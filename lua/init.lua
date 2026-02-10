@@ -24,8 +24,16 @@ local events   = nil   -- events.lua module
 local measure  = nil   -- measure.lua module (text measurement + font cache)
 local errors   = require("lua.errors")  -- error overlay (always loaded, self-contained)
 
+local images   = nil   -- images.lua module (image cache)
+
 local mode     = nil   -- "web", "native", or "canvas"
 local basePath = nil   -- directory containing these modules
+local initConfig = nil -- stashed config from init() for reload()
+
+-- HMR state
+local hmrFrameCounter = 0
+local hmrLastMtime    = nil
+local hmrHasLoaded    = false
 
 -- Helper: does the current mode run the rendering pipeline?
 local function isRendering()
@@ -85,6 +93,42 @@ local function pushEvent(evt)
   end
 end
 
+-- ============================================================================
+-- HMR helpers
+-- ============================================================================
+
+--- Serialize a Lua value to a JavaScript source literal string.
+--- Handles strings, numbers, booleans, nil, and nested tables.
+local function luaTableToJSLiteral(val)
+  local t = type(val)
+  if t == "string" then
+    -- Escape backslashes, quotes, and newlines
+    local escaped = val:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n"):gsub("\r", "\\r")
+    return '"' .. escaped .. '"'
+  elseif t == "number" then
+    return tostring(val)
+  elseif t == "boolean" then
+    return val and "true" or "false"
+  elseif t == "nil" then
+    return "null"
+  elseif t == "table" then
+    if val[1] ~= nil then
+      -- Array
+      local parts = {}
+      for i, v in ipairs(val) do parts[i] = luaTableToJSLiteral(v) end
+      return "[" .. table.concat(parts, ",") .. "]"
+    else
+      -- Object
+      local parts = {}
+      for k, v in pairs(val) do
+        parts[#parts + 1] = '"' .. tostring(k) .. '":' .. luaTableToJSLiteral(v)
+      end
+      return "{" .. table.concat(parts, ",") .. "}"
+    end
+  end
+  return "null"
+end
+
 --- Initialize react-love.
 --- config fields:
 ---   mode       : "auto" | "web" | "native" | "canvas"  (default "auto")
@@ -125,23 +169,28 @@ function ReactLove.init(config)
 
   else
     -- Native mode: use QuickJS bridge + retained tree + layout + painter.
+    initConfig = {
+      libpath = config.libpath or "lib/libquickjs",
+      bundlePath = config.bundlePath or "bundle.js",
+    }
+
     local BridgeQJS = require("lua.bridge_quickjs")
-    bridge = BridgeQJS.new(config.libpath or "lib/libquickjs")
+    bridge = BridgeQJS.new(initConfig.libpath)
 
     tree    = require("lua.tree")
     measure = require("lua.measure")
     layout  = require("lua.layout")
     painter = require("lua.painter")
     events  = require("lua.events")
+    images  = require("lua.images")
 
     events.setTreeModule(tree)
     tree.init()
 
     -- Load the bundled React app into QuickJS
-    local bundlePath = config.bundlePath or "bundle.js"
-    local bundleJS = love.filesystem.read(bundlePath)
+    local bundleJS = love.filesystem.read(initConfig.bundlePath)
     if not bundleJS then
-      error("[react-love] " .. bundlePath .. " not found -- run `npm run build` first")
+      error("[react-love] " .. initConfig.bundlePath .. " not found -- run `npm run build` first")
     end
 
     -- Tell the bundle to defer root.render() so JS_Eval returns immediately.
@@ -149,7 +198,7 @@ function ReactLove.init(config)
     bridge:eval("globalThis.__deferMount = true;", "<pre-bundle>")
 
     print("[react-love] Evaluating bundle (" .. #bundleJS .. " bytes)...")
-    bridge:eval(bundleJS, bundlePath)
+    bridge:eval(bundleJS, initConfig.bundlePath)
     print("[react-love] Bundle loaded OK")
 
     -- Don't mount yet — that happens in the first update() call so the
@@ -205,6 +254,24 @@ function ReactLove.update(dt)
   end
 
   -- Native mode -----------------------------------------------------------
+
+  -- HMR: poll bundle.js mtime every ~1 second for changes
+  hmrFrameCounter = hmrFrameCounter + 1
+  if hmrFrameCounter % 60 == 0 and initConfig then
+    local info = love.filesystem.getInfo(initConfig.bundlePath)
+    if info and info.modtime then
+      if hmrLastMtime == nil then
+        hmrLastMtime = info.modtime
+      elseif info.modtime ~= hmrLastMtime then
+        hmrLastMtime = info.modtime
+        if hmrHasLoaded then
+          ReactLove.reload()
+          return
+        end
+      end
+      hmrHasLoaded = true
+    end
+  end
 
   -- Deferred mount: trigger root.render() on the first update so the
   -- Love2D event loop is already running. Uses callGlobal (JS_Call)
@@ -508,6 +575,75 @@ function ReactLove.gamepadaxis(joystick, axis, value)
 
   local joystickId = joystick:getID()
   pushEvent(events.createGamepadAxisEvent(axis, value, joystickId))
+end
+
+--- Hot-reload the JS bundle without restarting Love2D.
+--- Destroys the QuickJS context, clears all Lua-side state, recreates
+--- the bridge with the new bundle, and restores dev state if available.
+function ReactLove.reload()
+  if mode ~= "native" or not bridge or not initConfig then
+    print("[react-love] reload() only works in native mode")
+    return
+  end
+
+  io.write("[react-love] Hot reload starting...\n"); io.flush()
+
+  -- 1. Read dev state from JS before teardown (pcall'd — safe if missing)
+  local devStateCache = nil
+  local sok, sval = pcall(function() return bridge:callGlobalReturn("__getDevState") end)
+  if sok and sval then
+    devStateCache = sval
+  end
+
+  -- 2. Teardown
+  bridge:destroy()
+  tree.init()
+  if images then images.clearCache() end
+  events.clearHover()
+  pcall(function() events.endDrag(0, 0) end)
+  measure.clearCache()
+
+  -- 3. Recreate bridge
+  local BridgeQJS = require("lua.bridge_quickjs")
+  bridge = BridgeQJS.new(initConfig.libpath)
+
+  -- 4. Re-read bundle from disk
+  local bundleJS = love.filesystem.read(initConfig.bundlePath)
+  if not bundleJS then
+    errors.push({
+      source = "lua",
+      message = initConfig.bundlePath .. " not found during reload",
+      context = "ReactLove.reload",
+    })
+    return
+  end
+
+  -- 5. Set up deferred mount + inject cached dev state
+  bridge:eval("globalThis.__deferMount = true;", "<pre-bundle>")
+  if devStateCache then
+    local jsLiteral = luaTableToJSLiteral(devStateCache)
+    bridge:eval("globalThis.__devState = " .. jsLiteral .. ";", "<hmr-state>")
+  end
+
+  -- 6. Evaluate new bundle
+  local eok, eerr = pcall(function()
+    bridge:eval(bundleJS, initConfig.bundlePath)
+  end)
+  if not eok then
+    errors.push({
+      source = "js",
+      message = tostring(eerr),
+      context = "ReactLove.reload (bundle eval)",
+    })
+    return
+  end
+
+  -- 7. Trigger mount on next update
+  ReactLove._needsMount = true
+  ReactLove._loggedCommands = nil
+  ReactLove._loggedDraw = nil
+
+  io.write("[react-love] Hot reload complete (" .. #bundleJS .. " bytes)\n"); io.flush()
 end
 
 --- Call from love.quit().

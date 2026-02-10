@@ -669,6 +669,44 @@ function Bridge:callGlobal(name)
   qjs.JS_FreeValue(ctx, global)
 end
 
+--- Call a global JS function by name and return its result as a Lua value.
+--- Like callGlobal but converts the return value via jsValueToLua instead
+--- of discarding it. Returns nil if the function doesn't exist or throws.
+function Bridge:callGlobalReturn(name)
+  local qjs = self.qjs
+  local ctx = self.ctx
+  local global = qjs.JS_GetGlobalObject(ctx)
+  local fn = qjs.JS_GetPropertyStr(ctx, global, name)
+
+  if qjs.JS_IsUndefined(fn) ~= 0 then
+    qjs.JS_FreeValue(ctx, fn)
+    qjs.JS_FreeValue(ctx, global)
+    return nil
+  end
+
+  if qjs.JS_IsFunction(ctx, fn) == 0 then
+    qjs.JS_FreeValue(ctx, fn)
+    qjs.JS_FreeValue(ctx, global)
+    return nil
+  end
+
+  local result = qjs.JS_Call(ctx, fn, global, 0, nil)
+
+  if qjs.JS_IsException(result) ~= 0 then
+    local exc = qjs.JS_GetException(ctx)
+    qjs.JS_FreeValue(ctx, exc)
+    qjs.JS_FreeValue(ctx, fn)
+    qjs.JS_FreeValue(ctx, global)
+    return nil
+  end
+
+  local luaVal = jsValueToLua(ctx, qjs, result)
+  qjs.JS_FreeValue(ctx, result)
+  qjs.JS_FreeValue(ctx, fn)
+  qjs.JS_FreeValue(ctx, global)
+  return luaVal
+end
+
 --- Tick the JS event loop (promises, microtasks, timers)
 function Bridge:tick()
   -- Drain pending microtasks (and clear any exceptions)

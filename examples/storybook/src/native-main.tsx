@@ -15,6 +15,13 @@ import { BridgeProvider, RendererProvider } from '../../../packages/shared/src/c
 import { Box, Text, Pressable } from '../../../packages/shared/src';
 import { stories, type StoryDef } from './stories';
 
+// ── HMR state sync ───────────────────────────────────────
+
+let currentActiveIdx = 0;
+
+// Expose state getter for HMR — Lua calls this before teardown
+(globalThis as any).__getDevState = () => ({ activeIdx: currentActiveIdx });
+
 // ── Story browser (sidebar + viewer) ─────────────────────
 
 function groupByCategory(list: StoryDef[]): Map<string, StoryDef[]> {
@@ -27,7 +34,9 @@ function groupByCategory(list: StoryDef[]): Map<string, StoryDef[]> {
 }
 
 function Storybook() {
-  const [activeIdx, setActiveIdx] = useState(0);
+  const initialIdx = (globalThis as any).__devState?.activeIdx ?? 0;
+  const [activeIdx, setActiveIdx] = useState(initialIdx);
+  currentActiveIdx = activeIdx; // sync for __getDevState
   const groups = groupByCategory(stories);
   const active = stories[activeIdx];
   const StoryComp = active?.component;

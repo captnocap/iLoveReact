@@ -7,7 +7,7 @@ LIB_DIR = $(NATIVE_GAME)/lib
 STORYBOOK_LOVE = examples/storybook/love
 STORYBOOK_LIB = $(STORYBOOK_LOVE)/lib
 
-.PHONY: all clean setup build build-native build-web build-storybook build-storybook-native run dev storybook storybook-web install
+.PHONY: all clean setup build build-native build-web build-storybook build-storybook-native run dev dev-storybook storybook storybook-web install
 
 all: setup build
 
@@ -117,6 +117,17 @@ dev:
 		--outfile=$(NATIVE_GAME)/bundle.js \
 		--watch \
 		examples/native-hud/src/main.tsx
+
+dev-storybook: setup $(STORYBOOK_LIB)/libquickjs.so node_modules
+	npx esbuild \
+		--bundle \
+		--format=iife \
+		--global-name=ReactLoveStorybook \
+		--target=es2020 \
+		--jsx=automatic \
+		--outfile=$(STORYBOOK_LOVE)/bundle.js \
+		--watch \
+		examples/storybook/src/native-main.tsx
 
 # ── Clean ───────────────────────────────────────────────
 
