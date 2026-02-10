@@ -36,6 +36,7 @@ import { SelectStory } from './SelectStory';
 import { AnimationTimingStory } from './AnimationTiming';
 import { AnimationSpringStory } from './AnimationSpring';
 import { SettingsDemoStory } from './SettingsDemo';
+import { ErrorTestStory } from './ErrorTest';
 
 export const stories: StoryDef[] = [
   // Primitives
@@ -82,4 +83,7 @@ export const stories: StoryDef[] = [
 
   // Demo
   { id: 'settings-demo', title: 'Settings Demo', category: 'Demo', component: SettingsDemoStory },
+
+  // Dev Tools
+  { id: 'error-test', title: 'Error Test', category: 'Dev Tools', component: ErrorTestStory },
 ];

@@ -109,6 +109,7 @@ ffi.cdef[[
   void qjs_set_host_events(HostCallback cb);
   void qjs_set_host_log(HostCallback cb);
   void qjs_set_host_measure(HostCallback cb);
+  void qjs_set_host_report_error(HostCallback cb);
   void qjs_register_host_functions(JSContext *ctx);
 ]]
 
@@ -406,7 +407,24 @@ function Bridge.new(libpath)
       console.warn = function() { __hostLog('[WARN] ' + Array.from(arguments).join(' ')); };
     }
     if (typeof console.error !== 'function') {
-      console.error = function() { __hostLog('[ERROR] ' + Array.from(arguments).join(' ')); };
+      console.error = function() {
+        var args = Array.from(arguments);
+        // If the first or second arg is an Error, report it with stack trace
+        for (var i = 0; i < args.length; i++) {
+          if (args[i] instanceof Error) {
+            if (typeof __hostReportError === 'function') {
+              __hostReportError({
+                name: args[i].name || 'Error',
+                message: args[i].message || String(args[i]),
+                stack: args[i].stack || '',
+                context: 'console.error'
+              });
+            }
+            break;
+          }
+        }
+        __hostLog('[ERROR] ' + args.join(' '));
+      };
     }
     if (typeof setTimeout === 'undefined') {
       // QuickJS doesn't have timers by default -- we approximate with a job queue
@@ -548,11 +566,44 @@ function Bridge:_setupHostFunctions()
   end)
   self._callbacks[#self._callbacks + 1] = measureCb
 
+  -- __hostReportError: JS sends structured error objects to Lua error overlay
+  local reportErrorCb = ffi.cast("HostCallback", function(ctx, argc, argv, ret)
+    if argc < 1 then return end
+
+    local pok, errObj = pcall(jsValueToLua, ctx, qjs, argv[0])
+    if not pok or type(errObj) ~= "table" then
+      -- Fallback: try to at least get a string
+      pcall(function()
+        local cstr = qjs.JS_ToCString(ctx, argv[0])
+        if cstr ~= nil then
+          local msg = ffi.string(cstr)
+          qjs.JS_FreeCString(ctx, cstr)
+          local errors = require("lua.errors")
+          errors.push({ source = "js", message = msg, context = "unknown" })
+        end
+      end)
+      return
+    end
+
+    -- Push structured error to the errors module
+    local eok, _ = pcall(function()
+      local errors = require("lua.errors")
+      errors.push({
+        source = errObj.name or "js",
+        message = errObj.message or "unknown error",
+        stack = errObj.stack or "",
+        context = errObj.context or "",
+      })
+    end)
+  end)
+  self._callbacks[#self._callbacks + 1] = reportErrorCb
+
   -- Register callbacks in C shim, then register JS globals
   qjs.qjs_set_host_flush(flushCb)
   qjs.qjs_set_host_events(eventsCb)
   qjs.qjs_set_host_log(logCb)
   qjs.qjs_set_host_measure(measureCb)
+  qjs.qjs_set_host_report_error(reportErrorCb)
   qjs.qjs_register_host_functions(self.ctx)
 end
 
@@ -628,7 +679,14 @@ function Bridge:tick()
       if ret < 0 then
         -- Clear the exception so it doesn't poison subsequent calls
         local exc = self.qjs.JS_GetException(self.ctx)
+        local cstr = self.qjs.JS_ToCString(self.ctx, exc)
+        local msg = cstr ~= nil and ffi.string(cstr) or "unknown error"
+        if cstr ~= nil then self.qjs.JS_FreeCString(self.ctx, cstr) end
         self.qjs.JS_FreeValue(self.ctx, exc)
+        pcall(function()
+          local errors = require("lua.errors")
+          errors.push({ source = "js", message = msg, context = "pending job exception" })
+        end)
       end
       break
     end

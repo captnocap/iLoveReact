@@ -6,6 +6,7 @@
 
 import Reconciler from 'react-reconciler';
 import { hostConfig } from './hostConfig';
+import { reportError } from './errorReporter';
 import type { ReactNode } from 'react';
 
 const reconciler = Reconciler(hostConfig);
@@ -38,7 +39,7 @@ export function createRoot(container?: { id: number }): Root {
     false,          // isStrictMode
     null,           // concurrentUpdatesByDefaultOverride
     '',             // identifierPrefix
-    (err: Error) => console.error(err), // onRecoverableError
+    (err: Error) => reportError(err, 'React recoverable error'), // onRecoverableError
     null            // transitionCallbacks
   );
 

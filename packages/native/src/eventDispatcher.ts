@@ -12,6 +12,7 @@
 
 import type { LoveEvent } from '../../shared/src/types';
 import { handlerRegistry } from './hostConfig';
+import { reportError } from './errorReporter';
 
 /** Any object with a subscribe method (NativeBridge, CanvasBridge, etc.) */
 interface Subscribable {
@@ -138,7 +139,7 @@ function dispatchWithBubbling(event: LoveEvent, handlerName: string): void {
         try {
           handler(enrichedEvent);
         } catch (e) {
-          console.error(`[react-love] Handler error in ${handlerName} for node ${nodeId}:`, e);
+          reportError(e, `${handlerName} for node ${nodeId}`);
         }
       }
     }

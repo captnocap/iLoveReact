@@ -22,6 +22,7 @@ local layout   = nil   -- layout.lua module
 local painter  = nil   -- painter.lua module
 local events   = nil   -- events.lua module
 local measure  = nil   -- measure.lua module (text measurement + font cache)
+local errors   = require("lua.errors")  -- error overlay (always loaded, self-contained)
 
 local mode     = nil   -- "web", "native", or "canvas"
 local basePath = nil   -- directory containing these modules
@@ -223,7 +224,11 @@ function ReactLove.update(dt)
   -- 2. Tell JS to process any pending input events
   local ok, err = pcall(function() bridge:callGlobal("_pollAndDispatchEvents") end)
   if not ok then
-    io.write("[react-love] Event dispatch error: " .. tostring(err) .. "\n"); io.flush()
+    errors.push({
+      source = "bridge",
+      message = tostring(err),
+      context = "event dispatch (_pollAndDispatchEvents)",
+    })
   end
 
   -- 3. Tick again (event handlers may have triggered state updates)
@@ -274,14 +279,27 @@ function ReactLove.draw()
         end
       end
     end
-    painter.paint(root)
+    local ok, paintErr = pcall(painter.paint, root)
+    if not ok then
+      errors.push({
+        source = "lua",
+        message = tostring(paintErr),
+        context = "painter.paint",
+      })
+    end
   end
+
+  -- Error overlay renders on top of everything, using raw Love2D calls
+  errors.draw()
 end
 
 --- Call from love.mousepressed(x, y, button).
 --- Hit-tests the tree and dispatches a click event to JS.
 --- Also starts tracking for potential drag operations.
 function ReactLove.mousepressed(x, y, button)
+  -- Error overlay gets first crack at mouse events
+  if errors.mousepressed(x, y, button) then return end
+
   if not isRendering() then return end
 
   local root = tree.getTree()

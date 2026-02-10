@@ -7,6 +7,7 @@
  */
 
 import type { HostConfig } from 'react-reconciler';
+import { reportError } from './errorReporter';
 
 // ── Types ────────────────────────────────────────────────
 
@@ -102,7 +103,11 @@ function coalesceCommands(commands: Command[]): Command[] {
 export function flushToHost(): void {
   if (pendingCommands.length === 0) return;
   const coalesced = coalesceCommands(pendingCommands);
-  globalThis.__hostFlush(coalesced);
+  try {
+    globalThis.__hostFlush(coalesced);
+  } catch (e) {
+    reportError(e, 'flushToHost (' + coalesced.length + ' commands)');
+  }
   pendingCommands.length = 0;
 }
 

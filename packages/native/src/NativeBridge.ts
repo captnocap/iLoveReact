@@ -10,6 +10,7 @@
 
 import type { IBridge, Listener, Unsubscribe, BridgeEvent } from '../../shared/src/bridge';
 import { initEventDispatching } from './eventDispatcher';
+import { reportError } from './errorReporter';
 
 declare const globalThis: {
   __hostFlush: (commands: any[]) => void;
@@ -120,7 +121,7 @@ export class NativeBridge implements IBridge {
     try {
       events = globalThis.__hostGetEvents();
     } catch (e: any) {
-      console.log('[react-love] __hostGetEvents() threw: ' + (e && e.message || e));
+      reportError(e, '__hostGetEvents()');
       return;
     }
 
@@ -135,7 +136,7 @@ export class NativeBridge implements IBridge {
           try {
             fn(event.payload);
           } catch (e: any) {
-            console.log('[react-love] handler error (' + event.type + '): ' + (e && e.message || e));
+            reportError(e, 'event handler (' + event.type + ')');
           }
         }
       }

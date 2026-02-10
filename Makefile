@@ -25,9 +25,10 @@ setup: $(LIB_DIR)/libquickjs.so
 $(QUICKJS_DIR):
 	git clone https://github.com/quickjs-ng/quickjs.git $(QUICKJS_DIR)
 
-$(QUICKJS_DIR)/qjs_ffi_shim.c: $(QUICKJS_DIR)
-	@test -f $(QUICKJS_DIR)/qjs_ffi_shim.c || \
-	echo "qjs_ffi_shim.c missing — copy from project root quickjs/ dir"
+# Copy our shim into the QuickJS source tree before building.
+# The canonical copy lives in native/quickjs-shim/ (tracked in git).
+$(QUICKJS_DIR)/qjs_ffi_shim.c: native/quickjs-shim/qjs_ffi_shim.c $(QUICKJS_DIR)
+	cp native/quickjs-shim/qjs_ffi_shim.c $(QUICKJS_DIR)/qjs_ffi_shim.c
 
 $(LIB_DIR):
 	mkdir -p $(LIB_DIR)
