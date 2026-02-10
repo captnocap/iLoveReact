@@ -63,6 +63,11 @@ export { Slider, type SliderProps } from './Slider';
 // Switch
 export { Switch, type SwitchProps } from './Switch';
 
+// Form primitives
+export { Checkbox, type CheckboxProps } from './Checkbox';
+export { Radio, RadioGroup, type RadioProps, type RadioGroupProps } from './Radio';
+export { Select, type SelectProps, type SelectOption } from './Select';
+
 // Animation
 export {
   AnimatedValue,

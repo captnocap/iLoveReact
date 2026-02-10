@@ -221,7 +221,10 @@ function ReactLove.update(dt)
   bridge:tick()
 
   -- 2. Tell JS to process any pending input events
-  bridge:callGlobal("_pollAndDispatchEvents")
+  local ok, err = pcall(function() bridge:callGlobal("_pollAndDispatchEvents") end)
+  if not ok then
+    io.write("[react-love] Event dispatch error: " .. tostring(err) .. "\n"); io.flush()
+  end
 
   -- 3. Tick again (event handlers may have triggered state updates)
   bridge:tick()

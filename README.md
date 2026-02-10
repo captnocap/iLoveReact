@@ -4,8 +4,9 @@ Write React components once, render them as DOM overlays on a Love2D WASM canvas
 
 ```
             Your Components (JSX)
-     Box, Text, Image, ScrollView, Modal,
-     Pressable, TextInput, FlatList, Slider, Switch
+     Box, Text, Image, ScrollView, Modal, Pressable,
+     TextInput, FlatList, Slider, Switch, Checkbox,
+     Radio, RadioGroup, Select
                      |
           +----------+----------+
           |                     |
@@ -50,6 +51,9 @@ The abstraction layer both renderers depend on. Contains all components, hooks, 
 | `FlatList.tsx` | Virtualized list with windowed rendering, grid mode, inverted, headers/footers |
 | `Slider.tsx` | Draggable value selector, horizontal/vertical, step snapping |
 | `Switch.tsx` | Boolean toggle with animated thumb |
+| `Checkbox.tsx` | Toggleable checkbox with optional label, custom colors/sizing |
+| `Radio.tsx` | Radio + RadioGroup — exclusive selection via React context |
+| `Select.tsx` | Dropdown select. Web: native `<select>`. Native: inline accordion expand/collapse |
 | `animation.ts` | `AnimatedValue`, timing/spring physics, easing functions, composite animations (`parallel`, `sequence`, `stagger`, `loop`), hooks (`useAnimation`, `useSpring`, `useTransition`) |
 
 ### `packages/web`
@@ -207,6 +211,57 @@ import { Switch } from '@react-love/shared';
 <Switch value={enabled} onValueChange={setEnabled} />
 ```
 
+### Checkbox
+
+```tsx
+import { Checkbox } from '@react-love/shared';
+
+<Checkbox
+  value={accepted}
+  onValueChange={setAccepted}
+  label="Accept terms"
+/>
+<Checkbox value={true} label="Custom color" color="#22c55e" />
+<Checkbox value={false} disabled label="Disabled" />
+```
+
+Supports: controlled/uncontrolled, `label`, `size`, `color`, `uncheckedColor`, `disabled`.
+
+### Radio / RadioGroup
+
+```tsx
+import { Radio, RadioGroup } from '@react-love/shared';
+
+<RadioGroup value={selected} onValueChange={setSelected}>
+  <Radio value="small" label="Small" />
+  <Radio value="medium" label="Medium" />
+  <Radio value="large" label="Large" />
+</RadioGroup>
+```
+
+`RadioGroup` provides context for exclusive selection. Each `Radio` reads group state. Supports: controlled/uncontrolled, `size`, `color`, `uncheckedColor`, per-item `disabled`.
+
+### Select
+
+```tsx
+import { Select } from '@react-love/shared';
+
+<Select
+  value={theme}
+  onValueChange={setTheme}
+  options={[
+    { label: 'Dark', value: 'dark' },
+    { label: 'Light', value: 'light' },
+    { label: 'System', value: 'system' },
+  ]}
+  placeholder="Choose theme..."
+/>
+```
+
+Web mode renders a native `<select>` element. Native mode renders an inline accordion — clicking the header toggles the option list, clicking an option selects it and collapses. No `position: absolute` required.
+
+Supports: controlled/uncontrolled, `placeholder`, `disabled`, `color`.
+
 ## Animation
 
 ```tsx
@@ -274,14 +329,15 @@ The style API covers the intersection of CSS flexbox and what the Lua layout/pai
 
 | Category | Properties |
 |---|---|
-| Sizing | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight` |
+| Sizing | `width`, `height`, `minWidth`, `minHeight`, `maxWidth`, `maxHeight`, `aspectRatio` |
 | Flexbox | `display`, `flexDirection`, `flexWrap`, `justifyContent`, `alignItems`, `alignSelf`, `flexGrow`, `flexShrink`, `flexBasis`, `gap` |
 | Spacing | `padding`, `paddingLeft/Right/Top/Bottom`, `margin`, `marginLeft/Right/Top/Bottom` |
-| Visual | `backgroundColor`, `borderRadius`, `borderWidth`, `borderColor`, `overflow`, `opacity`, `zIndex` |
+| Visual | `backgroundColor`, `borderRadius`, `overflow`, `opacity`, `zIndex` |
+| Border | `borderWidth`, `borderTopWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderRightWidth`, `borderColor`, `borderTopColor`, `borderBottomColor`, `borderLeftColor`, `borderRightColor` |
 | Shadow | `shadowColor`, `shadowOffsetX`, `shadowOffsetY`, `shadowBlur` |
 | Gradient | `backgroundGradient: { direction, colors }` |
 | Transform | `transform: { translateX, translateY, rotate, scaleX, scaleY, originX, originY }` |
-| Text | `color`, `fontSize`, `fontFamily`, `fontWeight`, `textAlign`, `textOverflow`, `lineHeight`, `letterSpacing` |
+| Text | `color`, `fontSize`, `fontFamily`, `fontWeight`, `textAlign`, `textOverflow`, `textDecorationLine`, `lineHeight`, `letterSpacing` |
 | Image | `objectFit` (`fill`, `contain`, `cover`, `none`) |
 | Position | `position` (`relative`, `absolute`), `top`, `bottom`, `left`, `right` |
 
@@ -444,6 +500,20 @@ Features: system gauges, power allocation grid, sensor contacts, alert feed, act
 
 Mounts `<LoveInstance>` with shared HUD components as DOM overlays on a love.js canvas. Requires a compiled love.js build.
 
+### `examples/storybook/` — Component storybook
+
+Interactive component catalog for testing primitives side-by-side in web and native modes. Stories are organized by category:
+
+- **Primitives** — Box, Text, Image, ScrollView, FlatList
+- **Interactive** — Pressable, TextInput, Slider, Switch, Modal
+- **Forms** — Checkbox, Radio, Select
+- **CSS Features** — FlexShrink, AspectRatio, TextDecoration, PerSideBorders
+
+```bash
+npm run build:storybook          # Web bundle (Vite)
+npm run build:storybook-native   # Native bundle (esbuild for QuickJS)
+```
+
 ### `examples/native-hud/` — Native HUD via QuickJS
 
 Love2D project that boots QuickJS, loads `bundle.js`, and renders the same HUD components as Love2D draw calls. Requires compiled QuickJS (`make setup`).
@@ -459,6 +529,7 @@ react-love/
   lua/                 # Lua modules (tree, layout, painter, events, bridges, images)
   examples/
     demo/              # Void Station (self-contained, works now)
+    storybook/         # Component catalog (web + native)
     web-overlay/       # Love2D WASM + DOM overlays
     native-hud/        # Love2D + QuickJS renderer
   docs/                # Research notes and reference material

@@ -62,6 +62,7 @@ ffi.cdef[[
   /* Type checking */
   int JS_IsException(JSValue val);
   int JS_IsUndefined(JSValue val);
+  int JS_IsFunction(JSContext *ctx, JSValue val);
   JSValue JS_GetException(JSContext *ctx);
 
   /* Function calls */
@@ -396,11 +397,16 @@ function Bridge.new(libpath)
   -- Polyfill basics if std helpers aren't available
   self:eval([[
     if (typeof console === 'undefined') {
-      globalThis.console = {
-        log: function() { __hostLog(Array.from(arguments).join(' ')); },
-        warn: function() { __hostLog('[WARN] ' + Array.from(arguments).join(' ')); },
-        error: function() { __hostLog('[ERROR] ' + Array.from(arguments).join(' ')); },
-      };
+      globalThis.console = {};
+    }
+    if (typeof console.log !== 'function') {
+      console.log = function() { __hostLog(Array.from(arguments).join(' ')); };
+    }
+    if (typeof console.warn !== 'function') {
+      console.warn = function() { __hostLog('[WARN] ' + Array.from(arguments).join(' ')); };
+    }
+    if (typeof console.error !== 'function') {
+      console.error = function() { __hostLog('[ERROR] ' + Array.from(arguments).join(' ')); };
     }
     if (typeof setTimeout === 'undefined') {
       // QuickJS doesn't have timers by default -- we approximate with a job queue
@@ -587,6 +593,13 @@ function Bridge:callGlobal(name)
     return
   end
 
+  if qjs.JS_IsFunction(ctx, fn) == 0 then
+    io.write("[react-love] callGlobal('" .. name .. "'): value exists but is NOT a function\n"); io.flush()
+    qjs.JS_FreeValue(ctx, fn)
+    qjs.JS_FreeValue(ctx, global)
+    return
+  end
+
   local result = qjs.JS_Call(ctx, fn, global, 0, nil)
 
   if qjs.JS_IsException(result) ~= 0 then
@@ -607,9 +620,19 @@ end
 
 --- Tick the JS event loop (promises, microtasks, timers)
 function Bridge:tick()
-  -- Drain pending microtasks
+  -- Drain pending microtasks (and clear any exceptions)
   local ctx_ptr = ffi.new("JSContext*[1]")
-  while self.qjs.JS_ExecutePendingJob(self.rt, ctx_ptr) > 0 do end
+  while true do
+    local ret = self.qjs.JS_ExecutePendingJob(self.rt, ctx_ptr)
+    if ret <= 0 then
+      if ret < 0 then
+        -- Clear the exception so it doesn't poison subsequent calls
+        local exc = self.qjs.JS_GetException(self.ctx)
+        self.qjs.JS_FreeValue(self.ctx, exc)
+      end
+      break
+    end
+  end
 
   -- Tick polyfilled timers (use callGlobal to avoid JS_Eval hang)
   pcall(function() self:callGlobal("__tickTimers") end)

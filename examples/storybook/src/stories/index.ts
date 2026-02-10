@@ -30,8 +30,12 @@ import { FlexShrinkStory } from './FlexShrink';
 import { AspectRatioStory } from './AspectRatio';
 import { TextDecorationStory } from './TextDecoration';
 import { PerSideBorderStory } from './PerSideBorder';
+import { CheckboxStory } from './CheckboxStory';
+import { RadioStory } from './RadioStory';
+import { SelectStory } from './SelectStory';
 import { AnimationTimingStory } from './AnimationTiming';
 import { AnimationSpringStory } from './AnimationSpring';
+import { SettingsDemoStory } from './SettingsDemo';
 
 export const stories: StoryDef[] = [
   // Primitives
@@ -67,7 +71,15 @@ export const stories: StoryDef[] = [
   { id: 'text-decoration', title: 'Text Decoration', category: 'CSS Features', component: TextDecorationStory },
   { id: 'per-side-border', title: 'Per-Side Borders', category: 'CSS Features', component: PerSideBorderStory },
 
+  // Forms
+  { id: 'checkbox', title: 'Checkbox', category: 'Forms', component: CheckboxStory },
+  { id: 'radio', title: 'Radio', category: 'Forms', component: RadioStory },
+  { id: 'select', title: 'Select', category: 'Forms', component: SelectStory },
+
   // Animation
   { id: 'animation-timing', title: 'Spring Width', category: 'Animation', component: AnimationTimingStory },
   { id: 'animation-spring', title: 'Spring Position', category: 'Animation', component: AnimationSpringStory },
+
+  // Demo
+  { id: 'settings-demo', title: 'Settings Demo', category: 'Demo', component: SettingsDemoStory },
 ];

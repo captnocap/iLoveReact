@@ -116,14 +116,27 @@ export class NativeBridge implements IBridge {
    * Called by Lua each frame via globalThis._pollAndDispatchEvents.
    */
   private pollAndDispatchEvents(): void {
-    const events = globalThis.__hostGetEvents();
-    if (!events || !Array.isArray(events) || events.length === 0) return;
+    let events: any;
+    try {
+      events = globalThis.__hostGetEvents();
+    } catch (e: any) {
+      console.log('[react-love] __hostGetEvents() threw: ' + (e && e.message || e));
+      return;
+    }
 
-    for (const event of events) {
+    if (!events || events.length === 0) return;
+
+    for (let i = 0; i < events.length; i++) {
+      const event = events[i];
+      if (!event || !event.type) continue;
       const set = this.listeners.get(event.type);
       if (set) {
         for (const fn of set) {
-          fn(event.payload);
+          try {
+            fn(event.payload);
+          } catch (e: any) {
+            console.log('[react-love] handler error (' + event.type + '): ' + (e && e.message || e));
+          }
         }
       }
     }
