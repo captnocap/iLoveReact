@@ -7,7 +7,7 @@ LIB_DIR = $(NATIVE_GAME)/lib
 STORYBOOK_LOVE = examples/storybook/love
 STORYBOOK_LIB = $(STORYBOOK_LOVE)/lib
 
-.PHONY: all clean setup build build-native build-web build-storybook build-storybook-native run dev dev-storybook storybook storybook-web install
+.PHONY: all clean setup build build-native build-web build-storybook build-storybook-native run dev dev-storybook storybook storybook-web install dist-storybook cli-setup
 
 all: setup build
 
@@ -100,6 +100,29 @@ storybook: setup build-storybook-native build-storybook $(STORYBOOK_LIB)/libquic
 storybook-web: build-storybook
 	@echo "Web storybook built. Serve with: cd examples/storybook && python3 -m http.server 8080"
 
+# ── Dist (packaged binaries) ─────────────────────────────
+
+DIST_STORYBOOK = dist/ilovereact-demo
+STAGING_DIR = /tmp/ilovereact-demo-staging
+
+dist-storybook: build-storybook-native setup
+	@echo "=== Packaging storybook demo ==="
+	rm -rf $(DIST_STORYBOOK)
+	mkdir -p $(DIST_STORYBOOK)/lib
+	rm -rf $(STAGING_DIR)
+	mkdir -p $(STAGING_DIR)/lua
+	cp $(STORYBOOK_LOVE)/bundle.js $(STAGING_DIR)/
+	cp packaging/storybook/main.lua $(STAGING_DIR)/
+	cp packaging/storybook/conf.lua $(STAGING_DIR)/
+	cp lua/*.lua $(STAGING_DIR)/lua/
+	cd $(STAGING_DIR) && zip -9 -r /tmp/ilovereact-demo.love .
+	cat $$(which love) /tmp/ilovereact-demo.love > $(DIST_STORYBOOK)/ilovereact-demo
+	chmod +x $(DIST_STORYBOOK)/ilovereact-demo
+	cp $(QUICKJS_DIR)/libquickjs.so $(DIST_STORYBOOK)/lib/
+	rm -rf $(STAGING_DIR) /tmp/ilovereact-demo.love
+	@echo "=== Done: $(DIST_STORYBOOK)/ilovereact-demo ==="
+	@echo "  Run: cd $(DIST_STORYBOOK) && ./ilovereact-demo"
+
 # ── Run ─────────────────────────────────────────────────
 
 run: build-native setup
@@ -128,6 +151,18 @@ dev-storybook: setup $(STORYBOOK_LIB)/libquickjs.so node_modules
 		--outfile=$(STORYBOOK_LOVE)/bundle.js \
 		--watch \
 		examples/storybook/src/native-main.tsx
+
+# ── CLI setup ──────────────────────────────────────────
+
+cli-setup: setup
+	@echo "=== Populating CLI runtime ==="
+	rm -rf cli/runtime
+	mkdir -p cli/runtime/lua cli/runtime/lib cli/runtime/ilovereact
+	cp lua/*.lua cli/runtime/lua/
+	cp $(QUICKJS_DIR)/libquickjs.so cli/runtime/lib/
+	cp -r packages/shared cli/runtime/ilovereact/shared
+	cp -r packages/native cli/runtime/ilovereact/native
+	@echo "=== CLI runtime ready. Run: cd cli && npm link ==="
 
 # ── Clean ───────────────────────────────────────────────
 

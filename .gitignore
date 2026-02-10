@@ -7,6 +7,7 @@ bundle.js
 examples/demo/dist/
 examples/web-overlay/dist/
 examples/native-hud/game/bundle.js
+cli/runtime/
 
 # QuickJS build artifacts
 libquickjs/

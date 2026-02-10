@@ -1,0 +1,17 @@
+{
+  "name": "ilovereact",
+  "version": "0.1.0",
+  "description": "CLI for iLoveReact — write React UIs for Love2D games",
+  "type": "module",
+  "bin": {
+    "ilovereact": "./bin/ilovereact.mjs"
+  },
+  "files": [
+    "bin/",
+    "commands/",
+    "template/",
+    "runtime/"
+  ],
+  "keywords": ["react", "love2d", "game", "ui", "lua"],
+  "license": "MIT"
+}

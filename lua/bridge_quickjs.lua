@@ -351,6 +351,11 @@ function Bridge.new(libpath)
   if libpath:sub(1, 1) ~= "/" and love and love.filesystem then
     local source = love.filesystem.getSource()
     if source then
+      -- For fused binaries, getSource() returns the binary path, not its directory.
+      -- Strip the filename to get the containing directory.
+      if love.filesystem.isFused and love.filesystem.isFused() then
+        source = source:match("(.+)/[^/]+$") or source
+      end
       libpath = source .. "/" .. libpath
     end
   end
