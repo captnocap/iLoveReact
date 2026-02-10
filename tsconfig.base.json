@@ -13,7 +13,8 @@
     "paths": {
       "@ilovereact/core": ["./packages/shared/src"],
       "@ilovereact/web": ["./packages/web/src"],
-      "@ilovereact/native": ["./packages/native/src"]
+      "@ilovereact/native": ["./packages/native/src"],
+      "@ilovereact/cc": ["./packages/cc/src"]
     }
   }
 }

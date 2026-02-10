@@ -60,6 +60,16 @@ export function setTransportFlush(fn: (commands: Command[]) => void): void {
 
 let nodeIdCounter = 0;
 const pendingCommands: Command[] = [];
+const rootInstances: Instance[] = [];
+
+/**
+ * Get the current root-level instances.
+ * Used by remote targets (e.g., CC) to walk the JS-side tree
+ * instead of sending mutation commands to a Lua bridge.
+ */
+export function getRootInstances(): Instance[] {
+  return rootInstances;
+}
 
 /**
  * Registry of event handlers keyed by nodeId.
@@ -346,6 +356,7 @@ export const hostConfig: HostConfig<
   },
 
   appendChildToContainer(container: Container, child: Instance | TextInstance) {
+    rootInstances.push(child as Instance);
     emit({ op: 'APPEND_TO_ROOT', childId: child.id });
   },
 
@@ -357,6 +368,8 @@ export const hostConfig: HostConfig<
   },
 
   removeChildFromContainer(_container: Container, child: Instance | TextInstance) {
+    const idx = rootInstances.indexOf(child as Instance);
+    if (idx !== -1) rootInstances.splice(idx, 1);
     emit({ op: 'REMOVE_FROM_ROOT', childId: child.id });
     cleanupHandlers(child);
   },
@@ -386,6 +399,12 @@ export const hostConfig: HostConfig<
     child: Instance | TextInstance,
     before: Instance | TextInstance
   ) {
+    const idx = rootInstances.indexOf(before as Instance);
+    if (idx !== -1) {
+      rootInstances.splice(idx, 0, child as Instance);
+    } else {
+      rootInstances.push(child as Instance);
+    }
     emit({
       op: 'INSERT_BEFORE_ROOT',
       childId: child.id,

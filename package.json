@@ -6,7 +6,8 @@
   "workspaces": [
     "packages/shared",
     "packages/web",
-    "packages/native"
+    "packages/native",
+    "packages/cc"
   ],
   "scripts": {
     "build:native": "esbuild --bundle --format=iife --global-name=ReactLove --target=es2020 --jsx=automatic --outfile=examples/native-hud/game/bundle.js examples/native-hud/src/main.tsx",
@@ -15,17 +16,20 @@
     "build:storybook": "esbuild --bundle --format=esm --target=es2020 --jsx=automatic --outfile=examples/storybook/dist/storybook.js examples/storybook/src/main.tsx",
     "build:storybook-native": "esbuild --bundle --format=iife --global-name=ReactLoveStorybook --target=es2020 --jsx=automatic --outfile=examples/storybook/love/bundle.js examples/storybook/src/native-main.tsx",
     "watch:storybook": "esbuild --bundle --format=esm --target=es2020 --jsx=automatic --outfile=examples/storybook/dist/storybook.js --watch examples/storybook/src/main.tsx",
-    "watch:storybook-native": "esbuild --bundle --format=iife --global-name=ReactLoveStorybook --target=es2020 --jsx=automatic --outfile=examples/storybook/love/bundle.js --watch examples/storybook/src/native-main.tsx"
+    "watch:storybook-native": "esbuild --bundle --format=iife --global-name=ReactLoveStorybook --target=es2020 --jsx=automatic --outfile=examples/storybook/love/bundle.js --watch examples/storybook/src/native-main.tsx",
+    "build:cc-demo": "esbuild --bundle --platform=node --format=esm --target=es2020 --jsx=automatic --outfile=examples/cc-demo/dist/main.js --external:ws examples/cc-demo/src/main.tsx"
   },
   "dependencies": {
+    "@types/ws": "^8.18.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
-    "react-reconciler": "^0.29.0"
+    "react-reconciler": "^0.29.0",
+    "ws": "^8.19.0"
   },
   "devDependencies": {
-    "esbuild": "^0.24.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "esbuild": "^0.24.0",
     "typescript": "^5.5.0"
   }
 }

@@ -11,6 +11,7 @@ export {
   extractHandlers,
   flushToHost,
   setTransportFlush,
+  getRootInstances,
   shallowEqual,
   type Instance,
   type TextInstance,
