@@ -1,0 +1,1061 @@
+{
+  "inputs": {
+    "node_modules/react/cjs/react.development.js": {
+      "bytes": 87593,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/react/index.js": {
+      "bytes": 190,
+      "imports": [
+        {
+          "path": "node_modules/react/cjs/react.development.js",
+          "kind": "require-call",
+          "original": "./cjs/react.development.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "ilovereact/native/src/errorReporter.ts": {
+      "bytes": 1356,
+      "imports": [],
+      "format": "esm"
+    },
+    "ilovereact/native/src/hostConfig.ts": {
+      "bytes": 16548,
+      "imports": [
+        {
+          "path": "ilovereact/native/src/errorReporter.ts",
+          "kind": "import-statement",
+          "original": "./errorReporter"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/native/src/eventDispatcher.ts": {
+      "bytes": 6246,
+      "imports": [
+        {
+          "path": "ilovereact/native/src/hostConfig.ts",
+          "kind": "import-statement",
+          "original": "./hostConfig"
+        },
+        {
+          "path": "ilovereact/native/src/errorReporter.ts",
+          "kind": "import-statement",
+          "original": "./errorReporter"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/native/src/NativeBridge.ts": {
+      "bytes": 4175,
+      "imports": [
+        {
+          "path": "ilovereact/native/src/eventDispatcher.ts",
+          "kind": "import-statement",
+          "original": "./eventDispatcher"
+        },
+        {
+          "path": "ilovereact/native/src/errorReporter.ts",
+          "kind": "import-statement",
+          "original": "./errorReporter"
+        },
+        {
+          "path": "ilovereact/native/src/hostConfig.ts",
+          "kind": "import-statement",
+          "original": "./hostConfig"
+        },
+        {
+          "path": "<runtime>",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/scheduler/cjs/scheduler.development.js": {
+      "bytes": 17497,
+      "imports": [],
+      "format": "cjs"
+    },
+    "node_modules/scheduler/index.js": {
+      "bytes": 198,
+      "imports": [
+        {
+          "path": "node_modules/scheduler/cjs/scheduler.development.js",
+          "kind": "require-call",
+          "original": "./cjs/scheduler.development.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/react-reconciler/cjs/react-reconciler.development.js": {
+      "bytes": 748662,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "require-call",
+          "original": "react"
+        },
+        {
+          "path": "node_modules/scheduler/index.js",
+          "kind": "require-call",
+          "original": "scheduler"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/react-reconciler/index.js": {
+      "bytes": 212,
+      "imports": [
+        {
+          "path": "node_modules/react-reconciler/cjs/react-reconciler.development.js",
+          "kind": "require-call",
+          "original": "./cjs/react-reconciler.development.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "ilovereact/native/src/NativeRenderer.ts": {
+      "bytes": 2379,
+      "imports": [
+        {
+          "path": "node_modules/react-reconciler/index.js",
+          "kind": "import-statement",
+          "original": "react-reconciler"
+        },
+        {
+          "path": "ilovereact/native/src/hostConfig.ts",
+          "kind": "import-statement",
+          "original": "./hostConfig"
+        },
+        {
+          "path": "ilovereact/native/src/errorReporter.ts",
+          "kind": "import-statement",
+          "original": "./errorReporter"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/context.ts": {
+      "bytes": 1187,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/native/src/Love2DApp.ts": {
+      "bytes": 1706,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/native/src/NativeBridge.ts",
+          "kind": "import-statement",
+          "original": "./NativeBridge"
+        },
+        {
+          "path": "ilovereact/native/src/NativeRenderer.ts",
+          "kind": "import-statement",
+          "original": "./NativeRenderer"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "../../shared/src/context"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/hooks.ts": {
+      "bytes": 4271,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        }
+      ],
+      "format": "esm"
+    },
+    "node_modules/react/cjs/react-jsx-runtime.development.js": {
+      "bytes": 42700,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "require-call",
+          "original": "react"
+        }
+      ],
+      "format": "cjs"
+    },
+    "node_modules/react/jsx-runtime.js": {
+      "bytes": 214,
+      "imports": [
+        {
+          "path": "node_modules/react/cjs/react-jsx-runtime.development.js",
+          "kind": "require-call",
+          "original": "./cjs/react-jsx-runtime.development.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "ilovereact/shared/src/primitives.tsx": {
+      "bytes": 9316,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/ScrollView.tsx": {
+      "bytes": 6798,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "../node_modules/react/cjs/react.development.js": {
+      "bytes": 87593,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../node_modules/react/index.js": {
+      "bytes": 190,
+      "imports": [
+        {
+          "path": "../node_modules/react/cjs/react.development.js",
+          "kind": "require-call",
+          "original": "./cjs/react.development.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../node_modules/scheduler/cjs/scheduler.development.js": {
+      "bytes": 17497,
+      "imports": [],
+      "format": "cjs"
+    },
+    "../node_modules/scheduler/index.js": {
+      "bytes": 198,
+      "imports": [
+        {
+          "path": "../node_modules/scheduler/cjs/scheduler.development.js",
+          "kind": "require-call",
+          "original": "./cjs/scheduler.development.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../node_modules/react-dom/cjs/react-dom.development.js": {
+      "bytes": 1029622,
+      "imports": [
+        {
+          "path": "../node_modules/react/index.js",
+          "kind": "require-call",
+          "original": "react"
+        },
+        {
+          "path": "../node_modules/scheduler/index.js",
+          "kind": "require-call",
+          "original": "scheduler"
+        }
+      ],
+      "format": "cjs"
+    },
+    "../node_modules/react-dom/index.js": {
+      "bytes": 1363,
+      "imports": [
+        {
+          "path": "../node_modules/react-dom/cjs/react-dom.development.js",
+          "kind": "require-call",
+          "original": "./cjs/react-dom.development.js"
+        }
+      ],
+      "format": "cjs"
+    },
+    "ilovereact/shared/src/Portal.tsx": {
+      "bytes": 4168,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "../node_modules/react-dom/index.js",
+          "kind": "require-call",
+          "original": "react-dom"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Pressable.tsx": {
+      "bytes": 8199,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Modal.tsx": {
+      "bytes": 7042,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/Portal.tsx",
+          "kind": "import-statement",
+          "original": "./Portal"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/Pressable.tsx",
+          "kind": "import-statement",
+          "original": "./Pressable"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/TextInput.tsx": {
+      "bytes": 14313,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/TextEditor.tsx": {
+      "bytes": 5878,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/FlatList.tsx": {
+      "bytes": 12154,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/ScrollView.tsx",
+          "kind": "import-statement",
+          "original": "./ScrollView"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Slider.tsx": {
+      "bytes": 10098,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Switch.tsx": {
+      "bytes": 3794,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Checkbox.tsx": {
+      "bytes": 3899,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Radio.tsx": {
+      "bytes": 5511,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Select.tsx": {
+      "bytes": 4938,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/FlexRow.tsx": {
+      "bytes": 712,
+      "imports": [
+        {
+          "path": "react",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/FlexColumn.tsx": {
+      "bytes": 654,
+      "imports": [
+        {
+          "path": "react",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Spacer.tsx": {
+      "bytes": 283,
+      "imports": [
+        {
+          "path": "react",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Card.tsx": {
+      "bytes": 1201,
+      "imports": [
+        {
+          "path": "react",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Badge.tsx": {
+      "bytes": 1090,
+      "imports": [
+        {
+          "path": "react",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/Divider.tsx": {
+      "bytes": 607,
+      "imports": [
+        {
+          "path": "react",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/animation.ts": {
+      "bytes": 21317,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "<runtime>",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
+    "ilovereact/shared/src/index.ts": {
+      "bytes": 2367,
+      "imports": [
+        {
+          "path": "ilovereact/shared/src/context.ts",
+          "kind": "import-statement",
+          "original": "./context"
+        },
+        {
+          "path": "ilovereact/shared/src/hooks.ts",
+          "kind": "import-statement",
+          "original": "./hooks"
+        },
+        {
+          "path": "ilovereact/shared/src/primitives.tsx",
+          "kind": "import-statement",
+          "original": "./primitives"
+        },
+        {
+          "path": "ilovereact/shared/src/ScrollView.tsx",
+          "kind": "import-statement",
+          "original": "./ScrollView"
+        },
+        {
+          "path": "ilovereact/shared/src/Portal.tsx",
+          "kind": "import-statement",
+          "original": "./Portal"
+        },
+        {
+          "path": "ilovereact/shared/src/Pressable.tsx",
+          "kind": "import-statement",
+          "original": "./Pressable"
+        },
+        {
+          "path": "ilovereact/shared/src/Modal.tsx",
+          "kind": "import-statement",
+          "original": "./Modal"
+        },
+        {
+          "path": "ilovereact/shared/src/TextInput.tsx",
+          "kind": "import-statement",
+          "original": "./TextInput"
+        },
+        {
+          "path": "ilovereact/shared/src/TextEditor.tsx",
+          "kind": "import-statement",
+          "original": "./TextEditor"
+        },
+        {
+          "path": "ilovereact/shared/src/FlatList.tsx",
+          "kind": "import-statement",
+          "original": "./FlatList"
+        },
+        {
+          "path": "ilovereact/shared/src/Slider.tsx",
+          "kind": "import-statement",
+          "original": "./Slider"
+        },
+        {
+          "path": "ilovereact/shared/src/Switch.tsx",
+          "kind": "import-statement",
+          "original": "./Switch"
+        },
+        {
+          "path": "ilovereact/shared/src/Checkbox.tsx",
+          "kind": "import-statement",
+          "original": "./Checkbox"
+        },
+        {
+          "path": "ilovereact/shared/src/Radio.tsx",
+          "kind": "import-statement",
+          "original": "./Radio"
+        },
+        {
+          "path": "ilovereact/shared/src/Select.tsx",
+          "kind": "import-statement",
+          "original": "./Select"
+        },
+        {
+          "path": "ilovereact/shared/src/FlexRow.tsx",
+          "kind": "import-statement",
+          "original": "./FlexRow"
+        },
+        {
+          "path": "ilovereact/shared/src/FlexColumn.tsx",
+          "kind": "import-statement",
+          "original": "./FlexColumn"
+        },
+        {
+          "path": "ilovereact/shared/src/Spacer.tsx",
+          "kind": "import-statement",
+          "original": "./Spacer"
+        },
+        {
+          "path": "ilovereact/shared/src/Card.tsx",
+          "kind": "import-statement",
+          "original": "./Card"
+        },
+        {
+          "path": "ilovereact/shared/src/Badge.tsx",
+          "kind": "import-statement",
+          "original": "./Badge"
+        },
+        {
+          "path": "ilovereact/shared/src/Divider.tsx",
+          "kind": "import-statement",
+          "original": "./Divider"
+        },
+        {
+          "path": "ilovereact/shared/src/animation.ts",
+          "kind": "import-statement",
+          "original": "./animation"
+        }
+      ],
+      "format": "esm"
+    },
+    "src/App.tsx": {
+      "bytes": 5365,
+      "imports": [
+        {
+          "path": "node_modules/react/index.js",
+          "kind": "import-statement",
+          "original": "react"
+        },
+        {
+          "path": "ilovereact/shared/src/index.ts",
+          "kind": "import-statement",
+          "original": "../ilovereact/shared/src"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    },
+    "src/main.tsx": {
+      "bytes": 185,
+      "imports": [
+        {
+          "path": "react",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "ilovereact/native/src/Love2DApp.ts",
+          "kind": "import-statement",
+          "original": "../ilovereact/native/src/Love2DApp"
+        },
+        {
+          "path": "src/App.tsx",
+          "kind": "import-statement",
+          "original": "./App"
+        },
+        {
+          "path": "node_modules/react/jsx-runtime.js",
+          "kind": "import-statement",
+          "original": "react/jsx-runtime"
+        }
+      ],
+      "format": "esm"
+    }
+  },
+  "outputs": {
+    "../../../../../dev/null": {
+      "imports": [],
+      "exports": [],
+      "entryPoint": "src/main.tsx",
+      "inputs": {
+        "node_modules/react/cjs/react.development.js": {
+          "bytesInOutput": 80822
+        },
+        "node_modules/react/index.js": {
+          "bytesInOutput": 247
+        },
+        "node_modules/scheduler/cjs/scheduler.development.js": {
+          "bytesInOutput": 17786
+        },
+        "node_modules/scheduler/index.js": {
+          "bytesInOutput": 259
+        },
+        "node_modules/react-reconciler/cjs/react-reconciler.development.js": {
+          "bytesInOutput": 691990
+        },
+        "node_modules/react-reconciler/index.js": {
+          "bytesInOutput": 280
+        },
+        "node_modules/react/cjs/react-jsx-runtime.development.js": {
+          "bytesInOutput": 38233
+        },
+        "node_modules/react/jsx-runtime.js": {
+          "bytesInOutput": 271
+        },
+        "ilovereact/native/src/Love2DApp.ts": {
+          "bytesInOutput": 666
+        },
+        "ilovereact/native/src/errorReporter.ts": {
+          "bytesInOutput": 464
+        },
+        "ilovereact/native/src/hostConfig.ts": {
+          "bytesInOutput": 10364
+        },
+        "ilovereact/native/src/eventDispatcher.ts": {
+          "bytesInOutput": 3711
+        },
+        "ilovereact/native/src/NativeBridge.ts": {
+          "bytesInOutput": 2931
+        },
+        "ilovereact/native/src/NativeRenderer.ts": {
+          "bytesInOutput": 1075
+        },
+        "ilovereact/shared/src/context.ts": {
+          "bytesInOutput": 643
+        },
+        "src/App.tsx": {
+          "bytesInOutput": 6279
+        },
+        "ilovereact/shared/src/index.ts": {
+          "bytesInOutput": 0
+        },
+        "ilovereact/shared/src/hooks.ts": {
+          "bytesInOutput": 48
+        },
+        "ilovereact/shared/src/primitives.tsx": {
+          "bytesInOutput": 7622
+        },
+        "ilovereact/shared/src/ScrollView.tsx": {
+          "bytesInOutput": 4275
+        },
+        "ilovereact/shared/src/Portal.tsx": {
+          "bytesInOutput": 170
+        },
+        "ilovereact/shared/src/Pressable.tsx": {
+          "bytesInOutput": 6207
+        },
+        "ilovereact/shared/src/Modal.tsx": {
+          "bytesInOutput": 108
+        },
+        "ilovereact/shared/src/TextInput.tsx": {
+          "bytesInOutput": 109
+        },
+        "ilovereact/shared/src/TextEditor.tsx": {
+          "bytesInOutput": 109
+        },
+        "ilovereact/shared/src/FlatList.tsx": {
+          "bytesInOutput": 8829
+        },
+        "ilovereact/shared/src/Slider.tsx": {
+          "bytesInOutput": 109
+        },
+        "ilovereact/shared/src/Switch.tsx": {
+          "bytesInOutput": 110
+        },
+        "ilovereact/shared/src/Checkbox.tsx": {
+          "bytesInOutput": 110
+        },
+        "ilovereact/shared/src/Radio.tsx": {
+          "bytesInOutput": 177
+        },
+        "ilovereact/shared/src/Select.tsx": {
+          "bytesInOutput": 110
+        },
+        "ilovereact/shared/src/FlexRow.tsx": {
+          "bytesInOutput": 61
+        },
+        "ilovereact/shared/src/FlexColumn.tsx": {
+          "bytesInOutput": 61
+        },
+        "ilovereact/shared/src/Spacer.tsx": {
+          "bytesInOutput": 61
+        },
+        "ilovereact/shared/src/Card.tsx": {
+          "bytesInOutput": 61
+        },
+        "ilovereact/shared/src/Badge.tsx": {
+          "bytesInOutput": 61
+        },
+        "ilovereact/shared/src/Divider.tsx": {
+          "bytesInOutput": 61
+        },
+        "ilovereact/shared/src/animation.ts": {
+          "bytesInOutput": 49
+        },
+        "src/main.tsx": {
+          "bytesInOutput": 162
+        }
+      },
+      "bytes": 889269
+    }
+  }
+}

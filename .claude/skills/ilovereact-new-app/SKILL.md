@@ -9,6 +9,20 @@ description: >
 
 # Create a New iLoveReact App
 
+## CLI-First Rule
+
+**ALWAYS use the `ilovereact` CLI tool when it covers your use case.** Do NOT manually
+run raw esbuild commands, manually scaffold directory structures, or add npm scripts
+to package.json for things the CLI already handles. The CLI encodes the correct esbuild
+flags, lint gates, runtime file placement, and distribution packaging — manual commands
+will get these wrong.
+
+The CLI handles: **Love2D scaffolding, Love2D builds, Love2D distribution packaging,
+terminal distribution packaging, linting, and screenshots.**
+
+Grid targets (terminal dev builds, CC, Neovim, Hammerspoon, AwesomeWM) are not yet
+covered by the CLI — use npm scripts for those.
+
 ## Instructions
 
 ### Step 1: Determine Target and Location
@@ -20,9 +34,34 @@ Ask the user:
 
 ### Step 2: Scaffold Based on Target
 
-Each target has a different entry point pattern. Create the directory and files.
+#### Love2D App (native) — USE THE CLI
+
+```bash
+cd /path/to/where/project/goes
+ilovereact init <app-name>
+```
+
+This creates the full project structure: `src/`, `lua/`, `lib/`, `ilovereact/`,
+`main.lua`, `conf.lua`, `package.json`, and installs dependencies. Do NOT manually
+create these files.
+
+After scaffolding, the workflow is:
+```bash
+cd <app-name>
+ilovereact dev          # Watch mode with HMR (esbuild --watch)
+# love . is already running in a separate terminal (user manages this)
+```
+
+To build:
+```bash
+ilovereact build                  # Lint gate + bundle (for love . workflow)
+ilovereact build dist:love        # Self-extracting Linux binary
+```
+
+The only file you need to edit is `src/App.tsx` (and add more components under `src/`).
 
 #### Terminal App
+
 ```
 <app-name>/
   src/
@@ -44,9 +83,15 @@ const app = createTerminalApp({
 app.render(<App />);
 ```
 
-**Build command** (add to root package.json if in examples/):
+**Build** (add to root package.json scripts if in monorepo examples/):
 ```json
 "build:<app-name>": "esbuild --bundle --platform=node --format=esm --target=es2020 --jsx=automatic --outfile=examples/<app-name>/dist/main.js examples/<app-name>/src/main.tsx"
+```
+
+**Distribution** (single-file executable): If the app has a `src/main-terminal.tsx`
+entry point, use the CLI from the app directory:
+```bash
+ilovereact build dist:terminal
 ```
 
 Run: `node examples/<app-name>/dist/main.js`
@@ -106,19 +151,6 @@ const server = createAwesomeServer({ width: 400, height: 30 });
 server.render(<App />);
 ```
 
-#### Love2D App (native)
-Use the CLI: `ilovereact init <app-name>`. Or manually:
-```tsx
-// src/main.tsx — IIFE format, runs in QuickJS
-import React from 'react';
-import { NativeRenderer } from '@ilovereact/native';
-import App from './App';
-
-NativeRenderer.create().render(<App />);
-```
-
-Build: `--format=iife --global-name=ReactLove` (no --platform=node)
-
 ### Step 3: Write the App Component
 
 For **grid targets** (terminal, cc, nvim, hs, awesome), use lowercase JSX intrinsics:
@@ -164,6 +196,23 @@ export default function App() {
 }
 ```
 
+### Step 4: Validate and Verify
+
+**After writing or modifying any component, you MUST run:**
+
+```bash
+# For Love2D apps — lint is mandatory (blocks builds on errors)
+ilovereact lint
+
+# For visual verification (Love2D apps only)
+ilovereact screenshot --output /tmp/preview.png
+```
+
+Then read `/tmp/preview.png` to confirm the layout is correct before moving on.
+
+For grid target apps that live in the monorepo, run the build command to verify
+the bundle compiles: `npm run build:<app-name>`
+
 ### Grid Target Style Constraints
 
 The grid layout engine (`@ilovereact/grid`) supports a subset of the full style system:
@@ -190,11 +239,3 @@ Properties like fontSize, borderRadius, shadows, transforms, and gradients are N
 | Select | Yes | No |
 | FlatList | Yes | No |
 | Animation | Yes | No |
-
-### Step 4: Build and Run
-
-```bash
-# Add build script to root package.json if needed
-npm run build:<app-name>
-# Then run according to target type
-```

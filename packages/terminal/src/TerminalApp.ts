@@ -5,11 +5,13 @@
  * No Lua, no WebSocket, no external client — runs entirely in Node.js.
  */
 
+import React from 'react';
 import type { ReactNode } from 'react';
 import {
   setTransportFlush,
   getRootInstances,
   createRoot,
+  RendererProvider,
   type Instance,
 } from '@ilovereact/native';
 import { computeLayout, flatten } from '@ilovereact/grid';
@@ -149,7 +151,9 @@ export function createTerminalApp(options: TerminalAppOptions = {}): TerminalApp
 
   return {
     render(element: ReactNode) {
-      root.render(element);
+      root.render(
+        React.createElement(RendererProvider, { mode: 'native' as const }, element)
+      );
     },
     stop() {
       root.unmount();

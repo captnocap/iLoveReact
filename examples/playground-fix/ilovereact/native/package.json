@@ -1,0 +1,13 @@
+{
+  "name": "@ilovereact/native",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "dependencies": {
+    "@ilovereact/core": "*"
+  },
+  "peerDependencies": {
+    "react": "^18.3.0",
+    "react-reconciler": "^0.29.0"
+  }
+}

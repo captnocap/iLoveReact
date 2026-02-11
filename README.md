@@ -208,6 +208,81 @@ npm run build:hs-demo
 npm run build:awesome-demo
 ```
 
+## CLI Tool
+
+The `ilovereact` CLI manages Love2D projects. Always use it instead of running esbuild directly.
+
+```bash
+ilovereact init <name>            # Create a new Love2D project
+ilovereact dev                    # Watch mode with HMR
+ilovereact build                  # Lint + bundle for dev (love . workflow)
+ilovereact build dist:love        # Self-extracting Linux binary
+ilovereact build dist:terminal    # Single-file Node.js executable
+ilovereact update                 # Sync runtime files from CLI into current project
+ilovereact lint                   # Static layout linter
+ilovereact screenshot [--output]  # Headless screenshot capture
+```
+
+## Development Workflow
+
+### Source of truth vs. distributed copies
+
+The framework has two kinds of files, and editing the wrong one is the fastest way to lose work.
+
+**Framework files** (globally distributed) live at the monorepo root and get copied into projects:
+
+| Source of truth | Role |
+|---|---|
+| `lua/` | Lua runtime — layout, painter, events, bridges, text editor, focus |
+| `packages/shared/` | React primitives, components, hooks, animation, types |
+| `packages/native/` | Love2D reconciler, host config, event dispatcher |
+
+**Project files** (application code) are unique to each project and owned by the developer:
+
+| Location | Role |
+|---|---|
+| `<project>/src/` | Application code (App.tsx, components, stories) |
+| `<project>/main.lua`, `conf.lua` | Love2D entry points |
+| `<project>/package.json` | Project dependencies |
+
+### How distribution works
+
+```
+lua/  ──────────────────┐
+packages/shared/  ──────┤  make cli-setup     ilovereact init
+packages/native/  ──────┼────────────────►  cli/runtime/  ──────────────►  <project>/
+quickjs/libquickjs.so ─┘                                  ilovereact update
+```
+
+1. `make cli-setup` copies source-of-truth files into `cli/runtime/`
+2. `ilovereact init <name>` creates a new project from `cli/runtime/` (one-time)
+3. `ilovereact update` re-syncs `cli/runtime/` into an existing project (repeatable)
+
+### Making framework changes
+
+When you modify any framework file (`lua/`, `packages/shared/`, `packages/native/`), every existing project needs to be updated:
+
+```bash
+# 1. Edit the source of truth
+vim lua/painter.lua                  # example: add a feature to the Lua painter
+
+# 2. Propagate to CLI runtime
+make cli-setup
+
+# 3. Update each project that needs the change
+cd examples/storybook
+ilovereact update                    # syncs lua/, lib/, ilovereact/
+ilovereact build dist:love           # rebuild
+
+cd ../playground
+ilovereact update
+ilovereact build dist:love
+```
+
+`ilovereact update` replaces `lua/`, `lib/`, and `ilovereact/` wholesale. It never touches `src/`, `main.lua`, `conf.lua`, or `package.json`.
+
+**Do not edit files inside `cli/runtime/`, `<project>/lua/`, or `<project>/ilovereact/` directly.** These are disposable copies. `make cli-setup` and `ilovereact update` will overwrite them.
+
 ## Architecture
 
 ### How targets work

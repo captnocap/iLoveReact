@@ -10,6 +10,34 @@ description: >
 
 # Build iLoveReact Components
 
+## Mandatory: Use the CLI Tool
+
+**After writing or modifying ANY component, you MUST run these CLI commands.
+Do NOT skip these steps or assume the code is correct without verification.**
+
+### For Love2D / Web targets:
+```bash
+# 1. Lint — catches layout bugs that silently produce broken output
+ilovereact lint
+
+# 2. Build — runs lint gate automatically, then bundles
+ilovereact build
+
+# 3. Visual verification — screenshot the result and inspect it
+ilovereact screenshot --output /tmp/preview.png
+# Then read /tmp/preview.png to confirm the layout is correct
+```
+
+### For monorepo examples (any target):
+```bash
+# Build the specific target to verify it compiles
+npm run build:<example-name>
+```
+
+**Do NOT manually invoke esbuild.** The CLI encodes the correct flags, lint gates,
+and runtime configuration. Manual esbuild commands will use wrong flags and skip
+the lint gate.
+
 ## Which Primitives to Use
 
 ### Grid targets (terminal, CC, Neovim, Hammerspoon, AwesomeWM)
@@ -257,7 +285,197 @@ const send = useLoveSend();
 send('ui:action', { type: 'click' });
 ```
 
-## Common Patterns
+## This Is Not CSS (READ THIS FIRST)
+
+iLoveReact's layout engine is **honest flexbox**. No margin collapsing, no shrink-to-fit
+heuristics, no intrinsic sizing fallbacks, no auto-sizing magic. If you don't specify a
+dimension, it's zero. If you say grow, it grows — no other mechanism intervenes.
+
+**Every pattern you know from CSS/React web will silently produce broken layouts here.**
+Your instinct to use `flexGrow: 1` on a root container, or omit `fontSize`, or use CSS
+properties like `background` — all of these produce invisible, zero-size, or misrendered
+elements with no error message.
+
+### Pre-Generation Checklist
+
+Before writing ANY component, verify:
+- [ ] Root element has `width: '100%', height: '100%'` (NOT `flexGrow: 1`)
+- [ ] Every `<Text>` has explicit `fontSize` in its style
+- [ ] No `flexGrow` without at least one sibling having explicit main-axis size
+- [ ] Pixel art grids have pre-computed container dimensions
+- [ ] Only valid iLoveReact style properties used (no CSS-only props like `background`, `boxShadow`, `transition`)
+- [ ] Flex nesting is shallow — prefer explicit sizes over deep nesting
+
+These rules are enforced by `ilovereact lint`. If your code passes lint, the layout
+structure is valid. **You MUST run `ilovereact lint` after writing any component —
+this is not optional.**
+
+### Screenshot Verification
+
+After writing or modifying a component, verify the output visually:
+```bash
+ilovereact screenshot --output /tmp/preview.png
+```
+Then read `/tmp/preview.png` to confirm the layout is correct before proceeding.
+**Do not consider a component done until you have visually verified the screenshot.**
+
+## Layout Rules (CRITICAL)
+
+These rules apply to ALL targets but are especially important for Love2D where the
+flexbox engine requires deterministic sizing at every node in the tree.
+
+### 1. Every container must have explicit dimensions or directly measurable content
+
+The layout engine walks the tree bottom-up to compute sizes. If a container's size
+depends on children whose sizes depend on the parent, you get undefined behavior
+(overlapping, invisible elements, 0-height nodes).
+
+**Good** — heart grid container with pre-computed dimensions:
+```tsx
+const HEART_PX = 12;
+const HEART_COLS = 13;
+const HEART_ROWS = 10;
+
+<Box style={{ width: HEART_COLS * HEART_PX, height: HEART_ROWS * HEART_PX }}>
+  {grid.map(row => (
+    <Box style={{ flexDirection: 'row' }}>
+      {row.map(cell => <Box style={{ width: HEART_PX, height: HEART_PX, backgroundColor: cell.color }} />)}
+    </Box>
+  ))}
+</Box>
+```
+
+**Bad** — relying on 130 nested children to infer container size:
+```tsx
+<Box style={{ flexDirection: 'column' }}>
+  {grid.map(row => (
+    <Box style={{ flexDirection: 'row' }}>
+      {row.map(cell => <Box style={{ width: 12, height: 12 }} />)}
+    </Box>
+  ))}
+</Box>
+```
+
+If you can compute the dimensions ahead of time, always provide them explicitly.
+
+### 2. Keep the flex tree shallow — never nest rows inside columns inside rows unnecessarily
+
+Every wrapper layer adds ambiguity for the layout engine. A label/value pair does NOT
+need its own FlexRow wrapper component inside a column inside a row.
+
+**Good** — flat structure, each info row is a direct child:
+```tsx
+<Box style={{ gap: 4 }}>
+  <Box style={{ flexDirection: 'row', gap: 4 }}>
+    <Text style={{ color: '#e94560', fontSize: 14, fontWeight: '700' }}>OS:</Text>
+    <Text style={{ color: '#e0e0f0', fontSize: 14 }}>Arch Linux</Text>
+  </Box>
+  <Box style={{ flexDirection: 'row', gap: 4 }}>
+    <Text style={{ color: '#e94560', fontSize: 14, fontWeight: '700' }}>CPU:</Text>
+    <Text style={{ color: '#e0e0f0', fontSize: 14 }}>Ryzen 9</Text>
+  </Box>
+</Box>
+```
+
+**Bad** — wrapper component adding unnecessary nesting depth:
+```tsx
+function InfoLine({ label, value }) {
+  return (
+    <FlexRow justify="space-between" align="center">
+      <Text>{label}:</Text>
+      <Text>{value}</Text>
+    </FlexRow>
+  );
+}
+// This creates: FlexRow > FlexColumn > FlexRow(InfoLine) > Text — 3 levels deep
+```
+
+### 3. Use `Box` with `flexDirection` directly — not wrapper components for layout
+
+`FlexRow` and `FlexColumn` are convenience wrappers available from `@ilovereact/core`,
+but when building layouts, prefer `Box` with explicit `flexDirection` and style props.
+This keeps the tree transparent and avoids hidden abstraction layers.
+
+```tsx
+// Direct and clear
+<Box style={{ flexDirection: 'row', gap: 24 }}>
+  <Box style={{ width: 156, height: 120 }}>{/* heart */}</Box>
+  <Box style={{ gap: 4 }}>{/* info lines */}</Box>
+</Box>
+```
+
+### 4. Follow the SettingsDemo pattern for card-like containers
+
+The proven pattern for card sections (used throughout the storybook):
+```tsx
+<Box style={{
+  gap: 12,
+  backgroundColor: '#1e293b',
+  borderRadius: 10,
+  padding: 14,
+}}>
+  <Text style={{ color: '#e2e8f0', fontSize: 16, fontWeight: '700' }}>Section Title</Text>
+  {/* content */}
+</Box>
+```
+
+No `overflow: 'hidden'`, no wrapper body Box, no extra abstraction. Just a Box with
+`gap`, `backgroundColor`, `borderRadius`, and `padding`.
+
+### 5. Every Text MUST have explicit fontSize (Love2D/Web targets)
+
+Text without fontSize cannot be measured. Always specify it:
+```tsx
+<Text style={{ color: '#fff', fontSize: 14 }}>Content</Text>
+```
+
+### 6. Reference the storybook — if a pattern works there, use it exactly
+
+The storybook (`examples/storybook/`) is the source of truth for what renders correctly.
+Before writing a new layout, find the closest working storybook demo and match its
+structure. The same primitives doing the same thing produce the same result.
+
+### 7. Fill the viewport — the window is a fixed-size canvas, not a scrolling page
+
+Love2D windows have a fixed size set at startup (typically ~500×700 or similar). There
+is no scrollbar. Treat the viewport as a canvas to fill, not a vertical document to
+flow top-to-bottom into the top-left corner.
+
+**Think in rows first.** Group related content into horizontal rows that span the full
+width, then subdivide each row into columns. Use `justifyContent: 'space-around'` or
+`'space-between'` on rows to distribute content across the available width.
+
+**Good** — weather dashboard filling the viewport with explicit child sizing:
+```tsx
+<Box style={{ width: '100%', height: '100%', gap: 16, padding: 16 }}>
+  {/* Row 1: visual + primary stats + secondary stats */}
+  <Box style={{ flexDirection: 'row', gap: 20, flexGrow: 1 }}>
+    <Box style={{ width: 88, height: 88 }}>{/* pixel art icon */}</Box>
+    <Box style={{ flexGrow: 1, gap: 4 }}>{/* temp + condition — grows to fill */}</Box>
+    <Box style={{ width: 180, gap: 4 }}>{/* humidity, wind, pressure — fixed width */}</Box>
+  </Box>
+  {/* Row 2: forecast + supplementary info */}
+  <Box style={{ flexDirection: 'row', gap: 12, flexGrow: 1 }}>
+    <Box style={{ flexGrow: 1 }}>{/* 7-day forecast — grows */}</Box>
+    <Box style={{ width: 110 }}>{/* cloud cover — fixed width for pixel art */}</Box>
+  </Box>
+</Box>
+```
+
+**Bad** — stacking everything vertically, leaving 60% of horizontal space empty:
+```tsx
+<Box style={{ gap: 16, padding: 16 }}>
+  <Box>{/* icon + temp */}</Box>
+  <Box>{/* stats */}</Box>
+  <Box>{/* forecast */}</Box>
+  <Box>{/* cloud */}</Box>
+</Box>
+```
+
+The Neofetch demo demonstrates this: heart on the left, info lines on the right —
+one row filling the width. The SettingsDemo uses two columns of cards. Always plan
+which content groups sit side-by-side before writing any JSX.
+
 
 ### Grid Target Dashboard
 ```tsx

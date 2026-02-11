@@ -5,11 +5,13 @@
  * computes layout, flattens to draw commands, and broadcasts via a pluggable transport.
  */
 
+import React from 'react';
 import type { ReactNode } from 'react';
 import {
   setTransportFlush,
   getRootInstances,
   createRoot,
+  RendererProvider,
   type Instance,
 } from '@ilovereact/native';
 import { computeLayout, type LayoutOptions } from './layout';
@@ -69,7 +71,9 @@ export function createRenderServer(options: RenderServerOptions): RenderServerHa
 
   return {
     render(element: ReactNode) {
-      root.render(element);
+      root.render(
+        React.createElement(RendererProvider, { mode: 'native' as const }, element)
+      );
     },
     stop() {
       root.unmount();

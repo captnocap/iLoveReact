@@ -1,4 +1,5 @@
 import type { ComponentType } from 'react';
+import { stories as addonStories } from '../../../../packages/components/src/stories';
 
 export interface StoryDef {
   id: string;
@@ -36,7 +37,11 @@ import { SelectStory } from './SelectStory';
 import { AnimationTimingStory } from './AnimationTiming';
 import { AnimationSpringStory } from './AnimationSpring';
 import { SettingsDemoStory } from './SettingsDemo';
+import { NeofetchDemoStory } from './NeofetchDemo';
+import { WeatherDemoStory } from './WeatherDemo';
 import { ErrorTestStory } from './ErrorTest';
+import { BlockTestStory } from './BlockTestStory';
+import { TextEditorStory } from './TextEditorStory';
 
 export const stories: StoryDef[] = [
   // Primitives
@@ -72,6 +77,9 @@ export const stories: StoryDef[] = [
   { id: 'text-decoration', title: 'Text Decoration', category: 'CSS Features', component: TextDecorationStory },
   { id: 'per-side-border', title: 'Per-Side Borders', category: 'CSS Features', component: PerSideBorderStory },
 
+  // Input
+  { id: 'text-editor', title: 'TextEditor', category: 'Input', component: TextEditorStory },
+
   // Forms
   { id: 'checkbox', title: 'Checkbox', category: 'Forms', component: CheckboxStory },
   { id: 'radio', title: 'Radio', category: 'Forms', component: RadioStory },
@@ -83,7 +91,13 @@ export const stories: StoryDef[] = [
 
   // Demo
   { id: 'settings-demo', title: 'Settings Demo', category: 'Demo', component: SettingsDemoStory },
+  { id: 'neofetch-demo', title: 'Neofetch', category: 'Demo', component: NeofetchDemoStory },
+  { id: 'weather-demo', title: 'Weather', category: 'Demo', component: WeatherDemoStory },
 
   // Dev Tools
   { id: 'error-test', title: 'Error Test', category: 'Dev Tools', component: ErrorTestStory },
+  { id: 'block-test', title: 'Block Test', category: 'Dev Tools', component: BlockTestStory },
+
+  // Addon components (from @ilovereact/components)
+  ...addonStories,
 ];

@@ -8,12 +8,21 @@
 
 local ReactLove = require("lua.init")
 
+-- Resolve lib/ path from the real filesystem (next to game.love, not inside it).
+local function resolveLibPath()
+  if arg and arg[1] then
+    local dir = arg[1]:match("(.+)/[^/]+$")
+    if dir then return dir .. "/lib/libquickjs" end
+  end
+  return "lib/libquickjs"
+end
+
 function love.load()
   love.graphics.setBackgroundColor(0.04, 0.04, 0.06)
   ReactLove.init({
     mode = "native",
     bundlePath = "bundle.js",
-    libpath = "lib/libquickjs",
+    libpath = resolveLibPath(),
   })
 end
 
