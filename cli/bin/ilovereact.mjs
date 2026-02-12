@@ -11,26 +11,41 @@ import { updateCommand } from '../commands/update.mjs';
 const [,, command, ...args] = argv;
 
 const HELP = `
-  ilovereact - CLI for iLoveReact
+  ilovereact (ilr) - CLI for iLoveReact
 
   Usage:
-    ilovereact init <name>           Create a new project (interactive)
-    ilovereact init <name> --all     Include all optional packages
-    ilovereact init <name> --minimal Core only, no optional packages
-    ilovereact dev                    Run esbuild in watch mode (HMR)
-    ilovereact build [--no-update]    Bundle JS for dev (love . workflow)
-    ilovereact build dist:love [--no-update] [--debug]
-                                      Single-file Love2D executable
-    ilovereact build dist:terminal [--no-update]
-                                      Single-file terminal executable
-    ilovereact update                 Sync runtime files (lua/, lib/, ilovereact/)
-    ilovereact lint                   Check src/ for layout mistakes
-    ilovereact screenshot [--output]  Lint + build + headless screenshot
-    ilovereact help                   Show this help message
+    ilr init <name>              Create a new project (interactive)
+    ilr init <name> --all        Include all optional packages
+    ilr init <name> --minimal    Core only, no optional packages
+    ilr dev [target]             Watch mode (default: love)
+    ilr build [target]           Dev build (default: love)
+    ilr build dist:<target>      Production build
+    ilr update                   Sync runtime files (lua/, lib/, ilovereact/)
+    ilr lint                     Check src/ for layout mistakes
+    ilr screenshot [--output]    Lint + build + headless screenshot
+    ilr help                     Show this help message
+
+  Targets:
+    love        Love2D (IIFE, QuickJS)      → bundle.js
+    terminal    Terminal (ESM, Node.js)      → dist/main.js
+    cc          ComputerCraft (ESM, WS)      → dist/main.js
+    nvim        Neovim (ESM, stdio)          → dist/main.js
+    hs          Hammerspoon (ESM, WS)        → dist/main.js
+    awesome     AwesomeWM (ESM, stdio)       → dist/main.js
+    web         Browser (ESM)                → dist/app.js
+
+  Dist formats:
+    dist:love       Self-extracting Linux binary (Love2D + glibc)
+    dist:terminal   Single-file Node.js executable (shebang + CJS)
+    dist:cc         Single-file Node.js executable (shebang + CJS)
+    dist:nvim       Single-file Node.js executable (shebang + CJS)
+    dist:hs         Single-file Node.js executable (shebang + CJS)
+    dist:awesome    Single-file Node.js executable (shebang + CJS)
+    dist:web        Production ESM bundle
 
   Flags:
-    --no-update                       Skip auto-updating runtime files
-    --debug                           Enable inspector in dist:love builds
+    --no-update     Skip auto-updating runtime files
+    --debug         Enable inspector in dist:love builds
 `;
 
 switch (command) {

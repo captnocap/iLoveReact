@@ -7,7 +7,8 @@
     "test": "node --test test/cli.test.mjs"
   },
   "bin": {
-    "ilovereact": "./bin/ilovereact.mjs"
+    "ilovereact": "./bin/ilovereact.mjs",
+    "ilr": "./bin/ilovereact.mjs"
   },
   "files": [
     "bin/",

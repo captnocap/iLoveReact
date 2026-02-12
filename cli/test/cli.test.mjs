@@ -86,6 +86,11 @@ describe('ilovereact help', () => {
     assert.ok(stdout.includes('--all'), 'Should mention --all flag');
     assert.ok(stdout.includes('--minimal'), 'Should mention --minimal flag');
   });
+
+  it('help mentions ilr shorthand', () => {
+    const { stdout } = cli(['help']);
+    assert.ok(stdout.includes('ilr'), 'Should mention ilr shorthand');
+  });
 });
 
 // ── Unknown command ─────────────────────────────────────────
