@@ -42,6 +42,10 @@ local state = {
   layoutMs   = 0,
   paintMs    = 0,
   nodeCount  = 0,
+  nodeCountDirty = true,  -- recalc on next draw
+  -- Hit test cache
+  lastHitX   = -1,
+  lastHitY   = -1,
   -- Layout/paint timing
   layoutStart = 0,
   paintStart  = 0,
@@ -86,6 +90,13 @@ local DETAIL_BG     = { 0.05, 0.05, 0.10, 0.92 }
 
 local TREE_WIDTH = 280
 local DETAIL_WIDTH = 300
+
+-- Cached fonts (created lazily on first draw, avoids allocation per frame)
+local fontSmall = nil   -- 11px, used by tooltip/tree/detail/perf
+local function getFont()
+  if not fontSmall then fontSmall = love.graphics.newFont(11) end
+  return fontSmall
+end
 
 -- ============================================================================
 -- Deep hit test (returns ANY node under cursor, not just hasHandlers)
@@ -189,11 +200,15 @@ end
 function Inspector.beginLayout()
   if not state.enabled then return end
   state.layoutStart = love.timer.getTime()
+  state.nodeCountDirty = true  -- tree changed, recount after layout
 end
 
 function Inspector.endLayout()
   if not state.enabled then return end
   state.layoutMs = (love.timer.getTime() - state.layoutStart) * 1000
+  -- Invalidate hit test cache since node positions may have changed
+  state.lastHitX = -1
+  state.lastHitY = -1
 end
 
 function Inspector.beginPaint()
@@ -204,6 +219,11 @@ end
 function Inspector.endPaint()
   if not state.enabled then return end
   state.paintMs = (love.timer.getTime() - state.paintStart) * 1000
+end
+
+--- Mark node count as stale (call after tree mutations)
+function Inspector.markDirty()
+  state.nodeCountDirty = true
 end
 
 --- Return performance data (used by console :perf command)
@@ -326,13 +346,22 @@ function Inspector.mousepressed(x, y, button)
     -- Find which node was clicked using cached positions
     for _, entry in ipairs(state.treeNodePositions) do
       if y >= entry.y and y < entry.y + entry.lineH then
-        if state.selectedNode == entry.node then
-          -- Click same node: deselect
-          state.selectedNode = nil
-          state.detailScrollY = 0
+        -- Check if click is on the collapse indicator (the ">" / "v" zone)
+        local hasChildren = entry.node.children and #entry.node.children > 0
+        local collapseX = 8 + (entry.depth or 0) * 12 - 10
+        if hasChildren and x >= collapseX - 4 and x <= collapseX + 12 then
+          -- Toggle collapse
+          local nid = entry.node.id
+          state.collapsed[nid] = not state.collapsed[nid]
         else
-          state.selectedNode = entry.node
-          state.detailScrollY = 0
+          -- Select / deselect node
+          if state.selectedNode == entry.node then
+            state.selectedNode = nil
+            state.detailScrollY = 0
+          else
+            state.selectedNode = entry.node
+            state.detailScrollY = 0
+          end
         end
         return true
       end
@@ -348,6 +377,7 @@ function Inspector.mousepressed(x, y, button)
     else
       state.selectedNode = state.hoveredNode
       state.detailScrollY = 0
+      state.scrollToSelected = true  -- tree panel will auto-scroll on next draw
     end
     return true
   end
@@ -407,9 +437,18 @@ function Inspector.draw(root)
   if not root then return end
 
   local ok, drawErr = pcall(function()
-    -- Update hovered node via deep hit test (skip if console is covering that area)
-    state.hoveredNode = deepHitTest(root, state.mouseX, state.mouseY)
-    state.nodeCount = countNodes(root)
+    -- Update hovered node via deep hit test (skip if mouse hasn't moved)
+    if state.mouseX ~= state.lastHitX or state.mouseY ~= state.lastHitY then
+      state.hoveredNode = deepHitTest(root, state.mouseX, state.mouseY)
+      state.lastHitX = state.mouseX
+      state.lastHitY = state.mouseY
+    end
+
+    -- Recount nodes only when tree has changed
+    if state.nodeCountDirty then
+      state.nodeCount = countNodes(root)
+      state.nodeCountDirty = false
+    end
 
     -- Save graphics state
     love.graphics.push("all")
@@ -430,6 +469,17 @@ function Inspector.draw(root)
     -- 4. Draw tree panel
     if state.treePanel then
       drawTreePanel(root)
+
+      -- Override hoveredNode when mouse is over tree panel rows
+      if state.mouseX < TREE_WIDTH then
+        state.hoveredNode = nil
+        for _, entry in ipairs(state.treeNodePositions) do
+          if state.mouseY >= entry.y and state.mouseY < entry.y + entry.lineH then
+            state.hoveredNode = entry.node
+            break
+          end
+        end
+      end
     end
 
     -- 5. Draw detail panel (when node is selected)
@@ -589,7 +639,7 @@ function drawTooltip()
   end
 
   -- Measure tooltip size
-  local font = love.graphics.newFont(11)
+  local font = getFont()
   local lineH = font:getHeight() + 2
   local pad = 8
   local maxW = 0
@@ -640,7 +690,7 @@ end
 
 function drawTreePanel(root)
   local screenH = love.graphics.getHeight()
-  local font = love.graphics.newFont(11)
+  local font = getFont()
   local lineH = font:getHeight() + 4
   local pad = 8
 
@@ -668,6 +718,24 @@ function drawTreePanel(root)
   local drawY = treeY - state.treeScrollY
   drawTreeNode(root, 0, drawY, font, lineH, pad, treeY, screenH)
 
+  -- Auto-scroll to selected node (after positions are cached)
+  if state.scrollToSelected and state.selectedNode then
+    for _, entry in ipairs(state.treeNodePositions) do
+      if entry.node == state.selectedNode then
+        -- entry.y is the drawn position (includes current scroll offset)
+        -- Convert to absolute position in the tree content
+        local absY = entry.y + state.treeScrollY - treeY
+        local visibleH = screenH - treeY
+        if entry.y < treeY or entry.y + lineH > screenH then
+          -- Node is outside visible area — scroll to center it
+          state.treeScrollY = math.max(0, absY - visibleH / 2)
+        end
+        break
+      end
+    end
+    state.scrollToSelected = false
+  end
+
   love.graphics.setScissor()
 end
 
@@ -678,11 +746,12 @@ function drawTreeNode(node, depth, y, font, lineH, pad, clipTop, clipBottom)
   local visible = y + lineH > clipTop and y < clipBottom
   local c = node.computed
 
-  -- Cache position for click detection
+  -- Cache position for click detection (depth needed for collapse indicator hit zone)
   state.treeNodePositions[#state.treeNodePositions + 1] = {
     node = node,
     y = y,
     lineH = lineH,
+    depth = depth,
   }
 
   if visible then
@@ -748,7 +817,7 @@ function drawDetailPanel()
   local screenW = love.graphics.getWidth()
   local screenH = love.graphics.getHeight()
   local panelX = screenW - DETAIL_WIDTH
-  local font = love.graphics.newFont(11)
+  local font = getFont()
   local lineH = font:getHeight() + 2
   local pad = 10
 
@@ -869,7 +938,7 @@ end
 -- ============================================================================
 
 function drawPerfBar()
-  local font = love.graphics.newFont(11)
+  local font = getFont()
   local screenW = love.graphics.getWidth()
   local pad = 6
   local lineH = font:getHeight() + 2
