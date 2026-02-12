@@ -115,3 +115,10 @@ export {
   type SpringConfig,
   type InterpolationConfig,
 } from './animation';
+
+// Colors
+export { colors, type CatppuccinColor } from './colors';
+
+// Debug tools
+export { useDebug, getDebugData, registerDebug } from './useDebug';
+export { DebugOverlay, DebugBox, useDebugOverlay } from './DebugOverlay';
