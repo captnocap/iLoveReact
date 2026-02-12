@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "description": "CLI for iLoveReact — write React UIs for Love2D games",
   "type": "module",
+  "scripts": {
+    "test": "node --test test/cli.test.mjs"
+  },
   "bin": {
     "ilovereact": "./bin/ilovereact.mjs"
   },
