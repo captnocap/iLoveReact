@@ -2,8 +2,11 @@
 export { z, ValidationError, type Infer, type SafeParseResult } from './schema';
 export type { Schema, ValidationIssue } from './schema';
 
-// ── Hooks ───────────────────────────────────────────────
+// ── Hooks (React) ───────────────────────────────────────
 export { useCRUD, useStorage, StorageProvider } from './hooks';
+
+// ── Plain CRUD (no React) ───────────────────────────────
+export { createCRUD, type CRUDMethods, type CreateCRUDOptions } from './crud';
 
 // ── Types ───────────────────────────────────────────────
 export type {

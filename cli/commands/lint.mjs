@@ -343,7 +343,7 @@ function buildContexts(sourceFile, filePath, ts) {
 
 // ── Call expression analysis (for hook lint rules) ────────────
 
-const STORAGE_HOOKS = new Set(['useCRUD', 'useStorage']);
+const STORAGE_HOOKS = new Set(['useCRUD', 'useStorage', 'createCRUD']);
 
 /**
  * Walk a source file's AST to find storage hook call expressions.
@@ -392,9 +392,13 @@ const callRules = [
     name: 'no-usecrud-without-schema',
     severity: 'error',
     check(call) {
-      if (call.funcName !== 'useCRUD') return null;
-      if (call.argCount < 2) {
-        return 'useCRUD() requires at least 2 arguments: collection name and schema — schema validation ensures type safety and runtime correctness';
+      if (call.funcName !== 'useCRUD' && call.funcName !== 'createCRUD') return null;
+      const minArgs = call.funcName === 'createCRUD' ? 3 : 2;
+      if (call.argCount < minArgs) {
+        const sig = call.funcName === 'createCRUD'
+          ? 'createCRUD(collection, schema, adapter)'
+          : 'useCRUD(collection, schema)';
+        return `${call.funcName}() requires at least ${minArgs} arguments: ${sig} — schema validation ensures type safety and runtime correctness`;
       }
       return null;
     },
