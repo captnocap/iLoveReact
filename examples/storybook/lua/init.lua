@@ -24,8 +24,11 @@ local events   = nil   -- events.lua module
 local measure  = nil   -- measure.lua module (text measurement + font cache)
 local errors     = require("lua.errors")      -- error overlay (always loaded, self-contained)
 local inspector  = require("lua.inspector")   -- debug inspector (F12 toggle, self-contained)
+local console    = require("lua.console")     -- interactive eval console (` toggle, self-contained)
 local screenshot = nil                        -- screenshot.lua (loaded on demand)
+local inspectorEnabled = true                 -- can be disabled via config.inspector = false
 
+local animate  = nil   -- animate.lua module (Lua-side transitions/animations)
 local images   = nil   -- images.lua module (image cache)
 local focus    = require("lua.focus")         -- focus manager for Lua-owned inputs
 local texteditor = nil                        -- texteditor.lua (loaded on demand)
@@ -33,6 +36,10 @@ local texteditor = nil                        -- texteditor.lua (loaded on deman
 local mode     = nil   -- "web", "native", or "canvas"
 local basePath = nil   -- directory containing these modules
 local initConfig = nil -- stashed config from init() for reload()
+
+-- Interaction style overlay tracking (hoverStyle / activeStyle)
+-- Maps nodeId -> { [propKey] = baseValue } for properties overridden by interaction
+local interactionBase = {}
 
 -- HMR state
 local hmrFrameCounter = 0
@@ -98,6 +105,85 @@ local function pushEvent(evt)
 end
 
 -- ============================================================================
+-- Interaction style overlay (hoverStyle / activeStyle)
+-- ============================================================================
+
+--- Apply or remove hoverStyle/activeStyle overlays on a node based on current
+--- hover and pressed state. Uses the transition system for smooth animations
+--- when the node has a `transition` config in its style.
+--- This runs entirely in Lua for 0-frame latency feedback.
+local function applyInteractionStyle(node)
+  if not node or not node.props then return end
+
+  local hoverStyle = node.props.hoverStyle
+  local activeStyle = node.props.activeStyle
+  if not hoverStyle and not activeStyle then return end
+
+  local isHovered = events and events.getHoveredNode() == node
+  local isPressed = events and events.getPressedNode() == node
+
+  -- Get or create base style tracking for this node
+  if not interactionBase[node.id] then
+    interactionBase[node.id] = {}
+  end
+  local base = interactionBase[node.id]
+
+  -- Collect all overridable keys from both hover and active styles
+  local allKeys = {}
+  if hoverStyle then for k in pairs(hoverStyle) do allKeys[k] = true end end
+  if activeStyle then for k in pairs(activeStyle) do allKeys[k] = true end end
+
+  local oldValues = {}
+  local newValues = {}
+  local anyChange = false
+
+  for k in pairs(allKeys) do
+    -- Save base value if not already saved (use sentinel for nil)
+    if base[k] == nil then
+      if node.style[k] == nil then
+        base[k] = "__NIL__"
+      else
+        base[k] = node.style[k]
+      end
+    end
+
+    -- Compute target: active > hover > base (priority order)
+    local target
+    if isPressed and activeStyle and activeStyle[k] ~= nil then
+      target = activeStyle[k]
+    elseif isHovered and hoverStyle and hoverStyle[k] ~= nil then
+      target = hoverStyle[k]
+    else
+      target = base[k]
+      if target == "__NIL__" then target = nil end
+    end
+
+    local current = node.style[k]
+    if current ~= target then
+      oldValues[k] = current
+      newValues[k] = target
+      node.style[k] = target
+      anyChange = true
+    end
+  end
+
+  -- Clean up base tracking if no longer hovered or pressed
+  if not isHovered and not isPressed then
+    interactionBase[node.id] = nil
+  end
+
+  -- Trigger transitions if configured
+  if anyChange and animate and node.style.transition then
+    animate.processStyleUpdate(node, oldValues, newValues)
+  end
+
+  -- Mark tree dirty if anything changed (layout or visual)
+  if anyChange and tree then
+    tree.markDirty()
+  end
+end
+
+-- ============================================================================
 -- HMR helpers
 -- ============================================================================
 
@@ -143,6 +229,9 @@ function ReactLove.init(config)
   config = config or {}
   basePath = resolveBasePath()
 
+  -- Inspector/console can be disabled for production builds
+  inspectorEnabled = config.inspector ~= false
+
   mode = detectMode(config)
   local ns = config.namespace or "default"
 
@@ -162,9 +251,12 @@ function ReactLove.init(config)
 
     measure = require("lua.measure")
     images  = require("lua.images")
+    animate = require("lua.animate")
 
     tree    = require("lua.tree")
-    tree.init({ images = images })
+    tree.init({ images = images, animate = animate })
+
+    animate.init({ tree = tree })
 
     layout  = require("lua.layout")
     layout.init({ measure = measure })
@@ -192,9 +284,12 @@ function ReactLove.init(config)
 
     measure = require("lua.measure")
     images  = require("lua.images")
+    animate = require("lua.animate")
 
     tree    = require("lua.tree")
-    tree.init({ images = images })
+    tree.init({ images = images, animate = animate })
+
+    animate.init({ tree = tree })
 
     layout  = require("lua.layout")
     layout.init({ measure = measure })
@@ -227,6 +322,12 @@ function ReactLove.init(config)
     ReactLove._needsMount = true
 
     print("[react-love] Initialized in NATIVE mode (QuickJS bridge)")
+  end
+
+  -- Wire up console + inspector (only in rendering modes with inspector enabled)
+  if isRendering() and inspectorEnabled then
+    console.init({ bridge = bridge, tree = tree, inspector = inspector })
+    inspector.setConsole(console)
   end
 
   -- Screenshot mode (env var trigger, works in native and canvas modes)
@@ -268,13 +369,16 @@ function ReactLove.update(dt)
       end
     end
 
-    -- 3. Relayout if tree changed
+    -- 3. Tick Lua-side transitions and animations (before layout)
+    if animate then animate.tick(dt) end
+
+    -- 4. Relayout if tree changed
     if tree.isDirty() then
       local root = tree.getTree()
       if root then
-        if inspector.isEnabled() then inspector.beginLayout() end
+        if inspectorEnabled and inspector.isEnabled() then inspector.beginLayout() end
         layout.layout(root)
-        if inspector.isEnabled() then inspector.endLayout() end
+        if inspectorEnabled and inspector.isEnabled() then inspector.endLayout() end
       end
       tree.clearDirty()
     end
@@ -285,10 +389,11 @@ function ReactLove.update(dt)
       texteditor.update(canvasFocusedNode, dt)
     end
 
-    inspector.update(dt)
+    if inspectorEnabled then inspector.update(dt) end
+    if inspectorEnabled then console.update(dt) end
     if screenshot then screenshot.update() end
 
-    -- 4. Flush bridge outbox (events back to JS)
+    -- 5. Flush bridge outbox (events back to JS)
     bridge.flush()
     return
   end
@@ -351,13 +456,16 @@ function ReactLove.update(dt)
     tree.applyCommands(commands)
   end
 
-  -- 5. Relayout if tree changed
+  -- 5. Tick Lua-side transitions and animations (before layout)
+  if animate then animate.tick(dt) end
+
+  -- 6. Relayout if tree changed
   if tree.isDirty() then
     local root = tree.getTree()
     if root then
-      if inspector.isEnabled() then inspector.beginLayout() end
+      if inspectorEnabled and inspector.isEnabled() then inspector.beginLayout() end
       layout.layout(root)
-      if inspector.isEnabled() then inspector.endLayout() end
+      if inspectorEnabled and inspector.isEnabled() then inspector.endLayout() end
     end
     tree.clearDirty()
   end
@@ -368,7 +476,8 @@ function ReactLove.update(dt)
     texteditor.update(focusedNode, dt)
   end
 
-  inspector.update(dt)
+  if inspectorEnabled then inspector.update(dt) end
+  if inspectorEnabled then console.update(dt) end
   if screenshot then screenshot.update() end
 end
 
@@ -397,9 +506,9 @@ function ReactLove.draw()
         end
       end
     end
-    if inspector.isEnabled() then inspector.beginPaint() end
+    if inspectorEnabled and inspector.isEnabled() then inspector.beginPaint() end
     local ok, paintErr = pcall(painter.paint, root)
-    if inspector.isEnabled() then inspector.endPaint() end
+    if inspectorEnabled and inspector.isEnabled() then inspector.endPaint() end
     if not ok then
       errors.push({
         source = "lua",
@@ -410,7 +519,7 @@ function ReactLove.draw()
   end
 
   -- Inspector overlay (after paint, before errors)
-  inspector.draw(root)
+  if inspectorEnabled then inspector.draw(root) end
 
   -- Error overlay renders on top of everything, using raw Love2D calls
   errors.draw()
@@ -425,7 +534,7 @@ end
 function ReactLove.mousepressed(x, y, button)
   -- Error overlay gets first crack at mouse events
   if errors.mousepressed(x, y, button) then return end
-  if inspector.mousepressed(x, y, button) then return end
+  if inspectorEnabled and inspector.mousepressed(x, y, button) then return end
 
   if not isRendering() then return end
 
@@ -473,6 +582,10 @@ function ReactLove.mousepressed(x, y, button)
       events.startDrag(hit.id, x, y)
       local bubblePath = events.buildBubblePath(hit)
       pushEvent(events.createEvent("click", hit.id, x, y, button, bubblePath))
+
+      -- Apply active (pressed) interaction style (0-frame latency)
+      events.setPressedNode(hit)
+      applyInteractionStyle(hit)
     end
   end
 end
@@ -497,6 +610,13 @@ function ReactLove.mousereleased(x, y, button)
     pushEvent(dragEndEvent)
   end
 
+  -- Clear pressed (active) state and revert active style (0-frame latency)
+  local prevPressed = events.getPressedNode()
+  events.clearPressedNode()
+  if prevPressed then
+    applyInteractionStyle(prevPressed)
+  end
+
   -- Dispatch normal release event with bubblePath
   local hit = events.hitTest(root, x, y)
   if hit then
@@ -509,7 +629,7 @@ end
 --- Tracks pointer enter/leave and dispatches hover events.
 --- Also updates drag state if a drag is active.
 function ReactLove.mousemoved(x, y)
-  inspector.mousemoved(x, y)
+  if inspectorEnabled then inspector.mousemoved(x, y) end
   if not isRendering() then return end
 
   -- TextEditor drag selection
@@ -539,9 +659,17 @@ function ReactLove.mousemoved(x, y)
   end
 
   -- Normal hover tracking when not dragging
+  local prevHovered = events.getHoveredNode()
   local hoverEvents = events.updateHover(root, x, y)
   for _, evt in ipairs(hoverEvents) do
     pushEvent(evt)
+  end
+
+  -- Apply interaction style overlays for hover state changes (0-frame latency)
+  local currHovered = events.getHoveredNode()
+  if prevHovered ~= currHovered then
+    if prevHovered then applyInteractionStyle(prevHovered) end
+    if currHovered then applyInteractionStyle(currHovered) end
   end
 end
 
@@ -560,7 +688,7 @@ end
 --- Call from love.keypressed(key, scancode, isrepeat).
 --- Dispatches a global keydown event to all JS keyboard listeners.
 function ReactLove.keypressed(key, scancode, isrepeat)
-  if inspector.keypressed(key) then return end
+  if inspectorEnabled and inspector.keypressed(key) then return end
   if not isRendering() then return end
 
   -- Route to focused TextEditor if any
@@ -614,6 +742,8 @@ end
 --- Call from love.textinput(text).
 --- Dispatches a text input event (handles unicode, IME, etc.).
 function ReactLove.textinput(text)
+  -- Inspector/console captures text input when active
+  if inspectorEnabled and inspector.textinput(text) then return end
   if not isRendering() then return end
 
   -- Route to focused TextEditor if any
@@ -632,7 +762,7 @@ end
 --- directly in Lua for immediate visual response AND send the event to JS.
 --- The scroll speed multiplier converts Love2D wheel units to pixels.
 function ReactLove.wheelmoved(x, y)
-  if inspector.wheelmoved(x, y) then return end
+  if inspectorEnabled and inspector.wheelmoved(x, y) then return end
   if not isRendering() then return end
 
   local root = tree.getTree()
@@ -756,8 +886,12 @@ function ReactLove.reload()
   -- 2. Teardown
   bridge:destroy()
   if images then images.clearCache() end
-  tree.init({ images = images })
+  if animate then animate.clear() end
+  tree.init({ images = images, animate = animate })
+  if animate then animate.init({ tree = tree }) end
   events.clearHover()
+  events.clearPressedNode()
+  interactionBase = {}
   focus.clear()
   pcall(function() events.endDrag(0, 0) end)
   measure.clearCache()
@@ -797,7 +931,12 @@ function ReactLove.reload()
     return
   end
 
-  -- 7. Trigger mount on next update
+  -- 7. Update console refs (bridge was recreated)
+  if inspectorEnabled then
+    console.updateRefs({ bridge = bridge, tree = tree })
+  end
+
+  -- 8. Trigger mount on next update
   ReactLove._needsMount = true
   ReactLove._loggedCommands = nil
   ReactLove._loggedDraw = nil

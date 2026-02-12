@@ -25,6 +25,7 @@ end
 -- ============================================================================
 
 local hoveredNode = nil
+local pressedNode = nil
 
 local dragState = {
   active = false,
@@ -80,6 +81,8 @@ function Events.hitTest(node, mx, my)
 
   -- Return this node if it has JS event handlers
   if node.hasHandlers then return node end
+  -- Nodes with hoverStyle/activeStyle are hittable for Lua-side interaction
+  if node.props and (node.props.hoverStyle or node.props.activeStyle) then return node end
   -- Also return scroll containers so wheel events can scroll them
   -- even when no JS handler is attached
   if isScroll then return node end
@@ -295,6 +298,27 @@ end
 --- Reset hover state (e.g. on tree rebuild).
 function Events.clearHover()
   hoveredNode = nil
+end
+
+-- ============================================================================
+-- Pressed (active) node tracking
+-- ============================================================================
+
+--- Set the currently pressed node.
+--- Called from mousepressed when a node is hit.
+function Events.setPressedNode(node)
+  pressedNode = node
+end
+
+--- Return the currently pressed node (or nil).
+function Events.getPressedNode()
+  return pressedNode
+end
+
+--- Clear pressed node state.
+--- Called from mousereleased.
+function Events.clearPressedNode()
+  pressedNode = nil
 end
 
 -- ============================================================================

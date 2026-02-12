@@ -103,6 +103,9 @@ function styleToCSS(style?: Style): React.CSSProperties {
     if (t.scaleX || t.scaleY) {
       parts.push(`scale(${t.scaleX || 1}, ${t.scaleY || 1})`);
     }
+    if (t.skewX || t.skewY) {
+      parts.push(`skew(${t.skewX || 0}deg, ${t.skewY || 0}deg)`);
+    }
     if (parts.length > 0) {
       css.transform = parts.join(' ');
     }
@@ -128,6 +131,54 @@ function styleToCSS(style?: Style): React.CSSProperties {
   if (style.bottom !== undefined) css.bottom = style.bottom;
   if (style.left !== undefined) css.left = style.left;
   if (style.right !== undefined) css.right = style.right;
+  if (style.visibility) css.visibility = style.visibility;
+
+  // Per-corner border radius
+  if (style.borderTopLeftRadius !== undefined) css.borderTopLeftRadius = style.borderTopLeftRadius;
+  if (style.borderTopRightRadius !== undefined) css.borderTopRightRadius = style.borderTopRightRadius;
+  if (style.borderBottomLeftRadius !== undefined) css.borderBottomLeftRadius = style.borderBottomLeftRadius;
+  if (style.borderBottomRightRadius !== undefined) css.borderBottomRightRadius = style.borderBottomRightRadius;
+
+  // Per-side border colors
+  if (style.borderTopColor) css.borderTopColor = colorToCSS(style.borderTopColor);
+  if (style.borderRightColor) css.borderRightColor = colorToCSS(style.borderRightColor);
+  if (style.borderBottomColor) css.borderBottomColor = colorToCSS(style.borderBottomColor);
+  if (style.borderLeftColor) css.borderLeftColor = colorToCSS(style.borderLeftColor);
+
+  // Text shadow
+  if (style.textShadowColor) {
+    const ox = style.textShadowOffsetX || 0;
+    const oy = style.textShadowOffsetY || 0;
+    css.textShadow = `${ox}px ${oy}px ${colorToCSS(style.textShadowColor)}`;
+  }
+
+  // Outline
+  if (style.outlineWidth !== undefined || style.outlineColor) {
+    const ow = style.outlineWidth || 1;
+    const oc = style.outlineColor ? colorToCSS(style.outlineColor) : 'currentColor';
+    css.outline = `${ow}px solid ${oc}`;
+    if (style.outlineOffset !== undefined) css.outlineOffset = style.outlineOffset;
+  }
+
+  // CSS Transition (web target maps directly to CSS transition)
+  if (style.transition) {
+    const parts: string[] = [];
+    for (const [prop, config] of Object.entries(style.transition)) {
+      const dur = (config.duration || 300) / 1000;
+      const easingMap: Record<string, string> = {
+        linear: 'linear',
+        easeIn: 'ease-in',
+        easeOut: 'ease-out',
+        easeInOut: 'ease-in-out',
+      };
+      const cssEasing = easingMap[config.easing || 'easeInOut'] || 'ease-in-out';
+      const delay = ((config.delay || 0) / 1000);
+      // Map 'all' to CSS 'all', otherwise convert camelCase to kebab-case
+      const cssProp = prop === 'all' ? 'all' : prop.replace(/([A-Z])/g, '-$1').toLowerCase();
+      parts.push(`${cssProp} ${dur}s ${cssEasing} ${delay}s`);
+    }
+    css.transition = parts.join(', ');
+  }
 
   return css;
 }
@@ -136,6 +187,8 @@ function styleToCSS(style?: Style): React.CSSProperties {
 
 export function Box({
   style,
+  hoverStyle,
+  activeStyle,
   onClick,
   onRelease,
   onPointerEnter,
@@ -158,15 +211,38 @@ export function Box({
   const mode = useRendererMode();
 
   if (mode === 'web') {
-    const css = styleToCSS(style);
-    if (onClick) css.cursor = 'pointer';
-    css.userSelect = 'none';
+    const [isHovered, setIsHovered] = React.useState(false);
+    const [isActive, setIsActive] = React.useState(false);
+    const baseCSS = styleToCSS(style);
+    if (onClick) baseCSS.cursor = 'pointer';
+    baseCSS.userSelect = 'none';
+
+    // Merge hover and active styles for web
+    let css = baseCSS;
+    if (isHovered && hoverStyle) {
+      css = { ...css, ...styleToCSS({ ...style, ...hoverStyle }) };
+      css.userSelect = 'none';
+    }
+    if (isActive && activeStyle) {
+      css = { ...css, ...styleToCSS({ ...style, ...(isHovered ? hoverStyle : {}), ...activeStyle }) };
+      css.userSelect = 'none';
+    }
+
     return (
       <div
         style={css}
         onClick={onClick as any}
-        onPointerEnter={onPointerEnter as any}
-        onPointerLeave={onPointerLeave as any}
+        onPointerEnter={(e: any) => {
+          setIsHovered(true);
+          if (onPointerEnter) onPointerEnter(e);
+        }}
+        onPointerLeave={(e: any) => {
+          setIsHovered(false);
+          setIsActive(false);
+          if (onPointerLeave) onPointerLeave(e);
+        }}
+        onMouseDown={() => setIsActive(true)}
+        onMouseUp={() => setIsActive(false)}
         onKeyDown={onKeyDown as any}
         onKeyUp={onKeyUp as any}
         onInput={onTextInput as any}
@@ -187,6 +263,8 @@ export function Box({
     'View',
     {
       style,
+      hoverStyle,
+      activeStyle,
       onClick,
       onRelease,
       onPointerEnter,

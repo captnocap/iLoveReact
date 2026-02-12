@@ -8,7 +8,8 @@
   The layout engine and painter operate on this tree.
 ]]
 
-local Images = nil  -- Injected at init time via Tree.init()
+local Images = nil    -- Injected at init time via Tree.init()
+local Animate = nil   -- Injected at init time via Tree.init()
 
 local Tree = {}
 
@@ -33,6 +34,11 @@ local function cleanup(id)
       Images.unload(n.props.src)
     end
 
+    -- Clean up active transitions/animations
+    if Animate then
+      Animate.onNodeRemoved(id)
+    end
+
     -- Recursively cleanup children
     for _, c in ipairs(n.children) do
       cleanup(c.id)
@@ -51,6 +57,7 @@ end
 function Tree.init(config)
   config = config or {}
   Images = config.images
+  Animate = config.animate
   nodes = {}
   rootChildren = {}
   treeDirty = true
@@ -124,9 +131,30 @@ function Tree.applyCommands(commands)
             if type(v) == "table" then
               if not node.props.style then node.props.style = {} end
               if not node.style then node.style = {} end
+
+              -- Snapshot old values before merge (needed for transitions)
+              local oldValues = nil
+              if Animate and node.style.transition then
+                oldValues = {}
+                for sk in pairs(v) do
+                  oldValues[sk] = node.style[sk]
+                end
+              end
+
+              -- Apply the style diff
               for sk, sv in pairs(v) do
                 node.style[sk] = sv
                 node.props.style[sk] = sv
+              end
+
+              -- Set up keyframe animation if the animation prop changed
+              if Animate and v.animation then
+                Animate.setupAnimation(node, v.animation)
+              end
+
+              -- Let animate module process transitions for changed properties
+              if Animate and oldValues then
+                Animate.processStyleUpdate(node, oldValues, v)
               end
             end
           else

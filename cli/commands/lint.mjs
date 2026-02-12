@@ -471,7 +471,9 @@ const rules = [
         'backgroundColor', 'borderRadius', 'borderWidth',
         'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth',
         'borderColor', 'borderTopColor', 'borderRightColor', 'borderBottomColor', 'borderLeftColor',
+        'borderTopLeftRadius', 'borderTopRightRadius', 'borderBottomLeftRadius', 'borderBottomRightRadius',
         'overflow', 'opacity', 'zIndex', 'scrollX', 'scrollY',
+        'visibility',
         // Shadow
         'shadowColor', 'shadowOffsetX', 'shadowOffsetY', 'shadowBlur',
         // Gradient
@@ -481,10 +483,16 @@ const rules = [
         // Text
         'color', 'fontSize', 'fontFamily', 'fontWeight', 'textAlign',
         'textOverflow', 'textDecorationLine', 'lineHeight', 'letterSpacing',
+        // Text shadow
+        'textShadowColor', 'textShadowOffsetX', 'textShadowOffsetY',
         // Image
         'objectFit',
         // Position
         'position', 'top', 'bottom', 'left', 'right',
+        // Outline
+        'outlineColor', 'outlineWidth', 'outlineOffset',
+        // Transitions & Animations (Lua-side)
+        'transition', 'animation',
       ]);
 
       const invalid = [];

@@ -377,6 +377,88 @@ local function drawGradient(x, y, w, h, direction, color1, color2, effectiveOpac
 end
 
 -- ============================================================================
+-- Per-corner border radius helper
+-- ============================================================================
+
+--- Draw a filled or stroked rectangle with per-corner border radii.
+--- Uses arc segments for each corner and polygon fill for the body.
+--- Falls back to love.graphics.rectangle() when all radii are equal.
+--- @param mode string "fill" or "line"
+--- @param x number Left edge
+--- @param y number Top edge
+--- @param w number Width
+--- @param h number Height
+--- @param tl number Top-left radius
+--- @param tr number Top-right radius
+--- @param bl number Bottom-left radius
+--- @param br number Bottom-right radius
+local function drawRoundedRect(mode, x, y, w, h, tl, tr, bl, br)
+  -- Clamp radii to half the shortest dimension
+  local maxR = math.min(w, h) / 2
+  tl = math.min(tl, maxR)
+  tr = math.min(tr, maxR)
+  bl = math.min(bl, maxR)
+  br = math.min(br, maxR)
+
+  -- If all corners are the same, use Love2D's built-in (faster)
+  if tl == tr and tr == bl and bl == br then
+    love.graphics.rectangle(mode, x, y, w, h, tl, tl)
+    return
+  end
+
+  -- Build polygon vertices: top-left arc, top-right arc, bottom-right arc, bottom-left arc
+  local segments = 8  -- arc segments per corner
+  local vertices = {}
+  local function addArc(cx, cy, r, startAngle, endAngle)
+    if r <= 0 then
+      vertices[#vertices + 1] = cx
+      vertices[#vertices + 1] = cy
+      return
+    end
+    for i = 0, segments do
+      local angle = startAngle + (endAngle - startAngle) * (i / segments)
+      vertices[#vertices + 1] = cx + math.cos(angle) * r
+      vertices[#vertices + 1] = cy + math.sin(angle) * r
+    end
+  end
+
+  -- Top-left corner (arc from pi to 3pi/2)
+  addArc(x + tl, y + tl, tl, math.pi, math.pi * 1.5)
+  -- Top-right corner (arc from 3pi/2 to 2pi)
+  addArc(x + w - tr, y + tr, tr, math.pi * 1.5, math.pi * 2)
+  -- Bottom-right corner (arc from 0 to pi/2)
+  addArc(x + w - br, y + h - br, br, 0, math.pi * 0.5)
+  -- Bottom-left corner (arc from pi/2 to pi)
+  addArc(x + bl, y + h - bl, bl, math.pi * 0.5, math.pi)
+
+  if mode == "fill" then
+    love.graphics.polygon("fill", vertices)
+  else
+    love.graphics.polygon("line", vertices)
+  end
+end
+
+--- Resolve per-corner border radii from style properties.
+--- Returns tl, tr, bl, br (top-left, top-right, bottom-left, bottom-right).
+--- Per-corner properties override the uniform borderRadius.
+--- @param s table The node's style table
+--- @return number, number, number, number
+local function resolveCornerRadii(s)
+  local uniform = s.borderRadius or 0
+  local tl = s.borderTopLeftRadius or uniform
+  local tr = s.borderTopRightRadius or uniform
+  local bl = s.borderBottomLeftRadius or uniform
+  local br = s.borderBottomRightRadius or uniform
+  return tl, tr, bl, br
+end
+
+--- Check if a node has non-uniform per-corner border radii.
+local function hasPerCornerRadius(s)
+  return s.borderTopLeftRadius or s.borderTopRightRadius
+      or s.borderBottomLeftRadius or s.borderBottomRightRadius
+end
+
+-- ============================================================================
 -- Transform helper
 -- ============================================================================
 
@@ -393,7 +475,8 @@ local function applyTransform(transform, c)
 
   -- Check if any transform is actually set
   local hasTransform = transform.translateX or transform.translateY or
-                       transform.rotate or transform.scaleX or transform.scaleY
+                       transform.rotate or transform.scaleX or transform.scaleY or
+                       transform.skewX or transform.skewY
   if not hasTransform then return false end
 
   love.graphics.push()
@@ -415,6 +498,13 @@ local function applyTransform(transform, c)
   -- Apply scale
   if transform.scaleX or transform.scaleY then
     love.graphics.scale(transform.scaleX or 1, transform.scaleY or 1)
+  end
+
+  -- Apply skew (shear)
+  if transform.skewX or transform.skewY then
+    local kx = transform.skewX and math.tan(math.rad(transform.skewX)) or 0
+    local ky = transform.skewY and math.tan(math.rad(transform.skewY)) or 0
+    love.graphics.shear(kx, ky)
   end
 
   -- Move back from origin
@@ -448,6 +538,9 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
   -- display:none -- skip this node and all its children entirely
   if s.display == "none" then return end
 
+  -- visibility:hidden -- layout occupies space but skip painting (children still paint)
+  local isHidden = s.visibility == "hidden"
+
   -- Calculate effective opacity for this node
   local nodeOpacity = s.opacity or 1
   local effectiveOpacity = nodeOpacity * inheritedOpacity
@@ -458,18 +551,25 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
   -- Apply transform (affects this node and all children)
   local didTransform = applyTransform(s.transform, c)
 
-  -- Determine clipping strategy
+  -- Resolve border radii (per-corner or uniform)
+  local tl, tr, bl, br = resolveCornerRadii(s)
   local borderRadius = s.borderRadius or 0
+  local hasRoundedCorners = tl > 0 or tr > 0 or bl > 0 or br > 0
+  local isPerCorner = hasPerCornerRadius(s)
   local isScroll = s.overflow == "scroll"
   local needsClipping = s.overflow == "hidden" or isScroll
-  local useStencil = needsClipping and borderRadius > 0
-  local useScissor = needsClipping and borderRadius <= 0
+  local useStencil = needsClipping and hasRoundedCorners
+  local useScissor = needsClipping and not hasRoundedCorners
 
   -- Apply stencil clipping for rounded corners
   if useStencil then
     local stencilValue = stencilDepth + 1
     love.graphics.stencil(function()
-      love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+      if isPerCorner then
+        drawRoundedRect("fill", c.x, c.y, c.w, c.h, tl, tr, bl, br)
+      else
+        love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+      end
     end, "replace", stencilValue)
     love.graphics.setStencilTest("greater", stencilDepth)
     stencilDepth = stencilValue
@@ -478,7 +578,7 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
     love.graphics.setScissor(c.x, c.y, c.w, c.h)
   end
 
-  if node.type == "View" or node.type == "box" then
+  if not isHidden and (node.type == "View" or node.type == "box") then
     -- Draw box shadow BEFORE background (so it appears behind)
     if s.shadowColor and s.shadowBlur and s.shadowBlur > 0 then
       local offsetX = s.shadowOffsetX or 0
@@ -490,10 +590,14 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
     if s.backgroundGradient then
       local grad = s.backgroundGradient
       -- Apply borderRadius clipping if needed (stencil for rounded gradients)
-      if borderRadius > 0 then
+      if hasRoundedCorners then
         local gradStencilValue = stencilDepth + 1
         love.graphics.stencil(function()
-          love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+          if isPerCorner then
+            drawRoundedRect("fill", c.x, c.y, c.w, c.h, tl, tr, bl, br)
+          else
+            love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+          end
         end, "replace", gradStencilValue)
         love.graphics.setStencilTest("greater", stencilDepth)
 
@@ -512,7 +616,11 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
       -- Solid background fill
       Painter.setColor(s.backgroundColor)
       Painter.applyOpacity(effectiveOpacity)
-      love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+      if isPerCorner then
+        drawRoundedRect("fill", c.x, c.y, c.w, c.h, tl, tr, bl, br)
+      else
+        love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+      end
     end
 
     -- Border stroke
@@ -530,30 +638,60 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
       Painter.setColor(s.borderColor or { 0.5, 0.5, 0.5, 1 })
       Painter.applyOpacity(effectiveOpacity)
       love.graphics.setLineWidth(s.borderWidth)
-      love.graphics.rectangle("line", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+      if isPerCorner then
+        drawRoundedRect("line", c.x, c.y, c.w, c.h, tl, tr, bl, br)
+      else
+        love.graphics.rectangle("line", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+      end
     elseif hasPerSideBorder then
-      -- Per-side borders: draw individual lines
-      Painter.setColor(s.borderColor or { 0.5, 0.5, 0.5, 1 })
-      Painter.applyOpacity(effectiveOpacity)
+      -- Per-side borders: draw individual lines with per-side colors
+      local defaultColor = s.borderColor or { 0.5, 0.5, 0.5, 1 }
       if bwT > 0 then
+        Painter.setColor(s.borderTopColor or defaultColor)
+        Painter.applyOpacity(effectiveOpacity)
         love.graphics.setLineWidth(bwT)
         love.graphics.line(c.x, c.y + bwT/2, c.x + c.w, c.y + bwT/2)
       end
       if bwB > 0 then
+        Painter.setColor(s.borderBottomColor or defaultColor)
+        Painter.applyOpacity(effectiveOpacity)
         love.graphics.setLineWidth(bwB)
         love.graphics.line(c.x, c.y + c.h - bwB/2, c.x + c.w, c.y + c.h - bwB/2)
       end
       if bwL > 0 then
+        Painter.setColor(s.borderLeftColor or defaultColor)
+        Painter.applyOpacity(effectiveOpacity)
         love.graphics.setLineWidth(bwL)
         love.graphics.line(c.x + bwL/2, c.y, c.x + bwL/2, c.y + c.h)
       end
       if bwR > 0 then
+        Painter.setColor(s.borderRightColor or defaultColor)
+        Painter.applyOpacity(effectiveOpacity)
         love.graphics.setLineWidth(bwR)
         love.graphics.line(c.x + c.w - bwR/2, c.y, c.x + c.w - bwR/2, c.y + c.h)
       end
     end
 
-  elseif node.type == "Text" or node.type == "__TEXT__" then
+    -- Outline (drawn outside the border box)
+    if s.outlineWidth and s.outlineWidth > 0 then
+      local outlineOffset = s.outlineOffset or 0
+      local ox = c.x - s.outlineWidth - outlineOffset
+      local oy = c.y - s.outlineWidth - outlineOffset
+      local ow = c.w + (s.outlineWidth + outlineOffset) * 2
+      local oh = c.h + (s.outlineWidth + outlineOffset) * 2
+      Painter.setColor(s.outlineColor or { 1, 1, 1, 1 })
+      Painter.applyOpacity(effectiveOpacity)
+      love.graphics.setLineWidth(s.outlineWidth)
+      if isPerCorner then
+        local orad = s.outlineWidth + outlineOffset
+        drawRoundedRect("line", ox, oy, ow, oh, tl + orad, tr + orad, bl + orad, br + orad)
+      else
+        local or_ = borderRadius > 0 and (borderRadius + s.outlineWidth + outlineOffset) or 0
+        love.graphics.rectangle("line", ox, oy, ow, oh, or_, or_)
+      end
+    end
+
+  elseif not isHidden and (node.type == "Text" or node.type == "__TEXT__") then
     -- Resolve text style properties (with inheritance for __TEXT__ children)
     local fontSize = s.fontSize or 14
     local fontFamily = resolveFontFamily(node)
@@ -575,15 +713,7 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
     local font, isBold = getFont(fontSize, fontFamily, fontWeight)
     love.graphics.setFont(font)
 
-    -- Text color with opacity (inherit from parent Text for __TEXT__ children)
-    local textColor = s.color
-    if not textColor and node.type == "__TEXT__" and node.parent then
-      textColor = (node.parent.style or {}).color
-    end
-    Painter.setColor(textColor or { 1, 1, 1, 1 })
-    Painter.applyOpacity(effectiveOpacity)
-
-    -- Resolve text content
+    -- Resolve text content (needed for both shadow and main draw)
     local text = node.text or (node.props and node.props.children) or ""
     if type(text) == "table" then text = table.concat(text) end
     text = tostring(text)
@@ -599,6 +729,60 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
     -- 4. Otherwise, use love.graphics.printf (fastest path)
     local needsLineControl = numberOfLines or textOverflow == "ellipsis"
     local needsManualRendering = hasCustomLineHeight or hasLetterSpacing or needsLineControl
+
+    -- Text shadow: draw text first with offset and shadow color
+    local shadowColor = s.textShadowColor
+    if not shadowColor and node.type == "__TEXT__" and node.parent then
+      shadowColor = (node.parent.style or {}).textShadowColor
+    end
+    if shadowColor then
+      local sox = s.textShadowOffsetX or 0
+      local soy = s.textShadowOffsetY or 0
+      if not sox and node.type == "__TEXT__" and node.parent then
+        sox = (node.parent.style or {}).textShadowOffsetX or 0
+      end
+      if not soy and node.type == "__TEXT__" and node.parent then
+        soy = (node.parent.style or {}).textShadowOffsetY or 0
+      end
+
+      Painter.setColor(shadowColor)
+      Painter.applyOpacity(effectiveOpacity)
+
+      if not needsManualRendering then
+        love.graphics.printf(text, c.x + sox, c.y + soy, c.w, align)
+        if isBold then
+          love.graphics.printf(text, c.x + sox + 0.8, c.y + soy, c.w, align)
+        end
+      else
+        local effectiveLineH = lineHeight or font:getHeight()
+        if textOverflow == "ellipsis" and not numberOfLines then
+          local truncated = Painter.truncateWithEllipsis(font, text, c.w, letterSpacing)
+          if hasLetterSpacing then
+            drawLineWithSpacing(font, truncated, c.x + sox, c.y + soy, letterSpacing, align, c.w)
+          else
+            drawLineNormal(font, truncated, c.x + sox, c.y + soy, align, c.w)
+          end
+        else
+          local lines = Painter.getVisibleLines(font, text, c.w, numberOfLines, textOverflow, letterSpacing)
+          for i, line in ipairs(lines) do
+            local ly = c.y + (i - 1) * effectiveLineH + soy
+            if hasLetterSpacing then
+              drawLineWithSpacing(font, line, c.x + sox, ly, letterSpacing, align, c.w)
+            else
+              drawLineNormal(font, line, c.x + sox, ly, align, c.w)
+            end
+          end
+        end
+      end
+    end
+
+    -- Text color with opacity (inherit from parent Text for __TEXT__ children)
+    local textColor = s.color
+    if not textColor and node.type == "__TEXT__" and node.parent then
+      textColor = (node.parent.style or {}).color
+    end
+    Painter.setColor(textColor or { 1, 1, 1, 1 })
+    Painter.applyOpacity(effectiveOpacity)
 
     if not needsManualRendering then
       -- Fast path: standard Love2D text rendering
@@ -653,7 +837,7 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
       end
     end
 
-  elseif node.type == "Image" then
+  elseif not isHidden and node.type == "Image" then
     local src = node.props and node.props.src
     if src then
       local image = Images.get(src)
@@ -735,7 +919,7 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
       end
     end
 
-  elseif node.type == "TextEditor" then
+  elseif not isHidden and node.type == "TextEditor" then
     -- Lua-owned text editor: delegate rendering entirely to texteditor.lua
     if not TextEditorModule then
       TextEditorModule = require("lua.texteditor")
