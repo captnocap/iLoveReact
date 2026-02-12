@@ -15,6 +15,7 @@
  *   no-implicit-container-sizing (warning) >5 children without explicit container size
  *   no-link-without-to          (error)   <Link> missing "to" prop
  *   no-routes-without-fallback  (warning) <Routes> without path="*" catch-all
+ *   no-usecrud-without-schema   (error)   useCRUD() called without a schema argument
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -339,6 +340,66 @@ function buildContexts(sourceFile, filePath, ts) {
   visit(sourceFile, null, 0, false);
   return contexts;
 }
+
+// ── Call expression analysis (for hook lint rules) ────────────
+
+const STORAGE_HOOKS = new Set(['useCRUD', 'useStorage']);
+
+/**
+ * Walk a source file's AST to find storage hook call expressions.
+ * Returns a flat list of call context objects for rule analysis.
+ */
+function findCallExpressions(sourceFile, filePath, ts) {
+  const calls = [];
+  const sourceLines = sourceFile.getFullText().split('\n');
+
+  function isIgnored(lineNum) {
+    if (lineNum < 2) return false;
+    const prevLine = sourceLines[lineNum - 2];
+    return prevLine && /ilr-ignore-next-line/.test(prevLine);
+  }
+
+  function visit(node) {
+    if (ts.isCallExpression(node)) {
+      let funcName = null;
+      if (ts.isIdentifier(node.expression)) {
+        funcName = node.expression.text;
+      }
+
+      if (funcName && STORAGE_HOOKS.has(funcName)) {
+        const pos = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile));
+        const line = pos.line + 1;
+        calls.push({
+          funcName,
+          argCount: node.arguments.length,
+          file: filePath,
+          line,
+          col: pos.character + 1,
+          ignored: isIgnored(line),
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  }
+
+  visit(sourceFile);
+  return calls;
+}
+
+const callRules = [
+  // useCRUD() requires a schema for type safety and runtime validation
+  {
+    name: 'no-usecrud-without-schema',
+    severity: 'error',
+    check(call) {
+      if (call.funcName !== 'useCRUD') return null;
+      if (call.argCount < 2) {
+        return 'useCRUD() requires at least 2 arguments: collection name and schema — schema validation ensures type safety and runtime correctness';
+      }
+      return null;
+    },
+  },
+];
 
 // ── Rules ────────────────────────────────────────────────────
 
@@ -699,6 +760,25 @@ export async function runLint(cwd, options = {}) {
             file: filePath,
             line: ctx.line,
             col: ctx.col,
+          });
+        }
+      }
+    }
+
+    // Call expression rules (storage hooks, etc.)
+    const calls = findCallExpressions(sourceFile, filePath, ts);
+    for (const call of calls) {
+      if (call.ignored) continue;
+      for (const rule of callRules) {
+        const message = rule.check(call);
+        if (message) {
+          diagnostics.push({
+            rule: rule.name,
+            severity: rule.severity,
+            message,
+            file: filePath,
+            line: call.line,
+            col: call.col,
           });
         }
       }

@@ -1,0 +1,9 @@
+{
+  "name": "@ilovereact/storage",
+  "version": "0.1.0",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "peerDependencies": {
+    "react": "^18.3.0"
+  }
+}

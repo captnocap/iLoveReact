@@ -33,6 +33,8 @@ local images   = nil   -- images.lua module (image cache)
 local focus    = require("lua.focus")         -- focus manager for Lua-owned inputs
 local texteditor = nil                        -- texteditor.lua (loaded on demand)
 
+local rpcHandlers = {}  -- RPC method -> handler function
+
 local mode     = nil   -- "web", "native", or "canvas"
 local basePath = nil   -- directory containing these modules
 local initConfig = nil -- stashed config from init() for reload()
@@ -324,6 +326,16 @@ function ReactLove.init(config)
     print("[react-love] Initialized in NATIVE mode (QuickJS bridge)")
   end
 
+  -- Load RPC handler modules (native and canvas modes)
+  if isRendering() then
+    local sok, storage = pcall(require, "lua.storage")
+    if sok then
+      for method, handler in pairs(storage.getHandlers()) do
+        rpcHandlers[method] = handler
+      end
+    end
+  end
+
   -- Wire up console + inspector (only in rendering modes with inspector enabled)
   if isRendering() and inspectorEnabled then
     console.init({ bridge = bridge, tree = tree, inspector = inspector })
@@ -449,11 +461,47 @@ function ReactLove.update(dt)
   -- 4. Drain mutation commands from JS and apply to retained tree
   local commands = bridge:drainCommands()
   if #commands > 0 then
-    if not ReactLove._loggedCommands then
-      ReactLove._loggedCommands = true
-      io.write("[react-love] First batch: " .. #commands .. " commands\n"); io.flush()
+    -- Filter out RPC calls and route them to registered handlers
+    local treeCommands = commands
+    local hasRPC = false
+    for _, cmd in ipairs(commands) do
+      if type(cmd) == "table" and cmd.type == "rpc:call" then
+        hasRPC = true
+        break
+      end
     end
-    tree.applyCommands(commands)
+
+    if hasRPC then
+      treeCommands = {}
+      for _, cmd in ipairs(commands) do
+        if type(cmd) == "table" and cmd.type == "rpc:call" then
+          local payload = cmd.payload
+          if payload and payload.method and payload.id then
+            local handler = rpcHandlers[payload.method]
+            if handler then
+              local ok, result = pcall(handler, payload.args)
+              if ok then
+                pushEvent({ type = "rpc:" .. payload.id, payload = { result = result } })
+              else
+                pushEvent({ type = "rpc:" .. payload.id, payload = { error = tostring(result) } })
+              end
+            else
+              pushEvent({ type = "rpc:" .. payload.id, payload = { error = "Unknown RPC method: " .. payload.method } })
+            end
+          end
+        else
+          treeCommands[#treeCommands + 1] = cmd
+        end
+      end
+    end
+
+    if #treeCommands > 0 then
+      if not ReactLove._loggedCommands then
+        ReactLove._loggedCommands = true
+        io.write("[react-love] First batch: " .. #treeCommands .. " commands\n"); io.flush()
+      end
+      tree.applyCommands(treeCommands)
+    end
   end
 
   -- 5. Tick Lua-side transitions and animations (before layout)
@@ -974,6 +1022,14 @@ end
 --- Useful for game code that needs to measure text outside the layout pass.
 function ReactLove.getMeasure()
   return measure
+end
+
+--- Register an RPC handler for a given method name.
+--- Handlers receive args table and return a result (or throw).
+--- @param method string The RPC method name (e.g. "storage:get")
+--- @param handler function(args) -> result
+function ReactLove.rpc(method, handler)
+  rpcHandlers[method] = handler
 end
 
 --- Set the scroll position for a node programmatically.

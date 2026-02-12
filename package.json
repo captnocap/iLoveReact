@@ -14,7 +14,8 @@
     "packages/awesome",
     "packages/terminal",
     "packages/components",
-    "packages/router"
+    "packages/router",
+    "packages/storage"
   ],
   "scripts": {
     "build:native": "esbuild --bundle --format=iife --global-name=ReactLove --target=es2020 --jsx=automatic --outfile=examples/native-hud/game/bundle.js examples/native-hud/src/main.tsx",
@@ -33,7 +34,9 @@
     "build:neofetch-nvim": "esbuild --bundle --platform=node --format=esm --target=es2020 --jsx=automatic --outfile=examples/neofetch/dist/main-nvim.js examples/neofetch/src/main-nvim.tsx",
     "build:neofetch-hs": "esbuild --bundle --platform=node --format=esm --target=es2020 --jsx=automatic --outfile=examples/neofetch/dist/main-hs.js --external:ws examples/neofetch/src/main-hs.tsx",
     "build:neofetch-awesome": "esbuild --bundle --platform=node --format=esm --target=es2020 --jsx=automatic --outfile=examples/neofetch/dist/main-awesome.js examples/neofetch/src/main-awesome.tsx",
-    "build:neofetch-cc": "esbuild --bundle --platform=node --format=esm --target=es2020 --jsx=automatic --outfile=examples/neofetch/dist/main-cc.js --external:ws examples/neofetch/src/main-cc.tsx"
+    "build:neofetch-cc": "esbuild --bundle --platform=node --format=esm --target=es2020 --jsx=automatic --outfile=examples/neofetch/dist/main-cc.js --external:ws examples/neofetch/src/main-cc.tsx",
+    "build:docs": "npx tsx scripts/docs/build.ts",
+    "validate:docs": "npx tsx scripts/docs/build.ts validate"
   },
   "dependencies": {
     "@types/ws": "^8.18.1",

@@ -21,7 +21,8 @@
       "@ilovereact/awesome": ["./packages/awesome/src"],
       "@ilovereact/terminal": ["./packages/terminal/src"],
       "@ilovereact/components": ["./packages/components/src"],
-      "@ilovereact/router": ["./packages/router/src"]
+      "@ilovereact/router": ["./packages/router/src"],
+      "@ilovereact/storage": ["./packages/storage/src"]
     }
   }
 }

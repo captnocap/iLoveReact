@@ -91,6 +91,7 @@ export class NativeBridge implements IBridge {
       });
 
       this.send('rpc:call', { id, method, args });
+      this.flush(); // Send immediately so Lua can process in current frame
     });
   }
 
