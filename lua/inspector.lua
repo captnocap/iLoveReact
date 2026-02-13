@@ -99,6 +99,36 @@ local function getFont()
 end
 
 -- ============================================================================
+-- Scroll parent helper
+-- ============================================================================
+
+--- Walk up the parent chain to find the nearest scroll container.
+local function findScrollParent(node)
+  local p = node.parent
+  while p do
+    if p.scrollState then return p end
+    p = p.parent
+  end
+  return nil
+end
+
+--- Accumulate scroll offsets from all scroll ancestors of a node.
+--- Returns total scrollX, scrollY that must be subtracted from layout
+--- coordinates to get visual (screen) coordinates.
+local function getAccumulatedScroll(node)
+  local sx, sy = 0, 0
+  local p = node.parent
+  while p do
+    if p.scrollState then
+      sx = sx + (p.scrollState.scrollX or 0)
+      sy = sy + (p.scrollState.scrollY or 0)
+    end
+    p = p.parent
+  end
+  return sx, sy
+end
+
+-- ============================================================================
 -- Deep hit test (returns ANY node under cursor, not just hasHandlers)
 -- ============================================================================
 
@@ -109,13 +139,17 @@ local function deepHitTest(node, mx, my)
 
   if s.display == "none" then return nil end
 
+  -- Check if mouse is within node bounds (in current coordinate space)
   if mx < c.x or mx > c.x + c.w or my < c.y or my > c.y + c.h then
     return nil
   end
 
-  -- Adjust for scroll containers
+  -- If this node is a scroll container, adjust mouse coordinates for children.
+  -- Children are laid out at their layout positions but painted with a scroll
+  -- offset, so we need to ADD the scroll offset to the mouse position to
+  -- convert from visual (screen) space back to layout space.
   local childMx, childMy = mx, my
-  if s.overflow == "scroll" and node.scrollState then
+  if node.scrollState then
     childMx = mx + (node.scrollState.scrollX or 0)
     childMy = my + (node.scrollState.scrollY or 0)
   end
@@ -520,6 +554,16 @@ function drawHoverOverlay()
   local s = node.style or {}
   local c = node.computed
 
+  -- Apply scroll offset so the overlay matches the painted position.
+  -- Layout coordinates are in "content space" but the painter draws with
+  -- a scroll translate, so we need the same transform here.
+  local scrollX, scrollY = getAccumulatedScroll(node)
+  local hasScroll = scrollX ~= 0 or scrollY ~= 0
+  if hasScroll then
+    love.graphics.push()
+    love.graphics.translate(-scrollX, -scrollY)
+  end
+
   local mt, mr, mb, ml = getMargins(s)
   local pt, pr, pb, pl = getPadding(s)
   local bt, br, bb, bl = getBorderWidths(s)
@@ -567,6 +611,10 @@ function drawHoverOverlay()
   love.graphics.setColor(BORDER_COLOR)
   love.graphics.setLineWidth(1)
   love.graphics.rectangle("line", c.x, c.y, c.w, c.h)
+
+  if hasScroll then
+    love.graphics.pop()
+  end
 end
 
 -- ============================================================================
@@ -579,6 +627,14 @@ function drawSelectedOverlay()
 
   local c = node.computed
 
+  -- Apply accumulated scroll offset from all scroll ancestors
+  local scrollX, scrollY = getAccumulatedScroll(node)
+  local hasScroll = scrollX ~= 0 or scrollY ~= 0
+  if hasScroll then
+    love.graphics.push()
+    love.graphics.translate(-scrollX, -scrollY)
+  end
+
   -- Solid bright outline for selected node
   love.graphics.setColor(TOOLTIP_ACCENT[1], TOOLTIP_ACCENT[2], TOOLTIP_ACCENT[3], 0.8)
   love.graphics.setLineWidth(2)
@@ -587,6 +643,10 @@ function drawSelectedOverlay()
   -- Light fill
   love.graphics.setColor(TOOLTIP_ACCENT[1], TOOLTIP_ACCENT[2], TOOLTIP_ACCENT[3], 0.08)
   love.graphics.rectangle("fill", c.x, c.y, c.w, c.h)
+
+  if hasScroll then
+    love.graphics.pop()
+  end
 end
 
 -- ============================================================================
@@ -604,11 +664,27 @@ function drawTooltip()
   local lines = {}
   local accents = {} -- indices that should use accent color
 
+  -- Component name (if available)
+  if node.debugName then
+    lines[#lines + 1] = "<" .. node.debugName .. ">"
+    accents[#lines] = true
+  end
+
   -- Node type + id
   local header = (node.type or "?")
   if node.id then header = header .. "  #" .. tostring(node.id) end
   lines[#lines + 1] = header
-  accents[1] = true
+  if not node.debugName then accents[#lines] = true end
+
+  -- Source location (if available)
+  if node.debugSource and node.debugSource.fileName then
+    local file = node.debugSource.fileName:match("([^/]+)$") or node.debugSource.fileName
+    local loc = file
+    if node.debugSource.lineNumber then
+      loc = loc .. ":" .. tostring(node.debugSource.lineNumber)
+    end
+    lines[#lines + 1] = loc
+  end
 
   -- Computed dimensions
   lines[#lines + 1] = string.format("x:%d  y:%d  w:%d  h:%d",
@@ -768,8 +844,13 @@ function drawTreeNode(node, depth, y, font, lineH, pad, clipTop, clipBottom)
     local indent = pad + depth * 12
     local maxTextW = TREE_WIDTH - indent - pad
 
-    -- Build label: type (w x h)
-    local label = node.type or "?"
+    -- Build label: <ComponentName> or type (w x h)
+    local label
+    if node.debugName then
+      label = "<" .. node.debugName .. ">"
+    else
+      label = node.type or "?"
+    end
     if c then
       label = label .. string.format("  %dx%d", math.floor(c.w), math.floor(c.h))
     end
@@ -836,11 +917,33 @@ function drawDetailPanel()
   local x = panelX + pad
   local y = pad - state.detailScrollY
 
-  -- Header
-  local header = (node.type or "?") .. "  #" .. tostring(node.id or "?")
+  -- Header with component name
+  local header
+  if node.debugName then
+    header = "<" .. node.debugName .. ">"
+  else
+    header = node.type or "?"
+  end
+  header = header .. "  #" .. tostring(node.id or "?")
   love.graphics.setColor(TOOLTIP_ACCENT)
   love.graphics.print(header, x, y)
-  y = y + lineH + 4
+  y = y + lineH
+
+  -- Source location (if available)
+  if node.debugSource then
+    love.graphics.setColor(TREE_DIM)
+    if node.debugSource.fileName then
+      local file = node.debugSource.fileName
+      local shortFile = file:match("([^/]+)$") or file
+      love.graphics.print(shortFile, x, y)
+      y = y + lineH
+      if node.debugSource.lineNumber then
+        love.graphics.print("  line " .. tostring(node.debugSource.lineNumber), x, y)
+        y = y + lineH
+      end
+    end
+  end
+  y = y + 4
 
   -- Computed layout
   local c = node.computed
