@@ -197,6 +197,26 @@ export interface LoveEvent {
 }
 
 export interface BoxProps {
+  // Shorthand layout props — mapped to style, style={} wins if both set
+  direction?: 'row' | 'col';
+  gap?: number | string;
+  padding?: number | string;
+  px?: number | string;
+  py?: number | string;
+  margin?: number | string;
+  align?: 'start' | 'center' | 'end' | 'stretch';
+  justify?: 'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly';
+  fill?: boolean;
+  grow?: boolean;
+  bg?: Color;
+  radius?: number;
+  w?: number | string;
+  h?: number | string;
+  wrap?: boolean;
+  scroll?: boolean;
+  hidden?: boolean;
+  z?: number;
+
   style?: Style;
   hoverStyle?: Style;
   activeStyle?: Style;
@@ -222,6 +242,15 @@ export interface BoxProps {
 }
 
 export interface TextProps {
+  // Shorthand text props — mapped to style, style={} wins if both set
+  size?: number;
+  color?: Color;
+  bold?: boolean;
+  italic?: boolean;
+  align?: 'left' | 'center' | 'right';
+  font?: string;
+  lines?: number;
+
   style?: Style;
   numberOfLines?: number;
   onKeyDown?: (event: LoveEvent) => void;
@@ -233,6 +262,11 @@ export interface TextProps {
 
 export interface ImageProps {
   src: string;
+  // Shorthand props
+  w?: number | string;
+  h?: number | string;
+  radius?: number;
+
   style?: Style;
   onClick?: (event: LoveEvent) => void;
   onWheel?: (event: LoveEvent) => void;

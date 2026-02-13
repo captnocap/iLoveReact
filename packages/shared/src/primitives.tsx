@@ -183,50 +183,157 @@ function styleToCSS(style?: Style): React.CSSProperties {
   return css;
 }
 
+// ── Shorthand prop → style merging ────────────────────
+
+/** Build a Style from Box shorthand props. style={} overrides. */
+function resolveBoxStyle(props: BoxProps): Style | undefined {
+  const {
+    direction, gap, padding, px, py, margin,
+    align, justify, fill, grow, bg, radius,
+    w, h, wrap, scroll, hidden, z, style,
+  } = props;
+
+  // Fast path: no shorthand props used
+  if (
+    direction === undefined && gap === undefined && padding === undefined &&
+    px === undefined && py === undefined && margin === undefined &&
+    align === undefined && justify === undefined && !fill && !grow &&
+    bg === undefined && radius === undefined && w === undefined &&
+    h === undefined && !wrap && !scroll && !hidden && z === undefined
+  ) {
+    return style;
+  }
+
+  const base: Style = {};
+  if (direction === 'row') base.flexDirection = 'row';
+  if (direction === 'col') base.flexDirection = 'column';
+  if (gap !== undefined) base.gap = gap;
+  if (padding !== undefined) base.padding = padding;
+  if (px !== undefined) { base.paddingLeft = px; base.paddingRight = px; }
+  if (py !== undefined) { base.paddingTop = py; base.paddingBottom = py; }
+  if (margin !== undefined) base.margin = margin;
+  if (align) base.alignItems = align;
+  if (justify) base.justifyContent = justify;
+  if (fill) { base.width = '100%'; base.height = '100%'; }
+  if (grow) base.flexGrow = 1;
+  if (bg !== undefined) base.backgroundColor = bg;
+  if (radius !== undefined) base.borderRadius = radius;
+  if (w !== undefined) base.width = w;
+  if (h !== undefined) base.height = h;
+  if (wrap) base.flexWrap = 'wrap';
+  if (scroll) base.overflow = 'scroll';
+  if (hidden) base.display = 'none';
+  if (z !== undefined) base.zIndex = z;
+
+  // style={} wins over shorthand props
+  return style ? { ...base, ...style } : base;
+}
+
+/** Build a Style from Text shorthand props. style={} overrides. */
+function resolveTextStyle(props: TextProps): Style | undefined {
+  const { size, color, bold, italic, align, font, style } = props;
+
+  if (
+    size === undefined && color === undefined && !bold && !italic &&
+    align === undefined && font === undefined
+  ) {
+    return style;
+  }
+
+  const base: Style = {};
+  if (size !== undefined) base.fontSize = size;
+  if (color !== undefined) base.color = color;
+  if (bold) base.fontWeight = 'bold';
+  if (italic) (base as any).fontStyle = 'italic';
+  if (align) base.textAlign = align;
+  if (font) base.fontFamily = font;
+
+  return style ? { ...base, ...style } : base;
+}
+
+/** Build a Style from Image shorthand props. style={} overrides. */
+function resolveImageStyle(props: ImageProps): Style | undefined {
+  const { w, h, radius, style } = props;
+
+  if (w === undefined && h === undefined && radius === undefined) {
+    return style;
+  }
+
+  const base: Style = {};
+  if (w !== undefined) base.width = w;
+  if (h !== undefined) base.height = h;
+  if (radius !== undefined) base.borderRadius = radius;
+
+  return style ? { ...base, ...style } : base;
+}
+
 // ── Primitives ─────────────────────────────────────────
 
-export function Box({
-  style,
-  hoverStyle,
-  activeStyle,
-  onClick,
-  onRelease,
-  onPointerEnter,
-  onPointerLeave,
-  onKeyDown,
-  onKeyUp,
-  onTextInput,
-  onWheel,
-  onTouchStart,
-  onTouchEnd,
-  onTouchMove,
-  onGamepadPress,
-  onGamepadRelease,
-  onGamepadAxis,
-  onDragStart,
-  onDrag,
-  onDragEnd,
-  children,
-}: BoxProps) {
+export function Box(props: BoxProps) {
+  const {
+    hoverStyle, activeStyle,
+    onClick, onRelease, onPointerEnter, onPointerLeave,
+    onKeyDown, onKeyUp, onTextInput, onWheel,
+    onTouchStart, onTouchEnd, onTouchMove,
+    onGamepadPress, onGamepadRelease, onGamepadAxis,
+    onDragStart, onDrag, onDragEnd,
+    children,
+  } = props;
+
+  const resolvedStyle = resolveBoxStyle(props);
   const mode = useRendererMode();
 
   if (mode === 'web') {
     const [isHovered, setIsHovered] = React.useState(false);
     const [isActive, setIsActive] = React.useState(false);
-    const baseCSS = styleToCSS(style);
+    const baseCSS = styleToCSS(resolvedStyle);
     if (onClick) baseCSS.cursor = 'pointer';
     baseCSS.userSelect = 'none';
 
     // Merge hover and active styles for web
     let css = baseCSS;
     if (isHovered && hoverStyle) {
-      css = { ...css, ...styleToCSS({ ...style, ...hoverStyle }) };
+      css = { ...css, ...styleToCSS({ ...resolvedStyle, ...hoverStyle }) };
       css.userSelect = 'none';
     }
     if (isActive && activeStyle) {
-      css = { ...css, ...styleToCSS({ ...style, ...(isHovered ? hoverStyle : {}), ...activeStyle }) };
+      css = { ...css, ...styleToCSS({ ...resolvedStyle, ...(isHovered ? hoverStyle : {}), ...activeStyle }) };
       css.userSelect = 'none';
     }
+
+    const dragRef = React.useRef<{ startX: number; startY: number; lastX: number; lastY: number } | null>(null);
+    const hasDrag = onDragStart || onDrag || onDragEnd;
+
+    const handlePointerDown = React.useCallback((e: React.PointerEvent) => {
+      setIsActive(true);
+      if (hasDrag) {
+        dragRef.current = { startX: e.clientX, startY: e.clientY, lastX: e.clientX, lastY: e.clientY };
+        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        if (onDragStart) {
+          onDragStart({ type: 'dragstart', x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, dx: 0, dy: 0, totalDeltaX: 0, totalDeltaY: 0 });
+        }
+      }
+    }, [hasDrag, onDragStart]);
+
+    const handlePointerMove = React.useCallback((e: React.PointerEvent) => {
+      if (dragRef.current && onDrag) {
+        const { startX, startY, lastX, lastY } = dragRef.current;
+        dragRef.current.lastX = e.clientX;
+        dragRef.current.lastY = e.clientY;
+        onDrag({ type: 'drag', x: e.clientX, y: e.clientY, startX, startY, dx: e.clientX - lastX, dy: e.clientY - lastY, totalDeltaX: e.clientX - startX, totalDeltaY: e.clientY - startY });
+      }
+    }, [onDrag]);
+
+    const handlePointerUp = React.useCallback((e: React.PointerEvent) => {
+      setIsActive(false);
+      if (dragRef.current) {
+        const { startX, startY } = dragRef.current;
+        if (onDragEnd) {
+          onDragEnd({ type: 'dragend', x: e.clientX, y: e.clientY, startX, startY, dx: 0, dy: 0, totalDeltaX: e.clientX - startX, totalDeltaY: e.clientY - startY });
+        }
+        dragRef.current = null;
+      }
+    }, [onDragEnd]);
 
     return (
       <div
@@ -238,11 +345,14 @@ export function Box({
         }}
         onPointerLeave={(e: any) => {
           setIsHovered(false);
-          setIsActive(false);
+          if (!dragRef.current) setIsActive(false);
           if (onPointerLeave) onPointerLeave(e);
         }}
-        onMouseDown={() => setIsActive(true)}
-        onMouseUp={() => setIsActive(false)}
+        onPointerDown={hasDrag ? handlePointerDown : (() => setIsActive(true)) as any}
+        onPointerMove={hasDrag ? handlePointerMove : undefined}
+        onPointerUp={hasDrag ? handlePointerUp : (() => setIsActive(false)) as any}
+        onMouseDown={hasDrag ? undefined : (() => setIsActive(true))}
+        onMouseUp={hasDrag ? undefined : (() => setIsActive(false))}
         onKeyDown={onKeyDown as any}
         onKeyUp={onKeyUp as any}
         onInput={onTextInput as any}
@@ -252,7 +362,6 @@ export function Box({
         onTouchMove={onTouchMove as any}
         tabIndex={onKeyDown || onKeyUp || onTextInput ? 0 : undefined}
       >
-        {/* TODO: Web drag implementation - use HTML5 drag API or pointer events */}
         {children}
       </div>
     );
@@ -262,7 +371,7 @@ export function Box({
   return React.createElement(
     'View',
     {
-      style,
+      style: resolvedStyle,
       hoverStyle,
       activeStyle,
       onClick,
@@ -287,21 +396,34 @@ export function Box({
   );
 }
 
-export function Text({ style, numberOfLines, onKeyDown, onKeyUp, onTextInput, children }: TextProps) {
+/** Row — shorthand for <Box direction="row"> */
+export function Row(props: BoxProps) {
+  return <Box direction="row" {...props} />;
+}
+
+/** Col — shorthand for <Box direction="col"> (default, but explicit) */
+export function Col(props: BoxProps) {
+  return <Box direction="col" {...props} />;
+}
+
+export function Text(props: TextProps) {
+  const { lines, numberOfLines, onKeyDown, onKeyUp, onTextInput, children } = props;
+  const resolvedStyle = resolveTextStyle(props);
+  // lines shorthand takes precedence, falls back to numberOfLines
+  const resolvedLines = lines ?? numberOfLines;
   const mode = useRendererMode();
 
   if (mode === 'web') {
     const baseCSS: React.CSSProperties = {
-      ...styleToCSS(style),
+      ...styleToCSS(resolvedStyle),
       display: 'inline',
       flexDirection: undefined,
       userSelect: 'none',
     };
 
-    // numberOfLines uses -webkit-line-clamp for multi-line truncation
-    if (numberOfLines !== undefined) {
+    if (resolvedLines !== undefined) {
       baseCSS.display = '-webkit-box';
-      (baseCSS as any).WebkitLineClamp = numberOfLines;
+      (baseCSS as any).WebkitLineClamp = resolvedLines;
       (baseCSS as any).WebkitBoxOrient = 'vertical';
       baseCSS.overflow = 'hidden';
     }
@@ -319,10 +441,12 @@ export function Text({ style, numberOfLines, onKeyDown, onKeyUp, onTextInput, ch
     );
   }
 
-  return React.createElement('Text', { style, numberOfLines, onKeyDown, onKeyUp, onTextInput }, children);
+  return React.createElement('Text', { style: resolvedStyle, numberOfLines: resolvedLines, onKeyDown, onKeyUp, onTextInput }, children);
 }
 
-export function Image({ src, style, onClick, onWheel }: ImageProps) {
+export function Image(props: ImageProps) {
+  const { src, onClick, onWheel } = props;
+  const resolvedStyle = resolveImageStyle(props);
   const mode = useRendererMode();
 
   if (mode === 'web') {
@@ -330,7 +454,7 @@ export function Image({ src, style, onClick, onWheel }: ImageProps) {
       <img
         src={src}
         style={{
-          ...styleToCSS(style),
+          ...styleToCSS(resolvedStyle),
           display: 'block',
           flexDirection: undefined,
         }}
@@ -340,7 +464,7 @@ export function Image({ src, style, onClick, onWheel }: ImageProps) {
     );
   }
 
-  return React.createElement('Image', { src, style, onClick, onWheel });
+  return React.createElement('Image', { src, style: resolvedStyle, onClick, onWheel });
 }
 
 // Re-export the CSS conversion for advanced usage

@@ -40,7 +40,7 @@ export {
 } from './hooks';
 
 // Primitives
-export { Box, Text, Image, styleToCSS, colorToCSS } from './primitives';
+export { Box, Row, Col, Text, Image, styleToCSS, colorToCSS } from './primitives';
 
 // ScrollView
 export { ScrollView } from './ScrollView';
