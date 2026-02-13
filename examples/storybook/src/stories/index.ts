@@ -52,6 +52,8 @@ import { TabsStory } from './TabsStory';
 import { BreadcrumbsStory } from './BreadcrumbsStory';
 import { ToolbarStory } from './ToolbarStory';
 import { AppShellDemoStory } from './AppShellDemo';
+import { AutoSizeBasic } from './AutoSizeBasic';
+import { OverflowStressStory } from './OverflowStress';
 
 export const stories: StoryDef[] = [
   // Primitives
@@ -62,6 +64,7 @@ export const stories: StoryDef[] = [
   { id: 'image-basic', title: 'Image', category: 'Primitives', component: ImageBasicStory },
 
   // Layout
+  { id: 'auto-size-basic', title: 'Auto-Sizing', category: 'Layout', component: AutoSizeBasic },
   { id: 'flex-row', title: 'Flex Row', category: 'Layout', component: FlexRowStory },
   { id: 'flex-column', title: 'Flex Column', category: 'Layout', component: FlexColumnStory },
   { id: 'flex-wrap', title: 'Flex Wrap', category: 'Layout', component: FlexWrapStory },
@@ -117,6 +120,9 @@ export const stories: StoryDef[] = [
   { id: 'weather-demo', title: 'Weather', category: 'Demo', component: WeatherDemoStory },
   { id: 'data-dashboard', title: 'Data Dashboard', category: 'Demo', component: DataDashboardDemoStory },
   { id: 'app-shell', title: 'App Shell', category: 'Demo', component: AppShellDemoStory },
+
+  // Stress Test
+  { id: 'overflow-stress', title: 'Overflow Stress', category: 'Stress Test', component: OverflowStressStory },
 
   // Dev Tools
   { id: 'error-test', title: 'Error Test', category: 'Dev Tools', component: ErrorTestStory },
