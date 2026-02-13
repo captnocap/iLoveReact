@@ -259,6 +259,89 @@ local function effectiveAlign(parentAlign, childStyle)
 end
 
 -- ============================================================================
+-- Intrinsic size estimation (auto-sizing)
+-- ============================================================================
+
+--- Estimate intrinsic (content-based) size of a container.
+--- Recursively measures children bottom-up, then adds padding/gaps.
+--- Used for auto-sizing containers when no explicit dimensions are set.
+---
+--- @param node table  The node to measure
+--- @param isRow boolean  true = measure width, false = measure height
+--- @param pw number|nil  Parent width (for percentage resolution)
+--- @param ph number|nil  Parent height (for percentage resolution)
+--- @return number  Estimated size in pixels
+local function estimateIntrinsicMain(node, isRow, pw, ph)
+  local s = node.style or {}
+  local ru = Layout.resolveUnit
+
+  -- 1. Calculate padding along the measurement axis
+  local pad = ru(s.padding, isRow and pw or ph) or 0
+  local padStart = isRow and (ru(s.paddingLeft, pw) or pad)
+                          or (ru(s.paddingTop, ph) or pad)
+  local padEnd = isRow and (ru(s.paddingRight, pw) or pad)
+                        or (ru(s.paddingBottom, ph) or pad)
+  local padMain = padStart + padEnd
+
+  -- 2. Text nodes: measure with font metrics
+  local isTextNode = (node.type == "Text" or node.type == "__TEXT__")
+  if isTextNode then
+    local text = resolveTextContent(node)
+    if text and text ~= "" then
+      local fontSize = resolveFontSize(node)
+      local fontFamily = resolveFontFamily(node)
+      local fontWeight = resolveFontWeight(node)
+      local lineHeight = resolveLineHeight(node)
+      local letterSpacing = resolveLetterSpacing(node)
+      local numberOfLines = resolveNumberOfLines(node)
+
+      -- Measure with no width constraint (natural width)
+      local result = Measure.measureText(text, fontSize, nil, fontFamily,
+                                        lineHeight, letterSpacing, numberOfLines, fontWeight)
+      return (isRow and result.width or result.height) + padMain
+    end
+    return padMain  -- Empty text
+  end
+
+  -- 3. Container nodes: recursively estimate from children
+  local children = node.children or {}
+  if #children == 0 then
+    return padMain  -- Empty container
+  end
+
+  local gap = ru(s.gap, isRow and pw or ph) or 0
+  local direction = s.flexDirection or "column"
+  local containerIsRow = (direction == "row")
+
+  -- 4. Sum (main axis) or max (cross axis) children
+  if (isRow and containerIsRow) or (not isRow and not containerIsRow) then
+    -- Main axis: sum children + gaps
+    local sum = 0
+    for _, child in ipairs(children) do
+      local cs = child.style or {}
+      local explicitMain = isRow and ru(cs.width, pw) or ru(cs.height, ph)
+
+      if explicitMain then
+        sum = sum + explicitMain
+      else
+        -- Recursive: measure child's intrinsic size
+        sum = sum + estimateIntrinsicMain(child, isRow, pw, ph)
+      end
+    end
+    local totalGaps = math.max(0, #children - 1) * gap
+    return padMain + sum + totalGaps
+  else
+    -- Cross axis: take max of children
+    local max = 0
+    for _, child in ipairs(children) do
+      local size = estimateIntrinsicMain(child, isRow, pw, ph)
+      if size > max then max = size end
+    end
+    return padMain + max
+  end
+end
+
+-- ============================================================================
 -- Recursive layout
 -- ============================================================================
 
@@ -289,8 +372,22 @@ function Layout.layoutNode(node, px, py, pw, ph)
   -- Own dimensions
   local explicitW = ru(s.width, pw)
   local explicitH = ru(s.height, ph)
-  local w = explicitW or pw or 0
-  local h = explicitH
+
+  local w, h
+
+  -- Width resolution with auto-sizing
+  if explicitW then
+    w = explicitW
+  elseif pw then
+    w = pw  -- Use parent's available width
+  else
+    -- No explicit width and no parent width: auto-size from content
+    w = estimateIntrinsicMain(node, true, pw, ph)
+  end
+
+  -- Height resolution - use existing deferred auto-height behavior
+  -- (computed later after laying out children, lines 864-890)
+  h = explicitH
 
   -- aspectRatio: compute missing dimension from the other
   local ar = s.aspectRatio
@@ -934,11 +1031,23 @@ end
 
 --- Lay out the entire tree starting from the root node.
 --- x, y default to 0; w, h default to the window dimensions.
+---
+--- Smart default: the root node fills the viewport when it has no
+--- explicit width or height.  This eliminates the requirement to write
+--- `width: '100%', height: '100%'` on the outermost container.
 function Layout.layout(node, x, y, w, h)
   x = x or 0
   y = y or 0
   w = w or love.graphics.getWidth()
   h = h or love.graphics.getHeight()
+
+  -- Root auto-fill: if the root has no explicit dimensions, tell
+  -- layoutNode to use the viewport size via the same signals that the
+  -- flex algorithm uses for parent-determined sizing.
+  local s = node.style or {}
+  if not s.width  then node._flexW    = w end
+  if not s.height then node._stretchH = h end
+
   Layout.layoutNode(node, x, y, w, h)
 end
 
