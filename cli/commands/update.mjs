@@ -45,6 +45,17 @@ export async function updateCommand(args) {
     console.log('  Updated lib/');
   }
 
+  // Update bin/ (tor binary)
+  const runtimeBin = join(CLI_ROOT, 'runtime', 'bin');
+  if (existsSync(runtimeBin)) {
+    const destBin = join(cwd, 'bin');
+    if (existsSync(destBin)) {
+      rmSync(destBin, { recursive: true });
+    }
+    cpSync(runtimeBin, destBin, { recursive: true });
+    console.log('  Updated bin/');
+  }
+
   // Update ilovereact/ (shared + native packages)
   if (existsSync(runtimePkgs)) {
     const destPkgs = join(cwd, 'ilovereact');

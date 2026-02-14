@@ -242,6 +242,12 @@ export async function initCommand(args) {
     console.warn('  Warning: lib/ (libquickjs.so) not found in CLI. Run `make cli-setup` first.');
   }
 
+  // Copy bundled binaries (tor)
+  const runtimeBin = join(CLI_ROOT, 'runtime', 'bin');
+  if (existsSync(runtimeBin)) {
+    cpSync(runtimeBin, join(dest, 'bin'), { recursive: true });
+  }
+
   // Copy framework source (shared + native — always included)
   const runtimePkgs = join(CLI_ROOT, 'runtime', 'ilovereact');
   if (existsSync(runtimePkgs)) {

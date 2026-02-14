@@ -170,16 +170,24 @@ local mpv = nil
 do
   local RTLD_LAZY     = 0x00001
   local RTLD_DEEPBIND = 0x00008
-  local ok, err = pcall(function()
-    -- RTLD_DEEPBIND isolates mpv's Lua 5.2 symbols from Love2D's LuaJIT
-    ffi.C.dlopen("libmpv.so.2", bit.bor(RTLD_LAZY, RTLD_DEEPBIND))
-    mpv = ffi.load("mpv")
-  end)
-  if ok then
-    libmpvAvailable = true
-    io.write("[videos] libmpv loaded (RTLD_DEEPBIND)\n"); io.flush()
-  else
-    io.write("[videos] libmpv not available: " .. tostring(err) .. "\n"); io.flush()
+  -- Try bundled lib/ first, then fall back to system library
+  local paths = { "lib/libmpv.so.2", "libmpv.so.2" }
+  local lastErr
+  for _, path in ipairs(paths) do
+    local ok, err = pcall(function()
+      -- RTLD_DEEPBIND isolates mpv's Lua 5.2 symbols from Love2D's LuaJIT
+      ffi.C.dlopen(path, bit.bor(RTLD_LAZY, RTLD_DEEPBIND))
+      mpv = ffi.load("mpv")
+    end)
+    if ok then
+      libmpvAvailable = true
+      io.write("[videos] libmpv loaded from " .. path .. " (RTLD_DEEPBIND)\n"); io.flush()
+      break
+    end
+    lastErr = err
+  end
+  if not libmpvAvailable then
+    io.write("[videos] libmpv not available: " .. tostring(lastErr) .. "\n"); io.flush()
     io.write("[videos] Install libmpv-dev for video playback\n"); io.flush()
   end
 end

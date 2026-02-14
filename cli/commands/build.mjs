@@ -178,6 +178,26 @@ function findLibQuickJS(cwd) {
   process.exit(1);
 }
 
+// ── Helper: resolve libmpv.so.2 (optional) ────────────────
+
+function findLibMpv(cwd) {
+  const local = join(cwd, 'lib', 'libmpv.so.2');
+  if (existsSync(local)) return local;
+  const cliRuntime = join(CLI_ROOT, 'runtime', 'lib', 'libmpv.so.2');
+  if (existsSync(cliRuntime)) return cliRuntime;
+  return null; // optional — video playback won't be available
+}
+
+// ── Helper: resolve tor binary (optional) ─────────────────
+
+function findTorBinary(cwd) {
+  const local = join(cwd, 'bin', 'tor');
+  if (existsSync(local)) return local;
+  const cliRuntime = join(CLI_ROOT, 'runtime', 'bin', 'tor');
+  if (existsSync(cliRuntime)) return cliRuntime;
+  return null; // optional — .onion hosting won't be available
+}
+
 // ── ilovereact build [target] (dev build) ─────────────────
 
 async function buildDevTarget(cwd, projectName, targetName) {
@@ -378,6 +398,58 @@ async function buildDistLove(cwd, projectName, opts = {}) {
   cpSync(loveBin, join(payloadDir, 'love.bin'));
   cpSync(loveArchive, join(payloadDir, 'game.love'));
   cpSync(libquickjs, join(payloadDir, 'lib', 'libquickjs.so'));
+
+  // Bundle libmpv if available (optional — video playback)
+  const libmpv = findLibMpv(cwd);
+  if (libmpv) {
+    cpSync(libmpv, join(payloadDir, 'lib', 'libmpv.so.2'));
+    // Bundle libmpv's transitive deps (ffmpeg libs, etc.)
+    try {
+      const mpvLdd = execSync(`ldd "${libmpv}"`, { encoding: 'utf-8' });
+      for (const line of mpvLdd.split('\n')) {
+        if (line.includes('linux-vdso')) continue;
+        const match = line.match(/^\s*(\S+)\s+=>\s+(\S+)/);
+        if (match) {
+          const [, soname, path] = match;
+          const dest = join(payloadDir, 'lib', soname);
+          if (!existsSync(dest)) {
+            try {
+              const real = execSync(`readlink -f "${path}"`, { encoding: 'utf-8' }).trim();
+              cpSync(real, dest);
+            } catch { /* skip unresolvable */ }
+          }
+        }
+      }
+    } catch { /* ldd failed — still have the .so itself */ }
+    console.log('  Bundled libmpv + dependencies');
+  }
+
+  // Bundle tor binary if available (optional — .onion hosting)
+  const torBin = findTorBinary(cwd);
+  if (torBin) {
+    mkdirSync(join(payloadDir, 'bin'), { recursive: true });
+    cpSync(torBin, join(payloadDir, 'bin', 'tor'));
+    execSync(`chmod +x "${join(payloadDir, 'bin', 'tor')}"`);
+    // Bundle tor's transitive deps
+    try {
+      const torLdd = execSync(`ldd "${torBin}"`, { encoding: 'utf-8' });
+      for (const line of torLdd.split('\n')) {
+        if (line.includes('linux-vdso')) continue;
+        const match = line.match(/^\s*(\S+)\s+=>\s+(\S+)/);
+        if (match) {
+          const [, soname, path] = match;
+          const dest = join(payloadDir, 'lib', soname);
+          if (!existsSync(dest)) {
+            try {
+              const real = execSync(`readlink -f "${path}"`, { encoding: 'utf-8' }).trim();
+              cpSync(real, dest);
+            } catch { /* skip unresolvable */ }
+          }
+        }
+      }
+    } catch { /* ldd failed — still have the binary itself */ }
+    console.log('  Bundled tor + dependencies');
+  }
 
   // Bundle ALL shared libraries (same technique as Steam Runtime / AppImage)
   const lddOutput = execSync(`ldd "${loveBin}"`, { encoding: 'utf-8' });

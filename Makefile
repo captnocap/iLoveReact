@@ -141,6 +141,31 @@ dist-storybook: build-storybook-native setup
 	cp $$(readlink -f $$(which love)) $(PAYLOAD_DIR)/love.bin
 	cp /tmp/ilovereact-demo.love $(PAYLOAD_DIR)/game.love
 	cp $(QUICKJS_DIR)/libquickjs.so $(PAYLOAD_DIR)/lib/
+	@LIBMPV=$$(ldconfig -p | grep 'libmpv.so.2 ' | head -1 | sed 's/.*=> //'); \
+	if [ -n "$$LIBMPV" ]; then \
+		cp "$$LIBMPV" $(PAYLOAD_DIR)/lib/libmpv.so.2; \
+		echo "  Bundled libmpv.so.2"; \
+		ldd "$$LIBMPV" | grep "=> /" | grep -v '$(VDSO_EXCLUDE)' | \
+			awk '{print $$1, $$3}' | while read soname path; do \
+				if [ ! -f $(PAYLOAD_DIR)/lib/"$$soname" ]; then \
+					real=$$(readlink -f "$$path"); \
+					cp "$$real" $(PAYLOAD_DIR)/lib/"$$soname"; \
+				fi; \
+			done; \
+	fi
+	@if [ -f cli/runtime/bin/tor ]; then \
+		mkdir -p $(PAYLOAD_DIR)/bin; \
+		cp cli/runtime/bin/tor $(PAYLOAD_DIR)/bin/tor; \
+		chmod +x $(PAYLOAD_DIR)/bin/tor; \
+		echo "  Bundled tor"; \
+		ldd $(PAYLOAD_DIR)/bin/tor | grep "=> /" | grep -v '$(VDSO_EXCLUDE)' | \
+			awk '{print $$1, $$3}' | while read soname path; do \
+				if [ ! -f $(PAYLOAD_DIR)/lib/"$$soname" ]; then \
+					real=$$(readlink -f "$$path"); \
+					cp "$$real" $(PAYLOAD_DIR)/lib/"$$soname"; \
+				fi; \
+			done; \
+	fi
 	@echo "--- Bundling shared libraries ---"
 	ldd $(PAYLOAD_DIR)/love.bin | grep "=> /" | grep -v '$(VDSO_EXCLUDE)' | \
 		awk '{print $$1, $$3}' | while read soname path; do \
@@ -197,9 +222,24 @@ dev-storybook: setup $(STORYBOOK_LIB)/libquickjs.so node_modules
 cli-setup: setup
 	@echo "=== Populating CLI runtime ==="
 	rm -rf cli/runtime
-	mkdir -p cli/runtime/lua cli/runtime/lib cli/runtime/ilovereact
+	mkdir -p cli/runtime/lua cli/runtime/lib cli/runtime/bin cli/runtime/ilovereact
 	cp lua/*.lua cli/runtime/lua/
 	cp $(QUICKJS_DIR)/libquickjs.so cli/runtime/lib/
+	@LIBMPV=$$(ldconfig -p | grep 'libmpv.so.2 ' | head -1 | sed 's/.*=> //'); \
+	if [ -n "$$LIBMPV" ]; then \
+		cp "$$LIBMPV" cli/runtime/lib/libmpv.so.2; \
+		echo "  Bundled libmpv.so.2"; \
+	else \
+		echo "  Warning: libmpv.so.2 not found — video playback won't be bundled"; \
+	fi
+	@TOR=$$(which tor 2>/dev/null); \
+	if [ -n "$$TOR" ]; then \
+		cp "$$(readlink -f "$$TOR")" cli/runtime/bin/tor; \
+		chmod +x cli/runtime/bin/tor; \
+		echo "  Bundled tor"; \
+	else \
+		echo "  Warning: tor not found — .onion hosting won't be bundled"; \
+	fi
 	cp -r packages/shared cli/runtime/ilovereact/shared
 	cp -r packages/native cli/runtime/ilovereact/native
 	cp -r packages/router cli/runtime/ilovereact/router
