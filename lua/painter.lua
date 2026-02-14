@@ -941,36 +941,18 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
       local status = Videos.getStatus(src)
 
       if status == "ready" then
-        local video = Videos.get(src)
-        if video then
-          -- Control playback based on props
-          local paused = node.props.paused
-          if paused and video:isPlaying() then
-            video:pause()
-          elseif not paused and not video:isPlaying() then
-            video:play()
-          end
-
-          -- Handle loop: restart when ended
-          if not video:isPlaying() and not paused and node.props.loop then
-            video:seek(0)
-            video:play()
-          end
-
-          -- Handle volume/mute
-          local source = video:getSource()
-          if source then
-            if node.props.muted then
-              source:setVolume(0)
-            else
-              source:setVolume(node.props.volume or 1)
-            end
-          end
+        local canvas = Videos.get(src)
+        if canvas then
+          -- Control playback via mpv property API
+          Videos.setPaused(src, node.props.paused)
+          Videos.setMuted(src, node.props.muted)
+          Videos.setVolume(src, node.props.volume or 1)
+          Videos.setLoop(src, node.props.loop)
 
           -- Calculate scaling using same objectFit logic as Image
           local objectFit = s.objectFit or "fill"
-          local vidW = video:getWidth()
-          local vidH = video:getHeight()
+          local vidW, vidH = Videos.getDimensions(src)
+          if not vidW then vidW, vidH = canvas:getWidth(), canvas:getHeight() end
           local scaleX, scaleY, drawX, drawY, drawW, drawH
 
           if objectFit == "contain" then
@@ -1016,9 +998,9 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
             love.graphics.setStencilTest("greater", stencilDepth)
           end
 
-          -- Draw the video frame
+          -- Draw the video frame (Canvas is drawable just like Video)
           love.graphics.setColor(1, 1, 1, effectiveOpacity)
-          love.graphics.draw(video, drawX, drawY, 0, scaleX, scaleY)
+          love.graphics.draw(canvas, drawX, drawY, 0, scaleX, scaleY)
 
           -- Restore stencil
           if videoStencil then
@@ -1030,30 +1012,8 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
           end
         end
 
-      elseif status == "transcoding" then
-        -- Transcoding placeholder: dark surface with animated progress bar
-        love.graphics.setColor(0.10, 0.11, 0.14, effectiveOpacity)
-        love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
-
-        -- Subtle border
-        love.graphics.setColor(0.20, 0.22, 0.28, 0.5 * effectiveOpacity)
-        love.graphics.rectangle("line", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
-
-        -- Animated progress bar at bottom
-        local t = love.timer.getTime()
-        local barH = 3
-        local barY = c.y + c.h - barH - 8
-        local barW = c.w * 0.5
-        local barX = c.x + (c.w - barW) / 2
-        love.graphics.setColor(0.22, 0.24, 0.30, 0.6 * effectiveOpacity)
-        love.graphics.rectangle("fill", barX, barY, barW, barH, 2, 2)
-        local shimmer = (t * 0.4) % 1.0
-        local fillW = barW * shimmer
-        love.graphics.setColor(0.40, 0.45, 0.60, 0.7 * effectiveOpacity)
-        love.graphics.rectangle("fill", barX, barY, fillW, barH, 2, 2)
-
       else
-        -- No video / error: neutral dark surface with film icon
+        -- Loading / error / no video: neutral dark surface with film icon
         love.graphics.setColor(0.10, 0.11, 0.14, effectiveOpacity)
         love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
         love.graphics.setColor(0.20, 0.22, 0.28, 0.5 * effectiveOpacity)

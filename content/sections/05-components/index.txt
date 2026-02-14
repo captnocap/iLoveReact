@@ -16,7 +16,7 @@ All primitives and components are exported from `@ilovereact/core`. Grid targets
 ```tsx
 import {
   // Primitives
-  Box, Text, Image,
+  Box, Text, Image, Video,
 
   // Text display
   CodeBlock,
@@ -47,6 +47,7 @@ Primitives (layout building blocks):
   Box        - Flexbox layout container. Every UI tree starts here.
   Text       - Renders text content with font styling.
   Image      - Displays images with sizing and objectFit control.
+  Video      - Plays video files with hardware acceleration via libmpv (Love2D).
 
 Interaction:
   Pressable  - Interaction wrapper with press, long press, and hover state tracking.

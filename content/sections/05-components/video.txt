@@ -1,0 +1,234 @@
+=== METADATA ===
+title: Video
+description: Plays video files with hardware acceleration via libmpv
+category: Components
+platforms: love2d, web
+keywords: video, video player, mp4, mkv, webm, playback, audio, streaming
+related: Image, Box, AudioPlayer
+difficulty: intermediate
+
+=== OVERVIEW ===
+Video plays video files in any format that libmpv supports (MP4, MKV, WebM, AVI, MOV, OGV, etc.) with hardware-accelerated decoding. Unlike the old FFmpeg transcoding pipeline, videos play instantly without any pre-processing step.
+
+In Love2D native mode, Video renders via libmpv's OpenGL render API, which creates video frames directly into a Love2D Canvas using an isolated framebuffer pipeline. This means videos render at their native resolution and scale to fit the container via the objectFit property — the same as Image.
+
+In web mode, Video renders as an `<video>` element with standard HTML5 controls and streaming support.
+
+The Video component supports play/pause control, volume, mute, seeking, looping, and playback events (onPlay, onPause, onTimeUpdate, onEnded).
+
+Requires: libmpv-dev (on Love2D). If libmpv is not installed, videos show an error placeholder.
+
+=== API / SYNTAX ===
+```tsx
+import { Video } from '@ilovereact/core';
+```
+
+```tsx
+<Video
+  src="assets/demo.mp4"
+  paused={false}
+  volume={0.8}
+  muted={false}
+  loop={false}
+  style={{ width: 640, height: 360, objectFit: 'contain' }}
+  onPlay={() => console.log('playing')}
+  onPause={() => console.log('paused')}
+  onTimeUpdate={(e) => console.log(`Time: ${e.currentTime}s`)}
+  onEnded={() => console.log('finished')}
+/>
+```
+
+Props:
+| Prop         | Type                                    | Default   | Description                              |
+|--------------|-----------------------------------------|-----------|------------------------------------------|
+| src          | string                                  | REQUIRED  | Video file path or URL (HTTP/HTTPS OK)   |
+| paused       | boolean                                 | false     | Control playback pause state             |
+| volume       | number (0-1)                            | 1         | Audio volume multiplier                  |
+| muted        | boolean                                 | false     | Mute audio                               |
+| loop         | boolean                                 | false     | Loop playback at end                     |
+| style        | Style                                   | undefined | Sizing and visual styling                |
+| onPlay       | () => void                              | undefined | Fires when video starts playing          |
+| onPause      | () => void                              | undefined | Fires when video is paused               |
+| onTimeUpdate | (e: {currentTime, duration}) => void    | undefined | Fires ~4x per second during playback     |
+| onEnded      | () => void                              | undefined | Fires when video reaches the end         |
+
+objectFit values (set via style.objectFit):
+| Value   | Behavior                                                        |
+|---------|-----------------------------------------------------------------|
+| fill    | Stretch video to fill the element (may distort aspect ratio)    |
+| contain | Scale video to fit entirely within the element (letterboxed)    |
+| cover   | Scale video to cover the element entirely (may crop)            |
+| none    | Display at original size, no scaling                            |
+
+=== EXAMPLES ===
+Example 1: Basic video with fixed size
+---
+```tsx
+<Video
+  src="assets/intro.mp4"
+  style={{ width: 640, height: 360 }}
+/>
+```
+---
+Platforms: Love2D, Web
+
+Example 2: Video with playback controls
+---
+```tsx
+const [paused, setPaused] = useState(false);
+const [volume, setVolume] = useState(1);
+
+return (
+  <Box>
+    <Video
+      src="assets/demo.mp4"
+      paused={paused}
+      volume={volume}
+      style={{ width: '100%', height: 400, objectFit: 'contain' }}
+      onPlay={() => setPaused(false)}
+      onPause={() => setPaused(true)}
+    />
+    <Box style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+      <Pressable
+        onPress={() => setPaused(!paused)}
+        style={{
+          padding: 8,
+          backgroundColor: '#0078d4',
+          borderRadius: 4,
+        }}
+      >
+        <Text style={{ fontSize: 14, color: '#fff' }}>
+          {paused ? 'Play' : 'Pause'}
+        </Text>
+      </Pressable>
+      <Pressable
+        onPress={() => setVolume(Math.max(0, volume - 0.1))}
+        style={{ padding: 8, backgroundColor: '#666', borderRadius: 4 }}
+      >
+        <Text style={{ fontSize: 14, color: '#fff' }}>-</Text>
+      </Pressable>
+      <Pressable
+        onPress={() => setVolume(Math.min(1, volume + 0.1))}
+        style={{ padding: 8, backgroundColor: '#666', borderRadius: 4 }}
+      >
+        <Text style={{ fontSize: 14, color: '#fff' }}>+</Text>
+      </Pressable>
+    </Box>
+  </Box>
+);
+```
+---
+Platforms: Love2D, Web
+
+Example 3: Video in a responsive card with border radius
+---
+```tsx
+<Box
+  style={{
+    width: 400,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: '#1a1a1a',
+  }}
+>
+  <Video
+    src="assets/clip.mp4"
+    loop={true}
+    style={{ width: '100%', height: 225, objectFit: 'cover' }}
+  />
+  <Box style={{ padding: 16 }}>
+    <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Demo Video</Text>
+  </Box>
+</Box>
+```
+---
+Platforms: Love2D, Web
+
+Example 4: Looping background video with time display
+---
+```tsx
+const [time, setTime] = useState(0);
+const [duration, setDuration] = useState(0);
+
+return (
+  <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
+    <Video
+      src="assets/background.mp4"
+      loop={true}
+      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      onTimeUpdate={(e) => {
+        setTime(e.currentTime);
+        setDuration(e.duration);
+      }}
+    />
+    <Box
+      style={{
+        position: 'absolute',
+        bottom: 16,
+        right: 16,
+        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+        padding: 8,
+        borderRadius: 4,
+      }}
+    >
+      <Text style={{ fontSize: 12, color: '#fff' }}>
+        {Math.floor(time)}s / {Math.floor(duration)}s
+      </Text>
+    </Box>
+  </Box>
+);
+```
+---
+Platforms: Love2D, Web
+
+=== PLATFORM NOTES ===
+Love2D:
+  Renders via libmpv's OpenGL render API with hardware-accelerated video decoding. Videos load instantly into a private OpenGL framebuffer and are blitted to a Love2D Canvas each frame. No transcoding step. The src path is relative to the project root. Supported formats: any format libmpv supports (MP4, MKV, WebM, AVI, MOV, OGV, H.264, VP8, VP9, AV1, etc.).
+
+  Requires libmpv-dev to be installed on the system. If libmpv is not available, the Video component will display an error placeholder. Install with: apt install libmpv-dev
+
+  Audio plays via libmpv's native audio output (PulseAudio, ALSA, or null if muted). Volume and mute control the mpv audio properties directly.
+
+  HTTP/HTTPS URLs are supported directly — mpv will stream from the URL without pre-downloading. M3U8/HLS streams are supported (VOD mode only).
+
+Web:
+  Renders as an `<video>` element with standard HTML5 video controls. The browser's native decoder is used. src can be a relative path, absolute URL, or blob URL.
+
+Terminal / ComputerCraft / Neovim / AwesomeWM:
+  Video is not supported on character-grid targets. These platforms cannot display raster video. Use a placeholder Box or progress indicator instead.
+
+=== HOW IT WORKS (LOVE2D) ===
+The Video component uses libmpv's OpenGL render API to decode video frames directly into GPU memory without any intermediate transcoding or CPU copies:
+
+1. On Videos.load(src), an mpv instance is created and the file is loaded asynchronously.
+2. Once video dimensions are known, a Love2D Canvas is created at the video's native resolution, along with a private OpenGL framebuffer.
+3. Each frame, Videos.renderAll() is called:
+   - mpv decodes video frames into its private FBO
+   - glBlitFramebuffer copies the frame to the Canvas FBO
+   - Love2D's painter draws the Canvas with the requested objectFit scaling
+4. Playback is controlled via mpv's property API (pause, volume, mute, loop, seek).
+5. Events (onPlay, onPause, onTimeUpdate, onEnded) are generated by polling mpv properties each frame.
+
+GL state is fully isolated: mpv renders to its own framebuffer, and all OpenGL state is saved/restored around mpv render calls to prevent GL corruption in the Love2D rendering pipeline.
+
+=== CRITICAL RULES ===
+- Video has no intrinsic size. You must provide width and height via the style prop, or constrain the video via a parent Box with known dimensions. A Video without sizing will collapse to zero.
+- The src prop is required. Omitting it will produce an error.
+- Video paths in Love2D are relative to the project root directory (where main.lua lives), or can be absolute paths or HTTP/HTTPS URLs.
+- Video accepts no children. It is a leaf element.
+- On Love2D, changing the src prop while a video is playing will stop playback and load the new video.
+- The paused, volume, muted, and loop props are reactive. Changing them during playback will immediately update playback state.
+- onTimeUpdate fires approximately 4 times per second during playback (not every frame — this is for efficiency).
+
+=== PERFORMANCE NOTES ===
+- Video decoding is GPU-accelerated via hwdec=auto-safe in libmpv, so CPU usage is minimal.
+- Multiple videos can play simultaneously on the same screen (each with its own mpv instance and Canvas).
+- Seeking is efficient and does not require re-decoding the entire video.
+- Videos are cached by src path — loading the same src twice reuses the mpv instance.
+- Each Video component holds a reference to its src until the component is unmounted.
+
+=== SEE ALSO ===
+- Image
+- Box
+- Pressable
+- Canvas (in advanced Lua runtime docs)

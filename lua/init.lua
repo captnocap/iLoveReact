@@ -692,7 +692,10 @@ function ReactLove.update(dt)
     end
   end
 
-  -- 8. Poll video transcoding jobs and emit status events to JS
+  -- 8. Render mpv video frames into Canvases (before layout/paint)
+  if videos then videos.renderAll() end
+
+  -- 9. Poll video status and playback events, emit to JS
   if videos then
     local videoEvents = videos.poll()
     for _, evt in ipairs(videoEvents) do
@@ -721,10 +724,10 @@ function ReactLove.update(dt)
     end
   end
 
-  -- 9. Tick Lua-side transitions and animations (before layout)
+  -- 10. Tick Lua-side transitions and animations (before layout)
   if animate then animate.tick(dt) end
 
-  -- 8. Relayout if tree changed
+  -- 11. Relayout if tree changed
   if tree.isDirty() then
     local root = tree.getTree()
     if root then
@@ -1478,6 +1481,7 @@ end
 --- Call from love.quit().
 --- Cleans up the bridge and releases resources.
 function ReactLove.quit()
+  if videos then videos.shutdown() end
   if tor then tor.stop() end
   if network then network.destroy() end
   if http then http.destroy() end
