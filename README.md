@@ -20,17 +20,23 @@ Painter (target-specific) ──► pixels / characters / widgets
 
 A reconciler, a layout engine, and a small painter per target. That's it.
 
+---
+
+# For Consumers
+
+Use iLoveReact to build UIs once, deploy them anywhere. Write React components, compile with the CLI, run on your target.
+
 ## Targets
 
-| Target | Transport | Renderer | Status |
-|--------|-----------|----------|--------|
-| **Love2D** | QuickJS FFI (in-process) | `love.graphics.*` | Full flexbox, images, scroll, events, animation |
-| **Web** | DOM (direct) | CSS flexbox | Shared components via dual-mode primitives |
-| **Terminal** | Direct (ANSI) | 24-bit truecolor | Cell buffer with diff-based updates |
-| **ComputerCraft** | WebSocket | `term`/`paintutils` | 16-color palette, 51x19 character grid |
-| **Neovim** | stdio | Floating windows + extmarks | 24-bit highlights, buffer rendering |
-| **Hammerspoon** | WebSocket | `hs.canvas` | Pixel-based desktop overlays (macOS) |
-| **AwesomeWM** | stdio | Cairo/Pango | Pixel-based widgets via `wibox` (Linux) |
+| Target | What it is | Status |
+|--------|-----------|--------|
+| **Love2D** | Native game UI (QuickJS in-process) | Full flexbox, images, scroll, events, animation |
+| **Web** | Browser DOM | Shared components via dual-mode primitives |
+| **Terminal** | 24-bit truecolor ANSI | Cell buffer with diff-based updates |
+| **ComputerCraft** | Minecraft computers (WebSocket) | 16-color palette, 51x19 character grid |
+| **Neovim** | Floating windows in Neovim (stdio) | 24-bit highlights, buffer rendering |
+| **Hammerspoon** | macOS desktop overlays (WebSocket) | Pixel-based, `hs.canvas` |
+| **AwesomeWM** | Linux desktop widgets (stdio) | Pixel-based, Cairo/Pango |
 
 ## Quick Start
 
@@ -184,68 +190,109 @@ parallel([
 | Image | `objectFit` (`fill`, `contain`, `cover`, `none`) |
 | Position | `position` (`relative`, `absolute`), `top`, `bottom`, `left`, `right` |
 
-## Building
+## Auto-Sizing (Content-Based Layout)
 
-```bash
-npm install
+Containers automatically size to fit their content when dimensions are not specified:
 
-# Love2D native target
-npm run build:native
+- **Column containers** (default): width = max of children, height = sum of children + gaps
+- **Row containers** (`flexDirection: 'row'`): width = sum of children + gaps, height = max of children
+- **Text nodes** measure themselves via font metrics and propagate dimensions upward
 
-# Terminal target
-npm run build:terminal-demo
+Use auto-sizing for cards, badges, buttons, labels. Use explicit sizing for root containers (`width: '100%'`, `height: '100%'`), percentage-based children, and performance-critical layouts.
 
-# ComputerCraft target
-npm run build:cc-demo
-
-# Neovim target
-npm run build:nvim-demo
-
-# Hammerspoon target
-npm run build:hs-demo
-
-# AwesomeWM target
-npm run build:awesome-demo
+```jsx
+<Box>
+  <Text fontSize={16}>Title</Text>
+  <Text fontSize={14}>Subtitle</Text>
+</Box>
 ```
+^ Container auto-sizes to fit both text elements.
 
-## CLI Tool
+## Critical Layout Rules
 
-The `ilovereact` CLI manages Love2D projects. Always use it instead of running esbuild directly.
+1. **Root containers** need `width: '100%', height: '100%'` — NOT `flexGrow: 1`
+2. **Every `<Text>` MUST have explicit `fontSize`** — the linter enforces this
+3. **Row Boxes NEED explicit width for `justifyContent` to work** — Box nodes have no intrinsic width
+4. **No `flexGrow` without sibling sizing context** — needs a parent with known dimensions
+5. **Pre-compute grid dimensions** — don't rely on child content to infer container size
+6. **Keep flex trees shallow** — prefer direct layout over deep wrapper hierarchies
+7. **Fill the viewport** — Love2D is a fixed canvas, not a scrolling page
+8. **Use `█` (U+2588) as a grid blueprint only, never in `<Text>`** — convert it to a boolean grid with colored `<Box>` elements instead. The linter enforces this via `no-block-char-in-text`
+
+The static linter catches violations as build-blocking errors. Escape hatch: `// ilr-ignore-next-line`.
+
+## Using the CLI
+
+Always use the `ilovereact` CLI instead of running esbuild directly. The CLI encodes correct build flags, enforces lint gates, handles runtime file placement, and produces correct distribution packages.
+
+### Project Setup & Development
 
 ```bash
 ilovereact init <name>            # Create a new Love2D project
-ilovereact dev                    # Watch mode with HMR
-ilovereact build                  # Lint + bundle for dev (love . workflow)
-ilovereact build dist:love        # Self-extracting Linux binary
-ilovereact build dist:terminal    # Single-file Node.js executable
-ilovereact update                 # Sync runtime files from CLI into current project
+ilovereact dev [target]           # Watch mode (default: love). Do NOT run esbuild manually.
+ilovereact build [target]         # Lint + bundle for dev
+```
+
+### Building & Distribution
+
+```bash
+ilovereact build dist:<target>    # Production build (love, terminal, cc, nvim, hs, awesome, web)
+```
+
+**Dist formats:**
+- `dist:love` — Self-extracting Linux binary (Love2D + bundled glibc)
+- `dist:terminal` / `dist:cc` / `dist:nvim` / `dist:hs` / `dist:awesome` — Single-file Node.js executable (shebang + CJS)
+- `dist:web` — Production ESM bundle
+
+### Component Development
+
+```bash
 ilovereact lint                   # Static layout linter
 ilovereact screenshot [--output]  # Headless screenshot capture
 ```
 
-## Development Workflow
+**After writing or modifying any component:** run `ilovereact lint`, then `ilovereact screenshot --output /tmp/preview.png` and inspect the result.
 
-### Source of truth vs. distributed copies
+### Runtime Management
 
-The framework has two kinds of files, and editing the wrong one is the fastest way to lose work.
+```bash
+ilovereact update                 # Sync runtime files from CLI into current project
+```
 
-**Framework files** (globally distributed) live at the monorepo root and get copied into projects:
+---
 
-| Source of truth | Role |
-|---|---|
-| `lua/` | Lua runtime — layout, painter, events, bridges, text editor, focus |
-| `packages/shared/` | React primitives, components, hooks, animation, types |
-| `packages/native/` | Love2D reconciler, host config, event dispatcher |
+# For Developers
 
-**Project files** (application code) are unique to each project and owned by the developer:
+Contributing to iLoveReact? Read this section. Here's how the framework is organized, where files live, what's safe to edit, and how to make changes that propagate correctly.
+
+## Source of Truth Architecture (CRITICAL)
+
+There are two categories of files: **globally distributed** (framework internals) and **project-specific** (user application code). Editing the wrong copy is the #1 source of "it builds but doesn't work" bugs.
+
+### Framework files (source of truth at monorepo root)
+
+These get copied into projects via the CLI. **ALWAYS edit these, never the copies.**
+
+| Source of truth | Role | Copied to projects by `ilovereact init/update` |
+|---|---|---|
+| `lua/` | Lua runtime — layout, painter, events, bridges, error overlay, inspector | `<project>/lua/` |
+| `packages/shared/` | React primitives, components, hooks, animation, types | `<project>/ilovereact/shared/` |
+| `packages/native/` | Love2D reconciler, host config, event dispatcher | `<project>/ilovereact/native/` |
+
+**DO NOT edit files inside `cli/runtime/`, `<project>/lua/`, or `<project>/ilovereact/` directly.** These are disposable copies that `make cli-setup` and `ilovereact update` will overwrite.
+
+### Project files (application code)
+
+These are unique to each project and safe to edit directly. `ilovereact init` creates starter versions; `ilovereact update` never touches them.
 
 | Location | Role |
 |---|---|
 | `<project>/src/` | Application code (App.tsx, components, stories) |
 | `<project>/main.lua`, `conf.lua` | Love2D entry points |
 | `<project>/package.json` | Project dependencies |
+| `<project>/packaging/` | Build customizations |
 
-### How distribution works
+## Distribution Flow
 
 ```
 lua/  ──────────────────┐
@@ -254,63 +301,22 @@ packages/native/  ──────┼─────────────�
 quickjs/libquickjs.so ─┘                                  ilovereact update
 ```
 
-1. `make cli-setup` copies source-of-truth files into `cli/runtime/`
-2. `ilovereact init <name>` creates a new project from `cli/runtime/` (one-time)
-3. `ilovereact update` re-syncs `cli/runtime/` into an existing project (repeatable)
+1. **`make cli-setup`** copies source-of-truth files into `cli/runtime/`
+2. **`ilovereact init <name>`** creates a new project from `cli/runtime/` (one-time)
+3. **`ilovereact update`** re-syncs `cli/runtime/` into an existing project (repeatable)
 
-### Making framework changes
+## Making Framework Changes (Checklist)
 
-When you modify any framework file (`lua/`, `packages/shared/`, `packages/native/`), every existing project needs to be updated:
+When you modify any framework file (`lua/`, `packages/shared/`, `packages/native/`):
 
-```bash
-# 1. Edit the source of truth
-vim lua/painter.lua                  # example: add a feature to the Lua painter
-
-# 2. Propagate to CLI runtime
-make cli-setup
-
-# 3. Update each project that needs the change
-cd examples/storybook
-ilovereact update                    # syncs lua/, lib/, ilovereact/
-ilovereact build dist:love           # rebuild
-
-cd ../playground
-ilovereact update
-ilovereact build dist:love
-```
+1. Edit/create files in `lua/` or `packages/shared/src/` or `packages/native/src/` (the source of truth)
+2. `make cli-setup` — propagates to `cli/runtime/`
+3. For each example project that needs the change:
+   - `cd examples/<project> && ilovereact update` — syncs runtime files (`lua/`, `lib/`, `ilovereact/`)
+   - `ilovereact build dist:love` — rebuilds
+4. For new projects: `ilovereact init <name>` — gets everything automatically
 
 `ilovereact update` replaces `lua/`, `lib/`, and `ilovereact/` wholesale. It never touches `src/`, `main.lua`, `conf.lua`, or `package.json`.
-
-**Do not edit files inside `cli/runtime/`, `<project>/lua/`, or `<project>/ilovereact/` directly.** These are disposable copies. `make cli-setup` and `ilovereact update` will overwrite them.
-
-## Architecture
-
-### How targets work
-
-Every target follows the same pattern:
-
-1. **React reconciler** diffs component trees and emits mutation commands
-2. **Transport** delivers commands to the target (FFI, WebSocket, stdio, or direct)
-3. **Layout engine** computes `{x, y, w, h}` for every node
-4. **Painter** draws using the target's native API
-
-Adding a target means writing a painter (~50-100 lines) and choosing a transport. The reconciler, layout engine, and component library are shared.
-
-### Grid targets (CC, Neovim, Terminal, Hammerspoon, AwesomeWM)
-
-These use `@ilovereact/grid` — a simplified JS flexbox engine that outputs flat `DrawCommand[]` arrays. Each target provides a thin client that receives commands and draws.
-
-### Love2D target
-
-The full-featured target. React runs inside Love2D via QuickJS. The Lua side has a 930-line flexbox engine, a full painter with gradients/shadows/transforms/clipping, and bidirectional event handling — all communicating via zero-copy FFI.
-
-### Bridge protocol
-
-Values cross the Lua/JS bridge via direct QuickJS C API traversal — no JSON serialization. The bridge validates JSValue tag layout at init and falls back to JSON if needed.
-
-- **Commands** (JS → Lua): Mutation commands coalesced and flushed once per frame
-- **Events** (Lua → JS): Input events collected in a Lua queue, returned as raw array when polled
-- **Handlers stay in JS** — only `hasHandlers` boolean crosses the bridge; dispatch happens in JS
 
 ## Project Structure
 
@@ -342,6 +348,35 @@ ilovereact/
     awesome-demo/    AwesomeWM status bar
   cli/               ilovereact CLI and runtime
 ```
+
+## Architecture
+
+### How Targets Work
+
+Every target follows the same pattern:
+
+1. **React reconciler** diffs component trees and emits mutation commands
+2. **Transport** delivers commands to the target (FFI, WebSocket, stdio, or direct)
+3. **Layout engine** computes `{x, y, w, h}` for every node
+4. **Painter** draws using the target's native API
+
+Adding a target means writing a painter (~50-100 lines) and choosing a transport. The reconciler, layout engine, and component library are shared.
+
+### Grid Targets (CC, Neovim, Terminal, Hammerspoon, AwesomeWM)
+
+These use `@ilovereact/grid` — a simplified JS flexbox engine that outputs flat `DrawCommand[]` arrays. Each target provides a thin client that receives commands and draws.
+
+### Love2D Target
+
+The full-featured target. React runs inside Love2D via QuickJS. The Lua side has a 930-line flexbox engine, a full painter with gradients/shadows/transforms/clipping, and bidirectional event handling — all communicating via zero-copy FFI.
+
+### Bridge Protocol (Lua ↔ JS)
+
+Values cross the Lua/JS bridge via direct QuickJS C API traversal — no JSON serialization. The bridge validates JSValue tag layout at init and falls back to JSON if needed.
+
+- **Commands** (JS → Lua): Mutation commands coalesced and flushed once per frame
+- **Events** (Lua → JS): Input events collected in a Lua queue, returned as raw array when polled
+- **Handlers stay in JS** — only `hasHandlers` boolean crosses the bridge; dispatch happens in JS
 
 ## Adding a Target
 
