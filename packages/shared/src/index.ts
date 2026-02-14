@@ -6,6 +6,9 @@ export type {
   BoxProps,
   TextProps,
   ImageProps,
+  VideoProps,
+  VideoPlayerProps,
+  VideoTimeEvent,
   ScrollEvent,
   ScrollViewProps,
   ScrollViewRef,
@@ -46,6 +49,10 @@ export {
 
 // Primitives
 export { Box, Row, Col, Text, Image, styleToCSS, colorToCSS } from './primitives';
+
+// Video
+export { Video } from './Video';
+export { VideoPlayer } from './VideoPlayer';
 
 // ScrollView
 export { ScrollView } from './ScrollView';

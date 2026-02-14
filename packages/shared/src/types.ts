@@ -274,6 +274,41 @@ export interface ImageProps {
   key?: string | number;
 }
 
+export interface VideoTimeEvent {
+  currentTime: number;
+  duration?: number;
+}
+
+export interface VideoProps {
+  src: string;
+  paused?: boolean;
+  loop?: boolean;
+  muted?: boolean;
+  volume?: number;
+
+  // Shorthand props
+  w?: number | string;
+  h?: number | string;
+  radius?: number;
+
+  style?: Style;
+
+  // Events
+  onTimeUpdate?: (event: VideoTimeEvent) => void;
+  onEnded?: () => void;
+  onPlay?: () => void;
+  onPause?: () => void;
+  onReady?: () => void;
+  onError?: (event: { message: string }) => void;
+  onClick?: (event: LoveEvent) => void;
+
+  key?: string | number;
+}
+
+export interface VideoPlayerProps extends VideoProps {
+  controls?: boolean;
+}
+
 export interface ScrollEvent {
   scrollX: number;
   scrollY: number;

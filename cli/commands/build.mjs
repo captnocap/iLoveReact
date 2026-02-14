@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, cpSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, basename, dirname } from 'node:path';
+import { existsSync, mkdirSync, cpSync, rmSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import { join, basename, dirname, extname } from 'node:path';
 import { execSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { runLint } from './lint.mjs';
@@ -9,6 +9,84 @@ import { getEsbuildAliases } from '../lib/aliases.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = join(__dirname, '..');
+
+const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.webm', '.mov', '.m4v', '.flv', '.wmv']);
+
+/** Check if ffmpeg is available on the system. */
+function hasFFmpeg() {
+  try {
+    execSync('which ffmpeg', { stdio: 'pipe' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Scan directories for video files and convert non-.ogv files to Theora format.
+ * Places .ogv files alongside originals (same name, .ogv extension).
+ * Skips if .ogv already exists and is newer than the source.
+ */
+function convertVideos(dirs) {
+  if (!hasFFmpeg()) {
+    return { converted: 0, skipped: 0, noFFmpeg: true };
+  }
+
+  let converted = 0;
+  let skipped = 0;
+
+  function scanDir(dir) {
+    if (!existsSync(dir)) return;
+    let entries;
+    try { entries = readdirSync(dir); } catch { return; }
+
+    for (const entry of entries) {
+      const fullPath = join(dir, entry);
+      let stat;
+      try { stat = statSync(fullPath); } catch { continue; }
+
+      if (stat.isDirectory()) {
+        // Skip node_modules, dist, .git, __video_cache
+        if (!['node_modules', 'dist', '.git', '__video_cache'].includes(entry)) {
+          scanDir(fullPath);
+        }
+        continue;
+      }
+
+      const ext = extname(entry).toLowerCase();
+      if (!VIDEO_EXTENSIONS.has(ext)) continue;
+
+      // Check if .ogv sibling already exists and is up-to-date
+      const ogvPath = fullPath.replace(/\.[^.]+$/, '.ogv');
+      if (existsSync(ogvPath)) {
+        try {
+          const ogvStat = statSync(ogvPath);
+          if (ogvStat.mtimeMs >= stat.mtimeMs) {
+            skipped++;
+            continue;
+          }
+        } catch { /* re-convert */ }
+      }
+
+      console.log(`  [video] Converting ${entry} → ${basename(ogvPath)}...`);
+      try {
+        execSync(
+          `ffmpeg -y -i "${fullPath}" -c:v libtheora -q:v 7 -c:a libvorbis -q:a 4 "${ogvPath}"`,
+          { stdio: 'pipe' }
+        );
+        converted++;
+      } catch (err) {
+        console.error(`  [video] Failed to convert ${entry}: ${err.message}`);
+      }
+    }
+  }
+
+  for (const dir of dirs) {
+    scanDir(dir);
+  }
+
+  return { converted, skipped, noFFmpeg: false };
+}
 
 export async function buildCommand(args) {
   const cwd = process.cwd();
@@ -252,6 +330,33 @@ async function buildDistLove(cwd, projectName, opts = {}) {
   // Inspector is now enabled by default in dist builds
   // (Previously disabled unless --debug was passed, but this was annoying for dev)
   // To disable: add `inspector = false` to ReactLove.init() in your main.lua
+
+  // 2b. Pre-convert video assets to Theora (.ogv) for Love2D
+  const videoDirs = [join(cwd, 'assets'), join(cwd, 'src'), cwd];
+  const videoResult = convertVideos(videoDirs);
+  if (videoResult.noFFmpeg && videoResult.converted === 0) {
+    // Only warn if there were actually video files to convert
+    // (we don't know without scanning, but ffmpeg missing is worth noting)
+  }
+  if (videoResult.converted > 0) {
+    console.log(`  [video] Converted ${videoResult.converted} video file${videoResult.converted !== 1 ? 's' : ''} to .ogv`);
+  }
+
+  // Copy any .ogv video files from project into staging
+  function copyVideoAssets(srcDir, destDir) {
+    if (!existsSync(srcDir)) return;
+    let entries;
+    try { entries = readdirSync(srcDir); } catch { return; }
+    for (const entry of entries) {
+      if (extname(entry).toLowerCase() === '.ogv') {
+        const srcFile = join(srcDir, entry);
+        mkdirSync(destDir, { recursive: true });
+        cpSync(srcFile, join(destDir, entry));
+      }
+    }
+  }
+  copyVideoAssets(join(cwd, 'assets'), join(stagingDir, 'assets'));
+  copyVideoAssets(cwd, stagingDir);
 
   // 3. Create .love archive
   console.log('  [3/6] Creating .love archive...');

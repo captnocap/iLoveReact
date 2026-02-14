@@ -12,6 +12,7 @@
     - lineHeight override (manual line-by-line rendering when set)
     - letterSpacing (character-by-character rendering -- known to be expensive)
     - Image: actual image rendering with scaling, opacity, and borderRadius
+    - Video: Theora video playback with objectFit, play/pause/loop/volume control
     - Opacity propagation: nested opacity values multiply down the tree
     - overflow:hidden with borderRadius > 0: stencil-based clipping with nesting support
     - overflow:hidden with borderRadius = 0: scissor-based rectangular clipping
@@ -24,6 +25,7 @@
 
 local Measure = nil  -- Injected at init time via Painter.init()
 local Images = nil   -- Injected at init time via Painter.init()
+local Videos = nil   -- Injected at init time via Painter.init()
 local ZIndex = require("lua.zindex")
 local TextEditorModule = nil  -- Lazy-loaded to avoid circular deps
 local CodeBlockModule = nil   -- Lazy-loaded to avoid circular deps
@@ -41,6 +43,7 @@ function Painter.init(config)
   config = config or {}
   Measure = config.measure
   Images = config.images
+  Videos = config.videos
   getFont = Measure.getFont
 end
 
@@ -929,6 +932,124 @@ function Painter.paintNode(node, inheritedOpacity, stencilDepth)
         love.graphics.rectangle("fill", c.x, c.y, c.w, c.h)
         love.graphics.setColor(1, 0, 0, 0.8 * effectiveOpacity)
         love.graphics.rectangle("line", c.x, c.y, c.w, c.h)
+      end
+    end
+
+  elseif not isHidden and node.type == "Video" and Videos then
+    local src = node.props and node.props.src
+    if src then
+      local status = Videos.getStatus(src)
+
+      if status == "ready" then
+        local video = Videos.get(src)
+        if video then
+          -- Control playback based on props
+          local paused = node.props.paused
+          if paused and video:isPlaying() then
+            video:pause()
+          elseif not paused and not video:isPlaying() then
+            video:play()
+          end
+
+          -- Handle loop: restart when ended
+          if not video:isPlaying() and not paused and node.props.loop then
+            video:seek(0)
+            video:play()
+          end
+
+          -- Handle volume/mute
+          local source = video:getSource()
+          if source then
+            if node.props.muted then
+              source:setVolume(0)
+            else
+              source:setVolume(node.props.volume or 1)
+            end
+          end
+
+          -- Calculate scaling using same objectFit logic as Image
+          local objectFit = s.objectFit or "fill"
+          local vidW = video:getWidth()
+          local vidH = video:getHeight()
+          local scaleX, scaleY, drawX, drawY, drawW, drawH
+
+          if objectFit == "contain" then
+            local scale = math.min(c.w / vidW, c.h / vidH)
+            scaleX = scale
+            scaleY = scale
+            drawW = vidW * scale
+            drawH = vidH * scale
+            drawX = c.x + (c.w - drawW) / 2
+            drawY = c.y + (c.h - drawH) / 2
+          elseif objectFit == "cover" then
+            local scale = math.max(c.w / vidW, c.h / vidH)
+            scaleX = scale
+            scaleY = scale
+            drawW = vidW * scale
+            drawH = vidH * scale
+            drawX = c.x + (c.w - drawW) / 2
+            drawY = c.y + (c.h - drawH) / 2
+          elseif objectFit == "none" then
+            scaleX = 1
+            scaleY = 1
+            drawW = vidW
+            drawH = vidH
+            drawX = c.x + (c.w - vidW) / 2
+            drawY = c.y + (c.h - vidH) / 2
+          else
+            -- "fill" (default)
+            scaleX = c.w / vidW
+            scaleY = c.h / vidH
+            drawX = c.x
+            drawY = c.y
+            drawW = c.w
+            drawH = c.h
+          end
+
+          -- Apply borderRadius clipping if needed
+          local videoStencil = borderRadius > 0
+          if videoStencil then
+            local stencilValue = stencilDepth + 1
+            love.graphics.stencil(function()
+              love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+            end, "replace", stencilValue)
+            love.graphics.setStencilTest("greater", stencilDepth)
+          end
+
+          -- Draw the video frame
+          love.graphics.setColor(1, 1, 1, effectiveOpacity)
+          love.graphics.draw(video, drawX, drawY, 0, scaleX, scaleY)
+
+          -- Restore stencil
+          if videoStencil then
+            if stencilDepth > 0 then
+              love.graphics.setStencilTest("greater", stencilDepth - 1)
+            else
+              love.graphics.setStencilTest()
+            end
+          end
+        end
+
+      elseif status == "transcoding" then
+        -- Loading placeholder: dark rounded box with pulsing indicator
+        love.graphics.setColor(0.12, 0.12, 0.15, effectiveOpacity)
+        love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+
+        -- Pulsing dot in center
+        local t = love.timer.getTime()
+        local pulse = 0.4 + 0.3 * math.sin(t * 3)
+        love.graphics.setColor(0.5, 0.5, 0.6, pulse * effectiveOpacity)
+        local dotR = math.min(c.w, c.h) * 0.04
+        if dotR > 1 then
+          love.graphics.circle("fill", c.x + c.w / 2, c.y + c.h / 2, dotR)
+        end
+
+      else
+        -- Error or unknown: dark box with red border
+        love.graphics.setColor(0.15, 0.08, 0.08, effectiveOpacity)
+        love.graphics.rectangle("fill", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
+        love.graphics.setColor(0.8, 0.2, 0.2, 0.6 * effectiveOpacity)
+        love.graphics.rectangle("line", c.x, c.y, c.w, c.h, borderRadius, borderRadius)
       end
     end
 

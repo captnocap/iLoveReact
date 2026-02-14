@@ -9,6 +9,7 @@
 ]]
 
 local Images = nil    -- Injected at init time via Tree.init()
+local Videos = nil    -- Injected at init time via Tree.init()
 local Animate = nil   -- Injected at init time via Tree.init()
 
 local Tree = {}
@@ -34,6 +35,12 @@ local function cleanup(id)
       Images.unload(n.props.src)
     end
 
+    -- Unload video if this is a Video node
+    if Videos and n.type == "Video" and n.props and n.props.src then
+      Videos.untrackNode(id)
+      Videos.unload(n.props.src)
+    end
+
     -- Clean up active transitions/animations
     if Animate then
       Animate.onNodeRemoved(id)
@@ -57,6 +64,7 @@ end
 function Tree.init(config)
   config = config or {}
   Images = config.images
+  Videos = config.videos
   Animate = config.animate
   nodes = {}
   rootChildren = {}
@@ -87,6 +95,11 @@ function Tree.applyCommands(commands)
       -- Pre-load image and establish ref count
       if Images and cmd.type == "Image" and props.src then
         Images.load(props.src)
+      end
+      -- Pre-load video and establish ref count (may trigger transcoding)
+      if Videos and cmd.type == "Video" and props.src then
+        Videos.load(props.src)
+        Videos.trackNode(cmd.id, props.src)
       end
       treeDirty = true
 
@@ -126,6 +139,13 @@ function Tree.applyCommands(commands)
         if Images and node.type == "Image" and cmd.props.src and cmd.props.src ~= node.props.src then
           if node.props.src then Images.unload(node.props.src) end
           Images.load(cmd.props.src)
+        end
+
+        -- Handle video src changes: unload old, load new
+        if Videos and node.type == "Video" and cmd.props.src and cmd.props.src ~= node.props.src then
+          if node.props.src then Videos.unload(node.props.src) end
+          Videos.load(cmd.props.src)
+          Videos.updateTrackedNode(cmd.id, cmd.props.src)
         end
 
         -- Apply changed props (partial diff)

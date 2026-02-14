@@ -30,6 +30,7 @@ local inspectorEnabled = true                 -- can be disabled via config.insp
 
 local animate  = nil   -- animate.lua module (Lua-side transitions/animations)
 local images   = nil   -- images.lua module (image cache)
+local videos   = nil   -- videos.lua module (video cache + FFmpeg transcoding)
 local focus    = require("lua.focus")         -- focus manager for Lua-owned inputs
 local texteditor = nil                        -- texteditor.lua (loaded on demand)
 local codeblock  = nil                        -- codeblock.lua (loaded on demand)
@@ -271,10 +272,11 @@ function ReactLove.init(config)
 
     measure = require("lua.measure")
     images  = require("lua.images")
+    videos  = require("lua.videos")
     animate = require("lua.animate")
 
     tree    = require("lua.tree")
-    tree.init({ images = images, animate = animate })
+    tree.init({ images = images, videos = videos, animate = animate })
 
     animate.init({ tree = tree })
 
@@ -282,7 +284,7 @@ function ReactLove.init(config)
     layout.init({ measure = measure })
 
     painter = require("lua.painter")
-    painter.init({ measure = measure, images = images })
+    painter.init({ measure = measure, images = images, videos = videos })
 
     events  = require("lua.events")
     events.setTreeModule(tree)
@@ -310,10 +312,11 @@ function ReactLove.init(config)
 
     measure = require("lua.measure")
     images  = require("lua.images")
+    videos  = require("lua.videos")
     animate = require("lua.animate")
 
     tree    = require("lua.tree")
-    tree.init({ images = images, animate = animate })
+    tree.init({ images = images, videos = videos, animate = animate })
 
     animate.init({ tree = tree })
 
@@ -321,7 +324,7 @@ function ReactLove.init(config)
     layout.init({ measure = measure })
 
     painter = require("lua.painter")
-    painter.init({ measure = measure, images = images })
+    painter.init({ measure = measure, images = images, videos = videos })
 
     events  = require("lua.events")
     events.setTreeModule(tree)
@@ -682,7 +685,32 @@ function ReactLove.update(dt)
     end
   end
 
-  -- 8. Tick Lua-side transitions and animations (before layout)
+  -- 8. Poll video transcoding jobs and emit status events to JS
+  if videos then
+    local videoEvents = videos.poll()
+    for _, evt in ipairs(videoEvents) do
+      pushEvent({
+        type = "video:" .. evt.status,
+        payload = { src = evt.src, message = evt.message },
+      })
+    end
+
+    -- Poll active video playback state for onTimeUpdate/onEnded/onPlay/onPause
+    local playbackEvents = videos.pollPlayback()
+    for _, evt in ipairs(playbackEvents) do
+      pushEvent({
+        type = evt.type,
+        payload = {
+          type = evt.type,
+          targetId = evt.nodeId,
+          currentTime = evt.currentTime,
+          duration = evt.duration,
+        },
+      })
+    end
+  end
+
+  -- 9. Tick Lua-side transitions and animations (before layout)
   if animate then animate.tick(dt) end
 
   -- 8. Relayout if tree changed
@@ -1341,8 +1369,9 @@ function ReactLove.reload()
   -- Note: Tor is NOT restarted on reload — it stays running across hot reloads
   torHostnameEmitted = false  -- Re-emit tor:ready to new JS context
   if images then images.clearCache() end
+  if videos then videos.clearCache() end
   if animate then animate.clear() end
-  tree.init({ images = images, animate = animate })
+  tree.init({ images = images, videos = videos, animate = animate })
   if animate then animate.init({ tree = tree }) end
   events.clearHover()
   events.clearPressedNode()

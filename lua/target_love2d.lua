@@ -17,8 +17,16 @@
         images.unload(src)
         images.getDimensions(src) -> width, height
         images.clearCache()
+    - videos: Video loading, caching, and FFmpeg transcoding (optional, may be nil)
+        videos.get(src) -> video or nil
+        videos.load(src)
+        videos.unload(src)
+        videos.getDimensions(src) -> width, height
+        videos.getStatus(src) -> "ready" | "transcoding" | "error" | nil
+        videos.poll() -> events table
+        videos.clearCache()
     - painter: Rendering backend
-        painter.init(config)  -- receives { measure, images }
+        painter.init(config)  -- receives { measure, images, videos }
         painter.paint(rootNode)
 ]]
 
@@ -27,6 +35,7 @@ local Target = {}
 Target.name = "love2d"
 Target.measure = require("lua.measure")
 Target.images = require("lua.images")
+Target.videos = require("lua.videos")
 Target.painter = require("lua.painter")
 
 return Target
