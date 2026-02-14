@@ -20,7 +20,7 @@ const C = {
 };
 
 function copyToClipboard(text: string) {
-  console.log('CLIPBOARD:' + text);
+  (globalThis as any).__hostLog('CLIPBOARD:' + text);
 }
 
 export function Dashboard() {
