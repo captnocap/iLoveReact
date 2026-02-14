@@ -176,19 +176,31 @@ function TextSelection.screenToPos(node, mx, my)
   local line = math.floor(relY / effectiveLineH) + 1
   line = math.max(1, math.min(line, #lines))
 
-  -- Horizontal: which character?
+  -- Horizontal: which byte offset? (iterate by UTF-8 codepoint boundaries)
+  -- Returns byte-based col so downstream sub() calls stay valid.
   local relX = sx - c.x
   local lineText = lines[line] or ""
-  local col = 0
+  local col = 0  -- byte offset of the cursor position
+  local bytePos = 1
+  local len = #lineText
 
-  for i = 1, #lineText do
-    local w = Measure.getWidthWithSpacing(font, lineText:sub(1, i), letterSpacing)
+  while bytePos <= len do
+    -- Determine codepoint length from lead byte
+    local b = lineText:byte(bytePos)
+    local cpLen = (b < 0x80 and 1) or (b < 0xE0 and 2) or (b < 0xF0 and 3) or 4
+    local endByte = math.min(bytePos + cpLen - 1, len)
+
+    local substr = lineText:sub(1, endByte)
+    local w = Measure.getWidthWithSpacing(font, substr, letterSpacing)
     if w > relX then
-      local prevW = Measure.getWidthWithSpacing(font, lineText:sub(1, i - 1), letterSpacing)
-      col = (relX - prevW < w - relX) and (i - 1) or i
+      local prevSubstr = lineText:sub(1, bytePos - 1)
+      local prevW = (bytePos > 1) and Measure.getWidthWithSpacing(font, prevSubstr, letterSpacing) or 0
+      col = (relX - prevW < w - relX) and (bytePos - 1) or endByte
       break
     end
-    col = i
+    col = endByte
+
+    bytePos = endByte + 1
   end
 
   return line, col
