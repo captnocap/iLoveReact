@@ -1,5 +1,5 @@
 import { classifiers as S } from '@reactjit/core';
-import type { GitActivity, GitCommitEntry, GitLaneTone } from '../../data/git-activity';
+import type { GitActivity, GitCommitEntry, GitLaneTone } from '../../data/overstock/git-activity';
 import { CTRL } from '../controls-specimen/controlsSpecimenTheme';
 
 export const GIT_LANE_ROW_HEIGHT = 24;

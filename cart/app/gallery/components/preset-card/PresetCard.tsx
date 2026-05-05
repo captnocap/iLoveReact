@@ -33,7 +33,7 @@
 //     accordingly.
 
 import { Col, Text } from '@reactjit/runtime/primitives';
-import type { InferencePreset } from '../../data/inference-preset';
+import type { InferencePreset } from '../../data/core/inference-preset';
 
 export type PresetCardProps = {
   row: InferencePreset;

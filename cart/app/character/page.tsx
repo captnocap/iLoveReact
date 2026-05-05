@@ -30,7 +30,7 @@ import { BlockFace3D } from '../gallery/components/block-faces/BlockFace3D';
 import { PopulationPyramid } from '../gallery/components/population-pyramid/PopulationPyramid';
 import { Venn, type VennDatum } from '../gallery/components/venn/Venn';
 import { useGradientWave, useScramble } from '../gallery/components/animated-text/useAnimatedText';
-import type { Worker, WorkerLifecycle } from '../gallery/data/worker';
+import type { Worker, WorkerLifecycle } from '../gallery/data/core/worker';
 import {
   ARCHETYPES,
   BOUNDARY_RULES,

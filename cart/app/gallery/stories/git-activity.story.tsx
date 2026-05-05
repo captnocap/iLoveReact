@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { gitActivityMockData, gitActivityReferences, gitActivitySchema } from '../data/git-activity';
+import { gitActivityMockData, gitActivityReferences, gitActivitySchema } from '../data/overstock/git-activity';
 
 export const gitActivitySection = defineGallerySection({
   id: "git-activity",

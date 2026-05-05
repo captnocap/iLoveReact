@@ -2,7 +2,7 @@ import { Fragment } from 'react';
 import { Box } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
 import { Tooltip } from '@reactjit/runtime/tooltip/Tooltip';
-import type { CommandComposer } from '../../data/command-composer';
+import type { CommandComposer } from '../../data/overstock/command-composer';
 import { CommandComposerKeycap } from './CommandComposerShortcut';
 
 function FooterDivider() {

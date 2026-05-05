@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { privacyMockData, privacyReferences, privacySchema } from '../data/privacy';
+import { privacyMockData, privacyReferences, privacySchema } from '../data/core/privacy';
 
 export const privacySection = defineGallerySection({
   id: "privacy",

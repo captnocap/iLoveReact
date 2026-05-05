@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { researchMockData, researchReferences, researchSchema } from '../data/research';
+import { researchMockData, researchReferences, researchSchema } from '../data/overstock/research';
 
 export const researchSection = defineGallerySection({
   id: "research",

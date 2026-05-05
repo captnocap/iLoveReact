@@ -1,5 +1,5 @@
 import { classifiers as S } from '@reactjit/core';
-import type { CommandComposer, CommandComposerPromptSegment } from '../../data/command-composer';
+import type { CommandComposer, CommandComposerPromptSegment } from '../../data/overstock/command-composer';
 import { CommandComposerActionRail } from './CommandComposerActionRail';
 import { CommandComposerChip, CommandComposerPromptReference } from './CommandComposerChip';
 

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { skillMockData, skillReferences, skillSchema } from '../data/skill';
+import { skillMockData, skillReferences, skillSchema } from '../data/overstock/skill';
 
 export const skillSection = defineGallerySection({
   id: "skill",

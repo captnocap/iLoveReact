@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { retrievalQueryMockData, retrievalQueryReferences, retrievalQuerySchema } from '../data/retrieval-query';
+import { retrievalQueryMockData, retrievalQueryReferences, retrievalQuerySchema } from '../data/composition/retrieval-query';
 
 export const retrievalQuerySection = defineGallerySection({
   id: "retrieval-query",

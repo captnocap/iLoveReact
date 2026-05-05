@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { GoalCard } from '../components/goal-card/GoalCard';
-import { goalMockData } from '../data/goal';
+import { goalMockData } from '../data/core/goal';
 
 export const goalCardSection = defineGallerySection({
   id: "goal-card",

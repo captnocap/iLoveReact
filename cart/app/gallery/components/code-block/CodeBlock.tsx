@@ -7,7 +7,7 @@
 
 import { classifiers as S } from '@reactjit/core';
 import { Box, ScrollView, Text } from '@reactjit/runtime/primitives';
-import type { CodeSnippet } from '../../data/code-snippet';
+import type { CodeSnippet } from '../../data/overstock/code-snippet';
 import { CodeCopyButton } from '../code-copy-button/CodeCopyButton';
 import { CodeLineNumber } from '../code-line-number/CodeLineNumber';
 import { splitSnippetIntoCodeLines, SyntaxHighlighter } from '../syntax-highlighter/SyntaxHighlighter';

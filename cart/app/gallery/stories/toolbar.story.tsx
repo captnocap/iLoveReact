@@ -7,7 +7,7 @@ import {
   toolbarStatusData,
   toolbarTextMenuData,
   toolbarVerticalData,
-} from '../data/toolbar';
+} from '../data/overstock/toolbar';
 
 function ToolbarShelf({ children }: { children: any }) {
   return (

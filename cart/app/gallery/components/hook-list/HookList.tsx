@@ -34,7 +34,7 @@
 //     accordingly.
 
 import { Col, Text } from '@reactjit/runtime/primitives';
-import type { EventHook } from '../../data/event-hook';
+import type { EventHook } from '../../data/core/event-hook';
 
 export type HookListProps = {
   row: EventHook;

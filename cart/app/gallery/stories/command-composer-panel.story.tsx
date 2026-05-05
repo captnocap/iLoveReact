@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { CommandComposerPanel } from '../components/command-composer-panel/CommandComposerPanel';
-import { commandComposerMockData } from '../data/command-composer';
+import { commandComposerMockData } from '../data/overstock/command-composer';
 
 export const commandComposerPanelSection = defineGallerySection({
   id: "command-composer-panel",

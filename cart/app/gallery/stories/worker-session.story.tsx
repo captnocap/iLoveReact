@@ -3,7 +3,7 @@ import {
   workerSessionMockData,
   workerSessionReferences,
   workerSessionSchema,
-} from '../data/worker-session';
+} from '../data/core/worker-session';
 
 export const workerSessionSection = defineGallerySection({
   id: 'worker-session',

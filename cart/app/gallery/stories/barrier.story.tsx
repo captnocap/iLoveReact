@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { barrierMockData, barrierReferences, barrierSchema } from '../data/barrier';
+import { barrierMockData, barrierReferences, barrierSchema } from '../data/overstock/barrier';
 
 export const barrierSection = defineGallerySection({
   id: "barrier",

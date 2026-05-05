@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { embeddingModelMockData, embeddingModelReferences, embeddingModelSchema } from '../data/embedding-model';
+import { embeddingModelMockData, embeddingModelReferences, embeddingModelSchema } from '../data/overstock/embedding-model';
 
 export const embeddingModelSection = defineGallerySection({
   id: "embedding-model",

@@ -12,8 +12,8 @@ import { LayerLockToggle, LayerVisibilityToggle } from '../gallery/components/la
 import { StripBadge } from '../gallery/components/controls-specimen/StripBadge';
 import { StepSlider } from '../gallery/components/controls-specimen/StepSlider';
 import { SyntaxHighlighter } from '../gallery/components/syntax-highlighter/SyntaxHighlighter';
-import { layerBlendModes, type LayerBlendMode, type LayerControlLayer, type LayerKind } from '../gallery/data/layer-control-panel';
-import type { CodeLine } from '../gallery/data/code-line';
+import { layerBlendModes, type LayerBlendMode, type LayerControlLayer, type LayerKind } from '../gallery/data/overstock/layer-control-panel';
+import type { CodeLine } from '../gallery/data/overstock/code-line';
 import { BoxSelect, ClipboardPaste, Copy, Group, Hand, MonitorCheck, MousePointer, MousePointerClick, PenLine, Square, Trash2, Type, Ungroup } from '@reactjit/runtime/icons/icons';
 import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 

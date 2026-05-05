@@ -1,4 +1,4 @@
-import type { LayerBlendMode, LayerKind } from '../../data/layer-control-panel';
+import type { LayerBlendMode, LayerKind } from '../../data/overstock/layer-control-panel';
 import type { ControlTone } from '../controls-specimen/controlsSpecimenTheme';
 
 const blendShort: Record<LayerBlendMode, string> = {

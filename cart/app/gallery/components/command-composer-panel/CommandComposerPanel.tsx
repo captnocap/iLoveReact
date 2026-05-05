@@ -33,7 +33,7 @@
 //     accordingly.
 
 import { classifiers as S } from '@reactjit/core';
-import type { CommandComposer } from '../../data/command-composer';
+import type { CommandComposer } from '../../data/overstock/command-composer';
 import { CommandComposerFooter } from '../command-composer/CommandComposerFooter';
 import { CommandComposerHeader } from '../command-composer/CommandComposerHeader';
 import { CommandComposerPromptLine } from '../command-composer/CommandComposerPromptLine';

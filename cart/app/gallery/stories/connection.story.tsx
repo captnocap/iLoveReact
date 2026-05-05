@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { connectionMockData, connectionReferences, connectionSchema } from '../data/connection';
+import { connectionMockData, connectionReferences, connectionSchema } from '../data/core/connection';
 
 export const connectionSection = defineGallerySection({
   id: "connection",

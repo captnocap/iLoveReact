@@ -1,6 +1,6 @@
 import { Box, Col, Row, ScrollView } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import type { LayerBlendMode, LayerControlLayer } from '../../data/layer-control-panel';
+import type { LayerBlendMode, LayerControlLayer } from '../../data/overstock/layer-control-panel';
 import { Body, Mono } from '../controls-specimen/controlsSpecimenParts';
 import { FileTabCard } from '../controls-specimen/FileTabCard';
 import { KeyValueBadge } from '../controls-specimen/KeyValueBadge';

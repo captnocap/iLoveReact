@@ -2,7 +2,7 @@ import { Col, Row } from '@reactjit/runtime/primitives';
 import { Blend } from '@reactjit/runtime/icons/icons';
 import { classifiers as S } from '@reactjit/core';
 import { Icon } from '@reactjit/runtime/icons/Icon';
-import type { LayerBlendMode, LayerControlLayer } from '../../data/layer-control-panel';
+import type { LayerBlendMode, LayerControlLayer } from '../../data/overstock/layer-control-panel';
 import { Body, Mono } from '../controls-specimen/controlsSpecimenParts';
 import { KeyValueBadge } from '../controls-specimen/KeyValueBadge';
 import { SegmentedControl } from '../controls-specimen/SegmentedControl';

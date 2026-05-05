@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { promptTemplateMockData, promptTemplateReferences, promptTemplateSchema } from '../data/prompt-template';
+import { promptTemplateMockData, promptTemplateReferences, promptTemplateSchema } from '../data/composition/prompt-template';
 
 export const promptTemplateSection = defineGallerySection({
   id: "prompt-template",

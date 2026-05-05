@@ -1,7 +1,7 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { CodeCopyButton } from '../components/code-copy-button/CodeCopyButton';
-import { codeSnippetMockData } from '../data/code-snippet';
-import type { CodeSnippet } from '../data/code-snippet';
+import { codeSnippetMockData } from '../data/overstock/code-snippet';
+import type { CodeSnippet } from '../data/overstock/code-snippet';
 
 const codeSnippetRows = Array.isArray(codeSnippetMockData)
   ? codeSnippetMockData

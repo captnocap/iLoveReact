@@ -1,11 +1,11 @@
 import { defineGallerySection, defineGalleryStory, type GallerySection } from '../types';
-import { spreadsheetMockData } from '../data/spreadsheet';
+import { spreadsheetMockData } from '../data/overstock/spreadsheet';
 import { SpreadsheetFormulaBar } from '../components/spreadsheet/SpreadsheetFormulaBar';
 import { SpreadsheetGrid } from '../components/spreadsheet/SpreadsheetGrid';
 import { SpreadsheetMetricStrip } from '../components/spreadsheet/SpreadsheetMetricStrip';
 import { SpreadsheetStatusBar } from '../components/spreadsheet/SpreadsheetStatusBar';
 import { SpreadsheetTopBar } from '../components/spreadsheet/SpreadsheetTopBar';
-import { emptySpreadsheetNativeState } from '../data/spreadsheet';
+import { emptySpreadsheetNativeState } from '../data/overstock/spreadsheet';
 import { classifiers as S } from '@reactjit/core';
 
 const workbook = spreadsheetMockData[0];

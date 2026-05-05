@@ -5,7 +5,7 @@ import {
   layerControlPanelMockData,
   type LayerControlLayer,
   type LayerControlPanelData,
-} from '../../data/layer-control-panel';
+} from '../../data/overstock/layer-control-panel';
 import { DexSearchBar } from '../dex-search-bar/DexSearchBar';
 import { SegmentedControl } from '../controls-specimen/SegmentedControl';
 import { KeyValueBadge } from '../controls-specimen/KeyValueBadge';

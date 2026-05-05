@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { agentMemoryMockData, agentMemoryReferences, agentMemorySchema } from '../data/agent-memory';
+import { agentMemoryMockData, agentMemoryReferences, agentMemorySchema } from '../data/core/agent-memory';
 
 export const agentMemorySection = defineGallerySection({
   id: "agent-memory",

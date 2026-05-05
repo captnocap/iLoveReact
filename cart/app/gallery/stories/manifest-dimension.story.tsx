@@ -3,7 +3,7 @@ import {
   manifestDimensionDefMockData,
   manifestDimensionDefReferences,
   manifestDimensionDefSchema,
-} from '../data/manifest-dimension';
+} from '../data/overstock/manifest-dimension';
 
 export const manifestDimensionSection = defineGallerySection({
   id: 'manifest-dimension',

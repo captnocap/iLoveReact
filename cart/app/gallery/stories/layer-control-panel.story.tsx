@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { LayerControlPanel } from '../components/layer-control-panel/LayerControlPanel';
-import { layerControlPanelMockData } from '../data/layer-control-panel';
+import { layerControlPanelMockData } from '../data/overstock/layer-control-panel';
 
 export const layerControlPanelSection = defineGallerySection({
   id: 'layer-control-panel',

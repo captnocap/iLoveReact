@@ -1,7 +1,7 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { Box } from '@reactjit/runtime/primitives';
 import { NewsFeed } from '../components/news-feed/NewsFeed';
-import { newsFeedPostMockData } from '../data/news-feed-post';
+import { newsFeedPostMockData } from '../data/overstock/news-feed-post';
 
 export const newsFeedSection = defineGallerySection({
   id: "news-feed",

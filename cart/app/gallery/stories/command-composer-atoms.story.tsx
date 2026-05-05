@@ -1,13 +1,13 @@
 import { Col, Row } from '@reactjit/runtime/primitives';
 import { defineGallerySection, defineGalleryStory } from '../types';
-import { commandComposerMockData } from '../data/command-composer';
+import { commandComposerMockData } from '../data/overstock/command-composer';
 import { CommandComposerActionRail } from '../components/command-composer/CommandComposerActionRail';
 import { CommandComposerChip, CommandComposerPromptReference } from '../components/command-composer/CommandComposerChip';
 import { CommandComposerFooter } from '../components/command-composer/CommandComposerFooter';
 import { CommandComposerHeader } from '../components/command-composer/CommandComposerHeader';
 import { CommandComposerPromptLine } from '../components/command-composer/CommandComposerPromptLine';
 import { CommandComposerShortcutHint } from '../components/command-composer/CommandComposerShortcut';
-import type { CommandComposerPromptSegment } from '../data/command-composer';
+import type { CommandComposerPromptSegment } from '../data/overstock/command-composer';
 
 const row = commandComposerMockData[0];
 type PromptReferenceSegment = Extract<CommandComposerPromptSegment, { label: string }>;

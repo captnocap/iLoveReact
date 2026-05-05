@@ -11,7 +11,7 @@ import { LayerToolbar } from '../components/layer-control-panel/LayerToolbar';
 import {
   layerControlPanelMockData,
   type LayerControlLayer,
-} from '../data/layer-control-panel';
+} from '../data/overstock/layer-control-panel';
 import { CTRL } from '../components/controls-specimen/controlsSpecimenTheme';
 
 const firstLayer = layerControlPanelMockData.layers[0];

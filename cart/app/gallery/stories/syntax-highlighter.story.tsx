@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { SyntaxHighlighter } from '../components/syntax-highlighter/SyntaxHighlighter';
-import { codeLineMockData } from '../data/code-line';
+import { codeLineMockData } from '../data/overstock/code-line';
 
 export const syntaxHighlighterSection = defineGallerySection({
   id: "syntax-highlighter",

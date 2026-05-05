@@ -32,7 +32,7 @@
 //     accordingly.
 
 import { Col, Text } from '@reactjit/runtime/primitives';
-import type { OutcomeRubric } from '../../data/outcome-rubric';
+import type { OutcomeRubric } from '../../data/composition/outcome-rubric';
 
 export type RubricPanelProps = {
   row: OutcomeRubric;

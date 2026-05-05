@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { RubricPanel } from '../components/rubric-panel/RubricPanel';
-import { outcomeRubricMockData } from '../data/outcome-rubric';
+import { outcomeRubricMockData } from '../data/composition/outcome-rubric';
 
 export const rubricPanelSection = defineGallerySection({
   id: "rubric-panel",

@@ -1,6 +1,6 @@
 import '../../components.cls';
 import { CodeBlock } from '../code-block/CodeBlock';
-import type { CodeSnippet } from '../../data/code-snippet';
+import type { CodeSnippet } from '../../data/overstock/code-snippet';
 
 export function IntentCode({ lang, children }: { lang?: string; children?: any }) {
   const language = normalizeLanguage(lang);

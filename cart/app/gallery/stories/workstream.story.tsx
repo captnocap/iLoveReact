@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { workstreamMockData, workstreamReferences, workstreamSchema } from '../data/workstream';
+import { workstreamMockData, workstreamReferences, workstreamSchema } from '../data/overstock/workstream';
 
 export const workstreamSection = defineGallerySection({
   id: "workstream",

@@ -1,5 +1,5 @@
 import { Col } from '@reactjit/runtime/primitives';
-import type { LayerControlLayer } from '../../data/layer-control-panel';
+import type { LayerControlLayer } from '../../data/overstock/layer-control-panel';
 import { ChoiceList } from '../controls-specimen/ChoiceList';
 import { FilledRailSlider } from '../controls-specimen/FilledRailSlider';
 import { MeterSlider } from '../controls-specimen/MeterSlider';

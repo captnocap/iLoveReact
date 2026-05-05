@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { goalMockData, goalReferences, goalSchema } from '../data/goal';
+import { goalMockData, goalReferences, goalSchema } from '../data/core/goal';
 
 export const goalSection = defineGallerySection({
   id: "goal",

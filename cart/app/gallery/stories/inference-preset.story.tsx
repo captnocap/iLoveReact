@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { inferencePresetMockData, inferencePresetReferences, inferencePresetSchema } from '../data/inference-preset';
+import { inferencePresetMockData, inferencePresetReferences, inferencePresetSchema } from '../data/core/inference-preset';
 
 export const inferencePresetSection = defineGallerySection({
   id: "inference-preset",

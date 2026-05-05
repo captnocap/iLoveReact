@@ -1,5 +1,5 @@
 import { classifiers as S } from '@reactjit/core';
-import type { GitActivity, GitCommitEntry, GitDiffFile, GitDiffLine } from '../../data/git-activity';
+import type { GitActivity, GitCommitEntry, GitDiffFile, GitDiffLine } from '../../data/overstock/git-activity';
 import { clampText, displaySha, getSelectedCommit, gitToneText, signedCount } from './gitLaneShared';
 
 export type GitDiffPreviewProps = {

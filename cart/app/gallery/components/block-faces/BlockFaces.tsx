@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Col, Row, Text } from '../../../../runtime/primitives';
-import type { Worker, WorkerLifecycle } from '../../data/worker';
+import type { Worker, WorkerLifecycle } from '../../data/core/worker';
 import { useAnimationsDisabled } from '../../lib/useSpring';
 
 // ───────────────────────── PALETTE ─────────────────────────

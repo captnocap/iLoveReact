@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { roleAssignmentMockData, roleAssignmentReferences, roleAssignmentSchema } from '../data/role-assignment';
+import { roleAssignmentMockData, roleAssignmentReferences, roleAssignmentSchema } from '../data/core/role-assignment';
 
 export const roleAssignmentSection = defineGallerySection({
   id: "role-assignment",

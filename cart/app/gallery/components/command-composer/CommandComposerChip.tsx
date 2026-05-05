@@ -13,7 +13,7 @@ import type {
   CommandComposerChip as CommandComposerChipData,
   CommandComposerPromptSegment,
   CommandComposerTone,
-} from '../../data/command-composer';
+} from '../../data/overstock/command-composer';
 
 type ClassifierComponent = (props: { children?: any; key?: string }) => any;
 type ReferenceSegment = Extract<CommandComposerPromptSegment, { label: string }>;

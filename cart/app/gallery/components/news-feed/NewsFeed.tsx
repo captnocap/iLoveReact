@@ -38,7 +38,7 @@
 
 import { useMemo, useState } from 'react';
 import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
-import type { NewsFeedPost } from '../../data/news-feed-post';
+import type { NewsFeedPost } from '../../data/overstock/news-feed-post';
 import { FeedComposer, type FeedComposerAuthor } from './FeedComposer';
 import { FeedPostCard } from './FeedPostCard';
 

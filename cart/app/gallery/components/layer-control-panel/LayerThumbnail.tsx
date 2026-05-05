@@ -8,7 +8,7 @@ import {
   Type,
 } from '@reactjit/runtime/icons/icons';
 import { Icon } from '@reactjit/runtime/icons/Icon';
-import type { LayerControlLayer, LayerKind } from '../../data/layer-control-panel';
+import type { LayerControlLayer, LayerKind } from '../../data/overstock/layer-control-panel';
 import { Body, Mono } from '../controls-specimen/controlsSpecimenParts';
 import { CTRL } from '../controls-specimen/controlsSpecimenTheme';
 

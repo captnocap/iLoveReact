@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { HookList } from '../components/hook-list/HookList';
-import { eventHookMockData } from '../data/event-hook';
+import { eventHookMockData } from '../data/core/event-hook';
 
 export const hookListSection = defineGallerySection({
   id: "hook-list",

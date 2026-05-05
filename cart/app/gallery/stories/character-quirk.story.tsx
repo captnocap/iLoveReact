@@ -3,7 +3,7 @@ import {
   characterQuirkMockData,
   characterQuirkReferences,
   characterQuirkSchema,
-} from '../data/character-quirk';
+} from '../data/overstock/character-quirk';
 
 export const characterQuirkSection = defineGallerySection({
   id: 'character-quirk',

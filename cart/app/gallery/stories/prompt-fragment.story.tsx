@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { promptFragmentMockData, promptFragmentReferences, promptFragmentSchema } from '../data/prompt-fragment';
+import { promptFragmentMockData, promptFragmentReferences, promptFragmentSchema } from '../data/composition/prompt-fragment';
 
 export const promptFragmentSection = defineGallerySection({
   id: "prompt-fragment",

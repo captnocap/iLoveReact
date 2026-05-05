@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { constraintMockData, constraintReferences, constraintSchema } from '../data/constraint';
+import { constraintMockData, constraintReferences, constraintSchema } from '../data/core/constraint';
 
 export const constraintSection = defineGallerySection({
   id: "constraint",

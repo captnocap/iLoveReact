@@ -3,7 +3,7 @@ import {
   userManifestMockData,
   userManifestReferences,
   userManifestSchema,
-} from '../data/user-manifest';
+} from '../data/overstock/user-manifest';
 
 export const userManifestSection = defineGallerySection({
   id: 'user-manifest',

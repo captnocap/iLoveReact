@@ -43,7 +43,7 @@
 //     accordingly.
 
 import { Col, Text } from '@reactjit/runtime/primitives';
-import type { Worker } from '../../data/worker';
+import type { Worker } from '../../data/core/worker';
 
 export type WorkerCardProps = {
   row: Worker;

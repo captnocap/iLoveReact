@@ -4,8 +4,8 @@
 
 import { classifiers as S } from '@reactjit/core';
 import { Box, Text } from '@reactjit/runtime/primitives';
-import type { CodeLine } from '../../data/code-line';
-import type { CodeSnippet } from '../../data/code-snippet';
+import type { CodeLine } from '../../data/overstock/code-line';
+import type { CodeSnippet } from '../../data/overstock/code-snippet';
 
 export type SyntaxHighlighterProps = {
   row: CodeLine;

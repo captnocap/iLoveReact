@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { codexRawEventMockData, codexRawEventReferences, codexRawEventSchema } from '../data/codex-raw-event';
+import { codexRawEventMockData, codexRawEventReferences, codexRawEventSchema } from '../data/core/codex-raw-event';
 
 export const codexRawEventSection = defineGallerySection({
   id: "codex-raw-event",

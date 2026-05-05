@@ -1,7 +1,7 @@
 import { COLORS, PALETTE } from './chart-palette';
 
 export { COLORS, PALETTE } from './chart-palette';
-export * from '../data/chart-demo-data';
+export * from '../data/overstock/chart-demo-data';
 
 export function scaleLinear(domain: [number, number], range: [number, number]) {
   const [d0, d1] = domain;

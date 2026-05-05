@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { inferenceParameterMockData, inferenceParameterReferences, inferenceParameterSchema } from '../data/inference-parameter';
+import { inferenceParameterMockData, inferenceParameterReferences, inferenceParameterSchema } from '../data/core/inference-parameter';
 
 export const inferenceParameterSection = defineGallerySection({
   id: "inference-parameter",

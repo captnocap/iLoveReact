@@ -1,5 +1,5 @@
 import { classifiers as S } from '@reactjit/core';
-import type { SpreadsheetNativeState } from '../../data/spreadsheet';
+import type { SpreadsheetNativeState } from '../../data/overstock/spreadsheet';
 
 export type SpreadsheetTopBarProps = {
   title: string;

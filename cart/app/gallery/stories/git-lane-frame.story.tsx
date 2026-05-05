@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { GitLaneFrame } from '../components/git-lanes/GitLaneFrame';
-import { gitActivityMockData } from '../data/git-activity';
+import { gitActivityMockData } from '../data/overstock/git-activity';
 
 export const gitLaneFrameSection = defineGallerySection({
   id: "git-lane-frame",

@@ -5,8 +5,8 @@ import type {
   SpreadsheetNativeState,
   SpreadsheetScalar,
   SpreadsheetWorkbook,
-} from '../../data/spreadsheet';
-import { emptySpreadsheetNativeState } from '../../data/spreadsheet';
+} from '../../data/overstock/spreadsheet';
+import { emptySpreadsheetNativeState } from '../../data/overstock/spreadsheet';
 import { SpreadsheetFormulaBar } from './SpreadsheetFormulaBar';
 import { SpreadsheetGrid, type SpreadsheetCellChangeEvent, type SpreadsheetColumnResizeEvent, type SpreadsheetSelectEvent } from './SpreadsheetGrid';
 import { SpreadsheetMetricStrip } from './SpreadsheetMetricStrip';

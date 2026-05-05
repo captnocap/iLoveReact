@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { codeSnippetMockData, codeSnippetReferences, codeSnippetSchema } from '../data/code-snippet';
+import { codeSnippetMockData, codeSnippetReferences, codeSnippetSchema } from '../data/overstock/code-snippet';
 
 export const codeSnippetSection = defineGallerySection({
   id: "code-snippet",

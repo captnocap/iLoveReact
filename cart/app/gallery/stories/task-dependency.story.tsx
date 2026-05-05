@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { taskDependencyMockData, taskDependencyReferences, taskDependencySchema } from '../data/task-dependency';
+import { taskDependencyMockData, taskDependencyReferences, taskDependencySchema } from '../data/overstock/task-dependency';
 
 export const taskDependencySection = defineGallerySection({
   id: "task-dependency",

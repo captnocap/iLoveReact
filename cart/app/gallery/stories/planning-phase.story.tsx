@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { planningPhaseMockData, planningPhaseReferences, planningPhaseSchema } from '../data/planning-phase';
+import { planningPhaseMockData, planningPhaseReferences, planningPhaseSchema } from '../data/composition/planning-phase';
 
 export const planningPhaseSection = defineGallerySection({
   id: "planning-phase",

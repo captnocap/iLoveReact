@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { avatarMockData, avatarReferences, avatarSchema } from '../data/avatar';
+import { avatarMockData, avatarReferences, avatarSchema } from '../data/overstock/avatar';
 
 export const avatarSection = defineGallerySection({
   id: 'avatar',

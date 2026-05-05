@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { jobRunMockData, jobRunReferences, jobRunSchema } from '../data/job-run';
+import { jobRunMockData, jobRunReferences, jobRunSchema } from '../data/core/job-run';
 
 export const jobRunSection = defineGallerySection({
   id: "job-run",

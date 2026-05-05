@@ -17,7 +17,7 @@ import { Box, Col, Pressable, Row, ScrollView, Text, TextInput } from '@reactjit
 import { useNavigate } from '@reactjit/runtime/router';
 import { Icon } from '@reactjit/runtime/icons/Icon';
 import { FilePlus, FolderOpen, History, MessageSquare, SendHorizontal } from '@reactjit/runtime/icons/icons';
-import type { Workspace } from '../../gallery/data/workspace';
+import type { Workspace } from '../../gallery/data/overstock/workspace';
 import { useRecentWorkspaces, useUser } from '../data';
 
 // ── Action tile ──────────────────────────────────────────────────────────

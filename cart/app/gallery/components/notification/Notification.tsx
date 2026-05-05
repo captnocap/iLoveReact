@@ -5,7 +5,7 @@ import { Icon, type IconData } from '@reactjit/runtime/icons/Icon';
 import { Body, Divider, Mono } from '../controls-specimen/controlsSpecimenParts';
 import { CTRL, type ControlTone, toneColor, toneSoftBackground } from '../controls-specimen/controlsSpecimenTheme';
 import { StatusBadge } from '../controls-specimen/StatusBadge';
-import type { NotificationAction, NotificationApproach, NotificationKind, NotificationLifetime, NotificationMessage } from '../../data/notification';
+import type { NotificationAction, NotificationApproach, NotificationKind, NotificationLifetime, NotificationMessage } from '../../data/overstock/notification';
 
 export type NotificationType = NotificationApproach;
 export type NotificationMethod = NotificationKind;

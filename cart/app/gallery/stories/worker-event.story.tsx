@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { workerEventMockData, workerEventReferences, workerEventSchema } from '../data/worker-event';
+import { workerEventMockData, workerEventReferences, workerEventSchema } from '../data/core/worker-event';
 
 export const workerEventSection = defineGallerySection({
   id: 'worker-event',

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { projectGlossaryMockData, projectGlossaryReferences, projectGlossarySchema } from '../data/project-glossary';
+import { projectGlossaryMockData, projectGlossaryReferences, projectGlossarySchema } from '../data/composition/project-glossary';
 
 export const projectGlossarySection = defineGallerySection({
   id: "project-glossary",

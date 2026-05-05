@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { mergeProposalMockData, mergeProposalReferences, mergeProposalSchema } from '../data/merge-proposal';
+import { mergeProposalMockData, mergeProposalReferences, mergeProposalSchema } from '../data/overstock/merge-proposal';
 
 export const mergeProposalSection = defineGallerySection({
   id: "merge-proposal",

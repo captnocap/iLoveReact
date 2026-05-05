@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { capabilityMockData, capabilityReferences, capabilitySchema } from '../data/capability';
+import { capabilityMockData, capabilityReferences, capabilitySchema } from '../data/overstock/capability';
 
 export const capabilitySection = defineGallerySection({
   id: "capability",

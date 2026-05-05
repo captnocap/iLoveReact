@@ -3,7 +3,7 @@ import {
   characterArchetypeMockData,
   characterArchetypeReferences,
   characterArchetypeSchema,
-} from '../data/character-archetype';
+} from '../data/overstock/character-archetype';
 
 export const characterArchetypeSection = defineGallerySection({
   id: 'character-archetype',

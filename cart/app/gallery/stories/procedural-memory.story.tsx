@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { proceduralMemoryMockData, proceduralMemoryReferences, proceduralMemorySchema } from '../data/procedural-memory';
+import { proceduralMemoryMockData, proceduralMemoryReferences, proceduralMemorySchema } from '../data/core/procedural-memory';
 
 export const proceduralMemorySection = defineGallerySection({
   id: "procedural-memory",

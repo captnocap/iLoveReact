@@ -1,5 +1,5 @@
 import { classifiers as S } from '@reactjit/core';
-import type { SpreadsheetNativeState, SpreadsheetQuickAdjustment } from '../../data/spreadsheet';
+import type { SpreadsheetNativeState, SpreadsheetQuickAdjustment } from '../../data/overstock/spreadsheet';
 
 export type SpreadsheetFormulaBarProps = {
   state: SpreadsheetNativeState;

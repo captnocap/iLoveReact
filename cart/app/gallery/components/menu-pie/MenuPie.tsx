@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Box, Graph, Pressable, Text } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import type { MenuEntry } from '../../data/menu-entry';
+import type { MenuEntry } from '../../data/overstock/menu-entry';
 import { MenuTileShell } from '../menu-tile-shell/MenuTileShell';
 
 // Graph coordinate system: origin (0, 0) is at the CENTER of the canvas,

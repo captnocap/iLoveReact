@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { modelRouteMockData, modelRouteReferences, modelRouteSchema } from '../data/model-route';
+import { modelRouteMockData, modelRouteReferences, modelRouteSchema } from '../data/core/model-route';
 
 export const modelRouteSection = defineGallerySection({
   id: "model-route",

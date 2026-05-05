@@ -1,5 +1,5 @@
-import type { NewsFeedPost } from '../../data/news-feed-post';
-import { newsFeedPostMockData } from '../../data/news-feed-post';
+import type { NewsFeedPost } from '../../data/overstock/news-feed-post';
+import { newsFeedPostMockData } from '../../data/overstock/news-feed-post';
 import { resolveGalleryColor } from '../../theme-color';
 
 export type SocialImageItem = {

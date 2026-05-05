@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { newsFeedPostMockData, newsFeedPostReferences, newsFeedPostSchema } from '../data/news-feed-post';
+import { newsFeedPostMockData, newsFeedPostReferences, newsFeedPostSchema } from '../data/overstock/news-feed-post';
 
 export const newsFeedPostSection = defineGallerySection({
   id: "news-feed-post",

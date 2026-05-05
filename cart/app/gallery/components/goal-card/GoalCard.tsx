@@ -41,7 +41,7 @@
 //     accordingly.
 
 import { Col, Text } from '@reactjit/runtime/primitives';
-import type { Goal } from '../../data/goal';
+import type { Goal } from '../../data/core/goal';
 
 export type GoalCardProps = {
   row: Goal;

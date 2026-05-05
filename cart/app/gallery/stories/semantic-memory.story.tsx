@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { semanticMemoryMockData, semanticMemoryReferences, semanticMemorySchema } from '../data/semantic-memory';
+import { semanticMemoryMockData, semanticMemoryReferences, semanticMemorySchema } from '../data/core/semantic-memory';
 
 export const semanticMemorySection = defineGallerySection({
   id: "semantic-memory",

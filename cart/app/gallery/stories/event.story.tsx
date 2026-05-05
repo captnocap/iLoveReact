@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { eventMockData, eventReferences, eventSchema } from '../data/event';
+import { eventMockData, eventReferences, eventSchema } from '../data/core/event';
 
 export const eventSection = defineGallerySection({
   id: "event",

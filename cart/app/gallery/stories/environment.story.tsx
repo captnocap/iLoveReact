@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { environmentMockData, environmentReferences, environmentSchema } from '../data/environment';
+import { environmentMockData, environmentReferences, environmentSchema } from '../data/overstock/environment';
 
 export const environmentSection = defineGallerySection({
   id: "environment",

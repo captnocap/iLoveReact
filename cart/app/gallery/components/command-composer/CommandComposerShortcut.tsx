@@ -1,5 +1,5 @@
 import { classifiers as S } from '@reactjit/core';
-import type { CommandComposerShortcut as CommandComposerShortcutData } from '../../data/command-composer';
+import type { CommandComposerShortcut as CommandComposerShortcutData } from '../../data/overstock/command-composer';
 
 export function CommandComposerKeycap({ value }: { value: string }) {
   return (

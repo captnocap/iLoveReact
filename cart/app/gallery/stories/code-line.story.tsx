@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { codeLineMockData, codeLineReferences, codeLineSchema } from '../data/code-line';
+import { codeLineMockData, codeLineReferences, codeLineSchema } from '../data/overstock/code-line';
 
 export const codeLineSection = defineGallerySection({
   id: "code-line",

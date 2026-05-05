@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { GitCommitRailRow } from '../components/git-lanes/GitCommitRailRow';
-import { gitActivityMockData } from '../data/git-activity';
+import { gitActivityMockData } from '../data/overstock/git-activity';
 
 export const gitCommitRailRowSection = defineGallerySection({
   id: "git-commit-rail-row",

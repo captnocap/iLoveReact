@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { chartDemoData, chartDemoDataReferences, chartDemoDataSchema } from '../data/chart-demo-data';
+import { chartDemoData, chartDemoDataReferences, chartDemoDataSchema } from '../data/overstock/chart-demo-data';
 
 export const chartDemoDataSection = defineGallerySection({
   id: 'chart-demo-data',

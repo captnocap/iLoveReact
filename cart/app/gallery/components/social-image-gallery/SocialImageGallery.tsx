@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { classifiers as S } from '@reactjit/core';
-import type { NewsFeedPost } from '../../data/news-feed-post';
+import type { NewsFeedPost } from '../../data/overstock/news-feed-post';
 import { useGalleryTheme } from '../../gallery-theme';
 import { SocialImageActions } from './SocialImageActions';
 import { SocialImageAuthor } from './SocialImageAuthor';

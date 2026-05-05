@@ -1,6 +1,6 @@
 import { classifiers as S } from '@reactjit/core';
 import { Graph } from '@reactjit/runtime/primitives';
-import type { GitActivity } from '../../data/git-activity';
+import type { GitActivity } from '../../data/overstock/git-activity';
 import {
   GIT_LANE_ROW_HEIGHT,
   GIT_LANE_X_OFFSET,

@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { GitDiffPreview } from '../components/git-lanes/GitDiffPreview';
-import { gitActivityMockData } from '../data/git-activity';
+import { gitActivityMockData } from '../data/overstock/git-activity';
 
 export const gitDiffPreviewSection = defineGallerySection({
   id: "git-diff-preview",

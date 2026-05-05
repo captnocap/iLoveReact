@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { characterMockData, characterReferences, characterSchema } from '../data/character';
+import { characterMockData, characterReferences, characterSchema } from '../data/core/character';
 
 export const characterSection = defineGallerySection({
   id: 'character',

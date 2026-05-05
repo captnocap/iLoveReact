@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { eventHookMockData, eventHookReferences, eventHookSchema } from '../data/event-hook';
+import { eventHookMockData, eventHookReferences, eventHookSchema } from '../data/core/event-hook';
 
 export const eventHookSection = defineGallerySection({
   id: "event-hook",

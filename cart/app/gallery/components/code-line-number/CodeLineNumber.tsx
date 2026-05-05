@@ -4,7 +4,7 @@
 
 import { classifiers as S } from '@reactjit/core';
 import { Text } from '@reactjit/runtime/primitives';
-import type { CodeLine } from '../../data/code-line';
+import type { CodeLine } from '../../data/overstock/code-line';
 
 export type CodeLineNumberProps = {
   row: CodeLine;

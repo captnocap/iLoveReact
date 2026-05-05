@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { compositionSourceKindMockData, compositionSourceKindReferences, compositionSourceKindSchema } from '../data/composition-source-kind';
+import { compositionSourceKindMockData, compositionSourceKindReferences, compositionSourceKindSchema } from '../data/composition/composition-source-kind';
 
 export const compositionSourceKindSection = defineGallerySection({
   id: "composition-source-kind",

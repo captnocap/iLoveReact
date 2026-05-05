@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { planMockData, planReferences, planSchema } from '../data/plan';
+import { planMockData, planReferences, planSchema } from '../data/core/plan';
 
 export const planSection = defineGallerySection({
   id: "plan",

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { assistantMockData, assistantReferences, assistantSchema } from '../data/assistant';
+import { assistantMockData, assistantReferences, assistantSchema } from '../data/core/assistant';
 
 export const assistantSection = defineGallerySection({
   id: 'assistant',

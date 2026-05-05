@@ -1,5 +1,5 @@
 import { classifiers as S } from '@reactjit/core';
-import type { SpreadsheetMetric } from '../../data/spreadsheet';
+import type { SpreadsheetMetric } from '../../data/overstock/spreadsheet';
 
 export type SpreadsheetMetricStripProps = {
   metrics: SpreadsheetMetric[];

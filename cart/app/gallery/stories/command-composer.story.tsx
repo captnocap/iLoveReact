@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { commandComposerMockData, commandComposerReferences, commandComposerSchema } from '../data/command-composer';
+import { commandComposerMockData, commandComposerReferences, commandComposerSchema } from '../data/overstock/command-composer';
 
 export const commandComposerSection = defineGallerySection({
   id: "command-composer",

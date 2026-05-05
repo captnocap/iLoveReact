@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Box } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import type { MenuEntry } from '../../data/menu-entry';
+import type { MenuEntry } from '../../data/overstock/menu-entry';
 import { MenuTileShell } from '../menu-tile-shell/MenuTileShell';
 import { useTick } from '../../lib/useTick';
 

@@ -1,7 +1,7 @@
 import { classifiers as S } from '@reactjit/core';
 import { ChevronRight } from '@reactjit/runtime/icons/icons';
 import { Icon } from '@reactjit/runtime/icons/Icon';
-import type { CommandComposer } from '../../data/command-composer';
+import type { CommandComposer } from '../../data/overstock/command-composer';
 import { CommandComposerChip } from './CommandComposerChip';
 
 function ComposerDividerIcon() {

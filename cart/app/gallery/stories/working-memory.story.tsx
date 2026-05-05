@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { workingMemoryMockData, workingMemoryReferences, workingMemorySchema } from '../data/working-memory';
+import { workingMemoryMockData, workingMemoryReferences, workingMemorySchema } from '../data/core/working-memory';
 
 export const workingMemorySection = defineGallerySection({
   id: "working-memory",

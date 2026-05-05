@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { supervisorMockData, supervisorReferences, supervisorSchema } from '../data/supervisor';
+import { supervisorMockData, supervisorReferences, supervisorSchema } from '../data/core/supervisor';
 
 export const supervisorSection = defineGallerySection({
   id: 'supervisor',

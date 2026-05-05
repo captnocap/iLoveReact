@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { WorkerCard } from '../components/worker-card/WorkerCard';
-import { workerMockData } from '../data/worker';
+import { workerMockData } from '../data/core/worker';
 
 export const workerCardSection = defineGallerySection({
   id: "worker-card",

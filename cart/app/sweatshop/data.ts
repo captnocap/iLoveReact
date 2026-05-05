@@ -12,11 +12,11 @@
 // we own the reads.
 
 import { useCRUD } from '../db';
-import type { User } from '../gallery/data/user';
-import type { Settings } from '../gallery/data/settings';
-import type { Connection } from '../gallery/data/connection';
-import type { Goal } from '../gallery/data/goal';
-import type { Workspace } from '../gallery/data/workspace';
+import type { User } from '../gallery/data/core/user';
+import type { Settings } from '../gallery/data/core/settings';
+import type { Connection } from '../gallery/data/core/connection';
+import type { Goal } from '../gallery/data/core/goal';
+import type { Workspace } from '../gallery/data/overstock/workspace';
 
 const NS = 'app';
 const passthrough = { parse: (v: unknown) => v as any };

@@ -19,8 +19,8 @@ import {
   blockFacesHairShapesHumanFem,
   blockFacesSkinTones,
 } from '../components/block-faces/BlockFaces';
-import { workerMockData } from '../data/worker';
-import type { Worker, WorkerLifecycle } from '../data/worker';
+import { workerMockData } from '../data/core/worker';
+import type { Worker, WorkerLifecycle } from '../data/core/worker';
 
 const COLORS = {
   bg: 'theme:bg',

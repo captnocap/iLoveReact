@@ -4,7 +4,7 @@ import { SocialImageGallery } from '../components/social-image-gallery/SocialIma
 import {
   DEFAULT_SOCIAL_IMAGE_POST,
 } from '../components/social-image-gallery/socialImageGalleryShared';
-import { newsFeedPostMockData } from '../data/news-feed-post';
+import { newsFeedPostMockData } from '../data/overstock/news-feed-post';
 
 export const socialImageGallerySection = defineGallerySection({
   id: 'social-image-gallery',

@@ -3,7 +3,7 @@ import {
   calendarDimensionMockData,
   calendarDimensionReferences,
   calendarDimensionSchema,
-} from '../data/calendar-dimension';
+} from '../data/overstock/calendar-dimension';
 
 export const calendarDimensionSection = defineGallerySection({
   id: 'calendar-dimension',

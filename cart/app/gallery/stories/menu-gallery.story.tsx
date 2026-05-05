@@ -1,5 +1,5 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
-import { menuEntryMockData } from '../data/menu-entry';
+import { menuEntryMockData } from '../data/overstock/menu-entry';
 
 import { MenuListBasic } from '../components/menu-list-basic/MenuListBasic';
 import { MenuListKeyed } from '../components/menu-list-keyed/MenuListKeyed';

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { episodicMemoryMockData, episodicMemoryReferences, episodicMemorySchema } from '../data/episodic-memory';
+import { episodicMemoryMockData, episodicMemoryReferences, episodicMemorySchema } from '../data/core/episodic-memory';
 
 export const episodicMemorySection = defineGallerySection({
   id: "episodic-memory",

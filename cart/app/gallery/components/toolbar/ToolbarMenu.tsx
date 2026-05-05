@@ -2,7 +2,7 @@ import { Box, Col, Pressable, Row } from '@reactjit/runtime/primitives';
 import { Icon } from '@reactjit/runtime/icons/Icon';
 import { Body, Divider, Mono } from '../controls-specimen/controlsSpecimenParts';
 import { CTRL, type ControlTone, toneColor, toneSoftBackground } from '../controls-specimen/controlsSpecimenTheme';
-import type { ToolbarMenuItem } from '../../data/toolbar';
+import type { ToolbarMenuItem } from '../../data/overstock/toolbar';
 
 type MenuAction = (id: string) => void;
 

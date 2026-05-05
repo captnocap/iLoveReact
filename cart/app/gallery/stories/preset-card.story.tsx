@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { PresetCard } from '../components/preset-card/PresetCard';
-import { inferencePresetMockData } from '../data/inference-preset';
+import { inferencePresetMockData } from '../data/core/inference-preset';
 
 export const presetCardSection = defineGallerySection({
   id: "preset-card",

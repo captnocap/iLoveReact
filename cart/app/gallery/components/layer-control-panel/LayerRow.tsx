@@ -1,6 +1,6 @@
 import { Box, Col, Pressable, Row } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import type { LayerControlLayer } from '../../data/layer-control-panel';
+import type { LayerControlLayer } from '../../data/overstock/layer-control-panel';
 import { Body, Mono } from '../controls-specimen/controlsSpecimenParts';
 import { KeyValueBadge } from '../controls-specimen/KeyValueBadge';
 import { StatusBadge } from '../controls-specimen/StatusBadge';

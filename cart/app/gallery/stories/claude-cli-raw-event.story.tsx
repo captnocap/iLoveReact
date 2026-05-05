@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { claudeCliRawEventMockData, claudeCliRawEventReferences, claudeCliRawEventSchema } from '../data/claude-cli-raw-event';
+import { claudeCliRawEventMockData, claudeCliRawEventReferences, claudeCliRawEventSchema } from '../data/core/claude-cli-raw-event';
 
 export const claudeCliRawEventSection = defineGallerySection({
   id: "claude-cli-raw-event",

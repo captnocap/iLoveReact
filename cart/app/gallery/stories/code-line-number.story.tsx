@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { CodeLineNumber } from '../components/code-line-number/CodeLineNumber';
-import { codeLineMockData } from '../data/code-line';
+import { codeLineMockData } from '../data/overstock/code-line';
 
 export const codeLineNumberSection = defineGallerySection({
   id: "code-line-number",

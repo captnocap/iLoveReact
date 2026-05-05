@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { modelMockData, modelReferences, modelSchema } from '../data/model';
+import { modelMockData, modelReferences, modelSchema } from '../data/core/model';
 
 export const modelSection = defineGallerySection({
   id: "model",

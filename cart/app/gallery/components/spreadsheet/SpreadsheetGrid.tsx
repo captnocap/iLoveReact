@@ -4,8 +4,8 @@ import type {
   SpreadsheetGridTheme,
   SpreadsheetNativeState,
   SpreadsheetScalar,
-} from '../../data/spreadsheet';
-import { defaultSpreadsheetTheme, emptySpreadsheetNativeState } from '../../data/spreadsheet';
+} from '../../data/overstock/spreadsheet';
+import { defaultSpreadsheetTheme, emptySpreadsheetNativeState } from '../../data/overstock/spreadsheet';
 
 export const SPREADSHEET_NATIVE_TYPE = 'SpreadsheetGrid';
 

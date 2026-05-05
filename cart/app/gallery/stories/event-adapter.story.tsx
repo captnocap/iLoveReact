@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { eventAdapterMockData, eventAdapterReferences, eventAdapterSchema } from '../data/event-adapter';
+import { eventAdapterMockData, eventAdapterReferences, eventAdapterSchema } from '../data/core/event-adapter';
 
 export const eventAdapterSection = defineGallerySection({
   id: "event-adapter",

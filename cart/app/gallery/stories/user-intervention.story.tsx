@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { userInterventionMockData, userInterventionReferences, userInterventionSchema } from '../data/user-intervention';
+import { userInterventionMockData, userInterventionReferences, userInterventionSchema } from '../data/core/user-intervention';
 
 export const userInterventionSection = defineGallerySection({
   id: "user-intervention",

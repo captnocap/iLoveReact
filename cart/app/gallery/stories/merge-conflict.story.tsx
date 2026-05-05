@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { mergeConflictMockData, mergeConflictReferences, mergeConflictSchema } from '../data/merge-conflict';
+import { mergeConflictMockData, mergeConflictReferences, mergeConflictSchema } from '../data/overstock/merge-conflict';
 
 export const mergeConflictSection = defineGallerySection({
   id: "merge-conflict",

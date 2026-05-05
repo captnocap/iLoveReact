@@ -3,7 +3,7 @@ import {
   characterCompatibilityMockData,
   characterCompatibilityReferences,
   characterCompatibilitySchema,
-} from '../data/character-compatibility';
+} from '../data/overstock/character-compatibility';
 
 export const characterCompatibilitySection = defineGallerySection({
   id: 'character-compatibility',

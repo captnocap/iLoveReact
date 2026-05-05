@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { systemMessageMockData, systemMessageReferences, systemMessageSchema } from '../data/system-message';
+import { systemMessageMockData, systemMessageReferences, systemMessageSchema } from '../data/composition/system-message';
 
 export const systemMessageSection = defineGallerySection({
   id: "system-message",

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { interpretationMockData, interpretationReferences, interpretationSchema } from '../data/interpretation';
+import { interpretationMockData, interpretationReferences, interpretationSchema } from '../data/overstock/interpretation';
 
 export const interpretationSection = defineGallerySection({
   id: "interpretation",

@@ -1,6 +1,6 @@
 import { classifiers as S } from '@reactjit/core';
 import { Heart, SendHorizontal } from '@reactjit/runtime/icons/icons';
-import type { NewsFeedComment, NewsFeedPost } from '../../data/news-feed-post';
+import type { NewsFeedComment, NewsFeedPost } from '../../data/overstock/news-feed-post';
 import { formatSocialCount, formatSocialTimestamp, initialsFromName } from './socialImageGalleryShared';
 
 export type SocialImageCommentsProps = {

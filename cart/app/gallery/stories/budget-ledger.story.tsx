@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { budgetLedgerMockData, budgetLedgerReferences, budgetLedgerSchema } from '../data/budget-ledger';
+import { budgetLedgerMockData, budgetLedgerReferences, budgetLedgerSchema } from '../data/overstock/budget-ledger';
 
 export const budgetLedgerSection = defineGallerySection({
   id: "budget-ledger",

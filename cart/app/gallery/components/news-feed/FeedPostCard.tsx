@@ -10,7 +10,7 @@ import {
   Repeat2,
   Send,
 } from '@reactjit/runtime/icons/icons';
-import type { NewsFeedAttachment, NewsFeedPost } from '../../data/news-feed-post';
+import type { NewsFeedAttachment, NewsFeedPost } from '../../data/overstock/news-feed-post';
 import { FeedActionButton } from './FeedActionButton';
 
 export type FeedPostCardProps = {

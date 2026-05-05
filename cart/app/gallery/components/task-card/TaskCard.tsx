@@ -40,7 +40,7 @@
 //     accordingly.
 
 import { Col, Text } from '@reactjit/runtime/primitives';
-import type { Task } from '../../data/task';
+import type { Task } from '../../data/overstock/task';
 
 export type TaskCardProps = {
   row: Task;

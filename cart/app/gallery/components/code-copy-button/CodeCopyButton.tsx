@@ -4,7 +4,7 @@
 
 import { classifiers as S } from '@reactjit/core';
 import { Pressable, Text } from '@reactjit/runtime/primitives';
-import type { CodeSnippet } from '../../data/code-snippet';
+import type { CodeSnippet } from '../../data/overstock/code-snippet';
 
 export type CodeCopyButtonProps = {
   row: CodeSnippet;

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { inferenceRequestMockData, inferenceRequestReferences, inferenceRequestSchema } from '../data/inference-request';
+import { inferenceRequestMockData, inferenceRequestReferences, inferenceRequestSchema } from '../data/core/inference-request';
 
 export const inferenceRequestSection = defineGallerySection({
   id: "inference-request",

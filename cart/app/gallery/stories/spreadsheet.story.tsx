@@ -1,5 +1,5 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
-import { spreadsheetMockData } from '../data/spreadsheet';
+import { spreadsheetMockData } from '../data/overstock/spreadsheet';
 import { Spreadsheet } from '../components/spreadsheet/Spreadsheet';
 
 export const spreadsheetSection = defineGallerySection({

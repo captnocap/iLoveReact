@@ -61,7 +61,7 @@ import { useOnboarding } from '../onboarding/state.tsx';
 import { useHudInsets, useSettingsSection } from '../shell';
 import { useAnimationTimeline } from '../anim';
 import { TRAITS } from '../onboarding/traits';
-import { inferenceParameterMockData } from '../gallery/data/inference-parameter';
+import { inferenceParameterMockData } from '../gallery/data/core/inference-parameter';
 import { effortLevelsFor, latestOpusId, familyOf } from '../claude-models';
 
 // ── List-entry stagger ───────────────────────────────────────────────

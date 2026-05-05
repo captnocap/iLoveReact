@@ -3,7 +3,7 @@ import {
   personalityDialMockData,
   personalityDialReferences,
   personalityDialSchema,
-} from '../data/personality-dial';
+} from '../data/overstock/personality-dial';
 
 export const personalityDialSection = defineGallerySection({
   id: 'personality-dial',

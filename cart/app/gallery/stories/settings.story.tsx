@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { settingsMockData, settingsReferences, settingsSchema } from '../data/settings';
+import { settingsMockData, settingsReferences, settingsSchema } from '../data/core/settings';
 
 export const settingsSection = defineGallerySection({
   id: "settings",

@@ -3,7 +3,7 @@ import {
   quizSessionMockData,
   quizSessionReferences,
   quizSessionSchema,
-} from '../data/quiz-session';
+} from '../data/overstock/quiz-session';
 
 export const quizSessionSection = defineGallerySection({
   id: 'quiz-session',

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { taskGraphMockData, taskGraphReferences, taskGraphSchema } from '../data/task-graph';
+import { taskGraphMockData, taskGraphReferences, taskGraphSchema } from '../data/overstock/task-graph';
 
 export const taskGraphSection = defineGallerySection({
   id: "task-graph",

@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { providerMockData, providerReferences, providerSchema } from '../data/provider';
+import { providerMockData, providerReferences, providerSchema } from '../data/core/provider';
 
 export const providerSection = defineGallerySection({
   id: "provider",

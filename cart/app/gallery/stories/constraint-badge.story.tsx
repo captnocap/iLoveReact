@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { ConstraintBadge } from '../components/constraint-badge/ConstraintBadge';
-import { constraintMockData } from '../data/constraint';
+import { constraintMockData } from '../data/core/constraint';
 
 export const constraintBadgeSection = defineGallerySection({
   id: "constraint-badge",

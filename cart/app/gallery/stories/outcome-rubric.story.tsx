@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { outcomeRubricMockData, outcomeRubricReferences, outcomeRubricSchema } from '../data/outcome-rubric';
+import { outcomeRubricMockData, outcomeRubricReferences, outcomeRubricSchema } from '../data/composition/outcome-rubric';
 
 export const outcomeRubricSection = defineGallerySection({
   id: "outcome-rubric",

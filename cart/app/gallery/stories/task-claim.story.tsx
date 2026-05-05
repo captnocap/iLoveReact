@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { taskClaimMockData, taskClaimReferences, taskClaimSchema } from '../data/task-claim';
+import { taskClaimMockData, taskClaimReferences, taskClaimSchema } from '../data/overstock/task-claim';
 
 export const taskClaimSection = defineGallerySection({
   id: "task-claim",

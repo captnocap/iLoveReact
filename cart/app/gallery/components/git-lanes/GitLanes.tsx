@@ -1,7 +1,7 @@
 import { classifiers as S } from '@reactjit/core';
 import { Search } from '@reactjit/runtime/icons/icons';
 import { Icon } from '@reactjit/runtime/icons/Icon';
-import type { GitActivity } from '../../data/git-activity';
+import type { GitActivity } from '../../data/overstock/git-activity';
 import { GitCommitRailRow } from './GitCommitRailRow';
 import { GitDiffPreview } from './GitDiffPreview';
 import { GitLaneFrame } from './GitLaneFrame';

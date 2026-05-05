@@ -1,5 +1,5 @@
 import { defineGalleryDataStory, defineGallerySection } from '../types';
-import { budgetMockData, budgetReferences, budgetSchema } from '../data/budget';
+import { budgetMockData, budgetReferences, budgetSchema } from '../data/overstock/budget';
 
 export const budgetSection = defineGallerySection({
   id: "budget",

@@ -33,7 +33,7 @@
 //     accordingly.
 
 import { Col, Text } from '@reactjit/runtime/primitives';
-import type { Constraint } from '../../data/constraint';
+import type { Constraint } from '../../data/core/constraint';
 
 export type ConstraintBadgeProps = {
   row: Constraint;

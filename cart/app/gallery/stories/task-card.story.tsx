@@ -1,6 +1,6 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { TaskCard } from '../components/task-card/TaskCard';
-import { taskMockData } from '../data/task';
+import { taskMockData } from '../data/overstock/task';
 
 export const taskCardSection = defineGallerySection({
   id: "task-card",

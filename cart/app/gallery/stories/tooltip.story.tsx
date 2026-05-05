@@ -1,10 +1,10 @@
 import { Row } from '@reactjit/runtime/primitives';
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { Tooltip } from '../components/tooltip/Tooltip';
-import { constraintMockData } from '../data/constraint';
-import { eventHookMockData } from '../data/event-hook';
-import { taskMockData } from '../data/task';
-import { workerMockData } from '../data/worker';
+import { constraintMockData } from '../data/core/constraint';
+import { eventHookMockData } from '../data/core/event-hook';
+import { taskMockData } from '../data/overstock/task';
+import { workerMockData } from '../data/core/worker';
 
 function TooltipShelf({ children }: { children: any }) {
   return (

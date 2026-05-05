@@ -4,8 +4,8 @@ import { Icon } from '@reactjit/runtime/icons/Icon';
 import { Body, InlinePill, Mono, VerticalSpine } from '../controls-specimen/controlsSpecimenParts';
 import { CTRL, type ControlTone, toneColor, toneSoftBackground } from '../controls-specimen/controlsSpecimenTheme';
 import { StatusBadge } from '../controls-specimen/StatusBadge';
-import type { ToolbarData, ToolbarItem, ToolbarKind, ToolbarOrientation } from '../../data/toolbar';
-import { toolbarIconData, toolbarStatusData, toolbarTextMenuData, toolbarVerticalData } from '../../data/toolbar';
+import type { ToolbarData, ToolbarItem, ToolbarKind, ToolbarOrientation } from '../../data/overstock/toolbar';
+import { toolbarIconData, toolbarStatusData, toolbarTextMenuData, toolbarVerticalData } from '../../data/overstock/toolbar';
 import { ToolbarMenu } from './ToolbarMenu';
 
 export type ToolbarType = ToolbarKind;

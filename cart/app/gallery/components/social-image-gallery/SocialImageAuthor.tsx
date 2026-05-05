@@ -1,6 +1,6 @@
 import { classifiers as S } from '@reactjit/core';
 import { BadgeCheck, MoreHorizontal } from '@reactjit/runtime/icons/icons';
-import type { NewsFeedPost } from '../../data/news-feed-post';
+import type { NewsFeedPost } from '../../data/overstock/news-feed-post';
 import type { SocialImageItem } from './socialImageGalleryShared';
 import { formatSocialTimestamp, visibilityLabel } from './socialImageGalleryShared';
 
