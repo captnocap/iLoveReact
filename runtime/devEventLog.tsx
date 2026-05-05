@@ -125,21 +125,36 @@ export function EventLog({ defaultMinImportance = 0.3, refreshMs = REFRESH_MS }:
     if (!dbHandle) return;
     const tick = () => {
       try {
-        // Filter out our own session so we don't display events caused by
-        // this cart's own renders. Order by id DESC + LIMIT keeps latency
-        // bounded regardless of how big the db has grown.
+        // Push filters into SQL. With high event rates (the bus does
+        // 1000+/sec under card_stress) the in-memory ring window of
+        // MAX_EVENTS scrolls past in fractions of a second — useless
+        // for "find me a specific event type." Filtering at the SQL
+        // layer means the LIMIT applies to MATCHING events, so a
+        // search for "fps" returns the last MAX_EVENTS fps lines,
+        // covering minutes of session instead of ms.
+        const needle = typeFilter.trim();
+        const wheres: string[] = ['session_id != ?'];
+        const params: any[] = [ownSid];
+        if (minImp > 0) {
+          wheres.push('importance >= ?');
+          params.push(minImp);
+        }
+        if (needle) {
+          wheres.push('(event_type LIKE ? OR source LIKE ? OR payload LIKE ?)');
+          const pat = `%${needle}%`;
+          params.push(pat, pat, pat);
+        }
+        params.push(MAX_EVENTS);
+        const sql = `SELECT id, ts_ms, session_id, event_type, source, importance, parent_id, payload
+                       FROM events
+                       WHERE ${wheres.join(' AND ')}
+                       ORDER BY id DESC
+                       LIMIT ?`;
         const rows = sqlite.query<{
           id: number; ts_ms: number; session_id: string;
           event_type: string; source: string; importance: number;
           parent_id: number | null; payload: string | null;
-        }>(dbHandle,
-          `SELECT id, ts_ms, session_id, event_type, source, importance, parent_id, payload
-             FROM events
-             WHERE session_id != ?
-             ORDER BY id DESC
-             LIMIT ?`,
-          [ownSid, MAX_EVENTS],
-        );
+        }>(dbHandle, sql, params);
         const mapped: BusEvent[] = rows.map(r => ({
           id: r.id,
           ts: r.ts_ms,
@@ -158,25 +173,12 @@ export function EventLog({ defaultMinImportance = 0.3, refreshMs = REFRESH_MS }:
     tick();
     const id = setInterval(tick, refreshMs);
     return () => clearInterval(id);
-  }, [paused, refreshMs, dbHandle, ownSid]);
+  }, [paused, refreshMs, dbHandle, ownSid, minImp, typeFilter]);
 
-  const filtered = useMemo(() => {
-    const needle = typeFilter.trim().toLowerCase();
-    return events.filter(e => {
-      if (e.imp < minImp) return false;
-      if (!needle) return true;
-      // Match against type, source, AND the payload — most prints land in
-      // payload.msg (e.g. "[telemetry] FPS: 240 …") so type=log.info alone
-      // is too coarse to find them.
-      if (e.type.toLowerCase().includes(needle)) return true;
-      if (e.src.toLowerCase().includes(needle)) return true;
-      const payloadStr = (typeof e.payload === 'string'
-        ? e.payload
-        : (() => { try { return JSON.stringify(e.payload); } catch { return ''; } })()
-      ).toLowerCase();
-      return payloadStr.includes(needle);
-    });
-  }, [events, minImp, typeFilter]);
+  // Filtering already happened at the SQL layer; render straight from
+  // the resultset. (Kept the variable name `filtered` so the JSX below
+  // doesn't need to change.)
+  const filtered = events;
 
   const counts = useMemo(() => {
     let high = 0, mid = 0, low = 0;
