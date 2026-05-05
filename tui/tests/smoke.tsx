@@ -2,8 +2,8 @@
 // print it. No alt-screen, no stdin. Verifies layout + paint without
 // taking over the terminal.
 import { createElement } from 'react';
-import { render, headlessSnapshot } from './host';
-import App from './cart';
+import { render, headlessSnapshot } from '../host';
+import App from '../examples/counter-bun';
 
 render(createElement(App));
 

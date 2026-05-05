@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { subscribeKey } from './host';
+import { subscribeKey } from '../host';
 
 const Box = (props: any) => <box {...props} />;
 const Text = (props: any) => <text {...props}>{props.children}</text>;

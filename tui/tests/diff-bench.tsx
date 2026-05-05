@@ -2,7 +2,7 @@
 // change should emit roughly one cursor-jump worth of ANSI, not a
 // full-screen redraw.
 import { createElement, useState, useEffect } from 'react';
-import { enter, leave, render } from './host';
+import { enter, leave, render } from '../host';
 
 let captured = '';
 let capturing = false;

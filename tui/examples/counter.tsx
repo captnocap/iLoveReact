@@ -1,4 +1,4 @@
-import './preamble.js';
+import '../v8-preamble.js';
 import { createElement, useState, useEffect } from 'react';
 import { enter, leave, render, startInput, subscribeKey } from '../host';
 

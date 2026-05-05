@@ -1,0 +1,56 @@
+#!/bin/sh
+# scripts/tui — bundle a TUI cart and run it on tools/v8cli.
+#
+# Usage:  scripts/tui [<entry.tsx>]
+#         (default: tui/examples/counter.tsx)
+#
+# All TUI carts share `tui/host.ts` (reconciler config + ANSI paint) and
+# `tui/v8-preamble.js` (timer/stdin polyfills + microtask trampoline).
+
+set -e
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+ENTRY="${1:-tui/examples/counter.tsx}"
+shift 2>/dev/null || true
+ESBUILD="$ROOT/tools/esbuild"
+V8CLI="$ROOT/tools/v8cli"
+# Fall back to fresh build if tools/v8cli is older than zig-out/bin/v8cli.
+[ -x "$ROOT/zig-out/bin/v8cli" ] && [ "$ROOT/zig-out/bin/v8cli" -nt "$V8CLI" ] && V8CLI="$ROOT/zig-out/bin/v8cli"
+
+# react / react-reconciler / scheduler materialized from vendor/. Bun
+# followed symlinks into vendor/ and couldn't resolve nested requires,
+# so we copy (one-time, ~1.6MB; gitignored).
+NM="$ROOT/tui/node_modules"
+if [ ! -d "$NM/react-reconciler/cjs" ]; then
+  mkdir -p "$NM"
+  for pkg in react react-reconciler scheduler loose-envify js-tokens; do
+    [ -d "$NM/$pkg" ] || cp -RL "$ROOT/vendor/$pkg" "$NM/$pkg"
+  done
+fi
+
+# Terminal size baked into the bundle as compile-time constants.
+SIZE=$(stty size 2>/dev/null || echo "24 80")
+ROWS=$(echo "$SIZE" | cut -d' ' -f1)
+COLS=$(echo "$SIZE" | cut -d' ' -f2)
+
+NAME=$(basename "$ENTRY" .tsx)
+OUT="$ROOT/tui/.cache/bundle-$NAME.js"
+mkdir -p "$ROOT/tui/.cache"
+
+"$ESBUILD" \
+  --bundle "$ENTRY" \
+  --outfile="$OUT" \
+  --platform=neutral \
+  --main-fields=module,main \
+  --target=es2020 \
+  --jsx=automatic \
+  --jsx-import-source=react \
+  --format=cjs \
+  --define:process.env.NODE_ENV='"production"' \
+  --define:__TUI_COLS__=$COLS \
+  --define:__TUI_ROWS__=$ROWS \
+  --log-level=warning \
+  --resolve-extensions=.tsx,.ts,.jsx,.js \
+  --conditions=default
+
+"$V8CLI" "$OUT" "$@"

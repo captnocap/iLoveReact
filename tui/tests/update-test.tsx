@@ -1,6 +1,6 @@
 // Verify: (1) text updates after state change, (2) flexWrap wraps a row.
 import { createElement, useState, useEffect } from 'react';
-import { render, headlessSnapshot } from './host';
+import { render, headlessSnapshot } from '../host';
 
 let bump: () => void = () => {};
 
