@@ -164,8 +164,17 @@ export function EventLog({ defaultMinImportance = 0.3, refreshMs = REFRESH_MS }:
     const needle = typeFilter.trim().toLowerCase();
     return events.filter(e => {
       if (e.imp < minImp) return false;
-      if (needle && !e.type.toLowerCase().includes(needle) && !e.src.toLowerCase().includes(needle)) return false;
-      return true;
+      if (!needle) return true;
+      // Match against type, source, AND the payload — most prints land in
+      // payload.msg (e.g. "[telemetry] FPS: 240 …") so type=log.info alone
+      // is too coarse to find them.
+      if (e.type.toLowerCase().includes(needle)) return true;
+      if (e.src.toLowerCase().includes(needle)) return true;
+      const payloadStr = (typeof e.payload === 'string'
+        ? e.payload
+        : (() => { try { return JSON.stringify(e.payload); } catch { return ''; } })()
+      ).toLowerCase();
+      return payloadStr.includes(needle);
     });
   }, [events, minImp, typeFilter]);
 
@@ -226,7 +235,7 @@ export function EventLog({ defaultMinImportance = 0.3, refreshMs = REFRESH_MS }:
             <TextInput
               value={typeFilter}
               onChangeText={(t: string) => setTypeFilter(t)}
-              placeholder="filter by type or source (substring)"
+              placeholder="filter by type, source, or payload (substring)"
               style={{ color: TEXT, fontSize: 12 }}
             />
           </Box>
