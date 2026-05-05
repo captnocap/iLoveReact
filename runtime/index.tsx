@@ -279,8 +279,6 @@ const Reconciler: any = require('react-reconciler');
 
 import { hostConfig, setTransportFlush, handlerRegistry } from '../renderer/hostConfig';
 import { prepareContext, releaseContext } from './effectContext';
-import { Window } from './primitives';
-import { EventLog } from './devEventLog';
 // @ts-ignore — bundle-time alias, resolved by esbuild-config.mjs (old path) or
 // scripts/cart-bundle.js via --alias:@cart-entry=<abs path> (v8cli path).
 import App from '@cart-entry';
@@ -510,21 +508,4 @@ if (typeof registerDispatch === 'function') {
 
 const reconciler = Reconciler(hostConfig);
 const container = reconciler.createContainer({ id: 0 }, 0, null, false, null, '', (_e: any) => {}, null);
-
-// Dev shell — when v8_app.zig sets globalThis.__DEV_MODE, wrap the cart's
-// App with a sibling <Window> hosting the EventLog. Same V8 isolate ⇒
-// shared event_bus state ⇒ the eventlog window sees every flush, every
-// IPC overflow, every spawn from the parent cart in real time. The cart
-// itself is unaware of any of this; in production __DEV_MODE is false
-// and we mount App raw, no extra primitive nodes emitted.
-const devShell = (globalThis as any).__DEV_MODE
-  ? React.createElement(React.Fragment, null,
-      React.createElement(App, {}),
-      React.createElement(
-        Window,
-        { title: 'EventLog · reactjit dev', width: 920, height: 620 },
-        React.createElement(EventLog, {}),
-      ),
-    )
-  : React.createElement(App, {});
-reconciler.updateContainer(devShell, container, null, null);
+reconciler.updateContainer(React.createElement(App, {}), container, null, null);
