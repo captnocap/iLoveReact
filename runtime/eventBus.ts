@@ -106,6 +106,17 @@ export function sessionId(): string {
 }
 
 /**
+ * Absolute path to the SQLite events database. Stable across sessions
+ * (currently `~/.cache/reactjit/events.db`). The eventlog cart uses
+ * this to open the same db the live runtime is writing to.
+ *
+ * Returns "" if the bus is in ring-only mode (no SQLite linked).
+ */
+export function dbPath(): string {
+  return callHostString('__busDbPath') ?? '';
+}
+
+/**
  * Convenience wrapper for begin/end pairs (e.g. timing a cart phase).
  * Returns a function that emits the corresponding "*.end" event with
  * elapsed_ms in the payload and parent_id linked.
@@ -123,5 +134,5 @@ export function span(type: string, payload?: unknown, opts?: EmitOptions): (extr
   });
 }
 
-export const bus = { emit, recent, sessionId, span };
+export const bus = { emit, recent, sessionId, dbPath, span };
 export default bus;

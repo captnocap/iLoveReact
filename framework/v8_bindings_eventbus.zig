@@ -116,10 +116,16 @@ fn hostBusSessionId(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
     setReturnString(info, event_bus.sessionId());
 }
 
+fn hostBusDbPath(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnString(info, event_bus.dbPath());
+}
+
 pub fn registerEventBus(_: anytype) void {
     v8_runtime.registerHostFn("__busEmit", hostBusEmit);
     v8_runtime.registerHostFn("__busEmitWithImportance", hostBusEmitWithImportance);
     v8_runtime.registerHostFn("__busEmitChild", hostBusEmitChild);
     v8_runtime.registerHostFn("__busRecent", hostBusRecent);
     v8_runtime.registerHostFn("__busSessionId", hostBusSessionId);
+    v8_runtime.registerHostFn("__busDbPath", hostBusDbPath);
 }

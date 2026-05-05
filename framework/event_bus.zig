@@ -10,21 +10,21 @@
 //!
 //! Design borrowed wholesale from engaige's eventBus (see
 //! old-project-ideas.md §2): one append-only log + auto-importance from
-//! event-type substring match + causal chains via parent_id. Local twist:
-//! NDJSON to a per-session file under ~/.cache/reactjit/ instead of
-//! SQLite — cheaper, tail-able with `tail -f`, no schema migrations. We
-//! upgrade to SQLite the day query speed becomes the bottleneck.
+//! event-type substring match + causal chains via parent_id. Storage is
+//! SQLite at `~/.cache/reactjit/events.db` (WAL mode, synchronous=NORMAL)
+//! so multiple processes can read while the active runtime writes — the
+//! eventlog cart runs as a separate binary and queries this same db.
 //!
 //! Contract:
 //!   - Single writer (main thread). No locks. Polling other threads call
 //!     emit() at their own risk; today nothing does.
-//!   - Best-effort. If init fails (no $HOME, can't make .cache), all
-//!     subsequent emit() calls silently no-op. The runtime keeps working.
-//!   - event_type and source must be ASCII identifier-ish (no quotes, no
-//!     backslashes). They are not JSON-escaped on write. Caller's job.
-//!   - payload_json is spliced verbatim into the line. Caller MUST pass
-//!     valid JSON ({} for empty). std.json.stringify or hand-built; we
-//!     don't validate.
+//!   - Best-effort. If sqlite open fails (HAS_SQLITE off, no $HOME, FS
+//!     permission), the bus keeps the in-memory ring alive but skips
+//!     persistence. emit() never blocks the runtime.
+//!   - event_type and source can be arbitrary UTF-8 — SQLite's parameter
+//!     binding handles escape, no caller-side discipline required.
+//!   - payload_json is stored as-is in the `payload` column. Callers
+//!     SHOULD pass valid JSON ("{}" for empty); we don't validate.
 //!
 //! Auto-importance from substring match (no manual tuning per call):
 //!   overflow|fatal|crash|panic              → 0.95
@@ -39,10 +39,15 @@
 //! gate, so logs don't drown.
 
 const std = @import("std");
+const sqlite = @import("sqlite.zig");
 
 const alloc = std.heap.c_allocator;
 
 const RING_SIZE: usize = 4096;
+
+/// Where the SQLite db lives. Stable across sessions so eventlog can
+/// always find it. The file is created on first init() call.
+pub const DB_SUBPATH = ".cache/reactjit/events.db";
 
 const RingEntry = struct {
     id: u64 = 0,
@@ -57,9 +62,10 @@ const RingEntry = struct {
 var g_inited: bool = false;
 var g_session_buf: [16]u8 = undefined;
 var g_session_len: usize = 0;
-var g_log_path_buf: [512]u8 = undefined;
-var g_log_path_len: usize = 0;
-var g_log_file: ?std.fs.File = null;
+var g_db_path_buf: [512]u8 = undefined;
+var g_db_path_len: usize = 0;
+var g_db: ?sqlite.Database = null;
+var g_insert_stmt: ?sqlite.Statement = null;
 var g_next_id: u64 = 1;
 var g_ring: [RING_SIZE]RingEntry = undefined;
 var g_ring_inited: bool = false;
@@ -74,14 +80,27 @@ pub fn sessionId() []const u8 {
     return g_session_buf[0..g_session_len];
 }
 
-pub fn logPath() []const u8 {
+pub fn dbPath() []const u8 {
     if (!g_inited) return "";
-    return g_log_path_buf[0..g_log_path_len];
+    return g_db_path_buf[0..g_db_path_len];
+}
+
+/// Back-compat alias — older callers used logPath() when storage was
+/// NDJSON. Now returns the SQLite db path.
+pub fn logPath() []const u8 {
+    return dbPath();
 }
 
 /// Initialize the bus. Idempotent. Safe to call before any cart code runs.
-/// On any failure (no $HOME, can't create dir, can't open file) the bus
-/// stays uninitialized and emit() becomes a no-op.
+///
+/// Best-effort:
+///   - Always: in-memory ring is set up unconditionally.
+///   - When SQLite + $HOME are available: opens ~/.cache/reactjit/events.db
+///     in WAL mode, creates the schema, and prepares the insert
+///     statement. Persistence is on.
+///   - When SQLite is stubbed (HAS_SQLITE=false) or open fails: stays in
+///     in-memory-only mode. emit() still works for in-process consumers
+///     that read the ring; cross-process eventlog views will be empty.
 pub fn init() void {
     if (g_inited) return;
 
@@ -94,32 +113,71 @@ pub fn init() void {
     const sid_str = std.fmt.bufPrint(&g_session_buf, "{x:0>16}", .{sid}) catch return;
     g_session_len = sid_str.len;
 
+    for (&g_ring) |*e| e.* = .{};
+    g_ring_inited = true;
+    g_inited = true;
+
+    // SQLite setup is best-effort and entirely optional. If anything below
+    // fails, the bus continues with the ring alone.
+    setupDb();
+
+    _ = emitWithImportance("bus.boot", "framework/event_bus.zig", 0.6, null, "{}");
+}
+
+fn setupDb() void {
     const home = std.posix.getenv("HOME") orelse return;
-    var dir_buf: [256]u8 = undefined;
+    var dir_buf: [384]u8 = undefined;
     const dir_path = std.fmt.bufPrint(&dir_buf, "{s}/.cache/reactjit", .{home}) catch return;
     std.fs.makeDirAbsolute(dir_path) catch |e| switch (e) {
         error.PathAlreadyExists => {},
         else => return,
     };
 
-    const log_path = std.fmt.bufPrint(&g_log_path_buf, "{s}/events-{s}.ndjson", .{ dir_path, sid_str }) catch return;
-    g_log_path_len = log_path.len;
+    const db_path = std.fmt.bufPrint(&g_db_path_buf, "{s}/{s}", .{ home, DB_SUBPATH }) catch return;
+    g_db_path_len = db_path.len;
 
-    const file = std.fs.createFileAbsolute(log_path, .{ .truncate = false }) catch return;
-    file.seekFromEnd(0) catch {};
-    g_log_file = file;
+    var db = sqlite.Database.open(db_path) catch return;
+    // WAL + relaxed sync = batched fsyncs (every checkpoint, not every
+    // commit). Combined with multi-process safety, this is what makes
+    // running eventlog as a separate reader cheap.
+    db.exec("PRAGMA journal_mode=WAL;") catch {};
+    db.exec("PRAGMA synchronous=NORMAL;") catch {};
+    db.exec(
+        \\CREATE TABLE IF NOT EXISTS events (
+        \\  id INTEGER PRIMARY KEY AUTOINCREMENT,
+        \\  ts_ms INTEGER NOT NULL,
+        \\  session_id TEXT NOT NULL,
+        \\  event_type TEXT NOT NULL,
+        \\  source TEXT NOT NULL,
+        \\  importance REAL NOT NULL,
+        \\  parent_id INTEGER,
+        \\  payload TEXT
+        \\);
+    ) catch {
+        db.close();
+        return;
+    };
+    db.exec("CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts_ms);") catch {};
+    db.exec("CREATE INDEX IF NOT EXISTS idx_events_imp ON events(importance);") catch {};
+    db.exec("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);") catch {};
 
-    for (&g_ring) |*e| e.* = .{};
-    g_ring_inited = true;
-    g_inited = true;
+    const stmt = db.prepare(
+        "INSERT INTO events(ts_ms, session_id, event_type, source, importance, parent_id, payload) VALUES (?, ?, ?, ?, ?, ?, ?);",
+    ) catch {
+        db.close();
+        return;
+    };
 
-    _ = emitWithImportance("bus.boot", "framework/event_bus.zig", 0.6, null, "{}");
+    g_db = db;
+    g_insert_stmt = stmt;
 }
 
 pub fn deinit() void {
     if (!g_inited) return;
-    if (g_log_file) |f| f.close();
-    g_log_file = null;
+    if (g_insert_stmt) |*s| s.deinit();
+    g_insert_stmt = null;
+    if (g_db) |*d| d.close();
+    g_db = null;
     if (g_ring_inited) {
         for (&g_ring) |*e| {
             if (e.event_type.len > 0) alloc.free(e.event_type);
@@ -167,12 +225,19 @@ pub fn emitWithImportance(
 ) u64 {
     if (!g_inited) return 0;
 
-    const id = g_next_id;
-    g_next_id += 1;
     const ts = std.time.milliTimestamp();
     const safe_payload = if (payload_json.len == 0) "{}" else payload_json;
 
-    if (g_log_file) |f| writeLine(f, id, ts, event_type, source, importance, parent_id, safe_payload);
+    // SQLite insert (when persistence is wired). The autoincrement column
+    // assigns its own rowid; we don't read it back — the ring's
+    // independent monotonic counter is what emit() returns to callers
+    // for parent_id chaining (works even when persistence is off).
+    if (g_insert_stmt) |*stmt| {
+        insertRow(stmt, ts, event_type, source, importance, parent_id, safe_payload);
+    }
+
+    const id = g_next_id;
+    g_next_id += 1;
 
     if (g_ring_inited) {
         const slot: usize = @intCast(g_ring_count % RING_SIZE);
@@ -195,9 +260,8 @@ pub fn emitWithImportance(
     return id;
 }
 
-fn writeLine(
-    f: std.fs.File,
-    id: u64,
+fn insertRow(
+    stmt: *sqlite.Statement,
     ts: i64,
     event_type: []const u8,
     source: []const u8,
@@ -205,21 +269,19 @@ fn writeLine(
     parent_id: ?u64,
     payload: []const u8,
 ) void {
-    var buf: std.ArrayList(u8) = .{};
-    defer buf.deinit(alloc);
-    const w = buf.writer(alloc);
+    stmt.reset() catch return;
+    stmt.bindInt(1, ts) catch return;
+    stmt.bindText(2, g_session_buf[0..g_session_len]) catch return;
+    stmt.bindText(3, event_type) catch return;
+    stmt.bindText(4, source) catch return;
+    stmt.bindFloat(5, importance) catch return;
     if (parent_id) |pid| {
-        w.print(
-            "{{\"id\":{d},\"ts\":{d},\"sid\":\"{s}\",\"type\":\"{s}\",\"src\":\"{s}\",\"imp\":{d:.3},\"par\":{d},\"payload\":{s}}}\n",
-            .{ id, ts, g_session_buf[0..g_session_len], event_type, source, importance, pid, payload },
-        ) catch return;
+        stmt.bindInt(6, @intCast(pid)) catch return;
     } else {
-        w.print(
-            "{{\"id\":{d},\"ts\":{d},\"sid\":\"{s}\",\"type\":\"{s}\",\"src\":\"{s}\",\"imp\":{d:.3},\"par\":null,\"payload\":{s}}}\n",
-            .{ id, ts, g_session_buf[0..g_session_len], event_type, source, importance, payload },
-        ) catch return;
+        stmt.bindNull(6) catch return;
     }
-    f.writeAll(buf.items) catch {};
+    stmt.bindText(7, payload) catch return;
+    _ = stmt.step() catch return;
 }
 
 // ── std.log adapter ────────────────────────────────────────────────────

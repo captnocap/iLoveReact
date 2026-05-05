@@ -1,18 +1,30 @@
-// devEventLog — the runtime-resident EventLog component.
+// devEventLog — observability cart that tails the SQLite events db.
 //
-// Lives in the SDK so runtime/index.tsx can wrap every dev-mode cart's
-// tree with `<Window><EventLog /></Window>` without forcing a cart-side
-// import. Same component is also re-exported by cart/eventlog/index.tsx
-// for users who want to ship the eventlog as a standalone cart.
+// Run as its own ship'd binary alongside the dev host. Two processes,
+// two V8 isolates, two ring buffers — no shared React tree, no feedback
+// loop. Both processes write to the SAME ~/.cache/reactjit/events.db
+// (WAL mode lets multiple readers + one writer coexist), and this cart
+// queries that db every refresh tick.
 //
-// Polls the in-memory ring (bus.recent) every 400ms and renders the last
-// N events newest-first. Filters by minimum importance + type substring.
-// The full record (including parent_id chains) is on disk at
-// ~/.cache/reactjit/events-<sessionId>.ndjson.
+// The cart filters out its OWN session_id so it doesn't display its own
+// renders/log calls. What you see is everyone else's traffic — the dev
+// host you're poking at, plus any other reactjit binaries running.
 
 import { useEffect, useMemo, useState } from 'react';
 import { Box, Col, Row, Text, Pressable, ScrollView, TextInput } from '@reactjit/runtime/primitives';
-import { bus, type BusEvent } from '@reactjit/runtime/eventBus';
+import { bus } from '@reactjit/runtime/eventBus';
+import * as sqlite from '@reactjit/runtime/hooks/sqlite';
+
+interface BusEvent {
+  id: number;
+  ts: number;
+  type: string;
+  src: string;
+  imp: number;
+  par: number | null;
+  sid: string;
+  payload: any;
+}
 
 const BG = '#0c0d10';
 const PANEL = '#15171c';
@@ -66,6 +78,10 @@ function payloadFull(payload: any): string {
   try { return JSON.stringify(payload, null, 2); } catch { return String(payload); }
 }
 
+function safeJson(s: string): any {
+  try { return JSON.parse(s); } catch { return s; }
+}
+
 export interface EventLogProps {
   /** Default minimum importance for the filter. Set to 0.3 to hide
    *  steady-state host.flush noise; 0 to show everything. */
@@ -81,17 +97,68 @@ export function EventLog({ defaultMinImportance = 0.3, refreshMs = REFRESH_MS }:
   const [typeFilter, setTypeFilter] = useState('');
   const [paused, setPaused] = useState(false);
   const [expanded, setExpanded] = useState<number | null>(null);
-  const [sid, setSid] = useState('');
+  const [ownSid] = useState(() => bus.sessionId());
+  const [dbHandle, setDbHandle] = useState<number>(0);
+  const [dbErr, setDbErr] = useState<string>('');
 
-  useEffect(() => { setSid(bus.sessionId()); }, []);
+  // Open the events db once. This is the bus's canonical SQLite file
+  // (`~/.cache/reactjit/events.db`); both this process and the dev host
+  // share it via WAL. Path comes from the bus's host fn so we don't have
+  // to know $HOME on the JS side.
+  useEffect(() => {
+    const path = bus.dbPath();
+    if (!path) {
+      setDbErr('bus has no db path (sqlite not linked?)');
+      return;
+    }
+    try {
+      const h = sqlite.open(path);
+      setDbHandle(h);
+      return () => { try { sqlite.close(h); } catch {} };
+    } catch (e: any) {
+      setDbErr(`open failed: ${e?.message || e}`);
+    }
+  }, []);
 
   useEffect(() => {
     if (paused) return;
-    const tick = () => setEvents(bus.recent(MAX_EVENTS, 0));
+    if (!dbHandle) return;
+    const tick = () => {
+      try {
+        // Filter out our own session so we don't display events caused by
+        // this cart's own renders. Order by id DESC + LIMIT keeps latency
+        // bounded regardless of how big the db has grown.
+        const rows = sqlite.query<{
+          id: number; ts_ms: number; session_id: string;
+          event_type: string; source: string; importance: number;
+          parent_id: number | null; payload: string | null;
+        }>(dbHandle,
+          `SELECT id, ts_ms, session_id, event_type, source, importance, parent_id, payload
+             FROM events
+             WHERE session_id != ?
+             ORDER BY id DESC
+             LIMIT ?`,
+          [ownSid, MAX_EVENTS],
+        );
+        const mapped: BusEvent[] = rows.map(r => ({
+          id: r.id,
+          ts: r.ts_ms,
+          type: r.event_type,
+          src: r.source,
+          imp: r.importance,
+          par: r.parent_id,
+          sid: r.session_id,
+          payload: r.payload ? safeJson(r.payload) : null,
+        }));
+        setEvents(mapped);
+      } catch (e: any) {
+        setDbErr(`query failed: ${e?.message || e}`);
+      }
+    };
     tick();
     const id = setInterval(tick, refreshMs);
     return () => clearInterval(id);
-  }, [paused, refreshMs]);
+  }, [paused, refreshMs, dbHandle, ownSid]);
 
   const filtered = useMemo(() => {
     const needle = typeFilter.trim().toLowerCase();
@@ -120,7 +187,8 @@ export function EventLog({ defaultMinImportance = 0.3, refreshMs = REFRESH_MS }:
           <Col style={{ gap: 4 }}>
             <Text fontSize={20} color={TEXT} bold style={{ letterSpacing: 1 }}>EVENT LOG</Text>
             <Text fontSize={11} color={TEXT_DIM}>
-              session {sid || '—'} · {events.length} buffered · ring caps at 4096
+              own session {ownSid || '—'} · {events.length} loaded
+              {dbErr ? ` · ${dbErr}` : ''}
             </Text>
           </Col>
           <Row style={{ gap: 6, alignItems: 'center' }}>
