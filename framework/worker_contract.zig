@@ -916,6 +916,26 @@ pub const WorkerStore = struct {
                     .external_session_id = session.external_session_id,
                 });
             },
+            .tool_call => {
+                const id = event.tool_call_id orelse "";
+                const name = event.tool_call_name orelse "";
+                const args = event.tool_call_args orelse "{}";
+                const payload = try std.fmt.allocPrint(self.allocator,
+                    "{{\"id\":\"{s}\",\"name\":\"{s}\",\"input_json\":{s}}}",
+                    .{ id, name, args });
+                defer self.allocator.free(payload);
+                try self.appendEvent(.{
+                    .session_id = session.id,
+                    .backend = .openai_compat,
+                    .kind = .tool_call,
+                    .role = .tool,
+                    .model = session.model,
+                    .phase = "tool_use",
+                    .text = name,
+                    .payload_json = payload,
+                    .external_session_id = session.external_session_id,
+                });
+            },
             .completion => {
                 self.status = .active;
                 try self.appendEvent(.{

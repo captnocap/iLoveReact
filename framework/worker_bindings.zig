@@ -712,6 +712,12 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
                 return setReturnString(info, cx.iso, "");
             };
             ls.* = .{ .allocator = std.heap.c_allocator, .inner = inner };
+            // local_ai_runtime takes tools via setTools (not init opts);
+            // forward it here so the schema is in place before the
+            // worker thread sends its first CHAT.
+            if (jsonStrField(parsed.value, "tools_json")) |tools_json| {
+                inner.setTools(tools_json) catch {};
+            }
             ls.worker = std.Thread.spawn(.{}, LocalAiSession.workerEntry, .{ls}) catch {
                 ls.destroy();
                 return setReturnString(info, cx.iso, "");
@@ -723,11 +729,13 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
             const model_id = model orelse return setReturnString(info, cx.iso, "");
             const api_key = jsonStrField(parsed.value, "api_key");
             const system_prompt = jsonStrField(parsed.value, "system_prompt");
+            const tools_json = jsonStrField(parsed.value, "tools_json");
             const inner = openai_compat_sdk.Session.init(std.heap.c_allocator, .{
                 .base_url = base_url,
                 .api_key = api_key,
                 .model = model_id,
                 .system_prompt = system_prompt,
+                .tools_json = tools_json,
             }) catch return setReturnString(info, cx.iso, "");
             const os = std.heap.c_allocator.create(OpenAiSession) catch {
                 inner.deinit();
@@ -902,10 +910,12 @@ fn hostWorkerPoll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 // ── Host fn: __worker_respond ───────────────────────────────────────────
 //
-// Phase 1 stub. The cart-side `respond(requestId, payload)` path exists
-// in the API surface, but the per-backend reply dispatch (Kimi
-// approval/tool/question/hook, Codex approvals_reviewer) is wired up
-// when those backends graduate from the legacy bindings.
+// __worker_respond(worker_id, request_id, payload_json)
+//
+// For tool_call replies on local_ai and openai_compat, request_id is a
+// tool_call_id and payload_json is the result content. Other reply
+// shapes (Kimi approval/question/hook, Codex approvals) ride here too
+// once those backends grow respond paths.
 
 fn hostWorkerRespond(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -919,8 +929,48 @@ fn hostWorkerRespond(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
     const payload = jsStringArg(std.heap.page_allocator, info, 2) orelse return setReturnBool(info, cx.iso, false);
     defer std.heap.page_allocator.free(payload);
 
-    _ = lookup(id) orelse return setReturnBool(info, cx.iso, false);
-    setReturnBool(info, cx.iso, false);
+    const entry = lookup(id) orelse return setReturnBool(info, cx.iso, false);
+    switch (entry.session) {
+        .local_ai => {
+            entry.session.local_ai.inner.submitToolReply(request_id, payload) catch return setReturnBool(info, cx.iso, false);
+            return setReturnBool(info, cx.iso, true);
+        },
+        .openai_compat => {
+            entry.session.openai_compat.inner.submitToolResult(request_id, payload) catch return setReturnBool(info, cx.iso, false);
+            return setReturnBool(info, cx.iso, true);
+        },
+        else => return setReturnBool(info, cx.iso, false),
+    }
+}
+
+// __worker_set_tools(worker_id, tools_json)
+//
+// Pushes a tools schema (JSON array string) onto the worker's session.
+// local_ai routes to local_ai_runtime.Session.setTools (sent as a TOOLS
+// message before the next CHAT). openai_compat stores it on the SDK
+// Session so it rides every chat-completions request body.
+fn hostWorkerSetTools(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const cx = callbackCtx(info);
+    if (info.length() < 2) return setReturnBool(info, cx.iso, false);
+
+    const id = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnBool(info, cx.iso, false);
+    defer std.heap.page_allocator.free(id);
+    const tools_json = jsStringArg(std.heap.page_allocator, info, 1) orelse return setReturnBool(info, cx.iso, false);
+    defer std.heap.page_allocator.free(tools_json);
+
+    const entry = lookup(id) orelse return setReturnBool(info, cx.iso, false);
+    switch (entry.session) {
+        .local_ai => {
+            entry.session.local_ai.inner.setTools(tools_json) catch return setReturnBool(info, cx.iso, false);
+            return setReturnBool(info, cx.iso, true);
+        },
+        .openai_compat => {
+            entry.session.openai_compat.inner.setTools(tools_json) catch return setReturnBool(info, cx.iso, false);
+            return setReturnBool(info, cx.iso, true);
+        },
+        else => return setReturnBool(info, cx.iso, false),
+    }
 }
 
 // ── Host fn: __worker_close ─────────────────────────────────────────────
@@ -952,5 +1002,6 @@ pub fn register() void {
     v8rt.registerHostFn("__worker_send", hostWorkerSend);
     v8rt.registerHostFn("__worker_poll", hostWorkerPoll);
     v8rt.registerHostFn("__worker_respond", hostWorkerRespond);
+    v8rt.registerHostFn("__worker_set_tools", hostWorkerSetTools);
     v8rt.registerHostFn("__worker_close", hostWorkerClose);
 }

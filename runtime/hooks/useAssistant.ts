@@ -90,6 +90,10 @@ export interface UseAssistantOpts {
   baseUrl?: string;       // openai_compat (e.g. http://localhost:1234/v1)
   apiKey?: string;        // openai_compat (Bearer token)
   systemPrompt?: string;  // openai_compat (initial system message)
+  /** Tools schema as a JSON array string. Format follows OpenAI's
+   *  `tools:[{type:"function",function:{name,description,parameters}}, …]`.
+   *  local_ai's runtime treats this same shape as its TOOLS message. */
+  tools?: string;
   pollMs?: number;
   /** When true, the worker stays alive across unmount (dev hot-reload). */
   persistAcrossUnmount?: boolean;
@@ -102,8 +106,14 @@ export interface UseAssistantResult {
   error: string | null;
   /** Send user text. Returns false if the worker isn't ready. */
   ask: (text: string) => boolean;
-  /** Reply to an interactive request the worker emitted. */
+  /** Reply to an interactive request the worker emitted. For tool_call
+   *  events on local_ai / openai_compat, requestId is the tool_call_id
+   *  and payload is the result string the model receives. */
   respond: (requestId: string, payload: unknown) => boolean;
+  /** Replace the tools schema mid-session. Most callers pass `tools` on
+   *  the initial opts and never need this, but it's exposed for carts
+   *  that mutate their tool registry on the fly. */
+  setTools: (toolsJson: string) => boolean;
   /** Close the worker and free its session. */
   close: () => void;
   ready: () => boolean;
@@ -122,6 +132,7 @@ function buildOptsJson(opts: UseAssistantOpts): string {
   if (opts.baseUrl) out.base_url = opts.baseUrl;
   if (opts.apiKey) out.api_key = opts.apiKey;
   if (opts.systemPrompt) out.system_prompt = opts.systemPrompt;
+  if (opts.tools) out.tools_json = opts.tools;
   return JSON.stringify(out);
 }
 
@@ -236,6 +247,12 @@ export function useAssistant(opts: UseAssistantOpts): UseAssistantResult {
     return callHost<boolean>('__worker_respond', false, wid, requestId, json);
   };
 
+  const setTools = (toolsJson: string): boolean => {
+    const wid = workerIdRef.current;
+    if (!wid || !hasHost('__worker_set_tools')) return false;
+    return callHost<boolean>('__worker_set_tools', false, wid, toolsJson);
+  };
+
   const close = (): void => {
     const wid = workerIdRef.current;
     if (!wid) return;
@@ -249,5 +266,5 @@ export function useAssistant(opts: UseAssistantOpts): UseAssistantResult {
 
   const ready = (): boolean => phaseRef.current !== 'init' && phaseRef.current !== 'starting' && phaseRef.current !== 'failed' && phaseRef.current !== 'closed';
 
-  return { events, phase, workerId, error, ask, respond, close, ready };
+  return { events, phase, workerId, error, ask, respond, setTools, close, ready };
 }
