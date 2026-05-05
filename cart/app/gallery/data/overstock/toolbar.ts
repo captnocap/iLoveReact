@@ -1,4 +1,4 @@
-import type { ControlTone } from '../components/controls-specimen/controlsSpecimenTheme';
+import type { ControlTone } from '../../components/controls-specimen/controlsSpecimenTheme';
 
 export type ToolbarOrientation = 'horizontal' | 'vertical';
 export type ToolbarKind = 'text-menu' | 'icon-bar' | 'status' | 'vertical';

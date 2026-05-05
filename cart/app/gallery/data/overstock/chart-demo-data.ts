@@ -1,5 +1,5 @@
 import type { GalleryDataReference, JsonObject } from '../../types';
-import { PALETTE } from '../lib/chart-palette';
+import { PALETTE } from '../../lib/chart-palette';
 
 function objectSchema(properties: Record<string, JsonObject>, required: string[] = Object.keys(properties)): JsonObject {
   return {

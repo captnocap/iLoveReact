@@ -14,7 +14,7 @@
 // strategy's other knobs).
 
 import type { GalleryDataReference, JsonObject } from '../../types';
-import type { EmbeddingEntityKind } from './embedding';
+import type { EmbeddingEntityKind } from '../overstock/embedding';
 
 export type RetrievalScoringMode =
   | 'cosine'

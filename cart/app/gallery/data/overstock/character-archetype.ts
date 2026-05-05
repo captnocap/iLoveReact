@@ -19,7 +19,7 @@ import type {
   CharacterCorrectionStyle,
   CharacterInitiativeProfile,
   CharacterRelationshipStance,
-} from './character';
+} from '../core/character';
 
 export type CharacterArchetype = {
   id: string;

@@ -9,7 +9,7 @@
 // env. Add rows only for variables we actively support or document.
 
 import type { GalleryDataReference, JsonObject } from '../../types';
-import { CONNECTION_KINDS, type ConnectionKind } from './connection';
+import { CONNECTION_KINDS, type ConnectionKind } from '../core/connection';
 
 export type EnvVarRole =
   | 'auth'

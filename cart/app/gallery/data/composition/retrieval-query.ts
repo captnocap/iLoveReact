@@ -13,7 +13,7 @@
 // the result row preserves what was actually retrieved).
 
 import type { GalleryDataReference, JsonObject } from '../../types';
-import type { EmbeddingEntityKind } from './embedding';
+import type { EmbeddingEntityKind } from '../overstock/embedding';
 
 export type RetrievalResult = {
   rank: number;
