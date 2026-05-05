@@ -1,0 +1,9 @@
+#!/bin/sh
+# scripts/devshell — TUI dev shell. Tab-switched panes for logs, eventlog,
+# inspector, bundle stats, status. Currently scaffolded; panes wire up
+# incrementally.
+#
+# Usage: scripts/devshell <cart-name>
+
+set -e
+exec "$(dirname "$0")/tui" tui/devshell/main.tsx "$@"
