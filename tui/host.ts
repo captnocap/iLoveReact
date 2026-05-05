@@ -346,7 +346,7 @@ function cellEq(a: Cell, b: Cell): boolean {
 function repaint() {
   if (!entered) return; // headless mode: paint goes through headlessSnapshot()
   const W = process.stdout.columns || 80;
-  const H = (process.stdout.rows || 24) - 1;
+  const H = process.stdout.rows || 24;
   const grid: Cell[][] = Array.from({ length: H }, () => Array.from({ length: W }, blank));
 
   const boxes: Box[] = [];
@@ -421,15 +421,34 @@ const RESTORE = '\x1b[?1049l';
 const HIDE = '\x1b[?25l';
 const SHOW = '\x1b[?25h';
 
+// 4Hz resize poll — v8cli has no SIGWINCH wiring, so we ioctl every 250ms
+// and repaint when dimensions actually change. Cheap (one syscall) and
+// far less hassle than threading a signal through the event loop.
+let lastW = 0, lastH = 0;
+let resizePollTimer: any = null;
+function pollResize() {
+  const w = process.stdout.columns || 80;
+  const h = process.stdout.rows || 24;
+  if (w !== lastW || h !== lastH) {
+    lastW = w; lastH = h;
+    prev = null; // dimensions changed → full repaint
+    scheduleRepaint();
+  }
+}
+
 export function enter() {
   entered = true;
   prev = null; // first frame after enter is always full repaint
+  lastW = process.stdout.columns || 80;
+  lastH = process.stdout.rows || 24;
   process.stdout.write(ALT + HIDE + '\x1b[2J\x1b[H');
   scheduleRepaint();
+  if (resizePollTimer == null) resizePollTimer = setInterval(pollResize, 250);
 }
 export function leave() {
   if (!entered) return;
   entered = false;
+  if (resizePollTimer != null) { clearInterval(resizePollTimer); resizePollTimer = null; }
   process.stdout.write('\x1b[0m' + SHOW + RESTORE);
 }
 

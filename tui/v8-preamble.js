@@ -29,9 +29,20 @@ if (typeof globalThis.queueMicrotask !== 'function') {
 globalThis.process = globalThis.process || {};
 const stdout = globalThis.process.stdout = globalThis.process.stdout || {};
 
-// __TUI_COLS__ / __TUI_ROWS__ are defined by esbuild at build time from `stty size`.
-stdout.columns = (typeof __TUI_COLS__ === 'number') ? __TUI_COLS__ : 80;
-stdout.rows    = (typeof __TUI_ROWS__ === 'number') ? __TUI_ROWS__ : 24;
+// Live terminal size via TIOCGWINSZ on every access — handles resize
+// without a SIGWINCH handler. Falls back to build-time defines, then 80x24.
+function __readTermSize() {
+  try {
+    const arr = JSON.parse(__termSize());
+    if (Array.isArray(arr) && arr.length === 2 && arr[0] > 0 && arr[1] > 0) return arr;
+  } catch {}
+  return [
+    (typeof __TUI_COLS__ === 'number') ? __TUI_COLS__ : 80,
+    (typeof __TUI_ROWS__ === 'number') ? __TUI_ROWS__ : 24,
+  ];
+}
+Object.defineProperty(stdout, 'columns', { get: () => __readTermSize()[0], configurable: true });
+Object.defineProperty(stdout, 'rows',    { get: () => __readTermSize()[1], configurable: true });
 stdout.write   = (s) => { __writeStdout(typeof s === 'string' ? s : String(s)); return true; };
 stdout.on      = () => stdout;
 stdout.isTTY   = true;

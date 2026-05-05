@@ -262,6 +262,29 @@ fn readStdin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setString(info, buf[0..n]);
 }
 
+/// __termSize() → JSON [cols, rows]. Reads via TIOCGWINSZ on stdin so it
+/// reflects the current terminal size on every call (not just at startup).
+/// Returns [0, 0] if stdin isn't a tty.
+const TIOCGWINSZ_REQ: c_ulong = 0x5413; // Linux constant
+const Winsize = extern struct { ws_row: u16, ws_col: u16, ws_xpixel: u16, ws_ypixel: u16 };
+extern fn ioctl(fd: c_int, request: c_ulong, ...) c_int;
+
+fn termSize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var ws: Winsize = .{ .ws_row = 0, .ws_col = 0, .ws_xpixel = 0, .ws_ypixel = 0 };
+    const r = ioctl(0, TIOCGWINSZ_REQ, &ws);
+    if (r < 0) {
+        setString(info, "[0,0]");
+        return;
+    }
+    var buf: [32]u8 = undefined;
+    const s = std.fmt.bufPrint(&buf, "[{d},{d}]", .{ ws.ws_col, ws.ws_row }) catch {
+        setString(info, "[0,0]");
+        return;
+    };
+    setString(info, s);
+}
+
 /// __pollFds(fdsJson, timeoutMs) → JSON array of indices ready to read.
 /// fdsJson is a JSON array of fd numbers, e.g. "[0, 5, 7]". Index 0 is
 /// stdin if 0 is in the list. Used by the dev-shell event loop to wait
@@ -655,7 +678,26 @@ fn forgetPid(pid: std.posix.pid_t) void {
     }
 }
 
+/// Restore the terminal to a sane state on any exit path. Only does work
+/// if the script actually opted into raw mode (g_termios_saved set) — for
+/// non-TUI scripts (cart-bundle, push-bundle) this is a no-op.
+///
+/// Emits alt-screen-off + cursor-on + SGR-reset so a TUI cart that
+/// crashed mid-paint doesn't leave the user's terminal painted into a
+/// corner. Both atexit (normal __exit) and the signal handler call this.
+fn restoreTty() callconv(.c) void {
+    if (g_termios_saved) |saved| {
+        std.posix.tcsetattr(0, .NOW, saved) catch {};
+        _ = std.posix.write(1, "\x1b[?1049l\x1b[?25h\x1b[0m") catch {};
+    }
+}
+
+extern fn atexit(func: *const fn () callconv(.c) void) c_int;
+
 fn signalHandler(sig: c_int) callconv(.c) void {
+    // Restore terminal first so the user's shell isn't left in raw mode
+    // / alt-screen if a TUI cart got SIGINT'd.
+    restoreTty();
     // Kill every tracked child, then re-raise the signal with the default
     // disposition so our own exit status reflects the signal that killed us.
     for (g_pid_table) |pid| {
@@ -663,8 +705,6 @@ fn signalHandler(sig: c_int) callconv(.c) void {
             _ = std.posix.kill(pid, std.posix.SIG.TERM) catch {};
         }
     }
-    // Restore default and re-raise so the parent shell sees SIGINT etc. as a
-    // real signal exit, not an ordinary exit.
     const dfl = std.posix.Sigaction{
         .handler = .{ .handler = std.posix.SIG.DFL },
         .mask = std.posix.sigemptyset(),
@@ -674,8 +714,9 @@ fn signalHandler(sig: c_int) callconv(.c) void {
     _ = std.posix.raise(@intCast(sig)) catch {};
 }
 
-/// Install SIGINT/SIGTERM/SIGHUP handlers that kill tracked child processes.
-/// Call once from main before spawning anything.
+/// Install SIGINT/SIGTERM/SIGHUP handlers that kill tracked child processes,
+/// plus an atexit hook for terminal restore. Call once from main before
+/// spawning anything.
 pub fn installSignalHandlers() void {
     const act = std.posix.Sigaction{
         .handler = .{ .handler = signalHandler },
@@ -685,6 +726,7 @@ pub fn installSignalHandlers() void {
     std.posix.sigaction(std.posix.SIG.INT, &act, null);
     std.posix.sigaction(std.posix.SIG.TERM, &act, null);
     std.posix.sigaction(std.posix.SIG.HUP, &act, null);
+    _ = atexit(restoreTty);
 }
 
 fn ensureChildren() void {
@@ -986,6 +1028,7 @@ pub fn registerAll() void {
     v8_runtime.registerHostFn("__setStdinRaw", setStdinRaw);
     v8_runtime.registerHostFn("__readStdin", readStdin);
     v8_runtime.registerHostFn("__pollFds", pollFds);
+    v8_runtime.registerHostFn("__termSize", termSize);
 
     v8_runtime.registerHostFn("__readFile", readFile);
     v8_runtime.registerHostFn("__writeFile", writeFile);
