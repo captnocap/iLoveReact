@@ -35,13 +35,19 @@ where that claim cashes out in file paths.
     ResultMsg with cost/duration.
   - `framework/claude_sdk/parser.zig` + `buffer.zig` — stream-json
     parsing.
-  - `framework/v8_bindings_sdk.zig` — JS bridge: `__claude_init(cwd,
-    model?, resumeId?)`, `__claude_send(text)`, `__claude_poll()`,
-    `__claude_close()`. Single global session today.
+  - `framework/v8_bindings_sdk.zig` — JS bridge: registers the unified
+    `__worker_*` host fns through `worker_bindings.register()`. The old
+    `__claude_*` / `__kimi_*` / `__localai_*` fns were retired in favor
+    of the single contract.
 - **Codex agent SDK** — `framework/codex_sdk.zig`.
 - **Kimi wire SDK** — `framework/kimi_wire_sdk.zig`.
-- **Generic agent core** — `framework/agent_core.zig`,
-  `framework/agent_session.zig`, `framework/agent_spawner.zig`.
+- **OpenAI-compat HTTP SDK** — `framework/openai_compat_sdk.zig` (covers
+  OpenAI proper, OpenRouter, LMStudio, Ollama, NanoGPT — anything
+  speaking `/v1/chat/completions` with SSE).
+- **Unified worker contract** — `framework/worker_contract.zig`
+  (Backend enum + WorkerStore + ingest fns) and
+  `framework/worker_bindings.zig` (per-session worker threads, five
+  `__worker_*` host fns).
 
 The carts at `cart/cockpit/index.tsx` and `cart/sweatshop/index.tsx`
 exist as existing carts that drive these SDKs as a working pattern
