@@ -6,8 +6,13 @@
 // Self-contained — no IPC, no socket, no dev-host required. Works
 // whether the cart is running or not, since metafiles are written by
 // scripts/dev's bundling step.
+//
+// Scrollable: ↑/↓ (or k/j) move by 1, PgUp/PgDn by viewport, g/Home top,
+// G/End bottom. Subscribed via the host key bus; only fires while the
+// pane is mounted (Shell unmounts on tab switch).
 
-import { createElement, useState, useEffect } from 'react';
+import { createElement, useState, useEffect, ReactElement } from 'react';
+import { subscribeKey } from '../../host';
 
 declare const __readFile: ((path: string) => string | null) | undefined;
 
@@ -36,9 +41,6 @@ function summarize(m: Meta): Summary | null {
   const entries = Object.entries(out.inputs).map(([path, v]) => ({ path, bytes: v.bytesInOutput }));
   entries.sort((a, b) => b.bytes - a.bytes);
 
-  // Group by first directory segment. Vendored deps collapse into
-  // `vendor/<pkg>` (two segments) so react / react-reconciler stay
-  // distinguishable in the breakdown.
   const dirs = new Map<string, { bytes: number; count: number }>();
   for (const e of entries) {
     const segs = e.path.split('/');
@@ -55,8 +57,8 @@ function summarize(m: Meta): Summary | null {
     entryPoint: out.entryPoint ?? '?',
     totalBytes: out.bytes,
     moduleCount: entries.length,
-    topModules: entries.slice(0, 10),
-    topDirs: topDirs.slice(0, 8),
+    topModules: entries.slice(0, 50),
+    topDirs,
   };
 }
 
@@ -77,9 +79,14 @@ function trimPath(p: string, max: number): string {
   return '…' + p.slice(p.length - max + 1);
 }
 
+// Chrome rows owned by the Shell that the pane has to subtract: title +
+// tabs + footer + pane Y-padding (top + bottom).
+const CHROME_ROWS = 5;
+
 export function BundlePane({ cart }: { cart: string }) {
   const [data, setData] = useState<Summary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [scrollY, setScrollY] = useState(0);
 
   useEffect(() => {
     if (typeof __readFile !== 'function') {
@@ -101,6 +108,62 @@ export function BundlePane({ cart }: { cart: string }) {
     }
   }, [cart]);
 
+  // Build the flat list of rows once per data change. `null` slots become
+  // blank lines; everything else is a ReactElement.
+  const rows: (ReactElement | null)[] = [];
+  if (data) {
+    const max = data.topModules[0]?.bytes ?? 1;
+    rows.push(<text key="title" fg="#fbbf24" bold>Bundle</text>);
+    rows.push(<Row key="r1" k="output" v={data.bundle} />);
+    rows.push(<Row key="r2" k="entry" v={data.entryPoint} />);
+    rows.push(<Row key="r3" k="size" v={`${fmtBytes(data.totalBytes)} · ${data.moduleCount} modules`} />);
+    rows.push(null);
+    rows.push(<text key="hd1" fg="#cbd5e1" bold>Top modules</text>);
+    for (const m of data.topModules) {
+      rows.push(
+        <box key={`m:${m.path}`} flexDirection="row" gap={1} align="start">
+          <text fg="#7c3aed">{bar(m.bytes / max)}</text>
+          <box width={10}><text fg="#fbbf24">{fmtBytes(m.bytes)}</text></box>
+          <text fg="#cbd5e1">{trimPath(m.path, 48)}</text>
+        </box>,
+      );
+    }
+    rows.push(null);
+    rows.push(<text key="hd2" fg="#cbd5e1" bold>By directory</text>);
+    for (const d of data.topDirs) {
+      rows.push(
+        <box key={`d:${d.dir}`} flexDirection="row" gap={1} align="start">
+          <text fg="#0f766e">{bar(d.bytes / data.totalBytes)}</text>
+          <box width={8}><text fg="#fbbf24">{((d.bytes / data.totalBytes) * 100).toFixed(1)}%</text></box>
+          <box width={10}><text fg="#94a3b8">{fmtBytes(d.bytes)}</text></box>
+          <text fg="#cbd5e1">{d.dir}<text fg="#64748b"> · {d.count}</text></text>
+        </box>,
+      );
+    }
+  }
+
+  // Live viewport — Shell re-renders at 5Hz so reading process.stdout.rows
+  // here picks up resize naturally.
+  const termRows = (typeof process !== 'undefined' && process.stdout?.rows) || 24;
+  // Reserve 1 row inside the pane for the scroll indicator.
+  const viewportH = Math.max(1, termRows - CHROME_ROWS - 1);
+  const maxScroll = Math.max(0, rows.length - viewportH);
+  const clampedScroll = Math.min(scrollY, maxScroll);
+  // If clamped (e.g. on resize that shrunk the list), correct stored
+  // state next tick to keep keys mapped to the right window.
+  useEffect(() => {
+    if (scrollY !== clampedScroll) setScrollY(clampedScroll);
+  }, [clampedScroll, scrollY]);
+
+  useEffect(() => subscribeKey(k => {
+    if (k === '\x1b[A' || k === 'k') setScrollY(y => Math.max(0, y - 1));
+    else if (k === '\x1b[B' || k === 'j') setScrollY(y => y + 1); // clamp on render
+    else if (k === '\x1b[5~') setScrollY(y => Math.max(0, y - viewportH));
+    else if (k === '\x1b[6~' || k === ' ') setScrollY(y => y + viewportH);
+    else if (k === 'g' || k === '\x1b[H') setScrollY(0);
+    else if (k === 'G' || k === '\x1b[F') setScrollY(99999); // clamp on render
+  }), [viewportH]);
+
   if (error) {
     return (
       <box flexDirection="column">
@@ -111,32 +174,26 @@ export function BundlePane({ cart }: { cart: string }) {
   }
   if (!data) return <text fg="#94a3b8">loading…</text>;
 
-  const max = data.topModules[0]?.bytes ?? 1;
+  const slice = rows.slice(clampedScroll, clampedScroll + viewportH);
+  const above = clampedScroll;
+  const below = Math.max(0, rows.length - clampedScroll - viewportH);
+
   return (
-    <box flexDirection="column">
-      <text fg="#fbbf24" bold>Bundle</text>
-      <Row k="output" v={data.bundle} />
-      <Row k="entry" v={data.entryPoint} />
-      <Row k="size" v={`${fmtBytes(data.totalBytes)} · ${data.moduleCount} modules`} />
-      <text> </text>
-      <text fg="#cbd5e1" bold>Top modules</text>
-      {data.topModules.map(m => (
-        <box key={m.path} flexDirection="row" gap={1} align="start">
-          <text fg="#7c3aed">{bar(m.bytes / max)}</text>
-          <box width={10}><text fg="#fbbf24">{fmtBytes(m.bytes)}</text></box>
-          <text fg="#cbd5e1">{trimPath(m.path, 48)}</text>
-        </box>
-      ))}
-      <text> </text>
-      <text fg="#cbd5e1" bold>By directory</text>
-      {data.topDirs.map(d => (
-        <box key={d.dir} flexDirection="row" gap={1} align="start">
-          <text fg="#0f766e">{bar(d.bytes / data.totalBytes)}</text>
-          <box width={8}><text fg="#fbbf24">{((d.bytes / data.totalBytes) * 100).toFixed(1)}%</text></box>
-          <box width={10}><text fg="#94a3b8">{fmtBytes(d.bytes)}</text></box>
-          <text fg="#cbd5e1">{d.dir}<text fg="#64748b"> · {d.count}</text></text>
-        </box>
-      ))}
+    <box flexDirection="column" height={viewportH + 1}>
+      {slice.map((r, i) => r ?? <text key={`blank:${i}`}> </text>)}
+      <ScrollIndicator above={above} below={below} cur={clampedScroll + 1} total={rows.length} />
+    </box>
+  );
+}
+
+function ScrollIndicator({ above, below, cur, total }: { above: number; below: number; cur: number; total: number }) {
+  const arrows: string[] = [];
+  if (above > 0) arrows.push(`↑ ${above} more`);
+  if (below > 0) arrows.push(`↓ ${below} more`);
+  const hint = arrows.length ? arrows.join('  ·  ') : 'all visible';
+  return (
+    <box flexDirection="row" gap={2}>
+      <text fg="#64748b">─── {cur}/{total}  {hint}  ·  k/j ↑↓ · PgUp/PgDn · g/G top/bottom</text>
     </box>
   );
 }

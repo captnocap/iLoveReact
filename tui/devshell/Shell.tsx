@@ -91,13 +91,19 @@ function ActivePane({ id, cart, hostUp, tick }: { id: TabId; cart: string; hostU
 function StatusPane({ cart, hostUp, tick }: { cart: string; hostUp: boolean; tick: number }) {
   return (
     <box flexDirection="column">
-      <text fg="#fbbf24" bold>Status</text>
-      <Row k="cart"        v={cart} />
+      <text fg="#fbbf24" bold>Target cart</text>
+      <Row k="name"        v={cart} />
       <Row k="dev host"    v={hostUp ? 'connected at /tmp/reactjit.sock' : 'not running'}
                             kc={hostUp ? '#34d399' : '#f87171'} />
-      <Row k="heartbeat"   v={`${tick} ticks · 5Hz`} />
+      <Row k="renderer"    v={hostUp ? 'GPU host (Zig · SDL3 · WebGPU)' : '—'} />
+      <Row k="bundle"      v={`.cache/bundle-${cart}.js`} />
+
+      <text fg="#64748b"> </text>
+      <text fg="#fbbf24" bold>Devshell (this UI)</text>
       <Row k="renderer"    v="tui/host.ts (24-bit ANSI, dirty diff)" />
-      <Row k="runtime"     v="tools/v8cli (zig + V8)" />
+      <Row k="runtime"     v="tools/v8cli (Zig · V8)" />
+      <Row k="heartbeat"   v={`${tick} ticks · 5Hz`} />
+
       <text fg="#64748b"> </text>
       <text fg="#64748b">Press 1..5 to switch tabs. Other panes are placeholders.</text>
     </box>
