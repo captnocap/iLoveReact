@@ -13,6 +13,8 @@ export type BoxProps = {
   flexDirection?: 'row' | 'column';
   gap?: number;
   padding?: number;
+  paddingX?: number;
+  paddingY?: number;
   bg?: string;     // hex "#rrggbb"
   fg?: string;
   border?: boolean;
@@ -142,7 +144,8 @@ function intrinsic(node: Node): { w: number; h: number } {
   if (node.kind === 'text') return { w: textOf(node).length, h: 1 };
 
   const p = node.props;
-  const pad = p.padding ?? 0;
+  const padX = p.paddingX ?? p.padding ?? 0;
+  const padY = p.paddingY ?? p.padding ?? 0;
   const gap = p.gap ?? 0;
   const dir = p.flexDirection ?? 'column';
   const border = p.border ? 1 : 0;
@@ -156,8 +159,8 @@ function intrinsic(node: Node): { w: number; h: number } {
     cw = kids.reduce((m, k) => Math.max(m, k.w), 0);
     ch = kids.reduce((a, k) => a + k.h, 0) + Math.max(0, kids.length - 1) * gap;
   }
-  const w = (typeof p.width === 'number') ? p.width : cw + pad * 2 + border * 2;
-  const h = (typeof p.height === 'number') ? p.height : ch + pad * 2 + border * 2;
+  const w = (typeof p.width === 'number') ? p.width : cw + padX * 2 + border * 2;
+  const h = (typeof p.height === 'number') ? p.height : ch + padY * 2 + border * 2;
   return { w, h };
 }
 
@@ -165,14 +168,15 @@ function layout(node: Node, x: number, y: number, w: number, h: number, out: Box
   out.push({ x, y, w, h, node });
   if (node.kind !== 'box') return;
   const p = node.props;
-  const pad = p.padding ?? 0;
+  const padX = p.paddingX ?? p.padding ?? 0;
+  const padY = p.paddingY ?? p.padding ?? 0;
   const gap = p.gap ?? 0;
   const dir = p.flexDirection ?? 'column';
   const border = p.border ? 1 : 0;
-  const ix = x + pad + border;
-  const iy = y + pad + border;
-  const iw = Math.max(0, w - pad * 2 - border * 2);
-  const ih = Math.max(0, h - pad * 2 - border * 2);
+  const ix = x + padX + border;
+  const iy = y + padY + border;
+  const iw = Math.max(0, w - padX * 2 - border * 2);
+  const ih = Math.max(0, h - padY * 2 - border * 2);
 
   const kids = node.children;
   if (kids.length === 0) return;
@@ -231,7 +235,7 @@ function layout(node: Node, x: number, y: number, w: number, h: number, out: Box
   const innerMain = dir === 'row' ? iw : ih;
   const innerCross = dir === 'row' ? ih : iw;
 
-  const sizes: { main: number; cross: number; grow: number; align: BoxProps['align'] }[] = [];
+  const sizes: { main: number; cross: number; grow: number; align: BoxProps['align'] | undefined }[] = [];
   let fixed = 0, growSum = 0;
   for (const k of kids) {
     const ip = intrinsic(k);
@@ -243,13 +247,19 @@ function layout(node: Node, x: number, y: number, w: number, h: number, out: Box
     if (explicitMain === 'fill') { grow = Math.max(grow, 1); mainSize = 0; }
     else if (typeof explicitMain === 'number') mainSize = explicitMain;
     else mainSize = main(ip);
-    const crossSize =
-      explicitCross === 'fill' ? innerCross
-      : typeof explicitCross === 'number' ? explicitCross
-      : Math.min(innerCross, cross(ip));
+    // CSS-flex cross sizing. `align` resolves like CSS align-self: child
+    // wins, else parent's align acts as align-items, else stretch. Stretch
+    // means crossSize = innerCross (full); start/center/end means shrink to
+    // intrinsic and offset.
+    const align = kp.align ?? p.align;
+    let crossSize: number;
+    if (explicitCross === 'fill') crossSize = innerCross;
+    else if (typeof explicitCross === 'number') crossSize = explicitCross;
+    else if (align === 'start' || align === 'center' || align === 'end') crossSize = Math.min(innerCross, cross(ip));
+    else crossSize = innerCross; // stretch (default)
     fixed += mainSize;
     growSum += grow;
-    sizes.push({ main: mainSize, cross: crossSize, grow, align: kp.align ?? p.align ?? 'start' });
+    sizes.push({ main: mainSize, cross: crossSize, grow, align });
   }
 
   const totalGap = Math.max(0, kids.length - 1) * gap;

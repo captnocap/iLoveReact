@@ -16,7 +16,8 @@ const TABS: { id: TabId; label: string }[] = [
   { id: 'status',  label: 'Status' },
 ];
 
-declare const __exists: (path: string) => boolean;
+declare const __exists: ((path: string) => boolean) | undefined;
+const probeHost = () => (typeof __exists === 'function') ? __exists('/tmp/reactjit.sock') : false;
 
 export function Shell({ cart }: { cart: string }) {
   const [active, setActive] = useState<TabId>('status');
@@ -29,7 +30,7 @@ export function Shell({ cart }: { cart: string }) {
     return () => clearInterval(t);
   }, []);
   useEffect(() => {
-    setHostUp(__exists('/tmp/reactjit.sock'));
+    setHostUp(probeHost());
   }, [tick]);
 
   useEffect(() => subscribeKey(k => {
@@ -44,45 +45,34 @@ export function Shell({ cart }: { cart: string }) {
 
   return (
     <box width="fill" height="fill" bg="#0b1020" fg="#e5e7eb" flexDirection="column">
-      {/* Title bar */}
-      <box flexDirection="row" gap={2} padding={1} bg="#111827" align="center">
-        <box bg="#1d4ed8" fg="#ffffff" padding={1} border borderColor="#60a5fa">
-          <text bold>rjit devshell</text>
-        </box>
+      {/* Title bar — single row */}
+      <box flexDirection="row" gap={2} paddingX={1} bg="#111827">
+        <text bold fg="#60a5fa">rjit</text>
         <text fg="#cbd5e1">cart=<text bold fg="#fbbf24">{cart}</text></text>
         <text fg={hostUp ? '#34d399' : '#f87171'}>host {hostUp ? '● up' : '○ down'}</text>
         <text fg="#94a3b8">{spinner} {now}</text>
       </box>
 
-      {/* Tab strip */}
-      <box flexDirection="row" gap={1} padding={1} bg="#0b1020">
+      {/* Tab strip — single row, selection via bg + bold */}
+      <box flexDirection="row" gap={1} paddingX={1} bg="#0b1020">
         {TABS.map((t, i) => {
           const sel = active === t.id;
           return (
-            <box key={t.id}
-              bg={sel ? '#1e293b' : undefined}
-              fg={sel ? '#fbbf24' : '#94a3b8'}
-              padding={1}
-              border={sel}
-              borderColor="#fbbf24">
-              <text bold={sel}>[{i + 1}] {t.label}</text>
+            <box key={t.id} bg={sel ? '#1e293b' : undefined} paddingX={1}>
+              <text fg={sel ? '#fbbf24' : '#94a3b8'} bold={sel}>{i + 1}·{t.label}</text>
             </box>
           );
         })}
       </box>
 
-      {/* Active pane */}
-      <box flexGrow={1} padding={1} border borderColor="#334155">
+      {/* Active pane — no border, just inset */}
+      <box flexGrow={1} paddingX={2} paddingY={1}>
         <ActivePane id={active} cart={cart} hostUp={hostUp} tick={tick} />
       </box>
 
-      {/* Footer */}
-      <box flexDirection="row" gap={2} padding={1} bg="#111827">
-        <text fg="#64748b">[1..5] tab</text>
-        <text fg="#64748b">F2 restart</text>
-        <text fg="#64748b">F3 rebuild</text>
-        <text fg="#64748b">F5 pick</text>
-        <text fg="#64748b">q quit</text>
+      {/* Footer — single row */}
+      <box flexDirection="row" gap={2} paddingX={1} bg="#111827">
+        <text fg="#64748b">1..5 tab · F2 restart · F3 rebuild · F5 pick · q quit</text>
       </box>
     </box>
   );
@@ -99,15 +89,16 @@ function ActivePane({ id, cart, hostUp, tick }: { id: TabId; cart: string; hostU
 
 function StatusPane({ cart, hostUp, tick }: { cart: string; hostUp: boolean; tick: number }) {
   return (
-    <box flexDirection="column" gap={1}>
+    <box flexDirection="column">
       <text fg="#fbbf24" bold>Status</text>
       <Row k="cart"        v={cart} />
       <Row k="dev host"    v={hostUp ? 'connected at /tmp/reactjit.sock' : 'not running'}
                             kc={hostUp ? '#34d399' : '#f87171'} />
       <Row k="heartbeat"   v={`${tick} ticks · 5Hz`} />
-      <Row k="renderer"    v="tui/host.ts (24-bit ANSI, dirty-frame diff)" />
-      <Row k="runtime"     v="tools/v8cli (zig + V8) · no node, no bun" />
-      <text fg="#64748b">{`\nPress 1..5 to switch tabs. Other panes are placeholders — see plan in each.`}</text>
+      <Row k="renderer"    v="tui/host.ts (24-bit ANSI, dirty diff)" />
+      <Row k="runtime"     v="tools/v8cli (zig + V8)" />
+      <text fg="#64748b"> </text>
+      <text fg="#64748b">Press 1..5 to switch tabs. Other panes are placeholders.</text>
     </box>
   );
 }
