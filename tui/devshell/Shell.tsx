@@ -6,6 +6,7 @@
 
 import { createElement, useState, useEffect } from 'react';
 import { subscribeKey } from '../host';
+import { BundlePane } from './panes/Bundle';
 
 type TabId = 'logs' | 'events' | 'inspect' | 'bundle' | 'status';
 const TABS: { id: TabId; label: string }[] = [
@@ -83,7 +84,7 @@ function ActivePane({ id, cart, hostUp, tick }: { id: TabId; cart: string; hostU
   if (id === 'logs')    return <Placeholder name="Logs"        next="spawn dev host as child, capture stdout/stderr via __spawn + __childReadLine, ring-buffer, render scrollable" />;
   if (id === 'events')  return <Placeholder name="Eventlog"    next="extend dev_ipc.zig with QUERY-EVENTS command; reuse SQL filter from cart/eventlog" />;
   if (id === 'inspect') return <Placeholder name="Inspector"   next="extend dev_ipc.zig with PICK-ELEMENT (request) + ELEMENT-INFO (reply); cart enters pick mode" />;
-  if (id === 'bundle')  return <Placeholder name="Bundle Stats" next="parse .cache/bundle-{cart}.js.metafile.json; render top modules by size" />;
+  if (id === 'bundle')  return <BundlePane cart={cart} />;
   return null;
 }
 

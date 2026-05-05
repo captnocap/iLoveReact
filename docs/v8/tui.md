@@ -204,7 +204,7 @@ Current panes (one is real, the rest are scaffolded):
 | 1 | Logs | placeholder. Plan: spawn dev host as child via `__spawn`, capture stdout/stderr via `__childReadLine`, ring-buffer + scrollback. |
 | 2 | Events | placeholder. Plan: extend `framework/dev_ipc.zig` with `QUERY-EVENTS` command; reuse SQL filter from `cart/eventlog/`. |
 | 3 | Inspect | placeholder. Plan: `PICK-ELEMENT` (request) + `ELEMENT-INFO` (reply); cart enters pick mode; render fiber tree as Box/Text. |
-| 4 | Bundle | placeholder. Plan: parse `.cache/bundle-<cart>.js.metafile.json`; render top modules by size. |
+| 4 | Bundle | live. Parses `.cache/bundle-<cart>.js.metafile.json`. Shows total bundle size + module count, top 10 modules by `bytesInOutput` with bar charts, and per-top-level-directory breakdown (`vendor/<pkg>` collapses to two segments so react / react-reconciler stay distinct). Self-contained — no IPC, runs whether the cart is up or not. |
 | 5 | Status | live. cart name, dev-host socket up/down probe, heartbeat counter, runtime info. |
 
 Tab keys `1..5` switch panes. `q` / ctrl-c quits. `F2` / `F3` / `F5`
