@@ -299,6 +299,12 @@ if [[ -f "$METAFILE" ]]; then
     fi
     if [[ "$WANT_SQLITE" == "1" ]]; then
         SQLITE_FLAG="-Dhas-sqlite=true"
+        # __sql_* host fns are registered inside v8_bindings_telemetry.zig,
+        # so SQLite consumers also need has-telemetry to pull that binding
+        # in. Couple them here until __sql_* moves to its own binding
+        # (TODO: extract to v8_bindings_sqlite.zig).
+        TEL_FLAG="-Dhas-telemetry=true"
+        WANT_TEL=1
     fi
     if [[ "$WANT_EMBED" == "1" ]]; then
         EMBED_FLAG="-Dhas-embed=true"
