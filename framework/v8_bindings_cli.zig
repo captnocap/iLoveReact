@@ -10,6 +10,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const hotstate = @import("hotstate.zig");
 
 extern fn getpid() c_int;
 extern fn usleep(usec: c_uint) c_int;
@@ -1010,6 +1011,72 @@ fn unixClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setUndefined(info);
 }
 
+// ── hotstate (cross-reload state survival) ────────────────────────────
+//
+// Backed by framework/hotstate.zig — a key→JSON-string map living in the
+// process. Survives a v8cli reload AND even surviving a full v8cli
+// restart (engine writes a snapshot on exit, reads it on next start —
+// not yet wired here, but the storage layer is the same one the GPU
+// stack uses for useHotState). Used by the TUI engine to flash useHot
+// slots before swapping a user bundle.
+
+fn hotGet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const key = argStringAlloc(alloc, info, 0) orelse {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(key);
+    if (hotstate.get(key)) |v| setString(info, v) else setNull(info);
+}
+
+fn hotSet(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const key = argStringAlloc(alloc, info, 0) orelse {
+        setUndefined(info);
+        return;
+    };
+    defer alloc.free(key);
+    const val = argStringAlloc(alloc, info, 1) orelse {
+        setUndefined(info);
+        return;
+    };
+    defer alloc.free(val);
+    hotstate.set(key, val);
+    setUndefined(info);
+}
+
+fn hotRemove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const key = argStringAlloc(alloc, info, 0) orelse {
+        setUndefined(info);
+        return;
+    };
+    defer alloc.free(key);
+    hotstate.remove(key);
+    setUndefined(info);
+}
+
+fn hotClear(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    hotstate.clear();
+    setUndefined(info);
+}
+
+fn hotKeys(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const json = hotstate.keysJson(alloc) catch {
+        setString(info, "[]");
+        return;
+    };
+    defer alloc.free(json);
+    setString(info, json);
+}
+
 // ── registration ───────────────────────────────────────────────────────
 
 /// Install all CLI bindings into the current V8 context as global __xxx fns.
@@ -1029,6 +1096,12 @@ pub fn registerAll() void {
     v8_runtime.registerHostFn("__readStdin", readStdin);
     v8_runtime.registerHostFn("__pollFds", pollFds);
     v8_runtime.registerHostFn("__termSize", termSize);
+
+    v8_runtime.registerHostFn("__hotGet", hotGet);
+    v8_runtime.registerHostFn("__hotSet", hotSet);
+    v8_runtime.registerHostFn("__hotRemove", hotRemove);
+    v8_runtime.registerHostFn("__hotClear", hotClear);
+    v8_runtime.registerHostFn("__hotKeys", hotKeys);
 
     v8_runtime.registerHostFn("__readFile", readFile);
     v8_runtime.registerHostFn("__writeFile", writeFile);
