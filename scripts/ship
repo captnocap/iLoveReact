@@ -229,6 +229,7 @@ VOICE_FLAG=""
 WHISPER_FLAG=""
 PG_FLAG=""
 EMBED_FLAG=""
+SQLITE_FLAG=""
 WANT_PRIVACY=0
 WANT_USEHOST=0
 WANT_USECONN=0
@@ -241,6 +242,7 @@ WANT_VOICE=0
 WANT_WHISPER=0
 WANT_PG=0
 WANT_EMBED=0
+WANT_SQLITE=0
 if [[ -f "$METAFILE" ]]; then
     # Pure JSON membership check — v8cli reads the metafile, walks
     # outputs[].inputs (bytes-actually-shipped), and emits a single line of
@@ -254,7 +256,7 @@ if [[ -f "$METAFILE" ]]; then
         echo "[ship] any cart that uses a gated hook would crash at runtime." >&2
         exit 1
     fi
-    read -r WANT_PRIVACY WANT_USEHOST WANT_USECONN WANT_FS WANT_WS WANT_TEL WANT_ZIGCALL WANT_SDK WANT_VOICE WANT_WHISPER WANT_PG WANT_EMBED <<< "$GATE_FLAGS"
+    read -r WANT_PRIVACY WANT_USEHOST WANT_USECONN WANT_FS WANT_WS WANT_TEL WANT_ZIGCALL WANT_SDK WANT_VOICE WANT_WHISPER WANT_PG WANT_EMBED WANT_SQLITE <<< "$GATE_FLAGS"
     if [[ "$WANT_PRIVACY" == "1" ]]; then
         PRIVACY_FLAG="-Dhas-privacy=true"
     fi
@@ -294,6 +296,9 @@ if [[ -f "$METAFILE" ]]; then
     # has-embed implies has-pg (embed.zig pulls in framework/pg.zig).
     if [[ "$WANT_PG" == "1" ]] || [[ "$WANT_EMBED" == "1" ]]; then
         PG_FLAG="-Dhas-pg=true"
+    fi
+    if [[ "$WANT_SQLITE" == "1" ]]; then
+        SQLITE_FLAG="-Dhas-sqlite=true"
     fi
     if [[ "$WANT_EMBED" == "1" ]]; then
         EMBED_FLAG="-Dhas-embed=true"
@@ -396,7 +401,7 @@ if [[ -d "$RJIT_HOME/deps/sysroot/usr/include" ]]; then
     done
 fi
 
-echo "[ship]   zig flags: $V8_FLAG${CUSTOM_CHROME_FLAG:+ $CUSTOM_CHROME_FLAG} $OPT_FLAG${SYSROOT_FLAG:+ $SYSROOT_FLAG}${PRIVACY_FLAG:+ $PRIVACY_FLAG}${PROCESS_FLAG:+ $PROCESS_FLAG}${HTTPSRV_FLAG:+ $HTTPSRV_FLAG}${WSSRV_FLAG:+ $WSSRV_FLAG}${NET_FLAG:+ $NET_FLAG}${TOR_FLAG:+ $TOR_FLAG}${FS_FLAG:+ $FS_FLAG}${WS_FLAG:+ $WS_FLAG}${TEL_FLAG:+ $TEL_FLAG}${ZIGCALL_FLAG:+ $ZIGCALL_FLAG}${SDK_FLAG:+ $SDK_FLAG}${VOICE_FLAG:+ $VOICE_FLAG}${WHISPER_FLAG:+ $WHISPER_FLAG}${PG_FLAG:+ $PG_FLAG}${EMBED_FLAG:+ $EMBED_FLAG}"
+echo "[ship]   zig flags: $V8_FLAG${CUSTOM_CHROME_FLAG:+ $CUSTOM_CHROME_FLAG} $OPT_FLAG${SYSROOT_FLAG:+ $SYSROOT_FLAG}${PRIVACY_FLAG:+ $PRIVACY_FLAG}${PROCESS_FLAG:+ $PROCESS_FLAG}${HTTPSRV_FLAG:+ $HTTPSRV_FLAG}${WSSRV_FLAG:+ $WSSRV_FLAG}${NET_FLAG:+ $NET_FLAG}${TOR_FLAG:+ $TOR_FLAG}${FS_FLAG:+ $FS_FLAG}${WS_FLAG:+ $WS_FLAG}${TEL_FLAG:+ $TEL_FLAG}${ZIGCALL_FLAG:+ $ZIGCALL_FLAG}${SDK_FLAG:+ $SDK_FLAG}${VOICE_FLAG:+ $VOICE_FLAG}${WHISPER_FLAG:+ $WHISPER_FLAG}${PG_FLAG:+ $PG_FLAG}${EMBED_FLAG:+ $EMBED_FLAG}${SQLITE_FLAG:+ $SQLITE_FLAG}"
 
 # Zig package cache override — ONLY when running off-tree (rjit-driven).
 # In rjit-driven mode the SDK ships a bundled cache at tools/zig/cache/p/
@@ -407,7 +412,7 @@ if [[ "$CART_ROOT" != "$RJIT_HOME" ]]; then
     export ZIG_GLOBAL_CACHE_DIR="$RJIT_HOME/tools/zig/cache"
 fi
 
-"$ZIG" build app -p "$CART_ROOT/zig-out" -Dapp-name="$NAME" -Dapp-source="$APP_SOURCE" -Dbundle-path="$EMBED_BUNDLE" $V8_FLAG $CUSTOM_CHROME_FLAG $OPT_FLAG $SYSROOT_FLAG $PRIVACY_FLAG $PROCESS_FLAG $HTTPSRV_FLAG $WSSRV_FLAG $NET_FLAG $TOR_FLAG $FS_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $SDK_FLAG $VOICE_FLAG $WHISPER_FLAG $PG_FLAG $EMBED_FLAG
+"$ZIG" build app -p "$CART_ROOT/zig-out" -Dapp-name="$NAME" -Dapp-source="$APP_SOURCE" -Dbundle-path="$EMBED_BUNDLE" $V8_FLAG $CUSTOM_CHROME_FLAG $OPT_FLAG $SYSROOT_FLAG $PRIVACY_FLAG $PROCESS_FLAG $HTTPSRV_FLAG $WSSRV_FLAG $NET_FLAG $TOR_FLAG $FS_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $SDK_FLAG $VOICE_FLAG $WHISPER_FLAG $PG_FLAG $EMBED_FLAG $SQLITE_FLAG
 
 BUILD_BIN="$CART_ROOT/zig-out/bin/$NAME"
 if [[ ! -f "$BUILD_BIN" ]]; then

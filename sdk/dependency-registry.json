@@ -275,6 +275,7 @@
       "nativeLibraries": ["box2d"]
     },
     "sqlite": {
+      "shipGate": "sqlite",
       "triggers": [
         { "kind": "metafileInput", "input": "runtime/hooks/sqlite.ts" },
         { "kind": "metafileInput", "input": "runtime/hooks/localstore.ts" },
@@ -427,6 +428,6 @@
     }
   },
   "shipGate": {
-    "flagOrder": ["privacy", "useHost", "useConnection", "fs", "websocket", "telemetry", "zigcall", "sdk", "voice", "whisper", "pg", "embed"]
+    "flagOrder": ["privacy", "useHost", "useConnection", "fs", "websocket", "telemetry", "zigcall", "sdk", "voice", "whisper", "pg", "embed", "sqlite"]
   }
 }
