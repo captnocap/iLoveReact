@@ -24,6 +24,10 @@ export type ModelFamily =
 export type Model = {
   id: string;
   providerId: string;
+  /** FK → cart/app/gallery/data/core/model-family.ts. Carries the family-level
+   *  capability class. The `family` string below is denormalized for filter
+   *  cheapness and will be removed once all consumers resolve via familyId. */
+  familyId?: string;
   displayName: string;
   family: ModelFamily;
   contextWindow: number;
@@ -45,6 +49,7 @@ export const modelMockData: Model[] = [
   {
     id: 'claude-opus-4-7',
     providerId: 'anthropic',
+    familyId: 'fam_claude_4',
     displayName: 'Claude Opus 4.7',
     family: 'claude-4',
     contextWindow: 1_000_000,
@@ -63,6 +68,7 @@ export const modelMockData: Model[] = [
   {
     id: 'claude-sonnet-4-6',
     providerId: 'anthropic',
+    familyId: 'fam_claude_4',
     displayName: 'Claude Sonnet 4.6',
     family: 'claude-4',
     contextWindow: 200_000,
@@ -80,6 +86,7 @@ export const modelMockData: Model[] = [
   {
     id: 'claude-haiku-4-5',
     providerId: 'anthropic',
+    familyId: 'fam_claude_4',
     displayName: 'Claude Haiku 4.5',
     family: 'claude-4',
     contextWindow: 200_000,
@@ -98,6 +105,7 @@ export const modelMockData: Model[] = [
   {
     id: 'kimi-k2',
     providerId: 'moonshot',
+    familyId: 'fam_kimi_k2',
     displayName: 'Kimi K2',
     family: 'kimi-k2',
     contextWindow: 128_000,
@@ -113,6 +121,7 @@ export const modelMockData: Model[] = [
   {
     id: 'gpt-5',
     providerId: 'openai',
+    familyId: 'fam_gpt_5',
     displayName: 'GPT-5',
     family: 'gpt-5',
     contextWindow: 400_000,
@@ -131,6 +140,7 @@ export const modelMockData: Model[] = [
   {
     id: 'gpt-5.4-mini',
     providerId: 'local',
+    familyId: 'fam_local',
     displayName: 'GPT-5.4 mini (local)',
     family: 'local',
     contextWindow: 32_000,
@@ -165,6 +175,7 @@ export const modelSchema: JsonObject = {
     properties: {
       id: { type: 'string' },
       providerId: { type: 'string' },
+      familyId: { type: 'string' },
       displayName: { type: 'string' },
       family: {
         type: 'string',

@@ -181,7 +181,7 @@ export const tooltipSection = defineGallerySection({
                   data={{
                     title: hook.label,
                     detail: hook.summary || hook.id,
-                    badge: hook.action.kind,
+                    badge: hook.consequence.kind,
                     rows: [
                       { label: 'MATCH', value: hook.match.kind, tone: 'warn' },
                       { label: 'SUBJ', value: hook.match.subjectKind || 'any', tone: 'blue' },

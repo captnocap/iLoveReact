@@ -51,12 +51,58 @@ export type ConnectionCapabilities = {
 
 export type ConnectionStatus = 'active' | 'unauthorized' | 'unreachable' | 'disabled';
 
+/** Kind→transport split as data. `kind` carries the auth shape; `connectionType`
+ *  carries the wire shape. Adding a new kind doesn't have to imply a new
+ *  transport — a kimi-cli-wire variant could be `kind: 'kimi-api-key'` +
+ *  `connectionType: 'cli'`. */
+export type ConnectionTransport = 'cli' | 'http';
+
+/** Where workers backed by this Connection actually run. `host` = local
+ *  process, no isolation. `firecracker` = per-invocation Firecracker VM
+ *  picked from a VmImage. Other substrates may land later. */
+export type ConnectionExecutionSubstrate = 'host' | 'firecracker' | 'docker' | 'remote-ssh';
+
+export type ConnectionVmConfig = {
+  defaultVmImageId?: string;
+  /** Fall back to this image when the active recipe doesn't pin one. */
+  forceImageId?: string;
+  /** Hard cap on per-VM CPU. */
+  vcpuMax?: number;
+  /** Hard cap on per-VM memory. */
+  memMaxBytes?: number;
+  /** Worker branch retention policy after VM destruction. */
+  branchRetention?: 'preserve' | 'merge-or-delete' | 'delete-after-success';
+};
+
+/** CLI runtimes auto-load specific files at session start (claude-code reads
+ *  CLAUDE.md, codex reads AGENTS.md, etc.). Workers backed by this Connection
+ *  must render their composition assembly to one of these targets. */
+export type ConnectionAutoLoadedFile = {
+  path: string;
+  /** Composition target slot the assembler writes here. Mirrors the
+   *  spec's `target: "CLAUDE.md" | "system_prompt" | …`. */
+  assemblyTarget: string;
+  description?: string;
+};
+
 export type Connection = {
   id: string;
   settingsId: string;
   providerId: string;
   kind: ConnectionKind;
   label: string;
+  /** Wire shape — derived from `kind` for built-in kinds, but stored
+   *  explicitly so connection-type filters in rules / model-routes can
+   *  match without knowing the kind enum. */
+  connectionType?: ConnectionTransport;
+  /** Where the worker process runs. Defaults to 'host' for back-compat;
+   *  Firecracker substrate requires vmConfig to be set. */
+  executionSubstrate?: ConnectionExecutionSubstrate;
+  vmConfig?: ConnectionVmConfig;
+  /** Files the runtime auto-loads at session start. The assembler renders
+   *  the active prompt-composition into these. CLI kinds populate this; HTTP
+   *  kinds typically leave it empty (the prompt rides in the request body). */
+  autoLoadedFiles?: ConnectionAutoLoadedFile[];
   credentialRef: CredentialRef;
   capabilities: ConnectionCapabilities;
   status: ConnectionStatus;
@@ -75,6 +121,11 @@ export const connectionMockData: Connection[] = [
     providerId: 'anthropic',
     kind: 'claude-code-cli',
     label: 'Claude Code (subscription)',
+    connectionType: 'cli',
+    executionSubstrate: 'host',
+    autoLoadedFiles: [
+      { path: 'CLAUDE.md', assemblyTarget: 'cli-runtime-instructions', description: 'Auto-loaded by claude on session start.' },
+    ],
     credentialRef: { source: 'cli-session', locator: '~/.claude/' },
     capabilities: {
       streaming: true,
@@ -95,6 +146,8 @@ export const connectionMockData: Connection[] = [
     providerId: 'anthropic',
     kind: 'anthropic-api-key',
     label: 'Anthropic Console (project key)',
+    connectionType: 'http',
+    executionSubstrate: 'host',
     credentialRef: { source: 'env', locator: 'ANTHROPIC_API_KEY' },
     capabilities: {
       streaming: true,
@@ -114,6 +167,11 @@ export const connectionMockData: Connection[] = [
     providerId: 'moonshot',
     kind: 'kimi-api-key',
     label: 'Kimi (K2)',
+    connectionType: 'cli',
+    executionSubstrate: 'host',
+    autoLoadedFiles: [
+      { path: 'KIMI.md', assemblyTarget: 'cli-runtime-instructions', description: 'Auto-loaded by kimi --wire.' },
+    ],
     credentialRef: { source: 'env', locator: 'KIMI_API_KEY' },
     capabilities: {
       streaming: true,
@@ -133,6 +191,11 @@ export const connectionMockData: Connection[] = [
     providerId: 'openai',
     kind: 'openai-api-key',
     label: 'OpenAI (Codex)',
+    connectionType: 'http',
+    executionSubstrate: 'host',
+    autoLoadedFiles: [
+      { path: 'AGENTS.md', assemblyTarget: 'cli-runtime-instructions', description: 'Auto-loaded by codex CLI on session start.' },
+    ],
     credentialRef: { source: 'env', locator: 'OPENAI_API_KEY' },
     capabilities: {
       streaming: true,
@@ -151,6 +214,8 @@ export const connectionMockData: Connection[] = [
     providerId: 'local',
     kind: 'local-runtime',
     label: 'Local runtime',
+    connectionType: 'http',
+    executionSubstrate: 'host',
     credentialRef: { source: 'none' },
     capabilities: {
       streaming: true,
@@ -192,6 +257,32 @@ export const connectionSchema: JsonObject = {
       providerId: { type: 'string' },
       kind: { type: 'string', enum: CONNECTION_KINDS },
       label: { type: 'string' },
+      connectionType: { type: 'string', enum: ['cli', 'http'] },
+      executionSubstrate: { type: 'string', enum: ['host', 'firecracker', 'docker', 'remote-ssh'] },
+      vmConfig: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          defaultVmImageId: { type: 'string' },
+          forceImageId: { type: 'string' },
+          vcpuMax: { type: 'number' },
+          memMaxBytes: { type: 'number' },
+          branchRetention: { type: 'string', enum: ['preserve', 'merge-or-delete', 'delete-after-success'] },
+        },
+      },
+      autoLoadedFiles: {
+        type: 'array',
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['path', 'assemblyTarget'],
+          properties: {
+            path: { type: 'string' },
+            assemblyTarget: { type: 'string' },
+            description: { type: 'string' },
+          },
+        },
+      },
       credentialRef: {
         type: 'object',
         additionalProperties: false,

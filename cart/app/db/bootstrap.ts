@@ -99,3 +99,27 @@ export async function resetBucket(bucket: BucketId): Promise<void> {
   bootstrapped = false;
   await ensureBootstrapped();
 }
+
+/** Hard reset of EVERY bucket. DROPs all bucket databases then
+ *  re-bootstraps the whole cluster. Throws away every row.
+ *
+ *  Intended for fast iteration on shapes — when the registry adds /
+ *  renames entities, the cleanest path is `resetAll()` + reboot rather
+ *  than schema-migration scripting. The DB is treated as derivable
+ *  from the registry; nothing in it is canonical.
+ *
+ *  Mock data does not auto-seed — call your seeders after this resolves. */
+export async function resetAll(): Promise<void> {
+  const cluster = getClusterHandle();
+  for (const id of BUCKET_IDS) {
+    const name = BUCKETS[id].databaseName;
+    pg.exec(
+      cluster,
+      `SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ${lit(name)} AND pid <> pg_backend_pid()`,
+    );
+    const ok = pg.exec(cluster, `DROP DATABASE IF EXISTS ${ident(name)}`);
+    if (!ok) throw new Error(`DROP DATABASE ${name} failed.`);
+  }
+  bootstrapped = false;
+  await ensureBootstrapped();
+}

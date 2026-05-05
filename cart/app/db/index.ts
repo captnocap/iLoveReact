@@ -8,5 +8,5 @@
 export { BUCKETS, BUCKET_IDS, type Bucket, type BucketId } from './buckets';
 export { ENTITY_TO_BUCKET, bucketFor, entitiesByBucket } from './registry';
 export { useCRUD } from './useCRUD';
-export { ensureBootstrapped, resetBucket } from './bootstrap';
+export { ensureBootstrapped, resetBucket, resetAll } from './bootstrap';
 export { getHandle, query, exec, changes } from './connections';

@@ -51,6 +51,7 @@ import { modelCardSection } from './model-card.story';
 import { skeletonTilesSection } from './skeleton-tiles.story';
 import { sweatshopMatrixDisplaySection } from './sweatshop-matrix-display.story';
 import { astQuiltSection } from './ast-quilt.story';
+import { astTileBoxSection } from './ast-tile-box.story';
 import { easingsSection } from './easings.story';
 import { easingsLatchSection } from './easings-latch.story';
 import { easingsLatchFullSection } from './easings-latch-full.story';
@@ -187,7 +188,7 @@ import { jobRunSection } from './job-run.story';
 import { goalSection } from './goal.story';
 import { constraintSection } from './constraint.story';
 import { eventSection } from './event.story';
-import { eventHookSection } from './event-hook.story';
+import { ruleSection } from './rule.story';
 import { outcomeRubricSection } from './outcome-rubric.story';
 import { userInterventionSection } from './user-intervention.story';
 import { interpretationSection } from './interpretation.story';
@@ -212,7 +213,7 @@ import { constraintBadgeSection } from './constraint-badge.story';
 import { presetCardSection } from './preset-card.story';
 import { rubricPanelSection } from './rubric-panel.story';
 import { hookListSection } from './hook-list.story';
-import { compositionSection } from './composition.story';
+import { promptCompositionSection } from './prompt-composition.story';
 import { compositionSourceKindSection } from './composition-source-kind.story';
 import { promptFragmentSection } from './prompt-fragment.story';
 import { codeSnippetSection } from './code-snippet.story';
@@ -303,6 +304,7 @@ export const storySections: GallerySection[] = [
   skeletonTilesSection,
   sweatshopMatrixDisplaySection,
   astQuiltSection,
+  astTileBoxSection,
   easingsSection,
   easingsLatchSection,
   easingsLatchOnlySection,
@@ -437,7 +439,7 @@ export const storySections: GallerySection[] = [
   goalSection,
   constraintSection,
   eventSection,
-  eventHookSection,
+  ruleSection,
   outcomeRubricSection,
   userInterventionSection,
   interpretationSection,
@@ -462,7 +464,7 @@ export const storySections: GallerySection[] = [
   presetCardSection,
   rubricPanelSection,
   hookListSection,
-  compositionSection,
+  promptCompositionSection,
   compositionSourceKindSection,
   promptFragmentSection,
   codeSnippetSection,

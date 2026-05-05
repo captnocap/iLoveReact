@@ -30,7 +30,7 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'user-manifest': 'user',
   'workspace': 'user',
 
-  // ── assistant (33) ────────────────────────────────────────────────
+  // ── assistant (34) ────────────────────────────────────────────────
   'assistant': 'assistant',
   'capability': 'assistant',
   'character': 'assistant',
@@ -39,21 +39,21 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'character-quirk': 'assistant',
   'chat-session': 'assistant',
   'chat-turn': 'assistant',
-  'composition': 'assistant',
   'composition-source-kind': 'assistant',
   'constraint': 'assistant',
   'embedding-model': 'assistant',
   'event-adapter': 'assistant',
-  'event-hook': 'assistant',
   'inference-parameter': 'assistant',
   'inference-preset': 'assistant',
   'inference-request': 'assistant',
   'interpretation': 'assistant',
   'model': 'assistant',
+  'model-family': 'assistant',
   'model-route': 'assistant',
   'outcome-rubric': 'assistant',
   'personality-dial': 'assistant',
   'project-glossary': 'assistant',
+  'prompt-composition': 'assistant',
   'prompt-fragment': 'assistant',
   'prompt-template': 'assistant',
   'provider': 'assistant',
@@ -102,18 +102,36 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'task-graph': 'user-sweatshop',
   'workstream': 'user-sweatshop',
 
-  // ── supervisor-sweatshop (1) ──────────────────────────────────────
+  // ── supervisor-sweatshop (6) ──────────────────────────────────────
+  // The supervisor's domain: behavior floor, run-grain audit trails,
+  // per-judgment records. Quarantined from user-sweatshop so a
+  // supervisor-database corruption doesn't take user goal/plan data
+  // with it.
   'barrier': 'supervisor-sweatshop',
+  'composition-run': 'supervisor-sweatshop',
+  'pathology': 'supervisor-sweatshop',
+  'pathology-detection': 'supervisor-sweatshop',
+  'plan-deviation': 'supervisor-sweatshop',
+  'supervisor-judgment': 'supervisor-sweatshop',
 
-  // ── worker-sweatshop (8) ──────────────────────────────────────────
+  // ── worker-sweatshop (16) ─────────────────────────────────────────
+  'binary-shim': 'worker-sweatshop',
   'claude-cli-raw-event': 'worker-sweatshop',
   'codex-raw-event': 'worker-sweatshop',
   'event': 'worker-sweatshop',
   'job': 'worker-sweatshop',
   'job-run': 'worker-sweatshop',
+  'model-output': 'worker-sweatshop',
+  'rule': 'worker-sweatshop',
+  'rule-firing': 'worker-sweatshop',
+  'tool-call': 'worker-sweatshop',
+  'verb-invocation': 'worker-sweatshop',
+  'vm-image': 'worker-sweatshop',
+  'vm-run': 'worker-sweatshop',
   'worker': 'worker-sweatshop',
   'worker-event': 'worker-sweatshop',
   'worker-session': 'worker-sweatshop',
+  'worker-verb': 'worker-sweatshop',
 
   // ── provider-keys (0) ─────────────────────────────────────────────
   // Empty by design. Populate only if the cart starts storing key
