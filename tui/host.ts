@@ -244,8 +244,13 @@ function layout(node: Node, x: number, y: number, w: number, h: number, out: Box
     const explicitCross = dir === 'row' ? kp.height : kp.width;
     let mainSize: number;
     let grow = kp.flexGrow ?? 0;
+    // CSS-flex flex-basis default. With only flex-grow set (no width/
+    // height), basis is 0 — the child starts empty and gets all leftover
+    // space. Without this rule, an oversize child eats `free` via its
+    // intrinsic and starves later siblings (e.g. footer pushed off-screen).
     if (explicitMain === 'fill') { grow = Math.max(grow, 1); mainSize = 0; }
     else if (typeof explicitMain === 'number') mainSize = explicitMain;
+    else if (grow > 0) mainSize = 0;
     else mainSize = main(ip);
     // CSS-flex cross sizing. `align` resolves like CSS align-self: child
     // wins, else parent's align acts as align-items, else stretch. Stretch
