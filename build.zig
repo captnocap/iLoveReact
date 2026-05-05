@@ -513,11 +513,21 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     v8_cli_mod.addImport("v8", v8_mod);
+    // Same stack-shim requirement as the main app: v8_runtime.zig calls
+    // setStackLimit, which the prebuilt libc_v8.a doesn't ship.
+    v8_cli_mod.addCSourceFile(.{
+        .file = b.path("framework/ffi/v8_stack_shim.cpp"),
+        .flags = &.{ "-O2", "-std=c++17" },
+    });
 
     const v8_cli_exe = b.addExecutable(.{
         .name = "v8cli",
         .root_module = v8_cli_mod,
     });
+    // Match the main app's 64MB stack — v8_runtime.zig hands V8 a 16MB
+    // stack budget via SetStackLimit, so the OS stack must comfortably
+    // exceed that with native frame headroom on top.
+    v8_cli_exe.stack_size = 64 * 1024 * 1024;
     v8_cli_exe.linkLibC();
     v8_cli_exe.linkLibCpp();
 

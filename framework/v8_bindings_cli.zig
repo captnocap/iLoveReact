@@ -201,6 +201,132 @@ fn sleepMs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setUndefined(info);
 }
 
+// ── stdin (raw mode + non-blocking read + fd polling) ─────────────────
+//
+// Adds the missing piece for interactive TUI/dev-shell carts: read keys
+// from the controlling terminal without blocking, and wait on multiple
+// fds at once so a TUI can service stdin + unix sockets in the same loop.
+
+var g_termios_saved: ?std.posix.termios = null;
+
+/// __setStdinRaw(enable) → bool. Saves the original termios on first
+/// enable, restores it on disable. Keeps ISIG so ctrl-c still kills.
+fn setStdinRaw(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const enable = argI32(info, 0, 1) != 0;
+
+    if (enable) {
+        const current = std.posix.tcgetattr(0) catch {
+            setBool(info, false);
+            return;
+        };
+        if (g_termios_saved == null) g_termios_saved = current;
+        var t = current;
+        t.lflag.ICANON = false;
+        t.lflag.ECHO = false;
+        t.lflag.ECHONL = false;
+        t.lflag.IEXTEN = false;
+        t.iflag.IXON = false;
+        t.iflag.ICRNL = false;
+        t.iflag.BRKINT = false;
+        t.iflag.INPCK = false;
+        t.iflag.ISTRIP = false;
+        t.oflag.OPOST = false;
+        t.cc[@intFromEnum(std.posix.V.MIN)] = 0;
+        t.cc[@intFromEnum(std.posix.V.TIME)] = 0;
+        std.posix.tcsetattr(0, .NOW, t) catch {
+            setBool(info, false);
+            return;
+        };
+        setBool(info, true);
+    } else {
+        if (g_termios_saved) |saved| {
+            std.posix.tcsetattr(0, .NOW, saved) catch {};
+        }
+        setBool(info, true);
+    }
+}
+
+/// __readStdin() → string. Always non-blocking: zero-timeout poll first,
+/// then read only if data is ready. Works with or without raw mode.
+fn readStdin(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var pfd = [_]std.posix.pollfd{.{ .fd = 0, .events = std.posix.POLL.IN, .revents = 0 }};
+    const ready = std.posix.poll(&pfd, 0) catch 0;
+    if (ready == 0 or (pfd[0].revents & std.posix.POLL.IN) == 0) {
+        setString(info, "");
+        return;
+    }
+    var buf: [4096]u8 = undefined;
+    const n = std.posix.read(0, &buf) catch 0;
+    setString(info, buf[0..n]);
+}
+
+/// __pollFds(fdsJson, timeoutMs) → JSON array of indices ready to read.
+/// fdsJson is a JSON array of fd numbers, e.g. "[0, 5, 7]". Index 0 is
+/// stdin if 0 is in the list. Used by the dev-shell event loop to wait
+/// on stdin + multiple unix sockets simultaneously.
+fn pollFds(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const fds_json = argStringAlloc(alloc, info, 0) orelse {
+        setString(info, "[]");
+        return;
+    };
+    defer alloc.free(fds_json);
+    const timeout_ms = argI32(info, 1, 0);
+
+    var pfds: [32]std.posix.pollfd = undefined;
+    var n_fds: usize = 0;
+    var i: usize = 0;
+    while (i < fds_json.len and n_fds < pfds.len) {
+        const c = fds_json[i];
+        if (c >= '0' and c <= '9') {
+            var v: i32 = 0;
+            while (i < fds_json.len and fds_json[i] >= '0' and fds_json[i] <= '9') {
+                v = v * 10 + @as(i32, @intCast(fds_json[i] - '0'));
+                i += 1;
+            }
+            pfds[n_fds] = .{ .fd = v, .events = std.posix.POLL.IN, .revents = 0 };
+            n_fds += 1;
+        } else {
+            i += 1;
+        }
+    }
+
+    if (n_fds == 0) {
+        setString(info, "[]");
+        return;
+    }
+
+    _ = std.posix.poll(pfds[0..n_fds], timeout_ms) catch {
+        setString(info, "[]");
+        return;
+    };
+
+    var out: std.ArrayList(u8) = .{};
+    defer out.deinit(alloc);
+    out.append(alloc, '[') catch {
+        setString(info, "[]");
+        return;
+    };
+    var first = true;
+    for (pfds[0..n_fds], 0..) |pfd, idx| {
+        if ((pfd.revents & std.posix.POLL.IN) != 0) {
+            if (!first) out.append(alloc, ',') catch break;
+            first = false;
+            var nbuf: [16]u8 = undefined;
+            const s = std.fmt.bufPrint(&nbuf, "{d}", .{idx}) catch break;
+            out.appendSlice(alloc, s) catch break;
+        }
+    }
+    out.append(alloc, ']') catch {
+        setString(info, "[]");
+        return;
+    };
+    setString(info, out.items);
+}
+
 // ── stdout / stderr ────────────────────────────────────────────────────
 
 fn writeStdout(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -856,6 +982,10 @@ pub fn registerAll() void {
 
     v8_runtime.registerHostFn("__writeStdout", writeStdout);
     v8_runtime.registerHostFn("__writeStderr", writeStderr);
+
+    v8_runtime.registerHostFn("__setStdinRaw", setStdinRaw);
+    v8_runtime.registerHostFn("__readStdin", readStdin);
+    v8_runtime.registerHostFn("__pollFds", pollFds);
 
     v8_runtime.registerHostFn("__readFile", readFile);
     v8_runtime.registerHostFn("__writeFile", writeFile);
