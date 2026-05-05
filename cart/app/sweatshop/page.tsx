@@ -1,91 +1,149 @@
-// Composer — the canvas surface.
+// Sweatshop canvas — the open scene.
 //
-// Per docs/02-canvas-and-substrates.md: the canvas is the *open scene*. No
-// chat box at the bottom, no fixed layout. Three palette tiers (capabilities,
-// domain nodes, rules/effects) compose freely. Composition is structural;
-// useIFTTT is reactive. Both coexist.
+// Per docs/02-canvas-and-substrates.md: the canvas is the substrate
+// every cart's logic composes onto. Three palette tiers (capability /
+// domain / rules) drop nodes onto a FlowEditor surface; clicking a
+// palette item spawns a node at the canvas center, drag to lay out,
+// click ports to wire.
 //
-// This file is a placeholder. The real canvas lands here when the substrate
-// surfaces are ready. For now: prove data continuity (the goal node knows
-// what the user typed at onboarding) and lay out the tier hint.
+// The palette is data-driven: capability nodes come from the IFTTT
+// registry (every registered source/action prefix becomes a draggable
+// node), domain nodes come from the gallery shape catalog, rule
+// stamps come from a curated library that will eventually read from
+// the `rule` table.
+//
+// The seed scene shows a Goal node (pulled from the persisted
+// onboarding row, so cross-cartridge identity continuity is visible)
+// plus a starter trigger → action chain you can edit.
 
 import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
+import { useState } from 'react';
+import { FlowEditor } from '../gallery/components/flow-editor/FlowEditor';
+import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types';
+import { PaletteSidebar } from './canvas/PaletteSidebar';
+import type { PaletteItem } from './canvas/palette';
 import { useUser, useLatestGoal } from './data';
+import '@reactjit/runtime/hooks/ifttt-supervisor';
 
-const TIERS = [
-  { id: 'capability', label: 'Capability palette', hint: 'runtime/hooks/* — sensors, sources, effects' },
-  { id: 'domain',     label: 'Domain nodes',       hint: '../gallery shapes — Goal, Connection, Workspace' },
-  { id: 'rules',      label: 'Rules & effects',    hint: 'useIFTTT — reactive substrate over the structure' },
+// ── Seed scene ────────────────────────────────────────────────────
+// A Goal node + a starter rule chain (event:goal.reframed →
+// notify-user). Demonstrates the substrate in two clicks of editing.
+
+const SEED_NODES: FlowNode[] = [
+  {
+    id: 'seed-goal',
+    label: 'GOAL',
+    x: -200,
+    y: -180,
+    data: {
+      kind: 'token',
+      role: 'GOAL',
+      stripe: 'trigger',
+      state: 'idle',
+      ports: [
+        { id: 'review', side: 'out', kind: 'flow', label: 'review socket — emit "achieved" to close' },
+      ],
+    },
+  },
+  {
+    id: 'seed-trigger',
+    label: 'event:goal.reframed',
+    x: 100,
+    y: -100,
+    data: {
+      kind: 'trigger',
+      role: 'TRG',
+      stripe: 'trigger',
+      state: 'idle',
+    },
+  },
+  {
+    id: 'seed-action',
+    label: 'notify-user:Goal reframed',
+    x: 380,
+    y: -100,
+    data: {
+      kind: 'action',
+      role: 'NOT',
+      state: 'idle',
+    },
+  },
 ];
 
-function GoalNode() {
-  const goal = useLatestGoal();
-  const text = goal.data[0]?.statement ?? '(no goal set)';
-  return (
-    <Col style={{
-      backgroundColor: 'theme:surface',
-      borderColor: 'theme:line',
-      borderWidth: 1,
-      borderRadius: 12,
-      padding: 16,
-      gap: 8,
-      width: 360,
-    }}>
-      <Text size={11} color="theme:inkMuted" bold={true}>GOAL</Text>
-      <Text size={16} color="theme:ink">{text}</Text>
-      <Text size={10} color="theme:inkMuted">review socket — pinned to the run</Text>
-    </Col>
-  );
-}
+const SEED_EDGES: FlowEdge[] = [
+  {
+    id: 'seed-edge-trigger-action',
+    from: 'seed-trigger',
+    to: 'seed-action',
+    fromPort: 'out',
+    toPort: 'in',
+  },
+];
 
-function TierHint({ label, hint }: { label: string; hint: string }) {
-  return (
-    <Col style={{
-      backgroundColor: 'theme:surfaceSubtle',
-      borderColor: 'theme:lineSoft',
-      borderWidth: 1,
-      borderRadius: 8,
-      padding: 12,
-      gap: 4,
-      flexGrow: 1,
-    }}>
-      <Text size={11} color="theme:ink" bold={true}>{label}</Text>
-      <Text size={10} color="theme:inkMuted">{hint}</Text>
-    </Col>
-  );
-}
+// ── Page ──────────────────────────────────────────────────────────
 
-export default function ComposerPage() {
+export default function SweatshopPage() {
   const user = useUser();
-  const name = user.data?.displayName ?? '';
+  const goal = useLatestGoal();
+  const userName = user.data?.displayName ?? '';
+  const goalText = goal.data[0]?.statement ?? null;
+
+  const [nodes, setNodes] = useState<FlowNode[]>(() => seedNodesWithGoal(goalText));
+  const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
+
+  const handleSpawn = (item: PaletteItem) => {
+    // Drop near the canvas center with a small jitter so successive
+    // spawns don't pile on one pixel.
+    const jitter = (Math.random() - 0.5) * 80;
+    const node = item.spawn(jitter, 60 + jitter);
+    setNodes((prev) => [...prev, node]);
+  };
+
   return (
-    <Col style={{ flexGrow: 1, padding: 24, gap: 24, backgroundColor: 'theme:bg' }}>
-      <Row style={{ alignItems: 'baseline', gap: 12 }}>
-        <Text size={20} color="theme:ink" bold={true}>Canvas</Text>
-        <Text size={11} color="theme:inkMuted">
-          {name ? `${name}'s open scene` : 'open scene — nothing required, everything composes'}
-        </Text>
-      </Row>
+    <Row style={{ flexGrow: 1, backgroundColor: 'theme:bg' }}>
+      <PaletteSidebar onSpawn={handleSpawn} />
 
-      <Box style={{
-        flexGrow: 1,
-        borderColor: 'theme:lineSoft',
-        borderWidth: 1,
-        borderStyle: 'dashed',
-        borderRadius: 12,
-        padding: 32,
-        backgroundColor: 'theme:bg',
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
-        <GoalNode />
-      </Box>
+      <Col style={{ flexGrow: 1 }}>
+        {/* Top strip: identity + goal */}
+        <Row style={{
+          padding: 12,
+          gap: 12,
+          alignItems: 'baseline',
+          borderBottomWidth: 1,
+          borderBottomColor: 'theme:lineSoft',
+          backgroundColor: 'theme:surface',
+        }}>
+          <Text size={16} color="theme:ink" bold={true}>Canvas</Text>
+          <Text size={10} color="theme:inkMuted">
+            {userName ? `${userName}'s open scene` : 'open scene — nothing required, everything composes'}
+          </Text>
+          {goalText ? (
+            <Text size={10} color="theme:accent">goal: {goalText}</Text>
+          ) : null}
+        </Row>
 
-      <Row style={{ gap: 12 }}>
-        {TIERS.map((t) => (
-          <TierHint key={t.id} label={t.label} hint={t.hint} />
-        ))}
-      </Row>
-    </Col>
+        {/* Canvas */}
+        <Box style={{ flexGrow: 1 }}>
+          <FlowEditor
+            nodes={nodes}
+            edges={edges}
+            onNodesChange={setNodes}
+            onEdgesChange={setEdges}
+            allowDelete={true}
+          />
+        </Box>
+      </Col>
+    </Row>
+  );
+}
+
+function seedNodesWithGoal(goalText: string | null): FlowNode[] {
+  // If the persisted onboarding goal is set, surface it on the goal
+  // node's label. Otherwise the seed scene shows the placeholder copy.
+  if (!goalText) return SEED_NODES;
+  return SEED_NODES.map((n) =>
+    n.id === 'seed-goal'
+      ? { ...n, label: goalText.length > 60 ? goalText.slice(0, 57) + '…' : goalText }
+      : n,
   );
 }

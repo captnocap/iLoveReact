@@ -18,6 +18,7 @@ import { changes, exec, query } from './connections';
 import { ensureBootstrapped } from './bootstrap';
 import { bucketFor } from './registry';
 import { ident, lit, tableName, val } from './sql';
+import { notifyRowChange } from './buses';
 
 // ── Public types (mirror runtime/hooks/useCRUD.ts) ────────────────────
 
@@ -135,6 +136,7 @@ export function useCRUD<T extends Record<string, any>>(
       `INSERT INTO ${tableId} (id, data) VALUES (${val(id)}, ${val(row)})` +
       ` ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()`;
     if (!exec(bucket, sql)) throw new Error(`INSERT ${collection}/${id} failed.`);
+    notifyRowChange(collection, row);
     return id;
   }, [bucket, tableId, collection, schema]);
 
@@ -156,6 +158,7 @@ export function useCRUD<T extends Record<string, any>>(
     const sql = `UPDATE ${tableId} SET data = ${val(validated)}, updated_at = NOW() WHERE id = ${lit(id)}`;
     if (!exec(bucket, sql)) throw new Error(`UPDATE ${collection}/${id} failed.`);
     if (changes(bucket) === 0) throw new Error(`Not found: ${collection}/${id}`);
+    notifyRowChange(collection, validated);
   }, [bucket, tableId, collection, schema, get]);
 
   const del = useCallback(async (id: string): Promise<void> => {
