@@ -36,7 +36,16 @@ function parseToolCallPayload(payload_json: string | undefined): ToolCallPayload
   }
 }
 
-export function useAssistantTools(assistant: AssistantToolHandle) {
+export interface UseAssistantToolsOpts {
+  /** Default true. Set to false for CLI-backed assistants (claude_code,
+   *  codex, kimi_cli_wire) — their CLIs already executed any tool_call
+   *  before the event surfaced to JS, and respond() is a no-op for them,
+   *  so cart-side dispatch would just re-run the tool redundantly. */
+  enabled?: boolean;
+}
+
+export function useAssistantTools(assistant: AssistantToolHandle, opts: UseAssistantToolsOpts = {}) {
+  const enabled = opts.enabled ?? true;
   // Cursor over the event stream so we only dispatch each tool_call once.
   const cursorRef = useRef(0);
   // Track in-flight call ids so a re-render while awaiting doesn't kick
@@ -44,6 +53,12 @@ export function useAssistantTools(assistant: AssistantToolHandle) {
   const inFlightRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
+    if (!enabled) {
+      // Still advance the cursor so when the hook re-enables we don't
+      // retroactively dispatch every prior event.
+      cursorRef.current = assistant.events.length;
+      return;
+    }
     const events = assistant.events;
     if (events.length <= cursorRef.current) return;
     for (let i = cursorRef.current; i < events.length; i += 1) {
@@ -76,5 +91,5 @@ export function useAssistantTools(assistant: AssistantToolHandle) {
         });
     }
     cursorRef.current = events.length;
-  }, [assistant.events]);
+  }, [assistant.events, enabled]);
 }

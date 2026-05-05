@@ -15,6 +15,8 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useCRUD } from '../db';
 import { useAssistant, type AssistantBackend } from '@reactjit/runtime/hooks/useAssistant';
 import { callHost, hasHost } from '@reactjit/runtime/ffi';
+import { listTools } from '../tools/registry';
+import { useAssistantTools } from '../tools/useAssistantTools';
 
 const NS = 'app';
 const SETTINGS_ID = 'settings_default';
@@ -52,7 +54,30 @@ function kindToBackend(kind: string | undefined): AssistantBackend | undefined {
   if (kind === 'claude-code-cli' || kind === 'anthropic-api-key') return 'claude_code';
   if (kind === 'kimi-api-key') return 'kimi_cli_wire';
   if (kind === 'local-runtime') return 'local_ai';
+  if (kind === 'openai-api-key' || kind === 'openai-api-like') return 'openai_compat';
   return undefined;
+}
+
+/** Render the cart's registered tools as an OpenAI-shape tools schema.
+ *  argsSchema is a free-form string in the cart's Tool type, so we feed
+ *  it into the description and use a permissive parameters schema. The
+ *  dispatcher's tool.scopeOf() validates concrete args at invoke time. */
+function buildToolsSchema(): string | undefined {
+  const tools = listTools();
+  if (tools.length === 0) return undefined;
+  return JSON.stringify(tools.map((t) => ({
+    type: 'function',
+    function: {
+      name: t.name,
+      description: `${t.description}\n\nArgs (TS-shape): ${t.argsSchema}`,
+      parameters: { type: 'object', additionalProperties: true },
+    },
+  })));
+}
+
+function envGet(key: string): string {
+  if (!hasHost('__env')) return '';
+  try { return callHost<string>('__env', '', key) || ''; } catch { return ''; }
 }
 
 export interface ChatAskOpts {
@@ -83,6 +108,28 @@ export function useAssistantChat() {
       : '';
   const cwd = processCwd();
 
+  // openai_compat reads endpoint + key from the connection row.
+  // credentialRef.source==='env' means locator is the env-var name
+  // holding the bearer; otherwise locator is the literal key.
+  const baseUrl = backend === 'openai_compat' ? (conn?.endpoint || '') : '';
+  const apiKey = useMemo(() => {
+    if (backend !== 'openai_compat') return '';
+    const cr = conn?.credentialRef;
+    if (!cr) return '';
+    if (cr.source === 'env') return envGet(String(cr.locator || ''));
+    return String(cr.locator || '');
+  }, [backend, conn?.credentialRef?.source, conn?.credentialRef?.locator]);
+
+  // CLI backends (claude_code, codex, kimi_cli_wire) handle tools
+  // internally — their CLIs run bash/edit/read inside the subprocess
+  // and only emit tool_call events for observability. The cart owns
+  // tool dispatch ONLY for backends with no CLI to defer to.
+  const usesCartTools = backend === 'local_ai' || backend === 'openai_compat';
+  const toolsJson = useMemo(
+    () => (usesCartTools ? buildToolsSchema() : undefined),
+    [usesCartTools],
+  );
+
   const assistant = useAssistant({
     backend,
     cwd,
@@ -90,7 +137,12 @@ export function useAssistantChat() {
     modelPath,
     configDir: cfgDir,
     nCtx: backend === 'local_ai' ? 4096 : undefined,
+    baseUrl: baseUrl || undefined,
+    apiKey: apiKey || undefined,
+    tools: toolsJson,
   });
+
+  useAssistantTools(assistant, { enabled: usesCartTools });
 
   // Pending-ask bridge: track the assistant_message events that arrive
   // after we sent, accumulate text, fire onPart, resolve on completion.
