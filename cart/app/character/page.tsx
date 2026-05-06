@@ -1536,7 +1536,7 @@ function CharacterForm() {
       }}>
         <ScrollView style={{
           flexGrow: 1, flexBasis: 0, minWidth: 0,
-          paddingTop: 28,
+          paddingTop: 28, paddingBottom: 28,
           paddingLeft: 28, paddingRight: 14,
           alignItems: 'center',
           opacity: pageOp,
