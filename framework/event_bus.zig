@@ -60,6 +60,13 @@ const RingEntry = struct {
 };
 
 var g_inited: bool = false;
+/// Minimum importance an event must clear to be persisted/buffered. Set
+/// at runtime via LOGLEVEL IPC. 0.0 = pass everything (default), higher
+/// values gate cheaper "log"-tier events out of the stream so a hot
+/// trace path doesn't cost SQL writes when off.
+var g_min_importance: f32 = 0.0;
+pub fn minImportance() f32 { return g_min_importance; }
+pub fn setMinImportance(threshold: f32) void { g_min_importance = threshold; }
 var g_session_buf: [16]u8 = undefined;
 var g_session_len: usize = 0;
 var g_db_path_buf: [512]u8 = undefined;
@@ -224,6 +231,9 @@ pub fn emitWithImportance(
     payload_json: []const u8,
 ) u64 {
     if (!g_inited) return 0;
+    // Threshold gate. Cheap (single int compare), runs before any
+    // string dup, JSON validation, SQL bind, or ring-slot eviction.
+    if (importance < g_min_importance) return 0;
 
     const ts = std.time.milliTimestamp();
     const safe_payload = if (payload_json.len == 0) "{}" else payload_json;

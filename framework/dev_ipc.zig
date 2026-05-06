@@ -130,6 +130,22 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
     var it = std.mem.tokenizeScalar(u8, header, ' ');
     const verb = it.next() orelse return error.BadHeader;
 
+    if (std.mem.eql(u8, verb, "LOGLEVEL")) {
+        // "LOGLEVEL"          → reply "{\"level\":<f>}\n" (current threshold)
+        // "LOGLEVEL <0..1>"   → set threshold and reply with the new value
+        if (it.next()) |arg| {
+            const v = std.fmt.parseFloat(f32, arg) catch {
+                try writeAll(client_fd, "ERR bad level\n");
+                return;
+            };
+            event_bus.setMinImportance(v);
+        }
+        var buf: [64]u8 = undefined;
+        const reply = std.fmt.bufPrint(&buf, "{{\"level\":{d:.3}}}\n", .{event_bus.minImportance()}) catch "{}\n";
+        try writeAll(client_fd, reply);
+        return;
+    }
+
     if (std.mem.eql(u8, verb, "TELEMETRY")) {
         // One-shot snapshot of the live telemetry counters. JSON line +
         // close. Used by tools/devshell to render fps/nodes/paint/layout

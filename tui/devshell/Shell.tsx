@@ -8,6 +8,7 @@ import { createElement, useState, useEffect } from 'react';
 import { subscribeKey, headlessSnapshot } from '../host';
 import { BundlePane } from './panes/Bundle';
 import { useTelemetry, Telemetry } from './services/Telemetry';
+import { useLogLevel } from './services/LogLevel';
 import { copyToClipboard } from './services/clipboard';
 
 type TabId = 'logs' | 'events' | 'inspect' | 'bundle' | 'status';
@@ -29,6 +30,7 @@ export function Shell({ cart }: { cart: string }) {
   const [toast, setToast] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const tel = useTelemetry();
+  const log = useLogLevel();
 
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 200);
@@ -50,6 +52,10 @@ export function Shell({ cart }: { cart: string }) {
       return;
     }
     if (k === '?') { setShowHelp(h => !h); return; }
+    if (k === 'l') {
+      log.cycle();
+      return;
+    }
     if (k === 'y') {
       // Snapshot the visible TUI as plain text and ship it via OSC 52.
       // Read terminal size live so resize is reflected in the snapshot.
@@ -77,6 +83,7 @@ export function Shell({ cart }: { cart: string }) {
             <text bold fg="#60a5fa">rjit</text>
             <text fg="#cbd5e1">cart=<text bold fg="#fbbf24">{cart}</text></text>
             <text fg={hostUp ? '#34d399' : '#f87171'}>host {hostUp ? '● up' : '○ down'}</text>
+            <text fg={log.color}>log:{log.name ?? '—'}</text>
           </box>
         )}
         <box flexGrow={1} />
@@ -103,7 +110,7 @@ export function Shell({ cart }: { cart: string }) {
 
       {/* Footer — single row */}
       <box flexDirection="row" gap={2} paddingX={1} bg="#111827">
-        <text fg="#64748b">1..5 tab · y copy · ? help · F2 restart · F3 rebuild · F5 pick · q quit</text>
+        <text fg="#64748b">1..5 tab · l log · y copy · ? help · q quit</text>
       </box>
     </box>
   );
@@ -189,6 +196,7 @@ function HelpPane() {
       <text> </text>
       <Hk k="1..5"      d="switch pane (Logs / Events / Inspect / Bundle / Status)" />
       <Hk k="y"         d="copy current screen as plain text to clipboard (OSC 52)" />
+      <Hk k="l"         d="cycle log level: trace · debug · warn · error" />
       <Hk k="?"         d="toggle this help (or ESC)" />
       <Hk k="q / ⌃C"    d="quit" />
       <text> </text>
