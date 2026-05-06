@@ -1530,15 +1530,20 @@ function CharacterForm() {
   const workbenchOp = tl.range(140, 140 + SECTION_DUR_MS, 'easeOutBack');
   return (
     <S.Page>
-      <Row style={{ width: '100%', height: '100%', alignItems: 'stretch' }}>
-        <ScrollView style={{ flexGrow: 1, flexBasis: 0 }}>
+      <Row style={{ width: '100%', height: '100%', alignItems: 'stretch', minWidth: 0 }}>
+        <ScrollView style={{ flexGrow: 1, flexBasis: 0, minWidth: 0 }}>
           <Box style={{
             paddingTop: 28,
             paddingLeft: 28, paddingRight: 14,
             alignItems: 'center',
             opacity: pageOp,
+            minWidth: 0,
+            overflow: 'hidden',
           }}>
-            <Box style={{ width: '100%', maxWidth: 1040 }}>
+            <Box style={{
+              width: '100%', maxWidth: 1040,
+              minWidth: 0, overflow: 'hidden',
+            }}>
               <Box style={{ opacity: headOp }}>
                 <Row style={{ width: '100%', gap: 16, alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
                   <Col style={{ gap: 4 }}>
