@@ -10,7 +10,7 @@ import { createElement, useState, useEffect, useRef } from 'react';
 import { subscribeKey } from '../../host';
 import { useEventStream, Event } from '../services/EventStream';
 import { useLogLevel } from '../services/LogLevel';
-import { claimInput, releaseInput } from '../services/InputClaim';
+import { claimInput, releaseInput, setCopyOverride } from '../services/InputClaim';
 
 const CHROME_ROWS = 6; // title 2 + tabs 1 + footer 1 + paneY-padding 2
 
@@ -64,6 +64,31 @@ function fmtPayload(ev: Event): string {
   } catch { return ''; }
 }
 
+// Format one event as a multi-line plain-text record for copy-paste.
+// No truncation, no wrapping — payload is rendered as pretty-printed
+// JSON so consumers can paste into a JSON-aware tool.
+function formatEventFull(ev: Event): string {
+  const lines: string[] = [];
+  lines.push(`time:   ${fmtTime(ev.ts)}`);
+  lines.push(`imp:    ${ev.imp.toFixed(3)}`);
+  lines.push(`event:  ${ev.type}`);
+  lines.push(`source: ${ev.src}`);
+  lines.push('');
+  lines.push('payload:');
+  let body = '';
+  if (ev.type.startsWith('log.') && typeof ev.payload?.msg === 'string') {
+    body = ev.payload.msg;
+  } else if (ev.payload === undefined || ev.payload === null) {
+    body = '';
+  } else if (typeof ev.payload === 'object') {
+    try { body = JSON.stringify(ev.payload, null, 2); } catch { body = String(ev.payload); }
+  } else {
+    body = String(ev.payload);
+  }
+  for (const line of body.split('\n')) lines.push('  ' + line);
+  return lines.join('\n');
+}
+
 // Substring filter. Empty = match everything. `!foo` excludes any event
 // whose haystack includes "foo". Otherwise include only events whose
 // haystack includes the term. Case-insensitive.
@@ -107,7 +132,19 @@ export function LogsPane() {
   eventsRef.current = events;
 
   // Release the input claim if the pane unmounts mid-edit.
-  useEffect(() => () => { releaseInput(); }, []);
+  useEffect(() => () => { releaseInput(); setCopyOverride(null); }, []);
+
+  // Install a copy override while in detail view — y will then yank
+  // the focused event's full unwrapped data instead of the screen.
+  useEffect(() => {
+    if (detailIdx === null) { setCopyOverride(null); return; }
+    setCopyOverride(() => {
+      const evs = eventsRef.current;
+      const idx = Math.min(detailIdx, evs.length - 1);
+      return idx >= 0 ? formatEventFull(evs[idx]) : '';
+    });
+    return () => setCopyOverride(null);
+  }, [detailIdx]);
 
   const termRows = (typeof process !== 'undefined' && process.stdout?.rows) || 24;
   const viewportH = Math.max(1, termRows - CHROME_ROWS - 1);

@@ -11,7 +11,7 @@ import { LogsPane } from './panes/Logs';
 import { useTelemetry, Telemetry } from './services/Telemetry';
 import { useLogLevel } from './services/LogLevel';
 import { copyToClipboard } from './services/clipboard';
-import { isInputClaimed } from './services/InputClaim';
+import { isInputClaimed, getCopyOverride } from './services/InputClaim';
 
 type TabId = 'logs' | 'events' | 'inspect' | 'bundle' | 'status';
 const TABS: { id: TabId; label: string }[] = [
@@ -62,13 +62,17 @@ export function Shell({ cart }: { cart: string }) {
       return;
     }
     if (k === 'y') {
-      // Snapshot the visible TUI as plain text and ship it via OSC 52.
-      // Read terminal size live so resize is reflected in the snapshot.
+      // Pane-installed copy override (e.g. LogsPane in detail view)
+      // gets first priority — copies the focused event's full unwrapped
+      // payload. Falls back to a screen snapshot when no override.
+      const override = getCopyOverride();
       const cols = (process.stdout?.columns) || 80;
       const rows = (process.stdout?.rows) || 24;
-      const text = headlessSnapshot(cols, rows);
+      const text = override ? override() : headlessSnapshot(cols, rows);
       copyToClipboard(text);
-      setToast(`✓ copied ${rows}×${cols} as plain text`);
+      setToast(override
+        ? `✓ copied row (${text.length} chars)`
+        : `✓ copied ${rows}×${cols} as plain text`);
       return;
     }
     if (k === '\x1b' && showHelp) setShowHelp(false); // ESC closes help
