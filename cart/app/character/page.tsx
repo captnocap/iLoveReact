@@ -1575,11 +1575,13 @@ function CharacterForm() {
                   </S.DocPageContent>
                 </S.DocPage>
               </S.DocPageWrap>
-              {/* Bottom spacer — DEBUG SIZE 200px. If the overscroll
-                  gap grows to 200, this spacer IS being measured. If
-                  it stays at ~28, the spacer is invisible to the
-                  content_height calc and the bug is elsewhere. */}
+              {/* Bottom spacer — DEBUG. magenta=200, lime=30. If the
+                  10-15px overscroll gap disappears now, the missing
+                  pixels were a constant inset; if the gap is still
+                  there, content_height is short by the same constant
+                  every time and we're chasing something else. */}
               <Box style={{ width: '100%', height: 200, backgroundColor: 'magenta' }} />
+              <Box style={{ width: '100%', height: 30, backgroundColor: 'lime' }} />
             </Box>
           </Box>
         </ScrollView>
