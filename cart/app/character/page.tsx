@@ -1537,30 +1537,15 @@ function CharacterForm() {
         <ScrollView
           debugName="char-scroll"
           onScroll={(e: any) => {
-            const host: any = globalThis;
-            const cnt = (host.__tel_node_count && host.__tel_node_count()) || 0;
-            let yel: any = null;
-            let scr: any = null;
-            for (let i = 0; i < cnt; i++) {
-              const n = host.__tel_node && host.__tel_node(i);
-              if (!n) continue;
-              if (n.tag === 'char-yellow') yel = n;
-              else if (n.tag === 'char-scroll') scr = n;
-              if (yel && scr) break;
-            }
-            if (yel && scr) {
-              const scrBottom = scr.y + scr.h;
-              const yelBottom = yel.y + yel.h;
-              console.log('[char-scroll]', JSON.stringify({
-                scrollY: e?.scrollY,
-                scrollY_internal: scr.scroll_y,
-                contentH: scr.content_height,
-                scrollH: scr.h,
-                maxScrollY: Math.max(0, scr.content_height - scr.h),
-                scrBottom, yelBottom,
-                bottomGap: scrBottom - yelBottom,
-              }));
-            }
+            console.log('[char-scroll/raw]', JSON.stringify({
+              scrollY: e?.scrollY,
+              scrollX: e?.scrollX,
+              deltaY: e?.deltaY,
+              hasTel: typeof (globalThis as any).__tel_node === 'function',
+              cnt: typeof (globalThis as any).__tel_node_count === 'function'
+                ? (globalThis as any).__tel_node_count()
+                : 'n/a',
+            }));
           }}
           style={{
             flexGrow: 1, flexBasis: 0, minWidth: 0,
