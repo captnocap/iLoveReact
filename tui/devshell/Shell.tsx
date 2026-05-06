@@ -73,21 +73,26 @@ export function Shell({ cart }: { cart: string }) {
 
   return (
     <box width="fill" height="fill" bg="#0b1020" fg="#e5e7eb" flexDirection="column">
-      {/* Title bar — left group + spacer + right (telemetry) group.
-          When a toast is active it temporarily replaces the left group. */}
-      <box flexDirection="row" paddingX={1} bg="#111827">
-        {toast ? (
-          <box flexDirection="row"><text fg="#34d399" bold>{toast}</text></box>
-        ) : (
-          <box flexDirection="row" gap={2}>
-            <text bold fg="#60a5fa">rjit</text>
-            <text fg="#cbd5e1">cart=<text bold fg="#fbbf24">{cart}</text></text>
-            <text fg={hostUp ? '#34d399' : '#f87171'}>host {hostUp ? '● up' : '○ down'}</text>
-            <text fg={log.color}>log:{log.name ?? '—'}</text>
-          </box>
-        )}
-        <box flexGrow={1} />
-        <TelemetryStrip tel={tel} hostUp={hostUp} spinner={spinner} />
+      {/* Title bar — two rows. Row 1: identity + log toggle; Row 2:
+          telemetry strip. Wrapping is mandatory once log:level joined the
+          identity row — single-row layout overflowed on standard widths. */}
+      <box flexDirection="column" bg="#111827">
+        <box flexDirection="row" paddingX={1}>
+          {toast ? (
+            <box flexDirection="row"><text fg="#34d399" bold>{toast}</text></box>
+          ) : (
+            <box flexDirection="row" gap={2}>
+              <text bold fg="#60a5fa">rjit</text>
+              <text fg="#cbd5e1">cart=<text bold fg="#fbbf24">{cart}</text></text>
+              <text fg={hostUp ? '#34d399' : '#f87171'}>host {hostUp ? '● up' : '○ down'}</text>
+              <text fg={log.color}>log:{log.name ?? '—'}</text>
+            </box>
+          )}
+        </box>
+        <box flexDirection="row" paddingX={1}>
+          <box flexGrow={1} />
+          <TelemetryStrip tel={tel} hostUp={hostUp} spinner={spinner} />
+        </box>
       </box>
 
       {/* Tab strip — single row, selection via bg + bold */}
