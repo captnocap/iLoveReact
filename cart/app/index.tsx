@@ -623,11 +623,12 @@ function ShellBody() {
                   width is taken out of flex distribution, and the
                   routes column gets exactly viewport - sideWidth via
                   flexGrow + minWidth:0. */}
-              <Row style={{
+              <Box style={{
                 flexGrow: 1,
                 minHeight: 0,
                 width: '100%',
-                borderWidth: 4,
+                flexDirection: 'row',
+                borderWidth: 8,
                 borderColor: 'rgba(255,0,0,1)',
               }}>
                 <Box style={{
@@ -670,7 +671,7 @@ function ShellBody() {
                   <ChatPage />
                 </Route>
                 </Box>
-              </Row>
+              </Box>
               {/* SideMenuInput — absolute overlay on the left.
                   Rendered FIRST so BottomInputBar overlays it in
                   z-order during phase 1 of shrink (input still in
