@@ -1262,7 +1262,7 @@ function AvatarPreview() {
           <PreviewStat label="Custom" value={customCount === 0 ? '-' : String(customCount)} />
         </Row>
       </CharacterCard>
-      {/* DEBUG-OFF: <VoiceRailCard /> */}
+      <VoiceRailCard />
       {/* DEBUG-OFF: <ManifestChartsCard /> */}
     </Col>
   );
