@@ -1241,61 +1241,13 @@ function PreviewStat({ label, value }: { label: string; value: string }) {
 
 function AvatarPreview() {
   const c = useCharacter();
-  const [backdrop, setBackdrop] = useState(BACKDROP_SWATCHES[0]);
-  const worker = previewWorker(c.character);
+  // BISECT: leave PreviewStats card only. Re-enable each /* DEBUG-OFF */
+  // chunk below one at a time to find which is driving the ScrollView's
+  // content_height bistability.
   const customCount = Object.keys(c.character.customProperties || {}).length;
   return (
     <Col style={{ width: '100%', height: '100%', gap: 8, justifyContent: 'flex-start', overflow: 'hidden' }}>
-      <CharacterCard style={{ flexShrink: 0, padding: 8, gap: 5 }}>
-        <S.Label style={{ color: 'theme:accentHot' }}>PREVIEW</S.Label>
-        <Box style={{ width: '100%', height: PREVIEW_AVATAR_H, overflow: 'hidden', position: 'relative' }}>
-          <Avatar
-            avatar={DEFAULT_AVATAR}
-            style={{ width: '100%', height: PREVIEW_AVATAR_H }}
-            backgroundColor={backdrop}
-            cameraPosition={[0, 1.0, 3.8]}
-            cameraTarget={[0, 0.85, 0]}
-            cameraFov={48}
-          >
-            {/* Voxel face wrapped onto the head sphere — each pixel is a
-                tiny <Scene3D.Mesh> box positioned spherically. Head part
-                in DEFAULT_AVATAR sits at (0,1.55,0) r=0.35. */}
-            <BlockFace3D
-              center={[0, 1.55, 0]}
-              radius={0.35}
-              archetype={archetypeForWorker(worker)}
-              seed={worker.id}
-            />
-          </Avatar>
-        </Box>
-        <S.Heading>{c.character.name || '(unnamed)'}</S.Heading>
-        {c.character.displayName ? <S.BodyDim>aka {c.character.displayName}</S.BodyDim> : null}
-        {c.character.bio ? <S.BodyDim>{c.character.bio}</S.BodyDim> : null}
-        <Row style={{ width: '100%', gap: 6, marginTop: 4, justifyContent: 'center' }}>
-          {BACKDROP_SWATCHES.map((color) => (
-            <Pressable
-              key={color}
-              onPress={() => setBackdrop(color)}
-              style={{
-                width: 28,
-                height: 24,
-                borderRadius: 12,
-                backgroundColor: color,
-                borderWidth: backdrop === color ? 2 : 1,
-                borderColor: backdrop === color ? 'theme:accentHot' : 'theme:border',
-              }}
-            />
-          ))}
-        </Row>
-        <Row style={{ width: '100%', gap: 8, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', marginTop: 5 }}>
-          <Tooltip label="Block Faces renders the assistant manifest as a live worker badge." side="top" delayMs={250}>
-            <BlockFaces row={worker} scale={2} layout="badge" />
-          </Tooltip>
-        </Row>
-        {/* DEBUG: AnimatedManifestText disabled to test if its per-frame
-            RAF cascades into ScrollView's content_height fluctuation. */}
-        {/* <AnimatedManifestText /> */}
-      </CharacterCard>
+      {/* DEBUG-OFF: top card with 3D Avatar + BlockFace3D + BlockFaces */}
       <CharacterCard style={{ flexShrink: 0, padding: 8, gap: 5 }}>
         <Row style={{ width: '100%', gap: 6, flexWrap: 'wrap', alignItems: 'stretch', justifyContent: 'flex-start' }}>
           <PreviewStat label="Stance" value={c.character.relationshipStance} />
@@ -1310,8 +1262,8 @@ function AvatarPreview() {
           <PreviewStat label="Custom" value={customCount === 0 ? '-' : String(customCount)} />
         </Row>
       </CharacterCard>
-      <VoiceRailCard />
-      <ManifestChartsCard />
+      {/* DEBUG-OFF: <VoiceRailCard /> */}
+      {/* DEBUG-OFF: <ManifestChartsCard /> */}
     </Col>
   );
 }
@@ -1619,9 +1571,7 @@ function CharacterForm() {
           overflow: 'hidden',
           opacity: pageOp,
         }}>
-          {/* DEBUG: AvatarPreview disabled to test if its 3D scene RAF
-              is what drives the ScrollView's content_height fluctuation. */}
-          {/* <AvatarPreview /> */}
+          <AvatarPreview />
         </Box>
       </Row>
     </S.Page>
