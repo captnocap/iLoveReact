@@ -57,10 +57,10 @@ const ROUTES: Array<{ path: string; label: string; icon: number[][]; mode: Route
   { path: '/',                  label: 'Home',      icon: Home,             mode: 'full', inputDock: 'bottom' },
   { path: '/chat',              label: 'Chat',      icon: BotMessageSquare, mode: 'side', inputDock: 'bottom' },
   { path: '/settings',          label: 'Settings',  icon: Settings,         mode: 'side', inputDock: 'rail'   },
-  { path: '/activity/sweatshop', label: 'Sweatshop', icon: Settings,         mode: 'side', inputDock: 'bottom' },
-  { path: '/composer',           label: 'Composer',  icon: Settings,         mode: 'side', inputDock: 'bottom' },
+  { path: '/activity/sweatshop', label: 'Sweatshop', icon: Settings,         mode: 'side', inputDock: 'rail'   },
+  { path: '/composer',           label: 'Composer',  icon: Settings,         mode: 'side', inputDock: 'rail'   },
   { path: '/character',          label: 'Character', icon: User2,            mode: 'side', inputDock: 'rail'   },
-  { path: '/face3d',             label: 'Face3D',    icon: Boxes,            mode: 'side', inputDock: 'bottom' },
+  { path: '/face3d',             label: 'Face3D',    icon: Boxes,            mode: 'side', inputDock: 'rail'   },
   { path: '/gallery',            label: 'Gallery',   icon: LayoutGrid,       mode: 'side', inputDock: 'rail'   },
 ];
 
