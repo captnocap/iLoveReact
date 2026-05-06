@@ -9,6 +9,7 @@
 import { createElement, useState, useEffect, useRef } from 'react';
 import { subscribeKey } from '../../host';
 import { useEventStream, Event } from '../services/EventStream';
+import { useLogLevel } from '../services/LogLevel';
 
 const CHROME_ROWS = 6; // title 2 + tabs 1 + footer 1 + paneY-padding 2
 
@@ -63,7 +64,14 @@ function fmtPayload(ev: Event): string {
 }
 
 export function LogsPane() {
-  const events = useEventStream(500);
+  const allEvents = useEventStream(500);
+  const log = useLogLevel();
+  // Display-side filter — host filter only gates what's stored going
+  // forward, so old events from a previous lower threshold linger in
+  // the ring. Re-apply the current threshold here so changing level
+  // clears them from view immediately.
+  const threshold = log.value ?? 0;
+  const events = allEvents.filter(e => e.imp >= threshold);
   const [scrollY, setScrollY] = useState(0);
   const [scrollX, setScrollX] = useState(0);
   const [stickToBottom, setStickToBottom] = useState(true);
