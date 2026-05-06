@@ -94,6 +94,11 @@ export function LogsPane() {
   const [scrollX, setScrollX] = useState(0);
   const [stickToBottom, setStickToBottom] = useState(true);
   const lastSeenCount = useRef(0);
+  // Refs that the keypress closure reads — lets the closure see live
+  // values without resubscribing on every event.
+  const eventsLenRef = useRef(0);
+  const viewportHRef = useRef(0);
+  const maxRowWidthRef = useRef(0);
 
   // Release the input claim if the pane unmounts mid-edit.
   useEffect(() => () => { releaseInput(); }, []);
@@ -122,15 +127,30 @@ export function LogsPane() {
       return;
     }
     if (k === '/') { setEditingFilter(true); claimInput(); return; }
+    const maxScrollY = Math.max(0, eventsLenRef.current - viewportHRef.current);
+    const maxScrollX = Math.max(0, maxRowWidthRef.current - 16);
     if (k === '\x1b[A' || k === 'k') { setStickToBottom(false); setScrollY(y => Math.max(0, y - 1)); }
-    else if (k === '\x1b[B' || k === 'j') { setStickToBottom(false); setScrollY(y => y + 1); }
+    else if (k === '\x1b[B' || k === 'j') {
+      // Auto-resume live tail when scrolling down past the bottom.
+      setScrollY(y => {
+        const next = Math.min(y + 1, maxScrollY);
+        if (next >= maxScrollY) setStickToBottom(true);
+        return next;
+      });
+    }
     else if (k === '\x1b[D' || k === 'h') setScrollX(x => Math.max(0, x - 8));
-    else if (k === '\x1b[C') setScrollX(x => x + 8);
-    else if (k === '\x1b[5~') { setStickToBottom(false); setScrollY(y => Math.max(0, y - viewportH)); }
-    else if (k === '\x1b[6~' || k === ' ') { setStickToBottom(false); setScrollY(y => y + viewportH); }
+    else if (k === '\x1b[C') setScrollX(x => Math.min(maxScrollX, x + 8));
+    else if (k === '\x1b[5~') { setStickToBottom(false); setScrollY(y => Math.max(0, y - viewportHRef.current)); }
+    else if (k === '\x1b[6~' || k === ' ') {
+      setScrollY(y => {
+        const next = Math.min(y + viewportHRef.current, maxScrollY);
+        if (next >= maxScrollY) setStickToBottom(true);
+        return next;
+      });
+    }
     else if (k === 'g' || k === '\x1b[H') { setStickToBottom(false); setScrollY(0); setScrollX(0); }
     else if (k === 'G' || k === '\x1b[F') { setStickToBottom(true); setScrollX(0); }
-  }), [viewportH, editingFilter]);
+  }), [editingFilter]);
 
   if (events.length === 0) {
     return (
@@ -150,23 +170,44 @@ export function LogsPane() {
   const above = clamped;
   const below = Math.max(0, events.length - clamped - viewportH);
 
+  // Bound horizontal scroll to the longest visible row's content width
+  // so → can't run off into infinity. ROW_CHROME = sum of fixed col
+  // widths + their separators (74), payload is variable.
+  const ROW_CHROME = COL_TIME + SEP.length + COL_IMP + SEP.length + COL_TYPE + SEP.length + COL_SRC + SEP.length;
+  let maxPayload = 0;
+  for (const ev of slice) {
+    const p = fmtPayload(ev);
+    if (p.length > maxPayload) maxPayload = p.length;
+  }
+  const maxRowWidth = ROW_CHROME + maxPayload;
+  const maxScrollX = Math.max(0, maxRowWidth - 16);
+  const clampedX = Math.min(scrollX, maxScrollX);
+
+  // Stash live values for the keypress closure (which captures only on
+  // mount due to fixed deps).
+  eventsLenRef.current = events.length;
+  viewportHRef.current = viewportH;
+  maxRowWidthRef.current = maxRowWidth;
+
   const showFilterBar = editingFilter || filter.length > 0;
   return (
     <box flexDirection="column" height={viewportH + 1}>
       {showFilterBar ? <FilterBar filter={filter} editing={editingFilter} /> : null}
-      <Header scrollX={scrollX} />
+      <Header scrollX={clampedX} />
       {slice.slice(0, viewportH - (showFilterBar ? 2 : 1)).map(ev =>
-        <Row key={ev.id} ev={ev} scrollX={scrollX} />
+        <Row key={ev.id} ev={ev} scrollX={clampedX} />
       )}
       <box flexDirection="row" gap={2}>
         <text fg="#64748b">
           ─── {events.length}/{allEvents.length} events
           {above > 0 ? `  ↑ ${above}` : ''}
           {below > 0 ? `  ↓ ${below}` : ''}
-          {stickToBottom ? '  · live' : '  · paused'}
-          {scrollX > 0 ? `  ·  →${scrollX}` : ''}
-          {`  ·  / filter · k/j ↑↓ · h/→ ←→ · G live`}
         </text>
+        {stickToBottom
+          ? <text fg="#34d399">  · live</text>
+          : <text fg="#f87171" bold>  · PAUSED (G to resume)</text>}
+        {clampedX > 0 ? <text fg="#64748b">{`  ·  →${clampedX}`}</text> : null}
+        <text fg="#64748b">{`  ·  / filter · k/j ↑↓ · h/→ ←→ · G live`}</text>
       </box>
     </box>
   );
