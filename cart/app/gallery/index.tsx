@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import './components.cls';
-import { callHost } from '@reactjit/runtime/ffi';
 import { TooltipRoot } from '@reactjit/runtime/tooltip/Tooltip';
 import {
   useFuzzySearch,
@@ -10,8 +9,8 @@ import {
   type FuzzySearchResult,
 } from '@reactjit/runtime/hooks/useFuzzySearch';
 import { Box, Col, Pressable, Row, ScrollView, StaticSurface, Text, TextInput } from '@reactjit/runtime/primitives';
-import { Icon, type IconData } from '@reactjit/runtime/icons/Icon';
-import { ChevronDown, ChevronRight, Maximize, Minimize, X } from '@reactjit/runtime/icons/icons';
+import { Icon } from '@reactjit/runtime/icons/Icon';
+import { ChevronDown, ChevronRight } from '@reactjit/runtime/icons/icons';
 import { Route, Router, useNavigate, useRoute } from './local-router';
 import { GalleryDisplayContainer } from './components/gallery-display-container/GalleryDisplayContainer';
 import { ChartAnimationProvider } from './lib/useSpring';
@@ -625,158 +624,6 @@ function groupVisibleStories(stories: StoryEntry[], preserveRank = false): Story
   }));
 }
 
-function windowMinimize() {
-  callHost<void>('__window_minimize', undefined as any);
-}
-
-function windowMaximize() {
-  callHost<void>('__window_maximize', undefined as any);
-}
-
-function windowClose() {
-  callHost<void>('__window_close', undefined as any);
-}
-
-function WindowButton({
-  icon,
-  onPress,
-  tone,
-}: {
-  icon: IconData;
-  onPress: () => void;
-  tone: string;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      style={{
-        width: 28,
-        height: 24,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderRadius: 6,
-        backgroundColor: COLORS.panelBg,
-        borderWidth: 1,
-        borderColor: COLORS.border,
-      }}
-    >
-      <Icon icon={icon} size={13} color={tone} strokeWidth={2.2} />
-    </Pressable>
-  );
-}
-
-function TitleBar({
-  searchValue,
-  onSearchChange,
-  searchPlaceholder = 'Search gallery',
-}: {
-  searchValue?: string;
-  onSearchChange?: (value: string) => void;
-  searchPlaceholder?: string;
-} = {}) {
-  const galleryTheme = useGalleryTheme();
-  const activeThemeIndex = galleryTheme.options.findIndex((option) => option.id === galleryTheme.activeThemeId);
-  const tokens = galleryTheme.active?.tokensByPath;
-  const swatchColor = getThemeStringToken(tokens, 'accent.accentHot', COLORS.accent);
-  const swatchBorder = getThemeStringToken(tokens, 'rules.ruleBright', COLORS.borderStrong);
-  const cycleTheme = () => {
-    if (galleryTheme.options.length <= 1) {
-      console.log('[gallery-theme:chrome] cycle ignored', { optionCount: galleryTheme.options.length });
-      return;
-    }
-    const currentIndex = activeThemeIndex >= 0 ? activeThemeIndex : 0;
-    const nextIndex = (currentIndex + 1) % galleryTheme.options.length;
-    const nextOption = galleryTheme.options[nextIndex];
-    console.log('[gallery-theme:chrome] cycle', {
-      current: galleryTheme.options[currentIndex]?.id,
-      next: nextOption?.id,
-      currentIndex,
-      nextIndex,
-    });
-    if (nextOption) galleryTheme.setTheme(nextOption.id);
-  };
-
-  return (
-    <Row
-      windowDrag={true}
-      style={{
-        width: '100%',
-        height: 42,
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        paddingLeft: 12,
-        paddingRight: 8,
-        backgroundColor: COLORS.railBg,
-        borderBottomWidth: 1,
-        borderBottomColor: COLORS.border,
-      }}
-    >
-      <Row style={{ alignItems: 'center', gap: 10, flexGrow: 1, flexBasis: 0 }}>
-        <Pressable
-          onPress={cycleTheme}
-          style={{
-            width: 18,
-            height: 18,
-            borderRadius: 5,
-            backgroundColor: swatchColor,
-            borderWidth: 1,
-            borderColor: swatchBorder,
-          }}
-        />
-        <Col style={{ gap: 1 }}>
-          <Text style={{ fontSize: 12, fontWeight: 'bold', color: COLORS.text }}>Component Gallery</Text>
-          <Text style={{ fontSize: 9, color: COLORS.faint }}>cart/app/gallery</Text>
-        </Col>
-      </Row>
-
-      {onSearchChange ? (
-        <Row
-          windowDrag={false}
-          style={{
-            width: 360,
-            height: 26,
-            alignItems: 'center',
-            gap: 8,
-            paddingLeft: 9,
-            paddingRight: 8,
-            borderRadius: 7,
-            backgroundColor: COLORS.panelBg,
-            borderWidth: 1,
-            borderColor: COLORS.border,
-          }}
-        >
-          <Text style={{ width: 34, fontSize: 9, fontWeight: 'bold', color: COLORS.faint }}>Find</Text>
-          <TextInput
-            value={searchValue || ''}
-            onChangeText={(value: any) => onSearchChange(getTextInputValue(value))}
-            placeholder={searchPlaceholder}
-            fontSize={11}
-            color={COLORS.text}
-            style={{
-              height: 20,
-              flexGrow: 1,
-              flexBasis: 0,
-              minWidth: 0,
-              paddingLeft: 0,
-              paddingRight: 0,
-              backgroundColor: COLORS.panelBg,
-              fontSize: 11,
-              fontFamily: 'monospace',
-              color: COLORS.text,
-            }}
-          />
-        </Row>
-      ) : null}
-
-      <Row style={{ alignItems: 'center', gap: 6 }}>
-        <WindowButton icon={Minimize} onPress={windowMinimize} tone={COLORS.warning} />
-        <WindowButton icon={Maximize} onPress={windowMaximize} tone={COLORS.success} />
-        <WindowButton icon={X} onPress={windowClose} tone="theme:atch" />
-      </Row>
-    </Row>
-  );
-}
-
 function Metric({ label, value, tone }: { label: string; value: string; tone: string }) {
   return (
     <Col
@@ -1040,6 +887,7 @@ function StoryNavItem({
         : status.slice(0, 1).toUpperCase();
 
   return (
+    <StaticSurface>
     <Pressable
       onPress={onPress}
       style={{
@@ -1100,6 +948,7 @@ function StoryNavItem({
         </Row>
       </Row>
     </Pressable>
+    </StaticSurface>
   );
 }
 
@@ -1165,9 +1014,15 @@ function StoryStage({ children }: { children: any }) {
     <Col
       style={{
         width: '100%',
+        minWidth: 0,
         minHeight: PAGE_SURFACE.minHeight - PAGE_SURFACE.padding * 2,
         alignItems: 'center',
         justifyContent: 'center',
+        // Some stories (FlowChart, etc.) hardcode a width wider than
+        // the gallery viewport; without this clip their overflow
+        // forces a page-level horizontal scrollbar that fights the
+        // column-stack layout of the rest of the page.
+        overflow: 'hidden',
       }}
     >
       {children}
@@ -2797,34 +2652,104 @@ function NextGalleryDetailCard({
   onSelectReference: (entry: StoryEntry) => void;
 }) {
   const story = entry.story;
-  const variant = getStoryVariants(story)[0] || null;
   const centered = !isDataStory(story) && !isThemeStory(story);
+  const code = formatNextGalleryCode(categoryId, index);
+  const meta = getSourceName(story.source);
 
-  return (
-    <GalleryDisplayContainer
-      code={formatNextGalleryCode(categoryId, index)}
-      title={story.title}
-      meta={getSourceName(story.source)}
-      ratio="wide"
-      width="100%"
-      height={620}
-      stagePadding={centered ? 18 : 12}
-      center={centered}
-    >
-      {isDataStory(story) ? (
-        <ScrollView showScrollbar style={{ width: '100%', height: '100%' }}>
-          <DataStoryPreview story={story} dataStoriesBySource={dataStoriesBySource} onSelectReference={onSelectReference} />
-        </ScrollView>
-      ) : isThemeStory(story) ? (
-        <ScrollView showScrollbar style={{ width: '100%', height: '100%' }}>
-          <ThemeStoryPreview story={story} activeThemeId={activeThemeId} onApplyTheme={onApplyTheme} />
-        </ScrollView>
-      ) : variant ? (
-        variant.render()
-      ) : (
+  if (isDataStory(story)) {
+    return (
+      <GalleryDisplayContainer
+        code={code}
+        title={story.title}
+        meta={meta}
+        ratio="fluid"
+        width="100%"
+        height="100%"
+        stagePadding={12}
+        center={false}
+      >
+        <DataStoryPreview story={story} dataStoriesBySource={dataStoriesBySource} onSelectReference={onSelectReference} />
+      </GalleryDisplayContainer>
+    );
+  }
+
+  if (isThemeStory(story)) {
+    return (
+      <GalleryDisplayContainer
+        code={code}
+        title={story.title}
+        meta={meta}
+        ratio="fluid"
+        width="100%"
+        height="100%"
+        stagePadding={12}
+        center={false}
+      >
+        <ThemeStoryPreview story={story} activeThemeId={activeThemeId} onApplyTheme={onApplyTheme} />
+      </GalleryDisplayContainer>
+    );
+  }
+
+  const variants = getStoryVariants(story);
+  if (variants.length === 0) {
+    return (
+      <GalleryDisplayContainer
+        code={code}
+        title={story.title}
+        meta={meta}
+        ratio="wide"
+        width="100%"
+        height={520}
+        stagePadding={18}
+        center
+      >
         <EmptyPreview />
-      )}
-    </GalleryDisplayContainer>
+      </GalleryDisplayContainer>
+    );
+  }
+
+  if (variants.length === 1) {
+    const v = variants[0];
+    return (
+      <GalleryDisplayContainer
+        code={code}
+        title={story.title}
+        meta={meta}
+        ratio="wide"
+        width="100%"
+        height={520}
+        stagePadding={centered ? 18 : 12}
+        center={centered}
+      >
+        {v.render()}
+      </GalleryDisplayContainer>
+    );
+  }
+
+  const fallback = variants.length === 2
+    ? { width: 540, height: 440 }
+    : { width: 720, height: 420 };
+  return (
+    <Row style={{ width: '100%', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+      {variants.map((variant, vi) => {
+        const canvas = variant.previewCanvas || fallback;
+        return (
+          <GalleryDisplayContainer
+            key={variant.id}
+            code={`${code}.${vi + 1}`}
+            title={`${story.title} · ${variant.name}`}
+            meta={meta}
+            ratio="fluid"
+            width={canvas.width}
+            height={canvas.height}
+            stagePadding={centered ? 12 : 8}
+            center={centered}
+          >
+            {variant.render()}
+          </GalleryDisplayContainer>
+        );
+      })}
+    </Row>
   );
 }
 
@@ -2918,36 +2843,75 @@ function VirtualizedTileGrid({
 // single tile rather than the whole catalog.
 function AtomsBrowser({
   entries,
-  categoryId,
   allEntries,
   dataStoriesBySource,
   activeThemeId,
   onApplyTheme,
   onSelectReference,
+  searchValue,
+  onSearchChange,
+  searchPlaceholder = 'Search gallery',
 }: {
   entries: StoryEntry[];
-  categoryId: NextGalleryRouteId;
   allEntries: StoryEntry[];
   dataStoriesBySource: Map<string, StoryEntry>;
   activeThemeId: string;
   onApplyTheme: (id: string) => void;
   onSelectReference: (entry: StoryEntry) => void;
+  searchValue: string;
+  onSearchChange: (value: string) => void;
+  searchPlaceholder?: string;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const hoveredEntry = hoveredId
     ? entries.find((entry) => entry.story.id === hoveredId) || null
     : null;
+  const hoveredCategoryId = hoveredEntry ? getNextGalleryCategory(hoveredEntry) : 'atoms';
 
   return (
-    <Row style={{ width: '100%', alignItems: 'stretch', padding: 0, gap: 0 }}>
+    <Row style={{ width: '100%', height: '100%', alignItems: 'stretch', padding: 0, gap: 0 }}>
       <Col
         style={{
           width: 320,
+          height: '100%',
           flexShrink: 0,
           borderRightWidth: 1,
           borderRightColor: PAGE_SURFACE.borderColor,
         }}
       >
+        <Row
+          style={{
+            width: '100%',
+            height: 32,
+            alignItems: 'center',
+            gap: 8,
+            paddingLeft: 12,
+            paddingRight: 8,
+            borderBottomWidth: 1,
+            borderBottomColor: PAGE_SURFACE.borderColor,
+          }}
+        >
+          <Text style={{ width: 30, fontSize: 9, fontWeight: 'bold', color: COLORS.faint }}>Find</Text>
+          <TextInput
+            value={searchValue || ''}
+            onChangeText={(value: any) => onSearchChange(getTextInputValue(value))}
+            placeholder={searchPlaceholder}
+            fontSize={11}
+            color={COLORS.text}
+            style={{
+              height: 22,
+              flexGrow: 1,
+              flexBasis: 0,
+              minWidth: 0,
+              paddingLeft: 0,
+              paddingRight: 0,
+              backgroundColor: 'transparent',
+              fontSize: 11,
+              fontFamily: 'monospace',
+              color: COLORS.text,
+            }}
+          />
+        </Row>
         <ScrollView showScrollbar style={{ width: '100%', height: '100%' }}>
           <Col style={{ width: '100%', paddingTop: 6, paddingBottom: 6 }}>
             {entries.map((entry) => {
@@ -2995,20 +2959,24 @@ function AtomsBrowser({
           </Col>
         </ScrollView>
       </Col>
-      <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, padding: 18 }}>
+      <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, height: '100%' }}>
         {hoveredEntry ? (
-          <NextGalleryDetailCard
-            entry={hoveredEntry}
-            categoryId={categoryId}
-            index={Math.max(
-              0,
-              allEntries.findIndex((entry) => entry.story.id === hoveredEntry.story.id)
-            )}
-            dataStoriesBySource={dataStoriesBySource}
-            activeThemeId={activeThemeId}
-            onApplyTheme={onApplyTheme}
-            onSelectReference={onSelectReference}
-          />
+          <ScrollView showScrollbar style={{ width: '100%', height: '100%' }}>
+            <Col style={{ width: '100%', padding: 18 }}>
+              <NextGalleryDetailCard
+                entry={hoveredEntry}
+                categoryId={hoveredCategoryId}
+                index={Math.max(
+                  0,
+                  allEntries.findIndex((entry) => entry.story.id === hoveredEntry.story.id)
+                )}
+                dataStoriesBySource={dataStoriesBySource}
+                activeThemeId={activeThemeId}
+                onApplyTheme={onApplyTheme}
+                onSelectReference={onSelectReference}
+              />
+            </Col>
+          </ScrollView>
         ) : (
           <Col
             style={{
@@ -3019,7 +2987,7 @@ function AtomsBrowser({
             }}
           >
             <Text style={{ fontSize: 14, fontWeight: 'bold', color: PAGE_SURFACE.textColor }}>
-              {`${entries.length} atom${entries.length === 1 ? '' : 's'}`}
+              {`${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`}
             </Text>
             <Text style={{ fontSize: 11, color: PAGE_SURFACE.mutedTextColor }}>
               Hover an entry on the left to preview.
@@ -3056,22 +3024,6 @@ function NextGalleryCollection({
   viewportH: number;
   scrollY: number;
 }) {
-  // Atoms get the new hover-to-preview browser instead of the grid.
-  // Only one atom mounts at a time, killing the all-mount cost.
-  if (categoryId === 'atoms') {
-    return (
-      <AtomsBrowser
-        entries={entries}
-        categoryId={categoryId}
-        allEntries={allEntries}
-        dataStoriesBySource={dataStoriesBySource}
-        activeThemeId={activeThemeId}
-        onApplyTheme={onApplyTheme}
-        onSelectReference={(entry) => onSelectStory('data', entry.story.id)}
-      />
-    );
-  }
-
   const selectedEntry =
     selectedStoryId === 'all' ? null : entries.find((entry) => entry.story.id === selectedStoryId) || null;
 
@@ -3113,35 +3065,12 @@ function NextGalleryCollection({
   );
 }
 
-function NextComponentGalleryShell({ selection }: { selection: Selection | null }) {
+function NextComponentGalleryShell({ selection: _selection }: { selection: Selection | null }) {
   const galleryTheme = useGalleryTheme();
-  const route = useRoute();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedByCategory, setSelectedByCategory] = useState<Record<NextGalleryRouteId, string>>({
-    data: 'all',
-    atoms: 'all',
-    components: 'all',
-    tokens: 'all',
-  });
-  // Virtualization state — onScroll/onLayout feed these so VirtualizedTileGrid
-  // can compute which row range to keep mounted. Sane defaults so first paint
-  // (before onLayout fires) renders ~one viewport-worth of tiles instead of
-  // nothing.
-  const [scrollY, setScrollY] = useState(0);
-  const [viewport, setViewport] = useState<{ width: number; height: number }>({ width: 1200, height: 900 });
   const tokens = galleryTheme.active?.tokensByPath;
   const backgroundColor = getThemeStringToken(tokens, 'surfaces.bg', COLORS.appBg);
-  const panelColor = getThemeStringToken(tokens, 'surfaces.bg1', COLORS.railBg);
-  const panelRaisedColor = getThemeStringToken(tokens, 'surfaces.bg2', COLORS.panelBg);
-  const borderColor = getThemeStringToken(tokens, 'rules.ruleBright', COLORS.borderStrong);
-  const textColor = getThemeStringToken(tokens, 'ink.ink', COLORS.text);
-  const mutedTextColor = getThemeStringToken(tokens, 'ink.inkDim', COLORS.muted);
-  const accentColor = getThemeStringToken(tokens, 'accent.accentHot', COLORS.accent);
-  const activeCategoryId = getNextGalleryRouteId(route.path) || 'data';
-  const activeRouteMeta = getNextGalleryRouteMeta(activeCategoryId);
-  const routeLabel = selection ? `${selection.storyId}/${selection.variantId}` : route.path;
   const stories = useMemo(() => sortStoryEntries(flattenStories(gallerySections)), []);
-  const categoryEntries = useMemo(() => getNextGalleryEntries(stories, activeCategoryId), [activeCategoryId, stories]);
   const storyFuzzyOptions = useMemo<FuzzySearchOptions<StoryEntry>>(
     () => ({
       mode: NAV_SEARCH_MODE,
@@ -3153,7 +3082,7 @@ function NextComponentGalleryShell({ selection }: { selection: Selection | null 
     }),
     []
   );
-  const searchedMatches = useFuzzySearch(categoryEntries, searchQuery, storyFuzzyOptions);
+  const searchedMatches = useFuzzySearch(stories, searchQuery, storyFuzzyOptions);
   const searchedEntries = useMemo(() => searchedMatches.map((match) => match.item), [searchedMatches]);
   const dataStoriesBySource = useMemo(() => {
     const entries = new Map<string, StoryEntry>();
@@ -3163,94 +3092,19 @@ function NextComponentGalleryShell({ selection }: { selection: Selection | null 
     }
     return entries;
   }, [stories]);
-  const selectedStoryId = selectedByCategory[activeCategoryId] || 'all';
-  const collectionEntries =
-    selectedStoryId === 'all' ? searchedEntries : searchedEntries.filter((entry) => entry.story.id === selectedStoryId);
-  const selectStoryFilter = (categoryId: NextGalleryRouteId, storyId: string) => {
-    setSelectedByCategory((current) => ({ ...current, [categoryId]: storyId }));
-  };
 
   return (
-    <Col
-      style={{
-        width: '100%',
-        height: '100%',
-        backgroundColor,
-      }}
-    >
-      <TitleBar
+    <Col style={{ width: '100%', height: '100%', backgroundColor }}>
+      <AtomsBrowser
+        entries={searchedEntries}
+        allEntries={stories}
+        dataStoriesBySource={dataStoriesBySource}
+        activeThemeId={galleryTheme.activeThemeId}
+        onApplyTheme={galleryTheme.setTheme}
+        onSelectReference={() => {}}
         searchValue={searchQuery}
         onSearchChange={setSearchQuery}
-        searchPlaceholder={`Search ${activeRouteMeta.label.toLowerCase()}`}
       />
-      <NextGalleryRouteBar
-        backgroundColor={backgroundColor}
-        panelColor={panelColor}
-        panelRaisedColor={panelRaisedColor}
-        borderColor={borderColor}
-        textColor={textColor}
-        mutedTextColor={mutedTextColor}
-        accentColor={accentColor}
-      />
-      {activeCategoryId === 'atoms' ? null : (
-        <NextGalleryIndividualTabs
-          categoryId={activeCategoryId}
-          entries={searchedEntries}
-          totalCount={categoryEntries.length}
-          selectedStoryId={selectedStoryId}
-          onSelect={(storyId) => selectStoryFilter(activeCategoryId, storyId)}
-          panelColor={panelColor}
-          panelRaisedColor={panelRaisedColor}
-          borderColor={borderColor}
-          textColor={textColor}
-          mutedTextColor={mutedTextColor}
-          accentColor={accentColor}
-        />
-      )}
-      <Box
-        style={{
-          width: '100%',
-          flexGrow: 1,
-          flexBasis: 0,
-          backgroundColor,
-        }}
-        onLayout={(rect: any) => {
-          if (!rect) return;
-          const w = Number.isFinite(rect.width) ? rect.width : 0;
-          const h = Number.isFinite(rect.height) ? rect.height : 0;
-          if (w <= 0 && h <= 0) return;
-          setViewport((prev) =>
-            prev.width === w && prev.height === h ? prev : { width: w || prev.width, height: h || prev.height }
-          );
-        }}
-      >
-        <ScrollView
-          showScrollbar
-          style={{ width: '100%', height: '100%' }}
-          onScroll={(payload: any) => {
-            const y = Number.isFinite(payload?.scrollY) ? payload.scrollY : 0;
-            setScrollY((prev) => (prev === y ? prev : y));
-          }}
-        >
-          <NextGalleryCollection
-            categoryId={activeCategoryId}
-            entries={collectionEntries}
-            allEntries={categoryEntries}
-            selectedStoryId={selectedStoryId}
-            dataStoriesBySource={dataStoriesBySource}
-            activeThemeId={galleryTheme.activeThemeId}
-            onApplyTheme={galleryTheme.setTheme}
-            onSelectStory={selectStoryFilter}
-            containerW={viewport.width}
-            viewportH={viewport.height}
-            scrollY={scrollY}
-          />
-          <Box style={{ height: 28 }} />
-          <Text style={{ fontSize: 9, fontFamily: 'monospace', color: mutedTextColor }}>
-            {`theme ${galleryTheme.active?.label || galleryTheme.activeThemeId || 'none'} · route ${routeLabel}`}
-          </Text>
-        </ScrollView>
-      </Box>
     </Col>
   );
 }
@@ -3472,7 +3326,6 @@ function ComponentGalleryShell({ selection }: { selection: Selection | null }) {
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: COLORS.appBg }}>
       <Col style={{ width: '100%', height: '100%' }}>
-        <TitleBar />
         <Row
           style={{
             height: 76,
