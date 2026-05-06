@@ -370,6 +370,23 @@ fn dispatchV8RightClick(x: f32, y: f32) void {
     state.markDirty();
 }
 
+// Same shape as dispatchV8RightClick — engine.dispatchScrollChanged calls
+// prepareScrollEvent() to stash node id + scroll deltas in qjs_runtime
+// globals, then invokes our handler. Under V8 we can't go through the
+// QJS-only callGlobalInt; instead eval __dispatchScroll(id) and let the
+// JS shim pull the coords back via __getPreparedScroll (registered in
+// v8_bindings_core.zig:1200). Without this, onScroll handlers attached
+// to a ScrollView never fire under V8 — content scrolls visually but
+// no JS event is delivered.
+fn dispatchV8Scroll() void {
+    const id = qjs_runtime.g_prepared_node_event_id;
+    if (id == 0) return;
+    qjs_runtime.g_prepared_node_event_id = 0;
+    var buf: [128]u8 = undefined;
+    const expr = std.fmt.bufPrintZ(&buf, "__dispatchScroll({d})", .{id}) catch return;
+    v8_runtime.evalScript(expr);
+}
+
 // ── Context menu item trampolines ────────────────────────
 // MenuItem.handler is `*const fn () void` with no args, so a single
 // dispatcher can't recover which item was clicked. We comptime-generate
@@ -2225,7 +2242,7 @@ fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
         node.handlers.js_on_hover_exit = installJsExpr("__dispatchEvent({d},'onHoverExit')\x00", id);
     }
     if (cmdHasAnyHandlerName(cmd, &.{"onScroll"})) {
-        node.handlers.on_scroll = qjs_runtime.dispatchPreparedScroll;
+        node.handlers.on_scroll = dispatchV8Scroll;
     }
     if (cmdHasAnyHandlerName(cmd, &.{ "onRightClick", "onContextMenu" })) {
         node.handlers.on_right_click = dispatchV8RightClick;
