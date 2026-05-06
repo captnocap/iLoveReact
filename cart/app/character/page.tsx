@@ -1619,7 +1619,9 @@ function CharacterForm() {
           overflow: 'hidden',
           opacity: pageOp,
         }}>
-          <AvatarPreview />
+          {/* DEBUG: AvatarPreview disabled to test if its 3D scene RAF
+              is what drives the ScrollView's content_height fluctuation. */}
+          {/* <AvatarPreview /> */}
         </Box>
       </Row>
     </S.Page>
