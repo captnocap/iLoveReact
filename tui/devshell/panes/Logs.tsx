@@ -12,6 +12,26 @@ import { useEventStream, Event } from '../services/EventStream';
 
 const CHROME_ROWS = 6; // title 2 + tabs 1 + footer 1 + paneY-padding 2
 
+// Render each row as colored segments so we can drop characters from the
+// left when scrolling horizontally without losing per-column color.
+type Seg = { text: string; fg: string; bold?: boolean };
+
+function padRight(s: string, n: number): string {
+  if (s.length >= n) return s.slice(0, n);
+  return s + ' '.repeat(n - s.length);
+}
+
+function sliceSegs(segs: Seg[], from: number): Seg[] {
+  let drop = from;
+  const out: Seg[] = [];
+  for (const s of segs) {
+    if (drop >= s.text.length) { drop -= s.text.length; continue; }
+    out.push({ ...s, text: s.text.slice(drop) });
+    drop = 0;
+  }
+  return out;
+}
+
 function impColor(imp: number): string {
   if (imp >= 0.85) return '#f87171';   // error
   if (imp >= 0.70) return '#fbbf24';   // warn
@@ -42,14 +62,10 @@ function fmtPayload(ev: Event): string {
   } catch { return ''; }
 }
 
-function trim(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + '…';
-}
-
 export function LogsPane() {
   const events = useEventStream(500);
   const [scrollY, setScrollY] = useState(0);
+  const [scrollX, setScrollX] = useState(0);
   const [stickToBottom, setStickToBottom] = useState(true);
   const lastSeenCount = useRef(0);
 
@@ -69,10 +85,12 @@ export function LogsPane() {
   useEffect(() => subscribeKey(k => {
     if (k === '\x1b[A' || k === 'k') { setStickToBottom(false); setScrollY(y => Math.max(0, y - 1)); }
     else if (k === '\x1b[B' || k === 'j') { setStickToBottom(false); setScrollY(y => y + 1); }
+    else if (k === '\x1b[D' || k === 'h') setScrollX(x => Math.max(0, x - 8));
+    else if (k === '\x1b[C') setScrollX(x => x + 8);
     else if (k === '\x1b[5~') { setStickToBottom(false); setScrollY(y => Math.max(0, y - viewportH)); }
     else if (k === '\x1b[6~' || k === ' ') { setStickToBottom(false); setScrollY(y => y + viewportH); }
-    else if (k === 'g' || k === '\x1b[H') { setStickToBottom(false); setScrollY(0); }
-    else if (k === 'G' || k === '\x1b[F') { setStickToBottom(true); }
+    else if (k === 'g' || k === '\x1b[H') { setStickToBottom(false); setScrollY(0); setScrollX(0); }
+    else if (k === 'G' || k === '\x1b[F') { setStickToBottom(true); setScrollX(0); }
   }), [viewportH]);
 
   if (events.length === 0) {
@@ -95,43 +113,70 @@ export function LogsPane() {
 
   return (
     <box flexDirection="column" height={viewportH + 1}>
-      <Header />
-      {slice.slice(0, viewportH - 1).map(ev => <Row key={ev.id} ev={ev} />)}
+      <Header scrollX={scrollX} />
+      {slice.slice(0, viewportH - 1).map(ev => <Row key={ev.id} ev={ev} scrollX={scrollX} />)}
       <box flexDirection="row" gap={2}>
         <text fg="#64748b">
           ─── {events.length} events
           {above > 0 ? `  ↑ ${above}` : ''}
           {below > 0 ? `  ↓ ${below}` : ''}
           {stickToBottom ? '  · live' : '  · paused'}
-          {`  ·  k/j ↑↓ · PgUp/PgDn · G live`}
+          {scrollX > 0 ? `  ·  →${scrollX}` : ''}
+          {`  ·  k/j ↑↓ · h/→ ←→ · PgUp/PgDn · G live`}
         </text>
       </box>
     </box>
   );
 }
 
-function Header() {
-  return (
-    <box flexDirection="row" gap={1}>
-      <box width={12}><text fg="#475569" bold>time</text></box>
-      <box width={5}><text fg="#475569" bold>imp</text></box>
-      <box width={22}><text fg="#475569" bold>event</text></box>
-      <box width={28}><text fg="#475569" bold>source</text></box>
-      <text fg="#475569" bold>message / payload</text>
-    </box>
-  );
+// Header / Row both build a left-to-right segment list and then drop
+// `scrollX` characters off the front. That's how horizontal scroll
+// works without ANSI cursor positioning per cell — the host's
+// flex layout just sees a shorter row.
+const SEP = '  ';
+const COL_TIME = 12;
+const COL_IMP  = 4;
+const COL_TYPE = 22;
+const COL_SRC  = 28;
+
+function Header({ scrollX }: { scrollX: number }) {
+  const segs: Seg[] = [
+    { text: padRight('time', COL_TIME), fg: '#475569', bold: true },
+    { text: SEP, fg: '#475569' },
+    { text: padRight('imp', COL_IMP), fg: '#475569', bold: true },
+    { text: SEP, fg: '#475569' },
+    { text: padRight('event', COL_TYPE), fg: '#475569', bold: true },
+    { text: SEP, fg: '#475569' },
+    { text: padRight('source', COL_SRC), fg: '#475569', bold: true },
+    { text: SEP, fg: '#475569' },
+    { text: 'message / payload', fg: '#475569', bold: true },
+  ];
+  return <SegRow segs={sliceSegs(segs, scrollX)} />;
 }
 
-function Row({ ev }: { ev: Event }) {
+function Row({ ev, scrollX }: { ev: Event; scrollX: number }) {
   const c = impColor(ev.imp);
   const payload = fmtPayload(ev);
+  const segs: Seg[] = [
+    { text: padRight(fmtTime(ev.ts), COL_TIME), fg: '#64748b' },
+    { text: SEP, fg: '#475569' },
+    { text: padRight(ev.imp.toFixed(2), COL_IMP), fg: c },
+    { text: SEP, fg: '#475569' },
+    { text: padRight(ev.type, COL_TYPE), fg: c },
+    { text: SEP, fg: '#475569' },
+    { text: padRight(ev.src, COL_SRC), fg: '#94a3b8' },
+    { text: SEP, fg: '#475569' },
+    { text: payload, fg: '#cbd5e1' },
+  ];
+  return <SegRow segs={sliceSegs(segs, scrollX)} />;
+}
+
+function SegRow({ segs }: { segs: Seg[] }) {
   return (
-    <box flexDirection="row" gap={1}>
-      <box width={12}><text fg="#64748b">{fmtTime(ev.ts)}</text></box>
-      <box width={5}><text fg={c}>{ev.imp.toFixed(2)}</text></box>
-      <box width={22}><text fg={c}>{trim(ev.type, 22)}</text></box>
-      <box width={28}><text fg="#94a3b8">{trim(ev.src, 28)}</text></box>
-      {payload ? <text fg="#cbd5e1">{trim(payload, 80)}</text> : null}
+    <box flexDirection="row">
+      {segs.map((s, i) => (
+        <text key={i} fg={s.fg} bold={s.bold}>{s.text}</text>
+      ))}
     </box>
   );
 }
