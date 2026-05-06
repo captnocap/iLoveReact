@@ -19,6 +19,8 @@
 
 const std = @import("std");
 const event_bus = @import("event_bus.zig");
+const qjs_runtime = @import("qjs_runtime.zig");
+const telemetry = @import("telemetry.zig");
 const log = std.log.scoped(.dev_ipc);
 
 pub const SOCKET_PATH = "/tmp/reactjit.sock";
@@ -124,9 +126,32 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
     if (header_len == 0 or header_buf[header_len - 1] != '\n') return error.BadHeader;
     const header = std.mem.trimRight(u8, header_buf[0..header_len], "\r\n");
 
-    // Parse: "PUSH <name> <length>"
+    // Parse: "PUSH <name> <length>" or "TELEMETRY"
     var it = std.mem.tokenizeScalar(u8, header, ' ');
     const verb = it.next() orelse return error.BadHeader;
+
+    if (std.mem.eql(u8, verb, "TELEMETRY")) {
+        // One-shot snapshot of the live telemetry counters. JSON line +
+        // close. Used by tools/devshell to render fps/nodes/paint/layout
+        // in its title bar at ~4Hz.
+        const snap = telemetry.current;
+        var buf: [320]u8 = undefined;
+        const json = std.fmt.bufPrint(
+            &buf,
+            "{{\"fps\":{d},\"layout_us\":{d},\"paint_us\":{d},\"frame_total_us\":{d},\"frame_number\":{d},\"node_count\":{d}}}\n",
+            .{
+                qjs_runtime.telemetry_fps,
+                qjs_runtime.telemetry_layout_us,
+                qjs_runtime.telemetry_paint_us,
+                snap.frame_total_us,
+                snap.frame_number,
+                telemetry.nodeCount(),
+            },
+        ) catch "{}\n";
+        try writeAll(client_fd, json);
+        return;
+    }
+
     if (!std.mem.eql(u8, verb, "PUSH")) {
         try writeAll(client_fd, "ERR unknown verb\n");
         return;

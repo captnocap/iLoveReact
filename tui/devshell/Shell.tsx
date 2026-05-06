@@ -7,6 +7,7 @@
 import { createElement, useState, useEffect } from 'react';
 import { subscribeKey } from '../host';
 import { BundlePane } from './panes/Bundle';
+import { useTelemetry, Telemetry } from './services/Telemetry';
 
 type TabId = 'logs' | 'events' | 'inspect' | 'bundle' | 'status';
 const TABS: { id: TabId; label: string }[] = [
@@ -24,15 +25,13 @@ export function Shell({ cart }: { cart: string }) {
   const [active, setActive] = useState<TabId>('status');
   const [tick, setTick] = useState(0);
   const [hostUp, setHostUp] = useState(false);
+  const tel = useTelemetry();
 
-  // 5Hz heartbeat — drives spinner, time display, socket probe.
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 200);
     return () => clearInterval(t);
   }, []);
-  useEffect(() => {
-    setHostUp(probeHost());
-  }, [tick]);
+  useEffect(() => { setHostUp(probeHost()); }, [tick]);
 
   useEffect(() => subscribeKey(k => {
     if (k >= '1' && k <= '5') {
@@ -42,16 +41,18 @@ export function Shell({ cart }: { cart: string }) {
   }), []);
 
   const spinner = '|/-\\'[tick % 4];
-  const now = new Date().toLocaleTimeString();
 
   return (
     <box width="fill" height="fill" bg="#0b1020" fg="#e5e7eb" flexDirection="column">
-      {/* Title bar — single row */}
-      <box flexDirection="row" gap={2} paddingX={1} bg="#111827">
-        <text bold fg="#60a5fa">rjit</text>
-        <text fg="#cbd5e1">cart=<text bold fg="#fbbf24">{cart}</text></text>
-        <text fg={hostUp ? '#34d399' : '#f87171'}>host {hostUp ? '● up' : '○ down'}</text>
-        <text fg="#94a3b8">{spinner} {now}</text>
+      {/* Title bar — left group + spacer + right (telemetry) group */}
+      <box flexDirection="row" paddingX={1} bg="#111827">
+        <box flexDirection="row" gap={2}>
+          <text bold fg="#60a5fa">rjit</text>
+          <text fg="#cbd5e1">cart=<text bold fg="#fbbf24">{cart}</text></text>
+          <text fg={hostUp ? '#34d399' : '#f87171'}>host {hostUp ? '● up' : '○ down'}</text>
+        </box>
+        <box flexGrow={1} />
+        <TelemetryStrip tel={tel} hostUp={hostUp} spinner={spinner} />
       </box>
 
       {/* Tab strip — single row, selection via bg + bold */}
@@ -75,6 +76,39 @@ export function Shell({ cart }: { cart: string }) {
       <box flexDirection="row" gap={2} paddingX={1} bg="#111827">
         <text fg="#64748b">1..5 tab · F2 restart · F3 rebuild · F5 pick · q quit</text>
       </box>
+    </box>
+  );
+}
+
+// Live telemetry strip pinned to the title bar's right edge. Always
+// visible regardless of which tab is active. Reads from the dev host
+// over /tmp/reactjit.sock (TELEMETRY verb), so reflects the cart's
+// frame loop — not the devshell's own renderer.
+function TelemetryStrip({ tel, hostUp, spinner }: { tel: Telemetry | null; hostUp: boolean; spinner: string }) {
+  const dim = '#475569';
+  const sep = <text fg={dim}>·</text>;
+  if (!hostUp || !tel) {
+    return (
+      <box flexDirection="row" gap={1}>
+        <text fg={dim}>—fps {sep} —nodes {sep} L— {sep} P— {sep} {spinner}</text>
+      </box>
+    );
+  }
+  const fps = tel.fps | 0;
+  const fpsColor = fps >= 55 ? '#34d399' : fps >= 30 ? '#fbbf24' : '#f87171';
+  const lay = (tel.layout_us / 1000).toFixed(1);
+  const pnt = (tel.paint_us / 1000).toFixed(1);
+  return (
+    <box flexDirection="row" gap={1}>
+      <text fg={fpsColor} bold>{fps}fps</text>
+      {sep}
+      <text fg="#cbd5e1">{tel.node_count} nodes</text>
+      {sep}
+      <text fg="#cbd5e1">L {lay}ms</text>
+      {sep}
+      <text fg="#cbd5e1">P {pnt}ms</text>
+      {sep}
+      <text fg="#94a3b8">{spinner}</text>
     </box>
   );
 }
