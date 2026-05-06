@@ -1594,7 +1594,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     const total_capsules: u32 = @intCast(capsules.count());
     const total_polys: u32 = @intCast(polys.count());
     const total_images: u32 = @intCast(images.count());
-    log.info(.gpu, "frame dims={d}x{d} rects={d} glyphs={d} curves={d} capsules={d} polys={d} images={d} boundaries={d}", .{
+    // Per-frame breakdown — debug tier so it doesn't drown the event ring
+    // at default threshold; opt in via devshell `l` to trace.
+    log.debug(.gpu, "frame dims={d}x{d} rects={d} glyphs={d} curves={d} capsules={d} polys={d} images={d} boundaries={d}", .{
         g_width, g_height, total_rects, total_glyphs, total_curves, total_capsules, total_polys, total_images, g_scissor_count,
     });
 

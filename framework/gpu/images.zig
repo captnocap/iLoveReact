@@ -84,7 +84,7 @@ fn queueQuadInternal(x: f32, y: f32, w: f32, h: f32, opacity: f32, bind_group: *
     };
     g_bind_groups[g_quad_count] = bind_group;
     if (log.isEnabled(.gpu)) {
-        log.info(.gpu, "image queue idx={d} rect=({d:.0},{d:.0},{d:.0},{d:.0}) opacity={d:.2}", .{
+        log.debug(.gpu, "image queue idx={d} rect=({d:.0},{d:.0},{d:.0},{d:.0}) opacity={d:.2}", .{
             g_quad_count, tx, ty, tw, th, opacity,
         });
     }

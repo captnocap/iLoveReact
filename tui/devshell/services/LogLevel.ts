@@ -2,12 +2,13 @@
 // threshold via the LOGLEVEL IPC verb so noisy "log"-tier events can
 // be turned on for a debugging session and off again afterwards.
 //
-// Levels chosen to align with framework/event_bus.zig's auto-importance
-// substring table:
-//   0.00 — trace (recv/tick/poll and everything else)
-//   0.50 — debug (skips trace tier)
-//   0.70 — warn  (skips info/debug — only warn|error|critical pass)
-//   0.85 — error (only errors and critical pass)
+// Standard log-level semantics: each level = "show this tier and above".
+// Threshold value = floor importance for that tier.
+//   trace 0.00 — everything passes
+//   debug 0.15 — log.debug and above (per-frame trace logs included)
+//   info  0.30 — log.info and above (default; gpu trace excluded)
+//   warn  0.70 — log.warn and above (only warnings/errors)
+//   error 0.85 — only errors+critical
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 
@@ -20,10 +21,11 @@ declare const __exists:      ((path: string) => boolean) | undefined;
 const SOCK = '/tmp/reactjit.sock';
 const TIMEOUT_MS = 200;
 
-export type LogLevelName = 'trace' | 'debug' | 'warn' | 'error';
+export type LogLevelName = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 export const LEVELS: { name: LogLevelName; value: number; color: string }[] = [
   { name: 'trace', value: 0.00, color: '#94a3b8' },
-  { name: 'debug', value: 0.50, color: '#60a5fa' },
+  { name: 'debug', value: 0.15, color: '#60a5fa' },
+  { name: 'info',  value: 0.30, color: '#a3e635' },
   { name: 'warn',  value: 0.70, color: '#fbbf24' },
   { name: 'error', value: 0.85, color: '#f87171' },
 ];

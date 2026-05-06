@@ -97,6 +97,22 @@ fn fileWrite(s: []const u8) void {
     if (log_file) |f| _ = f.write(s) catch {};
 }
 
+/// Per-frame / per-tick noise that the user only wants to see when
+/// they've explicitly opted into trace-tier in the dev shell. Bus
+/// importance 0.15, default-filtered.
+pub fn debug(cat: Category, comptime fmt: []const u8, args: anytype) void {
+    ensureInit();
+    const name = @tagName(cat);
+    var msg_buf: [1024]u8 = undefined;
+    const msg = std.fmt.bufPrint(&msg_buf, fmt, args) catch return;
+    _ = event_bus.emitFromLog(.debug, name, msg);
+    if (enabled[@intFromEnum(cat)]) {
+        var line_buf: [1100]u8 = undefined;
+        const line = std.fmt.bufPrint(&line_buf, "[{s}] {s}\n", .{ name, msg }) catch return;
+        fileWrite(line);
+    }
+}
+
 pub fn info(cat: Category, comptime fmt: []const u8, args: anytype) void {
     ensureInit();
     const name = @tagName(cat);

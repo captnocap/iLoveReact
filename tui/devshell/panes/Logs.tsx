@@ -28,9 +28,14 @@ function fmtTime(ts: number): string {
   return `${hh}:${mm}:${ss}.${ms}`;
 }
 
-function fmtPayload(p: any): string {
+// log.* events have payload {msg, scope, level} — surface the msg
+// directly so the row reads naturally. For other event types, render
+// the JSON payload unmolested.
+function fmtPayload(ev: Event): string {
+  const p = ev.payload;
   if (p === null || p === undefined) return '';
   if (typeof p !== 'object') return String(p);
+  if (ev.type.startsWith('log.') && typeof p.msg === 'string') return p.msg;
   try {
     const s = JSON.stringify(p);
     return s === '{}' ? '' : s;
@@ -106,7 +111,7 @@ export function LogsPane() {
 
 function Row({ ev }: { ev: Event }) {
   const c = impColor(ev.imp);
-  const payload = fmtPayload(ev.payload);
+  const payload = fmtPayload(ev);
   return (
     <box flexDirection="row" gap={1}>
       <box width={12}><text fg="#64748b">{fmtTime(ev.ts)}</text></box>

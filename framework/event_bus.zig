@@ -64,10 +64,11 @@ var g_inited: bool = false;
 /// at runtime via LOGLEVEL IPC. 0.0 = pass everything (default), higher
 /// values gate cheaper "log"-tier events out of the stream so a hot
 /// trace path doesn't cost SQL writes when off.
-/// Default 0.5 — drops the "log"-tier (recv|tick|poll at 0.20) and any
-/// other importance-0 emit. Hit `l` in devshell to lower for debugging.
-/// 0.0 makes everything pass; 1.0 silences everything.
-var g_min_importance: f32 = 0.5;
+/// Default 0.30 — matches the devshell "info" level: log.info / boot /
+/// bundle / warn / err all pass; log.debug (0.15) and below are gated.
+/// `l` in devshell cycles to a lower threshold for opt-in trace.
+/// 0.0 = pass everything, 1.0 = silence everything.
+var g_min_importance: f32 = 0.30;
 pub fn minImportance() f32 { return g_min_importance; }
 pub fn setMinImportance(threshold: f32) void { g_min_importance = threshold; }
 

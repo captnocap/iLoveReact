@@ -202,7 +202,7 @@ function HelpPane() {
       <text> </text>
       <Hk k="1..5"      d="switch pane (Logs / Events / Inspect / Bundle / Status)" />
       <Hk k="y"         d="copy current screen as plain text to clipboard (OSC 52)" />
-      <Hk k="l"         d="cycle log level: trace · debug · warn · error" />
+      <Hk k="l"         d="cycle log level: trace · debug · info · warn · error" />
       <Hk k="?"         d="toggle this help (or ESC)" />
       <Hk k="q / ⌃C"    d="quit" />
       <text> </text>
