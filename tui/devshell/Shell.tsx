@@ -210,6 +210,8 @@ function HelpPane() {
       <text> </text>
       <text fg="#cbd5e1" bold>Inside Logs pane</text>
       <Hk k="/"         d="filter (substring match; ! prefix excludes); Enter applies, ESC clears" />
+      <Hk k="Enter"     d="open detail view on bottom event (full payload, word-wrapped)" />
+      <Hk k="n / p"     d="(in detail) next / previous event" />
       <Hk k="↑/↓ k/j"   d="scroll one row" />
       <Hk k="←/→ h"     d="horizontal scroll (8 cols)" />
       <Hk k="G"         d="resume live tail" />

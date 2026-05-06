@@ -93,12 +93,18 @@ export function LogsPane() {
   const [scrollY, setScrollY] = useState(0);
   const [scrollX, setScrollX] = useState(0);
   const [stickToBottom, setStickToBottom] = useState(true);
+  // Detail mode — when non-null, the pane replaces the row list with a
+  // pretty-printed view of one event (payload word-wrapped to terminal
+  // width). Enter opens it on the most recent event; n/p step.
+  const [detailIdx, setDetailIdx] = useState<number | null>(null);
   const lastSeenCount = useRef(0);
   // Refs that the keypress closure reads — lets the closure see live
   // values without resubscribing on every event.
   const eventsLenRef = useRef(0);
   const viewportHRef = useRef(0);
   const maxRowWidthRef = useRef(0);
+  const eventsRef = useRef<Event[]>([]);
+  eventsRef.current = events;
 
   // Release the input claim if the pane unmounts mid-edit.
   useEffect(() => () => { releaseInput(); }, []);
@@ -126,6 +132,24 @@ export function LogsPane() {
       else if (k.length === 1 && k >= ' ' && k !== '\x1b') setFilter(f => f + k);
       return;
     }
+    // Detail mode — ESC closes, n/p step within the events list.
+    if (detailIdx !== null) {
+      if (k === '\x1b') { setDetailIdx(null); return; }
+      if (k === 'n' || k === 'j' || k === '\x1b[B') {
+        setDetailIdx(i => (i === null) ? null : Math.min(eventsLenRef.current - 1, i + 1));
+        return;
+      }
+      if (k === 'p' || k === 'k' || k === '\x1b[A') {
+        setDetailIdx(i => (i === null) ? null : Math.max(0, i - 1));
+        return;
+      }
+      // Fall through — other keys still work in detail mode (l/y/etc.)
+    } else if (k === '\r' || k === '\n') {
+      // Enter opens detail on the bottom-most visible event.
+      const events = eventsRef.current;
+      if (events.length > 0) setDetailIdx(events.length - 1);
+      return;
+    }
     if (k === '/') { setEditingFilter(true); claimInput(); return; }
     const maxScrollY = Math.max(0, eventsLenRef.current - viewportHRef.current);
     const maxScrollX = Math.max(0, maxRowWidthRef.current - 16);
@@ -150,7 +174,7 @@ export function LogsPane() {
     }
     else if (k === 'g' || k === '\x1b[H') { setStickToBottom(false); setScrollY(0); setScrollX(0); }
     else if (k === 'G' || k === '\x1b[F') { setStickToBottom(true); setScrollX(0); }
-  }), [editingFilter]);
+  }), [editingFilter, detailIdx]);
 
   if (events.length === 0) {
     return (
@@ -161,6 +185,18 @@ export function LogsPane() {
         <text fg="#64748b">If the host is up but logs stay empty, the threshold</text>
         <text fg="#64748b">may be filtering everything out. Press `l` to lower it.</text>
       </box>
+    );
+  }
+
+  if (detailIdx !== null && detailIdx < events.length) {
+    const termCols = (typeof process !== 'undefined' && process.stdout?.columns) || 80;
+    return (
+      <DetailView
+        ev={events[detailIdx]}
+        idx={detailIdx}
+        total={events.length}
+        cols={termCols - 4}
+      />
     );
   }
 
@@ -209,6 +245,61 @@ export function LogsPane() {
         {clampedX > 0 ? <text fg="#64748b">{`  ·  →${clampedX}`}</text> : null}
         <text fg="#64748b">{`  ·  / filter · k/j ↑↓ · h/→ ←→ · G live`}</text>
       </box>
+    </box>
+  );
+}
+
+function DetailView({ ev, idx, total, cols }: { ev: Event; idx: number; total: number; cols: number }) {
+  const c = impColor(ev.imp);
+  // Pretty-print payload. log.* events get the .msg field; everything
+  // else gets full JSON with 2-space indent.
+  let body = '';
+  if (ev.type.startsWith('log.') && typeof ev.payload?.msg === 'string') {
+    body = ev.payload.msg;
+  } else if (ev.payload === undefined || ev.payload === null) {
+    body = '';
+  } else if (typeof ev.payload === 'object') {
+    try { body = JSON.stringify(ev.payload, null, 2); } catch { body = String(ev.payload); }
+  } else {
+    body = String(ev.payload);
+  }
+  const lines: string[] = [];
+  const width = Math.max(20, cols);
+  // Honour explicit \n breaks, then wrap each segment to `width`.
+  for (const seg of body.split('\n')) {
+    if (seg.length === 0) { lines.push(''); continue; }
+    for (let i = 0; i < seg.length; i += width) {
+      lines.push(seg.slice(i, i + width));
+    }
+  }
+  return (
+    <box flexDirection="column">
+      <box flexDirection="row" gap={2}>
+        <text fg="#fbbf24" bold>{`detail ${idx + 1}/${total}`}</text>
+        <text fg="#64748b">— ESC close · n/p next/prev</text>
+      </box>
+      <text> </text>
+      <box flexDirection="row" gap={2}>
+        <box width={10}><text fg="#94a3b8">time</text></box>
+        <text fg="#e5e7eb">{fmtTime(ev.ts)}</text>
+      </box>
+      <box flexDirection="row" gap={2}>
+        <box width={10}><text fg="#94a3b8">imp</text></box>
+        <text fg={c}>{ev.imp.toFixed(3)}</text>
+      </box>
+      <box flexDirection="row" gap={2}>
+        <box width={10}><text fg="#94a3b8">event</text></box>
+        <text fg={c} bold>{ev.type}</text>
+      </box>
+      <box flexDirection="row" gap={2}>
+        <box width={10}><text fg="#94a3b8">source</text></box>
+        <text fg="#cbd5e1">{ev.src}</text>
+      </box>
+      <text> </text>
+      <text fg="#94a3b8" bold>payload:</text>
+      {lines.length === 0
+        ? <text fg="#64748b">  (empty)</text>
+        : lines.map((ln, i) => <text key={i} fg="#e5e7eb">  {ln}</text>)}
     </box>
   );
 }
