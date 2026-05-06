@@ -1533,7 +1533,7 @@ function CharacterForm() {
       <Row style={{ width: '100%', height: '100%', alignItems: 'stretch' }}>
         <ScrollView style={{ flexGrow: 1, flexBasis: 0 }}>
           <Box style={{
-            paddingTop: 28, paddingBottom: 28,
+            paddingTop: 28,
             paddingLeft: 28, paddingRight: 14,
             alignItems: 'center',
             opacity: pageOp,
@@ -1559,6 +1559,11 @@ function CharacterForm() {
                   </S.DocPageContent>
                 </S.DocPage>
               </S.DocPageWrap>
+              {/* Bottom spacer — keeps the breathing room as measured
+                  content rather than the parent's paddingBottom, which
+                  the ScrollView's content_height calc was rounding off
+                  and producing a 28px overscroll-snap artifact. */}
+              <Box style={{ width: '100%', height: 28 }} />
             </Box>
           </Box>
         </ScrollView>
