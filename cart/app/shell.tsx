@@ -78,6 +78,35 @@ export function useInputClaim(): InputClaim | null {
   return React.useSyncExternalStore(_subscribeClaim, _getClaim, _getClaim);
 }
 
+// ── Shelved input ────────────────────────────────────────────────────
+//
+// User-triggered toggle that collapses the InputStrip into a thin
+// handle along its edge. Bound to `Ctrl+\` at the App level. Useful
+// when the user wants more screen room without leaving the route or
+// killing the chat session — flip the bit, the strip tucks; flip
+// back, it returns to whichever slot the route+claim derivation
+// places it in.
+
+let _shelved = false;
+const _shelvedSubs = new Set<() => void>();
+function _notifyShelved(): void { for (const s of _shelvedSubs) s(); }
+function _subscribeShelved(fn: () => void): () => void {
+  _shelvedSubs.add(fn);
+  return () => { _shelvedSubs.delete(fn); };
+}
+function _getShelved(): boolean { return _shelved; }
+
+export function setInputShelved(value: boolean): void {
+  if (_shelved === value) return;
+  _shelved = value;
+  _notifyShelved();
+}
+export function toggleInputShelved(): void { setInputShelved(!_shelved); }
+export function getInputShelved(): boolean { return _shelved; }
+export function useInputShelved(): boolean {
+  return React.useSyncExternalStore(_subscribeShelved, _getShelved, _getShelved);
+}
+
 // ── HUD insets ───────────────────────────────────────────────────────
 //
 // Shell publishes the animated bottom (BottomInputBar reserved height)

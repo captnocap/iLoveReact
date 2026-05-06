@@ -25,6 +25,9 @@ import { useAnimationTimeline } from './anim';
 import { InputStrip } from './InputStrip';
 import {
   useInputClaim,
+  useInputShelved,
+  toggleInputShelved,
+  setInputShelved,
   setHudInsets,
   RAIL_SUBNAV_MAX_FRAC,
 } from './shell';
@@ -37,25 +40,34 @@ import type { ChatShape } from './chat/types';
 applyGalleryTheme(getActiveGalleryThemeId());
 installBrowserShims();
 
-// Each route declares its shell layout mode. `full` is home only — the
-// cold-start state with no side rail. Every other route is `side`
-// (rail visible). Whether the InputStrip lives in the rail or the
-// bottom is independent of route — it's derived from inputClaim and
-// chatIsActivity in ShellBody. /chat IS in this list (with a chrome
-// tab) so users who land there have an obvious way back to the rest
-// of the app; the chat is global, but the surface for it is route-
-// addressable like everything else.
+// Each route declares its shell layout mode. `full` is home only —
+// cold-start, no side rail. Every other route is `side` (rail visible).
+//
+// `inputDock` is the route's preferred default position for the
+// InputStrip when the rail is visible and no activity has claimed
+// the input. Routes the user fundamentally types INTO (Sweatshop
+// canvas, future text editors, /chat) want it bottom-full so it
+// doesn't fight with the route's own input affordances; chat-rail
+// routes (Settings sub-nav with assistant chat alongside) keep it
+// docked in the rail so the chat panel stays the focus. Active
+// claims always override either default.
 type RouteMode = 'full' | 'side';
-const ROUTES: Array<{ path: string; label: string; icon: number[][]; mode: RouteMode }> = [
-  { path: '/',                  label: 'Home',      icon: Home,             mode: 'full' },
-  { path: '/chat',              label: 'Chat',      icon: BotMessageSquare, mode: 'side' },
-  { path: '/settings',          label: 'Settings',  icon: Settings,         mode: 'side' },
-  { path: '/activity/sweatshop', label: 'Sweatshop', icon: Settings,         mode: 'side' },
-  { path: '/composer',           label: 'Composer',  icon: Settings,         mode: 'side' },
-  { path: '/character',          label: 'Character', icon: User2,            mode: 'side' },
-  { path: '/face3d',             label: 'Face3D',    icon: Boxes,            mode: 'side' },
-  { path: '/gallery',            label: 'Gallery',   icon: LayoutGrid,       mode: 'side' },
+type InputDock = 'rail' | 'bottom';
+const ROUTES: Array<{ path: string; label: string; icon: number[][]; mode: RouteMode; inputDock: InputDock }> = [
+  { path: '/',                  label: 'Home',      icon: Home,             mode: 'full', inputDock: 'bottom' },
+  { path: '/chat',              label: 'Chat',      icon: BotMessageSquare, mode: 'side', inputDock: 'bottom' },
+  { path: '/settings',          label: 'Settings',  icon: Settings,         mode: 'side', inputDock: 'rail'   },
+  { path: '/activity/sweatshop', label: 'Sweatshop', icon: Settings,         mode: 'side', inputDock: 'bottom' },
+  { path: '/composer',           label: 'Composer',  icon: Settings,         mode: 'side', inputDock: 'bottom' },
+  { path: '/character',          label: 'Character', icon: User2,            mode: 'side', inputDock: 'rail'   },
+  { path: '/face3d',             label: 'Face3D',    icon: Boxes,            mode: 'side', inputDock: 'bottom' },
+  { path: '/gallery',            label: 'Gallery',   icon: LayoutGrid,       mode: 'side', inputDock: 'rail'   },
 ];
+
+function inputDockForPath(path: string): InputDock {
+  if (path.startsWith('/settings')) return 'rail';
+  return ROUTES.find((r) => r.path === path)?.inputDock ?? 'bottom';
+}
 
 function NavLink({ path, label, icon }: { path: string; label: string; icon: number[][] }) {
   const route = useRoute();
@@ -189,7 +201,31 @@ function NavigationBus() {
   useIFTTT('app:navigate', (path: any) => {
     if (typeof path === 'string' && path.startsWith('/')) nav.push(path);
   });
+  // Global shelve toggle — Ctrl+\ collapses the InputStrip into the
+  // thin handle along the bottom edge, frees up the rail input slot.
+  // Same key flips it back. Lives here (alongside NavigationBus) so
+  // it's mounted exactly once for the cart's lifetime.
+  useIFTTT('key:ctrl+\\', () => toggleInputShelved());
   return null;
+}
+
+// Thin Pressable that replaces the InputStrip when shelved. Click
+// anywhere on the bar to restore the input.
+function ShelveHandle() {
+  return (
+    <S.AppShelveHandle
+      onPress={() => setInputShelved(false)}
+      style={{
+        position: 'absolute', left: 0, right: 0, bottom: 0,
+        height: SHELF_HANDLE_H,
+      }}
+    >
+      <S.AppShelveHandleLabel>↑ INPUT</S.AppShelveHandleLabel>
+      <S.AppShelveHandleKbd>
+        <S.AppShelveHandleKbdText>CTRL+\</S.AppShelveHandleKbdText>
+      </S.AppShelveHandleKbd>
+    </S.AppShelveHandle>
+  );
 }
 
 // Strip is gated on onboarding completion — surfacing it during the
@@ -250,6 +286,9 @@ function ConditionalAssistantChat({
 
 const SIDE_W = 360;
 const STRIP_TWEEN_MS = 600;
+// Reserved height for the thin "input shelved" handle at the bottom
+// of the screen. Just tall enough to read the label and tap.
+const SHELF_HANDLE_H = 28;
 
 function nowMs(): number {
   const g: any = globalThis;
@@ -314,11 +353,17 @@ function deriveHeadingTo(
   railVisible: boolean,
   hasClaim: boolean,
   chatIsActivity: boolean,
+  inputDock: InputDock,
 ): HeadingTo {
   if (chatIsActivity) return 'chat-route';
   if (!railVisible) return 'cold';
   if (hasClaim) return 'rail-claim';
-  return 'rail-input';
+  // No claim — the route's declared default decides where the input
+  // lives. 'rail-claim' shape (input bottom, rail still visible with
+  // chat) is reused for routes that prefer the bottom InputStrip; the
+  // 'claim' part is just a misnomer at this point — it's the same
+  // visual layout. 'rail-input' is the rail-docked default.
+  return inputDock === 'bottom' ? 'rail-claim' : 'rail-input';
 }
 
 // Live chat surface location. Hidden in cold-state (no session yet);
@@ -359,12 +404,14 @@ function ShellBody() {
   const chatIsActivity = route.path === '/chat';
   const claim = useInputClaim();
   const hasChat = useChatHasAny();
+  const shelved = useInputShelved();
   // Rail follows the user once they leave home OR ever start a chat.
   // Cold home (path === '/' AND no chat) keeps the rail hidden, which
   // is the only condition where the InputStrip is supposed to be
   // bottom-full-width with no rail visible.
   const railVisible = route.path !== '/' || hasChat;
-  const headingTo = deriveHeadingTo(railVisible, claim != null, chatIsActivity);
+  const inputDock = inputDockForPath(route.path);
+  const headingTo = deriveHeadingTo(railVisible, claim != null, chatIsActivity, inputDock);
   const chatShape = deriveChatShape(headingTo);
 
   // Three independent morph timelines — see the constants comment for
@@ -497,8 +544,12 @@ function ShellBody() {
   // Page area's bottom padding — reserves space for AppBottomInputBar
   // (= APP_BOTTOM_BAR_H, the classifier's height) when in full mode,
   // collapses to 0 in side mode. Animates so the page-extends-down /
-  // page-retracts step is smooth.
-  const paddingBottom = (1 - bottomMorph) * APP_BOTTOM_BAR_H;
+  // page-retracts step is smooth. When the user shelves the input via
+  // Ctrl+\, we replace the bar with a thin handle at the bottom — the
+  // handle's height is the only inset we reserve.
+  const paddingBottom = shelved
+    ? SHELF_HANDLE_H
+    : (1 - bottomMorph) * APP_BOTTOM_BAR_H;
 
   // Publish HUD insets so pages can apply matching internal padding
   // while keeping their backgrounds full-bleed. The bar paints
@@ -598,7 +649,7 @@ function ShellBody() {
                     sub-nav or chat history can never push it past the
                     rail's bottom edge — the chat (flexGrow:1, minHeight:0)
                     absorbs every pixel of squeeze before this does. */}
-                {isSide ? (
+                {isSide && !shelved ? (
                   <Box style={{ flexShrink: 0, width: '100%' }}>
                     <ConditionalInputStrip />
                   </Box>
@@ -611,8 +662,17 @@ function ShellBody() {
                   tree when isSide. Inner display:'flex' is explicit
                   (avoids any framework ambiguity). Height comes from
                   the classifier (APP_BOTTOM_BAR_H, single source of
-                  truth alongside the strip's own classifier definition). */}
-              {isSide ? null : (
+                  truth alongside the strip's own classifier definition).
+
+                  When shelved, the bar (and the rail's input slot) is
+                  replaced with a thin Pressable strip that the user can
+                  click to restore the input — keybind Ctrl+\ also
+                  toggles. The handle always sits at the bottom of the
+                  page area, regardless of which slot the input would
+                  otherwise be in. */}
+              {shelved ? (
+                <ShelveHandle />
+              ) : isSide ? null : (
                 <S.AppBottomInputBar style={{
                   position: 'absolute', left: 0, right: 0, bottom: 0,
                   paddingRight,

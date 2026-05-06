@@ -3920,6 +3920,35 @@ classifier({
     overflow: 'scroll',
   }},
 
+  // ── Shelve handle ────────────────────────────────────────────────
+  // Thin bar that replaces the InputStrip when the user shelves the
+  // input (Ctrl+\). Click to restore. Anchored to the bottom of the
+  // page area; left edge spans the full viewport so it's reachable
+  // even when the side rail is wide.
+
+  AppShelveHandle: { type: 'Pressable', style: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'theme:bg1',
+    borderTopWidth: 1,
+    borderColor: 'theme:rule',
+  }},
+
+  AppShelveHandleLabel: { type: 'Text', size: 10, color: 'theme:inkDim',
+                          style: { fontFamily: 'theme:fontMono', letterSpacing: 2, lineHeight: 12, whiteSpace: 'pre' } },
+
+  AppShelveHandleKbd: { type: 'Box', style: {
+    flexDirection: 'row', alignItems: 'center',
+    height: 16, paddingLeft: 5, paddingRight: 5,
+    borderWidth: 1, borderColor: 'theme:rule',
+    backgroundColor: 'theme:bg2',
+  }},
+
+  AppShelveHandleKbdText: { type: 'Text', size: 9, color: 'theme:inkDimmer',
+                            style: { fontFamily: 'theme:fontMono', letterSpacing: 1, lineHeight: 11, whiteSpace: 'pre' } },
+
   // Chat-history list (rail's chat slot when no live session, OR when on
   // /chat and the live transcript is in the activity area).
   AppChatHistoryList: { type: 'Box', style: {
