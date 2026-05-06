@@ -1534,21 +1534,53 @@ function CharacterForm() {
         width: '100%', height: '100%', alignItems: 'stretch', minWidth: 0,
         borderWidth: 4, borderColor: 'rgba(0,255,255,1)',
       }}>
-        <ScrollView style={{
-          flexGrow: 1, flexBasis: 0, minWidth: 0,
-          paddingTop: 28, paddingBottom: 28,
-          paddingLeft: 28, paddingRight: 14,
-          alignItems: 'center',
-          opacity: pageOp,
-          borderWidth: 4, borderColor: 'rgba(0,128,255,1)',
-          backgroundColor: 'rgba(0,128,255,0.10)',
-        }}>
-            <Box style={{
-              width: '100%', maxWidth: 1040,
-              minWidth: 0, overflow: 'hidden',
-              borderWidth: 4, borderColor: 'rgba(255,255,0,1)',
-              backgroundColor: 'rgba(255,255,0,0.06)',
-            }}>
+        <ScrollView
+          debugName="char-scroll"
+          onScroll={(e: any) => {
+            const host: any = globalThis;
+            const cnt = (host.__tel_node_count && host.__tel_node_count()) || 0;
+            let yel: any = null;
+            let scr: any = null;
+            for (let i = 0; i < cnt; i++) {
+              const n = host.__tel_node && host.__tel_node(i);
+              if (!n) continue;
+              if (n.tag === 'char-yellow') yel = n;
+              else if (n.tag === 'char-scroll') scr = n;
+              if (yel && scr) break;
+            }
+            if (yel && scr) {
+              const scrBottom = scr.y + scr.h;
+              const yelBottom = yel.y + yel.h;
+              console.log('[char-scroll]', JSON.stringify({
+                scrollY: e?.scrollY,
+                scrollY_internal: scr.scroll_y,
+                contentH: scr.content_height,
+                scrollH: scr.h,
+                maxScrollY: Math.max(0, scr.content_height - scr.h),
+                scrBottom, yelBottom,
+                bottomGap: scrBottom - yelBottom,
+              }));
+            }
+          }}
+          style={{
+            flexGrow: 1, flexBasis: 0, minWidth: 0,
+            paddingTop: 28, paddingBottom: 28,
+            paddingLeft: 28, paddingRight: 14,
+            alignItems: 'center',
+            opacity: pageOp,
+            borderWidth: 4, borderColor: 'rgba(0,128,255,1)',
+            backgroundColor: 'rgba(0,128,255,0.10)',
+          }}
+        >
+            <Box
+              debugName="char-yellow"
+              style={{
+                width: '100%', maxWidth: 1040,
+                minWidth: 0, overflow: 'hidden',
+                borderWidth: 4, borderColor: 'rgba(255,255,0,1)',
+                backgroundColor: 'rgba(255,255,0,0.06)',
+              }}
+            >
               <Box style={{ opacity: headOp }}>
                 <Row style={{ width: '100%', gap: 16, alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
                   <Col style={{ gap: 4 }}>
