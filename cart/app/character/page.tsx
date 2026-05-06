@@ -1285,9 +1285,11 @@ function AvatarPreview() {
           ))}
         </Row>
         <Row style={{ width: '100%', gap: 8, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap', marginTop: 5 }}>
+          {/* DEBUG-OFF: 2D BlockFaces badge inside Tooltip
           <Tooltip label="Block Faces renders the assistant manifest as a live worker badge." side="top" delayMs={250}>
             <BlockFaces row={worker} scale={2} layout="badge" />
           </Tooltip>
+          */}
         </Row>
         {/* DEBUG-OFF: <AnimatedManifestText /> */}
       </CharacterCard>
