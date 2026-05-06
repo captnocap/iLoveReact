@@ -610,10 +610,29 @@ function ShellBody() {
                   useHudInsets() to keep content above the bar's
                   footprint. paddingLeft stays here for the side rail
                   (rail is opaque chrome). */}
-              <Box style={{
+              {/* Routes content — wrapped in a flex Row that reserves
+                  the rail's width as a real sibling spacer instead of
+                  paddingLeft on this Box. paddingLeft turned out to
+                  be unreliable: the framework's layout was letting
+                  child `width: '100%'` resolve against the wrapper's
+                  outer width, ignoring the padding, so wide pages
+                  (character, gallery) painted the correct leftmost
+                  pixel but then extended past the viewport on the
+                  right — kicking off horizontal-scrollbar flicker on
+                  every layout pulse. With a flex spacer the rail's
+                  width is taken out of flex distribution, and the
+                  routes column gets exactly viewport - sideWidth via
+                  flexGrow + minWidth:0. */}
+              <Row style={{
                 flexGrow: 1,
-                paddingLeft: sideWidth,
+                minHeight: 0,
+                width: '100%',
               }}>
+                <Box style={{ width: sideWidth, flexShrink: 0 }} />
+                <Box style={{
+                  flexGrow: 1, flexBasis: 0, minWidth: 0,
+                  flexDirection: 'column',
+                }}>
                 <Route path="/">
                   <IndexPage />
                 </Route>
@@ -641,7 +660,8 @@ function ShellBody() {
                 <Route path="/chat">
                   <ChatPage />
                 </Route>
-              </Box>
+                </Box>
+              </Row>
               {/* SideMenuInput — absolute overlay on the left.
                   Rendered FIRST so BottomInputBar overlays it in
                   z-order during phase 1 of shrink (input still in
