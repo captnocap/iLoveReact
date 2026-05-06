@@ -623,16 +623,22 @@ function ShellBody() {
                   width is taken out of flex distribution, and the
                   routes column gets exactly viewport - sideWidth via
                   flexGrow + minWidth:0. */}
-              <Row style={{
-                flexGrow: 1,
-                minHeight: 0,
-                width: '100%',
-              }}>
+              <Row
+                onLayout={(r: any) => console.log('[layout] page-area-row', { vw: getViewportW(), sideWidth, w: r?.w })}
+                style={{
+                  flexGrow: 1,
+                  minHeight: 0,
+                  width: '100%',
+                }}
+              >
                 <Box style={{ width: sideWidth, flexShrink: 0 }} />
-                <Box style={{
-                  flexGrow: 1, flexBasis: 0, minWidth: 0,
-                  flexDirection: 'column',
-                }}>
+                <Box
+                  onLayout={(r: any) => console.log('[layout] routes-column', { vw: getViewportW(), sideWidth, expected: getViewportW() - sideWidth, w: r?.w })}
+                  style={{
+                    flexGrow: 1, flexBasis: 0, minWidth: 0,
+                    flexDirection: 'column',
+                  }}
+                >
                 <Route path="/">
                   <IndexPage />
                 </Route>
