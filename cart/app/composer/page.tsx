@@ -1,5 +1,5 @@
 import { Component, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Canvas, Pressable, ScrollView, Text, TextInput } from '@reactjit/runtime/primitives';
+import { Box, Canvas, Pressable, ScrollView, StaticSurface, Text, TextInput } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
 import { storySections } from '../gallery/stories';
 import { getCanonicalStoryTags, formatCanonicalTagLabel, resolveGalleryGroup } from '../gallery/taxonomy';
@@ -1197,38 +1197,40 @@ function ComposerPageInner() {
                     paddingBottom: 14,
                   }}
                 >
-                  <Box
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 4,
-                      paddingLeft: 8,
-                      paddingRight: 8,
-                      paddingTop: 7,
-                      paddingBottom: 7,
-                      backgroundColor: 'theme:bg2',
-                      borderWidth: 1,
-                      borderColor: 'theme:ruleBright',
-                    }}
-                  >
-                    <ActionBarButton icon={MousePointer} label="SEL" active={tool === 'select'} onPress={() => setTool('select')} />
-                    <ActionBarButton icon={Hand} label="PAN" active={tool === 'move'} onPress={() => setTool('move')} />
-                    <ActionBarButton icon={PenLine} label="DRAW" active={tool === 'draw'} onPress={() => setTool('draw')} />
-                    <ActionBarDivider />
-                    <ActionBarButton icon={Square} label="BOX" onPress={() => addAtom({ id: 'Box', title: 'Box', group: 'Primitives', tags: ['panel'], kind: 'primitive' })} />
-                    <ActionBarButton icon={Type} label="TEXT" onPress={() => addAtom({ id: 'Text', title: 'Text', group: 'Primitives', tags: ['input'], kind: 'primitive' })} />
-                    <ActionBarButton icon={MousePointerClick} label="BTN" onPress={() => addAtom({ id: 'Pressable', title: 'Pressable', group: 'Primitives', tags: ['button'], kind: 'primitive' })} />
-                    <ActionBarDivider />
-                    <ActionBarButton icon={Copy} label="COPY" onPress={copy} />
-                    <ActionBarButton icon={ClipboardPaste} label="PASTE" onPress={paste} />
-                    <ActionBarButton icon={BoxSelect} label="DUP" onPress={duplicate} />
-                    <ActionBarButton icon={Trash2} label="DEL" onPress={remove} />
-                    <ActionBarDivider />
-                    <ActionBarButton icon={Group} label="GRP" onPress={() => updateDoc(groupSelection)} />
-                    <ActionBarButton icon={Ungroup} label="UNGRP" onPress={() => updateDoc(ungroupSelection)} />
-                    <ActionBarDivider />
-                    <ActionBarButton icon={MonitorCheck} label="PAGE" onPress={() => addPage(PAGE_PRESETS[1])} />
-                  </Box>
+                  <StaticSurface>
+                    <Box
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 4,
+                        paddingLeft: 8,
+                        paddingRight: 8,
+                        paddingTop: 7,
+                        paddingBottom: 7,
+                        backgroundColor: 'theme:bg2',
+                        borderWidth: 1,
+                        borderColor: 'theme:ruleBright',
+                      }}
+                    >
+                      <ActionBarButton icon={MousePointer} label="SEL" active={tool === 'select'} onPress={() => setTool('select')} />
+                      <ActionBarButton icon={Hand} label="PAN" active={tool === 'move'} onPress={() => setTool('move')} />
+                      <ActionBarButton icon={PenLine} label="DRAW" active={tool === 'draw'} onPress={() => setTool('draw')} />
+                      <ActionBarDivider />
+                      <ActionBarButton icon={Square} label="BOX" onPress={() => addAtom({ id: 'Box', title: 'Box', group: 'Primitives', tags: ['panel'], kind: 'primitive' })} />
+                      <ActionBarButton icon={Type} label="TEXT" onPress={() => addAtom({ id: 'Text', title: 'Text', group: 'Primitives', tags: ['input'], kind: 'primitive' })} />
+                      <ActionBarButton icon={MousePointerClick} label="BTN" onPress={() => addAtom({ id: 'Pressable', title: 'Pressable', group: 'Primitives', tags: ['button'], kind: 'primitive' })} />
+                      <ActionBarDivider />
+                      <ActionBarButton icon={Copy} label="COPY" onPress={copy} />
+                      <ActionBarButton icon={ClipboardPaste} label="PASTE" onPress={paste} />
+                      <ActionBarButton icon={BoxSelect} label="DUP" onPress={duplicate} />
+                      <ActionBarButton icon={Trash2} label="DEL" onPress={remove} />
+                      <ActionBarDivider />
+                      <ActionBarButton icon={Group} label="GRP" onPress={() => updateDoc(groupSelection)} />
+                      <ActionBarButton icon={Ungroup} label="UNGRP" onPress={() => updateDoc(ungroupSelection)} />
+                      <ActionBarDivider />
+                      <ActionBarButton icon={MonitorCheck} label="PAGE" onPress={() => addPage(PAGE_PRESETS[1])} />
+                    </Box>
+                  </StaticSurface>
                 </Box>
               </Canvas.Clamp>
               {doc.pages.map((page) => (

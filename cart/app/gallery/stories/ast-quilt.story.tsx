@@ -1,11 +1,10 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
 import { AstBinarySquares, AstBinaryTile, AstQuilt, AstTile } from '../components/ast-quilt/AstQuilt';
-import { FileFingerprintWorkbench } from '../components/ast-quilt/FileFingerprintWorkbench';
+import { AstTileBox } from '../components/ast-quilt/AstTileBox';
 import {
   AstFingerprintEffect,
   AstFingerprintEffectGrid,
 } from '../components/ast-quilt/EffectFromFingerprint';
-import { FingerprintEffectWorkbench } from '../components/ast-quilt/FingerprintEffectWorkbench';
 import { AST_SAMPLE_FILES } from '../components/ast-quilt/sampleContract';
 
 export const astQuiltSection = defineGallerySection({
@@ -36,6 +35,11 @@ export const astQuiltSection = defineGallerySection({
           render: () => <AstTile file={{ ...AST_SAMPLE_FILES[17], selected: true, tagColor: 'theme:ok' }} tileIndex={17} />,
         },
         {
+          id: 'box-tile',
+          name: 'Box Tile (host-driven)',
+          render: () => <AstTileBox file={{ ...AST_SAMPLE_FILES[17], selected: true, tagColor: 'theme:ok' }} tileIndex={17} />,
+        },
+        {
           id: 'binary-tile',
           name: 'Binary Tile',
           render: () => <AstBinaryTile file={{ ...AST_SAMPLE_FILES[17], selected: true, tagColor: 'theme:ok' }} tileIndex={17} />,
@@ -54,26 +58,6 @@ export const astQuiltSection = defineGallerySection({
           id: 'random-effect-grid-dense',
           name: 'Random Effect Grid (6×6)',
           render: () => <AstFingerprintEffectGrid gridSide={6} />,
-        },
-        {
-          id: 'random-effect-from-file',
-          name: 'Random Effect From File',
-          render: () => <FingerprintEffectWorkbench initialPath="cart/app/gallery/components/ast-quilt/AstQuilt.tsx" />,
-        },
-        {
-          id: 'from-file',
-          name: 'From File',
-          render: () => <FileFingerprintWorkbench initialPath="cart/app/gallery/components/ast-quilt/AstQuilt.tsx" />,
-        },
-        {
-          id: 'from-file-binary',
-          name: 'From File Binary',
-          render: () => (
-            <FileFingerprintWorkbench
-              initialPath="cart/app/gallery/components/ast-quilt/AstQuilt.tsx"
-              previewMode="binary-squares"
-            />
-          ),
         },
       ],
     }),

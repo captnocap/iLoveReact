@@ -4090,6 +4090,7 @@ pub fn run(config_in: AppConfig) !void {
         const phase_t_preframe = std.time.microTimestamp();
         gpu.frame(0.051, 0.067, 0.090);
         const phase_t_postframe = std.time.microTimestamp();
+        qjs_runtime.telemetry_gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe));
         if (g_input_latency_ts_us != 0) {
             const since_click = phase_t_postframe - g_input_latency_ts_us;
             if (since_click > 50000) {
@@ -4141,6 +4142,7 @@ pub fn run(config_in: AppConfig) !void {
             .tick_us = @intCast(@max(0, t1 - t0)),
             .layout_us = @intCast(@max(0, t3 - t2)),
             .paint_us = @intCast(@max(0, t5 - t4)),
+            .gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe)),
             .frame_total_us = @intCast(@max(0, t6 - t0)),
             .fps = qjs_runtime.telemetry_fps,
             .bridge_calls_per_sec = qjs_runtime.telemetry_bridge_calls,
@@ -4172,12 +4174,12 @@ pub fn run(config_in: AppConfig) !void {
             const verbose = std.posix.getenv("ZIGOS_TELEMETRY") != null;
             if (verbose or (now -% telemetry_stderr_last) >= 10_000) {
                 telemetry_stderr_last = now;
-                log.print("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | visible: {d}/{d} | gpu: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s\n", .{
-                    fps_frames, qjs_runtime.telemetry_layout_us, qjs_runtime.telemetry_paint_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, qjs_runtime.bridge_calls_this_second,
+                log.print("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s\n", .{
+                    fps_frames, qjs_runtime.telemetry_layout_us, qjs_runtime.telemetry_paint_us, qjs_runtime.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, qjs_runtime.bridge_calls_this_second,
                 });
             }
-            log.writeLine("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | visible: {d}/{d} | gpu: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s", .{
-                fps_frames, qjs_runtime.telemetry_layout_us, qjs_runtime.telemetry_paint_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, qjs_runtime.bridge_calls_this_second,
+            log.writeLine("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s", .{
+                fps_frames, qjs_runtime.telemetry_layout_us, qjs_runtime.telemetry_paint_us, qjs_runtime.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, qjs_runtime.bridge_calls_this_second,
             });
             qjs_runtime.telemetry_bridge_calls = qjs_runtime.bridge_calls_this_second;
             qjs_runtime.bridge_calls_this_second = 0;

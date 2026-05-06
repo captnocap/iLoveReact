@@ -17,6 +17,7 @@
 // plus a starter trigger → action chain you can edit.
 
 import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
+import { classifiers as S } from '@reactjit/core';
 import { useState } from 'react';
 import { FlowEditor } from '../gallery/components/flow-editor/FlowEditor';
 import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types';
@@ -100,7 +101,7 @@ export default function SweatshopPage() {
   };
 
   return (
-    <Row style={{ flexGrow: 1, backgroundColor: 'theme:bg' }}>
+    <S.Page style={{ flexDirection: 'row' }}>
       <PaletteSidebar onSpawn={handleSpawn} />
 
       <Col style={{ flexGrow: 1 }}>
@@ -110,13 +111,13 @@ export default function SweatshopPage() {
           gap: 12,
           alignItems: 'baseline',
           borderBottomWidth: 1,
-          borderBottomColor: 'theme:lineSoft',
-          backgroundColor: 'theme:surface',
+          borderBottomColor: 'theme:rule',
+          backgroundColor: 'theme:bg1',
         }}>
           <Text size={16} color="theme:ink" bold={true}>Canvas</Text>
-          <Text size={10} color="theme:inkMuted">
+          <S.Caption>
             {userName ? `${userName}'s open scene` : 'open scene — nothing required, everything composes'}
-          </Text>
+          </S.Caption>
           {goalText ? (
             <Text size={10} color="theme:accent">goal: {goalText}</Text>
           ) : null}
@@ -133,7 +134,7 @@ export default function SweatshopPage() {
           />
         </Box>
       </Col>
-    </Row>
+    </S.Page>
   );
 }
 

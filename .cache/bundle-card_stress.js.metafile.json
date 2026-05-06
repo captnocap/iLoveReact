@@ -127,7 +127,7 @@
       "format": "esm"
     },
     "runtime/ffi.ts": {
-      "bytes": 4455,
+      "bytes": 5195,
       "imports": [
         {
           "path": "/home/siah/creative/reactjit/runtime/jsx_shim.ts",
@@ -411,7 +411,7 @@
       "format": "esm"
     },
     "renderer/debugLog.ts": {
-      "bytes": 68,
+      "bytes": 1690,
       "imports": [
         {
           "path": "/home/siah/creative/reactjit/runtime/jsx_shim.ts",
@@ -659,65 +659,8 @@
       ],
       "format": "esm"
     },
-    "runtime/eventBus.ts": {
-      "bytes": 4250,
-      "imports": [
-        {
-          "path": "/home/siah/creative/reactjit/runtime/jsx_shim.ts",
-          "kind": "import-statement",
-          "external": true
-        },
-        {
-          "path": "/home/siah/creative/reactjit/framework/ambient.ts",
-          "kind": "import-statement",
-          "external": true
-        },
-        {
-          "path": "/home/siah/creative/reactjit/framework/ambient_primitives.ts",
-          "kind": "import-statement",
-          "external": true
-        }
-      ],
-      "format": "esm"
-    },
-    "runtime/devEventLog.tsx": {
-      "bytes": 9344,
-      "imports": [
-        {
-          "path": "vendor/react/index.js",
-          "kind": "import-statement",
-          "original": "react"
-        },
-        {
-          "path": "runtime/primitives.tsx",
-          "kind": "import-statement",
-          "original": "@reactjit/runtime/primitives"
-        },
-        {
-          "path": "runtime/eventBus.ts",
-          "kind": "import-statement",
-          "original": "@reactjit/runtime/eventBus"
-        },
-        {
-          "path": "/home/siah/creative/reactjit/runtime/jsx_shim.ts",
-          "kind": "import-statement",
-          "external": true
-        },
-        {
-          "path": "/home/siah/creative/reactjit/framework/ambient.ts",
-          "kind": "import-statement",
-          "external": true
-        },
-        {
-          "path": "/home/siah/creative/reactjit/framework/ambient_primitives.ts",
-          "kind": "import-statement",
-          "external": true
-        }
-      ],
-      "format": "esm"
-    },
     "cart/card_stress.tsx": {
-      "bytes": 11339,
+      "bytes": 11199,
       "imports": [
         {
           "path": "vendor/react/index.js",
@@ -1043,7 +986,7 @@
       "format": "cjs"
     },
     "runtime/index.tsx": {
-      "bytes": 21715,
+      "bytes": 20889,
       "imports": [
         {
           "path": "runtime/effect_tracker.ts",
@@ -1059,16 +1002,6 @@
           "path": "runtime/effectContext.ts",
           "kind": "import-statement",
           "original": "./effectContext"
-        },
-        {
-          "path": "runtime/primitives.tsx",
-          "kind": "import-statement",
-          "original": "./primitives"
-        },
-        {
-          "path": "runtime/devEventLog.tsx",
-          "kind": "import-statement",
-          "original": "./devEventLog"
         },
         {
           "path": "cart/card_stress.tsx",
@@ -1139,7 +1072,7 @@
           "bytesInOutput": 6482
         },
         "runtime/ffi.ts": {
-          "bytesInOutput": 1438
+          "bytesInOutput": 1801
         },
         "runtime/hooks/fs.ts": {
           "bytesInOutput": 323
@@ -1190,7 +1123,7 @@
           "bytesInOutput": 352
         },
         "runtime/index.tsx": {
-          "bytesInOutput": 13052
+          "bytesInOutput": 12720
         },
         "runtime/effect_tracker.ts": {
           "bytesInOutput": 6894
@@ -1202,7 +1135,7 @@
           "bytesInOutput": 444
         },
         "renderer/debugLog.ts": {
-          "bytesInOutput": 114
+          "bytesInOutput": 1008
         },
         "runtime/core_stub.ts": {
           "bytesInOutput": 66
@@ -1216,17 +1149,11 @@
         "runtime/effectContext.ts": {
           "bytesInOutput": 6389
         },
-        "runtime/devEventLog.tsx": {
-          "bytesInOutput": 8317
-        },
-        "runtime/eventBus.ts": {
-          "bytesInOutput": 2057
-        },
         "cart/card_stress.tsx": {
-          "bytesInOutput": 8736
+          "bytesInOutput": 9196
         }
       },
-      "bytes": 997374
+      "bytes": 988275
     }
   }
 }

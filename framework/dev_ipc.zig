@@ -176,14 +176,16 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
         // close. Used by tools/devshell to render fps/nodes/paint/layout
         // in its title bar at ~4Hz.
         const snap = telemetry.current;
-        var buf: [320]u8 = undefined;
+        var buf: [512]u8 = undefined;
         const json = std.fmt.bufPrint(
             &buf,
-            "{{\"fps\":{d},\"layout_us\":{d},\"paint_us\":{d},\"frame_total_us\":{d},\"frame_number\":{d},\"node_count\":{d}}}\n",
+            "{{\"fps\":{d},\"tick_us\":{d},\"layout_us\":{d},\"paint_us\":{d},\"gpu_us\":{d},\"frame_total_us\":{d},\"frame_number\":{d},\"node_count\":{d}}}\n",
             .{
                 qjs_runtime.telemetry_fps,
+                snap.tick_us,
                 qjs_runtime.telemetry_layout_us,
                 qjs_runtime.telemetry_paint_us,
+                qjs_runtime.telemetry_gpu_us,
                 snap.frame_total_us,
                 snap.frame_number,
                 telemetry.nodeCount(),

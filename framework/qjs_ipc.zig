@@ -140,6 +140,9 @@ fn hostIpcPerf(ctx: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.JSValu
     setF(c2, obj, "fps", @floatFromInt(p.fps));
     setF(c2, obj, "layout_us", @floatFromInt(p.layout_us));
     setF(c2, obj, "paint_us", @floatFromInt(p.paint_us));
+    setF(c2, obj, "gpu_us", @floatFromInt(p.gpu_us));
+    setF(c2, obj, "tick_us", @floatFromInt(p.tick_us));
+    setF(c2, obj, "frame_total_us", @floatFromInt(p.frame_total_us));
     setF(c2, obj, "rects", @floatFromInt(p.rects));
     setF(c2, obj, "glyphs", @floatFromInt(p.glyphs));
     setF(c2, obj, "total_nodes", @floatFromInt(p.total_nodes));

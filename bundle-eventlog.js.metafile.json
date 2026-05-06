@@ -660,7 +660,7 @@
       "format": "esm"
     },
     "runtime/eventBus.ts": {
-      "bytes": 4250,
+      "bytes": 4619,
       "imports": [
         {
           "path": "/home/siah/creative/reactjit/runtime/jsx_shim.ts",
@@ -680,8 +680,34 @@
       ],
       "format": "esm"
     },
+    "runtime/hooks/sqlite.ts": {
+      "bytes": 2951,
+      "imports": [
+        {
+          "path": "runtime/ffi.ts",
+          "kind": "import-statement",
+          "original": "../ffi"
+        },
+        {
+          "path": "/home/siah/creative/reactjit/runtime/jsx_shim.ts",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "/home/siah/creative/reactjit/framework/ambient.ts",
+          "kind": "import-statement",
+          "external": true
+        },
+        {
+          "path": "/home/siah/creative/reactjit/framework/ambient_primitives.ts",
+          "kind": "import-statement",
+          "external": true
+        }
+      ],
+      "format": "esm"
+    },
     "runtime/devEventLog.tsx": {
-      "bytes": 9344,
+      "bytes": 12142,
       "imports": [
         {
           "path": "vendor/react/index.js",
@@ -697,6 +723,11 @@
           "path": "runtime/eventBus.ts",
           "kind": "import-statement",
           "original": "@reactjit/runtime/eventBus"
+        },
+        {
+          "path": "runtime/hooks/sqlite.ts",
+          "kind": "import-statement",
+          "original": "@reactjit/runtime/hooks/sqlite"
         },
         {
           "path": "/home/siah/creative/reactjit/runtime/jsx_shim.ts",
@@ -1038,7 +1069,7 @@
       "format": "cjs"
     },
     "runtime/index.tsx": {
-      "bytes": 21715,
+      "bytes": 20889,
       "imports": [
         {
           "path": "runtime/effect_tracker.ts",
@@ -1054,16 +1085,6 @@
           "path": "runtime/effectContext.ts",
           "kind": "import-statement",
           "original": "./effectContext"
-        },
-        {
-          "path": "runtime/primitives.tsx",
-          "kind": "import-statement",
-          "original": "./primitives"
-        },
-        {
-          "path": "runtime/devEventLog.tsx",
-          "kind": "import-statement",
-          "original": "./devEventLog"
         },
         {
           "path": "cart/eventlog/index.tsx",
@@ -1185,7 +1206,7 @@
           "bytesInOutput": 352
         },
         "runtime/index.tsx": {
-          "bytesInOutput": 13070
+          "bytesInOutput": 12729
         },
         "runtime/effect_tracker.ts": {
           "bytesInOutput": 6894
@@ -1211,17 +1232,20 @@
         "runtime/effectContext.ts": {
           "bytesInOutput": 6389
         },
-        "runtime/devEventLog.tsx": {
-          "bytesInOutput": 8355
-        },
-        "runtime/eventBus.ts": {
-          "bytesInOutput": 2057
-        },
         "cart/eventlog/index.tsx": {
           "bytesInOutput": 66
+        },
+        "runtime/devEventLog.tsx": {
+          "bytesInOutput": 9931
+        },
+        "runtime/eventBus.ts": {
+          "bytesInOutput": 2139
+        },
+        "runtime/hooks/sqlite.ts": {
+          "bytesInOutput": 367
         }
       },
-      "bytes": 988763
+      "bytes": 990453
     }
   }
 }

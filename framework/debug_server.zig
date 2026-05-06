@@ -574,7 +574,9 @@ fn appendPerfFields(buf: []u8, pos: *usize, snap: telemetry.Snapshot) void {
     ap(buf, pos, ",\"frame\":"); apInt(buf, pos, @intCast(snap.frame_number));
     ap(buf, pos, ",\"layout_us\":"); apInt(buf, pos, @intCast(snap.layout_us));
     ap(buf, pos, ",\"paint_us\":"); apInt(buf, pos, @intCast(snap.paint_us));
+    ap(buf, pos, ",\"gpu_us\":"); apInt(buf, pos, @intCast(snap.gpu_us));
     ap(buf, pos, ",\"tick_us\":"); apInt(buf, pos, @intCast(snap.tick_us));
+    ap(buf, pos, ",\"frame_total_us\":"); apInt(buf, pos, @intCast(snap.frame_total_us));
     ap(buf, pos, ",\"rects\":"); apInt(buf, pos, @intCast(snap.rect_count));
     ap(buf, pos, ",\"glyphs\":"); apInt(buf, pos, @intCast(snap.glyph_count));
     ap(buf, pos, ",\"visible\":"); apInt(buf, pos, @intCast(snap.visible_nodes));

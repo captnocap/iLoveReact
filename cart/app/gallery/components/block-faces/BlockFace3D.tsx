@@ -154,22 +154,18 @@ export function BlockFace3D({
     [frameRows, spec.palette, skinHex]
   );
 
-  // Sit a hair outside the underlying head sphere so when the avatar
-  // still draws its plain head, this textured one wins the depth test
-  // on the front-facing tris instead of z-fighting at the same radius.
-  const surfaceR = radius * 1.005;
+  // Sit 5% outside the underlying head sphere so it definitively wins
+  // the depth test on every front-facing pixel — 1.005x was too tight
+  // and let the inner head leak through at the front center.
+  const surfaceR = radius * 1.05;
   return (
     <Scene3D.Mesh
       geometry="sphere"
       position={center}
       radius={surfaceR}
-      // DEBUG: magenta tint instead of white so we can tell at a glance
-      // whether this textured sphere is rendering at all. If the face
-      // shows up purplish, the texture path works (sample × magenta).
-      // If the whole sphere is solid magenta, the prop didn't arrive.
-      // If we see plain brown head only, the Avatar children path is
-      // dropping this mesh entirely. Revert to "#ffffff" once verified.
-      material="#ff00ff"
+      // White material so the texture shows true colors. Set a tint
+      // here (e.g. "#ff8866") to color-shift the whole face for moods.
+      material="#ffffff"
       texture={{ width: SIZE, height: SIZE, hex: texHex }}
     />
   );

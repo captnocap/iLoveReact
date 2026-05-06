@@ -16,7 +16,7 @@
 //   Right preview — avatar + live character readout.
 
 import { useRef, useState } from 'react';
-import { Box, Col, Row, ScrollView, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, ScrollView, Pressable, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import { Tooltip } from '@reactjit/runtime/tooltip/Tooltip';
 import { classifiers as S } from '@reactjit/core';
 import { Avatar } from '@reactjit/runtime/avatar';
@@ -537,12 +537,16 @@ function ManifestChartsCard() {
         <Col style={{ width: '100%', maxWidth: 300, gap: 14, alignItems: 'center', justifyContent: 'center' }}>
           <Tooltip label="Population Pyramid compares chosen scope against the assistant's configured pressure." side="top" delayMs={250}>
             <Box style={{ width: 300, height: 150 }}>
-              <PopulationPyramid labels={pyramid.labels} left={pyramid.left} right={pyramid.right} width={300} height={150} />
+              <StaticSurface>
+                <PopulationPyramid labels={pyramid.labels} left={pyramid.left} right={pyramid.right} width={300} height={150} />
+              </StaticSurface>
             </Box>
           </Tooltip>
           <Tooltip label="Venn Diagram shows overlap between work domains, social register, and stakes." side="top" delayMs={250}>
             <Box style={{ width: vennW, height: vennH }}>
-              <Venn data={purposeVenn(c.character, vennW, vennH)} width={vennW} height={vennH} />
+              <StaticSurface>
+                <Venn data={purposeVenn(c.character, vennW, vennH)} width={vennW} height={vennH} />
+              </StaticSurface>
             </Box>
           </Tooltip>
         </Col>

@@ -412,6 +412,11 @@ pub fn init() void {
         .{
             .binding = 1,
             .visibility = wgpu.ShaderStages.fragment,
+            // Linear so the binding-type matches the sampler we create
+            // (`.filtering` requires at least one linear filter). Linear
+            // smooths the 16×16 BlockFace pixels between cells; switch
+            // back to .non_filtering + nearest sampler if we want crisp
+            // pixel art.
             .sampler = .{ .type = .filtering },
         },
     };
@@ -423,8 +428,8 @@ pub fn init() void {
     g_diffuse_sampler = device.createSampler(&.{
         .address_mode_u = .clamp_to_edge,
         .address_mode_v = .clamp_to_edge,
-        .mag_filter = .nearest,
-        .min_filter = .nearest,
+        .mag_filter = .linear,
+        .min_filter = .linear,
     });
 
     // 1×1 white default texture so untextured meshes sample white →

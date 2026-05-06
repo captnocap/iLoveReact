@@ -98,7 +98,11 @@ export default function Face3DPage() {
   const [camY, setCamY] = useState(1.55);
   const [targetY, setTargetY] = useState(1.55);
   const [backdrop, setBackdrop] = useState(BACKDROPS[0]);
-  const [showHead, setShowHead] = useState(true);
+  // Default: head sphere hidden so the textured sphere is the visible
+  // surface. There's a depth-occlusion edge case when both spheres share
+  // a center — toggling hide makes the face show cleanly while we sort
+  // it out properly.
+  const [showHead, setShowHead] = useState(false);
 
   // Optionally hide the head sphere so the voxel face IS the face.
   const avatarData = showHead

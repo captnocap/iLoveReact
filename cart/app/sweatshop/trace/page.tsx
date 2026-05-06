@@ -9,7 +9,8 @@
 // produce trace records. For now: an empty-state showing what *would*
 // be shown, anchored to the persisted user/goal context.
 
-import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
+import { Col, Row } from '@reactjit/runtime/primitives';
+import { classifiers as S } from '@reactjit/core';
 import { useUser, useLatestGoal } from '../data';
 
 export default function TracePage() {
@@ -19,34 +20,25 @@ export default function TracePage() {
   const goalText = goal.data[0]?.statement ?? null;
 
   return (
-    <Col style={{ flexGrow: 1, padding: 24, gap: 24, backgroundColor: 'theme:bg' }}>
+    <S.Page style={{ flexDirection: 'column', padding: 24, gap: 24 }}>
       <Row style={{ alignItems: 'baseline', gap: 12 }}>
-        <Text size={20} color="theme:ink" bold={true}>Trace</Text>
-        <Text size={11} color="theme:inkMuted">score after the music</Text>
+        <S.Title>Trace</S.Title>
+        <S.Caption>score after the music</S.Caption>
       </Row>
 
-      <Box style={{
-        flexGrow: 1,
-        padding: 32,
-        backgroundColor: 'theme:surface',
-        borderColor: 'theme:lineSoft',
-        borderWidth: 1,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-      }}>
+      <S.Card style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}>
         <Col style={{ gap: 8, alignItems: 'center' }}>
-          <Text size={14} color="theme:ink" bold={true}>No runs yet</Text>
-          <Text size={11} color="theme:inkMuted">
+          <S.Heading>No runs yet</S.Heading>
+          <S.Caption>
             {name ? `${name}, sweep the sequencer to commit a plan.` : 'Sweep the sequencer to commit a plan.'}
-          </Text>
+          </S.Caption>
           {goalText ? (
-            <Text size={10} color="theme:inkMuted" style={{ marginTop: 12 }}>
+            <S.TinyDim style={{ marginTop: 12 }}>
               {`Pinned goal: ${goalText}`}
-            </Text>
+            </S.TinyDim>
           ) : null}
         </Col>
-      </Box>
-    </Col>
+      </S.Card>
+    </S.Page>
   );
 }

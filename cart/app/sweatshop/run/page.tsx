@@ -13,6 +13,7 @@
 
 import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text } from '@reactjit/runtime/primitives';
+import { classifiers as S } from '@reactjit/core';
 import { Play } from '@reactjit/runtime/icons/icons';
 import { Icon } from '@reactjit/runtime/icons/Icon';
 
@@ -31,8 +32,8 @@ function Cell({ on, onPress }: { on: boolean; onPress: () => void }) {
       width: 36,
       height: 36,
       borderRadius: 6,
-      backgroundColor: on ? 'theme:accent' : 'theme:surfaceSubtle',
-      borderColor: on ? 'theme:accent' : 'theme:lineSoft',
+      backgroundColor: on ? 'theme:accent' : 'theme:bg2',
+      borderColor: on ? 'theme:accent' : 'theme:rule',
       borderWidth: 1,
     }} />
   );
@@ -44,7 +45,7 @@ function ToggleGrid({ grid, toggle }: { grid: Grid; toggle: (r: number, c: numbe
       {ROWS.map((label, r) => (
         <Row key={label} style={{ gap: 6, alignItems: 'center' }}>
           <Box style={{ width: 80 }}>
-            <Text size={11} color="theme:inkMuted">{label}</Text>
+            <S.Caption>{label}</S.Caption>
           </Box>
           {grid[r].map((on, c) => (
             <Cell key={c} on={on} onPress={() => toggle(r, c)} />
@@ -54,7 +55,7 @@ function ToggleGrid({ grid, toggle }: { grid: Grid; toggle: (r: number, c: numbe
       <Row style={{ gap: 6, marginTop: 4, paddingLeft: 80 }}>
         {Array.from({ length: COLS }, (_, c) => (
           <Box key={c} style={{ width: 36, alignItems: 'center' }}>
-            <Text size={9} color="theme:inkMuted">{`p${c + 1}`}</Text>
+            <S.MicroDim>{`p${c + 1}`}</S.MicroDim>
           </Box>
         ))}
       </Row>
@@ -82,57 +83,39 @@ export default function RunPage() {
   const plan = planFromGrid(grid);
 
   return (
-    <Row style={{ flexGrow: 1, padding: 24, gap: 24, backgroundColor: 'theme:bg' }}>
+    <S.Page style={{ flexDirection: 'row', padding: 24, gap: 24 }}>
       <Col style={{ flexGrow: 1, gap: 16 }}>
         <Row style={{ alignItems: 'baseline', gap: 12 }}>
-          <Text size={20} color="theme:ink" bold={true}>Sequencer</Text>
-          <Text size={11} color="theme:inkMuted">arm cells, sweep to commit</Text>
+          <S.Title>Sequencer</S.Title>
+          <S.Caption>arm cells, sweep to commit</S.Caption>
         </Row>
 
-        <Col style={{
-          padding: 24,
-          backgroundColor: 'theme:surface',
-          borderColor: 'theme:lineSoft',
-          borderWidth: 1,
-          borderRadius: 12,
-          gap: 16,
-        }}>
+        <S.Card>
           <ToggleGrid grid={grid} toggle={toggle} />
-        </Col>
+        </S.Card>
 
         <Row style={{ gap: 12, alignItems: 'center' }}>
-          <Pressable onPress={() => {}} style={{
+          <S.Button onPress={() => {}} style={{
             flexDirection: 'row',
             alignItems: 'center',
             gap: 8,
-            paddingHorizontal: 16,
-            paddingVertical: 10,
-            backgroundColor: 'theme:accent',
-            borderRadius: 8,
           }}>
-            <Icon icon={Play} size={14} color="theme:onAccent" />
-            <Text size={12} color="theme:onAccent" bold={true}>Sweep</Text>
-          </Pressable>
-          <Text size={11} color="theme:inkMuted">animation is the commit ceremony</Text>
+            <Icon icon={Play} size={14} color="theme:paper" />
+            <Text size={12} color="theme:paper" bold={true}>Sweep</Text>
+          </S.Button>
+          <S.Caption>animation is the commit ceremony</S.Caption>
         </Row>
       </Col>
 
       <Col style={{ width: 360, gap: 12 }}>
-        <Text size={14} color="theme:ink" bold={true}>Plan (preview)</Text>
-        <Box style={{
-          flexGrow: 1,
-          padding: 16,
-          backgroundColor: 'theme:surfaceSubtle',
-          borderColor: 'theme:lineSoft',
-          borderWidth: 1,
-          borderRadius: 8,
-        }}>
-          <Text size={11} color="theme:ink">{plan}</Text>
-        </Box>
-        <Text size={10} color="theme:inkMuted">
+        <S.Heading>Plan (preview)</S.Heading>
+        <S.Surface style={{ flexGrow: 1 }}>
+          <S.Body>{plan}</S.Body>
+        </S.Surface>
+        <S.TinyDim>
           structured form is canonical; the prose is rendered from it.
-        </Text>
+        </S.TinyDim>
       </Col>
-    </Row>
+    </S.Page>
   );
 }

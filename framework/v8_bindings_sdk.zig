@@ -784,6 +784,9 @@ fn hostIpcPerf(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setNumProp(cx.iso, cx.ctx, obj, "fps", @floatFromInt(p.fps));
     setNumProp(cx.iso, cx.ctx, obj, "layout_us", @floatFromInt(p.layout_us));
     setNumProp(cx.iso, cx.ctx, obj, "paint_us", @floatFromInt(p.paint_us));
+    setNumProp(cx.iso, cx.ctx, obj, "gpu_us", @floatFromInt(p.gpu_us));
+    setNumProp(cx.iso, cx.ctx, obj, "tick_us", @floatFromInt(p.tick_us));
+    setNumProp(cx.iso, cx.ctx, obj, "frame_total_us", @floatFromInt(p.frame_total_us));
     setNumProp(cx.iso, cx.ctx, obj, "rects", @floatFromInt(p.rects));
     setNumProp(cx.iso, cx.ctx, obj, "glyphs", @floatFromInt(p.glyphs));
     setNumProp(cx.iso, cx.ctx, obj, "total_nodes", @floatFromInt(p.total_nodes));

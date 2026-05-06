@@ -1,11 +1,11 @@
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Col, Row, Text, Pressable, TextInput, ScrollView } from '@reactjit/runtime/primitives';
-import { requestAsync } from '@reactjit/runtime/hooks/http';
+import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
 import { parseIntent, Node } from '@reactjit/runtime/intent/parser';
 import { RenderIntent } from '@reactjit/runtime/intent/render';
 import { saveIntentCart } from '@reactjit/runtime/intent/save';
 
-const ENDPOINT = 'http://127.0.0.1:1234/v1/chat/completions';
+const BASE_URL = 'http://127.0.0.1:1234/v1';
 const MODEL = 'gemma-4-e2b-uncensored-hauhaucs-aggressive';
 
 const SYSTEM_PROMPT = `You respond to the user with an interactive chat surface, not prose.
@@ -73,68 +73,62 @@ interface Turn {
 export default function App() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [input, setInput] = useState('');
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Refs read live state inside Pressable / TextInput handlers, which
-  // capture their first-commit closure and never refresh.
-  const inputRef = useRef('');
-  const turnsRef = useRef<Turn[]>([]);
-  const busyRef = useRef(false);
-  inputRef.current = input;
-  turnsRef.current = turns;
-  busyRef.current = busy;
+  const assistant = useAssistant({
+    backend: 'openai_compat',
+    baseUrl: BASE_URL,
+    model: MODEL,
+    systemPrompt: SYSTEM_PROMPT,
+    persistAcrossUnmount: true,
+  });
 
-  const send = async (text: string) => {
+  // Cursor over the unified-contract event stream. Accumulate
+  // assistant_message text per turn; on completion, fold into a Turn.
+  const cursorRef = useRef(0);
+  const accumRef = useRef('');
+
+  useEffect(() => {
+    if (assistant.events.length <= cursorRef.current) return;
+    for (let i = cursorRef.current; i < assistant.events.length; i++) {
+      const ev = assistant.events[i];
+      if (ev.kind === 'assistant_message' && typeof ev.text === 'string') {
+        accumRef.current += ev.text;
+      } else if (ev.kind === 'completion') {
+        const content = accumRef.current;
+        accumRef.current = '';
+        const parsed = parseIntent(content);
+        setTurns((t) => [...t, { role: 'assistant', content, parsed }]);
+      } else if (ev.kind === 'error_') {
+        setError(ev.text || 'worker error');
+        accumRef.current = '';
+      }
+    }
+    cursorRef.current = assistant.events.length;
+  }, [assistant.events]);
+
+  const inputRef = useRef('');
+  inputRef.current = input;
+
+  const send = (text: string) => {
     const msg = text.trim();
-    if (!msg || busyRef.current) return;
+    if (!msg) return;
+    if (!assistant.ready()) return;
     setError(null);
-    setBusy(true);
-    busyRef.current = true;
-    const next: Turn[] = [...turnsRef.current, { role: 'user', content: msg }];
-    setTurns(next);
-    turnsRef.current = next;
+    setTurns((t) => [...t, { role: 'user', content: msg }]);
     setInput('');
     inputRef.current = '';
-
-    try {
-      const messages = [
-        { role: 'system', content: SYSTEM_PROMPT },
-        ...next.map((t) => ({ role: t.role, content: t.content })),
-      ];
-      const body = JSON.stringify({ model: MODEL, messages, temperature: 0.4, stream: false });
-      const res = await requestAsync({
-        method: 'POST',
-        url: ENDPOINT,
-        headers: { 'Content-Type': 'application/json' },
-        body,
-        timeoutMs: 999_000,
-      });
-      if (res.status !== 200) {
-        const detail = res.error ? `: ${res.error}` : (res.body ? `: ${res.body.slice(0, 240)}` : '');
-        setError(`HTTP ${res.status}${detail}`);
-        return;
-      }
-      const json = JSON.parse(res.body);
-      const content = json?.choices?.[0]?.message?.content ?? '';
-      const parsed = parseIntent(content);
-      const after = [...turnsRef.current, { role: 'assistant' as const, content, parsed }];
-      setTurns(after);
-      turnsRef.current = after;
-    } catch (e: any) {
-      setError(`fetch failed: ${e?.message ?? String(e)}`);
-    } finally {
-      setBusy(false);
-      busyRef.current = false;
-    }
+    assistant.ask(msg);
   };
 
   const sendCurrent = () => send(inputRef.current);
 
+  const busy = assistant.phase === 'streaming';
+
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#0b1020' }}>
       <Box style={{ padding: 12, paddingLeft: 18, paddingRight: 18, borderBottomWidth: 1, borderColor: '#1e293b' }}>
-        <Text style={{ fontSize: 13, color: '#94a3b8' }}>chat-loom · {MODEL} @ {ENDPOINT}</Text>
+        <Text style={{ fontSize: 13, color: '#94a3b8' }}>chat-loom · {MODEL} @ {BASE_URL}</Text>
       </Box>
 
       <ScrollView style={{ flexGrow: 1, padding: 18 }}>

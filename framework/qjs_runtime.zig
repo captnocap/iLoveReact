@@ -75,6 +75,11 @@ var g_local_ai_session: ?*local_ai_runtime.Session = null;
 pub var telemetry_fps: u32 = 0;
 pub var telemetry_layout_us: u64 = 0;
 pub var telemetry_paint_us: u64 = 0;
+// GPU encode + submit + present time (the gpu.frame() call). Distinct
+// from telemetry_paint_us, which is just the CPU-side walk that emits
+// draw commands. Use this to separate "framework overhead" from
+// "actual GPU rasterization."
+pub var telemetry_gpu_us: u64 = 0;
 pub var telemetry_tick_us: u64 = 0;
 pub var telemetry_bridge_calls: u64 = 0;
 pub var bridge_calls_this_second: u64 = 0;

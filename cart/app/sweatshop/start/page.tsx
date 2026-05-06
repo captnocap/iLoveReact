@@ -14,6 +14,7 @@
 
 import { useState } from 'react';
 import { Box, Col, Pressable, Row, ScrollView, Text, TextInput } from '@reactjit/runtime/primitives';
+import { classifiers as S } from '@reactjit/core';
 import { useNavigate } from '@reactjit/runtime/router';
 import { Icon } from '@reactjit/runtime/icons/Icon';
 import { FilePlus, FolderOpen, History, MessageSquare, SendHorizontal } from '@reactjit/runtime/icons/icons';
@@ -42,14 +43,14 @@ function ActionTile({ action, onPress }: { action: ActionDef; onPress: () => voi
       flexDirection: 'column',
       gap: 8,
       padding: 20,
-      backgroundColor: 'theme:surface',
-      borderColor: 'theme:lineSoft',
+      backgroundColor: 'theme:bg1',
+      borderColor: 'theme:rule',
       borderWidth: 1,
       borderRadius: 12,
     }}>
       <Icon icon={action.icon} size={20} color="theme:ink" />
-      <Text size={14} color="theme:ink" bold={true}>{action.title}</Text>
-      <Text size={11} color="theme:inkMuted">{action.hint}</Text>
+      <S.Heading>{action.title}</S.Heading>
+      <S.Caption>{action.hint}</S.Caption>
     </Pressable>
   );
 }
@@ -65,14 +66,14 @@ function RecentRow({ ws, onPress }: { ws: Workspace; onPress: () => void }) {
       paddingVertical: 10,
       paddingHorizontal: 14,
       borderRadius: 8,
-      backgroundColor: 'theme:surfaceSubtle',
+      backgroundColor: 'theme:bg2',
     }}>
-      <Icon icon={FolderOpen} size={14} color="theme:inkMuted" />
+      <Icon icon={FolderOpen} size={14} color="theme:inkDim" />
       <Col style={{ flexGrow: 1, gap: 2 }}>
-        <Text size={12} color="theme:ink" bold={true}>{ws.label}</Text>
-        <Text size={10} color="theme:inkMuted">{ws.rootPath}</Text>
+        <S.Subheading>{ws.label}</S.Subheading>
+        <S.Caption>{ws.rootPath}</S.Caption>
       </Col>
-      <Text size={9} color="theme:inkMuted">{ws.kind}</Text>
+      <S.MicroDim>{ws.kind}</S.MicroDim>
     </Pressable>
   );
 }
@@ -80,19 +81,19 @@ function RecentRow({ ws, onPress }: { ws: Workspace; onPress: () => void }) {
 function RecentList() {
   const recent = useRecentWorkspaces(8);
   const nav = useNavigate();
-  if (recent.loading) return <Text size={11} color="theme:inkMuted">Loading…</Text>;
+  if (recent.loading) return <S.Caption>Loading…</S.Caption>;
   if (!recent.data.length) {
     return (
       <Box style={{
         padding: 20,
-        borderColor: 'theme:lineSoft',
+        borderColor: 'theme:rule',
         borderWidth: 1,
         borderStyle: 'dashed',
         borderRadius: 8,
       }}>
-        <Text size={11} color="theme:inkMuted">
+        <S.Caption>
           No recent projects. Pick "New" or "Add" above to get started.
-        </Text>
+        </S.Caption>
       </Box>
     );
   }
@@ -126,23 +127,16 @@ function AgentDock() {
   };
 
   return (
-    <Col style={{
-      gap: 10,
-      padding: 16,
-      backgroundColor: 'theme:surface',
-      borderColor: 'theme:lineSoft',
-      borderWidth: 1,
-      borderRadius: 12,
-    }}>
+    <S.Card>
       <Row style={{ alignItems: 'center', gap: 8 }}>
-        <Icon icon={MessageSquare} size={12} color="theme:inkMuted" />
-        <Text size={11} color="theme:inkMuted" bold={true}>Ask the agent</Text>
+        <Icon icon={MessageSquare} size={12} color="theme:inkDim" />
+        <S.Label>Ask the agent</S.Label>
       </Row>
 
       {history.length ? (
         <Col style={{ gap: 4 }}>
           {history.slice(-3).map((line, i) => (
-            <Text key={i} size={11} color="theme:inkMuted">— {line}</Text>
+            <S.Caption key={i}>— {line}</S.Caption>
           ))}
         </Col>
       ) : (
@@ -152,11 +146,11 @@ function AgentDock() {
               paddingVertical: 4,
               paddingHorizontal: 10,
               borderRadius: 999,
-              backgroundColor: 'theme:surfaceSubtle',
-              borderColor: 'theme:lineSoft',
+              backgroundColor: 'theme:bg2',
+              borderColor: 'theme:rule',
               borderWidth: 1,
             }}>
-              <Text size={10} color="theme:inkMuted">{s}</Text>
+              <S.TinyDim>{s}</S.TinyDim>
             </Pressable>
           ))}
         </Row>
@@ -181,18 +175,17 @@ function AgentDock() {
             paddingRight: 12,
           }}
         />
-        <Pressable onPress={submit} style={{
+        <S.Button onPress={submit} style={{
           width: 36,
           height: 36,
-          borderRadius: 8,
-          backgroundColor: 'theme:accent',
+          padding: 0,
           alignItems: 'center',
           justifyContent: 'center',
         }}>
-          <Icon icon={SendHorizontal} size={14} color="theme:onAccent" />
-        </Pressable>
+          <Icon icon={SendHorizontal} size={14} color="theme:paper" />
+        </S.Button>
       </Row>
-    </Col>
+    </S.Card>
   );
 }
 
@@ -203,16 +196,16 @@ export default function StartPage() {
   const name = user.data?.displayName ?? '';
 
   return (
-    <Col style={{ flexGrow: 1, backgroundColor: 'theme:bg' }}>
+    <S.Page style={{ flexDirection: 'column' }}>
       <ScrollView style={{ flexGrow: 1 }}>
         <Col style={{ padding: 32, gap: 24, maxWidth: 880, width: '100%', alignSelf: 'center' }}>
           <Col style={{ gap: 4 }}>
-            <Text size={24} color="theme:ink" bold={true}>
+            <S.Title>
               {name ? `Welcome back, ${name}.` : 'Welcome to Sweatshop.'}
-            </Text>
-            <Text size={12} color="theme:inkMuted">
+            </S.Title>
+            <S.Caption>
               Pick up where you left off, or set up a new canvas.
-            </Text>
+            </S.Caption>
           </Col>
 
           <Row style={{ gap: 12 }}>
@@ -223,19 +216,19 @@ export default function StartPage() {
 
           <Col style={{ gap: 10 }}>
             <Row style={{ alignItems: 'center', gap: 8 }}>
-              <Icon icon={History} size={12} color="theme:inkMuted" />
-              <Text size={11} color="theme:inkMuted" bold={true}>Recent projects</Text>
+              <Icon icon={History} size={12} color="theme:inkDim" />
+              <S.Label>Recent projects</S.Label>
             </Row>
             <RecentList />
           </Col>
         </Col>
       </ScrollView>
 
-      <Box style={{ padding: 16, borderTopWidth: 1, borderTopColor: 'theme:lineSoft' }}>
+      <Box style={{ padding: 16, borderTopWidth: 1, borderTopColor: 'theme:rule' }}>
         <Box style={{ maxWidth: 880, width: '100%', alignSelf: 'center' }}>
           <AgentDock />
         </Box>
       </Box>
-    </Col>
+    </S.Page>
   );
 }

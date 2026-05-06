@@ -59,7 +59,9 @@ import { easingsLatchOnlySection } from './easings-latch-only.story';
 import { easingsZigMathSection } from './easings-zig-math.story';
 import { easingsZigStaticSection } from './easings-zig-static.story';
 import { easingsHostIntervalSection } from './easings-host-interval.story';
+import { easingsShaderSection } from './easings-shader.story';
 import { animatedTextSection } from './animated-text.story';
+import { animatedTextShaderSection } from './animated-text-shader.story';
 import { gridSpinnersSection } from './grid-spinners.story';
 import { timeInstrumentsSection } from './time-instruments.story';
 import { conditionalGuttersSection } from './conditional-gutters.story';
@@ -205,6 +207,7 @@ import { tooltipHeaderSection } from './tooltip-header.story';
 import { tooltipDataRowSection } from './tooltip-data-row.story';
 import { tooltipSection } from './tooltip.story';
 import { notificationSection } from './notification.story';
+import { tweenArchSection } from './tween-arch.story';
 import { toolbarSection } from './toolbar.story';
 import { goalCardSection } from './goal-card.story';
 import { taskCardSection } from './task-card.story';
@@ -312,7 +315,9 @@ export const storySections: GallerySection[] = [
   easingsZigMathSection,
   easingsZigStaticSection,
   easingsHostIntervalSection,
+  easingsShaderSection,
   animatedTextSection,
+  animatedTextShaderSection,
   gridSpinnersSection,
   timeInstrumentsSection,
   conditionalGuttersSection,
@@ -456,6 +461,7 @@ export const storySections: GallerySection[] = [
   tooltipDataRowSection,
   tooltipSection,
   notificationSection,
+  tweenArchSection,
   toolbarSection,
   goalCardSection,
   taskCardSection,

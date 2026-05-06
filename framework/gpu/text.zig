@@ -51,8 +51,8 @@ pub const GlyphInstance = extern struct {
 // the appender) and the rest of the page renders frame chrome but no text.
 // 131072 leaves enough headroom for a heavily-text-bearing 200+ tile grid.
 pub const MAX_GLYPHS = 131072;
-const ATLAS_SIZE = 2048;
-const MAX_ATLAS_GLYPHS = 2048;
+const ATLAS_SIZE = 4096;
+const MAX_ATLAS_GLYPHS = 8192;
 
 /// Line-height override for the next drawTextWrapped call. 0 = use FreeType natural.
 /// Set via setLineHeightOverride before the call; cleared automatically after one use.
@@ -502,6 +502,13 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
             }
             pen_x += glyph.advance * inv_ms;
             pen_x += g_letter_spacing;
+        } else {
+            // Atlas full / glyph load failure: still advance the pen so the
+            // missing character leaves a roughly correct-width gap instead of
+            // silently overlapping the next glyph. Matches getCharAdvance's
+            // fallback so measurement and paint agree.
+            pen_x += @as(f32, @floatFromInt(size_px)) * 0.5 * inv_ms;
+            pen_x += g_letter_spacing;
         }
         i += ch.len;
     }
@@ -528,6 +535,8 @@ pub fn measureTextLineWidth(text: []const u8, size_px: u16) f32 {
         }
         if (cacheGlyph(ch.codepoint, size_px)) |glyph| {
             width += glyph.advance;
+        } else {
+            width += @as(f32, @floatFromInt(size_px)) * 0.5;
         }
         i += ch.len;
     }

@@ -31,6 +31,11 @@ pub const Snapshot = struct {
     tick_us: u64 = 0,
     layout_us: u64 = 0,
     paint_us: u64 = 0,
+    // GPU encode + submit + present (the gpu.frame() call). Distinct from
+    // paint_us, which is only the CPU-side walk that emits draw commands
+    // into per-frame buffers. paint_us answers "how much per-node framework
+    // overhead?"; gpu_us answers "how much actual GPU rasterization?".
+    gpu_us: u64 = 0,
     frame_total_us: u64 = 0,
 
     // ── GPU ──
@@ -234,6 +239,7 @@ pub const CollectArgs = struct {
     tick_us: u64,
     layout_us: u64,
     paint_us: u64,
+    gpu_us: u64,
     frame_total_us: u64,
     fps: u32,
     bridge_calls_per_sec: u64,
@@ -252,6 +258,7 @@ pub fn collect(args: CollectArgs) void {
     snap.tick_us = args.tick_us;
     snap.layout_us = args.layout_us;
     snap.paint_us = args.paint_us;
+    snap.gpu_us = args.gpu_us;
     snap.frame_total_us = args.frame_total_us;
     snap.fps = args.fps;
     snap.frame_number = gpu.telemetryFrameCounter();

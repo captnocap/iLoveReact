@@ -21,7 +21,7 @@
 // HOW the visual gets to the screen.
 
 import { useMemo, useState } from 'react';
-import { Box, Effect, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Effect, Pressable, ScrollView, Text } from '@reactjit/runtime/primitives';
 
 const COLOR_BG = '#050b16';
 const COLOR_INK = '#e8eef8';
@@ -161,6 +161,7 @@ function Toggle({ label, on, onPress, accent }: { label: string; on: boolean; on
 export default function CardStress() {
   const [count, setCount] = useState(100);
   const [mode, setMode] = useState<Mode>('each-fx');
+  const [scrollable, setScrollable] = useState(false);
   const cards: number[] = [];
   for (let i = 0; i < count; i++) cards.push(i);
 
@@ -238,6 +239,8 @@ export default function CardStress() {
         {COUNTS.map((c) => (
           <Toggle key={c} label={String(c)} on={c === count} onPress={() => setCount(c)} accent="#3da9ff" />
         ))}
+        <Box style={{ width: 12 }} />
+        <Toggle label="SCROLL" on={scrollable} onPress={() => setScrollable(!scrollable)} accent="#a78bfa" />
       </Box>
 
       <Box style={{
@@ -248,48 +251,44 @@ export default function CardStress() {
         borderRadius: 6,
         padding: GRID_PAD,
       }}>
-        {mode === 'one-fx' ? (
-          // Outer Box is sized to the EXACT total grid dimensions so
-          // both the underlying Effect and the hit-zone overlay can
-          // reference the same coordinate space. The shader's grid
-          // math (cols / rows / card_w / gap) lines up with the
-          // overlay's flex-wrap layout because both use the same
-          // pixel constants.
-          <Box style={{ position: 'relative', width: gridW, height: gridH }}>
-            {/* Single Effect underneath — draws every card's pulse
-                animation in one fragment pass. Explicit pixel size
-                via flexGrow:1 fills the outer Box; the shader sees
-                U.size_w = gridW exactly. */}
-            <Effect shader={oneFxWgsl} style={{
-              position: 'absolute',
-              left: 0, top: 0,
-              width: gridW, height: gridH,
-            }} />
-            {/* Invisible hit-zone overlay on top — handles hover/
-                tooltip per card. Inset by GRID_PAD on all sides so
-                the flex-wrap starts at the same origin as the shader's
-                inner content area. Explicit width/height force flex-
-                wrap to the same column count the shader assumes. */}
-            <Box style={{
-              position: 'absolute',
-              left: GRID_PAD, top: GRID_PAD,
-              width: gridW - GRID_PAD * 2,
-              height: gridH - GRID_PAD * 2,
-              flexDirection: 'row',
-              flexWrap: 'wrap',
-              alignContent: 'flex-start',
-            }}>
-              {cards.map((i) => <HitZoneOnly key={i} idx={i} />)}
+        {(() => {
+          const grid = mode === 'one-fx' ? (
+            // Outer Box is sized to the EXACT total grid dimensions so
+            // both the underlying Effect and the hit-zone overlay can
+            // reference the same coordinate space. The shader's grid
+            // math (cols / rows / card_w / gap) lines up with the
+            // overlay's flex-wrap layout because both use the same
+            // pixel constants.
+            <Box style={{ position: 'relative', width: gridW, height: gridH }}>
+              <Effect shader={oneFxWgsl} style={{
+                position: 'absolute',
+                left: 0, top: 0,
+                width: gridW, height: gridH,
+              }} />
+              <Box style={{
+                position: 'absolute',
+                left: GRID_PAD, top: GRID_PAD,
+                width: gridW - GRID_PAD * 2,
+                height: gridH - GRID_PAD * 2,
+                flexDirection: 'row',
+                flexWrap: 'wrap',
+                alignContent: 'flex-start',
+              }}>
+                {cards.map((i) => <HitZoneOnly key={i} idx={i} />)}
+              </Box>
             </Box>
-          </Box>
-        ) : (
-          <Box style={{ flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start' }}>
-            {cards.map((i) => mode === 'each-fx'
-              ? <CardEachFx key={i} idx={i} />
-              : <CardEachBox key={i} idx={i} />
-            )}
-          </Box>
-        )}
+          ) : (
+            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start' }}>
+              {cards.map((i) => mode === 'each-fx'
+                ? <CardEachFx key={i} idx={i} />
+                : <CardEachBox key={i} idx={i} />
+              )}
+            </Box>
+          );
+          return scrollable
+            ? <ScrollView style={{ width: '100%', height: '100%' }}>{grid}</ScrollView>
+            : grid;
+        })()}
       </Box>
     </Box>
   );

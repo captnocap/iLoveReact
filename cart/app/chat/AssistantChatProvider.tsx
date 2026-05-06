@@ -133,9 +133,10 @@ export function AssistantChatProvider() {
   const lastSentRouteRef = useRef<string | null>(null);
 
   // First-ever send of this provider's lifetime — used to prepend the
-  // loom system prompt exactly once. Neither useClaudeChat nor
-  // useLocalChat exposes a system-prompt knob, so the prompt rides on
-  // the first user message (matches the pattern in cart/browse-agent.tsx).
+  // loom system prompt exactly once. The active backends behind
+  // useAssistant don't expose a system-prompt knob (claude_code rides
+  // the CLI's own behavior; local_ai / kimi_cli_wire do not pass one
+  // through), so the prompt rides on the first user message.
   const loomPromptSentRef = useRef(false);
 
   // Publish hook state to the chat-status store so AssistantChat's

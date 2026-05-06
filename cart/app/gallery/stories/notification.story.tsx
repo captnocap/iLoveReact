@@ -48,11 +48,6 @@ export const notificationSection = defineGallerySection({
           render: () => <Notification type="overlay" method="info" data={notificationMockData[3]} />,
         },
         {
-          id: 'system',
-          name: 'System Window',
-          render: () => <Notification type="system" method="message" data={notificationMockData[2]} />,
-        },
-        {
           id: 'kinds',
           name: 'Kinds',
           render: () => (

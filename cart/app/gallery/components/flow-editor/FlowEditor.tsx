@@ -198,7 +198,7 @@ export function FlowEditor(props: FlowEditorProps) {
     const packetCount = Math.max(1, Math.min(7, Math.floor(length / theme.wirePacketGap)));
     const basePhase = ((tick * theme.wirePacketSpeed) / length + edgeHash(e.id)) % 1;
     edgePaths.push(
-      <Graph.Path
+      <Canvas.Path
         key={`p-${e.id}`}
         d={bz.d}
         stroke={color}
@@ -211,7 +211,7 @@ export function FlowEditor(props: FlowEditorProps) {
       const phase = (basePhase + packetIndex / packetCount) % 1;
       const point = cubicPoint(x1, y1, x2, y2, bz, phase);
       edgePaths.push(
-        <Graph.Path
+        <Canvas.Path
           key={`c-${e.id}-${packetIndex}`}
           d={squarePath(point.x, point.y, theme.wirePacketSize)}
           fill={color}

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Box, Col, Notification as HostNotification, Pressable, Row, Text, TextInput } from '@reactjit/runtime/primitives';
+import { Box, Col, Notification as HostNotification, Pressable, Row, StaticSurface, Text, TextInput } from '@reactjit/runtime/primitives';
 import { AlertTriangle, BellRing, CheckCircle, CircleAlert, Clock, Info, MessageSquareText, Monitor, Pin, Send, X } from '@reactjit/runtime/icons/icons';
 import { Icon, type IconData } from '@reactjit/runtime/icons/Icon';
 import { Body, Divider, Mono } from '../controls-specimen/controlsSpecimenParts';
@@ -125,9 +125,9 @@ function ActionButton({
           backgroundColor: solid ? color : toneSoftBackground(tone),
         }}
       >
-        {action.kind === 'dismiss' ? <Icon icon={X} size={12} color={solid ? CTRL.bg : color} /> : null}
-        {action.kind === 'remind' ? <Icon icon={Clock} size={12} color={solid ? CTRL.bg : color} /> : null}
-        {action.kind === 'reply' ? <Icon icon={Send} size={12} color={solid ? CTRL.bg : color} /> : null}
+        {action.kind === 'dismiss' ? <StaticSurface><Icon icon={X} size={12} color={solid ? CTRL.bg : color} /></StaticSurface> : null}
+        {action.kind === 'remind' ? <StaticSurface><Icon icon={Clock} size={12} color={solid ? CTRL.bg : color} /></StaticSurface> : null}
+        {action.kind === 'reply' ? <StaticSurface><Icon icon={Send} size={12} color={solid ? CTRL.bg : color} /></StaticSurface> : null}
         <Mono color={solid ? CTRL.bg : color} fontSize={9} fontWeight="bold" lineHeight={10} noWrap>
           {action.label}
         </Mono>
@@ -175,8 +175,6 @@ function NotificationSurface({
         borderWidth: 1,
         borderColor: color,
         backgroundColor: CTRL.bg2,
-        shadowBlur: overlay ? 18 : 8,
-        shadowColor: 'theme:bg',
       }}
     >
       <Row style={{ width: '100%', gap: 11, alignItems: 'flex-start' }}>
@@ -191,7 +189,7 @@ function NotificationSurface({
             backgroundColor: toneSoftBackground(tone),
           }}
         >
-          <Icon icon={iconForKind(method)} size={overlay ? 21 : 17} color={color} strokeWidth={2.1} />
+          <StaticSurface><Icon icon={iconForKind(method)} size={overlay ? 21 : 17} color={color} strokeWidth={2.1} /></StaticSurface>
         </Box>
         <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 4 }}>
           <Row style={{ gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -208,7 +206,7 @@ function NotificationSurface({
         </Col>
         <Pressable onPress={() => fire({ id: 'dismiss', label: 'Dismiss', kind: 'dismiss' })}>
           <Box style={{ width: 24, height: 24, alignItems: 'center', justifyContent: 'center' }}>
-            <Icon icon={X} size={15} color={CTRL.inkDim} />
+            <StaticSurface><Icon icon={X} size={15} color={CTRL.inkDim} /></StaticSurface>
           </Box>
         </Pressable>
       </Row>
@@ -216,7 +214,7 @@ function NotificationSurface({
       <Divider />
 
       <Row style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-        <Icon icon={type === 'system' ? Monitor : type === 'corner' ? Pin : BellRing} size={14} color={color} />
+        <StaticSurface><Icon icon={type === 'system' ? Monitor : type === 'corner' ? Pin : BellRing} size={14} color={color} /></StaticSurface>
         <Mono fontSize={9} letterSpacing={0.4} lineHeight={10} noWrap>
           {data.source || DEFAULT_DATA.source}
         </Mono>
@@ -254,31 +252,11 @@ function InlineNotification(props: Omit<Parameters<typeof NotificationSurface>[0
 }
 
 function CornerNotification(props: Omit<Parameters<typeof NotificationSurface>[0], 'type'> & { type: NotificationType }) {
-  return (
-    <Box style={{ position: 'relative', width: 460, height: 220 }}>
-      <Box style={{ position: 'absolute', right: 0, bottom: 0 }}>
-        <NotificationSurface {...props} />
-      </Box>
-    </Box>
-  );
+  return <NotificationSurface {...props} />;
 }
 
 function OverlayNotification(props: Omit<Parameters<typeof NotificationSurface>[0], 'type'> & { type: NotificationType }) {
-  return (
-    <Box
-      style={{
-        position: 'relative',
-        width: 640,
-        height: 320,
-        alignItems: 'center',
-        justifyContent: 'center',
-        backgroundColor: 'theme:bg',
-      }}
-    >
-      <Box style={{ position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, backgroundColor: 'theme:bg', opacity: 0.36 }} />
-      <NotificationSurface {...props} />
-    </Box>
-  );
+  return <NotificationSurface {...props} />;
 }
 
 function SystemNotification(props: Omit<Parameters<typeof NotificationSurface>[0], 'type'> & { type: NotificationType }) {
@@ -309,24 +287,11 @@ export function Notification({
 }: NotificationProps) {
   const resolvedType = type || data.approach || DEFAULT_DATA.approach;
   const resolvedMethod = method || data.kind || DEFAULT_DATA.kind;
-  const [visible, setVisible] = useState(true);
   const lifetime: NotificationLifetime = data.lifetime || DEFAULT_DATA.lifetime;
 
-  useEffect(() => {
-    if (lifetime !== 'self-dismiss') return;
-    const id = setTimeout(() => {
-      setVisible(false);
-      onDismiss?.();
-    }, data.durationMs || 5000);
-    return () => clearTimeout(id);
-  }, [data.durationMs, lifetime, onDismiss]);
-
   const dismiss = () => {
-    setVisible(false);
     onDismiss?.();
   };
-
-  if (!visible) return null;
 
   const surfaceProps = {
     type: resolvedType,

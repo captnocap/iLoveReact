@@ -4,7 +4,8 @@
 // receives the PaletteItem and spawns a node at the canvas center
 // (the canvas owns layout, so we don't position here).
 
-import { Box, Col, Pressable, ScrollView, Text } from '@reactjit/runtime/primitives';
+import { Col, Pressable, ScrollView } from '@reactjit/runtime/primitives';
+import { classifiers as S } from '@reactjit/core';
 import { useMemo, useState } from 'react';
 import { buildPalette, PALETTE_TIERS, type PaletteItem, type PaletteTier } from './palette';
 
@@ -26,27 +27,24 @@ export function PaletteSidebar({ onSpawn }: PaletteSidebarProps) {
   return (
     <Col style={{
       width: 280,
-      backgroundColor: 'theme:surface',
+      backgroundColor: 'theme:bg1',
       borderRightWidth: 1,
-      borderRightColor: 'theme:line',
+      borderRightColor: 'theme:rule',
     }}>
       {/* Tier selector */}
-      <Col style={{ padding: 12, gap: 4, borderBottomWidth: 1, borderBottomColor: 'theme:lineSoft' }}>
+      <Col style={{ padding: 12, gap: 4, borderBottomWidth: 1, borderBottomColor: 'theme:rule' }}>
         {PALETTE_TIERS.map((t) => {
           const active = t.id === tier;
+          const Pill = active ? S.NavPillActive : S.NavPill;
           return (
-            <Pressable
-              key={t.id}
-              onPress={() => setTier(t.id)}
-              style={{
-                padding: 8,
-                borderRadius: 6,
-                backgroundColor: active ? 'theme:accentSoft' : 'transparent',
-              }}
-            >
-              <Text size={12} color={active ? 'theme:accent' : 'theme:ink'} bold={active}>{t.label}</Text>
-              <Text size={10} color="theme:inkMuted">{t.hint}</Text>
-            </Pressable>
+            <Pill key={t.id} onPress={() => setTier(t.id)}>
+              <Col style={{ gap: 2 }}>
+                <S.Body style={{ fontWeight: active ? 700 : 400, color: active ? 'theme:accent' : 'theme:ink' }}>
+                  {t.label}
+                </S.Body>
+                <S.Caption>{t.hint}</S.Caption>
+              </Col>
+            </Pill>
           );
         })}
       </Col>
@@ -54,7 +52,7 @@ export function PaletteSidebar({ onSpawn }: PaletteSidebarProps) {
       {/* Filter input is intentionally a button-toggle for now; a real
           search input lands when the canvas itself stops mounting it. */}
       <Col style={{ padding: 8, gap: 4 }}>
-        <Text size={10} color="theme:inkMuted">{filtered.length} items</Text>
+        <S.Caption>{filtered.length} items</S.Caption>
       </Col>
 
       {/* Item list */}
@@ -68,12 +66,13 @@ export function PaletteSidebar({ onSpawn }: PaletteSidebarProps) {
                 padding: 8,
                 borderRadius: 6,
                 borderWidth: 1,
-                borderColor: 'theme:lineSoft',
+                borderColor: 'theme:rule',
+                backgroundColor: 'theme:bg2',
                 gap: 2,
               }}
             >
-              <Text size={11} color="theme:ink">{it.label}</Text>
-              {it.hint ? <Text size={9} color="theme:inkMuted">{it.hint}</Text> : null}
+              <S.Body>{it.label}</S.Body>
+              {it.hint ? <S.Caption>{it.hint}</S.Caption> : null}
             </Pressable>
           ))}
         </Col>
