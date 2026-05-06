@@ -1537,14 +1537,27 @@ function CharacterForm() {
         <ScrollView
           debugName="char-scroll"
           onScroll={(e: any) => {
-            console.log('[char-scroll/raw]', JSON.stringify({
-              scrollY: e?.scrollY,
-              scrollX: e?.scrollX,
-              deltaY: e?.deltaY,
-              hasTel: typeof (globalThis as any).__tel_node === 'function',
-              cnt: typeof (globalThis as any).__tel_node_count === 'function'
-                ? (globalThis as any).__tel_node_count()
-                : 'n/a',
+            const host: any = globalThis;
+            const cnt = (host.__tel_node_count && host.__tel_node_count()) | 0;
+            let scr: any = null, yel: any = null;
+            for (let i = 0; i < cnt; i++) {
+              const n = host.__tel_node && host.__tel_node(i);
+              if (!n) continue;
+              if (n.tag === 'char-scroll') scr = n;
+              else if (n.tag === 'char-yellow') yel = n;
+              if (scr && yel) break;
+            }
+            console.log('[char-scroll]', JSON.stringify({
+              wY: e?.scrollY,
+              dY: e?.deltaY,
+              scrCH: scr?.content_height,
+              scrH: scr?.h,
+              max: scr ? Math.max(0, scr.content_height - scr.h) : null,
+              yelH: yel?.h,
+              yelY: yel?.y,
+              yelB: yel ? yel.y + yel.h : null,
+              scrB: scr ? scr.y + scr.h : null,
+              gap: (scr && yel) ? (scr.y + scr.h) - (yel.y + yel.h) : null,
             }));
           }}
           style={{
