@@ -1536,19 +1536,13 @@ function CharacterForm() {
       }}>
         <ScrollView style={{
           flexGrow: 1, flexBasis: 0, minWidth: 0,
+          paddingTop: 28,
+          paddingLeft: 28, paddingRight: 14,
+          alignItems: 'center',
+          opacity: pageOp,
           borderWidth: 4, borderColor: 'rgba(0,128,255,1)',
           backgroundColor: 'rgba(0,128,255,0.10)',
         }}>
-          <Box style={{
-            paddingTop: 28,
-            paddingLeft: 28, paddingRight: 14,
-            alignItems: 'center',
-            opacity: pageOp,
-            minWidth: 0,
-            overflow: 'hidden',
-            borderWidth: 4, borderColor: 'rgba(255,128,0,1)',
-            backgroundColor: 'rgba(255,128,0,0.10)',
-          }}>
             <Box style={{
               width: '100%', maxWidth: 1040,
               minWidth: 0, overflow: 'hidden',
@@ -1583,7 +1577,6 @@ function CharacterForm() {
               <Box style={{ width: '100%', height: 200, backgroundColor: 'magenta' }} />
               <Box style={{ width: '100%', height: 30, backgroundColor: 'lime' }} />
             </Box>
-          </Box>
         </ScrollView>
 
         <Box style={{
