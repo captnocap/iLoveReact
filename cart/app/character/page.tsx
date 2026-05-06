@@ -1263,7 +1263,7 @@ function AvatarPreview() {
         </Row>
       </CharacterCard>
       <VoiceRailCard />
-      {/* DEBUG-OFF: <ManifestChartsCard /> */}
+      <ManifestChartsCard />
     </Col>
   );
 }
