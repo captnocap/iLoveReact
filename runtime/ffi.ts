@@ -68,7 +68,9 @@ export function callHostJson<T>(name: string, fallback: T, ...args: any[]): T {
 //     subscriber setState to re-enter the in-flight render.
 
 type FfiListener = (payload: any) => void;
+type FfiWildcardListener = (channel: string, payload: any) => void;
 const _listeners = new Map<string, Set<FfiListener>>();
+const _wildcardListeners = new Set<FfiWildcardListener>();
 
 export function subscribe(channel: string, fn: FfiListener): () => void {
   let set = _listeners.get(channel);
@@ -77,12 +79,28 @@ export function subscribe(channel: string, fn: FfiListener): () => void {
   return () => { set!.delete(fn); };
 }
 
+/** Subscribe to every channel. Listener receives (channel, payload).
+ *  Used by transport bridges (vsock mirror, eventlog tap) that need to
+ *  forward / record everything regardless of channel name. */
+export function subscribeAll(fn: FfiWildcardListener): () => void {
+  _wildcardListeners.add(fn);
+  return () => { _wildcardListeners.delete(fn); };
+}
+
 function dispatchListeners(channel: string, payload: any): void {
   const set = _listeners.get(channel);
-  if (!set || set.size === 0) return;
-  for (const fn of Array.from(set)) {
-    try { fn(payload); } catch (e: any) {
-      console.error(`[ffi] ${channel} listener error:`, e?.message || e);
+  if (set && set.size > 0) {
+    for (const fn of Array.from(set)) {
+      try { fn(payload); } catch (e: any) {
+        console.error(`[ffi] ${channel} listener error:`, e?.message || e);
+      }
+    }
+  }
+  if (_wildcardListeners.size > 0) {
+    for (const fn of Array.from(_wildcardListeners)) {
+      try { fn(channel, payload); } catch (e: any) {
+        console.error(`[ffi] wildcard listener error on ${channel}:`, e?.message || e);
+      }
     }
   }
 }
