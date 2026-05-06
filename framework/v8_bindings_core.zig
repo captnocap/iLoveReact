@@ -98,17 +98,13 @@ fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
 
-    // Bus telemetry. Auto-importance lands "host.flush" at 0.5; that
-    // would put every reconciler tick at the default console gate. Pin
-    // it down to "noisy" tier so steady-state flushes persist quietly
-    // and only outliers (large flushes — surfaced separately below)
-    // bubble up.
-    var pbuf: [64]u8 = undefined;
-    if (std.fmt.bufPrint(&pbuf, "{{\"bytes\":{d}}}", .{owned.len})) |p| {
-        _ = event_bus.emitWithImportance("host.flush", "v8_bindings_core", 0.15, null, p);
-    } else |_| {}
-    // Outlier gate — anything past 256K is worth flagging. Below that
-    // is the steady-state noise we don't want surfacing.
+    // host.flush fires per React commit — that's hundreds-thousands per
+    // second on a busy cart, and persisting that to SQL bloats the events
+    // table catastrophically (12hr session = 2.4GB observed). Per-frame
+    // commit telemetry belongs in framework/telemetry.zig (snapshot
+    // counters), not in event_bus (append stream). The outlier emit below
+    // — large flushes — is rare enough to be worth keeping as a real
+    // event you'd want to see.
     if (owned.len >= 256 * 1024) {
         var pbuf2: [64]u8 = undefined;
         if (std.fmt.bufPrint(&pbuf2, "{{\"bytes\":{d}}}", .{owned.len})) |p2| {

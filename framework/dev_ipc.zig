@@ -102,6 +102,11 @@ pub fn pollOnce() void {
     defer std.posix.close(client_fd);
 
     handleClient(client_fd) catch |e| {
+        // BrokenPipe / ConnectionResetByPeer = client gave up before our
+        // write completed. Common when devshell polls TELEMETRY at 4Hz
+        // and the cart frame loop briefly stalls past the 200ms read
+        // timeout — not an error worth logging on every occurrence.
+        if (e == error.BrokenPipe or e == error.ConnectionResetByPeer) return;
         log.warn("client error: {}", .{e});
         writeAll(client_fd, "ERR internal\n") catch {};
     };

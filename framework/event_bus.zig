@@ -64,9 +64,20 @@ var g_inited: bool = false;
 /// at runtime via LOGLEVEL IPC. 0.0 = pass everything (default), higher
 /// values gate cheaper "log"-tier events out of the stream so a hot
 /// trace path doesn't cost SQL writes when off.
-var g_min_importance: f32 = 0.0;
+/// Default 0.5 — drops the "log"-tier (recv|tick|poll at 0.20) and any
+/// other importance-0 emit. Hit `l` in devshell to lower for debugging.
+/// 0.0 makes everything pass; 1.0 silences everything.
+var g_min_importance: f32 = 0.5;
 pub fn minImportance() f32 { return g_min_importance; }
 pub fn setMinImportance(threshold: f32) void { g_min_importance = threshold; }
+
+/// Row cap on the SQLite events table. Once exceeded, oldest rows are
+/// pruned to keep the file from growing without bound during long
+/// sessions. ~17 minutes of headroom at 200 events/sec sustained, hours
+/// at human-meaningful event rates.
+const ROW_CAP: u64 = 200_000;
+const PRUNE_EVERY: u64 = 1000;
+var g_emits_since_prune: u64 = 0;
 var g_session_buf: [16]u8 = undefined;
 var g_session_len: usize = 0;
 var g_db_path_buf: [512]u8 = undefined;
@@ -149,6 +160,12 @@ fn setupDb() void {
     // running eventlog as a separate reader cheap.
     db.exec("PRAGMA journal_mode=WAL;") catch {};
     db.exec("PRAGMA synchronous=NORMAL;") catch {};
+    // auto_vacuum=INCREMENTAL means the file actively shrinks as rows are
+    // deleted (rather than just marking pages free). Only takes effect on
+    // a fresh db (sqlite docs are explicit on this); existing dbs need a
+    // full VACUUM to opt in. Together with the row cap below this stops
+    // long sessions from bloating the events file unbounded.
+    db.exec("PRAGMA auto_vacuum=INCREMENTAL;") catch {};
     db.exec(
         \\CREATE TABLE IF NOT EXISTS events (
         \\  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -244,6 +261,11 @@ pub fn emitWithImportance(
     // for parent_id chaining (works even when persistence is off).
     if (g_insert_stmt) |*stmt| {
         insertRow(stmt, ts, event_type, source, importance, parent_id, safe_payload);
+        g_emits_since_prune += 1;
+        if (g_emits_since_prune >= PRUNE_EVERY) {
+            g_emits_since_prune = 0;
+            pruneOldRows();
+        }
     }
 
     const id = g_next_id;
@@ -268,6 +290,26 @@ pub fn emitWithImportance(
     }
 
     return id;
+}
+
+/// Drop everything below (max rowid - ROW_CAP). Bounded work — SQLite's
+/// rowid is the primary key, so the WHERE clause hits the b-tree
+/// directly. Called every PRUNE_EVERY emits, deleting ~PRUNE_EVERY rows
+/// per call in steady state.
+fn pruneOldRows() void {
+    if (g_db) |*db| {
+        var buf: [160:0]u8 = undefined;
+        const sql = std.fmt.bufPrintZ(
+            &buf,
+            "DELETE FROM events WHERE rowid <= (SELECT MAX(rowid) - {d} FROM events);",
+            .{ROW_CAP},
+        ) catch return;
+        db.exec(sql) catch {};
+        // Reclaim freelist pages so the file actually shrinks. Cheap
+        // (incremental, not a full VACUUM) when auto_vacuum=INCREMENTAL
+        // is on.
+        db.exec("PRAGMA incremental_vacuum;") catch {};
+    }
 }
 
 fn insertRow(
