@@ -66,16 +66,37 @@ export function useAnimationTimeline(opts) {
   const [t, setT] = useState(0);
   const tRef = useRef(0);
   const frameRef = useRef(null);
+  // Tracks the largest `b` ever passed to range() — once elapsed
+  // exceeds it (with a small grace window), every range() call would
+  // saturate at 1 anyway, so there's no reason to keep ticking. The
+  // previous implementation ran RAF forever, which forced every
+  // consumer of `range()` to re-render every frame for the cart's
+  // lifetime — fine for tiny trees, catastrophic for pages with
+  // bound styles on a ScrollView (each tick re-paints the scroll
+  // content's static surface, producing visible flicker).
+  const maxBRef = useRef(0);
+  // Bumped from a tick callback to wake the effect when the cap
+  // changes. Keeps the dependency-array small — we don't want to
+  // restart the timer just because a new `range` call happened.
+  const stopAtRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
     const startedAt = nowMs();
+    const GRACE_MS = 64; // one extra frame past the last animation
     const tick = () => {
       if (cancelled) return;
       const elapsed = nowMs() - startedAt;
       const eff = skip ? elapsed + skipOffsetMs : elapsed;
       tRef.current = eff;
       setT(elapsed);
+      stopAtRef.current = maxBRef.current;
+      // Stop ticking once every range() call would clamp to 1. We
+      // require maxBRef > 0 so we don't stop before the first render
+      // populates it.
+      if (stopAtRef.current > 0 && eff >= stopAtRef.current + GRACE_MS) {
+        return;
+      }
       frameRef.current = scheduleFrame(tick);
     };
     frameRef.current = scheduleFrame(tick);
@@ -88,6 +109,7 @@ export function useAnimationTimeline(opts) {
   const eff = skip ? t + skipOffsetMs : t;
 
   function range(a, b, easing) {
+    if (b > maxBRef.current) maxBRef.current = b;
     if (eff <= a) return 0;
     if (eff >= b) return 1;
     const fn = (easing && EASINGS[easing]) || EASINGS.easeOutCubic;
