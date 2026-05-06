@@ -1532,11 +1532,12 @@ function CharacterForm() {
     <S.Page>
       <Row style={{
         width: '100%', height: '100%', alignItems: 'stretch', minWidth: 0,
-        borderWidth: 2, borderColor: 'cyan',
+        borderWidth: 4, borderColor: 'rgba(0,255,255,1)',
       }}>
         <ScrollView style={{
           flexGrow: 1, flexBasis: 0, minWidth: 0,
-          borderWidth: 2, borderColor: 'lime',
+          borderWidth: 4, borderColor: 'rgba(0,128,255,1)',
+          backgroundColor: 'rgba(0,128,255,0.10)',
         }}>
           <Box style={{
             paddingTop: 28,
@@ -1545,14 +1546,14 @@ function CharacterForm() {
             opacity: pageOp,
             minWidth: 0,
             overflow: 'hidden',
-            borderWidth: 2,
-            borderColor: 'orange',
+            borderWidth: 4, borderColor: 'rgba(255,128,0,1)',
+            backgroundColor: 'rgba(255,128,0,0.10)',
           }}>
             <Box style={{
               width: '100%', maxWidth: 1040,
               minWidth: 0, overflow: 'hidden',
-              borderWidth: 2,
-              borderColor: 'yellow',
+              borderWidth: 4, borderColor: 'rgba(255,255,0,1)',
+              backgroundColor: 'rgba(255,255,0,0.06)',
             }}>
               <Box style={{ opacity: headOp }}>
                 <Row style={{ width: '100%', gap: 16, alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -1574,11 +1575,11 @@ function CharacterForm() {
                   </S.DocPageContent>
                 </S.DocPage>
               </S.DocPageWrap>
-              {/* Bottom spacer — keeps the breathing room as measured
-                  content rather than the parent's paddingBottom, which
-                  the ScrollView's content_height calc was rounding off
-                  and producing a 28px overscroll-snap artifact. */}
-              <Box style={{ width: '100%', height: 28 }} />
+              {/* Bottom spacer — DEBUG SIZE 200px. If the overscroll
+                  gap grows to 200, this spacer IS being measured. If
+                  it stays at ~28, the spacer is invisible to the
+                  content_height calc and the bug is elsewhere. */}
+              <Box style={{ width: '100%', height: 200, backgroundColor: 'magenta' }} />
             </Box>
           </Box>
         </ScrollView>

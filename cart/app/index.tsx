@@ -627,15 +627,20 @@ function ShellBody() {
                 flexGrow: 1,
                 minHeight: 0,
                 width: '100%',
-                borderWidth: 2,
-                borderColor: 'red',
+                borderWidth: 4,
+                borderColor: 'rgba(255,0,0,1)',
               }}>
-                <Box style={{ width: sideWidth, flexShrink: 0 }} />
+                <Box style={{
+                  width: sideWidth,
+                  flexShrink: 0,
+                  backgroundColor: 'rgba(255,0,255,0.25)',
+                }} />
                 <Box style={{
                   flexGrow: 1, flexBasis: 0, minWidth: 0,
                   flexDirection: 'column',
-                  borderWidth: 2,
-                  borderColor: 'magenta',
+                  borderWidth: 4,
+                  borderColor: 'rgba(0,255,0,1)',
+                  backgroundColor: 'rgba(0,255,0,0.08)',
                 }}>
                 <Route path="/">
                   <IndexPage />
