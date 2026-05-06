@@ -1292,7 +1292,9 @@ function AvatarPreview() {
             <BlockFaces row={worker} scale={2} layout="badge" />
           </Tooltip>
         </Row>
-        <AnimatedManifestText />
+        {/* DEBUG: AnimatedManifestText disabled to test if its per-frame
+            RAF cascades into ScrollView's content_height fluctuation. */}
+        {/* <AnimatedManifestText /> */}
       </CharacterCard>
       <CharacterCard style={{ flexShrink: 0, padding: 8, gap: 5 }}>
         <Row style={{ width: '100%', gap: 6, flexWrap: 'wrap', alignItems: 'stretch', justifyContent: 'flex-start' }}>
