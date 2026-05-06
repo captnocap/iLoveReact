@@ -736,7 +736,7 @@ export function FlowTile({
           >
             <Row
               style={{
-                width: 48,
+                width: 38,
                 height: 18,
                 borderRadius: 4,
                 backgroundColor: theme.roleBg,
@@ -752,10 +752,10 @@ export function FlowTile({
                 {data.roleGlyph ?? role.glyph}
               </Text>
             </Row>
-            <Text fontSize={8} color={theme.textDim} numberOfLines={1} style={{ fontFamily: 'monospace', width: 34 }}>
+            <Text fontSize={8} color={theme.textDim} numberOfLines={1} style={{ fontFamily: 'monospace', width: 28 }}>
               {node.id}
             </Text>
-            <Text fontSize={10} color={theme.textBright} numberOfLines={1} style={{ flexGrow: 1, flexBasis: 0, fontWeight: 'bold' }}>
+            <Text fontSize={9} color={theme.textBright} numberOfLines={1} style={{ flexGrow: 1, flexBasis: 0, fontWeight: 'bold' }}>
               {node.label}
             </Text>
             <StatePip state={data.state ?? 'idle'} theme={theme} />
