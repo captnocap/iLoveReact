@@ -749,6 +749,194 @@ function KnowledgeSection() {
   );
 }
 
+// ── Embodiment + advanced routing ────────────────────────────────────
+
+function EmbodimentSection() {
+  const c = useCharacter();
+  const avatarRef = useRef(c.character.avatarRef ?? '');
+  const voiceRef = useRef(c.character.voiceThumbnailRef ?? '');
+  const themeRef = useRef(c.character.themeId ?? '');
+  avatarRef.current = c.character.avatarRef ?? '';
+  voiceRef.current = c.character.voiceThumbnailRef ?? '';
+  themeRef.current = c.character.themeId ?? '';
+  return (
+    <CharacterCard>
+      <S.Caption>
+        Visual + auditory + chrome refs. The avatar pipeline is TBD; until then any URL or local
+        path is preserved verbatim. Theme id must be a `theme:NAME` token — never a hex literal,
+        per the no-color-drift rule.
+      </S.Caption>
+      <Col style={{ gap: 4 }}>
+        <S.Label>Avatar ref</S.Label>
+        <S.AppFormInput
+          value={c.character.avatarRef ?? ''}
+          placeholder="url, file path, or asset id"
+          onChangeText={(t: string) => { avatarRef.current = t; void c.setAvatarRef(t); }}
+        />
+      </Col>
+      <Col style={{ gap: 4 }}>
+        <S.Label>Voice thumbnail ref</S.Label>
+        <S.AppFormInput
+          value={c.character.voiceThumbnailRef ?? ''}
+          placeholder="audio sample url / path"
+          onChangeText={(t: string) => { voiceRef.current = t; void c.setVoiceThumbnailRef(t); }}
+        />
+      </Col>
+      <Col style={{ gap: 4 }}>
+        <S.Label>Theme id</S.Label>
+        <S.AppFormInput
+          value={c.character.themeId ?? ''}
+          placeholder="theme:characterAccentSage"
+          onChangeText={(t: string) => { themeRef.current = t; void c.setThemeId(t); }}
+        />
+      </Col>
+    </CharacterCard>
+  );
+}
+
+function AdvancedRoutingSection() {
+  const c = useCharacter();
+  const compRef = useRef(c.character.compositionId ?? '');
+  compRef.current = c.character.compositionId ?? '';
+  return (
+    <CharacterCard>
+      <S.Caption>
+        Advanced. Override the default `comp_character_who` prompt-composition by pointing at a
+        custom Composition row. Leave empty for the standard voice-assembly path.
+      </S.Caption>
+      <Col style={{ gap: 4 }}>
+        <S.Label>Composition id (optional)</S.Label>
+        <S.AppFormInput
+          value={c.character.compositionId ?? ''}
+          placeholder="comp_custom_voice"
+          onChangeText={(t: string) => { compRef.current = t; void c.setCompositionId(t); }}
+        />
+      </Col>
+    </CharacterCard>
+  );
+}
+
+// ── Knowledge sources sub-form ───────────────────────────────────────
+
+const KNOWLEDGE_SOURCE_KINDS: { id: 'file' | 'url' | 'inline' | 'asset' | 'style-reference'; label: string }[] = [
+  { id: 'file', label: 'file' },
+  { id: 'url', label: 'url' },
+  { id: 'inline', label: 'inline' },
+  { id: 'asset', label: 'asset' },
+  { id: 'style-reference', label: 'style-ref' },
+];
+
+const KNOWLEDGE_SOURCE_INFLUENCES: {
+  id: 'voice' | 'backstory' | 'knowledge-weight' | 'style' | 'boundary' | 'avatar' | 'custom' | 'none';
+  label: string;
+}[] = [
+  { id: 'none', label: '—' },
+  { id: 'voice', label: 'voice' },
+  { id: 'backstory', label: 'backstory' },
+  { id: 'knowledge-weight', label: 'knowledge' },
+  { id: 'style', label: 'style' },
+  { id: 'boundary', label: 'boundary' },
+  { id: 'avatar', label: 'avatar' },
+  { id: 'custom', label: 'custom' },
+];
+
+function KnowledgeSourcesSection() {
+  const c = useCharacter();
+  const sources = c.character.knowledgeSources;
+  return (
+    <CharacterCard>
+      <S.Caption>
+        Files, urls, or inline text the character treats as canon. Composer slots them via
+        src_character-snapshot. Influence is an optional channel hint — what dimension this
+        source informs (voice / backstory / style / etc.). Weight is a 0–1 emphasis.
+      </S.Caption>
+      <Col style={{ gap: 12 }}>
+        {sources.map((src) => {
+          const influence = src.influence ?? 'none';
+          return (
+            <Col key={src.id} style={{
+              gap: 6,
+              padding: 10,
+              borderWidth: 1,
+              borderColor: 'theme:rule',
+              borderRadius: 6,
+              backgroundColor: 'theme:bg',
+            }}>
+              <Row style={{ gap: 8, alignItems: 'center' }}>
+                <Box style={{ flexGrow: 1, flexBasis: 0 }}>
+                  <S.AppFormInput
+                    value={src.label}
+                    placeholder="label (e.g. 'librarian voice notes')"
+                    onChangeText={(t: string) => void c.updateKnowledgeSource(src.id, { label: t })}
+                  />
+                </Box>
+                <S.ButtonOutline onPress={() => void c.removeKnowledgeSource(src.id)}>
+                  <S.ButtonOutlineLabel>Remove</S.ButtonOutlineLabel>
+                </S.ButtonOutline>
+              </Row>
+              <Row style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Box style={{ width: 80 }}><S.Label>Kind</S.Label></Box>
+                <Segmented
+                  options={KNOWLEDGE_SOURCE_KINDS}
+                  value={src.kind}
+                  onPick={(k) => void c.updateKnowledgeSource(src.id, { kind: k })}
+                />
+              </Row>
+              <Row style={{ gap: 8, alignItems: 'center' }}>
+                <Box style={{ width: 80 }}><S.Label>Locator</S.Label></Box>
+                <Box style={{ flexGrow: 1, flexBasis: 0 }}>
+                  <S.AppFormInput
+                    value={src.locator}
+                    placeholder={src.kind === 'inline' ? 'inline body text' : 'path / url / asset id'}
+                    onChangeText={(t: string) => void c.updateKnowledgeSource(src.id, { locator: t })}
+                  />
+                </Box>
+              </Row>
+              <Row style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <Box style={{ width: 80 }}><S.Label>Influence</S.Label></Box>
+                <Segmented
+                  options={KNOWLEDGE_SOURCE_INFLUENCES}
+                  value={influence}
+                  onPick={(inf) =>
+                    void c.updateKnowledgeSource(src.id, { influence: inf === 'none' ? undefined : inf })
+                  }
+                />
+              </Row>
+              <Row style={{ gap: 8, alignItems: 'center' }}>
+                <Box style={{ width: 80 }}><S.Label>Weight</S.Label></Box>
+                <AxisRow
+                  left=""
+                  right={typeof src.weight === 'number' ? src.weight.toFixed(2) : '—'}
+                  value={typeof src.weight === 'number' ? src.weight : 0.5}
+                  leftWidth={0}
+                  rightWidth={48}
+                  width={360}
+                  onChange={(next) => void c.updateKnowledgeSource(src.id, { weight: next })}
+                />
+              </Row>
+              <Row style={{ gap: 8, alignItems: 'center' }}>
+                <Box style={{ width: 80 }}><S.Label>Description</S.Label></Box>
+                <Box style={{ flexGrow: 1, flexBasis: 0 }}>
+                  <S.AppFormInput
+                    value={src.description ?? ''}
+                    placeholder="(optional) one-line note"
+                    onChangeText={(t: string) => void c.updateKnowledgeSource(src.id, { description: t || undefined })}
+                  />
+                </Box>
+              </Row>
+            </Col>
+          );
+        })}
+        <Row style={{ width: '100%', justifyContent: 'flex-end' }}>
+          <S.Button onPress={() => void c.addKnowledgeSource()}>
+            <S.ButtonLabel>Add source</S.ButtonLabel>
+          </S.Button>
+        </Row>
+      </Col>
+    </CharacterCard>
+  );
+}
+
 function BackstorySection() {
   const c = useCharacter();
   return (
@@ -1116,6 +1304,7 @@ function AvatarPreview() {
           <PreviewStat label="Domains" value={c.character.taskDomainIds.length === 0 ? '-' : String(c.character.taskDomainIds.length)} />
           <PreviewStat label="Registers" value={c.character.relationshipRegisterIds.length === 0 ? '-' : String(c.character.relationshipRegisterIds.length)} />
           <PreviewStat label="Knowledge" value={c.character.knowledgeSpecializationIds.length === 0 ? '-' : String(c.character.knowledgeSpecializationIds.length)} />
+          <PreviewStat label="Sources" value={(c.character.knowledgeSources?.length ?? 0) === 0 ? '-' : String(c.character.knowledgeSources.length)} />
           <PreviewStat label="Custom" value={customCount === 0 ? '-' : String(customCount)} />
         </Row>
       </CharacterCard>
@@ -1151,7 +1340,11 @@ function stationMetric(id: StationId, c: ReturnType<typeof useCharacter>): strin
     if (c.character.relationshipContext) n++;
     if (c.character.continuitySeed) n++;
     if (c.character.ghostHistorySeed) n++;
-    return `${n}/10 set`;
+    if (c.character.avatarRef) n++;
+    if (c.character.voiceThumbnailRef) n++;
+    if (c.character.themeId) n++;
+    if (c.character.compositionId) n++;
+    return `${n}/14 set`;
   }
   if (id === 'purpose') {
     return `${c.character.taskDomainIds.length + c.character.relationshipRegisterIds.length + c.character.stakeProfileIds.length} picks`;
@@ -1168,7 +1361,8 @@ function stationMetric(id: StationId, c: ReturnType<typeof useCharacter>): strin
     return `${n} rules`;
   }
   if (id === 'knowledge') {
-    return `${c.character.knowledgeSpecializationIds.length} weighted`;
+    const sources = c.character.knowledgeSources?.length ?? 0;
+    return `${c.character.knowledgeSpecializationIds.length} weighted${sources ? ` · ${sources} src` : ''}`;
   }
   let fiction = Object.keys(c.character.customProperties || {}).length;
   if (c.character.deliberationProfile) fiction++;
@@ -1260,9 +1454,11 @@ function StationWorkbench({ active }: { active: StationId }) {
     return (
       <Col style={{ width: '100%', gap: 12 }}>
         <IdentitySection />
+        <EmbodimentSection />
         <RelationshipProjectionSection />
         <BackstorySection />
         <ContinuitySeedSection />
+        <AdvancedRoutingSection />
       </Col>
     );
   }
@@ -1296,8 +1492,9 @@ function StationWorkbench({ active }: { active: StationId }) {
   }
   if (active === 'knowledge') {
     return (
-      <Col style={{ width: '100%' }}>
+      <Col style={{ width: '100%', gap: 12 }}>
         <KnowledgeSection />
+        <KnowledgeSourcesSection />
       </Col>
     );
   }

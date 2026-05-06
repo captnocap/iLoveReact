@@ -84,6 +84,32 @@ type CharacterRoleplayIdentity = {
   dislikes?: string;
 };
 
+export type CharacterKnowledgeSourceKind =
+  | 'file'
+  | 'url'
+  | 'inline'
+  | 'asset'
+  | 'style-reference';
+
+export type CharacterKnowledgeSourceInfluence =
+  | 'voice'
+  | 'backstory'
+  | 'knowledge-weight'
+  | 'style'
+  | 'boundary'
+  | 'avatar'
+  | 'custom';
+
+export type CharacterKnowledgeSource = {
+  id: string;
+  label: string;
+  kind: CharacterKnowledgeSourceKind;
+  locator: string;
+  influence?: CharacterKnowledgeSourceInfluence;
+  weight?: number;
+  description?: string;
+};
+
 export type CharacterRow = {
   id: string;
   assistantId: string;
@@ -94,6 +120,14 @@ export type CharacterRow = {
   name: string;
   displayName?: string;
   bio?: string;
+  /** Avatar asset — image URL, file path, or asset id. The pipeline is TBD. */
+  avatarRef?: string;
+  /** Short audio sample reference — same shape as avatarRef. */
+  voiceThumbnailRef?: string;
+  /** Gallery theme id (`theme:NAME`) whose tokens drive UI accent / chrome
+   *  when this character is selected. Never a hex literal — always a theme
+   *  reference per the no-color-drift rule. */
+  themeId?: string;
   maskContract: CharacterMaskContract;
   archetypeId?: ArchetypeId;
   dialValues: Record<string, number>;
@@ -135,6 +169,13 @@ export type CharacterRow = {
   likes: string;
   dislikes: string;
   customProperties: Record<string, string>;
+  /** File / url / inline / asset / style-reference items the character
+   *  treats as canon. Composer slots them via src_character-snapshot. */
+  knowledgeSources: CharacterKnowledgeSource[];
+  /** Opt-in: when set, the assembler builds the character's prompt via
+   *  this Composition instead of the default `comp_character_who`.
+   *  Net-additive — null means default path. */
+  compositionId?: string;
   version: number;
   createdAt: string;
   updatedAt: string;
@@ -237,10 +278,21 @@ function defaultCharacterRow(): CharacterRow {
     likes: '',
     dislikes: '',
     customProperties: {},
+    knowledgeSources: [],
+    avatarRef: undefined,
+    voiceThumbnailRef: undefined,
+    themeId: undefined,
+    compositionId: undefined,
     version: 1,
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function freshSourceId(): string {
+  const t = Date.now().toString(36);
+  const r = Math.random().toString(36).slice(2, 6);
+  return `src_${t}_${r}`;
 }
 
 function normalizeCharacterRow(existing: any): CharacterRow {
@@ -255,6 +307,7 @@ function normalizeCharacterRow(existing: any): CharacterRow {
     integrity: { ...def.integrity, ...((existing && existing.integrity) || {}) },
     delivery: { ...def.delivery, ...((existing && existing.delivery) || {}) },
     roleplay: { ...def.roleplay, ...((existing && existing.roleplay) || {}) },
+    knowledgeSources: Array.isArray(existing?.knowledgeSources) ? existing.knowledgeSources : [],
   };
   return {
     ...merged,
@@ -332,6 +385,13 @@ export type CharacterContextValue = {
   setDislikes: (next: string) => Promise<void>;
   setCustomProperty: (key: string, value: string) => Promise<void>;
   removeCustomProperty: (key: string) => Promise<void>;
+  setAvatarRef: (next: string) => Promise<void>;
+  setVoiceThumbnailRef: (next: string) => Promise<void>;
+  setThemeId: (next: string) => Promise<void>;
+  setCompositionId: (next: string) => Promise<void>;
+  addKnowledgeSource: (src?: Partial<CharacterKnowledgeSource>) => Promise<string>;
+  updateKnowledgeSource: (id: string, partial: Partial<CharacterKnowledgeSource>) => Promise<void>;
+  removeKnowledgeSource: (id: string) => Promise<void>;
   save: () => Promise<void>;
 };
 
@@ -376,6 +436,13 @@ const Ctx = createContext<CharacterContextValue>({
   setDislikes: async () => {},
   setCustomProperty: async () => {},
   removeCustomProperty: async () => {},
+  setAvatarRef: async () => {},
+  setVoiceThumbnailRef: async () => {},
+  setThemeId: async () => {},
+  setCompositionId: async () => {},
+  addKnowledgeSource: async () => '',
+  updateKnowledgeSource: async () => {},
+  removeKnowledgeSource: async () => {},
   save: async () => {},
 });
 
@@ -553,6 +620,38 @@ export function CharacterProvider({ children }: { children: ReactNode }) {
     return patch({ customProperties: next });
   };
 
+  const setAvatarRef = (next: string) => patch({ avatarRef: next || undefined });
+  const setVoiceThumbnailRef = (next: string) => patch({ voiceThumbnailRef: next || undefined });
+  const setThemeId = (next: string) => patch({ themeId: next || undefined });
+  const setCompositionId = (next: string) => patch({ compositionId: next || undefined });
+
+  const addKnowledgeSource = async (src?: Partial<CharacterKnowledgeSource>): Promise<string> => {
+    const id = src?.id ?? freshSourceId();
+    const fresh: CharacterKnowledgeSource = {
+      id,
+      label: src?.label ?? '',
+      kind: src?.kind ?? 'inline',
+      locator: src?.locator ?? '',
+      influence: src?.influence,
+      weight: src?.weight,
+      description: src?.description,
+    };
+    await patch({ knowledgeSources: [...character.knowledgeSources, fresh] });
+    return id;
+  };
+
+  const updateKnowledgeSource = (id: string, partial: Partial<CharacterKnowledgeSource>) => {
+    const next = character.knowledgeSources.map((s) =>
+      s.id === id ? { ...s, ...partial, id: s.id } : s,
+    );
+    return patch({ knowledgeSources: next });
+  };
+
+  const removeKnowledgeSource = (id: string) => {
+    const next = character.knowledgeSources.filter((s) => s.id !== id);
+    return patch({ knowledgeSources: next });
+  };
+
   const save = async () => {
     const next: CharacterRow = { ...character, version: character.version + 1, updatedAt: nowIso() };
     setCharacter(next);
@@ -602,6 +701,13 @@ export function CharacterProvider({ children }: { children: ReactNode }) {
     setDislikes,
     setCustomProperty,
     removeCustomProperty,
+    setAvatarRef,
+    setVoiceThumbnailRef,
+    setThemeId,
+    setCompositionId,
+    addKnowledgeSource,
+    updateKnowledgeSource,
+    removeKnowledgeSource,
     save,
   };
 
