@@ -427,8 +427,25 @@ function ShellBody() {
   const skippedFirstRef = useRef(false);
 
   useEffect(() => {
+    // First mount: SNAP each tween to the target instead of animating
+    // from the {0,0,0} default. Hot-reload re-mounts ShellBody with
+    // tween refs at default and (sometimes) variant out of sync; if
+    // we returned early like the old code did, the layout would stay
+    // at cold-state values regardless of the route, leaving the user
+    // on /settings with the rail collapsed but the page already
+    // rendering as if the rail were visible. Snap-on-first cleans
+    // that up without an unwanted animation on first paint.
     if (!skippedFirstRef.current) {
       skippedFirstRef.current = true;
+      const tgt = TARGETS[headingTo];
+      sideTweenRef.current   = { from: tgt.side,   to: tgt.side,   start: 0 };
+      inputTweenRef.current  = { from: tgt.input,  to: tgt.input,  start: 0 };
+      bottomTweenRef.current = { from: tgt.bottom, to: tgt.bottom, start: 0 };
+      if (tgt.variant === 'side' && variant !== 'side') setVariant('side');
+      else if (tgt.variant === null && variant === 'side') setVariant(null);
+      // Force a re-render so the snapped tween values flow through
+      // readTween into the next paint.
+      force((n) => (n + 1) | 0);
       return;
     }
 
