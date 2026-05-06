@@ -19,7 +19,7 @@ import { useEffect, useRef } from 'react';
 import { useRoute } from '@reactjit/runtime/router';
 import { parseIntent, type Node } from '@reactjit/runtime/intent/parser';
 import { useAssistantChat } from './useAssistantChat';
-import { appendTurn, nextTurnId, setAsker, setChatStatus, setTurnPending, updateTurnBody, updateTurnSurface } from './store';
+import { appendTurn, nextTurnId, pushAsker, setChatStatus, setTurnPending, updateTurnBody, updateTurnSurface } from './store';
 import {
   grantPermission,
   invokeTool,
@@ -264,8 +264,7 @@ export function AssistantChatProvider() {
       return driveAssistantTurn(asstId, promptForClaude);
     };
 
-    setAsker(orchestratedAsk);
-    return () => { setAsker(null); };
+    return pushAsker(orchestratedAsk);
   }, [chat.ask]);
 
   return null;

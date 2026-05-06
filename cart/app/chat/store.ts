@@ -19,7 +19,7 @@ import * as React from 'react';
 import * as pgConn from '../db/connections';
 import { ensureBootstrapped } from '../db/bootstrap';
 import { lit, val, ident, tableName } from '../db/sql';
-import type { AssistantTurn, ChatSession, ChatSurface } from './types';
+import type { AssistantTurn, ChatSession, ChatSurface, ParallelCandidate } from './types';
 
 const TURN_TABLE = ident(tableName('chat-turn'));
 const SESSION_TABLE = ident(tableName('chat-session'));
@@ -240,6 +240,45 @@ export function updateTurnSurface(id: string, surface: ChatSurface | null): void
   _notify();
 }
 
+/** Mutate one model candidate inside a parallel-response turn. */
+export function updateParallelCandidate(
+  turnId: string,
+  candidateId: string,
+  patch: Partial<ParallelCandidate>,
+): void {
+  const i = _turns.findIndex((t) => t.id === turnId);
+  if (i < 0) return;
+  const cur = _turns[i];
+  if (cur.author !== 'parallel') return;
+  const candidates = cur.candidates.map((c) => (
+    c.id === candidateId ? { ...c, ...patch } : c
+  ));
+  const updated: AssistantTurn = { ...cur, candidates };
+  _turns = [..._turns.slice(0, i), updated, ..._turns.slice(i + 1)];
+  if (_currentSessionId) _writeTurn(_currentSessionId, updated);
+  _notify();
+}
+
+/** Mark the candidate the user chose as canonical for this round. */
+export function selectParallelCandidate(turnId: string, candidateId: string): ParallelCandidate | null {
+  const i = _turns.findIndex((t) => t.id === turnId);
+  if (i < 0) return null;
+  const cur = _turns[i];
+  if (cur.author !== 'parallel') return null;
+  let selected: ParallelCandidate | null = null;
+  const candidates = cur.candidates.map((c) => {
+    const isSelected = c.id === candidateId;
+    const next = { ...c, selected: isSelected };
+    if (isSelected) selected = next;
+    return next;
+  });
+  const updated: AssistantTurn = { ...cur, candidates };
+  _turns = [..._turns.slice(0, i), updated, ..._turns.slice(i + 1)];
+  if (_currentSessionId) _writeTurn(_currentSessionId, updated);
+  _notify();
+  return selected;
+}
+
 /** Switch the live transcript to a different session. Loads its turns
  *  synchronously from pg (we already paid the bootstrap cost). */
 export function loadSession(id: string): void {
@@ -318,17 +357,35 @@ export function useChatHasAny(): boolean {
 // without depending on hook context (the strip's slot changes during
 // the morph; we can't host the hook there).
 
-let _asker: ((text: string) => Promise<string>) | null = null;
+let _askerId = 0;
+let _askers: Array<{ id: number; priority: number; fn: (text: string) => Promise<string> }> = [];
 
 export function setAsker(fn: ((text: string) => Promise<string>) | null): void {
-  _asker = fn;
+  _askers = fn ? [{ id: ++_askerId, priority: 0, fn }] : [];
+}
+
+/** Push a temporary ask handler. The newest handler wins until its
+ *  disposer runs, which lets routes such as /chat override the global
+ *  rail assistant without losing the provider's base handler. */
+export function pushAsker(fn: (text: string) => Promise<string>, priority = 0): () => void {
+  const id = ++_askerId;
+  _askers = [..._askers, { id, priority, fn }];
+  return () => {
+    _askers = _askers.filter((a) => a.id !== id);
+  };
 }
 
 export function askAssistant(text: string): Promise<string> {
-  if (!_asker) {
+  const top = _askers.reduce<typeof _askers[number] | null>((best, cur) => {
+    if (!best) return cur;
+    if (cur.priority > best.priority) return cur;
+    if (cur.priority === best.priority && cur.id > best.id) return cur;
+    return best;
+  }, null);
+  if (!top) {
     return Promise.reject(new Error('chat: AssistantChatProvider not mounted'));
   }
-  return _asker(text);
+  return top.fn(text);
 }
 
 // Monotonic id helper for fresh turns — small + sufficient for an

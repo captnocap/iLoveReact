@@ -105,7 +105,7 @@ export function AssistantTurn({
   turn,
   showLift,
 }: {
-  turn: AssistantTurnT;
+  turn: Exclude<AssistantTurnT, { author: 'parallel' }>;
   showLift: boolean;
 }) {
   if (turn.author === 'user') {

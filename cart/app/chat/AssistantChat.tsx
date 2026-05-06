@@ -19,7 +19,7 @@
 // the swap.
 
 import { classifiers as S } from '@reactjit/core';
-import type { ChatShape } from './types';
+import type { ChatShape, ParallelCandidate } from './types';
 import {
   loadSession,
   startNewSession,
@@ -29,6 +29,7 @@ import {
   useCurrentSessionId,
 } from './store';
 import { AssistantTurn } from './AssistantTurn';
+import { ParallelAssistantTurn, ParallelLaneControls } from './ParallelAssistantTurn';
 
 function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + '…';
@@ -98,9 +99,18 @@ function ChatHistoryList({
 export function AssistantChat({
   shape,
   chatIsActivity = false,
+  parallel,
 }: {
   shape: ChatShape;
   chatIsActivity?: boolean;
+  parallel?: {
+    laneCount: number;
+    lanes: ParallelCandidate[];
+    modelOptions: Array<{ id: string; label: string }>;
+    onAddLane: () => void;
+    onRemoveLane: (laneIndex: number) => void;
+    onSelectLaneModel: (laneIndex: number, modelId: string) => void;
+  };
 }) {
   const turns = useChatTurns();
   const status = useChatStatus();
@@ -133,6 +143,9 @@ export function AssistantChat({
     : status.phase === 'failed'
     ? `FAILED · ${truncate(status.error || status.lastStatus || 'no detail', 64)}`
     : `PERSISTENT · ${turnCount} TURNS · DRAG ANY SURFACE TO CART`;
+  const panelMode = parallel
+    ? `${parallel.laneCount} LANE${parallel.laneCount === 1 ? '' : 'S'}`
+    : railShowsHistory ? 'HISTORY' : 'ACTIVE';
 
   return (
     <S.AppChatPanel>
@@ -140,16 +153,16 @@ export function AssistantChat({
         <S.AppChatPanelHeaderLeft>
           <S.AppChatPanelHeaderDot />
           <S.AppChatPanelHeaderTitle>01 ASSISTANT</S.AppChatPanelHeaderTitle>
-          {isSide ? (
+          {isSide || parallel ? (
             <S.AppChatPanelHeaderState>
               <S.AppChatPanelHeaderStateText>
-                {railShowsHistory ? 'HISTORY' : 'ACTIVE'}
+                {panelMode}
               </S.AppChatPanelHeaderStateText>
             </S.AppChatPanelHeaderState>
           ) : null}
         </S.AppChatPanelHeaderLeft>
-        {hasActiveSession ? (
-          <S.AppChatPanelHeaderToggle onPress={() => startNewSession()}>
+        {parallel || hasActiveSession ? (
+          <S.AppChatPanelHeaderToggle onPress={() => parallel ? parallel.onAddLane() : startNewSession()}>
             <S.AppChatPanelHeaderToggleText>+</S.AppChatPanelHeaderToggleText>
           </S.AppChatPanelHeaderToggle>
         ) : null}
@@ -161,6 +174,15 @@ export function AssistantChat({
             {phaseLabel}
           </S.AppChatPanelSublineText>
         </S.AppChatPanelSubline>
+      ) : null}
+
+      {parallel && parallel.lanes.length > 0 ? (
+        <ParallelLaneControls
+          candidates={parallel.lanes}
+          modelOptions={parallel.modelOptions}
+          onRemove={parallel.onRemoveLane}
+          onSelectModel={parallel.onSelectLaneModel}
+        />
       ) : null}
 
       <S.AppChatTranscript>
@@ -179,7 +201,9 @@ export function AssistantChat({
           </S.AppChatHistoryEmpty>
         ) : (
           turns.map((t) => (
-            <AssistantTurn key={t.id} turn={t} showLift={showLift} />
+            t.author === 'parallel'
+              ? <ParallelAssistantTurn key={t.id} turn={t} compact={isSide} />
+              : <AssistantTurn key={t.id} turn={t} showLift={showLift} />
           ))
         )}
       </S.AppChatTranscript>

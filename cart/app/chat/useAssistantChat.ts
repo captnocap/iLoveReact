@@ -84,14 +84,20 @@ export interface ChatAskOpts {
   onPart?: (partial: string) => void;
 }
 
-export function useAssistantChat() {
+export interface UseAssistantChatOpts {
+  modelId?: string;
+  persistAcrossUnmount?: boolean;
+}
+
+export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
   const settingsStore = useCRUD<any>('settings', passthrough, { namespace: NS });
   const connectionStore = useCRUD<any>('connection', passthrough, { namespace: NS });
   const modelStore = useCRUD<any>('model', passthrough, { namespace: NS });
 
   const { data: settings } = settingsStore.useQuery(SETTINGS_ID);
   const boundModelId = settings?.actionDefaults?.assistant || '';
-  const { data: boundModel } = modelStore.useQuery(boundModelId);
+  const activeModelId = opts.modelId || boundModelId;
+  const { data: boundModel } = modelStore.useQuery(activeModelId);
   const connId = boundModel?.connectionId || '';
   const { data: conn } = connectionStore.useQuery(connId);
 
@@ -140,6 +146,7 @@ export function useAssistantChat() {
     baseUrl: baseUrl || undefined,
     apiKey: apiKey || undefined,
     tools: toolsJson,
+    persistAcrossUnmount: opts.persistAcrossUnmount,
   });
 
   useAssistantTools(assistant, { enabled: usesCartTools });

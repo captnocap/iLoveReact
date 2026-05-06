@@ -28,7 +28,25 @@ export type AssistantTurn =
       author: 'user';
       timestamp: string;
       body: string;
+    }
+  | {
+      id: string;
+      author: 'parallel';
+      timestamp: string;
+      userBody: string;
+      candidates: ParallelCandidate[];
     };
+
+export type ParallelCandidate = {
+  id: string;
+  modelId: string;
+  modelLabel: string;
+  body: string;
+  surface?: ChatSurface;
+  pending?: boolean;
+  selected?: boolean;
+  error?: string;
+};
 
 /** Embedded surface card. Discriminated union — extend by adding a
  *  kind here and a render branch in `AssistantSurface.tsx`. The audit
