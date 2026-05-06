@@ -151,6 +151,26 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
         return;
     }
 
+    if (std.mem.eql(u8, verb, "EVENTS")) {
+        // "EVENTS <n>" → JSON array of the last N events from the
+        // in-memory ring (capped at RING_SIZE = 4096). Default 200 if N
+        // omitted or unparseable. Reads memory only — no SQL, no file
+        // I/O — so safe to poll at devshell rates.
+        var n: usize = 200;
+        if (it.next()) |arg| {
+            n = std.fmt.parseInt(usize, arg, 10) catch 200;
+        }
+        const a = std.heap.page_allocator;
+        const json = event_bus.recentEventsJson(a, n) catch {
+            try writeAll(client_fd, "[]\n");
+            return;
+        };
+        defer a.free(json);
+        try writeAll(client_fd, json);
+        try writeAll(client_fd, "\n");
+        return;
+    }
+
     if (std.mem.eql(u8, verb, "TELEMETRY")) {
         // One-shot snapshot of the live telemetry counters. JSON line +
         // close. Used by tools/devshell to render fps/nodes/paint/layout

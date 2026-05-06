@@ -7,6 +7,7 @@
 import { createElement, useState, useEffect } from 'react';
 import { subscribeKey, headlessSnapshot } from '../host';
 import { BundlePane } from './panes/Bundle';
+import { LogsPane } from './panes/Logs';
 import { useTelemetry, Telemetry } from './services/Telemetry';
 import { useLogLevel } from './services/LogLevel';
 import { copyToClipboard } from './services/clipboard';
@@ -156,7 +157,7 @@ function TelemetryStrip({ tel, hostUp, spinner }: { tel: Telemetry | null; hostU
 
 function ActivePane({ id, cart, hostUp, tick }: { id: TabId; cart: string; hostUp: boolean; tick: number }) {
   if (id === 'status') return <StatusPane cart={cart} hostUp={hostUp} tick={tick} />;
-  if (id === 'logs')    return <Placeholder name="Logs"        next="spawn dev host as child, capture stdout/stderr via __spawn + __childReadLine, ring-buffer, render scrollable" />;
+  if (id === 'logs')    return <LogsPane />;
   if (id === 'events')  return <Placeholder name="Eventlog"    next="extend dev_ipc.zig with QUERY-EVENTS command; reuse SQL filter from cart/eventlog" />;
   if (id === 'inspect') return <Placeholder name="Inspector"   next="extend dev_ipc.zig with PICK-ELEMENT (request) + ELEMENT-INFO (reply); cart enters pick mode" />;
   if (id === 'bundle')  return <BundlePane cart={cart} />;

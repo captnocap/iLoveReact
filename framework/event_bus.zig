@@ -292,6 +292,46 @@ pub fn emitWithImportance(
     return id;
 }
 
+/// Serialize the most recent `max_n` ring entries as a JSON array.
+/// Cheaper than a SQL query — the ring is in-process memory. Used by
+/// dev_ipc's EVENTS verb so devshell can tail logs without ever
+/// touching the events.db file.
+///
+/// event_type / source are framework-controlled identifiers (dotted
+/// snake-case — "host.flush", "framework/dev_ipc.zig") so we don't
+/// JSON-escape them. payload is already a JSON document; it's emitted
+/// as-is.
+pub fn recentEventsJson(out_alloc: std.mem.Allocator, max_n: usize) ![]u8 {
+    var out: std.ArrayList(u8) = .{};
+    errdefer out.deinit(out_alloc);
+    try out.append(out_alloc, '[');
+    if (g_ring_inited and g_ring_count > 0) {
+        const want = @min(max_n, RING_SIZE);
+        const total = g_ring_count;
+        const start = if (total > want) total - want else 0;
+        var first = true;
+        var i: u64 = start;
+        while (i < total) : (i += 1) {
+            const slot: usize = @intCast(i % RING_SIZE);
+            const e = &g_ring[slot];
+            if (e.event_type.len == 0) continue;
+            if (!first) try out.append(out_alloc, ',');
+            first = false;
+            var head_buf: [192]u8 = undefined;
+            const head = std.fmt.bufPrint(
+                &head_buf,
+                "{{\"id\":{d},\"ts\":{d},\"imp\":{d:.3},\"type\":\"{s}\",\"src\":\"{s}\",\"payload\":",
+                .{ e.id, e.ts_ms, e.importance, e.event_type, e.source },
+            ) catch continue;
+            try out.appendSlice(out_alloc, head);
+            try out.appendSlice(out_alloc, e.payload);
+            try out.append(out_alloc, '}');
+        }
+    }
+    try out.append(out_alloc, ']');
+    return out.toOwnedSlice(out_alloc);
+}
+
 /// Drop everything below (max rowid - ROW_CAP). Bounded work — SQLite's
 /// rowid is the primary key, so the WHERE clause hits the b-tree
 /// directly. Called every PRUNE_EVERY emits, deleting ~PRUNE_EVERY rows
