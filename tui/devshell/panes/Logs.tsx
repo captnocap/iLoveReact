@@ -10,6 +10,7 @@ import { createElement, useState, useEffect, useRef } from 'react';
 import { subscribeKey } from '../../host';
 import { useEventStream, Event } from '../services/EventStream';
 import { useLogLevel } from '../services/LogLevel';
+import { claimInput, releaseInput } from '../services/InputClaim';
 
 const CHROME_ROWS = 6; // title 2 + tabs 1 + footer 1 + paneY-padding 2
 
@@ -63,6 +64,21 @@ function fmtPayload(ev: Event): string {
   } catch { return ''; }
 }
 
+// Substring filter. Empty = match everything. `!foo` excludes any event
+// whose haystack includes "foo". Otherwise include only events whose
+// haystack includes the term. Case-insensitive.
+function matchesFilter(ev: Event, filter: string): boolean {
+  if (!filter) return true;
+  const exclude = filter.startsWith('!');
+  const term = (exclude ? filter.slice(1) : filter).toLowerCase();
+  if (!term) return true;
+  let payloadStr = '';
+  try { payloadStr = JSON.stringify(ev.payload || ''); } catch {}
+  const hay = (ev.type + ' ' + ev.src + ' ' + payloadStr).toLowerCase();
+  const hit = hay.includes(term);
+  return exclude ? !hit : hit;
+}
+
 export function LogsPane() {
   const allEvents = useEventStream(500);
   const log = useLogLevel();
@@ -71,11 +87,16 @@ export function LogsPane() {
   // the ring. Re-apply the current threshold here so changing level
   // clears them from view immediately.
   const threshold = log.value ?? 0;
-  const events = allEvents.filter(e => e.imp >= threshold);
+  const [filter, setFilter] = useState('');
+  const [editingFilter, setEditingFilter] = useState(false);
+  const events = allEvents.filter(e => e.imp >= threshold && matchesFilter(e, filter));
   const [scrollY, setScrollY] = useState(0);
   const [scrollX, setScrollX] = useState(0);
   const [stickToBottom, setStickToBottom] = useState(true);
   const lastSeenCount = useRef(0);
+
+  // Release the input claim if the pane unmounts mid-edit.
+  useEffect(() => () => { releaseInput(); }, []);
 
   const termRows = (typeof process !== 'undefined' && process.stdout?.rows) || 24;
   const viewportH = Math.max(1, termRows - CHROME_ROWS - 1);
@@ -91,6 +112,16 @@ export function LogsPane() {
   }, [events.length, viewportH, stickToBottom]);
 
   useEffect(() => subscribeKey(k => {
+    if (editingFilter) {
+      // Modal text input. Shell skips its global handlers because
+      // claimInput() was called when we entered the editor.
+      if (k === '\x1b' /* ESC */) { setFilter(''); setEditingFilter(false); releaseInput(); }
+      else if (k === '\r' || k === '\n') { setEditingFilter(false); releaseInput(); }
+      else if (k === '\x7f' || k === '\b') setFilter(f => f.slice(0, -1));
+      else if (k.length === 1 && k >= ' ' && k !== '\x1b') setFilter(f => f + k);
+      return;
+    }
+    if (k === '/') { setEditingFilter(true); claimInput(); return; }
     if (k === '\x1b[A' || k === 'k') { setStickToBottom(false); setScrollY(y => Math.max(0, y - 1)); }
     else if (k === '\x1b[B' || k === 'j') { setStickToBottom(false); setScrollY(y => y + 1); }
     else if (k === '\x1b[D' || k === 'h') setScrollX(x => Math.max(0, x - 8));
@@ -99,7 +130,7 @@ export function LogsPane() {
     else if (k === '\x1b[6~' || k === ' ') { setStickToBottom(false); setScrollY(y => y + viewportH); }
     else if (k === 'g' || k === '\x1b[H') { setStickToBottom(false); setScrollY(0); setScrollX(0); }
     else if (k === 'G' || k === '\x1b[F') { setStickToBottom(true); setScrollX(0); }
-  }), [viewportH]);
+  }), [viewportH, editingFilter]);
 
   if (events.length === 0) {
     return (
@@ -119,20 +150,35 @@ export function LogsPane() {
   const above = clamped;
   const below = Math.max(0, events.length - clamped - viewportH);
 
+  const showFilterBar = editingFilter || filter.length > 0;
   return (
     <box flexDirection="column" height={viewportH + 1}>
+      {showFilterBar ? <FilterBar filter={filter} editing={editingFilter} /> : null}
       <Header scrollX={scrollX} />
-      {slice.slice(0, viewportH - 1).map(ev => <Row key={ev.id} ev={ev} scrollX={scrollX} />)}
+      {slice.slice(0, viewportH - (showFilterBar ? 2 : 1)).map(ev =>
+        <Row key={ev.id} ev={ev} scrollX={scrollX} />
+      )}
       <box flexDirection="row" gap={2}>
         <text fg="#64748b">
-          ─── {events.length} events
+          ─── {events.length}/{allEvents.length} events
           {above > 0 ? `  ↑ ${above}` : ''}
           {below > 0 ? `  ↓ ${below}` : ''}
           {stickToBottom ? '  · live' : '  · paused'}
           {scrollX > 0 ? `  ·  →${scrollX}` : ''}
-          {`  ·  k/j ↑↓ · h/→ ←→ · PgUp/PgDn · G live`}
+          {`  ·  / filter · k/j ↑↓ · h/→ ←→ · G live`}
         </text>
       </box>
+    </box>
+  );
+}
+
+function FilterBar({ filter, editing }: { filter: string; editing: boolean }) {
+  return (
+    <box flexDirection="row" gap={1}>
+      <text fg={editing ? '#fbbf24' : '#94a3b8'} bold>filter:</text>
+      <text fg="#e5e7eb">{filter}{editing ? '_' : ''}</text>
+      {!editing && filter ? <text fg="#64748b">  (/ to edit · ESC to clear)</text> : null}
+      {editing ? <text fg="#64748b">  (Enter to apply · ESC to clear · ! prefix to exclude)</text> : null}
     </box>
   );
 }

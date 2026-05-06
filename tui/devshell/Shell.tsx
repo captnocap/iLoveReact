@@ -11,6 +11,7 @@ import { LogsPane } from './panes/Logs';
 import { useTelemetry, Telemetry } from './services/Telemetry';
 import { useLogLevel } from './services/LogLevel';
 import { copyToClipboard } from './services/clipboard';
+import { isInputClaimed } from './services/InputClaim';
 
 type TabId = 'logs' | 'events' | 'inspect' | 'bundle' | 'status';
 const TABS: { id: TabId; label: string }[] = [
@@ -47,6 +48,9 @@ export function Shell({ cart }: { cart: string }) {
   }, [toast]);
 
   useEffect(() => subscribeKey(k => {
+    // A pane has captured input (e.g. LogsPane filter editor). Skip
+    // global shortcuts so the user can type freely.
+    if (isInputClaimed()) return;
     if (k >= '1' && k <= '5') {
       const idx = parseInt(k, 10) - 1;
       if (TABS[idx]) setActive(TABS[idx].id);
@@ -203,6 +207,12 @@ function HelpPane() {
       <Hk k="1..5"      d="switch pane (Logs / Events / Inspect / Bundle / Status)" />
       <Hk k="y"         d="copy current screen as plain text to clipboard (OSC 52)" />
       <Hk k="l"         d="cycle log level: trace · debug · info · warn · error" />
+      <text> </text>
+      <text fg="#cbd5e1" bold>Inside Logs pane</text>
+      <Hk k="/"         d="filter (substring match; ! prefix excludes); Enter applies, ESC clears" />
+      <Hk k="↑/↓ k/j"   d="scroll one row" />
+      <Hk k="←/→ h"     d="horizontal scroll (8 cols)" />
+      <Hk k="G"         d="resume live tail" />
       <Hk k="?"         d="toggle this help (or ESC)" />
       <Hk k="q / ⌃C"    d="quit" />
       <text> </text>
