@@ -1531,11 +1531,12 @@ function CharacterForm() {
   return (
     <S.Page>
       <Row style={{ width: '100%', height: '100%', alignItems: 'stretch' }}>
-        <ScrollView style={{ flexGrow: 1, flexBasis: 0, height: '100%', opacity: pageOp }}>
+        <ScrollView style={{ flexGrow: 1, flexBasis: 0 }}>
           <Box style={{
             paddingTop: 28, paddingBottom: 28,
             paddingLeft: 28, paddingRight: 14,
             alignItems: 'center',
+            opacity: pageOp,
           }}>
             <Box style={{ width: '100%', maxWidth: 1040 }}>
               <Box style={{ opacity: headOp }}>
