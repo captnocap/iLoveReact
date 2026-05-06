@@ -77,7 +77,13 @@ pub fn setMinImportance(threshold: f32) void { g_min_importance = threshold; }
 /// sessions. ~17 minutes of headroom at 200 events/sec sustained, hours
 /// at human-meaningful event rates.
 const ROW_CAP: u64 = 200_000;
-const PRUNE_EVERY: u64 = 1000;
+// Prune cadence is a tradeoff: too frequent = visible frame hitches
+// from the synchronous DELETE+WAL fsync (observed in user-side
+// telemetry, ~3min cycle at info-level emit rates); too rare = the
+// table briefly carries more than ROW_CAP between prunes. 5000 keeps
+// drift to ~2.5% of cap and pushes the hitch out to 10-15min cycles
+// at typical event rates.
+const PRUNE_EVERY: u64 = 5000;
 var g_emits_since_prune: u64 = 0;
 var g_session_buf: [16]u8 = undefined;
 var g_session_len: usize = 0;
@@ -346,10 +352,13 @@ fn pruneOldRows() void {
             .{ROW_CAP},
         ) catch return;
         db.exec(sql) catch {};
-        // Reclaim freelist pages so the file actually shrinks. Cheap
-        // (incremental, not a full VACUUM) when auto_vacuum=INCREMENTAL
-        // is on.
-        db.exec("PRAGMA incremental_vacuum;") catch {};
+        // We deliberately do NOT call PRAGMA incremental_vacuum here —
+        // it's another synchronous SQL pass on the freelist that
+        // doubles the prune-cycle hitch. Without it, freed pages stay
+        // in-file and get reused for new INSERTs, so the file stabilizes
+        // at high-water mark rather than shrinking. Row count is still
+        // bounded by ROW_CAP. Run `VACUUM` manually offline if you
+        // need to actually shrink the file.
     }
 }
 
