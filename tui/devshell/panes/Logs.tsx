@@ -95,7 +95,8 @@ export function LogsPane() {
 
   return (
     <box flexDirection="column" height={viewportH + 1}>
-      {slice.map(ev => <Row key={ev.id} ev={ev} />)}
+      <Header />
+      {slice.slice(0, viewportH - 1).map(ev => <Row key={ev.id} ev={ev} />)}
       <box flexDirection="row" gap={2}>
         <text fg="#64748b">
           ─── {events.length} events
@@ -105,6 +106,18 @@ export function LogsPane() {
           {`  ·  k/j ↑↓ · PgUp/PgDn · G live`}
         </text>
       </box>
+    </box>
+  );
+}
+
+function Header() {
+  return (
+    <box flexDirection="row" gap={1}>
+      <box width={12}><text fg="#475569" bold>time</text></box>
+      <box width={5}><text fg="#475569" bold>imp</text></box>
+      <box width={22}><text fg="#475569" bold>event</text></box>
+      <box width={28}><text fg="#475569" bold>source</text></box>
+      <text fg="#475569" bold>message / payload</text>
     </box>
   );
 }
