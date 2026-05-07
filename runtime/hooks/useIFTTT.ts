@@ -87,6 +87,8 @@ import './process';          // proc:* triggers + actions, per-pid memory
 import './useFileWatch';     // fs:* triggers
 import './system_selection'; // select:* + clipboard:copy triggers
 import './ifttt-match';      // match:<channel>::<pattern> generic text-pattern source
+import './ifttt-count';      // count:<channel>::<n>:<windowMs> windowed counter
+import './ifttt-firsthit';   // firsthit:<channel>::<pattern> single-shot pattern
 
 // ── Bus + state store ─────────────────────────────────────────────────────
 

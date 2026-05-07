@@ -321,6 +321,88 @@ matchSpec('vm:abc:event:append', '/rm\\s+-rf/i');
 
 This is the load-bearing primitive behind features like the **Pathology dictionary** (`cart/app/gallery/data/core/pathology.ts`): each `Pathology.detectionSignals[]` entry — `{ kind: 'pattern', spec: '<regex>', surface: 'stdout' | 'tool-call' | … }` — can be bound by emitting one `match:<surface-channel>::<spec>` per row. Adding a new banned phrase becomes a data write.
 
+## Stateful Aggregation Sources
+
+Three primitives that hold state across emits. They build on the underlying bus and `match:` semantics; together they cover most pathology / verify-loop detection shapes that single-event sources can't.
+
+### `count:<channel>::<n>:<windowMs>`
+
+Edge-triggered windowed counter. Fires when the underlying channel has accumulated ≥ N events within the trailing windowMs. Fires **once on the transition** from <N to ≥N — won't re-fire until the count drops back below N and climbs again. For periodic re-fires while the count stays elevated, wrap with `{ trigger, cooldown: <ms> }`.
+
+Fire payload:
+
+```ts
+{ channel: string; count: number; n: number; windowMs: number; payload: any; at: number }
+```
+
+Examples:
+
+```ts
+// Investigation addiction: 6 Reads in 30s
+useIFTTT('count:event:append.tool_use.Read::6:30000', 'flag-pathology:pat_X');
+
+// Stdout spam from a worker process
+useIFTTT(
+  { trigger: 'count:proc:stdout:1234::100:1000', cooldown: 10_000 },
+  'notify-user:agent is spamming stdout',
+);
+
+// 3 guest events in 5s
+useIFTTT('count:vm:abc:event:append::3:5000', (e) => console.log(e));
+```
+
+Source file: `runtime/hooks/ifttt-count.ts`.
+
+### `firsthit:<channel>::<pattern>`
+
+Same wire format and semantics as `match:` (regex `/source/flags` or literal substring; payload search via JSON.stringify; same fire shape) — except the subscription auto-unsubscribes after the first match. Useful for **session-first** detection like "loss narrative without recovery check": the rule fires once per scope, never repeats. Re-arming is implicit per useIFTTT subscription — a fresh subscribe creates a fresh fired-flag.
+
+```ts
+useIFTTT('firsthit:vm:abc:event:append::work was destroyed',
+  'kick-to-supervisor:check_recovery_first');
+```
+
+Source file: `runtime/hooks/ifttt-firsthit.ts`.
+
+### `registerGate({ after, suspect, requires, key?, onFire })`
+
+Programmatic stateful gate — the "after-X-then-Y-unless-Z-in-between" shape. Three channels:
+
+- `after` — opens a verification window when one of its emits arrives.
+- `suspect` — fires the gate when an emit lands and no `requires` event has closed the window since the most recent `after`.
+- `requires` — closes the window without firing.
+
+Each channel takes an optional filter function (richer than a single regex) and a shared `key(payload)` extractor lets per-file / per-pid / per-id windows coexist.
+
+```ts
+import { registerGate } from '@reactjit/runtime/hooks/ifttt-gate';
+
+// Manifest-as-truth: Edit on file F, then claim "fixed", with no Bash event in between.
+const dispose = registerGate({
+  after:    'event:append',
+  afterFilter:    (p) => p.kind === 'tool_use' && p.name === 'Edit',
+  key:            (p) => p?.payload?.input?.file_path,
+
+  suspect:  'event:append',
+  suspectFilter:  (p) => /\bfix(ed)?\b|\bshipped\b|\btry it now\b/i.test(JSON.stringify(p)),
+
+  requires: 'event:append',
+  requiresFilter: (p) => p.kind === 'tool_use' && p.name === 'Bash',
+
+  onFire: ({ key, suspectPayload, afterPayload }) => {
+    emit('rule:fired', { ruleId: 'r_manifest_as_truth', file: key, suspectPayload, afterPayload });
+  },
+});
+
+// later: dispose() to tear down all three subscriptions.
+```
+
+Default behavior is **one fire per after-window**: the gate disarms after firing and re-arms when a fresh `after` event lands. Pass `reArmOnFire: true` to keep firing every suspect that arrives until a `requires` closes the window.
+
+Why programmatic instead of a DSL spec: the three channels typically need filter functions richer than a single regex, and the key extractor usually inspects payload structure. A spec-string DSL would push that complexity into escaping. Callers can still drive this declaratively — a binder can call `registerGate` once per row of a Pathology dictionary or a verify-rule table.
+
+Source file: `runtime/hooks/ifttt-gate.ts`.
+
 ## VM Boundary Source (`vm:`)
 
 `runtime/hooks/ifttt-vm.ts` registers the `vm:` prefix so cart-side rules can subscribe to events emitted from inside a Firecracker worker VM:
@@ -543,6 +625,9 @@ Representative cart usage:
 - Process IFTTT registrations: `runtime/hooks/process.ts`
 - File-watch IFTTT registrations: `runtime/hooks/useFileWatch.ts`
 - Generic pattern source (`match:`): `runtime/hooks/ifttt-match.ts`
+- Windowed counter source (`count:`): `runtime/hooks/ifttt-count.ts`
+- Single-shot pattern source (`firsthit:`): `runtime/hooks/ifttt-firsthit.ts`
+- Programmatic stateful gate (`registerGate`): `runtime/hooks/ifttt-gate.ts`
 - VM boundary source (`vm:`) + per-VM bridge lifecycle: `runtime/hooks/ifttt-vm.ts`
 - Vsock transport + channel-mirror helpers: `runtime/hooks/vsock.ts`
 - Supervisor lifecycle emit helpers: `runtime/hooks/ifttt-supervisor.ts`
