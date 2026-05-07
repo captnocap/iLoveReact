@@ -169,6 +169,20 @@ export default function SweatshopPage() {
     setNodes(parsed.nodes);
     setEdges(parsed.edges);
   }, [codeDirty, codeDraft, nodes, edges]);
+  // Debounced auto-apply. 600ms after the last keystroke, parse the
+  // draft and reconcile the canvas. Apply button + Cmd/Ctrl+S still
+  // work for an immediate sync. Empty draft → empty canvas (parse
+  // honors the user's intent).
+  useEffect(() => {
+    if (codeDraft === codeMirror) return;
+    const t = setTimeout(() => {
+      const parsed = parseCodeToGraph(codeDraft, nodes, edges);
+      setNodes(parsed.nodes);
+      setEdges(parsed.edges);
+    }, 600);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeDraft, codeMirror]);
 
   // ── Unified history (canvas state). Snapshots {nodes, edges}; pushes
   // are debounced 600ms so a flurry of node-drag re-renders coalesces
