@@ -95,7 +95,7 @@ const DEFAULT_RULES: DetectionRule[] = [
     requiredEvidence: ['log-grep'],
     requireAll: false,
     injectTemplate:
-      'You said: "{claim}". Run `git log --follow` on the relevant file to confirm you didn''t author the line.',
+      'You said: "{claim}". Run `git log --follow` on the relevant file to confirm you did not author the line.',
   },
   {
     kind: 'completion',

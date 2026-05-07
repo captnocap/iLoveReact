@@ -253,11 +253,28 @@ export function openVsock(opts: OpenVsockOpts): VsockTransport {
 
 /** Mirror a single bus channel across the transport. Local emits get
  *  forwarded as envelopes. Received envelopes for this channel re-emit
- *  locally. */
+ *  locally.
+ *
+ *  Re-entrancy: when a remote envelope arrives, we re-emit it on the
+ *  local bus, which would normally re-trigger our own local subscribe
+ *  and bounce the payload back across the transport — an infinite
+ *  loop the moment both sides of a pair mirror the same channel. The
+ *  `inRemoteDispatch` guard short-circuits exactly that: while we're
+ *  inside `emit(channel, env.payload)`, our local subscribe sees the
+ *  flag and suppresses the outbound send. Safe because `ffi.emit` is
+ *  synchronous — the callback runs within the same call stack as the
+ *  flag set/clear, regardless of how the transport delivers. */
 export function mirrorChannel(t: VsockTransport, channel: string): () => void {
-  const unsubLocal = subscribe(channel, (payload) => { t.send(channel, payload); });
+  let inRemoteDispatch = false;
+  const unsubLocal = subscribe(channel, (payload) => {
+    if (inRemoteDispatch) return;
+    t.send(channel, payload);
+  });
   const unsubRemote = t.onEnvelope((env) => {
-    if (env.channel === channel) emit(channel, env.payload);
+    if (env.channel !== channel) return;
+    inRemoteDispatch = true;
+    try { emit(channel, env.payload); }
+    finally { inRemoteDispatch = false; }
   });
   return () => { unsubLocal(); unsubRemote(); };
 }
@@ -272,15 +289,18 @@ export function mirrorChannels(t: VsockTransport, channels: string[]): () => voi
 /** Mirror by prefix. Local emits whose channel starts with `prefix`
  *  get forwarded; received envelopes whose channel starts with `prefix`
  *  re-emit locally. Uses subscribeAll, so bus traffic outside the
- *  prefix is untouched. */
+ *  prefix is untouched. Same re-entrancy guard as mirrorChannel. */
 export function mirrorPrefix(t: VsockTransport, prefix: string): () => void {
+  let inRemoteDispatch = false;
   const unsubLocal = subscribeAll((channel, payload) => {
+    if (inRemoteDispatch) return;
     if (channel.startsWith(prefix)) t.send(channel, payload);
   });
   const unsubRemote = t.onEnvelope((env) => {
-    if (typeof env.channel === 'string' && env.channel.startsWith(prefix)) {
-      emit(env.channel, env.payload);
-    }
+    if (typeof env.channel !== 'string' || !env.channel.startsWith(prefix)) return;
+    inRemoteDispatch = true;
+    try { emit(env.channel, env.payload); }
+    finally { inRemoteDispatch = false; }
   });
   return () => { unsubLocal(); unsubRemote(); };
 }

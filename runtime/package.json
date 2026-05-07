@@ -5,6 +5,12 @@
   "sideEffects": [
     "./hooks/process.ts",
     "./hooks/useFileWatch.ts",
+    "./hooks/system_selection.ts",
+    "./hooks/ifttt-match.ts",
+    "./hooks/ifttt-count.ts",
+    "./hooks/ifttt-firsthit.ts",
+    "./hooks/ifttt-repeat.ts",
+    "./hooks/turn-tracker.ts",
     "./effect_tracker.ts"
   ],
   "_doc": "sideEffects defaults to false (tree-shake everything), but the listed files contain top-level registerIfttSource()/registerIfttAction() calls that MUST run when imported even if no named export is used — useIFTTT side-effect-imports them so carts get the full DSL surface (proc:*, fs:*, voice:*, webhook:*) without manually pulling each owning hook. esbuild keeps these specific files; everything else stays tree-shaken. This preserves the metafile-based ingredient gate in scripts/ship: only hook modules whose exports the cart actually USES end up as inputs, EXCEPT for the registration entry points which are intentionally always-included. Don't flip back to literal false (drops registrations) or true (disables tree-shaking globally) — add new IFTTT-registering files to this list instead."
