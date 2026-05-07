@@ -13,10 +13,10 @@
 // the TextEditor stretch via width:100%/minHeight:100% breaks
 // selection / cursor rendering.
 //
-// Read-only is informational only (header pill text). The framework
-// primitive doesn't have a readOnly prop; gating writes is the
-// caller's responsibility (omit `onChange` to drop edits on the
-// floor — they'll appear visually but won't propagate).
+// Always editable — caller supplies onChange. A code editor that's
+// read-only is a viewer; this is an editor. Edits flow back to the
+// caller; bidirectional sync to the canvas is the caller's job (parse
+// the new text into FlowEditor nodes/edges).
 
 import { useMemo } from 'react';
 import { Box, Col, Row, ScrollView, Text, TextEditor } from '@reactjit/runtime/primitives';
@@ -24,8 +24,7 @@ import { tokenizeToColorRows } from './tokenize-ts';
 
 export interface CodeEditorProps {
   value: string;
-  onChange?: (next: string) => void;
-  readOnly?: boolean;
+  onChange: (next: string) => void;
   title?: string;
   filename?: string;
   fontSize?: number;
@@ -36,7 +35,6 @@ const DEFAULT_FONT_SIZE = 13;
 export function CodeEditor({
   value,
   onChange,
-  readOnly = false,
   title,
   filename,
   fontSize = DEFAULT_FONT_SIZE,
@@ -77,7 +75,7 @@ export function CodeEditor({
           {filename ? <Text size={10} color="theme:inkDim">{filename}</Text> : null}
           <Box style={{ flexGrow: 1 }} />
           <Text size={10} color="theme:inkDim">
-            {readOnly ? 'read-only' : 'editable'} · {lineCount} line{lineCount === 1 ? '' : 's'}
+            {lineCount} line{lineCount === 1 ? '' : 's'}
           </Text>
         </Row>
       )}

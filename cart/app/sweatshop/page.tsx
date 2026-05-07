@@ -142,6 +142,13 @@ export default function SweatshopPage() {
   const codeMirror = useMemo(() => toCode(nodes, edges), [nodes, edges]);
   const proseMirror = useMemo(() => toProse(nodes, edges), [nodes, edges]);
 
+  // Local mirror of the code pane's editable text. Initialized from
+  // the projection; the caller can edit freely. Re-syncs to the
+  // projection whenever the canvas changes (canvas is the source of
+  // truth until the parser-back-to-graph step lands).
+  const [codeDraft, setCodeDraft] = useState<string>(codeMirror);
+  useEffect(() => { setCodeDraft(codeMirror); }, [codeMirror]);
+
   // ── Boot the supervisor engines for the lifetime of the cartridge.
   // Each install is independent + idempotent; wrap in try/catch so a
   // missing dependency in one (e.g. `bindRules` if the DB has no rule
@@ -309,8 +316,8 @@ export default function SweatshopPage() {
                   <CodeEditor
                     title="Canvas as code"
                     filename="canvas.tsx"
-                    value={codeMirror}
-                    readOnly={true}
+                    value={codeDraft}
+                    onChange={setCodeDraft}
                   />
                 </Box>
               )}
