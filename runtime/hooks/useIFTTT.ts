@@ -83,8 +83,10 @@ import {
 // register*() calls fire on import, populating the registry before any
 // useIFTTT() subscription runs. Carts get full source coverage without
 // having to import each owning hook explicitly.
-import './process';        // proc:* triggers + actions, per-pid memory
-import './useFileWatch';   // fs:* triggers
+import './process';          // proc:* triggers + actions, per-pid memory
+import './useFileWatch';     // fs:* triggers
+import './system_selection'; // select:* + clipboard:copy triggers
+import './ifttt-match';      // match:<channel>::<pattern> generic text-pattern source
 
 // ── Bus + state store ─────────────────────────────────────────────────────
 
@@ -210,6 +212,24 @@ if (!G.__ifttt_handlers_installed) {
   };
   G.__ifttt_onSystemResize = (w: number, h: number) => {
     emit('system:resize', { w, h });
+  };
+  G.__ifttt_onSystemSelection = (
+    textLen: number,
+    downX: number,
+    downY: number,
+    upX: number,
+    upY: number,
+    screenW: number,
+    screenH: number,
+  ) => {
+    let text = '';
+    try { text = String((G.__sys_selection_get?.() ?? '')); } catch { /* ignore */ }
+    emit('system:selection', {
+      text, textLen, downX, downY, upX, upY, screenW, screenH, at: Date.now(),
+    });
+  };
+  G.__ifttt_onSystemSelectionCleared = () => {
+    emit('system:selection:cleared', { at: Date.now() });
   };
 }
 

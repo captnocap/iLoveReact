@@ -265,6 +265,141 @@ type FileWatchEvent = {
 
 The DSL always attaches recursive watchers. `framework/fswatch.zig` ticks every frame; JS drains queued events through `__fswatchDrain()` on a singleton 100ms timer.
 
+## Generic Pattern Source (`match:`)
+
+`useIFTTT.ts` imports `runtime/hooks/ifttt-match.ts` for side-effect registration. This source watches an arbitrary bus channel for text patterns — substring or regex — and fires when a payload contains a hit.
+
+Spec:
+
+```
+match:<channel>::<pattern>
+```
+
+`<channel>` may itself contain colons (`vm:abc:event:append`); the parser splits on the FIRST `::` to keep arbitrary channel namespaces intact. `<pattern>` is either:
+
+- A regex of the form `/source/flags`
+- Otherwise, a literal case-sensitive substring
+
+Payload search:
+
+- String payloads search verbatim.
+- Object payloads are `JSON.stringify`'d and the result is searched. A needle `rm -rf` fires whether the line was emitted as `{ line: 'rm -rf /' }`, `{ payload: { text: 'rm -rf /' } }`, or any other nested shape. Tradeoff: a needle that collides with a JSON key can produce false positives — usually fine for keyword detection; use regex bounds when it matters.
+
+Fire payload:
+
+```ts
+{
+  channel: string;     // the channel that emitted
+  payload: any;        // the original emit payload
+  text: string;        // the searchable string actually tested
+  match: string;       // the matched substring (group 0 for regex)
+  index: number;       // byte offset into `text`
+  groups?: string[];   // capture groups when using a regex with parens
+}
+```
+
+Examples:
+
+```ts
+useIFTTT('match:event:append::pkill -f',
+  'flag-pathology:pat_session_kill_pattern');
+
+useIFTTT('match:vm:abc:event:append::/git\\s+add\\s+(-A|\\.|\\*)/',
+  'halt-run:reason=indiscriminate-stage');
+
+useIFTTT('match:proc:stdout:1234::ERROR',
+  'notify-user:agent crashed');
+```
+
+Companion helper for binders that compose specs from data rows:
+
+```ts
+import { matchSpec } from '@reactjit/runtime/hooks/ifttt-match';
+matchSpec('vm:abc:event:append', '/rm\\s+-rf/i');
+// → 'match:vm:abc:event:append::/rm\\s+-rf/i'
+```
+
+This is the load-bearing primitive behind features like the **Pathology dictionary** (`cart/app/gallery/data/core/pathology.ts`): each `Pathology.detectionSignals[]` entry — `{ kind: 'pattern', spec: '<regex>', surface: 'stdout' | 'tool-call' | … }` — can be bound by emitting one `match:<surface-channel>::<spec>` per row. Adding a new banned phrase becomes a data write.
+
+## VM Boundary Source (`vm:`)
+
+`runtime/hooks/ifttt-vm.ts` registers the `vm:` prefix so cart-side rules can subscribe to events emitted from inside a Firecracker worker VM:
+
+```ts
+useIFTTT('vm:vmrun_001:event:tool-call.dispatched', 'flag-pathology:pat_X');
+useIFTTT('vm:vmrun_001:rule:smoke.fired', (e) => console.log(e));
+useIFTTT('vm:vmrun_001:verb:verb_build_dev.completed', 'queue-job:job_promote');
+```
+
+The principle: there is only one substrate. Reactjit runs on both sides of the VM boundary, and vsock is a transport that mirrors selected bus channels across it. Same hooks, same DSL inside the VM as on the host — events just travel further.
+
+Per-VM bridge lifecycle (typically driven by the auto-attach module described below):
+
+```ts
+import { attachVm, detachVm, listAttachedVms } from '@reactjit/runtime/hooks/ifttt-vm';
+attachVm('vmrun_001');   // open vsock, mirror under 'vm:vmrun_001:*'
+detachVm('vmrun_001');   // tear down
+```
+
+`attachVm` is idempotent. While attached, every guest emit on a mirrored channel becomes `vm:<vmid>:<channel>` on the host bus, and any host emit on `vm:<vmid>:<channel>` is forwarded back into the guest as `<channel>` (so a host rule can issue `supervisor:halt-run` and the in-VM cart reacts).
+
+Default mirrored channels (configurable via `mirrorChannels` / `mirrorPrefix` from `runtime/hooks/vsock.ts`):
+
+| Direction | Channels |
+|---|---|
+| guest → host | `event:append`, `rule:fired`, `verb:lifecycle`, `worker:lifecycle`, `run:lifecycle` |
+| host → guest | `supervisor:halt-run`, `supervisor:invoke-verb`, `supervisor:inject-message`, `supervisor:flag-pathology`, `supervisor:set-variable`, `supervisor:modify-assembly`, `supervisor:commit-state` |
+
+The transport binds via `__vsock_open` / `__vsock_send` / `__vsock_close` host functions (`runtime/hooks/vsock.ts`). When those bindings are absent (pre-firecracker dev), `openVsock()` returns a `NullTransport` that warns once and otherwise no-ops — cart code stays valid and inert; the moment the bindings ship, every wire activates without changes.
+
+## Auto-Attach Bridge
+
+`cart/app/db/vm-bridges.ts` watches the `session:lifecycle` channel and calls `attachVm(vmid)` / `detachVm(vmid)` automatically when a `worker-session` row transitions. No cart has to call attach/detach by hand.
+
+```text
+useCRUD writes worker-session row { id, status: 'running', vmid: 'vmrun_001' }
+  → cart/app/db/buses.ts notifyRowChange('worker-session', row)
+  → emitSessionLifecycle({ sessionId, status, vmid, ... })
+  → 'session:lifecycle' bus event
+  → cart/app/db/vm-bridges.ts subscriber → attachVm('vmrun_001')
+  → namespaceMirror over vsock
+  → host useIFTTT('vm:vmrun_001:event:tool-call.dispatched', …) fires
+```
+
+Reverses cleanly when status moves off `'running'`. Internal refcounts (per-vmid `Set<sessionId>`) make duplicate row writes idempotent and protect against tearing a bridge that another active session on the same VM still depends on.
+
+```ts
+import { installVmBridges, uninstallVmBridges, listVmBridgeRefs } from '@reactjit/cart/app/db';
+installVmBridges();    // subscribe; idempotent
+listVmBridgeRefs();    // [ { vmid, sessionIds: [...] }, ... ]
+uninstallVmBridges();  // for hot reload
+```
+
+The producer inside the VM is the **worker shell cart** (`framework/firecracker/vm-runtime/cart.tsx`): a reactjit cart that mounts at boot, reads `/worker/assignment.json`, spawns the agent CLI subprocess, pipes its stdout/stderr/exit onto the local bus as `event:append` rows, and reacts to host-issued supervisor channels. Every recipe wraps with `withWorkerRuntime(spec)` from `framework/firecracker/lib/with-worker-runtime.ts` to bake the runtime + worker shell into the rootfs.
+
+## Supervisor Lifecycle Channels
+
+`runtime/hooks/ifttt-supervisor.ts` exposes typed `emit*` helpers for the supervisor namespace and registers an action prefix. The DB writer (`cart/app/db/buses.ts`) calls these on each row insert / transition; tests can call them too. Wrapping `emit` keeps channel names canonical — no string typos in writers.
+
+| Channel | Helper | Triggered by |
+|---|---|---|
+| `event:append` | `emitEventAppend(row)` | `event` row insert. |
+| `rule:fired` | `emitRuleFired(row)` | `rule-firing` row insert. |
+| `verb:lifecycle` | `emitVerbLifecycle(row)` | `verb-invocation` row insert / transition. |
+| `worker:lifecycle` | `emitWorkerLifecycle(row)` | `worker` row update. |
+| `run:lifecycle` | `emitRunLifecycle(row)` | `composition-run` row update. |
+| `session:lifecycle` | `emitSessionLifecycle(row)` | `worker-session` row update. **Drives auto-attach.** |
+
+Subscribe with the raw bus fallback or, namespaced through a VM, with the `vm:` prefix:
+
+```ts
+useIFTTT('event:append', (e) => { /* every host-side event */ });
+useIFTTT('vm:vmrun_001:event:append', (e) => { /* guest events only */ });
+useIFTTT('match:event:append::/rm\\s+-rf/i', 'halt-run:reason=destructive');
+```
+
+Supervisor *action* channels — the DSL targets that the rule engine emits when a rule fires — are documented in `cart/app/db/MECHANICAL_WIRES.md`. Examples: `halt-run:<reason>`, `flag-pathology:<pathologyId>`, `invoke-verb:<verbId>`, `inject-message:<text>`, `queue-job:<jobId>`, `modify-assembly:<spec>`, `set-variable:<spec>`, `commit-state`.
+
 ## End-To-End Pipeline
 
 1. A cart calls `useIFTTT(trigger, action)`.
@@ -402,11 +537,19 @@ Representative cart usage:
 ## File Map
 
 - Hook surface and built-ins: `runtime/hooks/useIFTTT.ts`
-- Shared listener bus: `runtime/ffi.ts`
+- Shared listener bus: `runtime/ffi.ts` (`subscribe` / `subscribeAll` / `emit`)
 - Registry: `runtime/hooks/ifttt-registry.ts`
 - Compositional triggers and action substitution: `runtime/hooks/ifttt-compose.ts`
 - Process IFTTT registrations: `runtime/hooks/process.ts`
 - File-watch IFTTT registrations: `runtime/hooks/useFileWatch.ts`
+- Generic pattern source (`match:`): `runtime/hooks/ifttt-match.ts`
+- VM boundary source (`vm:`) + per-VM bridge lifecycle: `runtime/hooks/ifttt-vm.ts`
+- Vsock transport + channel-mirror helpers: `runtime/hooks/vsock.ts`
+- Supervisor lifecycle emit helpers: `runtime/hooks/ifttt-supervisor.ts`
+- Row-change → bus mapping: `cart/app/db/buses.ts`
+- Auto-attach bridge (worker-session → vsock): `cart/app/db/vm-bridges.ts`
+- Worker shell cart (in-VM event producer): `framework/firecracker/vm-runtime/cart.tsx`
+- Recipe helper that bakes the runtime into a worker rootfs: `framework/firecracker/lib/with-worker-runtime.ts`
 - Side-effect preservation: `runtime/package.json`
 - Runtime no-op bootstrap: `runtime/index.tsx`
 - V8 core host bindings: `framework/v8_bindings_core.zig`
