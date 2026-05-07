@@ -20,3 +20,9 @@ export {
   listOpenClaims,
   resolveClaim,
 } from './claim-engine';
+export {
+  installPathologyBinder,
+  uninstallPathologyBinder,
+  setActivePathologies,
+  listPathologyBindings,
+} from './pathology-binder';

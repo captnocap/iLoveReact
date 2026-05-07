@@ -16,6 +16,7 @@ import type { User } from '../gallery/data/core/user';
 import type { Settings } from '../gallery/data/core/settings';
 import type { Connection } from '../gallery/data/core/connection';
 import type { Goal } from '../gallery/data/core/goal';
+import type { Composition } from '../gallery/data/core/composition';
 import type { Workspace } from '../gallery/data/overstock/workspace';
 
 const NS = 'app';
@@ -62,4 +63,26 @@ export function useRecentWorkspaces(limit = 8) {
     order: 'desc',
     limit,
   });
+}
+
+// ── Composition (canvas state) ──────────────────────────────────────
+// One row per persisted canvas. For V0 the open scene is a single
+// canvas per user keyed by `composition_default_<userId>`. The read
+// side returns the current row (or undefined while loading); the
+// write side is the raw store so the page can debounced-write the
+// graph on every edit.
+
+export const DEFAULT_COMPOSITION_ID_PREFIX = 'composition_default_';
+
+export function defaultCompositionId(userId: string): string {
+  return `${DEFAULT_COMPOSITION_ID_PREFIX}${userId}`;
+}
+
+export function useDefaultComposition(userId: string | null | undefined) {
+  const store = useCRUD<Composition>('composition', passthrough, { namespace: NS });
+  return store.useQuery(userId ? defaultCompositionId(userId) : '__missing__');
+}
+
+export function useCompositionStore() {
+  return useCRUD<Composition>('composition', passthrough, { namespace: NS });
 }

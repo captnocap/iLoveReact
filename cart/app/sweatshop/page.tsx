@@ -24,13 +24,19 @@ import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types
 import { PaletteSidebar } from './canvas/PaletteSidebar';
 import type { PaletteItem } from './canvas/palette';
 import { compileGraph, applyBindings } from './canvas/compile';
-import { useUser, useLatestGoal } from './data';
+import {
+  useUser, useLatestGoal,
+  useDefaultComposition, useCompositionStore, defaultCompositionId,
+} from './data';
 import {
   installVmBridges, uninstallVmBridges,
   installClaimEngine, uninstallClaimEngine,
   installMechanicalWires, uninstallMechanicalWires,
+  installPathologyBinder, uninstallPathologyBinder, setActivePathologies,
   bindRules, unbindAllRules,
+  useCRUD,
 } from '../db';
+import type { Pathology } from '../gallery/data/core/pathology';
 import '@reactjit/runtime/hooks/ifttt-supervisor';
 
 // ── Seed scene ────────────────────────────────────────────────────
@@ -95,10 +101,16 @@ export default function SweatshopPage() {
   const goal = useLatestGoal();
   const userName = user.data?.displayName ?? '';
   const goalText = goal.data[0]?.statement ?? null;
+  const userId = user.data?.id ?? 'user_local';
+
+  const composition = useDefaultComposition(userId);
+  const compositionStore = useCompositionStore();
 
   const [nodes, setNodes] = useState<FlowNode[]>(() => seedNodesWithGoal(goalText));
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
   const [bindingCount, setBindingCount] = useState<number>(0);
+  const [persisted, setPersisted] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const hydratedRef = useRef(false);
 
   // ── Boot the supervisor engines for the lifetime of the cartridge.
   // Each install is independent + idempotent; wrap in try/catch so a
@@ -108,14 +120,76 @@ export default function SweatshopPage() {
     try { installVmBridges(); } catch (e: any) { console.warn('[sweatshop] installVmBridges:', e?.message ?? e); }
     try { installClaimEngine(); } catch (e: any) { console.warn('[sweatshop] installClaimEngine:', e?.message ?? e); }
     try { installMechanicalWires(); } catch (e: any) { console.warn('[sweatshop] installMechanicalWires:', e?.message ?? e); }
+    try { installPathologyBinder(); } catch (e: any) { console.warn('[sweatshop] installPathologyBinder:', e?.message ?? e); }
     bindRules().catch((e: any) => console.warn('[sweatshop] bindRules:', e?.message ?? e));
     return () => {
       try { unbindAllRules(); } catch { /* ignore */ }
+      try { uninstallPathologyBinder(); } catch { /* ignore */ }
       try { uninstallMechanicalWires(); } catch { /* ignore */ }
       try { uninstallClaimEngine(); } catch { /* ignore */ }
       try { uninstallVmBridges(); } catch { /* ignore */ }
     };
   }, []);
+
+  // ── Push active Pathology rows into the auto-binder whenever they
+  // change. The binder takes care of binding/rebinding per running
+  // session; we're just the data source.
+  const pathologyStore = useCRUD<Pathology>('pathology', { parse: (v: unknown) => v as any });
+  const activePathologies = pathologyStore.useListQuery({ where: { active: true } });
+  useEffect(() => {
+    if (activePathologies.loading) return;
+    setActivePathologies(activePathologies.data ?? []);
+  }, [activePathologies.loading, activePathologies.data]);
+
+  // ── Hydrate from the persisted composition row on first read. If
+  //    no row exists yet, write the seed scene as the first row so
+  //    later writes go through update() not create().
+  useEffect(() => {
+    if (hydratedRef.current) return;
+    if (composition.loading) return;
+    hydratedRef.current = true;
+    if (composition.data) {
+      setNodes((composition.data.nodes ?? SEED_NODES) as FlowNode[]);
+      setEdges((composition.data.edges ?? SEED_EDGES) as FlowEdge[]);
+      return;
+    }
+    // No row yet — seed it. Don't block; if create fails, the page
+    // continues to work in-memory and we retry on the next save.
+    const now = new Date().toISOString();
+    const seedNodes = seedNodesWithGoal(goalText);
+    compositionStore.create({
+      id: defaultCompositionId(userId),
+      name: 'Default canvas',
+      description: 'Sweatshop open scene.',
+      userId,
+      nodes: seedNodes as any,
+      edges: SEED_EDGES as any,
+      createdAt: now,
+      updatedAt: now,
+    }).catch((e: any) => console.warn('[sweatshop] composition seed:', e?.message ?? e));
+  }, [composition.loading, composition.data, userId, goalText, compositionStore]);
+
+  // ── Debounced save on graph edits. 400ms quiet window so a flurry
+  //    of node moves coalesces into one write.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      setPersisted('saving');
+      compositionStore.update(defaultCompositionId(userId), {
+        nodes: nodes as any,
+        edges: edges as any,
+        updatedAt: new Date().toISOString(),
+      })
+        .then(() => setPersisted('saved'))
+        .catch((e: any) => {
+          console.warn('[sweatshop] composition save:', e?.message ?? e);
+          setPersisted('error');
+        });
+    }, 400);
+    return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+  }, [nodes, edges, userId, compositionStore]);
 
   // ── Live re-bind on graph edits. Compile the current graph, attach
   // every trigger→action edge as a real IFTTT subscription, tear
@@ -165,6 +239,9 @@ export default function SweatshopPage() {
           ) : null}
           <Text size={10} color="theme:inkDim">
             {bindingCount > 0 ? `${bindingCount} live binding${bindingCount === 1 ? '' : 's'}` : 'no live bindings'}
+          </Text>
+          <Text size={10} color={persisted === 'error' ? 'theme:err' : 'theme:inkDim'}>
+            {persisted === 'saving' ? 'saving…' : persisted === 'saved' ? 'saved' : persisted === 'error' ? 'save failed' : ''}
           </Text>
         </Row>
 
