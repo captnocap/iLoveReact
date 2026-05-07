@@ -12,10 +12,10 @@
 // (kind='token' — e.g. the seed Goal node) are kept verbatim because
 // they're scenery, not rule wiring.
 //
-// Parse is best-effort: returns null when nothing useful is in the
-// source (zero useIFTTT calls AND zero orphan comments). Caller
-// keeps the previous canvas in that case so a half-typed edit doesn't
-// blow it away.
+// Parse is best-effort. Empty source → empty graph (minus token
+// nodes like Goal which are always carried as scenery). Caller
+// debounces so a typing-in-progress keystroke doesn't briefly nuke
+// the canvas mid-edit.
 
 import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types';
 
@@ -78,18 +78,16 @@ function makeNode(label: string, kind: 'trigger' | 'action', x: number, y: numbe
   };
 }
 
-/** Parse `code` and reconcile against `prevNodes` / `prevEdges`. Returns
- *  the new graph, or `null` if the source doesn't contain anything we
- *  can interpret (caller keeps the prior canvas). */
+/** Parse `code` and reconcile against `prevNodes` / `prevEdges`.
+ *  Always returns a graph: empty source produces an empty graph
+ *  (token-only). Caller's debounce smooths typing-in-progress. */
 export function parseCodeToGraph(
   code: string,
   prevNodes: FlowNode[],
   prevEdges: FlowEdge[],
-): { nodes: FlowNode[]; edges: FlowEdge[] } | null {
+): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const calls = extractCalls(code);
   const orphans = extractOrphans(code);
-
-  if (calls.length === 0 && orphans.length === 0) return null;
 
   // Look-up: existing nodes keyed by (kind, label) — we preserve id+x+y
   // when a parsed spec matches.

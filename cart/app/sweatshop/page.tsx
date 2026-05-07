@@ -155,7 +155,6 @@ export default function SweatshopPage() {
     if (codeDraft === codeMirror) return;
     const t = setTimeout(() => {
       const parsed = parseCodeToGraph(codeDraft, nodes, edges);
-      if (!parsed) return;
       setNodes(parsed.nodes);
       setEdges(parsed.edges);
     }, 300);
