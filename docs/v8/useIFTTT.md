@@ -120,6 +120,8 @@ System triggers are raw bus events produced by Zig/V8 handlers:
 | `system:claude` | normalized hook entry | `dispatchClaudeEvent`. |
 | `system:claude:<tool>` | normalized hook entry | Lowercased `entry.tool`. |
 | `system:claude:<phase>` | normalized hook entry | Lowercased `entry.phase`. |
+| `system:selection` | `{ text, textLen, downX, downY, upX, upY, screenW, screenH, at }` | OS-level text selection captured via `__ifttt_onSystemSelection`. |
+| `system:selection:cleared` | `{ at }` | Selection cleared. |
 
 Function triggers:
 
@@ -206,6 +208,25 @@ useIFTTT(
 String leaves are edge events. They latch true for one microtask and then auto-clear, which lets `all` and `any` combine event edges with sustained function conditions. Function leaves are polled every 50ms.
 
 Current sharp edge: `{ on, when }` calls `when()` without the trigger payload. Do not write `when: (event) => ...` unless `ifttt-compose.ts` is changed to pass the payload.
+
+## Selection And Clipboard Sources
+
+`useIFTTT.ts` imports `runtime/hooks/system_selection.ts` for side-effect registration. Five sources sit on top of the raw `system:selection` / `system:selection:cleared` / `system:clipboard` channels documented above:
+
+| Trigger | Payload | Notes |
+|---|---|---|
+| `select:cleared` | `{ at }` | Direct alias for `system:selection:cleared`. |
+| `select:any` | full selection event | Direct alias for `system:selection`. |
+| `select:nonempty` | full selection event | Filters out events where `text.length === 0`. |
+| `select:long:<min>` | full selection event | Filters out events where `text.length < min`. Useful for "user highlighted a paragraph or more." |
+| `clipboard:copy` | `{ text, at }` | Re-fired form of `system:clipboard` for parity with `select:*`; only fires for non-empty clipboard text. |
+
+Examples:
+
+```ts
+useIFTTT('select:long:200', (e) => showQuickActions(e.text));
+useIFTTT('clipboard:copy', (e) => recentClips.push(e.text));
+```
 
 ## Process Sources And Actions
 
@@ -692,7 +713,63 @@ useIFTTT('vm:vmrun_001:event:append', (e) => { /* guest events only */ });
 useIFTTT('match:event:append::/rm\\s+-rf/i', 'halt-run:reason=destructive');
 ```
 
-Supervisor *action* channels — the DSL targets that the rule engine emits when a rule fires — are documented in `cart/app/db/MECHANICAL_WIRES.md`. Examples: `halt-run:<reason>`, `flag-pathology:<pathologyId>`, `invoke-verb:<verbId>`, `inject-message:<text>`, `queue-job:<jobId>`, `modify-assembly:<spec>`, `set-variable:<spec>`, `commit-state`.
+### Supervisor source specs (kind-filtered)
+
+`runtime/hooks/ifttt-supervisor.ts` registers five **kind-filtered prefixes** on top of the raw lifecycle channels above. Each one watches the underlying channel and only fires when a row's identifying field matches the spec, with `.*` for suffix-wildcards:
+
+| Spec form | Underlying channel | Matches when | Example |
+|---|---|---|---|
+| `event:<kind>` | `event:append` | `row.kind === '<kind>'` | `event:tool-call.dispatched` |
+| `event:<prefix>.*` | `event:append` | `row.kind` starts with `<prefix>.` | `event:tool-call.*` |
+| `rule:<ruleId>.fired` | `rule:fired` | `row.ruleId === '<ruleId>'` | `rule:smoke.fired` |
+| `verb:<verbId>.<status>` | `verb:lifecycle` | `verbId` and `status` both match. Status: `started` / `succeeded` / `failed` / `timed-out` / `killed` | `verb:verb_build_dev.completed` |
+| `worker:<workerId>.<lifecycle>` | `worker:lifecycle` | `workerId` and `lifecycle` both match. Lifecycle: `spawning` / `active` / `idle` / `streaming` / `suspended` / `terminating` / `terminated` / `crashed` | `worker:w1.streaming` |
+| `run:<runId>.<status>` | `run:lifecycle` | `runId` and `status` both match. Status from `CompositionRunStatus` | `run:cr_001.stage2-executing` |
+
+Suffix-wildcard semantics: `task.*` matches `task.X` for any `X` (one segment). Comma-list isn't supported here; express OR by binding the same action to multiple specs.
+
+```ts
+// Any tool-call event from any worker
+useIFTTT('event:tool-call.*', (e) => observability.tool(e));
+
+// A specific verb completion
+useIFTTT('verb:verb_build_dev.completed', 'queue-job:job_promote');
+
+// One worker entering streaming state
+useIFTTT('worker:w1.streaming', 'log:w1 is live');
+```
+
+### Supervisor actions
+
+`ifttt-supervisor.ts` also registers thirteen action prefixes. Each emits a normalized `supervisor:<kind>` bus event (carts subscribe to persist as rows; tests subscribe to assert without a DB):
+
+| Action | Emits on | Behavior |
+|---|---|---|
+| `halt-run` | `supervisor:halt-run` | `{ reason, triggerPayload }`. Halts the active CompositionRun. |
+| `halt-run:<reason>` | same | Reason is the rest of the spec; trigger payload still attached. |
+| `flag-pathology:<pathologyId>` | `supervisor:flag-pathology` | Inserts a pending `pathology-detection` row through the writer side. |
+| `invoke-verb:<verbId>` | `supervisor:invoke-verb` | Dispatches a verb. Trigger payload attached as args. |
+| `fire-rule:<ruleId>` | `supervisor:fire-rule` + `rule:fired` | Synthesizes a rule firing — used to compose rules from rules. |
+| `kick-to-supervisor` | `supervisor:kick-to-supervisor` | Routes the agent's next step through the supervisor for review. |
+| `notify-user:<text>` | `supervisor:notify-user` | Surfaces a notification in the cockpit. |
+| `inject-message:<text>` | `supervisor:inject-message` | Writes back into the agent's stdin via the worker shell cart. **The verify-loop's prompt-back action.** |
+| `spawn-worker:<role>` | `supervisor:spawn-worker` | Adds a worker to the active crew. |
+| `modify-assembly:<spec>` | `supervisor:modify-assembly` | Mutates the active prompt assembly mid-run. |
+| `set-variable:<spec>` | `supervisor:set-variable` | Sets a run-scoped variable. |
+| `commit-state` | `supervisor:commit-state` | Snapshots the current state to the run's history. |
+| `mark-status:<spec>` | `supervisor:mark-status` | Updates a status field on the active run. |
+| `queue-job:<jobId>` | `supervisor:queue-job` | Enqueues a job. |
+
+These are first-class targets for any `useIFTTT` binding — for example a Pathology row's consequence becomes:
+
+```ts
+useIFTTT(
+  'match:vm:abc:event:append::/pkill\\s+-f/i',
+  'flag-pathology:pat_session_kill_pattern',
+);
+```
+
+The receiver side — what actually persists / dispatches when these `supervisor:*` events land — is documented in `cart/app/db/MECHANICAL_WIRES.md`.
 
 ## End-To-End Pipeline
 
