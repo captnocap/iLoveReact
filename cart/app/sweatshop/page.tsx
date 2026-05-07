@@ -18,12 +18,19 @@
 
 import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FlowEditor } from '../gallery/components/flow-editor/FlowEditor';
 import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types';
 import { PaletteSidebar } from './canvas/PaletteSidebar';
 import type { PaletteItem } from './canvas/palette';
+import { compileGraph, applyBindings } from './canvas/compile';
 import { useUser, useLatestGoal } from './data';
+import {
+  installVmBridges, uninstallVmBridges,
+  installClaimEngine, uninstallClaimEngine,
+  installMechanicalWires, uninstallMechanicalWires,
+  bindRules, unbindAllRules,
+} from '../db';
 import '@reactjit/runtime/hooks/ifttt-supervisor';
 
 // ── Seed scene ────────────────────────────────────────────────────
@@ -91,6 +98,41 @@ export default function SweatshopPage() {
 
   const [nodes, setNodes] = useState<FlowNode[]>(() => seedNodesWithGoal(goalText));
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
+  const [bindingCount, setBindingCount] = useState<number>(0);
+
+  // ── Boot the supervisor engines for the lifetime of the cartridge.
+  // Each install is independent + idempotent; wrap in try/catch so a
+  // missing dependency in one (e.g. `bindRules` if the DB has no rule
+  // rows yet) doesn't kill the others.
+  useEffect(() => {
+    try { installVmBridges(); } catch (e: any) { console.warn('[sweatshop] installVmBridges:', e?.message ?? e); }
+    try { installClaimEngine(); } catch (e: any) { console.warn('[sweatshop] installClaimEngine:', e?.message ?? e); }
+    try { installMechanicalWires(); } catch (e: any) { console.warn('[sweatshop] installMechanicalWires:', e?.message ?? e); }
+    bindRules().catch((e: any) => console.warn('[sweatshop] bindRules:', e?.message ?? e));
+    return () => {
+      try { unbindAllRules(); } catch { /* ignore */ }
+      try { uninstallMechanicalWires(); } catch { /* ignore */ }
+      try { uninstallClaimEngine(); } catch { /* ignore */ }
+      try { uninstallVmBridges(); } catch { /* ignore */ }
+    };
+  }, []);
+
+  // ── Live re-bind on graph edits. Compile the current graph, attach
+  // every trigger→action edge as a real IFTTT subscription, tear
+  // down on next change or unmount.
+  const teardownRef = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (teardownRef.current) { teardownRef.current(); teardownRef.current = null; }
+    const { bindings, warnings } = compileGraph(nodes, edges);
+    if (warnings.length > 0) for (const w of warnings) console.warn('[sweatshop compile]', w);
+    const { dispose, attached, warnings: applyWarnings } = applyBindings(bindings);
+    if (applyWarnings.length > 0) for (const w of applyWarnings) console.warn('[sweatshop bind]', w);
+    teardownRef.current = dispose;
+    setBindingCount(attached);
+    return () => {
+      if (teardownRef.current) { teardownRef.current(); teardownRef.current = null; }
+    };
+  }, [nodes, edges]);
 
   const handleSpawn = (item: PaletteItem) => {
     // Drop near the canvas center with a small jitter so successive
@@ -121,6 +163,9 @@ export default function SweatshopPage() {
           {goalText ? (
             <Text size={10} color="theme:accent">goal: {goalText}</Text>
           ) : null}
+          <Text size={10} color="theme:inkDim">
+            {bindingCount > 0 ? `${bindingCount} live binding${bindingCount === 1 ? '' : 's'}` : 'no live bindings'}
+          </Text>
         </Row>
 
         {/* Canvas */}
