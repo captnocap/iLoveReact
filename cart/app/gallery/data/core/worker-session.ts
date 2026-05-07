@@ -27,6 +27,11 @@ export type WorkerSession = {
   startedAt: string;
   endedAt?: string;
   eventCount: number;
+  /** Firecracker VM id when this session runs in an isolated worker VM.
+   *  Absent for host-side / cheap sessions. When present and status
+   *  transitions to 'running', the vm-bridges module calls attachVm so
+   *  the host bus mirrors the guest's events under 'vm:<vmid>:*'. */
+  vmid?: string;
 };
 
 const workerSessionRowSchema = objectSchema({
@@ -37,6 +42,7 @@ const workerSessionRowSchema = objectSchema({
   startedAt: stringSchema,
   endedAt: stringSchema,
   eventCount: numberSchema,
+  vmid: stringSchema,
 }, ['id', 'provider', 'model', 'status', 'startedAt', 'eventCount']);
 
 export const workerSessionSchema: JsonObject = {

@@ -18,6 +18,7 @@ import {
   emitVerbLifecycle,
   emitWorkerLifecycle,
   emitRunLifecycle,
+  emitSessionLifecycle,
 } from '@reactjit/runtime/hooks/ifttt-supervisor';
 
 type Notifier = (row: any) => void;
@@ -33,6 +34,10 @@ const NOTIFIERS: Record<string, Notifier> = {
   'worker': (row) => emitWorkerLifecycle({ workerId: row.id, lifecycle: row.lifecycle, ...row }),
   // composition-run row updates → 'run:lifecycle'
   'composition-run': (row) => emitRunLifecycle({ runId: row.id, status: row.status, ...row }),
+  // worker-session row updates → 'session:lifecycle'. The vm-bridges
+  // module subscribes here to attach / detach the vsock mirror when a
+  // session running in a Firecracker worker comes up or shuts down.
+  'worker-session': (row) => emitSessionLifecycle({ sessionId: row.id, status: row.status, vmid: row.vmid, ...row }),
 };
 
 /** Called from useCRUD after a successful create / update. The row is

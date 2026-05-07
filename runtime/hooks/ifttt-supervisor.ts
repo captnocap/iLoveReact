@@ -293,3 +293,12 @@ export function emitRunLifecycle(row: {
 }): void {
   emit('run:lifecycle', row);
 }
+
+export function emitSessionLifecycle(row: {
+  sessionId: string;
+  status: string;
+  vmid?: string;
+  [k: string]: unknown;
+}): void {
+  emit('session:lifecycle', row);
+}

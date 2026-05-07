@@ -12,3 +12,4 @@ export { ensureBootstrapped, resetBucket, resetAll } from './bootstrap';
 export { getHandle, query, exec, changes } from './connections';
 export { bindRules, rebindRules, unbindAllRules, listBoundRules } from './rule-binder';
 export { installMechanicalWires, uninstallMechanicalWires, refreshMechanicalCaches } from './mechanical-wires';
+export { installVmBridges, uninstallVmBridges, listVmBridgeRefs, listAttachedVms } from './vm-bridges';
