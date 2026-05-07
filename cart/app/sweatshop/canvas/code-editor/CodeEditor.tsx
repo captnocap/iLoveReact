@@ -1,37 +1,34 @@
-// CodeEditor — a real editable code surface for the sweatshop canvas
-// mirror. Composes the framework's TextEditor primitive (cursor +
-// selection + scroll + clipboard, all native) with a per-line TS
-// tokenizer that paints syntax via the primitive's `colorRows` prop
-// and `paintText={true}` flag.
+// CodeEditor — a real editable code surface. Wraps the framework's
+// <TextEditor> primitive with paintText=true + colorRows so the Zig
+// side renders syntax-colored text from the per-row span arrays we
+// build with tokenize-ts.ts.
 //
-// V0 supports TypeScript / TSX. Read-only mode supported via the
-// `readOnly` prop; today the canvas mirror is read-only (the canvas
-// is the source of truth) but the editor surface is the same — when
+// Cursor / selection / scroll / copy-paste are handled natively by
+// the primitive — this component just feeds it tokens + chrome.
+//
+// Read-only mode supported via the `readOnly` prop. The canvas-as-code
+// mirror starts read-only (canvas is the source of truth); when
 // bidirectional editing lands, flip readOnly off and parse onChange
 // back into FlowNode/FlowEdge.
 
 import { useMemo } from 'react';
 import { Box, Col, Row, Text, TextEditor } from '@reactjit/runtime/primitives';
-import { tokenizeTS, colorForToken } from './tokenize-ts';
+import { tokenizeToColorRows } from './tokenize-ts';
 
 export interface CodeEditorProps {
   value: string;
   onChange?: (next: string) => void;
   readOnly?: boolean;
-  /** Optional title shown in the editor header. */
   title?: string;
-  /** Optional filename badge — appears next to the title. */
   filename?: string;
   fontSize?: number;
   lineHeight?: number;
-  /** Hide the gutter (line numbers). Default: false. */
   hideGutter?: boolean;
 }
 
 const DEFAULT_FONT_SIZE = 12;
 const DEFAULT_LINE_HEIGHT = 18;
 const GUTTER_WIDTH = 44;
-const GUTTER_PADDING = 8;
 
 export function CodeEditor({
   value,
@@ -43,18 +40,14 @@ export function CodeEditor({
   lineHeight = DEFAULT_LINE_HEIGHT,
   hideGutter = false,
 }: CodeEditorProps) {
-  const tokenLines = useMemo(() => tokenizeTS(value), [value]);
-  const colorRows = useMemo(
-    () => tokenLines.map((toks) => toks.map((t) => ({ text: t.text, color: colorForToken(t.kind) }))),
-    [tokenLines],
-  );
-  const lineCount = tokenLines.length;
+  const colorRows = useMemo(() => tokenizeToColorRows(value), [value]);
+  const lineCount = colorRows.length;
 
   return (
     <Col style={{
       flexGrow: 1,
       minHeight: 0,
-      backgroundColor: '#0c1018',
+      backgroundColor: 'theme:bg1',
       overflow: 'hidden',
     }}>
       {(title || filename) && (
@@ -77,13 +70,17 @@ export function CodeEditor({
           <Col style={{
             width: GUTTER_WIDTH,
             paddingTop: 4, paddingBottom: 4,
-            paddingLeft: GUTTER_PADDING, paddingRight: GUTTER_PADDING,
-            backgroundColor: '#0a0d14',
-            borderRightWidth: 1, borderRightColor: '#1a202b',
+            paddingLeft: 8, paddingRight: 8,
+            backgroundColor: 'theme:bg2',
+            borderRightWidth: 1, borderRightColor: 'theme:rule',
           }}>
-            {tokenLines.map((_, i) => (
+            {colorRows.map((_, i) => (
               <Box key={i} style={{ height: lineHeight, alignItems: 'flex-end' }}>
-                <Text size={fontSize - 1} color="#3e4453" style={{ fontFamily: 'theme:fontMono' as any }}>
+                <Text
+                  size={fontSize - 1}
+                  color="theme:inkDimmer"
+                  style={{ fontFamily: 'theme:fontMono' as any }}
+                >
                   {String(i + 1)}
                 </Text>
               </Box>
@@ -97,7 +94,7 @@ export function CodeEditor({
             paintText={true}
             colorRows={colorRows}
             fontSize={fontSize}
-            color="#cdd6f4"
+            color="theme:ink"
             readOnly={readOnly}
             multiline={true}
             style={{

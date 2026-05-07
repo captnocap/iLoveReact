@@ -1,15 +1,16 @@
-// Tokenizer for TS / TSX. Hand-rolled: no parser library, no full AST,
-// just enough to colorize keywords / strings / comments / types /
-// numbers / operators per line. Ported from the deadcode sweatshop
-// CodeEditor (commit history → cart/deadcode/sweatshop/components/
-// code-editor/languages/ts.ts).
+// TS/TSX line tokenizer — produces the `Array<Array<{text, color}>>`
+// shape that v8_app.zig:944 `parseColorTextRows` consumes for
+// <TextEditor paintText colorRows={…}>. Each outer entry is one row
+// of the editor; each inner entry is one colored span on that row.
 //
-// Each line tokenizes independently — multi-line constructs (e.g.
-// /* ... */ comments spanning lines) won't carry state across newlines
-// in this simple form. Acceptable for the canvas-as-code mirror where
-// the generated source is single-block useIFTTT calls.
-
-export type Token = { text: string; kind: TokenKind };
+// Colors are theme: tokens matching the existing SyntaxX classifier
+// family in cart/app/gallery/components.cls.ts. Same cascade as the
+// rest of the cart — flips with the active gallery theme.
+//
+// Hand-rolled per-line tokenizer (no parser library). Multi-line
+// constructs (block comments spanning newlines) won't carry state
+// across rows in this simple form — fine for the canvas-as-code
+// mirror where the generated source is small useIFTTT-call blocks.
 
 export type TokenKind =
   | 'text'
@@ -20,6 +21,22 @@ export type TokenKind =
   | 'number'
   | 'comment'
   | 'operator';
+
+export interface ColorSpan {
+  text: string;
+  color: string;
+}
+
+const TOKEN_COLOR: Record<TokenKind, string> = {
+  text:     'theme:ink',
+  keyword:  'theme:accent',
+  type:     'theme:lilac',
+  constant: 'theme:warn',
+  string:   'theme:ok',
+  number:   'theme:warn',
+  comment:  'theme:inkDimmer',
+  operator: 'theme:flag',
+};
 
 const KEYWORDS = new Set([
   'import', 'from', 'export', 'default', 'as', 'const', 'let', 'var', 'function', 'return',
@@ -40,8 +57,12 @@ const isWordStart = (ch: string): boolean => /[a-zA-Z_$]/.test(ch);
 const isWordChar  = (ch: string): boolean => /[a-zA-Z0-9_$]/.test(ch);
 const isDigit     = (ch: string): boolean => /[0-9]/.test(ch);
 
-export function tokenizeTSLine(line: string): Token[] {
-  const tokens: Token[] = [];
+function tokenizeLine(line: string): ColorSpan[] {
+  const out: ColorSpan[] = [];
+  if (line.length === 0) {
+    out.push({ text: ' ', color: TOKEN_COLOR.text });
+    return out;
+  }
   let i = 0;
   while (i < line.length) {
     const ch = line.charAt(i);
@@ -50,12 +71,12 @@ export function tokenizeTSLine(line: string): Token[] {
     if (ch === ' ' || ch === '\t') {
       const start = i;
       while (i < line.length && (line.charAt(i) === ' ' || line.charAt(i) === '\t')) i++;
-      tokens.push({ text: line.slice(start, i), kind: 'text' });
+      out.push({ text: line.slice(start, i), color: TOKEN_COLOR.text });
       continue;
     }
 
     if (ch === '/' && next === '/') {
-      tokens.push({ text: line.slice(i), kind: 'comment' });
+      out.push({ text: line.slice(i), color: TOKEN_COLOR.comment });
       break;
     }
 
@@ -67,7 +88,7 @@ export function tokenizeTSLine(line: string): Token[] {
         if (line.charAt(i) === quote && line.charAt(i - 1) !== '\\') { i++; break; }
         i++;
       }
-      tokens.push({ text: line.slice(start, i), kind: 'string' });
+      out.push({ text: line.slice(start, i), color: TOKEN_COLOR.string });
       continue;
     }
 
@@ -75,7 +96,7 @@ export function tokenizeTSLine(line: string): Token[] {
       const start = i;
       i++;
       while (i < line.length && (isDigit(line.charAt(i)) || line.charAt(i) === '.')) i++;
-      tokens.push({ text: line.slice(start, i), kind: 'number' });
+      out.push({ text: line.slice(start, i), color: TOKEN_COLOR.number });
       continue;
     }
 
@@ -84,51 +105,31 @@ export function tokenizeTSLine(line: string): Token[] {
       i++;
       while (i < line.length && isWordChar(line.charAt(i))) i++;
       const word = line.slice(start, i);
-      let kind: TokenKind = 'text';
-      if (KEYWORDS.has(word)) kind = 'keyword';
-      else if (TYPES.has(word)) kind = 'type';
-      else if (/^[A-Z][a-zA-Z0-9_$]*$/.test(word)) kind = 'type';
-      else if (/^[A-Z][A-Z0-9_]*$/.test(word)) kind = 'constant';
-      tokens.push({ text: word, kind });
+      let color = TOKEN_COLOR.text;
+      if (KEYWORDS.has(word)) color = TOKEN_COLOR.keyword;
+      else if (TYPES.has(word)) color = TOKEN_COLOR.type;
+      else if (/^[A-Z][a-zA-Z0-9_$]*$/.test(word)) color = TOKEN_COLOR.type;
+      else if (/^[A-Z][A-Z0-9_]*$/.test(word)) color = TOKEN_COLOR.constant;
+      out.push({ text: word, color });
       continue;
     }
 
     if ('{}[]()=:;+-*%!&|<>?/.,~'.includes(ch)) {
-      tokens.push({ text: ch, kind: 'operator' });
+      out.push({ text: ch, color: TOKEN_COLOR.operator });
       i++;
       continue;
     }
 
-    tokens.push({ text: ch, kind: 'text' });
+    out.push({ text: ch, color: TOKEN_COLOR.text });
     i++;
   }
-  if (tokens.length === 0) tokens.push({ text: ' ', kind: 'text' });
-  return tokens;
+  if (out.length === 0) out.push({ text: ' ', color: TOKEN_COLOR.text });
+  return out;
 }
 
-export function tokenizeTS(text: string): Token[][] {
-  if (!text) return [[{ text: ' ', kind: 'text' }]];
-  return text.split('\n').map(tokenizeTSLine);
-}
-
-// ── Token kind → color ───────────────────────────────────────────
-//
-// Hex literals here pending a `theme:codeKeyword` / `theme:codeString`
-// / etc. token family. When that lands, swap to `theme:` strings and
-// the tokens cascade with the active gallery theme. (See app.md
-// "no-color-drift" memory for the convention.)
-
-const TOKEN_COLOR: Record<TokenKind, string> = {
-  text:     '#cdd6f4',
-  keyword:  '#cba6f7',
-  type:     '#94e2d5',
-  constant: '#fab387',
-  string:   '#a6e3a1',
-  number:   '#fab387',
-  comment:  '#6c7086',
-  operator: '#89b4fa',
-};
-
-export function colorForToken(kind: TokenKind): string {
-  return TOKEN_COLOR[kind] ?? TOKEN_COLOR.text;
+/** Tokenize TS/TSX source into the colorRows shape consumed by
+ *  <TextEditor paintText colorRows={…}>. */
+export function tokenizeToColorRows(source: string): ColorSpan[][] {
+  if (!source) return [[{ text: ' ', color: TOKEN_COLOR.text }]];
+  return source.split('\n').map(tokenizeLine);
 }

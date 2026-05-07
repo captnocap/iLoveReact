@@ -18,7 +18,7 @@
 
 import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FlowEditor } from '../gallery/components/flow-editor/FlowEditor';
 import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types';
 import { PaletteSidebar } from './canvas/PaletteSidebar';
@@ -26,7 +26,7 @@ import type { PaletteItem } from './canvas/palette';
 import { compileGraph, applyBindings } from './canvas/compile';
 import { toCode, toProse } from './canvas/describe';
 import { CodeEditor } from './canvas/code-editor/CodeEditor';
-import { SplitPane } from './canvas/SplitPane';
+import { SplitDivider } from './canvas/editor-split/SplitDivider';
 import {
   useUser, useLatestGoal,
   useDefaultComposition, useCompositionStore, defaultCompositionId,
@@ -116,6 +116,26 @@ export default function SweatshopPage() {
   const [showCanvas, setShowCanvas] = useState(true);
   const [showCode, setShowCode] = useState(true);
   const [showProse, setShowProse] = useState(true);
+  // Pane flex weights — dragging a SplitDivider rebalances. The "rest"
+  // bucket is canvas-vs-(code+prose); inside the right group, code-vs-prose.
+  const [weights, setWeights] = useState({ canvas: 2.0, code: 1.0, prose: 0.8 });
+  const bumpWeight = useCallback((aKey: 'canvas' | 'code', bKey: 'rest' | 'prose', delta: number) => {
+    setWeights((w) => {
+      if (bKey === 'rest') {
+        // canvas ↔ (code + prose). Push code+prose proportionally.
+        const sumRest = w.code + w.prose;
+        const newCanvas = Math.max(0.2, Math.min(8, w.canvas + delta));
+        const newRest = Math.max(0.2, w.canvas + sumRest - newCanvas);
+        const ratio = sumRest > 0 ? newRest / sumRest : 0.5;
+        return { canvas: newCanvas, code: w.code * ratio, prose: w.prose * ratio };
+      }
+      // code ↔ prose direct.
+      const sum = w.code + w.prose;
+      const newCode = Math.max(0.2, Math.min(8, w.code + delta));
+      const newProse = Math.max(0.2, sum - newCode);
+      return { ...w, code: newCode, prose: newProse };
+    });
+  }, []);
   const hydratedRef = useRef(false);
 
   // Derived projections — recompute only when graph changes.
@@ -262,19 +282,13 @@ export default function SweatshopPage() {
             onPress={() => { if (!(showProse && !showCanvas && !showCode)) setShowProse(v => !v); }} />
         </Row>
 
-        {/* Two-tier split: canvas (left) ↔ right rail (code over prose).
-            Each pane is hide-able from the top-strip toggle chips and
-            the divider between any two visible panes is drag-resizable.
-            At least one pane is always visible. */}
-        <Box style={{ flexGrow: 1, minHeight: 0 }}>
-          <SplitPane
-            direction="horizontal"
-            initialFirstSize={760}
-            minFirstSize={320}
-            minSecondSize={360}
-            showFirst={showCanvas}
-            showSecond={showCode || showProse}
-            first={
+        {/* Three horizontal panes: canvas | code | english. Each pane
+            is hide-able from the top-strip toggle chips. Dividers
+            between visible neighbors are drag-resizable (rAF-driven,
+            weight-based). At least one pane is always visible. */}
+        <Row style={{ flexGrow: 1, minHeight: 0 }}>
+          {showCanvas && (
+            <Box style={{ flexGrow: weights.canvas, flexBasis: 0, minWidth: 240 }}>
               <FlowEditor
                 nodes={nodes}
                 edges={edges}
@@ -282,46 +296,50 @@ export default function SweatshopPage() {
                 onEdgesChange={setEdges}
                 allowDelete={true}
               />
-            }
-            second={
-              <SplitPane
-                direction="vertical"
-                initialFirstSize={420}
-                minFirstSize={160}
-                minSecondSize={120}
-                showFirst={showCode}
-                showSecond={showProse}
-                first={
+            </Box>
+          )}
+          {showCanvas && (showCode || showProse) && (
+            <SplitDivider direction="horizontal"
+              onResize={(d) => bumpWeight('canvas', 'rest', d * 0.01)} />
+          )}
+          {(showCode || showProse) && (
+            <Row style={{ flexGrow: weights.canvas > 0 && showCanvas ? (weights.code + weights.prose) : 1, flexBasis: 0, minWidth: 280 }}>
+              {showCode && (
+                <Box style={{ flexGrow: weights.code, flexBasis: 0, minWidth: 240 }}>
                   <CodeEditor
                     title="Canvas as code"
                     filename="canvas.tsx"
                     value={codeMirror}
                     readOnly={true}
                   />
-                }
-                second={
-                  <Col style={{ flexGrow: 1, minHeight: 0, backgroundColor: 'theme:bg1' }}>
-                    <Row style={{
-                      paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, gap: 8,
-                      borderBottomWidth: 1, borderBottomColor: 'theme:rule',
-                      backgroundColor: 'theme:bg2',
-                      alignItems: 'center',
-                    }}>
-                      <Text size={11} color="theme:ink" bold>What this does</Text>
-                      <Box style={{ flexGrow: 1 }} />
-                      <Text size={10} color="theme:inkDim">plain english</Text>
-                    </Row>
-                    <ScrollView style={{ flexGrow: 1, minHeight: 0, padding: 16 }}>
-                      <Text size={13} color="theme:ink" style={{ lineHeight: 20, whiteSpace: 'pre-wrap' as any }}>
-                        {proseMirror}
-                      </Text>
-                    </ScrollView>
-                  </Col>
-                }
-              />
-            }
-          />
-        </Box>
+                </Box>
+              )}
+              {showCode && showProse && (
+                <SplitDivider direction="horizontal"
+                  onResize={(d) => bumpWeight('code', 'prose', d * 0.01)} />
+              )}
+              {showProse && (
+                <Col style={{ flexGrow: weights.prose, flexBasis: 0, minWidth: 240, backgroundColor: 'theme:bg1' }}>
+                  <Row style={{
+                    paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, gap: 8,
+                    borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+                    backgroundColor: 'theme:bg2',
+                    alignItems: 'center',
+                  }}>
+                    <Text size={11} color="theme:ink" bold>What this does</Text>
+                    <Box style={{ flexGrow: 1 }} />
+                    <Text size={10} color="theme:inkDim">plain english</Text>
+                  </Row>
+                  <ScrollView style={{ flexGrow: 1, minHeight: 0, padding: 16 }}>
+                    <Text size={13} color="theme:ink" style={{ lineHeight: 20, whiteSpace: 'pre-wrap' as any }}>
+                      {proseMirror}
+                    </Text>
+                  </ScrollView>
+                </Col>
+              )}
+            </Row>
+          )}
+        </Row>
       </Col>
     </S.Page>
   );
