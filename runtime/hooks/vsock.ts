@@ -105,24 +105,148 @@ class HostFnTransport implements VsockTransport {
   }
 }
 
+// ── Local-pair transport (in-process simulator) ──────────────────
+//
+// When the Zig vsock binding is absent — typical for development
+// without a real Firecracker VM, and for any test that exercises the
+// host↔guest mirror in a single JS process — we pair two openVsock
+// calls in-process by their vmid. Sends route through queueMicrotask
+// to a peer's listeners. The interface is identical to HostFnTransport
+// so caller code (mirrorChannel / namespaceMirror / etc.) is unchanged.
+//
+// Useful for: smoke tests, end-to-end pathology rules, the rule
+// engine's unit tests, anyone running a single reactjit process that
+// also embeds a "fake VM" cart for development.
+//
+// When the AF_VSOCK Zig binding lands (`framework/v8_bindings_vsock.zig`),
+// HostFnTransport takes over and LocalPairTransport is bypassed —
+// see openVsock below.
+
+const _localWaiting = new Map<string, LocalPairTransport>();   // vmid → unpaired side
+const _localById = new Map<number, LocalPairTransport>();
+let _localNextId = 1;
+
+class LocalPairTransport implements VsockTransport {
+  readonly live = true;
+  readonly id: number;
+  readonly vmid: string;
+  readonly kind: VsockKind;
+  private peer: LocalPairTransport | null = null;
+  private listeners = new Set<(env: VsockEnvelope) => void>();
+  private closed = false;
+
+  constructor(opts: { id: number; vmid: string; kind: VsockKind }) {
+    this.id = opts.id;
+    this.vmid = opts.vmid;
+    this.kind = opts.kind;
+  }
+
+  /** Internal: pair two unpaired transports. Symmetric — called once
+   *  for the second-arriving side. */
+  pairWith(other: LocalPairTransport): void {
+    this.peer = other;
+    other.peer = this;
+  }
+
+  send(channel: string, payload?: any): boolean {
+    if (this.closed) return false;
+    const peer = this.peer;
+    if (!peer) return false;
+    queueMicrotask(() => peer._deliver({ channel, payload }));
+    return true;
+  }
+
+  /** Internal: deliver an envelope to all listeners. */
+  _deliver(env: VsockEnvelope): void {
+    if (this.closed) return;
+    for (const fn of Array.from(this.listeners)) {
+      try { fn(env); }
+      catch (e: any) { console.error('[vsock localpair] envelope listener error:', e?.message || e); }
+    }
+  }
+
+  onEnvelope(fn: (env: VsockEnvelope) => void): () => void {
+    this.listeners.add(fn);
+    return () => { this.listeners.delete(fn); };
+  }
+
+  close(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.listeners.clear();
+    if (this.peer) {
+      const peer = this.peer;
+      this.peer = null;
+      peer.peer = null;
+    }
+    _localById.delete(this.id);
+    if (_localWaiting.get(this.vmid) === this) _localWaiting.delete(this.vmid);
+  }
+}
+
+function openLocalPair(opts: OpenVsockOpts): VsockTransport {
+  const vmid = opts.vmid;
+  if (!vmid) {
+    console.warn(`[vsock] localpair requires vmid for kind='${opts.kind}'; using NullTransport`);
+    return new NullTransport();
+  }
+  const id = _localNextId++;
+  const t = new LocalPairTransport({ id, vmid, kind: opts.kind });
+  _localById.set(id, t);
+
+  const waiting = _localWaiting.get(vmid);
+  if (waiting && waiting.kind !== opts.kind && waiting !== t) {
+    t.pairWith(waiting);
+    _localWaiting.delete(vmid);
+  } else {
+    _localWaiting.set(vmid, t);
+  }
+  return t;
+}
+
 // ── Public open ──────────────────────────────────────────────────
 
 export interface OpenVsockOpts {
   /** 'guest' connects from inside a VM to the host. 'host' connects
    *  from the host to a specific running VM. */
   kind: VsockKind;
-  /** Required when kind='host'. Identifies which running VM. */
+  /** Required for the LocalPair simulator. For the real Zig binding
+   *  this is required on kind='host' (identifies which running VM)
+   *  and optional on kind='guest' (the guest's identity is implicit
+   *  via AF_VSOCK CID). When you want host↔guest pairing in a single
+   *  process, pass the same vmid on both sides. */
   vmid?: string;
+  /** Force a specific transport. Defaults to 'auto':
+   *    'host'      — use Zig binding if registered, else LocalPair.
+   *    'localpair' — always use the in-process pair simulator.
+   *    'null'      — always return the no-op stub. */
+  transport?: 'auto' | 'host' | 'localpair' | 'null';
 }
 
-/** Open a vsock transport. Returns a NullTransport when the framework
- *  host functions aren't registered — caller code stays valid; it just
- *  doesn't ferry events. */
+/** Open a vsock transport. Selection order (default opts.transport='auto'):
+ *
+ *    Zig binding present → HostFnTransport (real AF_VSOCK)
+ *    Otherwise           → LocalPairTransport (in-process pair, requires vmid)
+ *    No vmid             → NullTransport (warns once, then no-ops)
+ *
+ *  All three implement VsockTransport identically, so caller code
+ *  doesn't branch. */
 export function openVsock(opts: OpenVsockOpts): VsockTransport {
-  if (!hasHost('__vsock_open')) return new NullTransport();
-  const id = callHost<number>('__vsock_open', 0, JSON.stringify(opts));
-  if (!id) return new NullTransport();
-  return new HostFnTransport(id);
+  const mode = opts.transport ?? 'auto';
+  if (mode === 'null') return new NullTransport();
+  if (mode === 'host') {
+    if (!hasHost('__vsock_open')) return new NullTransport();
+    const id = callHost<number>('__vsock_open', 0, JSON.stringify(opts));
+    if (!id) return new NullTransport();
+    return new HostFnTransport(id);
+  }
+  if (mode === 'localpair') return openLocalPair(opts);
+  // auto
+  if (hasHost('__vsock_open')) {
+    const id = callHost<number>('__vsock_open', 0, JSON.stringify(opts));
+    if (id) return new HostFnTransport(id);
+  }
+  return openLocalPair(opts);
 }
 
 // ── Channel mirroring ────────────────────────────────────────────

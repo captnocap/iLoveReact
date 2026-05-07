@@ -89,6 +89,8 @@ import './system_selection'; // select:* + clipboard:copy triggers
 import './ifttt-match';      // match:<channel>::<pattern> generic text-pattern source
 import './ifttt-count';      // count:<channel>::<n>:<windowMs> windowed counter
 import './ifttt-firsthit';   // firsthit:<channel>::<pattern> single-shot pattern
+import './ifttt-repeat';     // repeat:<channel>::<lookback>:<minSim> claim-shape similarity
+import './turn-tracker';     // turn:start / turn:end / turn:tool-use canonical channels
 
 // ── Bus + state store ─────────────────────────────────────────────────────
 

@@ -364,6 +364,47 @@ useIFTTT('firsthit:vm:abc:event:append::work was destroyed',
 
 Source file: `runtime/hooks/ifttt-firsthit.ts`.
 
+### `repeat:<channel>::<lookback>:<minSim>`
+
+Fires when an emit's text closely matches an earlier emit on the same channel. Catches the "claim shape didn't change after acknowledgment" pattern (multi-turn perf-ack, apology-without-change).
+
+- `<channel>` — bus channel; may contain colons.
+- `<lookback>` — integer; how many recent emits to compare against.
+- `<minSim>` — float in `(0, 1]`. Jaccard similarity on normalized 4-character shingles. `~0.6` catches paraphrased repeats; `~0.85` catches rephrasings of the same sentence; `1.0` exact match.
+
+Fire payload:
+
+```ts
+{
+  channel: string;
+  current: { text: string; payload: any };
+  prior:   { text: string; payload: any };
+  similarity: number;        // 0..1
+  indexInLookback: number;   // 0 = oldest in window
+}
+```
+
+Examples:
+
+```ts
+// Multi-turn performative acknowledgment: a near-duplicate claim within the last 5 emits.
+useIFTTT('repeat:vm:abc:event:append::5:0.7',
+  'flag-pathology:pat_acknowledgment_without_recalibration');
+
+// Apology-without-change: any near-repeat in the last 3 turns.
+useIFTTT('repeat:vm:abc:event:append::3:0.65',
+  'kick-to-supervisor:apology_streak');
+```
+
+Companion helper:
+
+```ts
+import { similarity } from '@reactjit/runtime/hooks/ifttt-repeat';
+similarity('the fix is in', 'fixed it now');  // → 0.31
+```
+
+Source file: `runtime/hooks/ifttt-repeat.ts`. Implementation is model-free (Jaccard on 4-shingles, normalized to lowercase / collapsed whitespace / non-word stripped). When a semantic-similarity primitive lands, `repeat:semantic:<...>` will register as a sibling.
+
 ### `registerGate({ after, suspect, requires, key?, onFire })`
 
 Programmatic stateful gate — the "after-X-then-Y-unless-Z-in-between" shape. Three channels:
@@ -403,6 +444,47 @@ Why programmatic instead of a DSL spec: the three channels typically need filter
 
 Source file: `runtime/hooks/ifttt-gate.ts`.
 
+## Turn Boundary Channels
+
+`runtime/hooks/turn-tracker.ts` canonicalizes Claude Code phase events into per-turn boundaries:
+
+| Channel | Payload | Trigger |
+|---|---|---|
+| `turn:start` | `{ at, turnId, phase: 'session-start' \| 'user-prompt' \| 'unknown' }` | `system:claude:session-start` or `system:claude:user-prompt`. |
+| `turn:tool-use` | `{ at, turnId, name, count }` | every `system:claude:pre-tool` — fires per tool call with the running per-turn count. |
+| `turn:end` | `{ at, turnId, count, tools, durationMs }` | `system:claude:stop`. |
+| `turn:tool-count` | `{ count, name, turnId }` | IFTTT-source alias for `turn:tool-use` (designed as a leaf in composables). |
+
+Examples:
+
+```ts
+// End_turn-as-API: the agent stopped after exactly one tool call.
+useIFTTT(
+  { all: ['turn:end', () => (currentTurn()?.count ?? 0) <= 1] },
+  'flag-pathology:pat_premature_stop',
+);
+
+// Performative acknowledgment within a single turn: "you're right" + "that said"
+// + a near-duplicate of the last claim, all between turn:start and turn:end.
+useIFTTT(
+  {
+    seq: [
+      'match:event:append::/you\'re right/i',
+      'match:event:append::/that said|however|but/i',
+      'repeat:event:append::3:0.7',
+    ],
+    within: 60_000,
+  },
+  'kick-to-supervisor:performative_ack',
+);
+```
+
+If the Claude Code hook fanout hasn't been wired yet (no `system:claude:*` events on the bus), the tracker silently no-ops. When an agent emits a `system:claude:pre-tool` with no preceding `start`, the tracker synthesizes a `turn:start` with `phase: 'unknown'` so the count isn't lost.
+
+`currentTurn()` returns the in-progress turn state for caller-side conditionals (used in the `useIFTTT` `() => boolean` example above).
+
+Source file: `runtime/hooks/turn-tracker.ts`.
+
 ## VM Boundary Source (`vm:`)
 
 `runtime/hooks/ifttt-vm.ts` registers the `vm:` prefix so cart-side rules can subscribe to events emitted from inside a Firecracker worker VM:
@@ -432,7 +514,19 @@ Default mirrored channels (configurable via `mirrorChannels` / `mirrorPrefix` fr
 | guest → host | `event:append`, `rule:fired`, `verb:lifecycle`, `worker:lifecycle`, `run:lifecycle` |
 | host → guest | `supervisor:halt-run`, `supervisor:invoke-verb`, `supervisor:inject-message`, `supervisor:flag-pathology`, `supervisor:set-variable`, `supervisor:modify-assembly`, `supervisor:commit-state` |
 
-The transport binds via `__vsock_open` / `__vsock_send` / `__vsock_close` host functions (`runtime/hooks/vsock.ts`). When those bindings are absent (pre-firecracker dev), `openVsock()` returns a `NullTransport` that warns once and otherwise no-ops — cart code stays valid and inert; the moment the bindings ship, every wire activates without changes.
+### Three-tier transport selection
+
+`openVsock(opts)` picks among three implementations of the same `VsockTransport` interface so caller code never branches:
+
+| Tier | When | Transport | Behavior |
+|---|---|---|---|
+| 1 | `__vsock_open` registered | `HostFnTransport` (production) | Real AF_VSOCK over the Zig binding. |
+| 2 | No Zig binding + caller passed `vmid` | `LocalPairTransport` (dev / tests) | Two `openVsock` calls in the same process with matching `vmid` and opposite `kind` route to each other in-memory via `queueMicrotask`. Lights up the entire host↔guest mirror without a VM. |
+| 3 | No Zig binding + no `vmid` | `NullTransport` | Warns once, drops sends. Keeps cart imports safe in early-init paths. |
+
+Force a tier with `opts.transport: 'host' | 'localpair' | 'null'`; default is `'auto'` (1 → 2 → 3).
+
+The Zig binding contract lives at `framework/v8_bindings_vsock.zig`. **It is currently a stub — the file is not registered in `build.zig`** so vsock.ts falls through to LocalPair. Activate by filling the `TODO(af-vsock)` blocks and registering `registerVsock` next to `registerEventBus` in the V8 init path.
 
 ## Auto-Attach Bridge
 
@@ -746,6 +840,9 @@ Representative cart usage:
 - Windowed counter source (`count:`): `runtime/hooks/ifttt-count.ts`
 - Single-shot pattern source (`firsthit:`): `runtime/hooks/ifttt-firsthit.ts`
 - Programmatic stateful gate (`registerGate`): `runtime/hooks/ifttt-gate.ts`
+- Claim-shape similarity source (`repeat:`): `runtime/hooks/ifttt-repeat.ts`
+- Turn boundary tracker (`turn:start` / `turn:end` / `turn:tool-use`): `runtime/hooks/turn-tracker.ts`
+- Production vsock binding contract (stub, not yet registered): `framework/v8_bindings_vsock.zig`
 - VM boundary source (`vm:`) + per-VM bridge lifecycle: `runtime/hooks/ifttt-vm.ts`
 - Vsock transport + channel-mirror helpers: `runtime/hooks/vsock.ts`
 - Supervisor lifecycle emit helpers: `runtime/hooks/ifttt-supervisor.ts`
