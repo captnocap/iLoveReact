@@ -341,26 +341,30 @@ CHECKLIST:
 
 ---
 
-### Sweatshop activity — `sweatshop/page.tsx` — Stub
+### Sweatshop activity — `sweatshop/page.tsx` — WIP
 
 CHECKLIST:
-- Purpose: Placeholder activity that exercises the GOLDEN shell's B↔C transitions. Renders a header + a row of worker tiles; each tile click calls `setInputFocal(true)` (B → C); a "release" button calls `setInputFocal(false)` (C → B). No real worker chat yet — the page is here so the shell has something to morph into other than an empty `/activity/sweatshop` route.
-- isRoute: TRUE (mounted at `/activity/sweatshop` in `index.tsx`'s `ROUTES` table; declared `mode: 'side'` so the shell knows to morph to state B on entry)
+- Purpose: The "open scene" — a canvas substrate where every cart's logic composes. A FlowEditor surface plus a three-tier palette (capability / domain / rules). Capability nodes are pulled live from the IFTTT registry (`listIfttSources()` / `listIfttActions()` — every registered source/action prefix becomes a draggable node). Domain nodes come from the gallery shape catalog. Rule stamps are a curated starter library that will eventually read from the `rule` table. The seed scene shows a Goal node pulled from the persisted onboarding row plus a starter trigger → action chain.
+- isRoute: TRUE (mounted at `/activity/sweatshop` in `index.tsx`'s `ROUTES` table; declared `mode: 'side'`)
 - Route: `/activity/sweatshop`
-- hasDatashape: FALSE
-- Datashape: reads/writes `inputFocal` via `cart/app/shell.tsx`'s `useInputFocal()` hook
+- hasDatashape: FALSE (the canvas state is local to the FlowEditor; persistence to a `composition` row is queued)
+- Datashape: reads `Goal` via `useLatestGoal()`; reads `User` via `useUser()`. Writes nothing yet.
 - exposedDatashapes: —
-- Hooks: `useInputFocal`
-- Conditions: `focal` toggles the visibility of the "release input (back to docked)" button (only shown when focal=true)
-- Components: `Box`, `Pressable`, `Text`
-- Atoms: raw primitives only (no S.* classifiers — placeholder content)
-- isUsingTheme: TRUE (theme:ink, theme:inkDim, theme:bg2, theme:rule)
+- Hooks: `useState` (canvas nodes/edges), `useLatestGoal`, `useUser`. Imports `'@reactjit/runtime/hooks/ifttt-supervisor'` for side-effect registration of the `event:` / `rule:` / `verb:` / `worker:` / `run:` sources and the 13 supervisor action runners.
+- Conditions: —
+- Components: `FlowEditor`, `PaletteSidebar`, `Box`, `Col`, `Row`, `Text`
+- Atoms: `S.*` classifiers from `@reactjit/core`
+- isUsingTheme: TRUE
 - hasIcons: FALSE
 - Icons: —
-- hasAnimation: FALSE (the shell handles all transitions; this page just dispatches focal state)
+- hasAnimation: FALSE
 - Animations: —
-- TODO: replace with real worker chat surface once activity registry + per-worker conversation persistence land
-- PROBLEMS: none — purely a placeholder
+- TODO:
+  - **Compile-from-graph** — walk FlowEditor nodes + edges and emit a list of `{ trigger, action }` pairs that bind through `useIFTTT` (or imperatively via `resolveTrigger(spec).subscribe(...)` + `dispatchAction(...)`). Spec strings are reconstructable from palette node types + port wiring. Tear down on unmount or graph edit.
+  - **Boot the engine on mount** — call `installVmBridges()` + `installClaimEngine()` + `installMechanicalWires()` + `bindRules()` (all from `cart/app/db`) so VM event mirroring, claim ledger / verify-loop, DB-backed action persistence, and `rule`-table-driven bindings come alive while the cartridge is active.
+  - Persist canvas state to a `composition` row so reloads + cross-cartridge identity continuity work.
+- PROBLEMS:
+  - **The canvas does not yet bind anything live.** Editing the graph today is purely visual — no `useIFTTT` calls happen as a result of node/edge changes. Capability palette renders 100% of registered sources/actions, but wiring two of them does not light a rule. The compile step + the four `installX()` calls above are the gap. See the IFTTT/supervisor substrate entry below for what's already wired at the lower layers.
 
 ---
 
@@ -1003,9 +1007,70 @@ CHECKLIST:
 
 ---
 
+### IFTTT / supervisor substrate — `runtime/hooks/*`, `cart/app/db/*` — WIP
+
+CHECKLIST:
+- Purpose: The reactive substrate that everything in cart/app composes onto. A bus (subscribe/emit + wildcard subscribeAll), a registry of trigger sources and action runners with longest-prefix-match resolution, a set of stateful aggregation primitives (`count:` / `firsthit:` / `repeat:` / `registerGate`), a host↔guest transport (`vsock` with three-tier selection: production AF_VSOCK Zig binding when present, in-process LocalPair simulator otherwise, NullTransport as last resort), and a row-driven engine layer (`vm-bridges` auto-attaches per running `worker-session.vmid`, `claim-engine` runs claim detection + verify-gate per running session, `mechanical-wires` persists supervisor actions to DB, `rule-binder` binds `rule` rows as live `useIFTTT` calls). All exhaustively documented in `docs/v8/useIFTTT.md`.
+- isRoute: FALSE
+- Route: —
+- hasDatashape: TRUE (substrate produces lifecycle channels + consumes row writes)
+- Datashape:
+  - **Sources** (every `registerIfttSource` prefix): `mount`, `click`, `key:*`, `key:up:*`, `timer:every:*`, `timer:once:*`, `state:*`, `proc:line:*` / `proc:ram:*` / `proc:cpu:*` / `proc:idle:*`, `fs:changed:*` / `fs:created:*` / `fs:deleted:*` / `fs:any:*`, `select:cleared` / `select:any` / `select:nonempty` / `select:long:*` / `clipboard:copy`, `match:*::*`, `count:*::*:*`, `firsthit:*::*`, `repeat:*::*:*`, `vm:*`, `turn:tool-count`, kind-filtered `event:*` / `rule:*.fired` / `verb:*.<status>` / `worker:*.<lifecycle>` / `run:*.<status>` (with `.*` suffix wildcard). Plus the raw bus channels: `event:append`, `rule:fired`, `verb:lifecycle`, `worker:lifecycle`, `run:lifecycle`, `session:lifecycle`, `claim:lifecycle`, all `system:*`, `turn:start` / `turn:end` / `turn:tool-use`.
+  - **Actions** (every `registerIfttAction` prefix): `state:set:*` / `state:toggle:*`, `send:*`, `log:*`, `clipboard:*`, `proc:spawn:*` / `proc:kill:*` / `proc:write:*`, supervisor verbs `halt-run` (+ `halt-run:<reason>`) / `flag-pathology:*` / `invoke-verb:*` / `fire-rule:*` / `kick-to-supervisor` / `notify-user:*` / `inject-message:*` / `spawn-worker:*` / `modify-assembly:*` / `set-variable:*` / `commit-state` / `mark-status:*` / `queue-job:*`. All thirteen supervisor verbs emit their normalized `supervisor:<kind>` bus event for the writer side to persist.
+  - **Programmatic API**: `useIFTTT(trigger, action) → IFTTTResult`, `busOn` / `busEmit`, `getSharedState` / `setSharedState`, `dispatchClaudeEvent`, `registerIfttSource` / `registerIfttAction` / `setIfttFallback` / `resolveTrigger` / `dispatchAction` / `listIfttSources` / `listIfttActions`, `compileTrigger` / `isComposable` / `substituteAction`, `registerGate({ after, suspect, requires, key?, onFire })`, `similarity(a, b)`, `currentTurn()`, `openVsock` / `mirrorChannel` / `mirrorChannels` / `mirrorPrefix` / `namespaceMirror` / `namespaceForward`, `attachVm` / `detachVm` / `listAttachedVms`, `installVmBridges` / `uninstallVmBridges` / `listVmBridgeRefs`, `installClaimEngine` / `uninstallClaimEngine` / `attachClaimDetector` / `listOpenClaims` / `resolveClaim`.
+- exposedDatashapes: `Claim`, `WorkerSession.vmid` (added 2026-05-06).
+- Hooks: `useIFTTT` is a React hook; everything else is plain functions. The bus is a module-singleton on top of `runtime/ffi.ts`.
+- Conditions:
+  - The Zig vsock binding contract is at `framework/v8_bindings_vsock.zig` but **not yet registered in `build.zig`** — `vsock.ts` falls through to `LocalPair` for in-process testing. Activating production AF_VSOCK is one TODO block + one registration call.
+  - `useIFTTT` plain function triggers depend on render cadence; refs don't trigger re-renders. Composable function leaves are polled every 50ms regardless.
+  - `mirrorChannel` has a re-entrancy guard so a same-channel double-mirror doesn't infinite-loop. Production patterns use asymmetric `namespaceMirror` + `namespaceForward` which can't loop.
+  - The claim ledger's `injectTemplate` writes back to the agent through `supervisor:inject-message` → worker shell cart's stdin pipe. The vmid on the action's namespace prefix routes to the right VM.
+- Components: —
+- Atoms: —
+- isUsingTheme: FALSE
+- hasIcons: FALSE
+- Icons: —
+- hasAnimation: FALSE
+- Animations: —
+- TODO:
+  - **Land the Zig vsock binding** (`framework/v8_bindings_vsock.zig` AF_VSOCK + AF_UNIX flavors, register in `build.zig`). Until then VM↔host mirroring works only in-process via LocalPair.
+  - **Wire `installVmBridges()` / `installClaimEngine()` / `installMechanicalWires()` / `bindRules()` into the shell mount path** — currently each cartridge has to install them by hand. Sweatshop hasn't yet (see Sweatshop entry above).
+  - **Pathology dictionary auto-binder** — for each active `Pathology` row, register a `match:vm:<vmid>:event:append::<spec>` per running session. Adding a banned phrase becomes a row insert. ~80 lines next to `claim-engine.ts`.
+  - **Plan / TODO ledgers** — same shape as claim-engine for the verify-loop V6/V7/V8 catalog scenarios.
+  - **Subagent inheritance walk** in claim-engine for V16.
+  - **Claim-shape semantic similarity** — `repeat:semantic:*` source backed by an embedding model when the substring Jaccard isn't enough.
+- PROBLEMS:
+  - State persistence: `state:*` shared state is module-local in-memory. Survives within a session, not across process restart.
+  - Cross-process pair (real two reactjit instances over Unix sockets) is not yet implemented; LocalPair only pairs within a single JS process.
+- Files:
+  - **Bus**: `runtime/ffi.ts` (`subscribe` / `subscribeAll` / `emit`)
+  - **Registry**: `runtime/hooks/ifttt-registry.ts`
+  - **Hook surface**: `runtime/hooks/useIFTTT.ts` (React hook + built-in triggers/actions + Claude hook fanout)
+  - **Composables**: `runtime/hooks/ifttt-compose.ts` (`{all, any, seq, debounce, throttle, cooldown, once}`)
+  - **Source primitives**: `runtime/hooks/ifttt-match.ts`, `ifttt-count.ts`, `ifttt-firsthit.ts`, `ifttt-repeat.ts`, `ifttt-gate.ts`, `system_selection.ts`, `process.ts` (proc:*), `useFileWatch.ts` (fs:*), `turn-tracker.ts`
+  - **Supervisor channels + actions**: `runtime/hooks/ifttt-supervisor.ts`
+  - **VM boundary**: `runtime/hooks/vsock.ts`, `runtime/hooks/ifttt-vm.ts`, `framework/firecracker/vm-runtime/cart.tsx` (in-VM worker shell), `framework/firecracker/lib/with-worker-runtime.ts` (recipe helper), `framework/v8_bindings_vsock.zig` (Zig contract — stub)
+  - **Engines (cart-side)**: `cart/app/db/buses.ts` (row→channel mapping), `cart/app/db/vm-bridges.ts` (auto-attach), `cart/app/db/claim-engine.ts` (claim detector + verify-gate), `cart/app/db/mechanical-wires.ts` (action runners), `cart/app/db/rule-binder.ts` (`rule` rows → live bindings)
+  - **Entities**: `cart/app/gallery/data/core/claim.ts`, `pathology.ts`, `pathology-detection.ts`, `worker-session.ts` (with vmid), plus the rest of the supervisor-sweatshop bucket
+  - **Docs**: `docs/v8/useIFTTT.md` (canonical, code↔doc audited 2026-05-07)
+  - **Tests**: `scripts/event-loop-smoke` (33-assertion v8cli smoke), `cart/event_loop_autotest.tsx` (real-cart autotest, 14 assertions including React lifecycle / function triggers / composables)
+
+---
+
 ## Planned work
 
 The sections below are *forward-looking* plans, not file entries. They live here so the architecture and the work-not-yet-done are in one place; the per-file index above stays a clean per-file map.
+
+### Sweatshop canvas → live bindings
+
+Drag-to-edit canvas already renders palette nodes from the live IFTTT registry. The remaining work to make wiring a node light a real rule:
+
+1. **Compile-from-graph** — `cart/app/sweatshop/canvas/compile.ts`. Walk `FlowNode[]` + `FlowEdge[]` and emit `{ trigger, action }` pairs. Spec strings come from palette node types + port wiring. Returns a teardown function.
+2. **Mount-time engine boot** — in `sweatshop/page.tsx` (or a `useSweatshop()` provider), call `installVmBridges()`, `installClaimEngine()`, `installMechanicalWires()`, `bindRules()` on mount; reverse on unmount.
+3. **Live re-bind** — when the graph edits, re-run compile + tear down old bindings + apply new ones. Diff to keep stable subscriptions where the graph didn't change.
+4. **Persistence** — write the canvas state to a `composition` row through `useCRUD` so reloads survive, and publish `composition.<id>.updated` through buses so other cartridges can react.
+
+After (1)+(2), a user dragging `match:event:append::pkill` and connecting it to `flag-pathology:pat_session_kill_pattern` produces a live binding that fires on pattern hit. After (3), edits are reactive. After (4), the canvas state is a real entity in the DB layer alongside `goal`, `character`, `pathology`.
 
 ### Character creator follow-up scope
 
