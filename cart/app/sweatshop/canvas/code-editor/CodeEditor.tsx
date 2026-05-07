@@ -1,18 +1,25 @@
-// CodeEditor — a real editable code surface. Wraps the framework's
-// <TextEditor> primitive with paintText=true + colorRows so the Zig
-// side renders syntax-colored text from the per-row span arrays we
-// build with tokenize-ts.ts.
+// CodeEditor — wraps the framework's <TextEditor paintText colorRows>
+// primitive with the proven layout shape from cart/deadcode/sweatshop/
+// components/code-editor/CodeEditorPanel.tsx:
 //
-// Cursor / selection / scroll / copy-paste are handled natively by
-// the primitive — this component just feeds it tokens + chrome.
+//   ScrollView (viewport)
+//     Row (content row, height = editorHeight in pixels)
+//       Box (gutter, fixed width)
+//       Box (editor canvas, position:relative, fixed pixel size)
+//         TextEditor (position:absolute, top:0 left:0, width/height pixels)
 //
-// Read-only mode supported via the `readOnly` prop. The canvas-as-code
-// mirror starts read-only (canvas is the source of truth); when
-// bidirectional editing lands, flip readOnly off and parse onChange
-// back into FlowNode/FlowEdge.
+// The editor sizes to its CONTENT (one big virtual canvas) — not to
+// its container. ScrollView lets the viewport scroll. Trying to make
+// the TextEditor stretch via width:100%/minHeight:100% breaks
+// selection / cursor rendering.
+//
+// Read-only is informational only (header pill text). The framework
+// primitive doesn't have a readOnly prop; gating writes is the
+// caller's responsibility (omit `onChange` to drop edits on the
+// floor — they'll appear visually but won't propagate).
 
 import { useMemo } from 'react';
-import { Box, Col, Row, Text, TextEditor } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, ScrollView, Text, TextEditor } from '@reactjit/runtime/primitives';
 import { tokenizeToColorRows } from './tokenize-ts';
 
 export interface CodeEditorProps {
@@ -22,13 +29,9 @@ export interface CodeEditorProps {
   title?: string;
   filename?: string;
   fontSize?: number;
-  lineHeight?: number;
-  hideGutter?: boolean;
 }
 
-const DEFAULT_FONT_SIZE = 12;
-const DEFAULT_LINE_HEIGHT = 18;
-const GUTTER_WIDTH = 44;
+const DEFAULT_FONT_SIZE = 13;
 
 export function CodeEditor({
   value,
@@ -37,11 +40,24 @@ export function CodeEditor({
   title,
   filename,
   fontSize = DEFAULT_FONT_SIZE,
-  lineHeight = DEFAULT_LINE_HEIGHT,
-  hideGutter = false,
 }: CodeEditorProps) {
   const colorRows = useMemo(() => tokenizeToColorRows(value), [value]);
   const lineCount = colorRows.length;
+
+  const lineHeight = fontSize + 5;
+  const topPad = 8;
+  const bottomPad = 16;
+  const leftPad = 12;
+  const rightPad = 24;
+
+  const lines = value.split('\n');
+  const longestCol = lines.reduce((m, l) => Math.max(m, l.length), 1);
+  // Min editor width keeps short content from collapsing. The
+  // measurement is approximate (0.6em per glyph for monospace) — the
+  // ScrollView absorbs any slack.
+  const editorWidth = Math.max(560, Math.ceil(longestCol * (fontSize * 0.6)) + leftPad + rightPad);
+  const editorHeight = Math.max(160, lineCount * lineHeight + topPad + bottomPad);
+  const gutterWidth = 44;
 
   return (
     <Col style={{
@@ -65,11 +81,22 @@ export function CodeEditor({
           </Text>
         </Row>
       )}
-      <Row style={{ flexGrow: 1, minHeight: 0, alignItems: 'stretch' }}>
-        {!hideGutter && (
+
+      <ScrollView showScrollbar={true} style={{
+        flexGrow: 1,
+        height: '100%',
+        backgroundColor: 'theme:bg1',
+      }}>
+        <Row style={{
+          minHeight: editorHeight,
+          width: gutterWidth + editorWidth,
+          alignItems: 'flex-start',
+        }}>
+          {/* Gutter */}
           <Col style={{
-            width: GUTTER_WIDTH,
-            paddingTop: 4, paddingBottom: 4,
+            width: gutterWidth,
+            paddingTop: topPad,
+            paddingBottom: bottomPad,
             paddingLeft: 8, paddingRight: 8,
             backgroundColor: 'theme:bg2',
             borderRightWidth: 1, borderRightColor: 'theme:rule',
@@ -77,7 +104,7 @@ export function CodeEditor({
             {colorRows.map((_, i) => (
               <Box key={i} style={{ height: lineHeight, alignItems: 'flex-end' }}>
                 <Text
-                  size={fontSize - 1}
+                  size={fontSize - 2}
                   color="theme:inkDimmer"
                   style={{ fontFamily: 'theme:fontMono' as any }}
                 >
@@ -86,33 +113,39 @@ export function CodeEditor({
               </Box>
             ))}
           </Col>
-        )}
-        <Box style={{ flexGrow: 1, minWidth: 0, position: 'relative', overflow: 'auto' }}>
-          <TextEditor
-            value={value}
-            onChange={readOnly ? undefined : onChange}
-            paintText={true}
-            colorRows={colorRows}
-            fontSize={fontSize}
-            color="theme:ink"
-            readOnly={readOnly}
-            multiline={true}
-            style={{
-              width: '100%',
-              minHeight: '100%',
-              paddingTop: 4,
-              paddingBottom: 4,
-              paddingLeft: 12,
-              paddingRight: 12,
-              borderWidth: 0,
-              backgroundColor: 'transparent',
-              fontFamily: 'theme:fontMono' as any,
-              lineHeight,
-              tabWidth: 2,
-            }}
-          />
-        </Box>
-      </Row>
+
+          {/* Editor canvas — fixed pixel size, position:relative parent */}
+          <Box style={{
+            width: editorWidth,
+            height: editorHeight,
+            position: 'relative',
+            backgroundColor: 'theme:bg1',
+          }}>
+            <TextEditor
+              value={value}
+              onChangeText={onChange}
+              paintText={true}
+              colorRows={colorRows}
+              fontSize={fontSize}
+              color="theme:ink"
+              style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: editorWidth,
+                height: editorHeight,
+                paddingTop: topPad,
+                paddingBottom: bottomPad,
+                paddingLeft: leftPad,
+                paddingRight: rightPad,
+                borderWidth: 0,
+                fontFamily: 'theme:fontMono' as any,
+                lineHeight,
+              }}
+            />
+          </Box>
+        </Row>
+      </ScrollView>
     </Col>
   );
 }
