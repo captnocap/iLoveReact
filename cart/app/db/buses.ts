@@ -19,6 +19,7 @@ import {
   emitWorkerLifecycle,
   emitRunLifecycle,
   emitSessionLifecycle,
+  emitClaimLifecycle,
 } from '@reactjit/runtime/hooks/ifttt-supervisor';
 
 type Notifier = (row: any) => void;
@@ -38,6 +39,11 @@ const NOTIFIERS: Record<string, Notifier> = {
   // module subscribes here to attach / detach the vsock mirror when a
   // session running in a Firecracker worker comes up or shuts down.
   'worker-session': (row) => emitSessionLifecycle({ sessionId: row.id, status: row.status, vmid: row.vmid, ...row }),
+  // claim row updates → 'claim:lifecycle'. The supervisor surface
+  // subscribes to render the open-claims panel; rules can subscribe
+  // for behavior on transitions (e.g. block forward action while
+  // status='unverified').
+  'claim': (row) => emitClaimLifecycle({ claimId: row.id, status: row.status, ...row }),
 };
 
 /** Called from useCRUD after a successful create / update. The row is

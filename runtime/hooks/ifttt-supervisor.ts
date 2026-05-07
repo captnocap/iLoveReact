@@ -302,3 +302,11 @@ export function emitSessionLifecycle(row: {
 }): void {
   emit('session:lifecycle', row);
 }
+
+export function emitClaimLifecycle(row: {
+  claimId: string;
+  status: string;
+  [k: string]: unknown;
+}): void {
+  emit('claim:lifecycle', row);
+}

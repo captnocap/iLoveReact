@@ -459,6 +459,123 @@ uninstallVmBridges();  // for hot reload
 
 The producer inside the VM is the **worker shell cart** (`framework/firecracker/vm-runtime/cart.tsx`): a reactjit cart that mounts at boot, reads `/worker/assignment.json`, spawns the agent CLI subprocess, pipes its stdout/stderr/exit onto the local bus as `event:append` rows, and reacts to host-issued supervisor channels. Every recipe wraps with `withWorkerRuntime(spec)` from `framework/firecracker/lib/with-worker-runtime.ts` to bake the runtime + worker shell into the rootfs.
 
+## Claim Ledger & Verify-Loop
+
+The bus + `match:` + `registerGate` triad is enough to *detect* most pathology shapes. Closing the verify-loop — making the agent come back and check — needs one more piece: a **Claim ledger**. The ledger holds an unresolved claim across the bus event stream and a forward-action gate emits `inject-message` when the agent moves on without verifying.
+
+The entity is `cart/app/gallery/data/core/claim.ts`. Each row carries:
+
+```ts
+{
+  id, sessionId, workerId?, vmid?, parentClaimId?,
+  claimText, detectedFrom, kind,
+  scope?,
+  requiredEvidence: ClaimEvidenceKind[],   // any one resolves; requireAll for AND
+  evidence: ClaimEvidenceRecord[],          // observed evidence so far
+  status: 'unverified' | 'verified' | 'rejected' | 'expired',
+  resolution?, resolvedAt?, resolutionNote?,
+  injectTemplate?,                          // prompt-back template
+  detectedAt, updatedAt,
+}
+```
+
+### Auto-running engine
+
+`cart/app/db/claim-engine.ts` subscribes to `session:lifecycle` and runs detection per active session. Imported through the package barrel:
+
+```ts
+import { installClaimEngine, listOpenClaims, resolveClaim } from '@reactjit/cart/app/db';
+installClaimEngine();
+```
+
+For each `session:lifecycle status='running'` event the engine attaches a detector to the right `event:append` channel — host-side or `vm:<vmid>:event:append` if the session has a vmid. On session terminate it tears the detector down and expires every unresolved claim it owned.
+
+### What it detects today
+
+The default ruleset is intentionally inline + small — promote to a `ClaimRule` entity once stable. Each rule pairs a regex against the bus payload (JSON-stringified) with the evidence kinds that resolve it:
+
+| `ClaimKind` | Pattern (case-insensitive) | Required evidence |
+|---|---|---|
+| `fix` | `fix(ed)?`, `the bug is gone`, `should be silenced`, `that should do it` | build-success, run-success |
+| `ship` | `shipped`, `the work is in`, `landed`, `merged` | build-success, test-pass |
+| `works` | `works (now)?`, `try it (now)?`, `good to go` | run-success |
+| `cause` | `the cause is`, `happens because`, `the reason is`, `root cause is` | stack-trace, repro-run |
+| `recovery` | `work was destroyed`, `unrecoverable`, `lost forever` | reflog-read |
+| `pre-existing` | `pre-existing` / `preexisting` | log-grep |
+| `completion` | `all done`, `all <n> tasks fixed`, `all steps complete` | test-pass, run-success |
+
+### What it credits as evidence
+
+Evidence detection runs against the same `event:append` payloads, looking for tool-use shapes:
+
+| `ClaimEvidenceKind` | Triggered when payload contains | Credits |
+|---|---|---|
+| `build-success` | `Bash` tool-use with `zig build` / `cargo build` / `npm build` and `exitCode: 0` | fix, ship |
+| `test-pass` | `Bash` with `zig test` / `cargo test` / `npm test` / `pytest` / `go test` and exit 0 / "passed" | ship, completion |
+| `run-success` | `Bash` with any command and exit 0 | works, fix, completion |
+| `reflog-read` | `Bash` with `git reflog` | recovery |
+| `log-grep` | `Bash` with `git log --follow` / `git blame` | pre-existing |
+| `stack-trace` | `Read` of a `.log` / `stderr` / panic / Traceback | cause |
+| `repro-run` | `Bash` invoking `./` / `bash` / `sh` with an exit | cause |
+
+### The loop
+
+```text
+1. agent emits "fixed" on event:append
+2. claim-engine matches DEFAULT_RULES.fix → inserts Claim {
+     status: 'unverified',
+     requiredEvidence: ['build-success', 'run-success'],
+     injectTemplate: 'You said "{claim}". No evidence ({requiredEvidence})...'
+   }
+3. claim-engine emits 'claim:opened:<id>' to seed the verify-gate window
+4. registerGate watches the same event:append channel:
+     - suspect = any tool_use that isn't an evidence event
+     - requires = an event matching one of requiredEvidence
+5a. agent runs `zig build && ./bin` (exit 0)  → engine credits evidence,
+    if requireAll satisfied (or any) → status='verified', gate disposes
+5b. agent emits another forward action with no evidence → gate fires,
+    emits 'vm:<vmid>:supervisor:inject-message' with the filled template
+6. worker shell cart receives supervisor:inject-message, writes the
+   prompt back into the agent process via stdin
+7. agent re-prompts itself → runs verification → step 5a closes the loop
+```
+
+The injected message uses `{claim}` / `{scope}` / `{requiredEvidence}` substitutions from the row's `injectTemplate`. Override per row to customize the prompt-back.
+
+### `claim:lifecycle` channel
+
+Every status transition emits on `claim:lifecycle`:
+
+```ts
+useIFTTT('claim:lifecycle', (e) => {
+  if (e.status === 'unverified') /* show in supervisor surface */;
+  if (e.status === 'expired') /* aged-out, surface for retro */;
+});
+```
+
+A useCRUD write on a `claim` row also emits this channel, via `emitClaimLifecycle` in `cart/app/db/buses.ts`.
+
+### Manual resolution
+
+The supervisor surface or a higher-priority rule can resolve a claim without bus evidence:
+
+```ts
+resolveClaim('claim_001', 'supervisor-overrode', 'shipping the ack manually');
+resolveClaim('claim_002', 'rule-rejected',      'a higher-priority pathology fired');
+```
+
+### Subagent inheritance
+
+A child worker's claim chains via `parentClaimId`. The semantics — "a parent only resolves when every descendant resolves" — are captured in the entity reference (`claimReferences` in `claim.ts`) but not yet enforced by the engine. Add the inheritance walk when subagent claim-binding lands.
+
+### Files
+
+- Entity: `cart/app/gallery/data/core/claim.ts`
+- Engine: `cart/app/db/claim-engine.ts`
+- Bucket assignment: `cart/app/db/registry.ts` (`'claim': 'supervisor-sweatshop'`)
+- Row → bus mapping: `cart/app/db/buses.ts`
+- Emit helper: `runtime/hooks/ifttt-supervisor.ts` (`emitClaimLifecycle`)
+
 ## Supervisor Lifecycle Channels
 
 `runtime/hooks/ifttt-supervisor.ts` exposes typed `emit*` helpers for the supervisor namespace and registers an action prefix. The DB writer (`cart/app/db/buses.ts`) calls these on each row insert / transition; tests can call them too. Wrapping `emit` keeps channel names canonical — no string typos in writers.
@@ -471,6 +588,7 @@ The producer inside the VM is the **worker shell cart** (`framework/firecracker/
 | `worker:lifecycle` | `emitWorkerLifecycle(row)` | `worker` row update. |
 | `run:lifecycle` | `emitRunLifecycle(row)` | `composition-run` row update. |
 | `session:lifecycle` | `emitSessionLifecycle(row)` | `worker-session` row update. **Drives auto-attach.** |
+| `claim:lifecycle` | `emitClaimLifecycle(row)` | `claim` row update. **Drives the verify-loop UI** — see Claim Ledger section above. |
 
 Subscribe with the raw bus fallback or, namespaced through a VM, with the `vm:` prefix:
 
@@ -633,6 +751,8 @@ Representative cart usage:
 - Supervisor lifecycle emit helpers: `runtime/hooks/ifttt-supervisor.ts`
 - Row-change → bus mapping: `cart/app/db/buses.ts`
 - Auto-attach bridge (worker-session → vsock): `cart/app/db/vm-bridges.ts`
+- Claim ledger entity: `cart/app/gallery/data/core/claim.ts`
+- Claim detector + verify-gate engine: `cart/app/db/claim-engine.ts`
 - Worker shell cart (in-VM event producer): `framework/firecracker/vm-runtime/cart.tsx`
 - Recipe helper that bakes the runtime into a worker rootfs: `framework/firecracker/lib/with-worker-runtime.ts`
 - Side-effect preservation: `runtime/package.json`

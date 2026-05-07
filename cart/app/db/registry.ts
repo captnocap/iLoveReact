@@ -102,12 +102,13 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'task-graph': 'user-sweatshop',
   'workstream': 'user-sweatshop',
 
-  // ── supervisor-sweatshop (6) ──────────────────────────────────────
+  // ── supervisor-sweatshop (7) ──────────────────────────────────────
   // The supervisor's domain: behavior floor, run-grain audit trails,
   // per-judgment records. Quarantined from user-sweatshop so a
   // supervisor-database corruption doesn't take user goal/plan data
   // with it.
   'barrier': 'supervisor-sweatshop',
+  'claim': 'supervisor-sweatshop',
   'composition-run': 'supervisor-sweatshop',
   'pathology': 'supervisor-sweatshop',
   'pathology-detection': 'supervisor-sweatshop',
