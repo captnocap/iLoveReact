@@ -16,14 +16,17 @@
 // onboarding row, so cross-cartridge identity continuity is visible)
 // plus a starter trigger → action chain you can edit.
 
-import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FlowEditor } from '../gallery/components/flow-editor/FlowEditor';
 import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types';
 import { PaletteSidebar } from './canvas/PaletteSidebar';
 import type { PaletteItem } from './canvas/palette';
 import { compileGraph, applyBindings } from './canvas/compile';
+import { toCode, toProse } from './canvas/describe';
+import { CodeEditor } from './canvas/code-editor/CodeEditor';
+import { SplitPane } from './canvas/SplitPane';
 import {
   useUser, useLatestGoal,
   useDefaultComposition, useCompositionStore, defaultCompositionId,
@@ -110,7 +113,14 @@ export default function SweatshopPage() {
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
   const [bindingCount, setBindingCount] = useState<number>(0);
   const [persisted, setPersisted] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [showCanvas, setShowCanvas] = useState(true);
+  const [showCode, setShowCode] = useState(true);
+  const [showProse, setShowProse] = useState(true);
   const hydratedRef = useRef(false);
+
+  // Derived projections — recompute only when graph changes.
+  const codeMirror = useMemo(() => toCode(nodes, edges), [nodes, edges]);
+  const proseMirror = useMemo(() => toProse(nodes, edges), [nodes, edges]);
 
   // ── Boot the supervisor engines for the lifetime of the cartridge.
   // Each install is independent + idempotent; wrap in try/catch so a
@@ -243,20 +253,91 @@ export default function SweatshopPage() {
           <Text size={10} color={persisted === 'error' ? 'theme:err' : 'theme:inkDim'}>
             {persisted === 'saving' ? 'saving…' : persisted === 'saved' ? 'saved' : persisted === 'error' ? 'save failed' : ''}
           </Text>
+          <Box style={{ flexGrow: 1 }} />
+          <PaneToggle label="canvas"  active={showCanvas}
+            onPress={() => { if (!(showCanvas && !showCode && !showProse)) setShowCanvas(v => !v); }} />
+          <PaneToggle label="code"    active={showCode}
+            onPress={() => { if (!(showCode && !showCanvas && !showProse)) setShowCode(v => !v); }} />
+          <PaneToggle label="english" active={showProse}
+            onPress={() => { if (!(showProse && !showCanvas && !showCode)) setShowProse(v => !v); }} />
         </Row>
 
-        {/* Canvas */}
-        <Box style={{ flexGrow: 1 }}>
-          <FlowEditor
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={setNodes}
-            onEdgesChange={setEdges}
-            allowDelete={true}
+        {/* Two-tier split: canvas (left) ↔ right rail (code over prose).
+            Each pane is hide-able from the top-strip toggle chips and
+            the divider between any two visible panes is drag-resizable.
+            At least one pane is always visible. */}
+        <Box style={{ flexGrow: 1, minHeight: 0 }}>
+          <SplitPane
+            direction="horizontal"
+            initialFirstSize={760}
+            minFirstSize={320}
+            minSecondSize={360}
+            showFirst={showCanvas}
+            showSecond={showCode || showProse}
+            first={
+              <FlowEditor
+                nodes={nodes}
+                edges={edges}
+                onNodesChange={setNodes}
+                onEdgesChange={setEdges}
+                allowDelete={true}
+              />
+            }
+            second={
+              <SplitPane
+                direction="vertical"
+                initialFirstSize={420}
+                minFirstSize={160}
+                minSecondSize={120}
+                showFirst={showCode}
+                showSecond={showProse}
+                first={
+                  <CodeEditor
+                    title="Canvas as code"
+                    filename="canvas.tsx"
+                    value={codeMirror}
+                    readOnly={true}
+                  />
+                }
+                second={
+                  <Col style={{ flexGrow: 1, minHeight: 0, backgroundColor: 'theme:bg1' }}>
+                    <Row style={{
+                      paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, gap: 8,
+                      borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+                      backgroundColor: 'theme:bg2',
+                      alignItems: 'center',
+                    }}>
+                      <Text size={11} color="theme:ink" bold>What this does</Text>
+                      <Box style={{ flexGrow: 1 }} />
+                      <Text size={10} color="theme:inkDim">plain english</Text>
+                    </Row>
+                    <ScrollView style={{ flexGrow: 1, minHeight: 0, padding: 16 }}>
+                      <Text size={13} color="theme:ink" style={{ lineHeight: 20, whiteSpace: 'pre-wrap' as any }}>
+                        {proseMirror}
+                      </Text>
+                    </ScrollView>
+                  </Col>
+                }
+              />
+            }
           />
         </Box>
       </Col>
     </S.Page>
+  );
+}
+
+function PaneToggle({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={onPress} style={{
+      paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: active ? 'theme:accent' : 'theme:rule',
+      backgroundColor: active ? 'theme:bg2' : 'transparent',
+    }}>
+      <Text size={10} color={active ? 'theme:accent' : 'theme:inkDim'}>{label}</Text>
+    </Pressable>
   );
 }
 
