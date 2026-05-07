@@ -26,6 +26,7 @@ import type { PaletteItem } from './canvas/palette';
 import { compileGraph, applyBindings } from './canvas/compile';
 import { toCode, toProse } from './canvas/describe';
 import { parseCodeToGraph } from './canvas/parse';
+import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { CodeEditor } from './canvas/code-editor/CodeEditor';
 import { SplitDivider } from './canvas/editor-split/SplitDivider';
 import {
@@ -143,27 +144,84 @@ export default function SweatshopPage() {
   const codeMirror = useMemo(() => toCode(nodes, edges), [nodes, edges]);
   const proseMirror = useMemo(() => toProse(nodes, edges), [nodes, edges]);
 
-  // Local mirror of the code pane's editable text. Bidirectional:
-  // canvas → code is the projection (toCode); code → canvas is the
-  // parser (parseCodeToGraph), debounced 300ms after last keystroke.
-  // The codeDraft===codeMirror equality check breaks the round-trip
-  // — when the canvas updates the projection, the effect sees them
-  // already equal and no-ops.
+  // Local mirror of the code pane's editable text. Canvas → code is
+  // an automatic projection (toCode); code → canvas is EXPLICIT —
+  // user clicks Apply or hits Cmd/Ctrl+S. The auto-resync from
+  // codeMirror only fires when the user isn't actively editing
+  // (codeDraft was last in sync with the previous projection).
   const [codeDraft, setCodeDraft] = useState<string>(codeMirror);
-  useEffect(() => { setCodeDraft(codeMirror); }, [codeMirror]);
+  const lastProjectedRef = useRef<string>(codeMirror);
   useEffect(() => {
-    if (codeDraft === codeMirror) return;
-    const t = setTimeout(() => {
-      const parsed = parseCodeToGraph(codeDraft, nodes, edges);
-      setNodes(parsed.nodes);
-      setEdges(parsed.edges);
-    }, 300);
-    return () => clearTimeout(t);
-  // intentionally exclude `nodes`/`edges` — the parser uses snapshots,
-  // and re-running on every node/edge change would race with the
-  // canvas→code projection.
+    // If the user hasn't touched the editor since the last sync,
+    // refresh from the new projection. Otherwise leave their edits
+    // intact — they'll choose when to overwrite via Apply or by
+    // accepting the canvas's version manually.
+    if (codeDraft === lastProjectedRef.current) {
+      setCodeDraft(codeMirror);
+    }
+    lastProjectedRef.current = codeMirror;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [codeDraft, codeMirror]);
+  }, [codeMirror]);
+  const codeDirty = codeDraft !== codeMirror;
+  const applyCode = useCallback(() => {
+    if (!codeDirty) return;
+    const parsed = parseCodeToGraph(codeDraft, nodes, edges);
+    setNodes(parsed.nodes);
+    setEdges(parsed.edges);
+  }, [codeDirty, codeDraft, nodes, edges]);
+
+  // ── Unified history (canvas state). Snapshots {nodes, edges}; pushes
+  // are debounced 600ms so a flurry of node-drag re-renders coalesces
+  // into one undo step. Apply, palette spawn, edge wire, parser apply
+  // all flow through the same setNodes/setEdges so they all snapshot.
+  type Snap = { nodes: FlowNode[]; edges: FlowEdge[] };
+  const historyRef = useRef<{ stack: Snap[]; index: number; restoring: boolean }>({
+    stack: [{ nodes, edges }],
+    index: 0,
+    restoring: false,
+  });
+  const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const h = historyRef.current;
+    if (h.restoring) { h.restoring = false; return; }
+    if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+    pushTimerRef.current = setTimeout(() => {
+      const top = h.stack[h.index];
+      if (top && top.nodes === nodes && top.edges === edges) return;
+      h.stack = h.stack.slice(0, h.index + 1);
+      h.stack.push({ nodes, edges });
+      if (h.stack.length > 64) h.stack.shift();
+      else h.index++;
+    }, 600);
+    return () => { if (pushTimerRef.current) clearTimeout(pushTimerRef.current); };
+  }, [nodes, edges]);
+  const undo = useCallback(() => {
+    const h = historyRef.current;
+    if (h.index <= 0) return;
+    h.index--;
+    h.restoring = true;
+    const snap = h.stack[h.index];
+    setNodes(snap.nodes);
+    setEdges(snap.edges);
+  }, []);
+  const redo = useCallback(() => {
+    const h = historyRef.current;
+    if (h.index >= h.stack.length - 1) return;
+    h.index++;
+    h.restoring = true;
+    const snap = h.stack[h.index];
+    setNodes(snap.nodes);
+    setEdges(snap.edges);
+  }, []);
+  // Keyboard shortcuts. Cmd+S applies code; Cmd+Z / Cmd+Shift+Z
+  // navigate history. ctrl+ variants for non-mac.
+  useIFTTT('key:ctrl+s', applyCode);
+  useIFTTT('key:meta+s', applyCode);
+  useIFTTT('key:ctrl+z', undo);
+  useIFTTT('key:meta+z', undo);
+  useIFTTT('key:ctrl+shift+z', redo);
+  useIFTTT('key:meta+shift+z', redo);
+  useIFTTT('key:ctrl+y', redo);
 
   // ── Boot the supervisor engines for the lifetime of the cartridge.
   // Each install is independent + idempotent; wrap in try/catch so a
@@ -334,6 +392,8 @@ export default function SweatshopPage() {
                     filename="canvas.tsx"
                     value={codeDraft}
                     onChange={setCodeDraft}
+                    dirty={codeDirty}
+                    onApply={applyCode}
                   />
                 </Box>
               )}

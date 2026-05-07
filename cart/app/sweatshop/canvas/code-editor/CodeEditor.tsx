@@ -19,7 +19,7 @@
 // the new text into FlowEditor nodes/edges).
 
 import { useMemo } from 'react';
-import { Box, Col, Row, ScrollView, Text, TextEditor } from '@reactjit/runtime/primitives';
+import { Box, Col, Pressable, Row, ScrollView, Text, TextEditor } from '@reactjit/runtime/primitives';
 import { tokenizeToColorRows } from './tokenize-ts';
 
 export interface CodeEditorProps {
@@ -28,6 +28,11 @@ export interface CodeEditorProps {
   title?: string;
   filename?: string;
   fontSize?: number;
+  /** When true, header shows a "modified" badge + Apply button. */
+  dirty?: boolean;
+  /** Called when the user clicks Apply (or hits Cmd/Ctrl+S inside
+   *  the editor). Caller should parse `value` and apply it. */
+  onApply?: () => void;
 }
 
 const DEFAULT_FONT_SIZE = 13;
@@ -38,6 +43,8 @@ export function CodeEditor({
   title,
   filename,
   fontSize = DEFAULT_FONT_SIZE,
+  dirty = false,
+  onApply,
 }: CodeEditorProps) {
   const colorRows = useMemo(() => tokenizeToColorRows(value), [value]);
   const lineCount = colorRows.length;
@@ -74,6 +81,19 @@ export function CodeEditor({
           {title ? <Text size={11} color="theme:ink" bold>{title}</Text> : null}
           {filename ? <Text size={10} color="theme:inkDim">{filename}</Text> : null}
           <Box style={{ flexGrow: 1 }} />
+          {dirty && (
+            <Text size={10} color="theme:warn">modified</Text>
+          )}
+          {dirty && onApply && (
+            <Pressable onPress={onApply} style={{
+              paddingLeft: 8, paddingRight: 8, paddingTop: 2, paddingBottom: 2,
+              borderRadius: 4,
+              borderWidth: 1, borderColor: 'theme:accent',
+              backgroundColor: 'theme:bg2',
+            }}>
+              <Text size={10} color="theme:accent">Apply ↵</Text>
+            </Pressable>
+          )}
           <Text size={10} color="theme:inkDim">
             {lineCount} line{lineCount === 1 ? '' : 's'}
           </Text>
