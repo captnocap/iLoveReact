@@ -1,0 +1,13 @@
+#!/bin/bash
+# event-loop-smoke — bundle + run scripts/event-loop-smoke.ts under v8cli.
+# Standalone smoke test for the framework/runtime event loop.
+# 33 assertions covering match: / count: / firsthit: / repeat: /
+# registerGate / vsock LocalPair / end-to-end claim→inject-message.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+mkdir -p .cache
+tools/esbuild scripts/event-loop-smoke.ts \
+  --bundle --platform=neutral --format=iife --target=es2022 \
+  --outfile=.cache/event-loop-smoke.bundle.js \
+  --tsconfig-raw='{"compilerOptions":{"target":"es2022","module":"esnext","moduleResolution":"bundler","strict":false}}'
+exec tools/v8cli .cache/event-loop-smoke.bundle.js
