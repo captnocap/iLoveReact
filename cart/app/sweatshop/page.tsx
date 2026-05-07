@@ -25,6 +25,7 @@ import { PaletteSidebar } from './canvas/PaletteSidebar';
 import type { PaletteItem } from './canvas/palette';
 import { compileGraph, applyBindings } from './canvas/compile';
 import { toCode, toProse } from './canvas/describe';
+import { parseCodeToGraph } from './canvas/parse';
 import { CodeEditor } from './canvas/code-editor/CodeEditor';
 import { SplitDivider } from './canvas/editor-split/SplitDivider';
 import {
@@ -142,12 +143,28 @@ export default function SweatshopPage() {
   const codeMirror = useMemo(() => toCode(nodes, edges), [nodes, edges]);
   const proseMirror = useMemo(() => toProse(nodes, edges), [nodes, edges]);
 
-  // Local mirror of the code pane's editable text. Initialized from
-  // the projection; the caller can edit freely. Re-syncs to the
-  // projection whenever the canvas changes (canvas is the source of
-  // truth until the parser-back-to-graph step lands).
+  // Local mirror of the code pane's editable text. Bidirectional:
+  // canvas → code is the projection (toCode); code → canvas is the
+  // parser (parseCodeToGraph), debounced 300ms after last keystroke.
+  // The codeDraft===codeMirror equality check breaks the round-trip
+  // — when the canvas updates the projection, the effect sees them
+  // already equal and no-ops.
   const [codeDraft, setCodeDraft] = useState<string>(codeMirror);
   useEffect(() => { setCodeDraft(codeMirror); }, [codeMirror]);
+  useEffect(() => {
+    if (codeDraft === codeMirror) return;
+    const t = setTimeout(() => {
+      const parsed = parseCodeToGraph(codeDraft, nodes, edges);
+      if (!parsed) return;
+      setNodes(parsed.nodes);
+      setEdges(parsed.edges);
+    }, 300);
+    return () => clearTimeout(t);
+  // intentionally exclude `nodes`/`edges` — the parser uses snapshots,
+  // and re-running on every node/edge change would race with the
+  // canvas→code projection.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeDraft, codeMirror]);
 
   // ── Boot the supervisor engines for the lifetime of the cartridge.
   // Each install is independent + idempotent; wrap in try/catch so a
