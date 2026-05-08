@@ -1,16 +1,17 @@
 // MatchWindow — the "ranked match" surface that opens when the user
-// hits Lock In on the planning canvas. Two phases for V0:
+// hits Lock In on the planning canvas.
 //
-//   loading → champ-select-style boot screen with worker portraits
-//             (BlockFace3D inside an Avatar 3D scene), a stat panel,
-//             and a top progress bar. Hit "Start match" to advance.
-//   in-game → grid of GenericChatCard panels (one per worker) plus a
-//             side rail with the existing AssistantChat surface (will
-//             later carry the supervisor role).
+// Shell mirrors the main app: persistent right-rail chat (the
+// supervisor surface, sharing the same AssistantChat as the main app)
+// + a content area that swaps between phases:
 //
-// For V0 the worker roster is synthetic (match-data.ts). Wiring real
-// Worker / WorkerSession rows from CompositionRun lands when the
-// lock-in flow populates them.
+//   loading → champ-select boot screen with worker portraits, stat
+//             panels, top progress bar.
+//   in-game → grid of GenericChatCard panels (one per worker).
+//
+// No route nav in the window chrome — that's the only thing the match
+// shell drops vs. the main app shell. Top chrome carries the run id
+// and surrender/close.
 
 import { useState } from 'react';
 import { Box, Col, Row, Pressable, ScrollView, Text, Window } from '@reactjit/runtime/primitives';
@@ -27,6 +28,8 @@ export interface MatchWindowProps {
   onClose: () => void;
 }
 
+const CHAT_RAIL_WIDTH = 360;
+
 export function MatchWindow({ runId, onClose }: MatchWindowProps) {
   const [phase, setPhase] = useState<Phase>('loading');
   // Synthetic boot progress for V0 — climbs to 100% over time and
@@ -42,19 +45,78 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
       height={900}
       onClose={onClose}
     >
-      <Col style={{ width: '100%', height: '100%', backgroundColor: 'theme:bg0' }}>
-        {phase === 'loading' ? (
-          <LoadingPhase
-            runId={runId}
-            champions={champions}
-            progress={progress}
-            onAdvanceProgress={() => setProgress((p) => Math.min(1, p + 0.25))}
-            onStart={() => setPhase('in-game')}
-          />
-        ) : (
-          <InGamePhase champions={champions} onSurrender={onClose} />
-        )}
-      </Col>
+      <Row style={{ width: '100%', height: '100%', backgroundColor: 'theme:bg0' }}>
+        {/* Content column (everything except the chat rail) */}
+        <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, minHeight: 0 }}>
+          {/* Top chrome — same height as the main app's chrome strip,
+              minus the route nav. Carries run id + close/surrender. */}
+          <Row style={{
+            paddingLeft: 16, paddingRight: 16, paddingTop: 10, paddingBottom: 10,
+            gap: 12, alignItems: 'center',
+            borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+            backgroundColor: 'theme:bg1',
+          }}>
+            <Text size={14} color="theme:ink" bold>Match</Text>
+            <Text size={11} color="theme:inkDim">{runId}</Text>
+            <Box style={{ flexGrow: 1 }} />
+            {phase === 'in-game' && (
+              <Pressable onPress={onClose} style={{
+                paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4,
+                borderRadius: 4,
+                borderWidth: 1, borderColor: 'theme:warn',
+                backgroundColor: 'theme:bg2',
+              }}>
+                <Text size={11} color="theme:warn">Surrender</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={onClose} style={{
+              paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4,
+              borderRadius: 4,
+              borderWidth: 1, borderColor: 'theme:rule',
+              backgroundColor: 'theme:bg2',
+            }}>
+              <Text size={11} color="theme:inkDim">Close ✕</Text>
+            </Pressable>
+          </Row>
+
+          {/* Body */}
+          <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+            {phase === 'loading' ? (
+              <LoadingPhase
+                champions={champions}
+                progress={progress}
+                onAdvanceProgress={() => setProgress((p) => Math.min(1, p + 0.25))}
+                onStart={() => setPhase('in-game')}
+              />
+            ) : (
+              <InGamePhase champions={champions} />
+            )}
+          </Box>
+        </Col>
+
+        {/* Chat rail — same shape and side as the main app's chat
+            slot. shape="side" matches the rail-slot variant in
+            cart/app/chat/AssistantChat.tsx. */}
+        <Col style={{
+          flexBasis: CHAT_RAIL_WIDTH,
+          flexShrink: 0,
+          width: CHAT_RAIL_WIDTH,
+          borderLeftWidth: 1, borderLeftColor: 'theme:rule',
+          backgroundColor: 'theme:bg1',
+        }}>
+          <Row style={{
+            paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10,
+            borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+            backgroundColor: 'theme:bg2',
+            alignItems: 'center',
+          }}>
+            <Text size={12} color="theme:ink" bold>Supervisor</Text>
+          </Row>
+          <Box style={{ flexGrow: 1, minHeight: 0 }}>
+            <AssistantChat shape="side" />
+          </Box>
+        </Col>
+      </Row>
     </Window>
   );
 }
@@ -62,33 +124,32 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
 // ── Loading phase ────────────────────────────────────────────────
 
 function LoadingPhase(props: {
-  runId: string;
   champions: ChampionWorker[];
   progress: number;
   onAdvanceProgress: () => void;
   onStart: () => void;
 }) {
-  const { runId, champions, progress, onAdvanceProgress, onStart } = props;
+  const { champions, progress, onAdvanceProgress, onStart } = props;
   const ready = progress >= 1;
 
   return (
-    <Col style={{ flexGrow: 1, padding: 24, gap: 20 }}>
-      {/* Header with run id + progress */}
+    <Col style={{ flexGrow: 1, minHeight: 0, padding: 24, gap: 20 }}>
+      {/* Progress strip */}
       <Col style={{ gap: 8 }}>
         <Row style={{ alignItems: 'baseline', gap: 12 }}>
-          <Text size={20} color="theme:ink" bold>Match loading</Text>
-          <Text size={11} color="theme:inkDim">{runId}</Text>
-          <Box style={{ flexGrow: 1 }} />
+          <Text size={16} color="theme:ink" bold>Boot</Text>
           <Text size={11} color="theme:inkDim">
             {ready ? 'all systems ready' : 'booting workers, cloning repos, attaching vsock…'}
           </Text>
+          <Box style={{ flexGrow: 1 }} />
+          <Text size={11} color="theme:inkDim">{Math.round(progress * 100)}%</Text>
         </Row>
         <ProgressBar value={progress} />
       </Col>
 
       {/* Champion grid */}
       <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
-        <Row style={{ flexWrap: 'wrap', gap: 16, justifyContent: 'flex-start' }}>
+        <Row style={{ flexWrap: 'wrap', gap: 16, justifyContent: 'flex-start', paddingBottom: 16 }}>
           {champions.map((c) => (
             <ChampionCard key={c.id} champion={c} />
           ))}
@@ -104,7 +165,7 @@ function LoadingPhase(props: {
             borderWidth: 1, borderColor: 'theme:rule',
             backgroundColor: 'theme:bg2',
           }}>
-            <Text size={11} color="theme:inkDim">tick boot ({Math.round(progress * 100)}%)</Text>
+            <Text size={11} color="theme:inkDim">tick boot</Text>
           </Pressable>
         )}
         <Pressable onPress={onStart} style={{
@@ -151,15 +212,14 @@ const EMPTY_AVATAR: any = { id: 'champion-portrait', parts: [] };
 function ChampionCard({ champion }: { champion: ChampionWorker }) {
   return (
     <Col style={{
-      width: 260,
+      width: 240,
+      flexShrink: 0,
       gap: 8,
       padding: 12,
       borderRadius: 8,
       borderWidth: 1, borderColor: 'theme:rule',
       backgroundColor: 'theme:bg1',
     }}>
-      {/* 3D portrait — sphere + textured BlockFace. Independent
-          windows have their own wgpu surface so this renders fine. */}
       <Avatar
         avatar={EMPTY_AVATAR}
         style={{ width: '100%', height: PORTRAIT_H, borderRadius: 6 }}
@@ -175,17 +235,14 @@ function ChampionCard({ champion }: { champion: ChampionWorker }) {
           seed={champion.seed}
         />
       </Avatar>
-      {/* Name + role */}
       <Col style={{ gap: 2 }}>
         <Text size={14} color="theme:ink" bold>{champion.name}</Text>
         <Text size={10} color="theme:inkDim">{champion.role}</Text>
       </Col>
-      {/* Model + connection */}
       <Row style={{ gap: 6, flexWrap: 'wrap' }}>
         <ChampionPill label={champion.model} />
         <ChampionPill label={champion.connection} />
       </Row>
-      {/* Stat panel */}
       <Col style={{ gap: 4, paddingTop: 6, borderTopWidth: 1, borderTopColor: 'theme:rule' }}>
         <StatRow label="runs"      value={String(champion.stats.runs)} />
         <StatRow label="win rate"  value={champion.stats.winRate} />
@@ -220,67 +277,36 @@ function StatRow({ label, value }: { label: string; value: string }) {
 
 // ── In-game phase ────────────────────────────────────────────────
 
-function InGamePhase({ champions, onSurrender }: { champions: ChampionWorker[]; onSurrender: () => void }) {
-  return (
-    <Row style={{ flexGrow: 1, minHeight: 0 }}>
-      {/* Worker grid (left, flex 3) */}
-      <Col style={{ flexGrow: 3, flexBasis: 0, minWidth: 0, minHeight: 0 }}>
-        <Row style={{
-          paddingLeft: 16, paddingRight: 16, paddingTop: 10, paddingBottom: 10,
-          borderBottomWidth: 1, borderBottomColor: 'theme:rule',
-          backgroundColor: 'theme:bg1',
-          alignItems: 'center', gap: 12,
-        }}>
-          <Text size={14} color="theme:ink" bold>Workers</Text>
-          <Text size={10} color="theme:inkDim">{champions.length} active</Text>
-          <Box style={{ flexGrow: 1 }} />
-          <Pressable onPress={onSurrender} style={{
-            paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4,
-            borderRadius: 4,
-            borderWidth: 1, borderColor: 'theme:warn',
-            backgroundColor: 'theme:bg2',
-          }}>
-            <Text size={11} color="theme:warn">Surrender</Text>
-          </Pressable>
-        </Row>
-        <ScrollView style={{ flexGrow: 1, minHeight: 0, padding: 12 }}>
-          <Row style={{ flexWrap: 'wrap', gap: 12 }}>
-            {champions.map((c) => (
-              <Box key={c.id} style={{ width: 480, height: 360 }}>
-                <GenericChatCard
-                  header={{
-                    title: c.name,
-                    pathology: c.role.toUpperCase(),
-                    achievement: '',
-                    trust: 'B',
-                    note: c.model,
-                    mode: 'live',
-                  }}
-                />
-              </Box>
-            ))}
-          </Row>
-        </ScrollView>
-      </Col>
+const WORKER_CARD_W = 460;
+const WORKER_CARD_H = 320;
 
-      {/* Supervisor chat side rail (right, flex 1) */}
-      <Col style={{
-        flexGrow: 1, flexBasis: 0, minWidth: 320,
-        borderLeftWidth: 1, borderLeftColor: 'theme:rule',
-        backgroundColor: 'theme:bg1',
-      }}>
-        <Row style={{
-          paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10,
-          borderBottomWidth: 1, borderBottomColor: 'theme:rule',
-          backgroundColor: 'theme:bg2',
-          alignItems: 'center',
-        }}>
-          <Text size={12} color="theme:ink" bold>Supervisor</Text>
-        </Row>
-        <Box style={{ flexGrow: 1, minHeight: 0 }}>
-          <AssistantChat shape="activity" />
-        </Box>
-      </Col>
-    </Row>
+function InGamePhase({ champions }: { champions: ChampionWorker[] }) {
+  return (
+    <ScrollView style={{ flexGrow: 1, minHeight: 0, padding: 16 }}>
+      <Row style={{ flexWrap: 'wrap', gap: 16, paddingBottom: 16 }}>
+        {champions.map((c) => (
+          <Box key={c.id} style={{
+            width: WORKER_CARD_W,
+            height: WORKER_CARD_H,
+            flexShrink: 0,
+            borderRadius: 8,
+            borderWidth: 1, borderColor: 'theme:rule',
+            backgroundColor: 'theme:bg1',
+            overflow: 'hidden',
+          }}>
+            <GenericChatCard
+              header={{
+                title: c.name,
+                pathology: c.role.toUpperCase(),
+                achievement: '',
+                trust: 'B',
+                note: c.model,
+                mode: 'live',
+              }}
+            />
+          </Box>
+        ))}
+      </Row>
+    </ScrollView>
   );
 }
