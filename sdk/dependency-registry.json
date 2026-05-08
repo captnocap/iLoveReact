@@ -176,6 +176,14 @@
       "bundlePolicy": "feature-gated",
       "buildFlag": "-Dhas-physics"
     },
+    "alsa": {
+      "kind": "dynamic-library",
+      "systemNames": ["asound"],
+      "linkPolicy": "feature-gated",
+      "bundlePolicy": "never",
+      "buildFlag": "-Dhas-midi",
+      "note": "ALSA sequencer (libasound) for MIDI input on Linux. Linked only when -Dhas-midi=true; never bundled — every Linux desktop has libasound.so.2 in its base install."
+    },
     "tls.zig": {
       "kind": "zig-package",
       "payloadPath": "deps/tls.zig",
@@ -257,6 +265,14 @@
         { "kind": "featureMarker", "input": "runtime/features/audio.ts" }
       ],
       "buildOptions": ["has-audio"]
+    },
+    "midi": {
+      "triggers": [
+        { "kind": "metafileInput", "input": "runtime/hooks/useMIDI.ts" }
+      ],
+      "buildOptions": ["has-midi"],
+      "nativeLibraries": ["alsa"],
+      "note": "Linux MIDI input via ALSA sequencer (framework/midi_real.zig). Carts that don't import useMIDI get framework/midi_stub.zig; libasound is not linked. The dispatcher pattern matches audio.zig / luajit_worker.zig / sqlite.zig / vterm.zig."
     },
     "terminal": {
       "triggers": [

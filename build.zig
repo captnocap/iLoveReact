@@ -74,6 +74,7 @@ pub fn build(b: *std.Build) void {
     // has-lua-worker independently.
     const has_lua_worker_explicit = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse false;
     const has_lua_worker = has_lua_worker_explicit or has_audio;
+    const has_midi = b.option(bool, "has-midi", "Link libasound + real midi.zig (ALSA snd_seq_* MIDI input) — otherwise stub") orelse false;
 
     // Bundle path override. When unset, v8_app.zig falls back to embedding
     // bundle-<app-name>.js relative to its own source directory (the
@@ -94,6 +95,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_terminal", has_terminal);
     options.addOption(bool, "has_audio", has_audio);
     options.addOption(bool, "has_lua_worker", has_lua_worker);
+    options.addOption(bool, "has_midi", has_midi);
     options.addOption([]const u8, "bundle_path", bundle_path);
     options.addOption(bool, "has_video", true);
     options.addOption(bool, "has_render_surfaces", true);
@@ -170,19 +172,16 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("m");
         exe.linkSystemLibrary("pthread");
         exe.linkSystemLibrary("dl");
-        // libasound is required by framework/midi.zig, which calls into
+        // libasound is required by framework/midi_real.zig, which calls
         // ALSA's snd_seq_* API for MIDI sequencer input on Linux. SDL3's
         // audio backends are dlopen'd at runtime (so SDL3 doesn't pull
-        // libasound into our DT_NEEDED via any of the audio path), but
-        // midi.zig links the snd_seq_* symbols directly via @extern, and
-        // those need libasound at link time. midi.zig is currently
-        // compiled unconditionally; once it gets stub-split (mirroring
-        // audio.zig / luajit_worker.zig) + a has-midi build option, this
-        // link can move into `if (has_midi) ...`. Until then, every Linux
-        // cart pays for libasound (~600KB on disk; the broader audio
-        // stack stays out because SDL3's pulse/pipewire/sndio paths are
-        // pure dlopen).
-        exe.linkSystemLibrary("asound");
+        // libasound into DT_NEEDED via the audio path), but midi_real.zig
+        // declares the snd_seq_* symbols via @extern, and those need
+        // libasound at link time. The dispatcher in framework/midi.zig
+        // selects midi_real.zig only when has_midi is on; the stub
+        // doesn't reference any ALSA symbols, so non-MIDI carts skip
+        // both the link and the ~600KB DT_NEEDED entry.
+        if (has_midi) exe.linkSystemLibrary("asound");
         if (sysroot) |sr| {
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
