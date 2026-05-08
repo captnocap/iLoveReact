@@ -740,21 +740,15 @@ if [[ "$WANT_FAT" == "1" ]] && [[ -d "$SR_LIB" ]]; then
     done
 fi
 
-# Bundle the dynamic loader itself — prefer the SDK-bundled one for the
-# same forward-compat reason as above.
-LD_LINUX=""
-if [[ -f "$SR_LIB/ld-linux-x86-64.so.2" ]]; then
-    LD_LINUX=$(readlink -f "$SR_LIB/ld-linux-x86-64.so.2")
-fi
-if [[ -z "$LD_LINUX" ]]; then
-    LD_LINUX=$(readlink -f /lib64/ld-linux-x86-64.so.2 2>/dev/null || readlink -f /lib/ld-linux-x86-64.so.2 2>/dev/null || echo "")
-fi
-if [[ -z "$LD_LINUX" ]] || [[ ! -f "$LD_LINUX" ]]; then
-    echo "[ship] WARNING: ld-linux-x86-64.so.2 not found — leaving build output at $BUILD_BIN"
-    rm -rf "$TMP_DIR"
-    exit 0
-fi
-cp "$LD_LINUX" "$LIB_DIR/ld-linux-x86-64.so.2"
+# ld-linux deliberately NOT bundled. Previously we shipped our own
+# ld-linux-x86-64.so.2 and exec'd the binary through it with
+# --library-path, on the theory that pinning the loader insulated us
+# from glibc ABI mismatches. With the own-libs allowlist (libSDL3 +
+# libfreetype + a few feature-gated libs) we no longer bundle libc/glibc
+# either, so running the bundled loader against a foreign libc is just
+# a confusing extra step. The user's own loader handles everything;
+# our launcher just prepends $DIR/lib to LD_LIBRARY_PATH so our pinned
+# libs win and falls back to system search for everything else.
 
 # ── Bundle postgres ──────────────────────────────────────────────────
 # Carts that touch the PG-backed cart/app/db routes need a postgres
@@ -771,11 +765,16 @@ if [[ -d "$RJIT_HOME/.pg-bundle" ]]; then
     echo "[ship]   bundled postgres ($PG_SIZE) — extract dir → pg/bin/postgres"
 fi
 
-# Launcher that execs the real binary via the bundled loader
+# Launcher: use the user's own ld-linux. Prepend $DIR/lib to
+# LD_LIBRARY_PATH so our SDK-pinned libs (SDL3, freetype, optional
+# feature libs) win over any system copy, but fall back to the system
+# loader's normal search for everything we didn't bundle (libc,
+# libstdc++, libcurl, libpulse, libX11, libxkbcommon, libdbus, …).
 cat > "$TMP_DIR/run" << 'LAUNCHER'
 #!/bin/sh
 DIR="$(cd "$(dirname "$0")" && pwd)"
-exec "$DIR/lib/ld-linux-x86-64.so.2" --inhibit-cache --library-path "$DIR/lib" "$DIR/app.bin" "$@"
+export LD_LIBRARY_PATH="$DIR/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$DIR/app.bin" "$@"
 LAUNCHER
 chmod +x "$TMP_DIR/run"
 
