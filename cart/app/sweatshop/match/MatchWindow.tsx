@@ -1,17 +1,18 @@
 // MatchWindow — the "ranked match" surface that opens when the user
 // hits Lock In on the planning canvas.
 //
-// Shell mirrors the main app: persistent right-rail chat (the
-// supervisor surface, sharing the same AssistantChat as the main app)
-// + a content area that swaps between phases:
+// Shell mirrors the main app: persistent right-rail chat + InputStrip,
+// chrome at the top, content area swaps between phases:
 //
 //   loading → champ-select boot screen with worker portraits, stat
 //             panels, top progress bar.
 //   in-game → grid of GenericChatCard panels (one per worker).
 //
-// No route nav in the window chrome — that's the only thing the match
-// shell drops vs. the main app shell. Top chrome carries the run id
-// and surrender/close.
+// The right rail carries AssistantChat (shape='side') over an
+// InputStrip — same components the main app uses, so the user can
+// actually talk to the supervisor from inside the match. Chat session
+// state is module-singleton, so the conversation here is the same
+// thread as the one in the main window.
 
 import { useState } from 'react';
 import { Box, Col, Row, Pressable, ScrollView, Text, Window } from '@reactjit/runtime/primitives';
@@ -19,6 +20,7 @@ import { Avatar } from '@reactjit/runtime/avatar';
 import { BlockFace3D } from '../../gallery/components/block-faces/BlockFace3D';
 import { GenericChatCard } from '../../gallery/components/generic-chat-card/GenericChatCard';
 import { AssistantChat } from '../../chat/AssistantChat';
+import { InputStrip } from '../../InputStrip';
 import { SAMPLE_CHAMPIONS, type ChampionWorker } from './match-data';
 
 type Phase = 'loading' | 'in-game';
@@ -28,7 +30,7 @@ export interface MatchWindowProps {
   onClose: () => void;
 }
 
-const CHAT_RAIL_WIDTH = 360;
+const CHAT_RAIL_WIDTH = 380;
 
 export function MatchWindow({ runId, onClose }: MatchWindowProps) {
   const [phase, setPhase] = useState<Phase>('loading');
@@ -41,8 +43,8 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
   return (
     <Window
       title={`Match ${runId}`}
-      width={1400}
-      height={900}
+      width={1480}
+      height={940}
       onClose={onClose}
     >
       <Row style={{ width: '100%', height: '100%', backgroundColor: 'theme:bg0' }}>
@@ -59,6 +61,9 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
             <Text size={14} color="theme:ink" bold>Match</Text>
             <Text size={11} color="theme:inkDim">{runId}</Text>
             <Box style={{ flexGrow: 1 }} />
+            <Text size={10} color="theme:inkDim">
+              {phase === 'loading' ? 'BOOT' : 'IN-GAME'}
+            </Text>
             {phase === 'in-game' && (
               <Pressable onPress={onClose} style={{
                 paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4,
@@ -94,26 +99,47 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
           </Box>
         </Col>
 
-        {/* Chat rail — same shape and side as the main app's chat
-            slot. shape="side" matches the rail-slot variant in
-            cart/app/chat/AssistantChat.tsx. */}
+        {/* Chat rail — full app shell minus route nav: chrome strip,
+            AssistantChat (live transcript, same module-singleton store
+            as the main app), and the InputStrip docked at the bottom
+            so the user can actually talk to the supervisor. */}
         <Col style={{
           flexBasis: CHAT_RAIL_WIDTH,
           flexShrink: 0,
           width: CHAT_RAIL_WIDTH,
           borderLeftWidth: 1, borderLeftColor: 'theme:rule',
           backgroundColor: 'theme:bg1',
+          minHeight: 0,
         }}>
           <Row style={{
             paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10,
             borderBottomWidth: 1, borderBottomColor: 'theme:rule',
             backgroundColor: 'theme:bg2',
-            alignItems: 'center',
+            alignItems: 'center', gap: 8,
           }}>
+            <Box style={{
+              width: 8, height: 8, borderRadius: 4,
+              backgroundColor: 'theme:accent',
+            }} />
             <Text size={12} color="theme:ink" bold>Supervisor</Text>
+            <Box style={{ flexGrow: 1 }} />
+            <Text size={10} color="theme:inkDim">LIVE</Text>
           </Row>
-          <Box style={{ flexGrow: 1, minHeight: 0 }}>
+          {/* Live transcript — fills the rail above the input dock. */}
+          <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0, overflow: 'hidden' }}>
             <AssistantChat shape="side" />
+          </Box>
+          {/* Input dock — same composer as the main app's bottom-strip
+              variant. Submitting fires askAssistant() which pushes into
+              the shared chat store, so transcripts stay in sync across
+              this window and the main one. */}
+          <Box style={{
+            flexShrink: 0,
+            borderTopWidth: 1, borderTopColor: 'theme:rule',
+            backgroundColor: 'theme:bg1',
+            padding: 8,
+          }}>
+            <InputStrip />
           </Box>
         </Col>
       </Row>
@@ -276,24 +302,18 @@ function StatRow({ label, value }: { label: string; value: string }) {
 }
 
 // ── In-game phase ────────────────────────────────────────────────
-
-const WORKER_CARD_W = 460;
-const WORKER_CARD_H = 320;
+//
+// Render GenericChatCard at its native width (CHAT_CARD.width = 506)
+// in a wrap row. No fixed-pixel wrapper — the card's intrinsic shape
+// is what makes its sub-pieces (header, telemetry, transcript) line
+// up; clipping it with overflow:hidden was the bug from last pass.
 
 function InGamePhase({ champions }: { champions: ChampionWorker[] }) {
   return (
     <ScrollView style={{ flexGrow: 1, minHeight: 0, padding: 16 }}>
-      <Row style={{ flexWrap: 'wrap', gap: 16, paddingBottom: 16 }}>
+      <Row style={{ flexWrap: 'wrap', gap: 20, paddingBottom: 16, alignItems: 'flex-start' }}>
         {champions.map((c) => (
-          <Box key={c.id} style={{
-            width: WORKER_CARD_W,
-            height: WORKER_CARD_H,
-            flexShrink: 0,
-            borderRadius: 8,
-            borderWidth: 1, borderColor: 'theme:rule',
-            backgroundColor: 'theme:bg1',
-            overflow: 'hidden',
-          }}>
+          <Box key={c.id} style={{ flexShrink: 0 }}>
             <GenericChatCard
               header={{
                 title: c.name,
