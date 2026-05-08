@@ -1561,7 +1561,19 @@ fn openHostWindowForNode(id: u32, type_name: []const u8, props: ?std.json.Value)
     else
         5000;
 
-    const kind: windows.WindowKind = if (is_notification) .notification else .independent;
+    // Read optional `kind` prop. Defaults preserved: notifications →
+    // .notification, plain Windows → .independent. Carts that want the
+    // Window to live in the same V8 isolate as the parent (so the
+    // cart's bundle globals — __dispatchLayout, __dispatchEvent, etc.
+    // — are available to nodes inside the Window) pass kind="in_process".
+    const kind: windows.WindowKind = if (is_notification) .notification else blk: {
+        if (propString(p, "kind")) |k| {
+            if (std.mem.eql(u8, k, "in_process")) break :blk .in_process;
+            if (std.mem.eql(u8, k, "notification")) break :blk .notification;
+            if (std.mem.eql(u8, k, "independent")) break :blk .independent;
+        }
+        break :blk .independent;
+    };
     const slot = windows.open(.{
         .title = title.ptr,
         .width = @intCast(@max(1, width)),
@@ -2058,6 +2070,20 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                         out[i] = jsonFloat(item) orelse 0;
                     }
                     node.polyline_points = out;
+                }
+            }
+        } else if (std.mem.eql(u8, k, "effectData")) {
+            // <Effect data={[…]}> — uploaded to the GPU storage buffer at
+            // @group(0) @binding(1). Lets shader source stay static while
+            // data updates per frame, so the pipeline doesn't recompile.
+            if (v == .array) {
+                if (node.effect_data) |old| g_alloc.free(old);
+                const buf = g_alloc.alloc(f32, v.array.items.len) catch null;
+                if (buf) |out| {
+                    for (v.array.items, 0..) |item, i| {
+                        out[i] = jsonFloat(item) orelse 0;
+                    }
+                    node.effect_data = out;
                 }
             }
         } else if (std.mem.eql(u8, k, "stroke")) {
