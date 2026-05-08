@@ -55,17 +55,34 @@ if ! flock -n 9; then
     echo "[ship] got lock, proceeding"
 fi
 
-NAME="${1:-}"
-if [[ "$#" -gt 1 ]]; then
-    echo "[ship] unexpected args: ${*:2}" >&2
-    echo "Usage: scripts/ship <cart-name>" >&2
-    echo "  (debug/raw flags removed — both produced binaries that crashed on launch)" >&2
-    exit 1
-fi
+NAME=""
+WANT_FAT=0
+for arg in "$@"; do
+    case "$arg" in
+        --fat)
+            WANT_FAT=1
+            ;;
+        --*)
+            echo "[ship] unknown flag: $arg" >&2
+            echo "Usage: scripts/ship <cart-name> [--fat]" >&2
+            exit 1
+            ;;
+        *)
+            if [[ -n "$NAME" ]]; then
+                echo "[ship] unexpected positional arg: $arg" >&2
+                echo "Usage: scripts/ship <cart-name> [--fat]" >&2
+                exit 1
+            fi
+            NAME="$arg"
+            ;;
+    esac
+done
 
 if [[ -z "$NAME" ]]; then
-    echo "Usage: scripts/ship <cart-name>" >&2
+    echo "Usage: scripts/ship <cart-name> [--fat]" >&2
     echo "  Cart expected at: $CART_ROOT/cart/<cart-name>.tsx" >&2
+    echo "  --fat: bundle every .so in deps/sysroot/usr/lib/ (Whonix-class hosts" >&2
+    echo "         with stripped-out runtime libs); default skips the catch-all." >&2
     exit 1
 fi
 
@@ -660,13 +677,16 @@ while IFS= read -r line; do
 done < "$LDD_TMP"
 rm -f "$LDD_TMP"
 
-# Catch-all: copy everything in the SDK sysroot lib dir into the cart's
-# bundle. ldd can miss transitively-loaded libs that aren't DT_NEEDED of
-# the binary itself (e.g. libpulse.so.0 dlopen's libpulsecommon-17.0.so;
-# on Whonix ldd can't even resolve it because Whonix's pulseaudio dir is
-# absent or empty). Belt-and-suspenders — better to ship 30 MB of
-# unused .so than to crash on launch with a missing dep.
-if [[ -d "$SR_LIB" ]]; then
+# Catch-all (opt-in via --fat): copy every .so* from the SDK sysroot lib
+# dir into the cart's bundle. Useful on Whonix-class hosts where dlopen
+# of libpulsecommon / libpipewire transitive deps fails because the
+# pulseaudio runtime dir isn't populated. Default off — every desktop
+# Linux ships these in its base install, and the catch-all otherwise
+# drags ~30MB of dead .so weight (libluajit, libpipewire, libsndio,
+# codec libs, etc.) into every cart binary even when the binary's ldd
+# never reports them.
+if [[ "$WANT_FAT" == "1" ]] && [[ -d "$SR_LIB" ]]; then
+    echo "[ship]   --fat: bundling all sysroot libs (Whonix mode)"
     for so in "$SR_LIB"/*.so*; do
         [[ -e "$so" ]] || continue
         soname=$(basename "$so")
