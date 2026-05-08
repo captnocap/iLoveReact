@@ -16,6 +16,7 @@
 
 import { useState } from 'react';
 import { Box, Col, Row, Pressable, ScrollView, Text, Window } from '@reactjit/runtime/primitives';
+import { Router, Route, Link, useNavigate, useRoute } from '@reactjit/runtime/router';
 import { Avatar } from '@reactjit/runtime/avatar';
 import { BlockFace3D } from '../../gallery/components/block-faces/BlockFace3D';
 import { GenericChatCard } from '../../gallery/components/generic-chat-card/GenericChatCard';
@@ -97,6 +98,22 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
               <InGamePhase champions={champions} />
             )}
           </Box>
+
+          {/* Router probe — sanity-check that nesting a Router inside a
+              Window mounts and Routes match. Mounted unconditionally so
+              we can see it across phases. NB: the host's router history
+              is process-wide (one __routerInit / __routerCurrentPath
+              set), so navigations here also move the main window —
+              that's the thing we're checking. */}
+          <Box style={{
+            flexShrink: 0,
+            borderTopWidth: 1, borderTopColor: 'theme:rule',
+            backgroundColor: 'theme:bg2',
+          }}>
+            <Router local initialPath="/match" hotKey="match-window">
+              <RouterProbe />
+            </Router>
+          </Box>
         </Col>
 
         {/* Chat rail — full app shell minus route nav: chrome strip,
@@ -144,6 +161,76 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
         </Col>
       </Row>
     </Window>
+  );
+}
+
+// ── Router probe ────────────────────────────────────────────────
+//
+// Three Routes under the match-window Router. Click a Link to switch
+// between them and watch the active panel swap. The current path is
+// printed top-right so you can see whether navigating here also moves
+// the main window's router (it shares the same host history).
+
+function RouterProbe() {
+  const ctx = useRoute();
+  const nav = useNavigate();
+  return (
+    <Col style={{ padding: 10, gap: 8 }}>
+      <Row style={{ alignItems: 'center', gap: 8 }}>
+        <Text size={10} color="theme:inkDim" bold>ROUTER PROBE</Text>
+        <Box style={{ flexGrow: 1 }} />
+        <Text size={10} color="theme:inkDim">path:&nbsp;</Text>
+        <Text size={10} color="theme:accent" bold>{ctx.path}</Text>
+      </Row>
+      <Row style={{ gap: 6 }}>
+        <ProbeLink to="/match"          label="boot"    active={ctx.path === '/match'} />
+        <ProbeLink to="/match/dossier"  label="dossier" active={ctx.path === '/match/dossier'} />
+        <ProbeLink to="/match/timeline" label="timeline" active={ctx.path === '/match/timeline'} />
+        <Box style={{ flexGrow: 1 }} />
+        <Pressable onPress={() => nav.push('/somewhere/else')} style={{
+          paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3,
+          borderRadius: 4,
+          borderWidth: 1, borderColor: 'theme:warn',
+          backgroundColor: 'theme:bg1',
+        }}>
+          <Text size={10} color="theme:warn">push /somewhere/else</Text>
+        </Pressable>
+      </Row>
+      <Box style={{
+        padding: 8,
+        borderWidth: 1, borderColor: 'theme:rule',
+        borderRadius: 6,
+        backgroundColor: 'theme:bg1',
+        minHeight: 28,
+      }}>
+        <Route path="/match">
+          <Text size={11} color="theme:ink">matched /match — boot view (default)</Text>
+        </Route>
+        <Route path="/match/dossier">
+          <Text size={11} color="theme:ink">matched /match/dossier — pretend champion dossier here</Text>
+        </Route>
+        <Route path="/match/timeline">
+          <Text size={11} color="theme:ink">matched /match/timeline — pretend run timeline here</Text>
+        </Route>
+        <Route fallback>
+          <Text size={11} color="theme:warn">fallback — no route registered for "{ctx.path}"</Text>
+        </Route>
+      </Box>
+    </Col>
+  );
+}
+
+function ProbeLink({ to, label, active }: { to: string; label: string; active: boolean }) {
+  return (
+    <Link to={to} style={{
+      paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: active ? 'theme:accent' : 'theme:rule',
+      backgroundColor: active ? 'theme:bg2' : 'theme:bg1',
+    }}>
+      <Text size={10} color={active ? 'theme:accent' : 'theme:inkDim'} bold>{label}</Text>
+    </Link>
   );
 }
 

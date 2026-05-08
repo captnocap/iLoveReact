@@ -164,10 +164,22 @@ function decodeSegment(s: string): string {
 
 // ── Context ─────────────────────────────────────────────────
 
+interface LocalNav {
+  push: (path: string) => void;
+  replace: (path: string) => void;
+  back: () => void;
+  forward: () => void;
+}
+
 interface RouterCtx {
   path: string;
   params: RouteParams;
   hotKey: string;
+  // Set when this branch was opened by a `local` Router. When present,
+  // useNavigate routes through these instead of the process-global host
+  // history — so a nested Router can run its own path independent of
+  // the main app router. Untouched in the default (host-backed) case.
+  localNav?: LocalNav;
 }
 
 const RouterContext = React.createContext<RouterCtx>({
@@ -181,14 +193,64 @@ const RouterContext = React.createContext<RouterCtx>({
 export function Router({
   initialPath = '/',
   hotKey = DEFAULT_ROUTER_HOT_KEY,
+  local = false,
   children,
 }: {
   initialPath?: string;
   hotKey?: string;
+  /** Run an in-memory history independent of the process-global host
+   *  router. Required when nesting a Router inside another Router (e.g.
+   *  inside a `<Window>`) — without this both routers fight over one
+   *  history and clicking a Link in the nested router moves the outer
+   *  app too. Local routers don't persist across reloads. */
+  local?: boolean;
   children?: any;
 }): any {
   const routerHotKey = hotKey || DEFAULT_ROUTER_HOT_KEY;
   const [, forceRender] = React.useState(0);
+
+  // ── Local-history branch ─────────────────────────────────────
+  if (local) {
+    const stateRef = React.useRef<null | {
+      stack: string[];
+      cursor: number;  // index into stack
+    }>(null);
+    if (stateRef.current === null) {
+      stateRef.current = { stack: [normalizePath(initialPath)], cursor: 0 };
+    }
+    const s = stateRef.current;
+    const path = s.stack[s.cursor];
+
+    const navigate = (next: string, replace: boolean) => {
+      const p = normalizePath(next);
+      if (replace) {
+        s.stack[s.cursor] = p;
+      } else {
+        // Drop any forward history then push.
+        s.stack = s.stack.slice(0, s.cursor + 1);
+        s.stack.push(p);
+        s.cursor = s.stack.length - 1;
+      }
+      forceRender((n: number) => n + 1);
+    };
+    const localNav: LocalNav = {
+      push: (p: string) => navigate(p, false),
+      replace: (p: string) => navigate(p, true),
+      back: () => {
+        if (s.cursor > 0) { s.cursor -= 1; forceRender((n: number) => n + 1); }
+      },
+      forward: () => {
+        if (s.cursor < s.stack.length - 1) { s.cursor += 1; forceRender((n: number) => n + 1); }
+      },
+    };
+    return React.createElement(
+      RouterContext.Provider,
+      { value: { path, params: {}, hotKey: routerHotKey, localNav } },
+      children,
+    );
+  }
+
+  // ── Host-backed branch (process-global, persisted) ───────────
   const initRef = React.useRef(null);
   if (initRef.current !== routerHotKey) {
     const restoredPath = readHotPath(routerHotKey);
@@ -288,6 +350,10 @@ export function useNavigate(): {
   forward: () => void;
 } {
   const ctx = React.useContext(RouterContext);
+  // Local Routers carry their own nav functions on the context so
+  // navigation stays inside that subtree's history; fall back to the
+  // process-global host history for the default top-level Router.
+  if (ctx.localNav) return ctx.localNav;
   const hotKey = ctx.hotKey || DEFAULT_ROUTER_HOT_KEY;
   return {
     push: (path: string) => hostPush(path, hotKey),
