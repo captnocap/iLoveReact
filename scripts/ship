@@ -659,11 +659,54 @@ fi
 # so SDL3's GLIBC_2.38 symbol references resolve at runtime.
 SR_LIB="$RJIT_HOME/deps/sysroot/usr/lib"
 LIB_COUNT=0
+
+# Allowlist of soname stems we OWN — the SDK either pins a specific
+# version, vendors the source, or builds the .so itself. Bundled from
+# the SDK sysroot (or wherever we built them). Anything ldd reports
+# that doesn't match this list stays on the user's system — every
+# Linux desktop ships its own libc, libX11, libpulse, libdbus, libcurl
+# etc. in its base install. Bundling those was just bloat and made
+# our binaries vulnerable to ABI mismatches with the user's loader.
+#
+# When a user's host genuinely lacks one of the unbundled libs, the
+# launcher script (run on first extract) emits a clear error pointing
+# at apt/brew/pacman — same probe pattern as tui/examples/reactjit-
+# installer.tsx (see the dep scan there for the full UX).
+BUNDLE_PREFIXES=(
+    "libSDL3"
+    "libfreetype"
+)
+[[ "$WANT_PRIVACY" == "1" ]] && BUNDLE_PREFIXES+=("libsodium")
+[[ "$WANT_SQLITE" == "1" ]]  && BUNDLE_PREFIXES+=("libsqlite3")
+[[ "$WANT_WHISPER" == "1" ]] && BUNDLE_PREFIXES+=("libwhisper")
+[[ "$WANT_EMBED" == "1" ]]   && BUNDLE_PREFIXES+=("libllama_ffi")
+# Feature-gated build flags don't all have ship-gate equivalents
+# (has-video / has-physics / has-terminal / has-lua-worker / has-midi
+# / has-audio). They ride their build flags into the ldd output, so
+# any matching soname here picks them up:
+BUNDLE_PREFIXES+=("libmpv" "libbox2d" "libvterm" "libluajit" "libllama" "libggml")
+
+soname_matches_allowlist() {
+    local sn="$1"
+    for prefix in "${BUNDLE_PREFIXES[@]}"; do
+        # Match `libfoo.so` or `libfoo.so.<ver>` — but NOT `libfoobar.*`
+        case "$sn" in
+            "${prefix}.so"|"${prefix}.so."*) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 LDD_TMP=$(mktemp)
 ldd "$BUILD_BIN" > "$LDD_TMP" 2>/dev/null || true
+SKIPPED_SYS=0
 while IFS= read -r line; do
     case "$line" in *linux-vdso*) continue ;; esac
     soname=$(echo "$line" | sed 's/^[[:space:]]*//;s/[[:space:]]*=>.*//')
+    if ! soname_matches_allowlist "$soname"; then
+        SKIPPED_SYS=$((SKIPPED_SYS + 1))
+        continue
+    fi
     if [[ -f "$SR_LIB/$soname" ]]; then
         real_path=$(readlink -f "$SR_LIB/$soname")
     else
@@ -676,6 +719,7 @@ while IFS= read -r line; do
     LIB_COUNT=$((LIB_COUNT + 1))
 done < "$LDD_TMP"
 rm -f "$LDD_TMP"
+echo "[ship]   bundled $LIB_COUNT SDK-owned lib(s); $SKIPPED_SYS system lib(s) skipped (resolved at runtime)"
 
 # Catch-all (opt-in via --fat): copy every .so* from the SDK sysroot lib
 # dir into the cart's bundle. Useful on Whonix-class hosts where dlopen
