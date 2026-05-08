@@ -14,7 +14,8 @@
 
 import { useState } from 'react';
 import { Box, Col, Row, Pressable, ScrollView, Text, Window } from '@reactjit/runtime/primitives';
-import { StaticFace } from '../../gallery/components/block-faces/BlockFaces';
+import { Avatar } from '@reactjit/runtime/avatar';
+import { BlockFace3D } from '../../gallery/components/block-faces/BlockFace3D';
 import { GenericChatCard } from '../../gallery/components/generic-chat-card/GenericChatCard';
 import { AssistantChat } from '../../chat/AssistantChat';
 import { SAMPLE_CHAMPIONS, type ChampionWorker } from './match-data';
@@ -37,7 +38,6 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
   return (
     <Window
       title={`Match ${runId}`}
-      kind="in_process"
       width={1400}
       height={900}
       onClose={onClose}
@@ -143,6 +143,10 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 const PORTRAIT_H = 180;
+// Avatar's `avatar` prop is required (avatar.parts.map crashes on undefined).
+// We don't want a body mesh on champion portraits — just the BlockFace3D
+// child rendering on a sphere — so pass an empty parts list.
+const EMPTY_AVATAR: any = { id: 'champion-portrait', parts: [] };
 
 function ChampionCard({ champion }: { champion: ChampionWorker }) {
   return (
@@ -154,19 +158,23 @@ function ChampionCard({ champion }: { champion: ChampionWorker }) {
       borderWidth: 1, borderColor: 'theme:rule',
       backgroundColor: 'theme:bg1',
     }}>
-      {/* 2D portrait — Block2d StaticFace works in any window kind
-          (in_process SDL2 OR independent wgpu). The 3D Avatar/Scene3D
-          path is GPU-singleton-bound so it would render blank in an
-          in_process secondary window. */}
-      <Box style={{
-        width: '100%', height: PORTRAIT_H,
-        borderRadius: 6,
-        backgroundColor: 'theme:bg2',
-        alignItems: 'center', justifyContent: 'center',
-        overflow: 'hidden',
-      }}>
-        <StaticFace archetype={champion.archetype} seed={champion.seed} scale={5} />
-      </Box>
+      {/* 3D portrait — sphere + textured BlockFace. Independent
+          windows have their own wgpu surface so this renders fine. */}
+      <Avatar
+        avatar={EMPTY_AVATAR}
+        style={{ width: '100%', height: PORTRAIT_H, borderRadius: 6 }}
+        backgroundColor="#1a1f2b"
+        cameraPosition={[0, 1.55, 1.5]}
+        cameraTarget={[0, 1.55, 0]}
+        cameraFov={48}
+      >
+        <BlockFace3D
+          center={[0, 1.55, 0]}
+          radius={0.42}
+          archetype={champion.archetype}
+          seed={champion.seed}
+        />
+      </Avatar>
       {/* Name + role */}
       <Col style={{ gap: 2 }}>
         <Text size={14} color="theme:ink" bold>{champion.name}</Text>
