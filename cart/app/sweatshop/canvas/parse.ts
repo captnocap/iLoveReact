@@ -21,9 +21,11 @@ import type { FlowNode, FlowEdge } from '../gallery/components/flow-editor/types
 
 const RE_IFTTT_CALL = /useIFTTT\s*\(\s*(['"`])((?:[^\\]|\\.)*?)\1\s*,\s*(['"`])((?:[^\\]|\\.)*?)\3\s*\)/g;
 const RE_ORPHAN     = /^\s*\/\/\s+(TRIGGER|ACTION)\s+(.+?)\s*$/gm;
+const RE_DOMAIN     = /^\s*\/\/\s+DOMAIN\s+(.+?)\s*$/gm;
 
 interface IfttCall { trigger: string; action: string }
 interface Orphan { kind: 'trigger' | 'action'; label: string }
+interface DomainRef { label: string }
 
 function extractCalls(code: string): IfttCall[] {
   const out: IfttCall[] = [];
@@ -44,6 +46,16 @@ function extractOrphans(code: string): Orphan[] {
       kind: m[1] === 'TRIGGER' ? 'trigger' : 'action',
       label: m[2].trim(),
     });
+  }
+  return out;
+}
+
+function extractDomains(code: string): DomainRef[] {
+  const out: DomainRef[] = [];
+  RE_DOMAIN.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = RE_DOMAIN.exec(code)) !== null) {
+    out.push({ label: m[1].trim() });
   }
   return out;
 }
@@ -88,6 +100,7 @@ export function parseCodeToGraph(
 ): { nodes: FlowNode[]; edges: FlowEdge[] } {
   const calls = extractCalls(code);
   const orphans = extractOrphans(code);
+  const domains = extractDomains(code);
 
   // Look-up: existing nodes keyed by (kind, label) — we preserve id+x+y
   // when a parsed spec matches.
@@ -111,12 +124,29 @@ export function parseCodeToGraph(
   const newEdges: FlowEdge[] = [];
   const usedNodeIds = new Set<string>();
 
-  // Always carry tokens (Goal, etc.) — they're scenery, not rule wiring.
+  // Tokens (Goal, domain refs) — keep only those still referenced via
+  // // DOMAIN <label> comments. Removing the comment removes the node.
+  // The seed Goal is preserved by the page-level seed, not here.
+  const wantedDomainLabels = new Set(domains.map((d) => d.label));
   for (const n of prevNodes) {
-    if (n.data?.kind === 'token') {
+    if ((n.data as any)?.kind === 'token' && wantedDomainLabels.has(n.label)) {
       newNodes.push(n);
       usedNodeIds.add(n.id);
     }
+  }
+  // Add brand-new domain comments that didn't have a prior token.
+  let domainIdx = 0;
+  for (const d of domains) {
+    const already = newNodes.some((n) => (n.data as any)?.kind === 'token' && n.label === d.label);
+    if (already) continue;
+    newNodes.push({
+      id: `dom_${d.label}_${Math.random().toString(36).slice(2, 8)}`,
+      label: d.label,
+      x: -360 + (domainIdx % 3) * 160,
+      y: -260 - Math.floor(domainIdx / 3) * 120,
+      data: { kind: 'token', role: d.label.toUpperCase().slice(0, 3), state: 'idle' },
+    });
+    domainIdx++;
   }
 
   // First pass: useIFTTT calls become edges + their endpoints.

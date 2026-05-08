@@ -337,8 +337,11 @@ export default function SweatshopPage() {
     // Drop near the canvas center with a small jitter so successive
     // spawns don't pile on one pixel.
     const jitter = (Math.random() - 0.5) * 80;
-    const node = item.spawn(jitter, 60 + jitter);
-    setNodes((prev) => [...prev, node]);
+    const result = item.spawn(jitter, 60 + jitter);
+    setNodes((prev) => [...prev, ...result.nodes]);
+    if (result.edges && result.edges.length > 0) {
+      setEdges((prev) => [...prev, ...result.edges!]);
+    }
   };
 
   return (

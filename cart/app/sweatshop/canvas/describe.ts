@@ -52,7 +52,7 @@ function classifyEdges(nodes: FlowNode[], edges: FlowEdge[]): {
 // ── Code mirror ──────────────────────────────────────────────────
 
 export function toCode(nodes: FlowNode[], edges: FlowEdge[]): string {
-  const { wired, orphans } = classifyEdges(nodes, edges);
+  const { wired, orphans, domains } = classifyEdges(nodes, edges);
   const out: string[] = [];
 
   out.push('// Auto-generated from your sweatshop canvas.');
@@ -77,8 +77,16 @@ export function toCode(nodes: FlowNode[], edges: FlowEdge[]): string {
     out.push('');
     out.push('// Orphan nodes (placed but unwired):');
     for (const o of orphans) {
-      const tag = ACTION_KINDS.has(o.data?.kind ?? '') ? 'ACTION ' : 'TRIGGER';
+      const tag = ACTION_KINDS.has((o.data as any)?.kind ?? '') ? 'ACTION ' : 'TRIGGER';
       out.push(`//   ${tag} ${o.label}`);
+    }
+  }
+
+  if (domains.length > 0) {
+    out.push('');
+    out.push('// Domain references on canvas:');
+    for (const d of domains) {
+      out.push(`//   DOMAIN  ${d.label}`);
     }
   }
 
@@ -88,7 +96,7 @@ export function toCode(nodes: FlowNode[], edges: FlowEdge[]): string {
 // ── English prose ────────────────────────────────────────────────
 
 export function toProse(nodes: FlowNode[], edges: FlowEdge[]): string {
-  const { wired, orphans } = classifyEdges(nodes, edges);
+  const { wired, orphans, domains } = classifyEdges(nodes, edges);
   const out: string[] = [];
 
   if (wired.length === 0) {
@@ -109,13 +117,18 @@ export function toProse(nodes: FlowNode[], edges: FlowEdge[]): string {
     out.push('');
     out.push(`Plus ${orphans.length} unwired piece${orphans.length === 1 ? '' : 's'}:`);
     for (const o of orphans) {
-      const k = o.data?.kind;
+      const k = (o.data as any)?.kind;
       if (ACTION_KINDS.has(k ?? '')) {
         out.push(`• "${o.label}" — an action waiting to be triggered.`);
       } else {
         out.push(`• "${o.label}" — a trigger that is not wired to an action yet.`);
       }
     }
+  }
+
+  if (domains.length > 0) {
+    out.push('');
+    out.push(`Domain references on canvas: ${domains.map((d) => d.label).join(', ')}.`);
   }
 
   return out.join('\n');

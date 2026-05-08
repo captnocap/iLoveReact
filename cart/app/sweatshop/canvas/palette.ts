@@ -15,19 +15,27 @@
 // the cursor location. Keep payloads minimal — the canvas owns layout.
 
 import { listIfttSources, listIfttActions } from '@reactjit/runtime/hooks/ifttt-registry';
-import type { FlowNode } from '../../gallery/components/flow-editor/types';
+import type { FlowNode, FlowEdge } from '../../gallery/components/flow-editor/types';
 
 export type PaletteTier = 'capability' | 'domain' | 'rules';
+
+export interface PaletteSpawn {
+  nodes: FlowNode[];
+  edges?: FlowEdge[];
+}
 
 export type PaletteItem = {
   id: string;
   tier: PaletteTier;
   label: string;
   hint?: string;
-  /** Build a partial FlowNode at the given drop point. The canvas
-   *  generates the id and edge wiring. */
-  spawn: (x: number, y: number) => FlowNode;
+  /** Build a spawn bundle at the given drop point. Single-node items
+   *  return one node; rule stamps return a wired trigger+action+edge.
+   *  Caller (sweatshop/page.tsx handleSpawn) appends both arrays. */
+  spawn: (x: number, y: number) => PaletteSpawn;
 };
+
+const newId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 8)}`;
 
 // ── Capability tier ───────────────────────────────────────────────
 
@@ -41,10 +49,12 @@ function capabilityNodes(): PaletteItem[] {
       label: prefix,
       hint: 'IFTTT trigger source',
       spawn: (x, y) => ({
-        id: `trg_${Math.random().toString(36).slice(2, 8)}`,
-        label: prefix,
-        x, y,
-        data: { kind: 'trigger', role: 'TRG', state: 'idle', stripe: 'trigger' },
+        nodes: [{
+          id: newId('trg'),
+          label: prefix,
+          x, y,
+          data: { kind: 'trigger', role: 'TRG', state: 'idle', stripe: 'trigger' },
+        }],
       }),
     });
   }
@@ -56,10 +66,12 @@ function capabilityNodes(): PaletteItem[] {
       label: prefix,
       hint: 'IFTTT action verb',
       spawn: (x, y) => ({
-        id: `act_${Math.random().toString(36).slice(2, 8)}`,
-        label: prefix,
-        x, y,
-        data: { kind: 'action', role: 'ACT', state: 'idle' },
+        nodes: [{
+          id: newId('act'),
+          label: prefix,
+          x, y,
+          data: { kind: 'action', role: 'ACT', state: 'idle' },
+        }],
       }),
     });
   }
@@ -93,10 +105,12 @@ function domainNodes(): PaletteItem[] {
     label: s.name,
     hint: s.hint,
     spawn: (x, y) => ({
-      id: `dom_${s.name}_${Math.random().toString(36).slice(2, 8)}`,
-      label: s.name,
-      x, y,
-      data: { kind: 'token', role: s.name.toUpperCase().slice(0, 3), state: 'idle' },
+      nodes: [{
+        id: newId(`dom_${s.name}`),
+        label: s.name,
+        x, y,
+        data: { kind: 'token', role: s.name.toUpperCase().slice(0, 3), state: 'idle' },
+      }],
     }),
   }));
 }
@@ -105,11 +119,37 @@ function domainNodes(): PaletteItem[] {
 // Recipe stamps + example rule patterns. Replace with reads from the
 // `rule` table once the binder's discovery surface is exposed.
 
-const RULE_STAMPS = [
-  { id: 'rule-pathology-block', label: 'Pathology → halt-run', hint: 'event:pathology.detected → halt-run' },
-  { id: 'rule-budget-warn',     label: 'Budget warn',          hint: 'event:budget.threshold-warned → notify-user' },
-  { id: 'rule-finding-promote', label: 'Promote finding',      hint: 'event:research.finding-promoted → queue-job' },
-  { id: 'rule-merge-celebrate', label: 'Merge celebrate',      hint: 'event:workstream.merged → consolidate-memory' },
+interface RuleStamp { id: string; label: string; hint: string; trigger: string; action: string }
+
+const RULE_STAMPS: RuleStamp[] = [
+  {
+    id: 'rule-pathology-block',
+    label: 'Pathology → halt-run',
+    hint: 'When a pathology is detected, halt the run.',
+    trigger: 'event:pathology.detected',
+    action:  'halt-run',
+  },
+  {
+    id: 'rule-budget-warn',
+    label: 'Budget warn',
+    hint: 'When budget threshold is hit, notify the user.',
+    trigger: 'event:budget.threshold-warned',
+    action:  'notify-user:Budget threshold hit',
+  },
+  {
+    id: 'rule-finding-promote',
+    label: 'Promote finding',
+    hint: 'When a research finding is promoted, queue a follow-up job.',
+    trigger: 'event:research.finding-promoted',
+    action:  'queue-job:promote',
+  },
+  {
+    id: 'rule-merge-celebrate',
+    label: 'Merge celebrate',
+    hint: 'On a merged workstream, consolidate memory.',
+    trigger: 'event:workstream.merged',
+    action:  'commit-state',
+  },
 ];
 
 function ruleNodes(): PaletteItem[] {
@@ -118,12 +158,33 @@ function ruleNodes(): PaletteItem[] {
     tier: 'rules' as const,
     label: s.label,
     hint: s.hint,
-    spawn: (x, y) => ({
-      id: `rule_${Math.random().toString(36).slice(2, 8)}`,
-      label: s.label,
-      x, y,
-      data: { kind: 'sequence', role: 'RULE', state: 'idle' },
-    }),
+    spawn: (x, y) => {
+      // A rule stamp expands to a real wired pair so it shows up in
+      // the code projection as one useIFTTT(...) line. Trigger goes
+      // on the left, action on the right with a single edge between.
+      const trgId = newId('trg');
+      const actId = newId('act');
+      const edgeId = newId('edge');
+      return {
+        nodes: [
+          {
+            id: trgId,
+            label: s.trigger,
+            x, y,
+            data: { kind: 'trigger', role: 'TRG', state: 'idle', stripe: 'trigger' },
+          },
+          {
+            id: actId,
+            label: s.action,
+            x: x + 240, y,
+            data: { kind: 'action', role: 'ACT', state: 'idle' },
+          },
+        ],
+        edges: [
+          { id: edgeId, from: trgId, to: actId, fromPort: 'out', toPort: 'in' },
+        ],
+      };
+    },
   }));
 }
 
