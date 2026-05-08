@@ -166,7 +166,16 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("m");
         exe.linkSystemLibrary("pthread");
         exe.linkSystemLibrary("dl");
-        exe.linkSystemLibrary("asound");
+        // libasound deliberately NOT linked here. No framework/*.zig
+        // references libasound symbols directly. SDL3 dlopens its audio
+        // backends (libasound, libpulse, libpipewire, libsndio) on
+        // demand at runtime — the previous unconditional link added a
+        // redundant DT_NEEDED entry that ldd then faithfully reported,
+        // dragging the entire audio stack into every cart bundle (incl.
+        // browser). Carts that need audio go through SDL3's runtime
+        // dispatch on the user's installed audio system. (When wave 2b
+        // lands the audio.zig stub-split + has-audio gate, this comment
+        // can be removed entirely — the absence-by-default is the rule.)
         if (sysroot) |sr| {
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
