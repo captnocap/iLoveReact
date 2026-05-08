@@ -143,6 +143,10 @@ function ProgressBar({ value }: { value: number }) {
 }
 
 const PORTRAIT_H = 180;
+// Avatar's `avatar` prop is required (`avatar.parts.map` crashes if
+// undefined). For champion portraits we don't want the body mesh —
+// just BlockFace3D children — so pass an empty parts list.
+const EMPTY_AVATAR: any = { id: 'champion-portrait', parts: [] };
 
 function ChampionCard({ champion }: { champion: ChampionWorker }) {
   return (
@@ -154,12 +158,15 @@ function ChampionCard({ champion }: { champion: ChampionWorker }) {
       borderWidth: 1, borderColor: 'theme:rule',
       backgroundColor: 'theme:bg1',
     }}>
-      {/* 3D portrait — sphere + textured BlockFace */}
+      {/* 3D portrait — sphere + textured BlockFace inside an empty
+          Scene3D wrapper. Avatar requires avatar.parts; we pass an
+          empty list so the wrapper renders only the BlockFace child. */}
       <Avatar
+        avatar={EMPTY_AVATAR}
         style={{ width: '100%', height: PORTRAIT_H, borderRadius: 6 }}
         backgroundColor="#1a1f2b"
-        cameraPosition={[0, 1.0, 3.6]}
-        cameraTarget={[0, 0.95, 0]}
+        cameraPosition={[0, 1.55, 1.5]}
+        cameraTarget={[0, 1.55, 0]}
         cameraFov={48}
       >
         <BlockFace3D
