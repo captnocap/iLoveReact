@@ -117,6 +117,8 @@ export type {
   SecureBufferMode,
 } from './usePrivacy';
 export { useTelemetry } from './useTelemetry';
+export { useMeasure } from './useMeasure';
+export type { MeasuredRect, UseMeasureResult } from './useMeasure';
 export type {
   TelemetrySpec,
   TelemetryResult,
@@ -133,6 +135,11 @@ export { useCRUD } from './useCRUD';
 export { useMedia } from './useMedia';
 export { useVoiceInput } from './useVoiceInput';
 export type { VoiceInputOptions, VoiceInputResult } from './useVoiceInput';
+export { useAudioInput };
+export type { AudioInputDevice, AudioInputHandle, AudioInputOptions } from './useAudioInput';
+export { useMIDI, subscribeMIDI };
+export type { MIDIHandle, MIDIOptions, MidiEvent, MidiEventType, MidiLearnTarget, MidiMapping, MidiPort } from './useMIDI';
+export { useFileDrop } from './useFileDrop';
 export { useFileWatch, attachWatcher } from './useFileWatch';
 export { useEmbed } from './useEmbed';
 export type { UseEmbedOpts, QueryOpts as EmbedQueryOpts, EmbedHit } from './useEmbed';
@@ -150,8 +157,8 @@ export type { FileWatchEvent, FileWatchOptions } from './useFileWatch';
 // Audio — declarative wrapper around framework/audio.zig. The <Audio>
 // primitive lives in runtime/audio.tsx; useAudio() is the imperative
 // façade for note-on/note-off/setParam (events that don't fit a tree).
-export { useAudio, AUDIO_MODULE_TYPE } from '../audio';
-export type { AudioHandle, AudioModuleType } from '../audio';
+export { useAudio, AUDIO_MODULE_TYPE, AUDIO_SOUND } from '../audio';
+export type { AudioHandle, AudioModuleType, AudioSound } from '../audio';
 
 export * from '../ffi';
 
