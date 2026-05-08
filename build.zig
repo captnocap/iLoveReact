@@ -167,7 +167,7 @@ pub fn build(b: *std.Build) void {
     const os_tag = target.result.os.tag;
     if (os_tag == .linux) {
         // X11/m/pthread/dl are universal on every desktop Linux — system-assumed,
-        // never bundled. SDL3/freetype/luajit/curl headers + sos come from the
+        // never bundled. SDL3/freetype/luajit headers + sos come from the
         // sysroot when -Dsysroot is set; otherwise we fall back to the host's
         // /usr/include/* layout (Debian-shaped paths).
         exe.linkSystemLibrary("X11");
@@ -392,7 +392,6 @@ pub fn build(b: *std.Build) void {
     if (has_physics) exe.linkSystemLibrary("box2d");
     if (has_sqlite) exe.linkSystemLibrary("sqlite3");
     if (has_terminal) exe.linkSystemLibrary("vterm");
-    exe.linkSystemLibrary("curl");
 
     // ── Privacy / libsodium (opt-in per cart) ─────────────────
     // Source-driven: cart bundle that imports usePrivacy gets libsodium
@@ -591,7 +590,7 @@ pub fn build(b: *std.Build) void {
             .flags = &.{ "-O2", "-std=c++17" },
         });
         // worker_bindings.zig + transitive SDKs need:
-        //   - libcurl (openai_compat_sdk → net/http.zig @cImport)
+        //   - std.http.Client (replaced libcurl in net/http.zig)
         //   - llama_headers (local_ai_runtime @cImport; libllama itself
         //     is dlopen'd at runtime, no link cost)
         //   - framework/ffi for compute_shim / common shims
@@ -605,7 +604,6 @@ pub fn build(b: *std.Build) void {
         tui_exe.stack_size = 64 * 1024 * 1024;
         tui_exe.linkLibC();
         tui_exe.linkLibCpp();
-        tui_exe.linkSystemLibrary("curl");
         if (has_terminal) tui_exe.linkSystemLibrary("vterm");
 
         const tui_step = b.step("tui-app", "Build a self-contained TUI cart binary (zig-out/bin/<app-name>)");
@@ -702,7 +700,6 @@ pub fn build(b: *std.Build) void {
     if (has_physics) luajit_runtime_test.linkSystemLibrary("box2d");
     if (has_sqlite) luajit_runtime_test.linkSystemLibrary("sqlite3");
     if (has_terminal) luajit_runtime_test.linkSystemLibrary("vterm");
-    luajit_runtime_test.linkSystemLibrary("curl");
     luajit_runtime_test.linkLibCpp();
 
     const run_luajit_runtime_test = b.addRunArtifact(luajit_runtime_test);

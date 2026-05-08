@@ -6,7 +6,8 @@
 //! - follows redirects
 //! - captures a text/html-ish response body for the browser shell
 //!
-//! This leaves the existing generic libcurl-backed runtime http hook alone.
+//! This is separate from the generic runtime http hook (framework/net/http.zig)
+//! which now uses std.http.Client.
 
 const std = @import("std");
 const tls = @import("tls");

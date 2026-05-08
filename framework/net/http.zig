@@ -1,7 +1,7 @@
-//! HTTP/HTTPS client — libcurl worker pool with ring buffer communication.
+//! HTTP/HTTPS client — std.http.Client worker pool with ring buffer communication.
 //!
-//! Port of love2d/lua/http.lua. Same architecture: worker threads block on
-//! curl_easy_perform(), main thread polls responses each frame.
+//! Replaces the previous libcurl implementation. Same architecture: worker threads
+//! block on client.fetch(), main thread polls responses each frame.
 //!
 //! Usage from generated code:
 //!   const http = @import("net/http.zig");
@@ -16,11 +16,6 @@
 
 const std = @import("std");
 const RingBuffer = @import("ring_buffer.zig").RingBuffer;
-const c = @cImport({
-    @cInclude("curl/curl.h");
-    // stdio for the download_to path: fopen/fwrite/fclose/FILE.
-    @cInclude("stdio.h");
-});
 
 // ── Configuration ────────────────────────────────────────────────────────
 
@@ -45,16 +40,14 @@ pub const RequestOpts = struct {
     proxy: ?[]const u8 = null,
     /// Stream the response body as a sequence of `.chunk` Responses followed
     /// by a terminal `.complete` (or `.err`). Each chunk carries up to
-    /// MAX_BODY bytes; cap is enforced per-libcurl-callback.
+    /// MAX_BODY bytes; cap is enforced per-write.
     stream: bool = false,
     /// If non-null, write the response body directly to this filesystem path.
     /// Skips the in-memory body buffer entirely — required for downloads
-    /// larger than MAX_BODY (model files, video, etc.). Worker fopen's the
-    /// path, curl write callback fwrites to the fd, progress is emitted as
-    /// `.progress` Responses (JSON `{"d":bytesDl,"t":bytesTotal}` in body),
-    /// and a terminal `.complete` (with HTTP status) or `.err` follows.
-    /// 30-second timeout is disabled for downloads. download_to and stream
-    /// are mutually exclusive — download_to takes precedence.
+    /// larger than MAX_BODY (model files, video, etc.). Progress is emitted as
+    /// `.progress` Responses (JSON `{"d":bytesDl,"t":0}` in body), and a
+    /// terminal `.complete` (with HTTP status) or `.err` follows.
+    /// stream and download_to are mutually exclusive — download_to takes precedence.
     download_to: ?[]const u8 = null,
 };
 
@@ -112,7 +105,6 @@ var initialized = false;
 /// Initialize the HTTP client. Spawns worker threads.
 pub fn init() void {
     if (initialized) return;
-    _ = c.curl_global_init(c.CURL_GLOBAL_ALL);
     for (0..MAX_WORKERS) |i| {
         workers[i] = std.Thread.spawn(.{}, workerMain, .{}) catch null;
     }
@@ -152,19 +144,11 @@ pub fn request(id: u32, opts: RequestOpts) bool {
         req.body_len = blen;
     }
 
-    // Copy proxy (explicit or resolved from env)
+    // Copy proxy (explicit — env vars are handled by std.http.Client)
     if (opts.proxy) |proxy| {
         const plen = @min(proxy.len, MAX_URL);
         @memcpy(req.proxy[0..plen], proxy[0..plen]);
         req.proxy_len = plen;
-    } else {
-        // Try environment proxy
-        const env_proxy = resolveProxy(opts.url[0..url_len]);
-        if (env_proxy) |ep| {
-            const plen = @min(ep.len, MAX_URL);
-            @memcpy(req.proxy[0..plen], ep[0..plen]);
-            req.proxy_len = plen;
-        }
     }
 
     req.stream = opts.stream;
@@ -205,18 +189,18 @@ pub fn destroy() void {
         if (workers[i]) |t| t.join();
         workers[i] = null;
     }
-    c.curl_global_cleanup();
     initialized = false;
 }
 
 // ── Worker thread ────────────────────────────────────────────────────────
 
 fn workerMain() void {
-    const handle = c.curl_easy_init() orelse return;
-    defer c.curl_easy_cleanup(handle);
+    const alloc = std.heap.page_allocator;
+    var client: std.http.Client = .{ .allocator = alloc };
+    defer client.deinit();
+    client.initDefaultProxies(alloc) catch {};
 
     while (true) {
-        // Spin-wait for a request (workers are cheap — they sleep most of the time)
         const req = blk: {
             while (true) {
                 if (request_queue.pop()) |r| break :blk r;
@@ -226,18 +210,21 @@ fn workerMain() void {
 
         if (req.shutdown) return;
 
-        // Streaming + download requests push their own chunk/progress +
-        // terminal Responses from inside executeRequest; the worker must
-        // NOT push an additional summary Response after.
         if (req.stream or req.download_path_len > 0) {
-            executeRequest(handle, &req, null);
+            executeStreamOrDownload(&client, &req);
             continue;
         }
 
         // Execute the request
         var resp = Response{};
         resp.id = req.id;
-        executeRequest(handle, &req, &resp);
+        executeRequest(&client, &req, &resp) catch |err| {
+            resp.response_type = .err;
+            const msg = @errorName(err);
+            const elen = @min(msg.len, MAX_ERROR);
+            @memcpy(resp.error_msg[0..elen], msg[0..elen]);
+            resp.error_len = elen;
+        };
         // Retry push until response is queued (don't drop responses)
         while (!response_queue.push(resp)) {
             std.Thread.sleep(1_000_000); // 1ms backoff
@@ -245,132 +232,98 @@ fn workerMain() void {
     }
 }
 
-fn executeRequest(handle: *c.CURL, req: *const Request, resp: ?*Response) void {
-    // URL (needs null terminator)
-    var url_buf: [MAX_URL + 1]u8 = undefined;
-    @memcpy(url_buf[0..req.url_len], req.url[0..req.url_len]);
-    url_buf[req.url_len] = 0;
-    _ = c.curl_easy_setopt(handle, c.CURLOPT_URL, @as([*c]const u8, &url_buf));
-
-    // Method
-    switch (req.method) {
-        .GET => _ = c.curl_easy_setopt(handle, c.CURLOPT_HTTPGET, @as(c_long, 1)),
-        .POST => _ = c.curl_easy_setopt(handle, c.CURLOPT_POST, @as(c_long, 1)),
-        .PUT => _ = c.curl_easy_setopt(handle, c.CURLOPT_CUSTOMREQUEST, @as([*c]const u8, "PUT")),
-        .DELETE => _ = c.curl_easy_setopt(handle, c.CURLOPT_CUSTOMREQUEST, @as([*c]const u8, "DELETE")),
-        .PATCH => _ = c.curl_easy_setopt(handle, c.CURLOPT_CUSTOMREQUEST, @as([*c]const u8, "PATCH")),
-        .HEAD => {
-            _ = c.curl_easy_setopt(handle, c.CURLOPT_NOBODY, @as(c_long, 1));
-            _ = c.curl_easy_setopt(handle, c.CURLOPT_CUSTOMREQUEST, @as([*c]const u8, "HEAD"));
-        },
-    }
-
-    // Request body
-    if (req.body_len > 0) {
-        _ = c.curl_easy_setopt(handle, c.CURLOPT_POSTFIELDSIZE, @as(c_long, @intCast(req.body_len)));
-        _ = c.curl_easy_setopt(handle, c.CURLOPT_POSTFIELDS, @as([*c]const u8, &req.body));
-    }
-
-    // Headers
-    var header_list: ?*c.curl_slist = null;
-    if (req.header_count > 0) {
-        for (0..req.header_count) |i| {
-            var hdr_buf: [MAX_HEADER_LEN * 2 + 4]u8 = undefined;
-            const klen = req.header_key_lens[i];
-            const vlen = req.header_val_lens[i];
-            @memcpy(hdr_buf[0..klen], req.header_keys[i][0..klen]);
-            hdr_buf[klen] = ':';
-            hdr_buf[klen + 1] = ' ';
-            @memcpy(hdr_buf[klen + 2 .. klen + 2 + vlen], req.header_vals[i][0..vlen]);
-            hdr_buf[klen + 2 + vlen] = 0;
-            header_list = c.curl_slist_append(header_list, @as([*c]const u8, &hdr_buf));
-        }
-        _ = c.curl_easy_setopt(handle, c.CURLOPT_HTTPHEADER, header_list);
-    }
-
-    // Proxy
-    if (req.proxy_len > 0) {
-        var proxy_buf: [MAX_URL + 1]u8 = undefined;
-        @memcpy(proxy_buf[0..req.proxy_len], req.proxy[0..req.proxy_len]);
-        proxy_buf[req.proxy_len] = 0;
-        _ = c.curl_easy_setopt(handle, c.CURLOPT_PROXY, @as([*c]const u8, &proxy_buf));
-    }
-
-    // Follow redirects
-    _ = c.curl_easy_setopt(handle, c.CURLOPT_FOLLOWLOCATION, @as(c_long, 1));
-    _ = c.curl_easy_setopt(handle, c.CURLOPT_MAXREDIRS, @as(c_long, 10));
-
-    // Timeout — disable for downloads (multi-minute on large model files);
-    // 30s default for everything else.
-    const is_download = req.download_path_len > 0;
-    _ = c.curl_easy_setopt(handle, c.CURLOPT_TIMEOUT, @as(c_long, if (is_download) 0 else 30));
-
-    // For downloads: open the destination fd before we hand control to
-    // libcurl. fopen-then-fwrite is ~6 lines via the C stdio (which is
-    // already linked because libcurl pulls it in).
-    var dl_fp: ?*c.FILE = null;
-    if (is_download) {
-        var path_buf: [MAX_URL + 1]u8 = undefined;
-        @memcpy(path_buf[0..req.download_path_len], req.download_path[0..req.download_path_len]);
-        path_buf[req.download_path_len] = 0;
-        dl_fp = c.fopen(@as([*c]const u8, &path_buf), "wb");
-        if (dl_fp == null) {
-            // Emit error terminal Response immediately, no curl invocation.
-            var done = Response{};
-            done.id = req.id;
-            done.response_type = .err;
-            const msg = "fopen failed (check directory exists + write perms)";
-            const elen = @min(msg.len, MAX_ERROR);
-            @memcpy(done.error_msg[0..elen], msg[0..elen]);
-            done.error_len = elen;
-            while (!response_queue.push(done)) std.Thread.sleep(1_000_000);
-            if (header_list) |hl| c.curl_slist_free_all(hl);
-            c.curl_easy_reset(handle);
-            return;
-        }
-    }
-    defer if (dl_fp) |fp| {
-        _ = c.fclose(fp);
+fn methodFromReq(req: *const Request) std.http.Method {
+    return switch (req.method) {
+        .GET => .GET,
+        .POST => .POST,
+        .PUT => .PUT,
+        .DELETE => .DELETE,
+        .PATCH => .PATCH,
+        .HEAD => .HEAD,
     };
+}
 
-    // Write callback context — three modes share one struct:
-    //   resp != null:   accumulate into resp.body (capped at MAX_BODY)
-    //   dl_fp != null:  fwrite straight to disk, body buffer not used
-    //   else:           streaming chunk responses
-    const WriteCtx = struct {
-        resp: ?*Response,
-        req_id: u32,
-        dl_fp: ?*c.FILE,
-    };
-    var write_ctx = WriteCtx{ .resp = resp, .req_id = req.id, .dl_fp = dl_fp };
+fn buildExtraHeaders(req: *const Request) [MAX_HEADERS]std.http.Header {
+    var extra_headers: [MAX_HEADERS]std.http.Header = undefined;
+    for (0..req.header_count) |i| {
+        extra_headers[i] = .{
+            .name = req.header_keys[i][0..req.header_key_lens[i]],
+            .value = req.header_vals[i][0..req.header_val_lens[i]],
+        };
+    }
+    return extra_headers;
+}
 
-    const write_cb = struct {
-        fn cb(data: [*c]u8, size: usize, nmemb: usize, userdata: *anyopaque) callconv(.c) usize {
-            const ctx: *WriteCtx = @ptrCast(@alignCast(userdata));
-            const total = size * nmemb;
-            // Download-to-file path takes precedence — bytes go straight
-            // to the open fd, not to the body buffer.
-            if (ctx.dl_fp) |fp| {
-                const written = c.fwrite(data, 1, total, fp);
-                return written; // short write surfaces as a curl error
-            }
-            if (ctx.resp) |r| {
-                const space = MAX_BODY - r.body_len;
-                const to_copy = @min(total, space);
-                if (to_copy < total) r.truncated = true;
-                if (to_copy > 0) {
-                    @memcpy(r.body[r.body_len..][0..to_copy], data[0..to_copy]);
-                    r.body_len += to_copy;
-                }
-            } else {
+fn executeRequest(client: *std.http.Client, req: *const Request, resp: *Response) !void {
+    const alloc = std.heap.page_allocator;
+    const url = req.url[0..req.url_len];
+    const method = methodFromReq(req);
+    var extra_headers = buildExtraHeaders(req);
+    const payload = if (req.body_len > 0) req.body[0..req.body_len] else null;
+
+    var body_alloc = std.Io.Writer.Allocating.init(alloc);
+    defer body_alloc.deinit();
+
+    const result = try client.fetch(.{
+        .location = .{ .url = url },
+        .method = method,
+        .payload = payload,
+        .extra_headers = extra_headers[0..req.header_count],
+        .response_writer = &body_alloc.writer,
+        .keep_alive = false,
+        .redirect_behavior = .init(10),
+    });
+
+    var body_list = body_alloc.toArrayList();
+    defer body_list.deinit(alloc);
+
+    resp.status = @intFromEnum(result.status);
+    const body = body_list.items;
+    const to_copy = @min(body.len, MAX_BODY);
+    if (to_copy > 0) {
+        @memcpy(resp.body[0..to_copy], body[0..to_copy]);
+    }
+    resp.body_len = to_copy;
+    resp.truncated = body.len > MAX_BODY;
+    resp.response_type = .complete;
+}
+
+// ── Streaming ────────────────────────────────────────────────────────────
+
+const StreamWriter = struct {
+    req_id: u32,
+    interface: std.Io.Writer,
+
+    pub fn init(req_id: u32) StreamWriter {
+        return .{
+            .req_id = req_id,
+            .interface = .{
+                .vtable = &.{
+                    .drain = drain,
+                    .sendFile = std.Io.Writer.unimplementedSendFile,
+                },
+                .buffer = &.{},
+            },
+        };
+    }
+
+    pub fn drain(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *StreamWriter = @fieldParentPtr("interface", io_w);
+        var total: usize = 0;
+        var s: usize = 0;
+        while (s < splat) : (s += 1) {
+            for (data) |slice| {
+                total += slice.len;
                 var off: usize = 0;
-                while (off < total) {
+                while (off < slice.len) {
                     var chunk = Response{};
-                    chunk.id = ctx.req_id;
+                    chunk.id = self.req_id;
                     chunk.response_type = .chunk;
-                    const remaining = total - off;
+                    const remaining = slice.len - off;
                     const to_copy = @min(remaining, MAX_BODY);
-                    @memcpy(chunk.body[0..to_copy], data[off .. off + to_copy]);
+                    if (to_copy > 0) {
+                        @memcpy(chunk.body[0..to_copy], slice[off..off + to_copy]);
+                    }
                     chunk.body_len = to_copy;
                     while (!response_queue.push(chunk)) {
                         std.Thread.sleep(1_000_000); // 1ms backoff if queue full
@@ -378,129 +331,138 @@ fn executeRequest(handle: *c.CURL, req: *const Request, resp: ?*Response) void {
                     off += to_copy;
                 }
             }
-            return total; // return total to not signal error to curl
         }
-    }.cb;
+        return total;
+    }
+};
 
-    _ = c.curl_easy_setopt(handle, c.CURLOPT_WRITEFUNCTION, write_cb);
-    _ = c.curl_easy_setopt(handle, c.CURLOPT_WRITEDATA, @as(*anyopaque, @ptrCast(&write_ctx)));
+// ── Download ─────────────────────────────────────────────────────────────
 
-    // Progress callback (download mode only). libcurl invokes this often;
-    // we throttle to ~10 Hz to keep the response queue from saturating, and
-    // drop progress events when full so they never block the actual
-    // transfer.
-    const ProgCtx = struct {
-        req_id: u32,
-        last_emit_ms: i64,
-    };
-    var prog_ctx = ProgCtx{ .req_id = req.id, .last_emit_ms = 0 };
-    if (is_download) {
-        const prog_cb = struct {
-            fn cb(
-                userdata: *anyopaque,
-                dltotal: c.curl_off_t,
-                dlnow: c.curl_off_t,
-                _: c.curl_off_t,
-                _: c.curl_off_t,
-            ) callconv(.c) c_int {
-                const ctx: *ProgCtx = @ptrCast(@alignCast(userdata));
-                const now_ms = std.time.milliTimestamp();
-                if (now_ms - ctx.last_emit_ms < 100) return 0;
-                ctx.last_emit_ms = now_ms;
-                var pr = Response{};
-                pr.id = ctx.req_id;
-                pr.response_type = .progress;
-                const written = std.fmt.bufPrint(&pr.body, "{{\"d\":{d},\"t\":{d}}}", .{ dlnow, dltotal }) catch return 0;
-                pr.body_len = written.len;
-                _ = response_queue.push(pr); // drop on full — progress is best-effort
-                return 0;
-            }
-        }.cb;
-        _ = c.curl_easy_setopt(handle, c.CURLOPT_NOPROGRESS, @as(c_long, 0));
-        _ = c.curl_easy_setopt(handle, c.CURLOPT_XFERINFOFUNCTION, prog_cb);
-        _ = c.curl_easy_setopt(handle, c.CURLOPT_XFERINFODATA, @as(*anyopaque, @ptrCast(&prog_ctx)));
+const DownloadWriter = struct {
+    req_id: u32,
+    file: std.fs.File,
+    bytes_written: usize = 0,
+    last_emit_ms: i64 = 0,
+    interface: std.Io.Writer,
+
+    pub fn init(req_id: u32, file: std.fs.File) DownloadWriter {
+        return .{
+            .req_id = req_id,
+            .file = file,
+            .interface = .{
+                .vtable = &.{
+                    .drain = drain,
+                    .sendFile = std.Io.Writer.unimplementedSendFile,
+                },
+                .buffer = &.{},
+            },
+        };
     }
 
-    // Execute
-    const result = c.curl_easy_perform(handle);
+    pub fn drain(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
+        const self: *DownloadWriter = @fieldParentPtr("interface", io_w);
+        var total: usize = 0;
+        var s: usize = 0;
+        while (s < splat) : (s += 1) {
+            for (data) |slice| {
+                self.file.writeAll(slice) catch return error.WriteFailed;
+                total += slice.len;
+                self.bytes_written += slice.len;
 
-    if (resp) |r| {
-        if (result != c.CURLE_OK) {
-            r.response_type = .err;
-            const err_str = c.curl_easy_strerror(result);
-            if (err_str) |es| {
-                const es_slice = std.mem.span(es);
-                const elen = @min(es_slice.len, MAX_ERROR);
-                @memcpy(r.error_msg[0..elen], es_slice[0..elen]);
-                r.error_len = elen;
+                const now_ms = std.time.milliTimestamp();
+                if (now_ms - self.last_emit_ms >= 100) {
+                    self.last_emit_ms = now_ms;
+                    var pr = Response{};
+                    pr.id = self.req_id;
+                    pr.response_type = .progress;
+                    const written = std.fmt.bufPrint(&pr.body, "{{\"d\":{d},\"t\":0}}", .{self.bytes_written}) catch return error.WriteFailed;
+                    pr.body_len = written.len;
+                    _ = response_queue.push(pr); // drop on full — progress is best-effort
+                }
             }
-        } else {
-            r.response_type = .complete;
-            var status_code: c_long = 0;
-            _ = c.curl_easy_getinfo(handle, c.CURLINFO_RESPONSE_CODE, &status_code);
-            r.status = if (status_code >= 0 and status_code <= 999) @intCast(status_code) else 0;
         }
-    } else {
-        // Streaming mode — push terminal Response (.complete or .err)
+        return total;
+    }
+
+};
+
+// ── Streaming + Download execution ───────────────────────────────────────
+
+fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
+    const url = req.url[0..req.url_len];
+    const method = methodFromReq(req);
+    var extra_headers = buildExtraHeaders(req);
+    const payload = if (req.body_len > 0) req.body[0..req.body_len] else null;
+
+    if (req.stream) {
+        var stream_writer = StreamWriter.init(req.id);
+        const result = client.fetch(.{
+            .location = .{ .url = url },
+            .method = method,
+            .payload = payload,
+            .extra_headers = extra_headers[0..req.header_count],
+            .response_writer = &stream_writer.interface,
+            .keep_alive = false,
+            .redirect_behavior = .init(10),
+        });
+
         var done = Response{};
         done.id = req.id;
-        if (result != c.CURLE_OK) {
-            done.response_type = .err;
-            const err_str = c.curl_easy_strerror(result);
-            if (err_str) |es| {
-                const es_slice = std.mem.span(es);
-                const elen = @min(es_slice.len, MAX_ERROR);
-                @memcpy(done.error_msg[0..elen], es_slice[0..elen]);
-                done.error_len = elen;
-            }
-        } else {
+        if (result) |r| {
             done.response_type = .complete;
-            var status_code: c_long = 0;
-            _ = c.curl_easy_getinfo(handle, c.CURLINFO_RESPONSE_CODE, &status_code);
-            done.status = if (status_code >= 0 and status_code <= 999) @intCast(status_code) else 0;
+            done.status = @intFromEnum(r.status);
+        } else |err| {
+            done.response_type = .err;
+            const msg = @errorName(err);
+            const elen = @min(msg.len, MAX_ERROR);
+            @memcpy(done.error_msg[0..elen], msg[0..elen]);
+            done.error_len = elen;
+        }
+        while (!response_queue.push(done)) {
+            std.Thread.sleep(1_000_000);
+        }
+    } else {
+        // Download mode
+        const file = std.fs.cwd().createFile(req.download_path[0..req.download_path_len], .{}) catch |err| {
+            var done = Response{};
+            done.id = req.id;
+            done.response_type = .err;
+            const msg = @errorName(err);
+            const elen = @min(msg.len, MAX_ERROR);
+            @memcpy(done.error_msg[0..elen], msg[0..elen]);
+            done.error_len = elen;
+            while (!response_queue.push(done)) {
+                std.Thread.sleep(1_000_000);
+            }
+            return;
+        };
+        defer file.close();
+
+        var dl_writer = DownloadWriter.init(req.id, file);
+        const result = client.fetch(.{
+            .location = .{ .url = url },
+            .method = method,
+            .payload = payload,
+            .extra_headers = extra_headers[0..req.header_count],
+            .response_writer = &dl_writer.interface,
+            .keep_alive = false,
+            .redirect_behavior = .init(10),
+        });
+
+        var done = Response{};
+        done.id = req.id;
+        if (result) |r| {
+            done.response_type = .complete;
+            done.status = @intFromEnum(r.status);
+        } else |err| {
+            done.response_type = .err;
+            const msg = @errorName(err);
+            const elen = @min(msg.len, MAX_ERROR);
+            @memcpy(done.error_msg[0..elen], msg[0..elen]);
+            done.error_len = elen;
         }
         while (!response_queue.push(done)) {
             std.Thread.sleep(1_000_000);
         }
     }
-
-    // Cleanup
-    if (header_list) |hl| c.curl_slist_free_all(hl);
-
-    // Reset handle for reuse
-    c.curl_easy_reset(handle);
-}
-
-// ── Proxy resolution ─────────────────────────────────────────────────────
-// Reference: love2d/lua/http.lua:126-160
-
-fn resolveProxy(url: []const u8) ?[]const u8 {
-    // Check NO_PROXY first
-    if (std.posix.getenv("NO_PROXY") orelse std.posix.getenv("no_proxy")) |no_proxy| {
-        if (no_proxy.len > 0 and !std.mem.eql(u8, no_proxy, "")) {
-            // Simplified: if NO_PROXY is "*", skip all proxies
-            if (std.mem.eql(u8, no_proxy, "*")) return null;
-        }
-    }
-
-    // HTTPS
-    if (url.len > 8 and std.mem.eql(u8, url[0..8], "https://")) {
-        if (std.posix.getenv("HTTPS_PROXY") orelse std.posix.getenv("https_proxy")) |p| {
-            if (p.len > 0) return p;
-        }
-    }
-
-    // HTTP
-    if (url.len > 7 and std.mem.eql(u8, url[0..7], "http://")) {
-        if (std.posix.getenv("HTTP_PROXY") orelse std.posix.getenv("http_proxy")) |p| {
-            if (p.len > 0) return p;
-        }
-    }
-
-    // Fallback
-    if (std.posix.getenv("ALL_PROXY") orelse std.posix.getenv("all_proxy")) |p| {
-        if (p.len > 0) return p;
-    }
-
-    return null;
 }

@@ -19,7 +19,7 @@ var g_page_fetch_init_done: bool = false;
 
 /// Zig-side stream consumer for net_http. Lets in-process callers (e.g.
 /// openai_compat_sdk) hook the same poll/dispatch loop the JS-facing
-/// __http_stream_open path uses, without re-implementing curl wrangling.
+/// __http_stream_open path uses, without re-implementing HTTP client setup.
 pub const HttpZigCallbacks = struct {
     onChunk: *const fn (ctx: *anyopaque, data: []const u8) void,
     onEnd: *const fn (ctx: *anyopaque, status: u16, err: ?[]const u8) void,
@@ -159,77 +159,84 @@ fn parseHttpReq(parsed: *const std.json.Parsed(std.json.Value)) ?HttpReq {
     };
 }
 
-fn httpSyncViaCurl(req: HttpReq) ![]u8 {
+fn httpSyncViaClient(req: HttpReq) ![]u8 {
     const alloc = std.heap.page_allocator;
 
-    var argv = std.ArrayList([]const u8){};
-    defer argv.deinit(alloc);
-    try argv.appendSlice(alloc, &.{ "curl", "-sSi", "-X", req.method });
+    const uri = try std.Uri.parse(req.url);
+    const method: std.http.Method = if (std.ascii.eqlIgnoreCase(req.method, "POST")) .POST
+        else if (std.ascii.eqlIgnoreCase(req.method, "PUT")) .PUT
+        else if (std.ascii.eqlIgnoreCase(req.method, "DELETE")) .DELETE
+        else if (std.ascii.eqlIgnoreCase(req.method, "PATCH")) .PATCH
+        else if (std.ascii.eqlIgnoreCase(req.method, "HEAD")) .HEAD
+        else .GET;
 
-    var tbuf: [16]u8 = undefined;
-    const tstr = try std.fmt.bufPrint(&tbuf, "{d}", .{req.timeout_sec});
-    try argv.appendSlice(alloc, &.{ "--max-time", tstr });
+    var client: std.http.Client = .{ .allocator = alloc };
+    defer client.deinit();
 
+    var extra_headers = std.ArrayList(std.http.Header){};
+    defer extra_headers.deinit(alloc);
     if (req.headers) |hdrs| {
         var it = hdrs.iterator();
         while (it.next()) |entry| {
             if (entry.value_ptr.* != .string) continue;
-            const hdr_line = try std.fmt.allocPrint(alloc, "{s}: {s}", .{ entry.key_ptr.*, entry.value_ptr.string });
-            try argv.appendSlice(alloc, &.{ "-H", hdr_line });
+            try extra_headers.append(alloc, .{
+                .name = entry.key_ptr.*,
+                .value = entry.value_ptr.string,
+            });
         }
     }
 
-    if (req.body) |b| try argv.appendSlice(alloc, &.{ "--data-binary", b });
-    try argv.append(alloc, req.url);
-
-    const result = try std.process.Child.run(.{
-        .allocator = alloc,
-        .argv = argv.items,
-        .max_output_bytes = 8 * 1024 * 1024,
+    var request_obj = try client.request(method, uri, .{
+        .extra_headers = extra_headers.items,
+        .keep_alive = false,
+        .redirect_behavior = .init(10),
     });
-    defer alloc.free(result.stderr);
+    defer request_obj.deinit();
 
-    const raw = result.stdout;
-    const sep_crlf = std.mem.indexOf(u8, raw, "\r\n\r\n");
-    const sep_lf = std.mem.indexOf(u8, raw, "\n\n");
-    const header_end: usize = if (sep_crlf) |v| v else (if (sep_lf) |v| v else raw.len);
-    const body_start: usize = if (sep_crlf != null) header_end + 4 else (if (sep_lf != null) header_end + 2 else raw.len);
-    const header_block = raw[0..header_end];
-    const body = raw[body_start..];
-
-    var status: u16 = 0;
-    if (std.mem.indexOfScalar(u8, header_block, '\n')) |nl| {
-        const first_line = std.mem.trim(u8, header_block[0..nl], " \r\t");
-        if (std.mem.indexOfScalar(u8, first_line, ' ')) |sp1| {
-            const after = first_line[sp1 + 1 ..];
-            const sp2 = std.mem.indexOfScalar(u8, after, ' ') orelse after.len;
-            status = std.fmt.parseInt(u16, after[0..sp2], 10) catch 0;
-        }
+    if (req.body) |b| {
+        request_obj.transfer_encoding = .{ .content_length = b.len };
+        var body = try request_obj.sendBodyUnflushed(&.{});
+        try body.writer.writeAll(b);
+        try body.end();
+        try request_obj.connection.?.flush();
+    } else {
+        try request_obj.sendBodiless();
     }
 
+    var redirect_buf: [8192]u8 = undefined;
+    var response = try request_obj.receiveHead(&redirect_buf);
+
+    const status = @intFromEnum(response.head.status);
+
+    // Read body
+    var body_list = std.ArrayList(u8){};
+    defer body_list.deinit(alloc);
+
+    var transfer_buf: [4096]u8 = undefined;
+    const reader = response.reader(&transfer_buf);
+    while (true) {
+        var buf: [4096]u8 = undefined;
+        const n = reader.readSliceShort(&buf) catch break;
+        if (n == 0) break;
+        try body_list.appendSlice(alloc, buf[0..n]);
+    }
+
+    // Build JSON with status, headers, body
     var out = std.ArrayList(u8){};
     errdefer out.deinit(alloc);
     try out.writer(alloc).print("{{\"status\":{d},\"headers\":{{", .{status});
     var first_hdr = true;
-    var it = std.mem.splitScalar(u8, header_block, '\n');
-    _ = it.next();
-    while (it.next()) |line| {
-        const trimmed = std.mem.trim(u8, line, " \r\t");
-        if (trimmed.len == 0) continue;
-        const colon = std.mem.indexOfScalar(u8, trimmed, ':') orelse continue;
-        const k = std.mem.trim(u8, trimmed[0..colon], " \t");
-        const v = std.mem.trim(u8, trimmed[colon + 1 ..], " \t");
+    var hit = std.http.HeaderIterator.init(response.head.bytes);
+    while (hit.next()) |hdr| {
         if (!first_hdr) try out.append(alloc, ',');
         first_hdr = false;
-        try jsonEscape(&out, alloc, k);
+        try jsonEscape(&out, alloc, hdr.name);
         try out.append(alloc, ':');
-        try jsonEscape(&out, alloc, v);
+        try jsonEscape(&out, alloc, hdr.value);
     }
     try out.appendSlice(alloc, "},\"body\":");
-    try jsonEscape(&out, alloc, body);
+    try jsonEscape(&out, alloc, body_list.items);
     try out.append(alloc, '}');
-
-    alloc.free(result.stdout);
     return out.toOwnedSlice(alloc);
 }
 
@@ -318,18 +325,24 @@ fn hostFetch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const url = jsStringArg(std.heap.page_allocator, info, 0) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(url);
 
-    const result = std.process.Child.run(.{
-        .allocator = std.heap.page_allocator,
-        .max_output_bytes = 2 * 1024 * 1024,
-        .argv = &[_][]const u8{
-            "curl", "-sL",                                                            "--max-time", "10", "--compressed",
-            "-H",   "User-Agent: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36", url,
-        },
+    const alloc = std.heap.page_allocator;
+    var client: std.http.Client = .{ .allocator = alloc };
+    defer client.deinit();
+
+    var body_alloc = std.Io.Writer.Allocating.init(alloc);
+    defer body_alloc.deinit();
+
+    client.fetch(.{
+        .location = .{ .url = url },
+        .response_writer = &body_alloc.writer,
+        .keep_alive = false,
+        .redirect_behavior = .init(10),
     }) catch return setReturnUndefined(info, cx.iso);
-    defer std.heap.page_allocator.free(result.stdout);
-    defer std.heap.page_allocator.free(result.stderr);
-    if (result.stdout.len == 0) return setReturnUndefined(info, cx.iso);
-    setReturnString(info, cx.iso, result.stdout);
+
+    var body_list = body_alloc.toArrayList();
+    defer body_list.deinit(alloc);
+    if (body_list.items.len == 0) return setReturnUndefined(info, cx.iso);
+    setReturnString(info, cx.iso, body_list.items);
 }
 
 fn hostHttpRequestSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -343,10 +356,10 @@ fn hostHttpRequestSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     };
     defer parsed.deinit();
     const req = parseHttpReq(&parsed) orelse return setReturnString(info, cx.iso, "{\"status\":0,\"headers\":{},\"body\":\"\",\"error\":\"bad request\"}");
-    const resp_json = httpSyncViaCurl(req) catch |err| {
+    const resp_json = httpSyncViaClient(req) catch |err| {
         var buf: [256]u8 = undefined;
         const s = std.fmt.bufPrint(&buf, "{{\"status\":0,\"headers\":{{}},\"body\":\"\",\"error\":\"{s}\"}}", .{@errorName(err)}) catch
-            return setReturnString(info, cx.iso, "{\"status\":0,\"headers\":{},\"body\":\"\",\"error\":\"curl failed\"}");
+            return setReturnString(info, cx.iso, "{\"status\":0,\"headers\":{},\"body\":\"\",\"error\":\"request failed\"}");
         return setReturnString(info, cx.iso, s);
     };
     defer std.heap.page_allocator.free(resp_json);
@@ -462,7 +475,7 @@ fn hostHttpDownloadToFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
 }
 
 /// JS-side `close()` symmetry. Cancellation isn't actually plumbed yet
-/// (curl_easy_perform runs to completion in the worker), so this just frees
+/// (std.http.Client fetch runs to completion in the worker), so this just frees
 /// the rid mapping early so any late chunks/end events get dropped on the
 /// floor instead of firing into a stale subscriber.
 fn hostHttpStreamClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

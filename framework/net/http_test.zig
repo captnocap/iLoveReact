@@ -1,6 +1,5 @@
-//! Standalone HTTP client test — verifies ring buffer + libcurl worker pool.
-//! Run: zig build-exe tsz/runtime/net/http_test.zig --library c --library curl \
-//!      -I /usr/include/x86_64-linux-gnu && ./http_test
+//! Standalone HTTP client test — verifies ring buffer + std.http.Client worker pool.
+//! Run: zig build-exe framework/net/http_test.zig && ./http_test
 
 const std = @import("std");
 const log = @import("../log.zig");
