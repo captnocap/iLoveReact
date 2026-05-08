@@ -13,7 +13,7 @@
 // lock-in flow populates them.
 
 import { useState } from 'react';
-import { Box, Col, Row, Pressable, ScrollView, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Pressable, ScrollView, Text, Window } from '@reactjit/runtime/primitives';
 import { Avatar } from '@reactjit/runtime/avatar';
 import { BlockFace3D } from '../../gallery/components/block-faces/BlockFace3D';
 import { GenericChatCard } from '../../gallery/components/generic-chat-card/GenericChatCard';
@@ -35,38 +35,14 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
   const [progress, setProgress] = useState(0);
   const champions = SAMPLE_CHAMPIONS;
 
-  // Full-screen modal overlay over the planner. Stays in the same
-  // React + layout context as the parent (no new V8 / layout-dispatch
-  // boundary), which was crashing <Window>'s separate-context path.
-  // We get a clear "match mode" surface with a close button; promote
-  // back to a native Window when the framework's secondary-context
-  // bootstrap is wired.
   return (
-    <Box style={{
-      position: 'absolute',
-      top: 0, left: 0, right: 0, bottom: 0,
-      zIndex: 1000,
-      backgroundColor: 'theme:bg0',
-    }}>
-      <Row style={{
-        paddingLeft: 16, paddingRight: 16, paddingTop: 8, paddingBottom: 8,
-        gap: 12, alignItems: 'center',
-        borderBottomWidth: 1, borderBottomColor: 'theme:rule',
-        backgroundColor: 'theme:bg1',
-      }}>
-        <Text size={14} color="theme:ink" bold>Match</Text>
-        <Text size={11} color="theme:inkDim">{runId}</Text>
-        <Box style={{ flexGrow: 1 }} />
-        <Pressable onPress={onClose} style={{
-          paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4,
-          borderRadius: 4,
-          borderWidth: 1, borderColor: 'theme:rule',
-          backgroundColor: 'theme:bg2',
-        }}>
-          <Text size={11} color="theme:inkDim">Close ✕</Text>
-        </Pressable>
-      </Row>
-      <Col style={{ flexGrow: 1, minHeight: 0 }}>
+    <Window
+      title={`Match ${runId}`}
+      width={1400}
+      height={900}
+      onClose={onClose}
+    >
+      <Col style={{ width: '100%', height: '100%', backgroundColor: 'theme:bg0' }}>
         {phase === 'loading' ? (
           <LoadingPhase
             runId={runId}
@@ -79,7 +55,7 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
           <InGamePhase champions={champions} onSurrender={onClose} />
         )}
       </Col>
-    </Box>
+    </Window>
   );
 }
 
