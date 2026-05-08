@@ -195,20 +195,26 @@ echo "[ship] compiling native binary..."
 APP_SOURCE="v8_app.zig"
 V8_FLAG="-Duse-v8=true"
 
-# Cart-declared capabilities (cart/<name>/cart.json). Currently only
-# `customChrome: true` is honoured — the runtime reads it as
-# build_options.custom_chrome to decide borderless vs windowed chrome.
-# Missing cart.json → no flag passed → default false.
+# Cart-declared capabilities (cart/<name>/cart.json). The runtime reads
+# `customChrome: true` as build_options.custom_chrome to decide borderless
+# vs windowed chrome. But customChrome=true alone is dangerous: if the
+# cart's React tree never renders a draggable window-control bar (i.e.
+# no `windowDrag` prop on any node), the user gets a borderless box with
+# no way to move or close it. Force OS chrome in that case.
+#
+# Detection signal: `windowDrag` literal in the bundled JS. The framework
+# uses that prop on the chrome bar's drag region — verified across carts
+# (browser has it, media doesn't, icon_bench doesn't). Reliable static
+# signal because the prop name is unique to this code path.
 CUSTOM_CHROME_FLAG=""
-if [[ -f "$CART_MANIFEST" ]]; then
-    # Grep-based probe avoids shelling out to a JS runtime for a one-field read.
-    # Matches `"customChrome":true` with optional whitespace. A cart author who
-    # writes something creative (nested objects, trailing comments) won't match,
-    # which is fine — the flag is opt-in and defaulting to "windowed chrome" is
-    # the safer fallback.
-    if grep -Eq '"customChrome"[[:space:]]*:[[:space:]]*true' "$CART_MANIFEST"; then
+if [[ -f "$CART_MANIFEST" ]] && grep -Eq '"customChrome"[[:space:]]*:[[:space:]]*true' "$CART_MANIFEST"; then
+    BUNDLE_FILE_FOR_CHROME="$CART_ROOT/bundle-${NAME}.js"
+    if [[ -f "$BUNDLE_FILE_FOR_CHROME" ]] && grep -q "windowDrag" "$BUNDLE_FILE_FOR_CHROME"; then
         CUSTOM_CHROME_FLAG="-Dcustom-chrome=true"
-        echo "[ship] cart manifest: customChrome=true"
+        echo "[ship] cart manifest: customChrome=true (windowDrag detected → borderless)"
+    else
+        echo "[ship] cart manifest: customChrome=true ignored — no windowDrag in bundle"
+        echo "[ship]   (cart has no draggable chrome bar; falling back to OS chrome so user can move/close the window)"
     fi
 fi
 

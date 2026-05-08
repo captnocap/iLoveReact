@@ -77,7 +77,11 @@ export function indexDeep(dir: string, options?: MediaIndexOptions): MediaFile[]
 const MEDIA_TYPES: Record<string, MediaType> = {
   mp4: 'video', mkv: 'video', avi: 'video', mov: 'video', wmv: 'video',
   webm: 'video', flv: 'video', m4v: 'video', mpg: 'video', mpeg: 'video',
-  ts: 'video', vob: 'video', ogv: 'video', '3gp': 'video',
+  // m2ts / mts are the unambiguous MPEG-TS container extensions. Bare
+  // `.ts` is overloaded with TypeScript source files — classifying every
+  // .ts as video and feeding it to libmpv produces "Failed to recognize
+  // file format" on any cart that lives in a TS source tree.
+  m2ts: 'video', mts: 'video', vob: 'video', ogv: 'video', '3gp': 'video',
   mp3: 'audio', flac: 'audio', ogg: 'audio', wav: 'audio', aac: 'audio',
   m4a: 'audio', wma: 'audio', opus: 'audio', aiff: 'audio', ape: 'audio', alac: 'audio',
   jpg: 'image', jpeg: 'image', png: 'image', gif: 'image', bmp: 'image',
