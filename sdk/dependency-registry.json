@@ -111,9 +111,10 @@
       "kind": "dynamic-library",
       "systemNames": ["luajit-5.1"],
       "includePaths": ["luajit-2.1"],
-      "linkPolicy": "foundational",
-      "bundlePolicy": "always",
-      "note": "Compute worker runtime. Pinned + bundled."
+      "linkPolicy": "feature-gated",
+      "bundlePolicy": "feature-gated",
+      "buildFlag": "-Dhas-lua-worker",
+      "note": "Compute worker runtime. Linked only when -Dhas-lua-worker=true (or when -Dhas-audio is set, since audio_real.zig's DSP engine imports zluajit). Carts that don't trigger either gate get framework/luajit_worker_stub.zig + audio_stub.zig and never link luajit-5.1."
     },
     "x11": {
       "kind": "platform-library",
@@ -217,54 +218,43 @@
       "nativeLibraries": ["v8"]
     },
     "window-runtime": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/window-runtime.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-window-runtime"],
-      "note": "Native libs (sdl3, wgpu-native, freetype, stb-image*, x11, posix-threading, macos-ui-frameworks) are foundational — always linked. The build option only signals intent; nothing extra is link-gated by it."
+      "note": "Native libs (sdl3, wgpu-native, freetype, stb-image*, x11, posix-threading, macos-ui-frameworks) are foundational — always linked. The build option only signals intent; nothing extra is link-gated by it. No auto-trigger — pass -Dhas-window-runtime manually if a future site needs it."
     },
     "canvas": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/canvas.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-canvas"],
-      "note": "wgpu-native is foundational; this flag only gates Canvas-primitive Zig code."
+      "note": "wgpu-native is foundational; this flag only gates Canvas-primitive Zig code. No auto-trigger today — pass -Dhas-canvas manually."
     },
     "graph": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/graph.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-graph"],
-      "note": "wgpu-native is foundational; this flag only gates Graph-primitive Zig code."
+      "note": "wgpu-native is foundational; this flag only gates Graph-primitive Zig code. No auto-trigger today — pass -Dhas-graph manually."
     },
     "text-rendering": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/text-rendering.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-text-rendering"],
-      "note": "freetype is foundational; this flag only gates text-rendering Zig code paths."
+      "note": "freetype is foundational; this flag only gates text-rendering Zig code paths. No auto-trigger today — pass -Dhas-text-rendering manually."
     },
     "image": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/image.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-image"],
-      "note": "stb-image is foundational; this flag only gates Image-primitive Zig code."
+      "note": "stb-image is foundational; this flag only gates Image-primitive Zig code. No auto-trigger today — pass -Dhas-image manually."
     },
     "video": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/video.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-video"],
       "nativeLibraries": ["libmpv"],
-      "note": "wgpu-native is foundational. libmpv is dlopen'd at runtime — the registry entry exists so pack-sdk knows to stage libmpv.so.2 alongside the SDK payload when has-video, not because it gets link-time gated."
+      "note": "wgpu-native is foundational. libmpv is dlopen'd at runtime — the registry entry exists so pack-sdk knows to stage libmpv.so.2 alongside the SDK payload when has-video, not because it gets link-time gated. No auto-trigger today; -Dhas-video is passed manually for video-using carts."
     },
     "audio": {
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/audio.tsx" },
-        { "kind": "featureMarker", "input": "runtime/features/audio.ts" }
+        { "kind": "metafileInput", "input": "runtime/audio.tsx" }
       ],
-      "buildOptions": ["has-audio"]
+      "buildOptions": ["has-audio"],
+      "nativeLibraries": ["luajit"],
+      "note": "Triggered by carts importing runtime/audio.tsx. Compiles framework/audio_real.zig (SDL3 audio + LuaJIT DSP engine). Implies has-lua-worker — see luajit nativeLibrary entry."
     },
     "midi": {
       "triggers": [
@@ -276,18 +266,16 @@
     },
     "terminal": {
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useTerminalRecorder.ts" },
-        { "kind": "featureMarker", "input": "runtime/features/terminal.ts" }
+        { "kind": "metafileInput", "input": "runtime/hooks/useTerminalRecorder.ts" }
       ],
       "buildOptions": ["has-terminal"],
       "nativeLibraries": ["libvterm"]
     },
     "physics": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/physics.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-physics"],
-      "nativeLibraries": ["box2d"]
+      "nativeLibraries": ["box2d"],
+      "note": "No auto-trigger today — pass -Dhas-physics manually for carts using the box2d-backed physics primitives."
     },
     "sqlite": {
       "shipGate": "sqlite",
@@ -405,11 +393,10 @@
       "note": "Heavy: compiles deps/whisper.cpp + ggml into libwhisper.so (~20 MB) and statically pulls libstdc++ into the cart binary (~80 MB). Carts that don't import runtime/hooks/whisper.ts pay nothing."
     },
     "lua-worker": {
-      "triggers": [
-        { "kind": "featureMarker", "input": "runtime/features/lua-worker.ts" }
-      ],
+      "triggers": [],
       "buildOptions": ["has-lua-worker"],
-      "note": "luajit is foundational; this flag only gates worker-pool Zig code paths."
+      "nativeLibraries": ["luajit"],
+      "note": "Off-thread LuaJIT compute worker (framework/luajit_worker_real.zig). No metafileInput trigger today — pass -Dhas-lua-worker manually for carts that want the worker without audio. Carts that opt into has-audio automatically get has-lua-worker because audio_real.zig's DSP engine imports zluajit (see build.zig: has_lua_worker = explicit OR has_audio)."
     },
     "pg": {
       "shipGate": "pg",
