@@ -350,7 +350,7 @@ if [[ "$WANT_ZIGCALL" == "1" ]]; then
 fi
 if [[ "$WANT_SDK" == "1" ]]; then
     BUILD_BINDINGS+=("sdk")
-    BUILD_TRIGGERS+=("sdk: runtime/hooks/http.ts or runtime/hooks/browser_page.ts")
+    BUILD_TRIGGERS+=("sdk: runtime/hooks/useTheInternet.ts or runtime/hooks/fetch.ts or runtime/hooks/useFetchBrowser.ts")
 fi
 if [[ "$WANT_PG" == "1" ]] || [[ "$WANT_EMBED" == "1" ]]; then
     BUILD_BINDINGS+=("pg")
