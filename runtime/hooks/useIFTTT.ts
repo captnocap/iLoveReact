@@ -9,8 +9,8 @@
  *   'key:up:<key>'           keyup
  *   'key:ctrl+<k>'           key combo (e.g. 'key:ctrl+s', 'key:ctrl+shift+z')
  *   'click'                  any mouse click anywhere
- *   'timer:every:<ms>'       repeating interval
- *   'timer:once:<ms>'        single-shot delay
+ *   'timer:every:<ms>'       repeating interval (Zig-side wheel, frame-quantized)
+ *   'timer:once:<ms>'        single-shot delay (Zig-side wheel)
  *   'mount'                  fires once on component mount
  *   'state:<key>:<value>'    fires when shared state matches value
  *   '<event>'                any custom bus event (paired with 'send:<event>')
@@ -39,7 +39,8 @@
  *
  * ── Function triggers ──────────────────────────────────────
  *   () => boolean            reactive condition — fires on false→true edge.
- *                            Keep pure & cheap; runs after every render.
+ *                            Polled at frame rate via requestAnimationFrame
+ *                            (decoupled from host render cycle).
  *
  * ── Function actions ───────────────────────────────────────
  *   (event?) => void         imperative callback, receives trigger payload
@@ -51,16 +52,25 @@
  *   useIFTTT(() => score > 100,   'send:victory')
  *   useIFTTT('victory',           (e) => showWin(e))
  *
+ * ── Render behavior ────────────────────────────────────────
+ *
+ * The hook does NOT trigger a host re-render when a wire fires. The
+ * returned `fired` / `lastFiredAt` are getters reading directly from
+ * the Zig-side registry; `lastEvent` is a JS-side mirror. A cart that
+ * wants reactivity on those values should mirror them into local
+ * state from inside the action callback (the cart is in the best
+ * position to decide whether each fire should cause a re-render).
+ *
  * Internals: trigger families and action verbs are registered through
  * `ifttt-registry.ts`. Other hooks (process, voice, fs, host, …) can
  * `registerIfttSource`/`registerIfttAction` to expose themselves through
- * this same DSL — see Phase C of the registry rollout. The shared bus
- * lives in `runtime/ffi.ts`; useIFTTT's `busOn`/`busEmit` are thin
- * facades over `subscribe`/`emit` there.
+ * this same DSL. The shared bus lives in `runtime/ffi.ts`. Timers,
+ * fired-count, and lastFiredAt live in framework/ifttt_zig.zig and are
+ * driven by the engine frame loop.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as clipboard from './clipboard';
-import { subscribe, emit } from '../ffi';
+import { subscribe, emit, callHost } from '../ffi';
 import {
   registerIfttSource,
   registerIfttAction,
@@ -134,6 +144,51 @@ function watchSharedState(key: string, fn: Handler): () => void {
   return () => { set!.delete(fn); };
 }
 
+// ── Wire registry (JS side) ──────────────────────────────────────────────
+//
+// Every useIFTTT() call allocates a Zig wireId at mount. The Zig side
+// tracks fired/lastAt counters; the JS side keeps a fire dispatcher per
+// wire so the Zig timer wheel can call back into JS (the cart-supplied
+// action callback is, of necessity, JS-side).
+
+type WireEntry = {
+  fire: (ev?: any) => void;
+  lastEvent?: any;
+};
+const _wires = new Map<number, WireEntry>();
+
+const G = globalThis as any;
+if (!G.__ifttt_dispatch_installed) {
+  G.__ifttt_dispatch_installed = true;
+  // Called by framework/ifttt_zig.zig when a registered Zig timer fires.
+  G.__ifttt_dispatch_timer = (wireId: number) => {
+    const w = _wires.get(wireId);
+    if (!w) return;
+    try { w.fire({ at: Date.now() }); } catch (e: any) {
+      console.error('[ifttt] timer dispatch error:', e?.message || e);
+    }
+  };
+}
+
+function allocWire(fire: (ev?: any) => void): number {
+  const id = callHost<number>('__ifttt_wire_alloc', 0);
+  if (id > 0) _wires.set(id, { fire });
+  return id;
+}
+
+function freeWire(id: number): void {
+  if (id <= 0) return;
+  _wires.delete(id);
+  callHost('__ifttt_wire_free', undefined, id);
+}
+
+function bumpWire(id: number, ev?: any): void {
+  if (id <= 0) return;
+  callHost('__ifttt_wire_bump', undefined, id, Date.now());
+  const w = _wires.get(id);
+  if (w) w.lastEvent = ev;
+}
+
 // ── Global key listening ──────────────────────────────────────────────────
 //
 // The framework's engine.zig already invokes __ifttt_onKeyDown(packed) and
@@ -183,7 +238,6 @@ function decodeKey(packed: number): { key: string; ctrlKey: boolean; shiftKey: b
   };
 }
 
-const G = globalThis as any;
 if (!G.__ifttt_handlers_installed) {
   G.__ifttt_handlers_installed = true;
   G.__ifttt_onKeyDown = (packed: number) => emit('__keydown', decodeKey(packed));
@@ -335,14 +389,27 @@ registerIfttSource('key:', {
   },
 });
 
+// Timer sources — Zig-owned wheel via __ifttt_timer_register. Each
+// subscription allocates its own dispatch wire (separate from the hook's
+// own wire) so the Zig timer fire lands here through __ifttt_dispatch_timer
+// and we can hand the event to onFire. Falls back to JS setInterval if
+// the binding isn't available (e.g. on TUI host without ifttt bindings).
 registerIfttSource('timer:every:', {
   match(spec) {
     if (!spec.startsWith('timer:every:')) return null;
     const ms = Math.max(1, Number(spec.slice('timer:every:'.length)) || 0);
     return {
       subscribe(onFire) {
-        const id = setInterval(() => onFire({ at: Date.now(), interval: ms }), ms);
-        return () => clearInterval(id);
+        const dispatchWire = allocWire(() => onFire({ at: Date.now(), interval: ms }));
+        if (dispatchWire <= 0) {
+          const id = setInterval(() => onFire({ at: Date.now(), interval: ms }), ms);
+          return () => clearInterval(id);
+        }
+        const tid = callHost<number>('__ifttt_timer_register', 0, ms, 0, dispatchWire);
+        return () => {
+          callHost('__ifttt_timer_cancel', undefined, tid);
+          freeWire(dispatchWire);
+        };
       },
     };
   },
@@ -354,8 +421,16 @@ registerIfttSource('timer:once:', {
     const ms = Math.max(0, Number(spec.slice('timer:once:'.length)) || 0);
     return {
       subscribe(onFire) {
-        const id = setTimeout(() => onFire({ at: Date.now(), delay: ms }), ms);
-        return () => clearTimeout(id);
+        const dispatchWire = allocWire(() => onFire({ at: Date.now(), delay: ms }));
+        if (dispatchWire <= 0) {
+          const id = setTimeout(() => onFire({ at: Date.now(), delay: ms }), ms);
+          return () => clearTimeout(id);
+        }
+        const tid = callHost<number>('__ifttt_timer_register', 0, ms, 1, dispatchWire);
+        return () => {
+          callHost('__ifttt_timer_cancel', undefined, tid);
+          freeWire(dispatchWire);
+        };
       },
     };
   },
@@ -446,49 +521,62 @@ export type IFTTTResult = {
 // ── The hook ──────────────────────────────────────────────────────────────
 
 export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResult {
-  const [, forceTick] = useState(0);
-  const counterRef = useRef(0);
-  const lastRef = useRef<any>(undefined);
-  const lastAtRef = useRef(0);
   const actionRef = useRef(action);
   actionRef.current = action;
 
+  // Allocate a wireId on first render. This is the hook's own counter row
+  // (separate from any per-trigger dispatch wires the source registry may
+  // allocate); we never call setState off it, so the host doesn't rerender.
+  const wireRef = useRef<number>(0);
+  if (wireRef.current === 0) {
+    wireRef.current = allocWire((ev) => fireRef.current(ev));
+  }
+  useEffect(() => {
+    return () => {
+      const id = wireRef.current;
+      wireRef.current = 0;
+      freeWire(id);
+    };
+  }, []);
+
   const fire = (event?: any) => {
-    counterRef.current += 1;
-    lastRef.current = event;
-    lastAtRef.current = Date.now();
+    const wid = wireRef.current;
+    if (wid > 0) bumpWire(wid, event);
     const a = actionRef.current;
     if (typeof a === 'function') a(event);
     else runStringAction(a, event);
-    forceTick((n) => (n + 1) & 0xffff);
   };
   const fireRef = useRef(fire);
   fireRef.current = fire;
 
-  // ── Function trigger: edge-detect false → true (post-render) ──────────
-  // Plain `() => boolean` triggers stay on the post-render path so existing
-  // carts keep their cadence. Function leaves used INSIDE a composable
-  // trigger are polled by the composer (see ifttt-compose.ts) and don't
-  // hit this branch.
+  // ── Function trigger: false → true edge, polled at frame rate ──────────
+  // RAF-driven so the predicate cadence is independent of the host's
+  // render cycle (no more re-evaluating every commit).
   const isFnTrigger = typeof trigger === 'function';
   const prevCondRef = useRef(false);
   useEffect(() => {
     if (!isFnTrigger) { prevCondRef.current = false; return; }
-    let cur = false;
-    try { cur = !!(trigger as () => boolean)(); } catch { cur = false; }
-    if (cur && !prevCondRef.current) fireRef.current(undefined);
-    prevCondRef.current = cur;
-  });
+    let cancelled = false;
+    let raf = 0;
+    const tick = () => {
+      if (cancelled) return;
+      let cur = false;
+      try { cur = !!(trigger as () => boolean)(); } catch { cur = false; }
+      if (cur && !prevCondRef.current) fireRef.current(undefined);
+      prevCondRef.current = cur;
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => { cancelled = true; cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFnTrigger]);
 
   // ── Compose key: re-subscribe only when the trigger shape changes ─────
-  // For string triggers we use the spec itself. For composable triggers we
-  // serialize the structure (functions are stable references; JSON skips
-  // them, which is acceptable since composer keeps a closure over them).
-  const composeKey = (() => {
+  const composeKey = useMemo(() => {
     if (typeof trigger === 'string') return `s:${trigger}`;
     if (typeof trigger === 'function') return null;
     try { return `c:${JSON.stringify(trigger)}`; } catch { return null; }
-  })();
+  }, [trigger]);
 
   // ── String / composable trigger subscription ──────────────────────────
   useEffect(() => {
@@ -509,10 +597,20 @@ export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResul
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [composeKey]);
 
-  return {
-    fired: counterRef.current,
-    lastEvent: lastRef.current,
-    lastFiredAt: lastAtRef.current,
-    fire,
-  };
+  // Stable handle. `fired`/`lastFiredAt` read from the Zig registry on
+  // demand; `lastEvent` is JS-side (mirrored in WireEntry by bumpWire).
+  // Cart components that want reactivity should mirror values into local
+  // state from inside the action callback rather than relying on these.
+  return useMemo<IFTTTResult>(() => ({
+    get fired(): number {
+      return callHost<number>('__ifttt_wire_count', 0, wireRef.current);
+    },
+    get lastEvent(): any {
+      return _wires.get(wireRef.current)?.lastEvent;
+    },
+    get lastFiredAt(): number {
+      return callHost<number>('__ifttt_wire_last_at', 0, wireRef.current);
+    },
+    fire: (event?: any) => fireRef.current(event),
+  }), []);
 }

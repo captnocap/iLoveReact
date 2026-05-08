@@ -41,6 +41,7 @@ const prepared_input = @import("framework/prepared_input.zig");
 const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = @import("framework/v8_bindings_core.zig");
 const v8_bindings_eventbus = @import("framework/v8_bindings_eventbus.zig");
+const v8_bindings_ifttt = @import("framework/v8_bindings_ifttt.zig");
 const event_bus = @import("framework/event_bus.zig");
 
 // Override std.log so every framework `std.log.info/warn/err` call routes
@@ -204,6 +205,11 @@ const INGREDIENTS = [_]Ingredient{
     // gets free crash/overflow/perf diagnostics with no opt-in. Cost is
     // five host fns and a circular ring; nothing the cart has to import.
     .{ .name = "eventbus", .required = true, .grep_prefix = "", .reg_fn = "registerEventBus", .mod = v8_bindings_eventbus },
+    // useIFTTT registry + timer wheel — always-on. runtime/index.tsx
+    // unconditionally requires useIFTTT.ts (it's the system-signal sink),
+    // so every cart pulls the wire/timer host fns. Source-gating this is
+    // degenerate for the same reason core is.
+    .{ .name = "ifttt", .required = true, .grep_prefix = "", .reg_fn = "registerIFTTT", .mod = v8_bindings_ifttt },
     // Everything below is source-gated: scripts/ship reads the esbuild
     // metafile and only flips the matching -Dhas-X=true if a JS file
     // that calls into the binding is actually shipped.

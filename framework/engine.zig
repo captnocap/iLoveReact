@@ -35,6 +35,7 @@ else
         pub fn tick(_: u32) void {}
     };
 const system_signals = @import("system_signals.zig");
+const ifttt_zig = @import("ifttt_zig.zig");
 const input = @import("input.zig");
 const classifier = @import("classifier.zig");
 const semantic = @import("semantic.zig");
@@ -1700,12 +1701,32 @@ fn paintNode(node: *Node) void {
         return;
     }
 
-    // Graph.Polyline — flat point array parsed once at update time, paint
-    // emits one capsule per segment. Bypasses the SVG d-string parser and
-    // bezier flattening that <Graph.Path> pays every paint. Lives inside a
-    // <Graph> so the parent's transform is already on the GPU stack.
+    // Graph.Polyline / Graph.Polygon — flat point array parsed once at
+    // update time. If canvas_fill_color is set, fan-triangulate from vertex 0
+    // for filled polygons (caller ensures shape is star-shaped from v0; bars,
+    // fan-baseline area charts, and donut wedges all qualify). Otherwise
+    // stroke as capsules. Both paths bypass the SVG d-string parser entirely.
     if (node.polyline_points) |pts| {
-        if (pts.len >= 4) {
+        if (node.canvas_fill_color) |fc| {
+            // Filled polygon — n points → n-2 triangles in a fan from v0.
+            if (pts.len >= 6) {
+                const r = @as(f32, @floatFromInt(fc.r)) / 255.0;
+                const g = @as(f32, @floatFromInt(fc.g)) / 255.0;
+                const b = @as(f32, @floatFromInt(fc.b)) / 255.0;
+                const a = @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity * node.canvas_fill_opacity;
+                const x0 = pts[0];
+                const y0 = pts[1];
+                var i: usize = 2;
+                while (i + 3 < pts.len) : (i += 2) {
+                    gpu.polys.drawTri(
+                        x0, y0,
+                        pts[i], pts[i + 1],
+                        pts[i + 2], pts[i + 3],
+                        r, g, b, a,
+                    );
+                }
+            }
+        } else if (pts.len >= 4) {
             const tc = node.text_color orelse Color.rgb(255, 255, 255);
             const r = @as(f32, @floatFromInt(tc.r)) / 255.0;
             const g = @as(f32, @floatFromInt(tc.g)) / 255.0;
@@ -4168,6 +4189,7 @@ pub fn run(config_in: AppConfig) !void {
         voice.tick(dt_ms);
         whisper.tick(dt_ms);
         system_signals.tick(dt_ms);
+        ifttt_zig.tick(dt_ms);
 
         // Paint (main window — wgpu)
         g_dt_sec = dt_sec;
