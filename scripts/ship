@@ -652,6 +652,33 @@ if [[ "$WANT_EMBED" == "1" ]]; then
     fi
 fi
 
+# ── libmpv (video playback, dlopen-only) ───────────────────────────────
+# framework/videos.zig dlopens libmpv.so.2 at first <Video> mount, so it
+# never appears in ldd of the cart binary. The own-libs allowlist that
+# walks ldd can't see it. But libmpv isn't pre-installed on most hosts
+# (Ubuntu/Debian/Fedora/Arch/macOS all need explicit `apt install libmpv2`
+# / `brew install mpv`), so relying on the user's system means video
+# carts silently no-op for >90% of users.
+#
+# Detect video usage by grepping the bundled JS for an actual JSX call
+# to the Video primitive. esbuild compiles `<Video src=...>` to
+# `__jsx(Video, {...})` (or `__jsxs(Video, ...)` with multiple children).
+# Naively grepping `videoSrc` triggers on the primitive's declaration
+# even when the cart never uses it (tree-shaking keeps the export when
+# any sibling primitive from runtime/primitives.tsx is imported).
+# The `__jsx(Video,` signal only appears at real call sites.
+BUNDLE_FILE="$CART_ROOT/bundle-${NAME}.js"
+if [[ -f "$BUNDLE_FILE" ]] && grep -qE "__jsxs?\(Video," "$BUNDLE_FILE"; then
+    LIBMPV_SRC="$RJIT_HOME/love2d/storybook/lib/libmpv.so.2"
+    if [[ -f "$LIBMPV_SRC" ]]; then
+        cp -L "$LIBMPV_SRC" "$LIB_DIR/libmpv.so.2"
+        echo "[ship]   bundled libmpv.so.2 (video cart — Video primitive detected)"
+    else
+        echo "[ship]   WARNING: cart uses Video but pinned libmpv.so.2 not found at $LIBMPV_SRC" >&2
+        echo "[ship]            video playback will fall back to user's system libmpv if installed, else no-op" >&2
+    fi
+fi
+
 if [[ -n "$ICON_SOURCE" ]]; then
     mkdir -p "$SHARE_DIR/icons" "$SHARE_DIR/applications"
     cp "$ICON_SOURCE" "$SHARE_DIR/icons/$ICON_FILE"
