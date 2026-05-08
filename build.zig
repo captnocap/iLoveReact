@@ -67,6 +67,10 @@ pub fn build(b: *std.Build) void {
     const has_physics = b.option(bool, "has-physics", "Link box2d + physics2d module") orelse false;
     const has_sqlite = b.option(bool, "has-sqlite", "Link sqlite3 + real sqlite.zig (otherwise stub)") orelse false;
     const has_terminal = b.option(bool, "has-terminal", "Link libvterm + real vterm.zig (otherwise stub)") orelse false;
+    // Default true for now (wave 1: infrastructure only). Wave 2 will flip
+    // this to default false once audio.zig is stub-split — audio's DSP
+    // architecture force-ties has_lua_worker on whenever has_audio is on.
+    const has_lua_worker = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse true;
 
     // Bundle path override. When unset, v8_app.zig falls back to embedding
     // bundle-<app-name>.js relative to its own source directory (the
@@ -85,6 +89,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_physics", has_physics);
     options.addOption(bool, "has_sqlite", has_sqlite);
     options.addOption(bool, "has_terminal", has_terminal);
+    options.addOption(bool, "has_lua_worker", has_lua_worker);
     options.addOption([]const u8, "bundle_path", bundle_path);
     options.addOption(bool, "has_video", true);
     options.addOption(bool, "has_render_surfaces", true);
@@ -106,7 +111,7 @@ pub fn build(b: *std.Build) void {
     root_mod.addOptions("build_options", options);
     root_mod.addImport("wgpu", wgpu_mod);
     root_mod.addImport("tls", tls_mod);
-    root_mod.addImport("zluajit", zluajit_dep.module("zluajit"));
+    if (has_lua_worker) root_mod.addImport("zluajit", zluajit_dep.module("zluajit"));
 
     // ── pg.zig (Postgres client) ────────────────────────────────
     // Used by framework/pg.zig (and via that, framework/embed.zig). Always
@@ -149,7 +154,7 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     exe.linkSystemLibrary("SDL3");
     exe.linkSystemLibrary("freetype");
-    exe.linkSystemLibrary("luajit-5.1");
+    if (has_lua_worker) exe.linkSystemLibrary("luajit-5.1");
 
     const os_tag = target.result.os.tag;
     if (os_tag == .linux) {
@@ -161,6 +166,7 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("m");
         exe.linkSystemLibrary("pthread");
         exe.linkSystemLibrary("dl");
+        exe.linkSystemLibrary("asound");
         if (sysroot) |sr| {
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
@@ -260,16 +266,13 @@ pub fn build(b: *std.Build) void {
         const whisper_root = b.path("deps/whisper.cpp");
 
         const cpu_flags = [_][]const u8{
-            "-O3", "-fPIC", "-D_GNU_SOURCE", "-DNDEBUG",
-            "-DGGML_USE_CPU",
-            "-DGGML_VERSION=\"vendored\"",
-            "-DGGML_COMMIT=\"unknown\"",
-            "-DWHISPER_VERSION=\"vendored\"",
-            "-mavx", "-mavx2", "-mfma", "-mf16c", "-msse3", "-mssse3",
-            "-pthread",
+            "-O3",            "-fPIC",                       "-D_GNU_SOURCE",             "-DNDEBUG",
+            "-DGGML_USE_CPU", "-DGGML_VERSION=\"vendored\"", "-DGGML_COMMIT=\"unknown\"", "-DWHISPER_VERSION=\"vendored\"",
+            "-mavx",          "-mavx2",                      "-mfma",                     "-mf16c",
+            "-msse3",         "-mssse3",                     "-pthread",
         };
-        const c_flags_whisper = cpu_flags ++ .{ "-std=c11" };
-        const cpp_flags_whisper = cpu_flags ++ .{ "-std=c++17" };
+        const c_flags_whisper = cpu_flags ++ .{"-std=c11"};
+        const cpp_flags_whisper = cpu_flags ++ .{"-std=c++17"};
 
         const wmod = b.createModule(.{
             .target = target,
@@ -533,6 +536,59 @@ pub fn build(b: *std.Build) void {
 
     const v8_cli_step = b.step("v8-cli", "Build standalone V8 script host (zig-out/bin/v8cli)");
     v8_cli_step.dependOn(&b.addInstallArtifact(v8_cli_exe, .{}).step);
+
+    // ── tui-app: self-contained TUI cart binary ─────────────────
+    // Same shape as v8-cli but with @embedFile baking the cart bundle into
+    // the binary at build time. -Dapp-name renames the output, -Dbundle-path
+    // points at the prebuilt esbuild bundle. scripts/ship-tui drives both.
+    //
+    // No SDL, no GPU host, no .so wrangling — v8cli's only dynamic deps are
+    // libm + libc + ld-linux, which are universal on every desktop Linux.
+    // The result is a single-file executable with no install needed.
+    {
+        const tui_options = b.addOptions();
+        tui_options.addOption([]const u8, "app_name", app_name);
+        tui_options.addOption([]const u8, "bundle_path", bundle_path);
+        // Mirrors the GPU app's gate: when -Dhas-terminal=true is passed,
+        // libvterm is linked and framework/vterm.zig dispatches to the
+        // real impl (otherwise the stub). The TUI host's <Terminal>
+        // renderer needs the real impl to spawn shells + read cell
+        // grids.
+        tui_options.addOption(bool, "has_terminal", has_terminal);
+
+        const tui_mod = b.createModule(.{
+            .root_source_file = b.path("v8_tui_app.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        tui_mod.addImport("v8", v8_mod);
+        tui_mod.addImport("tls", tls_mod);
+        tui_mod.addOptions("build_options", tui_options);
+        tui_mod.addCSourceFile(.{
+            .file = b.path("framework/ffi/v8_stack_shim.cpp"),
+            .flags = &.{ "-O2", "-std=c++17" },
+        });
+        // worker_bindings.zig + transitive SDKs need:
+        //   - libcurl (openai_compat_sdk → net/http.zig @cImport)
+        //   - llama_headers (local_ai_runtime @cImport; libllama itself
+        //     is dlopen'd at runtime, no link cost)
+        //   - framework/ffi for compute_shim / common shims
+        tui_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
+        tui_mod.addIncludePath(b.path("framework/ffi"));
+
+        const tui_exe = b.addExecutable(.{
+            .name = app_name,
+            .root_module = tui_mod,
+        });
+        tui_exe.stack_size = 64 * 1024 * 1024;
+        tui_exe.linkLibC();
+        tui_exe.linkLibCpp();
+        tui_exe.linkSystemLibrary("curl");
+        if (has_terminal) tui_exe.linkSystemLibrary("vterm");
+
+        const tui_step = b.step("tui-app", "Build a self-contained TUI cart binary (zig-out/bin/<app-name>)");
+        tui_step.dependOn(&b.addInstallArtifact(tui_exe, .{}).step);
+    }
 
     // ── luajit_runtime bridge library for the Zig integration test ───
     const bridge_mod = b.createModule(.{
