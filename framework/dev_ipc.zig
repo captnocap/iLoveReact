@@ -19,7 +19,10 @@
 
 const std = @import("std");
 const event_bus = @import("event_bus.zig");
-const qjs_runtime = @import("qjs_runtime.zig");
+// Frame telemetry counters — were housed in qjs_runtime.zig, now in
+// framework/frame_telemetry.zig (archive/qjs-stack/README.md). Aliased
+// as `qjs_runtime` to keep existing call sites working.
+const frame_telemetry = @import("frame_telemetry.zig");
 const telemetry = @import("telemetry.zig");
 const log = std.log.scoped(.dev_ipc);
 
@@ -181,11 +184,11 @@ fn handleClient(client_fd: std.posix.socket_t) !void {
             &buf,
             "{{\"fps\":{d},\"tick_us\":{d},\"layout_us\":{d},\"paint_us\":{d},\"gpu_us\":{d},\"frame_total_us\":{d},\"frame_number\":{d},\"node_count\":{d}}}\n",
             .{
-                qjs_runtime.telemetry_fps,
+                frame_telemetry.telemetry_fps,
                 snap.tick_us,
-                qjs_runtime.telemetry_layout_us,
-                qjs_runtime.telemetry_paint_us,
-                qjs_runtime.telemetry_gpu_us,
+                frame_telemetry.telemetry_layout_us,
+                frame_telemetry.telemetry_paint_us,
+                frame_telemetry.telemetry_gpu_us,
                 snap.frame_total_us,
                 snap.frame_number,
                 telemetry.nodeCount(),

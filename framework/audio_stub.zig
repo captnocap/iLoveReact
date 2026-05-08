@@ -499,7 +499,3 @@ pub fn getParamMax(module_id: u32, param_idx: u8) f64 {
     _ = param_idx;
     return 0;
 }
-
-// ── QJS host registration no-op ──────────────────────────────────────
-
-pub fn registerQjsHostFunctions() void {}

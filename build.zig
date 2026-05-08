@@ -1,11 +1,13 @@
-//! Root build.zig — builds qjs_app.zig against framework/ into zig-out/bin/<name>.
+//! Root build.zig — builds v8_app.zig against framework/ into zig-out/bin/<name>.
 //!
 //! Usage:
-//!   zig build app                                       # default: qjs_app.zig → zig-out/bin/app
+//!   zig build app                                       # default: v8_app.zig → zig-out/bin/app
 //!   zig build app -Dapp-name=hello                      # → zig-out/bin/hello
 //!   zig build app -Dapp-name=hello -Dapp-source=foo.zig # different root source
 //!
 //! Everything Smith-era lives in the frozen tsz/ directory and is not built here.
+//! The QJS / .tsz era runtime files were evicted to archive/qjs-stack/ on 2026-05-08
+//! (see archive/qjs-stack/README.md).
 
 const std = @import("std");
 
@@ -14,9 +16,11 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const app_name = b.option([]const u8, "app-name", "Output binary name") orelse "app";
-    const use_v8 = b.option(bool, "use-v8", "Use V8 JS engine instead of QuickJS") orelse false;
-    const default_src: []const u8 = if (use_v8) "v8_app.zig" else "qjs_app.zig";
-    const app_source = b.option([]const u8, "app-source", "Root Zig source file") orelse default_src;
+    // QJS path archived (archive/qjs-stack/) — the use-v8 option survives only
+    // as a build-options signal that other modules may read; the default root
+    // source is now v8_app.zig regardless.
+    const use_v8 = b.option(bool, "use-v8", "(legacy: V8 is the only engine now)") orelse true;
+    const app_source = b.option([]const u8, "app-source", "Root Zig source file") orelse "v8_app.zig";
     const sysroot = b.option([]const u8, "sysroot", "Optional sysroot for cross-builds");
     const dev_mode = b.option(bool, "dev-mode", "Read bundle.js from disk and hot-reload on change") orelse false;
     const custom_chrome = b.option(bool, "custom-chrome", "Cart draws its own window chrome (borderless)") orelse false;
@@ -68,11 +72,19 @@ pub fn build(b: *std.Build) void {
     const has_sqlite = b.option(bool, "has-sqlite", "Link sqlite3 + real sqlite.zig (otherwise stub)") orelse false;
     const has_terminal = b.option(bool, "has-terminal", "Link libvterm + real vterm.zig (otherwise stub)") orelse false;
     const has_audio = b.option(bool, "has-audio", "Compile audio_real.zig (SDL3 audio + LuaJIT DSP) — implies has-lua-worker") orelse false;
-    // Audio's DSP engine imports zluajit unconditionally, so has-audio
-    // forces has-lua-worker on. Carts that opt into audio always get
-    // both; carts that want only the lua compute worker can flip
-    // has-lua-worker independently.
-    const has_lua_worker_explicit = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse false;
+    // Audio's DSP engine imports zluajit, so has-audio forces
+    // has-lua-worker on. Default also stays TRUE for an unrelated
+    // reason: framework/luajit_runtime.zig (the main-thread .tsz
+    // script-block evaluator) calls libluajit-5.1 via @cImport("lua.h")
+    // and is unconditionally pulled in by engine.zig:105 +
+    // engine.zig:3063 (initVM at startup). With has-lua-worker=false
+    // those Lua C symbols become undefined at link time. Stub-splitting
+    // luajit_runtime.zig (mirroring audio.zig / luajit_worker.zig) is
+    // the structural fix; until that lands, has-lua-worker stays
+    // default-true so non-audio carts still build. Tracking task
+    // tightening note: luajit_worker_real / audio_real coupling is
+    // already correct; only luajit_runtime is the dangler.
+    const has_lua_worker_explicit = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse true;
     const has_lua_worker = has_lua_worker_explicit or has_audio;
     const has_midi = b.option(bool, "has-midi", "Link libasound + real midi.zig (ALSA snd_seq_* MIDI input) — otherwise stub") orelse false;
 
@@ -89,7 +101,6 @@ pub fn build(b: *std.Build) void {
     options.addOption([]const u8, "app_name", app_name);
     options.addOption(bool, "dev_mode", dev_mode);
     options.addOption(bool, "custom_chrome", custom_chrome);
-    options.addOption(bool, "has_quickjs", true);
     options.addOption(bool, "has_physics", has_physics);
     options.addOption(bool, "has_sqlite", has_sqlite);
     options.addOption(bool, "has_terminal", has_terminal);
@@ -210,7 +221,6 @@ pub fn build(b: *std.Build) void {
 
     // ── Include paths ──────────────────────────────────────────
     root_mod.addIncludePath(b.path("."));
-    root_mod.addIncludePath(b.path("love2d/quickjs"));
     root_mod.addIncludePath(b.path("framework/ffi"));
     // llama.h + ggml*.h for framework/local_ai_runtime.zig's @cImport.
     // We dlopen lmstudio's libllama.so at runtime; these headers only
@@ -219,12 +229,10 @@ pub fn build(b: *std.Build) void {
     // synced into the repo so builds don't depend on deps/llama.cpp.zig.
     root_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
 
-    // ── QuickJS ────────────────────────────────────────────────
-    root_mod.addCSourceFiles(.{
-        .root = b.path("love2d/quickjs"),
-        .files = &.{ "cutils.c", "dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c", "quickjs-libc.c" },
-        .flags = &.{ "-O2", "-D_GNU_SOURCE", "-DQUICKJS_NG_BUILD" },
-    });
+    // QuickJS C sources no longer compiled — qjs_runtime archived
+    // (archive/qjs-stack/). The C files in love2d/quickjs/ stay where
+    // they are (love2d/ tree is frozen reference) but no longer feed
+    // into any cart binary.
 
     // ── stb image read + write ────────────────────────────────
     // stbi_load_from_memory powers image_cache.zig (the <Image> primitive).
@@ -492,7 +500,7 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
-    const app_step = b.step("app", "Build the qjs_app binary");
+    const app_step = b.step("app", "Build the v8_app binary");
     app_step.dependOn(&b.addInstallArtifact(exe, .{}).step);
     app_step.dependOn(&install_manifest.step);
 
@@ -617,14 +625,10 @@ pub fn build(b: *std.Build) void {
     bridge_mod.addImport("zluajit", zluajit_dep.module("zluajit"));
 
     bridge_mod.addIncludePath(b.path("."));
-    bridge_mod.addIncludePath(b.path("love2d/quickjs"));
     bridge_mod.addIncludePath(b.path("framework/ffi"));
 
-    bridge_mod.addCSourceFiles(.{
-        .root = b.path("love2d/quickjs"),
-        .files = &.{ "cutils.c", "dtoa.c", "libregexp.c", "libunicode.c", "quickjs.c", "quickjs-libc.c" },
-        .flags = &.{ "-O2", "-D_GNU_SOURCE", "-DQUICKJS_NG_BUILD" },
-    });
+    // QuickJS C sources no longer compiled into bridge_mod — same reason
+    // as the main exe (qjs_runtime archived to archive/qjs-stack/).
     bridge_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
     bridge_mod.addCSourceFile(.{ .file = b.path("framework/ffi/compute_shim.c"), .flags = &.{"-O2"} });
     if (has_physics) {

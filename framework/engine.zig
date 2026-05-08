@@ -100,9 +100,18 @@ comptime {
     _ = @import("luajit_worker.zig");
 }
 
-// LuaJIT main-thread runtime — replaces QuickJS for logic (events, state, conditionals).
-// Same API surface as qjs_runtime: initVM, evalScript, evalExpr, tick, callGlobal.
-const luajit_runtime = @import("luajit_runtime.zig");
+// luajit_runtime archived to archive/qjs-stack/ — Smith-era .tsz script-block
+// evaluator. V8 carts never set handlers.lua_on_* (only the .tsz toolchain
+// did), so every evalExpr branch + initVM/tick/persistScrollSlot call below
+// is dead. Stub struct keeps the call sites compiling until they're scrubbed.
+const luajit_runtime = struct {
+    pub fn initVM() void {}
+    pub fn deinit() void {}
+    pub fn tick() void {}
+    pub fn evalExpr(_: []const u8) void {}
+    pub fn persistScrollSlot(_: u32, _: f32) void {}
+    pub var telemetry_fps: u32 = 0;
+};
 const mouse_state = @import("mouse_state.zig");
 
 // Force-reference audio.zig so its export fn symbols are available to the linker.
@@ -115,25 +124,9 @@ comptime {
     _ = @import("pty_client.zig");
 }
 
-const USE_V8 = if (@hasDecl(build_options, "use_v8")) build_options.use_v8 else false;
-const qjs_runtime = if (HAS_QUICKJS) @import("qjs_runtime.zig") else struct {
-    pub fn initVM() void {}
-    pub fn deinit() void {}
-    pub fn tick() void {}
-    pub fn evalScript(_: []const u8) void {}
-    pub fn ptyActive() bool {
-        return false;
-    }
-    pub fn ptyHandleTextInput(_: [*:0]const u8) void {}
-    pub fn ptyHandleKeyDown(_: i32, _: u16) void {}
-    pub var telemetry_tick_us: i64 = 0;
-    pub var telemetry_layout_us: i64 = 0;
-    pub var telemetry_paint_us: i64 = 0;
-    pub var telemetry_fps: u32 = 0;
-    pub var telemetry_bridge_calls: u32 = 0;
-    pub var bridge_calls_this_second: u32 = 0;
-};
-const js_vm = if (USE_V8) @import("v8_runtime.zig") else qjs_runtime;
+const prepared_input = @import("prepared_input.zig");
+const frame_telemetry = @import("frame_telemetry.zig");
+const js_vm = @import("v8_runtime.zig");
 const canvas = if (HAS_CANVAS) @import("canvas.zig") else struct {
     pub const CameraTransform = struct { cx: f32 = 0, cy: f32 = 0, scale: f32 = 1 };
     pub fn init() void {}
@@ -1041,15 +1034,15 @@ pub fn windowIsMaximized() bool {
 /// Otherwise open in the system browser via xdg-open.
 fn openUrl(url: []const u8) void {
     log.info(.events, "openUrl: {s}", .{url});
-    // Try in-app navigation first (browser cart defines _browserNavigate in JS)
-    const qjs_rt = @import("qjs_runtime.zig");
-    if (qjs_rt.hasGlobal("_browserNavigate")) {
-        // Null-terminate the URL for callGlobalStr
+    // Try in-app navigation first (browser cart defines _browserNavigate in JS).
+    // The QJS-side hasGlobal/callGlobalStr was archived (archive/qjs-stack/);
+    // a V8 equivalent (e.g. v8_runtime.callGlobalIfDefined) needs to land
+    // before in-app navigation re-activates. Falling through to xdg-open.
+    if (false) {
         var url_buf: [2048]u8 = undefined;
         if (url.len < url_buf.len) {
             @memcpy(url_buf[0..url.len], url);
             url_buf[url.len] = 0;
-            qjs_rt.callGlobalStr("_browserNavigate", @ptrCast(&url_buf));
             return;
         }
     }
@@ -1436,7 +1429,7 @@ fn dispatchScrollChanged(node: *Node, dx: f32, dy: f32) void {
     markScrollActivity(node);
     luajit_runtime.persistScrollSlot(node.scroll_persist_slot, node.scroll_y);
     if (node.handlers.on_scroll) |handler| {
-        qjs_runtime.prepareScrollEvent(
+        prepared_input.prepareScrollEvent(
             node.scroll_persist_slot,
             node.scroll_x,
             node.scroll_y,
@@ -1704,6 +1697,26 @@ fn paintNode(node: *Node) void {
     // Canvas.Path: draw before size check
     if (node.canvas_path or node.canvas_path_d != null) {
         paintCanvasPath(node);
+        return;
+    }
+
+    // Graph.Polyline — flat point array parsed once at update time, paint
+    // emits one capsule per segment. Bypasses the SVG d-string parser and
+    // bezier flattening that <Graph.Path> pays every paint. Lives inside a
+    // <Graph> so the parent's transform is already on the GPU stack.
+    if (node.polyline_points) |pts| {
+        if (pts.len >= 4) {
+            const tc = node.text_color orelse Color.rgb(255, 255, 255);
+            const r = @as(f32, @floatFromInt(tc.r)) / 255.0;
+            const g = @as(f32, @floatFromInt(tc.g)) / 255.0;
+            const b = @as(f32, @floatFromInt(tc.b)) / 255.0;
+            const a = @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity * node.canvas_stroke_opacity;
+            const sw = node.canvas_stroke_width;
+            var i: usize = 0;
+            while (i + 3 < pts.len) : (i += 2) {
+                gpu.drawCapsule(pts[i], pts[i + 1], pts[i + 2], pts[i + 3], r, g, b, a, sw);
+            }
+        }
         return;
     }
 
@@ -3045,16 +3058,13 @@ pub fn run(config_in: AppConfig) !void {
     defer {
         if (config.shutdown) |shutdown| shutdown();
     }
-    @import("audio.zig").registerQjsHostFunctions();
-    @import("pty_client.zig").registerQjsHostFunctions();
-    @import("applescript.zig").registerQjsHostFunctions();
     {
         const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
         log.print("[startup] vms: {d}ms\n", .{dt});
     }
 
     // Register window-open bridge so JS can call __openWindow
-    qjs_runtime.setOpenWindowFn(struct {
+    prepared_input.setOpenWindowFn(struct {
         fn open(title: [*:0]const u8, w: c_int, h: c_int) void {
             _ = windows.open(.{ .title = title, .width = w, .height = h, .kind = .in_process });
         }
@@ -3232,7 +3242,7 @@ pub fn run(config_in: AppConfig) !void {
                             if (h.context_menu_items) |items| {
                                 context_menu.showFor(mx, my, items, h.scroll_persist_slot);
                             } else if (h.handlers.on_right_click) |handler| {
-                                qjs_runtime.prepareNodeEvent(h.scroll_persist_slot);
+                                prepared_input.prepareNodeEvent(h.scroll_persist_slot);
                                 handler(mx, my);
                             }
                         }
@@ -3581,12 +3591,12 @@ pub fn run(config_in: AppConfig) !void {
                         }
                         continue;
                     }
-                    if (qjs_runtime.terminalDockResizeActive()) {
+                    if (prepared_input.terminalDockResizeActive()) {
                         if ((event.motion.state & c.SDL_BUTTON_LMASK) != 0) {
-                            const next_height = qjs_runtime.terminalDockResizeStartHeight() + (qjs_runtime.terminalDockResizeStartY() - my);
-                            js_vm.callGlobalFloat("__setTerminalDockHeight", next_height);
+                            const next_height = prepared_input.terminalDockResizeStartHeight() + (prepared_input.terminalDockResizeStartY() - my);
+                            js_vm.callGlobalFloat("__setTerminalDockHeight", @floatCast(next_height));
                         } else {
-                            qjs_runtime.endTerminalDockResize();
+                            prepared_input.endTerminalDockResize();
                         }
                     }
                     // Render surface mouse motion forwarding
@@ -3713,7 +3723,7 @@ pub fn run(config_in: AppConfig) !void {
                     mouse_state.updateMouse(event.button.x, event.button.y);
                     mouse_state.updateMouseButton(false, event.button.button == c.SDL_BUTTON_RIGHT);
                     if (event.button.button == c.SDL_BUTTON_LEFT) {
-                        qjs_runtime.endTerminalDockResize();
+                        prepared_input.endTerminalDockResize();
                         if (g_chrome_dragging) {
                             endChromeDrag();
                             continue;
@@ -3767,11 +3777,9 @@ pub fn run(config_in: AppConfig) !void {
                         terminalHandleTextInput(text_ptr);
                         continue;
                     }
-                    // PTY gets text first when active
-                    if (qjs_runtime.ptyActive()) {
-                        qjs_runtime.ptyHandleTextInput(text_ptr);
-                        continue;
-                    }
+                    // (PTY text-input fast-path was QJS-routed; archived
+                    // with qjs_runtime. PTY input now flows through the V8
+                    // bindings — see framework/v8_bindings_vterm.zig.)
                     // Render surface text input forwarding
                     if (render_surfaces.handleTextInput(text_ptr)) continue;
                     if (input.getFocusedId() != null) stampInputLatency("type");
@@ -3831,11 +3839,9 @@ pub fn run(config_in: AppConfig) !void {
                         terminalHandleKey(sym, mod);
                         continue;
                     }
-                    // PTY special key routing (arrows, enter, backspace, ctrl combos)
-                    if (qjs_runtime.ptyActive()) {
-                        qjs_runtime.ptyHandleKeyDown(sym, mod);
-                        continue;
-                    }
+                    // (PTY key-down fast-path was QJS-routed; archived
+                    // with qjs_runtime. PTY input now flows through the V8
+                    // bindings — see framework/v8_bindings_vterm.zig.)
                     // Render surface key forwarding
                     if (render_surfaces.handleKeyDown(sym)) continue;
                     {
@@ -3932,7 +3938,7 @@ pub fn run(config_in: AppConfig) !void {
                             markScrollActivity(scroll_node);
                             luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
                             if (scroll_node.handlers.on_scroll) |handler| {
-                                qjs_runtime.prepareScrollEvent(
+                                prepared_input.prepareScrollEvent(
                                     scroll_node.scroll_persist_slot,
                                     scroll_node.scroll_x,
                                     scroll_node.scroll_y,
@@ -3963,7 +3969,7 @@ pub fn run(config_in: AppConfig) !void {
                         markScrollActivity(scroll_node);
                         luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
                         if (scroll_node.handlers.on_scroll) |handler| {
-                            qjs_runtime.prepareScrollEvent(
+                            prepared_input.prepareScrollEvent(
                                 scroll_node.scroll_persist_slot,
                                 scroll_node.scroll_x,
                                 scroll_node.scroll_y,
@@ -3998,7 +4004,7 @@ pub fn run(config_in: AppConfig) !void {
         const t0 = std.time.microTimestamp();
         js_vm.tick();
         const t1 = std.time.microTimestamp();
-        qjs_runtime.telemetry_tick_us = @intCast(@max(0, t1 - t0));
+        frame_telemetry.telemetry_tick_us = @intCast(@max(0, t1 - t0));
 
         // LuaJIT tick
         luajit_runtime.tick();
@@ -4107,7 +4113,7 @@ pub fn run(config_in: AppConfig) !void {
         const app_h = win_h;
         layout.layout(config.root, 0, 0, win_w, app_h);
         const t3 = std.time.microTimestamp();
-        qjs_runtime.telemetry_layout_us = @intCast(@max(0, t3 - t2));
+        frame_telemetry.telemetry_layout_us = @intCast(@max(0, t3 - t2));
 
         // Re-resolve hovered_node after layout (computed rects are now valid).
         // Pre-tick we nulled the stale pointer; this restores it so the next
@@ -4225,19 +4231,19 @@ pub fn run(config_in: AppConfig) !void {
         }
 
         const t5 = std.time.microTimestamp();
-        qjs_runtime.telemetry_paint_us = @intCast(@max(0, t5 - t4));
+        frame_telemetry.telemetry_paint_us = @intCast(@max(0, t5 - t4));
 
         const phase_t_preframe = std.time.microTimestamp();
         gpu.frame(0.051, 0.067, 0.090);
         const phase_t_postframe = std.time.microTimestamp();
-        qjs_runtime.telemetry_gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe));
+        frame_telemetry.telemetry_gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe));
         if (g_input_latency_ts_us != 0) {
             const since_click = phase_t_postframe - g_input_latency_ts_us;
             if (since_click > 50000) {
                 log.print("[frame-timing] since_click={d}ms  tick={d}us  layout={d}us  paint={d}us  gpu.frame={d}us\n", .{
                     @divTrunc(since_click, 1000),
                     phase_t1 - phase_t0,
-                    qjs_runtime.telemetry_layout_us,
+                    frame_telemetry.telemetry_layout_us,
                     t5 - t4,
                     phase_t_postframe - phase_t_preframe,
                 });
@@ -4284,8 +4290,8 @@ pub fn run(config_in: AppConfig) !void {
             .paint_us = @intCast(@max(0, t5 - t4)),
             .gpu_us = @intCast(@max(0, phase_t_postframe - phase_t_preframe)),
             .frame_total_us = @intCast(@max(0, t6 - t0)),
-            .fps = qjs_runtime.telemetry_fps,
-            .bridge_calls_per_sec = qjs_runtime.telemetry_bridge_calls,
+            .fps = frame_telemetry.telemetry_fps,
+            .bridge_calls_per_sec = frame_telemetry.telemetry_bridge_calls,
             .root = config.root,
             .visible_nodes = g_paint_count,
             .hidden_nodes = g_hidden_count,
@@ -4301,7 +4307,7 @@ pub fn run(config_in: AppConfig) !void {
         fps_frames += 1;
         const now: u64 = c.SDL_GetTicks();
         if (now -% fps_last >= 1000) {
-            qjs_runtime.telemetry_fps = fps_frames;
+            frame_telemetry.telemetry_fps = fps_frames;
             luajit_runtime.telemetry_fps = fps_frames;
             // Use last frame's counts directly (counters reset per-frame for budget checks)
             const ppf = g_paint_count;
@@ -4315,14 +4321,14 @@ pub fn run(config_in: AppConfig) !void {
             if (verbose or (now -% telemetry_stderr_last) >= 10_000) {
                 telemetry_stderr_last = now;
                 log.print("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s\n", .{
-                    fps_frames, qjs_runtime.telemetry_layout_us, qjs_runtime.telemetry_paint_us, qjs_runtime.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, qjs_runtime.bridge_calls_this_second,
+                    fps_frames, frame_telemetry.telemetry_layout_us, frame_telemetry.telemetry_paint_us, frame_telemetry.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, frame_telemetry.bridge_calls_this_second,
                 });
             }
             log.writeLine("[telemetry] FPS: {d} | layout: {d}us | paint: {d}us | gpu: {d}us | visible: {d}/{d} | gpuops: {d}/{d} | hidden: {d} | zero: {d} | bridge: {d}/s", .{
-                fps_frames, qjs_runtime.telemetry_layout_us, qjs_runtime.telemetry_paint_us, qjs_runtime.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, qjs_runtime.bridge_calls_this_second,
+                fps_frames, frame_telemetry.telemetry_layout_us, frame_telemetry.telemetry_paint_us, frame_telemetry.telemetry_gpu_us, ppf, PAINT_BUDGET, gpu.g_gpu_ops, gpu.GPU_OPS_BUDGET, hpf, zpf, frame_telemetry.bridge_calls_this_second,
             });
-            qjs_runtime.telemetry_bridge_calls = qjs_runtime.bridge_calls_this_second;
-            qjs_runtime.bridge_calls_this_second = 0;
+            frame_telemetry.telemetry_bridge_calls = frame_telemetry.bridge_calls_this_second;
+            frame_telemetry.bridge_calls_this_second = 0;
             @import("luajit_worker.zig").logTelemetry();
             @import("audio.zig").logTelemetry();
             watchdog.heartbeat();

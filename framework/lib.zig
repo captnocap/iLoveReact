@@ -8,4 +8,4 @@
 pub const layout = @import("layout.zig");
 pub const engine = @import("engine.zig");
 pub const state = @import("state.zig");
-pub const qjs_runtime = @import("qjs_runtime.zig");
+// qjs_runtime moved to archive/qjs-stack/ — Smith-era runtime, V8 carts never use it. See task #13.

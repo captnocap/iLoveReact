@@ -369,6 +369,7 @@ pub const Node = struct {
     canvas_flow_speed: f32 = 0,
     canvas_fill_effect: ?[]const u8 = null,
     icon_name: ?[]const u8 = null,
+    polyline_points: ?[]f32 = null,
     text_effect: ?[]const u8 = null,
     inline_glyphs: ?[]const InlineGlyph = null,
     inline_slots: [MAX_INLINE_SLOTS]InlineSlot = [_]InlineSlot{.{}} ** MAX_INLINE_SLOTS,
@@ -586,73 +587,6 @@ pub const NodePool = struct {
     }
 };
 
-// ── QJS Runtime extern ──────────────────────────────────────────────
-pub const qjs_runtime = struct {
-    pub extern fn rjit_qjs_register_host_fn(name: [*:0]const u8, fn_ptr: ?*const anyopaque, argc: u8) void;
-    pub extern fn rjit_qjs_call_global(name: [*:0]const u8) void;
-    pub extern fn rjit_qjs_call_global_str(name: [*:0]const u8, arg: [*:0]const u8) void;
-    pub extern fn rjit_qjs_call_global_int(name: [*:0]const u8, arg: i64) void;
-    pub extern fn rjit_qjs_eval_expr(expr: [*:0]const u8) void;
-    pub extern fn rjit_qjs_eval_to_string(expr: [*]const u8, expr_len: usize, buf: [*]u8, buf_len: usize) usize;
-    pub extern fn rjit_qjs_eval_lua_map_data(index: usize, expr: [*]const u8, expr_len: usize) void;
-    pub extern fn rjit_qjs_sync_scalar_to_lua(name: [*:0]const u8) void;
-    pub extern fn rjit_qjs_sync_lua_to_qjs(name: [*:0]const u8) void;
-
-    pub fn registerHostFn(name: [*:0]const u8, fn_ptr: ?*const anyopaque, argc: u8) void {
-        rjit_qjs_register_host_fn(name, fn_ptr, argc);
-    }
-    pub fn callGlobal(name: [*:0]const u8) void {
-        rjit_qjs_call_global(name);
-    }
-    pub fn callGlobalStr(name: [*:0]const u8, arg: [*:0]const u8) void {
-        rjit_qjs_call_global_str(name, arg);
-    }
-    pub fn callGlobalInt(name: [*:0]const u8, arg: i64) void {
-        rjit_qjs_call_global_int(name, arg);
-    }
-    pub fn evalExpr(expr: [*:0]const u8) void {
-        rjit_qjs_eval_expr(expr);
-    }
-    pub fn evalToString(code: []const u8, buf: *[256]u8) []const u8 {
-        const n = rjit_qjs_eval_to_string(code.ptr, code.len, buf, 256);
-        return buf[0..n];
-    }
-    pub fn evalLuaMapData(index: usize, expr: []const u8) void {
-        rjit_qjs_eval_lua_map_data(index, expr.ptr, expr.len);
-    }
-    pub fn syncScalarToLua(name: [*:0]const u8) void {
-        rjit_qjs_sync_scalar_to_lua(name);
-    }
-    pub fn syncLuaToQjs(name: [*:0]const u8) void {
-        rjit_qjs_sync_lua_to_qjs(name);
-    }
-};
-
-// ── LuaJIT Runtime extern ──────────────────────────────────────────
-pub const luajit_runtime = struct {
-    pub extern fn rjit_lua_call_global(name: [*:0]const u8) void;
-    pub extern fn rjit_lua_set_map_wrapper(index: usize, ptr: *anyopaque) void;
-    pub extern fn rjit_lua_register_host_fn(name: [*:0]const u8, func: ?*const anyopaque, argc: c_int) void;
-    pub extern fn rjit_lua_set_global_int(name: [*:0]const u8, val: i64) void;
-    pub extern fn rjit_lua_set_effect_render(id: usize, fn_ptr: ?*const anyopaque) void;
-    pub extern fn rjit_lua_set_effect_shader(id: usize, shader_ptr: ?*const anyopaque) void;
-
-    pub fn callGlobal(name: [*:0]const u8) void {
-        rjit_lua_call_global(name);
-    }
-    pub fn setMapWrapper(index: usize, ptr: *anyopaque) void {
-        rjit_lua_set_map_wrapper(index, ptr);
-    }
-    pub fn registerHostFn(name: [*:0]const u8, func: ?*const anyopaque, argc: c_int) void {
-        rjit_lua_register_host_fn(name, func, argc);
-    }
-    pub fn setGlobalInt(name: [*:0]const u8, val: i64) void {
-        rjit_lua_set_global_int(name, val);
-    }
-    pub fn setEffectRender(id: usize, fn_ptr: *const anyopaque) void {
-        rjit_lua_set_effect_render(id, fn_ptr);
-    }
-    pub fn setEffectShader(id: usize, shader_ptr: *const anyopaque) void {
-        rjit_lua_set_effect_shader(id, shader_ptr);
-    }
-};
+// QJS / LuaJIT runtime externs removed — qjs_runtime + luajit_runtime
+// archived to archive/qjs-stack/. The framework-as-.so use case for
+// scripted carts no longer routes through this header.

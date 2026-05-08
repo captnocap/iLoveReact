@@ -1,7 +1,10 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8rt = @import("v8_runtime.zig");
-const qjs_runtime = @import("qjs_runtime.zig");
+// Frame telemetry counters — were housed in qjs_runtime.zig, now in
+// framework/frame_telemetry.zig (archive/qjs-stack/README.md). Aliased
+// as `qjs_runtime` to keep existing call sites working.
+const frame_telemetry = @import("frame_telemetry.zig");
 const telemetry = @import("telemetry.zig");
 const localstore = @import("localstore.zig");
 const hotstate = @import("hotstate.zig");
@@ -142,22 +145,22 @@ fn jsValueOrEmptyString(iso: v8.Isolate, s: []const u8) v8.Value {
 
 fn getFpsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setNumberReturn(info, @floatFromInt(qjs_runtime.telemetry_fps));
+    setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_fps));
 }
 
 fn getLayoutUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setNumberReturn(info, @floatFromInt(qjs_runtime.telemetry_layout_us));
+    setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_layout_us));
 }
 
 fn getPaintUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setNumberReturn(info, @floatFromInt(qjs_runtime.telemetry_paint_us));
+    setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_paint_us));
 }
 
 fn getTickUsCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setNumberReturn(info, @floatFromInt(qjs_runtime.telemetry_tick_us));
+    setNumberReturn(info, @floatFromInt(frame_telemetry.telemetry_tick_us));
 }
 
 fn telFrameCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {

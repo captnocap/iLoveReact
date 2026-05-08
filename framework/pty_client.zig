@@ -151,10 +151,3 @@ fn hostSend(ctx: ?*qjs.JSContext, _: qjs.JSValue, argc: c_int, argv: [*c]qjs.JSV
     return qjs.JS_NewStringLen(ctx, resp.ptr, @intCast(resp.len));
 }
 
-pub fn registerQjsHostFunctions() void {
-    const reg = @import("qjs_runtime.zig").registerHostFn;
-    reg("__pty_client_connect", @ptrCast(&hostConnect), 0);
-    reg("__pty_client_disconnect", @ptrCast(&hostDisconnect), 0);
-    reg("__pty_client_connected", @ptrCast(&hostConnected), 0);
-    reg("__pty_client_send", @ptrCast(&hostSend), 1);
-}

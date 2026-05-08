@@ -312,29 +312,11 @@ fn loadCartridgeLib(idx: usize) !void {
         carts[idx].title_len = tl;
     }
 
-    // Load and eval JS logic (QuickJS)
-    if (lib.lookup(GetLogicPtrFn, "app_get_js_logic")) |get_ptr| {
-        if (lib.lookup(GetLogicLenFn, "app_get_js_logic_len")) |get_len| {
-            const ptr = get_ptr();
-            const len = get_len();
-            if (len > 0) {
-                const qjs_runtime = @import("qjs_runtime.zig");
-                qjs_runtime.evalScript(ptr[0..len]);
-            }
-        }
-    }
-
-    // Load and eval Lua logic (LuaJIT)
-    if (lib.lookup(GetLogicPtrFn, "app_get_lua_logic")) |get_ptr| {
-        if (lib.lookup(GetLogicLenFn, "app_get_lua_logic_len")) |get_len| {
-            const ptr = get_ptr();
-            const len = get_len();
-            if (len > 0) {
-                const luajit_rt = @import("luajit_runtime.zig");
-                luajit_rt.evalScript(ptr[0..len]);
-            }
-        }
-    }
+    // QJS / LuaJIT eval paths archived (archive/qjs-stack/). The cartridge
+    // .so format used to embed `app_get_js_logic` / `app_get_lua_logic`
+    // blobs that the QJS engine ran at boot; V8 carts use @embedFile +
+    // v8_runtime.eval directly. If a future cart genuinely needs script
+    // evaluation from a .so blob, route it through v8_runtime here.
 
     // Init (crash-isolated — a bad init doesn't kill the host)
     if (carts[idx].init_fn) |init_fn| {

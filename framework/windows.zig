@@ -28,8 +28,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
-const luajit_runtime = @import("luajit_runtime.zig");
-const qjs_runtime = @import("qjs_runtime.zig");
 const state_mod = @import("state.zig");
 const text_mod = @import("text.zig");
 const events = @import("events.zig");
@@ -536,29 +534,11 @@ fn handleMouseMotion(idx: usize, mx: f32, my: f32) void {
         if (prev != slots[idx].hovered) {
             if (prev) |p| {
                 if (p.handlers.on_hover_exit) |h| h();
-                const dispatched_v8 = p.handlers.js_on_hover_exit != null and dispatchJs(p, "onHoverExit");
-                if (p.handlers.lua_on_hover_exit) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
-                if (!dispatched_v8) {
-                    if (p.handlers.js_on_hover_exit) |js_expr| {
-                        qjs_runtime.callGlobal("__beginJsEvent");
-                        qjs_runtime.evalExpr(std.mem.span(js_expr));
-                        qjs_runtime.callGlobal("__endJsEvent");
-                        state_mod.markDirty();
-                    }
-                }
+                if (p.handlers.js_on_hover_exit != null) _ = dispatchJs(p, "onHoverExit");
             }
             if (slots[idx].hovered) |n| {
                 if (n.handlers.on_hover_enter) |h| h();
-                const dispatched_v8 = n.handlers.js_on_hover_enter != null and dispatchJs(n, "onHoverEnter");
-                if (n.handlers.lua_on_hover_enter) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
-                if (!dispatched_v8) {
-                    if (n.handlers.js_on_hover_enter) |js_expr| {
-                        qjs_runtime.callGlobal("__beginJsEvent");
-                        qjs_runtime.evalExpr(std.mem.span(js_expr));
-                        qjs_runtime.callGlobal("__endJsEvent");
-                        state_mod.markDirty();
-                    }
-                }
+                if (n.handlers.js_on_hover_enter != null) _ = dispatchJs(n, "onHoverEnter");
             }
         }
     }
@@ -580,7 +560,6 @@ fn handleWheel(idx: usize, mx: f32, my: f32, dy: f32) void {
             scroll_node.scroll_y -= dy * 30.0;
             const max_scroll = @max(0.0, scroll_node.content_height - scroll_node.computed.h);
             scroll_node.scroll_y = @max(0.0, @min(scroll_node.scroll_y, max_scroll));
-            luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
         }
     }
 }

@@ -33,7 +33,11 @@ const latches = @import("framework/latches.zig");
 const animations = @import("framework/animations.zig");
 const windows = @import("framework/windows.zig");
 const ipc = @import("framework/net/ipc.zig");
-const qjs_runtime = @import("framework/qjs_runtime.zig"); // kept for non-VM state (input, telemetry, dock resize, pty)
+// Prepared input state (was housed in qjs_runtime.zig despite having
+// nothing to do with QJS — see archive/qjs-stack/README.md). Aliased
+// here as `qjs_runtime` to keep existing call sites working without
+// a sweep.
+const prepared_input = @import("framework/prepared_input.zig");
 const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = @import("framework/v8_bindings_core.zig");
 const v8_bindings_eventbus = @import("framework/v8_bindings_eventbus.zig");
@@ -359,11 +363,11 @@ const g_tab_click_callbacks = blk: {
 // uses callGlobal which is comptime-no-op when QuickJS isn't compiled in,
 // so under V8-only builds we need this parallel path.
 fn dispatchV8RightClick(x: f32, y: f32) void {
-    const id = qjs_runtime.g_prepared_node_event_id;
+    const id = prepared_input.g_prepared_node_event_id;
     if (id == 0) return;
-    qjs_runtime.g_prepared_node_event_id = 0;
-    qjs_runtime.g_prepared_mouse_x = x;
-    qjs_runtime.g_prepared_mouse_y = y;
+    prepared_input.g_prepared_node_event_id = 0;
+    prepared_input.g_prepared_mouse_x = x;
+    prepared_input.g_prepared_mouse_y = y;
     var buf: [128]u8 = undefined;
     const expr = std.fmt.bufPrintZ(&buf, "__dispatchRightClick({d})", .{id}) catch return;
     v8_runtime.evalScript(expr);
@@ -379,9 +383,9 @@ fn dispatchV8RightClick(x: f32, y: f32) void {
 // to a ScrollView never fire under V8 — content scrolls visually but
 // no JS event is delivered.
 fn dispatchV8Scroll() void {
-    const id = qjs_runtime.g_prepared_node_event_id;
+    const id = prepared_input.g_prepared_node_event_id;
     if (id == 0) return;
-    qjs_runtime.g_prepared_node_event_id = 0;
+    prepared_input.g_prepared_node_event_id = 0;
     var buf: [128]u8 = undefined;
     const expr = std.fmt.bufPrintZ(&buf, "__dispatchScroll({d})", .{id}) catch return;
     v8_runtime.evalScript(expr);
@@ -2041,6 +2045,21 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             // quad sampling framework/gpu/sdf_icons.zig's atlas. Tint from
             // text_color; size from style.width/height.
             if (dupJsonText(v)) |s| node.icon_name = s;
+        } else if (std.mem.eql(u8, k, "points")) {
+            // Graph.Polyline — flat array {x0, y0, x1, y1, …}. Parsed ONCE
+            // here, then engine paint emits a batched line draw per segment
+            // every frame without re-parsing. Free the previous buffer if any
+            // (UPDATE replaces the array).
+            if (v == .array) {
+                if (node.polyline_points) |old| g_alloc.free(old);
+                const buf = g_alloc.alloc(f32, v.array.items.len) catch null;
+                if (buf) |out| {
+                    for (v.array.items, 0..) |item, i| {
+                        out[i] = jsonFloat(item) orelse 0;
+                    }
+                    node.polyline_points = out;
+                }
+            }
         } else if (std.mem.eql(u8, k, "stroke")) {
             // `stroke` maps to text_color — that's the field engine_paint.zig
             // reads for Canvas.Path / Graph.Path stroke color.

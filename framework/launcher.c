@@ -10,7 +10,7 @@
 //   RJIT_ENGINE=bleeding ./my_app → same via env var
 //
 // The cart provides: app_get_root, app_get_init, app_get_tick, app_get_title
-// The engine provides: rjit_engine_run, rjit_state_*, rjit_qjs_*
+// The engine provides: rjit_engine_run, rjit_state_*
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,11 +49,6 @@ typedef void (*rjit_state_set_slot_string_fn)(unsigned long id, const char *ptr,
 typedef void (*rjit_state_mark_dirty_fn)(void);
 typedef int (*rjit_state_is_dirty_fn)(void);
 typedef void (*rjit_state_clear_dirty_fn)(void);
-typedef void (*rjit_qjs_register_host_fn_fn)(const char *name, void *fn_ptr, unsigned char argc);
-typedef void (*rjit_qjs_call_global_fn)(const char *name);
-typedef void (*rjit_qjs_call_global_str_fn)(const char *name, const char *arg);
-typedef void (*rjit_qjs_call_global_int_fn)(const char *name, long arg);
-typedef void (*rjit_qjs_eval_expr_fn)(const char *expr);
 
 // Global function pointers — cart code calls these
 rjit_engine_run_fn              g_rjit_engine_run;
@@ -73,11 +68,6 @@ rjit_state_set_slot_string_fn   g_rjit_state_set_slot_string;
 rjit_state_mark_dirty_fn        g_rjit_state_mark_dirty;
 rjit_state_is_dirty_fn          g_rjit_state_is_dirty;
 rjit_state_clear_dirty_fn       g_rjit_state_clear_dirty;
-rjit_qjs_register_host_fn_fn   g_rjit_qjs_register_host_fn;
-rjit_qjs_call_global_fn        g_rjit_qjs_call_global;
-rjit_qjs_call_global_str_fn    g_rjit_qjs_call_global_str;
-rjit_qjs_call_global_int_fn    g_rjit_qjs_call_global_int;
-rjit_qjs_eval_expr_fn          g_rjit_qjs_eval_expr;
 
 // Trampoline functions — these have the exact symbol names that cart .o expects
 unsigned long rjit_state_create_slot(long v)           { return g_rjit_state_create_slot(v); }
@@ -96,11 +86,6 @@ void          rjit_state_set_slot_string(unsigned long id, const char *p, unsign
 void          rjit_state_mark_dirty(void)              { g_rjit_state_mark_dirty(); }
 int           rjit_state_is_dirty(void)                { return g_rjit_state_is_dirty(); }
 void          rjit_state_clear_dirty(void)             { g_rjit_state_clear_dirty(); }
-void          rjit_qjs_register_host_fn(const char *n, void *p, unsigned char a) { g_rjit_qjs_register_host_fn(n, p, a); }
-void          rjit_qjs_call_global(const char *n)      { g_rjit_qjs_call_global(n); }
-void          rjit_qjs_call_global_str(const char *n, const char *a) { g_rjit_qjs_call_global_str(n, a); }
-void          rjit_qjs_call_global_int(const char *n, long a) { g_rjit_qjs_call_global_int(n, a); }
-void          rjit_qjs_eval_expr(const char *e)        { g_rjit_qjs_eval_expr(e); }
 int           rjit_engine_run(const EngineConfig *c)   { return g_rjit_engine_run(c); }
 
 static void *load_sym(void *handle, const char *name) {
@@ -181,11 +166,6 @@ int main(int argc, char **argv) {
     g_rjit_state_mark_dirty       = (rjit_state_mark_dirty_fn)load_sym(engine, "rjit_state_mark_dirty");
     g_rjit_state_is_dirty         = (rjit_state_is_dirty_fn)load_sym(engine, "rjit_state_is_dirty");
     g_rjit_state_clear_dirty      = (rjit_state_clear_dirty_fn)load_sym(engine, "rjit_state_clear_dirty");
-    g_rjit_qjs_register_host_fn   = (rjit_qjs_register_host_fn_fn)load_sym(engine, "rjit_qjs_register_host_fn");
-    g_rjit_qjs_call_global        = (rjit_qjs_call_global_fn)load_sym(engine, "rjit_qjs_call_global");
-    g_rjit_qjs_call_global_str    = (rjit_qjs_call_global_str_fn)load_sym(engine, "rjit_qjs_call_global_str");
-    g_rjit_qjs_call_global_int    = (rjit_qjs_call_global_int_fn)load_sym(engine, "rjit_qjs_call_global_int");
-    g_rjit_qjs_eval_expr          = (rjit_qjs_eval_expr_fn)load_sym(engine, "rjit_qjs_eval_expr");
 
     if (strcmp(channel, "stable") != 0) {
         fprintf(stderr, "[rjit] Engine channel: %s\n", channel);

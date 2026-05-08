@@ -7,8 +7,8 @@
 pub const layout = @import("layout.zig");
 pub const state_mod = @import("state.zig");
 pub const engine_mod = @import("engine.zig");
-pub const qjs_runtime_mod = @import("qjs_runtime.zig");
-pub const luajit_runtime_mod = @import("luajit_runtime.zig");
+// qjs_runtime + luajit_runtime moved to archive/qjs-stack/ — Smith-era
+// runtimes that V8 carts never reach. See task #13.
 // NOTE: llama.cpp symbols are in a separate libllama_ffi.so, not in the engine.
 // Carts that use llama FFI link it via scripts/build auto-detection.
 
@@ -82,65 +82,9 @@ export fn rjit_breakpoint_current() u8 {
     return @intFromEnum(bp_mod.current());
 }
 
-// ── QJS Runtime C-ABI exports ───────────────────────────────────────
-
 const std = @import("std");
 
-export fn rjit_qjs_register_host_fn(name: [*:0]const u8, fn_ptr: ?*const anyopaque, argc: u8) void {
-    if (fn_ptr) |p| {
-        qjs_runtime_mod.registerHostFn(name, p, @as(c_int, argc));
-    }
-}
-export fn rjit_qjs_call_global(name: [*:0]const u8) void {
-    qjs_runtime_mod.callGlobal(name);
-}
-export fn rjit_qjs_call_global_str(name: [*:0]const u8, arg: [*:0]const u8) void {
-    qjs_runtime_mod.callGlobalStr(name, arg);
-}
-export fn rjit_qjs_call_global_int(name: [*:0]const u8, arg: i64) void {
-    qjs_runtime_mod.callGlobalInt(name, arg);
-}
-export fn rjit_qjs_eval_expr(expr: [*:0]const u8) void {
-    qjs_runtime_mod.evalExpr(std.mem.span(expr));
-}
-export fn rjit_qjs_eval_to_string(expr: [*]const u8, expr_len: usize, buf: [*]u8, buf_len: usize) usize {
-    var arr: [256]u8 = undefined;
-    const result = qjs_runtime_mod.evalToString(expr[0..expr_len], &arr);
-    const n = @min(result.len, buf_len);
-    @memcpy(buf[0..n], result[0..n]);
-    return n;
-}
-export fn rjit_qjs_eval_lua_map_data(index: usize, expr: [*]const u8, expr_len: usize) void {
-    qjs_runtime_mod.evalLuaMapData(index, expr[0..expr_len]);
-}
-export fn rjit_qjs_sync_scalar_to_lua(name: [*:0]const u8) void {
-    qjs_runtime_mod.syncScalarToLua(name);
-}
-export fn rjit_qjs_sync_lua_to_qjs(name: [*:0]const u8) void {
-    qjs_runtime_mod.syncLuaToQjs(name);
-}
-
-// ── LuaJIT Runtime C-ABI exports ────────────────────────────────────
-export fn rjit_lua_call_global(name: [*:0]const u8) void {
-    luajit_runtime_mod.callGlobal(name);
-}
-export fn rjit_lua_set_map_wrapper(index: usize, ptr: *anyopaque) void {
-    luajit_runtime_mod.setMapWrapper(index, ptr);
-}
-export fn rjit_lua_register_host_fn(name: [*:0]const u8, func: ?*const anyopaque, argc: c_int) void {
-    luajit_runtime_mod.registerHostFn(name, func orelse return, argc);
-}
-export fn rjit_lua_set_global_int(name: [*:0]const u8, val: i64) void {
-    luajit_runtime_mod.setGlobalInt(name, val);
-}
-export fn rjit_lua_set_effect_render(id: usize, fn_ptr: ?*const anyopaque) void {
-    if (fn_ptr) |p| luajit_runtime_mod.setEffectRender(id, @ptrCast(@alignCast(p)));
-}
-export fn rjit_lua_set_effect_shader(id: usize, shader_ptr: ?*const anyopaque) void {
-    if (shader_ptr) |p| luajit_runtime_mod.setEffectShader(id, @ptrCast(@alignCast(p)));
-}
-
-// ── Engine C-ABI export ──────��────────────────────────────────────���─
+// ── Engine C-ABI export ─────────────────────────────────────────────
 
 const api = @import("api.zig");
 

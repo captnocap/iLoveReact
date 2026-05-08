@@ -7,7 +7,10 @@ const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 
 const engine = @import("engine.zig");
-const qjs_runtime = @import("qjs_runtime.zig");
+// Terminal-dock-resize state — was housed in qjs_runtime.zig, now in
+// framework/prepared_input.zig (archive/qjs-stack/README.md). Aliased
+// as `qjs_runtime` to keep existing call sites working.
+const prepared_input = @import("prepared_input.zig");
 const canvas = @import("canvas.zig");
 const process_mod = @import("process.zig");
 const svg_path = @import("svg_path.zig");
@@ -782,13 +785,13 @@ fn beginTerminalDockResize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.
     const ctx = currentContext(info);
     const start_y = info.getArg(0).toF64(ctx) catch 0;
     const start_height = info.getArg(1).toF64(ctx) catch 0;
-    qjs_runtime.beginTerminalDockResize(@floatCast(start_y), @floatCast(start_height));
+    prepared_input.beginTerminalDockResize(@floatCast(start_y), @floatCast(start_height));
     setUndefined(info);
 }
 
 fn endTerminalDockResize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    qjs_runtime.endTerminalDockResize();
+    prepared_input.endTerminalDockResize();
     setUndefined(info);
 }
 
@@ -797,9 +800,9 @@ fn getTerminalDockResizeState(info_c: ?*const v8.c.FunctionCallbackInfo) callcon
     const iso = info.getIsolate();
     const ctx = iso.getCurrentContext();
     const obj = v8.Object.init(iso);
-    _ = obj.setValue(ctx, v8.String.initUtf8(iso, "active"), v8.Number.init(iso, if (qjs_runtime.terminalDockResizeActive()) 1 else 0).toValue());
-    _ = obj.setValue(ctx, v8.String.initUtf8(iso, "startY"), v8.Number.init(iso, qjs_runtime.terminalDockResizeStartY()));
-    _ = obj.setValue(ctx, v8.String.initUtf8(iso, "startHeight"), v8.Number.init(iso, qjs_runtime.terminalDockResizeStartHeight()));
+    _ = obj.setValue(ctx, v8.String.initUtf8(iso, "active"), v8.Number.init(iso, if (prepared_input.terminalDockResizeActive()) 1 else 0).toValue());
+    _ = obj.setValue(ctx, v8.String.initUtf8(iso, "startY"), v8.Number.init(iso, prepared_input.terminalDockResizeStartY()));
+    _ = obj.setValue(ctx, v8.String.initUtf8(iso, "startHeight"), v8.Number.init(iso, prepared_input.terminalDockResizeStartHeight()));
     setValue(info, obj.toValue());
 }
 

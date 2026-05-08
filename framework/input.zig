@@ -17,15 +17,8 @@ const std = @import("std");
 const c = @import("c.zig").imports;
 const state_mod = @import("state.zig");
 const build_options = @import("build_options");
-const HAS_QUICKJS = if (@hasDecl(build_options, "has_quickjs")) build_options.has_quickjs else true;
 const USE_V8 = if (@hasDecl(build_options, "use_v8")) build_options.use_v8 else false;
-const qjs_runtime = if (HAS_QUICKJS) @import("qjs_runtime.zig") else struct {
-    pub fn hasGlobal(_: [*:0]const u8) bool {
-        return false;
-    }
-    pub fn callGlobalInt(_: [*:0]const u8, _: i64) void {}
-};
-const js_vm = if (USE_V8) @import("v8_runtime.zig") else qjs_runtime;
+const js_vm = @import("v8_runtime.zig");
 
 pub const MAX_INPUTS = 128;
 // Large editor surfaces like sweatshop need materially more than 4 KiB or the
@@ -932,6 +925,26 @@ pub fn setCursorPos(id: u8, pos: u32) void {
     s.has_selection = false;
     s.sel_start = clamped;
     s.sel_end = clamped;
+}
+
+pub fn moveCursorTo(id: u8, pos: u32, extend_selection: bool) void {
+    if (id >= MAX_INPUTS) return;
+    const s = &inputs[id];
+    if (extend_selection) {
+        startOrExtendSelection(s);
+    } else {
+        clearSelection(s);
+    }
+    const clamped = @min(pos, s.len);
+    s.cursor = clamped;
+    if (extend_selection) {
+        updateSelectionEnd(s);
+    } else {
+        s.sel_start = clamped;
+        s.sel_end = clamped;
+    }
+    cursor_blink = 0;
+    cursor_visible = true;
 }
 
 pub fn updateDragToPos(id: u8, pos: u32) void {

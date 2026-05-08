@@ -153,7 +153,3 @@ pub const getPortCount = impl.getPortCount;
 pub const getModuleType = impl.getModuleType;
 pub const getParamMin = impl.getParamMin;
 pub const getParamMax = impl.getParamMax;
-
-// ── QJS host registration ────────────────────────────────────────────
-
-pub const registerQjsHostFunctions = impl.registerQjsHostFunctions;

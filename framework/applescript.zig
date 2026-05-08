@@ -69,8 +69,3 @@ fn hostApplescriptFile(_: ?*qjs.JSContext, _: qjs.JSValue, _: c_int, _: [*c]qjs.
     return QJS_UNDEFINED;
 }
 
-pub fn registerQjsHostFunctions() void {
-    const reg = @import("qjs_runtime.zig").registerHostFn;
-    reg("__applescript", @ptrCast(&hostApplescript), 1);
-    reg("__applescript_file", @ptrCast(&hostApplescriptFile), 1);
-}
