@@ -606,12 +606,29 @@ mkdir -p "$LIB_DIR"
 cp "$BUILD_BIN" "$TMP_DIR/app.bin"
 
 # ── llama.cpp inference subprocess (rjit-llm-worker) ───────────────────
-# Carts that import useLocalChat get the worker binary + libllama.so +
-# the four ggml siblings bundled. The worker runs llama.cpp inference
-# in its own process so the renderer's wgpu/Vulkan never fights with
-# llama's ggml-vulkan over the VkInstance. See framework/ffi/llm_worker.cpp
+# Local-AI carts get the worker binary + libllama.so + the four ggml
+# siblings bundled. The worker runs llama.cpp inference in its own
+# process so the renderer's wgpu/Vulkan never fights with llama's
+# ggml-vulkan over the VkInstance. See framework/ffi/llm_worker.cpp
 # and framework/local_ai_runtime.zig for the full architecture.
-if [[ "$WANT_SDK" == "1" ]]; then
+#
+# Gate: WANT_EMBED. This fires on runtime/hooks/embed.ts /
+# useEmbed.ts, which means the cart does local LLM-backed embedding
+# work and also (if it uses chat) wants the same llama.cpp backend.
+# Previously gated on WANT_SDK — broad enough that every cart
+# importing fetch.ts / useTheInternet.ts dragged in 165MB of llama
+# even though it only ever talked to anthropic over HTTP. Smith-era
+# drift the user has been calling out.
+#
+# useAssistant's `local_ai` backend takes the backend as a runtime
+# string, so static analysis can't tell if a chat cart uses local
+# inference. If a cart wants useAssistant({ backend:'local_ai' })
+# without also touching embeddings, it has to flip has-embed
+# explicitly or this block stays off and `__worker_start` will fail
+# at runtime with a clear "rjit-llm-worker not bundled" error. Not
+# pretty, but better than silent 165MB-per-cart bloat. The proper
+# fix is a per-backend import surface for useAssistant.
+if [[ "$WANT_EMBED" == "1" ]]; then
     LLM_WORKER_SRC="$RJIT_HOME/zig-out/bin/rjit-llm-worker"
     LLM_LIB_DIR="$RJIT_HOME/deps/llama.cpp-fresh/build/bin"
     if [[ -f "$LLM_WORKER_SRC" ]] && [[ -d "$LLM_LIB_DIR" ]]; then
@@ -625,15 +642,13 @@ if [[ "$WANT_SDK" == "1" ]]; then
             for f in "$LLM_LIB_DIR/${so_pattern}.so"*; do
                 [[ -e "$f" ]] || continue
                 soname=$(basename "$f")
-                # Resolve symlink to real file, copy real file with the
-                # symlink's name so any naming layer works.
                 real=$(readlink -f "$f")
                 cp "$real" "$LIB_DIR/$soname"
             done
         done
         echo "[ship]   bundled rjit-llm-worker + libllama.so + ggml-vulkan backend"
     else
-        echo "[ship]   WARNING: useLocalChat needs $LLM_WORKER_SRC + $LLM_LIB_DIR — skipping local-runtime bundle"
+        echo "[ship]   WARNING: has-embed needs $LLM_WORKER_SRC + $LLM_LIB_DIR — skipping local-runtime bundle"
     fi
 fi
 
