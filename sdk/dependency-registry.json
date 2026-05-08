@@ -157,9 +157,9 @@
     "curl": {
       "kind": "dynamic-library",
       "systemNames": ["curl"],
-      "linkPolicy": "feature-gated",
-      "bundlePolicy": "feature-gated",
-      "note": "build.zig still calls linkSystemLibrary unconditionally, but Zig's default --as-needed elides libcurl from carts that reference no curl_* symbols. Net effect matches feature-gating for now; a full -Dhas-http-client gate (with framework/net/http.zig becoming a dispatcher) is the next refactor."
+      "linkPolicy": "deprecated",
+      "bundlePolicy": "never",
+      "note": "DEPRECATED — being removed. The networking stack is migrating to tier-0 useTheInternet (std.http + tls.zig + nghttp2). framework/net/http.zig (libcurl-based) is being replaced by an extended framework/net/page_fetch.zig (tls.zig-based). Once the migration completes, libcurl + its entire transitive auth/TLS chain (libssl, libcrypto, libgnutls, libkrb5, libgssapi, libldap, libsasl, libssh2, libidn2, libpsl, librtmp, libnettle, libhogweed, libtasn1, libp11-kit, libgmp, libunistring, libcom_err, libkeyutils) get dropped from every cart bundle (~30MB). Do not add new code that links libcurl."
     },
     "libvterm": {
       "kind": "vendored-library",
@@ -190,8 +190,7 @@
       "bundlePolicy": "never",
       "note": "Every macOS host has Foundation/QuartzCore/Metal/Cocoa/IOKit/CoreVideo. Linked, not bundled.",
       "platforms": ["macos"],
-      "frameworks": ["Foundation", "QuartzCore", "Metal", "Cocoa", "IOKit", "CoreVideo"],
-      "linkPolicy": "feature-gated"
+      "frameworks": ["Foundation", "QuartzCore", "Metal", "Cocoa", "IOKit", "CoreVideo"]
     }
   },
   "features": {
@@ -285,14 +284,6 @@
       "buildOptions": ["has-sqlite"],
       "nativeLibraries": ["sqlite3"]
     },
-    "http-client": {
-      "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/http.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/browser_page.ts" }
-      ],
-      "buildOptions": ["has-http-client"],
-      "nativeLibraries": ["curl", "tls.zig"]
-    },
     "crypto": {
       "triggers": [
         { "kind": "metafileInput", "input": "runtime/hooks/crypto.ts" }
@@ -370,20 +361,18 @@
       "shipGate": "sdk",
       "triggers": [
         { "kind": "metafileInput", "input": "runtime/hooks/http.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/browser_page.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useLocalChat.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useClaudeChat.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useBrowse.ts" }
+        { "kind": "metafileInput", "input": "runtime/hooks/browser_page.ts" }
       ],
       "buildOptions": ["has-sdk"],
       "v8Bindings": ["sdk"],
       "nativeLibraries": ["curl", "tls.zig"],
-      "note": "useLocalChat / useClaudeChat are here because __localai_* / __claude_* bindings live in v8_bindings_sdk.zig. The chat runtime no longer needs libllama_ffi linked (it dlopens an LM Studio backend at runtime), so this is the only gate it needs."
+      "note": "TRANSITIONAL — being replaced by tier-0 useTheInternet (see project_networking_stack memory). The libcurl path is being removed in favor of std.http + tls.zig + nghttp2. browser_page.ts already routes through tls.zig via framework/net/page_fetch.zig; http.ts still routes through framework/net/http.zig (libcurl) until the migration completes."
     },
     "voice": {
       "shipGate": "voice",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useVoiceInput.ts" }
+        { "kind": "metafileInput", "input": "runtime/hooks/useVoiceInput.ts" },
+        { "kind": "metafileInput", "input": "runtime/hooks/useAudioInput.ts" }
       ],
       "buildOptions": ["has-voice"],
       "v8Bindings": ["voice"]
