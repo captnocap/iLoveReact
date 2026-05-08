@@ -54,12 +54,13 @@
  *
  * ── Render behavior ────────────────────────────────────────
  *
- * The hook does NOT trigger a host re-render when a wire fires. The
- * returned `fired` / `lastFiredAt` are getters reading directly from
- * the Zig-side registry; `lastEvent` is a JS-side mirror. A cart that
- * wants reactivity on those values should mirror them into local
- * state from inside the action callback (the cart is in the best
- * position to decide whether each fire should cause a re-render).
+ * Lazy reactivity. `fired` / `lastEvent` / `lastFiredAt` are getters
+ * reading directly from the Zig-side registry (counters) and a JS-side
+ * mirror (lastEvent). The host re-renders on fire ONLY if any of those
+ * fields has been read at least once during the component's lifetime.
+ * Carts that just pass an action and ignore the return value are
+ * zero-rerender — useIFTTT('timer:every:100', tick) won't re-render the
+ * host 10x/sec.
  *
  * Internals: trigger families and action verbs are registered through
  * `ifttt-registry.ts`. Other hooks (process, voice, fs, host, …) can
@@ -68,7 +69,7 @@
  * fired-count, and lastFiredAt live in framework/ifttt_zig.zig and are
  * driven by the engine frame loop.
  */
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as clipboard from './clipboard';
 import { subscribe, emit, callHost } from '../ffi';
 import {
@@ -539,12 +540,21 @@ export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResul
     };
   }, []);
 
+  // Lazy reactivity: the host doesn't rerender on fire by default.
+  // First read of any result field flips `subscribedRef`; thereafter
+  // each fire bumps a useState so consumers (diagnostic dashboards,
+  // counters in render) update. Carts that ignore the return value
+  // never set the flag and stay zero-rerender.
+  const subscribedRef = useRef(false);
+  const [, forceTick] = useState(0);
+
   const fire = (event?: any) => {
     const wid = wireRef.current;
     if (wid > 0) bumpWire(wid, event);
     const a = actionRef.current;
     if (typeof a === 'function') a(event);
     else runStringAction(a, event);
+    if (subscribedRef.current) forceTick((n) => (n + 1) & 0xffff);
   };
   const fireRef = useRef(fire);
   fireRef.current = fire;
@@ -599,16 +609,19 @@ export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResul
 
   // Stable handle. `fired`/`lastFiredAt` read from the Zig registry on
   // demand; `lastEvent` is JS-side (mirrored in WireEntry by bumpWire).
-  // Cart components that want reactivity should mirror values into local
-  // state from inside the action callback rather than relying on these.
+  // Reading any field opts the host into rerender-on-fire (lazy
+  // subscription). Carts that never read these never trigger renders.
   return useMemo<IFTTTResult>(() => ({
     get fired(): number {
+      subscribedRef.current = true;
       return callHost<number>('__ifttt_wire_count', 0, wireRef.current);
     },
     get lastEvent(): any {
+      subscribedRef.current = true;
       return _wires.get(wireRef.current)?.lastEvent;
     },
     get lastFiredAt(): number {
+      subscribedRef.current = true;
       return callHost<number>('__ifttt_wire_last_at', 0, wireRef.current);
     },
     fire: (event?: any) => fireRef.current(event),
