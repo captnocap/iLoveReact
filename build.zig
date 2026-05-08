@@ -170,16 +170,19 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("m");
         exe.linkSystemLibrary("pthread");
         exe.linkSystemLibrary("dl");
-        // libasound deliberately NOT linked here. No framework/*.zig
-        // references libasound symbols directly. SDL3 dlopens its audio
-        // backends (libasound, libpulse, libpipewire, libsndio) on
-        // demand at runtime — the previous unconditional link added a
-        // redundant DT_NEEDED entry that ldd then faithfully reported,
-        // dragging the entire audio stack into every cart bundle (incl.
-        // browser). Carts that need audio go through SDL3's runtime
-        // dispatch on the user's installed audio system. (When wave 2b
-        // lands the audio.zig stub-split + has-audio gate, this comment
-        // can be removed entirely — the absence-by-default is the rule.)
+        // libasound is required by framework/midi.zig, which calls into
+        // ALSA's snd_seq_* API for MIDI sequencer input on Linux. SDL3's
+        // audio backends are dlopen'd at runtime (so SDL3 doesn't pull
+        // libasound into our DT_NEEDED via any of the audio path), but
+        // midi.zig links the snd_seq_* symbols directly via @extern, and
+        // those need libasound at link time. midi.zig is currently
+        // compiled unconditionally; once it gets stub-split (mirroring
+        // audio.zig / luajit_worker.zig) + a has-midi build option, this
+        // link can move into `if (has_midi) ...`. Until then, every Linux
+        // cart pays for libasound (~600KB on disk; the broader audio
+        // stack stays out because SDL3's pulse/pipewire/sndio paths are
+        // pure dlopen).
+        exe.linkSystemLibrary("asound");
         if (sysroot) |sr| {
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
             root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
