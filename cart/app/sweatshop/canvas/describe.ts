@@ -21,6 +21,7 @@ interface WiredPair {
 function classifyEdges(nodes: FlowNode[], edges: FlowEdge[]): {
   wired: WiredPair[];
   orphans: FlowNode[];
+  domains: FlowNode[];
 } {
   const byId = new Map<string, FlowNode>(nodes.map((n) => [n.id, n]));
   const wired: WiredPair[] = [];
@@ -29,8 +30,8 @@ function classifyEdges(nodes: FlowNode[], edges: FlowEdge[]): {
     const f = byId.get(e.from);
     const t = byId.get(e.to);
     if (!f || !t) continue;
-    const fKind = f.data?.kind;
-    const tKind = t.data?.kind;
+    const fKind = (f.data as any)?.kind;
+    const tKind = (t.data as any)?.kind;
     if (!fKind || !tKind) continue;
     if (!TRIGGER_KINDS.has(fKind)) continue;
     if (!ACTION_KINDS.has(tKind)) continue;
@@ -40,13 +41,17 @@ function classifyEdges(nodes: FlowNode[], edges: FlowEdge[]): {
     used.add(t.id);
   }
   const orphans = nodes.filter((n) => {
-    const k = n.data?.kind;
-    if (k === 'token') return false;                         // tokens are scenery
+    const k = (n.data as any)?.kind;
+    if (k === 'token') return false;                         // tokens project as DOMAIN
     if (!k) return false;
     if (!TRIGGER_KINDS.has(k) && !ACTION_KINDS.has(k)) return false;
     return !used.has(n.id);
   });
-  return { wired, orphans };
+  const domains = nodes.filter((n) => {
+    const k = (n.data as any)?.kind;
+    return k === 'token' && !!n.label;
+  });
+  return { wired, orphans, domains };
 }
 
 // ── Code mirror ──────────────────────────────────────────────────
