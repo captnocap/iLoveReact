@@ -390,30 +390,191 @@ function StatRow({ label, value }: { label: string; value: string }) {
 
 // ── In-game phase ────────────────────────────────────────────────
 //
-// Render GenericChatCard at its native width (CHAT_CARD.width = 506)
-// in a wrap row. No fixed-pixel wrapper — the card's intrinsic shape
-// is what makes its sub-pieces (header, telemetry, transcript) line
-// up; clipping it with overflow:hidden was the bug from last pass.
+// Each worker is its own <Router local>. The card top carries a mini
+// tab strip (chat / files / plan / eval) that drives the card's own
+// internal route, completely independent of the other workers and the
+// outer app. All four workers stay mounted and visible at once — only
+// each card's body swaps.
 
 function InGamePhase({ champions }: { champions: ChampionWorker[] }) {
   return (
     <ScrollView style={{ flexGrow: 1, minHeight: 0, padding: 16 }}>
       <Row style={{ flexWrap: 'wrap', gap: 20, paddingBottom: 16, alignItems: 'flex-start' }}>
         {champions.map((c) => (
-          <Box key={c.id} style={{ flexShrink: 0 }}>
-            <GenericChatCard
-              header={{
-                title: c.name,
-                pathology: c.role.toUpperCase(),
-                achievement: '',
-                trust: 'B',
-                note: c.model,
-                mode: 'live',
-              }}
-            />
-          </Box>
+          <Router
+            key={c.id}
+            local
+            initialPath="/chat"
+            hotKey={`worker:${c.id}`}
+          >
+            <WorkerCard champion={c} />
+          </Router>
         ))}
       </Row>
     </ScrollView>
+  );
+}
+
+const WORKER_TABS: Array<{ path: string; label: string }> = [
+  { path: '/chat',  label: 'chat'  },
+  { path: '/files', label: 'files' },
+  { path: '/plan',  label: 'plan'  },
+  { path: '/eval',  label: 'eval'  },
+];
+
+const WORKER_CARD_W = 506; // CHAT_CARD.width — match GenericChatCard's intrinsic shape
+
+function WorkerCard({ champion }: { champion: ChampionWorker }) {
+  const ctx = useRoute();
+  return (
+    <Col style={{
+      width: WORKER_CARD_W,
+      flexShrink: 0,
+      gap: 0,
+      borderRadius: 8,
+      borderWidth: 1, borderColor: 'theme:rule',
+      backgroundColor: 'theme:bg1',
+    }}>
+      {/* Mini tab strip — same shape as the route nav, just per-card. */}
+      <Row style={{
+        paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8,
+        gap: 6, alignItems: 'center',
+        borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+        backgroundColor: 'theme:bg2',
+      }}>
+        <Text size={11} color="theme:ink" bold>{champion.name}</Text>
+        <Text size={9} color="theme:inkDim">·</Text>
+        <Text size={9} color="theme:inkDim">{champion.role}</Text>
+        <Box style={{ flexGrow: 1 }} />
+        {WORKER_TABS.map((t) => (
+          <WorkerTab key={t.path} to={t.path} label={t.label} active={ctx.path === t.path} />
+        ))}
+      </Row>
+
+      {/* Body — one Route per tab. Same overflow rules as the rail; the
+          card's natural width is what keeps sub-tiles in shape. */}
+      <Box style={{ minHeight: 280 }}>
+        <Route path="/chat">
+          <GenericChatCard
+            header={{
+              title: champion.name,
+              pathology: champion.role.toUpperCase(),
+              achievement: '',
+              trust: 'B',
+              note: champion.model,
+              mode: 'live',
+            }}
+          />
+        </Route>
+        <Route path="/files">
+          <WorkerFilesPanel champion={champion} />
+        </Route>
+        <Route path="/plan">
+          <WorkerPlanPanel champion={champion} />
+        </Route>
+        <Route path="/eval">
+          <WorkerEvalPanel champion={champion} />
+        </Route>
+        <Route fallback>
+          <Col style={{ padding: 16 }}>
+            <Text size={11} color="theme:warn">no panel for {ctx.path}</Text>
+          </Col>
+        </Route>
+      </Box>
+    </Col>
+  );
+}
+
+function WorkerTab({ to, label, active }: { to: string; label: string; active: boolean }) {
+  return (
+    <Link to={to} style={{
+      paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3,
+      borderRadius: 4,
+      borderWidth: 1,
+      borderColor: active ? 'theme:accent' : 'theme:rule',
+      backgroundColor: active ? 'theme:bg1' : 'theme:bg0',
+    }}>
+      <Text size={10} color={active ? 'theme:accent' : 'theme:inkDim'} bold>{label}</Text>
+    </Link>
+  );
+}
+
+function WorkerFilesPanel({ champion }: { champion: ChampionWorker }) {
+  // Placeholder file list per worker — different per archetype so
+  // switching workers' panels visibly differ.
+  const files = [
+    { name: 'README.md',           bytes: '2.1k', status: 'clean' },
+    { name: `${champion.id}.plan`, bytes: '0.8k', status: 'editing' },
+    { name: 'src/index.ts',        bytes: '6.4k', status: 'staged' },
+    { name: 'src/util.ts',         bytes: '1.7k', status: 'clean' },
+  ];
+  return (
+    <Col style={{ padding: 12, gap: 4 }}>
+      <Text size={10} color="theme:inkDim" bold>FILES</Text>
+      {files.map((f) => (
+        <Row key={f.name} style={{ alignItems: 'baseline', gap: 8 }}>
+          <Text size={11} color="theme:ink" style={{ width: 200 }}>{f.name}</Text>
+          <Text size={10} color="theme:inkDim" style={{ width: 60 }}>{f.bytes}</Text>
+          <Text size={10} color={f.status === 'editing' ? 'theme:accent' : 'theme:inkDim'}>{f.status}</Text>
+        </Row>
+      ))}
+    </Col>
+  );
+}
+
+function WorkerPlanPanel({ champion }: { champion: ChampionWorker }) {
+  const steps = [
+    { id: 1, body: `read brief for ${champion.id}`,           done: true  },
+    { id: 2, body: 'enumerate impacted files',                 done: true  },
+    { id: 3, body: 'apply patch in isolated branch',           done: false },
+    { id: 4, body: 'run tests, repair until green',            done: false },
+    { id: 5, body: 'open PR with summary + verification log',  done: false },
+  ];
+  return (
+    <Col style={{ padding: 12, gap: 4 }}>
+      <Text size={10} color="theme:inkDim" bold>PLAN</Text>
+      {steps.map((s) => (
+        <Row key={s.id} style={{ alignItems: 'baseline', gap: 8 }}>
+          <Text size={11} color={s.done ? 'theme:accent' : 'theme:inkDim'} style={{ width: 16 }}>
+            {s.done ? '✓' : '·'}
+          </Text>
+          <Text size={11} color={s.done ? 'theme:inkDim' : 'theme:ink'}>{s.body}</Text>
+        </Row>
+      ))}
+    </Col>
+  );
+}
+
+function WorkerEvalPanel({ champion }: { champion: ChampionWorker }) {
+  return (
+    <Col style={{ padding: 12, gap: 8 }}>
+      <Text size={10} color="theme:inkDim" bold>EVAL</Text>
+      <Row style={{ gap: 8 }}>
+        <EvalChip label="runs"     value={String(champion.stats.runs)} />
+        <EvalChip label="win rate" value={champion.stats.winRate} />
+        <EvalChip label="avg"      value={champion.stats.avgMs} />
+      </Row>
+      <Text size={10} color="theme:inkDim">top tools</Text>
+      <Row style={{ gap: 6, flexWrap: 'wrap' }}>
+        {champion.stats.topTools.map((t) => (
+          <ChampionPill key={t} label={t} />
+        ))}
+      </Row>
+    </Col>
+  );
+}
+
+function EvalChip({ label, value }: { label: string; value: string }) {
+  return (
+    <Col style={{
+      paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6,
+      borderRadius: 4,
+      borderWidth: 1, borderColor: 'theme:rule',
+      backgroundColor: 'theme:bg2',
+      minWidth: 88,
+    }}>
+      <Text size={9} color="theme:inkDim">{label}</Text>
+      <Text size={12} color="theme:ink" bold>{value}</Text>
+    </Col>
   );
 }
