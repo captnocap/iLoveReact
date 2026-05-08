@@ -88,6 +88,7 @@ pub const MAX_INLINE_SLOTS = 8;
 pub const EventHandler = struct {
     on_press: ?*const fn () void = null,
     on_mouse_down: ?*const fn () void = null,
+    on_mouse_move: ?*const fn () void = null,
     on_mouse_up: ?*const fn () void = null,
     on_hover_enter: ?*const fn () void = null,
     on_hover_exit: ?*const fn () void = null,
@@ -102,9 +103,11 @@ pub const EventHandler = struct {
     on_right_click: ?*const fn (x: f32, y: f32) void = null,
     js_on_press: ?[*:0]const u8 = null,
     js_on_mouse_down: ?[*:0]const u8 = null,
+    js_on_mouse_move: ?[*:0]const u8 = null,
     js_on_mouse_up: ?[*:0]const u8 = null,
     lua_on_press: ?[*:0]const u8 = null,
     lua_on_mouse_down: ?[*:0]const u8 = null,
+    lua_on_mouse_move: ?[*:0]const u8 = null,
     lua_on_mouse_up: ?[*:0]const u8 = null,
 };
 
@@ -189,14 +192,30 @@ pub const Style = struct {
     shadow_color: ?Color = null,
     shadow_method: u8 = 0, // 0 = sdf (default), 1 = rect (multi-rect)
 
-    pub fn padLeft(self: Style) f32 { return self.padding_left orelse self.padding; }
-    pub fn padRight(self: Style) f32 { return self.padding_right orelse self.padding; }
-    pub fn padTop(self: Style) f32 { return self.padding_top orelse self.padding; }
-    pub fn padBottom(self: Style) f32 { return self.padding_bottom orelse self.padding; }
-    pub fn brdTop(self: Style) f32 { return self.border_top_width orelse self.border_width; }
-    pub fn brdRight(self: Style) f32 { return self.border_right_width orelse self.border_width; }
-    pub fn brdBottom(self: Style) f32 { return self.border_bottom_width orelse self.border_width; }
-    pub fn brdLeft(self: Style) f32 { return self.border_left_width orelse self.border_width; }
+    pub fn padLeft(self: Style) f32 {
+        return self.padding_left orelse self.padding;
+    }
+    pub fn padRight(self: Style) f32 {
+        return self.padding_right orelse self.padding;
+    }
+    pub fn padTop(self: Style) f32 {
+        return self.padding_top orelse self.padding;
+    }
+    pub fn padBottom(self: Style) f32 {
+        return self.padding_bottom orelse self.padding;
+    }
+    pub fn brdTop(self: Style) f32 {
+        return self.border_top_width orelse self.border_width;
+    }
+    pub fn brdRight(self: Style) f32 {
+        return self.border_right_width orelse self.border_width;
+    }
+    pub fn brdBottom(self: Style) f32 {
+        return self.border_bottom_width orelse self.border_width;
+    }
+    pub fn brdLeft(self: Style) f32 {
+        return self.border_left_width orelse self.border_width;
+    }
     pub fn marLeft(self: Style) f32 {
         const v = self.margin_left orelse self.margin;
         return if (std.math.isInf(v)) 0 else v;
@@ -349,6 +368,7 @@ pub const Node = struct {
     canvas_fill_gradient: ?LinearGradient = null,
     canvas_flow_speed: f32 = 0,
     canvas_fill_effect: ?[]const u8 = null,
+    icon_name: ?[]const u8 = null,
     text_effect: ?[]const u8 = null,
     inline_glyphs: ?[]const InlineGlyph = null,
     inline_slots: [MAX_INLINE_SLOTS]InlineSlot = [_]InlineSlot{.{}} ** MAX_INLINE_SLOTS,
@@ -390,23 +410,51 @@ pub const state = struct {
     pub extern fn rjit_state_clear_dirty() void;
 
     // Convenience wrappers matching the current API
-    pub fn createSlot(initial: i64) usize { return rjit_state_create_slot(initial); }
-    pub fn createSlotFloat(initial: f64) usize { return rjit_state_create_slot_float(initial); }
-    pub fn createSlotBool(initial: bool) usize { return rjit_state_create_slot_bool(initial); }
-    pub fn createSlotString(s: []const u8) usize { return rjit_state_create_slot_string(s.ptr, s.len); }
-    pub fn getSlot(id: usize) i64 { return rjit_state_get_slot(id); }
-    pub fn setSlot(id: usize, val: i64) void { rjit_state_set_slot(id, val); }
-    pub fn getSlotFloat(id: usize) f64 { return rjit_state_get_slot_float(id); }
-    pub fn setSlotFloat(id: usize, val: f64) void { rjit_state_set_slot_float(id, val); }
-    pub fn getSlotBool(id: usize) bool { return rjit_state_get_slot_bool(id); }
-    pub fn setSlotBool(id: usize, val: bool) void { rjit_state_set_slot_bool(id, val); }
+    pub fn createSlot(initial: i64) usize {
+        return rjit_state_create_slot(initial);
+    }
+    pub fn createSlotFloat(initial: f64) usize {
+        return rjit_state_create_slot_float(initial);
+    }
+    pub fn createSlotBool(initial: bool) usize {
+        return rjit_state_create_slot_bool(initial);
+    }
+    pub fn createSlotString(s: []const u8) usize {
+        return rjit_state_create_slot_string(s.ptr, s.len);
+    }
+    pub fn getSlot(id: usize) i64 {
+        return rjit_state_get_slot(id);
+    }
+    pub fn setSlot(id: usize, val: i64) void {
+        rjit_state_set_slot(id, val);
+    }
+    pub fn getSlotFloat(id: usize) f64 {
+        return rjit_state_get_slot_float(id);
+    }
+    pub fn setSlotFloat(id: usize, val: f64) void {
+        rjit_state_set_slot_float(id, val);
+    }
+    pub fn getSlotBool(id: usize) bool {
+        return rjit_state_get_slot_bool(id);
+    }
+    pub fn setSlotBool(id: usize, val: bool) void {
+        rjit_state_set_slot_bool(id, val);
+    }
     pub fn getSlotString(id: usize) []const u8 {
         return rjit_state_get_slot_string_ptr(id)[0..rjit_state_get_slot_string_len(id)];
     }
-    pub fn setSlotString(id: usize, s: []const u8) void { rjit_state_set_slot_string(id, s.ptr, s.len); }
-    pub fn markDirty() void { rjit_state_mark_dirty(); }
-    pub fn isDirty() bool { return rjit_state_is_dirty(); }
-    pub fn clearDirty() void { rjit_state_clear_dirty(); }
+    pub fn setSlotString(id: usize, s: []const u8) void {
+        rjit_state_set_slot_string(id, s.ptr, s.len);
+    }
+    pub fn markDirty() void {
+        rjit_state_mark_dirty();
+    }
+    pub fn isDirty() bool {
+        return rjit_state_is_dirty();
+    }
+    pub fn clearDirty() void {
+        rjit_state_clear_dirty();
+    }
 };
 
 // ── Theme extern functions ──────────────────────────────────────────
@@ -414,15 +462,21 @@ pub const theme = struct {
     pub extern fn rjit_theme_active_variant() u8;
     pub extern fn rjit_theme_set_variant(v: u8) void;
 
-    pub fn activeVariant() u8 { return rjit_theme_active_variant(); }
-    pub fn setVariant(v: u8) void { rjit_theme_set_variant(v); }
+    pub fn activeVariant() u8 {
+        return rjit_theme_active_variant();
+    }
+    pub fn setVariant(v: u8) void {
+        rjit_theme_set_variant(v);
+    }
 };
 
 // ── Breakpoint extern functions ────────────────────────────────────
 pub const breakpoint = struct {
     pub extern fn rjit_breakpoint_current() u8;
 
-    pub fn current() @import("breakpoint.zig").Breakpoint { return @enumFromInt(rjit_breakpoint_current()); }
+    pub fn current() @import("breakpoint.zig").Breakpoint {
+        return @enumFromInt(rjit_breakpoint_current());
+    }
 };
 
 // ── Engine extern (main loop entry point) ───────────────────────────
@@ -465,11 +519,19 @@ pub const window = struct {
     pub extern fn rjit_window_maximize() void;
     pub extern fn rjit_window_is_maximized() bool;
 
-    pub fn close() void { rjit_window_close(); }
-    pub fn minimize() void { rjit_window_minimize(); }
+    pub fn close() void {
+        rjit_window_close();
+    }
+    pub fn minimize() void {
+        rjit_window_minimize();
+    }
     /// Toggle maximize/restore.
-    pub fn maximize() void { rjit_window_maximize(); }
-    pub fn isMaximized() bool { return rjit_window_is_maximized(); }
+    pub fn maximize() void {
+        rjit_window_maximize();
+    }
+    pub fn isMaximized() bool {
+        return rjit_window_is_maximized();
+    }
 };
 
 // ── NodePool ───────────────────────────────────────────────────────
@@ -539,10 +601,18 @@ pub const qjs_runtime = struct {
     pub fn registerHostFn(name: [*:0]const u8, fn_ptr: ?*const anyopaque, argc: u8) void {
         rjit_qjs_register_host_fn(name, fn_ptr, argc);
     }
-    pub fn callGlobal(name: [*:0]const u8) void { rjit_qjs_call_global(name); }
-    pub fn callGlobalStr(name: [*:0]const u8, arg: [*:0]const u8) void { rjit_qjs_call_global_str(name, arg); }
-    pub fn callGlobalInt(name: [*:0]const u8, arg: i64) void { rjit_qjs_call_global_int(name, arg); }
-    pub fn evalExpr(expr: [*:0]const u8) void { rjit_qjs_eval_expr(expr); }
+    pub fn callGlobal(name: [*:0]const u8) void {
+        rjit_qjs_call_global(name);
+    }
+    pub fn callGlobalStr(name: [*:0]const u8, arg: [*:0]const u8) void {
+        rjit_qjs_call_global_str(name, arg);
+    }
+    pub fn callGlobalInt(name: [*:0]const u8, arg: i64) void {
+        rjit_qjs_call_global_int(name, arg);
+    }
+    pub fn evalExpr(expr: [*:0]const u8) void {
+        rjit_qjs_eval_expr(expr);
+    }
     pub fn evalToString(code: []const u8, buf: *[256]u8) []const u8 {
         const n = rjit_qjs_eval_to_string(code.ptr, code.len, buf, 256);
         return buf[0..n];
@@ -567,10 +637,22 @@ pub const luajit_runtime = struct {
     pub extern fn rjit_lua_set_effect_render(id: usize, fn_ptr: ?*const anyopaque) void;
     pub extern fn rjit_lua_set_effect_shader(id: usize, shader_ptr: ?*const anyopaque) void;
 
-    pub fn callGlobal(name: [*:0]const u8) void { rjit_lua_call_global(name); }
-    pub fn setMapWrapper(index: usize, ptr: *anyopaque) void { rjit_lua_set_map_wrapper(index, ptr); }
-    pub fn registerHostFn(name: [*:0]const u8, func: ?*const anyopaque, argc: c_int) void { rjit_lua_register_host_fn(name, func, argc); }
-    pub fn setGlobalInt(name: [*:0]const u8, val: i64) void { rjit_lua_set_global_int(name, val); }
-    pub fn setEffectRender(id: usize, fn_ptr: *const anyopaque) void { rjit_lua_set_effect_render(id, fn_ptr); }
-    pub fn setEffectShader(id: usize, shader_ptr: *const anyopaque) void { rjit_lua_set_effect_shader(id, shader_ptr); }
+    pub fn callGlobal(name: [*:0]const u8) void {
+        rjit_lua_call_global(name);
+    }
+    pub fn setMapWrapper(index: usize, ptr: *anyopaque) void {
+        rjit_lua_set_map_wrapper(index, ptr);
+    }
+    pub fn registerHostFn(name: [*:0]const u8, func: ?*const anyopaque, argc: c_int) void {
+        rjit_lua_register_host_fn(name, func, argc);
+    }
+    pub fn setGlobalInt(name: [*:0]const u8, val: i64) void {
+        rjit_lua_set_global_int(name, val);
+    }
+    pub fn setEffectRender(id: usize, fn_ptr: *const anyopaque) void {
+        rjit_lua_set_effect_render(id, fn_ptr);
+    }
+    pub fn setEffectShader(id: usize, shader_ptr: *const anyopaque) void {
+        rjit_lua_set_effect_shader(id, shader_ptr);
+    }
 };

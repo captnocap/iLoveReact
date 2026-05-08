@@ -1,5 +1,6 @@
-import { Box, Graph } from '../primitives';
+import { Box, Graph, SdfIcon } from '../primitives';
 import { lookupIcon } from './registry';
+import { BAKED_ICON_NAMES } from './baked-names';
 
 export type IconData = number[][];
 export type IconName = string;
@@ -107,6 +108,14 @@ function renderPaths(paths: IconData, color: string, strokeWidth: number) {
   ));
 }
 
+// Resolve user-supplied icon name to the exact PascalCase key used by the
+// SDF atlas + the icons.ts registry. "heart" / "Heart" / "arrow-right" all
+// normalize: leading char + each post-`-_` char to uppercase, separators
+// dropped. Mirrors registry.ts::toPascalCase.
+function toBakedKey(name: string): string {
+  return name.replace(/(^|[-_])([a-z0-9])/g, (_, __, c) => c.toUpperCase()).replace(/[-_]/g, '');
+}
+
 export function Icon(props: {
   name?: IconName;
   icon?: IconData;
@@ -117,6 +126,18 @@ export function Icon(props: {
   const size = props.size ?? 16;
   const color = props.color ?? 'theme:ink';
   const strokeWidth = props.strokeWidth ?? 2;
+
+  // SDF fast path — exact-name lookup against the pre-baked atlas. Beats
+  // the path-render path by a wide margin: 1 batched quad regardless of
+  // count, no per-paint string parsing, no curve tessellation. Custom
+  // `icon={data}` paths skip this (their geometry isn't in the atlas).
+  if (props.name && !props.icon) {
+    const key = toBakedKey(props.name);
+    if (BAKED_ICON_NAMES.has(key)) {
+      return <SdfIcon name={key} size={size} color={color} />;
+    }
+  }
+
   const paths = resolvePaths(props.name, props.icon);
 
   if (!paths || paths.length === 0) {

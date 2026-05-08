@@ -494,7 +494,7 @@ export const Scene3D: any = Scene3DBase;
 // cart actually mounts an <Audio> tree.
 //
 //   <Audio gain={0.8}>
-//     <Audio.Module id="voice1" type="pocket_voice" tone={0.5} drive={0.3} />
+//     <Audio.Module id="voice1" type="instrument" tone={0.5} drive={0.3} />
 //     <Audio.Module id="delay1" type="delay" feedback={0.4} time={0.25} />
 //     <Audio.Connection from="voice1" to="delay1" />
 //   </Audio>
@@ -507,6 +507,27 @@ const AudioBase: any = function Audio(props: any) {
 AudioBase.Module     = function Module(props: any)     { return require('./audio').Audio.Module(props); };
 AudioBase.Connection = function Connection(props: any) { return require('./audio').Audio.Connection(props); };
 export const Audio: any = AudioBase;
+
+// ── AudioControls — visual audio control surfaces ───────────────────────────
+//
+// These are UI atoms backed by useAudio(): keybeds, pads, sliders, step grids,
+// transport, scopes, generated module panels, and host-managed pattern tracks.
+const AudioControlsBase: any = {};
+AudioControlsBase.Keybed = function Keybed(props: any) { return require('./audio-controls').AudioControls.Keybed(props); };
+AudioControlsBase.Pads = function Pads(props: any) { return require('./audio-controls').AudioControls.Pads(props); };
+AudioControlsBase.Slider = function Slider(props: any) { return require('./audio-controls').AudioControls.Slider(props); };
+AudioControlsBase.XYPad = function XYPad(props: any) { return require('./audio-controls').AudioControls.XYPad(props); };
+AudioControlsBase.StepGrid = function StepGrid(props: any) { return require('./audio-controls').AudioControls.StepGrid(props); };
+AudioControlsBase.StepPattern = function StepPattern(props: any) { return require('./audio-controls').AudioControls.StepPattern(props); };
+AudioControlsBase.StepMeter = function StepMeter(props: any) { return require('./audio-controls').AudioControls.StepMeter(props); };
+AudioControlsBase.LevelMeter = function LevelMeter(props: any) { return require('./audio-controls').AudioControls.LevelMeter(props); };
+AudioControlsBase.Knob = function Knob(props: any) { return require('./audio-controls').AudioControls.Knob(props); };
+AudioControlsBase.TrackSelector = function TrackSelector(props: any) { return require('./audio-controls').AudioControls.TrackSelector(props); };
+AudioControlsBase.PatternTrack = function PatternTrack(props: any) { return require('./audio-controls').AudioControls.PatternTrack(props); };
+AudioControlsBase.Transport = function Transport(props: any) { return require('./audio-controls').AudioControls.Transport(props); };
+AudioControlsBase.Scope = function Scope(props: any) { return require('./audio-controls').AudioControls.Scope(props); };
+AudioControlsBase.ModulePanel = function ModulePanel(props: any) { return require('./audio-controls').AudioControls.ModulePanel(props); };
+export const AudioControls: any = AudioControlsBase;
 
 // ── Canvas — pan/zoomable node surface ──────────────────────
 
@@ -522,6 +543,27 @@ const GraphBase: any = (props: any) => h('Graph', props, props.children);
 GraphBase.Path = (props: any) => h('Graph.Path', props, props.children);
 GraphBase.Node = (props: any) => h('Graph.Node', props, props.children);
 export const Graph: any = GraphBase;
+
+// ── SdfIcon — pre-baked icon rendered as one textured quad ─────────────
+//
+// `name` matches a baked icon (see runtime/icons/baked-names.ts). The host
+// reads `iconName` and paints via framework/gpu/sdf_icons.zig — one batched
+// instanced draw for the whole frame, regardless of icon count. Cheap.
+//
+// For names NOT in the atlas, runtime/icons/Icon.tsx falls back to the
+// legacy <Graph.Path> renderer; this primitive is the leaf, it doesn't
+// know about the fallback.
+export const SdfIcon: any = ({ name, color, size, ...rest }: any) =>
+  h('View', {
+    ...rest,
+    iconName: name,
+    style: {
+      width: size ?? 16,
+      height: size ?? 16,
+      color: color ?? 'theme:ink',
+      ...(rest.style ?? {}),
+    },
+  });
 
 // ── Render — external display/app capture surface ─────────────
 

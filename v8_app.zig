@@ -1214,6 +1214,22 @@ fn applyStyleEntry(node: *Node, key: []const u8, val: std.json.Value, is_update:
         // `borderWidth`. Use this when you want `borderWidth: 0` (no baked
         // outline) but still want thick animated dashes.
         if (jsonFloat(val)) |f| node.style.border_dash_width = f;
+    } else if (eq(u8, key, "tweenTranslateXFrom")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_from = f;
+    } else if (eq(u8, key, "tweenTranslateXTo")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_to = f;
+    } else if (eq(u8, key, "tweenTranslateXDurMs")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_dur_ms = f;
+    } else if (eq(u8, key, "tweenTranslateXCurve")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_curve = @intFromFloat(@max(0, @min(255, f)));
+    } else if (eq(u8, key, "tweenTranslateYFrom")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_from = f;
+    } else if (eq(u8, key, "tweenTranslateYTo")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_to = f;
+    } else if (eq(u8, key, "tweenTranslateYDurMs")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_dur_ms = f;
+    } else if (eq(u8, key, "tweenTranslateYCurve")) {
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_curve = @intFromFloat(@max(0, @min(255, f)));
     } else if (eq(u8, key, "borderRadius")) {
         if (jsonFloat(val)) |f| node.style.border_radius = f;
     } else if (eq(u8, key, "borderTopLeftRadius")) {
@@ -2020,6 +2036,11 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.canvas_gh = f;
         } else if (std.mem.eql(u8, k, "d")) {
             if (dupJsonText(v)) |s| node.canvas_path_d = s;
+        } else if (std.mem.eql(u8, k, "iconName")) {
+            // SDF-baked icon — engine paints this node as a single textured
+            // quad sampling framework/gpu/sdf_icons.zig's atlas. Tint from
+            // text_color; size from style.width/height.
+            if (dupJsonText(v)) |s| node.icon_name = s;
         } else if (std.mem.eql(u8, k, "stroke")) {
             // `stroke` maps to text_color — that's the field engine_paint.zig
             // reads for Canvas.Path / Graph.Path stroke color.
@@ -2218,6 +2239,7 @@ fn installJsExpr(comptime expr_fmt: []const u8, id: u32) ?[*:0]const u8 {
 fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     node.handlers.js_on_press = null;
     node.handlers.js_on_mouse_down = null;
+    node.handlers.js_on_mouse_move = null;
     node.handlers.js_on_mouse_up = null;
     node.handlers.js_on_hover_enter = null;
     node.handlers.js_on_hover_exit = null;
@@ -2225,14 +2247,21 @@ fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     node.handlers.on_right_click = null;
     node.canvas_move_draggable = false;
     node.effect_render = null;
+    node.has_on_layout = false;
+    if (cmdHasHandlerName(cmd, "onLayout")) {
+        node.has_on_layout = true;
+    }
 
     if (cmdHasAnyHandlerName(cmd, &.{ "onClick", "onPress" })) {
         node.handlers.js_on_press = installJsExpr("__dispatchEvent({d},'onClick')\x00", id);
     }
-    if (cmdHasAnyHandlerName(cmd, &.{"onMouseDown"})) {
+    if (cmdHasAnyHandlerName(cmd, &.{ "onMouseDown", "onPointerDown", "onPressIn" })) {
         node.handlers.js_on_mouse_down = installJsExpr("__dispatchEvent({d},'onMouseDown')\x00", id);
     }
-    if (cmdHasAnyHandlerName(cmd, &.{"onMouseUp"})) {
+    if (cmdHasAnyHandlerName(cmd, &.{ "onMouseMove", "onPointerMove" })) {
+        node.handlers.js_on_mouse_move = installJsExpr("__dispatchEvent({d},'onMouseMove')\x00", id);
+    }
+    if (cmdHasAnyHandlerName(cmd, &.{ "onMouseUp", "onPointerUp", "onPressOut" })) {
         node.handlers.js_on_mouse_up = installJsExpr("__dispatchEvent({d},'onMouseUp')\x00", id);
     }
     if (cmdHasAnyHandlerName(cmd, &.{ "onHoverEnter", "onMouseEnter" })) {
@@ -2290,6 +2319,7 @@ fn ensureNode(id: u32) !*Node {
     if (g_node_by_id.get(id)) |n| return n;
     const n = try g_alloc.create(Node);
     n.* = .{};
+    n.id = id;
     n.scroll_persist_slot = id;
     try g_node_by_id.put(id, n);
     try g_children_ids.put(id, .{});

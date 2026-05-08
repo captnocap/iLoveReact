@@ -223,6 +223,24 @@ pub const Style = struct {
     // then to 1.5 px. Lets a cart suppress the baked border (border_width=0)
     // while still drawing thick animated dashes at an explicit width.
     border_dash_width: f32 = 0,
+    // Inline-paint tween (mirrors border_dash.zig's wire model: animation
+    // params live on the Box, the engine evaluates them per frame using
+    // SDL_GetTicks. No registry, no latches, no per-frame JS work). The
+    // eased value is added to translate_x/y in the painter just before the
+    // existing transform compose at engine.zig:1683.
+    //
+    //   tween_translate_*_from / _to    — endpoint values in px.
+    //   tween_translate_*_dur_ms        — cycle length. 0 = inactive.
+    //   tween_translate_*_curve         — animations.CurveType byte
+    //                                     (0..36; see framework/animations.zig).
+    tween_translate_x_from: f32 = 0,
+    tween_translate_x_to: f32 = 0,
+    tween_translate_x_dur_ms: f32 = 0,
+    tween_translate_x_curve: u8 = 0,
+    tween_translate_y_from: f32 = 0,
+    tween_translate_y_to: f32 = 0,
+    tween_translate_y_dur_ms: f32 = 0,
+    tween_translate_y_curve: u8 = 0,
     z_index: i16 = 0,
     gradient_color_end: ?Color = null,
     gradient_direction: GradientDirection = .none,
@@ -306,6 +324,13 @@ pub const Style = struct {
     }
 };
 pub const Node = struct {
+    /// React reconciler instance id. Set by `luajit_runtime.hostCreate` from
+    /// the JS side. 0 = not assigned (synthetic / framework-built nodes).
+    /// Used by `setRect` to fire onLayout events back to JS keyed by id.
+    id: u32 = 0,
+    /// JS handed us an `onLayout` handler — fire a layout event whenever
+    /// `setRect` runs on this node. Wired through `g_emit_layout`.
+    has_on_layout: bool = false,
     style: Style = .{},
     children: []Node = &.{},
     computed: LayoutRect = .{},
@@ -503,6 +528,11 @@ pub const Node = struct {
     canvas_fill_gradient: ?LinearGradient = null, // linear gradient fill — Gouraud-interpolated via drawTriColored
     canvas_flow_speed: f32 = 0, // 0 = solid, >0 = flow forward, <0 = flow reverse
     canvas_fill_effect: ?[]const u8 = null, // effect name to use as polygon fill texture
+    // SDF icon — when set, the engine paints this node as a textured quad
+    // sampling the pre-baked icon atlas (framework/gpu/sdf_icons.zig). Cheap
+    // alternative to <Graph.Path> for icons whose geometry doesn't change.
+    // Tint comes from text_color; size comes from layout (style.width/height).
+    icon_name: ?[]const u8 = null,
     text_effect: ?[]const u8 = null, // effect name for per-glyph text coloring
     // Inline glyphs — polygons/3D embedded in text (emoji-like)
     inline_glyphs: ?[]const InlineGlyph = null,
@@ -534,16 +564,49 @@ pub const Node = struct {
 };
 pub const MeasureTextFn = *const fn (text: []const u8, font_size: u16, font_family_id: u8, max_width: f32, letter_spacing: f32, line_height: f32, max_lines: u16, no_wrap: bool, bold: bool) TextMetrics;
 pub const MeasureImageFn = *const fn (path: []const u8) ImageDims;
+/// Layout-event callback. Fires inside `setRect` for nodes flagged
+/// `has_on_layout`. Engine wires this to a JS dispatcher; bench/standalone
+/// callers leave it null and pay nothing.
+pub const EmitLayoutFn = *const fn (id: u32, rect: LayoutRect) void;
+
+pub const PendingLayoutEvent = struct {
+    id: u32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+};
+var pending_layout_events: std.ArrayList(PendingLayoutEvent) = .{};
+
+/// Drain the queue accumulated by `setRect` since the last drain. Caller owns
+/// the returned slice — do not free it; the next `clearPendingLayoutEvents`
+/// reuses the underlying capacity.
+pub fn pendingLayoutEvents() []const PendingLayoutEvent {
+    return pending_layout_events.items;
+}
+
+pub fn clearPendingLayoutEvents() void {
+    pending_layout_events.clearRetainingCapacity();
+}
 
 // ── Module state ───────────────────────────────────
 var measureFn: ?MeasureTextFn = null;
 var measureImageFn: ?MeasureImageFn = null;
+var emitLayoutFn: ?EmitLayoutFn = null;
 const LAYOUT_BUDGET: usize = 100000;
 var layoutCount: usize = 0;
 
 /// When false, the main loop may skip `layout.layout(root)` until something calls `markLayoutDirty`.
 /// Starts true so the first frame always runs flex layout after app init.
 var g_layout_dirty: bool = true;
+
+/// True for the duration of a layout pass that was driven by an actual
+/// mutation (state change, resize, hot-reload, etc.). `setRect` emits onLayout
+/// events only when this is true, which means: idle frames with the every-frame
+/// flex pass don't fire onLayout, but a real trigger fires it for every flagged
+/// node in the tree — even ones whose rect coincidentally matches the previous
+/// pass's value.
+var g_emit_layout_pass: bool = false;
 
 pub fn markLayoutDirty() void {
     g_layout_dirty = true;
@@ -596,6 +659,7 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
 fn hasHandlers(h: EventHandler) bool {
     return h.on_press != null or h.js_on_press != null or h.lua_on_press != null or
         h.on_mouse_down != null or h.js_on_mouse_down != null or h.lua_on_mouse_down != null or
+        h.on_mouse_move != null or h.js_on_mouse_move != null or h.lua_on_mouse_move != null or
         h.on_mouse_up != null or h.js_on_mouse_up != null or h.lua_on_mouse_up != null or
         h.on_hover_enter != null or h.on_hover_exit != null or h.js_on_hover_enter != null or h.lua_on_hover_enter != null or h.js_on_hover_exit != null or h.lua_on_hover_exit != null or
         h.on_key != null or h.on_change_text != null or h.on_scroll != null or h.on_right_click != null;
@@ -658,6 +722,27 @@ pub fn setMeasureFn(f: ?MeasureTextFn) void {
 
 pub fn setMeasureImageFn(f: ?MeasureImageFn) void {
     measureImageFn = f;
+}
+
+pub fn setEmitLayoutFn(f: ?EmitLayoutFn) void {
+    emitLayoutFn = f;
+}
+
+/// Single chokepoint for assigning a node's computed rect. Replaces raw
+/// `node.computed = .{...}` so onLayout-flagged nodes notify JS in the same
+/// step that produced the rect — no post-pass walk, no diff cache.
+///
+/// Emission gates on `g_emit_layout_pass`, which `pub fn layout()` snapshots
+/// from `g_layout_dirty` at pass entry. Layout itself runs every frame (the
+/// dirty flag isn't currently used to skip the pass), but onLayout only fires
+/// for the passes that were actually driven by a state change, resize, or
+/// hot-reload — so idle frames stay silent and a real trigger fires the event
+/// for every flagged node, including ones whose rect happens to be identical.
+pub inline fn setRect(node: *Node, rect: LayoutRect) void {
+    node.computed = rect;
+    if (g_emit_layout_pass and node.has_on_layout and node.id != 0) {
+        if (emitLayoutFn) |f| f(node.id, rect);
+    }
 }
 
 fn padLeft(s: Style) f32 {
@@ -1145,14 +1230,14 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
     }
     const s = node.style;
     if (s.display == .none) {
-        node.computed = .{ .x = px, .y = py, .w = 0, .h = 0 };
+        setRect(node, .{ .x = px, .y = py, .w = 0, .h = 0 });
         return;
     }
     // Canvas.Path: standalone (icon) paths take their box's style/parent size
     // so paintCanvasPath can scale the 24×24 viewbox to fit. Inline paths
     // (canvas_path=true) collapse — they overlay their parent.
     if (node.canvas_path) {
-        node.computed = .{ .x = px, .y = py, .w = 0, .h = 0 };
+        setRect(node, .{ .x = px, .y = py, .w = 0, .h = 0 });
         return;
     }
     if (node.canvas_path_d != null) {
@@ -1161,12 +1246,12 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         const fb_w: f32 = if (s.flex_basis) |fb| fb else 0;
         const w_pref = if (s.width) |v| v else if (fb_w > 0) fb_w else if (pw > 0) pw else if (pin_w > 0) pin_w else 24;
         const h_pref = if (s.height) |v| v else if (ph > 0) ph else if (pin_h > 0) pin_h else 24;
-        node.computed = .{ .x = px, .y = py, .w = w_pref, .h = h_pref };
+        setRect(node, .{ .x = px, .y = py, .w = w_pref, .h = h_pref });
         return;
     }
     // Canvas.Clamp: spans full parent bounds (viewport overlay).
     if (node.canvas_clamp) {
-        node.computed = .{ .x = px, .y = py, .w = pw, .h = ph };
+        setRect(node, .{ .x = px, .y = py, .w = pw, .h = ph });
         for (node.children) |*child| {
             layoutNode(child, px, py, pw, ph);
         }
@@ -1175,7 +1260,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
     // Video/Render: fill parent bounds, clamped to GPU texture limit (8192).
     // The proportional fallback can produce ph=9999 which exceeds the GPU max.
     if (node.video_src != null or node.render_src != null) {
-        node.computed = .{ .x = px, .y = py, .w = @min(pw, 8192), .h = @min(ph, 8192) };
+        setRect(node, .{ .x = px, .y = py, .w = @min(pw, 8192), .h = @min(ph, 8192) });
         return;
     }
     // Canvas.Node layout:
@@ -1187,14 +1272,14 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         const cw = if (node.canvas_gw > 0) node.canvas_gw else pw;
         if (node.canvas_gh > 0) {
             // Fixed dimensions
-            node.computed = .{ .x = px, .y = py, .w = cw, .h = node.canvas_gh };
+            setRect(node, .{ .x = px, .y = py, .w = cw, .h = node.canvas_gh });
             for (node.children) |*child| {
                 layoutNode(child, px, py, cw, node.canvas_gh);
             }
         } else {
             // Auto-height: allocate big, measure content, shrink to fit
             const alloc_h: f32 = 500; // generous initial box
-            node.computed = .{ .x = px, .y = py, .w = cw, .h = alloc_h };
+            setRect(node, .{ .x = px, .y = py, .w = cw, .h = alloc_h });
             for (node.children) |*child| {
                 layoutNode(child, px, py, cw, alloc_h);
             }
@@ -1330,7 +1415,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         while (i < node.children.len) : (i += 1) {
             const child = &node.children[@intCast(i)];
             if (child.style.display == .none) {
-                child.computed = .{ .x = 0, .y = 0, .w = 0, .h = 0 };
+                setRect(child, .{ .x = 0, .y = 0, .w = 0, .h = 0 });
                 continue;
             }
             if (child.style.position == .absolute) {
@@ -2033,6 +2118,19 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         const measured_height = if (isRow) contentCrossEnd + pb else contentMainEnd + pb;
         node.content_width = @max(measured_width, visual_right + pr);
         node.content_height = @max(measured_height, visual_bottom + pb);
+        // Re-clamp scroll offsets to the new content extent. Without this,
+        // a route swap or filter that shrinks the list leaves scroll_y at
+        // its old value — viewport renders below all items until a wheel
+        // event triggers the wheel-handler's clamp. Clamping here makes
+        // the next paint authoritative.
+        if (s.overflow == .scroll or s.overflow == .auto) {
+            const viewport_h = h orelse 0;
+            const viewport_w = resolveMaybePct(s.width, pw) orelse 0;
+            const max_sy = @max(0.0, node.content_height - viewport_h);
+            const max_sx = @max(0.0, node.content_width - viewport_w);
+            if (node.scroll_y > max_sy) node.scroll_y = max_sy;
+            if (node.scroll_x > max_sx) node.scroll_x = max_sx;
+        }
     }
     const resolvedH = h orelse 0;
     {
@@ -2079,7 +2177,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             layoutNode(absChild, absX, absY, absW, absH);
         }
     }
-    node.computed = .{ .x = x, .y = y, .w = w, .h = resolvedH };
+    setRect(node, .{ .x = x, .y = y, .w = w, .h = resolvedH });
 }
 
 fn resolveAlign(self: AlignSelf, parent: AlignItems) AlignItems {
@@ -2126,9 +2224,15 @@ pub fn layout(root: *Node, x: f32, y: f32, w: f32, h: f32) void {
     layoutCount = 0;
     invalidateTextCache();
     invalidateCaches(root);
+    // Snapshot the dirty flag for this pass — setRect uses it to decide
+    // whether to emit onLayout events. Cleared here so subsequent every-frame
+    // passes (with no real trigger) stay silent until the next mutation.
+    g_emit_layout_pass = g_layout_dirty;
+    g_layout_dirty = false;
     root._flex_w = w;
     root._stretch_h = h;
     layoutNode(root, x, y, w, h);
+    g_emit_layout_pass = false;
     if (log.isEnabled(.layout)) logTree(root, 0);
 }
 

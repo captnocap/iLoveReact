@@ -15,6 +15,7 @@ const windows = @import("windows.zig");
 const svg_path = @import("svg_path.zig");
 const image_cache = @import("image_cache.zig");
 const border_dash = @import("border_dash.zig");
+const animations = @import("animations.zig");
 const log = @import("log.zig");
 const tooltip = @import("tooltip.zig");
 const context_menu = @import("context_menu.zig");
@@ -22,6 +23,7 @@ const telemetry = @import("telemetry.zig");
 const filedrop = @import("filedrop.zig");
 const fswatch = @import("fswatch.zig");
 const clipboard_watch = @import("clipboard_watch.zig");
+const selection_watch = @import("selection_watch.zig");
 const voice = @import("voice.zig");
 const build_options_for_whisper = @import("build_options");
 const whisper = if (@hasDecl(build_options_for_whisper, "has_whisper") and build_options_for_whisper.has_whisper)
@@ -531,6 +533,8 @@ var scrollbar_drag_offset: f32 = 0;
 var scrollbar_drag_cached_max_scroll: f32 = 0;
 var scrollbar_hover_slot: u32 = 0;
 var scrollbar_hover_axis: ScrollbarAxis = .vertical;
+var pointer_capture_slot: u32 = 0;
+var pointer_capture_button: u8 = 0;
 
 fn findNodeByScrollSlot(node: *Node, slot: u32) ?*Node {
     if (slot == 0) return null;
@@ -1085,6 +1089,33 @@ fn runJsHandlerExpr(expr: []const u8) void {
     state_mod.markDirty();
 }
 
+fn dispatchPointerHandler(node: *Node, comptime kind: enum { down, move, up }) void {
+    const handlers = &node.handlers;
+    switch (kind) {
+        .down => {
+            if (handlers.on_mouse_down) |handler| handler();
+            if (handlers.js_on_mouse_down) |js_expr| runJsHandlerExpr(std.mem.span(js_expr));
+            if (handlers.lua_on_mouse_down) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
+        },
+        .move => {
+            if (handlers.on_mouse_move) |handler| handler();
+            if (handlers.js_on_mouse_move) |js_expr| runJsHandlerExpr(std.mem.span(js_expr));
+            if (handlers.lua_on_mouse_move) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
+        },
+        .up => {
+            if (handlers.on_mouse_up) |handler| handler();
+            if (handlers.js_on_mouse_up) |js_expr| runJsHandlerExpr(std.mem.span(js_expr));
+            if (handlers.lua_on_mouse_up) |lua_expr| luajit_runtime.evalExpr(std.mem.span(lua_expr));
+        },
+    }
+}
+
+fn nodeWantsPointerCapture(node: *const Node) bool {
+    const h = node.handlers;
+    return h.on_mouse_move != null or h.js_on_mouse_move != null or h.lua_on_mouse_move != null or
+        h.on_mouse_up != null or h.js_on_mouse_up != null or h.lua_on_mouse_up != null;
+}
+
 fn measureCallback(t: []const u8, font_size: u16, font_family_id: u8, max_width: f32, letter_spacing: f32, line_height: f32, max_lines: u16, no_wrap: bool, bold: bool) layout.TextMetrics {
     if (g_text_engine) |te| {
         // gpu_text holds the active-weight flag — set it for the duration of
@@ -1170,6 +1201,18 @@ fn drawNodeTextCommon(node: *Node, text: []const u8, x: f32, y: f32, max_width: 
 fn measureImageCallback(src: []const u8) layout.ImageDims {
     const m = image_cache.measure(src);
     return .{ .width = m.w, .height = m.h };
+}
+
+/// Layout-event callback — invoked by `layout.setRect` for nodes flagged
+/// `has_on_layout`. Builds a small JS expression that calls into the runtime
+/// dispatcher with the just-computed rect; the dispatcher routes by id to the
+/// React handlerRegistry's `onLayout` callback.
+fn emitLayoutCallback(id: u32, rect: layout.LayoutRect) void {
+    var buf: [192]u8 = undefined;
+    const expr = std.fmt.bufPrintZ(&buf, "__dispatchLayout({d},{d:.2},{d:.2},{d:.2},{d:.2})", .{
+        id, rect.x, rect.y, rect.w, rect.h,
+    }) catch return;
+    js_vm.evalExpr(expr);
 }
 
 // ── Node painting (framework-owned) ─────────────────────────────────────
@@ -1500,6 +1543,50 @@ fn hitTestInputByte(id: u8, local_x: f32, local_y: f32, font_size: u16, max_widt
     return if (local_x <= 0) 0 else @intCast(@min(typed.len, @as(usize, std.math.maxInt(u32))));
 }
 
+fn findInputNode(node: *Node, id: u8) ?*Node {
+    if (node.input_id) |input_id| {
+        if (input_id == id) return node;
+    }
+    for (node.children) |*child| {
+        if (findInputNode(child, id)) |hit| return hit;
+    }
+    return null;
+}
+
+fn handleInputVerticalKey(root: *Node, sym: c_int, mods: u16) bool {
+    if (sym != c.SDLK_UP and sym != c.SDLK_DOWN) return false;
+    const id = input.getFocusedId() orelse return false;
+    if (!input.isMultiline(id)) return false;
+    const node = findInputNode(root, id) orelse return false;
+    const typed = input.getText(id);
+    if (typed.len == 0) return true;
+    const te = g_text_engine orelse return false;
+
+    const pl = node.style.padLeft();
+    const pr = node.style.padRight();
+    const max_w = @max(@as(f32, 1), node.computed.w - pl - pr);
+    const cursor_pos = input.getCursorPos(id);
+    const point = te.byteToPosLH(typed, @as(usize, cursor_pos), node.font_size, max_w, node.line_height);
+    const lm = te.lineMetrics(node.font_size);
+    const line_h: f32 = if (node.line_height > 0) node.line_height else lm.height;
+    const target_y = if (sym == c.SDLK_UP)
+        point.y - line_h
+    else
+        point.y + line_h;
+    const next = te.hitTestWrappedAlignedLH(
+        typed,
+        point.x,
+        @max(@as(f32, 0), target_y),
+        node.font_size,
+        max_w,
+        .left,
+        node.line_height,
+    );
+    const shift = (mods & c.SDL_KMOD_SHIFT) != 0;
+    input.moveCursorTo(id, @intCast(@min(next, typed.len)), shift);
+    return true;
+}
+
 fn paintStaticSurfaceOverlays(node: *Node) void {
     for (node.children) |*child| {
         if (child.static_surface_overlay) {
@@ -1626,11 +1713,55 @@ fn paintNode(node: *Node) void {
         return;
     }
 
+    // SDF icon — single textured quad sampling the pre-baked atlas. Cheap
+    // alternative to <Graph.Path> for any icon whose geometry is fixed.
+    // 50 of these cost the same as 1 because the engine's render loop batches
+    // them into a single instanced draw call (see framework/gpu/sdf_icons.zig).
+    if (node.icon_name) |name| {
+        if (gpu.sdf_icons.lookup(name)) |uv| {
+            const tc = node.text_color orelse Color.rgb(255, 255, 255);
+            gpu.sdf_icons.queueIcon(
+                r.x, r.y, r.w, r.h, uv,
+                @as(f32, @floatFromInt(tc.r)) / 255.0,
+                @as(f32, @floatFromInt(tc.g)) / 255.0,
+                @as(f32, @floatFromInt(tc.b)) / 255.0,
+                @as(f32, @floatFromInt(tc.a)) / 255.0 * g_paint_opacity,
+            );
+            return;
+        }
+        // Unknown icon name → render nothing rather than fall through to a
+        // background-only box. Cart should fall back to <Graph.Path> on the
+        // JS side via runtime/icons/Icon.tsx.
+        return;
+    }
+
     // CSS transform — push onto the node-matrix stack so this node's visuals
     // and all descendants inherit the rotation/scale/translate. Origin defaults
     // to center (0.5, 0.5). Mirrors love2d's painter.lua applyTransform: visual
     // only, does not affect layout positions or hit-testing.
-    const has_xform = node.style.rotation != 0 or node.style.scale_x != 1.0 or node.style.scale_y != 1.0 or node.style.translate_x != 0 or node.style.translate_y != 0;
+    // Inline-paint tween — mirrors border_dash's "set on style, host evaluates
+    // every frame from the engine clock" model. Adds to whatever the cart
+    // already set as translate_x/y so the existing transform pipeline stays
+    // unchanged. Curve byte is animations.CurveType (0..36).
+    var tween_dx: f32 = 0;
+    var tween_dy: f32 = 0;
+    if (node.style.tween_translate_x_dur_ms > 0 or node.style.tween_translate_y_dur_ms > 0) {
+        const ticks_ms_xf = c.SDL_GetTicks();
+        const now_ms_xf: f32 = @floatFromInt(ticks_ms_xf);
+        if (node.style.tween_translate_x_dur_ms > 0) {
+            const t = @mod(now_ms_xf, node.style.tween_translate_x_dur_ms) / node.style.tween_translate_x_dur_ms;
+            const curve_x: animations.CurveType = @enumFromInt(node.style.tween_translate_x_curve);
+            const eased = animations.applyCurvePub(curve_x, t);
+            tween_dx = node.style.tween_translate_x_from + (node.style.tween_translate_x_to - node.style.tween_translate_x_from) * eased;
+        }
+        if (node.style.tween_translate_y_dur_ms > 0) {
+            const t = @mod(now_ms_xf, node.style.tween_translate_y_dur_ms) / node.style.tween_translate_y_dur_ms;
+            const curve_y: animations.CurveType = @enumFromInt(node.style.tween_translate_y_curve);
+            const eased = animations.applyCurvePub(curve_y, t);
+            tween_dy = node.style.tween_translate_y_from + (node.style.tween_translate_y_to - node.style.tween_translate_y_from) * eased;
+        }
+    }
+    const has_xform = node.style.rotation != 0 or node.style.scale_x != 1.0 or node.style.scale_y != 1.0 or node.style.translate_x != 0 or node.style.translate_y != 0 or tween_dx != 0 or tween_dy != 0;
     if (has_xform) {
         const pivot_x = r.x + node.style.origin_x * r.w;
         const pivot_y = r.y + node.style.origin_y * r.h;
@@ -1641,8 +1772,8 @@ fn paintNode(node: *Node) void {
             std.math.degreesToRadians(node.style.rotation),
             node.style.scale_x,
             node.style.scale_y,
-            node.style.translate_x,
-            node.style.translate_y,
+            node.style.translate_x + tween_dx,
+            node.style.translate_y + tween_dy,
         );
     }
     defer if (has_xform) gpu.popNodeMatrix();
@@ -2876,6 +3007,7 @@ pub fn run(config_in: AppConfig) !void {
     g_text_engine = &te;
     layout.setMeasureFn(measureCallback);
     layout.setMeasureImageFn(measureImageCallback);
+    layout.setEmitLayoutFn(emitLayoutCallback);
     input.setMeasureWidthFn(measureWidthOnly);
     {
         const dt = @divTrunc(std.time.microTimestamp() - startup_t0, 1000);
@@ -2903,7 +3035,8 @@ pub fn run(config_in: AppConfig) !void {
         "'__ifttt_onKeyDown','__ifttt_onKeyUp','__ifttt_onClipboardChange'," ++
         "'__ifttt_onSystemFocus','__ifttt_onSystemDrop','__ifttt_onSystemCursor'," ++
         "'__ifttt_onSystemSlowFrame','__ifttt_onSystemHang'," ++
-        "'__ifttt_onSystemRam','__ifttt_onSystemVram','__ifttt_onSystemResize'" ++
+        "'__ifttt_onSystemRam','__ifttt_onSystemVram','__ifttt_onSystemResize'," ++
+        "'__ifttt_onSystemSelection','__ifttt_onSystemSelectionCleared'" ++
         "]) if (typeof globalThis[k] !== 'function') globalThis[k] = () => {};");
 
     // LuaJIT logic VM (main-thread — events, state, conditionals)
@@ -3175,7 +3308,7 @@ pub fn run(config_in: AppConfig) !void {
                             }
                         }
                         const hit = layout.hitTest(config.root, mx, my);
-                        const hit_is_interactive = if (hit) |h| (h.input_id != null or h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null or h.handlers.on_press != null or h.handlers.js_on_press != null or h.handlers.lua_on_press != null or h.href != null) else false;
+                        const hit_is_interactive = if (hit) |h| (h.input_id != null or h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null or h.handlers.on_mouse_move != null or h.handlers.js_on_mouse_move != null or h.handlers.lua_on_mouse_move != null or h.handlers.on_mouse_up != null or h.handlers.js_on_mouse_up != null or h.handlers.lua_on_mouse_up != null or h.handlers.on_press != null or h.handlers.js_on_press != null or h.handlers.lua_on_press != null or h.href != null) else false;
                         if (hit_is_interactive) {
                             const h = hit.?;
                             if (h.input_id) |id| {
@@ -3212,20 +3345,14 @@ pub fn run(config_in: AppConfig) !void {
                                     input_drag_font_size = h.font_size;
                                     input_drag_line_height = h.line_height;
                                 }
-                            } else if (h.handlers.on_mouse_down) |handler| {
+                            } else if (h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null) {
                                 input.unfocus();
                                 stampClickLatency();
                                 stampInputLatency("click");
-                                handler();
-                                if (h.handlers.js_on_mouse_down) |js_expr| {
-                                    const expr = std.mem.span(js_expr);
-                                    js_vm.callGlobal("__beginJsEvent");
-                                    js_vm.evalExpr(expr);
-                                    js_vm.callGlobal("__endJsEvent");
-                                    state_mod.markDirty();
-                                }
-                                if (h.handlers.lua_on_mouse_down) |lua_expr| {
-                                    luajit_runtime.evalExpr(std.mem.span(lua_expr));
+                                dispatchPointerHandler(h, .down);
+                                if (nodeWantsPointerCapture(h)) {
+                                    pointer_capture_slot = h.scroll_persist_slot;
+                                    pointer_capture_button = event.button.button;
                                 }
                             } else if (h.handlers.js_on_mouse_down) |js_expr| {
                                 input.unfocus();
@@ -3567,6 +3694,10 @@ pub fn run(config_in: AppConfig) !void {
                             }
                             state_mod.markDirty();
                         }
+                    } else if (dragging_left and pointer_capture_slot != 0) {
+                        if (findNodeByScrollSlot(config.root, pointer_capture_slot)) |node| {
+                            dispatchPointerHandler(node, .move);
+                        }
                     } else if (dragging_left and canvas_drag_node != null) {
                         // Canvas pan — built-in
                         const dx = mx - canvas_drag_last_x;
@@ -3595,6 +3726,13 @@ pub fn run(config_in: AppConfig) !void {
                         if (render_surfaces.handleMouseUp(rmx, rmy, event.button.button)) continue;
                     }
                     if (event.button.button == c.SDL_BUTTON_LEFT) {
+                        if (pointer_capture_slot != 0 and pointer_capture_button == event.button.button) {
+                            if (findNodeByScrollSlot(config.root, pointer_capture_slot)) |node| {
+                                dispatchPointerHandler(node, .up);
+                            }
+                            pointer_capture_slot = 0;
+                            pointer_capture_button = 0;
+                        }
                         // Commit Canvas.Node move-drag — fire onMove once with the final
                         // pool-resident position so the cart's React state catches up.
                         if (canvas_move_drag_id != 0) {
@@ -3703,7 +3841,8 @@ pub fn run(config_in: AppConfig) !void {
                     {
                         const ctrl = (mod & c.SDL_KMOD_CTRL) != 0;
                         const input_consumed = if (input.getFocusedId() != null)
-                            (if (ctrl) input.handleCtrlKey(sym, mod) else input.handleKey(sym, mod))
+                            (handleInputVerticalKey(config.root, sym, mod) or
+                                if (ctrl) input.handleCtrlKey(sym, mod) else input.handleKey(sym, mod))
                         else
                             false;
                         if (input_consumed) stampInputLatency("key");
@@ -4019,6 +4158,7 @@ pub fn run(config_in: AppConfig) !void {
         r3d.update(dt_sec);
         fswatch.tick(dt_ms);
         clipboard_watch.tick(dt_ms);
+        selection_watch.tick(dt_ms);
         voice.tick(dt_ms);
         whisper.tick(dt_ms);
         system_signals.tick(dt_ms);
