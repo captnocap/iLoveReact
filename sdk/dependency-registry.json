@@ -360,13 +360,15 @@
     "sdk": {
       "shipGate": "sdk",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/http.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/browser_page.ts" }
+        { "kind": "metafileInput", "input": "runtime/hooks/useTheInternet.ts" },
+        { "kind": "metafileInput", "input": "runtime/hooks/fetch.ts" },
+        { "kind": "metafileInput", "input": "runtime/hooks/useFetchBrowser.ts" },
+        { "kind": "metafileInput", "input": "runtime/hooks/useBrowse.ts" }
       ],
       "buildOptions": ["has-sdk"],
       "v8Bindings": ["sdk"],
-      "nativeLibraries": ["curl", "tls.zig"],
-      "note": "TRANSITIONAL — being replaced by tier-0 useTheInternet (see project_networking_stack memory). The libcurl path is being removed in favor of std.http + tls.zig + nghttp2. browser_page.ts already routes through tls.zig via framework/net/page_fetch.zig; http.ts still routes through framework/net/http.zig (libcurl) until the migration completes."
+      "nativeLibraries": ["tls.zig"],
+      "note": "Now triggers off the tiered networking stack: useTheInternet (tier 0) plus the tier 1/2 hooks that compose it (fetch, useFetchBrowser, useBrowse). The old http.ts + browser_page.ts triggers were retired when those files were absorbed into useTheInternet (commit 8a844f23a). curl removed from nativeLibraries — the backend is std.http + tls.zig + nghttp2 per project_networking_stack memory. nghttp2 should be added here once its native dep wiring lands."
     },
     "voice": {
       "shipGate": "voice",
