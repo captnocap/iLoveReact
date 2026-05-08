@@ -37,7 +37,7 @@ export function MatchWindow({ runId, onClose }: MatchWindowProps) {
 
   return (
     <Window
-      title={`Match — ${runId}`}
+      title={`Match ${runId}`}
       width={1400}
       height={900}
       onClose={onClose}
