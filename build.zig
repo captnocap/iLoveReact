@@ -73,18 +73,9 @@ pub fn build(b: *std.Build) void {
     const has_terminal = b.option(bool, "has-terminal", "Link libvterm + real vterm.zig (otherwise stub)") orelse false;
     const has_audio = b.option(bool, "has-audio", "Compile audio_real.zig (SDL3 audio + LuaJIT DSP) — implies has-lua-worker") orelse false;
     // Audio's DSP engine imports zluajit, so has-audio forces
-    // has-lua-worker on. Default also stays TRUE for an unrelated
-    // reason: framework/luajit_runtime.zig (the main-thread .tsz
-    // script-block evaluator) calls libluajit-5.1 via @cImport("lua.h")
-    // and is unconditionally pulled in by engine.zig:105 +
-    // engine.zig:3063 (initVM at startup). With has-lua-worker=false
-    // those Lua C symbols become undefined at link time. Stub-splitting
-    // luajit_runtime.zig (mirroring audio.zig / luajit_worker.zig) is
-    // the structural fix; until that lands, has-lua-worker stays
-    // default-true so non-audio carts still build. Tracking task
-    // tightening note: luajit_worker_real / audio_real coupling is
-    // already correct; only luajit_runtime is the dangler.
-    const has_lua_worker_explicit = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse true;
+    // has-lua-worker on. Carts that want only the lua compute worker
+    // (without audio) flip has-lua-worker explicitly.
+    const has_lua_worker_explicit = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse false;
     const has_lua_worker = has_lua_worker_explicit or has_audio;
     const has_midi = b.option(bool, "has-midi", "Link libasound + real midi.zig (ALSA snd_seq_* MIDI input) — otherwise stub") orelse false;
 
@@ -533,10 +524,18 @@ pub fn build(b: *std.Build) void {
     // No SDL / framework / UI. Used to replace `node scripts/X.mjs` calls so
     // the repo has zero npm/node dependencies. Reuses v8_runtime.zig and the
     // CLI-only bindings in framework/v8_bindings_cli.zig.
+    // v8cli always builds ReleaseFast. Host tool — it's not part of any
+    // cart's debug loop, and the global -Doptimize=Debug default triggers
+    // a Zig 0.15 / lld bug where `.init_array` slots get CREL relocations
+    // (.crel.init_array / .crel.init_array.100 sections) that the loader
+    // never applies → NULL function pointers → glibc call_init crashes
+    // at PC 0 the moment v8cli launches. ReleaseFast emits regular RELA
+    // relocations that get applied normally. Pinning here makes v8cli
+    // immune to the user's -Doptimize choice.
     const v8_cli_mod = b.createModule(.{
         .root_source_file = b.path("v8_cli.zig"),
         .target = target,
-        .optimize = optimize,
+        .optimize = .ReleaseFast,
     });
     v8_cli_mod.addImport("v8", v8_mod);
     // Same stack-shim requirement as the main app: v8_runtime.zig calls
