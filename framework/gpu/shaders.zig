@@ -239,6 +239,74 @@ pub const text_wgsl =
     \\}
 ;
 
+/// SDF icon pipeline: pre-baked unsigned distance field atlas + smoothstep'd
+/// fragment thresholding. One instanced quad per icon. The atlas (R8Unorm)
+/// stores `byte = clamp(255 * (1 - dist/SPREAD), 0, 255)` so byte 128 is the
+/// shape edge — `smoothstep(0.5 - aa, 0.5 + aa, sample)` gives crisp anti-
+/// aliased stroke at any rendering size. `fwidth(sample)` adapts the AA band
+/// to screen-space derivative — that's the sleight of hand that lets a tiny
+/// 32×32 atlas tile render perfectly at 16 px or 256 px without re-baking.
+pub const sdf_icon_wgsl =
+    \\struct Globals {
+    \\    screen_size: vec2f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> globals: Globals;
+    \\@group(0) @binding(1) var atlas_tex: texture_2d<f32>;
+    \\@group(0) @binding(2) var atlas_sampler: sampler;
+    \\
+    \\struct IconInstance {
+    \\    @location(0) pos: vec2f,        // top-left in screen pixels (transform-applied)
+    \\    @location(1) size: vec2f,       // width, height in pixels
+    \\    @location(2) uv_pos: vec2f,     // atlas UV offset [0..1]
+    \\    @location(3) uv_size: vec2f,    // atlas UV extent [0..1]
+    \\    @location(4) color: vec4f,      // tint RGBA — fully opaque stroke color
+    \\    @location(5) edge_smooth: vec2f,// edge midpoint (default 0.5) + extra AA
+    \\};
+    \\
+    \\struct VsOut {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) uv: vec2f,
+    \\    @location(1) color: vec4f,
+    \\    @location(2) edge_smooth: vec2f,
+    \\};
+    \\
+    \\@vertex
+    \\fn vs_main(@builtin(vertex_index) idx: u32, inst: IconInstance) -> VsOut {
+    \\    var quad_x = array<f32, 6>(0.0, 1.0, 0.0, 0.0, 1.0, 1.0);
+    \\    var quad_y = array<f32, 6>(0.0, 0.0, 1.0, 1.0, 0.0, 1.0);
+    \\    let corner = vec2f(quad_x[idx], quad_y[idx]);
+    \\
+    \\    let pixel_pos = inst.pos + corner * inst.size;
+    \\    let ndc = vec2f(
+    \\        pixel_pos.x / globals.screen_size.x * 2.0 - 1.0,
+    \\        1.0 - pixel_pos.y / globals.screen_size.y * 2.0,
+    \\    );
+    \\
+    \\    var out: VsOut;
+    \\    out.clip_pos = vec4f(ndc, 0.0, 1.0);
+    \\    out.uv = inst.uv_pos + corner * inst.uv_size;
+    \\    out.color = inst.color;
+    \\    out.edge_smooth = inst.edge_smooth;
+    \\    return out;
+    \\}
+    \\
+    \\@fragment
+    \\fn fs_main(in: VsOut) -> @location(0) vec4f {
+    \\    // Sample the SDF byte. R8Unorm gives us [0..1] in .r — closer to 1
+    \\    // means closer to a stroke pixel; closer to 0 means far away.
+    \\    let d = textureSample(atlas_tex, atlas_sampler, in.uv).r;
+    \\    // Screen-space adaptive AA band — fwidth picks up the per-pixel
+    \\    // change in the SDF sample, scaling the smoothstep edge so it stays
+    \\    // ~1 fragment wide regardless of how small or large the icon renders.
+    \\    let aa = max(fwidth(d) * 0.7 + in.edge_smooth.y, 0.001);
+    \\    let edge = in.edge_smooth.x;
+    \\    let alpha = smoothstep(edge - aa, edge + aa, d) * in.color.a;
+    \\    if alpha <= 0.001 { discard; }
+    \\    // Pre-multiplied output to match the rest of the pipeline's blend mode.
+    \\    return vec4f(in.color.rgb * alpha, alpha);
+    \\}
+;
+
 /// Curve pipeline: SDF quadratic bezier strokes.
 /// Each instance is one quadratic bezier segment (3 control points).
 /// Cubics are split into 2-3 quadratics on the CPU side.

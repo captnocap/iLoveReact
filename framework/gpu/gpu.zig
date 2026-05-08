@@ -19,6 +19,7 @@ const curves = @import("curves.zig");
 const capsules = @import("capsules.zig");
 const polys = @import("polys.zig");
 pub const images = @import("images.zig");
+pub const sdf_icons = @import("sdf_icons.zig");
 const scene3d = @import("3d.zig");
 pub const filters = @import("filters.zig");
 const log = @import("../log.zig");
@@ -1375,6 +1376,7 @@ pub fn initWeb(device: *wgpu.Device, queue: *wgpu.Queue, width: u32, height: u32
     log.print("[gpu.initWeb] init images pipeline...\n", .{});
     images.initPipeline(device, globals_buffer);
     filters.ensureInit(device, g_format);
+    sdf_icons.init();
     log.print("[gpu.initWeb] done\n", .{});
 }
 
@@ -1477,6 +1479,7 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     polys.initPipeline(device, globals_buffer);
     images.initPipeline(device, globals_buffer);
     filters.ensureInit(device, g_format);
+    sdf_icons.init();
 
     log.print("wgpu initialized: {d}x{d}\n", .{ g_width, g_height });
 }
@@ -1534,6 +1537,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         capsules.reset();
         polys.reset();
         images.reset();
+        sdf_icons.reset();
         g_static_capture_count = 0;
         g_scissor_count = 0;
         g_scissor_depth = 0;
@@ -1569,6 +1573,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
 
     // Image quads always upload (video frames change independently of UI dirty state)
     if (images.count() > 0) images.upload(queue);
+    // SDF icon quads — outside the dirty-check fast path because their atlas
+    // is immutable but instance positions change with layout.
+    if (sdf_icons.count() > 0) sdf_icons.upload(queue);
 
     renderStaticSurfaceCaptures(device, queue);
 
@@ -1671,6 +1678,20 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         }
     }
 
+    // SDF icons — drawn last in the main pass, in one instanced call,
+    // over the entire viewport. v0 doesn't participate in static-surface
+    // capture or scissor segmentation; that means icons inside scrollviews
+    // may not clip cleanly at scroll edges. Acceptable for the speed win;
+    // wire into PrimitiveCounts later if clipping fidelity becomes the
+    // bottleneck.
+    {
+        const total_icons: u32 = @intCast(sdf_icons.count());
+        if (total_icons > 0) {
+            render_pass.setScissorRect(0, 0, g_width, g_height);
+            sdf_icons.drawBatch(render_pass, 0, total_icons);
+        }
+    }
+
     // Filter composites — run AFTER all primitive draws so the filter
     // shader samples its captured offscreen texture and writes the result
     // over the area where the captured primitives would have appeared
@@ -1707,6 +1728,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     capsules.reset();
     polys.reset();
     images.reset();
+    sdf_icons.reset();
     g_static_capture_count = 0;
     g_scissor_count = 0;
     g_scissor_depth = 0;
