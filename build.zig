@@ -67,10 +67,13 @@ pub fn build(b: *std.Build) void {
     const has_physics = b.option(bool, "has-physics", "Link box2d + physics2d module") orelse false;
     const has_sqlite = b.option(bool, "has-sqlite", "Link sqlite3 + real sqlite.zig (otherwise stub)") orelse false;
     const has_terminal = b.option(bool, "has-terminal", "Link libvterm + real vterm.zig (otherwise stub)") orelse false;
-    // Default true for now (wave 1: infrastructure only). Wave 2 will flip
-    // this to default false once audio.zig is stub-split — audio's DSP
-    // architecture force-ties has_lua_worker on whenever has_audio is on.
-    const has_lua_worker = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse true;
+    const has_audio = b.option(bool, "has-audio", "Compile audio_real.zig (SDL3 audio + LuaJIT DSP) — implies has-lua-worker") orelse false;
+    // Audio's DSP engine imports zluajit unconditionally, so has-audio
+    // forces has-lua-worker on. Carts that opt into audio always get
+    // both; carts that want only the lua compute worker can flip
+    // has-lua-worker independently.
+    const has_lua_worker_explicit = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse false;
+    const has_lua_worker = has_lua_worker_explicit or has_audio;
 
     // Bundle path override. When unset, v8_app.zig falls back to embedding
     // bundle-<app-name>.js relative to its own source directory (the
@@ -89,6 +92,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_physics", has_physics);
     options.addOption(bool, "has_sqlite", has_sqlite);
     options.addOption(bool, "has_terminal", has_terminal);
+    options.addOption(bool, "has_audio", has_audio);
     options.addOption(bool, "has_lua_worker", has_lua_worker);
     options.addOption([]const u8, "bundle_path", bundle_path);
     options.addOption(bool, "has_video", true);
