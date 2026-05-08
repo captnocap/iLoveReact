@@ -29,6 +29,7 @@ import { parseCodeToGraph } from './canvas/parse';
 import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { CodeEditor } from './canvas/code-editor/CodeEditor';
 import { SplitDivider } from './canvas/editor-split/SplitDivider';
+import { MatchWindow } from './match/MatchWindow';
 import {
   useUser, useLatestGoal,
   useDefaultComposition, useCompositionStore, defaultCompositionId,
@@ -115,6 +116,13 @@ export default function SweatshopPage() {
   const [edges, setEdges] = useState<FlowEdge[]>(SEED_EDGES);
   const [bindingCount, setBindingCount] = useState<number>(0);
   const [persisted, setPersisted] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  // Lock-In opens a separate native <Window> with the match surface.
+  // V0 just generates a synthetic runId; real lock-in writes a
+  // CompositionRun row + populates Worker rows from the canvas.
+  const [matchRunId, setMatchRunId] = useState<string | null>(null);
+  const lockIn = useCallback(() => {
+    setMatchRunId(`run_${Date.now().toString(36)}`);
+  }, []);
   const [showCanvas, setShowCanvas] = useState(true);
   const [showCode, setShowCode] = useState(true);
   const [showProse, setShowProse] = useState(true);
@@ -378,7 +386,19 @@ export default function SweatshopPage() {
             onPress={() => { if (!(showCode && !showCanvas && !showProse)) setShowCode(v => !v); }} />
           <PaneToggle label="english" active={showProse}
             onPress={() => { if (!(showProse && !showCanvas && !showCode)) setShowProse(v => !v); }} />
+          <Pressable onPress={lockIn} style={{
+            marginLeft: 8,
+            paddingLeft: 12, paddingRight: 12, paddingTop: 4, paddingBottom: 4,
+            borderRadius: 4,
+            borderWidth: 1, borderColor: 'theme:accent',
+            backgroundColor: 'theme:bg2',
+          }}>
+            <Text size={11} color="theme:accent" bold>Lock In ▶</Text>
+          </Pressable>
         </Row>
+        {matchRunId && (
+          <MatchWindow runId={matchRunId} onClose={() => setMatchRunId(null)} />
+        )}
 
         {/* Three horizontal panes: canvas | code | english. Each pane
             is hide-able from the top-strip toggle chips. Dividers
