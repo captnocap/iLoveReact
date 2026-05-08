@@ -3381,6 +3381,37 @@ fn appInit() void {
     // if init fails the hooks gracefully no-op (see qjs_bindings.storeGet etc.).
     fs_mod.init("reactjit") catch |e| std.log.warn("fs init failed: {}", .{e});
     localstore.init() catch |e| std.log.warn("localstore init failed: {}", .{e});
+
+    // Window-child mode: install no-op stubs for the runtime dispatch
+    // globals. The cart bundle (which normally defines these in
+    // runtime/index.tsx) does not load in the child process. Without
+    // these stubs the framework's evalExpr("__dispatchLayout(...)") at
+    // engine.zig:1208 fires a ReferenceError on the first laid-out
+    // node with on_layout — V8 then enters an error state, every
+    // subsequent dispatch fails, the window appears unresponsive
+    // (clicks don't register, selection misroutes, etc.).
+    //
+    // Click events still round-trip correctly because runJsHandlerExpr
+    // (engine.zig:1071) routes through the dispatch_js_event callback
+    // (childDispatchEvent) — that path is independent of these globals.
+    // Layout / input-change / etc. don't have a callback path yet, so
+    // they're stubs here and would need their own engine callbacks to
+    // round-trip back to the parent's React handlers.
+    if (g_is_window_child) {
+        v8_runtime.evalScript(
+            \\globalThis.__dispatchEvent = function(){};
+            \\globalThis.__dispatchLayout = function(){};
+            \\globalThis.__dispatchInputChange = function(){};
+            \\globalThis.__dispatchInputSubmit = function(){};
+            \\globalThis.__dispatchInputFocus = function(){};
+            \\globalThis.__dispatchInputBlur = function(){};
+            \\globalThis.__dispatchInputKey = function(){};
+            \\globalThis.__dispatchRightClick = function(){};
+            \\globalThis.__beginJsEvent = function(){};
+            \\globalThis.__endJsEvent = function(){};
+            \\globalThis.__ffiEmit = function(){};
+        );
+    }
 }
 
 fn appTick(now: u32) void {
