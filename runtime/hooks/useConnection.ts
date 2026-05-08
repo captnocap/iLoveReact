@@ -31,7 +31,31 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { callHost, subscribe } from '../ffi';
+import {
+  nextId,
+  subscribe,
+  wsOpen,
+  wsSend,
+  wsClose,
+  tcpConnect,
+  tcpSend,
+  tcpClose,
+  udpOpen,
+  udpSend,
+  udpClose,
+  torStart,
+  torStop,
+  socks5Register,
+  socks5Unregister,
+  httpStreamOpen,
+  httpStreamClose,
+  rconOpen,
+  rconClose,
+  rconCommand,
+  a2sOpen,
+  a2sClose,
+  a2sQuery,
+} from './useTheInternet';
 
 // ── Common ─────────────────────────────────────────────────────────
 
@@ -352,8 +376,7 @@ export type ConnectionHandle =
 
 // ── ID allocator ───────────────────────────────────────────────────
 
-let _idSeq = 1;
-const nextId = () => _idSeq++;
+
 
 const viaJson = (v?: TransportHandle): string =>
   v ? JSON.stringify({ id: v.id, kind: v.kind }) : '';
@@ -399,7 +422,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
     const via = viaJson(spec.via);
 
     if (spec.kind === 'ws') {
-      callHost<void>('__ws_open', undefined as any, id, spec.url, via);
+      wsOpen(id, spec.url, via);
       unsubs.push(subscribe(`ws:open:${id}`, () => {
         if (cancelled) return;
         (specRef.current as WsConnectionSpec).onOpen?.();
@@ -428,7 +451,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
         setState('error');
       }));
     } else if (spec.kind === 'tcp') {
-      callHost<void>('__tcp_connect', undefined as any, id, spec.host, spec.port, via);
+      tcpConnect(id, spec.host, spec.port, via);
       unsubs.push(subscribe(`tcp:open:${id}`, () => {
         if (cancelled) return;
         setState('open');
@@ -453,7 +476,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
       // tcp_connect is sync today; flip to open optimistically if no event arrives.
       setState('open');
     } else if (spec.kind === 'udp') {
-      callHost<void>('__udp_open', undefined as any, id, spec.host, spec.port, via);
+      udpOpen(id, spec.host, spec.port, via);
       unsubs.push(subscribe(`udp:packet:${id}`, (data: any) => {
         if (cancelled) return;
         const s = typeof data === 'string' ? data : String(data);
@@ -472,7 +495,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
         identity: (spec as TorConnectionSpec).socksPort ? '' : 'default',
         socksPort: (spec as TorConnectionSpec).socksPort ?? 0,
       });
-      callHost<void>('__tor_start', undefined as any, id, opts);
+      torStart(id, opts);
       unsubs.push(subscribe(`tor:open:${id}`, (raw: any) => {
         if (cancelled) return;
         try {
@@ -489,15 +512,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
         setState('error');
       }));
     } else if (spec.kind === 'socks5') {
-      callHost<void>(
-        '__socks5_register',
-        undefined as any,
-        id,
-        spec.host,
-        spec.port,
-        spec.username ?? '',
-        spec.password ?? '',
-      );
+      socks5Register(id, spec.host, spec.port, spec.username ?? '', spec.password ?? '');
       // SOCKS5 is a config holder — no socket opens here. The proxy is used
       // when another connection passes this handle as `via:`.
       setState('open');
@@ -557,7 +572,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
         }
       };
 
-      callHost<void>('__http_stream_open', undefined as any, reqJson, rid);
+      httpStreamOpen(reqJson, rid);
 
       // Optimistically flip to open — server byte arrival is the real signal,
       // but the request is in flight as soon as the host fn returns. SSE fires
@@ -590,7 +605,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
         }
       }));
     } else if (spec.kind === 'rcon') {
-      callHost<void>('__rcon_open', undefined as any, id, spec.host, spec.port, spec.password);
+      rconOpen(id, spec.host, spec.port, spec.password);
       // The Zig side already framed and sent the AUTH packet. We optimistically
       // mark connecting → 'open' (TCP up, awaiting AUTH_RESPONSE); 'authed'
       // is tracked separately on the handle.
@@ -626,7 +641,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
         setState('error');
       }));
     } else if (spec.kind === 'a2s') {
-      callHost<void>('__a2s_open', undefined as any, id, spec.host, spec.port);
+      a2sOpen(id, spec.host, spec.port);
       setState('open');
       unsubs.push(subscribe(`a2s:info:${id}`, (raw: any) => {
         if (cancelled) return;
@@ -666,14 +681,14 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
     return () => {
       cancelled = true;
       for (const u of unsubs) u();
-      if (spec.kind === 'ws') callHost<void>('__ws_close', undefined as any, id);
-      else if (spec.kind === 'tcp') callHost<void>('__tcp_close', undefined as any, id);
-      else if (spec.kind === 'udp') callHost<void>('__udp_close', undefined as any, id);
-      else if (spec.kind === 'tor') callHost<void>('__tor_stop', undefined as any, id);
-      else if (spec.kind === 'socks5') callHost<void>('__socks5_unregister', undefined as any, id);
-      else if (spec.kind === 'http' || spec.kind === 'sse') callHost<void>('__http_stream_close', undefined as any, `c${id}`);
-      else if (spec.kind === 'rcon') callHost<void>('__rcon_close', undefined as any, id);
-      else if (spec.kind === 'a2s') callHost<void>('__a2s_close', undefined as any, id);
+      if (spec.kind === 'ws') wsClose(id);
+      else if (spec.kind === 'tcp') tcpClose(id);
+      else if (spec.kind === 'udp') udpClose(id);
+      else if (spec.kind === 'tor') torStop(id);
+      else if (spec.kind === 'socks5') socks5Unregister(id);
+      else if (spec.kind === 'http' || spec.kind === 'sse') httpStreamClose(`c${id}`);
+      else if (spec.kind === 'rcon') rconClose(id);
+      else if (spec.kind === 'a2s') a2sClose(id);
       setState('closed');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -689,30 +704,30 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
 
   // Build the kind-specific handle.
   const closeFn = () => {
-    if (spec.kind === 'ws') callHost<void>('__ws_close', undefined as any, id);
-    else if (spec.kind === 'tcp') callHost<void>('__tcp_close', undefined as any, id);
-    else if (spec.kind === 'udp') callHost<void>('__udp_close', undefined as any, id);
-    else if (spec.kind === 'http' || spec.kind === 'sse') callHost<void>('__http_stream_close', undefined as any, `c${id}`);
-    else if (spec.kind === 'rcon') callHost<void>('__rcon_close', undefined as any, id);
-    else if (spec.kind === 'a2s') callHost<void>('__a2s_close', undefined as any, id);
+    if (spec.kind === 'ws') wsClose(id);
+    else if (spec.kind === 'tcp') tcpClose(id);
+    else if (spec.kind === 'udp') udpClose(id);
+    else if (spec.kind === 'http' || spec.kind === 'sse') httpStreamClose(`c${id}`);
+    else if (spec.kind === 'rcon') rconClose(id);
+    else if (spec.kind === 'a2s') a2sClose(id);
   };
 
   if (spec.kind === 'ws') {
     return {
       kind: 'ws', id, state, error, close: closeFn,
-      send: (data) => callHost<void>('__ws_send', undefined as any, id, data),
+      send: (data) => wsSend(id, data),
     };
   }
   if (spec.kind === 'tcp') {
     return {
       kind: 'tcp', id, state, error, close: closeFn,
-      send: (data) => callHost<void>('__tcp_send', undefined as any, id, data),
+      send: (data) => tcpSend(id, data),
     };
   }
   if (spec.kind === 'udp') {
     return {
       kind: 'udp', id, state, error, close: closeFn,
-      send: (data) => callHost<void>('__udp_send', undefined as any, id, data),
+      send: (data) => udpSend(id, data),
     };
   }
   if (spec.kind === 'wireguard') {
@@ -748,7 +763,7 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
       authenticated: rconAuthed,
       command: (cmd: string) => {
         const reqId = rconReqSeq.current++;
-        callHost<void>('__rcon_command', undefined as any, id, reqId, cmd);
+        rconCommand(id, reqId, cmd);
         return reqId;
       },
     };
@@ -756,9 +771,9 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
   if (spec.kind === 'a2s') {
     return {
       kind: 'a2s', id, state, error, close: closeFn,
-      queryInfo: () => callHost<void>('__a2s_query', undefined as any, id, 'info'),
-      queryPlayers: () => callHost<void>('__a2s_query', undefined as any, id, 'players'),
-      queryRules: () => callHost<void>('__a2s_query', undefined as any, id, 'rules'),
+      queryInfo: () => a2sQuery(id, 'info'),
+      queryPlayers: () => a2sQuery(id, 'players'),
+      queryRules: () => a2sQuery(id, 'rules'),
     };
   }
   // peer

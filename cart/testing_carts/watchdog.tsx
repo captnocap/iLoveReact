@@ -22,7 +22,7 @@
 
 import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text } from '../runtime/primitives';
-import { useHost } from '../runtime/hooks/useHost';
+import { useProcess } from '../runtime/hooks/useProcess';
 import { useIFTTT } from '../runtime/hooks/useIFTTT';
 import * as proc from '../runtime/hooks/process';
 
@@ -142,8 +142,7 @@ export default function WatchdogCart() {
   const [latestSample, setLatestSample] = useState<any>(null);
   const [lastChildLine, setLastChildLine] = useState('');
 
-  const child = useHost({
-    kind: 'process',
+  const child = useProcess({
     ...modeCmd(mode),
     onStdout: (line) => { setLastChildLine(line.slice(0, 80)); bump(); },
     onExit: (_r) => { bump(); },

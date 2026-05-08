@@ -22,9 +22,10 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { callHost, callHostJson, hasHost, subscribe } from '../ffi';
+import { hasHost } from '../ffi';
+import { browseRequestAsync, browseSetPort, nextBrowseId, subscribe } from './useTheInternet';
 
-let _seq = 1;
+
 
 interface Envelope {
   ok: boolean;
@@ -76,7 +77,7 @@ export async function browseRequest(cmd: Record<string, any>): Promise<any> {
   if (!hasHost('__browse_request_async')) {
     throw new Error('browse host bindings not registered (framework/net/browse_bridge.zig)');
   }
-  const reqId = `b${_seq++}`;
+  const reqId = nextBrowseId();
   const body = JSON.stringify(cmd);
   return new Promise<any>((resolve, reject) => {
     const unsub = subscribe(`browse:${reqId}`, (payload: any) => {
@@ -91,13 +92,13 @@ export async function browseRequest(cmd: Record<string, any>): Promise<any> {
       if (!env.ok) reject(new Error(env.error || 'browse error'));
       else resolve(env.result);
     });
-    callHost<void>('__browse_request_async', undefined as any, body, reqId);
+    browseRequestAsync(body, reqId);
   });
 }
 
 /** Fire-and-forget port set. Affects all browse calls process-wide. */
 export function setBrowsePort(port: number): void {
-  callHost<void>('__browse_set_port', undefined as any, port);
+  browseSetPort(port);
 }
 
 export function useBrowse(options: BrowseOptions = {}): BrowseHandle {
@@ -280,6 +281,4 @@ function formatPage(r: any): any {
   return out;
 }
 
-// Suppress unused-import warning for callHostJson during MVP — kept in the
-// import list so adding a sync variant later is one line.
-void callHostJson;
+

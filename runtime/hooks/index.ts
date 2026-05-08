@@ -14,14 +14,15 @@ export type { Vec2, Vec3, BBox2, BBox3, SmoothDampResult } from './math';
 export * as sqlite from './sqlite';
 export * as pg from './pg';
 export * as embed from './embed';
-export * as http from './http';
+export * as fetch from './fetch';
 export * as crypto from './crypto';
 export * as process from './process';
 export * as localstore from './localstore';
 export * as clipboard from './clipboard';
 export * as websocket from './websocket';
 export * as media from './media';
-export * as browserPage from './browser_page';
+export { useFetchBrowser, fetchPageAsync } from './useFetchBrowser';
+export type { BrowserPageResponse } from './useFetchBrowser';
 export { useBrowse, browseRequest, setBrowsePort, createBrowseTools } from './useBrowse';
 export type { BrowseHandle, BrowseOptions, PageContent as BrowsePageContent, ToolDefinition as BrowseToolDefinition } from './useBrowse';
 export { useHotState, removeHotState, clearHotState, hotStateKeys } from './useHotState';
@@ -47,13 +48,13 @@ export type {
   HttpHostHandle,
   WsHostSpec,
   WsHostHandle,
-  ProcessHostSpec,
-  ProcessHostHandle,
   HttpRequest,
   HttpResponder,
   HttpRouteSpec,
   HostState,
 } from './useHost';
+export { useProcess } from './useProcess';
+export type { UseProcessSpec, UseProcessHandle, ProcessState } from './useProcess';
 export { useConnection } from './useConnection';
 export type {
   ConnectionSpec,
@@ -176,9 +177,9 @@ export * from '../ffi';
  * the shims OFF by default keeps things explicit — opt in per cart.
  */
 export function installBrowserShims(): void {
-  const httpMod = require('./http') as typeof import('./http');
-  httpMod.installFetchShim();
-  httpMod.installEventSourceShim();
+  const fetchMod = require('./fetch') as typeof import('./fetch');
+  fetchMod.installFetchShim();
+  fetchMod.installEventSourceShim();
   (require('./localstore') as typeof import('./localstore')).installLocalStorageShim();
   (require('./websocket') as typeof import('./websocket')).installWebSocketShim();
   installResizeBridge();

@@ -1,24 +1,10 @@
 /**
  * websocket — client-side WebSocket backed by framework/net/ (pure-Zig WS).
  *
- * Matches the browser WebSocket API shape (open/message/close/error events)
- * so copy-pasted code that uses `new WebSocket(url)` just works after
- * installing the shim.
- *
- * Registration (Zig side):
- *
- *   qjs_runtime.registerHostFn("__ws_open", @ptrCast(&ws_open), 2);
- *   qjs_runtime.registerHostFn("__ws_send", @ptrCast(&ws_send), 2);
- *   qjs_runtime.registerHostFn("__ws_close", @ptrCast(&ws_close), 1);
- *
- * Events fire via __ffiEmit:
- *   __ffiEmit('ws:open:<id>', {})
- *   __ffiEmit('ws:message:<id>', dataString)
- *   __ffiEmit('ws:close:<id>', { code, reason })
- *   __ffiEmit('ws:error:<id>', errorMessage)
+ * Matches the browser WebSocket API shape. Tier 1 wrapper over useTheInternet.
  */
 
-import { callHost, subscribe } from '../ffi';
+import { wsOpen, wsSend, wsClose, subscribe } from './useTheInternet';
 
 type Handler = (ev: any) => void;
 
@@ -40,15 +26,15 @@ export class ReactjitWebSocket {
     this._unsubs.push(subscribe(`ws:message:${this.id}`, (data) => { this.onmessage?.({ data }); }));
     this._unsubs.push(subscribe(`ws:close:${this.id}`, (p) => { this.onclose?.(p); this._cleanup(); }));
     this._unsubs.push(subscribe(`ws:error:${this.id}`, (msg) => { this.onerror?.({ message: msg }); }));
-    callHost<void>('__ws_open', undefined as any, this.id, url);
+    wsOpen(this.id, url, '');
   }
 
   send(data: string): void {
-    callHost<void>('__ws_send', undefined as any, this.id, data);
+    wsSend(this.id, data);
   }
 
-  close(code?: number, reason?: string): void {
-    callHost<void>('__ws_close', undefined as any, this.id);
+  close(_code?: number, _reason?: string): void {
+    wsClose(this.id);
     this._cleanup();
   }
 

@@ -15,6 +15,7 @@
 
 import * as React from 'react';
 import { useHost } from '@reactjit/runtime/hooks/useHost';
+import { useProcess } from '@reactjit/runtime/hooks/useProcess';
 import { useConnection } from '@reactjit/runtime/hooks/useConnection';
 import { useTelemetry } from '@reactjit/runtime/hooks/useTelemetry';
 
@@ -45,8 +46,7 @@ export default function App() {
     port: 8400,
   });
 
-  const proc = useHost({
-    kind: 'process',
+  const proc = useProcess({
     cmd: '/bin/echo',
     args: ['hello from useHost'],
     onStdout: () => {},

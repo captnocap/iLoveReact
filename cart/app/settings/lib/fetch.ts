@@ -13,7 +13,7 @@
 // Modality is inferred from the remote id (embedding/whisper/tts/image
 // keywords). Default is 'text'.
 
-import * as http from '@reactjit/runtime/hooks/http';
+import * as http from '@reactjit/runtime/hooks/fetch';
 import * as fs from '@reactjit/runtime/hooks/fs';
 import { execAsync, envGet } from '@reactjit/runtime/hooks/process';
 import { lookupModel, type Modality } from './modelRegistry';

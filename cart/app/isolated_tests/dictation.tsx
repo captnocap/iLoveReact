@@ -14,7 +14,7 @@ import { useEffect, useState } from 'react';
 import { Box, Row, Col, Text, Pressable, ScrollView } from '@reactjit/runtime/primitives';
 import { useEnsembleTranscript } from '@reactjit/runtime/hooks/useEnsembleTranscript';
 import * as fs from '@reactjit/runtime/hooks/fs';
-import * as http from '@reactjit/runtime/hooks/http';
+import * as http from '@reactjit/runtime/hooks/fetch';
 import * as process from '@reactjit/runtime/hooks/process';
 
 const C = {

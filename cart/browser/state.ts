@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { browserPage, localstore } from '@reactjit/runtime/hooks';
+import { fetchPageAsync, localstore } from '@reactjit/runtime/hooks';
 import { extractDocumentStyleRefs, interpretPageResponse } from './content';
 import {
   BLANK_URL,
@@ -185,7 +185,7 @@ export function useBrowserShellState() {
       if (inflightLoads.current[tab.id] === requestKey) continue;
       inflightLoads.current[tab.id] = requestKey;
 
-      browserPage.fetchPageAsync(tab.address)
+      fetchPageAsync(tab.address)
         .then(async (response) => {
           const document = interpretPageResponse(tab.address, response);
           const finalAddress = normalizeAddress(document.finalAddress || tab.address);
@@ -195,7 +195,7 @@ export function useBrowserShellState() {
             styles = refs.inline;
             for (const href of refs.links.slice(0, 3)) {
               try {
-                const cssResponse = await browserPage.fetchPageAsync(href);
+                const cssResponse = await fetchPageAsync(href);
                 if (!cssResponse.error && cssResponse.body) {
                   styles = styles ? `${styles}\n${cssResponse.body}` : cssResponse.body;
                 }
