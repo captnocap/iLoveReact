@@ -153,6 +153,22 @@ Tailwind via `className`: parsed by `runtime/tw.ts` at CREATE time. Full utility
 
 ---
 
+## Chart rendering
+
+Decide what's a fill and what's a stroke. They want different tools.
+
+- **Fills, gradients, scalar fields, analytic rings** (donut/pie/contour/heatmap/depth area, fill polygons): one `<Effect>` quad with a WGSL fragment shader. Pixel-perfect at any zoom, no geometry. See `cart/donut_demo.tsx`, `cart/pie_demo.tsx`, `cart/contour_demo.tsx`, `cart/depth_demo.tsx`.
+- **Multi-segment line strokes** (radar webs, axis spokes, polygon outlines, polylines): `<Graph.Polyline>` with one polyline per stroke. Per-segment analytic capsules from `framework/gpu/capsules.zig` give clean AA on every segment with no fwidth coupling. Proven clean in `cart/chart_bench.tsx` POLYLINE mode.
+- **Text/labels**: TSX, absolutely positioned.
+
+**Don't try to draw multi-segment outlines in a fragment shader.** No matter the formulation (per-wedge, min-over-segments, per-segment-with-its-own-fwidth-then-max), the composite SDF has derivative kinks at every segment boundary, and `fwidth` spikes there cause visible bleed (the "broken circle" / dashed-halo artifact). You can clamp the AA window to reduce it, but not eliminate it. Use `<Graph.Polyline>` instead — that's what `framework/gpu/capsules.zig` exists for.
+
+`cart/radar_demo.tsx` is the reference for the hybrid pattern: shader for the dynamic fill, `<Graph.Polyline>` layered on top for every stroke.
+
+WGSL gotchas worth saving you a debugging session: no unary `+` (`+0.85` errors; use `0.85`); no backticks in shader comments (they end the JS template literal).
+
+---
+
 ## Layout Rules
 
 Pixel-perfect flex, shared logic with love2d's layout engine.
