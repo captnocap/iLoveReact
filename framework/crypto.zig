@@ -12,7 +12,7 @@
 //!   - Envelope encryption (XChaCha20-Poly1305)
 
 const std = @import("std");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const crypto = std.crypto;
 const HmacSha256 = crypto.auth.hmac.sha2.HmacSha256;
 const XChaCha20Poly1305 = crypto.aead.chacha_poly.XChaCha20Poly1305;

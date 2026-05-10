@@ -4,8 +4,7 @@
  * Tier 2. Wraps useTheInternet.browserPageSync/Async.
  *
  * This path will absorb nghttp2 + tls.zig as the stack matures. Today it
- * bridges through framework/net/page_fetch.zig (HTTP/1.1 over plain TCP or
- * TLS) and will upgrade seamlessly once the underlying binding switches.
+ * bridges through framework/net/http.zig (std.http.Client + tls.zig).
  */
 
 import { browserPageSync, browserPageAsync, nextPageId, subscribe } from './useTheInternet';

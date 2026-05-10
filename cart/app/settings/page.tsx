@@ -134,7 +134,7 @@ export default function SettingsPage() {
             minWidth: 0, overflow: 'hidden',
           }}>
             <Box style={{
-              width: '100%', maxWidth: 1080,
+              width: '100%',
               minWidth: 0, overflow: 'hidden',
               flexDirection: 'column', gap: 20,
             }}>

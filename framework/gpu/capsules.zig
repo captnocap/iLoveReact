@@ -16,7 +16,7 @@
 //! the same way as every other primitive.
 
 const std = @import("std");
-const log = @import("../log.zig");
+const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
@@ -45,7 +45,12 @@ pub const CapsuleInstance = extern struct {
 // Constants & State
 // ════════════════════════════════════════════════════════════════════════
 
-pub const MAX_CAPSULES = 32768;
+// Bumped 32K → 1M to support data-dense polyline workloads (chart_bench at
+// 100 charts × 5000 points = ~500K capsules/frame). 1M × 48 bytes = ~48 MB
+// static state — fine on any modern desktop, and the GPU buffer of the same
+// size is well below typical VRAM headroom. Without this, polyline charts
+// silently truncate past ~6.5 fully-rendered cells in dense bench scenarios.
+pub const MAX_CAPSULES = 1_048_576;
 
 var g_capsules: [MAX_CAPSULES]CapsuleInstance = undefined;
 var g_capsule_count: usize = 0;

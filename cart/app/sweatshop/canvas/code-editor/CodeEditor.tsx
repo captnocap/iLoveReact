@@ -46,6 +46,10 @@ export function CodeEditor({
   dirty = false,
   onApply,
 }: CodeEditorProps) {
+  // tokenizeToColorRows itself caches by input string identity, so
+  // even if useMemo re-runs (upstream identity churn), the array
+  // reference returned for an unchanged source string stays stable —
+  // which is what kills the per-frame UPDATE on the colorRows prop.
   const colorRows = useMemo(() => tokenizeToColorRows(value), [value]);
   const lineCount = colorRows.length;
 
@@ -100,7 +104,13 @@ export function CodeEditor({
         </Row>
       )}
 
-      <ScrollView showScrollbar={true} style={{
+      <ScrollView showScrollbar={true}
+        onLayout={(r: any) => {
+          const g: any = globalThis as any;
+          g.__svN = (g.__svN || 0) + 1;
+          try { (globalThis as any).__hostLog?.(0, '[scroll-ce] #' + g.__svN + ' w=' + r.width.toFixed(1) + ' h=' + r.height.toFixed(1)); } catch {}
+        }}
+        style={{
         flexGrow: 1,
         height: '100%',
         backgroundColor: 'theme:bg1',

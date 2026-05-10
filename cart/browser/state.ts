@@ -11,6 +11,7 @@ import {
 } from './constants';
 import {
   BookmarkEntry,
+  BrowserDocumentKind,
   BrowserSession,
   BrowserSettings,
   BrowserTab,
@@ -30,6 +31,20 @@ import {
   subtitleFromAddress,
   updateLoadedTab,
 } from './utils';
+
+type CachedDocument = {
+  address: string;
+  title: string;
+  statusCode: number;
+  contentType: string;
+  documentKind: BrowserDocumentKind;
+  pageSource: string;
+  pageStyles: string;
+  pageText: string;
+  pageError: string | null;
+  truncated: boolean;
+  cachedAt: number;
+};
 
 function readSettings(): BrowserSettings {
   return localstore.getJson<BrowserSettings>(STORAGE_KEYS.settings, DEFAULT_SETTINGS);
@@ -116,6 +131,42 @@ function sessionSnapshot(tabs: BrowserTab[], activeTabId: string): BrowserSessio
   };
 }
 
+function cacheKeyForAddress(address: string): string {
+  return normalizeAddress(address).replace(/#.*$/, '');
+}
+
+function cachedDocumentFromTab(tab: BrowserTab): CachedDocument | null {
+  if (!tab.finalAddress || !tab.documentKind || !tab.statusCode) return null;
+  return {
+    address: tab.finalAddress,
+    title: tab.title,
+    statusCode: tab.statusCode,
+    contentType: tab.contentType || '',
+    documentKind: tab.documentKind,
+    pageSource: tab.pageSource,
+    pageStyles: tab.pageStyles,
+    pageText: tab.pageText,
+    pageError: tab.pageError,
+    truncated: tab.wasTruncated,
+    cachedAt: Date.now(),
+  };
+}
+
+function hydrateTabFromCachedDocument(tab: BrowserTab, cached: CachedDocument): BrowserTab {
+  return updateLoadedTab(tab, {
+    address: cached.address,
+    title: cached.title,
+    statusCode: cached.statusCode,
+    contentType: cached.contentType,
+    documentKind: cached.documentKind,
+    pageSource: cached.pageSource,
+    pageStyles: cached.pageStyles,
+    pageText: cached.pageText,
+    pageError: cached.pageError,
+    truncated: cached.truncated,
+  });
+}
+
 export function useBrowserShellState() {
   const [boot] = useState(() => {
     const settings = readSettings();
@@ -137,6 +188,8 @@ export function useBrowserShellState() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addressFocused, setAddressFocused] = useState(false);
   const inflightLoads = useRef<Record<string, string>>({});
+  const cacheBypassLoads = useRef<Record<string, string>>({});
+  const documentCacheRef = useRef<Record<string, CachedDocument>>({});
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || tabs[0] || null;
   const activeBookmark = activeTab ? bookmarkMatches(bookmarks, activeTab.address) : null;
@@ -183,6 +236,18 @@ export function useBrowserShellState() {
 
       const requestKey = `${tab.loadVersion}:${tab.address}`;
       if (inflightLoads.current[tab.id] === requestKey) continue;
+
+      const bypassCache = cacheBypassLoads.current[tab.id] === requestKey;
+      const cached = bypassCache ? null : documentCacheRef.current[cacheKeyForAddress(tab.address)];
+      if (cached) {
+        setTabs((prev) => prev.map((current) => {
+          if (current.id !== tab.id) return current;
+          if (current.loadVersion !== tab.loadVersion) return current;
+          return hydrateTabFromCachedDocument(current, cached);
+        }));
+        continue;
+      }
+
       inflightLoads.current[tab.id] = requestKey;
 
       fetchPageAsync(tab.address)
@@ -219,6 +284,12 @@ export function useBrowserShellState() {
               pageError: document.error,
               truncated: document.truncated,
             });
+            const cachedDocument = cachedDocumentFromTab(loaded);
+            if (cachedDocument) {
+              documentCacheRef.current[cacheKeyForAddress(tab.address)] = cachedDocument;
+              documentCacheRef.current[cacheKeyForAddress(finalAddress)] = cachedDocument;
+            }
+            return loaded;
           }));
         })
         .catch((error) => {
@@ -232,6 +303,9 @@ export function useBrowserShellState() {
         .finally(() => {
           if (inflightLoads.current[tab.id] === requestKey) {
             delete inflightLoads.current[tab.id];
+          }
+          if (cacheBypassLoads.current[tab.id] === requestKey) {
+            delete cacheBypassLoads.current[tab.id];
           }
         });
     }
@@ -250,6 +324,7 @@ export function useBrowserShellState() {
 
   function closeTab(tabId: string): void {
     delete inflightLoads.current[tabId];
+    delete cacheBypassLoads.current[tabId];
     if (tabs.length <= 1) {
       const replacement = createTab(settings.newTabMode === 'blank' ? BLANK_URL : HOME_URL, tabId);
       setTabs([replacement]);
@@ -301,6 +376,7 @@ export function useBrowserShellState() {
 
   function reloadActiveTab(): void {
     if (!activeTab) return;
+    cacheBypassLoads.current[activeTab.id] = `${activeTab.loadVersion + 1}:${activeTab.address}`;
     setTabs((prev) => prev.map((tab) => (
       tab.id === activeTab.id ? startTabLoad(tab) : tab
     )));

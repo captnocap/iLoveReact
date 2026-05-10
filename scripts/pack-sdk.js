@@ -9,7 +9,7 @@
 //
 // Payload contents (mirrors the in-repo install layout):
 //   tools/{zig,v8cli,esbuild}           — toolchain
-//   vendor/                             — vendored npm deps (react, ts, …)
+//   deps/                             — vendored npm deps (react, ts, …)
 //   framework/ runtime/ renderer/       — runtime + reconciler source
 //   scripts/                            — dispatcher targets (dev, ship, init, …)
 //   sdk/dependency-registry.json        — single source of truth

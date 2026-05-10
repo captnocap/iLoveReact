@@ -160,11 +160,14 @@ export default function SweatshopPage() {
   const [codeDraft, setCodeDraft] = useState<string>(codeMirror);
   const lastProjectedRef = useRef<string>(codeMirror);
   useEffect(() => {
-    // If the user hasn't touched the editor since the last sync,
-    // refresh from the new projection. Otherwise leave their edits
-    // intact — they'll choose when to overwrite via Apply or by
-    // accepting the canvas's version manually.
-    if (codeDraft === lastProjectedRef.current) {
+    // Refresh codeDraft from the new projection when:
+    //  (a) the user hasn't touched the editor since the last sync, OR
+    //  (b) codeDraft is empty (cleared) — there's nothing to preserve,
+    //      and leaving it empty while the canvas has nodes is confusing
+    //      (canvas as code disagrees with canvas).
+    // If neither holds, the user has live edits — leave them alone
+    // until they hit Apply.
+    if (codeDraft === lastProjectedRef.current || codeDraft === '') {
       setCodeDraft(codeMirror);
     }
     lastProjectedRef.current = codeMirror;
@@ -304,13 +307,23 @@ export default function SweatshopPage() {
 
   // ── Debounced save on graph edits. 400ms quiet window so a flurry
   //    of node moves coalesces into one write.
+  //
+  // compositionStore from useCRUD has unstable identity between
+  // renders (the hook returns a new object literal each call). If we
+  // listed it in this effect's deps, React would re-run the effect
+  // every render, the cleanup would cancel the prior 400ms timer,
+  // schedule a new one, and the saving→saved→saving→saved status
+  // text loop we hunted would re-emerge. Use a ref so we always read
+  // the latest store without making it part of the dep list.
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const compositionStoreRef = useRef(compositionStore);
+  compositionStoreRef.current = compositionStore;
   useEffect(() => {
     if (!hydratedRef.current) return;
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
       setPersisted('saving');
-      compositionStore.update(defaultCompositionId(userId), {
+      compositionStoreRef.current.update(defaultCompositionId(userId), {
         nodes: nodes as any,
         edges: edges as any,
         updatedAt: new Date().toISOString(),
@@ -322,7 +335,7 @@ export default function SweatshopPage() {
         });
     }, 400);
     return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
-  }, [nodes, edges, userId, compositionStore]);
+  }, [nodes, edges, userId]);
 
   // ── Live re-bind on graph edits. Compile the current graph, attach
   // every trigger→action edge as a real IFTTT subscription, tear
@@ -406,7 +419,14 @@ export default function SweatshopPage() {
             weight-based). At least one pane is always visible. */}
         <Row style={{ flexGrow: 1, minHeight: 0 }}>
           {showCanvas && (
-            <Box style={{ flexGrow: weights.canvas, flexBasis: 0, minWidth: 240 }}>
+            // Canvas.Path's flowSpeed animation steps the dashed-stroke
+            // offset every frame; without overflow:hidden the FlowEditor's
+            // intrinsic content size fluctuates, cascades through the
+            // layout pass, and bistabilizes sibling panes (CodeEditor in
+            // particular re-tokenizes per tick — see id:872 colorRows
+            // churn). Same bug pattern that hit BlockFaces on /character
+            // (commit 061e271ed); same fix.
+            <Box style={{ flexGrow: weights.canvas, flexBasis: 0, minWidth: 0, overflow: 'hidden' }}>
               <FlowEditor
                 nodes={nodes}
                 edges={edges}

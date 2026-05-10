@@ -7,7 +7,7 @@
 //! Zero allocations. Fixed-size history stack + segment matching.
 
 const std = @import("std");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 
 // ── Memory History ──────────────────────────────────────────────────
 

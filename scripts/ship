@@ -321,7 +321,8 @@ if [[ -f "$METAFILE" ]]; then
         PG_FLAG="-Dhas-pg=true"
     fi
     if [[ "$WANT_SQLITE" == "1" ]]; then
-        SQLITE_FLAG="-Dhas-sqlite=true"
+        # libsqlite3 is dlopen'd at runtime by framework/storage/sqlite.zig
+        # — no link-time -D flag. WANT_SQLITE still gates bundling the .so.
         # __sql_* host fns are registered inside v8_bindings_telemetry.zig,
         # so SQLite consumers also need has-telemetry to pull that binding
         # in. Couple them here until __sql_* moves to its own binding

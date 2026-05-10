@@ -52,24 +52,21 @@ There are three separate surfaces that are easy to conflate:
      `framework/api_types/tools.d.ts`
 
 3. The V8 host-function surface:
-   - currently registers Claude and Kimi SDK functions in
-     `framework/v8_bindings_sdk.zig`
-   - does not register generic `agent*` functions
+   - `framework/v8_bindings_sdk.zig` registers HTTP, browser, playback,
+     recording, IPC, and semantic-tree host functions
+   - it does not register Claude, Kimi, or any generic `agent*` functions
 
-The concrete V8 registrations in `framework/v8_bindings_sdk.zig` are:
+There are no `__claude_*` or `__kimi_*` V8 registrations in
+`framework/v8_bindings_sdk.zig`. Those host functions exist only in
+`framework/qjs_runtime.zig` (the QuickJS runtime), which registers:
 
 ```text
-__claude_init
-__claude_send
-__claude_poll
-__claude_close
-__kimi_init
-__kimi_send
-__kimi_poll
-__kimi_close
+__claude_init / __claude_send / __claude_poll / __claude_close
+__kimi_init   / __kimi_send   / __kimi_poll   / __kimi_close
 ```
 
-There is no current V8 registration for:
+For the V8 surface that this document covers, the Claude and Kimi SDK
+bindings are simply absent. There is also no current V8 registration for:
 
 ```text
 __agent_init
@@ -120,11 +117,18 @@ Zig caller
   -> loop exits because no tool calls were produced
 ```
 
-The orchestration data structures are in place, but the provider transport in
-`AgentSession.streamRound()` is explicitly placeholder code. It asks the
-provider to format an HTTP request, discards it, and returns an assistant
-message built from empty buffers. It does not yet perform HTTP streaming, feed
-SSE chunks into `Provider.parseStreamChunk()`, or invoke stream callbacks.
+The orchestration data structures are described as placeholder code in
+`AgentSession.streamRound()`: it asks the provider to format an HTTP request,
+discards it, and returns an assistant message built from empty buffers,
+without performing HTTP streaming, feeding SSE chunks into
+`Provider.parseStreamChunk()`, or invoking stream callbacks.
+
+Note: as of this writing, `framework/agent_session.zig` does not exist in the
+active framework at all. The file has been moved to `tsz/framework/agent_session.zig`
+(archived, read-only). The "current implemented flow" above therefore
+describes the archived `tsz/` copy, not anything currently compiled into the
+V8 runtime — the gap between intended and implemented is even wider than the
+placeholder wording suggests.
 
 ## Agent Core
 
@@ -393,7 +397,10 @@ pub const ToolExecution = struct {
 Current limitation: `streamRound()` is a placeholder. It creates the provider
 request, then does not make the HTTP request or parse stream chunks. Because it
 returns an assistant message with empty content and no tool calls, the live
-session loop exits after one round.
+session loop exits after one round. (And, as noted above, the file containing
+`streamRound()` lives only in `tsz/framework/agent_session.zig` today; the
+active framework has no `agent_session.zig` at all, so this loop is not
+currently reachable from the V8 runtime.)
 
 ## Tool Execution From Session
 

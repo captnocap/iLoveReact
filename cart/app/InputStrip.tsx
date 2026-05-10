@@ -25,6 +25,7 @@ import type {
 } from './gallery/data/command-composer';
 import { resolveTokens, TokenMatch } from './tokens';
 import { askAssistant } from './chat/store';
+import { setPendingIntent } from './plan/state';
 import { useInputClaim, getInputClaim } from './shell';
 
 const LEFT_SHORTCUTS = [
@@ -86,6 +87,17 @@ export function InputStrip() {
       draftRef.current = '';
       return;
     }
+    // Slash commands. `/plan [intent...]` enters the planning surface
+    // with the remainder of the line as the seed objective; the
+    // /plan page consumes it on mount via plan/state.ts.
+    if (text === '/plan' || text.startsWith('/plan ')) {
+      const seed = text.slice('/plan'.length).trim();
+      setPendingIntent(seed);
+      busEmit('app:navigate', '/sweatshop/plan');
+      setDraft('');
+      draftRef.current = '';
+      return;
+    }
     const tokens = resolveTokens(text);
     for (const m of tokens) {
       if (m.token.type === 'route') busEmit('app:navigate', m.token.path);
@@ -118,7 +130,7 @@ export function InputStrip() {
     leftShortcuts: LEFT_SHORTCUTS,
     executeShortcut: EXECUTE_SHORTCUT,
     modeGlyph: '',
-    sendLabel: 'SEND',
+    sendLabel: claim?.sendLabel ?? 'SEND',
   };
 
   return (

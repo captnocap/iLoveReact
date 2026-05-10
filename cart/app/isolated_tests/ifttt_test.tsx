@@ -122,6 +122,7 @@ export default function IftttTestCart() {
   const sysHang = useIFTTT('system:hang', (e) => { bump(); console.log('[ifttt-test] hang', e); });
   const sysRam = useIFTTT('system:ram', () => { bump(); });
   const sysVram = useIFTTT('system:vram', () => { bump(); });
+  const sysError = useIFTTT('system:error', (e) => { bump(); console.log('[ifttt-test] error caught', e?.message); });
 
   // Claude Code hooks — wired via .claude/hooks/ifttt-bus.sh + framework/claude_watch.zig
   const claudeAny = useIFTTT('system:claude', (e) => { bump(); console.log('[ifttt-test] claude', e?.phase, e?.tool, e?.cmd ?? e?.file ?? ''); });
@@ -183,6 +184,7 @@ export default function IftttTestCart() {
         <StatRow name="'system:hang'" hint="3+ consecutive slow frames; recovery=count:0" fired={sysHang.fired} lastAt={sysHang.lastFiredAt} payload={sysHang.lastEvent} />
         <StatRow name="'system:ram'" hint="updates ~1Hz when /proc/meminfo changes" fired={sysRam.fired} lastAt={sysRam.lastFiredAt} payload={sysRam.lastEvent} />
         <StatRow name="'system:vram'" hint="updates ~1Hz from /sys/class/drm/cardN" fired={sysVram.fired} lastAt={sysVram.lastFiredAt} payload={sysVram.lastEvent} />
+        <StatRow name="'system:error'" hint="taps console.error — fires on any runtime error" fired={sysError.fired} lastAt={sysError.lastFiredAt} payload={sysError.lastEvent?.message} />
       </Section>
 
       <Section title="Claude Code hooks (cross-session bus)">

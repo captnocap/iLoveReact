@@ -45,12 +45,23 @@ export function ConsoleTranscript({ blocks, attachment }: { blocks: TranscriptBl
       }}
       onLayout={(rect: any) => {
         if (!rect) return;
-        setViewport({
+        const next = {
           x: Number.isFinite(rect.x) ? rect.x : 0,
           y: Number.isFinite(rect.y) ? rect.y : 0,
           width: Number.isFinite(rect.width) ? rect.width : 384,
           height: Number.isFinite(rect.height) ? rect.height : 300,
-        });
+        };
+        // Diff before setState — onLayout fires every layout pass and a
+        // bare setViewport(next) writes a fresh object every tick, which
+        // re-renders, re-lays out, fires onLayout again, … parent's
+        // reconciler then ships an UPDATE for every ConsoleTranscript
+        // every frame and the child window rebuilds non-stop.
+        setViewport((prev) => (
+          prev.x === next.x && prev.y === next.y &&
+          prev.width === next.width && prev.height === next.height
+            ? prev
+            : next
+        ));
       }}
     >
       {shouldScroll ? (

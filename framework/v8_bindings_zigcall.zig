@@ -27,8 +27,9 @@ const v8_runtime = @import("v8_runtime.zig");
 // Each entry is a comptime `.{ "name", @import("path.zig") }` pair. Adding
 // a new module here is the full wiring — no boilerplate per function.
 const MODULES = .{
-    .{ "math",       @import("math.zig") },
-    .{ "easing",     @import("easing.zig") },
+    .{ "math",       @import("math/root.zig") },
+    .{ "easing",     @import("math/easing.zig") },
+    .{ "random",     @import("math/random.zig") },
     .{ "transition", @import("transition.zig") },
 };
 

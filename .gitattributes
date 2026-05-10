@@ -22,3 +22,28 @@ packages/icons/src/icons.ts linguist-generated
 # Documentation tooling
 scripts/docs/** linguist-documentation
 content/** linguist-documentation
+
+# ── Distribute-branch tarball trimming ─────────────────────────────
+#
+# `git archive` (and GitHub's auto-generated branch/tag tarballs) honor
+# `export-ignore`. The reactjit-installer cart pulls
+# https://github.com/<repo>/archive/refs/heads/distribute.tar.gz, so
+# anything tagged here is omitted from what end users download. Keep
+# only what scripts/ship actually needs at build time.
+archive/                      export-ignore
+love2d/                       export-ignore
+tsz/                          export-ignore
+bad-habits-good-ideas/        export-ignore
+bench/                        export-ignore
+zig-out/                      export-ignore
+.cache/                       export-ignore
+tui/.cache/                   export-ignore
+tools/zig/cache/              export-ignore
+node_modules/                 export-ignore
+**/node_modules/              export-ignore
+bundle-*.js                   export-ignore
+bundle-*.json                 export-ignore
+*.metafile.json               export-ignore
+benchmark_*.csv               export-ignore
+bench_test.gen.o              export-ignore
+*.tar.gz                      export-ignore

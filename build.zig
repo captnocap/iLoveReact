@@ -69,14 +69,8 @@ pub fn build(b: *std.Build) void {
     // dev host. Each gate must guard both the library link/include and
     // any framework code site that references the library's symbols.
     const has_physics = b.option(bool, "has-physics", "Link box2d + physics2d module") orelse false;
-    const has_sqlite = b.option(bool, "has-sqlite", "Link sqlite3 + real sqlite.zig (otherwise stub)") orelse false;
     const has_terminal = b.option(bool, "has-terminal", "Link libvterm + real vterm.zig (otherwise stub)") orelse false;
-    const has_audio = b.option(bool, "has-audio", "Compile audio_real.zig (SDL3 audio + LuaJIT DSP) — implies has-lua-worker") orelse false;
-    // Audio's DSP engine imports zluajit, so has-audio forces
-    // has-lua-worker on. Carts that want only the lua compute worker
-    // (without audio) flip has-lua-worker explicitly.
-    const has_lua_worker_explicit = b.option(bool, "has-lua-worker", "Link luajit-5.1 + real luajit_worker.zig (otherwise stub)") orelse false;
-    const has_lua_worker = has_lua_worker_explicit or has_audio;
+    const has_audio = b.option(bool, "has-audio", "Compile framework/audio.zig (SDL3 audio + LuaJIT DSP via zluajit module)") orelse false;
     const has_midi = b.option(bool, "has-midi", "Link libasound + real midi.zig (ALSA snd_seq_* MIDI input) — otherwise stub") orelse false;
 
     // Bundle path override. When unset, v8_app.zig falls back to embedding
@@ -93,10 +87,8 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "dev_mode", dev_mode);
     options.addOption(bool, "custom_chrome", custom_chrome);
     options.addOption(bool, "has_physics", has_physics);
-    options.addOption(bool, "has_sqlite", has_sqlite);
     options.addOption(bool, "has_terminal", has_terminal);
     options.addOption(bool, "has_audio", has_audio);
-    options.addOption(bool, "has_lua_worker", has_lua_worker);
     options.addOption(bool, "has_midi", has_midi);
     options.addOption([]const u8, "bundle_path", bundle_path);
     options.addOption(bool, "has_video", true);
@@ -119,7 +111,9 @@ pub fn build(b: *std.Build) void {
     root_mod.addOptions("build_options", options);
     root_mod.addImport("wgpu", wgpu_mod);
     root_mod.addImport("tls", tls_mod);
-    if (has_lua_worker) root_mod.addImport("zluajit", zluajit_dep.module("zluajit"));
+    // zluajit is needed by framework/audio (DSP engine). framework/process/luajit_worker
+    // dlopens libluajit-5.1 directly, so it doesn't need this import.
+    if (has_audio) root_mod.addImport("zluajit", zluajit_dep.module("zluajit"));
 
     // ── pg.zig (Postgres client) ────────────────────────────────
     // Used by framework/pg.zig (and via that, framework/embed.zig). Always
@@ -162,7 +156,6 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     exe.linkSystemLibrary("SDL3");
     exe.linkSystemLibrary("freetype");
-    if (has_lua_worker) exe.linkSystemLibrary("luajit-5.1");
 
     const os_tag = target.result.os.tag;
     if (os_tag == .linux) {
@@ -174,13 +167,13 @@ pub fn build(b: *std.Build) void {
         exe.linkSystemLibrary("m");
         exe.linkSystemLibrary("pthread");
         exe.linkSystemLibrary("dl");
-        // libasound is required by framework/midi_real.zig, which calls
+        // libasound is required by framework/audio/midi.zig, which calls
         // ALSA's snd_seq_* API for MIDI sequencer input on Linux. SDL3's
         // audio backends are dlopen'd at runtime (so SDL3 doesn't pull
-        // libasound into DT_NEEDED via the audio path), but midi_real.zig
+        // libasound into DT_NEEDED via the audio path), but audio/midi.zig
         // declares the snd_seq_* symbols via @extern, and those need
-        // libasound at link time. The dispatcher in framework/midi.zig
-        // selects midi_real.zig only when has_midi is on; the stub
+        // libasound at link time. The dispatcher in framework/audio/midi.zig
+        // selects audio/midi.zig only when has_midi is on; without midi
         // doesn't reference any ALSA symbols, so non-MIDI carts skip
         // both the link and the ~600KB DT_NEEDED entry.
         if (has_midi) exe.linkSystemLibrary("asound");
@@ -390,7 +383,6 @@ pub fn build(b: *std.Build) void {
 
     // ── System libraries ──────────────────────────────────────
     if (has_physics) exe.linkSystemLibrary("box2d");
-    if (has_sqlite) exe.linkSystemLibrary("sqlite3");
     if (has_terminal) exe.linkSystemLibrary("vterm");
 
     // ── Privacy / libsodium (opt-in per cart) ─────────────────
@@ -467,6 +459,9 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/whisper.flag", if (has_whisper) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/audio.flag", if (has_audio) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/midi.flag", if (has_midi) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/vterm.flag", if (has_terminal) "1\n" else "0\n");
     const install_manifest = b.addInstallDirectory(.{
         .source_dir = manifest_wf.getDirectory(),
         .install_dir = .prefix,
@@ -572,7 +567,7 @@ pub fn build(b: *std.Build) void {
         tui_options.addOption([]const u8, "bundle_path", bundle_path);
         // Mirrors the GPU app's gate: when -Dhas-terminal=true is passed,
         // libvterm is linked and framework/vterm.zig dispatches to the
-        // real impl (otherwise the stub). The TUI host's <Terminal>
+        // real impl (otherwise without midi). The TUI host's <Terminal>
         // renderer needs the real impl to spawn shells + read cell
         // grids.
         tui_options.addOption(bool, "has_terminal", has_terminal);
@@ -698,7 +693,6 @@ pub fn build(b: *std.Build) void {
         luajit_runtime_test.linkFramework("CoreVideo");
     }
     if (has_physics) luajit_runtime_test.linkSystemLibrary("box2d");
-    if (has_sqlite) luajit_runtime_test.linkSystemLibrary("sqlite3");
     if (has_terminal) luajit_runtime_test.linkSystemLibrary("vterm");
     luajit_runtime_test.linkLibCpp();
 

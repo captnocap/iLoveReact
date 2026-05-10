@@ -73,7 +73,7 @@ export const recipe: RecipeDocument = {
       kind: "bullet-list",
       title: "Pattern summary",
       items: [
-        "One directory per customer; pass it as cwd to __claude_init.",
+        "One directory per customer; pass it as cwd to useAssistant({ backend: 'claude_code', cwd, model }).",
         "Pin Claude to a known filename (profile.md) and a known schema in the prompt.",
         "First turn: Claude finds nothing, writes the file.",
         "Second turn onwards: same cwd, Claude reads first, recommendations land pre-personalized.",

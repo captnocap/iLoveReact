@@ -8,7 +8,7 @@
 //! No fixed element ceilings — arrays grow as needed.
 
 const std = @import("std");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const layout = @import("layout.zig");
 
 pub const MAX_SLOTS = 512;

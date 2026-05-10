@@ -33,6 +33,11 @@ fn argToI32(info: v8.FunctionCallbackInfo, idx: u32) ?i32 {
     return @as(i32, @intCast(info.getArg(idx).toI32(ctx) catch return null));
 }
 
+fn setReturnString(info: v8.FunctionCallbackInfo, text: []const u8) void {
+    const iso = info.getIsolate();
+    info.getReturnValue().set(v8.String.initUtf8(iso, text));
+}
+
 fn hostStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const ok = voice.start();
@@ -70,6 +75,12 @@ fn hostSetPreviewStrideMs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
     voice.setPreviewStrideMs(ms);
 }
 
+fn hostRecordingDevicesJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var buf: [4096]u8 = undefined;
+    setReturnString(info, voice.recordingDevicesJson(&buf));
+}
+
 pub fn registerVoice(_: anytype) void {
     v8_runtime.registerHostFn("__voice_start", hostStart);
     v8_runtime.registerHostFn("__voice_stop", hostStop);
@@ -77,6 +88,8 @@ pub fn registerVoice(_: anytype) void {
     v8_runtime.registerHostFn("__voice_set_floor", hostSetFloor);
     v8_runtime.registerHostFn("__voice_set_preview_stride_ms", hostSetPreviewStrideMs);
     v8_runtime.registerHostFn("__voice_release_buffer", hostReleaseBuffer);
+    v8_runtime.registerHostFn("__audio_input_devices_json", hostRecordingDevicesJson);
+    v8_runtime.registerHostFn("__voice_recording_devices_json", hostRecordingDevicesJson);
 }
 
 pub fn tickDrain() void {

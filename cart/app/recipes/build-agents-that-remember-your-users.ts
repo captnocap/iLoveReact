@@ -5,12 +5,12 @@ export const recipe: RecipeDocument = {
   title: "Build agents that remember your users",
   sourcePath: "cart/app/recipes/build-agents-that-remember-your-users.md",
   instructions:
-    "Persist customer preferences across sessions by treating the session's cwd as a memory store. Per-customer workspace directory + a pinned notes file (preferences.md) Claude reads at session start and edits when it learns something new. The original 'memory_store' beta from Claude Managed Agents has no analog in framework/claude_sdk/; cwd + Read/Edit is the closest local equivalent.",
+    "Persist customer preferences across sessions by treating the session's cwd as a memory store. Per-customer workspace directory + a pinned notes file (preferences.md) Claude reads at session start and edits when it learns something new. Drives the local claude CLI through useAssistant({ backend: 'claude_code', cwd, model }); the original 'memory_store' beta from Claude Managed Agents has no analog in framework/assistant/claude_sdk/, but cwd + Read/Edit is the closest local equivalent.",
   sections: [
     {
       kind: "paragraph",
       text:
-        "Most agents start every conversation from scratch. The original Anthropic recipe solves this with the Claude Managed Agents memory_store beta — cloud-hosted, mounted at /mnt/memory/{store}. We don't have that. framework/claude_sdk/ drives the local claude CLI; the closest analog is the session's cwd. Each customer gets their own directory; Claude reads/edits preferences.md inside it.",
+        "Most agents start every conversation from scratch. The original Anthropic recipe solves this with the Claude Managed Agents memory_store beta — cloud-hosted, mounted at /mnt/memory/{store}. We don't have that. framework/assistant/claude_sdk/ drives the local claude CLI through the unified worker contract; the closest analog is the session's cwd. Each customer gets their own directory; Claude reads/edits preferences.md inside it.",
     },
     {
       kind: "bullet-list",
@@ -26,10 +26,10 @@ export const recipe: RecipeDocument = {
       kind: "code-block",
       title: "Architecture",
       language: "text",
-      code: `.tsx cart  ── globals ──>  framework/v8_bindings_sdk.zig
-                            │
-                            └─ framework/claude_sdk/Session  (cwd = workspace/<customer-id>/)
-                                  └─ subprocess: \`claude --input-format stream-json\`
+      code: `.tsx cart  ── useAssistant ──>  framework/assistant/worker_bindings.zig
+                                  │
+                                  └─ framework/assistant/claude_sdk/Session  (cwd = workspace/<customer-id>/)
+                                        └─ subprocess: \`claude --input-format stream-json\`
 
 workspace/
 └── <customer-id>/
@@ -78,64 +78,58 @@ Keep entries short and dated when relevant.\`;`,
     },
     {
       kind: "code-block",
-      title: "First visit: capture preferences",
-      language: "typescript",
-      code: `const host: any = globalThis;
-const claude_init  = typeof host.__claude_init  === 'function' ? host.__claude_init  : (_a:string,_b:string,_c?:string)=>0;
-const claude_send  = typeof host.__claude_send  === 'function' ? host.__claude_send  : (_:string)=>0;
-const claude_poll  = typeof host.__claude_poll  === 'function' ? host.__claude_poll  : ()=>null;
-const claude_close = typeof host.__claude_close === 'function' ? host.__claude_close : ()=>{};
+      title: "First visit: capture preferences via useAssistant",
+      language: "tsx",
+      code: `import { useEffect, useMemo, useState } from 'react';
+import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
 
-function askShopper(cwd: string, userMsg: string,
-                    onUpdate: (text: string, done: boolean) => void): () => void {
-  if (!claude_init(cwd, 'claude-sonnet-4-6')) {
-    onUpdate('[error] failed to start session', true);
-    return () => {};
-  }
-  const prompt = \`\${MEMORY_INSTRUCTION}\\n\\nCustomer: \${userMsg}\`;
-  if (!claude_send(prompt)) {
-    claude_close();
-    onUpdate('[error] failed to send', true);
-    return () => {};
-  }
+export function Shopper({ customerId, userMsg }: { customerId: string; userMsg: string }) {
+  const [cwd, setCwd] = useState<string | null>(null);
+  useEffect(() => { workspaceFor(customerId).then(setCwd); }, [customerId]);
 
-  let text = '';
-  const handle = setInterval(() => {
-    const msg = claude_poll();
-    if (!msg) return;
-    if (msg.type === 'assistant' && msg.text) {
-      text += msg.text;
-      onUpdate(text, false);
-    } else if (msg.type === 'result') {
-      onUpdate(text, true);
-      clearInterval(handle);
-      claude_close();
-    }
-  }, 50);
+  const { events, ask, phase, ready } = useAssistant({
+    backend: 'claude_code',
+    cwd: cwd ?? undefined,
+    model: 'claude-sonnet-4-6',
+  });
 
-  return () => { clearInterval(handle); claude_close(); };
+  // Send the turn once the worker is ready and we have the user's message.
+  useEffect(() => {
+    if (!ready() || !userMsg) return;
+    ask(\`\${MEMORY_INSTRUCTION}\\n\\nCustomer: \${userMsg}\`);
+  }, [ready(), userMsg]);
+
+  // Derive streaming text + completion from the event timeline.
+  const text = useMemo(
+    () => events.filter(e => e.kind === 'assistant_message').map(e => e.text ?? '').join(''),
+    [events],
+  );
+  const done = phase === 'idle' || phase === 'failed';
+
+  return <Render text={text} done={done} />;
 }`,
     },
     {
       kind: "code-block",
       title: "Run a first turn",
-      language: "typescript",
-      code: `const cwd = await workspaceFor('cust_42');
-askShopper(
-  cwd,
-  "Hi! I'm looking for a new jacket. I wear a size medium, only buy vegan " +
-  "leather (no animal leather please), my budget is usually under $200, and " +
-  "I love earth tones. What would you suggest?",
-  (text, done) => render(text, done),
-);`,
+      language: "tsx",
+      code: `<Shopper
+  customerId="cust_42"
+  userMsg={
+    "Hi! I'm looking for a new jacket. I wear a size medium, only buy vegan " +
+    "leather (no animal leather please), my budget is usually under $200, and " +
+    "I love earth tones. What would you suggest?"
+  }
+/>`,
     },
     {
       kind: "bullet-list",
       title: "Expected behavior",
       items: [
-        "Claude calls Read({\"file_path\":\"./preferences.md\"}) — file doesn't exist yet, gets a not-found.",
-        "Claude makes recommendations using the constraints from the user message.",
+        "Claude calls Read({\"file_path\":\"./preferences.md\"}) — file doesn't exist yet, gets a not-found. Surfaces as a tool_call event in `events`.",
+        "Claude makes recommendations using the constraints from the user message — assistant_message events stream in.",
         "Claude calls Edit (or Write to create) to record sizes, materials, budget, style.",
+        "The hook's `phase` flips to 'idle' when the final completion event lands.",
       ],
     },
     {
@@ -174,14 +168,12 @@ async function dumpMemory(cwd: string) {
     },
     {
       kind: "code-block",
-      title: "Second visit: same cwd, automatic recall",
-      language: "typescript",
-      code: `const cwd = await workspaceFor('cust_42');  // same directory
-askShopper(
-  cwd,
-  "Hey, I'm back! I need a bag for work. Any recommendations?",
-  (text, done) => render(text, done),
-);`,
+      title: "Second visit: same customerId, automatic recall",
+      language: "tsx",
+      code: `<Shopper
+  customerId="cust_42"   // same id → same workspace dir
+  userMsg="Hey, I'm back! I need a bag for work. Any recommendations?"
+/>`,
     },
     {
       kind: "paragraph",
@@ -212,25 +204,25 @@ edit purchase-history.md — it's owned by the application.\`;`,
 ├── <customer-id>/preferences.md          ← per-customer, read+write
 └── _shared/catalog-notes.md              ← shared across customers, read-only
 
-# Layering needs add_dirs plumbed into hostClaudeInit (currently absent).
+# Layering needs add_dirs added to the worker opts schema (currently absent).
 # Workaround until then: copy the shared file into each customer's cwd at session start.`,
     },
     {
       kind: "bullet-list",
-      title: "Caveats and TODOs against the v8 bindings",
+      title: "Caveats and TODOs against the worker bindings",
       items: [
-        "No system_prompt from the cart. Memory instruction rides on every user message; move to the system slot when framework/v8_bindings_sdk.zig:932 grows the field.",
-        "No add_dirs from the cart. Cross-store layering (shared catalog + per-customer) needs add_dirs plumbed; copy files into cwd as a workaround.",
-        "One session at a time. g_claude_session is a single global (framework/v8_bindings_sdk.zig:24); two customers can't be served concurrently — queue or serialize.",
+        "No system_prompt for claude_code in the worker opts. Memory instruction rides on every user message; move to the system slot when framework/assistant/worker_bindings.zig grows the field for Claude (it's already wired for openai_compat).",
+        "No add_dirs in the worker opts. Cross-store layering (shared catalog + per-customer) needs add_dirs added to the Claude opts schema; copy files into cwd as a workaround.",
+        "One worker per useAssistant mount — by design. For two customers concurrently, mount two <Shopper> instances with different customerIds; each gets its own worker, session, and cwd.",
         "No 'memory store' abstraction. No API to list/version/audit memories — you have files. Snapshot cwd to git after each session if you need an audit trail.",
-        "permission_mode is hardcoded to bypass_permissions. Edits to preferences.md happen without prompt — fine inside the customer dir, do not widen cwd.",
+        "Claude Code default permission_mode is bypass_permissions. Edits to preferences.md happen without prompt — fine inside the customer dir, do not widen cwd.",
       ],
     },
     {
       kind: "bullet-list",
       title: "Pattern summary",
       items: [
-        "One directory per customer; pass it as cwd to __claude_init.",
+        "One directory per customer; pass it as cwd to useAssistant({ backend: 'claude_code', cwd, model }).",
         "Pin Claude to a known filename (preferences.md) and a known schema in the prompt.",
         "First turn: Claude finds nothing, makes recommendations, writes the file.",
         "Second turn: same cwd, Claude reads first, recommendations land pre-personalized.",

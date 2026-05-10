@@ -16,7 +16,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const fpg = @import("pg.zig");
+const fpg = @import("storage/pg.zig");
 
 fn currentContext(info: v8.FunctionCallbackInfo) v8.Context {
     return info.getIsolate().getCurrentContext();

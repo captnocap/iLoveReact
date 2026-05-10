@@ -39,6 +39,30 @@ import './effect_tracker';
 // shims, replacing the no-ops above with real emit-bus dispatchers.
 require('./hooks/useIFTTT');
 
+// ── system:error pump ────────────────────────────────────────────────
+// Surface runtime errors on the IFTTT bus so carts can subscribe with
+// useIFTTT('system:error', ...) — used by the dev shell's Doctor pane
+// and by per-cart error overlays. We can't install a V8-level uncaught
+// handler from JS (no setUnhandledPromise hook is exposed here), so we
+// tap the most-reliable JS-side signal: console.error. Real exceptions
+// caught by V8 still log through Zig's logException — the cart-side
+// overlay catches the in-bundle errors that React/effects throw.
+{
+  const ffi = require('./ffi');
+  const _origConsoleError = console.error?.bind(console);
+  console.error = (...args: any[]) => {
+    try {
+      // Build a stable shape: first arg as message, rest stringified.
+      const msg = typeof args[0] === 'string'
+        ? args[0]
+        : (args[0]?.message ?? String(args[0] ?? 'error'));
+      const stack = (args[0] && typeof args[0] === 'object' && (args[0] as any).stack) || null;
+      ffi.emit('system:error', { message: msg, stack, args, at: Date.now() });
+    } catch { /* never let the pump itself crash */ }
+    if (_origConsoleError) _origConsoleError(...args);
+  };
+}
+
 // ── Browser API shims ────────────────────────────────────────────────
 // Copy-pasted React code routinely reaches for window/document/addEventListener.
 // Without these, any useEffect that wires keyboard/resize/visibility listeners
@@ -122,9 +146,16 @@ function removeEventListenerShim(type: string, fn: Listener): void {
     return parts.join(' ');
   }
 
+  // __hostLog (framework/v8_bindings_core.zig:190) takes (severity:i32, msg:string)
+  // where 0=log/info, 1=warn, 2=error. The Zig binding does argToI32 — sending a
+  // string here silently degrades every console.error/.warn to severity=0, so the
+  // bus tags everything `js.log` @ imp 0.30 and emitJsLog's stderr fallthrough
+  // (gated on severity>=1) never fires. Map level → number here.
+  const SEV: Record<string, number> = { trace: 0, debug: 0, log: 0, info: 0, warn: 1, error: 2 };
+
   const emit = (level: string, args: any[]) => {
     const msg = stringify(args);
-    if (log) { try { log(level, msg); } catch {} }
+    if (log) { try { log(SEV[level] ?? 0, msg); } catch {} }
   };
 
   (globalThis as any).console = {
@@ -135,6 +166,14 @@ function removeEventListenerShim(type: string, fn: Listener): void {
     debug: (...a: any[]) => emit('debug', a),
     trace: (...a: any[]) => emit('trace', a),
   };
+
+  // React 18 concurrent mode reports the original render-time exception via
+  // globalThis.reportError(err) and only console.error()s the "Above error
+  // occurred in <X>" component-stack wrapper. With no reportError defined,
+  // the actual TypeError/etc. vanishes — only the wrapper makes it to logs.
+  if (typeof (globalThis as any).reportError !== 'function') {
+    (globalThis as any).reportError = (e: any) => emit('error', [e]);
+  }
 })();
 
 // ── Timer subsystem ──────────────────────────────────────────────────
@@ -330,6 +369,28 @@ function getPreparedScrollPayload() {
   return payload && typeof payload === 'object' ? payload : {};
 }
 
+function getPointerPayload(id: number, type: string) {
+  const host: any = globalThis as any;
+  const read = (name: string, fallback = 0): number => {
+    const fn = host[name];
+    if (typeof fn !== 'function') return fallback;
+    const n = Number(fn());
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const down = read('getMouseDown', 0) > 0;
+  return {
+    targetId: id,
+    type,
+    x: read('getMouseX', 0),
+    y: read('getMouseY', 0),
+    button: 1,
+    pressure: down ? 1 : 0,
+    buttons: down ? 1 : 0,
+    preventDefault() { this.defaultPrevented = true; },
+    defaultPrevented: false,
+  };
+}
+
 function dispatchAliases(id: number, aliases: string[], ...args: any[]) {
   const h = handlerRegistry.get(id);
   if (!h) return;
@@ -350,8 +411,9 @@ function dispatchAliases(id: number, aliases: string[], ...args: any[]) {
 function eventAliases(type: string): string[] {
   if (type === 'onClick') return ['onClick', 'onPress'];
   if (type === 'onPress') return ['onPress', 'onClick'];
-  if (type === 'onMouseDown') return ['onMouseDown'];
-  if (type === 'onMouseUp') return ['onMouseUp'];
+  if (type === 'onMouseDown') return ['onMouseDown', 'onPointerDown', 'onPressIn'];
+  if (type === 'onMouseMove') return ['onMouseMove', 'onPointerMove'];
+  if (type === 'onMouseUp') return ['onMouseUp', 'onPointerUp', 'onPressOut'];
   if (type === 'onHoverEnter') return ['onHoverEnter', 'onMouseEnter'];
   if (type === 'onHoverExit') return ['onHoverExit', 'onMouseLeave'];
   return [type];
@@ -375,7 +437,9 @@ function eventAliases(type: string): string[] {
   if (typeof hl === 'function') { try { hl(0, `[dispatch] id=${id} type=${type} handlers=${keys}`); } catch {} }
   const dT0 = (globalThis as any).performance?.now?.() ?? Date.now();
   try {
-    const payload = { targetId: id };
+    const payload = type === 'onMouseDown' || type === 'onMouseMove' || type === 'onMouseUp'
+      ? getPointerPayload(id, type)
+      : { targetId: id };
     dispatchAliases(id, eventAliases(type), payload);
   } catch (e: any) {
     if (typeof hl === 'function') {
@@ -396,6 +460,23 @@ if (typeof registerDispatch === 'function') {
     });
   } catch {}
 }
+
+// Layout dispatch entry — fired by framework/layout.zig:setRect for any node
+// flagged has_on_layout. Routes the rect to the user's onLayout handler or
+// useMeasure subscription. Called once per node per dirty layout pass.
+(globalThis as any).__dispatchLayout = (id: number, x: number, y: number, w: number, h: number) => {
+  const h_ = handlerRegistry.get(id);
+  const fn = h_ && h_.onLayout;
+  if (typeof fn !== 'function') return;
+  try {
+    fn({ x, y, width: w, height: h });
+  } catch (e: any) {
+    const hl: any = (globalThis as any).__hostLog;
+    if (typeof hl === 'function') {
+      try { hl(2, `[dispatchLayout] id=${id}: ${e?.message || e}`); } catch {}
+    }
+  }
+};
 
 (globalThis as any).__dispatchInputChange = (id: number, inputSlot?: number) => {
   try {
@@ -507,5 +588,30 @@ if (typeof registerDispatch === 'function') {
 };
 
 const reconciler = Reconciler(hostConfig);
-const container = reconciler.createContainer({ id: 0 }, 0, null, false, null, '', (_e: any) => {}, null);
-reconciler.updateContainer(React.createElement(App, {}), container, null, null);
+// React-reconciler's 7th arg is onRecoverableError — fires for hydration /
+// concurrent retries, NOT for uncaught render exceptions.
+const onReactError = (e: any) => {
+  try { console.error('[react]', e?.stack || e?.message || e); } catch {}
+};
+
+// React-reconciler 0.29 in DEV only logs the *original* render-time error via
+// the browser's invokeGuardedCallback fake-DOM-event trick (line 14305 of
+// react-reconciler.development.js). With no window/document it falls back to
+// invokeGuardedCallbackProd which silently stashes the error — only the
+// "Above error occurred in <X>" component-stack wrapper survives. To surface
+// the real error, mount a top-level error boundary; componentDidCatch
+// receives (error, info) before logCapturedError runs.
+class GlobalErrorBoundary extends (React as any).Component {
+  componentDidCatch(error: any, info: any) {
+    const msg = error?.stack || error?.message || String(error);
+    const stack = info?.componentStack || '';
+    console.error('[react-uncaught] ' + msg + (stack ? '\ncomponent-stack:' + stack : ''));
+  }
+  render() { return (this.props as any).children; }
+}
+
+const container = reconciler.createContainer({ id: 0 }, 0, null, false, null, '', onReactError, null);
+reconciler.updateContainer(
+  React.createElement(GlobalErrorBoundary as any, null, React.createElement(App, {})),
+  container, null, null,
+);

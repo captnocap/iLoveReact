@@ -3,19 +3,19 @@ const v8 = @import("v8");
 const v8rt = @import("v8_runtime.zig");
 
 const net_http = @import("net/http.zig");
-const page_fetch = @import("net/page_fetch.zig");
 const browse_bridge = @import("net/browse_bridge.zig");
-const debug_client = @import("debug_client.zig");
-const player_mod = @import("player.zig");
-const vterm_mod = @import("vterm.zig");
-const semantic = @import("semantic.zig");
-const classifier = @import("classifier.zig");
-const worker_bindings = @import("worker_bindings.zig");
+const debug_client = @import("diag/debug_client.zig");
+const build_options = @import("build_options");
+const HAS_TERMINAL = if (@hasDecl(build_options, "has_terminal")) build_options.has_terminal else false;
+const player_mod = @import("terminal/player.zig");
+const vterm_mod = @import("terminal/vterm.zig");
+const semantic = @import("terminal/semantic.zig");
+const classifier = @import("terminal/classifier.zig");
+const worker_bindings = @import("assistant/worker_bindings.zig");
 
 const HTTP_MAX_HEADERS: usize = 16;
 
 var g_http_init_done: bool = false;
-var g_page_fetch_init_done: bool = false;
 
 /// Zig-side stream consumer for net_http. Lets in-process callers (e.g.
 /// openai_compat_sdk) hook the same poll/dispatch loop the JS-facing
@@ -268,7 +268,7 @@ fn parsePageReq(parsed: *const std.json.Parsed(std.json.Value)) ?[]const u8 {
     return if (url_v == .string) url_v.string else null;
 }
 
-fn buildPageRespJson(resp: *const page_fetch.Response, alloc: std.mem.Allocator) ![]u8 {
+fn buildPageRespJson(resp: *const net_http.Response, alloc: std.mem.Allocator) ![]u8 {
     var out = std.ArrayList(u8){};
     errdefer out.deinit(alloc);
     try out.writer(alloc).print("{{\"status\":{d},\"finalUrl\":", .{resp.status});
@@ -332,12 +332,18 @@ fn hostFetch(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     var body_alloc = std.Io.Writer.Allocating.init(alloc);
     defer body_alloc.deinit();
 
-    client.fetch(.{
+    const result = client.fetch(.{
         .location = .{ .url = url },
         .response_writer = &body_alloc.writer,
         .keep_alive = false,
         .redirect_behavior = .init(10),
     }) catch return setReturnUndefined(info, cx.iso);
+
+    // Treat non-2xx as failure — body may still be written for 4xx/5xx
+    // responses (error pages), but the contract for this fast-path
+    // host fn is "give me the body of a successful GET or undefined."
+    const status: u16 = @intFromEnum(result.status);
+    if (status < 200 or status >= 300) return setReturnUndefined(info, cx.iso);
 
     var body_list = body_alloc.toArrayList();
     defer body_list.deinit(alloc);
@@ -504,7 +510,7 @@ fn hostBrowserPageSync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     };
     defer parsed.deinit();
     const url = parsePageReq(&parsed) orelse return setReturnString(info, cx.iso, "{\"status\":0,\"finalUrl\":\"\",\"contentType\":\"\",\"body\":\"\",\"error\":\"bad request\"}");
-    const resp = page_fetch.fetchSync(url);
+    const resp = net_http.fetchSync(.{ .url = url });
     const payload = buildPageRespJson(&resp, std.heap.page_allocator) catch return setReturnString(info, cx.iso, "{\"status\":0,\"finalUrl\":\"\",\"contentType\":\"\",\"body\":\"\",\"error\":\"serialize failed\"}");
     defer std.heap.page_allocator.free(payload);
     setReturnString(info, cx.iso, payload);
@@ -519,9 +525,9 @@ fn hostBrowserPageAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
     const rid = jsStringArg(std.heap.page_allocator, info, 1) orelse return setReturnUndefined(info, cx.iso);
     defer std.heap.page_allocator.free(rid);
 
-    if (!g_page_fetch_init_done) {
-        page_fetch.init();
-        g_page_fetch_init_done = true;
+    if (!g_http_init_done) {
+        net_http.init();
+        g_http_init_done = true;
     }
 
     const parsed = std.json.parseFromSlice(std.json.Value, std.heap.page_allocator, spec, .{}) catch return setReturnUndefined(info, cx.iso);
@@ -533,7 +539,7 @@ fn hostBrowserPageAsync(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) 
         std.heap.page_allocator.free(rid_copy);
         return setReturnUndefined(info, cx.iso);
     };
-    _ = page_fetch.request(id, url);
+    _ = net_http.request(id, .{ .url = url });
     setReturnUndefined(info, cx.iso);
 }
 
@@ -1108,39 +1114,79 @@ pub fn tickDrain() void {
         const n = net_http.poll(&buf);
         const alloc = std.heap.page_allocator;
         for (buf[0..n]) |resp| {
-            const pending = httpPending().get(resp.id) orelse continue;
             var ch_buf: [256]u8 = undefined;
 
-            if (pending.zig) |zcb| {
-                switch (resp.response_type) {
-                    .chunk => zcb.onChunk(zcb.ctx, resp.bodySlice()),
-                    .complete => {
-                        zcb.onEnd(zcb.ctx, resp.status, null);
-                        if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
-                    },
-                    .err => {
-                        zcb.onEnd(zcb.ctx, 0, resp.errorSlice());
-                        if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
-                    },
-                    .progress => {},
+            if (httpPending().get(resp.id)) |pending| {
+                if (pending.zig) |zcb| {
+                    switch (resp.response_type) {
+                        .chunk => zcb.onChunk(zcb.ctx, resp.bodySlice()),
+                        .complete => {
+                            zcb.onEnd(zcb.ctx, resp.status, null);
+                            if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
+                        },
+                        .err => {
+                            zcb.onEnd(zcb.ctx, 0, resp.errorSlice());
+                            if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
+                        },
+                        .progress => {},
+                    }
+                    continue;
                 }
-                continue;
-            }
 
-            if (pending.download) {
-                // Download mode: progress chunks ride
-                // "http-download-progress:<rid>" with `{"d":dl,"t":total}`,
-                // terminal rides "http-download-end:<rid>" with status or
-                // error. Buffer sizes accommodate the JSON payload.
+                if (pending.download) {
+                    // Download mode: progress chunks ride
+                    // "http-download-progress:<rid>" with `{"d":dl,"t":total}`,
+                    // terminal rides "http-download-end:<rid>" with status or
+                    // error. Buffer sizes accommodate the JSON payload.
+                    switch (resp.response_type) {
+                        .progress => {
+                            const ch = std.fmt.bufPrint(&ch_buf, "http-download-progress:{s}", .{pending.rid}) catch continue;
+                            emitChannelPayload(ch, resp.bodySlice());
+                        },
+                        .complete => {
+                            var payload_buf: [64]u8 = undefined;
+                            const payload = std.fmt.bufPrint(&payload_buf, "{{\"status\":{d}}}", .{resp.status}) catch continue;
+                            const ch = std.fmt.bufPrint(&ch_buf, "http-download-end:{s}", .{pending.rid}) catch continue;
+                            emitChannelPayload(ch, payload);
+                            if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
+                        },
+                        .err => {
+                            var out = std.ArrayList(u8){};
+                            defer out.deinit(alloc);
+                            out.appendSlice(alloc, "{\"error\":") catch continue;
+                            jsonEscape(&out, alloc, resp.errorSlice()) catch continue;
+                            out.append(alloc, '}') catch continue;
+                            const ch = std.fmt.bufPrint(&ch_buf, "http-download-end:{s}", .{pending.rid}) catch continue;
+                            emitChannelPayload(ch, out.items);
+                            if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
+                        },
+                        .chunk => {}, // not produced by download mode
+                    }
+                    continue;
+                }
+
+                if (!pending.stream) {
+                    // Non-streaming: single full-body response → "http:<rid>"
+                    const rid = httpPending().fetchRemove(resp.id) orelse continue;
+                    defer alloc.free(rid.value.rid);
+                    const payload = buildHttpRespJson(&resp, alloc) catch continue;
+                    defer alloc.free(payload);
+                    const ch = std.fmt.bufPrint(&ch_buf, "http:{s}", .{rid.value.rid}) catch continue;
+                    emitChannelPayload(ch, payload);
+                    continue;
+                }
+
+                // Streaming: chunks ride "http-stream:<rid>", terminal rides
+                // "http-stream-end:<rid>" carrying status or error.
                 switch (resp.response_type) {
-                    .progress => {
-                        const ch = std.fmt.bufPrint(&ch_buf, "http-download-progress:{s}", .{pending.rid}) catch continue;
+                    .chunk => {
+                        const ch = std.fmt.bufPrint(&ch_buf, "http-stream:{s}", .{pending.rid}) catch continue;
                         emitChannelPayload(ch, resp.bodySlice());
                     },
                     .complete => {
                         var payload_buf: [64]u8 = undefined;
                         const payload = std.fmt.bufPrint(&payload_buf, "{{\"status\":{d}}}", .{resp.status}) catch continue;
-                        const ch = std.fmt.bufPrint(&ch_buf, "http-download-end:{s}", .{pending.rid}) catch continue;
+                        const ch = std.fmt.bufPrint(&ch_buf, "http-stream-end:{s}", .{pending.rid}) catch continue;
                         emitChannelPayload(ch, payload);
                         if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                     },
@@ -1150,68 +1196,24 @@ pub fn tickDrain() void {
                         out.appendSlice(alloc, "{\"error\":") catch continue;
                         jsonEscape(&out, alloc, resp.errorSlice()) catch continue;
                         out.append(alloc, '}') catch continue;
-                        const ch = std.fmt.bufPrint(&ch_buf, "http-download-end:{s}", .{pending.rid}) catch continue;
+                        const ch = std.fmt.bufPrint(&ch_buf, "http-stream-end:{s}", .{pending.rid}) catch continue;
                         emitChannelPayload(ch, out.items);
                         if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
                     },
-                    .chunk => {}, // not produced by download mode
+                    .progress => {},
                 }
                 continue;
             }
 
-            if (!pending.stream) {
-                // Non-streaming: single full-body response → "http:<rid>"
-                const rid = httpPending().fetchRemove(resp.id) orelse continue;
-                defer alloc.free(rid.value.rid);
-                const payload = buildHttpRespJson(&resp, alloc) catch continue;
+            // Browser page fallback — ids not in httpPending are looked up in pagePending
+            if (pagePending().fetchRemove(resp.id)) |rid| {
+                defer alloc.free(rid.value);
+                const payload = buildPageRespJson(&resp, alloc) catch continue;
                 defer alloc.free(payload);
-                const ch = std.fmt.bufPrint(&ch_buf, "http:{s}", .{rid.value.rid}) catch continue;
+                const ch = std.fmt.bufPrint(&ch_buf, "browser-page:{s}", .{rid.value}) catch continue;
                 emitChannelPayload(ch, payload);
                 continue;
             }
-
-            // Streaming: chunks ride "http-stream:<rid>", terminal rides
-            // "http-stream-end:<rid>" carrying status or error.
-            switch (resp.response_type) {
-                .chunk => {
-                    const ch = std.fmt.bufPrint(&ch_buf, "http-stream:{s}", .{pending.rid}) catch continue;
-                    emitChannelPayload(ch, resp.bodySlice());
-                },
-                .complete => {
-                    var payload_buf: [64]u8 = undefined;
-                    const payload = std.fmt.bufPrint(&payload_buf, "{{\"status\":{d}}}", .{resp.status}) catch continue;
-                    const ch = std.fmt.bufPrint(&ch_buf, "http-stream-end:{s}", .{pending.rid}) catch continue;
-                    emitChannelPayload(ch, payload);
-                    if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
-                },
-                .err => {
-                    var out = std.ArrayList(u8){};
-                    defer out.deinit(alloc);
-                    out.appendSlice(alloc, "{\"error\":") catch continue;
-                    jsonEscape(&out, alloc, resp.errorSlice()) catch continue;
-                    out.append(alloc, '}') catch continue;
-                    const ch = std.fmt.bufPrint(&ch_buf, "http-stream-end:{s}", .{pending.rid}) catch continue;
-                    emitChannelPayload(ch, out.items);
-                    if (httpPending().fetchRemove(resp.id)) |entry| alloc.free(entry.value.rid);
-                },
-                .progress => {},
-            }
-        }
-    }
-
-    if (g_page_fetch_init_done) {
-        var buf: [8]page_fetch.Response = undefined;
-        const n = page_fetch.poll(&buf);
-        const alloc = std.heap.page_allocator;
-        for (buf[0..n]) |resp| {
-            const rid = pagePending().fetchRemove(resp.id) orelse continue;
-            defer alloc.free(rid.value);
-            const payload = buildPageRespJson(&resp, alloc) catch continue;
-            defer alloc.free(payload);
-
-            var ch_buf: [256]u8 = undefined;
-            const ch = std.fmt.bufPrint(&ch_buf, "browser-page:{s}", .{rid.value}) catch continue;
-            emitChannelPayload(ch, payload);
         }
     }
 
@@ -1243,20 +1245,22 @@ pub fn registerSdk(vm: anytype) void {
     v8rt.registerHostFn("__browse_request_sync", hostBrowseRequestSync);
     v8rt.registerHostFn("__browse_request_async", hostBrowseRequestAsync);
     v8rt.registerHostFn("__browse_set_port", hostBrowseSetPort);
-    v8rt.registerHostFn("__play_load", hostPlayLoad);
-    v8rt.registerHostFn("__play_play", hostPlayPlay);
-    v8rt.registerHostFn("__play_pause", hostPlayPause);
-    v8rt.registerHostFn("__play_toggle", hostPlayToggle);
-    v8rt.registerHostFn("__play_seek", hostPlaySeek);
-    v8rt.registerHostFn("__play_step", hostPlayStep);
-    v8rt.registerHostFn("__play_speed", hostPlaySpeed);
-    v8rt.registerHostFn("__play_state", hostPlayState);
-    v8rt.registerHostFn("__rec_start", hostRecStart);
-    v8rt.registerHostFn("__rec_stop", hostRecStop);
-    v8rt.registerHostFn("__rec_toggle", hostRecToggle);
-    v8rt.registerHostFn("__rec_save", hostRecSave);
-    v8rt.registerHostFn("__rec_is_recording", hostRecIsRecording);
-    v8rt.registerHostFn("__rec_frame_count", hostRecFrameCount);
+    if (HAS_TERMINAL) {
+        v8rt.registerHostFn("__play_load", hostPlayLoad);
+        v8rt.registerHostFn("__play_play", hostPlayPlay);
+        v8rt.registerHostFn("__play_pause", hostPlayPause);
+        v8rt.registerHostFn("__play_toggle", hostPlayToggle);
+        v8rt.registerHostFn("__play_seek", hostPlaySeek);
+        v8rt.registerHostFn("__play_step", hostPlayStep);
+        v8rt.registerHostFn("__play_speed", hostPlaySpeed);
+        v8rt.registerHostFn("__play_state", hostPlayState);
+        v8rt.registerHostFn("__rec_start", hostRecStart);
+        v8rt.registerHostFn("__rec_stop", hostRecStop);
+        v8rt.registerHostFn("__rec_toggle", hostRecToggle);
+        v8rt.registerHostFn("__rec_save", hostRecSave);
+        v8rt.registerHostFn("__rec_is_recording", hostRecIsRecording);
+        v8rt.registerHostFn("__rec_frame_count", hostRecFrameCount);
+    }
     v8rt.registerHostFn("__ipc_connect", hostIpcConnect);
     v8rt.registerHostFn("__ipc_disconnect", hostIpcDisconnect);
     v8rt.registerHostFn("__ipc_status", hostIpcStatus);
@@ -1269,22 +1273,24 @@ pub fn registerSdk(vm: anytype) void {
     v8rt.registerHostFn("__ipc_submit_code", hostIpcSubmitCode);
     v8rt.registerHostFn("__ipc_tree_count", hostIpcTreeCount);
     v8rt.registerHostFn("__ipc_tree_node", hostIpcTreeNode);
-    v8rt.registerHostFn("__sem_build_graph", hostSemBuildGraph);
-    v8rt.registerHostFn("__sem_cache_count", hostSemCacheCount);
-    v8rt.registerHostFn("__sem_cache_entry", hostSemCacheEntry);
-    v8rt.registerHostFn("__sem_export", hostSemExport);
-    v8rt.registerHostFn("__sem_frame", hostSemFrame);
-    v8rt.registerHostFn("__sem_has_diff", hostSemHasDiff);
-    v8rt.registerHostFn("__sem_node_count", hostSemNodeCount);
-    v8rt.registerHostFn("__sem_node", hostSemNode);
-    v8rt.registerHostFn("__sem_row_text", hostSemRowText);
-    v8rt.registerHostFn("__sem_row_token", hostSemRowToken);
-    v8rt.registerHostFn("__sem_set_mode", hostSemSetMode);
-    v8rt.registerHostFn("__sem_set_row_token", hostSemSetRowToken);
-    v8rt.registerHostFn("__sem_snapshot", hostSemSnapshot);
-    v8rt.registerHostFn("__sem_state", hostSemState);
-    v8rt.registerHostFn("__sem_tree", hostSemTree);
-    v8rt.registerHostFn("__sem_vterm_rows", hostSemVtermRows);
+    if (HAS_TERMINAL) {
+        v8rt.registerHostFn("__sem_build_graph", hostSemBuildGraph);
+        v8rt.registerHostFn("__sem_cache_count", hostSemCacheCount);
+        v8rt.registerHostFn("__sem_cache_entry", hostSemCacheEntry);
+        v8rt.registerHostFn("__sem_export", hostSemExport);
+        v8rt.registerHostFn("__sem_frame", hostSemFrame);
+        v8rt.registerHostFn("__sem_has_diff", hostSemHasDiff);
+        v8rt.registerHostFn("__sem_node_count", hostSemNodeCount);
+        v8rt.registerHostFn("__sem_node", hostSemNode);
+        v8rt.registerHostFn("__sem_row_text", hostSemRowText);
+        v8rt.registerHostFn("__sem_row_token", hostSemRowToken);
+        v8rt.registerHostFn("__sem_set_mode", hostSemSetMode);
+        v8rt.registerHostFn("__sem_set_row_token", hostSemSetRowToken);
+        v8rt.registerHostFn("__sem_snapshot", hostSemSnapshot);
+        v8rt.registerHostFn("__sem_state", hostSemState);
+        v8rt.registerHostFn("__sem_tree", hostSemTree);
+        v8rt.registerHostFn("__sem_vterm_rows", hostSemVtermRows);
+    }
 
     worker_bindings.register();
 }

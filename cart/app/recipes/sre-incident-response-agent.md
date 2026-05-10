@@ -5,9 +5,9 @@
 The original Anthropic recipe builds an SRE agent in Python with the `claude-agent-sdk`, talking to an external MCP tool server. We are adapting it to ReactJIT, where:
 
 - **No MCP.** Everything runs inside the same cart process.
-- **No Python.** Zig drives the `claude` CLI subprocess via `framework/claude_sdk/`.
+- **No Python.** Zig drives the `claude` CLI subprocess via `framework/assistant/claude_sdk/`.
 - **No external tool server.** Claude Code's built-in tools (`Bash`, `Read`, `Edit`, `Grep`, `Glob`) are scoped via `allowed_tools` and confined by the session's `cwd`.
-- **No notebook loop.** The cart drives the agent with `__claude_init` / `__claude_send` / `__claude_poll`, polled once per frame from the React reconciler.
+- **No notebook loop.** The cart drives the agent through the `useAssistant({ backend: 'claude_code' })` hook, reading the normalized `WorkerEvent` stream from the hook's `events` array.
 
 The SRE incident pattern (investigate → diagnose → remediate → write post-mortem) is preserved. The plumbing changes.
 
@@ -15,28 +15,29 @@ The SRE incident pattern (investigate → diagnose → remediate → write post-
 
 | Anthropic recipe | ReactJIT equivalent |
 |---|---|
-| `claude-agent-sdk` (Python) | `framework/claude_sdk/` (Zig, stream-json subprocess) |
-| `query()` async generator | `Session.poll()` non-blocking, called per frame |
-| `ClaudeAgentOptions` | `claude_sdk.SessionOptions` (`framework/claude_sdk/options.zig`) |
+| `claude-agent-sdk` (Python) | `framework/assistant/claude_sdk/` (Zig, stream-json subprocess) |
+| `query()` async generator | `useAssistant().events` array (reactive, append-only) |
+| `ClaudeAgentOptions` | `claude_sdk.SessionOptions` (`framework/assistant/claude_sdk/options.zig`) |
 | `mcp_servers={...}` | **Dropped.** Built-in tools only, scoped by `allowed_tools` |
 | `allowed_tools=["mcp__sre__..."]` | `allowed_tools = &.{ "Bash", "Read", "Edit", "Grep" }` |
 | `permission_mode="acceptEdits"` | `permission_mode = .accept_edits` |
 | `system_prompt="..."` | `system_prompt = "..."` (same name, same role) |
-| `model="claude-opus-4-6"` | `model = "claude-opus-4-6"` |
+| `model="claude-opus-4-7"` | `model: 'claude-opus-4-7'` in the useAssistant opts |
 | PreToolUse hooks | Not implemented in this SDK yet — gap, see §Gaps |
-| Python notebook driver | Cart `index.tsx` polling loop |
-| Anthropic Python SDK message types | `claude_sdk.Message` union: `system` / `assistant` / `user` / `result` |
-| `AssistantMessage.content[]` blocks | `ContentBlock` union: `text` / `thinking` / `tool_use` |
+| Python notebook driver | Cart `index.tsx` mounting useAssistant |
+| Anthropic Python SDK message types | `WorkerEvent` union from `runtime/hooks/useAssistant.ts` |
+| `AssistantMessage.content[]` blocks | `WorkerEvent.kind`: `assistant_message` / `reasoning` / `tool_call` |
 
 ## What sits where in this repo
 
-- `framework/claude_sdk/mod.zig` — public surface: `Session`, `SessionOptions`, `Message`, `ContentBlock`, `OwnedMessage`, `PermissionMode`.
-- `framework/claude_sdk/session.zig` — `init()` spawns `claude --input-format stream-json --output-format stream-json --verbose`. `send()` writes a user-turn NDJSON line to stdin. `poll()` does a non-blocking `posix.read` from the O_NONBLOCK stdout, drains complete JSON lines through the parser, returns one `OwnedMessage` per call (or `null` if no line is ready).
-- `framework/claude_sdk/options.zig` — the typed config. The fields the SRE recipe needs are already there: `system_prompt`, `allowed_tools`, `disallowed_tools`, `permission_mode`, `model`, `max_turns`, `cwd`, `add_dirs`.
-- `framework/claude_sdk/argv.zig` — translates options to CLI flags: `--system-prompt`, `--allowedTools`, `--permission-mode`, `--dangerously-skip-permissions`, `--max-turns`, `--resume`, `--add-dir`. The `--mcp-config` flag is **not** wired (MCP was deferred).
-- `framework/claude_sdk/types.zig` — `Message`, `ContentBlock` (text / thinking / tool_use), `Usage`, `ResultMsg` with cost and duration.
-- `framework/v8_bindings_sdk.zig` — exposes the session to JS as four host functions: `__claude_init(cwd, model?, resumeId?)`, `__claude_send(text)`, `__claude_poll() → message | undefined`, `__claude_close()`. There is exactly one `g_claude_session` global; the bridge is single-session.
-- `cart/cockpit/index.tsx` and `cart/sweatshop/index.tsx` — existing carts that drive the polling pattern. Copy from them.
+- `framework/assistant/claude_sdk/mod.zig` — public surface: `Session`, `SessionOptions`, `Message`, `ContentBlock`, `OwnedMessage`, `PermissionMode`.
+- `framework/assistant/claude_sdk/session.zig` — `init()` spawns `claude --input-format stream-json --output-format stream-json --verbose`. `send()` writes a user-turn NDJSON line to stdin. `poll()` does a non-blocking `posix.read` from the O_NONBLOCK stdout, drains complete JSON lines through the parser, returns one `OwnedMessage` per call (or `null` if no line is ready).
+- `framework/assistant/claude_sdk/options.zig` — the typed config. The fields the SRE recipe needs are already there: `system_prompt`, `allowed_tools`, `disallowed_tools`, `permission_mode`, `model`, `max_turns`, `cwd`, `add_dirs`.
+- `framework/assistant/claude_sdk/argv.zig` — translates options to CLI flags: `--system-prompt`, `--allowedTools`, `--permission-mode`, `--dangerously-skip-permissions`, `--max-turns`, `--resume`, `--add-dir`. The `--mcp-config` flag is **not** wired (MCP was deferred).
+- `framework/assistant/claude_sdk/types.zig` — `Message`, `ContentBlock` (text / thinking / tool_use), `Usage`, `ResultMsg` with cost and duration.
+- `framework/assistant/worker_bindings.zig` — V8 host fns `__worker_start` / `_send` / `_poll` / `_respond` / `_set_tools` / `_close` — the bridge `useAssistant` calls.
+- `framework/assistant/worker_contract.zig` — normalized `WorkerEvent` emission: every backend funnels into the same event union.
+- `runtime/hooks/useAssistant.ts` — React-side surface: opts in, `{ events, ask, phase, ready, close }` out.
 
 ## Step 0: pick a workspace cwd
 
@@ -71,6 +72,8 @@ const allowed: []const []const u8 = &.{ "Bash", "Read", "Edit", "Grep" };
 const disallowed: []const []const u8 = &.{ "Write", "WebFetch", "WebSearch" };
 ```
 
+These fields aren't yet plumbed through the worker opts JSON for `claude_code` — see §Gaps. Carts that need full tool scoping drop to Zig.
+
 ## Step 2: write the system prompt
 
 Same shape as the original. The cart pattern is one prompt, no skills.
@@ -97,16 +100,16 @@ Investigation methodology lives in the system prompt. Tool descriptions for `Bas
 
 ## Step 3: drive a session from Zig
 
-For a one-shot binary (e.g. a flight-check tool, or the dev-shell sub-command), call `claude_sdk.Session` directly. Same shape as `cart/sweatshop` but without the React polling — a tight `while (try sess.poll()) |*owned|` loop.
+For a one-shot binary (e.g. a flight-check tool, or the dev-shell sub-command), call `claude_sdk.Session` directly. Same shape as `cart/sweatshop` but without React — a tight `while (try sess.poll()) |*owned|` loop.
 
 ```zig
 const std = @import("std");
-const claude_sdk = @import("framework/claude_sdk/mod.zig");
+const claude_sdk = @import("framework/assistant/claude_sdk/mod.zig");
 
 pub fn runIncident(allocator: std.mem.Allocator) !void {
     var sess = try claude_sdk.Session.init(allocator, .{
         .cwd = "/home/you/sre-workspace",
-        .model = "claude-opus-4-6",
+        .model = "claude-opus-4-7",
         .system_prompt = SYSTEM_PROMPT,
         .allowed_tools = &.{ "Bash", "Read", "Edit", "Grep" },
         .disallowed_tools = &.{ "Write", "WebFetch", "WebSearch" },
@@ -157,55 +160,50 @@ A second `sess.send(...)` after the result message kicks off the remediation pha
 
 ## Step 4: drive a session from a cart
 
-Carts don't open a `claude_sdk.Session` directly; they go through the four host functions in `framework/v8_bindings_sdk.zig`. Pattern lifted from `cart/cockpit/index.tsx`.
+Carts mount `useAssistant`; the hook owns the worker, send queue, and event drain. Read the events array and reduce it into whatever shape your UI wants.
 
 ```tsx
-const claude_init  = (host as any).__claude_init  as (cwd: string, model?: string, resumeId?: string) => boolean;
-const claude_send  = (host as any).__claude_send  as (text: string) => boolean;
-const claude_poll  = (host as any).__claude_poll  as () => null | ClaudeMessage;
-const claude_close = (host as any).__claude_close as () => void;
+import { useEffect, useMemo } from 'react';
+import { useAssistant, WorkerEvent } from '@reactjit/runtime/hooks/useAssistant';
+import { Col, Pressable, ScrollView, Text } from '@reactjit/runtime/primitives';
 
-type ClaudeMessage =
-  | { type: "system";    session_id: string; tools?: string[] }
-  | { type: "assistant"; content: ContentBlock[] }
-  | { type: "user";      content_json: string }
-  | { type: "result";    is_error: boolean; total_cost_usd: number; num_turns: number };
+const INCIDENT_PROMPT =
+  "Reports of API errors and timeouts. Investigate thoroughly:\n" +
+  "- service health and error rates (Prometheus on localhost:9090)\n" +
+  "- DB connections and latency\n" +
+  "- container logs for errors\n" +
+  "- config files for misconfigurations\n" +
+  "Identify the root cause. Do NOT apply any fixes yet.";
 
-type ContentBlock =
-  | { type: "text"; text: string }
-  | { type: "thinking"; thinking: string }
-  | { type: "tool_use"; id: string; name: string; input_json: string };
-
-function SreCart() {
-  const [log, setLog] = useState<string[]>([]);
-  const initedRef = useRef(false);
-
-  useEffect(() => {
-    if (initedRef.current) return;
-    initedRef.current = true;
-    claude_init("/home/you/sre-workspace", "claude-opus-4-6");
-    return () => claude_close();
-  }, []);
-
-  useFrame(() => {
-    let drained = 0;
-    while (drained++ < 8) {
-      const msg = claude_poll();
-      if (!msg) break;
-      if (msg.type === "assistant") {
-        for (const block of msg.content) {
-          if (block.type === "text") setLog(l => [...l, block.text]);
-          if (block.type === "tool_use") setLog(l => [...l, `[${block.name}]`]);
-        }
-      } else if (msg.type === "result") {
-        setLog(l => [...l, `done — $${msg.total_cost_usd.toFixed(4)}, ${msg.num_turns} turns`]);
-      }
+function reduceLog(events: WorkerEvent[]): string[] {
+  const out: string[] = [];
+  for (const ev of events) {
+    if (ev.kind === 'assistant_message' && ev.text) out.push(ev.text);
+    else if (ev.kind === 'tool_call' && ev.payload_json) {
+      try {
+        const parsed = JSON.parse(ev.payload_json);
+        out.push(`[${parsed?.name ?? '?'}]`);
+      } catch {}
+    } else if (ev.kind === 'completion') {
+      const cost = ev.cost_usd_delta ?? 0;
+      out.push(`done — $${cost.toFixed(4)}`);
     }
+  }
+  return out;
+}
+
+export default function SreCart() {
+  const { events, ask, ready } = useAssistant({
+    backend: 'claude_code',
+    cwd: '/home/you/sre-workspace',
+    model: 'claude-opus-4-7',
   });
+
+  const log = useMemo(() => reduceLog(events), [events]);
 
   return (
     <Col>
-      <Pressable onPress={() => claude_send(INCIDENT_PROMPT)}>
+      <Pressable onPress={() => ready() && ask(INCIDENT_PROMPT)}>
         <Text>Investigate</Text>
       </Pressable>
       <ScrollView>
@@ -216,9 +214,7 @@ function SreCart() {
 }
 ```
 
-`useFrame` is a per-frame hook (cart code uses `setInterval` or the frame-effect primitive depending on cart). Eight events drained per frame keeps the loop responsive without starving the React reconciler. For a real cart, batch the `setLog` updates so streaming text doesn't trigger one reconcile per token.
-
-The `system_prompt` and `allowed_tools` are not yet exposed through the JS bridge — see §Gaps.
+The hook handles the per-frame poll, batching, and teardown. There's no `setInterval`, no manual draining — events arrive in `events` as the worker reports them. `systemPrompt` and `allowed_tools` aren't yet exposed through the worker opts JSON for `claude_code` — see §Gaps.
 
 ## Step 5: the incident — DB pool exhaustion
 
@@ -242,7 +238,7 @@ The agent will autonomously chain `Bash` (curl Prometheus), `Bash` (docker-compo
 
 ## Step 6: remediate
 
-Same session, second `send()`:
+Same `useAssistant` mount, second `ask()`:
 
 ```text
 Based on your investigation, the root cause is DB_POOL_SIZE=1 in config/api-server.env.
@@ -254,23 +250,23 @@ Based on your investigation, the root cause is DB_POOL_SIZE=1 in config/api-serv
 
 `permission_mode = .accept_edits` lets the `Edit` tool fire without an interactive prompt. Without it, the CLI would ask the user to confirm — fine for an interactive cart, fatal for a headless run.
 
-## Gaps in `framework/claude_sdk/` relative to the original recipe
+## Gaps in `framework/assistant/` relative to the original recipe
 
 These are deliberate omissions to keep MCP out, but they are also real gaps if/when we want to push the recipe further:
 
 1. **No PreToolUse hooks.** The Python recipe blocks unsafe `DB_POOL_SIZE` values via a shell hook. We'd need to add a `hooks` field to `SessionOptions` and emit `--settings <json>` in `argv.zig`. Today the only guardrails are `cwd`, `allowed_tools`, and `disallowed_tools`.
-2. **Single-session JS bridge.** `framework/v8_bindings_sdk.zig` keeps one `g_claude_session`. Two simultaneous incident agents would require a session map.
-3. **No `system_prompt` / `allowed_tools` over the bridge.** `__claude_init` only takes `cwd` / `model` / `resumeId`. To match the recipe from a cart we either (a) extend `__claude_init` to accept the full `SessionOptions`, or (b) drive sessions from Zig and surface an FFI for cart UIs that's higher-level than raw poll.
-4. **Tool input is opaque on the JS side.** `ToolUseBlock.input_json` is the raw JSON string; the cart has to `JSON.parse` it. Acceptable, but a parsed shape would be friendlier.
-5. **No structured "tool result back to model" path from cart code.** The agent's `Bash` / `Read` / `Edit` already round-trip through the CLI, so for the SRE flow this is fine. It only matters if we want to add custom in-cart tools later — at which point we'd resurrect a slim, in-process tool dispatch (still no MCP, just a callback registry the parser hands `tool_use` blocks to before the next turn).
+2. **Worker opts for `claude_code` don't accept `allowed_tools` / `disallowed_tools` / `systemPrompt` yet.** The fields exist in `claude_sdk/options.zig` — wire them through `framework/assistant/worker_bindings.zig`.
+3. **Two simultaneous incident agents work** — `useAssistant` gives each mount its own worker — but they don't share state. Cross-coordination needs an explicit shared store.
+4. **`tool_call` payload is backend-shaped.** The cart parses `payload_json` to inspect the tool name + arguments (and the inner `input` may itself be a JSON string). Acceptable, but a parsed shape would be friendlier.
+5. **No structured "tool result back to model" path from cart code.** The agent's `Bash` / `Read` / `Edit` already round-trip through the CLI, so for the SRE flow this is fine. It only matters if we want to add custom in-cart tools later — at which point we'd resurrect a slim, in-process tool dispatch (still no MCP, just a callback registry the parser hands `tool_use` blocks to before the next turn). The hook already exposes `respond(requestId, payload)` for this future path.
 
 These are all small wires. The runtime pass we promised in the original handoff is where they get filled in.
 
 ## What to take from this
 
 - The original SRE recipe is a 12-tool MCP contraption because Python didn't give it built-ins; ours doesn't need that — Claude Code already ships `Bash`/`Read`/`Edit`/`Grep`, and they are enough for the SRE loop.
-- Safety = `cwd` + `allowed_tools` + `disallowed_tools` + `permission_mode`, all already in `framework/claude_sdk/options.zig`.
-- The agentic loop = `Session.poll()` per frame from the cart, exactly the existing `cart/cockpit` pattern.
+- Safety = `cwd` + `allowed_tools` + `disallowed_tools` + `permission_mode`, all already in `framework/assistant/claude_sdk/options.zig`.
+- The agentic loop = the `useAssistant` events array, exactly the pattern the other recipes use.
 - Investigation methodology lives in the system prompt; tool descriptions don't need to be rewritten because we're using the built-ins.
 
-Next pass: extend the JS bridge and `SessionOptions` so a cart can declare the full SRE configuration without dropping to Zig.
+Next pass: extend the worker opts JSON and surface the missing fields so a cart can declare the full SRE configuration without dropping to Zig.

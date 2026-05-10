@@ -29,8 +29,8 @@ type SNode = {
   text?: string;
   bg?: string;
   color?: string;
-  width?: number;
-  height?: number;
+  width?: number | string;
+  height?: number | string;
   padding?: number;
   gap?: number;
   flexDirection?: 'row' | 'column';
@@ -120,7 +120,10 @@ function defaultPage(index: number): SNode {
 
 function nextPagePosition(pages: SNode[]): { x: number; y: number } {
   if (!pages.length) return { x: 80, y: 80 };
-  const right = pages.reduce((max, page) => Math.max(max, (page.x || 0) + (page.width || 320)), 0);
+  const right = pages.reduce((max, page) => {
+    const pageWidth = typeof page.width === 'number' ? page.width : 320;
+    return Math.max(max, (page.x || 0) + pageWidth);
+  }, 0);
   return { x: right + 80, y: 80 };
 }
 
@@ -202,11 +205,22 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
+// Property-panel size parser: accepts plain numbers ("220") and percent
+// strings ("100%", "50.5%"). Anything else returns undefined and the
+// edit is dropped.
+function parseSizeInput(value: string): number | string | undefined {
+  const trimmed = value.trim();
+  if (trimmed === '') return undefined;
+  if (/^\d+(\.\d+)?%$/.test(trimmed)) return trimmed;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function maxSizeIn(parent: SNode | null): { width?: number; height?: number } {
   if (!parent) return {};
   return {
-    width: parent.width != null ? Math.max(1, parent.width - (parent.padding || 0) * 2) : undefined,
-    height: parent.height != null ? Math.max(1, parent.height - (parent.padding || 0) * 2) : undefined,
+    width: typeof parent.width === 'number' ? Math.max(1, parent.width - (parent.padding || 0) * 2) : undefined,
+    height: typeof parent.height === 'number' ? Math.max(1, parent.height - (parent.padding || 0) * 2) : undefined,
   };
 }
 
@@ -276,10 +290,12 @@ function ensureUniqueIds(nodes: SNode[], seen = new Set<string>()): SNode[] {
     const nextNode: SNode = { ...node, id, children: ensureUniqueIds(nextChildren, seen) };
     if (node.kind === 'GalleryAtom') {
       const minimumHeight = galleryTemplateHeight(node.galleryId || node.shapeId || 'gallery-atom', Boolean(node.shapeId));
+      const numericHeight = typeof node.height === 'number' ? node.height : 0;
       if (upgradedGalleryChildren || node.height === 112 || node.height === 148) {
-        nextNode.height = Math.max(node.height || 0, minimumHeight);
+        nextNode.height = Math.max(numericHeight, minimumHeight);
       }
-      if (!node.width || node.width < 200) nextNode.width = node.shapeId ? 260 : 240;
+      const numericWidth = typeof node.width === 'number' ? node.width : 0;
+      if (!numericWidth || numericWidth < 200) nextNode.width = node.shapeId ? 260 : 240;
     }
     return nextNode;
   });
@@ -979,6 +995,11 @@ function ComposerPageInner() {
     const parsed = Number(value);
     if (Number.isFinite(parsed)) patchSelected({ [key]: parsed } as Partial<SNode>);
   };
+  const patchSelectedSize = (key: 'width' | 'height', value: string) => {
+    const parsed = parseSizeInput(value);
+    if (parsed === undefined) return;
+    patchSelected({ [key]: parsed } as Partial<SNode>);
+  };
   const alignSelected = (alignH: Align, alignV: Align) => patchSelected({ alignH, alignV });
   const addAtom = (atom: PaletteAtom) => updateDoc((current) => {
     if (atom.kind === 'primitive') return addToSelectionTarget(current, primitiveNode(atom.id as 'Box' | 'Text' | 'Pressable'));
@@ -1181,7 +1202,7 @@ function ComposerPageInner() {
           <Box style={{ flexGrow: 1, minWidth: 0, minHeight: 0, backgroundColor: 'theme:bg' }}>
             <Canvas
               style={{ width: '100%', height: '100%', backgroundColor: 'theme:bg' }}
-              gridStep={16}
+              gridStep={40}
               gridStroke={1}
               gridColor="theme:gridDot"
               gridMajorColor="theme:gridDotStrong"
@@ -1282,8 +1303,8 @@ function ComposerPageInner() {
                       ) : null}
                       <PropertyLabel label="Size" value={`${selected.width || '-'} x ${selected.height || '-'}`} />
                       <S.InlineX3>
-                        <FieldInput onFocus={focusInput} onBlur={blurInput} compact value={String(selected.width || '')} onChange={(value) => patchSelectedNumber('width', value)} placeholder="width" />
-                        <FieldInput onFocus={focusInput} onBlur={blurInput} compact value={String(selected.height || '')} onChange={(value) => patchSelectedNumber('height', value)} placeholder="height" />
+                        <FieldInput onFocus={focusInput} onBlur={blurInput} compact value={String(selected.width ?? '')} onChange={(value) => patchSelectedSize('width', value)} placeholder="width" />
+                        <FieldInput onFocus={focusInput} onBlur={blurInput} compact value={String(selected.height ?? '')} onChange={(value) => patchSelectedSize('height', value)} placeholder="height" />
                       </S.InlineX3>
                       {selected.kind === 'Page' ? (
                         <>

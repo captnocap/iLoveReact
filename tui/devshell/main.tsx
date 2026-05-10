@@ -1,15 +1,5 @@
-// scripts/devshell entry point. Wires the tui host + Shell + cart arg.
+// scripts/devshell entry. tui/entry.tsx already does enter/startInput/mount —
+// the cart just needs a default-exported component. Shell self-bootstraps
+// (reads argv for the cart label, owns its own keybindings).
 
-import '../v8-preamble.js';
-import { createElement } from 'react';
-import { enter, leave, render, startInput } from '../host';
-import { Shell } from './Shell';
-
-declare const __runEventLoop: (done?: () => void) => void;
-
-const cart = (process.argv[1] || '<no cart>');
-
-enter();
-startInput();
-render(createElement(Shell, { cart }));
-__runEventLoop(() => { leave(); process.exit(0); });
+export { default } from './Shell';

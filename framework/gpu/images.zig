@@ -10,7 +10,7 @@ const std = @import("std");
 const wgpu = @import("wgpu");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
-const log = @import("../log.zig");
+const log = @import("../diag/log.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Types
@@ -95,6 +95,11 @@ fn queueQuadInternal(x: f32, y: f32, w: f32, h: f32, opacity: f32, bind_group: *
 /// Get the bind group layout for creating per-image bind groups.
 pub fn getBindGroupLayout() ?*wgpu.BindGroupLayout {
     return g_bind_group_layout;
+}
+
+/// Forward to gpu.gpu.zig — 3D pipeline needs StaticSurface textures.
+pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
+    return core.staticSurfaceBindGroup3D(key);
 }
 
 /// Create a bind group for a specific image texture.

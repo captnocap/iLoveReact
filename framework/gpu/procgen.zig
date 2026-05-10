@@ -8,7 +8,7 @@
 //! Perlin noise terrain, cross-section branch geometry).
 
 const std = @import("std");
-const math = @import("../math.zig");
+const math = @import("../math/root.zig");
 
 // Must match 3d.zig Vertex layout exactly
 pub const Vertex = extern struct {
@@ -51,7 +51,7 @@ pub fn generateCone(radius: f32, height: f32, segments: u32) u32 {
         const s2 = @sin(a2);
         if (idx + 6 > MAX_VERTS) break;
         // Side triangle (apex at top)
-        const slope = radius / @sqrt(radius * radius + height * height);
+        const slope = radius / math.length2(radius, height);
         const ny = slope;
         const nscale = @sqrt(1.0 - ny * ny);
         addVert(&geo_buf, &idx, 0, hy, 0, (c1 + c2) * 0.5 * nscale, ny, (s1 + s2) * 0.5 * nscale, 0.5, 0);
@@ -243,7 +243,7 @@ pub fn generateTerrain(
 }
 
 fn normalize3(v: [3]f32) [3]f32 {
-    const len = @sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    const len = math.length3(v[0], v[1], v[2]);
     if (len < 0.0001) return .{ 0, 1, 0 };
     return .{ v[0] / len, v[1] / len, v[2] / len };
 }

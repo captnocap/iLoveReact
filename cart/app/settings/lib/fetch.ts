@@ -276,6 +276,14 @@ export async function fetchModelsFor(conn: any): Promise<FetchResult> {
   if (kind === 'claude-code-cli') {
     return fetchClaudeCodeModels(id, cr.locator || '~/.claude/');
   }
+  if (kind === 'codex-cli') {
+    // The `codex` CLI doesn't expose a "list models" endpoint — the active
+    // model is set in `~/.codex/config.toml` and surfaced through the
+    // app-server's `agent.session.start` response. The cart's model picker
+    // renders the static Codex roster from modelRegistry.ts directly, so
+    // this fetch is intentionally a no-op success.
+    return { ok: true, message: 'Codex models surface from the static registry — no fetch needed.', rows: [] };
+  }
   if (kind === 'local-runtime') {
     return fetchLocalGgufs(id, cr.locator || '');
   }

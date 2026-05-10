@@ -6,18 +6,21 @@ import { classifiers as S } from '@reactjit/core';
 
 export type BipolarSliderProps = {
   value?: number;
+  defaultValue?: number;
   width?: number;
   label?: string;
   onChange?: (next: number) => void;
 };
 
 export function BipolarSlider({
-  value = 65,
+  value,
+  defaultValue = 65,
   width = 240,
   label = 'OFFSET',
   onChange,
 }: BipolarSliderProps) {
-  const [current, setCurrent] = useControllableNumberState({ value, defaultValue: value, onChange });
+  // Don't default `value` in the signature — see RotaryKnob for the why.
+  const [current, setCurrent] = useControllableNumberState({ value, defaultValue, onChange });
   const center = 0.5;
   const trackWidth = Math.max(0, width - 20);
   const drag = useHorizontalPercentDrag(current, setCurrent, trackWidth);

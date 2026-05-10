@@ -2,7 +2,7 @@ Giving Claude a Crop Tool for Better Image Analysis
 
 When Claude analyzes images, it sees the entire image at once. For detailed tasks — reading small text, comparing similar values in a chart, examining fine details — that's limiting.
 
-The fix: let Claude "zoom in" by cropping regions of interest. In our stack we don't define a custom `crop_image` tool over MCP. We drive Claude Code as a subprocess and lean on the built-in `Read` + `Bash` tools. Claude reads the source image, shells out to `python3` + PIL (or `convert`) to write a cropped PNG, then reads that file.
+The fix: let Claude "zoom in" by cropping regions of interest. In our stack we don't define a custom `crop_image` tool over MCP. We drive Claude Code as a subprocess (via `useAssistant({ backend: 'claude_code' })`) and lean on the built-in `Read` + `Bash` tools. Claude reads the source image, shells out to `python3` + PIL (or `convert`) to write a cropped PNG, then reads that file.
 
 ## When is a crop tool useful?
 
@@ -14,94 +14,72 @@ The fix: let Claude "zoom in" by cropping regions of interest. In our stack we d
 ## Architecture (this repo)
 
 ```text
-.tsx cart  ── globals ──>  framework/v8_bindings_sdk.zig
-                            │
-                            └─ framework/claude_sdk/Session
-                                  └─ subprocess: `claude --input-format stream-json`
+.tsx cart  ── useAssistant ──>  framework/assistant/worker_bindings.zig
+                                  │
+                                  └─ framework/assistant/claude_sdk/Session
+                                        └─ subprocess: `claude --input-format stream-json`
 ```
 
-The cart speaks to V8 globals only. The bindings own one `g_claude_session` (single global session) and convert each stream-json message into a plain JS object.
+The cart speaks to one hook (`useAssistant`); the hook owns one worker per mount and converts each stream-json message into a normalized `WorkerEvent` you read off the events array.
 
-## The four globals
+## The hook surface
 
-`framework/v8_bindings_sdk.zig` exposes:
+`runtime/hooks/useAssistant.ts` exposes:
 
 ```typescript
-declare global {
-  // Returns true if the session was created (or already exists).
-  function __claude_init(cwd: string, model?: string, resumeSession?: string): boolean;
+import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
 
-  // Queue a user turn. Returns true if queued.
-  function __claude_send(text: string): boolean;
-
-  // Drain at most one parsed event from the subprocess. Returns undefined if
-  // nothing is ready. Call once per frame from the GUI loop.
-  function __claude_poll(): ClaudeMessage | undefined;
-
-  // Tear the session down. Idempotent.
-  function __claude_close(): void;
-}
+const {
+  events,    // append-only WorkerEvent[] timeline; reactive
+  ask,       // (text: string) => boolean — queue a user turn
+  phase,     // 'init' | 'starting' | 'idle' | 'streaming' | 'failed' | 'closed'
+  ready,     // () => boolean — true once worker has spawned
+  close,     // () => void — manual teardown; the hook also tears down on unmount
+  workerId,  // backend-assigned worker id (debug-only)
+  error,     // last error string, if any
+} = useAssistant({ backend: 'claude_code', cwd, model });
 ```
 
-Hardcoded defaults inside `hostClaudeInit` (`framework/v8_bindings_sdk.zig:932`):
+Hardcoded defaults inside the Claude branch of the worker today:
 
 - `permission_mode = bypass_permissions` — no prompts, all tools auto-approved.
 - `verbose = true`, `inherit_stderr = true`.
 - `allowed_tools` is **not** plumbed through yet. The session inherits Claude Code's default tool set (Read, Bash, Edit, Glob, Grep, etc.). For now you sandbox by choice of `cwd`, not by tool whitelisting.
 
-## Message shape from `__claude_poll`
+## WorkerEvent shape (relevant kinds)
 
 ```typescript
-type ClaudeMessage =
-  | { type: 'system'; session_id: string; model?: string; cwd?: string; tools: string[] }
-  | {
-      type: 'assistant';
-      id?: string; session_id?: string; stop_reason?: string;
-      input_tokens: number; output_tokens: number;
-      content: Array<
-        | { type: 'text'; text: string }
-        | { type: 'thinking'; thinking: string }
-        | { type: 'tool_use'; id: string; name: string; input_json: string }
-      >;
-      text?: string;        // joined text blocks for convenience
-      thinking?: string;    // joined thinking blocks
-    }
-  | { type: 'user'; session_id?: string; content_json: string }
-  | {
-      type: 'result';
-      subtype: string; session_id: string; result?: string;
-      total_cost_usd: number; duration_ms: number;
-      num_turns: number; is_error: boolean;
-    };
+// from runtime/hooks/useAssistant.ts
+interface WorkerEvent {
+  id: number;
+  worker_id: string;
+  session_id: string;
+  backend: 'claude_code' | 'codex_app_server' | 'kimi_cli_wire' | 'local_ai' | 'openai_compat';
+  kind:
+    | 'assistant_message'   // text chunks from the model
+    | 'reasoning'           // thinking/scratch text
+    | 'tool_call'           // model invoked a tool — payload_json carries name+args
+    | 'tool_output'         // tool returned — payload_json carries result
+    | 'usage' | 'completion' | 'error_'
+    | 'lifecycle' | 'context_switch' | 'status' | 'user_message' | 'raw';
+  text?: string;
+  payload_json?: string;    // backend-shaped JSON for tool_call / raw events
+  cost_usd_delta?: number;
+  usage?: { input_tokens; output_tokens; cache_creation_input_tokens; cache_read_input_tokens };
+}
 ```
 
-Note `tool_use.input_json` is a **string** — the bindings don't pre-parse tool input. Use `JSON.parse` if you need fields.
+`payload_json` on a `tool_call` event holds something like:
 
-## Cart-side FFI shims
-
-Match the canonical pattern from `cart/sweatshop/index.tsx:4`:
-
-```typescript
-const host: any = globalThis;
-const claude_init  = typeof host.__claude_init  === 'function'
-  ? host.__claude_init
-  : (_a: string, _b: string, _c?: string) => 0;
-const claude_send  = typeof host.__claude_send  === 'function'
-  ? host.__claude_send
-  : (_: string) => 0;
-const claude_poll  = typeof host.__claude_poll  === 'function'
-  ? host.__claude_poll
-  : () => null;
-const claude_close = typeof host.__claude_close === 'function'
-  ? host.__claude_close
-  : () => {};
+```json
+{ "name": "Read", "input": "{\"file_path\":\"chart.png\"}", "id": "..." }
 ```
 
-The fallbacks let the cart compile and run under a host that hasn't wired the bindings (e.g. the dev playground without a real `claude` binary on PATH).
+`JSON.parse` it before destructuring. Note that `input` may itself be a JSON string and need a second parse.
 
 ## Stage the chart on disk
 
-Claude needs a file path it can `Read`. Use `runtime/host` writeFile (or your local equivalent) to drop the source PNG into a workspace directory; then init the session with that directory as cwd:
+Claude needs a file path it can `Read`. Use `runtime/host` writeFile (or your local equivalent) to drop the source PNG into a workspace directory; then mount the hook with that directory as `cwd`:
 
 ```typescript
 import { writeFile } from './host';
@@ -149,94 +127,68 @@ Three things this prompt does:
 2. Hands over the exact crop one-liner so it doesn't burn turns inventing PIL syntax.
 3. Sets a normalized coordinate convention without any schema enforcement.
 
-## The polling loop
+## Reduce the events stream into a turn
 
-Drive `__claude_poll()` from a `setInterval` (or `requestAnimationFrame` if your host has one). For each event, route by `type`:
+The hook owns the worker, so all you do cart-side is read `events` and fold them into the shape your UI wants:
 
-```typescript
-type Turn = {
+```tsx
+import { useEffect, useMemo, useState } from 'react';
+import { Box, Col, Text } from '@reactjit/runtime/primitives';
+import { useAssistant, WorkerEvent } from '@reactjit/runtime/hooks/useAssistant';
+
+interface Turn {
   text: string;
   thinking: string;
   toolCalls: Array<{ name: string; input: unknown }>;
   done: boolean;
   cost: number;
-};
-
-function runTurn(workspace: string, model: string, prompt: string,
-                 onUpdate: (t: Turn) => void): () => void {
-  if (!claude_init(workspace, model)) {
-    onUpdate({ text: '[error] failed to start session', thinking: '',
-               toolCalls: [], done: true, cost: 0 });
-    return () => {};
-  }
-  if (!claude_send(prompt)) {
-    onUpdate({ text: '[error] failed to send', thinking: '',
-               toolCalls: [], done: true, cost: 0 });
-    claude_close();
-    return () => {};
-  }
-
-  const turn: Turn = { text: '', thinking: '', toolCalls: [], done: false, cost: 0 };
-  const handle = setInterval(() => {
-    const msg = claude_poll();
-    if (!msg) return;
-
-    if (msg.type === 'assistant') {
-      if (msg.text) turn.text += msg.text;
-      if (msg.thinking) turn.thinking += msg.thinking;
-      for (const block of msg.content ?? []) {
-        if (block.type === 'tool_use') {
-          let parsed: unknown = block.input_json;
-          try { parsed = JSON.parse(block.input_json); } catch {}
-          turn.toolCalls.push({ name: block.name, input: parsed });
-        }
-      }
-      onUpdate({ ...turn });
-    } else if (msg.type === 'result') {
-      turn.done = true;
-      turn.cost = msg.total_cost_usd ?? 0;
-      onUpdate({ ...turn });
-      clearInterval(handle);
-      claude_close();
-    }
-    // 'system' and 'user' events: ignore for this recipe.
-  }, 50);
-
-  return () => { clearInterval(handle); claude_close(); };
 }
-```
 
-Why `setInterval` and not blocking: `__claude_poll` is non-blocking by design (`framework/claude_sdk/mod.zig:1`). A 50ms tick keeps the UI responsive without flooding the bindings.
+function reduceTurn(events: WorkerEvent[]): Turn {
+  let text = '', thinking = '';
+  const toolCalls: Turn['toolCalls'] = [];
+  let done = false, cost = 0;
+  for (const ev of events) {
+    if (ev.kind === 'assistant_message' && ev.text) text += ev.text;
+    else if (ev.kind === 'reasoning' && ev.text)    thinking += ev.text;
+    else if (ev.kind === 'tool_call' && ev.payload_json) {
+      try {
+        const parsed = JSON.parse(ev.payload_json);
+        let input: unknown = parsed?.input;
+        if (typeof input === 'string') { try { input = JSON.parse(input); } catch {} }
+        toolCalls.push({ name: parsed?.name ?? '?', input });
+      } catch {}
+    }
+    else if (ev.kind === 'completion') {
+      done = true;
+      cost += ev.cost_usd_delta ?? 0;
+    }
+  }
+  return { text, thinking, toolCalls, done, cost };
+}
 
-## Putting it together in a cart
-
-```tsx
-import { useEffect, useState } from 'react';
-import { Box, Col, Pressable, Row, Text } from '@reactjit/runtime/primitives';
-
-export default function CropDemo({ workspace, chartPng, question }: Props) {
-  const [turn, setTurn] = useState<Turn>({
-    text: '', thinking: '', toolCalls: [], done: false, cost: 0,
-  });
+export default function CropDemo({ workspace, chartPng, question }: {
+  workspace: string; chartPng: Uint8Array; question: string;
+}) {
+  const [staged, setStaged] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const start = async () => {
-    try {
-      await stageImage(workspace, chartPng);
-      const stop = runTurn(workspace, 'claude-opus-4-6',
-                           buildPrompt(question), setTurn);
-      return stop;
-    } catch (err) {
-      setError(String(err));
-      return () => {};
-    }
-  };
+  useEffect(() => {
+    stageImage(workspace, chartPng).then(() => setStaged(true)).catch(e => setError(String(e)));
+  }, []);
+
+  const { events, ask, ready } = useAssistant({
+    backend: 'claude_code',
+    cwd: workspace,
+    model: 'claude-opus-4-7',
+  });
 
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    start().then(stop => { cleanup = stop; });
-    return () => { cleanup?.(); };
-  }, []);
+    if (!staged || !ready()) return;
+    ask(buildPrompt(question));
+  }, [staged, ready()]);
+
+  const turn = useMemo(() => reduceTurn(events), [events]);
 
   return (
     <Col className="p-4 gap-3">
@@ -254,6 +206,8 @@ export default function CropDemo({ workspace, chartPng, question }: Props) {
 }
 ```
 
+The hook handles spawn, polling, and teardown — there's no `setInterval`, no manual `__claude_poll` loop. Events arrive in `events` as the worker reports them.
+
 ## Demo: chart analysis
 
 Feed it a FigureQA-style question against a stored chart:
@@ -270,22 +224,22 @@ Yes — Cyan is the smallest slice in the pie chart, well under the next-smalles
 $0.0182
 ```
 
-Each `[name]` line is a `tool_use` event surfaced from `__claude_poll`. The text body is the joined `assistant.text` from successive turns.
+Each `[name]` line is a `tool_call` event surfaced through the events array. The text body is the joined `assistant_message.text` from successive events.
 
 ## Caveats and TODOs
 
-- **One session at a time.** `g_claude_session` is a module-level global in the bindings (`framework/v8_bindings_sdk.zig:24`). A second `__claude_init` while one is live no-ops and returns true; you'll multiplex the wrong cart's events.
-- **No `allowed_tools` from the cart.** Today the session inherits the default Claude Code toolset. Sandbox by choosing a cwd you're comfortable with the agent rooting around in. Add an opts struct to `hostClaudeInit` when this matters.
-- **No system-prompt override from the cart.** Anything system-prompty has to ride on the user message.
+- **One worker per `useAssistant` mount.** That's by design — for parallel sessions, mount two `<CropDemo>` instances. Each gets its own worker, session, and events stream.
+- **No `allowed_tools` from the cart.** Today the session inherits the default Claude Code toolset. Sandbox by choosing a cwd you're comfortable with the agent rooting around in. Add an opts field to the Claude branch of `framework/assistant/worker_bindings.zig` when this matters.
+- **No `systemPrompt` override from the cart for `claude_code`.** Anything system-prompty has to ride on the user message. (`openai_compat` already accepts `systemPrompt`.)
 - **Image input is via filesystem only.** No base64 image content blocks — Claude reads files. Always stage to `cwd` first.
-- **Tool input is a JSON string.** `tool_use.input_json` is unparsed. `JSON.parse` it before destructuring.
+- **`tool_call` payload is backend-shaped.** `payload_json` carries `{ name, input, id }` with `input` often itself a JSON string. `JSON.parse` twice if needed before destructuring.
 
 ## Pattern summary
 
 1. Stage the source image to a workspace dir.
-2. `__claude_init(cwd, model)` → start the subprocess.
-3. `__claude_send(prompt)` with the question + a "use Read+Bash to crop, then Read the crop" instruction.
-4. Drain `__claude_poll()` from a 50ms tick; route `assistant` text/tool_use to UI, stop on `result`.
-5. `__claude_close()` when done.
+2. Mount `useAssistant({ backend: 'claude_code', cwd, model })` — the hook owns the worker.
+3. `ask(prompt)` once `ready()` is true, with the question + a "use Read+Bash to crop, then Read the crop" instruction.
+4. Reduce the `events` array into your turn shape; `tool_call` events carry the Read/Bash invocations.
+5. `close()` / unmount when done; the hook tears the worker down automatically.
 
 This works because Claude can see the full image first, identify regions that need closer inspection, and iteratively zoom in — all using built-ins, no custom tool registration, no MCP.

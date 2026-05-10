@@ -1,6 +1,0 @@
-{
-  "name": "Manifest Gate",
-  "description": "Two-round line-manifest benchmark. Round-2 gate runs Gemma-4 through framework/local_ai_runtime.zig (libllama_ffi via Vulkan) and emits a TRUE/FALSE preamble per claim.",
-  "width": 1100,
-  "height": 760
-}

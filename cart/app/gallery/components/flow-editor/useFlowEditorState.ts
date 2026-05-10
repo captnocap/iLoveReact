@@ -78,17 +78,46 @@ export function useFlowEditorState(options: UseFlowEditorStateOptions = {}): Flo
 
   const tryAddEdge = useCallback((fromId: string, toId: string, fromPort?: string, toPort?: string, kind?: FlowPortKind) => {
     if (fromId === toId) return;
+    // Enforce rule shape at draw time: a rule needs a trigger (or
+    // domain token) pointing at an action. If the user drew it
+    // backwards (action → trigger), auto-flip. Anything else
+    // (trigger↔trigger, action↔action, unlabeled kinds) is rejected
+    // silently — the canvas should never show a connection that the
+    // code/prose pane can't honor.
+    const live = nodesRef.current;
+    const from = live.find((n) => n.id === fromId);
+    const to = live.find((n) => n.id === toId);
+    if (!from || !to) return;
+    const fk = (from.data as any)?.kind ?? '';
+    const tk = (to.data as any)?.kind ?? '';
+    const isTrigger = (k: string) => k === 'trigger' || k === 'token';
+    const isAction = (k: string) => k === 'action';
+    let resolvedFromId = fromId;
+    let resolvedToId = toId;
+    let resolvedFromPort = fromPort;
+    let resolvedToPort = toPort;
+    if (isTrigger(fk) && isAction(tk)) {
+      // canonical shape — keep as-is
+    } else if (isAction(fk) && isTrigger(tk)) {
+      // backwards — flip orientation so it lands as trigger → action
+      resolvedFromId = toId;
+      resolvedToId = fromId;
+      resolvedFromPort = toPort;
+      resolvedToPort = fromPort;
+    } else {
+      return;
+    }
     edgeCounterRef.current += 1;
     const id = `e${edgeCounterRef.current}_${Date.now().toString(36)}`;
     setEdges((prev) =>
       prev.some((e) => (
-        e.from === fromId
-        && e.to === toId
-        && (e.fromPort ?? '') === (fromPort ?? '')
-        && (e.toPort ?? '') === (toPort ?? '')
+        e.from === resolvedFromId
+        && e.to === resolvedToId
+        && (e.fromPort ?? '') === (resolvedFromPort ?? '')
+        && (e.toPort ?? '') === (resolvedToPort ?? '')
       ))
         ? prev
-        : [...prev, { id, from: fromId, to: toId, fromPort, toPort, kind }],
+        : [...prev, { id, from: resolvedFromId, to: resolvedToId, fromPort: resolvedFromPort, toPort: resolvedToPort, kind }],
     );
   }, []);
 

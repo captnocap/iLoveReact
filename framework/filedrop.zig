@@ -16,7 +16,7 @@
 //! order.
 
 const std = @import("std");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const layout = @import("layout.zig");
 const state = @import("state.zig");
 const Node = layout.Node;

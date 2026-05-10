@@ -16,38 +16,47 @@ where that claim cashes out in file paths.
 
 ## Working today
 
-### Agent SDKs (Zig, exposed as React hooks via V8 bindings)
+### Agent SDKs (Zig, exposed via the `useAssistant` React hook)
+
+All assistant code now lives under `framework/assistant/`. One hook
+(`runtime/hooks/useAssistant.ts`) drives every backend through the
+unified worker contract — pick a `backend` opt and the right SDK
+spins up underneath.
 
 - **Claude Code SDK** — non-blocking subprocess driver for the
   `claude` CLI in stream-json mode.
-  - `framework/claude_sdk/mod.zig` — public surface (`Session`,
-    `SessionOptions`, `Message`, `ContentBlock`, `OwnedMessage`,
-    `PermissionMode`).
-  - `framework/claude_sdk/session.zig` — `init()` / `send()` /
-    `interrupt()` / `poll()` / `close()` / `deinit()`.
-  - `framework/claude_sdk/options.zig` — typed config (`cwd`,
-    `model`, `system_prompt`, `allowed_tools`, `disallowed_tools`,
-    `permission_mode`, `max_turns`, `resume_session`, `add_dirs`).
-  - `framework/claude_sdk/argv.zig` — emits CLI flags. No
+  - `framework/assistant/claude_sdk/mod.zig` — public surface
+    (`Session`, `SessionOptions`, `Message`, `ContentBlock`,
+    `OwnedMessage`, `PermissionMode`).
+  - `framework/assistant/claude_sdk/session.zig` — `init()` /
+    `send()` / `interrupt()` / `poll()` / `close()` / `deinit()`.
+  - `framework/assistant/claude_sdk/options.zig` — typed config
+    (`cwd`, `model`, `system_prompt`, `allowed_tools`,
+    `disallowed_tools`, `permission_mode`, `max_turns`,
+    `resume_session`, `add_dirs`).
+  - `framework/assistant/claude_sdk/argv.zig` — emits CLI flags. No
     `--mcp-config`.
-  - `framework/claude_sdk/types.zig` — Message union (system /
-    assistant / user / result), ContentBlock variants, Usage,
-    ResultMsg with cost/duration.
-  - `framework/claude_sdk/parser.zig` + `buffer.zig` — stream-json
-    parsing.
-  - `framework/v8_bindings_sdk.zig` — JS bridge: registers the unified
-    `__worker_*` host fns through `worker_bindings.register()`. The old
-    `__claude_*` / `__kimi_*` / `__localai_*` fns were retired in favor
-    of the single contract.
-- **Codex agent SDK** — `framework/codex_sdk.zig`.
-- **Kimi wire SDK** — `framework/kimi_wire_sdk.zig`.
-- **OpenAI-compat HTTP SDK** — `framework/openai_compat_sdk.zig` (covers
-  OpenAI proper, OpenRouter, LMStudio, Ollama, NanoGPT — anything
-  speaking `/v1/chat/completions` with SSE).
-- **Unified worker contract** — `framework/worker_contract.zig`
+  - `framework/assistant/claude_sdk/types.zig` — Message union
+    (system / assistant / user / result), ContentBlock variants,
+    Usage, ResultMsg with cost/duration.
+  - `framework/assistant/claude_sdk/parser.zig` + `buffer.zig` —
+    stream-json parsing.
+- **Codex agent SDK** — `framework/assistant/codex_sdk.zig`.
+- **Kimi wire SDK** — `framework/assistant/kimi_wire_sdk.zig`.
+- **OpenAI-compat HTTP SDK** — `framework/assistant/openai_compat_sdk.zig`
+  (covers OpenAI proper, OpenRouter, LMStudio, Ollama, NanoGPT —
+  anything speaking `/v1/chat/completions` with SSE).
+- **Unified worker contract** — `framework/assistant/worker_contract.zig`
   (Backend enum + WorkerStore + ingest fns) and
-  `framework/worker_bindings.zig` (per-session worker threads, five
-  `__worker_*` host fns).
+  `framework/assistant/worker_bindings.zig` (per-session worker
+  threads, six `__worker_*` host fns: `_start`, `_send`, `_poll`,
+  `_respond`, `_set_tools`, `_close`). Per-backend `__claude_*` /
+  `__kimi_*` / `__localai_*` host fns were retired in favor of this
+  single contract.
+- **JS bridge** — `framework/assistant/v8_bindings_sdk.zig` registers
+  HTTP / browser / IPC / semantic surfaces; `worker_bindings.register()`
+  registers the agent host fns. `useAssistant` is the only cart-side
+  consumer carts should reach for.
 
 The carts at `cart/cockpit/index.tsx` and `cart/sweatshop/index.tsx`
 exist as existing carts that drive these SDKs as a working pattern
@@ -69,18 +78,21 @@ to copy from.
 
 ### Local model inference
 
-- `framework/llama_exports.zig` — llama.cpp embedded directly
-  (compiled in, not Ollama HTTP). Used for local model inference
-  and ready for embeddings work.
+- `framework/assistant/llama_exports.zig` — llama.cpp embedded
+  directly (compiled in, not Ollama HTTP). Used for local model
+  inference and ready for embeddings work. The async session
+  driver lives at `framework/assistant/local_ai_runtime.zig` and
+  is reached from carts via `useAssistant({ backend: 'local_ai',
+  modelPath, nCtx, maxTokens })`.
 - HTTP path to local LLM endpoints is also wired (LM Studio at
   `localhost:1234` in production for `auto-commit.sh`, etc.).
 
 ### Agentic tools (for non-Claude-Code-SDK users)
 
-- `framework/tool_framework.zig` + `framework/tools_builtin.zig` —
+- `framework/assistant/tool_framework.zig` + `framework/assistant/tools_builtin.zig` —
   tool execution tracking and the built-in tool set (Read, Edit,
   Write, Bash, Grep) for agents that don't ride the claude CLI.
-- `framework/api_types/tools.d.ts` + `agent.d.ts` — typed surface.
+- `framework/assistant/api_types/tools.d.ts` + `agent.d.ts` — typed surface.
 
 ### useIFTTT — full Claude Code hooks integration + system signals + clipboard
 

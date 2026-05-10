@@ -13,6 +13,7 @@ import { Icon } from '@reactjit/runtime/icons/Icon';
 import { ChevronDown, ChevronRight } from '@reactjit/runtime/icons/icons';
 import { Route, Router, useNavigate, useRoute } from './local-router';
 import { GalleryDisplayContainer } from './components/gallery-display-container/GalleryDisplayContainer';
+import { AuditPage } from './audit-page';
 import { ChartAnimationProvider } from './lib/useSpring';
 import { findGalleryThemeOption, useGalleryTheme } from './gallery-theme';
 import { gallerySections } from './registry';
@@ -3820,6 +3821,9 @@ function ComponentGalleryRoutes() {
       </Route>
       <Route path="/tokens">
         <ActiveComponentGalleryShell selection={null} />
+      </Route>
+      <Route path="/audit">
+        <AuditPage />
       </Route>
       <Route path="/">
         <ActiveComponentGalleryShell selection={null} />

@@ -2,7 +2,7 @@
 
 Most agents start every conversation from scratch. A customer tells your shopping assistant their size, budget, and which materials they avoid, and the next time they return, the agent has forgotten everything.
 
-The original Anthropic recipe solves this with the **Claude Managed Agents** beta — a cloud-hosted runtime where you create a `memory_store`, attach it to a `session`, and the agent reads/writes through `/mnt/memory/{store}`. We don't have that. `framework/claude_sdk/` drives the local `claude` CLI. The closest analog: **the session's `cwd` is the memory store.** Claude Code already has Read/Edit/Write/Glob, and a directory persists between session inits.
+The original Anthropic recipe solves this with the **Claude Managed Agents** beta — a cloud-hosted runtime where you create a `memory_store`, attach it to a `session`, and the agent reads/writes through `/mnt/memory/{store}`. We don't have that. `framework/assistant/claude_sdk/` drives the local `claude` CLI through the unified worker contract. The closest analog: **the session's `cwd` is the memory store.** Claude Code already has Read/Edit/Write/Glob, and a directory persists between session inits.
 
 This recipe rebuilds the shopping-assistant pattern around that reality.
 
@@ -16,10 +16,10 @@ This recipe rebuilds the shopping-assistant pattern around that reality.
 ## Architecture
 
 ```text
-.tsx cart  ── globals ──>  framework/v8_bindings_sdk.zig
-                            │
-                            └─ framework/claude_sdk/Session  (cwd = workspace/<customer-id>/)
-                                  └─ subprocess: `claude --input-format stream-json`
+.tsx cart  ── useAssistant ──>  framework/assistant/worker_bindings.zig
+                                  │
+                                  └─ framework/assistant/claude_sdk/Session  (cwd = workspace/<customer-id>/)
+                                        └─ subprocess: `claude --input-format stream-json`
 
 workspace/
 └── <customer-id>/
@@ -77,65 +77,57 @@ This instruction goes in front of every user turn (no `system_prompt` slot from 
 
 ## First visit: capture
 
-```typescript
-const host: any = globalThis;
-const claude_init  = typeof host.__claude_init  === 'function'
-  ? host.__claude_init  : (_a: string, _b: string, _c?: string) => 0;
-const claude_send  = typeof host.__claude_send  === 'function'
-  ? host.__claude_send  : (_: string) => 0;
-const claude_poll  = typeof host.__claude_poll  === 'function'
-  ? host.__claude_poll  : () => null;
-const claude_close = typeof host.__claude_close === 'function'
-  ? host.__claude_close : () => {};
+The `useAssistant` hook owns the worker lifecycle and exposes a normalized event stream. There are no per-backend host fns to wire up — pick a backend, pass it `cwd`, and read events.
 
-function askShopper(cwd: string, userMsg: string,
-                    onUpdate: (text: string, done: boolean) => void): () => void {
-  if (!claude_init(cwd, 'claude-sonnet-4-6')) {
-    onUpdate('[error] failed to start session', true);
-    return () => {};
-  }
-  const prompt = `${MEMORY_INSTRUCTION}\n\nCustomer: ${userMsg}`;
-  if (!claude_send(prompt)) {
-    claude_close();
-    onUpdate('[error] failed to send', true);
-    return () => {};
-  }
+```tsx
+import { useEffect, useMemo, useState } from 'react';
+import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
 
-  let text = '';
-  const handle = setInterval(() => {
-    const msg = claude_poll();
-    if (!msg) return;
-    if (msg.type === 'assistant' && msg.text) {
-      text += msg.text;
-      onUpdate(text, false);
-    } else if (msg.type === 'result') {
-      onUpdate(text, true);
-      clearInterval(handle);
-      claude_close();
-    }
-  }, 50);
+export function Shopper({ customerId, userMsg }: { customerId: string; userMsg: string }) {
+  const [cwd, setCwd] = useState<string | null>(null);
+  useEffect(() => { workspaceFor(customerId).then(setCwd); }, [customerId]);
 
-  return () => { clearInterval(handle); claude_close(); };
+  const { events, ask, phase, ready } = useAssistant({
+    backend: 'claude_code',
+    cwd: cwd ?? undefined,
+    model: 'claude-sonnet-4-6',
+  });
+
+  // Send the turn once the worker is ready and we have the user's message.
+  useEffect(() => {
+    if (!ready() || !userMsg) return;
+    ask(`${MEMORY_INSTRUCTION}\n\nCustomer: ${userMsg}`);
+  }, [ready(), userMsg]);
+
+  // Derive streaming text + completion from the event timeline.
+  const text = useMemo(
+    () => events.filter(e => e.kind === 'assistant_message').map(e => e.text ?? '').join(''),
+    [events],
+  );
+  const done = phase === 'idle' || phase === 'failed';
+
+  return <Render text={text} done={done} />;
 }
 ```
 
 Run a first turn:
 
-```typescript
-const cwd = await workspaceFor('cust_42');
-askShopper(
-  cwd,
-  "Hi! I'm looking for a new jacket. I wear a size medium, only buy vegan " +
-  "leather (no animal leather please), my budget is usually under $200, and " +
-  "I love earth tones. What would you suggest?",
-  (text, done) => render(text, done),
-);
+```tsx
+<Shopper
+  customerId="cust_42"
+  userMsg={
+    "Hi! I'm looking for a new jacket. I wear a size medium, only buy vegan " +
+    "leather (no animal leather please), my budget is usually under $200, and " +
+    "I love earth tones. What would you suggest?"
+  }
+/>
 ```
 
 Expected behavior:
-1. Claude calls `Read({"file_path":"./preferences.md"})` — file doesn't exist yet, gets a not-found.
-2. Claude makes recommendations using the constraints from the user message.
+1. Claude calls `Read({"file_path":"./preferences.md"})` — file doesn't exist yet, gets a not-found. Surfaces as a `tool_call` event in `events`.
+2. Claude makes recommendations using the constraints from the user message — `assistant_message` events stream in.
 3. Claude calls `Edit` (creating the file via `Write` if Edit fails) to record sizes / materials / budget / style.
+4. The hook's `phase` flips to `idle` when the final `completion` event lands.
 
 ## Inspect what got stored
 
@@ -173,13 +165,13 @@ Typical output after the first turn:
 
 ## Second visit: recall
 
-```typescript
-const cwd = await workspaceFor('cust_42');  // same directory
-askShopper(
-  cwd,
-  "Hey, I'm back! I need a bag for work. Any recommendations?",
-  (text, done) => render(text, done),
-);
+Mount the same component with the same `customerId` — `useAssistant` spawns a fresh worker against the same `cwd`, and Claude finds the file on its first `Read`.
+
+```tsx
+<Shopper
+  customerId="cust_42"   // same id → same workspace dir
+  userMsg="Hey, I'm back! I need a bag for work. Any recommendations?"
+/>
 ```
 
 This time Claude's first tool call is `Read({"file_path":"./preferences.md"})` and the recommendations are size-medium, vegan, earth-toned, sub-$200 right out of the gate — without the customer repeating themselves.
@@ -216,19 +208,19 @@ workspace/
 └── _shared/catalog-notes.md              ← shared across customers, read-only
 ```
 
-Use the `add_dirs` field in `SessionOptions` to expose `_shared/` to a session whose `cwd` is the customer dir. **Today this isn't plumbed through `hostClaudeInit`** — see TODOs.
+Use the `add_dirs` field in `SessionOptions` to expose `_shared/` to a session whose `cwd` is the customer dir. **Today this isn't plumbed through the worker opts** — see TODOs.
 
-## Caveats and TODOs against the v8 bindings
+## Caveats and TODOs against the worker bindings
 
-- **No `system_prompt` from the cart.** Memory instructions ride on every user message. When `framework/v8_bindings_sdk.zig:932` learns to pass `system_prompt`, move `MEMORY_INSTRUCTION` there.
-- **No `add_dirs` from the cart.** Cross-store layering (shared catalog + per-customer prefs) needs `add_dirs` plumbed into `hostClaudeInit`. Until then, copy the shared file into each customer's cwd at session start.
-- **One session at a time.** `g_claude_session` is a single global (`framework/v8_bindings_sdk.zig:24`). Two customers can't be served concurrently — queue or serialize.
+- **No `system_prompt` from the cart for `claude_code`.** Memory instructions ride on every user message. When `framework/assistant/worker_bindings.zig` grows the field for the Claude backend (it's already wired for `openai_compat`), move `MEMORY_INSTRUCTION` there.
+- **No `add_dirs` in the worker opts.** Cross-store layering (shared catalog + per-customer prefs) needs `add_dirs` added to the Claude opts schema. Until then, copy the shared file into each customer's cwd at session start.
+- **One worker per `useAssistant` mount.** That's by design — for two customers concurrently, mount two `<Shopper>` instances with different `customerId`s. Each gets its own worker, its own session, its own `cwd`.
 - **No "memory store" abstraction.** There's no API to list memories, version them, or get a typed view. You're working with files. If you need an audit trail, snapshot the cwd to git after each session.
-- **Claude Code default permission_mode is `bypass_permissions` (`framework/v8_bindings_sdk.zig:960`).** Edits to `preferences.md` happen without a prompt. That's fine for a memory file scoped to the customer's own dir, but don't widen the cwd to anything sensitive.
+- **Claude Code default permission_mode is `bypass_permissions`.** Edits to `preferences.md` happen without a prompt. That's fine for a memory file scoped to the customer's own dir, but don't widen the cwd to anything sensitive.
 
 ## Pattern summary
 
-1. One directory per customer; pass it as `cwd` to `__claude_init`.
+1. One directory per customer; pass it as `cwd` to `useAssistant({ backend: 'claude_code', cwd, model })`.
 2. Pin Claude to a known filename (`preferences.md`) and a known schema in the prompt.
 3. First turn: Claude finds nothing, makes recommendations, writes the file.
 4. Second turn: same `cwd`, Claude reads the file first, recommendations land pre-personalized.

@@ -65,12 +65,24 @@ function MarkableWord(props: {
       <Pressable
         onLayout={(rect: any) => {
           if (!rect) return;
-          setAnchor({
+          const next = {
             x: Number.isFinite(rect.x) ? rect.x : 0,
             y: Number.isFinite(rect.y) ? rect.y : 0,
             width: Number.isFinite(rect.width) ? rect.width : props.token.length * 6 + 4,
             height: Number.isFinite(rect.height) ? rect.height : 12,
-          });
+          };
+          // Diff before setState — onLayout fires on every layout pass
+          // and an unconditional setAnchor writes a fresh object every
+          // tick, which re-renders, re-lays out, fires onLayout again,
+          // … the default transcript has many markable tokens per card
+          // and the loop multiplies into a per-frame mutation flood.
+          setAnchor((prev) => (
+            prev &&
+            prev.x === next.x && prev.y === next.y &&
+            prev.width === next.width && prev.height === next.height
+              ? prev
+              : next
+          ));
         }}
         onPress={() => {
           const nextAnchor = anchor ?? {

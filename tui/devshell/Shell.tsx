@@ -1,38 +1,55 @@
-// Dev-shell top-level layout. Title bar + tab strip + active pane + footer.
+// Devshell top-level. Cart-shaped: <Router> wraps a chrome layout
+// (TitleBar / NavRail / Footer) with the active <Route>'s pane in the
+// content area. Hotkeys (digit → route, l/y/?/q) are owned here;
+// per-pane keys (filter, scroll, etc.) live in the panes themselves
+// and gate via InputClaim.
 //
-// Wires tab switching (number keys), quit (q / ctrl-c), and the placeholder
-// hotkey reservations (F2 restart, F3 rebuild, F5 pick). Real pane contents
-// live in panes/*.
+// Run on the TUI host via `scripts/devshell <cart>`. Same primitives,
+// reconciler, and theme machinery a GPU cart would use — when the TUI
+// can't render something, fix the TUI in tui/host.ts rather than
+// designing around it here.
 
-import { createElement, useState, useEffect } from 'react';
+import * as React from 'react';
+import { Box, Col, Row, Text } from '../../runtime/primitives';
 import { subscribeKey, headlessSnapshot } from '../host';
-import { BundlePane } from './panes/Bundle';
-import { LogsPane } from './panes/Logs';
-import { useTelemetry, Telemetry } from './services/Telemetry';
+import { Router, Route, useNavigate, useRoute } from '../../cart/app/gallery/local-router';
+
+import { installShellTokens } from './shell-tokens';
+import { PANES, findPaneByHotkey, findPaneByRoute, type PaneCtx } from './registry';
+import { TitleBar } from './components/TitleBar';
+import { TelemetryStrip } from './components/TelemetryStrip';
+import { Toast } from './components/Toast';
+import { NavRail } from './components/NavRail';
+import { Footer } from './components/Footer';
+import { HelpPane } from './panes/HelpPane';
 import { useLogLevel } from './services/LogLevel';
 import { copyToClipboard } from './services/clipboard';
 import { isInputClaimed, getCopyOverride } from './services/InputClaim';
 
-type TabId = 'logs' | 'events' | 'inspect' | 'bundle' | 'status';
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'logs',    label: 'Logs' },
-  { id: 'events',  label: 'Events' },
-  { id: 'inspect', label: 'Inspect' },
-  { id: 'bundle',  label: 'Bundle' },
-  { id: 'status',  label: 'Status' },
-];
+const { useState, useEffect } = React;
 
 declare const __exists: ((path: string) => boolean) | undefined;
-const probeHost = () => (typeof __exists === 'function') ? __exists('/tmp/reactjit.sock') : false;
+const probeHost = (): boolean => (typeof __exists === 'function') ? __exists('/tmp/reactjit.sock') : false;
 
-export function Shell({ cart }: { cart: string }) {
-  const [active, setActive] = useState<TabId>('status');
+installShellTokens();
+
+export default function Shell() {
+  return (
+    <Router initialPath="/" hotKey="devshell">
+      <ShellChrome />
+    </Router>
+  );
+}
+
+function ShellChrome() {
+  const cart = (typeof process !== 'undefined' && process.argv?.[2]) || '<no cart>';
   const [tick, setTick] = useState(0);
   const [hostUp, setHostUp] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [showHelp, setShowHelp] = useState(false);
-  const tel = useTelemetry();
   const log = useLogLevel();
+  const nav = useNavigate();
+  const { path } = useRoute();
 
   useEffect(() => {
     const t = setInterval(() => setTick(n => n + 1), 200);
@@ -40,7 +57,6 @@ export function Shell({ cart }: { cart: string }) {
   }, []);
   useEffect(() => { setHostUp(probeHost()); }, [tick]);
 
-  // Two-second toast timer (e.g. "copied to clipboard").
   useEffect(() => {
     if (!toast) return;
     const t = setTimeout(() => setToast(null), 1800);
@@ -48,210 +64,87 @@ export function Shell({ cart }: { cart: string }) {
   }, [toast]);
 
   useEffect(() => subscribeKey(k => {
-    // A pane has captured input (e.g. LogsPane filter editor). Skip
-    // global shortcuts so the user can type freely.
     if (isInputClaimed()) return;
-    if (k >= '1' && k <= '5') {
-      const idx = parseInt(k, 10) - 1;
-      if (TABS[idx]) setActive(TABS[idx].id);
-      return;
-    }
+    if (k === 'q') process.exit(0);
+    const hit = findPaneByHotkey(k);
+    if (hit) { nav.push(hit.route); return; }
     if (k === '?') { setShowHelp(h => !h); return; }
-    if (k === 'l') {
-      log.cycle();
-      return;
-    }
+    if (k === 'l') { log.cycle(); return; }
     if (k === 'y') {
-      // Pane-installed copy override (e.g. LogsPane in detail view)
-      // gets first priority — copies the focused event's full unwrapped
-      // payload. Falls back to a screen snapshot when no override.
       const override = getCopyOverride();
       const cols = (process.stdout?.columns) || 80;
       const rows = (process.stdout?.rows) || 24;
       const text = override ? override() : headlessSnapshot(cols, rows);
       copyToClipboard(text);
+      const lines = text ? text.split('\n').length : 0;
       setToast(override
-        ? `✓ copied row (${text.length} chars)`
+        ? `✓ copied ${text.length} chars · ${lines} lines`
         : `✓ copied ${rows}×${cols} as plain text`);
       return;
     }
-    if (k === '\x1b' && showHelp) setShowHelp(false); // ESC closes help
+    if (k === '\x1b' && showHelp) setShowHelp(false);
   }), [showHelp]);
 
   const spinner = '|/-\\'[tick % 4];
+  const ctx: PaneCtx = { cart, hostUp, tick };
 
   return (
-    <box width="fill" height="fill" bg="#0b1020" fg="#e5e7eb" flexDirection="column">
-      {/* Title bar — two rows. Row 1: identity + log toggle; Row 2:
-          telemetry strip. Wrapping is mandatory once log:level joined the
-          identity row — single-row layout overflowed on standard widths. */}
-      <box flexDirection="column" bg="#111827">
-        <box flexDirection="row" paddingX={1}>
-          {toast ? (
-            <box flexDirection="row"><text fg="#34d399" bold>{toast}</text></box>
-          ) : (
-            <box flexDirection="row" gap={2}>
-              <text bold fg="#60a5fa">rjit</text>
-              <text fg="#cbd5e1">cart=<text bold fg="#fbbf24">{cart}</text></text>
-              <text fg={hostUp ? '#34d399' : '#f87171'}>host {hostUp ? '● up' : '○ down'}</text>
-              <text fg={log.color}>log:{log.name ?? '—'}</text>
-            </box>
-          )}
-        </box>
-        <box flexDirection="row" paddingX={1}>
-          <box flexGrow={1} />
-          <TelemetryStrip tel={tel} hostUp={hostUp} spinner={spinner} />
-        </box>
-      </box>
+    <Box style={{
+      width: '100%', height: '100%',
+      backgroundColor: 'theme:bg', color: 'theme:ink',
+      flexDirection: 'column',
+    }}>
+      {/* Top strip — TitleBar replaced by Toast on copy. Telemetry
+          row sits below either way so width stays stable. */}
+      <Col style={{ backgroundColor: 'theme:bg1' }}>
+        {toast ? <Toast message={toast} /> : <TitleBar cart={cart} hostUp={hostUp} />}
+        <Row style={{ paddingLeft: 1, paddingRight: 1 }}>
+          <Box style={{ flexGrow: 1 }} />
+          <TelemetryStrip hostUp={hostUp} spinner={spinner} />
+        </Row>
+      </Col>
 
-      {/* Tab strip — single row, selection via bg + bold */}
-      <box flexDirection="row" gap={1} paddingX={1} bg="#0b1020">
-        {TABS.map((t, i) => {
-          const sel = active === t.id;
-          return (
-            <box key={t.id} bg={sel ? '#1e293b' : undefined} paddingX={1}>
-              <text fg={sel ? '#fbbf24' : '#94a3b8'} bold={sel}>{i + 1}·{t.label}</text>
-            </box>
-          );
-        })}
-      </box>
+      {/* Body — rail on the left, content on the right. */}
+      <Row style={{ flexGrow: 1 }}>
+        <NavRail />
+        <Box style={{
+          flexGrow: 1,
+          paddingLeft: 2, paddingRight: 2, paddingTop: 1, paddingBottom: 1,
+          backgroundColor: 'theme:bg',
+        }}>
+          {showHelp ? <HelpPane /> : <PaneRoutes ctx={ctx} />}
+        </Box>
+      </Row>
 
-      {/* Active pane — no border, just inset. Help overlay replaces
-          the pane while ?-toggled. */}
-      <box flexGrow={1} paddingX={2} paddingY={1}>
-        {showHelp ? <HelpPane /> : <ActivePane id={active} cart={cart} hostUp={hostUp} tick={tick} />}
-      </box>
-
-      {/* Footer — single row */}
-      <box flexDirection="row" gap={2} paddingX={1} bg="#111827">
-        <text fg="#64748b">1..5 tab · l log · y copy · ? help · q quit</text>
-      </box>
-    </box>
+      <Footer />
+    </Box>
   );
 }
 
-// Live telemetry strip pinned to the title bar's right edge. Always
-// visible regardless of which tab is active. Reads from the dev host
-// over /tmp/reactjit.sock (TELEMETRY verb), so reflects the cart's
-// frame loop — not the devshell's own renderer.
-function TelemetryStrip({ tel, hostUp, spinner }: { tel: Telemetry | null; hostUp: boolean; spinner: string }) {
-  const dim = '#475569';
-  const sep = <text fg={dim}>·</text>;
-  if (!hostUp || !tel) {
-    return (
-      <box flexDirection="row" gap={1}>
-        <text fg={dim}>—fps {sep} —nodes {sep} L— {sep} P— {sep} {spinner}</text>
-      </box>
-    );
-  }
-  const fps = tel.fps | 0;
-  const fpsColor = fps >= 55 ? '#34d399' : fps >= 30 ? '#fbbf24' : '#f87171';
-  const lay = (tel.layout_us / 1000).toFixed(1);
-  const pnt = (tel.paint_us / 1000).toFixed(1);
+function PaneRoutes({ ctx }: { ctx: PaneCtx }) {
+  // Render <Route>s for every registered pane. local-router only
+  // matches one (first match wins via __matched); fallback handles
+  // unknown paths by jumping to the default pane.
   return (
-    <box flexDirection="row" gap={1}>
-      <text fg={fpsColor} bold>{fps}fps</text>
-      {sep}
-      <text fg="#cbd5e1">{tel.node_count} nodes</text>
-      {sep}
-      <text fg="#cbd5e1">L {lay}ms</text>
-      {sep}
-      <text fg="#cbd5e1">P {pnt}ms</text>
-      {sep}
-      <text fg="#94a3b8">{spinner}</text>
-    </box>
+    <>
+      {PANES.map(p => (
+        <Route key={p.id} path={p.route}>
+          {p.render(ctx)}
+        </Route>
+      ))}
+      <Route fallback>
+        <UnknownRoute />
+      </Route>
+    </>
   );
 }
 
-function ActivePane({ id, cart, hostUp, tick }: { id: TabId; cart: string; hostUp: boolean; tick: number }) {
-  if (id === 'status') return <StatusPane cart={cart} hostUp={hostUp} tick={tick} />;
-  if (id === 'logs')    return <LogsPane />;
-  if (id === 'events')  return <Placeholder name="Eventlog"    next="extend dev_ipc.zig with QUERY-EVENTS command; reuse SQL filter from cart/eventlog" />;
-  if (id === 'inspect') return <Placeholder name="Inspector"   next="extend dev_ipc.zig with PICK-ELEMENT (request) + ELEMENT-INFO (reply); cart enters pick mode" />;
-  if (id === 'bundle')  return <BundlePane cart={cart} />;
-  return null;
-}
-
-function StatusPane({ cart, hostUp, tick }: { cart: string; hostUp: boolean; tick: number }) {
-  return (
-    <box flexDirection="column">
-      <text fg="#fbbf24" bold>Target cart</text>
-      <Row k="name"        v={cart} />
-      <Row k="dev host"    v={hostUp ? 'connected at /tmp/reactjit.sock' : 'not running'}
-                            kc={hostUp ? '#34d399' : '#f87171'} />
-      <Row k="renderer"    v={hostUp ? 'GPU host (Zig · SDL3 · WebGPU)' : '—'} />
-      <Row k="bundle"      v={`.cache/bundle-${cart}.js`} />
-
-      <text fg="#64748b"> </text>
-      <text fg="#fbbf24" bold>Devshell (this UI)</text>
-      <Row k="renderer"    v="tui/host.ts (24-bit ANSI, dirty diff)" />
-      <Row k="runtime"     v="tools/v8cli (Zig · V8)" />
-      <Row k="heartbeat"   v={`${tick} ticks · 5Hz`} />
-
-      <text fg="#64748b"> </text>
-      <text fg="#64748b">Press 1..5 to switch tabs. Other panes are placeholders.</text>
-    </box>
-  );
-}
-
-function Row({ k, v, kc }: { k: string; v: string; kc?: string }) {
-  return (
-    <box flexDirection="row" gap={2}>
-      <box width={14}><text fg="#94a3b8">{k}</text></box>
-      <text fg={kc ?? '#e5e7eb'}>{v}</text>
-    </box>
-  );
-}
-
-function HelpPane() {
-  return (
-    <box flexDirection="column">
-      <text fg="#fbbf24" bold>Hotkeys</text>
-      <text> </text>
-      <Hk k="1..5"      d="switch pane (Logs / Events / Inspect / Bundle / Status)" />
-      <Hk k="y"         d="copy current screen as plain text to clipboard (OSC 52)" />
-      <Hk k="l"         d="cycle log level: trace · debug · info · warn · error" />
-      <text> </text>
-      <text fg="#cbd5e1" bold>Inside Logs pane</text>
-      <Hk k="/"         d="filter (substring match; ! prefix excludes); Enter applies, ESC clears" />
-      <Hk k="Enter"     d="open detail view on bottom event (full payload, word-wrapped)" />
-      <Hk k="n / p"     d="(in detail) next / previous event" />
-      <Hk k="↑/↓ k/j"   d="scroll one row" />
-      <Hk k="←/→ h"     d="horizontal scroll (8 cols)" />
-      <Hk k="G"         d="resume live tail" />
-      <Hk k="?"         d="toggle this help (or ESC)" />
-      <Hk k="q / ⌃C"    d="quit" />
-      <text> </text>
-      <text fg="#cbd5e1" bold>Inside Bundle pane</text>
-      <Hk k="↑/↓ k/j"   d="scroll one row" />
-      <Hk k="PgUp/PgDn / Space" d="scroll one page" />
-      <Hk k="g / G"     d="top / bottom" />
-      <text> </text>
-      <text fg="#cbd5e1" bold>Reserved</text>
-      <Hk k="F2"        d="restart dev host (not wired yet)" />
-      <Hk k="F3"        d="rebuild current cart (not wired yet)" />
-      <Hk k="F5"        d="pick element (not wired yet)" />
-      <text> </text>
-      <text fg="#64748b">y avoids terminal selection — output is the exact grid we paint, no ANSI, no box-drawing artifacts.</text>
-    </box>
-  );
-}
-
-function Hk({ k, d }: { k: string; d: string }) {
-  return (
-    <box flexDirection="row" gap={2}>
-      <box width={20}><text fg="#fbbf24">{k}</text></box>
-      <text fg="#cbd5e1">{d}</text>
-    </box>
-  );
-}
-
-function Placeholder({ name, next }: { name: string; next: string }) {
-  return (
-    <box flexDirection="column" gap={1}>
-      <text fg="#fbbf24" bold>{name}</text>
-      <text fg="#94a3b8">not yet wired</text>
-      <text fg="#cbd5e1">next step: {next}</text>
-    </box>
-  );
+function UnknownRoute() {
+  const { path } = useRoute();
+  const nav = useNavigate();
+  useEffect(() => {
+    const fallback = findPaneByRoute('/');
+    if (fallback) nav.replace(fallback.route);
+  }, [path]);
+  return <Text style={{ color: 'theme:inkDim' }}>routing…</Text>;
 }

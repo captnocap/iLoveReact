@@ -29,6 +29,8 @@
  *   'system:claude'          any Claude Code hook event; payload = full entry
  *   'system:claude:<tool>'   filtered by tool name (e.g. 'system:claude:bash')
  *   'system:claude:<phase>'  filtered by phase    (e.g. 'system:claude:pre')
+ *   'system:error'           runtime error; payload = { message, stack?, args, at }
+ *                            — pumped from console.error by runtime/index.tsx
  *
  * ── String actions ──────────────────────────────────────────
  *   'state:set:<key>:<val>'  set shared state
@@ -119,17 +121,33 @@ export function busEmit(event: string, payload?: any): void {
   emit(event, payload);
 }
 
-const state = new Map<string, any>();
+// Shared state — persisted in Zig via __ifttt_state_get/set, which routes
+// through framework/hotstate.zig (the same store useHotState uses, with an
+// `ifttt:` key prefix). Survives JS hot reloads — when the V8 isolate is
+// torn down and rebuilt, the next setSharedState call still sees its prior
+// value live in Zig. JS keeps a tiny last-written cache to skip no-op sets
+// (otherwise watchers would fire every time `state:set:flag:true` runs,
+// even when nothing changed).
+const _stateLastJson = new Map<string, string>();
 const stateWatchers = new Map<string, Set<Handler>>();
 
 export function getSharedState(key: string): any {
-  return state.get(key);
+  // Prefer the local cache (cheap) and fall through to Zig (survives reload).
+  if (_stateLastJson.has(key)) {
+    try { return JSON.parse(_stateLastJson.get(key)!); } catch { return undefined; }
+  }
+  const json = callHost<string | null>('__ifttt_state_get', null, key);
+  if (json == null) return undefined;
+  _stateLastJson.set(key, json);
+  try { return JSON.parse(json); } catch { return undefined; }
 }
 
 export function setSharedState(key: string, value: any): void {
-  const prev = state.get(key);
-  if (prev === value) return;
-  state.set(key, value);
+  let json: string;
+  try { json = JSON.stringify(value); } catch { return; }
+  if (_stateLastJson.get(key) === json) return;
+  _stateLastJson.set(key, json);
+  callHost('__ifttt_state_set', undefined, key, json);
   const watchers = stateWatchers.get(key);
   if (watchers) for (const fn of Array.from(watchers)) {
     try { fn(value); } catch (e: any) {
@@ -167,6 +185,19 @@ if (!G.__ifttt_dispatch_installed) {
     if (!w) return;
     try { w.fire({ at: Date.now() }); } catch (e: any) {
       console.error('[ifttt] timer dispatch error:', e?.message || e);
+    }
+  };
+  // Called by framework/ifttt_zig.zig when a registered key match fires.
+  // The packed key (sym|mod) lives in Zig and is read back on demand —
+  // saves passing two ints through callGlobalInt.
+  G.__ifttt_dispatch_key = (wireId: number) => {
+    const w = _wires.get(wireId);
+    if (!w) return;
+    try {
+      const packed = callHost<number>('__ifttt_last_key', 0);
+      w.fire(decodeKey(packed));
+    } catch (e: any) {
+      console.error('[ifttt] key dispatch error:', e?.message || e);
     }
   };
 }
@@ -346,6 +377,26 @@ function coerce(raw: string): any {
   return raw;
 }
 
+// Reverse map of SDL_KEY_NAMES — built lazily so the named-key list and
+// reverse map can never drift. Used to resolve a parsed key string
+// (e.g. "escape") back to its SDL keycode for Zig-side matching.
+let _nameToSym: Map<string, number> | null = null;
+function nameToSym(name: string): number | null {
+  if (!name) return null;
+  // Single printable ASCII char → its lowercase code.
+  if (name.length === 1) {
+    const c = name.charCodeAt(0);
+    if (c >= 0x20 && c < 0x7f) return c >= 0x41 && c <= 0x5a ? c + 0x20 : c;
+  }
+  if (!_nameToSym) {
+    _nameToSym = new Map();
+    for (const codeStr of Object.keys(SDL_KEY_NAMES)) {
+      _nameToSym.set(SDL_KEY_NAMES[Number(codeStr)], Number(codeStr));
+    }
+  }
+  return _nameToSym.get(name) ?? null;
+}
+
 // ── Built-in trigger sources ──────────────────────────────────────────────
 
 registerIfttSource('mount', {
@@ -364,12 +415,50 @@ registerIfttSource('click', {
   },
 });
 
+// Key sources — registration pre-compiles the spec into (sym, modifier
+// wants) and registers with the Zig key matcher. On keydown/keyup the
+// engine walks the Zig list directly; the JS bridge is only crossed
+// once per matching wire (vs once per keystroke + walking every
+// `key:`-source subscriber's keyMatches check). Falls back to a JS
+// `__keydown`/`__keyup` bus subscription when the binding is missing
+// or the spec uses a key name we can't resolve to an SDL keycode.
+function compileAndRegisterKey(
+  ks: KeySpec,
+  isKeyup: boolean,
+  onFire: (ev: any) => void,
+): (() => void) | null {
+  const sym = nameToSym(ks.key);
+  if (sym == null) return null;
+  const dispatchWire = allocWire(onFire);
+  if (dispatchWire <= 0) return null;
+  const keyId = callHost<number>(
+    '__ifttt_key_register', 0,
+    sym,
+    ks.ctrl ? 1 : 0,
+    ks.shift ? 1 : 0,
+    ks.alt ? 1 : 0,
+    ks.meta ? 1 : 0,
+    isKeyup ? 1 : 0,
+    dispatchWire,
+  );
+  if (keyId <= 0) {
+    freeWire(dispatchWire);
+    return null;
+  }
+  return () => {
+    callHost('__ifttt_key_unregister', undefined, keyId);
+    freeWire(dispatchWire);
+  };
+}
+
 registerIfttSource('key:up:', {
   match(spec) {
     if (!spec.startsWith('key:up:')) return null;
     const ks = parseKey(spec.slice('key:up:'.length));
     return {
       subscribe(onFire) {
+        const cleanup = compileAndRegisterKey(ks, true, onFire);
+        if (cleanup) return cleanup;
         return subscribe('__keyup', (ev: any) => { if (keyMatches(ev, ks)) onFire(ev); });
       },
     };
@@ -384,6 +473,8 @@ registerIfttSource('key:', {
     const ks = parseKey(spec.slice('key:'.length));
     return {
       subscribe(onFire) {
+        const cleanup = compileAndRegisterKey(ks, false, onFire);
+        if (cleanup) return cleanup;
         return subscribe('__keydown', (ev: any) => { if (keyMatches(ev, ks)) onFire(ev); });
       },
     };

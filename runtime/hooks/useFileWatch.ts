@@ -98,6 +98,7 @@ export function attachWatcher(
   fn: Listener,
   opts: FileWatchOptions = {},
 ): () => void {
+  if (!path) return () => {};
   const id: number = host().__fswatchAdd?.(
     path,
     opts.recursive ? 1 : 0,

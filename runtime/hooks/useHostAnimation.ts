@@ -34,7 +34,18 @@
 
 import { useEffect } from 'react';
 
-export type CurveName = 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'spring' | 'bounce' | 'sine';
+export type CurveName =
+  | 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'spring' | 'bounce' | 'sine'
+  | 'easeInSine' | 'easeOutSine' | 'easeInOutSine'
+  | 'easeInQuad' | 'easeOutQuad' | 'easeInOutQuad'
+  | 'easeInCubic' | 'easeOutCubic' | 'easeInOutCubic'
+  | 'easeInQuart' | 'easeOutQuart' | 'easeInOutQuart'
+  | 'easeInQuint' | 'easeOutQuint' | 'easeInOutQuint'
+  | 'easeInExpo' | 'easeOutExpo' | 'easeInOutExpo'
+  | 'easeInCirc' | 'easeOutCirc' | 'easeInOutCirc'
+  | 'easeInBack' | 'easeOutBack' | 'easeInOutBack'
+  | 'easeInElastic' | 'easeOutElastic' | 'easeInOutElastic'
+  | 'easeInBounce' | 'easeOutBounce' | 'easeInOutBounce';
 export type LoopMode = 'once' | 'cycle' | 'pingpong';
 
 export interface HostAnimationConfig {

@@ -60,10 +60,16 @@ import { easingsZigMathSection } from './easings-zig-math.story';
 import { easingsZigStaticSection } from './easings-zig-static.story';
 import { easingsHostIntervalSection } from './easings-host-interval.story';
 import { easingsShaderSection } from './easings-shader.story';
+import { easingsInlinePaintSection } from './easings-inline-paint.story';
 import { animatedTextSection } from './animated-text.story';
 import { animatedTextShaderSection } from './animated-text-shader.story';
 import { gridSpinnersSection } from './grid-spinners.story';
-import { timeInstrumentsSection } from './time-instruments.story';
+import {
+  binaryClockSection,
+  timeRibbonsSection,
+  wordClockSection,
+  secondLoomSection,
+} from './time-instruments.story';
 import { conditionalGuttersSection } from './conditional-gutters.story';
 import { hairlineSliderSection } from './hairline-slider.story';
 import { filledRailSliderSection } from './filled-rail-slider.story';
@@ -207,7 +213,7 @@ import { tooltipHeaderSection } from './tooltip-header.story';
 import { tooltipDataRowSection } from './tooltip-data-row.story';
 import { tooltipSection } from './tooltip.story';
 import { notificationSection } from './notification.story';
-import { tweenArchSection } from './tween-arch.story';
+import { easingsTweenArchSection } from './easings-tween-arch.story';
 import { toolbarSection } from './toolbar.story';
 import { goalCardSection } from './goal-card.story';
 import { taskCardSection } from './task-card.story';
@@ -237,7 +243,12 @@ import { gitCommitRailRowSection } from './git-commit-rail-row.story';
 import { gitDiffPreviewSection } from './git-diff-preview.story';
 import { gitLanesSection } from './git-lanes.story';
 import { commandComposerPanelSection } from './command-composer-panel.story';
-import { layerControlPanelSection } from './layer-control-panel.story';
+import {
+  layerRowSection,
+  layerBlendModeControlSection,
+  layerOpacityControlsSection,
+  layerPropertiesPanelSection,
+} from './layer-control-panel.story';
 import { menuGallerySections } from './menu-gallery.story';
 import { blockFacesSection } from './block-faces.story';
 import { newsFeedPostSection } from './news-feed-post.story';
@@ -316,10 +327,14 @@ export const storySections: GallerySection[] = [
   easingsZigStaticSection,
   easingsHostIntervalSection,
   easingsShaderSection,
+  easingsInlinePaintSection,
   animatedTextSection,
   animatedTextShaderSection,
   gridSpinnersSection,
-  timeInstrumentsSection,
+  binaryClockSection,
+  timeRibbonsSection,
+  wordClockSection,
+  secondLoomSection,
   conditionalGuttersSection,
   hairlineSliderSection,
   filledRailSliderSection,
@@ -461,7 +476,7 @@ export const storySections: GallerySection[] = [
   tooltipDataRowSection,
   tooltipSection,
   notificationSection,
-  tweenArchSection,
+  easingsTweenArchSection,
   toolbarSection,
   goalCardSection,
   taskCardSection,
@@ -492,7 +507,10 @@ export const storySections: GallerySection[] = [
   gitDiffPreviewSection,
   gitLanesSection,
   commandComposerPanelSection,
-  layerControlPanelSection,
+  layerRowSection,
+  layerBlendModeControlSection,
+  layerOpacityControlsSection,
+  layerPropertiesPanelSection,
   ...menuGallerySections,
   blockFacesSection,
   socialImageGallerySection,

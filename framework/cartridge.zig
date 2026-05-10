@@ -5,7 +5,7 @@
 //! state preservation exports (app_state_count, app_state_get_int, etc.).
 
 const std = @import("std");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const layout = @import("layout.zig");
 const Node = layout.Node;
 

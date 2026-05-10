@@ -34,8 +34,8 @@
 //!   client.close();
 
 const std = @import("std");
-const log = @import("../log.zig");
-const event_bus = @import("../event_bus.zig");
+const log = @import("../diag/log.zig");
+const event_bus = @import("../diag/event_bus.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Constants

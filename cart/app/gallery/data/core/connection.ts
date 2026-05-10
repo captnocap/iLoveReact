@@ -16,14 +16,16 @@ import type { GalleryDataReference, JsonObject } from '../../types';
 export type ConnectionKind =
   | 'claude-code-cli' // Anthropic — `claude` binary, subscription-backed session
   | 'anthropic-api-key' // Anthropic — Console API key, Messages HTTP API
-  | 'kimi-api-key' // Moonshot — single API key
-  | 'openai-api-key' // OpenAI — single API key (Codex CLI uses this)
+  | 'kimi-api-key' // Moonshot — `kimi --wire` subprocess
+  | 'codex-cli' // OpenAI — local `codex` app-server (stdio JSON-RPC)
+  | 'openai-api-key' // OpenAI — single API key, /v1/chat/completions HTTP (also covers Codex via API key path)
   | 'local-runtime'; // Local — no network credential
 
 export const CONNECTION_KINDS: ConnectionKind[] = [
   'claude-code-cli',
   'anthropic-api-key',
   'kimi-api-key',
+  'codex-cli',
   'openai-api-key',
   'local-runtime',
 ];
@@ -186,16 +188,37 @@ export const connectionMockData: Connection[] = [
     lastUsedAt: '2026-04-24T09:06:03Z',
   },
   {
-    id: 'conn_openai',
+    id: 'conn_codex_cli',
     settingsId: 'settings_default',
     providerId: 'openai',
-    kind: 'openai-api-key',
-    label: 'OpenAI (Codex)',
-    connectionType: 'http',
+    kind: 'codex-cli',
+    label: 'Codex (subscription)',
+    connectionType: 'cli',
     executionSubstrate: 'host',
     autoLoadedFiles: [
       { path: 'AGENTS.md', assemblyTarget: 'cli-runtime-instructions', description: 'Auto-loaded by codex CLI on session start.' },
     ],
+    credentialRef: { source: 'cli-session', locator: '~/.codex/' },
+    capabilities: {
+      streaming: true,
+      tools: true,
+      thinking: true,
+      vision: true,
+      promptCache: true,
+      batch: false,
+    },
+    status: 'active',
+    createdAt: '2026-04-12T00:00:00Z',
+    summary: 'Local `codex` app-server subprocess over stdio JSON-RPC. Same provider as the API-key path; different transport.',
+  },
+  {
+    id: 'conn_openai',
+    settingsId: 'settings_default',
+    providerId: 'openai',
+    kind: 'openai-api-key',
+    label: 'OpenAI (API key)',
+    connectionType: 'http',
+    executionSubstrate: 'host',
     credentialRef: { source: 'env', locator: 'OPENAI_API_KEY' },
     capabilities: {
       streaming: true,
@@ -207,6 +230,7 @@ export const connectionMockData: Connection[] = [
     },
     status: 'active',
     createdAt: '2026-04-12T00:00:00Z',
+    summary: 'OpenAI Chat Completions HTTP. Covers OpenAI proper (incl. Codex models reachable via API key). The `codex-cli` connection is the parallel CLI-subprocess path to the same provider.',
   },
   {
     id: 'conn_local',

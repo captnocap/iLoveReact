@@ -8,6 +8,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const wgpu = @import("wgpu");
+const mathx = @import("../math/root.zig");
 
 const is_web = builtin.cpu.arch == .wasm32;
 
@@ -17,12 +18,13 @@ const rects = @import("rects.zig");
 const text = @import("text.zig");
 const curves = @import("curves.zig");
 const capsules = @import("capsules.zig");
-const polys = @import("polys.zig");
+pub const polys = @import("polys.zig");
+pub const gcurve_fill = @import("gcurve_fill.zig");
 pub const images = @import("images.zig");
 pub const sdf_icons = @import("sdf_icons.zig");
 const scene3d = @import("3d.zig");
 pub const filters = @import("filters.zig");
-const log = @import("../log.zig");
+const log = @import("../diag/log.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Re-exports — callers use gpu.drawRect(), gpu.RectInstance, etc.
@@ -39,6 +41,7 @@ pub const drawTextWrapped = text.drawTextWrapped;
 pub const measureTextLineWidth = text.measureTextLineWidth;
 pub const drawColorTextRow = text.drawColorTextRow;
 pub const drawSelectionRects = text.drawSelectionRects;
+pub const byteIndexAtPos = text.byteIndexAtPos;
 pub const getLineHeight = text.getLineHeight;
 pub const drawCurve = curves.drawCurve;
 pub const drawCubicCurve = curves.drawCubicCurve;
@@ -74,7 +77,12 @@ pub const CurveInstance = curves.CurveInstance;
 // GPU operations budget — cross-pipeline per-frame safety limit
 // ═══════════════════════════════════════════════════════════��════════════
 
-pub const GPU_OPS_BUDGET: u32 = 100_000;
+// Bumped 100K → 5M to allow data-dense workloads (e.g. chart_bench at
+// 100 charts × 5000 points = ~500K capsules/frame from polyline alone, plus
+// rects, glyphs, curves from the rest of the UI). 100K was a runaway-loop
+// safety net; 5M leaves enough headroom for legitimate dense scenes while
+// still tripping on actual infinite loops.
+pub const GPU_OPS_BUDGET: u32 = 5_000_000;
 pub var g_gpu_ops: u32 = 0;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -188,8 +196,8 @@ pub const Affine = struct {
 
     /// Decompose into rotation (radians), scale_x, scale_y. Assumes no skew/shear.
     pub fn decompose(m: Affine) struct { angle_rad: f32, sx: f32, sy: f32 } {
-        const sx = @sqrt(m.a * m.a + m.b * m.b);
-        const sy = @sqrt(m.c * m.c + m.d * m.d);
+        const sx = mathx.mat2dScaleX(m.a, m.b);
+        const sy = mathx.mat2dScaleY(m.c, m.d);
         const angle = std.math.atan2(m.b, m.a);
         return .{ .angle_rad = angle, .sx = sx, .sy = sy };
     }
@@ -279,14 +287,20 @@ pub fn applyXY(x: f32, y: f32) [2]f32 {
 /// Combined effective scale on the X axis (canvas zoom × node-matrix sx).
 pub fn effectiveScaleX() f32 {
     var s: f32 = 1;
-    if (g_node_matrix_active) s *= @sqrt(g_node_matrix_stack[g_node_matrix_top].a * g_node_matrix_stack[g_node_matrix_top].a + g_node_matrix_stack[g_node_matrix_top].b * g_node_matrix_stack[g_node_matrix_top].b);
+    if (g_node_matrix_active) {
+        const nm = g_node_matrix_stack[g_node_matrix_top];
+        s *= mathx.mat2dScaleX(nm.a, nm.b);
+    }
     if (g_transform_active) s *= g_transform_scale;
     return s;
 }
 
 pub fn effectiveScaleY() f32 {
     var s: f32 = 1;
-    if (g_node_matrix_active) s *= @sqrt(g_node_matrix_stack[g_node_matrix_top].c * g_node_matrix_stack[g_node_matrix_top].c + g_node_matrix_stack[g_node_matrix_top].d * g_node_matrix_stack[g_node_matrix_top].d);
+    if (g_node_matrix_active) {
+        const nm = g_node_matrix_stack[g_node_matrix_top];
+        s *= mathx.mat2dScaleY(nm.c, nm.d);
+    }
     if (g_transform_active) s *= g_transform_scale;
     return s;
 }
@@ -323,8 +337,8 @@ pub fn resolveRect(x: f32, y: f32, w: f32, h: f32) TransformedRect {
 
     if (g_node_matrix_active) {
         const m = g_node_matrix_stack[g_node_matrix_top];
-        const sx = @sqrt(m.a * m.a + m.b * m.b);
-        const sy = @sqrt(m.c * m.c + m.d * m.d);
+        const sx = mathx.mat2dScaleX(m.a, m.b);
+        const sy = mathx.mat2dScaleY(m.c, m.d);
         const angle = std.math.atan2(m.b, m.a);
         const cx = x + w / 2;
         const cy = y + h / 2;
@@ -666,6 +680,7 @@ const StaticSurfaceEntry = struct {
     view: ?*wgpu.TextureView = null,
     sampler: ?*wgpu.Sampler = null,
     bind_group: ?*wgpu.BindGroup = null,
+    bind_group_3d: ?*wgpu.BindGroup = null,
     ready: bool = false,
     active: bool = false,
     warmup_started_frame: u64 = 0,
@@ -748,6 +763,7 @@ fn findStaticEntry(hash: u64, key_len: usize) ?usize {
 fn releaseStaticResources(entry: *StaticSurfaceEntry) void {
     if (entry.filter_bind_group) |bg| bg.release();
     if (entry.filter_uniform_buf) |buf| buf.release();
+    if (entry.bind_group_3d) |bg| bg.release();
     if (entry.bind_group) |bg| bg.release();
     if (entry.sampler) |sampler| sampler.release();
     if (entry.view) |view| view.release();
@@ -899,6 +915,37 @@ pub fn staticSurfaceWarming(key: []const u8, width_f: f32, height_f: f32, warmup
     }
     const age = g_frame_counter -| entry.warmup_started_frame;
     return age < warmup_frames;
+}
+
+/// Return a 3D-pipeline-compatible bind group for a StaticSurface texture.
+/// The bind group uses the Scene3D diffuse layout (texture@0, sampler@1)
+/// and is cached on the StaticSurfaceEntry so repeated lookups are free.
+///
+/// Unlike the 2D paint path, we do NOT require entry.ready == true. The
+/// 2D path uses `ready` to avoid compositing a stale quad while a new
+/// capture is in flight. For 3D mesh texturing, the previous frame's
+/// texture content is still valid in GPU memory until drawAll() overwrites
+/// it. This prevents a chicken-and-egg where the StaticSurface is always
+/// stale relative to the Scene3D render (both are in the same paint loop,
+/// but the 3D scene is drawn before the StaticSurface GPU capture finishes).
+pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
+    const idx = findStaticEntry(staticKeyHash(key), key.len) orelse return null;
+    const entry = &g_static_entries[idx];
+    if (entry.view == null or entry.sampler == null) return null;
+    if (entry.bind_group_3d) |bg| return bg;
+
+    const layout_ = scene3d.getTexBindGroupLayout() orelse return null;
+    const device = getDevice() orelse return null;
+    const entries = [_]wgpu.BindGroupEntry{
+        .{ .binding = 0, .texture_view = entry.view.? },
+        .{ .binding = 1, .sampler = entry.sampler.? },
+    };
+    entry.bind_group_3d = device.createBindGroup(&.{
+        .layout = layout_,
+        .entry_count = entries.len,
+        .entries = &entries,
+    }) orelse return null;
+    return entry.bind_group_3d;
 }
 
 pub fn beginStaticSurfaceCapture(key: []const u8, x: f32, y: f32, width_f: f32, height_f: f32, opacity: f32, intro_frames: u16, scale_f: f32) ?StaticSurfaceToken {
@@ -1373,6 +1420,7 @@ pub fn initWeb(device: *wgpu.Device, queue: *wgpu.Queue, width: u32, height: u32
     capsules.initPipeline(device, globals_buffer);
     log.print("[gpu.initWeb] init polys pipeline...\n", .{});
     polys.initPipeline(device, globals_buffer);
+    gcurve_fill.initPipeline(device, globals_buffer);
     log.print("[gpu.initWeb] init images pipeline...\n", .{});
     images.initPipeline(device, globals_buffer);
     filters.ensureInit(device, g_format);
@@ -1477,6 +1525,7 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     curves.initPipeline(device, globals_buffer);
     capsules.initPipeline(device, globals_buffer);
     polys.initPipeline(device, globals_buffer);
+    gcurve_fill.initPipeline(device, globals_buffer);
     images.initPipeline(device, globals_buffer);
     filters.ensureInit(device, g_format);
     sdf_icons.init();
@@ -1538,6 +1587,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         polys.reset();
         images.reset();
         sdf_icons.reset();
+        gcurve_fill.reset();
         g_static_capture_count = 0;
         g_scissor_count = 0;
         g_scissor_depth = 0;
@@ -1576,6 +1626,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     // SDF icon quads — outside the dirty-check fast path because their atlas
     // is immutable but instance positions change with layout.
     if (sdf_icons.count() > 0) sdf_icons.upload(queue);
+    if (gcurve_fill.count() > 0) gcurve_fill.upload(queue);
 
     renderStaticSurfaceCaptures(device, queue);
 
@@ -1684,6 +1735,17 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     // may not clip cleanly at scroll edges. Acceptable for the speed win;
     // wire into PrimitiveCounts later if clipping fidelity becomes the
     // bottleneck.
+    // G-curve fill — Loop-Blinn quadratic-bezier-triangle fills. Same one-
+    // batched-draw pattern as sdf_icons; sits outside the static-surface
+    // capture / scissor segmentation system for now (acceptable v0 limit:
+    // gcurves inside scrollviews don't clip cleanly at scroll edges).
+    {
+        const total_gcurves: u32 = @intCast(gcurve_fill.count());
+        if (total_gcurves > 0) {
+            render_pass.setScissorRect(0, 0, g_width, g_height);
+            gcurve_fill.drawBatch(render_pass, 0, total_gcurves);
+        }
+    }
     {
         const total_icons: u32 = @intCast(sdf_icons.count());
         if (total_icons > 0) {
@@ -1729,6 +1791,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     polys.reset();
     images.reset();
     sdf_icons.reset();
+    gcurve_fill.reset();
     g_static_capture_count = 0;
     g_scissor_count = 0;
     g_scissor_depth = 0;

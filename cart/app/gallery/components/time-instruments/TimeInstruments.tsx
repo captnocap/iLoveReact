@@ -514,15 +514,3 @@ export function SecondLoom(props: TimeInstrumentProps) {
   );
 }
 
-export function TimeInstrumentDeck(props: TimeInstrumentProps) {
-  const now = useClockNow(props.now);
-  const width = props.width ?? 560;
-  return (
-    <S.StackX6 style={{ width, minWidth: 0 }}>
-      <BinaryClock now={now} width={width} />
-      <TimeRibbons now={now} width={width} />
-      <WordClock now={now} width={width} />
-      <SecondLoom now={now} width={width} />
-    </S.StackX6>
-  );
-}

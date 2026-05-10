@@ -5,7 +5,7 @@
 // row at `actionDefaults[<roleId>]`.
 
 import { useState } from 'react';
-import { Box, Pressable, ScrollView } from '@reactjit/runtime/primitives';
+import { Box, Pressable } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
 import { Icon } from '@reactjit/runtime/icons/Icon';
 import { Check, X, ChevronDown, Clock, GitCommit, Save } from '@reactjit/runtime/icons/icons';
@@ -170,6 +170,11 @@ export default function ActionsRoute() {
                 paddingBottom: 14,
                 borderBottomWidth: idx === ROLES.length - 1 ? 0 : 1,
                 borderBottomColor: 'theme:rule',
+                // Hoist the entire row above sibling rows when its picker is
+                // open. paintChildrenInZOrder only re-sorts within one parent —
+                // a high zIndex on just the picker doesn't outpaint the next
+                // role row's subtree, which is why the picker bled-through.
+                zIndex: isOpen ? 999 : 0,
               }}>
                 {/* Row header — label + current binding + pick + clear */}
                 <Box style={{ flexDirection: 'row', gap: 14, alignItems: 'center' }}>
@@ -179,29 +184,119 @@ export default function ActionsRoute() {
                   </Box>
 
                   <Box style={{ flexDirection: 'row', gap: 8, flexShrink: 0, alignItems: 'center' }}>
-                    <Pressable onPress={() => setOpenRoleId(isOpen ? null : r.id)}>
-                      <Box style={{
-                        flexDirection: 'row', alignItems: 'center', gap: 8,
-                        paddingLeft: 14, paddingRight: 16, paddingTop: 9, paddingBottom: 9,
-                        borderRadius: 'theme:radiusMd',
-                        borderWidth: 1, borderColor: 'theme:rule',
-                        backgroundColor: 'theme:bg2',
-                        width: 280,
-                      }}>
-                        {(() => {
-                          const iid = effectiveIconId(m, conn);
-                          return iid && PROVIDER_ICONS[iid]
-                            ? <ProviderIcon providerId={iid} size={18} />
-                            : <Box style={{ width: 18, height: 18, flexShrink: 0 }} />;
-                        })()}
-                        <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
-                          <S.ButtonOutlineLabel noWrap>
-                            {m ? modelLabel(m) : '— pick a model —'}
-                          </S.ButtonOutlineLabel>
+                    {/* Trigger + picker share an anchor Box so the picker can
+                        position: absolute against the trigger and overlay
+                        whatever sits below this row, instead of inflating the
+                        flex layout and pushing later rows down. The framework
+                        treats non-zero zIndex as a paint pass with a fresh
+                        full-viewport scissor (engine.zig:1663) — same trick
+                        useContextMenu uses. */}
+                    <Box style={{ flexDirection: 'column', flexShrink: 0 }}>
+                      <Pressable onPress={() => setOpenRoleId(isOpen ? null : r.id)}>
+                        <Box style={{
+                          flexDirection: 'row', alignItems: 'center', gap: 8,
+                          paddingLeft: 14, paddingRight: 16, paddingTop: 9, paddingBottom: 9,
+                          borderRadius: 'theme:radiusMd',
+                          borderWidth: 1, borderColor: 'theme:rule',
+                          backgroundColor: 'theme:bg2',
+                          width: 280,
+                        }}>
+                          {(() => {
+                            const iid = effectiveIconId(m, conn);
+                            return iid && PROVIDER_ICONS[iid]
+                              ? <ProviderIcon providerId={iid} size={18} />
+                              : <Box style={{ width: 18, height: 18, flexShrink: 0 }} />;
+                          })()}
+                          <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
+                            <S.ButtonOutlineLabel noWrap>
+                              {m ? modelLabel(m) : '— pick a model —'}
+                            </S.ButtonOutlineLabel>
+                          </Box>
+                          <Icon icon={ChevronDown} size={13} color="theme:inkDim" strokeWidth={2} />
                         </Box>
-                        <Icon icon={ChevronDown} size={13} color="theme:inkDim" strokeWidth={2} />
-                      </Box>
-                    </Pressable>
+                      </Pressable>
+
+                      {/* Click-outside backdrop — full-viewport Pressable
+                          beneath the picker. Style goes on the Pressable
+                          itself (not a child Box) so its hit-test bounds
+                          actually cover the viewport — wrapping a Box in a
+                          Pressable collapses the Pressable to 0×0 because
+                          the absolute child contributes nothing to its
+                          parent's intrinsic size. */}
+                      {isOpen && (
+                        <Pressable onPress={() => setOpenRoleId(null)} style={{
+                          position: 'absolute',
+                          top: -10000, left: -10000,
+                          width: 100000, height: 100000,
+                          zIndex: 998,
+                        }} />
+                      )}
+
+                      {/* Expanded picker — absolute overlay anchored under the
+                          trigger. The picker itself is the scroll container
+                          (overflow:scroll + bounded height) — no nested
+                          ScrollView needed. The inner Box just lays the
+                          items out and grows past the picker's height; the
+                          picker clips and scrolls. */}
+                      {isOpen && (
+                        <Box style={{
+                          position: 'absolute',
+                          top: 44, right: 0,
+                          zIndex: 999,
+                          width: 280,
+                          flexDirection: 'column',
+                          paddingTop: 6, paddingBottom: 6,
+                          paddingLeft: 6, paddingRight: 6,
+                          borderRadius: 'theme:radiusMd',
+                          backgroundColor: 'theme:bg2',
+                          borderWidth: 1, borderColor: 'theme:rule',
+                          height: 320,
+                          overflow: 'scroll',
+                        }}>
+                          {matching.length === 0 ? (
+                            <Box style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 8, paddingRight: 8 }}>
+                              <S.BodyDim>
+                                No {MODALITY_LABEL[r.modality].toLowerCase()} models available.
+                                Add a provider, then refetch in Models.
+                              </S.BodyDim>
+                            </Box>
+                          ) : (
+                            <Box style={{ flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4 }}>
+                              {matching.map((opt: any) => {
+                                const isSelected = opt.id === bound;
+                                const optConn = connFor(opt.connectionId);
+                                return (
+                                  <Pressable key={opt.id} onPress={() => setBinding(r.id, opt.id)}>
+                                    <Box style={{
+                                      flexDirection: 'row', gap: 10, alignItems: 'center',
+                                      paddingTop: 8, paddingBottom: 8,
+                                      paddingLeft: 10, paddingRight: 10,
+                                      borderRadius: 6,
+                                      backgroundColor: isSelected ? 'theme:bg1' : 'transparent',
+                                      borderWidth: 1, borderColor: isSelected ? 'theme:accent' : 'transparent',
+                                    }}>
+                                      <Box style={{ width: 14, alignItems: 'center' }}>
+                                        {isSelected && <Icon icon={Check} size={12} color="theme:accent" strokeWidth={2} />}
+                                      </Box>
+                                      {(() => {
+                                        const iid = effectiveIconId(opt, optConn);
+                                        return iid && PROVIDER_ICONS[iid]
+                                          ? <ProviderIcon providerId={iid} size={20} />
+                                          : <Box style={{ width: 20, height: 20 }} />;
+                                      })()}
+                                      <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, flexDirection: 'column', gap: 2 }}>
+                                        <S.Body noWrap>{modelLabel(opt)}</S.Body>
+                                        <S.Caption noWrap>{optConn?.label || opt.connectionId}</S.Caption>
+                                      </Box>
+                                    </Box>
+                                  </Pressable>
+                                );
+                              })}
+                            </Box>
+                          )}
+                        </Box>
+                      )}
+                    </Box>
 
                     {m && (
                       <Pressable onPress={() => setBinding(r.id, null)} tooltip="Clear binding">
@@ -218,63 +313,6 @@ export default function ActionsRoute() {
                     )}
                   </Box>
                 </Box>
-
-                {/* Expanded picker — list of matching models */}
-                {isOpen && (
-                  <Box style={{
-                    flexDirection: 'column',
-                    paddingTop: 6, paddingBottom: 6,
-                    paddingLeft: 6, paddingRight: 6,
-                    borderRadius: 'theme:radiusMd',
-                    backgroundColor: 'theme:bg2',
-                    borderWidth: 1, borderColor: 'theme:rule',
-                    maxHeight: 320,
-                  }}>
-                    {matching.length === 0 ? (
-                      <Box style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 8, paddingRight: 8 }}>
-                        <S.BodyDim>
-                          No {MODALITY_LABEL[r.modality].toLowerCase()} models available.
-                          Add a provider, then refetch in Models.
-                        </S.BodyDim>
-                      </Box>
-                    ) : (
-                      <ScrollView style={{ width: '100%', height: 308 }} showScrollbar>
-                        <Box style={{ flexDirection: 'column', gap: 2, paddingTop: 4, paddingBottom: 4 }}>
-                          {matching.map((opt: any) => {
-                            const isSelected = opt.id === bound;
-                            const optConn = connFor(opt.connectionId);
-                            return (
-                              <Pressable key={opt.id} onPress={() => setBinding(r.id, opt.id)}>
-                                <Box style={{
-                                  flexDirection: 'row', gap: 10, alignItems: 'center',
-                                  paddingTop: 8, paddingBottom: 8,
-                                  paddingLeft: 10, paddingRight: 10,
-                                  borderRadius: 6,
-                                  backgroundColor: isSelected ? 'theme:bg1' : 'transparent',
-                                  borderWidth: 1, borderColor: isSelected ? 'theme:accent' : 'transparent',
-                                }}>
-                                  <Box style={{ width: 14, alignItems: 'center' }}>
-                                    {isSelected && <Icon icon={Check} size={12} color="theme:accent" strokeWidth={2} />}
-                                  </Box>
-                                  {(() => {
-                                    const iid = effectiveIconId(opt, optConn);
-                                    return iid && PROVIDER_ICONS[iid]
-                                      ? <ProviderIcon providerId={iid} size={20} />
-                                      : <Box style={{ width: 20, height: 20 }} />;
-                                  })()}
-                                  <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, flexDirection: 'column', gap: 2 }}>
-                                    <S.Body noWrap>{modelLabel(opt)}</S.Body>
-                                    <S.Caption noWrap>{optConn?.label || opt.connectionId}</S.Caption>
-                                  </Box>
-                                </Box>
-                              </Pressable>
-                            );
-                          })}
-                        </Box>
-                      </ScrollView>
-                    )}
-                  </Box>
-                )}
               </Box>
             );
           })}

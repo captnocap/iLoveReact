@@ -36,10 +36,10 @@ Host registration surface (`registerSdk`)
     - non-stream: `http:<rid>` + full JSON payload
     - stream chunk: `http-stream:<rid>` + chunk body string
     - stream end/error: `http-stream-end:<rid>` + `{"status":N}` or `{"error":"..."}`
-- Page fetch:
-  - `hostBrowserPageSync` calls `page_fetch.fetchSync`
-  - `hostBrowserPageAsync` queues request in `page_fetch` and stores rid
-  - `tickDrain` polls and emits `browser-page:<rid>`.
+- Browser page fetch:
+  - `hostBrowserPageSync` calls `net_http.fetchSync`
+  - `hostBrowserPageAsync` queues request in `net_http` and stores rid
+  - `tickDrain` polls `net_http.poll` and emits `browser-page:<rid>`.
 
 ### AI bridges
 - Claude/Kimi/local-ai each have `init/send/poll/close` hosts.
@@ -119,34 +119,29 @@ Execution internals
   - if streaming: emits `.chunk` responses by slicing into `MAX_BODY` chunks.
 - Supports `GET/POST/PUT/DELETE/PATCH/HEAD`, proxy from opts or environment, and follows redirects in curl options.
 
-## 4) `framework/net/page_fetch.zig` (dependency hop 3)
+## 4) Browser page fetch (unified into `framework/net/http.zig`)
 
 Purpose
-- Browser-like GET-only page fetch worker pool for shell-like HTML/text extraction.
-- Kept separate from generic HTTP client (libcurl worker path above).
+- Browser-like GET-only page fetch for shell-like HTML/text extraction.
+- Unified with the generic HTTP client — shares the same `std.http.Client` worker pool.
 
 Topology
-- `Request` is fixed URL-only ID+buffer queue.
-- `Response` includes:
-  - status
-  - final URL
-  - content-type
-  - body
-  - truncated flag
-  - response type (`complete`/`err`).
-- Constants: `MAX_REDIRECTS=5`, `MAX_BODY=256KB`, queue depth `16`, workers `4`.
+- Uses the same `Request`/`Response` types as generic HTTP, with additional fields:
+  - `final_url` — captured from the redirect chain
+  - `content_type` — captured from the `Content-Type` header
+- Constants: queue depth `16`, workers `4`.
 
 Flow
-- `init()` starts worker threads.
+- `init()` starts worker threads (shared with all HTTP traffic).
 - Async queue:
-  - `request(id,url)` copies URL bytes, pushes request.
+  - `request(id, .{ .url = url })` copies URL bytes, pushes request.
   - `poll(out)` returns completed `Response` values.
 - Sync path:
-  - `fetchSync(url)` runs `executeRequest` inline and returns `Response` directly.
+  - `fetchSync(.{ .url = url })` runs `executeRequest` inline and returns `Response` directly.
 - Shutdown via `destroy()` pushes sentinel `Request` records and joins workers.
 
 Execution internals
-- `executeRequest`:
+- `executeRequest` uses `std.http.Client`'s low-level API to capture headers and final URL after redirects.
   - performs redirect loop using `resolveRedirect`, bounded by `MAX_REDIRECTS` and a simple status whitelist.
   - parses HTTP status, `content-type`, `location`, chunked transfer.
   - copies final URL/content-type/body into fixed response buffers.

@@ -1,11 +1,14 @@
 #!/bin/sh
-# scripts/tui — bundle a TUI cart and run it on tools/v8cli.
+# scripts/tui — bundle a cart through tui/entry.tsx and run it on tools/v8cli.
 #
 # Usage:  scripts/tui [<entry.tsx>]
 #         (default: tui/examples/counter.tsx)
 #
-# All TUI carts share `tui/host.ts` (reconciler config + ANSI paint) and
-# `tui/v8-preamble.js` (timer/stdin polyfills + microtask trampoline).
+# The cart is bundled via the TUI entry, which boots the same react-reconciler
+# the GPU host uses (renderer/hostConfig.ts) but routes paint to a character
+# grid (tui/host.ts). Cart code can therefore use the same primitives
+# (Box, Text, Pressable, ScrollView from runtime/primitives.tsx) it would
+# use on the GPU host.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -14,17 +17,24 @@ ENTRY="${1:-tui/examples/counter.tsx}"
 shift 2>/dev/null || true
 ESBUILD="$ROOT/tools/esbuild"
 V8CLI="$ROOT/tools/v8cli"
-# Fall back to fresh build if tools/v8cli is older than zig-out/bin/v8cli.
 [ -x "$ROOT/zig-out/bin/v8cli" ] && [ "$ROOT/zig-out/bin/v8cli" -nt "$V8CLI" ] && V8CLI="$ROOT/zig-out/bin/v8cli"
 
-# react / react-reconciler / scheduler materialized from vendor/. Bun
-# followed symlinks into vendor/ and couldn't resolve nested requires,
+# Resolve the cart entry to an absolute path so the alias works regardless
+# of where esbuild executes its module resolver from.
+case "$ENTRY" in
+  /*) ENTRY_ABS="$ENTRY" ;;
+  *)  ENTRY_ABS="$ROOT/$ENTRY" ;;
+esac
+[ -f "$ENTRY_ABS" ] || { echo "[tui] missing entry: $ENTRY" >&2; exit 2; }
+
+# react / react-reconciler / scheduler materialized from deps/. Bun
+# followed symlinks into deps/ and couldn't resolve nested requires,
 # so we copy (one-time, ~1.6MB; gitignored).
 NM="$ROOT/tui/node_modules"
 if [ ! -d "$NM/react-reconciler/cjs" ]; then
   mkdir -p "$NM"
   for pkg in react react-reconciler scheduler loose-envify js-tokens; do
-    [ -d "$NM/$pkg" ] || cp -RL "$ROOT/vendor/$pkg" "$NM/$pkg"
+    [ -d "$NM/$pkg" ] || cp -RL "$ROOT/deps/$pkg" "$NM/$pkg"
   done
 fi
 
@@ -33,12 +43,12 @@ SIZE=$(stty size 2>/dev/null || echo "24 80")
 ROWS=$(echo "$SIZE" | cut -d' ' -f1)
 COLS=$(echo "$SIZE" | cut -d' ' -f2)
 
-NAME=$(basename "$ENTRY" .tsx)
+NAME=$(basename "$ENTRY_ABS" .tsx)
 OUT="$ROOT/tui/.cache/bundle-$NAME.js"
 mkdir -p "$ROOT/tui/.cache"
 
 "$ESBUILD" \
-  --bundle "$ENTRY" \
+  --bundle "$ROOT/tui/entry.tsx" \
   --outfile="$OUT" \
   --platform=neutral \
   --main-fields=module,main \
@@ -51,6 +61,14 @@ mkdir -p "$ROOT/tui/.cache"
   --define:__TUI_ROWS__=$ROWS \
   --log-level=warning \
   --resolve-extensions=.tsx,.ts,.jsx,.js \
-  --conditions=default
+  --conditions=default \
+  --alias:@cart-entry="$ENTRY_ABS" \
+  --alias:@reactjit/core="$ROOT/runtime/core_stub.ts" \
+  --alias:@reactjit/runtime="$ROOT/runtime" \
+  --alias:react="$ROOT/deps/react" \
+  --alias:react-reconciler="$ROOT/deps/react-reconciler" \
+  --alias:scheduler="$ROOT/deps/scheduler" \
+  --alias:loose-envify="$ROOT/deps/loose-envify" \
+  --alias:js-tokens="$ROOT/deps/js-tokens"
 
 "$V8CLI" "$OUT" "$@"

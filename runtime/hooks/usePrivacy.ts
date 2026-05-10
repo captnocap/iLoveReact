@@ -568,6 +568,15 @@ export function usePrivacy(opts: PrivacyOptions = {}): PrivacyAPI {
   };
 }
 
+// ── Non-hook alias ─────────────────────────────────────────────────
+//
+// `usePrivacy` is a pure builder — no `useState`/`useEffect`/`useRef` —
+// so it's safe to call from non-React contexts (service modules, batch
+// scripts, error paths). Use `privacyOps` there to avoid React's
+// rules-of-hooks lint warnings on the `use*` name.
+
+export const privacyOps = usePrivacy;
+
 // ── Inferred surface type (exported for app type-checking) ─────────
 
 export type PrivacyAPI = ReturnType<typeof makeStub>;

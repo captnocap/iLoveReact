@@ -30,7 +30,7 @@
 
 import { Box, Col, Row, Graph, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import { EASINGS, EASING_NAMES, type EasingName } from '@reactjit/runtime/easing';
-import { useHostAnimation } from '@reactjit/runtime/hooks/useHostAnimation';
+import { useHostAnimation, type CurveName } from '@reactjit/runtime/hooks/useHostAnimation';
 
 const CYCLE_MS = 1800;
 const TILE_W = 160;
@@ -58,14 +58,12 @@ function EasingTileHost(props: { name: EasingName }) {
   // Three host-side animations per tile: dot x, dot y, bar ball x.
   // Cart code never touches per-frame state for these.
   //
-  // Note: the host-side easing.zig has linear / easeIn / easeOut /
-  // easeInOut / spring / bounce — not the full 30 named easings the
-  // JS side has. For perf-comparison purposes, drive every tile with
-  // 'easeInOut'; visual fidelity to the named easing is irrelevant
-  // to the FPS measurement.
-  // dotX moves LINEARLY with time across the X axis — matches the
-  // original `PLOT.x + props.t * PLOT.w`. The curve shape comes
-  // entirely from dotY (and the bar uses the eased value too).
+  // dotX is linear in time (the X axis IS the time axis on the plot);
+  // dotY and barLeft both use the tile's actual easing curve so each
+  // tile shows its real shape. framework/easing.zig has all 31 named
+  // easings (mirrors EASINGS in runtime/easing.ts), animations.zig
+  // dispatches via CurveType.fromString.
+  const tileCurve = props.name as CurveName;
   useHostAnimation({
     latch: `easing-host:${props.name}:dotX`,
     curve: 'linear',
@@ -76,7 +74,7 @@ function EasingTileHost(props: { name: EasingName }) {
   });
   useHostAnimation({
     latch: `easing-host:${props.name}:dotY`,
-    curve: 'easeInOut',
+    curve: tileCurve,
     from: PLOT.y + PLOT.h - 3,
     to: PLOT.y - 3,
     durationMs: CYCLE_MS,
@@ -84,7 +82,7 @@ function EasingTileHost(props: { name: EasingName }) {
   });
   useHostAnimation({
     latch: `easing-host:${props.name}:barLeft`,
-    curve: 'easeInOut',
+    curve: tileCurve,
     from: -5,
     to: PLOT.w - 5,
     durationMs: CYCLE_MS,

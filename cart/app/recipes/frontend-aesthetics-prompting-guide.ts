@@ -5,7 +5,7 @@ export const recipe: RecipeDocument = {
   title: "Frontend Aesthetics: A Prompting Guide",
   sourcePath: "cart/app/recipes/frontend-aesthetics-prompting-guide.md",
   instructions:
-    "A prompt blob that pushes Claude away from generic 'AI slop' frontend defaults. In our stack it rides on the user message — framework/v8_bindings_sdk.zig:932 (hostClaudeInit) doesn't expose system_prompt to the cart yet — so prepend it to every UI-generation turn.",
+    "A prompt blob that pushes Claude away from generic 'AI slop' frontend defaults. In our stack it rides on the user message — the Claude branch of useAssistant doesn't expose a system_prompt opt yet (only openai_compat does) — so prepend it to every UI-generation turn.",
   sections: [
     {
       kind: "paragraph",
@@ -65,20 +65,24 @@ that you think outside the box!
     },
     {
       kind: "code-block",
-      title: "Sending it through the v8 bindings",
-      language: "typescript",
-      code: `const host: any = globalThis;
-const claude_init = typeof host.__claude_init === 'function'
-  ? host.__claude_init : (_a: string, _b: string, _c?: string) => 0;
-const claude_send = typeof host.__claude_send === 'function'
-  ? host.__claude_send : (_: string) => 0;
+      title: "Sending it through useAssistant",
+      language: "tsx",
+      code: `import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
 
-function askForFrontend(workspace: string, model: string, request: string): boolean {
-  if (!claude_init(workspace, model)) return false;
+function FrontendBuilder({ workspace, model, request }: { workspace: string; model: string; request: string }) {
+  const { events, ask, ready } = useAssistant({
+    backend: 'claude_code',
+    cwd: workspace,
+    model,
+  });
 
-  // No system_prompt override from the cart yet — concatenate.
-  const prompt = \`\${FRONTEND_AESTHETICS_PROMPT}\\n\\n\${request}\`;
-  return claude_send(prompt);
+  useEffect(() => {
+    if (!ready() || !request) return;
+    // No system_prompt opt for claude_code yet — concatenate into the user turn.
+    ask(\`\${FRONTEND_AESTHETICS_PROMPT}\\n\\n\${request}\`);
+  }, [ready(), request]);
+
+  return <RenderEvents events={events} />;
 }`,
     },
     {
@@ -111,10 +115,10 @@ gradients on white. Draw from IDE themes and cultural aesthetics.
     },
     {
       kind: "bullet-list",
-      title: "Caveats and TODOs against the v8 bindings",
+      title: "Caveats and TODOs against the worker bindings",
       items: [
-        "No system_prompt from the cart. framework/claude_sdk/options.zig:35 has the field; framework/v8_bindings_sdk.zig:932 doesn't pass it through. Concatenate into the user message today; move to the system slot when wired.",
-        "No turn-history persistence. Each new __claude_init is a fresh subprocess. Re-send the aesthetics block per session until resume_session is exposed cleanly.",
+        "No system_prompt for claude_code in the worker opts. The openai_compat backend already accepts systemPrompt — wire it through framework/assistant/claude_sdk/options.zig and surface a systemPrompt opt for claude_code in framework/assistant/worker_bindings.zig. Concatenate into the user message today; move to the system slot when wired.",
+        "No turn-history persistence by default. Each useAssistant mount spawns a fresh worker. Pass resumeSession to keep the conversation when the cart can supply a session id; otherwise re-send the aesthetics block per session.",
       ],
     },
     {
@@ -122,9 +126,9 @@ gradients on white. Draw from IDE themes and cultural aesthetics.
       title: "Pattern summary",
       items: [
         "Keep the aesthetics block as a TS string export so it's a one-liner to import anywhere.",
-        "Concatenate ${AESTHETICS}\\n\\n${request} and pass that to __claude_send.",
+        "Concatenate ${AESTHETICS}\\n\\n${request} and pass that to ask().",
         "For narrow tasks, send a slice (typography / motion / color) instead of the full bundle.",
-        "When system_prompt opens up in the bindings, move the block onto the system slot.",
+        "When systemPrompt opens up for claude_code in the worker bindings, move the block onto the system slot.",
       ],
     },
   ],

@@ -6,12 +6,12 @@ export const recipe: RecipeDocument = {
   sourcePath:
     "cart/app/recipes/giving-claude-a-crop-tool-for-better-image-analysis.md",
   instructions:
-    "Let Claude zoom into images by driving framework/v8_bindings_sdk.zig's __claude_* globals: stage the image to a workspace dir, send a prompt that instructs Read+Bash crops via PIL, and drain assistant/tool_use/result events from __claude_poll().",
+    "Let Claude zoom into images by mounting useAssistant({ backend: 'claude_code', cwd, model }): stage the image to a workspace dir, send a prompt that instructs Read+Bash crops via PIL, and read the assistant_message / tool_call events from the hook's events array.",
   sections: [
     {
       kind: "paragraph",
       text:
-        "Claude sees the entire image at once. For tasks that need fine detail — close bar values, small text, dense diagrams — that's limiting. In our stack we don't define a custom crop_image tool over MCP; we drive Claude Code as a subprocess and lean on built-in Read + Bash. Claude reads the source PNG, shells out to python3+PIL (or ImageMagick) to write a cropped file, then reads that file.",
+        "Claude sees the entire image at once. For tasks that need fine detail — close bar values, small text, dense diagrams — that's limiting. In our stack we don't define a custom crop_image tool over MCP; we drive Claude Code as a subprocess (via useAssistant({ backend: 'claude_code' })) and lean on built-in Read + Bash. Claude reads the source PNG, shells out to python3+PIL (or ImageMagick) to write a cropped file, then reads that file.",
     },
     {
       kind: "bullet-list",
@@ -27,85 +27,65 @@ export const recipe: RecipeDocument = {
       kind: "code-block",
       title: "Architecture in this repo",
       language: "text",
-      code: `.tsx cart  ── globals ──>  framework/v8_bindings_sdk.zig
-                            │
-                            └─ framework/claude_sdk/Session
-                                  └─ subprocess: \`claude --input-format stream-json\``,
+      code: `.tsx cart  ── useAssistant ──>  framework/assistant/worker_bindings.zig
+                                  │
+                                  └─ framework/assistant/claude_sdk/Session
+                                        └─ subprocess: \`claude --input-format stream-json\``,
     },
     {
       kind: "code-block",
-      title: "The four globals exposed by v8_bindings_sdk",
+      title: "The hook surface",
       language: "typescript",
-      code: `declare global {
-  // Returns true if the session was created (or already exists).
-  function __claude_init(cwd: string, model?: string, resumeSession?: string): boolean;
+      code: `import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
 
-  // Queue a user turn. Returns true if queued.
-  function __claude_send(text: string): boolean;
-
-  // Drain at most one parsed event from the subprocess. Returns undefined if
-  // nothing is ready. Call once per frame from the GUI loop.
-  function __claude_poll(): ClaudeMessage | undefined;
-
-  // Tear the session down. Idempotent.
-  function __claude_close(): void;
-}`,
+// One mount = one worker = one session. Returns:
+const {
+  events,      // append-only WorkerEvent[] timeline; reactive
+  ask,         // (text: string) => boolean — queue a user turn
+  phase,       // 'init' | 'starting' | 'idle' | 'streaming' | 'failed' | 'closed'
+  ready,       // () => boolean — true once worker has spawned
+  close,       // () => void — manual teardown; the hook also tears down on unmount
+  workerId,    // backend-assigned worker id (debug-only)
+  error,       // last error string, if any
+} = useAssistant({ backend: 'claude_code', cwd, model });`,
     },
     {
       kind: "bullet-list",
-      title: "What hostClaudeInit hardcodes (framework/v8_bindings_sdk.zig:932)",
+      title: "What the Claude worker hardcodes today",
       items: [
         "permission_mode = bypass_permissions — no prompts, all tools auto-approved.",
         "verbose = true, inherit_stderr = true.",
         "allowed_tools is NOT plumbed through yet — the session inherits Claude Code's default toolset (Read, Bash, Edit, Glob, Grep, ...). Sandbox by choice of cwd.",
-        "No system_prompt override from the cart. Anything system-prompty rides on the user message.",
+        "No systemPrompt override from the cart for claude_code. Anything system-prompty rides on the user message.",
       ],
     },
     {
       kind: "code-block",
-      title: "Message shape returned from __claude_poll",
+      title: "WorkerEvent shape (relevant kinds)",
       language: "typescript",
-      code: `type ClaudeMessage =
-  | { type: 'system'; session_id: string; model?: string; cwd?: string; tools: string[] }
-  | {
-      type: 'assistant';
-      id?: string; session_id?: string; stop_reason?: string;
-      input_tokens: number; output_tokens: number;
-      content: Array<
-        | { type: 'text'; text: string }
-        | { type: 'thinking'; thinking: string }
-        | { type: 'tool_use'; id: string; name: string; input_json: string }
-      >;
-      text?: string;        // joined text blocks for convenience
-      thinking?: string;    // joined thinking blocks
-    }
-  | { type: 'user'; session_id?: string; content_json: string }
-  | {
-      type: 'result';
-      subtype: string; session_id: string; result?: string;
-      total_cost_usd: number; duration_ms: number;
-      num_turns: number; is_error: boolean;
-    };
+      code: `// from runtime/hooks/useAssistant.ts
+interface WorkerEvent {
+  id: number;
+  worker_id: string;
+  session_id: string;
+  backend: 'claude_code' | 'codex_app_server' | 'kimi_cli_wire' | 'local_ai' | 'openai_compat';
+  kind:
+    | 'assistant_message'   // text chunks from the model
+    | 'reasoning'           // thinking/scratch text (subset of backends)
+    | 'tool_call'           // model invoked a tool — payload_json carries name+args
+    | 'tool_output'         // tool returned — payload_json carries result
+    | 'usage' | 'completion' | 'error_'
+    | 'lifecycle' | 'context_switch' | 'status' | 'user_message' | 'raw';
+  text?: string;
+  payload_json?: string;    // backend-shaped JSON for tool_call / raw events
+  cost_usd_delta?: number;
+  usage?: { input_tokens; output_tokens; cache_creation_input_tokens; cache_read_input_tokens };
+  // ...
+}
 
-// Note: tool_use.input_json is a STRING, not pre-parsed. JSON.parse before destructuring.`,
-    },
-    {
-      kind: "code-block",
-      title: "Cart-side FFI shims (matches cart/sweatshop/index.tsx:4)",
-      language: "typescript",
-      code: `const host: any = globalThis;
-const claude_init  = typeof host.__claude_init  === 'function'
-  ? host.__claude_init
-  : (_a: string, _b: string, _c?: string) => 0;
-const claude_send  = typeof host.__claude_send  === 'function'
-  ? host.__claude_send
-  : (_: string) => 0;
-const claude_poll  = typeof host.__claude_poll  === 'function'
-  ? host.__claude_poll
-  : () => null;
-const claude_close = typeof host.__claude_close === 'function'
-  ? host.__claude_close
-  : () => {};`,
+// payload_json on a tool_call event holds something like
+//   { "name": "Read", "input": "{\\"file_path\\":\\"chart.png\\"}", "id": "..." }
+// JSON.parse it before destructuring.`,
     },
     {
       kind: "code-block",
@@ -159,85 +139,65 @@ When you have an answer, state it clearly with a one-line conclusion.\`;
     },
     {
       kind: "code-block",
-      title: "Polling loop: drain __claude_poll on a 50ms tick",
-      language: "typescript",
-      code: `type Turn = {
+      title: "Cart component: derive the running turn from events",
+      language: "tsx",
+      code: `import { useEffect, useMemo, useState } from 'react';
+import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
+import { useAssistant, WorkerEvent } from '@reactjit/runtime/hooks/useAssistant';
+
+interface Turn {
   text: string;
   thinking: string;
   toolCalls: Array<{ name: string; input: unknown }>;
   done: boolean;
   cost: number;
-};
+}
 
-function runTurn(workspace: string, model: string, prompt: string,
-                 onUpdate: (t: Turn) => void): () => void {
-  if (!claude_init(workspace, model)) {
-    onUpdate({ text: '[error] failed to start session', thinking: '',
-               toolCalls: [], done: true, cost: 0 });
-    return () => {};
-  }
-  if (!claude_send(prompt)) {
-    onUpdate({ text: '[error] failed to send', thinking: '',
-               toolCalls: [], done: true, cost: 0 });
-    claude_close();
-    return () => {};
-  }
-
-  const turn: Turn = { text: '', thinking: '', toolCalls: [], done: false, cost: 0 };
-  const handle = setInterval(() => {
-    const msg = claude_poll();
-    if (!msg) return;
-
-    if (msg.type === 'assistant') {
-      if (msg.text) turn.text += msg.text;
-      if (msg.thinking) turn.thinking += msg.thinking;
-      for (const block of msg.content ?? []) {
-        if (block.type === 'tool_use') {
-          let parsed: unknown = block.input_json;
-          try { parsed = JSON.parse(block.input_json); } catch {}
-          turn.toolCalls.push({ name: block.name, input: parsed });
-        }
-      }
-      onUpdate({ ...turn });
-    } else if (msg.type === 'result') {
-      turn.done = true;
-      turn.cost = msg.total_cost_usd ?? 0;
-      onUpdate({ ...turn });
-      clearInterval(handle);
-      claude_close();
+function reduceTurn(events: WorkerEvent[]): Turn {
+  let text = '', thinking = '';
+  const toolCalls: Turn['toolCalls'] = [];
+  let done = false, cost = 0;
+  for (const ev of events) {
+    if (ev.kind === 'assistant_message' && ev.text) text += ev.text;
+    else if (ev.kind === 'reasoning' && ev.text)    thinking += ev.text;
+    else if (ev.kind === 'tool_call' && ev.payload_json) {
+      try {
+        const parsed = JSON.parse(ev.payload_json);
+        let input: unknown = parsed?.input;
+        if (typeof input === 'string') { try { input = JSON.parse(input); } catch {} }
+        toolCalls.push({ name: parsed?.name ?? '?', input });
+      } catch {}
     }
-    // 'system' and 'user' events: ignore for this recipe.
-  }, 50);
+    else if (ev.kind === 'completion') {
+      done = true;
+      cost += ev.cost_usd_delta ?? 0;
+    }
+  }
+  return { text, thinking, toolCalls, done, cost };
+}
 
-  return () => { clearInterval(handle); claude_close(); };
-}`,
-    },
-    {
-      kind: "code-block",
-      title: "Wiring it into a cart component",
-      language: "tsx",
-      code: `import { useEffect, useState } from 'react';
-import { Box, Col, Pressable, Row, Text } from '@reactjit/runtime/primitives';
-
-export default function CropDemo({ workspace, chartPng, question }: Props) {
-  const [turn, setTurn] = useState<Turn>({
-    text: '', thinking: '', toolCalls: [], done: false, cost: 0,
-  });
+export default function CropDemo({ workspace, chartPng, question }: {
+  workspace: string; chartPng: Uint8Array; question: string;
+}) {
+  const [staged, setStaged] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    (async () => {
-      try {
-        await stageImage(workspace, chartPng);
-        cleanup = runTurn(workspace, 'claude-opus-4-6',
-                          buildPrompt(question), setTurn);
-      } catch (err) {
-        setError(String(err));
-      }
-    })();
-    return () => { cleanup?.(); };
+    stageImage(workspace, chartPng).then(() => setStaged(true)).catch(e => setError(String(e)));
   }, []);
+
+  const { events, ask, ready } = useAssistant({
+    backend: 'claude_code',
+    cwd: workspace,
+    model: 'claude-opus-4-7',
+  });
+
+  useEffect(() => {
+    if (!staged || !ready()) return;
+    ask(buildPrompt(question));
+  }, [staged, ready()]);
+
+  const turn = useMemo(() => reduceTurn(events), [events]);
 
   return (
     <Col className="p-4 gap-3">
@@ -270,13 +230,13 @@ $0.0182`,
     },
     {
       kind: "bullet-list",
-      title: "Caveats and TODOs against the current bindings",
+      title: "Caveats and TODOs against the current worker bindings",
       items: [
-        "One session at a time. g_claude_session is module-level (framework/v8_bindings_sdk.zig:24); a second __claude_init while one is live no-ops and returns true — events would multiplex into the wrong cart.",
-        "No allowed_tools from the cart yet. Sandbox by cwd today; add an opts struct to hostClaudeInit when this matters.",
-        "No system_prompt override from the cart. Anything system-prompty rides on the user message.",
+        "One worker per useAssistant mount — by design. Two CropDemos render two workers, each with its own session and event stream.",
+        "No allowed_tools from the cart yet. Sandbox by cwd today; add an opts field to the Claude branch of framework/assistant/worker_bindings.zig when this matters.",
+        "No systemPrompt override from the cart for claude_code. Anything system-prompty rides on the user message.",
         "Image input is filesystem-only. No base64 image content blocks — Claude reads files. Always stage to cwd first.",
-        "tool_use.input_json is an unparsed string. JSON.parse it before destructuring.",
+        "tool_call payload_json is backend-shaped and the inner `input` may be a JSON-encoded string. JSON.parse twice if needed before destructuring.",
       ],
     },
     {
@@ -284,10 +244,10 @@ $0.0182`,
       title: "Pattern summary",
       items: [
         "Stage the source image to a workspace dir.",
-        "__claude_init(cwd, model) → start the subprocess.",
-        "__claude_send(prompt) with the question + a 'use Read+Bash to crop, then Read the crop' instruction.",
-        "Drain __claude_poll() from a 50ms tick; route assistant text/tool_use to UI, stop on result.",
-        "__claude_close() when done.",
+        "Mount useAssistant({ backend: 'claude_code', cwd, model }) — the hook owns the worker.",
+        "ask(prompt) once the hook is ready, with the question + a 'use Read+Bash to crop, then Read the crop' instruction.",
+        "Reduce the events array into your turn shape; tool_call events carry the Read/Bash invocations.",
+        "close() / unmount when done; the hook tears the worker down automatically.",
       ],
     },
   ],

@@ -5,22 +5,22 @@ export const recipe: RecipeDocument = {
   title: "Knowledge Graph Construction with Claude",
   sourcePath: "cart/app/recipes/knowledge-graph-construction-with-claude.md",
   instructions:
-    "Build an in-memory knowledge graph from unstructured documents using Claude through framework/v8_bindings_sdk.zig. Two-phase pipeline (extract → resolve aliases → assemble → query) with each phase a fresh __claude_send turn. JSON-fence parsing replaces the original recipe's messages.parse() since structured output isn't exposed by our subprocess pathway.",
+    "Build an in-memory knowledge graph from unstructured documents using Claude through the unified worker contract. Two-phase pipeline (extract → resolve aliases → assemble → query). Each phase is a fresh worker turn driven through useAssistant for in-component flows, or via a small runOneTurn helper that talks directly to the __worker_* host fns for batch pipelines outside React render. JSON-fence parsing replaces the original recipe's messages.parse() since structured output isn't exposed by our subprocess pathway.",
   sections: [
     {
       kind: "paragraph",
       text:
-        "The original recipe uses client.messages.parse() with Pydantic schemas, two models (Haiku for extraction, Sonnet for resolution), and NetworkX. We adapt for v8 bindings: prompt for JSON inside fenced code blocks, parse it from assistant.text, hold the graph in plain JS state.",
+        "The original recipe uses client.messages.parse() with Pydantic schemas, two models (Haiku for extraction, Sonnet for resolution), and NetworkX. We adapt for the worker contract: prompt for JSON inside fenced code blocks, parse it from the assistant_message events, hold the graph in plain JS state.",
     },
     {
       kind: "code-block",
       title: "Pipeline shape",
       language: "text",
       code: `documents
-   │ (extract — one __claude_send per doc)
+   │ (extract — one worker turn per doc)
    ▼
 raw entities + raw relations
-   │ (resolve — group by entity type, one __claude_send per type)
+   │ (resolve — group by entity type, one worker turn per type)
    ▼
 canonical entities + alias map
    ▼
@@ -31,43 +31,57 @@ grounded answer with edge citations`,
     },
     {
       kind: "code-block",
-      title: "Two-model strategy: model swap = session restart",
+      title: "Two-model strategy: model swap = worker respawn",
       language: "typescript",
       code: `const EXTRACTION_MODEL = 'claude-haiku-4-5';
 const SYNTHESIS_MODEL  = 'claude-sonnet-4-6';
 
-// Each phase opens its own session with the right model.
-// __claude_close() between phases is fine and cheap because each phase
+// Each phase opens its own worker with the right model.
+// Closing + reopening between phases is fine and cheap because each phase
 // reads/writes plain JS state, not in-session conversation memory.`,
     },
     {
       kind: "code-block",
-      title: "FFI shims + askOnce helper",
+      title: "runOneTurn helper — Promise wrapper around the worker host fns",
       language: "typescript",
-      code: `const host: any = globalThis;
-const claude_init  = typeof host.__claude_init  === 'function' ? host.__claude_init  : (_a:string,_b:string,_c?:string)=>0;
-const claude_send  = typeof host.__claude_send  === 'function' ? host.__claude_send  : (_:string)=>0;
-const claude_poll  = typeof host.__claude_poll  === 'function' ? host.__claude_poll  : ()=>null;
-const claude_close = typeof host.__claude_close === 'function' ? host.__claude_close : ()=>{};
+      code: `// useAssistant is the React-hook surface; for batch pipelines outside
+// render we talk to the underlying __worker_* fns directly. The hook and
+// this helper share the same Zig-side WorkerStore.
 
-function askOnce(cwd: string, model: string, prompt: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!claude_init(cwd, model)) return reject(new Error('init failed'));
-    if (!claude_send(prompt)) { claude_close(); return reject(new Error('send failed')); }
+import { callHost, hasHost } from '@reactjit/runtime/ffi';
 
-    let text = '';
-    const handle = setInterval(() => {
-      const msg = claude_poll();
-      if (!msg) return;
-      if (msg.type === 'assistant' && msg.text) text += msg.text;
-      if (msg.type === 'result') {
-        clearInterval(handle);
-        claude_close();
-        if (msg.is_error) reject(new Error(msg.result || 'error'));
-        else resolve(text);
+type Backend = 'claude_code' | 'codex_app_server' | 'kimi_cli_wire' | 'local_ai' | 'openai_compat';
+
+interface OneTurnOpts {
+  backend: Backend;
+  cwd?: string;
+  model?: string;
+  // ...other useAssistant opts; see runtime/hooks/useAssistant.ts
+}
+
+export async function runOneTurn(opts: OneTurnOpts, prompt: string): Promise<string> {
+  if (!hasHost('__worker_start')) throw new Error('worker bindings not registered');
+  const wid = callHost('__worker_start', opts.backend, JSON.stringify(opts)) as string;
+  if (!wid) throw new Error('worker_start failed');
+  if (!callHost('__worker_send', wid, prompt)) {
+    callHost('__worker_close', wid);
+    throw new Error('worker_send failed');
+  }
+  let text = '';
+  while (true) {
+    const events = (callHost('__worker_poll', wid) as any[]) ?? [];
+    for (const ev of events) {
+      if (ev.kind === 'assistant_message' && ev.text) text += ev.text;
+      else if (ev.kind === 'completion') {
+        callHost('__worker_close', wid);
+        return text;
+      } else if (ev.kind === 'error_') {
+        callHost('__worker_close', wid);
+        throw new Error(ev.text || 'worker error');
       }
-    }, 50);
-  });
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
 }`,
     },
     {
@@ -80,7 +94,7 @@ function askOnce(cwd: string, model: string, prompt: string): Promise<string> {
   return JSON.parse(m[1]);
 }
 
-// On parse failure: ask Claude to retry with "return ONLY a fenced JSON block,
+// On parse failure: re-run runOneTurn with "return ONLY a fenced JSON block,
 // no prose". One nudge is usually enough.`,
     },
     {
@@ -116,7 +130,10 @@ Return ONLY a fenced JSON block. Schema:
 \\\`\\\`\\\`\`;
 
 async function extract(cwd: string, doc: { title: string; text: string }): Promise<ExtractedGraph> {
-  const reply = await askOnce(cwd, EXTRACTION_MODEL, EXTRACTION_PROMPT(doc.text));
+  const reply = await runOneTurn(
+    { backend: 'claude_code', cwd, model: EXTRACTION_MODEL },
+    EXTRACTION_PROMPT(doc.text),
+  );
   return extractJsonFence(reply) as ExtractedGraph;
 }`,
     },
@@ -170,7 +187,10 @@ async function resolveType(
   const unique = new Map<string, string>();
   for (const e of entities) if (!unique.has(e.name)) unique.set(e.name, e.description);
   const list = [...unique].map(([name, desc]) => \`- \${name}: \${desc}\`).join('\\n');
-  const reply = await askOnce(cwd, SYNTHESIS_MODEL, RESOLVE_PROMPT(entityType, list));
+  const reply = await runOneTurn(
+    { backend: 'claude_code', cwd, model: SYNTHESIS_MODEL },
+    RESOLVE_PROMPT(entityType, list),
+  );
   return (extractJsonFence(reply) as { clusters: Cluster[] }).clusters;
 }`,
     },
@@ -275,7 +295,7 @@ async function ask(cwd: string, question: string, center: string, hops = 2): Pro
 </graph>
 
 Question: \${question}\`;
-  return askOnce(cwd, SYNTHESIS_MODEL, prompt);
+  return runOneTurn({ backend: 'claude_code', cwd, model: SYNTHESIS_MODEL }, prompt);
 }`,
     },
     {
@@ -305,21 +325,21 @@ for (const [docTitle, labels] of Object.entries(gold)) {
     },
     {
       kind: "bullet-list",
-      title: "Caveats and TODOs against the v8 bindings",
+      title: "Caveats and TODOs against the worker bindings",
       items: [
         "No messages.parse / structured output. Ask for JSON fences and parse manually; budget one retry on parse failure.",
-        "One session at a time (g_claude_session is module-level, framework/v8_bindings_sdk.zig:24). Phases are sequential; no parallel extraction from one cart.",
-        "Model swap costs a session restart. __claude_close() + __claude_init(cwd, newModel) is cheap, but you lose in-session context. Keep prompts stateless from Claude's POV.",
+        "runOneTurn opens one worker per call — each carries the spawn cost of starting the claude subprocess. Acceptable for batch pipelines; for interactive flows reach for useAssistant which keeps a worker warm across mounts.",
+        "Phases are sequential as written. Multiple workers can run in parallel — call runOneTurn from several await Promise.all() arms — but each backend has its own spawn cost.",
         "No add_dirs from the cart. Documents must live under cwd, or be inlined in the prompt. For Wikipedia-style summaries, inlining is correct.",
-        "Cost telemetry is per-session, not per-graph. Sum result.total_cost_usd across phases yourself for a graph-build total.",
+        "Cost telemetry is per-completion, not per-graph. Sum cost_usd_delta across the events array (or wrap runOneTurn to return both text and cost) for a graph-build total.",
       ],
     },
     {
       kind: "bullet-list",
       title: "Pattern summary",
       items: [
-        "One session per phase per document/type. askOnce opens, sends, drains, closes.",
-        "Prompt for JSON inside a fenced block; parse out of assistant.text.",
+        "One worker turn per phase per document/type. runOneTurn opens, sends, drains, closes.",
+        "Prompt for JSON inside a fenced block; parse out of the assistant_message text.",
         "Resolve aliases per type using the description as the disambiguation signal.",
         "Hold the graph in plain JS Maps/arrays — no NetworkX needed.",
         "Query by walking N hops, serializing the subgraph, asking Sonnet against that context only.",

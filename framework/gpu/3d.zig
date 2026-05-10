@@ -9,7 +9,7 @@ const wgpu = @import("wgpu");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
 const images = @import("images.zig");
-const math = @import("../math.zig");
+const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
 
@@ -303,6 +303,7 @@ const MeshSpec = struct {
     tex_w: u32 = 0,
     tex_h: u32 = 0,
     tex_rgba: ?[]const u8 = null,
+    tex_key: ?[]const u8 = null,
 };
 
 // ════════════════════════════════════════════════════════════════════════
@@ -529,6 +530,10 @@ pub fn init() void {
     g_initialized = g_pipeline != null;
 }
 
+pub fn getTexBindGroupLayout() ?*wgpu.BindGroupLayout {
+    return g_tex_bind_group_layout;
+}
+
 pub fn deinit() void {
     // Release every pool slot's resources.
     for (0..MAX_RT_POOL) |i| {
@@ -643,12 +648,12 @@ fn estimateMeshRadius(node: *const Node) f32 {
     if (std.mem.eql(u8, geo, "plane")) {
         const hx = node.scene3d_size_x * sx * 0.5;
         const hz = node.scene3d_size_z * sz * 0.5;
-        return @sqrt(hx * hx + hz * hz);
+        return math.length2(hx, hz);
     }
     if (std.mem.eql(u8, geo, "cylinder") or std.mem.eql(u8, geo, "cone")) {
         const r = node.scene3d_radius * @max(sx, sz);
         const hy = node.scene3d_size_y * sy * 0.5;
-        return @sqrt(r * r + hy * hy);
+        return math.length2(r, hy);
     }
     if (std.mem.eql(u8, geo, "torus")) {
         return (node.scene3d_radius + node.scene3d_tube_radius) * @max(sx, sz);
@@ -656,7 +661,7 @@ fn estimateMeshRadius(node: *const Node) f32 {
     const hx = node.scene3d_size_x * sx * 0.5;
     const hy = node.scene3d_size_y * sy * 0.5;
     const hz = node.scene3d_size_z * sz * 0.5;
-    return @sqrt(hx * hx + hy * hy + hz * hz);
+    return math.length3(hx, hy, hz);
 }
 
 fn buildMeshSpec(node: *const Node) MeshSpec {
@@ -672,6 +677,7 @@ fn buildMeshSpec(node: *const Node) MeshSpec {
         .tex_w = node.scene3d_tex_w,
         .tex_h = node.scene3d_tex_h,
         .tex_rgba = node.scene3d_tex_rgba,
+        .tex_key = node.scene3d_tex_key,
     };
 }
 
@@ -866,6 +872,9 @@ fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_of
     if (spec.tex_rgba) |rgba| {
         if (getOrCreateTexBindGroup(rgba, spec.tex_w, spec.tex_h)) |bg| tex_bg = bg;
     }
+    if (spec.tex_key) |key| {
+        if (images.staticSurfaceBindGroup3D(key)) |bg| tex_bg = bg;
+    }
     if (tex_bg) |bg| pass.setBindGroup(1, bg, 0, null);
     pass.setVertexBuffer(0, g_vertex_buffer.?, vert_byte_offset.*, vert_bytes);
     pass.draw(vert_count, 1, 0, 0);
@@ -1011,7 +1020,7 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
                     const dx = child.scene3d_dir_x;
                     const dy = child.scene3d_dir_y;
                     const dz = child.scene3d_dir_z;
-                    const len = @sqrt(dx * dx + dy * dy + dz * dz);
+                    const len = math.length3(dx, dy, dz);
                     if (len > 0.001) {
                         light_dir = .{ dx / len, dy / len, dz / len };
                     }

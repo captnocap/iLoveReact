@@ -5,11 +5,13 @@
 // AssistantChatProvider stays unchanged.
 //
 // Connection.kind → backend mapping:
-//   - claude-code-cli   → claude_code (claude_sdk drives the CLI)
-//   - anthropic-api-key → claude_code (same SDK; no configDir override)
+//   - claude-code-cli   → claude_code     (claude_sdk drives the CLI)
+//   - anthropic-api-key → claude_code     (same SDK; no configDir override)
 //   - kimi-api-key      → kimi_cli_wire
-//   - local-runtime     → unsupported until Backend gains local_ai
-//   - openai-api-key    → unsupported until codex_app_server bridge lands
+//   - codex-cli         → codex_app_server (local `codex` stdio JSON-RPC)
+//   - openai-api-key    → openai_compat   (OpenAI Chat Completions HTTP — also covers Codex via API key)
+//   - openai-api-like   → openai_compat   (OpenRouter / LMStudio / Ollama / etc.)
+//   - local-runtime     → local_ai
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useCRUD } from '../db';
@@ -22,15 +24,31 @@ const NS = 'app';
 const SETTINGS_ID = 'settings_default';
 const passthrough: any = { parse: (v: unknown) => v };
 
+function expandTilde(raw: string): string {
+  const v0 = raw.trim();
+  if (!v0) return '';
+  // Tolerate "/~/foo" too — older saves resolved a literal tilde from
+  // cwd=/ before reaching the consumer, baking the leading slash into
+  // the stored locator.
+  const v = v0.startsWith('/~/') || v0 === '/~' ? v0.slice(1) : v0;
+  if (v === '~') {
+    const home = hasHost('__env') ? (callHost<string>('__env', '', 'HOME') || '') : '';
+    return home || v;
+  }
+  if (v.startsWith('~/')) {
+    const home = hasHost('__env') ? (callHost<string>('__env', '', 'HOME') || '') : '';
+    if (home) return `${home}/${v.slice(2)}`;
+  }
+  return v;
+}
+
 function resolveConfigDir(raw: string): string {
   const v = raw.trim();
   if (!v) return '';
+  // The Claude SDK reads ~/.claude by default — return empty so it
+  // uses the built-in default rather than receiving a redundant path.
   if (v === '~/.claude' || v === '~/.claude/') return '';
-  if (v.startsWith('~/') || v === '~') {
-    const home = hasHost('__env') ? (callHost<string>('__env', '', 'HOME') || '') : '';
-    if (home) return v === '~' ? home : `${home}/${v.slice(2)}`;
-  }
-  return v;
+  return expandTilde(v);
 }
 
 function processCwd(): string {
@@ -53,6 +71,7 @@ function kindToBackend(kind: string | undefined): AssistantBackend | undefined {
   if (!kind) return undefined;
   if (kind === 'claude-code-cli' || kind === 'anthropic-api-key') return 'claude_code';
   if (kind === 'kimi-api-key') return 'kimi_cli_wire';
+  if (kind === 'codex-cli') return 'codex_app_server';
   if (kind === 'local-runtime') return 'local_ai';
   if (kind === 'openai-api-key' || kind === 'openai-api-like') return 'openai_compat';
   return undefined;
@@ -108,9 +127,16 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
       ? resolveConfigDir(String(conn.credentialRef.locator))
       : '';
   const model = boundModel?.remoteId || '';
+  // For local-runtime models, the .gguf file path lives on the model
+  // row's remoteId (set by the gguf-walk in settings/lib/fetch.ts) —
+  // the connection's credentialRef.locator points to the *folder*
+  // containing all the gguf files. Pass the model-specific path so
+  // local_ai_runtime opens the actual file. expandTilde is defensive
+  // against locators that already had a literal tilde resolved from
+  // cwd=/ (showing up as "/~/...").
   const modelPath =
-    kind === 'local-runtime' && conn?.credentialRef?.locator
-      ? String(conn.credentialRef.locator)
+    kind === 'local-runtime' && boundModel?.remoteId
+      ? expandTilde(String(boundModel.remoteId))
       : '';
   const cwd = processCwd();
 
@@ -142,7 +168,20 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
     model,
     modelPath,
     configDir: cfgDir,
-    nCtx: backend === 'local_ai' ? 4096 : undefined,
+    // Local model context: pull from the model row's contextLength
+    // (set by the gguf-walk / list fetch in settings/lib/fetch.ts), but
+    // clamp at 32k. The model registry advertises the model's *trained*
+    // window (e.g. 262144 for Gemma-4 / Mistral / Qwen3.6) — passing
+    // that straight through to llama.cpp allocates a KV cache big
+    // enough to OOM the machine on load. 32k is a sane default for
+    // chat; carts that genuinely need more should plumb their own cap.
+    nCtx: backend === 'local_ai'
+      ? Math.min(Number(boundModel?.contextLength) || 32768, 32768)
+      : undefined,
+    // Generation cap. The runtime's prior 256-token default truncated
+    // every reply mid-sentence; 8192 is enough headroom for a
+    // reasoning-heavy local model to think AND respond.
+    maxTokens: backend === 'local_ai' ? 8192 : undefined,
     baseUrl: baseUrl || undefined,
     apiKey: apiKey || undefined,
     tools: toolsJson,
@@ -237,5 +276,11 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
     error: assistant.error,
     ask,
     ready: assistant.ready,
+    /** Active worker id. Changes whenever useAssistant respawns the
+     *  worker (model swap, backend swap, key rotation). The chat
+     *  provider compares against its own "last bootstrapped" id to
+     *  decide whether to re-prime the new worker with the cart-owned
+     *  transcript. */
+    workerId: assistant.workerId,
   };
 }

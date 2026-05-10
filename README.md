@@ -105,7 +105,7 @@ This isn't React with a thinner browser. It's React without a browser. Behind th
 - **Layout** — `framework/layout.zig` + `framework/engine.zig`. Custom flexbox; no Yoga, no Taffy. Sizing tiers (explicit / content / proportional fallback), hit-testing, scroll, focus, z-index scissor breakouts.
 - **Text** — `framework/text.zig` + `framework/gpu/text.zig`. Font loading, glyph cache, shaping, line-break, paint. No HarfBuzz, no Pango.
 - **GPU drawing** — `framework/gpu/{rects,capsules,curves,polys,images,procgen,shaders,text,3d}.zig` on top of wgpu-native.
-- **Networking** — `framework/net/{tcp,udp,http,httpserver,websocket,wsserver,socks5,tor,rcon,a2s,page_fetch,ipc}.zig`. HTTP/1.1, WS client+server, SOCKS5, Tor (control port + onion service), RCON, A2S. The `tcp via:tor` and `tcp via:socks5` composition is by design — not a passthrough to a system socks daemon.
+- **Networking** — `framework/net/{tcp,udp,http,httpserver,websocket,wsserver,socks5,tor,rcon,a2s,ipc}.zig`. HTTP/1.1, WS client+server, SOCKS5, Tor (control port + onion service), RCON, A2S. The `tcp via:tor` and `tcp via:socks5` composition is by design — not a passthrough to a system socks daemon.
 - **Voice + audio + whisper** — `framework/voice.zig` (SDL3 + libfvad), `framework/audio.zig` (modular synth graph), `framework/whisper.zig` (whisper.cpp on a worker thread + VAD-gated buffer lifecycle).
 - **Video** — `framework/videos.zig`. `dlopen("libmpv.so.2")` with `RTLD_DEEPBIND` to isolate mpv's bundled Lua 5.2; mpv renders into a private GL FBO; we `glReadPixels` and upload to a wgpu texture. Hand-rolled embedding, not a process spawn.
 

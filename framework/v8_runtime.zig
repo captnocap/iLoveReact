@@ -38,7 +38,7 @@ pub fn initVM() void {
     // measured downward from whatever the C++ SP happens to be at isolate
     // creation. Our binding surface (every INGREDIENTS row's register fn,
     // each opening a HandleScope; comptime-unrolled inline-for in
-    // v8_app.appInit; static init for claude/kimi/local_ai/page_fetch
+    // v8_app.appInit; static init for claude/kimi/local_ai/net_http
     // imports) puts SP deep enough at this point that 700KB doesn't
     // survive the 1MB+ bundle parse + React first render. V8 throws
     // StackOverflow, and inside the throw path V8 14 (and newer) trips an

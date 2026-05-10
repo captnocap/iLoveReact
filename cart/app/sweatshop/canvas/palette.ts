@@ -19,6 +19,15 @@ import type { FlowNode, FlowEdge } from '../../gallery/components/flow-editor/ty
 
 export type PaletteTier = 'capability' | 'domain' | 'rules';
 
+/**
+ * Visible kind for an item in the palette UI. The capability tier
+ * mixes triggers and actions (and rules expand to a wired pair); the
+ * sidebar groups + tags by this so triggers and actions don't blur
+ * together in the list. Domain tokens get their own kind so the rail
+ * paints them with the same accent the canvas uses.
+ */
+export type PaletteItemKind = 'trigger' | 'action' | 'token' | 'rule';
+
 export interface PaletteSpawn {
   nodes: FlowNode[];
   edges?: FlowEdge[];
@@ -27,6 +36,9 @@ export interface PaletteSpawn {
 export type PaletteItem = {
   id: string;
   tier: PaletteTier;
+  /** What this item produces on the canvas. Drives the rail's group +
+   *  badge styling (sidebar) and the rule-shape validator (canvas). */
+  kind: PaletteItemKind;
   label: string;
   hint?: string;
   /** Build a spawn bundle at the given drop point. Single-node items
@@ -46,8 +58,9 @@ function capabilityNodes(): PaletteItem[] {
     items.push({
       id: `cap-trigger-${prefix}`,
       tier: 'capability',
+      kind: 'trigger',
       label: prefix,
-      hint: 'IFTTT trigger source',
+      hint: 'fires when this happens',
       spawn: (x, y) => ({
         nodes: [{
           id: newId('trg'),
@@ -63,8 +76,9 @@ function capabilityNodes(): PaletteItem[] {
     items.push({
       id: `cap-action-${prefix}`,
       tier: 'capability',
+      kind: 'action',
       label: prefix,
-      hint: 'IFTTT action verb',
+      hint: 'runs when triggered',
       spawn: (x, y) => ({
         nodes: [{
           id: newId('act'),
@@ -102,6 +116,7 @@ function domainNodes(): PaletteItem[] {
   return DOMAIN_SHAPES.map((s) => ({
     id: `dom-${s.name}`,
     tier: 'domain' as const,
+    kind: 'token' as const,
     label: s.name,
     hint: s.hint,
     spawn: (x, y) => ({
@@ -156,6 +171,7 @@ function ruleNodes(): PaletteItem[] {
   return RULE_STAMPS.map((s) => ({
     id: s.id,
     tier: 'rules' as const,
+    kind: 'rule' as const,
     label: s.label,
     hint: s.hint,
     spawn: (x, y) => {

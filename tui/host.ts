@@ -1,155 +1,417 @@
-// Tiny TUI host for ReactJIT primitives (Box, Text).
-// Same shape as renderer/hostConfig.ts — react-reconciler talks to us,
-// we build a tree, lay it out on a character grid, and paint with ANSI.
+// tui/host.ts — character-grid backend for renderer/hostConfig.
+//
+// We are NOT a reconciler. The reconciler is renderer/hostConfig.ts; we
+// just consume the Instance tree it builds. Each paint walks
+// getRootInstances() fresh, lays out on a character grid, and emits 24-bit
+// ANSI with dirty-cell diffing.
+//
+// Why this shape: the GPU host (framework/*.zig) reads style.* off the
+// same Instance tree. By consuming the same tree (and the same style prop
+// names — flexDirection, gap, padding, flexGrow, backgroundColor, color,
+// borderColor, borderWidth, fontWeight, overflow), any cart that uses
+// runtime/primitives.tsx renders here without source changes for the
+// subset of primitives we support (View/Text/Pressable/ScrollView).
+//
+// Other primitives (Image/Canvas/Video/etc.) render as placeholders in
+// Phase 1 — see tui/entry.tsx for the supported set.
 
-import Reconciler from 'react-reconciler';
-import { DefaultEventPriority } from 'react-reconciler/constants';
+import type { Instance, TextInstance } from '../renderer/hostConfig';
+import { getRootInstances, handlerRegistry } from '../renderer/hostConfig';
 
-// ── Tree ────────────────────────────────────────────────────────────
+// ── Repaint scheduling ───────────────────────────────────────────────
 
-export type BoxProps = {
-  width?: number | 'fill';
-  height?: number | 'fill';
-  flexDirection?: 'row' | 'column';
-  gap?: number;
-  padding?: number;
-  paddingX?: number;
-  paddingY?: number;
-  bg?: string;     // hex "#rrggbb"
-  fg?: string;
-  border?: boolean;
-  borderColor?: string;
-  bold?: boolean;
-  flexGrow?: number;
-  justify?: 'start' | 'center' | 'end' | 'between';
-  align?: 'start' | 'center' | 'end';
-  wrap?: boolean;
-};
-
-type Node =
-  | { kind: 'box'; id: number; type: 'box'; props: BoxProps; children: Node[] }
-  | { kind: 'text'; id: number; type: 'text'; props: BoxProps; children: Node[] }
-  | { kind: 'rawtext'; id: number; text: string };
-
-// A <text> node's rendered string is *derived* every paint from its
-// rawtext children — never cached. Otherwise React's commitTextUpdate
-// (which mutates the rawtext) would never propagate to the parent.
-function textOf(n: Node): string {
-  if (n.kind === 'rawtext') return n.text;
-  if (n.kind === 'text') return n.children.map(textOf).join('');
-  return '';
-}
-
-let idc = 0;
-const root: { children: Node[] } = { children: [] };
 let scheduled = false;
 let entered = false;
 
-function scheduleRepaint() {
+// ── Selection state ────────────────────────────────────────────────
+//
+// Drag-painted selection that survives repaints. Native terminal
+// selection breaks on any cell write to the row; we own this one in our
+// paint pipeline so it stays put no matter how busy the cart is. On
+// release the cells under the rect get sent to the system clipboard via
+// OSC 52.
+type Pt = { x: number; y: number };
+let selAnchor: Pt | null = null; // mouse-down origin
+let selFocus: Pt | null = null;  // current end (drag head or release pt)
+let selDragging = false;          // true between press and release
+
+export function requestPaint(): void {
   if (scheduled) return;
   scheduled = true;
-  queueMicrotask(() => { scheduled = false; repaint(); });
+  queueMicrotask(() => { scheduled = false; if (!paused) repaint(); });
 }
 
-// ── Reconciler config ───────────────────────────────────────────────
+// forcePaint — discard the prev-frame buffer so the next paint is a
+// full repaint. Use after large structural tree changes (route swaps,
+// tab switches) where cells the new tree doesn't cover would otherwise
+// stay frozen at their old content. The cost is one full-screen emit
+// (~1000 bytes/row vs ~30 bytes/cell), payable once per transition.
+export function forcePaint(): void {
+  prev = null;
+  requestPaint();
+}
 
-const cfg: any = {
-  supportsMutation: true,
-  supportsPersistence: false,
-  supportsHydration: false,
-  isPrimaryRenderer: true,
+// ── Pause ──────────────────────────────────────────────────────────
+//
+// While paused, repaint() is a no-op. The screen stays frozen at the
+// last painted state — terminal selection / highlight on any row stays
+// intact because nothing is overwriting cells. Use case: live log views
+// where a column ticks every frame and you want to copy a row.
+//
+// Carts can bind any key to togglePaused(). The host also auto-binds
+// Ctrl+P (\x10) as a default so users always have an escape hatch.
 
-  getRootHostContext: () => ({}),
-  getChildHostContext: () => ({}),
-  getPublicInstance: (n: any) => n,
-  prepareForCommit: () => null,
-  resetAfterCommit: () => scheduleRepaint(),
-  preparePortalMount: () => {},
-  scheduleTimeout: setTimeout,
-  cancelTimeout: clearTimeout,
-  noTimeout: -1,
-  // Always reconcile children — even single-string text content goes through
-  // createTextInstance so updates land in commitTextUpdate.
-  shouldSetTextContent: () => false,
-  getCurrentEventPriority: () => DefaultEventPriority,
-  getInstanceFromNode: () => null,
-  beforeActiveInstanceBlur: () => {},
-  afterActiveInstanceBlur: () => {},
-  prepareScopeUpdate: () => {},
-  getInstanceFromScope: () => null,
-  detachDeletedInstance: () => {},
-  clearContainer: (c: any) => { c.children.length = 0; },
+let paused = false;
 
-  createInstance(type: string, props: any): Node {
-    const id = ++idc;
-    if (type === 'text') return { kind: 'text', id, type: 'text', props, children: [] };
-    return { kind: 'box', id, type: 'box', props, children: [] };
-  },
-  createTextInstance(text: string): Node {
-    return { kind: 'rawtext', id: ++idc, text };
-  },
+export function isPaused(): boolean { return paused; }
+export function setPaused(p: boolean): void {
+  if (paused === p) return;
+  paused = p;
+  if (!paused) {
+    // Resume: force a full repaint so the screen catches up with any
+    // state changes that happened while frozen.
+    prev = null;
+    requestPaint();
+  } else {
+    // Paint the indicator immediately, then freeze.
+    repaintPauseIndicator();
+  }
+}
+export function togglePaused(): void { setPaused(!paused); }
 
-  appendInitialChild(parent: Node, child: Node) {
-    if (parent.kind === 'box' || parent.kind === 'text') parent.children.push(child);
-  },
-  appendChild(parent: Node, child: Node) { (cfg as any).appendInitialChild(parent, child); },
-  appendChildToContainer(container: any, child: Node) { container.children.push(child); },
-  removeChild(parent: Node, child: Node) {
-    if (parent.kind === 'box' || parent.kind === 'text') {
-      const i = parent.children.indexOf(child);
-      if (i !== -1) parent.children.splice(i, 1);
+// Indicator drawn at top-right corner so it's visible regardless of
+// what the cart's painting. Bypasses the dirty-diff path because we
+// want it to land NOW, not next requestPaint.
+function repaintPauseIndicator(): void {
+  if (!entered) return;
+  const W = process.stdout.columns || 80;
+  const label = ' ⏸ paused (Ctrl+P) ';
+  const x = Math.max(0, W - label.length);
+  // SGR: yellow bg, black fg, bold; then absolute cursor pos at row 1.
+  process.stdout.write(`\x1b[1;${x + 1}H\x1b[48;2;251;191;36m\x1b[38;2;15;23;42m\x1b[1m${label}\x1b[0m`);
+}
+
+// ── Style accessors ─────────────────────────────────────────────────
+
+type AnyProps = Record<string, any>;
+
+function styleOf(node: Instance): AnyProps {
+  return (node.props && (node.props as any).style) || {};
+}
+
+function asNumber(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+}
+
+// GPU carts use pixel sizes (padding: 24, width: 1280); the TUI grid is
+// in character cells. RJIT_TUI_SCALE divides every numeric sizing value
+// before layout. Set it (via env var) to ~8 for GPU carts; leave at 1
+// for cell-native TUI carts (counter, devshell). Read once at module init.
+const TUI_SCALE: number = (() => {
+  try {
+    const env: any = (globalThis as any).process?.env?.RJIT_TUI_SCALE;
+    const n = env ? parseFloat(env) : NaN;
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  } catch { return 1; }
+})();
+
+// Convert a numeric pixel-style value to cells. Scaled values clamp to >=0.
+function cells(n: number): number {
+  return Math.max(0, Math.round(n / TUI_SCALE));
+}
+
+function asCells(v: unknown): number | null {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return null;
+  return cells(v);
+}
+
+function padLeft(s: AnyProps): number {
+  return asCells(s.paddingLeft) ?? asCells(s.paddingX) ?? asCells(s.padding) ?? 0;
+}
+function padRight(s: AnyProps): number {
+  return asCells(s.paddingRight) ?? asCells(s.paddingX) ?? asCells(s.padding) ?? 0;
+}
+function padTop(s: AnyProps): number {
+  return asCells(s.paddingTop) ?? asCells(s.paddingY) ?? asCells(s.padding) ?? 0;
+}
+function padBottom(s: AnyProps): number {
+  return asCells(s.paddingBottom) ?? asCells(s.paddingY) ?? asCells(s.padding) ?? 0;
+}
+
+function borderW(s: AnyProps): number {
+  // We only render 0/1 — terminal cells aren't fractional.
+  const n = asNumber(s.borderWidth) ?? 0;
+  return n > 0 ? 1 : 0;
+}
+
+function flexDir(s: AnyProps): 'row' | 'column' {
+  return s.flexDirection === 'row' ? 'row' : 'column';
+}
+
+function isFill(v: unknown): boolean {
+  return v === '100%' || v === 'fill';
+}
+
+// Resolve a width/height value against a parent inner extent. Numbers
+// pass through; '100%'/'fill' resolves to parent extent; '50%' resolves
+// proportionally; anything else returns null (use intrinsic).
+function resolveExtent(v: unknown, parentInner: number): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return cells(v);
+  if (typeof v !== 'string') return null;
+  if (isFill(v)) return parentInner;
+  if (v.endsWith('%')) {
+    const pct = parseFloat(v.slice(0, -1));
+    if (Number.isFinite(pct)) return Math.max(0, Math.floor(parentInner * pct / 100));
+  }
+  return null;
+}
+
+// ── Wide-char width (East Asian Wide / Fullwidth / Wide Emoji) ─────
+//
+// Code points in these ranges occupy 2 cells in monospace fonts. Without
+// this, layout under-counts text width by 1 per wide char and right
+// borders punch through the gap to the next sibling. BMP-only for now;
+// surrogate pairs (most emoji) fall through as 1 cell — close enough
+// until a cart hits it.
+
+function charWidth(cp: number): number {
+  if (
+    (cp >= 0x1100 && cp <= 0x115F) ||  // Hangul Jamo
+    (cp >= 0x2E80 && cp <= 0x303E) ||  // CJK radicals + symbols
+    (cp >= 0x3041 && cp <= 0x33FF) ||  // Hiragana/Katakana/Bopomofo/Hangul/CJK letters
+    (cp >= 0x3400 && cp <= 0x4DBF) ||  // CJK Ext A
+    (cp >= 0x4E00 && cp <= 0x9FFF) ||  // CJK Unified
+    (cp >= 0xA000 && cp <= 0xA4CF) ||  // Yi
+    (cp >= 0xAC00 && cp <= 0xD7A3) ||  // Hangul Syllables
+    (cp >= 0xF900 && cp <= 0xFAFF) ||  // CJK Compat
+    (cp >= 0xFE30 && cp <= 0xFE4F) ||  // CJK Compat Forms
+    (cp >= 0xFF01 && cp <= 0xFF60) ||  // Fullwidth Forms (＋ ＝ ⓪ etc.)
+    (cp >= 0xFFE0 && cp <= 0xFFE6)     // Fullwidth signs (￠ ￡ etc.)
+  ) return 2;
+  return 1;
+}
+
+function strWidth(s: string): number {
+  let w = 0;
+  for (let i = 0; i < s.length; i++) w += charWidth(s.charCodeAt(i));
+  return w;
+}
+
+// ── Text collection ─────────────────────────────────────────────────
+
+function isInstance(n: Instance | TextInstance): n is Instance {
+  return !!n && 'children' in n;
+}
+
+// Collect the text content of a Text instance. primitives.tsx flattens
+// children at React-element time, so most Text nodes already have one or
+// two TextInstances as direct children. We still recurse defensively in
+// case a classifier or user wraps text in nested Text nodes.
+function collectText(node: Instance): string {
+  let out = '';
+  for (const child of node.children) {
+    if (!isInstance(child)) {
+      out += child.text;
+    } else if (child.type === 'Text' || child.type === 'CodeBlock') {
+      out += collectText(child);
     }
-  },
-  removeChildFromContainer(container: any, child: Node) {
-    const i = container.children.indexOf(child);
-    if (i !== -1) container.children.splice(i, 1);
-  },
-  insertBefore(parent: Node, child: Node, before: Node) {
-    if (parent.kind !== 'box' && parent.kind !== 'text') return;
-    const i = parent.children.indexOf(before);
-    if (i === -1) parent.children.push(child);
-    else parent.children.splice(i, 0, child);
-  },
-  insertInContainerBefore(container: any, child: Node, before: Node) {
-    const i = container.children.indexOf(before);
-    if (i === -1) container.children.push(child);
-    else container.children.splice(i, 0, child);
-  },
-  finalizeInitialChildren: () => false,
-  prepareUpdate(_inst: Node, _t: string, oldProps: any, newProps: any) {
-    return oldProps === newProps ? null : newProps;
-  },
-  commitUpdate(inst: Node, payload: any) {
-    if (!payload) return;
-    if (inst.kind === 'box' || inst.kind === 'text') inst.props = payload;
-  },
-  commitTextUpdate(inst: Node, _old: string, next: string) {
-    if (inst.kind === 'rawtext') inst.text = next;
-  },
-};
-
-const reconciler = Reconciler(cfg);
-const container = reconciler.createContainer(root, 0, null, false, null, '', () => {}, null);
-
-export function render(element: any) {
-  reconciler.updateContainer(element, container, null, () => {});
+    // Non-text inline children (Pressable, View) are ignored — they would
+    // be block siblings on the GPU side too. We don't have a true inline
+    // box model.
+  }
+  return out;
 }
 
-// ── Layout (flex on character grid) ─────────────────────────────────
+// ── Layout ──────────────────────────────────────────────────────────
 
-type Box = { x: number; y: number; w: number; h: number; node: Node };
+type Clip = { x: number; y: number; w: number; h: number };
+type LaidOut = { x: number; y: number; w: number; h: number; node: Instance; clip: Clip | null };
 
-function intrinsic(node: Node): { w: number; h: number } {
-  if (node.kind === 'rawtext') return { w: node.text.length, h: 1 };
-  if (node.kind === 'text') return { w: textOf(node).length, h: 1 };
+// ── ScrollView state ───────────────────────────────────────────────
+//
+// Per-instance vertical scroll offset, plus the current max scrollable
+// distance computed during layout. Wheel events / arrow keys mutate
+// scrollY; layout clamps. Map keyed by Instance.id so React's tree
+// re-creates don't strand state (id is stable across re-renders).
+const scrollY: Map<number, number> = new Map();
+const scrollMaxY: Map<number, number> = new Map();
+// Most recently interacted ScrollView (last wheel or click target).
+// Arrow keys scroll this one when no other key handler claims them.
+let activeScrollId: number | null = null;
 
-  const p = node.props;
-  const padX = p.paddingX ?? p.padding ?? 0;
-  const padY = p.paddingY ?? p.padding ?? 0;
-  const gap = p.gap ?? 0;
-  const dir = p.flexDirection ?? 'column';
-  const border = p.border ? 1 : 0;
-  const kids = node.children.map(intrinsic);
+// ── Terminal (vterm) slots ─────────────────────────────────────────
+//
+// Per-Instance vterm slot. The host calls __vterm_spawn(rows, cols)
+// the first time a Terminal is painted, stores the slot, and reuses
+// it across paints. activeTerminalId routes keystrokes to a focused
+// terminal's PTY.
+type TermEntry = { slot: number; rows: number; cols: number };
+const termSlots: Map<number, TermEntry> = new Map();
+let activeTerminalId: number | null = null;
+
+function decodeTerminalRow(grid: Cell[][], x: number, y: number, maxW: number, rowStr: string): void {
+  const W = grid[0]?.length ?? 0, H = grid.length;
+  if (y < 0 || y >= H) return;
+  if (!rowStr) return;
+  const cells = rowStr.split('\x1e');
+  const limit = Math.min(cells.length, maxW);
+  for (let i = 0; i < limit; i++) {
+    const xx = x + i;
+    if (xx < 0 || xx >= W || !inClip(xx, y)) continue;
+    const fields = cells[i].split('\x1f');
+    if (fields.length < 4) continue;
+    const ch = fields[0].length > 0 ? fields[0] : ' ';
+    const fg = fields[1].length > 0 ? '#' + fields[1] : null;
+    const bg = fields[2].length > 0 ? '#' + fields[2] : null;
+    const attrs = parseInt(fields[3], 10) || 0;
+    const c = grid[y][xx];
+    c.ch = ch;
+    c.fg = fg;
+    c.bg = bg;
+    c.bold      = (attrs & 0x01) !== 0;
+    c.italic    = (attrs & 0x02) !== 0;
+    c.underline = (attrs & 0x04) !== 0;
+    c.strike    = (attrs & 0x08) !== 0;
+    c.reverse   = (attrs & 0x10) !== 0;
+    c.dim = false;
+  }
+}
+
+function clipIntersect(a: Clip | null, b: Clip): Clip {
+  if (!a) return b;
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  const x2 = Math.min(a.x + a.w, b.x + b.w);
+  const y2 = Math.min(a.y + a.h, b.y + b.h);
+  return { x: x1, y: y1, w: Math.max(0, x2 - x1), h: Math.max(0, y2 - y1) };
+}
+
+// Topmost ScrollView containing point — for routing wheel/scroll keys
+// to the right viewport. Walks lastLayout in REVERSE (deepest first).
+function hitTestScroll(x: number, y: number): Instance | null {
+  for (let i = lastLayout.length - 1; i >= 0; i--) {
+    const b = lastLayout[i];
+    if (b.node.type !== 'ScrollView') continue;
+    if (x < b.x || x >= b.x + b.w) continue;
+    if (y < b.y || y >= b.y + b.h) continue;
+    return b.node;
+  }
+  return null;
+}
+
+function hitTestTerminal(x: number, y: number): Instance | null {
+  for (let i = lastLayout.length - 1; i >= 0; i--) {
+    const b = lastLayout[i];
+    if (b.node.type !== 'Terminal') continue;
+    if (x < b.x || x >= b.x + b.w) continue;
+    if (y < b.y || y >= b.y + b.h) continue;
+    return b.node;
+  }
+  return null;
+}
+
+function hitTestTextInput(x: number, y: number): Instance | null {
+  for (let i = lastLayout.length - 1; i >= 0; i--) {
+    const b = lastLayout[i];
+    const t = b.node.type;
+    if (t !== 'TextInput' && t !== 'TextArea' && t !== 'TextEditor') continue;
+    if (x < b.x || x >= b.x + b.w) continue;
+    if (y < b.y || y >= b.y + b.h) continue;
+    return b.node;
+  }
+  return null;
+}
+
+function findInstanceById(id: number): Instance | null {
+  for (let i = lastLayout.length - 1; i >= 0; i--) {
+    if (lastLayout[i].node.id === id) return lastLayout[i].node;
+  }
+  return null;
+}
+
+function scrollBy(id: number, delta: number): void {
+  const max = scrollMaxY.get(id) ?? 0;
+  const cur = scrollY.get(id) ?? 0;
+  const next = Math.max(0, Math.min(max, cur + delta));
+  if (next === cur) return;
+  scrollY.set(id, next);
+  requestPaint();
+}
+
+// Renderable visibility — Window/Notification/Effect/Render aren't part
+// of the visual tree on the GPU side either. Skip in layout.
+function isRenderable(node: Instance): boolean {
+  switch (node.type) {
+    case 'Effect':
+    case 'Render':
+    case 'Window':       // no multi-window TUI
+    case 'Notification':
+    case 'Audio':
+    case 'Physics':
+      return false;
+  }
+  return true;
+}
+
+function visibleChildren(node: Instance): Instance[] {
+  const out: Instance[] = [];
+  for (const c of node.children) {
+    if (isInstance(c) && isRenderable(c)) out.push(c);
+  }
+  return out;
+}
+
+// Intrinsic size (width/height before flex distribution). Containers
+// shrink-wrap children unless an explicit size pins them.
+function intrinsic(node: Instance): { w: number; h: number } {
+  if (node.type === 'Text') {
+    const text = collectText(node);
+    return { w: strWidth(text), h: text ? 1 : 0 };
+  }
+  if (node.type === 'Image') {
+    const s = styleOf(node);
+    const w = asCells(s.width) ?? 8;
+    const h = asCells(s.height) ?? 4;
+    return { w, h };
+  }
+  if (node.type === 'TextInput' || node.type === 'TextArea' || node.type === 'TextEditor') {
+    const s = styleOf(node);
+    const w = asCells(s.width) ?? 16;
+    const h = asCells(s.height) ?? (node.type === 'TextInput' ? 1 : 3);
+    return { w, h };
+  }
+  if (node.type === 'Canvas' || node.type === 'Graph' || node.type === 'Video' || node.type === 'Scene3D') {
+    const s = styleOf(node);
+    const w = asCells(s.width) ?? 12;
+    const h = asCells(s.height) ?? 4;
+    return { w, h };
+  }
+  if (node.type === 'Terminal') {
+    // Use explicit dimensions when set; otherwise a sensible shell-shaped
+    // default. Carts that wrap a Terminal in a flexGrow:1 container will
+    // get the full surface anyway via the parent's allocation.
+    const s = styleOf(node);
+    const w = asCells(s.width) ?? 40;
+    const h = asCells(s.height) ?? 12;
+    return { w, h };
+  }
+  if (node.type === 'ScrollView') {
+    // Don't propagate children's intrinsic up — that would defeat
+    // scrolling (parent would size the SV to fit all content). Use the
+    // explicit width/height when set, otherwise 0; carts rely on
+    // flexGrow:1 (or `height: 'fill'`) on the ScrollView's parent to
+    // give it the available space.
+    const s = styleOf(node);
+    const w = asCells(s.width) ?? 0;
+    const h = asCells(s.height) ?? 0;
+    return { w, h };
+  }
+
+  const s = styleOf(node);
+  const dir = flexDir(s);
+  const gap = asCells(s.gap) ?? 0;
+  const bw = borderW(s);
+  const kids = visibleChildren(node).map(intrinsic);
 
   let cw = 0, ch = 0;
   if (dir === 'row') {
@@ -159,173 +421,307 @@ function intrinsic(node: Node): { w: number; h: number } {
     cw = kids.reduce((m, k) => Math.max(m, k.w), 0);
     ch = kids.reduce((a, k) => a + k.h, 0) + Math.max(0, kids.length - 1) * gap;
   }
-  const w = (typeof p.width === 'number') ? p.width : cw + padX * 2 + border * 2;
-  const h = (typeof p.height === 'number') ? p.height : ch + padY * 2 + border * 2;
+  const w = (asCells(s.width)) ?? cw + padLeft(s) + padRight(s) + bw * 2;
+  const h = (asCells(s.height)) ?? ch + padTop(s) + padBottom(s) + bw * 2;
   return { w, h };
 }
 
-function layout(node: Node, x: number, y: number, w: number, h: number, out: Box[]) {
-  out.push({ x, y, w, h, node });
-  if (node.kind !== 'box') return;
-  const p = node.props;
-  const padX = p.paddingX ?? p.padding ?? 0;
-  const padY = p.paddingY ?? p.padding ?? 0;
-  const gap = p.gap ?? 0;
-  const dir = p.flexDirection ?? 'column';
-  const border = p.border ? 1 : 0;
-  const ix = x + padX + border;
-  const iy = y + padY + border;
-  const iw = Math.max(0, w - padX * 2 - border * 2);
-  const ih = Math.max(0, h - padY * 2 - border * 2);
+function layout(node: Instance, x: number, y: number, w: number, h: number, out: LaidOut[], clip: Clip | null = null): void {
+  out.push({ x, y, w, h, node, clip });
+  if (node.type === 'Text' || node.type === 'Image' || node.type === 'TextInput' ||
+      node.type === 'TextArea' || node.type === 'TextEditor' || node.type === 'Canvas' ||
+      node.type === 'Graph' || node.type === 'Video' || node.type === 'Scene3D' ||
+      node.type === 'Terminal') return;
 
-  const kids = node.children;
+  const s = styleOf(node);
+  const dir = flexDir(s);
+  const gap = asCells(s.gap) ?? 0;
+  const bw = borderW(s);
+  const ix = x + padLeft(s) + bw;
+  const iy = y + padTop(s) + bw;
+  const iw = Math.max(0, w - padLeft(s) - padRight(s) - bw * 2);
+  const ih = Math.max(0, h - padTop(s) - padBottom(s) - bw * 2);
+
+  const kids = visibleChildren(node);
   if (kids.length === 0) return;
 
-  // flexWrap: greedy line-pack along main, stack lines along cross.
-  // Only meaningful when direction has a finite main extent.
-  if (p.wrap && (dir === 'row' ? iw : ih) > 0) {
-    const measured = kids.map(k => {
+  // ScrollView — children stacked at intrinsic heights, vertically
+  // offset by the saved scroll position. Inner rect becomes the clip
+  // for descendants so anything outside the viewport just doesn't paint.
+  if (node.type === 'ScrollView') {
+    const id = node.id;
+    let contentH = 0;
+    const childIntrinsics = kids.map((k) => {
       const ip = intrinsic(k);
-      const kp: BoxProps = (k as any).props ?? {};
-      const m = dir === 'row'
-        ? (typeof kp.width  === 'number' ? kp.width  : ip.w)
-        : (typeof kp.height === 'number' ? kp.height : ip.h);
-      const c = dir === 'row'
-        ? (typeof kp.height === 'number' ? kp.height : ip.h)
-        : (typeof kp.width  === 'number' ? kp.width  : ip.w);
-      return { m, c };
+      contentH += ip.h;
+      return ip;
     });
-    const lines: { idxs: number[]; main: number; cross: number }[] = [];
-    let line: { idxs: number[]; main: number; cross: number } = { idxs: [], main: 0, cross: 0 };
-    const innerMainExtent = dir === 'row' ? iw : ih;
-    for (let i = 0; i < kids.length; i++) {
-      const { m, c } = measured[i];
-      const tentative = line.main + (line.idxs.length ? gap : 0) + m;
-      if (line.idxs.length > 0 && tentative > innerMainExtent) {
-        lines.push(line);
-        line = { idxs: [i], main: m, cross: c };
-      } else {
-        line.idxs.push(i);
-        line.main = tentative;
-        line.cross = Math.max(line.cross, c);
-      }
-    }
-    if (line.idxs.length) lines.push(line);
+    contentH += Math.max(0, kids.length - 1) * gap;
+    const maxY = Math.max(0, contentH - ih);
+    scrollMaxY.set(id, maxY);
+    const sY = Math.min(maxY, Math.max(0, scrollY.get(id) ?? 0));
+    if ((scrollY.get(id) ?? 0) !== sY) scrollY.set(id, sY);
 
-    let crossCursor = 0;
-    for (const ln of lines) {
-      let mainCursor = 0;
-      for (const i of ln.idxs) {
-        const { m, c } = measured[i];
-        const cx = dir === 'row' ? ix + mainCursor : ix + crossCursor;
-        const cy = dir === 'row' ? iy + crossCursor : iy + mainCursor;
-        const cw = dir === 'row' ? m : c;
-        const chh = dir === 'row' ? c : m;
-        layout(kids[i], cx, cy, cw, chh, out);
-        mainCursor += m + gap;
-      }
-      crossCursor += ln.cross + gap;
+    const childClip = clipIntersect(clip, { x: ix, y: iy, w: iw, h: ih });
+    let cy = iy - sY;
+    for (let i = 0; i < kids.length; i++) {
+      const k = kids[i];
+      const ks = styleOf(k);
+      const explicitW = ks.width;
+      const kw = isFill(explicitW) ? iw
+        : (typeof explicitW === 'number') ? cells(explicitW)
+        : (typeof explicitW === 'string' && explicitW.endsWith('%')) ? (resolveExtent(explicitW, iw) ?? iw)
+        : iw;
+      const kh = childIntrinsics[i].h;
+      layout(k, ix, cy, kw, kh, out, childClip);
+      cy += kh + gap;
     }
     return;
   }
 
-  // Resolve fixed sizes; collect grow weights
-  const main = (k: { w: number; h: number }) => dir === 'row' ? k.w : k.h;
-  const cross = (k: { w: number; h: number }) => dir === 'row' ? k.h : k.w;
+  // flexWrap on row/column. Greedy line-pack.
+  if (s.flexWrap === 'wrap' && (dir === 'row' ? iw : ih) > 0) {
+    layoutWrap(node, kids, ix, iy, iw, ih, gap, dir, out, clip);
+    return;
+  }
+
+  layoutFlex(node, kids, ix, iy, iw, ih, gap, dir, s, out, clip);
+}
+
+function layoutWrap(
+  parent: Instance, kids: Instance[],
+  ix: number, iy: number, iw: number, ih: number,
+  gap: number, dir: 'row' | 'column',
+  out: LaidOut[],
+  clip: Clip | null,
+): void {
+  const measured = kids.map(k => {
+    const ip = intrinsic(k);
+    const ks = styleOf(k);
+    const m = dir === 'row'
+      ? (asCells(ks.width)  ?? ip.w)
+      : (asCells(ks.height) ?? ip.h);
+    const c = dir === 'row'
+      ? (asCells(ks.height) ?? ip.h)
+      : (asCells(ks.width)  ?? ip.w);
+    return { m, c };
+  });
+  const innerMain = dir === 'row' ? iw : ih;
+  type Line = { idxs: number[]; main: number; cross: number };
+  const lines: Line[] = [];
+  let line: Line = { idxs: [], main: 0, cross: 0 };
+  for (let i = 0; i < kids.length; i++) {
+    const { m, c } = measured[i];
+    const tentative = line.main + (line.idxs.length ? gap : 0) + m;
+    if (line.idxs.length > 0 && tentative > innerMain) {
+      lines.push(line);
+      line = { idxs: [i], main: m, cross: c };
+    } else {
+      line.idxs.push(i);
+      line.main = tentative;
+      line.cross = Math.max(line.cross, c);
+    }
+  }
+  if (line.idxs.length) lines.push(line);
+
+  let crossCursor = 0;
+  for (const ln of lines) {
+    let mainCursor = 0;
+    for (const i of ln.idxs) {
+      const { m, c } = measured[i];
+      const cx = dir === 'row' ? ix + mainCursor : ix + crossCursor;
+      const cy = dir === 'row' ? iy + crossCursor : iy + mainCursor;
+      const cw = dir === 'row' ? m : c;
+      const chh = dir === 'row' ? c : m;
+      layout(kids[i], cx, cy, cw, chh, out, clip);
+      mainCursor += m + gap;
+    }
+    crossCursor += ln.cross + gap;
+  }
+}
+
+function layoutFlex(
+  parent: Instance, kids: Instance[],
+  ix: number, iy: number, iw: number, ih: number,
+  gap: number, dir: 'row' | 'column',
+  ps: AnyProps,
+  out: LaidOut[],
+  clip: Clip | null,
+): void {
   const innerMain = dir === 'row' ? iw : ih;
   const innerCross = dir === 'row' ? ih : iw;
+  const main = (k: { w: number; h: number }) => dir === 'row' ? k.w : k.h;
 
-  const sizes: { main: number; cross: number; grow: number; align: BoxProps['align'] | undefined }[] = [];
+  type Slot = { main: number; cross: number; grow: number; shrink: number; alignSelf: string | undefined };
+  const slots: Slot[] = [];
   let fixed = 0, growSum = 0;
+
   for (const k of kids) {
     const ip = intrinsic(k);
-    const kp: BoxProps = (k as any).props ?? {};
-    const explicitMain = dir === 'row' ? kp.width : kp.height;
-    const explicitCross = dir === 'row' ? kp.height : kp.width;
+    const ks = styleOf(k);
+    const explicitMain = dir === 'row' ? ks.width : ks.height;
+    const explicitCross = dir === 'row' ? ks.height : ks.width;
+    let grow = asNumber(ks.flexGrow) ?? 0;
+    // flexShrink defaults to 0 here (NOT CSS's 1) — terminal cells are
+    // too coarse for implicit shrink, and the parent-border-on-top paint
+    // pass already handles overflow visually. Carts set flexShrink>0
+    // when they want a child to absorb deficit.
+    const shrink = asNumber(ks.flexShrink) ?? 0;
     let mainSize: number;
-    let grow = kp.flexGrow ?? 0;
-    // CSS-flex flex-basis default. With only flex-grow set (no width/
-    // height), basis is 0 — the child starts empty and gets all leftover
-    // space. Without this rule, an oversize child eats `free` via its
-    // intrinsic and starves later siblings (e.g. footer pushed off-screen).
-    if (explicitMain === 'fill') { grow = Math.max(grow, 1); mainSize = 0; }
-    else if (typeof explicitMain === 'number') mainSize = explicitMain;
+
+    if (isFill(explicitMain)) { grow = Math.max(grow, 1); mainSize = 0; }
+    else if (typeof explicitMain === 'number' && Number.isFinite(explicitMain)) mainSize = cells(explicitMain);
+    else if (typeof explicitMain === 'string' && explicitMain.endsWith('%')) {
+      mainSize = resolveExtent(explicitMain, innerMain) ?? main(ip);
+    }
     else if (grow > 0) mainSize = 0;
     else mainSize = main(ip);
-    // CSS-flex cross sizing. `align` resolves like CSS align-self: child
-    // wins, else parent's align acts as align-items, else stretch. Stretch
-    // means crossSize = innerCross (full); start/center/end means shrink to
-    // intrinsic and offset.
-    const align = kp.align ?? p.align;
+
+    const alignSelf = ks.alignSelf ?? ps.alignItems ?? 'stretch';
     let crossSize: number;
-    if (explicitCross === 'fill') crossSize = innerCross;
-    else if (typeof explicitCross === 'number') crossSize = explicitCross;
-    else if (align === 'start' || align === 'center' || align === 'end') crossSize = Math.min(innerCross, cross(ip));
-    else crossSize = innerCross; // stretch (default)
+    if (isFill(explicitCross)) crossSize = innerCross;
+    else if (typeof explicitCross === 'number' && Number.isFinite(explicitCross)) crossSize = cells(explicitCross);
+    else if (typeof explicitCross === 'string' && explicitCross.endsWith('%')) {
+      crossSize = resolveExtent(explicitCross, innerCross) ?? Math.min(innerCross, dir === 'row' ? ip.h : ip.w);
+    }
+    else if (alignSelf === 'flex-start' || alignSelf === 'center' || alignSelf === 'flex-end' || alignSelf === 'start' || alignSelf === 'end') {
+      crossSize = Math.min(innerCross, dir === 'row' ? ip.h : ip.w);
+    } else {
+      crossSize = innerCross; // stretch (default)
+    }
+
     fixed += mainSize;
     growSum += grow;
-    sizes.push({ main: mainSize, cross: crossSize, grow, align });
+    slots.push({ main: mainSize, cross: crossSize, grow, shrink, alignSelf });
   }
 
   const totalGap = Math.max(0, kids.length - 1) * gap;
   const free = Math.max(0, innerMain - fixed - totalGap);
   if (growSum > 0) {
-    for (const s of sizes) if (s.grow > 0) s.main += Math.floor(free * s.grow / growSum);
+    for (const s of slots) if (s.grow > 0) s.main += Math.floor(free * s.grow / growSum);
   }
 
-  // justify
-  const consumed = sizes.reduce((a, s) => a + s.main, 0) + totalGap;
+  // CSS flex-shrink: when fixed sizes overflow the inner extent and the
+  // user explicitly opted children into shrinking via flexShrink>0, take
+  // the deficit weighted by `shrink * mainSize`. Default flexShrink is 0
+  // here (NOT the CSS default of 1) — terminal cells are too coarse for
+  // implicit shrink to look right; it almost always eats the row that
+  // contained text. Carts that want shrink set it explicitly.
+  //
+  // Whatever the shrink can't absorb stays as overflow; the two-pass
+  // paint below ensures parent borders still draw cleanly over it, so
+  // overflow doesn't punch through chrome.
+  if (free === 0 && fixed + totalGap > innerMain) {
+    const overflow = (fixed + totalGap) - innerMain;
+    let weightTotal = 0;
+    for (const s of slots) if (s.shrink > 0) weightTotal += s.shrink * s.main;
+    if (weightTotal > 0) {
+      let remaining = overflow;
+      for (let i = 0; i < slots.length; i++) {
+        const s = slots[i];
+        if (s.shrink <= 0 || s.main <= 0) continue;
+        const isLast = i === slots.length - 1;
+        const share = isLast ? remaining : Math.floor(overflow * s.shrink * s.main / weightTotal);
+        const taken = Math.min(s.main, share);
+        s.main -= taken;
+        remaining -= taken;
+      }
+    }
+  }
+
+  const consumed = slots.reduce((a, s) => a + s.main, 0) + totalGap;
   const slack = Math.max(0, innerMain - consumed);
   let cursor = 0;
   let extraGap = 0;
   if (growSum === 0) {
-    if (p.justify === 'center') cursor = Math.floor(slack / 2);
-    else if (p.justify === 'end') cursor = slack;
-    else if (p.justify === 'between' && kids.length > 1) extraGap = Math.floor(slack / (kids.length - 1));
+    const j = ps.justifyContent;
+    if (j === 'center') cursor = Math.floor(slack / 2);
+    else if (j === 'flex-end' || j === 'end') cursor = slack;
+    else if ((j === 'space-between' || j === 'between') && kids.length > 1) extraGap = Math.floor(slack / (kids.length - 1));
   }
 
   for (let i = 0; i < kids.length; i++) {
-    const s = sizes[i];
+    const slot = slots[i];
     let crossOffset = 0;
-    if (s.align === 'center') crossOffset = Math.floor((innerCross - s.cross) / 2);
-    else if (s.align === 'end') crossOffset = innerCross - s.cross;
+    const a = slot.alignSelf;
+    if (a === 'center') crossOffset = Math.floor((innerCross - slot.cross) / 2);
+    else if (a === 'flex-end' || a === 'end') crossOffset = innerCross - slot.cross;
     const cx = dir === 'row' ? ix + cursor : ix + crossOffset;
     const cy = dir === 'row' ? iy + crossOffset : iy + cursor;
-    const cw = dir === 'row' ? s.main : s.cross;
-    const chh = dir === 'row' ? s.cross : s.main;
-    layout(kids[i], cx, cy, cw, chh, out);
-    cursor += s.main + gap + extraGap;
+    const cw = dir === 'row' ? slot.main : slot.cross;
+    const chh = dir === 'row' ? slot.cross : slot.main;
+    layout(kids[i], cx, cy, cw, chh, out, clip);
+    cursor += slot.main + gap + extraGap;
   }
 }
 
 // ── Paint ───────────────────────────────────────────────────────────
 
-type Cell = { ch: string; fg: string | null; bg: string | null; bold: boolean };
-const blank = (): Cell => ({ ch: ' ', fg: null, bg: null, bold: false });
+// Cell carries the full SGR state we'll ever emit. Bools are easier to
+// diff than a packed bitmask and the per-cell overhead is negligible
+// against terminal grids (80×24 = 1920 cells max in practice).
+type Cell = {
+  ch: string;
+  fg: string | null;
+  bg: string | null;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  dim: boolean;
+  reverse: boolean;
+  strike: boolean;
+};
+const blank = (): Cell => ({
+  ch: ' ', fg: null, bg: null,
+  bold: false, italic: false, underline: false, dim: false, reverse: false, strike: false,
+});
 
 function hex(c: string): [number, number, number] | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(c);
-  if (!m) return null;
+  if (typeof c !== 'string') return null;
+  const m = /^#?([0-9a-fA-F]{6})$/.exec(c);
+  if (!m) {
+    // rgb(r,g,b) and rgba(r,g,b,a) — accept since classifier sheets emit them.
+    const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(c);
+    if (rgb) return [+rgb[1] & 255, +rgb[2] & 255, +rgb[3] & 255];
+    return null;
+  }
   const n = parseInt(m[1], 16);
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
-function fgEsc(c: string | null) { if (!c) return ''; const r = hex(c); return r ? `\x1b[38;2;${r[0]};${r[1]};${r[2]}m` : ''; }
-function bgEsc(c: string | null) { if (!c) return ''; const r = hex(c); return r ? `\x1b[48;2;${r[0]};${r[1]};${r[2]}m` : ''; }
+function fgEsc(c: string | null): string {
+  if (!c) return ''; const r = hex(c); return r ? `\x1b[38;2;${r[0]};${r[1]};${r[2]}m` : '';
+}
+function bgEsc(c: string | null): string {
+  if (!c) return ''; const r = hex(c); return r ? `\x1b[48;2;${r[0]};${r[1]};${r[2]}m` : '';
+}
 
-function fillRect(grid: Cell[][], x: number, y: number, w: number, h: number, bg: string | null, fg: string | null) {
+// paintClip — module-level "active clip rect" set by the build-pass
+// driver before each box's paint call. fillRect/drawBorder/writeText
+// honor it so a ScrollView's children never bleed past its bounds.
+let paintClip: Clip | null = null;
+
+function inClip(x: number, y: number): boolean {
+  if (!paintClip) return true;
+  return x >= paintClip.x && y >= paintClip.y
+    && x < paintClip.x + paintClip.w && y < paintClip.y + paintClip.h;
+}
+
+function fillRect(grid: Cell[][], x: number, y: number, w: number, h: number, bg: string | null, fg: string | null): void {
   const W = grid[0]?.length ?? 0, H = grid.length;
   for (let yy = Math.max(0, y); yy < Math.min(H, y + h); yy++) {
     for (let xx = Math.max(0, x); xx < Math.min(W, x + w); xx++) {
+      if (!inClip(xx, yy)) continue;
       const c = grid[yy][xx];
       if (bg) c.bg = bg;
       if (fg) c.fg = fg;
     }
   }
 }
-function drawBorder(grid: Cell[][], x: number, y: number, w: number, h: number, color: string | null) {
+function drawBorder(grid: Cell[][], x: number, y: number, w: number, h: number, color: string | null): void {
   const W = grid[0]?.length ?? 0, H = grid.length;
-  const put = (xx: number, yy: number, ch: string) => {
+  const put = (xx: number, yy: number, ch: string): void => {
     if (xx < 0 || yy < 0 || xx >= W || yy >= H) return;
+    if (!inClip(xx, yy)) return;
     const c = grid[yy][xx];
     c.ch = ch; if (color) c.fg = color;
   };
@@ -334,69 +730,443 @@ function drawBorder(grid: Cell[][], x: number, y: number, w: number, h: number, 
   for (let xx = x + 1; xx < x + w - 1; xx++) { put(xx, y, '─'); put(xx, y + h - 1, '─'); }
   for (let yy = y + 1; yy < y + h - 1; yy++) { put(x, yy, '│'); put(x + w - 1, yy, '│'); }
 }
-function writeText(grid: Cell[][], x: number, y: number, w: number, h: number, text: string, fg: string | null, bold: boolean) {
+// '\0' marks a wide-char continuation cell — the right half of a 2-cell
+// glyph painted by the column to its left. The dirty-diff emit loop
+// skips continuation cells and lets the wide char to the left paint
+// both visual cells.
+const WIDE_CONT = '\0';
+
+type TextSGR = {
+  fg: string | null;
+  bold: boolean;
+  italic: boolean;
+  underline: boolean;
+  dim: boolean;
+  reverse: boolean;
+  strike: boolean;
+};
+
+function writeText(
+  grid: Cell[][], x: number, y: number, w: number, h: number,
+  text: string, sgr: TextSGR,
+): void {
   const W = grid[0]?.length ?? 0, H = grid.length;
   if (y < 0 || y >= H || h <= 0) return;
-  const max = Math.min(text.length, w);
-  for (let i = 0; i < max; i++) {
-    const xx = x + i;
-    if (xx < 0 || xx >= W) continue;
-    const c = grid[y][xx];
-    c.ch = text[i];
-    if (fg) c.fg = fg;
-    if (bold) c.bold = true;
+  let col = 0;
+  for (let i = 0; i < text.length && col < w; i++) {
+    const ch = text[i];
+    const cw = charWidth(text.charCodeAt(i));
+    const xx = x + col;
+    if (cw === 2 && col + 2 > w) break;
+    if (xx >= 0 && xx < W && inClip(xx, y)) {
+      const c = grid[y][xx];
+      c.ch = ch;
+      if (sgr.fg) c.fg = sgr.fg;
+      if (sgr.bold)      c.bold = true;
+      if (sgr.italic)    c.italic = true;
+      if (sgr.underline) c.underline = true;
+      if (sgr.dim)       c.dim = true;
+      if (sgr.reverse)   c.reverse = true;
+      if (sgr.strike)    c.strike = true;
+      if (cw === 2 && xx + 1 < W && inClip(xx + 1, y)) {
+        const cc = grid[y][xx + 1];
+        cc.ch = WIDE_CONT;
+        cc.fg = sgr.fg;
+        cc.bg = c.bg;
+        cc.bold = !!sgr.bold;
+        cc.italic = !!sgr.italic;
+        cc.underline = !!sgr.underline;
+        cc.dim = !!sgr.dim;
+        cc.reverse = !!sgr.reverse;
+        cc.strike = !!sgr.strike;
+      }
+    }
+    col += cw;
   }
 }
 
-// Previous-frame buffer for dirty diffing. React will commit per state
-// change, and full-screen repaints flood the TTY — only emit cells that
-// actually differ from the last frame.
+// SGR-from-style. Reads the React-Native-shaped style fields: fontWeight,
+// fontStyle, textDecorationLine ('underline' | 'line-through' | 'underline line-through'),
+// opacity (<1 → dim). Plus host-specific shortcuts: `italic`, `dim`,
+// `reverse`, `strike` boolean style fields for direct opt-in.
+function sgrFromStyle(s: AnyProps, color: string | null): TextSGR {
+  const fw = s.fontWeight;
+  const bold = fw === 'bold' || fw === 'bolder' || (typeof fw === 'number' && fw >= 700);
+  const italic = s.fontStyle === 'italic' || !!s.italic;
+  const decor = typeof s.textDecorationLine === 'string' ? s.textDecorationLine : '';
+  const underline = decor.includes('underline') || !!s.underline;
+  const strike = decor.includes('line-through') || !!s.strike || !!s.strikethrough;
+  const dim = (typeof s.opacity === 'number' && s.opacity < 1) || !!s.dim;
+  const reverse = !!s.reverse || !!s.invert;
+  return { fg: color, bold, italic, underline, dim, reverse, strike };
+}
+
+// Focus highlight hook — set by tui/focus.ts. Returns the focused
+// Instance id, or -1 if none. We keep the dependency one-way: focus.ts
+// imports nothing from host other than requestPaint, so this hook is
+// optional.
+let focusedId: number = -1;
+export function setFocusedId(id: number): void {
+  if (focusedId === id) return;
+  focusedId = id;
+  requestPaint();
+}
+export function getFocusedId(): number { return focusedId; }
+
+// Two-pass paint:
+//   pass 1 — bg fills + leaf content (text, placeholders), in normal
+//            depth order (root first). Children's bg overrides parent's
+//            bg in their region; child text/placeholder content sits on
+//            top.
+//   pass 2 — container borders, in REVERSE depth order (root last).
+//            Means a parent's border always wins over a descendant's
+//            border at conflicting cells. Without this, an oversized
+//            child's `│` punches through the parent's `─` and you get
+//            visible gaps in the parent's chrome.
+function paintBgAndContent(grid: Cell[][], box: LaidOut): void {
+  const node = box.node;
+  const s = styleOf(node);
+
+  if (node.type === 'Text' || node.type === 'CodeBlock') {
+    const text = collectText(node);
+    const color = (typeof s.color === 'string') ? s.color : null;
+    writeText(grid, box.x, box.y, box.w, box.h, text, sgrFromStyle(s, color));
+    return;
+  }
+
+  if (node.type === 'Image') {
+    fillRect(grid, box.x, box.y, box.w, box.h, '#1f2937', '#94a3b8');
+    writeText(grid, box.x, box.y, box.w, 1, `[img ${box.w}×${box.h}]`, sgrFromStyle({}, '#94a3b8'));
+    return;
+  }
+
+  if (node.type === 'Canvas' || node.type === 'Graph' || node.type === 'Video' || node.type === 'Scene3D') {
+    fillRect(grid, box.x, box.y, box.w, box.h, '#0f172a', '#475569');
+    writeText(grid, box.x, box.y, box.w, 1, `[${node.type.toLowerCase()}]`, sgrFromStyle({}, '#475569'));
+    return;
+  }
+
+  if (node.type === 'Terminal') {
+    const g: any = globalThis;
+    if (typeof g.__vterm_spawn !== 'function') {
+      fillRect(grid, box.x, box.y, box.w, box.h, '#1f2937', '#94a3b8');
+      writeText(grid, box.x, box.y, box.w, 1,
+        '[vterm not available — build with -Dhas-terminal=true]',
+        sgrFromStyle({}, '#f87171'));
+      return;
+    }
+    const id = node.id;
+    let entry = termSlots.get(id);
+    if (!entry) {
+      const shell = typeof (node.props as any).shell === 'string' ? (node.props as any).shell : '';
+      const slot = g.__vterm_spawn(box.h, box.w, shell);
+      if (slot < 0) {
+        fillRect(grid, box.x, box.y, box.w, box.h, '#1f2937', '#94a3b8');
+        writeText(grid, box.x, box.y, box.w, 1,
+          '[no free vterm slot — max 4 terminals]',
+          sgrFromStyle({}, '#f87171'));
+        return;
+      }
+      entry = { slot, rows: box.h, cols: box.w };
+      termSlots.set(id, entry);
+    } else if (entry.rows !== box.h || entry.cols !== box.w) {
+      try { g.__vterm_resize?.(entry.slot, box.h, box.w); } catch {}
+      entry.rows = box.h;
+      entry.cols = box.w;
+    }
+    // Drain any pending PTY data into the vterm screen, then read each
+    // row out and decode into our grid.
+    try { g.__vterm_poll?.(entry.slot); } catch {}
+    fillRect(grid, box.x, box.y, box.w, box.h, '#000000', '#e5e7eb');
+    for (let r = 0; r < box.h; r++) {
+      const row: string = (() => { try { return g.__vterm_get_row(entry!.slot, r) || ''; } catch { return ''; } })();
+      decodeTerminalRow(grid, box.x, box.y + r, box.w, row);
+    }
+    // Schedule another paint while alive — keeps the cell grid in sync
+    // with shell output without the cart having to manage tick state.
+    requestPaint();
+    return;
+  }
+
+  if (node.type === 'TextInput' || node.type === 'TextArea' || node.type === 'TextEditor') {
+    const value = typeof (node.props as any).value === 'string' ? (node.props as any).value
+                : typeof (node.props as any).defaultValue === 'string' ? (node.props as any).defaultValue
+                : '';
+    const placeholder = typeof (node.props as any).placeholder === 'string' ? (node.props as any).placeholder : '';
+    const focused = node.id === focusedId;
+    const bg = focused ? '#1e293b' : '#0f172a';
+    fillRect(grid, box.x, box.y, box.w, box.h, bg, '#e5e7eb');
+    const text = value.length > 0 ? value : placeholder;
+    const color = value.length > 0 ? '#e5e7eb' : '#64748b';
+    writeText(grid, box.x, box.y, box.w, 1, text, sgrFromStyle({}, color));
+    if (focused) {
+      const cursorX = Math.min(box.x + value.length, box.x + box.w - 1);
+      writeText(grid, cursorX, box.y, 1, 1, '_', { fg: '#fbbf24', bold: true, italic: false, underline: false, dim: false, reverse: false, strike: false });
+    }
+    return;
+  }
+
+  // View / Pressable / ScrollView and friends — bg only here. Borders go
+  // in pass 2 so they overlay any descendants.
+  const bg = (typeof s.backgroundColor === 'string') ? s.backgroundColor : null;
+  const fg = (typeof s.color === 'string') ? s.color : null;
+  if (bg) fillRect(grid, box.x, box.y, box.w, box.h, bg, fg);
+  else if (fg) fillRect(grid, box.x, box.y, box.w, box.h, null, fg);
+}
+
+function paintBorder(grid: Cell[][], box: LaidOut): void {
+  const node = box.node;
+  // Leaf types own their own chrome; nothing to draw here.
+  switch (node.type) {
+    case 'Text':
+    case 'CodeBlock':
+    case 'Image':
+    case 'Canvas':
+    case 'Graph':
+    case 'Video':
+    case 'Scene3D':
+    case 'TextInput':
+    case 'TextArea':
+    case 'TextEditor':
+      return;
+  }
+  const s = styleOf(node);
+  const fg = (typeof s.color === 'string') ? s.color : null;
+  if (borderW(s) > 0) {
+    drawBorder(grid, box.x, box.y, box.w, box.h, (typeof s.borderColor === 'string') ? s.borderColor : fg);
+  }
+  // Focus ring on Pressables — accent-color border, drawn last so it
+  // wins over any underlying chrome at the same cells.
+  if (node.type === 'Pressable' && node.id === focusedId) {
+    drawBorder(grid, box.x, box.y, box.w, box.h, '#fbbf24');
+  }
+}
+
+// Previous-frame buffer — diff and emit only changed cells.
 let prev: Cell[][] | null = null;
 let prevW = 0, prevH = 0;
 
 function cellEq(a: Cell, b: Cell): boolean {
-  return a.ch === b.ch && a.fg === b.fg && a.bg === b.bg && a.bold === b.bold;
+  return a.ch === b.ch && a.fg === b.fg && a.bg === b.bg
+    && a.bold === b.bold && a.italic === b.italic && a.underline === b.underline
+    && a.dim === b.dim && a.reverse === b.reverse && a.strike === b.strike;
+}
+// Selection rect in normalized reading order (anchor → focus may flip).
+function selectionBounds(): { sx: number; sy: number; ex: number; ey: number } | null {
+  if (!selAnchor || !selFocus) return null;
+  let { x: sx, y: sy } = selAnchor;
+  let { x: ex, y: ey } = selFocus;
+  // Reading-order normalize: top-to-bottom, then left-to-right within row.
+  if (sy > ey || (sy === ey && sx > ex)) {
+    [sx, sy, ex, ey] = [ex, ey, sx, sy];
+  }
+  return { sx, sy, ex, ey };
 }
 
-function repaint() {
-  if (!entered) return; // headless mode: paint goes through headlessSnapshot()
-  const W = process.stdout.columns || 80;
-  const H = process.stdout.rows || 24;
-  const grid: Cell[][] = Array.from({ length: H }, () => Array.from({ length: W }, blank));
+function inSelection(x: number, y: number): boolean {
+  const b = selectionBounds();
+  if (!b) return false;
+  if (y < b.sy || y > b.ey) return false;
+  if (b.sy === b.ey) return x >= b.sx && x <= b.ex;
+  if (y === b.sy) return x >= b.sx;
+  if (y === b.ey) return x <= b.ex;
+  return true;
+}
 
-  const boxes: Box[] = [];
-  for (const child of root.children) {
-    layout(child, 0, 0, W, H, boxes);
-  }
-
-  // Paint boxes back-to-front (parents first thanks to push order in layout())
-  for (const b of boxes) {
-    if (b.node.kind === 'box') {
-      const p = b.node.props;
-      const inheritedFg = p.fg ?? null;
-      const bg = p.bg ?? null;
-      if (bg) fillRect(grid, b.x, b.y, b.w, b.h, bg, inheritedFg);
-      else if (inheritedFg) fillRect(grid, b.x, b.y, b.w, b.h, null, inheritedFg);
-      if (p.border) drawBorder(grid, b.x, b.y, b.w, b.h, p.borderColor ?? p.fg ?? null);
-    } else if (b.node.kind === 'text') {
-      const p = b.node.props;
-      writeText(grid, b.x, b.y, b.w, b.h, textOf(b.node), p.fg ?? null, !!p.bold);
+// Selection overlay: invert each selected cell so the highlight reads
+// like a typical terminal selection regardless of the cell's underlying
+// fg/bg. Runs after both paint passes so it lands on top of everything.
+function paintSelection(grid: Cell[][]): void {
+  if (!selAnchor || !selFocus) return;
+  const H = grid.length;
+  const W = grid[0]?.length ?? 0;
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      if (!inSelection(x, y)) continue;
+      const c = grid[y][x];
+      // Invert fg/bg for a clear "selected" look. Defaults to a yellow
+      // highlight on cells that had no explicit colors.
+      const bg = c.fg ?? '#fbbf24';
+      const fg = c.bg ?? '#0b1020';
+      c.fg = fg;
+      c.bg = bg;
     }
   }
+}
 
-  // Resize invalidates the entire prev buffer — fall back to full paint.
+function buildGrid(W: number, H: number, layoutOut: LaidOut[]): Cell[][] {
+  const grid: Cell[][] = Array.from({ length: H }, () => Array.from({ length: W }, blank));
+  // Pass 1: bg + leaf content (root → deepest).
+  for (const b of layoutOut) {
+    paintClip = b.clip;
+    paintBgAndContent(grid, b);
+  }
+  // Pass 2: container borders (deepest → root). Last writer wins, so the
+  // root's border draws on top of any descendant's border at conflict
+  // cells. Prevents oversized children from punching through parent
+  // chrome.
+  for (let i = layoutOut.length - 1; i >= 0; i--) {
+    paintClip = layoutOut[i].clip;
+    paintBorder(grid, layoutOut[i]);
+  }
+  paintClip = null;
+  // Pass 3: drag-selection overlay. Runs last so it visually wins over
+  // everything else.
+  paintSelection(grid);
+  return grid;
+}
+
+// Extract the selected text from the current grid for clipboard. Joins
+// per-row, trimming trailing whitespace on each row to avoid pasting
+// lines of padding spaces.
+function selectionText(grid: Cell[][]): string {
+  const b = selectionBounds();
+  if (!b) return '';
+  const W = grid[0]?.length ?? 0;
+  const lines: string[] = [];
+  for (let y = b.sy; y <= b.ey; y++) {
+    const startX = (y === b.sy) ? b.sx : 0;
+    const endX = (y === b.ey) ? b.ex : W - 1;
+    let line = '';
+    for (let x = startX; x <= endX; x++) {
+      const c = grid[y][x];
+      if (c.ch === WIDE_CONT) continue;
+      line += c.ch;
+    }
+    lines.push(line.replace(/\s+$/, ''));
+  }
+  return lines.join('\n');
+}
+
+// Base64 — no Buffer in v8cli, so a hand-rolled encoder. ASCII-only is
+// fine here; selection text is whatever's already on screen as printable
+// chars and box-drawing glyphs.
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function base64Encode(s: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    const cp = s.charCodeAt(i);
+    if (cp < 0x80) bytes.push(cp);
+    else if (cp < 0x800) bytes.push(0xc0 | (cp >> 6), 0x80 | (cp & 0x3f));
+    else bytes.push(0xe0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3f), 0x80 | (cp & 0x3f));
+  }
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const a = bytes[i], b = bytes[i + 1] ?? 0, c = bytes[i + 2] ?? 0;
+    out += B64[a >> 2];
+    out += B64[((a & 0x03) << 4) | (b >> 4)];
+    out += (i + 1 < bytes.length) ? B64[((b & 0x0f) << 2) | (c >> 6)] : '=';
+    out += (i + 2 < bytes.length) ? B64[c & 0x3f] : '=';
+  }
+  return out;
+}
+
+function copySelectionToClipboard(grid: Cell[][]): number {
+  const text = selectionText(grid);
+  if (!text) return 0;
+  process.stdout.write('\x1b]52;c;' + base64Encode(text) + '\x07');
+  return text.length;
+}
+
+function collectLayout(W: number, H: number): LaidOut[] {
+  const out: LaidOut[] = [];
+  for (const root of getRootInstances()) {
+    if (!isRenderable(root)) continue;
+    layout(root, 0, 0, W, H, out);
+  }
+  return out;
+}
+
+// Debug: tint every emitted cell's bg to a color of your choosing. Lets
+// you SEE the dirty rectangle the host emits on each frame. Set
+// RJIT_TUI_DIRTY_TINT=1 (red), or to any #rrggbb hex literal. Cells that
+// were tinted last frame get re-emitted this frame with their real bg
+// (i.e. they "decay" off) so persistent dirty regions blink instead of
+// staying lit forever.
+const TINT_DIRTY: string | null = (() => {
+  try {
+    const v: any = (globalThis as any).process?.env?.RJIT_TUI_DIRTY_TINT;
+    if (!v) return null;
+    if (v === '1' || v === 'true') return '#ff0033';
+    if (typeof v === 'string' && /^#?[0-9a-fA-F]{6}$/.test(v)) return v.startsWith('#') ? v : '#' + v;
+    return null;
+  } catch { return null; }
+})();
+
+let lastTinted: Set<number> = new Set();  // packed (y * W + x) keys
+
+function repaint(): void {
+  if (!entered) return;
+  const W = process.stdout.columns || 80;
+  const H = process.stdout.rows || 24;
+  lastLayout = collectLayout(W, H);
+  const grid = buildGrid(W, H, lastLayout);
   const fullRepaint = !prev || prevW !== W || prevH !== H;
 
   let out = '';
   let lastFg: string | null | '__init' = '__init';
   let lastBg: string | null | '__init' = '__init';
   let lastBold = false;
+  let lastItalic = false;
+  let lastUnderline = false;
+  let lastDim = false;
+  let lastReverse = false;
+  let lastStrike = false;
   let cursorX = -1, cursorY = -1;
+  const newTinted: Set<number> = TINT_DIRTY ? new Set() : lastTinted;
 
-  const moveTo = (x: number, y: number) => {
+  const moveTo = (x: number, y: number): void => {
     if (cursorX === x && cursorY === y) return;
     out += `\x1b[${y + 1};${x + 1}H`;
     cursorX = x; cursorY = y;
+  };
+
+  // emitCell — does the actual byte emission for one cell, applying the
+  // dirty-tint override if enabled. Pulled out so the "force-clear last
+  // frame's tint" path can call it on otherwise-clean cells.
+  // SGR codes used:
+  //   1/22  bold on/off       (22 also clears dim)
+  //   2/22  dim on/off        (paired with bold via the 22 reset)
+  //   3/23  italic on/off
+  //   4/24  underline on/off
+  //   7/27  reverse on/off
+  //   9/29  strikethrough on/off
+  const emitCell = (cc: Cell, x: number, y: number, isDirty: boolean): number => {
+    const useBg = (TINT_DIRTY && isDirty) ? TINT_DIRTY : cc.bg;
+    if (cc.fg !== lastFg) { out += cc.fg ? fgEsc(cc.fg) : '\x1b[39m'; lastFg = cc.fg; }
+    if (useBg !== lastBg) { out += useBg ? bgEsc(useBg) : '\x1b[49m'; lastBg = useBg; }
+    if (cc.bold !== lastBold) {
+      // 22 turns off both bold AND dim, so re-assert dim if it should
+      // remain on after a bold->!bold transition. Cheap: lastDim tracks
+      // the post-emit state.
+      if (cc.bold) out += '\x1b[1m';
+      else { out += '\x1b[22m'; lastDim = false; }
+      lastBold = cc.bold;
+    }
+    if (cc.dim !== lastDim) {
+      if (cc.dim) out += '\x1b[2m'; else out += '\x1b[22m';
+      lastDim = cc.dim;
+    }
+    if (cc.italic !== lastItalic) {
+      out += cc.italic ? '\x1b[3m' : '\x1b[23m';
+      lastItalic = cc.italic;
+    }
+    if (cc.underline !== lastUnderline) {
+      out += cc.underline ? '\x1b[4m' : '\x1b[24m';
+      lastUnderline = cc.underline;
+    }
+    if (cc.reverse !== lastReverse) {
+      out += cc.reverse ? '\x1b[7m' : '\x1b[27m';
+      lastReverse = cc.reverse;
+    }
+    if (cc.strike !== lastStrike) {
+      out += cc.strike ? '\x1b[9m' : '\x1b[29m';
+      lastStrike = cc.strike;
+    }
+    out += cc.ch;
+    const w = charWidth(cc.ch.charCodeAt(0));
+    cursorX = x + w; cursorY = y;
+    return w;
   };
 
   for (let y = 0; y < H; y++) {
@@ -404,18 +1174,20 @@ function repaint() {
     while (x < W) {
       const c = grid[y][x];
       const same = !fullRepaint && cellEq(prev![y][x], c);
-      if (same) { x++; continue; }
-      // Found a dirty run starting at x — emit until next clean cell.
+      const wasTinted = TINT_DIRTY ? lastTinted.has(y * W + x) : false;
+      // Continuation cells are painted by the wide char to their left.
+      if (c.ch === WIDE_CONT) { x++; continue; }
+      if (same && !wasTinted) { x++; continue; }
       moveTo(x, y);
       while (x < W) {
         const cc = grid[y][x];
-        if (!fullRepaint && cellEq(prev![y][x], cc)) break;
-        if (cc.fg !== lastFg) { out += cc.fg ? fgEsc(cc.fg) : '\x1b[39m'; lastFg = cc.fg; }
-        if (cc.bg !== lastBg) { out += cc.bg ? bgEsc(cc.bg) : '\x1b[49m'; lastBg = cc.bg; }
-        if (cc.bold !== lastBold) { out += cc.bold ? '\x1b[1m' : '\x1b[22m'; lastBold = cc.bold; }
-        out += cc.ch;
-        cursorX = x + 1; cursorY = y;
-        x++;
+        const isDirty = fullRepaint || !cellEq(prev![y][x], cc);
+        const wasT = TINT_DIRTY ? lastTinted.has(y * W + x) : false;
+        if (!isDirty && !wasT) break;
+        if (cc.ch === WIDE_CONT) { x++; continue; }
+        const w = emitCell(cc, x, y, isDirty);
+        if (TINT_DIRTY && isDirty) newTinted.add(y * W + x);
+        x += w;
       }
     }
   }
@@ -424,6 +1196,7 @@ function repaint() {
     out += '\x1b[0m';
     process.stdout.write(out);
   }
+  if (TINT_DIRTY) lastTinted = newTinted;
 
   prev = grid;
   prevW = W; prevH = H;
@@ -435,76 +1208,361 @@ const ALT = '\x1b[?1049h';
 const RESTORE = '\x1b[?1049l';
 const HIDE = '\x1b[?25l';
 const SHOW = '\x1b[?25h';
+// Mouse: 1000 = press/release, 1002 = motion-while-button-held (drag),
+// 1006 = SGR extended (decimal coords past col 223). Drag reporting
+// makes per-host text selection possible — drag paints an overlay, the
+// release auto-copies the underlying cells via OSC 52 (set-clipboard).
+const MOUSE_ON  = '\x1b[?1000h\x1b[?1002h\x1b[?1006h';
+const MOUSE_OFF = '\x1b[?1000l\x1b[?1002l\x1b[?1006l';
 
-// 4Hz resize poll — v8cli has no SIGWINCH wiring, so we ioctl every 250ms
-// and repaint when dimensions actually change. Cheap (one syscall) and
-// far less hassle than threading a signal through the event loop.
+// Last laid-out tree from the most recent paint. Hit-testing walks this
+// instead of re-running layout(), so a click on row 4 col 50 always
+// targets the node that's visually there right now.
+let lastLayout: LaidOut[] = [];
+
 let lastW = 0, lastH = 0;
 let resizePollTimer: any = null;
-function pollResize() {
+function pollResize(): void {
   const w = process.stdout.columns || 80;
   const h = process.stdout.rows || 24;
   if (w !== lastW || h !== lastH) {
     lastW = w; lastH = h;
-    prev = null; // dimensions changed → full repaint
-    scheduleRepaint();
+    prev = null;
+    requestPaint();
   }
 }
 
-export function enter() {
+export function enter(): void {
   entered = true;
-  prev = null; // first frame after enter is always full repaint
+  prev = null;
   lastW = process.stdout.columns || 80;
   lastH = process.stdout.rows || 24;
-  process.stdout.write(ALT + HIDE + '\x1b[2J\x1b[H');
-  scheduleRepaint();
+  process.stdout.write(ALT + HIDE + MOUSE_ON + '\x1b[2J\x1b[H');
+  requestPaint();
   if (resizePollTimer == null) resizePollTimer = setInterval(pollResize, 250);
 }
-export function leave() {
+export function leave(): void {
   if (!entered) return;
   entered = false;
   if (resizePollTimer != null) { clearInterval(resizePollTimer); resizePollTimer = null; }
-  process.stdout.write('\x1b[0m' + SHOW + RESTORE);
+  process.stdout.write('\x1b[0m' + MOUSE_OFF + SHOW + RESTORE);
 }
 
-// Headless snapshot for tests — paints once into an explicit-size grid and
-// returns the result as plain text (no ANSI). Bypasses stdout entirely.
+// Headless snapshot — paints once into an explicit-size grid and returns
+// plain text (no ANSI). Bypasses stdout entirely. Used by devshell `y`
+// copy and by tests.
 export function headlessSnapshot(width: number, height: number): string {
-  const grid: Cell[][] = Array.from({ length: height }, () => Array.from({ length: width }, blank));
-  const boxes: Box[] = [];
-  for (const child of root.children) layout(child, 0, 0, width, height, boxes);
-  for (const b of boxes) {
-    if (b.node.kind === 'box') {
-      const p = b.node.props;
-      if (p.bg) fillRect(grid, b.x, b.y, b.w, b.h, p.bg, p.fg ?? null);
-      if (p.border) drawBorder(grid, b.x, b.y, b.w, b.h, p.borderColor ?? p.fg ?? null);
-    } else if (b.node.kind === 'text') {
-      writeText(grid, b.x, b.y, b.w, b.h, textOf(b.node), b.node.props.fg ?? null, !!b.node.props.bold);
-    }
-  }
-  return grid.map(row => row.map(c => c.ch).join('')).join('\n');
+  const grid = buildGrid(width, height, collectLayout(width, height));
+  // Drop WIDE_CONT continuation cells — the wide char to the left
+  // already represents both visual columns. Output preserves logical
+  // string width: each wide char counts as one source char.
+  return grid.map(row => row.map(c => c.ch === WIDE_CONT ? '' : c.ch).join('')).join('\n');
 }
 
-process.stdout.on('resize', () => scheduleRepaint());
+process.stdout.on('resize', () => requestPaint());
 process.on('exit', leave);
 process.on('SIGINT', () => { leave(); process.exit(0); });
 process.on('SIGTERM', () => { leave(); process.exit(0); });
 
-// Tiny key event bus — carts can subscribe with subscribeKey().
+// ── Key bus ─────────────────────────────────────────────────────────
+
 type KeyHandler = (key: string) => void;
 const keyHandlers = new Set<KeyHandler>();
 export function subscribeKey(fn: KeyHandler): () => void {
   keyHandlers.add(fn);
-  return () => keyHandlers.delete(fn);
+  return () => { keyHandlers.delete(fn); };
 }
 
-export function startInput() {
+// Internal hook for the focus manager / entry.tsx so they can intercept
+// keys before user subscribers (focus traversal, Pressable activation).
+type KeyInterceptor = (key: string) => boolean; // return true → consumed
+const interceptors = new Set<KeyInterceptor>();
+export function addKeyInterceptor(fn: KeyInterceptor): () => void {
+  interceptors.add(fn);
+  return () => { interceptors.delete(fn); };
+}
+
+// ── Hit-testing ─────────────────────────────────────────────────────
+
+// True if a node has any handler in handlerRegistry that we'd dispatch
+// from a click. Pressable is the canonical case; any node with onPress
+// or onClick (e.g. a View used as a button) also counts.
+function isClickable(id: number): boolean {
+  const h = handlerRegistry.get(id);
+  if (!h) return false;
+  return typeof h.onPress === 'function' || typeof h.onClick === 'function';
+}
+
+// Topmost clickable node containing (x, y). Walks lastLayout in REVERSE
+// order — descendants pushed after parents, so reverse iteration hits
+// the deepest match first.
+export function hitTest(x: number, y: number): Instance | null {
+  for (let i = lastLayout.length - 1; i >= 0; i--) {
+    const b = lastLayout[i];
+    if (x < b.x || x >= b.x + b.w) continue;
+    if (y < b.y || y >= b.y + b.h) continue;
+    if (b.node.type === 'Pressable' || isClickable(b.node.id)) return b.node;
+  }
+  return null;
+}
+
+// ── Mouse parsing ────────────────────────────────────────────────────
+//
+// SGR mouse mode (1006) emits CSI sequences:
+//   \x1b[<{button};{col};{row}M   press / drag
+//   \x1b[<{button};{col};{row}m   release
+// Buttons: 0=left, 1=middle, 2=right, 64=wheel-up, 65=wheel-down. Drag
+// adds 32 to the button code. col/row are 1-based.
+
+const MOUSE_RE = /\x1b\[<(\d+);(\d+);(\d+)([Mm])/;
+
+function dispatchMouse(buf: string): void {
+  let s = buf;
+  while (true) {
+    const m = MOUSE_RE.exec(s);
+    if (!m) break;
+    const rawButton = parseInt(m[1], 10);
+    const col = parseInt(m[2], 10) - 1;
+    const row = parseInt(m[3], 10) - 1;
+    const action = m[4]; // 'M' = press OR drag (motion-with-button), 'm' = release
+    s = s.slice(m.index + m[0].length);
+
+    // Drag flag is bit 5 (32). Mask it off to learn the actual button.
+    const dragging = (rawButton & 32) !== 0;
+    const button = rawButton & ~32;
+
+    // Wheel: bit 6 (64). 64 = wheel-up, 65 = wheel-down. Route to the
+    // topmost ScrollView under the cursor and "activate" it for keyboard
+    // arrow scrolling.
+    if ((rawButton & 64) !== 0 && action === 'M') {
+      const sv = hitTestScroll(col, row);
+      if (sv) {
+        activeScrollId = sv.id;
+        scrollBy(sv.id, (rawButton & 1) ? 3 : -3);
+      }
+      continue;
+    }
+
+    if (button !== 0) continue; // ignore middle/right for now
+
+    if (action === 'M' && !dragging) {
+      // Left-button PRESS. Begin a fresh drag-selection at this cell.
+      // Don't fire onPress yet — we'll only treat this as a click if
+      // release happens at the same cell with no drag in between.
+      selAnchor = { x: col, y: row };
+      selFocus = { x: col, y: row };
+      selDragging = true;
+      // Activate the deepest ScrollView under the cursor for keyboard
+      // arrow scrolling.
+      const sv = hitTestScroll(col, row);
+      if (sv) activeScrollId = sv.id;
+      // Terminal focus: clicking into a <Terminal> routes subsequent
+      // keystrokes to its PTY; clicking outside drops focus.
+      const tm = hitTestTerminal(col, row);
+      activeTerminalId = tm ? tm.id : null;
+      // TextInput focus on click — set focusedId so the typing path in
+      // startInput dispatches onChangeText to the right node.
+      const ti = hitTestTextInput(col, row);
+      if (ti) setFocusedId(ti.id);
+      requestPaint();
+    } else if (action === 'M' && dragging) {
+      // Mid-drag. Update focus end so the selection rect grows.
+      if (selDragging) {
+        selFocus = { x: col, y: row };
+        requestPaint();
+      }
+    } else if (action === 'm' && selDragging) {
+      // Left-button RELEASE. Two cases:
+      //   - Anchor === current focus → it's a click → fire onPress and
+      //     clear the selection.
+      //   - Otherwise → user dragged → keep the visible highlight, copy
+      //     the underlying cells via OSC 52.
+      selDragging = false;
+      const moved = !selAnchor || !selFocus
+        || selAnchor.x !== selFocus.x || selAnchor.y !== selFocus.y;
+      if (!moved) {
+        // Plain click. Clear the (zero-area) selection and dispatch.
+        selAnchor = null;
+        selFocus = null;
+        const target = hitTest(col, row);
+        if (target) {
+          setFocusedId(target.id);
+          dispatchTo(target.id, ['onPress', 'onClick'], { x: col, y: row });
+        }
+        requestPaint();
+      } else {
+        // Real drag. Copy current cells under the rect to the system
+        // clipboard via OSC 52. The highlight stays painted until the
+        // next click clears it.
+        const W = process.stdout.columns || 80;
+        const H = process.stdout.rows || 24;
+        const grid = buildGrid(W, H, lastLayout);
+        copySelectionToClipboard(grid);
+        requestPaint();
+      }
+    }
+  }
+}
+
+export function startInput(): void {
   if (!process.stdin.isTTY) return;
   process.stdin.setRawMode(true);
   process.stdin.resume();
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (data: string) => {
-    if (data === '\x03' || data === 'q') { leave(); process.exit(0); }
-    for (const fn of keyHandlers) fn(data);
+    // Ctrl+] (\x1d) leaves Terminal focus and returns input to the cart.
+    if (data === '\x1d' && activeTerminalId !== null) {
+      activeTerminalId = null;
+      requestPaint();
+      return;
+    }
+    // While focused on a Terminal, route keystrokes (including Ctrl+C →
+    // SIGINT to shell) to the vterm PTY. Ctrl+P still toggles host
+    // pause; everything else flows through.
+    if (activeTerminalId !== null && data !== '\x10') {
+      const entry = termSlots.get(activeTerminalId);
+      const g: any = globalThis;
+      if (entry && typeof g.__vterm_write === 'function') {
+        try { g.__vterm_write(entry.slot, data); } catch {}
+        return;
+      }
+    }
+    if (data === '\x03') { leave(); process.exit(0); }
+    // Ctrl+P toggles repaint-pause. Mouse mode also cycles off → on
+    // around the pause so the terminal owns selection while frozen.
+    if (data === '\x10') {
+      const next = !paused;
+      if (next) process.stdout.write(MOUSE_OFF);
+      else      process.stdout.write(MOUSE_ON);
+      togglePaused();
+      return;
+    }
+    // While paused, drop all input. The user is mid-select; we don't
+    // want stray keys advancing focus, firing handlers, or scrolling.
+    if (paused) return;
+    // Esc clears any visible selection so the highlight gets out of the
+    // way without requiring the user to click somewhere specific.
+    if (data === '\x1b' && (selAnchor || selFocus)) {
+      selAnchor = null;
+      selFocus = null;
+      selDragging = false;
+      requestPaint();
+      return;
+    }
+    // Mouse escapes can arrive packed with adjacent keys. Split off any
+    // mouse sequences first; let the rest fall through to key handlers.
+    if (data.indexOf('\x1b[<') !== -1) {
+      // Handle each mouse seq in order, and pass non-mouse remainder.
+      let rest = '';
+      let cursor = 0;
+      while (cursor < data.length) {
+        const idx = data.indexOf('\x1b[<', cursor);
+        if (idx === -1) { rest += data.slice(cursor); break; }
+        rest += data.slice(cursor, idx);
+        const m = MOUSE_RE.exec(data.slice(idx));
+        if (!m) { rest += data.slice(idx); break; }
+        dispatchMouse(data.slice(idx, idx + m[0].length));
+        cursor = idx + m[0].length;
+      }
+      if (rest.length === 0) return;
+      data = rest;
+    }
+    // Text input handler — runs before generic cart key handlers so
+    // typing into a focused TextInput doesn't double-dispatch as both
+    // an edit AND a cart-level key event.
+    if (focusedId !== -1) {
+      const node = findInstanceById(focusedId);
+      if (node && (node.type === 'TextInput' || node.type === 'TextArea' || node.type === 'TextEditor')) {
+        const handled = handleTextInputKey(node, data);
+        if (handled) return;
+      }
+    }
+    for (const fn of interceptors) {
+      try { if (fn(data)) return; } catch {}
+    }
+    for (const fn of keyHandlers) {
+      try { fn(data); } catch {}
+    }
+    // After cart-level handlers run, route arrow keys / page nav to the
+    // most-recently-active ScrollView. No claim mechanism on keyHandlers,
+    // so a cart that consumes arrows for its own state will see this
+    // scroll on top — works because a typical cart with a ScrollView
+    // child wants both behaviors anyway (arrows scroll the visible
+    // viewport).
+    if (activeScrollId !== null) {
+      if (data === '\x1b[A')      scrollBy(activeScrollId, -1);   // up
+      else if (data === '\x1b[B') scrollBy(activeScrollId,  1);   // down
+      else if (data === '\x1b[5~') scrollBy(activeScrollId, -10); // PgUp
+      else if (data === '\x1b[6~') scrollBy(activeScrollId,  10); // PgDn
+      else if (data === '\x1b[H' || data === 'g') scrollBy(activeScrollId, -1e9);
+      else if (data === '\x1b[F' || data === 'G') scrollBy(activeScrollId,  1e9);
+    }
   });
+}
+
+// Text input key handler — appends/backspaces/submits + dispatches
+// onChangeText to the cart. Returns true if the key was consumed (so
+// upstream key handlers don't double-fire).
+//
+// Phase 1: cursor pinned at end. Left/right arrow navigation and full
+// caret model are Phase 2.
+function handleTextInputKey(node: Instance, data: string): boolean {
+  const props: any = node.props || {};
+  const isMulti = node.type !== 'TextInput';
+  const cur: string = typeof props.value === 'string' ? props.value
+                    : typeof props.defaultValue === 'string' ? props.defaultValue
+                    : '';
+
+  // Tab + Shift-Tab pass through so focus.ts can cycle off the field.
+  if (data === '\t' || data === '\x1b[Z') return false;
+  // Esc — drop focus on the field, return control to cart-level handlers.
+  if (data === '\x1b') {
+    setFocusedId(-1);
+    return true;
+  }
+  // Enter — TextInput submits; multi-line nodes append a newline.
+  if (data === '\r' || data === '\n') {
+    if (isMulti) {
+      dispatchTo(node.id, ['onChangeText'], cur + '\n');
+      dispatchTo(node.id, ['onChange'], { target: { value: cur + '\n' } });
+    } else {
+      dispatchTo(node.id, ['onSubmitEditing', 'onSubmit'], { value: cur });
+    }
+    requestPaint();
+    return true;
+  }
+  // Backspace / Delete — strip the last char.
+  if (data === '\x7f' || data === '\b') {
+    if (cur.length === 0) return true;
+    const next = cur.slice(0, -1);
+    dispatchTo(node.id, ['onChangeText'], next);
+    dispatchTo(node.id, ['onChange'], { target: { value: next } });
+    requestPaint();
+    return true;
+  }
+  // Ignore other ANSI control sequences (arrows, function keys, etc.).
+  if (data.startsWith('\x1b')) return true;
+  // Printable: append. Multi-byte UTF-8 fragments arrive as one chunk
+  // from V8's UTF-8 stdin shim, so we can append wholesale.
+  if (data.length === 0) return true;
+  // Filter raw control chars except those handled above.
+  if (data.length === 1 && data.charCodeAt(0) < 0x20) return true;
+  const next = cur + data;
+  dispatchTo(node.id, ['onChangeText'], next);
+  dispatchTo(node.id, ['onChange'], { target: { value: next } });
+  requestPaint();
+  return true;
+}
+
+// Dispatch helper — fires a handler from handlerRegistry by node id and
+// alias name. Used by focus.ts to activate Pressables on Enter, and by
+// the mouse path to fire clicks.
+export function dispatchTo(id: number, names: string[], ...args: any[]): boolean {
+  const h = handlerRegistry.get(id);
+  if (!h) return false;
+  for (const n of names) {
+    const fn = h[n];
+    if (typeof fn === 'function') { try { fn(...args); } catch {} return true; }
+  }
+  return false;
 }

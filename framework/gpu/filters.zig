@@ -22,7 +22,7 @@ const std = @import("std");
 const wgpu = @import("wgpu");
 
 const filter_shaders = @import("filter_shaders.zig");
-const log = @import("../log.zig");
+const log = @import("../diag/log.zig");
 
 // ─── Filter taxonomy ────────────────────────────────────────────
 pub const Filter = enum(u8) {

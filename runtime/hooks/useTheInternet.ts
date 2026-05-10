@@ -187,7 +187,7 @@ export function a2sQuery(id: number, kind: string): void {
 }
 
 // ── Browser page fetch ─────────────────────────────────────────────
-// Backed by framework/net/page_fetch.zig (HTTP/1.1 + tls.zig worker pool).
+// Backed by framework/net/http.zig (std.http.Client + tls.zig).
 // This path will absorb nghttp2 as the stack matures.
 
 export function browserPageSync(spec: string): string {

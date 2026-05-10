@@ -6,7 +6,7 @@
 //! Canvas transform is applied on the CPU side (same as rects/curves).
 
 const std = @import("std");
-const log = @import("../log.zig");
+const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
@@ -48,7 +48,11 @@ pub const TriInstance = extern struct {
 // Constants & State
 // ════════════════════════════════════════════════════════════════════════
 
-pub const MAX_TRIS = 8192;
+// Bumped 8K → 1M for dense filled-polygon workloads (chart_bench's
+// Graph.Polygon at 100 charts × 5000-point area-fills = ~500K triangles
+// per frame). 1M × 80 bytes = ~80 MB static. Fine on modern GPUs; matches
+// the capsules cap (1M) so polyline + polygon pipelines have parity.
+pub const MAX_TRIS = 1_048_576;
 
 var g_tris: [MAX_TRIS]TriInstance = undefined;
 var g_tri_count: usize = 0;

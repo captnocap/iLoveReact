@@ -28,6 +28,11 @@ export interface InputClaim {
   onSubmit: (text: string) => void | Promise<void>;
   /** Optional placeholder shown while this claim is active. */
   placeholder?: string;
+  /** Optional override for the strip's send button label. When set,
+   *  replaces the default "SEND" so the user can see exactly what
+   *  the next submit will do (e.g. "STAGE COMMENT" while a /plan
+   *  anchor is active vs "ASK PLANNER" while talking to the worker). */
+  sendLabel?: string;
   /** Called when the claim is released by the strip (Escape, blur,
    *  external releaseClaim()). Lets the activity drop focus / close
    *  affordances. */
@@ -175,4 +180,33 @@ function _subscribeSection(fn: () => void): () => void {
 export function useSettingsSection(): [string, (v: string) => void] {
   const value = React.useSyncExternalStore(_subscribeSection, getSettingsSection);
   return [value, setSettingsSection];
+}
+
+// ── Sweatshop active section ─────────────────────────────────────────
+//
+// /sweatshop is a multi-section route (Canvas, Plan, Composer, …) that
+// shares the FlowEditor + composition vocabulary. Same shape as
+// settings: shell-level store + a HUD-owned SweatshopNav rail. The
+// route paths (/sweatshop, /sweatshop/canvas, /sweatshop/plan, …) sync
+// through this store so deep-links land on the right section.
+
+let _sweatshopSection = 'canvas';
+const _sweatshopSubs = new Set<() => void>();
+
+export function setSweatshopSection(value: string): void {
+  if (_sweatshopSection === value) return;
+  _sweatshopSection = value;
+  for (const s of _sweatshopSubs) s();
+}
+
+export function getSweatshopSection(): string { return _sweatshopSection; }
+
+function _subscribeSweatshop(fn: () => void): () => void {
+  _sweatshopSubs.add(fn);
+  return () => { _sweatshopSubs.delete(fn); };
+}
+
+export function useSweatshopSection(): [string, (v: string) => void] {
+  const value = React.useSyncExternalStore(_subscribeSweatshop, getSweatshopSection);
+  return [value, setSweatshopSection];
 }

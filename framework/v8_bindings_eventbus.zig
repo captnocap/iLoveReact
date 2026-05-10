@@ -14,7 +14,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const event_bus = @import("event_bus.zig");
+const event_bus = @import("diag/event_bus.zig");
 
 const alloc = std.heap.c_allocator;
 

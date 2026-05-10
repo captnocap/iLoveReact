@@ -107,10 +107,40 @@ function fmtDate(iso: any): string {
   return m ? `${m[1]} ${m[2]} UTC` : iso;
 }
 
+function rowTimestamp(row: PreviewRow, kind: 'created' | 'updated'): string {
+  const columnValue = kind === 'created' ? row.created_at : row.updated_at;
+  if (columnValue) return columnValue;
+  const data = typeof row.data === 'string'
+    ? (() => {
+        try { return JSON.parse(row.data); } catch { return null; }
+      })()
+    : row.data;
+  if (!data || typeof data !== 'object') return '';
+  if (kind === 'updated') {
+    return data.updated_at || data.updatedAt || data.lastUpdatedAt || data.lastUsedAt || data.timestamp || data.created_at || data.createdAt || '';
+  }
+  return data.created_at || data.createdAt || data.timestamp || data.updated_at || data.updatedAt || '';
+}
+
 function truncate(v: any, max = 180): string {
   const raw = typeof v === 'string' ? v : JSON.stringify(v);
   if (!raw) return '';
   return raw.length > max ? `${raw.slice(0, max - 3)}...` : raw;
+}
+
+function prettyJson(v: any): string {
+  if (typeof v === 'string') {
+    try {
+      return JSON.stringify(JSON.parse(v), null, 2);
+    } catch {
+      return v;
+    }
+  }
+  try {
+    return JSON.stringify(v, null, 2);
+  } catch {
+    return String(v);
+  }
 }
 
 function statusText(ok: boolean): string {
@@ -136,6 +166,42 @@ function KV({ label, value, mono }: { label: string; value: any; mono?: boolean 
         <Text>{value == null || value === '' ? EM_DASH : String(value)}</Text>
       </Box>
     </S.KV>
+  );
+}
+
+function JsonDetail({ value }: { value: any }) {
+  const lines = prettyJson(value).split('\n');
+  return (
+    <Box style={{ flexDirection: 'column', gap: 4, flexGrow: 1, minHeight: 0 }}>
+      <S.Body>data</S.Body>
+      <ScrollView showScrollbar style={{ width: '100%', flexGrow: 1, minHeight: 0 }}>
+        <Box style={{
+          paddingLeft: 8,
+          paddingRight: 8,
+          paddingTop: 6,
+          paddingBottom: 6,
+          borderWidth: 1,
+          borderColor: 'theme:rule',
+          backgroundColor: 'theme:bg',
+          flexDirection: 'column',
+          gap: 1,
+        }}>
+          {lines.map((line, index) => (
+            <S.Code key={`${index}:${line}`}>{line || ' '}</S.Code>
+          ))}
+        </Box>
+      </ScrollView>
+    </Box>
+  );
+}
+
+function DetailField({ label, value, mono }: { label: string; value: any; mono?: boolean }) {
+  const Text = mono ? S.Code : S.Body;
+  return (
+    <Box style={{ flexDirection: 'column', gap: 1, minWidth: 118, flexGrow: 1, flexShrink: 1 }}>
+      <S.Caption>{label}</S.Caption>
+      <Text>{value == null || value === '' ? EM_DASH : String(value)}</Text>
+    </Box>
   );
 }
 
@@ -341,6 +407,7 @@ function PostgresCard() {
   const [error, setError] = useState<string | null>(null);
   const [target, setTarget] = useState<PreviewTarget>({ bucket: 'user', entity: 'user' });
   const [preview, setPreview] = useState<PreviewRow[]>([]);
+  const [selectedRowId, setSelectedRowId] = useState('');
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<string | null>(null);
   const [tableFilter, setTableFilter] = useState('');
@@ -406,11 +473,13 @@ function PostgresCard() {
       const table = tableName(nextTarget.entity);
       const rows = pgQuery<PreviewRow>(
         nextTarget.bucket,
-        `SELECT id, created_at, updated_at, data FROM ${ident(table)} ORDER BY updated_at DESC LIMIT 8`,
+        `SELECT id, created_at::text AS created_at, updated_at::text AS updated_at, data FROM ${ident(table)} ORDER BY updated_at DESC LIMIT 8`,
       );
       setPreview(rows);
+      setSelectedRowId((cur) => rows.some((row) => row.id === cur) ? cur : (rows[0]?.id || ''));
     } catch (e: any) {
       setPreview([]);
+      setSelectedRowId('');
       setPreviewError(e?.message || String(e));
     }
   };
@@ -472,6 +541,7 @@ function PostgresCard() {
   const totalRows = status.reduce((n, b) => n + b.tables.reduce((m, t) => m + t.rows, 0), 0);
   const badBuckets = status.filter((bucket) => !bucket.ok).length;
   const selectedTable = activeTables.find((table) => table.entity === target.entity);
+  const selectedRow = preview.find((row) => row.id === selectedRowId) || preview[0] || null;
 
   return (
     <Card gap={16}>
@@ -551,6 +621,7 @@ function PostgresCard() {
                       edited={!bucket.ok}
                       onPress={() => {
                         const firstEntity = bucket.tables[0]?.entity || (grouped[bucket.id] || ['user'])[0];
+                        setSelectedRowId('');
                         setTarget({ bucket: bucket.id, entity: firstEntity });
                       }}
                     />
@@ -596,7 +667,10 @@ function PostgresCard() {
                         type={table.ok ? 'number' : 'null'}
                         selected={table.entity === target.entity}
                         edited={!table.ok || table.rows > 0}
-                        onPress={() => setTarget({ bucket: target.bucket, entity: table.entity })}
+                        onPress={() => {
+                          setSelectedRowId('');
+                          setTarget({ bucket: target.bucket, entity: table.entity });
+                        }}
                       />
                     ))}
                   </Box>
@@ -653,23 +727,32 @@ function PostgresCard() {
                         <S.BodyDim>No rows in this table.</S.BodyDim>
                       </Box>
                     ) : null}
-                    {preview.map((row, index) => (
-                      <Box key={row.id} style={{ flexDirection: 'row' }}>
-                        <DexTableCell value={truncate(row.id, 28)} flex={0.85} selected={index === 0} />
-                        <DexTableCell value={fmtDate(row.updated_at)} flex={0.62} tone="number" selected={index === 0} />
-                        <DexTableCell
-                          value={truncate(row.data, 180)}
-                          flex={2.1}
-                          tone={rowTone(typeof row.data === 'object' ? valueType(row.data) : 'default')}
-                          selected={index === 0}
-                        />
-                      </Box>
-                    ))}
+                    {preview.map((row) => {
+                      const isSelected = row.id === selectedRow?.id;
+                      return (
+                        <Pressable
+                          key={row.id}
+                          onPress={() => setSelectedRowId(row.id)}
+                          style={{ flexDirection: 'row', width: '100%' }}
+                        >
+                          <DexTableCell value={truncate(row.id, 28)} flex={0.85} selected={isSelected} />
+                          <DexTableCell value={fmtDate(rowTimestamp(row, 'updated'))} flex={0.62} tone="number" selected={isSelected} />
+                          <DexTableCell
+                            value={truncate(row.data, 180)}
+                            flex={2.1}
+                            tone={rowTone(typeof row.data === 'object' ? valueType(row.data) : 'default')}
+                            selected={isSelected}
+                          />
+                        </Pressable>
+                      );
+                    })}
                   </Box>
                 </ScrollView>
 
-                {preview[0] ? (
+                {selectedRow ? (
                   <Box style={{
+                    height: 190,
+                    flexShrink: 0,
                     borderTopWidth: 1,
                     borderTopColor: 'theme:rule',
                     paddingLeft: 10,
@@ -678,12 +761,16 @@ function PostgresCard() {
                     paddingBottom: 8,
                     gap: 4,
                     backgroundColor: 'theme:bg1',
+                    flexDirection: 'column',
+                    minHeight: 0,
                   }}>
                     <S.Caption>Selected row detail</S.Caption>
-                    <KV label="id" value={preview[0].id} mono />
-                    <KV label="created" value={fmtDate(preview[0].created_at)} />
-                    <KV label="updated" value={fmtDate(preview[0].updated_at)} />
-                    <KV label="data" value={truncate(preview[0].data, 520)} mono />
+                    <Box style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap', flexShrink: 0 }}>
+                      <DetailField label="id" value={selectedRow.id} mono />
+                      <DetailField label="created" value={fmtDate(rowTimestamp(selectedRow, 'created'))} />
+                      <DetailField label="updated" value={fmtDate(rowTimestamp(selectedRow, 'updated'))} />
+                    </Box>
+                    <JsonDetail value={selectedRow.data} />
                   </Box>
                 ) : null}
               </Box>

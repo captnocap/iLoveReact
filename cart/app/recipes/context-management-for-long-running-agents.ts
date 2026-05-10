@@ -5,7 +5,7 @@ export const recipe: RecipeDocument = {
   title: "Context Management for Long-Running Agents",
   sourcePath: "cart/app/recipes/context-management-for-long-running-agents.md",
   instructions:
-    "Manage context for long-running agents in our v8-bindings stack. The original recipe relies on Messages API features (compact_20260112, clear_tool_uses_20250919, memory_20250818) that we don't expose — Claude Code runs its own auto-compaction inside the subprocess. Levers we have: cwd-as-memory, cart-driven session reset, cart-side user-message trimming.",
+    "Manage context for long-running agents through the unified worker contract. The original recipe relies on Messages API features (compact_20260112, clear_tool_uses_20250919, memory_20250818) that we don't expose — Claude Code runs its own auto-compaction inside the subprocess. Levers we have through useAssistant({ backend: 'claude_code' }): cwd-as-memory, cart-driven session reset (close + remount), cart-side user-message trimming.",
   sections: [
     {
       kind: "paragraph",
@@ -27,8 +27,8 @@ Memory tool          memory_20250818                    cwd + Read/Edit/Write is
       title: "What we can do today",
       items: [
         "Use cwd as a memory store — same shape as the shopper recipe.",
-        "End a session and start a new one with __claude_close() + __claude_init() when context feels heavy. Carry state forward via files.",
-        "Trim our own user-message bloat before __claude_send. Everything to the left of the binding is ours to shape.",
+        "End a session and start a new one by calling close() on the useAssistant return + remounting (or toggling the backend opts so the hook respawns the worker). Carry state forward via files.",
+        "Trim our own user-message bloat before ask(). Everything to the left of the hook is ours to shape.",
       ],
     },
     {
@@ -44,9 +44,9 @@ Memory tool          memory_20250818                    cwd + Read/Edit/Write is
       kind: "code-block",
       title: "Architecture: where context management actually lives",
       language: "text",
-      code: `.tsx cart  ── __claude_send ──>  framework/v8_bindings_sdk.zig
+      code: `.tsx cart  ── useAssistant ──>  framework/assistant/worker_bindings.zig
                                   │
-                                  └─ framework/claude_sdk/Session
+                                  └─ framework/assistant/claude_sdk/Session
                                         └─ subprocess: \`claude --input-format stream-json\`
                                               └─ Claude Code's own context manager
                                                     (auto-compaction, /clear, /compact)
@@ -58,8 +58,10 @@ Memory tool          memory_20250818                    cwd + Read/Edit/Write is
     {
       kind: "code-block",
       title: "Strategy 1: cart-side memory via cwd + notes.md",
-      language: "typescript",
-      code: `const NOTES_INSTRUCTION = \`You are a research analyst. Treat ./notes.md as your durable scratchpad.
+      language: "tsx",
+      code: `import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
+
+const NOTES_INSTRUCTION = \`You are a research analyst. Treat ./notes.md as your durable scratchpad.
 
 At the start of every conversation:
 1. Read ./notes.md if it exists.
@@ -68,43 +70,55 @@ At the start of every conversation:
 
 Keep entries short, dated when relevant, and skimmable.\`;
 
-const host: any = globalThis;
-const claude_init  = typeof host.__claude_init  === 'function' ? host.__claude_init  : (_a:string,_b:string,_c?:string)=>0;
-const claude_send  = typeof host.__claude_send  === 'function' ? host.__claude_send  : (_:string)=>0;
-const claude_poll  = typeof host.__claude_poll  === 'function' ? host.__claude_poll  : ()=>null;
-const claude_close = typeof host.__claude_close === 'function' ? host.__claude_close : ()=>{};`,
-    },
-    {
-      kind: "code-block",
-      title: "Strategy 2: cart-driven session reset",
-      language: "typescript",
-      code: `// Closest analog to compaction we have: drop the session, start fresh.
-// The new session has zero conversation history. Anything important must
-// already be in notes.md.
-
-function resetSession(cwd: string, model: string) {
-  claude_close();
-  claude_init(cwd, model);
+function useAnalyst(cwd: string, model: string) {
+  return useAssistant({ backend: 'claude_code', cwd, model });
 }`,
     },
     {
       kind: "code-block",
+      title: "Strategy 2: cart-driven session reset",
+      language: "tsx",
+      code: `// Closest analog to compaction we have: drop the worker, respawn it.
+// The new worker has zero conversation history. Anything important must
+// already be in notes.md.
+//
+// useAssistant respawns its worker whenever a load-bearing opt changes
+// (cwd / model / sessionId / etc.) — bumping a 'sessionEpoch' state value
+// passed via opts.sessionId is enough to force a clean reset.
+
+const [epoch, setEpoch] = useState(0);
+const { events, ask, close } = useAssistant({
+  backend: 'claude_code',
+  cwd,
+  model,
+  sessionId: \`epoch-\${epoch}\`,
+});
+
+function resetSession() { setEpoch(n => n + 1); }`,
+    },
+    {
+      kind: "code-block",
       title: "Strategy 2a: ask Claude to summarize before close",
-      language: "typescript",
-      code: `async function summarizeAndClose(cwd: string): Promise<void> {
-  await askOnce(cwd, model,
+      language: "tsx",
+      code: `// Send the summary turn, wait for completion, then bump the epoch.
+async function summarizeAndReset() {
+  ask(
     "Before we wrap, write a 5-bullet summary of what you've learned this " +
-    "session into ./notes.md under a new dated heading. Then say 'done'.");
-  claude_close();
+    "session into ./notes.md under a new dated heading. Then say 'done'.",
+  );
+  // Watch events for the next 'completion' kind, then:
+  //   close();      // optional — the hook tears down on opts change anyway
+  //   setEpoch(n => n + 1);
 }`,
     },
     {
       kind: "code-block",
       title: "Strategy 2b: cart owns the rolling summary",
       language: "typescript",
-      code: `// Cheaper and predictable. We accumulate assistant text turn by turn,
-// keep a rolling summary in JS state, prepend to next session's first user
-// message. No Claude involvement at the boundary.
+      code: `// Cheaper and predictable. We accumulate assistant text turn by turn
+// (read it off the events array), keep a rolling summary in JS state,
+// prepend to next session's first user message. No Claude involvement
+// at the boundary.
 
 let runningSummary = '';
 
@@ -141,30 +155,28 @@ function trimForSend(history: CartTurn[], keepRecent = 4): string {
     },
     {
       kind: "code-block",
-      title: "Observability — what __claude_poll surfaces",
+      title: "Observability — what the events array surfaces",
       language: "typescript",
-      code: `type ResultMsg = {
-  type: 'result';
-  subtype: string;             // 'success' | 'error_max_turns' | etc.
-  session_id: string;
-  result?: string;
-  total_cost_usd: number;
-  duration_ms: number;
-  num_turns: number;
-  is_error: boolean;
-};
+      code: `// Each WorkerEvent in \`events\` carries a normalized shape:
+//   - kind: 'completion' | 'usage' | 'assistant_message' | 'tool_call' | ...
+//   - usage?: { input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens }
+//   - cost_usd_delta?: number
+//
+// Sum cost_usd_delta across the run for a "session is getting expensive"
+// signal; count completion events for "num_turns". Reset when either
+// crosses a workload-specific threshold.
 
-// num_turns and total_cost_usd are our proxies for "session is getting long /
-// expensive". Reset when they cross a workload-specific threshold.`,
+const numTurns = events.filter(e => e.kind === 'completion').length;
+const totalCostUsd = events.reduce((sum, e) => sum + (e.cost_usd_delta ?? 0), 0);`,
     },
     {
       kind: "bullet-list",
-      title: "Caveats and TODOs against the v8 bindings",
+      title: "Caveats and TODOs against the worker bindings",
       items: [
-        "No betas plumbing. framework/claude_sdk/argv.zig:31 doesn't pass --beta flags. compact_20260112 / clear_tool_uses_20250919 live on client.beta.messages.create — we don't call that.",
+        "No betas plumbing. framework/assistant/claude_sdk/argv.zig doesn't pass --beta flags. compact_20260112 / clear_tool_uses_20250919 live on client.beta.messages.create — we don't call that.",
         "No mid-session context_management config. Messages API takes context_management.edits per request; Claude Code applies its own policy and hides the knobs.",
-        "No slash-command path. framework/v8_bindings_sdk.zig:968 (hostClaudeSend) sends raw user text. If we route a leading '/' into Claude Code's slash-command surface, /clear and /compact become cart-driven primitives.",
-        "No cache_read_input_tokens / cache_creation_input_tokens telemetry. Add to claudeMessageToJs (framework/v8_bindings_sdk.zig:277) when token-trajectory plots become useful.",
+        "No slash-command path. The worker's send fn passes raw user text. If we route a leading '/' into Claude Code's slash-command surface, /clear and /compact become cart-driven primitives.",
+        "Token telemetry partial. cache_read_input_tokens and cache_creation_input_tokens are already on WorkerEventUsage in framework/assistant/worker_bindings.zig — surface them in cart UI when token-trajectory plots become useful.",
       ],
     },
     {
@@ -172,9 +184,9 @@ function trimForSend(history: CartTurn[], keepRecent = 4): string {
       title: "Pattern summary",
       items: [
         "Treat cwd + a known notes file as your memory tool.",
-        "Reset (close + init) when num_turns or total_cost_usd crosses a threshold; carry state via files.",
-        "Optionally have Claude write a summary into notes.md before close so the next session starts informed.",
-        "Trim cart-side history before __claude_send to control what enters the session.",
+        "Reset (bump sessionId / remount) when numTurns or totalCostUsd crosses a threshold; carry state via files.",
+        "Optionally have Claude write a summary into notes.md before reset so the next session starts informed.",
+        "Trim cart-side history before ask() to control what enters the session.",
         "Treat Claude Code's own auto-compaction as opaque until we plumb the Messages API or slash commands.",
       ],
     },

@@ -1,6 +1,5 @@
 import { Box, Col, Row } from '@reactjit/runtime/primitives';
-import { AtomFrame, Body, Mono } from './controlsSpecimenParts';
-import { VerticalText } from './ControlsSpecimenShell';
+import { AtomFrame, Body, Mono, VerticalText } from './controlsSpecimenParts';
 import { CTRL } from './controlsSpecimenTheme';
 import { classifiers as S } from '@reactjit/core';
 

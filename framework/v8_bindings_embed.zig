@@ -23,7 +23,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const embed = @import("embed.zig");
+const embed = @import("assistant/embed.zig");
 
 var g_reranker: ?embed.Reranker = null;
 var g_reranker_path: []u8 = &.{};

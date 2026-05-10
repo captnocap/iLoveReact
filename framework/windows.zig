@@ -31,7 +31,7 @@ const layout = @import("layout.zig");
 const state_mod = @import("state.zig");
 const text_mod = @import("text.zig");
 const events = @import("events.zig");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const ipc = @import("net/ipc.zig");
 
 const Node = layout.Node;

@@ -17,8 +17,8 @@ const Node = layout.Node;
 const Style = layout.Style;
 const Color = layout.Color;
 const transition_mod = @import("framework/transition.zig");
-const easing_mod = @import("framework/easing.zig");
-const effect_ctx = @import("framework/effect_ctx.zig");
+const easing_mod = @import("framework/math/easing.zig");
+const effect_ctx = @import("framework/effects/ctx.zig");
 const input = @import("framework/input.zig");
 const state = @import("framework/state.zig");
 const events = @import("framework/events.zig");
@@ -42,7 +42,7 @@ const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = @import("framework/v8_bindings_core.zig");
 const v8_bindings_eventbus = @import("framework/v8_bindings_eventbus.zig");
 const v8_bindings_ifttt = @import("framework/v8_bindings_ifttt.zig");
-const event_bus = @import("framework/event_bus.zig");
+const event_bus = @import("framework/diag/event_bus.zig");
 
 // Override std.log so every framework `std.log.info/warn/err` call routes
 // through the bus. Single chokepoint; no call-site rewrites needed. Errors
@@ -187,6 +187,26 @@ const v8_bindings_embed = if (HAS_EMBED) @import("framework/v8_bindings_embed.zi
     pub fn registerEmbed(_: anytype) void {}
     pub fn tickDrain() void {}
 };
+const HAS_VIDEO = if (@hasDecl(build_options, "has_video")) build_options.has_video else false;
+const v8_bindings_video = if (HAS_VIDEO) @import("framework/v8_bindings_video.zig") else struct {
+    pub fn registerVideo(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const HAS_AUDIO = if (@hasDecl(build_options, "has_audio")) build_options.has_audio else false;
+const v8_bindings_audio = if (HAS_AUDIO) @import("framework/v8_bindings_audio.zig") else struct {
+    pub fn registerAudio(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const HAS_MIDI = if (@hasDecl(build_options, "has_midi")) build_options.has_midi else false;
+const v8_bindings_midi = if (HAS_MIDI) @import("framework/v8_bindings_midi.zig") else struct {
+    pub fn registerMidi(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const HAS_TERMINAL = if (@hasDecl(build_options, "has_terminal")) build_options.has_terminal else false;
+const v8_bindings_vterm = if (HAS_TERMINAL) @import("framework/v8_bindings_vterm.zig") else struct {
+    pub fn registerVterm(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
 
 const INGREDIENTS = [_]Ingredient{
     // Framework-essential (always-on). These bindings expose host fns the
@@ -233,9 +253,13 @@ const INGREDIENTS = [_]Ingredient{
     .{ .name = "whisper", .required = false, .grep_prefix = "__whisper_", .reg_fn = "registerWhisper", .mod = v8_bindings_whisper },
     .{ .name = "pg", .required = false, .grep_prefix = "__pg_", .reg_fn = "registerPg", .mod = v8_bindings_pg },
     .{ .name = "embed", .required = false, .grep_prefix = "__embed_", .reg_fn = "registerEmbed", .mod = v8_bindings_embed },
+    .{ .name = "video", .required = false, .grep_prefix = "__video_", .reg_fn = "registerVideo", .mod = v8_bindings_video },
+    .{ .name = "audio", .required = false, .grep_prefix = "__audio_", .reg_fn = "registerAudio", .mod = v8_bindings_audio },
+    .{ .name = "midi", .required = false, .grep_prefix = "__midi_", .reg_fn = "registerMidi", .mod = v8_bindings_midi },
+    .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
 };
 const fs_mod = @import("framework/fs.zig");
-const localstore = @import("framework/localstore.zig");
+const localstore = @import("framework/storage/localstore.zig");
 comptime {
     if (!IS_LIB) _ = @import("framework/core.zig");
 }
@@ -325,7 +349,7 @@ var g_last_bundle_mtime: i128 = 0;
 var g_mtime_poll_counter: u32 = 0;
 var g_reload_pending: bool = false;
 
-const dev_ipc = @import("framework/dev_ipc.zig");
+const dev_ipc = @import("framework/diag/dev_ipc.zig");
 
 /// A dev-mode tab. Each tab has a human-readable name (cart name) and a
 /// heap-owned bundle. The active tab is the one currently evaluated in QJS;
@@ -1944,6 +1968,8 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonInt(v)) |i| node.scene3d_tex_w = if (i > 0 and i < 65536) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dTexH")) {
             if (jsonInt(v)) |i| node.scene3d_tex_h = if (i > 0 and i < 65536) @intCast(i) else 0;
+        } else if (std.mem.eql(u8, k, "scene3dTexKey")) {
+            if (dupJsonText(v)) |s| node.scene3d_tex_key = s;
         } else if (std.mem.eql(u8, k, "scene3dTexData")) {
             // RRGGBBAA hex string, 8 chars per pixel. Length must equal
             // 8 * w * h. Decoded into a fresh RGBA byte buffer owned by
@@ -2076,6 +2102,21 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                         out[i] = jsonFloat(item) orelse 0;
                     }
                     node.polyline_points = out;
+                }
+            }
+        } else if (std.mem.eql(u8, k, "gcurves")) {
+            // Graph.GCurve — flat array of 6-float quadratic-bezier-triangle
+            // control points: {p0x,p0y, p1x,p1y, p2x,p2y, …}. Parsed once at
+            // CREATE/UPDATE; engine paint queues one g-curve fill instance
+            // per group of 6 floats.
+            if (v == .array) {
+                if (node.gcurve_data) |old| g_alloc.free(old);
+                const buf = g_alloc.alloc(f32, v.array.items.len) catch null;
+                if (buf) |out| {
+                    for (v.array.items, 0..) |item, i| {
+                        out[i] = jsonFloat(item) orelse 0;
+                    }
+                    node.gcurve_data = out;
                 }
             }
         } else if (std.mem.eql(u8, k, "effectData")) {
@@ -2619,6 +2660,89 @@ fn applyCommandBatch(json_bytes: []const u8) void {
     };
     if (!g_is_window_child) {
         for (parsed.value.array.items) |cmd| routeCommandToHostWindow(cmd);
+    }
+    // Diagnostic: per-batch op breakdown. Helps locate per-frame churn
+    // when the parent sends mutations repeatedly. Gated behind
+    // ZIGOS_TRACE_BATCH_OPS=1 so it stays quiet by default.
+    const trace_ops = blk: {
+        const env = std.posix.getenv("ZIGOS_TRACE_BATCH_OPS") orelse break :blk false;
+        break :blk env.len > 0 and env[0] != '0';
+    };
+    if (trace_ops and cmd_count > 0) {
+        var n_create: u32 = 0;
+        var n_update: u32 = 0;
+        var n_append: u32 = 0;
+        var n_remove: u32 = 0;
+        var n_other: u32 = 0;
+        var update_summary: std.ArrayList(u8) = .{};
+        defer update_summary.deinit(g_alloc);
+        var first_other_op: []const u8 = "";
+        var update_seen: u32 = 0;
+        for (parsed.value.array.items) |cmd| {
+            if (cmd != .object) continue;
+            const op_v = cmd.object.get("op") orelse continue;
+            if (op_v != .string) continue;
+            const op = op_v.string;
+            if (std.mem.eql(u8, op, "CREATE")) n_create += 1
+            else if (std.mem.eql(u8, op, "UPDATE")) {
+                n_update += 1;
+                // Capture id + diff keys for the first 4 UPDATEs in
+                // each batch. When the diff includes "style", expand
+                // it inline as style{a,b,c} — that's where churn most
+                // often hides (per-render fresh literals).
+                if (update_seen < 4) {
+                    update_seen += 1;
+                    var id_v: i64 = -1;
+                    if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| { id_v = i; };
+                    update_summary.writer(g_alloc).print(" #{d}=id:{d}[", .{ update_seen, id_v }) catch {};
+                    if (cmd.object.get("props")) |pv| if (pv == .object) {
+                        var iter = pv.object.iterator();
+                        var first = true;
+                        while (iter.next()) |entry| {
+                            if (!first) update_summary.appendSlice(g_alloc, ",") catch break;
+                            update_summary.appendSlice(g_alloc, entry.key_ptr.*) catch break;
+                            first = false;
+                            // Expand `style` keys inline
+                            if (std.mem.eql(u8, entry.key_ptr.*, "style") and entry.value_ptr.* == .object) {
+                                update_summary.appendSlice(g_alloc, "{") catch break;
+                                var sit = entry.value_ptr.*.object.iterator();
+                                var sfirst = true;
+                                while (sit.next()) |se| {
+                                    if (!sfirst) update_summary.appendSlice(g_alloc, ",") catch break;
+                                    update_summary.appendSlice(g_alloc, se.key_ptr.*) catch break;
+                                    sfirst = false;
+                                }
+                                update_summary.appendSlice(g_alloc, "}") catch break;
+                            }
+                        }
+                    };
+                    update_summary.appendSlice(g_alloc, "]") catch {};
+                }
+            }
+            else if (std.mem.eql(u8, op, "APPEND") or std.mem.eql(u8, op, "INSERT_BEFORE")) n_append += 1
+            else if (std.mem.eql(u8, op, "REMOVE")) n_remove += 1
+            else {
+                n_other += 1;
+                if (first_other_op.len == 0) {
+                    first_other_op = op;
+                    // For UPDATE_TEXT and similar non-standard ops,
+                    // capture the target id and a snippet of the
+                    // text/payload so we can find the source.
+                    var id_v: i64 = -1;
+                    if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| { id_v = i; };
+                    update_summary.writer(g_alloc).print(" other=id:{d}", .{id_v}) catch {};
+                    if (cmd.object.get("text")) |tv| if (tv == .string) {
+                        const t = tv.string;
+                        const head_len = if (t.len > 24) 24 else t.len;
+                        update_summary.writer(g_alloc).print(" text:{s}", .{t[0..head_len]}) catch {};
+                    };
+                }
+            }
+        }
+        std.debug.print(
+            "[batch-ops] cmds={d} C={d} U={d} A={d} R={d} other={d}({s}) updates:{s}\n",
+            .{ cmd_count, n_create, n_update, n_append, n_remove, n_other, first_other_op, update_summary.items },
+        );
     }
     const t2 = std.time.microTimestamp();
     cleanupDetachedNodes();
@@ -3511,6 +3635,34 @@ fn childTitle() [*:0]const u8 {
 }
 
 fn childInit() void {
+    // Install no-op stubs for the runtime dispatch globals. The cart
+    // bundle (runtime/index.tsx) defines these in the main process but
+    // never loads in the child — without these stubs the framework's
+    // evalExpr("__dispatchLayout(...)") at engine.zig:1208 fires a
+    // ReferenceError on the first laid-out node with on_layout, V8
+    // enters an error state, and subsequent dispatches all fail
+    // (clicks unrouted, selection misroutes, etc.). The earlier
+    // attempt to install these in appInit() never ran for child
+    // windows because childInit() — not appInit() — is the engine's
+    // config.init for the child branch.
+    //
+    // Click events still round-trip correctly because runJsHandlerExpr
+    // (engine.zig:1071) goes through the dispatch_js_event callback
+    // (childDispatchEvent) — that path is independent of these globals.
+    v8_runtime.evalScript(
+        \\globalThis.__dispatchEvent = function(){};
+        \\globalThis.__dispatchLayout = function(){};
+        \\globalThis.__dispatchInputChange = function(){};
+        \\globalThis.__dispatchInputSubmit = function(){};
+        \\globalThis.__dispatchInputFocus = function(){};
+        \\globalThis.__dispatchInputBlur = function(){};
+        \\globalThis.__dispatchInputKey = function(){};
+        \\globalThis.__dispatchRightClick = function(){};
+        \\globalThis.__beginJsEvent = function(){};
+        \\globalThis.__endJsEvent = function(){};
+        \\globalThis.__ffiEmit = function(){};
+    );
+
     const port_s = std.posix.getenv("ZIGOS_IPC_PORT") orelse return;
     const port = std.fmt.parseInt(u16, port_s, 10) catch return;
     std.debug.print("[window-child] init port={d} window_id={d}\n", .{ port, g_child_window_id });

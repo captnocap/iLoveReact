@@ -9,6 +9,9 @@ node_modules/
 *.love
 bundle.js
 bundle-*.js
+bundle-*.json
+*.metafile.json
+.cache/*
 
 # ── Vendored Zig toolchain ───────────────────────────────
 # Run scripts/fetch-zig.sh after clone to populate. End-user rjit
@@ -196,7 +199,11 @@ os/cartridge-os/*.cart
 *.log
 npm-debug.log*
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Testing
 coverage/
@@ -272,5 +279,28 @@ deps/zig-v8/v8-build/
 
 # Test screenshots (local artifacts)
 tests/
-
+bundle*
+bundle-*/
 $HOME
+
+
+cache/
+cache/*.js
+
+# Generated thumbnails (path-encoded names)
+*.thumb.jpg
+/thumbnails/
+
+# Root-level scratch/generated math notes
+/layout_math*.md
+
+# Oversized archive zips (stored on disk, too big for git)
+/archive/editor.zip
+/archive/experiments.zip
+/archive/images.zip
+/archive/os.zip
+
+# Leftover untracked content from archived dirs (data, kept on disk)
+/editor/
+/experiments/
+/os/

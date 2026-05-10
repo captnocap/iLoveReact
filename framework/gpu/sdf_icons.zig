@@ -23,7 +23,7 @@
 //! giving crisp edges at any rendering size — that's the SDF magic.
 
 const std = @import("std");
-const log = @import("../log.zig");
+const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");

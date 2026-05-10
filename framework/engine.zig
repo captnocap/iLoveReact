@@ -12,18 +12,18 @@ const geometry = @import("geometry.zig");
 const selection = @import("selection.zig");
 const breakpoint = @import("breakpoint.zig");
 const windows = @import("windows.zig");
-const svg_path = @import("svg_path.zig");
-const image_cache = @import("image_cache.zig");
-const border_dash = @import("border_dash.zig");
+const svg_path = @import("gpu/svg/path.zig");
+const image_cache = @import("gpu/image_cache.zig");
+const border_dash = @import("gpu/svg/dash.zig");
 const animations = @import("animations.zig");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const tooltip = @import("tooltip.zig");
 const context_menu = @import("context_menu.zig");
-const telemetry = @import("telemetry.zig");
+const telemetry = @import("diag/telemetry.zig");
 const filedrop = @import("filedrop.zig");
 const fswatch = @import("fswatch.zig");
-const clipboard_watch = @import("clipboard_watch.zig");
-const selection_watch = @import("selection_watch.zig");
+const clipboard_watch = @import("ifttt/clipboard_watch.zig");
+const selection_watch = @import("ifttt/selection_watch.zig");
 const voice = @import("voice.zig");
 const build_options_for_whisper = @import("build_options");
 const whisper = if (@hasDecl(build_options_for_whisper, "has_whisper") and build_options_for_whisper.has_whisper)
@@ -34,14 +34,11 @@ else
         pub fn deinit() void {}
         pub fn tick(_: u32) void {}
     };
-const system_signals = @import("system_signals.zig");
-const ifttt_zig = @import("ifttt_zig.zig");
+const system_signals = @import("ifttt/system_signals.zig");
+const ifttt_zig = @import("ifttt/ifttt.zig");
 const input = @import("input.zig");
-const classifier = @import("classifier.zig");
-const semantic = @import("semantic.zig");
-const pty_remote = @import("pty_remote.zig");
-const crashlog = @import("crashlog.zig");
-const watchdog = @import("watchdog.zig");
+const crashlog = @import("diag/crashlog.zig");
+const watchdog = @import("diag/watchdog.zig");
 const cart = @import("cartridge.zig");
 
 // ── Build-option-gated imports (lean tier omits these) ──────────────────
@@ -49,6 +46,7 @@ const build_options = @import("build_options");
 const HAS_QUICKJS = if (@hasDecl(build_options, "has_quickjs")) build_options.has_quickjs else true;
 const HAS_PHYSICS = if (@hasDecl(build_options, "has_physics")) build_options.has_physics else true;
 const HAS_TERMINAL = if (@hasDecl(build_options, "has_terminal")) build_options.has_terminal else true;
+const HAS_AUDIO = if (@hasDecl(build_options, "has_audio")) build_options.has_audio else false;
 const HAS_VIDEO = if (@hasDecl(build_options, "has_video")) build_options.has_video else true;
 const HAS_RENDER_SURFACES = if (@hasDecl(build_options, "has_render_surfaces")) build_options.has_render_surfaces else true;
 const HAS_EFFECTS = if (@hasDecl(build_options, "has_effects")) build_options.has_effects else true;
@@ -59,7 +57,7 @@ const HAS_CRYPTO = if (@hasDecl(build_options, "has_crypto")) build_options.has_
 const HAS_BLEND2D = if (@hasDecl(build_options, "has_blend2d")) build_options.has_blend2d else false;
 const HAS_DEBUG_SERVER = if (@hasDecl(build_options, "has_debug_server")) build_options.has_debug_server else false;
 
-const blend2d_gfx = if (HAS_BLEND2D) @import("blend2d.zig") else struct {
+const blend2d_gfx = if (HAS_BLEND2D) @import("gpu/blend2d.zig") else struct {
     pub fn fillSVGPath(_: []const u8, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) void {}
     pub fn fillSVGPathFromEffect(_: []const u8, _: [*]const u8, _: u32, _: u32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) void {}
     pub fn deinit() void {}
@@ -78,7 +76,7 @@ fn isPaisleyName(name: []const u8) bool {
     return std.mem.startsWith(u8, name, "paisley-");
 }
 
-const debug_server = if (HAS_DEBUG_SERVER) @import("debug_server.zig") else struct {
+const debug_server = if (HAS_DEBUG_SERVER) @import("diag/debug_server.zig") else struct {
     pub fn init(_: [*:0]const u8) void {}
     pub fn poll() void {}
     pub fn deinit() void {}
@@ -98,7 +96,7 @@ comptime {
 // Force-reference luajit_worker.zig so its export fn symbols are available to the linker.
 // LuaJIT workers are compute-only, off-thread — they never touch rendering, layout, or state.
 comptime {
-    _ = @import("luajit_worker.zig");
+    _ = @import("process/luajit_worker.zig");
 }
 
 // luajit_runtime archived to archive/qjs-stack/ — Smith-era .tsz script-block
@@ -115,18 +113,78 @@ const luajit_runtime = struct {
 };
 const mouse_state = @import("mouse_state.zig");
 
-// Force-reference audio.zig so its export fn symbols are available to the linker.
-comptime {
-    _ = @import("audio.zig");
-}
+const pty_remote = if (HAS_TERMINAL) @import("terminal/pty_remote.zig") else struct {
+    pub fn init() void {}
+    pub fn deinit() void {}
+    pub fn poll() void {}
+};
+
+const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
+    pub const RGB = struct { r: u8, g: u8, b: u8 };
+    pub const Cell = struct {
+        char_buf: [4]u8 = .{ 0, 0, 0, 0 },
+        char_len: u8 = 0,
+        width: u8 = 1,
+        fg: ?RGB = null,
+        bg: ?RGB = null,
+        bold: bool = false,
+        italic: bool = false,
+        underline: bool = false,
+        strike: bool = false,
+        reverse: bool = false,
+    };
+    pub const MAX_TERMINALS: u8 = 4;
+    pub fn copySelectedTextIdx(_: u8, _: u16, _: u16, _: u16, _: u16, _: []u8) usize { return 0; }
+    pub fn getCellIdx(_: u8, _: u16, _: u16) Cell { return .{}; }
+    pub fn getColsIdx(_: u8) u16 { return 0; }
+    pub fn getCursorColIdx(_: u8) u16 { return 0; }
+    pub fn getCursorRowIdx(_: u8) u16 { return 0; }
+    pub fn getCursorVisibleIdx(_: u8) bool { return false; }
+    pub fn getRowsIdx(_: u8) u16 { return 0; }
+    pub fn getRowTextIdx(_: u8, _: u16) []const u8 { return ""; }
+    pub fn getScrollbackCellIdx(_: u8, _: u16, _: u16) Cell { return .{}; }
+    pub fn pollPtyIdx(_: u8) bool { return false; }
+    pub fn resizeVtermIdx(_: u8, _: u16, _: u16) void {}
+    pub fn scrollDownIdx(_: u8, _: u16) void {}
+    pub fn scrollOffsetIdx(_: u8) u16 { return 0; }
+    pub fn scrollToBottomIdx(_: u8) void {}
+    pub fn scrollUpIdx(_: u8, _: u16) void {}
+    pub fn spawnShellIdx(_: u8, _: [*:0]const u8, _: u16, _: u16) void {}
+    pub fn writePtyIdx(_: u8, _: []const u8) void {}
+};
+
+const classifier = if (HAS_TERMINAL) @import("terminal/classifier.zig") else struct {
+    pub const Token = enum(u8) {
+        output, command, @"error", success, heading, separator, progress,
+        user_prompt, user_text, assistant_text, thinking, thought_complete,
+        tool, result, diff,
+        banner, status_bar, box_drawing, input_border, input_zone,
+        permission, menu_title, menu_option, menu_desc, hint,
+        task_done, task_active, task_open, task_summary,
+        text,
+    };
+    pub const Mode = enum { none, basic, claude_code, json };
+    pub fn tokenColor(_: Token) layout.Color { return .{}; }
+    pub fn getModeIdx(_: u8) Mode { return .none; }
+    pub fn setModeIdx(_: u8, _: Mode) void {}
+    pub fn markDirtyIdx(_: u8) void {}
+    pub fn isDirtyIdx(_: u8) bool { return false; }
+    pub fn clearDirtyIdx(_: u8) void {}
+    pub fn getRowTokenIdx(_: u8, _: u16) Token { return .text; }
+    pub fn classifyAndCacheIdx(_: u8, _: u16, _: []const u8, _: u16) void {}
+};
+
+const semantic = if (HAS_TERMINAL) @import("terminal/semantic.zig") else struct {
+    pub fn tick(_: u16) void {}
+};
 
 // Force-reference pty_client.zig for unix socket terminal remote control.
 comptime {
-    _ = @import("pty_client.zig");
+    if (HAS_TERMINAL) _ = @import("terminal/pty_client.zig");
 }
 
 const prepared_input = @import("prepared_input.zig");
-const frame_telemetry = @import("frame_telemetry.zig");
+const frame_telemetry = @import("diag/frame_telemetry.zig");
 const js_vm = @import("v8_runtime.zig");
 const canvas = if (HAS_CANVAS) @import("canvas.zig") else struct {
     pub const CameraTransform = struct { cx: f32 = 0, cy: f32 = 0, scale: f32 = 1 };
@@ -157,7 +215,7 @@ const canvas = if (HAS_CANVAS) @import("canvas.zig") else struct {
     }
 };
 // devtools removed — inspector lives in tsz-tools (standalone IPC app)
-const testharness = if (HAS_QUICKJS) @import("testharness.zig") else struct {
+const testharness = if (HAS_QUICKJS) @import("testing/harness.zig") else struct {
     pub fn envEnabled() bool {
         return false;
     }
@@ -169,7 +227,7 @@ const testharness = if (HAS_QUICKJS) @import("testharness.zig") else struct {
         return 0;
     }
 };
-const videos = if (HAS_VIDEO) @import("videos.zig") else struct {
+const videos = if (HAS_VIDEO) @import("render/videos.zig") else struct {
     pub fn init() void {}
     pub fn deinit() void {}
     pub fn update() void {}
@@ -180,7 +238,7 @@ const videos = if (HAS_VIDEO) @import("videos.zig") else struct {
         return false;
     }
 };
-const render_surfaces = if (HAS_RENDER_SURFACES) @import("render_surfaces.zig") else struct {
+const render_surfaces = if (HAS_RENDER_SURFACES) @import("render/render_surfaces.zig") else struct {
     pub fn init() void {}
     pub fn deinit() void {}
     pub fn update() void {}
@@ -207,7 +265,7 @@ const render_surfaces = if (HAS_RENDER_SURFACES) @import("render_surfaces.zig") 
     }
     pub fn setSuspended(_: []const u8, _: bool) void {}
 };
-const capture = if (HAS_EFFECTS) @import("capture.zig") else struct {
+const capture = if (HAS_EFFECTS) @import("gpu/capture.zig") else struct {
     pub fn init() void {}
     pub fn deinit() void {}
     pub fn handleKey(_: i32) bool {
@@ -217,7 +275,7 @@ const capture = if (HAS_EFFECTS) @import("capture.zig") else struct {
         return false;
     }
 };
-const effects = if (HAS_EFFECTS) @import("effects.zig") else struct {
+const effects = if (HAS_EFFECTS) @import("effects/effects.zig") else struct {
     pub fn init() void {}
     pub fn deinit() void {}
     pub fn update(_: f32) void {}
@@ -250,10 +308,6 @@ const transition = if (HAS_TRANSITIONS) @import("transition.zig") else struct {
         return false;
     }
 };
-// vterm.zig is self-gating: when -Dhas-terminal=false it re-exports the
-// stub set, so this import works in both modes without engine.zig
-// having to know.
-const vterm_mod = @import("vterm.zig");
 const physics2d = if (HAS_PHYSICS) @import("physics2d.zig") else struct {
     pub const BodyType = enum(c_int) { static_body = 0, kinematic = 1, dynamic = 2 };
     pub fn init(_: f32, _: f32) void {}
@@ -280,7 +334,7 @@ const Node = layout.Node;
 const Color = layout.Color;
 const TextEngine = text_mod.TextEngine;
 const state_mod = @import("state.zig");
-const witness = @import("witness.zig");
+const witness = @import("testing/witness.zig");
 
 // ── Devtools removed — inspector lives in tsz-tools ─────────────────────
 
@@ -628,10 +682,11 @@ fn hitTestScrollbar(node: *Node, mx: f32, my: f32) ?ScrollbarHit {
     if (node.style.display == .none) return null;
 
     const r = node.computed;
-    if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
-
-    // Scrollbars are painted after children, so the owning node's overlay wins.
-    if (scrollbarHitForNode(node, mx, my)) |hit| return hit;
+    // No AABB pre-reject on `node` itself — an absolute-positioned scroll
+    // container (e.g. the model picker popover) extends past its anchor's
+    // bounds, and pre-rejecting here would prevent the walker from ever
+    // reaching it. scrollbarHitForNode does its own bounds check before
+    // returning a hit, so removing the early reject is safe.
 
     const ov = node.style.overflow;
     const is_scroll = (ov == .scroll or (ov == .auto and (node.content_height > r.h or node.content_width > r.w)));
@@ -642,11 +697,16 @@ fn hitTestScrollbar(node: *Node, mx: f32, my: f32) ?ScrollbarHit {
         child_my = my + node.scroll_y;
     }
 
+    // Descend first so deepest scrollbar wins (front-most paint).
     var i = node.children.len;
     while (i > 0) {
         i -= 1;
         if (hitTestScrollbar(&node.children[i], child_mx, child_my)) |hit| return hit;
     }
+
+    // Self last. Scrollbars are painted after children, so the owning node's
+    // overlay wins only when no descendant claimed the hit.
+    if (scrollbarHitForNode(node, mx, my)) |hit| return hit;
     return null;
 }
 
@@ -1701,6 +1761,31 @@ fn paintNode(node: *Node) void {
         return;
     }
 
+    // Graph.GCurve — flat array of 6-float quadratic-bezier-triangle control
+    // points. Each group of 6 is one Loop-Blinn fill triangle queued to the
+    // gcurve_fill pipeline, batched into one draw call. Resolution-independent,
+    // perfectly anti-aliased per-fragment via the `u*u - v < 0` interior test.
+    // Lives inside <Graph> so the parent's transform is already on the GPU stack.
+    if (node.gcurve_data) |gd| {
+        if (gd.len >= 6) {
+            const fc = node.canvas_fill_color orelse Color.rgb(255, 255, 255);
+            const r = @as(f32, @floatFromInt(fc.r)) / 255.0;
+            const g = @as(f32, @floatFromInt(fc.g)) / 255.0;
+            const b = @as(f32, @floatFromInt(fc.b)) / 255.0;
+            const a = @as(f32, @floatFromInt(fc.a)) / 255.0 * g_paint_opacity * node.canvas_fill_opacity;
+            var i: usize = 0;
+            while (i + 5 < gd.len) : (i += 6) {
+                gpu.gcurve_fill.drawGCurveFill(
+                    gd[i], gd[i + 1],
+                    gd[i + 2], gd[i + 3],
+                    gd[i + 4], gd[i + 5],
+                    r, g, b, a,
+                );
+            }
+        }
+        return;
+    }
+
     // Graph.Polyline / Graph.Polygon — flat point array parsed once at
     // update time. If canvas_fill_color is set, fan-triangulate from vertex 0
     // for filled polygons (caller ensures shape is star-shaped from v0; bars,
@@ -2523,9 +2608,9 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
     if (!is_placeholder) {
         const sel = input.getSelection(id);
         if (sel.hi > sel.lo) {
-            if (node.line_height > 0) gpu.setLineHeightOverride(node.line_height);
+            const scope = selection.applyNodeTextScope(node);
+            defer selection.restoreNodeTextScope(scope);
             gpu.drawSelectionRects(typed, r.x + pl, text_y, node.font_size, max_w, sel.lo, sel.hi);
-            if (node.line_height > 0) gpu.setLineHeightOverride(0);
         }
     }
     if (!is_placeholder) {
@@ -3794,7 +3879,7 @@ pub fn run(config_in: AppConfig) !void {
                     // SDL3: event.text.text is a const char* pointer
                     const text_ptr: [*:0]const u8 = @ptrCast(event.text.text orelse continue);
                     // Native terminal gets text first
-                    if (terminals_initialized[g_focused_terminal]) {
+                    if (HAS_TERMINAL and terminals_initialized[g_focused_terminal]) {
                         terminalHandleTextInput(text_ptr);
                         continue;
                     }
@@ -3875,6 +3960,7 @@ pub fn run(config_in: AppConfig) !void {
                         if (input_consumed) stampInputLatency("key");
                         if (!input_consumed and !videos.handleKey(sym)) {
                             selection.onKeyDown(config.root, sym, mod);
+                            ifttt_zig.dispatchKeyDown(packed_key);
                             js_vm.callGlobalInt("__ifttt_onKeyDown", packed_key);
                             // Forward key events to QuickJS script layer
                             js_vm.callGlobalInt("__onKeyDown", @intCast(sym));
@@ -3886,6 +3972,7 @@ pub fn run(config_in: AppConfig) !void {
                     const mod = event.key.mod;
                     const packed_key: i64 = (@as(i64, @intCast(mod)) << 16) | (@as(i64, @intCast(sym)) & 0xFFFF);
                     _ = render_surfaces.handleKeyUp(@intCast(event.key.key));
+                    ifttt_zig.dispatchKeyUp(packed_key);
                     js_vm.callGlobalInt("__ifttt_onKeyUp", packed_key);
                 },
                 c.SDL_EVENT_MOUSE_WHEEL => {
@@ -4351,8 +4438,8 @@ pub fn run(config_in: AppConfig) !void {
             });
             frame_telemetry.telemetry_bridge_calls = frame_telemetry.bridge_calls_this_second;
             frame_telemetry.bridge_calls_this_second = 0;
-            @import("luajit_worker.zig").logTelemetry();
-            @import("audio.zig").logTelemetry();
+            @import("process/luajit_worker.zig").logTelemetry();
+            if (HAS_AUDIO) @import("audio/api.zig").logTelemetry();
             watchdog.heartbeat();
             g_budget_exceeded = false;
             g_hover_changed = false;

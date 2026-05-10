@@ -14,6 +14,19 @@ same runtime:
 Both paths consume local `.gguf` model files. Neither path uses the DOM,
 browser fetch, Web Workers, remote APIs, Ollama, or LM Studio as a server.
 
+Note on runtime scope: the active V8 path for local llama.cpp inference is
+`useAssistant({ backend: 'local_ai', modelPath, nCtx, … })`, which calls
+`__worker_start('local_ai', …)` registered by `framework/worker_bindings.zig`
+(see `docs/v8/worker_contract.md`). The direct `__localai_init` /
+`__localai_send` / `__localai_poll` / `__localai_close` globals documented
+below are registered only on the QuickJS runtime
+(`framework/qjs_runtime.zig:3163-3166`) and are not exposed to V8. The
+`useLocalChat` hook described in the rest of this doc is no longer present in
+`runtime/hooks/`; its responsibilities live in `runtime/hooks/useAssistant.ts`
+on the V8 path. The lower-level shapes (LocalChatPhase, ToolDefinition, event
+kinds) and the underlying `framework/local_ai_runtime.zig` runtime described
+below are still accurate.
+
 ## Public API
 
 ### `useLocalChat`

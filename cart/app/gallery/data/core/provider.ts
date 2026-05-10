@@ -43,12 +43,12 @@ export const providerMockData: Provider[] = [
   },
   {
     id: 'openai',
-    label: 'OpenAI (Codex)',
+    label: 'OpenAI',
     kind: 'http-api',
     status: 'active',
     docsUrl: 'https://platform.openai.com/docs',
     summary:
-      'OpenAI-compatible HTTP streaming. Used here via the Codex CLI path. Delta-chunk wire format is materially different from Anthropic — see codex-raw-event.ts.',
+      'Two reachable transports for the same provider: `openai-api-key` connections speak Chat Completions HTTP, while `codex-cli` connections drive the local `codex` app-server over stdio. Delta-chunk wire format is materially different from Anthropic — see codex-raw-event.ts.',
   },
   {
     id: 'local',

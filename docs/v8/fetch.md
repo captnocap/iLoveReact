@@ -400,9 +400,10 @@ fetchPageAsync(url)
        __browser_page_async(JSON.stringify({url}), reqId)
 ```
 
-The Zig side uses `framework/net/page_fetch.zig`, not `framework/net/http.zig`.
-It is a GET-only page fetcher with final URL, content type, body, truncation,
-and error fields. It has its own worker pool and its own `tickDrain()` branch.
+The Zig side uses `framework/net/http.zig` (the same module as generic HTTP).
+Browser page fetch is a GET request that captures final URL and content type
+from the response headers. It shares the same worker pool and `tickDrain()`
+loop as all other HTTP requests.
 
 Use this when a cart wants page-like HTML/text content metadata. Use
 `http.getAsync` or `fetch` for normal API calls.

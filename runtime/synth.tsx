@@ -33,7 +33,8 @@ export const MODULE_TYPE = {
   sequencer: 7,
   sampler: 8,
   custom: 9,
-  pocket_voice: 10,
+  instrument: 10,
+  clock: 11,
 } as const;
 
 export type ModuleType = keyof typeof MODULE_TYPE;
@@ -203,7 +204,8 @@ const Lfo = moduleWrapper('lfo');
 const Sequencer = moduleWrapper('sequencer');
 const Sampler = moduleWrapper('sampler');
 const Custom = moduleWrapper('custom');
-const PocketVoice = moduleWrapper('pocket_voice');
+const Instrument = moduleWrapper('instrument');
+const Clock = moduleWrapper('clock');
 
 // ── Explicit <Synth.Wire> for non-port-0 connections ──────────────────
 
@@ -243,5 +245,6 @@ function Wire({
 (Synth as any).Sequencer = Sequencer;
 (Synth as any).Sampler = Sampler;
 (Synth as any).Custom = Custom;
-(Synth as any).PocketVoice = PocketVoice;
+(Synth as any).Instrument = Instrument;
+(Synth as any).Clock = Clock;
 (Synth as any).Wire = Wire;

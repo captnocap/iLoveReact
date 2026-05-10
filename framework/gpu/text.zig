@@ -4,8 +4,9 @@
 //! handles, CPU-side glyph batch, GPU buffer, pipeline, and bind group.
 
 const std = @import("std");
-const log = @import("../log.zig");
+const log = @import("../diag/log.zig");
 const wgpu = @import("wgpu");
+const m = @import("../math/root.zig");
 const c = @import("../c.zig").imports;
 const shaders = @import("shaders.zig");
 const core = @import("gpu.zig");
@@ -405,7 +406,7 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
     // ancestor pushed a transform via engine.zig:paintNode.
     const node_m = core.getNodeMatrix();
     const node_active = core.nodeMatrixActive();
-    const matrix_scale: f32 = if (node_active) @sqrt(node_m.a * node_m.a + node_m.b * node_m.b) else 1;
+    const matrix_scale: f32 = if (node_active) m.mat2dScaleX(node_m.a, node_m.b) else 1;
 
     // When canvas transform OR a node CSS transform with scale is active,
     // rasterize the atlas at the effective size for crisp glyphs.
@@ -562,28 +563,45 @@ pub fn drawColorTextRow(spans: []const node_layout.ColorTextSpan, x: f32, y: f32
     }
 }
 
-/// Draw text with word-wrapping at max_width. Returns total height drawn.
-pub fn drawTextWrapped(text: []const u8, x: f32, y: f32, size_px: u16, max_width: f32, cr: f32, cg: f32, cb: f32, ca: f32, max_lines: u16) f32 {
-    if (g_ft_face == null or core.g_gpu_ops >= core.GPU_OPS_BUDGET) return 0;
-    core.g_gpu_ops += 1;
+// ── Shared word-wrap walker ────────────────────────────────────────────────
+//
+// One algorithm decides how a string breaks into visual lines. Both the
+// painter (drawTextWrapped) and any sibling pass that needs to land pixels
+// behind those same lines (drawSelectionRects, hit-testing, debug overlays)
+// drive off it. Anything that wants to walk text MUST go through walkLines —
+// reimplementing the wrap logic locally is what produced the per-cart
+// selection drift this replaced.
+//
+// Caller passes a context value with an `onLine(byte_start, byte_end, x, y)`
+// method; walkLines invokes it once per visual line in paint order.
 
-    if (max_width <= 0) {
-        drawTextLine(text, x, y, size_px, cr, cg, cb, ca);
-        return @as(f32, @floatFromInt(size_px));
-    }
+pub fn walkLines(
+    text: []const u8,
+    x_start: f32,
+    y_start: f32,
+    size_px: u16,
+    max_width: f32,
+    max_lines: u16,
+    ctx: anytype,
+) f32 {
+    if (g_ft_face == null) return 0;
 
     const face = activeFace(size_px);
     const natural_line_h: f32 = @as(f32, @floatFromInt(face.*.size.*.metrics.height)) / 64.0;
     const line_h: f32 = if (g_line_height_override > 0) g_line_height_override else natural_line_h;
+
+    if (max_width <= 0) {
+        // Single-line fast path: no wrap, one onLine emission for the whole string.
+        ctx.onLine(0, text.len, x_start, y_start);
+        return line_h;
+    }
+
     const space_w = getCharAdvance(' ', size_px);
     const ls = g_letter_spacing;
 
-    // Word-by-word wrap mirroring `TextEngine.wordWrap` in framework/text.zig.
-    // Both paths must agree on line breaks; sharing the algorithm here means
-    // anything measurement decides will paint the same way. Words wider than
-    // max_width get their own line (no mid-word break) — matches the browser's
-    // `overflow-wrap: normal` default.
-    var pen_y: f32 = y;
+    // Word-by-word wrap. Words wider than max_width get their own line (no
+    // mid-word break) — matches `overflow-wrap: normal`.
+    var pen_y: f32 = y_start;
     var lines_drawn: u16 = 0;
     var line_start: usize = 0;
     var line_width: f32 = 0;
@@ -594,7 +612,7 @@ pub fn drawTextWrapped(text: []const u8, x: f32, y: f32, size_px: u16, max_width
         if (max_lines > 0 and lines_drawn >= max_lines) break;
         if (text[i] == '\n') {
             const end = if (last_word_end > line_start) last_word_end else i;
-            drawTextLine(text[line_start..end], x, pen_y, size_px, cr, cg, cb, ca);
+            ctx.onLine(line_start, end, x_start, pen_y);
             lines_drawn += 1;
             pen_y += line_h;
             i += 1;
@@ -608,7 +626,6 @@ pub fn drawTextWrapped(text: []const u8, x: f32, y: f32, size_px: u16, max_width
             continue;
         }
 
-        // Word start — measure whole word (UTF-8 + inline-glyph aware).
         const word_start = i;
         var word_width: f32 = 0;
         var word_chars: usize = 0;
@@ -634,8 +651,7 @@ pub fn drawTextWrapped(text: []const u8, x: f32, y: f32, size_px: u16, max_width
         const with_word = line_width + separator_w + word_width;
 
         if (need_space and with_word > max_width) {
-            // Wrap: emit current line, start new line at this word.
-            drawTextLine(text[line_start..last_word_end], x, pen_y, size_px, cr, cg, cb, ca);
+            ctx.onLine(line_start, last_word_end, x_start, pen_y);
             lines_drawn += 1;
             pen_y += line_h;
             line_start = word_start;
@@ -647,17 +663,174 @@ pub fn drawTextWrapped(text: []const u8, x: f32, y: f32, size_px: u16, max_width
         }
     }
 
-    // Emit the final line.
     if (line_start < text.len and (max_lines == 0 or lines_drawn < max_lines)) {
         const end = if (last_word_end > line_start) last_word_end else text.len;
-        drawTextLine(text[line_start..end], x, pen_y, size_px, cr, cg, cb, ca);
+        ctx.onLine(line_start, end, x_start, pen_y);
         pen_y += line_h;
     }
 
-    return pen_y - y;
+    return pen_y - y_start;
+}
+
+/// Pen advance from a line's start to a substring boundary, mirroring
+/// drawTextLine's stepping exactly so selection-rect endpoints land on the
+/// same x as the painted glyphs. Letter-spacing is added after every glyph
+/// (including inline sentinels and missing-glyph fallbacks) — same as the
+/// painter — so adjacent selection rects abut cleanly.
+pub fn subLineAdvance(text: []const u8, size_px: u16) f32 {
+    if (g_ft_face == null) return 0;
+    _ = activeFace(size_px);
+
+    var pen_x: f32 = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        const sentinel_len = inlineGlyphSentinelLen(text, i);
+        if (sentinel_len > 0) {
+            pen_x += @as(f32, @floatFromInt(size_px));
+            pen_x += g_letter_spacing;
+            i += sentinel_len;
+            continue;
+        }
+        const ch = decodeUtf8(text[i..]);
+        if (ch.codepoint == '\n') {
+            i += ch.len;
+            continue;
+        }
+        if (cacheGlyph(ch.codepoint, size_px)) |glyph| {
+            pen_x += glyph.advance;
+        } else {
+            pen_x += @as(f32, @floatFromInt(size_px)) * 0.5;
+        }
+        pen_x += g_letter_spacing;
+        i += ch.len;
+    }
+    return pen_x;
+}
+
+/// Hit-test text laid out by walkLines: returns the byte index closest to
+/// (target_x, target_y) in node-local coords (relative to the text's top-left).
+/// Uses the same wrap and pen-stepping as the painter so a click lands on the
+/// glyph it visually appears to land on. Past-last-line snaps to text.len;
+/// past-end-of-line snaps to that line's last byte.
+pub fn byteIndexAtPos(
+    text: []const u8,
+    size_px: u16,
+    max_width: f32,
+    target_x: f32,
+    target_y: f32,
+) usize {
+    if (g_ft_face == null or text.len == 0) return 0;
+    const face = activeFace(size_px);
+    const natural_line_h: f32 = @as(f32, @floatFromInt(face.*.size.*.metrics.height)) / 64.0;
+    const line_h: f32 = if (g_line_height_override > 0) g_line_height_override else natural_line_h;
+    const target_line: usize = if (target_y < 0) 0 else @intFromFloat(target_y / line_h);
+
+    const Ctx = struct {
+        text: []const u8,
+        size_px: u16,
+        target_line: usize,
+        target_x: f32,
+        line_idx: usize = 0,
+        result: usize = 0,
+        result_set: bool = false,
+        last_line_end: usize = 0,
+        pub fn onLine(self: *@This(), byte_start: usize, byte_end: usize, lx: f32, ly: f32) void {
+            _ = lx;
+            _ = ly;
+            self.last_line_end = byte_end;
+            if (self.result_set) {
+                self.line_idx += 1;
+                return;
+            }
+            if (self.line_idx == self.target_line) {
+                self.result = byte_start + closestByteOnSlice(self.text[byte_start..byte_end], self.size_px, self.target_x);
+                self.result_set = true;
+            }
+            self.line_idx += 1;
+        }
+    };
+    var ctx = Ctx{
+        .text = text,
+        .size_px = size_px,
+        .target_line = target_line,
+        .target_x = target_x,
+    };
+    _ = walkLines(text, 0, 0, size_px, max_width, 0, &ctx);
+    if (ctx.result_set) return ctx.result;
+    // Past last visual line: clamp to the end of the last line (excludes trailing
+    // whitespace / newline byte to match the painter's byte_end semantics).
+    return ctx.last_line_end;
+}
+
+/// Walk a single line slice with drawTextLine's exact pen-stepping; return
+/// the byte index whose left/right midpoint best matches target_x.
+fn closestByteOnSlice(text: []const u8, size_px: u16, target_x: f32) usize {
+    if (g_ft_face == null) return 0;
+    _ = activeFace(size_px);
+    var pen_x: f32 = 0;
+    var i: usize = 0;
+    while (i < text.len) {
+        var advance: f32 = 0;
+        var step: usize = 0;
+        const sentinel_len = inlineGlyphSentinelLen(text, i);
+        if (sentinel_len > 0) {
+            advance = @as(f32, @floatFromInt(size_px));
+            step = sentinel_len;
+        } else {
+            const ch = decodeUtf8(text[i..]);
+            if (ch.codepoint == '\n') {
+                i += ch.len;
+                continue;
+            }
+            if (cacheGlyph(ch.codepoint, size_px)) |glyph| {
+                advance = glyph.advance;
+            } else {
+                advance = @as(f32, @floatFromInt(size_px)) * 0.5;
+            }
+            step = ch.len;
+        }
+        // Snap to the cursor BEFORE the glyph if the click is left of the
+        // glyph's horizontal midpoint, AFTER if right of it. This is the
+        // standard text-editor caret-placement rule.
+        if (pen_x + advance / 2.0 > target_x) return i;
+        pen_x += advance;
+        pen_x += g_letter_spacing;
+        i += step;
+    }
+    return text.len;
+}
+
+/// Draw text with word-wrapping at max_width. Returns total height drawn.
+pub fn drawTextWrapped(text: []const u8, x: f32, y: f32, size_px: u16, max_width: f32, cr: f32, cg: f32, cb: f32, ca: f32, max_lines: u16) f32 {
+    if (g_ft_face == null or core.g_gpu_ops >= core.GPU_OPS_BUDGET) return 0;
+    core.g_gpu_ops += 1;
+
+    const Ctx = struct {
+        text: []const u8,
+        size_px: u16,
+        cr: f32,
+        cg: f32,
+        cb: f32,
+        ca: f32,
+        pub fn onLine(self: @This(), byte_start: usize, byte_end: usize, lx: f32, ly: f32) void {
+            drawTextLine(self.text[byte_start..byte_end], lx, ly, self.size_px, self.cr, self.cg, self.cb, self.ca);
+        }
+    };
+    const ctx = Ctx{
+        .text = text,
+        .size_px = size_px,
+        .cr = cr,
+        .cg = cg,
+        .cb = cb,
+        .ca = ca,
+    };
+    return walkLines(text, x, y, size_px, max_width, max_lines, ctx);
 }
 
 /// Draw selection highlight rectangles for a byte range within wrapped text.
+/// Reuses walkLines so line breaks are guaranteed to match the painter, then
+/// uses subLineAdvance — the same pen-stepping drawTextLine uses — to find
+/// the x positions of the selection endpoints inside each line.
 pub fn drawSelectionRects(text: []const u8, x: f32, y: f32, size_px: u16, max_width: f32, sel_start: usize, sel_end: usize) void {
     if (g_ft_face == null or sel_start >= sel_end) return;
 
@@ -665,107 +838,33 @@ pub fn drawSelectionRects(text: []const u8, x: f32, y: f32, size_px: u16, max_wi
     const natural_line_h: f32 = @as(f32, @floatFromInt(face.*.size.*.metrics.height)) / 64.0;
     const line_h: f32 = if (g_line_height_override > 0) g_line_height_override else natural_line_h;
 
-    var pen_x: f32 = 0;
-    var line_start: usize = 0;
-    var last_break: usize = 0;
-    var last_break_pen_x: f32 = 0;
-
-    // Selection highlight color: blue with alpha
-    const sel_r: f32 = 0.2;
-    const sel_g: f32 = 0.4;
-    const sel_b: f32 = 0.8;
-    const sel_a: f32 = 0.4;
-
-    var cur_line_y: f32 = y;
-    var cur_x: f32 = 0;
-    var sel_line_start_x: f32 = -1;
-    var in_selection: bool = false;
-    var i: usize = 0;
-    line_start = 0;
-    pen_x = 0;
-
-    while (i < text.len) {
-        const ch = decodeUtf8(text[i..]);
-
-        if (ch.codepoint == '\n') {
-            // End of line — flush selection rect if active
-            if (in_selection and sel_line_start_x >= 0) {
-                rects.drawRect(x + sel_line_start_x, cur_line_y, cur_x - sel_line_start_x, line_h, sel_r, sel_g, sel_b, sel_a, 0, 0, 0, 0, 0, 0);
-            }
-            cur_line_y += line_h;
-            i += ch.len;
-            line_start = i;
-            last_break = i;
-            pen_x = 0;
-            cur_x = 0;
-            last_break_pen_x = 0;
-            if (in_selection) sel_line_start_x = 0;
-            continue;
+    const Ctx = struct {
+        text: []const u8,
+        sel_start: usize,
+        sel_end: usize,
+        size_px: u16,
+        line_h: f32,
+        pub fn onLine(self: @This(), byte_start: usize, byte_end: usize, lx: f32, ly: f32) void {
+            const lo = @max(self.sel_start, byte_start);
+            const hi = @min(self.sel_end, byte_end);
+            if (lo >= hi) return;
+            const x_off_lo = subLineAdvance(self.text[byte_start..lo], self.size_px);
+            const x_off_hi = subLineAdvance(self.text[byte_start..hi], self.size_px);
+            const sel_r: f32 = 0.2;
+            const sel_g: f32 = 0.4;
+            const sel_b: f32 = 0.8;
+            const sel_a: f32 = 0.4;
+            rects.drawRect(lx + x_off_lo, ly, x_off_hi - x_off_lo, self.line_h, sel_r, sel_g, sel_b, sel_a, 0, 0, 0, 0, 0, 0);
         }
-
-        if (ch.codepoint == ' ') {
-            last_break = i;
-            last_break_pen_x = pen_x;
-        }
-
-        var advance: f32 = 0;
-        if (cacheGlyph(ch.codepoint, size_px)) |glyph| {
-            advance = glyph.advance;
-        }
-
-        // Check for word wrap
-        if (max_width > 0 and pen_x + advance > max_width and pen_x > 0) {
-            // Flush selection rect for this line
-            if (in_selection and sel_line_start_x >= 0) {
-                rects.drawRect(x + sel_line_start_x, cur_line_y, cur_x - sel_line_start_x, line_h, sel_r, sel_g, sel_b, sel_a, 0, 0, 0, 0, 0, 0);
-            }
-            cur_line_y += line_h;
-
-            if (last_break > line_start) {
-                // Re-measure from line_start to current
-                pen_x = 0;
-                var j: usize = last_break + 1;
-                while (j < i) {
-                    const jch = decodeUtf8(text[j..]);
-                    if (cacheGlyph(jch.codepoint, size_px)) |g| {
-                        pen_x += g.advance;
-                    }
-                    j += jch.len;
-                }
-                cur_x = pen_x;
-                line_start = last_break + 1;
-            } else {
-                line_start = i;
-                pen_x = 0;
-                cur_x = 0;
-            }
-            last_break = line_start;
-            last_break_pen_x = 0;
-            if (in_selection) sel_line_start_x = 0;
-        }
-
-        cur_x = pen_x;
-
-        // Check selection transitions
-        if (!in_selection and i >= sel_start and i < sel_end) {
-            in_selection = true;
-            sel_line_start_x = cur_x;
-        }
-        if (in_selection and i >= sel_end) {
-            // End selection
-            rects.drawRect(x + sel_line_start_x, cur_line_y, cur_x - sel_line_start_x, line_h, sel_r, sel_g, sel_b, sel_a, 0, 0, 0, 0, 0, 0);
-            in_selection = false;
-        }
-
-        pen_x += advance;
-        cur_x = pen_x;
-        i += ch.len;
-    }
-
-    // Flush final selection rect
-    if (in_selection and sel_line_start_x >= 0) {
-        rects.drawRect(x + sel_line_start_x, cur_line_y, cur_x - sel_line_start_x, line_h, sel_r, sel_g, sel_b, sel_a, 0, 0, 0, 0, 0, 0);
-    }
+    };
+    const ctx = Ctx{
+        .text = text,
+        .sel_start = sel_start,
+        .sel_end = sel_end,
+        .size_px = size_px,
+        .line_h = line_h,
+    };
+    _ = walkLines(text, x, y, size_px, max_width, 0, ctx);
 }
 
 /// Get the advance width of a character at a given font size.

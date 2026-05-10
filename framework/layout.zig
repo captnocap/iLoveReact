@@ -10,7 +10,20 @@
 //! updates. It does not round-trip from the current intent source yet.
 
 const std = @import("std");
-const easing_mod = @import("easing.zig");
+const easing_mod = @import("math/easing.zig");
+const math = @import("math/root.zig");
+
+// Map layout's JustifyContent (no .stretch) onto math.Distribute.
+fn justifyToDistribute(j: JustifyContent) math.Distribute {
+    return switch (j) {
+        .start => .start,
+        .center => .center,
+        .end => .end,
+        .space_between => .space_between,
+        .space_around => .space_around,
+        .space_evenly => .space_evenly,
+    };
+}
 
 inline fn asF32(val: anytype) f32 {
     return switch (@typeInfo(@TypeOf(val))) {
@@ -31,11 +44,11 @@ inline fn asF32(val: anytype) f32 {
 }
 
 // ── Imports ────────────────────────────────────────
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const events = @import("events.zig");
 const EventHandler = events.EventHandler;
-const effect_ctx = @import("effect_ctx.zig");
-const effect_shader = @import("effect_shader.zig");
+const effect_ctx = @import("effects/ctx.zig");
+const effect_shader = @import("gpu/effect_shader.zig");
 const context_menu = @import("context_menu.zig");
 
 // ── Type definitions ────────────────────────────────
@@ -460,6 +473,7 @@ pub const Node = struct {
     scene3d_tex_w: u32 = 0,
     scene3d_tex_h: u32 = 0,
     scene3d_tex_rgba: ?[]const u8 = null, // raw RGBA bytes, length = w*h*4
+    scene3d_tex_key: ?[]const u8 = null, // StaticSurface key — looked up in gpu/gpu.zig
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container
@@ -533,6 +547,18 @@ pub const Node = struct {
     // alternative to <Graph.Path> for icons whose geometry doesn't change.
     // Tint comes from text_color; size comes from layout (style.width/height).
     icon_name: ?[]const u8 = null,
+    // Graph.Polyline — flat point array {x0, y0, x1, y1, …} parsed ONCE at
+    // CREATE/UPDATE from the cart's `points` prop. Engine paint emits one
+    // capsule-SDF line per segment, batched. Bypasses the SVG d-string
+    // parser + bezier flattening that <Graph.Path> pays every paint.
+    polyline_points: ?[]f32 = null,
+    // Graph.GCurve — flat array of 6-float quadratic-bezier-triangle control
+    // points: {p0x, p0y, p1x, p1y, p2x, p2y, p0x', p0y', …}. Each group of 6
+    // is one Loop-Blinn fill triangle. Engine paint queues one g-curve fill
+    // instance per group; batched into one draw call. Use canvas_fill_color
+    // for the fill tint. Resolution-independent, perfectly anti-aliased,
+    // no SDF texture or tessellation involved.
+    gcurve_data: ?[]f32 = null,
     text_effect: ?[]const u8 = null, // effect name for per-glyph text coloring
     // Inline glyphs — polygons/3D embedded in text (emoji-like)
     inline_glyphs: ?[]const InlineGlyph = null,
@@ -542,6 +568,13 @@ pub const Node = struct {
     effect_render: ?effect_ctx.RenderFn = null,
     effect_shader: ?effect_shader.GpuShaderDesc = null,
     effect_name: ?[]const u8 = null, // named effect — renders but not drawn, referenced by fillEffect
+    // Cart-supplied f32 array uploaded to the Effect's storage buffer at
+    // @group(0) @binding(1). Lets the shader source stay static while the
+    // data updates per frame — the chart-rendering analog of how text uses
+    // a glyph atlas. Lifetime: parsed once at CREATE/UPDATE in v8_app.zig,
+    // owned by the engine alloc, leaked on prop replace (same pattern as
+    // canvas_path_d / polyline_points).
+    effect_data: ?[]f32 = null,
     effect_background: bool = false, // true = render behind parent's children
     effect_mask: bool = false, // true = post-process parent's rendered content
     // Custom window chrome — borderless window drag/resize regions
@@ -944,6 +977,14 @@ fn estimateIntrinsicWidthUncached(node: *Node) f32 {
         if (child.style.display == .none) {
             continue;
         }
+        // Same out-of-flow filter as estimateIntrinsicHeight: a 100000-wide
+        // absolute backdrop (popover dismiss layer) would otherwise blow up
+        // its parent's intrinsic width to 100000 and push the row layout
+        // around. Mirrors paintChildrenInZOrder's z-index ordering — abs
+        // children paint via their own pass, they shouldn't size the parent.
+        if (child.style.position == .absolute) {
+            continue;
+        }
         const cw = estimateIntrinsicWidth(child);
         const cmL = marLeft(child.style);
         const cmR = marRight(child.style);
@@ -1068,6 +1109,7 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
         var vc: usize = 0;
         for (node.children) |*child| {
             if (child.style.display == .none) continue;
+            if (child.style.position == .absolute) continue;
             if (vc >= MAX_ROW_EST) break;
             const cw = resolveMaybePct(child.style.width, innerW) orelse estimateIntrinsicWidth(child);
             const cmL = marLeft(child.style);
@@ -1084,6 +1126,7 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
             var ri: usize = 0;
             for (node.children) |*child| {
                 if (child.style.display == .none) continue;
+                if (child.style.position == .absolute) continue;
                 if (ri >= vc) break;
                 if (child.style.flex_grow > 0) {
                     childWidths[ri] += (child.style.flex_grow / growTotal) * freeSpace;
@@ -1095,6 +1138,7 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
         var ri2: usize = 0;
         for (node.children) |*child| {
             if (child.style.display == .none) continue;
+            if (child.style.position == .absolute) continue;
             if (ri2 >= vc) break;
             const allocW = childWidths[ri2];
             const ch = estimateIntrinsicHeight(child, allocW);
@@ -1108,6 +1152,13 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
     } else {
         for (node.children) |*child| {
             if (child.style.display == .none) continue;
+            // Absolute children are out-of-flow — must not contribute to the
+            // parent's intrinsic main- or cross-axis size, otherwise opening
+            // a position:absolute popover (model picker, tooltip) inflates the
+            // anchor and pushes the rest of the page around. The wrap branch
+            // below already skips abs; the simple-row + column paths above
+            // and this branch were missing the filter.
+            if (child.style.position == .absolute) continue;
             const ch = estimateIntrinsicHeight(child, innerW);
             const cmT = marTop(child.style);
             const cmB = marBottom(child.style);
@@ -1125,43 +1176,34 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
         return total + gaps + pt + pb;
     }
     if ((s.flex_wrap == .wrap or s.flex_wrap == .wrap_reverse) and innerW > 0) {
-        var lineMain: f32 = 0;
-        var lineCrossMax: f32 = 0;
-        var totalCross: f32 = 0;
-        var itemsOnLine: usize = 0;
-        var lineCount: usize = 0;
+        // Two-pass: collect each visible child's main+cross sizes, hand the
+        // main sizes to math.wrapPack, then aggregate cross-max per line.
+        const MAX_WRAP_CHILDREN = 2048;
+        var itemMains: [MAX_WRAP_CHILDREN]f32 = undefined;
+        var itemCrosses: [MAX_WRAP_CHILDREN]f32 = undefined;
+        var n: usize = 0;
         for (node.children) |*child| {
-            if (child.style.display == .none) {
-                continue;
-            }
-            if (child.style.position == .absolute) {
-                continue;
-            }
-            const cw = estimateIntrinsicWidth(child);
-            const cmL = marLeft(child.style);
-            const cmR = marRight(child.style);
-            const itemMain = cw + cmL + cmR;
-            const gapBefore = if (itemsOnLine > 0) g else 0;
-            if (itemsOnLine > 0 and (asF32(lineMain) + asF32(gapBefore) + itemMain) > innerW) {
-                totalCross += lineCrossMax;
-                lineCount += 1;
-                lineMain = itemMain;
-                lineCrossMax = estimateIntrinsicHeight(child, innerW) + marTop(child.style) + marBottom(child.style);
-                itemsOnLine = 1;
-            } else {
-                lineMain += asF32(gapBefore) + asF32(itemMain);
-                const chCross = estimateIntrinsicHeight(child, innerW) + marTop(child.style) + marBottom(child.style);
-                if (chCross > lineCrossMax) {
-                    lineCrossMax = chCross;
-                }
-                itemsOnLine += 1;
-            }
+            if (child.style.display == .none) continue;
+            if (child.style.position == .absolute) continue;
+            if (n >= MAX_WRAP_CHILDREN) break;
+            itemMains[n] = estimateIntrinsicWidth(child) + marLeft(child.style) + marRight(child.style);
+            itemCrosses[n] = estimateIntrinsicHeight(child, innerW) + marTop(child.style) + marBottom(child.style);
+            n += 1;
         }
-        if (itemsOnLine > 0) {
+        var lines: [64]math.Line = undefined;
+        const numLines: usize = @intCast(math.wrapPack(itemMains[0..n], innerW, g, lines[0..]));
+        var totalCross: f32 = 0;
+        for (lines[0..numLines]) |ln| {
+            var lineCrossMax: f32 = 0;
+            const start: usize = @intCast(ln.start);
+            const stop: usize = start + @as(usize, @intCast(ln.count));
+            var i = start;
+            while (i < stop) : (i += 1) {
+                if (itemCrosses[i] > lineCrossMax) lineCrossMax = itemCrosses[i];
+            }
             totalCross += lineCrossMax;
-            lineCount += 1;
         }
-        const lineGaps = if (lineCount > 1) g * @as(f32, @floatFromInt((lineCount - 1))) else 0;
+        const lineGaps = if (numLines > 1) g * @as(f32, @floatFromInt(numLines - 1)) else 0;
         return totalCross + lineGaps + pt + pb;
     }
     return maxCross + pt + pb;
@@ -1510,54 +1552,29 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         }
     }
     const MAX_LINES = 64;
-    var lineStarts = std.mem.zeroes([MAX_LINES]usize);
-    var lineCounts = std.mem.zeroes([MAX_LINES]usize);
+    var lines: [MAX_LINES]math.Line = undefined;
     var numLines: usize = 0;
     if ((s.flex_wrap == .wrap or s.flex_wrap == .wrap_reverse) and visibleCount > 0) {
-        var lineMain: f32 = 0;
-        var lineStartIdx: usize = 0;
-        var itemsOnLine: usize = 0;
-        {
-            var i: usize = 0;
-            while (i < visibleCount) : (i += 1) {
-                const itemMain = childBasis[@intCast(i)] + childMainMarginStart[@intCast(i)] + childMainMarginEnd[@intCast(i)];
-                const gapBefore = if (itemsOnLine > 0) gap else 0;
-                if (itemsOnLine > 0 and (asF32(lineMain) + asF32(gapBefore) + itemMain) > mainSize) {
-                    if (numLines < MAX_LINES) {
-                        lineStarts[@intCast(numLines)] = lineStartIdx;
-                        lineCounts[@intCast(numLines)] = itemsOnLine;
-                        numLines += 1;
-                    }
-                    lineStartIdx = i;
-                    lineMain = itemMain;
-                    itemsOnLine = 1;
-                } else {
-                    lineMain += asF32(gapBefore) + asF32(itemMain);
-                    itemsOnLine += 1;
-                }
-            }
+        // Pre-aggregate per-item main sizes (basis + margins) into a contiguous
+        // buffer, then delegate the greedy pack to math.wrapPack.
+        var itemMains: [MAX_CHILDREN]f32 = undefined;
+        var i: usize = 0;
+        while (i < visibleCount) : (i += 1) {
+            itemMains[i] = childBasis[@intCast(i)] + childMainMarginStart[@intCast(i)] + childMainMarginEnd[@intCast(i)];
         }
-        if (itemsOnLine > 0 and numLines < MAX_LINES) {
-            lineStarts[@intCast(numLines)] = lineStartIdx;
-            lineCounts[@intCast(numLines)] = itemsOnLine;
-            numLines += 1;
-        }
-    } else {
-        lineStarts[@intCast(0)] = 0;
-        lineCounts[@intCast(0)] = visibleCount;
-        numLines = if (visibleCount > 0) 1 else 0;
+        numLines = @intCast(math.wrapPack(itemMains[0..visibleCount], mainSize, gap, lines[0..]));
+    } else if (visibleCount > 0) {
+        lines[0] = .{ .start = 0, .count = @intCast(visibleCount) };
+        numLines = 1;
     }
     // wrap_reverse: reverse line order so last line appears first on cross axis
     if (s.flex_wrap == .wrap_reverse and numLines > 1) {
         var lo: usize = 0;
         var hi: usize = numLines - 1;
         while (lo < hi) {
-            const tmpS = lineStarts[lo];
-            const tmpC = lineCounts[lo];
-            lineStarts[lo] = lineStarts[hi];
-            lineCounts[lo] = lineCounts[hi];
-            lineStarts[hi] = tmpS;
-            lineCounts[hi] = tmpC;
+            const tmp = lines[lo];
+            lines[lo] = lines[hi];
+            lines[hi] = tmp;
             lo += 1;
             hi -= 1;
         }
@@ -1569,8 +1586,8 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         var li: usize = 0;
         while (li < numLines) : (li += 1) {
             var lcMax: f32 = 0;
-            const lls = lineStarts[@intCast(li)];
-            const llc = lineCounts[@intCast(li)];
+            const lls: usize = @intCast(lines[li].start);
+            const llc: usize = @intCast(lines[li].count);
             var lci = lls;
             while (lci < lls + llc) : (lci += 1) {
                 const cc = childCrossSize[@intCast(lci)] + childCrossMarginStart[@intCast(lci)] + childCrossMarginEnd[@intCast(lci)];
@@ -1594,33 +1611,26 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
     var crossOffset: f32 = 0;
     var extraCrossGap: f32 = 0;
     if (numLines > 1 and freeCross > 0) {
-        switch (s.align_content) {
-            .center => {
-                crossOffset = @floor(freeCross / 2);
-            },
-            .end => {
-                crossOffset = freeCross;
-            },
-            .space_between => {
-                extraCrossGap = freeCross / @as(f32, @floatFromInt(numLines - 1));
-            },
-            .space_around => {
-                extraCrossGap = freeCross / @as(f32, @floatFromInt(numLines));
-                crossOffset = @floor(extraCrossGap / 2);
-            },
-            .space_evenly => {
-                extraCrossGap = freeCross / @as(f32, @floatFromInt(numLines + 1));
-                crossOffset = @floor(extraCrossGap);
-            },
-            .stretch => {
-                // Distribute extra space equally to each line
-                const perLine = freeCross / @as(f32, @floatFromInt(numLines));
-                var sli: usize = 0;
-                while (sli < numLines) : (sli += 1) {
-                    lineCrossSizes[@intCast(sli)] += perLine;
-                }
-            },
-            .start => {},
+        if (s.align_content == .stretch) {
+            // Stretch grows each line, not the gaps — handled outside math.distribute.
+            const perLine = freeCross / @as(f32, @floatFromInt(numLines));
+            var sli: usize = 0;
+            while (sli < numLines) : (sli += 1) {
+                lineCrossSizes[@intCast(sli)] += perLine;
+            }
+        } else {
+            const dmode: math.Distribute = switch (s.align_content) {
+                .start => .start,
+                .center => .center,
+                .end => .end,
+                .space_between => .space_between,
+                .space_around => .space_around,
+                .space_evenly => .space_evenly,
+                .stretch => unreachable,
+            };
+            const d = math.distribute(dmode, freeCross, @intCast(numLines));
+            crossOffset = d.offset;
+            extraCrossGap = d.extra_gap;
         }
     }
     var crossCursor: f32 = crossOffset;
@@ -1629,8 +1639,8 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
     {
         var lineIdx: usize = 0;
         while (lineIdx < numLines) : (lineIdx += 1) {
-            const ls = lineStarts[@intCast(lineIdx)];
-            const lc = lineCounts[@intCast(lineIdx)];
+            const ls: usize = @intCast(lines[lineIdx].start);
+            const lc: usize = @intCast(lines[lineIdx].count);
             var totalBasis: f32 = 0;
             var totalFlex: f32 = 0;
             var totalMainMargin: f32 = 0;
@@ -1922,32 +1932,9 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             // The 9999 sentinel is not a real size — centering against it produces absurd offsets.
             const mainAxisAuto = if (isRow) false else autoHeight;
             if (!mainAxisAuto and autoMarginCount == 0) {
-                switch (justify) {
-                    .center => {
-                        mainOffset = @floor(freeMain / 2);
-                    },
-                    .end => {
-                        mainOffset = freeMain;
-                    },
-                    .space_between => {
-                        if (lc > 1) {
-                            extraGap = freeMain / @as(f32, @floatFromInt((lc - 1)));
-                        }
-                    },
-                    .space_around => {
-                        if (lc > 0) {
-                            extraGap = freeMain / @as(f32, @floatFromInt(lc));
-                            mainOffset = @floor(extraGap / 2);
-                        }
-                    },
-                    .space_evenly => {
-                        if (lc > 0) {
-                            extraGap = freeMain / @as(f32, @floatFromInt((lc + 1)));
-                            mainOffset = @floor(extraGap);
-                        }
-                    },
-                    .start => {},
-                }
+                const d = math.distribute(justifyToDistribute(justify), freeMain, @intCast(lc));
+                mainOffset = d.offset;
+                extraGap = d.extra_gap;
             }
             var cursor = if (isReverse) mainSize - mainOffset else mainOffset;
             {

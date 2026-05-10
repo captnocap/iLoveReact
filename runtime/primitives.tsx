@@ -242,9 +242,35 @@ export const notification: any = Notification;
 
 // ── Video — Image-shaped host node, but routed through framework/videos.zig ──
 // Pass `src` (or `videoSrc` for clarity); engine.zig:1232 promotes any node
-// with video_src to the Video paint path.
-export const Video: any = ({ src, videoSrc, ...rest }: any) =>
-  h('Image', { ...rest, videoSrc: videoSrc ?? src }, rest.children);
+// with video_src to the Video paint path. The optional `paused` / `loop` /
+// `volume` / `muted` props feed framework/videos.zig via the __video_*
+// bindings as soon as the source reaches `ready`. The Zig side defaults
+// every newly-loaded clip to paused — so without `paused={false}` the
+// frame paints but never advances.
+export const Video: any = ({ src, videoSrc, paused, loop, volume, muted, ...rest }: any) => {
+  const React = require('react');
+  const resolvedSrc = videoSrc ?? src;
+  React.useEffect(() => {
+    if (!resolvedSrc) return undefined;
+    const { videoControl } = require('./hooks/useVideo');
+    const ctl = videoControl(resolvedSrc);
+    const apply = () => {
+      if (ctl.getStatus() !== 'ready') return false;
+      if (paused !== undefined) (paused ? ctl.pause() : ctl.play());
+      if (loop !== undefined) ctl.setLoop(!!loop);
+      if (volume !== undefined) ctl.setVolume(volume);
+      if (muted !== undefined) ctl.setMuted(!!muted);
+      return true;
+    };
+    if (apply()) return undefined;
+    // Poll until videos.zig finishes loading (mpv reports video-params/w
+    // before any frame has rendered — typically <500ms for local files,
+    // longer for remote URLs).
+    const id = setInterval(() => { if (apply()) clearInterval(id); }, 100);
+    return () => clearInterval(id);
+  }, [resolvedSrc, paused, loop, volume, muted]);
+  return h('Image', { ...rest, videoSrc: resolvedSrc }, rest.children);
+};
 
 // ── Cartridge — embed a guest cart bundle inline. `src` is a path to a
 // `.cart.js` file built with `cart-bundle.js --cartridge`. The loader reads
@@ -412,7 +438,7 @@ Scene3DBase.Camera = ({ position, target, fov, ...rest }: any) => {
     scene3dFov: fov ?? 60,
   });
 };
-Scene3DBase.Mesh = ({ geometry, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ, texture, ...rest }: any) => {
+Scene3DBase.Mesh = ({ geometry, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ, texture, textureKey, ...rest }: any) => {
   const matColor = typeof material === 'string' ? material : (material?.color ?? color);
   const [r, g, b] = _hexToRgb(matColor, [0.8, 0.8, 0.8]);
   const [px, py, pz] = _vec3(position, 0, 0, 0);
@@ -428,6 +454,7 @@ Scene3DBase.Mesh = ({ geometry, material, color, position, rotation, scale, radi
   const texW = tex && Number.isFinite(tex.width) ? Math.max(0, tex.width | 0) : 0;
   const texH = tex && Number.isFinite(tex.height) ? Math.max(0, tex.height | 0) : 0;
   const texHex = tex && typeof tex.hex === 'string' ? tex.hex : '';
+  const texKey = typeof textureKey === 'string' && textureKey.length > 0 ? textureKey : '';
   return h('View', {
     ...rest,
     scene3dMesh: true,
@@ -444,6 +471,7 @@ Scene3DBase.Mesh = ({ geometry, material, color, position, rotation, scale, radi
     scene3dTexW: texW,
     scene3dTexH: texH,
     scene3dTexData: texHex && texW > 0 && texH > 0 && texHex.length === texW * texH * 8 ? texHex : '',
+    ...(texKey ? { scene3dTexKey: texKey } : {}),
   });
 };
 Scene3DBase.AmbientLight = ({ color, intensity, ...rest }: any) => {
@@ -542,6 +570,29 @@ export const Canvas: any = CanvasBase;
 const GraphBase: any = (props: any) => h('Graph', props, props.children);
 GraphBase.Path = (props: any) => h('Graph.Path', props, props.children);
 GraphBase.Node = (props: any) => h('Graph.Node', props, props.children);
+// Graph.Polyline — straight-line analog of Graph.Path. `points` is a flat
+// array {x0,y0,x1,y1,…}. Engine parses it ONCE at update time and emits a
+// batched capsule SDF per segment every paint. No bezier flattening, no
+// d-string parsing — bypasses the per-frame work that makes <Graph.Path>
+// expensive at chart scale. Stroke color via `stroke`, width via
+// `strokeWidth` — same names as Graph.Path so the parser dispatches them
+// identically (color → text_color, width → canvas_stroke_width).
+GraphBase.Polyline = (props: any) => h('Graph.Polyline', props, props.children);
+// Graph.Polygon — filled sibling of Graph.Polyline. Same flat point array
+// shape; engine triangle-fans from vertex 0 into the batched polys pipeline
+// (one triangle per pair of subsequent edges). Fan triangulation requires
+// the shape be star-shaped from v0 — true for bars, fan-baseline area
+// charts, donut wedges, radar polygons. Color via `fill` (matches Path).
+GraphBase.Polygon = (props: any) => h('Graph.Polygon', props, props.children);
+// Graph.GCurve — Loop-Blinn quadratic-bezier-triangle filler. `gcurves` is
+// a flat array of 6-float groups: each group {p0x,p0y, p1x,p1y, p2x,p2y}
+// defines ONE triangle whose three corners are the control points of a
+// quadratic bezier; the engine's gcurve_fill pipeline does a per-pixel
+// `u*u - v < 0` interior test for sub-pixel-perfect curve fills at any
+// scale, no SDF texture, no tessellation. Compose multiple groups for
+// shapes that need several curve segments (donut rim, area-chart top,
+// radar curve sides, etc). Color via `fill` (canvas_fill_color).
+GraphBase.GCurve = (props: any) => h('Graph.GCurve', props, props.children);
 export const Graph: any = GraphBase;
 
 // ── SdfIcon — pre-baked icon rendered as one textured quad ─────────────
@@ -570,7 +621,13 @@ export const SdfIcon: any = ({ name, color, size, ...rest }: any) =>
 export const Render: any = (props: any) => h('Render', props, props.children);
 
 // ── Effect — per-pixel generative surface ─────────────────────
-export const Effect: any = (props: any) => h('Effect', props, props.children);
+// <Effect shader={wgsl} data={[...]}>
+//   `data` (optional) — Float32Array-shaped values uploaded once per change
+//   to the engine's GPU storage buffer at @group(0) @binding(1). Lets shader
+//   source stay static while live data updates without recompiling the
+//   pipeline. Aliased to engine prop `effectData`.
+export const Effect: any = ({ data, ...rest }: any) =>
+  h('Effect', { ...rest, ...(data != null ? { effectData: data } : {}) }, rest.children);
 
 // ── Native — universal escape hatch for host-handled types ──
 

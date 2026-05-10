@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, ScrollView } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import { http as httpHook, process as processHook } from '@reactjit/runtime/hooks';
+import { fetch as fetchHook, process as processHook } from '@reactjit/runtime/hooks';
 import { SnakeSpinner } from '../gallery/components/grid-spinners/GridSpinners';
 import { useAnimationTimeline } from '../anim';
 import { useOnboarding } from './state.tsx';
@@ -607,7 +607,7 @@ function ClaudeForm({ setLockedIn, setCommitPayload }) {
     // Claude Code itself uses internally; without it the API rejects
     // the OAuth token.
     try {
-      const resp = await httpHook.getAsync('https://api.anthropic.com/v1/models', {
+      const resp = await fetchHook.getAsync('https://api.anthropic.com/v1/models', {
         'Authorization': `Bearer ${token}`,
         'anthropic-version': '2023-06-01',
         'anthropic-beta': 'oauth-2025-04-20',
@@ -829,7 +829,7 @@ function LocalForm({ setLockedIn, setCommitPayload }) {
           let res;
           try {
             const fetchRes = await Promise.race([
-              fetch(url, { method: 'GET', headers }),
+              fetchHook(url, { method: 'GET', headers }),
               new Promise((_, reject) => setTimeout(() => reject(new Error(`timeout after ${HTTP_PROBE_TIMEOUT_MS}ms`)), HTTP_PROBE_TIMEOUT_MS)),
             ]);
             const bodyText = await fetchRes.text();

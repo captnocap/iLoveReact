@@ -114,7 +114,7 @@ pub const EventHandler = struct {
 pub const GpuShaderDesc = struct { wgsl: []const u8 };
 pub const MenuItem = struct { label: []const u8, handler: *const fn () void };
 
-pub const EffectContext = @import("effect_ctx.zig").EffectContext;
+pub const EffectContext = @import("effects/ctx.zig").EffectContext;
 pub const RenderFn = *const fn (*EffectContext) void;
 
 // ── Style ──────────────────────────────────────────────────────────
@@ -320,6 +320,7 @@ pub const Node = struct {
     scene3d_tex_w: u32 = 0,
     scene3d_tex_h: u32 = 0,
     scene3d_tex_rgba: ?[]const u8 = null,
+    scene3d_tex_key: ?[]const u8 = null,
     physics_world_id: u8 = 0,
     physics_world: bool = false,
     physics_body: bool = false,
@@ -370,6 +371,7 @@ pub const Node = struct {
     canvas_fill_effect: ?[]const u8 = null,
     icon_name: ?[]const u8 = null,
     polyline_points: ?[]f32 = null,
+    gcurve_data: ?[]f32 = null,
     text_effect: ?[]const u8 = null,
     inline_glyphs: ?[]const InlineGlyph = null,
     inline_slots: [MAX_INLINE_SLOTS]InlineSlot = [_]InlineSlot{.{}} ** MAX_INLINE_SLOTS,
@@ -377,6 +379,7 @@ pub const Node = struct {
     effect_render: ?RenderFn = null,
     effect_shader: ?GpuShaderDesc = null,
     effect_name: ?[]const u8 = null,
+    effect_data: ?[]f32 = null,
     effect_background: bool = false,
     effect_mask: bool = false,
     // Custom window chrome — borderless window drag/resize regions

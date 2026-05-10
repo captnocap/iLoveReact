@@ -1,13 +1,14 @@
 // Providers route — credentials only.
 //
-// Five UI kinds (internal kind strings kept stable so the assistant /
+// Six UI kinds (internal kind strings kept stable so the assistant /
 // model-picking code that switches on `kind` keeps working):
 //
-//   "OpenAI"            → openai-api-key
-//   "OpenAI-Compatible" → openai-api-like   (Kimi, LMStudio HTTP, Ollama, vLLM…)
+//   "OpenAI"            → openai-api-key   (Chat Completions HTTP — also covers Codex models via API key)
+//   "OpenAI-Compatible" → openai-api-like  (Kimi, LMStudio HTTP, Ollama, vLLM…)
 //   "Anthropic"         → anthropic-api-key
-//   "Claude Code"       → claude-code-cli   (subscription via local CLI auth)
-//   "Local"             → local-runtime     (embedded llama.cpp; needs .gguf folder)
+//   "Claude Code"       → claude-code-cli  (subscription via local CLI auth)
+//   "Codex"             → codex-cli        (local `codex` app-server subprocess, stdio JSON-RPC)
+//   "Local"             → local-runtime    (embedded llama.cpp; needs .gguf folder)
 //
 // Multiple instances per kind are fine. Each row is one connection
 // pointing the assistant at one credential / endpoint.
@@ -35,14 +36,15 @@ import { PROVIDER_ICONS } from '../../gallery/components/model-card/providerIcon
 import { Section, Field, Input, PillRow, SETTINGS_ID } from '../shared';
 import { useSettingsCtx } from '../page';
 
-type UiKind = 'openai' | 'openai-compat' | 'anthropic' | 'claude-code' | 'local';
+type UiKind = 'openai' | 'openai-compat' | 'anthropic' | 'claude-code' | 'codex' | 'local';
 
-const UI_KINDS: UiKind[] = ['openai', 'openai-compat', 'anthropic', 'claude-code', 'local'];
+const UI_KINDS: UiKind[] = ['openai', 'openai-compat', 'anthropic', 'claude-code', 'codex', 'local'];
 const UI_LABELS: Record<UiKind, string> = {
   'openai':        'OpenAI',
   'openai-compat': 'OpenAI-Compatible',
   'anthropic':     'Anthropic',
   'claude-code':   'Claude Code',
+  'codex':         'Codex',
   'local':         'Local',
 };
 
@@ -52,6 +54,7 @@ const INTERNAL_KIND: Record<UiKind, string> = {
   'openai-compat': 'openai-api-like',
   'anthropic':     'anthropic-api-key',
   'claude-code':   'claude-code-cli',
+  'codex':         'codex-cli',
   'local':         'local-runtime',
 };
 const UI_FROM_INTERNAL: Record<string, UiKind> = {
@@ -60,6 +63,7 @@ const UI_FROM_INTERNAL: Record<string, UiKind> = {
   'kimi-api-key':      'openai-compat', // legacy preset folds into openai-compat
   'anthropic-api-key': 'anthropic',
   'claude-code-cli':   'claude-code',
+  'codex-cli':         'codex',
   'local-runtime':     'local',
 };
 
@@ -68,6 +72,7 @@ const KIND_ICON: Record<UiKind, number[][]> = {
   'openai-compat': Cloud,
   'anthropic':     Bot,
   'claude-code':   Key,
+  'codex':         Key,
   'local':         HardDrive,
 };
 
@@ -77,6 +82,7 @@ const DEFAULT_BRAND_ICON: Record<UiKind, string> = {
   'openai-compat': 'ollama',
   'anthropic':     'anthropic',
   'claude-code':   'claude',
+  'codex':         'openai',
   'local':         'meta',
 };
 
@@ -109,13 +115,14 @@ const DEFAULTS = {
   } as Record<string, string>,
   folder: {
     'claude-code': '~/.claude/',
+    'codex':       '~/.codex/',
     'local':       '~/.lmstudio/models',
   } as Record<string, string>,
 };
 
 function needsEndpoint(k: UiKind) { return k === 'openai' || k === 'openai-compat' || k === 'anthropic'; }
 function needsKey(k: UiKind)      { return k === 'openai' || k === 'openai-compat' || k === 'anthropic'; }
-function needsFolder(k: UiKind)   { return k === 'claude-code' || k === 'local'; }
+function needsFolder(k: UiKind)   { return k === 'claude-code' || k === 'codex' || k === 'local'; }
 function defaultLabel(k: UiKind)  { return UI_LABELS[k]; }
 
 type Draft = {

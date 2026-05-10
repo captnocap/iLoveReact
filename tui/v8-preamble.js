@@ -76,6 +76,25 @@ globalThis.process.env = globalThis.process.env || { NODE_ENV: 'production' };
 globalThis.process.exit = globalThis.process.exit || ((code) => __exit(code | 0));
 globalThis.process.on   = globalThis.process.on   || (() => globalThis.process);
 
+// performance.now() shim — many carts (and renderer/hostConfig.ts) call
+// this for timestamps. v8cli exposes __nowMs but not performance.
+if (typeof globalThis.performance === 'undefined') {
+  globalThis.performance = { now: () => __nowMs() };
+}
+
+// requestAnimationFrame shim — fires roughly at 60Hz via setTimeout. The
+// TUI host doesn't have a real frame loop; this is enough to keep
+// useHostAnimation-driven carts ticking.
+if (typeof globalThis.requestAnimationFrame !== 'function') {
+  let rafId = 1;
+  globalThis.requestAnimationFrame = (fn) => {
+    const id = rafId++;
+    setTimeout(() => fn(performance.now()), 16);
+    return id;
+  };
+  globalThis.cancelAnimationFrame = () => {};
+}
+
 // v8cli has no event loop. We run our own as a microtask trampoline so
 // V8 drains queued microtasks (repaint, scheduler callbacks, react effect
 // flushes) between every timer step. A naive synchronous while-loop

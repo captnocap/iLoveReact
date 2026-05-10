@@ -31,6 +31,7 @@ export function DexTableCell({
         width: flex == null ? width : undefined,
         flex,
         height: 26,
+        overflow: 'hidden',
         justifyContent: 'center',
         paddingLeft: 8,
         paddingRight: 8,
@@ -40,7 +41,7 @@ export function DexTableCell({
         backgroundColor: selected ? 'theme:bg1' : DEX_COLORS.bg,
       }}
     >
-      <Text style={{ color: TONE_COLOR[tone], fontSize: 10 }}>{String(value)}</Text>
+      <Text style={{ color: TONE_COLOR[tone], fontSize: 10 }} numberOfLines={1} noWrap>{String(value)}</Text>
     </Box>
   );
 }

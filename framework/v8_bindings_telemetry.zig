@@ -4,12 +4,12 @@ const v8rt = @import("v8_runtime.zig");
 // Frame telemetry counters — were housed in qjs_runtime.zig, now in
 // framework/frame_telemetry.zig (archive/qjs-stack/README.md). Aliased
 // as `qjs_runtime` to keep existing call sites working.
-const frame_telemetry = @import("frame_telemetry.zig");
-const telemetry = @import("telemetry.zig");
-const localstore = @import("localstore.zig");
+const frame_telemetry = @import("diag/frame_telemetry.zig");
+const telemetry = @import("diag/telemetry.zig");
+const localstore = @import("storage/localstore.zig");
 const hotstate = @import("hotstate.zig");
-const sqlite_mod = @import("sqlite.zig");
-const pty_mod = @import("pty.zig");
+const sqlite_mod = @import("storage/sqlite.zig");
+const pty_mod = @import("terminal/pty.zig");
 
 extern fn heavy_compute(n: c_long) c_long;
 extern fn heavy_compute_timed(n: c_long) c_long;

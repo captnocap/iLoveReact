@@ -307,6 +307,81 @@ pub const sdf_icon_wgsl =
     \\}
 ;
 
+/// G-curve fill pipeline: Loop-Blinn-style filled quadratic bezier triangles.
+/// Per-vertex barycentric coords drive a per-pixel `u*u - v < 0` interior
+/// test. Smoothstep on `fwidth(...)` of that gives sub-pixel-perfect AA at
+/// any zoom — the speaker's "the GPU only understands triangles, give it
+/// triangles with bezier weights" recipe applied as an authoring primitive.
+/// Each instance = ONE triangle (3 vertices); the vertex shader emits the
+/// three corners with hard-coded bezier UVs (0,0), (0.5,0), (1,1).
+pub const gcurve_fill_wgsl =
+    \\struct Globals {
+    \\    screen_size: vec2f,
+    \\};
+    \\@group(0) @binding(0) var<uniform> globals: Globals;
+    \\
+    \\struct GCurveInstance {
+    \\    @location(0) p0: vec2f,    // start point (curve passes through)
+    \\    @location(1) p1: vec2f,    // off-curve control point
+    \\    @location(2) p2: vec2f,    // end point (curve passes through)
+    \\    @location(3) color: vec4f, // straight RGBA — premultiplied at output
+    \\};
+    \\
+    \\struct VsOut {
+    \\    @builtin(position) clip_pos: vec4f,
+    \\    @location(0) bezier_uv: vec2f,
+    \\    @location(1) color: vec4f,
+    \\};
+    \\
+    \\@vertex
+    \\fn vs_main(@builtin(vertex_index) idx: u32, inst: GCurveInstance) -> VsOut {
+    \\    // Three corners of the triangle, plus the bezier UVs that drive
+    \\    // the fragment's interior test. v0 = (0,0), v1 = (0.5,0), v2 = (1,1)
+    \\    // is the canonical Loop-Blinn assignment so that f(u,v) = u*u - v
+    \\    // crosses zero exactly along the curve passing through p0 and p2
+    \\    // with control p1.
+    \\    var px: f32 = 0.0;
+    \\    var py: f32 = 0.0;
+    \\    var uv: vec2f = vec2f(0.0, 0.0);
+    \\    if (idx == 0u) {
+    \\        px = inst.p0.x; py = inst.p0.y;
+    \\        uv = vec2f(0.0, 0.0);
+    \\    } else if (idx == 1u) {
+    \\        px = inst.p1.x; py = inst.p1.y;
+    \\        uv = vec2f(0.5, 0.0);
+    \\    } else {
+    \\        px = inst.p2.x; py = inst.p2.y;
+    \\        uv = vec2f(1.0, 1.0);
+    \\    }
+    \\
+    \\    let ndc = vec2f(
+    \\        px / globals.screen_size.x * 2.0 - 1.0,
+    \\        1.0 - py / globals.screen_size.y * 2.0,
+    \\    );
+    \\
+    \\    var out: VsOut;
+    \\    out.clip_pos = vec4f(ndc, 0.0, 1.0);
+    \\    out.bezier_uv = uv;
+    \\    out.color = inst.color;
+    \\    return out;
+    \\}
+    \\
+    \\@fragment
+    \\fn fs_main(in: VsOut) -> @location(0) vec4f {
+    \\    // Loop-Blinn implicit form: the curve is the locus where u² - v = 0.
+    \\    // Inside the curve region of the triangle: u² - v < 0. Outside: > 0.
+    \\    let f = in.bezier_uv.x * in.bezier_uv.x - in.bezier_uv.y;
+    \\    // Screen-space adaptive AA — fwidth picks up the per-fragment change
+    \\    // in f, so the smoothstep edge stays ~1 pixel wide regardless of how
+    \\    // big or small the triangle renders. This is what makes the curve
+    \\    // crisp at any zoom level with no SDF texture in sight.
+    \\    let aa = fwidth(f);
+    \\    let alpha = (1.0 - smoothstep(-aa, aa, f)) * in.color.a;
+    \\    if alpha <= 0.001 { discard; }
+    \\    return vec4f(in.color.rgb * alpha, alpha);
+    \\}
+;
+
 /// Curve pipeline: SDF quadratic bezier strokes.
 /// Each instance is one quadratic bezier segment (3 control points).
 /// Cubics are split into 2-3 quadratics on the CPU side.

@@ -87,6 +87,7 @@ export interface UseAssistantOpts {
   yolo?: boolean;         // kimi_cli_wire only
   modelPath?: string;     // local_ai (absolute path to .gguf)
   nCtx?: number;          // local_ai (KV-cache size; default 2048)
+  maxTokens?: number;     // local_ai (per-turn generation cap; default 4096)
   baseUrl?: string;       // openai_compat (e.g. http://localhost:1234/v1)
   apiKey?: string;        // openai_compat (Bearer token)
   systemPrompt?: string;  // openai_compat (initial system message)
@@ -129,6 +130,7 @@ function buildOptsJson(opts: UseAssistantOpts): string {
   if (opts.yolo !== undefined) out.yolo = opts.yolo;
   if (opts.modelPath) out.model_path = opts.modelPath;
   if (opts.nCtx !== undefined) out.n_ctx = opts.nCtx;
+  if (opts.maxTokens !== undefined) out.max_tokens = opts.maxTokens;
   if (opts.baseUrl) out.base_url = opts.baseUrl;
   if (opts.apiKey) out.api_key = opts.apiKey;
   if (opts.systemPrompt) out.system_prompt = opts.systemPrompt;
@@ -159,8 +161,49 @@ export function useAssistant(opts: UseAssistantOpts): UseAssistantResult {
   const phaseRef = useRef<AssistantPhase>('init');
   const workerIdRef = useRef<string | null>(null);
   const startedRef = useRef(false);
+  // Signature of the opts the live worker was spawned with. When the
+  // current opts produce a different signature (user picked a different
+  // model in Settings, swapped backends, rotated an API key, etc.), we
+  // close the live worker and respawn with the new opts. Without this,
+  // the model picker silently lies — the worker keeps running with
+  // whatever model first satisfied the start gate.
+  const spawnSigRef = useRef<string | null>(null);
 
   useEffect(() => {
+    const sig = JSON.stringify({
+      backend: opts.backend ?? null,
+      cwd: opts.cwd ?? null,
+      model: opts.model ?? null,
+      modelPath: opts.modelPath ?? null,
+      configDir: opts.configDir ?? null,
+      sessionId: opts.sessionId ?? null,
+      resumeSession: opts.resumeSession ?? null,
+      yolo: opts.yolo ?? null,
+      nCtx: opts.nCtx ?? null,
+      maxTokens: opts.maxTokens ?? null,
+      baseUrl: opts.baseUrl ?? null,
+      apiKey: opts.apiKey ?? null,
+      systemPrompt: opts.systemPrompt ?? null,
+    });
+
+    // If a worker is already alive but spawned under a stale signature,
+    // tear it down so the start block below respawns with the new opts.
+    if (startedRef.current && spawnSigRef.current !== sig) {
+      const wid = workerIdRef.current;
+      if (wid && hasHost('__worker_close')) {
+        callHost<void>('__worker_close', undefined as any, wid);
+      }
+      workerIdRef.current = null;
+      startedRef.current = false;
+      spawnSigRef.current = null;
+      setWorkerId(null);
+      // Events are observability (status / lifecycle / usage), not the
+      // transcript — the cart's chat store owns that. Keep them so the
+      // header status surface doesn't blink to empty during the swap.
+      phaseRef.current = 'starting';
+      setPhase('starting');
+    }
+
     // Lazy spawn: settings/connection rows load async, so the first
     // render usually has empty backend/cwd/model. We re-run on opts
     // change and start the worker once required fields arrive.
@@ -196,6 +239,7 @@ export function useAssistant(opts: UseAssistantOpts): UseAssistantResult {
 
       startedRef.current = true;
       workerIdRef.current = id;
+      spawnSigRef.current = sig;
       setWorkerId(id);
       phaseRef.current = 'starting';
       setPhase('starting');
@@ -232,7 +276,7 @@ export function useAssistant(opts: UseAssistantOpts): UseAssistantResult {
         setWorkerId(null);
       }
     };
-  }, [opts.backend, opts.cwd, opts.model, opts.modelPath, opts.nCtx, opts.configDir, opts.resumeSession, opts.sessionId, opts.yolo, opts.baseUrl, opts.apiKey, opts.systemPrompt, opts.pollMs]);
+  }, [opts.backend, opts.cwd, opts.model, opts.modelPath, opts.nCtx, opts.maxTokens, opts.configDir, opts.resumeSession, opts.sessionId, opts.yolo, opts.baseUrl, opts.apiKey, opts.systemPrompt, opts.pollMs]);
 
   const ask = (text: string): boolean => {
     const wid = workerIdRef.current;

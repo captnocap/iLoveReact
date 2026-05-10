@@ -7,18 +7,21 @@ import { Route, Router, useNavigate, useRoute } from '@reactjit/runtime/router';
 import { installBrowserShims } from '@reactjit/runtime/hooks';
 import { useBreakpoint, useActiveVariant, setVariant } from '@reactjit/runtime/theme';
 import { TooltipRoot } from '@reactjit/runtime/tooltip/Tooltip';
-import { BotMessageSquare, Boxes, Home, LayoutGrid, Maximize, Minimize, Settings, User2, X } from '@reactjit/runtime/icons/icons';
+import { BotMessageSquare, Boxes, Home, KeyboardMusic, LayoutGrid, Maximize, Minimize, Settings, User2, X } from '@reactjit/runtime/icons/icons';
 import { callHost } from '@reactjit/runtime/ffi';
 import { applyGalleryTheme, getActiveGalleryThemeId, useGalleryTheme } from './gallery/gallery-theme';
 import { classifiers as S } from '@reactjit/core';
 import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import IndexPage from './page.tsx';
 import SettingsPage, { SettingsNav } from './settings/page.tsx';
-import SweatshopPage from './sweatshop/page';
+import SweatshopSectionShell, { SweatshopNav } from './sweatshop/SectionShell';
+import { PlanChatRail } from './plan/PlanChatRail';
 import CharacterPage from './character/page';
 import Face3DPage from './face3d/page';
-import ComposerPage from './composer/page';
+import WorldPage from './world/page';
+import CanvasPage from './canvas/page';
 import GalleryPage from './gallery';
+import DAWPage from './daw/page';
 import { OnboardingProvider, useOnboarding } from './onboarding/state.tsx';
 import { EffectProfilerOverlay } from './EffectProfilerOverlay';
 import { useAnimationTimeline } from './anim';
@@ -57,15 +60,21 @@ const ROUTES: Array<{ path: string; label: string; icon: number[][]; mode: Route
   { path: '/',                  label: 'Home',      icon: Home,             mode: 'full', inputDock: 'bottom' },
   { path: '/chat',              label: 'Chat',      icon: BotMessageSquare, mode: 'side', inputDock: 'bottom' },
   { path: '/settings',          label: 'Settings',  icon: Settings,         mode: 'side', inputDock: 'rail'   },
-  { path: '/activity/sweatshop', label: 'Sweatshop', icon: Settings,         mode: 'side', inputDock: 'rail'   },
-  { path: '/composer',           label: 'Composer',  icon: Settings,         mode: 'side', inputDock: 'rail'   },
+  { path: '/sweatshop',         label: 'Sweatshop', icon: Settings,         mode: 'side', inputDock: 'rail'   },
+  { path: '/canvas',            label: 'Canvas',    icon: LayoutGrid,       mode: 'side', inputDock: 'rail'   },
   { path: '/character',          label: 'Character', icon: User2,            mode: 'side', inputDock: 'rail'   },
   { path: '/face3d',             label: 'Face3D',    icon: Boxes,            mode: 'side', inputDock: 'rail'   },
+  { path: '/world',              label: 'World',     icon: Boxes,            mode: 'side', inputDock: 'rail'   },
   { path: '/gallery',            label: 'Gallery',   icon: LayoutGrid,       mode: 'side', inputDock: 'rail'   },
+  { path: '/daw',                label: 'DAW',       icon: KeyboardMusic,    mode: 'side', inputDock: 'bottom' },
 ];
 
 function inputDockForPath(path: string): InputDock {
   if (path.startsWith('/settings')) return 'rail';
+  // /sweatshop sections vary: plan is a chat-shaped surface (bottom),
+  // canvas/composer are tool surfaces that want the rail dock.
+  if (path.startsWith('/sweatshop/plan')) return 'bottom';
+  if (path.startsWith('/sweatshop')) return 'rail';
   return ROUTES.find((r) => r.path === path)?.inputDock ?? 'bottom';
 }
 
@@ -401,6 +410,7 @@ function ShellBody() {
   // top of the assistant rail — same column as the chat — so the rail
   // reads as one continuous left chrome instead of a separate slot.
   const isSettings = route.path.startsWith('/settings');
+  const isSweatshop = route.path.startsWith('/sweatshop');
   const chatIsActivity = route.path === '/chat';
   const claim = useInputClaim();
   const hasChat = useChatHasAny();
@@ -575,7 +585,14 @@ function ShellBody() {
   // its content above the bar's footprint. paddingLeft stays on the
   // routes wrapper for now (rail is opaque chrome — its bg fully
   // covers whatever the page paints behind it, no visible difference).
-  setHudInsets(paddingBottom, 0);
+  //
+  // Publish in an effect, not during render: setHudInsets notifies
+  // useSyncExternalStore subscribers (HomeBody etc.), and React forbids
+  // updating one component while rendering another — calling it during
+  // render warns and forces a re-render every frame.
+  useEffect(() => {
+    setHudInsets(paddingBottom, 0);
+  }, [paddingBottom]);
 
   return (
     <Box style={{
@@ -628,20 +645,14 @@ function ShellBody() {
                 minHeight: 0,
                 width: '100%',
                 flexDirection: 'row',
-                borderWidth: 8,
-                borderColor: 'rgba(255,0,0,1)',
               }}>
                 <Box style={{
                   width: sideWidth,
                   flexShrink: 0,
-                  backgroundColor: 'rgba(255,0,255,0.25)',
                 }} />
                 <Box style={{
                   flexGrow: 1, flexBasis: 0, minWidth: 0,
                   flexDirection: 'column',
-                  borderWidth: 4,
-                  borderColor: 'rgba(0,255,0,1)',
-                  backgroundColor: 'rgba(0,255,0,0.08)',
                 }}>
                 <Route path="/">
                   <IndexPage />
@@ -652,11 +663,20 @@ function ShellBody() {
                 <Route path="/settings/customize">
                   <SettingsPage />
                 </Route>
-                <Route path="/activity/sweatshop">
-                  <SweatshopPage />
+                <Route path="/sweatshop">
+                  <SweatshopSectionShell />
                 </Route>
-                <Route path="/composer">
-                  <ComposerPage />
+                <Route path="/sweatshop/canvas">
+                  <SweatshopSectionShell />
+                </Route>
+                <Route path="/sweatshop/plan">
+                  <SweatshopSectionShell />
+                </Route>
+                <Route path="/sweatshop/composer">
+                  <SweatshopSectionShell />
+                </Route>
+                <Route path="/canvas">
+                  <CanvasPage />
                 </Route>
                 <Route path="/character">
                   <CharacterPage />
@@ -664,11 +684,17 @@ function ShellBody() {
                 <Route path="/face3d">
                   <Face3DPage />
                 </Route>
+                <Route path="/world">
+                  <WorldPage />
+                </Route>
                 <Route path="/gallery">
                   <GalleryPage />
                 </Route>
                 <Route path="/chat">
                   <ChatPage />
+                </Route>
+                <Route path="/daw">
+                  <DAWPage />
                 </Route>
                 </Box>
               </Box>
@@ -683,6 +709,7 @@ function ShellBody() {
                 position: 'absolute', left: 0, top: 0, bottom: 0, width: sideWidth,
               }}>
                 {isSettings ? <SettingsNav maxHeight={subnavMaxH} /> : null}
+                {isSweatshop ? <SweatshopNav maxHeight={subnavMaxH} /> : null}
                 {/* Rail's chat slot — always 'side' shape when the rail
                     is visible. Shows live transcript when there's an
                     active session, history list otherwise. Stays in
@@ -690,7 +717,13 @@ function ShellBody() {
                     still scan history while the live chat is in the
                     activity area. */}
                 {railVisible ? (
-                  <ConditionalAssistantChat shape="side" chatIsActivity={chatIsActivity} />
+                  // /sweatshop/plan replaces the assistant chat slot
+                  // with the planning chat (PlanChatRail). Same chrome,
+                  // different number — "02 PLANNING" instead of
+                  // "01 ASSISTANT" — so it reads as a sibling tab.
+                  route.path === '/sweatshop/plan'
+                    ? <PlanChatRail />
+                    : <ConditionalAssistantChat shape="side" chatIsActivity={chatIsActivity} />
                 ) : null}
                 {/* InputStrip is pinned with flexShrink:0 so a tall
                     sub-nav or chat history can never push it past the

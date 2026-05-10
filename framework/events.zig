@@ -14,6 +14,7 @@ const Node = layout.Node;
 pub const EventHandler = struct {
     on_press: ?*const fn () void = null,
     on_mouse_down: ?*const fn () void = null,
+    on_mouse_move: ?*const fn () void = null,
     on_mouse_up: ?*const fn () void = null,
     on_hover_enter: ?*const fn () void = null,
     on_hover_exit: ?*const fn () void = null,
@@ -29,10 +30,12 @@ pub const EventHandler = struct {
     /// JS expression to eval on press (used by .so cartridges that can't call QJS directly)
     js_on_press: ?[*:0]const u8 = null,
     js_on_mouse_down: ?[*:0]const u8 = null,
+    js_on_mouse_move: ?[*:0]const u8 = null,
     js_on_mouse_up: ?[*:0]const u8 = null,
     /// Lua expression to eval on press (LuaJIT logic runtime)
     lua_on_press: ?[*:0]const u8 = null,
     lua_on_mouse_down: ?[*:0]const u8 = null,
+    lua_on_mouse_move: ?[*:0]const u8 = null,
     lua_on_mouse_up: ?[*:0]const u8 = null,
     js_on_middle_click: ?[*:0]const u8 = null,
 };
@@ -78,6 +81,7 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
 fn hasHandlers(h: *const EventHandler) bool {
     return h.on_press != null or
         h.on_mouse_down != null or
+        h.on_mouse_move != null or
         h.on_mouse_up != null or
         h.on_hover_enter != null or
         h.on_hover_exit != null or
@@ -91,9 +95,11 @@ fn hasHandlers(h: *const EventHandler) bool {
         h.on_scroll != null or
         h.on_right_click != null or
         h.js_on_mouse_down != null or
+        h.js_on_mouse_move != null or
         h.js_on_mouse_up != null or
         h.lua_on_press != null or
         h.lua_on_mouse_down != null or
+        h.lua_on_mouse_move != null or
         h.lua_on_mouse_up != null or
         h.js_on_press != null;
 }
@@ -228,9 +234,13 @@ pub fn hitTestText(node: *Node, mx: f32, my: f32) ?*Node {
 pub fn findCanvasNode(node: *Node, mx: f32, my: f32) ?*Node {
     if (node.style.display == .none) return null;
     const r = node.computed;
-    if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
-    // Canvas nodes don't have children in the paint tree, so check self first
-    if (node.canvas_type != null) return node;
+    // No AABB pre-reject — an absolute-positioned canvas (or a canvas
+    // inside an absolute popover) extends past its anchor's bounds, and
+    // pre-rejecting here would prevent the walker from ever reaching it.
+    // Bounds are checked at self-match below. Same shape as hitTest.
+    if (node.canvas_type != null and mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
+        return node;
+    }
     const ov = node.style.overflow;
     const is_scroll = (ov == .scroll or (ov == .auto and node.content_height > r.h));
     var child_mx = mx;
@@ -282,8 +292,6 @@ pub fn findScrollContainer(node: *Node, mx: f32, my: f32) ?*Node {
     if (node.style.display == .none) return null;
 
     const r = node.computed;
-    // Quick AABB rejection
-    if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
 
     // Scroll container: adjust coordinates for children in content space
     const ov = node.style.overflow;
@@ -295,15 +303,21 @@ pub fn findScrollContainer(node: *Node, mx: f32, my: f32) ?*Node {
         child_mx = mx + node.scroll_x;
     }
 
-    // Check children in reverse order (deepest/front-most first)
+    // Check children in reverse order (deepest/front-most first). NO AABB
+    // rejection on this node first: an absolute-positioned popover (model
+    // picker, tooltip) can extend well past its anchor's bounds, so we have
+    // to descend regardless of whether the cursor is inside the parent.
+    // Mirrors hitTest()'s shape — that's why clicks land on the popover but
+    // wheel scroll didn't until this loop stopped pre-rejecting.
     var i = node.children.len;
     while (i > 0) {
         i -= 1;
         if (findScrollContainer(&node.children[i], child_mx, child_my)) |hit| return hit;
     }
 
-    // Check self — scroll always scrollable, auto only when content overflows
-    if (is_scroll) return node;
+    // Check self — scroll always scrollable, auto only when content
+    // overflows. Self only counts if the cursor is actually inside its box.
+    if (is_scroll and mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) return node;
 
     return null;
 }

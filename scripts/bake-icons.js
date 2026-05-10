@@ -34,8 +34,15 @@ const OUT_PGM_HEX = ROOT + '/framework/gpu/icon_atlas_debug.ppm.txt';
 const VIEWBOX = 24;          // Lucide source viewBox
 const HIRES = 256;           // rasterization resolution per icon (high-quality SDF)
 const TILE = 32;             // atlas tile size per icon (post-downsample)
-const STROKE_HIRES = 22;     // stroke thickness in HIRES space (~2 in viewBox space → 22 in 256)
-const SPREAD_HIRES = 32;     // distance encoding spread in HIRES px (= 4 px in TILE space)
+// Rasterize a thin centerline (4 hires-px ≈ 0.4 viewBox-px), then let the SDF
+// gradient *be* the visible stroke. With SPREAD=18, the smoothstep edge at
+// byte 128 sits ~9 hires-px from the centerline, so the rendered stroke has
+// half-width ≈ 9 + 2 = 11 hires-px → diameter ≈ 22 hires-px ≈ 2 viewBox-px,
+// matching Lucide's intended stroke width. Earlier values (22 + 32) made the
+// rendered stroke ≈ 5 px because we baked the stroke at full width AND added
+// a halo on top of it — the halo should be the stroke, not extra atop it.
+const STROKE_HIRES = 4;
+const SPREAD_HIRES = 18;
 const ATLAS_COLS = 16;       // tiles per row
 const PADDING = 2;           // tile padding so neighbors don't bleed via bilinear sampling
 

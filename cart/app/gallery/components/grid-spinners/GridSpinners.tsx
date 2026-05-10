@@ -630,9 +630,9 @@ function ShuffleSpinner() {
   );
 }
 
-type SpinnerSpec = { id: string; name: string; caption: string; Comp: () => any };
+export type SpinnerSpec = { id: string; name: string; caption: string; Comp: () => any };
 
-const SPINNERS: SpinnerSpec[] = [
+export const SPINNERS: SpinnerSpec[] = [
   { id: 'slide',   name: 'Slide',       caption: '15-puzzle · tiles fill gap',   Comp: SlideSpinner },
   { id: 'rotate',  name: 'Rotate',      caption: '2×2 block · cycles corner',    Comp: RotateSpinner },
   { id: 'shuffle', name: 'Shuffle',     caption: 'adjacent pair swaps',          Comp: ShuffleSpinner },

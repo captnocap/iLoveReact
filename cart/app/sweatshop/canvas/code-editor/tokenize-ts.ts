@@ -128,8 +128,50 @@ function tokenizeLine(line: string): ColorSpan[] {
 }
 
 /** Tokenize TS/TSX source into the colorRows shape consumed by
- *  <TextEditor paintText colorRows={…}>. */
+ *  <TextEditor paintText colorRows={…}>.
+ *
+ *  Module-level identity cache. CodeEditor's useMemo on `[value]`
+ *  retains by ===, but the bridge has been observed shipping per-frame
+ *  UPDATEs with `keys=[colorRows]` even when `value` content visibly
+ *  hadn't changed — symptom of upstream churn re-running useMemo
+ *  despite same-string deps (or React losing hook cache for some other
+ *  reason). Caching by input string guarantees the same source string
+ *  always returns the same array reference, killing the per-frame
+ *  prop-identity churn at the source. Single-slot cache because the
+ *  app only has one CodeEditor mounted at a time and we don't want
+ *  to leak. */
+let _lastSource: string | null = null;
+let _lastRows: ColorSpan[][] | null = null;
+let _hits = 0;
+let _misses = 0;
+let _lastReport = 0;
 export function tokenizeToColorRows(source: string): ColorSpan[][] {
-  if (!source) return [[{ text: ' ', color: TOKEN_COLOR.text }]];
-  return source.split('\n').map(tokenizeLine);
+  // Diagnostic: log cache hit/miss ratio. If we mostly cache-hit but
+  // the bridge still ships colorRows UPDATE every frame, the issue is
+  // upstream (React losing the useMemo cache). If we cache-miss every
+  // call, source content is genuinely changing per render — find the
+  // upstream churn instead.
+  const now = Date.now();
+  if (_lastRows !== null && _lastSource === source) {
+    _hits += 1;
+    if (now - _lastReport >= 1000) {
+      try { (globalThis as any).__hostLog?.(0, '[tokenize] hits=' + _hits + ' misses=' + _misses + ' lastLen=' + source.length); } catch {}
+      _hits = 0; _misses = 0; _lastReport = now;
+    }
+    return _lastRows;
+  }
+  _misses += 1;
+  if (_lastSource !== null) {
+    try { (globalThis as any).__hostLog?.(0, '[tokenize] MISS oldLen=' + (_lastSource as string).length + ' newLen=' + source.length + ' equal=' + ((_lastSource as string) === source) + ' headDiff=' + JSON.stringify({ old: (_lastSource as string).slice(0, 40), nu: source.slice(0, 40) })); } catch {}
+  }
+  const rows = !source
+    ? [[{ text: ' ', color: TOKEN_COLOR.text }]]
+    : source.split('\n').map(tokenizeLine);
+  _lastSource = source;
+  _lastRows = rows;
+  if (now - _lastReport >= 1000) {
+    try { (globalThis as any).__hostLog?.(0, '[tokenize] hits=' + _hits + ' misses=' + _misses + ' lastLen=' + source.length); } catch {}
+    _hits = 0; _misses = 0; _lastReport = now;
+  }
+  return rows;
 }

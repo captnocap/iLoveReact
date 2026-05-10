@@ -247,6 +247,13 @@ ensure_pg_running() {
 }
 ensure_pg_running
 
+# Expose the cart's source dir as an env var so carts that need
+# repo-aware paths (cart/media's media.useScan, etc.) can resolve them
+# in dev mode where the host's CWD is repo root, not the cart's
+# source dir. Cart code reads via __env_get("RJIT_DEV_CART_DIR").
+# Shipped binaries don't set this; falls back to '.' (user's CWD).
+export RJIT_DEV_CART_DIR="$(dirname "$CART_FILE")"
+
 "$BIN" &
 BIN_PID=$!
 

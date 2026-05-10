@@ -372,7 +372,7 @@ function loadTypeScript() {
   const tsPath = join(__cwd(), 'vendor', 'typescript', 'typescript.js');
   const code = __readFile(tsPath);
   if (code === null) {
-    throw new Error(`Missing vendor/typescript/typescript.js at ${tsPath}`);
+    throw new Error(`Missing deps/typescript/typescript.js at ${tsPath}`);
   }
 
   const module = { exports: {} };

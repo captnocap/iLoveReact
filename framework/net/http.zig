@@ -1,7 +1,7 @@
 //! HTTP/HTTPS client — std.http.Client worker pool with ring buffer communication.
 //!
 //! Replaces the previous libcurl implementation. Same architecture: worker threads
-//! block on client.fetch(), main thread polls responses each frame.
+//! block on the HTTP request, main thread polls responses each frame.
 //!
 //! Usage from generated code:
 //!   const http = @import("net/http.zig");
@@ -23,6 +23,7 @@ const MAX_WORKERS = 4;
 const MAX_URL = 2048;
 const MAX_HEADERS = 16;
 const MAX_HEADER_LEN = 512;
+const MAX_CONTENT_TYPE = 128;
 const MAX_REQ_BODY = 16384; // 16KB request body
 const MAX_BODY = 65536; // 64KB response body limit
 const MAX_ERROR = 256;
@@ -62,6 +63,10 @@ pub const Response = struct {
     response_type: ResponseType = .complete,
     error_msg: [MAX_ERROR]u8 = undefined,
     error_len: usize = 0,
+    final_url: [MAX_URL]u8 = undefined,
+    final_url_len: usize = 0,
+    content_type: [MAX_CONTENT_TYPE]u8 = undefined,
+    content_type_len: usize = 0,
 
     pub fn bodySlice(self: *const Response) []const u8 {
         return self.body[0..self.body_len];
@@ -69,6 +74,14 @@ pub const Response = struct {
 
     pub fn errorSlice(self: *const Response) []const u8 {
         return self.error_msg[0..self.error_len];
+    }
+
+    pub fn finalUrlSlice(self: *const Response) []const u8 {
+        return self.final_url[0..self.final_url_len];
+    }
+
+    pub fn contentTypeSlice(self: *const Response) []const u8 {
+        return self.content_type[0..self.content_type_len];
     }
 };
 
@@ -162,6 +175,49 @@ pub fn request(id: u32, opts: RequestOpts) bool {
     return request_queue.push(req);
 }
 
+/// Perform a synchronous HTTP request on the calling thread.
+/// Returns a fully populated Response including final_url and content_type.
+pub fn fetchSync(opts: RequestOpts) Response {
+    const alloc = std.heap.page_allocator;
+    var client: std.http.Client = .{ .allocator = alloc };
+    defer client.deinit();
+    client.initDefaultProxies(alloc) catch {};
+
+    var req = Request{};
+    req.id = 0;
+    const url_len = @min(opts.url.len, MAX_URL);
+    @memcpy(req.url[0..url_len], opts.url[0..url_len]);
+    req.url_len = url_len;
+    req.method = opts.method;
+    if (opts.headers) |hdrs| {
+        for (hdrs, 0..) |kv, i| {
+            if (i >= MAX_HEADERS) break;
+            const klen = @min(kv[0].len, MAX_HEADER_LEN);
+            const vlen = @min(kv[1].len, MAX_HEADER_LEN);
+            @memcpy(req.header_keys[i][0..klen], kv[0][0..klen]);
+            @memcpy(req.header_vals[i][0..vlen], kv[1][0..vlen]);
+            req.header_key_lens[i] = klen;
+            req.header_val_lens[i] = vlen;
+            req.header_count += 1;
+        }
+    }
+    if (opts.body) |body| {
+        const blen = @min(body.len, MAX_REQ_BODY);
+        @memcpy(req.body[0..blen], body[0..blen]);
+        req.body_len = blen;
+    }
+
+    var resp = Response{};
+    executeRequestOnClient(&client, &req, &resp) catch |err| {
+        resp.response_type = .err;
+        const msg = @errorName(err);
+        const elen = @min(msg.len, MAX_ERROR);
+        @memcpy(resp.error_msg[0..elen], msg[0..elen]);
+        resp.error_len = elen;
+    };
+    return resp;
+}
+
 /// Poll for completed responses. Non-blocking — returns count.
 pub fn poll(out: []Response) usize {
     return response_queue.drain(out);
@@ -218,7 +274,7 @@ fn workerMain() void {
         // Execute the request
         var resp = Response{};
         resp.id = req.id;
-        executeRequest(&client, &req, &resp) catch |err| {
+        executeRequestOnClient(&client, &req, &resp) catch |err| {
             resp.response_type = .err;
             const msg = @errorName(err);
             const elen = @min(msg.len, MAX_ERROR);
@@ -254,30 +310,70 @@ fn buildExtraHeaders(req: *const Request) [MAX_HEADERS]std.http.Header {
     return extra_headers;
 }
 
-fn executeRequest(client: *std.http.Client, req: *const Request, resp: *Response) !void {
+fn executeRequestOnClient(client: *std.http.Client, req: *const Request, resp: *Response) !void {
     const alloc = std.heap.page_allocator;
     const url = req.url[0..req.url_len];
     const method = methodFromReq(req);
     var extra_headers = buildExtraHeaders(req);
     const payload = if (req.body_len > 0) req.body[0..req.body_len] else null;
 
-    var body_alloc = std.Io.Writer.Allocating.init(alloc);
-    defer body_alloc.deinit();
-
-    const result = try client.fetch(.{
-        .location = .{ .url = url },
-        .method = method,
-        .payload = payload,
+    const uri = try std.Uri.parse(url);
+    var request_obj = try client.request(method, uri, .{
         .extra_headers = extra_headers[0..req.header_count],
-        .response_writer = &body_alloc.writer,
+        .headers = .{ .accept_encoding = .omit },
         .keep_alive = false,
         .redirect_behavior = .init(10),
     });
+    defer request_obj.deinit();
 
-    var body_list = body_alloc.toArrayList();
+    if (payload) |p| {
+        request_obj.transfer_encoding = .{ .content_length = p.len };
+        var body = try request_obj.sendBodyUnflushed(&.{});
+        try body.writer.writeAll(p);
+        try body.end();
+        try request_obj.connection.?.flush();
+    } else {
+        try request_obj.sendBodiless();
+    }
+
+    var redirect_buf: [8192]u8 = undefined;
+    var response = try request_obj.receiveHead(&redirect_buf);
+
+    resp.status = @intFromEnum(response.head.status);
+
+    // Capture final URL
+    if (std.fmt.bufPrint(&resp.final_url, "{f}", .{request_obj.uri.fmt(.all)})) |s| {
+        resp.final_url_len = s.len;
+    } else |_| {
+        resp.final_url_len = 0;
+    }
+
+    // Capture Content-Type from headers
+    var hit = std.http.HeaderIterator.init(response.head.bytes);
+    while (hit.next()) |hdr| {
+        if (std.ascii.eqlIgnoreCase(hdr.name, "content-type")) {
+            const ct_len = @min(hdr.value.len, MAX_CONTENT_TYPE);
+            if (ct_len > 0) {
+                @memcpy(resp.content_type[0..ct_len], hdr.value[0..ct_len]);
+            }
+            resp.content_type_len = ct_len;
+            break;
+        }
+    }
+
+    // Read body
+    var body_list = std.ArrayList(u8){};
     defer body_list.deinit(alloc);
 
-    resp.status = @intFromEnum(result.status);
+    var transfer_buf: [4096]u8 = undefined;
+    const reader = response.reader(&transfer_buf);
+    while (true) {
+        var buf: [4096]u8 = undefined;
+        const n = reader.readSliceShort(&buf) catch break;
+        if (n == 0) break;
+        try body_list.appendSlice(alloc, buf[0..n]);
+    }
+
     const body = body_list.items;
     const to_copy = @min(body.len, MAX_BODY);
     if (to_copy > 0) {
@@ -383,7 +479,6 @@ const DownloadWriter = struct {
         }
         return total;
     }
-
 };
 
 // ── Streaming + Download execution ───────────────────────────────────────

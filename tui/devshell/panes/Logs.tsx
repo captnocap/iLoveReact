@@ -1,21 +1,19 @@
-// Logs pane — tails the dev host's event ring (latest 500) and renders
-// one row per event. Newest at bottom. Auto-scrolls to bottom while at
-// the bottom; pinning to a row stops auto-scroll until you press G.
-//
-// No SQL on the host side — EVENTS IPC reads directly from the
-// in-memory ring. Polling at 1Hz so a busy session doesn't add
-// pressure.
+// Logs pane — accordion table. Each event is one row; press Enter to
+// expand the cursor row in place and read the full payload without
+// losing the surrounding context. j/k (or arrows) move the cursor;
+// stepping past the bottom returns to live tail mode.
 
-import { createElement, useState, useEffect, useRef } from 'react';
+import * as React from 'react';
+import { Box, Row, Col, Text, Pressable } from '../../../runtime/primitives';
 import { subscribeKey } from '../../host';
 import { useEventStream, Event } from '../services/EventStream';
 import { useLogLevel } from '../services/LogLevel';
 import { claimInput, releaseInput, setCopyOverride } from '../services/InputClaim';
 
-const CHROME_ROWS = 6; // title 2 + tabs 1 + footer 1 + paneY-padding 2
+const { useState, useEffect, useRef, useMemo } = React;
 
-// Render each row as colored segments so we can drop characters from the
-// left when scrolling horizontally without losing per-column color.
+const CHROME_ROWS = 6;
+
 type Seg = { text: string; fg: string; bold?: boolean };
 
 function padRight(s: string, n: number): string {
@@ -35,10 +33,10 @@ function sliceSegs(segs: Seg[], from: number): Seg[] {
 }
 
 function impColor(imp: number): string {
-  if (imp >= 0.85) return '#f87171';   // error
-  if (imp >= 0.70) return '#fbbf24';   // warn
-  if (imp >= 0.50) return '#cbd5e1';   // info / default
-  return '#94a3b8';                    // debug / trace
+  if (imp >= 0.85) return '#f87171';
+  if (imp >= 0.70) return '#fbbf24';
+  if (imp >= 0.50) return '#cbd5e1';
+  return '#94a3b8';
 }
 
 function fmtTime(ts: number): string {
@@ -50,9 +48,6 @@ function fmtTime(ts: number): string {
   return `${hh}:${mm}:${ss}.${ms}`;
 }
 
-// log.* events have payload {msg, scope, level} — surface the msg
-// directly so the row reads naturally. For other event types, render
-// the JSON payload unmolested.
 function fmtPayload(ev: Event): string {
   const p = ev.payload;
   if (p === null || p === undefined) return '';
@@ -64,9 +59,15 @@ function fmtPayload(ev: Event): string {
   } catch { return ''; }
 }
 
-// Format one event as a multi-line plain-text record for copy-paste.
-// No truncation, no wrapping — payload is rendered as pretty-printed
-// JSON so consumers can paste into a JSON-aware tool.
+function payloadBody(ev: Event): string {
+  if (ev.type.startsWith('log.') && typeof ev.payload?.msg === 'string') return ev.payload.msg;
+  if (ev.payload === undefined || ev.payload === null) return '';
+  if (typeof ev.payload === 'object') {
+    try { return JSON.stringify(ev.payload, null, 2); } catch { return String(ev.payload); }
+  }
+  return String(ev.payload);
+}
+
 function formatEventFull(ev: Event): string {
   const lines: string[] = [];
   lines.push(`time:   ${fmtTime(ev.ts)}`);
@@ -75,23 +76,10 @@ function formatEventFull(ev: Event): string {
   lines.push(`source: ${ev.src}`);
   lines.push('');
   lines.push('payload:');
-  let body = '';
-  if (ev.type.startsWith('log.') && typeof ev.payload?.msg === 'string') {
-    body = ev.payload.msg;
-  } else if (ev.payload === undefined || ev.payload === null) {
-    body = '';
-  } else if (typeof ev.payload === 'object') {
-    try { body = JSON.stringify(ev.payload, null, 2); } catch { body = String(ev.payload); }
-  } else {
-    body = String(ev.payload);
-  }
-  for (const line of body.split('\n')) lines.push('  ' + line);
+  for (const line of payloadBody(ev).split('\n')) lines.push('  ' + line);
   return lines.join('\n');
 }
 
-// Substring filter. Empty = match everything. `!foo` excludes any event
-// whose haystack includes "foo". Otherwise include only events whose
-// haystack includes the term. Case-insensitive.
 function matchesFilter(ev: Event, filter: string): boolean {
   if (!filter) return true;
   const exclude = filter.startsWith('!');
@@ -107,256 +95,319 @@ function matchesFilter(ev: Event, filter: string): boolean {
 export function LogsPane() {
   const allEvents = useEventStream(500);
   const log = useLogLevel();
-  // Display-side filter — host filter only gates what's stored going
-  // forward, so old events from a previous lower threshold linger in
-  // the ring. Re-apply the current threshold here so changing level
-  // clears them from view immediately.
   const threshold = log.value ?? 0;
   const [filter, setFilter] = useState('');
   const [editingFilter, setEditingFilter] = useState(false);
-  const events = allEvents.filter(e => e.imp >= threshold && matchesFilter(e, filter));
+  const events = useMemo(
+    () => allEvents.filter(e => e.imp >= threshold && matchesFilter(e, filter)),
+    [allEvents, threshold, filter],
+  );
+
+  // Cursor tracked by event id (stable across ring-buffer eviction).
+  // null = follow tail; expansion tracked the same way so it survives
+  // cursor moves and new events streaming in.
+  const [cursorId, setCursorId] = useState<number | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
   const [scrollY, setScrollY] = useState(0);
   const [scrollX, setScrollX] = useState(0);
-  const [stickToBottom, setStickToBottom] = useState(true);
-  // Detail mode — when non-null, the pane replaces the row list with a
-  // pretty-printed view of one event (payload word-wrapped to terminal
-  // width). Enter opens it on the most recent event; n/p step.
-  const [detailIdx, setDetailIdx] = useState<number | null>(null);
-  const lastSeenCount = useRef(0);
-  // Refs that the keypress closure reads — lets the closure see live
-  // values without resubscribing on every event.
-  const eventsLenRef = useRef(0);
-  const viewportHRef = useRef(0);
-  const maxRowWidthRef = useRef(0);
+
+  const cursorIdx = useMemo(
+    () => cursorId === null ? -1 : events.findIndex(e => e.id === cursorId),
+    [events, cursorId],
+  );
+  const stickToBottom = cursorIdx < 0;
+
   const eventsRef = useRef<Event[]>([]);
   eventsRef.current = events;
+  const cursorIdxRef = useRef(cursorIdx);
+  cursorIdxRef.current = cursorIdx;
+  const expandedIdRef = useRef(expandedId);
+  expandedIdRef.current = expandedId;
+  const viewportHRef = useRef(0);
+  const maxRowWidthRef = useRef(0);
 
-  // Release the input claim if the pane unmounts mid-edit.
   useEffect(() => () => { releaseInput(); setCopyOverride(null); }, []);
 
-  // Install a copy override while in detail view — y will then yank
-  // the focused event's full unwrapped data instead of the screen.
+  // Copy buffer: prefer expanded, then cursor, then everything visible.
   useEffect(() => {
-    if (detailIdx === null) { setCopyOverride(null); return; }
     setCopyOverride(() => {
       const evs = eventsRef.current;
-      const idx = Math.min(detailIdx, evs.length - 1);
-      return idx >= 0 ? formatEventFull(evs[idx]) : '';
+      if (expandedId !== null) {
+        const e = evs.find(x => x.id === expandedId);
+        if (e) return formatEventFull(e);
+      }
+      if (cursorId !== null) {
+        const e = evs.find(x => x.id === cursorId);
+        if (e) return formatEventFull(e);
+      }
+      return evs.map(formatEventFull).join('\n\n---\n\n');
     });
     return () => setCopyOverride(null);
-  }, [detailIdx]);
+  }, [cursorId, expandedId]);
 
   const termRows = (typeof process !== 'undefined' && process.stdout?.rows) || 24;
+  const termCols = (typeof process !== 'undefined' && process.stdout?.columns) || 80;
   const viewportH = Math.max(1, termRows - CHROME_ROWS - 1);
+  viewportHRef.current = viewportH;
 
-  // Auto-scroll: while sticky, jump scrollY to the bottom whenever new
-  // events arrive. Once the user scrolls up, stickToBottom = false until
-  // they hit G or scroll back to the bottom.
+  // Tail mode: keep scroll pinned to the latest event.
   useEffect(() => {
     if (!stickToBottom) return;
     const max = Math.max(0, events.length - viewportH);
     setScrollY(max);
-    lastSeenCount.current = events.length;
   }, [events.length, viewportH, stickToBottom]);
+
+  // Manual mode: keep cursor in viewport when it moves.
+  useEffect(() => {
+    if (cursorIdx < 0) return;
+    if (cursorIdx < scrollY) setScrollY(cursorIdx);
+    else if (cursorIdx >= scrollY + viewportH) setScrollY(Math.max(0, cursorIdx - viewportH + 1));
+  }, [cursorIdx, scrollY, viewportH]);
+
+  // When a row is expanded, scroll so the cursor row sits near the top
+  // and its detail block has room to render below it. Without this,
+  // expanding a row at the bottom of a tail-pinned viewport would push
+  // the detail off-screen entirely.
+  useEffect(() => {
+    if (expandedId === null) return;
+    if (cursorIdx < 0) return;
+    const desired = Math.max(0, cursorIdx - 1);
+    if (scrollY > desired) setScrollY(desired);
+    else if (scrollY < desired - 1) setScrollY(desired);
+    // intentionally not depending on scrollY (avoid feedback loop)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [expandedId, cursorIdx]);
 
   useEffect(() => subscribeKey(k => {
     if (editingFilter) {
-      // Modal text input. Shell skips its global handlers because
-      // claimInput() was called when we entered the editor.
-      if (k === '\x1b' /* ESC */) { setFilter(''); setEditingFilter(false); releaseInput(); }
+      if (k === '\x1b') { setFilter(''); setEditingFilter(false); releaseInput(); }
       else if (k === '\r' || k === '\n') { setEditingFilter(false); releaseInput(); }
       else if (k === '\x7f' || k === '\b') setFilter(f => f.slice(0, -1));
       else if (k.length === 1 && k >= ' ' && k !== '\x1b') setFilter(f => f + k);
       return;
     }
-    // Detail mode — ESC closes, n/p step within the events list.
-    if (detailIdx !== null) {
-      if (k === '\x1b') { setDetailIdx(null); return; }
-      if (k === 'n' || k === 'j' || k === '\x1b[B') {
-        setDetailIdx(i => (i === null) ? null : Math.min(eventsLenRef.current - 1, i + 1));
-        return;
-      }
-      if (k === 'p' || k === 'k' || k === '\x1b[A') {
-        setDetailIdx(i => (i === null) ? null : Math.max(0, i - 1));
-        return;
-      }
-      // Fall through — other keys still work in detail mode (l/y/etc.)
-    } else if (k === '\r' || k === '\n') {
-      // Enter opens detail on the bottom-most visible event.
-      const events = eventsRef.current;
-      if (events.length > 0) setDetailIdx(events.length - 1);
+    if (k === '/') { setEditingFilter(true); claimInput(); return; }
+
+    const evs = eventsRef.current;
+    const last = evs.length - 1;
+    if (last < 0) return;
+    const cur = cursorIdxRef.current;
+    const vh = viewportHRef.current;
+    const setCursorByIdx = (idx: number) => {
+      const clamped = Math.max(0, Math.min(last, idx));
+      setCursorId(evs[clamped]?.id ?? null);
+    };
+
+    // Enter: expand/collapse the cursor row (or the tail row in tail mode).
+    if (k === '\r' || k === '\n') {
+      const idx = cur < 0 ? last : cur;
+      const id = evs[idx]?.id;
+      if (id === undefined) return;
+      setExpandedId(prev => prev === id ? null : id);
+      if (cur < 0) setCursorId(id); // pin cursor when expanding from tail
       return;
     }
-    if (k === '/') { setEditingFilter(true); claimInput(); return; }
-    const maxScrollY = Math.max(0, eventsLenRef.current - viewportHRef.current);
+
+    if (k === '\x1b') {
+      if (expandedIdRef.current !== null) { setExpandedId(null); return; }
+      // Second ESC returns to tail (live).
+      setCursorId(null);
+      return;
+    }
+
+    if (k === '\x1b[A' || k === 'k') {
+      if (cur < 0) setCursorByIdx(last); // first up-press from tail selects last
+      else setCursorByIdx(cur - 1);
+      return;
+    }
+    if (k === '\x1b[B' || k === 'j') {
+      if (cur < 0) return; // already at tail
+      if (cur >= last) { setCursorId(null); setExpandedId(null); return; }
+      setCursorByIdx(cur + 1);
+      return;
+    }
+
+    // Horizontal scroll (collapsed table only)
     const maxScrollX = Math.max(0, maxRowWidthRef.current - 16);
-    if (k === '\x1b[A' || k === 'k') { setStickToBottom(false); setScrollY(y => Math.max(0, y - 1)); }
-    else if (k === '\x1b[B' || k === 'j') {
-      // Auto-resume live tail when scrolling down past the bottom.
-      setScrollY(y => {
-        const next = Math.min(y + 1, maxScrollY);
-        if (next >= maxScrollY) setStickToBottom(true);
-        return next;
-      });
+    // 'l' is claimed by Shell for log-level cycle, so only arrows scroll horizontally.
+    if (k === '\x1b[D') { setScrollX(x => Math.max(0, x - 8)); return; }
+    if (k === '\x1b[C') { setScrollX(x => Math.min(maxScrollX, x + 8)); return; }
+
+    if (k === '\x1b[5~') {
+      const start = cur < 0 ? last : cur;
+      setCursorByIdx(start - vh);
+      return;
     }
-    else if (k === '\x1b[D' || k === 'h') setScrollX(x => Math.max(0, x - 8));
-    else if (k === '\x1b[C') setScrollX(x => Math.min(maxScrollX, x + 8));
-    else if (k === '\x1b[5~') { setStickToBottom(false); setScrollY(y => Math.max(0, y - viewportHRef.current)); }
-    else if (k === '\x1b[6~' || k === ' ') {
-      setScrollY(y => {
-        const next = Math.min(y + viewportHRef.current, maxScrollY);
-        if (next >= maxScrollY) setStickToBottom(true);
-        return next;
-      });
+    if (k === '\x1b[6~' || k === ' ') {
+      if (cur < 0) return;
+      const next = cur + vh;
+      if (next > last) { setCursorId(null); setExpandedId(null); }
+      else setCursorByIdx(next);
+      return;
     }
-    else if (k === 'g' || k === '\x1b[H') { setStickToBottom(false); setScrollY(0); setScrollX(0); }
-    else if (k === 'G' || k === '\x1b[F') { setStickToBottom(true); setScrollX(0); }
-  }), [editingFilter, detailIdx]);
+
+    if (k === 'g' || k === '\x1b[H') { setCursorByIdx(0); setScrollX(0); return; }
+    if (k === 'G' || k === '\x1b[F') { setCursorId(null); setExpandedId(null); setScrollX(0); return; }
+  }), [editingFilter]);
 
   if (events.length === 0) {
     return (
-      <box flexDirection="column">
-        <text fg="#fbbf24" bold>Logs</text>
-        <text fg="#94a3b8">no events yet — waiting on dev host</text>
-        <text fg="#64748b"> </text>
-        <text fg="#64748b">If the host is up but logs stay empty, the threshold</text>
-        <text fg="#64748b">may be filtering everything out. Press `l` to lower it.</text>
-      </box>
+      <Col>
+        <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>Logs</Text>
+        <Text style={{ color: '#94a3b8' }}>no events yet — waiting on dev host</Text>
+        <Text style={{ color: '#64748b' }}> </Text>
+        <Text style={{ color: '#64748b' }}>If the host is up but logs stay empty, the threshold</Text>
+        <Text style={{ color: '#64748b' }}>may be filtering everything out. Press `l` to lower it.</Text>
+      </Col>
     );
   }
 
-  if (detailIdx !== null && detailIdx < events.length) {
-    const termCols = (typeof process !== 'undefined' && process.stdout?.columns) || 80;
-    return (
-      <DetailView
-        ev={events[detailIdx]}
-        idx={detailIdx}
-        total={events.length}
-        cols={termCols - 4}
-      />
-    );
-  }
+  const showFilterBar = editingFilter || filter.length > 0;
+  const headerChromeRows = (showFilterBar ? 2 : 1); // filter? + column header
+  const footerRows = 1;
+  const targetBodyRows = Math.max(1, viewportH - headerChromeRows - footerRows + 1);
 
   const maxScroll = Math.max(0, events.length - viewportH);
   const clamped = Math.min(scrollY, maxScroll);
-  const slice = events.slice(clamped, clamped + viewportH);
+
+  // Effective cursor for highlighting: in tail mode, pretend cursor is the last event.
+  const highlightIdx = cursorIdx < 0 ? events.length - 1 : cursorIdx;
+
+  // Build visual rows starting at `clamped`, stop when target rows filled.
+  // Each event is one LogRow + (if expanded) wrapped detail lines.
+  // Width budget for wrapped payload text. Account for everything left
+  // of the wrapped content: NavRail (16) + Shell body padding (2+2) +
+  // detail bar prefix "  │ " (4) + payload indent "  " (2) = 26 cols.
+  const detailWidth = Math.max(20, termCols - 26);
+  const rendered: React.ReactNode[] = [];
+  let used = 0;
+
+  // First, find cheap measurement of payload widths in the visible window
+  // (for horizontal-scroll clamp).
+  let maxPayload = 0;
+  for (let i = clamped; i < events.length && (i - clamped) < viewportH; i++) {
+    const p = fmtPayload(events[i]);
+    if (p.length > maxPayload) maxPayload = p.length;
+  }
+  const ROW_CHROME = MARKER_W + COL_TIME + SEP.length + COL_IMP + SEP.length + COL_TYPE + SEP.length + COL_SRC + SEP.length;
+  maxRowWidthRef.current = ROW_CHROME + maxPayload;
+  const maxScrollX = Math.max(0, maxRowWidthRef.current - 16);
+  const clampedX = Math.min(scrollX, maxScrollX);
+
+  const toggleExpand = (id: number) => {
+    setCursorId(id);
+    setExpandedId(prev => prev === id ? null : id);
+  };
+
+  for (let i = clamped; i < events.length && used < targetBodyRows; i++) {
+    const ev = events[i];
+    const isCursor = i === highlightIdx;
+    const isExpanded = expandedId === ev.id;
+    const evId = ev.id;
+    rendered.push(
+      <Pressable key={`r-${ev.id}`} onPress={() => toggleExpand(evId)}>
+        <LogRow ev={ev} scrollX={clampedX} cursor={isCursor} expanded={isExpanded} />
+      </Pressable>,
+    );
+    used++;
+    if (isExpanded) {
+      const lines = renderInlineDetail(ev, detailWidth);
+      for (const ln of lines) {
+        if (used >= targetBodyRows) break;
+        rendered.push(ln);
+        used++;
+      }
+    }
+  }
+
   const above = clamped;
   const below = Math.max(0, events.length - clamped - viewportH);
 
-  // Bound horizontal scroll to the longest visible row's content width
-  // so → can't run off into infinity. ROW_CHROME = sum of fixed col
-  // widths + their separators (74), payload is variable.
-  const ROW_CHROME = COL_TIME + SEP.length + COL_IMP + SEP.length + COL_TYPE + SEP.length + COL_SRC + SEP.length;
-  let maxPayload = 0;
-  for (const ev of slice) {
-    const p = fmtPayload(ev);
-    if (p.length > maxPayload) maxPayload = p.length;
-  }
-  const maxRowWidth = ROW_CHROME + maxPayload;
-  const maxScrollX = Math.max(0, maxRowWidth - 16);
-  const clampedX = Math.min(scrollX, maxScrollX);
-
-  // Stash live values for the keypress closure (which captures only on
-  // mount due to fixed deps).
-  eventsLenRef.current = events.length;
-  viewportHRef.current = viewportH;
-  maxRowWidthRef.current = maxRowWidth;
-
-  const showFilterBar = editingFilter || filter.length > 0;
   return (
-    <box flexDirection="column" height={viewportH + 1}>
+    <Col style={{ height: viewportH + 1 }}>
       {showFilterBar ? <FilterBar filter={filter} editing={editingFilter} /> : null}
       <Header scrollX={clampedX} />
-      {slice.slice(0, viewportH - (showFilterBar ? 2 : 1)).map(ev =>
-        <Row key={ev.id} ev={ev} scrollX={clampedX} />
-      )}
-      <box flexDirection="row" gap={2}>
-        <text fg="#64748b">
+      {rendered}
+      <Row style={{ gap: 2 }}>
+        <Text style={{ color: '#64748b' }}>
           ─── {events.length}/{allEvents.length} events
           {above > 0 ? `  ↑ ${above}` : ''}
           {below > 0 ? `  ↓ ${below}` : ''}
-        </text>
+        </Text>
         {stickToBottom
-          ? <text fg="#34d399">  · live</text>
-          : <text fg="#f87171" bold>  · PAUSED (G to resume)</text>}
-        {clampedX > 0 ? <text fg="#64748b">{`  ·  →${clampedX}`}</text> : null}
-        <text fg="#64748b">{`  ·  / filter · k/j ↑↓ · h/→ ←→ · G live`}</text>
-      </box>
-    </box>
+          ? <Text style={{ color: '#34d399' }}>  · live</Text>
+          : <Text style={{ color: '#f87171', fontWeight: 'bold' }}>  · PAUSED (G to resume)</Text>}
+        {clampedX > 0 ? <Text style={{ color: '#64748b' }}>{`  ·  →${clampedX}`}</Text> : null}
+        <Text style={{ color: '#64748b' }}>{`  · click row or Enter to expand · k/j ↑↓ · ESC collapse · G live · / filter`}</Text>
+      </Row>
+    </Col>
   );
 }
 
-function DetailView({ ev, idx, total, cols }: { ev: Event; idx: number; total: number; cols: number }) {
+function renderInlineDetail(ev: Event, width: number): React.ReactNode[] {
+  const out: React.ReactNode[] = [];
   const c = impColor(ev.imp);
-  // Pretty-print payload. log.* events get the .msg field; everything
-  // else gets full JSON with 2-space indent.
-  let body = '';
-  if (ev.type.startsWith('log.') && typeof ev.payload?.msg === 'string') {
-    body = ev.payload.msg;
-  } else if (ev.payload === undefined || ev.payload === null) {
-    body = '';
-  } else if (typeof ev.payload === 'object') {
-    try { body = JSON.stringify(ev.payload, null, 2); } catch { body = String(ev.payload); }
-  } else {
-    body = String(ev.payload);
+  const meta: Array<[string, string, string]> = [
+    ['time',   fmtTime(ev.ts), '#cbd5e1'],
+    ['source', ev.src,         '#cbd5e1'],
+    ['imp',    ev.imp.toFixed(3), c],
+    ['event',  ev.type,        c],
+  ];
+  const detailBg = '#1e293b';
+  const bar = <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>  │ </Text>;
+  const wrap = (key: string, content: React.ReactNode) => (
+    <Box key={key} style={{ backgroundColor: detailBg }}>
+      <Row style={{ gap: 1 }}>
+        {bar}
+        {content}
+      </Row>
+    </Box>
+  );
+  for (const [k, v, color] of meta) {
+    out.push(wrap(`d-m-${ev.id}-${k}`,
+      <>
+        <Box style={{ width: 8 }}><Text style={{ color: '#94a3b8' }}>{k}</Text></Box>
+        <Text style={{ color }}>{v}</Text>
+      </>,
+    ));
   }
-  const lines: string[] = [];
-  const width = Math.max(20, cols);
-  // Honour explicit \n breaks, then wrap each segment to `width`.
+  out.push(wrap(`d-ph-${ev.id}`,
+    <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>payload:</Text>,
+  ));
+  const body = payloadBody(ev);
+  if (body === '') {
+    out.push(wrap(`d-pe-${ev.id}`, <Text style={{ color: '#64748b' }}>  (empty)</Text>));
+    return out;
+  }
+  let li = 0;
   for (const seg of body.split('\n')) {
-    if (seg.length === 0) { lines.push(''); continue; }
+    if (seg.length === 0) {
+      out.push(wrap(`d-p-${ev.id}-${li++}`, <Text> </Text>));
+      continue;
+    }
     for (let i = 0; i < seg.length; i += width) {
-      lines.push(seg.slice(i, i + width));
+      const part = seg.slice(i, i + width);
+      out.push(wrap(`d-p-${ev.id}-${li++}`,
+        <Text style={{ color: '#fafafa' }}>{'  ' + part}</Text>,
+      ));
     }
   }
-  return (
-    <box flexDirection="column">
-      <box flexDirection="row" gap={2}>
-        <text fg="#fbbf24" bold>{`detail ${idx + 1}/${total}`}</text>
-        <text fg="#64748b">— ESC close · n/p next/prev</text>
-      </box>
-      <text> </text>
-      <box flexDirection="row" gap={2}>
-        <box width={10}><text fg="#94a3b8">time</text></box>
-        <text fg="#e5e7eb">{fmtTime(ev.ts)}</text>
-      </box>
-      <box flexDirection="row" gap={2}>
-        <box width={10}><text fg="#94a3b8">imp</text></box>
-        <text fg={c}>{ev.imp.toFixed(3)}</text>
-      </box>
-      <box flexDirection="row" gap={2}>
-        <box width={10}><text fg="#94a3b8">event</text></box>
-        <text fg={c} bold>{ev.type}</text>
-      </box>
-      <box flexDirection="row" gap={2}>
-        <box width={10}><text fg="#94a3b8">source</text></box>
-        <text fg="#cbd5e1">{ev.src}</text>
-      </box>
-      <text> </text>
-      <text fg="#94a3b8" bold>payload:</text>
-      {lines.length === 0
-        ? <text fg="#64748b">  (empty)</text>
-        : lines.map((ln, i) => <text key={i} fg="#e5e7eb">  {ln}</text>)}
-    </box>
-  );
+  return out;
 }
 
 function FilterBar({ filter, editing }: { filter: string; editing: boolean }) {
   return (
-    <box flexDirection="row" gap={1}>
-      <text fg={editing ? '#fbbf24' : '#94a3b8'} bold>filter:</text>
-      <text fg="#e5e7eb">{filter}{editing ? '_' : ''}</text>
-      {!editing && filter ? <text fg="#64748b">  (/ to edit · ESC to clear)</text> : null}
-      {editing ? <text fg="#64748b">  (Enter to apply · ESC to clear · ! prefix to exclude)</text> : null}
-    </box>
+    <Row style={{ gap: 1 }}>
+      <Text style={{ color: editing ? '#fbbf24' : '#94a3b8', fontWeight: 'bold' }}>filter:</Text>
+      <Text style={{ color: '#e5e7eb' }}>{filter}{editing ? '_' : ''}</Text>
+      {!editing && filter ? <Text style={{ color: '#64748b' }}>  (/ to edit · ESC to clear)</Text> : null}
+      {editing ? <Text style={{ color: '#64748b' }}>  (Enter to apply · ESC to clear · ! prefix to exclude)</Text> : null}
+    </Row>
   );
 }
 
-// Header / Row both build a left-to-right segment list and then drop
-// `scrollX` characters off the front. That's how horizontal scroll
-// works without ANSI cursor positioning per cell — the host's
-// flex layout just sees a shorter row.
 const SEP = '  ';
+const MARKER_W = 2; // marker glyph + space
 const COL_TIME = 12;
 const COL_IMP  = 4;
 const COL_TYPE = 22;
@@ -364,6 +415,7 @@ const COL_SRC  = 28;
 
 function Header({ scrollX }: { scrollX: number }) {
   const segs: Seg[] = [
+    { text: '  ', fg: '#475569' },
     { text: padRight('time', COL_TIME), fg: '#475569', bold: true },
     { text: SEP, fg: '#475569' },
     { text: padRight('imp', COL_IMP), fg: '#475569', bold: true },
@@ -377,29 +429,40 @@ function Header({ scrollX }: { scrollX: number }) {
   return <SegRow segs={sliceSegs(segs, scrollX)} />;
 }
 
-function Row({ ev, scrollX }: { ev: Event; scrollX: number }) {
+function LogRow({ ev, scrollX, cursor, expanded }: { ev: Event; scrollX: number; cursor: boolean; expanded: boolean }) {
   const c = impColor(ev.imp);
   const payload = fmtPayload(ev);
+  const marker = expanded ? '▼' : (cursor ? '▶' : ' ');
+  const markerColor = (cursor || expanded) ? '#fbbf24' : '#475569';
+  const timeColor = cursor ? '#e5e7eb' : '#64748b';
+  const srcColor = cursor ? '#e5e7eb' : '#94a3b8';
+  const payColor = cursor ? '#fafafa' : '#cbd5e1';
+  const bg = (cursor || expanded) ? '#1e293b' : undefined;
   const segs: Seg[] = [
-    { text: padRight(fmtTime(ev.ts), COL_TIME), fg: '#64748b' },
+    { text: marker + ' ', fg: markerColor, bold: cursor || expanded },
+    { text: padRight(fmtTime(ev.ts), COL_TIME), fg: timeColor },
     { text: SEP, fg: '#475569' },
     { text: padRight(ev.imp.toFixed(2), COL_IMP), fg: c },
     { text: SEP, fg: '#475569' },
-    { text: padRight(ev.type, COL_TYPE), fg: c },
+    { text: padRight(ev.type, COL_TYPE), fg: c, bold: cursor || expanded },
     { text: SEP, fg: '#475569' },
-    { text: padRight(ev.src, COL_SRC), fg: '#94a3b8' },
+    { text: padRight(ev.src, COL_SRC), fg: srcColor },
     { text: SEP, fg: '#475569' },
-    { text: payload, fg: '#cbd5e1' },
+    { text: payload, fg: payColor },
   ];
-  return <SegRow segs={sliceSegs(segs, scrollX)} />;
+  return (
+    <Box style={bg ? { backgroundColor: bg } : undefined}>
+      <SegRow segs={sliceSegs(segs, scrollX)} />
+    </Box>
+  );
 }
 
 function SegRow({ segs }: { segs: Seg[] }) {
   return (
-    <box flexDirection="row">
+    <Row>
       {segs.map((s, i) => (
-        <text key={i} fg={s.fg} bold={s.bold}>{s.text}</text>
+        <Text key={i} style={{ color: s.fg, fontWeight: s.bold ? 'bold' : undefined }}>{s.text}</Text>
       ))}
-    </box>
+    </Row>
   );
 }

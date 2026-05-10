@@ -689,7 +689,13 @@ fn forgetPid(pid: std.posix.pid_t) void {
 fn restoreTty() callconv(.c) void {
     if (g_termios_saved) |saved| {
         std.posix.tcsetattr(0, .NOW, saved) catch {};
-        _ = std.posix.write(1, "\x1b[?1049l\x1b[?25h\x1b[0m") catch {};
+        // Order matters: disable mouse reporting BEFORE leaving the alt
+        // screen so mouse-mode bytes don't end up at the user's shell
+        // prompt if the shell happens to repaint immediately after.
+        // 1000l = press/release off, 1002l = drag tracking off,
+        // 1006l = SGR extended off, 1049l = alt screen off, 25h = cursor
+        // on, 0m = SGR reset.
+        _ = std.posix.write(1, "\x1b[?1000l\x1b[?1002l\x1b[?1006l\x1b[?1049l\x1b[?25h\x1b[0m") catch {};
     }
 }
 

@@ -306,8 +306,14 @@ export function Route({
   // render (so this state is per-render, not persisted).
   (ctx as any).__matched = true;
   if (typeof children === 'function') return children(m.params);
-  // Child mode: clone to inject params if it's a single element that wants them.
-  if (React.isValidElement(children)) {
+  // Child mode: don't cloneElement to inject params unless the route
+  // actually captured some — m.params is a fresh object every render
+  // and cloneElement would write a new `params` prop on every paint,
+  // which React diffs as changed and emits an UPDATE every frame.
+  // Routes without `:foo` segments hit this hot path, so the default
+  // is just `return children`. Render-prop form (children-as-function)
+  // remains the way to consume params.
+  if (React.isValidElement(children) && Object.keys(m.params).length > 0) {
     return React.cloneElement(children, { params: m.params });
   }
   return children;

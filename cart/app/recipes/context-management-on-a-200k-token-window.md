@@ -1,6 +1,6 @@
 # Context Management for Long-Running Agents (Part 2): On a 200K-token Window
 
-Part 1 (`context-management-for-long-running-agents`) covered the three context strategies — compaction, tool-result clearing, memory — and the gap between the original Anthropic recipe (Messages API) and what our v8 bindings expose (Claude Code subprocess). Part 2 narrows the lens to a 200K-token window and asks: what changes when you can't comfortably overrun?
+Part 1 (`context-management-for-long-running-agents`) covered the three context strategies — compaction, tool-result clearing, memory — and the gap between the original Anthropic recipe (Messages API) and what `useAssistant` exposes (Claude Code subprocess). Part 2 narrows the lens to a 200K-token window and asks: what changes when you can't comfortably overrun?
 
 ## The failure mode shifts
 
@@ -8,62 +8,59 @@ On a 1M model, context bloat shows up as **rot**: older facts get harder to retr
 
 On a 200K model, it shows up as a **hard stop**: the next request is rejected, the agent halts mid-task. There is no graceful degradation.
 
-Our v8 bindings don't see either failure directly — both happen inside the `claude` subprocess. What we *do* see is the `result` event with `is_error: true` when something goes wrong:
+Our worker bindings don't see either failure directly — both happen inside the `claude` subprocess. What we *do* see is the normalized `WorkerEvent` stream from `useAssistant`, with `kind: 'completion'` and `kind: 'error_'` markers and a `status_text` field that carries the structured cause:
 
 ```typescript
-// framework/v8_bindings_sdk.zig:336
-type ResultMsg = {
-  type: 'result';
-  subtype: string;       // 'success' | 'error_max_turns' | etc.
-  session_id: string;
-  result?: string;       // human-readable error if applicable
-  total_cost_usd: number;
-  duration_ms: number;
-  num_turns: number;
-  is_error: boolean;
-};
+// from runtime/hooks/useAssistant.ts
+interface WorkerEvent {
+  kind: 'completion' | 'usage' | 'assistant_message' | 'tool_call' | 'error_' | ...;
+  status_text?: string;     // 'success' | 'error_max_turns' | etc.
+  cost_usd_delta?: number;
+  usage?: WorkerEventUsage;
+  payload_json?: string;    // full backend payload as JSON
+  // ...
+}
 ```
 
-`subtype` is the closest thing to a structured cause. Watch for it.
+`status_text` on the completion event is the closest thing to a structured cause. Watch for it.
 
 ## Strategy: defensive resets before the wall
 
-Without `context_management.edits` we can't trigger compaction on a token threshold. We can do the next-best thing: **reset the session before context grows past a turn budget we've measured for our workload.**
+Without `context_management.edits` we can't trigger compaction on a token threshold. We can do the next-best thing: **reset the worker before context grows past a turn budget we've measured for our workload.**
 
-```typescript
+```tsx
 const MAX_TURNS_BEFORE_RESET = 8;
 const MAX_COST_BEFORE_RESET  = 0.50; // USD
 
-let turnsThisSession = 0;
-let costThisSession = 0;
+function useResettingAssistant(cwd: string, model: string) {
+  const [epoch, setEpoch] = useState(0);
+  const { events, ask, close } = useAssistant({
+    backend: 'claude_code',
+    cwd, model,
+    sessionId: `epoch-${epoch}`,
+  });
 
-function shouldReset(): boolean {
-  return turnsThisSession >= MAX_TURNS_BEFORE_RESET
-      || costThisSession   >= MAX_COST_BEFORE_RESET;
-}
+  const numTurns     = events.filter(e => e.kind === 'completion').length;
+  const totalCostUsd = events.reduce((s, e) => s + (e.cost_usd_delta ?? 0), 0);
 
-function onResult(msg: ResultMsg) {
-  costThisSession = msg.total_cost_usd;
-  turnsThisSession = msg.num_turns;
-  if (shouldReset()) {
-    askForSessionSummary().then(() => {
-      claude_close();
-      // Next user turn will __claude_init() fresh.
-      turnsThisSession = 0;
-      costThisSession  = 0;
-    });
-  }
+  useEffect(() => {
+    if (numTurns >= MAX_TURNS_BEFORE_RESET || totalCostUsd >= MAX_COST_BEFORE_RESET) {
+      askForSessionSummary(ask).then(() => setEpoch(n => n + 1));
+    }
+  }, [numTurns, totalCostUsd]);
+
+  return { events, ask, close };
 }
 ```
 
-The numbers are workload-specific. Run a few sessions with `MAX_TURNS_BEFORE_RESET = 999` and watch when `is_error: true` first appears. Set the threshold to ~70% of that.
+The numbers are workload-specific. Run a few sessions with `MAX_TURNS_BEFORE_RESET = 999` and watch when an `error_` event first appears. Set the threshold to ~70% of that.
 
 ## Strategy: cart-driven compaction at boundaries
 
 Before resetting, ask Claude to compress the session into `notes.md`. This is the only "compaction" our stack supports today — Claude doing it explicitly via Edit/Write at our request, *outside* the Messages API.
 
 ```typescript
-async function askForSessionSummary() {
+async function askForSessionSummary(ask: (s: string) => boolean) {
   const prompt = `Before we wrap this session, write a compact summary into ./notes.md under a new dated heading.
 
 Include:
@@ -72,33 +69,36 @@ Include:
 - Open threads that should be picked up later.
 
 Be concise. Skip verbose tool outputs. Reply 'done' when the file is updated.`;
-  await sendAndWait(prompt);
+  ask(prompt);
+  // Caller awaits the next `completion` event in the events array, then bumps the epoch.
 }
 ```
 
-`sendAndWait` is the same `askOnce`-style helper from the knowledge-graph recipe — it sends one prompt, drains `__claude_poll` until the `result` event, returns.
+`ask()` queues one prompt against the live worker; the cart watches `events` for the next `kind: 'completion'` before triggering the reset.
 
-Then on the next user turn, the cart prepends the summary on its own:
+Then on the next user turn (after the worker has respawned), the cart prepends the summary on its own:
 
-```typescript
+```tsx
 import { readFile } from './host';
 
-async function startNewSessionWithRecall(cwd: string, model: string, userMsg: string) {
-  let summary = '';
-  try { summary = await readFile(`${cwd}/notes.md`, 'utf8'); } catch {}
-  const prompt = summary
-    ? `Prior session notes:\n${summary}\n\nUser: ${userMsg}`
-    : userMsg;
-  claude_init(cwd, model);
-  claude_send(prompt);
-}
+useEffect(() => {
+  if (!ready() || epoch === 0) return;   // first session has no prior summary
+  readFile(`${cwd}/notes.md`, 'utf8')
+    .catch(() => '')
+    .then(summary => {
+      const prompt = summary
+        ? `Prior session notes:\n${summary}\n\nUser: ${pendingUserMsg}`
+        : pendingUserMsg;
+      ask(prompt);
+    });
+}, [ready(), epoch]);
 ```
 
 You're paying the prefill cost of the summary every fresh session. That's still cheaper than carrying the entire prior transcript.
 
 ## Strategy: trim user-message bloat ourselves
 
-Same as Part 1, with a tighter discipline. Anything we send via `__claude_send` is ours to shape. On a 200K window, we can't afford to re-feed history defensively.
+Same as Part 1, with a tighter discipline. Anything we send via `ask()` is ours to shape. On a 200K window, we can't afford to re-feed history defensively.
 
 ```typescript
 interface CartTurn {
@@ -128,14 +128,14 @@ Three knobs: `keepRecent` (how many recent turns), `headBudget` (how much of eac
 
 - **Skip cart-driven compaction** if the workload is single-question / single-answer; let each session live and die on one turn. Reset every time.
 - **Skip the notes file** for sessions that must remain isolated (compliance, eval, sandboxing). Use a per-session tempdir.
-- **Always** trim history before `__claude_send`. The cost-per-turn cliff hits hard near the limit.
+- **Always** trim history before `ask()`. The cost-per-turn cliff hits hard near the limit.
 
 ## Strategy comparison
 
 | Strategy | Lever in our stack | Cost | Best for |
 |---|---|---|---|
-| Cart-side reset | `__claude_close` + `__claude_init` | Re-init latency (~tens of ms) | Bounded-budget runs |
-| Cart-side summary into `notes.md` | `__claude_send` "summarize and stop" | One extra Claude turn | Research that must continue |
+| Cart-side reset | bump `sessionId` / remount | Re-init latency (~tens of ms) | Bounded-budget runs |
+| Cart-side summary into `notes.md` | `ask("summarize and stop")` | One extra Claude turn | Research that must continue |
 | User-message trimming | Cart-side string slicing | Free | Every workload, always |
 | Server-side compaction | (not exposed) | — | Out of scope until plumbed |
 | Server-side tool-result clearing | (not exposed) | — | Out of scope until plumbed |
@@ -144,29 +144,29 @@ Three knobs: `keepRecent` (how many recent turns), `headBudget` (how much of eac
 
 | Telemetry | Available | Source |
 |---|---|---|
-| `num_turns` | yes | `result.num_turns` |
-| `total_cost_usd` | yes | `result.total_cost_usd` |
-| `duration_ms` | yes | `result.duration_ms` |
-| `input_tokens` per turn | partial | `assistant.input_tokens` (final turn only) |
-| `cache_read_input_tokens` | no | not in `claudeMessageToJs` (`framework/v8_bindings_sdk.zig:277`) |
-| `cache_creation_input_tokens` | no | same |
+| `numTurns` | yes | `events.filter(e => e.kind === 'completion').length` |
+| `totalCostUsd` | yes | `events.reduce((s,e) => s + (e.cost_usd_delta ?? 0), 0)` |
+| `duration_ms` | partial | derive from `event.created_at_ms` range |
+| `input_tokens` / `output_tokens` per turn | partial | `event.usage` on `usage` / `completion` events (backend-dependent) |
+| `cache_read_input_tokens` | partial | `event.usage.cache_read_input_tokens` (Claude SDK doesn't fill it yet) |
+| `cache_creation_input_tokens` | partial | same — wire through `framework/assistant/claude_sdk/parser.zig` |
 | `applied_edits` (compaction) | no | server-side, hidden |
 | `cleared_input_tokens` | no | server-side, hidden |
 
-Plot whatever you have. Start with `num_turns` over wall-clock and watch where the bend happens before failure.
+Plot whatever you have. Start with `numTurns` over wall-clock and watch where the bend happens before failure.
 
-## Caveats and TODOs against the v8 bindings
+## Caveats and TODOs against the worker bindings
 
-- **No `betas` plumbing.** `framework/claude_sdk/argv.zig` doesn't pass `--beta` flags. Mid-session compaction (`compact_20260112`) and clearing (`clear_tool_uses_20250919`) live on `client.beta.messages.create`, which we don't call.
-- **No slash-command path.** `framework/v8_bindings_sdk.zig:968` sends raw user text. If we route a leading `/` into Claude Code's slash-command surface, `/clear` and `/compact` become cart-driven primitives. Open a small ticket here when this is needed.
-- **No usage breakdown beyond input/output.** Add `cache_read_input_tokens` and `cache_creation_input_tokens` to `claudeMessageToJs` so the cart can plot real token trajectories.
-- **`subtype` enum drift.** `result.subtype` is a string — we don't enumerate values. Capture them as you see them and add typed handling for `error_max_turns`, `error_during_execution`, etc.
+- **No `betas` plumbing.** `framework/assistant/claude_sdk/argv.zig` doesn't pass `--beta` flags. Mid-session compaction (`compact_20260112`) and clearing (`clear_tool_uses_20250919`) live on `client.beta.messages.create`, which we don't call.
+- **No slash-command path.** The Claude worker's send fn passes raw user text. If we route a leading `/` into Claude Code's slash-command surface, `/clear` and `/compact` become cart-driven primitives. Open a small ticket here when this is needed.
+- **Token usage gaps.** `cache_read_input_tokens` and `cache_creation_input_tokens` exist on `WorkerEventUsage` but the Claude SDK parser doesn't populate them yet — wire them through `framework/assistant/claude_sdk/parser.zig` so the cart can plot real token trajectories.
+- **`status_text` enum drift.** The string is not enumerated end-to-end. Capture values as you see them and add typed handling for `error_max_turns`, `error_during_execution`, etc.
 
 ## Pattern summary
 
 1. Pick a turn / cost budget below your observed wall.
-2. On `result`, decide: continue, reset, or summarize-and-reset.
-3. Summarize via `__claude_send`-driven Edit on `notes.md`; reload it as the prefix of the next session's first user message.
+2. On each `completion` event, decide: continue, reset, or summarize-and-reset.
+3. Summarize via `ask()`-driven Edit on `notes.md`; reload it as the prefix of the next session's first `ask()`.
 4. Trim cart-side history aggressively before sending — there's no server-side eviction to fall back on.
 5. Treat Claude Code's own auto-compaction as opaque; instrument resets, not edits.
 

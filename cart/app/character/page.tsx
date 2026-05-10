@@ -1537,51 +1537,20 @@ function CharacterForm() {
     <S.Page>
       <Row style={{
         width: '100%', height: '100%', alignItems: 'stretch', minWidth: 0,
-        borderWidth: 4, borderColor: 'rgba(0,255,255,1)',
       }}>
         <ScrollView
-          debugName="char-scroll"
-          onScroll={(e: any) => {
-            const host: any = globalThis;
-            const cnt = (host.__tel_node_count && host.__tel_node_count()) | 0;
-            let scr: any = null, yel: any = null;
-            for (let i = 0; i < cnt; i++) {
-              const n = host.__tel_node && host.__tel_node(i);
-              if (!n) continue;
-              if (n.tag === 'char-scroll') scr = n;
-              else if (n.tag === 'char-yellow') yel = n;
-              if (scr && yel) break;
-            }
-            console.log('[char-scroll]', JSON.stringify({
-              wY: e?.scrollY,
-              dY: e?.deltaY,
-              scrCH: scr?.content_height,
-              scrH: scr?.h,
-              max: scr ? Math.max(0, scr.content_height - scr.h) : null,
-              yelH: yel?.h,
-              yelY: yel?.y,
-              yelB: yel ? yel.y + yel.h : null,
-              scrB: scr ? scr.y + scr.h : null,
-              gap: (scr && yel) ? (scr.y + scr.h) - (yel.y + yel.h) : null,
-            }));
-          }}
           style={{
             flexGrow: 1, flexBasis: 0, minWidth: 0,
             paddingTop: 28, paddingBottom: 28,
             paddingLeft: 28, paddingRight: 14,
             alignItems: 'center',
             opacity: pageOp,
-            borderWidth: 4, borderColor: 'rgba(0,128,255,1)',
-            backgroundColor: 'rgba(0,128,255,0.10)',
           }}
         >
             <Box
-              debugName="char-yellow"
               style={{
                 width: '100%', maxWidth: 1040,
                 minWidth: 0, overflow: 'hidden',
-                borderWidth: 4, borderColor: 'rgba(255,255,0,1)',
-                backgroundColor: 'rgba(255,255,0,0.06)',
               }}
             >
               <Box style={{ opacity: headOp }}>
@@ -1604,13 +1573,6 @@ function CharacterForm() {
                   </S.DocPageContent>
                 </S.DocPage>
               </S.DocPageWrap>
-              {/* Bottom spacer — DEBUG. magenta=200, lime=30. If the
-                  10-15px overscroll gap disappears now, the missing
-                  pixels were a constant inset; if the gap is still
-                  there, content_height is short by the same constant
-                  every time and we're chasing something else. */}
-              <Box style={{ width: '100%', height: 200, backgroundColor: 'magenta' }} />
-              <Box style={{ width: '100%', height: 30, backgroundColor: 'lime' }} />
             </Box>
         </ScrollView>
 

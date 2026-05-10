@@ -77,13 +77,13 @@ const runtimeEntry = cartridgeMode
 const metafileAbs = bundleAbs + '.metafile.json';
 const reactAlias = cartridgeMode
   ? ROOT + '/runtime/cart_externs/react.cjs'
-  : ROOT + '/vendor/react';
+  : ROOT + '/deps/react';
 const reconcilerAlias = cartridgeMode
   ? ROOT + '/runtime/cart_externs/react_reconciler.cjs'
-  : ROOT + '/vendor/react-reconciler';
+  : ROOT + '/deps/react-reconciler';
 const schedulerAlias = cartridgeMode
   ? ROOT + '/runtime/cart_externs/scheduler.cjs'
-  : ROOT + '/vendor/scheduler';
+  : ROOT + '/deps/scheduler';
 const flags = [
   runtimeEntry,
   '--bundle',
@@ -102,14 +102,14 @@ const flags = [
   // inside the SDK tree. Off-tree carts (rjit-mode) need this.
   '--alias:@reactjit/runtime=' + ROOT + '/runtime',
   '--alias:@cart-entry=' + entryAbs,
-  // Vendored npm deps under vendor/. Replaces node_modules lookup so
+  // Vendored npm deps under deps/. Replaces node_modules lookup so
   // bare-specifier imports (react, react-reconciler, ...) resolve without
   // any node_modules directory anywhere in the tree.
   '--alias:react=' + reactAlias,
   '--alias:react-reconciler=' + reconcilerAlias,
   '--alias:scheduler=' + schedulerAlias,
-  '--alias:loose-envify=' + ROOT + '/vendor/loose-envify',
-  '--alias:js-tokens=' + ROOT + '/vendor/js-tokens',
+  '--alias:loose-envify=' + ROOT + '/deps/loose-envify',
+  '--alias:js-tokens=' + ROOT + '/deps/js-tokens',
   '--external:path',
   '--external:typescript',
   // absWorkingDir equivalent — esbuild uses cwd. We already set cwd to ROOT

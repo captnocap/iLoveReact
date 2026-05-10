@@ -203,10 +203,14 @@ pub const TextEngine = struct {
     }
 
     fn setSize(self: *TextEngine, size_px: u16) void {
-        if (self.current_size != size_px) {
-            _ = c.FT_Set_Pixel_Sizes(self.face, 0, size_px);
-            self.current_size = size_px;
-        }
+        // Always reset — the cached `current_size` lies if windows.zig (or any
+        // other module) has called FT_Set_Pixel_Sizes(self.face, ...) directly
+        // since our last setSize. lineMetrics then reads metrics for the wrong
+        // size, producing scale-correlated text height drift in the toolbar /
+        // any auto-sized box during canvas zoom. FT_Set_Pixel_Sizes is cheap;
+        // saving the FFI call isn't worth the silent corruption.
+        _ = c.FT_Set_Pixel_Sizes(self.face, 0, size_px);
+        self.current_size = size_px;
     }
 
     /// Get the advance width of a single Unicode codepoint.
@@ -796,8 +800,17 @@ pub const TextEngine = struct {
 
         // Measure x within the line up to byte_idx
         const line_start = wrap.line_starts[line_idx];
-        const target = if (byte_idx > line_start) byte_idx - line_start else 0;
-        const line = text[line_start..wrap.line_ends[line_idx]];
+        var line_end = wrap.line_ends[line_idx];
+        // wordWrap() trims trailing spaces from visual line ends so normal text
+        // measurement does not grow from invisible whitespace. Caret placement
+        // still needs those bytes: after typing a space, the cursor should move
+        // immediately, not wait until the next non-space character appears.
+        if (byte_idx > line_end) {
+            const next_start = if (line_idx + 1 < wrap.count) wrap.line_starts[line_idx + 1] else text.len + 1;
+            if (byte_idx < next_start) line_end = @min(byte_idx, text.len);
+        }
+        const target = if (byte_idx > line_start) @min(byte_idx, line_end) - line_start else 0;
+        const line = text[line_start..line_end];
 
         var pen_x: f32 = 0;
         var i: usize = 0;

@@ -2,16 +2,16 @@
 
 You have a pile of unstructured documents and need to answer questions that span them — "who works with people who worked on project X", "which vendors are connected to this incident". RAG retrieval won't chain the facts. You need a knowledge graph: entities as nodes, typed relations as edges, multi-hop reasoning by graph traversal.
 
-The original recipe uses `client.messages.parse()` with Pydantic schemas for structured output, two models (Haiku for extraction, Sonnet for resolution), and NetworkX for the graph. Here we adapt for our v8 bindings: prompt for JSON inside fenced code blocks, parse it from `assistant.text`, hold the graph in plain JS state.
+The original recipe uses `client.messages.parse()` with Pydantic schemas for structured output, two models (Haiku for extraction, Sonnet for resolution), and NetworkX for the graph. Here we adapt for the worker bindings: prompt for JSON inside fenced code blocks, parse it from the assistant text, hold the graph in plain JS state.
 
 ## Pipeline shape
 
 ```text
 documents
-   │ (extract — one __claude_send per doc)
+   │ (extract — one worker turn per doc)
    ▼
 raw entities + raw relations
-   │ (resolve — group by entity type, one __claude_send per type)
+   │ (resolve — group by entity type, one worker turn per type)
    ▼
 canonical entities + alias map
    ▼
@@ -21,61 +21,67 @@ in-memory graph: { nodes: Map, edges: Array }
 grounded answer with edge citations
 ```
 
-Each pass is a separate `__claude_send` turn. The cart owns the loop; Claude only does the language work.
+Each pass is a separate worker turn. The cart owns the loop; Claude only does the language work.
 
 ## Architecture in this repo
 
 ```text
-.tsx cart  ── globals ──>  framework/v8_bindings_sdk.zig
-                            │
-                            └─ framework/claude_sdk/Session
-                                  └─ subprocess: `claude --input-format stream-json`
+.tsx cart  ── runOneTurn / useAssistant ──>  framework/assistant/worker_bindings.zig
+                                              │
+                                              └─ framework/assistant/claude_sdk/Session
+                                                    └─ subprocess: `claude --input-format stream-json`
 ```
 
-One `g_claude_session` at a time. We process documents sequentially: open a session, send the extraction prompt, drain `__claude_poll`, parse JSON, repeat for the next doc.
+For batch pipelines like this one we use `runOneTurn` (a small Promise wrapper around the `__worker_*` host fns); for interactive UIs we use the `useAssistant` hook. Both share the same Zig-side WorkerStore, so the choice is purely ergonomic.
 
-## Two-model strategy (deferred for now)
+## Two-model strategy
 
-The original uses Haiku for bulk extraction and Sonnet for resolution/synthesis. Our `__claude_init` accepts a model string per session, so the split is doable — just call `__claude_close()` between phases and re-init with the new model. There's no extra cost or state loss because each phase reads/writes plain JS state, not session memory.
+The original uses Haiku for bulk extraction and Sonnet for resolution/synthesis. The worker contract accepts a `model` per turn, so the split is doable — `runOneTurn` opens a fresh worker per call, so each phase picks the right model directly. There's no extra cost or state loss because each phase reads/writes plain JS state, not session memory.
 
 ```typescript
 const EXTRACTION_MODEL = 'claude-haiku-4-5';
 const SYNTHESIS_MODEL  = 'claude-sonnet-4-6';
 ```
 
-## Send + collect helper
+## runOneTurn helper
 
-Every phase reuses this. It opens a session, sends one prompt, accumulates the text reply, returns when the `result` event lands.
+Every phase reuses this. It opens a worker, sends one prompt, accumulates the assistant text from the events stream, returns when the `completion` event lands.
 
 ```typescript
-const host: any = globalThis;
-const claude_init  = typeof host.__claude_init  === 'function'
-  ? host.__claude_init  : (_a: string, _b: string, _c?: string) => 0;
-const claude_send  = typeof host.__claude_send  === 'function'
-  ? host.__claude_send  : (_: string) => 0;
-const claude_poll  = typeof host.__claude_poll  === 'function'
-  ? host.__claude_poll  : () => null;
-const claude_close = typeof host.__claude_close === 'function'
-  ? host.__claude_close : () => {};
+import { callHost, hasHost } from '@reactjit/runtime/ffi';
 
-function askOnce(cwd: string, model: string, prompt: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    if (!claude_init(cwd, model)) return reject(new Error('init failed'));
-    if (!claude_send(prompt)) { claude_close(); return reject(new Error('send failed')); }
+type Backend = 'claude_code' | 'codex_app_server' | 'kimi_cli_wire' | 'local_ai' | 'openai_compat';
 
-    let text = '';
-    const handle = setInterval(() => {
-      const msg = claude_poll();
-      if (!msg) return;
-      if (msg.type === 'assistant' && msg.text) text += msg.text;
-      if (msg.type === 'result') {
-        clearInterval(handle);
-        claude_close();
-        if (msg.is_error) reject(new Error(msg.result || 'error'));
-        else resolve(text);
+interface OneTurnOpts {
+  backend: Backend;
+  cwd?: string;
+  model?: string;
+  // ...other useAssistant opts; see runtime/hooks/useAssistant.ts
+}
+
+export async function runOneTurn(opts: OneTurnOpts, prompt: string): Promise<string> {
+  if (!hasHost('__worker_start')) throw new Error('worker bindings not registered');
+  const wid = callHost('__worker_start', opts.backend, JSON.stringify(opts)) as string;
+  if (!wid) throw new Error('worker_start failed');
+  if (!callHost('__worker_send', wid, prompt)) {
+    callHost('__worker_close', wid);
+    throw new Error('worker_send failed');
+  }
+  let text = '';
+  while (true) {
+    const events = (callHost('__worker_poll', wid) as any[]) ?? [];
+    for (const ev of events) {
+      if (ev.kind === 'assistant_message' && ev.text) text += ev.text;
+      else if (ev.kind === 'completion') {
+        callHost('__worker_close', wid);
+        return text;
+      } else if (ev.kind === 'error_') {
+        callHost('__worker_close', wid);
+        throw new Error(ev.text || 'worker error');
       }
-    }, 50);
-  });
+    }
+    await new Promise(r => setTimeout(r, 50));
+  }
 }
 ```
 
@@ -91,7 +97,7 @@ function extractJsonFence(reply: string): unknown {
 }
 ```
 
-If you see parse failures in practice, ask Claude to retry with `"return ONLY a fenced JSON block, no prose"`. One nudge is usually enough.
+If you see parse failures in practice, re-run with `"return ONLY a fenced JSON block, no prose"`. One nudge is usually enough.
 
 ## Phase 1: extraction
 
@@ -138,7 +144,10 @@ Return ONLY a fenced JSON block. Schema:
 \`\`\``;
 
 async function extract(cwd: string, doc: { title: string; text: string }): Promise<ExtractedGraph> {
-  const reply = await askOnce(cwd, EXTRACTION_MODEL, EXTRACTION_PROMPT(doc.text));
+  const reply = await runOneTurn(
+    { backend: 'claude_code', cwd, model: EXTRACTION_MODEL },
+    EXTRACTION_PROMPT(doc.text),
+  );
   return extractJsonFence(reply) as ExtractedGraph;
 }
 ```
@@ -197,7 +206,10 @@ async function resolveType(
   const unique = new Map<string, string>();
   for (const e of entities) if (!unique.has(e.name)) unique.set(e.name, e.description);
   const list = [...unique].map(([name, desc]) => `- ${name}: ${desc}`).join('\n');
-  const reply = await askOnce(cwd, SYNTHESIS_MODEL, RESOLVE_PROMPT(entityType, list));
+  const reply = await runOneTurn(
+    { backend: 'claude_code', cwd, model: SYNTHESIS_MODEL },
+    RESOLVE_PROMPT(entityType, list),
+  );
   return (extractJsonFence(reply) as { clusters: Cluster[] }).clusters;
 }
 ```
@@ -312,7 +324,7 @@ ${ctx}
 </graph>
 
 Question: ${question}`;
-  return askOnce(cwd, SYNTHESIS_MODEL, prompt);
+  return runOneTurn({ backend: 'claude_code', cwd, model: SYNTHESIS_MODEL }, prompt);
 }
 ```
 
@@ -343,18 +355,18 @@ for (const [docTitle, labels] of Object.entries(gold)) {
 }
 ```
 
-## Caveats and TODOs against the v8 bindings
+## Caveats and TODOs against the worker bindings
 
 - **No `messages.parse` / structured output.** We ask for JSON fences and parse them ourselves. Add an explicit "return ONLY a fenced JSON block" line; budget one retry on parse failure.
-- **One session at a time.** `g_claude_session` is module-level (`framework/v8_bindings_sdk.zig:24`). Phases are sequential. Don't try to fan out extractions in parallel from a single cart.
-- **Model swap costs a session restart.** `__claude_close()` + `__claude_init(cwd, newModel)` is fine and cheap, but you lose any in-session context. Keep phases stateless from Claude's POV — each prompt carries everything it needs.
+- **One worker per `runOneTurn` call.** Each call carries the spawn cost of starting the claude subprocess. Acceptable for batch pipelines; for interactive flows reach for `useAssistant` which keeps a worker warm across mounts.
+- **Phases run sequentially as written.** The worker contract supports many concurrent workers — fan extractions out via `Promise.all(documents.map(d => extract(...)))` if the spawn cost is worth the parallelism.
 - **No `add_dirs` from cart.** All documents have to live under `cwd` if you want Claude to read them; otherwise pass content inline in the prompt. For Wikipedia summaries (the original demo), inlining is the right call.
-- **Cost telemetry is per-session, not per-graph.** `result.total_cost_usd` lands once per session. Sum it across phases yourself if you want a graph-build total.
+- **Cost telemetry is per-completion.** `cost_usd_delta` lands on each `completion` event in the events stream. Sum it across phases yourself if you want a graph-build total — wrap `runOneTurn` to return `{ text, cost }`.
 
 ## Pattern summary
 
-1. One session per phase per document/type. `askOnce` opens, sends, drains, closes.
-2. Prompt for JSON inside a fenced block; parse out of `assistant.text`.
+1. One worker turn per phase per document/type. `runOneTurn` opens, sends, drains, closes.
+2. Prompt for JSON inside a fenced block; parse out of the assistant text.
 3. Resolve aliases per type using the description as the disambiguation signal.
 4. Hold the graph in plain JS Maps/arrays — no NetworkX needed.
 5. Query by walking N hops, serializing the subgraph, asking Sonnet against that context only.

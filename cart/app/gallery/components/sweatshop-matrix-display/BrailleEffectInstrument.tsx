@@ -75,51 +75,5 @@ export function BrailleProjectionSquare(props: BrailleEffectInstrumentProps) {
   );
 }
 
-export function BrailleProjectionStrip(props: BrailleProjectionStripProps) {
-  const simulation = useInstrumentSimulation();
-  const sizes = props.sizes && props.sizes.length > 0 ? props.sizes : PROJECTION_SIZES;
-  const channelId = props.channelId ?? 'plasma';
-  const paletteId = props.paletteId ?? 'amber';
-  const speed = resolvedSpeed(props.speed);
-  const gain = resolvedGain(props.gain);
-  const theme = props.theme ? resolveBrailleProjectionTheme(props.theme) : DEFAULT_BRAILLE_PROJECTION_THEME;
-
-  useEffect(() => {
-    resetInstrumentChannel(simulation, channelId);
-  }, [simulation, channelId]);
-
-  return (
-    <Row
-      style={{
-        width: '100%',
-        flexWrap: 'wrap',
-        gap: 12,
-        alignItems: 'flex-start',
-      }}
-    >
-      {sizes.map((size) => (
-        <BrailleProjectionSurface
-          key={`braille-projection:${size}:${channelId}:${paletteId}:${speed}:${gain}`}
-          size={size}
-          simulation={simulation}
-          channelId={channelId}
-          paletteId={paletteId}
-          speed={speed}
-          gain={gain}
-          showLabel
-          theme={theme}
-        />
-      ))}
-    </Row>
-  );
-}
-
-export function BrailleEffectStage(props: Omit<BrailleEffectInstrumentProps, 'size'>) {
-  return <BrailleProjectionSquare {...props} size={512} />;
-}
-
-export function BrailleEffectInstrument(props: BrailleProjectionStripProps) {
-  return <BrailleProjectionStrip {...props} />;
-}
 
 export { renderSurface };

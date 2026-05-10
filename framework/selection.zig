@@ -8,7 +8,7 @@ const std = @import("std");
 const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
 const gpu = @import("gpu/gpu.zig");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 const Node = layout.Node;
 const Color = layout.Color;
 
@@ -37,6 +37,44 @@ var pending_now: u32 = 0;
 var pending_root: ?*Node = null;
 
 const DOUBLE_CLICK_MS: u32 = 400;
+
+// ── Text-style scope ────────────────────────────────────────────────────
+//
+// Anything that walks a text node's bytes (paint, selection rect, click
+// hit-test) must do so under the SAME transient text-style globals the
+// painter uses, otherwise glyph advances and line height drift apart and
+// rects/indices land in the wrong place. The painter sets these in
+// engine.zig:drawNodeTextCommon and clears them after; everyone else has to
+// re-establish them. Bundling save+apply / restore in one place means future
+// additions to text style only need to update this scope, not every caller.
+
+pub const NodeTextScope = struct {
+    bold: bool,
+    line_height: f32,
+    letter_spacing: f32,
+    font_family_id: u8,
+};
+
+pub fn applyNodeTextScope(node: *const Node) NodeTextScope {
+    const scope = NodeTextScope{
+        .bold = node.font_weight >= 600,
+        .line_height = node.line_height,
+        .letter_spacing = node.letter_spacing,
+        .font_family_id = node.font_family_id,
+    };
+    if (scope.line_height > 0) gpu.setLineHeightOverride(scope.line_height);
+    if (scope.letter_spacing != 0) gpu.setLetterSpacing(scope.letter_spacing);
+    if (scope.bold) gpu.setBold(true);
+    if (scope.font_family_id != 0) gpu.setFontFamily(scope.font_family_id);
+    return scope;
+}
+
+pub fn restoreNodeTextScope(scope: NodeTextScope) void {
+    if (scope.line_height > 0) gpu.setLineHeightOverride(0);
+    if (scope.letter_spacing != 0) gpu.setLetterSpacing(0);
+    if (scope.bold) gpu.setBold(false);
+    if (scope.font_family_id != 0) gpu.setFontFamily(0);
+}
 
 // ── Public API ──────────────────────────────────────────────────────────
 
@@ -241,20 +279,8 @@ pub fn paintHighlight(node: *Node, screen_x: f32, screen_y: f32) void {
     const pad_r = node.style.padRight();
     const max_w = @max(1.0, node.computed.w - pad_l - pad_r);
 
-    // Paint's drawNodeTextCommon sets line_height_override + letter_spacing
-    // globals around its call and clears them after. By the time we run the
-    // selection pass those globals are back to 0, so drawSelectionRects reads
-    // natural FreeType metrics instead of the node's actual line_height —
-    // rects then advance at ~ascent+descent per line while paint advances at
-    // node.line_height, drifting linearly (~2 px/line for a 16 px lineHeight
-    // at size 10). Set the same globals here so selection uses the same
-    // per-line step as paint did.
-    if (node.line_height > 0) gpu.setLineHeightOverride(node.line_height);
-    if (node.letter_spacing != 0) gpu.setLetterSpacing(node.letter_spacing);
-    defer {
-        if (node.line_height > 0) gpu.setLineHeightOverride(0);
-        if (node.letter_spacing != 0) gpu.setLetterSpacing(0);
-    }
+    const scope = applyNodeTextScope(node);
+    defer restoreNodeTextScope(scope);
 
     if (sel_all) {
         // Select-all: highlight everything
@@ -330,89 +356,12 @@ fn charIndexAtPos(text: []const u8, node: *Node, mx: f32, my: f32) usize {
     const local_x = mx - (r.x + pad_l);
     const local_y = my - (r.y + pad_t);
 
-    const line_h = gpu.getLineHeight(node.font_size);
-    if (line_h <= 0) return 0;
-
-    // Which line are we on?
-    const target_line: usize = if (local_y < 0) 0 else @intFromFloat(local_y / line_h);
-
-    // Walk text char by char, tracking line wrapping
-    var pen_x: f32 = 0;
-    var current_line: usize = 0;
-    var line_start: usize = 0;
-    var last_break: usize = 0;
-
-    var i: usize = 0;
-    var best: usize = 0;
-
-    while (i < text.len) {
-        if (current_line == target_line) best = i;
-
-        const ch = text[i];
-        if (ch == '\n') {
-            if (current_line == target_line) {
-                // On our line — check if click is past the end
-                return if (local_x >= pen_x) i else closestOnLine(text, line_start, i, local_x, node.font_size);
-            }
-            current_line += 1;
-            i += 1;
-            line_start = i;
-            last_break = i;
-            pen_x = 0;
-            continue;
-        }
-
-        if (ch == ' ') {
-            last_break = i;
-        }
-
-        const advance = gpu.getCharAdvance(@intCast(ch), node.font_size);
-
-        // Word wrap
-        if (max_w > 0 and pen_x + advance > max_w and pen_x > 0) {
-            if (current_line == target_line) {
-                return closestOnLine(text, line_start, i, local_x, node.font_size);
-            }
-            current_line += 1;
-            if (last_break > line_start) {
-                line_start = last_break + 1;
-                pen_x = 0;
-                // Re-measure from new line start to current pos
-                var j: usize = line_start;
-                while (j < i) : (j += 1) {
-                    pen_x += gpu.getCharAdvance(@intCast(text[j]), node.font_size);
-                }
-            } else {
-                line_start = i;
-                pen_x = 0;
-            }
-            last_break = line_start;
-            continue; // don't advance i, re-check this char on new line
-        }
-
-        pen_x += advance;
-        i += 1;
-    }
-
-    // Past last line — return end of text or closest char
-    if (current_line == target_line) {
-        return if (local_x >= pen_x) text.len else closestOnLine(text, line_start, text.len, local_x, node.font_size);
-    }
-
-    return best;
-}
-
-/// Find the closest character index on a single line segment.
-fn closestOnLine(text: []const u8, start: usize, end: usize, target_x: f32, font_size: u16) usize {
-    var x: f32 = 0;
-    var i: usize = start;
-    while (i < end) {
-        const advance = gpu.getCharAdvance(@intCast(text[i]), font_size);
-        if (x + advance / 2.0 > target_x) return i;
-        x += advance;
-        i += 1;
-    }
-    return end;
+    // Hit-test under the same text-style scope the painter uses, so a click
+    // on a bold/letter-spaced/non-default-family node snaps to the byte
+    // whose glyph is actually under the cursor.
+    const scope = applyNodeTextScope(node);
+    defer restoreNodeTextScope(scope);
+    return gpu.byteIndexAtPos(text, node.font_size, max_w, local_x, local_y);
 }
 
 /// Find word boundaries around a byte index.

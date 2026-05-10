@@ -182,8 +182,9 @@ export function useBrowse(options: BrowseOptions = {}): BrowseHandle {
 // ── AI tool definitions ─────────────────────────────────────────────
 //
 // Shape mirrors love2d/packages/ai's ToolDefinition. Drop the result of
-// createBrowseTools() into useLocalChat({ tools: [...] }) (once tool-calling
-// lands there) to give a local-llama agent the browser as a tool.
+// createBrowseTools() into useAssistant({ backend: 'local_ai', tools: '[...]' })
+// (passing the tools JSON string the worker schema expects) to give a
+// local-llama agent the browser as a tool.
 
 export interface ToolDefinition {
   name: string;

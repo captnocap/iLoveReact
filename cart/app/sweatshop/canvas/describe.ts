@@ -18,27 +18,41 @@ interface WiredPair {
   action: FlowNode;
 }
 
+interface InvalidPair {
+  edge: FlowEdge;
+  from: FlowNode;
+  to: FlowNode;
+  fromKind: string;
+  toKind: string;
+}
+
 function classifyEdges(nodes: FlowNode[], edges: FlowEdge[]): {
   wired: WiredPair[];
+  invalid: InvalidPair[];
   orphans: FlowNode[];
   domains: FlowNode[];
 } {
   const byId = new Map<string, FlowNode>(nodes.map((n) => [n.id, n]));
   const wired: WiredPair[] = [];
+  const invalid: InvalidPair[] = [];
   const used = new Set<string>();
   for (const e of edges) {
     const f = byId.get(e.from);
     const t = byId.get(e.to);
     if (!f || !t) continue;
-    const fKind = (f.data as any)?.kind;
-    const tKind = (t.data as any)?.kind;
-    if (!fKind || !tKind) continue;
-    if (!TRIGGER_KINDS.has(fKind)) continue;
-    if (!ACTION_KINDS.has(tKind)) continue;
-    if (!f.label || !t.label) continue;
-    wired.push({ edge: e, trigger: f, action: t });
-    used.add(f.id);
-    used.add(t.id);
+    const fKind = (f.data as any)?.kind ?? '';
+    const tKind = (t.data as any)?.kind ?? '';
+    const isWired =
+      TRIGGER_KINDS.has(fKind) && ACTION_KINDS.has(tKind) && !!f.label && !!t.label;
+    if (isWired) {
+      wired.push({ edge: e, trigger: f, action: t });
+      used.add(f.id);
+      used.add(t.id);
+    } else {
+      invalid.push({ edge: e, from: f, to: t, fromKind: fKind, toKind: tKind });
+      used.add(f.id);
+      used.add(t.id);
+    }
   }
   const orphans = nodes.filter((n) => {
     const k = (n.data as any)?.kind;
@@ -51,13 +65,13 @@ function classifyEdges(nodes: FlowNode[], edges: FlowEdge[]): {
     const k = (n.data as any)?.kind;
     return k === 'token' && !!n.label;
   });
-  return { wired, orphans, domains };
+  return { wired, invalid, orphans, domains };
 }
 
 // ── Code mirror ──────────────────────────────────────────────────
 
 export function toCode(nodes: FlowNode[], edges: FlowEdge[]): string {
-  const { wired, orphans, domains } = classifyEdges(nodes, edges);
+  const { wired, invalid, orphans, domains } = classifyEdges(nodes, edges);
   const out: string[] = [];
 
   out.push('// Auto-generated from your sweatshop canvas.');
@@ -77,6 +91,17 @@ export function toCode(nodes: FlowNode[], edges: FlowEdge[]): string {
     }
   }
   out.push('}');
+
+  if (invalid.length > 0) {
+    out.push('');
+    out.push('// Connections that are not yet rules — a rule needs a trigger →');
+    out.push('// action edge. These are wired on the canvas but the shape is off:');
+    for (const inv of invalid) {
+      const fromTag = ACTION_KINDS.has(inv.fromKind) ? 'action' : TRIGGER_KINDS.has(inv.fromKind) ? 'trigger' : (inv.fromKind || 'unknown');
+      const toTag   = ACTION_KINDS.has(inv.toKind)   ? 'action' : TRIGGER_KINDS.has(inv.toKind)   ? 'trigger' : (inv.toKind   || 'unknown');
+      out.push(`//   ${inv.from.label || '(unlabeled)'} (${fromTag}) → ${inv.to.label || '(unlabeled)'} (${toTag})`);
+    }
+  }
 
   if (orphans.length > 0) {
     out.push('');
@@ -101,7 +126,7 @@ export function toCode(nodes: FlowNode[], edges: FlowEdge[]): string {
 // ── English prose ────────────────────────────────────────────────
 
 export function toProse(nodes: FlowNode[], edges: FlowEdge[]): string {
-  const { wired, orphans, domains } = classifyEdges(nodes, edges);
+  const { wired, invalid, orphans, domains } = classifyEdges(nodes, edges);
   const out: string[] = [];
 
   if (wired.length === 0) {
@@ -115,6 +140,16 @@ export function toProse(nodes: FlowNode[], edges: FlowEdge[]): string {
     for (const { trigger, action } of wired) {
       out.push(`${n}. When ${describeTrigger(trigger.label)}, ${describeAction(action.label)}.`);
       n++;
+    }
+  }
+
+  if (invalid.length > 0) {
+    out.push('');
+    out.push(`Also ${invalid.length} connection${invalid.length === 1 ? '' : 's'} on the canvas that don't form a rule yet — a rule needs a trigger pointing at an action:`);
+    for (const inv of invalid) {
+      const fromTag = ACTION_KINDS.has(inv.fromKind) ? 'action' : TRIGGER_KINDS.has(inv.fromKind) ? 'trigger' : (inv.fromKind || 'piece');
+      const toTag   = ACTION_KINDS.has(inv.toKind)   ? 'action' : TRIGGER_KINDS.has(inv.toKind)   ? 'trigger' : (inv.toKind   || 'piece');
+      out.push(`• "${inv.from.label || '(unlabeled)'}" (${fromTag}) → "${inv.to.label || '(unlabeled)'}" (${toTag})`);
     }
   }
 

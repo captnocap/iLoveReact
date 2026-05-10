@@ -1,24 +1,26 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
-import { ProjectionSurfaceWall } from '../components/sweatshop-matrix-display/ProjectionSurfaceWall';
+import { BrailleProjectionSquare } from '../components/sweatshop-matrix-display/BrailleEffectInstrument';
+
+// Renamed from "Sweatshop Matrix Display". The component is one
+// BrailleProjectionSquare. The wall (every effect at every size) and the
+// "instrument" wrapper were both catalog/page shapes.
 
 export const sweatshopMatrixDisplaySection = defineGallerySection({
-  id: 'sweatshop-matrix-display',
-  title: 'Projection Surface',
+  id: 'braille-projection',
+  title: 'Braille Projection',
   stories: [
     defineGalleryStory({
-      id: 'sweatshop-matrix-display/default',
-      title: 'Projection Surface',
-      source: 'cart/app/gallery/components/sweatshop-matrix-display/ProjectionSurfaceWall.tsx',
+      id: 'braille-projection/default',
+      title: 'Braille Projection',
+      source: 'cart/app/gallery/components/sweatshop-matrix-display/BrailleProjectionSurface.tsx',
       status: 'ready',
-      summary: 'Single comparison wall showing each effect type as a cascading size row, with the matrix projection surface folded into the same screen.',
-      tags: ['effect', 'matrix', 'braille', 'projection', 'surface'],
+      summary: 'One braille projection square. Variants change the size only.',
+      tags: ['matrix', 'braille', 'projection'],
       variants: [
-        {
-          id: 'comparison-wall',
-          name: 'Comparison Wall',
-          summary: 'Every projection type is shown on one surface as rows of 16x16, 32x32, 64x64, 128x128, and 512x512 outputs.',
-          render: () => <ProjectionSurfaceWall />,
-        },
+        { id: 'native',  name: 'Native (128)', render: () => <BrailleProjectionSquare size={128} /> },
+        { id: 'small',   name: 'Small (64)',   render: () => <BrailleProjectionSquare size={64} /> },
+        { id: 'large',   name: 'Large (256)',  render: () => <BrailleProjectionSquare size={256} /> },
+        { id: 'huge',    name: 'Huge (512)',   render: () => <BrailleProjectionSquare size={512} /> },
       ],
     }),
   ],

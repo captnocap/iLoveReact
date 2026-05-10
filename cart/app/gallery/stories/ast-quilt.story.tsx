@@ -1,63 +1,46 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
-import { AstBinarySquares, AstBinaryTile, AstQuilt, AstTile } from '../components/ast-quilt/AstQuilt';
+import { AstBinaryTile, AstTile } from '../components/ast-quilt/AstQuilt';
 import { AstTileBox } from '../components/ast-quilt/AstTileBox';
-import {
-  AstFingerprintEffect,
-  AstFingerprintEffectGrid,
-} from '../components/ast-quilt/EffectFromFingerprint';
+import { AstFingerprintEffect } from '../components/ast-quilt/EffectFromFingerprint';
 import { AST_SAMPLE_FILES } from '../components/ast-quilt/sampleContract';
 
+// Just the 3 tile atoms. The full quilt, the binary-squares wall, the
+// fingerprint-effect grids — all of those are catalog/montage shapes, not
+// components. Compose them later if needed; don't ship them as a gallery entry.
+
+const sampleFile = { ...AST_SAMPLE_FILES[17], selected: true, tagColor: 'theme:ok' as const };
+
 export const astQuiltSection = defineGallerySection({
-  id: 'ast-quilt',
-  title: 'AST Quilt',
+  id: 'ast-tile',
+  title: 'AST Tile',
   stories: [
     defineGalleryStory({
-      id: 'ast-quilt/default',
-      title: 'AST Quilt',
+      id: 'ast-tile/default',
+      title: 'AST Tile',
       source: 'cart/app/gallery/components/ast-quilt/AstQuilt.tsx',
       status: 'ready',
-      summary: 'Treemap, binary-square, and gene-driven procedural fingerprint tiles. Same file always lands on the same effect.',
-      tags: ['effect', 'fingerprint', 'treemap', 'binary', 'procedural', 'runtime'],
+      summary: 'Three tile shapes for AST fingerprint visualization.',
+      tags: ['effect', 'fingerprint', 'tile'],
       variants: [
         {
-          id: 'default',
-          name: 'Quilt',
-          render: () => <AstQuilt />,
+          id: 'tile',
+          name: 'Tile',
+          render: () => <AstTile file={sampleFile} tileIndex={17} />,
         },
         {
-          id: 'binary-squares',
-          name: 'Binary Squares',
-          render: () => <AstBinarySquares />,
-        },
-        {
-          id: 'single-tile',
-          name: 'Single Tile',
-          render: () => <AstTile file={{ ...AST_SAMPLE_FILES[17], selected: true, tagColor: 'theme:ok' }} tileIndex={17} />,
-        },
-        {
-          id: 'box-tile',
-          name: 'Box Tile (host-driven)',
-          render: () => <AstTileBox file={{ ...AST_SAMPLE_FILES[17], selected: true, tagColor: 'theme:ok' }} tileIndex={17} />,
+          id: 'tile-box',
+          name: 'Tile (host-driven)',
+          render: () => <AstTileBox file={sampleFile} tileIndex={17} />,
         },
         {
           id: 'binary-tile',
           name: 'Binary Tile',
-          render: () => <AstBinaryTile file={{ ...AST_SAMPLE_FILES[17], selected: true, tagColor: 'theme:ok' }} tileIndex={17} />,
+          render: () => <AstBinaryTile file={sampleFile} tileIndex={17} />,
         },
         {
-          id: 'random-effect',
-          name: 'Random Effect',
+          id: 'fingerprint-effect',
+          name: 'Fingerprint Effect',
           render: () => <AstFingerprintEffect file={AST_SAMPLE_FILES[7]} />,
-        },
-        {
-          id: 'random-effect-grid',
-          name: 'Random Effect Grid',
-          render: () => <AstFingerprintEffectGrid gridSide={4} />,
-        },
-        {
-          id: 'random-effect-grid-dense',
-          name: 'Random Effect Grid (6×6)',
-          render: () => <AstFingerprintEffectGrid gridSide={6} />,
         },
       ],
     }),

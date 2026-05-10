@@ -1,46 +1,30 @@
 import { defineGallerySection, defineGalleryStory } from '../types';
-import { Box } from '@reactjit/runtime/primitives';
-import { NewsFeed } from '../components/news-feed/NewsFeed';
+import { FeedPostCard } from '../components/news-feed/FeedPostCard';
 import { newsFeedPostMockData } from '../data/overstock/news-feed-post';
 
+// The component is FeedPostCard — one post. The "News Feed" wrapper that
+// stacked posts + composer + actions was the app shape, not a component.
+
 export const newsFeedSection = defineGallerySection({
-  id: "news-feed",
-  title: "News Feed",
-  group: {
-    id: "compositions",
-    title: "Compositions",
-  },
-  kind: "top-level",
-  composedOf: [
-    "cart/app/gallery/components/news-feed/FeedComposer.tsx",
-    "cart/app/gallery/components/news-feed/FeedPostCard.tsx",
-    "cart/app/gallery/components/news-feed/FeedActionButton.tsx",
-  ],
+  id: 'feed-post-card',
+  title: 'Feed Post Card',
   stories: [
     defineGalleryStory({
-      id: "news-feed/default",
-      title: "News Feed",
-      source: "cart/app/gallery/components/news-feed/NewsFeed.tsx",
-      status: 'draft',
-      tags: ["input", "card", "panel"],
+      id: 'feed-post-card/default',
+      title: 'Feed Post Card',
+      source: 'cart/app/gallery/components/news-feed/FeedPostCard.tsx',
+      status: 'ready',
+      tags: ['card', 'social'],
       variants: [
         {
           id: 'default',
-          name: 'Desktop Feed',
-          render: () => (
-            <Box style={{ width: 760, height: 560 }}>
-              <NewsFeed rows={newsFeedPostMockData} />
-            </Box>
-          ),
+          name: 'Default',
+          render: () => <FeedPostCard post={newsFeedPostMockData[0]} />,
         },
         {
-          id: 'compact',
-          name: 'Compact Feed',
-          render: () => (
-            <Box style={{ width: 390, height: 560 }}>
-              <NewsFeed rows={newsFeedPostMockData} />
-            </Box>
-          ),
+          id: 'reposted',
+          name: 'Reposted',
+          render: () => <FeedPostCard post={newsFeedPostMockData[2]} />,
         },
       ],
     }),

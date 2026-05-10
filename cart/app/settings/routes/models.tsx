@@ -172,9 +172,9 @@ function TypeContextBadge({
 
 // One inert effort tier badge. Effort tiers come from
 // claude-models.effortLevelsFor — currently Anthropic-only (Sonnet/Opus
-// via API or Claude Code CLI). When OpenAI's Codex CLI lands as a
-// connection kind, extend effortLevelsFor (or add a parallel helper)
-// to cover gpt-5-codex variants.
+// via API or Claude Code CLI). The codex-cli connection kind is wired,
+// but effortLevelsFor doesn't yet cover gpt-5-codex variants — extend
+// it (or add a parallel helper) when Codex effort tiers should render.
 function EffortBadge({ level }: { level: string }) {
   return (
     <Pressable onPress={() => {}} tooltip={`Effort tier: ${level}`}>

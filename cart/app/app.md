@@ -197,7 +197,7 @@ CHECKLIST:
 - Animations: —
 - TODO:
   - Wire the router-model tier: parallel HTTP request from `submit()`, parse one-line response (`GOTO <path>` / `OPEN <app>` / `NONE`), fire `app:navigate` from the same code path. Read connection from `Settings.routerConnectionId` once that field exists.
-  - Wire the supervisor session: long-lived Claude session via the cockpit poll-loop pattern (`__claude_init` / `__claude_send` / `__claude_poll`). Render the chat thread inside the route slot, not the strip itself.
+  - Wire the supervisor session: long-lived Claude session via `useAssistant({ backend: 'claude_code', cwd, model })` — read the events array for streaming text and tool calls, call `ask()` to send turns. Render the chat thread inside the route slot, not the strip itself.
   - Swap the static `ROUTE_CHIP` (label `tier-1 only`) for the live model name once a `Settings.routerConnectionId` (or supervisor connection) is wired. Same for `TARGET_CHIP` once "currently focused app" is a concept.
   - Token chips for resolved `@`-mentions currently sit on a separate row above the live input; explore inline replacement once the renderer can host mixed text + chip segments inside one `<TextInput>` analogue.
   - Add an `app:open` IFTTT subscriber and emit shape for app-typed tokens once cartridges mount inline (tokens.ts already has the union slot reserved).
@@ -629,7 +629,7 @@ CHECKLIST:
 - PROBLEMS:
   - API-key probe still returns a canned model list; local probe does live HTTP probing (`/models`, `/v1/models`, `/api/tags`) and parses model IDs. Until the API probe is real, `Settings.defaultModelId` ends up holding whichever stubbed name the user picks.
   - The Claude probe relies on `claude` being on `$PATH` of the cart's process — no fallback if it isn't.
-  - **Runtime plumbing landed.** The `home` field captures which Claude install to use; `commitConnection` writes it to `Connection.credentialRef.locator`; the SDK now honors it via `claude_sdk.SessionOptions.config_dir` → `CLAUDE_CONFIG_DIR=<dir>` injected into the spawned subprocess's env (`framework/claude_sdk/session.zig`). `__claude_init` accepts an optional 4th arg (`config_dir`) — JS callers that want to pin a specific install pass the locator there. Existing 1–3 arg callers continue to inherit the parent's env (default behavior unchanged).
+  - **Runtime plumbing landed.** The `home` field captures which Claude install to use; `commitConnection` writes it to `Connection.credentialRef.locator`; the SDK honors it via `claude_sdk.SessionOptions.config_dir` → `CLAUDE_CONFIG_DIR=<dir>` injected into the spawned subprocess's env (`framework/assistant/claude_sdk/session.zig`). `useAssistant({ backend: 'claude_code', configDir })` plumbs the locator through the worker opts JSON; carts that don't set `configDir` inherit the parent's env (default behavior unchanged).
 
 ---
 
@@ -1237,7 +1237,7 @@ Only what isn't covered by the above. Naming follows the `App<Surface>` conventi
 
 **Datashape decision: ONE thread or MANY?** Concept image text says "PERSISTENT · 14 TURNS" — a single rolling supervisor thread. v1 ships one. Multi-thread (per-activity / per-worker scoping) is a follow-up; the side-menu's "chat-history list" bullet implies it eventually, but v1 is one thread visible across all windows.
 
-**Driving the model.** Today the `useLocalChat` hook (recently landed, see Recently landed) plus the `claude_runner` framework path are the two generation surfaces. The supervisor chat picks one based on `Settings.defaultConnectionId` (Claude SDK route → claude_runner; local route → useLocalChat). Wire this through a thin `useAssistantChat()` hook that mirrors `useLocalChat`'s phase / streaming surface but routes by connection. **Do not couple the chat UI to either backend directly** — the hook is the seam.
+**Driving the model.** All generation surfaces collapse into `useAssistant({ backend, ... })` — the unified worker contract dispatches Claude / Codex / Kimi / OpenAI-compat / local-AI behind a single React hook (`runtime/hooks/useAssistant.ts` → `framework/assistant/worker_bindings.zig` → per-backend SDK). The supervisor chat picks `backend` and the rest of the opts off `Settings.defaultConnectionId`; the cart-side `useAssistantChat()` wrapper just routes connection rows into the hook's opts. **Do not couple the chat UI to a specific backend** — `useAssistant` is the seam.
 
 **Triggers / submit path.**
 - The InputStrip's `submit()` already parses `@`-tokens (route / app / command). For the assistant chat, anything that ISN'T a token-only input becomes a turn (`assistant:turn` IFTTT event with the typed text, model id, attachments). The supervisor session subscribes once and pushes a turn into the active `AssistantThread`.
@@ -1298,6 +1298,8 @@ These need a coordinated touch — not localized to a single file.
 ### Recently landed
 
 A short rolling log so cross-file work doesn't keep getting re-planned. Trim entries older than the last few weeks.
+
+> **Note (2026-05-10):** Older entries below name the per-backend host fns (`__claude_*`, `__kimi_*`, `__localai_*`) and the `useLocalChat` / `claude_runner` paths. These were unified into the single `__worker_*` host-fn surface (`framework/assistant/worker_bindings.zig`) and the `useAssistant` React hook (`runtime/hooks/useAssistant.ts`). Read those entries as historical record; for new code use `useAssistant({ backend, ... })`. SDK files moved from `framework/{claude_sdk, codex_sdk, kimi_wire_sdk, openai_compat_sdk, local_ai_runtime, llama_exports, tool_framework, tools_builtin, embed, v8_bindings_sdk, v8_bindings_embed, api_types}` into `framework/assistant/` at the same time.
 
 - **Composer route + canvas authoring first pass** (2026-05-04) — moved the `docs/11-composer.md` plan into a real app route at `/composer` and registered it in the shell (`mode: 'side'`). Also registered `/gallery` as a side-mode route and removed the stale `/about` route from `index.tsx`. Main pieces:
   - **Canvas substrate** — `composer/page.tsx` owns `ComposerDoc` + `SNode` state, persists one default draft through `__store_get/__store_set`, autosaves with a debounce, and normalizes ids/selection on every edit. Pages are `Canvas.Node`s with persisted `x/y/width/height`; new pages are blank and placed beside existing pages instead of stacked on top of each other.

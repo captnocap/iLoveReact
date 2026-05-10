@@ -53,7 +53,7 @@ const MAX_UTTERANCE_SAMPLES: usize = @as(usize, @intCast(SAMPLE_RATE)) * 30;
 // sub-clipping — the stride is tuned to "don't queue faster than tiny can
 // drain". 0 disables the feature.
 const DEFAULT_PREVIEW_STRIDE_FRAMES: u32 = 1500 / FRAME_MS; // ~1500ms
-const DEFAULT_PREVIEW_MIN_FRAMES: u32 = 1000 / FRAME_MS;    // ~1s of speech
+const DEFAULT_PREVIEW_MIN_FRAMES: u32 = 1000 / FRAME_MS; // ~1s of speech
 
 // ── State ─────────────────────────────────────────────────────────────
 
@@ -220,6 +220,29 @@ pub fn setPreviewStrideMs(ms: i32) void {
     S.preview_stride_frames = frames;
 }
 
+pub fn recordingDevicesJson(out: []u8) []const u8 {
+    var stream = std.io.fixedBufferStream(out);
+    const w = stream.writer();
+    var count: c_int = 0;
+    const devices = c.SDL_GetAudioRecordingDevices(&count);
+    w.writeAll("[") catch return out[0..stream.pos];
+    if (devices) |ids| {
+        defer c.SDL_free(ids);
+        var i: c_int = 0;
+        while (i < count) : (i += 1) {
+            if (i > 0) w.writeAll(",") catch break;
+            const id = ids[@intCast(i)];
+            const name_ptr = c.SDL_GetAudioDeviceName(id);
+            const name = if (name_ptr) |p| std.mem.span(p) else "";
+            w.print("{{\"id\":{d},\"name\":\"", .{id}) catch break;
+            writeJsonEscaped(w, name) catch break;
+            w.writeAll("\"}") catch break;
+        }
+    }
+    w.writeAll("]") catch {};
+    return out[0..stream.pos];
+}
+
 // ── Tick — drain SDL stream, run VAD, fire events ─────────────────────
 
 pub fn tick(_: u32) void {
@@ -302,10 +325,7 @@ pub fn tick(_: u32) void {
         if (S.phase == .speaking or S.phase == .candidate_silence) {
             S.frames_in_speech +%= 1;
             S.frames_since_preview +%= 1;
-            if (S.preview_stride_frames > 0
-                and S.frames_in_speech >= S.preview_min_frames
-                and S.frames_since_preview >= S.preview_stride_frames)
-            {
+            if (S.preview_stride_frames > 0 and S.frames_in_speech >= S.preview_min_frames and S.frames_since_preview >= S.preview_stride_frames) {
                 snapshotPreview();
                 S.frames_since_preview = 0;
             }
@@ -375,6 +395,19 @@ pub fn getBuffer(id: u32) ?[]const i16 {
 pub fn releaseBuffer(id: u32) void {
     if (S.buffers.fetchSwapRemove(id)) |kv| {
         S.allocator.free(kv.value);
+    }
+}
+
+fn writeJsonEscaped(writer: anytype, text: []const u8) !void {
+    for (text) |ch| {
+        switch (ch) {
+            '\\' => try writer.writeAll("\\\\"),
+            '"' => try writer.writeAll("\\\""),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => try writer.writeByte(ch),
+        }
     }
 }
 

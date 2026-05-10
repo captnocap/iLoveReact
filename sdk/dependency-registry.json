@@ -5,23 +5,38 @@
     "tools": {
       "zig": {
         "kind": "toolchain",
-        "requiredFor": ["scaffold", "build", "ship"],
+        "requiredFor": [
+          "scaffold",
+          "build",
+          "ship"
+        ],
         "version": "0.15.2",
         "payloadPath": "tools/zig/zig",
-        "supportPaths": ["tools/zig/lib", "tools/zig/cache/p"],
+        "supportPaths": [
+          "tools/zig/lib",
+          "tools/zig/cache/p"
+        ],
         "packPolicy": "required",
         "status": "present"
       },
       "v8cli": {
         "kind": "host-tool",
-        "requiredFor": ["scaffold", "build", "ship", "scripts"],
+        "requiredFor": [
+          "scaffold",
+          "build",
+          "ship",
+          "scripts"
+        ],
         "payloadPath": "tools/v8cli",
         "packPolicy": "required",
         "status": "present"
       },
       "esbuild": {
         "kind": "bundler",
-        "requiredFor": ["build", "ship"],
+        "requiredFor": [
+          "build",
+          "ship"
+        ],
         "payloadPath": "tools/esbuild",
         "packPolicy": "required",
         "status": "present"
@@ -29,33 +44,51 @@
     },
     "jsPackages": {
       "react": {
-        "requiredFor": ["scaffold", "build", "ship"],
-        "vendorPath": "vendor/react",
+        "requiredFor": [
+          "scaffold",
+          "build",
+          "ship"
+        ],
+        "vendorPath": "deps/react",
         "packPolicy": "required"
       },
       "react-reconciler": {
-        "requiredFor": ["build", "ship"],
-        "vendorPath": "vendor/react-reconciler",
+        "requiredFor": [
+          "build",
+          "ship"
+        ],
+        "vendorPath": "deps/react-reconciler",
         "packPolicy": "required"
       },
       "scheduler": {
-        "requiredFor": ["build", "ship"],
-        "vendorPath": "vendor/scheduler",
+        "requiredFor": [
+          "build",
+          "ship"
+        ],
+        "vendorPath": "deps/scheduler",
         "packPolicy": "required"
       },
       "loose-envify": {
-        "requiredFor": ["build", "ship"],
-        "vendorPath": "vendor/loose-envify",
+        "requiredFor": [
+          "build",
+          "ship"
+        ],
+        "vendorPath": "deps/loose-envify",
         "packPolicy": "required"
       },
       "js-tokens": {
-        "requiredFor": ["build", "ship"],
-        "vendorPath": "vendor/js-tokens",
+        "requiredFor": [
+          "build",
+          "ship"
+        ],
+        "vendorPath": "deps/js-tokens",
         "packPolicy": "required"
       },
       "typescript": {
-        "requiredFor": ["scaffold"],
-        "vendorPath": "vendor/typescript",
+        "requiredFor": [
+          "scaffold"
+        ],
+        "vendorPath": "deps/typescript",
         "packPolicy": "required",
         "note": "Vendored for tsconfig template emission by scripts/init.js. Typecheck (tsc invocation) is not wired."
       }
@@ -72,7 +105,9 @@
     },
     "sdl3": {
       "kind": "dynamic-library",
-      "systemNames": ["SDL3"],
+      "systemNames": [
+        "SDL3"
+      ],
       "linkPolicy": "foundational",
       "bundlePolicy": "always",
       "note": "Window/input. Every cart binary opens a window. We pin our own version, so SDL3.so ships in the SDK payload."
@@ -87,103 +122,144 @@
     },
     "freetype": {
       "kind": "dynamic-library",
-      "systemNames": ["freetype"],
-      "includePaths": ["freetype2"],
+      "systemNames": [
+        "freetype"
+      ],
+      "includePaths": [
+        "freetype2"
+      ],
       "linkPolicy": "foundational",
       "bundlePolicy": "always",
       "note": "Text rendering. Pinned + bundled."
     },
     "stb-image": {
       "kind": "vendored-c-source",
-      "sources": ["stb/stb_image_impl.c"],
+      "sources": [
+        "stb/stb_image_impl.c"
+      ],
       "linkPolicy": "foundational",
       "bundlePolicy": "vendored-source",
-      "note": "Powers <Image>. Compiled into every cart from vendored C source — no .so to ship."
+      "note": "Powers <Image>. Compiled into every cart from vendored C source \u2014 no .so to ship."
     },
     "stb-image-write": {
       "kind": "vendored-c-source",
-      "sources": ["stb/stb_image_write_impl.c"],
+      "sources": [
+        "stb/stb_image_write_impl.c"
+      ],
       "linkPolicy": "foundational",
       "bundlePolicy": "vendored-source",
       "note": "Capture / witness screenshotting. Vendored C source."
     },
     "luajit": {
       "kind": "dynamic-library",
-      "systemNames": ["luajit-5.1"],
-      "includePaths": ["luajit-2.1"],
-      "linkPolicy": "feature-gated",
+      "systemNames": [
+        "luajit-5.1"
+      ],
+      "includePaths": [
+        "luajit-2.1"
+      ],
+      "linkPolicy": "never",
       "bundlePolicy": "feature-gated",
-      "buildFlag": "-Dhas-lua-worker",
-      "note": "Compute worker runtime. Linked only when -Dhas-lua-worker=true (or when -Dhas-audio is set, since audio_real.zig's DSP engine imports zluajit). Carts that don't trigger either gate get framework/luajit_worker_stub.zig + audio_stub.zig and never link luajit-5.1."
+      "note": "framework/process/luajit_worker.zig dlopens libluajit-5.1 at runtime — no link-time dependency. framework/audio.zig still uses the zluajit module (Zig wrapper) which is gated by -Dhas-audio. Bundle libluajit-5.1.so alongside the cart when the lua-worker or audio feature triggers."
     },
     "x11": {
       "kind": "platform-library",
-      "platforms": ["linux"],
-      "systemNames": ["X11"],
+      "platforms": [
+        "linux"
+      ],
+      "systemNames": [
+        "X11"
+      ],
       "linkPolicy": "system-assumed",
       "bundlePolicy": "never",
       "note": "Display server protocol. Linked at build time (windows.zig sets _NET_WM_WINDOW_TYPE atoms via 2 extern Xlib calls), but every Linux desktop ships libX11. Don't bundle. Wayland-only systems ship Xwayland which provides libX11 too."
     },
     "posix-threading": {
       "kind": "platform-library",
-      "platforms": ["linux"],
-      "systemNames": ["m", "pthread", "dl"],
+      "platforms": [
+        "linux"
+      ],
+      "systemNames": [
+        "m",
+        "pthread",
+        "dl"
+      ],
       "linkPolicy": "system-assumed",
       "bundlePolicy": "never",
-      "note": "libc, libm, libpthread, libdl — present on every Linux host."
+      "note": "libc, libm, libpthread, libdl \u2014 present on every Linux host."
     },
     "libmpv": {
       "kind": "dynamic-library",
-      "systemNames": ["mpv"],
-      "knownPayloads": ["love2d/storybook/lib/libmpv.so.2", "love2d/web/lib/libmpv.so.2"],
+      "systemNames": [
+        "mpv"
+      ],
+      "knownPayloads": [
+        "love2d/storybook/lib/libmpv.so.2",
+        "love2d/web/lib/libmpv.so.2"
+      ],
       "linkPolicy": "feature-gated",
       "bundlePolicy": "feature-gated",
-      "note": "Runtime dlopen — no link-time cost. Pack libmpv.so.2 into the SDK payload when has-video so carts can dlopen our pinned version instead of relying on the host."
+      "note": "Runtime dlopen \u2014 no link-time cost. Pack libmpv.so.2 into the SDK payload when has-video so carts can dlopen our pinned version instead of relying on the host."
     },
     "libsodium": {
       "kind": "dynamic-library",
-      "systemNames": ["sodium"],
-      "knownPayloads": ["love2d/storybook/lib/libsodium.so", "love2d/web/lib/libsodium.so"],
+      "systemNames": [
+        "sodium"
+      ],
+      "knownPayloads": [
+        "love2d/storybook/lib/libsodium.so",
+        "love2d/web/lib/libsodium.so"
+      ],
       "linkPolicy": "feature-gated",
       "bundlePolicy": "feature-gated",
       "buildFlag": "-Dhas-privacy"
     },
     "sqlite3": {
       "kind": "dynamic-library",
-      "systemNames": ["sqlite3"],
-      "linkPolicy": "feature-gated",
+      "systemNames": [
+        "sqlite3"
+      ],
+      "linkPolicy": "never",
       "bundlePolicy": "feature-gated",
-      "buildFlag": "-Dhas-sqlite"
+      "note": "dlopen'd at runtime by framework/storage/sqlite.zig — no link-time dependency. Registry entry exists so pack-sdk stages libsqlite3.so alongside the cart when the sqlite feature triggers."
     },
     "curl": {
       "kind": "dynamic-library",
-      "systemNames": ["curl"],
+      "systemNames": [
+        "curl"
+      ],
       "linkPolicy": "deprecated",
       "bundlePolicy": "never",
-      "note": "DEPRECATED — being removed. The networking stack is migrating to tier-0 useTheInternet (std.http + tls.zig + nghttp2). framework/net/http.zig (libcurl-based) is being replaced by an extended framework/net/page_fetch.zig (tls.zig-based). Once the migration completes, libcurl + its entire transitive auth/TLS chain (libssl, libcrypto, libgnutls, libkrb5, libgssapi, libldap, libsasl, libssh2, libidn2, libpsl, librtmp, libnettle, libhogweed, libtasn1, libp11-kit, libgmp, libunistring, libcom_err, libkeyutils) get dropped from every cart bundle (~30MB). Do not add new code that links libcurl."
+      "note": "REMOVED. The networking stack now uses std.http.Client + tls.zig (framework/net/http.zig). libcurl and its entire transitive auth/TLS chain (~30MB) have been dropped from cart bundles. Do not add new code that links libcurl."
     },
     "libvterm": {
       "kind": "vendored-library",
       "payloadPath": "deps/libvterm",
-      "systemNames": ["vterm"],
+      "systemNames": [
+        "vterm"
+      ],
       "linkPolicy": "feature-gated",
       "bundlePolicy": "feature-gated",
       "buildFlag": "-Dhas-terminal"
     },
     "box2d": {
       "kind": "dynamic-library",
-      "systemNames": ["box2d"],
+      "systemNames": [
+        "box2d"
+      ],
       "linkPolicy": "feature-gated",
       "bundlePolicy": "feature-gated",
       "buildFlag": "-Dhas-physics"
     },
     "alsa": {
       "kind": "dynamic-library",
-      "systemNames": ["asound"],
+      "systemNames": [
+        "asound"
+      ],
       "linkPolicy": "feature-gated",
       "bundlePolicy": "never",
       "buildFlag": "-Dhas-midi",
-      "note": "ALSA sequencer (libasound) for MIDI input on Linux. Linked only when -Dhas-midi=true; never bundled — every Linux desktop has libasound.so.2 in its base install."
+      "note": "ALSA sequencer (libasound) for MIDI input on Linux. Linked only when -Dhas-midi=true; never bundled \u2014 every Linux desktop has libasound.so.2 in its base install."
     },
     "tls.zig": {
       "kind": "zig-package",
@@ -198,230 +274,489 @@
       "linkPolicy": "system-assumed",
       "bundlePolicy": "never",
       "note": "Every macOS host has Foundation/QuartzCore/Metal/Cocoa/IOKit/CoreVideo. Linked, not bundled.",
-      "platforms": ["macos"],
-      "frameworks": ["Foundation", "QuartzCore", "Metal", "Cocoa", "IOKit", "CoreVideo"]
+      "platforms": [
+        "macos"
+      ],
+      "frameworks": [
+        "Foundation",
+        "QuartzCore",
+        "Metal",
+        "Cocoa",
+        "IOKit",
+        "CoreVideo"
+      ]
     }
   },
   "features": {
     "react-runtime": {
-      "requiredFor": ["build", "ship"],
-      "jsPackages": ["react", "react-reconciler", "scheduler", "loose-envify", "js-tokens"]
+      "requiredFor": [
+        "build",
+        "ship"
+      ],
+      "jsPackages": [
+        "react",
+        "react-reconciler",
+        "scheduler",
+        "loose-envify",
+        "js-tokens"
+      ]
     },
     "cli-toolchain": {
-      "requiredFor": ["scaffold", "build", "ship"],
-      "tools": ["zig", "v8cli", "esbuild"],
-      "jsPackages": ["typescript"]
+      "requiredFor": [
+        "scaffold",
+        "build",
+        "ship"
+      ],
+      "tools": [
+        "zig",
+        "v8cli",
+        "esbuild"
+      ],
+      "jsPackages": [
+        "typescript"
+      ]
     },
     "v8-engine": {
-      "requiredFor": ["ship"],
-      "buildOptions": ["use-v8"],
-      "nativeLibraries": ["v8"]
+      "requiredFor": [
+        "ship"
+      ],
+      "buildOptions": [
+        "use-v8"
+      ],
+      "nativeLibraries": [
+        "v8"
+      ]
     },
     "window-runtime": {
       "triggers": [],
-      "buildOptions": ["has-window-runtime"],
-      "note": "Native libs (sdl3, wgpu-native, freetype, stb-image*, x11, posix-threading, macos-ui-frameworks) are foundational — always linked. The build option only signals intent; nothing extra is link-gated by it. No auto-trigger — pass -Dhas-window-runtime manually if a future site needs it."
+      "buildOptions": [
+        "has-window-runtime"
+      ],
+      "note": "Native libs (sdl3, wgpu-native, freetype, stb-image*, x11, posix-threading, macos-ui-frameworks) are foundational \u2014 always linked. The build option only signals intent; nothing extra is link-gated by it. No auto-trigger \u2014 pass -Dhas-window-runtime manually if a future site needs it."
     },
     "canvas": {
       "triggers": [],
-      "buildOptions": ["has-canvas"],
-      "note": "wgpu-native is foundational; this flag only gates Canvas-primitive Zig code. No auto-trigger today — pass -Dhas-canvas manually."
+      "buildOptions": [
+        "has-canvas"
+      ],
+      "note": "wgpu-native is foundational; this flag only gates Canvas-primitive Zig code. No auto-trigger today \u2014 pass -Dhas-canvas manually."
     },
     "graph": {
       "triggers": [],
-      "buildOptions": ["has-graph"],
-      "note": "wgpu-native is foundational; this flag only gates Graph-primitive Zig code. No auto-trigger today — pass -Dhas-graph manually."
+      "buildOptions": [
+        "has-graph"
+      ],
+      "note": "wgpu-native is foundational; this flag only gates Graph-primitive Zig code. No auto-trigger today \u2014 pass -Dhas-graph manually."
     },
     "text-rendering": {
       "triggers": [],
-      "buildOptions": ["has-text-rendering"],
-      "note": "freetype is foundational; this flag only gates text-rendering Zig code paths. No auto-trigger today — pass -Dhas-text-rendering manually."
+      "buildOptions": [
+        "has-text-rendering"
+      ],
+      "note": "freetype is foundational; this flag only gates text-rendering Zig code paths. No auto-trigger today \u2014 pass -Dhas-text-rendering manually."
     },
     "image": {
       "triggers": [],
-      "buildOptions": ["has-image"],
-      "note": "stb-image is foundational; this flag only gates Image-primitive Zig code. No auto-trigger today — pass -Dhas-image manually."
+      "buildOptions": [
+        "has-image"
+      ],
+      "note": "stb-image is foundational; this flag only gates Image-primitive Zig code. No auto-trigger today \u2014 pass -Dhas-image manually."
     },
     "video": {
       "triggers": [],
-      "buildOptions": ["has-video"],
-      "nativeLibraries": ["libmpv"],
-      "note": "wgpu-native is foundational. libmpv is dlopen'd at runtime — the registry entry exists so pack-sdk knows to stage libmpv.so.2 alongside the SDK payload when has-video, not because it gets link-time gated. No auto-trigger today; -Dhas-video is passed manually for video-using carts."
+      "buildOptions": [
+        "has-video"
+      ],
+      "nativeLibraries": [
+        "libmpv"
+      ],
+      "note": "wgpu-native is foundational. libmpv is dlopen'd at runtime \u2014 the registry entry exists so pack-sdk knows to stage libmpv.so.2 alongside the SDK payload when has-video, not because it gets link-time gated. No auto-trigger today; -Dhas-video is passed manually for video-using carts."
     },
     "audio": {
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/audio.tsx" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/audio.tsx"
+        }
       ],
-      "buildOptions": ["has-audio"],
-      "nativeLibraries": ["luajit"],
-      "note": "Triggered by carts importing runtime/audio.tsx. Compiles framework/audio_real.zig (SDL3 audio + LuaJIT DSP engine). Implies has-lua-worker — see luajit nativeLibrary entry."
+      "buildOptions": [
+        "has-audio"
+      ],
+      "nativeLibraries": [
+        "luajit"
+      ],
+      "note": "Triggered by carts importing runtime/audio.tsx. Compiles framework/audio.zig (SDL3 audio + LuaJIT DSP engine via the zluajit Zig module)."
     },
     "midi": {
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useMIDI.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useMIDI.ts"
+        }
       ],
-      "buildOptions": ["has-midi"],
-      "nativeLibraries": ["alsa"],
+      "buildOptions": [
+        "has-midi"
+      ],
+      "nativeLibraries": [
+        "alsa"
+      ],
       "note": "Linux MIDI input via ALSA sequencer (framework/midi_real.zig). Carts that don't import useMIDI get framework/midi_stub.zig; libasound is not linked. The dispatcher pattern matches audio.zig / luajit_worker.zig / sqlite.zig / vterm.zig."
     },
     "terminal": {
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useTerminalRecorder.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useTerminal.ts"
+        }
       ],
-      "buildOptions": ["has-terminal"],
-      "nativeLibraries": ["libvterm"]
+      "buildOptions": [
+        "has-terminal"
+      ],
+      "nativeLibraries": [
+        "libvterm"
+      ]
     },
     "physics": {
       "triggers": [],
-      "buildOptions": ["has-physics"],
-      "nativeLibraries": ["box2d"],
-      "note": "No auto-trigger today — pass -Dhas-physics manually for carts using the box2d-backed physics primitives."
+      "buildOptions": [
+        "has-physics"
+      ],
+      "nativeLibraries": [
+        "box2d"
+      ],
+      "note": "No auto-trigger today \u2014 pass -Dhas-physics manually for carts using the box2d-backed physics primitives."
     },
     "sqlite": {
       "shipGate": "sqlite",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/sqlite.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/localstore.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useLocalStore.ts" },
-        { "kind": "metafileInputPrefix", "input": "cart/sweatshop/lib/storage/" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/sqlite.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/localstore.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useLocalStore.ts"
+        },
+        {
+          "kind": "metafileInputPrefix",
+          "input": "cart/sweatshop/lib/storage/"
+        }
       ],
-      "buildOptions": ["has-sqlite"],
-      "nativeLibraries": ["sqlite3"]
+      "buildOptions": [],
+      "nativeLibraries": [
+        "sqlite3"
+      ]
     },
     "crypto": {
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/crypto.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/crypto.ts"
+        }
       ],
-      "buildOptions": ["has-crypto"],
-      "nativeLibraries": ["libsodium"]
+      "buildOptions": [
+        "has-crypto"
+      ],
+      "nativeLibraries": [
+        "libsodium"
+      ]
     },
     "privacy": {
       "shipGate": "privacy",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/usePrivacy.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/usePrivacy.ts"
+        }
       ],
-      "buildOptions": ["has-privacy"],
-      "v8Bindings": ["privacy"],
-      "nativeLibraries": ["libsodium"]
+      "buildOptions": [
+        "has-privacy"
+      ],
+      "v8Bindings": [
+        "privacy"
+      ],
+      "nativeLibraries": [
+        "libsodium"
+      ]
     },
     "use-host": {
       "shipGate": "useHost",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useHost.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useHost.ts"
+        }
       ],
-      "buildOptions": ["has-process", "has-httpsrv", "has-wssrv", "has-net"],
-      "v8Bindings": ["process", "httpsrv", "wssrv", "net"]
+      "buildOptions": [
+        "has-process",
+        "has-httpsrv",
+        "has-wssrv",
+        "has-net"
+      ],
+      "v8Bindings": [
+        "process",
+        "httpsrv",
+        "wssrv",
+        "net"
+      ]
     },
     "connection": {
       "shipGate": "useConnection",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useConnection.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useConnection.ts"
+        }
       ],
-      "buildOptions": ["has-net", "has-tor", "has-websocket"],
-      "v8Bindings": ["net", "tor", "websocket"]
+      "buildOptions": [
+        "has-net",
+        "has-tor",
+        "has-websocket"
+      ],
+      "v8Bindings": [
+        "net",
+        "tor",
+        "websocket"
+      ]
     },
     "fs": {
       "shipGate": "fs",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/fs.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useFileContent.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useFileDrop.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useFileWatch.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/fs.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useFileContent.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useFileDrop.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useFileWatch.ts"
+        }
       ],
-      "buildOptions": ["has-fs"],
-      "v8Bindings": ["fs"]
+      "buildOptions": [
+        "has-fs"
+      ],
+      "v8Bindings": [
+        "fs"
+      ]
     },
     "websocket": {
       "shipGate": "websocket",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/websocket.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useConnection.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/websocket.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useConnection.ts"
+        }
       ],
-      "buildOptions": ["has-websocket"],
-      "v8Bindings": ["websocket"]
+      "buildOptions": [
+        "has-websocket"
+      ],
+      "v8Bindings": [
+        "websocket"
+      ]
     },
     "telemetry": {
       "shipGate": "telemetry",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useTelemetry.ts" },
-        { "kind": "metafileInput", "input": "cart/inspector/bridge.ts" },
-        { "kind": "metafileInput", "input": "cart/sweatshop/host.ts" },
-        { "kind": "metafileInput", "input": "cart/component-gallery/components/telemetry/TelemetryPanel.tsx" },
-        { "kind": "metafileInput", "input": "cart/component-gallery/stories/telemetry-stats.story.tsx" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useTelemetry.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/inspector/bridge.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/sweatshop/host.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/component-gallery/components/telemetry/TelemetryPanel.tsx"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/component-gallery/stories/telemetry-stats.story.tsx"
+        }
       ],
-      "buildOptions": ["has-telemetry"],
-      "v8Bindings": ["telemetry"],
-      "nativeLibraries": ["sqlite3"]
+      "buildOptions": [
+        "has-telemetry"
+      ],
+      "v8Bindings": [
+        "telemetry"
+      ],
+      "nativeLibraries": [
+        "sqlite3"
+      ]
     },
     "zigcall": {
       "shipGate": "zigcall",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/math.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/math.ts"
+        }
       ],
-      "buildOptions": ["has-zigcall"],
-      "v8Bindings": ["zigcall", "zigcall_list"]
+      "buildOptions": [
+        "has-zigcall"
+      ],
+      "v8Bindings": [
+        "zigcall",
+        "zigcall_list"
+      ]
     },
     "sdk": {
       "shipGate": "sdk",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useTheInternet.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/fetch.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useFetchBrowser.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useBrowse.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useTheInternet.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/fetch.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useFetchBrowser.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useBrowse.ts"
+        }
       ],
-      "buildOptions": ["has-sdk"],
-      "v8Bindings": ["sdk"],
-      "nativeLibraries": ["tls.zig"],
-      "note": "Now triggers off the tiered networking stack: useTheInternet (tier 0) plus the tier 1/2 hooks that compose it (fetch, useFetchBrowser, useBrowse). The old http.ts + browser_page.ts triggers were retired when those files were absorbed into useTheInternet (commit 8a844f23a). curl removed from nativeLibraries — the backend is std.http + tls.zig + nghttp2 per project_networking_stack memory. nghttp2 should be added here once its native dep wiring lands."
+      "buildOptions": [
+        "has-sdk"
+      ],
+      "v8Bindings": [
+        "sdk"
+      ],
+      "nativeLibraries": [
+        "tls.zig"
+      ],
+      "note": "Now triggers off the tiered networking stack: useTheInternet (tier 0) plus the tier 1/2 hooks that compose it (fetch, useFetchBrowser, useBrowse). The old http.ts + browser_page.ts triggers were retired when those files were absorbed into useTheInternet (commit 8a844f23a). libcurl has been removed; the backend is std.http.Client + tls.zig. nghttp2 should be added here once its native dep wiring lands."
     },
     "voice": {
       "shipGate": "voice",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/useVoiceInput.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useAudioInput.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useVoiceInput.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useAudioInput.ts"
+        }
       ],
-      "buildOptions": ["has-voice"],
-      "v8Bindings": ["voice"]
+      "buildOptions": [
+        "has-voice"
+      ],
+      "v8Bindings": [
+        "voice"
+      ]
     },
     "whisper": {
       "shipGate": "whisper",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/whisper.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/whisper.ts"
+        }
       ],
-      "buildOptions": ["has-whisper"],
-      "v8Bindings": ["whisper"],
+      "buildOptions": [
+        "has-whisper"
+      ],
+      "v8Bindings": [
+        "whisper"
+      ],
       "note": "Heavy: compiles deps/whisper.cpp + ggml into libwhisper.so (~20 MB) and statically pulls libstdc++ into the cart binary (~80 MB). Carts that don't import runtime/hooks/whisper.ts pay nothing."
     },
     "lua-worker": {
       "triggers": [],
-      "buildOptions": ["has-lua-worker"],
-      "nativeLibraries": ["luajit"],
-      "note": "Off-thread LuaJIT compute worker (framework/luajit_worker_real.zig). No metafileInput trigger today — pass -Dhas-lua-worker manually for carts that want the worker without audio. Carts that opt into has-audio automatically get has-lua-worker because audio_real.zig's DSP engine imports zluajit (see build.zig: has_lua_worker = explicit OR has_audio)."
+      "buildOptions": [],
+      "nativeLibraries": [
+        "luajit"
+      ],
+      "note": "Off-thread LuaJIT compute worker (framework/process/luajit_worker.zig). Always compiled; libluajit-5.1 is dlopen'd at runtime so there is no -D flag. Trigger this feature so pack-sdk stages libluajit-5.1.so next to the cart."
     },
     "pg": {
       "shipGate": "pg",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/pg.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/usePostgres.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/embed.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useEmbed.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/pg.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/usePostgres.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/embed.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useEmbed.ts"
+        }
       ],
-      "buildOptions": ["has-pg"],
-      "v8Bindings": ["pg"],
+      "buildOptions": [
+        "has-pg"
+      ],
+      "v8Bindings": [
+        "pg"
+      ],
       "note": "Postgres client (pg.zig) + auto-spawn of embedded postgres at ~/.cache/reactjit-embed/embed-pg/. Free side effect of useEmbed since embedding storage rides the same socket."
     },
     "embed": {
       "shipGate": "embed",
       "triggers": [
-        { "kind": "metafileInput", "input": "runtime/hooks/embed.ts" },
-        { "kind": "metafileInput", "input": "runtime/hooks/useEmbed.ts" }
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/embed.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useEmbed.ts"
+        }
       ],
-      "buildOptions": ["has-embed"],
-      "v8Bindings": ["embed"],
-      "note": "Local embedding + retrieval via libllama_ffi.so (linked from tsz/zig-out/lib at build). Chat generation no longer rides this gate — useLocalChat dlopens an LM Studio backend at runtime (framework/local_ai_runtime.zig) and is gated by has-sdk for its host bindings."
+      "buildOptions": [
+        "has-embed"
+      ],
+      "v8Bindings": [
+        "embed"
+      ],
+      "note": "Local embedding + retrieval via libllama_ffi.so (linked from tsz/zig-out/lib at build). Chat generation no longer rides this gate \u2014 useLocalChat dlopens an LM Studio backend at runtime (framework/local_ai_runtime.zig) and is gated by has-sdk for its host bindings."
     }
   },
   "shipGate": {
-    "flagOrder": ["privacy", "useHost", "useConnection", "fs", "websocket", "telemetry", "zigcall", "sdk", "voice", "whisper", "pg", "embed", "sqlite"]
+    "flagOrder": [
+      "privacy",
+      "useHost",
+      "useConnection",
+      "fs",
+      "websocket",
+      "telemetry",
+      "zigcall",
+      "sdk",
+      "voice",
+      "whisper",
+      "pg",
+      "embed",
+      "sqlite"
+    ]
   }
 }

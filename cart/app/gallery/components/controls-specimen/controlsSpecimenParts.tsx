@@ -1,6 +1,34 @@
 import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
-import { VerticalText } from './ControlsSpecimenShell';
 import { CTRL, type ControlTone, toneColor, toneSoftBackground } from './controlsSpecimenTheme';
+
+export function VerticalText(props: {
+  text: string;
+  color?: string;
+  fontSize?: number;
+  fontWeight?: string;
+  letterSpacing?: number;
+}) {
+  const chars = Array.from(props.text || '');
+  return (
+    <Col style={{ alignItems: 'center', gap: 0 }}>
+      {chars.map((char, index) => (
+        <Text
+          key={`${char}-${index}`}
+          style={{
+            fontSize: props.fontSize ?? 8,
+            color: props.color ?? CTRL.inkDimmer,
+            fontFamily: CTRL.mono,
+            fontWeight: props.fontWeight ?? 'normal',
+            letterSpacing: props.letterSpacing ?? 1.2,
+            lineHeight: (props.fontSize ?? 8) + 1,
+          }}
+        >
+          {char}
+        </Text>
+      ))}
+    </Col>
+  );
+}
 
 export function AtomFrame(props: {
   children: any;

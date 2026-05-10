@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import type {
   SpreadsheetCellMap,
-  SpreadsheetMetric,
   SpreadsheetNativeState,
   SpreadsheetScalar,
   SpreadsheetWorkbook,
@@ -9,11 +8,11 @@ import type {
 import { emptySpreadsheetNativeState } from '../../data/overstock/spreadsheet';
 import { SpreadsheetFormulaBar } from './SpreadsheetFormulaBar';
 import { SpreadsheetGrid, type SpreadsheetCellChangeEvent, type SpreadsheetColumnResizeEvent, type SpreadsheetSelectEvent } from './SpreadsheetGrid';
-import { SpreadsheetMetricStrip } from './SpreadsheetMetricStrip';
-import { SpreadsheetStatusBar } from './SpreadsheetStatusBar';
-import { SpreadsheetTopBar } from './SpreadsheetTopBar';
 import { classifiers as S } from '@reactjit/core';
 
+// Spreadsheet — formula bar + grid. App chrome (title bar, metric strip,
+// status bar) lives separately in spreadsheet-atoms; the spreadsheet itself
+// is just the editable surface, not a whole shell.
 export type SpreadsheetProps = {
   workbook: SpreadsheetWorkbook;
   cells?: SpreadsheetCellMap;
@@ -69,22 +68,6 @@ function adjustCell(cells: SpreadsheetCellMap, address: string, delta: number): 
   const numeric = Number(current);
   const base = Number.isFinite(numeric) ? numeric : 0;
   return { ...cells, [address]: base + delta };
-}
-
-function metricsWithState(base: SpreadsheetMetric[], state: SpreadsheetNativeState): SpreadsheetMetric[] {
-  const errors = state.errorCount > 0
-    ? { id: 'errors', label: 'Errors', value: String(state.errorCount), tone: 'error' as const }
-    : { id: 'errors', label: 'Errors', value: '0', tone: 'neutral' as const };
-
-  const current = {
-    id: 'current',
-    label: 'Current',
-    value: state.valueDisplay || state.rawInput || '-',
-    tone: state.error ? 'error' as const : 'accent' as const,
-  };
-
-  const rest = base.filter((metric) => metric.id !== 'errors' && metric.id !== 'current');
-  return [errors, current, ...rest];
 }
 
 export function Spreadsheet({
@@ -161,13 +144,6 @@ export function Spreadsheet({
 
   return (
     <S.SpreadsheetFrame style={{ height }}>
-      <SpreadsheetTopBar
-        title={workbook.title}
-        subtitle={workbook.subtitle}
-        state={activeState}
-        readOnly={workbook.readOnly}
-      />
-
       <SpreadsheetFormulaBar
         state={activeState}
         readOnly={workbook.readOnly}
@@ -197,9 +173,6 @@ export function Spreadsheet({
           onColumnResize={handleColumnResize}
         />
       </S.SpreadsheetGridSlot>
-
-      <SpreadsheetMetricStrip metrics={metricsWithState(workbook.metrics, activeState)} />
-      <SpreadsheetStatusBar state={activeState} rows={workbook.rows} cols={workbook.cols} />
     </S.SpreadsheetFrame>
   );
 }

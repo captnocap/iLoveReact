@@ -1,4 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useAudio } from '../audio';
+import { exists as fileExists, listDir, stat as fileStat, type FsStat } from './fs';
+import { useFileDrop } from './useFileDrop';
+import { useFileWatch, type FileWatchOptions } from './useFileWatch';
 import {
   classifyFile,
   dirStats,
@@ -10,20 +14,20 @@ import {
   type MediaType,
 } from './media';
 
-type ScanOptions = {
+export type ScanOptions = {
   dir: string | null;
   recursive?: boolean;
   maxDepth?: number;
   kinds?: MediaType[];
 };
 
-type StatsOptions = {
+export type StatsOptions = {
   dir: string | null;
   recursive?: boolean;
   maxDepth?: number;
 };
 
-type IndexOptions = {
+export type IndexOptions = {
   dir: string | null;
   recursive?: boolean;
   maxDepth?: number;
@@ -32,7 +36,7 @@ type IndexOptions = {
   kinds?: MediaType[];
 };
 
-type QueryOptions = {
+export type QueryOptions = {
   dir: string | null;
   source?: 'scan' | 'index';
   recursive?: boolean;
@@ -48,6 +52,75 @@ type QueryOptions = {
   limit?: number;
   offset?: number;
 };
+
+export type MediaInput = string | MediaFile | null | undefined;
+
+export type AudioPlacementOptions = {
+  track: number;
+  start?: number;
+  end?: number;
+  sliceStart?: number;
+  sliceEnd?: number;
+  stretchFactor?: number;
+  play?: boolean;
+};
+
+export type LoadedAudioMedia = {
+  path: string;
+  file: MediaFile;
+  sound: number;
+  duration: number;
+};
+
+export type MediaDropEvent = {
+  path: string;
+  file: MediaFile;
+  stat: FsStat | null;
+  audio: LoadedAudioMedia | null;
+};
+
+export type MediaDropOptions = {
+  kinds?: MediaType[];
+  loadAudio?: boolean;
+  placeAudio?: AudioPlacementOptions;
+};
+
+export type UseAudioFileOptions = {
+  place?: AudioPlacementOptions;
+};
+
+function basename(path: string): string {
+  const normalized = String(path || '').replace(/\\/g, '/');
+  return normalized.split('/').filter(Boolean).pop() || normalized;
+}
+
+function mediaPath(input: MediaInput): string {
+  if (!input) return '';
+  return typeof input === 'string' ? input : input.path;
+}
+
+function mediaFileFromPath(path: string): MediaFile {
+  const st = fileStat(path);
+  return {
+    path,
+    name: basename(path),
+    size: st?.size ?? 0,
+    mtime: st?.mtimeMs,
+    type: classifyFile(path),
+    source: 'filesystem',
+  };
+}
+
+function normalizeMediaFile(input: MediaInput): MediaFile | null {
+  const path = mediaPath(input);
+  if (!path) return null;
+  return typeof input === 'string' ? mediaFileFromPath(path) : input;
+}
+
+function isFilesystemAudio(input: MediaInput): boolean {
+  const file = normalizeMediaFile(input);
+  return !!file && file.source === 'filesystem' && file.type === 'audio';
+}
 
 function filterKinds(items: MediaFile[], kinds?: MediaType[]): MediaFile[] {
   if (!kinds || kinds.length === 0) return items;
@@ -91,6 +164,8 @@ function queryItems(items: MediaFile[], options: QueryOptions): MediaFile[] {
 }
 
 export function useMedia() {
+  const audio = useAudio();
+
   const runScan = useCallback(async (options: ScanOptions): Promise<MediaFile[]> => {
     if (!options.dir) return [];
     return filterKinds(
@@ -142,6 +217,54 @@ export function useMedia() {
         });
     return queryItems(items, options);
   }, [runIndex, runScan]);
+
+  const loadAudio = useCallback((input: MediaInput): LoadedAudioMedia | null => {
+    const file = normalizeMediaFile(input);
+    if (!file || file.source !== 'filesystem' || file.type !== 'audio') return null;
+    const sound = audio.loadSound(file.path);
+    if (!sound) return null;
+    return {
+      path: file.path,
+      file,
+      sound,
+      duration: audio.dur(sound),
+    };
+  }, [audio]);
+
+  const loadSample = useCallback((
+    target: string | number,
+    slot: number,
+    input: MediaInput,
+    mode: 'oneshot' | 'loop' = 'oneshot',
+  ): boolean => {
+    const file = normalizeMediaFile(input);
+    if (!file || file.source !== 'filesystem' || file.type !== 'audio') return false;
+    return audio.loadSample(target, slot, file.path, mode);
+  }, [audio]);
+
+  const placeAudio = useCallback((input: MediaInput, options: AudioPlacementOptions): LoadedAudioMedia | null => {
+    const loaded = loadAudio(input);
+    if (!loaded) return null;
+
+    let sound = loaded.sound;
+    if (typeof options.sliceStart === 'number' && typeof options.sliceEnd === 'number') {
+      sound = audio.createAudioSlice(sound, options.sliceStart, options.sliceEnd);
+    }
+    if (typeof options.stretchFactor === 'number') {
+      sound = audio.createAudioStretch(sound, options.stretchFactor);
+    }
+
+    const start = typeof options.start === 'number' ? options.start : audio.getPlayhead();
+    if (typeof options.end === 'number') audio.fitMedia(sound, options.track, start, options.end);
+    else audio.insertMedia(sound, options.track, start);
+    if (options.play) audio.play();
+
+    return {
+      ...loaded,
+      sound,
+      duration: audio.dur(sound),
+    };
+  }, [audio, loadAudio]);
 
   const useScan = (options: ScanOptions) => {
     const [files, setFiles] = useState<MediaFile[]>([]);
@@ -239,6 +362,67 @@ export function useMedia() {
     return { results, loading, error, refetch };
   };
 
+  const useWatchedScan = (options: ScanOptions, watchOptions: FileWatchOptions = {}) => {
+    const result = useScan(options);
+    useFileWatch(options.dir ?? '', () => result.rescan(), {
+      recursive: watchOptions.recursive ?? options.recursive ?? true,
+      intervalMs: watchOptions.intervalMs,
+      pattern: watchOptions.pattern,
+    });
+    return result;
+  };
+
+  const useAudioFile = (input: MediaInput, options: UseAudioFileOptions = {}) => {
+    const [value, setValue] = useState<LoadedAudioMedia | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<Error | null>(null);
+    const [version, setVersion] = useState(0);
+    const path = mediaPath(input);
+    const optsKey = JSON.stringify(options);
+
+    useEffect(() => {
+      let cancelled = false;
+      setLoading(true);
+      setError(null);
+      try {
+        const loaded = options.place ? placeAudio(input, options.place) : loadAudio(input);
+        if (!cancelled) setValue(loaded);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e : new Error(String(e)));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+      return () => { cancelled = true; };
+    }, [path, optsKey, version]);
+
+    const reload = useCallback(() => setVersion((v) => v + 1), []);
+    return { audio: value, loading, error, reload };
+  };
+
+  const useDrop = (handler: (event: MediaDropEvent) => void, options: MediaDropOptions = {}) => {
+    const handlerRef = useRef(handler);
+    const optionsRef = useRef(options);
+    handlerRef.current = handler;
+    optionsRef.current = options;
+
+    useFileDrop((path) => {
+      const file = mediaFileFromPath(path);
+      const opts = optionsRef.current;
+      if (opts.kinds && opts.kinds.length > 0 && !opts.kinds.includes(file.type)) return;
+      const audioResult = opts.placeAudio
+        ? placeAudio(file, opts.placeAudio)
+        : opts.loadAudio
+          ? loadAudio(file)
+          : null;
+      handlerRef.current({
+        path,
+        file,
+        stat: fileStat(path),
+        audio: audioResult,
+      });
+    });
+  };
+
   return {
     scan: runScan,
     stats: runStats,
@@ -248,6 +432,17 @@ export function useMedia() {
     useStats,
     useIndex,
     useQuery,
+    useWatchedScan,
+    useAudioFile,
+    useDrop,
+    fileFromPath: mediaFileFromPath,
+    exists: fileExists,
+    stat: fileStat,
+    listDir,
+    isAudio: isFilesystemAudio,
+    loadAudio,
+    loadSample,
+    placeAudio,
     classifyFile,
     formatSize,
   };

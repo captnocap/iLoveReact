@@ -1,33 +1,32 @@
-// icon_bench — A/B comparison of icon rendering paths.
+// icon_bench — A/B/C comparison of icon rendering paths.
 //
-// Two modes, identical visual content:
+// Three modes, identical visual content:
 //
-//   SDF — pre-baked atlas, one batched instanced quad per frame regardless of
-//         icon count. Goes through runtime/icons/Icon.tsx's atlas fast path.
+//   SDF    — pre-baked atlas, one batched instanced quad per frame regardless
+//            of icon count. Goes through runtime/icons/Icon.tsx's atlas fast
+//            path → framework/gpu/sdf_icons.zig.
 //
-//   PATH — current <Graph.Path> renderer. Each icon parses its `d` string,
-//          flattens beziers, queues curve segments. Today's hot path.
+//   PATH   — current <Graph.Path> renderer. Each icon parses its `d` string,
+//            flattens beziers, queues curve segments. Today's hot path.
+//
+//   PATH+SS — PATH wrapped in <StaticSurface> per-cell. Today's band-aid:
+//             paint cost collapses to a GPU-cached quad as long as nothing
+//             changes in that cell. ANIM ON forces re-paint and busts the
+//             cache, so the saving evaporates.
 //
 // Toggles:
 //   COUNT — 50 / 200 / 500 / 1000 / 2000 icons
-//   MODE  — SDF vs PATH
-//   ANIM  — pulse opacity per-icon (forces re-paint every tick)
+//   ANIM  — pulse size+opacity per-icon at 60Hz so re-paint can't be elided
 //
-// Read FPS / paint µs from the engine telemetry overlay (top-left).
-//
-// Both modes render the SAME 12 icon names in rotation, so geometry and
-// pixel coverage are equivalent — the only differing factor is the render
-// path.
+// FPS / paint µs come from the engine telemetry overlay (top-left). With ANIM
+// ON at 1000+ icons, SDF should stay smooth while PATH and PATH+SS choke.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Pressable, StaticSurface, Text } from '@reactjit/runtime/primitives';
+import { Box, Graph, Pressable, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import { Icon } from '@reactjit/runtime/icons/Icon';
-import { Graph } from '@reactjit/runtime/primitives';
 import { registerIcons } from '@reactjit/runtime/icons/registry';
 import * as AllIcons from '@reactjit/runtime/icons/icons';
 
-// Register the 12 baked icons by name so <Icon name="..."> works in the
-// path-renderer mode (the atlas case routes by exact name without registry).
 registerIcons({
   Heart: (AllIcons as any).Heart,
   Search: (AllIcons as any).Search,
@@ -57,8 +56,22 @@ const COLOR_DIM = '#7f93b1';
 const COLOR_GREEN = '#34d399';
 const COLOR_BLUE = '#3da9ff';
 const COLOR_AMBER = '#ff9f43';
+const COLOR_PINK = '#f472b6';
 
-type Mode = 'sdf' | 'path';
+type Mode = 'sdf' | 'path' | 'path-ss';
+
+// ── HSL → hex (parseColor in the engine accepts hex/rgb/named, NOT hsl) ──
+function hslToHex(h: number, s: number, l: number): string {
+  s /= 100;
+  l /= 100;
+  const k = (n: number) => (n + h / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => {
+    const x = l - a * Math.max(-1, Math.min(k(n) - 3, 9 - k(n), 1));
+    return Math.round(255 * x).toString(16).padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
 
 // ── Path-mode icon — bypasses Icon.tsx's atlas fast path so we measure the
 // pure <Graph.Path> render cost. Identical visual + sizing.
@@ -108,15 +121,25 @@ function Toggle({ label, on, onPress, accent }: { label: string; on: boolean; on
   );
 }
 
+// ── Single tile renderer per mode. Wrapped in <StaticSurface> for path-ss
+// only — the cache collapses to a GPU quad while nothing in the cell changes,
+// then re-bakes the moment ANIM forces a prop update.
+function Tile({ mode, name, color, size }: { mode: Mode; name: string; color: string; size: number }) {
+  if (mode === 'sdf') return <Icon name={name} size={size} color={color} />;
+  if (mode === 'path') return <PathIcon name={name} color={color} size={size} />;
+  return (
+    <StaticSurface staticKey={`${name}-${color}-${size}`}>
+      <PathIcon name={name} color={color} size={size} />
+    </StaticSurface>
+  );
+}
+
 export default function IconBench() {
   const [count, setCount] = useState(500);
   const [mode, setMode] = useState<Mode>('sdf');
   const [anim, setAnim] = useState(false);
   const [tick, setTick] = useState(0);
 
-  // Pulse a frame counter at 60 Hz when ANIM is on. Each icon multiplies
-  // the counter by its index for varying per-icon opacity, forcing real
-  // per-frame work in both render paths (SDF and Path).
   useEffect(() => {
     if (!anim) return;
     const id = setInterval(() => setTick((t) => t + 1), TICK_MS);
@@ -142,6 +165,20 @@ export default function IconBench() {
     return arr;
   }, [count]);
 
+  // Pre-compute the ICONS color rotation (one hex per index) so we don't
+  // recompute hslToHex × 2000 in render. When ANIM is on, the carousel of
+  // colors shifts by `tick`, every cell gets a new color every frame.
+  const palette = useMemo(() => {
+    const out: string[] = [];
+    for (let i = 0; i < 360; i++) out.push(hslToHex(i, 70, 70));
+    return out;
+  }, []);
+
+  const status =
+    mode === 'sdf' ? { label: 'SDF', color: COLOR_GREEN } :
+    mode === 'path' ? { label: 'PATH', color: COLOR_AMBER } :
+    { label: 'PATH+SS', color: COLOR_PINK };
+
   return (
     <Box style={{
       flexGrow: 1, width: '100%', height: '100%',
@@ -152,15 +189,13 @@ export default function IconBench() {
       {/* Header */}
       <Box style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={{ fontSize: 16, color: COLOR_INK, fontWeight: 'bold' }}>
-          Icon-bench · SDF vs Path
+          Icon-bench · SDF vs Path vs Path+StaticSurface
         </Text>
         <Box style={{ flexDirection: 'row', gap: 16 }}>
           <Text style={{ fontSize: 11, color: COLOR_DIM }}>{`icons ${count}`}</Text>
           <Text style={{ fontSize: 11, color: COLOR_DIM }}>{`renders/s ${diag.rps}`}</Text>
           <Text style={{ fontSize: 11, color: anim ? COLOR_GREEN : COLOR_DIM }}>{anim ? 'ANIM' : 'IDLE'}</Text>
-          <Text style={{ fontSize: 11, color: mode === 'sdf' ? COLOR_GREEN : COLOR_AMBER, fontWeight: 'bold' }}>
-            {mode === 'sdf' ? 'SDF' : 'PATH'}
-          </Text>
+          <Text style={{ fontSize: 11, color: status.color, fontWeight: 'bold' }}>{status.label}</Text>
         </Box>
       </Box>
 
@@ -168,6 +203,7 @@ export default function IconBench() {
       <Box style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         <Toggle label="SDF" on={mode === 'sdf'} onPress={() => setMode('sdf')} accent={COLOR_GREEN} />
         <Toggle label="PATH" on={mode === 'path'} onPress={() => setMode('path')} accent={COLOR_AMBER} />
+        <Toggle label="PATH+SS" on={mode === 'path-ss'} onPress={() => setMode('path-ss')} accent={COLOR_PINK} />
         <Box style={{ width: 12 }} />
         <Toggle label={anim ? 'ANIM ON' : 'ANIM OFF'} on={anim} onPress={() => setAnim((v) => !v)} accent={COLOR_BLUE} />
         <Box style={{ width: 12 }} />
@@ -176,18 +212,32 @@ export default function IconBench() {
         ))}
       </Box>
 
+      {/* Helper text */}
+      <Text style={{ fontSize: 10, color: COLOR_DIM }}>
+        ANIM ON: every icon's hue shifts every frame (visible color rotation) and tile size pulses ±20% so re-paint can't be elided. Read paint µs / FPS from the telemetry overlay.
+      </Text>
+
       {/* Icon grid */}
       <Box style={{ flexGrow: 1, flexDirection: 'row', flexWrap: 'wrap', alignContent: 'flex-start' }}>
         {indices.map((i) => {
-          const name = ICONS[i % ICONS.length];
-          // Tint cycles + pulses with `tick` so memoization can't elide work.
-          const base = (i + (anim ? tick : 0)) % 360;
-          const color = `hsl(${base}, 70%, 70%)`;
+          const hue = (i * 19 + (anim ? tick : 0)) % 360;
+          const color = palette[hue];
+          // Pulse the tile size 24 ± 4 over a ~40-frame cycle when ANIM is on,
+          // so the visual change is unmistakable (color alone is subtle).
+          const pulse = anim
+            ? 1.0 + 0.18 * Math.sin((i + tick) * 0.31)
+            : 1.0;
+          const sz = Math.round(ICON_SIZE * pulse);
           return (
-            <Box key={i} style={{ width: ICON_SIZE + 4, height: ICON_SIZE + 4, alignItems: 'center', justifyContent: 'center' }}>
-              {mode === 'sdf'
-                ? <Icon name={name} size={ICON_SIZE} color={color} />
-                : <PathIcon name={name} size={ICON_SIZE} color={color} />}
+            <Box
+              key={i}
+              style={{
+                width: ICON_SIZE + 4, height: ICON_SIZE + 4,
+                flexShrink: 0, flexGrow: 0,
+                alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Tile mode={mode} name={ICONS[i % ICONS.length]} color={color} size={sz} />
             </Box>
           );
         })}

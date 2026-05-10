@@ -17,8 +17,8 @@
 //! from the current interpolated value (no pop).
 
 const std = @import("std");
-const m = @import("math.zig");
-const easing_mod = @import("easing.zig");
+const m = @import("math/root.zig");
+const easing_mod = @import("math/easing.zig");
 const layout = @import("layout.zig");
 const Node = layout.Node;
 const Color = layout.Color;

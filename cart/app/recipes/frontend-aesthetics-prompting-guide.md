@@ -2,7 +2,7 @@
 
 Claude can produce great frontends but tends toward generic, conservative defaults when not steered. This recipe is a single prompt blob you wrap your turn with so the output rejects the "AI slop" aesthetic and commits to a specific design direction.
 
-In our stack the prompt rides on the user message — `framework/v8_bindings_sdk.zig:932` (`hostClaudeInit`) does not expose `system_prompt` to the cart yet. Until that opens up, prepend the aesthetics block to every turn that asks Claude to generate UI.
+In our stack the prompt rides on the user message — the `claude_code` branch of `useAssistant` doesn't expose a `systemPrompt` opt yet (only `openai_compat` does). Until that opens up, prepend the aesthetics block to every turn that asks Claude to generate UI.
 
 ## When to use this
 
@@ -53,21 +53,26 @@ that you think outside the box!
 </frontend_aesthetics>`;
 ```
 
-## Sending it through the v8 bindings
+## Sending it through useAssistant
 
-```typescript
-const host: any = globalThis;
-const claude_init = typeof host.__claude_init === 'function'
-  ? host.__claude_init : (_a: string, _b: string, _c?: string) => 0;
-const claude_send = typeof host.__claude_send === 'function'
-  ? host.__claude_send : (_: string) => 0;
+```tsx
+import { useEffect } from 'react';
+import { useAssistant } from '@reactjit/runtime/hooks/useAssistant';
 
-function askForFrontend(workspace: string, model: string, request: string): boolean {
-  if (!claude_init(workspace, model)) return false;
+function FrontendBuilder({ workspace, model, request }: { workspace: string; model: string; request: string }) {
+  const { events, ask, ready } = useAssistant({
+    backend: 'claude_code',
+    cwd: workspace,
+    model,
+  });
 
-  // No system_prompt override from the cart yet — concatenate.
-  const prompt = `${FRONTEND_AESTHETICS_PROMPT}\n\n${request}`;
-  return claude_send(prompt);
+  useEffect(() => {
+    if (!ready() || !request) return;
+    // No system_prompt opt for claude_code yet — concatenate into the user turn.
+    ask(`${FRONTEND_AESTHETICS_PROMPT}\n\n${request}`);
+  }, [ready(), request]);
+
+  return <RenderEvents events={events} />;
 }
 ```
 
@@ -103,14 +108,14 @@ Use one or two of these instead of the full bundle when you're doing a focused s
 
 Generate two variants of the same component, one with the prompt and one without. The non-prompted version usually picks Inter, a near-monochrome palette, and zero motion. The prompted version commits to a direction. If the prompted variant still feels generic, narrow the prompt to typography or color alone.
 
-## Caveats and TODOs against the v8 bindings
+## Caveats and TODOs against the worker bindings
 
-- **No `system_prompt` from the cart.** `framework/claude_sdk/options.zig:35` already has the field; `framework/v8_bindings_sdk.zig:932` (`hostClaudeInit`) doesn't pass it through. Today we concatenate into the user message. When that's wired, move this prompt onto the system slot so it doesn't eat the turn budget.
-- **No turn-history persistence in the cart yet.** Each new `__claude_init` is a fresh subprocess. The aesthetics block has to be re-sent every time you start a new session, until we surface `resume_session` cleanly.
+- **No `systemPrompt` for `claude_code` in the worker opts.** `framework/assistant/claude_sdk/options.zig` already has the field; the Claude branch of `useAssistant` doesn't surface it. The `openai_compat` backend already accepts `systemPrompt` — wire the same opt through `framework/assistant/worker_bindings.zig` for the Claude path. Today we concatenate into the user message; when wired, move this prompt onto the system slot so it doesn't eat the turn budget.
+- **No turn-history persistence by default.** Each `useAssistant` mount spawns a fresh worker. The aesthetics block has to be re-sent every time, until you supply `resumeSession` to restore a prior conversation.
 
 ## Pattern summary
 
 1. Keep the aesthetics block as a TS string export so it's a one-liner to import anywhere.
-2. Concatenate `${AESTHETICS}\n\n${request}` and pass that to `__claude_send`.
+2. Concatenate `${AESTHETICS}\n\n${request}` and pass that to `ask()`.
 3. For narrow tasks, send a slice (typography / motion / color) instead of the full bundle.
-4. When `system_prompt` opens up in the bindings, move the block onto the system slot.
+4. When `systemPrompt` opens up for `claude_code` in the worker bindings, move the block onto the system slot.

@@ -15,7 +15,6 @@ export * as sqlite from './sqlite';
 export * as pg from './pg';
 export * as embed from './embed';
 export * as fetch from './fetch';
-export * as crypto from './crypto';
 export * as process from './process';
 export * as localstore from './localstore';
 export * as clipboard from './clipboard';
@@ -134,6 +133,8 @@ export type {
 } from './useTelemetry';
 export { useCRUD } from './useCRUD';
 export { useMedia } from './useMedia';
+export { useVideo, videoControl } from './useVideo';
+export type { VideoStatus, VideoControl, UseVideoResult } from './useVideo';
 export { useVoiceInput } from './useVoiceInput';
 export type { VoiceInputOptions, VoiceInputResult } from './useVoiceInput';
 export { useAudioInput };

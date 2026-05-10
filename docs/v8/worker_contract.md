@@ -28,8 +28,9 @@ exposes provider-specific poll events directly; it does not yet expose
 | Codex app-server SDK | `framework/codex_sdk.zig` | Speaks JSON-RPC over `codex app-server --listen stdio://`; produces app-server notifications. |
 | Kimi wire SDK | `framework/kimi_wire_sdk.zig` | Speaks Kimi `--wire` JSON-RPC over stdio; produces event/request/response messages. |
 | Local AI runtime | `framework/local_ai_runtime.zig`, `framework/ffi/llm_worker.cpp` | Spawns `rjit-llm-worker`, emits local chat events over an in-process event ring. |
-| V8 SDK binding | `framework/v8_bindings_sdk.zig` | Registers `__claude_*`, `__kimi_*`, `__localai_*`, converts provider events to JS objects. |
-| React hooks | `runtime/hooks/useClaudeChat.ts`, `runtime/hooks/useLocalChat.ts` | Poll host events and expose cart-friendly chat state. |
+| V8 worker binding | `framework/worker_bindings.zig` (called from `framework/v8_bindings_sdk.zig` `registerSdk`) | Registers `__worker_start`, `__worker_send`, `__worker_poll`, `__worker_respond`, `__worker_set_tools`, `__worker_close`; recognizes `claude_code`, `kimi_cli_wire`, and `local_ai` backends and normalizes their events. |
+| Legacy QJS provider globals | `framework/qjs_runtime.zig` | Registers `__claude_*`, `__kimi_*`, `__localai_*` directly on the QuickJS runtime only. Not registered on V8. |
+| React hooks | `runtime/hooks/useAssistant.ts` | V8 cart entry point — drives `__worker_start` / `__worker_send` / `__worker_poll`, exposes phase, streaming text, tool calls, and event kinds for any registered backend. |
 | Gallery data shapes | `cart/app/gallery/data/worker.ts`, `worker-session.ts`, `worker-event.ts`, `event-adapter.ts` | Documents UI/database-facing worker/session/event shapes and adapter rules. |
 | Older cockpit consumer | `cart/deadcode/cockpit/index.tsx` | Historical reducer that consumes compact JS event variants per backend. |
 | Adjacent docs | `docs/v8/claude-sdk.md`, `docs/v8/codex-sdk.md`, `docs/v8/llamacpp.md`, `docs/v8/v8_bindings_sdk.md` | Backend-specific and binding-specific context. |
@@ -93,8 +94,14 @@ __localai_close
 6. Cart reducers or hooks accumulate those objects into UI-local transcript
    state.
 
-The missing step is important: V8 does not currently call
-`framework/worker_contract.zig` before events reach JS.
+The provider-specific path above still exists, but it is no longer the only
+surface. `framework/v8_bindings_sdk.zig` now also calls
+`framework/worker_bindings.zig` (`worker_bindings.register()` at the tail of
+`registerSdk`), which exposes `worker_contract.WorkerStore` directly to JS via
+`__worker_start` / `__worker_send` / `__worker_poll` / `__worker_respond` /
+`__worker_set_tools` / `__worker_close`. Carts on the new path receive
+already-normalized `WorkerEvent` rows; carts on the legacy provider globals
+still bypass `worker_contract.zig`.
 
 ## Build And Registration
 
@@ -694,18 +701,26 @@ The normalizer maps them back into `UsageTotals`.
 
 ## Local AI Events
 
-`framework/worker_contract.zig` does not currently ingest
-`local_ai_runtime.OwnedEvent`.
-
-The local runtime still participates in the UI-level worker contract through the
-V8 SDK binding and `useLocalChat`:
+`worker_bindings.register()` recognizes `local_ai` as a live backend alongside
+`claude_code` and `kimi_cli_wire`. `LocalAiSession` (`worker_bindings.zig`
+~L315) wraps `local_ai_runtime.Session`, owns an inbox of `OwnedEvent` rows,
+and plumbs `enqueue` (send), `drainInbox` (poll), `submitToolReply`
+(respond), and `setTools` through the standard `__worker_*` hosts. So
+`__worker_start("local_ai", optsJson)` returns a real worker id and the V8
+event flow is:
 
 ```text
 framework/local_ai_runtime.zig
   -> OwnedEvent
-  -> framework/v8_bindings_sdk.zig localAiEventToJs
-  -> runtime/hooks/useLocalChat.ts
+  -> framework/worker_bindings.zig LocalAiSession.drainInbox
+  -> __worker_poll(workerId)
+  -> runtime/hooks/useAssistant.ts
 ```
+
+The legacy `framework/v8_bindings_sdk.zig localAiEventToJs` /
+`runtime/hooks/useLocalChat.ts` flow described in older versions of this doc
+applied only to QuickJS — those `__localai_*` globals are not registered on
+V8, and `useLocalChat.ts` is no longer present in `runtime/hooks/`.
 
 Local event kinds:
 
@@ -1208,25 +1223,28 @@ Local AI:
 
 ## Current Gaps
 
-The most important gap: `framework/worker_contract.zig` is not wired into
-`framework/v8_bindings_sdk.zig`.
+`framework/worker_contract.zig` is now wired into `framework/v8_bindings_sdk.zig`
+via `framework/worker_bindings.zig` (`worker_bindings.register()` is called from
+`registerSdk`). It exposes `__worker_start`, `__worker_send`, `__worker_poll`,
+`__worker_respond`, `__worker_set_tools`, and `__worker_close`, each
+worker-scoped by id.
 
-Consequences:
+Remaining gaps:
 
-- carts poll provider-specific event shapes
-- there is no `__worker_poll` or `__worker_snapshot`
-- no worker id is passed through the native V8 SDK binding
-- provider sessions are process-global, not worker-scoped
-- local AI events are not ingested into `WorkerStore`
-- Codex app-server has a native SDK and normalizer but no V8 binding
+- `claude_code`, `kimi_cli_wire`, and `local_ai` are live backends.
+  `__worker_start("codex_app_server", …)` returns `""` until its V8 bridge
+  lands.
+- legacy provider globals (`__claude_*`, `__kimi_*`, `__localai_*`) are
+  registered only on the QuickJS runtime (`framework/qjs_runtime.zig`); on V8
+  there is no parallel surface to migrate away from, only the new
+  `__worker_*` path.
+- there is no `__worker_snapshot` yet — readback is poll-only
 - gallery data shapes and native structs have different enum names and field
   names
 
-This is not just missing polish. It means a UI that wants a true multi-worker
-surface must either:
-
-- keep doing JS-side normalization, or
-- add a native worker-store binding that owns one `WorkerStore` per UI worker.
+A UI that wants a true multi-worker surface should migrate carts onto the
+`__worker_*` host fns; JS-side normalization remains only for backends not yet
+covered by `worker_bindings`.
 
 ## Suggested V8 Worker API
 

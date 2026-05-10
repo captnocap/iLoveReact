@@ -12,11 +12,11 @@ const engine = @import("engine.zig");
 // as `qjs_runtime` to keep existing call sites working.
 const prepared_input = @import("prepared_input.zig");
 const canvas = @import("canvas.zig");
-const process_mod = @import("process.zig");
-const svg_path = @import("svg_path.zig");
+const process_mod = @import("process/process.zig");
+const svg_path = @import("gpu/svg/path.zig");
 const theme = @import("theme.zig");
 const windows = @import("windows.zig");
-const log = @import("log.zig");
+const log = @import("diag/log.zig");
 
 extern fn getpid() c_int;
 extern fn popen(command: [*:0]const u8, mode: [*:0]const u8) ?*anyopaque;

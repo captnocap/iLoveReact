@@ -1,0 +1,152 @@
+#!/bin/sh
+# scripts/ship-tui — build a TUI cart into a self-extracting binary.
+#
+# Same shape as scripts/ship: gzip+tar the ELF behind a #!/bin/sh wrapper
+# that extracts to ~/.cache/reactjit-<name>/<sig>/ on first run and execs
+# the real binary. V8 doesn't compress well (~2.7×), but raw ELFs are
+# bigger than they need to be and gzip is the proven shipping format the
+# rest of the SDK uses.
+#
+# Pipeline:
+#   1. esbuild → tui/.cache/bundle-<name>.js     (TUI entry + cart aliased in)
+#   2. zig build tui-app -Dapp-name=<name>       → zig-out/bin/<name>
+#      -Dbundle-path=<absolute path>            (bundle baked in via @embedFile)
+#   3. strip + tar.gz + self-extracting wrapper → zig-out/bin/<name>
+#
+# No `lib/` dir is bundled because the TUI host has no non-system .so
+# deps (only libc/libm/ld-linux, all universal). The tarball is just
+# `{ app.bin, run }`.
+#
+# Usage:  scripts/ship-tui <cart-entry.tsx>
+#         scripts/ship-tui tui/devshell/Shell.tsx
+#         scripts/ship-tui cart/somecart.tsx
+
+set -e
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+
+if [ -z "${1:-}" ]; then
+  echo "usage: scripts/ship-tui <cart-entry.tsx>" >&2
+  exit 2
+fi
+
+ENTRY="$1"
+case "$ENTRY" in
+  /*) ENTRY_ABS="$ENTRY" ;;
+  *)  ENTRY_ABS="$ROOT/$ENTRY" ;;
+esac
+[ -f "$ENTRY_ABS" ] || { echo "[ship-tui] missing entry: $ENTRY" >&2; exit 2; }
+
+NAME=$(basename "$ENTRY_ABS" .tsx)
+ESBUILD="$ROOT/tools/esbuild"
+ZIG="${REACTJIT_ZIG:-$ROOT/tools/zig/zig}"
+[ -x "$ZIG" ] || ZIG=zig
+
+# react / react-reconciler / scheduler vendored copies live under
+# tui/node_modules so the existing scripts/tui aliasing continues to work
+# (even though we override with --alias:, esbuild's resolver still scans).
+NM="$ROOT/tui/node_modules"
+if [ ! -d "$NM/react-reconciler/cjs" ]; then
+  mkdir -p "$NM"
+  for pkg in react react-reconciler scheduler loose-envify js-tokens; do
+    [ -d "$NM/$pkg" ] || cp -RL "$ROOT/deps/$pkg" "$NM/$pkg"
+  done
+fi
+
+OUT_BUNDLE="$ROOT/tui/.cache/bundle-$NAME.js"
+mkdir -p "$ROOT/tui/.cache"
+
+# Terminal size at build time is irrelevant for the shipped binary (the
+# JS preamble re-reads it at boot via __termSize), but esbuild still wants
+# values for the defines.
+SIZE=$(stty size 2>/dev/null || echo "24 80")
+ROWS=$(echo "$SIZE" | cut -d' ' -f1)
+COLS=$(echo "$SIZE" | cut -d' ' -f2)
+
+echo "[ship-tui] bundling $ENTRY → $OUT_BUNDLE"
+"$ESBUILD" \
+  --bundle "$ROOT/tui/entry.tsx" \
+  --outfile="$OUT_BUNDLE" \
+  --platform=neutral \
+  --main-fields=module,main \
+  --target=es2020 \
+  --jsx=automatic \
+  --jsx-import-source=react \
+  --format=cjs \
+  --define:process.env.NODE_ENV='"production"' \
+  --define:__TUI_COLS__=$COLS \
+  --define:__TUI_ROWS__=$ROWS \
+  --log-level=warning \
+  --resolve-extensions=.tsx,.ts,.jsx,.js \
+  --conditions=default \
+  --alias:@cart-entry="$ENTRY_ABS" \
+  --alias:@reactjit/core="$ROOT/runtime/core_stub.ts" \
+  --alias:@reactjit/runtime="$ROOT/runtime" \
+  --alias:react="$ROOT/deps/react" \
+  --alias:react-reconciler="$ROOT/deps/react-reconciler" \
+  --alias:scheduler="$ROOT/deps/scheduler" \
+  --alias:loose-envify="$ROOT/deps/loose-envify" \
+  --alias:js-tokens="$ROOT/deps/js-tokens"
+
+echo "[ship-tui] zig build tui-app -Dapp-name=$NAME"
+# -Dhas-terminal=true links libvterm and brings in framework/vterm_real
+# so the host's <Terminal> renderer can spawn shells and read cells.
+# libvterm is ~70KB statically; no reason to gate this off by default.
+"$ZIG" build tui-app \
+  -Doptimize=ReleaseFast \
+  -Dapp-name="$NAME" \
+  -Dbundle-path="$OUT_BUNDLE" \
+  -Dhas-terminal=true
+
+OUT_BIN="$ROOT/zig-out/bin/$NAME"
+if [ ! -x "$OUT_BIN" ]; then
+  echo "[ship-tui] build did not produce $OUT_BIN" >&2
+  exit 1
+fi
+
+# Strip debug info before packaging (drops ~15MB of dwarf sections).
+strip "$OUT_BIN" 2>/dev/null || true
+ELF_SIZE=$(stat -c%s "$OUT_BIN" 2>/dev/null || stat -f%z "$OUT_BIN")
+
+# Self-extracting wrapper, same shape as scripts/ship. No `lib/` dir
+# because the TUI host has no non-system .so deps — the tarball is just
+# `{ app.bin, run }`. gzip alone takes the V8-heavy ELF down ~3×.
+TMP_DIR=$(mktemp -d)
+trap 'rm -rf "$TMP_DIR" "/tmp/reactjit-tui-${NAME}-payload.tar.gz"' EXIT
+
+cp "$OUT_BIN" "$TMP_DIR/app.bin"
+chmod +x "$TMP_DIR/app.bin"
+
+cat > "$TMP_DIR/run" << 'LAUNCHER'
+#!/bin/sh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/app.bin" "$@"
+LAUNCHER
+chmod +x "$TMP_DIR/run"
+
+TARBALL="/tmp/reactjit-tui-${NAME}-payload.tar.gz"
+(cd "$TMP_DIR" && tar czf "$TARBALL" .)
+
+STAGED="${OUT_BIN}.staged"
+cat > "$STAGED" << HEADER
+#!/bin/sh
+set -e
+APP_DIR=\${XDG_CACHE_HOME:-\$HOME/.cache}/reactjit-$NAME
+SIG=\$(md5sum "\$0" 2>/dev/null | cut -c1-8 || cksum "\$0" | cut -d" " -f1)
+CACHE="\$APP_DIR/\$SIG"
+if [ ! -f "\$CACHE/.ready" ]; then
+  rm -rf "\$APP_DIR"
+  mkdir -p "\$CACHE"
+  SKIP=\$(awk '/^__ARCHIVE__\$/{print NR + 1; exit}' "\$0")
+  tail -n+"\$SKIP" "\$0" | tar xz -C "\$CACHE"
+  touch "\$CACHE/.ready"
+fi
+exec "\$CACHE/run" "\$@"
+__ARCHIVE__
+HEADER
+cat "$TARBALL" >> "$STAGED"
+chmod +x "$STAGED"
+mv -f "$STAGED" "$OUT_BIN"
+
+WRAPPED_SIZE=$(stat -c%s "$OUT_BIN" 2>/dev/null || stat -f%z "$OUT_BIN")
+echo "[ship-tui] done: $OUT_BIN  (ELF $((ELF_SIZE / 1024 / 1024))MB → wrapped $((WRAPPED_SIZE / 1024 / 1024))MB)"
