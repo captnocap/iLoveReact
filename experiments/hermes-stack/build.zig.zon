@@ -1,8 +1,0 @@
-.{
-    .name = .hermes_stack,
-    .fingerprint = 0x1441878986d0d350,
-    .version = "0.0.0",
-    .minimum_zig_version = "0.15.0",
-    .dependencies = .{},
-    .paths = .{""},
-}
