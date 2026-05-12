@@ -1416,6 +1416,25 @@ export function startInput(): void {
       requestPaint();
       return;
     }
+    // Strip mouse-CSI sequences out FIRST, before any branch that might
+    // forward `data` wholesale (e.g. the PTY-forward path below). Mouse
+    // bytes drive host hit-testing/selection — they must never reach the
+    // embedded shell, or clicks appear in the PTY as literal "<35;…M".
+    if (data.indexOf('\x1b[<') !== -1) {
+      let rest = '';
+      let cursor = 0;
+      while (cursor < data.length) {
+        const idx = data.indexOf('\x1b[<', cursor);
+        if (idx === -1) { rest += data.slice(cursor); break; }
+        rest += data.slice(cursor, idx);
+        const m = MOUSE_RE.exec(data.slice(idx));
+        if (!m) { rest += data.slice(idx); break; }
+        dispatchMouse(data.slice(idx, idx + m[0].length));
+        cursor = idx + m[0].length;
+      }
+      if (rest.length === 0) return;
+      data = rest;
+    }
     // While focused on a Terminal, route keystrokes (including Ctrl+C →
     // SIGINT to shell) to the vterm PTY. Ctrl+P still toggles host
     // pause; everything else flows through.
@@ -1448,24 +1467,6 @@ export function startInput(): void {
       selDragging = false;
       requestPaint();
       return;
-    }
-    // Mouse escapes can arrive packed with adjacent keys. Split off any
-    // mouse sequences first; let the rest fall through to key handlers.
-    if (data.indexOf('\x1b[<') !== -1) {
-      // Handle each mouse seq in order, and pass non-mouse remainder.
-      let rest = '';
-      let cursor = 0;
-      while (cursor < data.length) {
-        const idx = data.indexOf('\x1b[<', cursor);
-        if (idx === -1) { rest += data.slice(cursor); break; }
-        rest += data.slice(cursor, idx);
-        const m = MOUSE_RE.exec(data.slice(idx));
-        if (!m) { rest += data.slice(idx); break; }
-        dispatchMouse(data.slice(idx, idx + m[0].length));
-        cursor = idx + m[0].length;
-      }
-      if (rest.length === 0) return;
-      data = rest;
     }
     // Text input handler — runs before generic cart key handlers so
     // typing into a focused TextInput doesn't double-dispatch as both

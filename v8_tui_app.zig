@@ -27,7 +27,7 @@ const vterm_bindings = if (HAS_TERMINAL) @import("framework/v8_bindings_vterm.zi
 // SDK back-ends powering useAssistant. Pulled in unconditionally so a
 // cart can pick any backend; libcurl is the only extra link cost
 // (libllama is dlopen'd at runtime, no link-time dep).
-const worker_bindings = @import("framework/worker_bindings.zig");
+const worker_bindings = @import("framework/assistant/worker_bindings.zig");
 
 // Default to "bundle.js" (next to source) when bundle-path isn't passed,
 // matching v8_app's behavior. Real builds always pass an absolute path.
