@@ -1331,10 +1331,24 @@ function dispatchMouse(buf: string): void {
     const dragging = (rawButton & 32) !== 0;
     const button = rawButton & ~32;
 
-    // Wheel: bit 6 (64). 64 = wheel-up, 65 = wheel-down. Route to the
-    // topmost ScrollView under the cursor and "activate" it for keyboard
-    // arrow scrolling.
+    // Wheel: bit 6 (64). 64 = wheel-up, 65 = wheel-down. Terminal under
+    // cursor wins: translate the notch into arrow-key presses and feed
+    // the PTY. Forwarding the raw SGR mouse seq only helps programs that
+    // opted into mouse-tracking; arrow keys work universally (shells,
+    // pagers, Ink-based TUIs like Claude Code use them for navigation).
+    // Falls through to ScrollView routing when no Terminal is under the
+    // cursor — and to nothing when neither matches.
     if ((rawButton & 64) !== 0 && action === 'M') {
+      const tm = hitTestTerminal(col, row);
+      if (tm) {
+        const entry = termSlots.get(tm.id);
+        const g: any = globalThis;
+        if (entry && typeof g.__vterm_write === 'function') {
+          const key = (rawButton & 1) ? '\x1b[B' : '\x1b[A';
+          try { g.__vterm_write(entry.slot, key + key + key); } catch {}
+          continue;
+        }
+      }
       const sv = hitTestScroll(col, row);
       if (sv) {
         activeScrollId = sv.id;

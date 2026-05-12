@@ -1,0 +1,152 @@
+#!/bin/sh
+# scripts/claude-ss — boot worker-minimal.ext4 with claude-code as PID 1.
+#
+# First-flight version: no task routing, no credential injection. Just
+# enough to verify the boot chain — kernel → /init → claude on ttyS0,
+# now with network so claude can reach api.anthropic.com.
+#
+# On first run (per host boot) this script asks for sudo to create the
+# tap0 device + NAT rule. Re-runs detect the existing tap and skip the
+# sudo step — so day-to-day usage is `scripts/claude-ss` and nothing else.
+#
+# Usage:  scripts/claude-ss
+#         <Terminal shell="scripts/claude-ss" />   (inside claudewrap)
+#
+# Leave the VM by quitting claude inside (kernel panics → firecracker
+# exits → PTY closes), or Ctrl+] (claudewrap unfocus) → q.
+
+set -e
+cd "$(dirname "$0")/.."
+ROOT="$PWD"
+
+KERNEL="$ROOT/images/vmlinux"
+ROOTFS="$ROOT/images/worker-minimal.ext4"
+[ -f "$KERNEL" ] || { echo "[claude-ss] missing $KERNEL — fetch firecracker vmlinux" >&2; exit 2; }
+[ -f "$ROOTFS" ] || { echo "[claude-ss] missing $ROOTFS — run tools/v8cli scripts/firecracker-build.js framework/firecracker/recipes/worker-minimal.ts" >&2; exit 2; }
+command -v firecracker >/dev/null || { echo "[claude-ss] firecracker not on PATH" >&2; exit 2; }
+
+# ── host-side network bring-up (idempotent) ────────────────────────
+#
+# Layout — point-to-point /30 between host and guest:
+#   host : tap0  ← 172.16.0.1/30
+#   guest: eth0  ← 172.16.0.2/30   (set in /init)
+#
+# Outbound: NAT/MASQUERADE on whatever interface owns the default
+# route, plus FORWARD rules for tap0. ip_forward sysctl on.
+#
+# Everything below is wrapped in -C (check) → -A (append) idempotency
+# so re-runs don't pile up duplicate rules.
+
+TAP=tap0
+GUEST_IP=172.16.0.2
+HOST_IP=172.16.0.1
+SUBNET=172.16.0.0/30
+
+if ! ip link show "$TAP" >/dev/null 2>&1; then
+  WAN=$(ip route show default | awk '/default/ {print $5; exit}')
+  [ -n "$WAN" ] || { echo "[claude-ss] no default route — can't pick a WAN iface to MASQ" >&2; exit 2; }
+  echo "[claude-ss] one-time host bring-up of $TAP (needs sudo)…"
+  sudo sh -eu <<EOF
+ip tuntap add $TAP mode tap user "$USER"
+ip addr add $HOST_IP/30 dev $TAP
+ip link set $TAP up
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+iptables -t nat -C POSTROUTING -s $SUBNET -o $WAN -j MASQUERADE 2>/dev/null \
+  || iptables -t nat -A POSTROUTING -s $SUBNET -o $WAN -j MASQUERADE
+iptables -C FORWARD -i $TAP -j ACCEPT 2>/dev/null \
+  || iptables -A FORWARD -i $TAP -j ACCEPT
+iptables -C FORWARD -o $TAP -j ACCEPT 2>/dev/null \
+  || iptables -A FORWARD -o $TAP -j ACCEPT
+EOF
+fi
+
+# ── per-run scratch dir + credential drive ─────────────────────────
+#
+# We stage the host's claude credentials into a small raw drive that
+# /init untars over the guest's /root tmpfs. Keeps base rootfs generic;
+# creds stay per-run, per-user.
+
+RUN_DIR=$(mktemp -d -t claude-ss.XXXXXX)
+CFG="$RUN_DIR/vm.json"
+CREDS_IMG="$RUN_DIR/creds.img"
+CREDS_DRIVE_LINE=""
+
+stage="$RUN_DIR/stage"
+mkdir -p "$stage/.claude"
+copied=0
+for src in "$HOME/.claude/.credentials.json" "$HOME/.claude/.claude.json"; do
+  if [ -f "$src" ]; then cp "$src" "$stage/.claude/"; copied=$((copied + 1)); fi
+done
+# claude-code also sometimes writes ~/.claude.json directly in $HOME.
+if [ -f "$HOME/.claude.json" ]; then cp "$HOME/.claude.json" "$stage/"; copied=$((copied + 1)); fi
+
+if [ "$copied" -gt 0 ]; then
+  # Raw tar dumped onto a block device. /init reads it with `tar -xf
+  # /dev/vdb`; tar treats trailing nulls as end-of-archive padding, so
+  # we just pad to a 512-byte boundary for virtio-blk alignment.
+  tar -cf "$CREDS_IMG" -C "$stage" .
+  size=$(stat -c %s "$CREDS_IMG")
+  pad=$((512 - size % 512))
+  if [ "$pad" -lt 512 ]; then
+    dd if=/dev/zero bs=1 count="$pad" >> "$CREDS_IMG" 2>/dev/null
+  fi
+  CREDS_DRIVE_LINE=',
+    {
+      "drive_id": "creds",
+      "path_on_host": "'"$CREDS_IMG"'",
+      "is_root_device": false,
+      "is_read_only": true
+    }'
+  echo "[claude-ss] staged $copied credential file(s) into $CREDS_IMG"
+else
+  echo "[claude-ss] no host creds found — claude will show its login flow"
+fi
+
+# ── vm.json ────────────────────────────────────────────────────────
+
+# Kernel cmdline — canonical Firecracker minimal:
+#   console=ttyS0   send printk + the /init shell to the serial
+#   reboot=k        triple-fault on reboot so firecracker exits cleanly
+#   panic=1         panic also reboots (clean exit on /init exit)
+#   pci=off         no pci probing (saves a few ms of boot time)
+#   init=/init      our minimal shell init from the recipe
+#   loglevel=4      drop kernel chatter; trace lives in /init now
+BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off init=/init loglevel=4"
+
+# guest_mac: locally-administered prefix 06, encodes the guest IP in
+# the low bytes so future multi-VM allocators can keep them in sync.
+GUEST_MAC="06:00:AC:10:00:02"
+
+cat > "$CFG" <<JSON
+{
+  "boot-source": {
+    "kernel_image_path": "$KERNEL",
+    "boot_args": "$BOOT_ARGS"
+  },
+  "drives": [
+    {
+      "drive_id": "rootfs",
+      "path_on_host": "$ROOTFS",
+      "is_root_device": true,
+      "is_read_only": true
+    }$CREDS_DRIVE_LINE
+  ],
+  "network-interfaces": [
+    {
+      "iface_id": "eth0",
+      "host_dev_name": "$TAP",
+      "guest_mac": "$GUEST_MAC"
+    }
+  ],
+  "machine-config": {
+    "vcpu_count": 2,
+    "mem_size_mib": 1024,
+    "smt": false
+  }
+}
+JSON
+
+# exec → firecracker becomes the PTY child. Its stdin/stdout ARE the
+# serial console, so the TUI (or kitty) renders the guest's ttyS0
+# directly.
+exec firecracker --no-api --config-file "$CFG"
