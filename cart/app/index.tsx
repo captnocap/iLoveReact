@@ -19,7 +19,6 @@ import { PlanChatRail } from './plan/PlanChatRail';
 import CharacterPage from './character/page';
 import Face3DPage from './face3d/page';
 import WorldPage from './world/page';
-import CanvasPage from './canvas/page';
 import GalleryPage from './gallery';
 import DAWPage from './daw/page';
 import { OnboardingProvider, useOnboarding } from './onboarding/state.tsx';
@@ -61,7 +60,6 @@ const ROUTES: Array<{ path: string; label: string; icon: number[][]; mode: Route
   { path: '/chat',              label: 'Chat',      icon: BotMessageSquare, mode: 'side', inputDock: 'bottom' },
   { path: '/settings',          label: 'Settings',  icon: Settings,         mode: 'side', inputDock: 'rail'   },
   { path: '/sweatshop',         label: 'Sweatshop', icon: Settings,         mode: 'side', inputDock: 'rail'   },
-  { path: '/canvas',            label: 'Canvas',    icon: LayoutGrid,       mode: 'side', inputDock: 'rail'   },
   { path: '/character',          label: 'Character', icon: User2,            mode: 'side', inputDock: 'rail'   },
   { path: '/face3d',             label: 'Face3D',    icon: Boxes,            mode: 'side', inputDock: 'rail'   },
   { path: '/world',              label: 'World',     icon: Boxes,            mode: 'side', inputDock: 'rail'   },
@@ -674,9 +672,6 @@ function ShellBody() {
                 </Route>
                 <Route path="/sweatshop/composer">
                   <SweatshopSectionShell />
-                </Route>
-                <Route path="/canvas">
-                  <CanvasPage />
                 </Route>
                 <Route path="/character">
                   <CharacterPage />

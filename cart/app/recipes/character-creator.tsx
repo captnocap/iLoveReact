@@ -158,6 +158,16 @@ export const recipe: RecipeDocument = {
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe stamps a composition + event\n` +
+      `  // hook (system:character:saved → character:applied). The IFTTT-shaped\n` +
+      `  // entry is one line:\n` +
+      `  //   useIFTTT('event:system:character:saved', 'send:character:applied');\n` +
+      `  // but the recipe's full behavior is composition-shaped (identity-slot\n` +
+      `  // override, fragment registry, source kind). Belongs as a stamped\n` +
+      `  // composition pointed at by the scaffold, not as the scaffold itself.\n`,
+  },
 };
 
 // ── JSX stamp ──────────────────────────────────────────────────────────

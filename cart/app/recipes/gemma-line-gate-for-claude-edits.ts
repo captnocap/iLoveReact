@@ -202,4 +202,12 @@ per-claim verdict (line N of target.py vs manifest claim):
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is a tool-pre-call gate using a\n` +
+      `  // local Gemma model as a filter. Substrate gap: no tool:pre-call\n` +
+      `  // source on the bus (would need to fire BEFORE the Edit lands, with\n` +
+      `  // a sync veto path). Likely also needs a second-model invocation\n` +
+      `  // shape since the gate calls a local LLM, not just a static action.\n`,
+  },
 };

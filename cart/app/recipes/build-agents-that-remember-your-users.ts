@@ -231,4 +231,12 @@ edit purchase-history.md — it's owned by the application.\`;`,
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is an agent-with-memory pattern,\n` +
+      `  // not a 2-node useIFTTT chain. Substrate gap: no first-class\n` +
+      `  // assistant:profile-update event; profile reads/writes live in cart\n` +
+      `  // code rather than as IFTTT rules. Likely needs composition-shaped\n` +
+      `  // recipes or a memory-event source registered on the bus.\n`,
+  },
 };

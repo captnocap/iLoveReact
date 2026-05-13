@@ -149,6 +149,15 @@ export const recipe: RecipeDocument = {
         "The default JSX export stamps: a new src_onboarding-signal source kind that bundles step 1+3+5, a 'who' composition pinning the signal as identity context, three prompt fragments (turn-1 clarify, turn-2 write, concern-structurer enhancer), a prompt composition whose system slot uses first-match to swap between the clarify/write fragments based on whether answers are present, a SECOND prompt composition (comp_concern_structurer) the cart fires as a separate upstream Claude turn when the incoming message reads as upset, an event hook on system:claude:write for first_impression.md (the cart swaps from the onboarding shell to the welcome surface when it fires), and arming recommendations for two pathologies the recipe historically tripped: scope-collapse at T1 (locks onto a stereotype on the thin first read) and premature-commitment at T2 (the model wants to skip the clarifying turn).",
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe stamps a composition + event hook\n` +
+      `  // (system:claude:write on first_impression.md). The IFTTT-shaped entry:\n` +
+      `  //   useIFTTT('fs:changed:first_impression.md', 'send:onboarding:complete');\n` +
+      `  // but the recipe's core behavior is a composition with first-match slot\n` +
+      `  // swapping between clarify/write fragments — composition-shaped, not\n` +
+      `  // a 2-node useIFTTT chain. Belongs as a stamp the scaffold points at.\n`,
+  },
 };
 
 // ── Stamp form ────────────────────────────────────────────────────────────

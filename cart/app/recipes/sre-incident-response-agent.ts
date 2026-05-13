@@ -320,4 +320,14 @@ Report your findings but do NOT apply any fixes yet.`,
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is a multi-tool agent loop\n` +
+      `  // (investigate → diagnose → remediate → write post-mortem), not\n` +
+      `  // a 2-node useIFTTT chain. A partial event-driven entry point:\n` +
+      `  //   useIFTTT('event:incident.declared', 'spawn-worker:sre-agent');\n` +
+      `  // — but the agent's behavior lives inside useAssistant + worker\n` +
+      `  // bindings, not in the IFTTT graph itself. Needs composition-\n` +
+      `  // shaped recipes that point at a long-running agent worker.\n`,
+  },
 };

@@ -35,6 +35,13 @@ export function ensureBootstrapped(): Promise<void> {
     try {
       createMissingDatabases();
       createMissingTables();
+      // Seed the recipe corpus from disk. Idempotent — uses ON CONFLICT
+      // DO NOTHING so user-edited rows survive subsequent boots.
+      // Imported lazily to avoid a cycle at module-load time (seed.ts
+      // pulls in cart/app/recipes/index.ts which transitively touches
+      // gallery composition data).
+      const { seedRecipes } = await import('../recipes/seed');
+      seedRecipes();
       bootstrapped = true;
     } finally {
       bootstrapPromise = null;

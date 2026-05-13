@@ -124,6 +124,15 @@ export const recipe: RecipeDocument = {
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is a quiz-state-machine with\n` +
+      `  // confidence updates and contradiction routing, not a 2-node useIFTTT\n` +
+      `  // chain. Partial event-driven hook:\n` +
+      `  //   useIFTTT('event:quiz.answer-submitted', 'send:manifest:update');\n` +
+      `  // but the recipe's core is composition + per-quiz delta math that\n` +
+      `  // lives outside the IFTTT graph. Belongs as a stamped composition.\n`,
+  },
 };
 
 // ── JSX stamp ──────────────────────────────────────────────────────────

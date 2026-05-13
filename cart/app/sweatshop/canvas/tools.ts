@@ -20,7 +20,7 @@
 //   - describe / list → scope = '*'
 
 import { busEmit } from '@reactjit/runtime/hooks/useIFTTT';
-import { register, type Tool } from '../tools';
+import { register, type Tool } from '../../tools';
 import { atoms as allAtoms, atomById, atomsByGroup, ATOM_GROUP_ORDER, type Atom } from './atoms';
 import { loadHistory, loadHistoryIndex, type HistoryEntry } from './history';
 
@@ -38,8 +38,7 @@ export interface CanvasSnapshot {
     span: { w: number; h: number };
     hidden: boolean;
   }>;
-  bag: { cols: 4 | 6 | 8 };
-  slots: (string | null)[];  // length = current cols × rows of action bar
+  slots: (string | null)[];  // length = rows × cols of action bar
   // Future: canvasNodes, canvasEdges
 }
 
@@ -69,7 +68,7 @@ function optInt(v: unknown, name: string, dflt: number): number {
 
 const describeTool: Tool<Record<string, never>, CanvasSnapshot | { error: string }> = {
   name: 'canvas-describe',
-  description: "Snapshot of what is currently on the user's canvas: panels (chrome) with anchors / offsets / sizes / hidden state, the bag's column setting, and the action bar's slot bindings (atom ids per slot). Always read this before proposing layout edits.",
+  description: "Snapshot of what is currently on the user's canvas: panels (chrome) with anchors / offsets / sizes / hidden state, and the action bar's slot bindings (atom ids per slot). Always read this before proposing layout edits.",
   argsSchema: '{}',
   scopeOf: () => '*',
   handler: () => readCanvasState() ?? { error: 'canvas-not-mounted: navigate to /canvas first' },
@@ -134,19 +133,6 @@ const togglePanelTool: Tool<{ panelId: string; show: boolean }, { ok: true }> = 
     requireString(panelId, 'panelId');
     if (typeof show !== 'boolean') throw new Error('show: must be boolean');
     busEmit('canvas:cmd:toggle-panel', { panelId, show });
-    return { ok: true };
-  },
-};
-
-const setBagColsTool: Tool<{ cols: number }, { ok: true }> = {
-  name: 'canvas-set-bag-cols',
-  description: 'Set the bag grid column count. Valid values: 4, 6, 8.',
-  argsSchema: '{ cols: 4 | 6 | 8 }',
-  scopeOf: () => '*',
-  handler: ({ cols }) => {
-    const c = requireInt(cols, 'cols');
-    if (c !== 4 && c !== 6 && c !== 8) throw new Error('cols: must be 4, 6, or 8');
-    busEmit('canvas:cmd:set-bag-cols', { cols: c });
     return { ok: true };
   },
 };
@@ -288,7 +274,6 @@ export function registerCanvasTools(): void {
     movePanelTool,
     resizePanelTool,
     togglePanelTool,
-    setBagColsTool,
     resetLayoutTool,
     bindSlotTool,
     swapSlotsTool,

@@ -132,4 +132,12 @@ gradients on white. Draw from IDE themes and cultural aesthetics.
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is prompt-engineering content,\n` +
+      `  // not an event-driven rule. Substrate gap: prompts aren't IFTTT-shaped;\n` +
+      `  // they live on the assistant config layer, not the bus. Likely belongs\n` +
+      `  // as a prompt-fragment composition rather than a recipe scaffold —\n` +
+      `  // see the prompt-composition shape under cart/app/gallery/data/composition/.\n`,
+  },
 };

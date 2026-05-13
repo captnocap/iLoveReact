@@ -687,7 +687,8 @@ export function FlowTile({
   const roleKind = data.roleKind ?? role.roleKind;
   const roleColor = kind === 'token' ? theme.accentHot : getPortColor(roleKind, theme);
   const stripe = data.stripe ?? (kind === 'trigger' ? 'trigger' : kind === 'end' ? 'end' : undefined);
-  const quickActions = data.quickActions ?? (kind === 'switch' ? ['◉', '+', '⚑', '⋯'] : ['◉', '⌖', '⚑', '⏸', '⋯']);
+  const roleWord = data.role ?? role.role;
+  const quickActions = data.quickActions ?? ['⏸', '⋯'];
   const frameColor = selected ? theme.selectedRing : anyPending ? theme.tilePending : theme.frameColor;
   return (
     <Canvas.Node
@@ -736,32 +737,29 @@ export function FlowTile({
           >
             <Row
               style={{
-                width: 38,
                 height: 18,
+                paddingLeft: 5,
+                paddingRight: 6,
                 borderRadius: 4,
                 backgroundColor: theme.roleBg,
                 borderWidth: 1,
                 borderColor: roleColor,
                 alignItems: 'center',
-                justifyContent: 'center',
-                gap: 3,
+                gap: 5,
               }}
             >
-              <Box style={{ width: 7, height: 7, borderRadius: 2, backgroundColor: roleColor }} />
-              <Text fontSize={8} color={theme.roleText} style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
-                {data.roleGlyph ?? role.glyph}
+              <Box style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: roleColor }} />
+              <Text fontSize={8} color={theme.roleText} style={{ fontFamily: 'monospace', fontWeight: 'bold', letterSpacing: 0.5 }}>
+                {roleWord}
               </Text>
             </Row>
-            <Text fontSize={8} color={theme.textDim} numberOfLines={1} style={{ fontFamily: 'monospace', width: 28 }}>
-              {node.id}
-            </Text>
             <Text fontSize={9} color={theme.textBright} numberOfLines={1} style={{ flexGrow: 1, flexBasis: 0, fontWeight: 'bold' }}>
               {node.label}
             </Text>
             <StatePip state={data.state ?? 'idle'} theme={theme} />
-            <Row style={{ gap: 4, alignItems: 'center' }}>
+            <Row style={{ gap: 5, alignItems: 'center' }}>
               {quickActions.map((action) => (
-                <Text key={action} fontSize={9} color={theme.textDim} style={{ fontFamily: 'monospace', fontWeight: 'bold' }}>
+                <Text key={action} fontSize={10} color={theme.textDim} style={{ fontFamily: 'monospace' }}>
                   {action}
                 </Text>
               ))}

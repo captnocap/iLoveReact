@@ -22,6 +22,7 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'menu-entry': 'user',
   'notification': 'user',
   'privacy': 'user',
+  'embed-source': 'user',
   'role-assignment': 'user',
   'settings': 'user',
   'tool-permission': 'user',
@@ -83,7 +84,7 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'semantic-memory': 'memories',
   'working-memory': 'memories',
 
-  // ── user-sweatshop (18) ───────────────────────────────────────────
+  // ── user-sweatshop (20) ───────────────────────────────────────────
   'budget': 'user-sweatshop',
   'budget-ledger': 'user-sweatshop',
   'chart-demo-data': 'user-sweatshop',
@@ -95,6 +96,8 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'plan': 'user-sweatshop',
   'planning-phase': 'user-sweatshop',
   'project': 'user-sweatshop',
+  'recipe': 'user-sweatshop',
+  'recipe-binding': 'user-sweatshop',
   'research': 'user-sweatshop',
   'spreadsheet': 'user-sweatshop',
   'task': 'user-sweatshop',

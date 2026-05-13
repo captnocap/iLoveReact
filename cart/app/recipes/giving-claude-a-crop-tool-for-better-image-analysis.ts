@@ -251,4 +251,12 @@ $0.0182`,
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is a custom-tool registration\n` +
+      `  // pattern (Claude calls a Crop tool to refine image analysis), not\n` +
+      `  // an event-driven rule. Substrate gap: tool registration lives on\n` +
+      `  // the worker bindings layer, not the IFTTT bus. Recipe belongs as\n` +
+      `  // an assistant-tool composition rather than a useIFTTT chain.\n`,
+  },
 };

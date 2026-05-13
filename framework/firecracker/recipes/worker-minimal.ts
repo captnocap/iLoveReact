@@ -49,6 +49,75 @@ const recipe: VmImage = {
       },
     },
 
+    // ifttt-emit — claude hook callback. Each Claude Code lifecycle
+    // event (PreToolUse, PostToolUse, UserPromptSubmit, Notification,
+    // Stop, SessionStart, …) is wired in settings.json to call this
+    // script with the event name as $1 and the hook JSON payload on
+    // stdin. We wrap it in an envelope and ship to the host listener
+    // at 172.16.0.1:9099 via socat (TCP, no tty involvement).
+    //
+    // Best-effort: || true so a missing/slow host doesn't block the
+    // hook (claude waits for hooks to return). Timeout caps blocking.
+    {
+      writeFile: {
+        path: '/usr/local/bin/ifttt-emit',
+        mode: 0o755,
+        content:
+          '#!/bin/sh\n' +
+          'event=${1:-unknown}\n' +
+          'ts=$(date +%s%3N)\n' +
+          'payload=$(cat)\n' +
+          '# Envelope: {event, ts (ms), payload (raw hook JSON)}. We trust\n' +
+          '# the payload to be JSON — claude\\u2019s hook spec mandates it.\n' +
+          'line="{\\"event\\":\\"$event\\",\\"ts\\":$ts,\\"payload\\":${payload:-null}}"\n' +
+          'printf "%s\\n" "$line" \\\n' +
+          '  | timeout 2 /usr/bin/socat - TCP:172.16.0.1:9099 2>/dev/null \\\n' +
+          '  || true\n',
+      },
+    },
+
+    // claude-wrap — runs as socat's EXEC child. Sets the inner pty’s
+    // size from $COLUMNS/$LINES (exported by /init from /root/.termsize),
+    // then execs claude. Without this the pty defaults to 80x24 and
+    // claude’s redraws clip / leave stale ANSI behind (e.g. the /
+    // command menu sticking around after backspace).
+    {
+      writeFile: {
+        path: '/usr/local/bin/claude-wrap',
+        mode: 0o755,
+        content:
+          '#!/bin/sh\n' +
+          'if [ -n "$COLUMNS" ] && [ -n "$LINES" ]; then\n' +
+          '  stty cols "$COLUMNS" rows "$LINES" 2>/dev/null\n' +
+          'fi\n' +
+          'exec /usr/local/bin/claude\n',
+      },
+    },
+
+    // Default Claude Code hooks settings. Copied into /root/.claude/
+    // by /init at boot (after any cred-seed from /dev/vdb). Picks the
+    // load-bearing lifecycle events; pathology-style triggers (stuck
+    // spinners, repeated retries) come from PTY scraping in the
+    // wrapper, not from hooks.
+    {
+      writeFile: {
+        path: '/etc/claude-hooks-settings.json',
+        mode: 0o644,
+        content: JSON.stringify({
+          hooks: {
+            PreToolUse:       [{ matcher: '*', hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit PreToolUse' }] }],
+            PostToolUse:      [{ matcher: '*', hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit PostToolUse' }] }],
+            UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit UserPromptSubmit' }] }],
+            Notification:     [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit Notification' }] }],
+            Stop:             [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit Stop' }] }],
+            SubagentStop:     [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit SubagentStop' }] }],
+            SessionStart:     [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit SessionStart' }] }],
+            SessionEnd:       [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit SessionEnd' }] }],
+          },
+        }, null, 2) + '\n',
+      },
+    },
+
     // PID 1 init script. No systemd — we just need: mount essential
     // filesystems, bring eth0 up, drop to claude on ttyS0, and let
     // `panic=1 reboot=k` shut the VM down when claude exits.
@@ -80,6 +149,11 @@ const recipe: VmImage = {
           'else\n' +
           '  echo "[init] no /dev/vdb — running without creds"\n' +
           'fi\n' +
+          '# Install hook settings on top of whatever the cred-seed brought\n' +
+          '# (or as the only settings if no creds). Hooks emit one line per\n' +
+          '# claude lifecycle event to the host listener at 172.16.0.1:9099.\n' +
+          'mkdir -p /root/.claude\n' +
+          'cp /etc/claude-hooks-settings.json /root/.claude/settings.json;  echo "[init] hooks settings=$?"\n' +
           '# Bring eth0 up: single virtio-net, kernel-named eth0 (no udev).\n' +
           '# Static config matches what the launcher set on the host side\n' +
           '# of tap0 (host 172.16.0.1/30, guest 172.16.0.2/30, NAT MASQ).\n' +
@@ -90,6 +164,15 @@ const recipe: VmImage = {
           'export HOME=/root\n' +
           'export TERM=xterm-256color\n' +
           'cd /root\n' +
+          '# Pick up the outer terminal size the launcher captured before\n' +
+          '# boot. Apply to /dev/ttyS0 (so kernel + claude agree on size)\n' +
+          '# and forward to socat\\u2019s inner pty. Fallback 80x24 if no\n' +
+          '# .termsize was staged.\n' +
+          'ROWS=24; COLS=80\n' +
+          '[ -f /root/.termsize ] && . /root/.termsize\n' +
+          'stty -F /dev/ttyS0 rows "$ROWS" cols "$COLS" 2>/dev/null\n' +
+          'export COLUMNS="$COLS" LINES="$ROWS"\n' +
+          'echo "[init] term size: ${COLS}x${ROWS}"\n' +
           '# Bridge /dev/ttyS0 ↔ claude through socat with:\n' +
           '#   - stdio side: raw mode, no echo, no socat-side line\n' +
           '#     processing; \"inlcr\" tells SOCAT (user-space, not termios)\n' +
@@ -100,11 +183,17 @@ const recipe: VmImage = {
           '#     calls cfmakeraw on its own stdin.\n' +
           '#   - exec side: pty + setsid + ctty so claude gets a real,\n' +
           '#     fresh controlling terminal (Ink/Node requires isatty=true).\n' +
+          '#     rows/cols sized to match the outer terminal so claude\\u2019s\n' +
+          '#     redraws clear the whole visible region (otherwise stale\n' +
+          '#     ANSI content like the / command menu sticks around).\n' +
+          '#     /usr/local/bin/claude-wrap reads $COLUMNS/$LINES and\n' +
+          '#     stty\\u2019s the inner pty before exec\\u2019ing claude, since\n' +
+          '#     socat\\u2019s EXEC pty doesn\\u2019t accept rows/cols options.\n' +
           '# When claude exits, socat exits, kernel panics (panic=1), \n' +
           '# firecracker exits, your kitty shell returns.\n' +
           'exec /usr/bin/socat \\\n' +
           '  STDIO,rawer,inlcr \\\n' +
-          '  "EXEC:/usr/local/bin/claude,pty,setsid,ctty,stderr,raw,echo=0"\n',
+          '  "EXEC:/usr/local/bin/claude-wrap,pty,setsid,ctty,stderr,raw,echo=0"\n',
       },
     },
   ],

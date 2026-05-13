@@ -1,5 +1,105 @@
 // Canvas — the merged sweatshop+composer route.
 //
+// ─────────────────────────────────────────────────────────────────────
+// USER FLOW (the system from the user's seat — load-bearing context
+// for any agent picking this up cold; do not delete on refactor)
+//
+//   1. Open app → land on Canvas (this file). Authoring surface.
+//   2. Author reusable RECIPES here: drop trigger/action atoms from
+//      the bag, wire them into useIFTTT rules, save into recipe-store.
+//      A recipe is just a FlowGraph of rules.
+//   3. The user keeps a small library — typically one planning recipe
+//      and several task recipes. Task recipes are the behavioral
+//      envelopes a worker carries during a single task; planning
+//      recipes shape the planning worker that builds Plans.
+//   4. Go to /plan, write a prompt. Planning worker runs the planning
+//      recipe and produces a Plan with N tasks (phases).
+//   5. Plan → Sequencer. Sequencer is an (N+1) × M matrix:
+//        rows    = N tasks from the plan, plus row 0 "Global" pinned
+//        columns = the user's M authored recipes (from recipe-store)
+//        cells   = on/off toggle binding a recipe to that row's scope
+//        status  = right-most column, read-only, fed by task lifecycle
+//      Row 0 toggle ON = recipe is always active during the run.
+//      Task row T toggle ON = recipe active only while T is current.
+//   6. Lock and run. User's job is effectively done.
+//   7. User comes back when one of three things fires:
+//        - notify-user / kick-to-supervisor (recipe asks attention)
+//        - hitl                              (recipe demands decision)
+//        - halt-run / failure / cancel       (run terminates)
+//
+// SCOPING MECHANICS
+//
+//   The sequencer mints a stable task id per row. Lifecycle events
+//   ride on:     task:<rowId>.<status>     e.g. task:T3.started
+//   This is a standard kind-filtered IFTTT source (same shape as
+//   verb:/run:/worker:/event:/rule: in runtime/hooks/ifttt-supervisor).
+//   At authoring time recipes use prefix-only triggers (`task:.started`);
+//   at bind time the sequencer rewrites the suffix to the row id, or
+//   to `*` for the Global row. One compile path covers both modes.
+//
+//   verb:/run: live UNDERNEATH this layer — they're the worker's tool-
+//   call execution detail. They are not user-facing in the way Task /
+//   Plan / Goal are. The bag's "Triggers" group currently mixes both
+//   layers; eventual cleanup moves verb:/run: to an "Execution"
+//   subgroup so they stop competing with Domain nouns.
+//
+// CONSTRAINTS + evaluate: (gating, not suggesting)
+//
+//   A Constraint is a recipe with `require:` semantics — same
+//   authoring surface as any recipe, but instead of binding its
+//   triggers to an action it binds them to clause-ids of the
+//   constraint. Shape:
+//     { id, scope, clauses: [{ id, match }], combine: 'all'|'any'|'count:N' }
+//
+//   When a constraint's scope starts (e.g. task:T3.started for a
+//   task-scoped constraint), the runtime arms each clause as a small
+//   match: subscriber and writes met-flags into
+//     state:constraint:T3:<constraintId>:<clauseId>
+//
+//   `evaluate:<constraintId>` is an ACTION that reads those flags,
+//   applies the combine rule, and emits:
+//     constraint:<id>.evaluating  (while running, optional)
+//     constraint:<id>.met
+//     constraint:<id>.unmet
+//   so constraint:<id>.<status> is another kind-filtered source on
+//   the missing-namespaces list below.
+//
+//   Gating: the sequencer holds the task-complete edge. When a worker
+//   says "done" the sequencer transitions task:T3.completing, fires
+//   evaluate:<id> for every constraint bound to T3, and only emits
+//   task:T3.complete once every bound constraint emits .met. Any
+//   .unmet transitions to task:T3.blocked-by-constraint (surfaces via
+//   notify-user / hitl / loop). Constraints are not suggestions; the
+//   sequencer is the only emitter of task:complete and it will not
+//   emit until the gate clears.
+//
+//   Matrix implication: each sequencer row gets a constraint sub-lane
+//   (or a Constraint column-group beside the recipes). Same cell
+//   shape { row, col, on } with col.kind = 'recipe' | 'constraint'.
+//
+// NAMESPACE STATE (as of this comment)
+//
+//   Domain shapes that have aligned lifecycle sources:
+//     Worker     ↔ worker:<id>.<lifecycle>
+//     Rule       ↔ rule:<id>.fired
+//     CompositionRun ↔ run:<id>.<status>
+//     Pathology  ↔ event:pathology.detected  (rides on generic event:)
+//   Domain shapes still missing a lifecycle source:
+//     Goal, Plan, Task, Supervisor, Connection, Model, Constraint,
+//     Composition (the parent, not the Run). Each is a ~10-LOC
+//     registerKindFilteredSource added to ifttt-supervisor.ts.
+//     Priority order: `task:` and `constraint:` are load-bearing
+//     (recipe scoping + task-complete gating); the rest are clean-up.
+//   Missing action runtime:
+//     evaluate:<constraintId> — reads accumulated clause flags,
+//     emits constraint:<id>.met / .unmet. Pairs with the sequencer's
+//     task-complete gate. Currently no runner registered.
+//
+// NOTE: cart/app/plan/types.ts predates this comment and says phases
+// are sequencer COLUMNS. The current model (above) treats them as ROWS
+// with recipes as columns; types.ts's comment is stale on that axis.
+// ─────────────────────────────────────────────────────────────────────
+//
 // Substrate: a single full-bleed pan/zoom <Canvas>. Every piece of
 // chrome is a Canvas.Clamp-pinned panel that floats over it (WoW-HUD
 // style). Panels live at one of 9 viewport anchors (TL/TC/TR/ML/MC/MR
@@ -33,14 +133,25 @@
 //   - Measured canvas-viewport size (currently estimated from window
 //     minus rail + chrome). Off by a few px on small windows.
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Box, Col, Row, Text, Pressable, Canvas, Native } from '@reactjit/runtime/primitives';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Col, Row, Text, Pressable, Canvas, Native, ScrollView } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
 import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import {
   Box as BoxIcon, Code, Settings, Eye, EyeOff, Move, Grid3X3, Terminal, Map as MapIcon,
   Layers, Sparkles, Hammer, Boxes, FileCode, Plus, Minus, X, Zap, Play, Bot, Sliders,
 } from '@reactjit/runtime/icons/icons';
+import { IconButton, colorForKey } from '@reactjit/runtime/icons/IconButton';
+import { PropertiesPanel } from './properties/PropertiesPanel';
+import type { CanvasSelection, SelectionPatch } from './properties/types';
+import { CodeEditor } from './code-editor/CodeEditor';
+import { toCode } from './describe';
+import { parseCodeToGraph } from './parse';
+import { useCRUD } from '../../db/useCRUD';
+import { wrapScaffold, type RecipeDocument } from '../../recipes';
+import { listRecipes, upsertRecipe, deleteRecipe, newRecipeId, type SavedRecipe } from './recipe-store';
+import { FlowEditorChildren } from '../../gallery/components/flow-editor/FlowEditor';
+import type { FlowNode, FlowEdge } from '../../gallery/components/flow-editor/types';
 
 // Unified atom registry shared with the assistant control surface.
 // Bag, action bar, and (future) canvas content spawners all read from
@@ -94,10 +205,34 @@ const MIN_SPAN_H = 1;
 const CELL = 56;
 const LAYOUT_KEY = 'canvas_hud_layout_v0';
 const ACTION_SLOTS_KEY = 'canvas_action_slots_v0';
-const BAG_COLS_KEY = 'canvas_bag_cols_v0';
 // ActionBar slot pixel size — slots are always 1:1, fixed pixel size.
 // Number of cols/rows derives from the panel's pixel rect.
 const SLOT_PX = 44;
+// ActionBar header strip (panel title row) — must match PanelView.
+const ACTION_BAR_HEADER_H = 18;
+const ACTION_BAR_BORDER_PX = 1;
+
+// Hit-test a screen-space cursor against the action bar's slot grid.
+// Mirrors the geometry computed inside ActionBarStub so the BagStub
+// → ActionBar drag (page-level) and the slot-to-slot rearrange
+// (ActionBarStub-local) agree on which cell the cursor's over.
+// Returns the flat slot index (row * cols + col) or -1 if the cursor
+// is outside the slot area.
+function actionBarSlotAt(rect: Rect, mx: number, my: number): number {
+  const innerW = Math.max(0, rect.w - ACTION_BAR_BORDER_PX * 2);
+  const innerH = Math.max(0, rect.h - ACTION_BAR_BORDER_PX * 2 - ACTION_BAR_HEADER_H);
+  const cols = Math.floor(innerW / SLOT_PX);
+  const rows = Math.floor(innerH / SLOT_PX);
+  if (cols <= 0 || rows <= 0) return -1;
+  const slotPx = Math.min(SLOT_PX, Math.floor(innerW / cols), Math.floor(innerH / rows));
+  const ox = rect.x + ACTION_BAR_BORDER_PX;
+  const oy = rect.y + ACTION_BAR_BORDER_PX + ACTION_BAR_HEADER_H;
+  if (mx < ox || my < oy) return -1;
+  const col = Math.floor((mx - ox) / slotPx);
+  const row = Math.floor((my - oy) / slotPx);
+  if (col < 0 || col >= cols || row < 0 || row >= rows) return -1;
+  return row * cols + col;
+}
 // Shell estimates — used to convert window dims to canvas-viewport
 // dims. Anything anchored to the right edge is off by ~8px until we
 // read the canvas's measured size.
@@ -126,18 +261,62 @@ const DEFAULT_LAYOUT: PanelPlacement[] = PANELS.map((p) => ({
 
 // ── Layout persistence ────────────────────────────────────────────
 
+// Persisted layouts pair the placement list with the viewport dims at
+// save time. Reloading at a wildly different viewport size (user
+// resized the window between sessions, or shipped fullscreen → opened
+// windowed) restores positions that solveLayout can't honor — panels
+// end up in nonsensical spots and the SDF icons appear "loose" because
+// nodes were laid out in coords that don't match the chrome's new
+// position. When the dims mismatch beyond a threshold, treat the
+// saved layout as stale and fall back to defaults.
+type PersistedLayout = {
+  v: 1;
+  layout: PanelPlacement[];
+  vw: number;
+  vh: number;
+};
+// Allow some slack — small resizes (a notch of dpi, a window-frame
+// height delta) shouldn't nuke the user's tweaks. ~25% off in either
+// dimension is the threshold; anything larger means a fullscreen ↔
+// window swap or a totally different display, reset is safer.
+const VIEWPORT_DRIFT_TOLERANCE = 0.25;
 function loadLayout(): PanelPlacement[] {
   try {
     const raw = (globalThis as any).localStorage?.getItem(LAYOUT_KEY);
     if (!raw) return DEFAULT_LAYOUT;
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return DEFAULT_LAYOUT;
+    // Back-compat: an older shape persisted a bare array. Treat those
+    // as having no viewport stamp — they'll only be honored if the
+    // current viewport happens to be close to default-ish dims.
+    let layoutItems: any[] = [];
+    let savedVw: number | null = null;
+    let savedVh: number | null = null;
+    if (Array.isArray(parsed)) {
+      layoutItems = parsed;
+    } else if (parsed && typeof parsed === 'object' && Array.isArray(parsed.layout)) {
+      layoutItems = parsed.layout;
+      if (typeof parsed.vw === 'number') savedVw = parsed.vw;
+      if (typeof parsed.vh === 'number') savedVh = parsed.vh;
+    } else {
+      return DEFAULT_LAYOUT;
+    }
+    // Viewport-drift gate. If saved dims exist and differ from the
+    // current viewport beyond the tolerance, reset rather than load.
+    if (savedVw != null && savedVh != null) {
+      const curVw = readViewportW();
+      const curVh = readViewportH();
+      const wDrift = Math.abs(curVw - savedVw) / Math.max(1, savedVw);
+      const hDrift = Math.abs(curVh - savedVh) / Math.max(1, savedVh);
+      if (wDrift > VIEWPORT_DRIFT_TOLERANCE || hDrift > VIEWPORT_DRIFT_TOLERANCE) {
+        return DEFAULT_LAYOUT;
+      }
+    }
     // Drop unknown ids; fill missing with defaults so adding a new
     // panel doesn't strand it because the saved layout predates it.
     const known = new Map(PANELS.map((p) => [p.id, p]));
     const seen = new Set<string>();
     const out: PanelPlacement[] = [];
-    for (const item of parsed) {
+    for (const item of layoutItems) {
       if (item && typeof item.id === 'string' && known.has(item.id) && !seen.has(item.id)) {
         seen.add(item.id);
         out.push(item as PanelPlacement);
@@ -149,7 +328,13 @@ function loadLayout(): PanelPlacement[] {
 }
 function saveLayout(layout: PanelPlacement[]) {
   try {
-    (globalThis as any).localStorage?.setItem(LAYOUT_KEY, JSON.stringify(layout));
+    const blob: PersistedLayout = {
+      v: 1,
+      layout,
+      vw: readViewportW(),
+      vh: readViewportH(),
+    };
+    (globalThis as any).localStorage?.setItem(LAYOUT_KEY, JSON.stringify(blob));
   } catch { /* ignore */ }
 }
 
@@ -188,25 +373,19 @@ function saveActionSlots(slots: (string | null)[]) {
   try { (globalThis as any).localStorage?.setItem(ACTION_SLOTS_KEY, JSON.stringify(slots)); } catch { /* ignore */ }
 }
 
-// Bag columns config — the number of 1:1 tiles per row in the bag.
-// Cycles 4 → 6 → 8 → 4. Tile size derives from panel width / cols.
-const BAG_COL_OPTS = [4, 6, 8] as const;
-type BagCols = typeof BAG_COL_OPTS[number];
-function loadBagCols(): BagCols {
-  try {
-    const raw = (globalThis as any).localStorage?.getItem(BAG_COLS_KEY);
-    const n = Number(raw);
-    if (BAG_COL_OPTS.includes(n as BagCols)) return n as BagCols;
-  } catch { /* ignore */ }
-  return 4;
-}
-function saveBagCols(c: BagCols) {
-  try { (globalThis as any).localStorage?.setItem(BAG_COLS_KEY, String(c)); } catch { /* ignore */ }
-}
-
 // ── Mouse + viewport (tile_drag pattern) ──────────────────────────
 
 const host: any = globalThis as any;
+
+// Derive a default recipe filename from a name. Lowercase + kebab,
+// .tsx suffix. Empty input falls back to a generic placeholder.
+function slugifyPath(name: string): string {
+  const slug = name.trim().toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return (slug || 'untitled') + '.tsx';
+}
+
 function readMouseX(): number { try { const v = Number(host.getMouseX?.()); return Number.isFinite(v) ? v : 0; } catch { return 0; } }
 function readMouseY(): number { try { const v = Number(host.getMouseY?.()); return Number.isFinite(v) ? v : 0; } catch { return 0; } }
 function readMouseDown(): boolean { try { return !!host.getMouseDown?.(); } catch { return false; } }
@@ -384,7 +563,6 @@ type CanvasOp =
   | { type: 'move-panel'; panelId: string; anchor: Anchor; offset: { x: number; y: number } }
   | { type: 'resize-panel'; panelId: string; span: { w: number; h: number } }
   | { type: 'toggle-panel'; panelId: string; show: boolean }
-  | { type: 'set-bag-cols'; cols: BagCols }
   | { type: 'bind-slot'; slot: number; atomId: string | null }
   | { type: 'swap-slots'; from: number; to: number }
   | { type: 'reset-layout' };
@@ -392,12 +570,11 @@ type CanvasOp =
 interface CommittedState {
   layout: PanelPlacement[];
   hidden: Set<string>;
-  bagCols: BagCols;
   actionSlots: (string | null)[];
 }
 
 function applyOps(s: CommittedState, ops: CanvasOp[]): CommittedState {
-  let { layout, hidden, bagCols, actionSlots } = s;
+  let { layout, hidden, actionSlots } = s;
   for (const op of ops) {
     switch (op.type) {
       case 'move-panel':
@@ -412,9 +589,6 @@ function applyOps(s: CommittedState, ops: CanvasOp[]): CommittedState {
         hidden = next;
         break;
       }
-      case 'set-bag-cols':
-        bagCols = op.cols;
-        break;
       case 'bind-slot': {
         const padTo = Math.max(actionSlots.length, op.slot + 1);
         const next: (string | null)[] = [];
@@ -439,21 +613,19 @@ function applyOps(s: CommittedState, ops: CanvasOp[]): CommittedState {
         break;
     }
   }
-  return { layout, hidden, bagCols, actionSlots };
+  return { layout, hidden, actionSlots };
 }
 
-// Compute which UI targets (panel ids, slot indices, the bag) the
-// staged ops would affect. Drives the diff overlay so the user sees
-// exactly what the proposal touches before deciding.
+// Compute which UI targets (panel ids, slot indices) the staged ops
+// would affect. Drives the diff overlay so the user sees exactly what
+// the proposal touches before deciding.
 interface DiffTargets {
   panelIds: Set<string>;
   slots: Set<number>;
-  bagChanged: boolean;
 }
 function diffTargets(ops: CanvasOp[]): DiffTargets {
   const panelIds = new Set<string>();
   const slots = new Set<number>();
-  let bagChanged = false;
   for (const op of ops) {
     switch (op.type) {
       case 'move-panel':
@@ -468,16 +640,12 @@ function diffTargets(ops: CanvasOp[]): DiffTargets {
         slots.add(op.from);
         slots.add(op.to);
         break;
-      case 'set-bag-cols':
-        bagChanged = true;
-        panelIds.add('bag');
-        break;
       case 'reset-layout':
         for (const p of PANELS) panelIds.add(p.id);
         break;
     }
   }
-  return { panelIds, slots, bagChanged };
+  return { panelIds, slots };
 }
 
 // Transient "look here" overlay marker. Module-level so PanelView /
@@ -498,17 +666,314 @@ export default function CanvasPage() {
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const [editMode, setEditMode] = useState(false);
   const [actionSlots, setActionSlots] = useState<(string | null)[]>(loadActionSlots);
-  const [bagCols, setBagCols] = useState<BagCols>(loadBagCols);
+  // Selection — drives the Properties panel. Set externally via the
+  // `canvas:cmd:select` bus event (canvas content layer + assistant
+  // tool both push through this channel). Cleared with a null payload.
+  // The actual canvas content layer that produces selectable nodes
+  // isn't wired yet; the wiring is here so when it lands the panel
+  // routes correctly.
+  const [selection, setSelection] = useState<CanvasSelection>(null);
+  useIFTTT('canvas:cmd:select', (ev: any) => {
+    if (!ev || ev.selection === null) { setSelection(null); return; }
+    const sel = ev.selection;
+    if (sel?.kind === 'design' && sel.node?.id) setSelection(sel as CanvasSelection);
+    else if (sel?.kind === 'flow' && sel.node?.id) setSelection(sel as CanvasSelection);
+    else setSelection(null);
+  });
+  // Properties panel write channel. v0 mutates the local selection
+  // mirror so the inspector feels live; once the canvas content layer
+  // owns the source of truth, this forwards a patch event through the
+  // bus and the layer reconciles. Keeping the API stable now means
+  // that swap is a one-line change.
+  const onPropsPatch = useCallback((patch: SelectionPatch) => {
+    setSelection((prev) => {
+      if (!prev) return prev;
+      if (prev.kind !== patch.kind || prev.node.id !== patch.id) return prev;
+      if (patch.kind === 'design') {
+        return { kind: 'design', node: { ...prev.node, ...patch.patch } } as CanvasSelection;
+      }
+      return { kind: 'flow', node: { ...prev.node, ...patch.patch } } as CanvasSelection;
+    });
+    // Mirror flow patches into the real flowNodes array so the canvas
+    // reflects label / position / data edits made in the Properties
+    // panel. The selection mirror above is the immediate-feel echo;
+    // this is the source of truth.
+    if (patch.kind === 'flow') {
+      setFlowNodes((prev) => prev.map((n) =>
+        n.id === patch.id ? { ...n, ...patch.patch, data: 'data' in patch.patch ? patch.patch.data : n.data } : n,
+      ));
+    }
+  }, []);
   // Live alt-key state. SDL only delivers modifiers via key events,
   // so we mirror altKey on every __keydown / __keyup. Held alt during
   // a slot mouse-down kicks off a slot-rearrange drag; releasing alt
   // mid-drag doesn't cancel — by then dragSlotRef is the source of
   // truth.
   const altDownRef = useRef(false);
-  useIFTTT('__keydown', (ev: any) => { altDownRef.current = !!ev?.altKey; });
+  useIFTTT('__keydown', (ev: any) => {
+    altDownRef.current = !!ev?.altKey;
+    // 1-9 hotkeys → invoke the corresponding action-bar slot. Slot 0
+    // is hotkey "1" (top-left), slot 1 is "2", etc. Skip when an
+    // input is focused (typing into TextEditor / TextInput) so digits
+    // typed by the user don't fire bound atoms.
+    if (ev?.metaKey || ev?.ctrlKey || ev?.altKey) return;
+    const k: string = String(ev?.key ?? '');
+    if (k.length !== 1 || k < '1' || k > '9') return;
+    const slotIdx = k.charCodeAt(0) - '1'.charCodeAt(0);
+    const atomId = actionSlots[slotIdx];
+    if (!atomId) return;
+    const atom = atomById(atomId);
+    if (!atom) return;
+    atom.invoke({ cursor: { x: 0, y: 0 }, selection: [] });
+  });
   useIFTTT('__keyup',   (ev: any) => { altDownRef.current = !!ev?.altKey; });
   useEffect(() => { saveActionSlots(actionSlots); }, [actionSlots]);
-  useEffect(() => { saveBagCols(bagCols); }, [bagCols]);
+
+  // ── Flow graph state ────────────────────────────────────────────
+  // The canvas hosts a flow graph as its primary content. Atoms in
+  // the bag emit `canvas:atom:invoke` events when invoked (click, alt-
+  // drag, slot fire) carrying a flow-shaped payload — `kind` is one of
+  // 'trigger' | 'action' | 'token' | 'design-ref' | 'rule', plus the
+  // channel / prefix / defaults the atom wants stamped on the node.
+  // We translate each spawn into a FlowNode and append.
+  const [flowNodes, setFlowNodes] = useState<FlowNode[]>([]);
+  const [flowEdges, setFlowEdges] = useState<FlowEdge[]>([]);
+  const [invokeEvents, setInvokeEvents] = useState(0);  // TODO debug
+  const [lastInvokeKind, setLastInvokeKind] = useState<string>('—');  // TODO debug
+  const flowNodeSeqRef = useRef(0);
+  useIFTTT('canvas:atom:invoke', (ev: any) => {
+    // Debug — count every event reaching the subscriber so we can tell
+    // whether spawn issues are at subscription, filter, or render.
+    setInvokeEvents((n) => n + 1);
+    setLastInvokeKind(String(ev?.kind ?? '—'));
+    if (!ev || typeof ev !== 'object') return;
+    const flowKind: string = String(ev.kind ?? '');
+    // Only kinds the FlowTile renderer understands land here. Edit /
+    // page / tool atoms emit other event kinds; ignore them.
+    const isFlowKind = (
+      flowKind === 'trigger' || flowKind === 'action' || flowKind === 'token' ||
+      flowKind === 'design-ref' || flowKind === 'rule' || flowKind === 'end' ||
+      flowKind === 'sequence' || flowKind === 'if' || flowKind === 'switch' ||
+      flowKind === 'lanes' || flowKind === 'loop'
+    );
+    if (!isFlowKind) return;
+    // design-ref doesn't have a FlowTile renderer yet; reuse the
+    // 'token' shape so it still paints. The actual page-sketch surface
+    // lands when the inline composer overlay is wired in.
+    const renderKind = flowKind === 'design-ref' ? 'token' : flowKind;
+    const label =
+      typeof ev.shape === 'string' && ev.shape ? String(ev.shape) :
+      typeof ev.channel === 'string' && ev.channel ? String(ev.channel) :
+      typeof ev.prefix === 'string' && ev.prefix ? String(ev.prefix) :
+      String(ev.atomId ?? 'node');
+    // Spiral-place around the origin so successive spawns don't pile
+    // on a single pixel. Mirrors the placement in useFlowEditorState.
+    setFlowNodes((prev) => {
+      const PAD_X = 280, PAD_Y = 190;
+      const overlaps = (x: number, y: number) =>
+        prev.some((n) => Math.abs(n.x - x) < PAD_X && Math.abs(n.y - y) < PAD_Y);
+      let x = 0, y = 0;
+      if (prev.length > 0) {
+        let placed = false;
+        for (let r = 1; r < 30 && !placed; r += 1) {
+          for (let dy = -r; dy <= r && !placed; dy += 1) {
+            for (let dx = -r; dx <= r && !placed; dx += 1) {
+              if (Math.abs(dx) !== r && Math.abs(dy) !== r) continue;
+              const cx = dx * PAD_X;
+              const cy = dy * PAD_Y;
+              if (!overlaps(cx, cy)) { x = cx; y = cy; placed = true; }
+            }
+          }
+        }
+      }
+      flowNodeSeqRef.current += 1;
+      const id = `n_${flowNodeSeqRef.current}_${Date.now().toString(36)}`;
+      const node: FlowNode = {
+        id, label, x, y,
+        data: {
+          kind: renderKind,
+          state: 'idle',
+          channel: ev.channel,
+          prefix: ev.prefix,
+          shape: ev.shape,
+          defaults: ev.defaults,
+          ports: ev.ports,
+          atomId: ev.atomId,
+        } as any,
+      };
+      return [...prev, node];
+    });
+  });
+
+  // ── Canvas ⇆ Code sync (debounced two-way) ──────────────────────
+  // Mirrors the pattern in cart/app/sweatshop/page.tsx:
+  //   - canvas → code  : automatic projection via toCode(nodes, edges).
+  //     Recomputed whenever the graph changes; cheap (string concat).
+  //   - code → canvas  : EXPLICIT — user hits Apply / Cmd-S, OR types
+  //     and lets a 600ms quiet-window debounce fire parseCodeToGraph.
+  // codeDraft is the editor's live buffer. lastProjectedRef tracks the
+  // most recent projection we handed the editor; while the draft still
+  // matches that, canvas-side edits flow through and replace the draft
+  // (so dragging a node doesn't fight the editor). Once the user
+  // touches the editor, codeDraft diverges from lastProjectedRef and
+  // canvas-side edits stop overwriting it.
+  const codeMirror = useMemo(() => toCode(flowNodes, flowEdges), [flowNodes, flowEdges]);
+  const [codeDraft, setCodeDraft] = useState<string>(codeMirror);
+  const lastProjectedRef = useRef<string>(codeMirror);
+  useEffect(() => {
+    if (codeDraft === lastProjectedRef.current || codeDraft === '') {
+      setCodeDraft(codeMirror);
+    }
+    lastProjectedRef.current = codeMirror;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeMirror]);
+  const codeDirty = codeDraft !== codeMirror;
+  const applyCode = useCallback(() => {
+    if (!codeDirty) return;
+    const parsed = parseCodeToGraph(codeDraft, flowNodes, flowEdges);
+    setFlowNodes(parsed.nodes);
+    setFlowEdges(parsed.edges);
+  }, [codeDirty, codeDraft, flowNodes, flowEdges]);
+  // Debounced auto-apply. 600ms after the last keystroke, parse the
+  // draft and reconcile the canvas. Apply button + Cmd/Ctrl+S still
+  // work for an immediate sync. Empty draft → empty canvas (parse
+  // honors the user's intent).
+  useEffect(() => {
+    if (codeDraft === codeMirror) return;
+    const t = setTimeout(() => {
+      const parsed = parseCodeToGraph(codeDraft, flowNodes, flowEdges);
+      setFlowNodes(parsed.nodes);
+      setFlowEdges(parsed.edges);
+    }, 600);
+    return () => clearTimeout(t);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [codeDraft, codeMirror]);
+  // Cmd/Ctrl+S → apply immediately, matches sweatshop.
+  useIFTTT('key:ctrl+s', applyCode);
+  useIFTTT('key:meta+s', applyCode);
+
+  // ── Recipe save / load ──────────────────────────────────────────
+  // The code panel's editable name + path doubles as recipe metadata.
+  // First save allocates an id and persists; subsequent saves update.
+  // Loading a saved/premade recipe stamps its code into the editor
+  // (the 600ms debounce + canvas reconciler does the rest).
+  const [recipeName, setRecipeName] = useState('Untitled');
+  const [recipePath, setRecipePath] = useState('canvas.tsx');
+  const [activeRecipeId, setActiveRecipeId] = useState<string | null>(null);
+  const [savedRecipes, setSavedRecipes] = useState<SavedRecipe[]>(() => listRecipes());
+  const refreshSavedRecipes = useCallback(() => { setSavedRecipes(listRecipes()); }, []);
+  const saveCurrentRecipe = useCallback(() => {
+    const id = activeRecipeId ?? newRecipeId();
+    const saved = upsertRecipe({ id, name: recipeName, path: recipePath, code: codeDraft });
+    setActiveRecipeId(saved.id);
+    refreshSavedRecipes();
+  }, [activeRecipeId, recipeName, recipePath, codeDraft, refreshSavedRecipes]);
+  const loadRecipe = useCallback((r: SavedRecipe) => {
+    setRecipeName(r.name);
+    setRecipePath(r.path);
+    setActiveRecipeId(r.id);
+    setCodeDraft(r.code);
+    // Treat the loaded source as the new "last projection" baseline
+    // so the canvas → code auto-refresh effect picks up subsequent
+    // graph edits (drag, click-to-spawn, port-wire) and updates
+    // codeDraft in lockstep. Without this, the debounced reverse-
+    // parse fires against the stale recipe source and erases nodes
+    // the user added after loading.
+    lastProjectedRef.current = r.code;
+  }, []);
+  const loadPremade = useCallback((title: string, code: string) => {
+    setRecipeName(title);
+    setRecipePath(slugifyPath(title));
+    setActiveRecipeId(null); // premade → not yet a saved row of its own
+    setCodeDraft(code);
+    lastProjectedRef.current = code;
+  }, []);
+  const deleteRecipeById = useCallback((id: string) => {
+    deleteRecipe(id);
+    if (activeRecipeId === id) setActiveRecipeId(null);
+    refreshSavedRecipes();
+  }, [activeRecipeId, refreshSavedRecipes]);
+
+  // ── Bag → ActionBar drag ────────────────────────────────────────
+  // Alt+mousedown on a bag tile starts a page-level drag carrying that
+  // atom id. A floating ghost icon follows the cursor; on release we
+  // hit-test against the action bar's rect (read from the layout
+  // solver below via solvedRef) and bind the atom to the slot the
+  // cursor's over. Outside the action bar the drop is a no-op — the
+  // bag itself is the canonical source, so dropping back into nothing
+  // doesn't need to mean anything.
+  const bagDragRef = useRef<{ atomId: string; x: number; y: number } | null>(null);
+  const bagDragRafRef = useRef<any>(null);
+  const [bagDragTickN, forceBagDrag] = useState(0);
+  const solvedRef = useRef<Array<{ id: string; rect: Rect }>>([]);
+  // Window→clamp-local offset. The Canvas.Clamp's content Box has a
+  // window-absolute origin (shell side-nav pushes us right of (0,0));
+  // its onLayout below stamps the value into this ref. The ghost sits
+  // inside that Box and uses `left/top = mouseScreen - clampOrigin` to
+  // appear under the cursor instead of 360-ish px to its right.
+  const clampOriginRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const stopBagDrag = useCallback(() => {
+    if (bagDragRafRef.current == null) return;
+    const cancel = host.cancelAnimationFrame?.bind(host);
+    if (cancel) cancel(bagDragRafRef.current); else clearTimeout(bagDragRafRef.current);
+    bagDragRafRef.current = null;
+  }, []);
+  const schedBagDrag = useCallback((fn: () => void) => {
+    const raf = host.requestAnimationFrame?.bind(host);
+    if (raf) bagDragRafRef.current = raf(fn);
+    else bagDragRafRef.current = setTimeout(fn, 16);
+  }, []);
+  const bagDragTick = useCallback(() => {
+    const ref = bagDragRef.current;
+    if (!ref) { stopBagDrag(); return; }
+    const mx = readMouseX();
+    const my = readMouseY();
+    if (!readMouseDown()) {
+      // Released — find the action bar in the solved layout and bind.
+      // ab.rect is clamp-local; mx/my is window-absolute, so convert.
+      const ox = clampOriginRef.current.x;
+      const oy = clampOriginRef.current.y;
+      const ab = solvedRef.current.find((it) => it.id === 'actionBar');
+      if (ab) {
+        const slot = actionBarSlotAt(ab.rect, mx - ox, my - oy);
+        if (slot >= 0) {
+          setActionSlots((prev) => {
+            const padTo = Math.max(prev.length, slot + 1);
+            const next: (string | null)[] = [];
+            for (let i = 0; i < padTo; i++) next.push(prev[i] ?? null);
+            next[slot] = ref.atomId;
+            return next;
+          });
+        }
+      }
+      bagDragRef.current = null;
+      stopBagDrag();
+      forceBagDrag((n) => (n + 1) | 0);
+      return;
+    }
+    ref.x = mx;
+    ref.y = my;
+    forceBagDrag((n) => (n + 1) | 0);
+    schedBagDrag(bagDragTick);
+  }, [stopBagDrag, schedBagDrag]);
+  const beginBagDrag = useCallback((atomId: string) => {
+    // The runtime fires onMouseDown OR onPress, never both — so this
+    // mousedown is the single hook for both gestures:
+    //   - alt held → start a bag→action-bar drag
+    //   - alt not held → invoke the atom (plain click semantics)
+    // We can't rely on the runtime's onPress to spawn the node since
+    // it's suppressed by the presence of onMouseDown.
+    if (altDownRef.current) {
+      bagDragRef.current = { atomId, x: readMouseX(), y: readMouseY() };
+      stopBagDrag();
+      schedBagDrag(bagDragTick);
+      forceBagDrag((n) => (n + 1) | 0);
+      return;
+    }
+    const atom = atomById(atomId);
+    if (atom) atom.invoke({ cursor: { x: 0, y: 0 }, selection: [] });
+  }, [stopBagDrag, schedBagDrag, bagDragTick]);
+  useEffect(() => () => stopBagDrag(), [stopBagDrag]);
 
   // ── History ──────────────────────────────────────────────────
   // Linear chain of committed snapshots; current index = head we're
@@ -528,9 +993,8 @@ export default function CanvasPage() {
         hidden: hidden.has(p.id),
       };
     }),
-    bag: { cols: bagCols },
     slots: [...actionSlots],
-  }), [layout, hidden, bagCols, actionSlots]);
+  }), [layout, hidden, actionSlots]);
 
   const pushHistory = useCallback((snap: CanvasSnapshot, author: 'user' | 'assistant', summary: string) => {
     const head = historyChainRef.current[historyIndexRef.current];
@@ -561,7 +1025,6 @@ export default function CanvasPage() {
       offset: { ...p.offset }, span: { ...p.span },
     })));
     setHidden(new Set(snap.panels.filter((p) => p.hidden).map((p) => p.id)));
-    setBagCols(snap.bag.cols);
     setActionSlots([...snap.slots]);
     saveHistory(historyChainRef.current, historyIndexRef.current);
   }, []);
@@ -575,8 +1038,8 @@ export default function CanvasPage() {
   const [stagedOps, setStagedOps] = useState<CanvasOp[]>([]);
   const stagedActive = stagedOps.length > 0;
   const live = stagedActive
-    ? applyOps({ layout, hidden, bagCols, actionSlots }, stagedOps)
-    : { layout, hidden, bagCols, actionSlots };
+    ? applyOps({ layout, hidden, actionSlots }, stagedOps)
+    : { layout, hidden, actionSlots };
   const stagedTargets = stagedActive ? diffTargets(stagedOps) : null;
 
   // ── Highlights ────────────────────────────────────────────────
@@ -614,11 +1077,6 @@ export default function CanvasPage() {
     if (!ev || typeof ev.panelId !== 'string') return;
     setStagedOps((prev) => [...prev, { type: 'toggle-panel', panelId: ev.panelId, show: !!ev.show }]);
   });
-  useIFTTT('canvas:cmd:set-bag-cols', (ev: any) => {
-    const c = Number(ev?.cols);
-    if (c !== 4 && c !== 6 && c !== 8) return;
-    setStagedOps((prev) => [...prev, { type: 'set-bag-cols', cols: c as BagCols }]);
-  });
   useIFTTT('canvas:cmd:bind-slot', (ev: any) => {
     if (!ev) return;
     const slot = Number(ev.slot) | 0;
@@ -641,10 +1099,9 @@ export default function CanvasPage() {
   // hook in here in phase 2B). Cancel just clears.
   useIFTTT('canvas:stage:accept', () => {
     if (stagedOps.length === 0) return;
-    const next = applyOps({ layout, hidden, bagCols, actionSlots }, stagedOps);
+    const next = applyOps({ layout, hidden, actionSlots }, stagedOps);
     setLayout(next.layout);
     setHidden(next.hidden);
-    setBagCols(next.bagCols);
     setActionSlots(next.actionSlots);
     // Push to history with assistant author + op summary. Compute
     // snapshot from `next` directly so it's accurate; the user-side
@@ -661,7 +1118,6 @@ export default function CanvasPage() {
           hidden: next.hidden.has(p.id),
         };
       }),
-      bag: { cols: next.bagCols },
       slots: [...next.actionSlots],
     };
     pushHistory(snap, 'assistant', `${opCount} op${opCount === 1 ? '' : 's'}`);
@@ -703,7 +1159,7 @@ export default function CanvasPage() {
       pushHistory(buildSnapshot(), 'user', 'user edit');
     }, 600);
     return () => clearTimeout(t);
-  }, [layout, hidden, bagCols, actionSlots, buildSnapshot, pushHistory]);
+  }, [layout, hidden, actionSlots, buildSnapshot, pushHistory]);
   useIFTTT('canvas:cmd:highlight', (ev: any) => {
     if (!ev || (ev.kind !== 'atom' && ev.kind !== 'slot' && ev.kind !== 'panel')) return;
     const id = String(ev.id ?? '');
@@ -1036,6 +1492,9 @@ export default function CanvasPage() {
   // snap against current positions of the non-dragged panels. The
   // dragged panel itself isn't in solved.placed, so no filter needed.
   otherPlacedRef.current = solved.placed;
+  // Also surface placed rects for the bag-drag tick (it hit-tests
+  // against the action bar without going through React state).
+  solvedRef.current = placed;
 
   // Publish the canvas snapshot so canvas-describe (assistant tool)
   // returns fresh data. Effect, not during render — publishCanvasState
@@ -1055,10 +1514,9 @@ export default function CanvasPage() {
           hidden: hidden.has(p.id),
         };
       }),
-      bag: { cols: bagCols },
       slots: [...actionSlots],
     });
-  }, [layout, hidden, bagCols, actionSlots]);
+  }, [layout, hidden, actionSlots]);
 
   return (
     <S.Page>
@@ -1070,8 +1528,27 @@ export default function CanvasPage() {
         gridMajorColor="theme:gridDotStrong"
         gridMajorEvery={4}
       >
+        {/* Flow graph content — nodes + edges live in graph coords so
+            they pan/zoom with the canvas substrate. Sits behind the
+            Canvas.Clamp HUD panels (which are screen-pinned), in front
+            of the grid. The FlowEditorChildren variant skips its own
+            Canvas wrapper so we use this Canvas's coord space. */}
+        <FlowEditorChildren
+          nodes={flowNodes}
+          edges={flowEdges}
+          onNodesChange={setFlowNodes}
+          onEdgesChange={setFlowEdges}
+          onSelectChange={(node) => setSelection(node ? { kind: 'flow', node } : null)}
+          renderTileBody={renderFlowTileBody}
+          allowDelete={true}
+        />
         <Canvas.Clamp>
-          <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
+          <Box
+            style={{ width: '100%', height: '100%', position: 'relative' }}
+            onLayout={(r: any) => {
+              clampOriginRef.current = { x: r?.x ?? 0, y: r?.y ?? 0 };
+            }}
+          >
             {/* Always-visible canvas frame. Gives the right and bottom
                 edges a solid "wall" to abut against, matching what the
                 shell rail (left) and chrome (top) provide on the
@@ -1084,6 +1561,22 @@ export default function CanvasPage() {
               borderWidth: 1, borderColor: 'theme:rule',
               pointerEvents: 'none' as any,
             }} />
+
+            {/* Spawn diagnostic — visible counter of current flow
+                nodes/edges. Ticks up when a bag click / slot fire /
+                alt-drop reaches the page subscriber. Going to 0 after
+                a click means the event isn't landing. Remove once
+                spawn is end-to-end. */}
+            <Box style={{
+              position: 'absolute', top: 6, right: 6,
+              paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3,
+              borderWidth: 1, borderColor: 'theme:accent',
+              backgroundColor: 'theme:bg2',
+              pointerEvents: 'none' as any,
+              zIndex: 60,
+            }}>
+              <Text size={9} color="theme:accent" bold>flow: {flowNodes.length}n / {flowEdges.length}e · evts:{invokeEvents} last:{lastInvokeKind}</Text>
+            </Box>
 
             {/* Edit-mode tint. Full-bleed Pressable with no-op
                 onMouseDown to swallow clicks (Canvas.Clamp content
@@ -1180,9 +1673,25 @@ export default function CanvasPage() {
                     editToggle={stagedActive ? () => {} : () => setEditMode((v) => !v)}
                     actionSlots={live.actionSlots}
                     setActionSlots={stagedActive ? (() => {}) as any : setActionSlots}
-                    bagCols={live.bagCols}
-                    setBagCols={stagedActive ? () => {} : setBagCols}
+                    selection={selection}
+                    onPropsPatch={onPropsPatch}
+                    onBagDrag={stagedActive ? () => {} : beginBagDrag}
+                    codeDraft={codeDraft}
+                    setCodeDraft={setCodeDraft}
+                    codeDirty={codeDirty}
+                    applyCode={applyCode}
+                    recipeName={recipeName}
+                    setRecipeName={setRecipeName}
+                    recipePath={recipePath}
+                    setRecipePath={setRecipePath}
+                    activeRecipeId={activeRecipeId}
+                    savedRecipes={savedRecipes}
+                    saveCurrentRecipe={saveCurrentRecipe}
+                    loadRecipe={loadRecipe}
+                    loadPremade={loadPremade}
+                    deleteRecipeById={deleteRecipeById}
                     altDownRef={altDownRef}
+                    clampOriginRef={clampOriginRef}
                     highlights={highlights}
                     panelHighlight={findHighlight(highlights, 'panel', item.id)}
                     stagedTarget={stagedTargets?.panelIds.has(item.id) ?? false}
@@ -1229,6 +1738,42 @@ export default function CanvasPage() {
                 })}
               </Box>
             ) : null}
+
+            {/* Bag → ActionBar drag ghost. Shows the dragged atom's
+                icon under the cursor while alt is held + mouse-down.
+                Released over the action bar binds the atom; released
+                anywhere else is a no-op. Uses bagDragTickN to opt-in
+                to the page render schedule that the raf tick drives. */}
+            {(() => {
+              void bagDragTickN;
+              const ref = bagDragRef.current;
+              if (!ref) return null;
+              const atom = atomById(ref.atomId);
+              if (!atom) return null;
+              const ghostSize = 36;
+              return (
+                <Box style={{
+                  position: 'absolute',
+                  left: ref.x - clampOriginRef.current.x - ghostSize / 2,
+                  top: ref.y - clampOriginRef.current.y - ghostSize / 2,
+                  width: ghostSize,
+                  height: ghostSize,
+                  alignItems: 'center', justifyContent: 'center',
+                  borderWidth: 1, borderColor: 'theme:accent',
+                  backgroundColor: colorForKey(atom.id),
+                  opacity: 0.85,
+                  pointerEvents: 'none' as any,
+                  zIndex: 200,
+                }}>
+                  <IconButton
+                    name={atom.iconName}
+                    iconData={atom.iconName ? undefined : atom.icon}
+                    size={ghostSize}
+                    bg={colorForKey(atom.id)}
+                  />
+                </Box>
+              );
+            })()}
           </Box>
         </Canvas.Clamp>
       </Canvas>
@@ -1238,7 +1783,7 @@ export default function CanvasPage() {
 
 // ── Panel chrome + content stubs ──────────────────────────────────
 
-function PanelView({ def, rect, editMode, onDragHandle, onResizeHandle, onClose, hidden, togglePanel, editToggle, actionSlots, setActionSlots, bagCols, setBagCols, altDownRef, highlights, panelHighlight, stagedTarget, stagedSlots }: {
+function PanelView({ def, rect, editMode, onDragHandle, onResizeHandle, onClose, hidden, togglePanel, editToggle, actionSlots, setActionSlots, selection, onPropsPatch, onBagDrag, codeDraft, setCodeDraft, codeDirty, applyCode, recipeName, setRecipeName, recipePath, setRecipePath, activeRecipeId, savedRecipes, saveCurrentRecipe, loadRecipe, loadPremade, deleteRecipeById, altDownRef, clampOriginRef, highlights, panelHighlight, stagedTarget, stagedSlots }: {
   def: PanelDef;
   rect: Rect;
   editMode: boolean;
@@ -1250,13 +1795,29 @@ function PanelView({ def, rect, editMode, onDragHandle, onResizeHandle, onClose,
   editToggle: () => void;
   actionSlots: (string | null)[];
   setActionSlots: (updater: (prev: (string | null)[]) => (string | null)[]) => void;
-  bagCols: BagCols;
-  setBagCols: (c: BagCols) => void;
+  selection: CanvasSelection;
+  onPropsPatch: (patch: SelectionPatch) => void;
+  onBagDrag: (atomId: string) => void;
+  codeDraft: string;
+  setCodeDraft: (next: string) => void;
+  codeDirty: boolean;
+  applyCode: () => void;
+  recipeName: string;
+  setRecipeName: (next: string) => void;
+  recipePath: string;
+  setRecipePath: (next: string) => void;
+  activeRecipeId: string | null;
+  savedRecipes: SavedRecipe[];
+  saveCurrentRecipe: () => void;
+  loadRecipe: (r: SavedRecipe) => void;
+  loadPremade: (title: string, code: string) => void;
+  deleteRecipeById: (id: string) => void;
   altDownRef: { current: boolean };
+  clampOriginRef: { current: { x: number; y: number } };
   highlights: Highlight[];
   panelHighlight: Highlight | undefined;
   /** True if this panel is in the staged-ops target set (move,
-   *  resize, toggle, set-bag-cols, reset). Triggers the diff halo. */
+   *  resize, toggle, reset). Triggers the diff halo. */
   stagedTarget: boolean;
   /** Slot indices the staged ops touch — passed through to ActionBar
    *  so it can dot-halo specific slots. Null when not staged. */
@@ -1298,9 +1859,25 @@ function PanelView({ def, rect, editMode, onDragHandle, onResizeHandle, onClose,
           editToggle={editToggle}
           actionSlots={actionSlots}
           setActionSlots={setActionSlots}
-          bagCols={bagCols}
-          setBagCols={setBagCols}
+          selection={selection}
+          onPropsPatch={onPropsPatch}
+          onBagDrag={onBagDrag}
+          codeDraft={codeDraft}
+          setCodeDraft={setCodeDraft}
+          codeDirty={codeDirty}
+          applyCode={applyCode}
+          recipeName={recipeName}
+          setRecipeName={setRecipeName}
+          recipePath={recipePath}
+          setRecipePath={setRecipePath}
+          activeRecipeId={activeRecipeId}
+          savedRecipes={savedRecipes}
+          saveCurrentRecipe={saveCurrentRecipe}
+          loadRecipe={loadRecipe}
+          loadPremade={loadPremade}
+          deleteRecipeById={deleteRecipeById}
           altDownRef={altDownRef}
+          clampOriginRef={clampOriginRef}
           highlights={highlights}
           stagedSlots={stagedSlots}
         />
@@ -1369,7 +1946,7 @@ function PanelView({ def, rect, editMode, onDragHandle, onResizeHandle, onClose,
   );
 }
 
-function PanelContent({ id, rect, hidden, togglePanel, editMode, editToggle, actionSlots, setActionSlots, bagCols, setBagCols, altDownRef, highlights, stagedSlots }: {
+function PanelContent({ id, rect, hidden, togglePanel, editMode, editToggle, actionSlots, setActionSlots, selection, onPropsPatch, onBagDrag, codeDraft, setCodeDraft, codeDirty, applyCode, recipeName, setRecipeName, recipePath, setRecipePath, activeRecipeId, savedRecipes, saveCurrentRecipe, loadRecipe, loadPremade, deleteRecipeById, altDownRef, clampOriginRef, highlights, stagedSlots }: {
   id: string;
   rect: Rect;
   hidden: Set<string>;
@@ -1378,18 +1955,46 @@ function PanelContent({ id, rect, hidden, togglePanel, editMode, editToggle, act
   editToggle: () => void;
   actionSlots: (string | null)[];
   setActionSlots: (updater: (prev: (string | null)[]) => (string | null)[]) => void;
-  bagCols: BagCols;
-  setBagCols: (c: BagCols) => void;
+  selection: CanvasSelection;
+  onPropsPatch: (patch: SelectionPatch) => void;
+  onBagDrag: (atomId: string) => void;
+  codeDraft: string;
+  setCodeDraft: (next: string) => void;
+  codeDirty: boolean;
+  applyCode: () => void;
+  recipeName: string;
+  setRecipeName: (next: string) => void;
+  recipePath: string;
+  setRecipePath: (next: string) => void;
+  activeRecipeId: string | null;
+  savedRecipes: SavedRecipe[];
+  saveCurrentRecipe: () => void;
+  loadRecipe: (r: SavedRecipe) => void;
+  loadPremade: (title: string, code: string) => void;
+  deleteRecipeById: (id: string) => void;
   altDownRef: { current: boolean };
+  clampOriginRef: { current: { x: number; y: number } };
   highlights: Highlight[];
   stagedSlots: Set<number> | null;
 }) {
   if (id === 'modeTabs')  return <ModeTabsStub />;
-  if (id === 'bag')       return <BagStub rect={rect} bagCols={bagCols} setBagCols={setBagCols} highlights={highlights} />;
+  if (id === 'bag')       return <BagStub rect={rect} highlights={highlights} onBagDrag={onBagDrag} />;
   if (id === 'bagBar')    return <BagBarStub hidden={hidden} togglePanel={togglePanel} editMode={editMode} editToggle={editToggle} />;
-  if (id === 'actionBar') return <ActionBarStub rect={rect} slots={actionSlots} setSlots={setActionSlots} altDownRef={altDownRef} highlights={highlights} stagedSlots={stagedSlots} />;
-  if (id === 'code')      return <CodeStub />;
-  if (id === 'props')     return <PropsStub />;
+  if (id === 'actionBar') return <ActionBarStub rect={rect} slots={actionSlots} setSlots={setActionSlots} altDownRef={altDownRef} clampOriginRef={clampOriginRef} highlights={highlights} stagedSlots={stagedSlots} />;
+  if (id === 'code')      return (
+    <CodeBlock
+      value={codeDraft} onChange={setCodeDraft} dirty={codeDirty} onApply={applyCode}
+      name={recipeName} setName={setRecipeName}
+      path={recipePath} setPath={setRecipePath}
+      activeRecipeId={activeRecipeId}
+      savedRecipes={savedRecipes}
+      onSave={saveCurrentRecipe}
+      onLoadRecipe={loadRecipe}
+      onLoadPremade={loadPremade}
+      onDeleteRecipe={deleteRecipeById}
+    />
+  );
+  if (id === 'props')     return <PropertiesPanel selection={selection} onPatch={onPropsPatch} />;
   if (id === 'minimap')   return <MinimapStub />;
   return <Box style={{ flexGrow: 1 }} />;
 }
@@ -1419,30 +2024,38 @@ function ModeTabsStub() {
   );
 }
 
-function BagStub({ rect, bagCols, setBagCols, highlights }: {
-  rect: Rect; bagCols: BagCols; setBagCols: (c: BagCols) => void; highlights: Highlight[];
+function BagStub({ rect, highlights, onBagDrag }: {
+  rect: Rect; highlights: Highlight[]; onBagDrag: (atomId: string) => void;
 }) {
-  // Sectioned 1:1 grid. Tile size = inner panel width / cols, shared
-  // across all groups so the bag reads as one consistent grid even
-  // though sections render as separate row blocks (with a header
-  // chip between them). Click a tile = invoke that atom directly.
+  // Fixed 1:1 tiles, flex-wrapped per section. Width follows the
+  // panel; the row wraps when it runs out of space rather than
+  // squeezing tiles or letting them spill out. The old cols-toggle
+  // (4×/6×/8×) was a misfeature — overflowed at narrow widths and
+  // distorted icons at wide ones.
+  void rect;
   const PAD = 4;
-  const innerW = Math.max(0, rect.w - 2 - PAD * 2);
-  const tileSize = Math.max(16, Math.floor(innerW / bagCols));
-  const cycleCols = () => {
-    const idx = BAG_COL_OPTS.indexOf(bagCols);
-    setBagCols(BAG_COL_OPTS[(idx + 1) % BAG_COL_OPTS.length]);
+  const TILE = 36;
+
+  // Filter — case-insensitive substring match against the atom's
+  // label, id, and description. Sections that become empty after
+  // filtering are dropped from the render. Bag-bar-pinned (top of
+  // panel) so it survives scroll.
+  const [query, setQuery] = useState<string>('');
+  const q = query.trim().toLowerCase();
+  const matches = (atom: Atom): boolean => {
+    if (!q) return true;
+    return (
+      atom.label.toLowerCase().includes(q) ||
+      atom.id.toLowerCase().includes(q) ||
+      atom.description.toLowerCase().includes(q)
+    );
   };
 
-  // Build sections in declared group order, skipping empty groups.
-  // Each non-empty group becomes a header + N rows of `bagCols` tiles.
-  const sections: Array<{ group: AtomGroup; rows: Atom[][] }> = [];
+  const sections: Array<{ group: AtomGroup; items: Atom[] }> = [];
   for (const g of ATOM_GROUP_ORDER) {
-    const items = atomsByGroup(g);
+    const items = atomsByGroup(g).filter(matches);
     if (items.length === 0) continue;
-    const rows: Atom[][] = [];
-    for (let i = 0; i < items.length; i += bagCols) rows.push(items.slice(i, i + bagCols));
-    sections.push({ group: g, rows });
+    sections.push({ group: g, items });
   }
 
   // Click in the bag = invoke this atom. v0 fires through the bus
@@ -1453,60 +2066,82 @@ function BagStub({ rect, bagCols, setBagCols, highlights }: {
   };
 
   return (
-    <Col style={{ flexGrow: 1, padding: PAD, gap: 0 }}>
-      {/* Cols toggle — top-right. Cycles 4 → 6 → 8. */}
-      <Row style={{ paddingBottom: 2, alignItems: 'center', gap: 4 }}>
-        <Box style={{ flexGrow: 1 }} />
-        <Pressable onPress={cycleCols} style={{
-          paddingLeft: 4, paddingRight: 4, paddingTop: 1, paddingBottom: 1,
-          borderWidth: 1, borderColor: 'theme:rule',
-        }}>
-          <Text size={8} color="theme:inkDim">{bagCols}×</Text>
-        </Pressable>
-      </Row>
-      {sections.map((sec) => (
-        <Col key={sec.group} style={{ marginBottom: 4 }}>
+    <Col style={{ flexGrow: 1, minHeight: 0 }}>
+      {/* Search bar — pinned above the scroll viewport so typing
+          doesn't get scrolled off when the result list shrinks. */}
+      <Box style={{
+        padding: PAD,
+        borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+        backgroundColor: 'theme:bg2',
+      }}>
+        <TextInput
+          value={query}
+          placeholder="filter…"
+          onChange={(s: string) => setQuery(s)}
+          style={{
+            width: '100%',
+            paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3,
+            borderWidth: 1, borderColor: 'theme:rule',
+            backgroundColor: 'theme:bg1',
+            color: 'theme:ink',
+            fontSize: 10,
+          }}
+        />
+      </Box>
+      <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
+        <Col style={{ padding: PAD, gap: 4 }}>
+        {sections.length === 0 ? (
+          <Box style={{ padding: 8 }}>
+            <Text size={9} color="theme:inkDim">no atoms match "{query}"</Text>
+          </Box>
+        ) : sections.map((sec) => (
+        <Col key={sec.group} style={{ gap: 2 }}>
           {/* Group header — small dim label, follows Image 27's bag.
               Same pattern the assistant references via list-atoms. */}
           <Box style={{ paddingTop: 2, paddingBottom: 2, paddingLeft: 2 }}>
             <Text size={8} color="theme:inkDim" bold>{sec.group}</Text>
           </Box>
-          {sec.rows.map((row, rIdx) => (
-            <Row key={rIdx} style={{ flexDirection: 'row' }}>
-              {row.map((atom) => {
-                // Highlight: assistant called canvas-highlight kind=atom.
-                // Bump border to accent + carry an optional caption
-                // pinned above the tile.
-                const hl = findHighlight(highlights, 'atom', atom.id);
-                return (
-                  <Box key={atom.id} style={{ position: 'relative' }}>
-                    <Pressable onPress={() => onAtomClick(atom)} style={{
-                      width: tileSize, height: tileSize,
-                      alignItems: 'center', justifyContent: 'center',
-                      borderWidth: hl ? 2 : 1,
-                      borderColor: hl ? 'theme:accent' : 'theme:rule',
-                      backgroundColor: 'theme:bg2',
+          <Box style={{
+            flexDirection: 'row',
+            flexWrap: 'wrap',
+            gap: 2,
+          }}>
+            {sec.items.map((atom) => {
+              // Highlight: assistant called canvas-highlight kind=atom.
+              // Bump border to accent + carry an optional caption
+              // pinned above the tile.
+              const hl = findHighlight(highlights, 'atom', atom.id);
+              return (
+                <Box key={atom.id} style={{ position: 'relative' }}>
+                  <IconButton
+                    name={atom.iconName}
+                    iconData={atom.iconName ? undefined : atom.icon}
+                    size={TILE}
+                    bg={hl ? 'theme:bg2' : colorForKey(atom.id)}
+                    active={!!hl}
+                    tooltip={`${atom.label} — ${atom.description}`}
+                    onPress={() => onAtomClick(atom)}
+                    onMouseDown={() => onBagDrag(atom.id)}
+                  />
+                  {hl?.label ? (
+                    <Box style={{
+                      position: 'absolute', left: 0, top: -16,
+                      paddingLeft: 4, paddingRight: 4, paddingTop: 1, paddingBottom: 1,
+                      backgroundColor: 'theme:accent',
+                      pointerEvents: 'none' as any,
+                      zIndex: 50,
                     }}>
-                      <Native type="Icon" icon={atom.icon} size={Math.max(10, Math.floor(tileSize * 0.45))} strokeWidth={2} color={hl ? 'theme:accent' : 'theme:ink'} />
-                    </Pressable>
-                    {hl?.label ? (
-                      <Box style={{
-                        position: 'absolute', left: 0, top: -16,
-                        paddingLeft: 4, paddingRight: 4, paddingTop: 1, paddingBottom: 1,
-                        backgroundColor: 'theme:accent',
-                        pointerEvents: 'none' as any,
-                        zIndex: 50,
-                      }}>
-                        <Text size={8} color="theme:bg" bold>{hl.label}</Text>
-                      </Box>
-                    ) : null}
-                  </Box>
-                );
-              })}
-            </Row>
-          ))}
+                      <Text size={8} color="theme:bg" bold>{hl.label}</Text>
+                    </Box>
+                  ) : null}
+                </Box>
+              );
+            })}
+          </Box>
         </Col>
       ))}
+        </Col>
+      </ScrollView>
     </Col>
   );
 }
@@ -1546,11 +2181,12 @@ function BagBarStub({ hidden, togglePanel, editMode, editToggle }: {
   );
 }
 
-function ActionBarStub({ rect, slots, setSlots, altDownRef, highlights, stagedSlots }: {
+function ActionBarStub({ rect, slots, setSlots, altDownRef, clampOriginRef, highlights, stagedSlots }: {
   rect: Rect;
   slots: (string | null)[];
   setSlots: (updater: (prev: (string | null)[]) => (string | null)[]) => void;
   altDownRef: { current: boolean };
+  clampOriginRef: { current: { x: number; y: number } };
   highlights: Highlight[];
   stagedSlots: Set<number> | null;
 }) {
@@ -1614,27 +2250,20 @@ function ActionBarStub({ rect, slots, setSlots, altDownRef, highlights, stagedSl
     else rafRef.current = setTimeout(fn, 16);
   }, []);
 
-  // Hit-test: which slot index is the cursor over, or -1 if outside
-  // the action bar entirely. Uses the panel's absolute rect and our
-  // computed cols/rows.
+  // Hit-test delegates to the module-level helper so bag→action-bar
+  // drag (page level) and slot-to-slot drag (here) agree on geometry.
   const slotAt = useCallback((mx: number, my: number): number => {
-    // ActionBar's content area starts at rect.x + borderPx on the
-    // left and rect.y + borderPx + headerH on the top.
-    const ox = rect.x + borderPx;
-    const oy = rect.y + borderPx + headerH;
-    if (mx < ox || my < oy) return -1;
-    const col = Math.floor((mx - ox) / slotPx);
-    const row = Math.floor((my - oy) / slotPx);
-    if (col < 0 || col >= cols || row < 0 || row >= rows) return -1;
-    return row * cols + col;
-  }, [rect.x, rect.y, cols, rows, slotPx]);
+    return actionBarSlotAt(rect, mx, my);
+  }, [rect]);
 
   const dragTick = useCallback(() => {
     if (dragSlotRef.current == null) { stop(); return; }
     if (!readMouseDown()) {
       const from = dragSlotRef.current;
-      const mx = readMouseX();
-      const my = readMouseY();
+      const ox = clampOriginRef.current.x;
+      const oy = clampOriginRef.current.y;
+      const mx = readMouseX() - ox;
+      const my = readMouseY() - oy;
       const to = slotAt(mx, my);
       setSlots((prev) => {
         const padTo = Math.max(prev.length, total, from + 1);
@@ -1663,8 +2292,17 @@ function ActionBarStub({ rect, slots, setSlots, altDownRef, highlights, stagedSl
   }, [setSlots, slotAt, total, stop, sched]);
 
   const beginSlotDrag = useCallback((slotIdx: number) => {
-    if (!altDownRef.current) return;
-    if (padded[slotIdx] == null) return;
+    // Same gesture-split as BagStub: the runtime suppresses onPress
+    // when onMouseDown is set, so this is the single hook for both
+    // gestures — alt+drag rearranges the slot binding, plain click
+    // invokes the bound atom.
+    const slotAtomId = padded[slotIdx];
+    if (slotAtomId == null) return;
+    if (!altDownRef.current) {
+      const atom = atomById(slotAtomId);
+      if (atom) atom.invoke({ cursor: { x: 0, y: 0 }, selection: [] });
+      return;
+    }
     dragSlotRef.current = slotIdx;
     cursorRef.current = { x: readMouseX(), y: readMouseY() };
     stop();
@@ -1696,33 +2334,35 @@ function ActionBarStub({ rect, slots, setSlots, altDownRef, highlights, stagedSl
               zIndex: 30,
             }} />
           ) : null}
-          <Pressable
-            // onMouseDown handles the alt+drag-rearrange gesture (no-op
-            // when alt isn't held; beginSlotDrag short-circuits there).
-            onMouseDown={() => beginSlotDrag(idx)}
-            // onPress only fires on a clean click (no drag), so a normal
-            // tap on the slot invokes the bound atom while alt+drag
-            // routes through the drag mechanic and never lands here.
-            onPress={() => { if (atom) atom.invoke({ cursor: { x: 0, y: 0 }, selection: [] }); }}
-            style={{
+          {atom ? (
+            <Box style={{ opacity: isDragSource ? 0.3 : 1 }}>
+              <IconButton
+                name={atom.iconName}
+                iconData={atom.iconName ? undefined : atom.icon}
+                size={slotPx}
+                bg={hl ? 'theme:bg2' : colorForKey(atom.id)}
+                active={!!hl}
+                tooltip={`${atom.label} — ${atom.description}`}
+                // onPress fires on a clean click (no drag), so a normal
+                // tap invokes the bound atom; alt+drag-rearrange routes
+                // through onMouseDown and never lands here.
+                onPress={() => atom.invoke({ cursor: { x: 0, y: 0 }, selection: [] })}
+                onMouseDown={() => beginSlotDrag(idx)}
+              />
+            </Box>
+          ) : (
+            <Pressable style={{
               width: slotPx, height: slotPx,
               alignItems: 'center', justifyContent: 'center',
               borderWidth: hl ? 2 : 1,
               borderColor: hl ? 'theme:accent' : 'theme:rule',
-              backgroundColor: atom ? 'theme:bg2' : 'theme:bg1',
-              opacity: isDragSource ? 0.3 : 1,
-              position: 'relative',
-            }}
-          >
-            {atom ? (
-              <Native type="Icon" icon={atom.icon} size={Math.max(10, Math.floor(slotPx * 0.45))} strokeWidth={2} color={hl ? 'theme:accent' : 'theme:ink'} />
-            ) : (
-              // Empty slot: faint hotkey number for the first row.
-              r === 0 ? (
+              backgroundColor: 'theme:bg1',
+            }}>
+              {r === 0 ? (
                 <Text size={9} color="theme:inkDimmer">{c + 1}</Text>
-              ) : null
-            )}
-          </Pressable>
+              ) : null}
+            </Pressable>
+          )}
           {hl?.label ? (
             <Box style={{
               position: 'absolute', left: 0, top: -16,
@@ -1755,8 +2395,8 @@ function ActionBarStub({ rect, slots, setSlots, altDownRef, highlights, stagedSl
         return (
           <Box style={{
             position: 'absolute',
-            left: cursorRef.current.x - rect.x - slotPx / 2,
-            top:  cursorRef.current.y - rect.y - slotPx / 2 - headerH,
+            left: cursorRef.current.x - clampOriginRef.current.x - rect.x - slotPx / 2,
+            top:  cursorRef.current.y - clampOriginRef.current.y - rect.y - slotPx / 2 - headerH,
             width: slotPx, height: slotPx,
             alignItems: 'center', justifyContent: 'center',
             borderWidth: 1, borderColor: 'theme:accent',
@@ -1773,23 +2413,229 @@ function ActionBarStub({ rect, slots, setSlots, altDownRef, highlights, stagedSl
   );
 }
 
-function CodeStub() {
+// Code block — controlled wrapper around sweatshop's CodeEditor.
+// CanvasPage owns the draft (so the canvas <-> code two-way sync can
+// thread through the same state), and feeds value/onChange/dirty/
+// onApply down. The Apply button + Cmd/Ctrl+S still trigger an
+// explicit reverse-parse; an auto-apply debounce runs 600ms after the
+// last keystroke (handled at the page level).
+function CodeBlock({ value, onChange, dirty, onApply, name, setName, path, setPath, activeRecipeId, savedRecipes, onSave, onLoadRecipe, onLoadPremade, onDeleteRecipe }: {
+  value: string;
+  onChange: (next: string) => void;
+  dirty: boolean;
+  onApply: () => void;
+  name: string;
+  setName: (next: string) => void;
+  path: string;
+  setPath: (next: string) => void;
+  activeRecipeId: string | null;
+  savedRecipes: SavedRecipe[];
+  onSave: () => void;
+  onLoadRecipe: (r: SavedRecipe) => void;
+  onLoadPremade: (title: string, code: string) => void;
+  onDeleteRecipe: (id: string) => void;
+}) {
+  // Two tabs:
+  //   - Code     — the live canvas-as-code editor (sweatshop CodeEditor)
+  //                with editable name + path header that doubles as
+  //                the recipe's identity. Save persists into the
+  //                user's recipe library.
+  //   - Recipes  — list of saved + premade recipes the user can load
+  //                as a starting point. Click → recipe code goes into
+  //                the editor; the existing 600ms debounce reconciler
+  //                then rebuilds the canvas from it.
+  const [tab, setTab] = useState<'code' | 'recipes'>('code');
+  const [editingName, setEditingName] = useState(false);
+  const [editingPath, setEditingPath] = useState(false);
+  const lineCount = value.split('\n').length;
+  const saveLabel = activeRecipeId ? 'Save' : 'Save as…';
+
   return (
-    <Box style={{ flexGrow: 1, padding: 8 }}>
-      <Text size={9} color="theme:inkDim" style={{ fontFamily: 'monospace' as any }}>
-        {`// canvas as code\nexport default () => (\n  <Canvas>\n    {/* selection ↦ JSX */}\n  </Canvas>\n);`}
-      </Text>
-    </Box>
+    <Col style={{ flexGrow: 1, minHeight: 0 }}>
+      <Row style={{
+        paddingLeft: 6, paddingRight: 6, paddingTop: 4, paddingBottom: 4, gap: 4,
+        borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+        backgroundColor: 'theme:bg2',
+        alignItems: 'center',
+      }}>
+        <CodeTab label="Code" active={tab === 'code'} onPress={() => setTab('code')} />
+        <CodeTab label="Recipes" active={tab === 'recipes'} onPress={() => setTab('recipes')} />
+      </Row>
+      {tab === 'code' ? (
+        <>
+          {/* Editable header — name (recipe title) + path (filename).
+              Click to edit either; blur or Enter commits. Save button
+              persists to localStorage; Apply still drives the
+              code→canvas reverse-parse. */}
+          <Row style={{
+            paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, gap: 8,
+            borderBottomWidth: 1, borderBottomColor: 'theme:rule',
+            backgroundColor: 'theme:bg2',
+            alignItems: 'center',
+          }}>
+            {editingName ? (
+              <Box style={{ minWidth: 120 }}>
+                <TextInput
+                  value={name}
+                  onChange={(s: string) => setName(s)}
+                  onBlur={() => setEditingName(false)}
+                  style={{
+                    paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2,
+                    borderWidth: 1, borderColor: 'theme:accent',
+                    backgroundColor: 'theme:bg1', color: 'theme:ink',
+                    fontSize: 11, minWidth: 120,
+                  }}
+                />
+              </Box>
+            ) : (
+              <Pressable onPress={() => setEditingName(true)}>
+                <Text size={11} color="theme:ink" bold>{name || 'Untitled'}</Text>
+              </Pressable>
+            )}
+            {editingPath ? (
+              <Box style={{ minWidth: 100 }}>
+                <TextInput
+                  value={path}
+                  onChange={(s: string) => setPath(s)}
+                  onBlur={() => setEditingPath(false)}
+                  style={{
+                    paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2,
+                    borderWidth: 1, borderColor: 'theme:rule',
+                    backgroundColor: 'theme:bg1', color: 'theme:inkDim',
+                    fontSize: 10, minWidth: 100,
+                  }}
+                />
+              </Box>
+            ) : (
+              <Pressable onPress={() => setEditingPath(true)}>
+                <Text size={10} color="theme:inkDim">{path || 'untitled.tsx'}</Text>
+              </Pressable>
+            )}
+            <Box style={{ flexGrow: 1 }} />
+            {dirty ? <Text size={10} color="theme:warn">modified</Text> : null}
+            {dirty ? (
+              <Pressable onPress={onApply} style={{
+                paddingLeft: 8, paddingRight: 8, paddingTop: 2, paddingBottom: 2,
+                borderRadius: 4, borderWidth: 1, borderColor: 'theme:accent',
+                backgroundColor: 'theme:bg2',
+              }}>
+                <Text size={10} color="theme:accent">Apply ↵</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={onSave} style={{
+              paddingLeft: 8, paddingRight: 8, paddingTop: 2, paddingBottom: 2,
+              borderRadius: 4, borderWidth: 1, borderColor: 'theme:accentHot',
+              backgroundColor: 'theme:bg2',
+            }}>
+              <Text size={10} color="theme:accentHot" bold>{saveLabel}</Text>
+            </Pressable>
+            <Text size={10} color="theme:inkDim">{lineCount} line{lineCount === 1 ? '' : 's'}</Text>
+          </Row>
+          <Box style={{ flexGrow: 1, minHeight: 0 }}>
+            <CodeEditor
+              // built-in header suppressed — we render our own above.
+              value={value}
+              onChange={onChange}
+              dirty={false}
+            />
+          </Box>
+        </>
+      ) : (
+        <RecipeList
+          savedRecipes={savedRecipes}
+          activeRecipeId={activeRecipeId}
+          onLoadRecipe={(r) => { onLoadRecipe(r); setTab('code'); }}
+          onLoadPremade={(title, code) => { onLoadPremade(title, code); setTab('code'); }}
+          onDelete={onDeleteRecipe}
+        />
+      )}
+    </Col>
   );
 }
 
-function PropsStub() {
+function CodeTab({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Col style={{ flexGrow: 1, padding: 8, gap: 6 }}>
-      <Text size={9} color="theme:inkDim" bold>SELECTED</Text>
-      <Text size={10} color="theme:ink">Nothing selected.</Text>
-      <Text size={9} color="theme:inkDim">Click a node to inspect its properties.</Text>
-    </Col>
+    <Pressable onPress={onPress} style={{
+      paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3,
+      borderRadius: 4,
+      borderWidth: 1, borderColor: active ? 'theme:accent' : 'theme:rule',
+      backgroundColor: active ? 'theme:bg1' : 'transparent',
+    }}>
+      <Text size={10} color={active ? 'theme:accent' : 'theme:inkDim'} bold>{label}</Text>
+    </Pressable>
+  );
+}
+
+// Passthrough Schema for useCRUD — the RecipeDocument validation lives
+// on the disk-authoring side (TypeScript enforces the shape on import).
+// The DB layer just stores and retrieves; no runtime parse needed.
+const recipePassthrough = { parse: (v: any) => v as RecipeDocument };
+
+function RecipeList({ savedRecipes, activeRecipeId, onLoadRecipe, onLoadPremade, onDelete }: {
+  savedRecipes: SavedRecipe[];
+  activeRecipeId: string | null;
+  onLoadRecipe: (r: SavedRecipe) => void;
+  onLoadPremade: (title: string, code: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  // Live recipe corpus. Seeded from disk on bootstrap (see
+  // cart/app/recipes/seed.ts); user edits via the canvas's save flow
+  // write back through this same store so subsequent reads see them.
+  const recipeStore = useCRUD<RecipeDocument>('recipe', recipePassthrough as any, { namespace: 'app' });
+  const { data: recipes } = recipeStore.useListQuery();
+  return (
+    <ScrollView style={{ flexGrow: 1, minHeight: 0 }}>
+      <Col style={{ padding: 8, gap: 6 }}>
+        {savedRecipes.length > 0 ? (
+          <>
+            <Text size={9} color="theme:inkDim" bold>SAVED</Text>
+            {savedRecipes.map((r) => (
+              <Box key={r.id} style={{
+                padding: 8, gap: 3,
+                borderWidth: 1,
+                borderColor: r.id === activeRecipeId ? 'theme:accent' : 'theme:rule',
+                backgroundColor: 'theme:bg2',
+              }}>
+                <Row style={{ alignItems: 'center', gap: 6 }}>
+                  <Pressable onPress={() => onLoadRecipe(r)} style={{ flexGrow: 1 }}>
+                    <Row style={{ alignItems: 'baseline', gap: 6 }}>
+                      <Text size={11} color="theme:ink" bold>{r.name}</Text>
+                      <Text size={9} color="theme:inkDim">{r.path}</Text>
+                    </Row>
+                  </Pressable>
+                  <Pressable onPress={() => onLoadRecipe(r)}>
+                    <Text size={8} color="theme:accent">load ↵</Text>
+                  </Pressable>
+                  <Pressable onPress={() => onDelete(r.id)}>
+                    <Text size={8} color="theme:err">del</Text>
+                  </Pressable>
+                </Row>
+                <Text size={9} color="theme:inkDim">
+                  saved {new Date(r.updatedAt).toLocaleString()}
+                </Text>
+              </Box>
+            ))}
+          </>
+        ) : null}
+        <Text size={9} color="theme:inkDim" bold>PREMADE</Text>
+        {recipes.map((r) => (
+          <Pressable key={r.slug} onPress={() => onLoadPremade(r.title, wrapScaffold(r.scaffold.body))} style={{
+            padding: 8, gap: 3,
+            borderWidth: 1, borderColor: 'theme:rule',
+            backgroundColor: 'theme:bg2',
+          }}>
+            <Row style={{ alignItems: 'center', gap: 6 }}>
+              <Text size={11} color="theme:ink" bold>{r.title}</Text>
+              <Box style={{ flexGrow: 1 }} />
+              <Text size={8} color="theme:accent">load ↵</Text>
+            </Row>
+            <Text size={9} color="theme:inkDim" style={{ lineHeight: 13 }}>
+              {r.instructions}
+            </Text>
+          </Pressable>
+        ))}
+      </Col>
+    </ScrollView>
   );
 }
 
@@ -1798,5 +2644,66 @@ function MinimapStub() {
     <Box style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}>
       <Native type="Icon" icon={MapIcon} size={20} strokeWidth={2} color="theme:inkDim" />
     </Box>
+  );
+}
+
+// FlowTile body renderer for the /canvas substrate. The gallery's
+// default body is HTTP-request themed (method / url / auth / timeout)
+// which is meaningless for the IFTTT recipes we host — when a recipe
+// loads, every tile looks identical regardless of what it actually
+// does. This renderer surfaces the trigger/action channel front-and-
+// center plus a description hint when the spawning atom carried one.
+function renderFlowTileBody({ node }: { node: any }) {
+  const data: any = node.data ?? {};
+  const channel: string = data.channel ?? data.prefix ?? '';
+  const atom = data.atomId ? atomById(data.atomId) : null;
+  const description: string | null = atom?.description ?? null;
+  const isTrigger = data.kind === 'trigger' || data.kind === 'token';
+  const accent = isTrigger ? 'theme:accent' : 'theme:accentHot';
+
+  // Show defaults compactly when present (one-line per key). Skips
+  // verbose values (objects, long strings) and the empty-string slop
+  // so the tile body stays readable.
+  const defaults: Array<[string, any]> = data.defaults
+    ? Object.entries(data.defaults).filter(([_k, v]) => {
+        if (v === '' || v == null) return false;
+        if (Array.isArray(v) && v.length === 0) return false;
+        if (typeof v === 'object') return false;
+        return true;
+      }) as Array<[string, any]>
+    : [];
+
+  return (
+    <Col style={{ flexGrow: 1, padding: 10, gap: 6 }}>
+      <Text size={9} color="theme:inkDim" bold style={{ fontFamily: 'monospace' as any }}>
+        {isTrigger ? 'WHEN' : 'THEN'}
+      </Text>
+      <Text size={13} color={accent} bold
+        style={{ fontFamily: 'monospace' as any }}
+      >
+        {channel || node.label || '—'}
+      </Text>
+      {description ? (
+        <Text size={9} color="theme:inkDim" numberOfLines={2} style={{ lineHeight: 12 }}>
+          {description}
+        </Text>
+      ) : null}
+      {defaults.length > 0 ? (
+        <Col style={{ gap: 1, marginTop: 4 }}>
+          {defaults.slice(0, 4).map(([k, v]) => (
+            <Row key={k} style={{ gap: 6 }}>
+              <Text size={9} color="theme:inkDim">{k}</Text>
+              <Box style={{ flexGrow: 1 }} />
+              <Text size={9} color="theme:ink" numberOfLines={1} style={{ fontFamily: 'monospace' as any }}>
+                {String(v)}
+              </Text>
+            </Row>
+          ))}
+          {defaults.length > 4 ? (
+            <Text size={8} color="theme:inkDim">+{defaults.length - 4} more · Properties panel</Text>
+          ) : null}
+        </Col>
+      ) : null}
+    </Col>
   );
 }

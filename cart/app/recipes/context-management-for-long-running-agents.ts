@@ -191,4 +191,13 @@ const totalCostUsd = events.reduce((sum, e) => sum + (e.cost_usd_delta ?? 0), 0)
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — context-management is a multi-turn cart\n` +
+      `  // policy, not a 2-node useIFTTT chain. Substrate gap: no\n` +
+      `  // session:compaction event source, no token-budget bus channel.\n` +
+      `  // A partial scaffold would be: timer:every:N + predicate trigger on\n` +
+      `  // (state.session.tokens > threshold) → action:'reset-session'.\n` +
+      `  // Needs a session-lifecycle source + a tokens state slot first.\n`,
+  },
 };

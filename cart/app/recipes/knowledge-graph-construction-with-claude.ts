@@ -347,4 +347,12 @@ for (const [docTitle, labels] of Object.entries(gold)) {
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is a multi-stage extraction\n` +
+      `  // pipeline (chunk → extract triples → resolve aliases → store →\n` +
+      `  // query), not a 2-node useIFTTT chain. Likely needs composition-\n` +
+      `  // shaped recipes with named stages on a worker pipeline rather\n` +
+      `  // than the flat trigger→action shape useIFTTT carries.\n`,
+  },
 };

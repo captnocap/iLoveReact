@@ -87,6 +87,14 @@ export const recipe: RecipeDocument = {
         "The default JSX export stamps: a new src_cwd-memory-file source kind, a `who` composition that pins ./profile.md as long-term memory, a `prompt` composition that wraps user turns with the memory contract, an event hook that surfaces a 'memory updated' indicator when Claude edits profile.md, and recommended arming for two pathologies the recipe historically tripped (scope-collapse at T1, canonical-pivot at T2 — customers can rationalize away their own evolved preferences).",
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — same gap as build-agents-that-remember-your-users.ts.\n` +
+      `  // This .tsx file ships the stamp form (composition + arming). The IFTTT-\n` +
+      `  // shaped scaffold would arm on fs:changed:profile.md → emit a\n` +
+      `  // memory-updated event, but the recipe's core behavior is composition-\n` +
+      `  // shaped, not event-shaped. Duplicate of the .ts recipe; consolidate.\n`,
+  },
 };
 
 // ── Stamp form ────────────────────────────────────────────────────────────

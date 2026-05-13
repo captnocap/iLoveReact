@@ -188,4 +188,13 @@ async function ingestSession(path: string, embed: ReturnType<typeof useEmbed>) {
       ],
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — this recipe is a RAG pipeline (ingest →\n` +
+      `  // embed → store → retrieve), not a 2-node useIFTTT chain. Partial\n` +
+      `  // event-driven shape: useIFTTT('fs:changed:logs/*.jsonl',\n` +
+      `  // 'queue-job:ingest-chunk') is the ingest side — but that wraps a\n` +
+      `  // pipeline-shaped job rather than a single action. Belongs as a\n` +
+      `  // multi-rule recipe pointing at a composition.\n`,
+  },
 };

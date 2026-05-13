@@ -21,7 +21,7 @@ import { Box } from '@reactjit/runtime/primitives';
 import { useNavigate, useRoute } from '@reactjit/runtime/router';
 import { classifiers as S } from '@reactjit/core';
 import { setSweatshopSection, useSweatshopSection } from '../shell';
-import CanvasPage from './page';
+import CanvasPage from './canvas/page';
 import PlanPage from '../plan/page';
 import ComposerPage from '../composer/page';
 

@@ -39,14 +39,22 @@ import {
   parseGrantReply,
   parseToolReply,
   registerBuiltinTools,
+  registerBrowseTools,
   setRouteRef,
   type ToolCall,
 } from '../tools';
-import { registerCanvasTools, readCanvasState } from '../canvas/tools';
+import { registerCanvasTools, readCanvasState } from '../sweatshop/canvas/tools';
 
 // Run the cart's tool registration exactly once per process. Importing
 // this module is the trigger; the registry no-ops on subsequent calls.
 registerBuiltinTools();
+// Stealth-Firefox research surface. The cart must still own the browse
+// session lifecycle (typical: useProcess to spawn `python -m
+// browse.session --port 7332`, useBrowse({port:7332}) to point the
+// bridge). Registering the tools eagerly lets list-tools advertise them
+// even before the session is up; calls will fail clearly if no session
+// is listening.
+registerBrowseTools();
 // /canvas-route tools (move-panel, bind-slot, highlight, …). Eager
 // registration so the assistant knows they exist even when the user
 // hasn't visited /canvas yet — list-tools includes them on first ask.
@@ -112,7 +120,7 @@ Canvas staging:
     <Btn reply="@stage/cancel">Nevermind</Btn>
 - One card per turn covers ALL the mutations in that turn — bind 5 slots in one turn = one card with one Accept that commits all 5. Don't fragment into multiple cards.
 - accept = commit. cancel = drop. retry = drop AND you'll get a fresh turn telling you the user wanted a different approach; read canvas-describe and propose something else.
-- Before proposing canvas changes, check the current state. While the user is on /canvas, the snapshot is injected at the top of every turn as [Canvas: {...JSON...}] — read it instead of calling canvas-describe. Use canvas-describe only when you need a refresh between tool calls.
+- Before proposing canvas changes, check the current state. While the user is on /sweatshop/canvas, the snapshot is injected at the top of every turn as [Canvas: {...JSON...}] — read it instead of calling canvas-describe. Use canvas-describe only when you need a refresh between tool calls.
 - Undo/redo: canvas-undo and canvas-redo step the user back/forward through history (last 100 commits). canvas-history lists recent entries. Use these when the user asks to revert or revisit a prior layout.`;
 
 function hasIntentTags(nodes: Node[]): boolean {
@@ -241,7 +249,7 @@ export function AssistantChatProvider() {
       // before reasoning about layout. Tiny payload (a few hundred
       // bytes); no harm including it on every canvas-route turn.
       let canvasNote = '';
-      if (routeRef.current.startsWith('/canvas')) {
+      if (routeRef.current.startsWith('/sweatshop/canvas')) {
         const snap = readCanvasState();
         if (snap) canvasNote = `[Canvas: ${JSON.stringify(snap)}]\n\n`;
       }

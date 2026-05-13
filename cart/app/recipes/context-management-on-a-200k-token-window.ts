@@ -213,4 +213,11 @@ cleared_input_tokens            no         server-side, hidden`,
         "The 200K window doesn't change the strategies, only the urgency. Same levers as Part 1, applied earlier and more often.",
     },
   ],
+  scaffold: {
+    body:
+      `  // TODO: author scaffold — same shape as Part 1 with tighter thresholds.\n` +
+      `  // A partial scaffold once session-lifecycle + tokens state lands:\n` +
+      `  //   useIFTTT(() => state.session.tokens > 160_000, 'reset-session');\n` +
+      `  // Needs the same prerequisites as context-management-for-long-running.\n`,
+  },
 };

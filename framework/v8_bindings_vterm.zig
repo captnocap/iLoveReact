@@ -143,6 +143,30 @@ fn hostVtermWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const data = argToStringAlloc(info, 1) orelse return;
     defer std.heap.c_allocator.free(data);
     vterm.writePty(data);
+    // Typing while scrolled-back snaps the view back to live — what
+    // every terminal emulator does. Mouse-wheel scroll never calls
+    // through here so it stays at its set offset until user types.
+    vterm.scrollToBottom();
+}
+
+// ── __vterm_scroll(slot, delta) ─────────────────────────────────────
+//
+// Positive delta → scroll DOWN (toward live view, smaller offset).
+// Negative delta → scroll UP (into history, larger offset).
+// Returns the new scroll offset so JS can know if we hit the limits.
+
+fn hostVtermScroll(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = argI32(info, 0, 0);
+    const delta = argI32(info, 1, 0);
+    if (delta < 0) {
+        const n: u16 = @intCast(@min(-delta, 65535));
+        vterm.scrollUp(n);
+    } else if (delta > 0) {
+        const n: u16 = @intCast(@min(delta, 65535));
+        vterm.scrollDown(n);
+    }
+    setReturnNum(info, @floatFromInt(vterm.scrollOffset()));
 }
 
 // ── __vterm_resize(slot, rows, cols) ────────────────────────────────
@@ -207,10 +231,16 @@ fn hostVtermGetRow(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const row = argU16(info, 1, 0);
 
     const cols = vterm.getCols();
-    if (cols == 0 or row >= vterm.getRows()) {
+    const rows = vterm.getRows();
+    if (cols == 0 or row >= rows) {
         setReturnString(info, "");
         return;
     }
+
+    // Scroll-aware row source. sb_scroll > 0 means the user has
+    // scrolled up into history; the top `sb_scroll` viewport rows
+    // show scrollback, the rest still show live cells (shifted).
+    const sb_scroll = vterm.scrollOffset();
 
     var pos: usize = 0;
     var col: u16 = 0;
@@ -220,7 +250,10 @@ fn hostVtermGetRow(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
             g_row_buf[pos] = 0x1e; // RS — cell separator
             pos += 1;
         }
-        const cell = vterm.getCell(row, col);
+        const cell = if (row < sb_scroll)
+            vterm.getScrollbackCell(row, col)
+        else
+            vterm.getCell(row - sb_scroll, col);
 
         // Char (utf-8). Skip writing when empty — decoder treats the empty
         // first field as a space.
@@ -268,6 +301,7 @@ pub fn registerVterm(_: anytype) void {
     v8_runtime.registerHostFn("__vterm_write", hostVtermWrite);
     v8_runtime.registerHostFn("__vterm_resize", hostVtermResize);
     v8_runtime.registerHostFn("__vterm_get_row", hostVtermGetRow);
+    v8_runtime.registerHostFn("__vterm_scroll", hostVtermScroll);
 }
 
 // Alias for the TUI app entry, which calls registerAll() (different

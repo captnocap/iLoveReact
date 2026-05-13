@@ -1,16 +1,17 @@
 #!/bin/sh
 # scripts/claude-ss — boot worker-minimal.ext4 with claude-code as PID 1.
 #
-# First-flight version: no task routing, no credential injection. Just
-# enough to verify the boot chain — kernel → /init → claude on ttyS0,
-# now with network so claude can reach api.anthropic.com.
+# Usage:  scripts/claude-ss [--task=<id>]
+#         <Terminal shell="scripts/claude-ss" />   (inside claudewrap)
+#
+# With --task=<id>, reads ~/.cache/reactjit/tasks/<id>.json and stages
+# the task's `claudemd` field into /root/CLAUDE.md inside the VM, so
+# claude starts the session with that context already loaded. Task
+# files are produced by the planning UI (/plan in claudewrap).
 #
 # On first run (per host boot) this script asks for sudo to create the
 # tap0 device + NAT rule. Re-runs detect the existing tap and skip the
 # sudo step — so day-to-day usage is `scripts/claude-ss` and nothing else.
-#
-# Usage:  scripts/claude-ss
-#         <Terminal shell="scripts/claude-ss" />   (inside claudewrap)
 #
 # Leave the VM by quitting claude inside (kernel panics → firecracker
 # exits → PTY closes), or Ctrl+] (claudewrap unfocus) → q.
@@ -18,6 +19,19 @@
 set -e
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
+
+# ── arg parsing ────────────────────────────────────────────────────
+TASK_ID=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --task=*) TASK_ID="${1#--task=}"; shift ;;
+    --task)   TASK_ID="$2"; shift 2 ;;
+    -h|--help)
+      sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0 ;;
+    *)        echo "[claude-ss] unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
 
 KERNEL="$ROOT/images/vmlinux"
 ROOTFS="$ROOT/images/worker-minimal.ext4"
@@ -79,6 +93,71 @@ for src in "$HOME/.claude/.credentials.json" "$HOME/.claude/.claude.json"; do
 done
 # claude-code also sometimes writes ~/.claude.json directly in $HOME.
 if [ -f "$HOME/.claude.json" ]; then cp "$HOME/.claude.json" "$stage/"; copied=$((copied + 1)); fi
+
+# ── task staging ───────────────────────────────────────────────────
+#
+# --task=<id> → load ~/.cache/reactjit/tasks/<id>.json and lift its
+# `claudemd` field into /root/CLAUDE.md inside the VM (rides along on
+# the same cred drive as creds, since both end up under /root).
+#
+# Task file shape (all optional except id):
+#   { "id": "auth", "title": "...", "claudemd": "# Task: ...\n...", ... }
+#
+# Future fields (prompt, cwd, allowedWrites, …) will join here as the
+# planning UI grows.
+TASK_DIR="$HOME/.cache/reactjit/tasks"
+TASK_FILE=""
+if [ -n "$TASK_ID" ]; then
+  TASK_FILE="$TASK_DIR/$TASK_ID.json"
+  [ -f "$TASK_FILE" ] || { echo "[claude-ss] no task file at $TASK_FILE" >&2; exit 2; }
+  command -v jq >/dev/null || { echo "[claude-ss] --task needs jq on PATH" >&2; exit 2; }
+  claudemd=$(jq -r '.claudemd // ""' "$TASK_FILE")
+  if [ -n "$claudemd" ]; then
+    printf '%s' "$claudemd" > "$stage/CLAUDE.md"
+    copied=$((copied + 1))
+    title=$(jq -r '.title // .id' "$TASK_FILE")
+    echo "[claude-ss] task=$TASK_ID ($title) → /root/CLAUDE.md in guest"
+  else
+    echo "[claude-ss] task=$TASK_ID has no claudemd field — staging nothing" >&2
+  fi
+fi
+
+# ── terminal-size handoff ──────────────────────────────────────────
+#
+# Firecracker doesn't propagate kitty's (or claudewrap's) window size
+# through the serial UART, so the guest's /dev/ttyS0 and the inner pty
+# socat creates for claude default to 80x24. When the outer terminal
+# is wider, claude clears/wraps at 80 while kitty paints at the real
+# width, leaving stale renders (e.g. the / menu after backspace).
+#
+# We read our stdin's size with stty and ship it on the cred drive as
+# /root/.termsize. /init `.`-sources that and sets both /dev/ttyS0
+# and the inner pty to match. No live SIGWINCH yet — resize during a
+# session still requires a reboot of the VM.
+if [ -t 0 ]; then
+  size=$(stty size 2>/dev/null || echo "24 80")
+  rows=$(echo "$size" | cut -d' ' -f1)
+  cols=$(echo "$size" | cut -d' ' -f2)
+  printf 'ROWS=%s\nCOLS=%s\n' "$rows" "$cols" > "$stage/.termsize"
+  copied=$((copied + 1))
+  echo "[claude-ss] window: ${cols}x${rows}"
+fi
+
+# ── ifttt event listener (host side) ──────────────────────────────
+#
+# Guest's /usr/local/bin/ifttt-emit sends one JSON line per claude hook
+# event to 172.16.0.1:9099. We tee those lines to a stable host file
+# (~/.cache/reactjit/ifttt-latest.log, truncated per run) so the wrapper
+# (or `tail -F`) can pick them up. nc -lk = listen on port, keep
+# accepting connections after each disconnect.
+IFTTT_HOST_DIR="$HOME/.cache/reactjit"
+IFTTT_HOST_LOG="$IFTTT_HOST_DIR/ifttt-latest.log"
+mkdir -p "$IFTTT_HOST_DIR"
+: > "$IFTTT_HOST_LOG"
+nc -lk "$HOST_IP" 9099 >> "$IFTTT_HOST_LOG" 2>/dev/null &
+NC_PID=$!
+trap 'kill "$NC_PID" 2>/dev/null; rm -rf "$RUN_DIR"' EXIT INT TERM
+echo "[claude-ss] ifttt events → $IFTTT_HOST_LOG  (pid $NC_PID)"
 
 if [ "$copied" -gt 0 ]; then
   # Raw tar dumped onto a block device. /init reads it with `tar -xf
@@ -146,7 +225,8 @@ cat > "$CFG" <<JSON
 }
 JSON
 
-# exec → firecracker becomes the PTY child. Its stdin/stdout ARE the
-# serial console, so the TUI (or kitty) renders the guest's ttyS0
-# directly.
-exec firecracker --no-api --config-file "$CFG"
+# Run firecracker as a child (not exec) so our EXIT trap fires when it
+# returns — we need to kill the nc listener and clean up RUN_DIR. The
+# stdin/stdout PTY is shared with the child; serial console renders
+# directly in the kitty / claudewrap terminal that launched us.
+firecracker --no-api --config-file "$CFG"

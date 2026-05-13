@@ -1332,20 +1332,22 @@ function dispatchMouse(buf: string): void {
     const button = rawButton & ~32;
 
     // Wheel: bit 6 (64). 64 = wheel-up, 65 = wheel-down. Terminal under
-    // cursor wins: translate the notch into arrow-key presses and feed
-    // the PTY. Forwarding the raw SGR mouse seq only helps programs that
-    // opted into mouse-tracking; arrow keys work universally (shells,
-    // pagers, Ink-based TUIs like Claude Code use them for navigation).
-    // Falls through to ScrollView routing when no Terminal is under the
-    // cursor — and to nothing when neither matches.
+    // cursor wins: scroll OUR vterm's scrollback (not the running app's
+    // history). That's what every terminal emulator does — the wheel
+    // moves the viewport over bytes-already-rendered, never injects
+    // input. The next keystroke (which goes through __vterm_write)
+    // snaps the view back to live.
+    // Falls through to ScrollView routing when no Terminal is under
+    // the cursor — and to nothing when neither matches.
     if ((rawButton & 64) !== 0 && action === 'M') {
       const tm = hitTestTerminal(col, row);
       if (tm) {
         const entry = termSlots.get(tm.id);
         const g: any = globalThis;
-        if (entry && typeof g.__vterm_write === 'function') {
-          const key = (rawButton & 1) ? '\x1b[B' : '\x1b[A';
-          try { g.__vterm_write(entry.slot, key + key + key); } catch {}
+        if (entry && typeof g.__vterm_scroll === 'function') {
+          const delta = (rawButton & 1) ? 3 : -3; // wheel-down = +3 toward live
+          try { g.__vterm_scroll(entry.slot, delta); } catch {}
+          requestPaint();
           continue;
         }
       }

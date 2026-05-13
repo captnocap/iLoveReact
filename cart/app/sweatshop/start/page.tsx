@@ -100,7 +100,7 @@ function RecentList() {
   return (
     <Col style={{ gap: 6 }}>
       {recent.data.map((ws) => (
-        <RecentRow key={ws.id} ws={ws} onPress={() => nav.push('/canvas')} />
+        <RecentRow key={ws.id} ws={ws} onPress={() => nav.push('/sweatshop/canvas')} />
       ))}
     </Col>
   );
