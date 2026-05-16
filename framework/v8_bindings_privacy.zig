@@ -16,7 +16,7 @@ const v8_runtime = @import("v8_runtime.zig");
 const privacy = @import("privacy/privacy.zig");
 const sodium = @import("privacy/sodium.zig");
 const keyring = @import("privacy/keyring.zig");
-const crmod = @import("crypto.zig");
+const crmod = @import("privacy/crypto.zig");
 
 const alloc = std.heap.c_allocator;
 

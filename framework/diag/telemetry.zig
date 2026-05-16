@@ -7,14 +7,13 @@
 const std = @import("std");
 const layout = @import("../layout.zig");
 const gpu = @import("../gpu/gpu.zig");
-const state = @import("../state.zig");
-const canvas = @import("../canvas.zig");
-const selection = @import("../selection.zig");
-const input = @import("../input.zig");
-const tooltip = @import("../tooltip.zig");
-const breakpoint = @import("../breakpoint.zig");
-const windows = @import("../windows.zig");
-const router = @import("../router.zig");
+const canvas = @import("../primitive/canvas.zig");
+const selection = @import("../state/selection.zig");
+const input = @import("../primitive/input.zig");
+const tooltip = @import("../primitive/tooltip.zig");
+const system_signals = @import("../ifttt/system_signals.zig");
+const windows = @import("../primitive/windows.zig");
+const router = @import("../primitive/router.zig");
 const log = @import("log.zig");
 
 const Node = layout.Node;
@@ -76,13 +75,6 @@ pub const Snapshot = struct {
     image_nodes: u32 = 0,
     pressable_nodes: u32 = 0,
     canvas_nodes: u32 = 0,
-
-    // ── State ──
-    state_slot_count: u32 = 0,
-    state_slot_capacity: u32 = 0,
-    state_dirty: bool = false,
-    array_slot_count: u32 = 0,
-    array_slot_capacity: u32 = 0,
 
     // ── Bridge ──
     bridge_calls_per_sec: u64 = 0,
@@ -303,13 +295,6 @@ pub fn collect(args: CollectArgs) void {
     buildDfsIndex(args.root, 0);
     dfs_frame = snap.frame_number;
 
-    // ── State ──
-    snap.state_slot_count = @intCast(state.slotCount());
-    snap.state_slot_capacity = state.MAX_SLOTS;
-    snap.state_dirty = state.isDirty();
-    snap.array_slot_count = @intCast(state.telemetryArraySlotCount());
-    snap.array_slot_capacity = 16; // MAX_ARRAY_SLOTS
-
     // ── Bridge ──
     snap.bridge_calls_per_sec = args.bridge_calls_per_sec;
 
@@ -350,7 +335,7 @@ pub fn collect(args: CollectArgs) void {
         }
     }
 
-    snap.breakpoint_tier = @intFromEnum(breakpoint.current());
+    snap.breakpoint_tier = system_signals.getBpTier();
     snap.secondary_window_count = windows.telemetryActiveCount();
 
     // ── Canvas ──

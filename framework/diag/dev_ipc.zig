@@ -24,7 +24,10 @@ const event_bus = @import("event_bus.zig");
 // as `qjs_runtime` to keep existing call sites working.
 const frame_telemetry = @import("frame_telemetry.zig");
 const telemetry = @import("telemetry.zig");
+const sock_util = @import("sock_util.zig");
 const log = std.log.scoped(.dev_ipc);
+
+const writeAll = sock_util.writeAll;
 
 pub const SOCKET_PATH = "/tmp/reactjit.sock";
 
@@ -255,15 +258,6 @@ fn peerPidOrZero(fd: std.posix.socket_t) i32 {
     var len: u32 = @sizeOf(Ucred);
     if (getsockopt(@as(c_int, @intCast(fd)), SOL_SOCKET, SO_PEERCRED, &cred, &len) != 0) return 0;
     return cred.pid;
-}
-
-fn writeAll(fd: std.posix.socket_t, data: []const u8) !void {
-    var written: usize = 0;
-    while (written < data.len) {
-        const n = try std.posix.write(fd, data[written..]);
-        if (n == 0) return error.EarlyEof;
-        written += n;
-    }
 }
 
 /// Pull the next queued push message. Returns null if the queue is empty.

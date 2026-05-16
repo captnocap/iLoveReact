@@ -179,6 +179,18 @@ fn hostVtermResize(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     vterm.resizeVterm(rows, cols);
 }
 
+// ── __vterm_get_mouse_mode(slot) → mouse mode (0 = off, 1..3 = on) ──
+//
+// Lets the JS TUI host decide whether to forward wheel/click events as
+// SGR mouse sequences (when the inner program is tracking mouse — e.g.
+// a nested TUI like claude-inner) vs handle them locally.
+
+fn hostVtermGetMouseMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    _ = argI32(info, 0, 0);
+    setReturnNum(info, @floatFromInt(vterm.getMouseModeIdx(0)));
+}
+
 // ── __vterm_get_row(slot, row) → encoded cell string ────────────────
 //
 // Row encoding mirrors tui/host.ts decodeTerminalRow:
@@ -302,6 +314,7 @@ pub fn registerVterm(_: anytype) void {
     v8_runtime.registerHostFn("__vterm_resize", hostVtermResize);
     v8_runtime.registerHostFn("__vterm_get_row", hostVtermGetRow);
     v8_runtime.registerHostFn("__vterm_scroll", hostVtermScroll);
+    v8_runtime.registerHostFn("__vterm_get_mouse_mode", hostVtermGetMouseMode);
 }
 
 // Alias for the TUI app entry, which calls registerAll() (different

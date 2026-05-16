@@ -108,6 +108,10 @@ const VTermValue = extern struct {
 // Constants
 const VTERM_PROP_CURSORVISIBLE: c_int = 1;
 const VTERM_PROP_ALTSCREEN: c_int = 3;
+// From deps/libvterm/include/vterm.h enum VTermProp (CURSORVISIBLE=1,
+// CURSORBLINK=2, ALTSCREEN=3, TITLE=4, ICONNAME=5, REVERSE=6, CURSORSHAPE=7,
+// MOUSE=8). Values: 0=none, 1=click, 2=drag, 3=any-motion.
+const VTERM_PROP_MOUSE: c_int = 8;
 const VTERM_DAMAGE_ROW: c_int = 1;
 
 // Callback function pointer types
@@ -197,6 +201,11 @@ pub const VTerm = struct {
     render_in_progress: bool = false,
     render_completed: bool = false,
     alt_screen: bool = false,
+    // Mouse mode the inner program asked for via DECSET (1000/1002/1003). 0
+    // means the program isn't tracking mouse events; the GPU host then owns
+    // mouse for selection. Nonzero means we forward mouse events as SGR (1006)
+    // sequences to the PTY instead of doing host-side selection.
+    mouse_mode: c_int = 0,
 
     // Reusable cell buffer
     cell_buf: VTermScreenCell = .{},
@@ -397,6 +406,14 @@ fn cb_settermprop(prop: c_int, val: [*c]VTermValue, user: ?*anyopaque) callconv(
         }
     } else if (prop == VTERM_PROP_ALTSCREEN) {
         self.alt_screen = (val[0].boolean != 0);
+    } else if (prop == VTERM_PROP_MOUSE) {
+        // Inner program enabled (or disabled) mouse reporting. We use this
+        // as the gate for whether the GPU host forwards clicks to the PTY.
+        // VTermValue is a union { boolean, number, … } and the Zig binding
+        // only declares the `boolean` slot — but `number` lives at the same
+        // offset (see comment on VTermValue above), so reading via .boolean
+        // yields the correct c_int payload.
+        self.mouse_mode = val[0].boolean;
     }
     return 1;
 }
@@ -594,21 +611,33 @@ pub fn spawnShell(shell: [*:0]const u8, rows: u16, cols: u16) void {
 
 /// Drain PTY output → feed to vterm → flush vterm responses back to PTY.
 /// Call once per frame. Returns true if new data was received.
+///
+/// Loops to drain ALL pending data (up to 256KB) rather than a single
+/// 8KB buffer-full. Claude Code's full-screen redraws are 100KB+; at
+/// one buffer per frame the old content (e.g. the / menu) persists for
+/// many frames before the clearing escape sequences arrive.
 pub fn pollPty() bool {
     var p = &(g_pty orelse return false);
-    const data = p.readData() orelse return false;
-    // Tap: capture raw PTY data for session recording
-    if (g_recording_active) g_recorder.capture(data);
-    if (g_vterm) |*v| {
-        v.feedData(data);
-        // Drain vterm output responses (device attributes, cursor reports, etc.)
-        // Without this, the shell may hang waiting for responses to queries like \e[c
-        var out_buf: [4096]u8 = undefined;
-        if (v.readOutputData(&out_buf)) |response| {
-            _ = p.writeData(response);
+    var got_data = false;
+    var iters: u32 = 0;
+    while (iters < 32) : (iters += 1) {
+        const data = p.readData() orelse break;
+        got_data = true;
+        if (g_recording_active) g_recorder.capture(data);
+        if (g_vterm) |*v| {
+            v.feedData(data);
         }
     }
-    return true;
+    if (got_data) {
+        if (g_vterm) |*v| {
+            var out_buf: [4096]u8 = undefined;
+            if (v.readOutputData(&out_buf)) |response| {
+                var pty = &(g_pty orelse return true);
+                _ = pty.writeData(response);
+            }
+        }
+    }
+    return got_data;
 }
 
 /// Send keystrokes to the PTY (keyboard input from the user).
@@ -804,6 +833,15 @@ pub fn getCursorColIdx(_: u8) u16 {
 
 pub fn getCursorVisibleIdx(_: u8) bool {
     return getCursorVisible();
+}
+
+// 0 = no mouse mode (host owns mouse for selection / drag-to-copy).
+// 1..3 = inner program enabled SGR mouse reporting (click / drag / any-motion).
+// Engine reads this in the mouse-down dispatcher and forwards events as SGR
+// (1006) sequences when nonzero instead of doing host-side selection.
+pub fn getMouseModeIdx(_: u8) c_int {
+    if (g_vterm) |v| return v.mouse_mode;
+    return 0;
 }
 
 pub fn getRowTextIdx(_: u8, row: u16) []const u8 {

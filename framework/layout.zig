@@ -47,9 +47,9 @@ inline fn asF32(val: anytype) f32 {
 const log = @import("diag/log.zig");
 const events = @import("events.zig");
 const EventHandler = events.EventHandler;
-const effect_ctx = @import("effects/ctx.zig");
+const effect_ctx = @import("gpu/effects_ctx.zig");
 const effect_shader = @import("gpu/effect_shader.zig");
-const context_menu = @import("context_menu.zig");
+const context_menu = @import("primitive/context_menu.zig");
 
 // ── Type definitions ────────────────────────────────
 pub const FlexDirection = enum { row, column, row_reverse, column_reverse };
@@ -498,6 +498,10 @@ pub const Node = struct {
     terminal: bool = false, // true = Terminal element (cell-grid rendering via vterm)
     terminal_font_size: u16 = 13, // monospace font size for terminal cell grid
     terminal_id: u8 = 0, // multi-terminal slot index (0..MAX_TERMINALS-1)
+    // Optional shell binary path from <Terminal shell="..." />. Null →
+    // engine spawns "bash". Read once on first tick after the node appears;
+    // subsequent changes are ignored (PTY already spawned).
+    terminal_shell: ?[*:0]const u8 = null,
     graph_container: bool = false, // true = Graph element (SVG paths, no pan/zoom)
     // true = Graph/Canvas uses DOM-style origin (0,0 at element top-left).
     // Default is center-origin (world 0,0 sits at the element midpoint), which
@@ -537,7 +541,7 @@ pub const Node = struct {
     canvas_path_d: ?[]const u8 = null, // SVG path data string
     canvas_stroke_width: f32 = 2,
     canvas_stroke_opacity: f32 = 1,
-    canvas_fill_color: ?Color = null, // fill color for filled SVG paths (via blend2d)
+    canvas_fill_color: ?Color = null,
     canvas_fill_opacity: f32 = 1,
     canvas_fill_gradient: ?LinearGradient = null, // linear gradient fill — Gouraud-interpolated via drawTriColored
     canvas_flow_speed: f32 = 0, // 0 = solid, >0 = flow forward, <0 = flow reverse
@@ -674,6 +678,34 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
         child_my = my + node.scroll_y;
         child_mx = mx + node.scroll_x;
     }
+
+    // Filter-aware pointer warp. The CRT shader applies barrel distortion
+    // in its fragment shader; without matching that math here, the
+    // pointer hits where the un-warped layout thinks the element is,
+    // not where the user visually sees it.
+    if (node.filter_name) |fname| {
+        if (std.mem.eql(u8, fname, "crt") and r.w > 0 and r.h > 0) {
+            const u = (child_mx - r.x) / r.w;
+            const v = (child_my - r.y) / r.h;
+            const px = u * 2.0 - 1.0;
+            const py = v * 2.0 - 1.0;
+            const r2 = px * px + py * py;
+            const k = 0.15 * node.filter_intensity;
+            const scale = 1.0 + k * r2;
+            const ppx = px * scale;
+            const ppy = py * scale;
+            const src_u = ppx * 0.5 + 0.5;
+            const src_v = ppy * 0.5 + 0.5;
+            // CRT shader returns transparent when source uv is OOB —
+            // hit-test misses match the visible blackness.
+            if (src_u < 0.0 or src_u > 1.0 or src_v < 0.0 or src_v > 1.0) {
+                return null;
+            }
+            child_mx = r.x + src_u * r.w;
+            child_my = r.y + src_v * r.h;
+        }
+    }
+
     var i = node.children.len;
     while (i > 0) {
         i -= 1;
@@ -966,6 +998,25 @@ fn estimateIntrinsicWidthUncached(node: *Node) f32 {
     if (node.image_src != null) {
         const dims = measureNodeImage(node);
         return dims.width + pl + pr;
+    }
+    if (node.input_id != null) {
+        // TextInput's typed value lives in framework/input.zig's inputs[],
+        // not node.text, so at intrinsic-sizing time we only see the
+        // placeholder. Measure it if present; otherwise give the input a
+        // reasonable default so a width-less TextInput doesn't collapse to
+        // just padding and clip the placeholder.
+        const bold = node.font_weight >= 600;
+        var w: f32 = 0;
+        if (node.placeholder) |ph| {
+            if (measureFn) |mf| {
+                const m = mf(ph, node.font_size, node.font_family_id, 0, node.letter_spacing, node.line_height, 1, true, bold);
+                w = m.width;
+            }
+        }
+        if (w <= 0) {
+            w = @as(f32, @floatFromInt(node.font_size)) * 8.0;
+        }
+        return w + pl + pr;
     }
     if (node.children.len == 0) {
         return pl + pr;
@@ -1460,7 +1511,14 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                 setRect(child, .{ .x = 0, .y = 0, .w = 0, .h = 0 });
                 continue;
             }
-            if (child.style.position == .absolute) {
+            // Canvas.Node is positioned in graph space by canvas.zig's
+            // positionOneCanvasNode after layout — it must NOT advance
+            // the parent's flex cursor or it pushes following siblings
+            // (e.g. a Canvas.Clamp HUD overlay) down by tile-height per
+            // tile. Route through the absolute pass so layoutNode still
+            // fires (the canvas_node branch in layoutNode sets the rect
+            // from gw/gh) without the flex cursor advancing.
+            if (child.style.position == .absolute or child.canvas_node) {
                 if (absoluteCount < MAX_CHILDREN) {
                     absoluteIndices[@intCast(absoluteCount)] = i;
                     absoluteCount += 1;
@@ -1748,18 +1806,52 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                     }
                 }
             } else if (freeSpace < 0 and !preserveMainOverflow) {
+                // Column direction min-height: auto, applied BEFORE shrink so
+                // floored items don't push the container past mainSize. A
+                // `flex: 1 1 0` panel in a column-flex parent has basis=0 and
+                // shrink × basis = 0, so the proportional shrink alone would
+                // leave it at 0 height and its content-sized sibling would eat
+                // the full container. Floor basis<=0 items at their intrinsic
+                // content height first, freeze them, then absorb the (now
+                // larger) overflow into the remaining shrinkable items. The
+                // row-direction equivalent is the post-shrink floor below;
+                // doing it pre-shrink here keeps the totals balanced so the
+                // panel's bottom edge — and its border-radius — lands exactly
+                // at the viewport bottom rather than just past it.
+                var shrinkFrozen = std.mem.zeroes([MAX_CHILDREN]bool);
+                var floorAdded: f32 = 0;
+                if (!isRow) {
+                    var i = ls;
+                    while (i < ls + lc) : (i += 1) {
+                        const childIdx = visibleIndices[@intCast(i)];
+                        const childNode = &node.children[@intCast(childIdx)];
+                        if (childNode.style.min_height != null) continue;
+                        if (childBasis[@intCast(i)] <= 0) {
+                            const autoMinH = childMainSize[@intCast(i)];
+                            const maxH = resolveMaybePct(childNode.style.max_height, innerH);
+                            const floorH = if (maxH != null) @min(autoMinH, maxH.?) else autoMinH;
+                            if (asF32(floorH) > asF32(childBasis[@intCast(i)])) {
+                                floorAdded += floorH - childBasis[@intCast(i)];
+                                childBasis[@intCast(i)] = floorH;
+                                shrinkFrozen[@intCast(i)] = true;
+                            }
+                        }
+                    }
+                }
                 var totalShrinkScaled: f32 = 0;
                 {
                     var i = ls;
                     while (i < ls + lc) : (i += 1) {
+                        if (shrinkFrozen[@intCast(i)]) continue;
                         totalShrinkScaled += childShrink[@intCast(i)] * childBasis[@intCast(i)];
                     }
                 }
                 if (totalShrinkScaled > 0) {
-                    const shrinkOverflow = -freeSpace;
+                    const shrinkOverflow = -freeSpace + floorAdded;
                     {
                         var i = ls;
                         while (i < ls + lc) : (i += 1) {
+                            if (shrinkFrozen[@intCast(i)]) continue;
                             const amount = (childShrink[@intCast(i)] * childBasis[@intCast(i)] / totalShrinkScaled) * shrinkOverflow;
                             childBasis[@intCast(i)] -= amount;
                         }
@@ -1796,6 +1888,34 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                         const floorW = if (maxW != null) @min(autoMinW, maxW.?) else autoMinW;
                         if (asF32(childBasis[@intCast(i)]) < asF32(floorW)) {
                             childBasis[@intCast(i)] = floorW;
+                        }
+                    }
+                }
+            } else {
+                // Column direction mirror of the isRow basis<=0 floor above.
+                // A `flex: 1 1 0` panel in a column-flex parent resolves to
+                // basis=0 and never grows (no positive freeSpace) when a
+                // content-sized sibling has already claimed the full mainSize.
+                // The shrink pass leaves it at 0 because shrink × basis = 0,
+                // so the panel paints at zero height and the user sees nothing.
+                // Floor it at its intrinsic content height (childMainSize was
+                // resolved from estimateIntrinsicHeight at innerW above) so the
+                // declared grower gets its content size at minimum, the way
+                // CSS min-height: auto would. Positive-basis siblings stay
+                // shrunk, matching the row-direction rule.
+                var i = ls;
+                while (i < ls + lc) : (i += 1) {
+                    const childIdx = visibleIndices[@intCast(i)];
+                    const childNode = &node.children[@intCast(childIdx)];
+                    if (childNode.style.min_height != null) {
+                        continue;
+                    }
+                    if (childBasis[@intCast(i)] <= 0) {
+                        const autoMinH = childMainSize[@intCast(i)];
+                        const maxH = resolveMaybePct(childNode.style.max_height, innerH);
+                        const floorH = if (maxH != null) @min(autoMinH, maxH.?) else autoMinH;
+                        if (asF32(childBasis[@intCast(i)]) < asF32(floorH)) {
+                            childBasis[@intCast(i)] = floorH;
                         }
                     }
                 }

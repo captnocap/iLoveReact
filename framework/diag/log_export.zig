@@ -13,6 +13,7 @@
 //! QuickJS bridge: register via qjs_runtime.registerHostFn. See docs/LOG_EXPORT.md.
 
 const std = @import("std");
+const json_probe = @import("json_probe.zig");
 
 // ── Types ───────────────────────────────────────────────────────────
 
@@ -122,39 +123,24 @@ fn formatJson(entries: []const LogEntry, writer: anytype) !void {
     try writer.writeAll("[\n");
     for (entries, 0..) |entry, i| {
         try writer.writeAll("  {\n");
-        try writer.writeAll("    \"timestamp\": \"");
-        try writeJsonEscaped(writer, entry.timestamp);
-        try writer.writeAll("\",\n");
+        try writer.writeAll("    \"timestamp\": ");
+        try json_probe.writeString(writer, entry.timestamp);
+        try writer.writeAll(",\n");
         try writer.print("    \"level\": \"{s}\",\n", .{entry.level.label()});
-        try writer.writeAll("    \"source\": \"");
-        try writeJsonEscaped(writer, entry.source);
-        try writer.writeAll("\",\n");
-        try writer.writeAll("    \"message\": \"");
-        try writeJsonEscaped(writer, entry.message);
-        try writer.writeByte('"');
+        try writer.writeAll("    \"source\": ");
+        try json_probe.writeString(writer, entry.source);
+        try writer.writeAll(",\n");
+        try writer.writeAll("    \"message\": ");
+        try json_probe.writeString(writer, entry.message);
         if (entry.metadata.len > 0) {
-            try writer.writeAll(",\n    \"metadata\": \"");
-            try writeJsonEscaped(writer, entry.metadata);
-            try writer.writeByte('"');
+            try writer.writeAll(",\n    \"metadata\": ");
+            try json_probe.writeString(writer, entry.metadata);
         }
         try writer.writeAll("\n  }");
         if (i + 1 < entries.len) try writer.writeByte(',');
         try writer.writeByte('\n');
     }
     try writer.writeAll("]\n");
-}
-
-fn writeJsonEscaped(writer: anytype, s: []const u8) !void {
-    for (s) |c| {
-        switch (c) {
-            '"' => try writer.writeAll("\\\""),
-            '\\' => try writer.writeAll("\\\\"),
-            '\n' => try writer.writeAll("\\n"),
-            '\r' => try writer.writeAll("\\r"),
-            '\t' => try writer.writeAll("\\t"),
-            else => try writer.writeByte(c),
-        }
-    }
 }
 
 // ── Markdown ────────────────────────────────────────────────────────

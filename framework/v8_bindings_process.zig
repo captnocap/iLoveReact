@@ -647,6 +647,4 @@ pub fn registerProcess(_: anytype) void {
     v8_runtime.registerHostFn("__proc_stat", hostProcStat);
     v8_runtime.registerHostFn("__proc_watch_add", hostProcWatchAdd);
     v8_runtime.registerHostFn("__proc_watch_remove", hostProcWatchRemove);
-    // __env_get / __env_set are owned by v8_bindings_fs.registerFs; do not
-    // re-register here — the names collide and clobber the fs versions.
 }

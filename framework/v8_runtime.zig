@@ -111,7 +111,7 @@ pub fn resetContextForReload() void {
     // previous cart happened to mount in the same order. hotstate is
     // explicitly preserved (that's the whole point of useHotState
     // hydration after reload).
-    @import("input.zig").clearAll();
+    @import("primitive/input.zig").clearAll();
 }
 
 pub fn teardownVM() void {

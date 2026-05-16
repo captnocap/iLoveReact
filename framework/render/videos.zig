@@ -1037,7 +1037,7 @@ pub fn deinit() void {
 // File drop subscriber — registered via the generic filedrop system
 // ════════════════════════════════════════════════════════════════════════
 
-const filedrop = @import("../filedrop.zig");
+const filedrop = @import("../fs/filedrop.zig");
 const Node = @import("../layout.zig").Node;
 
 /// Subscribe to file drop events. Called once at engine startup.

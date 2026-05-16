@@ -40,6 +40,7 @@
 
 const std = @import("std");
 const sqlite = @import("../storage/sqlite.zig");
+const json_probe = @import("json_probe.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -403,19 +404,7 @@ fn insertRow(
 // Re-entrancy: every helper inside swallows errors with `catch`; nothing
 // here calls `std.log.*`, so there's no recursion into the override.
 
-fn writeJsonString(writer: anytype, s: []const u8) !void {
-    try writer.writeByte('"');
-    for (s) |c| switch (c) {
-        '"' => try writer.writeAll("\\\""),
-        '\\' => try writer.writeAll("\\\\"),
-        '\n' => try writer.writeAll("\\n"),
-        '\r' => try writer.writeAll("\\r"),
-        '\t' => try writer.writeAll("\\t"),
-        0x00...0x07, 0x0B, 0x0E...0x1F => try writer.print("\\u{x:0>4}", .{c}),
-        else => try writer.writeByte(c),
-    };
-    try writer.writeByte('"');
-}
+const writeJsonString = json_probe.writeString;
 
 /// Runtime-arg log emitter — used by both fromStdLog (the std.options
 /// override) and framework/log.zig's print/info/warn/err helpers. Keeps

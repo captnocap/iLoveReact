@@ -154,6 +154,7 @@ fn loadLib() ?*Lib {
     }
     const h = handle.?;
 
+    var lib: Lib = undefined;
     inline for (.{
         .{ "open", "sqlite3_open", FnOpen },
         .{ "close", "sqlite3_close", FnClose },
@@ -180,39 +181,14 @@ fn loadLib() ?*Lib {
         .{ "last_insert", "sqlite3_last_insert_rowid", FnLastInsert },
         .{ "errmsg", "sqlite3_errmsg", FnErrMsg },
     }) |entry| {
-        const sym = dlsym(h, entry[1]);
-        if (sym == null) {
+        const raw = dlsym(h, entry[1]) orelse {
             std.debug.print("[sqlite] missing symbol {s} — disabled\n", .{entry[1]});
             return null;
-        }
+        };
+        @field(&lib, entry[0]) = @ptrCast(@alignCast(raw));
     }
 
-    g_lib = .{
-        .open = @ptrCast(@alignCast(dlsym(h, "sqlite3_open").?)),
-        .close = @ptrCast(@alignCast(dlsym(h, "sqlite3_close").?)),
-        .busy_timeout = @ptrCast(@alignCast(dlsym(h, "sqlite3_busy_timeout").?)),
-        .exec = @ptrCast(@alignCast(dlsym(h, "sqlite3_exec").?)),
-        .free = @ptrCast(@alignCast(dlsym(h, "sqlite3_free").?)),
-        .prepare_v2 = @ptrCast(@alignCast(dlsym(h, "sqlite3_prepare_v2").?)),
-        .finalize = @ptrCast(@alignCast(dlsym(h, "sqlite3_finalize").?)),
-        .step = @ptrCast(@alignCast(dlsym(h, "sqlite3_step").?)),
-        .reset = @ptrCast(@alignCast(dlsym(h, "sqlite3_reset").?)),
-        .clear_bindings = @ptrCast(@alignCast(dlsym(h, "sqlite3_clear_bindings").?)),
-        .bind_text = @ptrCast(@alignCast(dlsym(h, "sqlite3_bind_text").?)),
-        .bind_int64 = @ptrCast(@alignCast(dlsym(h, "sqlite3_bind_int64").?)),
-        .bind_double = @ptrCast(@alignCast(dlsym(h, "sqlite3_bind_double").?)),
-        .bind_null = @ptrCast(@alignCast(dlsym(h, "sqlite3_bind_null").?)),
-        .col_text = @ptrCast(@alignCast(dlsym(h, "sqlite3_column_text").?)),
-        .col_bytes = @ptrCast(@alignCast(dlsym(h, "sqlite3_column_bytes").?)),
-        .col_int64 = @ptrCast(@alignCast(dlsym(h, "sqlite3_column_int64").?)),
-        .col_double = @ptrCast(@alignCast(dlsym(h, "sqlite3_column_double").?)),
-        .col_type = @ptrCast(@alignCast(dlsym(h, "sqlite3_column_type").?)),
-        .col_count = @ptrCast(@alignCast(dlsym(h, "sqlite3_column_count").?)),
-        .col_name = @ptrCast(@alignCast(dlsym(h, "sqlite3_column_name").?)),
-        .changes = @ptrCast(@alignCast(dlsym(h, "sqlite3_changes").?)),
-        .last_insert = @ptrCast(@alignCast(dlsym(h, "sqlite3_last_insert_rowid").?)),
-        .errmsg = @ptrCast(@alignCast(dlsym(h, "sqlite3_errmsg").?)),
-    };
+    g_lib = lib;
     return &g_lib.?;
 }
 

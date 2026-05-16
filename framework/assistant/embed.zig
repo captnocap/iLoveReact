@@ -1121,12 +1121,21 @@ const code_extensions = [_][]const u8{
     ".html", ".toml",
 };
 
+// Default skip list — applies to every ingest. Project-specific
+// exclusions (e.g. "archive/" in a particular repo) belong in the
+// user's EmbedSource.excludes, NOT here.
 const code_skip_dirs = [_][]const u8{
-    "node_modules", "zig-out", "zig-cache", "dist",   "target",   "build",
-    "archive",      "deps",    "editor",    "vendor", "reactjit",
+    "node_modules", "zig-out", "zig-cache", "dist", "target", "build", "vendor",
 };
 
-fn shouldSkipPath(rel_path: []const u8) bool {
+fn shouldSkipPath(rel_path: []const u8, user_excludes: []const []const u8) bool {
+    // User-provided excludes match against the full relative path — this
+    // lets callers use either bare segment names ("archive") or path
+    // prefixes ("cart/app/bundle.js") with the same field.
+    for (user_excludes) |ex| {
+        if (ex.len == 0) continue;
+        if (std.mem.indexOf(u8, rel_path, ex) != null) return true;
+    }
     var seg_iter = std.mem.tokenizeScalar(u8, rel_path, '/');
     while (seg_iter.next()) |seg| {
         if (seg.len > 0 and seg[0] == '.') return true;
@@ -1159,7 +1168,11 @@ fn detectLang(path: []const u8) []const u8 {
 
 /// Recursive walker. Returns absolute paths of embeddable files under `root`,
 /// sorted. Caller owns the slice and each path.
-pub fn findFiles(allocator: std.mem.Allocator, root: []const u8) ![][]u8 {
+pub fn findFiles(
+    allocator: std.mem.Allocator,
+    root: []const u8,
+    user_excludes: []const []const u8,
+) ![][]u8 {
     var out = std.array_list.Managed([]u8).init(allocator);
     errdefer {
         for (out.items) |p| allocator.free(p);
@@ -1172,7 +1185,7 @@ pub fn findFiles(allocator: std.mem.Allocator, root: []const u8) ![][]u8 {
     defer walker.deinit();
     while (try walker.next()) |entry| {
         if (entry.kind != .file) continue;
-        if (shouldSkipPath(entry.path)) continue;
+        if (shouldSkipPath(entry.path, user_excludes)) continue;
         if (!isEmbeddableExt(entry.basename)) continue;
         const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, entry.path });
         try out.append(full);
@@ -1613,6 +1626,7 @@ fn windowEvents(
     allocator: std.mem.Allocator,
     session_id: []const u8,
     events: []const FlatEvent,
+    chunk_size: usize,
 ) !std.array_list.Managed(Chunk) {
     var out = std.array_list.Managed(Chunk).init(allocator);
     errdefer {
@@ -1621,15 +1635,24 @@ fn windowEvents(
     }
     if (events.len == 0) return out;
 
+    // chunk_size = 0 → fall back to the file-scope default. Overlap is
+    // scaled to half the window for any user override so a 6-event
+    // window pairs with a 3-event slide, etc.
+    const w_size: usize = if (chunk_size > 0) chunk_size else window_size;
+    const w_overlap: usize = if (chunk_size > 0)
+        @max(@as(usize, 1), w_size / 2)
+    else
+        window_overlap;
+
     var idx: usize = 0;
     var chunk_index: usize = 0;
     while (idx < events.len) {
-        const end = @min(idx + window_size, events.len);
+        const end = @min(idx + w_size, events.len);
         const ch = try buildChunk(allocator, session_id, chunk_index, events[idx..end]);
         try out.append(ch);
         chunk_index += 1;
         if (end == events.len) break;
-        idx += window_size - window_overlap;
+        idx += w_size - w_overlap;
     }
     return out;
 }
@@ -1759,45 +1782,362 @@ fn sortStrings(items: [][]u8) void {
 
 /// What kind of corpus a job's path belongs to. Picks the parser + the
 /// chunk shape + the canonical source_type label that lands in pgvector.
-pub const SourceKind = enum {
+/// Canonical content kinds. Each one controls (1) the walker, (2) the
+/// chunker, and (3) the `source_type` column value (which the partial
+/// HNSW indexes are built on).
+///
+/// `conversation_history` and `knowledge` are STRUCTURED kinds: the
+/// caller supplies a Mapping that says which JSON key paths correspond
+/// to canonical fields (role, content, timestamp, title, …). The Zig
+/// side has no vendor-specific parsers anymore — the caller declares
+/// the shape via the mapping. Settings → Embed ships UI presets for
+/// Claude/Codex/Kimi JSONL exports that pre-fill the mapping.
+///
+/// `code` and `documentation` are RAW kinds: the walker collects files,
+/// the chunker windows the file's text. No mapping needed.
+pub const CanonicalKind = enum {
     code,
-    claude,
-    claude_overflow,
-    codex,
-    kimi,
-    memory,
+    documentation,
+    conversation_history,
+    knowledge,
 
-    pub fn fromStr(s: []const u8) ?SourceKind {
+    pub fn fromStr(s: []const u8) ?CanonicalKind {
         if (std.mem.eql(u8, s, "code")) return .code;
-        if (std.mem.eql(u8, s, "claude")) return .claude;
-        if (std.mem.eql(u8, s, "claude-overflow")) return .claude_overflow;
-        if (std.mem.eql(u8, s, "codex")) return .codex;
-        if (std.mem.eql(u8, s, "kimi")) return .kimi;
-        if (std.mem.eql(u8, s, "memory")) return .memory;
+        if (std.mem.eql(u8, s, "documentation")) return .documentation;
+        if (std.mem.eql(u8, s, "conversation-history")) return .conversation_history;
+        if (std.mem.eql(u8, s, "conversation_history")) return .conversation_history;
+        if (std.mem.eql(u8, s, "knowledge")) return .knowledge;
+        // Legacy aliases from the pre-canonical-kinds era. These let an
+        // old EmbedSource row survive the rename without manual edits;
+        // cart-side listSources() also migrates rows on read.
+        if (std.mem.eql(u8, s, "claude")) return .conversation_history;
+        if (std.mem.eql(u8, s, "claude-overflow")) return .conversation_history;
+        if (std.mem.eql(u8, s, "codex")) return .conversation_history;
+        if (std.mem.eql(u8, s, "kimi")) return .conversation_history;
+        if (std.mem.eql(u8, s, "memory")) return .documentation;
         return null;
     }
 
-    pub fn label(self: SourceKind) []const u8 {
+    pub fn label(self: CanonicalKind) []const u8 {
         return switch (self) {
             .code => "code",
-            .claude => "claude",
-            .claude_overflow => "claude-overflow",
-            .codex => "codex",
-            .kimi => "kimi",
-            .memory => "memory",
+            .documentation => "documentation",
+            .conversation_history => "conversation-history",
+            .knowledge => "knowledge",
         };
     }
 
     /// What lands in chunks.<table>.source_type. The dense+rerank pipeline
     /// already builds a partial HNSW index per source_type.
-    pub fn canonicalSourceType(self: SourceKind) []const u8 {
+    pub fn canonicalSourceType(self: CanonicalKind) []const u8 {
         return switch (self) {
             .code => "code-chunk",
-            .claude, .claude_overflow, .codex, .kimi => "chat-log-chunk",
-            .memory => "document-chunk",
+            .documentation => "document-chunk",
+            .conversation_history => "chat-log-chunk",
+            .knowledge => "knowledge-chunk",
+        };
+    }
+
+    pub fn isStructured(self: CanonicalKind) bool {
+        return switch (self) {
+            .conversation_history, .knowledge => true,
+            .code, .documentation => false,
         };
     }
 };
+
+// Back-compat alias so callers outside this file (and the host binding
+// layer) keep compiling while we migrate. Drop once everything points
+// at CanonicalKind directly.
+pub const SourceKind = CanonicalKind;
+
+/// User-declared mapping from JSON key-paths in the source to canonical
+/// content fields. All paths are dot-separated (`message.content`,
+/// `payload.body.text`). Empty string means "field not present in this
+/// source." Borrowed slices — owner keeps them alive for the session.
+pub const Mapping = struct {
+    // conversation-history fields
+    role: []const u8 = "",
+    content: []const u8 = "",
+    timestamp: []const u8 = "",
+    session_id: []const u8 = "",
+    // knowledge fields
+    title: []const u8 = "",
+    source_uri: []const u8 = "",
+
+    /// Parse from a JSON object. Unknown keys are ignored; missing keys
+    /// stay as empty strings. The returned struct borrows from `json`'s
+    /// arena — caller keeps `parsed` alive for the mapping's lifetime.
+    pub fn fromJsonValue(value: std.json.Value) Mapping {
+        if (value != .object) return .{};
+        const o = value.object;
+        return .{
+            .role = stringOr(o, "role", ""),
+            .content = stringOr(o, "content", ""),
+            .timestamp = stringOr(o, "timestamp", ""),
+            .session_id = stringOr(o, "session_id", ""),
+            .title = stringOr(o, "title", ""),
+            .source_uri = stringOr(o, "source_uri", ""),
+        };
+    }
+
+    fn stringOr(o: std.json.ObjectMap, key: []const u8, dflt: []const u8) []const u8 {
+        const v = o.get(key) orelse return dflt;
+        return if (v == .string) v.string else dflt;
+    }
+};
+
+/// Walk a dotted path into a parsed JSON value. Returns null if any
+/// segment is missing or the path leaves a non-object intermediate.
+/// Empty path returns the root.
+pub fn getJsonPath(root: std.json.Value, path: []const u8) ?std.json.Value {
+    if (path.len == 0) return root;
+    var cur = root;
+    var it = std.mem.tokenizeScalar(u8, path, '.');
+    while (it.next()) |seg| {
+        if (cur != .object) return null;
+        cur = cur.object.get(seg) orelse return null;
+    }
+    return cur;
+}
+
+/// Coerce a JSON value to retrieval text. The whole point of this
+/// helper is to flatten the "content might be a string OR a list of
+/// typed blocks" mess every chat provider has settled into. The user's
+/// mapping only points at the *path*; this function figures out how to
+/// turn whatever lives there into searchable text. Caller owns the
+/// returned slice.
+// Error set declared explicitly: extractText ↔ concatBlocksToText is
+// mutually recursive, and Zig can't resolve inferred error sets across
+// a cycle. Every allocator call funnels into Allocator.Error, so that's
+// all this needs to declare.
+pub fn extractText(allocator: std.mem.Allocator, value: std.json.Value) std.mem.Allocator.Error![]u8 {
+    return switch (value) {
+        .string => |s| try allocator.dupe(u8, s),
+        .integer => |n| try std.fmt.allocPrint(allocator, "{d}", .{n}),
+        .float => |f| try std.fmt.allocPrint(allocator, "{d}", .{f}),
+        .bool => |b| try allocator.dupe(u8, if (b) "true" else "false"),
+        .null => try allocator.dupe(u8, ""),
+        .array => |arr| try concatBlocksToText(allocator, arr),
+        .object => |obj| try pickObjectText(allocator, obj),
+        .number_string => |s| try allocator.dupe(u8, s),
+    };
+}
+
+// Array-of-blocks → concatenated text. Handles:
+//   - Plain strings: ["a", "b"] → "a\nb"
+//   - Anthropic block shape: [{type:"text", text:"..."}, {type:"tool_use", name:"...", input:{...}}, {type:"tool_result", content:"..."}]
+//   - Generic objects: pulls .text / .content / .body recursively
+fn concatBlocksToText(allocator: std.mem.Allocator, arr: std.json.Array) std.mem.Allocator.Error![]u8 {
+    var buf = std.array_list.Managed(u8).init(allocator);
+    defer buf.deinit();
+    for (arr.items, 0..) |item, i| {
+        if (i > 0) try buf.append('\n');
+        const piece = try extractText(allocator, item);
+        defer allocator.free(piece);
+        try buf.appendSlice(piece);
+    }
+    return buf.toOwnedSlice();
+}
+
+// Object → pick the best "this is text" field. Looks for text, content,
+// body, value in that order. Anthropic `tool_use` blocks get
+// "<tool_name> <input-summary>" so the search index still has the call
+// signature; plain "type"-only metadata blocks get an empty string.
+fn pickObjectText(allocator: std.mem.Allocator, obj: std.json.ObjectMap) std.mem.Allocator.Error![]u8 {
+    // Anthropic tool_use surface — render as a one-liner.
+    if (obj.get("type")) |t| {
+        if (t == .string and std.mem.eql(u8, t.string, "tool_use")) {
+            const name = if (obj.get("name")) |n| (if (n == .string) n.string else "") else "";
+            const input_summary: []const u8 = blk: {
+                const iv = obj.get("input") orelse break :blk "";
+                if (iv != .object) break :blk "";
+                var it = iv.object.iterator();
+                while (it.next()) |entry| {
+                    if (entry.value_ptr.* == .string) break :blk entry.value_ptr.*.string;
+                }
+                break :blk "";
+            };
+            const truncated = if (input_summary.len > 80) input_summary[0..80] else input_summary;
+            return std.fmt.allocPrint(allocator, "[tool_use {s}] {s}", .{ name, truncated });
+        }
+    }
+    // Conventional text-bearing keys, in priority order.
+    inline for ([_][]const u8{ "text", "content", "body", "value" }) |key| {
+        if (obj.get(key)) |v| return extractText(allocator, v);
+    }
+    return allocator.dupe(u8, "");
+}
+
+/// Walk the first N JSONL lines of `path`, accumulate every key path
+/// observed plus up to `max_samples_per_key` sample values per path.
+/// Returns a JSON string the cart can parse to drive the mapping UI's
+/// dropdowns. Output shape:
+///
+///   { "sampleCount": N,
+///     "keys": [ { "path": "message.role",
+///                 "samples": ["user","assistant"],
+///                 "occurrences": 50 }, ... ] }
+///
+/// Only the first `max_keys` paths are kept (LRU-style: insertion order,
+/// later sightings just bump occurrences). Caller owns the returned
+/// slice. Empty string on read failure.
+pub fn probeStructuredKeys(
+    allocator: std.mem.Allocator,
+    path: []const u8,
+    sample_lines: usize,
+    max_keys: usize,
+    max_samples_per_key: usize,
+) ![]u8 {
+    const file = std.fs.openFileAbsolute(path, .{}) catch return allocator.dupe(u8, "");
+    defer file.close();
+    const stat = file.stat() catch return allocator.dupe(u8, "");
+    if (stat.size == 0) return allocator.dupe(u8, "{\"sampleCount\":0,\"keys\":[]}");
+    const cap: usize = @min(@as(usize, @intCast(stat.size)), 16 * 1024 * 1024);
+    const data = try file.readToEndAlloc(allocator, cap);
+    defer allocator.free(data);
+
+    var key_paths = std.array_list.Managed([]u8).init(allocator);
+    defer {
+        for (key_paths.items) |p| allocator.free(p);
+        key_paths.deinit();
+    }
+    var samples = std.array_list.Managed(std.array_list.Managed([]u8)).init(allocator);
+    defer {
+        for (samples.items) |*l| {
+            for (l.items) |s| allocator.free(s);
+            l.deinit();
+        }
+        samples.deinit();
+    }
+    var occurrences = std.array_list.Managed(usize).init(allocator);
+    defer occurrences.deinit();
+
+    var n_lines: usize = 0;
+    var line_iter = std.mem.tokenizeScalar(u8, data, '\n');
+    while (line_iter.next()) |line| {
+        if (n_lines >= sample_lines) break;
+        if (line.len == 0 or line[0] != '{') continue;
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, line, .{}) catch continue;
+        defer parsed.deinit();
+        try walkAccumulate(
+            allocator,
+            parsed.value,
+            "",
+            &key_paths,
+            &samples,
+            &occurrences,
+            max_keys,
+            max_samples_per_key,
+        );
+        n_lines += 1;
+    }
+
+    // Emit JSON. Hand-rolled because we don't have a Value built — just
+    // parallel slices. Escape strings with our existing sqlEscape-style
+    // helper. Keep this compact: no pretty-printing.
+    var out = std.array_list.Managed(u8).init(allocator);
+    errdefer out.deinit();
+    try out.writer().print("{{\"sampleCount\":{d},\"keys\":[", .{n_lines});
+    for (key_paths.items, 0..) |p, i| {
+        if (i > 0) try out.append(',');
+        try out.appendSlice("{\"path\":");
+        try appendJsonString(&out, p);
+        try out.writer().print(",\"occurrences\":{d},\"samples\":[", .{occurrences.items[i]});
+        const sl = samples.items[i].items;
+        for (sl, 0..) |s, j| {
+            if (j > 0) try out.append(',');
+            try appendJsonString(&out, s);
+        }
+        try out.appendSlice("]}");
+    }
+    try out.appendSlice("]}");
+    return out.toOwnedSlice();
+}
+
+fn appendJsonString(out: *std.array_list.Managed(u8), s: []const u8) !void {
+    try out.append('"');
+    for (s) |b| {
+        switch (b) {
+            '"' => try out.appendSlice("\\\""),
+            '\\' => try out.appendSlice("\\\\"),
+            '\n' => try out.appendSlice("\\n"),
+            '\r' => try out.appendSlice("\\r"),
+            '\t' => try out.appendSlice("\\t"),
+            0...0x1f => {
+                var hex_buf: [6]u8 = undefined;
+                _ = std.fmt.bufPrint(&hex_buf, "\\u{x:0>4}", .{b}) catch unreachable;
+                try out.appendSlice(&hex_buf);
+            },
+            else => try out.append(b),
+        }
+    }
+    try out.append('"');
+}
+
+fn walkAccumulate(
+    allocator: std.mem.Allocator,
+    value: std.json.Value,
+    prefix: []const u8,
+    paths: *std.array_list.Managed([]u8),
+    samples: *std.array_list.Managed(std.array_list.Managed([]u8)),
+    occurrences: *std.array_list.Managed(usize),
+    max_keys: usize,
+    max_samples_per_key: usize,
+) !void {
+    switch (value) {
+        .object => |obj| {
+            var it = obj.iterator();
+            while (it.next()) |entry| {
+                const child = if (prefix.len == 0)
+                    try allocator.dupe(u8, entry.key_ptr.*)
+                else
+                    try std.fmt.allocPrint(allocator, "{s}.{s}", .{ prefix, entry.key_ptr.* });
+                defer allocator.free(child);
+                try walkAccumulate(allocator, entry.value_ptr.*, child, paths, samples, occurrences, max_keys, max_samples_per_key);
+            }
+        },
+        else => {
+            // Leaf — record the path + a sample value.
+            const sample_text = try extractText(allocator, value);
+            defer allocator.free(sample_text);
+            const idx = findOrAddPath(allocator, paths, samples, occurrences, prefix, max_keys) catch return;
+            occurrences.items[idx] += 1;
+            if (samples.items[idx].items.len < max_samples_per_key) {
+                const dup = try allocator.dupe(u8, sample_text[0..@min(sample_text.len, 200)]);
+                // Skip duplicates so the samples are actually informative.
+                var seen = false;
+                for (samples.items[idx].items) |existing| {
+                    if (std.mem.eql(u8, existing, dup)) { seen = true; break; }
+                }
+                if (seen) {
+                    allocator.free(dup);
+                } else {
+                    try samples.items[idx].append(dup);
+                }
+            }
+        },
+    }
+}
+
+fn findOrAddPath(
+    allocator: std.mem.Allocator,
+    paths: *std.array_list.Managed([]u8),
+    samples: *std.array_list.Managed(std.array_list.Managed([]u8)),
+    occurrences: *std.array_list.Managed(usize),
+    path: []const u8,
+    max_keys: usize,
+) !usize {
+    for (paths.items, 0..) |p, i| {
+        if (std.mem.eql(u8, p, path)) return i;
+    }
+    if (paths.items.len >= max_keys) return error.OutOfKeys;
+    const owned = try allocator.dupe(u8, path);
+    try paths.append(owned);
+    try samples.append(std.array_list.Managed([]u8).init(allocator));
+    try occurrences.append(0);
+    return paths.items.len - 1;
+}
 
 const code_window_lines: usize = 200;
 const code_overlap_lines: usize = 50;
@@ -1905,12 +2245,33 @@ pub const IngestSession = struct {
     source_type: []u8,
     model_id: []u8,
     n_workers: usize,
+    /// User-supplied excludes — owned dupes, freed in deinit. Empty
+    /// slice = no user excludes (framework defaults still apply).
+    user_excludes: [][]u8,
+    /// Per-source chunk-window override. 0 = use the file-scope
+    /// const default for the kind (`code_window_lines` for code,
+    /// `window_size` for chat-log).
+    chunk_size: usize,
+    /// Owned copy of the mapping-source JSON. Lives for the session's
+    /// lifetime; the parsed Mapping struct below borrows into this
+    /// buffer via std.json.parseFromSlice into mapping_arena.
+    mapping_json: []u8,
+    /// Arena that owns the parsed mapping. Lives for the session.
+    mapping_parsed: ?std.json.Parsed(std.json.Value),
+    /// Field paths extracted from mapping_parsed. Empty fields = "this
+    /// canonical column has no source path mapped." Borrows from
+    /// mapping_parsed's arena — do not free the slices directly.
+    mapping: Mapping,
 
     /// `shared` and `store` outlive the session; they're borrowed.
-    /// `root_path` is the directory the walker is rooted at; for chat-log
-    /// kinds (claude/claude-overflow/codex/kimi) the walker reads
-    /// `<root_path>/{projects,sessions}/...`. For .memory the walker uses
-    /// `<root_path>` as $HOME and walks both .claude + .claude-overflow.
+    /// `root_path` is the directory the walker is rooted at. For raw
+    /// kinds (code, documentation) this is the recursive root the
+    /// walker descends. For structured kinds (conversation_history,
+    /// knowledge) this is the directory containing .json/.jsonl files.
+    /// `mapping_json` is an object with optional `role`, `content`,
+    /// `timestamp`, `session_id`, `title`, `source_uri` keys whose
+    /// values are dot-paths into each JSON record. Empty / "{}" is
+    /// fine for raw kinds.
     pub fn start(
         allocator: std.mem.Allocator,
         shared: *SharedModel,
@@ -1919,9 +2280,40 @@ pub const IngestSession = struct {
         kind: SourceKind,
         model_id: []const u8,
         n_workers: usize,
+        user_excludes: []const []const u8,
+        chunk_size: usize,
+        mapping_json: []const u8,
     ) !*IngestSession {
         const session = try allocator.create(IngestSession);
         errdefer allocator.destroy(session);
+        // Dupe the excludes so callers can free their source strings.
+        var ex_owned = try allocator.alloc([]u8, user_excludes.len);
+        var ex_filled: usize = 0;
+        errdefer {
+            for (ex_owned[0..ex_filled]) |s| allocator.free(s);
+            allocator.free(ex_owned);
+        }
+        for (user_excludes) |s| {
+            ex_owned[ex_filled] = try allocator.dupe(u8, s);
+            ex_filled += 1;
+        }
+        // Stash the mapping JSON and parse it once. The parsed
+        // std.json.Parsed owns its arena; we keep it on the session so
+        // the borrowed strings inside `mapping` stay alive for every
+        // worker. Empty / malformed JSON degrades to an all-empty
+        // Mapping — raw kinds (code, documentation) don't need it
+        // anyway.
+        const mj_dup = try allocator.dupe(u8, mapping_json);
+        var mapping_parsed: ?std.json.Parsed(std.json.Value) = null;
+        var mapping_struct: Mapping = .{};
+        if (mj_dup.len > 0) {
+            if (std.json.parseFromSlice(std.json.Value, allocator, mj_dup, .{})) |p| {
+                mapping_parsed = p;
+                mapping_struct = Mapping.fromJsonValue(p.value);
+            } else |_| {
+                // bad JSON — leave mapping empty
+            }
+        }
         session.* = .{
             .allocator = allocator,
             .queue = JobQueue.init(allocator),
@@ -1937,21 +2329,35 @@ pub const IngestSession = struct {
             .source_type = try allocator.dupe(u8, kind.canonicalSourceType()),
             .model_id = try allocator.dupe(u8, model_id),
             .n_workers = n_workers,
+            .user_excludes = ex_owned,
+            .chunk_size = chunk_size,
+            .mapping_json = mj_dup,
+            .mapping_parsed = mapping_parsed,
+            .mapping = mapping_struct,
         };
         errdefer {
             allocator.free(session.source_type);
             allocator.free(session.model_id);
+            for (session.user_excludes) |s| allocator.free(s);
+            allocator.free(session.user_excludes);
+            allocator.free(session.mapping_json);
+            if (session.mapping_parsed) |*p| p.deinit();
             session.queue.deinit();
         }
 
         // Per-kind walker. Synchronous so we have an accurate files_total
-        // before any worker starts.
+        // before any worker starts. The raw kinds (code, documentation)
+        // walk for embeddable text files; the structured kinds walk for
+        // .json/.jsonl files. User excludes apply to all of them.
+        const ex_const: [][]const u8 = blk: {
+            const tmp = try allocator.alloc([]const u8, ex_owned.len);
+            for (ex_owned, 0..) |s, i| tmp[i] = s;
+            break :blk tmp;
+        };
+        defer allocator.free(ex_const);
         const files = switch (kind) {
-            .code => try findFiles(allocator, root_path),
-            .claude, .claude_overflow => try findClaudeJsonls(allocator, root_path),
-            .codex => try findCodexJsonls(allocator, root_path),
-            .kimi => try findKimiContexts(allocator, root_path),
-            .memory => try findMemoryMarkdowns(allocator, root_path),
+            .code, .documentation => try findFiles(allocator, root_path, ex_const),
+            .conversation_history, .knowledge => try findStructuredFiles(allocator, root_path, ex_const),
         };
         defer {
             for (files) |p| allocator.free(p);
@@ -2037,6 +2443,10 @@ pub const IngestSession = struct {
         self.allocator.free(self.threads);
         self.allocator.free(self.source_type);
         self.allocator.free(self.model_id);
+        for (self.user_excludes) |s| self.allocator.free(s);
+        self.allocator.free(self.user_excludes);
+        self.allocator.free(self.mapping_json);
+        if (self.mapping_parsed) |*p| p.deinit();
         self.allocator.destroy(self);
     }
 
@@ -2130,9 +2540,14 @@ fn processJob(
     session: *IngestSession,
 ) !void {
     return switch (job.kind) {
-        .code => processCode(allocator, ctx, store, job, session),
-        .claude, .claude_overflow, .codex, .kimi => processChatLog(allocator, ctx, store, job, session),
-        .memory => processMemory(allocator, ctx, store, job, session),
+        // Documentation aliases to the code chunker (line-window). A
+        // paragraph-aware chunker is a future improvement; for v1 a
+        // 200-line window over a .md file is good enough — the
+        // embedding model doesn't care about prose vs code boundaries
+        // as much as we do.
+        .code, .documentation => processCode(allocator, ctx, store, job, session),
+        .conversation_history => processConversationMapped(allocator, ctx, store, job, session),
+        .knowledge => processKnowledgeMapped(allocator, ctx, store, job, session),
     };
 }
 
@@ -2164,12 +2579,20 @@ fn processCode(
     // Each chunk is byte-capped + UTF-8-sanitised so the tokenizer sees
     // clean, bounded input.
     const chunk_byte_cap: usize = 32 * 1024;
+    // chunk_size = 0 → fall back to the file-scope default. Overlap is
+    // scaled to a quarter of the window so tiny windows don't gap-out
+    // and big ones don't burn cycles on redundant context.
+    const window_lines: usize = if (session.chunk_size > 0) session.chunk_size else code_window_lines;
+    const overlap_lines: usize = if (session.chunk_size > 0)
+        @max(@as(usize, 1), window_lines / 4)
+    else
+        code_overlap_lines;
     var chunk_bodies = std.array_list.Managed([]u8).init(allocator);
     defer chunk_bodies.deinit();
     {
         var i: usize = 0;
         while (i < lines.items.len) {
-            const end = @min(i + code_window_lines, lines.items.len);
+            const end = @min(i + window_lines, lines.items.len);
             var body = std.array_list.Managed(u8).init(allocator);
             defer body.deinit();
             try body.writer().print("// File: {s}\n// Lang: {s}\n// Lines: {d}-{d}\n\n", .{ rel, lang, i + 1, end });
@@ -2182,7 +2605,7 @@ fn processCode(
             const cleaned = try sanitizeUtf8(allocator, truncated);
             try chunk_bodies.append(cleaned);
             if (end == lines.items.len) break;
-            i += code_window_lines - code_overlap_lines;
+            i += window_lines - overlap_lines;
         }
     }
 
@@ -2220,40 +2643,102 @@ fn processCode(
     }
 }
 
-/// Chat-log ingest. Parses the JSONL per the source kind, sliding-windows
-/// 4 events at a time (with 2-event overlap) into chunks, embeds each
-/// chunk's display_text, and upserts with role_sequence/tool_calls/first_ts/
-/// last_ts metadata so query-time filtering by role or tool can use it.
-fn processChatLog(
+/// Recursive walker that collects every `.jsonl` and `.json` file under
+/// `root`. Used by the structured kinds (conversation_history, knowledge)
+/// — no vendor-specific subdirectory shapes assumed. Same exclude
+/// semantics as `findFiles`. Caller owns the returned slice and paths.
+pub fn findStructuredFiles(
+    allocator: std.mem.Allocator,
+    root: []const u8,
+    user_excludes: []const []const u8,
+) ![][]u8 {
+    var out = std.array_list.Managed([]u8).init(allocator);
+    errdefer {
+        for (out.items) |p| allocator.free(p);
+        out.deinit();
+    }
+    var dir = try std.fs.openDirAbsolute(root, .{ .iterate = true });
+    defer dir.close();
+    var walker = try dir.walk(allocator);
+    defer walker.deinit();
+    while (try walker.next()) |entry| {
+        if (entry.kind != .file) continue;
+        if (shouldSkipPath(entry.path, user_excludes)) continue;
+        const lower = entry.basename;
+        if (!std.mem.endsWith(u8, lower, ".jsonl") and !std.mem.endsWith(u8, lower, ".json"))
+            continue;
+        const full = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ root, entry.path });
+        try out.append(full);
+    }
+    std.mem.sort([]u8, out.items, {}, struct {
+        fn lt(_: void, a: []u8, b: []u8) bool { return std.mem.lessThan(u8, a, b); }
+    }.lt);
+    return out.toOwnedSlice();
+}
+
+/// Conversation-history ingest, mapping-driven. The user supplied a
+/// Mapping (role/content/timestamp/session_id paths) on the session.
+/// We read the file (.jsonl or .json array), apply the mapping per
+/// record to build FlatEvents, window them, embed each window.
+///
+/// This replaces the per-vendor parsers (parseClaudeJsonl etc.) — same
+/// FlatEvent → windowEvents → store.upsert pipeline, but with a
+/// user-declared mapping instead of hardcoded field paths. Settings →
+/// Embed presets pre-fill the mapping for known formats.
+fn processConversationMapped(
     allocator: std.mem.Allocator,
     ctx: *WorkerCtx,
     store: *Store,
     job: *const Job,
     session: *IngestSession,
 ) !void {
-    const basename = std.fs.path.basename(job.path);
-    // Kimi's session files all share the basename `context.jsonl`; the
-    // sibling directory name is the actual session identifier.
-    const session_basename: []const u8 = if (job.kind == .kimi) blk: {
-        const dir_path = std.fs.path.dirname(job.path) orelse job.path;
-        break :blk std.fs.path.basename(dir_path);
-    } else basename;
-    const agent_label = job.kind.label();
-    const session_id = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ agent_label, session_basename });
+    if (session.mapping.content.len == 0) return; // nothing to extract
 
-    var events = switch (job.kind) {
-        .claude, .claude_overflow => parseClaudeJsonl(allocator, job.path) catch return,
-        .codex => parseCodexJsonl(allocator, job.path) catch return,
-        .kimi => parseKimiContextJsonl(allocator, job.path) catch return,
-        else => return,
-    };
+    const basename = std.fs.path.basename(job.path);
+    const session_id = try std.fmt.allocPrint(allocator, "conversation-history/{s}", .{basename});
+    defer allocator.free(session_id);
+
+    const file = std.fs.openFileAbsolute(job.path, .{}) catch return;
+    defer file.close();
+    const stat = file.stat() catch return;
+    if (stat.size == 0) return;
+    if (stat.size > 200 * 1024 * 1024) return;
+    const data = file.readToEndAlloc(allocator, @intCast(stat.size)) catch return;
+    defer allocator.free(data);
+
+    // Build event list by walking the file as records. JSONL is the
+    // common path (one record per line); fall through to a single-array
+    // root for plain .json. We don't try to handle nested-object roots
+    // — those need a different mapping shape we haven't designed yet.
+    var events = std.array_list.Managed(FlatEvent).init(allocator);
     defer {
         for (events.items) |*e| freeEvent(allocator, e);
         events.deinit();
     }
+
+    if (std.mem.endsWith(u8, basename, ".jsonl")) {
+        var line_iter = std.mem.tokenizeScalar(u8, data, '\n');
+        while (line_iter.next()) |line| {
+            if (line.len == 0 or line[0] != '{') continue;
+            appendMappedConversation(allocator, &events, line, session.mapping) catch continue;
+        }
+    } else {
+        // .json — expect a top-level array of records.
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, data, .{}) catch return;
+        defer parsed.deinit();
+        if (parsed.value != .array) return;
+        for (parsed.value.array.items) |item| {
+            // appendMappedConversation expects a fresh parse — we re-stringify
+            // each item and feed it back through. Simpler than threading an
+            // already-parsed Value through; .json arrays are rare in practice.
+            const item_str = std.json.Stringify.valueAlloc(allocator, item, .{}) catch continue;
+            defer allocator.free(item_str);
+            appendMappedConversation(allocator, &events, item_str, session.mapping) catch continue;
+        }
+    }
     if (events.items.len == 0) return;
 
-    var chunks = try windowEvents(allocator, session_id, events.items);
+    var chunks = try windowEvents(allocator, session_id, events.items, session.chunk_size);
     defer {
         for (chunks.items) |*ch| freeChunk(allocator, ch);
         chunks.deinit();
@@ -2261,9 +2746,6 @@ fn processChatLog(
 
     for (chunks.items) |ch| {
         if (session.cancel_flag.load(.monotonic)) return;
-
-        // UTF-8 sanitise + byte-cap before tokenizing — chat tool_result
-        // blobs frequently contain mojibake or huge binary payloads.
         const cleaned = try sanitizeUtf8(allocator, ch.display_text);
         defer allocator.free(cleaned);
         const cap: usize = 32 * 1024;
@@ -2271,10 +2753,10 @@ fn processChatLog(
 
         const t0 = std.time.nanoTimestamp();
         const vec = ctx.embedText(allocator, body) catch continue;
-        const t1 = std.time.nanoTimestamp();
-        _ = session.counters.embed_ns.fetchAdd(@intCast(t1 - t0), .monotonic);
+        _ = session.counters.embed_ns.fetchAdd(@intCast(std.time.nanoTimestamp() - t0), .monotonic);
 
         const id_input = try std.fmt.allocPrint(allocator, "{s}#{d}#{s}", .{ session_id, ch.chunk_index, session.model_id });
+        defer allocator.free(id_input);
         const id_hex = shaHex(id_input);
         const id = id_hex[0..40];
         const sha_full = shaHex(body);
@@ -2282,12 +2764,13 @@ fn processChatLog(
         const preview_len: usize = @min(160, body.len);
         const meta = try std.fmt.allocPrint(
             allocator,
-            "{{\"agent\":\"{s}\",\"role_sequence\":\"{s}\",\"tool_calls\":\"{s}\",\"first_ts\":\"{s}\",\"last_ts\":\"{s}\"}}",
-            .{ agent_label, ch.role_sequence, ch.tool_calls, ch.first_ts, ch.last_ts },
+            "{{\"file\":\"{s}\",\"role_sequence\":\"{s}\",\"first_ts\":\"{s}\",\"last_ts\":\"{s}\"}}",
+            .{ basename, ch.role_sequence, ch.first_ts, ch.last_ts },
         );
+        defer allocator.free(meta);
         store.upsert(
             id,
-            session.source_type, // "chat-log-chunk"
+            session.source_type,
             session_id,
             @intCast(ch.chunk_index),
             body,
@@ -2301,56 +2784,139 @@ fn processChatLog(
     }
 }
 
-/// Memory `.md` ingest. Whole-file embed (memory files are by design
-/// short — Claude's memory entries are kept terse). Metadata captures
-/// account + project_slug + filename for downstream filtering.
-fn processMemory(
+fn appendMappedConversation(
+    allocator: std.mem.Allocator,
+    out: *std.array_list.Managed(FlatEvent),
+    line: []const u8,
+    mapping: Mapping,
+) !void {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, line, .{}) catch return;
+    defer parsed.deinit();
+    const root = parsed.value;
+
+    const content_v = getJsonPath(root, mapping.content) orelse return;
+    const content_text = try extractText(allocator, content_v);
+    defer allocator.free(content_text);
+    if (content_text.len == 0) return;
+
+    const role: []const u8 = if (mapping.role.len > 0) blk: {
+        const v = getJsonPath(root, mapping.role) orelse break :blk "user";
+        if (v == .string) break :blk v.string;
+        break :blk "user";
+    } else "user";
+
+    const ts: []const u8 = if (mapping.timestamp.len > 0) blk: {
+        const v = getJsonPath(root, mapping.timestamp) orelse break :blk "";
+        if (v == .string) break :blk v.string;
+        break :blk "";
+    } else "";
+
+    try pushEvent(allocator, out, ts, role, content_text, false);
+}
+
+/// Knowledge ingest. One record = one chunk (no windowing). Used for
+/// atomic facts: each row in the JSONL is a self-contained piece of
+/// knowledge with optional title + source_uri metadata. Embeds the
+/// concatenation of `# {title}\n\n{content}` (title omitted if unmapped).
+fn processKnowledgeMapped(
     allocator: std.mem.Allocator,
     ctx: *WorkerCtx,
     store: *Store,
     job: *const Job,
     session: *IngestSession,
 ) !void {
-    const filename = std.fs.path.basename(job.path);
-    const memdir = std.fs.path.dirname(job.path) orelse "";
-    const projdir = std.fs.path.dirname(memdir) orelse "";
-    const project_slug = std.fs.path.basename(projdir);
-    const projsdir = std.fs.path.dirname(projdir) orelse "";
-    const accountdir = std.fs.path.dirname(projsdir) orelse "";
-    const account = std.fs.path.basename(accountdir);
+    if (session.mapping.content.len == 0) return;
 
-    const source_id = try std.fmt.allocPrint(allocator, "memory/{s}/{s}/{s}", .{ account, project_slug, filename });
-
+    const basename = std.fs.path.basename(job.path);
     const file = std.fs.openFileAbsolute(job.path, .{}) catch return;
     defer file.close();
     const stat = file.stat() catch return;
-    if (stat.size > 200 * 1024) return;
-    const raw = file.readToEndAlloc(allocator, @intCast(stat.size)) catch return;
-    defer allocator.free(raw);
+    if (stat.size == 0) return;
+    if (stat.size > 200 * 1024 * 1024) return;
+    const data = file.readToEndAlloc(allocator, @intCast(stat.size)) catch return;
+    defer allocator.free(data);
 
-    const cleaned = try sanitizeUtf8(allocator, raw);
-    defer allocator.free(cleaned);
-    const display_text = try std.fmt.allocPrint(
-        allocator,
-        "# Memory: {s}\n# Project: {s}/{s}\n\n{s}",
-        .{ filename, account, project_slug, cleaned },
-    );
+    var record_index: usize = 0;
+    if (std.mem.endsWith(u8, basename, ".jsonl")) {
+        var line_iter = std.mem.tokenizeScalar(u8, data, '\n');
+        while (line_iter.next()) |line| {
+            if (line.len == 0 or line[0] != '{') continue;
+            if (session.cancel_flag.load(.monotonic)) return;
+            embedKnowledgeRecord(allocator, ctx, store, session, basename, line, record_index) catch {};
+            record_index += 1;
+        }
+    } else {
+        var parsed = std.json.parseFromSlice(std.json.Value, allocator, data, .{}) catch return;
+        defer parsed.deinit();
+        if (parsed.value != .array) return;
+        for (parsed.value.array.items) |item| {
+            if (session.cancel_flag.load(.monotonic)) return;
+            const item_str = std.json.Stringify.valueAlloc(allocator, item, .{}) catch continue;
+            defer allocator.free(item_str);
+            embedKnowledgeRecord(allocator, ctx, store, session, basename, item_str, record_index) catch {};
+            record_index += 1;
+        }
+    }
+}
+
+fn embedKnowledgeRecord(
+    allocator: std.mem.Allocator,
+    ctx: *WorkerCtx,
+    store: *Store,
+    session: *IngestSession,
+    file_basename: []const u8,
+    line: []const u8,
+    record_index: usize,
+) !void {
+    var parsed = std.json.parseFromSlice(std.json.Value, allocator, line, .{}) catch return;
+    defer parsed.deinit();
+    const root = parsed.value;
+
+    const content_v = getJsonPath(root, session.mapping.content) orelse return;
+    const content_text = try extractText(allocator, content_v);
+    defer allocator.free(content_text);
+    if (content_text.len == 0) return;
+
+    const title: []const u8 = if (session.mapping.title.len > 0) blk: {
+        const v = getJsonPath(root, session.mapping.title) orelse break :blk "";
+        if (v == .string) break :blk v.string;
+        break :blk "";
+    } else "";
+    const source_uri: []const u8 = if (session.mapping.source_uri.len > 0) blk: {
+        const v = getJsonPath(root, session.mapping.source_uri) orelse break :blk "";
+        if (v == .string) break :blk v.string;
+        break :blk "";
+    } else "";
+
+    const display_text = if (title.len > 0)
+        try std.fmt.allocPrint(allocator, "# {s}\n\n{s}", .{ title, content_text })
+    else
+        try allocator.dupe(u8, content_text);
     defer allocator.free(display_text);
 
+    const cleaned = try sanitizeUtf8(allocator, display_text);
+    defer allocator.free(cleaned);
     const cap: usize = 32 * 1024;
-    const body = if (display_text.len > cap) display_text[0..cap] else display_text;
+    const body = if (cleaned.len > cap) cleaned[0..cap] else cleaned;
     const preview_len: usize = @min(160, body.len);
 
-    const id_input = try std.fmt.allocPrint(allocator, "{s}#0#{s}", .{ source_id, session.model_id });
+    const source_id = try std.fmt.allocPrint(allocator, "knowledge/{s}#{d}", .{ file_basename, record_index });
+    defer allocator.free(source_id);
+    const id_input = try std.fmt.allocPrint(allocator, "{s}#{s}", .{ source_id, session.model_id });
+    defer allocator.free(id_input);
     const id_hex = shaHex(id_input);
     const id = id_hex[0..40];
     const sha_full = shaHex(body);
     const text_sha = sha_full[0..40];
+
+    const meta_title = if (title.len > 0) title else "";
+    const meta_uri = if (source_uri.len > 0) source_uri else "";
     const meta = try std.fmt.allocPrint(
         allocator,
-        "{{\"format\":\"memory\",\"account\":\"{s}\",\"project_slug\":\"{s}\",\"filename\":\"{s}\"}}",
-        .{ account, project_slug, filename },
+        "{{\"file\":\"{s}\",\"title\":\"{s}\",\"source_uri\":\"{s}\"}}",
+        .{ file_basename, meta_title, meta_uri },
     );
+    defer allocator.free(meta);
 
     const t0 = std.time.nanoTimestamp();
     const vec = ctx.embedText(allocator, body) catch return;
@@ -2358,9 +2924,9 @@ fn processMemory(
 
     try store.upsert(
         id,
-        session.source_type, // "document-chunk"
+        session.source_type,
         source_id,
-        0,
+        @intCast(record_index),
         body,
         body[0..preview_len],
         meta,

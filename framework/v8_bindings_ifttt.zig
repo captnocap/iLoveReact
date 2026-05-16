@@ -19,7 +19,7 @@ const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const ifttt = @import("ifttt/ifttt.zig");
-const hotstate = @import("hotstate.zig");
+const hotstate = @import("state/hotstate.zig");
 
 const STATE_KEY_PREFIX = "ifttt:";
 

@@ -125,8 +125,15 @@ pub const rect_wgsl =
     \\        return vec4f(in.color.rgb * final_a, final_a);
     \\    }
     \\
-    \\    // Normal mode: anti-aliased edge (1px smooth falloff)
-    \\    let aa = 1.0 - smoothstep(-1.0, 0.5, dist);
+    \\    // Normal mode: anti-aliased edge (~1px smooth falloff).
+    \\    //
+    \\    // The inner edge of the AA band is clamped to -min(half_size, 1.0)
+    \\    // so the smoothstep never bleeds further inside than the rect's
+    \\    // half-width. Without this, sub-2px rects (e.g. 1×1 cells in a pixel
+    \\    // grid) have their entire interior fall inside the AA falloff and
+    \\    // render at ~50-75% opacity at the brightest point.
+    \\    let inner_edge = -min(min(half_size.x, half_size.y), 1.0);
+    \\    let aa = 1.0 - smoothstep(inner_edge, 0.5, dist);
     \\
     \\    if aa <= 0.0 {
     \\        discard;

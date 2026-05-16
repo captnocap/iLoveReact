@@ -20,11 +20,10 @@ const std = @import("std");
 const log = @import("../diag/log.zig");
 const layout = @import("../layout.zig");
 const Node = layout.Node;
-const state_mod = @import("../state.zig");
 const testdriver = @import("driver.zig");
 const query = @import("query.zig");
 const gpu = @import("../gpu/gpu.zig");
-const input_mod = @import("../input.zig");
+const input_mod = @import("../primitive/input.zig");
 
 const page_alloc = std.heap.page_allocator;
 
@@ -42,8 +41,14 @@ const TEXT_LEN = 256;
 
 const Mode = enum { off, record, replay, autotest, snapshot };
 
+// Slot-state machinery is vestigial — the Smith-era state.zig slot system was
+// retired (replaced by React's in-V8 hook state). snapshotState() returns an
+// empty StateSnapshot so the recording/diffing helpers compile and behave as
+// no-ops. Witness now verifies parity via the captured tree + text snapshots.
+const SlotKind = enum { int, float, boolean, string };
+
 const SlotSnapshot = struct {
-    kind: state_mod.SlotKind = .int,
+    kind: SlotKind = .int,
     int_val: i64 = 0,
     float_val: f64 = 0,
     bool_val: bool = false,
@@ -319,25 +324,8 @@ pub fn exitCode() u8 {
 // ── State snapshotting ──────────────────────────────────────────────────
 
 fn snapshotState() StateSnapshot {
-    var snap: StateSnapshot = .{};
-    const count = state_mod.slotCount();
-    snap.count = @intCast(@min(count, MAX_SLOTS));
-    for (0..snap.count) |i| {
-        const kind = state_mod.getSlotKind(i);
-        snap.slots[i].kind = kind;
-        switch (kind) {
-            .int => snap.slots[i].int_val = state_mod.getSlot(i),
-            .float => snap.slots[i].float_val = state_mod.getSlotFloat(i),
-            .boolean => snap.slots[i].bool_val = state_mod.getSlotBool(i),
-            .string => {
-                const s = state_mod.getSlotString(i);
-                const len = @min(s.len, TEXT_LEN);
-                @memcpy(snap.slots[i].str_buf[0..len], s[0..len]);
-                snap.slots[i].str_len = @intCast(len);
-            },
-        }
-    }
-    return snap;
+    // Slots are always empty post-state.zig retirement; see SlotKind comment.
+    return .{};
 }
 
 fn statesMatch(a: *const StateSnapshot, b: *const StateSnapshot) bool {
@@ -1799,7 +1787,7 @@ fn snapshotTick(root: *Node) bool {
         .collect_initial => {
             // Count tree health
             snapCountTree(root);
-            const slot_count = state_mod.slotCount();
+            const slot_count: usize = 0;
 
             // Collect initial text expects first (populates snap_nil_count)
             snapCollectTexts(root);

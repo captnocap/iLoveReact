@@ -126,6 +126,10 @@ pub fn notifyResize(w: f32, h: f32) void {
 // JS getters — let cart modules read the current viewport size on import
 // without having to wait for a resize event. Bind via host fns in
 // v8_bindings_core.zig.
+pub fn getBpTier() u8 {
+    return last_bp_tier;
+}
+
 pub fn getViewportWidth() f32 {
     return last_w;
 }

@@ -32,7 +32,7 @@ pub const ImageQuad = extern struct {
 // ════════════════════════════════════════════════════════════════════════
 
 // Image-quad pool shared by `<Image>` blits, render-to-texture composites
-// (StaticSurface, Filter), blend2d-rasterized SVG fills, and effect-fill
+// (StaticSurface, Filter), rasterized SVG fills, and effect-fill
 // quads. 256 was a long-standing default that capped real-world pages once
 // they had ~50 cards × multiple images each. Bumped to 2048 — ~64KB BSS
 // (g_quads + g_bind_groups arrays).

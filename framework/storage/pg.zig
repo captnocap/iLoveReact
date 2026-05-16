@@ -6,7 +6,10 @@
 //! sanitization and connection lifetime.
 //!
 //! Default connection (URI = "") talks to the framework's embedded
-//! postgres at `~/.cache/reactjit-embed/embed-pg-sock/.s.PGSQL.5432`.
+//! postgres cluster at `~/.cache/reactjit-embed/embed-pg-sock/.s.PGSQL.5432`,
+//! role `postgres`, database `postgres` (the system DB initdb always
+//! creates). The framework does NOT pick an application database for you
+//! — pass an explicit URI to target your own role/db.
 //!
 //! ── Self-contained startup ────────────────────────────────────────────
 //! On first connect, if the data dir is missing we run `initdb` to seed
@@ -60,8 +63,11 @@ fn allocator() std.mem.Allocator {
 
 const default_socket_subpath = ".cache/reactjit-embed/embed-pg-sock";
 const default_data_subpath = ".cache/reactjit-embed/embed-pg";
-const default_user = "embed";
-const default_database = "embed_bench";
+// Neutral cluster defaults. `postgres` is the role+db initdb always
+// creates; using these means the framework never assumes an application
+// database name. Authors target their own roles/DBs via explicit URIs.
+const default_user = "postgres";
+const default_database = "postgres";
 
 // Known postgres install layouts to scan when locating the binaries.
 // Bundled paths win over system paths so `scripts/ship`-extracted apps
@@ -100,9 +106,19 @@ const system_pg_share_dirs = [_][]const u8{
     "/usr/share/postgresql",
 };
 
-/// Returns the bundle root (parent of `bin/`) if a `<root>/bin/postgres`
-/// exists in any candidate location. Caller owns the returned slice.
-fn findBundleRoot(a: std.mem.Allocator) ?[]u8 {
+/// Cached bundle root — resolved once per process.
+var g_bundle_root: ?[]u8 = null;
+var g_bundle_tried: bool = false;
+
+fn bundleRoot(a: std.mem.Allocator) ?[]const u8 {
+    if (g_bundle_root) |r| return r;
+    if (g_bundle_tried) return null;
+    g_bundle_tried = true;
+    g_bundle_root = resolveBundleRoot(a);
+    return g_bundle_root;
+}
+
+fn resolveBundleRoot(a: std.mem.Allocator) ?[]u8 {
     if (std.posix.getenv("RJIT_PG_BUNDLE")) |env_root| {
         const probe = std.fs.path.join(a, &.{ env_root, "bin", "postgres" }) catch return null;
         defer a.free(probe);
@@ -131,19 +147,8 @@ fn findBundleRoot(a: std.mem.Allocator) ?[]u8 {
     return null;
 }
 
-/// Locate `<name>` (e.g. "postgres", "initdb") in a bundle or known
-/// system dir. Returns absolute path or null. Caller owns the slice.
-fn findPgBin(a: std.mem.Allocator, name: []const u8) ?[]u8 {
-    if (findBundleRoot(a)) |root| {
-        defer a.free(root);
-        const path = std.fs.path.join(a, &.{ root, "bin", name }) catch return null;
-        if (std.fs.cwd().access(path, .{})) {
-            return path;
-        } else |_| {
-            a.free(path);
-        }
-    }
-    for (system_pg_bin_dirs) |dir| {
+fn findInDirs(a: std.mem.Allocator, dirs: []const []const u8, name: []const u8) ?[]u8 {
+    for (dirs) |dir| {
         const path = std.fs.path.join(a, &.{ dir, name }) catch continue;
         if (std.fs.cwd().access(path, .{})) {
             return path;
@@ -154,17 +159,18 @@ fn findPgBin(a: std.mem.Allocator, name: []const u8) ?[]u8 {
     return null;
 }
 
-/// Locate the postgres `share/` tree (templates, encodings, locale).
-/// Bundled copy wins; otherwise scan system layouts. Caller owns slice.
+fn findPgBin(a: std.mem.Allocator, name: []const u8) ?[]u8 {
+    if (bundleRoot(a)) |root| {
+        const path = std.fs.path.join(a, &.{ root, "bin", name }) catch return null;
+        if (std.fs.cwd().access(path, .{})) return path else |_| a.free(path);
+    }
+    return findInDirs(a, &system_pg_bin_dirs, name);
+}
+
 fn findShareDir(a: std.mem.Allocator) ?[]u8 {
-    if (findBundleRoot(a)) |root| {
-        defer a.free(root);
+    if (bundleRoot(a)) |root| {
         const path = std.fs.path.join(a, &.{ root, "share", "postgresql" }) catch return null;
-        if (std.fs.cwd().access(path, .{})) {
-            return path;
-        } else |_| {
-            a.free(path);
-        }
+        if (std.fs.cwd().access(path, .{})) return path else |_| a.free(path);
     }
     for (system_pg_share_dirs) |dir| {
         if (std.fs.cwd().access(dir, .{})) {
@@ -174,8 +180,45 @@ fn findShareDir(a: std.mem.Allocator) ?[]u8 {
     return null;
 }
 
-/// True iff the data dir contains a PG_VERSION marker (initdb's stamp).
-/// An empty existing dir is NOT counted as initialized.
+const EmbedPaths = struct {
+    data_dir: []u8,
+    sock_dir: []u8,
+    sock_path: []u8,
+
+    fn resolve(a: std.mem.Allocator) !EmbedPaths {
+        const home = std.posix.getenv("HOME") orelse return error.ConnectFailed;
+        return .{
+            .data_dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ home, default_data_subpath }),
+            .sock_dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ home, default_socket_subpath }),
+            .sock_path = try std.fmt.allocPrint(a, "{s}/{s}/.s.PGSQL.5432", .{ home, default_socket_subpath }),
+        };
+    }
+
+    fn deinit(self: EmbedPaths, a: std.mem.Allocator) void {
+        a.free(self.data_dir);
+        a.free(self.sock_dir);
+        a.free(self.sock_path);
+    }
+};
+
+fn pgChildEnv(a: std.mem.Allocator) !std.process.EnvMap {
+    var env_map = std.process.getEnvMap(a) catch return error.ConnectFailed;
+    if (findShareDir(a)) |share| {
+        defer a.free(share);
+        env_map.put("PGSHAREDIR", share) catch {
+            env_map.deinit();
+            return error.ConnectFailed;
+        };
+    }
+    return env_map;
+}
+
+fn slotFor(handle: usize) ?*Slot {
+    if (handle == 0 or handle >= max_handles) return null;
+    if (slots[handle].pool == null) return null;
+    return &slots[handle];
+}
+
 fn dataDirInitialized(data_dir: []const u8) bool {
     var d = std.fs.cwd().openDir(data_dir, .{}) catch return false;
     defer d.close();
@@ -198,12 +241,8 @@ fn runInitdb(a: std.mem.Allocator, data_dir: []const u8) !void {
     };
 
     var child = std.process.Child.init(&argv, a);
-    var env_map = std.process.getEnvMap(a) catch return error.ConnectFailed;
+    var env_map = try pgChildEnv(a);
     defer env_map.deinit();
-    if (findShareDir(a)) |share| {
-        defer a.free(share);
-        env_map.put("PGSHAREDIR", share) catch return error.ConnectFailed;
-    }
     child.env_map = &env_map;
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Inherit;
@@ -269,59 +308,34 @@ pub fn connect(uri: []const u8) usize {
 }
 
 fn connectDefault(a: std.mem.Allocator) !*pg.Pool {
-    const home = std.posix.getenv("HOME") orelse "/root";
-    const sock_path = try std.fmt.allocPrint(a, "{s}/{s}/.s.PGSQL.5432", .{ home, default_socket_subpath });
-    defer a.free(sock_path);
-    const data_dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ home, default_data_subpath });
-    defer a.free(data_dir);
+    const paths = try EmbedPaths.resolve(a);
+    defer paths.deinit(a);
 
-    // Try the live socket first — covers both "we already opened it this
-    // process" and "user has postgres running from elsewhere".
     if (pg.Pool.init(a, .{
         .size = 16,
-        .connect = .{ .host = sock_path },
+        .connect = .{ .host = paths.sock_path },
         .auth = .{ .username = default_user, .database = default_database },
     })) |pool| {
         return pool;
     } else |_| {}
 
-    // Cluster not running — make sure it exists, then spawn it. initdb
-    // is idempotent (skipped when PG_VERSION already exists), so this
-    // path is safe to take whether the data dir is missing or just stale.
-    runInitdb(a, data_dir) catch return error.ConnectFailed;
-    spawnEmbeddedPostgres(a) catch return error.ConnectFailed;
-    return waitForReady(a, sock_path, 30) catch error.ConnectFailed;
+    runInitdb(a, paths.data_dir) catch return error.ConnectFailed;
+    spawnEmbeddedPostgres(a, paths) catch return error.ConnectFailed;
+    return waitForReady(a, paths.sock_path, 30) catch error.ConnectFailed;
 }
 
 fn connectUri(a: std.mem.Allocator, uri: []const u8) !*pg.Pool {
-    // pg.zig accepts a connection URI via `Pool.initUri`. The signature is
-    // `(allocator, std.Uri, Opts)` so we parse here.
     const parsed = std.Uri.parse(uri) catch return error.ConnectFailed;
     return pg.Pool.initUri(a, parsed, .{ .size = 16, .timeout = 10_000 }) catch return error.ConnectFailed;
 }
 
-fn spawnEmbeddedPostgres(a: std.mem.Allocator) !void {
-    const home = std.posix.getenv("HOME") orelse return error.ConnectFailed;
-    const data_dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ home, default_data_subpath });
-    defer a.free(data_dir);
-    const sock_dir = try std.fmt.allocPrint(a, "{s}/{s}", .{ home, default_socket_subpath });
-    defer a.free(sock_dir);
+fn spawnEmbeddedPostgres(a: std.mem.Allocator, paths: EmbedPaths) !void {
+    std.fs.cwd().access(paths.data_dir, .{}) catch return error.ConnectFailed;
+    std.fs.cwd().makePath(paths.sock_dir) catch {};
 
-    // Caller (connectDefault) ran initdb if needed, so the data dir
-    // should exist and contain PG_VERSION. Defensive check — bail
-    // cleanly if something deleted it between calls.
-    std.fs.cwd().access(data_dir, .{}) catch return error.ConnectFailed;
-    std.fs.cwd().makePath(sock_dir) catch {};
-
-    // postgres handles its own socket cleanup at startup. The one thing
-    // that DOES block startup is a `postmaster.pid` whose PID is alive
-    // (postgres assumes another instance owns the dir). Only clear it
-    // when the PID is dead — a stale leftover from a crashed previous
-    // instance. NEVER touch the socket files: we'd strand a live
-    // cluster (its socket gone, but PG itself still up and refusing
-    // duplicates), which is exactly the bug this comment exists to
-    // prevent recurring.
-    const pid_file = std.fs.path.join(a, &.{ data_dir, "postmaster.pid" }) catch return error.OutOfMemory;
+    // Only clear a stale postmaster.pid whose PID is dead. NEVER touch
+    // the socket files — we'd strand a live cluster.
+    const pid_file = std.fs.path.join(a, &.{ paths.data_dir, "postmaster.pid" }) catch return error.OutOfMemory;
     defer a.free(pid_file);
     if (!postmasterPidIsLive(pid_file)) {
         std.fs.cwd().deleteFile(pid_file) catch {};
@@ -330,35 +344,22 @@ fn spawnEmbeddedPostgres(a: std.mem.Allocator) !void {
     const postgres_bin = findPgBin(a, "postgres") orelse return error.ConnectFailed;
     defer a.free(postgres_bin);
 
-    // max_connections defaults to 100. Each bucket DB opens a 16-conn
-    // pool keyed on its URI; with 8 buckets + cluster = 9 unique URIs
-    // the per-process budget is ~144, blowing past the default. Bump
-    // to 300 so the embeddings bucket also has headroom for parallel
-    // ingest workers (each holds connections during embed.upsert).
-    // Memory cost ≈ 5–10 MB per idle backend; ~2 GB worst case is
-    // acceptable for a desktop app and well within ulimit defaults.
     const argv = [_][]const u8{
         postgres_bin,
-        "-D",        data_dir,
-        "-k",        sock_dir,
+        "-D",        paths.data_dir,
+        "-k",        paths.sock_dir,
         "-c",        "listen_addresses=",
         "-c",        "max_connections=300",
     };
 
     var child = std.process.Child.init(&argv, a);
-    var env_map = std.process.getEnvMap(a) catch return error.ConnectFailed;
+    var env_map = try pgChildEnv(a);
     defer env_map.deinit();
-    if (findShareDir(a)) |share| {
-        defer a.free(share);
-        env_map.put("PGSHAREDIR", share) catch return error.ConnectFailed;
-    }
     child.env_map = &env_map;
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Ignore;
     child.stdin_behavior = .Ignore;
     try child.spawn();
-    // Detach — postgres double-forks itself into its supervisor on
-    // success, so the immediate child becomes a wait()-able shell.
 }
 
 /// Returns true if `postmaster.pid` exists AND its first line (the PID)
@@ -385,38 +386,26 @@ pub fn close(handle: usize) void {
     slots[handle] = .{ .pool = null, .uri = &.{}, .last_changes = 0 };
 }
 
-fn poolFor(handle: usize) ?*pg.Pool {
-    if (handle == 0 or handle >= max_handles) return null;
-    return slots[handle].pool;
-}
-
-/// DDL or write. Returns true on success, false on failure (caller can't
-/// distinguish the failure mode; check stderr for the pg error). Updates
-/// `last_changes` for `changes()`.
 pub fn exec(handle: usize, sql: []const u8, _: []const u8) bool {
-    const pool = poolFor(handle) orelse return false;
-    const affected_opt = pool.exec(sql, .{}) catch return false;
-    slots[handle].last_changes = if (affected_opt) |n| n else 0;
+    const slot = slotFor(handle) orelse return false;
+    const affected_opt = slot.pool.?.exec(sql, .{}) catch return false;
+    slot.last_changes = if (affected_opt) |n| n else 0;
     return true;
 }
 
 pub fn changes(handle: usize) i64 {
-    if (handle == 0 or handle >= max_handles) return 0;
-    return slots[handle].last_changes;
+    const slot = slotFor(handle) orelse return 0;
+    return slot.last_changes;
 }
 
-/// Run a SELECT and return the result rows as a JSON string allocated with
-/// `out_alloc`. Each row is a JSON object keyed by column name. Columns of
-/// numeric / boolean type are emitted as JSON primitives; text and unknown
-/// types are emitted as quoted strings (escaped). Caller owns the returned
-/// slice.
 pub fn queryJson(
     out_alloc: std.mem.Allocator,
     handle: usize,
     sql: []const u8,
     _: []const u8,
 ) ![]u8 {
-    const pool = poolFor(handle) orelse return error.InvalidHandle;
+    const slot = slotFor(handle) orelse return error.InvalidHandle;
+    const pool = slot.pool.?;
     var result = pool.queryOpts(sql, .{}, .{ .column_names = true }) catch return error.QueryFailed;
     defer result.deinit();
 

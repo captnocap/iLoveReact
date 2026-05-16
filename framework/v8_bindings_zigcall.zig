@@ -30,7 +30,8 @@ const MODULES = .{
     .{ "math",       @import("math/root.zig") },
     .{ "easing",     @import("math/easing.zig") },
     .{ "random",     @import("math/random.zig") },
-    .{ "transition", @import("transition.zig") },
+    .{ "transition", @import("gpu/transition.zig") },
+    .{ "sim",        @import("sim/root.zig") },
 };
 
 // ── Type support predicate ──────────────────────────────────────────────

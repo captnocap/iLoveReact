@@ -25,7 +25,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const voice = @import("voice.zig");
+const voice = @import("voice/voice.zig");
 
 fn argToI32(info: v8.FunctionCallbackInfo, idx: u32) ?i32 {
     if (idx >= info.length()) return null;

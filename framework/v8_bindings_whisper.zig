@@ -17,7 +17,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const whisper = @import("whisper.zig");
+const whisper = @import("voice/whisper.zig");
 
 const alloc = std.heap.c_allocator;
 

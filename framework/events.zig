@@ -6,8 +6,62 @@
 //!
 //! No allocations — handlers are compile-time function pointers.
 
+const std = @import("std");
 const layout = @import("layout.zig");
 const Node = layout.Node;
+
+// ── Filter-aware pointer warp ───────────────────────────────────────────
+//
+// The CRT filter applies barrel distortion in its fragment shader:
+//   p = uv * 2 - 1
+//   p' = p * (1 + k * |p|^2)        where k = 0.15 * filter_intensity
+//   source_uv = p' * 0.5 + 0.5
+// so the pixel VISUALLY shown at screen `uv` is the un-warped scene's
+// content at `source_uv`. The hit-tester reads flat layout rects (which
+// are pre-warp), so clicks fall through to the wrong elements unless we
+// transform the pointer the same way before recursing into the filter's
+// children.
+//
+// Other built-in filters (deepfry, vhs, chromatic, posterize, scanlines,
+// invert, grayscale, pixelate, dither) DO NOT warp positions — they
+// only manipulate per-pixel color. So crt is the only filter that
+// needs this correction today.
+const FilterWarp = struct {
+    x: f32,
+    y: f32,
+    /// True if the warped point is still inside the filter's source
+    /// rect [0,1]^2. The CRT shader returns transparent when out of
+    /// range — hit-test should miss the same way.
+    in_bounds: bool,
+};
+
+fn warpForFilter(node: *Node, r: layout.LayoutRect, mx: f32, my: f32) FilterWarp {
+    const fname = node.filter_name orelse return .{ .x = mx, .y = my, .in_bounds = true };
+    if (r.w <= 0 or r.h <= 0) return .{ .x = mx, .y = my, .in_bounds = true };
+
+    if (std.mem.eql(u8, fname, "crt")) {
+        const u = (mx - r.x) / r.w;
+        const v = (my - r.y) / r.h;
+        const px = u * 2.0 - 1.0;
+        const py = v * 2.0 - 1.0;
+        const r2 = px * px + py * py;
+        const k = 0.15 * node.filter_intensity;
+        const scale = 1.0 + k * r2;
+        const ppx = px * scale;
+        const ppy = py * scale;
+        const src_u = ppx * 0.5 + 0.5;
+        const src_v = ppy * 0.5 + 0.5;
+        const in = src_u >= 0.0 and src_u <= 1.0 and src_v >= 0.0 and src_v <= 1.0;
+        return .{
+            .x = r.x + src_u * r.w,
+            .y = r.y + src_v * r.h,
+            .in_bounds = in,
+        };
+    }
+
+    // Non-positional filter — identity.
+    return .{ .x = mx, .y = my, .in_bounds = true };
+}
 
 // ── Event Handler ────────────────────────────────────────────────────────
 
@@ -27,7 +81,6 @@ pub const EventHandler = struct {
     on_submit: ?*const fn () void = null,
     on_scroll: ?*const fn () void = null,
     on_right_click: ?*const fn (x: f32, y: f32) void = null,
-    /// JS expression to eval on press (used by .so cartridges that can't call QJS directly)
     js_on_press: ?[*:0]const u8 = null,
     js_on_mouse_down: ?[*:0]const u8 = null,
     js_on_mouse_move: ?[*:0]const u8 = null,
@@ -58,6 +111,17 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
         if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
         child_my = my + node.scroll_y;
         child_mx = mx + node.scroll_x;
+    }
+
+    // Filter-aware coordinate warp (CRT barrel etc.). Applied AFTER any
+    // scroll adjustment because the filter's source rect is in screen
+    // coords post-scroll. Off-screen warp means the shader returns
+    // transparent — propagate as a hit-test miss.
+    if (node.filter_name != null) {
+        const w = warpForFilter(node, r, child_mx, child_my);
+        if (!w.in_bounds) return null;
+        child_mx = w.x;
+        child_my = w.y;
     }
 
     // Check children in reverse order (last child = front-most)
@@ -123,6 +187,14 @@ pub fn hitTestHoverable(node: *Node, mx: f32, my: f32) ?*Node {
         child_mx = mx + node.scroll_x;
     }
 
+    // Filter-aware warp — see hitTest comment.
+    if (node.filter_name != null) {
+        const w = warpForFilter(node, r, child_mx, child_my);
+        if (!w.in_bounds) return null;
+        child_mx = w.x;
+        child_my = w.y;
+    }
+
     // Canvas container: Canvas.Node / Canvas.Path descendants have computed rects
     // in graph space (positionOneCanvasNode in engine.zig shifts them pre-paint).
     // Canvas.Clamp children stay in screen space. Bail if mouse is outside the
@@ -130,7 +202,7 @@ pub fn hitTestHoverable(node: *Node, mx: f32, my: f32) ?*Node {
     // elsewhere on screen.
     if (node.canvas_type != null) {
         if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
-        const canvas_mod = @import("canvas.zig");
+        const canvas_mod = @import("primitive/canvas.zig");
         const vp_cx = r.x + r.w / 2;
         const vp_cy = r.y + r.h / 2;
         const gpos = canvas_mod.screenToGraph(mx, my, vp_cx, vp_cy);
@@ -209,6 +281,14 @@ pub fn hitTestText(node: *Node, mx: f32, my: f32) ?*Node {
         child_mx = mx + node.scroll_x;
     }
 
+    // Filter-aware warp — see hitTest comment.
+    if (node.filter_name != null) {
+        const w = warpForFilter(node, r, child_mx, child_my);
+        if (!w.in_bounds) return null;
+        child_mx = w.x;
+        child_my = w.y;
+    }
+
     // Check children in reverse order (last child = front-most)
     var i = node.children.len;
     while (i > 0) {
@@ -271,6 +351,14 @@ pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
         if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
         child_my = my + node.scroll_y;
         child_mx = mx + node.scroll_x;
+    }
+
+    // Filter-aware warp — see hitTest comment.
+    if (node.filter_name != null) {
+        const w = warpForFilter(node, r, child_mx, child_my);
+        if (!w.in_bounds) return null;
+        child_mx = w.x;
+        child_my = w.y;
     }
 
     var i = node.children.len;

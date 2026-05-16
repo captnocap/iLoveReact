@@ -10,7 +10,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const hotstate = @import("hotstate.zig");
+const hotstate = @import("state/hotstate.zig");
 
 extern fn getpid() c_int;
 extern fn usleep(usec: c_uint) c_int;

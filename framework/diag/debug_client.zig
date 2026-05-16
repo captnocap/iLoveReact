@@ -13,6 +13,10 @@ const std = @import("std");
 const log = @import("log.zig");
 const ipc = @import("../net/ipc.zig");
 const app_crypto = @import("../crypto.zig");
+const json_probe = @import("json_probe.zig");
+
+const jsonStr = json_probe.str;
+const jsonInt = json_probe.int;
 
 const X25519 = std.crypto.dh.X25519;
 const XChaCha = std.crypto.aead.chacha_poly.XChaCha20Poly1305;
@@ -413,42 +417,3 @@ fn eql(a: []const u8, b: []const u8) bool {
     return std.mem.eql(u8, a, b);
 }
 
-fn jsonStr(json: []const u8, key: []const u8) ?[]const u8 {
-    var i: usize = 0;
-    while (i + key.len + 4 < json.len) : (i += 1) {
-        if (json[i] == '"' and i + 1 + key.len < json.len and
-            std.mem.eql(u8, json[i + 1 .. i + 1 + key.len], key) and
-            json[i + 1 + key.len] == '"')
-        {
-            var j = i + 2 + key.len;
-            while (j < json.len and (json[j] == ':' or json[j] == ' ')) j += 1;
-            if (j < json.len and json[j] == '"') {
-                j += 1;
-                const vs = j;
-                while (j < json.len and json[j] != '"') j += 1;
-                return json[vs..j];
-            }
-        }
-    }
-    return null;
-}
-
-fn jsonInt(json: []const u8, key: []const u8) ?i32 {
-    var i: usize = 0;
-    while (i + key.len + 4 < json.len) : (i += 1) {
-        if (json[i] == '"' and i + 1 + key.len < json.len and
-            std.mem.eql(u8, json[i + 1 .. i + 1 + key.len], key) and
-            json[i + 1 + key.len] == '"')
-        {
-            var j = i + 2 + key.len;
-            while (j < json.len and (json[j] == ':' or json[j] == ' ')) j += 1;
-            const ns = j;
-            if (j < json.len and (json[j] == '-' or (json[j] >= '0' and json[j] <= '9'))) {
-                j += 1;
-                while (j < json.len and json[j] >= '0' and json[j] <= '9') j += 1;
-                return std.fmt.parseInt(i32, json[ns..j], 10) catch null;
-            }
-        }
-    }
-    return null;
-}

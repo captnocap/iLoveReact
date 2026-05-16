@@ -496,6 +496,7 @@ const ScissorSegment = struct {
     capsule_start: u32,
     poly_start: u32,
     image_start: u32,
+    sdf_icon_start: u32,
 };
 
 const ZERO_SCISSOR_SEGMENT = ScissorSegment{
@@ -509,6 +510,7 @@ const ZERO_SCISSOR_SEGMENT = ScissorSegment{
     .capsule_start = 0,
     .poly_start = 0,
     .image_start = 0,
+    .sdf_icon_start = 0,
 };
 
 // Scissor history for clipped subtrees (overflow: hidden, ScrollView,
@@ -535,7 +537,8 @@ fn sameBoundary(a: ScissorSegment, b: ScissorSegment) bool {
     return a.x == b.x and a.y == b.y and a.w == b.w and a.h == b.h and
         a.rect_start == b.rect_start and a.glyph_start == b.glyph_start and
         a.curve_start == b.curve_start and a.capsule_start == b.capsule_start and
-        a.poly_start == b.poly_start and a.image_start == b.image_start;
+        a.poly_start == b.poly_start and a.image_start == b.image_start and
+        a.sdf_icon_start == b.sdf_icon_start;
 }
 
 fn recordBoundary(x: u32, y: u32, w: u32, h: u32, image_start: u32) void {
@@ -552,6 +555,7 @@ fn recordBoundary(x: u32, y: u32, w: u32, h: u32, image_start: u32) void {
         .capsule_start = @intCast(capsules.count()),
         .poly_start = @intCast(polys.count()),
         .image_start = image_start,
+        .sdf_icon_start = @intCast(sdf_icons.count()),
     };
 
     if (g_scissor_count > 0 and sameBoundary(g_scissor_segments[g_scissor_count - 1], seg)) return;
@@ -624,6 +628,7 @@ pub fn pushScissor(x: f32, y: f32, w: f32, h: f32) void {
             .capsule_start = 0,
             .poly_start = 0,
             .image_start = 0,
+            .sdf_icon_start = 0,
         };
         g_scissor_depth += 1;
     }
@@ -1658,6 +1663,8 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         g_width, g_height, total_rects, total_glyphs, total_curves, total_capsules, total_polys, total_images, g_scissor_count,
     });
 
+    const total_icons: u32 = @intCast(sdf_icons.count());
+
     if (g_scissor_count == 0) {
         // Fast path — no clip or ordering boundaries, single draw for all primitives
         render_pass.setScissorRect(0, 0, g_width, g_height);
@@ -1667,6 +1674,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         drawCapsulesSkipping(render_pass, 0, total_capsules);
         drawPolysSkipping(render_pass, 0, total_polys);
         drawImagesSkipping(render_pass, 0, total_images);
+        if (total_icons > 0) sdf_icons.drawBatch(render_pass, 0, total_icons);
     } else {
         // Boundary-segmented rendering
         var segments: [MAX_SCISSOR_SEGMENTS + 1]ScissorSegment = undefined;
@@ -1679,6 +1687,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         var prev_capsule: u32 = 0;
         var prev_poly: u32 = 0;
         var prev_image: u32 = 0;
+        var prev_icon: u32 = 0;
         var prev_sx: u32 = 0;
         var prev_sy: u32 = 0;
         var prev_sw: u32 = g_width;
@@ -1692,8 +1701,9 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
             const capsule_end = seg.capsule_start;
             const poly_end = seg.poly_start;
             const image_end = seg.image_start;
+            const icon_end = seg.sdf_icon_start;
 
-            if (rect_end > prev_rect or glyph_end > prev_glyph or curve_end > prev_curve or capsule_end > prev_capsule or poly_end > prev_poly or image_end > prev_image) {
+            if (rect_end > prev_rect or glyph_end > prev_glyph or curve_end > prev_curve or capsule_end > prev_capsule or poly_end > prev_poly or image_end > prev_image or icon_end > prev_icon) {
                 if (setClampedScissor(render_pass, prev_sx, prev_sy, prev_sw, prev_sh, g_width, g_height)) {
                     if (rect_end > prev_rect) drawRectsSkipping(render_pass, prev_rect, rect_end);
                     if (glyph_end > prev_glyph) drawTextSkipping(render_pass, prev_glyph, glyph_end);
@@ -1701,6 +1711,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
                     if (capsule_end > prev_capsule) drawCapsulesSkipping(render_pass, prev_capsule, capsule_end);
                     if (poly_end > prev_poly) drawPolysSkipping(render_pass, prev_poly, poly_end);
                     if (image_end > prev_image) drawImagesSkipping(render_pass, prev_image, image_end);
+                    if (icon_end > prev_icon) sdf_icons.drawBatch(render_pass, prev_icon, icon_end);
                 }
             }
 
@@ -1710,6 +1721,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
             prev_capsule = capsule_end;
             prev_poly = poly_end;
             prev_image = image_end;
+            prev_icon = icon_end;
             prev_sx = seg.x;
             prev_sy = seg.y;
             prev_sw = seg.w;
@@ -1717,7 +1729,7 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         }
 
         // Draw remaining after last segment
-        if (total_rects > prev_rect or total_glyphs > prev_glyph or total_curves > prev_curve or total_capsules > prev_capsule or total_polys > prev_poly or total_images > prev_image) {
+        if (total_rects > prev_rect or total_glyphs > prev_glyph or total_curves > prev_curve or total_capsules > prev_capsule or total_polys > prev_poly or total_images > prev_image or total_icons > prev_icon) {
             if (setClampedScissor(render_pass, prev_sx, prev_sy, prev_sw, prev_sh, g_width, g_height)) {
                 if (total_rects > prev_rect) drawRectsSkipping(render_pass, prev_rect, total_rects);
                 if (total_glyphs > prev_glyph) drawTextSkipping(render_pass, prev_glyph, total_glyphs);
@@ -1725,16 +1737,11 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
                 if (total_capsules > prev_capsule) drawCapsulesSkipping(render_pass, prev_capsule, total_capsules);
                 if (total_polys > prev_poly) drawPolysSkipping(render_pass, prev_poly, total_polys);
                 if (total_images > prev_image) drawImagesSkipping(render_pass, prev_image, total_images);
+                if (total_icons > prev_icon) sdf_icons.drawBatch(render_pass, prev_icon, total_icons);
             }
         }
     }
 
-    // SDF icons — drawn last in the main pass, in one instanced call,
-    // over the entire viewport. v0 doesn't participate in static-surface
-    // capture or scissor segmentation; that means icons inside scrollviews
-    // may not clip cleanly at scroll edges. Acceptable for the speed win;
-    // wire into PrimitiveCounts later if clipping fidelity becomes the
-    // bottleneck.
     // G-curve fill — Loop-Blinn quadratic-bezier-triangle fills. Same one-
     // batched-draw pattern as sdf_icons; sits outside the static-surface
     // capture / scissor segmentation system for now (acceptable v0 limit:
@@ -1744,13 +1751,6 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
         if (total_gcurves > 0) {
             render_pass.setScissorRect(0, 0, g_width, g_height);
             gcurve_fill.drawBatch(render_pass, 0, total_gcurves);
-        }
-    }
-    {
-        const total_icons: u32 = @intCast(sdf_icons.count());
-        if (total_icons > 0) {
-            render_pass.setScissorRect(0, 0, g_width, g_height);
-            sdf_icons.drawBatch(render_pass, 0, total_icons);
         }
     }
 

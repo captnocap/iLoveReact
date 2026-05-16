@@ -16,32 +16,31 @@ const layout = @import("framework/layout.zig");
 const Node = layout.Node;
 const Style = layout.Style;
 const Color = layout.Color;
-const transition_mod = @import("framework/transition.zig");
+const transition_mod = @import("framework/gpu/transition.zig");
 const easing_mod = @import("framework/math/easing.zig");
-const effect_ctx = @import("framework/effects/ctx.zig");
-const input = @import("framework/input.zig");
-const state = @import("framework/state.zig");
+const effect_ctx = @import("framework/gpu/effects_ctx.zig");
+const input = @import("framework/primitive/input.zig");
+const state = @import("framework/state/dirty.zig");
 const events = @import("framework/events.zig");
-const context_menu = @import("framework/context_menu.zig");
+const context_menu = @import("framework/primitive/context_menu.zig");
 const engine = if (IS_LIB) struct {} else @import("framework/engine.zig");
 const gpu = if (IS_LIB) struct {
     pub fn frameCounter() u64 {
         return 0;
     }
 } else @import("framework/gpu/gpu.zig");
-const latches = @import("framework/latches.zig");
-const animations = @import("framework/animations.zig");
-const windows = @import("framework/windows.zig");
+const latches = @import("framework/state/latches.zig");
+const animations = @import("framework/gpu/animations.zig");
+const windows = @import("framework/primitive/windows.zig");
 const ipc = @import("framework/net/ipc.zig");
-// Prepared input state (was housed in qjs_runtime.zig despite having
-// nothing to do with QJS — see archive/qjs-stack/README.md). Aliased
-// here as `qjs_runtime` to keep existing call sites working without
-// a sweep.
-const prepared_input = @import("framework/prepared_input.zig");
+const prepared_input = @import("framework/state/prepared_input.zig");
 const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = @import("framework/v8_bindings_core.zig");
 const v8_bindings_eventbus = @import("framework/v8_bindings_eventbus.zig");
 const v8_bindings_ifttt = @import("framework/v8_bindings_ifttt.zig");
+const v8_bindings_env = @import("framework/v8_bindings_env.zig");
+const v8_bindings_window = @import("framework/v8_bindings_window.zig");
+const v8_bindings_inspector = @import("framework/v8_bindings_inspector.zig");
 const event_bus = @import("framework/diag/event_bus.zig");
 
 // Override std.log so every framework `std.log.info/warn/err` call routes
@@ -230,6 +229,9 @@ const INGREDIENTS = [_]Ingredient{
     // so every cart pulls the wire/timer host fns. Source-gating this is
     // degenerate for the same reason core is.
     .{ .name = "ifttt", .required = true, .grep_prefix = "", .reg_fn = "registerIFTTT", .mod = v8_bindings_ifttt },
+    .{ .name = "env", .required = true, .grep_prefix = "", .reg_fn = "registerEnv", .mod = v8_bindings_env },
+    .{ .name = "window", .required = true, .grep_prefix = "", .reg_fn = "registerWindow", .mod = v8_bindings_window },
+    .{ .name = "inspector", .required = true, .grep_prefix = "", .reg_fn = "registerInspector", .mod = v8_bindings_inspector },
     // Everything below is source-gated: scripts/ship reads the esbuild
     // metafile and only flips the matching -Dhas-X=true if a JS file
     // that calls into the binding is actually shipped.
@@ -258,11 +260,8 @@ const INGREDIENTS = [_]Ingredient{
     .{ .name = "midi", .required = false, .grep_prefix = "__midi_", .reg_fn = "registerMidi", .mod = v8_bindings_midi },
     .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
 };
-const fs_mod = @import("framework/fs.zig");
+const fs_mod = @import("framework/fs/fs.zig");
 const localstore = @import("framework/storage/localstore.zig");
-comptime {
-    if (!IS_LIB) _ = @import("framework/core.zig");
-}
 
 // Per-cart bundle. Default path is `bundle-<app-name>.js` (relative to
 // v8_app.zig) so that two parallel ships don't race on a shared bundle.js.
@@ -1780,6 +1779,14 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             }
         } else if (is_terminal and std.mem.eql(u8, k, "terminalFontSize")) {
             if (jsonInt(v)) |i| node.terminal_font_size = @intCast(@max(i, 1));
+        } else if (is_terminal and std.mem.eql(u8, k, "shell")) {
+            // Path to the binary the PTY should exec. Stored null-terminated
+            // because spawnShellIdx → execvp wants [*:0]const u8.
+            if (v == .string) {
+                if (g_alloc.dupeZ(u8, v.string)) |z| {
+                    node.terminal_shell = z.ptr;
+                } else |_| {}
+            }
         } else if (std.mem.eql(u8, k, "color")) {
             if (v == .string) node.text_color = parseColor(v.string);
         } else if (std.mem.eql(u8, k, "letterSpacing")) {
@@ -3552,6 +3559,16 @@ fn appTick(now: u32) void {
     _probe_n.v += 1;
     const _probe = _probe_n.v <= 3;
     if (_probe) std.debug.print("[probe-tick] #{d} entry now={d}\n", .{ _probe_n.v, now });
+
+    // Bridge framework-side state.markDirty() into v8_app's g_dirty so that
+    // SDL-event-driven dispatches (filedrop, router, system_signals, …) cause
+    // a React re-render on the next tick. Without this, polling hooks like
+    // useFileDrop never observe the new seq because the JS world is never
+    // re-evaluated after the event.
+    if (state.isDirty()) {
+        g_dirty = true;
+        state.clearDirty();
+    }
 
     // Dev-mode: accept incoming IPC pushes (may switch the active tab) and
     // check the active tab's disk source for mtime-triggered reloads. Either

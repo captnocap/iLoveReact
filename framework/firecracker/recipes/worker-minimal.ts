@@ -28,6 +28,10 @@ const recipe: VmImage = {
     // to bridge /dev/ttyS0 ↔ claude with NL→CR translation that ttyS0’s
     // line discipline can’t do (because claude’s setRawMode clears it).
     'socat',
+    // libvterm0: shared library used by the claude-inner TUI wrapper
+    // (staged on the cred drive). Without it the wrapper hard-fails with
+    // "error while loading shared libraries: libvterm.so.0".
+    'libvterm0',
   ],
 
   npmGlobal: [
@@ -90,6 +94,12 @@ const recipe: VmImage = {
           'if [ -n "$COLUMNS" ] && [ -n "$LINES" ]; then\n' +
           '  stty cols "$COLUMNS" rows "$LINES" 2>/dev/null\n' +
           'fi\n' +
+          '# Prefer the inner TUI wrapper if staged — it runs claude inside\n' +
+          '# our own vterm so the output crossing vsock is flat character cells\n' +
+          '# instead of Ink\\u2019s complex cursor-query / alt-screen ANSI.\n' +
+          'if [ -x /root/claude-inner ]; then\n' +
+          '  exec /root/claude-inner\n' +
+          'fi\n' +
           'exec /usr/local/bin/claude\n',
       },
     },
@@ -110,7 +120,9 @@ const recipe: VmImage = {
             UserPromptSubmit: [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit UserPromptSubmit' }] }],
             Notification:     [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit Notification' }] }],
             Stop:             [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit Stop' }] }],
+            SubagentStart:    [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit SubagentStart' }] }],
             SubagentStop:     [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit SubagentStop' }] }],
+            PreCompact:       [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit PreCompact' }] }],
             SessionStart:     [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit SessionStart' }] }],
             SessionEnd:       [{ hooks: [{ type: 'command', command: '/usr/local/bin/ifttt-emit SessionEnd' }] }],
           },
@@ -173,26 +185,20 @@ const recipe: VmImage = {
           'stty -F /dev/ttyS0 rows "$ROWS" cols "$COLS" 2>/dev/null\n' +
           'export COLUMNS="$COLS" LINES="$ROWS"\n' +
           'echo "[init] term size: ${COLS}x${ROWS}"\n' +
-          '# Bridge /dev/ttyS0 ↔ claude through socat with:\n' +
-          '#   - stdio side: raw mode, no echo, no socat-side line\n' +
-          '#     processing; \"inlcr\" tells SOCAT (user-space, not termios)\n' +
-          '#     to translate NL→CR on input. This is the actual fix:\n' +
-          '#     bytes arrive at /dev/ttyS0 as LF because firecracker (or\n' +
-          '#     the host kitty PTY) does CR→LF upstream, and termios\n' +
-          '#     options on the guest can\\u2019t undo it once claude\\u2019s Ink\n' +
-          '#     calls cfmakeraw on its own stdin.\n' +
+          '# Bridge vsock ↔ claude. The host connects to guest port 5000\n' +
+          '# via the Firecracker vsock UDS, giving a clean byte stream with\n' +
+          '# no serial-console UART in the path. The old STDIO+inlcr path\n' +
+          '# mangled escape sequences through ttyS0\\u2019s line discipline.\n' +
+          '#   - vsock side: transparent byte pipe, no translation needed.\n' +
           '#   - exec side: pty + setsid + ctty so claude gets a real,\n' +
           '#     fresh controlling terminal (Ink/Node requires isatty=true).\n' +
-          '#     rows/cols sized to match the outer terminal so claude\\u2019s\n' +
-          '#     redraws clear the whole visible region (otherwise stale\n' +
-          '#     ANSI content like the / command menu sticks around).\n' +
           '#     /usr/local/bin/claude-wrap reads $COLUMNS/$LINES and\n' +
-          '#     stty\\u2019s the inner pty before exec\\u2019ing claude, since\n' +
-          '#     socat\\u2019s EXEC pty doesn\\u2019t accept rows/cols options.\n' +
-          '# When claude exits, socat exits, kernel panics (panic=1), \n' +
-          '# firecracker exits, your kitty shell returns.\n' +
+          '#     stty\\u2019s the inner pty before exec\\u2019ing claude.\n' +
+          '# When claude exits, socat exits, kernel panics (panic=1),\n' +
+          '# vsock drops, host bridge returns, cleanup fires.\n' +
+          'echo "[init] listening on vsock port 5000"\n' +
           'exec /usr/bin/socat \\\n' +
-          '  STDIO,rawer,inlcr \\\n' +
+          '  VSOCK-LISTEN:5000,reuseaddr \\\n' +
           '  "EXEC:/usr/local/bin/claude-wrap,pty,setsid,ctty,stderr,raw,echo=0"\n',
       },
     },

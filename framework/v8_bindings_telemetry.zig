@@ -7,7 +7,7 @@ const v8rt = @import("v8_runtime.zig");
 const frame_telemetry = @import("diag/frame_telemetry.zig");
 const telemetry = @import("diag/telemetry.zig");
 const localstore = @import("storage/localstore.zig");
-const hotstate = @import("hotstate.zig");
+const hotstate = @import("state/hotstate.zig");
 const sqlite_mod = @import("storage/sqlite.zig");
 const pty_mod = @import("terminal/pty.zig");
 
@@ -218,20 +218,6 @@ fn telNodesCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "image", s.image_nodes);
     setObjectNumber(ctx, obj, "pressable", s.pressable_nodes);
     setObjectNumber(ctx, obj, "canvas", s.canvas_nodes);
-    info.getReturnValue().set(obj.toValue());
-}
-
-fn telStateCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const iso = info.getIsolate();
-    const ctx = iso.getCurrentContext();
-    const s = telemetry.current;
-    const obj = iso.initObject();
-    setObjectNumber(ctx, obj, "slot_count", s.state_slot_count);
-    setObjectNumber(ctx, obj, "slot_capacity", s.state_slot_capacity);
-    setObjectBool(ctx, obj, "dirty", s.state_dirty);
-    setObjectNumber(ctx, obj, "array_slot_count", s.array_slot_count);
-    setObjectNumber(ctx, obj, "array_slot_capacity", s.array_slot_capacity);
     info.getReturnValue().set(obj.toValue());
 }
 
@@ -1241,7 +1227,6 @@ pub fn registerTelemetry(_: anytype) void {
     v8rt.registerHostFn("__tel_frame", telFrameCb);
     v8rt.registerHostFn("__tel_gpu", telGpuCb);
     v8rt.registerHostFn("__tel_nodes", telNodesCb);
-    v8rt.registerHostFn("__tel_state", telStateCb);
     v8rt.registerHostFn("__tel_history", telHistoryCb);
     v8rt.registerHostFn("__tel_input", telInputCb);
     v8rt.registerHostFn("__tel_layout", telLayoutCb);

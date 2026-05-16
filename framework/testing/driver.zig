@@ -94,7 +94,7 @@ pub fn typeText(text: []const u8) void {
     // SDL3 changed text.text to a const char* pointer managed by SDL.
     // We cannot safely synthesize these events. Instead, directly inject
     // through the input system.
-    const input = @import("../input.zig");
+    const input = @import("../primitive/input.zig");
     for (text) |ch| {
         var buf: [2]u8 = .{ ch, 0 };
         input.handleTextInput(@ptrCast(&buf));

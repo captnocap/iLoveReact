@@ -249,7 +249,14 @@ pub fn openPty(opts: OpenOptions) !Pty {
     var name_len: usize = 0;
     while (name_len < 64 and namebuf[name_len] != 0) name_len += 1;
 
-    // 4. Fork
+    // 4. Set window size BEFORE fork so the child sees the correct
+    //    dimensions immediately. The old post-fork ioctl raced: the child
+    //    could call `stty size` before the parent's ioctl, getting the
+    //    kernel's default PTY size instead of the intended layout box.
+    var ws = WinSize{ .ws_row = opts.rows, .ws_col = opts.cols };
+    _ = ioctl(masterfd, TIOCSWINSZ, @intFromPtr(&ws));
+
+    // 5. Fork
     const pid = fork();
     if (pid < 0) {
         _ = close(masterfd);
@@ -281,9 +288,6 @@ pub fn openPty(opts: OpenOptions) !Pty {
     }
 
     // ── PARENT ──
-    // Set initial window size before child renders first prompt
-    var ws = WinSize{ .ws_row = opts.rows, .ws_col = opts.cols };
-    _ = ioctl(masterfd, TIOCSWINSZ, @intFromPtr(&ws));
 
     // Non-blocking master
     const flags = fcntl(masterfd, F_GETFL);

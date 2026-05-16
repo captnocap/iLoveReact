@@ -632,13 +632,39 @@ fn ensureSharedModel(model_path: []const u8) bool {
     return true;
 }
 
-/// __embed_ingest_start(rootPath, kind, modelPath, slug, nWorkers) → 1 | 0
+/// __embed_ingest_start(rootPath, kind, modelPath, slug, nWorkers,
+///                      excludesJson?, chunkSize?) → 1 | 0
 ///
 /// `kind` is one of: "code" | "claude" | "claude-overflow" | "codex" |
 /// "kimi" | "memory". The framework picks the right walker, parser, and
 /// canonical source_type label automatically. Backwards-compat: if the
 /// arg looks like a source_type label ("code-chunk" / "chat-log-chunk" /
 /// "document-chunk") we map it to the closest kind.
+///
+/// `kind` is one of the canonical kinds: "code" | "documentation" |
+/// "conversation-history" | "knowledge". Legacy aliases ("claude",
+/// "codex", "kimi", "memory", "claude-overflow") are accepted and
+/// rewritten to the canonical kind in embed.CanonicalKind.fromStr.
+///
+/// `excludesJson` (optional) is a JSON array of path-substring matches
+/// the walker should skip (applied to all kinds). Pass "[]" or omit
+/// for no user excludes.
+///
+/// `chunkSize` (optional) overrides the window size:
+///   - code / documentation → lines per chunk (default 200)
+///   - conversation-history → events per window (default 4)
+///   - knowledge → ignored (one record = one chunk)
+/// Pass 0 or omit to keep the framework default.
+///
+/// `mappingJson` (optional) is a JSON object declaring how to read each
+/// record from a structured source. Required for `conversation-history`
+/// and `knowledge`; ignored for `code`/`documentation`. Recognised keys
+/// (each value is a dotted JSON path into the source record):
+///   role, content, timestamp, session_id  (conversation-history)
+///   title, content, source_uri            (knowledge)
+/// `content` is required for the structured kinds — the rest are
+/// optional. Empty value = "field not mapped." Pass "{}" or omit when
+/// not using a structured kind.
 fn hostIngestStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const a = allocator();
@@ -666,12 +692,49 @@ fn hostIngestStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
     const n_workers_i = argI32(info, 4, 4);
     const n_workers: usize = if (n_workers_i <= 0) 1 else if (n_workers_i > 16) 16 else @intCast(n_workers_i);
 
-    // Map kind string → SourceKind. Accept the canonical kind labels the
-    // enum knows about, plus the source_type aliases for legacy callers.
-    const kind: embed.SourceKind = embed.SourceKind.fromStr(kind_str) orelse blk: {
-        if (std.mem.eql(u8, kind_str, "code-chunk")) break :blk embed.SourceKind.code;
-        if (std.mem.eql(u8, kind_str, "chat-log-chunk")) break :blk embed.SourceKind.claude;
-        if (std.mem.eql(u8, kind_str, "document-chunk")) break :blk embed.SourceKind.memory;
+    // Arg 5: JSON array of user-supplied excludes (path substring
+    // matches). Optional — omit or pass "[]" for none. Parsed here, the
+    // session keeps owned dupes.
+    const excludes_json = argStringAlloc(a, info, 5) orelse a.dupe(u8, "[]") catch {
+        setNumber(info, 0);
+        return;
+    };
+    defer a.free(excludes_json);
+    var excludes_list = std.array_list.Managed([]u8).init(a);
+    defer {
+        for (excludes_list.items) |s| a.free(s);
+        excludes_list.deinit();
+    }
+    parseExcludesJson(a, excludes_json, &excludes_list) catch {};
+    var excludes_const = a.alloc([]const u8, excludes_list.items.len) catch {
+        setNumber(info, 0);
+        return;
+    };
+    defer a.free(excludes_const);
+    for (excludes_list.items, 0..) |s, i| excludes_const[i] = s;
+
+    // Arg 6: chunk size override (lines for code, events for chat-log).
+    // 0 = use the framework defaults.
+    const chunk_size_i = argI32(info, 6, 0);
+    const chunk_size: usize = if (chunk_size_i <= 0) 0 else @intCast(chunk_size_i);
+
+    // Arg 7: mapping JSON for structured kinds. Optional; "{}" / empty
+    // is fine for raw kinds. The session deep-parses it and keeps the
+    // arena alive for the workers.
+    const mapping_json = argStringAlloc(a, info, 7) orelse a.dupe(u8, "{}") catch {
+        setNumber(info, 0);
+        return;
+    };
+    defer a.free(mapping_json);
+
+    // Map kind string → CanonicalKind. fromStr accepts the canonical
+    // names AND the legacy vendor aliases (claude/codex/kimi/memory)
+    // for one-step migration.
+    const kind: embed.CanonicalKind = embed.CanonicalKind.fromStr(kind_str) orelse blk: {
+        if (std.mem.eql(u8, kind_str, "code-chunk")) break :blk embed.CanonicalKind.code;
+        if (std.mem.eql(u8, kind_str, "chat-log-chunk")) break :blk embed.CanonicalKind.conversation_history;
+        if (std.mem.eql(u8, kind_str, "document-chunk")) break :blk embed.CanonicalKind.documentation;
+        if (std.mem.eql(u8, kind_str, "knowledge-chunk")) break :blk embed.CanonicalKind.knowledge;
         setNumber(info, 0);
         return;
     };
@@ -719,12 +782,35 @@ fn hostIngestStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         kind,
         model_id,
         n_workers,
+        excludes_const,
+        chunk_size,
+        mapping_json,
     ) catch {
         setNumber(info, 0);
         return;
     };
     g_ingest = sess;
     setNumber(info, 1);
+}
+
+/// Parse a JSON array of strings into an array_list of owned u8 slices.
+/// Lenient on shape — anything non-string is skipped; malformed JSON
+/// leaves the list empty. This is "decode user excludes from V8 land",
+/// not a general-purpose parser.
+fn parseExcludesJson(
+    a: std.mem.Allocator,
+    json_text: []const u8,
+    out: *std.array_list.Managed([]u8),
+) !void {
+    const parsed = std.json.parseFromSlice(std.json.Value, a, json_text, .{}) catch return;
+    defer parsed.deinit();
+    const root = parsed.value;
+    if (root != .array) return;
+    for (root.array.items) |item| {
+        if (item != .string) continue;
+        const s = try a.dupe(u8, item.string);
+        try out.append(s);
+    }
 }
 
 /// __embed_ingest_progress(handle) → JSON snapshot

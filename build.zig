@@ -99,7 +99,6 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_transitions", true);
     options.addOption(bool, "has_networking", true);
     options.addOption(bool, "has_crypto", true);
-    options.addOption(bool, "has_blend2d", false);
     options.addOption(bool, "has_debug_server", true);
     options.addOption(bool, "use_v8", use_v8);
 
@@ -200,7 +199,6 @@ pub fn build(b: *std.Build) void {
         exe.linkFramework("Cocoa");
         exe.linkFramework("IOKit");
         exe.linkFramework("CoreVideo");
-        root_mod.addCSourceFile(.{ .file = b.path("framework/ffi/applescript_shim.m"), .flags = &.{"-O2"} });
     }
 
     // ── Include paths ──────────────────────────────────────────
@@ -414,7 +412,7 @@ pub fn build(b: *std.Build) void {
     const has_wssrv = b.option(bool, "has-wssrv", "Register __wssrv_* bindings") orelse false;
     const has_net = b.option(bool, "has-net", "Register __tcp_*/__udp_*/__socks5_* bindings") orelse false;
     const has_tor = b.option(bool, "has-tor", "Register __tor_* bindings") orelse false;
-    const has_fs = b.option(bool, "has-fs", "Register __fs_*/__window_* bindings") orelse false;
+    const has_fs = b.option(bool, "has-fs", "Register __fs_* bindings") orelse false;
     const has_websocket = b.option(bool, "has-websocket", "Register __ws_* (client) bindings") orelse false;
     const has_telemetry = b.option(bool, "has-telemetry", "Register __tel_*/getFps/... bindings") orelse false;
     const has_zigcall = b.option(bool, "has-zigcall", "Register __zig_call/__zig_call_list bindings") orelse false;
@@ -571,6 +569,17 @@ pub fn build(b: *std.Build) void {
         // renderer needs the real impl to spawn shells + read cell
         // grids.
         tui_options.addOption(bool, "has_terminal", has_terminal);
+        // Same source-driven feature gates as the GPU app. ship-tui walks
+        // the cart's esbuild metafile (via scripts/ship-metafile-gate.js)
+        // and passes the corresponding `-Dhas-*` flags. No system libs
+        // are linked by these — the bindings are pure Zig stdlib (std.net
+        // / std.http / std.posix). Their tickDrain() runs from JS via
+        // __tickDrain in tui/v8-preamble.js.
+        tui_options.addOption(bool, "has_httpsrv", has_httpsrv);
+        tui_options.addOption(bool, "has_wssrv", has_wssrv);
+        tui_options.addOption(bool, "has_process", has_process);
+        tui_options.addOption(bool, "has_net", has_net);
+        tui_options.addOption(bool, "has_sdk", has_sdk);
 
         const tui_mod = b.createModule(.{
             .root_source_file = b.path("v8_tui_app.zig"),
@@ -645,7 +654,6 @@ pub fn build(b: *std.Build) void {
         bridge_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
         bridge_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/lib" });
         bridge_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/include" });
-        bridge_mod.addCSourceFile(.{ .file = b.path("framework/ffi/applescript_shim.m"), .flags = &.{"-O2"} });
     }
 
     if (os_tag == .linux) {

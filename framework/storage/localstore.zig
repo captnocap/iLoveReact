@@ -8,7 +8,7 @@
 // fs.init() must be called before localstore.init().
 
 const std = @import("std");
-const fs = @import("../fs.zig");
+const fs = @import("../fs/fs.zig");
 const sqlite = @import("sqlite.zig");
 
 pub const MAX_KEY = 256;

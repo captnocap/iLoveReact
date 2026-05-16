@@ -7,25 +7,22 @@ comptime {
 }
 
 const v8_runtime = @import("v8_runtime.zig");
-const state = @import("state.zig");
-const input = @import("input.zig");
-const selection = @import("selection.zig");
-// Prepared input state — was housed in qjs_runtime.zig, now in
-// framework/prepared_input.zig (archive/qjs-stack/README.md). Aliased
-// as `qjs_runtime` to keep existing call sites working.
-const prepared_input = @import("prepared_input.zig");
-const mouse_state = @import("mouse_state.zig");
+const state = @import("state/dirty.zig");
+const input = @import("primitive/input.zig");
+const selection = @import("state/selection.zig");
+const prepared_input = @import("state/prepared_input.zig");
+const mouse_state = @import("state/mouse_state.zig");
 const exec_async = @import("process/exec_async.zig");
-const router = @import("router.zig");
-const filedrop = @import("filedrop.zig");
+const router = @import("primitive/router.zig");
+const filedrop = @import("fs/filedrop.zig");
 const localstore = @import("storage/localstore.zig");
-const fswatch = @import("fswatch.zig");
-const latches = @import("latches.zig");
-const animations = @import("animations.zig");
+const fswatch = @import("fs/fswatch.zig");
+const latches = @import("state/latches.zig");
+const animations = @import("gpu/animations.zig");
 const system_signals = @import("ifttt/system_signals.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
 const event_bus = @import("diag/event_bus.zig");
-const c = @import("c.zig").imports;
+const c = @import("engine.zig").c;
 
 var g_content_store: std.AutoHashMap(u32, []u8) = undefined;
 var g_content_store_inited: bool = false;
@@ -210,45 +207,6 @@ fn hostJsEval(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnString(info, result);
 }
 
-fn hostSetState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const ctx = infoCtx(info);
-    if (info.length() < 2) return;
-    const slot_id = argToI32(info, 0) orelse return;
-    if (slot_id < 0 or slot_id >= state.MAX_SLOTS) return;
-    switch (state.getSlotKind(@intCast(slot_id))) {
-        .string => {
-            const s = argToStringAlloc(info, 1) orelse return;
-            defer std.heap.c_allocator.free(s);
-            state.setSlotString(@intCast(slot_id), s);
-        },
-        .float => {
-            const f = argToF64(info, 1) orelse return;
-            state.setSlotFloat(@intCast(slot_id), f);
-        },
-        .boolean => {
-            state.setSlotBool(@intCast(slot_id), info.getArg(1).toBool(info.getIsolate()));
-        },
-        .int => {
-            const f = argToF64(info, 1) orelse return;
-            state.setSlot(@intCast(slot_id), @intFromFloat(f));
-        },
-    }
-    state.markDirty();
-    _ = ctx;
-}
-
-fn hostSetStateString(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 2) return;
-    const slot_id = argToI32(info, 0) orelse return;
-    if (slot_id < 0 or slot_id >= state.MAX_SLOTS) return;
-    const s = argToStringAlloc(info, 1) orelse return;
-    defer std.heap.c_allocator.free(s);
-    state.setSlotString(@intCast(slot_id), s);
-    state.markDirty();
-}
-
 // ── Latches ─────────────────────────────────────────────
 //
 // __latchSet(key: string, value: number) — writes a host-owned
@@ -342,50 +300,6 @@ fn hostAnimUnregister(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
     const id_f = argToF64(info, 0) orelse return;
     const id: u32 = @intFromFloat(id_f);
     animations.unregister(id);
-}
-
-fn hostGetState(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) {
-        setReturnNumber(info, 0);
-        return;
-    }
-    const slot_id = argToI32(info, 0) orelse {
-        setReturnNumber(info, 0);
-        return;
-    };
-    if (slot_id < 0 or slot_id >= state.MAX_SLOTS) {
-        setReturnNumber(info, 0);
-        return;
-    }
-    switch (state.getSlotKind(@intCast(slot_id))) {
-        .float => setReturnNumber(info, state.getSlotFloat(@intCast(slot_id))),
-        .boolean => setReturnNumber(info, if (state.getSlotBool(@intCast(slot_id))) 1 else 0),
-        .int => setReturnNumber(info, @floatFromInt(state.getSlot(@intCast(slot_id)))),
-        .string => setReturnNumber(info, 0),
-    }
-}
-
-fn hostGetStateString(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) {
-        setReturnString(info, "");
-        return;
-    }
-    const slot_id = argToI32(info, 0) orelse {
-        setReturnString(info, "");
-        return;
-    };
-    if (slot_id < 0 or slot_id >= state.MAX_SLOTS) {
-        setReturnString(info, "");
-        return;
-    }
-    setReturnString(info, state.getSlotString(@intCast(slot_id)));
-}
-
-fn hostMarkDirty(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    _ = info_c;
-    state.markDirty();
 }
 
 fn hostGetMouseX(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -906,15 +820,10 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);
     v8_runtime.registerHostFn("__hostLog", hostLog);
     v8_runtime.registerHostFn("__js_eval", hostJsEval);
-    v8_runtime.registerHostFn("__setState", hostSetState);
-    v8_runtime.registerHostFn("__setStateString", hostSetStateString);
-    v8_runtime.registerHostFn("__getState", hostGetState);
     v8_runtime.registerHostFn("__latchSet", hostLatchSet);
     v8_runtime.registerHostFn("__latchGet", hostLatchGet);
     v8_runtime.registerHostFn("__anim_register", hostAnimRegister);
     v8_runtime.registerHostFn("__anim_unregister", hostAnimUnregister);
-    v8_runtime.registerHostFn("__getStateString", hostGetStateString);
-    v8_runtime.registerHostFn("__markDirty", hostMarkDirty);
     v8_runtime.registerHostFn("getMouseX", hostGetMouseX);
     v8_runtime.registerHostFn("getMouseY", hostGetMouseY);
     v8_runtime.registerHostFn("getMouseDown", hostGetMouseDown);

@@ -4,30 +4,34 @@
 //! Adding new framework modules (geometry, watchdog, etc.) happens here — no codegen changes needed.
 
 const std = @import("std");
-const c = @import("c.zig").imports;
+pub const c = @cImport({
+    @cInclude("SDL3/SDL.h");
+    @cInclude("ft2build.h");
+    @cInclude("freetype/freetype.h");
+    @cInclude("stb/stb_image.h");
+});
 const layout = @import("layout.zig");
-const text_mod = @import("text.zig");
+const text_mod = @import("primitive/text.zig");
 const gpu = @import("gpu/gpu.zig");
-const geometry = @import("geometry.zig");
-const selection = @import("selection.zig");
-const breakpoint = @import("breakpoint.zig");
-const windows = @import("windows.zig");
+const geometry = @import("storage/geometry.zig");
+const selection = @import("state/selection.zig");
+const windows = @import("primitive/windows.zig");
 const svg_path = @import("gpu/svg/path.zig");
 const image_cache = @import("gpu/image_cache.zig");
 const border_dash = @import("gpu/svg/dash.zig");
-const animations = @import("animations.zig");
+const animations = @import("gpu/animations.zig");
 const log = @import("diag/log.zig");
-const tooltip = @import("tooltip.zig");
-const context_menu = @import("context_menu.zig");
+const tooltip = @import("primitive/tooltip.zig");
+const context_menu = @import("primitive/context_menu.zig");
 const telemetry = @import("diag/telemetry.zig");
-const filedrop = @import("filedrop.zig");
-const fswatch = @import("fswatch.zig");
+const filedrop = @import("fs/filedrop.zig");
+const fswatch = @import("fs/fswatch.zig");
 const clipboard_watch = @import("ifttt/clipboard_watch.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
-const voice = @import("voice.zig");
+const voice = @import("voice/voice.zig");
 const build_options_for_whisper = @import("build_options");
 const whisper = if (@hasDecl(build_options_for_whisper, "has_whisper") and build_options_for_whisper.has_whisper)
-    @import("whisper.zig")
+    @import("voice/whisper.zig")
 else
     struct {
         pub fn init(_: anytype) void {}
@@ -36,11 +40,10 @@ else
     };
 const system_signals = @import("ifttt/system_signals.zig");
 const ifttt_zig = @import("ifttt/ifttt.zig");
-const input = @import("input.zig");
+const sim = @import("sim/root.zig");
+const input = @import("primitive/input.zig");
 const crashlog = @import("diag/crashlog.zig");
 const watchdog = @import("diag/watchdog.zig");
-const cart = @import("cartridge.zig");
-
 // ── Build-option-gated imports (lean tier omits these) ──────────────────
 const build_options = @import("build_options");
 const HAS_QUICKJS = if (@hasDecl(build_options, "has_quickjs")) build_options.has_quickjs else true;
@@ -54,14 +57,7 @@ const HAS_CANVAS = if (@hasDecl(build_options, "has_canvas")) build_options.has_
 const HAS_3D = if (@hasDecl(build_options, "has_3d")) build_options.has_3d else true;
 const HAS_TRANSITIONS = if (@hasDecl(build_options, "has_transitions")) build_options.has_transitions else true;
 const HAS_CRYPTO = if (@hasDecl(build_options, "has_crypto")) build_options.has_crypto else true;
-const HAS_BLEND2D = if (@hasDecl(build_options, "has_blend2d")) build_options.has_blend2d else false;
 const HAS_DEBUG_SERVER = if (@hasDecl(build_options, "has_debug_server")) build_options.has_debug_server else false;
-
-const blend2d_gfx = if (HAS_BLEND2D) @import("gpu/blend2d.zig") else struct {
-    pub fn fillSVGPath(_: []const u8, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) void {}
-    pub fn fillSVGPathFromEffect(_: []const u8, _: [*]const u8, _: u32, _: u32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32, _: f32) void {}
-    pub fn deinit() void {}
-};
 
 var g_paisley_debug_enabled: ?bool = null;
 
@@ -90,7 +86,7 @@ const debug_server = if (HAS_DEBUG_SERVER) @import("diag/debug_server.zig") else
 
 // Force-reference crypto.zig so its export fn symbols (e.g. crypto_run_all_tests) are available to the linker.
 comptime {
-    if (HAS_CRYPTO) _ = @import("crypto.zig");
+    if (HAS_CRYPTO) _ = @import("privacy/crypto.zig");
 }
 
 // Force-reference luajit_worker.zig so its export fn symbols are available to the linker.
@@ -111,7 +107,7 @@ const luajit_runtime = struct {
     pub fn persistScrollSlot(_: u32, _: f32) void {}
     pub var telemetry_fps: u32 = 0;
 };
-const mouse_state = @import("mouse_state.zig");
+const mouse_state = @import("state/mouse_state.zig");
 
 const pty_remote = if (HAS_TERMINAL) @import("terminal/pty_remote.zig") else struct {
     pub fn init() void {}
@@ -140,6 +136,7 @@ const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
     pub fn getCursorColIdx(_: u8) u16 { return 0; }
     pub fn getCursorRowIdx(_: u8) u16 { return 0; }
     pub fn getCursorVisibleIdx(_: u8) bool { return false; }
+    pub fn getMouseModeIdx(_: u8) c_int { return 0; }
     pub fn getRowsIdx(_: u8) u16 { return 0; }
     pub fn getRowTextIdx(_: u8, _: u16) []const u8 { return ""; }
     pub fn getScrollbackCellIdx(_: u8, _: u16, _: u16) Cell { return .{}; }
@@ -183,10 +180,10 @@ comptime {
     if (HAS_TERMINAL) _ = @import("terminal/pty_client.zig");
 }
 
-const prepared_input = @import("prepared_input.zig");
+const prepared_input = @import("state/prepared_input.zig");
 const frame_telemetry = @import("diag/frame_telemetry.zig");
 const js_vm = @import("v8_runtime.zig");
-const canvas = if (HAS_CANVAS) @import("canvas.zig") else struct {
+const canvas = if (HAS_CANVAS) @import("primitive/canvas.zig") else struct {
     pub const CameraTransform = struct { cx: f32 = 0, cy: f32 = 0, scale: f32 = 1 };
     pub fn init() void {}
     pub fn setCamera(_: f32, _: f32, _: f32) void {}
@@ -275,7 +272,7 @@ const capture = if (HAS_EFFECTS) @import("gpu/capture.zig") else struct {
         return false;
     }
 };
-const effects = if (HAS_EFFECTS) @import("effects/effects.zig") else struct {
+const effects = if (HAS_EFFECTS) @import("gpu/effects.zig") else struct {
     pub fn init() void {}
     pub fn deinit() void {}
     pub fn update(_: f32) void {}
@@ -300,7 +297,7 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     }
     pub fn update(_: f32) void {}
 };
-const transition = if (HAS_TRANSITIONS) @import("transition.zig") else struct {
+const transition = if (HAS_TRANSITIONS) @import("gpu/transition.zig") else struct {
     pub fn tick(_: f32) bool {
         return false;
     }
@@ -308,7 +305,7 @@ const transition = if (HAS_TRANSITIONS) @import("transition.zig") else struct {
         return false;
     }
 };
-const physics2d = if (HAS_PHYSICS) @import("physics2d.zig") else struct {
+const physics2d = if (HAS_PHYSICS) @import("phys/physics2d.zig") else struct {
     pub const BodyType = enum(c_int) { static_body = 0, kinematic = 1, dynamic = 2 };
     pub fn init(_: f32, _: f32) void {}
     pub fn isInitialized() bool {
@@ -333,7 +330,7 @@ const physics2d = if (HAS_PHYSICS) @import("physics2d.zig") else struct {
 const Node = layout.Node;
 const Color = layout.Color;
 const TextEngine = text_mod.TextEngine;
-const state_mod = @import("state.zig");
+const state_mod = @import("state/dirty.zig");
 const witness = @import("testing/witness.zig");
 
 // ── Devtools removed — inspector lives in tsz-tools ─────────────────────
@@ -375,6 +372,24 @@ fn termPixelToCell(tn: *Node, mx: f32, my: f32) struct { row: u16, col: u16 } {
         .row = @intFromFloat(@min(@floor(local_y / cell_h), 255)),
         .col = @intFromFloat(@min(@floor(local_x / cell_w), 255)),
     };
+}
+
+// True while a left-button press has been forwarded into a terminal whose
+// inner program enabled mouse reporting. Drag motion events fire SGR drag
+// updates only while this is set, and release fires the SGR release event.
+var g_term_mouse_forwarding: bool = false;
+
+// Format an SGR (1006) mouse event and write it to the focused PTY.
+// `button` is the SGR button code (0=L, 1=M, 2=R, +32 for drag, 64=wheel-up,
+// 65=wheel-down, 3=no-button motion). `action` is 'M' for press/drag/motion
+// and 'm' for release. Coordinates are 1-based per the SGR spec.
+fn forwardTermMouse(tn: *Node, tid: u8, mx: f32, my: f32, button: u32, action: u8) void {
+    const cell = termPixelToCell(tn, mx, my);
+    var buf: [48]u8 = undefined;
+    const seq = std.fmt.bufPrint(&buf, "\x1b[<{d};{d};{d}{c}", .{
+        button, cell.col + 1, cell.row + 1, action,
+    }) catch return;
+    vterm_mod.writePtyIdx(tid, seq);
 }
 
 fn termCellSelected(row: u16, col: u16) bool {
@@ -2066,7 +2081,7 @@ fn paintNode(node: *Node) void {
     g_paint_opacity = saved_opacity;
 }
 
-/// Paint a Canvas.Path node (SVG stroke curves + optional blend2d fill).
+/// Paint a Canvas.Path node (SVG stroke curves + optional fill).
 fn paintCanvasPath(node: *Node) callconv(.auto) void {
     @setRuntimeSafety(false);
     if (node.canvas_path_d) |d| {
@@ -2120,35 +2135,16 @@ fn paintCanvasPath(node: *Node) callconv(.auto) void {
                         },
                     );
                 }
-                if (HAS_BLEND2D) {
-                    blend2d_gfx.fillSVGPathFromEffect(
-                        d,
-                        info.pixel_buf,
-                        info.width,
-                        info.height,
-                        min_x,
-                        min_y,
-                        max_x - min_x,
-                        max_y - min_y,
-                        g_paint_opacity * node.canvas_fill_opacity,
-                        @as(f32, @floatFromInt(tc.r)) / 255.0,
-                        @as(f32, @floatFromInt(tc.g)) / 255.0,
-                        @as(f32, @floatFromInt(tc.b)) / 255.0,
-                        @as(f32, @floatFromInt(tc.a)) / 255.0,
-                        node.canvas_stroke_width,
-                    );
-                } else {
-                    svg_path.drawFillFromEffect(
-                        &fill_path,
-                        info.pixel_buf,
-                        info.width,
-                        info.height,
-                        min_x,
-                        min_y,
-                        max_x - min_x,
-                        max_y - min_y,
-                    );
-                }
+                svg_path.drawFillFromEffect(
+                    &fill_path,
+                    info.pixel_buf,
+                    info.width,
+                    info.height,
+                    min_x,
+                    min_y,
+                    max_x - min_x,
+                    max_y - min_y,
+                );
             } else if (paisleyDebugEnabled() and isPaisleyName(ename)) {
                 log.print("[paisley] paintCanvasPath name={s} missing fill source\n", .{ename});
             }
@@ -2691,6 +2687,14 @@ noinline fn paintTerminal(node: *Node) void {
         return;
     }
 
+    // Force monospace family (DejaVuSansMono) for the whole terminal paint.
+    // Otherwise glyphs render in the global default (family 0 / proportional
+    // DejaVuSans) but cells are sized to `M`'s advance — narrow letters
+    // like 'i' end up sitting in a wide cell with visible right-side
+    // padding. Family 3 is the mono triple loaded in gpu/text.zig.
+    gpu.setFontFamily(3);
+    defer gpu.setFontFamily(0);
+
     const cell_w = gpu.getCharWidth(font_size);
     const cell_h = gpu.getLineHeight(font_size);
     if (cell_w <= 0 or cell_h <= 0) return;
@@ -3135,7 +3139,6 @@ pub fn run(config_in: AppConfig) !void {
 
     var win_w: f32 = @floatFromInt(init_w);
     var win_h: f32 = @floatFromInt(init_h);
-    breakpoint.update(win_w);
 
     // QuickJS VM
     js_vm.initVM();
@@ -3287,7 +3290,6 @@ pub fn run(config_in: AppConfig) !void {
                     win_w = @floatFromInt(ww);
                     win_h = @floatFromInt(wh);
                     gpu.resize(@intCast(ww), @intCast(wh));
-                    breakpoint.update(win_w);
                     system_signals.notifyResize(win_w, win_h);
                     geometry.save(window);
                     layout.markLayoutDirty();
@@ -3654,13 +3656,21 @@ pub fn run(config_in: AppConfig) !void {
                             if (clicked_term) |tid| {
                                 g_focused_terminal = tid;
                                 if (findTerminalNodeById(config.root, tid)) |tn| {
-                                    const cell = termPixelToCell(tn, mx, my);
-                                    term_sel_start_row = cell.row;
-                                    term_sel_start_col = cell.col;
-                                    term_sel_end_row = cell.row;
-                                    term_sel_end_col = cell.col;
-                                    term_sel_active = false;
-                                    term_sel_dragging = true;
+                                    // If the inner program enabled SGR mouse
+                                    // reporting, forward the click rather
+                                    // than starting a host-side selection.
+                                    if (vterm_mod.getMouseModeIdx(tid) > 0) {
+                                        forwardTermMouse(tn, tid, mx, my, 0, 'M');
+                                        g_term_mouse_forwarding = true;
+                                    } else {
+                                        const cell = termPixelToCell(tn, mx, my);
+                                        term_sel_start_row = cell.row;
+                                        term_sel_start_col = cell.col;
+                                        term_sel_end_row = cell.row;
+                                        term_sel_end_col = cell.col;
+                                        term_sel_active = false;
+                                        term_sel_dragging = true;
+                                    }
                                 }
                             } else {
                                 termClearSelection();
@@ -3715,6 +3725,26 @@ pub fn run(config_in: AppConfig) !void {
                     // Physics drag update
                     if (physics2d.isDragging()) {
                         physics2d.updateDrag(mx, my);
+                    }
+                    // Terminal mouse forwarding — if a press was forwarded
+                    // (or the inner program asked for any-motion via 1003),
+                    // emit SGR motion events instead of growing a selection.
+                    if (HAS_TERMINAL and terminals_initialized[g_focused_terminal]) {
+                        const mm = vterm_mod.getMouseModeIdx(g_focused_terminal);
+                        if (mm > 0) {
+                            if (findTerminalNodeById(config.root, g_focused_terminal)) |tn| {
+                                const r = tn.computed;
+                                const inside = mx >= r.x and mx <= r.x + r.w and my >= r.y and my <= r.y + r.h;
+                                // Any-motion (3) reports continuously; drag (2)
+                                // / click (1) only while a button is held.
+                                if (inside and (g_term_mouse_forwarding or mm >= 3)) {
+                                    // SGR motion-no-button is button 35 (3+32);
+                                    // motion-with-left is 32 (0+32).
+                                    const btn: u32 = if (g_term_mouse_forwarding) 32 else 35;
+                                    forwardTermMouse(tn, g_focused_terminal, mx, my, btn, 'M');
+                                }
+                            }
+                        }
                     }
                     // Terminal drag selection
                     if (term_sel_dragging) {
@@ -3872,6 +3902,14 @@ pub fn run(config_in: AppConfig) !void {
                         input_drag_active = false;
                         input_drag_pending = false;
                         term_sel_dragging = false;
+                        // Terminal mouse-up forwarding — emit SGR release if
+                        // we forwarded the press. Button 0 + 'm' is "left up".
+                        if (HAS_TERMINAL and g_term_mouse_forwarding) {
+                            if (findTerminalNodeById(config.root, g_focused_terminal)) |tn| {
+                                forwardTermMouse(tn, g_focused_terminal, event.button.x, event.button.y, 0, 'm');
+                            }
+                            g_term_mouse_forwarding = false;
+                        }
                         selection.onMouseUp();
                     }
                 },
@@ -4019,21 +4057,34 @@ pub fn run(config_in: AppConfig) !void {
                     }
                     // Canvas: check for scroll containers inside tiles before zooming
                     if (events.findCanvasNode(config.root, mx, my)) |cn| {
+                        // Canvas.Clamp panels (HUD / viewport overlays) live in
+                        // screen space, not graph space — search them first with
+                        // raw mouse coords so a ScrollView inside a clamp captures
+                        // the wheel instead of falling through to canvas zoom.
+                        var scroll_hit: ?*Node = null;
+                        for (cn.children) |*clamp| {
+                            if (!clamp.canvas_clamp) continue;
+                            if (events.findScrollContainer(clamp, mx, my)) |s| {
+                                scroll_hit = s;
+                                break;
+                            }
+                        }
                         // Transform mouse to graph space, then search each canvas tile for ScrollViews
                         const vp_cx = cn.computed.x + cn.computed.w / 2;
                         const vp_cy = cn.computed.y + cn.computed.h / 2;
                         const gpos = canvas.screenToGraph(mx, my, vp_cx, vp_cy);
-                        var scroll_hit: ?*Node = null;
-                        for (cn.children) |*tile| {
-                            if (!tile.canvas_node) continue;
-                            // Each canvas tile's children have graph-space computed rects
-                            for (tile.children) |*tile_child| {
-                                if (events.findScrollContainer(tile_child, gpos[0], gpos[1])) |s| {
-                                    scroll_hit = s;
-                                    break;
+                        if (scroll_hit == null) {
+                            for (cn.children) |*tile| {
+                                if (!tile.canvas_node) continue;
+                                // Each canvas tile's children have graph-space computed rects
+                                for (tile.children) |*tile_child| {
+                                    if (events.findScrollContainer(tile_child, gpos[0], gpos[1])) |s| {
+                                        scroll_hit = s;
+                                        break;
+                                    }
                                 }
+                                if (scroll_hit != null) break;
                             }
-                            if (scroll_hit != null) break;
                         }
                         if (scroll_hit) |scroll_node| {
                             const sc: f32 = if (comptime @import("builtin").os.tag == .macos) 10.0 else 30.0;
@@ -4135,12 +4186,6 @@ pub fn run(config_in: AppConfig) !void {
         }
         const phase_t1 = std.time.microTimestamp();
 
-        // Tick all loaded cartridges (dev_shell QJS path; no-op in V8 mode where
-        // <Cartridge> is implemented entirely in JS via runtime/cartridge_loader).
-        if (cart.count() > 0) cart.tickAll(@truncate(c.SDL_GetTicks()));
-
-        // (devtools tick removed — inspector lives in tsz-tools)
-
         // Transition tick — interpolate active transitions AFTER style updates, BEFORE layout
         {
             const now_t: u32 = @truncate(c.SDL_GetTicks());
@@ -4167,7 +4212,16 @@ pub fn run(config_in: AppConfig) !void {
             var ti: u8 = 0;
             while (ti < term_count) : (ti += 1) {
                 if (!terminals_initialized[ti]) {
-                    vterm_mod.spawnShellIdx(ti, "bash", 24, 80);
+                    // Honor the cart's <Terminal shell="..."> prop when set;
+                    // fall back to bash. Lookup walks the tree because we
+                    // need the actual node, not just the count.
+                    const tn = findTerminalNodeById(config.root, ti);
+                    const shell_path: [*:0]const u8 =
+                        if (tn != null and tn.?.terminal_shell != null)
+                            tn.?.terminal_shell.?
+                        else
+                            "bash";
+                    vterm_mod.spawnShellIdx(ti, shell_path, 24, 80);
                     terminals_initialized[ti] = true;
                 }
                 crashlog.log("tick:poll");
@@ -4277,6 +4331,7 @@ pub fn run(config_in: AppConfig) !void {
         whisper.tick(dt_ms);
         system_signals.tick(dt_ms);
         ifttt_zig.tick(dt_ms);
+        sim.tick(dt_ms);
 
         // Paint (main window — wgpu)
         g_dt_sec = dt_sec;
