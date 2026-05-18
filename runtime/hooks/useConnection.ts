@@ -433,16 +433,66 @@ interface RconExtras { setRconAuthed: (a: boolean) => void }
 
 type TorInfo = { socksPort: number; hostname: string; hsPort: number };
 
-function parseJson(raw: unknown): Record<string, unknown> {
-  try {
-    return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
-  } catch {
-    return {};
-  }
-}
-
 function asString(raw: unknown): string {
   return typeof raw === 'string' ? raw : String(raw);
+}
+
+// ── Typed subscribe helpers ────────────────────────────────────────
+//
+// Each backend channel carries one of three shapes: nothing (signal-only),
+// a string (raw text payload), or a JSON object. These three helpers wrap
+// `subscribe()` so wire functions never see `(raw: any)` and never repeat
+// the `if (ctl.cancelled.value) return;` boilerplate.
+//
+// Payload shapes by channel:
+//   ws:open      void                  ws:message    string
+//   ws:close     WsCloseEvent          ws:error      string
+//   tcp:open     void                  tcp:data      string
+//   tcp:close    void                  tcp:error     string
+//   udp:packet   string                udp:error     string
+//   tor:open     TorOpenEvent          tor:error     string
+//   http-stream  string                http-stream-end  HttpEndEvent
+//   rcon:auth    RconAuthEvent         rcon:response RconResponseEvent
+//   rcon:close   void                  rcon:error    string
+//   a2s:info     A2sInfo               a2s:players   A2sPlayer[]
+//   a2s:rules    Record<string,string> a2s:error     string
+
+interface WsCloseEvent { code?: number; reason?: string }
+interface TorOpenEvent { socksPort?: number; hostname?: string; hsPort?: number }
+interface HttpEndEvent { status?: number; error?: string }
+interface RconAuthEvent { ok?: boolean }
+interface RconResponseEvent { requestId?: number; body?: string }
+
+function onVoid(channel: string, ctl: BaseCtl, cb: () => void): Unsubscribe {
+  return subscribe(channel, () => {
+    if (ctl.cancelled.value) return;
+    cb();
+  });
+}
+
+function onString(channel: string, ctl: BaseCtl, cb: (s: string) => void): Unsubscribe {
+  return subscribe(channel, (raw: unknown) => {
+    if (ctl.cancelled.value) return;
+    cb(asString(raw));
+  });
+}
+
+/**
+ * Subscribe to a JSON-payload channel. On parse failure, the callback is
+ * invoked with `{}` cast to T — matches the prior behavior where each
+ * handler defends against missing fields with `?? default`.
+ */
+function onJson<T>(channel: string, ctl: BaseCtl, cb: (obj: T) => void): Unsubscribe {
+  return subscribe(channel, (raw: unknown) => {
+    if (ctl.cancelled.value) return;
+    let obj: T;
+    try {
+      obj = (typeof raw === 'string' ? JSON.parse(raw) : raw) as T;
+    } catch {
+      obj = {} as T;
+    }
+    cb(obj);
+  });
 }
 
 // ── Per-kind wire functions ────────────────────────────────────────
@@ -459,25 +509,18 @@ function wireWs(
 ): Unsubscribe {
   wsOpen(id, spec.url, viaJson(spec.via));
   const unsubs: Unsubscribe[] = [
-    subscribe(`ws:open:${id}`, () => {
-      if (ctl.cancelled.value) return;
+    onVoid(`ws:open:${id}`, ctl, () => {
       getSpec().onOpen?.();
       ctl.setState('open');
     }),
-    subscribe(`ws:message:${id}`, (data: any) => {
-      if (ctl.cancelled.value) return;
-      getSpec().onMessage?.(asString(data));
+    onString(`ws:message:${id}`, ctl, (s) => {
+      getSpec().onMessage?.(s);
     }),
-    subscribe(`ws:close:${id}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const obj = parseJson(raw);
-      const info = { code: (obj.code as number) ?? 0, reason: (obj.reason as string) ?? '' };
-      getSpec().onClose?.(info);
+    onJson<WsCloseEvent>(`ws:close:${id}`, ctl, (obj) => {
+      getSpec().onClose?.({ code: obj.code ?? 0, reason: obj.reason ?? '' });
       ctl.setState('closed');
     }),
-    subscribe(`ws:error:${id}`, (msg: any) => {
-      if (ctl.cancelled.value) return;
-      const m = asString(msg);
+    onString(`ws:error:${id}`, ctl, (m) => {
       getSpec().onError?.(m);
       ctl.setError(m);
       ctl.setState('error');
@@ -494,22 +537,13 @@ function wireTcp(
 ): Unsubscribe {
   tcpConnect(id, spec.host, spec.port, viaJson(spec.via));
   const unsubs: Unsubscribe[] = [
-    subscribe(`tcp:open:${id}`, () => {
-      if (ctl.cancelled.value) return;
-      ctl.setState('open');
-    }),
-    subscribe(`tcp:data:${id}`, (data: any) => {
-      if (ctl.cancelled.value) return;
-      getSpec().onData?.(asString(data));
-    }),
-    subscribe(`tcp:close:${id}`, () => {
-      if (ctl.cancelled.value) return;
+    onVoid(`tcp:open:${id}`, ctl, () => ctl.setState('open')),
+    onString(`tcp:data:${id}`, ctl, (s) => getSpec().onData?.(s)),
+    onVoid(`tcp:close:${id}`, ctl, () => {
       getSpec().onClose?.();
       ctl.setState('closed');
     }),
-    subscribe(`tcp:error:${id}`, (msg: any) => {
-      if (ctl.cancelled.value) return;
-      const m = asString(msg);
+    onString(`tcp:error:${id}`, ctl, (m) => {
       getSpec().onError?.(m);
       ctl.setError(m);
       ctl.setState('error');
@@ -528,13 +562,8 @@ function wireUdp(
 ): Unsubscribe {
   udpOpen(id, spec.host, spec.port, viaJson(spec.via));
   const unsubs: Unsubscribe[] = [
-    subscribe(`udp:packet:${id}`, (data: any) => {
-      if (ctl.cancelled.value) return;
-      getSpec().onPacket?.(asString(data));
-    }),
-    subscribe(`udp:error:${id}`, (msg: any) => {
-      if (ctl.cancelled.value) return;
-      const m = asString(msg);
+    onString(`udp:packet:${id}`, ctl, (s) => getSpec().onPacket?.(s)),
+    onString(`udp:error:${id}`, ctl, (m) => {
       getSpec().onError?.(m);
       ctl.setError(m);
       ctl.setState('error');
@@ -556,17 +585,13 @@ function wireTor(
   });
   torStart(id, opts);
   const unsubs: Unsubscribe[] = [
-    subscribe(`tor:open:${id}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const obj = parseJson(raw);
+    onJson<TorOpenEvent>(`tor:open:${id}`, ctl, (obj) => {
       if (typeof obj.socksPort === 'number' && typeof obj.hostname === 'string' && typeof obj.hsPort === 'number') {
         ctl.setTorInfo({ socksPort: obj.socksPort, hostname: obj.hostname, hsPort: obj.hsPort });
       }
       ctl.setState('open');
     }),
-    subscribe(`tor:error:${id}`, (msg: any) => {
-      if (ctl.cancelled.value) return;
-      const m = asString(msg);
+    onString(`tor:error:${id}`, ctl, (m) => {
       ctl.setError(m);
       ctl.setState('error');
     }),
@@ -655,26 +680,20 @@ function wireHttpOrSse(
   if (isSse) (getSpec() as SseConnectionSpec).onOpen?.();
 
   const unsubs: Unsubscribe[] = [
-    subscribe(`http-stream:${rid}`, (data: any) => {
-      if (ctl.cancelled.value) return;
-      const s = asString(data);
+    onString(`http-stream:${rid}`, ctl, (s) => {
       if (isSse) feedSse(s);
       else (getSpec() as HttpConnectionSpec).onChunk?.(s);
     }),
-    subscribe(`http-stream-end:${rid}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const obj = parseJson(raw);
+    onJson<HttpEndEvent>(`http-stream-end:${rid}`, ctl, (obj) => {
+      const cur = getSpec();
       if (typeof obj.error === 'string') {
-        const cur = getSpec();
-        if (cur.kind === 'sse') cur.onError?.(obj.error);
-        else cur.onError?.(obj.error);
+        cur.onError?.(obj.error);
         ctl.setError(obj.error);
         ctl.setState('error');
       } else {
         if (isSse && leftover !== '') { feedSse('\n'); } // flush trailing
-        const status = typeof obj.status === 'number' ? obj.status : 0;
+        const status = obj.status ?? 0;
         if (typeof obj.status === 'number') ctl.setHttpStatus(obj.status);
-        const cur = getSpec();
         if (cur.kind === 'sse') cur.onClose?.();
         else cur.onComplete?.({ status });
         ctl.setState('closed');
@@ -696,30 +715,23 @@ function wireRcon(
   // is tracked separately on the handle.
   ctl.setState('open');
   const unsubs: Unsubscribe[] = [
-    subscribe(`rcon:auth:${id}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const obj = parseJson(raw);
+    onJson<RconAuthEvent>(`rcon:auth:${id}`, ctl, (obj) => {
       const ok = !!obj.ok;
       ctl.setRconAuthed(ok);
       getSpec().onAuth?.(ok);
       if (!ok) ctl.setState('error');
     }),
-    subscribe(`rcon:response:${id}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const obj = parseJson(raw);
+    onJson<RconResponseEvent>(`rcon:response:${id}`, ctl, (obj) => {
       getSpec().onResponse?.({
-        requestId: (obj.requestId as number) ?? 0,
-        body: (obj.body as string) ?? '',
+        requestId: obj.requestId ?? 0,
+        body: obj.body ?? '',
       });
     }),
-    subscribe(`rcon:close:${id}`, () => {
-      if (ctl.cancelled.value) return;
+    onVoid(`rcon:close:${id}`, ctl, () => {
       getSpec().onClose?.();
       ctl.setState('closed');
     }),
-    subscribe(`rcon:error:${id}`, (msg: any) => {
-      if (ctl.cancelled.value) return;
-      const m = asString(msg);
+    onString(`rcon:error:${id}`, ctl, (m) => {
       getSpec().onError?.(m);
       ctl.setError(m);
       ctl.setState('error');
@@ -737,24 +749,10 @@ function wireA2s(
   a2sOpen(id, spec.host, spec.port);
   ctl.setState('open');
   const unsubs: Unsubscribe[] = [
-    subscribe(`a2s:info:${id}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const info = parseJson(raw) as unknown as A2sInfo;
-      getSpec().onInfo?.(info);
-    }),
-    subscribe(`a2s:players:${id}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const players = (typeof raw === 'string' ? JSON.parse(raw) : raw) as A2sPlayer[];
-      getSpec().onPlayers?.(players);
-    }),
-    subscribe(`a2s:rules:${id}`, (raw: any) => {
-      if (ctl.cancelled.value) return;
-      const rules = parseJson(raw) as Record<string, string>;
-      getSpec().onRules?.(rules);
-    }),
-    subscribe(`a2s:error:${id}`, (msg: any) => {
-      if (ctl.cancelled.value) return;
-      const m = asString(msg);
+    onJson<A2sInfo>(`a2s:info:${id}`, ctl, (info) => getSpec().onInfo?.(info)),
+    onJson<A2sPlayer[]>(`a2s:players:${id}`, ctl, (players) => getSpec().onPlayers?.(players)),
+    onJson<Record<string, string>>(`a2s:rules:${id}`, ctl, (rules) => getSpec().onRules?.(rules)),
+    onString(`a2s:error:${id}`, ctl, (m) => {
       getSpec().onError?.(m);
       ctl.setError(m);
       ctl.setState('error');
