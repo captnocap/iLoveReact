@@ -72,6 +72,8 @@ interface SpecBase {
   via?: TransportHandle;
 }
 
+type Unsubscribe = () => void;
+
 // ── Spec types ─────────────────────────────────────────────────────
 
 export interface WsConnectionSpec extends SpecBase {
@@ -374,28 +376,400 @@ export type ConnectionHandle =
   | RconConnectionHandle
   | A2sConnectionHandle;
 
-// ── ID allocator ───────────────────────────────────────────────────
+// ── Kind-indexed maps ──────────────────────────────────────────────
 
+export type ConnectionKind = ConnectionSpec['kind'];
+export type SpecByKind   = { [K in ConnectionKind]: Extract<ConnectionSpec,   { kind: K }> };
+export type HandleByKind = { [K in ConnectionKind]: Extract<ConnectionHandle, { kind: K }> };
 
+// ── Helpers ────────────────────────────────────────────────────────
 
 const viaJson = (v?: TransportHandle): string =>
   v ? JSON.stringify({ id: v.id, kind: v.kind }) : '';
 
+/** String key for the effect dep list: identity changes ⇒ tear-down + re-open. */
+function connectionIdentity(spec: ConnectionSpec): string {
+  switch (spec.kind) {
+    case 'ws':        return spec.url;
+    case 'tcp':       return `${spec.host}:${spec.port}`;
+    case 'udp':       return `${spec.host}:${spec.port}`;
+    case 'wireguard': return spec.interfaceName ?? 'wg';
+    case 'tor':       return `tor:${spec.socksPort ?? 'sys'}:${spec.embedded ? 'e' : 's'}`;
+    case 'socks5':    return `${spec.host}:${spec.port}`;
+    case 'stun':      return spec.server;
+    case 'peer':      return spec.peerId;
+    case 'http':      return `${spec.method ?? 'GET'} ${spec.url}`;
+    case 'sse':       return spec.url;
+    case 'rcon':      return `${spec.host}:${spec.port}`;
+    case 'a2s':       return `${spec.host}:${spec.port}`;
+  }
+}
+
+/** Tell the host to tear down the backend channel. Idempotent. */
+function closeBackend(spec: ConnectionSpec, id: number): void {
+  switch (spec.kind) {
+    case 'ws':     wsClose(id); return;
+    case 'tcp':    tcpClose(id); return;
+    case 'udp':    udpClose(id); return;
+    case 'tor':    torStop(id); return;
+    case 'socks5': socks5Unregister(id); return;
+    case 'http':
+    case 'sse':    httpStreamClose(`c${id}`); return;
+    case 'rcon':   rconClose(id); return;
+    case 'a2s':    a2sClose(id); return;
+    // wireguard / stun / peer: no backend to tear down.
+  }
+}
+
+interface BaseCtl {
+  cancelled: { value: boolean };
+  setState: (s: ConnectionState) => void;
+  setError: (m: string | undefined) => void;
+}
+
+interface TorExtras { setTorInfo: (i: TorInfo) => void }
+interface HttpExtras { setHttpStatus: (n: number) => void }
+interface RconExtras { setRconAuthed: (a: boolean) => void }
+
+type TorInfo = { socksPort: number; hostname: string; hsPort: number };
+
+function parseJson(raw: unknown): Record<string, unknown> {
+  try {
+    return typeof raw === 'string' ? JSON.parse(raw) : (raw as Record<string, unknown>);
+  } catch {
+    return {};
+  }
+}
+
+function asString(raw: unknown): string {
+  return typeof raw === 'string' ? raw : String(raw);
+}
+
+// ── Per-kind wire functions ────────────────────────────────────────
+//
+// Each wires its backend events and returns an Unsubscribe that detaches
+// all listeners. The effect's cleanup is just this returned function plus
+// a `closeBackend()` call — one source for tear-down.
+
+function wireWs(
+  id: number,
+  spec: WsConnectionSpec,
+  getSpec: () => WsConnectionSpec,
+  ctl: BaseCtl,
+): Unsubscribe {
+  wsOpen(id, spec.url, viaJson(spec.via));
+  const unsubs: Unsubscribe[] = [
+    subscribe(`ws:open:${id}`, () => {
+      if (ctl.cancelled.value) return;
+      getSpec().onOpen?.();
+      ctl.setState('open');
+    }),
+    subscribe(`ws:message:${id}`, (data: any) => {
+      if (ctl.cancelled.value) return;
+      getSpec().onMessage?.(asString(data));
+    }),
+    subscribe(`ws:close:${id}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const obj = parseJson(raw);
+      const info = { code: (obj.code as number) ?? 0, reason: (obj.reason as string) ?? '' };
+      getSpec().onClose?.(info);
+      ctl.setState('closed');
+    }),
+    subscribe(`ws:error:${id}`, (msg: any) => {
+      if (ctl.cancelled.value) return;
+      const m = asString(msg);
+      getSpec().onError?.(m);
+      ctl.setError(m);
+      ctl.setState('error');
+    }),
+  ];
+  return () => { for (const u of unsubs) u(); };
+}
+
+function wireTcp(
+  id: number,
+  spec: TcpConnectionSpec,
+  getSpec: () => TcpConnectionSpec,
+  ctl: BaseCtl,
+): Unsubscribe {
+  tcpConnect(id, spec.host, spec.port, viaJson(spec.via));
+  const unsubs: Unsubscribe[] = [
+    subscribe(`tcp:open:${id}`, () => {
+      if (ctl.cancelled.value) return;
+      ctl.setState('open');
+    }),
+    subscribe(`tcp:data:${id}`, (data: any) => {
+      if (ctl.cancelled.value) return;
+      getSpec().onData?.(asString(data));
+    }),
+    subscribe(`tcp:close:${id}`, () => {
+      if (ctl.cancelled.value) return;
+      getSpec().onClose?.();
+      ctl.setState('closed');
+    }),
+    subscribe(`tcp:error:${id}`, (msg: any) => {
+      if (ctl.cancelled.value) return;
+      const m = asString(msg);
+      getSpec().onError?.(m);
+      ctl.setError(m);
+      ctl.setState('error');
+    }),
+  ];
+  // tcp_connect is sync today; flip to open optimistically if no event arrives.
+  ctl.setState('open');
+  return () => { for (const u of unsubs) u(); };
+}
+
+function wireUdp(
+  id: number,
+  spec: UdpConnectionSpec,
+  getSpec: () => UdpConnectionSpec,
+  ctl: BaseCtl,
+): Unsubscribe {
+  udpOpen(id, spec.host, spec.port, viaJson(spec.via));
+  const unsubs: Unsubscribe[] = [
+    subscribe(`udp:packet:${id}`, (data: any) => {
+      if (ctl.cancelled.value) return;
+      getSpec().onPacket?.(asString(data));
+    }),
+    subscribe(`udp:error:${id}`, (msg: any) => {
+      if (ctl.cancelled.value) return;
+      const m = asString(msg);
+      getSpec().onError?.(m);
+      ctl.setError(m);
+      ctl.setState('error');
+    }),
+  ];
+  ctl.setState('open');
+  return () => { for (const u of unsubs) u(); };
+}
+
+function wireTor(
+  id: number,
+  spec: TorConnectionSpec,
+  _getSpec: () => TorConnectionSpec,
+  ctl: BaseCtl & TorExtras,
+): Unsubscribe {
+  const opts = JSON.stringify({
+    identity: spec.socksPort ? '' : 'default',
+    socksPort: spec.socksPort ?? 0,
+  });
+  torStart(id, opts);
+  const unsubs: Unsubscribe[] = [
+    subscribe(`tor:open:${id}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const obj = parseJson(raw);
+      if (typeof obj.socksPort === 'number' && typeof obj.hostname === 'string' && typeof obj.hsPort === 'number') {
+        ctl.setTorInfo({ socksPort: obj.socksPort, hostname: obj.hostname, hsPort: obj.hsPort });
+      }
+      ctl.setState('open');
+    }),
+    subscribe(`tor:error:${id}`, (msg: any) => {
+      if (ctl.cancelled.value) return;
+      const m = asString(msg);
+      ctl.setError(m);
+      ctl.setState('error');
+    }),
+  ];
+  return () => { for (const u of unsubs) u(); };
+}
+
+function wireSocks5(
+  id: number,
+  spec: Socks5ConnectionSpec,
+  _getSpec: () => Socks5ConnectionSpec,
+  ctl: BaseCtl,
+): Unsubscribe {
+  socks5Register(id, spec.host, spec.port, spec.username ?? '', spec.password ?? '');
+  // SOCKS5 is a config holder — no socket opens here. The proxy is used
+  // when another connection passes this handle as `via:`.
+  ctl.setState('open');
+  return () => {};
+}
+
+function wireHttpOrSse(
+  id: number,
+  spec: HttpConnectionSpec | SseConnectionSpec,
+  getSpec: () => HttpConnectionSpec | SseConnectionSpec,
+  ctl: BaseCtl & HttpExtras,
+): Unsubscribe {
+  const rid = `c${id}`;
+  const isSse = spec.kind === 'sse';
+  const headers: Record<string, string> = { ...(spec.headers ?? {}) };
+  if (isSse) {
+    headers['Accept'] = 'text/event-stream';
+    if (!('Cache-Control' in headers)) headers['Cache-Control'] = 'no-cache';
+  }
+  const explicitMethod = spec.kind === 'http' ? spec.method : undefined;
+  const body = spec.body;
+  const method = (explicitMethod ?? (body !== undefined ? 'POST' : 'GET')).toUpperCase();
+  const reqJson = JSON.stringify({ method, url: spec.url, headers, body });
+
+  // SSE parser state — only used when isSse, but cheap to allocate.
+  let leftover = '';
+  let evName = 'message';
+  let evData = '';
+  let evId: string | undefined;
+  let evRetry: number | undefined;
+  const dispatchSse = () => {
+    if (evData === '' && evName === 'message' && evId === undefined && evRetry === undefined) {
+      return; // empty event — ignore
+    }
+    const ev: SseEvent = { event: evName, data: evData };
+    if (evId !== undefined) ev.id = evId;
+    if (evRetry !== undefined) ev.retry = evRetry;
+    (getSpec() as SseConnectionSpec).onEvent?.(ev);
+    evName = 'message';
+    evData = '';
+    evId = undefined;
+    evRetry = undefined;
+  };
+  const feedSse = (incoming: string) => {
+    const buf = leftover + incoming;
+    // SSE allows \n, \r, or \r\n line breaks.
+    const lines = buf.split(/\r\n|\r|\n/);
+    leftover = lines.pop() ?? '';
+    for (const line of lines) {
+      if (line === '') { dispatchSse(); continue; }
+      if (line.startsWith(':')) continue; // comment
+      const sep = line.indexOf(':');
+      const field = sep === -1 ? line : line.slice(0, sep);
+      let value = sep === -1 ? '' : line.slice(sep + 1);
+      if (value.startsWith(' ')) value = value.slice(1);
+      if (field === 'event') evName = value;
+      else if (field === 'data') evData = evData === '' ? value : `${evData}\n${value}`;
+      else if (field === 'id') evId = value;
+      else if (field === 'retry') {
+        const n = Number(value);
+        if (!Number.isNaN(n)) evRetry = n;
+      }
+    }
+  };
+
+  httpStreamOpen(reqJson, rid);
+
+  // Optimistically flip to open — server byte arrival is the real signal,
+  // but the request is in flight as soon as the host fn returns. SSE fires
+  // onOpen here too; the spec is "connection established," not "first event."
+  ctl.setState('open');
+  if (isSse) (getSpec() as SseConnectionSpec).onOpen?.();
+
+  const unsubs: Unsubscribe[] = [
+    subscribe(`http-stream:${rid}`, (data: any) => {
+      if (ctl.cancelled.value) return;
+      const s = asString(data);
+      if (isSse) feedSse(s);
+      else (getSpec() as HttpConnectionSpec).onChunk?.(s);
+    }),
+    subscribe(`http-stream-end:${rid}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const obj = parseJson(raw);
+      if (typeof obj.error === 'string') {
+        const cur = getSpec();
+        if (cur.kind === 'sse') cur.onError?.(obj.error);
+        else cur.onError?.(obj.error);
+        ctl.setError(obj.error);
+        ctl.setState('error');
+      } else {
+        if (isSse && leftover !== '') { feedSse('\n'); } // flush trailing
+        const status = typeof obj.status === 'number' ? obj.status : 0;
+        if (typeof obj.status === 'number') ctl.setHttpStatus(obj.status);
+        const cur = getSpec();
+        if (cur.kind === 'sse') cur.onClose?.();
+        else cur.onComplete?.({ status });
+        ctl.setState('closed');
+      }
+    }),
+  ];
+  return () => { for (const u of unsubs) u(); };
+}
+
+function wireRcon(
+  id: number,
+  spec: RconConnectionSpec,
+  getSpec: () => RconConnectionSpec,
+  ctl: BaseCtl & RconExtras,
+): Unsubscribe {
+  rconOpen(id, spec.host, spec.port, spec.password);
+  // The Zig side already framed and sent the AUTH packet. We optimistically
+  // mark connecting → 'open' (TCP up, awaiting AUTH_RESPONSE); 'authed'
+  // is tracked separately on the handle.
+  ctl.setState('open');
+  const unsubs: Unsubscribe[] = [
+    subscribe(`rcon:auth:${id}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const obj = parseJson(raw);
+      const ok = !!obj.ok;
+      ctl.setRconAuthed(ok);
+      getSpec().onAuth?.(ok);
+      if (!ok) ctl.setState('error');
+    }),
+    subscribe(`rcon:response:${id}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const obj = parseJson(raw);
+      getSpec().onResponse?.({
+        requestId: (obj.requestId as number) ?? 0,
+        body: (obj.body as string) ?? '',
+      });
+    }),
+    subscribe(`rcon:close:${id}`, () => {
+      if (ctl.cancelled.value) return;
+      getSpec().onClose?.();
+      ctl.setState('closed');
+    }),
+    subscribe(`rcon:error:${id}`, (msg: any) => {
+      if (ctl.cancelled.value) return;
+      const m = asString(msg);
+      getSpec().onError?.(m);
+      ctl.setError(m);
+      ctl.setState('error');
+    }),
+  ];
+  return () => { for (const u of unsubs) u(); };
+}
+
+function wireA2s(
+  id: number,
+  spec: A2sConnectionSpec,
+  getSpec: () => A2sConnectionSpec,
+  ctl: BaseCtl,
+): Unsubscribe {
+  a2sOpen(id, spec.host, spec.port);
+  ctl.setState('open');
+  const unsubs: Unsubscribe[] = [
+    subscribe(`a2s:info:${id}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const info = parseJson(raw) as unknown as A2sInfo;
+      getSpec().onInfo?.(info);
+    }),
+    subscribe(`a2s:players:${id}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const players = (typeof raw === 'string' ? JSON.parse(raw) : raw) as A2sPlayer[];
+      getSpec().onPlayers?.(players);
+    }),
+    subscribe(`a2s:rules:${id}`, (raw: any) => {
+      if (ctl.cancelled.value) return;
+      const rules = parseJson(raw) as Record<string, string>;
+      getSpec().onRules?.(rules);
+    }),
+    subscribe(`a2s:error:${id}`, (msg: any) => {
+      if (ctl.cancelled.value) return;
+      const m = asString(msg);
+      getSpec().onError?.(m);
+      ctl.setError(m);
+      ctl.setState('error');
+    }),
+  ];
+  return () => { for (const u of unsubs) u(); };
+}
+
 // ── Hook ───────────────────────────────────────────────────────────
 
-export function useConnection(spec: WsConnectionSpec): WsConnectionHandle;
-export function useConnection(spec: TcpConnectionSpec): TcpConnectionHandle;
-export function useConnection(spec: UdpConnectionSpec): UdpConnectionHandle;
-export function useConnection(spec: WireGuardConnectionSpec): WireGuardConnectionHandle;
-export function useConnection(spec: TorConnectionSpec): TorConnectionHandle;
-export function useConnection(spec: Socks5ConnectionSpec): Socks5ConnectionHandle;
-export function useConnection(spec: StunConnectionSpec): StunConnectionHandle;
-export function useConnection(spec: PeerConnectionSpec): PeerConnectionHandle;
-export function useConnection(spec: HttpConnectionSpec): HttpConnectionHandle;
-export function useConnection(spec: SseConnectionSpec): SseConnectionHandle;
-export function useConnection(spec: RconConnectionSpec): RconConnectionHandle;
-export function useConnection(spec: A2sConnectionSpec): A2sConnectionHandle;
-export function useConnection(spec: ConnectionSpec): ConnectionHandle {
+export function useConnection<K extends ConnectionKind>(spec: SpecByKind[K]): HandleByKind[K] {
+  return useConnectionImpl(spec) as HandleByKind[K];
+}
+
+function useConnectionImpl(spec: ConnectionSpec): ConnectionHandle {
   const idRef = useRef<number>(0);
   if (idRef.current === 0) idRef.current = nextId();
   const id = idRef.current;
@@ -403,9 +777,8 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
   const [state, setState] = useState<ConnectionState>('connecting');
   const [error, setError] = useState<string | undefined>(undefined);
   // Tor only — populated when bootstrap completes.
-  const [torInfo, setTorInfo] = useState<{ socksPort: number; hostname: string; hsPort: number } | undefined>(undefined);
-  const torInfoRef = useRef<typeof torInfo>(undefined);
-  // http / sse only — populated on .complete from http-stream-end.
+  const [torInfo, setTorInfo] = useState<TorInfo | undefined>(undefined);
+  // http only — populated on .complete from http-stream-end.
   const [httpStatus, setHttpStatus] = useState<number>(0);
   // rcon only — flips on AUTH_RESPONSE.
   const [rconAuthed, setRconAuthed] = useState<boolean>(false);
@@ -413,372 +786,106 @@ export function useConnection(spec: ConnectionSpec): ConnectionHandle {
 
   const specRef = useRef(spec);
   specRef.current = spec;
+  const getSpec = <T extends ConnectionSpec>() => specRef.current as T;
 
+  const identity = connectionIdentity(spec);
   const viaKey = spec.via ? `${spec.via.kind}:${spec.via.id}` : '';
 
   useEffect(() => {
-    let cancelled = false;
-    const unsubs: Array<() => void> = [];
-    const via = viaJson(spec.via);
+    const cancelled = { value: false };
+    const ctl: BaseCtl = { cancelled, setState, setError };
 
-    if (spec.kind === 'ws') {
-      wsOpen(id, spec.url, via);
-      unsubs.push(subscribe(`ws:open:${id}`, () => {
-        if (cancelled) return;
-        (specRef.current as WsConnectionSpec).onOpen?.();
-        setState('open');
-      }));
-      unsubs.push(subscribe(`ws:message:${id}`, (data: any) => {
-        if (cancelled) return;
-        const s = typeof data === 'string' ? data : String(data);
-        (specRef.current as WsConnectionSpec).onMessage?.(s);
-      }));
-      unsubs.push(subscribe(`ws:close:${id}`, (raw: any) => {
-        if (cancelled) return;
-        let info = { code: 0, reason: '' };
-        try {
-          const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
-          info = { code: obj.code ?? 0, reason: obj.reason ?? '' };
-        } catch {}
-        (specRef.current as WsConnectionSpec).onClose?.(info);
-        setState('closed');
-      }));
-      unsubs.push(subscribe(`ws:error:${id}`, (msg: any) => {
-        if (cancelled) return;
-        const m = typeof msg === 'string' ? msg : String(msg);
-        (specRef.current as WsConnectionSpec).onError?.(m);
-        setError(m);
+    let detach: Unsubscribe;
+    switch (spec.kind) {
+      case 'ws':
+        detach = wireWs(id, spec, getSpec, ctl);
+        break;
+      case 'tcp':
+        detach = wireTcp(id, spec, getSpec, ctl);
+        break;
+      case 'udp':
+        detach = wireUdp(id, spec, getSpec, ctl);
+        break;
+      case 'tor':
+        detach = wireTor(id, spec, getSpec, { ...ctl, setTorInfo });
+        break;
+      case 'socks5':
+        detach = wireSocks5(id, spec, getSpec, ctl);
+        break;
+      case 'http':
+      case 'sse':
+        detach = wireHttpOrSse(id, spec, getSpec, { ...ctl, setHttpStatus });
+        break;
+      case 'rcon':
+        detach = wireRcon(id, spec, getSpec, { ...ctl, setRconAuthed });
+        break;
+      case 'a2s':
+        detach = wireA2s(id, spec, getSpec, ctl);
+        break;
+      default:
+        // wireguard / stun / peer: no Zig backend yet. Honest error rather
+        // than a silent open. When the binding lands, add a wireX driver.
+        setError(`${spec.kind} transport: zig backend not yet implemented`);
         setState('error');
-      }));
-    } else if (spec.kind === 'tcp') {
-      tcpConnect(id, spec.host, spec.port, via);
-      unsubs.push(subscribe(`tcp:open:${id}`, () => {
-        if (cancelled) return;
-        setState('open');
-      }));
-      unsubs.push(subscribe(`tcp:data:${id}`, (data: any) => {
-        if (cancelled) return;
-        const s = typeof data === 'string' ? data : String(data);
-        (specRef.current as TcpConnectionSpec).onData?.(s);
-      }));
-      unsubs.push(subscribe(`tcp:close:${id}`, () => {
-        if (cancelled) return;
-        (specRef.current as TcpConnectionSpec).onClose?.();
-        setState('closed');
-      }));
-      unsubs.push(subscribe(`tcp:error:${id}`, (msg: any) => {
-        if (cancelled) return;
-        const m = typeof msg === 'string' ? msg : String(msg);
-        (specRef.current as TcpConnectionSpec).onError?.(m);
-        setError(m);
-        setState('error');
-      }));
-      // tcp_connect is sync today; flip to open optimistically if no event arrives.
-      setState('open');
-    } else if (spec.kind === 'udp') {
-      udpOpen(id, spec.host, spec.port, via);
-      unsubs.push(subscribe(`udp:packet:${id}`, (data: any) => {
-        if (cancelled) return;
-        const s = typeof data === 'string' ? data : String(data);
-        (specRef.current as UdpConnectionSpec).onPacket?.(s);
-      }));
-      unsubs.push(subscribe(`udp:error:${id}`, (msg: any) => {
-        if (cancelled) return;
-        const m = typeof msg === 'string' ? msg : String(msg);
-        (specRef.current as UdpConnectionSpec).onError?.(m);
-        setError(m);
-        setState('error');
-      }));
-      setState('open');
-    } else if (spec.kind === 'tor') {
-      const opts = JSON.stringify({
-        identity: (spec as TorConnectionSpec).socksPort ? '' : 'default',
-        socksPort: (spec as TorConnectionSpec).socksPort ?? 0,
-      });
-      torStart(id, opts);
-      unsubs.push(subscribe(`tor:open:${id}`, (raw: any) => {
-        if (cancelled) return;
-        try {
-          const obj = typeof raw === 'string' ? JSON.parse(raw) : raw;
-          torInfoRef.current = { socksPort: obj.socksPort, hostname: obj.hostname, hsPort: obj.hsPort };
-          setTorInfo(torInfoRef.current);
-        } catch {}
-        setState('open');
-      }));
-      unsubs.push(subscribe(`tor:error:${id}`, (msg: any) => {
-        if (cancelled) return;
-        const m = typeof msg === 'string' ? msg : String(msg);
-        setError(m);
-        setState('error');
-      }));
-    } else if (spec.kind === 'socks5') {
-      socks5Register(id, spec.host, spec.port, spec.username ?? '', spec.password ?? '');
-      // SOCKS5 is a config holder — no socket opens here. The proxy is used
-      // when another connection passes this handle as `via:`.
-      setState('open');
-    } else if (spec.kind === 'http' || spec.kind === 'sse') {
-      const rid = `c${id}`;
-      const isSse = spec.kind === 'sse';
-      const headers: Record<string, string> = { ...(spec.headers ?? {}) };
-      if (isSse) {
-        headers['Accept'] = 'text/event-stream';
-        if (!('Cache-Control' in headers)) headers['Cache-Control'] = 'no-cache';
-      }
-      const reqJson = JSON.stringify({
-        method: ((spec as any).method ?? (((spec as SseConnectionSpec).body !== undefined && isSse) || ((spec as HttpConnectionSpec).body !== undefined && !isSse) ? 'POST' : 'GET')).toUpperCase(),
-        url: spec.url,
-        headers,
-        body: (spec as any).body,
-      });
-
-      // SSE parser state — only used when isSse, but cheap to allocate.
-      let leftover = '';
-      let evName = 'message';
-      let evData = '';
-      let evId: string | undefined;
-      let evRetry: number | undefined;
-      const dispatchSse = () => {
-        if (evData === '' && evName === 'message' && evId === undefined && evRetry === undefined) {
-          return; // empty event — ignore
-        }
-        const ev: SseEvent = { event: evName, data: evData };
-        if (evId !== undefined) ev.id = evId;
-        if (evRetry !== undefined) ev.retry = evRetry;
-        (specRef.current as SseConnectionSpec).onEvent?.(ev);
-        evName = 'message';
-        evData = '';
-        evId = undefined;
-        evRetry = undefined;
-      };
-      const feedSse = (incoming: string) => {
-        const buf = leftover + incoming;
-        // SSE allows \n, \r, or \r\n line breaks.
-        const lines = buf.split(/\r\n|\r|\n/);
-        leftover = lines.pop() ?? '';
-        for (const line of lines) {
-          if (line === '') { dispatchSse(); continue; }
-          if (line.startsWith(':')) continue; // comment
-          const sep = line.indexOf(':');
-          const field = sep === -1 ? line : line.slice(0, sep);
-          let value = sep === -1 ? '' : line.slice(sep + 1);
-          if (value.startsWith(' ')) value = value.slice(1);
-          if (field === 'event') evName = value;
-          else if (field === 'data') evData = evData === '' ? value : `${evData}\n${value}`;
-          else if (field === 'id') evId = value;
-          else if (field === 'retry') {
-            const n = Number(value);
-            if (!Number.isNaN(n)) evRetry = n;
-          }
-        }
-      };
-
-      httpStreamOpen(reqJson, rid);
-
-      // Optimistically flip to open — server byte arrival is the real signal,
-      // but the request is in flight as soon as the host fn returns. SSE fires
-      // onOpen here too; the spec is "connection established," not "first event."
-      setState('open');
-      if (isSse) (specRef.current as SseConnectionSpec).onOpen?.();
-
-      unsubs.push(subscribe(`http-stream:${rid}`, (data: any) => {
-        if (cancelled) return;
-        const s = typeof data === 'string' ? data : String(data);
-        if (isSse) feedSse(s);
-        else (specRef.current as HttpConnectionSpec).onChunk?.(s);
-      }));
-
-      unsubs.push(subscribe(`http-stream-end:${rid}`, (raw: any) => {
-        if (cancelled) return;
-        let obj: any = {};
-        try { obj = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch {}
-        if (typeof obj.error === 'string') {
-          if (isSse) (specRef.current as SseConnectionSpec).onError?.(obj.error);
-          else (specRef.current as HttpConnectionSpec).onError?.(obj.error);
-          setError(obj.error);
-          setState('error');
-        } else {
-          if (isSse && leftover !== '') { feedSse('\n'); } // flush trailing
-          if (typeof obj.status === 'number') setHttpStatus(obj.status);
-          if (isSse) (specRef.current as SseConnectionSpec).onClose?.();
-          else (specRef.current as HttpConnectionSpec).onComplete?.({ status: obj.status ?? 0 });
-          setState('closed');
-        }
-      }));
-    } else if (spec.kind === 'rcon') {
-      rconOpen(id, spec.host, spec.port, spec.password);
-      // The Zig side already framed and sent the AUTH packet. We optimistically
-      // mark connecting → 'open' (TCP up, awaiting AUTH_RESPONSE); 'authed'
-      // is tracked separately on the handle.
-      setState('open');
-      unsubs.push(subscribe(`rcon:auth:${id}`, (raw: any) => {
-        if (cancelled) return;
-        let obj: any = {};
-        try { obj = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch {}
-        const ok = !!obj.ok;
-        setRconAuthed(ok);
-        (specRef.current as RconConnectionSpec).onAuth?.(ok);
-        if (!ok) setState('error');
-      }));
-      unsubs.push(subscribe(`rcon:response:${id}`, (raw: any) => {
-        if (cancelled) return;
-        let obj: any = {};
-        try { obj = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch {}
-        (specRef.current as RconConnectionSpec).onResponse?.({
-          requestId: obj.requestId ?? 0,
-          body: obj.body ?? '',
-        });
-      }));
-      unsubs.push(subscribe(`rcon:close:${id}`, () => {
-        if (cancelled) return;
-        (specRef.current as RconConnectionSpec).onClose?.();
-        setState('closed');
-      }));
-      unsubs.push(subscribe(`rcon:error:${id}`, (msg: any) => {
-        if (cancelled) return;
-        const m = typeof msg === 'string' ? msg : String(msg);
-        (specRef.current as RconConnectionSpec).onError?.(m);
-        setError(m);
-        setState('error');
-      }));
-    } else if (spec.kind === 'a2s') {
-      a2sOpen(id, spec.host, spec.port);
-      setState('open');
-      unsubs.push(subscribe(`a2s:info:${id}`, (raw: any) => {
-        if (cancelled) return;
-        try {
-          const info = typeof raw === 'string' ? JSON.parse(raw) : raw;
-          (specRef.current as A2sConnectionSpec).onInfo?.(info);
-        } catch {}
-      }));
-      unsubs.push(subscribe(`a2s:players:${id}`, (raw: any) => {
-        if (cancelled) return;
-        try {
-          const players = typeof raw === 'string' ? JSON.parse(raw) : raw;
-          (specRef.current as A2sConnectionSpec).onPlayers?.(players);
-        } catch {}
-      }));
-      unsubs.push(subscribe(`a2s:rules:${id}`, (raw: any) => {
-        if (cancelled) return;
-        try {
-          const rules = typeof raw === 'string' ? JSON.parse(raw) : raw;
-          (specRef.current as A2sConnectionSpec).onRules?.(rules);
-        } catch {}
-      }));
-      unsubs.push(subscribe(`a2s:error:${id}`, (msg: any) => {
-        if (cancelled) return;
-        const m = typeof msg === 'string' ? msg : String(msg);
-        (specRef.current as A2sConnectionSpec).onError?.(m);
-        setError(m);
-        setState('error');
-      }));
-    } else {
-      // wireguard / stun / peer: no Zig backend yet. Honest error rather
-      // than a silent open. When the binding lands, replace with real wiring.
-      setError(`${spec.kind} transport: zig backend not yet implemented`);
-      setState('error');
+        detach = () => {};
     }
 
     return () => {
-      cancelled = true;
-      for (const u of unsubs) u();
-      if (spec.kind === 'ws') wsClose(id);
-      else if (spec.kind === 'tcp') tcpClose(id);
-      else if (spec.kind === 'udp') udpClose(id);
-      else if (spec.kind === 'tor') torStop(id);
-      else if (spec.kind === 'socks5') socks5Unregister(id);
-      else if (spec.kind === 'http' || spec.kind === 'sse') httpStreamClose(`c${id}`);
-      else if (spec.kind === 'rcon') rconClose(id);
-      else if (spec.kind === 'a2s') a2sClose(id);
+      cancelled.value = true;
+      detach();
+      closeBackend(spec, id);
       setState('closed');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    spec.kind,
-    (spec as any).url,
-    (spec as any).host,
-    (spec as any).port,
-    (spec as any).server,
-    (spec as any).peerId,
-    viaKey,
-  ]);
+  }, [spec.kind, identity, viaKey]);
 
-  // Build the kind-specific handle.
-  const closeFn = () => {
-    if (spec.kind === 'ws') wsClose(id);
-    else if (spec.kind === 'tcp') tcpClose(id);
-    else if (spec.kind === 'udp') udpClose(id);
-    else if (spec.kind === 'http' || spec.kind === 'sse') httpStreamClose(`c${id}`);
-    else if (spec.kind === 'rcon') rconClose(id);
-    else if (spec.kind === 'a2s') a2sClose(id);
-  };
+  const close = () => closeBackend(spec, id);
 
-  if (spec.kind === 'ws') {
-    return {
-      kind: 'ws', id, state, error, close: closeFn,
-      send: (data) => wsSend(id, data),
-    };
+  switch (spec.kind) {
+    case 'ws':
+      return { kind: 'ws', id, state, error, close, send: (data) => wsSend(id, data) };
+    case 'tcp':
+      return { kind: 'tcp', id, state, error, close, send: (data) => tcpSend(id, data) };
+    case 'udp':
+      return { kind: 'udp', id, state, error, close, send: (data) => udpSend(id, data) };
+    case 'wireguard':
+      return { kind: 'wireguard', id, state, error, close };
+    case 'tor':
+      return {
+        kind: 'tor', id, state, error, close,
+        socksPort: torInfo?.socksPort ?? spec.socksPort ?? 0,
+        hostname: torInfo?.hostname,
+        hsPort: torInfo?.hsPort ?? 0,
+      };
+    case 'socks5':
+      return { kind: 'socks5', id, state, error, close };
+    case 'stun':
+      return { kind: 'stun', id, state, error, close };
+    case 'http':
+      return { kind: 'http', id, state, error, close, status: httpStatus };
+    case 'sse':
+      return { kind: 'sse', id, state, error, close };
+    case 'rcon':
+      return {
+        kind: 'rcon', id, state, error, close,
+        authenticated: rconAuthed,
+        command: (cmd: string) => {
+          const reqId = rconReqSeq.current++;
+          rconCommand(id, reqId, cmd);
+          return reqId;
+        },
+      };
+    case 'a2s':
+      return {
+        kind: 'a2s', id, state, error, close,
+        queryInfo: () => a2sQuery(id, 'info'),
+        queryPlayers: () => a2sQuery(id, 'players'),
+        queryRules: () => a2sQuery(id, 'rules'),
+      };
+    case 'peer':
+      return {
+        kind: 'peer', id, state, error, close,
+        send: (_data: string) => { /* not wired */ },
+      };
   }
-  if (spec.kind === 'tcp') {
-    return {
-      kind: 'tcp', id, state, error, close: closeFn,
-      send: (data) => tcpSend(id, data),
-    };
-  }
-  if (spec.kind === 'udp') {
-    return {
-      kind: 'udp', id, state, error, close: closeFn,
-      send: (data) => udpSend(id, data),
-    };
-  }
-  if (spec.kind === 'wireguard') {
-    return { kind: 'wireguard', id, state, error, close: closeFn };
-  }
-  if (spec.kind === 'tor') {
-    return {
-      kind: 'tor',
-      id,
-      state,
-      error,
-      close: closeFn,
-      socksPort: torInfo?.socksPort ?? spec.socksPort ?? 0,
-      hostname: torInfo?.hostname,
-      hsPort: torInfo?.hsPort ?? 0,
-    };
-  }
-  if (spec.kind === 'socks5') {
-    return { kind: 'socks5', id, state, error, close: closeFn };
-  }
-  if (spec.kind === 'stun') {
-    return { kind: 'stun', id, state, error, close: closeFn };
-  }
-  if (spec.kind === 'http') {
-    return { kind: 'http', id, state, error, close: closeFn, status: httpStatus };
-  }
-  if (spec.kind === 'sse') {
-    return { kind: 'sse', id, state, error, close: closeFn };
-  }
-  if (spec.kind === 'rcon') {
-    return {
-      kind: 'rcon', id, state, error, close: closeFn,
-      authenticated: rconAuthed,
-      command: (cmd: string) => {
-        const reqId = rconReqSeq.current++;
-        rconCommand(id, reqId, cmd);
-        return reqId;
-      },
-    };
-  }
-  if (spec.kind === 'a2s') {
-    return {
-      kind: 'a2s', id, state, error, close: closeFn,
-      queryInfo: () => a2sQuery(id, 'info'),
-      queryPlayers: () => a2sQuery(id, 'players'),
-      queryRules: () => a2sQuery(id, 'rules'),
-    };
-  }
-  // peer
-  return {
-    kind: 'peer', id, state, error, close: closeFn,
-    send: (_data: string) => { /* not wired */ },
-  };
 }
