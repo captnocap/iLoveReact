@@ -61,6 +61,14 @@ var g_frame_arena: std.heap.ArenaAllocator = undefined;
 /// actually computed for each Node's rect.
 var g_last_dumped_slot_count: u32 = 0;
 
+/// Pool of allocated handler-expression strings (e.g.
+/// "__dispatchEvent(42,'onClick')") whose pointers live on
+/// Node.handlers.js_on_press etc. These strings are referenced from
+/// arena-copied Nodes every frame, so they need a lifetime that
+/// outlives any single frame's arena reset — hence a separate
+/// permanent pool on g_alloc.
+var g_handler_expr_pool: std.ArrayList([:0]u8) = .{};
+
 // ────────────────────────────────────────────────────────────────────
 // Lifecycle
 // ────────────────────────────────────────────────────────────────────
@@ -74,8 +82,7 @@ pub fn init(alloc: std.mem.Allocator) !void {
     host_tree.setHooks(.{
         .open_host_window = openHostWindow,
         .apply_props = applyProps,
-        // apply_handler_flags still null — onPress etc. inside the
-        // Window subtree don't fire yet. Coming in the next layer.
+        .apply_handler_flags = applyHandlerFlags,
     });
     // Install the layout-side text-measure callback so Text intrinsic
     // widths come back non-zero. Without this, every Text node measures
@@ -86,6 +93,10 @@ pub fn init(alloc: std.mem.Allocator) !void {
     // share the same FreeType face so the measurement is consistent
     // across windows.
     layout.setMeasureFn(measureText);
+    // Wire the SDL3 paint side to call back into JS when handlers
+    // fire on hit-tested nodes. windows.zig already does the hit
+    // testing + dispatchJs walk; we just provide the eval.
+    windows.setJsDispatchFn(jsDispatch);
     g_inited = true;
 }
 
@@ -159,6 +170,79 @@ fn measureText(
         return .{ .width = r.w, .height = r.h, .ascent = r.x };
     }
     return .{ .width = 0, .height = 0, .ascent = 0 };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Event dispatch — SDL3 hit → JS handler
+// ────────────────────────────────────────────────────────────────────
+
+/// windows.zig calls this for any hit-tested node whose js_on_* slot
+/// is non-null. `node_id` is the React Node id (forwarded from
+/// node.scroll_persist_slot, which host_tree.ensureNode pins = id).
+/// `expr` is the pre-formatted JS expression installed by
+/// applyHandlerFlags, e.g. "__dispatchEvent(42,'onClick')".
+fn jsDispatch(_: u32, expr: []const u8) void {
+    v8_runtime.evalExpr(expr);
+}
+
+/// Per-handler-name check — the reconciler attaches a top-level
+/// `handlerNames: ["onClick", ...]` array to CREATE/UPDATE commands.
+/// Mirrors v8_app.zig's cmdHasHandlerName.
+fn cmdHasHandlerName(cmd: std.json.Value, name: []const u8) bool {
+    const v = cmd.object.get("handlerNames") orelse return false;
+    if (v != .array) return false;
+    for (v.array.items) |entry| {
+        if (entry == .string and std.mem.eql(u8, entry.string, name)) return true;
+    }
+    return false;
+}
+
+fn cmdHasAnyHandler(cmd: std.json.Value, comptime names: []const []const u8) bool {
+    inline for (names) |n| {
+        if (cmdHasHandlerName(cmd, n)) return true;
+    }
+    return false;
+}
+
+/// Allocate a permanent null-terminated JS-eval string and stash its
+/// pointer on the Node. Strings live in g_handler_expr_pool for the
+/// process lifetime — they're tiny (~30 bytes each) and stable.
+fn installJsExpr(comptime expr_fmt: []const u8, id: u32) ?[*:0]const u8 {
+    const s = std.fmt.allocPrint(g_alloc, expr_fmt, .{id}) catch return null;
+    const sz: [:0]u8 = s[0 .. s.len - 1 :0];
+    g_handler_expr_pool.append(g_alloc, sz) catch {};
+    return sz.ptr;
+}
+
+/// CREATE/UPDATE hook: extract event handler flags from the command
+/// and install JS-eval strings on the Node. windows.zig:routeEvent
+/// hit-tests against these on every SDL3 mouse event and fires
+/// dispatchJs (→ jsDispatch above) when one matches.
+fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
+    node.handlers.js_on_press = null;
+    node.handlers.js_on_mouse_down = null;
+    node.handlers.js_on_mouse_move = null;
+    node.handlers.js_on_mouse_up = null;
+    node.handlers.js_on_hover_enter = null;
+    node.handlers.js_on_hover_exit = null;
+    if (cmdHasAnyHandler(cmd, &.{ "onClick", "onPress" })) {
+        node.handlers.js_on_press = installJsExpr("__dispatchEvent({d},'onClick')\x00", id);
+    }
+    if (cmdHasAnyHandler(cmd, &.{ "onMouseDown", "onPointerDown", "onPressIn" })) {
+        node.handlers.js_on_mouse_down = installJsExpr("__dispatchEvent({d},'onMouseDown')\x00", id);
+    }
+    if (cmdHasAnyHandler(cmd, &.{ "onMouseMove", "onPointerMove" })) {
+        node.handlers.js_on_mouse_move = installJsExpr("__dispatchEvent({d},'onMouseMove')\x00", id);
+    }
+    if (cmdHasAnyHandler(cmd, &.{ "onMouseUp", "onPointerUp", "onPressOut" })) {
+        node.handlers.js_on_mouse_up = installJsExpr("__dispatchEvent({d},'onMouseUp')\x00", id);
+    }
+    if (cmdHasAnyHandler(cmd, &.{ "onHoverEnter", "onMouseEnter" })) {
+        node.handlers.js_on_hover_enter = installJsExpr("__dispatchEvent({d},'onHoverEnter')\x00", id);
+    }
+    if (cmdHasAnyHandler(cmd, &.{ "onHoverExit", "onMouseLeave" })) {
+        node.handlers.js_on_hover_exit = installJsExpr("__dispatchEvent({d},'onHoverExit')\x00", id);
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────
@@ -537,7 +621,12 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (val != .object) continue;
             var sit = val.object.iterator();
             while (sit.next()) |se| applyStyleKey(node, se.key_ptr.*, se.value_ptr.*);
-        } else if (std.mem.eql(u8, key, "text")) {
+        } else if (std.mem.eql(u8, key, "text") or std.mem.eql(u8, key, "value")) {
+            // `text` (Text-shaped nodes) and `value` (TextInput) both
+            // drive the Node's painted text. The SDL paint path reads
+            // node.text uniformly; full TextInput cursor/edit handling
+            // would live in a wider input subsystem not yet wired here,
+            // but at least the displayed value goes through.
             if (val == .string) {
                 node.text = g_alloc.dupe(u8, val.string) catch null;
             }
