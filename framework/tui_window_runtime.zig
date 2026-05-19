@@ -66,8 +66,9 @@ pub fn init(alloc: std.mem.Allocator) !void {
     host_tree.init(alloc);
     host_tree.setHooks(.{
         .open_host_window = openHostWindow,
-        // Stage 1: no apply_props / apply_handler_flags hooks yet.
-        // The Window opens but its children paint as empty Nodes.
+        .apply_props = applyProps,
+        // apply_handler_flags still null — onPress etc. inside the
+        // Window subtree don't fire yet. Coming in the next layer.
     });
     g_inited = true;
 }
@@ -155,6 +156,257 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
         windows.close(slot);
         return;
     };
+}
+
+// ────────────────────────────────────────────────────────────────────
+// apply_props hook — minimal CSS-shaped style application
+// ────────────────────────────────────────────────────────────────────
+//
+// Cribs the smallest viable subset of v8_app.zig's 590-line applyProps.
+// Carts inside a TUI-spawned <Window> mostly need: layout (flex, gap,
+// padding, width/height), colors (background, text), font sizing,
+// borders. Image src, latches, animation tweens, gradients, etc.
+// aren't here yet — those carts ship via the GPU app anyway.
+
+fn jsonFloat(v: std.json.Value) ?f32 {
+    return switch (v) {
+        .integer => |i| @floatFromInt(i),
+        .float => |f| @floatCast(f),
+        else => null,
+    };
+}
+
+fn parseHexColor(s: []const u8) ?layout.Color {
+    if (s.len < 4 or s[0] != '#') return null;
+    const body = s[1..];
+    if (body.len == 3) {
+        const r = std.fmt.parseInt(u8, body[0..1], 16) catch return null;
+        const g = std.fmt.parseInt(u8, body[1..2], 16) catch return null;
+        const b = std.fmt.parseInt(u8, body[2..3], 16) catch return null;
+        return layout.Color.rgb(r * 17, g * 17, b * 17);
+    }
+    if (body.len == 6) {
+        const r = std.fmt.parseInt(u8, body[0..2], 16) catch return null;
+        const g = std.fmt.parseInt(u8, body[2..4], 16) catch return null;
+        const b = std.fmt.parseInt(u8, body[4..6], 16) catch return null;
+        return layout.Color.rgb(r, g, b);
+    }
+    if (body.len == 8) {
+        const r = std.fmt.parseInt(u8, body[0..2], 16) catch return null;
+        const g = std.fmt.parseInt(u8, body[2..4], 16) catch return null;
+        const b = std.fmt.parseInt(u8, body[4..6], 16) catch return null;
+        const a = std.fmt.parseInt(u8, body[6..8], 16) catch return null;
+        return layout.Color.rgba(r, g, b, a);
+    }
+    return null;
+}
+
+fn parseRgbColor(s: []const u8) ?layout.Color {
+    var i: usize = 0;
+    while (i < s.len and s[i] != '(') i += 1;
+    if (i >= s.len or s[s.len - 1] != ')') return null;
+    const body = s[i + 1 .. s.len - 1];
+    var it = std.mem.splitScalar(u8, body, ',');
+    var parts: [4]u8 = .{ 0, 0, 0, 255 };
+    var idx: usize = 0;
+    while (it.next()) |p| : (idx += 1) {
+        if (idx >= 4) break;
+        const t = std.mem.trim(u8, p, " \t");
+        const v = std.fmt.parseFloat(f32, t) catch continue;
+        const scaled = if (idx == 3) v * 255.0 else v;
+        const clamped = @max(@min(scaled, 255.0), 0.0);
+        parts[idx] = @intFromFloat(clamped);
+    }
+    return layout.Color.rgba(parts[0], parts[1], parts[2], parts[3]);
+}
+
+fn parseColor(s: []const u8) ?layout.Color {
+    if (s.len == 0) return null;
+    if (s[0] == '#') return parseHexColor(s);
+    if (std.mem.startsWith(u8, s, "rgb")) return parseRgbColor(s);
+    const eq = std.mem.eql;
+    if (eq(u8, s, "black")) return layout.Color.rgb(0, 0, 0);
+    if (eq(u8, s, "white")) return layout.Color.rgb(255, 255, 255);
+    if (eq(u8, s, "red")) return layout.Color.rgb(220, 50, 50);
+    if (eq(u8, s, "blue")) return layout.Color.rgb(70, 130, 230);
+    if (eq(u8, s, "green")) return layout.Color.rgb(60, 190, 100);
+    if (eq(u8, s, "yellow")) return layout.Color.rgb(240, 210, 60);
+    if (eq(u8, s, "transparent")) return layout.Color.rgba(0, 0, 0, 0);
+    return null;
+}
+
+fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
+    const eq = std.mem.eql;
+    // Dimensions
+    if (eq(u8, key, "width")) {
+        if (jsonFloat(val)) |f| node.style.width = f;
+    } else if (eq(u8, key, "height")) {
+        if (jsonFloat(val)) |f| node.style.height = f;
+    } else if (eq(u8, key, "minWidth")) {
+        if (jsonFloat(val)) |f| node.style.min_width = f;
+    } else if (eq(u8, key, "maxWidth")) {
+        if (jsonFloat(val)) |f| node.style.max_width = f;
+    } else if (eq(u8, key, "minHeight")) {
+        if (jsonFloat(val)) |f| node.style.min_height = f;
+    } else if (eq(u8, key, "maxHeight")) {
+        if (jsonFloat(val)) |f| node.style.max_height = f;
+    }
+    // Flex
+    else if (eq(u8, key, "flexDirection")) {
+        if (val == .string) {
+            const s = val.string;
+            if (eq(u8, s, "row")) {
+                node.style.flex_direction = .row;
+            } else if (eq(u8, s, "column")) {
+                node.style.flex_direction = .column;
+            } else if (eq(u8, s, "row-reverse")) {
+                node.style.flex_direction = .row_reverse;
+            } else if (eq(u8, s, "column-reverse")) {
+                node.style.flex_direction = .column_reverse;
+            }
+        }
+    } else if (eq(u8, key, "flexGrow")) {
+        if (jsonFloat(val)) |f| node.style.flex_grow = f;
+    } else if (eq(u8, key, "gap")) {
+        if (jsonFloat(val)) |f| node.style.gap = f;
+    } else if (eq(u8, key, "justifyContent")) {
+        if (val == .string) {
+            const s = val.string;
+            if (eq(u8, s, "flex-start") or eq(u8, s, "start")) {
+                node.style.justify_content = .start;
+            } else if (eq(u8, s, "center")) {
+                node.style.justify_content = .center;
+            } else if (eq(u8, s, "flex-end") or eq(u8, s, "end")) {
+                node.style.justify_content = .end;
+            } else if (eq(u8, s, "space-between")) {
+                node.style.justify_content = .space_between;
+            } else if (eq(u8, s, "space-around")) {
+                node.style.justify_content = .space_around;
+            } else if (eq(u8, s, "space-evenly")) {
+                node.style.justify_content = .space_evenly;
+            }
+        }
+    } else if (eq(u8, key, "alignItems")) {
+        if (val == .string) {
+            const s = val.string;
+            if (eq(u8, s, "flex-start") or eq(u8, s, "start")) {
+                node.style.align_items = .start;
+            } else if (eq(u8, s, "center")) {
+                node.style.align_items = .center;
+            } else if (eq(u8, s, "flex-end") or eq(u8, s, "end")) {
+                node.style.align_items = .end;
+            } else if (eq(u8, s, "stretch")) {
+                node.style.align_items = .stretch;
+            } else if (eq(u8, s, "baseline")) {
+                node.style.align_items = .baseline;
+            }
+        }
+    }
+    // Padding
+    else if (eq(u8, key, "padding")) {
+        if (jsonFloat(val)) |f| node.style.padding = f;
+    } else if (eq(u8, key, "paddingLeft")) {
+        if (jsonFloat(val)) |f| node.style.padding_left = f;
+    } else if (eq(u8, key, "paddingRight")) {
+        if (jsonFloat(val)) |f| node.style.padding_right = f;
+    } else if (eq(u8, key, "paddingTop")) {
+        if (jsonFloat(val)) |f| node.style.padding_top = f;
+    } else if (eq(u8, key, "paddingBottom")) {
+        if (jsonFloat(val)) |f| node.style.padding_bottom = f;
+    }
+    // Margin
+    else if (eq(u8, key, "margin")) {
+        if (jsonFloat(val)) |f| node.style.margin = f;
+    } else if (eq(u8, key, "marginLeft")) {
+        if (jsonFloat(val)) |f| node.style.margin_left = f;
+    } else if (eq(u8, key, "marginRight")) {
+        if (jsonFloat(val)) |f| node.style.margin_right = f;
+    } else if (eq(u8, key, "marginTop")) {
+        if (jsonFloat(val)) |f| node.style.margin_top = f;
+    } else if (eq(u8, key, "marginBottom")) {
+        if (jsonFloat(val)) |f| node.style.margin_bottom = f;
+    }
+    // Background + text color
+    else if (eq(u8, key, "backgroundColor")) {
+        if (val == .string) node.style.background_color = parseColor(val.string);
+    } else if (eq(u8, key, "color")) {
+        if (val == .string) node.text_color = parseColor(val.string);
+    }
+    // Borders
+    else if (eq(u8, key, "borderWidth")) {
+        if (jsonFloat(val)) |f| node.style.border_width = f;
+    } else if (eq(u8, key, "borderColor")) {
+        if (val == .string) node.style.border_color = parseColor(val.string);
+    } else if (eq(u8, key, "borderRadius")) {
+        if (jsonFloat(val)) |f| node.style.border_radius = f;
+    }
+    // Typography
+    else if (eq(u8, key, "fontSize")) {
+        if (jsonFloat(val)) |f| node.font_size = @intFromFloat(f);
+    } else if (eq(u8, key, "fontWeight")) {
+        if (jsonFloat(val)) |f| node.font_weight = @intFromFloat(f);
+    } else if (eq(u8, key, "lineHeight")) {
+        if (jsonFloat(val)) |f| node.line_height = f;
+    } else if (eq(u8, key, "textAlign")) {
+        if (val == .string) {
+            const s = val.string;
+            if (eq(u8, s, "left")) {
+                node.style.text_align = .left;
+            } else if (eq(u8, s, "center")) {
+                node.style.text_align = .center;
+            } else if (eq(u8, s, "right")) {
+                node.style.text_align = .right;
+            }
+        }
+    }
+    // Opacity
+    else if (eq(u8, key, "opacity")) {
+        if (jsonFloat(val)) |f| node.style.opacity = f;
+    }
+    // Position
+    else if (eq(u8, key, "position")) {
+        if (val == .string) {
+            const s = val.string;
+            if (eq(u8, s, "absolute")) {
+                node.style.position = .absolute;
+            } else if (eq(u8, s, "relative")) {
+                node.style.position = .relative;
+            }
+        }
+    } else if (eq(u8, key, "top")) {
+        if (jsonFloat(val)) |f| node.style.top = f;
+    } else if (eq(u8, key, "left")) {
+        if (jsonFloat(val)) |f| node.style.left = f;
+    } else if (eq(u8, key, "right")) {
+        if (jsonFloat(val)) |f| node.style.right = f;
+    } else if (eq(u8, key, "bottom")) {
+        if (jsonFloat(val)) |f| node.style.bottom = f;
+    }
+    // Unknown keys (gradients, shadows, transforms, image src, latch
+    // bindings, tweens, etc.) silently skipped. The Window-subtree
+    // surface is intentionally minimal here — carts that need the
+    // full GPU-flavored prop set ship via scripts/ship, not ship-tui.
+}
+
+fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
+    _ = type_name;
+    if (props != .object) return;
+    var it = props.object.iterator();
+    while (it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const val = entry.value_ptr.*;
+        if (std.mem.eql(u8, key, "style")) {
+            if (val != .object) continue;
+            var sit = val.object.iterator();
+            while (sit.next()) |se| applyStyleKey(node, se.key_ptr.*, se.value_ptr.*);
+        } else if (std.mem.eql(u8, key, "text")) {
+            if (val == .string) {
+                node.text = g_alloc.dupe(u8, val.string) catch null;
+            }
+        }
+        // Other top-level props (children, src, onPress, debugSource,
+        // etc.) intentionally ignored — Window-subtree minimum surface.
+    }
 }
 
 // ────────────────────────────────────────────────────────────────────

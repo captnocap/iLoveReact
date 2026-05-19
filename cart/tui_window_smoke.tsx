@@ -8,16 +8,63 @@
 // Expected: ANSI text in the terminal AND a real GUI window pops up.
 
 import * as React from 'react';
-import { Col, Text, Window } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Window } from '@reactjit/runtime/primitives';
 
 export default function TuiWindowSmoke() {
   return (
     <Col style={{ width: '100%', height: '100%', padding: 1, backgroundColor: '#0b1020' }}>
       <Text style={{ color: '#fbbf24' }}>tui_window_smoke</Text>
       <Text style={{ color: '#94a3b8' }}>{'a real GUI window should appear alongside this ANSI shell'}</Text>
-      <Window title="hello from the TUI" width={520} height={320}>
-        <Col style={{ width: '100%', height: '100%', backgroundColor: '#1f2937' }}>
-          <Text style={{ color: '#e5e7eb' }}>this is rendered into a real SDL3 window</Text>
+      <Window title="hello from the TUI" width={560} height={360}>
+        <Col
+          style={{
+            width: '100%',
+            height: '100%',
+            padding: 24,
+            gap: 16,
+            backgroundColor: '#0f172a',
+          }}
+        >
+          <Text style={{ color: '#fbbf24', fontSize: 22 }}>
+            Hello from the TUI's React tree
+          </Text>
+          <Text style={{ color: '#94a3b8', fontSize: 13 }}>
+            This window is a real SDL3 surface. ANSI grid + GUI window share one
+            reconciler, one component tree, one JS state.
+          </Text>
+          <Row style={{ gap: 12 }}>
+            <Box
+              style={{
+                padding: 12,
+                backgroundColor: '#1e40af',
+                borderRadius: 6,
+              }}
+            >
+              <Text style={{ color: '#dbeafe' }}>blue tile</Text>
+            </Box>
+            <Box
+              style={{
+                padding: 12,
+                backgroundColor: '#7e22ce',
+                borderRadius: 6,
+              }}
+            >
+              <Text style={{ color: '#f3e8ff' }}>purple tile</Text>
+            </Box>
+            <Box
+              style={{
+                padding: 12,
+                backgroundColor: '#16a34a',
+                borderRadius: 6,
+              }}
+            >
+              <Text style={{ color: '#dcfce7' }}>green tile</Text>
+            </Box>
+          </Row>
+          <Box style={{ flexGrow: 1 }} />
+          <Text style={{ color: '#475569', fontSize: 11 }}>
+            close this window from the WM — the TUI shell keeps running
+          </Text>
         </Col>
       </Window>
     </Col>
