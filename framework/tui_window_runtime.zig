@@ -70,6 +70,15 @@ pub fn init(alloc: std.mem.Allocator) !void {
         // apply_handler_flags still null — onPress etc. inside the
         // Window subtree don't fire yet. Coming in the next layer.
     });
+    // Install the layout-side text-measure callback so Text intrinsic
+    // widths come back non-zero. Without this, every Text node measures
+    // 0×0, parent containers shrink-wrap to padding-only, and Row
+    // children stack at the same x (which is exactly what the
+    // tui_window_smoke + claudewrap screenshots showed). The callback
+    // grabs whichever active window's TextEngine is around — they all
+    // share the same FreeType face so the measurement is consistent
+    // across windows.
+    layout.setMeasureFn(measureText);
     g_inited = true;
 }
 
@@ -100,6 +109,38 @@ fn ensureSdlInited() bool {
     }
     g_sdl_inited = true;
     return true;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// Layout text-measure callback
+// ────────────────────────────────────────────────────────────────────
+
+/// Called by framework/layout.zig to measure a Text node's intrinsic
+/// dimensions. We borrow whichever active in-process window's
+/// TextEngine is around — they all wrap the same FreeType face
+/// (windows.zig:198 hard-codes DejaVuSans), so measurement is
+/// consistent regardless of which window's engine answers. font_family_id
+/// is ignored: the TUI window subset is single-font.
+fn measureText(
+    t: []const u8,
+    font_size: u16,
+    font_family_id: u8,
+    max_width: f32,
+    letter_spacing: f32,
+    line_height: f32,
+    max_lines: u16,
+    no_wrap: bool,
+    bold: bool,
+) layout.TextMetrics {
+    _ = font_family_id;
+    var i: usize = 0;
+    while (i < 32) : (i += 1) {
+        const slot = windows.getSlot(i) orelse continue;
+        if (slot.text_engine == null) continue;
+        const te = &slot.text_engine.?;
+        return te.measureTextWrappedEx(t, font_size, max_width, letter_spacing, line_height, max_lines, no_wrap, bold);
+    }
+    return .{ .width = 0, .height = 0, .ascent = 0 };
 }
 
 // ────────────────────────────────────────────────────────────────────

@@ -628,6 +628,15 @@ pub fn build(b: *std.Build) void {
         });
         tui_mod.addImport("v8", v8_mod);
         tui_mod.addImport("tls", tls_mod);
+        // wgpu pulled in transitively when has_window: the SDL3
+        // TextEngine in primitive/text.zig calls into gpu/text.zig for
+        // per-glyph advances (shared atlas, single source of truth for
+        // metrics across the engine). Layout text measurement therefore
+        // needs wgpu link-side even though paint goes through SDL3's
+        // 2D renderer, not the wgpu pipeline. Cost is real — wgpu's
+        // static archive is ~241MB — but it's the source-driven
+        // contract: carts that import <Window> pay; the rest don't.
+        if (has_window) tui_mod.addImport("wgpu", wgpu_mod);
         tui_mod.addOptions("build_options", tui_options);
         tui_mod.addCSourceFile(.{
             .file = b.path("framework/ffi/v8_stack_shim.cpp"),
