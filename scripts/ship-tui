@@ -67,6 +67,7 @@ echo "[ship-tui] bundling $ENTRY → $OUT_BUNDLE"
 "$ESBUILD" \
   --bundle "$ROOT/tui/entry.tsx" \
   --outfile="$OUT_BUNDLE" \
+  --metafile="$OUT_BUNDLE.metafile.json" \
   --platform=neutral \
   --main-fields=module,main \
   --target=es2020 \
@@ -88,7 +89,66 @@ echo "[ship-tui] bundling $ENTRY → $OUT_BUNDLE"
   --alias:loose-envify="$ROOT/deps/loose-envify" \
   --alias:js-tokens="$ROOT/deps/js-tokens"
 
-echo "[ship-tui] zig build tui-app -Dapp-name=$NAME"
+# Source-driven feature gate. Same metafile walker scripts/ship uses —
+# scripts/ship-metafile-gate.js inspects which runtime/hooks/*.ts files
+# survived tree-shaking and emits one space-separated line of 0/1 flags
+# in this exact order:
+#   privacy useHost useConn fs ws tel zigcall sdk voice whisper pg embed
+#   sqlite terminal process
+METAFILE="$OUT_BUNDLE.metafile.json"
+HTTPSRV_FLAG=""
+WSSRV_FLAG=""
+PROCESS_FLAG=""
+NET_FLAG=""
+SDK_FLAG=""
+FS_FLAG=""
+WINDOW_FLAG=""
+if [ -f "$METAFILE" ]; then
+    GATE_FLAGS=$("$ROOT/tools/v8cli" "$ROOT/scripts/ship-metafile-gate.js" "$METAFILE")
+    if [ -z "$GATE_FLAGS" ]; then
+        echo "[ship-tui] FATAL: ship-metafile-gate.js produced no output." >&2
+        exit 1
+    fi
+    # shellcheck disable=SC2086
+    set -- $GATE_FLAGS
+    # $1=privacy $2=useHost $3=useConn $4=fs $5=ws $6=tel $7=zigcall
+    # $8=sdk $9=voice $10=whisper $11=onnx $12=pg $13=embed $14=sqlite
+    # $15=terminal $16=process $17=window
+    WANT_USEHOST=$2
+    WANT_USECONN=$3
+    WANT_FS=$4
+    WANT_SDK=$8
+    WANT_PROCESS=${16}
+    WANT_WINDOW=${17}
+    if [ "$WANT_USEHOST" = "1" ]; then
+        HTTPSRV_FLAG="-Dhas-httpsrv=true"
+        WSSRV_FLAG="-Dhas-wssrv=true"
+        PROCESS_FLAG="-Dhas-process=true"
+    elif [ "$WANT_PROCESS" = "1" ]; then
+        PROCESS_FLAG="-Dhas-process=true"
+    fi
+    if [ "$WANT_USEHOST" = "1" ] || [ "$WANT_USECONN" = "1" ]; then
+        NET_FLAG="-Dhas-net=true"
+    fi
+    if [ "$WANT_SDK" = "1" ]; then
+        SDK_FLAG="-Dhas-sdk=true"
+    fi
+    if [ "$WANT_FS" = "1" ]; then
+        FS_FLAG="-Dhas-fs=true"
+    fi
+    if [ "$WANT_WINDOW" = "1" ]; then
+        # Auto-fires when the cart imports <Window>/<Notification> from
+        # @reactjit/runtime/primitives. ship-tui keys SDL3 + the window
+        # engine subset off this flag so an otherwise-ANSI binary can
+        # paint a <Window> subtree as a real GPU window from inside the
+        # same React tree. Currently informational — the link wiring is
+        # blocked on extracting v8_app.zig:applyCommandBatch (and the
+        # Node-tree state it touches) into a shared module.
+        WINDOW_FLAG="-Dhas-window=true"
+    fi
+fi
+
+echo "[ship-tui] zig build tui-app -Dapp-name=$NAME $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG"
 # -Dhas-terminal=true links libvterm and brings in framework/vterm_real
 # so the host's <Terminal> renderer can spawn shells and read cells.
 # libvterm is ~70KB statically; no reason to gate this off by default.
@@ -96,7 +156,8 @@ echo "[ship-tui] zig build tui-app -Dapp-name=$NAME"
   -Doptimize=ReleaseFast \
   -Dapp-name="$NAME" \
   -Dbundle-path="$OUT_BUNDLE" \
-  -Dhas-terminal=true
+  -Dhas-terminal=true \
+  $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG
 
 OUT_BIN="$ROOT/zig-out/bin/$NAME"
 if [ ! -x "$OUT_BIN" ]; then

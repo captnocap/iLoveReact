@@ -2,7 +2,7 @@
 //!
 //! Three window types, one API:
 //!
-//!   .in_process    — SDL2 renderer in the same process. Zero latency, shared memory.
+//!   .in_process    — SDL3 renderer in the same process. Zero latency, shared memory.
 //!                    Use for: inspector, devtools, debug panels.
 //!
 //!   .notification  — In-process + X11 notification hints. No focus steal, auto-dismiss.
@@ -11,9 +11,10 @@
 //!   .independent   — Separate OS process connected via TCP/NDJSON. Own wgpu surface.
 //!                    Use for: docked multi-window UIs, complex multi-panel apps.
 //!
-//! In-process windows use SDL2 renderers (not wgpu) because gpu.zig is a singleton
-//! bound to one surface. This is intentional — secondary windows don't need the full
-//! GPU pipeline. Independent windows each get their own process with their own wgpu.
+//! In-process windows use the SDL3 2D renderer (not wgpu) because gpu.zig is a
+//! singleton bound to one surface. This is intentional — secondary windows don't
+//! need the full GPU pipeline. Independent windows each get their own process
+//! with their own wgpu.
 //!
 //! Usage:
 //!   const win = windows.open("Inspector", 400, 600, .in_process);
@@ -43,9 +44,9 @@ const TextEngine = text_mod.TextEngine;
 // ════════════════════════════════════════════════════════════════════════
 
 pub const WindowKind = enum {
-    /// Same process, SDL2 renderer. Shared address space, zero IPC overhead.
+    /// Same process, SDL3 renderer. Shared address space, zero IPC overhead.
     in_process,
-    /// Same process, SDL2 renderer + X11 notification window type.
+    /// Same process, SDL3 renderer + X11 notification window type.
     /// No focus steal, optional auto-dismiss timer.
     notification,
     /// Separate OS process with its own wgpu surface, connected via TCP/NDJSON.
@@ -59,7 +60,7 @@ pub const WindowSlot = struct {
     active: bool = false,
     kind: WindowKind = .in_process,
 
-    // SDL2 (in_process + notification)
+    // SDL3 (in_process + notification)
     window: ?*c.SDL_Window = null,
     renderer: ?*c.SDL_Renderer = null,
     sdl_window_id: u32 = 0,
@@ -193,7 +194,7 @@ fn openInProcess(idx: usize, opts: OpenOptions) ?usize {
 
     const sdl_id = c.SDL_GetWindowID(window);
 
-    // Each in-process window gets its own text engine (SDL2 renderer mode)
+    // Each in-process window gets its own text engine (SDL3 renderer mode)
     const te = TextEngine.init(renderer, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") catch {
         log.err(.engine, "windows: TextEngine init failed", .{});
         c.SDL_DestroyRenderer(renderer);
@@ -580,7 +581,7 @@ pub fn layoutAll() void {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Paint (SDL2 renderer for in-process windows)
+// Paint (SDL3 renderer for in-process windows)
 // ════════════════════════════════════════════════════════════════════════
 
 /// Paint and present all active in-process windows.

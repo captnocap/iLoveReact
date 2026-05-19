@@ -51,7 +51,7 @@ function resolveThemeValue(v: any, colors: any, styles: any, resolveToken: any):
 function useResolvedPrimitiveProps(props: any): any {
   // Theme is required lazily for the same reason React is: primitives can be
   // initialized while React's own module body is still bootstrapping.
-  const theme = require('./theme');
+  const theme = require('./classifier');
   const snap = theme.__useClassifierSnapshot();
   if (!props || !hasThemeTokenValue(props)) return props;
   return resolveThemeValue(props, snap.colors, snap.styles, theme.resolveToken);
@@ -162,7 +162,15 @@ export const Text: any = (props: any) => {
  *   </Text>
  */
 export const GLYPH_SLOT = '\x01';
-export const Image: any = (props: any) => h('Image', props, props.children);
+// Image accepts EITHER `src` or `source` — the Zig host only reads `source`
+// (see v8_app.zig:1822), but `src` is the universal name (HTML, React, JSX
+// docs), so callers shouldn't have to remember which one. Caller wins if
+// both are passed.
+export const Image: any = ({ src, source, ...rest }: any) =>
+  h('Image', { ...rest, source: source ?? src }, rest.children);
+// One-liner wrapper for the host's icon renderer. Equivalent to
+// <Native type="Icon" .../> but cheaper to write/read everywhere.
+export const Icon: any = (props: any) => h('Icon', props);
 export const Pressable: any = (props: any) => h('Pressable', props, props.children);
 // ScrollView auto-persists its scroll position across dev-mode hot reloads.
 //
@@ -225,20 +233,11 @@ export const TextArea: any = (props: any) => h('TextArea', props, props.children
 export const TextEditor: any = (props: any) => h('TextEditor', props, props.children);
 export const Terminal: any = (props: any) => h('Terminal', props, props.children);
 export const terminal: any = Terminal;
-export const Window: any = (props: any) => {
-  if ((globalThis as any).__TRACE_WINDOWS) {
-    try {
-      const childCount = Array.isArray(props.children) ? props.children.length : (props.children ? 1 : 0);
-      console.log('[Window] render', JSON.stringify({
-        title: props.title, width: props.width, height: props.height, childCount,
-      }));
-    } catch {}
-  }
-  return h('Window', props, props.children);
-};
-export const window: any = Window;
-export const Notification: any = (props: any) => h('Notification', props, props.children);
-export const notification: any = Notification;
+// Window + Notification live in their own file so the esbuild metafile
+// can detect when a cart actually uses them. ship-tui keys the
+// -Dhas-window=true gate off that signal (carts without <Window> skip
+// the SDL3 + window-engine link).
+export { Window, window, Notification, notification } from './primitives/window';
 
 // ── Video — Image-shaped host node, but routed through framework/videos.zig ──
 // Pass `src` (or `videoSrc` for clarity); engine.zig:1232 promotes any node

@@ -232,6 +232,17 @@
       "bundlePolicy": "never",
       "note": "REMOVED. The networking stack now uses std.http.Client + tls.zig (framework/net/http.zig). libcurl and its entire transitive auth/TLS chain (~30MB) have been dropped from cart bundles. Do not add new code that links libcurl."
     },
+    "onnx-runtime": {
+      "kind": "vendored-library",
+      "payloadPath": "deps/onnxruntime",
+      "systemNames": [
+        "onnxruntime"
+      ],
+      "linkPolicy": "feature-gated",
+      "bundlePolicy": "feature-gated",
+      "buildFlag": "-Dhas-onnx",
+      "note": "Microsoft ONNX Runtime CPU-only Linux x64 build (~22MB libonnxruntime.so + symlinks). Used by framework/ml/ for inference (currently MobileSAM for image segmentation in cart/cutout). See deps/onnxruntime/README.md for version + upgrade notes."
+    },
     "libvterm": {
       "kind": "vendored-library",
       "payloadPath": "deps/libvterm",
@@ -334,6 +345,19 @@
       ],
       "note": "Native libs (sdl3, wgpu-native, freetype, stb-image*, x11, posix-threading, macos-ui-frameworks) are foundational \u2014 always linked. The build option only signals intent; nothing extra is link-gated by it. No auto-trigger \u2014 pass -Dhas-window-runtime manually if a future site needs it."
     },
+    "window": {
+      "shipGate": "window",
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/primitives/window.tsx"
+        }
+      ],
+      "buildOptions": [
+        "has-window"
+      ],
+      "note": "Auto-fires when a cart imports <Window> (or <Notification>) from @reactjit/runtime/primitives. For ship-tui, this is the trigger that links SDL3 + the window-rendering engine subset into an otherwise-ANSI-only TUI binary so a <Window> subtree can paint as a real GPU window from inside the same React tree. For ship (GPU app), the deps are already foundational \u2014 -Dhas-window is informational. Carts that don't reference Window pay zero (the file tree-shakes out)."
+    },
     "canvas": {
       "triggers": [],
       "buildOptions": [
@@ -403,6 +427,7 @@
       "note": "Linux MIDI input via ALSA sequencer (framework/midi_real.zig). Carts that don't import useMIDI get framework/midi_stub.zig; libasound is not linked. The dispatcher pattern matches audio.zig / luajit_worker.zig / sqlite.zig / vterm.zig."
     },
     "terminal": {
+      "shipGate": "terminal",
       "triggers": [
         {
           "kind": "metafileInput",
@@ -483,6 +508,25 @@
         "libsodium"
       ]
     },
+    "process": {
+      "shipGate": "process",
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/process.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useProcess.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-process"
+      ],
+      "v8Bindings": [
+        "process"
+      ]
+    },
     "use-host": {
       "shipGate": "useHost",
       "triggers": [
@@ -510,6 +554,10 @@
         {
           "kind": "metafileInput",
           "input": "runtime/hooks/useConnection.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useTheInternet.ts"
         }
       ],
       "buildOptions": [
@@ -685,6 +733,25 @@
       ],
       "note": "Heavy: compiles deps/whisper.cpp + ggml into libwhisper.so (~20 MB) and statically pulls libstdc++ into the cart binary (~80 MB). Carts that don't import runtime/hooks/whisper.ts pay nothing."
     },
+    "onnx": {
+      "shipGate": "onnx",
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useSegment.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-onnx"
+      ],
+      "v8Bindings": [
+        "onnx"
+      ],
+      "nativeLibraries": [
+        "onnx-runtime"
+      ],
+      "note": "Embeds onnxruntime + registers __onnx_* / __segment_* host fns. Phase 1 is a smoke-test only (__onnx_test); Phase 2 adds MobileSAM segmentation for cart/cutout. Carts that don't import runtime/hooks/useSegment.ts pay nothing — onnxruntime.so is ~22MB."
+    },
     "lua-worker": {
       "triggers": [],
       "buildOptions": [],
@@ -754,9 +821,13 @@
       "sdk",
       "voice",
       "whisper",
+      "onnx",
       "pg",
       "embed",
-      "sqlite"
+      "sqlite",
+      "terminal",
+      "process",
+      "window"
     ]
   }
 }

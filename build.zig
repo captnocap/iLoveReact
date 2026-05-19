@@ -72,6 +72,14 @@ pub fn build(b: *std.Build) void {
     const has_terminal = b.option(bool, "has-terminal", "Link libvterm + real vterm.zig (otherwise stub)") orelse false;
     const has_audio = b.option(bool, "has-audio", "Compile framework/audio.zig (SDL3 audio + LuaJIT DSP via zluajit module)") orelse false;
     const has_midi = b.option(bool, "has-midi", "Link libasound + real midi.zig (ALSA snd_seq_* MIDI input) — otherwise stub") orelse false;
+    // -Dhas-window: cart imports <Window> (or <Notification>) from
+    // @reactjit/runtime/primitives. For the GPU app (this target), the
+    // window-rendering deps (SDL3, freetype, layout, text, windows.zig)
+    // are foundational — always linked — so the flag is informational
+    // and currently no-op on the link side. The flag is consumed by the
+    // tui-app target below, where it gates SDL3 + the window engine
+    // subset for an otherwise-ANSI binary.
+    const has_window = b.option(bool, "has-window", "Cart uses <Window>/<Notification> (informational for GPU app; gates SDL3 + window-engine link for tui-app)") orelse false;
 
     // Bundle path override. When unset, v8_app.zig falls back to embedding
     // bundle-<app-name>.js relative to its own source directory (the
@@ -90,6 +98,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_terminal", has_terminal);
     options.addOption(bool, "has_audio", has_audio);
     options.addOption(bool, "has_midi", has_midi);
+    options.addOption(bool, "has_window", has_window);
     options.addOption([]const u8, "bundle_path", bundle_path);
     options.addOption(bool, "has_video", true);
     options.addOption(bool, "has_render_surfaces", true);
@@ -351,6 +360,22 @@ pub fn build(b: *std.Build) void {
         exe.addRPath(.{ .cwd_relative = "$ORIGIN" });
     }
 
+    // ── ONNX Runtime (has_onnx) ────────────────────────────────
+    // Vendored prebuilt libonnxruntime.so + C API headers. Used by
+    // framework/ml/ to run small inference models (currently MobileSAM
+    // for image segmentation in cart/cutout). No build-from-source —
+    // Microsoft's prebuilt is the supported path. See deps/onnxruntime/README.md.
+    const has_onnx = b.option(bool, "has-onnx", "Link onnxruntime + register __onnx_* / __segment_* bindings") orelse false;
+    if (has_onnx) {
+        root_mod.addIncludePath(b.path("deps/onnxruntime/include"));
+        root_mod.addLibraryPath(b.path("deps/onnxruntime/lib"));
+        exe.linkSystemLibrary("onnxruntime");
+        // $ORIGIN so the packaged binary finds libonnxruntime.so.1 sitting
+        // next to it. scripts/ship's source-driven walker bundles the .so
+        // when this feature is gated on via the dependency-registry.
+        exe.addRPath(.{ .cwd_relative = "$ORIGIN" });
+    }
+
     // ── llama.cpp via libllama_ffi.so (has_embed) ──────────────
     // Wraps the embedding + reranker work that experiments/embed-bench
     // validated. Pre-built .so lives at tsz/zig-out/lib/libllama_ffi.so
@@ -374,7 +399,6 @@ pub fn build(b: *std.Build) void {
     }
 
     // ── Framework FFI shims ────────────────────────────────────
-    root_mod.addCSourceFile(.{ .file = b.path("framework/ffi/compute_shim.c"), .flags = &.{"-O2"} });
     if (has_physics) {
         root_mod.addCSourceFile(.{ .file = b.path("framework/ffi/physics_shim.cpp"), .flags = &.{"-O2"} });
     }
@@ -433,6 +457,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_pg", has_pg or has_embed);
     options.addOption(bool, "has_embed", has_embed);
     options.addOption(bool, "has_whisper", has_whisper);
+    options.addOption(bool, "has_onnx", has_onnx);
 
     // ── Allergen label: V8 binding manifest ───────────────────────────
     // Writes one file per opt-in domain to zig-out/manifest/<name>.flag
@@ -457,6 +482,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/whisper.flag", if (has_whisper) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/onnx.flag", if (has_onnx) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/audio.flag", if (has_audio) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/midi.flag", if (has_midi) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/vterm.flag", if (has_terminal) "1\n" else "0\n");
@@ -580,6 +606,20 @@ pub fn build(b: *std.Build) void {
         tui_options.addOption(bool, "has_process", has_process);
         tui_options.addOption(bool, "has_net", has_net);
         tui_options.addOption(bool, "has_sdk", has_sdk);
+        tui_options.addOption(bool, "has_fs", has_fs);
+        // -Dhas-window: cart imports <Window>/<Notification>. The trigger
+        // is runtime/primitives/window.tsx landing in the bundle
+        // (ship-metafile-gate.js detects it). When set, the tui-app
+        // target needs to link SDL3 + the window-rendering engine subset
+        // (layout, text, windows.zig) and register the reconciler→
+        // Node-tree pipeline so a <Window> subtree can paint as a real
+        // GPU window from inside this otherwise-ANSI binary. The actual
+        // link wiring is deferred — it depends on extracting
+        // v8_app.zig:applyCommandBatch + the Node-tree state it touches
+        // into a shared module both v8_app.zig and v8_tui_app.zig can
+        // import. The option is declared so ship-tui can pass it
+        // without zig erroring on an unknown flag.
+        tui_options.addOption(bool, "has_window", has_window);
 
         const tui_mod = b.createModule(.{
             .root_source_file = b.path("v8_tui_app.zig"),
@@ -597,7 +637,7 @@ pub fn build(b: *std.Build) void {
         //   - std.http.Client (replaced libcurl in net/http.zig)
         //   - llama_headers (local_ai_runtime @cImport; libllama itself
         //     is dlopen'd at runtime, no link cost)
-        //   - framework/ffi for compute_shim / common shims
+        //   - framework/ffi for common shims
         tui_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
         tui_mod.addIncludePath(b.path("framework/ffi"));
 
@@ -631,7 +671,6 @@ pub fn build(b: *std.Build) void {
     // QuickJS C sources no longer compiled into bridge_mod — same reason
     // as the main exe (qjs_runtime archived to archive/qjs-stack/).
     bridge_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
-    bridge_mod.addCSourceFile(.{ .file = b.path("framework/ffi/compute_shim.c"), .flags = &.{"-O2"} });
     if (has_physics) {
         bridge_mod.addCSourceFile(.{ .file = b.path("framework/ffi/physics_shim.cpp"), .flags = &.{"-O2"} });
     }

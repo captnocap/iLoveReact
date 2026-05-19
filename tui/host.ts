@@ -17,6 +17,7 @@
 
 import type { Instance, TextInstance } from '../renderer/hostConfig';
 import { getRootInstances, handlerRegistry } from '../renderer/hostConfig';
+import { paintEffect, bindEffectScheduler } from './effects';
 
 // ── Repaint scheduling ───────────────────────────────────────────────
 
@@ -38,8 +39,72 @@ let selDragging = false;          // true between press and release
 export function requestPaint(): void {
   if (scheduled) return;
   scheduled = true;
-  queueMicrotask(() => { scheduled = false; if (!paused) repaint(); });
+  queueMicrotask(() => { scheduled = false; if (!paused) safeRepaint(); });
 }
+
+// Throttled paint scheduler. Microtask-driven requestPaint runs as fast
+// as the event loop allows — perfect for cart-state→repaint, but a tight
+// self-feedback loop when used to "keep polling for inner PTY redraws".
+// requestPaintSoon trampolines through setTimeout(16) so a stretch of
+// repaints during a Terminal warm-pump window caps at ~60fps instead of
+// burning a core.
+let softScheduled = false;
+export function requestPaintSoon(delayMs = 16): void {
+  if (scheduled || softScheduled) return;
+  softScheduled = true;
+  setTimeout(() => { softScheduled = false; if (!paused) safeRepaint(); }, delayMs);
+}
+
+// repaint() guarded against exceptions. Without this, a throw in any
+// cart component (e.g. a layout edge case at extreme window sizes) takes
+// down the microtask trampoline and freezes the stdin pump, leaving
+// the terminal stuck in alt-screen + MOUSE_ON with no input being
+// drained — which presents as "UI gone, scroll prints raw mouse SGR".
+// The catch keeps the process responsive and logs to stderr so the
+// failing render is recoverable + diagnosable.
+let lastPaintErrorTs = 0;
+function safeRepaint(): void {
+  try {
+    repaint();
+  } catch (e: any) {
+    // Rate-limit to avoid drowning stderr if the cart's render is
+    // permanently broken — one report per 2s is plenty.
+    const now = Date.now();
+    if (now - lastPaintErrorTs > 2000) {
+      lastPaintErrorTs = now;
+      try { (process.stderr as any).write?.(`[paint] ${e?.stack ?? e}\n`); } catch {}
+    }
+  }
+}
+
+// Terminal-resize warm pump. After ANY Terminal slot resize (inner box
+// changed, OR outer window resize via pollResize) the inner program will
+// emit its SIGWINCH-driven redraw over the next several frames — for
+// nested-VM setups like claude-ss (PTY → vsock → outer PTY) that round
+// trip can be 100-500ms. The drained-only gate in the Terminal paint
+// block won't reschedule a paint until the bytes arrive, but nothing
+// will trigger a paint until then either, so the bytes sit in the PTY
+// buffer until a keypress or mouse event.
+//
+// Solution: any resize sets this timestamp, and the Terminal paint
+// block treats "warm" the same as "drained" — schedules another paint,
+// throttled to 60fps. Pump dies on its own after warmMs elapses with no
+// new resize.
+let termWarmUntil = 0;
+export function markTermWarm(durationMs = 1500): void {
+  const until = Date.now() + durationMs;
+  if (until > termWarmUntil) termWarmUntil = until;
+  requestPaint();
+}
+
+// tickDrain polls the PTY; when it drains new data it returns 1 and the
+// preamble calls this. Immediate repaint — no polling latency.
+(globalThis as any).__onVtermUpdate = () => requestPaint();
+
+// One-shot wiring so <Effect> animation frames can request paints, and so
+// shaders can read mouse coords for parallax. Both go through this seam to
+// avoid pulling host internals into effects.ts.
+bindEffectScheduler(requestPaint, getMouse);
 
 // forcePaint — discard the prev-frame buffer so the next paint is a
 // full repaint. Use after large structural tree changes (route swaps,
@@ -338,13 +403,23 @@ function scrollBy(id: number, delta: number): void {
   requestPaint();
 }
 
-// Renderable visibility — Window/Notification/Effect/Render aren't part
-// of the visual tree on the GPU side either. Skip in layout.
+// Renderable visibility — these node types aren't part of the visual
+// tree on the GPU side either. Skip in ANSI layout.
+//
+// Window / Notification: when -Dhas-window is set (cart imports
+// runtime/primitives/window.tsx), the v8_tui_app binary links SDL3 +
+// the window-rendering engine subset and registers __hostFlush so
+// reconciler ops for the Window subtree route to a real GPU window
+// from inside this same React tree. We still skip the subtree HERE in
+// the ANSI walker either way — the Zig side owns paint for those
+// nodes, not the terminal grid. The has-window link wiring is
+// blocked on extracting v8_app.zig:applyCommandBatch + the Node-tree
+// state it touches into a shared module; until that lands, <Window>
+// is a no-op rather than a real GUI window.
 function isRenderable(node: Instance): boolean {
   switch (node.type) {
-    case 'Effect':
     case 'Render':
-    case 'Window':       // no multi-window TUI
+    case 'Window':
     case 'Notification':
     case 'Audio':
     case 'Physics':
@@ -384,6 +459,15 @@ function intrinsic(node: Instance): { w: number; h: number } {
     const s = styleOf(node);
     const w = asCells(s.width) ?? 12;
     const h = asCells(s.height) ?? 4;
+    return { w, h };
+  }
+  if (node.type === 'Effect') {
+    // Effect is a leaf rendered by paintEffect. Default to a small surface
+    // when no size is pinned; carts almost always wrap it in a sized parent
+    // or apply flexGrow, which overrides this anyway.
+    const s = styleOf(node);
+    const w = asCells(s.width) ?? 24;
+    const h = asCells(s.height) ?? 8;
     return { w, h };
   }
   if (node.type === 'Terminal') {
@@ -431,7 +515,7 @@ function layout(node: Instance, x: number, y: number, w: number, h: number, out:
   if (node.type === 'Text' || node.type === 'Image' || node.type === 'TextInput' ||
       node.type === 'TextArea' || node.type === 'TextEditor' || node.type === 'Canvas' ||
       node.type === 'Graph' || node.type === 'Video' || node.type === 'Scene3D' ||
-      node.type === 'Terminal') return;
+      node.type === 'Terminal' || node.type === 'Effect') return;
 
   const s = styleOf(node);
   const dir = flexDir(s);
@@ -442,8 +526,43 @@ function layout(node: Instance, x: number, y: number, w: number, h: number, out:
   const iw = Math.max(0, w - padLeft(s) - padRight(s) - bw * 2);
   const ih = Math.max(0, h - padTop(s) - padBottom(s) - bw * 2);
 
-  const kids = visibleChildren(node);
-  if (kids.length === 0) return;
+  const allKids = visibleChildren(node);
+  if (allKids.length === 0) return;
+
+  // Partition kids: position:'absolute' children are taken out of the
+  // normal flow and laid out at the parent's inner rect (with optional
+  // top/left/width/height overrides). They're appended to `out` AFTER
+  // their flex siblings, so they paint on top — natural z-index.
+  const kids: Instance[] = [];
+  const absKids: Instance[] = [];
+  for (const k of allKids) {
+    if ((styleOf(k) as any).position === 'absolute') absKids.push(k);
+    else kids.push(k);
+  }
+
+  // Tail call (run after the normal-flow layout below) that lays out
+  // absolute children at the parent's inner rect.
+  const layoutAbsKids = () => {
+    for (const k of absKids) {
+      const ks: any = styleOf(k);
+      const kw = (typeof ks.width === 'number') ? cells(ks.width)
+        : (typeof ks.width === 'string' && ks.width.endsWith('%')) ? (resolveExtent(ks.width, iw) ?? iw)
+        : iw;
+      const kh = (typeof ks.height === 'number') ? cells(ks.height)
+        : (typeof ks.height === 'string' && ks.height.endsWith('%')) ? (resolveExtent(ks.height, ih) ?? ih)
+        : ih;
+      const left = asCells(ks.left) ?? 0;
+      const top  = asCells(ks.top)  ?? 0;
+      // right/bottom anchor: pin to the far edge instead of left/top.
+      const right  = asCells(ks.right);
+      const bottom = asCells(ks.bottom);
+      const kx = (right  != null) ? ix + iw - kw - right  : ix + left;
+      const ky = (bottom != null) ? iy + ih - kh - bottom : iy + top;
+      layout(k, kx, ky, kw, kh, out, clip);
+    }
+  };
+
+  if (kids.length === 0) { layoutAbsKids(); return; }
 
   // ScrollView — children stacked at intrinsic heights, vertically
   // offset by the saved scroll position. Inner rect becomes the clip
@@ -476,16 +595,19 @@ function layout(node: Instance, x: number, y: number, w: number, h: number, out:
       layout(k, ix, cy, kw, kh, out, childClip);
       cy += kh + gap;
     }
+    layoutAbsKids();
     return;
   }
 
   // flexWrap on row/column. Greedy line-pack.
   if (s.flexWrap === 'wrap' && (dir === 'row' ? iw : ih) > 0) {
     layoutWrap(node, kids, ix, iy, iw, ih, gap, dir, out, clip);
+    layoutAbsKids();
     return;
   }
 
   layoutFlex(node, kids, ix, iy, iw, ih, gap, dir, s, out, clip);
+  layoutAbsKids();
 }
 
 function layoutWrap(
@@ -714,6 +836,12 @@ function fillRect(grid: Cell[][], x: number, y: number, w: number, h: number, bg
       const c = grid[yy][xx];
       if (bg) c.bg = bg;
       if (fg) c.fg = fg;
+      // Reset character + attrs so overlapping nodes (e.g. an absolute
+      // overlay on top of a Terminal) actually mask whatever was painted
+      // beneath them. Leaf paints (writeText, decodeTerminalRow) come
+      // right after fillRect and set ch back to real content.
+      c.ch = ' ';
+      c.bold = c.italic = c.underline = c.dim = c.reverse = c.strike = false;
     }
   }
 }
@@ -846,6 +974,21 @@ function paintBgAndContent(grid: Cell[][], box: LaidOut): void {
     return;
   }
 
+  if (node.type === 'Effect') {
+    // Walk up to the nearest ancestor with an explicit backgroundColor —
+    // shaders frequently return premultiplied colors with alpha<1, and we
+    // need a sensible color underneath. Default to black.
+    let bg: string | null = null;
+    let p: any = (node as any).parent;
+    while (p) {
+      const ps = styleOf(p);
+      if (typeof ps.backgroundColor === 'string') { bg = ps.backgroundColor; break; }
+      p = p.parent;
+    }
+    paintEffect(grid as any, { x: box.x, y: box.y, w: box.w, h: box.h }, node as any, bg);
+    return;
+  }
+
   if (node.type === 'Terminal') {
     const g: any = globalThis;
     if (typeof g.__vterm_spawn !== 'function') {
@@ -869,22 +1012,48 @@ function paintBgAndContent(grid: Cell[][], box: LaidOut): void {
       }
       entry = { slot, rows: box.h, cols: box.w };
       termSlots.set(id, entry);
+      // autoFocus: route keystrokes to this Terminal immediately without
+      // requiring a click. Lets nested-TUI setups (a TUI cart whose only
+      // job is to host a single <Terminal>) work when mouse events can't
+      // flow through the outer terminal — e.g. wrapt_tui being driven
+      // through a parent GPU/TUI session.
+      if ((node.props as any).autoFocus === true) {
+        activeTerminalId = id;
+      }
     } else if (entry.rows !== box.h || entry.cols !== box.w) {
       try { g.__vterm_resize?.(entry.slot, box.h, box.w); } catch {}
       entry.rows = box.h;
       entry.cols = box.w;
+      // After SIGWINCH the inner program's redraw takes several frames to
+      // arrive (especially through a vsock/VM boundary). Keep the paint
+      // pump alive across that window so the bytes actually land.
+      markTermWarm();
     }
     // Drain any pending PTY data into the vterm screen, then read each
-    // row out and decode into our grid.
-    try { g.__vterm_poll?.(entry.slot); } catch {}
+    // row out and decode into our grid. __vterm_poll returns 1 if it
+    // actually drained any bytes, 0 otherwise.
+    const drained: number = (() => { try { return g.__vterm_poll?.(entry.slot) ?? 0; } catch { return 0; } })();
     fillRect(grid, box.x, box.y, box.w, box.h, '#000000', '#e5e7eb');
     for (let r = 0; r < box.h; r++) {
       const row: string = (() => { try { return g.__vterm_get_row(entry!.slot, r) || ''; } catch { return ''; } })();
       decodeTerminalRow(grid, box.x, box.y + r, box.w, row);
     }
-    // Schedule another paint while alive — keeps the cell grid in sync
-    // with shell output without the cart having to manage tick state.
-    requestPaint();
+    // Schedule another paint when new PTY data arrived this frame
+    // (microtask — apply immediately) OR while a resize warm window is
+    // still active (setTimeout 16ms — 60fps-capped pump so the inner
+    // program's SIGWINCH redraw, which arrives over many frames, has
+    // somewhere to land without spinning a core).
+    //
+    // Pre-warm version: a single unconditional requestPaint() here
+    // produced a tight self-feedback loop that locked our own GPU
+    // <Terminal> when wrapt_tui was nested inside wrapt. The current
+    // shape preserves that fix while ensuring resize redraws always
+    // settle.
+    if (drained) {
+      requestPaint();
+    } else if (Date.now() < termWarmUntil) {
+      requestPaintSoon(16);
+    }
     return;
   }
 
@@ -1208,12 +1377,25 @@ const ALT = '\x1b[?1049h';
 const RESTORE = '\x1b[?1049l';
 const HIDE = '\x1b[?25l';
 const SHOW = '\x1b[?25h';
-// Mouse: 1000 = press/release, 1002 = motion-while-button-held (drag),
-// 1006 = SGR extended (decimal coords past col 223). Drag reporting
-// makes per-host text selection possible — drag paints an overlay, the
-// release auto-copies the underlying cells via OSC 52 (set-clipboard).
-const MOUSE_ON  = '\x1b[?1000h\x1b[?1002h\x1b[?1006h';
-const MOUSE_OFF = '\x1b[?1000l\x1b[?1002l\x1b[?1006l';
+// Mouse: 1000 = press/release, 1003 = any-motion (hover-without-button +
+// drag), 1006 = SGR extended (decimal coords past col 223). Any-motion
+// reporting lets <Effect> shaders use U.mouse_x / U.mouse_y / U.mouse_inside
+// for hover-driven parallax — same primitive carts use on the GPU host.
+// The drag-selection logic still works: press/drag/release events come
+// through identically in 1003 mode.
+const MOUSE_ON  = '\x1b[?1000h\x1b[?1003h\x1b[?1006h';
+const MOUSE_OFF = '\x1b[?1000l\x1b[?1003l\x1b[?1006l';
+
+// Persistent mouse position, in cell coordinates. Updated on every mouse
+// event so <Effect> shaders can read it via U.mouse_x / U.mouse_y. Stays
+// at the last-known position when the cursor leaves the terminal (so the
+// parallax doesn't snap to origin on every hover-out).
+let mouseCellX = -1;
+let mouseCellY = -1;
+let mouseInside = 0;
+export function getMouse(): { x: number; y: number; inside: number } {
+  return { x: mouseCellX, y: mouseCellY, inside: mouseInside };
+}
 
 // Last laid-out tree from the most recent paint. Hit-testing walks this
 // instead of re-running layout(), so a click on row 4 col 50 always
@@ -1228,7 +1410,11 @@ function pollResize(): void {
   if (w !== lastW || h !== lastH) {
     lastW = w; lastH = h;
     prev = null;
-    requestPaint();
+    // Force a dirty re-render all the way down the chain: nested
+    // Terminals will refire __vterm_resize on the next paint (box.w/h
+    // changed), and the warm pump keeps polling until their inner
+    // SIGWINCH redraw finishes flowing through.
+    markTermWarm();
   }
 }
 
@@ -1248,6 +1434,15 @@ export function leave(): void {
   process.stdout.write('\x1b[0m' + MOUSE_OFF + SHOW + RESTORE);
 }
 
+// Re-emit MOUSE_ON + alt-screen guards. Cheap defensive call to run
+// after window-state transitions (fullscreen/maximize) that some
+// terminal emulators have been observed to drop modes during. Idempotent
+// — costs ~30 bytes of ANSI when fired, invisible to the user.
+function reAssertTerminalModes(): void {
+  if (!entered) return;
+  process.stdout.write(ALT + HIDE + MOUSE_ON);
+}
+
 // Headless snapshot — paints once into an explicit-size grid and returns
 // plain text (no ANSI). Bypasses stdout entirely. Used by devshell `y`
 // copy and by tests.
@@ -1259,10 +1454,46 @@ export function headlessSnapshot(width: number, height: number): string {
   return grid.map(row => row.map(c => c.ch === WIDE_CONT ? '' : c.ch).join('')).join('\n');
 }
 
-process.stdout.on('resize', () => requestPaint());
+process.stdout.on('resize', () => {
+  // Defensive: re-assert alt-screen + mouse modes in case the host
+  // terminal dropped them during a fullscreen/maximize transition.
+  // Then invalidate the diff buffer + kick the inner-Terminal warm
+  // pump so SIGWINCH-driven redraws have something to land in.
+  //
+  // The synchronous reassert covers most cases, but some terminals
+  // (notably kitty on monitor-edge maximize) finish their mode-reset
+  // dance AFTER our resize event fires. The two-stage delayed reassert
+  // catches that window — cheap (~60 bytes), invisible to user.
+  reAssertTerminalModes();
+  prev = null;
+  markTermWarm();
+  setTimeout(reAssertTerminalModes, 100);
+  setTimeout(reAssertTerminalModes, 400);
+});
 process.on('exit', leave);
-process.on('SIGINT', () => { leave(); process.exit(0); });
+process.on('SIGINT',  () => { leave(); process.exit(0); });
 process.on('SIGTERM', () => { leave(); process.exit(0); });
+process.on('SIGHUP',  () => { leave(); process.exit(0); });
+
+// Crash safety net. Without this, an exception in repaint / a cart
+// component / a host callback exits the process via V8's default
+// handler — which doesn't run our exit hook, leaving the user's
+// terminal in alt-screen + MOUSE_ON. The shell underneath then
+// echoes mouse SGR sequences (e.g. `^[[<65;111;31M` on scroll)
+// because kitty doesn't know our process is dead.
+//
+// We also log the exception to stderr; users running with
+// `2>/tmp/cw.err` can read what blew up.
+process.on('uncaughtException', (e: any) => {
+  try { leave(); } catch {}
+  try { (process.stderr as any).write?.(`[uncaughtException] ${e?.stack ?? e}\n`); } catch {}
+  process.exit(1);
+});
+process.on('unhandledRejection', (e: any) => {
+  try { leave(); } catch {}
+  try { (process.stderr as any).write?.(`[unhandledRejection] ${e?.stack ?? e}\n`); } catch {}
+  process.exit(1);
+});
 
 // ── Key bus ─────────────────────────────────────────────────────────
 
@@ -1271,6 +1502,16 @@ const keyHandlers = new Set<KeyHandler>();
 export function subscribeKey(fn: KeyHandler): () => void {
   keyHandlers.add(fn);
   return () => { keyHandlers.delete(fn); };
+}
+
+// Hotkeys that bypass Terminal focus — even while the inner program
+// (e.g. claude-code in a vsock VM) is reading stdin, these match first
+// and fire the cart's callback instead of being forwarded to the PTY.
+// Use sparingly; the inner program will never see these bytes.
+const hotkeyHandlers = new Map<string, () => void>();
+export function subscribeHotkey(seq: string, fn: () => void): () => void {
+  hotkeyHandlers.set(seq, fn);
+  return () => { hotkeyHandlers.delete(seq); };
 }
 
 // Internal hook for the focus manager / entry.tsx so they can intercept
@@ -1327,16 +1568,29 @@ function dispatchMouse(buf: string): void {
     const action = m[4]; // 'M' = press OR drag (motion-with-button), 'm' = release
     s = s.slice(m.index + m[0].length);
 
+    // Track persistent mouse position on every event (including motion-no-
+    // button under 1003 reporting). Used by <Effect> shaders for parallax.
+    mouseCellX = col;
+    mouseCellY = row;
+    mouseInside = 1;
+    // No-button motion in 1003 reports button = 35 (3 + drag flag). It
+    // contains useful position data but nothing else, so we tick a paint
+    // (effects animate on it) and drop the event.
+    if ((rawButton & ~32) === 3) {
+      requestPaint();
+      continue;
+    }
+
     // Drag flag is bit 5 (32). Mask it off to learn the actual button.
     const dragging = (rawButton & 32) !== 0;
     const button = rawButton & ~32;
 
     // Wheel: bit 6 (64). 64 = wheel-up, 65 = wheel-down. Terminal under
-    // cursor wins: scroll OUR vterm's scrollback (not the running app's
-    // history). That's what every terminal emulator does — the wheel
-    // moves the viewport over bytes-already-rendered, never injects
-    // input. The next keystroke (which goes through __vterm_write)
-    // snaps the view back to live.
+    // cursor wins. Two cases:
+    //   1. Inner program is tracking mouse (mouse_mode > 0, e.g. nested
+    //      TUI like claude-inner) → forward the wheel as an SGR mouse
+    //      sequence so the inner can scroll its own scrollback.
+    //   2. Otherwise → scroll OUR vterm's scrollback locally.
     // Falls through to ScrollView routing when no Terminal is under
     // the cursor — and to nothing when neither matches.
     if ((rawButton & 64) !== 0 && action === 'M') {
@@ -1344,11 +1598,32 @@ function dispatchMouse(buf: string): void {
       if (tm) {
         const entry = termSlots.get(tm.id);
         const g: any = globalThis;
-        if (entry && typeof g.__vterm_scroll === 'function') {
-          const delta = (rawButton & 1) ? 3 : -3; // wheel-down = +3 toward live
-          try { g.__vterm_scroll(entry.slot, delta); } catch {}
-          requestPaint();
-          continue;
+        if (entry) {
+          const mouseMode = (typeof g.__vterm_get_mouse_mode === 'function')
+            ? (g.__vterm_get_mouse_mode(entry.slot) ?? 0)
+            : 0;
+          if (mouseMode > 0 && typeof g.__vterm_write === 'function') {
+            // Find the terminal's box to translate to inner-screen coords.
+            let tbox: LaidOut | null = null;
+            for (let i = lastLayout.length - 1; i >= 0; i--) {
+              if (lastLayout[i].node.id === tm.id) { tbox = lastLayout[i]; break; }
+            }
+            if (tbox) {
+              const buttonCode = (rawButton & 1) ? 65 : 64; // wheel-down : wheel-up
+              const innerCol = col - tbox.x + 1;
+              const innerRow = row - tbox.y + 1;
+              const seq = `\x1b[<${buttonCode};${innerCol};${innerRow}M`;
+              try { g.__vterm_write(entry.slot, seq); } catch {}
+              markTermWarm(500);
+              continue;
+            }
+          }
+          if (typeof g.__vterm_scroll === 'function') {
+            const delta = (rawButton & 1) ? 3 : -3; // wheel-down = +3 toward live
+            try { g.__vterm_scroll(entry.slot, delta); } catch {}
+            requestPaint();
+            continue;
+          }
         }
       }
       const sv = hitTestScroll(col, row);
@@ -1451,6 +1726,12 @@ export function startInput(): void {
       if (rest.length === 0) return;
       data = rest;
     }
+    // Cart-registered hotkeys bypass Terminal focus. Checked BEFORE the
+    // PTY forward so the embedded shell never sees these bytes.
+    {
+      const hot = hotkeyHandlers.get(data);
+      if (hot) { try { hot(); } catch {} return; }
+    }
     // While focused on a Terminal, route keystrokes (including Ctrl+C →
     // SIGINT to shell) to the vterm PTY. Ctrl+P still toggles host
     // pause; everything else flows through.
@@ -1459,6 +1740,11 @@ export function startInput(): void {
       const g: any = globalThis;
       if (entry && typeof g.__vterm_write === 'function') {
         try { g.__vterm_write(entry.slot, data); } catch {}
+        // PTY echo lands over the next few frames — keep the pump
+        // alive so the typed bytes actually render. Without this, the
+        // drained-only paint gate would leave keystrokes invisible
+        // until some unrelated event triggered a paint.
+        markTermWarm(500);
         return;
       }
     }
