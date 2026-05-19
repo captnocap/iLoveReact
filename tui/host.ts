@@ -304,15 +304,22 @@ const scrollMaxY: Map<number, number> = new Map();
 // Arrow keys scroll this one when no other key handler claims them.
 let activeScrollId: number | null = null;
 
-// ── Terminal (vterm) slots ─────────────────────────────────────────
+// ── Terminal (vterm) sessions ──────────────────────────────────────
 //
-// Per-Instance vterm slot. The host calls __vterm_spawn(rows, cols)
-// the first time a Terminal is painted, stores the slot, and reuses
-// it across paints. activeTerminalId routes keystrokes to a focused
-// terminal's PTY.
-type TermEntry = { slot: number; rows: number; cols: number };
+// Per-Instance vterm session. The host calls __vterm_open(name, rows, cols)
+// the first time a Terminal is painted, stores the name, and reuses it
+// across paints. The session name comes from the cart's `session` prop
+// when set, otherwise falls back to `tui-<node.id>` so each <Terminal>
+// instance gets its own pipe automatically.
+type TermEntry = { session: string; rows: number; cols: number };
 const termSlots: Map<number, TermEntry> = new Map();
 let activeTerminalId: number | null = null;
+
+function terminalSessionFor(node: Instance): string {
+  const explicit = (node.props as any)?.session;
+  if (typeof explicit === 'string' && explicit.length > 0) return explicit;
+  return `tui-${node.id}`;
+}
 
 function decodeTerminalRow(grid: Cell[][], x: number, y: number, maxW: number, rowStr: string): void {
   const W = grid[0]?.length ?? 0, H = grid.length;
@@ -991,7 +998,7 @@ function paintBgAndContent(grid: Cell[][], box: LaidOut): void {
 
   if (node.type === 'Terminal') {
     const g: any = globalThis;
-    if (typeof g.__vterm_spawn !== 'function') {
+    if (typeof g.__vterm_open !== 'function' && typeof g.__vterm_spawn !== 'function') {
       fillRect(grid, box.x, box.y, box.w, box.h, '#1f2937', '#94a3b8');
       writeText(grid, box.x, box.y, box.w, 1,
         '[vterm not available — build with -Dhas-terminal=true]',
@@ -1002,15 +1009,20 @@ function paintBgAndContent(grid: Cell[][], box: LaidOut): void {
     let entry = termSlots.get(id);
     if (!entry) {
       const shell = typeof (node.props as any).shell === 'string' ? (node.props as any).shell : '';
-      const slot = g.__vterm_spawn(box.h, box.w, shell);
-      if (slot < 0) {
+      const session = terminalSessionFor(node);
+      // __vterm_open(name, rows, cols, shell). Returns 0 on success, -1 on
+      // failure. Falls back to __vterm_spawn for older host binaries that
+      // expose only the legacy alias.
+      const open = g.__vterm_open ?? g.__vterm_spawn;
+      const rc = open(session, box.h, box.w, shell);
+      if (rc < 0) {
         fillRect(grid, box.x, box.y, box.w, box.h, '#1f2937', '#94a3b8');
         writeText(grid, box.x, box.y, box.w, 1,
-          '[no free vterm slot — max 4 terminals]',
+          `[failed to open vterm session "${session}"]`,
           sgrFromStyle({}, '#f87171'));
         return;
       }
-      entry = { slot, rows: box.h, cols: box.w };
+      entry = { session, rows: box.h, cols: box.w };
       termSlots.set(id, entry);
       // autoFocus: route keystrokes to this Terminal immediately without
       // requiring a click. Lets nested-TUI setups (a TUI cart whose only
@@ -1021,7 +1033,7 @@ function paintBgAndContent(grid: Cell[][], box: LaidOut): void {
         activeTerminalId = id;
       }
     } else if (entry.rows !== box.h || entry.cols !== box.w) {
-      try { g.__vterm_resize?.(entry.slot, box.h, box.w); } catch {}
+      try { g.__vterm_resize?.(entry.session, box.h, box.w); } catch {}
       entry.rows = box.h;
       entry.cols = box.w;
       // After SIGWINCH the inner program's redraw takes several frames to
@@ -1032,10 +1044,10 @@ function paintBgAndContent(grid: Cell[][], box: LaidOut): void {
     // Drain any pending PTY data into the vterm screen, then read each
     // row out and decode into our grid. __vterm_poll returns 1 if it
     // actually drained any bytes, 0 otherwise.
-    const drained: number = (() => { try { return g.__vterm_poll?.(entry.slot) ?? 0; } catch { return 0; } })();
+    const drained: number = (() => { try { return g.__vterm_poll?.(entry.session) ?? 0; } catch { return 0; } })();
     fillRect(grid, box.x, box.y, box.w, box.h, '#000000', '#e5e7eb');
     for (let r = 0; r < box.h; r++) {
-      const row: string = (() => { try { return g.__vterm_get_row(entry!.slot, r) || ''; } catch { return ''; } })();
+      const row: string = (() => { try { return g.__vterm_get_row(entry!.session, r) || ''; } catch { return ''; } })();
       decodeTerminalRow(grid, box.x, box.y + r, box.w, row);
     }
     // Schedule another paint when new PTY data arrived this frame
@@ -1600,7 +1612,7 @@ function dispatchMouse(buf: string): void {
         const g: any = globalThis;
         if (entry) {
           const mouseMode = (typeof g.__vterm_get_mouse_mode === 'function')
-            ? (g.__vterm_get_mouse_mode(entry.slot) ?? 0)
+            ? (g.__vterm_get_mouse_mode(entry.session) ?? 0)
             : 0;
           if (mouseMode > 0 && typeof g.__vterm_write === 'function') {
             // Find the terminal's box to translate to inner-screen coords.
@@ -1613,14 +1625,14 @@ function dispatchMouse(buf: string): void {
               const innerCol = col - tbox.x + 1;
               const innerRow = row - tbox.y + 1;
               const seq = `\x1b[<${buttonCode};${innerCol};${innerRow}M`;
-              try { g.__vterm_write(entry.slot, seq); } catch {}
+              try { g.__vterm_write(entry.session, seq); } catch {}
               markTermWarm(500);
               continue;
             }
           }
           if (typeof g.__vterm_scroll === 'function') {
             const delta = (rawButton & 1) ? 3 : -3; // wheel-down = +3 toward live
-            try { g.__vterm_scroll(entry.slot, delta); } catch {}
+            try { g.__vterm_scroll(entry.session, delta); } catch {}
             requestPaint();
             continue;
           }
@@ -1739,7 +1751,7 @@ export function startInput(): void {
       const entry = termSlots.get(activeTerminalId);
       const g: any = globalThis;
       if (entry && typeof g.__vterm_write === 'function') {
-        try { g.__vterm_write(entry.slot, data); } catch {}
+        try { g.__vterm_write(entry.session, data); } catch {}
         // PTY echo lands over the next few frames — keep the pump
         // alive so the typed bytes actually render. Without this, the
         // drained-only paint gate would leave keystrokes invisible

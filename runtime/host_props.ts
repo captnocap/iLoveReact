@@ -117,6 +117,28 @@ export type HostNodeProps = Partial<{
   /** Toggle the drift animation. */
   driftActive: boolean;
 
+  // ── Terminal (cell-grid <Terminal> primitive) ─────────────
+  /**
+   * Shell binary the PTY should exec when this Terminal first mounts.
+   * Engine default = "bash". Read once at spawn; subsequent updates to
+   * this prop are ignored for the lifetime of that session.
+   */
+  shell: string;
+  /**
+   * Session name. Each unique name maps to its own pipe (vterm + PTY +
+   * scrollback + classifier + semantic graph). Two `<Terminal session="X">`
+   * elements with the same name share one pipe — change the name on the
+   * same node to switch which session is visible (the previous one keeps
+   * running in the background until you call `closeTerminalSession`).
+   * Unset → implicit "default" session, which is fine for single-Terminal
+   * carts.
+   */
+  session: string;
+  /** Take keyboard focus on first paint without requiring a click. */
+  autoFocus: boolean;
+  /** Monospace cell font size in pixels (GPU host only). */
+  terminalFontSize: number;
+
   // ── Physics (Box2D, see <Physics> primitive for ergonomic API) ──
   physicsWorld: boolean;
   physicsWorldId: number;

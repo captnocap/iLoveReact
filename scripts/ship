@@ -253,6 +253,7 @@ WHISPER_FLAG=""
 PG_FLAG=""
 EMBED_FLAG=""
 SQLITE_FLAG=""
+TERMINAL_FLAG=""
 WANT_PRIVACY=0
 WANT_USEHOST=0
 WANT_USECONN=0
@@ -266,6 +267,7 @@ WANT_WHISPER=0
 WANT_PG=0
 WANT_EMBED=0
 WANT_SQLITE=0
+WANT_TERMINAL=0
 if [[ -f "$METAFILE" ]]; then
     # Pure JSON membership check — v8cli reads the metafile, walks
     # outputs[].inputs (bytes-actually-shipped), and emits a single line of
@@ -279,7 +281,17 @@ if [[ -f "$METAFILE" ]]; then
         echo "[ship] any cart that uses a gated hook would crash at runtime." >&2
         exit 1
     fi
-    read -r WANT_PRIVACY WANT_USEHOST WANT_USECONN WANT_FS WANT_WS WANT_TEL WANT_ZIGCALL WANT_SDK WANT_VOICE WANT_WHISPER WANT_PG WANT_EMBED WANT_SQLITE <<< "$GATE_FLAGS"
+    # Order MUST match sdk/dependency-registry.json shipGate.flagOrder. The
+    # JS gate already emits 17 positional flags; this read line was lagging
+    # behind onnx + window additions, so WANT_TERMINAL was silently picking
+    # up sqlite's value (always 0). Keep in lock-step with flagOrder.
+    read -r WANT_PRIVACY WANT_USEHOST WANT_USECONN WANT_FS WANT_WS WANT_TEL WANT_ZIGCALL WANT_SDK WANT_VOICE WANT_WHISPER WANT_ONNX WANT_PG WANT_EMBED WANT_SQLITE WANT_TERMINAL WANT_PROCESS WANT_WINDOW <<< "$GATE_FLAGS"
+    # Process binding is a strict subset of useHost (useHost pulls in process +
+    # httpsrv + wssrv + net). Carts that import runtime/hooks/process.ts
+    # directly (run/execAsync) only need the process binding.
+    if [[ "$WANT_PROCESS" == "1" ]] && [[ "$WANT_USEHOST" != "1" ]]; then
+        PROCESS_FLAG="-Dhas-process=true"
+    fi
     if [[ "$WANT_PRIVACY" == "1" ]]; then
         PRIVACY_FLAG="-Dhas-privacy=true"
     fi
@@ -333,6 +345,11 @@ if [[ -f "$METAFILE" ]]; then
     if [[ "$WANT_EMBED" == "1" ]]; then
         EMBED_FLAG="-Dhas-embed=true"
     fi
+    if [[ "$WANT_TERMINAL" == "1" ]]; then
+        # libvterm is linked at -Dhas-terminal=true; the ldd-driven packager
+        # below picks it up via the libvterm prefix in BUNDLE_PREFIXES.
+        TERMINAL_FLAG="-Dhas-terminal=true"
+    fi
 else
     echo "[ship] WARNING: no metafile at $METAFILE — all opt-in V8 bindings disabled" >&2
 fi
@@ -348,6 +365,9 @@ fi
 if [[ "$WANT_USEHOST" == "1" ]]; then
     BUILD_BINDINGS+=("process" "httpsrv" "wssrv")
     BUILD_TRIGGERS+=("useHost: runtime/hooks/useHost.ts")
+elif [[ "$WANT_PROCESS" == "1" ]]; then
+    BUILD_BINDINGS+=("process")
+    BUILD_TRIGGERS+=("process: runtime/hooks/process.ts")
 fi
 if [[ "$WANT_USEHOST" == "1" ]] || [[ "$WANT_USECONN" == "1" ]]; then
     BUILD_BINDINGS+=("net")
@@ -384,6 +404,10 @@ if [[ "$WANT_EMBED" == "1" ]]; then
     BUILD_BINDINGS+=("embed")
     BUILD_LIBS+=("libllama_ffi (tsz/zig-out/lib)")
     BUILD_TRIGGERS+=("embed: runtime/hooks/embed.ts or runtime/hooks/useEmbed.ts")
+fi
+if [[ "$WANT_TERMINAL" == "1" ]]; then
+    BUILD_LIBS+=("libvterm")
+    BUILD_TRIGGERS+=("terminal: runtime/hooks/useTerminal.ts")
 fi
 
 echo "[ship] build ingredients:"
@@ -431,7 +455,7 @@ if [[ -d "$RJIT_HOME/deps/sysroot/usr/include" ]]; then
     done
 fi
 
-echo "[ship]   zig flags: $V8_FLAG${CUSTOM_CHROME_FLAG:+ $CUSTOM_CHROME_FLAG} $OPT_FLAG${SYSROOT_FLAG:+ $SYSROOT_FLAG}${PRIVACY_FLAG:+ $PRIVACY_FLAG}${PROCESS_FLAG:+ $PROCESS_FLAG}${HTTPSRV_FLAG:+ $HTTPSRV_FLAG}${WSSRV_FLAG:+ $WSSRV_FLAG}${NET_FLAG:+ $NET_FLAG}${TOR_FLAG:+ $TOR_FLAG}${FS_FLAG:+ $FS_FLAG}${WS_FLAG:+ $WS_FLAG}${TEL_FLAG:+ $TEL_FLAG}${ZIGCALL_FLAG:+ $ZIGCALL_FLAG}${SDK_FLAG:+ $SDK_FLAG}${VOICE_FLAG:+ $VOICE_FLAG}${WHISPER_FLAG:+ $WHISPER_FLAG}${PG_FLAG:+ $PG_FLAG}${EMBED_FLAG:+ $EMBED_FLAG}${SQLITE_FLAG:+ $SQLITE_FLAG}"
+echo "[ship]   zig flags: $V8_FLAG${CUSTOM_CHROME_FLAG:+ $CUSTOM_CHROME_FLAG} $OPT_FLAG${SYSROOT_FLAG:+ $SYSROOT_FLAG}${PRIVACY_FLAG:+ $PRIVACY_FLAG}${PROCESS_FLAG:+ $PROCESS_FLAG}${HTTPSRV_FLAG:+ $HTTPSRV_FLAG}${WSSRV_FLAG:+ $WSSRV_FLAG}${NET_FLAG:+ $NET_FLAG}${TOR_FLAG:+ $TOR_FLAG}${FS_FLAG:+ $FS_FLAG}${WS_FLAG:+ $WS_FLAG}${TEL_FLAG:+ $TEL_FLAG}${ZIGCALL_FLAG:+ $ZIGCALL_FLAG}${SDK_FLAG:+ $SDK_FLAG}${VOICE_FLAG:+ $VOICE_FLAG}${WHISPER_FLAG:+ $WHISPER_FLAG}${PG_FLAG:+ $PG_FLAG}${EMBED_FLAG:+ $EMBED_FLAG}${SQLITE_FLAG:+ $SQLITE_FLAG}${TERMINAL_FLAG:+ $TERMINAL_FLAG}"
 
 # Zig package cache override — ONLY when running off-tree (rjit-driven).
 # In rjit-driven mode the SDK ships a bundled cache at tools/zig/cache/p/
@@ -442,7 +466,7 @@ if [[ "$CART_ROOT" != "$RJIT_HOME" ]]; then
     export ZIG_GLOBAL_CACHE_DIR="$RJIT_HOME/tools/zig/cache"
 fi
 
-"$ZIG" build app -p "$CART_ROOT/zig-out" -Dapp-name="$NAME" -Dapp-source="$APP_SOURCE" -Dbundle-path="$EMBED_BUNDLE" $V8_FLAG $CUSTOM_CHROME_FLAG $OPT_FLAG $SYSROOT_FLAG $PRIVACY_FLAG $PROCESS_FLAG $HTTPSRV_FLAG $WSSRV_FLAG $NET_FLAG $TOR_FLAG $FS_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $SDK_FLAG $VOICE_FLAG $WHISPER_FLAG $PG_FLAG $EMBED_FLAG $SQLITE_FLAG
+"$ZIG" build app -p "$CART_ROOT/zig-out" -Dapp-name="$NAME" -Dapp-source="$APP_SOURCE" -Dbundle-path="$EMBED_BUNDLE" $V8_FLAG $CUSTOM_CHROME_FLAG $OPT_FLAG $SYSROOT_FLAG $PRIVACY_FLAG $PROCESS_FLAG $HTTPSRV_FLAG $WSSRV_FLAG $NET_FLAG $TOR_FLAG $FS_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $SDK_FLAG $VOICE_FLAG $WHISPER_FLAG $PG_FLAG $EMBED_FLAG $SQLITE_FLAG $TERMINAL_FLAG
 
 BUILD_BIN="$CART_ROOT/zig-out/bin/$NAME"
 if [[ ! -f "$BUILD_BIN" ]]; then
@@ -459,9 +483,13 @@ fi
 LABEL_DIR="$CART_ROOT/zig-out/manifest/v8-ingredients"
 NET_EXPECTED="0"
 [[ "$WANT_USEHOST" == "1" || "$WANT_USECONN" == "1" ]] && NET_EXPECTED="1"
+# Process binding is enabled by either useHost (which subsumes it) or a direct
+# import of runtime/hooks/process.ts (run/execAsync).
+PROCESS_EXPECTED="0"
+[[ "$WANT_USEHOST" == "1" || "$WANT_PROCESS" == "1" ]] && PROCESS_EXPECTED="1"
 declare -A EXPECTED=(
     [privacy]="$WANT_PRIVACY"
-    [process]="$WANT_USEHOST"
+    [process]="$PROCESS_EXPECTED"
     [httpsrv]="$WANT_USEHOST"
     [wssrv]="$WANT_USEHOST"
     [net]="$NET_EXPECTED"
