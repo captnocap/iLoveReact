@@ -590,7 +590,7 @@ fn hostBrowseSetPort(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) voi
 fn hostPlayLoad(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const cx = callbackCtx(info);
-    const rec = vterm_mod.getRecorder();
+    const rec = vterm_mod.getRecorder() orelse return setReturnNum(info, cx.iso, 0);
     if (rec.frame_count == 0) return setReturnNum(info, cx.iso, 0);
     player_mod.load(rec);
     setReturnNum(info, cx.iso, 1);
@@ -691,7 +691,10 @@ fn hostRecIsRecording(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) vo
 
 fn hostRecFrameCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    setReturnNum(info, callbackCtx(info).iso, @floatFromInt(vterm_mod.getRecorder().frame_count));
+    const rec = vterm_mod.getRecorder() orelse {
+        return setReturnNum(info, callbackCtx(info).iso, 0);
+    };
+    setReturnNum(info, callbackCtx(info).iso, @floatFromInt(rec.frame_count));
 }
 
 

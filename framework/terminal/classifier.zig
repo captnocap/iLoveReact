@@ -4,12 +4,18 @@
 //! per-token colors for rendering. Replaces raw ANSI colors with
 //! semantically meaningful colors that survive reclassification.
 //!
-//! Two built-in classifiers:
+//! State is per-pipe (each Terminal session keeps its own mode + cache + dirty
+//! flag in its own `Classifier` instance, looked up by session name). All the
+//! pattern-matching helpers below are pure functions on text bytes — only the
+//! storage and the public API surface know about sessions.
+//!
+//! Two built-in modes:
 //!   basic      — 7 tokens, works for any shell (default)
 //!   claude_code — 25+ tokens for the Claude Code CLI
 
 const std = @import("std");
 const Color = @import("../layout.zig").Color;
+const vterm_mod = @import("vterm.zig");
 
 // ── Token vocabulary ────────────────────────────────────────────────
 
@@ -97,92 +103,221 @@ pub fn tokenColor(token: Token) Color {
 
 pub const Mode = enum { none, basic, claude_code, json };
 
-// ── Classification cache ────────────────────────────────────────────
+// ── Per-pipe classifier state ───────────────────────────────────────
 
 const MAX_ROWS: u16 = 256;
-var row_cache: [MAX_ROWS]Token = [_]Token{.output} ** MAX_ROWS;
-var cache_dirty: bool = true;
-var active_mode: Mode = .none;
 
-pub fn getMode() Mode {
-    return active_mode;
+pub const Classifier = struct {
+    row_cache: [MAX_ROWS]Token = [_]Token{.output} ** MAX_ROWS,
+    dirty: bool = true,
+    mode: Mode = .none,
+
+    pub fn classifyAndCache(self: *Classifier, row: u16, text: []const u8, total_rows: u16) void {
+        if (row >= MAX_ROWS) return;
+        const prev: Token = if (row > 0) self.row_cache[row - 1] else .output;
+        if (self.mode == .none or self.mode == .json) {
+            self.row_cache[row] = .output;
+            return;
+        }
+        var kind = switch (self.mode) {
+            .none, .json => unreachable,
+            .basic => classifyBasic(text, row, total_rows),
+            .claude_code => classifyClaude(text, row, total_rows),
+        };
+        kind = refineAdjacency(kind, prev, text);
+        self.row_cache[row] = kind;
+    }
+};
+
+// ── Registry: one Classifier per session ────────────────────────────
+
+const g_alloc = std.heap.c_allocator;
+var g_classifiers: ?std.StringHashMap(*Classifier) = null;
+
+fn ensureMap() *std.StringHashMap(*Classifier) {
+    if (g_classifiers == null) {
+        g_classifiers = std.StringHashMap(*Classifier).init(g_alloc);
+    }
+    return &g_classifiers.?;
 }
 
-pub fn setMode(mode: Mode) void {
-    if (mode != active_mode) {
-        active_mode = mode;
-        cache_dirty = true;
+/// Look up or create the classifier for `name`. Always succeeds (allocation
+/// failure returns null but the call sites treat null defensively).
+pub fn getOrCreate(name: []const u8) ?*Classifier {
+    const map = ensureMap();
+    if (map.get(name)) |c| return c;
+    const c = g_alloc.create(Classifier) catch return null;
+    c.* = .{};
+    // Dupe the key separately so the classifier owns it.
+    const key = g_alloc.dupe(u8, name) catch {
+        g_alloc.destroy(c);
+        return null;
+    };
+    map.put(key, c) catch {
+        g_alloc.free(key);
+        g_alloc.destroy(c);
+        return null;
+    };
+    return c;
+}
+
+pub fn get(name: []const u8) ?*Classifier {
+    if (g_classifiers == null) return null;
+    return g_classifiers.?.get(name);
+}
+
+pub fn closeClassifier(name: []const u8) bool {
+    if (g_classifiers == null) return false;
+    const entry = g_classifiers.?.fetchRemove(name) orelse return false;
+    g_alloc.free(entry.key);
+    g_alloc.destroy(entry.value);
+    return true;
+}
+
+// ── Public API — name-keyed ─────────────────────────────────────────
+
+pub fn getModeByName(name: []const u8) Mode {
+    if (get(name)) |c| return c.mode;
+    return .none;
+}
+
+pub fn setModeByName(name: []const u8, mode: Mode) void {
+    const c = getOrCreate(name) orelse return;
+    if (mode != c.mode) {
+        c.mode = mode;
+        c.dirty = true;
     }
 }
 
-/// Set a row's token externally (used by JSON-driven classifier in JS).
-pub fn setRowToken(row: u16, token: Token) void {
+pub fn setRowTokenByName(name: []const u8, row: u16, token: Token) void {
+    const c = getOrCreate(name) orelse return;
     if (row >= MAX_ROWS) return;
-    row_cache[row] = token;
+    c.row_cache[row] = token;
 }
 
-/// Map a token name string to the Token enum. Returns .output for unknown names.
-pub fn tokenFromName(name: []const u8) Token {
-    const fields = @typeInfo(Token).@"enum".fields;
-    inline for (fields) |f| {
-        if (std.mem.eql(u8, name, f.name)) return @enumFromInt(f.value);
+pub fn markDirtyByName(name: []const u8) void {
+    const c = getOrCreate(name) orelse return;
+    c.dirty = true;
+}
+
+pub fn isDirtyByName(name: []const u8) bool {
+    if (get(name)) |c| return c.dirty;
+    return false;
+}
+
+pub fn clearDirtyByName(name: []const u8) void {
+    if (get(name)) |c| c.dirty = false;
+}
+
+pub fn getRowTokenByName(name: []const u8, row: u16) Token {
+    if (get(name)) |c| {
+        if (row >= MAX_ROWS) return .output;
+        return c.row_cache[row];
     }
     return .output;
 }
 
-pub fn markDirty() void {
-    cache_dirty = true;
+pub fn classifyAndCacheByName(name: []const u8, row: u16, text: []const u8, total_rows: u16) void {
+    const c = getOrCreate(name) orelse return;
+    c.classifyAndCache(row, text, total_rows);
 }
 
-pub fn isDirty() bool {
-    return cache_dirty;
-}
-
-pub fn clearDirty() void {
-    cache_dirty = false;
-}
-
-/// Get the classified token for a row.
-pub fn getRowToken(row: u16) Token {
-    if (row >= MAX_ROWS) return .output;
-    return row_cache[row];
-}
-
-/// Classify a single row and store in cache. Call row-by-row in order (0..rows-1)
-/// so adjacency refinement can use the previous row's token.
-pub fn classifyAndCache(row: u16, text: []const u8, total_rows: u16) void {
-    if (row >= MAX_ROWS) return;
-    const prev: Token = if (row > 0) row_cache[row - 1] else .output;
-    // json mode: tokens are set externally by JS, skip Zig classification
-    if (active_mode == .none or active_mode == .json) {
-        row_cache[row] = .output;
-        return;
-    }
-    var kind = switch (active_mode) {
-        .none, .json => unreachable,
-        .basic => classifyBasic(text, row, total_rows),
-        .claude_code => classifyClaude(text, row, total_rows),
-    };
-    kind = refineAdjacency(kind, prev, text);
-    row_cache[row] = kind;
-}
-
-// ── Indexed compat stubs (engine.zig expects multi-terminal API) ─────
-// The refactor consolidated to single-terminal. These ignore the index.
-
-pub fn getModeIdx(_: u8) Mode { return getMode(); }
-pub fn setModeIdx(_: u8, mode: Mode) void { setMode(mode); }
-pub fn markDirtyIdx(_: u8) void { markDirty(); }
-pub fn isDirtyIdx(_: u8) bool { return isDirty(); }
-pub fn clearDirtyIdx(_: u8) void { clearDirty(); }
-pub fn getRowTokenIdx(_: u8, row: u16) Token { return getRowToken(row); }
-pub fn classifyAndCacheIdx(_: u8, row: u16, text: []const u8, total_rows: u16) void { classifyAndCache(row, text, total_rows); }
-pub fn isTurnStartIdx(_: u8, kind: Token) bool {
-    return switch (active_mode) {
+pub fn isTurnStartByName(name: []const u8, kind: Token) bool {
+    const mode = getModeByName(name);
+    return switch (mode) {
         .none, .json => false,
         .basic => kind == .command,
         .claude_code => kind == .user_prompt,
     };
+}
+
+/// Map a token name string to the Token enum. Returns .output for unknown names.
+pub fn tokenFromName(text: []const u8) Token {
+    const fields = @typeInfo(Token).@"enum".fields;
+    inline for (fields) |f| {
+        if (std.mem.eql(u8, text, f.name)) return @enumFromInt(f.value);
+    }
+    return .output;
+}
+
+// ── Default-session helpers (legacy single-Terminal API) ────────────
+
+pub fn getMode() Mode {
+    return getModeByName(vterm_mod.DEFAULT_SESSION);
+}
+
+pub fn setMode(mode: Mode) void {
+    setModeByName(vterm_mod.DEFAULT_SESSION, mode);
+}
+
+pub fn setRowToken(row: u16, token: Token) void {
+    setRowTokenByName(vterm_mod.DEFAULT_SESSION, row, token);
+}
+
+pub fn markDirty() void {
+    markDirtyByName(vterm_mod.DEFAULT_SESSION);
+}
+
+pub fn isDirty() bool {
+    return isDirtyByName(vterm_mod.DEFAULT_SESSION);
+}
+
+pub fn clearDirty() void {
+    clearDirtyByName(vterm_mod.DEFAULT_SESSION);
+}
+
+pub fn getRowToken(row: u16) Token {
+    return getRowTokenByName(vterm_mod.DEFAULT_SESSION, row);
+}
+
+pub fn classifyAndCache(row: u16, text: []const u8, total_rows: u16) void {
+    classifyAndCacheByName(vterm_mod.DEFAULT_SESSION, row, text, total_rows);
+}
+
+pub fn isTurnStart(kind: Token) bool {
+    return isTurnStartByName(vterm_mod.DEFAULT_SESSION, kind);
+}
+
+// ── Legacy Idx wrappers ─────────────────────────────────────────────
+//
+// Remapped to "idx-<n>" pipe names, matching vterm.zig. The engine has
+// been updated to call ByName directly; these stubs remain for any
+// transitional caller still passing an integer.
+
+var idx_name_buf: [vterm_mod.MAX_TERMINALS][8]u8 = undefined;
+
+fn nameForIdx(idx: u8) []const u8 {
+    const i = @min(idx, vterm_mod.MAX_TERMINALS - 1);
+    const written = std.fmt.bufPrint(&idx_name_buf[i], "idx-{d}", .{i}) catch {
+        idx_name_buf[i][0] = '0';
+        return idx_name_buf[i][0..1];
+    };
+    return written;
+}
+
+pub fn getModeIdx(idx: u8) Mode {
+    return getModeByName(nameForIdx(idx));
+}
+pub fn setModeIdx(idx: u8, mode: Mode) void {
+    setModeByName(nameForIdx(idx), mode);
+}
+pub fn markDirtyIdx(idx: u8) void {
+    markDirtyByName(nameForIdx(idx));
+}
+pub fn isDirtyIdx(idx: u8) bool {
+    return isDirtyByName(nameForIdx(idx));
+}
+pub fn clearDirtyIdx(idx: u8) void {
+    clearDirtyByName(nameForIdx(idx));
+}
+pub fn getRowTokenIdx(idx: u8, row: u16) Token {
+    return getRowTokenByName(nameForIdx(idx), row);
+}
+pub fn classifyAndCacheIdx(idx: u8, row: u16, text: []const u8, total_rows: u16) void {
+    classifyAndCacheByName(nameForIdx(idx), row, text, total_rows);
+}
+pub fn isTurnStartIdx(idx: u8, kind: Token) bool {
+    return isTurnStartByName(nameForIdx(idx), kind);
 }
 
 // ── Basic classifier (port of classifiers/basic.lua) ────────────────
@@ -366,7 +501,16 @@ fn matchPrompt(text: []const u8) bool {
 }
 
 fn matchNumberedOption(s: []const u8) bool {
-    const t = std.mem.trimLeft(u8, s, " \t>");
+    var t = std.mem.trimLeft(u8, s, " \t>");
+    if (t.len < 3) return false;
+    // Skip UTF-8 cursor indicators: ❯ (\xe2\x9d\xaf) and › (\xe2\x80\xba)
+    const cursors = [_][]const u8{ "\xe2\x9d\xaf", "\xe2\x80\xba" };
+    for (cursors) |cur| {
+        if (std.mem.startsWith(u8, t, cur)) {
+            t = std.mem.trimLeft(u8, t[cur.len..], " ");
+            break;
+        }
+    }
     if (t.len < 3) return false;
     // Check for digit followed by . and space
     if (t[0] >= '0' and t[0] <= '9') {
@@ -439,14 +583,4 @@ fn isUpperLine(s: []const u8) bool {
         return false; // lowercase or other chars
     }
     return has_alpha;
-}
-
-// ── Turn detection ──────────────────────────────────────────────────
-
-pub fn isTurnStart(kind: Token) bool {
-    return switch (active_mode) {
-        .none, .json => false,
-        .basic => kind == .command,
-        .claude_code => kind == .user_prompt,
-    };
 }
