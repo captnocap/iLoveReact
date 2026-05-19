@@ -20,8 +20,8 @@ export default function TuiWindowSmoke() {
           style={{
             width: '100%',
             height: '100%',
-            padding: 24,
-            gap: 16,
+            padding: 3,
+            gap: 2,
             backgroundColor: '#0f172a',
           }}
         >
@@ -32,30 +32,30 @@ export default function TuiWindowSmoke() {
             This window is a real SDL3 surface. ANSI grid + GUI window share one
             reconciler, one component tree, one JS state.
           </Text>
-          <Row style={{ gap: 12 }}>
+          <Row style={{ gap: 2 }}>
             <Box
               style={{
-                padding: 12,
+                padding: 2,
                 backgroundColor: '#1e40af',
-                borderRadius: 6,
+                borderRadius: 1,
               }}
             >
               <Text style={{ color: '#dbeafe' }}>blue tile</Text>
             </Box>
             <Box
               style={{
-                padding: 12,
+                padding: 2,
                 backgroundColor: '#7e22ce',
-                borderRadius: 6,
+                borderRadius: 1,
               }}
             >
               <Text style={{ color: '#f3e8ff' }}>purple tile</Text>
             </Box>
             <Box
               style={{
-                padding: 12,
+                padding: 2,
                 backgroundColor: '#16a34a',
-                borderRadius: 6,
+                borderRadius: 1,
               }}
             >
               <Text style={{ color: '#dcfce7' }}>green tile</Text>

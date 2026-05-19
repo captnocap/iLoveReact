@@ -209,6 +209,27 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
 // borders. Image src, latches, animation tweens, gradients, etc.
 // aren't here yet — those carts ship via the GPU app anyway.
 
+// Cell → pixel scale for ship-tui <Window> subtrees.
+//
+// Carts that ship through ship-tui are authored in cell-units (the
+// ANSI grid's natural unit — gap:1 = one row, width:18 = 18 cells,
+// padding:1 = one cell). When the same JSX renders into a real SDL3
+// window, the values would be treated as pixels — gap:1 = 1 px,
+// padding:1 = 1 px — producing illegible overlap. We scale spatial
+// values up by this constant so the same cart looks correct in both
+// targets without rewriting every dimension.
+//
+// 8.0 is the cell-cell-pixel ratio for the default 16 px font when
+// rendered through windows.zig's SDL3 TextEngine: each character is
+// ~8 px wide × ~16 px tall. The ratio's most defensible value for
+// width-keyed sizing is the character cell width — height-keyed
+// sizing has slightly different ergonomics but the cart's authoring
+// intent is consistent across both axes.
+//
+// fontSize, lineHeight, opacity, flexGrow, fontWeight stay literal —
+// those are already pixel-typed (fontSize) or unit-less (the rest).
+const CELL_SCALE: f32 = 8.0;
+
 fn jsonFloat(v: std.json.Value) ?f32 {
     return switch (v) {
         .integer => |i| @floatFromInt(i),
@@ -217,17 +238,26 @@ fn jsonFloat(v: std.json.Value) ?f32 {
     };
 }
 
-/// Dimension parser: accepts integer/float (taken as pixels) AND
-/// percent strings like "100%". Mirrors v8_app.zig's jsonMaybePct —
-/// percent is encoded as a negative number that layout.zig:847
-/// (resolveMaybePct) interprets as a fraction of the parent extent.
-/// Without this, `width: '100%'` silently drops and Nodes inherit
-/// align_items=stretch behavior, which doesn't reach all the cases
-/// the cart author expected.
+/// Scaled numeric value: integer/float → cells × CELL_SCALE (pixels).
+/// String "auto" / percents pass through to the unscaled path —
+/// callers should reach for `jsonMaybePct` for those.
+fn jsonScaled(v: std.json.Value) ?f32 {
+    return switch (v) {
+        .integer => |i| @as(f32, @floatFromInt(i)) * CELL_SCALE,
+        .float => |f| @as(f32, @floatCast(f)) * CELL_SCALE,
+        else => null,
+    };
+}
+
+/// Dimension parser: accepts integer/float (taken as cell-units and
+/// scaled to pixels via CELL_SCALE) AND percent strings like "100%"
+/// (encoded as a negative fraction per layout.zig:resolveMaybePct,
+/// NOT scaled — percents resolve against the parent extent at
+/// layout time).
 fn jsonMaybePct(v: std.json.Value) ?f32 {
     return switch (v) {
-        .integer => |i| @floatFromInt(i),
-        .float => |f| @floatCast(f),
+        .integer => |i| @as(f32, @floatFromInt(i)) * CELL_SCALE,
+        .float => |f| @as(f32, @floatCast(f)) * CELL_SCALE,
         .string => |s| blk: {
             const t = std.mem.trim(u8, s, " \t\r\n");
             if (t.len == 0) break :blk null;
@@ -235,7 +265,9 @@ fn jsonMaybePct(v: std.json.Value) ?f32 {
                 const pct = std.fmt.parseFloat(f32, t[0 .. t.len - 1]) catch break :blk null;
                 break :blk -(pct / 100.0);
             }
-            break :blk std.fmt.parseFloat(f32, t) catch null;
+            // Bare numeric string ("18") — treat as cell-unit too.
+            const n = std.fmt.parseFloat(f32, t) catch break :blk null;
+            break :blk n * CELL_SCALE;
         },
         else => null,
     };
@@ -353,9 +385,10 @@ fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
             }
         }
     } else if (eq(u8, key, "flexGrow")) {
+        // flex_grow is a unit-less weight, NOT a length — don't scale.
         if (jsonFloat(val)) |f| node.style.flex_grow = f;
     } else if (eq(u8, key, "gap")) {
-        if (jsonFloat(val)) |f| node.style.gap = f;
+        if (jsonScaled(val)) |f| node.style.gap = f;
     } else if (eq(u8, key, "justifyContent")) {
         if (val == .string) {
             const s = val.string;
@@ -389,29 +422,29 @@ fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
             }
         }
     }
-    // Padding
+    // Padding (spatial — scaled cell→pixel)
     else if (eq(u8, key, "padding")) {
-        if (jsonFloat(val)) |f| node.style.padding = f;
+        if (jsonScaled(val)) |f| node.style.padding = f;
     } else if (eq(u8, key, "paddingLeft")) {
-        if (jsonFloat(val)) |f| node.style.padding_left = f;
+        if (jsonScaled(val)) |f| node.style.padding_left = f;
     } else if (eq(u8, key, "paddingRight")) {
-        if (jsonFloat(val)) |f| node.style.padding_right = f;
+        if (jsonScaled(val)) |f| node.style.padding_right = f;
     } else if (eq(u8, key, "paddingTop")) {
-        if (jsonFloat(val)) |f| node.style.padding_top = f;
+        if (jsonScaled(val)) |f| node.style.padding_top = f;
     } else if (eq(u8, key, "paddingBottom")) {
-        if (jsonFloat(val)) |f| node.style.padding_bottom = f;
+        if (jsonScaled(val)) |f| node.style.padding_bottom = f;
     }
-    // Margin
+    // Margin (spatial — scaled cell→pixel)
     else if (eq(u8, key, "margin")) {
-        if (jsonFloat(val)) |f| node.style.margin = f;
+        if (jsonScaled(val)) |f| node.style.margin = f;
     } else if (eq(u8, key, "marginLeft")) {
-        if (jsonFloat(val)) |f| node.style.margin_left = f;
+        if (jsonScaled(val)) |f| node.style.margin_left = f;
     } else if (eq(u8, key, "marginRight")) {
-        if (jsonFloat(val)) |f| node.style.margin_right = f;
+        if (jsonScaled(val)) |f| node.style.margin_right = f;
     } else if (eq(u8, key, "marginTop")) {
-        if (jsonFloat(val)) |f| node.style.margin_top = f;
+        if (jsonScaled(val)) |f| node.style.margin_top = f;
     } else if (eq(u8, key, "marginBottom")) {
-        if (jsonFloat(val)) |f| node.style.margin_bottom = f;
+        if (jsonScaled(val)) |f| node.style.margin_bottom = f;
     }
     // Background + text color
     else if (eq(u8, key, "backgroundColor")) {
@@ -419,13 +452,13 @@ fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
     } else if (eq(u8, key, "color")) {
         if (val == .string) node.text_color = parseColor(val.string);
     }
-    // Borders
+    // Borders (spatial — scaled cell→pixel)
     else if (eq(u8, key, "borderWidth")) {
-        if (jsonFloat(val)) |f| node.style.border_width = f;
+        if (jsonScaled(val)) |f| node.style.border_width = f;
     } else if (eq(u8, key, "borderColor")) {
         if (val == .string) node.style.border_color = parseColor(val.string);
     } else if (eq(u8, key, "borderRadius")) {
-        if (jsonFloat(val)) |f| node.style.border_radius = f;
+        if (jsonScaled(val)) |f| node.style.border_radius = f;
     }
     // Typography
     else if (eq(u8, key, "fontSize")) {
@@ -461,13 +494,13 @@ fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
             }
         }
     } else if (eq(u8, key, "top")) {
-        if (jsonFloat(val)) |f| node.style.top = f;
+        if (jsonMaybePct(val)) |f| node.style.top = f;
     } else if (eq(u8, key, "left")) {
-        if (jsonFloat(val)) |f| node.style.left = f;
+        if (jsonMaybePct(val)) |f| node.style.left = f;
     } else if (eq(u8, key, "right")) {
-        if (jsonFloat(val)) |f| node.style.right = f;
+        if (jsonMaybePct(val)) |f| node.style.right = f;
     } else if (eq(u8, key, "bottom")) {
-        if (jsonFloat(val)) |f| node.style.bottom = f;
+        if (jsonMaybePct(val)) |f| node.style.bottom = f;
     }
     // Unknown keys (gradients, shadows, transforms, image src, latch
     // bindings, tweens, etc.) silently skipped. The Window-subtree
