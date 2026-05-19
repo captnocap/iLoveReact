@@ -16,6 +16,11 @@ const layout = @import("framework/layout.zig");
 const Node = layout.Node;
 const Style = layout.Style;
 const Color = layout.Color;
+// Compile-link the new tree-state module so v8_tui_app can adopt it
+// under -Dhas-window. v8_app doesn't reference it yet — its own
+// applyCommand owns the tree state for now (Phase 3 of the
+// host_tree.zig migration plan).
+comptime { _ = @import("framework/host_tree.zig"); }
 const transition_mod = @import("framework/gpu/transition.zig");
 const easing_mod = @import("framework/math/easing.zig");
 const effect_ctx = @import("framework/gpu/effects_ctx.zig");
@@ -176,6 +181,10 @@ const v8_bindings_whisper = if (HAS_WHISPER) @import("framework/v8_bindings_whis
     pub fn registerWhisper(_: anytype) void {}
     pub fn tickDrain() void {}
 };
+const HAS_ONNX = if (@hasDecl(build_options, "has_onnx")) build_options.has_onnx else false;
+const v8_bindings_onnx = if (HAS_ONNX) @import("framework/v8_bindings_onnx.zig") else struct {
+    pub fn registerOnnx(_: anytype) void {}
+};
 const HAS_PG = if (@hasDecl(build_options, "has_pg")) build_options.has_pg else false;
 const v8_bindings_pg = if (HAS_PG) @import("framework/v8_bindings_pg.zig") else struct {
     pub fn registerPg(_: anytype) void {}
@@ -253,6 +262,7 @@ const INGREDIENTS = [_]Ingredient{
     .{ .name = "sdk", .required = false, .grep_prefix = "__http_request_", .reg_fn = "registerSdk", .mod = v8_bindings_sdk },
     .{ .name = "voice", .required = false, .grep_prefix = "__voice_", .reg_fn = "registerVoice", .mod = v8_bindings_voice },
     .{ .name = "whisper", .required = false, .grep_prefix = "__whisper_", .reg_fn = "registerWhisper", .mod = v8_bindings_whisper },
+    .{ .name = "onnx", .required = false, .grep_prefix = "__onnx_", .reg_fn = "registerOnnx", .mod = v8_bindings_onnx },
     .{ .name = "pg", .required = false, .grep_prefix = "__pg_", .reg_fn = "registerPg", .mod = v8_bindings_pg },
     .{ .name = "embed", .required = false, .grep_prefix = "__embed_", .reg_fn = "registerEmbed", .mod = v8_bindings_embed },
     .{ .name = "video", .required = false, .grep_prefix = "__video_", .reg_fn = "registerVideo", .mod = v8_bindings_video },
@@ -3600,7 +3610,13 @@ fn appTick(now: u32) void {
     // callbacks fired by these drains defer through setTimeout(0) (see
     // runtime/ffi.ts), so emit-during-tick is observed by JS on the NEXT
     // __jsTick — no ordering dependency vs the call above.
-    inline for (INGREDIENTS) |ing| if (@hasDecl(ing.mod, "tickDrain")) ing.mod.tickDrain();
+    inline for (INGREDIENTS) |ing| {
+        if (@hasDecl(ing.mod, "tickDrain")) {
+            // vterm's tickDrain returns bool (whether to repaint — the TUI
+            // host consumes it); the rest return void. Discard either way.
+            _ = ing.mod.tickDrain();
+        }
+    }
     if (_probe) std.debug.print("[probe-tick] #{d} after tickDrain\n", .{_probe_n.v});
 
     // Apply any CMD batches that accumulated during press events since last tick.
