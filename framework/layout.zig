@@ -497,10 +497,16 @@ pub const Node = struct {
     context_menu_items: ?[]const context_menu.MenuItem = null,
     terminal: bool = false, // true = Terminal element (cell-grid rendering via vterm)
     terminal_font_size: u16 = 13, // monospace font size for terminal cell grid
-    terminal_id: u8 = 0, // multi-terminal slot index (0..MAX_TERMINALS-1)
+    // Session name from <Terminal session="..." />. Each unique name maps to
+    // its own Pipe (vterm + PTY + scrollback + classifier + semantic graph).
+    // Null → engine falls back to the implicit "default" session. Sessions
+    // persist across mount/unmount: PTYs keep running in the background while
+    // their <Terminal> is unmounted, then resume when re-mounted under the
+    // same name. Owned by g_alloc (dupZ'd in applyProps).
+    terminal_session: ?[]const u8 = null,
     // Optional shell binary path from <Terminal shell="..." />. Null →
-    // engine spawns "bash". Read once on first tick after the node appears;
-    // subsequent changes are ignored (PTY already spawned).
+    // engine spawns "bash". Read once on the tick that spawns this session's
+    // PTY; ignored on later updates of the same session.
     terminal_shell: ?[*:0]const u8 = null,
     graph_container: bool = false, // true = Graph element (SVG paths, no pan/zoom)
     // true = Graph/Canvas uses DOM-style origin (0,0 at element top-left).

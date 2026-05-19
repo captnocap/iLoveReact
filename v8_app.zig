@@ -1791,10 +1791,19 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonInt(v)) |i| node.terminal_font_size = @intCast(@max(i, 1));
         } else if (is_terminal and std.mem.eql(u8, k, "shell")) {
             // Path to the binary the PTY should exec. Stored null-terminated
-            // because spawnShellIdx → execvp wants [*:0]const u8.
+            // because spawnShellByName → execvp wants [*:0]const u8.
             if (v == .string) {
                 if (g_alloc.dupeZ(u8, v.string)) |z| {
                     node.terminal_shell = z.ptr;
+                } else |_| {}
+            }
+        } else if (is_terminal and std.mem.eql(u8, k, "session")) {
+            // Named session for multi-Terminal carts. Each unique name maps
+            // to its own Pipe (vterm + PTY + scrollback). Unset → engine
+            // falls back to the implicit "default" session.
+            if (v == .string and v.string.len > 0) {
+                if (g_alloc.dupe(u8, v.string)) |s| {
+                    node.terminal_session = s;
                 } else |_| {}
             }
         } else if (std.mem.eql(u8, k, "color")) {

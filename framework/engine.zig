@@ -4,12 +4,7 @@
 //! Adding new framework modules (geometry, watchdog, etc.) happens here — no codegen changes needed.
 
 const std = @import("std");
-pub const c = @cImport({
-    @cInclude("SDL3/SDL.h");
-    @cInclude("ft2build.h");
-    @cInclude("freetype/freetype.h");
-    @cInclude("stb/stb_image.h");
-});
+pub const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
 const text_mod = @import("primitive/text.zig");
 const gpu = @import("gpu/gpu.zig");
@@ -129,25 +124,30 @@ const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
         strike: bool = false,
         reverse: bool = false,
     };
-    pub const MAX_TERMINALS: u8 = 4;
-    pub fn copySelectedTextIdx(_: u8, _: u16, _: u16, _: u16, _: u16, _: []u8) usize { return 0; }
-    pub fn getCellIdx(_: u8, _: u16, _: u16) Cell { return .{}; }
-    pub fn getColsIdx(_: u8) u16 { return 0; }
-    pub fn getCursorColIdx(_: u8) u16 { return 0; }
-    pub fn getCursorRowIdx(_: u8) u16 { return 0; }
-    pub fn getCursorVisibleIdx(_: u8) bool { return false; }
-    pub fn getMouseModeIdx(_: u8) c_int { return 0; }
-    pub fn getRowsIdx(_: u8) u16 { return 0; }
-    pub fn getRowTextIdx(_: u8, _: u16) []const u8 { return ""; }
-    pub fn getScrollbackCellIdx(_: u8, _: u16, _: u16) Cell { return .{}; }
-    pub fn pollPtyIdx(_: u8) bool { return false; }
-    pub fn resizeVtermIdx(_: u8, _: u16, _: u16) void {}
-    pub fn scrollDownIdx(_: u8, _: u16) void {}
-    pub fn scrollOffsetIdx(_: u8) u16 { return 0; }
-    pub fn scrollToBottomIdx(_: u8) void {}
-    pub fn scrollUpIdx(_: u8, _: u16) void {}
-    pub fn spawnShellIdx(_: u8, _: [*:0]const u8, _: u16, _: u16) void {}
-    pub fn writePtyIdx(_: u8, _: []const u8) void {}
+    pub const Pipe = struct {};
+    pub const MAX_TERMINALS: u8 = 16;
+    pub const DEFAULT_SESSION: []const u8 = "default";
+    pub fn pipeCount() usize { return 0; }
+    pub fn getPipe(_: []const u8) ?*Pipe { return null; }
+    pub fn copySelectedTextByName(_: []const u8, _: u16, _: u16, _: u16, _: u16, _: []u8) usize { return 0; }
+    pub fn getCellByName(_: []const u8, _: u16, _: u16) Cell { return .{}; }
+    pub fn getColsByName(_: []const u8) u16 { return 0; }
+    pub fn getCursorColByName(_: []const u8) u16 { return 0; }
+    pub fn getCursorRowByName(_: []const u8) u16 { return 0; }
+    pub fn getCursorVisibleByName(_: []const u8) bool { return false; }
+    pub fn getMouseModeByName(_: []const u8) c_int { return 0; }
+    pub fn getRowsByName(_: []const u8) u16 { return 0; }
+    pub fn getRowTextByName(_: []const u8, _: u16) []const u8 { return ""; }
+    pub fn scrollbackCellByName(_: []const u8, _: u16, _: u16) Cell { return .{}; }
+    pub fn pollPtyByName(_: []const u8) bool { return false; }
+    pub fn resizeByName(_: []const u8, _: u16, _: u16) void {}
+    pub fn scrollDownByName(_: []const u8, _: u16) void {}
+    pub fn scrollOffsetByName(_: []const u8) u16 { return 0; }
+    pub fn scrollToBottomByName(_: []const u8) void {}
+    pub fn scrollUpByName(_: []const u8, _: u16) void {}
+    pub fn spawnShellByName(_: []const u8, _: [*:0]const u8, _: u16, _: u16) void {}
+    pub fn writePtyByName(_: []const u8, _: []const u8) void {}
+    pub fn ptyAliveByName(_: []const u8) bool { return false; }
 };
 
 const classifier = if (HAS_TERMINAL) @import("terminal/classifier.zig") else struct {
@@ -162,17 +162,17 @@ const classifier = if (HAS_TERMINAL) @import("terminal/classifier.zig") else str
     };
     pub const Mode = enum { none, basic, claude_code, json };
     pub fn tokenColor(_: Token) layout.Color { return .{}; }
-    pub fn getModeIdx(_: u8) Mode { return .none; }
-    pub fn setModeIdx(_: u8, _: Mode) void {}
-    pub fn markDirtyIdx(_: u8) void {}
-    pub fn isDirtyIdx(_: u8) bool { return false; }
-    pub fn clearDirtyIdx(_: u8) void {}
-    pub fn getRowTokenIdx(_: u8, _: u16) Token { return .text; }
-    pub fn classifyAndCacheIdx(_: u8, _: u16, _: []const u8, _: u16) void {}
+    pub fn getModeByName(_: []const u8) Mode { return .none; }
+    pub fn setModeByName(_: []const u8, _: Mode) void {}
+    pub fn markDirtyByName(_: []const u8) void {}
+    pub fn isDirtyByName(_: []const u8) bool { return false; }
+    pub fn clearDirtyByName(_: []const u8) void {}
+    pub fn getRowTokenByName(_: []const u8, _: u16) Token { return .text; }
+    pub fn classifyAndCacheByName(_: []const u8, _: u16, _: []const u8, _: u16) void {}
 };
 
 const semantic = if (HAS_TERMINAL) @import("terminal/semantic.zig") else struct {
-    pub fn tick(_: u16) void {}
+    pub fn tickByName(_: []const u8, _: u16) void {}
 };
 
 // Force-reference pty_client.zig for unix socket terminal remote control.
@@ -348,10 +348,25 @@ var g_resize_hud_h: i32 = 0;
 var physics_initialized: bool = false;
 
 // ── Terminal state ──────────────────────────────────────────────────────
-const MAX_TERMINALS = vterm_mod.MAX_TERMINALS;
-var terminals_initialized: [MAX_TERMINALS]bool = .{false} ** MAX_TERMINALS;
-var g_semantic_detected_flags: [MAX_TERMINALS]bool = .{false} ** MAX_TERMINALS;
-var g_focused_terminal: u8 = 0;
+//
+// Multi-terminal dispatch is now keyed by session name (the `session` prop on
+// <Terminal>), not by a positional index. Each unique name maps to one Pipe
+// in vterm.zig; the engine looks up state by name and lets the pipe registry
+// be the source of truth for "does this terminal exist". No parallel
+// `[MAX_TERMINALS]bool` arrays — `vterm_mod.getPipe(name)` answers that
+// directly. The classifier mode doubles as the "have we auto-detected the
+// inner CLI yet?" flag: `.none` means undetected, anything else means done.
+var g_focused_session_buf: [64]u8 = undefined;
+var g_focused_session: []const u8 = vterm_mod.DEFAULT_SESSION;
+
+/// Set the focused session, copying the name into our owned buffer so the
+/// slice stays valid even if the source (Node prop) gets freed.
+fn setFocusedSession(name: []const u8) void {
+    const len = @min(name.len, g_focused_session_buf.len);
+    @memcpy(g_focused_session_buf[0..len], name[0..len]);
+    g_focused_session = g_focused_session_buf[0..len];
+}
+
 var term_sel_active: bool = false;
 var term_sel_dragging: bool = false;
 var term_sel_start_row: u16 = 0;
@@ -383,13 +398,19 @@ var g_term_mouse_forwarding: bool = false;
 // `button` is the SGR button code (0=L, 1=M, 2=R, +32 for drag, 64=wheel-up,
 // 65=wheel-down, 3=no-button motion). `action` is 'M' for press/drag/motion
 // and 'm' for release. Coordinates are 1-based per the SGR spec.
-fn forwardTermMouse(tn: *Node, tid: u8, mx: f32, my: f32, button: u32, action: u8) void {
+fn forwardTermMouse(tn: *Node, session: []const u8, mx: f32, my: f32, button: u32, action: u8) void {
     const cell = termPixelToCell(tn, mx, my);
     var buf: [48]u8 = undefined;
     const seq = std.fmt.bufPrint(&buf, "\x1b[<{d};{d};{d}{c}", .{
         button, cell.col + 1, cell.row + 1, action,
     }) catch return;
-    vterm_mod.writePtyIdx(tid, seq);
+    vterm_mod.writePtyByName(session, seq);
+}
+
+/// The session name for a Terminal node — `<Terminal session="...">` if set,
+/// otherwise the implicit "default" session.
+inline fn terminalSessionOf(node: *const Node) []const u8 {
+    return node.terminal_session orelse vterm_mod.DEFAULT_SESSION;
 }
 
 fn termCellSelected(row: u16, col: u16) bool {
@@ -416,52 +437,57 @@ fn termClearSelection() void {
     term_sel_dragging = false;
 }
 
-fn findTerminalNode(node: *Node) ?*Node {
-    if (node.terminal) return node;
-    for (node.children) |*child| {
-        if (findTerminalNode(child)) |found| return found;
-    }
-    return null;
-}
-
-fn findTerminalNodes(node: *Node, count: *u8) void {
+/// Find the Terminal node whose `session` prop matches `name`.
+fn findTerminalNodeBySession(node: *Node, name: []const u8) ?*Node {
     if (node.terminal) {
-        if (count.* < MAX_TERMINALS) {
-            node.terminal_id = count.*;
-            count.* += 1;
-        }
-        return;
+        const ns = node.terminal_session orelse vterm_mod.DEFAULT_SESSION;
+        if (std.mem.eql(u8, ns, name)) return node;
     }
     for (node.children) |*child| {
-        findTerminalNodes(child, count);
-    }
-}
-
-fn findTerminalNodeById(node: *Node, id: u8) ?*Node {
-    if (node.terminal and node.terminal_id == id) return node;
-    for (node.children) |*child| {
-        if (findTerminalNodeById(child, id)) |found| return found;
+        if (findTerminalNodeBySession(child, name)) |found| return found;
     }
     return null;
 }
 
-fn anyTerminalInitialized() bool {
-    for (terminals_initialized) |t| {
-        if (t) return true;
+/// Iterator-style walk: callback gets each Terminal node and its session
+/// name. Caller passes a mutable context pointer. Used by the per-tick
+/// poll/init loop and by wheel/click hit-tests that need to enumerate
+/// every live terminal.
+fn forEachTerminalNode(
+    node: *Node,
+    ctx: anytype,
+    comptime visit: fn (@TypeOf(ctx), *Node, []const u8) void,
+) void {
+    if (node.terminal) {
+        const ns = node.terminal_session orelse vterm_mod.DEFAULT_SESSION;
+        visit(ctx, node, ns);
     }
-    return false;
+    for (node.children) |*child| {
+        forEachTerminalNode(child, ctx, visit);
+    }
+}
+
+/// True when any pipe currently exists in the vterm registry.
+fn anyTerminalInitialized() bool {
+    return vterm_mod.pipeCount() > 0;
+}
+
+/// True when the named session has a pipe that the engine has seen at
+/// least once (i.e. a Terminal node carries this name AND a PTY was spawned).
+fn sessionInitialized(name: []const u8) bool {
+    return vterm_mod.ptyAliveByName(name);
 }
 
 /// Route SDL key event to the terminal PTY as ANSI escape sequences.
 fn terminalHandleKey(sym: i32, mod_state: u16) void {
-    const ti = g_focused_terminal;
+    const session = g_focused_session;
     const ctrl = (mod_state & c.SDL_KMOD_CTRL) != 0;
     termClearSelection();
-    vterm_mod.scrollToBottomIdx(ti);
+    vterm_mod.scrollToBottomByName(session);
     // Ctrl+letter → raw control character
     if (ctrl and sym >= 'a' and sym <= 'z') {
         const buf = [1]u8{@intCast(sym - 'a' + 1)};
-        vterm_mod.writePtyIdx(ti, &buf);
+        vterm_mod.writePtyByName(session, &buf);
         return;
     }
     // Special keys → ANSI escape sequences
@@ -493,17 +519,17 @@ fn terminalHandleKey(sym: i32, mod_state: u16) void {
         c.SDLK_F11 => "\x1b[23~",
         else => null,
     };
-    if (seq) |s| vterm_mod.writePtyIdx(ti, s);
+    if (seq) |s| vterm_mod.writePtyByName(session, s);
 }
 
 fn terminalHandleTextInput(text: [*:0]const u8) void {
-    const ti = g_focused_terminal;
+    const session = g_focused_session;
     const slice = std.mem.span(text);
-    log.print("[terminal] textInput: len={d} chars=\"{s}\"\n", .{ slice.len, slice });
+    log.print("[terminal:{s}] textInput: len={d} chars=\"{s}\"\n", .{ session, slice.len, slice });
     if (slice.len > 0) {
         termClearSelection();
-        vterm_mod.scrollToBottomIdx(ti);
-        vterm_mod.writePtyIdx(ti, slice);
+        vterm_mod.scrollToBottomByName(session);
+        vterm_mod.writePtyByName(session, slice);
     }
 }
 
@@ -2481,7 +2507,7 @@ noinline fn paintNodeVisuals(node: *Node) void {
 
     // Terminal — cell-grid rendering via vterm
     if (node.terminal) {
-        crashlog.logFmt("paint:term id={d}", .{node.terminal_id});
+        crashlog.logFmt("paint:term session={s}", .{terminalSessionOf(node)});
         paintTerminal(node);
         crashlog.log("paint:term-done");
     }
@@ -2676,14 +2702,14 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
 /// Each cell gets its own fg color; non-default backgrounds get a bg rect.
 /// Uses span-based batching: consecutive cells with the same fg are drawn as one string.
 noinline fn paintTerminal(node: *Node) void {
-    const ti = node.terminal_id;
+    const session = terminalSessionOf(node);
     const r = node.computed;
     const font_size = node.terminal_font_size;
     const padding: f32 = 4;
 
     // Sanity check: don't paint if vterm not initialized
-    if (vterm_mod.getRowsIdx(ti) == 0) {
-        crashlog.logFmt("paint:skip id={d} rows=0", .{ti});
+    if (vterm_mod.getRowsByName(session) == 0) {
+        crashlog.logFmt("paint:skip session={s} rows=0", .{session});
         return;
     }
 
@@ -2705,17 +2731,17 @@ noinline fn paintTerminal(node: *Node) void {
     const rows: u16 = @intFromFloat(@max(1, @floor(avail_h / cell_h)));
 
     // Auto-resize vterm to match layout (only if changed)
-    const vt_rows = vterm_mod.getRowsIdx(ti);
-    const vt_cols = vterm_mod.getColsIdx(ti);
+    const vt_rows = vterm_mod.getRowsByName(session);
+    const vt_cols = vterm_mod.getColsByName(session);
     if (vt_rows != rows or vt_cols != cols) {
-        vterm_mod.resizeVtermIdx(ti, rows, cols);
+        vterm_mod.resizeByName(session, rows, cols);
     }
 
     const base_x = r.x + padding;
     const base_y = r.y + padding;
 
     // Scrollback: when scrolled up, top rows come from scrollback, rest from live screen
-    const scroll_off = vterm_mod.scrollOffsetIdx(ti);
+    const scroll_off = vterm_mod.scrollOffsetByName(session);
     const sb_visible: u16 = @min(scroll_off, rows);
 
     // Draw cells row by row
@@ -2731,7 +2757,7 @@ noinline fn paintTerminal(node: *Node) void {
         // Left accent bar: bright for classified tokens, dim for output
         if (row >= sb_visible) {
             const live_r = row - sb_visible;
-            const tok = classifier.getRowTokenIdx(ti, live_r);
+            const tok = classifier.getRowTokenByName(session, live_r);
             if (tok != .output and tok != .text) {
                 const ac = classifier.tokenColor(tok);
                 gpu.drawRect(r.x, cy, 2, cell_h, @as(f32, @floatFromInt(ac.r)) / 255.0, @as(f32, @floatFromInt(ac.g)) / 255.0, @as(f32, @floatFromInt(ac.b)) / 255.0, 0.9 * g_paint_opacity, 0, 0, 0, 0, 0, 0);
@@ -2743,9 +2769,9 @@ noinline fn paintTerminal(node: *Node) void {
         var col: u16 = 0;
         while (col < cols) : (col += 1) {
             const cell = if (row < sb_visible)
-                vterm_mod.getScrollbackCellIdx(ti, row, col)
+                vterm_mod.scrollbackCellByName(session, row, col)
             else
-                vterm_mod.getCellIdx(ti, row - sb_visible, col);
+                vterm_mod.getCellByName(session, row - sb_visible, col);
             const cx = base_x + @as(f32, @floatFromInt(col)) * cell_w;
 
             // Selection highlight
@@ -2766,7 +2792,7 @@ noinline fn paintTerminal(node: *Node) void {
                 // Use semantic classifier color for live screen rows (only when overlay active)
                 const fg = if (g_semantic_overlay and row >= sb_visible) blk: {
                     const live_row = row - sb_visible;
-                    const token = classifier.getRowTokenIdx(ti, live_row);
+                    const token = classifier.getRowTokenByName(session, live_row);
                     if (token != .output and token != .text) {
                         const tc = classifier.tokenColor(token);
                         break :blk @TypeOf(raw_fg){ .r = tc.r, .g = tc.g, .b = tc.b };
@@ -2796,9 +2822,9 @@ noinline fn paintTerminal(node: *Node) void {
     }
 
     // Cursor — only show when at live view (not scrolled up)
-    if (scroll_off == 0 and vterm_mod.getCursorVisibleIdx(ti) and g_cursor_visible) {
-        const crow = vterm_mod.getCursorRowIdx(ti);
-        const ccol = vterm_mod.getCursorColIdx(ti);
+    if (scroll_off == 0 and vterm_mod.getCursorVisibleByName(session) and g_cursor_visible) {
+        const crow = vterm_mod.getCursorRowByName(session);
+        const ccol = vterm_mod.getCursorColByName(session);
         if (crow < rows and ccol < cols) {
             const cx = base_x + @as(f32, @floatFromInt(ccol)) * cell_w;
             const cy_cur = base_y + @as(f32, @floatFromInt(crow)) * cell_h;
@@ -3640,37 +3666,39 @@ pub fn run(config_in: AppConfig) !void {
                                 canvas_drag_last_y = my;
                             }
                         } else {
-                            // Check all terminals for click
-                            var clicked_term: ?u8 = null;
-                            var ti2: u8 = 0;
-                            while (ti2 < MAX_TERMINALS) : (ti2 += 1) {
-                                if (!terminals_initialized[ti2]) continue;
-                                if (findTerminalNodeById(config.root, ti2)) |tn| {
+                            // Hit-test live Terminal nodes for the click.
+                            const HitCtx = struct {
+                                mx: f32,
+                                my: f32,
+                                hit: ?*Node = null,
+                            };
+                            var hit_ctx = HitCtx{ .mx = mx, .my = my };
+                            forEachTerminalNode(config.root, &hit_ctx, struct {
+                                fn visit(c_: *HitCtx, tn: *Node, _: []const u8) void {
+                                    if (c_.hit != null) return;
                                     const tr = tn.computed;
-                                    if (mx >= tr.x and mx <= tr.x + tr.w and my >= tr.y and my <= tr.y + tr.h) {
-                                        clicked_term = ti2;
-                                        break;
+                                    if (c_.mx >= tr.x and c_.mx <= tr.x + tr.w and c_.my >= tr.y and c_.my <= tr.y + tr.h) {
+                                        c_.hit = tn;
                                     }
                                 }
-                            }
-                            if (clicked_term) |tid| {
-                                g_focused_terminal = tid;
-                                if (findTerminalNodeById(config.root, tid)) |tn| {
-                                    // If the inner program enabled SGR mouse
-                                    // reporting, forward the click rather
-                                    // than starting a host-side selection.
-                                    if (vterm_mod.getMouseModeIdx(tid) > 0) {
-                                        forwardTermMouse(tn, tid, mx, my, 0, 'M');
-                                        g_term_mouse_forwarding = true;
-                                    } else {
-                                        const cell = termPixelToCell(tn, mx, my);
-                                        term_sel_start_row = cell.row;
-                                        term_sel_start_col = cell.col;
-                                        term_sel_end_row = cell.row;
-                                        term_sel_end_col = cell.col;
-                                        term_sel_active = false;
-                                        term_sel_dragging = true;
-                                    }
+                            }.visit);
+                            if (hit_ctx.hit) |tn| {
+                                const sess = terminalSessionOf(tn);
+                                setFocusedSession(sess);
+                                // If the inner program enabled SGR mouse
+                                // reporting, forward the click rather
+                                // than starting a host-side selection.
+                                if (vterm_mod.getMouseModeByName(sess) > 0) {
+                                    forwardTermMouse(tn, sess, mx, my, 0, 'M');
+                                    g_term_mouse_forwarding = true;
+                                } else {
+                                    const cell = termPixelToCell(tn, mx, my);
+                                    term_sel_start_row = cell.row;
+                                    term_sel_start_col = cell.col;
+                                    term_sel_end_row = cell.row;
+                                    term_sel_end_col = cell.col;
+                                    term_sel_active = false;
+                                    term_sel_dragging = true;
                                 }
                             } else {
                                 termClearSelection();
@@ -3729,10 +3757,10 @@ pub fn run(config_in: AppConfig) !void {
                     // Terminal mouse forwarding — if a press was forwarded
                     // (or the inner program asked for any-motion via 1003),
                     // emit SGR motion events instead of growing a selection.
-                    if (HAS_TERMINAL and terminals_initialized[g_focused_terminal]) {
-                        const mm = vterm_mod.getMouseModeIdx(g_focused_terminal);
+                    if (HAS_TERMINAL and sessionInitialized(g_focused_session)) {
+                        const mm = vterm_mod.getMouseModeByName(g_focused_session);
                         if (mm > 0) {
-                            if (findTerminalNodeById(config.root, g_focused_terminal)) |tn| {
+                            if (findTerminalNodeBySession(config.root, g_focused_session)) |tn| {
                                 const r = tn.computed;
                                 const inside = mx >= r.x and mx <= r.x + r.w and my >= r.y and my <= r.y + r.h;
                                 // Any-motion (3) reports continuously; drag (2)
@@ -3741,14 +3769,14 @@ pub fn run(config_in: AppConfig) !void {
                                     // SGR motion-no-button is button 35 (3+32);
                                     // motion-with-left is 32 (0+32).
                                     const btn: u32 = if (g_term_mouse_forwarding) 32 else 35;
-                                    forwardTermMouse(tn, g_focused_terminal, mx, my, btn, 'M');
+                                    forwardTermMouse(tn, g_focused_session, mx, my, btn, 'M');
                                 }
                             }
                         }
                     }
                     // Terminal drag selection
                     if (term_sel_dragging) {
-                        if (findTerminalNodeById(config.root, g_focused_terminal)) |tn| {
+                        if (findTerminalNodeBySession(config.root, g_focused_session)) |tn| {
                             const cell = termPixelToCell(tn, mx, my);
                             term_sel_end_row = cell.row;
                             term_sel_end_col = cell.col;
@@ -3905,8 +3933,8 @@ pub fn run(config_in: AppConfig) !void {
                         // Terminal mouse-up forwarding — emit SGR release if
                         // we forwarded the press. Button 0 + 'm' is "left up".
                         if (HAS_TERMINAL and g_term_mouse_forwarding) {
-                            if (findTerminalNodeById(config.root, g_focused_terminal)) |tn| {
-                                forwardTermMouse(tn, g_focused_terminal, event.button.x, event.button.y, 0, 'm');
+                            if (findTerminalNodeBySession(config.root, g_focused_session)) |tn| {
+                                forwardTermMouse(tn, g_focused_session, event.button.x, event.button.y, 0, 'm');
                             }
                             g_term_mouse_forwarding = false;
                         }
@@ -3917,7 +3945,7 @@ pub fn run(config_in: AppConfig) !void {
                     // SDL3: event.text.text is a const char* pointer
                     const text_ptr: [*:0]const u8 = @ptrCast(event.text.text orelse continue);
                     // Native terminal gets text first
-                    if (HAS_TERMINAL and terminals_initialized[g_focused_terminal]) {
+                    if (HAS_TERMINAL and sessionInitialized(g_focused_session)) {
                         terminalHandleTextInput(text_ptr);
                         continue;
                     }
@@ -3936,14 +3964,14 @@ pub fn run(config_in: AppConfig) !void {
                     // Capture key (F9 recording toggle)
                     if (capture.handleKey(sym)) continue;
                     // Terminal copy/paste: Ctrl+Shift+C/V (not Ctrl+C which is SIGINT)
-                    if (terminals_initialized[g_focused_terminal]) {
+                    if (sessionInitialized(g_focused_session)) {
                         const t_ctrl = (mod & c.SDL_KMOD_CTRL) != 0;
                         const t_shift = (mod & c.SDL_KMOD_SHIFT) != 0;
                         if (t_ctrl and t_shift and sym == c.SDLK_C) {
                             if (term_sel_active) {
                                 var copy_buf: [8192]u8 = undefined;
-                                const len = vterm_mod.copySelectedTextIdx(
-                                    g_focused_terminal,
+                                const len = vterm_mod.copySelectedTextByName(
+                                    g_focused_session,
                                     term_sel_start_row,
                                     term_sel_start_col,
                                     term_sel_end_row,
@@ -3961,9 +3989,9 @@ pub fn run(config_in: AppConfig) !void {
                         if (t_ctrl and t_shift and sym == c.SDLK_D) {
                             g_semantic_overlay = !g_semantic_overlay;
                             // When overlay turns on, activate basic classifier if none set
-                            if (g_semantic_overlay and classifier.getModeIdx(g_focused_terminal) == .none) {
-                                classifier.setModeIdx(g_focused_terminal, .basic);
-                                classifier.markDirtyIdx(g_focused_terminal);
+                            if (g_semantic_overlay and classifier.getModeByName(g_focused_session) == .none) {
+                                classifier.setModeByName(g_focused_session, .basic);
+                                classifier.markDirtyByName(g_focused_session);
                             }
                             log.print("[semantic] overlay {s}\n", .{if (g_semantic_overlay) "ON" else "OFF"});
                             continue;
@@ -3971,15 +3999,15 @@ pub fn run(config_in: AppConfig) !void {
                         if (t_ctrl and t_shift and sym == c.SDLK_V) {
                             const clip = c.SDL_GetClipboardText();
                             if (clip != null) {
-                                vterm_mod.scrollToBottomIdx(g_focused_terminal);
-                                vterm_mod.writePtyIdx(g_focused_terminal, std.mem.span(clip));
+                                vterm_mod.scrollToBottomByName(g_focused_session);
+                                vterm_mod.writePtyByName(g_focused_session, std.mem.span(clip));
                                 c.SDL_free(@ptrCast(clip));
                             }
                             continue;
                         }
                     }
                     // Native terminal special key routing
-                    if (terminals_initialized[g_focused_terminal]) {
+                    if (sessionInitialized(g_focused_session)) {
                         terminalHandleKey(sym, mod);
                         continue;
                     }
@@ -4023,8 +4051,6 @@ pub fn run(config_in: AppConfig) !void {
                     // When a terminal is nested inside a Canvas.Node its computed rect is in
                     // graph space; transform the cursor into graph space before hit-testing.
                     {
-                        var scroll_ti: u8 = 0;
-                        var scroll_handled = false;
                         const canvas_hit = events.findCanvasNode(config.root, mx, my);
                         var gx: f32 = mx;
                         var gy: f32 = my;
@@ -4035,25 +4061,41 @@ pub fn run(config_in: AppConfig) !void {
                             gx = gpos[0];
                             gy = gpos[1];
                         }
-                        while (scroll_ti < MAX_TERMINALS) : (scroll_ti += 1) {
-                            if (!terminals_initialized[scroll_ti]) continue;
-                            if (findTerminalNodeById(config.root, scroll_ti)) |tn| {
+                        const ScrollCtx = struct {
+                            mx: f32,
+                            my: f32,
+                            gx: f32,
+                            gy: f32,
+                            canvas_hit: bool,
+                            wheel_y: i32,
+                            handled: bool = false,
+                        };
+                        var sctx = ScrollCtx{
+                            .mx = mx,
+                            .my = my,
+                            .gx = gx,
+                            .gy = gy,
+                            .canvas_hit = canvas_hit != null,
+                            .wheel_y = @intFromFloat(event.wheel.y),
+                        };
+                        forEachTerminalNode(config.root, &sctx, struct {
+                            fn visit(s: *ScrollCtx, tn: *Node, sess: []const u8) void {
+                                if (s.handled) return;
+                                if (!sessionInitialized(sess)) return;
                                 const tr = tn.computed;
-                                const screen_hit = mx >= tr.x and mx <= tr.x + tr.w and my >= tr.y and my <= tr.y + tr.h;
-                                const graph_hit = canvas_hit != null and gx >= tr.x and gx <= tr.x + tr.w and gy >= tr.y and gy <= tr.y + tr.h;
+                                const screen_hit = s.mx >= tr.x and s.mx <= tr.x + tr.w and s.my >= tr.y and s.my <= tr.y + tr.h;
+                                const graph_hit = s.canvas_hit and s.gx >= tr.x and s.gx <= tr.x + tr.w and s.gy >= tr.y and s.gy <= tr.y + tr.h;
                                 if (screen_hit or graph_hit) {
-                                    const wheel_y: i32 = @intFromFloat(event.wheel.y);
-                                    if (wheel_y > 0) {
-                                        vterm_mod.scrollUpIdx(scroll_ti, @intCast(wheel_y * 3));
-                                    } else if (wheel_y < 0) {
-                                        vterm_mod.scrollDownIdx(scroll_ti, @intCast(-wheel_y * 3));
+                                    if (s.wheel_y > 0) {
+                                        vterm_mod.scrollUpByName(sess, @intCast(s.wheel_y * 3));
+                                    } else if (s.wheel_y < 0) {
+                                        vterm_mod.scrollDownByName(sess, @intCast(-s.wheel_y * 3));
                                     }
-                                    scroll_handled = true;
-                                    break;
+                                    s.handled = true;
                                 }
                             }
-                        }
-                        if (scroll_handled) continue;
+                        }.visit);
+                        if (sctx.handled) continue;
                     }
                     // Canvas: check for scroll containers inside tiles before zooming
                     if (events.findCanvasNode(config.root, mx, my)) |cn| {
@@ -4204,58 +4246,56 @@ pub fn run(config_in: AppConfig) !void {
         // PTY remote control — accept connections, process commands
         pty_remote.poll();
 
-        // Terminal tick — init PTYs for all Terminal nodes, poll for output
+        // Terminal tick — walk every Terminal node in the tree, ensure its
+        // pipe exists, poll for output, run classifier + semantic per session.
         {
             crashlog.log("tick:term-start");
-            var term_count: u8 = 0;
-            findTerminalNodes(config.root, &term_count);
-            var ti: u8 = 0;
-            while (ti < term_count) : (ti += 1) {
-                if (!terminals_initialized[ti]) {
-                    // Honor the cart's <Terminal shell="..."> prop when set;
-                    // fall back to bash. Lookup walks the tree because we
-                    // need the actual node, not just the count.
-                    const tn = findTerminalNodeById(config.root, ti);
-                    const shell_path: [*:0]const u8 =
-                        if (tn != null and tn.?.terminal_shell != null)
-                            tn.?.terminal_shell.?
-                        else
-                            "bash";
-                    vterm_mod.spawnShellIdx(ti, shell_path, 24, 80);
-                    terminals_initialized[ti] = true;
-                }
-                crashlog.log("tick:poll");
-                if (vterm_mod.pollPtyIdx(ti)) {
-                    classifier.markDirtyIdx(ti);
-                    layout.markLayoutDirty();
-                }
-                // Auto-detect CLI from banner text (first 6 rows)
-                if (!g_semantic_detected_flags[ti]) {
-                    const detect_rows = @min(vterm_mod.getRowsIdx(ti), 6);
-                    var dr: u16 = 0;
-                    while (dr < detect_rows) : (dr += 1) {
-                        const dt = vterm_mod.getRowTextIdx(ti, dr);
-                        if (dt.len > 0 and std.mem.indexOf(u8, dt, "Claude Code") != null) {
-                            classifier.setModeIdx(ti, .claude_code);
-                            classifier.markDirtyIdx(ti);
-                            g_semantic_detected_flags[ti] = true;
-                            break;
+            const TickCtx = struct {};
+            var tick_ctx = TickCtx{};
+            forEachTerminalNode(config.root, &tick_ctx, struct {
+                fn visit(_: *TickCtx, tn: *Node, sess: []const u8) void {
+                    // First sight of this session → spawn its shell. The
+                    // pipe is auto-created at the default 24×80; paintTerminal
+                    // resizes on first paint once the layout is known.
+                    if (vterm_mod.getPipe(sess) == null) {
+                        const shell_path: [*:0]const u8 =
+                            if (tn.terminal_shell) |s| s else "bash";
+                        vterm_mod.spawnShellByName(sess, shell_path, 24, 80);
+                    }
+                    crashlog.log("tick:poll");
+                    if (vterm_mod.pollPtyByName(sess)) {
+                        classifier.markDirtyByName(sess);
+                        layout.markLayoutDirty();
+                    }
+                    // Auto-detect CLI from banner text (first 6 rows). Once the
+                    // classifier mode is non-`.none`, we treat detection as
+                    // settled (no separate boolean flag needed).
+                    if (classifier.getModeByName(sess) == .none) {
+                        const detect_rows = @min(vterm_mod.getRowsByName(sess), 6);
+                        var dr: u16 = 0;
+                        while (dr < detect_rows) : (dr += 1) {
+                            const dt = vterm_mod.getRowTextByName(sess, dr);
+                            if (dt.len > 0 and std.mem.indexOf(u8, dt, "Claude Code") != null) {
+                                classifier.setModeByName(sess, .claude_code);
+                                classifier.markDirtyByName(sess);
+                                break;
+                            }
                         }
                     }
-                }
-                // Re-classify when damage occurred
-                if (classifier.isDirtyIdx(ti) and classifier.getModeIdx(ti) != .none and classifier.getModeIdx(ti) != .json) {
-                    const cls_rows = vterm_mod.getRowsIdx(ti);
-                    var cls_r: u16 = 0;
-                    while (cls_r < cls_rows) : (cls_r += 1) {
-                        const cls_text = vterm_mod.getRowTextIdx(ti, cls_r);
-                        classifier.classifyAndCacheIdx(ti, cls_r, cls_text, cls_rows);
+                    // Re-classify when damage occurred. Semantic graph builds
+                    // per-session (no more "only terminal 0" restriction).
+                    if (classifier.isDirtyByName(sess) and classifier.getModeByName(sess) != .none and classifier.getModeByName(sess) != .json) {
+                        const cls_rows = vterm_mod.getRowsByName(sess);
+                        var cls_r: u16 = 0;
+                        while (cls_r < cls_rows) : (cls_r += 1) {
+                            const cls_text = vterm_mod.getRowTextByName(sess, cls_r);
+                            classifier.classifyAndCacheByName(sess, cls_r, cls_text, cls_rows);
+                        }
+                        classifier.clearDirtyByName(sess);
+                        semantic.tickByName(sess, cls_rows);
                     }
-                    classifier.clearDirtyIdx(ti);
-                    // Only build semantic graph for terminal 0 (primary)
-                    if (ti == 0) semantic.tick(cls_rows);
                 }
-            }
+            }.visit);
         }
 
         // Coalesced TextInput drag hit-test — runs once per frame regardless
