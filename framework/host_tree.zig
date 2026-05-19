@@ -158,6 +158,54 @@ pub fn allocator() std.mem.Allocator {
 }
 
 // ════════════════════════════════════════════════════════════════════════
+// Tree materialization
+// ════════════════════════════════════════════════════════════════════════
+//
+// Walks the id-keyed tree under `parent_id` and copies it into a linear
+// arena-allocated Node tree the painter can recurse through. Shallow copy
+// per Node (style + computed + text pointers are all shared with the
+// canonical node in g_node_by_id); the painter writes only to `computed`,
+// which is per-frame anyway.
+//
+// Use this from a per-frame arena that's reset every tick — no individual
+// frees, O(1) reuse. Multi-Window owner filtering (skipping children that
+// belong to a different Window subtree) is a GPU-host concern and not
+// handled here.
+
+pub fn materializeChildren(arena: std.mem.Allocator, parent_id: u32) []layout.Node {
+    const ids = getChildren(parent_id);
+    if (ids.len == 0) return &.{};
+    const out = arena.alloc(layout.Node, ids.len) catch return &.{};
+    var i: usize = 0;
+    for (ids) |cid| {
+        const src = getNode(cid) orelse {
+            out[i] = .{};
+            i += 1;
+            continue;
+        };
+        out[i] = src.*;
+        out[i].children = materializeChildren(arena, cid);
+        i += 1;
+    }
+    return out;
+}
+
+/// Build a synthetic root for `node_id` carrying the node's own state plus
+/// a recursively-materialized child tree. The caller usually wants this for
+/// a <Window>'s subtree — i.e. a root that paints with a column flex and
+/// some default background, with the cart's tree as children. Returns null
+/// if the node isn't in the host tree.
+pub fn materializeWindowRoot(arena: std.mem.Allocator, window_node_id: u32) ?*layout.Node {
+    if (getNode(window_node_id) == null) return null;
+    const root = arena.create(layout.Node) catch return null;
+    root.* = .{};
+    root.style.flex_direction = .column;
+    root.style.background_color = layout.Color.rgb(17, 24, 39);
+    root.children = materializeChildren(arena, window_node_id);
+    return root;
+}
+
+// ════════════════════════════════════════════════════════════════════════
 // CRUD primitives
 // ════════════════════════════════════════════════════════════════════════
 

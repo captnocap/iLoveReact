@@ -85,10 +85,47 @@ pub const WindowSlot = struct {
 var slots: [MAX_WINDOWS]WindowSlot = [_]WindowSlot{.{}} ** MAX_WINDOWS;
 var slot_count: usize = 0;
 var g_js_dispatch_fn: ?*const fn (u32, []const u8) void = null;
+var g_sdl_inited: bool = false;
 const WrappedLine = struct { start: usize, end: usize };
 
 pub fn setJsDispatchFn(f: *const fn (u32, []const u8) void) void {
     g_js_dispatch_fn = f;
+}
+
+// ── SDL3 lifecycle ─────────────────────────────────────────────────
+//
+// Lazy SDL_Init the first time a Window opens. Deferred so a TUI binary
+// built with -Dhas-window=true but with a cart that never opens a
+// <Window> doesn't pay the SDL_Init cost.
+
+pub fn ensureSdlInited() bool {
+    if (g_sdl_inited) return true;
+    if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
+        std.debug.print("[windows] SDL_Init failed\n", .{});
+        return false;
+    }
+    g_sdl_inited = true;
+    return true;
+}
+
+pub fn isSdlInited() bool {
+    return g_sdl_inited;
+}
+
+pub fn shutdownSdl() void {
+    if (!g_sdl_inited) return;
+    c.SDL_Quit();
+    g_sdl_inited = false;
+}
+
+/// Pump every queued SDL3 event into routeEvent. Drains the queue.
+/// Returns when SDL_PollEvent has no more events to deliver.
+pub fn pumpEvents() void {
+    if (!g_sdl_inited) return;
+    var event: c.SDL_Event = undefined;
+    while (c.SDL_PollEvent(&event)) {
+        _ = routeEvent(&event);
+    }
 }
 
 fn dispatchJs(node: *Node, handler: []const u8) bool {

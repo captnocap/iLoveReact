@@ -68,6 +68,85 @@ pub fn setScale(s: f32) void {
     g_scale = if (s > 0) s else 1.0;
 }
 
+// ── JS handler expression pool ─────────────────────────────────────
+//
+// CREATE/UPDATE installs a null-terminated `__dispatchEvent(id,'name')`
+// string on each Node's handler slot. The string outlives any single
+// frame, so it has to live on a heap that's not arena-reset. The
+// pool is process-lifetime; entries are tiny (~30 bytes) and never
+// freed individually. Both shells share one pool so a node mutated by
+// the GPU host AND queried by the TUI Window paint side never sees a
+// stale pointer.
+
+var g_handler_pool: std.ArrayList([:0]u8) = .{};
+var g_pool_alloc: ?std.mem.Allocator = null;
+
+pub fn initHandlerPool(alloc: std.mem.Allocator) void {
+    g_pool_alloc = alloc;
+}
+
+fn poolAllocator() std.mem.Allocator {
+    return g_pool_alloc orelse std.heap.c_allocator;
+}
+
+pub fn installJsExpr(comptime expr_fmt: []const u8, id: u32) ?[*:0]const u8 {
+    const alloc = poolAllocator();
+    const s = std.fmt.allocPrint(alloc, expr_fmt, .{id}) catch return null;
+    const sz: [:0]u8 = s[0 .. s.len - 1 :0];
+    g_handler_pool.append(alloc, sz) catch {};
+    return sz.ptr;
+}
+
+// ── Handler-name lookups against the reconciler's handlerNames array ──
+
+pub fn cmdHasHandlerName(cmd: std.json.Value, name: []const u8) bool {
+    const names_v = if (cmd == .object) cmd.object.get("handlerNames") else null;
+    if (names_v == null or names_v.? != .array) return false;
+    for (names_v.?.array.items) |entry| {
+        if (entry == .string and std.mem.eql(u8, entry.string, name)) return true;
+    }
+    return false;
+}
+
+pub fn cmdHasAnyHandlerName(cmd: std.json.Value, comptime names: []const []const u8) bool {
+    inline for (names) |name| {
+        if (cmdHasHandlerName(cmd, name)) return true;
+    }
+    return false;
+}
+
+/// CREATE/UPDATE hook: install the six mouse/click/hover JS-eval expression
+/// pointers on the Node based on which handler names the reconciler attached.
+/// Both GPU and TUI-Window shells call this; the GPU shell additionally
+/// handles onScroll/onRightClick/onMove/onRender/onLayout (those refer to
+/// shell-specific dispatch callbacks).
+pub fn applyMouseHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
+    node.handlers.js_on_press = null;
+    node.handlers.js_on_mouse_down = null;
+    node.handlers.js_on_mouse_move = null;
+    node.handlers.js_on_mouse_up = null;
+    node.handlers.js_on_hover_enter = null;
+    node.handlers.js_on_hover_exit = null;
+    if (cmdHasAnyHandlerName(cmd, &.{ "onClick", "onPress" })) {
+        node.handlers.js_on_press = installJsExpr("__dispatchEvent({d},'onClick')\x00", id);
+    }
+    if (cmdHasAnyHandlerName(cmd, &.{ "onMouseDown", "onPointerDown", "onPressIn" })) {
+        node.handlers.js_on_mouse_down = installJsExpr("__dispatchEvent({d},'onMouseDown')\x00", id);
+    }
+    if (cmdHasAnyHandlerName(cmd, &.{ "onMouseMove", "onPointerMove" })) {
+        node.handlers.js_on_mouse_move = installJsExpr("__dispatchEvent({d},'onMouseMove')\x00", id);
+    }
+    if (cmdHasAnyHandlerName(cmd, &.{ "onMouseUp", "onPointerUp", "onPressOut" })) {
+        node.handlers.js_on_mouse_up = installJsExpr("__dispatchEvent({d},'onMouseUp')\x00", id);
+    }
+    if (cmdHasAnyHandlerName(cmd, &.{ "onHoverEnter", "onMouseEnter" })) {
+        node.handlers.js_on_hover_enter = installJsExpr("__dispatchEvent({d},'onHoverEnter')\x00", id);
+    }
+    if (cmdHasAnyHandlerName(cmd, &.{ "onHoverExit", "onMouseLeave" })) {
+        node.handlers.js_on_hover_exit = installJsExpr("__dispatchEvent({d},'onHoverExit')\x00", id);
+    }
+}
+
 pub fn getScale() f32 {
     return g_scale;
 }

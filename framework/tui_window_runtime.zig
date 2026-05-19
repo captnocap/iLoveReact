@@ -28,12 +28,10 @@ const build_options = @import("build_options");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 
-const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
 const windows = @import("primitive/windows.zig");
 const host_tree = @import("host_tree.zig");
 const host_props = @import("host_props.zig");
-const log = @import("diag/log.zig");
 
 const Node = layout.Node;
 
@@ -43,7 +41,6 @@ const Node = layout.Node;
 
 var g_alloc: std.mem.Allocator = undefined;
 var g_inited: bool = false;
-var g_sdl_inited: bool = false;
 
 /// node_id → windows.zig slot index. Populated when CREATE with
 /// type="Window" fires; consulted on tickDrain to know which slots
@@ -62,14 +59,6 @@ var g_frame_arena: std.heap.ArenaAllocator = undefined;
 /// actually computed for each Node's rect.
 var g_last_dumped_slot_count: u32 = 0;
 
-/// Pool of allocated handler-expression strings (e.g.
-/// "__dispatchEvent(42,'onClick')") whose pointers live on
-/// Node.handlers.js_on_press etc. These strings are referenced from
-/// arena-copied Nodes every frame, so they need a lifetime that
-/// outlives any single frame's arena reset — hence a separate
-/// permanent pool on g_alloc.
-var g_handler_expr_pool: std.ArrayList([:0]u8) = .{};
-
 // ────────────────────────────────────────────────────────────────────
 // Lifecycle
 // ────────────────────────────────────────────────────────────────────
@@ -80,10 +69,11 @@ pub fn init(alloc: std.mem.Allocator) !void {
     g_slot_by_node_id = std.AutoHashMap(u32, usize).init(alloc);
     g_frame_arena = std.heap.ArenaAllocator.init(alloc);
     host_tree.init(alloc);
+    host_props.initHandlerPool(alloc);
     host_tree.setHooks(.{
         .open_host_window = openHostWindow,
         .apply_props = applyProps,
-        .apply_handler_flags = applyHandlerFlags,
+        .apply_handler_flags = host_props.applyMouseHandlerFlags,
     });
     // Install the layout-side text-measure callback so Text intrinsic
     // widths come back non-zero. Without this, every Text node measures
@@ -106,29 +96,12 @@ pub fn deinit() void {
     g_slot_by_node_id.deinit();
     g_frame_arena.deinit();
     windows.deinitAll();
-    if (g_sdl_inited) {
-        c.SDL_Quit();
-        g_sdl_inited = false;
-    }
+    windows.shutdownSdl();
     g_inited = false;
 }
 
-// ────────────────────────────────────────────────────────────────────
-// SDL3 lazy init
-// ────────────────────────────────────────────────────────────────────
-
-/// Initialize SDL3 video on first window open. Deferred so ANSI-only
-/// carts that just happen to be built with -Dhas-window=true (e.g.
-/// transitively via a re-export) don't pay the SDL_Init cost.
-fn ensureSdlInited() bool {
-    if (g_sdl_inited) return true;
-    if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
-        log.err(.engine, "tui_window_runtime: SDL_Init failed", .{});
-        return false;
-    }
-    g_sdl_inited = true;
-    return true;
-}
+// (SDL3 lazy init lives in framework/primitive/windows.zig —
+// windows.ensureSdlInited() / pumpEvents() / shutdownSdl().)
 
 // ────────────────────────────────────────────────────────────────────
 // Layout text-measure callback
@@ -190,65 +163,9 @@ fn jsDispatch(node_id: u32, event_name: []const u8) void {
     v8_runtime.evalExpr(expr);
 }
 
-/// Per-handler-name check — the reconciler attaches a top-level
-/// `handlerNames: ["onClick", ...]` array to CREATE/UPDATE commands.
-/// Mirrors v8_app.zig's cmdHasHandlerName.
-fn cmdHasHandlerName(cmd: std.json.Value, name: []const u8) bool {
-    const v = cmd.object.get("handlerNames") orelse return false;
-    if (v != .array) return false;
-    for (v.array.items) |entry| {
-        if (entry == .string and std.mem.eql(u8, entry.string, name)) return true;
-    }
-    return false;
-}
-
-fn cmdHasAnyHandler(cmd: std.json.Value, comptime names: []const []const u8) bool {
-    inline for (names) |n| {
-        if (cmdHasHandlerName(cmd, n)) return true;
-    }
-    return false;
-}
-
-/// Allocate a permanent null-terminated JS-eval string and stash its
-/// pointer on the Node. Strings live in g_handler_expr_pool for the
-/// process lifetime — they're tiny (~30 bytes each) and stable.
-fn installJsExpr(comptime expr_fmt: []const u8, id: u32) ?[*:0]const u8 {
-    const s = std.fmt.allocPrint(g_alloc, expr_fmt, .{id}) catch return null;
-    const sz: [:0]u8 = s[0 .. s.len - 1 :0];
-    g_handler_expr_pool.append(g_alloc, sz) catch {};
-    return sz.ptr;
-}
-
-/// CREATE/UPDATE hook: extract event handler flags from the command
-/// and install JS-eval strings on the Node. windows.zig:routeEvent
-/// hit-tests against these on every SDL3 mouse event and fires
-/// dispatchJs (→ jsDispatch above) when one matches.
-fn applyHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
-    node.handlers.js_on_press = null;
-    node.handlers.js_on_mouse_down = null;
-    node.handlers.js_on_mouse_move = null;
-    node.handlers.js_on_mouse_up = null;
-    node.handlers.js_on_hover_enter = null;
-    node.handlers.js_on_hover_exit = null;
-    if (cmdHasAnyHandler(cmd, &.{ "onClick", "onPress" })) {
-        node.handlers.js_on_press = installJsExpr("__dispatchEvent({d},'onClick')\x00", id);
-    }
-    if (cmdHasAnyHandler(cmd, &.{ "onMouseDown", "onPointerDown", "onPressIn" })) {
-        node.handlers.js_on_mouse_down = installJsExpr("__dispatchEvent({d},'onMouseDown')\x00", id);
-    }
-    if (cmdHasAnyHandler(cmd, &.{ "onMouseMove", "onPointerMove" })) {
-        node.handlers.js_on_mouse_move = installJsExpr("__dispatchEvent({d},'onMouseMove')\x00", id);
-    }
-    if (cmdHasAnyHandler(cmd, &.{ "onMouseUp", "onPointerUp", "onPressOut" })) {
-        node.handlers.js_on_mouse_up = installJsExpr("__dispatchEvent({d},'onMouseUp')\x00", id);
-    }
-    if (cmdHasAnyHandler(cmd, &.{ "onHoverEnter", "onMouseEnter" })) {
-        node.handlers.js_on_hover_enter = installJsExpr("__dispatchEvent({d},'onHoverEnter')\x00", id);
-    }
-    if (cmdHasAnyHandler(cmd, &.{ "onHoverExit", "onMouseLeave" })) {
-        node.handlers.js_on_hover_exit = installJsExpr("__dispatchEvent({d},'onHoverExit')\x00", id);
-    }
-}
+// (handler-name lookups, JS-eval string pool, and applyMouseHandlerFlags
+// live in framework/host_props.zig — both shells share them. The hook is
+// wired in init() above.)
 
 // ────────────────────────────────────────────────────────────────────
 // host_tree hooks
@@ -263,7 +180,7 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
     const is_window = std.mem.eql(u8, type_name, "Window");
     const is_notif = std.mem.eql(u8, type_name, "Notification");
     if (!is_window and !is_notif) return;
-    if (!ensureSdlInited()) return;
+    if (!windows.ensureSdlInited()) return;
     if (g_slot_by_node_id.contains(id)) return;
 
     var title_buf: [256:0]u8 = undefined;
@@ -380,51 +297,17 @@ pub fn register() void {
 // Per-tick pump: SDL events → routeEvent; layout + paint all windows
 // ────────────────────────────────────────────────────────────────────
 
-/// Materialize a Window's children into an arena-allocated linked
-/// Node tree that windows.zig can walk. Mirrors v8_app.zig's
-/// `materializeWindowRoot` but reads from host_tree's state instead of
-/// v8_app's globals, and skips owner filtering (the TUI host doesn't
-/// yet support nested Windows owning sub-Windows).
-fn materializeWindowRoot(arena: std.mem.Allocator, window_node_id: u32) ?*Node {
-    if (host_tree.getNode(window_node_id) == null) return null;
-    const root = arena.create(Node) catch return null;
-    root.* = .{};
-    root.style.flex_direction = .column;
-    root.style.background_color = layout.Color.rgb(17, 24, 39);
-    root.children = materializeChildren(arena, window_node_id);
-    return root;
-}
-
-fn materializeChildren(arena: std.mem.Allocator, parent_id: u32) []Node {
-    const ids = host_tree.getChildren(parent_id);
-    if (ids.len == 0) return &.{};
-    const out = arena.alloc(Node, ids.len) catch return &.{};
-    var i: usize = 0;
-    for (ids) |cid| {
-        const src = host_tree.getNode(cid) orelse {
-            out[i] = .{};
-            i += 1;
-            continue;
-        };
-        out[i] = src.*;
-        out[i].children = materializeChildren(arena, cid);
-        i += 1;
-    }
-    return out;
-}
+// (materializeWindowRoot + materializeChildren live in
+// framework/host_tree.zig — same function, same algorithm, used by both
+// shells. tickDrain below calls host_tree.materializeWindowRoot directly.)
 
 pub fn tickDrain() void {
-    if (!g_inited or !g_sdl_inited) return;
+    if (!g_inited or !windows.isSdlInited()) return;
     if (g_slot_by_node_id.count() == 0) return;
 
-    // Pump SDL events. Each event gets routed to the right slot.
-    // Caveat: we share the host process event queue with anything else
-    // that might also be polling — in a slim TUI binary there's
-    // nothing else, so we own the queue.
-    var event: c.SDL_Event = undefined;
-    while (c.SDL_PollEvent(&event)) {
-        _ = windows.routeEvent(&event);
-    }
+    // Pump SDL events into per-window routing. In a slim TUI binary
+    // there's nothing else polling the queue, so we own it.
+    windows.pumpEvents();
 
     // Rebuild every open Window's Node tree this frame, point its
     // slot at the new root, then layout + paint. Arena reset is
@@ -436,7 +319,7 @@ pub fn tickDrain() void {
     while (it.next()) |entry| {
         const window_node_id = entry.key_ptr.*;
         const slot_idx = entry.value_ptr.*;
-        const root = materializeWindowRoot(arena, window_node_id) orelse continue;
+        const root = host_tree.materializeWindowRoot(arena, window_node_id) orelse continue;
         windows.setRoot(slot_idx, root);
     }
 
