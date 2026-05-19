@@ -176,6 +176,50 @@ fn jsonFloat(v: std.json.Value) ?f32 {
     };
 }
 
+/// Dimension parser: accepts integer/float (taken as pixels) AND
+/// percent strings like "100%". Mirrors v8_app.zig's jsonMaybePct —
+/// percent is encoded as a negative number that layout.zig:847
+/// (resolveMaybePct) interprets as a fraction of the parent extent.
+/// Without this, `width: '100%'` silently drops and Nodes inherit
+/// align_items=stretch behavior, which doesn't reach all the cases
+/// the cart author expected.
+fn jsonMaybePct(v: std.json.Value) ?f32 {
+    return switch (v) {
+        .integer => |i| @floatFromInt(i),
+        .float => |f| @floatCast(f),
+        .string => |s| blk: {
+            const t = std.mem.trim(u8, s, " \t\r\n");
+            if (t.len == 0) break :blk null;
+            if (std.mem.endsWith(u8, t, "%")) {
+                const pct = std.fmt.parseFloat(f32, t[0 .. t.len - 1]) catch break :blk null;
+                break :blk -(pct / 100.0);
+            }
+            break :blk std.fmt.parseFloat(f32, t) catch null;
+        },
+        else => null,
+    };
+}
+
+/// Font weight: numbers pass through; the common string aliases
+/// ('bold' / 'normal' / 'light') map to CSS numeric weights.
+fn parseFontWeight(v: std.json.Value) ?u16 {
+    return switch (v) {
+        .integer => |i| @intCast(@max(@as(i64, 0), @min(@as(i64, 1000), i))),
+        .float => |f| @intFromFloat(@max(@as(f32, 0), @min(@as(f32, 1000), @as(f32, @floatCast(f))))),
+        .string => |s| blk: {
+            const eq = std.mem.eql;
+            if (eq(u8, s, "bold")) break :blk 700;
+            if (eq(u8, s, "normal")) break :blk 400;
+            if (eq(u8, s, "light")) break :blk 300;
+            if (eq(u8, s, "lighter")) break :blk 300;
+            if (eq(u8, s, "bolder")) break :blk 800;
+            const parsed = std.fmt.parseInt(u16, s, 10) catch break :blk null;
+            break :blk parsed;
+        },
+        else => null,
+    };
+}
+
 fn parseHexColor(s: []const u8) ?layout.Color {
     if (s.len < 4 or s[0] != '#') return null;
     const body = s[1..];
@@ -237,19 +281,21 @@ fn parseColor(s: []const u8) ?layout.Color {
 
 fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
     const eq = std.mem.eql;
-    // Dimensions
+    // Dimensions — accept numbers AND percent strings ("100%"). The
+    // layout engine encodes percents as negative values; resolved
+    // against the parent extent in layout.zig:resolveMaybePct.
     if (eq(u8, key, "width")) {
-        if (jsonFloat(val)) |f| node.style.width = f;
+        if (jsonMaybePct(val)) |f| node.style.width = f;
     } else if (eq(u8, key, "height")) {
-        if (jsonFloat(val)) |f| node.style.height = f;
+        if (jsonMaybePct(val)) |f| node.style.height = f;
     } else if (eq(u8, key, "minWidth")) {
-        if (jsonFloat(val)) |f| node.style.min_width = f;
+        if (jsonMaybePct(val)) |f| node.style.min_width = f;
     } else if (eq(u8, key, "maxWidth")) {
-        if (jsonFloat(val)) |f| node.style.max_width = f;
+        if (jsonMaybePct(val)) |f| node.style.max_width = f;
     } else if (eq(u8, key, "minHeight")) {
-        if (jsonFloat(val)) |f| node.style.min_height = f;
+        if (jsonMaybePct(val)) |f| node.style.min_height = f;
     } else if (eq(u8, key, "maxHeight")) {
-        if (jsonFloat(val)) |f| node.style.max_height = f;
+        if (jsonMaybePct(val)) |f| node.style.max_height = f;
     }
     // Flex
     else if (eq(u8, key, "flexDirection")) {
@@ -344,7 +390,7 @@ fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
     else if (eq(u8, key, "fontSize")) {
         if (jsonFloat(val)) |f| node.font_size = @intFromFloat(f);
     } else if (eq(u8, key, "fontWeight")) {
-        if (jsonFloat(val)) |f| node.font_weight = @intFromFloat(f);
+        if (parseFontWeight(val)) |w| node.font_weight = w;
     } else if (eq(u8, key, "lineHeight")) {
         if (jsonFloat(val)) |f| node.line_height = f;
     } else if (eq(u8, key, "textAlign")) {
