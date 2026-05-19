@@ -650,6 +650,41 @@ pub fn build(b: *std.Build) void {
         tui_exe.linkLibCpp();
         if (has_terminal) tui_exe.linkSystemLibrary("vterm");
 
+        // ── has-window: link SDL3 + the engine subset ──────────
+        // When a cart imports <Window>/<Notification>, the TUI binary
+        // grows the window-rendering substrate so the <Window>
+        // subtree can paint to a real SDL3 surface from inside the
+        // same React tree that drives the ANSI grid. ANSI-only carts
+        // skip every line below this comment — they keep the slim,
+        // .so-free tui-app shape.
+        if (has_window) {
+            tui_exe.linkSystemLibrary("SDL3");
+            tui_exe.linkSystemLibrary("freetype");
+            // framework/c.zig @cImport pulls SDL3/SDL.h, ft2build.h,
+            // freetype/freetype.h, stb/stb_image.h. Match the GPU
+            // app's include-path layout (build.zig:179-188).
+            if (sysroot) |sr| {
+                tui_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
+                tui_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
+                tui_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
+            } else {
+                tui_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+                tui_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+            }
+            // stb_image is vendored C source; <Image> primitive uses it.
+            tui_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
+            tui_mod.addIncludePath(b.path("."));
+            // X11 hint atoms (notifications). Same posix-threading
+            // assumptions as the GPU app — libX11/libm/libpthread/libdl
+            // are system-assumed on every Linux desktop.
+            if (target.result.os.tag == .linux) {
+                tui_exe.linkSystemLibrary("X11");
+                tui_exe.linkSystemLibrary("m");
+                tui_exe.linkSystemLibrary("pthread");
+                tui_exe.linkSystemLibrary("dl");
+            }
+        }
+
         const tui_step = b.step("tui-app", "Build a self-contained TUI cart binary (zig-out/bin/<app-name>)");
         tui_step.dependOn(&b.addInstallArtifact(tui_exe, .{}).step);
     }

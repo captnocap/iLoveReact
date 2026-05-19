@@ -1,37 +1,36 @@
 //! framework/host_tree.zig — the React Node tree state container.
 //!
-//! Phase 1 (this file): structural state + CRUD primitives only.
+//! Owns the structural side of the reconciler→Zig pipeline:
 //!   - id → Node map
 //!   - parent → children list map
 //!   - child → parent map (the inverse, for O(depth) ancestor walks)
 //!   - root-child id list
-//!   - dirty flag
-//!   - ensureNode / appendChild / insertBefore / removeChild / appendToRoot /
-//!     insertBeforeRoot / removeFromRoot / markSubtreeDirty
-//!   - mutation hook (so StaticSurface stays correct in v8_app without
-//!     pulling gpu.frameCounter into this module — the hook fires once
-//!     per ancestor on every mutation, and v8_app installs a function
-//!     that stamps node.subtree_last_mutated_frame)
+//!   - dirty flag + mutation hook (StaticSurface stamping etc. live in
+//!     the consumer, not here)
+//!   - CRUD primitives (ensureNode / appendChild / insertBefore / etc.)
+//!   - applyCommand + applyCommandBatch — the per-batch JSON consumer
+//!     that drives the tree from the reconciler's mutation stream
+//!   - inheritTypography, jsonInt
 //!
-//! Phase 2 (next session): move applyCommand + applyCommandBatch off
-//!   v8_app.zig into this module so v8_tui_app can drive a Window
-//!   subtree's reconciler stream without re-implementing the loop.
-//!   applyProps (590 lines of CSS-shaped style parsing) is the big
-//!   piece. It touches latches, font handles, image cache — some of
-//!   which are GPU-only. The plan is to extract the pure-data parts
-//!   here and expose extension hooks for the GPU-coupled ones.
-//!
-//! Phase 3 (later): the GPU side (v8_app.zig) drops its own
-//!   `g_node_by_id`, `g_children_ids`, `g_parent_id`, `g_root_child_ids`,
-//!   `g_dirty` globals and reads from this module instead. Until then,
-//!   v8_app keeps its tree state; only v8_tui_app (under -Dhas-window)
-//!   uses this module.
+//! The GPU-coupled bits (CSS-shaped prop parsing, handler-flag
+//! registration, host-window opens, .independent IPC routing) are
+//! delegated to optional hooks installed by the consumer. v8_app
+//! installs all of them; v8_tui_app installs a subset under
+//! -Dhas-window so a <Window> subtree from a TUI cart can paint to a
+//! real SDL3 surface via the same reconciler stream that powers the
+//! ANSI grid.
 //!
 //! Why not just import v8_app.zig from v8_tui_app? Top-level
 //! `@embedFile(BUNDLE_FILE_NAME)` in v8_app.zig:281 is eager-evaluated
 //! on import — would double-embed the cart bundle into ship-tui. And
 //! v8_app's globals are bound to the GPU paint loop's lifecycle. A
 //! dedicated tree-state module is the clean cut.
+//!
+//! Migration status: v8_tui_app under HAS_WINDOW is the first
+//! consumer. v8_app continues to own its parallel copy of the tree
+//! state during the transition (its `g_node_by_id` et al. stay live)
+//! — moving v8_app onto this module is the next sweep. Until then,
+//! the two binaries each have independent tree state.
 
 const std = @import("std");
 const layout = @import("layout.zig");
@@ -300,4 +299,202 @@ pub fn jsonInt(v: std.json.Value) ?i64 {
         .float => |f| @as(i64, @intFromFloat(f)),
         else => null,
     };
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// Hooks (GPU-coupled side effects)
+// ════════════════════════════════════════════════════════════════════════
+
+pub const Hooks = struct {
+    /// CREATE: type_name has been determined. Apply type-specific
+    /// defaults to the new Node (e.g. ScrollView sets overflow=hidden,
+    /// font-bearing types stamp a default family/size). v8_app's
+    /// installer mirrors `applyTypeDefaults` in v8_app.zig.
+    type_defaults: ?*const fn (*Node, u32, []const u8) void = null,
+
+    /// CREATE/UPDATE: apply the props object (CSS-shaped style + other
+    /// reconciler props) to the Node. `type_name` is set on CREATE,
+    /// null on UPDATE. The 590-line CSS parse lives in v8_app's
+    /// `applyProps`; v8_tui_app installs a smaller version that
+    /// handles only what a TUI-spawned <Window> subtree needs.
+    apply_props: ?*const fn (*Node, std.json.Value, ?[]const u8) void = null,
+
+    /// CREATE/UPDATE: extract event handler flags (onPress, onMouseDown,
+    /// etc.) from the command and register them with the event system.
+    apply_handler_flags: ?*const fn (*Node, u32, std.json.Value) void = null,
+
+    /// CREATE with type=Window/Notification: open the host window.
+    /// Wraps `framework/primitive/windows.zig` calls. v8_app's
+    /// installer also tracks the slot in its window-by-id map.
+    open_host_window: ?*const fn (u32, []const u8, ?std.json.Value) void = null,
+
+    /// Every applyCommand call: note which window owns this command.
+    /// v8_app uses this for .independent window IPC routing; v8_tui_app
+    /// can skip.
+    note_window_owner: ?*const fn (std.json.Value) void = null,
+
+    /// After every applyCommand in a batch: maybe forward the command
+    /// across an IPC boundary for .independent windows. v8_app-only.
+    route_to_window: ?*const fn (std.json.Value) void = null,
+
+    /// UPDATE: remove keys from props/style (when a prop is unset by
+    /// the reconciler diff). v8_app's handlers clean up latch tracking
+    /// and any GPU-coupled prop teardown.
+    remove_prop_keys: ?*const fn (*Node, std.json.Value) void = null,
+    remove_style_keys: ?*const fn (*Node, std.json.Value) void = null,
+
+    /// Pre-op intercept for v8_app's `.independent` child-window mode
+    /// (separate process connected via IPC). Returns true if the
+    /// command was consumed and applyCommand should bail. Only set in
+    /// v8_app when running as a child window.
+    child_window_intercept: ?*const fn (std.json.Value, []const u8) bool = null,
+};
+
+var g_hooks: Hooks = .{};
+
+pub fn setHooks(h: Hooks) void {
+    g_hooks = h;
+}
+
+pub fn getHooks() Hooks {
+    return g_hooks;
+}
+
+// ════════════════════════════════════════════════════════════════════════
+// applyCommand — drive the tree from one reconciler mutation
+// ════════════════════════════════════════════════════════════════════════
+
+fn cmdId(cmd: std.json.Value, key: []const u8) ?u32 {
+    const v = cmd.object.get(key) orelse return null;
+    const i = jsonInt(v) orelse return null;
+    if (i < 0) return null;
+    return @intCast(i);
+}
+
+pub fn applyCommand(cmd: std.json.Value) !void {
+    if (cmd != .object) return;
+    if (g_hooks.note_window_owner) |f| f(cmd);
+
+    const op_v = cmd.object.get("op") orelse return;
+    if (op_v != .string) return;
+    const op = op_v.string;
+
+    // Child-window IPC intercept (v8_app .independent mode only).
+    if (g_hooks.child_window_intercept) |f| {
+        if (f(cmd, op)) return;
+    }
+
+    if (std.mem.eql(u8, op, "CREATE")) {
+        const id = cmdId(cmd, "id") orelse return;
+        const n = try ensureNode(id);
+        var type_name: ?[]const u8 = null;
+        if (cmd.object.get("type")) |t| if (t == .string) {
+            type_name = t.string;
+            if (g_hooks.type_defaults) |f| f(n, id, t.string);
+        };
+        if (cmd.object.get("props")) |props| {
+            if (g_hooks.apply_props) |f| f(n, props, type_name);
+        }
+        if (type_name) |tn| {
+            if (g_hooks.open_host_window) |f| f(id, tn, cmd.object.get("props"));
+        }
+        // debugName / debugSource are emitted as top-level siblings to
+        // props by renderer/hostConfig.ts. Capture so witness/autotest
+        // can label pressables by user-component name.
+        if (cmd.object.get("debugName")) |dn| if (dn == .string and dn.string.len > 0) {
+            if (g_alloc.dupe(u8, dn.string)) |owned| {
+                n.debug_name = owned;
+            } else |_| {}
+        };
+        if (g_hooks.apply_handler_flags) |f| f(n, id, cmd);
+        markSubtreeDirty(id);
+        g_dirty = true;
+    } else if (std.mem.eql(u8, op, "CREATE_TEXT")) {
+        const id = cmdId(cmd, "id") orelse return;
+        const n = try ensureNode(id);
+        if (cmd.object.get("text")) |t| if (t == .string) {
+            n.text = try g_alloc.dupe(u8, t.string);
+        };
+        markSubtreeDirty(id);
+        g_dirty = true;
+    } else if (std.mem.eql(u8, op, "APPEND")) {
+        const pid = cmdId(cmd, "parentId") orelse return;
+        const cid = cmdId(cmd, "childId") orelse return;
+        try appendChild(pid, cid);
+        inheritTypography(pid, cid);
+    } else if (std.mem.eql(u8, op, "APPEND_TO_ROOT")) {
+        const cid = cmdId(cmd, "childId") orelse return;
+        try appendToRoot(cid);
+    } else if (std.mem.eql(u8, op, "INSERT_BEFORE_ROOT")) {
+        const cid = cmdId(cmd, "childId") orelse return;
+        const bid = cmdId(cmd, "beforeId") orelse return;
+        try insertBeforeRoot(cid, bid);
+    } else if (std.mem.eql(u8, op, "INSERT_BEFORE")) {
+        const pid = cmdId(cmd, "parentId") orelse return;
+        const cid = cmdId(cmd, "childId") orelse return;
+        const bid = cmdId(cmd, "beforeId") orelse return;
+        try insertBefore(pid, cid, bid);
+        inheritTypography(pid, cid);
+    } else if (std.mem.eql(u8, op, "REMOVE")) {
+        const pid = cmdId(cmd, "parentId") orelse return;
+        const cid = cmdId(cmd, "childId") orelse return;
+        removeChild(pid, cid);
+    } else if (std.mem.eql(u8, op, "REMOVE_FROM_ROOT")) {
+        const cid = cmdId(cmd, "childId") orelse return;
+        removeFromRoot(cid);
+    } else if (std.mem.eql(u8, op, "UPDATE")) {
+        const id = cmdId(cmd, "id") orelse return;
+        if (g_node_by_id.get(id)) |n| {
+            if (cmd.object.get("removeKeys")) |keys| {
+                if (g_hooks.remove_prop_keys) |f| f(n, keys);
+            }
+            if (cmd.object.get("removeStyleKeys")) |keys| {
+                if (g_hooks.remove_style_keys) |f| f(n, keys);
+            }
+            if (cmd.object.get("props")) |props| {
+                if (g_hooks.apply_props) |f| f(n, props, null);
+            }
+            if (g_hooks.apply_handler_flags) |f| f(n, id, cmd);
+            // Propagate typography to bare text children so dynamic
+            // fontSize changes on the parent flow through to the child
+            // TextInstances.
+            if (g_children_ids.get(id)) |children| {
+                for (children.items) |child_id| inheritTypography(id, child_id);
+            }
+            markSubtreeDirty(id);
+            g_dirty = true;
+        }
+    } else if (std.mem.eql(u8, op, "UPDATE_TEXT")) {
+        const id = cmdId(cmd, "id") orelse return;
+        if (g_node_by_id.get(id)) |n| {
+            if (cmd.object.get("text")) |t| if (t == .string) {
+                n.text = try g_alloc.dupe(u8, t.string);
+            };
+            markSubtreeDirty(id);
+            g_dirty = true;
+        }
+    }
+}
+
+/// Drain one batch of pending reconciler commands. JSON bytes are an
+/// array of command objects emitted by renderer/hostConfig.ts. Errors
+/// per-command are caught and logged so a single bad command can't
+/// freeze the whole frame; parse failure aborts the whole batch.
+pub fn applyCommandBatch(json_bytes: []const u8) void {
+    const parsed = std.json.parseFromSlice(std.json.Value, g_alloc, json_bytes, .{}) catch |err| {
+        std.log.scoped(.host_tree).err("parse error: {s}", .{@errorName(err)});
+        return;
+    };
+    defer parsed.deinit();
+    if (parsed.value != .array) return;
+    for (parsed.value.array.items) |cmd| applyCommand(cmd) catch |err| {
+        std.log.scoped(.host_tree).err("apply error: {s}", .{@errorName(err)});
+    };
+    // .independent windows: forward the batch's commands across the IPC
+    // boundary to the child process. v8_app installs this; v8_tui_app
+    // doesn't use .independent (no need for crash isolation when the
+    // window is in-process SDL3 anyway).
+    if (g_hooks.route_to_window) |f| {
+        for (parsed.value.array.items) |cmd| f(cmd);
+    }
 }

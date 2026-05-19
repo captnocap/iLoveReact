@@ -10,17 +10,58 @@
 //!   2. zig build tui-app -Dapp-name=<name> -Dbundle-path=<absolute path>
 //!   3. zig-out/bin/<name> is the shippable binary.
 //!
-//! The bundle path is wired via build_options.bundle_path; @embedFile takes
-//! it as a comptime literal. Mirrors v8_app.zig's BUNDLE_FILE_NAME pattern.
+//! Optional V8 bindings (httpsrv, wssrv, process, net, sdk) are gated by
+//! the same `-Dhas-*` flags ship/ship-tui derive from the cart's bundle
+//! metafile. Same source-driven feature gates as the GPU app.
 
 const std = @import("std");
 const v8rt = @import("framework/v8_runtime.zig");
+const v8_runtime = v8rt;
 const cli_bindings = @import("framework/v8_bindings_cli.zig");
 const build_options = @import("build_options");
+const v8 = @import("v8");
 
 const HAS_TERMINAL = @hasDecl(build_options, "has_terminal") and build_options.has_terminal;
+const HAS_HTTPSRV = @hasDecl(build_options, "has_httpsrv") and build_options.has_httpsrv;
+const HAS_WSSRV = @hasDecl(build_options, "has_wssrv") and build_options.has_wssrv;
+const HAS_PROCESS = @hasDecl(build_options, "has_process") and build_options.has_process;
+const HAS_NET = @hasDecl(build_options, "has_net") and build_options.has_net;
+const HAS_SDK = @hasDecl(build_options, "has_sdk") and build_options.has_sdk;
+const HAS_FS = @hasDecl(build_options, "has_fs") and build_options.has_fs;
+const HAS_WINDOW = @hasDecl(build_options, "has_window") and build_options.has_window;
+
+const window_runtime = if (HAS_WINDOW) @import("framework/tui_window_runtime.zig") else struct {
+    pub fn register() void {}
+    pub fn init(_: std.mem.Allocator) !void {}
+    pub fn tickDrain() void {}
+};
+
 const vterm_bindings = if (HAS_TERMINAL) @import("framework/v8_bindings_vterm.zig") else struct {
     pub fn registerAll() void {}
+    pub fn tickDrain() bool { return false; }
+};
+const httpsrv_bindings = if (HAS_HTTPSRV) @import("framework/v8_bindings_httpserver.zig") else struct {
+    pub fn registerHttpServer(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const wssrv_bindings = if (HAS_WSSRV) @import("framework/v8_bindings_wsserver.zig") else struct {
+    pub fn registerWsServer(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const process_bindings = if (HAS_PROCESS) @import("framework/v8_bindings_process.zig") else struct {
+    pub fn registerProcess(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const net_bindings = if (HAS_NET) @import("framework/v8_bindings_net.zig") else struct {
+    pub fn registerNet(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const sdk_bindings = if (HAS_SDK) @import("framework/v8_bindings_sdk.zig") else struct {
+    pub fn registerSdk(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const fs_bindings = if (HAS_FS) @import("framework/v8_bindings_fs.zig") else struct {
+    pub fn registerFs(_: anytype) void {}
 };
 
 // Worker bindings — claude_code / codex / kimi / local_ai / openai_compat
@@ -37,6 +78,25 @@ else
     "bundle.js";
 
 const BUNDLE_BYTES = @embedFile(BUNDLE_FILE_NAME);
+
+// __tickDrain — pump every binding's per-tick work (accept new HTTP
+// connections, deliver completed SDK requests, etc.). The GPU app
+// calls each binding's tickDrain inline in its render loop; the TUI
+// has no render loop on the Zig side, so the JS preamble's
+// __runEventLoop calls this between timer firings.
+fn hostTickDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const vterm_drained = vterm_bindings.tickDrain();
+    httpsrv_bindings.tickDrain();
+    wssrv_bindings.tickDrain();
+    process_bindings.tickDrain();
+    net_bindings.tickDrain();
+    sdk_bindings.tickDrain();
+    // SDL3 event pump + repaint for any <Window> nodes the cart opened.
+    // No-op when HAS_WINDOW is off (the if-comptime resolves to a stub).
+    window_runtime.tickDrain();
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (vterm_drained) @as(f64, 1) else @as(f64, 0)));
+}
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -63,9 +123,28 @@ pub fn main() !void {
     // Optional vterm bindings — only present when -Dhas-terminal=true.
     // No-op stub otherwise.
     vterm_bindings.registerAll();
+    // Optional networking bindings — gated by `-Dhas-*` flags ship-tui
+    // derives from the cart's bundle metafile.
+    httpsrv_bindings.registerHttpServer({});
+    wssrv_bindings.registerWsServer({});
+    process_bindings.registerProcess({});
+    net_bindings.registerNet({});
+    sdk_bindings.registerSdk({});
+    fs_bindings.registerFs({});
     // Assistant SDK bindings — powers runtime/hooks/useAssistant for the
     // five supported backends.
     worker_bindings.register();
+
+    // Window runtime — when HAS_WINDOW, registers __hostFlush so React
+    // reconciler ops flow into host_tree, and arms tickDrain to pump
+    // SDL3 events + paint open <Window> surfaces. No-op stub when
+    // HAS_WINDOW is false.
+    try window_runtime.init(std.heap.c_allocator);
+    window_runtime.register();
+
+    // __tickDrain — called between timer firings by tui/v8-preamble.js
+    // to advance binding-side async work (accept new connections, etc.).
+    v8_runtime.registerHostFn("__tickDrain", hostTickDrain);
 
     // Same minimal console + process shim v8_cli installs. Carts then layer
     // tui/v8-preamble.js on top via the bundle's first line.

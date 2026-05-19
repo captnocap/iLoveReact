@@ -25,9 +25,21 @@ import App from '@cart-entry';
 
 declare const __runEventLoop: (done?: () => void) => void;
 
-// Drain hostConfig commands (we don't need them — we walk the tree
-// directly) and trigger a repaint.
-setTransportFlush((_cmds: any) => { requestPaint(); });
+// Drain hostConfig commands. The ANSI walker doesn't need them
+// (we walk the Instance tree directly), but when a cart imports
+// <Window>, the tui-app binary registers __hostFlush which routes
+// the same commands into framework/host_tree.zig so the SDL3
+// window surface can paint the Window subtree. Forward unchanged
+// when __hostFlush is registered; otherwise just signal repaint.
+setTransportFlush((cmds: any) => {
+  const gh: any = globalThis as any;
+  if (typeof gh.__hostFlush === 'function') {
+    try { gh.__hostFlush(cmds); } catch (e) {
+      try { (process.stderr as any)?.write?.('[transportFlush] __hostFlush err: ' + e + '\n'); } catch {}
+    }
+  }
+  requestPaint();
+});
 
 const Reconciler: any = require('react-reconciler');
 const reconciler = Reconciler(hostConfig);
