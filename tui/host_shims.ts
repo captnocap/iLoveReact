@@ -16,7 +16,7 @@
 // that use useHostAnimation get a static (no animation) value but don't
 // crash.
 
-import { forcePaint } from './host';
+import { forcePaint, dispatchTo } from './host';
 
 declare const globalThis: any;
 
@@ -60,6 +60,43 @@ export function installHostShims(): void {
 
   globalThis.__beginJsEvent = globalThis.__beginJsEvent || (() => {});
   globalThis.__endJsEvent   = globalThis.__endJsEvent   || (() => {});
+
+  // ── Event dispatch entry from Zig ─────────────────────────────────
+  //
+  // framework/tui_window_runtime.zig:jsDispatch builds the string
+  // `__dispatchEvent(id, 'onClick')` and v8_runtime.evalExprs it whenever
+  // SDL3 hit-tests a Pressable inside a <Window>. Without this global,
+  // every click in a Window throws ReferenceError, the V8 stack-trace
+  // path then logs "no StackTrace object", and the noise floods the TUI
+  // grid until the user kills the process.
+  //
+  // We route through tui/host.ts's dispatchTo — same handlerRegistry the
+  // ANSI-side mouse path uses, so a button works identically whether you
+  // click it in the terminal grid or in the SDL3 Window subtree.
+  if (typeof globalThis.__dispatchEvent !== 'function') {
+    globalThis.__dispatchEvent = (id: number, type: string) => {
+      const aliases =
+        type === 'onClick'      ? ['onClick', 'onPress'] :
+        type === 'onPress'      ? ['onPress', 'onClick'] :
+        type === 'onMouseDown'  ? ['onMouseDown', 'onPointerDown', 'onPressIn'] :
+        type === 'onMouseMove'  ? ['onMouseMove', 'onPointerMove'] :
+        type === 'onMouseUp'    ? ['onMouseUp', 'onPointerUp', 'onPressOut'] :
+        type === 'onHoverEnter' ? ['onHoverEnter', 'onMouseEnter'] :
+        type === 'onHoverExit'  ? ['onHoverExit', 'onMouseLeave'] :
+        [type];
+      try {
+        dispatchTo(id, aliases, { targetId: id });
+      } catch (e: any) {
+        // Swallow handler errors here — letting them propagate triggers
+        // the V8 no-stack-trace path that floods stderr into the TUI grid.
+        try {
+          (globalThis.process?.stderr as any)?.write?.(
+            `[__dispatchEvent] id=${id} type=${type} err: ${e?.stack || e?.message || e}\n`
+          );
+        } catch {}
+      }
+    };
+  }
 
   // ── Animation shims (Phase 2) ──────────────────────────────────────
 

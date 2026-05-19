@@ -30,7 +30,7 @@ const HAS_SDK = @hasDecl(build_options, "has_sdk") and build_options.has_sdk;
 const HAS_FS = @hasDecl(build_options, "has_fs") and build_options.has_fs;
 const HAS_WINDOW = @hasDecl(build_options, "has_window") and build_options.has_window;
 
-const window_runtime = if (HAS_WINDOW) @import("framework/tui_window_runtime.zig") else struct {
+const host_window = if (HAS_WINDOW) @import("framework/v8_bindings_host_window.zig") else struct {
     pub fn register() void {}
     pub fn init(_: std.mem.Allocator) !void {}
     pub fn tickDrain() void {}
@@ -94,7 +94,7 @@ fn hostTickDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     sdk_bindings.tickDrain();
     // SDL3 event pump + repaint for any <Window> nodes the cart opened.
     // No-op when HAS_WINDOW is off (the if-comptime resolves to a stub).
-    window_runtime.tickDrain();
+    host_window.tickDrain();
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (vterm_drained) @as(f64, 1) else @as(f64, 0)));
 }
 
@@ -135,12 +135,12 @@ pub fn main() !void {
     // five supported backends.
     worker_bindings.register();
 
-    // Window runtime — when HAS_WINDOW, registers __hostFlush so React
-    // reconciler ops flow into host_tree, and arms tickDrain to pump
-    // SDL3 events + paint open <Window> surfaces. No-op stub when
+    // Host-window binding — when HAS_WINDOW, registers __hostFlush so the
+    // React reconciler stream flows into host_tree, and arms tickDrain to
+    // pump SDL3 events + paint open <Window> surfaces. No-op stub when
     // HAS_WINDOW is false.
-    try window_runtime.init(std.heap.c_allocator);
-    window_runtime.register();
+    try host_window.init(std.heap.c_allocator);
+    host_window.register();
 
     // __tickDrain — called between timer firings by tui/v8-preamble.js
     // to advance binding-side async work (accept new connections, etc.).

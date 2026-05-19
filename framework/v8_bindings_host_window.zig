@@ -1,27 +1,24 @@
-//! framework/tui_window_runtime.zig — bridges the React reconciler
-//! stream to real SDL3 windows from inside an otherwise-ANSI TUI
-//! binary. Only compiled when the cart imports <Window>/<Notification>
-//! (ship-tui passes -Dhas-window=true; build.zig links SDL3 + freetype
-//! + the engine subset).
+//! framework/v8_bindings_host_window.zig — V8 binding that bridges the
+//! React reconciler stream to real SDL3 windows. Only linked when a cart
+//! imports `<Window>`/`<Notification>` (ship-tui passes `-Dhas-window=true`,
+//! build.zig links SDL3 + FreeType + the windows.zig paint subset).
+//!
+//! Naming convention: sibling to v8_bindings_vterm.zig, v8_bindings_process.zig,
+//! v8_bindings_telemetry.zig, etc. NOT a "runtime" — the only runtime is
+//! runtime/ (the JS side); this is a V8 host binding that registers
+//! `__hostFlush` and pumps SDL3 events per tick.
 //!
 //! Architecture:
-//!   - host_tree.zig owns the React Node tree and consumes the
-//!     reconciler's mutation batch via __hostFlush.
-//!   - When CREATE fires with type="Window", we open an SDL3 in-process
-//!     window via framework/primitive/windows.zig and track the slot
-//!     keyed by the Window node's id.
-//!   - tickDrain() pumps SDL3 events (mouse/keyboard/close), rebuilds
-//!     each open window's Node-tree root via materializeWindowRoot,
-//!     and runs windows.layoutAll + paintAndPresent.
-//!
-//! Stage 1 (this file): minimal — opens windows, paints empty frame
-//! with the window's bg color. Cart sees a real SDL3 window appear
-//! when state flips. Children inside the Window subtree don't render
-//! yet because applyProps is a stub.
-//!
-//! Stage 2 (next iteration): minimal applyProps so Box/Text/Pressable
-//! inside the Window paint with their styled props. Event handlers
-//! routed back through the reconciler's onPress/onMouseDown registry.
+//!   - host_tree.zig owns the React Node tree and consumes the reconciler's
+//!     mutation batch via __hostFlush.
+//!   - host_props.zig is the shared prop parser (same one v8_app.zig uses).
+//!   - windows.zig owns the SDL3 lifecycle, slot table, event routing,
+//!     paint, and FreeType text measurement.
+//!   - host_tree.zig owns per-frame Node-tree materialization.
+//!   - This file is just the glue that wires those modules to the TUI
+//!     binary's V8 isolate: open a window on CREATE, run host_props
+//!     with the cell→pixel scale on UPDATE, eval __dispatchEvent on
+//!     mouse hits, pump per tick.
 
 const std = @import("std");
 const build_options = @import("build_options");
@@ -203,7 +200,7 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
         };
     };
 
-    std.debug.print("[tui_window_runtime] opening window id={d} w={d} h={d}\n", .{ id, width, height });
+    std.debug.print("[host_window] opening window id={d} w={d} h={d}\n", .{ id, width, height });
     const slot = windows.open(.{
         .title = title,
         .width = width,
@@ -211,13 +208,13 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
         .kind = if (is_notif) .notification else .in_process,
         .window_id = id,
     }) orelse {
-        std.debug.print("[tui_window_runtime] windows.open FAILED for node {d}\n", .{id});
+        std.debug.print("[host_window] windows.open FAILED for node {d}\n", .{id});
         return;
     };
-    std.debug.print("[tui_window_runtime] windows.open OK node={d} slot={d}\n", .{ id, slot });
+    std.debug.print("[host_window] windows.open OK node={d} slot={d}\n", .{ id, slot });
 
     g_slot_by_node_id.put(id, slot) catch {
-        std.debug.print("[tui_window_runtime] map put OOM\n", .{});
+        std.debug.print("[host_window] map put OOM\n", .{});
         windows.close(slot);
         return;
     };
