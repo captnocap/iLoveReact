@@ -1720,40 +1720,6 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             }
             const lineGaps = if (lc > 1) gap * @as(f32, @floatFromInt((lc - 1))) else 0;
             const freeSpace = mainSize - totalBasis - lineGaps - totalMainMargin;
-            // Diagnostic: layout pass for any flex container whose child OR
-            // grandchild is the variant-button Text. React wraps as Pressable →
-            // Text wrapper → __TEXT__ leaf, so we walk down two levels.
-            {
-                var dbgi = ls;
-                var dbg_hit = false;
-                while (dbgi < ls + lc) : (dbgi += 1) {
-                    const dchild = &node.children[visibleIndices[@intCast(dbgi)]];
-                    if (dchild.text) |dt| {
-                        if (std.mem.eql(u8, dt, "Frames \xc2\xb7 italianMan")) {
-                            dbg_hit = true;
-                            break;
-                        }
-                    }
-                    for (dchild.children) |*gc| {
-                        if (gc.text) |gt| {
-                            if (std.mem.eql(u8, gt, "Frames \xc2\xb7 italianMan")) {
-                                dbg_hit = true;
-                                break;
-                            }
-                        }
-                    }
-                    if (dbg_hit) break;
-                }
-                if (dbg_hit) {
-                    log.print("[layout-dbg] flex isRow={} mainSize={d:.1} innerW={d:.1} totalBasis={d:.1} freeSpace={d:.1} lc={d}\n", .{ isRow, mainSize, innerW, totalBasis, freeSpace, lc });
-                    var pi = ls;
-                    while (pi < ls + lc) : (pi += 1) {
-                        const cn = &node.children[visibleIndices[@intCast(pi)]];
-                        const txt: []const u8 = cn.text orelse if (cn.children.len > 0 and cn.children[0].text != null) cn.children[0].text.? else "(no text)";
-                        log.print("[layout-dbg]   child[{d}] basis={d:.1} grow={d:.2} shrink={d:.2} explicit_w={?d:.1} text=\"{s}\"\n", .{ pi, childBasis[@intCast(pi)], childGrow[@intCast(pi)], childShrink[@intCast(pi)], cn.style.width, txt });
-                    }
-                }
-            }
             if (freeSpace > 0 and totalFlex > 0) {
                 var frozen = std.mem.zeroes([MAX_CHILDREN]bool);
                 var savedBasis = std.mem.zeroes([MAX_CHILDREN]f32);
@@ -1922,18 +1888,6 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                         const floorH = if (maxH != null) @min(autoMinH, maxH.?) else autoMinH;
                         if (asF32(childBasis[@intCast(i)]) < asF32(floorH)) {
                             childBasis[@intCast(i)] = floorH;
-                        }
-                    }
-                }
-            }
-            // Diagnostic: post-resolution basis for the italianMan child.
-            {
-                var pj = ls;
-                while (pj < ls + lc) : (pj += 1) {
-                    const cn = &node.children[visibleIndices[@intCast(pj)]];
-                    if (cn.text) |dt| {
-                        if (std.mem.eql(u8, dt, "Frames \xc2\xb7 italianMan")) {
-                            log.print("[layout-dbg]   POST-RESOLVE child[{d}] basis={d:.1} mainSize_used\n", .{ pj, childBasis[@intCast(pj)] });
                         }
                     }
                 }
