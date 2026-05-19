@@ -177,11 +177,15 @@ fn measureText(
 // ────────────────────────────────────────────────────────────────────
 
 /// windows.zig calls this for any hit-tested node whose js_on_* slot
-/// is non-null. `node_id` is the React Node id (forwarded from
-/// node.scroll_persist_slot, which host_tree.ensureNode pins = id).
-/// `expr` is the pre-formatted JS expression installed by
-/// applyHandlerFlags, e.g. "__dispatchEvent(42,'onClick')".
-fn jsDispatch(_: u32, expr: []const u8) void {
+/// is non-null. The contract here (set by windows.zig:dispatchJs, NOT
+/// by engine.zig — those differ!) is that we receive (node_id,
+/// event_name) — e.g. (42, "onClick") — and are responsible for
+/// constructing the `__dispatchEvent(42,'onClick')` call ourselves.
+/// The js_on_* fields on the Node act as a non-null gate; their
+/// contents are not consumed by windows.zig.
+fn jsDispatch(node_id: u32, event_name: []const u8) void {
+    var buf: [128]u8 = undefined;
+    const expr = std.fmt.bufPrint(&buf, "__dispatchEvent({d},'{s}')", .{ node_id, event_name }) catch return;
     v8_runtime.evalExpr(expr);
 }
 
