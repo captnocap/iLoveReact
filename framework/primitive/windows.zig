@@ -1023,6 +1023,55 @@ pub fn forEach(callback: *const fn (usize, *WindowSlot) void) void {
     }
 }
 
+// ── Public text measurement (FreeType-direct, matches paint path) ──────
+//
+// The default layout measureFn used by GPU carts routes through
+// framework/gpu/text.zig's glyph atlas — which depends on wgpu being
+// initialized. When framework/primitive/windows.zig paints in its
+// in_process SDL3 mode it uses FreeType directly (via the wrapSdlText
+// / measureSdlLine / glyphAdvance helpers above) — the gpu_text atlas
+// is bypassed entirely. For layout measurements to match paint, the
+// host (tui_window_runtime) installs a measureFn that calls this
+// helper instead of TextEngine.measureTextWrappedEx — which transitively
+// goes through gpu_text and returns a fallback `size_px / 2 per char`
+// when the atlas is empty, producing widths ~50% smaller than reality
+// and causing every Text to wrap.
+
+pub fn measureSdlTextForLayout(
+    te: *TextEngine,
+    text: []const u8,
+    font_size: u16,
+    max_width: f32,
+    letter_spacing: f32,
+    line_height_override: f32,
+    max_lines: u16,
+    no_wrap: bool,
+) layout.LayoutRect {
+    if (text.len == 0) return .{ .x = 0, .y = 0, .w = 0, .h = 0 };
+    const lm = te.lineMetrics(font_size);
+    const line_h: f32 = if (line_height_override > 0) line_height_override else lm.height;
+
+    // No wrap (single line) — return single-line metrics.
+    if (no_wrap or max_width <= 0) {
+        const w = measureSdlLine(te, text, font_size, letter_spacing);
+        const clamped_w = if (no_wrap and max_width > 0) @min(w, max_width) else w;
+        return .{ .x = lm.ascent, .y = 0, .w = clamped_w, .h = line_h };
+    }
+
+    // Wrapped — use the same wrapSdlText the painter uses so layout
+    // and paint can't disagree on where lines break.
+    var lines: [256]WrappedLine = undefined;
+    const line_count = wrapSdlText(te, text, font_size, max_width, letter_spacing, &lines);
+    const draw_count = if (max_lines > 0 and line_count > max_lines) max_lines else line_count;
+    var widest: f32 = 0;
+    for (0..draw_count) |li| {
+        const line = text[lines[li].start..lines[li].end];
+        const lw = measureSdlLine(te, line, font_size, letter_spacing);
+        if (lw > widest) widest = lw;
+    }
+    return .{ .x = lm.ascent, .y = 0, .w = widest, .h = line_h * @as(f32, @floatFromInt(draw_count)) };
+}
+
 // ── Telemetry ────────────────────────────────────────────────────────────
 
 pub fn telemetryActiveCount() u32 {

@@ -54,6 +54,13 @@ var g_slot_by_node_id: std.AutoHashMap(u32, usize) = undefined;
 /// Reset (not freed) each frame for cheap O(1) reuse.
 var g_frame_arena: std.heap.ArenaAllocator = undefined;
 
+/// Diagnostic: dump the post-layout Node tree when the set of open
+/// windows changes (a <Window> mounted or unmounted). Gated by env
+/// var RJIT_DUMP_LAYOUT — set to 1 to enable. Useful when the
+/// rendered output looks off and we want to confirm what the engine
+/// actually computed for each Node's rect.
+var g_last_dumped_slot_count: u32 = 0;
+
 // ────────────────────────────────────────────────────────────────────
 // Lifecycle
 // ────────────────────────────────────────────────────────────────────
@@ -133,12 +140,23 @@ fn measureText(
     bold: bool,
 ) layout.TextMetrics {
     _ = font_family_id;
+    _ = bold; // windows.zig SDL paint doesn't switch bold mid-line either yet
     var i: usize = 0;
     while (i < 32) : (i += 1) {
         const slot = windows.getSlot(i) orelse continue;
         if (slot.text_engine == null) continue;
         const te = &slot.text_engine.?;
-        return te.measureTextWrappedEx(t, font_size, max_width, letter_spacing, line_height, max_lines, no_wrap, bold);
+        // Route through the FreeType-direct measurer that mirrors the
+        // SDL paint path (windows.zig:wrapSdlText / measureSdlLine).
+        // The default TextEngine.measureTextWrappedEx goes through
+        // framework/gpu/text.zig — which depends on the wgpu atlas
+        // being initialized. The TUI binary links wgpu but never
+        // inits it, so gpu_text.getCharAdvance falls back to
+        // `size_px / 2` per char — about 50% of real DejaVu Sans
+        // advances. Layout then under-sizes every Text and paint
+        // ends up wrapping mid-word.
+        const r = windows.measureSdlTextForLayout(te, t, font_size, max_width, letter_spacing, line_height, max_lines, no_wrap);
+        return .{ .width = r.w, .height = r.h, .ascent = r.x };
     }
     return .{ .width = 0, .height = 0, .ascent = 0 };
 }
@@ -616,5 +634,43 @@ pub fn tickDrain() void {
     }
 
     windows.layoutAll();
+    // Diagnostic: dump the post-layout tree when the open-window set
+    // changes (a new <Window> mounted or one unmounted). Gated by
+    // RJIT_DUMP_LAYOUT=1. Lets you `RJIT_DUMP_LAYOUT=1 ./binary` and
+    // see the layout each time a Window pops up — far more useful
+    // than a one-shot fire on first paint, since most carts open
+    // Windows on user action, not at mount.
+    const slot_count = g_slot_by_node_id.count();
+    if (slot_count != g_last_dumped_slot_count) {
+        g_last_dumped_slot_count = slot_count;
+        const dump_env = std.posix.getenv("RJIT_DUMP_LAYOUT") orelse "";
+        if (dump_env.len > 0 and dump_env[0] != '0' and slot_count > 0) {
+            var dit = g_slot_by_node_id.iterator();
+            while (dit.next()) |entry| {
+                const slot_idx = entry.value_ptr.*;
+                if (windows.getSlot(slot_idx)) |slot| {
+                    if (slot.root) |root| {
+                        std.debug.print("[layout-dump] window node={d} slot={d}\n", .{ entry.key_ptr.*, slot_idx });
+                        dumpTree(root, 0);
+                    }
+                }
+            }
+        }
+    }
     windows.paintAndPresent();
+}
+
+fn dumpTree(node: *Node, depth: u32) void {
+    var i: u32 = 0;
+    while (i < depth) : (i += 1) std.debug.print("  ", .{});
+    const r = node.computed;
+    const txt: []const u8 = node.text orelse "";
+    std.debug.print("rect=({d:.0},{d:.0},{d:.0}x{d:.0}) w_style={?d:.0} h_style={?d:.0} fg={d} '{s}'\n", .{
+        r.x, r.y, r.w, r.h,
+        node.style.width,
+        node.style.height,
+        node.style.flex_grow,
+        if (txt.len > 30) txt[0..30] else txt,
+    });
+    for (node.children) |*child| dumpTree(child, depth + 1);
 }
