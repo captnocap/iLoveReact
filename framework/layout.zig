@@ -1323,11 +1323,14 @@ fn computeMinContentW(node: *Node) f32 {
 }
 
 // ── Flex resolver: ChildSlot bundle + helpers ──────────────────────
-// MAX_CHILDREN sized to cover a stress-test grid (e.g. 1000 cells in one
-// flexWrap row) without blowing 8MB threads at deep nesting. ~40 bytes per
-// slot × 2048 ≈ 80KB per recursive layoutNode frame, same order as the
-// prior 9-parallel-array layout.
-const MAX_CHILDREN = 2048;
+// Two cap constants:
+//   MAX_CHILDREN — visible+absolute children PER layoutNode frame. 2048
+//     was historically asserted by a stress grid, but at Debug stack
+//     frames of ~120KB+ per layoutNode × deep recursion it overflowed a
+//     12.5MB stack on the wrap-test fixture. 512 is still bigger than any
+//     real flex container; carts exceeding it should split into rows.
+//   MAX_LINES — wrap lines per container. 64 covers any plausible grid.
+const MAX_CHILDREN = 512;
 
 /// Per-flex-child measurement bundle. Collapses what used to live in nine
 /// parallel `[MAX_CHILDREN]f32` arrays plus a `visibleIndices` array. The

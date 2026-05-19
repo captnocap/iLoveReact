@@ -1,6 +1,6 @@
 const std = @import("std");
 const testing = std.testing;
-const layout = @import("../../layout.zig");
+const layout = @import("layout");
 
 fn mockMeasure(
     text: []const u8,

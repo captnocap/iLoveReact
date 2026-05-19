@@ -790,4 +790,44 @@ pub fn build(b: *std.Build) void {
     const run_luajit_runtime_test = b.addRunArtifact(luajit_runtime_test);
     const luajit_runtime_test_step = b.step("test-luajit-runtime", "Run the LuaJIT runtime integration test");
     luajit_runtime_test_step.dependOn(&run_luajit_runtime_test.step);
+
+    // ── Layout unit tests ──────────────────────────────────────────
+    // Exercises the flex resolver in framework/layout.zig with concrete
+    // expected rects. Hook to verify behavior after layout refactors.
+    // Test files import `@import("layout")` — module wired below.
+    const layout_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/layout.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const layout_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/layout.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    layout_test_mod.addImport("layout", layout_mod_for_tests);
+    const layout_test = b.addTest(.{
+        .name = "layout-test",
+        .root_module = layout_test_mod,
+    });
+    const run_layout_test = b.addRunArtifact(layout_test);
+    const layout_test_step = b.step("test-layout", "Run the layout unit tests");
+    layout_test_step.dependOn(&run_layout_test.step);
+
+    const layout_wrap_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/layout_wrap.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    layout_wrap_test_mod.addImport("layout", layout_mod_for_tests);
+    const layout_wrap_test = b.addTest(.{
+        .name = "layout-wrap-test",
+        .root_module = layout_wrap_test_mod,
+    });
+    const run_layout_wrap_test = b.addRunArtifact(layout_wrap_test);
+    const layout_wrap_test_step = b.step("test-layout-wrap", "Run the layout wrap unit tests");
+    layout_wrap_test_step.dependOn(&run_layout_wrap_test.step);
 }
