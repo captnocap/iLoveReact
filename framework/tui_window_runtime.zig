@@ -32,6 +32,7 @@ const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
 const windows = @import("primitive/windows.zig");
 const host_tree = @import("host_tree.zig");
+const host_props = @import("host_props.zig");
 const log = @import("diag/log.zig");
 
 const Node = layout.Node;
@@ -306,337 +307,50 @@ fn openHostWindow(id: u32, type_name: []const u8, props: ?std.json.Value) void {
 }
 
 // ────────────────────────────────────────────────────────────────────
-// apply_props hook — minimal CSS-shaped style application
+// apply_props hook — delegates to framework/host_props.zig
 // ────────────────────────────────────────────────────────────────────
 //
-// Cribs the smallest viable subset of v8_app.zig's 590-line applyProps.
-// Carts inside a TUI-spawned <Window> mostly need: layout (flex, gap,
-// padding, width/height), colors (background, text), font sizing,
-// borders. Image src, latches, animation tweens, gradients, etc.
-// aren't here yet — those carts ship via the GPU app anyway.
+// All style + typography prop parsing is shared with v8_app.zig via
+// framework/host_props.zig. This file's only job is to set the cell→pixel
+// scale around the call (TUI carts author in cell-units; SDL3 paints in
+// pixels), then route any non-style top-level props (text, value) to
+// node fields. No GPU-host hooks (latches, transitions) — those don't
+// reach a Window subtree.
+//
+// Long-term: cart authoring unit unifies on pixels and the scale dies.
 
-// Cell → pixel scale for ship-tui <Window> subtrees.
-//
-// Carts that ship through ship-tui are authored in cell-units (the
-// ANSI grid's natural unit — gap:1 = one row, width:18 = 18 cells,
-// padding:1 = one cell). When the same JSX renders into a real SDL3
-// window, the values would be treated as pixels — gap:1 = 1 px,
-// padding:1 = 1 px — producing illegible overlap. We scale spatial
-// values up by this constant so the same cart looks correct in both
-// targets without rewriting every dimension.
-//
-// 8.0 is the cell-cell-pixel ratio for the default 16 px font when
-// rendered through windows.zig's SDL3 TextEngine: each character is
-// ~8 px wide × ~16 px tall. The ratio's most defensible value for
-// width-keyed sizing is the character cell width — height-keyed
-// sizing has slightly different ergonomics but the cart's authoring
-// intent is consistent across both axes.
-//
-// fontSize, lineHeight, opacity, flexGrow, fontWeight stay literal —
-// those are already pixel-typed (fontSize) or unit-less (the rest).
+// Cell → pixel scale for ship-tui <Window> subtrees. The same JSX renders
+// to either an ANSI cell grid (1 unit = 1 cell) or a real SDL3 window
+// (1 unit = 1 pixel). To keep cart numbers consistent across both, the
+// SDL3 path multiplies spatial reads by ~one-cell-in-pixels. 8.0 is the
+// width of a DejaVuSans cell at the default 16 px font size.
 const CELL_SCALE: f32 = 8.0;
-
-fn jsonFloat(v: std.json.Value) ?f32 {
-    return switch (v) {
-        .integer => |i| @floatFromInt(i),
-        .float => |f| @floatCast(f),
-        else => null,
-    };
-}
-
-/// Scaled numeric value: integer/float → cells × CELL_SCALE (pixels).
-/// String "auto" / percents pass through to the unscaled path —
-/// callers should reach for `jsonMaybePct` for those.
-fn jsonScaled(v: std.json.Value) ?f32 {
-    return switch (v) {
-        .integer => |i| @as(f32, @floatFromInt(i)) * CELL_SCALE,
-        .float => |f| @as(f32, @floatCast(f)) * CELL_SCALE,
-        else => null,
-    };
-}
-
-/// Dimension parser: accepts integer/float (taken as cell-units and
-/// scaled to pixels via CELL_SCALE) AND percent strings like "100%"
-/// (encoded as a negative fraction per layout.zig:resolveMaybePct,
-/// NOT scaled — percents resolve against the parent extent at
-/// layout time).
-fn jsonMaybePct(v: std.json.Value) ?f32 {
-    return switch (v) {
-        .integer => |i| @as(f32, @floatFromInt(i)) * CELL_SCALE,
-        .float => |f| @as(f32, @floatCast(f)) * CELL_SCALE,
-        .string => |s| blk: {
-            const t = std.mem.trim(u8, s, " \t\r\n");
-            if (t.len == 0) break :blk null;
-            if (std.mem.endsWith(u8, t, "%")) {
-                const pct = std.fmt.parseFloat(f32, t[0 .. t.len - 1]) catch break :blk null;
-                break :blk -(pct / 100.0);
-            }
-            // Bare numeric string ("18") — treat as cell-unit too.
-            const n = std.fmt.parseFloat(f32, t) catch break :blk null;
-            break :blk n * CELL_SCALE;
-        },
-        else => null,
-    };
-}
-
-/// Font weight: numbers pass through; the common string aliases
-/// ('bold' / 'normal' / 'light') map to CSS numeric weights.
-fn parseFontWeight(v: std.json.Value) ?u16 {
-    return switch (v) {
-        .integer => |i| @intCast(@max(@as(i64, 0), @min(@as(i64, 1000), i))),
-        .float => |f| @intFromFloat(@max(@as(f32, 0), @min(@as(f32, 1000), @as(f32, @floatCast(f))))),
-        .string => |s| blk: {
-            const eq = std.mem.eql;
-            if (eq(u8, s, "bold")) break :blk 700;
-            if (eq(u8, s, "normal")) break :blk 400;
-            if (eq(u8, s, "light")) break :blk 300;
-            if (eq(u8, s, "lighter")) break :blk 300;
-            if (eq(u8, s, "bolder")) break :blk 800;
-            const parsed = std.fmt.parseInt(u16, s, 10) catch break :blk null;
-            break :blk parsed;
-        },
-        else => null,
-    };
-}
-
-fn parseHexColor(s: []const u8) ?layout.Color {
-    if (s.len < 4 or s[0] != '#') return null;
-    const body = s[1..];
-    if (body.len == 3) {
-        const r = std.fmt.parseInt(u8, body[0..1], 16) catch return null;
-        const g = std.fmt.parseInt(u8, body[1..2], 16) catch return null;
-        const b = std.fmt.parseInt(u8, body[2..3], 16) catch return null;
-        return layout.Color.rgb(r * 17, g * 17, b * 17);
-    }
-    if (body.len == 6) {
-        const r = std.fmt.parseInt(u8, body[0..2], 16) catch return null;
-        const g = std.fmt.parseInt(u8, body[2..4], 16) catch return null;
-        const b = std.fmt.parseInt(u8, body[4..6], 16) catch return null;
-        return layout.Color.rgb(r, g, b);
-    }
-    if (body.len == 8) {
-        const r = std.fmt.parseInt(u8, body[0..2], 16) catch return null;
-        const g = std.fmt.parseInt(u8, body[2..4], 16) catch return null;
-        const b = std.fmt.parseInt(u8, body[4..6], 16) catch return null;
-        const a = std.fmt.parseInt(u8, body[6..8], 16) catch return null;
-        return layout.Color.rgba(r, g, b, a);
-    }
-    return null;
-}
-
-fn parseRgbColor(s: []const u8) ?layout.Color {
-    var i: usize = 0;
-    while (i < s.len and s[i] != '(') i += 1;
-    if (i >= s.len or s[s.len - 1] != ')') return null;
-    const body = s[i + 1 .. s.len - 1];
-    var it = std.mem.splitScalar(u8, body, ',');
-    var parts: [4]u8 = .{ 0, 0, 0, 255 };
-    var idx: usize = 0;
-    while (it.next()) |p| : (idx += 1) {
-        if (idx >= 4) break;
-        const t = std.mem.trim(u8, p, " \t");
-        const v = std.fmt.parseFloat(f32, t) catch continue;
-        const scaled = if (idx == 3) v * 255.0 else v;
-        const clamped = @max(@min(scaled, 255.0), 0.0);
-        parts[idx] = @intFromFloat(clamped);
-    }
-    return layout.Color.rgba(parts[0], parts[1], parts[2], parts[3]);
-}
-
-fn parseColor(s: []const u8) ?layout.Color {
-    if (s.len == 0) return null;
-    if (s[0] == '#') return parseHexColor(s);
-    if (std.mem.startsWith(u8, s, "rgb")) return parseRgbColor(s);
-    const eq = std.mem.eql;
-    if (eq(u8, s, "black")) return layout.Color.rgb(0, 0, 0);
-    if (eq(u8, s, "white")) return layout.Color.rgb(255, 255, 255);
-    if (eq(u8, s, "red")) return layout.Color.rgb(220, 50, 50);
-    if (eq(u8, s, "blue")) return layout.Color.rgb(70, 130, 230);
-    if (eq(u8, s, "green")) return layout.Color.rgb(60, 190, 100);
-    if (eq(u8, s, "yellow")) return layout.Color.rgb(240, 210, 60);
-    if (eq(u8, s, "transparent")) return layout.Color.rgba(0, 0, 0, 0);
-    return null;
-}
-
-fn applyStyleKey(node: *Node, key: []const u8, val: std.json.Value) void {
-    const eq = std.mem.eql;
-    // Dimensions — accept numbers AND percent strings ("100%"). The
-    // layout engine encodes percents as negative values; resolved
-    // against the parent extent in layout.zig:resolveMaybePct.
-    if (eq(u8, key, "width")) {
-        if (jsonMaybePct(val)) |f| node.style.width = f;
-    } else if (eq(u8, key, "height")) {
-        if (jsonMaybePct(val)) |f| node.style.height = f;
-    } else if (eq(u8, key, "minWidth")) {
-        if (jsonMaybePct(val)) |f| node.style.min_width = f;
-    } else if (eq(u8, key, "maxWidth")) {
-        if (jsonMaybePct(val)) |f| node.style.max_width = f;
-    } else if (eq(u8, key, "minHeight")) {
-        if (jsonMaybePct(val)) |f| node.style.min_height = f;
-    } else if (eq(u8, key, "maxHeight")) {
-        if (jsonMaybePct(val)) |f| node.style.max_height = f;
-    }
-    // Flex
-    else if (eq(u8, key, "flexDirection")) {
-        if (val == .string) {
-            const s = val.string;
-            if (eq(u8, s, "row")) {
-                node.style.flex_direction = .row;
-            } else if (eq(u8, s, "column")) {
-                node.style.flex_direction = .column;
-            } else if (eq(u8, s, "row-reverse")) {
-                node.style.flex_direction = .row_reverse;
-            } else if (eq(u8, s, "column-reverse")) {
-                node.style.flex_direction = .column_reverse;
-            }
-        }
-    } else if (eq(u8, key, "flexGrow")) {
-        // flex_grow is a unit-less weight, NOT a length — don't scale.
-        if (jsonFloat(val)) |f| node.style.flex_grow = f;
-    } else if (eq(u8, key, "gap")) {
-        if (jsonScaled(val)) |f| node.style.gap = f;
-    } else if (eq(u8, key, "justifyContent")) {
-        if (val == .string) {
-            const s = val.string;
-            if (eq(u8, s, "flex-start") or eq(u8, s, "start")) {
-                node.style.justify_content = .start;
-            } else if (eq(u8, s, "center")) {
-                node.style.justify_content = .center;
-            } else if (eq(u8, s, "flex-end") or eq(u8, s, "end")) {
-                node.style.justify_content = .end;
-            } else if (eq(u8, s, "space-between")) {
-                node.style.justify_content = .space_between;
-            } else if (eq(u8, s, "space-around")) {
-                node.style.justify_content = .space_around;
-            } else if (eq(u8, s, "space-evenly")) {
-                node.style.justify_content = .space_evenly;
-            }
-        }
-    } else if (eq(u8, key, "alignItems")) {
-        if (val == .string) {
-            const s = val.string;
-            if (eq(u8, s, "flex-start") or eq(u8, s, "start")) {
-                node.style.align_items = .start;
-            } else if (eq(u8, s, "center")) {
-                node.style.align_items = .center;
-            } else if (eq(u8, s, "flex-end") or eq(u8, s, "end")) {
-                node.style.align_items = .end;
-            } else if (eq(u8, s, "stretch")) {
-                node.style.align_items = .stretch;
-            } else if (eq(u8, s, "baseline")) {
-                node.style.align_items = .baseline;
-            }
-        }
-    }
-    // Padding (spatial — scaled cell→pixel)
-    else if (eq(u8, key, "padding")) {
-        if (jsonScaled(val)) |f| node.style.padding = f;
-    } else if (eq(u8, key, "paddingLeft")) {
-        if (jsonScaled(val)) |f| node.style.padding_left = f;
-    } else if (eq(u8, key, "paddingRight")) {
-        if (jsonScaled(val)) |f| node.style.padding_right = f;
-    } else if (eq(u8, key, "paddingTop")) {
-        if (jsonScaled(val)) |f| node.style.padding_top = f;
-    } else if (eq(u8, key, "paddingBottom")) {
-        if (jsonScaled(val)) |f| node.style.padding_bottom = f;
-    }
-    // Margin (spatial — scaled cell→pixel)
-    else if (eq(u8, key, "margin")) {
-        if (jsonScaled(val)) |f| node.style.margin = f;
-    } else if (eq(u8, key, "marginLeft")) {
-        if (jsonScaled(val)) |f| node.style.margin_left = f;
-    } else if (eq(u8, key, "marginRight")) {
-        if (jsonScaled(val)) |f| node.style.margin_right = f;
-    } else if (eq(u8, key, "marginTop")) {
-        if (jsonScaled(val)) |f| node.style.margin_top = f;
-    } else if (eq(u8, key, "marginBottom")) {
-        if (jsonScaled(val)) |f| node.style.margin_bottom = f;
-    }
-    // Background + text color
-    else if (eq(u8, key, "backgroundColor")) {
-        if (val == .string) node.style.background_color = parseColor(val.string);
-    } else if (eq(u8, key, "color")) {
-        if (val == .string) node.text_color = parseColor(val.string);
-    }
-    // Borders (spatial — scaled cell→pixel)
-    else if (eq(u8, key, "borderWidth")) {
-        if (jsonScaled(val)) |f| node.style.border_width = f;
-    } else if (eq(u8, key, "borderColor")) {
-        if (val == .string) node.style.border_color = parseColor(val.string);
-    } else if (eq(u8, key, "borderRadius")) {
-        if (jsonScaled(val)) |f| node.style.border_radius = f;
-    }
-    // Typography
-    else if (eq(u8, key, "fontSize")) {
-        if (jsonFloat(val)) |f| node.font_size = @intFromFloat(f);
-    } else if (eq(u8, key, "fontWeight")) {
-        if (parseFontWeight(val)) |w| node.font_weight = w;
-    } else if (eq(u8, key, "lineHeight")) {
-        if (jsonFloat(val)) |f| node.line_height = f;
-    } else if (eq(u8, key, "textAlign")) {
-        if (val == .string) {
-            const s = val.string;
-            if (eq(u8, s, "left")) {
-                node.style.text_align = .left;
-            } else if (eq(u8, s, "center")) {
-                node.style.text_align = .center;
-            } else if (eq(u8, s, "right")) {
-                node.style.text_align = .right;
-            }
-        }
-    }
-    // Opacity
-    else if (eq(u8, key, "opacity")) {
-        if (jsonFloat(val)) |f| node.style.opacity = f;
-    }
-    // Position
-    else if (eq(u8, key, "position")) {
-        if (val == .string) {
-            const s = val.string;
-            if (eq(u8, s, "absolute")) {
-                node.style.position = .absolute;
-            } else if (eq(u8, s, "relative")) {
-                node.style.position = .relative;
-            }
-        }
-    } else if (eq(u8, key, "top")) {
-        if (jsonMaybePct(val)) |f| node.style.top = f;
-    } else if (eq(u8, key, "left")) {
-        if (jsonMaybePct(val)) |f| node.style.left = f;
-    } else if (eq(u8, key, "right")) {
-        if (jsonMaybePct(val)) |f| node.style.right = f;
-    } else if (eq(u8, key, "bottom")) {
-        if (jsonMaybePct(val)) |f| node.style.bottom = f;
-    }
-    // Unknown keys (gradients, shadows, transforms, image src, latch
-    // bindings, tweens, etc.) silently skipped. The Window-subtree
-    // surface is intentionally minimal here — carts that need the
-    // full GPU-flavored prop set ship via scripts/ship, not ship-tui.
-}
 
 fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
     _ = type_name;
     if (props != .object) return;
+
+    host_props.setScale(CELL_SCALE);
+    defer host_props.setScale(1.0);
+
     var it = props.object.iterator();
     while (it.next()) |entry| {
         const key = entry.key_ptr.*;
         const val = entry.value_ptr.*;
-        if (std.mem.eql(u8, key, "style")) {
-            if (val != .object) continue;
-            var sit = val.object.iterator();
-            while (sit.next()) |se| applyStyleKey(node, se.key_ptr.*, se.value_ptr.*);
-        } else if (std.mem.eql(u8, key, "text") or std.mem.eql(u8, key, "value")) {
-            // `text` (Text-shaped nodes) and `value` (TextInput) both
-            // drive the Node's painted text. The SDL paint path reads
-            // node.text uniformly; full TextInput cursor/edit handling
-            // would live in a wider input subsystem not yet wired here,
-            // but at least the displayed value goes through.
+        // The shared parser handles style{}, fontSize, fontFamily, fontWeight,
+        // color, letterSpacing, lineHeight, numberOfLines, noWrap.
+        if (host_props.applyTopLevelProp(node, key, val, false, .{})) continue;
+
+        // `text` and `value` both drive node.text — SDL paint reads it
+        // uniformly. TextInput cursor/edit handling isn't wired yet.
+        if (std.mem.eql(u8, key, "text") or std.mem.eql(u8, key, "value")) {
             if (val == .string) {
                 node.text = g_alloc.dupe(u8, val.string) catch null;
             }
         }
         // Other top-level props (children, src, onPress, debugSource,
-        // etc.) intentionally ignored — Window-subtree minimum surface.
+        // gradients, image src, etc.) intentionally ignored — Window-
+        // subtree minimum surface.
     }
 }
 
