@@ -1322,6 +1322,155 @@ fn computeMinContentW(node: *Node) f32 {
     return minW + pl + pr;
 }
 
+// ── Flex resolver: ChildSlot bundle + helpers ──────────────────────
+// MAX_CHILDREN sized to cover a stress-test grid (e.g. 1000 cells in one
+// flexWrap row) without blowing 8MB threads at deep nesting. ~40 bytes per
+// slot × 2048 ≈ 80KB per recursive layoutNode frame, same order as the
+// prior 9-parallel-array layout.
+const MAX_CHILDREN = 2048;
+
+/// Per-flex-child measurement bundle. Collapses what used to live in nine
+/// parallel `[MAX_CHILDREN]f32` arrays plus a `visibleIndices` array. The
+/// CSS-order sort now swaps a child by moving one struct instead of ten
+/// keyed values, and the grow/shrink resolvers read `slots[i].field`
+/// directly instead of indexing into ten side-by-side arrays.
+const ChildSlot = struct {
+    index: usize = 0,
+    basis: f32 = 0,
+    grow: f32 = 0,
+    shrink: f32 = 0,
+    main_size: f32 = 0,
+    cross_size: f32 = 0,
+    main_margin_start: f32 = 0,
+    main_margin_end: f32 = 0,
+    cross_margin_start: f32 = 0,
+    cross_margin_end: f32 = 0,
+};
+
+/// Iterative flex-grow distribution. CSS Flexbox §9.7: distribute free
+/// main-axis space proportionally to each item's `flex-grow`, freeze any
+/// item that hits its min/max clamp, redistribute the remainder over the
+/// still-active set. Capped at 10 passes — past that an oscillating clamp
+/// configuration is the only thing that could keep us iterating, and real
+/// layouts converge in 1-3.
+fn solveFlexGrow(
+    node: *Node,
+    slots: []ChildSlot,
+    ls: usize,
+    lc: usize,
+    mainSize: f32,
+    lineGaps: f32,
+    totalMainMargin: f32,
+    isRow: bool,
+    innerW: f32,
+    innerH: f32,
+) void {
+    var frozen = std.mem.zeroes([MAX_CHILDREN]bool);
+    var savedBasis = std.mem.zeroes([MAX_CHILDREN]f32);
+    {
+        var i = ls;
+        while (i < ls + lc) : (i += 1) {
+            frozen[i] = slots[i].grow <= 0;
+            savedBasis[i] = slots[i].basis;
+        }
+    }
+    var passes: usize = 0;
+    while (passes < 10) : (passes += 1) {
+        var used: f32 = 0;
+        var activeFlex: f32 = 0;
+        {
+            var i = ls;
+            while (i < ls + lc) : (i += 1) {
+                if (frozen[i]) {
+                    used += slots[i].basis;
+                } else {
+                    used += savedBasis[i];
+                    activeFlex += slots[i].grow;
+                }
+            }
+        }
+        if (activeFlex <= 0) return;
+        const space = mainSize - used - lineGaps - totalMainMargin;
+        if (space <= 0) return;
+        var anyClamped = false;
+        var i = ls;
+        while (i < ls + lc) : (i += 1) {
+            if (frozen[i]) continue;
+            slots[i].basis = savedBasis[i] + (slots[i].grow / activeFlex) * space;
+            const csG = &node.children[slots[i].index].style;
+            const mn = resolveMaybePct(if (isRow) csG.min_width else csG.min_height, if (isRow) innerW else innerH);
+            const mx = resolveMaybePct(if (isRow) csG.max_width else csG.max_height, if (isRow) innerW else innerH);
+            const clampedVal = clampVal(slots[i].basis, mn, mx);
+            if (clampedVal != slots[i].basis) {
+                slots[i].basis = clampedVal;
+                frozen[i] = true;
+                anyClamped = true;
+            }
+        }
+        if (!anyClamped) return;
+    }
+}
+
+/// Absolute-positioned children pass. Runs after the in-flow layout finishes
+/// so it can resolve `width: 100%` / `top+bottom` against the parent's final
+/// inner box. Out-of-flow: contributes nothing to the parent's main/cross
+/// extent, doesn't advance the flex cursor.
+fn layoutAbsoluteChildren(
+    node: *Node,
+    absoluteIndices: []const usize,
+    absoluteCount: usize,
+    x: f32,
+    y: f32,
+    pl: f32,
+    pt: f32,
+    pb: f32,
+    innerW: f32,
+    resolvedH: f32,
+) void {
+    var ai: usize = 0;
+    while (ai < absoluteCount) : (ai += 1) {
+        const absIdx = absoluteIndices[@intCast(ai)];
+        const absChild = &node.children[@intCast(absIdx)];
+        const acs = absChild.style;
+        var absW: f32 = undefined;
+        const resolvedW = resolveMaybePct(acs.width, innerW);
+        if (resolvedW != null) {
+            absW = resolvedW.?;
+        } else if (acs.left != null and acs.right != null) {
+            absW = innerW - (acs.left orelse 0) - (acs.right orelse 0);
+        } else {
+            absW = estimateIntrinsicWidth(absChild);
+        }
+        absW = clampVal(absW, resolveMaybePct(acs.min_width, innerW), resolveMaybePct(acs.max_width, innerW));
+        const absInnerH = resolvedH - pt - pb;
+        var absH: f32 = undefined;
+        const resolvedAH = resolveMaybePct(acs.height, absInnerH);
+        if (resolvedAH != null) {
+            absH = resolvedAH.?;
+        } else if (acs.top != null and acs.bottom != null) {
+            absH = absInnerH - (acs.top orelse 0) - (acs.bottom orelse 0);
+        } else {
+            absH = estimateIntrinsicHeight(absChild, absW);
+        }
+        absH = clampVal(absH, resolveMaybePct(acs.min_height, absInnerH), resolveMaybePct(acs.max_height, absInnerH));
+        var absX = x + pl;
+        var absY = y + pt;
+        if (acs.left != null) {
+            absX = x + pl + acs.left.?;
+        } else if (acs.right != null) {
+            absX = asF32(x + pl + innerW - absW) - asF32(acs.right);
+        }
+        if (acs.top != null) {
+            absY = y + pt + acs.top.?;
+        } else if (acs.bottom != null) {
+            absY = asF32(y + pt + absInnerH - absH) - asF32(acs.bottom);
+        }
+        absChild._flex_w = absW;
+        absChild._stretch_h = absH;
+        layoutNode(absChild, absX, absY, absW, absH);
+    }
+}
+
 pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
     layoutCount += 1;
     if (layoutCount > LAYOUT_BUDGET) {
@@ -1491,21 +1640,9 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
     const justify = s.justify_content;
     const @"align" = s.align_items;
     const mainSize = if (isRow) innerW else innerH;
-    // Stack-allocated per-flex-call child measurement arrays. 11 arrays at
-    // MAX_CHILDREN entries (~52 bytes/child) per recursion frame. 2048 ×
-    // 52 ≈ 104KB / frame; ample for a stress-test grid (1000 cells in one
-    // flexWrap row) without blowing 8MB threads at deep nesting.
-    const MAX_CHILDREN = 2048;
-    var childBasis: [MAX_CHILDREN]f32 = undefined;
-    var childGrow: [MAX_CHILDREN]f32 = undefined;
-    var childShrink: [MAX_CHILDREN]f32 = undefined;
-    var childMainSize: [MAX_CHILDREN]f32 = undefined;
-    var childCrossSize: [MAX_CHILDREN]f32 = undefined;
-    var childMainMarginStart: [MAX_CHILDREN]f32 = undefined;
-    var childMainMarginEnd: [MAX_CHILDREN]f32 = undefined;
-    var childCrossMarginStart: [MAX_CHILDREN]f32 = undefined;
-    var childCrossMarginEnd: [MAX_CHILDREN]f32 = undefined;
-    var visibleIndices: [MAX_CHILDREN]usize = undefined;
+    // Stack-allocated per-flex-call child measurement bundle. See ChildSlot
+    // above the function for the per-slot layout. ~80KB / frame.
+    var slots: [MAX_CHILDREN]ChildSlot = undefined;
     var visibleCount: usize = 0;
     var absoluteIndices: [MAX_CHILDREN]usize = undefined;
     var absoluteCount: usize = 0;
@@ -1552,24 +1689,28 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             const cmR = marRight(cs);
             const cmT = marTop(cs);
             const cmB = marBottom(cs);
-            visibleIndices[@intCast(visibleCount)] = i;
-            childBasis[@intCast(visibleCount)] = basis;
-            childGrow[@intCast(visibleCount)] = grow;
-            childShrink[@intCast(visibleCount)] = shrink;
-            childMainSize[@intCast(visibleCount)] = if (isRow) cwClamped else chClamped;
-            childCrossSize[@intCast(visibleCount)] = if (isRow) chClamped else cwClamped;
-            childMainMarginStart[@intCast(visibleCount)] = if (isRow) cmL else cmT;
-            childMainMarginEnd[@intCast(visibleCount)] = if (isRow) cmR else cmB;
-            childCrossMarginStart[@intCast(visibleCount)] = if (isRow) cmT else cmL;
-            childCrossMarginEnd[@intCast(visibleCount)] = if (isRow) cmB else cmR;
+            slots[visibleCount] = .{
+                .index = i,
+                .basis = basis,
+                .grow = grow,
+                .shrink = shrink,
+                .main_size = if (isRow) cwClamped else chClamped,
+                .cross_size = if (isRow) chClamped else cwClamped,
+                .main_margin_start = if (isRow) cmL else cmT,
+                .main_margin_end = if (isRow) cmR else cmB,
+                .cross_margin_start = if (isRow) cmT else cmL,
+                .cross_margin_end = if (isRow) cmB else cmR,
+            };
             visibleCount += 1;
         }
     }
-    // Sort visible children by CSS order property (stable insertion sort)
+    // Sort visible children by CSS order property (stable insertion sort).
+    // With ChildSlot bundling, swapping a child is one struct assignment
+    // instead of ten parallel keyed copies.
     if (visibleCount > 1) {
         var hasOrder = false;
-        for (0..visibleCount) |i| {
-            if (node.children[visibleIndices[i]].style.order != 0) {
+        for (slots[0..visibleCount]) |sl| {
+            if (node.children[sl.index].style.order != 0) {
                 hasOrder = true;
                 break;
             }
@@ -1577,41 +1718,13 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         if (hasOrder) {
             var si: usize = 1;
             while (si < visibleCount) : (si += 1) {
-                const keyIdx = visibleIndices[si];
-                const keyOrder = node.children[keyIdx].style.order;
-                const keyBasis = childBasis[si];
-                const keyGrow = childGrow[si];
-                const keyShrink = childShrink[si];
-                const keyMain = childMainSize[si];
-                const keyCross = childCrossSize[si];
-                const keyMMS = childMainMarginStart[si];
-                const keyMME = childMainMarginEnd[si];
-                const keyCMS = childCrossMarginStart[si];
-                const keyCME = childCrossMarginEnd[si];
+                const key = slots[si];
+                const keyOrder = node.children[key.index].style.order;
                 var j: usize = si;
-                while (j > 0 and node.children[visibleIndices[j - 1]].style.order > keyOrder) {
-                    visibleIndices[j] = visibleIndices[j - 1];
-                    childBasis[j] = childBasis[j - 1];
-                    childGrow[j] = childGrow[j - 1];
-                    childShrink[j] = childShrink[j - 1];
-                    childMainSize[j] = childMainSize[j - 1];
-                    childCrossSize[j] = childCrossSize[j - 1];
-                    childMainMarginStart[j] = childMainMarginStart[j - 1];
-                    childMainMarginEnd[j] = childMainMarginEnd[j - 1];
-                    childCrossMarginStart[j] = childCrossMarginStart[j - 1];
-                    childCrossMarginEnd[j] = childCrossMarginEnd[j - 1];
-                    j -= 1;
+                while (j > 0 and node.children[slots[j - 1].index].style.order > keyOrder) : (j -= 1) {
+                    slots[j] = slots[j - 1];
                 }
-                visibleIndices[j] = keyIdx;
-                childBasis[j] = keyBasis;
-                childGrow[j] = keyGrow;
-                childShrink[j] = keyShrink;
-                childMainSize[j] = keyMain;
-                childCrossSize[j] = keyCross;
-                childMainMarginStart[j] = keyMMS;
-                childMainMarginEnd[j] = keyMME;
-                childCrossMarginStart[j] = keyCMS;
-                childCrossMarginEnd[j] = keyCME;
+                slots[j] = key;
             }
         }
     }
@@ -1624,7 +1737,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         var itemMains: [MAX_CHILDREN]f32 = undefined;
         var i: usize = 0;
         while (i < visibleCount) : (i += 1) {
-            itemMains[i] = childBasis[@intCast(i)] + childMainMarginStart[@intCast(i)] + childMainMarginEnd[@intCast(i)];
+            itemMains[i] = slots[i].basis + slots[i].main_margin_start + slots[i].main_margin_end;
         }
         numLines = @intCast(math.wrapPack(itemMains[0..visibleCount], mainSize, gap, lines[0..]));
     } else if (visibleCount > 0) {
@@ -1654,7 +1767,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             const llc: usize = @intCast(lines[li].count);
             var lci = lls;
             while (lci < lls + llc) : (lci += 1) {
-                const cc = childCrossSize[@intCast(lci)] + childCrossMarginStart[@intCast(lci)] + childCrossMarginEnd[@intCast(lci)];
+                const cc = slots[lci].cross_size + slots[lci].cross_margin_start + slots[lci].cross_margin_end;
                 if (cc > lcMax) lcMax = cc;
             }
             if (numLines == 1) {
@@ -1711,72 +1824,17 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             {
                 var i = ls;
                 while (i < ls + lc) : (i += 1) {
-                    totalBasis += childBasis[@intCast(i)];
-                    totalMainMargin += childMainMarginStart[@intCast(i)] + childMainMarginEnd[@intCast(i)];
-                    if (childGrow[@intCast(i)] > 0) {
-                        totalFlex += childGrow[@intCast(i)];
+                    totalBasis += slots[i].basis;
+                    totalMainMargin += slots[i].main_margin_start + slots[i].main_margin_end;
+                    if (slots[i].grow > 0) {
+                        totalFlex += slots[i].grow;
                     }
                 }
             }
             const lineGaps = if (lc > 1) gap * @as(f32, @floatFromInt((lc - 1))) else 0;
             const freeSpace = mainSize - totalBasis - lineGaps - totalMainMargin;
             if (freeSpace > 0 and totalFlex > 0) {
-                var frozen = std.mem.zeroes([MAX_CHILDREN]bool);
-                var savedBasis = std.mem.zeroes([MAX_CHILDREN]f32);
-                {
-                    var i = ls;
-                    while (i < ls + lc) : (i += 1) {
-                        frozen[@intCast(i)] = childGrow[@intCast(i)] <= 0;
-                        savedBasis[@intCast(i)] = childBasis[@intCast(i)];
-                    }
-                }
-                var passes: usize = 0;
-                while (passes < 10) {
-                    passes += 1;
-                    var used: f32 = 0;
-                    var activeFlex: f32 = 0;
-                    {
-                        var i = ls;
-                        while (i < ls + lc) : (i += 1) {
-                            if (frozen[@intCast(i)]) {
-                                used += childBasis[@intCast(i)];
-                            } else {
-                                used += savedBasis[@intCast(i)];
-                                activeFlex += childGrow[@intCast(i)];
-                            }
-                        }
-                    }
-                    if (activeFlex <= 0) {
-                        break;
-                    }
-                    const space = mainSize - used - lineGaps - totalMainMargin;
-                    if (space <= 0) {
-                        break;
-                    }
-                    var anyClamped = false;
-                    {
-                        var i = ls;
-                        while (i < ls + lc) : (i += 1) {
-                            if (frozen[@intCast(i)]) {
-                                continue;
-                            }
-                            childBasis[@intCast(i)] = savedBasis[@intCast(i)] + (childGrow[@intCast(i)] / activeFlex) * space;
-                            const ci = visibleIndices[@intCast(i)];
-                            const csG = &node.children[@intCast(ci)].style;
-                            const mn = resolveMaybePct(if (isRow) csG.min_width else csG.min_height, if (isRow) innerW else innerH);
-                            const mx = resolveMaybePct(if (isRow) csG.max_width else csG.max_height, if (isRow) innerW else innerH);
-                            const clampedVal = clampVal(childBasis[@intCast(i)], mn, mx);
-                            if (clampedVal != childBasis[@intCast(i)]) {
-                                childBasis[@intCast(i)] = clampedVal;
-                                frozen[@intCast(i)] = true;
-                                anyClamped = true;
-                            }
-                        }
-                    }
-                    if (!anyClamped) {
-                        break;
-                    }
-                }
+                solveFlexGrow(node, slots[0..], ls, lc, mainSize, lineGaps, totalMainMargin, isRow, innerW, innerH);
             } else if (freeSpace < 0 and !preserveMainOverflow) {
                 // Column direction min-height: auto, applied BEFORE shrink so
                 // floored items don't push the container past mainSize. A
@@ -1795,16 +1853,16 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                 if (!isRow) {
                     var i = ls;
                     while (i < ls + lc) : (i += 1) {
-                        const childIdx = visibleIndices[@intCast(i)];
+                        const childIdx = slots[i].index;
                         const childNode = &node.children[@intCast(childIdx)];
                         if (childNode.style.min_height != null) continue;
-                        if (childBasis[@intCast(i)] <= 0) {
-                            const autoMinH = childMainSize[@intCast(i)];
+                        if (slots[i].basis <= 0) {
+                            const autoMinH = slots[i].main_size;
                             const maxH = resolveMaybePct(childNode.style.max_height, innerH);
                             const floorH = if (maxH != null) @min(autoMinH, maxH.?) else autoMinH;
-                            if (asF32(floorH) > asF32(childBasis[@intCast(i)])) {
-                                floorAdded += floorH - childBasis[@intCast(i)];
-                                childBasis[@intCast(i)] = floorH;
+                            if (asF32(floorH) > asF32(slots[i].basis)) {
+                                floorAdded += floorH - slots[i].basis;
+                                slots[i].basis = floorH;
                                 shrinkFrozen[@intCast(i)] = true;
                             }
                         }
@@ -1815,7 +1873,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                     var i = ls;
                     while (i < ls + lc) : (i += 1) {
                         if (shrinkFrozen[@intCast(i)]) continue;
-                        totalShrinkScaled += childShrink[@intCast(i)] * childBasis[@intCast(i)];
+                        totalShrinkScaled += slots[i].shrink * slots[i].basis;
                     }
                 }
                 if (totalShrinkScaled > 0) {
@@ -1824,8 +1882,8 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                         var i = ls;
                         while (i < ls + lc) : (i += 1) {
                             if (shrinkFrozen[@intCast(i)]) continue;
-                            const amount = (childShrink[@intCast(i)] * childBasis[@intCast(i)] / totalShrinkScaled) * shrinkOverflow;
-                            childBasis[@intCast(i)] -= amount;
+                            const amount = (slots[i].shrink * slots[i].basis / totalShrinkScaled) * shrinkOverflow;
+                            slots[i].basis -= amount;
                         }
                     }
                 }
@@ -1833,14 +1891,14 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                     {
                         var i = ls;
                         while (i < ls + lc) : (i += 1) {
-                            const childIdx = visibleIndices[@intCast(i)];
+                            const childIdx = slots[i].index;
                             const childNode = &node.children[@intCast(childIdx)];
                             if (childNode.style.min_width != null) {
                                 continue;
                             }
                             const mcw = computeMinContentW(childNode);
-                            if (asF32(childBasis[@intCast(i)]) < asF32(mcw)) {
-                                childBasis[@intCast(i)] = mcw;
+                            if (asF32(slots[i].basis) < asF32(mcw)) {
+                                slots[i].basis = mcw;
                             }
                         }
                     }
@@ -1849,17 +1907,17 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             if (isRow) {
                 var i = ls;
                 while (i < ls + lc) : (i += 1) {
-                    const childIdx = visibleIndices[@intCast(i)];
+                    const childIdx = slots[i].index;
                     const childNode = &node.children[@intCast(childIdx)];
                     if (childNode.style.min_width != null) {
                         continue;
                     }
-                    if (childBasis[@intCast(i)] <= 0) {
+                    if (slots[i].basis <= 0) {
                         const autoMinW = computeMinContentW(childNode);
                         const maxW = resolveMaybePct(childNode.style.max_width, innerW);
                         const floorW = if (maxW != null) @min(autoMinW, maxW.?) else autoMinW;
-                        if (asF32(childBasis[@intCast(i)]) < asF32(floorW)) {
-                            childBasis[@intCast(i)] = floorW;
+                        if (asF32(slots[i].basis) < asF32(floorW)) {
+                            slots[i].basis = floorW;
                         }
                     }
                 }
@@ -1877,17 +1935,17 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                 // shrunk, matching the row-direction rule.
                 var i = ls;
                 while (i < ls + lc) : (i += 1) {
-                    const childIdx = visibleIndices[@intCast(i)];
+                    const childIdx = slots[i].index;
                     const childNode = &node.children[@intCast(childIdx)];
                     if (childNode.style.min_height != null) {
                         continue;
                     }
-                    if (childBasis[@intCast(i)] <= 0) {
-                        const autoMinH = childMainSize[@intCast(i)];
+                    if (slots[i].basis <= 0) {
+                        const autoMinH = slots[i].main_size;
                         const maxH = resolveMaybePct(childNode.style.max_height, innerH);
                         const floorH = if (maxH != null) @min(autoMinH, maxH.?) else autoMinH;
-                        if (asF32(childBasis[@intCast(i)]) < asF32(floorH)) {
-                            childBasis[@intCast(i)] = floorH;
+                        if (asF32(slots[i].basis) < asF32(floorH)) {
+                            slots[i].basis = floorH;
                         }
                     }
                 }
@@ -1895,7 +1953,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             {
                 var i = ls;
                 while (i < ls + lc) : (i += 1) {
-                    const childIdx = visibleIndices[@intCast(i)];
+                    const childIdx = slots[i].index;
                     const child = &node.children[@intCast(childIdx)];
                     if (isRow) {
                         if (child.text != null) {
@@ -1906,12 +1964,12 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                             // innerW; mirror it here so onlyTextChildren (which forces
                             // isRow=true on a Text wrapper laying out its __TEXT__ leaf)
                             // also respects the wrap constraint. `no_wrap` opts out.
-                            if (!child.no_wrap and childBasis[@intCast(i)] > innerW) {
-                                childBasis[@intCast(i)] = innerW;
-                                childMainSize[@intCast(i)] = innerW;
+                            if (!child.no_wrap and slots[i].basis > innerW) {
+                                slots[i].basis = innerW;
+                                slots[i].main_size = innerW;
                             }
-                            const finalW = clampVal(childBasis[@intCast(i)], resolveMaybePct(child.style.min_width, innerW), resolveMaybePct(child.style.max_width, innerW));
-                            const prevW = childMainSize[@intCast(i)];
+                            const finalW = clampVal(slots[i].basis, resolveMaybePct(child.style.min_width, innerW), resolveMaybePct(child.style.max_width, innerW));
+                            const prevW = slots[i].main_size;
                             if (@abs(finalW - prevW) > 0.5) {
                                 const cpl = padLeft(child.style);
                                 const cpr = padRight(child.style);
@@ -1919,7 +1977,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                                 const cpb = padBottom(child.style);
                                 const constrainW = finalW - cpl - cpr;
                                 const m = measureNodeTextW(child, if (constrainW > 0) constrainW else 0);
-                                childCrossSize[@intCast(i)] = clampVal(m.height + cpt + cpb, resolveMaybePct(child.style.min_height, innerH), resolveMaybePct(child.style.max_height, innerH));
+                                slots[i].cross_size = clampVal(m.height + cpt + cpb, resolveMaybePct(child.style.min_height, innerH), resolveMaybePct(child.style.max_height, innerH));
                             }
                         }
                     } else {
@@ -1933,7 +1991,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                         // out, matching the browser. Explicit `width` always wins.
                         const finalW = resolveMaybePct(child.style.width, innerW) orelse blk: {
                             if (effAlign == .stretch) break :blk innerW;
-                            const natural = childCrossSize[@intCast(i)];
+                            const natural = slots[i].cross_size;
                             if (child.no_wrap) break :blk natural;
                             break :blk @min(natural, innerW);
                         };
@@ -1944,7 +2002,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                         // the parent's innerW so its own children wrap correctly.
                         // Without this, the wrapper kept its intrinsic 160px and
                         // overflowed its 72px-inner Pressable.
-                        childCrossSize[@intCast(i)] = finalW;
+                        slots[i].cross_size = finalW;
                         if (child.text != null) {
                             const cpl = padLeft(child.style);
                             const cpr = padRight(child.style);
@@ -1954,8 +2012,8 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                             const m = measureNodeTextW(child, if (constrainW > 0) constrainW else 0);
                             const newH = clampVal(m.height + cpt + cpb, resolveMaybePct(child.style.min_height, innerH), resolveMaybePct(child.style.max_height, innerH));
                             if (child.style.height == null) {
-                                childBasis[@intCast(i)] = newH;
-                                childMainSize[@intCast(i)] = newH;
+                                slots[i].basis = newH;
+                                slots[i].main_size = newH;
                             }
                         }
                     }
@@ -1966,7 +2024,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             {
                 var i = ls;
                 while (i < ls + lc) : (i += 1) {
-                    usedMain += childBasis[@intCast(i)] + childMainMarginStart[@intCast(i)] + childMainMarginEnd[@intCast(i)];
+                    usedMain += slots[i].basis + slots[i].main_margin_start + slots[i].main_margin_end;
                 }
             }
             const freeMain = mainSize - usedMain - lineGaps;
@@ -1977,8 +2035,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             {
                 var am_pre = ls;
                 while (am_pre < ls + lc) : (am_pre += 1) {
-                    const am_pre_ci = visibleIndices[@intCast(am_pre)];
-                    const am_pre_cs = node.children[@intCast(am_pre_ci)].style;
+                    const am_pre_cs = node.children[slots[am_pre].index].style;
                     if (isRow) {
                         if (am_pre_cs.isMarginAutoLeft()) autoMarginCount += 1;
                         if (am_pre_cs.isMarginAutoRight()) autoMarginCount += 1;
@@ -1994,14 +2051,13 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                     const perAuto = freeMain / @as(f32, @floatFromInt(autoMarginCount));
                     var am_j = ls;
                     while (am_j < ls + lc) : (am_j += 1) {
-                        const am_cj = visibleIndices[@intCast(am_j)];
-                        const am_cs = node.children[@intCast(am_cj)].style;
+                        const am_cs = node.children[slots[am_j].index].style;
                         if (isRow) {
-                            if (am_cs.isMarginAutoLeft()) childMainMarginStart[@intCast(am_j)] = perAuto;
-                            if (am_cs.isMarginAutoRight()) childMainMarginEnd[@intCast(am_j)] = perAuto;
+                            if (am_cs.isMarginAutoLeft()) slots[am_j].main_margin_start = perAuto;
+                            if (am_cs.isMarginAutoRight()) slots[am_j].main_margin_end = perAuto;
                         } else {
-                            if (am_cs.isMarginAutoTop()) childMainMarginStart[@intCast(am_j)] = perAuto;
-                            if (am_cs.isMarginAutoBottom()) childMainMarginEnd[@intCast(am_j)] = perAuto;
+                            if (am_cs.isMarginAutoTop()) slots[am_j].main_margin_start = perAuto;
+                            if (am_cs.isMarginAutoBottom()) slots[am_j].main_margin_end = perAuto;
                         }
                     }
                 }
@@ -2020,7 +2076,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
             {
                 var i = ls;
                 while (i < ls + lc) : (i += 1) {
-                    const childIdx = visibleIndices[@intCast(i)];
+                    const childIdx = slots[i].index;
                     const child = &node.children[@intCast(childIdx)];
                     var cx: f32 = undefined;
                     var cy: f32 = undefined;
@@ -2028,16 +2084,16 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                     var chFinal: f32 = undefined;
                     const effAlign = resolveAlign(child.style.align_self, @"align");
                     if (isRow) {
-                        cwFinal = clampVal(childBasis[@intCast(i)], resolveMaybePct(child.style.min_width, innerW), resolveMaybePct(child.style.max_width, innerW));
+                        cwFinal = clampVal(slots[i].basis, resolveMaybePct(child.style.min_width, innerW), resolveMaybePct(child.style.max_width, innerW));
                         if (isReverse) {
-                            cursor -= childMainMarginEnd[@intCast(i)] + cwFinal;
+                            cursor -= slots[i].main_margin_end + cwFinal;
                         }
                         // Forward: cursor sits at the child's outer-left; the
                         // recursive layoutNode adds marLeft itself (line 1177).
                         // Pre-adding here would double-apply the margin.
                         cx = x + pl + cursor;
-                        chFinal = childCrossSize[@intCast(i)];
-                        const crossAvail = lineCross - childCrossMarginStart[@intCast(i)] - childCrossMarginEnd[@intCast(i)];
+                        chFinal = slots[i].cross_size;
+                        const crossAvail = lineCross - slots[i].cross_margin_start - slots[i].cross_margin_end;
                         switch (effAlign) {
                             .center => {
                                 cy = y + pt + crossCursor + @floor((crossAvail - chFinal) / 2);
@@ -2064,15 +2120,15 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                             },
                         }
                     } else {
-                        chFinal = clampVal(childBasis[@intCast(i)], resolveMaybePct(child.style.min_height, innerH), resolveMaybePct(child.style.max_height, innerH));
+                        chFinal = clampVal(slots[i].basis, resolveMaybePct(child.style.min_height, innerH), resolveMaybePct(child.style.max_height, innerH));
                         if (isReverse) {
-                            cursor -= childMainMarginEnd[@intCast(i)] + chFinal;
+                            cursor -= slots[i].main_margin_end + chFinal;
                         }
                         // Forward: cursor is the child's outer-top; layoutNode
                         // applies marTop itself. Pre-adding here would double.
                         cy = y + pt + cursor;
-                        cwFinal = childCrossSize[@intCast(i)];
-                        const crossAvail = lineCross - childCrossMarginStart[@intCast(i)] - childCrossMarginEnd[@intCast(i)];
+                        cwFinal = slots[i].cross_size;
+                        const crossAvail = lineCross - slots[i].cross_margin_start - slots[i].cross_margin_end;
                         switch (effAlign) {
                             .center => {
                                 cx = x + pl + crossCursor + (crossAvail - cwFinal) / 2;
@@ -2130,17 +2186,17 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                     layoutNode(child, cx, cy, cwFinal, chFinal);
                     const actualMain = if (isRow) child.computed.w else child.computed.h;
                     if (isReverse) {
-                        cursor -= childMainMarginStart[@intCast(i)] + gap + extraGap;
+                        cursor -= slots[i].main_margin_start + gap + extraGap;
                     } else {
                         // Advance past the entire outer box (start margin + content + end margin).
                         // The pre-cursor addition of marginStart was removed above so the child's
                         // own layoutNode wouldn't double-apply it; we fold it back in here so the
                         // next sibling's outer-left is correctly positioned.
-                        cursor += childMainMarginStart[@intCast(i)] + actualMain + childMainMarginEnd[@intCast(i)] + gap + extraGap;
+                        cursor += slots[i].main_margin_start + actualMain + slots[i].main_margin_end + gap + extraGap;
                     }
                     if (isRow) {
-                        const me = (child.computed.x - x) + child.computed.w + childMainMarginEnd[@intCast(i)];
-                        const ce = (child.computed.y - y) + child.computed.h + childCrossMarginEnd[@intCast(i)];
+                        const me = (child.computed.x - x) + child.computed.w + slots[i].main_margin_end;
+                        const ce = (child.computed.y - y) + child.computed.h + slots[i].cross_margin_end;
                         if (me > contentMainEnd) {
                             contentMainEnd = me;
                         }
@@ -2148,8 +2204,8 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
                             contentCrossEnd = ce;
                         }
                     } else {
-                        const me = (child.computed.y - y) + child.computed.h + childMainMarginEnd[@intCast(i)];
-                        const ce = (child.computed.x - x) + child.computed.w + childCrossMarginEnd[@intCast(i)];
+                        const me = (child.computed.y - y) + child.computed.h + slots[i].main_margin_end;
+                        const ce = (child.computed.x - x) + child.computed.w + slots[i].cross_margin_end;
                         if (me > contentMainEnd) {
                             contentMainEnd = me;
                         }
@@ -2200,50 +2256,7 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         }
     }
     const resolvedH = h orelse 0;
-    {
-        var ai: usize = 0;
-        while (ai < absoluteCount) : (ai += 1) {
-            const absIdx = absoluteIndices[@intCast(ai)];
-            const absChild = &node.children[@intCast(absIdx)];
-            const acs = absChild.style;
-            var absW: f32 = undefined;
-            const resolvedW = resolveMaybePct(acs.width, innerW);
-            if (resolvedW != null) {
-                absW = resolvedW.?;
-            } else if (acs.left != null and acs.right != null) {
-                absW = innerW - (acs.left orelse 0) - (acs.right orelse 0);
-            } else {
-                absW = estimateIntrinsicWidth(absChild);
-            }
-            absW = clampVal(absW, resolveMaybePct(acs.min_width, innerW), resolveMaybePct(acs.max_width, innerW));
-            const absInnerH = resolvedH - pt - pb;
-            var absH: f32 = undefined;
-            const resolvedAH = resolveMaybePct(acs.height, absInnerH);
-            if (resolvedAH != null) {
-                absH = resolvedAH.?;
-            } else if (acs.top != null and acs.bottom != null) {
-                absH = absInnerH - (acs.top orelse 0) - (acs.bottom orelse 0);
-            } else {
-                absH = estimateIntrinsicHeight(absChild, absW);
-            }
-            absH = clampVal(absH, resolveMaybePct(acs.min_height, absInnerH), resolveMaybePct(acs.max_height, absInnerH));
-            var absX = x + pl;
-            var absY = y + pt;
-            if (acs.left != null) {
-                absX = x + pl + acs.left.?;
-            } else if (acs.right != null) {
-                absX = asF32(x + pl + innerW - absW) - asF32(acs.right);
-            }
-            if (acs.top != null) {
-                absY = y + pt + acs.top.?;
-            } else if (acs.bottom != null) {
-                absY = asF32(y + pt + absInnerH - absH) - asF32(acs.bottom);
-            }
-            absChild._flex_w = absW;
-            absChild._stretch_h = absH;
-            layoutNode(absChild, absX, absY, absW, absH);
-        }
-    }
+    layoutAbsoluteChildren(node, absoluteIndices[0..], absoluteCount, x, y, pl, pt, pb, innerW, resolvedH);
     setRect(node, .{ .x = x, .y = y, .w = w, .h = resolvedH });
 }
 
