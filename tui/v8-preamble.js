@@ -101,7 +101,13 @@ if (typeof globalThis.requestAnimationFrame !== 'function') {
 // would prevent the call stack from ever returning to the top, blocking
 // microtask drain forever.
 globalThis.__runEventLoop = function (done) {
+  // __tickDrain pumps optional V8 bindings whose tickDrain() advances
+  // async work (httpsrv accepts, sdk request completion, etc.). It's
+  // registered by v8_tui_app.zig when the relevant -Dhas-* flags fired.
+  // Undefined for TUI builds that don't ship any networking.
+  const tickDrain = (typeof __tickDrain === 'function') ? __tickDrain : null;
   const step = () => {
+    if (tickDrain && tickDrain() && globalThis.__onVtermUpdate) globalThis.__onVtermUpdate();
     if (__timers.length === 0) { if (done) done(); return; }
     __timers.sort((a, b) => a.fireAt - b.fireAt);
     const head = __timers[0];
