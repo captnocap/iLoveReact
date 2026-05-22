@@ -630,15 +630,15 @@ export const Effect: any = ({ data, ...rest }: any) =>
 
 // ── Paintable — persistent GPU mask texture, no visible rendering ─
 // <Paintable id="my-mask" w={W} h={H} />
-//   Allocates an R8Unorm GPU texture keyed by `id` at the host_tree CREATE
-//   pass (i.e. synchronously, before any consumer's first paint). The
-//   texture survives across React renders and is destroyed when the
-//   <Paintable> unmounts. Renders nothing visible — its job is to own the
-//   handle so other Effects can sample it via `textures={{ name: id }}`.
-//   Paint into it via the usePaintable hook's imperative ops (V8 binding
-//   calls; no React state in the input path).
-export const Paintable: any = ({ id, w, h }: { id: string; w: number; h: number }) =>
-  h('Paintable', { paintableId: id, paintableW: w, paintableH: h });
+//   Allocates an R8Unorm GPU texture keyed by `id` at host_tree CREATE
+//   (synchronously, before any consumer first renders). The texture
+//   survives across React renders and is destroyed when the <Paintable>
+//   unmounts. Renders nothing visible — its job is to own the handle so
+//   other Effects can sample it via `textures={[id]}`. Paint into it
+//   via the usePaintable hook's imperative ops (V8 binding calls; no
+//   React state in the input path).
+export const Paintable: any = ({ id, w: ptW, h: ptH }: { id: string; w: number; h: number }) =>
+  h('Paintable', { paintableId: id, paintableW: ptW, paintableH: ptH });
 
 // ── Native — universal escape hatch for host-handled types ──
 
