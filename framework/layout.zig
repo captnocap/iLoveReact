@@ -588,6 +588,13 @@ pub const Node = struct {
     effect_render: ?effect_ctx.RenderFn = null,
     effect_shader: ?effect_shader.GpuShaderDesc = null,
     effect_name: ?[]const u8 = null, // named effect — renders but not drawn, referenced by fillEffect
+    // <Effect textures={['mask-A', 'src-img']}>. Each entry is a paintable
+    // id string; effects.zig binds the paintable's view + sampler into the
+    // pipeline at fixed slot pairs starting at @binding(2):
+    //   index 0 → binding(2) = texture_2d<f32>, binding(3) = sampler
+    //   index 1 → binding(4) = texture_2d<f32>, binding(5) = sampler
+    // Owned by g_alloc; freed on prop replace or node destroy.
+    effect_textures: ?[]const []const u8 = null,
     // Cart-supplied f32 array uploaded to the Effect's storage buffer at
     // @group(0) @binding(1). Lets the shader source stay static while the
     // data updates per frame — the chart-rendering analog of how text uses

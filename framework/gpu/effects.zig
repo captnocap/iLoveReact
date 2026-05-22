@@ -215,6 +215,13 @@ const Instance = struct {
     // change to the shader string forces a recompile instead of silently
     // running the old pipeline. 0 = no pipeline yet.
     gpu_shader_hash: u64 = 0,
+    // Paintable texture bindings — slice of handle strings in slot order.
+    // Mirrored from node.effect_textures during paintCustomEffect; null
+    // when the Effect doesn't sample any paintable texture. Hash drives
+    // bind-group invalidation when the cart swaps which paintables it
+    // samples.
+    gpu_textures_pending: ?[]const []const u8 = null,
+    gpu_textures_hash: u64 = 0,
 
     // Timing (for custom render path)
     time: f32 = 0,
@@ -469,6 +476,21 @@ var instances: [MAX_INSTANCES]Instance = [_]Instance{.{}} ** MAX_INSTANCES;
 var instance_count: usize = 0;
 var g_backend_pref: BackendPref = .auto;
 var g_gpu_bind_group_layout: ?*wgpu.BindGroupLayout = null;
+// Texture-enabled variant of the bind-group layout — adds 2 texture slots
+// + 2 sampler slots at bindings(2..5) so <Effect textures> can route
+// paintable textures into the pipeline without per-instance layout
+// proliferation. Built lazily on first use.
+var g_gpu_bind_group_layout_tex: ?*wgpu.BindGroupLayout = null;
+// Shared 1x1 dummy texture + sampler for unused slots in the
+// textures-enabled layout. Bound when the cart's textures array is
+// shorter than the layout's slot count (e.g. 1 of 2 slots in use).
+var g_dummy_texture: ?*wgpu.Texture = null;
+var g_dummy_texture_view: ?*wgpu.TextureView = null;
+var g_dummy_sampler: ?*wgpu.Sampler = null;
+/// Maximum paintable textures bound to one Effect. Sized to cutout's
+/// needs (mask + gray reference). Raise if a future cart wants more.
+const EFFECT_TEXTURE_SLOTS: u32 = 2;
+const paintable_mod = @import("paintable.zig");
 
 // ════════════════════════════════════════════════════════════════════════
 // Mouse state (polled once per frame)
@@ -568,6 +590,111 @@ fn ensureGpuBindGroupLayout(device: *wgpu.Device) ?*wgpu.BindGroupLayout {
     return layout_ref;
 }
 
+/// Texture-enabled bind-group layout. Adds `EFFECT_TEXTURE_SLOTS` pairs
+/// of (texture_2d, sampler) starting at binding(2). All slots are
+/// fragment-visible. Shaders that don't reference a given slot pay
+/// nothing at runtime; we just bind a dummy.
+fn ensureGpuBindGroupLayoutTex(device: *wgpu.Device) ?*wgpu.BindGroupLayout {
+    if (g_gpu_bind_group_layout_tex) |layout_ref| return layout_ref;
+    var entries: [2 + EFFECT_TEXTURE_SLOTS * 2]wgpu.BindGroupLayoutEntry = undefined;
+    entries[0] = .{
+        .binding = 0,
+        .visibility = wgpu.ShaderStages.fragment,
+        .buffer = .{
+            .type = .uniform,
+            .has_dynamic_offset = 0,
+            .min_binding_size = @sizeOf(GpuUniforms),
+        },
+    };
+    entries[1] = .{
+        .binding = 1,
+        .visibility = wgpu.ShaderStages.fragment,
+        .buffer = .{
+            .type = .read_only_storage,
+            .has_dynamic_offset = 0,
+            .min_binding_size = 0,
+        },
+    };
+    var i: u32 = 0;
+    while (i < EFFECT_TEXTURE_SLOTS) : (i += 1) {
+        const base: u32 = 2 + i * 2;
+        entries[2 + @as(usize, i) * 2] = .{
+            .binding = base,
+            .visibility = wgpu.ShaderStages.fragment,
+            .texture = .{
+                .sample_type = .float,
+                .view_dimension = .@"2d",
+                .multisampled = 0,
+            },
+        };
+        entries[3 + @as(usize, i) * 2] = .{
+            .binding = base + 1,
+            .visibility = wgpu.ShaderStages.fragment,
+            .sampler = .{ .type = .filtering },
+        };
+    }
+    const layout_ref = device.createBindGroupLayout(&.{
+        .entry_count = entries.len,
+        .entries = &entries,
+    }) orelse return null;
+    g_gpu_bind_group_layout_tex = layout_ref;
+    return layout_ref;
+}
+
+/// Lazily build a 1x1 R8 dummy texture + sampler for unused texture
+/// slots in the textures-enabled layout. WebGPU bind groups require
+/// every layout-declared binding to point at SOMETHING valid; this
+/// is the "valid nothing" we hand it.
+fn ensureDummyTexture() bool {
+    if (g_dummy_texture_view != null and g_dummy_sampler != null) return true;
+    const device = gpu_core.getDevice() orelse return false;
+    if (g_dummy_texture == null) {
+        const tex = device.createTexture(&.{
+            .label = wgpu.StringView.fromSlice("effect_dummy_tex"),
+            .size = .{ .width = 1, .height = 1, .depth_or_array_layers = 1 },
+            .mip_level_count = 1,
+            .sample_count = 1,
+            .dimension = .@"2d",
+            .format = .r8_unorm,
+            .usage = wgpu.TextureUsages.texture_binding,
+        }) orelse return false;
+        g_dummy_texture = tex;
+    }
+    if (g_dummy_texture_view == null) {
+        const view = g_dummy_texture.?.createView(&.{
+            .format = .r8_unorm,
+            .dimension = .@"2d",
+            .base_mip_level = 0,
+            .mip_level_count = 1,
+            .base_array_layer = 0,
+            .array_layer_count = 1,
+            .aspect = .all,
+        }) orelse return false;
+        g_dummy_texture_view = view;
+    }
+    if (g_dummy_sampler == null) {
+        const samp = device.createSampler(&.{
+            .address_mode_u = .clamp_to_edge,
+            .address_mode_v = .clamp_to_edge,
+            .mag_filter = .nearest,
+            .min_filter = .nearest,
+        }) orelse return false;
+        g_dummy_sampler = samp;
+    }
+    return true;
+}
+
+/// Hash a textures slice for change detection. Same content, same
+/// order → same hash; differs by either content or order → rebuild.
+fn texturesHash(ids: []const []const u8) u64 {
+    var hasher = std.hash.Wyhash.init(0);
+    for (ids) |id| {
+        hasher.update(id);
+        hasher.update(&.{0}); // separator so {"a","bc"} != {"ab","c"}
+    }
+    return hasher.final();
+}
+
 fn ensureGpuPipeline(self: *Instance) bool {
     const shader_desc = self.shader_desc orelse return false;
 
@@ -588,9 +715,29 @@ fn ensureGpuPipeline(self: *Instance) bool {
         self.gpu_uniform_buffer = null;
     }
 
+    // Detect a textures-prop shape change since last build. If the cart
+    // added/removed a paintable from the array OR swapped layouts entirely
+    // (from no-textures to has-textures or vice versa), the existing
+    // pipeline + bind group are wrong for the new wiring and have to be
+    // torn down. The hash is over the texture ID strings; bind-group
+    // re-creation (without pipeline rebuild) happens later when only the
+    // texture CONTENT moves but the array shape is unchanged.
+    const wants_textures = self.gpu_textures_pending != null and self.gpu_textures_pending.?.len > 0;
+    const new_tex_hash: u64 = if (self.gpu_textures_pending) |t| texturesHash(t) else 0;
+    if (self.gpu_pipeline != null and new_tex_hash != self.gpu_textures_hash) {
+        if (self.gpu_pipeline) |p| p.release();
+        if (self.gpu_bind_group) |b| b.release();
+        self.gpu_pipeline = null;
+        self.gpu_bind_group = null;
+    }
+
     if (self.gpu_pipeline != null and self.gpu_bind_group != null and self.gpu_uniform_buffer != null and self.gpu_data_buffer != null) return true;
     const device = gpu_core.getDevice() orelse return false;
-    const bgl = ensureGpuBindGroupLayout(device) orelse return false;
+    const bgl = if (wants_textures)
+        (ensureGpuBindGroupLayoutTex(device) orelse return false)
+    else
+        (ensureGpuBindGroupLayout(device) orelse return false);
+    if (wants_textures and !ensureDummyTexture()) return false;
 
     if (self.gpu_uniform_buffer == null) {
         self.gpu_uniform_buffer = device.createBuffer(&.{
@@ -622,15 +769,43 @@ fn ensureGpuPipeline(self: *Instance) bool {
     }
     const data_buf = self.gpu_data_buffer.?;
 
-    const bind_entries = [_]wgpu.BindGroupEntry{
-        .{ .binding = 0, .buffer = uniform_buf, .offset = 0, .size = @sizeOf(GpuUniforms) },
-        .{ .binding = 1, .buffer = data_buf, .offset = 0, .size = @as(u64, self.gpu_data_capacity_floats) * @sizeOf(f32) },
-    };
+    // Bind group entries: always binding(0) + binding(1). When the cart
+    // declared textures, fill the rest of the layout's slots (each slot
+    // is a texture+sampler pair). Missing entries (cart provided fewer
+    // textures than EFFECT_TEXTURE_SLOTS) fall through to the dummy.
+    var bind_buf: [2 + EFFECT_TEXTURE_SLOTS * 2]wgpu.BindGroupEntry = undefined;
+    bind_buf[0] = .{ .binding = 0, .buffer = uniform_buf, .offset = 0, .size = @sizeOf(GpuUniforms) };
+    bind_buf[1] = .{ .binding = 1, .buffer = data_buf, .offset = 0, .size = @as(u64, self.gpu_data_capacity_floats) * @sizeOf(f32) };
+    var entry_count: usize = 2;
+    if (wants_textures) {
+        const ids = self.gpu_textures_pending.?;
+        var i: u32 = 0;
+        while (i < EFFECT_TEXTURE_SLOTS) : (i += 1) {
+            const base: u32 = 2 + i * 2;
+            const view: *wgpu.TextureView = blk: {
+                if (i < ids.len) {
+                    if (paintable_mod.getView(ids[i])) |v| break :blk v;
+                }
+                break :blk g_dummy_texture_view.?;
+            };
+            const samp: *wgpu.Sampler = blk: {
+                if (i < ids.len) {
+                    if (paintable_mod.getSampler(ids[i])) |s| break :blk s;
+                }
+                break :blk g_dummy_sampler.?;
+            };
+            bind_buf[entry_count] = .{ .binding = base, .texture_view = view };
+            entry_count += 1;
+            bind_buf[entry_count] = .{ .binding = base + 1, .sampler = samp };
+            entry_count += 1;
+        }
+    }
     const effect_bg = device.createBindGroup(&.{
         .layout = bgl,
-        .entry_count = bind_entries.len,
-        .entries = &bind_entries,
+        .entry_count = @intCast(entry_count),
+        .entries = &bind_buf,
     }) orelse return false;
+    self.gpu_textures_hash = new_tex_hash;
 
     const module_desc = wgpu.shaderModuleWGSLDescriptor(.{
         .label = "effect_gpu_shader",
@@ -798,6 +973,14 @@ pub fn deinit() void {
     instance_count = 0;
     if (g_gpu_bind_group_layout) |layout_ref| layout_ref.release();
     g_gpu_bind_group_layout = null;
+    if (g_gpu_bind_group_layout_tex) |layout_ref| layout_ref.release();
+    g_gpu_bind_group_layout_tex = null;
+    if (g_dummy_sampler) |s| s.release();
+    if (g_dummy_texture_view) |v| v.release();
+    if (g_dummy_texture) |t| t.destroy();
+    g_dummy_sampler = null;
+    g_dummy_texture_view = null;
+    g_dummy_texture = null;
 }
 
 /// Monotonic frame counter — bumped at the start of each `update(dt)` call.
@@ -948,6 +1131,13 @@ pub fn paintCustomEffect(node: *const Node, x: f32, y: f32, w: f32, h: f32, opac
     // ensureGpuPipeline rebuilds them at the new size — the bind group
     // entry's `size` field is fixed at creation.
     i.gpu_data_pending = node.effect_data;
+    // Mirror the cart's texture-binding declaration into the instance so
+    // ensureGpuPipeline knows whether to use the textures-enabled bind
+    // group layout this frame. Hash diff drives bind-group rebuild
+    // (paintable swap) but pipeline rebuild only happens when the layout
+    // choice itself toggles — which texturesHash differing reliably
+    // signals (length 0 → non-zero or array shape change).
+    i.gpu_textures_pending = node.effect_textures;
     if (node.effect_data) |pd| {
         if (pd.len > i.gpu_data_capacity_floats) {
             if (i.gpu_data_buffer) |b| b.release();

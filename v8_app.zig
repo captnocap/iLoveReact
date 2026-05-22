@@ -2256,6 +2256,34 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                     node.effect_shader = .{ .wgsl = wgsl };
                 }
             }
+        } else if (std.mem.eql(u8, k, "textures")) {
+            // <Effect textures={['paintable-A', 'src-img']} /> — array of
+            // paintable handle strings, slot order. effects.zig binds each
+            // into the pipeline at @binding(2+2i) / @binding(3+2i).
+            if (node.effect_textures) |old| {
+                for (old) |s| g_alloc.free(s);
+                g_alloc.free(old);
+                node.effect_textures = null;
+            }
+            if (v == .array) {
+                const arr = g_alloc.alloc([]const u8, v.array.items.len) catch null;
+                if (arr) |out| {
+                    var ok = true;
+                    for (v.array.items, 0..) |item, i| {
+                        if (item != .string) { ok = false; break; }
+                        const dup = g_alloc.dupe(u8, item.string) catch {
+                            ok = false; break;
+                        };
+                        out[i] = dup;
+                    }
+                    if (ok) {
+                        node.effect_textures = out;
+                    } else {
+                        // Partial allocation — free what we managed.
+                        g_alloc.free(out);
+                    }
+                }
+            }
         } else if (std.mem.eql(u8, k, "paintableId")) {
             // String handle that uniquely identifies the paintable's
             // GPU texture across the cart. Dup'd on g_alloc (matches
@@ -2572,6 +2600,11 @@ fn beforeNodeDestroy(node: *Node, _: u32) void {
     if (node.paintable_id) |pid| {
         g_alloc.free(pid);
         node.paintable_id = null;
+    }
+    if (node.effect_textures) |arr| {
+        for (arr) |s| g_alloc.free(s);
+        g_alloc.free(arr);
+        node.effect_textures = null;
     }
 }
 
