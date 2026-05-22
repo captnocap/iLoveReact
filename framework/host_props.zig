@@ -556,6 +556,10 @@ pub fn applyStyleEntry(
         if (scaledMaybePct(val)) |f| node.style.flex_basis = f;
         return true;
     }
+    if (eq(u8, key, "order")) {
+        if (jsonInt(val)) |i| node.style.order = @intCast(i);
+        return true;
+    }
     if (eq(u8, key, "flexWrap")) {
         if (val == .string) {
             if (eq(u8, val.string, "wrap")) {
@@ -680,23 +684,23 @@ pub fn applyStyleEntry(
 
     // Borders — widths, dash params, radii are all pixel-typed → scaled.
     if (eq(u8, key, "borderWidth")) {
-        if (scaledFloat(val)) |f| node.style.border_width = f;
+        if (jsonFloat(val)) |f| node.style.border_width = f;
         return true;
     }
     if (eq(u8, key, "borderTopWidth")) {
-        if (scaledFloat(val)) |f| node.style.border_top_width = f;
+        if (jsonFloat(val)) |f| node.style.border_top_width = f;
         return true;
     }
     if (eq(u8, key, "borderRightWidth")) {
-        if (scaledFloat(val)) |f| node.style.border_right_width = f;
+        if (jsonFloat(val)) |f| node.style.border_right_width = f;
         return true;
     }
     if (eq(u8, key, "borderBottomWidth")) {
-        if (scaledFloat(val)) |f| node.style.border_bottom_width = f;
+        if (jsonFloat(val)) |f| node.style.border_bottom_width = f;
         return true;
     }
     if (eq(u8, key, "borderLeftWidth")) {
-        if (scaledFloat(val)) |f| node.style.border_left_width = f;
+        if (jsonFloat(val)) |f| node.style.border_left_width = f;
         return true;
     }
     if (eq(u8, key, "borderColor")) {
@@ -705,46 +709,46 @@ pub fn applyStyleEntry(
     }
     if (eq(u8, key, "borderDash")) {
         if (val == .array and val.array.items.len >= 2) {
-            if (scaledFloat(val.array.items[0])) |on| node.style.border_dash_on = on;
-            if (scaledFloat(val.array.items[1])) |off| node.style.border_dash_off = off;
+            if (jsonFloat(val.array.items[0])) |on| node.style.border_dash_on = on;
+            if (jsonFloat(val.array.items[1])) |off| node.style.border_dash_off = off;
         }
         return true;
     }
     if (eq(u8, key, "borderDashOn")) {
-        if (scaledFloat(val)) |f| node.style.border_dash_on = f;
+        if (jsonFloat(val)) |f| node.style.border_dash_on = f;
         return true;
     }
     if (eq(u8, key, "borderDashOff")) {
-        if (scaledFloat(val)) |f| node.style.border_dash_off = f;
+        if (jsonFloat(val)) |f| node.style.border_dash_off = f;
         return true;
     }
     if (eq(u8, key, "borderFlowSpeed")) {
         // px/sec — pixel-typed, so scale.
-        if (scaledFloat(val)) |f| node.style.border_flow_speed = f;
+        if (jsonFloat(val)) |f| node.style.border_flow_speed = f;
         return true;
     }
     if (eq(u8, key, "borderDashWidth")) {
-        if (scaledFloat(val)) |f| node.style.border_dash_width = f;
+        if (jsonFloat(val)) |f| node.style.border_dash_width = f;
         return true;
     }
     if (eq(u8, key, "borderRadius")) {
-        if (scaledFloat(val)) |f| node.style.border_radius = f;
+        if (jsonFloat(val)) |f| node.style.border_radius = f;
         return true;
     }
     if (eq(u8, key, "borderTopLeftRadius")) {
-        if (scaledFloat(val)) |f| node.style.border_top_left_radius = f;
+        if (jsonFloat(val)) |f| node.style.border_top_left_radius = f;
         return true;
     }
     if (eq(u8, key, "borderTopRightRadius")) {
-        if (scaledFloat(val)) |f| node.style.border_top_right_radius = f;
+        if (jsonFloat(val)) |f| node.style.border_top_right_radius = f;
         return true;
     }
     if (eq(u8, key, "borderBottomRightRadius")) {
-        if (scaledFloat(val)) |f| node.style.border_bottom_right_radius = f;
+        if (jsonFloat(val)) |f| node.style.border_bottom_right_radius = f;
         return true;
     }
     if (eq(u8, key, "borderBottomLeftRadius")) {
-        if (scaledFloat(val)) |f| node.style.border_bottom_left_radius = f;
+        if (jsonFloat(val)) |f| node.style.border_bottom_left_radius = f;
         return true;
     }
 
@@ -809,10 +813,10 @@ pub fn applyStyleEntry(
                 if (jsonFloat(v)) |f| node.style.origin_y = f;
             }
             if (val.object.get("translateX")) |v| {
-                if (scaledFloat(v)) |f| node.style.translate_x = f;
+                if (jsonFloat(v)) |f| node.style.translate_x = f;
             }
             if (val.object.get("translateY")) |v| {
-                if (scaledFloat(v)) |f| node.style.translate_y = f;
+                if (jsonFloat(v)) |f| node.style.translate_y = f;
             }
         }
         return true;
@@ -821,11 +825,11 @@ pub fn applyStyleEntry(
     // Tweens — pixel-typed translation values are scaled; duration/curve
     // are unit-less (ms, curve id) and stay literal.
     if (eq(u8, key, "tweenTranslateXFrom")) {
-        if (scaledFloat(val)) |f| node.style.tween_translate_x_from = f;
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_from = f;
         return true;
     }
     if (eq(u8, key, "tweenTranslateXTo")) {
-        if (scaledFloat(val)) |f| node.style.tween_translate_x_to = f;
+        if (jsonFloat(val)) |f| node.style.tween_translate_x_to = f;
         return true;
     }
     if (eq(u8, key, "tweenTranslateXDurMs")) {
@@ -837,11 +841,11 @@ pub fn applyStyleEntry(
         return true;
     }
     if (eq(u8, key, "tweenTranslateYFrom")) {
-        if (scaledFloat(val)) |f| node.style.tween_translate_y_from = f;
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_from = f;
         return true;
     }
     if (eq(u8, key, "tweenTranslateYTo")) {
-        if (scaledFloat(val)) |f| node.style.tween_translate_y_to = f;
+        if (jsonFloat(val)) |f| node.style.tween_translate_y_to = f;
         return true;
     }
     if (eq(u8, key, "tweenTranslateYDurMs")) {
@@ -867,15 +871,15 @@ pub fn applyStyleEntry(
         return true;
     }
     if (eq(u8, key, "shadowOffsetX")) {
-        if (scaledFloat(val)) |f| node.style.shadow_offset_x = f;
+        if (jsonFloat(val)) |f| node.style.shadow_offset_x = f;
         return true;
     }
     if (eq(u8, key, "shadowOffsetY")) {
-        if (scaledFloat(val)) |f| node.style.shadow_offset_y = f;
+        if (jsonFloat(val)) |f| node.style.shadow_offset_y = f;
         return true;
     }
     if (eq(u8, key, "shadowBlur")) {
-        if (scaledFloat(val)) |f| node.style.shadow_blur = f;
+        if (jsonFloat(val)) |f| node.style.shadow_blur = f;
         return true;
     }
     if (eq(u8, key, "shadowColor")) {
@@ -925,11 +929,11 @@ pub fn applyStyleEntry(
         return true;
     }
     if (eq(u8, key, "letterSpacing")) {
-        if (scaledFloat(val)) |f| node.letter_spacing = f;
+        if (jsonFloat(val)) |f| node.letter_spacing = f;
         return true;
     }
     if (eq(u8, key, "lineHeight")) {
-        if (scaledFloat(val)) |f| node.line_height = f;
+        if (jsonFloat(val)) |f| node.line_height = f;
         return true;
     }
 

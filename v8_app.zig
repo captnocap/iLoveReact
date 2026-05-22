@@ -215,6 +215,11 @@ const v8_bindings_vterm = if (HAS_TERMINAL) @import("framework/v8_bindings_vterm
     pub fn registerVterm(_: anytype) void {}
     pub fn tickDrain() void {}
 };
+const HAS_DOOM = if (@hasDecl(build_options, "has_doom")) build_options.has_doom else false;
+const v8_bindings_doom = if (HAS_DOOM) @import("framework/v8_bindings_doom.zig") else struct {
+    pub fn registerDoom(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
 
 const INGREDIENTS = [_]Ingredient{
     // Framework-essential (always-on). These bindings expose host fns the
@@ -269,6 +274,7 @@ const INGREDIENTS = [_]Ingredient{
     .{ .name = "audio", .required = false, .grep_prefix = "__audio_", .reg_fn = "registerAudio", .mod = v8_bindings_audio },
     .{ .name = "midi", .required = false, .grep_prefix = "__midi_", .reg_fn = "registerMidi", .mod = v8_bindings_midi },
     .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
+    .{ .name = "doom", .required = false, .grep_prefix = "__doom_", .reg_fn = "registerDoom", .mod = v8_bindings_doom },
 };
 const fs_mod = @import("framework/fs/fs.zig");
 const localstore = @import("framework/storage/localstore.zig");
