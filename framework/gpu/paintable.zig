@@ -778,22 +778,21 @@ pub fn readbackSync(key: []const u8) ?[]u8 {
     // device.poll() until the map callback fires. This is acceptable here
     // since readback is rare (save / export paths).
     var done: bool = false;
-    const Userdata = struct {
-        done_ptr: *bool,
+    const cb_struct = struct {
+        fn cb(status: wgpu.MapAsyncStatus, _: wgpu.StringView, userdata1: ?*anyopaque, _: ?*anyopaque) callconv(.c) void {
+            _ = status;
+            const done_ptr: *bool = @ptrCast(@alignCast(userdata1.?));
+            done_ptr.* = true;
+        }
     };
-    var ud: Userdata = .{ .done_ptr = &done };
     _ = buf.mapAsync(
         wgpu.MapModes.read,
         0,
         total,
-        @ptrCast(&ud),
-        struct {
-            fn cb(status: wgpu.MapAsyncStatus, userdata: ?*anyopaque) callconv(.C) void {
-                _ = status;
-                const u: *Userdata = @ptrCast(@alignCast(userdata.?));
-                u.done_ptr.* = true;
-            }
-        }.cb,
+        .{
+            .callback = cb_struct.cb,
+            .userdata1 = @ptrCast(&done),
+        },
     );
     while (!done) {
         _ = device.poll(true, null);
