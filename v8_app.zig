@@ -222,6 +222,12 @@ const v8_bindings_doom = if (enabledFor("doom")) @import("framework/v8_bindings_
     pub fn registerDoom(_: anytype) void {}
     pub fn tickDrain() void {}
 };
+// Paintable mask textures — opt-in via the `__paintable_` host fn prefix.
+// Carts that import usePaintable() reference __paintable_circle etc., the
+// metafile-gate sees the prefix, scripts/ship flips -Dhas-paintable=true.
+const v8_bindings_paintable = if (enabledFor("paintable")) @import("framework/v8_bindings_paintable.zig") else struct {
+    pub fn registerPaintable(_: anytype) void {}
+};
 
 const INGREDIENTS = [_]Ingredient{
     // Framework-essential (always-on). These bindings expose host fns the
@@ -277,6 +283,7 @@ const INGREDIENTS = [_]Ingredient{
     .{ .name = "midi", .required = false, .grep_prefix = "__midi_", .reg_fn = "registerMidi", .mod = v8_bindings_midi },
     .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
     .{ .name = "doom", .required = false, .grep_prefix = "__doom_", .reg_fn = "registerDoom", .mod = v8_bindings_doom },
+    .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },
 };
 const fs_mod = @import("framework/fs/fs.zig");
 const localstore = @import("framework/storage/localstore.zig");

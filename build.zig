@@ -424,6 +424,49 @@ pub fn build(b: *std.Build) void {
         }
     }
 
+    // ── doomgeneric (id Software Doom + ozkl porting shim) ────
+    // Vendored at deps/doomgeneric/src (87 C files, ~30K LOC). Gated
+    // behind -Dhas-doom because compiling 87 .c files isn't free — carts
+    // that don't import useDoom shouldn't pay the build cost or carry the
+    // engine in their binary. Our DG_* shim lives in framework/doom/doom.zig
+    // (Zig exports overriding the otherwise-absent platform impls).
+    //
+    // The upstream Makefile compiles with -DNORMALUNIX -DLINUX -D_DEFAULT_SOURCE
+    // and -w (silences the many "implicit declaration" warnings from the
+    // 1990s codebase). Same flags here.
+    const has_doom = b.option(bool, "has-doom", "Compile doomgeneric + register __doom_* bindings") orelse false;
+    options.addOption(bool, "has_doom", has_doom);
+    if (has_doom) {
+        const doom_src = b.path("deps/doomgeneric/src");
+        root_mod.addIncludePath(doom_src);
+        root_mod.addCSourceFiles(.{
+            .root = doom_src,
+            .files = &.{
+                "dummy.c",      "am_map.c",     "doomdef.c",    "doomstat.c",
+                "dstrings.c",   "d_event.c",    "d_items.c",    "d_iwad.c",
+                "d_loop.c",     "d_main.c",     "d_mode.c",     "d_net.c",
+                "f_finale.c",   "f_wipe.c",     "g_game.c",     "hu_lib.c",
+                "hu_stuff.c",   "info.c",       "i_cdmus.c",    "i_endoom.c",
+                "i_joystick.c", "i_scale.c",    "i_sound.c",    "i_system.c",
+                "i_timer.c",    "memio.c",      "m_argv.c",     "m_bbox.c",
+                "m_cheat.c",    "m_config.c",   "m_controls.c", "m_fixed.c",
+                "m_menu.c",     "m_misc.c",     "m_random.c",   "p_ceilng.c",
+                "p_doors.c",    "p_enemy.c",    "p_floor.c",    "p_inter.c",
+                "p_lights.c",   "p_map.c",      "p_maputl.c",   "p_mobj.c",
+                "p_plats.c",    "p_pspr.c",     "p_saveg.c",    "p_setup.c",
+                "p_sight.c",    "p_spec.c",     "p_switch.c",   "p_telept.c",
+                "p_tick.c",     "p_user.c",     "r_bsp.c",      "r_data.c",
+                "r_draw.c",     "r_main.c",     "r_plane.c",    "r_segs.c",
+                "r_sky.c",      "r_things.c",   "sha1.c",       "sounds.c",
+                "statdump.c",   "st_lib.c",     "st_stuff.c",   "s_sound.c",
+                "tables.c",     "v_video.c",    "wi_stuff.c",   "w_checksum.c",
+                "w_file.c",     "w_main.c",     "w_wad.c",      "z_zone.c",
+                "w_file_stdc.c","i_input.c",    "i_video.c",    "doomgeneric.c",
+            },
+            .flags = &.{ "-O2", "-fPIC", "-w", "-DNORMALUNIX", "-DLINUX", "-D_DEFAULT_SOURCE" },
+        });
+    }
+
     // ── useHost domain bindings (opt-in per cart) ─────────────
     // Source-driven: cart only pays for the V8 bindings it actually uses.
     // scripts/ship greps the bundle for `__proc_`, `__httpsrv_`, `__wssrv_`
@@ -442,7 +485,8 @@ pub fn build(b: *std.Build) void {
     const has_zigcall = b.option(bool, "has-zigcall", "Register __zig_call/__zig_call_list bindings") orelse false;
     const has_sdk = b.option(bool, "has-sdk", "Register __http_request_*/__fetch/__claude_*/__kimi_*/__localai_*/__browser_*/__ipc_*/__play_*/__rec_* bindings") orelse false;
     const has_voice = b.option(bool, "has-voice", "Register __voice_* bindings (mic + WebRTC VAD)") orelse false;
-    // has_whisper, has_pg, has_embed hoisted earlier (next to their compile/link blocks).
+    const has_paintable = b.option(bool, "has-paintable", "Register __paintable_* bindings (persistent GPU mask textures)") orelse false;
+    // has_whisper, has_pg, has_embed, has_doom hoisted earlier (next to their compile/link blocks).
     options.addOption(bool, "has_process", has_process);
     options.addOption(bool, "has_httpsrv", has_httpsrv);
     options.addOption(bool, "has_wssrv", has_wssrv);
@@ -454,6 +498,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_zigcall", has_zigcall);
     options.addOption(bool, "has_sdk", has_sdk);
     options.addOption(bool, "has_voice", has_voice);
+    options.addOption(bool, "has_paintable", has_paintable);
     options.addOption(bool, "has_pg", has_pg or has_embed);
     options.addOption(bool, "has_embed", has_embed);
     options.addOption(bool, "has_whisper", has_whisper);
@@ -479,6 +524,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/zigcall.flag", if (has_zigcall) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/sdk.flag", if (has_sdk) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/voice.flag", if (has_voice) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/paintable.flag", if (has_paintable) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/whisper.flag", if (has_whisper) "1\n" else "0\n");
@@ -486,6 +532,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/audio.flag", if (has_audio) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/midi.flag", if (has_midi) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/vterm.flag", if (has_terminal) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/doom.flag", if (has_doom) "1\n" else "0\n");
     const install_manifest = b.addInstallDirectory(.{
         .source_dir = manifest_wf.getDirectory(),
         .install_dir = .prefix,

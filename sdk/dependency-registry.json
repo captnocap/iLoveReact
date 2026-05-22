@@ -733,6 +733,22 @@
       ],
       "note": "Heavy: compiles deps/whisper.cpp + ggml into libwhisper.so (~20 MB) and statically pulls libstdc++ into the cart binary (~80 MB). Carts that don't import runtime/hooks/whisper.ts pay nothing."
     },
+    "paintable": {
+      "shipGate": "paintable",
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/usePaintable.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-paintable"
+      ],
+      "v8Bindings": [
+        "paintable"
+      ],
+      "note": "Persistent GPU mask textures (framework/gpu/paintable.zig) + brush ops via __paintable_circle/__paintable_polygon/__paintable_upload/__paintable_readback. Carts that import usePaintable() get an R8Unorm texture per handle to paint into; consumers sample via <Effect textures=...>. Cost is a handful of host fns + a render pipeline at init."
+    },
     "onnx": {
       "shipGate": "onnx",
       "triggers": [
@@ -807,6 +823,22 @@
         "embed"
       ],
       "note": "Local embedding + retrieval via libllama_ffi.so (linked from tsz/zig-out/lib at build). Chat generation no longer rides this gate \u2014 useLocalChat dlopens an LM Studio backend at runtime (framework/local_ai_runtime.zig) and is gated by has-sdk for its host bindings."
+    },
+    "doom": {
+      "shipGate": "doom",
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useDoom.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-doom"
+      ],
+      "v8Bindings": [
+        "doom"
+      ],
+      "note": "Vendored doomgeneric (id Software Doom + ozkl porting shim) compiled into the cart. ~30K LOC of C, adds ~600KB to the binary. Carts that don't import useDoom pay nothing."
     }
   },
   "shipGate": {
@@ -827,7 +859,8 @@
       "sqlite",
       "terminal",
       "process",
-      "window"
+      "window",
+      "doom"
     ]
   }
 }
