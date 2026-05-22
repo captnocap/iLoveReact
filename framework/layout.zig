@@ -1207,6 +1207,48 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
                 }
                 ri += 1;
             }
+        } else if (freeSpace < 0) {
+            // Mirror the actual layout pass's row-direction flex-shrink
+            // (see lines ~1858-1924): when intrinsic widths overflow the
+            // row, all items shrink proportionally to shrink × basis,
+            // floored at min-content. Without this, grow children kept
+            // their full intrinsic width here, so the recursive
+            // estimateIntrinsicHeight call under-wrapped any text inside
+            // (label measured at 230px on one line, then actually painted
+            // at 170px on two lines). The row's height came back ~14px
+            // short per wrapping label; cart/composer's input picker had
+            // three wrapping labels → bottom Col overshot the rail by
+            // ~46px and shoved "capture from mic" under the StatusBar.
+            var totalShrinkScaled: f32 = 0;
+            var si: usize = 0;
+            for (node.children) |*child| {
+                if (child.style.display == .none) continue;
+                if (child.style.position == .absolute) continue;
+                if (si >= vc) break;
+                const sh = child.style.flex_shrink orelse 1.0;
+                totalShrinkScaled += sh * childWidths[si];
+                si += 1;
+            }
+            if (totalShrinkScaled > 0) {
+                const overflow = -freeSpace;
+                var sj: usize = 0;
+                for (node.children) |*child| {
+                    if (child.style.display == .none) continue;
+                    if (child.style.position == .absolute) continue;
+                    if (sj >= vc) break;
+                    const sh = child.style.flex_shrink orelse 1.0;
+                    const amount = (sh * childWidths[sj] / totalShrinkScaled) * overflow;
+                    var newW = childWidths[sj] - amount;
+                    const minCW = if (child.style.min_width == null)
+                        computeMinContentW(child)
+                    else
+                        (resolveMaybePct(child.style.min_width, innerW) orelse 0);
+                    if (newW < minCW) newW = minCW;
+                    if (newW < 0) newW = 0;
+                    childWidths[sj] = newW;
+                    sj += 1;
+                }
+            }
         }
         // Now measure height with estimated widths
         var ri2: usize = 0;
