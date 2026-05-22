@@ -21,18 +21,26 @@ import type { SessionDocument } from './session';
 const HISTORY_CAP = 50;
 const COALESCE_MS = 250;
 
+/** Callers pass a THUNK rather than a pre-built SessionDocument so
+ *  expensive parts of building the snapshot (GPU mask readback) only
+ *  run when the commit is actually going to land. A slider drag fires
+ *  commitCoalesced dozens of times per second; the 250ms throttle
+ *  drops all but the first, but if the snapshot is built eagerly at
+ *  every call the throttle saves no work. */
+export type SnapshotBuilder = () => SessionDocument | null;
+
 export interface HistoryControls {
   /** Push the current snapshot. Called before a mutation. Clears redo. */
-  commit: (current: SessionDocument | null) => void;
+  commit: (build: SnapshotBuilder) => void;
   /** First-write-wins commit inside a 250 ms window. Drag handlers call
    *  this on every value change; only the FIRST call in a burst lands
    *  on the stack. The previously-committed value is what undo returns
    *  to — i.e. "the value before the drag started". */
-  commitCoalesced: (current: SessionDocument | null) => void;
+  commitCoalesced: (build: SnapshotBuilder) => void;
   /** Pop undo into `current` going to redo. Returns the snapshot to
    *  apply, or null if the stack was empty. */
-  undo: (current: SessionDocument | null) => SessionDocument | null;
-  redo: (current: SessionDocument | null) => SessionDocument | null;
+  undo: (build: SnapshotBuilder) => SessionDocument | null;
+  redo: (build: SnapshotBuilder) => SessionDocument | null;
   canUndo: boolean;
   canRedo: boolean;
   /** Wipe both stacks. Called when the cart ingests a new image —
@@ -52,7 +60,12 @@ export function useHistory(): HistoryControls {
     setCanRedo(redoStack.current.length > 0);
   };
 
-  const commit = useCallback((current: SessionDocument | null) => {
+  const commit = useCallback((build: SnapshotBuilder) => {
+    // Build the snapshot only once we know we're going to commit. For
+    // commit() that's always (no throttle); the laziness mostly matters
+    // for commitCoalesced below, but keeping the API symmetric stops
+    // call sites from accidentally re-building eagerly elsewhere.
+    const current = build();
     if (!current) return;
     lastCoalesceAt.current = 0; // any explicit commit ends a coalesce window
     undoStack.current.push(current);
@@ -61,10 +74,14 @@ export function useHistory(): HistoryControls {
     recompute();
   }, []);
 
-  const commitCoalesced = useCallback((current: SessionDocument | null) => {
-    if (!current) return;
+  const commitCoalesced = useCallback((build: SnapshotBuilder) => {
+    // Throttle BEFORE building — a slider drag at 60 Hz would otherwise
+    // do 60 GPU readbacks per second to populate the snapshot's mask
+    // payload, even though the throttle drops all but the first.
     const now = Date.now();
     if (now - lastCoalesceAt.current < COALESCE_MS) return; // already snapped this burst
+    const current = build();
+    if (!current) return;
     lastCoalesceAt.current = now;
     undoStack.current.push(current);
     if (undoStack.current.length > HISTORY_CAP) undoStack.current.shift();
@@ -72,9 +89,10 @@ export function useHistory(): HistoryControls {
     recompute();
   }, []);
 
-  const undo = useCallback((current: SessionDocument | null): SessionDocument | null => {
+  const undo = useCallback((build: SnapshotBuilder): SessionDocument | null => {
     const prev = undoStack.current.pop();
     if (!prev) return null;
+    const current = build();
     if (current) {
       redoStack.current.push(current);
       if (redoStack.current.length > HISTORY_CAP) redoStack.current.shift();
@@ -83,9 +101,10 @@ export function useHistory(): HistoryControls {
     return prev;
   }, []);
 
-  const redo = useCallback((current: SessionDocument | null): SessionDocument | null => {
+  const redo = useCallback((build: SnapshotBuilder): SessionDocument | null => {
     const next = redoStack.current.pop();
     if (!next) return null;
+    const current = build();
     if (current) {
       undoStack.current.push(current);
       if (undoStack.current.length > HISTORY_CAP) undoStack.current.shift();

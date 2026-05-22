@@ -695,7 +695,7 @@ export function useCutoutState(): CutoutState {
     // Snapshot BEFORE the stroke starts so undo returns to the pre-
     // stroke state. We commit on stroke-begin (not end) because the
     // current state IS the BEFORE-state at this moment.
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     drawingRef.current = true;
     lastStrokePointRef.current = null;
     lastBumpRef.current = 0; // force first paint to fire a bump
@@ -812,7 +812,7 @@ export function useCutoutState(): CutoutState {
   };
   const clearMask = () => {
     if (!srcDims) return;
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     mask.paint.clear(0);
     maskRef.current = null; // invalidate the CPU mirror
     setHasBrushLayer(false);
@@ -822,7 +822,7 @@ export function useCutoutState(): CutoutState {
 
   const invertMask = () => {
     if (!srcDims) return;
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     // No native invert op in paintable.zig; round-trip via readback +
     // CPU flip + upload. Invert is a single-click rare op so the
     // ~5-30ms cost at 4K is fine.
@@ -844,7 +844,7 @@ export function useCutoutState(): CutoutState {
 
   const commitLasso = () => {
     if (!srcDims || lassoPoints.length < 3) return;
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     // Pack the lasso points into a Float32Array of interleaved x,y.
     // paintable.zig's polygon op rasterizes inside the bbox; outside
     // pixels are untouched.
@@ -933,7 +933,7 @@ export function useCutoutState(): CutoutState {
   const addClick = async (sx: number, sy: number, label: ClickLabel) => {
     // Read from clicksRef (always current) not from `clicks` closure
     // (frozen at render time — would lose intermediate adds).
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     const next: ClickPoint[] = [...clicksRef.current, { x: sx, y: sy, label }];
     clicksRef.current = next;
     setClicks(next);
@@ -941,7 +941,7 @@ export function useCutoutState(): CutoutState {
   };
 
   const clearClicks = () => {
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     clicksRef.current = [];
     setClicks([]);
     writeLayerStack([], [], []);
@@ -1195,7 +1195,7 @@ export function useCutoutState(): CutoutState {
    *  the click and the config slot, then re-runs the backend so the
    *  combined mask updates. */
   const deleteLayer = async (i: number) => {
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     const allClicks = clicksRef.current;
     let keepSeen = 0;
     let targetClickIdx = -1;
@@ -1541,8 +1541,13 @@ export function useCutoutState(): CutoutState {
   // keyboard shortcuts + the undo/redo state fields exposed below.
   // commitCoalesced is for slider-style continuous edits — first-write-
   // wins inside a 250 ms window so a drag becomes one undo step.
-  const commit = () => history.commit(buildCurrentSession());
-  const commitCoalesced = () => history.commitCoalesced(buildCurrentSession());
+  // Pass the BUILDER (not a pre-built doc) so history.ts can decide
+  // whether to actually invoke it. commitCoalesced throttles at 250ms;
+  // when a slider fires 60 times/sec, only the first call's snapshot
+  // is built — the rest skip the (expensive, GPU-readback-bearing)
+  // buildCurrentSession entirely.
+  const commit = () => history.commit(buildCurrentSession);
+  const commitCoalesced = () => history.commitCoalesced(buildCurrentSession);
 
   const setFloodFuzz = (n: number) => {
     commitCoalesced();
@@ -1578,7 +1583,7 @@ export function useCutoutState(): CutoutState {
   };
 
   const undo = () => {
-    const prev = history.undo(buildCurrentSession());
+    const prev = history.undo(buildCurrentSession);
     if (!prev) { setStatus('nothing to undo'); return; }
     autosaveSuppressedRef.current = true;
     applyDoc(prev, { quiet: true });
@@ -1587,7 +1592,7 @@ export function useCutoutState(): CutoutState {
   };
 
   const redo = () => {
-    const next = history.redo(buildCurrentSession());
+    const next = history.redo(buildCurrentSession);
     if (!next) { setStatus('nothing to redo'); return; }
     autosaveSuppressedRef.current = true;
     applyDoc(next, { quiet: true });
@@ -1624,7 +1629,7 @@ export function useCutoutState(): CutoutState {
 
   const pasteLayer = () => {
     if (!clipboard) { setStatus('clipboard empty'); return; }
-    history.commit(buildCurrentSession());
+    history.commit(buildCurrentSession);
     const nextLayers = [...layers, new Set<number>(clipboard.mask)];
     const nextConfigs = [...layerConfigsRef.current, {
       mode: clipboard.config.mode,

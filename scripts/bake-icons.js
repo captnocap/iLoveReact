@@ -21,7 +21,7 @@
 //             - hex dump of a P5 PGM image; convert to PNG via:
 //               xxd -r -p framework/gpu/icon_atlas_debug.ppm.txt > /tmp/atlas.pgm
 //
-// The text-only output is a workaround for v8cli's __writeFile coercing
+// The text-only output is a workaround for v8cli's __fs_write coercing
 // through UTF-8 (corrupts bytes > 127). Adding a __writeBytesB64 binding
 // would clean this up but isn't worth a v8cli rebuild for a build script.
 
@@ -50,6 +50,12 @@ const PADDING = 2;           // tile padding so neighbors don't bleed via biline
 const ICON_NAMES = [
   'Heart', 'Search', 'ArrowRight', 'Plus', 'X', 'Settings',
   'Star', 'Home', 'Eye', 'User', 'Bell', 'Bookmark',
+  'Upload', 'Download', 'Save', 'FileImage', 'Image',
+  'Hand', 'Brush', 'WandSparkles', 'Eraser', 'RotateCcw', 'Palette',
+  'Minus', 'Square', 'Maximize', 'Minimize', 'Scissors',
+  'FolderOpen', 'FolderInput', 'PanelTop', 'PanelLeft',
+  'Undo2', 'Redo2', 'RefreshCw', 'RefreshCcw',
+  'Copy', 'ArrowUp', 'ArrowDown', 'Merge', 'Trash2', 'Package',
 ];
 
 // ── Boilerplate ───────────────────────────────────────────────────────
@@ -215,7 +221,7 @@ function bytesToHex(bytes) {
 }
 
 // ── Main bake ─────────────────────────────────────────────────────────
-const srcRaw = __readFile(ICONS_TS);
+const srcRaw = __fs_read(ICONS_TS);
 if (!srcRaw) die('failed to read ' + ICONS_TS);
 
 const polylines = {};
@@ -286,7 +292,7 @@ for (let i = 0; i < atlas.length; i += 16) {
   zig += row + '\n';
 }
 zig += `};\n`;
-if (!__writeFile(OUT_ZIG, zig)) die('failed to write ' + OUT_ZIG);
+if (!__fs_write(OUT_ZIG, zig)) die('failed to write ' + OUT_ZIG);
 log(`wrote ${OUT_ZIG} (${meta.length} icons + ${atlas.length}-byte atlas inlined)`);
 
 // ── Write debug PGM as hex (so xxd -r -p reproduces a valid binary PGM) ──
@@ -302,7 +308,7 @@ let wrapped = '';
 for (let i = 0; i < hexDump.length; i += 64) {
   wrapped += hexDump.slice(i, i + 64) + '\n';
 }
-if (!__writeFile(OUT_PGM_HEX, wrapped)) die('failed to write ' + OUT_PGM_HEX);
+if (!__fs_write(OUT_PGM_HEX, wrapped)) die('failed to write ' + OUT_PGM_HEX);
 log(`wrote ${OUT_PGM_HEX} — preview via:`);
 log(`  xxd -r -p ${OUT_PGM_HEX} > /tmp/icon_atlas.pgm && xdg-open /tmp/icon_atlas.pgm`);
 
@@ -317,7 +323,7 @@ ts += `// fall through to the legacy <Graph.Path> renderer.\n\n`;
 ts += `export const BAKED_ICON_NAMES: ReadonlySet<string> = new Set([\n`;
 for (const m of meta) ts += `  "${m.name}",\n`;
 ts += `]);\n`;
-if (!__writeFile(OUT_TS, ts)) die('failed to write ' + OUT_TS);
+if (!__fs_write(OUT_TS, ts)) die('failed to write ' + OUT_TS);
 log(`wrote ${OUT_TS}`);
 
 log(`done.`);
