@@ -46,4 +46,6 @@ export const BAKED_ICON_NAMES: ReadonlySet<string> = new Set([
   "Merge",
   "Trash2",
   "Package",
+  "ScanLine",
+  "Spline",
 ]);

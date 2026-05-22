@@ -325,6 +325,24 @@ export function useCutoutState(): CutoutState {
   const effectDimRef = useRef(0.85); effectDimRef.current = effectDim;
   const [customSurfaces, setCustomSurfaces] = useState<CustomSurface[]>([]);
   const [layers, setLayers] = useState<Set<number>[]>([]);
+  // Mirror layers into a ref so smart-layer brush dabs can mutate the
+  // shape at 240 Hz without calling setLayers per dab — a per-dab
+  // setState fans out into a full cart re-render PLUS the smart-union
+  // useEffect (which rebuilds + uploads the union texture), and at
+  // 240 Hz that saturated the main thread and locked the app. Now we
+  // write into layersRef every dab and flush to setLayers on the same
+  // 60 ms throttle bump that gates maskVersion (`bumpThrottled`), with
+  // a final flush at endStroke so the last cells aren't lost.
+  const layersRef = useRef<Set<number>[]>([]);
+  layersRef.current = layers;
+  const pendingLayersRef = useRef<Set<number>[] | null>(null);
+  const flushLayersIfPending = () => {
+    if (pendingLayersRef.current) {
+      const next = pendingLayersRef.current;
+      pendingLayersRef.current = null;
+      setLayers(next);
+    }
+  };
   const [overlayRes, setOverlayRes] = useState<number>(OVERLAY_RES);
   const [layerConfigs, setLayerConfigs] = useState<LayerConfig[]>([]);
   const [paintLayerName, setPaintLayerName] = useState('Paint Layer');
@@ -684,7 +702,10 @@ export function useCutoutState(): CutoutState {
   //   - endStroke bumps for the final settle if the throttle was deferred.
   const lastBumpRef = useRef(0);
   const BUMP_THROTTLE_MS = 60;
-  const bump = () => setMaskVersion((v) => v + 1);
+  const bump = () => {
+    flushLayersIfPending();
+    setMaskVersion((v) => v + 1);
+  };
   const bumpThrottled = () => {
     const now = Date.now();
     if (now - lastBumpRef.current < BUMP_THROTTLE_MS) return;
@@ -754,11 +775,16 @@ export function useCutoutState(): CutoutState {
       // Global brush layer — the historical path. The brush-only
       // overlay paints these cells with `effectMode`.
       setHasBrushLayer(true);
-    } else if (target < layers.length) {
+    } else if (target < layersRef.current.length) {
       // Smart layer paint — quantize the brush circle to overlayRes
-      // cells and add/remove them from the layer's Set. The Editor's
-      // per-layer MaskQuad sees the updated cells immediately because
-      // useMemo on the Set ref refires when we hand it a new Set.
+      // cells and add/remove them from the layer's Set. We read+write
+      // layersRef (the up-to-the-millisecond mirror) every dab and
+      // only push the result through setLayers on the same 60 ms
+      // throttle that gates maskVersion. A per-dab setState here would
+      // re-render the entire cart tree 240×/sec and lock the app.
+      // The smart-union useEffect that listens on `layers` also rides
+      // the throttle, so the union texture only re-uploads at 16 Hz.
+      const cur = pendingLayersRef.current ?? layersRef.current;
       const cellW = srcDims.w / overlayRes;
       const cellH = srcDims.h / overlayRes;
       const r = radius;
@@ -767,7 +793,7 @@ export function useCutoutState(): CutoutState {
       const yMin = Math.max(0, Math.floor((pt.y - r) / cellH));
       const yMax = Math.min(overlayRes - 1, Math.ceil((pt.y + r) / cellH));
       const r2 = r * r;
-      const next = new Set(layers[target]);
+      const next = new Set(cur[target]);
       for (let cy = yMin; cy <= yMax; cy++) {
           const ccy = (cy + 0.5) * cellH;
           const dy = ccy - pt.y;
@@ -780,9 +806,9 @@ export function useCutoutState(): CutoutState {
           else next.delete(idx);
         }
       }
-      const nextLayers = layers.slice();
+      const nextLayers = cur.slice();
       nextLayers[target] = next;
-      setLayers(nextLayers);
+      pendingLayersRef.current = nextLayers;
     }
     bumpThrottled();
   };

@@ -56,6 +56,8 @@ const ICON_NAMES = [
   'FolderOpen', 'FolderInput', 'PanelTop', 'PanelLeft',
   'Undo2', 'Redo2', 'RefreshCw', 'RefreshCcw',
   'Copy', 'ArrowUp', 'ArrowDown', 'Merge', 'Trash2', 'Package',
+  // Cutout tool palette — refine brush + lasso.
+  'ScanLine', 'Spline',
 ];
 
 // ── Boilerplate ───────────────────────────────────────────────────────

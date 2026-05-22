@@ -37,10 +37,8 @@
  * paint walk, so consumers always see the latest texture state.
  */
 
-declare const globalThis: any;
-const G = globalThis;
-
 import { useRef } from 'react';
+import { callHost } from '../ffi';
 
 // Stable per-cart id counter so two hook instances don't collide. We
 // don't use crypto.randomUUID — the id is purely process-local and the
@@ -100,17 +98,17 @@ function makeOps(id: string): PaintableOps {
   if (existing) return existing;
   const ops: PaintableOps = {
     id,
-    circle(cx, cy, r, value) { G.__paintable_circle?.(id, cx, cy, r, value); },
+    circle(cx, cy, r, value) { callHost('__paintable_circle', undefined, id, cx, cy, r, value); },
     circleEdgeAware(cx, cy, r, value, grayId, gradThreshold) {
-      G.__paintable_circle_edge?.(id, cx, cy, r, value, grayId, gradThreshold);
+      callHost('__paintable_circle_edge', undefined, id, cx, cy, r, value, grayId, gradThreshold);
     },
     polygon(verts, value) {
-      G.__paintable_polygon?.(id, verts, value);
+      callHost('__paintable_polygon', undefined, id, verts, value);
     },
-    clear(value) { G.__paintable_clear?.(id, value); },
-    upload(bytes) { G.__paintable_upload?.(id, bytes); },
+    clear(value) { callHost('__paintable_clear', undefined, id, value); },
+    upload(bytes) { callHost('__paintable_upload', undefined, id, bytes); },
     readback() {
-      const out = G.__paintable_readback?.(id);
+      const out = callHost<unknown>('__paintable_readback', null, id);
       return out instanceof Uint8Array ? out : null;
     },
   };
