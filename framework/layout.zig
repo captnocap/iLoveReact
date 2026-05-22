@@ -1185,12 +1185,27 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
             if (child.style.display == .none) continue;
             if (child.style.position == .absolute) continue;
             if (vc >= MAX_ROW_EST) break;
-            const cw = resolveMaybePct(child.style.width, innerW) orelse estimateIntrinsicWidth(child);
-            const cmL = marLeft(child.style);
-            const cmR = marRight(child.style);
+            // Mirror the actual layout pass's defaultBasis (line ~1703):
+            // grow children with no explicit width have basis=0, so they
+            // absorb free space instead of inflating totalIntrinsic. If
+            // we used intrinsic here, totalIntrinsic could exceed innerW
+            // and the grow branch wouldn't fire — even though the real
+            // layout will give grow children all available space. The
+            // recursive height measurement then runs at a slightly-off
+            // allocated width (post-shrink instead of post-grow), causing
+            // sub-pixel text-wrap divergence between estimate and actual.
+            const cs = child.style;
+            const cw = if (cs.width != null)
+                (resolveMaybePct(cs.width, innerW) orelse estimateIntrinsicWidth(child))
+            else if (cs.flex_grow > 0)
+                @as(f32, 0)
+            else
+                estimateIntrinsicWidth(child);
+            const cmL = marLeft(cs);
+            const cmR = marRight(cs);
             childWidths[vc] = cw;
             totalIntrinsic += cw + cmL + cmR;
-            growTotal += child.style.flex_grow;
+            growTotal += cs.flex_grow;
             vc += 1;
         }
         const rowGaps = if (vc > 1) g * @as(f32, @floatFromInt(vc - 1)) else 0;
