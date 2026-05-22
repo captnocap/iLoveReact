@@ -291,6 +291,9 @@ const effects = if (HAS_EFFECTS) @import("gpu/effects.zig") else struct {
         return null;
     }
 };
+const paintable = if (HAS_EFFECTS) @import("gpu/paintable.zig") else struct {
+    pub fn drainAll() void {}
+};
 const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
     pub fn render(_: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
         return false;
@@ -1783,6 +1786,14 @@ fn paintChildrenInZOrder(node: *Node) void {
 
 fn paintNode(node: *Node) void {
     if (node.style.display == .none) {
+        g_hidden_count += 1;
+        return;
+    }
+    // Paintable nodes own a GPU mask texture but render nothing visible.
+    // Brush ops accumulated since last frame were already drained at the
+    // top of the frame; children of a Paintable are unusual but allowed
+    // (paintable is conceptually a leaf).
+    if (node.is_paintable) {
         g_hidden_count += 1;
         return;
     }
@@ -4363,6 +4374,11 @@ pub fn run(config_in: AppConfig) !void {
 
         // Effects update — animate and render all effect instances
         effects.update(dt_sec);
+        // Drain any brush ops that JS pushed onto paintable mask textures
+        // since the last frame. Runs BEFORE the paint walk so consumers
+        // (Effects that sample a paintable via `textures`) see the latest
+        // texture state.
+        paintable.drainAll();
         r3d.update(dt_sec);
         fswatch.tick(dt_ms);
         clipboard_watch.tick(dt_ms);

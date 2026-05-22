@@ -157,6 +157,81 @@ pub fn allocator() std.mem.Allocator {
     return g_alloc;
 }
 
+// Pointer accessors. The GPU shell (v8_app.zig) installs local pointer
+// vars to these on startup so its existing `g_node_by_id.get(id)` /
+// `g_children_ids.getPtr(pid)` / `g_root_child_ids.items` syntax keeps
+// working without rewriting hundreds of call sites. The capacity to
+// peek inside the maps directly is intentional for the GPU paint loop's
+// hot path; the TUI shell uses the slice-shaped accessors above instead.
+pub fn nodesPtr() *std.AutoHashMap(u32, *Node) {
+    return &g_node_by_id;
+}
+pub fn childrenIdsPtr() *std.AutoHashMap(u32, std.ArrayList(u32)) {
+    return &g_children_ids;
+}
+pub fn parentIdPtr() *std.AutoHashMap(u32, u32) {
+    return &g_parent_id;
+}
+pub fn rootChildIdsPtr() *std.ArrayList(u32) {
+    return &g_root_child_ids;
+}
+pub fn dirtyPtr() *bool {
+    return &g_dirty;
+}
+
+pub fn nodeCount() usize {
+    return g_node_by_id.count();
+}
+
+pub const NodeIterator = std.AutoHashMap(u32, *Node).Iterator;
+pub fn nodesIter() NodeIterator {
+    return g_node_by_id.iterator();
+}
+
+pub const NodeValueIterator = std.AutoHashMap(u32, *Node).ValueIterator;
+pub fn nodesValueIter() NodeValueIterator {
+    return g_node_by_id.valueIterator();
+}
+
+/// Remove `id` from the tree state and free its Node memory + children
+/// list. Caller is responsible for any per-cart-feature teardown on the
+/// Node's fields (gpu buffers, input slots, etc.) BEFORE calling — those
+/// concerns live in the consumer shell, not here.
+pub fn destroyNode(id: u32) void {
+    if (g_node_by_id.get(id)) |n| {
+        if (g_hooks.before_destroy) |f| f(n, id);
+    }
+    if (g_children_ids.getPtr(id)) |list| list.deinit(g_alloc);
+    _ = g_children_ids.remove(id);
+    _ = g_parent_id.remove(id);
+    if (g_node_by_id.fetchRemove(id)) |entry| {
+        g_alloc.destroy(entry.value);
+    }
+}
+
+/// Hot-reload teardown. Drops every Node + map entry but keeps the
+/// allocations so the next bundle's CREATEs hit cached capacity. node.text
+/// ownership is mixed (some g_alloc dupes, some slices into framework input
+/// buffers) so we intentionally leak the text — kilobytes per reload, fine
+/// for a dev-mode safety net.
+pub fn clearAll() void {
+    if (g_hooks.before_destroy) |f| {
+        var pre_it = g_node_by_id.iterator();
+        while (pre_it.next()) |entry| f(entry.value_ptr.*, entry.key_ptr.*);
+    }
+    var nodes_it = g_node_by_id.valueIterator();
+    while (nodes_it.next()) |np| g_alloc.destroy(np.*);
+    g_node_by_id.clearRetainingCapacity();
+
+    var children_it = g_children_ids.valueIterator();
+    while (children_it.next()) |list| list.deinit(g_alloc);
+    g_children_ids.clearRetainingCapacity();
+
+    g_parent_id.clearRetainingCapacity();
+    g_root_child_ids.clearRetainingCapacity();
+    g_dirty = true;
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Tree materialization
 // ════════════════════════════════════════════════════════════════════════
@@ -396,6 +471,12 @@ pub const Hooks = struct {
     /// command was consumed and applyCommand should bail. Only set in
     /// v8_app when running as a child window.
     child_window_intercept: ?*const fn (std.json.Value, []const u8) bool = null,
+
+    /// Called from `destroyNode` BEFORE the Node memory is freed, so
+    /// per-cart-feature teardown (paintable textures, GPU buffers,
+    /// input slots, etc.) gets a chance to run with the Node's fields
+    /// still valid. Also called from `clearAll` for every live node.
+    before_destroy: ?*const fn (*Node, u32) void = null,
 };
 
 var g_hooks: Hooks = .{};

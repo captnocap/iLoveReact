@@ -410,6 +410,16 @@ pub const Node = struct {
     filter_name: ?[]const u8 = null,
     filter_intensity: f32 = 1.0,
     effect_type: ?[]const u8 = null,
+    // Paintable — owns a persistent GPU R8Unorm mask texture keyed by
+    // `paintable_id`. Renders nothing visible itself; consumed by other
+    // Effects via the `textures` prop. See framework/gpu/paintable.zig.
+    // The Node is registered with paintable.ensure() after CREATE props
+    // are applied, and unregistered via the host_tree before_destroy
+    // hook so the texture survives exactly as long as the React subtree.
+    paintable_id: ?[]const u8 = null,
+    paintable_w: u32 = 0,
+    paintable_h: u32 = 0,
+    is_paintable: bool = false,
     input_id: ?u8 = null,
     input_paint_text: bool = true,
     input_color_rows: ?[]const ColorTextRow = null,

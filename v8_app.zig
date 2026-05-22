@@ -1,12 +1,17 @@
-//! qjs_app.zig — React (via react-reconciler + love2d hostConfig) running in the
-//! framework's real QuickJS VM, producing mutation commands that land directly on
-//! framework.layout.Node. Event press → engine's js_on_press evals
-//! `__dispatchEvent(id,'onClick')` → React handler runs → commit flushes new
-//! mutations via __hostFlush → applied to the same Node pool → layout dirtied.
-//! No hermes subprocess. Same AppConfig seam Smith uses.
+//! v8_app.zig — the GPU shell. React (via react-reconciler + the love2d-shaped
+//! hostConfig) runs inside V8, emitting CREATE/APPEND/UPDATE/REMOVE mutations
+//! that __hostFlush queues; the engine drains the queue at the start of each
+//! paint frame and host_tree.applyCommandBatch lands the mutations on the
+//! shared Node pool with v8_app's hooks doing GPU-specific concerns (CSS-shape
+//! prop parsing, handler-flag registration, host-window opens, .independent
+//! child-window intercept). Event press → engine's js_on_press evals
+//! `__dispatchEvent(id,'onClick')` → React handler runs → next commit flows
+//! through the same path. The TUI shell (v8_tui_app.zig) shares the binding
+//! and tree-state modules; the only difference is rasterization (SDL3
+//! window vs cell grid).
 //!
 //! Build:
-//!   zig build app -Dapp-name=qjs_d152 -Dapp-source=qjs_app.zig -Doptimize=ReleaseFast
+//!   zig build app -Dapp-name=<cart> -Dapp-source=v8_app.zig -Doptimize=ReleaseFast
 
 const std = @import("std");
 const build_options = @import("build_options");
@@ -16,11 +21,10 @@ const layout = @import("framework/layout.zig");
 const Node = layout.Node;
 const Style = layout.Style;
 const Color = layout.Color;
-// Compile-link the new tree-state module so v8_tui_app can adopt it
-// under -Dhas-window. v8_app doesn't reference it yet — its own
-// applyCommand owns the tree state for now (Phase 3 of the
-// host_tree.zig migration plan).
-comptime { _ = @import("framework/host_tree.zig"); }
+// Tree state lives in framework/host_tree.zig — single owner across
+// both shells. v8_app installs hooks (apply_props, apply_handler_flags,
+// open_host_window, etc.) and consumes the tree via host_tree's
+// accessors. Phase 3 of the host_tree.zig migration plan: complete.
 const transition_mod = @import("framework/gpu/transition.zig");
 const easing_mod = @import("framework/math/easing.zig");
 const effect_ctx = @import("framework/gpu/effects_ctx.zig");
@@ -36,11 +40,14 @@ const gpu = if (IS_LIB) struct {
 } else @import("framework/gpu/gpu.zig");
 const latches = @import("framework/state/latches.zig");
 const animations = @import("framework/gpu/animations.zig");
+const paintable = @import("framework/gpu/paintable.zig");
 const windows = @import("framework/primitive/windows.zig");
 const ipc = @import("framework/net/ipc.zig");
 const prepared_input = @import("framework/state/prepared_input.zig");
 const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = @import("framework/v8_bindings_core.zig");
+const v8_bindings_reconciler = @import("framework/v8_bindings_reconciler.zig");
+const host_tree = @import("framework/host_tree.zig");
 const v8_bindings_eventbus = @import("framework/v8_bindings_eventbus.zig");
 const v8_bindings_ifttt = @import("framework/v8_bindings_ifttt.zig");
 const v8_bindings_env = @import("framework/v8_bindings_env.zig");
@@ -58,23 +65,33 @@ pub const std_options: std.Options = .{
 
 // Conditional @import — when has_X is false the binding file is NEVER
 // parsed, so its string literals (host-fn names like "getFps", "__zig_call")
-// don't bleed into .rodata/DWARF of the final binary. The "_real = @import(...)"
-// then "if cond _real else stub" pattern keeps the file in the compile graph
-// regardless and leaks the host-fn name strings into hello-raw even though
-// the registration calls themselves are dead-stripped.
-const v8_bindings_fs = if (build_options.has_fs) @import("framework/v8_bindings_fs.zig") else struct {
+// don't bleed into .rodata/DWARF of the final binary. The naive
+// `_real = @import(...)` / `if cond _real else stub` shape compiles the
+// file unconditionally and leaks the host-fn strings into the binary
+// even when the gate is off; the `if cond @import(...) else struct{...}`
+// shape below is the load-bearing trick.
+//
+// `@import` requires a string literal in Zig 0.15 — we can't fold it into
+// a helper that takes the path as a parameter. What we CAN factor out is
+// the `@hasDecl(build_options, "has_X") and build_options.has_X` ladder.
+// That goes through `enabledFor`, killing the redundant `HAS_X` consts.
+inline fn enabledFor(comptime opt_name: []const u8) bool {
+    return @hasDecl(build_options, "has_" ++ opt_name) and @field(build_options, "has_" ++ opt_name);
+}
+
+const v8_bindings_fs = if (enabledFor("fs")) @import("framework/v8_bindings_fs.zig") else struct {
     pub fn registerFs(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const v8_bindings_websocket = if (build_options.has_websocket) @import("framework/v8_bindings_websocket.zig") else struct {
+const v8_bindings_websocket = if (enabledFor("websocket")) @import("framework/v8_bindings_websocket.zig") else struct {
     pub fn registerWebSocket(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const v8_bindings_telemetry = if (build_options.has_telemetry) @import("framework/v8_bindings_telemetry.zig") else struct {
+const v8_bindings_telemetry = if (enabledFor("telemetry")) @import("framework/v8_bindings_telemetry.zig") else struct {
     pub fn registerTelemetry(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const v8_bindings_zigcall = if (build_options.has_zigcall) @import("framework/v8_bindings_zigcall.zig") else struct {
+const v8_bindings_zigcall = if (enabledFor("zigcall")) @import("framework/v8_bindings_zigcall.zig") else struct {
     pub fn registerZigCall(_: anytype) void {}
     pub fn registerZigCallList(_: anytype) void {}
     pub fn tickDrain() void {}
@@ -132,23 +149,19 @@ const Ingredient = struct {
     mod: type,
 };
 
-// Same inline-@import pattern as the new bindings above — conditionally
-// import the binding file so its host-fn name string literals never enter
-// the binary when the gate is off. The previous `_real = @import(...)` /
-// `if cond _real else stub` shape compiled the file unconditionally.
-const v8_bindings_httpserver = if (build_options.has_httpsrv) @import("framework/v8_bindings_httpserver.zig") else struct {
+const v8_bindings_httpserver = if (enabledFor("httpsrv")) @import("framework/v8_bindings_httpserver.zig") else struct {
     pub fn registerHttpServer(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const v8_bindings_wsserver = if (build_options.has_wssrv) @import("framework/v8_bindings_wsserver.zig") else struct {
+const v8_bindings_wsserver = if (enabledFor("wssrv")) @import("framework/v8_bindings_wsserver.zig") else struct {
     pub fn registerWsServer(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const v8_bindings_process = if (build_options.has_process) @import("framework/v8_bindings_process.zig") else struct {
+const v8_bindings_process = if (enabledFor("process")) @import("framework/v8_bindings_process.zig") else struct {
     pub fn registerProcess(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const v8_bindings_net = if (build_options.has_net) @import("framework/v8_bindings_net.zig") else struct {
+const v8_bindings_net = if (enabledFor("net")) @import("framework/v8_bindings_net.zig") else struct {
     pub fn registerNet(_: anytype) void {}
     pub fn tickDrain() void {}
 };
@@ -156,67 +169,56 @@ const v8_bindings_net = if (build_options.has_net) @import("framework/v8_binding
 // top of net/tcp.zig and net/udp.zig and ride the useConnection trichotomy.
 // Any cart shipping `useConnection({kind:'rcon'|'a2s'})` already trips
 // has-net via the metafile gate, so no separate ingredient flag is needed.
-const v8_bindings_gameserver = if (build_options.has_net) @import("framework/v8_bindings_gameserver.zig") else struct {
+const v8_bindings_gameserver = if (enabledFor("net")) @import("framework/v8_bindings_gameserver.zig") else struct {
     pub fn registerGameServer(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_TOR = if (@hasDecl(build_options, "has_tor")) build_options.has_tor else false;
-const v8_bindings_tor = if (HAS_TOR) @import("framework/v8_bindings_tor.zig") else struct {
+const v8_bindings_tor = if (enabledFor("tor")) @import("framework/v8_bindings_tor.zig") else struct {
     pub fn registerTor(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const v8_bindings_privacy = if (build_options.has_privacy) @import("framework/v8_bindings_privacy.zig") else struct {
+const v8_bindings_privacy = if (enabledFor("privacy")) @import("framework/v8_bindings_privacy.zig") else struct {
     pub fn registerPrivacy(_: anytype) void {}
 };
-const v8_bindings_sdk = if (build_options.has_sdk) @import("framework/v8_bindings_sdk.zig") else struct {
+const v8_bindings_sdk = if (enabledFor("sdk")) @import("framework/v8_bindings_sdk.zig") else struct {
     pub fn registerSdk(_: anytype) void {}
 };
-const HAS_VOICE = if (@hasDecl(build_options, "has_voice")) build_options.has_voice else false;
-const v8_bindings_voice = if (HAS_VOICE) @import("framework/v8_bindings_voice.zig") else struct {
+const v8_bindings_voice = if (enabledFor("voice")) @import("framework/v8_bindings_voice.zig") else struct {
     pub fn registerVoice(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_WHISPER = if (@hasDecl(build_options, "has_whisper")) build_options.has_whisper else false;
-const v8_bindings_whisper = if (HAS_WHISPER) @import("framework/v8_bindings_whisper.zig") else struct {
+const v8_bindings_whisper = if (enabledFor("whisper")) @import("framework/v8_bindings_whisper.zig") else struct {
     pub fn registerWhisper(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_ONNX = if (@hasDecl(build_options, "has_onnx")) build_options.has_onnx else false;
-const v8_bindings_onnx = if (HAS_ONNX) @import("framework/v8_bindings_onnx.zig") else struct {
+const v8_bindings_onnx = if (enabledFor("onnx")) @import("framework/v8_bindings_onnx.zig") else struct {
     pub fn registerOnnx(_: anytype) void {}
 };
-const HAS_PG = if (@hasDecl(build_options, "has_pg")) build_options.has_pg else false;
-const v8_bindings_pg = if (HAS_PG) @import("framework/v8_bindings_pg.zig") else struct {
+const v8_bindings_pg = if (enabledFor("pg")) @import("framework/v8_bindings_pg.zig") else struct {
     pub fn registerPg(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_EMBED = if (@hasDecl(build_options, "has_embed")) build_options.has_embed else false;
-const v8_bindings_embed = if (HAS_EMBED) @import("framework/v8_bindings_embed.zig") else struct {
+const v8_bindings_embed = if (enabledFor("embed")) @import("framework/v8_bindings_embed.zig") else struct {
     pub fn registerEmbed(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_VIDEO = if (@hasDecl(build_options, "has_video")) build_options.has_video else false;
-const v8_bindings_video = if (HAS_VIDEO) @import("framework/v8_bindings_video.zig") else struct {
+const v8_bindings_video = if (enabledFor("video")) @import("framework/v8_bindings_video.zig") else struct {
     pub fn registerVideo(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_AUDIO = if (@hasDecl(build_options, "has_audio")) build_options.has_audio else false;
-const v8_bindings_audio = if (HAS_AUDIO) @import("framework/v8_bindings_audio.zig") else struct {
+const v8_bindings_audio = if (enabledFor("audio")) @import("framework/v8_bindings_audio.zig") else struct {
     pub fn registerAudio(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_MIDI = if (@hasDecl(build_options, "has_midi")) build_options.has_midi else false;
-const v8_bindings_midi = if (HAS_MIDI) @import("framework/v8_bindings_midi.zig") else struct {
+const v8_bindings_midi = if (enabledFor("midi")) @import("framework/v8_bindings_midi.zig") else struct {
     pub fn registerMidi(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_TERMINAL = if (@hasDecl(build_options, "has_terminal")) build_options.has_terminal else false;
-const v8_bindings_vterm = if (HAS_TERMINAL) @import("framework/v8_bindings_vterm.zig") else struct {
+const v8_bindings_vterm = if (enabledFor("terminal")) @import("framework/v8_bindings_vterm.zig") else struct {
     pub fn registerVterm(_: anytype) void {}
     pub fn tickDrain() void {}
 };
-const HAS_DOOM = if (@hasDecl(build_options, "has_doom")) build_options.has_doom else false;
-const v8_bindings_doom = if (HAS_DOOM) @import("framework/v8_bindings_doom.zig") else struct {
+const v8_bindings_doom = if (enabledFor("doom")) @import("framework/v8_bindings_doom.zig") else struct {
     pub fn registerDoom(_: anytype) void {}
     pub fn tickDrain() void {}
 };
@@ -304,13 +306,15 @@ const WINDOW_TITLE = std.fmt.comptimePrint("{s}", .{
 
 var g_alloc: std.mem.Allocator = undefined;
 var g_arena: std.heap.ArenaAllocator = undefined;
-var g_node_by_id: std.AutoHashMap(u32, *Node) = undefined;
-var g_children_ids: std.AutoHashMap(u32, std.ArrayList(u32)) = undefined;
-/// child_id → parent_id. Inverse of `g_children_ids`. Maintained alongside
-/// every APPEND / INSERT_BEFORE / REMOVE so `markSubtreeDirty` can walk the
-/// ancestor chain in O(depth). Without this, finding a node's parent
-/// would require scanning every entry of `g_children_ids` per mutation.
-var g_parent_id: std.AutoHashMap(u32, u32) = undefined;
+// Tree-state moved to framework/host_tree.zig. These four pointers are
+// installed in main() (g_node_by_id = host_tree.nodesPtr(), …) so every
+// `g_node_by_id.get(id)` / `g_children_ids.get(pid).items` / etc. that
+// existed before the migration keeps working without rewriting every
+// call site — they just dereference into host_tree's owned maps.
+var g_node_by_id: *std.AutoHashMap(u32, *Node) = undefined;
+var g_children_ids: *std.AutoHashMap(u32, std.ArrayList(u32)) = undefined;
+var g_parent_id: *std.AutoHashMap(u32, u32) = undefined;
+var g_root_child_ids: *std.ArrayList(u32) = undefined;
 
 /// Sets of nodes with `latch_*_key` style bindings, one per supported
 /// style field. The pre-frame `syncLatchesToNodes` pass iterates each
@@ -325,7 +329,6 @@ var g_latch_left_nodes: std.AutoHashMap(u32, void) = undefined;
 var g_latch_top_nodes: std.AutoHashMap(u32, void) = undefined;
 var g_latch_right_nodes: std.AutoHashMap(u32, void) = undefined;
 var g_latch_bottom_nodes: std.AutoHashMap(u32, void) = undefined;
-var g_root_child_ids: std.ArrayList(u32) = .{};
 var g_window_owner_by_node_id: std.AutoHashMap(u32, u32) = undefined;
 const WindowBinding = struct {
     slot: usize,
@@ -339,7 +342,10 @@ var g_child_client: ?ipc.Client = null;
 var g_child_auto_dismiss_ms: u32 = 0;
 var g_child_started_ms: i64 = 0;
 var g_root: Node = .{};
-var g_dirty: bool = true;
+// host_tree owns the dirty flag. Local pointer installed in main(),
+// dereferenced at every read/write site (`g_dirty.*`). See the
+// pointer-aliasing rationale on g_node_by_id above.
+var g_dirty: *bool = undefined;
 var g_scroll_prop_slots: std.AutoHashMap(u32, void) = undefined;
 var g_press_expr_pool: std.ArrayList([:0]u8) = .{};
 var g_input_slot_by_node_id: std.AutoHashMap(u32, u8) = undefined;
@@ -1121,15 +1127,8 @@ fn applyLatchOrPct(
         // Seed with whatever the latch currently holds so first-frame
         // layout has a sensible value before any tick fires.
         style_field.* = latches.getF32(suffix);
-        // Find this node's id (linear scan g_node_by_id; called only at
-        // applyStyle time, not per-frame). Add to the registry.
-        var it = g_node_by_id.iterator();
-        while (it.next()) |entry| {
-            if (entry.value_ptr.* == node) {
-                nodes_set.put(entry.key_ptr.*, {}) catch {};
-                break;
-            }
-        }
+        // Node.id is stamped by ensureNode — no map scan needed.
+        if (node.id != 0) nodes_set.put(node.id, {}) catch {};
     } else if (jsonMaybePct(val)) |f| {
         style_field.* = f;
         // Clear any prior latch binding when the value becomes literal.
@@ -1582,6 +1581,11 @@ fn applyTypeDefaults(node: *Node, id: u32, type_name: []const u8) void {
         node.canvas_path = true;
     } else if (eq(u8, type_name, "Canvas.Clamp")) {
         node.canvas_clamp = true;
+    } else if (eq(u8, type_name, "Paintable")) {
+        // Persistent GPU mask texture, never painted visibly. The real
+        // texture allocation happens in applyProps once paintableW/H and
+        // paintableId are known. See framework/gpu/paintable.zig.
+        node.is_paintable = true;
     } else if (isTerminalType(type_name)) {
         node.terminal = true;
     }
@@ -2245,6 +2249,34 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                     node.effect_shader = .{ .wgsl = wgsl };
                 }
             }
+        } else if (std.mem.eql(u8, k, "paintableId")) {
+            // String handle that uniquely identifies the paintable's
+            // GPU texture across the cart. Dup'd on g_alloc (matches
+            // the canvas_fill_effect / text_effect lifetime model).
+            if (v == .string) {
+                if (node.paintable_id) |old| g_alloc.free(old);
+                if (dupJsonText(v)) |s| node.paintable_id = s;
+            }
+        } else if (std.mem.eql(u8, k, "paintableW")) {
+            if (jsonFloat(v)) |f| {
+                const iw: i64 = @intFromFloat(@max(0, f));
+                node.paintable_w = @intCast(iw);
+            }
+        } else if (std.mem.eql(u8, k, "paintableH")) {
+            if (jsonFloat(v)) |f| {
+                const ih: i64 = @intFromFloat(@max(0, f));
+                node.paintable_h = @intCast(ih);
+            }
+        }
+    }
+    // After all props are applied, if we have a complete paintable spec,
+    // (re-)allocate the GPU texture. ensure() is idempotent and handles
+    // re-sizing by re-allocating, so prop updates that change w/h work.
+    if (node.is_paintable) {
+        if (node.paintable_id) |pid| {
+            if (node.paintable_w > 0 and node.paintable_h > 0) {
+                _ = paintable.ensure(pid, node.paintable_w, node.paintable_h);
+            }
         }
     }
 }
@@ -2438,48 +2470,28 @@ fn writeJsonString(out: *std.ArrayList(u8), value: []const u8) !void {
 }
 
 // ── Command application ─────────────────────────────────────────
+//
+// applyCommand, ensureNode, inheritTypography, and the structural side
+// of markSubtreeDirty all live in framework/host_tree.zig now (single
+// owner across both shells). v8_app installs hooks (apply_props,
+// apply_handler_flags, open_host_window, note_window_owner,
+// route_to_window, remove_prop_keys, remove_style_keys,
+// child_window_intercept, type_defaults) plus a mutation hook that
+// stamps `subtree_last_mutated_frame` for <StaticSurface> invalidation.
+// See installHostTreeHooks() in main().
 
 fn ensureNode(id: u32) !*Node {
-    if (g_node_by_id.get(id)) |n| return n;
-    const n = try g_alloc.create(Node);
-    n.* = .{};
-    n.id = id;
-    n.scroll_persist_slot = id;
-    try g_node_by_id.put(id, n);
-    try g_children_ids.put(id, .{});
-    return n;
+    return host_tree.ensureNode(id);
 }
 
-/// When a bare text node (created by CREATE_TEXT, i.e. React's TextInstance
-/// for a string child) is appended to a parent, copy the parent's typography
-/// so `<Text fontSize={17}>Hello</Text>` actually renders "Hello" at 17. The
-/// reconciler makes the parent Text and child TextInstance separate nodes;
-/// without this propagation the child inherits nothing and uses the default 16.
 fn inheritTypography(parent_id: u32, child_id: u32) void {
-    const parent = g_node_by_id.get(parent_id) orelse return;
-    const child = g_node_by_id.get(child_id) orelse return;
-    if (child.text == null) return;
-    child.font_size = parent.font_size;
-    child.font_family_id = parent.font_family_id;
-    child.font_weight = parent.font_weight;
-    if (parent.text_color) |c| child.text_color = c;
-    child.letter_spacing = parent.letter_spacing;
-    child.number_of_lines = parent.number_of_lines;
-    child.no_wrap = parent.no_wrap;
-    // Only propagate line_height when the parent explicitly set one. Without
-    // this guard, a child with its own `lineHeight` style would get stomped
-    // back to 0 by any parent UPDATE (the default), which desynchronises
-    // paint (uses node.line_height) from hit-test (uses node.line_height).
-    if (parent.line_height > 0) child.line_height = parent.line_height;
+    host_tree.inheritTypography(parent_id, child_id);
 }
 
-/// Stamp `subtree_last_mutated_frame` on `id` and every ancestor up to
-/// the root. Called after every reconciler mutation so that a
-/// `<StaticSurface>` ancestor's cached texture can be detected as stale
-/// and force a recapture on the next paint pass. Walk-up is O(depth)
-/// which is amortized cheap because mutations are rare relative to
-/// frames; the per-frame paint check stays O(1) (a single integer compare
-/// against `entry.captured_frame` in gpu.zig).
+/// host_tree fires the mutation hook for `id` and every ancestor on each
+/// applyCommand — see hostTreeMutationHook below. Local callers (Alt-drag,
+/// dev-mode reload paths) that aren't inside the reconciler stream call
+/// this wrapper to get the same stamp.
 fn markSubtreeDirty(id: u32) void {
     const frame = gpu.frameCounter();
     var current: ?u32 = id;
@@ -2489,217 +2501,115 @@ fn markSubtreeDirty(id: u32) void {
             node.subtree_last_mutated_frame = frame;
         }
         current = g_parent_id.get(cur);
-        // Defensive cycle guard: should never happen but if g_parent_id
-        // ever contained a loop, we'd hang here forever.
         hops += 1;
         if (hops > 4096) break;
     }
 }
 
-fn applyCommand(cmd: std.json.Value) !void {
-    if (cmd != .object) return;
-    noteCommandWindowOwner(cmd);
-    const op = (cmd.object.get("op") orelse return).string;
+fn hostTreeMutationHook(node: *Node) void {
+    node.subtree_last_mutated_frame = gpu.frameCounter();
+}
 
-    if (g_is_window_child) {
-        if (std.mem.eql(u8, op, "CREATE")) {
-            if (cmd.object.get("id")) |v| {
-                if (jsonInt(v)) |id| if (id == g_child_window_id) return;
+/// child_window_intercept hook — when this process is a spawned child
+/// (.independent window mode), CREATE/UPDATE on the window-node id are
+/// suppressed (the window is already managed externally), and
+/// APPEND/INSERT_BEFORE/REMOVE that target the window id as parent are
+/// re-routed onto the root list (the child sees the window's subtree as
+/// its top-level tree). Returning true means "command consumed, do not
+/// let host_tree fall through to its standard CRUD".
+fn childWindowIntercept(cmd: std.json.Value, op: []const u8) bool {
+    if (!g_is_window_child) return false;
+    if (cmd != .object) return false;
+    if (std.mem.eql(u8, op, "CREATE") or std.mem.eql(u8, op, "UPDATE")) {
+        if (cmd.object.get("id")) |v| {
+            if (host_tree.jsonInt(v)) |id| {
+                if (id == g_child_window_id) return true;
             }
-        } else if (std.mem.eql(u8, op, "UPDATE")) {
-            if (cmd.object.get("id")) |v| {
-                if (jsonInt(v)) |id| if (id == g_child_window_id) return;
-            }
-        } else if (std.mem.eql(u8, op, "APPEND")) {
-            const pid: u32 = @intCast(cmd.object.get("parentId").?.integer);
-            const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-            if (pid == g_child_window_id) {
-                _ = try ensureNode(cid);
-                for (g_root_child_ids.items) |existing| if (existing == cid) return;
-                try g_root_child_ids.append(g_alloc, cid);
-                g_dirty = true;
-                return;
-            }
-        } else if (std.mem.eql(u8, op, "INSERT_BEFORE")) {
-            const pid: u32 = @intCast(cmd.object.get("parentId").?.integer);
-            const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-            const bid: u32 = @intCast(cmd.object.get("beforeId").?.integer);
-            if (pid == g_child_window_id) {
-                _ = try ensureNode(cid);
-                var idx: usize = g_root_child_ids.items.len;
-                for (g_root_child_ids.items, 0..) |x, i| if (x == bid) {
-                    idx = i;
-                    break;
-                };
-                try g_root_child_ids.insert(g_alloc, idx, cid);
-                g_dirty = true;
-                return;
-            }
-        } else if (std.mem.eql(u8, op, "REMOVE")) {
-            const pid: u32 = @intCast(cmd.object.get("parentId").?.integer);
-            const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-            if (pid == g_child_window_id) {
-                for (g_root_child_ids.items, 0..) |x, i| if (x == cid) {
-                    _ = g_root_child_ids.orderedRemove(i);
-                    break;
-                };
-                g_dirty = true;
-                return;
-            }
+        }
+        return false;
+    }
+    const pid_v = cmd.object.get("parentId") orelse return false;
+    const pid_i = host_tree.jsonInt(pid_v) orelse return false;
+    if (pid_i != g_child_window_id) return false;
+    const cid_v = cmd.object.get("childId") orelse return false;
+    const cid_i = host_tree.jsonInt(cid_v) orelse return false;
+    if (cid_i < 0) return false;
+    const cid: u32 = @intCast(cid_i);
+    if (std.mem.eql(u8, op, "APPEND")) {
+        _ = host_tree.ensureNode(cid) catch return true;
+        for (host_tree.getRootChildren()) |existing| if (existing == cid) return true;
+        host_tree.appendToRoot(cid) catch {};
+        return true;
+    } else if (std.mem.eql(u8, op, "INSERT_BEFORE")) {
+        const bid_v = cmd.object.get("beforeId") orelse return false;
+        const bid_i = host_tree.jsonInt(bid_v) orelse return false;
+        host_tree.insertBeforeRoot(cid, @intCast(bid_i)) catch {};
+        return true;
+    } else if (std.mem.eql(u8, op, "REMOVE")) {
+        host_tree.removeFromRoot(cid);
+        return true;
+    }
+    return false;
+}
+
+fn beforeNodeDestroy(node: *Node, _: u32) void {
+    // Release GPU resources tied to per-node fields before the Node
+    // itself is freed. Add new releases here when more handle-typed
+    // fields land — the order doesn't matter, all branches are
+    // independent.
+    if (node.is_paintable) {
+        if (node.paintable_id) |pid| {
+            paintable.destroy(pid);
         }
     }
-
-    if (std.mem.eql(u8, op, "CREATE")) {
-        const id: u32 = @intCast(cmd.object.get("id").?.integer);
-        const n = try ensureNode(id);
-        var type_name: ?[]const u8 = null;
-        if (cmd.object.get("type")) |t| if (t == .string) {
-            type_name = t.string;
-            applyTypeDefaults(n, id, t.string);
-        };
-        if (cmd.object.get("props")) |props| applyProps(n, props, type_name);
-        if (type_name) |tn| openHostWindowForNode(id, tn, cmd.object.get("props"));
-        // debugName / debugSource are emitted as top-level siblings to props
-        // by renderer/hostConfig.ts (not inside the props object). Capture
-        // them here so witness.zig / autotest can label pressables by the
-        // user-component name the reconciler resolved via fiber walk.
-        if (cmd.object.get("debugName")) |dn| if (dn == .string and dn.string.len > 0) {
-            if (g_alloc.dupe(u8, dn.string)) |owned| {
-                n.debug_name = owned;
-            } else |_| {}
-        };
-        applyHandlerFlags(n, id, cmd);
-        markSubtreeDirty(id);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "CREATE_TEXT")) {
-        const id: u32 = @intCast(cmd.object.get("id").?.integer);
-        const n = try ensureNode(id);
-        if (cmd.object.get("text")) |t| if (t == .string) {
-            n.text = try g_alloc.dupe(u8, t.string);
-        };
-        markSubtreeDirty(id);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "APPEND")) {
-        const pid: u32 = @intCast(cmd.object.get("parentId").?.integer);
-        const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-        _ = try ensureNode(pid);
-        _ = try ensureNode(cid);
-        if (g_children_ids.getPtr(pid)) |list| try list.append(g_alloc, cid);
-        g_parent_id.put(cid, pid) catch {};
-        inheritTypography(pid, cid);
-        markSubtreeDirty(cid);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "APPEND_TO_ROOT")) {
-        const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-        _ = try ensureNode(cid);
-        try g_root_child_ids.append(g_alloc, cid);
-        _ = g_parent_id.remove(cid);
-        markSubtreeDirty(cid);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "INSERT_BEFORE_ROOT")) {
-        const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-        const bid: u32 = @intCast(cmd.object.get("beforeId").?.integer);
-        _ = try ensureNode(cid);
-        var idx: usize = g_root_child_ids.items.len;
-        for (g_root_child_ids.items, 0..) |x, i| if (x == bid) {
-            idx = i;
-            break;
-        };
-        try g_root_child_ids.insert(g_alloc, idx, cid);
-        _ = g_parent_id.remove(cid);
-        markSubtreeDirty(cid);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "INSERT_BEFORE")) {
-        const pid: u32 = @intCast(cmd.object.get("parentId").?.integer);
-        const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-        const bid: u32 = @intCast(cmd.object.get("beforeId").?.integer);
-        _ = try ensureNode(cid);
-        if (g_children_ids.getPtr(pid)) |list| {
-            var idx: usize = list.items.len;
-            for (list.items, 0..) |x, i| if (x == bid) {
-                idx = i;
-                break;
-            };
-            try list.insert(g_alloc, idx, cid);
-        }
-        g_parent_id.put(cid, pid) catch {};
-        inheritTypography(pid, cid);
-        markSubtreeDirty(cid);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "REMOVE")) {
-        const pid: u32 = @intCast(cmd.object.get("parentId").?.integer);
-        const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-        if (g_children_ids.getPtr(pid)) |list| {
-            for (list.items, 0..) |x, i| if (x == cid) {
-                _ = list.orderedRemove(i);
-                break;
-            };
-        }
-        // Stamp dirty BEFORE clearing the parent link so the walk reaches
-        // the (former) parent's StaticSurface ancestors. After this the
-        // detached subtree is gone from the tree anyway.
-        markSubtreeDirty(cid);
-        _ = g_parent_id.remove(cid);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "REMOVE_FROM_ROOT")) {
-        const cid: u32 = @intCast(cmd.object.get("childId").?.integer);
-        for (g_root_child_ids.items, 0..) |x, i| if (x == cid) {
-            _ = g_root_child_ids.orderedRemove(i);
-            break;
-        };
-        markSubtreeDirty(cid);
-        _ = g_parent_id.remove(cid);
-        g_dirty = true;
-    } else if (std.mem.eql(u8, op, "UPDATE")) {
-        const id: u32 = @intCast(cmd.object.get("id").?.integer);
-        if (g_node_by_id.get(id)) |n| {
-            if (cmd.object.get("removeKeys")) |keys| removePropKeys(n, keys);
-            if (cmd.object.get("removeStyleKeys")) |keys| removeStyleKeys(n, keys);
-            if (cmd.object.get("props")) |props| applyProps(n, props, null);
-            applyHandlerFlags(n, id, cmd);
-            // Propagate typography to bare text children so dynamic fontSize
-            // changes on the parent flow through to the child TextInstances.
-            if (g_children_ids.get(id)) |children| {
-                for (children.items) |child_id| inheritTypography(id, child_id);
-            }
-            markSubtreeDirty(id);
-            g_dirty = true;
-        }
-    } else if (std.mem.eql(u8, op, "UPDATE_TEXT")) {
-        const id: u32 = @intCast(cmd.object.get("id").?.integer);
-        if (g_node_by_id.get(id)) |n| {
-            if (cmd.object.get("text")) |t| if (t == .string) {
-                n.text = try g_alloc.dupe(u8, t.string);
-            };
-            markSubtreeDirty(id);
-            g_dirty = true;
-        }
+    if (node.paintable_id) |pid| {
+        g_alloc.free(pid);
+        node.paintable_id = null;
     }
 }
 
+fn installHostTreeHooks() void {
+    host_tree.setHooks(.{
+        .type_defaults = applyTypeDefaults,
+        .apply_props = applyProps,
+        .apply_handler_flags = applyHandlerFlags,
+        .open_host_window = openHostWindowForNode,
+        .note_window_owner = noteCommandWindowOwner,
+        .route_to_window = routeCommandToHostWindow,
+        .remove_prop_keys = removePropKeys,
+        .remove_style_keys = removeStyleKeys,
+        .child_window_intercept = childWindowIntercept,
+        .before_destroy = beforeNodeDestroy,
+    });
+    host_tree.setMutationHook(hostTreeMutationHook);
+}
+
+/// Per-batch reconciler drain. Delegates the actual mutation work to
+/// host_tree.applyCommandBatch (hooks installed above handle the
+/// GPU-specific concerns), then runs v8_app-only diagnostics and the
+/// detached-node sweep. Called by the reconciler binding via
+/// v8_bindings_reconciler.drainPending().
 fn applyCommandBatch(json_bytes: []const u8) void {
     const t0 = std.time.microTimestamp();
-    const parsed = std.json.parseFromSlice(std.json.Value, g_alloc, json_bytes, .{}) catch |err| {
-        std.debug.print("[qjs] parse error: {s}\n", .{@errorName(err)});
-        return;
-    };
-    defer parsed.deinit();
-    if (parsed.value != .array) return;
+    host_tree.applyCommandBatch(json_bytes);
     const t1 = std.time.microTimestamp();
-    const cmd_count = parsed.value.array.items.len;
-    for (parsed.value.array.items) |cmd| applyCommand(cmd) catch |err| {
-        std.debug.print("[qjs] apply error: {s}\n", .{@errorName(err)});
-    };
-    if (!g_is_window_child) {
-        for (parsed.value.array.items) |cmd| routeCommandToHostWindow(cmd);
-    }
-    // Diagnostic: per-batch op breakdown. Helps locate per-frame churn
-    // when the parent sends mutations repeatedly. Gated behind
-    // ZIGOS_TRACE_BATCH_OPS=1 so it stays quiet by default.
+    cleanupDetachedNodes();
+    const t2 = std.time.microTimestamp();
+
     const trace_ops = blk: {
         const env = std.posix.getenv("ZIGOS_TRACE_BATCH_OPS") orelse break :blk false;
         break :blk env.len > 0 and env[0] != '0';
     };
+    const verbose = std.posix.getenv("REACTJIT_VERBOSE_BATCHES") != null;
+    if (!trace_ops and !verbose) return;
+
+    // Re-parse for diagnostics. Gated behind env vars, so the double-parse
+    // is invisible in normal runs.
+    const parsed = std.json.parseFromSlice(std.json.Value, g_alloc, json_bytes, .{}) catch return;
+    defer parsed.deinit();
+    if (parsed.value != .array) return;
+    const cmd_count = parsed.value.array.items.len;
+
     if (trace_ops and cmd_count > 0) {
         var n_create: u32 = 0;
         var n_update: u32 = 0;
@@ -2715,13 +2625,10 @@ fn applyCommandBatch(json_bytes: []const u8) void {
             const op_v = cmd.object.get("op") orelse continue;
             if (op_v != .string) continue;
             const op = op_v.string;
-            if (std.mem.eql(u8, op, "CREATE")) n_create += 1
-            else if (std.mem.eql(u8, op, "UPDATE")) {
+            if (std.mem.eql(u8, op, "CREATE")) {
+                n_create += 1;
+            } else if (std.mem.eql(u8, op, "UPDATE")) {
                 n_update += 1;
-                // Capture id + diff keys for the first 4 UPDATEs in
-                // each batch. When the diff includes "style", expand
-                // it inline as style{a,b,c} — that's where churn most
-                // often hides (per-render fresh literals).
                 if (update_seen < 4) {
                     update_seen += 1;
                     var id_v: i64 = -1;
@@ -2734,7 +2641,6 @@ fn applyCommandBatch(json_bytes: []const u8) void {
                             if (!first) update_summary.appendSlice(g_alloc, ",") catch break;
                             update_summary.appendSlice(g_alloc, entry.key_ptr.*) catch break;
                             first = false;
-                            // Expand `style` keys inline
                             if (std.mem.eql(u8, entry.key_ptr.*, "style") and entry.value_ptr.* == .object) {
                                 update_summary.appendSlice(g_alloc, "{") catch break;
                                 var sit = entry.value_ptr.*.object.iterator();
@@ -2750,16 +2656,14 @@ fn applyCommandBatch(json_bytes: []const u8) void {
                     };
                     update_summary.appendSlice(g_alloc, "]") catch {};
                 }
-            }
-            else if (std.mem.eql(u8, op, "APPEND") or std.mem.eql(u8, op, "INSERT_BEFORE")) n_append += 1
-            else if (std.mem.eql(u8, op, "REMOVE")) n_remove += 1
-            else {
+            } else if (std.mem.eql(u8, op, "APPEND") or std.mem.eql(u8, op, "INSERT_BEFORE")) {
+                n_append += 1;
+            } else if (std.mem.eql(u8, op, "REMOVE")) {
+                n_remove += 1;
+            } else {
                 n_other += 1;
                 if (first_other_op.len == 0) {
                     first_other_op = op;
-                    // For UPDATE_TEXT and similar non-standard ops,
-                    // capture the target id and a snippet of the
-                    // text/payload so we can find the source.
                     var id_v: i64 = -1;
                     if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| { id_v = i; };
                     update_summary.writer(g_alloc).print(" other=id:{d}", .{id_v}) catch {};
@@ -2776,31 +2680,27 @@ fn applyCommandBatch(json_bytes: []const u8) void {
             .{ cmd_count, n_create, n_update, n_append, n_remove, n_other, first_other_op, update_summary.items },
         );
     }
-    const t2 = std.time.microTimestamp();
-    cleanupDetachedNodes();
-    const t3 = std.time.microTimestamp();
-    const parse_us = t1 - t0;
-    const apply_us = t2 - t1;
-    const cleanup_us = t3 - t2;
-    if (std.posix.getenv("REACTJIT_VERBOSE_BATCHES") != null) {
-        std.debug.print("[batch-timing] bytes={d} cmds={d} parse={d}ms apply={d}ms cleanup={d}ms\n", .{
-            json_bytes.len,              cmd_count,
-            @divTrunc(parse_us, 1000),   @divTrunc(apply_us, 1000),
-            @divTrunc(cleanup_us, 1000),
+
+    if (verbose) {
+        const apply_us = t1 - t0;
+        const cleanup_us = t2 - t1;
+        std.debug.print("[batch-timing] bytes={d} cmds={d} apply={d}ms cleanup={d}ms\n", .{
+            json_bytes.len,                cmd_count,
+            @divTrunc(apply_us, 1000),     @divTrunc(cleanup_us, 1000),
         });
     }
 }
 
-// __hostFlush, __getInputTextForNode, __hostLoadFileToBuffer, __hostReleaseFileBuffer
-// are registered by v8_bindings_core.registerCore(). The pending-flush queue and
-// content store live there too.
+// __hostFlush is registered by framework/v8_bindings_reconciler.zig.
+// The content store lives in v8_bindings_core. The pending-flush queue
+// + drain + reload-clear all live in v8_bindings_reconciler.
 
 fn contentStoreGet(id: u32) ?[]const u8 {
     return v8_bindings_core.contentStoreGet(id);
 }
 
 fn drainPendingFlushes() void {
-    v8_bindings_core.drainPendingFlushes(applyCommandBatch);
+    v8_bindings_reconciler.drainPending(applyCommandBatch);
 }
 
 /// Pre-frame sync: write current latch values into the corresponding
@@ -2846,7 +2746,7 @@ fn syncLatchesToNodes() void {
         if (node.latch_bottom_key) |key| node.style.bottom = latches.getF32(key);
     }
     latches.clearDirty();
-    g_dirty = true;
+    g_dirty.* = true;
 }
 
 // ── Tree materialization ────────────────────────────────────────
@@ -3301,13 +3201,14 @@ fn clearTreeStateForReload() void {
     for (g_press_expr_pool.items) |s| g_alloc.free(s);
     g_press_expr_pool.clearRetainingCapacity();
 
-    // pending_flush queue is owned by v8_bindings_core. The original code
-    // skipped this on the assumption that VM tear-down would free the queue —
-    // but reload only swaps the V8 Context, NOT the VM. Stale batches queued
-    // by the prior bundle that survive into the new bundle's eval get replayed
-    // on top of fresh React-assigned node IDs, building cycles in
-    // g_children_ids and wedging materializeChildren in infinite recursion.
-    v8_bindings_core.clearPendingFlushForReload();
+    // pending_flush queue is owned by v8_bindings_reconciler. The original
+    // code skipped this on the assumption that VM tear-down would free the
+    // queue — but reload only swaps the V8 Context, NOT the VM. Stale
+    // batches queued by the prior bundle that survive into the new bundle's
+    // eval get replayed on top of fresh React-assigned node IDs, building
+    // cycles in the host tree's children map and wedging materializeChildren
+    // in infinite recursion.
+    v8_bindings_reconciler.clearPending();
 
     // Unregister every live input slot so framework/input.zig doesn't keep
     // dispatching callbacks that read into the freed Node pool.
@@ -3323,17 +3224,12 @@ fn clearTreeStateForReload() void {
     }
     g_window_by_node_id.clearRetainingCapacity();
 
-    // Destroy every Node struct. node.text ownership is mixed (some g_alloc
-    // dupes, some slices into framework/input.zig's buffers) so we leak the
-    // text for dev-mode safety — kilobytes per reload, acceptable.
-    var node_it = g_node_by_id.valueIterator();
-    while (node_it.next()) |n_ptr| g_alloc.destroy(n_ptr.*);
-    g_node_by_id.clearRetainingCapacity();
-
-    var cid_it = g_children_ids.valueIterator();
-    while (cid_it.next()) |list| list.deinit(g_alloc);
-    g_children_ids.clearRetainingCapacity();
-    g_parent_id.clearRetainingCapacity();
+    // host_tree owns all tree state — destroy every Node, free children
+    // lists, clear parent map + root-child list in one call. node.text
+    // ownership is mixed (some g_alloc dupes, some slices into
+    // framework/input.zig's buffers) so the text leaks for dev-mode
+    // safety — kilobytes per reload, acceptable.
+    host_tree.clearAll();
     g_latch_height_nodes.clearRetainingCapacity();
     g_latch_width_nodes.clearRetainingCapacity();
     g_latch_left_nodes.clearRetainingCapacity();
@@ -3345,16 +3241,14 @@ fn clearTreeStateForReload() void {
     g_window_owner_by_node_id.clearRetainingCapacity();
     g_scroll_prop_slots.clearRetainingCapacity();
 
-    // The root-child list is populated by APPEND_ROOT; clear so new React
-    // mounts don't see stale IDs mixed with fresh ones.
-    g_root_child_ids.clearRetainingCapacity();
+    // host_tree.clearAll above already cleared the root-child list.
 
     // Arena holds only materializeChildren output (rebuilt every frame from
-    // g_children_ids + g_node_by_id). Safe to reset now that g_root.children
-    // no longer references it.
+    // host_tree's maps). Safe to reset now that g_root.children no longer
+    // references it.
     _ = g_arena.reset(.retain_capacity);
 
-    g_dirty = true;
+    g_dirty.* = true;
 }
 
 fn performReload() void {
@@ -3478,6 +3372,10 @@ fn appInit() void {
     // the cart's bundle ordered them. See INGREDIENTS comment block for the
     // full contract (one row + one build option + one scripts/ship grep).
     inline for (INGREDIENTS) |ing| @field(ing.mod, ing.reg_fn)({});
+    // __hostFlush — single registration site shared with v8_tui_app.
+    // Mode was set to `.queue` in main() so per-commit payloads go into
+    // the queue and the engine drains them at the right frame phase.
+    v8_bindings_reconciler.register();
     windows.setJsDispatchFn(dispatchWindowEvent);
     v8_bindings_sdk.registerSdk({});
 
@@ -3591,7 +3489,7 @@ fn appTick(now: u32) void {
     // useFileDrop never observe the new seq because the JS world is never
     // re-evaluated after the event.
     if (state.isDirty()) {
-        g_dirty = true;
+        g_dirty.* = true;
         state.clearDirty();
     }
 
@@ -3647,9 +3545,9 @@ fn appTick(now: u32) void {
     syncLatchesToNodes();
     windows.tickIndependent();
     cleanupClosedHostWindows();
-    if (_probe) std.debug.print("[probe-tick] #{d} after windows+cleanup, dirty={}\n", .{ _probe_n.v, g_dirty });
+    if (_probe) std.debug.print("[probe-tick] #{d} after windows+cleanup, dirty={}\n", .{ _probe_n.v, g_dirty.* });
 
-    if (g_dirty) {
+    if (g_dirty.*) {
         if (_probe) std.debug.print("[probe-tick] #{d} before snapshotRuntimeState\n", .{_probe_n.v});
         const t0 = std.time.microTimestamp();
         snapshotRuntimeState();
@@ -3659,7 +3557,7 @@ fn appTick(now: u32) void {
         const t2 = std.time.microTimestamp();
         if (_probe) std.debug.print("[probe-tick] #{d} before markLayoutDirty\n", .{_probe_n.v});
         layout.markLayoutDirty();
-        g_dirty = false;
+        g_dirty.* = false;
         g_scroll_prop_slots.clearRetainingCapacity();
         const snap_us = t1 - t0;
         const rebuild_us = t2 - t1;
@@ -3756,7 +3654,7 @@ fn childApplyMessage(line: []const u8) void {
     const commands_v = parsed.value.object.get("commands") orelse return;
     if (commands_v != .array) return;
     if (trace) std.debug.print("[window-child] apply commands={d}\n", .{commands_v.array.items.len});
-    for (commands_v.array.items) |cmd| applyCommand(cmd) catch |err| {
+    for (commands_v.array.items) |cmd| host_tree.applyCommand(cmd) catch |err| {
         std.debug.print("[window-child] apply error: {s}\n", .{@errorName(err)});
     };
 }
@@ -3781,7 +3679,7 @@ fn childTick(_: u32) void {
         }
     }
 
-    if (g_dirty) {
+    if (g_dirty.*) {
         snapshotRuntimeState();
         rebuildTree();
         std.debug.print("[window-child] rebuild root_children={d} rendered={d} nodes={d}\n", .{
@@ -3790,7 +3688,7 @@ fn childTick(_: u32) void {
             g_node_by_id.count(),
         });
         layout.markLayoutDirty();
-        g_dirty = false;
+        g_dirty.* = false;
         g_scroll_prop_slots.clearRetainingCapacity();
     }
 }
@@ -3830,9 +3728,24 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     g_alloc = gpa.allocator();
     g_arena = std.heap.ArenaAllocator.init(g_alloc);
-    g_node_by_id = std.AutoHashMap(u32, *Node).init(g_alloc);
-    g_children_ids = std.AutoHashMap(u32, std.ArrayList(u32)).init(g_alloc);
-    g_parent_id = std.AutoHashMap(u32, u32).init(g_alloc);
+
+    // host_tree owns the React tree state across both shells. Initialize
+    // it with our allocator, then install local pointer aliases so the
+    // existing `g_node_by_id.get(id)` / `g_children_ids.getPtr(pid)` /
+    // `g_root_child_ids.items` syntax keeps working without rewriting
+    // hundreds of paint / layout / cleanup call sites. Hooks (style
+    // parsing, handler flags, host-window opens, child-window intercept)
+    // are installed AFTER init so they're in place before the first
+    // __hostFlush could fire.
+    host_tree.init(g_alloc);
+    g_node_by_id = host_tree.nodesPtr();
+    g_children_ids = host_tree.childrenIdsPtr();
+    g_parent_id = host_tree.parentIdPtr();
+    g_root_child_ids = host_tree.rootChildIdsPtr();
+    g_dirty = host_tree.dirtyPtr();
+    installHostTreeHooks();
+    v8_bindings_reconciler.setMode(.queue);
+
     g_latch_height_nodes = std.AutoHashMap(u32, void).init(g_alloc);
     g_latch_width_nodes = std.AutoHashMap(u32, void).init(g_alloc);
     g_latch_left_nodes = std.AutoHashMap(u32, void).init(g_alloc);
