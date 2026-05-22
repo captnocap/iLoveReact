@@ -40,6 +40,8 @@
 declare const globalThis: any;
 const G = globalThis;
 
+import { useRef } from 'react';
+
 // Stable per-cart id counter so two hook instances don't collide. We
 // don't use crypto.randomUUID — the id is purely process-local and the
 // counter is enough.
@@ -127,13 +129,22 @@ function makeOps(id: string): PaintableOps {
  * it's the imperative API surface, not a value to put in deps arrays.
  */
 export function usePaintable(opts: UsePaintableOptions): PaintableHandle {
-  // No React.useId / useRef — that would couple the ops object to a
-  // component instance, which makes passing the API into utility modules
-  // awkward. The pool handles dedup by id. `useMemo` would also work but
-  // there's nothing to memoize: makeOps is idempotent on the id.
-  const id = opts.id ?? nextId();
-  const paint = makeOps(id);
-  return { id, paint };
+  // The id MUST be stable across renders — every JSX render reads it,
+  // and the <Paintable> primitive triggers paintable.ensure() on prop
+  // change. A fresh nextId() per render means a fresh GPU texture per
+  // render (leaking the previous one) and the cart's brush ops pointing
+  // at an id different from the one currently mounted in JSX. useRef
+  // memoizes per component instance; `opts.id` overrides for the rare
+  // case the cart wants a stable cross-process handle.
+  const idRef = useRef<string | null>(null);
+  if (idRef.current === null) {
+    idRef.current = opts.id ?? nextId();
+  } else if (opts.id && opts.id !== idRef.current) {
+    // Cart explicitly switched to a different id — honor it.
+    idRef.current = opts.id;
+  }
+  const paint = makeOps(idRef.current);
+  return { id: idRef.current, paint };
 }
 
 /**
