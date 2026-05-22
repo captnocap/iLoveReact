@@ -44,17 +44,23 @@ const WGSL = `
 export default function PaintableDemo() {
   const mask = usePaintable({ id: 'demo-mask', w: TEX_W, h: TEX_H });
   const [drawing, setDrawing] = useState(false);
-  // Refs for the drag handlers — onMouseMove fires per frame and we
-  // don't want any of this in React state.
+  // Refs for the drag handlers — onMouseMove fires per render and we
+  // don't want any of this in React state. rectRef holds the Pressable's
+  // screen-space layout so we can subtract its origin from each event's
+  // screen-space coords.
   const lastRef = useRef<{ x: number; y: number } | null>(null);
+  const rectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null);
 
-  const stampAt = (px: number, py: number) => {
-    // Scale display px → texture px.
-    const tx = (px / SURFACE_PX) * TEX_W;
-    const ty = (py / SURFACE_PX) * TEX_H;
+  const stampAt = (screenX: number, screenY: number) => {
+    const rect = rectRef.current;
+    if (!rect) return;
+    // Screen-space → local-space → texture-space.
+    const lx = screenX - rect.x;
+    const ly = screenY - rect.y;
+    const tx = (lx / Math.max(1, rect.width)) * TEX_W;
+    const ty = (ly / Math.max(1, rect.height)) * TEX_H;
     mask.paint.circle(tx, ty, 20, 1);
-    // If we have a last position, also stamp interpolated points so a
-    // fast drag doesn't leave a dotted trail.
+    // Interpolate from previous stamp so a fast drag doesn't dot-trail.
     const prev = lastRef.current;
     if (prev) {
       const dx = tx - prev.x;
@@ -72,6 +78,7 @@ export default function PaintableDemo() {
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0c0e14', alignItems: 'center', justifyContent: 'center' }}>
       <Pressable
+        onLayout={(r: any) => { rectRef.current = r; }}
         onMouseDown={(e: any) => {
           setDrawing(true);
           lastRef.current = null;
