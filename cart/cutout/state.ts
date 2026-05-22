@@ -367,19 +367,24 @@ export function useCutoutState(): CutoutState {
   const mask = usePaintable({ w: 1, h: 1 }); // dimensions land via <Paintable> when srcDims is known
   const smartUnion = usePaintable({ w: 1, h: 1 });
   // Dirty-bit replacement for `hasAnyErased(maskRef.current)`. The
-  // texture-side has no cheap "any non-zero" probe, so we maintain
-  // a counter: bumped on every paint op, reset on clearMask. Backend
-  // results / session restores set it to a sentinel (`-1`) and the
-  // memoized accessor below checks via readback once.
+  // texture-side has no cheap "any non-zero" probe, so we maintain a
+  // ref counter: bumped on every paint op, reset on clearMask. ONLY
+  // fires setState on the clean→dirty (or dirty→clean) BOUNDARY, not
+  // on every dab — `hasMaskEdits` is a boolean; consumers don't care
+  // about the counter value, only whether it's non-zero. A per-dab
+  // setState would re-render the entire cart subtree per brush dab
+  // and crater fps the moment the user starts painting.
   const maskDirtyCountRef = useRef(0);
   const [maskDirtyTick, setMaskDirtyTick] = useState(0);
   const markMaskDirty = () => {
+    const wasClean = maskDirtyCountRef.current === 0;
     maskDirtyCountRef.current += 1;
-    setMaskDirtyTick((v) => v + 1);
+    if (wasClean) setMaskDirtyTick((v) => v + 1);
   };
   const clearMaskDirty = () => {
+    const wasDirty = maskDirtyCountRef.current > 0;
     maskDirtyCountRef.current = 0;
-    setMaskDirtyTick((v) => v + 1);
+    if (wasDirty) setMaskDirtyTick((v) => v + 1);
   };
   // Lazy CPU mirror — call at save / autosave / history-commit time.
   // Returns the freshly read-back bytes AND updates maskRef.current so

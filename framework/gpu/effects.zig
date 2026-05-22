@@ -222,6 +222,14 @@ const Instance = struct {
     // samples.
     gpu_textures_pending: ?[]const []const u8 = null,
     gpu_textures_hash: u64 = 0,
+    // Paintable-module generation counter snapshot at bind-group build
+    // time. paintable.zig bumps `g_generation` every time a texture is
+    // torn down (Paintable unmount, hot reload, ensure() resize). If the
+    // snapshot doesn't match the live counter, the cached bind_group is
+    // pointing at a destroyed view and MUST be rebuilt before the next
+    // render pass — otherwise wgpu trips a validation error and the
+    // process panics. 0 sentinel = no snapshot yet.
+    gpu_textures_generation: u64 = 0,
 
     // Timing (for custom render path)
     time: f32 = 0,
@@ -724,7 +732,15 @@ fn ensureGpuPipeline(self: *Instance) bool {
     // texture CONTENT moves but the array shape is unchanged.
     const wants_textures = self.gpu_textures_pending != null and self.gpu_textures_pending.?.len > 0;
     const new_tex_hash: u64 = if (self.gpu_textures_pending) |t| texturesHash(t) else 0;
-    if (self.gpu_pipeline != null and new_tex_hash != self.gpu_textures_hash) {
+    // Tear the bind_group down (and the pipeline along with it) on any of:
+    //   - texture id array changed (different paintable handles bound)
+    //   - paintable.zig generation advanced (a paintable was destroyed +
+    //     possibly re-created at the same id, so our cached view points
+    //     at dead memory). This catches the hot-reload race that other-
+    //     wise crashes wgpu with "Texture has been destroyed".
+    const live_generation = paintable_mod.generation();
+    const tex_stale = wants_textures and live_generation != self.gpu_textures_generation;
+    if (self.gpu_pipeline != null and (new_tex_hash != self.gpu_textures_hash or tex_stale)) {
         if (self.gpu_pipeline) |p| p.release();
         if (self.gpu_bind_group) |b| b.release();
         self.gpu_pipeline = null;
@@ -806,6 +822,7 @@ fn ensureGpuPipeline(self: *Instance) bool {
         .entries = &bind_buf,
     }) orelse return false;
     self.gpu_textures_hash = new_tex_hash;
+    self.gpu_textures_generation = paintable_mod.generation();
 
     const module_desc = wgpu.shaderModuleWGSLDescriptor(.{
         .label = "effect_gpu_shader",

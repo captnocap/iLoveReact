@@ -288,7 +288,7 @@ if [[ -f "$METAFILE" ]]; then
     # JS gate already emits 17 positional flags; this read line was lagging
     # behind onnx + window additions, so WANT_TERMINAL was silently picking
     # up sqlite's value (always 0). Keep in lock-step with flagOrder.
-    read -r WANT_PRIVACY WANT_USEHOST WANT_USECONN WANT_FS WANT_WS WANT_TEL WANT_ZIGCALL WANT_SDK WANT_VOICE WANT_WHISPER WANT_PAINTABLE WANT_ONNX WANT_PG WANT_EMBED WANT_SQLITE WANT_TERMINAL WANT_PROCESS WANT_WINDOW WANT_DOOM <<< "$GATE_FLAGS"
+    read -r WANT_PRIVACY WANT_USEHOST WANT_USECONN WANT_FS WANT_WS WANT_TEL WANT_ZIGCALL WANT_SDK WANT_VOICE WANT_AUDIO_INPUT WANT_WHISPER WANT_PAINTABLE WANT_ONNX WANT_PG WANT_EMBED WANT_SQLITE WANT_TERMINAL WANT_PROCESS WANT_WINDOW WANT_DOOM <<< "$GATE_FLAGS"
     # Process binding is a strict subset of useHost (useHost pulls in process +
     # httpsrv + wssrv + net). Carts that import runtime/hooks/process.ts
     # directly (run/execAsync) only need the process binding.

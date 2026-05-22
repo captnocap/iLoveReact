@@ -281,6 +281,13 @@ const SHADER_CACHE: Record<MaskSurface, string> = {
 // don't pass `paintableId` and pay nothing for the new texture bindings.
 
 const TEX_COMMON_PRELUDE = `
+// The storage buffer at binding(1) still carries the per-Effect data
+// (header floats + color slots) — same binding the cells-mode shaders
+// use. effects.zig's textures-enabled bind-group layout includes this
+// slot as well, so the cart-supplied data prop is uploaded just like
+// before. NB no backticks in this WGSL block — they'd close the JS
+// template literal.
+@group(0) @binding(1) var<storage, read> data: array<f32>;
 @group(0) @binding(2) var mask_tex: texture_2d<f32>;
 @group(0) @binding(3) var mask_samp: sampler;
 @group(0) @binding(4) var smart_tex: texture_2d<f32>;

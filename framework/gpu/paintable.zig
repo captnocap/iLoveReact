@@ -91,6 +91,13 @@ const Paintable = struct {
 
 // ─── Module state ────────────────────────────────────────────────────────
 var g_entries: [MAX_PAINTABLES]Paintable = [_]Paintable{.{}} ** MAX_PAINTABLES;
+/// Monotonic generation counter — bumps every time a paintable's
+/// underlying wgpu texture is destroyed (releaseEntry). Consumers like
+/// effects.zig cache the value at bind-group-build time and rebuild when
+/// it advances, so a render pass never references a destroyed view.
+/// Without this, hot reload or any Paintable unmount mid-frame trips
+/// "Texture with 'paintable' label has been destroyed" in wgpu.
+var g_generation: u64 = 0;
 var g_brush_pipeline: ?*wgpu.RenderPipeline = null;
 var g_brush_bgl: ?*wgpu.BindGroupLayout = null;
 var g_brush_uniform_buf: ?*wgpu.Buffer = null;
@@ -181,6 +188,12 @@ pub fn deinit() void {
 }
 
 fn releaseEntry(e: *Paintable) void {
+    if (e.texture != null or e.view != null or e.sampler != null) {
+        // Bump the generation BEFORE freeing — any consumer that read
+        // the previous generation and cached a bind-group is now stale
+        // and will recompute on its next render.
+        g_generation += 1;
+    }
     if (e.sampler) |s| s.release();
     if (e.view) |v| v.release();
     if (e.texture) |t| t.destroy();
@@ -191,6 +204,13 @@ fn releaseEntry(e: *Paintable) void {
         if (e.ops[i].upload_bytes) |b| page_alloc.free(b);
     }
     e.* = .{};
+}
+
+/// Monotonic counter, advanced on every paintable teardown. Effects.zig
+/// reads this to detect a stale cached bind group and rebuild it before
+/// the next render pass binds a destroyed texture view.
+pub fn generation() u64 {
+    return g_generation;
 }
 
 // ─── Handle lookup / creation ────────────────────────────────────────────
