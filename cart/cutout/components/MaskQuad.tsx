@@ -31,6 +31,7 @@ import { Effect } from '@reactjit/runtime/primitives';
 
 export type MaskSurface = 'rainbow' | 'plasma' | 'voronoi' | 'fbm' | 'solid' | 'edges';
 export type SurfaceId = MaskSurface | string;
+export type BlendMode = 'normal' | 'add' | 'multiply' | 'screen';
 export interface CustomSurface {
   id: string;
   label: string;
@@ -121,6 +122,13 @@ fn slotColor(slot: u32, igw: u32, igh: u32) -> vec3f {
   return vec3f(data[off], data[off + 1u], data[off + 2u]);
 }
 
+fn applyBlendPreview(color: vec3f, mode: f32) -> vec3f {
+  if (mode < 0.5) { return color; }
+  if (mode < 1.5) { return min(color + vec3f(0.35), vec3f(1.0)); }
+  if (mode < 2.5) { return color * vec3f(0.55); }
+  return vec3f(1.0) - (vec3f(1.0) - color) * vec3f(0.45);
+}
+
 // 6-stop rainbow LUT — branchless-ish, used by the rainbow mode.
 fn rainbow(t: f32) -> vec3f {
   let s = fract(t);
@@ -202,6 +210,7 @@ function buildShader(mode: MaskSurface): string {
   let dim = data[2];
   let hue_off = data[3];
   let phase_off = data[4];
+  let blend_mode = data[6];
 
   let igw = u32(gw);
   let igh = u32(gh);
@@ -242,6 +251,7 @@ ${SHADER_BODY[mode]}
   // independently.
   let _tint = select(slotColor(0u, igw, igh), slotColor(1u, igw, igh), on_edge);
   out_color = out_color * _tint;
+  out_color = applyBlendPreview(out_color, blend_mode);
   return vec4f(out_color * a, a);
 }`;
 }
@@ -259,10 +269,137 @@ const SHADER_CACHE: Record<MaskSurface, string> = {
   edges:   buildShader('edges'),
 };
 
+// ── Texture-mode shader builder ───────────────────────────────────────
+// The cells-mode shaders above pack the mask into the @binding(1) storage
+// buffer and index it per-cell. The cutout cart's brush layer now stores
+// its mask on the GPU as an R8Unorm paintable texture; sampling that
+// texture directly avoids the per-stroke `sampleToCells` downsample and
+// works at full image resolution. The smart-union texture (binding 4)
+// carries the OR of every smart layer's cell set — pixels where it's
+// non-zero get discarded so the brush MaskQuad doesn't double-paint over
+// per-layer FX. Smart-layer MaskQuads stay on the cells-mode path; they
+// don't pass `paintableId` and pay nothing for the new texture bindings.
+
+const TEX_COMMON_PRELUDE = `
+@group(0) @binding(2) var mask_tex: texture_2d<f32>;
+@group(0) @binding(3) var mask_samp: sampler;
+@group(0) @binding(4) var smart_tex: texture_2d<f32>;
+@group(0) @binding(5) var smart_samp: sampler;
+
+// Texture-mode color slot layout — header [0..8] + colors [8..8+slots*3].
+// No per-cell storage in this mode (the mask is the texture).
+fn slotColor(slot: u32) -> vec3f {
+  let off = 8u + slot * 3u;
+  return vec3f(data[off], data[off + 1u], data[off + 2u]);
+}
+
+fn applyBlendPreview(color: vec3f, mode: f32) -> vec3f {
+  if (mode < 0.5) { return color; }
+  if (mode < 1.5) { return min(color + vec3f(0.35), vec3f(1.0)); }
+  if (mode < 2.5) { return color * vec3f(0.55); }
+  return vec3f(1.0) - (vec3f(1.0) - color) * vec3f(0.45);
+}
+
+fn rainbow(t: f32) -> vec3f {
+  let s = fract(t);
+  let h = s * 6.0;
+  let i = floor(h);
+  let f = h - i;
+  if (i < 1.0) { return vec3f(1.0, f, 0.0); }
+  if (i < 2.0) { return vec3f(1.0 - f, 1.0, 0.0); }
+  if (i < 3.0) { return vec3f(0.0, 1.0, f); }
+  if (i < 4.0) { return vec3f(0.0, 1.0 - f, 1.0); }
+  if (i < 5.0) { return vec3f(f, 0.0, 1.0); }
+  return vec3f(1.0, 0.0, 1.0 - f);
+}
+
+// 4-neighbor edge probe in mask-texture UV space. We step by 1/textureDim
+// so the probe lands on adjacent texels regardless of how big the mask
+// texture is. Returns true if any neighbor sample reads as outside.
+fn isMaskEdgeTex(uv: vec2f) -> bool {
+  let dims = textureDimensions(mask_tex);
+  let dx = 1.0 / f32(dims.x);
+  let dy = 1.0 / f32(dims.y);
+  let vl = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(-dx, 0.0), 0.0).r;
+  let vr = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(dx, 0.0), 0.0).r;
+  let vu = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(0.0, -dy), 0.0).r;
+  let vd = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(0.0, dy), 0.0).r;
+  return (vl < 0.5 || vr < 0.5 || vu < 0.5 || vd < 0.5);
+}
+`;
+
+function buildTextureShader(mode: MaskSurface): string {
+  const f = SURFACE_FLAGS[mode];
+  const pulseExpr = f.pulse
+    ? `0.55 + 0.45 * (0.5 + 0.5 * sin(U.time * 2.4 + phase_off))`
+    : `1.0`;
+  return `${TEX_COMMON_PRELUDE}
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let gw = data[0];
+  let gh = data[1];
+  let dim = data[2];
+  let hue_off = data[3];
+  let phase_off = data[4];
+  let blend_mode = data[6];
+
+  let mask_v = textureSampleLevel(mask_tex, mask_samp, in.uv, 0.0).r;
+  if (mask_v < 0.5) { return vec4f(0.0); }
+
+  // Smart-union knockout — preserves the cells-era "brushOnlyOverlayCells"
+  // visual behavior. Smart-layer MaskQuads bind the framework's dummy
+  // texture here, so this branch is a constant 0 for them.
+  let smart_v = textureSampleLevel(smart_tex, smart_samp, in.uv, 0.0).r;
+  if (smart_v > 0.5) { return vec4f(0.0); }
+
+  // Logical grid coords for the per-mode color body. gw/gh come from the
+  // header buffer, not from textureDimensions — same axis the cells-mode
+  // shaders animate over, so visuals match.
+  let cx_f = in.uv.x * gw;
+  let cy_f = in.uv.y * gh;
+
+  // mask_flag stays for parity with the cells-mode bodies that reference it.
+  let mask_flag = mask_v;
+
+  let t = U.time;
+${SHADER_BODY[mode]}
+
+  let pulse = ${pulseExpr};
+  let on_edge = isMaskEdgeTex(in.uv);
+  let interior_a = ${f.interiorAlpha.toFixed(3)};
+  let edge_a = ${f.edgeAlpha.toFixed(3)};
+
+  var a = dim * pulse * select(interior_a, edge_a, on_edge);
+  if (a < 0.005) { return vec4f(0.0); }
+  var out_color = color;
+  if (on_edge) {
+    let ant = 0.5 + 0.5 * sin((cx_f - cy_f) * 0.5 - U.time * 6.0 + phase_off);
+    a = mix(a, edge_a, ant * 0.7);
+    out_color = mix(color, vec3f(1.0), 0.55);
+  }
+  let _tint = select(slotColor(0u), slotColor(1u), on_edge);
+  out_color = out_color * _tint;
+  out_color = applyBlendPreview(out_color, blend_mode);
+  return vec4f(out_color * a, a);
+}`;
+}
+
+const TEX_SHADER_CACHE: Record<MaskSurface, string> = {
+  rainbow: buildTextureShader('rainbow'),
+  plasma:  buildTextureShader('plasma'),
+  voronoi: buildTextureShader('voronoi'),
+  fbm:     buildTextureShader('fbm'),
+  solid:   buildTextureShader('solid'),
+  edges:   buildTextureShader('edges'),
+};
+
 interface Props {
-  /** Sampled mask grid as Set<index> where index = y*w + x in grid units. */
-  cells: Set<number>;
-  /** Grid resolution (square) — mask is downsampled to gridSize x gridSize. */
+  /** Sampled mask grid as Set<index> where index = y*w + x in grid units.
+   *  Used by smart-layer MaskQuads (overlayRes-coarse cell sets). The
+   *  brush MaskQuad ignores this and samples a paintable texture instead. */
+  cells?: Set<number>;
+  /** Grid resolution (square) — mask is downsampled to gridSize x gridSize.
+   *  Texture-mode MaskQuads still use this for the per-mode color body's
+   *  `cx_f / cy_f` logical coordinates (unchanged visuals vs cells mode). */
   gridSize: number;
   /** Rendered display dimensions in canvas world units. */
   worldW: number;
@@ -282,21 +419,51 @@ interface Props {
    *  short / missing entries fall through to white (= identity tint, no
    *  visual change vs the legacy unconfigured layer). */
   colors?: string[];
+  blend?: BlendMode;
+  /** When set, MaskQuad runs in texture-sampling mode: the mask is read
+   *  from the named paintable's R8 texture at @binding(2). `cells` is
+   *  ignored in this mode. The brush MaskQuad uses this; smart-layer
+   *  MaskQuads stay on the cells path. */
+  paintableId?: string;
+  /** Optional second paintable — when sampled non-zero at a pixel, that
+   *  pixel is discarded (the smart-union knockout). Only meaningful in
+   *  texture mode. */
+  smartUnionId?: string;
 }
 
 export function MaskQuad({
   cells, gridSize, worldW, worldH,
   dim = 0.85, mode = 'rainbow',
   customShader, hueOffset = 0, phaseOffset = 0,
-  colors,
+  colors, blend = 'normal',
+  paintableId, smartUnionId,
 }: Props) {
-  // Pack the cell set into the f32 storage buffer. Header (8 floats) +
-  // gridSize*gridSize flags + NUM_COLOR_SLOTS*3 color floats. Color slots
-  // sit AFTER the mask so existing shaders that index `8u + y*igw + x` keep
-  // working; new shaders read slots via slotColor(slot, igw, igh).
+  const textureMode = !!paintableId;
+  // Header layout differs by mode: cells-mode packs the mask grid after
+  // the 8-float header so the shader can index `8u + y*igw + x`; texture-
+  // mode skips the mask grid (sampled from binding 2) and lays color
+  // slots immediately after the header.
   const packed = useMemo(() => {
-    const cells_total = gridSize * gridSize;
     const colors_total = NUM_COLOR_SLOTS * 3;
+    if (textureMode) {
+      const buf = new Array<number>(8 + colors_total);
+      buf[0] = gridSize;
+      buf[1] = gridSize;
+      buf[2] = dim;
+      buf[3] = hueOffset;
+      buf[4] = phaseOffset;
+      buf[5] = NUM_COLOR_SLOTS;
+      buf[6] = blendModeIndex(blend); buf[7] = 0;
+      for (let i = 0; i < NUM_COLOR_SLOTS; i++) {
+        const hex = (colors && colors[i]) || SLOT_DEFAULTS[i] || '#ffffff';
+        const [r, g, b] = hexToRgb01(hex);
+        buf[8 + i * 3 + 0] = r;
+        buf[8 + i * 3 + 1] = g;
+        buf[8 + i * 3 + 2] = b;
+      }
+      return buf;
+    }
+    const cells_total = gridSize * gridSize;
     const buf = new Array<number>(8 + cells_total + colors_total);
     buf[0] = gridSize;
     buf[1] = gridSize;
@@ -304,10 +471,12 @@ export function MaskQuad({
     buf[3] = hueOffset;
     buf[4] = phaseOffset;
     buf[5] = NUM_COLOR_SLOTS;
-    buf[6] = 0; buf[7] = 0;
+    buf[6] = blendModeIndex(blend); buf[7] = 0;
     for (let i = 0; i < cells_total; i++) buf[8 + i] = 0;
-    for (const idx of cells) {
-      if (idx >= 0 && idx < cells_total) buf[8 + idx] = 1;
+    if (cells) {
+      for (const idx of cells) {
+        if (idx >= 0 && idx < cells_total) buf[8 + idx] = 1;
+      }
     }
     const colorOff = 8 + cells_total;
     for (let i = 0; i < NUM_COLOR_SLOTS; i++) {
@@ -318,14 +487,23 @@ export function MaskQuad({
       buf[colorOff + i * 3 + 2] = b;
     }
     return buf;
-  }, [cells, gridSize, dim, hueOffset, phaseOffset, colors]);
+  }, [textureMode, cells, gridSize, dim, hueOffset, phaseOffset, colors, blend]);
 
-  const shader = isBuiltinSurface(mode) ? SHADER_CACHE[mode] : customShader || SHADER_CACHE.rainbow;
+  const shader = textureMode
+    ? (isBuiltinSurface(mode) ? TEX_SHADER_CACHE[mode] : customShader || TEX_SHADER_CACHE.rainbow)
+    : (isBuiltinSurface(mode) ? SHADER_CACHE[mode] : customShader || SHADER_CACHE.rainbow);
+
+  // Texture-mode passes the paintable ids in slot order [mask, smart-union].
+  // Missing slots fall through to the framework's dummy 1x1 (sampled as 0).
+  const textures = textureMode
+    ? [paintableId!, smartUnionId ?? '']
+    : undefined;
 
   return (
     <Effect
       shader={shader}
       data={packed}
+      textures={textures}
       style={{
         position: 'absolute',
         left: 0, top: 0,
@@ -334,4 +512,13 @@ export function MaskQuad({
       }}
     />
   );
+}
+
+function blendModeIndex(mode: BlendMode): number {
+  switch (mode) {
+    case 'add': return 1;
+    case 'multiply': return 2;
+    case 'screen': return 3;
+    default: return 0;
+  }
 }

@@ -13,7 +13,7 @@
 //   screen → screenToGraph host fn → world (gx, gy)
 //   world  → source: (gx + srcW/2, gy + srcH/2)
 
-import { Box, Canvas, Col, Image, Pressable, Row, Text } from '@reactjit/runtime/primitives';
+import { Box, Canvas, Col, Image, Paintable, Pressable, Row, Text } from '@reactjit/runtime/primitives';
 import { callHost } from '@reactjit/runtime/ffi';
 import { useRef, useState } from 'react';
 import { COLORS } from '../theme';
@@ -23,7 +23,7 @@ import { rowRuns } from '../mask';
 import { MaskQuad } from './MaskQuad';
 
 type Rect = { x: number; y: number; width: number; height: number };
-type ToolCursor = { x: number; y: number; radius: number; kind: 'brush' | 'smart' };
+type ToolCursor = { x: number; y: number; radius: number; kind: 'brush' | 'smart' | 'lasso' | 'refine' };
 
 function screenToWorld(
   sx: number, sy: number, rect: Rect,
@@ -40,6 +40,7 @@ export function Editor({ s }: { s: CutoutState }) {
   const [cursor, setCursor] = useState<ToolCursor | null>(null);
   const drawing = useRef(false);
   const lastCursorBump = useRef(0);
+  const lastLassoClick = useRef<{ sx: number; sy: number; at: number } | null>(null);
   const shaderFor = (id: string) => s.customSurfaces.find((fx) => fx.id === id)?.shader;
 
   const toSource = (px: number, py: number) => {
@@ -52,6 +53,13 @@ export function Editor({ s }: { s: CutoutState }) {
     // "ghost" pixels into clamped edge regions.
     if (sx < 0 || sy < 0 || sx >= s.srcDims.w || sy >= s.srcDims.h) return null;
     return { sx, sy };
+  };
+
+  const updateHoverCursor = (p: any, force = false) => {
+    if (typeof p?.x !== 'number' || typeof p?.y !== 'number') return null;
+    const hit = toSource(p.x, p.y);
+    updateCursor(p.x, p.y, hit, force);
+    return hit;
   };
 
   const updateCursor = (px: number, py: number, hit: { sx: number; sy: number } | null, force = false) => {
@@ -70,6 +78,10 @@ export function Editor({ s }: { s: CutoutState }) {
     const localY = py - rect.y;
     if (s.tool === 'smart') {
       setCursor({ x: localX, y: localY, radius: 12, kind: 'smart' });
+      return;
+    }
+    if (s.tool === 'lasso' || s.tool === 'refine') {
+      setCursor({ x: localX, y: localY, radius: s.tool === 'lasso' ? 8 : Math.max(4, Math.min(180, s.brushPx)), kind: s.tool });
       return;
     }
     // Keep cursor rendering cheap. The actual brush hit math above already
@@ -97,25 +109,34 @@ export function Editor({ s }: { s: CutoutState }) {
             ) : (
               <BlankSurface w={s.srcDims.w} h={s.srcDims.h} />
             )}
-            {/* Global overlay paints ONLY the brush-owned cells. Smart-
-               layer regions render through their own per-layer MaskQuads
-               below — if we painted the combined mask here too, the
-               global FX would double-paint over per-layer FX and mute
-               would have no visible effect. */}
-            {s.brushOnlyOverlayCells.size > 0 ? (
-              <MaskQuad
-                cells={s.brushOnlyOverlayCells}
-                gridSize={OVERLAY_RES}
-                worldW={s.srcDims.w}
-                worldH={s.srcDims.h}
-                mode={s.effectMode}
-                customShader={shaderFor(s.effectMode)}
-                hueOffset={s.effectHueOffset}
-                phaseOffset={s.effectPhaseOffset}
-                dim={s.effectDim}
-                colors={s.effectColors}
-              />
-            ) : null}
+            {/* Brush mask texture (full image-resolution R8 paintable).
+               The host_tree CREATE pass allocates it before any consumer
+               first renders; brush strokes write to it via direct V8
+               calls (no React state in the input path). */}
+            <Paintable id={s.maskId} w={s.srcDims.w} h={s.srcDims.h} />
+            {/* Smart-union texture (OVERLAY_RES²) — OR of every smart
+               layer's cell set. The brush MaskQuad's shader samples this
+               alongside the mask and discards pixels where it's non-zero,
+               preserving the historical "brush doesn't double-paint over
+               per-layer FX" behavior. */}
+            <Paintable id={s.smartUnionId} w={OVERLAY_RES} h={OVERLAY_RES} />
+            {/* Brush MaskQuad in texture-sampling mode — reads the
+               paintable's R8 texture at @binding(2) and the smart-union
+               at @binding(4). No cells prop; no per-stroke CPU downsample. */}
+            <MaskQuad
+              paintableId={s.maskId}
+              smartUnionId={s.smartUnionId}
+              gridSize={OVERLAY_RES}
+              worldW={s.srcDims.w}
+              worldH={s.srcDims.h}
+              mode={s.effectMode}
+              customShader={shaderFor(s.effectMode)}
+              hueOffset={s.effectHueOffset}
+              phaseOffset={s.effectPhaseOffset}
+              dim={s.effectDim}
+              colors={s.effectColors}
+              blend="normal"
+            />
             {s.layers.map((cells, i) => {
               const cfg = s.layerConfigs[i];
               if (!cfg || cfg.muted || cells.size === 0) return null;
@@ -132,10 +153,12 @@ export function Editor({ s }: { s: CutoutState }) {
                   phaseOffset={cfg.phaseOffset}
                   dim={cfg.dim}
                   colors={cfg.colors}
+                  blend={cfg.blend ?? 'normal'}
                 />
               );
             })}
             <ClickMarkers s={s} />
+            <LassoPreview s={s} />
           </Canvas.Node>
         </Canvas>
       ) : (
@@ -157,9 +180,15 @@ export function Editor({ s }: { s: CutoutState }) {
             position: 'absolute', left: 0, top: 0, right: 0, bottom: 0,
             backgroundColor: '#00000001',
           }}
+          onMouseEnter={(p: any) => { updateHoverCursor(p, true); }}
+          onPointerMove={(p: any) => {
+            const hit = updateHoverCursor(p);
+            if (!drawing.current) return;
+            if (!hit) return;
+            s.paintAtSource(hit.sx, hit.sy, p.pressure);
+          }}
           onMouseDown={(p: any) => {
-            const hit = toSource(p.x, p.y);
-            updateCursor(p.x, p.y, hit, true);
+            const hit = updateHoverCursor(p, true);
             if (!hit) return;
             if (s.tool === 'smart') {
               if (s.isBlank) return;
@@ -173,16 +202,29 @@ export function Editor({ s }: { s: CutoutState }) {
               void s.addClick(hit.sx, hit.sy, label);
               return;
             }
+            if (s.tool === 'lasso') {
+              const now = Date.now();
+              const prev = lastLassoClick.current;
+              const doubleClick = !!prev
+                && now - prev.at <= 320
+                && (hit.sx - prev.sx) * (hit.sx - prev.sx) + (hit.sy - prev.sy) * (hit.sy - prev.sy) <= 64;
+              lastLassoClick.current = { sx: hit.sx, sy: hit.sy, at: now };
+              if (doubleClick) {
+                s.commitLasso();
+              } else {
+                s.addLassoPoint(hit.sx, hit.sy);
+              }
+              return;
+            }
             s.beginStroke();
             drawing.current = true;
-            s.paintAtSource(hit.sx, hit.sy);
+            s.paintAtSource(hit.sx, hit.sy, p.pressure);
           }}
           onMouseMove={(p: any) => {
-            const hit = toSource(p.x, p.y);
-            updateCursor(p.x, p.y, hit);
+            const hit = updateHoverCursor(p);
             if (!drawing.current) return;
             if (!hit) return;
-            s.paintAtSource(hit.sx, hit.sy);
+            s.paintAtSource(hit.sx, hit.sy, p.pressure);
           }}
           onMouseUp={() => { drawing.current = false; s.endStroke(); }}
           onMouseLeave={() => { setCursor(null); if (drawing.current) { drawing.current = false; s.endStroke(); } }}
@@ -196,10 +238,14 @@ export function Editor({ s }: { s: CutoutState }) {
 function BrushCursor({ cursor, mode }: { cursor: ToolCursor; mode: string }) {
   const color = cursor.kind === 'smart'
     ? COLORS.accent
+    : cursor.kind === 'lasso'
+      ? COLORS.good
+      : cursor.kind === 'refine'
+        ? COLORS.accent
     : mode === 'erase'
       ? COLORS.warn
       : COLORS.good;
-  if (cursor.kind === 'smart') {
+  if (cursor.kind === 'smart' || cursor.kind === 'lasso') {
     return (
       <Box style={{
         position: 'absolute',
@@ -213,10 +259,14 @@ function BrushCursor({ cursor, mode }: { cursor: ToolCursor; mode: string }) {
         backgroundColor: '#00000001',
         zIndex: 8,
       }}>
-        <Box style={{ position: 'absolute', left: cursor.radius - 1, top: -6, width: 2, height: 8, backgroundColor: color }} />
-        <Box style={{ position: 'absolute', left: cursor.radius - 1, bottom: -6, width: 2, height: 8, backgroundColor: color }} />
-        <Box style={{ position: 'absolute', left: -6, top: cursor.radius - 1, width: 8, height: 2, backgroundColor: color }} />
-        <Box style={{ position: 'absolute', right: -6, top: cursor.radius - 1, width: 8, height: 2, backgroundColor: color }} />
+        {cursor.kind === 'smart' ? (
+          <>
+            <Box style={{ position: 'absolute', left: cursor.radius - 1, top: -6, width: 2, height: 8, backgroundColor: color }} />
+            <Box style={{ position: 'absolute', left: cursor.radius - 1, bottom: -6, width: 2, height: 8, backgroundColor: color }} />
+            <Box style={{ position: 'absolute', left: -6, top: cursor.radius - 1, width: 8, height: 2, backgroundColor: color }} />
+            <Box style={{ position: 'absolute', right: -6, top: cursor.radius - 1, width: 8, height: 2, backgroundColor: color }} />
+          </>
+        ) : null}
       </Box>
     );
   }
@@ -243,6 +293,12 @@ function EditorHud({ s }: { s: CutoutState }) {
       ? (s.mode === 'erase'
           ? 'Click to add the region to the cutout.'
           : 'Click a false-positive to subtract it.')
+      : s.tool === 'lasso'
+        ? 'Click vertices. Return to the first point or double-click to close.'
+        : s.tool === 'refine'
+          ? (s.mode === 'erase'
+              ? 'Drag to expand the mask through low-gradient areas.'
+              : 'Drag to shrink the mask through low-gradient areas.')
       : (s.mode === 'erase'
           ? 'Drag over background to remove.'
           : 'Drag removed areas to restore.');
@@ -251,6 +307,8 @@ function EditorHud({ s }: { s: CutoutState }) {
   // an unobtrusive single-line strip with a tool dot + mode tag.
   const dotColor = s.tool === 'hand' ? COLORS.inkMuted
     : s.tool === 'smart' ? COLORS.accent
+    : s.tool === 'lasso' ? COLORS.good
+    : s.tool === 'refine' ? COLORS.accent
     : COLORS.ink;
   const modeColor = s.mode === 'erase' ? COLORS.warn : COLORS.good;
   return (
@@ -281,6 +339,44 @@ function EditorHud({ s }: { s: CutoutState }) {
         {action}
       </Text>
     </Row>
+  );
+}
+
+function lassoPath(points: { x: number; y: number }[], close: boolean): string {
+  if (points.length === 0) return '';
+  const [first, ...rest] = points;
+  return `M ${first.x} ${first.y}${rest.map((p) => ` L ${p.x} ${p.y}`).join('')}${close ? ' Z' : ''}`;
+}
+
+function LassoPreview({ s }: { s: CutoutState }) {
+  if (!s.srcDims || s.lassoPoints.length === 0) return null;
+  const r = Math.max(5, Math.min(s.srcDims.w, s.srcDims.h) * 0.005);
+  const d = lassoPath(s.lassoPoints, false);
+  const closed = s.lassoPoints.length >= 3 ? lassoPath(s.lassoPoints, true) : '';
+  return (
+    <Box style={{
+      position: 'absolute', left: 0, top: 0,
+      width: s.srcDims.w, height: s.srcDims.h,
+    }}>
+      {closed ? <Canvas.Path d={closed} fill={COLORS.good} fillOpacity={0.12} stroke="none" /> : null}
+      <Canvas.Path d={d} fill="none" stroke={COLORS.good} strokeWidth={2} />
+      {s.lassoPoints.map((p, i) => (
+        <Box
+          key={i}
+          style={{
+            position: 'absolute',
+            left: p.x - r,
+            top: p.y - r,
+            width: r * 2,
+            height: r * 2,
+            borderRadius: r,
+            backgroundColor: i === 0 ? COLORS.warn : COLORS.good,
+            borderWidth: Math.max(1, r * 0.25),
+            borderColor: '#ffffff',
+          }}
+        />
+      ))}
+    </Box>
   );
 }
 
@@ -347,34 +443,6 @@ function ClickMarkers({ s }: { s: CutoutState }) {
             backgroundColor: c.label === 'keep' ? COLORS.good : COLORS.bad,
             borderWidth: Math.max(2, r * 0.25),
             borderColor: '#ffffff',
-          }}
-        />
-      ))}
-    </Box>
-  );
-}
-
-function MaskOverlay({ s }: { s: CutoutState }) {
-  if (!s.srcDims || s.overlayCells.size === 0) return null;
-  const cellW = s.srcDims.w / OVERLAY_RES;
-  const cellH = s.srcDims.h / OVERLAY_RES;
-  const runs = rowRuns(s.overlayCells, OVERLAY_RES);
-  return (
-    <Box style={{
-      position: 'absolute', left: 0, top: 0,
-      width: s.srcDims.w, height: s.srcDims.h,
-    }}>
-      {runs.map((r, i) => (
-        <Box
-          key={i}
-          style={{
-            position: 'absolute',
-            left: r.x * cellW,
-            top: r.y * cellH,
-            width: r.len * cellW,
-            height: cellH,
-            backgroundColor: COLORS.bg,
-            opacity: 0.85,
           }}
         />
       ))}

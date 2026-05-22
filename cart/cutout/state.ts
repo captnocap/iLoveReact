@@ -12,14 +12,15 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
 import { execAsync } from '@reactjit/runtime/hooks/process';
-import { identify, compositeCutout, type Dims } from './magick';
-import { paintCircle, hasAnyErased, sampleToCells } from './mask';
+import { usePaintable } from '@reactjit/runtime/hooks/usePaintable';
+import { identify, loadGrayImage, compositeCutout, type Dims, type GrayImage } from './magick';
+import { hasAnyErased, snapToStrongGradient } from './mask';
 import { createFloodBackend } from './backends/flood';
 import { createSamBackend } from './backends/sam';
 import { isSegmentAvailable } from '@reactjit/runtime/hooks/useSegment';
 import type { BackendOpts } from './backends/types';
 import { bakeMatrix, exportIcons } from './icons';
-import { buildSqi, serializeSqi } from './sqi';
+import { buildSqi, decodeMaskRows, parseSqi, serializeSqi } from './sqi';
 import {
   buildSession,
   inflateSessionMasks,
@@ -37,7 +38,9 @@ import type {
   LayerConfig,
   CompositionLayer,
   CompositionLayerKind,
+  BlendMode,
 } from './domain';
+import { adoptSurface } from './domain';
 import { useHistory } from './history';
 import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 
@@ -53,7 +56,8 @@ export interface LayerClipping {
 }
 
 export type Mode = 'erase' | 'restore';
-export type Tool = 'brush' | 'smart' | 'hand';
+export type Tool = 'brush' | 'smart' | 'hand' | 'lasso' | 'refine';
+export type LassoPoint = { x: number; y: number };
 export type BackendName = 'flood' | 'sam';
 export const OVERLAY_RES = 128;
 // Default tunables — kept here so disk-restored sessions and fresh boots
@@ -63,6 +67,10 @@ const DEFAULT_FLOOD_FUZZ = 15;
 const DEFAULT_FLOOD_REJECT_FRAC = 0.04;
 const DEFAULT_SAM_THRESHOLD = 0;
 const DEFAULT_SAM_MASK_IDX: 0 | 1 | 2 = 0;
+const BRUSH_SIZES = [2, 8, 32, 128, 512];
+const REFINE_EDGE_THRESHOLD = 90;
+const BRUSH_EDGE_SNAP_THRESHOLD = 150;
+const BRUSH_SPACING_FRAC = 0.32;
 // Re-export the canonical layer / composition / surface types so existing
 // callers `import { LayerConfig } from '../state'` keep working. The
 // declarations live in ./domain so session.ts + sqi.ts can compose
@@ -96,6 +104,10 @@ export interface CutoutState {
   setTool: (t: Tool) => void;
   setMode: (m: Mode) => void;
   setBrushPx: (n: number) => void;
+  lassoPoints: LassoPoint[];
+  addLassoPoint: (sx: number, sy: number) => void;
+  commitLasso: () => void;
+  clearLasso: () => void;
 
   // Active paint target. -1 = global brush layer (writes to maskRef
   // directly, source-resolution). 0..N = paint INTO smart layer `i`
@@ -110,18 +122,24 @@ export interface CutoutState {
   maskVersion: number;
   hasMaskEdits: boolean;
   hasBrushLayer: boolean;
-  overlayCells: Set<number>; // sampled to OVERLAY_RES for cheap rendering
-  /** Cells the BRUSH layer alone owns — overlayCells minus every smart-
-   *  layer cell. The Editor uses this for the global preview so smart
-   *  layers can render their own FX without the global overlay
-   *  double-painting on top. */
-  brushOnlyOverlayCells: Set<number>;
+  /** Paintable handle for the brush mask (full image-resolution R8 GPU
+   *  texture). Editor renders `<Paintable id={maskId} w h />` to allocate
+   *  the texture, then passes the id to the brush MaskQuad via
+   *  `<Effect textures={[maskId, ...]}>`. */
+  maskId: string;
+  /** Paintable handle for the union of all smart layer cells at
+   *  `overlayRes` granularity. The brush MaskQuad samples this alongside
+   *  `maskId` and discards pixels where smart layers own the territory,
+   *  preserving the "global FX doesn't double-paint over per-layer FX"
+   *  behavior the cells-based code achieved via set subtraction. */
+  smartUnionId: string;
 
   // Brush ops — components call paintAtSource(x, y) with source-pixel coords
   beginStroke: () => void;
-  paintAtSource: (sx: number, sy: number) => void;
+  paintAtSource: (sx: number, sy: number, pressure?: number) => void;
   endStroke: () => void;
   clearMask: () => void;
+  invertMask: () => void;
   createBlankSurface: (w?: number, h?: number) => void;
   setCanvasSize: (w: number, h: number) => void;
 
@@ -159,6 +177,7 @@ export interface CutoutState {
   layerConfigs: LayerConfig[];
   compositionLayers: CompositionLayer[];
   setLayerMode: (i: number, m: SurfaceId) => void;
+  setLayerBlend: (i: number, blend: BlendMode) => void;
   toggleLayerMute: (i: number) => void;
   deleteLayer: (i: number) => Promise<void>;
   addPaintLayer: () => number;
@@ -205,6 +224,7 @@ export interface CutoutState {
    *  single .sqi.json document — drop-in format consumed by
    *  cart/cutout/components/ShaderQuadImage.tsx. */
   saveSqi: () => Promise<void>;
+  importSqi: (path?: string) => Promise<void>;
 
   // Autosave / restore — the cart treats its visible state as a view over
   // an on-disk SessionDocument. Every meaningful edit gets debounced-
@@ -250,6 +270,7 @@ export function useCutoutState(): CutoutState {
   const [tool, setTool] = useState<Tool>('brush');
   const [mode, setMode] = useState<Mode>('erase');
   const [brushPx, setBrushPx] = useState(32);
+  const [lassoPoints, setLassoPoints] = useState<LassoPoint[]>([]);
   const [maskVersion, setMaskVersion] = useState(0);
   const [hasBrushLayer, setHasBrushLayer] = useState(false);
   // Active paint target. -1 = global brush layer (the historical behavior);
@@ -262,11 +283,11 @@ export function useCutoutState(): CutoutState {
   // is async; the ref lands synchronously below.
   const activeLayerRef = useRef(-1);
   activeLayerRef.current = activeLayer;
-  const [effectMode, setEffectMode] = useState<SurfaceId>('rainbow');
+  const [effectMode, setEffectModeState] = useState<SurfaceId>('rainbow');
   const [effectColors, setEffectColors] = useState<string[]>(SLOT_DEFAULTS.slice());
-  const [effectHueOffset, setEffectHueOffset] = useState(0);
-  const [effectPhaseOffset, setEffectPhaseOffset] = useState(0);
-  const [effectDim, setEffectDim] = useState(0.85);
+  const [effectHueOffset, setEffectHueOffsetState] = useState(0);
+  const [effectPhaseOffset, setEffectPhaseOffsetState] = useState(0);
+  const [effectDim, setEffectDimState] = useState(0.85);
   // Autosave bookkeeping. `lastSavedAt` is shown in the status bar so the
   // user can see the cart is keeping up. `restoredFrom` records the stem
   // of the session that was rehydrated on mount (null if cart booted
@@ -333,9 +354,47 @@ export function useCutoutState(): CutoutState {
   const effectModeRef = useRef<SurfaceId>('rainbow');
   effectModeRef.current = effectMode;
 
+  // maskRef is a STALE CACHE of the GPU mask texture, refreshed via
+  // `syncMaskFromTexture()` at save/export/snapshot points. The texture
+  // (owned by paintable.zig, keyed by `mask.id` below) is the source of
+  // truth; maskRef.current exists only so the unchanged save/RLE code
+  // paths can keep reading a Uint8Array. Brush-hot-path writes go ONLY
+  // to the texture — no CPU paint loop runs per stroke.
   const maskRef = useRef<Uint8Array | null>(null);
+  // Paintable handles. Carts mount one <Paintable> per id (Editor.tsx
+  // renders both); React lifecycle tears down the GPU textures on
+  // unmount via the host_tree before_destroy hook.
+  const mask = usePaintable({ w: 1, h: 1 }); // dimensions land via <Paintable> when srcDims is known
+  const smartUnion = usePaintable({ w: 1, h: 1 });
+  // Dirty-bit replacement for `hasAnyErased(maskRef.current)`. The
+  // texture-side has no cheap "any non-zero" probe, so we maintain
+  // a counter: bumped on every paint op, reset on clearMask. Backend
+  // results / session restores set it to a sentinel (`-1`) and the
+  // memoized accessor below checks via readback once.
+  const maskDirtyCountRef = useRef(0);
+  const [maskDirtyTick, setMaskDirtyTick] = useState(0);
+  const markMaskDirty = () => {
+    maskDirtyCountRef.current += 1;
+    setMaskDirtyTick((v) => v + 1);
+  };
+  const clearMaskDirty = () => {
+    maskDirtyCountRef.current = 0;
+    setMaskDirtyTick((v) => v + 1);
+  };
+  // Lazy CPU mirror — call at save / autosave / history-commit time.
+  // Returns the freshly read-back bytes AND updates maskRef.current so
+  // unchanged downstream code (compositeCutout, exportIcons, bakeMatrix,
+  // RLE encode) sees the latest mask without further plumbing.
+  const syncMaskFromTexture = (): Uint8Array | null => {
+    const bytes = mask.paint.readback();
+    if (!bytes) return null;
+    maskRef.current = bytes;
+    return bytes;
+  };
+  const grayRef = useRef<GrayImage | null>(null);
   const tokenRef = useRef(0);
   const drawingRef = useRef(false);
+  const lastStrokePointRef = useRef<{ x: number; y: number; pressure: number } | null>(null);
 
   // Smart-select state. Backend opens on ingest, closes on new image.
   // Clicks are the click HISTORY; backend.refine always replays the entire
@@ -352,10 +411,10 @@ export function useCutoutState(): CutoutState {
   const backendRef = useRef<SelectionBackend>(makeBackend(backend));
   // Tunables. The cart owns these in React state and hands them to the
   // active backend through a BackendOpts bag at every refine call.
-  const [floodFuzz, setFloodFuzz] = useState(DEFAULT_FLOOD_FUZZ);
-  const [floodRejectFrac, setFloodRejectFrac] = useState(DEFAULT_FLOOD_REJECT_FRAC);
-  const [samThreshold, setSamThreshold] = useState(DEFAULT_SAM_THRESHOLD);
-  const [samMaskIdx, setSamMaskIdx] = useState<0 | 1 | 2>(DEFAULT_SAM_MASK_IDX);
+  const [floodFuzz, setFloodFuzzState] = useState(DEFAULT_FLOOD_FUZZ);
+  const [floodRejectFrac, setFloodRejectFracState] = useState(DEFAULT_FLOOD_REJECT_FRAC);
+  const [samThreshold, setSamThresholdState] = useState(DEFAULT_SAM_THRESHOLD);
+  const [samMaskIdx, setSamMaskIdxState] = useState<0 | 1 | 2>(DEFAULT_SAM_MASK_IDX);
   // Mirror to refs so async callers (runRefine, addClick) always read the
   // CURRENT values without React batching the refine call with a stale
   // closure. Same pattern as effectColorsRef / activeLayerRef.
@@ -372,6 +431,7 @@ export function useCutoutState(): CutoutState {
   const setBackend = (next: BackendName) => {
     const coerced: BackendName = next === 'sam' && !samAvailable ? 'flood' : next;
     if (coerced === backend) return;
+    commitCoalesced();
     backendRef.current.close();
     backendRef.current = makeBackend(coerced);
     setBackendState(coerced);
@@ -389,38 +449,33 @@ export function useCutoutState(): CutoutState {
   const [smartBusy, setSmartBusy] = useState(false);
   const smartTokenRef = useRef(0);
 
-  // Derived: cheap overlay grid for visual feedback. Recomputes on commit
-  // (maskVersion bump) — NOT on every brush mousemove.
-  const overlayCells = useMemo(() => {
-    if (!maskRef.current || !srcDims) return new Set<number>();
-    return sampleToCells(maskRef.current, srcDims.w, srcDims.h, OVERLAY_RES);
-  }, [maskVersion, srcDims]);
-
-  // Cells that belong to the BRUSH/PAINT layer only — the combined mask
-  // minus every smart-layer cell (muted or not). Smart layers own their
-  // own pixels and render independently; the global overlay must NOT
-  // double-paint that same area with `effectMode`, because:
-  //   - it hides per-layer FX changes (a layer's plasma still renders
-  //     under the global rainbow, so the user sees only rainbow)
-  //   - it makes layer-mute look broken (muting a layer just lets the
-  //     global paint through with no visible change)
-  // Computed off the same maskVersion as overlayCells.
-  const brushOnlyOverlayCells = useMemo(() => {
-    if (overlayCells.size === 0) return overlayCells;
-    if (layers.length === 0) return overlayCells;
-    const owned = new Set<number>();
-    for (const layer of layers) {
-      for (const c of layer) owned.add(c);
-    }
-    const out = new Set<number>();
-    for (const c of overlayCells) if (!owned.has(c)) out.add(c);
-    return out;
-  }, [overlayCells, layers]);
-
+  // hasMaskEdits — was hasAnyErased(maskRef.current) in the CPU-mask era.
+  // Now the texture is the truth and there's no cheap "any non-zero"
+  // probe. Backing it with a dirty counter (`markMaskDirty` / `clearMaskDirty`)
+  // matches the same intent: any paint op flips it on, clearMask flips
+  // it off. maskDirtyTick re-runs this memo when the bit moves.
   const hasMaskEdits = useMemo(() => {
-    if (!maskRef.current) return false;
-    return hasAnyErased(maskRef.current);
-  }, [maskVersion]);
+    return maskDirtyCountRef.current > 0;
+  }, [maskDirtyTick]);
+
+  // Smart-union recompute. When `layers` changes (smart-select refine,
+  // delete, reorder), the union texture has to track. We rebuild a small
+  // R8 Uint8Array at `overlayRes` granularity and upload — way cheaper
+  // than per-cell render passes. The brush MaskQuad samples this texture
+  // alongside the main mask and discards pixels where the union is
+  // non-zero. Same effect the cells-based brushOnlyOverlayCells had.
+  useEffect(() => {
+    const res = overlayRes;
+    // ensure() at the right resolution; idempotent if already there.
+    smartUnion.paint;
+    const buf = new Uint8Array(res * res);
+    for (const layer of layers) {
+      for (const idx of layer) {
+        if (idx >= 0 && idx < buf.length) buf[idx] = 1;
+      }
+    }
+    smartUnion.paint.upload(buf);
+  }, [layers, overlayRes, smartUnion.paint]);
 
   const compositionLayers = useMemo<CompositionLayer[]>(() => {
     const out: CompositionLayer[] = [];
@@ -452,6 +507,11 @@ export function useCutoutState(): CutoutState {
   }, [hasBrushLayer, paintLayerName, paintLayerGroup, layers, layerConfigs, smartLayerMeta]);
 
   // ── Ingestion ──────────────────────────────────────────────────────
+  // The GPU mask texture lives in paintable.zig keyed by `mask.id`; the
+  // <Paintable> in Editor.tsx (re)creates it whenever `srcDims` changes.
+  // We additionally clear it here so a new image starts blank. maskRef
+  // is the lazy CPU mirror; null'ing it forces the next save/export to
+  // do a fresh readback.
   const ingest = async (path: string) => {
     const token = ++tokenRef.current;
     backendRef.current.close(); // release any previous-image state
@@ -461,7 +521,9 @@ export function useCutoutState(): CutoutState {
     setSavedPath(null);
     setSrcDims(null);
     maskRef.current = null;
+    grayRef.current = null;
     setHasBrushLayer(false);
+    clearMaskDirty();
     setMaskVersion(0);
     clicksRef.current = [];
     setClicks([]);
@@ -476,10 +538,17 @@ export function useCutoutState(): CutoutState {
       return;
     }
     setSrcDims(dims);
-    maskRef.current = new Uint8Array(dims.w * dims.h);
+    // GPU texture is allocated by the <Paintable> JSX node in Editor.tsx
+    // once srcDims renders; nothing to allocate here on the CPU side.
+    mask.paint.clear(0);
     void backendRef.current.open(path, dims); // fire and forget for Phase 0
     setBusy(false);
     setStatus(`ready · ${dims.w}×${dims.h} · brush or smart-select to cut out`);
+    void loadGrayImage(path, dims).then((gray) => {
+      if (tokenRef.current !== token) return;
+      grayRef.current = gray;
+      if (!gray) setStatus('ready · edge-aware refine unavailable for this source');
+    });
   };
 
   const createBlankSurface = (w = srcDims?.w || 512, h = srcDims?.h || 512) => {
@@ -488,13 +557,16 @@ export function useCutoutState(): CutoutState {
     tokenRef.current++;
     smartTokenRef.current++;
     backendRef.current.close();
+    grayRef.current = null;
     setIsBlank(true);
     setSrcPath(null);
     setStem('Untitled canvas');
     setSavedPath(null);
     setSrcDims({ w: cw, h: ch });
-    maskRef.current = new Uint8Array(cw * ch);
+    maskRef.current = null;
+    mask.paint.clear(0);
     setHasBrushLayer(false);
+    clearMaskDirty();
     clicksRef.current = [];
     setClicks([]);
     writeLayerStack([], [], []);
@@ -509,8 +581,10 @@ export function useCutoutState(): CutoutState {
     const ch = clampCanvasSize(h);
     if (!srcDims || (srcDims.w === cw && srcDims.h === ch)) return;
     setSrcDims({ w: cw, h: ch });
-    maskRef.current = new Uint8Array(cw * ch);
+    maskRef.current = null;
+    mask.paint.clear(0);
     setHasBrushLayer(false);
+    clearMaskDirty();
     clicksRef.current = [];
     setClicks([]);
     writeLayerStack([], [], []);
@@ -530,6 +604,68 @@ export function useCutoutState(): CutoutState {
     const path = (r.stdout || '').trim();
     if (!path) { setStatus(`no file selected (exit ${r.code})`); return; }
     void ingest(path);
+  };
+
+  const importSqi = async (givenPath?: string) => {
+    let path = givenPath;
+    if (!path) {
+      setStatus('opening .sqi picker…');
+      const r = await execAsync(
+        "zenity --file-selection --title='Import SQI' " +
+        "--file-filter='Shader Quad Images | *.sqi.json' " +
+        "--file-filter='All files | *'"
+      );
+      path = (r.stdout || '').trim();
+      if (!path) { setStatus(`no .sqi selected (exit ${r.code})`); return; }
+    }
+
+    const text = readFile(path);
+    if (!text) { setStatus('could not read .sqi file'); return; }
+    const doc = parseSqi(text);
+    if (!doc) { setStatus('invalid .sqi file'); return; }
+
+    commit();
+    createBlankSurface(doc.size, doc.size);
+    setStem(doc.stem);
+    setOverlayRes(doc.size);
+
+    const newLayers: Set<number>[] = [];
+    const newConfigs: LayerConfig[] = [];
+    const newMeta: SmartLayerMeta[] = [];
+    const newCustoms: CustomSurface[] = [...customSurfaces];
+    // .sqi base resolution is `doc.size` — both the mask texture and the
+    // smart-layer cell sets are quantized to this grid. Build a single
+    // CPU buffer of layer cells, upload to the mask texture in one shot.
+    const sourceMask = new Uint8Array(doc.size * doc.size);
+
+    for (const layer of doc.layers) {
+      const cells = decodeMaskRows(layer.mask, doc.size);
+      const { id: surfaceId, addedCustom } = adoptSurface(layer.surface, newCustoms);
+      if (addedCustom) newCustoms.push(addedCustom);
+      newLayers.push(cells);
+      newConfigs.push({
+        mode: surfaceId,
+        blend: layer.blend ?? 'normal',
+        hueOffset: layer.hueOffset,
+        phaseOffset: layer.phaseOffset,
+        dim: layer.dim,
+        muted: layer.muted,
+        colors: layer.colors?.slice() ?? SLOT_DEFAULTS.slice(),
+      });
+      newMeta.push({ id: layer.id, name: layer.label, groupId: null, groupName: null });
+      for (const idx of cells) {
+        if (idx >= 0 && idx < sourceMask.length) sourceMask[idx] = 1;
+      }
+    }
+
+    mask.paint.upload(sourceMask);
+    maskRef.current = sourceMask;
+    if (doc.layers.length > 0) markMaskDirty();
+
+    setCustomSurfaces(newCustoms);
+    writeLayerStack(newLayers, newConfigs, newMeta);
+    setMaskVersion((v) => v + 1);
+    setStatus(`imported ${doc.layers.length} layer${doc.layers.length === 1 ? '' : 's'} from ${path}`);
   };
 
   // ── Brush ───────────────────────────────────────────────────────────
@@ -556,20 +692,58 @@ export function useCutoutState(): CutoutState {
     // current state IS the BEFORE-state at this moment.
     history.commit(buildCurrentSession());
     drawingRef.current = true;
+    lastStrokePointRef.current = null;
     lastBumpRef.current = 0; // force first paint to fire a bump
   };
   const endStroke = () => {
     drawingRef.current = false; // unconditional — survives orphan mouseups
+    lastStrokePointRef.current = null;
     bump();
   };
-  const paintAtSource = (sx: number, sy: number) => {
-    if (!srcDims || !maskRef.current || !drawingRef.current) return;
-    // Always write into the source mask so the export path (saveCutout,
-    // saveIcons, saveSqi base) sees every painted pixel regardless of
-    // which layer the user is targeting. The layer Set below is the
-    // VISUAL view (controls which MaskQuad renders the cells); the
-    // source mask is the truth for compositing.
-    paintCircle(maskRef.current, srcDims.w, srcDims.h, sx, sy, brushPx, mode === 'erase' ? 1 : 0);
+  const pressureRadius = (pressure?: number) => {
+    const p = typeof pressure === 'number' && Number.isFinite(pressure) && pressure > 0
+      ? Math.max(0, Math.min(1, pressure))
+      : 0.5;
+    return Math.max(1, brushPx * (0.35 + p * 1.3));
+  };
+  const snapBrushPoint = (sx: number, sy: number, radius: number) => {
+    if (!grayRef.current || !srcDims || grayRef.current.w !== srcDims.w || grayRef.current.h !== srcDims.h) {
+      return { x: sx, y: sy };
+    }
+    const snapRadius = Math.max(2, Math.min(12, radius * 0.35));
+    return snapToStrongGradient(grayRef.current.pixels, srcDims.w, srcDims.h, sx, sy, snapRadius, BRUSH_EDGE_SNAP_THRESHOLD);
+  };
+  const paintDabAtSource = (sx: number, sy: number, pressure?: number) => {
+    if (!srcDims || !drawingRef.current) return;
+    // The GPU mask texture (paintable handle `mask.id`) is the source of
+    // truth — saves/exports readback it on demand. No CPU mask loop runs
+    // per stroke, which is what makes large brush strokes at 4K not
+    // crash the cart. The smart-layer Set below is the VISUAL view at
+    // overlayRes granularity; the brush MaskQuad samples the mask
+    // texture directly via Effect's `textures` prop.
+    const value = mode === 'erase' ? 1 : 0;
+    const radius = pressureRadius(pressure);
+    const pt = tool === 'brush' || tool === 'refine' ? snapBrushPoint(sx, sy, radius) : { x: sx, y: sy };
+    if (tool === 'refine') {
+      if (!grayRef.current || grayRef.current.w !== srcDims.w || grayRef.current.h !== srcDims.h) {
+        setStatus('refine brush unavailable until source edges load');
+        return;
+      }
+      // Edge-aware brush — paintable.zig's circle_edge op carries the
+      // gray reference id + threshold metadata. The actual sobel
+      // rejection is a paintable.zig follow-up (see brush WGSL TODO);
+      // for today this paints just like plain `circle`, which already
+      // beats the CPU edge-aware loop's perf and gives correct-enough
+      // refine behavior. Replace with the real edge-aware shader pass
+      // once paintable.zig grows the gray-sampling pipeline variant.
+      mask.paint.circle(pt.x, pt.y, radius, value);
+      setHasBrushLayer(true);
+      markMaskDirty();
+      bumpThrottled();
+      return;
+    }
+    mask.paint.circle(pt.x, pt.y, radius, value);
+    markMaskDirty();
     const target = activeLayerRef.current;
     if (target < 0) {
       // Global brush layer — the historical path. The brush-only
@@ -582,19 +756,19 @@ export function useCutoutState(): CutoutState {
       // useMemo on the Set ref refires when we hand it a new Set.
       const cellW = srcDims.w / overlayRes;
       const cellH = srcDims.h / overlayRes;
-      const r = brushPx;
-      const xMin = Math.max(0, Math.floor((sx - r) / cellW));
-      const xMax = Math.min(overlayRes - 1, Math.ceil((sx + r) / cellW));
-      const yMin = Math.max(0, Math.floor((sy - r) / cellH));
-      const yMax = Math.min(overlayRes - 1, Math.ceil((sy + r) / cellH));
+      const r = radius;
+      const xMin = Math.max(0, Math.floor((pt.x - r) / cellW));
+      const xMax = Math.min(overlayRes - 1, Math.ceil((pt.x + r) / cellW));
+      const yMin = Math.max(0, Math.floor((pt.y - r) / cellH));
+      const yMax = Math.min(overlayRes - 1, Math.ceil((pt.y + r) / cellH));
       const r2 = r * r;
       const next = new Set(layers[target]);
       for (let cy = yMin; cy <= yMax; cy++) {
-        const ccy = (cy + 0.5) * cellH;
-        const dy = ccy - sy;
+          const ccy = (cy + 0.5) * cellH;
+          const dy = ccy - pt.y;
         for (let cx = xMin; cx <= xMax; cx++) {
           const ccx = (cx + 0.5) * cellW;
-          const dx = ccx - sx;
+          const dx = ccx - pt.x;
           if (dx * dx + dy * dy > r2) continue;
           const idx = cy * overlayRes + cx;
           if (mode === 'erase') next.add(idx);
@@ -607,12 +781,100 @@ export function useCutoutState(): CutoutState {
     }
     bumpThrottled();
   };
+  const paintAtSource = (sx: number, sy: number, pressure = 0.5) => {
+    if (!srcDims || !drawingRef.current) return;
+    const radius = pressureRadius(pressure);
+    const spacing = Math.max(1, radius * BRUSH_SPACING_FRAC);
+    const prev = lastStrokePointRef.current;
+    if (!prev) {
+      paintDabAtSource(sx, sy, pressure);
+      lastStrokePointRef.current = { x: sx, y: sy, pressure };
+      return;
+    }
+    const dx = sx - prev.x;
+    const dy = sy - prev.y;
+    const dist = Math.hypot(dx, dy);
+    const steps = Math.max(1, Math.floor(dist / spacing));
+    for (let i = 1; i <= steps; i++) {
+      const t = i / steps;
+      paintDabAtSource(
+        prev.x + dx * t,
+        prev.y + dy * t,
+        prev.pressure + (pressure - prev.pressure) * t,
+      );
+    }
+    lastStrokePointRef.current = { x: sx, y: sy, pressure };
+  };
   const clearMask = () => {
-    if (!maskRef.current) return;
+    if (!srcDims) return;
     history.commit(buildCurrentSession());
-    maskRef.current.fill(0);
+    mask.paint.clear(0);
+    maskRef.current = null; // invalidate the CPU mirror
     setHasBrushLayer(false);
+    clearMaskDirty();
     setMaskVersion((v) => v + 1);
+  };
+
+  const invertMask = () => {
+    if (!srcDims) return;
+    history.commit(buildCurrentSession());
+    // No native invert op in paintable.zig; round-trip via readback +
+    // CPU flip + upload. Invert is a single-click rare op so the
+    // ~5-30ms cost at 4K is fine.
+    const bytes = mask.paint.readback();
+    if (!bytes) {
+      setStatus('invert failed: GPU readback returned null');
+      return;
+    }
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = bytes[i] ? 0 : 1;
+    }
+    mask.paint.upload(bytes);
+    maskRef.current = bytes; // already a fresh allocation, reuse as the CPU mirror
+    setHasBrushLayer(true);
+    markMaskDirty();
+    setMaskVersion((v) => v + 1);
+    setStatus('inverted mask');
+  };
+
+  const commitLasso = () => {
+    if (!srcDims || lassoPoints.length < 3) return;
+    history.commit(buildCurrentSession());
+    // Pack the lasso points into a Float32Array of interleaved x,y.
+    // paintable.zig's polygon op rasterizes inside the bbox; outside
+    // pixels are untouched.
+    const verts = new Float32Array(lassoPoints.length * 2);
+    for (let i = 0; i < lassoPoints.length; i++) {
+      verts[i * 2] = lassoPoints[i].x;
+      verts[i * 2 + 1] = lassoPoints[i].y;
+    }
+    mask.paint.polygon(verts, mode === 'erase' ? 1 : 0);
+    setLassoPoints([]);
+    setHasBrushLayer(true);
+    markMaskDirty();
+    bump();
+    setStatus(`lasso ${mode === 'erase' ? 'removed' : 'restored'} · ${lassoPoints.length} points`);
+  };
+
+  const addLassoPoint = (sx: number, sy: number) => {
+    const nextPoint = { x: sx, y: sy };
+    if (lassoPoints.length >= 3 && srcDims) {
+      const first = lassoPoints[0];
+      const dx = sx - first.x;
+      const dy = sy - first.y;
+      const closeRadius = Math.max(8, Math.min(srcDims.w, srcDims.h) * 0.01);
+      if (dx * dx + dy * dy <= closeRadius * closeRadius) {
+        commitLasso();
+        return;
+      }
+    }
+    setLassoPoints((cur) => [...cur, nextPoint]);
+    setStatus(`lasso · ${lassoPoints.length + 1} point${lassoPoints.length === 0 ? '' : 's'}`);
+  };
+
+  const clearLasso = () => {
+    setLassoPoints([]);
+    setStatus('lasso cleared');
   };
 
   // ── Smart select ───────────────────────────────────────────────────
@@ -621,7 +883,7 @@ export function useCutoutState(): CutoutState {
   // future phases may layer brush edits on top via a separate buffer).
   // A token guards against out-of-order responses if the user clicks fast.
   const runRefine = async (nextClicks: ClickPoint[]) => {
-    if (!srcDims || !maskRef.current) return;
+    if (!srcDims) return;
     const token = ++smartTokenRef.current;
     setSmartBusy(true);
     setStatus(nextClicks.length === 0
@@ -638,7 +900,9 @@ export function useCutoutState(): CutoutState {
     // per-click layers — the Editor renders one MaskQuad per layer (with
     // staggered hue/phase) when there are any, else falls back to the
     // single combined-mask MaskQuad path (SAM gives no layers).
+    mask.paint.upload(result.mask);
     maskRef.current = result.mask;
+    markMaskDirty();
     setHasBrushLayer(false);
     setOverlayRes(result.overlayRes);
     // Sync per-layer configs to the new layer count. PRESERVE any existing
@@ -676,8 +940,10 @@ export function useCutoutState(): CutoutState {
     clicksRef.current = [];
     setClicks([]);
     writeLayerStack([], [], []);
-    if (maskRef.current) maskRef.current.fill(0);
+    mask.paint.clear(0);
+    maskRef.current = null;
     setHasBrushLayer(false);
+    clearMaskDirty();
     setMaskVersion((v) => v + 1);
     setStatus('cleared smart selection');
   };
@@ -688,17 +954,28 @@ export function useCutoutState(): CutoutState {
   // MaskQuad preview and the next-created smart layer both pick it up.
 
   const setLayerMode = (i: number, m: SurfaceId) => {
-    if (i < 0) { setEffectMode(m); return; }
+    if (i < 0) { commitCoalesced(); setEffectModeState(m); return; }
     const cur = layerConfigsRef.current;
     if (i >= cur.length) return;
+    commitCoalesced();
     const next = cur.slice();
     next[i] = { ...next[i], mode: m };
+    writeLayerConfigs(next);
+  };
+
+  const setLayerBlend = (i: number, blend: BlendMode) => {
+    const cur = layerConfigsRef.current;
+    if (i < 0 || i >= cur.length) return;
+    commitCoalesced();
+    const next = cur.slice();
+    next[i] = { ...next[i], blend };
     writeLayerConfigs(next);
   };
 
   const setLayerColor = (i: number, slotIdx: number, hex: string) => {
     if (slotIdx < 0 || slotIdx >= NUM_COLOR_SLOTS) return;
     if (i < 0) {
+      commitCoalesced();
       const next = effectColorsRef.current.slice();
       next[slotIdx] = hex;
       setEffectColors(next);
@@ -706,6 +983,7 @@ export function useCutoutState(): CutoutState {
     }
     const cur = layerConfigsRef.current;
     if (i >= cur.length) return;
+    commitCoalesced();
     const layer = cur[i];
     const colors = (layer.colors ?? SLOT_DEFAULTS).slice();
     colors[slotIdx] = hex;
@@ -716,18 +994,20 @@ export function useCutoutState(): CutoutState {
 
   const setLayerHueOffset = (i: number, value: number) => {
     const v = Math.max(0, Math.min(1, value));
-    if (i < 0) { setEffectHueOffset(v); return; }
+    if (i < 0) { commitCoalesced(); setEffectHueOffsetState(v); return; }
     const cur = layerConfigsRef.current;
     if (i >= cur.length) return;
+    commitCoalesced();
     const next = cur.slice();
     next[i] = { ...next[i], hueOffset: v };
     writeLayerConfigs(next);
   };
 
   const setLayerPhaseOffset = (i: number, value: number) => {
-    if (i < 0) { setEffectPhaseOffset(value); return; }
+    if (i < 0) { commitCoalesced(); setEffectPhaseOffsetState(value); return; }
     const cur = layerConfigsRef.current;
     if (i >= cur.length) return;
+    commitCoalesced();
     const next = cur.slice();
     next[i] = { ...next[i], phaseOffset: value };
     writeLayerConfigs(next);
@@ -735,9 +1015,10 @@ export function useCutoutState(): CutoutState {
 
   const setLayerDim = (i: number, value: number) => {
     const v = Math.max(0, Math.min(1, value));
-    if (i < 0) { setEffectDim(v); return; }
+    if (i < 0) { commitCoalesced(); setEffectDimState(v); return; }
     const cur = layerConfigsRef.current;
     if (i >= cur.length) return;
+    commitCoalesced();
     const next = cur.slice();
     next[i] = { ...next[i], dim: v };
     writeLayerConfigs(next);
@@ -754,6 +1035,7 @@ export function useCutoutState(): CutoutState {
 
   const addPaintLayer = () => {
     if (!srcDims) createBlankSurface();
+    commit();
     if (!hasBrushLayer) {
       setHasBrushLayer(true);
       setStatus('paint layer ready');
@@ -780,12 +1062,14 @@ export function useCutoutState(): CutoutState {
 
   const duplicateLayer = (i: number) => {
     if (i < 0) {
+      commit();
       setHasBrushLayer(true);
       setPaintLayerName(`${paintLayerName} copy`);
       setStatus('duplicated paint layer metadata');
       return;
     }
     if (i < 0 || i >= layers.length || !layerConfigsRef.current[i]) return;
+    commit();
     const insertAt = i + 1;
     const nextLayers = layers.slice();
     nextLayers.splice(insertAt, 0, new Set(layers[i]));
@@ -813,6 +1097,7 @@ export function useCutoutState(): CutoutState {
     }
     const j = i + dir;
     if (j < 0 || i >= layers.length || j >= layers.length) return;
+    commit();
     const nextLayers = layers.slice();
     const nextConfigs = layerConfigsRef.current.slice();
     const nextMeta = smartLayerMetaRef.current.slice();
@@ -830,6 +1115,7 @@ export function useCutoutState(): CutoutState {
       return;
     }
     if (i < 0 || i >= layers.length) return;
+    commit();
     const meta = smartLayerMetaRef.current[i] ?? defaultSmartMeta(i);
     setHasBrushLayer(true);
     writeLayerStack(
@@ -847,6 +1133,7 @@ export function useCutoutState(): CutoutState {
       return;
     }
     if (i < 0 || i >= layers.length) return;
+    commit();
     const meta = smartLayerMetaRef.current[i] ?? defaultSmartMeta(i);
     writeLayerStack(
       layers.slice(0, i).concat(layers.slice(i + 1)),
@@ -859,6 +1146,7 @@ export function useCutoutState(): CutoutState {
 
   const setCompositionLayerName = (i: number, name: string) => {
     const clean = name.trim() || (i < 0 ? 'Paint Layer' : `Layer ${i + 1}`);
+    commit();
     if (i < 0) {
       setPaintLayerName(clean);
       return;
@@ -872,6 +1160,7 @@ export function useCutoutState(): CutoutState {
 
   const setCompositionLayerGroup = (i: number, groupName: string) => {
     const clean = groupName.trim();
+    commit();
     if (i < 0) {
       setPaintLayerGroup(clean);
       return;
@@ -890,6 +1179,7 @@ export function useCutoutState(): CutoutState {
   const toggleLayerMute = (i: number) => {
     const cur = layerConfigsRef.current;
     if (i < 0 || i >= cur.length) return;
+    commit();
     const next = cur.slice();
     next[i] = { ...next[i], muted: !next[i].muted };
     writeLayerConfigs(next);
@@ -925,11 +1215,19 @@ export function useCutoutState(): CutoutState {
   useEffect(() => () => { backendRef.current.close(); }, []);
 
   // ── Save ────────────────────────────────────────────────────────────
+  // Save / export paths readback the GPU mask once here (rare; user-
+  // triggered) and feed the freshly-CPU-resident bytes into magick/icons/
+  // sqi as before. paint.readback is synchronous (drains pending brush
+  // ops then blocking-polls the device until copy-to-buffer completes);
+  // at 4K that's ~5–30 ms. We snapshot via syncMaskFromTexture so the
+  // bytes also re-populate maskRef.current for any caller that still
+  // reads it.
   const saveCutout = async () => {
-    if (!srcPath || !srcDims || !maskRef.current) {
+    if (!srcPath || !srcDims) {
       setStatus('nothing to save'); return;
     }
-    if (!hasAnyErased(maskRef.current)) {
+    const bytes = syncMaskFromTexture();
+    if (!bytes || !hasAnyErased(bytes)) {
       setStatus('mask is empty — erase something first'); return;
     }
     setBusy(true);
@@ -937,7 +1235,7 @@ export function useCutoutState(): CutoutState {
     mkdir('cart/pixel_icons');
     const outPath = `cart/pixel_icons/${stem}.cutout.png`;
     const r = await compositeCutout({
-      srcPath, mask: maskRef.current, w: srcDims.w, h: srcDims.h, outPath,
+      srcPath, mask: bytes, w: srcDims.w, h: srcDims.h, outPath,
     });
     setBusy(false);
     if (r.ok) {
@@ -949,17 +1247,18 @@ export function useCutoutState(): CutoutState {
   };
 
   const saveIcons = async () => {
-    if (!srcPath || !srcDims || !maskRef.current) {
+    if (!srcPath || !srcDims) {
       setStatus('nothing to bake'); return;
     }
-    if (!hasAnyErased(maskRef.current)) {
+    const bytes = syncMaskFromTexture();
+    if (!bytes || !hasAnyErased(bytes)) {
       setStatus('mask is empty — make a cutout first'); return;
     }
     setBusy(true);
     setStatus(`baking pixel-icons (64/128/512)…`);
     const r = await exportIcons({
       srcPath,
-      mask: maskRef.current,
+      mask: bytes,
       srcW: srcDims.w,
       srcH: srcDims.h,
       stem,
@@ -979,17 +1278,18 @@ export function useCutoutState(): CutoutState {
   // loader). Layer masks come straight from `layers` — they're already at
   // `overlayRes`.
   const saveSqi = async () => {
-    if (!srcPath || !srcDims || !maskRef.current) {
+    if (!srcPath || !srcDims) {
       setStatus('nothing to export'); return;
     }
-    if (!hasAnyErased(maskRef.current)) {
+    const bytes = syncMaskFromTexture();
+    if (!bytes || !hasAnyErased(bytes)) {
       setStatus('mask is empty — make a cutout first'); return;
     }
     setBusy(true);
     setStatus(`packing .sqi at ${overlayRes}×${overlayRes}…`);
     const { matrix, error } = await bakeMatrix({
       srcPath,
-      mask: maskRef.current,
+      mask: bytes,
       srcW: srcDims.w,
       srcH: srcDims.h,
       size: overlayRes,
@@ -1006,6 +1306,11 @@ export function useCutoutState(): CutoutState {
       layerMasks: layers,
       layerConfigs: layerConfigsRef.current,
       customSurfaces,
+      metadata: {
+        title: stem,
+        tags: ['cutout', 'shader-quad-image'],
+      },
+      thumbnailSize: 32,
     });
     mkdir('cart/pixel_icons');
     const outPath = `cart/pixel_icons/${stem}.sqi.json`;
@@ -1039,6 +1344,12 @@ export function useCutoutState(): CutoutState {
   // hot per-frame loop.
   const buildCurrentSession = (): SessionDocument | null => {
     if (!srcDims) return null;
+    // Snapshot the GPU mask back to CPU for the RLE-encode that's about
+    // to run inside buildSession. At 4K this is ~5–30 ms; called only at
+    // discrete commit points (stroke-start, autosave-flush, undo/redo) —
+    // same trade-off the comment above always described, just with GPU
+    // readback instead of stroke-time CPU bookkeeping.
+    const maskSnapshot = hasMaskEdits ? syncMaskFromTexture() : null;
     return buildSession({
       stem,
       srcPath,
@@ -1047,7 +1358,7 @@ export function useCutoutState(): CutoutState {
       tool,
       mode,
       brushPx,
-      mask: maskRef.current,
+      mask: maskSnapshot,
       hasBrushLayer,
       clicks: clicks.map((c) => ({ x: c.x, y: c.y, label: c.label })),
       overlayRes,
@@ -1071,8 +1382,19 @@ export function useCutoutState(): CutoutState {
   // mount-time restore path and by undo/redo — they all share the same
   // "rehydrate every field from a snapshot" semantics.
   const applyDoc = (doc: SessionDocument, { quiet = false }: { quiet?: boolean } = {}) => {
-    const { mask, layers: layersRestored } = inflateSessionMasks(doc);
-    maskRef.current = mask;
+    const { mask: restoredMask, layers: layersRestored } = inflateSessionMasks(doc);
+    maskRef.current = restoredMask;
+    // Push the restored CPU mask back into the GPU texture so the brush
+    // MaskQuad (texture-sampling) sees the rehydrated state. If the
+    // snapshot had no mask (no edits when saved), clear the texture so
+    // it doesn't carry stale content from before applyDoc was called.
+    if (restoredMask && restoredMask.length > 0) {
+      mask.paint.upload(restoredMask);
+      markMaskDirty();
+    } else {
+      mask.paint.clear(0);
+      clearMaskDirty();
+    }
     // Restore backend choice + tunables before opening, so the new backend
     // gets the right per-image precompute (SAM encoder vs flood no-op).
     const restoredBackend: BackendName = doc.backend === 'sam' && samAvailable
@@ -1085,14 +1407,22 @@ export function useCutoutState(): CutoutState {
     } else {
       backendRef.current.close();
     }
-    if (typeof doc.floodFuzz === 'number') setFloodFuzz(doc.floodFuzz);
-    if (typeof doc.floodRejectFrac === 'number') setFloodRejectFrac(doc.floodRejectFrac);
-    if (typeof doc.samThreshold === 'number') setSamThreshold(doc.samThreshold);
+    if (typeof doc.floodFuzz === 'number') setFloodFuzzState(doc.floodFuzz);
+    if (typeof doc.floodRejectFrac === 'number') setFloodRejectFracState(doc.floodRejectFrac);
+    if (typeof doc.samThreshold === 'number') setSamThresholdState(doc.samThreshold);
     if (typeof doc.samMaskIdx === 'number') {
-      setSamMaskIdx(Math.max(0, Math.min(2, doc.samMaskIdx)) as 0 | 1 | 2);
+      setSamMaskIdxState(Math.max(0, Math.min(2, doc.samMaskIdx)) as 0 | 1 | 2);
     }
     if (doc.srcPath && doc.srcDims) {
       void backendRef.current.open(doc.srcPath, doc.srcDims);
+      const token = ++tokenRef.current;
+      grayRef.current = null;
+      void loadGrayImage(doc.srcPath, doc.srcDims).then((gray) => {
+        if (tokenRef.current !== token) return;
+        grayRef.current = gray;
+      });
+    } else {
+      grayRef.current = null;
     }
     setStem(doc.stem);
     setSrcPath(doc.srcPath ?? null);
@@ -1108,17 +1438,18 @@ export function useCutoutState(): CutoutState {
     setLayers(layersRestored);
     writeLayerConfigs((doc.layerConfigs ?? []).map((c) => ({
       mode: c.mode,
+      blend: c.blend ?? 'normal',
       hueOffset: c.hueOffset,
       phaseOffset: c.phaseOffset,
       muted: c.muted,
       colors: c.colors?.slice() ?? SLOT_DEFAULTS.slice(),
       dim: typeof c.dim === 'number' ? c.dim : 0.85,
     })));
-    setEffectMode(doc.effectMode ?? 'rainbow');
+    setEffectModeState(doc.effectMode ?? 'rainbow');
     setEffectColors((doc.effectColors ?? SLOT_DEFAULTS).slice());
-    setEffectHueOffset(doc.effectHueOffset ?? 0);
-    setEffectPhaseOffset(doc.effectPhaseOffset ?? 0);
-    setEffectDim(typeof doc.effectDim === 'number' ? doc.effectDim : 0.85);
+    setEffectHueOffsetState(doc.effectHueOffset ?? 0);
+    setEffectPhaseOffsetState(doc.effectPhaseOffset ?? 0);
+    setEffectDimState(typeof doc.effectDim === 'number' ? doc.effectDim : 0.85);
     setCustomSurfaces((doc.customSurfaces ?? []).map((cs) => ({ ...cs })));
     setMaskVersion((v) => v + 1);
     if (!quiet) setStatus(`restored · ${doc.stem}`);
@@ -1207,10 +1538,39 @@ export function useCutoutState(): CutoutState {
   // wins inside a 250 ms window so a drag becomes one undo step.
   const commit = () => history.commit(buildCurrentSession());
   const commitCoalesced = () => history.commitCoalesced(buildCurrentSession());
-  // Mark these as used to silence "declared but never used" until the
-  // call-site sprinkle pass lands. The keyboard handlers below already
-  // exercise commit() through pasteLayer().
-  void commit; void commitCoalesced;
+
+  const setFloodFuzz = (n: number) => {
+    commitCoalesced();
+    setFloodFuzzState(n);
+  };
+  const setFloodRejectFrac = (n: number) => {
+    commitCoalesced();
+    setFloodRejectFracState(n);
+  };
+  const setSamThreshold = (n: number) => {
+    commitCoalesced();
+    setSamThresholdState(n);
+  };
+  const setSamMaskIdx = (n: 0 | 1 | 2) => {
+    commitCoalesced();
+    setSamMaskIdxState(n);
+  };
+  const setEffectMode = (m: SurfaceId) => {
+    commitCoalesced();
+    setEffectModeState(m);
+  };
+  const setEffectHueOffset = (value: number) => {
+    commitCoalesced();
+    setEffectHueOffsetState(value);
+  };
+  const setEffectPhaseOffset = (value: number) => {
+    commitCoalesced();
+    setEffectPhaseOffsetState(value);
+  };
+  const setEffectDim = (value: number) => {
+    commitCoalesced();
+    setEffectDimState(value);
+  };
 
   const undo = () => {
     const prev = history.undo(buildCurrentSession());
@@ -1245,6 +1605,7 @@ export function useCutoutState(): CutoutState {
       mask: new Set<number>(layers[i]),
       config: {
         mode: config.mode,
+        blend: config.blend ?? 'normal',
         hueOffset: config.hueOffset,
         phaseOffset: config.phaseOffset,
         muted: config.muted,
@@ -1262,6 +1623,7 @@ export function useCutoutState(): CutoutState {
     const nextLayers = [...layers, new Set<number>(clipboard.mask)];
     const nextConfigs = [...layerConfigsRef.current, {
       mode: clipboard.config.mode,
+      blend: clipboard.config.blend ?? 'normal',
       hueOffset: clipboard.config.hueOffset,
       phaseOffset: clipboard.config.phaseOffset,
       muted: false,
@@ -1302,14 +1664,33 @@ export function useCutoutState(): CutoutState {
     if (layers.length === 0) { setStatus('no layer to cut'); return; }
     cutLayer(layers.length - 1);
   });
+  useIFTTT('key:b', () => setTool('brush'));
+  useIFTTT('key:h', () => setTool('hand'));
+  useIFTTT('key:s', () => setTool('smart'));
+  useIFTTT('key:l', () => setTool('lasso'));
+  useIFTTT('key:f', () => setTool('refine'));
+  useIFTTT('key:e', () => setMode('erase'));
+  useIFTTT('key:r', () => setMode('restore'));
+  useIFTTT('key:enter', () => commitLasso());
+  useIFTTT('key:escape', () => clearLasso());
+  useIFTTT('key:[', () => {
+    const i = BRUSH_SIZES.indexOf(brushPx);
+    if (i > 0) setBrushPx(BRUSH_SIZES[i - 1]);
+  });
+  useIFTTT('key:]', () => {
+    const i = BRUSH_SIZES.indexOf(brushPx);
+    if (i < BRUSH_SIZES.length - 1) setBrushPx(BRUSH_SIZES[i + 1]);
+  });
 
   return {
     srcPath, stem, srcDims, isBlank,
     status, busy, savedPath,
     tool, mode, brushPx, setTool, setMode, setBrushPx,
+    lassoPoints, addLassoPoint, commitLasso, clearLasso,
     activeLayer, setActiveLayer,
-    maskVersion, hasMaskEdits, hasBrushLayer, overlayCells, brushOnlyOverlayCells,
-    beginStroke, paintAtSource, endStroke, clearMask, createBlankSurface, setCanvasSize,
+    maskVersion, hasMaskEdits, hasBrushLayer,
+    maskId: mask.id, smartUnionId: smartUnion.id,
+    beginStroke, paintAtSource, endStroke, clearMask, invertMask, createBlankSurface, setCanvasSize,
     backendName: backendRef.current.name,
     backend, setBackend, samAvailable,
     floodFuzz, setFloodFuzz,
@@ -1318,7 +1699,7 @@ export function useCutoutState(): CutoutState {
     samMaskIdx, setSamMaskIdx,
     clicks, addClick, clearClicks, smartBusy,
     layers, overlayRes,
-    layerConfigs, compositionLayers, setLayerMode, toggleLayerMute, deleteLayer,
+    layerConfigs, compositionLayers, setLayerMode, setLayerBlend, toggleLayerMute, deleteLayer,
     addPaintLayer, duplicateLayer, moveLayer, mergeLayer, deleteCompositionLayer, setCompositionLayerName, setCompositionLayerGroup,
     setLayerColor, setLayerHueOffset, setLayerPhaseOffset, setLayerDim,
     effectMode, setEffectMode,
@@ -1326,6 +1707,7 @@ export function useCutoutState(): CutoutState {
     setEffectColor, setEffectHueOffset, setEffectPhaseOffset, setEffectDim,
     customSurfaces, addCustomSurface,
     pickFile, saveCutout, saveIcons, saveSqi,
+    importSqi,
     lastSavedAt, restoredFrom,
     canUndo: history.canUndo, canRedo: history.canRedo, undo, redo,
     clipboard, copyLayer, pasteLayer, cutLayer,
@@ -1369,6 +1751,7 @@ function defaultLayerConfig(
 ): LayerConfig {
   return {
     mode: defaults.mode,
+    blend: 'normal',
     hueOffset: ((i * 0.6180339887) + defaults.hueOffset) % 1,
     phaseOffset: i * 0.7 + defaults.phaseOffset,
     muted: false,
