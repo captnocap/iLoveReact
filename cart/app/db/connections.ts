@@ -16,7 +16,12 @@ import * as pg from '@reactjit/runtime/hooks/pg';
 import { BUCKETS, type BucketId } from './buckets';
 
 const SOCKET_SUBPATH = '.cache/reactjit-embed/embed-pg-sock';
-const PG_USER = 'embed';
+// PG_USER MUST match framework/storage/pg.zig's `default_user` AND
+// scripts/dev's `initdb -U <role>` — the third member of the three-way
+// lockstep. When pg.zig flipped from `embed` to `postgres` this kept
+// the old default and every bucket connection failed with `role
+// "embed" does not exist`. Keep all three call sites in sync.
+const PG_USER = 'postgres';
 
 function home(): string {
   if (!hasHost('__env_get')) {
