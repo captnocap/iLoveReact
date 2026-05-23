@@ -92,6 +92,13 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     options.addOption(bool, "is_lib", false);
     options.addOption([]const u8, "app_name", app_name);
+    // has_gpu — true for the GPU shell, false for the TUI shell. The
+    // INGREDIENTS catalog uses this to gate `core` + `window` bindings
+    // (the two whose .zig pull SDL3/freetype via engine.zig); when
+    // false those resolve to no-op stubs so the headless binary
+    // doesn't need the SDL include paths. C2 will widen this into a
+    // full headless/windowed split inside v8_app itself.
+    options.addOption(bool, "has_gpu", true);
     options.addOption(bool, "dev_mode", dev_mode);
     options.addOption(bool, "custom_chrome", custom_chrome);
     options.addOption(bool, "has_physics", has_physics);
@@ -485,6 +492,7 @@ pub fn build(b: *std.Build) void {
     const has_zigcall = b.option(bool, "has-zigcall", "Register __zig_call/__zig_call_list bindings") orelse false;
     const has_sdk = b.option(bool, "has-sdk", "Register __http_request_*/__fetch/__claude_*/__kimi_*/__localai_*/__browser_*/__ipc_*/__play_*/__rec_* bindings") orelse false;
     const has_voice = b.option(bool, "has-voice", "Register __voice_* bindings (mic + WebRTC VAD)") orelse false;
+    const has_audio_input = b.option(bool, "has-audio-input", "Register __rawCapture_* bindings (raw mic capture for music sampling)") orelse false;
     const has_paintable = b.option(bool, "has-paintable", "Register __paintable_* bindings (persistent GPU mask textures)") orelse false;
     // has_whisper, has_pg, has_embed, has_doom hoisted earlier (next to their compile/link blocks).
     options.addOption(bool, "has_process", has_process);
@@ -498,6 +506,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_zigcall", has_zigcall);
     options.addOption(bool, "has_sdk", has_sdk);
     options.addOption(bool, "has_voice", has_voice);
+    options.addOption(bool, "has_audio_input", has_audio_input);
     options.addOption(bool, "has_paintable", has_paintable);
     options.addOption(bool, "has_pg", has_pg or has_embed);
     options.addOption(bool, "has_embed", has_embed);
@@ -524,6 +533,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/zigcall.flag", if (has_zigcall) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/sdk.flag", if (has_sdk) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/voice.flag", if (has_voice) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/audio_input.flag", if (has_audio_input) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/paintable.flag", if (has_paintable) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");
@@ -636,6 +646,13 @@ pub fn build(b: *std.Build) void {
         const tui_options = b.addOptions();
         tui_options.addOption([]const u8, "app_name", app_name);
         tui_options.addOption([]const u8, "bundle_path", bundle_path);
+        // has_gpu=false declares this binary as the headless shell.
+        // INGREDIENTS gates `core` + `window` (the SDL-coupled
+        // required bindings) on this flag — when false they resolve
+        // to no-op stubs, so the TUI binary doesn't need SDL3/freetype
+        // include paths or links. C2 collapses this distinction into
+        // a unified v8_app entry point.
+        tui_options.addOption(bool, "has_gpu", false);
         // Mirrors the GPU app's gate: when -Dhas-terminal=true is passed,
         // libvterm is linked and framework/vterm.zig dispatches to the
         // real impl (otherwise without midi). The TUI host's <Terminal>
@@ -654,6 +671,38 @@ pub fn build(b: *std.Build) void {
         tui_options.addOption(bool, "has_net", has_net);
         tui_options.addOption(bool, "has_sdk", has_sdk);
         tui_options.addOption(bool, "has_fs", has_fs);
+        // Full catalog mirror — same flag set the GPU shell sees. The
+        // INGREDIENTS catalog in framework/v8_ingredients.zig reads
+        // these via `enabledFor("X")`; flags that aren't declared
+        // here would short-circuit to false (forever), forcing the
+        // stub branch even when the cart's metafile clearly ordered
+        // the binding. Declaring them all keeps the source-driven
+        // contract symmetric across substrates.
+        //
+        // Pure-Zig bindings (pg, embed-via-dlopen, whisper, onnx, tor,
+        // privacy, websocket, telemetry, zigcall) compile cleanly into
+        // the TUI binary today. SDL3 / wgpu-coupled bindings
+        // (audio, audio_input, voice, video, paintable, doom) need
+        // their C deps linked — the tui-app exe block below does not
+        // wire those in unless has_window is also true, so passing
+        // -Dhas-voice=true to ship-tui will currently compile-fail on
+        // an SDL header. The SDL gate merge (C2) closes that.
+        tui_options.addOption(bool, "has_websocket", has_websocket);
+        tui_options.addOption(bool, "has_telemetry", has_telemetry);
+        tui_options.addOption(bool, "has_zigcall", has_zigcall);
+        tui_options.addOption(bool, "has_tor", has_tor);
+        tui_options.addOption(bool, "has_privacy", has_privacy);
+        tui_options.addOption(bool, "has_pg", has_pg or has_embed);
+        tui_options.addOption(bool, "has_embed", has_embed);
+        tui_options.addOption(bool, "has_whisper", has_whisper);
+        tui_options.addOption(bool, "has_onnx", has_onnx);
+        tui_options.addOption(bool, "has_voice", has_voice);
+        tui_options.addOption(bool, "has_audio_input", has_audio_input);
+        tui_options.addOption(bool, "has_audio", has_audio);
+        tui_options.addOption(bool, "has_midi", has_midi);
+        tui_options.addOption(bool, "has_paintable", has_paintable);
+        tui_options.addOption(bool, "has_doom", has_doom);
+        tui_options.addOption(bool, "has_video", false);
         // -Dhas-window: cart imports <Window>/<Notification>. The trigger
         // is runtime/primitives/window.tsx landing in the bundle
         // (ship-metafile-gate.js detects it). When set, the tui-app
@@ -675,6 +724,15 @@ pub fn build(b: *std.Build) void {
         });
         tui_mod.addImport("v8", v8_mod);
         tui_mod.addImport("tls", tls_mod);
+        // pg.zig (Postgres client) — source-gated alongside the
+        // v8_ingredients catalog. When has_pg=false the
+        // `@import("v8_bindings_pg.zig")` resolves to a stub inside
+        // v8_ingredients, so neither pg.zig nor its named "pg" module
+        // import are reached. Pull the module in iff the cart ordered
+        // it (or has_embed, which depends on pg). Same shape as
+        // wgpu's `if (has_window) tui_mod.addImport("wgpu", ...)`
+        // below.
+        if (has_pg or has_embed) tui_mod.addImport("pg", pg_dep.module("pg"));
         // wgpu pulled in transitively when has_window: the SDL3
         // TextEngine in primitive/text.zig calls into gpu/text.zig for
         // per-glyph advances (shared atlas, single source of truth for

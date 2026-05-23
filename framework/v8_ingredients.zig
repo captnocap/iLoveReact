@@ -1,0 +1,323 @@
+//! v8_ingredients — shared V8 binding catalog.
+//!
+//! Every V8 host-fn binding registered by a cart goes through this module.
+//! v8_app.zig (GPU shell) and v8_tui_app.zig (TUI shell) both consume the
+//! same INGREDIENTS table via `registerAll()` and `tickDrain()`. There is
+//! ONE source of truth for the binding surface; substrate-specific stuff
+//! (SDL3 window, ANSI rasterizer) lives in its own shell, not here.
+//!
+//! The contract (lifted from v8_app.zig — see that file's pre-extraction
+//! INGREDIENTS comment block for the full historical context):
+//!
+//!   A cart's bundle is the order ticket. The kitchen (this file +
+//!   scripts/ship + build.zig) only puts an ingredient in the burrito if
+//!   the ticket asks for it. Carts that don't order an ingredient never
+//!   see its host-fn surface on globalThis.
+//!
+//! ⚠️ Every new V8 binding that registers host fns goes HERE. Three pieces,
+//! all required — forgetting any one is how allergens get into burritos:
+//!
+//!   1. One row in INGREDIENTS below (grep_prefix / reg_fn / mod)
+//!   2. A `has-<name>` option in build.zig — referenced by build_options.has_X
+//!   3. A `grep -qE '<grep_prefix>'` in scripts/ship that flips -Dhas-X=true
+//!
+//! The kitchen story: scripts/ship reads the cart's bundle, looks for the
+//! grep_prefix (e.g. "__proc_"), and if found passes `-Dhas-process=true`
+//! to zig build. build.zig exposes that as `build_options.has_process`.
+//! The import below resolves to the real module when the option is true,
+//! or to a stub with matching public API when false. `registerAll()` and
+//! `tickDrain()` iterate INGREDIENTS uniformly — register the real impl
+//! or the no-op stub.
+//!
+//! What happens if you skip any step:
+//!   - Skip step 1 → binding never gets registered. Cart's hook silently
+//!     no-ops on the cart that imports it. Visible failure for that cart's
+//!     author. Other carts unaffected.
+//!   - Skip step 2 → comptime fails. Build won't compile. Self-correcting.
+//!   - Skip step 3 → binding never gets registered (option defaults false).
+//!     Same visible failure as skip step 1.
+//!
+//! What previously happened when this contract DIDN'T exist (2026-04-25):
+//! worker 571f added httpsrv/wssrv/process bindings and called register()
+//! for all three unconditionally in appInit. Every cart in the repo paid
+//! the cost of registering host-fn surface they never asked for. The extra
+//! V8 Function-table load corrupted Function::Call such that callGlobalInt
+//! from C++ threw RangeError on every cart — even carts that never
+//! imported useHost. Three hours of debugging burritos that had
+//! ingredients nobody ordered. Don't re-litigate. Add the row.
+
+const std = @import("std");
+const build_options = @import("build_options");
+
+// `enabledFor("X")` returns `build_options.has_X` when the decl exists,
+// else false. `@import` requires a string literal in Zig 0.15 so the
+// path can't move into the helper — but the gate-check ladder can.
+// `@hasDecl` short-circuits to false so binaries whose build_options
+// omits a flag still compile (the binding falls through to the stub).
+pub inline fn enabledFor(comptime opt_name: []const u8) bool {
+    return @hasDecl(build_options, "has_" ++ opt_name) and @field(build_options, "has_" ++ opt_name);
+}
+
+pub const Ingredient = struct {
+    name: []const u8,
+    /// `true` = framework-essential, registered on every cart. `grep_prefix` ignored.
+    /// `false` = opt-in; only registered when scripts/ship sees `grep_prefix` in the bundle.
+    required: bool,
+    /// Bundle-grep token — must match the host-fn prefix that the
+    /// corresponding hook calls via callHost(). Empty when required=true.
+    grep_prefix: []const u8,
+    /// Public name of the register function inside `mod`.
+    reg_fn: []const u8,
+    /// Module to register from — already gated to a stub if
+    /// `required=false` and the cart didn't ask for it (see comptime
+    /// imports below).
+    mod: type,
+};
+
+// ── Required binding modules ─────────────────────────────────────────
+//
+// These bindings expose host fns the React renderer / runtime depend on
+// unconditionally — __hostFlush, __zigCall, telemetry counters, etc.
+// They're "in every burrito" because no cart can run without them on
+// the GPU substrate.
+//
+// Two of them — `core` and `window` — are SDL-coupled: their .zig
+// files reach into framework/engine.zig which @cImports SDL3.h /
+// ft2build.h. The headless (TUI) shell can't link SDL, so those two
+// resolve to stubs when `has_gpu=false`. The TUI host (tui/host.ts)
+// re-implements anything the React reconciler actually needs at the
+// JS layer (e.g. there is no mouse/viewport surface in an ANSI grid).
+// C2 will collapse the headless/windowed distinction into a single
+// runtime branch; until then, has_gpu is the seam.
+
+const has_gpu_flag = enabledFor("gpu");
+
+const v8_bindings_core = if (has_gpu_flag) @import("v8_bindings_core.zig") else struct {
+    pub fn registerCore(_: anytype) void {}
+};
+const v8_bindings_eventbus = @import("v8_bindings_eventbus.zig");
+const v8_bindings_ifttt = @import("v8_bindings_ifttt.zig");
+const v8_bindings_env = @import("v8_bindings_env.zig");
+const v8_bindings_window = if (has_gpu_flag) @import("v8_bindings_window.zig") else struct {
+    pub fn registerWindow(_: anytype) void {}
+};
+const v8_bindings_inspector = @import("v8_bindings_inspector.zig");
+
+// ── Source-gated binding modules ─────────────────────────────────────
+//
+// `if (enabledFor("X")) @import(...) else struct { stub }` — the stub
+// matches the real module's public API surface (register fn + tickDrain
+// when applicable) so the INGREDIENTS iteration compiles either way.
+//
+// Critical: when has_X is false the binding file is NEVER parsed, so its
+// string literals (host-fn names like "getFps", "__zig_call") don't bleed
+// into .rodata/DWARF of the final binary. The naive
+// `_real = @import(...); if cond _real else stub` shape compiles the
+// file unconditionally and leaks the host-fn strings into the binary
+// even when the gate is off; the `if cond @import(...) else struct{...}`
+// shape below is the load-bearing trick.
+
+const v8_bindings_fs = if (enabledFor("fs")) @import("v8_bindings_fs.zig") else struct {
+    pub fn registerFs(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_websocket = if (enabledFor("websocket")) @import("v8_bindings_websocket.zig") else struct {
+    pub fn registerWebSocket(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_telemetry = if (enabledFor("telemetry")) @import("v8_bindings_telemetry.zig") else struct {
+    pub fn registerTelemetry(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_zigcall = if (enabledFor("zigcall")) @import("v8_bindings_zigcall.zig") else struct {
+    pub fn registerZigCall(_: anytype) void {}
+    pub fn registerZigCallList(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_httpserver = if (enabledFor("httpsrv")) @import("v8_bindings_httpserver.zig") else struct {
+    pub fn registerHttpServer(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_wsserver = if (enabledFor("wssrv")) @import("v8_bindings_wsserver.zig") else struct {
+    pub fn registerWsServer(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_process = if (enabledFor("process")) @import("v8_bindings_process.zig") else struct {
+    pub fn registerProcess(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_net = if (enabledFor("net")) @import("v8_bindings_net.zig") else struct {
+    pub fn registerNet(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+// Source RCON + A2S Source Query — gated alongside has_net since they sit
+// on top of net/tcp.zig and net/udp.zig and ride the useConnection
+// trichotomy. Any cart shipping `useConnection({kind:'rcon'|'a2s'})`
+// already trips has-net via the metafile gate, so no separate ingredient
+// flag is needed.
+const v8_bindings_gameserver = if (enabledFor("net")) @import("v8_bindings_gameserver.zig") else struct {
+    pub fn registerGameServer(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_tor = if (enabledFor("tor")) @import("v8_bindings_tor.zig") else struct {
+    pub fn registerTor(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_privacy = if (enabledFor("privacy")) @import("v8_bindings_privacy.zig") else struct {
+    pub fn registerPrivacy(_: anytype) void {}
+};
+const v8_bindings_sdk = if (enabledFor("sdk")) @import("v8_bindings_sdk.zig") else struct {
+    pub fn registerSdk(_: anytype) void {}
+};
+const v8_bindings_voice = if (enabledFor("voice")) @import("v8_bindings_voice.zig") else struct {
+    pub fn registerVoice(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_audio_input = if (enabledFor("audio_input")) @import("v8_bindings_audio_input.zig") else struct {
+    pub fn registerAudioInput(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_whisper = if (enabledFor("whisper")) @import("v8_bindings_whisper.zig") else struct {
+    pub fn registerWhisper(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_onnx = if (enabledFor("onnx")) @import("v8_bindings_onnx.zig") else struct {
+    pub fn registerOnnx(_: anytype) void {}
+};
+const v8_bindings_pg = if (enabledFor("pg")) @import("v8_bindings_pg.zig") else struct {
+    pub fn registerPg(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_embed = if (enabledFor("embed")) @import("v8_bindings_embed.zig") else struct {
+    pub fn registerEmbed(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_video = if (enabledFor("video")) @import("v8_bindings_video.zig") else struct {
+    pub fn registerVideo(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_audio = if (enabledFor("audio")) @import("v8_bindings_audio.zig") else struct {
+    pub fn registerAudio(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_midi = if (enabledFor("midi")) @import("v8_bindings_midi.zig") else struct {
+    pub fn registerMidi(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_vterm = if (enabledFor("terminal")) @import("v8_bindings_vterm.zig") else struct {
+    pub fn registerVterm(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+const v8_bindings_doom = if (enabledFor("doom")) @import("v8_bindings_doom.zig") else struct {
+    pub fn registerDoom(_: anytype) void {}
+    pub fn tickDrain() void {}
+};
+// Paintable mask textures — opt-in via the `__paintable_` host fn prefix.
+// Carts that import usePaintable() reference __paintable_circle etc., the
+// metafile-gate sees the prefix, scripts/ship flips -Dhas-paintable=true.
+const v8_bindings_paintable = if (enabledFor("paintable")) @import("v8_bindings_paintable.zig") else struct {
+    pub fn registerPaintable(_: anytype) void {}
+};
+
+// ── INGREDIENTS ─────────────────────────────────────────────────────
+//
+// Required-true rows are always registered. Required-false rows are
+// only "real" when the matching `has-<name>` build option is true —
+// the corresponding `mod` resolves to a stub otherwise, so iterating
+// the array uniformly does the right thing in either case.
+
+pub const INGREDIENTS = [_]Ingredient{
+    // Framework-essential (always-on). These bindings expose host fns
+    // the React renderer / runtime depend on unconditionally —
+    // __hostFlush, __fs_*, __zigCall, telemetry counters, etc. They're
+    // "in every burrito" because no cart can run without them. New
+    // required bindings still go here (do NOT bypass by hardcoding a
+    // register call elsewhere in appInit).
+    //
+    // Core is the only truly framework-internal binding — its host fns
+    // (__hostFlush/__setState/__markDirty/getMouse*/isKeyDown/...) are
+    // called by runtime/index.tsx + runtime/primitives.tsx which every
+    // cart bundles unconditionally as React reconciler scaffolding. So
+    // gating it on a hook-file presence is degenerate; it's always
+    // shipped because the framework boilerplate in the bundle always
+    // references it.
+    .{ .name = "core", .required = true, .grep_prefix = "", .reg_fn = "registerCore", .mod = v8_bindings_core },
+    // Observability bus — always-on. The whole point is that every cart
+    // gets free crash/overflow/perf diagnostics with no opt-in. Cost is
+    // five host fns and a circular ring; nothing the cart has to import.
+    .{ .name = "eventbus", .required = true, .grep_prefix = "", .reg_fn = "registerEventBus", .mod = v8_bindings_eventbus },
+    // useIFTTT registry + timer wheel — always-on. runtime/index.tsx
+    // unconditionally requires useIFTTT.ts (it's the system-signal
+    // sink), so every cart pulls the wire/timer host fns. Source-gating
+    // this is degenerate for the same reason core is.
+    .{ .name = "ifttt", .required = true, .grep_prefix = "", .reg_fn = "registerIFTTT", .mod = v8_bindings_ifttt },
+    .{ .name = "env", .required = true, .grep_prefix = "", .reg_fn = "registerEnv", .mod = v8_bindings_env },
+    .{ .name = "window", .required = true, .grep_prefix = "", .reg_fn = "registerWindow", .mod = v8_bindings_window },
+    .{ .name = "inspector", .required = true, .grep_prefix = "", .reg_fn = "registerInspector", .mod = v8_bindings_inspector },
+    // Everything below is source-gated: scripts/ship reads the esbuild
+    // metafile and only flips the matching -Dhas-X=true if a JS file
+    // that calls into the binding is actually shipped.
+    .{ .name = "fs", .required = false, .grep_prefix = "__fs_", .reg_fn = "registerFs", .mod = v8_bindings_fs },
+    .{ .name = "websocket", .required = false, .grep_prefix = "__ws_", .reg_fn = "registerWebSocket", .mod = v8_bindings_websocket },
+    .{ .name = "telemetry", .required = false, .grep_prefix = "__tel_", .reg_fn = "registerTelemetry", .mod = v8_bindings_telemetry },
+    .{ .name = "zigcall", .required = false, .grep_prefix = "__zig_call", .reg_fn = "registerZigCall", .mod = v8_bindings_zigcall },
+    .{ .name = "zigcall_list", .required = false, .grep_prefix = "__zig_call", .reg_fn = "registerZigCallList", .mod = v8_bindings_zigcall },
+    // Opt-in per cart — scripts/ship grep flips -Dhas-X when the bundle
+    // references the matching prefix. Carts that don't order them get
+    // a comptime stub (no host-fn registration, no tickDrain).
+    .{ .name = "process", .required = false, .grep_prefix = "__proc_", .reg_fn = "registerProcess", .mod = v8_bindings_process },
+    .{ .name = "httpsrv", .required = false, .grep_prefix = "__httpsrv_", .reg_fn = "registerHttpServer", .mod = v8_bindings_httpserver },
+    .{ .name = "wssrv", .required = false, .grep_prefix = "__wssrv_", .reg_fn = "registerWsServer", .mod = v8_bindings_wsserver },
+    .{ .name = "net", .required = false, .grep_prefix = "__tcp_", .reg_fn = "registerNet", .mod = v8_bindings_net },
+    .{ .name = "gameserver", .required = false, .grep_prefix = "__rcon_", .reg_fn = "registerGameServer", .mod = v8_bindings_gameserver },
+    .{ .name = "tor", .required = false, .grep_prefix = "__tor_", .reg_fn = "registerTor", .mod = v8_bindings_tor },
+    .{ .name = "privacy", .required = false, .grep_prefix = "__priv_", .reg_fn = "registerPrivacy", .mod = v8_bindings_privacy },
+    .{ .name = "sdk", .required = false, .grep_prefix = "__http_request_", .reg_fn = "registerSdk", .mod = v8_bindings_sdk },
+    .{ .name = "voice", .required = false, .grep_prefix = "__voice_", .reg_fn = "registerVoice", .mod = v8_bindings_voice },
+    .{ .name = "audio_input", .required = false, .grep_prefix = "__rawCapture_", .reg_fn = "registerAudioInput", .mod = v8_bindings_audio_input },
+    .{ .name = "whisper", .required = false, .grep_prefix = "__whisper_", .reg_fn = "registerWhisper", .mod = v8_bindings_whisper },
+    .{ .name = "onnx", .required = false, .grep_prefix = "__onnx_", .reg_fn = "registerOnnx", .mod = v8_bindings_onnx },
+    .{ .name = "pg", .required = false, .grep_prefix = "__pg_", .reg_fn = "registerPg", .mod = v8_bindings_pg },
+    .{ .name = "embed", .required = false, .grep_prefix = "__embed_", .reg_fn = "registerEmbed", .mod = v8_bindings_embed },
+    .{ .name = "video", .required = false, .grep_prefix = "__video_", .reg_fn = "registerVideo", .mod = v8_bindings_video },
+    .{ .name = "audio", .required = false, .grep_prefix = "__audio_", .reg_fn = "registerAudio", .mod = v8_bindings_audio },
+    .{ .name = "midi", .required = false, .grep_prefix = "__midi_", .reg_fn = "registerMidi", .mod = v8_bindings_midi },
+    .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
+    .{ .name = "doom", .required = false, .grep_prefix = "__doom_", .reg_fn = "registerDoom", .mod = v8_bindings_doom },
+    .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },
+};
+
+/// Register every ingredient's host fns into the current V8 context.
+/// Call once at shell init, after v8_runtime.initVM() and before the
+/// cart bundle evaluates. Real binding for opted-in ingredients, no-op
+/// stub for the rest.
+pub fn registerAll() void {
+    inline for (INGREDIENTS) |ing| @field(ing.mod, ing.reg_fn)({});
+}
+
+/// Pump every ingredient's per-tick work — accept new HTTP connections,
+/// deliver completed SDK requests, etc. The GPU shell calls this from
+/// inside the render loop; the TUI shell calls it from JS via
+/// __tickDrain. Stubs no-op.
+///
+/// Return value: true if any binding signaled that downstream consumers
+/// should act on freshly-drained work. Today only vterm's tickDrain
+/// returns bool (true = new PTY data; tui/v8-preamble.js fires
+/// __onVtermUpdate so the ANSI walker repaints without polling latency).
+/// The GPU shell discards the bool because engine.run owns its own
+/// repaint cadence; the TUI shell forwards it to JS.
+pub fn tickDrain() bool {
+    var signaled: bool = false;
+    inline for (INGREDIENTS) |ing| {
+        if (@hasDecl(ing.mod, "tickDrain")) {
+            const td = @field(ing.mod, "tickDrain");
+            const RetT = @typeInfo(@TypeOf(td)).@"fn".return_type orelse void;
+            if (RetT == bool) {
+                if (td()) signaled = true;
+            } else {
+                _ = td();
+            }
+        }
+    }
+    return signaled;
+}

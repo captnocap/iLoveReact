@@ -10,9 +10,13 @@
 //!   2. zig build tui-app -Dapp-name=<name> -Dbundle-path=<absolute path>
 //!   3. zig-out/bin/<name> is the shippable binary.
 //!
-//! Optional V8 bindings (httpsrv, wssrv, process, net, sdk) are gated by
-//! the same `-Dhas-*` flags ship/ship-tui derive from the cart's bundle
-//! metafile. Same source-driven feature gates as the GPU app.
+//! Binding surface comes from framework/v8_ingredients.zig — the same
+//! INGREDIENTS catalog the GPU shell (v8_app.zig) consumes. What
+//! compiles in is controlled per-cart by the metafile gate via -Dhas-X
+//! flags. The TUI shell carries one extra registration on top of the
+//! catalog: `worker_bindings.register()` (so useAssistant works without
+//! the cart also ordering has-sdk; in v8_app worker_bindings rides on
+//! v8_bindings_sdk.registerSdk).
 
 const std = @import("std");
 const v8rt = @import("framework/v8_runtime.zig");
@@ -20,54 +24,29 @@ const v8_runtime = v8rt;
 const cli_bindings = @import("framework/v8_bindings_cli.zig");
 const build_options = @import("build_options");
 const v8 = @import("v8");
+const reconciler_bindings = @import("framework/v8_bindings_reconciler.zig");
+const ingredients = @import("framework/v8_ingredients.zig");
 
-const HAS_TERMINAL = @hasDecl(build_options, "has_terminal") and build_options.has_terminal;
-const HAS_HTTPSRV = @hasDecl(build_options, "has_httpsrv") and build_options.has_httpsrv;
-const HAS_WSSRV = @hasDecl(build_options, "has_wssrv") and build_options.has_wssrv;
-const HAS_PROCESS = @hasDecl(build_options, "has_process") and build_options.has_process;
-const HAS_NET = @hasDecl(build_options, "has_net") and build_options.has_net;
-const HAS_SDK = @hasDecl(build_options, "has_sdk") and build_options.has_sdk;
-const HAS_FS = @hasDecl(build_options, "has_fs") and build_options.has_fs;
-const HAS_WINDOW = @hasDecl(build_options, "has_window") and build_options.has_window;
-
-const host_window = if (HAS_WINDOW) @import("framework/v8_bindings_host_window.zig") else struct {
-    pub fn register() void {}
-    pub fn init(_: std.mem.Allocator) !void {}
-    pub fn tickDrain() void {}
-};
-
-const vterm_bindings = if (HAS_TERMINAL) @import("framework/v8_bindings_vterm.zig") else struct {
-    pub fn registerAll() void {}
-    pub fn tickDrain() bool { return false; }
-};
-const httpsrv_bindings = if (HAS_HTTPSRV) @import("framework/v8_bindings_httpserver.zig") else struct {
-    pub fn registerHttpServer(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const wssrv_bindings = if (HAS_WSSRV) @import("framework/v8_bindings_wsserver.zig") else struct {
-    pub fn registerWsServer(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const process_bindings = if (HAS_PROCESS) @import("framework/v8_bindings_process.zig") else struct {
-    pub fn registerProcess(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const net_bindings = if (HAS_NET) @import("framework/v8_bindings_net.zig") else struct {
-    pub fn registerNet(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const sdk_bindings = if (HAS_SDK) @import("framework/v8_bindings_sdk.zig") else struct {
-    pub fn registerSdk(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const fs_bindings = if (HAS_FS) @import("framework/v8_bindings_fs.zig") else struct {
-    pub fn registerFs(_: anytype) void {}
-};
+// host_window — opt-in <Window>/<Notification> support for TUI carts
+// that want to paint a real SDL3 surface from inside an otherwise-ANSI
+// binary. Gated on build_options.has_window. NOT part of the
+// INGREDIENTS catalog because it owns SDL3 lifecycle (init + per-tick
+// SDL_PumpEvents) that only matters when this opt-in flips on.
+const host_window = if (@hasDecl(build_options, "has_window") and build_options.has_window)
+    @import("framework/v8_bindings_host_window.zig")
+else
+    struct {
+        pub fn register() void {}
+        pub fn init(_: std.mem.Allocator) !void {}
+        pub fn tickDrain() void {}
+    };
 
 // Worker bindings — claude_code / codex / kimi / local_ai / openai_compat
-// SDK back-ends powering useAssistant. Pulled in unconditionally so a
-// cart can pick any backend; libcurl is the only extra link cost
-// (libllama is dlopen'd at runtime, no link-time dep).
+// SDK back-ends powering useAssistant. Registered unconditionally so a
+// TUI cart can pick any backend; libllama is dlopen'd at runtime, so no
+// link-time dep. In v8_app this rides on v8_bindings_sdk.registerSdk —
+// the TUI shell calls it directly because TUI carts may not order
+// has-sdk yet still want useAssistant.
 const worker_bindings = @import("framework/assistant/worker_bindings.zig");
 
 // Default to "bundle.js" (next to source) when bundle-path isn't passed,
@@ -79,23 +58,21 @@ else
 
 const BUNDLE_BYTES = @embedFile(BUNDLE_FILE_NAME);
 
-// __tickDrain — pump every binding's per-tick work (accept new HTTP
-// connections, deliver completed SDK requests, etc.). The GPU app
-// calls each binding's tickDrain inline in its render loop; the TUI
-// has no render loop on the Zig side, so the JS preamble's
-// __runEventLoop calls this between timer firings.
+// __tickDrain — pump every binding's per-tick work between timer firings.
+// The GPU app calls ingredients.tickDrain inline in its render loop; the
+// TUI has no Zig-side render loop, so the JS preamble's __runEventLoop
+// calls this. host_window.tickDrain runs alongside because it owns SDL3
+// event pumping for <Window> nodes (separate from the ANSI grid). The
+// returned number is the vterm-drained signal that tui/v8-preamble.js
+// uses to fire __onVtermUpdate without polling latency — propagated from
+// ingredients.tickDrain()'s bool return.
 fn hostTickDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const vterm_drained = vterm_bindings.tickDrain();
-    httpsrv_bindings.tickDrain();
-    wssrv_bindings.tickDrain();
-    process_bindings.tickDrain();
-    net_bindings.tickDrain();
-    sdk_bindings.tickDrain();
+    const drained = ingredients.tickDrain();
     // SDL3 event pump + repaint for any <Window> nodes the cart opened.
-    // No-op when HAS_WINDOW is off (the if-comptime resolves to a stub).
+    // No-op when has_window is off (the if-comptime resolves to a stub).
     host_window.tickDrain();
-    info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (vterm_drained) @as(f64, 1) else @as(f64, 0)));
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (drained) @as(f64, 1) else @as(f64, 0)));
 }
 
 pub fn main() !void {
@@ -120,25 +97,30 @@ pub fn main() !void {
     cli_bindings.setArgv(@constCast(script_argv));
     cli_bindings.registerAll();
     cli_bindings.installSignalHandlers();
-    // Optional vterm bindings — only present when -Dhas-terminal=true.
-    // No-op stub otherwise.
-    vterm_bindings.registerAll();
-    // Optional networking bindings — gated by `-Dhas-*` flags ship-tui
-    // derives from the cart's bundle metafile.
-    httpsrv_bindings.registerHttpServer({});
-    wssrv_bindings.registerWsServer({});
-    process_bindings.registerProcess({});
-    net_bindings.registerNet({});
-    sdk_bindings.registerSdk({});
-    fs_bindings.registerFs({});
-    // Assistant SDK bindings — powers runtime/hooks/useAssistant for the
-    // five supported backends.
+
+    // All host-fn binding registration — required (core/eventbus/ifttt/
+    // env/window/inspector) plus opt-in (fs/ws/tel/process/net/sdk/pg/
+    // embed/whisper/voice/audio/midi/vterm/...). The catalog is shared
+    // with v8_app; what actually compiles in is controlled per-cart by
+    // the metafile gate via -Dhas-X flags. See
+    // framework/v8_ingredients.zig for the contract.
+    ingredients.registerAll();
+
+    // __hostFlush — single binding shared with the GPU shell. Default
+    // mode is `.sync`: payloads land in host_tree.applyCommandBatch
+    // inline. The TUI binary has no Zig-side paint loop to coordinate
+    // with, so there's nothing to defer.
+    reconciler_bindings.register();
+
+    // Assistant SDK bindings — register directly so useAssistant works
+    // for any TUI cart, even ones that don't order has-sdk (in v8_app
+    // worker_bindings rides on registerSdk; we can't rely on that path
+    // here without adding worker_bindings as its own catalog row).
     worker_bindings.register();
 
-    // Host-window binding — when HAS_WINDOW, registers __hostFlush so the
-    // React reconciler stream flows into host_tree, and arms tickDrain to
-    // pump SDL3 events + paint open <Window> surfaces. No-op stub when
-    // HAS_WINDOW is false.
+    // Host-window binding — when has-window, arms tickDrain to pump
+    // SDL3 events + paint open <Window> surfaces. No-op stub when
+    // has-window is false.
     try host_window.init(std.heap.c_allocator);
     host_window.register();
 

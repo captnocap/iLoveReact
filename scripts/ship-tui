@@ -111,15 +111,29 @@ if [ -f "$METAFILE" ]; then
     fi
     # shellcheck disable=SC2086
     set -- $GATE_FLAGS
-    # $1=privacy $2=useHost $3=useConn $4=fs $5=ws $6=tel $7=zigcall
-    # $8=sdk $9=voice $10=whisper $11=onnx $12=pg $13=embed $14=sqlite
-    # $15=terminal $16=process $17=window
+    # Source of truth: sdk/dependency-registry.json shipGate.flagOrder.
+    # As of this commit:
+    #   $1=privacy   $2=useHost   $3=useConn   $4=fs   $5=ws    $6=tel
+    #   $7=zigcall   $8=sdk       $9=voice    $10=audio_input  $11=whisper
+    #  $12=paintable $13=onnx    $14=pg       $15=embed       $16=sqlite
+    #  $17=terminal  $18=process $19=window   $20=doom
+    # Stale comments cause silently-wrong build flags — keep this block
+    # in lockstep with the registry's flagOrder array. Mismatch = the
+    # gate emits a `1` in a slot we read as a different ingredient.
+    WANT_PRIVACY=$1
     WANT_USEHOST=$2
     WANT_USECONN=$3
     WANT_FS=$4
+    WANT_WS=$5
+    WANT_TEL=$6
+    WANT_ZIGCALL=$7
     WANT_SDK=$8
-    WANT_PROCESS=${16}
-    WANT_WINDOW=${17}
+    WANT_WHISPER=${11}
+    WANT_ONNX=${13}
+    WANT_PG=${14}
+    WANT_EMBED=${15}
+    WANT_PROCESS=${18}
+    WANT_WINDOW=${19}
     if [ "$WANT_USEHOST" = "1" ]; then
         HTTPSRV_FLAG="-Dhas-httpsrv=true"
         WSSRV_FLAG="-Dhas-wssrv=true"
@@ -136,6 +150,18 @@ if [ -f "$METAFILE" ]; then
     if [ "$WANT_FS" = "1" ]; then
         FS_FLAG="-Dhas-fs=true"
     fi
+    # Pure-Zig bindings — same INGREDIENTS catalog the GPU shell pulls
+    # from. No SDL link cost; they just register __X_* host fns when
+    # the cart's bundle metafile says the corresponding runtime/hooks
+    # file made it past tree-shake. See framework/v8_ingredients.zig.
+    [ "$WANT_PRIVACY" = "1" ] && PRIVACY_FLAG="-Dhas-privacy=true"
+    [ "$WANT_WS" = "1" ]      && WS_FLAG="-Dhas-websocket=true"
+    [ "$WANT_TEL" = "1" ]     && TEL_FLAG="-Dhas-telemetry=true"
+    [ "$WANT_ZIGCALL" = "1" ] && ZIGCALL_FLAG="-Dhas-zigcall=true"
+    [ "$WANT_PG" = "1" ]      && PG_FLAG="-Dhas-pg=true"
+    [ "$WANT_EMBED" = "1" ]   && EMBED_FLAG="-Dhas-embed=true"
+    [ "$WANT_WHISPER" = "1" ] && WHISPER_FLAG="-Dhas-whisper=true"
+    [ "$WANT_ONNX" = "1" ]    && ONNX_FLAG="-Dhas-onnx=true"
     if [ "$WANT_WINDOW" = "1" ]; then
         # Auto-fires when the cart imports <Window>/<Notification> from
         # @reactjit/runtime/primitives. ship-tui keys SDL3 + the window
@@ -148,7 +174,7 @@ if [ -f "$METAFILE" ]; then
     fi
 fi
 
-echo "[ship-tui] zig build tui-app -Dapp-name=$NAME $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG"
+echo "[ship-tui] zig build tui-app -Dapp-name=$NAME $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG $PRIVACY_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $PG_FLAG $EMBED_FLAG $WHISPER_FLAG $ONNX_FLAG"
 # -Dhas-terminal=true links libvterm and brings in framework/vterm_real
 # so the host's <Terminal> renderer can spawn shells and read cells.
 # libvterm is ~70KB statically; no reason to gate this off by default.
@@ -157,7 +183,8 @@ echo "[ship-tui] zig build tui-app -Dapp-name=$NAME $HTTPSRV_FLAG $WSSRV_FLAG $P
   -Dapp-name="$NAME" \
   -Dbundle-path="$OUT_BUNDLE" \
   -Dhas-terminal=true \
-  $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG
+  $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG \
+  $PRIVACY_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $PG_FLAG $EMBED_FLAG $WHISPER_FLAG $ONNX_FLAG
 
 OUT_BIN="$ROOT/zig-out/bin/$NAME"
 if [ ! -x "$OUT_BIN" ]; then

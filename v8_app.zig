@@ -48,11 +48,15 @@ const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = @import("framework/v8_bindings_core.zig");
 const v8_bindings_reconciler = @import("framework/v8_bindings_reconciler.zig");
 const host_tree = @import("framework/host_tree.zig");
-const v8_bindings_eventbus = @import("framework/v8_bindings_eventbus.zig");
-const v8_bindings_ifttt = @import("framework/v8_bindings_ifttt.zig");
-const v8_bindings_env = @import("framework/v8_bindings_env.zig");
-const v8_bindings_window = @import("framework/v8_bindings_window.zig");
-const v8_bindings_inspector = @import("framework/v8_bindings_inspector.zig");
+// All V8 host-fn binding registration goes through this catalog. v8_app
+// (GPU shell) and v8_tui_app (TUI shell) consume the same INGREDIENTS
+// table — register/tickDrain is the same loop on both substrates. See
+// framework/v8_ingredients.zig for the contract (one row + one build
+// option + one scripts/ship grep). v8_bindings_core and
+// v8_bindings_reconciler are imported above for direct calls
+// (contentStoreGet, drainPending, etc.) that don't go through the
+// catalog; everything else lives behind `ingredients`.
+const ingredients = @import("framework/v8_ingredients.zig");
 const event_bus = @import("framework/diag/event_bus.zig");
 
 // Override std.log so every framework `std.log.info/warn/err` call routes
@@ -63,228 +67,6 @@ pub const std_options: std.Options = .{
     .logFn = event_bus.fromStdLog,
 };
 
-// Conditional @import — when has_X is false the binding file is NEVER
-// parsed, so its string literals (host-fn names like "getFps", "__zig_call")
-// don't bleed into .rodata/DWARF of the final binary. The naive
-// `_real = @import(...)` / `if cond _real else stub` shape compiles the
-// file unconditionally and leaks the host-fn strings into the binary
-// even when the gate is off; the `if cond @import(...) else struct{...}`
-// shape below is the load-bearing trick.
-//
-// `@import` requires a string literal in Zig 0.15 — we can't fold it into
-// a helper that takes the path as a parameter. What we CAN factor out is
-// the `@hasDecl(build_options, "has_X") and build_options.has_X` ladder.
-// That goes through `enabledFor`, killing the redundant `HAS_X` consts.
-inline fn enabledFor(comptime opt_name: []const u8) bool {
-    return @hasDecl(build_options, "has_" ++ opt_name) and @field(build_options, "has_" ++ opt_name);
-}
-
-const v8_bindings_fs = if (enabledFor("fs")) @import("framework/v8_bindings_fs.zig") else struct {
-    pub fn registerFs(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_websocket = if (enabledFor("websocket")) @import("framework/v8_bindings_websocket.zig") else struct {
-    pub fn registerWebSocket(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_telemetry = if (enabledFor("telemetry")) @import("framework/v8_bindings_telemetry.zig") else struct {
-    pub fn registerTelemetry(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_zigcall = if (enabledFor("zigcall")) @import("framework/v8_bindings_zigcall.zig") else struct {
-    pub fn registerZigCall(_: anytype) void {}
-    pub fn registerZigCallList(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-
-// ── INGREDIENTS — opt-in V8 binding surface per cart ────────────────
-//
-// The contract: a cart's bundle is the order ticket. The kitchen (this file
-// + scripts/ship + build.zig) only puts an ingredient in the burrito if the
-// ticket asks for it. Carts that don't order an ingredient never see its
-// host-fn surface on globalThis.
-//
-// ⚠️ Every new V8 binding that registers host fns goes HERE. Three pieces,
-// all required — forgetting any one is how allergens get into burritos:
-//
-//   1. One row in INGREDIENTS below (grep_prefix / reg_fn / mod)
-//   2. A `has-<name>` option in build.zig — referenced by build_options.has_X
-//   3. A `grep -qE '<grep_prefix>'` in scripts/ship that flips -Dhas-X=true
-//
-// The kitchen story: scripts/ship reads the cart's bundle, looks for the
-// grep_prefix (e.g. "__proc_"), and if found passes `-Dhas-process=true` to
-// zig build. build.zig exposes that as `build_options.has_process`. The
-// import below resolves to the real module when the option is true, or to
-// a stub with matching public API when false. appInit and appTick iterate
-// INGREDIENTS uniformly — register the real impl or the no-op stub.
-//
-// What happens if you skip any step:
-//   - Skip step 1 → binding never gets registered. Cart's hook silently
-//     no-ops on the cart that imports it. Visible failure for that cart's
-//     author. Other carts unaffected.
-//   - Skip step 2 → comptime fails. Build won't compile. Self-correcting.
-//   - Skip step 3 → binding never gets registered (option defaults false).
-//     Same visible failure as skip step 1.
-//
-// What previously happened when this contract DIDN'T exist (2026-04-25):
-// worker 571f added httpsrv/wssrv/process bindings and called register()
-// for all three unconditionally in appInit. Every cart in the repo paid
-// the cost of registering host-fn surface they never asked for. The extra
-// V8 Function-table load corrupted Function::Call such that callGlobalInt
-// from C++ threw RangeError on every cart — even carts that never imported
-// useHost. Three hours of debugging burritos that had ingredients nobody
-// ordered. Don't re-litigate. Add the row.
-const Ingredient = struct {
-    name: []const u8,
-    /// `true` = framework-essential, registered on every cart. `grep_prefix` ignored.
-    /// `false` = opt-in; only registered when scripts/ship sees `grep_prefix` in the bundle.
-    required: bool,
-    /// Bundle-grep token — must match the host-fn prefix that the corresponding
-    /// hook calls via callHost(). Empty when required=true.
-    grep_prefix: []const u8,
-    /// Public name of the register function inside `mod`.
-    reg_fn: []const u8,
-    /// Module to register from — already gated to a stub if `required=false`
-    /// and the cart didn't ask for it (see comptime imports above).
-    mod: type,
-};
-
-const v8_bindings_httpserver = if (enabledFor("httpsrv")) @import("framework/v8_bindings_httpserver.zig") else struct {
-    pub fn registerHttpServer(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_wsserver = if (enabledFor("wssrv")) @import("framework/v8_bindings_wsserver.zig") else struct {
-    pub fn registerWsServer(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_process = if (enabledFor("process")) @import("framework/v8_bindings_process.zig") else struct {
-    pub fn registerProcess(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_net = if (enabledFor("net")) @import("framework/v8_bindings_net.zig") else struct {
-    pub fn registerNet(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-// Source RCON + A2S Source Query — gated alongside has_net since they sit on
-// top of net/tcp.zig and net/udp.zig and ride the useConnection trichotomy.
-// Any cart shipping `useConnection({kind:'rcon'|'a2s'})` already trips
-// has-net via the metafile gate, so no separate ingredient flag is needed.
-const v8_bindings_gameserver = if (enabledFor("net")) @import("framework/v8_bindings_gameserver.zig") else struct {
-    pub fn registerGameServer(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_tor = if (enabledFor("tor")) @import("framework/v8_bindings_tor.zig") else struct {
-    pub fn registerTor(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_privacy = if (enabledFor("privacy")) @import("framework/v8_bindings_privacy.zig") else struct {
-    pub fn registerPrivacy(_: anytype) void {}
-};
-const v8_bindings_sdk = if (enabledFor("sdk")) @import("framework/v8_bindings_sdk.zig") else struct {
-    pub fn registerSdk(_: anytype) void {}
-};
-const v8_bindings_voice = if (enabledFor("voice")) @import("framework/v8_bindings_voice.zig") else struct {
-    pub fn registerVoice(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_whisper = if (enabledFor("whisper")) @import("framework/v8_bindings_whisper.zig") else struct {
-    pub fn registerWhisper(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_onnx = if (enabledFor("onnx")) @import("framework/v8_bindings_onnx.zig") else struct {
-    pub fn registerOnnx(_: anytype) void {}
-};
-const v8_bindings_pg = if (enabledFor("pg")) @import("framework/v8_bindings_pg.zig") else struct {
-    pub fn registerPg(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_embed = if (enabledFor("embed")) @import("framework/v8_bindings_embed.zig") else struct {
-    pub fn registerEmbed(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_video = if (enabledFor("video")) @import("framework/v8_bindings_video.zig") else struct {
-    pub fn registerVideo(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_audio = if (enabledFor("audio")) @import("framework/v8_bindings_audio.zig") else struct {
-    pub fn registerAudio(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_midi = if (enabledFor("midi")) @import("framework/v8_bindings_midi.zig") else struct {
-    pub fn registerMidi(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_vterm = if (enabledFor("terminal")) @import("framework/v8_bindings_vterm.zig") else struct {
-    pub fn registerVterm(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-const v8_bindings_doom = if (enabledFor("doom")) @import("framework/v8_bindings_doom.zig") else struct {
-    pub fn registerDoom(_: anytype) void {}
-    pub fn tickDrain() void {}
-};
-// Paintable mask textures — opt-in via the `__paintable_` host fn prefix.
-// Carts that import usePaintable() reference __paintable_circle etc., the
-// metafile-gate sees the prefix, scripts/ship flips -Dhas-paintable=true.
-const v8_bindings_paintable = if (enabledFor("paintable")) @import("framework/v8_bindings_paintable.zig") else struct {
-    pub fn registerPaintable(_: anytype) void {}
-};
-
-const INGREDIENTS = [_]Ingredient{
-    // Framework-essential (always-on). These bindings expose host fns the
-    // React renderer / runtime depend on unconditionally — __hostFlush,
-    // __fs_*, __zigCall, telemetry counters, etc. They're "in every burrito"
-    // because no cart can run without them. New required bindings still go
-    // here (do NOT bypass by hardcoding a register call elsewhere in appInit).
-    // Core is the only truly framework-internal binding — its host fns
-    // (__hostFlush/__setState/__markDirty/getMouse*/isKeyDown/...) are called
-    // by runtime/index.tsx + runtime/primitives.tsx which every cart bundles
-    // unconditionally as React reconciler scaffolding. So gating it on a
-    // hook-file presence is degenerate; it's always shipped because the
-    // framework boilerplate in the bundle always references it.
-    .{ .name = "core", .required = true, .grep_prefix = "", .reg_fn = "registerCore", .mod = v8_bindings_core },
-    // Observability bus — always-on. The whole point is that every cart
-    // gets free crash/overflow/perf diagnostics with no opt-in. Cost is
-    // five host fns and a circular ring; nothing the cart has to import.
-    .{ .name = "eventbus", .required = true, .grep_prefix = "", .reg_fn = "registerEventBus", .mod = v8_bindings_eventbus },
-    // useIFTTT registry + timer wheel — always-on. runtime/index.tsx
-    // unconditionally requires useIFTTT.ts (it's the system-signal sink),
-    // so every cart pulls the wire/timer host fns. Source-gating this is
-    // degenerate for the same reason core is.
-    .{ .name = "ifttt", .required = true, .grep_prefix = "", .reg_fn = "registerIFTTT", .mod = v8_bindings_ifttt },
-    .{ .name = "env", .required = true, .grep_prefix = "", .reg_fn = "registerEnv", .mod = v8_bindings_env },
-    .{ .name = "window", .required = true, .grep_prefix = "", .reg_fn = "registerWindow", .mod = v8_bindings_window },
-    .{ .name = "inspector", .required = true, .grep_prefix = "", .reg_fn = "registerInspector", .mod = v8_bindings_inspector },
-    // Everything below is source-gated: scripts/ship reads the esbuild
-    // metafile and only flips the matching -Dhas-X=true if a JS file
-    // that calls into the binding is actually shipped.
-    .{ .name = "fs", .required = false, .grep_prefix = "__fs_", .reg_fn = "registerFs", .mod = v8_bindings_fs },
-    .{ .name = "websocket", .required = false, .grep_prefix = "__ws_", .reg_fn = "registerWebSocket", .mod = v8_bindings_websocket },
-    .{ .name = "telemetry", .required = false, .grep_prefix = "__tel_", .reg_fn = "registerTelemetry", .mod = v8_bindings_telemetry },
-    .{ .name = "zigcall", .required = false, .grep_prefix = "__zig_call", .reg_fn = "registerZigCall", .mod = v8_bindings_zigcall },
-    .{ .name = "zigcall_list", .required = false, .grep_prefix = "__zig_call", .reg_fn = "registerZigCallList", .mod = v8_bindings_zigcall },
-    // Opt-in per cart — scripts/ship grep flips -Dhas-X when the bundle
-    // references the matching prefix. Carts that don't order them get a
-    // comptime stub (no host-fn registration, no tickDrain).
-    .{ .name = "process", .required = false, .grep_prefix = "__proc_", .reg_fn = "registerProcess", .mod = v8_bindings_process },
-    .{ .name = "httpsrv", .required = false, .grep_prefix = "__httpsrv_", .reg_fn = "registerHttpServer", .mod = v8_bindings_httpserver },
-    .{ .name = "wssrv", .required = false, .grep_prefix = "__wssrv_", .reg_fn = "registerWsServer", .mod = v8_bindings_wsserver },
-    .{ .name = "net", .required = false, .grep_prefix = "__tcp_", .reg_fn = "registerNet", .mod = v8_bindings_net },
-    .{ .name = "gameserver", .required = false, .grep_prefix = "__rcon_", .reg_fn = "registerGameServer", .mod = v8_bindings_gameserver },
-    .{ .name = "tor", .required = false, .grep_prefix = "__tor_", .reg_fn = "registerTor", .mod = v8_bindings_tor },
-    .{ .name = "privacy", .required = false, .grep_prefix = "__priv_", .reg_fn = "registerPrivacy", .mod = v8_bindings_privacy },
-    .{ .name = "sdk", .required = false, .grep_prefix = "__http_request_", .reg_fn = "registerSdk", .mod = v8_bindings_sdk },
-    .{ .name = "voice", .required = false, .grep_prefix = "__voice_", .reg_fn = "registerVoice", .mod = v8_bindings_voice },
-    .{ .name = "whisper", .required = false, .grep_prefix = "__whisper_", .reg_fn = "registerWhisper", .mod = v8_bindings_whisper },
-    .{ .name = "onnx", .required = false, .grep_prefix = "__onnx_", .reg_fn = "registerOnnx", .mod = v8_bindings_onnx },
-    .{ .name = "pg", .required = false, .grep_prefix = "__pg_", .reg_fn = "registerPg", .mod = v8_bindings_pg },
-    .{ .name = "embed", .required = false, .grep_prefix = "__embed_", .reg_fn = "registerEmbed", .mod = v8_bindings_embed },
-    .{ .name = "video", .required = false, .grep_prefix = "__video_", .reg_fn = "registerVideo", .mod = v8_bindings_video },
-    .{ .name = "audio", .required = false, .grep_prefix = "__audio_", .reg_fn = "registerAudio", .mod = v8_bindings_audio },
-    .{ .name = "midi", .required = false, .grep_prefix = "__midi_", .reg_fn = "registerMidi", .mod = v8_bindings_midi },
-    .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
-    .{ .name = "doom", .required = false, .grep_prefix = "__doom_", .reg_fn = "registerDoom", .mod = v8_bindings_doom },
-    .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },
-};
 const fs_mod = @import("framework/fs/fs.zig");
 const localstore = @import("framework/storage/localstore.zig");
 
@@ -772,6 +554,11 @@ fn ensureInputSlot(node: *Node, id: u32, type_name: []const u8) void {
     const sid = slot.?;
     g_node_id_by_input_slot[sid] = id;
     if (isMultilineInputType(type_name)) input.registerMultiline(sid) else input.register(sid);
+    // TextEditor is a code editor — Enter must insert a newline, not submit.
+    // TextArea keeps the chat-composer default (Enter submits, Shift+Enter
+    // newlines). Carts that want the opposite for either type can flip the
+    // bit via setSubmitOnEnter at the host_fn layer in the future.
+    if (std.mem.eql(u8, type_name, "TextEditor")) input.setSubmitOnEnter(sid, false);
     input.setOnChange(sid, g_input_change_callbacks[sid]);
     input.setOnSubmit(sid, g_input_submit_callbacks[sid]);
     input.setOnFocus(sid, g_input_focus_callbacks[sid]);
@@ -3407,17 +3194,17 @@ fn appInit() void {
     // engine evals it, hostConfig's transportFlush tries to call globalThis.__hostFlush.
     // We must register __hostFlush BEFORE the bundle evals. Since appInit runs BEFORE
     // evalScript in engine.run order (tsz convention: init → evalScript), register here.
-    // EVERY V8 binding registration goes through INGREDIENTS — no exceptions.
-    // Required bindings always register; opt-in bindings register only when
-    // the cart's bundle ordered them. See INGREDIENTS comment block for the
-    // full contract (one row + one build option + one scripts/ship grep).
-    inline for (INGREDIENTS) |ing| @field(ing.mod, ing.reg_fn)({});
+    // EVERY V8 binding registration goes through ingredients — no
+    // exceptions. Required bindings always register; opt-in bindings
+    // register only when the cart's bundle ordered them. See
+    // framework/v8_ingredients.zig for the contract (one row + one
+    // build option + one scripts/ship grep).
+    ingredients.registerAll();
     // __hostFlush — single registration site shared with v8_tui_app.
     // Mode was set to `.queue` in main() so per-commit payloads go into
     // the queue and the engine drains them at the right frame phase.
     v8_bindings_reconciler.register();
     windows.setJsDispatchFn(dispatchWindowEvent);
-    v8_bindings_sdk.registerSdk({});
 
     // Bridge the dev-mode flag to JS so runtime/index.tsx can wrap the
     // active cart's tree with a sibling eventlog Window. Keep it small —
@@ -3562,14 +3349,11 @@ fn appTick(now: u32) void {
     // free for carts that didn't order the opt-in domains. Note: subscriber
     // callbacks fired by these drains defer through setTimeout(0) (see
     // runtime/ffi.ts), so emit-during-tick is observed by JS on the NEXT
-    // __jsTick — no ordering dependency vs the call above.
-    inline for (INGREDIENTS) |ing| {
-        if (@hasDecl(ing.mod, "tickDrain")) {
-            // vterm's tickDrain returns bool (whether to repaint — the TUI
-            // host consumes it); the rest return void. Discard either way.
-            _ = ing.mod.tickDrain();
-        }
-    }
+    // __jsTick — no ordering dependency vs the call above. The bool
+    // return is the vterm-drained signal the TUI shell uses to repaint
+    // without polling latency; engine.run owns its own repaint cadence,
+    // so the GPU shell discards it.
+    _ = ingredients.tickDrain();
     if (_probe) std.debug.print("[probe-tick] #{d} after tickDrain\n", .{_probe_n.v});
 
     // Apply any CMD batches that accumulated during press events since last tick.
