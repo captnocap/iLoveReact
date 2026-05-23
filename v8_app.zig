@@ -3655,6 +3655,17 @@ fn runHeadless() !void {
     // the cart's metafile gate, same as the GPU shell.
     ingredients.registerAll();
 
+    // host_tree owns the React tree state across both shells. Initialize
+    // its hashmaps BEFORE the reconciler registers __hostFlush — in
+    // sync mode (TUI default) every mutation batch lands directly in
+    // host_tree.applyCommandBatch via __hostFlush, and walking
+    // uninitialized maps SEGVs at the first batch. The GPU shell does
+    // this same init at the top of its appInit/main; the headless body
+    // needs it too. The TUI's ANSI walker (tui/host.ts) consumes the
+    // React Instance tree directly and ignores host_tree's contents,
+    // but the writes still have to land somewhere allocated.
+    host_tree.init(std.heap.c_allocator);
+
     // __hostFlush registration. Mode defaults to .sync (TUI has no
     // Zig-side paint loop to defer to); applyCommandBatch on the
     // host_tree side lands every mutation inline.
