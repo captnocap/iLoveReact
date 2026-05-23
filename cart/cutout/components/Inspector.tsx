@@ -8,6 +8,7 @@ import { onnxTest, type OnnxTestResult } from '@reactjit/runtime/hooks/useSegmen
 import { COLORS, SIZES } from '../theme';
 import type { CutoutState } from '../state';
 import { MaskQuad, MASK_SURFACES, isBuiltinSurface, maskSurfaceLabel, NUM_COLOR_SLOTS, SLOT_DEFAULTS, SLOT_LABELS, type SurfaceId } from './MaskQuad';
+import { BLEND_MODES, type BlendMode } from '../domain';
 
 // Quick-pick palette mirrored from cart/cutout/components/Tools.tsx so the
 // Parameters block's swatches stay in sync with the left rail. Kept here as
@@ -83,14 +84,13 @@ export function Inspector({
   const [isResizing, setIsResizing] = useState(false);
   const [selectedLayer, setSelectedLayerLocal] = useState<number | null>(null);
   const resizingRef = useRef(false);
-  const activeLayerIndex = selectedLayer !== null && selectedLayer >= 0 && selectedLayer < s.layers.length
+  // null = no layer focused (FX panel edits the global defaults); >=0 = a
+  // real layer in the stack. There is no brush/smart distinction anymore.
+  const layerTarget = selectedLayer !== null && selectedLayer >= 0 && selectedLayer < s.layers.length
     ? selectedLayer
     : null;
-  const layerTarget = selectedLayer === -1 && s.hasBrushLayer ? -1 : activeLayerIndex;
-  // Push selection into CutoutState so the brush's paint target tracks
-  // the Inspector pick. null = no layer focused (paint goes to global
-  // brush layer, -1); -1 = explicitly the paint layer; >=0 = paint INTO
-  // smart layer i.
+  // Push selection into CutoutState so every tool's edit target tracks the
+  // Inspector pick. -1 = no active layer.
   const setSelectedLayer = (next: number | null) => {
     setSelectedLayerLocal(next);
     s.setActiveLayer(next == null ? -1 : next);
@@ -215,7 +215,7 @@ function ToolProperties({ s }: { s: CutoutState }) {
         <Row style={{ gap: 8, alignItems: 'center' }}>
           <Metric label="backend" value={s.backendName} />
           <Metric label="clicks" value={String(s.clicks.length)} />
-          <Metric label="layers" value={String(s.layers.length + (s.hasBrushLayer ? 1 : 0))} />
+          <Metric label="layers" value={String(s.layers.length)} />
           <Box style={{ flexGrow: 1 }} />
           {s.clicks.length > 0 ? <TinyButton label="Clear" onPress={s.clearClicks} /> : null}
         </Row>
@@ -369,11 +369,11 @@ function SurfaceProperties({
   setSelectedLayer: (index: number | null) => void;
   onOpenEffectModal: (draft: EffectDraft) => void;
 }) {
-  const layerCfg = selectedLayer !== null ? s.layerConfigs[selectedLayer] : null;
+  const layerCfg = selectedLayer !== null ? (s.layers[selectedLayer]?.config ?? null) : null;
   const activeMode = layerCfg ? layerCfg.mode : s.effectMode;
-  const targetLabel = selectedLayer === -1 ? 'Paint layer' : layerCfg ? `Layer ${selectedLayer! + 1}` : 'Global preview';
+  const targetLabel = layerCfg ? (s.layers[selectedLayer!]?.name ?? `Layer ${selectedLayer! + 1}`) : 'Global preview';
   const selectSurface = (id: SurfaceId) => {
-    if (selectedLayer === null || selectedLayer === -1) s.setEffectMode(id);
+    if (selectedLayer === null) s.setEffectMode(id);
     else s.setLayerMode(selectedLayer, id);
   };
   return (
@@ -386,9 +386,6 @@ function SurfaceProperties({
           <Metric label="target" value={targetLabel} />
           <Box style={{ flexGrow: 1 }} />
           <TinyButton label="Global" active={selectedLayer === null} onPress={() => setSelectedLayer(null)} />
-          {s.hasBrushLayer ? (
-            <TinyButton label="Paint" active={selectedLayer === -1} onPress={() => setSelectedLayer(-1)} />
-          ) : null}
           {s.layers.map((_, i) => (
             <TinyButton
               key={i}
@@ -448,13 +445,14 @@ function ParametersBlock({
   // `selectedLayer === null` → global preview (effect* state on s).
   // `selectedLayer === -1`   → brush/paint layer; also routes to effect*.
   // `selectedLayer >= 0`     → smart-layer i; pulls from s.layerConfigs[i].
-  const isGlobal = selectedLayer === null || selectedLayer === -1;
-  const layerCfg = !isGlobal ? s.layerConfigs[selectedLayer!] : null;
+  const isGlobal = selectedLayer === null;
+  const layerCfg = !isGlobal ? (s.layers[selectedLayer!]?.config ?? null) : null;
   const target: number = isGlobal ? -1 : selectedLayer!;
   const colors = (isGlobal ? s.effectColors : layerCfg?.colors) ?? SLOT_DEFAULTS;
   const hueOffset = isGlobal ? s.effectHueOffset : (layerCfg?.hueOffset ?? 0);
   const phaseOffset = isGlobal ? s.effectPhaseOffset : (layerCfg?.phaseOffset ?? 0);
   const dim = isGlobal ? s.effectDim : (layerCfg?.dim ?? 0.85);
+  const blend = layerCfg?.blend ?? 'normal';
   const muted = layerCfg?.muted ?? false;
   const [activeSlot, setActiveSlot] = useState(0);
   const safeSlot = Math.min(Math.max(activeSlot, 0), NUM_COLOR_SLOTS - 1);
@@ -520,6 +518,22 @@ function ParametersBlock({
         />
 
         {!isGlobal ? (
+          <Col style={{ gap: 5 }}>
+            <Text style={{ color: COLORS.inkMuted, fontSize: 9, fontWeight: '800', letterSpacing: 1 }}>BLEND</Text>
+            <Row style={{ gap: 5, flexWrap: 'wrap' }}>
+              {BLEND_MODES.map((mode) => (
+                <TinyButton
+                  key={mode}
+                  label={blendLabel(mode)}
+                  active={blend === mode}
+                  onPress={() => s.setLayerBlend(selectedLayer!, mode)}
+                />
+              ))}
+            </Row>
+          </Col>
+        ) : null}
+
+        {!isGlobal ? (
           <Row style={{ gap: 6, alignItems: 'center' }}>
             <Text style={{ color: COLORS.inkMuted, fontSize: 9, fontWeight: '800' }}>VISIBILITY</Text>
             <Box style={{ flexGrow: 1 }} />
@@ -533,6 +547,15 @@ function ParametersBlock({
       </Col>
     </PropertyBlock>
   );
+}
+
+function blendLabel(mode: BlendMode): string {
+  switch (mode) {
+    case 'add': return 'Add';
+    case 'multiply': return 'Multiply';
+    case 'screen': return 'Screen';
+    default: return 'Normal';
+  }
 }
 
 function SlotChip({
@@ -812,7 +835,7 @@ function AdvancedProperties({
       <PropertyBlock title="Stats">
         <Row style={{ gap: 8, flexWrap: 'wrap' }}>
           <Metric label="mask" value={s.hasMaskEdits ? 'edited' : 'empty'} />
-          <Metric label="layers" value={String(s.layers.length + (s.hasBrushLayer ? 1 : 0))} />
+          <Metric label="layers" value={String(s.layers.length)} />
           <Metric label="surface" value={surfaceLabel(s, s.effectMode)} />
         </Row>
       </PropertyBlock>
@@ -862,8 +885,8 @@ function LayersPanel({
   selectedLayer: number | null;
   setSelectedLayer: (index: number | null) => void;
 }) {
-  const layerCount = s.compositionLayers.length;
-  const actionTarget = selectedLayer ?? (s.hasBrushLayer ? -1 : 0);
+  const layerCount = s.layers.length;
+  const actionTarget = selectedLayer ?? (s.layers.length > 0 ? 0 : null);
   return (
     <Col style={{
       height,
@@ -872,7 +895,7 @@ function LayersPanel({
     }}>
       <PanelHeader title={`Layers ${layerCount ? `(${layerCount})` : ''}`} compact />
       <Col style={{ paddingHorizontal: 10, paddingBottom: 8, gap: 6, minHeight: 0, flexGrow: 1, flexBasis: 0 }}>
-        {!s.hasBrushLayer && s.layers.length === 0 ? (
+        {s.layers.length === 0 ? (
           <Col style={{
             height: 64,
             borderRadius: 6,
@@ -887,36 +910,25 @@ function LayersPanel({
             <Text style={{ color: COLORS.inkMuted, fontSize: 10 }}>Add paint or smart-select a region.</Text>
           </Col>
         ) : null}
-        {s.hasBrushLayer ? (
-          <PaintLayerRow
+        {s.layers.map((layer, i) => (
+          <LayerRow
+            key={layer.id}
+            index={i}
+            cfg={layer.config}
             s={s}
-            selected={selectedLayer === -1}
+            selected={selectedLayer === i}
             setSelectedLayer={setSelectedLayer}
           />
-        ) : null}
-        {s.layers.map((_, i) => {
-          const cfg = s.layerConfigs[i];
-          if (!cfg) return null;
-          return (
-            <LayerRow
-              key={i}
-              index={i}
-              cfg={cfg}
-              s={s}
-              selected={selectedLayer === i}
-              setSelectedLayer={setSelectedLayer}
-            />
-          );
-        })}
+        ))}
       </Col>
       <LayerActionBar
         canTarget={layerCount > 0}
-        onAdd={() => { setSelectedLayer(s.addPaintLayer()); }}
+        onAdd={() => { setSelectedLayer(s.addLayer()); }}
         onDuplicate={() => { if (layerCount > 0) s.duplicateLayer(actionTarget); }}
         onMoveUp={() => { if (actionTarget !== null) s.moveLayer(actionTarget, -1); }}
         onMoveDown={() => { if (actionTarget !== null) s.moveLayer(actionTarget, 1); }}
-        onMerge={() => { if (actionTarget !== null) { s.mergeLayer(actionTarget); setSelectedLayer(-1); } }}
-        onDelete={() => { if (actionTarget !== null) { s.deleteCompositionLayer(actionTarget); setSelectedLayer(null); } }}
+        onMerge={() => { if (actionTarget !== null) { s.mergeLayer(actionTarget); setSelectedLayer(null); } }}
+        onDelete={() => { if (actionTarget !== null) { s.deleteLayer(actionTarget); setSelectedLayer(null); } }}
       />
     </Col>
   );
@@ -992,51 +1004,6 @@ function LayerIconButton({
   );
 }
 
-function PaintLayerRow({
-  s,
-  selected,
-  setSelectedLayer,
-}: {
-  s: CutoutState;
-  selected: boolean;
-  setSelectedLayer: (index: number | null) => void;
-}) {
-  const meta = s.compositionLayers.find((l) => l.kind === 'paint');
-  const [renaming, setRenaming] = useState(false);
-  return (
-    <Pressable onPress={() => setSelectedLayer(-1)}>
-      <Col style={{
-        gap: 6,
-        padding: 8,
-        borderRadius: 5,
-        backgroundColor: selected ? COLORS.panelHi : COLORS.panel,
-        borderWidth: 1,
-        borderColor: selected ? COLORS.accent : COLORS.border,
-      }}>
-        <Row style={{ gap: 8, alignItems: 'center' }}>
-          <SelectionStripe active={selected} />
-          <SurfacePreview mode={s.effectMode} shader={surfaceShader(s, s.effectMode)} small />
-          <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 2 }}>
-            <LayerName
-              value={meta?.name || 'Paint Layer'}
-              renaming={renaming}
-              onRename={() => setRenaming(true)}
-              onChange={(v) => s.setCompositionLayerName(-1, v)}
-            />
-            <Row style={{ gap: 6, alignItems: 'center' }}>
-              <Text style={{ color: COLORS.inkDim, fontSize: 10 }} numberOfLines={1}>
-                {surfaceLabel(s, s.effectMode)}
-              </Text>
-              {meta?.groupName ? <LayerGroupTag label={meta.groupName} /> : null}
-            </Row>
-          </Col>
-          <LayerVisibilityButton muted={false} onPress={() => {}} />
-        </Row>
-      </Col>
-    </Pressable>
-  );
-}
-
 function LayerRow({
   index,
   cfg,
@@ -1050,7 +1017,7 @@ function LayerRow({
   selected: boolean;
   setSelectedLayer: (index: number | null) => void;
 }) {
-  const meta = s.compositionLayers.find((l) => l.kind === 'smart' && l.sourceIndex === index);
+  const layer = s.layers[index];
   const [renaming, setRenaming] = useState(false);
   return (
     <Pressable onPress={() => setSelectedLayer(index)}>
@@ -1068,23 +1035,21 @@ function LayerRow({
           <SurfacePreview
             mode={cfg.mode}
             shader={surfaceShader(s, cfg.mode)}
-            cells={s.layers[index]}
-            gridSize={s.overlayRes}
             colors={cfg.colors}
             small
           />
           <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, gap: 2 }}>
             <LayerName
-              value={meta?.name || `Layer ${index + 1}`}
+              value={layer?.name || `Layer ${index + 1}`}
               renaming={renaming}
               onRename={() => setRenaming(true)}
-              onChange={(v) => s.setCompositionLayerName(index, v)}
+              onChange={(v) => s.setLayerName(index, v)}
             />
             <Row style={{ gap: 6, alignItems: 'center' }}>
               <Text style={{ color: COLORS.inkDim, fontSize: 10 }} numberOfLines={1}>
                 {surfaceLabel(s, cfg.mode)}
               </Text>
-              {meta?.groupName ? <LayerGroupTag label={meta.groupName} /> : null}
+              {layer?.groupName ? <LayerGroupTag label={layer.groupName} /> : null}
             </Row>
           </Col>
           <LayerVisibilityButton muted={cfg.muted} onPress={() => s.toggleLayerMute(index)} />

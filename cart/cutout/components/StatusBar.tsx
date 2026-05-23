@@ -15,7 +15,7 @@ import { useTelemetry } from '@reactjit/runtime/hooks/useTelemetry';
 
 export function StatusBar({ s }: { s: CutoutState }) {
   const statusColor = s.busy ? COLORS.warn : s.savedPath ? COLORS.good : s.srcDims ? COLORS.ink : COLORS.inkDim;
-  const layerCount = s.layers.length + (s.hasBrushLayer ? 1 : 0);
+  const layerCount = s.layers.length;
   // Both telemetry channels poll at 1 Hz. Faster polling (was 500/250 ms)
   // dragged the WHOLE cart through a re-render every quarter-second —
   // during a brush stroke that compounds with the maskVersion throttle
@@ -147,7 +147,7 @@ function estimateFileSize(s: CutoutState): string {
   // PNG empirical estimate: ~0.6 bytes/pixel for photo content with
   // alpha. Add ~200 KB per FX layer (sqi serialization at overlayRes
   // packs tight). Rough; better than no signal.
-  const layerCount = s.layers.length + (s.hasBrushLayer ? 1 : 0);
+  const layerCount = s.layers.length;
   const bytes = px * 0.6 + layerCount * 200_000;
   return formatBytes(bytes);
 }

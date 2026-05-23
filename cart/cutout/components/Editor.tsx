@@ -2,16 +2,18 @@
 // image at native resolution; pan/zoom via the Canvas primitive; brush
 // input rides a Pressable child inside the same Canvas.Node.
 //
-// Coordinate spaces (subtle, document carefully):
-//   - SCREEN: raw mouse event coords from the OS, in browser pixels
-//   - WORLD:  Canvas internal coord system, centered at (0,0), units = ?
-//   - SOURCE: image pixel coords (0..srcW, 0..srcH)
+// Each layer in the stack mounts its own full-resolution mask texture
+// (<Paintable>) plus, when visible, one texture-mode <MaskQuad> drawing
+// that layer's surface. Tools never touch a global buffer — brush, lasso,
+// refine and smart-select all write through state into the ACTIVE layer's
+// texture, so switching tools never disturbs the stack.
 //
-// The Canvas.Node sits at gx=0,gy=0 (its center on world origin) with
-// gw=srcW, gh=srcH. So an image-pixel at (px, py) corresponds to world
-// (px - srcW/2, py - srcH/2). screenToWorld() does the round-trip:
-//   screen → screenToGraph host fn → world (gx, gy)
-//   world  → source: (gx + srcW/2, gy + srcH/2)
+// Coordinate spaces:
+//   - SCREEN: raw mouse event coords from the OS
+//   - WORLD:  Canvas internal coord system, centered at (0,0)
+//   - SOURCE: image pixel coords (0..srcW, 0..srcH)
+// The Canvas.Node sits at gx=0,gy=0 with gw=srcW, gh=srcH, so image-pixel
+// (px,py) maps to world (px - srcW/2, py - srcH/2).
 
 import { Box, Canvas, Col, Image, Paintable, Pressable, Row, Text } from '@reactjit/runtime/primitives';
 import { callHost } from '@reactjit/runtime/ffi';
@@ -19,7 +21,6 @@ import { useRef, useState } from 'react';
 import { COLORS } from '../theme';
 import type { CutoutState } from '../state';
 import { OVERLAY_RES } from '../state';
-import { rowRuns } from '../mask';
 import { MaskQuad } from './MaskQuad';
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -49,8 +50,6 @@ export function Editor({ s }: { s: CutoutState }) {
     if (!w) return null;
     const sx = w.gx + s.srcDims.w / 2;
     const sy = w.gy + s.srcDims.h / 2;
-    // Reject clicks outside the image bounds — otherwise the user paints
-    // "ghost" pixels into clamped edge regions.
     if (sx < 0 || sy < 0 || sx >= s.srcDims.w || sy >= s.srcDims.h) return null;
     return { sx, sy };
   };
@@ -63,14 +62,7 @@ export function Editor({ s }: { s: CutoutState }) {
   };
 
   const updateCursor = (px: number, py: number, hit: { sx: number; sy: number } | null, force = false) => {
-    if (!rect || !s.srcDims) {
-      setCursor(null);
-      return;
-    }
-    if (!hit) {
-      setCursor(null);
-      return;
-    }
+    if (!rect || !s.srcDims || !hit) { setCursor(null); return; }
     const now = Date.now();
     if (!force && now - lastCursorBump.current < 60) return;
     lastCursorBump.current = now;
@@ -84,9 +76,6 @@ export function Editor({ s }: { s: CutoutState }) {
       setCursor({ x: localX, y: localY, radius: s.tool === 'lasso' ? 8 : Math.max(4, Math.min(180, s.brushPx)), kind: s.tool });
       return;
     }
-    // Keep cursor rendering cheap. The actual brush hit math above already
-    // converts through canvas space; the outline is visual feedback and is
-    // throttled like mask resampling to avoid a render per mouse packet.
     const radius = Math.max(4, Math.min(180, s.brushPx));
     setCursor({ x: localX, y: localY, radius, kind: 'brush' });
   };
@@ -109,54 +98,31 @@ export function Editor({ s }: { s: CutoutState }) {
             ) : (
               <BlankSurface w={s.srcDims.w} h={s.srcDims.h} />
             )}
-            {/* Brush mask texture (full image-resolution R8 paintable).
-               The host_tree CREATE pass allocates it before any consumer
-               first renders; brush strokes write to it via direct V8
-               calls (no React state in the input path). */}
-            <Paintable id={s.maskId} w={s.srcDims.w} h={s.srcDims.h} />
-            {/* Smart-union texture (OVERLAY_RES²) — OR of every smart
-               layer's cell set. The brush MaskQuad's shader samples this
-               alongside the mask and discards pixels where it's non-zero,
-               preserving the historical "brush doesn't double-paint over
-               per-layer FX" behavior. */}
-            <Paintable id={s.smartUnionId} w={OVERLAY_RES} h={OVERLAY_RES} />
-            {/* Brush MaskQuad in texture-sampling mode — reads the
-               paintable's R8 texture at @binding(2) and the smart-union
-               at @binding(4). No cells prop; no per-stroke CPU downsample. */}
-            <MaskQuad
-              paintableId={s.maskId}
-              smartUnionId={s.smartUnionId}
-              gridSize={OVERLAY_RES}
-              worldW={s.srcDims.w}
-              worldH={s.srcDims.h}
-              mode={s.effectMode}
-              customShader={shaderFor(s.effectMode)}
-              hueOffset={s.effectHueOffset}
-              phaseOffset={s.effectPhaseOffset}
-              dim={s.effectDim}
-              colors={s.effectColors}
-              blend="normal"
-            />
-            {s.layers.map((cells, i) => {
-              const cfg = s.layerConfigs[i];
-              if (!cfg || cfg.muted || cells.size === 0) return null;
-              return (
+            {/* One full-res mask texture per layer. Mounted for EVERY layer
+               (even muted ones) so the texture survives mute/reorder and is
+               always readable at export. The MaskQuad that draws it is
+               skipped when the layer is muted. */}
+            {s.layers.map((layer) => (
+              <Paintable key={layer.id} id={layer.maskId} w={s.srcDims!.w} h={s.srcDims!.h} />
+            ))}
+            {s.layers.map((layer) => (
+              layer.config.muted ? null : (
                 <MaskQuad
-                  key={i}
-                  cells={cells}
-                  gridSize={s.overlayRes}
+                  key={`q:${layer.id}`}
+                  paintableId={layer.maskId}
+                  gridSize={OVERLAY_RES}
                   worldW={s.srcDims!.w}
                   worldH={s.srcDims!.h}
-                  mode={cfg.mode}
-                  customShader={shaderFor(cfg.mode)}
-                  hueOffset={cfg.hueOffset}
-                  phaseOffset={cfg.phaseOffset}
-                  dim={cfg.dim}
-                  colors={cfg.colors}
-                  blend={cfg.blend ?? 'normal'}
+                  mode={layer.config.mode}
+                  customShader={shaderFor(layer.config.mode)}
+                  hueOffset={layer.config.hueOffset}
+                  phaseOffset={layer.config.phaseOffset}
+                  dim={layer.config.dim}
+                  colors={layer.config.colors}
+                  blend={layer.config.blend ?? 'normal'}
                 />
-              );
-            })}
+              )
+            ))}
             <ClickMarkers s={s} />
             <LassoPreview s={s} />
           </Canvas.Node>
@@ -165,15 +131,9 @@ export function Editor({ s }: { s: CutoutState }) {
         <EmptyState />
       )}
       {s.srcDims ? <EditorHud s={s} /> : null}
-      {/* Click handler OVERLAYS the editor in screen-space (NOT inside
-          Canvas.Node). When inside the canvas, a Pressable sized to the
-          full image dimensions has a hit-region that spills past the
-          canvas viewport — clicks on the Tools palette would land on the
-          invisible Pressable instead. Putting it here keeps the hit-test
-          exactly the editor viewport.
-          When the HAND tool is active we DON'T render this overlay at all,
-          letting the underlying Canvas receive raw mouse input for its
-          built-in pan/zoom. */}
+      {/* Click handler overlays the editor in screen-space (NOT inside
+          Canvas.Node) so its hit-region is exactly the viewport. The HAND
+          tool skips the overlay so the Canvas gets raw pan/zoom input. */}
       {s.srcDims && s.tool !== 'hand' ? (
         <Pressable
           style={{
@@ -183,8 +143,7 @@ export function Editor({ s }: { s: CutoutState }) {
           onMouseEnter={(p: any) => { updateHoverCursor(p, true); }}
           onPointerMove={(p: any) => {
             const hit = updateHoverCursor(p);
-            if (!drawing.current) return;
-            if (!hit) return;
+            if (!drawing.current || !hit) return;
             s.paintAtSource(hit.sx, hit.sy, p.pressure);
           }}
           onMouseDown={(p: any) => {
@@ -192,12 +151,6 @@ export function Editor({ s }: { s: CutoutState }) {
             if (!hit) return;
             if (s.tool === 'smart') {
               if (s.isBlank) return;
-              // The framework's Pressable doesn't propagate keyboard
-              // modifiers (no p.shiftKey), so reject can't be a shift-
-              // click gesture. Instead use the existing left-palette
-              // mode toggle: ERASE → keep (add region), RESTORE → reject
-              // (subtract region). Same toggle the brush tool uses, just
-              // remapped semantically.
               const label = s.mode === 'restore' ? 'reject' : 'keep';
               void s.addClick(hit.sx, hit.sy, label);
               return;
@@ -209,11 +162,8 @@ export function Editor({ s }: { s: CutoutState }) {
                 && now - prev.at <= 320
                 && (hit.sx - prev.sx) * (hit.sx - prev.sx) + (hit.sy - prev.sy) * (hit.sy - prev.sy) <= 64;
               lastLassoClick.current = { sx: hit.sx, sy: hit.sy, at: now };
-              if (doubleClick) {
-                s.commitLasso();
-              } else {
-                s.addLassoPoint(hit.sx, hit.sy);
-              }
+              if (doubleClick) s.commitLasso();
+              else s.addLassoPoint(hit.sx, hit.sy);
               return;
             }
             s.beginStroke();
@@ -222,8 +172,7 @@ export function Editor({ s }: { s: CutoutState }) {
           }}
           onMouseMove={(p: any) => {
             const hit = updateHoverCursor(p);
-            if (!drawing.current) return;
-            if (!hit) return;
+            if (!drawing.current || !hit) return;
             s.paintAtSource(hit.sx, hit.sy, p.pressure);
           }}
           onMouseUp={() => { drawing.current = false; s.endStroke(); }}
@@ -302,9 +251,9 @@ function EditorHud({ s }: { s: CutoutState }) {
       : (s.mode === 'erase'
           ? 'Drag over background to remove.'
           : 'Drag removed areas to restore.');
-  // Subtle one-line bar at bottom-left. The old "BRUSH / ERASE" colored
-  // chip + verbose help text packed into a panel was atrocious; this is
-  // an unobtrusive single-line strip with a tool dot + mode tag.
+  const activeName = s.activeLayer >= 0 && s.activeLayer < s.layers.length
+    ? s.layers[s.activeLayer].name
+    : 'no layer';
   const dotColor = s.tool === 'hand' ? COLORS.inkMuted
     : s.tool === 'smart' ? COLORS.accent
     : s.tool === 'lasso' ? COLORS.good
@@ -316,7 +265,7 @@ function EditorHud({ s }: { s: CutoutState }) {
       position: 'absolute',
       left: 14,
       bottom: 14,
-      maxWidth: 460,
+      maxWidth: 520,
       paddingHorizontal: 10,
       paddingVertical: 6,
       borderRadius: 14,
@@ -333,6 +282,10 @@ function EditorHud({ s }: { s: CutoutState }) {
       <Box style={{ width: 1, height: 10, backgroundColor: COLORS.border }} />
       <Text style={{ color: modeColor, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 }}>
         {s.mode.toUpperCase()}
+      </Text>
+      <Box style={{ width: 1, height: 10, backgroundColor: COLORS.border }} />
+      <Text style={{ color: COLORS.accent, fontSize: 10, fontWeight: '800' }} numberOfLines={1}>
+        {activeName}
       </Text>
       <Box style={{ width: 1, height: 10, backgroundColor: COLORS.border }} />
       <Text style={{ color: COLORS.inkDim, fontSize: 10 }} numberOfLines={1}>
@@ -419,11 +372,11 @@ function BlankSurface({ w, h }: { w: number; h: number }) {
   );
 }
 
-// ClickMarkers — small colored dots showing where smart-select clicks went.
-// Visually persistent so the user knows where they've already poked.
+// ClickMarkers — small colored dots showing where the active layer's
+// smart-select clicks went. Visually persistent so the user knows where
+// they've already poked.
 function ClickMarkers({ s }: { s: CutoutState }) {
   if (!s.srcDims || s.clicks.length === 0) return null;
-  // Dot radius scales with source — visible at any zoom level.
   const r = Math.max(8, Math.min(s.srcDims.w, s.srcDims.h) * 0.008);
   return (
     <Box style={{
