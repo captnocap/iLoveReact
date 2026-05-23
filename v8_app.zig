@@ -16,6 +16,15 @@
 const std = @import("std");
 const build_options = @import("build_options");
 const IS_LIB = if (@hasDecl(build_options, "is_lib")) build_options.is_lib else false;
+// HAS_GPU drives the GPU/headless split inside v8_app. true (default):
+// the SDL3/wgpu/freetype substrate is linked + every framework/gpu/* and
+// framework/primitive/{windows,context_menu,input} import resolves to
+// the real file. false: those imports collapse to no-op stubs so the
+// headless binary compiles without the SDL include path, and main()
+// branches into the TUI eval body (mirroring v8_tui_app.zig) instead
+// of engine.run. C3 deletes v8_tui_app once this branch is proven.
+const HAS_GPU = if (@hasDecl(build_options, "has_gpu")) build_options.has_gpu else true;
+const HEADLESS = IS_LIB or !HAS_GPU;
 
 const layout = @import("framework/layout.zig");
 const Node = layout.Node;
@@ -25,27 +34,69 @@ const Color = layout.Color;
 // both shells. v8_app installs hooks (apply_props, apply_handler_flags,
 // open_host_window, etc.) and consumes the tree via host_tree's
 // accessors. Phase 3 of the host_tree.zig migration plan: complete.
-const transition_mod = @import("framework/gpu/transition.zig");
+const transition_mod = if (HEADLESS) struct {
+    pub const TransitionConfig = struct { duration_ms: u32 = 0 };
+    pub fn set(_: anytype, _: anytype, _: anytype, _: anytype) void {}
+} else @import("framework/gpu/transition.zig");
 const easing_mod = @import("framework/math/easing.zig");
-const effect_ctx = @import("framework/gpu/effects_ctx.zig");
-const input = @import("framework/primitive/input.zig");
+const effect_ctx = if (HEADLESS) struct {
+    pub const EffectContext = opaque {};
+} else @import("framework/gpu/effects_ctx.zig");
+const input = if (HEADLESS) struct {
+    pub const MAX_INPUTS: usize = 256;
+    pub fn register(_: anytype) void {}
+    pub fn registerMultiline(_: anytype) void {}
+    pub fn unregister(_: anytype) void {}
+    pub fn syncValue(_: anytype, _: anytype) void {}
+    pub fn setSubmitOnEnter(_: anytype, _: anytype) void {}
+    pub fn setOnChange(_: anytype, _: anytype) void {}
+    pub fn setOnSubmit(_: anytype, _: anytype) void {}
+    pub fn setOnFocus(_: anytype, _: anytype) void {}
+    pub fn setOnBlur(_: anytype, _: anytype) void {}
+    pub fn setOnKey(_: anytype, _: anytype) void {}
+} else @import("framework/primitive/input.zig");
 const state = @import("framework/state/dirty.zig");
 const events = @import("framework/events.zig");
-const context_menu = @import("framework/primitive/context_menu.zig");
-const engine = if (IS_LIB) struct {} else @import("framework/engine.zig");
-const gpu = if (IS_LIB) struct {
-    pub fn frameCounter() u64 {
-        return 0;
-    }
+const context_menu = if (HEADLESS) struct {
+    pub const MenuItem = struct { label: []const u8 = "" };
+    pub fn activeNodeId() u32 { return 0; }
+} else @import("framework/primitive/context_menu.zig");
+const engine = if (HEADLESS) struct {
+    pub fn run(_: anytype) !void { unreachable; }
+    pub fn windowMinimize() void {}
+    pub fn windowMaximize() void {}
+    pub fn windowClose() void {}
+    pub fn dispatchScrollChanged(_: anytype, _: anytype) void {}
+} else @import("framework/engine.zig");
+const gpu = if (HEADLESS) struct {
+    pub fn frameCounter() u64 { return 0; }
 } else @import("framework/gpu/gpu.zig");
 const latches = @import("framework/state/latches.zig");
-const animations = @import("framework/gpu/animations.zig");
-const paintable = @import("framework/gpu/paintable.zig");
-const windows = @import("framework/primitive/windows.zig");
+const animations = if (HEADLESS) struct {
+    pub fn clearAll() void {}
+    pub fn tickAll(_: anytype) void {}
+} else @import("framework/gpu/animations.zig");
+const paintable = if (HEADLESS) struct {
+    pub fn destroy(_: anytype) void {}
+    pub fn ensure(_: anytype, _: anytype, _: anytype) u32 { return 0; }
+} else @import("framework/gpu/paintable.zig");
+const windows = if (HEADLESS) struct {
+    pub const WindowKind = enum { window, notification };
+    const Slot = opaque {};
+    pub fn open(_: anytype) !usize { return 0; }
+    pub fn close(_: anytype) void {}
+    pub fn getSlot(_: anytype) ?*Slot { return null; }
+    pub fn sendLineToChild(_: anytype, _: anytype) void {}
+    pub fn setJsDispatchFn(_: anytype) void {}
+    pub fn setRoot(_: anytype) void {}
+    pub fn tickIndependent() void {}
+} else @import("framework/primitive/windows.zig");
 const ipc = @import("framework/net/ipc.zig");
 const prepared_input = @import("framework/state/prepared_input.zig");
 const v8_runtime = @import("framework/v8_runtime.zig");
-const v8_bindings_core = @import("framework/v8_bindings_core.zig");
+const v8_bindings_core = if (HEADLESS) struct {
+    pub fn contentStoreGet(_: anytype) ?[]const u8 { return null; }
+} else @import("framework/v8_bindings_core.zig");
 const v8_bindings_reconciler = @import("framework/v8_bindings_reconciler.zig");
 const host_tree = @import("framework/host_tree.zig");
 // All V8 host-fn binding registration goes through this catalog. v8_app
@@ -58,6 +109,24 @@ const host_tree = @import("framework/host_tree.zig");
 // catalog; everything else lives behind `ingredients`.
 const ingredients = @import("framework/v8_ingredients.zig");
 const event_bus = @import("framework/diag/event_bus.zig");
+
+// ── Headless shell imports ──────────────────────────────────────────
+// Used only by runHeadless() when HEADLESS=true (mirrors v8_tui_app's
+// body). cli_bindings + worker_bindings are pure-Zig and don't pull
+// SDL, so they import unconditionally. host_window does pull SDL via
+// primitive/windows.zig; gate it on has_window the same way the
+// catalog gates `core` + `window` on has_gpu.
+const v8 = @import("v8");
+const cli_bindings = @import("framework/v8_bindings_cli.zig");
+const worker_bindings = @import("framework/assistant/worker_bindings.zig");
+const host_window = if (@hasDecl(build_options, "has_window") and build_options.has_window)
+    @import("framework/v8_bindings_host_window.zig")
+else
+    struct {
+        pub fn register() void {}
+        pub fn init(_: std.mem.Allocator) !void {}
+        pub fn tickDrain() void {}
+    };
 
 // Override std.log so every framework `std.log.info/warn/err` call routes
 // through the bus. Single chokepoint; no call-site rewrites needed. Errors
@@ -3538,6 +3607,101 @@ fn appShutdown() void {
     fs_mod.deinit();
 }
 
+// ── Headless shell — TUI/ANSI main body ─────────────────────────────
+//
+// Used when HEADLESS=true (build_options.has_gpu=false). Mirrors
+// v8_tui_app's main: register cli bindings, the INGREDIENTS catalog
+// (which stubs `core` + `window` for us via the same has_gpu gate),
+// reconciler, worker_bindings, and host_window. Then eval the bundle
+// and return. There is no engine.run; the cart's React tree drives
+// paint through tui/host.ts's ANSI walker, pumped from JS via
+// __runEventLoop in tui/v8-preamble.js.
+//
+// Lives inline in v8_app.zig (not a separate file) so the single
+// entry-point goal is literal: one main, one binary, two substrates.
+
+fn hostTickDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const drained = ingredients.tickDrain();
+    // SDL3 event pump + paint for any <Window> nodes the cart opened
+    // — no-op when has_window is false (stub above).
+    host_window.tickDrain();
+    info.getReturnValue().set(v8.Number.init(info.getIsolate(), if (drained) @as(f64, 1) else @as(f64, 0)));
+}
+
+fn runHeadless() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const alloc = gpa.allocator();
+
+    // process.argv[0] = bundle name; argv[1..] = the user's args.
+    const raw_argv = try std.process.argsAlloc(alloc);
+    defer std.process.argsFree(alloc, raw_argv);
+    const script_argv = try alloc.alloc([]const u8, raw_argv.len);
+    defer alloc.free(script_argv);
+    script_argv[0] = if (@hasDecl(build_options, "app_name")) build_options.app_name else "v8_app";
+    for (raw_argv[1..], 1..) |a, i| script_argv[i] = a;
+
+    v8_runtime.initVM();
+    defer v8_runtime.teardownVM();
+
+    cli_bindings.setArgv(@constCast(script_argv));
+    cli_bindings.registerAll();
+    cli_bindings.installSignalHandlers();
+
+    // INGREDIENTS catalog — same source of truth the GPU shell uses.
+    // Stubs `core` + `window` because has_gpu=false; the rest of the
+    // opt-in bindings (pg/embed/fs/process/etc.) compile in based on
+    // the cart's metafile gate, same as the GPU shell.
+    ingredients.registerAll();
+
+    // __hostFlush registration. Mode defaults to .sync (TUI has no
+    // Zig-side paint loop to defer to); applyCommandBatch on the
+    // host_tree side lands every mutation inline.
+    v8_bindings_reconciler.register();
+
+    // Assistant SDK bindings — registered directly so useAssistant
+    // works in TUI carts even when has_sdk is off (in the GPU path
+    // worker_bindings rides on v8_bindings_sdk.registerSdk).
+    worker_bindings.register();
+
+    // host_window — opt-in <Window>/<Notification> support for TUI
+    // carts that want to paint a real SDL3 surface from inside an
+    // otherwise-ANSI binary. No-op when has_window=false.
+    try host_window.init(std.heap.c_allocator);
+    host_window.register();
+
+    v8_runtime.registerHostFn("__tickDrain", hostTickDrain);
+
+    // Same console + process shim v8_cli installs. The cart bundle
+    // then layers tui/v8-preamble.js on top via its first line.
+    v8_runtime.evalScript(
+        \\globalThis.console = {
+        \\  log:   (...args) => __writeStdout(args.map(fmtArg).join(' ') + '\n'),
+        \\  info:  (...args) => __writeStdout(args.map(fmtArg).join(' ') + '\n'),
+        \\  warn:  (...args) => __writeStderr(args.map(fmtArg).join(' ') + '\n'),
+        \\  error: (...args) => __writeStderr(args.map(fmtArg).join(' ') + '\n'),
+        \\};
+        \\function fmtArg(a) {
+        \\  if (typeof a === 'string') return a;
+        \\  if (a === null) return 'null';
+        \\  if (a === undefined) return 'undefined';
+        \\  if (typeof a === 'object') { try { return JSON.stringify(a); } catch { return String(a); } }
+        \\  return String(a);
+        \\}
+        \\globalThis.process = {
+        \\  get argv() { return JSON.parse(__argv()); },
+        \\  env: new Proxy({}, { get: (_, k) => __env(String(k)) }),
+        \\  exit: (code) => __exit(code | 0),
+        \\  cwd: () => __cwd(),
+        \\  platform: 'linux',
+        \\};
+    );
+
+    const ok = v8_runtime.evalScriptChecked(BUNDLE_BYTES);
+    if (!ok) std.process.exit(1);
+}
+
 // ── main ────────────────────────────────────────────────────────
 
 pub fn main() !void {
@@ -3548,6 +3712,15 @@ pub fn main() !void {
     // land in the log instead of vanishing pre-bus. Best-effort — failure
     // (e.g. no $HOME) leaves emit() as a no-op and the runtime keeps going.
     event_bus.init();
+
+    // Headless (TUI) branch — bypass the entire GPU init + engine.run
+    // path. Substrate dispatched at compile time via the has_gpu
+    // build option so each binary only carries the substrate it
+    // shipped with.
+    if (HEADLESS) {
+        try runHeadless();
+        return;
+    }
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     g_alloc = gpa.allocator();

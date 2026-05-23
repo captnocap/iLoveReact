@@ -24,6 +24,14 @@ pub fn build(b: *std.Build) void {
     const sysroot = b.option([]const u8, "sysroot", "Optional sysroot for cross-builds");
     const dev_mode = b.option(bool, "dev-mode", "Read bundle.js from disk and hot-reload on change") orelse false;
     const custom_chrome = b.option(bool, "custom-chrome", "Cart draws its own window chrome (borderless)") orelse false;
+    // -Dhas-gpu=false ships the app binary in headless (TUI) mode: no
+    // SDL3/wgpu/freetype/X11 link, no engine.run call, framework/gpu/*
+    // and framework/primitive/{windows,context_menu,input} resolve to
+    // comptime stubs inside v8_app.zig. Default true preserves the GPU
+    // shell behavior for every existing cart. Set false from
+    // scripts/ship-tui (and eventually scripts/ship via metafile
+    // detection) so one binary target covers both substrates.
+    const has_gpu_cli = b.option(bool, "has-gpu", "Build v8_app with the GPU substrate (SDL3 + wgpu + engine.run). Set false for headless/TUI builds.") orelse true;
     const prebuilt_v8_path = b.option(
         []const u8,
         "prebuilt_v8_path",
@@ -92,13 +100,17 @@ pub fn build(b: *std.Build) void {
     const options = b.addOptions();
     options.addOption(bool, "is_lib", false);
     options.addOption([]const u8, "app_name", app_name);
-    // has_gpu — true for the GPU shell, false for the TUI shell. The
-    // INGREDIENTS catalog uses this to gate `core` + `window` bindings
-    // (the two whose .zig pull SDL3/freetype via engine.zig); when
-    // false those resolve to no-op stubs so the headless binary
-    // doesn't need the SDL include paths. C2 will widen this into a
-    // full headless/windowed split inside v8_app itself.
-    options.addOption(bool, "has_gpu", true);
+    // has_gpu — drives every comptime gate that distinguishes the GPU
+    // shell from the headless shell. Default true preserves existing
+    // cart behavior. When false: v8_ingredients stubs `core` + `window`
+    // (the two SDL-coupled required bindings via engine.zig); v8_app's
+    // main() takes the TUI eval body instead of engine.run; every
+    // framework/gpu/* and framework/primitive/{windows,context_menu,
+    // input} import in v8_app resolves to a stub so the SDL include
+    // paths aren't reached at compile time; this exe block skips
+    // linkSystemLibrary("SDL3"/wgpu/freetype/X11/asound). One binary
+    // target covers both substrates.
+    options.addOption(bool, "has_gpu", has_gpu_cli);
     options.addOption(bool, "dev_mode", dev_mode);
     options.addOption(bool, "custom_chrome", custom_chrome);
     options.addOption(bool, "has_physics", has_physics);
@@ -107,12 +119,18 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_midi", has_midi);
     options.addOption(bool, "has_window", has_window);
     options.addOption([]const u8, "bundle_path", bundle_path);
-    options.addOption(bool, "has_video", true);
-    options.addOption(bool, "has_render_surfaces", true);
-    options.addOption(bool, "has_effects", true);
-    options.addOption(bool, "has_canvas", true);
-    options.addOption(bool, "has_3d", true);
-    options.addOption(bool, "has_transitions", true);
+    // GPU-substrate features that were always-on for the GPU shell.
+    // Headless builds must turn them off, otherwise the matching
+    // framework/v8_bindings_X / framework/render/* modules get compiled
+    // and pull in wgpu / SDL via @import("wgpu") or framework/c.zig.
+    // Networking + crypto + debug_server are substrate-agnostic and
+    // stay on either way.
+    options.addOption(bool, "has_video", has_gpu_cli);
+    options.addOption(bool, "has_render_surfaces", has_gpu_cli);
+    options.addOption(bool, "has_effects", has_gpu_cli);
+    options.addOption(bool, "has_canvas", has_gpu_cli);
+    options.addOption(bool, "has_3d", has_gpu_cli);
+    options.addOption(bool, "has_transitions", has_gpu_cli);
     options.addOption(bool, "has_networking", true);
     options.addOption(bool, "has_crypto", true);
     options.addOption(bool, "has_debug_server", true);
@@ -124,7 +142,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     root_mod.addOptions("build_options", options);
-    root_mod.addImport("wgpu", wgpu_mod);
+    // wgpu — GPU rasterization pipeline. Pulled in by every framework/gpu/*
+    // and framework/render/* module. When has_gpu=false, v8_app.zig stubs
+    // all those imports, so the named "wgpu" module is unreachable and
+    // gating it here keeps the ~241MB static archive out of the headless
+    // binary's compile graph.
+    if (has_gpu_cli) root_mod.addImport("wgpu", wgpu_mod);
     root_mod.addImport("tls", tls_mod);
     // zluajit is needed by framework/audio (DSP engine). framework/process/luajit_worker
     // dlopens libluajit-5.1 directly, so it doesn't need this import.
@@ -169,17 +192,25 @@ pub fn build(b: *std.Build) void {
 
     // ── Always linked ──────────────────────────────────────────
     exe.linkLibC();
-    exe.linkSystemLibrary("SDL3");
-    exe.linkSystemLibrary("freetype");
+    // SDL3 + freetype carry the GPU substrate (windowing, GPU paint,
+    // text rasterization). Gated on has_gpu_cli so headless builds skip
+    // ~12MB of DT_NEEDED entries and don't need the SDL3/freetype
+    // headers at compile time.
+    if (has_gpu_cli) {
+        exe.linkSystemLibrary("SDL3");
+        exe.linkSystemLibrary("freetype");
+    }
 
     const os_tag = target.result.os.tag;
     if (os_tag == .linux) {
-        // X11/m/pthread/dl are universal on every desktop Linux — system-assumed,
-        // never bundled. SDL3/freetype/luajit headers + sos come from the
-        // sysroot when -Dsysroot is set; otherwise we fall back to the host's
-        // /usr/include/* layout (Debian-shaped paths).
-        exe.linkSystemLibrary("X11");
-        exe.linkSystemLibrary("m");
+        // X11/m are GPU-substrate concerns (window manager hints + math
+        // for SDL/wgpu). pthread + dl are universal: V8 isolates need
+        // pthread; dlopen lives on dl for libllama/libluajit/etc.
+        // luajit + freetype headers ride alongside SDL when GPU is on.
+        if (has_gpu_cli) {
+            exe.linkSystemLibrary("X11");
+            exe.linkSystemLibrary("m");
+        }
         exe.linkSystemLibrary("pthread");
         exe.linkSystemLibrary("dl");
         // libasound is required by framework/audio/midi.zig, which calls
@@ -192,29 +223,36 @@ pub fn build(b: *std.Build) void {
         // doesn't reference any ALSA symbols, so non-MIDI carts skip
         // both the link and the ~600KB DT_NEEDED entry.
         if (has_midi) exe.linkSystemLibrary("asound");
-        if (sysroot) |sr| {
-            root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
-            root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
-            root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
-            root_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
-        } else {
-            root_mod.addIncludePath(.{ .cwd_relative = "/usr/include/luajit-2.1" });
-            root_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
-            root_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+        if (has_gpu_cli) {
+            if (sysroot) |sr| {
+                root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
+                root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
+                root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
+                root_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
+            } else {
+                root_mod.addIncludePath(.{ .cwd_relative = "/usr/include/luajit-2.1" });
+                root_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+                root_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+            }
         }
     } else if (os_tag == .macos) {
-        root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/luajit-2.1" });
-        root_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
-        root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
-        root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
-        root_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/lib" });
-        root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/include" });
-        exe.linkFramework("Foundation");
-        exe.linkFramework("QuartzCore");
-        exe.linkFramework("Metal");
-        exe.linkFramework("Cocoa");
-        exe.linkFramework("IOKit");
-        exe.linkFramework("CoreVideo");
+        // macOS GPU substrate — Cocoa + Metal + the homebrew include
+        // tree. Gated alongside SDL on has_gpu_cli; headless builds
+        // skip the entire Apple framework link surface.
+        if (has_gpu_cli) {
+            root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/luajit-2.1" });
+            root_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
+            root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
+            root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
+            root_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/lib" });
+            root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/opt/libarchive/include" });
+            exe.linkFramework("Foundation");
+            exe.linkFramework("QuartzCore");
+            exe.linkFramework("Metal");
+            exe.linkFramework("Cocoa");
+            exe.linkFramework("IOKit");
+            exe.linkFramework("CoreVideo");
+        }
     }
 
     // ── Include paths ──────────────────────────────────────────
@@ -234,9 +272,13 @@ pub fn build(b: *std.Build) void {
 
     // ── stb image read + write ────────────────────────────────
     // stbi_load_from_memory powers image_cache.zig (the <Image> primitive).
-    // stbi_write_png powers capture/witness screenshotting.
-    root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
-    root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
+    // stbi_write_png powers capture/witness screenshotting. Both are
+    // GPU-substrate (no image decode/encode path in the ANSI walker),
+    // so gate them on has_gpu_cli to keep the headless binary small.
+    if (has_gpu_cli) {
+        root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
+        root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
+    }
 
     // ── libfvad (WebRTC VAD) ─────────────────────────────────
     // Tiny (~1500 LOC), BSD-licensed, no deps. Always linked because
