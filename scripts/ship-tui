@@ -42,6 +42,13 @@ esac
 [ -f "$ENTRY_ABS" ] || { echo "[ship-tui] missing entry: $ENTRY" >&2; exit 2; }
 
 NAME=$(basename "$ENTRY_ABS" .tsx)
+# Directory carts (cart/<name>/index.tsx) — same convention scripts/ship
+# uses. The basename here is "index"; derive the real cart name from
+# the parent directory. Without this, `ship-tui cart/tui_app/index.tsx`
+# produces zig-out/bin/index which collides with cart/index.tsx.
+if [ "$NAME" = "index" ]; then
+    NAME=$(basename "$(dirname "$ENTRY_ABS")")
+fi
 ESBUILD="$ROOT/tools/esbuild"
 ZIG="${REACTJIT_ZIG:-$ROOT/tools/zig/zig}"
 [ -x "$ZIG" ] || ZIG=zig
