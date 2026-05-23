@@ -8,10 +8,14 @@
 # rest of the SDK uses.
 #
 # Pipeline:
-#   1. esbuild → tui/.cache/bundle-<name>.js     (TUI entry + cart aliased in)
-#   2. zig build tui-app -Dapp-name=<name>       → zig-out/bin/<name>
-#      -Dbundle-path=<absolute path>            (bundle baked in via @embedFile)
-#   3. strip + tar.gz + self-extracting wrapper → zig-out/bin/<name>
+#   1. esbuild → tui/.cache/bundle-<name>.js               (TUI entry + cart aliased in)
+#   2. zig build app -Dhas-gpu=false -Dapp-name=<name>     → zig-out/bin/<name>
+#      -Dbundle-path=<absolute path>                       (bundle baked in via @embedFile)
+#   3. strip + tar.gz + self-extracting wrapper            → zig-out/bin/<name>
+#
+# Unified v8_app entry point — same binary target as scripts/ship, just
+# flipped into headless mode. v8_tui_app.zig + the tui-app build target
+# were retired in C3 once v8_app.runHeadless() was proven equivalent.
 #
 # No `lib/` dir is bundled because the TUI host has no non-system .so
 # deps (only libc/libm/ld-linux, all universal). The tarball is just
@@ -174,11 +178,17 @@ if [ -f "$METAFILE" ]; then
     fi
 fi
 
-echo "[ship-tui] zig build tui-app -Dapp-name=$NAME $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG $PRIVACY_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $PG_FLAG $EMBED_FLAG $WHISPER_FLAG $ONNX_FLAG"
+echo "[ship-tui] zig build app -Dhas-gpu=false -Dapp-name=$NAME $HTTPSRV_FLAG $WSSRV_FLAG $PROCESS_FLAG $NET_FLAG $SDK_FLAG $FS_FLAG $WINDOW_FLAG $PRIVACY_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $PG_FLAG $EMBED_FLAG $WHISPER_FLAG $ONNX_FLAG"
+# Unified app target with -Dhas-gpu=false produces the headless binary
+# (no SDL/wgpu link, v8_app's runHeadless() body instead of engine.run).
+# The dedicated tui-app target was deleted in C3; v8_app is the single
+# entry point now.
+#
 # -Dhas-terminal=true links libvterm and brings in framework/vterm_real
 # so the host's <Terminal> renderer can spawn shells and read cells.
 # libvterm is ~70KB statically; no reason to gate this off by default.
-"$ZIG" build tui-app \
+"$ZIG" build app \
+  -Dhas-gpu=false \
   -Doptimize=ReleaseFast \
   -Dapp-name="$NAME" \
   -Dbundle-path="$OUT_BUNDLE" \

@@ -83,11 +83,12 @@ pub fn build(b: *std.Build) void {
     // -Dhas-window: cart imports <Window> (or <Notification>) from
     // @reactjit/runtime/primitives. For the GPU app (this target), the
     // window-rendering deps (SDL3, freetype, layout, text, windows.zig)
-    // are foundational — always linked — so the flag is informational
-    // and currently no-op on the link side. The flag is consumed by the
-    // tui-app target below, where it gates SDL3 + the window engine
-    // subset for an otherwise-ANSI binary.
-    const has_window = b.option(bool, "has-window", "Cart uses <Window>/<Notification> (informational for GPU app; gates SDL3 + window-engine link for tui-app)") orelse false;
+    // are foundational on the GPU shell (engine.run already pulls them).
+    // On the headless shell (-Dhas-gpu=false), this flag is what brings
+    // SDL3 + freetype + wgpu + the framework include paths in so an
+    // otherwise-ANSI binary can paint a <Window> subtree alongside the
+    // ANSI grid. See the `has_gpu_cli or has_window` link gates below.
+    const has_window = b.option(bool, "has-window", "Cart uses <Window>/<Notification> (foundational on GPU shell; gates SDL3 + window-engine link on headless shell)") orelse false;
 
     // Bundle path override. When unset, v8_app.zig falls back to embedding
     // bundle-<app-name>.js relative to its own source directory (the
@@ -143,11 +144,14 @@ pub fn build(b: *std.Build) void {
     });
     root_mod.addOptions("build_options", options);
     // wgpu — GPU rasterization pipeline. Pulled in by every framework/gpu/*
-    // and framework/render/* module. When has_gpu=false, v8_app.zig stubs
-    // all those imports, so the named "wgpu" module is unreachable and
-    // gating it here keeps the ~241MB static archive out of the headless
-    // binary's compile graph.
-    if (has_gpu_cli) root_mod.addImport("wgpu", wgpu_mod);
+    // and framework/render/* module. When has_gpu=false AND has_window=false,
+    // v8_app.zig stubs all those imports and the named "wgpu" module is
+    // unreachable; gating it here keeps the ~241MB static archive out
+    // of the pure-headless binary's compile graph. has_window=true on a
+    // headless build still needs wgpu because primitive/text.zig
+    // (called from primitive/windows.zig for <Window> text metrics)
+    // imports gpu/text.zig which @import("wgpu").
+    if (has_gpu_cli or has_window) root_mod.addImport("wgpu", wgpu_mod);
     root_mod.addImport("tls", tls_mod);
     // zluajit is needed by framework/audio (DSP engine). framework/process/luajit_worker
     // dlopens libluajit-5.1 directly, so it doesn't need this import.
@@ -193,10 +197,14 @@ pub fn build(b: *std.Build) void {
     // ── Always linked ──────────────────────────────────────────
     exe.linkLibC();
     // SDL3 + freetype carry the GPU substrate (windowing, GPU paint,
-    // text rasterization). Gated on has_gpu_cli so headless builds skip
+    // text rasterization). Linked when either:
+    //   - has_gpu_cli: full GPU shell (engine.run + SDL event pump)
+    //   - has_window: TUI cart imports <Window>/<Notification>, needs
+    //     SDL3 to paint a real window subtree alongside the ANSI grid
+    // Pure-headless builds (has_gpu=false AND has_window=false) skip
     // ~12MB of DT_NEEDED entries and don't need the SDL3/freetype
     // headers at compile time.
-    if (has_gpu_cli) {
+    if (has_gpu_cli or has_window) {
         exe.linkSystemLibrary("SDL3");
         exe.linkSystemLibrary("freetype");
     }
@@ -206,8 +214,9 @@ pub fn build(b: *std.Build) void {
         // X11/m are GPU-substrate concerns (window manager hints + math
         // for SDL/wgpu). pthread + dl are universal: V8 isolates need
         // pthread; dlopen lives on dl for libllama/libluajit/etc.
-        // luajit + freetype headers ride alongside SDL when GPU is on.
-        if (has_gpu_cli) {
+        // luajit + freetype headers ride alongside SDL when GPU or
+        // <Window>-on-TUI is on.
+        if (has_gpu_cli or has_window) {
             exe.linkSystemLibrary("X11");
             exe.linkSystemLibrary("m");
         }
@@ -223,7 +232,7 @@ pub fn build(b: *std.Build) void {
         // doesn't reference any ALSA symbols, so non-MIDI carts skip
         // both the link and the ~600KB DT_NEEDED entry.
         if (has_midi) exe.linkSystemLibrary("asound");
-        if (has_gpu_cli) {
+        if (has_gpu_cli or has_window) {
             if (sysroot) |sr| {
                 root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/luajit-2.1", .{sr}) });
                 root_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
@@ -237,9 +246,10 @@ pub fn build(b: *std.Build) void {
         }
     } else if (os_tag == .macos) {
         // macOS GPU substrate — Cocoa + Metal + the homebrew include
-        // tree. Gated alongside SDL on has_gpu_cli; headless builds
-        // skip the entire Apple framework link surface.
-        if (has_gpu_cli) {
+        // tree. Headless builds without has_window skip the entire
+        // Apple framework link surface; headless+has_window builds
+        // still need it to paint <Window> subtrees via SDL3.
+        if (has_gpu_cli or has_window) {
             root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/luajit-2.1" });
             root_mod.addLibraryPath(.{ .cwd_relative = "/opt/homebrew/lib" });
             root_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include" });
@@ -274,8 +284,9 @@ pub fn build(b: *std.Build) void {
     // stbi_load_from_memory powers image_cache.zig (the <Image> primitive).
     // stbi_write_png powers capture/witness screenshotting. Both are
     // GPU-substrate (no image decode/encode path in the ANSI walker),
-    // so gate them on has_gpu_cli to keep the headless binary small.
-    if (has_gpu_cli) {
+    // so gate them on has_gpu_cli OR has_window — a headless cart that
+    // opts into <Window> may use <Image> inside it.
+    if (has_gpu_cli or has_window) {
         root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
         root_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_write_impl.c"), .flags = &.{"-O2"} });
     }
@@ -676,174 +687,16 @@ pub fn build(b: *std.Build) void {
     const v8_cli_step = b.step("v8-cli", "Build standalone V8 script host (zig-out/bin/v8cli)");
     v8_cli_step.dependOn(&b.addInstallArtifact(v8_cli_exe, .{}).step);
 
-    // ── tui-app: self-contained TUI cart binary ─────────────────
-    // Same shape as v8-cli but with @embedFile baking the cart bundle into
-    // the binary at build time. -Dapp-name renames the output, -Dbundle-path
-    // points at the prebuilt esbuild bundle. scripts/ship-tui drives both.
-    //
-    // No SDL, no GPU host, no .so wrangling — v8cli's only dynamic deps are
-    // libm + libc + ld-linux, which are universal on every desktop Linux.
-    // The result is a single-file executable with no install needed.
-    {
-        const tui_options = b.addOptions();
-        tui_options.addOption([]const u8, "app_name", app_name);
-        tui_options.addOption([]const u8, "bundle_path", bundle_path);
-        // has_gpu=false declares this binary as the headless shell.
-        // INGREDIENTS gates `core` + `window` (the SDL-coupled
-        // required bindings) on this flag — when false they resolve
-        // to no-op stubs, so the TUI binary doesn't need SDL3/freetype
-        // include paths or links. C2 collapses this distinction into
-        // a unified v8_app entry point.
-        tui_options.addOption(bool, "has_gpu", false);
-        // Mirrors the GPU app's gate: when -Dhas-terminal=true is passed,
-        // libvterm is linked and framework/vterm.zig dispatches to the
-        // real impl (otherwise without midi). The TUI host's <Terminal>
-        // renderer needs the real impl to spawn shells + read cell
-        // grids.
-        tui_options.addOption(bool, "has_terminal", has_terminal);
-        // Same source-driven feature gates as the GPU app. ship-tui walks
-        // the cart's esbuild metafile (via scripts/ship-metafile-gate.js)
-        // and passes the corresponding `-Dhas-*` flags. No system libs
-        // are linked by these — the bindings are pure Zig stdlib (std.net
-        // / std.http / std.posix). Their tickDrain() runs from JS via
-        // __tickDrain in tui/v8-preamble.js.
-        tui_options.addOption(bool, "has_httpsrv", has_httpsrv);
-        tui_options.addOption(bool, "has_wssrv", has_wssrv);
-        tui_options.addOption(bool, "has_process", has_process);
-        tui_options.addOption(bool, "has_net", has_net);
-        tui_options.addOption(bool, "has_sdk", has_sdk);
-        tui_options.addOption(bool, "has_fs", has_fs);
-        // Full catalog mirror — same flag set the GPU shell sees. The
-        // INGREDIENTS catalog in framework/v8_ingredients.zig reads
-        // these via `enabledFor("X")`; flags that aren't declared
-        // here would short-circuit to false (forever), forcing the
-        // stub branch even when the cart's metafile clearly ordered
-        // the binding. Declaring them all keeps the source-driven
-        // contract symmetric across substrates.
-        //
-        // Pure-Zig bindings (pg, embed-via-dlopen, whisper, onnx, tor,
-        // privacy, websocket, telemetry, zigcall) compile cleanly into
-        // the TUI binary today. SDL3 / wgpu-coupled bindings
-        // (audio, audio_input, voice, video, paintable, doom) need
-        // their C deps linked — the tui-app exe block below does not
-        // wire those in unless has_window is also true, so passing
-        // -Dhas-voice=true to ship-tui will currently compile-fail on
-        // an SDL header. The SDL gate merge (C2) closes that.
-        tui_options.addOption(bool, "has_websocket", has_websocket);
-        tui_options.addOption(bool, "has_telemetry", has_telemetry);
-        tui_options.addOption(bool, "has_zigcall", has_zigcall);
-        tui_options.addOption(bool, "has_tor", has_tor);
-        tui_options.addOption(bool, "has_privacy", has_privacy);
-        tui_options.addOption(bool, "has_pg", has_pg or has_embed);
-        tui_options.addOption(bool, "has_embed", has_embed);
-        tui_options.addOption(bool, "has_whisper", has_whisper);
-        tui_options.addOption(bool, "has_onnx", has_onnx);
-        tui_options.addOption(bool, "has_voice", has_voice);
-        tui_options.addOption(bool, "has_audio_input", has_audio_input);
-        tui_options.addOption(bool, "has_audio", has_audio);
-        tui_options.addOption(bool, "has_midi", has_midi);
-        tui_options.addOption(bool, "has_paintable", has_paintable);
-        tui_options.addOption(bool, "has_doom", has_doom);
-        tui_options.addOption(bool, "has_video", false);
-        // -Dhas-window: cart imports <Window>/<Notification>. The trigger
-        // is runtime/primitives/window.tsx landing in the bundle
-        // (ship-metafile-gate.js detects it). When set, the tui-app
-        // target needs to link SDL3 + the window-rendering engine subset
-        // (layout, text, windows.zig) and register the reconciler→
-        // Node-tree pipeline so a <Window> subtree can paint as a real
-        // GPU window from inside this otherwise-ANSI binary. The actual
-        // link wiring is deferred — it depends on extracting
-        // v8_app.zig:applyCommandBatch + the Node-tree state it touches
-        // into a shared module both v8_app.zig and v8_tui_app.zig can
-        // import. The option is declared so ship-tui can pass it
-        // without zig erroring on an unknown flag.
-        tui_options.addOption(bool, "has_window", has_window);
-
-        const tui_mod = b.createModule(.{
-            .root_source_file = b.path("v8_tui_app.zig"),
-            .target = target,
-            .optimize = optimize,
-        });
-        tui_mod.addImport("v8", v8_mod);
-        tui_mod.addImport("tls", tls_mod);
-        // pg.zig (Postgres client) — source-gated alongside the
-        // v8_ingredients catalog. When has_pg=false the
-        // `@import("v8_bindings_pg.zig")` resolves to a stub inside
-        // v8_ingredients, so neither pg.zig nor its named "pg" module
-        // import are reached. Pull the module in iff the cart ordered
-        // it (or has_embed, which depends on pg). Same shape as
-        // wgpu's `if (has_window) tui_mod.addImport("wgpu", ...)`
-        // below.
-        if (has_pg or has_embed) tui_mod.addImport("pg", pg_dep.module("pg"));
-        // wgpu pulled in transitively when has_window: the SDL3
-        // TextEngine in primitive/text.zig calls into gpu/text.zig for
-        // per-glyph advances (shared atlas, single source of truth for
-        // metrics across the engine). Layout text measurement therefore
-        // needs wgpu link-side even though paint goes through SDL3's
-        // 2D renderer, not the wgpu pipeline. Cost is real — wgpu's
-        // static archive is ~241MB — but it's the source-driven
-        // contract: carts that import <Window> pay; the rest don't.
-        if (has_window) tui_mod.addImport("wgpu", wgpu_mod);
-        tui_mod.addOptions("build_options", tui_options);
-        tui_mod.addCSourceFile(.{
-            .file = b.path("framework/ffi/v8_stack_shim.cpp"),
-            .flags = &.{ "-O2", "-std=c++17" },
-        });
-        // worker_bindings.zig + transitive SDKs need:
-        //   - std.http.Client (replaced libcurl in net/http.zig)
-        //   - llama_headers (local_ai_runtime @cImport; libllama itself
-        //     is dlopen'd at runtime, no link cost)
-        //   - framework/ffi for common shims
-        tui_mod.addIncludePath(b.path("framework/ffi/llama_headers"));
-        tui_mod.addIncludePath(b.path("framework/ffi"));
-
-        const tui_exe = b.addExecutable(.{
-            .name = app_name,
-            .root_module = tui_mod,
-        });
-        tui_exe.stack_size = 64 * 1024 * 1024;
-        tui_exe.linkLibC();
-        tui_exe.linkLibCpp();
-        if (has_terminal) tui_exe.linkSystemLibrary("vterm");
-
-        // ── has-window: link SDL3 + the engine subset ──────────
-        // When a cart imports <Window>/<Notification>, the TUI binary
-        // grows the window-rendering substrate so the <Window>
-        // subtree can paint to a real SDL3 surface from inside the
-        // same React tree that drives the ANSI grid. ANSI-only carts
-        // skip every line below this comment — they keep the slim,
-        // .so-free tui-app shape.
-        if (has_window) {
-            tui_exe.linkSystemLibrary("SDL3");
-            tui_exe.linkSystemLibrary("freetype");
-            // framework/c.zig @cImport pulls SDL3/SDL.h, ft2build.h,
-            // freetype/freetype.h, stb/stb_image.h. Match the GPU
-            // app's include-path layout (build.zig:179-188).
-            if (sysroot) |sr| {
-                tui_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
-                tui_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
-                tui_mod.addLibraryPath(.{ .cwd_relative = b.fmt("{s}/usr/lib", .{sr}) });
-            } else {
-                tui_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
-                tui_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
-            }
-            // stb_image is vendored C source; <Image> primitive uses it.
-            tui_mod.addCSourceFile(.{ .file = b.path("stb/stb_image_impl.c"), .flags = &.{"-O2"} });
-            tui_mod.addIncludePath(b.path("."));
-            // X11 hint atoms (notifications). Same posix-threading
-            // assumptions as the GPU app — libX11/libm/libpthread/libdl
-            // are system-assumed on every Linux desktop.
-            if (target.result.os.tag == .linux) {
-                tui_exe.linkSystemLibrary("X11");
-                tui_exe.linkSystemLibrary("m");
-                tui_exe.linkSystemLibrary("pthread");
-                tui_exe.linkSystemLibrary("dl");
-            }
-        }
-
-        const tui_step = b.step("tui-app", "Build a self-contained TUI cart binary (zig-out/bin/<app-name>)");
-        tui_step.dependOn(&b.addInstallArtifact(tui_exe, .{}).step);
-    }
+    // ── tui-app: DELETED (C3) ────────────────────────────────────
+    // The dedicated tui-app build target + v8_tui_app.zig entry point
+    // were retired once v8_app.zig grew a runHeadless() branch behind
+    // -Dhas-gpu=false (see C2). scripts/ship-tui now invokes
+    //   zig build app -Dhas-gpu=false -Dapp-name=<n> ...
+    // producing the same binary shape (~6MB pure-ANSI / ~176MB with
+    // -Dhas-window=true for the embedded-<Window> case) the dedicated
+    // target produced before. One entry point, two substrates, source-
+    // driven gating via the INGREDIENTS catalog. See v8_app.zig's
+    // HEADLESS const + runHeadless() fn for the actual dispatch.
 
     // ── luajit_runtime bridge library for the Zig integration test ───
     const bridge_mod = b.createModule(.{
