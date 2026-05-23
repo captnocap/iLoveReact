@@ -103,13 +103,17 @@ export function Editor({ s }: { s: CutoutState }) {
                always readable at export. The MaskQuad that draws it is
                skipped when the layer is muted. */}
             {s.layers.map((layer) => (
-              <Paintable key={layer.id} id={layer.maskId} w={s.srcDims!.w} h={s.srcDims!.h} />
+              <Paintable key={`base:${layer.id}`} id={layer.baseId} w={s.srcDims!.w} h={s.srcDims!.h} />
+            ))}
+            {s.layers.map((layer) => (
+              <Paintable key={`brush:${layer.id}`} id={layer.brushId} w={s.srcDims!.w} h={s.srcDims!.h} />
             ))}
             {s.layers.map((layer) => (
               layer.config.muted ? null : (
                 <MaskQuad
                   key={`q:${layer.id}`}
-                  paintableId={layer.maskId}
+                  paintableId={layer.baseId}
+                  overrideId={layer.brushId}
                   gridSize={OVERLAY_RES}
                   worldW={s.srcDims!.w}
                   worldH={s.srcDims!.h}

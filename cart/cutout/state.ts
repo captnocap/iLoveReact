@@ -1,28 +1,28 @@
 // useCutoutState — the single source of truth for the cutout cart.
 //
-// ── Unified layer model ───────────────────────────────────────────────
-// A cutout is ONE stack of layers. Each layer owns:
-//   - a full-resolution mask living in its own GPU paintable texture
-//     (1 = removed/cut, 0 = kept). Keyed by a stable per-layer id so the
-//     texture survives reorders and round-trips through save/undo.
-//   - a visual config (surface mode / blend / hue / phase / colors / dim).
-//   - its own smart-select click history (empty if it was only brushed).
+// ── Unified layer model (dual-source masks) ───────────────────────────
+// A cutout is ONE stack of layers. Each layer owns TWO full-resolution GPU
+// mask textures that compose:
+//   - base  (smart selection): set by replaying this layer's clicks; rebuilt
+//     on every refine. Binary, stored 0/255 (255 = removed).
+//   - brush (manual override): brush/lasso/refine paint here ON TOP of the
+//     base. Three states: 0 = untouched (defer to base), ~128 = force-keep,
+//     ~255 = force-remove.
+// Effective removed-mask = brush==force ? brush : base. So you can smart-
+// select a layer, clean it up with the brush, and smart-select AGAIN — the
+// re-refine rebuilds `base` while your brush overrides ride on top untouched.
 //
 // `activeLayer` is the index every tool writes into. Brush, lasso, refine
-// and smart-select all edit the active layer — switching tools changes
-// nothing about the layer data, which is the whole point: a layer is a
-// layer, no matter which tool touches it. Smart-select replays the active
-// layer's clicks into the active layer's texture; it never owns a global
-// buffer and never wipes another layer.
+// and smart-select all edit the active layer — switching tools never
+// disturbs the stack. On-screen + exported PNG/.sqi composite the stack:
+// the final removed region is the union of every visible layer's effective
+// mask.
 //
-// The on-screen view and the exported PNG/.sqi composite the stack: the
-// final removed region is the union of every visible layer's mask.
-//
-// Perf invariants carried over from the old single-buffer design:
-//   - Brush dabs write straight to the GPU texture (paintableOps) and only
-//     bump a throttled version counter — never a per-dab setState.
-//   - The big work (RLE-encoding masks for autosave / undo) runs lazily at
-//     discrete commit points, reading each layer's texture back on demand.
+// Perf invariants:
+//   - Brush dabs write straight to the GPU override texture (paintableOps)
+//     and only bump a throttled version counter — never a per-dab setState.
+//   - RLE-encoding masks for autosave / undo runs lazily at discrete commit
+//     points, reading each layer's textures back on demand.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
@@ -73,24 +73,53 @@ const BRUSH_SIZES = [2, 8, 32, 128, 512];
 const BRUSH_EDGE_SNAP_THRESHOLD = 150;
 const BRUSH_SPACING_FRAC = 0.32;
 
+// Brush override band values (normalized 0..1, written via paintable.circle
+// which stores value*255 into the R8 texture). Read back as bytes.
+const BRUSH_REMOVE = 1.0; // force-remove (erase mode)  → byte 255
+const BRUSH_KEEP = 0.5;   // force-keep   (restore mode) → byte ~128
+
 export type { LayerConfig } from './domain';
 
-/** A layer in the stack. The mask itself lives on the GPU under `maskId`;
- *  this object carries everything else. */
+/** A layer in the stack. Both masks live on the GPU under base/brush ids. */
 export interface Layer {
   id: string;
   name: string;
   groupName: string | null;
   config: LayerConfig;
-  /** Paintable handle id for this layer's full-res R8 mask texture. */
-  maskId: string;
-  /** Smart-select click history that drives this layer (empty = brush/lasso
-   *  only). Kept per-layer so re-refining stays scoped to one layer. */
+  /** Paintable id for the SMART selection mask (full-res R8, 0/255). */
+  baseId: string;
+  /** Paintable id for MANUAL brush overrides (0 untouched / ~128 keep /
+   *  ~255 remove). Brush/lasso/refine paint here so re-refining never wipes
+   *  manual cleanup. */
+  brushId: string;
+  /** Smart-select click history that drives `base` (empty = brush only). */
   clicks: ClickPoint[];
 }
 
-function maskIdFor(layerId: string): string {
-  return `cutout-mask-${layerId}`;
+function baseIdFor(layerId: string): string { return `cutout-base-${layerId}`; }
+function brushIdFor(layerId: string): string { return `cutout-brush-${layerId}`; }
+
+/** Scale a 0/1 (or 0/255) mask to 0/255 so the R8Unorm sampler reads it as
+ *  1.0, not byte-1 ≈ 0.004. paintable.upload writes RAW bytes, so the
+ *  backend's 0/1 mask MUST be scaled or it samples as empty. */
+function scaleMask(bytes: Uint8Array): Uint8Array {
+  const out = new Uint8Array(bytes.length);
+  for (let i = 0; i < bytes.length; i++) out[i] = bytes[i] ? 255 : 0;
+  return out;
+}
+
+/** Compose a layer's effective binary mask (1 = removed) from its smart
+ *  base (0/255 bytes) and brush override (0 untouched / ~128 keep / ~255
+ *  remove). Matches the in-shader compose in MaskQuad. */
+function effectiveMask(base: Uint8Array | null, brush: Uint8Array | null, n: number): Uint8Array {
+  const out = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    const ov = brush ? brush[i] : 0;
+    if (ov >= 192) out[i] = 1;                          // force remove
+    else if (ov >= 64) out[i] = 0;                      // force keep
+    else out[i] = base && base[i] >= 128 ? 1 : 0;       // untouched → base
+  }
+  return out;
 }
 
 export interface CutoutState {
@@ -153,8 +182,7 @@ export interface CutoutState {
   smartBusy: boolean;
 
   // Layer ops. `i` indexes `layers`. The per-look setters also accept the
-  // legacy `i = -1` to target the effect* defaults (Tools palette + the
-  // "Global" target in the Inspector).
+  // legacy `i = -1` to target the effect* defaults.
   addLayer: () => number;
   deleteLayer: (i: number) => void;
   duplicateLayer: (i: number) => void;
@@ -206,7 +234,8 @@ export interface CutoutState {
 }
 
 export interface LayerClipping {
-  maskBytes: Uint8Array | null;
+  baseBytes: Uint8Array | null;
+  brushBytes: Uint8Array | null;
   config: LayerConfig;
   clicks: ClickPoint[];
   sourceName: string;
@@ -263,14 +292,15 @@ export function useCutoutState(): CutoutState {
     setActiveLayerState(clamped);
   };
 
-  // Pending CPU→GPU uploads, keyed by maskId. Filled by restore / undo /
+  // Pending CPU→GPU uploads, keyed by paintable id. Bytes are stored READY
+  // to upload (already scaled for base channels). Filled by restore / undo /
   // duplicate / paste / import (which set `layers` before the matching
-  // <Paintable> has mounted) and flushed in the effect below once the
-  // textures exist.
+  // <Paintable> mounts) and flushed once the textures exist.
   const pendingUploadsRef = useRef<Map<string, Uint8Array>>(new Map());
   useEffect(() => {
     if (pendingUploadsRef.current.size === 0) return;
-    const live = new Set(layersRef.current.map((l) => l.maskId));
+    const live = new Set<string>();
+    for (const l of layersRef.current) { live.add(l.baseId); live.add(l.brushId); }
     for (const [id, bytes] of pendingUploadsRef.current) {
       if (live.has(id)) paintableOps(id).upload(bytes);
     }
@@ -295,8 +325,7 @@ export function useCutoutState(): CutoutState {
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const [restoredFrom, setRestoredFrom] = useState<string | null>(null);
 
-  // Dirty bit — any paint/upload flips it on, clear-all flips it off. Backs
-  // hasMaskEdits without a per-dab probe.
+  // Dirty bit — any paint/upload flips it on, clear-all flips it off.
   const maskDirtyCountRef = useRef(0);
   const [maskDirtyTick, setMaskDirtyTick] = useState(0);
   const markMaskDirty = () => {
@@ -357,7 +386,8 @@ export function useCutoutState(): CutoutState {
         phaseOffset: effectPhaseOffsetRef.current,
         dim: effectDimRef.current,
       }, ordinal),
-      maskId: maskIdFor(id),
+      baseId: baseIdFor(id),
+      brushId: brushIdFor(id),
       clicks: [],
     };
   };
@@ -368,7 +398,6 @@ export function useCutoutState(): CutoutState {
     return i >= 0 && i < arr.length ? arr[i] : null;
   };
 
-  /** Ensure there's at least one layer and an active index; returns it. */
   const ensureActiveLayer = (): Layer => {
     let layer = activeLayerObj();
     if (layer) return layer;
@@ -379,7 +408,6 @@ export function useCutoutState(): CutoutState {
     return layer;
   };
 
-  /** Immutable in-place update of one layer's metadata/config. */
   const patchLayer = (i: number, patch: Partial<Layer>) => {
     const cur = layersRef.current;
     if (i < 0 || i >= cur.length) return;
@@ -395,6 +423,14 @@ export function useCutoutState(): CutoutState {
     setLayers(next);
   };
 
+  /** Read a layer's effective binary mask (1 = removed) by composing its two
+   *  textures. Used at export / snapshot / merge / invert. */
+  const readEffective = (layer: Layer, n: number): Uint8Array => {
+    const base = paintableOps(layer.baseId).readback();
+    const brush = paintableOps(layer.brushId).readback();
+    return effectiveMask(base, brush, n);
+  };
+
   const bump = () => setMaskVersion((v) => v + 1);
   const lastBumpRef = useRef(0);
   const BUMP_THROTTLE_MS = 60;
@@ -406,13 +442,6 @@ export function useCutoutState(): CutoutState {
   };
 
   // ── Ingestion ───────────────────────────────────────────────────────
-  const resetForSource = () => {
-    setLayers([]);
-    setActiveLayer(-1);
-    clearMaskDirty();
-    setMaskVersion((v) => v + 1);
-  };
-
   const ingest = async (path: string) => {
     const token = ++tokenRef.current;
     backendRef.current.close();
@@ -422,14 +451,16 @@ export function useCutoutState(): CutoutState {
     setSavedPath(null);
     setSrcDims(null);
     grayRef.current = null;
-    resetForSource();
+    setLayers([]);
+    setActiveLayer(-1);
+    clearMaskDirty();
+    setMaskVersion((v) => v + 1);
     setBusy(true);
     setStatus(`loading ${basenameStem(path)}…`);
     const dims = await identify(path);
     if (tokenRef.current !== token) return;
     if (!dims) { setStatus('could not read image dimensions'); setBusy(false); return; }
     setSrcDims(dims);
-    // Start with one empty layer so a tool always has somewhere to paint.
     const first = makeLayer(0, 'Layer 1');
     setLayers([first]);
     setActiveLayer(0);
@@ -470,7 +501,6 @@ export function useCutoutState(): CutoutState {
     const ch = clampCanvasSize(h);
     if (!srcDims || (srcDims.w === cw && srcDims.h === ch)) return;
     setSrcDims({ w: cw, h: ch });
-    // Resizing the canvas invalidates pixel masks; reset to one empty layer.
     const first = makeLayer(0, 'Layer 1');
     setLayers([first]);
     setActiveLayer(0);
@@ -481,7 +511,7 @@ export function useCutoutState(): CutoutState {
 
   useFileDrop((path) => { void ingest(path); });
 
-  // ── Brush / lasso / refine — paint the ACTIVE layer ─────────────────
+  // ── Brush / lasso / refine — paint the ACTIVE layer's OVERRIDE ──────
   const pressureRadius = (pressure?: number) => {
     const p = typeof pressure === 'number' && Number.isFinite(pressure) && pressure > 0
       ? Math.max(0, Math.min(1, pressure)) : 0.5;
@@ -497,7 +527,6 @@ export function useCutoutState(): CutoutState {
 
   const beginStroke = () => {
     history.commit(buildCurrentSession);
-    // A stroke needs a layer; create one if the stack is empty.
     ensureActiveLayer();
     drawingRef.current = true;
     lastStrokePointRef.current = null;
@@ -513,10 +542,13 @@ export function useCutoutState(): CutoutState {
     if (!srcDims || !drawingRef.current) return;
     const layer = activeLayerObj();
     if (!layer) return;
-    const value = mode === 'erase' ? 1 : 0;
+    // Brush writes the OVERRIDE channel: erase → force-remove, restore →
+    // force-keep. The smart base underneath is untouched, so re-refining
+    // never wipes these strokes.
+    const value = mode === 'erase' ? BRUSH_REMOVE : BRUSH_KEEP;
     const radius = pressureRadius(pressure);
     const pt = (tool === 'brush' || tool === 'refine') ? snapBrushPoint(sx, sy, radius) : { x: sx, y: sy };
-    paintableOps(layer.maskId).circle(pt.x, pt.y, radius, value);
+    paintableOps(layer.brushId).circle(pt.x, pt.y, radius, value);
     markMaskDirty();
     bumpThrottled();
   };
@@ -545,7 +577,8 @@ export function useCutoutState(): CutoutState {
     const layer = activeLayerObj();
     if (!layer) return;
     history.commit(buildCurrentSession);
-    paintableOps(layer.maskId).clear(0);
+    paintableOps(layer.baseId).clear(0);
+    paintableOps(layer.brushId).clear(0);
     patchLayer(activeLayerRef.current, { clicks: [] });
     bump();
     setStatus(`cleared ${layer.name}`);
@@ -555,16 +588,21 @@ export function useCutoutState(): CutoutState {
     const layer = activeLayerObj();
     if (!srcDims || !layer) return;
     history.commit(buildCurrentSession);
-    const bytes = paintableOps(layer.maskId).readback();
-    if (!bytes) { setStatus('invert failed: GPU readback returned null'); return; }
-    for (let i = 0; i < bytes.length; i++) bytes[i] = bytes[i] ? 0 : 1;
-    paintableOps(layer.maskId).upload(bytes);
+    // Bake the current effective mask, invert it into the base, and drop the
+    // brush overrides + clicks (invert is a whole-layer reset of intent).
+    const n = srcDims.w * srcDims.h;
+    const eff = readEffective(layer, n);
+    const inv = new Uint8Array(n);
+    for (let i = 0; i < n; i++) inv[i] = eff[i] ? 0 : 255;
+    paintableOps(layer.baseId).upload(inv);
+    paintableOps(layer.brushId).clear(0);
+    patchLayer(activeLayerRef.current, { clicks: [] });
     markMaskDirty();
     bump();
     setStatus(`inverted ${layer.name}`);
   };
 
-  // ── Lasso — fills the ACTIVE layer ──────────────────────────────────
+  // ── Lasso — paints the ACTIVE layer's OVERRIDE ──────────────────────
   const addLassoPoint = (sx: number, sy: number) => {
     const nextPoint = { x: sx, y: sy };
     if (lassoPoints.length >= 3 && srcDims) {
@@ -586,14 +624,14 @@ export function useCutoutState(): CutoutState {
       verts[i * 2] = lassoPoints[i].x;
       verts[i * 2 + 1] = lassoPoints[i].y;
     }
-    paintableOps(layer.maskId).polygon(verts, mode === 'erase' ? 1 : 0);
+    paintableOps(layer.brushId).polygon(verts, mode === 'erase' ? BRUSH_REMOVE : BRUSH_KEEP);
     setLassoPoints([]);
     markMaskDirty();
     bump();
     setStatus(`lasso ${mode === 'erase' ? 'removed' : 'restored'} · ${lassoPoints.length} points`);
   };
 
-  // ── Smart select — drives the ACTIVE layer's selection ──────────────
+  // ── Smart select — rebuilds the ACTIVE layer's BASE ─────────────────
   const runRefine = async (layerIndex: number, nextClicks: ClickPoint[]) => {
     if (!srcDims) return;
     const layer = layersRef.current[layerIndex];
@@ -607,9 +645,9 @@ export function useCutoutState(): CutoutState {
     if (smartTokenRef.current !== token) return;
     setSmartBusy(false);
     if (!result) { setStatus('smart-select failed'); return; }
-    // The result mask replaces THIS layer's mask (re-refine is authoritative
-    // over its own click set). Other layers are untouched.
-    paintableOps(layer.maskId).upload(result.mask);
+    // Replace ONLY this layer's smart base. Brush overrides + other layers
+    // are untouched. Scale 0/1 → 0/255 so the sampler reads it as 1.0.
+    paintableOps(layer.baseId).upload(scaleMask(result.mask));
     markMaskDirty();
     bump();
     setStatus(`smart-select · ${nextClicks.length} click${nextClicks.length === 1 ? '' : 's'} · ${backendRef.current.name}`);
@@ -629,7 +667,7 @@ export function useCutoutState(): CutoutState {
     if (!layer) return;
     history.commit(buildCurrentSession);
     patchLayer(activeLayerRef.current, { clicks: [] });
-    paintableOps(layer.maskId).clear(0);
+    paintableOps(layer.baseId).clear(0);
     bump();
     setStatus('cleared selection');
   };
@@ -654,7 +692,8 @@ export function useCutoutState(): CutoutState {
     const removed = cur[i];
     const next = cur.slice(0, i).concat(cur.slice(i + 1));
     setLayers(next);
-    paintableOps(removed.maskId).clear(0);
+    paintableOps(removed.baseId).clear(0);
+    paintableOps(removed.brushId).clear(0);
     const a = activeLayerRef.current;
     setActiveLayer(next.length === 0 ? -1 : Math.min(a > i ? a - 1 : a, next.length - 1));
     bump();
@@ -666,11 +705,13 @@ export function useCutoutState(): CutoutState {
     if (i < 0 || i >= cur.length) return;
     history.commit(buildCurrentSession);
     const src = cur[i];
-    const bytes = paintableOps(src.maskId).readback();
+    const base = paintableOps(src.baseId).readback();
+    const brush = paintableOps(src.brushId).readback();
     const dup = makeLayer(cur.length, `${src.name} copy`);
     dup.config = cloneConfig(src.config);
     dup.clicks = src.clicks.map((c) => ({ ...c }));
-    if (bytes) pendingUploadsRef.current.set(dup.maskId, bytes);
+    if (base) pendingUploadsRef.current.set(dup.baseId, base);
+    if (brush) pendingUploadsRef.current.set(dup.brushId, brush);
     const next = cur.slice();
     next.splice(i + 1, 0, dup);
     setLayers(next);
@@ -695,20 +736,24 @@ export function useCutoutState(): CutoutState {
 
   const mergeLayer = (i: number) => {
     const cur = layersRef.current;
-    if (i <= 0 || i >= cur.length) { setStatus('nothing below to merge into'); return; }
+    if (i <= 0 || i >= cur.length || !srcDims) { setStatus('nothing below to merge into'); return; }
     history.commit(buildCurrentSession);
     const above = cur[i];
     const below = cur[i - 1];
-    const a = paintableOps(above.maskId).readback();
-    const b = paintableOps(below.maskId).readback();
-    if (a && b) {
-      const n = Math.min(a.length, b.length);
-      for (let k = 0; k < n; k++) if (a[k]) b[k] = 1;
-      paintableOps(below.maskId).upload(b);
-    }
+    const n = srcDims.w * srcDims.h;
+    // Bake both effectives, union into `below`'s base, drop below's brush +
+    // clicks (the merged result is now its baked base).
+    const effAbove = readEffective(above, n);
+    const effBelow = readEffective(below, n);
+    const merged = new Uint8Array(n);
+    for (let k = 0; k < n; k++) merged[k] = (effAbove[k] || effBelow[k]) ? 255 : 0;
+    paintableOps(below.baseId).upload(merged);
+    paintableOps(below.brushId).clear(0);
+    paintableOps(above.baseId).clear(0);
+    paintableOps(above.brushId).clear(0);
     const next = cur.slice(0, i).concat(cur.slice(i + 1));
+    next[i - 1] = { ...below, clicks: [] };
     setLayers(next);
-    paintableOps(above.maskId).clear(0);
     setActiveLayer(Math.min(i - 1, next.length - 1));
     markMaskDirty();
     bump();
@@ -807,18 +852,16 @@ export function useCutoutState(): CutoutState {
   useEffect(() => () => { backendRef.current.close(); }, []);
 
   // ── Export composite ────────────────────────────────────────────────
-  // Final removed region = union of every VISIBLE layer's mask.
+  // Final removed region = union of every VISIBLE layer's effective mask.
   const composeExportMask = (): Uint8Array | null => {
     if (!srcDims) return null;
     const n = srcDims.w * srcDims.h;
     let out: Uint8Array | null = null;
     for (const layer of layersRef.current) {
       if (layer.config.muted) continue;
-      const bytes = paintableOps(layer.maskId).readback();
-      if (!bytes) continue;
+      const eff = readEffective(layer, n);
       if (!out) out = new Uint8Array(n);
-      const len = Math.min(n, bytes.length);
-      for (let i = 0; i < len; i++) if (bytes[i]) out[i] = 1;
+      for (let i = 0; i < n; i++) if (eff[i]) out[i] = 1;
     }
     return out;
   };
@@ -871,13 +914,13 @@ export function useCutoutState(): CutoutState {
     setStatus(`packing .sqi at ${OVERLAY_RES}×${OVERLAY_RES}…`);
     const { matrix, error } = await bakeMatrix({ srcPath, mask: composed, srcW: srcDims.w, srcH: srcDims.h, size: OVERLAY_RES });
     if (!matrix) { setBusy(false); setStatus(`sqi base bake failed: ${error}`); return; }
-    const visible = layersRef.current.filter((l) => !l.config.muted);
+    const n = srcDims.w * srcDims.h;
     const layerMasks: Set<number>[] = [];
     const layerConfigs: LayerConfig[] = [];
-    for (const layer of visible) {
-      const bytes = paintableOps(layer.maskId).readback();
-      if (!bytes) continue;
-      layerMasks.push(maskToCellSet(bytes, srcDims.w, srcDims.h, OVERLAY_RES));
+    for (const layer of layersRef.current) {
+      if (layer.config.muted) continue;
+      const eff = readEffective(layer, n);
+      layerMasks.push(maskToCellSet(eff, srcDims.w, srcDims.h, OVERLAY_RES));
       layerConfigs.push(layer.config);
     }
     const doc = buildSqi({
@@ -931,11 +974,11 @@ export function useCutoutState(): CutoutState {
         muted: sqiLayer.muted,
         colors: sqiLayer.colors?.slice() ?? SLOT_DEFAULTS.slice(),
       };
-      // Inflate the cell set to a full-res mask at the .sqi grid (doc.size
-      // == canvas size after createBlankSurface), then queue the upload.
+      // Inflate the cell set to a full-res base mask (0/255) at the .sqi grid
+      // (doc.size == canvas size after createBlankSurface); brush stays empty.
       const bytes = new Uint8Array(doc.size * doc.size);
-      for (const idx of cells) if (idx >= 0 && idx < bytes.length) bytes[idx] = 1;
-      pendingUploadsRef.current.set(layer.maskId, bytes);
+      for (const idx of cells) if (idx >= 0 && idx < bytes.length) bytes[idx] = 255;
+      pendingUploadsRef.current.set(layer.baseId, bytes);
       newLayers.push(layer);
     }
     setCustomSurfaces(newCustoms);
@@ -955,9 +998,9 @@ export function useCutoutState(): CutoutState {
       name: l.name,
       groupName: l.groupName,
       config: cloneConfig(l.config),
-      // Readback is synchronous and only runs at discrete commit points
-      // (autosave flush, undo/redo, history commit) — never per frame.
-      mask: paintableOps(l.maskId).readback(),
+      // Readback is synchronous; only at discrete commit points, never per frame.
+      base: paintableOps(l.baseId).readback(),
+      brush: paintableOps(l.brushId).readback(),
       clicks: l.clicks.map((c) => ({ ...c })),
     }));
 
@@ -978,9 +1021,11 @@ export function useCutoutState(): CutoutState {
     const inflated = inflateSessionLayers(doc);
     pendingUploadsRef.current.clear();
     const restored: Layer[] = inflated.map((l) => {
-      const maskId = maskIdFor(l.id);
-      if (l.mask && l.mask.length > 0) pendingUploadsRef.current.set(maskId, l.mask);
-      return { id: l.id, name: l.name, groupName: l.groupName, config: l.config, maskId, clicks: l.clicks };
+      const baseId = baseIdFor(l.id);
+      const brushId = brushIdFor(l.id);
+      if (l.base && l.base.length > 0) pendingUploadsRef.current.set(baseId, scaleMask(l.base));
+      if (l.brush && l.brush.length > 0) pendingUploadsRef.current.set(brushId, l.brush);
+      return { id: l.id, name: l.name, groupName: l.groupName, config: l.config, baseId, brushId, clicks: l.clicks };
     });
 
     const restoredBackend: BackendName = doc.backend === 'sam' && samAvailable ? 'sam' : 'flood';
@@ -1022,7 +1067,7 @@ export function useCutoutState(): CutoutState {
     setEffectPhaseOffsetState(doc.effectPhaseOffset ?? 0);
     setEffectDimState(typeof doc.effectDim === 'number' ? doc.effectDim : 0.85);
     setCustomSurfaces((doc.customSurfaces ?? []).map((cs) => ({ ...cs })));
-    if (restored.some((l) => pendingUploadsRef.current.has(l.maskId))) markMaskDirty();
+    if (pendingUploadsRef.current.size > 0) markMaskDirty();
     else clearMaskDirty();
     setMaskVersion((v) => v + 1);
     if (!quiet) setStatus(`restored · ${doc.stem}`);
@@ -1035,8 +1080,8 @@ export function useCutoutState(): CutoutState {
   useEffect(() => {
     if (restoreOnceRef.current) return;
     restoreOnceRef.current = true;
-    const pointer = readFile(SESSION_LAST_POINTER);
     const release = () => { autosaveSuppressedRef.current = false; };
+    const pointer = readFile(SESSION_LAST_POINTER);
     if (!pointer) { release(); return; }
     const targetStem = pointer.trim();
     if (!targetStem) { release(); return; }
@@ -1110,7 +1155,8 @@ export function useCutoutState(): CutoutState {
     if (i < 0 || i >= cur.length) { setStatus('select a layer to copy'); return; }
     const src = cur[i];
     setClipboard({
-      maskBytes: paintableOps(src.maskId).readback(),
+      baseBytes: paintableOps(src.baseId).readback(),
+      brushBytes: paintableOps(src.brushId).readback(),
       config: cloneConfig(src.config),
       clicks: src.clicks.map((c) => ({ ...c })),
       sourceName: src.name,
@@ -1124,7 +1170,8 @@ export function useCutoutState(): CutoutState {
     layer.config = cloneConfig(clipboard.config);
     layer.config.muted = false;
     layer.clicks = clipboard.clicks.map((c) => ({ ...c }));
-    if (clipboard.maskBytes) pendingUploadsRef.current.set(layer.maskId, clipboard.maskBytes);
+    if (clipboard.baseBytes) pendingUploadsRef.current.set(layer.baseId, clipboard.baseBytes);
+    if (clipboard.brushBytes) pendingUploadsRef.current.set(layer.brushId, clipboard.brushBytes);
     const next = layersRef.current.concat([layer]);
     setLayers(next);
     setActiveLayer(next.length - 1);
@@ -1178,7 +1225,7 @@ export function useCutoutState(): CutoutState {
     clipboard, copyLayer, pasteLayer, cutLayer,
   };
 
-  // ── File pick (hoisted; uses ingest above) ──────────────────────────
+  // Hoisted — uses ingest defined above.
   async function pickFile() {
     setStatus('opening file picker…');
     const r = await execAsync(

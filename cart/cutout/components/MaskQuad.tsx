@@ -349,14 +349,16 @@ function buildTextureShader(mode: MaskSurface): string {
   let phase_off = data[4];
   let blend_mode = data[6];
 
-  let mask_v = textureSampleLevel(mask_tex, mask_samp, in.uv, 0.0).r;
+  // Compose the layer's effective mask from its smart base (mask_tex) and
+  // its manual brush override (smart_tex binding, reused as the override).
+  // Override bands: > 0.75 force-remove, 0.25..0.75 force-keep, else defer
+  // to the base. Layers with no override bind the framework dummy (reads 0
+  // → always "untouched"), so a base-only layer renders exactly the base.
+  let base_v = textureSampleLevel(mask_tex, mask_samp, in.uv, 0.0).r;
+  let ov = textureSampleLevel(smart_tex, smart_samp, in.uv, 0.0).r;
+  var mask_v = base_v;
+  if (ov > 0.75) { mask_v = 1.0; } else if (ov > 0.25) { mask_v = 0.0; }
   if (mask_v < 0.5) { return vec4f(0.0); }
-
-  // Smart-union knockout — preserves the cells-era "brushOnlyOverlayCells"
-  // visual behavior. Smart-layer MaskQuads bind the framework's dummy
-  // texture here, so this branch is a constant 0 for them.
-  let smart_v = textureSampleLevel(smart_tex, smart_samp, in.uv, 0.0).r;
-  if (smart_v > 0.5) { return vec4f(0.0); }
 
   // Logical grid coords for the per-mode color body. gw/gh come from the
   // header buffer, not from textureDimensions — same axis the cells-mode
@@ -432,10 +434,10 @@ interface Props {
    *  ignored in this mode. The brush MaskQuad uses this; smart-layer
    *  MaskQuads stay on the cells path. */
   paintableId?: string;
-  /** Optional second paintable — when sampled non-zero at a pixel, that
-   *  pixel is discarded (the smart-union knockout). Only meaningful in
-   *  texture mode. */
-  smartUnionId?: string;
+  /** Optional brush-override paintable composed on top of the base mask in
+   *  texture mode (0 untouched / ~0.5 force-keep / ~1 force-remove). Layers
+   *  with no manual edits omit it and the base renders as-is. */
+  overrideId?: string;
 }
 
 export function MaskQuad({
@@ -443,7 +445,7 @@ export function MaskQuad({
   dim = 0.85, mode = 'rainbow',
   customShader, hueOffset = 0, phaseOffset = 0,
   colors, blend = 'normal',
-  paintableId, smartUnionId,
+  paintableId, overrideId,
 }: Props) {
   const textureMode = !!paintableId;
   // Header layout differs by mode: cells-mode packs the mask grid after
@@ -503,7 +505,7 @@ export function MaskQuad({
   // Texture-mode passes the paintable ids in slot order [mask, smart-union].
   // Missing slots fall through to the framework's dummy 1x1 (sampled as 0).
   const textures = textureMode
-    ? [paintableId!, smartUnionId ?? '']
+    ? [paintableId!, overrideId ?? '']
     : undefined;
 
   return (
