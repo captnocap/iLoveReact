@@ -233,10 +233,17 @@ ensure_pg_running() {
 
     mkdir -p "$datadir" "$sockdir"
 
-    # Initialize data dir on first run.
+    # Initialize data dir on first run. Superuser MUST match
+    # framework/storage/pg.zig's `default_user` constant — that's the
+    # role the dev binary auth's as via connectDefault(). Was once
+    # `embed` (paired with default_database `embed_bench`); flipped to
+    # `postgres` along with pg.zig but this script wasn't updated, so
+    # every fresh dev cluster boot produced "role postgres does not
+    # exist" because initdb wrote the cluster with `-U embed` while
+    # the binary tried to connect as `postgres`. Keep these in lockstep.
     if [[ ! -f "$datadir/PG_VERSION" ]]; then
         echo "[dev] initializing embedded postgres cluster (first run)..."
-        "$initdb_bin" -D "$datadir" -U embed -A trust -E UTF8 --locale=C --no-sync > /dev/null
+        "$initdb_bin" -D "$datadir" -U postgres -A trust -E UTF8 --locale=C --no-sync > /dev/null
     fi
 
     echo "[dev] starting embedded postgres..."
