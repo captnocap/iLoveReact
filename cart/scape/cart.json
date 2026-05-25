@@ -1,0 +1,6 @@
+{
+  "name": "Scape",
+  "description": "Click-to-move 3rd-person pixel MMO. The rotating ground is a single GPU shader quad; only sprites live in the React tree.",
+  "width": 1100,
+  "height": 720
+}

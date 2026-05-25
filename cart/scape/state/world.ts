@@ -1,0 +1,336 @@
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
+import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { decorAt } from '../world/tiles';
+import { findPath, nearestWalkable } from '../world/pathfinding';
+import { buildDecorWindow, buildTileWindow, HALF, type Decor } from '../world/window';
+import { unproject, type Cam, type Rect } from '../world/projection';
+import type { EvidenceAxis, LifeState, Player, VisualSignature } from '../design';
+import {
+  adjustHealth,
+  adjustMoney,
+  adjustSuspicionAxis,
+  advancePlayer,
+  createInitialPlayerState,
+  increaseHigh,
+  setCostume,
+  setHigh,
+  setLifeState,
+  type ScapePlayerState,
+} from './player';
+import {
+  createInitialInventoryState,
+  dropInHand,
+  equipInventoryItem,
+  inHandSlot,
+  inventorySlots,
+  nearestWorldItem,
+  pickupWorldItem,
+  type InventorySlot,
+  type InventoryState,
+} from '../systems/inventory';
+
+const NPC_SPEED = 1.1;
+const ROT_SPEED = 1.9;
+const PITCH_SPEED = 0.7;
+
+export type EntKind = 'storefront' | 'sign' | 'npc';
+
+export interface Ent {
+  id: string;
+  kind: EntKind;
+  x: number;
+  y: number;
+  hx: number;
+  hy: number;
+  tx: number;
+  ty: number;
+  tint: number;
+  label: string;
+  blocks: boolean;
+  quest?: boolean;
+  name?: string;
+}
+
+export function makeEntities(): Ent[] {
+  const e: Ent[] = [];
+  const put = (p: Partial<Ent> & { kind: EntKind; x: number; y: number; label: string; tint: number }) =>
+    e.push({ id: `${p.kind}-${e.length}`, hx: p.x, hy: p.y, tx: p.x, ty: p.y, blocks: true, ...p });
+  put({ kind: 'storefront', x: 19.5, y: 14.5, tint: 0, label: 'EL POLLO LOCO-ISH — taco window, grease-fogged glass, OPEN 25 HRS.' });
+  put({ kind: 'storefront', x: 32.5, y: 14.5, tint: 1, label: 'CASH 4 GOLD — barred pawn shop, half the neon letters dead.' });
+  put({ kind: 'npc', x: 24.5, y: 22.5, tint: 5, blocks: false, quest: true, name: "Roach", label: 'Roach is vibrating in place near the fountain. (click to talk)' });
+  put({ kind: 'npc', x: 20.5, y: 20.5, tint: 1, blocks: false, label: 'Promoter: "Yo yo — VIP list, you on it, I PUT you on it, c\'mon."' });
+  put({ kind: 'npc', x: 29.5, y: 27.5, tint: 2, blocks: false, label: 'Corner kid: "...you good? you straight? you need somethin\'?"' });
+  put({ kind: 'npc', x: 26.5, y: 25.5, tint: 0, blocks: false, label: 'Tweaker: "the PALM TREES are WATCHING bro I\'m not even playin\'."' });
+  put({ kind: 'npc', x: 18.5, y: 26.5, tint: 3, blocks: false, label: 'Guy on a bench: "spare a couple bucks? for the bus. it\'s not for the bus."' });
+  return e;
+}
+
+type KeyState = Record<string, boolean>;
+
+export type ChatGate = {
+  chatOpenRef: MutableRefObject<boolean>;
+  openQuestChat: (npc: Ent) => void;
+};
+
+export type ScapeWorld = {
+  sim: ScapePlayerState;
+  player: Player;
+  playerActions: PlayerDebugActions;
+  inventory: InventoryState;
+  inventorySlots: InventorySlot[];
+  inHand: InventorySlot | null;
+  inventoryActions: InventoryActions;
+  rect: Rect;
+  cam: Cam;
+  rectRef: MutableRefObject<Rect>;
+  winOX: number;
+  winOY: number;
+  winTiles: number[];
+  decorList: Decor[];
+  entities: Ent[];
+  examineText: string | null;
+  onSceneDown: (payload: any) => void;
+};
+
+export type PlayerDebugActions = {
+  adjustHealth: (delta: number) => void;
+  adjustMoney: (delta: number) => void;
+  adjustSuspicionAxis: (axis: EvidenceAxis, delta: number) => void;
+  setLifeState: (lifeState: LifeState) => void;
+  setCostume: (costume: Partial<VisualSignature>) => void;
+  adjustHigh: (delta: number) => void;
+};
+
+export type InventoryActions = {
+  equip: (instanceId: number) => void;
+  dropInHand: () => void;
+};
+
+function useSceneControls(
+  keys: MutableRefObject<KeyState>,
+  sim: MutableRefObject<ScapePlayerState>,
+  inventory: MutableRefObject<InventoryState>,
+  refresh: () => void,
+  disabledRef: MutableRefObject<boolean>,
+): void {
+  useEffect(() => {
+    const set = (ev: any, down: boolean) => {
+      if (disabledRef.current) return;
+      const k = String(ev?.key ?? '').toLowerCase();
+      if (k === 'w' || k === 'a' || k === 's' || k === 'd') keys.current[k] = down;
+      if (down && k === 'h') increaseHigh(sim.current);
+      if (down && k === 'q') {
+        dropInHand(sim.current.body, inventory.current, sim.current.px + Math.cos(sim.current.body.facing) * 0.9, sim.current.py + Math.sin(sim.current.body.facing) * 0.9);
+        refresh();
+      }
+    };
+    const offD = busOn('__keydown', (e) => set(e, true));
+    const offU = busOn('__keyup', (e) => set(e, false));
+    return () => {
+      offD();
+      offU();
+    };
+  }, [disabledRef, inventory, keys, refresh, sim]);
+}
+
+function useWorldLoop({
+  entsRef,
+  staticBlockers,
+  sim,
+  keys,
+  force,
+}: {
+  entsRef: MutableRefObject<Ent[]>;
+  staticBlockers: Set<string>;
+  sim: MutableRefObject<ScapePlayerState>;
+  keys: MutableRefObject<KeyState>;
+  force: Dispatch<SetStateAction<number>>;
+}): void {
+  useEffect(() => {
+    const G: any = globalThis;
+    const sched = G.requestAnimationFrame ? G.requestAnimationFrame.bind(G) : (fn: any) => setTimeout(fn, 16);
+    const cancel = G.cancelAnimationFrame ? G.cancelAnimationFrame.bind(G) : clearTimeout;
+    let handle: any = 0;
+    let last = G.performance?.now?.() ?? Date.now();
+    const tick = () => {
+      const now = G.performance?.now?.() ?? Date.now();
+      const dt = Math.max(0.001, Math.min(0.05, (now - last) / 1000));
+      last = now;
+      const s = sim.current;
+      const k = keys.current;
+      if (k.a) s.yaw -= ROT_SPEED * dt;
+      if (k.d) s.yaw += ROT_SPEED * dt;
+      if (k.w) s.pitch = Math.min(0.86, s.pitch + PITCH_SPEED * dt);
+      if (k.s) s.pitch = Math.max(0.40, s.pitch - PITCH_SPEED * dt);
+      advancePlayer(s, dt);
+      for (const e of entsRef.current) {
+        if (e.kind !== 'npc' || e.quest) continue;
+        const dx = e.tx - e.x;
+        const dy = e.ty - e.y;
+        const d = Math.hypot(dx, dy);
+        if (d < 0.08) {
+          const ang = Math.random() * Math.PI * 2;
+          const rad = Math.random() * 2.2;
+          const cand = nearestWalkable(Math.round(e.hx + Math.cos(ang) * rad), Math.round(e.hy + Math.sin(ang) * rad), staticBlockers);
+          if (cand) {
+            e.tx = cand.x + 0.5;
+            e.ty = cand.y + 0.5;
+          }
+        } else {
+          const tt = Math.min(1, (NPC_SPEED * dt) / d);
+          e.x += dx * tt;
+          e.y += dy * tt;
+        }
+      }
+      force((nn) => (nn + 1) & 0xffff);
+      handle = sched(tick);
+    };
+    handle = sched(tick);
+    return () => cancel(handle);
+  }, [entsRef, force, keys, sim, staticBlockers]);
+}
+
+export function useScapeWorld(chat: ChatGate): ScapeWorld {
+  const ents = useMemo(() => makeEntities(), []);
+  const staticBlockers = useMemo(
+    () => new Set(ents.filter((e) => e.blocks).map((e) => `${Math.floor(e.x)},${Math.floor(e.y)}`)),
+    [ents],
+  );
+  const entsRef = useRef(ents);
+  const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1100, height: 720 });
+  const keys = useRef<KeyState>({});
+  const sim = useRef<ScapePlayerState>(createInitialPlayerState());
+  const inventory = useRef<InventoryState>(createInitialInventoryState());
+  const [, force] = useState(0);
+  const examineRef = useRef<{ text: string; until: number } | null>(null);
+  const refresh = useCallback(() => force((nn) => (nn + 1) & 0xffff), []);
+
+  useSceneControls(keys, sim, inventory, refresh, chat.chatOpenRef);
+  useWorldLoop({ entsRef, staticBlockers, sim, keys, force });
+
+  const playerActions: PlayerDebugActions = {
+    adjustHealth: (delta) => {
+      adjustHealth(sim.current, delta);
+      refresh();
+    },
+    adjustMoney: (delta) => {
+      adjustMoney(sim.current, delta);
+      refresh();
+    },
+    adjustSuspicionAxis: (axis, delta) => {
+      adjustSuspicionAxis(sim.current, axis, delta);
+      refresh();
+    },
+    setLifeState: (lifeState) => {
+      setLifeState(sim.current, lifeState);
+      refresh();
+    },
+    setCostume: (costume) => {
+      setCostume(sim.current, costume);
+      refresh();
+    },
+    adjustHigh: (delta) => {
+      setHigh(sim.current, sim.current.body.high + delta);
+      refresh();
+    },
+  };
+
+  const inventoryActions: InventoryActions = {
+    equip: (instanceId) => {
+      const text = equipInventoryItem(sim.current.body, inventory.current, instanceId);
+      if (text) examineRef.current = { text, until: ((globalThis as any).performance?.now?.() ?? Date.now()) + 2200 };
+      refresh();
+    },
+    dropInHand: () => {
+      const s = sim.current;
+      const text = dropInHand(s.body, inventory.current, s.px + Math.cos(s.body.facing) * 0.9, s.py + Math.sin(s.body.facing) * 0.9);
+      if (text) examineRef.current = { text, until: ((globalThis as any).performance?.now?.() ?? Date.now()) + 2200 };
+      refresh();
+    },
+  };
+
+  const onSceneDown = (payload: any) => {
+    if (chat.chatOpenRef.current) return;
+    const r = rectRef.current;
+    const sx = Number(payload?.x ?? 0) - r.x;
+    const sy = Number(payload?.y ?? 0) - r.y;
+    if (sx < 0 || sy < 0 || sx > r.width || sy > r.height) return;
+    if (sx >= 12 && sx <= 286 && sy >= r.height - 260 && sy <= r.height - 12) return;
+    if (sx >= 310 && sx <= 790 && sy >= r.height - 112 && sy <= r.height - 12) return;
+    const s = sim.current;
+    const world = unproject(sx, sy, s, r);
+    const nearbyItem = nearestWorldItem(inventory.current.worldItems, world.x, world.y, 0.75);
+    if (nearbyItem) {
+      const playerDist = Math.hypot(nearbyItem.x - s.px, nearbyItem.y - s.py);
+      if (playerDist <= 1.65) {
+        const text = pickupWorldItem(s.body, inventory.current, nearbyItem.id);
+        if (text) examineRef.current = { text, until: ((globalThis as any).performance?.now?.() ?? Date.now()) + 2400 };
+        refresh();
+      } else {
+        s.path = findPath(s.px, s.py, nearbyItem.x, nearbyItem.y, staticBlockers);
+        examineRef.current = { text: 'Walk closer to pick that up.', until: ((globalThis as any).performance?.now?.() ?? Date.now()) + 2200 };
+      }
+      return;
+    }
+    let best: Ent | null = null;
+    let bestD = 0.9;
+    for (const e of entsRef.current) {
+      const d = Math.hypot(e.x - world.x, e.y - world.y);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    const now = (globalThis as any).performance?.now?.() ?? Date.now();
+    if (best && best.quest) {
+      chat.openQuestChat(best);
+      return;
+    }
+    if (best) {
+      examineRef.current = { text: best.label, until: now + 3500 };
+      return;
+    }
+    const tdec = decorAt(Math.floor(world.x), Math.floor(world.y));
+    if (tdec && Math.hypot(Math.floor(world.x) + 0.5 - world.x, Math.floor(world.y) + 0.5 - world.y) < 0.7) {
+      const decorText =
+        tdec === 'palm'
+          ? 'A scraggly palm, half its fronds dead. Very Miami.'
+          : tdec === 'dumpster'
+            ? "A dumpster. Something in it is leaking. Don't."
+            : 'A buzzing neon sign, one letter flickering out.';
+      examineRef.current = { text: decorText, until: now + 3500 };
+      return;
+    }
+    s.path = findPath(s.px, s.py, world.x, world.y, staticBlockers);
+  };
+
+  const s = sim.current;
+  const r = rectRef.current;
+  const cam: Cam = { px: s.px, py: s.py, yaw: s.yaw, pitch: s.pitch, zoom: s.zoom };
+  const winOX = Math.floor(s.px) - HALF;
+  const winOY = Math.floor(s.py) - HALF;
+  const winTiles = useMemo(() => buildTileWindow(winOX, winOY), [winOX, winOY]);
+  const decorList = useMemo(() => buildDecorWindow(winOX, winOY, winTiles), [winOX, winOY, winTiles]);
+  const nowMs = (globalThis as any).performance?.now?.() ?? 0;
+  const examineText = examineRef.current && examineRef.current.until > nowMs ? examineRef.current.text : null;
+
+  return {
+    sim: s,
+    player: s.body,
+    playerActions,
+    inventory: inventory.current,
+    inventorySlots: inventorySlots(s.body, inventory.current),
+    inHand: inHandSlot(s.body, inventory.current),
+    inventoryActions,
+    rect: r,
+    cam,
+    rectRef,
+    winOX,
+    winOY,
+    winTiles,
+    decorList,
+    entities: entsRef.current,
+    examineText,
+    onSceneDown,
+  };
+}
