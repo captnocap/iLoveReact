@@ -54,6 +54,40 @@ Verification:
 - `./scripts/ship scape` completed successfully and produced `zig-out/bin/scape`.
 - `timeout 5s ./zig-out/bin/scape` launched the cart without shader creation errors before timeout exit.
 
+---
+
+# Session — 2026-05-25 (face + interaction foundations)
+
+This session took scape from a fantasy-RuneScape test prototype to a neon-grime
+city with a real interaction primitive. Four chunks, in order:
+
+1. **Face pass** — de-randomized the map (deleted the noise wilderness; the world
+   is now a bounded hand-authored city in `world/citymap.ts`) and repainted the
+   entire look to TONE.md (neon dusk over grime). New `render/palette.ts` is the
+   single source of colour.
+2. **Solid buildings + rooftops** — buildings became solid extruded blocks with
+   real rooftops, fixing the "standing on the wall" look.
+3. **Action menu + doors** — built the load-bearing interaction primitive
+   (right-click → contextual `ActionOption[]`), with doors as its first consumer
+   (open/close, sealed-shell-until-opened).
+4. **Building variety** — per-building height tiers (a real skyline) + facade
+   styles, via packed tile values and a rewritten variable-height heightfield march.
+
+Each chunk is detailed in its own section below and was shipped + committed
+(`./scripts/ship scape` clean each time). The cart now: neon city, hand-authored
+map, repainted chrome + cast (quest-giver **Roach** the fixer), right-click action
+menu, openable doors, varied building heights/styles.
+
+**Open follow-ups carried out of this session:**
+- The variable-height building march is reasoned-correct but **not yet eyeballed in
+  motion** — wants a visual pass (stair-stepping on tall roofs? edge seams?).
+- Player is a screen-centred React overlay → no depth occlusion, so it still draws
+  over buildings *behind* it.
+- Doors: open-door line-of-sight + walkable interiors (the "see through when open /
+  sealed shell when closed" behaviour) — needs the perception system next.
+
+---
+
 ## Face pass — de-randomize the map + TONE.md repalette
 
 Status: complete.
