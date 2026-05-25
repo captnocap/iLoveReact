@@ -238,3 +238,54 @@ Open follow-ups:
   the first item and `Q` drops; weapon-cycling (scroll / number keys) wants wiring into
   the weapon box next.
 - Armor/health/money/clock are display-only — nothing damages armor or spends time yet.
+
+---
+
+# Session — 2026-05-25 (action probability + the delusional perception layer)
+
+Status: complete; first attack consumers live (pistol/knife).
+
+Closed the design-review gaps in `design.ts` and built the system behind the
+action-menu %: a real X-COM hit-chance from world state, **plus** the drug-psychosis
+layer that warps what you're SHOWN without touching the truth.
+
+**Contract (`design.ts`).** Six review gaps closed: `high: number` → **`HighState`**
+(intensity/phase/rising/sinceMs + derived phonePressure/marketReadNoise/agentAgitation
+— peak ≠ comedown); **`PerceptionOverlay`** + `PerceivedNpcOverride` on `World` (the UI
+can lie — a civilian reads as a cop — while the sim stays honest); **`InternetArtifact`**
++ `World.internet` (the dead internet leaves a durable footprint); `World.items/assets/
+orders` (the live collections the player ids resolve into); `Objective` gets an explicit
+**`ObjectiveTarget`** union (npc-by-Id vs zone/site-by-Key can't be confused); a contract
+comment on `notoriety`. Plus `ChanceBreakdown` gained **`health`** + **`time`** terms and
+`ActionOption` gained **`perceivedTarget`**.
+
+**Chance engine (`systems/chance.ts`, new).** `lineOfSight()` raycasts the city grid
+(clear / partial-cover / glass-through-a-facade-window / none-blocked over walls + closed
+doors + props). `attackChance(profile, ranged, dist, los, ctx)` → a full `ChanceBreakdown`:
+weapon base × range falloff × LoS (glass penalty) × cover × awareness × **health (shaky
+aim when low)** × **time-of-day (night hurts ranged sight)** × combat skill. This is the
+ONLY place a hit-% is computed — ground truth.
+
+**Perception distortion (`systems/perception.ts`, new).** `perceivedChance(pTrue, h, tMs)`
+implements the agreed model exactly: `clamp(pTrue·(1−h/150) + δ(h) + sin(ω·t)·(h/100), 0,1)`
+with `δ(h)=0.5·((h−60)/40)²` past the tweaking line (h≥60). Wired into `ContextMenu` and
+recomputed every frame, so under high the menu % **flickers frantically and reads manically
+high** (a 15%-true shot shows a jittering ~65% at h≥90). The dice roll in `runAction` uses
+the TRUE chance — so the manic player is baited into a catastrophic blunder.
+
+**First consumers.** A ranged **pistol** item (RangeProfile + SDF, spawned in the plaza)
+and the melee knife now generate `shoot`/`slash` rows on NPCs when held. Right-click an NPC
+while armed → "Shoot — Cheap pistol — NN%" gated by distance/LoS; firing rolls the true
+odds, spends a round, and on a miss the NPC bolts and visual heat spikes (a witnessed botch).
+`notoriety` is now a weighted blend (visual×1.5, fund×0.8) matching the new contract comment.
+
+Verified: `./scripts/ship scape` clean; 6s launch shader/exception-clean (pistol SDF +
+icon shader both compile).
+
+Open follow-ups:
+- LoS `glass` is wired but can't trigger yet — no walkable interiors / NPCs inside
+  buildings. It activates the moment interiors land (the sniper-through-a-window case).
+- NPC `awareness` is hardcoded `unaware` (Ent has no perception state yet); alert/fleeing
+  multipliers are in the engine waiting for it.
+- `PerceptionOverlay` (fake cop / phantom tiles / price noise) is contract-only — the menu
+  warps the % but the npcOverrides aren't populated/rendered yet.

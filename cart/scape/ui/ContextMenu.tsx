@@ -1,6 +1,7 @@
 import { Box, Pressable, Text } from '@reactjit/runtime/primitives';
 import type { ActionOption } from '../design';
 import { UI } from '../render/palette';
+import { perceivedChance } from '../systems/perception';
 
 // The right-click action menu. Renders the contextual ActionOption list from
 // systems/actions.ts at the click point, greys blocked rows (with their reason),
@@ -19,12 +20,18 @@ export function ActionMenu({
   menu,
   onPick,
   onClose,
+  high = 0,
 }: {
   menu: ActionMenuState | null;
   onPick: (interactionKey: string) => void;
   onClose: () => void;
+  high?: number; // 0..1 high intensity — warps the SHOWN hit-% (systems/perception.ts)
 }) {
   if (!menu) return null;
+  // The % is recomputed every render against system-time, so under high it flickers
+  // frantically and reads manically high — the displayed lie, ground truth untouched.
+  const h = high * 100;
+  const now = (globalThis as any).performance?.now?.() ?? Date.now();
   return (
     <>
       <Pressable
@@ -60,9 +67,12 @@ export function ActionMenu({
             <Pressable
               key={`o-${i}`}
               onPress={() => onPick(o.interactionKey)}
-              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5 }}
+              style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}
             >
               <Text style={{ color: UI.text, fontSize: 12 }}>{o.label}</Text>
+              {o.chance != null ? (
+                <Text style={{ color: UI.accent, fontSize: 12, fontFamily: 'mono', fontWeight: '700' }}>{`${Math.round(perceivedChance(o.chance, h, now) * 100)}%`}</Text>
+              ) : null}
             </Pressable>
           ),
         )}

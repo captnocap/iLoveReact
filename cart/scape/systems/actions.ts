@@ -4,12 +4,34 @@
 // carry a reason). No effects here and no React — this just answers "what could I
 // attempt on this thing right now?". state/world.ts runs the chosen one.
 
-import type { ActionOption } from '../design';
+import type { ActionOption, RangeProfile } from '../design';
 import type { Ent } from '../state/world';
 import type { Door } from './doors';
 import type { WorldItem } from './inventory';
 import type { DecorKind } from '../world/tiles';
 import { INTERACTIONS, PROXIMITY_RANGE, type InteractionKey } from './interactions';
+import { attackChance, lineOfSight } from './chance';
+
+// The held weapon, resolved into what an attack row needs. Null when unarmed.
+export type WeaponContext = {
+  ranged: boolean;
+  profile: RangeProfile | null;
+  key: 'shoot' | 'slash';
+  label: string; // the menu verb, e.g. 'Shoot — Cheap pistol'
+};
+
+// Everything availableActions needs beyond the target: where the player is, what
+// they're holding, their condition, the time of day, and the live door blockers
+// (for line-of-sight). The chance math lives in systems/chance.ts.
+export type AttackContext = {
+  px: number;
+  py: number;
+  weapon: WeaponContext | null;
+  combat: number; // 0..1
+  health01: number; // 0..1
+  hour: number; // 0..23
+  closedDoors: Set<string>;
+};
 
 export type ActionTarget =
   | { kind: 'npc'; ent: Ent }
@@ -69,16 +91,51 @@ function opt(key: InteractionKey, dist: number, labelOverride?: string): ActionO
   };
 }
 
-export function availableActions(t: ActionTarget, playerX: number, playerY: number): ActionOption[] {
+// Build the attack row for an NPC, if the player is holding a weapon. The chance is
+// GROUND TRUTH (systems/chance.ts) — distance, line of sight, the shooter's health
+// and the time of day all fold into it; the menu may DISPLAY a warped value under
+// high, but `chance` here stays honest so the dice roll is fair.
+function attackOption(ctx: AttackContext, pos: { x: number; y: number }, d: number): ActionOption | null {
+  const w = ctx.weapon;
+  if (!w) return null;
+  const los = w.ranged ? lineOfSight(ctx.px, ctx.py, pos.x, pos.y, ctx.closedDoors) : 'clear';
+  const breakdown = attackChance(w.profile, w.ranged, d, los, {
+    combat: ctx.combat,
+    health01: ctx.health01,
+    hour: ctx.hour,
+    awareness: 'unaware',
+  });
+  const blocked = breakdown.final <= 0;
+  let reason: string | undefined;
+  if (blocked) {
+    if (w.ranged && los === 'none') reason = 'no line of sight';
+    else if (w.ranged && w.profile && d > w.profile.maxRange) reason = 'out of range';
+    else if (!w.ranged && d > PROXIMITY_RANGE.adjacent) reason = 'too far — get closer';
+    else reason = 'no shot';
+  }
+  return {
+    interactionKey: w.key,
+    label: w.label,
+    chance: breakdown.final,
+    breakdown,
+    blocked,
+    reason,
+  };
+}
+
+export function availableActions(t: ActionTarget, ctx: AttackContext): ActionOption[] {
   const pos = targetPos(t);
-  const d = Math.hypot(pos.x - playerX, pos.y - playerY);
+  const d = Math.hypot(pos.x - ctx.px, pos.y - ctx.py);
   const out: ActionOption[] = [];
 
   switch (t.kind) {
-    case 'npc':
+    case 'npc': {
+      const attack = attackOption(ctx, pos, d);
+      if (attack) out.push(attack);
       out.push(opt('talk', d, t.ent.name ? `Talk to ${t.ent.name}` : 'Talk'));
       out.push(opt('examine', d));
       break;
+    }
     case 'storefront':
     case 'sign':
       out.push(opt('examine', d));

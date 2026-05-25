@@ -1,5 +1,5 @@
 import type { Cam } from '../world/projection';
-import type { EvidenceAxis, LifeState, Player, Suspicion, Tile, VisualSignature } from '../design';
+import type { EvidenceAxis, HighPhase, HighState, LifeState, Player, Suspicion, Tile, VisualSignature } from '../design';
 
 export type PathStep = { x: number; y: number };
 
@@ -12,12 +12,46 @@ export const PLAYER_SPEED = 4.2;
 
 const SUSPICION_AXES: EvidenceAxis[] = ['visual', 'fund', 'pattern', 'digital', 'location'];
 
+// Per-axis weights for notoriety. Strategic by design: visual heat hurts most
+// (you were SEEN), funny-money is slow to trace so it's discounted. See the
+// contract comment on Player.notoriety in design.ts.
+const SUSPICION_WEIGHTS: Record<EvidenceAxis, number> = {
+  visual: 1.5,
+  fund: 0.8,
+  pattern: 1.0,
+  digital: 1.0,
+  location: 1.0,
+};
+
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
 function zeroSuspicion(): Suspicion {
   return { visual: 0, fund: 0, pattern: 0, digital: 0, location: 0 };
+}
+
+function zeroHigh(): HighState {
+  return { intensity: 0, phase: 'sober', sinceMs: 0, rising: false, phonePressure: 0, marketReadNoise: 0, agentAgitation: 0 };
+}
+
+// Peak ≠ crash: the phase is derived from magnitude + whether we just dosed.
+function derivePhase(intensity: number, rising: boolean): HighPhase {
+  if (intensity < 0.05) return 'sober';
+  if (intensity >= 0.85) return 'overamped';
+  if (rising) return intensity < 0.5 ? 'comeup' : 'peak';
+  return intensity > 0.45 ? 'peak' : 'crashing';
+}
+
+// Recompute the pressures the high pushes onto other systems. Rising/peak = the
+// world screams at you; crashing = it goes flat and bored.
+function recomputeHigh(h: HighState): void {
+  h.phase = derivePhase(h.intensity, h.rising);
+  const i = h.intensity;
+  h.phonePressure = i;
+  h.marketReadNoise = clamp((i - 0.3) / 0.7, 0, 1);
+  const up = h.rising || h.phase === 'peak' || h.phase === 'overamped';
+  h.agentAgitation = up ? i : i * 0.4;
 }
 
 function defaultCostume(): VisualSignature {
@@ -28,15 +62,22 @@ function tileFromPosition(px: number, py: number): Tile {
   return { x: Math.floor(px), y: Math.floor(py) };
 }
 
-export function suspicionMagnitude(suspicion: Suspicion): number {
-  let sum = 0;
-  for (const axis of SUSPICION_AXES) sum += suspicion[axis] * suspicion[axis];
-  return clamp(Math.sqrt(sum / SUSPICION_AXES.length), 0, 100);
+// notoriety = weighted blend of the five axes, normalised to 0..100. A blend (not
+// the max) means heat spread thin is cheaper than one spiked axis — players hedge.
+export function computeNotoriety(suspicion: Suspicion): number {
+  let weighted = 0;
+  let total = 0;
+  for (const axis of SUSPICION_AXES) {
+    const w = SUSPICION_WEIGHTS[axis];
+    weighted += suspicion[axis] * w;
+    total += w;
+  }
+  return clamp(weighted / total, 0, 100);
 }
 
 export function syncPlayerBody(state: ScapePlayerState): void {
   state.body.tile = tileFromPosition(state.px, state.py);
-  state.body.notoriety = suspicionMagnitude(state.body.suspicion);
+  state.body.notoriety = computeNotoriety(state.body.suspicion);
 }
 
 export function createInitialPlayerBody(tile: Tile, facing: number): Player {
@@ -58,7 +99,7 @@ export function createInitialPlayerBody(tile: Tile, facing: number): Player {
     lifeState: 'free',
     rapSheet: { busts: 0, burnedSignatures: [], heatRamp: 1 },
     career: { kills: 0, style: 0, earned: 0 },
-    high: 0,
+    high: zeroHigh(),
   };
 }
 
@@ -80,7 +121,8 @@ export function createInitialPlayerState(): ScapePlayerState {
 }
 
 export function advancePlayer(state: ScapePlayerState, dt: number): void {
-  setHigh(state, state.body.high - 0.12 * dt);
+  state.body.high.sinceMs += dt * 1000;
+  setHigh(state, state.body.high.intensity - 0.12 * dt); // decay → rising=false → crashing
   if (!state.path.length) {
     syncPlayerBody(state);
     return;
@@ -124,7 +166,7 @@ export function adjustMoney(state: ScapePlayerState, delta: number): void {
 
 export function setSuspicionAxis(state: ScapePlayerState, axis: EvidenceAxis, value: number): void {
   state.body.suspicion[axis] = clamp(Math.round(value), 0, 100);
-  state.body.notoriety = suspicionMagnitude(state.body.suspicion);
+  state.body.notoriety = computeNotoriety(state.body.suspicion);
 }
 
 export function adjustSuspicionAxis(state: ScapePlayerState, axis: EvidenceAxis, delta: number): void {
@@ -139,10 +181,19 @@ export function setCostume(state: ScapePlayerState, costume: Partial<VisualSigna
   state.body.costume = { ...state.body.costume, ...costume };
 }
 
-export function setHigh(state: ScapePlayerState, high: number): void {
-  state.body.high = clamp(high, 0, 1);
+export function setHigh(state: ScapePlayerState, intensity: number): void {
+  const h = state.body.high;
+  const next = clamp(intensity, 0, 1);
+  h.rising = next > h.intensity + 1e-4;
+  h.intensity = next;
+  recomputeHigh(h);
 }
 
-export function increaseHigh(state: ScapePlayerState): void {
-  setHigh(state, state.body.high + 0.45);
+export function increaseHigh(state: ScapePlayerState, substanceKey?: string): void {
+  const h = state.body.high;
+  h.sinceMs = 0;
+  if (substanceKey) h.substanceKey = substanceKey;
+  setHigh(state, h.intensity + 0.45);
+  h.rising = true; // a fresh dose is unambiguously a come-up
+  recomputeHigh(h);
 }

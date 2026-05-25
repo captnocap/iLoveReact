@@ -2,6 +2,7 @@ import { blueHoodie } from './items/blue_hoodie';
 import { bomb } from './items/bomb';
 import { knife } from './items/knife';
 import { lockpick } from './items/lockpick';
+import { pistol } from './items/pistol';
 import type { Key } from '../design';
 import type { ItemLookup, ScapeItemModule } from './items/types';
 
@@ -12,6 +13,7 @@ export const ITEM_MODULES: ScapeItemModule[] = [
   knife,
   lockpick,
   blueHoodie,
+  pistol,
 ];
 
 export const ITEMS: ItemLookup = Object.fromEntries(

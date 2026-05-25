@@ -104,7 +104,7 @@ export function createScapeFrame({
   head[7] = winOY;
   head[8] = WIN;
   head[9] = spriteN;
-  head[10] = sim.body.high;
+  head[10] = sim.body.high.intensity;
 
   const nowMs = (globalThis as any).performance?.now?.() ?? 0;
   return {

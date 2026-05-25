@@ -76,7 +76,7 @@ export function PlayerDebug({ player, actions }: { player: Player; actions: Play
         <TinyButton label="-100" onPress={() => actions.adjustMoney(-100)} />
         <TinyButton label="+100" onPress={() => actions.adjustMoney(100)} />
       </Row>
-      <Row label="high" value={`${Math.round(player.high * 100)}%`}>
+      <Row label="high" value={`${Math.round(player.high.intensity * 100)}% ${player.high.phase}`}>
         <TinyButton label="-10" onPress={() => actions.adjustHigh(-0.1)} />
         <TinyButton label="+25" onPress={() => actions.adjustHigh(0.25)} />
       </Row>

@@ -47,7 +47,7 @@ export default function Scape() {
           clock={world.clock}
         />
         <PlayerDebug player={world.player} actions={world.playerActions} />
-        <ActionMenu menu={world.menu} onPick={world.runAction} onClose={world.closeMenu} />
+        <ActionMenu menu={world.menu} onPick={world.runAction} onClose={world.closeMenu} high={world.player.high.intensity} />
         <QuestChatPanel chat={chat} />
       </Pressable>
     </Box>

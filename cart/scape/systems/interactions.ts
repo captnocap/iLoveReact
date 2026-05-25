@@ -15,7 +15,9 @@ export type InteractionKey =
   | 'drop'
   | 'open'
   | 'close'
-  | 'loot';
+  | 'loot'
+  | 'shoot'
+  | 'slash';
 
 export type Proximity = 'adjacent' | 'near' | 'any';
 
@@ -41,4 +43,9 @@ export const INTERACTIONS: Record<InteractionKey, InteractionDef> = {
   open: { key: 'open', label: 'Open door', proximity: 'adjacent' },
   close: { key: 'close', label: 'Close door', proximity: 'adjacent' },
   loot: { key: 'loot', label: 'Search', proximity: 'adjacent' },
+  // Attacks. `shoot` is range-gated by the weapon's maxRange + line of sight (in
+  // systems/chance.ts), not by a proximity band, so it stays 'any' here; `slash` is
+  // a melee verb and must be adjacent.
+  shoot: { key: 'shoot', label: 'Shoot', proximity: 'any' },
+  slash: { key: 'slash', label: 'Slash', proximity: 'adjacent' },
 };

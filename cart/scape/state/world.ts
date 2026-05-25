@@ -18,7 +18,7 @@ import {
   setLifeState,
   type ScapePlayerState,
 } from './player';
-import { advanceClock, createClock, formatClock, type GameClock } from './clock';
+import { advanceClock, clockHM, createClock, formatClock, type GameClock } from './clock';
 import {
   createInitialInventoryState,
   dropInHand,
@@ -31,7 +31,7 @@ import {
   type InventoryState,
 } from '../systems/inventory';
 import { buildDoors, closedDoorBlockers, nearestDoor, toggleDoor, type Door } from '../systems/doors';
-import { availableActions, targetLabel, targetPos, type ActionTarget } from '../systems/actions';
+import { availableActions, targetLabel, targetPos, type ActionTarget, type AttackContext, type WeaponContext } from '../systems/actions';
 import { PROXIMITY_RANGE } from '../systems/interactions';
 import type { ActionMenuState } from '../ui/ContextMenu';
 
@@ -258,7 +258,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       refresh();
     },
     adjustHigh: (delta) => {
-      setHigh(sim.current, sim.current.body.high + delta);
+      setHigh(sim.current, sim.current.body.high.intensity + delta);
       refresh();
     },
   };
@@ -377,6 +377,33 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
     return { kind: 'tile', x: Math.floor(wx), y: Math.floor(wy) };
   };
 
+  // Snapshot everything the chance engine needs from the current player: held
+  // weapon, combat skill, condition, the hour, and the live (closed-door) blockers
+  // for line-of-sight. Built fresh per right-click so the % reflects where you stand.
+  const buildAttackContext = (cur: ScapePlayerState): AttackContext => {
+    const slot = inHandSlot(cur.body, inventory.current);
+    let weapon: WeaponContext | null = null;
+    if (slot && slot.module.type.category === 'weapon') {
+      const ty = slot.module.type;
+      const ranged = !!ty.ranged;
+      weapon = {
+        ranged,
+        profile: ty.range ?? null,
+        key: ranged ? 'shoot' : 'slash',
+        label: `${ranged ? 'Shoot' : 'Slash'} — ${ty.label}`,
+      };
+    }
+    return {
+      px: cur.px,
+      py: cur.py,
+      weapon,
+      combat: cur.body.skills.combat,
+      health01: cur.body.health / cur.body.maxHealth,
+      hour: clockHM(clock.current).hour,
+      closedDoors: new Set<string>(closedDoorBlockers(doorsRef.current)),
+    };
+  };
+
   const onSceneRightClick = (payload: any) => {
     if (chat.chatOpenRef.current) return;
     const r = rectRef.current;
@@ -387,7 +414,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
     const world = unproject(sx, sy, cur, r);
     const target = pickTarget(world.x, world.y);
     menuTargetRef.current = target;
-    setMenu({ x: sx, y: sy, title: targetLabel(target), options: availableActions(target, cur.px, cur.py) });
+    setMenu({ x: sx, y: sy, title: targetLabel(target), options: availableActions(target, buildAttackContext(cur)) });
   };
 
   const examineTextFor = (t: ActionTarget): string => {
@@ -415,6 +442,10 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
   // so anything that reaches here already passed its proximity gate.
   const runAction = (interactionKey: string) => {
     const t = menuTargetRef.current;
+    // The TRUE chance for the picked row (ground truth — NOT the warped value the
+    // menu may have shown under high). The dice roll uses this, so a manic player
+    // baited by a fake % eats the real odds.
+    const picked = menu?.options.find((o) => o.interactionKey === interactionKey);
     setMenu(null);
     if (!t) return;
     const cur = sim.current;
@@ -450,6 +481,34 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       case 'loot':
         setEx('You paw through the dumpster. Trash, mostly.');
         break;
+      case 'shoot':
+      case 'slash': {
+        if (t.kind !== 'npc') break;
+        const e = t.ent;
+        const pTrue = picked?.chance ?? 0;
+        const hit = Math.random() < pTrue;
+        // a shot spends a round
+        const slot = inHandSlot(cur.body, inventory.current);
+        if (slot && slot.module.type.ranged && slot.instance.charges != null) {
+          slot.instance.charges = Math.max(0, slot.instance.charges - 1);
+        }
+        // the target reacts — bolts away from the player (a witnessed, panicked flee)
+        if (!e.quest) {
+          const away = nearestWalkable(Math.round(e.x + (e.x - cur.px)), Math.round(e.y + (e.y - cur.py)), liveBlockers());
+          if (away) {
+            e.tx = away.x + 0.5;
+            e.ty = away.y + 0.5;
+          }
+        }
+        if (hit) {
+          setEx(`Hit. ${e.name ?? 'They'} fold up — ugly, twitchy, over in a second.`);
+          adjustSuspicionAxis(cur, 'visual', 12);
+        } else {
+          setEx(`You whiff. ${e.name ?? 'They'} bolt screaming — and now the whole block saw you.`);
+          adjustSuspicionAxis(cur, 'visual', 20);
+        }
+        break;
+      }
     }
     refresh();
   };

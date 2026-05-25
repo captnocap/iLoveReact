@@ -107,10 +107,10 @@ export function Hud({
 
       {/* top-left: the high pill (Spun signal) + the controls hint */}
       <Box key="topleft" style={{ position: 'absolute', left: 18, top: 16, gap: 6, alignItems: 'flex-start' }}>
-        {player.high > 0.05 ? (
+        {player.high.intensity > 0.05 ? (
           <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: UI.panelBg, borderWidth: 1, borderColor: UI.high, borderRadius: 4, paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3 }}>
-            <Text style={{ color: UI.high, fontSize: 12, fontWeight: '700' }}>◈ HIGH</Text>
-            <Text style={{ color: UI.text, fontSize: 12, fontFamily: 'mono' }}>{`${Math.round(player.high * 100)}%`}</Text>
+            <Text style={{ color: UI.high, fontSize: 12, fontWeight: '700' }}>{`◈ ${player.high.phase.toUpperCase()}`}</Text>
+            <Text style={{ color: UI.text, fontSize: 12, fontFamily: 'mono' }}>{`${Math.round(player.high.intensity * 100)}%`}</Text>
           </Box>
         ) : null}
         <Text style={{ color: UI.textFaint, fontSize: 10 }}>click move · right-click actions · A/D orbit · W/S tilt · H bump</Text>

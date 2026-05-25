@@ -114,6 +114,26 @@ export type WebsiteType = {
   source: 'sim' | 'agents' | 'ledger' | 'static';
 };
 
+// The artifacts the dead internet ACCUMULATES — without these, agents generate text
+// that evaporates and leave no durable footprint. A rumor can move the Case; a
+// listing is an Order's shopfront; a news_item is the investigation rendered. These
+// persist in World.internet and the WebsiteType surfaces render slices of them.
+export type InternetArtifactKind =
+  | 'post' | 'dm' | 'listing' | 'comment' | 'rumor' | 'news_item' | 'market_screed';
+
+export type InternetArtifact = {
+  id: Id;
+  siteKey: Key;
+  kind: InternetArtifactKind;
+  authorNpcId?: Id;
+  relatedEventId?: Id;            // ties a post/rumor to a MurderEvent
+  relatedOrderId?: Id;            // ties a listing/DM to an Order
+  atMs: number;
+  text: string;
+  suspicionDelta?: Partial<Suspicion>;  // rumors/news can nudge the Case
+  visibleToPlayer: boolean;
+};
+
 // ── interactions ─────────────────────────────────────────────────────────────
 // The generic "do a thing" verb. Some interactions ARE murders (point at a
 // MurderType); others are mundane (loot, talk, hack, buy). The method decides
@@ -221,6 +241,26 @@ export type Npc = {
 // ── player ───────────────────────────────────────────────────────────────────
 export type Skill = 'combat' | 'stealth' | 'hacking' | 'trading' | 'social';
 
+// The drug-psychosis signal. Was a single 0..1 scalar; split so peak and comedown
+// are mechanically distinct, and so GROUND TRUTH (`intensity`) is separated from
+// the perception it drives. Subscribers: the shader (warp/grade), the action menu
+// (perceived hit-% lies — systems/perception.ts), the market read, the phone, and
+// the agents. The flat-gray comedown is its own game (slower casts, worse rolls,
+// bored agents) — not just "less peak".
+export type HighPhase = 'sober' | 'comeup' | 'peak' | 'overamped' | 'crashing';
+
+export type HighState = {
+  intensity: number;             // 0..1 — the magnitude everything scales from
+  phase: HighPhase;              // peak ≠ crash; the phase changes which systems lie how
+  substanceKey?: Key;            // what you're on (sets the curve/colour later)
+  sinceMs: number;               // ms since the last dose — drives the curve
+  rising: boolean;               // came up this tick vs decaying → comeup ↔ crashing
+  // derived pressures the high pushes onto OTHER systems (each 0..1):
+  phonePressure: number;         // notification spam / perceived urgency
+  marketReadNoise: number;       // how far displayed market data drifts from truth
+  agentAgitation: number;        // how weird/aggressive the NPC agents become
+};
+
 export type Player = {
   tile: Tile; facing: number;
   health: number; maxHealth: number;     // fail meter #1
@@ -229,6 +269,11 @@ export type Player = {
   simWalletId: Id;               // trades the same market as the NPCs
   /** The TRUE evidence you've generated (ground truth, some not yet discovered). */
   suspicion: Suspicion;
+  // notoriety = f(suspicion): the exact reducer lives in state/player.ts, but the
+  // contract guarantees it's a PURE function of Suspicion, range 0..100. The choice
+  // is strategic: a weighted blend → players spread heat evenly; the max axis →
+  // players dump into one axis they plan to launder. Current impl: weighted blend
+  // (visual×1.5, fund×0.8, others ×1.0), normalised to 0..100.
   notoriety: number;             // derived 0..100 — fail meter #2
   costume: VisualSignature;      // current presented identity
   // GTA inventory: ONE item in hand, pockets are a flat quick-select wheel.
@@ -246,7 +291,7 @@ export type Player = {
   // + your trades go impulsive), the phone (notification pressure), and the
   // agents (they get weirder/more aggressive). Perception always distorts;
   // erratic high-state behaviour also has real causal effects in thin pools.
-  high: number;                  // 0..1 drug-psychosis level
+  high: HighState;               // drug-psychosis signal (see HighState above)
 };
 
 // ── runtime glue (referenced by the above; the heartbeat of the loop) ─────────
@@ -287,13 +332,17 @@ export type RangeProfile = {
   glassPenalty: number;          // 0..1 multiplier when firing through a window
 };
 
-/** The legible breakdown behind one %, so the menu can show WHY it's 30%. */
+/** The legible breakdown behind one %, so the menu can show WHY it's 30%. Each
+ *  field is a multiplier on `base`; `final` is their clamped product. This is
+ *  GROUND TRUTH — what the menu DISPLAYS may be warped by high (see ActionOption). */
 export type ChanceBreakdown = {
-  base: number;
-  range: number;                 // × distance vs optimal
-  los: number;                   // × clear / glass / partial
-  cover: number;                 // × target behind cover
+  base: number;                  // weapon's base accuracy at optimal range
+  range: number;                 // × distance vs optimalRange (falloff)
+  los: number;                   // × clear / glass / partial line of sight
+  cover: number;                 // × target behind cover (props, corners)
   awareness: number;             // × unaware (bonus) vs alert/fleeing (penalty)
+  health: number;                // × shooter's condition — low HP = shaky aim
+  time: number;                  // × time of day — night penalises ranged sight
   skill: number;                 // × player combat/throwing skill
   final: number;                 // clamped product, 0..1
 };
@@ -307,6 +356,10 @@ export type ActionOption = {
   style?: number;                // style points if it lands
   blocked?: boolean;             // shown greyed
   reason?: string;               // why blocked ('out of reach', 'no line of sight')
+  // Perception, not truth: under high the menu may show a different victim than the
+  // real one (the cop that's actually a civilian) and a different %. `chance` stays
+  // ground truth; the SHOWN value is warped at render time (systems/perception.ts).
+  perceivedTarget?: { npcId: Id; perceivedRole?: NpcRole; perceivedSignature?: VisualSignature };
 };
 
 // What happens after the dice roll. A MISS is not nothing: the target goes
@@ -360,12 +413,18 @@ export type ScheduleEntry = {
 // website) — the story is a curated path through systems that run anyway.
 export type ObjectiveKind =
   | 'kill' | 'reach' | 'earn' | 'acquire' | 'talk' | 'evade' | 'use_site';
+// Explicit target so npc-by-Id and zone/site-by-Key can't be silently confused
+// (the old single `targetId?: Id` was ambiguous and would quietly break for zones).
+export type ObjectiveTarget =
+  | { kind: 'npc'; id: Id }
+  | { kind: 'zone'; key: Key }
+  | { kind: 'site'; key: Key }
+  | { kind: 'tile'; tile: Tile };
 export type Objective = {
   kind: ObjectiveKind;
-  targetId?: Id;                 // npc / zone
+  target?: ObjectiveTarget;      // who/where (subsumes the old targetId + siteKey)
   amount?: number;               // $ goal, or notoriety ceiling for 'evade'
   itemKey?: Key;
-  siteKey?: Key;
   marker?: Tile;                 // the world blip you path to in order to engage
   done: boolean;
 };
@@ -380,6 +439,24 @@ export type Quest = {
   reward: { cash?: number; itemKey?: Key; repDelta?: number };
 };
 
+// ── perception overlay: the layer that lets the UI lie without the sim lying ─────
+// High-state hallucination must NOT mutate ground truth. Instead it writes here:
+// the renderer reads `World.perception` on top of reality, so the cop the player
+// "sees" can be a civilian, a phantom tile can appear, a price can drift — while the
+// simulation stays honest underneath. Entries expire so the world snaps back.
+export type PerceivedNpcOverride = {
+  npcId: Id;
+  perceivedRole?: NpcRole;       // the civilian that reads as a cop
+  perceivedSignature?: VisualSignature;
+  threatLevel?: number;          // 0..1 — how dangerous they FEEL
+  expiresAtMs: number;
+};
+export type PerceptionOverlay = {
+  npcOverrides: PerceivedNpcOverride[];
+  phantomTiles: { tile: Tile; kind: string; expiresAtMs: number }[];
+  marketPriceNoise: { assetKey: Key; displayedMult: number; expiresAtMs: number }[];
+};
+
 // ── world root: the durable game state ───────────────────────────────────────
 export type World = {
   clock: WorldClock;
@@ -390,6 +467,13 @@ export type World = {
   events: MurderEvent[];         // everything that's happened
   case: Case;                    // the active investigation
   quests: Quest[];               // story + side, with live progress
+  // live instance collections the Player ids resolve INTO (pockets/assets/inHand
+  // reference these; without them the player references entities that live nowhere):
+  items: ItemInstance[];         // carried + world-floor item instances
+  assets: AssetInstance[];       // owned property instances
+  orders: Order[];               // the dealing queue (buyers are agents)
+  internet: InternetArtifact[];  // the dead internet's durable footprint
+  perception: PerceptionOverlay; // what the player is shown vs what's true (high)
 };
 
 // ── authoring layer (compiles INTO the runtime data above — NOT live nodes) ──

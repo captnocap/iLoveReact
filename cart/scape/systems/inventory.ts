@@ -54,6 +54,7 @@ export function createInitialInventoryState(): InventoryState {
   spawnWorldItem(state, 'lockpick', 19.5, 22.5);
   spawnWorldItem(state, 'blue_hoodie', 25.5, 20.5);
   spawnWorldItem(state, 'bomb', 31.5, 25.5);
+  spawnWorldItem(state, 'pistol', 22.5, 26.5);
   return state;
 }
 
