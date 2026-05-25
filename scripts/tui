@@ -1,14 +1,30 @@
 #!/bin/sh
-# scripts/tui — bundle a cart through tui/entry.tsx and run it on tools/v8cli.
+# scripts/tui — bundle a cart through tui/entry.tsx and run it as a real
+# TUI host binary (every optional binding linked in).
 #
-# Usage:  scripts/tui [<entry.tsx>]
+# Usage:  scripts/tui [<entry.tsx>] [-- script-args...]
 #         (default: tui/examples/counter.tsx)
 #
-# The cart is bundled via the TUI entry, which boots the same react-reconciler
-# the GPU host uses (renderer/hostConfig.ts) but routes paint to a character
-# grid (tui/host.ts). Cart code can therefore use the same primitives
-# (Box, Text, Pressable, ScrollView from runtime/primitives.tsx) it would
-# use on the GPU host.
+# Pipeline:
+#   1. esbuild → tui/.cache/bundle-<name>.js   (TUI entry + cart aliased in)
+#   2. zig build tui-app -Dapp-name=<name> -Dbundle-path=<bundle>
+#      with EVERY tui-app `-Dhas-*` flag forced on → zig-out/bin/<name>
+#   3. exec the binary.
+#
+# Why every flag is forced on: same philosophy as scripts/dev for the GPU
+# host. In dev we want any hook the cart imports (or might import after
+# a hot edit) to "just work" without re-bundling to re-run the metafile
+# gate. The metafile gate is correct for ship-tui (one cart, one
+# binary, link only what's needed); for the dev iterate path it's a
+# foot-gun — gallery.tsx imports useAssistant via require(), nothing
+# triggers the sdk gate, and the resulting binary silently lacks the
+# bindings useAssistant needs. So: dev = everything on, ship = gated.
+#
+# Why not tools/v8cli at all: v8cli only registers framework/v8_bindings_cli.zig
+# (fs, process for the build scripts). No __vterm_spawn, no worker_*,
+# no net, no sdk. Any cart that mounts <Terminal> or calls useAssistant
+# falls through the stub branch in tui/host.ts or the hasHost()=false
+# branch in the hook.
 
 set -e
 cd "$(dirname "$0")/.."
@@ -18,9 +34,9 @@ shift 2>/dev/null || true
 ESBUILD="$ROOT/tools/esbuild"
 V8CLI="$ROOT/tools/v8cli"
 [ -x "$ROOT/zig-out/bin/v8cli" ] && [ "$ROOT/zig-out/bin/v8cli" -nt "$V8CLI" ] && V8CLI="$ROOT/zig-out/bin/v8cli"
+ZIG="${REACTJIT_ZIG:-$ROOT/tools/zig/zig}"
+[ -x "$ZIG" ] || ZIG=zig
 
-# Resolve the cart entry to an absolute path so the alias works regardless
-# of where esbuild executes its module resolver from.
 case "$ENTRY" in
   /*) ENTRY_ABS="$ENTRY" ;;
   *)  ENTRY_ABS="$ROOT/$ENTRY" ;;
@@ -38,7 +54,9 @@ if [ ! -d "$NM/react-reconciler/cjs" ]; then
   done
 fi
 
-# Terminal size baked into the bundle as compile-time constants.
+# Terminal size baked into the bundle as compile-time constants. The
+# JS preamble re-reads it at boot via __termSize, but esbuild still
+# wants concrete define values.
 SIZE=$(stty size 2>/dev/null || echo "24 80")
 ROWS=$(echo "$SIZE" | cut -d' ' -f1)
 COLS=$(echo "$SIZE" | cut -d' ' -f2)
@@ -50,6 +68,7 @@ mkdir -p "$ROOT/tui/.cache"
 "$ESBUILD" \
   --bundle "$ROOT/tui/entry.tsx" \
   --outfile="$OUT" \
+  --metafile="$OUT.metafile.json" \
   --platform=neutral \
   --main-fields=module,main \
   --target=es2020 \
@@ -71,4 +90,22 @@ mkdir -p "$ROOT/tui/.cache"
   --alias:loose-envify="$ROOT/deps/loose-envify" \
   --alias:js-tokens="$ROOT/deps/js-tokens"
 
-"$V8CLI" "$OUT" "$@"
+# Dev mode: turn on every `-Dhas-*` flag tui-app declares. This list
+# tracks v8_tui_app.zig's `HAS_*` checks (and build.zig's tui_options
+# block). When v8_tui_app gains another optional binding, add the flag
+# here. ship-tui gates these by metafile; scripts/tui doesn't.
+DEV_TUI_FLAGS="-Dhas-terminal=true -Dhas-httpsrv=true -Dhas-wssrv=true -Dhas-process=true -Dhas-net=true -Dhas-sdk=true -Dhas-fs=true"
+
+echo "[tui] zig build app -Dhas-gpu=false -Dapp-name=$NAME $DEV_TUI_FLAGS"
+# shellcheck disable=SC2086
+"$ZIG" build app \
+  -Doptimize=ReleaseFast \
+  -Dhas-gpu=false \
+  -Dapp-name="$NAME" \
+  -Dbundle-path="$OUT" \
+  $DEV_TUI_FLAGS
+
+OUT_BIN="$ROOT/zig-out/bin/$NAME"
+[ -x "$OUT_BIN" ] || { echo "[tui] build did not produce $OUT_BIN" >&2; exit 1; }
+
+exec "$OUT_BIN" "$@"
