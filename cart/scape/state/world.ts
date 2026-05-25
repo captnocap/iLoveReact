@@ -28,6 +28,10 @@ import {
   type InventorySlot,
   type InventoryState,
 } from '../systems/inventory';
+import { buildDoors, closedDoorBlockers, nearestDoor, toggleDoor, type Door } from '../systems/doors';
+import { availableActions, targetLabel, targetPos, type ActionTarget } from '../systems/actions';
+import { PROXIMITY_RANGE } from '../systems/interactions';
+import type { ActionMenuState } from '../ui/ContextMenu';
 
 const NPC_SPEED = 1.1;
 const ROT_SPEED = 1.9;
@@ -88,8 +92,13 @@ export type ScapeWorld = {
   winTiles: number[];
   decorList: Decor[];
   entities: Ent[];
+  doors: Door[];
   examineText: string | null;
+  menu: ActionMenuState | null;
   onSceneDown: (payload: any) => void;
+  onSceneRightClick: (payload: any) => void;
+  runAction: (interactionKey: string) => void;
+  closeMenu: () => void;
 };
 
 export type PlayerDebugActions = {
@@ -204,6 +213,13 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
   const [, force] = useState(0);
   const examineRef = useRef<{ text: string; until: number } | null>(null);
   const refresh = useCallback(() => force((nn) => (nn + 1) & 0xffff), []);
+  const doorsRef = useRef<Door[]>(buildDoors());
+  const [menu, setMenu] = useState<ActionMenuState | null>(null);
+  const menuTargetRef = useRef<ActionTarget | null>(null);
+  const closeMenu = useCallback(() => setMenu(null), []);
+  // Live blockers = static entity tiles + every CLOSED door tile (recomputed at
+  // call time so opening a door immediately makes its tile walkable).
+  const liveBlockers = () => new Set<string>([...staticBlockers, ...closedDoorBlockers(doorsRef.current)]);
 
   useSceneControls(keys, sim, inventory, refresh, chat.chatOpenRef);
   useWorldLoop({ entsRef, staticBlockers, sim, keys, force });
@@ -251,6 +267,10 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
 
   const onSceneDown = (payload: any) => {
     if (chat.chatOpenRef.current) return;
+    if (menu) {
+      setMenu(null);
+      return;
+    }
     const r = rectRef.current;
     const sx = Number(payload?.x ?? 0) - r.x;
     const sy = Number(payload?.y ?? 0) - r.y;
@@ -267,8 +287,20 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
         if (text) examineRef.current = { text, until: ((globalThis as any).performance?.now?.() ?? Date.now()) + 2400 };
         refresh();
       } else {
-        s.path = findPath(s.px, s.py, nearbyItem.x, nearbyItem.y, staticBlockers);
+        s.path = findPath(s.px, s.py, nearbyItem.x, nearbyItem.y, liveBlockers());
         examineRef.current = { text: 'Walk closer to pick that up.', until: ((globalThis as any).performance?.now?.() ?? Date.now()) + 2200 };
+      }
+      return;
+    }
+    const door = nearestDoor(doorsRef.current, world.x, world.y, 0.75);
+    if (door) {
+      const dist = Math.hypot(door.x + 0.5 - s.px, door.y + 0.5 - s.py);
+      if (dist <= PROXIMITY_RANGE.adjacent) {
+        toggleDoor(door);
+        refresh();
+      } else {
+        s.path = findPath(s.px, s.py, door.x + 0.5, door.y + 0.5, liveBlockers());
+        examineRef.current = { text: 'Head over to the door.', until: ((globalThis as any).performance?.now?.() ?? Date.now()) + 2000 };
       }
       return;
     }
@@ -301,7 +333,112 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       examineRef.current = { text: decorText, until: now + 3500 };
       return;
     }
-    s.path = findPath(s.px, s.py, world.x, world.y, staticBlockers);
+    s.path = findPath(s.px, s.py, world.x, world.y, liveBlockers());
+  };
+
+  // What the player clicked, resolved to an action target (door > NPC/object >
+  // item > prop > bare ground). Priority mirrors onSceneDown's default-action order.
+  const pickTarget = (wx: number, wy: number): ActionTarget => {
+    const door = nearestDoor(doorsRef.current, wx, wy, 0.75);
+    if (door) return { kind: 'door', door };
+    let best: Ent | null = null;
+    let bestD = 0.9;
+    for (const e of entsRef.current) {
+      const d = Math.hypot(e.x - wx, e.y - wy);
+      if (d < bestD) {
+        bestD = d;
+        best = e;
+      }
+    }
+    if (best) {
+      if (best.kind === 'storefront') return { kind: 'storefront', ent: best };
+      if (best.kind === 'sign') return { kind: 'sign', ent: best };
+      return { kind: 'npc', ent: best };
+    }
+    const item = nearestWorldItem(inventory.current.worldItems, wx, wy, 0.75);
+    if (item) return { kind: 'item', item };
+    const dec = decorAt(Math.floor(wx), Math.floor(wy));
+    if (dec && Math.hypot(Math.floor(wx) + 0.5 - wx, Math.floor(wy) + 0.5 - wy) < 0.7) {
+      return { kind: 'prop', prop: { x: Math.floor(wx) + 0.5, y: Math.floor(wy) + 0.5, kind: dec } };
+    }
+    return { kind: 'tile', x: Math.floor(wx), y: Math.floor(wy) };
+  };
+
+  const onSceneRightClick = (payload: any) => {
+    if (chat.chatOpenRef.current) return;
+    const r = rectRef.current;
+    const sx = Number(payload?.x ?? 0) - r.x;
+    const sy = Number(payload?.y ?? 0) - r.y;
+    if (sx < 0 || sy < 0 || sx > r.width || sy > r.height) return;
+    const cur = sim.current;
+    const world = unproject(sx, sy, cur, r);
+    const target = pickTarget(world.x, world.y);
+    menuTargetRef.current = target;
+    setMenu({ x: sx, y: sy, title: targetLabel(target), options: availableActions(target, cur.px, cur.py) });
+  };
+
+  const examineTextFor = (t: ActionTarget): string => {
+    switch (t.kind) {
+      case 'npc':
+      case 'storefront':
+      case 'sign':
+        return t.ent.label;
+      case 'door':
+        return t.door.open ? 'An open doorway. Dark in there.' : 'A shut door. The building is closed up tight.';
+      case 'item':
+        return 'Something worth grabbing is lying here.';
+      case 'prop':
+        return t.prop.kind === 'palm'
+          ? 'A scraggly palm, half its fronds dead. Very Miami.'
+          : t.prop.kind === 'dumpster'
+            ? "A dumpster. Something in it is leaking. Don't."
+            : 'A buzzing neon sign, one letter flickering out.';
+      case 'tile':
+        return 'Cracked pavement, old gum, a flyer for a club that closed.';
+    }
+  };
+
+  // Run the picked menu action on the stored target. Blocked rows aren't pressable,
+  // so anything that reaches here already passed its proximity gate.
+  const runAction = (interactionKey: string) => {
+    const t = menuTargetRef.current;
+    setMenu(null);
+    if (!t) return;
+    const cur = sim.current;
+    const now = (globalThis as any).performance?.now?.() ?? Date.now();
+    const setEx = (text: string) => {
+      examineRef.current = { text, until: now + 3000 };
+    };
+    const pos = targetPos(t);
+    switch (interactionKey) {
+      case 'walk':
+        cur.path = findPath(cur.px, cur.py, pos.x, pos.y, liveBlockers());
+        break;
+      case 'examine':
+        setEx(examineTextFor(t));
+        break;
+      case 'talk':
+        if (t.kind === 'npc' && t.ent.quest) {
+          chat.openQuestChat(t.ent);
+          return;
+        }
+        if (t.kind === 'npc') setEx(t.ent.label);
+        break;
+      case 'pickup':
+        if (t.kind === 'item') {
+          const text = pickupWorldItem(cur.body, inventory.current, t.item.id);
+          if (text) setEx(text);
+        }
+        break;
+      case 'open':
+      case 'close':
+        if (t.kind === 'door') toggleDoor(t.door);
+        break;
+      case 'loot':
+        setEx('You paw through the dumpster. Trash, mostly.');
+        break;
+    }
+    refresh();
   };
 
   const s = sim.current;
@@ -330,7 +467,12 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
     winTiles,
     decorList,
     entities: entsRef.current,
+    doors: doorsRef.current,
     examineText,
+    menu,
     onSceneDown,
+    onSceneRightClick,
+    runAction,
+    closeMenu,
   };
 }

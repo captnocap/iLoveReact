@@ -3,12 +3,14 @@ import { HEADER, MAX_SPRITES, WIN, type Decor } from '../world/window';
 import type { Ent } from '../state/world';
 import type { ScapePlayerState } from '../state/player';
 import { type InventoryState, type WorldItem, worldItemSlot } from '../systems/inventory';
+import type { Door } from '../systems/doors';
 
 export const SK_PALM = 0;
 export const SK_DUMPSTER = 1;
 export const SK_STORE = 2;
 export const SK_SIGN = 3;
 export const SK_NPC = 4;
+export const SK_DOOR = 5;
 export const SK_DOT = 6;
 export const SK_TARGET = 7;
 
@@ -56,6 +58,7 @@ export function createScapeFrame({
   decorList,
   entities,
   inventory,
+  doors,
 }: {
   sim: ScapePlayerState;
   rect: Rect;
@@ -66,9 +69,12 @@ export function createScapeFrame({
   decorList: Decor[];
   entities: Ent[];
   inventory: InventoryState;
+  doors: Door[];
 }): ScapeFrame {
+  const doorSprites = doors.map((d) => ({ kind: 'door', x: d.x + 0.5, y: d.y + 0.5, spriteKind: SK_DOOR, tint: d.open ? 1 : 0 }));
   const visible = (decorList as any[])
     .concat(entities as any[])
+    .concat(doorSprites as any[])
     .concat(inventory.worldItems.map((item) => itemSprite(item, inventory)).filter(Boolean) as any[])
     .map((e: any) => {
       const p = project(e.x, e.y, cam, rect);

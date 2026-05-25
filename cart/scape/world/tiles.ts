@@ -12,6 +12,7 @@ export const enum Kind {
   Sand = 4,
   Grime = 5,
   Wall = 6,
+  Door = 7,
 }
 
 // Props placed in the world (blocking). Renamed from the old fantasy decor.

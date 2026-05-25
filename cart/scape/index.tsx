@@ -7,6 +7,7 @@ import { Hud } from './render/Hud';
 import { Player } from './render/Player';
 import { createScapeFrame } from './render/sprites';
 import { useScapeWorld } from './state/world';
+import { ActionMenu } from './ui/ContextMenu';
 import { QuestChatPanel, useQuestChat } from './ui/Chat';
 import { PlayerDebug } from './ui/PlayerDebug';
 import { Wheel } from './ui/Wheel';
@@ -24,6 +25,7 @@ export default function Scape() {
     decorList: world.decorList,
     entities: world.entities,
     inventory: world.inventory,
+    doors: world.doors,
   });
 
   return (
@@ -33,6 +35,7 @@ export default function Scape() {
           world.rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height };
         }}
         onMouseDown={world.onSceneDown}
+        onRightClick={world.onSceneRightClick}
         style={{ flexGrow: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#0a0612' }}
       >
         <Effect key="ground" shader={GROUND_WGSL} data={frame.data} style={{ position: 'absolute', left: 0, top: 0, width: world.rect.width, height: world.rect.height }} />
@@ -50,6 +53,7 @@ export default function Scape() {
         />
         <PlayerDebug player={world.player} actions={world.playerActions} />
         <Wheel slots={world.inventorySlots} inHand={world.inHand} actions={world.inventoryActions} />
+        <ActionMenu menu={world.menu} onPick={world.runAction} onClose={world.closeMenu} />
         <QuestChatPanel chat={chat} />
       </Pressable>
     </Box>

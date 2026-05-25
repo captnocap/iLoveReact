@@ -16,6 +16,7 @@ const HDR: i32 = ${HEADER};
   if (kind == 4) { col = ${wgsl(TILE.sand)}; }
   if (kind == 5) { col = ${wgsl(TILE.grime)}; }
   if (kind == 6) { col = ${wgsl(TILE.wallTop)}; }
+  if (kind == 7) { col = ${wgsl(NEON.orange)}; }
   let plx = (D[0] - D[6]) / f32(WIN);
   let ply = (D[1] - D[7]) / f32(WIN);
   let yaw = D[2];

@@ -37,7 +37,7 @@ export function Hud({
         <Text style={{ color: UI.text, fontSize: 11 }}>{`HAND ${hand}`}</Text>
         <Text style={{ color: UI.textDim, fontSize: 11 }}>{`SPR ${spriteN}  ·  WIN ${WIN}²  ·  CITY 52×44`}</Text>
         <Text style={{ color: pathLength ? UI.accent : UI.textFaint, fontSize: 11 }}>{`${status}   ${player.lifeState.toUpperCase()}`}</Text>
-        <Text style={{ color: UI.textFaint, fontSize: 10 }}>click: move · A/D: orbit · W/S: tilt · H: bump</Text>
+        <Text style={{ color: UI.textFaint, fontSize: 10 }}>click move · right-click actions · A/D orbit · W/S tilt · H bump</Text>
       </Box>
 
       {examineText ? (

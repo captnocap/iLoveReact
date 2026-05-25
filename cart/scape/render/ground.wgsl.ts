@@ -95,6 +95,8 @@ fn baseColor(kind: i32, wx: f32, wy: f32, t: f32) -> vec3f {
   if (kind == 5) { let st = snoise(wx * 2.0, wy * 2.0) * 0.05 - snoise(wx * 7.0, wy * 7.0) * 0.03; return ${wgsl(TILE.grime)} + vec3f(st, st, st); }
   // wall handled by raycast (kind == 6)
   if (kind == 6) { return ${wgsl(TILE.wall)}; }
+  // door threshold — a dark recess in the facade; the door leaf is a sprite
+  if (kind == 7) { return vec3f(0.05, 0.04, 0.07); }
   // road — wet asphalt with a faint neon reflection sheen
   let sheen = pow(max(sin(wx * 0.7 + wy * 1.3 + t * 0.5), 0.0), 6.0);
   let refl = mix(${wgsl(NEON.purple)}, ${wgsl(NEON.cyan)}, fract(wx * 0.3 + wy * 0.2));
@@ -168,6 +170,16 @@ fn sprite(kind: i32, lx: f32, ly: f32, tint: i32) -> vec4f {
     c = over(c, shade(sdBox(vec2f(lx, ly + 6.0), vec2f(6.0, 6.0)), vec3f(0.12, 0.10, 0.14), vec3f(0.06, 0.05, 0.07)));
     c = over(c, shade(sdBox(vec2f(lx, ly + 18.0), vec2f(8.0, 9.0)), npcColor(tint), vec3f(0.08, 0.06, 0.08)));
     c = over(c, shade(sdCirc(vec2f(lx, ly + 32.0), 7.0), vec3f(0.62, 0.46, 0.40), vec3f(0.34, 0.24, 0.20)));
+  } else if (kind == 5) {
+    // door leaf — tint 0 closed (a leaf filling the frame, neon trim + handle),
+    // tint 1 open (a dark opening with the leaf swung against the jamb).
+    if (tint < 1) {
+      c = over(c, shade(sdBox(vec2f(lx, ly + 22.0), vec2f(12.0, 22.0)), vec3f(0.13, 0.10, 0.16), ${wgsl(NEON.pink)}));
+      c = over(c, shade(sdCirc(vec2f(lx + 7.0, ly + 22.0), 1.8), ${wgsl(NEON.cyan)}, vec3f(1.0, 1.0, 1.0)));
+    } else {
+      c = over(c, shade(sdBox(vec2f(lx, ly + 22.0), vec2f(11.0, 22.0)), vec3f(0.03, 0.02, 0.05), vec3f(0.06, 0.05, 0.09)));
+      c = over(c, shade(sdBox(vec2f(lx - 13.0, ly + 22.0), vec2f(2.5, 22.0)), vec3f(0.13, 0.10, 0.16), ${wgsl(NEON.pink)}));
+    }
   } else if (kind == 6) {
     c = over(c, shade(abs(lx) + abs(ly) - 4.0, ${wgsl(NEON.pink)}, vec3f(1.0, 1.0, 1.0)));
   } else if (kind == 7) {

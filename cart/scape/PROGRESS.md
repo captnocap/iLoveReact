@@ -103,3 +103,35 @@ Known follow-up: the player is a screen-centered React overlay, so it still draw
 over buildings that are *behind* it (no depth occlusion yet); and all blocks share
 one height (`WALL_H`) — per-building height variation needs a height field in the
 tile data.
+
+## Phase 2B — Action menu (the load-bearing interaction primitive) + doors
+
+Status: first slice complete.
+
+Built the action menu BEFORE the door/enter-building system, because every
+interaction (talk, examine, loot, door open/close, and later every attack) is one
+entry in it — the menu is the primitive, doors are its first consumer.
+
+- `systems/interactions.ts` — the interaction catalog (walk/examine/talk/pickup/
+  drop/open/close/loot) with proximity bands. Pure data.
+- `systems/actions.ts` — `availableActions(target, px, py)`: pure function →
+  contextual `ActionOption[]` (design.ts), each proximity-gated; blocked rows carry
+  a reason ("too far — get closer"). `ActionTarget` = door | npc | storefront |
+  sign | item | prop | tile.
+- `ui/ContextMenu.tsx` — `<ActionMenu>` renders the options at the click point,
+  greys blocked rows, runs the picked key. Backdrop dismiss + high zIndex.
+- `state/world.ts` — right-click (`onSceneRightClick`) opens the menu for whatever
+  is under the cursor; `runAction` executes the effect (walk / examine / talk→chat /
+  pickup / open-close door / search). Left-click stays the default action.
+
+Doors (first menu consumer): `systems/doors.ts` holds open/closed state; each
+building's door tile is carved to a `Door` gap (`world/citymap.ts`), the leaf is a
+sprite (open vs closed by tint, `render/ground.wgsl.ts` kind 5). Closed doors fold
+into the pathfinding blocker set, so the building stays a sealed shell until opened.
+Left-click a door (when adjacent) toggles it; right-click → Open/Close/Examine.
+Doors show as orange pips on the minimap.
+
+Verified: `./scripts/ship scape` succeeds; 6s launch is shader- and exception-clean.
+
+Next on doors: open-door LoS + walkable interiors (needs the perception system) —
+the "see through when open / sealed shell when closed" behaviour the design calls for.

@@ -16,6 +16,7 @@ export const enum T {
   Sand = 4,
   Grime = 5,
   Wall = 6,
+  Door = 7, // a ground-level gap carved in a building wall; the door leaf is a sprite
 }
 
 export const CITY_W = 52;
@@ -88,11 +89,14 @@ function buildGrid(): Int8Array {
   }
   // Buildings are SOLID extruded volumes — the whole footprint is Wall, so the
   // shader's wall raycast caps each block with one clean rooftop face and draws
-  // side faces only on the outer perimeter. (The interior `floor`/`door` fields
-  // are kept on the defs for the future enter-building system, which will carve
-  // walkable interiors and fade the roof when the player steps inside.)
+  // side faces only on the outer perimeter. Each building's door tile is then
+  // carved back out as a Door gap (a ground-level notch in the facade); the door
+  // leaf itself is a sprite whose open/closed state lives in systems/doors.ts.
+  // (The interior `floor` field is kept on the defs for the future enter-building
+  // system, which will carve walkable interiors and fade the roof on entry.)
   for (const b of BLDGS) {
     for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) set(x, y, T.Wall);
+    set(b.door[0], b.door[1], T.Door);
   }
   return g;
 }
@@ -103,6 +107,9 @@ export function cityTileAt(x: number, y: number): number {
   if (x < 0 || y < 0 || x >= CITY_W || y >= CITY_H) return VOID;
   return GRID[y * CITY_W + x];
 }
+
+// The carved door tiles, in tile coords — the seed for the runtime door objects.
+export const CITY_DOORS: { x: number; y: number }[] = BLDGS.map((b) => ({ x: b.door[0], y: b.door[1] }));
 
 // ── props (hand-placed, blocking) ───────────────────────────────────────────────
 // tint indexes into the per-kind color ramp in the shader (signs cycle neon hues).
