@@ -1,5 +1,6 @@
 import { TILE_PX } from '../world/projection';
 import { HEADER, WIN } from '../world/window';
+import { HEIGHTS, MAX_BUILDING_H } from '../world/citymap';
 import { ITEM_SPRITE_WGSL } from '../registries/items';
 import { HAZE, NEON, TILE, wgsl } from './palette';
 
@@ -15,14 +16,56 @@ export const GROUND_WGSL = `
 const WIN: i32 = ${WIN};
 const HDR: i32 = ${HEADER};
 
-fn tileKind(tx: i32, ty: i32, ox: i32, oy: i32) -> i32 {
+// Tile values are packed: bits 0..2 kind, 3..5 height tier, 6..8 facade style.
+fn tilePacked(tx: i32, ty: i32, ox: i32, oy: i32) -> i32 {
   let lx = tx - ox;
   let ly = ty - oy;
   if (lx < 0 || ly < 0 || lx >= WIN || ly >= WIN) { return -1; }
-  return i32(D[HDR + ly * WIN + lx] + 0.5);
+  let raw = D[HDR + ly * WIN + lx];
+  if (raw < -0.5) { return -1; } // void (outside the city)
+  return i32(raw + 0.5);
+}
+fn tileKind(tx: i32, ty: i32, ox: i32, oy: i32) -> i32 {
+  let p = tilePacked(tx, ty, ox, oy);
+  if (p < 0) { return -1; }
+  return p & 7;
 }
 fn isWall(tx: i32, ty: i32, ox: i32, oy: i32) -> bool {
   return tileKind(tx, ty, ox, oy) == 6;
+}
+fn tileStyle(tx: i32, ty: i32, ox: i32, oy: i32) -> i32 {
+  let p = tilePacked(tx, ty, ox, oy);
+  if (p < 0) { return 0; }
+  return (p >> 6) & 7;
+}
+fn heightForTier(t: i32) -> f32 {
+${HEIGHTS.map((h, i) => `  if (t == ${i}) { return ${h.toFixed(2)}; }`).join('\n')}
+  return ${HEIGHTS[HEIGHTS.length - 1].toFixed(2)};
+}
+// Extrusion height of a tile — only walls rise; everything else is ground (0).
+fn tileHeight(tx: i32, ty: i32, ox: i32, oy: i32) -> f32 {
+  let p = tilePacked(tx, ty, ox, oy);
+  if (p < 0) { return 0.0; }
+  if ((p & 7) != 6) { return 0.0; }
+  return heightForTier((p >> 3) & 7);
+}
+// Per-building facade palette (style 0 pink stucco, 1 teal, 2 lilac, 3 grime).
+fn facadeColor(s: i32) -> vec3f {
+  if (s == 1) { return vec3f(0.16, 0.30, 0.30); }
+  if (s == 2) { return vec3f(0.28, 0.18, 0.34); }
+  if (s == 3) { return vec3f(0.15, 0.13, 0.13); }
+  return vec3f(0.34, 0.18, 0.24);
+}
+fn windowHue(s: i32) -> vec3f {
+  if (s == 1) { return ${wgsl(NEON.pink)}; }
+  if (s == 2) { return ${wgsl(NEON.orange)}; }
+  return ${wgsl(NEON.cyan)};
+}
+fn roofTone(s: i32) -> vec3f {
+  if (s == 1) { return vec3f(0.09, 0.12, 0.13); }
+  if (s == 2) { return vec3f(0.12, 0.10, 0.15); }
+  if (s == 3) { return vec3f(0.08, 0.075, 0.07); }
+  return vec3f(0.13, 0.10, 0.13);
 }
 fn neonHue(t: i32) -> vec3f {
   if (t == 1) { return ${wgsl(NEON.cyan)}; }
@@ -30,14 +73,14 @@ fn neonHue(t: i32) -> vec3f {
   if (t == 3) { return ${wgsl(NEON.orange)}; }
   return ${wgsl(NEON.pink)};
 }
-fn rooftop(hit: vec2f, ox: i32, oy: i32) -> vec3f {
+fn rooftop(hit: vec2f, ox: i32, oy: i32, style: i32) -> vec3f {
   let tx = i32(floor(hit.x));
   let ty = i32(floor(hit.y));
   let fx = fract(hit.x);
   let fy = fract(hit.y);
-  // tar-and-gravel surface
+  // tar-and-gravel surface, toned per building style
   let g = snoise(hit.x * 4.0, hit.y * 4.0) * 0.02;
-  var col = vec3f(0.11 + g, 0.10 + g, 0.14 + g);
+  var col = roofTone(style) + vec3f(g, g, g);
   // parapet: a bright neon rim, but only on the building's OUTER edges (where the
   // neighbouring tile is not also a wall) — so the roof reads as one capped block.
   let edgeW = select(0.0, 1.0 - smoothstep(0.0, 0.12, fx), !isWall(tx - 1, ty, ox, oy));
@@ -45,7 +88,7 @@ fn rooftop(hit: vec2f, ox: i32, oy: i32) -> vec3f {
   let edgeN = select(0.0, 1.0 - smoothstep(0.0, 0.12, fy), !isWall(tx, ty - 1, ox, oy));
   let edgeS = select(0.0, 1.0 - smoothstep(0.0, 0.12, 1.0 - fy), !isWall(tx, ty + 1, ox, oy));
   let para = max(max(edgeW, edgeE), max(edgeN, edgeS));
-  col = mix(col, ${wgsl(NEON.pink)} * 0.5 + vec3f(0.16, 0.15, 0.20), para * 0.7);
+  col = mix(col, windowHue(style) * 0.6 + vec3f(0.12, 0.12, 0.16), para * 0.7);
   // a hashed AC unit / vent block on roughly a third of the roof tiles
   let h = fract(sin(f32(tx) * 12.9898 + f32(ty) * 78.233) * 43758.5453);
   if (h > 0.7 && abs(fx - 0.5) < 0.18 && abs(fy - 0.5) < 0.15) {
@@ -53,22 +96,26 @@ fn rooftop(hit: vec2f, ox: i32, oy: i32) -> vec3f {
   }
   return col;
 }
-fn wallSideColor(nrm: vec2f, hit: vec2f, z: f32, wallH: f32) -> vec3f {
+fn wallSideColor(nrm: vec2f, hit: vec2f, z: f32, wallH: f32, style: i32) -> vec3f {
   let ndl = clamp(dot(nrm, vec2f(0.42, -0.91)) * 0.5 + 0.5, 0.0, 1.0);
   let lit = 0.40 + 0.50 * ndl;
   let tex = snoise(hit.x * 3.0, hit.y * 3.0) * 0.02;
-  var col = (${wgsl(TILE.wall)} + vec3f(tex, tex, tex)) * lit * (0.80 + 0.20 * (z / wallH));
+  var col = (facadeColor(style) + vec3f(tex, tex, tex)) * lit * (0.80 + 0.20 * (z / wallH));
   let along = select(fract(hit.x), fract(hit.y), abs(nrm.x) > 0.5);
-  // lit neon windows in a grid up the facade
+  // lit neon windows; row count scales with building height (more floors = taller).
+  let rows = max(2.0, floor(wallH * 1.5));
   let wcol = floor(along * 2.0);
-  let wrow = floor((z / wallH) * 3.0);
+  let wrow = floor((z / wallH) * rows);
   let wx2 = fract(along * 2.0);
-  let wz2 = fract((z / wallH) * 3.0);
-  let inwin = step(0.22, wx2) * step(wx2, 0.78) * step(0.28, wz2) * step(wz2, 0.82);
-  let lit_hue = select(${wgsl(NEON.cyan)}, ${wgsl(NEON.pink)}, (i32(wcol) + i32(wrow)) % 2 == 0);
-  col = mix(col, lit_hue, inwin * 0.42);
+  let wz2 = fract((z / wallH) * rows);
+  let inwin = step(0.22, wx2) * step(wx2, 0.78) * step(0.30, wz2) * step(wz2, 0.82);
+  let hue = windowHue(style);
+  // checkered lit/dark windows
+  let onCell = (i32(wcol) + i32(wrow)) % 2 == 0;
+  let win = select(hue * 0.22, hue, onCell);
+  col = mix(col, win, inwin * 0.5);
   // neon roofline rim + grimy footing
-  if (z > wallH - 0.12) { col = mix(col, ${wgsl(NEON.pink)}, 0.55); }
+  if (z > wallH - 0.12) { col = mix(col, hue, 0.5); }
   if (z < 0.06) { col = col * 0.5; }
   return col;
 }
@@ -227,74 +274,39 @@ ${ITEM_SPRITE_WGSL}
   }
 
   var hazeDist = length(vec2f(wx - px, wy - py));
-  let WALL_H = 2.4;
-  // Cast through the wall volume from its projected top plane down to ground.
-  // This keeps the wall tile as a solid raised cell instead of drawing a side
-  // strip on a grid line while the actual tile footprint reads empty.
+  // Variable-height heightfield march. The view vector points from this ground
+  // fragment toward the camera; marching that way, the ray rises by pitch per
+  // tile. We step from high above (z = H_MAX) down toward the fragment and take
+  // the first building column the ray dips into. Crossing a column roofline from
+  // directly above => rooftop; stepping in from a shorter neighbour => a side
+  // face. This lets every building carry its own height (citymap height tiers).
   let view = vec2f(sn, cs);
-  let topDist = WALL_H / pitch;
-  let topPos = vec2f(wx, wy) + view * topDist;
-  let rayDir = -view;
-  var tx = i32(floor(topPos.x));
-  var ty = i32(floor(topPos.y));
-  var wallDone = false;
-
-  if (isWall(tx, ty, ox, oy)) {
-    col = rooftop(topPos, ox, oy);
-    hazeDist = length(topPos - vec2f(px, py));
-    wallDone = true;
-  }
-
-  if (!wallDone) {
-    var stepX = 0;
-    var stepY = 0;
-    var tMaxX = 9999.0;
-    var tMaxY = 9999.0;
-    var tDeltaX = 9999.0;
-    var tDeltaY = 9999.0;
-    if (abs(rayDir.x) > 0.0001) {
-      if (rayDir.x > 0.0) {
-        stepX = 1;
-        tMaxX = (floor(topPos.x) + 1.0 - topPos.x) / rayDir.x;
+  let H_MAX = ${(MAX_BUILDING_H + 0.2).toFixed(2)};
+  let sMax = H_MAX / pitch;
+  let STEPS = 56;
+  let ds = sMax / f32(STEPS);
+  var prevTx = -99999;
+  var prevTy = -99999;
+  for (var i = 0; i < STEPS; i = i + 1) {
+    let s = sMax - (f32(i) + 0.5) * ds;
+    let z = s * pitch;
+    let q = vec2f(wx, wy) + view * s;
+    let qx = i32(floor(q.x));
+    let qy = i32(floor(q.y));
+    let h = tileHeight(qx, qy, ox, oy);
+    if (h > 0.0 && z <= h) {
+      let style = tileStyle(qx, qy, ox, oy);
+      if (qx == prevTx && qy == prevTy) {
+        col = rooftop(q, ox, oy, style); // descended onto this column's roof
       } else {
-        stepX = -1;
-        tMaxX = (floor(topPos.x) - topPos.x) / rayDir.x;
+        let nrm = normalize(vec2f(f32(prevTx - qx), f32(prevTy - qy)));
+        col = wallSideColor(nrm, q, z, h, style); // stepped into a side face
       }
-      tDeltaX = 1.0 / abs(rayDir.x);
+      hazeDist = length(q - vec2f(px, py));
+      break;
     }
-    if (abs(rayDir.y) > 0.0001) {
-      if (rayDir.y > 0.0) {
-        stepY = 1;
-        tMaxY = (floor(topPos.y) + 1.0 - topPos.y) / rayDir.y;
-      } else {
-        stepY = -1;
-        tMaxY = (floor(topPos.y) - topPos.y) / rayDir.y;
-      }
-      tDeltaY = 1.0 / abs(rayDir.y);
-    }
-    for (var i = 0; i < 10; i = i + 1) {
-      var d = 0.0;
-      var nrm = vec2f(0.0, 0.0);
-      if (tMaxX < tMaxY) {
-        d = tMaxX;
-        tMaxX = tMaxX + tDeltaX;
-        tx = tx + stepX;
-        nrm = vec2f(-f32(stepX), 0.0);
-      } else {
-        d = tMaxY;
-        tMaxY = tMaxY + tDeltaY;
-        ty = ty + stepY;
-        nrm = vec2f(0.0, -f32(stepY));
-      }
-      if (d > topDist) { break; }
-      if (isWall(tx, ty, ox, oy)) {
-        let hit = topPos + rayDir * d;
-        let z = WALL_H - d * pitch;
-        col = wallSideColor(nrm, hit, z, WALL_H);
-        hazeDist = length(hit - vec2f(px, py));
-        break;
-      }
-    }
+    prevTx = qx;
+    prevTy = qy;
   }
   col = mix(col, haze, smoothstep(15.0, 24.0, hazeDist));
 

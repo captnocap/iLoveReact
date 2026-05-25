@@ -135,3 +135,27 @@ Verified: `./scripts/ship scape` succeeds; 6s launch is shader- and exception-cl
 
 Next on doors: open-door LoS + walkable interiors (needs the perception system) —
 the "see through when open / sealed shell when closed" behaviour the design calls for.
+
+## Building variety — per-building height + facade style
+
+Status: complete.
+
+Every building shared one `WALL_H` and one palette. Now each carries an authored
+**height tier** (HEIGHTS in `citymap.ts`: trap houses squat at 1.6, residential
+mid, commercial towers up to 4.0 — a real skyline) and a **facade style** (0 pink
+stucco, 1 teal, 2 lilac, 3 grime), driving facade colour, window neon hue, and
+roof tone.
+
+- Tile values are now PACKED — bits 0..2 kind, 3..5 height tier, 6..8 style — so
+  no buffer-layout change. `cityTileAt` masks to the kind for game logic;
+  `cityPackedAt` feeds the renderer; both shaders mask `& 7` for the kind. Grid is
+  Int16 to hold the packed values.
+- The wall renderer was rewritten from a single-global-height projection trick into
+  a true variable-height heightfield march (`ground.wgsl.ts`): step from high above
+  down toward the fragment; first building column the ray dips into is the surface
+  — same column from above = rooftop, lateral step-in = side face. Window rows now
+  scale with building height (taller = more floors).
+
+Verified: `./scripts/ship scape` succeeds; 6s launch is shader- and exception-clean.
+NOT yet eyeballed in motion — the march is reasoned-correct but wants a visual pass
+(watch for stair-stepping on tall roofs or seams at building edges).

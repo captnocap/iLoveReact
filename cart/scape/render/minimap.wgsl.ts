@@ -8,7 +8,7 @@ const HDR: i32 = ${HEADER};
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
   let lx = i32(in.uv.x * f32(WIN));
   let ly = i32(in.uv.y * f32(WIN));
-  let kind = i32(D[HDR + ly * WIN + lx] + 0.5);
+  let kind = i32(D[HDR + ly * WIN + lx] + 0.5) & 7;
   var col = ${wgsl(TILE.road)};
   if (kind == 1) { col = ${wgsl(TILE.sidewalk)}; }
   if (kind == 2) { col = ${wgsl(NEON.pink)}; }

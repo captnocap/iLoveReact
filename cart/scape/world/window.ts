@@ -1,5 +1,5 @@
-import { cityPropsIn } from './citymap';
-import { type DecorKind, tileAt } from './tiles';
+import { cityPackedAt, cityPropsIn } from './citymap';
+import { type DecorKind } from './tiles';
 
 export const HEADER = 16;
 export const WIN = 56;
@@ -14,11 +14,13 @@ export interface Decor {
   tint: number;
 }
 
+// Streams the PACKED tile values (kind | tier<<3 | style<<6); the shaders mask
+// off the kind and unpack tier/style as needed.
 export function buildTileWindow(winOX: number, winOY: number): number[] {
   const tiles = new Array<number>(WIN * WIN);
   for (let ly = 0; ly < WIN; ly++) {
     for (let lx = 0; lx < WIN; lx++) {
-      tiles[ly * WIN + lx] = tileAt(winOX + lx, winOY + ly);
+      tiles[ly * WIN + lx] = cityPackedAt(winOX + lx, winOY + ly);
     }
   }
   return tiles;

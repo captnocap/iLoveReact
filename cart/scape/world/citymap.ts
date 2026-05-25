@@ -33,8 +33,19 @@ export interface Prop {
 
 // ── stamps ────────────────────────────────────────────────────────────────────
 type Rect = { x0: number; y0: number; x1: number; y1: number; t: T };
-// A building: wall border, interior floor, and a 1-tile door punched in an edge.
-type Bldg = { x0: number; y0: number; x1: number; y1: number; floor: T; door: [number, number] };
+// A building footprint, plus a height tier (index into HEIGHTS) and a facade
+// style (0..3) that drives its stucco colour, window hue, and roof tone.
+type Bldg = { x0: number; y0: number; x1: number; y1: number; floor: T; door: [number, number]; h: number; style: number };
+
+// Per-building extrusion heights, by tier. Trap houses squat low, residential
+// sits mid, commercial towers rise — a real skyline. Keep ≤ MAX_BUILDING_H.
+export const HEIGHTS = [1.6, 2.0, 2.4, 2.8, 3.2, 3.6, 4.0, 4.4];
+export const MAX_BUILDING_H = 4.4;
+
+// Tile values pack three fields so the shader needs no extra buffer:
+//   bits 0..2 = kind (0..7), bits 3..5 = height tier (0..7), bits 6..8 = style (0..7)
+export const KIND_MASK = 7;
+const packTile = (kind: T, tier: number, style: number) => kind | (tier << 3) | (style << 6);
 
 const FILL: T = T.Sidewalk; // base ground before anything is stamped
 
@@ -58,52 +69,61 @@ const RECTS: Rect[] = [
   { x0: 2, y0: 33, x1: 35, y1: 34, t: T.Sand }, // beach lip along the canal
 ];
 
-// Buildings (walls with an interior floor + a door onto the street).
+// Buildings. `h` = height tier (HEIGHTS), `style` = facade style (0 pink stucco,
+// 1 teal, 2 lilac, 3 grime). Heights step up from squat trap houses to tall towers.
 const BLDGS: Bldg[] = [
-  // residential — northwest block (pastel apartment stacks)
-  { x0: 2, y0: 2, x1: 10, y1: 8, floor: T.Sidewalk, door: [6, 8] },
+  // residential — northwest block (pastel apartment stacks), mid-rise
+  { x0: 2, y0: 2, x1: 10, y1: 8, floor: T.Sidewalk, door: [6, 8], h: 2, style: 0 },
   // residential — west block
-  { x0: 2, y0: 14, x1: 9, y1: 21, floor: T.Sidewalk, door: [9, 17] },
-  { x0: 2, y0: 23, x1: 9, y1: 29, floor: T.Sidewalk, door: [9, 26] },
-  // market strip — north-center storefronts
-  { x0: 16, y0: 2, x1: 23, y1: 8, floor: T.Sidewalk, door: [19, 8] },
-  { x0: 27, y0: 2, x1: 34, y1: 8, floor: T.Sidewalk, door: [30, 8] },
-  // commercial — northeast tower
-  { x0: 40, y0: 2, x1: 49, y1: 8, floor: T.Sidewalk, door: [44, 8] },
-  { x0: 40, y0: 14, x1: 49, y1: 21, floor: T.Sidewalk, door: [40, 17] },
-  { x0: 40, y0: 23, x1: 49, y1: 29, floor: T.Sidewalk, door: [40, 26] },
-  // trap houses — southeast grime (run-down sheds)
-  { x0: 41, y0: 35, x1: 45, y1: 40, floor: T.Grime, door: [43, 35] },
-  { x0: 46, y0: 35, x1: 49, y1: 40, floor: T.Grime, door: [47, 35] },
+  { x0: 2, y0: 14, x1: 9, y1: 21, floor: T.Sidewalk, door: [9, 17], h: 1, style: 1 },
+  { x0: 2, y0: 23, x1: 9, y1: 29, floor: T.Sidewalk, door: [9, 26], h: 2, style: 2 },
+  // market strip — north-center storefronts, a bit taller
+  { x0: 16, y0: 2, x1: 23, y1: 8, floor: T.Sidewalk, door: [19, 8], h: 3, style: 1 },
+  { x0: 27, y0: 2, x1: 34, y1: 8, floor: T.Sidewalk, door: [30, 8], h: 4, style: 0 },
+  // commercial — northeast towers, the tallest in the skyline
+  { x0: 40, y0: 2, x1: 49, y1: 8, floor: T.Sidewalk, door: [44, 8], h: 6, style: 2 },
+  { x0: 40, y0: 14, x1: 49, y1: 21, floor: T.Sidewalk, door: [40, 17], h: 5, style: 1 },
+  { x0: 40, y0: 23, x1: 49, y1: 29, floor: T.Sidewalk, door: [40, 26], h: 4, style: 0 },
+  // trap houses — southeast grime, squat and run-down
+  { x0: 41, y0: 35, x1: 45, y1: 40, floor: T.Grime, door: [43, 35], h: 0, style: 3 },
+  { x0: 46, y0: 35, x1: 49, y1: 40, floor: T.Grime, door: [47, 35], h: 1, style: 3 },
 ];
 
 // ── grid build (once) ─────────────────────────────────────────────────────────
-function buildGrid(): Int8Array {
-  const g = new Int8Array(CITY_W * CITY_H).fill(FILL);
-  const set = (x: number, y: number, t: T) => {
+// Int16 so each cell can hold the packed (kind | tier<<3 | style<<6) value.
+function buildGrid(): Int16Array {
+  const g = new Int16Array(CITY_W * CITY_H).fill(FILL);
+  const set = (x: number, y: number, v: number) => {
     if (x < 0 || y < 0 || x >= CITY_W || y >= CITY_H) return;
-    g[y * CITY_W + x] = t;
+    g[y * CITY_W + x] = v;
   };
   for (const r of RECTS) {
     for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) set(x, y, r.t);
   }
-  // Buildings are SOLID extruded volumes — the whole footprint is Wall, so the
-  // shader's wall raycast caps each block with one clean rooftop face and draws
-  // side faces only on the outer perimeter. Each building's door tile is then
-  // carved back out as a Door gap (a ground-level notch in the facade); the door
-  // leaf itself is a sprite whose open/closed state lives in systems/doors.ts.
-  // (The interior `floor` field is kept on the defs for the future enter-building
-  // system, which will carve walkable interiors and fade the roof on entry.)
+  // Buildings are SOLID extruded volumes — the whole footprint is Wall (packed
+  // with the building's height tier + style), so the shader's variable-height
+  // march caps each block with a rooftop and draws perimeter side faces. Each
+  // building's door tile is carved back out as a Door gap (a ground-level notch);
+  // the door leaf is a sprite whose state lives in systems/doors.ts. (The interior
+  // `floor` field is kept for the future enter-building system.)
   for (const b of BLDGS) {
-    for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) set(x, y, T.Wall);
-    set(b.door[0], b.door[1], T.Door);
+    const wall = packTile(T.Wall, b.h, b.style);
+    for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) set(x, y, wall);
+    set(b.door[0], b.door[1], packTile(T.Door, 0, b.style));
   }
   return g;
 }
 
 const GRID = buildGrid();
 
+/** Tile KIND (0..7) for game logic — masks off the packed tier/style bits. */
 export function cityTileAt(x: number, y: number): number {
+  if (x < 0 || y < 0 || x >= CITY_W || y >= CITY_H) return VOID;
+  return GRID[y * CITY_W + x] & KIND_MASK;
+}
+
+/** The full packed tile value (kind | tier<<3 | style<<6) — for the renderer. */
+export function cityPackedAt(x: number, y: number): number {
   if (x < 0 || y < 0 || x >= CITY_W || y >= CITY_H) return VOID;
   return GRID[y * CITY_W + x];
 }
