@@ -45,6 +45,8 @@ export function createInitialPlayerBody(tile: Tile, facing: number): Player {
     facing,
     health: 100,
     maxHealth: 100,
+    armor: 0,
+    maxArmor: 100,
     money: 320,
     simWalletId: 0,
     suspicion: zeroSuspicion(),
@@ -106,6 +108,14 @@ export function setHealth(state: ScapePlayerState, health: number): void {
 
 export function adjustHealth(state: ScapePlayerState, delta: number): void {
   setHealth(state, state.body.health + delta);
+}
+
+export function setArmor(state: ScapePlayerState, armor: number): void {
+  state.body.armor = clamp(Math.round(armor), 0, state.body.maxArmor);
+}
+
+export function adjustArmor(state: ScapePlayerState, delta: number): void {
+  setArmor(state, state.body.armor + delta);
 }
 
 export function adjustMoney(state: ScapePlayerState, delta: number): void {

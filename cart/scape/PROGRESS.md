@@ -193,3 +193,48 @@ roof tone.
 Verified: `./scripts/ship scape` succeeds; 6s launch is shader- and exception-clean.
 NOT yet eyeballed in motion — the march is reasoned-correct but wants a visual pass
 (watch for stair-stepping on tall roofs or seams at building edges).
+
+---
+
+# Session — 2026-05-25 (player interface — the GTA HUD pass)
+
+Status: complete, eyeballed by the user.
+
+Repainted the debug-style HUD into a real GTA III / Vice City **player interface**
+(neon-dusk repalette of the classic stacked readout), driven by reference art.
+
+- **`state/clock.ts`** (new) — the in-game clock. ~1 game-minute per real-second
+  (a day ≈ 24 real min), starts at dusk (20:00). Ticked in the world loop; the HUD
+  reads it as `HH:MM`. First consumer of the daily-time system the design calls for.
+- **Armor** added to the `Player` contract (`armor`/`maxArmor`) + `setArmor`/`adjustArmor`
+  mutators + a PlayerDebug row. Shown in the HUD only when > 0.
+- **`render/sdf.wgsl.ts`** (new) — the shared SDF helpers (`sdBox`/`sdCirc`/`shade`/
+  `over`) extracted from `ground.wgsl.ts` so the ground and the new icon shader can't
+  drift.
+- **`render/itemIcon.wgsl.ts`** (new) — renders the held item, centered, into the HUD
+  weapon box by REUSING the exact item SDF branches (`ITEM_SPRITE_WGSL`). The thing in
+  your hand is the thing in the corner — one source of truth. (ly maps box-top→most-
+  negative so the sprite is upright.)
+- **`render/Hud.tsx`** rewritten: LED clock (cyan, mono, hard drop-shadow — the
+  runtime has no textShadow, so glyphs are layered), zero-padded green money, inline
+  ♥ armor + ♥ health, a 6-star wanted row (notoriety→stars), the two-tone neon weapon
+  box (charges as a small LED count), a "◈ HIGH" pill, and a faint controls hint. The
+  old debug telemetry box is gone (dev info lives in PlayerDebug).
+- **Circular radar** — `minimap.wgsl.ts` masks the square buffer into a dial: outside
+  the circle returns a fully-transparent **premultiplied** pixel, so the effect-node
+  compositor (rects pipeline, `premultiplied_alpha_blending`) drops the square corners
+  and the city shows through. Container border frames the pink ring. Moved bottom-right.
+- **Removed the bottom POCKETS wheel** — the top-corner weapon box is the inventory
+  display now. `ui/Wheel.tsx` is left on disk (unused) for when weapon-cycling lands;
+  its click-exclusion zone was removed so that bottom-center is walkable again.
+- `state/world.ts` threads the clock, exposes `clock`, adds the `adjustArmor` action,
+  and adds click-exclusion zones for the new top-right cluster + bottom-right radar.
+
+Verified: `./scripts/ship scape` clean; 6s launch shader/exception-clean; user
+confirmed the look in-motion (clock/money/heart/weapon/radar all reading correctly).
+
+Open follow-ups:
+- No way to swap the in-hand item via UI anymore (POCKETS removed). Pickup auto-equips
+  the first item and `Q` drops; weapon-cycling (scroll / number keys) wants wiring into
+  the weapon box next.
+- Armor/health/money/clock are display-only — nothing damages armor or spends time yet.

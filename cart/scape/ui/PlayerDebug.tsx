@@ -68,6 +68,10 @@ export function PlayerDebug({ player, actions }: { player: Player; actions: Play
         <TinyButton label="-10" onPress={() => actions.adjustHealth(-10)} />
         <TinyButton label="+10" onPress={() => actions.adjustHealth(10)} />
       </Row>
+      <Row label="armor" value={`${player.armor}/${player.maxArmor}`}>
+        <TinyButton label="-25" onPress={() => actions.adjustArmor(-25)} />
+        <TinyButton label="+25" onPress={() => actions.adjustArmor(25)} />
+      </Row>
       <Row label="money" value={`$${player.money}`}>
         <TinyButton label="-100" onPress={() => actions.adjustMoney(-100)} />
         <TinyButton label="+100" onPress={() => actions.adjustMoney(100)} />

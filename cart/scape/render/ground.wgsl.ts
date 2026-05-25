@@ -2,6 +2,7 @@ import { TILE_PX } from '../world/projection';
 import { HEADER, WIN } from '../world/window';
 import { HEIGHTS, MAX_BUILDING_H } from '../world/citymap';
 import { ITEM_SPRITE_WGSL } from '../registries/items';
+import { SDF_HELPERS_WGSL } from './sdf.wgsl';
 import { HAZE, NEON, TILE, wgsl } from './palette';
 
 // Ground + windowed tile layer + SDF sprites + high-state post process.
@@ -151,18 +152,7 @@ fn baseColor(kind: i32, wx: f32, wy: f32, t: f32) -> vec3f {
   return ${wgsl(TILE.road)} + vec3f(grain, grain, grain) + refl * sheen * 0.08;
 }
 
-fn sdBox(p: vec2f, b: vec2f) -> f32 { let d = abs(p) - b; return length(max(d, vec2f(0.0))) + min(max(d.x, d.y), 0.0); }
-fn sdCirc(p: vec2f, rr: f32) -> f32 { return length(p) - rr; }
-fn shade(d: f32, fill: vec3f, line: vec3f) -> vec4f {
-  let a = 1.0 - smoothstep(0.0, 1.4, d);
-  let fr = smoothstep(-2.2, -0.4, d);
-  return vec4f(mix(fill, line, fr), a);
-}
-fn over(dst: vec4f, src: vec4f) -> vec4f {
-  let a = src.a + dst.a * (1.0 - src.a);
-  let rgb = (src.rgb * src.a + dst.rgb * dst.a * (1.0 - src.a)) / max(a, 0.0001);
-  return vec4f(rgb, a);
-}
+${SDF_HELPERS_WGSL}
 fn npcColor(i: i32) -> vec3f {
   if (i == 0) { return vec3f(0.78, 0.32, 0.40); }  // washed red
   if (i == 1) { return vec3f(0.30, 0.55, 0.62); }  // grimy teal

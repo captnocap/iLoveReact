@@ -224,6 +224,7 @@ export type Skill = 'combat' | 'stealth' | 'hacking' | 'trading' | 'social';
 export type Player = {
   tile: Tile; facing: number;
   health: number; maxHealth: number;     // fail meter #1
+  armor: number; maxArmor: number;       // soaks damage before health (GTA armor)
   money: number;
   simWalletId: Id;               // trades the same market as the NPCs
   /** The TRUE evidence you've generated (ground truth, some not yet discovered). */

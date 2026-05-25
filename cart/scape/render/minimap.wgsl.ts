@@ -24,6 +24,13 @@ const HDR: i32 = ${HEADER};
   let camy = ply - cos(yaw) * (2.4 / f32(WIN));
   if (distance(in.uv, vec2f(camx, camy)) * f32(WIN) < 0.7) { col = ${wgsl(NEON.cyan)}; }
   if (distance(in.uv, vec2f(plx, ply)) * f32(WIN) < 1.0) { col = vec3f(1.0, 1.0, 1.0); }
+  // Clip the square buffer into a round radar dial. Outside the circle returns a
+  // fully-transparent (premultiplied) pixel, so the effect-node compositor drops
+  // the square corners entirely and the container's pink ring frames a clean
+  // circle over the live scene — no black box.
+  let dc = distance(in.uv, vec2f(0.5, 0.5));
+  if (dc > 0.5) { return vec4f(0.0, 0.0, 0.0, 0.0); }
+  if (dc > 0.44) { col = mix(col, ${wgsl(NEON.pink)}, smoothstep(0.44, 0.5, dc)); }
   return vec4f(col, 1.0);
 }
 `;

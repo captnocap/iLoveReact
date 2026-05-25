@@ -10,7 +10,6 @@ import { useScapeWorld } from './state/world';
 import { ActionMenu } from './ui/ContextMenu';
 import { QuestChatPanel, useQuestChat } from './ui/Chat';
 import { PlayerDebug } from './ui/PlayerDebug';
-import { Wheel } from './ui/Wheel';
 
 export default function Scape() {
   const chat = useQuestChat();
@@ -41,18 +40,13 @@ export default function Scape() {
         <Effect key="ground" shader={GROUND_WGSL} data={frame.data} style={{ position: 'absolute', left: 0, top: 0, width: world.rect.width, height: world.rect.height }} />
         <Player key="player" cx={frame.playerCx} cy={frame.playerCy} rel={frame.playerRel} bob={frame.bob} />
         <Hud
-          px={world.sim.px}
-          py={world.sim.py}
-          deg={frame.deg}
-          spriteN={frame.spriteN}
-          pathLength={world.sim.path.length}
           player={world.player}
           inHand={world.inHand}
           data={frame.data}
           examineText={world.examineText}
+          clock={world.clock}
         />
         <PlayerDebug player={world.player} actions={world.playerActions} />
-        <Wheel slots={world.inventorySlots} inHand={world.inHand} actions={world.inventoryActions} />
         <ActionMenu menu={world.menu} onPick={world.runAction} onClose={world.closeMenu} />
         <QuestChatPanel chat={chat} />
       </Pressable>

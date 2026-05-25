@@ -6,6 +6,7 @@ import { buildDecorWindow, buildTileWindow, HALF, type Decor } from '../world/wi
 import { unproject, type Cam, type Rect } from '../world/projection';
 import type { EvidenceAxis, LifeState, Player, VisualSignature } from '../design';
 import {
+  adjustArmor,
   adjustHealth,
   adjustMoney,
   adjustSuspicionAxis,
@@ -17,6 +18,7 @@ import {
   setLifeState,
   type ScapePlayerState,
 } from './player';
+import { advanceClock, createClock, formatClock, type GameClock } from './clock';
 import {
   createInitialInventoryState,
   dropInHand,
@@ -84,6 +86,7 @@ export type ScapeWorld = {
   inventorySlots: InventorySlot[];
   inHand: InventorySlot | null;
   inventoryActions: InventoryActions;
+  clock: string;
   rect: Rect;
   cam: Cam;
   rectRef: MutableRefObject<Rect>;
@@ -103,6 +106,7 @@ export type ScapeWorld = {
 
 export type PlayerDebugActions = {
   adjustHealth: (delta: number) => void;
+  adjustArmor: (delta: number) => void;
   adjustMoney: (delta: number) => void;
   adjustSuspicionAxis: (axis: EvidenceAxis, delta: number) => void;
   setLifeState: (lifeState: LifeState) => void;
@@ -146,12 +150,14 @@ function useWorldLoop({
   entsRef,
   staticBlockers,
   sim,
+  clock,
   keys,
   force,
 }: {
   entsRef: MutableRefObject<Ent[]>;
   staticBlockers: Set<string>;
   sim: MutableRefObject<ScapePlayerState>;
+  clock: MutableRefObject<GameClock>;
   keys: MutableRefObject<KeyState>;
   force: Dispatch<SetStateAction<number>>;
 }): void {
@@ -165,6 +171,7 @@ function useWorldLoop({
       const now = G.performance?.now?.() ?? Date.now();
       const dt = Math.max(0.001, Math.min(0.05, (now - last) / 1000));
       last = now;
+      advanceClock(clock.current, dt);
       const s = sim.current;
       const k = keys.current;
       if (k.a) s.yaw -= ROT_SPEED * dt;
@@ -196,7 +203,7 @@ function useWorldLoop({
     };
     handle = sched(tick);
     return () => cancel(handle);
-  }, [entsRef, force, keys, sim, staticBlockers]);
+  }, [clock, entsRef, force, keys, sim, staticBlockers]);
 }
 
 export function useScapeWorld(chat: ChatGate): ScapeWorld {
@@ -209,6 +216,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1100, height: 720 });
   const keys = useRef<KeyState>({});
   const sim = useRef<ScapePlayerState>(createInitialPlayerState());
+  const clock = useRef<GameClock>(createClock());
   const inventory = useRef<InventoryState>(createInitialInventoryState());
   const [, force] = useState(0);
   const examineRef = useRef<{ text: string; until: number } | null>(null);
@@ -222,11 +230,15 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
   const liveBlockers = () => new Set<string>([...staticBlockers, ...closedDoorBlockers(doorsRef.current)]);
 
   useSceneControls(keys, sim, inventory, refresh, chat.chatOpenRef);
-  useWorldLoop({ entsRef, staticBlockers, sim, keys, force });
+  useWorldLoop({ entsRef, staticBlockers, sim, clock, keys, force });
 
   const playerActions: PlayerDebugActions = {
     adjustHealth: (delta) => {
       adjustHealth(sim.current, delta);
+      refresh();
+    },
+    adjustArmor: (delta) => {
+      adjustArmor(sim.current, delta);
       refresh();
     },
     adjustMoney: (delta) => {
@@ -275,8 +287,9 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
     const sx = Number(payload?.x ?? 0) - r.x;
     const sy = Number(payload?.y ?? 0) - r.y;
     if (sx < 0 || sy < 0 || sx > r.width || sy > r.height) return;
-    if (sx >= 12 && sx <= 286 && sy >= r.height - 260 && sy <= r.height - 12) return;
-    if (sx >= 310 && sx <= 790 && sy >= r.height - 112 && sy <= r.height - 12) return;
+    if (sx >= 12 && sx <= 286 && sy >= r.height - 260 && sy <= r.height - 12) return; // PlayerDebug panel
+    if (sx >= r.width - 320 && sy <= 172) return; // top-right stats + weapon box
+    if (sx >= r.width - 180 && sy >= r.height - 180) return; // bottom-right radar
     const s = sim.current;
     const world = unproject(sx, sy, s, r);
     const nearbyItem = nearestWorldItem(inventory.current.worldItems, world.x, world.y, 0.75);
@@ -459,6 +472,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
     inventorySlots: inventorySlots(s.body, inventory.current),
     inHand: inHandSlot(s.body, inventory.current),
     inventoryActions,
+    clock: formatClock(clock.current),
     rect: r,
     cam,
     rectRef,

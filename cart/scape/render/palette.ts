@@ -56,4 +56,12 @@ export const UI = {
   high: '#ff2d95',
   userBubble: '#1a1030',
   npcBubble: '#1c0a22',
+  // ── HUD readouts (the GTA chrome) ──
+  money: '#5fe08c', // spring-green LED cash
+  health: '#ff5ea0', // magenta heart
+  armor: '#8a6cff', // purple armor heart
+  ledShadow: '#070310', // hard drop-shadow behind every LED glyph
+  star: '#18e0d8', // a lit wanted star
+  starDim: '#3a2540', // an unlit wanted star
+  surround: '#0b0618', // dial / icon-box ground (matches the shader fills below)
 } as const;
