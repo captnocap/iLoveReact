@@ -1,0 +1,6 @@
+{
+  "name": "Scape3D",
+  "description": "A real-3D fork of Scape. Same click-to-move world, systems, and A/D-orbit / W/S-tilt camera — but the ground, buildings, props, and people are meshes in one Scene3D, with boxy low-poly player and NPC models. Picking is a ground-plane raycast that inverts the render camera.",
+  "width": 1100,
+  "height": 720
+}
