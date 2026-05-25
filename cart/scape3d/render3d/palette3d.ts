@@ -43,6 +43,14 @@ export const buildingRoof = (style: number) => hex(scale(FACADE[style] ?? FACADE
 // Lit window strips glow in the style's complementary neon.
 export const windowGlow = (style: number) =>
   hex([NEON.cyan, NEON.pink, NEON.orange, NEON.purple][style] ?? NEON.cyan);
+// Neon rim cage colour per style (the crisp edge outline the 2D shader had).
+export const neonRim = (style: number) =>
+  hex([NEON.pink, NEON.cyan, NEON.purple, NEON.orange][style] ?? NEON.pink);
+
+// Ground texturing.
+export const PLAZA_A = hex(scale(TILE.plaza, 1.7)); // checker square A
+export const PLAZA_B = hex(scale(TILE.plaza, 2.9)); // brighter checker square B
+export const ROAD_LINE = hex(TILE.roadLine);
 
 // Props.
 export const PALM_TRUNK = '#3a2c1e';
