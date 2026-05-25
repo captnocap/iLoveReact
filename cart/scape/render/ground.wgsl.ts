@@ -217,6 +217,11 @@ fn sprite(kind: i32, lx: f32, ly: f32, tint: i32) -> vec4f {
       c = over(c, shade(sdBox(vec2f(lx, ly + 22.0), vec2f(11.0, 22.0)), vec3f(0.03, 0.02, 0.05), vec3f(0.06, 0.05, 0.09)));
       c = over(c, shade(sdBox(vec2f(lx - 13.0, ly + 22.0), vec2f(2.5, 22.0)), vec3f(0.13, 0.10, 0.16), ${wgsl(NEON.pink)}));
     }
+  } else if (kind == 13) {
+    // a downed body — prone torso + slumped head, dull, a dark pool beneath
+    c = over(c, vec4f(0.06, 0.02, 0.03, (1.0 - smoothstep(0.0, 16.0, sdCirc(vec2f(lx, (ly + 5.0) * 2.4), 13.0))) * 0.5));
+    c = over(c, shade(sdBox(vec2f(lx, ly + 6.0), vec2f(11.0, 4.0)), vec3f(0.30, 0.17, 0.19), vec3f(0.12, 0.07, 0.08)));
+    c = over(c, shade(sdCirc(vec2f(lx - 12.0, ly + 6.0), 4.0), vec3f(0.42, 0.31, 0.29), vec3f(0.18, 0.12, 0.12)));
   } else if (kind == 6) {
     c = over(c, shade(abs(lx) + abs(ly) - 4.0, ${wgsl(NEON.pink)}, vec3f(1.0, 1.0, 1.0)));
   } else if (kind == 7) {

@@ -13,6 +13,7 @@ export const SK_NPC = 4;
 export const SK_DOOR = 5;
 export const SK_DOT = 6;
 export const SK_TARGET = 7;
+export const SK_BODY = 13; // a downed NPC (after the item kinds 8..12)
 
 export function kindCode(k: string): number {
   return k === 'palm'
@@ -90,7 +91,10 @@ export function createScapeFrame({
     const p = project(sim.path[i].x, sim.path[i].y, cam, rect);
     spriteBuf.push(p.x, p.y, i === sim.path.length - 1 ? SK_TARGET : SK_DOT, 0, 1 - hazeOpacity(p.depth));
   }
-  for (const o of visible) spriteBuf.push(o.p.x, o.p.y, o.e.spriteKind ?? kindCode(o.e.kind), o.e.tint ?? 0, o.op);
+  for (const o of visible) {
+    const sk = o.e.dead ? SK_BODY : (o.e.spriteKind ?? kindCode(o.e.kind));
+    spriteBuf.push(o.p.x, o.p.y, sk, o.e.tint ?? 0, o.op);
+  }
   const spriteN = spriteBuf.length / 5;
 
   const head = new Array<number>(HEADER).fill(0);

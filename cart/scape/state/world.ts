@@ -55,6 +55,7 @@ export interface Ent {
   blocks: boolean;
   quest?: boolean;
   name?: string;
+  dead?: boolean; // downed by an attack — stops wandering, renders as a body
 }
 
 export function makeEntities(): Ent[] {
@@ -180,7 +181,7 @@ function useWorldLoop({
       if (k.s) s.pitch = Math.max(0.40, s.pitch - PITCH_SPEED * dt);
       advancePlayer(s, dt);
       for (const e of entsRef.current) {
-        if (e.kind !== 'npc' || e.quest) continue;
+        if (e.kind !== 'npc' || e.quest || e.dead) continue;
         const dx = e.tx - e.x;
         const dy = e.ty - e.y;
         const d = Math.hypot(dx, dy);
@@ -485,6 +486,10 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       case 'slash': {
         if (t.kind !== 'npc') break;
         const e = t.ent;
+        if (e.dead) {
+          setEx(`${e.name ?? 'They'} are already down. You stand over the body, breathing hard.`);
+          break;
+        }
         const pTrue = picked?.chance ?? 0;
         const hit = Math.random() < pTrue;
         // a shot spends a round
@@ -492,18 +497,21 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
         if (slot && slot.module.type.ranged && slot.instance.charges != null) {
           slot.instance.charges = Math.max(0, slot.instance.charges - 1);
         }
-        // the target reacts — bolts away from the player (a witnessed, panicked flee)
-        if (!e.quest) {
+        if (hit) {
+          // down them: they stop where they fall and render as a body
+          e.dead = true;
+          e.tx = e.x;
+          e.ty = e.y;
+          cur.body.career.kills += 1;
+          setEx(`Hit. ${e.name ?? 'They'} fold up — ugly, twitchy, over in a second.`);
+          adjustSuspicionAxis(cur, 'visual', 12);
+        } else {
+          // a witnessed botch: the target bolts away from the player, heat spikes
           const away = nearestWalkable(Math.round(e.x + (e.x - cur.px)), Math.round(e.y + (e.y - cur.py)), liveBlockers());
           if (away) {
             e.tx = away.x + 0.5;
             e.ty = away.y + 0.5;
           }
-        }
-        if (hit) {
-          setEx(`Hit. ${e.name ?? 'They'} fold up — ugly, twitchy, over in a second.`);
-          adjustSuspicionAxis(cur, 'visual', 12);
-        } else {
           setEx(`You whiff. ${e.name ?? 'They'} bolt screaming — and now the whole block saw you.`);
           adjustSuspicionAxis(cur, 'visual', 20);
         }
