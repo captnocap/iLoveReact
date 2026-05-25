@@ -30,11 +30,28 @@ fn neonHue(t: i32) -> vec3f {
   if (t == 3) { return ${wgsl(NEON.orange)}; }
   return ${wgsl(NEON.pink)};
 }
-fn wallTopColor(hit: vec2f) -> vec3f {
+fn rooftop(hit: vec2f, ox: i32, oy: i32) -> vec3f {
+  let tx = i32(floor(hit.x));
+  let ty = i32(floor(hit.y));
   let fx = fract(hit.x);
   let fy = fract(hit.y);
-  let edge = min(min(fx, 1.0 - fx), min(fy, 1.0 - fy));
-  return ${wgsl(TILE.wallTop)} * mix(0.72, 1.0, smoothstep(0.0, 0.07, edge));
+  // tar-and-gravel surface
+  let g = snoise(hit.x * 4.0, hit.y * 4.0) * 0.02;
+  var col = vec3f(0.11 + g, 0.10 + g, 0.14 + g);
+  // parapet: a bright neon rim, but only on the building's OUTER edges (where the
+  // neighbouring tile is not also a wall) — so the roof reads as one capped block.
+  let edgeW = select(0.0, 1.0 - smoothstep(0.0, 0.12, fx), !isWall(tx - 1, ty, ox, oy));
+  let edgeE = select(0.0, 1.0 - smoothstep(0.0, 0.12, 1.0 - fx), !isWall(tx + 1, ty, ox, oy));
+  let edgeN = select(0.0, 1.0 - smoothstep(0.0, 0.12, fy), !isWall(tx, ty - 1, ox, oy));
+  let edgeS = select(0.0, 1.0 - smoothstep(0.0, 0.12, 1.0 - fy), !isWall(tx, ty + 1, ox, oy));
+  let para = max(max(edgeW, edgeE), max(edgeN, edgeS));
+  col = mix(col, ${wgsl(NEON.pink)} * 0.5 + vec3f(0.16, 0.15, 0.20), para * 0.7);
+  // a hashed AC unit / vent block on roughly a third of the roof tiles
+  let h = fract(sin(f32(tx) * 12.9898 + f32(ty) * 78.233) * 43758.5453);
+  if (h > 0.7 && abs(fx - 0.5) < 0.18 && abs(fy - 0.5) < 0.15) {
+    col = vec3f(0.18, 0.17, 0.21);
+  }
+  return col;
 }
 fn wallSideColor(nrm: vec2f, hit: vec2f, z: f32, wallH: f32) -> vec3f {
   let ndl = clamp(dot(nrm, vec2f(0.42, -0.91)) * 0.5 + 0.5, 0.0, 1.0);
@@ -211,7 +228,7 @@ ${ITEM_SPRITE_WGSL}
   var wallDone = false;
 
   if (isWall(tx, ty, ox, oy)) {
-    col = wallTopColor(topPos);
+    col = rooftop(topPos, ox, oy);
     hazeDist = length(topPos - vec2f(px, py));
     wallDone = true;
   }

@@ -86,14 +86,13 @@ function buildGrid(): Int8Array {
   for (const r of RECTS) {
     for (let y = r.y0; y <= r.y1; y++) for (let x = r.x0; x <= r.x1; x++) set(x, y, r.t);
   }
+  // Buildings are SOLID extruded volumes — the whole footprint is Wall, so the
+  // shader's wall raycast caps each block with one clean rooftop face and draws
+  // side faces only on the outer perimeter. (The interior `floor`/`door` fields
+  // are kept on the defs for the future enter-building system, which will carve
+  // walkable interiors and fade the roof when the player steps inside.)
   for (const b of BLDGS) {
-    for (let y = b.y0; y <= b.y1; y++) {
-      for (let x = b.x0; x <= b.x1; x++) {
-        const edge = x === b.x0 || x === b.x1 || y === b.y0 || y === b.y1;
-        set(x, y, edge ? T.Wall : b.floor);
-      }
-    }
-    set(b.door[0], b.door[1], b.floor); // punch the door
+    for (let y = b.y0; y <= b.y1; y++) for (let x = b.x0; x <= b.x1; x++) set(x, y, T.Wall);
   }
   return g;
 }

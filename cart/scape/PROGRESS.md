@@ -86,3 +86,20 @@ Verification:
 
 - `./scripts/ship scape` succeeded → `zig-out/bin/scape`.
 - `timeout 6s ./zig-out/bin/scape` launched clean — no shader-creation errors.
+
+### Solid buildings + rooftops
+
+Buildings were hollow open-top wall rings: the back wall's raised top projected
+forward over the courtyard and front wall, and the player billboard overlapped it
+— which read as "standing on the wall." Made building footprints SOLID Wall, so
+the existing wall raycast caps each block with one clean rooftop face and draws
+side faces only on the outer perimeter; the player now clearly stands in front of
+the base. The wall-top is now a real rooftop (`rooftop()` in `ground.wgsl.ts`):
+tar surface, a neon parapet drawn only on the building's outer edges, and hashed
+AC-unit blocks. Interior `floor`/`door` defs are retained for the future
+enter-building system (carve interiors + fade the roof on entry).
+
+Known follow-up: the player is a screen-centered React overlay, so it still draws
+over buildings that are *behind* it (no depth occlusion yet); and all blocks share
+one height (`WALL_H`) — per-building height variation needs a height field in the
+tile data.
