@@ -85,6 +85,21 @@ const IPC_PRIVATE: c_int = 0;
 const IPC_RMID: c_int = 0;
 const IPC_CREAT: c_int = 512;
 
+// XErrorEvent — passed to our protocol-error handler so we can log and continue
+// instead of letting Xlib's default handler call exit(). Layout matches Xlib.
+const XErrorEvent = extern struct {
+    type: c_int,
+    display: ?*Display,
+    serial: c_ulong,
+    error_code: u8,
+    request_code: u8,
+    minor_code: u8,
+    resourceid: XID,
+};
+
+const XErrorHandlerFn = *const fn (?*Display, ?*XErrorEvent) callconv(.c) c_int;
+const XIOErrorHandlerFn = *const fn (?*Display) callconv(.c) c_int;
+
 // X11 function pointers (loaded at runtime via dlopen)
 pub const X11Fns = struct {
     XOpenDisplay: *const fn (?[*:0]const u8) callconv(.c) ?*Display = undefined,
@@ -99,6 +114,10 @@ pub const X11Fns = struct {
     XFlush: *const fn (*Display) callconv(.c) c_int = undefined,
     XWarpPointer: *const fn (*Display, XID, XID, c_int, c_int, c_uint, c_uint, c_int, c_int) callconv(.c) c_int = undefined,
     XKeysymToKeycode: *const fn (*Display, c_ulong) callconv(.c) u8 = undefined,
+    // Error handlers — install once so a single feed's X protocol/IO error
+    // can't take down the whole process via Xlib's default exit() handlers.
+    XSetErrorHandler: *const fn (?XErrorHandlerFn) callconv(.c) ?*anyopaque = undefined,
+    XSetIOErrorHandler: *const fn (?XIOErrorHandlerFn) callconv(.c) ?*anyopaque = undefined,
 };
 
 // XTest extension function pointers (for synthetic input — no subprocess overhead)
@@ -263,7 +282,7 @@ const Backend = enum {
 
 pub const FeedStatus = enum { starting, connecting, ready, @"error", stopped };
 
-pub const MAX_FEEDS = 8;
+pub const MAX_FEEDS = 64; // perf-lab headroom: pile on capture surfaces til the GPU/CPU wall, not an array cap
 const UNLOAD_DEBOUNCE_FRAMES = 180; // ~3s at 60fps
 
 pub const Feed = struct {
@@ -460,6 +479,29 @@ extern fn dlsym(handle: *anyopaque, symbol: [*:0]const u8) ?*anyopaque;
 extern fn dlclose(handle: *anyopaque) c_int;
 const RTLD_LAZY: c_int = 0x00001;
 
+// Non-fatal X protocol error handler. Xlib's default prints the error and
+// calls exit() — fatal for a wall of capture feeds, where one feed's
+// XShmGetImage BadMatch (e.g. transient geometry mismatch) would otherwise
+// kill every other terminal. Returning here makes the offending call fail
+// (returns 0) instead, so captureXShm just bails for that frame and retries.
+fn xErrorHandler(dpy: ?*Display, ev: ?*XErrorEvent) callconv(.c) c_int {
+    _ = dpy;
+    if (ev) |e| {
+        log.print("[render] non-fatal X error: code={d} request={d} minor={d}\n", .{ e.error_code, e.request_code, e.minor_code });
+    }
+    return 0;
+}
+
+// I/O error handler — fires when a feed's Xvfb connection breaks. The legacy
+// contract still exits on most libX11 builds, so this is best-effort logging;
+// the real defense against a dead Xvfb is the liveness check in update()
+// (we stop capturing from a feed whose Xvfb child has exited).
+fn xIOErrorHandler(dpy: ?*Display) callconv(.c) c_int {
+    _ = dpy;
+    log.print("[render] X I/O error (display connection broken) — feed will be retired\n", .{});
+    return 0;
+}
+
 fn loadSym(comptime T: type, handle: *anyopaque, name: [*:0]const u8) ?T {
     const ptr = dlsym(handle, name) orelse return null;
     return @ptrCast(@alignCast(ptr));
@@ -498,6 +540,19 @@ fn initXShm() bool {
     x11.XFlush = loadSym(@TypeOf(x11.XFlush), x11_lib.?, "XFlush") orelse return false;
     x11.XWarpPointer = loadSym(@TypeOf(x11.XWarpPointer), x11_lib.?, "XWarpPointer") orelse return false;
     x11.XKeysymToKeycode = loadSym(@TypeOf(x11.XKeysymToKeycode), x11_lib.?, "XKeysymToKeycode") orelse return false;
+
+    // Install non-fatal error handlers BEFORE opening any display, so no X
+    // protocol error can ever reach Xlib's default exit() handler. Global to
+    // the process (not per-display), so set once. Optional — if a build lacks
+    // the symbol we just keep Xlib's default rather than fail capture init.
+    if (loadSym(@TypeOf(x11.XSetErrorHandler), x11_lib.?, "XSetErrorHandler")) |f| {
+        x11.XSetErrorHandler = f;
+        _ = x11.XSetErrorHandler(&xErrorHandler);
+    }
+    if (loadSym(@TypeOf(x11.XSetIOErrorHandler), x11_lib.?, "XSetIOErrorHandler")) |f| {
+        x11.XSetIOErrorHandler = f;
+        _ = x11.XSetIOErrorHandler(&xIOErrorHandler);
+    }
 
     // XTest extension (for synthetic input — zero subprocess overhead)
     xtst_lib = dlopen("libXtst.so.6", RTLD_LAZY) orelse dlopen("libXtst.so", RTLD_LAZY);
@@ -957,6 +1012,30 @@ fn findFreeDisplay() ?u32 {
     return null;
 }
 
+// Cached check: is `setpriv` (util-linux) available? We launch Xvfb under
+// `setpriv --pdeathsig KILL` so the kernel SIGKILLs each Xvfb the moment our
+// process dies — by ANY cause: clean exit, panic, segfault, even SIGKILL,
+// where no userspace cleanup handler could ever run. Killing the Xvfb cascades:
+// its kitty loses the X connection and exits, which SIGHUPs the app (claude)
+// under it. This is the keystone that makes <Render> leak-proof on crash.
+// setpriv execs in place (same PID), so feed.x_server_child bookkeeping —
+// kill/wait/SIGSTOP — keeps targeting Xvfb unchanged.
+var setpriv_checked: bool = false;
+var setpriv_ok: bool = false;
+fn hasSetpriv() bool {
+    if (setpriv_checked) return setpriv_ok;
+    setpriv_checked = true;
+    setpriv_ok = blk: {
+        std.fs.accessAbsolute("/usr/bin/setpriv", .{}) catch {
+            std.fs.accessAbsolute("/bin/setpriv", .{}) catch break :blk false;
+            break :blk true;
+        };
+        break :blk true;
+    };
+    if (!setpriv_ok) log.info(.render, "setpriv not found — Xvfb won't auto-die on crash; orphans possible", .{});
+    return setpriv_ok;
+}
+
 fn spawnXvfb(display_num: u32, w: u32, h: u32) ?std.process.Child {
     var disp_buf: [8]u8 = undefined;
     const disp_str = std.fmt.bufPrint(&disp_buf, ":{d}", .{display_num}) catch return null;
@@ -964,8 +1043,12 @@ fn spawnXvfb(display_num: u32, w: u32, h: u32) ?std.process.Child {
     var screen_buf: [32]u8 = undefined;
     const screen_str = std.fmt.bufPrint(&screen_buf, "{d}x{d}x24", .{ w, h }) catch return null;
 
-    const argv = [_][]const u8{ "Xvfb", disp_str, "-screen", "0", screen_str };
-    var child = std.process.Child.init(&argv, page_alloc);
+    // Prefer launching Xvfb under setpriv --pdeathsig KILL (parent-death =
+    // auto-SIGKILL). Fall back to a bare spawn if setpriv is unavailable.
+    const argv_guarded = [_][]const u8{ "setpriv", "--pdeathsig", "KILL", "--", "Xvfb", disp_str, "-screen", "0", screen_str };
+    const argv_bare = [_][]const u8{ "Xvfb", disp_str, "-screen", "0", screen_str };
+
+    var child = std.process.Child.init(if (hasSetpriv()) &argv_guarded else &argv_bare, page_alloc);
     child.stdout_behavior = .Ignore;
     child.stderr_behavior = .Ignore;
     child.stdin_behavior = .Ignore;
@@ -1127,6 +1210,58 @@ fn acquireFeedSlot() ?*Feed {
     return f;
 }
 
+// ── OOM guard ────────────────────────────────────────────────────────────
+// Each display/app:/vm: feed spawns a detached Xvfb + app (kitty, often
+// claude — hundreds of MB). An unbounded wall exhausts RAM and thrashes swap
+// into a desktop lockup. We refuse to spawn a new heavy feed once free memory
+// would drop below a reserve floor, so <Render> can never OOM the machine.
+//   RENDER_MEM_RESERVE_MB  — hard floor of free RAM to keep (default 2048)
+//   RENDER_MEM_PER_FEED_MB — est. cost reserved per in-flight feed (default 600)
+fn availableMemMb() u64 {
+    var f = std.fs.openFileAbsolute("/proc/meminfo", .{}) catch return 0;
+    defer f.close();
+    var buf: [4096]u8 = undefined;
+    const n = f.read(&buf) catch return 0;
+    const txt = buf[0..n];
+    const key = "MemAvailable:";
+    const idx = std.mem.indexOf(u8, txt, key) orelse return 0;
+    var i: usize = idx + key.len;
+    while (i < txt.len and (txt[i] == ' ' or txt[i] == '\t')) i += 1;
+    var kb: u64 = 0;
+    while (i < txt.len and txt[i] >= '0' and txt[i] <= '9') : (i += 1) kb = kb * 10 + (txt[i] - '0');
+    return kb / 1024; // MiB
+}
+
+fn envU64(name: [*:0]const u8, default: u64) u64 {
+    const v = std.posix.getenv(std.mem.span(name)) orelse return default;
+    return std.fmt.parseInt(u64, v, 10) catch default;
+}
+
+// Feeds spawned but not yet at steady-state RSS (claude keeps growing for a few
+// seconds after launch). Reserve budget for them so a rapid burst of adds can't
+// overshoot before their memory shows up in MemAvailable.
+fn unsettledFeedCount() u64 {
+    var n: u64 = 0;
+    for (feeds[0..feed_count]) |*f| {
+        if (f.status == .stopped) continue;
+        if (f.backend == .display_xshm or f.backend == .vnc) {
+            if (f.status == .starting) n += 1;
+        }
+    }
+    return n;
+}
+
+/// Returns true if there's enough free RAM to safely spawn one more heavy feed.
+/// Exported so the cart can soft-guard the UI with the same policy the host enforces.
+pub fn memoryHeadroomOk() bool {
+    const avail = availableMemMb();
+    if (avail == 0) return true; // can't read meminfo → don't block
+    const reserve = envU64("RENDER_MEM_RESERVE_MB", 2048);
+    const per_feed = envU64("RENDER_MEM_PER_FEED_MB", 600);
+    const required = reserve + (unsettledFeedCount() + 1) * per_feed;
+    return avail >= required;
+}
+
 fn createFeed(src: []const u8, node_w: f32, node_h: f32) ?*Feed {
     // In headless/snapshot mode (set by scripts/ship for autotest runs)
     // skip subprocess spawning entirely. Spawning qemu/Xvfb/kitty here
@@ -1134,6 +1269,15 @@ fn createFeed(src: []const u8, node_w: f32, node_h: f32) ?*Feed {
     // script's flock fd, blocking every subsequent build until reaped.
     if (std.posix.getenv("ZIGOS_HEADLESS")) |v| {
         if (v.len > 0 and v[0] != '0') return null;
+    }
+
+    // OOM guard: only the process-spawning source types are heavy.
+    const probe = parseSource(src);
+    if (probe.source_type == .display or probe.source_type == .vm) {
+        if (!memoryHeadroomOk()) {
+            log.info(.render, "OOM guard: refusing new feed — {d}MB free below reserve+per-feed budget", .{availableMemMb()});
+            return null;
+        }
     }
 
     const feed = acquireFeedSlot() orelse return null;
@@ -1377,6 +1521,24 @@ pub fn update() void {
         if (feed.suspended) continue;
         switch (feed.status) {
             .ready => {
+                // Liveness guard: if a virtual-display feed's Xvfb has exited,
+                // its X connection is dead — capturing from it would trip an
+                // Xlib I/O error (the legacy handler still exits on most
+                // builds). Reap it (WNOHANG) and retire the feed instead of
+                // ever issuing XShmGetImage against a broken connection.
+                if (feed.backend == .display_xshm) {
+                    if (feed.x_server_child) |child| {
+                        const r = std.posix.waitpid(child.id, 1); // WNOHANG
+                        if (r.pid == child.id) {
+                            log.info(.render, "Xvfb :{?d} exited — retiring feed", .{feed.display_num});
+                            feed.x_server_child = null; // already reaped; don't double-wait
+                            feed.deinit();
+                            feed.active = false;
+                            continue;
+                        }
+                    }
+                }
+
                 switch (feed.backend) {
                     .xshm, .display_xshm => _ = captureXShm(feed),
                     .ffmpeg => updateFFmpeg(feed),

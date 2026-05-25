@@ -30,6 +30,17 @@ export interface CompileResult {
   /** Names bound into the sandbox at compile time — useful for the
    *  library UI to show the user "what's available right now". */
   bindings: string[];
+  /** User-code scheduling calls captured during compile. This feeds the
+   *  timeline UI; audio remains the source of truth for playback. */
+  events: TimelineEvent[];
+}
+
+export interface TimelineEvent {
+  kind: 'pattern' | 'media' | 'section';
+  track: number;
+  start: number;
+  end: number;
+  label: string;
 }
 
 export function compileAndRun(text: string, ctx: CompileContext): CompileResult {
@@ -44,14 +55,40 @@ export function compileAndRun(text: string, ctx: CompileContext): CompileResult 
   // ReferenceError when they reference an unloaded id, which is the
   // clearer signal.
   const sampleBindings: Record<string, number> = {};
+  const soundLabels = new Map<unknown, string>([
+    [AUDIO_SOUND.kick, 'kick'],
+    [AUDIO_SOUND.snare, 'snare'],
+    [AUDIO_SOUND.hat, 'hat'],
+    [AUDIO_SOUND.bass, 'bass'],
+    [AUDIO_SOUND.lead, 'lead'],
+  ]);
   for (const s of samples) {
     try {
       const handle = audio.loadSound(s.path);
-      if (handle > 0) sampleBindings[s.id] = handle;
+      if (handle > 0) {
+        sampleBindings[s.id] = handle;
+        soundLabels.set(handle, s.id);
+      }
     } catch {
       // skip; the user will see the missing-id ReferenceError at compile
     }
   }
+  const events: TimelineEvent[] = [];
+
+  const record = (event: TimelineEvent) => {
+    if (!Number.isFinite(event.track) || !Number.isFinite(event.start) || !Number.isFinite(event.end)) return;
+    events.push({
+      ...event,
+      track: Math.max(0, Math.floor(event.track)),
+      start: Math.max(1, event.start),
+      end: Math.max(event.start + 0.25, event.end),
+    });
+  };
+
+  const soundLabel = (sound: unknown): string => {
+    if (Array.isArray(sound)) return sound.map(soundLabel).join('+');
+    return soundLabels.get(sound) ?? 'sound';
+  };
 
   // Sandbox surface. The EarSketch idiom is global-flat: every entry
   // here becomes a top-level binding in the user's code via
@@ -66,20 +103,32 @@ export function compileAndRun(text: string, ctx: CompileContext): CompileResult 
     setPlayhead: (m: number) => audio.setPlayhead(m),
 
     // Patterns
-    makeBeat: (sound: AudioSound, track: number, start: number, beat: string, steps = 16) =>
-      audio.makeBeat(sound, track, start, beat, steps),
-    makePattern: (sound: AudioSound, track: number, start: number, pattern: string, steps = 16) =>
-      audio.makePattern(sound, track, start, pattern, steps),
-    makeBeatSlice: (sound: number, track: number, start: number, beat: string, slices: number[], steps = 16) =>
-      audio.makeBeatSlice(sound, track, start, beat, slices, steps),
+    makeBeat: (sound: AudioSound, track: number, start: number, beat: string, steps = 16) => {
+      record({ kind: 'pattern', track, start, end: start + Math.max(1, beat.length / Math.max(1, steps)), label: soundLabel(sound) });
+      return audio.makeBeat(sound, track, start, beat, steps);
+    },
+    makePattern: (sound: AudioSound, track: number, start: number, pattern: string, steps = 16) => {
+      record({ kind: 'pattern', track, start, end: start + Math.max(1, pattern.length / Math.max(1, steps)), label: soundLabel(sound) });
+      return audio.makePattern(sound, track, start, pattern, steps);
+    },
+    makeBeatSlice: (sound: number, track: number, start: number, beat: string, slices: number[], steps = 16) => {
+      record({ kind: 'pattern', track, start, end: start + Math.max(1, beat.length / Math.max(1, steps)), label: `${soundLabel(sound)} slice` });
+      return audio.makeBeatSlice(sound, track, start, beat, slices, steps);
+    },
 
     // Media
-    insertMedia: (sound: number, track: number, start: number) =>
-      audio.insertMedia(sound, track, start),
-    fitMedia: (sound: number, track: number, start: number, end: number) =>
-      audio.fitMedia(sound, track, start, end),
-    insertMediaSection: (sound: number, track: number, start: number, sliceStart: number, sliceEnd: number) =>
-      audio.insertMediaSection(sound, track, start, sliceStart, sliceEnd),
+    insertMedia: (sound: number, track: number, start: number) => {
+      record({ kind: 'media', track, start, end: start + Math.max(0.25, audio.dur(sound) || 1), label: soundLabel(sound) });
+      return audio.insertMedia(sound, track, start);
+    },
+    fitMedia: (sound: number, track: number, start: number, end: number) => {
+      record({ kind: 'media', track, start, end, label: soundLabel(sound) });
+      return audio.fitMedia(sound, track, start, end);
+    },
+    insertMediaSection: (sound: number, track: number, start: number, sliceStart: number, sliceEnd: number) => {
+      record({ kind: 'section', track, start, end: start + Math.max(0.25, sliceEnd - sliceStart), label: soundLabel(sound) });
+      return audio.insertMediaSection(sound, track, start, sliceStart, sliceEnd);
+    },
 
     // Sample handles
     loadSound: (path: string) => audio.loadSound(path),
@@ -125,10 +174,10 @@ export function compileAndRun(text: string, ctx: CompileContext): CompileResult 
     const fn = new Function(...keys, `"use strict";\n${text}`);
     fn(...values);
     audio.play();
-    return { ok: true, bindings: keys };
+    return { ok: true, bindings: keys, events };
   } catch (e) {
     const err = e as Error;
-    return { ok: false, error: err.message || String(err), bindings: keys };
+    return { ok: false, error: err.message || String(err), bindings: keys, events };
   }
 }
 

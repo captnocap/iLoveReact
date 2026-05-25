@@ -34,6 +34,9 @@ tsz/bench_lua_worker
 # Runtime state (sqlite dbs, supervisor queues)
 .sweatshop/
 
+# Composer user-captured/imported audio samples
+cart/composer/samples/
+
 # Third-party library downloads
 blend2d-*.tar.gz
 blend2d/
