@@ -437,6 +437,23 @@ export type Quest = {
   stages: QuestStage[];
   stageIndex: number;
   reward: { cash?: number; itemKey?: Key; repDelta?: number };
+  requires?: QuestRequirement;   // gate — see below. Absent = always offered.
+};
+
+// The "no story state machine" model: availability is a PURE predicate over world
+// state, never a graph of transitions. `availableQuests(world)` is just
+// `quests.filter(q => meets(q.requires, world))` — a quest unlocks the instant its
+// criteria are met, in any order. e.g. OneLastRodeo.requires =
+// { questsDone:['SunsetTilDawn'], relationship:{ withId:'big_tony', min:0.43 } }:
+// you can finish SunsetTilDawn but still be locked out until rep is high enough,
+// which you grind via big_tony's side-mission rotation (MissionTemplate, below).
+export type QuestRequirement = {
+  relationship?: { withId: Id; min: number };  // player↔giver sentiment ≥ min (0..1)
+  questsDone?: Key[];                           // these quests must be complete
+  skills?: Partial<Record<Skill, number>>;      // min skill levels
+  items?: Key[];                                // must currently hold these keys
+  maxNotoriety?: number;                        // too hot → the giver won't deal
+  minDay?: number;                              // not offered before this in-game day
 };
 
 // ── perception overlay: the layer that lets the UI lie without the sim lying ─────
@@ -517,5 +534,74 @@ export type Order = {
   payout: number;
   deliverTo?: Tile;              // in-person delivery marker (random events en route)
   sting?: boolean;               // a honeypot from the investigation — hidden from the UI
+};
+
+// ── reusable daily side-missions (the rep grind that feeds QuestRequirement) ──
+// A giver owns a ROTATION of reusable mission shapes — big_tony's is
+// [PackageDelivery, QuacksLikeADuck, AllEyesNoEars, …]. Each is a parametric
+// TEMPLATE, not a hand-authored quest: at the top of the day it's instantiated
+// with concrete coords/deadline/payout (→ a MissionInstance), and its framing
+// text is generated. Completing them accrues `baseRep` toward the giver, which is
+// how a locked core Quest (relationship-gated) eventually opens.
+export type MissionTemplate = {
+  key: Key;
+  giverId: Id;                   // whose rotation this belongs to
+  objective: ObjectiveKind;      // the verb the day's instance fills (acquire/kill/reach/…)
+  baseRep: number;               // sentiment delta toward the giver on success
+  constraints?: MissionConstraint[];
+  staticBrief: string;           // fallback framing when no LLM is configured
+};
+
+// Constraints SILENTLY decide the deal. An unmet constraint sinks the mission with
+// no UI objective ever shown — the only tell is how the giver framed it ("get a
+// new set of threads before you show up"). So failing one feels like the world
+// reacting, not a checklist you missed.
+export type MissionConstraint =
+  | { kind: 'wearNewCostume' }                  // arrive in a face NOT on your rap sheet
+  | { kind: 'arriveBy'; hour: number }          // hard deadline (in-game hour)
+  | { kind: 'maxNotoriety'; ceiling: number }   // show up too hot → it's off
+  | { kind: 'holdItem'; key: Key };             // must be carrying X on arrival
+
+// A template stamped for one day. `brief` is the resolved framing (LLM or static);
+// it compiles INTO a normal Quest, so the runtime quest machinery is unchanged.
+export type MissionInstance = {
+  templateKey: Key;
+  day: number;                   // the in-game day this was rolled for
+  origin: Tile; destination?: Tile;
+  deadlineHour?: number;
+  payout: number;
+  brief: string;                 // the giver's resolved message to the player
+};
+
+// ── LLM framing (OPTIONAL — static fallback always works) ─────────────────────
+// worldStateFactorization() collapses live world state into the few facts a giver
+// would plausibly KNOW, then (SOUL.md persona + INTERACTIONS.md history + these
+// facts) becomes the prompt that frames a MissionInstance. With no LLM configured
+// the template's staticBrief is used verbatim — the game is fully playable either
+// way; the LLM only buys richer, reactive immersion ("saw your dumb ass on the
+// news last night — get a costume before you come around").
+export type MissionGenContext = {
+  templateKey: Key;
+  soul: Key;                     // the giver's SOUL.md / persona ref
+  recentInteractions: string;    // INTERACTIONS.md slice (flaky? owes money? reliable?)
+  worldFacts: {                  // the worldStateFactorization() output
+    daysAwake: number;           // from HighState.sinceMs accumulation
+    notoriety: number;           // player heat (0..100)
+    recentHeadlines: Id[];       // InternetArtifact ids ABOUT the player (the chase video)
+    playerCashFlow: number;      // recent earn rate — drives how desperate the giver is
+  };
+};
+
+// ── persistence: autosave snapshot (the world is durable; you resume in place) ─
+// The world is a STATELESS-shape over a serialisable root: bake() rebuilds ALL
+// static geometry (tiles/heights/meshes) from the entity tree at load, so a save
+// stores only MUTABLE state — player position/progress, cache.opened flags, quest
+// progress, npc positions, the clock. Written ~once/minute and on key events;
+// loaded on restart so a 400-tile walk isn't repeated. `World` is already the
+// durable root, so the snapshot just wraps it + a version for migration.
+export type SaveSnapshot = {
+  version: number;
+  savedAtMs: number;             // real wall-clock time the snapshot was taken
+  world: World;                  // the whole durable root (no meshes — bake() re-derives them)
 };
 
