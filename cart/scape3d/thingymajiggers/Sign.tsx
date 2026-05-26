@@ -10,6 +10,7 @@ export default defineThingymajigger<SignProps>({
   kind: 'sign',
   size: [1, 1],
   blocks: true,
+  examine: 'A buzzing neon sign, one letter flickering out.',
   Mesh: ({ x, z, baseY, tint }) => {
     const cx = x + 0.5, cz = z + 0.5; // centre of the 1×1 footprint
     return (

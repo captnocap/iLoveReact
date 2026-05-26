@@ -8,6 +8,8 @@ export default defineThingymajigger({
   kind: 'dumpster',
   size: [1, 1],
   blocks: true,
+  stash: 2, // big enough to bury a couple things in the trash
+  examine: 'A dumpster. Something in it is leaking. Worth a dig, maybe.',
   Mesh: ({ x, z, baseY }) => {
     const cx = x + 0.5, cz = z + 0.5; // centre of the 1×1 footprint
     return (

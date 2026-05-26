@@ -6,6 +6,8 @@ import { defineThingymajigger } from './kit';
 export default defineThingymajigger({
   kind: 'toilet',
   size: [1, 1],
+  stash: 1, // the cistern — a classic place to tape something behind
+  examine: 'A grimy toilet, tank lid sitting crooked. Plenty of room behind it.',
   Mesh: ({ x, z, baseY }) => (
     <Fragment>
       <Scene3D.Mesh geometry="box" material="#d8dde2" position={[x + 0.5, baseY + 0.22, z + 0.55]} sizeX={0.4} sizeY={0.34} sizeZ={0.46} />

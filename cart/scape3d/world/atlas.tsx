@@ -10,7 +10,7 @@ import {
 } from './citymap';
 import { bake, type Entity, type Surface } from './entity';
 import { crackhouse } from './entities';
-import { meshOf } from '../thingymajiggers';
+import { meshOf, THINGYMAJIGGERS } from '../thingymajiggers';
 
 const SURF: Record<number, Surface> = {
   [T.Road]: 'road', [T.Sidewalk]: 'sidewalk', [T.Plaza]: 'plaza',
@@ -31,11 +31,14 @@ function buildingEntity(b: Bldg): Entity {
 }
 
 function propEntity(p: Prop): Entity {
+  const tmj = THINGYMAJIGGERS[p.kind];
   return {
     size: [1, 1],
-    prop: p.kind,
+    kind: p.kind,        // so a stash cache resolves to a feature that knows its kind
+    prop: p.kind,        // still a decor prop for the minimap/streaming
     propTint: p.tint,
     render: meshOf(p.kind, { tint: p.tint }),
+    ...(tmj?.stash ? { cache: { stash: tmj.stash, opened: false } } : {}),
   };
 }
 

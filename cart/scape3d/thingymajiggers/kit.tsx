@@ -27,6 +27,14 @@ export interface Thingymajigger<P extends ThingProps = ThingProps> {
   size: [number, number];     // footprint in tiles — pathfinding + bake read this
   blocks?: boolean;           // occupies its tiles for movement
   Mesh: (p: P) => ReactNode;  // emits <Scene3D.Mesh> children at ABSOLUTE coords
+  // ── interaction profile ──────────────────────────────────────────────────
+  // A thing can carry a stash: a hidden container the player searches (and later
+  // stashes loot into). `stash` is the POTENTIAL slot count — it never has to be
+  // filled, but declaring it > 0 makes a placed thing an auto-registered, searchable
+  // feature (an empty cache of this capacity). 0/undefined = inert. This is why a
+  // toilet (`stash: 1`) is searchable even when there's nothing in it.
+  stash?: number;
+  examine?: string;           // flavor shown on Examine (per-kind, not per-instance)
 }
 
 // Identity helper — gives each module file inference + a uniform shape to register.

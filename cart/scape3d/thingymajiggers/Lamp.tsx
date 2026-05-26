@@ -6,6 +6,7 @@ import { defineThingymajigger } from './kit';
 export default defineThingymajigger({
   kind: 'lamp',
   size: [1, 1],
+  examine: 'A floor lamp, bulb buzzing. Nowhere to hide anything.',
   Mesh: ({ x, z, baseY }) => (
     <Fragment>
       <Scene3D.Mesh geometry="cylinder" material="#2a2228" position={[x + 0.5, baseY + 0.4, z + 0.5]} radius={0.05} sizeY={0.8} />

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { decorAt } from '../world/tiles';
 import { featureAt } from '../world/atlas';
+import { THINGYMAJIGGERS } from '../thingymajiggers';
 import { findPath, nearestWalkable } from '../world/pathfinding';
 import { buildDecorWindow, buildTileWindow, HALF, type Decor } from '../world/window';
 import { unproject, type Cam, type Rect } from '../world/projection';
@@ -433,11 +434,8 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       case 'item':
         return 'Something worth grabbing is lying here.';
       case 'prop':
-        return t.prop.kind === 'palm'
-          ? 'A scraggly palm, half its fronds dead. Very Miami.'
-          : t.prop.kind === 'dumpster'
-            ? "A dumpster. Something in it is leaking. Don't."
-            : 'A buzzing neon sign, one letter flickering out.';
+        // flavor is declared on the thingymajigger now, not switched on kind here
+        return THINGYMAJIGGERS[t.prop.kind]?.examine ?? 'Some bit of street junk.';
       case 'feature':
         if (t.feature.kind === 'floorboard') {
           return t.feature.cache.opened
@@ -446,7 +444,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
               ? 'A board that sits a little proud of the others. It would take a tool to lift.'
               : 'Floorboards. Some give a little underfoot.';
         }
-        return t.feature.kind;
+        return THINGYMAJIGGERS[t.feature.kind]?.examine ?? t.feature.kind;
       case 'tile':
         return 'Cracked pavement, old gum, a flyer for a club that closed.';
     }
@@ -468,6 +466,16 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       examineRef.current = { text, until: now + 3000 };
     };
     const pos = targetPos(t);
+    // Open a stash cache once and bank whatever cash it held. Returns the amount taken,
+    // or null if it was already opened. Shared by 'loot' (quiet) and 'pry' (loud) so the
+    // reveal logic lives in one place; flavor + heat stay per-verb.
+    const takeStash = (cache: { opened?: boolean; money?: number }): number | null => {
+      if (cache.opened) return null;
+      cache.opened = true;
+      const got = cache.money && cache.money > 0 ? cache.money : 0;
+      if (got) { adjustMoney(cur, got); cache.money = 0; }
+      return got;
+    };
     switch (interactionKey) {
       case 'walk':
         cur.path = findPath(cur.px, cur.py, pos.x, pos.y, liveBlockers());
@@ -492,28 +500,26 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       case 'close':
         if (t.kind === 'door') toggleDoor(t.door);
         break;
-      case 'loot':
-        setEx('You paw through the dumpster. Trash, mostly.');
-        break;
-      case 'pry': {
-        // Crack up the board (the action menu already gated this on holding the
-        // crowbar). Reveal + take whatever's cached; tearing up a room is loud and
-        // leaves a mess, so it spikes visual heat whether or not it paid off.
+      case 'loot': {
+        // Search an UNGATED stash (toilet, bed, dumpster, …). Quiet — you're rifling,
+        // not tearing the place up — so no heat. Takes pre-placed cash; depositing your
+        // own items into the stash is the next layer.
         if (t.kind !== 'feature') break;
-        const cache = t.feature.cache;
-        if (cache.opened) {
-          setEx('Already pried up. Nothing left but the gap.');
-          break;
-        }
-        cache.opened = true;
+        const got = takeStash(t.feature.cache);
+        if (got == null) setEx("Already been through here. Nothing left.");
+        else if (got > 0) setEx(`Tucked in there — $${got.toLocaleString()}. Lucky you.`);
+        else setEx(`You search the ${t.feature.kind}. Nothing worth taking.`);
+        break;
+      }
+      case 'pry': {
+        // A GATED stash (the action menu already checked you're holding the tool).
+        // Loud — forcing it open is a mess, so it spikes visual heat either way.
+        if (t.kind !== 'feature') break;
+        const got = takeStash(t.feature.cache);
+        if (got == null) { setEx('Already pried open. Nothing left but the gap.'); break; }
         adjustSuspicionAxis(cur, 'visual', 6);
-        if (cache.money && cache.money > 0) {
-          adjustMoney(cur, cache.money);
-          setEx(`Under the board — a brick of cash. $${cache.money.toLocaleString()}. You did hear something.`);
-          cache.money = 0;
-        } else {
-          setEx('You splinter the board up. Rotten joists, a dead roach. Nothing.');
-        }
+        if (got > 0) setEx(`Under it — a brick of cash. $${got.toLocaleString()}. You did hear something.`);
+        else setEx('You splinter it open. Rotten joists, a dead roach. Nothing.');
         break;
       }
       case 'shoot':

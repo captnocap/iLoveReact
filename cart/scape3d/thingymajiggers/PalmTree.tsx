@@ -20,6 +20,7 @@ export default defineThingymajigger({
   kind: 'palm',
   size: [1, 1],
   blocks: true,
+  examine: 'A scraggly palm, half its fronds dead. Very Miami.',
   Mesh: ({ x, z, baseY }) => {
     const cx = x + 0.5, cz = z + 0.5; // centre of the 1×1 footprint
     return (

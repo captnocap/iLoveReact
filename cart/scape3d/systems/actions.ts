@@ -80,8 +80,10 @@ export function targetLabel(t: ActionTarget): string {
       return 'Item';
     case 'prop':
       return t.prop.kind === 'palm' ? 'Palm' : t.prop.kind === 'dumpster' ? 'Dumpster' : 'Sign';
-    case 'feature':
-      return t.feature.kind === 'floorboard' ? 'Floorboard' : t.feature.kind;
+    case 'feature': {
+      const k = t.feature.kind;
+      return k.charAt(0).toUpperCase() + k.slice(1);
+    }
     case 'tile':
       return 'Ground';
   }
@@ -156,23 +158,29 @@ export function availableActions(t: ActionTarget, ctx: AttackContext): ActionOpt
       out.push(opt('examine', d));
       break;
     case 'prop':
-      if (t.prop.kind === 'dumpster') out.push(opt('loot', d, 'Search'));
+      // Stashable props (dumpster) resolve as features now; a bare prop only examines.
       out.push(opt('examine', d));
       break;
     case 'feature': {
-      const f = t.feature;
-      if (f.kind === 'floorboard' && !f.cache.opened) {
-        // 'pry' is gated by BOTH proximity and holding the required tool. The gate
-        // reason names what's missing (the player learns they need a crowbar).
-        const tooFar = d > PROXIMITY_RANGE.adjacent;
-        const needs = f.cache.needs;
-        const missingTool = needs != null && ctx.heldKey !== needs;
-        out.push({
-          interactionKey: 'pry',
-          label: 'Pry up floorboard',
-          blocked: tooFar || missingTool,
-          reason: tooFar ? 'too far — get closer' : missingTool ? `need a ${needs}` : undefined,
-        });
+      const c = t.feature.cache;
+      // A stash is searchable until it's been opened. A GATED stash (needs a tool)
+      // offers 'pry'; an ungated one offers 'Search'. An empty declared stash is still
+      // searchable — you just find nothing. That's the whole point of a potential spot.
+      const stashable = !c.opened && (!!c.stash || !!c.money || !!c.items?.length || c.needs != null);
+      if (stashable) {
+        if (c.needs != null) {
+          // gated by BOTH proximity and holding the required tool; the reason names it
+          const tooFar = d > PROXIMITY_RANGE.adjacent;
+          const missingTool = ctx.heldKey !== c.needs;
+          out.push({
+            interactionKey: 'pry',
+            label: t.feature.kind === 'floorboard' ? 'Pry up floorboard' : 'Force it open',
+            blocked: tooFar || missingTool,
+            reason: tooFar ? 'too far — get closer' : missingTool ? `need a ${c.needs}` : undefined,
+          });
+        } else {
+          out.push(opt('loot', d, 'Search'));
+        }
       }
       out.push(opt('examine', d));
       break;

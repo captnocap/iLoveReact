@@ -21,12 +21,18 @@ const wall = (w: number, h: number): Entity => ({
 });
 
 // A furniture fixture: a render-only thingymajigger on the floor (footprint from its
-// registry entry, so a 2×1 bed claims two tiles).
-const fixture = (kind: string): Entity => ({
-  size: THINGYMAJIGGERS[kind].size,
-  kind,
-  render: meshOf(kind),
-});
+// registry entry, so a 2×1 bed claims two tiles). If the kind declares a stash, the
+// fixture carries an empty cache of that capacity — that's what makes it a searchable
+// feature (the toilet you can search even when it's holding nothing).
+const fixture = (kind: string): Entity => {
+  const tmj = THINGYMAJIGGERS[kind];
+  return {
+    size: tmj.size,
+    kind,
+    render: meshOf(kind),
+    ...(tmj.stash ? { cache: { stash: tmj.stash, opened: false } } : {}),
+  };
+};
 
 // One floorboard per tile of a room. Most hide nothing; ONE hides the stash, and you
 // need a crowbar to pry it. floorboard[i] ↔ local tile i (row-major), so in a 4×4 room
