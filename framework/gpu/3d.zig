@@ -68,12 +68,21 @@ comptime {
 //                    one Scene3D render pass. Each drawMesh appends at a
 //                    cumulative byte offset, so draws don't read each
 //                    other's bytes.
+//
+// Sizing: this is immediate-mode (geometry regenerated + uploaded each frame), but
+// the buffers are allocated ONCE and writeBuffer only uploads the bytes actually
+// drawn — so a larger ceiling costs reserved GPU memory, NOT per-frame work. A full
+// baked city + detailed props (e.g. sphere-bearing palms ×13 ≈ 130k verts) blew the
+// old 64k. Raised to 256k verts / 2048 draws (≈ 8 MB vert + 0.5 MB uniform) for
+// generous headroom. Non-indexed, u64 offsets — no 16-bit index limit applies. If a
+// scene ever needs HUNDREDS of detailed objects, the real fix is retained/instanced
+// buffers (generate once, redraw), not a bigger scratch buffer.
 const MAX_MESH_VERTS = 4096;
-const MAX_FRAME_VERTS = 65536;
+const MAX_FRAME_VERTS = 262144;
 var g_geo_buf: [MAX_MESH_VERTS]Vertex = undefined;
 
 const UNIFORM_STRIDE: u32 = 256;
-const MAX_DRAW_UNIFORMS: u32 = 512;
+const MAX_DRAW_UNIFORMS: u32 = 2048;
 
 fn pushVertex(buf: []Vertex, idx: *usize, pos: [3]f32, normal: [3]f32, uv: [2]f32) bool {
     if (idx.* >= buf.len) return false;
