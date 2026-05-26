@@ -1,5 +1,10 @@
+import { Fragment } from 'react';
 import { SK_ITEM_PISTOL } from './spriteKinds';
 import { defineItem } from './types';
+import { itemBox } from './itemMesh';
+
+const METAL = '#383b42';
+const GRIP = '#2e251f';
 
 // The first ranged weapon. Its RangeProfile drives the action-menu hit-% through
 // systems/chance.ts: best at ~4 tiles, falls off with distance, needs line of sight,
@@ -34,6 +39,14 @@ export const pistol = defineItem({
     c = over(c, shade(sdBox(vec2f(lx - 1.0, ly + 14.5), vec2f(3.2, 1.6)), vec3f(0.16, 0.16, 0.18), vec3f(0.07, 0.07, 0.08)));
   }
 `,
+    // ~18 cm pistol lying flat — slide along x, grip out the back.
+    model: (a) => (
+      <Fragment>
+        {itemBox(a, { x: 2, y: 3, w: 16, h: 4, d: 3.2 }, METAL)}     {/* slide / barrel */}
+        {itemBox(a, { x: -5, y: 1.6, z: 4, w: 4, h: 3.2, d: 8 }, GRIP)}  {/* grip */}
+        {itemBox(a, { x: -3, y: 1.4, z: 1.5, w: 4, h: 1.6, d: 4 }, METAL)} {/* trigger guard */}
+      </Fragment>
+    ),
   },
   inventory: {
     shortLabel: 'pistol',

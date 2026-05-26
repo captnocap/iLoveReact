@@ -9,13 +9,20 @@ import { frags, kindAt, features } from '../world/atlas';
 import { heightAt } from '../world/terrain';
 import { T } from '../world/citymap';
 import { THINGYMAJIGGERS } from '../thingymajiggers';
+import { itemModule } from '../registries/items';
 import type { Door } from '../systems/doors';
-import type { Ent } from '../state/world';
+import type { Ent, WorldItem3D } from '../state/world';
 
-export function World({ doors, entities }: { doors: Door[]; entities: Ent[] }) {
+export function World({ doors, entities, worldItems }: { doors: Door[]; entities: Ent[]; worldItems: WorldItem3D[] }) {
   return (
     <>
       {frags}
+      {worldItems.map((wi) => {
+        const model = itemModule(wi.typeKey)?.world.model;
+        return model ? (
+          <Fragment key={wi.id}>{model({ x: wi.x, z: wi.y, baseY: heightAt(wi.x, wi.y) })}</Fragment>
+        ) : null;
+      })}
       {doors.map((d) => {
         const ewWall = kindAt(d.x - 1, d.y) === T.Wall || kindAt(d.x + 1, d.y) === T.Wall;
         return (

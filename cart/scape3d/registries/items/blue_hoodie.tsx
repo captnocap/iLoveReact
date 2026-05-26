@@ -1,7 +1,11 @@
+import { Fragment } from 'react';
 import { SK_ITEM_HOODIE } from './spriteKinds';
 import { defineItem } from './types';
+import { itemBox } from './itemMesh';
 
 const PRESENTS = { silhouette: 'avg' as const, color: '#2e6da4', accessory: 'hood' as const };
+const CLOTH = '#2956a8';
+const CLOTH_DARK = '#1a3a5c';
 
 export const blueHoodie = defineItem({
   type: {
@@ -22,6 +26,13 @@ export const blueHoodie = defineItem({
     c = over(c, shade(sdBox(vec2f(lx, ly + 8.0), vec2f(12.0, 3.0)), vec3f(0.10, 0.23, 0.36), vec3f(0.04, 0.09, 0.16)));
   }
 `,
+    // A folded hoodie — a low cloth bundle with the hood folded on top.
+    model: (a) => (
+      <Fragment>
+        {itemBox(a, { y: 3, w: 17, h: 6, d: 13 }, CLOTH)}            {/* folded body */}
+        {itemBox(a, { x: 4, y: 8, w: 9, h: 4, d: 9 }, CLOTH_DARK)}   {/* hood fold */}
+      </Fragment>
+    ),
   },
   inventory: {
     shortLabel: 'hoodie',

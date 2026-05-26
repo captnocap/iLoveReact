@@ -1,5 +1,10 @@
+import { Fragment } from 'react';
 import { SK_ITEM_CROWBAR } from './spriteKinds';
 import { defineItem } from './types';
+import { itemBox } from './itemMesh';
+
+const RED = '#c6382e';
+const DARK = '#9c2a20';
 
 // A crowbar — the tool that gates prying up floorboards (and forcing things open
 // later). `enables: ['pry']` is the contract the action menu reads.
@@ -21,6 +26,15 @@ export const crowbar = defineItem({
     c = over(c, shade(sdBox(vec2f(lx - 1.0, ly + 17.0), vec2f(4.0, 2.0)), vec3f(0.62, 0.16, 0.13), vec3f(0.26, 0.08, 0.06)));
   }
 `,
+    // ~50 cm crowbar lying flat on the ground (cm grid; see itemMesh.tsx).
+    model: (a) => (
+      <Fragment>
+        {itemBox(a, { x: 0, y: 2, w: 44, h: 4, d: 4 }, RED)}        {/* shaft */}
+        {itemBox(a, { x: -24, y: 2, w: 8, h: 3, d: 6 }, DARK)}      {/* flattened pry tip */}
+        {itemBox(a, { x: 22, y: 7, w: 4, h: 11, d: 4 }, RED)}       {/* hooked end rises */}
+        {itemBox(a, { x: 27, y: 12, w: 10, h: 4, d: 4 }, DARK)}     {/* the curl of the hook */}
+      </Fragment>
+    ),
   },
   inventory: {
     shortLabel: 'bar',

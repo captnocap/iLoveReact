@@ -7,12 +7,17 @@
 // (costume colour) + a cap brim; NPCs are tinted by their Ent.tint ramp; a downed
 // NPC lies flat as a body. Facing maps scape's 2D angle → a Y-rotation.
 
+import type { ReactNode } from 'react';
 import { Scene3D } from '@reactjit/runtime/primitives';
 import type { V3 } from '../world/projection';
 import { heightAt } from '../world/terrain';
 import type { Player } from '../design';
 import type { Ent } from '../state/world';
+import type { ItemAnchor } from '../registries/items/itemMesh';
 import { BODY_DOWN, EYE, NPC_PANTS, NPC_SHIRT, SKIN } from './palette3d';
+
+// The in-hand item's 3D model, rendered gripped in the right hand. Optional.
+type HeldModel = (a: ItemAnchor) => ReactNode;
 
 // model faces +Z by default; rotate a local point around Y
 function rotY([x, y, z]: V3, yaw: number): V3 {
@@ -45,7 +50,7 @@ function humanoidBoxes(colors: { skin: string; shirt: string; pants: string }): 
 }
 
 function Figure({
-  prefix, wx, wz, face, boxes, eyeColor = EYE, hood,
+  prefix, wx, wz, face, boxes, eyeColor = EYE, hood, heldModel,
 }: {
   prefix: string;
   wx: number;
@@ -54,6 +59,7 @@ function Figure({
   boxes: Box[];
   eyeColor?: string;
   hood?: string; // optional hood/cap colour over the head (marks the player)
+  heldModel?: HeldModel; // the in-hand item's 3D model, gripped in the right hand
 }) {
   const yaw = modelYaw(face);
   const baseY = heightAt(wx, wz); // feet ride the terrain
@@ -61,6 +67,7 @@ function Figure({
     const r = rotY(p, yaw);
     return [wx + r[0], baseY + r[1], wz + r[2]];
   };
+  const hand = place([0.43, 0.8, 0.02]); // right-hand world point — where a held item grips
   return (
     <>
       {boxes.map((b) => (
@@ -90,16 +97,18 @@ function Figure({
             position={place([0, 1.84, 0.26])} rotation={[0, yaw, 0]} sizeX={0.4} sizeY={0.06} sizeZ={0.18} />
         </>
       ) : null}
+      {/* the in-hand item, gripped in the right hand and pointed along facing */}
+      {heldModel ? heldModel({ x: hand[0], z: hand[2], baseY: hand[1], yaw }) : null}
     </>
   );
 }
 
 // ── Player ───────────────────────────────────────────────────────────────
-export function Player3D({ px, py, facing, costumeColor }: {
-  px: number; py: number; facing: number; costumeColor: string;
+export function Player3D({ px, py, facing, costumeColor, heldModel }: {
+  px: number; py: number; facing: number; costumeColor: string; heldModel?: HeldModel;
 }) {
   const boxes = humanoidBoxes({ skin: SKIN[0], shirt: costumeColor, pants: '#1b1620' });
-  return <Figure prefix="player" wx={px} wz={py} face={facing} boxes={boxes} hood={costumeColor} />;
+  return <Figure prefix="player" wx={px} wz={py} face={facing} boxes={boxes} hood={costumeColor} heldModel={heldModel} />;
 }
 
 // ── NPCs ───────────────────────────────────────────────────────────────

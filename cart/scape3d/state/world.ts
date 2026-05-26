@@ -26,6 +26,7 @@ import {
   dropInHand,
   equipInventoryItem,
   inHandSlot,
+  instanceById,
   inventorySlots,
   nearestWorldItem,
   pickupWorldItem,
@@ -83,9 +84,15 @@ export type ChatGate = {
   openQuestChat: (npc: Ent) => void;
 };
 
+// A dropped item resolved for 3D rendering: where it lies + which item it is (so the
+// renderer can look up that item's 3D model). The frame loop re-renders every tick, so
+// reading the live worldItems list here stays fresh as items are dropped/picked up.
+export type WorldItem3D = { id: number; x: number; y: number; typeKey: string };
+
 export type ScapeWorld = {
   sim: ScapePlayerState;
   player: Player;
+  worldItems: WorldItem3D[];
   playerActions: PlayerDebugActions;
   inventory: InventoryState;
   inventorySlots: InventorySlot[];
@@ -590,10 +597,19 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
   const nowMs = (globalThis as any).performance?.now?.() ?? 0;
   const examineText = examineRef.current && examineRef.current.until > nowMs ? examineRef.current.text : null;
 
+  // Resolve dropped items to {where, whichItem} so the 3D scene can render each one's
+  // model. Computed each render (the frame loop keeps it fresh as items move).
+  const worldItems: WorldItem3D[] = [];
+  for (const wi of inventory.current.worldItems) {
+    const inst = instanceById(inventory.current, wi.instanceId);
+    if (inst) worldItems.push({ id: wi.id, x: wi.x, y: wi.y, typeKey: inst.typeKey });
+  }
+
   return {
     sim: s,
     player: s.body,
     playerActions,
+    worldItems,
     inventory: inventory.current,
     inventorySlots: inventorySlots(s.body, inventory.current),
     inHand: inHandSlot(s.body, inventory.current),

@@ -63,6 +63,8 @@ export default function Scape3D() {
               cam={world.cam}
               doors={world.doors}
               entities={world.entities}
+              worldItems={world.worldItems}
+              heldModel={world.inHand?.module.world.model}
             />
           </Box>
           <Hud
