@@ -116,18 +116,23 @@ No more "which file/system writes this model and its scale?" split (`BuildingDef
 - Name rationale: "thing" is ungreppable; `thingymajigger` returns exactly our objects.
   It's the game-industry "doodad" concept (WoW's placed-decoration category).
 
-Done so far: kit + registry + **static** thingymajiggers `PalmTree`, `Dumpster`, `Sign`,
-`CityBuilding` (which owns `HEIGHT_SCALE` + `FACADE_TEX`). `entity.tsx` is now pure
-bake-engine + ground/relief fills; `atlas.tsx` resolves buildings + props via the
-registry. Ships + launches clean.
+MIGRATION COMPLETE (13 thingymajiggers): **static** (baked via `meshOf()` from the entity
+tree) `PalmTree`, `Dumpster`, `Sign`, `CityBuilding` (owns `HEIGHT_SCALE`+`FACADE_TEX`),
+`Wall`, `Toilet`, `Bed`, `Lamp`; **dynamic** (re-rendered live from game state by
+`render3d/World.tsx`) `Door`, `Floorboard`, `Storefront`. One `meshOf(kind, params)` bridge
+wires the registry into the bake tree, so atlas + entities never re-implement it. Convention:
+`x,z` = footprint origin CORNER, `baseY` sampled at centre. `render3d/City3D.tsx` renamed →
+`World.tsx`. `entity.tsx` = pure bake-engine + ground/relief surface fills; `entities.tsx` =
+pure composition (no mesh code). Ships + launches clean.
 
-Scale pass (same session): 1 tile = 1 m, the ~2 m player is the fixed human anchor,
-scale the world UP not the player down. Buildings `HEIGHT_SCALE` 3.2→4.6, palm 2.4→4.2 m
-(stylised, not realistic-10 m), dumpster 0.9→1.3 m, sign 1.8→3 m pole.
+Deliberately NOT migrated: `Characters3D.tsx` (player/NPC people — already self-contained,
+not placed via the entity tree) and the terrain surface fills in `entity.tsx` (variable-size
+ground/road/relief woven into bake's paint-order stacking — a different beast than a discrete
+object). Both can fold in later if useful; neither was the "scattered model" problem.
 
-STILL TO MIGRATE: furniture (`Toilet`/`Bed`/`Lamp` from `world/entities.tsx`), then the
-dynamics (`Door` — folding in the pending 1.7→2.1 height fix so the 2 m player clears it —
-`Floorboard`, `Storefront`, `Person`), then rename `render3d/City3D.tsx` → `World.tsx`.
+Scale pass (same session): 1 tile = 1 m, the ~2 m player is the fixed human anchor, scale the
+world UP not the player down. Buildings `HEIGHT_SCALE` 3.2→4.6, palm 2.4→4.2 m (stylised, not
+realistic-10 m), dumpster 0.9→1.3 m, sign 1.8→3 m, door 1.7→2.1 m (player now clears it).
 
 design.ts also gained the NEW quest/mission/save datashapes (not yet built): `Quest.requires`
 + `QuestRequirement` (unlock-by-criteria, no story state machine), `MissionTemplate` +

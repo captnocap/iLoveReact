@@ -8,10 +8,13 @@ export default defineThingymajigger({
   kind: 'dumpster',
   size: [1, 1],
   blocks: true,
-  Mesh: ({ x, z, baseY }) => (
-    <Fragment>
-      <Scene3D.Mesh geometry="box" material={DUMPSTER} position={[x, baseY + 0.6, z]} sizeX={1.0} sizeY={1.12} sizeZ={0.82} />
-      <Scene3D.Mesh geometry="box" material={DUMPSTER_LID} position={[x, baseY + 1.22, z]} sizeX={1.08} sizeY={0.14} sizeZ={0.9} />
-    </Fragment>
-  ),
+  Mesh: ({ x, z, baseY }) => {
+    const cx = x + 0.5, cz = z + 0.5; // centre of the 1×1 footprint
+    return (
+      <Fragment>
+        <Scene3D.Mesh geometry="box" material={DUMPSTER} position={[cx, baseY + 0.6, cz]} sizeX={1.0} sizeY={1.12} sizeZ={0.82} />
+        <Scene3D.Mesh geometry="box" material={DUMPSTER_LID} position={[cx, baseY + 1.22, cz]} sizeX={1.08} sizeY={0.14} sizeZ={0.9} />
+      </Fragment>
+    );
+  },
 });

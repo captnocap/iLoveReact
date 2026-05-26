@@ -10,7 +10,7 @@ import {
 } from './citymap';
 import { bake, type Entity, type Surface } from './entity';
 import { crackhouse } from './entities';
-import { THINGYMAJIGGERS } from '../thingymajiggers';
+import { meshOf } from '../thingymajiggers';
 
 const SURF: Record<number, Surface> = {
   [T.Road]: 'road', [T.Sidewalk]: 'sidewalk', [T.Plaza]: 'plaza',
@@ -26,8 +26,7 @@ function buildingEntity(b: Bldg): Entity {
   return {
     size: [w, d],
     pack: T.Wall | (b.h << 3) | (b.style << 6),
-    render: (ax, ay, heightAt) =>
-      THINGYMAJIGGERS.cityBuilding.Mesh({ x: ax, z: ay, baseY: heightAt(ax + w / 2, ay + d / 2), w, d, tier: b.h, style: b.style }),
+    render: meshOf('cityBuilding', { w, d, tier: b.h, style: b.style }),
   };
 }
 
@@ -36,8 +35,7 @@ function propEntity(p: Prop): Entity {
     size: [1, 1],
     prop: p.kind,
     propTint: p.tint,
-    render: (ax, ay, heightAt) =>
-      THINGYMAJIGGERS[p.kind]?.Mesh({ x: ax + 0.5, z: ay + 0.5, baseY: heightAt(ax + 0.5, ay + 0.5), tint: p.tint }) ?? null,
+    render: meshOf(p.kind, { tint: p.tint }),
   };
 }
 

@@ -12,7 +12,7 @@ import { cameraFor, type Cam } from '../world/projection';
 import { heightAt } from '../world/terrain';
 import { hex, PATH_DOT, PATH_TARGET } from './palette3d';
 import { HAZE } from '../render/palette';
-import { City3D } from './City3D';
+import { World } from './World';
 import { Player3D, Npcs3D } from './Characters3D';
 import type { Door } from '../systems/doors';
 import type { Ent } from '../state/world';
@@ -77,7 +77,7 @@ export function Scene({
       <Scene3D.PointLight position={[25, 8, 22]} color="#ff2d95" intensity={0.5} />
       <Scene3D.PointLight position={[40, 6, 16]} color="#18e0d8" intensity={0.35} />
 
-      <City3D doors={doors} entities={entities} />
+      <World doors={doors} entities={entities} />
       <Npcs3D entities={entities} />
       <Player3D px={sim.px} py={sim.py} facing={sim.body.facing} costumeColor={resolveCostume(sim.body.costume.color)} />
       <PathMarkers path={sim.path} />

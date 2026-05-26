@@ -20,12 +20,15 @@ export default defineThingymajigger({
   kind: 'palm',
   size: [1, 1],
   blocks: true,
-  Mesh: ({ x, z, baseY }) => (
-    <Fragment>
-      <Scene3D.Mesh geometry="cylinder" material={PALM_TRUNK} position={[x, baseY + 1.85, z]} radius={0.14} sizeY={3.7} />
-      <Scene3D.Mesh geometry="box" material={PALM_FROND} position={[x, baseY + 3.9, z]} sizeX={0.4} sizeY={0.24} sizeZ={0.4} />
-      {ring(x, z, baseY, 0, 5, 1.5, 0.35, 4.0, 0.9)}
-      {ring(x, z, baseY, 1, 4, 1.1, 0.8, 3.75, 0.68)}
-    </Fragment>
-  ),
+  Mesh: ({ x, z, baseY }) => {
+    const cx = x + 0.5, cz = z + 0.5; // centre of the 1×1 footprint
+    return (
+      <Fragment>
+        <Scene3D.Mesh geometry="cylinder" material={PALM_TRUNK} position={[cx, baseY + 1.85, cz]} radius={0.14} sizeY={3.7} />
+        <Scene3D.Mesh geometry="box" material={PALM_FROND} position={[cx, baseY + 3.9, cz]} sizeX={0.4} sizeY={0.24} sizeZ={0.4} />
+        {ring(cx, cz, baseY, 0, 5, 1.5, 0.35, 4.0, 0.9)}
+        {ring(cx, cz, baseY, 1, 4, 1.1, 0.8, 3.75, 0.68)}
+      </Fragment>
+    );
+  },
 });

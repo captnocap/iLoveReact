@@ -10,11 +10,14 @@ export default defineThingymajigger<SignProps>({
   kind: 'sign',
   size: [1, 1],
   blocks: true,
-  Mesh: ({ x, z, baseY, tint }) => (
-    <Fragment>
-      <Scene3D.Mesh geometry="cylinder" material={SIGN_POLE} position={[x, baseY + 1.5, z]} radius={0.06} sizeY={3.0} />
-      <Scene3D.Mesh geometry="box" material={signNeon(tint)} position={[x, baseY + 3.2, z]} sizeX={1.0} sizeY={0.72} sizeZ={0.1} />
-      <Scene3D.Mesh geometry="box" material={SIGN_POLE} position={[x, baseY + 3.2, z - 0.06]} sizeX={1.16} sizeY={0.88} sizeZ={0.05} />
-    </Fragment>
-  ),
+  Mesh: ({ x, z, baseY, tint }) => {
+    const cx = x + 0.5, cz = z + 0.5; // centre of the 1×1 footprint
+    return (
+      <Fragment>
+        <Scene3D.Mesh geometry="cylinder" material={SIGN_POLE} position={[cx, baseY + 1.5, cz]} radius={0.06} sizeY={3.0} />
+        <Scene3D.Mesh geometry="box" material={signNeon(tint)} position={[cx, baseY + 3.2, cz]} sizeX={1.0} sizeY={0.72} sizeZ={0.1} />
+        <Scene3D.Mesh geometry="box" material={SIGN_POLE} position={[cx, baseY + 3.2, cz - 0.06]} sizeX={1.16} sizeY={0.88} sizeZ={0.05} />
+      </Fragment>
+    );
+  },
 });

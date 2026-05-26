@@ -17,9 +17,9 @@ import type { ReactNode } from 'react';
 // single scene. baseY = terrain height under the origin, so feet/base ride relief.
 // Specific thingymajiggers extend this (a building adds w/d/tier/style, a sign a tint).
 export interface ThingProps {
-  x: number;      // absolute world X of the origin (tile units; 1 tile = 1 m)
-  z: number;      // absolute world Z
-  baseY: number;  // ground height under the origin
+  x: number;      // absolute world X of the footprint's ORIGIN CORNER (tile units; 1 tile = 1 m)
+  z: number;      // absolute world Z of that corner
+  baseY: number;  // ground height under the footprint centre — base/feet ride relief
 }
 
 export interface Thingymajigger<P extends ThingProps = ThingProps> {
