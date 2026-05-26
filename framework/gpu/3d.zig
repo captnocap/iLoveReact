@@ -112,7 +112,12 @@ fn addTriFlat(buf: []Vertex, idx: *usize, a: [3]f32, b: [3]f32, c: [3]f32, n: [3
 
 fn addFace(buf: []Vertex, idx: *usize, v1: [3]f32, v2: [3]f32, v3: [3]f32, v4: [3]f32, n: [3]f32) void {
     const corners = [4][3]f32{ v1, v2, v3, v4 };
-    const uvs = [4][2]f32{ .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 }, .{ 0, 1 } };
+    // V is flipped from the corner order: corners run world bottom→top
+    // (v1..v4 = BL,BR,TR,TL) but WGSL textureSample treats v=0 as the
+    // texture's TOP row. Mapping world-top to v=0 keeps a texture upright on
+    // the face (a <StaticSurface> screen reads right-side-up; symmetric
+    // procedural facades never exposed this).
+    const uvs = [4][2]f32{ .{ 0, 1 }, .{ 1, 1 }, .{ 1, 0 }, .{ 0, 0 } };
     const tri = [6]u8{ 0, 1, 2, 0, 2, 3 };
     for (tri) |ti| {
         _ = pushVertex(buf, idx, corners[ti], n, uvs[ti]);
@@ -367,6 +372,13 @@ const Rt = struct {
 };
 var g_rt_pool: [MAX_RT_POOL]Rt = [_]Rt{.{}} ** MAX_RT_POOL;
 var g_rt_cursor: usize = 0;
+
+// Scenes recorded by render() during the paint walk, drawn later by
+// flushPending() (after StaticSurface captures). One pending entry per
+// acquired RT slot, so it shares the pool's cap.
+const Pending = struct { node: *Node, slot: *Rt, w: f32, h: f32 };
+var g_pending: [MAX_RT_POOL]Pending = undefined;
+var g_pending_count: usize = 0;
 
 // ════════════════════════════════════════════════════════════════════════
 // Init / deinit (same as before — pipeline, bind groups, sampler)
@@ -986,7 +998,11 @@ fn drawSceneGuides(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_
 // Public API
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn update(_: f32) void {}
+pub fn update(_: f32) void {
+    // Clear scenes recorded but never flushed (e.g. a frame where gpu.frame()
+    // bailed before flushPending). Runs before the paint walk each frame.
+    g_pending_count = 0;
+}
 
 /// Render a 3D.View node: walk children for 3D.Camera/Light/Mesh, draw to offscreen, composite.
 pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
@@ -995,8 +1011,43 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
     const iw: u32 = @intFromFloat(@max(1, w));
     const ih: u32 = @intFromFloat(@max(1, h));
     const slot = acquireRt(iw, ih) orelse return false;
-    const queue = core.getQueue() orelse return false;
-    const device = core.getDevice() orelse return false;
+
+    // render() runs during the paint WALK and only RECORDS the scene. The
+    // actual GPU pass is deferred to flushPending(), which gpu.frame() calls
+    // AFTER renderStaticSurfaceCaptures(). That ordering is the whole point:
+    // a mesh that samples a <StaticSurface> via textureKey (a billboard, a
+    // screen) then reads THIS frame's captured content instead of last
+    // frame's — fixing the one-frame-stale / first-frame-blank monitor.
+    if (g_pending_count < g_pending.len) {
+        g_pending[g_pending_count] = .{ .node = node, .slot = slot, .w = w, .h = h };
+        g_pending_count += 1;
+    }
+
+    // Queue the composite quad NOW so the 3D view holds its z-order/position
+    // in the 2D draw stream; its bind group points at slot.color_view, which
+    // flushPending() fills before the main 2D pass samples it.
+    if (slot.composite_bind_group) |bg| {
+        // No-flip variant: the 3D pipeline writes the render-to-texture
+        // already in final screen orientation, so the default Y-flip the
+        // image compositor applies (correct for top-down sprite sources)
+        // would invert the scene.
+        images.queueQuadNoFlip(x, y, w, h, opacity, bg);
+        return true;
+    }
+    return false;
+}
+
+// Draw every scene recorded by render() this frame. Called once from
+// gpu.frame(), after StaticSurface captures and before the main 2D pass, so
+// textureKey-sampled surfaces are already populated for this frame.
+pub fn flushPending() void {
+    for (g_pending[0..g_pending_count]) |p| drawScene(p.node, p.slot, p.w, p.h);
+    g_pending_count = 0;
+}
+
+fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
+    const queue = core.getQueue() orelse return;
+    const device = core.getDevice() orelse return;
 
     // ── Extract camera, lights, meshes from children ──
     var cam_pos = math.Vec3{ .x = 0, .y = 5, .z = 10 };
@@ -1060,9 +1111,9 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
     const vp = math.m4multiply(projection, view);
 
     // ── Begin render pass ──
-    const color_view = slot.color_view orelse return false;
-    const depth_view = slot.depth_view orelse return false;
-    const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("r3d") }) orelse return false;
+    const color_view = slot.color_view orelse return;
+    const depth_view = slot.depth_view orelse return;
+    const encoder = device.createCommandEncoder(&.{ .label = wgpu.StringView.fromSlice("r3d") }) orelse return;
     const pass = encoder.beginRenderPass(&.{
         .color_attachment_count = 1,
         .color_attachments = @ptrCast(&wgpu.ColorAttachment{
@@ -1082,7 +1133,7 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
         },
     }) orelse {
         encoder.release();
-        return false;
+        return;
     };
 
     pass.setPipeline(g_pipeline.?);
@@ -1103,20 +1154,9 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
     pass.release();
     const command = encoder.finish(&.{ .label = wgpu.StringView.fromSlice("r3d_cmd") }) orelse {
         encoder.release();
-        return false;
+        return;
     };
     encoder.release();
     queue.submit(&.{command});
     command.release();
-
-    if (slot.composite_bind_group) |bg| {
-        // No-flip variant: the 3D pipeline writes the render-to-texture
-        // already in final screen orientation, so the default Y-flip the
-        // image compositor applies (correct for top-down sprite sources)
-        // would invert the scene. Symmetric tiles hid this; an off-axis
-        // avatar makes it obvious.
-        images.queueQuadNoFlip(x, y, w, h, opacity, bg);
-        return true;
-    }
-    return false;
 }

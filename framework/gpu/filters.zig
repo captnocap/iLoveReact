@@ -291,6 +291,40 @@ pub fn queueComposite(
     g_composite_count += 1;
 }
 
+/// Draw ONE filter composite immediately into the given render pass, at
+/// `bounds` in that pass's coordinate space (globals.screen_size must already
+/// be the target's dims). Used to fold a <Filter> nested inside a
+/// <StaticSurface> into the parent's offscreen texture, instead of leaking it
+/// onto the main framebuffer. `bind_group` samples the filter's captured
+/// (raw) input texture.
+pub fn drawInline(
+    render_pass: *wgpu.RenderPassEncoder,
+    queue: *wgpu.Queue,
+    filter: Filter,
+    bind_group: *wgpu.BindGroup,
+    uniform_buf: *wgpu.Buffer,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    time: f32,
+    intensity: f32,
+) void {
+    const pipeline = g_pipelines[@intFromEnum(filter)] orelse return;
+    const u = FilterUniforms{
+        .bounds_x = x,
+        .bounds_y = y,
+        .bounds_w = w,
+        .bounds_h = h,
+        .time = time,
+        .intensity = std.math.clamp(intensity, 0.0, 1.0),
+    };
+    queue.writeBuffer(uniform_buf, 0, @ptrCast(&u), @sizeOf(FilterUniforms));
+    render_pass.setPipeline(pipeline);
+    render_pass.setBindGroup(0, bind_group, 0, null);
+    render_pass.draw(6, 1, 0, 0);
+}
+
 /// Run all queued filter composites against the main framebuffer.
 /// Call from inside the main render pass, after primitive draws.
 pub fn drawComposites(render_pass: *wgpu.RenderPassEncoder) void {

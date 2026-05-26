@@ -1202,10 +1202,40 @@ fn drawStaticCapture(render_pass: *wgpu.RenderPassEncoder, cap: StaticSurfaceCap
     }
 }
 
+// True when `inner`'s primitive range falls entirely within `outer`'s — i.e.
+// `inner` was painted as part of `outer`'s captured subtree (nesting).
+fn capEncloses(outer: StaticSurfaceCapture, inner: StaticSurfaceCapture) bool {
+    return inner.start.rects >= outer.start.rects and inner.end.rects <= outer.end.rects and
+        inner.start.glyphs >= outer.start.glyphs and inner.end.glyphs <= outer.end.glyphs and
+        inner.start.images >= outer.start.images and inner.end.images <= outer.end.images;
+}
+
 fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
     if (g_static_capture_count == 0) return;
 
-    for (g_static_captures[0..g_static_capture_count]) |cap| {
+    // A <Filter> nested inside a <StaticSurface> shows up as a filter capture
+    // whose range is enclosed by a (non-filter) static capture's range. Such a
+    // filter must NOT composite to the main framebuffer (it would leak at its
+    // capture-local origin); its filtered output is drawn INTO the parent
+    // static texture during the parent's pass instead — so the captured
+    // surface, and any mesh sampling it via textureKey, shows the filtered
+    // result. Non-nested filters (e.g. a top-level fullscreen Filter) and
+    // plain StaticSurfaces are unaffected.
+    var nested = [_]bool{false} ** MAX_STATIC_CAPTURES;
+    for (g_static_captures[0..g_static_capture_count], 0..) |cap, i| {
+        if (!cap.is_filter) continue;
+        for (g_static_captures[0..g_static_capture_count], 0..) |outer, j| {
+            if (j == i or outer.is_filter) continue;
+            if (capEncloses(outer, cap)) {
+                nested[i] = true;
+                break;
+            }
+        }
+    }
+
+    const t_seconds: f32 = @floatCast(@as(f64, @floatFromInt(g_frame_counter % 1_000_000)) / 60.0);
+
+    for (g_static_captures[0..g_static_capture_count], 0..) |cap, i| {
         if (cap.entry_index >= MAX_STATIC_SURFACES) continue;
         const entry = &g_static_entries[cap.entry_index];
         const view = entry.view orelse continue;
@@ -1228,7 +1258,39 @@ fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
             encoder.release();
             continue;
         };
-        drawStaticCapture(render_pass, cap);
+        // If a nested filter covers this surface's ENTIRE range, skip drawing
+        // the raw content — the filter replaces it. Otherwise the filter's
+        // inset/curvature (e.g. CRT barrel) reveals un-filtered pixels at the
+        // edges (an orange border around the screen). A partial nested filter
+        // still draws the raw content around itself.
+        var raw_covered = false;
+        if (!cap.is_filter) {
+            for (g_static_captures[0..g_static_capture_count], 0..) |fcap, fi| {
+                if (!fcap.is_filter or !nested[fi]) continue;
+                if (capEncloses(fcap, cap)) {
+                    raw_covered = true;
+                    break;
+                }
+            }
+        }
+        if (!raw_covered) drawStaticCapture(render_pass, cap);
+
+        // Parent static surface: fold each nested filter's shader pass directly
+        // into this texture at the filter's local bounds. Nested filters were
+        // appended before their parent (inner subtree finishes first), so their
+        // raw input texture is already rendered by now.
+        if (!cap.is_filter) {
+            for (g_static_captures[0..g_static_capture_count], 0..) |fcap, fi| {
+                if (!fcap.is_filter or !nested[fi]) continue;
+                if (!capEncloses(cap, fcap)) continue;
+                if (fcap.entry_index >= MAX_STATIC_SURFACES) continue;
+                const fentry = &g_static_entries[fcap.entry_index];
+                const fbg = fentry.filter_bind_group orelse continue;
+                const fub = fentry.filter_uniform_buf orelse continue;
+                filters.drawInline(render_pass, queue, fcap.filter, fbg, fub, fcap.filter_x, fcap.filter_y, fcap.filter_w, fcap.filter_h, t_seconds, fcap.filter_intensity);
+            }
+        }
+
         render_pass.end();
         render_pass.release();
         const command = encoder.finish(null) orelse {
@@ -1240,23 +1302,25 @@ fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
         command.release();
         if (cap.is_filter) {
             // Filter captures intentionally don't cache. Leave entry.ready=false
-            // so the offscreen pass runs again next frame. Queue the filter
-            // shader composite to run during the main render pass.
-            const bg = entry.filter_bind_group orelse continue;
-            const ub = entry.filter_uniform_buf orelse continue;
-            const t_seconds: f32 = @floatCast(@as(f64, @floatFromInt(g_frame_counter % 1_000_000)) / 60.0);
-            filters.queueComposite(
-                queue,
-                cap.filter,
-                bg,
-                ub,
-                cap.filter_x,
-                cap.filter_y,
-                cap.filter_w,
-                cap.filter_h,
-                t_seconds,
-                cap.filter_intensity,
-            );
+            // so the offscreen pass runs again next frame. A non-nested filter
+            // composites to the main framebuffer; a nested one was already
+            // folded into its parent's texture above.
+            if (!nested[i]) {
+                const bg = entry.filter_bind_group orelse continue;
+                const ub = entry.filter_uniform_buf orelse continue;
+                filters.queueComposite(
+                    queue,
+                    cap.filter,
+                    bg,
+                    ub,
+                    cap.filter_x,
+                    cap.filter_y,
+                    cap.filter_w,
+                    cap.filter_h,
+                    t_seconds,
+                    cap.filter_intensity,
+                );
+            }
         } else {
             entry.ready = true;
             entry.ready_frame = g_frame_counter;
@@ -1634,6 +1698,12 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     if (gcurve_fill.count() > 0) gcurve_fill.upload(queue);
 
     renderStaticSurfaceCaptures(device, queue);
+
+    // Draw deferred 3D scenes now — AFTER StaticSurface captures so a mesh that
+    // samples a captured surface via textureKey reads THIS frame's content
+    // (billboards / screens), and BEFORE the main pass so the composite quad
+    // queued during the paint walk samples a freshly-rendered 3D RT.
+    scene3d.flushPending();
 
     const encoder = device.createCommandEncoder(&.{}) orelse return;
 
