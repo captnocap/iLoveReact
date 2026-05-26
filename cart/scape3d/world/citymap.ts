@@ -49,14 +49,28 @@ const packTile = (kind: T, tier: number, style: number) => kind | (tier << 3) | 
 
 const FILL: T = T.Sidewalk; // base ground before anything is stamped
 
+// ── normalized lane/road standard (1 tile = 1 m) ────────────────────────────
+// A lane is 2 tiles (≈ a car-and-a-bit). A basic road is two lanes either side of
+// a 1-tile median: LANE_W*2 + MEDIAN_W = 5. Author EVERY road from these so lane
+// width is one source of truth. NOTE: this map is placeholder and will be rebuilt
+// on this standard — the point of this pass is to normalize the unit, not the layout.
+export const LANE_W = 2;
+export const MEDIAN_W = 1;
+export const ROAD_W = LANE_W * 2 + MEDIAN_W; // 5 — a basic two-lane road
+export const SIDEWALK_W = 2;                 // reserved for the real map's street section
+
+// A road ROAD_W tiles thick. The dashed centerline auto-draws down the median.
+const hRoad = (y: number, x0: number, x1: number): Rect => ({ x0, y0: y, x1, y1: y + ROAD_W - 1, t: T.Road });
+const vRoad = (x: number, y0: number, y1: number): Rect => ({ x0: x, y0, x1: x + ROAD_W - 1, y1, t: T.Road });
+
 // Roads form a grid of blocks. Plaza is the central block. Buildings sit in the
 // outer blocks; the canal eats the south-center; grime fills the southeast.
 export const RECTS: Rect[] = [
-  // boulevards (asphalt), 3 tiles thick
-  { x0: 2, y0: 10, x1: 49, y1: 12, t: T.Road }, // north boulevard
-  { x0: 2, y0: 30, x1: 49, y1: 32, t: T.Road }, // south boulevard
-  { x0: 12, y0: 2, x1: 14, y1: 41, t: T.Road }, // west avenue
-  { x0: 36, y0: 2, x1: 38, y1: 41, t: T.Road }, // east avenue
+  // boulevards + avenues — two-lane (ROAD_W), built from the lane standard above
+  hRoad(10, 2, 49), // north boulevard
+  hRoad(30, 2, 49), // south boulevard
+  vRoad(12, 2, 41), // west avenue
+  vRoad(36, 2, 41), // east avenue
 
   // central neon plaza (the dream)
   { x0: 16, y0: 14, x1: 35, y1: 29, t: T.Plaza },

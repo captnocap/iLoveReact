@@ -109,7 +109,7 @@ function zoneHex(t: T): string {
 // Flat ground fill (textured for plaza/road); roads also get crisp lane dashes.
 // `y0` stacks overlapping fills by paint order (base under overrides) to avoid
 // z-fighting where one zone's floor sits over another's.
-function groundFrag(key: string, surface: Surface, ax: number, ay: number, w: number, h: number, y0: number) {
+function groundFrag(key: string, surface: Surface, ax: number, ay: number, w: number, h: number, y0: number, isRoad: (x: number, y: number) => boolean) {
   const cx = ax + w / 2;
   const cz = ay + h / 2;
   const textured = surface === 'plaza' ? PLAZA_TEX : surface === 'road' ? ROAD_TEX : null;
@@ -124,9 +124,14 @@ function groundFrag(key: string, surface: Surface, ax: number, ay: number, w: nu
     const n = Math.floor(len / STEP);
     for (let k = 0; k < n; k++) {
       const off = -len / 2 + STEP / 2 + k * STEP;
+      const px = horizontal ? cx + off : cx;
+      const pz = horizontal ? cz : cz + off;
+      // A centerline dash only exists where the tile under it is STILL road after all
+      // stamps — so markings can't float over water/sand/buildings that overdrew the road.
+      if (!isRoad(Math.floor(px), Math.floor(pz))) continue;
       pieces.push(
         <Scene3D.Mesh key={`lane-${k}`} geometry="box" material={ROAD_LINE}
-          position={horizontal ? [cx + off, 0.06, cz] : [cx, 0.06, cz + off]}
+          position={[px, 0.06, pz]}
           sizeX={horizontal ? DASH : 0.16} sizeY={0.05} sizeZ={horizontal ? 0.16 : DASH} />,
       );
     }
@@ -210,10 +215,13 @@ export function bake(root: Entity): BakedWorld {
     return 0;
   };
 
-  // pass 2: emit frags now that heightAt exists (buildings sit on their terrain)
+  // pass 2: emit frags now that heightAt exists (buildings sit on their terrain).
+  // The packed grid is final here, so road markings can be clipped to tiles that are
+  // STILL road after every stamp — no lane lines floating over water/buildings.
+  const isRoad = (x: number, y: number): boolean => ((packed.get(`${x},${y}`) ?? VOID) & 7) === T.Road;
   let gi = 0; // ground paint order → tiny y stack so overlapping fills don't z-fight
   const frags: any[] = entries.map((en, i) => {
-    if (en.kind === 'ground') return groundFrag(`g${i}`, en.surface, en.ax, en.ay, en.w, en.h, -0.05 + gi++ * 0.004);
+    if (en.kind === 'ground') return groundFrag(`g${i}`, en.surface, en.ax, en.ay, en.w, en.h, -0.05 + gi++ * 0.004, isRoad);
     if (en.kind === 'terrace') return terraceFrag(`t${i}`, en.surface, en.ax, en.ay, en.w, en.h, en.fn);
     return <Fragment key={`c${i}`}>{en.e.render!(en.ax, en.ay, heightAt)}</Fragment>;
   });
