@@ -88,7 +88,10 @@ const SURFACE_KIND: Record<Surface, T> = {
 
 // ── textures (built once, host-cached by content hash) ───────────────────────
 const WHITE = '#ffffff';
-const PLAZA_TEX = checkerTex(20, 16, 4, PLAZA_A, PLAZA_B);
+// cell px = texels per 1 m checker square. The whole plaza is one stretched face, so
+// this is the only resolution knob until UV tiling lands — keep it dense (≈32px/tile)
+// so the squares + grout stay crisp instead of bilinear-smearing into soft diamonds.
+const PLAZA_TEX = checkerTex(20, 16, 32, PLAZA_A, PLAZA_B);
 const ROAD_TEX = asphaltTex(ZONE_HEX.road, ROAD_LINE);
 
 function zoneHex(t: T): string {

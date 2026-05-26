@@ -54,8 +54,8 @@ export function checkerTex(cols: number, rows: number, cell: number, aHex: strin
 
 // ── asphalt speckle (lane lines are now crisp geometry, not painted here) ───
 export function asphaltTex(baseHex: string, _lineHex: string): Tex {
-  const w = 16;
-  const h = 16;
+  const w = 64; // denser grain; roads are long faces, so this is still the cheap knob (tiling would do better)
+  const h = 64;
   let hex = '';
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
@@ -68,8 +68,8 @@ export function asphaltTex(baseHex: string, _lineHex: string): Tex {
 
 // ── building facade: lit window grid with dark frames ──────────────────────
 export function facadeTex(wallHex: string, winHex: string, cols: number, rows: number): Tex {
-  const cw = 9; // px per cell — higher res so windows stay crisp when stretched
-  const ch = 9;
+  const cw = 24; // px per window cell — dense enough that frames/sheen stay crisp when the face is stretched
+  const ch = 24;
   const w = cols * cw;
   const h = rows * ch;
   let hex = '';
