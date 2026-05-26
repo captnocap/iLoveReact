@@ -102,6 +102,38 @@ so world picking uses raw coords.
 - **Enterable interiors / depth** and **per-zone NPCs** (NPCs are still global in
   `state/world.ts makeEntities`).
 
+## Thingymajiggers — the one world-object category (2026-05-26)
+
+Every placed object — toilet, building, palm, dumpster, door — is ONE thing: a
+**thingymajigger**, a self-contained module that owns its material + mesh + footprint.
+No more "which file/system writes this model and its scale?" split (`BuildingDef`/
+`Item` in `design.ts` were premature category splits; the runtime model is `Entity`).
+
+- `thingymajiggers/kit.tsx` — the contract: `Thingymajigger { kind, size, blocks?, Mesh }`,
+  `ThingProps { x, z, baseY }`, `defineThingymajigger()`.
+- `thingymajiggers/index.ts` — the `THINGYMAJIGGERS` registry. **Both `bake()` (static)
+  and the live renderers (dynamic) resolve meshes through this one table.**
+- Name rationale: "thing" is ungreppable; `thingymajigger` returns exactly our objects.
+  It's the game-industry "doodad" concept (WoW's placed-decoration category).
+
+Done so far: kit + registry + **static** thingymajiggers `PalmTree`, `Dumpster`, `Sign`,
+`CityBuilding` (which owns `HEIGHT_SCALE` + `FACADE_TEX`). `entity.tsx` is now pure
+bake-engine + ground/relief fills; `atlas.tsx` resolves buildings + props via the
+registry. Ships + launches clean.
+
+Scale pass (same session): 1 tile = 1 m, the ~2 m player is the fixed human anchor,
+scale the world UP not the player down. Buildings `HEIGHT_SCALE` 3.2→4.6, palm 2.4→4.2 m
+(stylised, not realistic-10 m), dumpster 0.9→1.3 m, sign 1.8→3 m pole.
+
+STILL TO MIGRATE: furniture (`Toilet`/`Bed`/`Lamp` from `world/entities.tsx`), then the
+dynamics (`Door` — folding in the pending 1.7→2.1 height fix so the 2 m player clears it —
+`Floorboard`, `Storefront`, `Person`), then rename `render3d/City3D.tsx` → `World.tsx`.
+
+design.ts also gained the NEW quest/mission/save datashapes (not yet built): `Quest.requires`
++ `QuestRequirement` (unlock-by-criteria, no story state machine), `MissionTemplate` +
+`MissionConstraint` + `MissionInstance` (reusable daily side-gigs), `MissionGenContext`
+(optional LLM framing, static fallback), `SaveSnapshot` (autosave; bake() re-derives geometry).
+
 ---
 
 # Scape Progress (inherited 2D-era history below)

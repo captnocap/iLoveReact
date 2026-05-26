@@ -19,13 +19,9 @@
 
 import { Fragment } from 'react';
 import { Scene3D } from '@reactjit/runtime/primitives';
-import { T, VOID, HEIGHTS, type PropKind } from './citymap';
-import {
-  ZONE_HEX, buildingFacade, buildingRoof, neonRim, windowGlow,
-  PALM_TRUNK, PALM_FROND, DUMPSTER, DUMPSTER_LID, SIGN_POLE, signNeon,
-  PLAZA_A, PLAZA_B, ROAD_LINE, HILL_SIDE,
-} from '../render3d/palette3d';
-import { checkerTex, asphaltTex, facadeTex } from '../render3d/textures';
+import { T, VOID, type PropKind } from './citymap';
+import { ZONE_HEX, PLAZA_A, PLAZA_B, ROAD_LINE, HILL_SIDE } from '../render3d/palette3d';
+import { checkerTex, asphaltTex } from '../render3d/textures';
 
 // ── types ──────────────────────────────────────────────────────────────────
 export type Surface = 'road' | 'sidewalk' | 'plaza' | 'water' | 'sand' | 'grime';
@@ -92,8 +88,6 @@ const SURFACE_KIND: Record<Surface, T> = {
 
 // ── textures (built once, host-cached by content hash) ───────────────────────
 const WHITE = '#ffffff';
-const HEIGHT_SCALE = 3.2;
-export const FACADE_TEX = [0, 1, 2, 3].map((s) => facadeTex(buildingFacade(s), windowGlow(s), 6, 16));
 const PLAZA_TEX = checkerTex(20, 16, 4, PLAZA_A, PLAZA_B);
 const ROAD_TEX = asphaltTex(ZONE_HEX.road, ROAD_LINE);
 
@@ -108,71 +102,9 @@ function zoneHex(t: T): string {
   }
 }
 
-// ── reusable render helpers (kit pieces) ─────────────────────────────────────
-// A building: textured facade from ground to roof (so it fills any relief it
-// stands on) + roof cap + neon rim cage.
-export function buildingMesh(key: string, ax: number, ay: number, w: number, d: number, tier: number, style: number, baseY: number) {
-  const cx = ax + w / 2;
-  const cz = ay + d / 2;
-  const top = baseY + HEIGHTS[tier] * HEIGHT_SCALE;
-  const t = 0.12;
-  return (
-    <Fragment key={key}>
-      <Scene3D.Mesh geometry="box" material={WHITE} texture={FACADE_TEX[style]}
-        position={[cx, top / 2, cz]} sizeX={w} sizeY={top} sizeZ={d} />
-      <Scene3D.Mesh geometry="box" material={buildingRoof(style)}
-        position={[cx, top + 0.05, cz]} sizeX={w - 0.04} sizeY={0.14} sizeZ={d - 0.04} />
-      {/* neon rim: top frame + corner posts */}
-      <Scene3D.Mesh geometry="box" material={neonRim(style)} position={[cx, top, cz - d / 2]} sizeX={w + t} sizeY={t} sizeZ={t} />
-      <Scene3D.Mesh geometry="box" material={neonRim(style)} position={[cx, top, cz + d / 2]} sizeX={w + t} sizeY={t} sizeZ={t} />
-      <Scene3D.Mesh geometry="box" material={neonRim(style)} position={[cx - w / 2, top, cz]} sizeX={t} sizeY={t} sizeZ={d + t} />
-      <Scene3D.Mesh geometry="box" material={neonRim(style)} position={[cx + w / 2, top, cz]} sizeX={t} sizeY={t} sizeZ={d + t} />
-      {[[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sz], k) => (
-        <Scene3D.Mesh key={k} geometry="box" material={neonRim(style)}
-          position={[cx + (sx * w) / 2, top / 2, cz + (sz * d) / 2]} sizeX={t} sizeY={top} sizeZ={t} />
-      ))}
-    </Fragment>
-  );
-}
-
-export function palmMesh(key: string, x: number, z: number, baseY: number) {
-  const ring = (tier: number, n: number, len: number, droop: number, y: number, reach: number) =>
-    Array.from({ length: n }, (_, k) => {
-      const a = (k / n) * Math.PI * 2 + tier * 0.4;
-      return (
-        <Scene3D.Mesh key={`f${tier}-${k}`} geometry="box" material={PALM_FROND}
-          position={[x + Math.cos(a) * reach, baseY + y, z + Math.sin(a) * reach]}
-          rotation={[droop, -a, 0]} sizeX={len} sizeY={0.05} sizeZ={0.22} />
-      );
-    });
-  return (
-    <Fragment key={key}>
-      <Scene3D.Mesh geometry="cylinder" material={PALM_TRUNK} position={[x, baseY + 1.1, z]} radius={0.12} sizeY={2.2} />
-      <Scene3D.Mesh geometry="box" material={PALM_FROND} position={[x, baseY + 2.3, z]} sizeX={0.3} sizeY={0.18} sizeZ={0.3} />
-      {ring(0, 5, 1.0, 0.35, 2.32, 0.55)}
-      {ring(1, 4, 0.7, 0.8, 2.18, 0.42)}
-    </Fragment>
-  );
-}
-
-export function dumpsterMesh(key: string, x: number, z: number, baseY: number) {
-  return (
-    <Fragment key={key}>
-      <Scene3D.Mesh geometry="box" material={DUMPSTER} position={[x, baseY + 0.42, z]} sizeX={0.82} sizeY={0.78} sizeZ={0.66} />
-      <Scene3D.Mesh geometry="box" material={DUMPSTER_LID} position={[x, baseY + 0.84, z]} sizeX={0.9} sizeY={0.12} sizeZ={0.74} />
-    </Fragment>
-  );
-}
-
-export function signMesh(key: string, x: number, z: number, tint: number, baseY: number) {
-  return (
-    <Fragment key={key}>
-      <Scene3D.Mesh geometry="cylinder" material={SIGN_POLE} position={[x, baseY + 0.9, z]} radius={0.05} sizeY={1.8} />
-      <Scene3D.Mesh geometry="box" material={signNeon(tint)} position={[x, baseY + 1.9, z]} sizeX={0.7} sizeY={0.5} sizeZ={0.08} />
-      <Scene3D.Mesh geometry="box" material={SIGN_POLE} position={[x, baseY + 1.9, z - 0.05]} sizeX={0.82} sizeY={0.62} sizeZ={0.04} />
-    </Fragment>
-  );
-}
+// Discrete world objects (palm, dumpster, sign, building, …) live in
+// thingymajiggers/ and are resolved via THINGYMAJIGGERS by the atlas. What stays
+// here is the surface layer the bake engine owns directly: ground fills + relief.
 
 // Flat ground fill (textured for plaza/road); roads also get crisp lane dashes.
 // `y0` stacks overlapping fills by paint order (base under overrides) to avoid

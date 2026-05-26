@@ -8,11 +8,9 @@
 import {
   T, CITY_W, CITY_H, RECTS, BLDGS, PROPS, type Bldg, type Prop,
 } from './citymap';
-import {
-  bake, buildingMesh, palmMesh, dumpsterMesh, signMesh,
-  type Entity, type Surface,
-} from './entity';
+import { bake, type Entity, type Surface } from './entity';
 import { crackhouse } from './entities';
+import { THINGYMAJIGGERS } from '../thingymajiggers';
 
 const SURF: Record<number, Surface> = {
   [T.Road]: 'road', [T.Sidewalk]: 'sidewalk', [T.Plaza]: 'plaza',
@@ -28,7 +26,8 @@ function buildingEntity(b: Bldg): Entity {
   return {
     size: [w, d],
     pack: T.Wall | (b.h << 3) | (b.style << 6),
-    render: (ax, ay, heightAt) => buildingMesh(`b-${ax}-${ay}`, ax, ay, w, d, b.h, b.style, heightAt(ax + w / 2, ay + d / 2)),
+    render: (ax, ay, heightAt) =>
+      THINGYMAJIGGERS.cityBuilding.Mesh({ x: ax, z: ay, baseY: heightAt(ax + w / 2, ay + d / 2), w, d, tier: b.h, style: b.style }),
   };
 }
 
@@ -37,15 +36,8 @@ function propEntity(p: Prop): Entity {
     size: [1, 1],
     prop: p.kind,
     propTint: p.tint,
-    render: (ax, ay, heightAt) => {
-      const cx = ax + 0.5;
-      const cz = ay + 0.5;
-      const by = heightAt(cx, cz);
-      const key = `p-${ax}-${ay}`;
-      if (p.kind === 'palm') return palmMesh(key, cx, cz, by);
-      if (p.kind === 'dumpster') return dumpsterMesh(key, cx, cz, by);
-      return signMesh(key, cx, cz, p.tint, by);
-    },
+    render: (ax, ay, heightAt) =>
+      THINGYMAJIGGERS[p.kind]?.Mesh({ x: ax + 0.5, z: ay + 0.5, baseY: heightAt(ax + 0.5, ay + 0.5), tint: p.tint }) ?? null,
   };
 }
 
