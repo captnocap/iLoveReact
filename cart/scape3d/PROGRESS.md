@@ -139,6 +139,51 @@ design.ts also gained the NEW quest/mission/save datashapes (not yet built): `Qu
 `MissionConstraint` + `MissionInstance` (reusable daily side-gigs), `MissionGenContext`
 (optional LLM framing, static fallback), `SaveSnapshot` (autosave; bake() re-derives geometry).
 
+### Lane/road normalization + dash clipping
+
+Roads were 3 tiles thick → ~1.5 m lanes (a lane as wide as the player). Normalized the
+UNIT: `LANE_W=2`, `MEDIAN_W=1`, `ROAD_W=5` (2+1+2) + `hRoad`/`vRoad` helpers in
+`world/citymap.ts`, so lane width is one source of truth and the real map (this layout is
+placeholder — it'll be rebuilt on the standard) authors roads from it, never magic numbers.
+Sidewalks untouched (`SIDEWALK_W=2` reserved). Also fixed FLOATING lane lines: the centerline
+and asphalt were separate meshes at different heights, so a dash outlived its road wherever a
+later stamp (canal) or a building overdrew it. `groundFrag` now clips each dash to tiles that
+are STILL road in the final baked grid — markings can't float, on any map.
+
+### Texture fidelity
+
+All procedural textures were tiny buffers stretched once across a big face, then bilinear-
+smeared (the plaza checker was 4 px/tile → soft diamonds). Densified the buffers: plaza checker
+cell 4→32, facade window cell 9→24, asphalt 16→64. Plaza/facade are now crisp; roads are long
+faces so asphalt is still stretch-limited — UV tiling (repeat + per-mesh uv-scale) is the
+resolution-independent fix when wanted.
+
+### Interaction profile on thingymajiggers (stash + examine)
+
+A thingymajigger now declares `stash?: number` (potential container slots) + `examine?: string`.
+A declared stash auto-registers the placed thing as a searchable `feature` (an empty `cache` of
+that capacity) — so a toilet (`stash:1`) is searchable even when empty. This collapsed the old
+hardcoded special-cases (dumpster-Search/floorboard-Pry switched on kind): `availableActions`
+offers Search for any ungated stash, Pry for a tool-gated one (crowbar floorboard = a gated
+stash); examine flavor is read from the registry. **Deposit/withdraw**: a stash is a REUSABLE
+container — "Stash the <item>" deposits the held item, Search pulls everything back out, it stays
+usable. Instances ride `cache.stashed` (id-list) and never leave inventory state so charges/
+quality survive. `design.ts InteractionEffect` gained `{kind:'stash'}` (deposit) beside `loot`.
+
+### 3D item models — dropped + in-hand
+
+Items had only 2D SDF sprites (shader-quad era), so in 3D they were invisible and hands were
+empty. Each item now carries a hand-authored 3D `model` in a fine cm grid (`registries/items/
+itemMesh.tsx`: 1 unit = 1 cm, capped ≤1 tile), beside its SDF (still drives the HUD box).
+Authored: crowbar, knife, pistol, lockpick, bomb, blue_hoodie. Dropped items resolve through
+`World.tsx` and lie on the terrain; the in-hand item renders gripped in the player's right hand
+(`Characters3D` `Figure`), yaw-oriented along facing (`itemMesh` gained `yaw`). Icon ≠ model:
+pixel_icon/cutout are the future ICON layer, not a model source.
+
+**Still open (next):** doors/ENTRY-TO-BUILDING — doors open/close + block pathfinding, but only
+the crackhouse has an interior; the citymap `BLDGS` are solid `CityBuilding` blocks. Real entry
+(interiors for buildings + roof fade/cull so the top-down camera sees in) is unbuilt.
+
 ---
 
 # Scape Progress (inherited 2D-era history below)
