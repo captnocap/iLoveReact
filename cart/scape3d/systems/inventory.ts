@@ -134,3 +134,38 @@ export function dropInHand(player: Player, state: InventoryState, x: number, y: 
   state.worldItems.push({ id: state.nextWorldItemId++, instanceId, x, y });
   return module ? `Dropped ${module.type.label}.` : 'Dropped item.';
 }
+
+// ── stash containers (toilet/bed/dumpster …) — deposit & withdraw ────────────
+// A stash is just another list of instance ids, like pockets. The instance never
+// leaves state.instances, so charges/quality/burned survive being stashed.
+type StashCache = { stash?: number; stashed?: number[] };
+
+// Move the in-hand item into a stash, if it has a free slot. Returns a message, or
+// null if there's nothing in hand / no room.
+export function stashInHand(player: Player, state: InventoryState, cache: StashCache): string | null {
+  if (player.inHand == null || cache.stash == null) return null;
+  const stashed = cache.stashed ?? (cache.stashed = []);
+  if (stashed.length >= cache.stash) return null; // full
+  const instanceId = player.inHand;
+  const instance = instanceById(state, instanceId);
+  const module = instance ? itemModule(instance.typeKey) : undefined;
+  player.pockets = player.pockets.filter((id) => id !== instanceId);
+  player.inHand = player.pockets[0];
+  stashed.push(instanceId);
+  return module ? `Stashed the ${module.type.label}.` : 'Stashed it.';
+}
+
+// Pull everything out of a stash back into pockets. Returns the labels taken (for the
+// toast). Leaves the container empty + reusable.
+export function emptyStash(player: Player, state: InventoryState, cache: StashCache): string[] {
+  const taken: string[] = [];
+  for (const id of cache.stashed ?? []) {
+    if (!player.pockets.includes(id)) player.pockets = player.pockets.concat(id);
+    if (player.inHand == null) player.inHand = id;
+    const inst = instanceById(state, id);
+    const mod = inst ? itemModule(inst.typeKey) : undefined;
+    if (mod) taken.push(mod.type.label);
+  }
+  cache.stashed = [];
+  return taken;
+}

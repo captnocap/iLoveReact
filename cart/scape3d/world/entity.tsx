@@ -50,8 +50,9 @@ export interface Cache {
   needs?: PropKind | string;  // item key required to open (e.g. 'crowbar')
   money?: number;             // cash inside
   items?: string[];           // item keys inside
-  opened?: boolean;           // pried/looted yet
-  stash?: number;             // slot capacity — set from the thingymajigger's `stash`; makes an empty thing searchable
+  opened?: boolean;           // pried/looted yet (one-time caches only; containers ignore it)
+  stash?: number;             // slot CAPACITY — set from the thingymajigger's `stash`. Presence marks a REUSABLE container.
+  stashed?: number[];         // instance ids the player has deposited (live in inventory state; just held off-inventory here)
 }
 
 // A baked interactable: an entity with a cache, flattened to ABSOLUTE coords with

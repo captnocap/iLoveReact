@@ -29,6 +29,8 @@ import {
   inventorySlots,
   nearestWorldItem,
   pickupWorldItem,
+  stashInHand,
+  emptyStash,
   type InventorySlot,
   type InventoryState,
 } from '../systems/inventory';
@@ -407,6 +409,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       hour: clockHM(clock.current).hour,
       closedDoors: new Set<string>(closedDoorBlockers(doorsRef.current)),
       heldKey: slot?.module.type.key, // gates tool actions (e.g. 'pry' needs a crowbar)
+      heldLabel: slot?.module.type.label, // names the "Stash the X" row
     };
   };
 
@@ -501,14 +504,30 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
         if (t.kind === 'door') toggleDoor(t.door);
         break;
       case 'loot': {
-        // Search an UNGATED stash (toilet, bed, dumpster, …). Quiet — you're rifling,
-        // not tearing the place up — so no heat. Takes pre-placed cash; depositing your
-        // own items into the stash is the next layer.
         if (t.kind !== 'feature') break;
-        const got = takeStash(t.feature.cache);
-        if (got == null) setEx("Already been through here. Nothing left.");
-        else if (got > 0) setEx(`Tucked in there — $${got.toLocaleString()}. Lucky you.`);
-        else setEx(`You search the ${t.feature.kind}. Nothing worth taking.`);
+        const cache = t.feature.cache;
+        if (cache.stash != null) {
+          // A REUSABLE container (toilet/bed/dumpster) — pull out cash + everything you
+          // stashed. Stays reusable (no 'opened'), so it keeps working as a hiding spot.
+          // Quiet: rifling your own stash isn't loud, so no heat.
+          const parts: string[] = [];
+          if (cache.money && cache.money > 0) { adjustMoney(cur, cache.money); parts.push(`$${cache.money.toLocaleString()}`); cache.money = 0; }
+          parts.push(...emptyStash(cur.body, inventory.current, cache));
+          setEx(parts.length ? `You pull out: ${parts.join(', ')}.` : `You search the ${t.feature.kind}. Empty.`);
+        } else {
+          // A ONE-TIME cache. Quiet search — take the cash, then it's spent.
+          const got = takeStash(cache);
+          if (got == null) setEx('Already been through here. Nothing left.');
+          else if (got > 0) setEx(`Tucked in there — $${got.toLocaleString()}. Lucky you.`);
+          else setEx(`You search the ${t.feature.kind}. Nothing worth taking.`);
+        }
+        break;
+      }
+      case 'stash': {
+        // Deposit the in-hand item into a reusable stash (the menu already checked room).
+        if (t.kind !== 'feature') break;
+        const msg = stashInHand(cur.body, inventory.current, t.feature.cache);
+        setEx(msg ?? 'No room, or nothing in hand.');
         break;
       }
       case 'pry': {

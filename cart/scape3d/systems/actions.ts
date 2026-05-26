@@ -32,7 +32,8 @@ export type AttackContext = {
   health01: number; // 0..1
   hour: number; // 0..23
   closedDoors: Set<string>;
-  heldKey?: string; // typeKey of the in-hand item — gates tool actions like 'pry'
+  heldKey?: string;   // typeKey of the in-hand item — gates tool actions like 'pry'
+  heldLabel?: string; // label of the in-hand item — names the "Stash the X" row
 };
 
 export type ActionTarget =
@@ -163,13 +164,18 @@ export function availableActions(t: ActionTarget, ctx: AttackContext): ActionOpt
       break;
     case 'feature': {
       const c = t.feature.cache;
-      // A stash is searchable until it's been opened. A GATED stash (needs a tool)
-      // offers 'pry'; an ungated one offers 'Search'. An empty declared stash is still
-      // searchable — you just find nothing. That's the whole point of a potential spot.
-      const stashable = !c.opened && (!!c.stash || !!c.money || !!c.items?.length || c.needs != null);
-      if (stashable) {
+      if (c.stash != null) {
+        // A REUSABLE stash container (toilet/bed/dumpster). Always searchable (empty =
+        // you find nothing). If you're holding something and there's a free slot, you
+        // can stash it — this is the "best way to hide items" path.
+        out.push(opt('loot', d, 'Search'));
+        const hasRoom = (c.stashed?.length ?? 0) < c.stash;
+        if (ctx.heldKey != null && hasRoom) {
+          out.push(opt('stash', d, ctx.heldLabel ? `Stash the ${ctx.heldLabel}` : 'Stash held item'));
+        }
+      } else if (!c.opened && (!!c.money || !!c.items?.length || c.needs != null)) {
+        // A ONE-TIME cache (the floorboard). Gated → pry (needs the tool); else → search.
         if (c.needs != null) {
-          // gated by BOTH proximity and holding the required tool; the reason names it
           const tooFar = d > PROXIMITY_RANGE.adjacent;
           const missingTool = ctx.heldKey !== c.needs;
           out.push({

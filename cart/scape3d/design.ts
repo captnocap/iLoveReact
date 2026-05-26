@@ -165,7 +165,8 @@ export type InteractionEffect =
   | { kind: 'disable'; what: 'camera' | 'light' | 'alarm' | 'phone' }
   | { kind: 'access'; opens: WebsiteKind | 'container' }   // use computer / search a body
   | { kind: 'social'; topic?: string }                     // talk / pet dog / pure flavor
-  | { kind: 'loot' };                                      // take cash / items
+  | { kind: 'loot' }                                       // take cash / items OUT of a container
+  | { kind: 'stash' };                                     // put a carried item INTO a container (hide it)
 
 // ── murder types ─────────────────────────────────────────────────────────────
 // NOT how a kill is performed (that's the interaction) — purely its CONSEQUENCE
