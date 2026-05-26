@@ -9,6 +9,7 @@
 
 import { Scene3D } from '@reactjit/runtime/primitives';
 import type { V3 } from '../world/projection';
+import { heightAt } from '../world/terrain';
 import type { Player } from '../design';
 import type { Ent } from '../state/world';
 import { BODY_DOWN, EYE, NPC_PANTS, NPC_SHIRT, SKIN } from './palette3d';
@@ -55,9 +56,10 @@ function Figure({
   hood?: string; // optional hood/cap colour over the head (marks the player)
 }) {
   const yaw = modelYaw(face);
+  const baseY = heightAt(wx, wz); // feet ride the terrain
   const place = (p: V3): V3 => {
     const r = rotY(p, yaw);
-    return [wx + r[0], r[1], wz + r[2]];
+    return [wx + r[0], baseY + r[1], wz + r[2]];
   };
   return (
     <>
@@ -111,12 +113,13 @@ function npcFace(e: Ent): number {
 function DownedBody({ prefix, wx, wz, face }: { prefix: string; wx: number; wz: number; face: number }) {
   // a flat slab on the ground — a body
   const yaw = modelYaw(face);
+  const baseY = heightAt(wx, wz);
   return (
     <>
       <Scene3D.Mesh key={`${prefix}-body`} geometry="box" material={BODY_DOWN}
-        position={[wx, 0.12, wz]} rotation={[0, yaw, 0]} sizeX={0.6} sizeY={0.22} sizeZ={1.5} />
+        position={[wx, baseY + 0.12, wz]} rotation={[0, yaw, 0]} sizeX={0.6} sizeY={0.22} sizeZ={1.5} />
       <Scene3D.Mesh key={`${prefix}-head`} geometry="box" material={SKIN[1]}
-        position={[wx + Math.cos(face) * 0.85, 0.12, wz + Math.sin(face) * 0.85]}
+        position={[wx + Math.cos(face) * 0.85, baseY + 0.12, wz + Math.sin(face) * 0.85]}
         rotation={[0, yaw, 0]} sizeX={0.34} sizeY={0.2} sizeZ={0.34} />
     </>
   );

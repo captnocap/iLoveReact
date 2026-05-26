@@ -55,6 +55,7 @@ export function createInitialInventoryState(): InventoryState {
   spawnWorldItem(state, 'blue_hoodie', 25.5, 20.5);
   spawnWorldItem(state, 'bomb', 31.5, 25.5);
   spawnWorldItem(state, 'pistol', 22.5, 26.5);
+  spawnWorldItem(state, 'crowbar', 24.5, 23.5); // near spawn — grab it, then go pry boards
   return state;
 }
 

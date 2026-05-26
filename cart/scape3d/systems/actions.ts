@@ -9,6 +9,7 @@ import type { Ent } from '../state/world';
 import type { Door } from './doors';
 import type { WorldItem } from './inventory';
 import type { DecorKind } from '../world/tiles';
+import type { Feature } from '../world/entity';
 import { INTERACTIONS, PROXIMITY_RANGE, type InteractionKey } from './interactions';
 import { attackChance, lineOfSight } from './chance';
 
@@ -31,6 +32,7 @@ export type AttackContext = {
   health01: number; // 0..1
   hour: number; // 0..23
   closedDoors: Set<string>;
+  heldKey?: string; // typeKey of the in-hand item — gates tool actions like 'pry'
 };
 
 export type ActionTarget =
@@ -40,6 +42,7 @@ export type ActionTarget =
   | { kind: 'door'; door: Door }
   | { kind: 'item'; item: WorldItem }
   | { kind: 'prop'; prop: { x: number; y: number; kind: DecorKind } }
+  | { kind: 'feature'; feature: Feature }
   | { kind: 'tile'; x: number; y: number };
 
 /** The world-space point a target occupies, for distance/proximity tests. */
@@ -55,6 +58,8 @@ export function targetPos(t: ActionTarget): { x: number; y: number } {
       return { x: t.item.x, y: t.item.y };
     case 'prop':
       return { x: t.prop.x, y: t.prop.y };
+    case 'feature':
+      return { x: t.feature.x + t.feature.w / 2, y: t.feature.y + t.feature.h / 2 };
     case 'tile':
       return { x: t.x + 0.5, y: t.y + 0.5 };
   }
@@ -75,6 +80,8 @@ export function targetLabel(t: ActionTarget): string {
       return 'Item';
     case 'prop':
       return t.prop.kind === 'palm' ? 'Palm' : t.prop.kind === 'dumpster' ? 'Dumpster' : 'Sign';
+    case 'feature':
+      return t.feature.kind === 'floorboard' ? 'Floorboard' : t.feature.kind;
     case 'tile':
       return 'Ground';
   }
@@ -152,6 +159,24 @@ export function availableActions(t: ActionTarget, ctx: AttackContext): ActionOpt
       if (t.prop.kind === 'dumpster') out.push(opt('loot', d, 'Search'));
       out.push(opt('examine', d));
       break;
+    case 'feature': {
+      const f = t.feature;
+      if (f.kind === 'floorboard' && !f.cache.opened) {
+        // 'pry' is gated by BOTH proximity and holding the required tool. The gate
+        // reason names what's missing (the player learns they need a crowbar).
+        const tooFar = d > PROXIMITY_RANGE.adjacent;
+        const needs = f.cache.needs;
+        const missingTool = needs != null && ctx.heldKey !== needs;
+        out.push({
+          interactionKey: 'pry',
+          label: 'Pry up floorboard',
+          blocked: tooFar || missingTool,
+          reason: tooFar ? 'too far — get closer' : missingTool ? `need a ${needs}` : undefined,
+        });
+      }
+      out.push(opt('examine', d));
+      break;
+    }
     case 'tile':
       break;
   }

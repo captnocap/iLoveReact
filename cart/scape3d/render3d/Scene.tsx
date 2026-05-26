@@ -1,9 +1,15 @@
 // The Scene3D root for scape3d. ONE <Scene3D> — camera derived from the same
 // cameraFor() that the click-picker inverts, dusk lighting, the meshed city, the
 // boxy player + NPCs, and click-to-move path markers laid on the ground.
+//
+// High system: the screen-warp the 2D ground shader did (wavy distortion under
+// the high) is split here into (a) a woozy CAMERA sway scaled by high.intensity,
+// and (b) a chromatic post-process applied in index.tsx. Sober → no sway, the
+// truth; peaking → the world breathes and the colour splits.
 
 import { Scene3D } from '@reactjit/runtime/primitives';
 import { cameraFor, type Cam } from '../world/projection';
+import { heightAt } from '../world/terrain';
 import { hex, PATH_DOT, PATH_TARGET } from './palette3d';
 import { HAZE } from '../render/palette';
 import { City3D } from './City3D';
@@ -25,7 +31,7 @@ function PathMarkers({ path }: { path: { x: number; y: number }[] }) {
             key={`path-${i}`}
             geometry="cylinder"
             material={last ? PATH_TARGET : PATH_DOT}
-            position={[p.x, 0.04, p.y]}
+            position={[p.x, heightAt(p.x, p.y) + 0.04, p.y]}
             radius={last ? 0.26 : 0.1}
             sizeY={0.06}
           />
@@ -39,6 +45,20 @@ function resolveCostume(color: string): string {
   return color && color.startsWith('#') ? color : '#b53a8a';
 }
 
+// Woozy camera under the high: gentle drifting sway on yaw/pitch/zoom that scales
+// with intensity (0 when sober). Kept subtle — a manic shimmer, not nausea — and
+// it's thematic that aim drifts a touch while you're spun (the sim never lies).
+function swayCam(cam: Cam, high: number): Cam {
+  if (high <= 0.01) return cam;
+  const t = ((globalThis as any).performance?.now?.() ?? 0) / 1000;
+  return {
+    ...cam,
+    yaw: cam.yaw + Math.sin(t * 1.3) * 0.035 * high,
+    pitch: cam.pitch + Math.sin(t * 0.9 + 1.7) * 0.03 * high,
+    zoom: cam.zoom * (1 + Math.sin(t * 2.1) * 0.04 * high),
+  };
+}
+
 export function Scene({
   sim, cam, doors, entities,
 }: {
@@ -47,7 +67,7 @@ export function Scene({
   doors: Door[];
   entities: Ent[];
 }) {
-  const c = cameraFor(cam);
+  const c = cameraFor(swayCam(cam, sim.body.high.intensity));
   return (
     <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={SKY} showGrid={false} showAxes={false}>
       <Scene3D.Camera position={c.pos} target={c.target} fov={c.fov} />

@@ -1,8 +1,10 @@
-// Tile API over the authored city. There is no procedural generation anymore —
-// every tile and prop comes from world/citymap.ts (hand-placed). This module just
-// exposes the city through the Kind/decor names the rest of the cart already uses.
+// Tile API over the MASTER grid. Tiles and props come from whichever chunk owns
+// the coordinate (world/chunks.ts); this module just exposes that through the
+// Kind/decor names the rest of the cart already uses. Coordinates may be negative
+// (the master grid is signed/infinite); unclaimed tiles read as VOID.
 
-import { cityPropAt, cityTileAt, type PropKind } from './citymap';
+import { kindAt, propAt } from './atlas';
+import { type PropKind } from './citymap';
 
 export const enum Kind {
   Road = 0,
@@ -19,10 +21,10 @@ export const enum Kind {
 export type DecorKind = PropKind;
 
 export function tileAt(x: number, y: number): number {
-  return cityTileAt(x, y);
+  return kindAt(x, y);
 }
 
 export function decorAt(x: number, y: number): DecorKind | null {
-  const p = cityPropAt(x, y);
+  const p = propAt(x, y);
   return p ? p.kind : null;
 }

@@ -6,6 +6,8 @@
 // Scene component and unproject() both derive the eye/target/fov from it, so a
 // click always lands on the tile the cursor is over.
 
+import { heightAt } from './terrain';
+
 export const TILE_PX = 30;
 
 export interface Cam {
@@ -46,13 +48,15 @@ export function elevationFor(pitch: number): number {
 }
 
 // Eye, look-target, and fov for the current camera state. The renderer feeds this
-// straight into <Scene3D.Camera>; unproject() inverts it.
+// straight into <Scene3D.Camera>; unproject() inverts it. Both eye and target
+// ride the player's ground elevation so the framing holds as you climb the hill.
 export function cameraFor(c: Cam): { pos: V3; target: V3; fov: number } {
-  const target: V3 = [c.px, TARGET_Y, c.py];
+  const ground = heightAt(c.px, c.py);
+  const target: V3 = [c.px, ground + TARGET_Y, c.py];
   const dist = BASE_DIST / Math.max(0.35, c.zoom);
   const elev = elevationFor(c.pitch);
   const horiz = dist * Math.cos(elev);
-  const height = dist * Math.sin(elev) + TARGET_Y;
+  const height = ground + dist * Math.sin(elev) + TARGET_Y;
   const pos: V3 = [
     c.px - Math.sin(c.yaw) * horiz,
     height,
@@ -117,13 +121,41 @@ export function unproject(sx: number, sy: number, c: Cam, r: Rect) {
   const vy = ndcY * tanHalf;
   const vz = -1;
   // world ray dir = vx*s + vy*u + vz*f
-  const dx = vx * sxv + vy * ux + vz * fx;
-  const dy = vx * syv + vy * uy + vz * fy;
-  const dz = vx * szv + vy * uz + vz * fz;
+  let dx = vx * sxv + vy * ux + vz * fx;
+  let dy = vx * syv + vy * uy + vz * fy;
+  let dz = vx * szv + vy * uz + vz * fz;
+  const dl = Math.hypot(dx, dy, dz) || 1;
+  dx /= dl; dy /= dl; dz /= dl;
 
-  // intersect ground plane y = 0
-  if (Math.abs(dy) < 1e-6) return { x: c.px, y: c.py };
-  const t = -pos[1] / dy;
-  if (t < 0) return { x: c.px, y: c.py }; // ray points at sky — fall back to player
-  return { x: pos[0] + t * dx, y: pos[2] + t * dz };
+  // March the ray against the height field (terrain.heightAt). Flat ground is
+  // height 0, so over most of the map this resolves on the first crossing; the
+  // hill bump is caught by stepping until the ray dips below the surface, then
+  // bisecting. Picking is click-rate, so the step budget is irrelevant.
+  const STEP = 0.2;
+  const MAX_T = 200;
+  let prevT = 0;
+  let prevGap = pos[1] - heightAt(pos[0], pos[2]); // >0 = above ground
+  for (let t = STEP; t < MAX_T; t += STEP) {
+    const wx = pos[0] + t * dx;
+    const wz = pos[2] + t * dz;
+    const gap = (pos[1] + t * dy) - heightAt(wx, wz);
+    if (gap <= 0) {
+      // crossed the surface between prevT and t — bisect for a clean landing
+      let lo = prevT;
+      let hi = t;
+      for (let i = 0; i < 18; i++) {
+        const mid = (lo + hi) / 2;
+        const mx = pos[0] + mid * dx;
+        const mz = pos[2] + mid * dz;
+        if ((pos[1] + mid * dy) - heightAt(mx, mz) <= 0) hi = mid;
+        else lo = mid;
+      }
+      const ft = (lo + hi) / 2;
+      return { x: pos[0] + ft * dx, y: pos[2] + ft * dz };
+    }
+    prevT = t;
+    prevGap = gap;
+  }
+  void prevGap;
+  return { x: c.px, y: c.py }; // ray never met the ground — fall back to player
 }

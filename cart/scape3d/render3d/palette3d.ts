@@ -51,6 +51,8 @@ export const neonRim = (style: number) =>
 export const PLAZA_A = hex(scale(TILE.plaza, 1.7)); // checker square A
 export const PLAZA_B = hex(scale(TILE.plaza, 2.9)); // brighter checker square B
 export const ROAD_LINE = hex(TILE.roadLine);
+// Hill structure: the cliff/retaining-wall sides of the raised plaza shelf.
+export const HILL_SIDE = hex(scale(TILE.plaza, 1.2));
 
 // Props.
 export const PALM_TRUNK = '#3a2c1e';

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { decorAt } from '../world/tiles';
+import { featureAt } from '../world/atlas';
 import { findPath, nearestWalkable } from '../world/pathfinding';
 import { buildDecorWindow, buildTileWindow, HALF, type Decor } from '../world/window';
 import { unproject, type Cam, type Rect } from '../world/projection';
@@ -371,6 +372,8 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
     }
     const item = nearestWorldItem(inventory.current.worldItems, wx, wy, 0.75);
     if (item) return { kind: 'item', item };
+    const feature = featureAt(Math.floor(wx), Math.floor(wy));
+    if (feature) return { kind: 'feature', feature };
     const dec = decorAt(Math.floor(wx), Math.floor(wy));
     if (dec && Math.hypot(Math.floor(wx) + 0.5 - wx, Math.floor(wy) + 0.5 - wy) < 0.7) {
       return { kind: 'prop', prop: { x: Math.floor(wx) + 0.5, y: Math.floor(wy) + 0.5, kind: dec } };
@@ -402,6 +405,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       health01: cur.body.health / cur.body.maxHealth,
       hour: clockHM(clock.current).hour,
       closedDoors: new Set<string>(closedDoorBlockers(doorsRef.current)),
+      heldKey: slot?.module.type.key, // gates tool actions (e.g. 'pry' needs a crowbar)
     };
   };
 
@@ -434,6 +438,15 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
           : t.prop.kind === 'dumpster'
             ? "A dumpster. Something in it is leaking. Don't."
             : 'A buzzing neon sign, one letter flickering out.';
+      case 'feature':
+        if (t.feature.kind === 'floorboard') {
+          return t.feature.cache.opened
+            ? 'Torn-up boards and a dark gap. Whatever was here is gone.'
+            : t.feature.cache.needs
+              ? 'A board that sits a little proud of the others. It would take a tool to lift.'
+              : 'Floorboards. Some give a little underfoot.';
+        }
+        return t.feature.kind;
       case 'tile':
         return 'Cracked pavement, old gum, a flyer for a club that closed.';
     }
@@ -482,6 +495,27 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
       case 'loot':
         setEx('You paw through the dumpster. Trash, mostly.');
         break;
+      case 'pry': {
+        // Crack up the board (the action menu already gated this on holding the
+        // crowbar). Reveal + take whatever's cached; tearing up a room is loud and
+        // leaves a mess, so it spikes visual heat whether or not it paid off.
+        if (t.kind !== 'feature') break;
+        const cache = t.feature.cache;
+        if (cache.opened) {
+          setEx('Already pried up. Nothing left but the gap.');
+          break;
+        }
+        cache.opened = true;
+        adjustSuspicionAxis(cur, 'visual', 6);
+        if (cache.money && cache.money > 0) {
+          adjustMoney(cur, cache.money);
+          setEx(`Under the board — a brick of cash. $${cache.money.toLocaleString()}. You did hear something.`);
+          cache.money = 0;
+        } else {
+          setEx('You splinter the board up. Rotten joists, a dead roach. Nothing.');
+        }
+        break;
+      }
       case 'shoot':
       case 'slash': {
         if (t.kind !== 'npc') break;
