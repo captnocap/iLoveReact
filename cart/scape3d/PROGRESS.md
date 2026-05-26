@@ -180,6 +180,29 @@ Authored: crowbar, knife, pistol, lockpick, bomb, blue_hoodie. Dropped items res
 (`Characters3D` `Figure`), yaw-oriented along facing (`itemMesh` gained `yaw`). Icon ≠ model:
 pixel_icon/cutout are the future ICON layer, not a model source.
 
+### Furniture sizing — the player is the gauge
+
+Rule of thumb: the player is ≈1 tile wide, ~2.5 tiles tall; furniture should read BIGGER than the
+player where it should. The bed went `[2,1]` → `[4,2]` (kept its detailed mesh — frame/duvet/
+pillows — by scaling it 2× across the floor plane via one `S` knob, design numbers verbatim) and
+was repositioned in the 4×4 bedroom to `[0,1]` so it fits clear of the lamp + stash floorboard.
+Bed + toilet meshes were also fleshed out. (Note: the player figure is currently ~2.1 units tall,
+a touch under the 2.5 eyeballed — bump if it matters.)
+
+### GPU vertex/draw budget raise (framework)
+
+A detailed palm with sphere coconuts (a sphere = `generateSphere(_,24,16)` = 2,304 verts vs a box's
+36) ×13 palms ≈ 130k verts blew the old 64k frame buffer — `framework/gpu/3d.zig`'s `drawMesh`
+SILENTLY skips any mesh that would overflow, and since the player/NPCs render LAST (after the
+baked world) they were exactly what got dropped → invisible. The renderer is immediate-mode (geometry
+regenerated + uploaded each frame into ONE pre-allocated buffer), so the buffer SIZE was the only
+real wall — CPU regen at this scale is trivial, and the buffers upload only what's drawn, so a bigger
+ceiling costs reserved GPU memory, not per-frame work. Raised `MAX_FRAME_VERTS` 65,536→262,144 and
+`MAX_DRAW_UNIFORMS` 512→2,048 (≈8.5 MB more reserved). Detailed sphere props now fit; player visible.
+Only RAISES limits, so it can't hurt the other 3D carts. The retained/instanced rearchitecture
+(generate once, redraw/instance) remains the move ONLY if a scene ever needs hundreds of detailed
+objects — noted in `3d.zig`.
+
 **Still open (next):** doors/ENTRY-TO-BUILDING — doors open/close + block pathfinding, but only
 the crackhouse has an interior; the citymap `BLDGS` are solid `CityBuilding` blocks. Real entry
 (interiors for buildings + roof fade/cull so the top-down camera sees in) is unbuilt.
