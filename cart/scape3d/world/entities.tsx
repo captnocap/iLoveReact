@@ -56,8 +56,9 @@ const bedroom: Entity = {
   size: [4, 4],
   contents: [
     ...floorboards(4, 4, 12, 1_000_000),
-    { at: [2, 0], of: fixture('bed') },
-    { at: [0, 0], of: fixture('lamp') },
+    { at: [0, 1], of: fixture('bed') },   // 4×2 bed spans x0-3, z1-2 — fits the room
+    { at: [0, 0], of: fixture('lamp') },  // corner (z0), clear of the bed
+
   ],
 };
 
