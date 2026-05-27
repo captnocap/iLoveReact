@@ -116,23 +116,71 @@ BUNDLE_FROM_HARNESS=1 CART_ROOT="$CART_ROOT" "$V8CLI" scripts/cart-bundle.js "$C
 # nothing works, agent adds logs, the rebuild trigger STILL doesn't fire
 # (fast-push path again), agent gives up and kills the dev host, restart
 # rebuilds the binary, "now it works" with no real explanation.
+#
+# Staleness is decided by a CONTENT HASH of the build inputs, NOT by mtime
+# ordering against the binary. The mtime approach (`find … -newer "$BIN"`)
+# has a fatal race: a `zig build` that read the OLD source can finish writing
+# its output a few ms AFTER an edit it didn't include, leaving the binary
+# mtime *newer* than the source it's missing. `find -newer` then reports
+# "nothing newer" forever and the rebuild never fires (this burned a full
+# session: scape3d water sat flat in dev while ship animated, 2026-05-26).
+# Parallel workers + git checkouts (which rewrite mtimes arbitrarily) make
+# mtime ordering unreliable in general. Hashing 6.5MB of framework source is
+# ~13ms — free — and is immune to both. The hash captured into "$STAMP" is
+# the source state as of THIS invocation's decision point (computed before
+# the build), so an edit racing in during the build can only cause a harmless
+# extra rebuild next time, never a stale-binary false-negative.
 BIN="$RJIT_HOME/zig-out/bin/reactjit-dev"
+STAMP="$RJIT_HOME/zig-out/bin/.reactjit-dev.srcstamp"
+
+# Hash of every build input that affects the compiled dev binary. Mirrors the
+# scope of the old `find framework build.zig v8_app.zig sdk/… tools/zig/zig`
+# check: all of framework/ plus the top-level build sources and flag inputs.
+# The zig compiler is identified by size+mtime (stat) rather than hashed —
+# it's a large binary swapped wholesale on upgrade, never edited in place.
+#
+# Runs in a subshell with errexit/pipefail DISABLED. The caller's `set -euo
+# pipefail` would otherwise make this fragile: parallel workers churn files
+# under framework/ constantly, and a source file deleted/replaced in the
+# window between `find` listing it and `xargs cat` reading it makes the inner
+# pipeline exit nonzero → pipefail propagates it → set -e silently kills the
+# WHOLE script (observed: dev bundled then vanished with no host, no rebuild,
+# no error, 2026-05-26). A transient miss must only perturb the hash (causing
+# at most a harmless extra rebuild), never abort. The subshell's exit status
+# is `cut`'s (always 0), and `+e/+o pipefail` don't leak to the caller.
+dev_src_hash() (
+    set +e +o pipefail
+    {
+        find "$RJIT_HOME/framework" -type f -print0 2>/dev/null | sort -z | xargs -0 cat 2>/dev/null
+        cat "$RJIT_HOME/build.zig" "$RJIT_HOME/v8_app.zig" \
+            "$RJIT_HOME/sdk/dependency-registry.json" \
+            "$RJIT_HOME/scripts/sdk-dependency-resolve.js" 2>/dev/null
+        stat -c '%s %Y' "$ZIG" 2>/dev/null
+    } | sha256sum | cut -d' ' -f1
+)
+
+SRC_HASH="$(dev_src_hash)"
 needs_build=0
 if [[ ! -x "$BIN" ]]; then
     needs_build=1
-elif [[ -n "$(find framework build.zig v8_app.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig -newer "$BIN" 2>/dev/null | head -1)" ]]; then
+elif [[ ! -f "$STAMP" ]]; then
+    # No provenance for this binary (e.g. built by `ship`, or pre-dates this
+    # check). Rebuild once to establish the stamp — safe over fast-pushing
+    # onto native code of unknown vintage.
+    needs_build=1
+elif [[ "$SRC_HASH" != "$(cat "$STAMP" 2>/dev/null)" ]]; then
     needs_build=1
 fi
 
 # Fast path: host already running — push and exit.
 # `-S "$SOCKET"` only tells us a socket FILE exists on disk; a dead host can
-# leave that file behind. Probe `ss -lUp` to confirm a process is actually
+# leave that file behind. Probe listening Unix sockets to confirm a process is actually
 # bound. Only then does the staleness check apply (refusing to push to a
 # live-but-stale host). If the file is orphaned, just rm it and fall
 # through to the spawn path so a fresh host gets built.
 host_alive=0
 if [[ -S "$SOCKET" ]]; then
-    if ss -lUp 2>/dev/null | grep -q "$SOCKET"; then
+    if ss -lx -p 2>/dev/null | grep -q "$SOCKET"; then
         host_alive=1
     else
         rm -f "$SOCKET"
@@ -141,11 +189,16 @@ fi
 
 if [[ "$host_alive" -eq 1 ]]; then
     if [[ "$needs_build" -eq 1 ]]; then
-        echo "[dev] STALE DEV HOST — running binary predates current framework source." >&2
+        echo "[dev] STALE DEV HOST — framework source hash differs from what this binary was built from." >&2
         echo "[dev] refusing to push: bundle would talk to yesterday's native code." >&2
         echo "[dev] kill the running dev host (ctrl-c its terminal) and rerun this command." >&2
-        echo "[dev] inputs newer than $BIN:" >&2
-        find framework build.zig v8_app.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig -newer "$BIN" 2>/dev/null | head -10 | sed 's/^/[dev]   /' >&2
+        echo "[dev]   built-from: $(cat "$STAMP" 2>/dev/null || echo '<no stamp>')" >&2
+        echo "[dev]   current:    $SRC_HASH" >&2
+        # Best-effort human hint of which framework files changed recently
+        # (mtime, display-only — the staleness DECISION above is hash-based,
+        # so this list may be empty even when a rebuild is needed; that's the
+        # exact race the hash check exists to catch).
+        find framework -type f -newer "$STAMP" 2>/dev/null | head -10 | sed 's/^/[dev]   changed: /' >&2
         exit 1
     fi
     echo "[dev] host detected — pushing '${NAME}'"
@@ -165,7 +218,7 @@ fi
 cp "$PER_CART_BUNDLE" bundle.js
 
 if [[ "$needs_build" -eq 1 && -x "$BIN" ]]; then
-    echo "[dev] dev host inputs newer than binary — rebuilding..."
+    echo "[dev] framework source changed since this binary was built — rebuilding..."
 fi
 if [[ "$needs_build" -eq 1 ]]; then
     # ReleaseFast: Debug builds silently exit on click (pre-existing framework
@@ -188,6 +241,14 @@ if [[ "$needs_build" -eq 1 ]]; then
         export ZIG_GLOBAL_CACHE_DIR="$RJIT_HOME/tools/zig/cache"
     fi
     "$ZIG" build app -p "$RJIT_HOME/zig-out" -Dapp-name="reactjit-dev" -Dapp-source=v8_app.zig "${DEV_FEATURE_ARGS[@]}" -Doptimize=ReleaseFast
+    # Record the source hash this binary was built from. Use SRC_HASH captured
+    # at the top (decision point), NOT a fresh hash here: if a source edit
+    # raced in during the build, a re-hash now could match the new source while
+    # the binary lacks it — reintroducing the stale-binary false-negative. The
+    # decision-point hash guarantees the only failure mode is a harmless extra
+    # rebuild. `set -e` aborts on build failure, so a failed build never writes
+    # a stamp (leaving the stale binary correctly flagged on the next run).
+    echo "$SRC_HASH" > "$STAMP"
 fi
 
 # ── Pre-warm embedded postgres ────────────────────────────────────────
