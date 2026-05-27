@@ -485,7 +485,7 @@ Scene3DBase.Skybox = ({ zenith, horizon, ground, sunDir, sunColor, sunSize, sunG
     scene3dSkyNight: night ?? 0.0,
   });
 Scene3DBase.Mesh = ({
-  geometry, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
+  geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
   texture, textureKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
   waveDirection, waveDirX, waveDirZ, wavePhase, ...rest
 }: any) => {
@@ -505,6 +505,37 @@ Scene3DBase.Mesh = ({
   const texH = tex && Number.isFinite(tex.height) ? Math.max(0, tex.height | 0) : 0;
   const texHex = tex && typeof tex.hex === 'string' ? tex.hex : '';
   const texKey = typeof textureKey === 'string' && textureKey.length > 0 ? textureKey : '';
+  const texData = texHex && texW > 0 && texH > 0 && texHex.length === texW * texH * 8 ? texHex : '';
+
+  // ── @reactjit/geometries registry path ──────────────────────────────
+  // geometry={Box} (a generator def, not a string) → run the TS generator ONCE
+  // per unique params (interned in JS), ship the verts + the intern key. The
+  // host retains the verts in a GPU buffer and redraws the slice every frame
+  // with NO per-frame regeneration; the framework never learns a shape name.
+  // This is the canonical path; the string branch below is legacy (migrating).
+  const geomIntern = require('./geometries/intern');
+  if (geomIntern.isGeometryDef(geometry)) {
+    const g3 = geomIntern.internGeometry(geometry, params);
+    return h('View', {
+      ...rest,
+      scene3dMesh: true,
+      scene3dGeomKey: g3.key,
+      scene3dVertices: g3.vertices,
+      scene3dVertCount: g3.count,
+      scene3dBoundsRadius: g3.bounds,
+      scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
+      scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
+      scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,
+      scene3dColorR: r, scene3dColorG: g, scene3dColorB: b,
+      scene3dTexW: texW,
+      scene3dTexH: texH,
+      scene3dTexData: texData,
+      ...(texKey ? { scene3dTexKey: texKey } : {}),
+    });
+  }
+
+  // ── Legacy string-geometry path (geometry="box"|"sphere"|…) ──────────
+  // Kept working during migration; deleted once all carts move to defs.
   const [wdx, _wdy, wdz] = _vec3(waveDirection, waveDirX ?? 1, 0, waveDirZ ?? 0);
   return h('View', {
     ...rest,
@@ -521,7 +552,7 @@ Scene3DBase.Mesh = ({
     scene3dSizeZ: sizeZ ?? geometry?.depth ?? 1,
     scene3dTexW: texW,
     scene3dTexH: texH,
-    scene3dTexData: texHex && texW > 0 && texH > 0 && texHex.length === texW * texH * 8 ? texHex : '',
+    scene3dTexData: texData,
     ...(texKey ? { scene3dTexKey: texKey } : {}),
     // Heightfield: a flat cols×rows array of corner heights (geometry="heightfield").
     // sizeX/sizeZ = world span, sizeY = skirt base Y. The host meshes a smooth

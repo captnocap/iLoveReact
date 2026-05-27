@@ -503,6 +503,16 @@ pub const Node = struct {
     scene3d_heights: ?[]const f32 = null, // heightfield corner heights
     scene3d_hf_cols: u32 = 0,
     scene3d_hf_rows: u32 = 0,
+    // @reactjit/geometries registry mesh. A geometry generator (TS) produced
+    // these interleaved verts [px,py,pz,nx,ny,nz,u,v]×count; gpu/3d.zig interns
+    // them by `scene3d_geom_key` (id+paramHash) into a RETAINED GPU buffer and
+    // redraws the slice every frame — NO per-frame regeneration. The framework
+    // knows zero shape names; it just uploads bytes. When geom_key is set the
+    // legacy string `scene3d_geometry` + generate* path is bypassed entirely.
+    scene3d_geom_key: ?[]const u8 = null, // intern key; null = legacy string geometry
+    scene3d_vertices: ?[]const f32 = null, // interleaved verts, read once on cache miss
+    scene3d_vert_count: u32 = 0,
+    scene3d_bounds_radius: f32 = 0, // unscaled bounding radius from the generator (culling)
     // Heightfield-only host-side wave deformation. The cart passes a few stable
     // scalars; gpu/3d.zig adds the animated sine offset while rebuilding verts.
     scene3d_wave_amplitude: f32 = 0,

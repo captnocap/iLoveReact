@@ -1926,6 +1926,29 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                     }
                 }
             }
+        } else if (std.mem.eql(u8, k, "scene3dGeomKey")) {
+            // @reactjit/geometries intern key (e.g. "Sphere:r0.12s24g16"). gpu/3d.zig
+            // caches the retained vertex slice under this key; identical keys across
+            // meshes share one upload + one buffer region.
+            if (dupJsonText(v)) |s| node.scene3d_geom_key = s;
+        } else if (std.mem.eql(u8, k, "scene3dVertices")) {
+            // Interleaved verts [px,py,pz,nx,ny,nz,u,v]×count produced by the TS
+            // generator. Read ONCE on cache miss, then the retained GPU slice is
+            // redrawn every frame — same g_alloc-owned []f32 pattern as heights.
+            if (v == .array) {
+                const items = v.array.items;
+                if (items.len > 0 and items.len <= (1 << 24)) {
+                    const buf = g_alloc.alloc(f32, items.len) catch null;
+                    if (buf) |out| {
+                        for (items, 0..) |fv, n| out[n] = jsonFloat(fv) orelse 0;
+                        node.scene3d_vertices = out;
+                    }
+                }
+            }
+        } else if (std.mem.eql(u8, k, "scene3dVertCount")) {
+            if (jsonInt(v)) |i| node.scene3d_vert_count = if (i > 0 and i < (1 << 22)) @intCast(i) else 0;
+        } else if (std.mem.eql(u8, k, "scene3dBoundsRadius")) {
+            if (jsonFloat(v)) |f| node.scene3d_bounds_radius = f;
         } else if (std.mem.eql(u8, k, "scene3dWaveAmplitude")) {
             if (jsonFloat(v)) |f| node.scene3d_wave_amplitude = f;
         } else if (std.mem.eql(u8, k, "scene3dWaveLength")) {

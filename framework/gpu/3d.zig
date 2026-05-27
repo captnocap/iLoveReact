@@ -109,6 +109,27 @@ const MAX_MESH_VERTS = 16384; // heightfield terrain meshes need headroom (~52×
 const MAX_FRAME_VERTS = 262144;
 var g_geo_buf: [MAX_MESH_VERTS]Vertex = undefined;
 
+// ── Retained geometry intern cache (@reactjit/geometries) ───────────────────
+//
+// A registry mesh ships its verts (already in Vertex layout) ONCE, tagged with
+// an intern key. We upload each UNIQUE key into g_retained_vbuf and remember its
+// (offset, count); every later frame just redraws that slice — no regeneration,
+// no re-upload. This is the texture cache (getOrCreateTexBindGroup) applied to
+// vertices: identical geometry across N meshes collapses to one GPU copy. The
+// "240fps coconut" — regenerated every frame in the legacy path — becomes one
+// upload that never runs again unless its params (hence its key) change.
+const MAX_RETAINED_VERTS = 524288; // 512k verts × 32 B/vert ≈ 16 MB
+const GEO_CACHE_SIZE = 512;
+const GeoEntry = struct {
+    hash: u64 = 0,
+    offset_bytes: u64 = 0,
+    count: u32 = 0,
+    present: bool = false,
+};
+var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
+var g_geo_cache_len: usize = 0;
+var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
+
 const UNIFORM_STRIDE: u32 = 256;
 const MAX_DRAW_UNIFORMS: u32 = 2048;
 
@@ -489,6 +510,11 @@ fn generateTorus(radius: f32, tube_radius: f32, segments: u32, sides: u32) struc
 
 const MeshSpec = struct {
     geometry: []const u8 = "box",
+    // @reactjit/geometries: when geom_key is set, the mesh uses the retained
+    // intern cache (no Zig-side generation) and `geometry` is ignored.
+    geom_key: ?[]const u8 = null,
+    vertices: ?[]const f32 = null, // interleaved Vertex layout, read once on miss
+    vert_count: u32 = 0,
     size: [3]f32 = .{ 1, 1, 1 },
     radius: f32 = 0.5,
     tube_radius: f32 = 0.25,
@@ -514,6 +540,7 @@ const MeshSpec = struct {
 
 var g_pipeline: ?*wgpu.RenderPipeline = null;
 var g_vertex_buffer: ?*wgpu.Buffer = null;
+var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
 var g_uniform_buffer: ?*wgpu.Buffer = null;
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
@@ -588,6 +615,14 @@ pub fn init() void {
     g_vertex_buffer = device.createBuffer(&.{
         .label = wgpu.StringView.fromSlice("render3d_verts"),
         .size = MAX_FRAME_VERTS * @sizeOf(Vertex),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    // Retained buffer for interned registry geometry — uploaded once per unique
+    // key, never reset per frame (unlike g_vertex_buffer which bump-resets).
+    g_retained_vbuf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_retained_verts"),
+        .size = MAX_RETAINED_VERTS * @sizeOf(Vertex),
         .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
@@ -933,6 +968,12 @@ fn estimateMeshRadius(node: *const Node) f32 {
     const sx = @abs(node.scene3d_scale_x);
     const sy = @abs(node.scene3d_scale_y);
     const sz = @abs(node.scene3d_scale_z);
+    // Registry geometry ships its own unscaled bounds — cull off that × max scale,
+    // no per-shape switch. This is what lets the framework cull a shape it knows
+    // nothing about.
+    if (node.scene3d_bounds_radius > 0) {
+        return node.scene3d_bounds_radius * max3(sx, sy, sz);
+    }
     const geo = node.scene3d_geometry orelse "box";
     if (std.mem.eql(u8, geo, "sphere")) {
         return node.scene3d_radius * max3(sx, sy, sz);
@@ -968,6 +1009,9 @@ fn estimateMeshRadius(node: *const Node) f32 {
 fn buildMeshSpec(node: *const Node) MeshSpec {
     return .{
         .geometry = node.scene3d_geometry orelse "box",
+        .geom_key = node.scene3d_geom_key,
+        .vertices = node.scene3d_vertices,
+        .vert_count = node.scene3d_vert_count,
         .size = .{ node.scene3d_size_x, node.scene3d_size_y, node.scene3d_size_z },
         .radius = node.scene3d_radius,
         .tube_radius = node.scene3d_tube_radius,
@@ -1122,6 +1166,37 @@ fn getOrCreateTexBindGroup(rgba: []const u8, w: u32, h: u32) ?*wgpu.BindGroup {
     return bg;
 }
 
+fn hashKey(key: []const u8) u64 {
+    var h: u64 = 0xcbf29ce484222325;
+    for (key) |byte| {
+        h ^= byte;
+        h *%= 0x100000001b3;
+    }
+    return h;
+}
+
+const GeoSlice = struct { offset: u64, count: u32 };
+
+// Resolve a geometry key to a retained (offset, count), uploading the verts on
+// first sight. Returns null when the cache or retained buffer is full — the
+// caller then falls back to a per-frame upload (correct, just not retained).
+fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
+    const hash = hashKey(key);
+    for (g_geo_cache[0..g_geo_cache_len]) |*e| {
+        if (e.present and e.hash == hash) return .{ .offset = e.offset_bytes, .count = e.count };
+    }
+    if (g_geo_cache_len >= GEO_CACHE_SIZE) return null;
+    const buf = g_retained_vbuf orelse return null;
+    const bytes: u64 = @as(u64, count) * @sizeOf(Vertex);
+    if (g_retained_top + bytes > @as(u64, MAX_RETAINED_VERTS) * @sizeOf(Vertex)) return null;
+    queue.writeBuffer(buf, g_retained_top, @ptrCast(verts.ptr), bytes);
+    const off = g_retained_top;
+    g_retained_top += bytes;
+    g_geo_cache[g_geo_cache_len] = .{ .hash = hash, .offset_bytes = off, .count = count, .present = true };
+    g_geo_cache_len += 1;
+    return .{ .offset = off, .count = count };
+}
+
 fn generateGeometry(spec: MeshSpec) u32 {
     if (std.mem.eql(u8, spec.geometry, "sphere")) {
         return generateSphere(spec.radius, 24, 16).count;
@@ -1146,19 +1221,48 @@ fn generateGeometry(spec: MeshSpec) u32 {
 }
 
 fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_offset: *u64, vp: math.Mat4, cam_pos: math.Vec3, light_dir: [3]f32, light_color: [3]f32, ambient_color: [3]f32, fog_color: [3]f32, fog_near: f32, fog_far: f32, spec: MeshSpec) void {
-    const vert_count = generateGeometry(spec);
-    if (vert_count == 0) return;
+    // ── Resolve the vertex source ──
+    // Registry mesh (geom_key set): redraw a RETAINED slice — generated once,
+    // uploaded once, no per-frame work. Legacy mesh: regenerate into the
+    // per-frame buffer (immediate mode, the old path).
+    var draw_buffer: *wgpu.Buffer = undefined;
+    var draw_offset: u64 = 0;
+    var vert_count: u32 = 0;
+    var advance_frame_buf = false;
+    const frame_cap_bytes: u64 = @as(u64, MAX_FRAME_VERTS) * @sizeOf(Vertex);
+
+    if (spec.geom_key) |key| {
+        const verts = spec.vertices orelse return;
+        if (spec.vert_count == 0) return;
+        if (verts.len < @as(usize, spec.vert_count) * 8) return; // 8 floats/vertex
+        if (internGeometry(queue, key, verts, spec.vert_count)) |slot| {
+            draw_buffer = g_retained_vbuf.?;
+            draw_offset = slot.offset;
+            vert_count = slot.count;
+        } else {
+            // Cache/buffer full — degrade to a per-frame upload (still correct).
+            const bytes: u64 = @as(u64, spec.vert_count) * @sizeOf(Vertex);
+            if (vert_byte_offset.* + bytes > frame_cap_bytes) return;
+            queue.writeBuffer(g_vertex_buffer.?, vert_byte_offset.*, @ptrCast(verts.ptr), bytes);
+            draw_buffer = g_vertex_buffer.?;
+            draw_offset = vert_byte_offset.*;
+            vert_count = spec.vert_count;
+            advance_frame_buf = true;
+        }
+    } else {
+        vert_count = generateGeometry(spec);
+        if (vert_count == 0) return;
+        const bytes: u64 = @as(u64, vert_count) * @sizeOf(Vertex);
+        if (vert_byte_offset.* + bytes > frame_cap_bytes) return;
+        // Each mesh writes at a unique cumulative offset so queued writeBuffer
+        // calls survive into the eventual draws (shared offset 0 would clobber).
+        queue.writeBuffer(g_vertex_buffer.?, vert_byte_offset.*, @ptrCast(&g_geo_buf), bytes);
+        draw_buffer = g_vertex_buffer.?;
+        draw_offset = vert_byte_offset.*;
+        advance_frame_buf = true;
+    }
     if (uniform_index.* >= MAX_DRAW_UNIFORMS) return;
-
     const vert_bytes: u64 = @as(u64, vert_count) * @sizeOf(Vertex);
-    const buffer_capacity_bytes: u64 = @as(u64, MAX_FRAME_VERTS) * @sizeOf(Vertex);
-    if (vert_byte_offset.* + vert_bytes > buffer_capacity_bytes) return;
-
-    // Each mesh writes at a unique cumulative offset so that all the queued
-    // writeBuffer calls survive into the eventual draws — without this, a
-    // shared offset 0 means later writes clobber earlier ones and every
-    // draw reads the same final blob.
-    queue.writeBuffer(g_vertex_buffer.?, vert_byte_offset.*, @ptrCast(&g_geo_buf), vert_bytes);
 
     const deg2rad = std.math.pi / 180.0;
     var model = math.m4scale(math.m4identity(), spec.scale);
@@ -1192,9 +1296,9 @@ fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_of
         if (images.staticSurfaceBindGroup3D(key)) |bg| tex_bg = bg;
     }
     if (tex_bg) |bg| pass.setBindGroup(1, bg, 0, null);
-    pass.setVertexBuffer(0, g_vertex_buffer.?, vert_byte_offset.*, vert_bytes);
+    pass.setVertexBuffer(0, draw_buffer, draw_offset, vert_bytes);
     pass.draw(vert_count, 1, 0, 0);
-    vert_byte_offset.* += vert_bytes;
+    if (advance_frame_buf) vert_byte_offset.* += vert_bytes;
 }
 
 fn drawSceneGuides(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_offset: *u64, vp: math.Mat4, cam_pos: math.Vec3, light_dir: [3]f32, light_color: [3]f32, ambient_color: [3]f32, fog_color: [3]f32, fog_near: f32, fog_far: f32, scene_extent: f32, show_grid: bool, show_axes: bool) void {
