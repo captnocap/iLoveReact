@@ -13,6 +13,7 @@
 
 import { useEffect, useState } from 'react';
 import { Box, Text, Scene3D, StaticSurface, Effect, Filter } from '@reactjit/runtime/primitives';
+import * as Geometry from '@reactjit/geometries';
 
 const TEX_W = 512;
 const TEX_H = 256;
@@ -59,15 +60,17 @@ export default function BillboardDemo() {
 
         {/* LEFT: live Box+Text UI. Thin panel + rocking → edge stays hidden. */}
         <Scene3D.Mesh
-          geometry="box" material="#ffffff" textureKey="bb-screen"
-          position={[-1.4, 0, 0]} sizeX={2.2} sizeY={1.1} sizeZ={0.006}
+          geometry={Geometry.Box} params={{ width: 2.2, height: 1.1, depth: 0.006 }}
+          material="#ffffff" textureKey="bb-screen"
+          position={[-1.4, 0, 0]}
           rotation={[0, rock, 0]}
         />
 
         {/* RIGHT: Effect shader, rocking the opposite way. */}
         <Scene3D.Mesh
-          geometry="box" material="#ffffff" textureKey="bb-fx"
-          position={[1.4, 0, 0]} sizeX={2.2} sizeY={1.1} sizeZ={0.006}
+          geometry={Geometry.Box} params={{ width: 2.2, height: 1.1, depth: 0.006 }}
+          material="#ffffff" textureKey="bb-fx"
+          position={[1.4, 0, 0]}
           rotation={[0, -rock, 0]}
         />
       </Scene3D>
