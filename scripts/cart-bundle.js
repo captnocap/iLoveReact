@@ -106,6 +106,12 @@ const flags = [
   // effect instead of re-rolling private WGSL. Physically runtime/effects/;
   // '@reactjit/runtime/effects' also resolves there via the line above.
   '--alias:@reactjit/effects=' + ROOT + '/runtime/effects',
+  // @reactjit/geometries — the shared registry of 3D geometry generators
+  // (Box, Sphere, Cylinder, …). The 3D analog of @reactjit/effects: each entry
+  // is a pure generate(params)→vertices; the framework never knows what shapes
+  // exist. Physically runtime/geometries/; '@reactjit/runtime/geometries' also
+  // resolves there via the runtime alias above.
+  '--alias:@reactjit/geometries=' + ROOT + '/runtime/geometries',
   '--alias:@cart-entry=' + entryAbs,
   // Vendored npm deps under deps/. Replaces node_modules lookup so
   // bare-specifier imports (react, react-reconciler, ...) resolve without
