@@ -59,7 +59,7 @@ const entryInsideCart = CART_ROOT !== ROOT && entryAbs.startsWith(CART_ROOT + '/
 if (!entryInsideHome && !entryInsideCart) {
   die('entry must stay inside ' + ROOT + (CART_ROOT !== ROOT ? ' or ' + CART_ROOT : ''), 2);
 }
-if (!__exists(entryAbs)) die('missing entry: ' + entryArg, 2);
+if (!__fs_exists(entryAbs)) die('missing entry: ' + entryArg, 2);
 
 // ── esbuild flags ─────────────────────────────────────────────────────
 // In cartridge mode the bundle is loaded into an already-running host. The
@@ -93,14 +93,19 @@ const flags = [
   '--jsx-factory=__jsx',
   '--jsx-fragment=Fragment',
   '--inject:' + ROOT + '/runtime/jsx_shim.ts',
-  '--inject:' + ROOT + '/framework/ambient.ts',
-  '--inject:' + ROOT + '/framework/ambient_primitives.ts',
+  '--inject:' + ROOT + '/runtime/ambient.ts',
+  '--inject:' + ROOT + '/runtime/ambient_primitives.ts',
   '--alias:@reactjit/core=' + ROOT + '/runtime/core_stub.ts',
   // @reactjit/runtime is the portable handle for cart code to import SDK
   // primitives, hooks, classifiers, etc. — replaces brittle '../runtime/X'
   // and '../../runtime/X' relative paths that only work when the cart lives
   // inside the SDK tree. Off-tree carts (rjit-mode) need this.
   '--alias:@reactjit/runtime=' + ROOT + '/runtime',
+  // @reactjit/effects — the shared registry of reusable <Effect>s (Plasma,
+  // Rings, Gradient, …). Authored once for ReactJIT so carts import a named
+  // effect instead of re-rolling private WGSL. Physically runtime/effects/;
+  // '@reactjit/runtime/effects' also resolves there via the line above.
+  '--alias:@reactjit/effects=' + ROOT + '/runtime/effects',
   '--alias:@cart-entry=' + entryAbs,
   // Vendored npm deps under deps/. Replaces node_modules lookup so
   // bare-specifier imports (react, react-reconciler, ...) resolve without
