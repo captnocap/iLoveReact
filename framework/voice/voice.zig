@@ -243,6 +243,34 @@ pub fn recordingDevicesJson(out: []u8) []const u8 {
     return out[0..stream.pos];
 }
 
+/// Playback (output) device enumeration. Sibling to recordingDevicesJson
+/// — cart UIs use this to surface "capture from this output" affordances
+/// by pairing each playback device with its matching loopback/monitor
+/// source on the recording side. SDL3 just hands us the playback list;
+/// the pairing happens in cart code.
+pub fn playbackDevicesJson(out: []u8) []const u8 {
+    var stream = std.io.fixedBufferStream(out);
+    const w = stream.writer();
+    var count: c_int = 0;
+    const devices = c.SDL_GetAudioPlaybackDevices(&count);
+    w.writeAll("[") catch return out[0..stream.pos];
+    if (devices) |ids| {
+        defer c.SDL_free(ids);
+        var i: c_int = 0;
+        while (i < count) : (i += 1) {
+            if (i > 0) w.writeAll(",") catch break;
+            const id = ids[@intCast(i)];
+            const name_ptr = c.SDL_GetAudioDeviceName(id);
+            const name = if (name_ptr) |p| std.mem.span(p) else "";
+            w.print("{{\"id\":{d},\"name\":\"", .{id}) catch break;
+            writeJsonEscaped(w, name) catch break;
+            w.writeAll("\"}") catch break;
+        }
+    }
+    w.writeAll("]") catch {};
+    return out[0..stream.pos];
+}
+
 // ── Tick — drain SDL stream, run VAD, fire events ─────────────────────
 
 pub fn tick(_: u32) void {

@@ -24,6 +24,7 @@ const fswatch = @import("fs/fswatch.zig");
 const clipboard_watch = @import("ifttt/clipboard_watch.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
 const voice = @import("voice/voice.zig");
+const audio_input = @import("audio_input/audio_input.zig");
 const build_options_for_whisper = @import("build_options");
 const whisper = if (@hasDecl(build_options_for_whisper, "has_whisper") and build_options_for_whisper.has_whisper)
     @import("voice/whisper.zig")
@@ -148,6 +149,9 @@ const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
     pub fn spawnShellByName(_: []const u8, _: [*:0]const u8, _: u16, _: u16) void {}
     pub fn writePtyByName(_: []const u8, _: []const u8) void {}
     pub fn ptyAliveByName(_: []const u8) bool { return false; }
+    pub fn ensurePipe(_: []const u8, _: u16, _: u16) ?*Pipe { return null; }
+    pub fn hasDamageByName(_: []const u8) bool { return false; }
+    pub fn clearDamageByName(_: []const u8) void {}
 };
 
 const classifier = if (HAS_TERMINAL) @import("terminal/classifier.zig") else struct {
@@ -2703,7 +2707,11 @@ noinline fn paintTextInput(node: *Node, id: u8) void {
             cursor_y = point.y;
         }
         const cx = r.x + pl + cursor_x;
-        const line_h: f32 = @as(f32, @floatFromInt(node.font_size)) * 1.3;
+        // Match the caret to the line box the text and selection use — same
+        // metric as the color-row path above and gpu.drawSelectionRects —
+        // instead of a hardcoded 1.3×font_size, which left the caret a
+        // different height from both the glyphs and the selection highlight.
+        const line_h: f32 = if (node.line_height > 0) node.line_height else gpu.getLineHeight(node.font_size);
         const cy = text_y + cursor_y;
         gpu.drawRect(cx, @max(cy, text_y), 2, @max(@min(line_h, inner_h), 4), 1, 1, 1, 0.8, 0, 0, 0, 0, 0, 0);
     }
@@ -3034,6 +3042,17 @@ pub fn run(config_in: AppConfig) !void {
     // Witness — record/replay for regression testing
     witness.init();
 
+    // Loopback / "monitor" sources (capture-what's-playing) — by default
+    // SDL3's PulseAudio backend hides them, and the native PipeWire backend
+    // hides them outright. Force pulseaudio (PipeWire's pulse compat layer
+    // serves the same devices) AND flip the include-monitors hint so the
+    // recording-device enumeration surfaces every output's monitor source
+    // alongside the physical mics. Carts that don't care about this still
+    // pay nothing — the hint only affects enumeration. Must run BEFORE
+    // SDL_Init.
+    _ = c.SDL_SetHint("SDL_AUDIO_DRIVER", "pulseaudio");
+    _ = c.SDL_SetHint("SDL_AUDIO_INCLUDE_MONITORS", "1");
+
     if (!c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO)) return error.SDLInitFailed;
     defer {
         // Release any held SDL captures BEFORE SDL_Quit so the X server (or
@@ -3044,6 +3063,7 @@ pub fn run(config_in: AppConfig) !void {
         if (g_chrome_dragging) endChromeDrag();
         whisper.deinit();
         voice.deinit();
+        audio_input.deinit();
         c.SDL_Quit();
         watchdog.markCleanExit();
         crashlog.markCleanShutdown();
@@ -3055,6 +3075,7 @@ pub fn run(config_in: AppConfig) !void {
     // useVoiceInput() without scripts/ship needing to flip a fresh -Dhas-X.
     voice.init(std.heap.c_allocator);
     whisper.init(std.heap.c_allocator);
+    audio_input.init(std.heap.c_allocator);
 
     // Canvas system init
     canvas.init();
@@ -4265,6 +4286,21 @@ pub fn run(config_in: AppConfig) !void {
             var tick_ctx = TickCtx{};
             forEachTerminalNode(config.root, &tick_ctx, struct {
                 fn visit(_: *TickCtx, tn: *Node, sess: []const u8) void {
+                    // <Terminal dumb /> — no PTY. Ensure the cell-grid pipe
+                    // exists (so paint has rows) but never spawn a shell or
+                    // poll. The cart feeds bytes via __vterm_feed; repaint is
+                    // driven off the vterm damage flag the feed sets.
+                    if (tn.terminal_dumb) {
+                        if (vterm_mod.getPipe(sess) == null) {
+                            _ = vterm_mod.ensurePipe(sess, 24, 80);
+                        }
+                        if (vterm_mod.hasDamageByName(sess)) {
+                            vterm_mod.clearDamageByName(sess);
+                            classifier.markDirtyByName(sess);
+                            layout.markLayoutDirty();
+                        }
+                        return;
+                    }
                     // First sight of this session → spawn its shell. The
                     // pipe is auto-created at the default 24×80; paintTerminal
                     // resizes on first paint once the layout is known.
@@ -4384,6 +4420,7 @@ pub fn run(config_in: AppConfig) !void {
         clipboard_watch.tick(dt_ms);
         selection_watch.tick(dt_ms);
         voice.tick(dt_ms);
+        audio_input.tick(dt_ms);
         whisper.tick(dt_ms);
         system_signals.tick(dt_ms);
         ifttt_zig.tick(dt_ms);

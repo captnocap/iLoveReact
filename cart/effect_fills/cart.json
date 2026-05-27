@@ -1,6 +1,6 @@
 {
   "name": "Effect Fill Swatches",
-  "description": "Procedural GPU Effect fills evaluated as scape3d mesh textures. Boards A-D (codex): environment, condemned, props/wearables, neon-rot interiors. Boards E-F (Claude): the neon-surface dream pole (facades, signage, sky, wet streets, vehicles, screens, palms) and the contraband/crime-scene squalor game-objects. Each material x3 variants x a runtime detail grade (PSX -> Max). See CATALOG.md.",
+  "description": "Procedural GPU Effect fills evaluated as scape3d mesh textures. Boards A-D (codex): environment, condemned, props/wearables, neon-rot interiors. Boards E-F (Claude): the neon-surface dream pole (facades, signage, sky, wet streets, vehicles, screens, palms) and the contraband/crime-scene squalor game-objects. Board G (Kimi): liminal threshold surfaces — fogged mirror, salt flat, moss carpet, tarnished silver, ice sheet, charcoal bed, stained glass. Each material x3 variants x a runtime detail grade (PSX -> Max). See CATALOG.md.",
   "width": 1120,
   "height": 860
 }

@@ -19,7 +19,7 @@ import * as React from 'react';
 import * as pgConn from '../db/connections';
 import { ensureBootstrapped } from '../db/bootstrap';
 import { lit, val, ident, tableName } from '../db/sql';
-import type { AssistantTurn, ChatSession, ChatSurface, ParallelCandidate } from './types';
+import type { AssistantTurn, ChatSession, ChatSurface, ChatTurnMetadata, ParallelCandidate } from './types';
 
 const TURN_TABLE = ident(tableName('chat-turn'));
 const SESSION_TABLE = ident(tableName('chat-session'));
@@ -28,12 +28,14 @@ const SESSION_TABLE = ident(tableName('chat-session'));
 
 let _sessions: ChatSession[] = [];
 let _currentSessionId: string | null = null;
+let _activeSessionIds: string[] = [];
 let _turns: AssistantTurn[] = [];
 let _loaded = false;
 let _loadingPromise: Promise<void> | null = null;
 
 const _subs = new Set<() => void>();
 const _sessionSubs = new Set<() => void>();
+const _activeSessionSubs = new Set<() => void>();
 
 function _notify(): void {
   for (const s of _subs) s();
@@ -41,6 +43,10 @@ function _notify(): void {
 
 function _notifySessions(): void {
   for (const s of _sessionSubs) s();
+}
+
+function _notifyActiveSessions(): void {
+  for (const s of _activeSessionSubs) s();
 }
 
 function _subscribe(fn: () => void): () => void {
@@ -53,12 +59,51 @@ function _subscribeSessions(fn: () => void): () => void {
   return () => { _sessionSubs.delete(fn); };
 }
 
+function _subscribeActiveSessions(fn: () => void): () => void {
+  _activeSessionSubs.add(fn);
+  return () => { _activeSessionSubs.delete(fn); };
+}
+
 function _getTurns(): AssistantTurn[] {
   return _turns;
 }
 
 function _getSessions(): ChatSession[] {
   return _sessions;
+}
+
+function _getActiveSessions(): ChatSession[] {
+  const byId = new Map(_sessions.map((s) => [s.id, s]));
+  const seen = new Set<string>();
+  const out: ChatSession[] = [];
+  for (const rawId of _activeSessionIds) {
+    const id = String(rawId);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const session = byId.get(id);
+    if (session) out.push(session);
+  }
+  return out;
+}
+
+function _markSessionActive(id: string): void {
+  if (!id) return;
+  const cleanId = String(id);
+  const seen = new Set<string>([cleanId]);
+  const rest: string[] = [];
+  for (const rawId of _activeSessionIds) {
+    const sid = String(rawId);
+    if (seen.has(sid)) continue;
+    seen.add(sid);
+    rest.push(sid);
+  }
+  const next = [cleanId, ...rest].slice(0, 9);
+  if (
+    next.length === _activeSessionIds.length &&
+    next.every((sid, i) => sid === _activeSessionIds[i])
+  ) return;
+  _activeSessionIds = next;
+  _notifyActiveSessions();
 }
 
 // ── Persistence helpers ───────────────────────────────────────────────
@@ -143,9 +188,16 @@ export function ensureChatLoaded(): Promise<void> {
   _loadingPromise = (async () => {
     try {
       await ensureBootstrapped();
-      _sessions = _loadSessionsFromPg();
+      const seen = new Set<string>();
+      _sessions = _loadSessionsFromPg().filter((s) => {
+        if (seen.has(s.id)) return false;
+        seen.add(s.id);
+        return true;
+      });
+      _activeSessionIds = _activeSessionIds.filter((id, index, list) => list.indexOf(id) === index);
       _loaded = true;
       _notifySessions();
+      _notifyActiveSessions();
     } finally {
       _loadingPromise = null;
     }
@@ -180,6 +232,7 @@ export function appendTurn(turn: AssistantTurn): void {
     };
     _currentSessionId = session.id;
     _sessions = [session, ..._sessions];
+    _markSessionActive(session.id);
     _writeSession(session);
     _notifySessions();
   }
@@ -240,6 +293,17 @@ export function updateTurnSurface(id: string, surface: ChatSurface | null): void
   _notify();
 }
 
+export function updateTurnMetadata(id: string, metadata: ChatTurnMetadata): void {
+  const i = _turns.findIndex((t) => t.id === id);
+  if (i < 0) return;
+  const cur = _turns[i];
+  if (cur.author !== 'asst') return;
+  const updated = { ...cur, metadata } as AssistantTurn;
+  _turns = [..._turns.slice(0, i), updated, ..._turns.slice(i + 1)];
+  if (_currentSessionId) _writeTurn(_currentSessionId, updated);
+  _notify();
+}
+
 /** Mutate one model candidate inside a parallel-response turn. */
 export function updateParallelCandidate(
   turnId: string,
@@ -284,6 +348,7 @@ export function selectParallelCandidate(turnId: string, candidateId: string): Pa
 export function loadSession(id: string): void {
   if (id === _currentSessionId) return;
   _currentSessionId = id;
+  _markSessionActive(id);
   _turns = _loadTurnsFromPg(id);
   _notify();
 }
@@ -297,10 +362,48 @@ export function startNewSession(): void {
   _notify();
 }
 
+export function renameSession(id: string, title: string): void {
+  const i = _sessions.findIndex(s => s.id === id);
+  if (i < 0) return;
+  const clean = title.trim() || '(untitled)';
+  const updated: ChatSession = {
+    ..._sessions[i],
+    title: clean,
+    updated_at: new Date().toISOString(),
+  };
+  _sessions = [..._sessions.slice(0, i), updated, ..._sessions.slice(i + 1)];
+  _writeSession(updated);
+  _notifySessions();
+  _notifyActiveSessions();
+}
+
+/** Persist the backend's session id (claude's sid) on the current
+ *  thread, so the next turn resumes the same process. No-op when there's
+ *  no current session or the value is unchanged. */
+export function setCurrentSessionExternalId(externalSessionId: string): void {
+  if (!externalSessionId || !_currentSessionId) return;
+  const i = _sessions.findIndex(s => s.id === _currentSessionId);
+  if (i < 0) return;
+  if (_sessions[i].external_session_id === externalSessionId) return;
+  const updated: ChatSession = { ..._sessions[i], external_session_id: externalSessionId };
+  _sessions = [..._sessions.slice(0, i), updated, ..._sessions.slice(i + 1)];
+  _writeSession(updated);
+  _notifySessions();
+  _notifyActiveSessions();
+}
+
+export function getCurrentSessionExternalId(): string | null {
+  if (!_currentSessionId) return null;
+  const s = _sessions.find(s => s.id === _currentSessionId);
+  return s?.external_session_id || null;
+}
+
 /** Permanently delete a session and its turns from pg. */
 export function deleteSession(id: string): void {
   _deleteSessionFromPg(id);
   _sessions = _sessions.filter(s => s.id !== id);
+  _activeSessionIds = _activeSessionIds.filter(sid => sid !== id);
+  _notifyActiveSessions();
   if (_currentSessionId === id) {
     _currentSessionId = null;
     _turns = [];
@@ -322,9 +425,31 @@ export function useChatSessions(): ChatSession[] {
   return React.useSyncExternalStore(_subscribeSessions, _getSessions, _getSessions);
 }
 
+export function useActiveChatSessions(): ChatSession[] {
+  React.useEffect(() => { void ensureChatLoaded(); }, []);
+  return React.useSyncExternalStore(_subscribeActiveSessions, _getActiveSessions, _getActiveSessions);
+}
+
 /** Hook — returns the active session id (null when in fresh-chat state). */
 export function useCurrentSessionId(): string | null {
   return React.useSyncExternalStore(_subscribe, getCurrentSessionId, getCurrentSessionId);
+}
+
+/** Hook — the current thread's stored backend session id (claude's sid),
+ *  or null. Re-renders on both thread switches (_subscribe) and session
+ *  metadata writes (_subscribeSessions). Fed back to the worker as the
+ *  resume key so a thread keeps the same claude process. */
+function _subscribeCurrentExternalId(fn: () => void): () => void {
+  const u1 = _subscribe(fn);
+  const u2 = _subscribeSessions(fn);
+  return () => { u1(); u2(); };
+}
+export function useCurrentSessionExternalId(): string | null {
+  return React.useSyncExternalStore(
+    _subscribeCurrentExternalId,
+    getCurrentSessionExternalId,
+    getCurrentSessionExternalId,
+  );
 }
 
 /** True iff the cart has any chat presence — current session has turns

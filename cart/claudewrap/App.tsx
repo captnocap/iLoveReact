@@ -127,8 +127,10 @@ export default function App() {
           id = stable hook position; toggling enabled flips the action
           to a no-op rather than unmounting (rule-of-hooks-safe). */}
       {settings.rules.map(r => <RuleBinding key={r.id} rule={r} />)}
-      {/* Invisible — useHost binds the HTTP server at boot. */}
-      <BridgeHost />
+      {/* Invisible — useHost binds the HTTP server at boot. No spawnShell:
+          the <Terminal session="default"> below owns the PTY, so the
+          bridge runs in attached mode and just drives that pipe. */}
+      <BridgeHost port={settings.bridgePort} />
       {/* Settings GUI window. Visibility gated by state.ts.windowOpen. */}
       <SettingsWindow />
 

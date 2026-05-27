@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { ScrollView, Box, Text, Pressable, TextInput } from '@reactjit/runtime/primitives';
-import { C } from './style_cls';
+import { C } from './style.cls';
 
 type Segment = {
   type: 'text' | 'code';

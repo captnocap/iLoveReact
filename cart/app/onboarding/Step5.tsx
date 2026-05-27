@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { classifiers as S } from '@reactjit/core';
 import { Tooltip } from '@reactjit/runtime/tooltip/Tooltip';
-import { useBreakpoint } from '@reactjit/runtime/theme';
+import { useBreakpoint } from '@reactjit/runtime/classifier';
 import { SnakeSpinner } from '../gallery/components/grid-spinners/GridSpinners';
 import { useAnimationTimeline } from '../anim';
 import { useOnboarding } from './state.tsx';

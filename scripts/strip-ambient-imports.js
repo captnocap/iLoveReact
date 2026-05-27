@@ -4,8 +4,8 @@
 //
 // esbuild is configured (in scripts/cart-bundle.js) with:
 //   --inject:runtime/jsx_shim.ts
-//   --inject:framework/ambient.ts
-//   --inject:framework/ambient_primitives.ts
+//   --inject:runtime/ambient.ts
+//   --inject:runtime/ambient_primitives.ts
 //
 // Every name exported from those three files is globally available in every
 // bundled .tsx/.ts file. So:
@@ -43,10 +43,10 @@ function normalizeArgv(raw) {
 }
 
 const AMBIENT = new Set([
-  // framework/ambient_primitives.ts
+  // runtime/ambient_primitives.ts
   'Box','Row','Col','Text','Image','Pressable','ScrollView','TextInput','TextArea',
   'TextEditor','Terminal','terminal','Canvas','Graph','Render','Effect','Native',
-  // framework/ambient.ts (React hooks + helpers)
+  // runtime/ambient.ts (React hooks + helpers)
   'useState','useEffect','useLayoutEffect','useCallback','useMemo','useRef',
   'useContext','useReducer','useId','useImperativeHandle','useSyncExternalStore',
   'useTransition','useDeferredValue','createElement','cloneElement','isValidElement',
@@ -69,7 +69,7 @@ function isAmbientModule(spec) {
 }
 
 function walk(dir, out = []) {
-  const entriesRaw = __readDir(dir);
+  const entriesRaw = __fs_list_json(dir);
   if (entriesRaw === null) return out;
 
   let entries;
@@ -82,7 +82,7 @@ function walk(dir, out = []) {
   for (const name of entries) {
     if (name === 'node_modules' || name.startsWith('.')) continue;
     const full = joinPath(dir, name);
-    const st = statParse(__stat(full));
+    const st = statParse(__fs_stat_json(full));
     if (!st) continue;
     if (st.isDir) walk(full, out);
     else if (full.endsWith('.tsx') || full.endsWith('.ts')) out.push(full);
@@ -163,14 +163,14 @@ function rewriteImport(match, typeKw, clause, spec) {
 }
 
 function processFile(path) {
-  const src = __readFile(path);
+  const src = __fs_read(path);
   if (src === null) die('failed to read ' + path);
   const out = src.replace(IMPORT_RE, rewriteImport);
   if (out === src) return false;
   if (dryRun) {
     __writeStdout(`[would change] ${path}\n`);
   } else {
-    if (!__writeFile(path, out)) die('failed to write ' + path);
+    if (!__fs_write(path, out)) die('failed to write ' + path);
     __writeStdout(`[rewrote]     ${path}\n`);
   }
   return true;
@@ -178,7 +178,7 @@ function processFile(path) {
 
 const files = targets.length
   ? targets.flatMap((target) => {
-      const st = statParse(__stat(target));
+      const st = statParse(__fs_stat_json(target));
       if (!st) return [target];
       return st.isDir ? walk(target) : [target];
     })

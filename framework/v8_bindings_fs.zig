@@ -494,7 +494,10 @@ fn fsRemove(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     switch (stat.kind) {
-        .directory => std.fs.cwd().deleteDir(path_buf) catch {
+        // Recursive: cli's __remove used deleteTree, callers rely on that
+        // (e.g., scripts wiping cache dirs). deleteDir would fail on
+        // non-empty directories.
+        .directory => std.fs.cwd().deleteTree(path_buf) catch {
             setBool(info, false);
             return;
         },

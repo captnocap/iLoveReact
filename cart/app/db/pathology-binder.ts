@@ -23,8 +23,8 @@
 // concerns and makes it trivial to drive from tests.
 
 import { subscribe, emit } from '@reactjit/runtime/ffi';
-import { resolveTrigger } from '@reactjit/runtime/hooks/ifttt-registry';
-import { matchSpec } from '@reactjit/runtime/hooks/ifttt-match';
+import { resolveTrigger } from '@reactjit/runtime/hooks/ifttt/registry';
+import { matchSpec } from '@reactjit/runtime/hooks/ifttt/match';
 import type { Pathology } from '../gallery/data/core/pathology';
 
 interface ActiveSession { sessionId: string; vmid: string }

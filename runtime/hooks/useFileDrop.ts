@@ -15,8 +15,7 @@
  */
 
 import { useEffect, useRef } from 'react';
-
-const host = (): any => globalThis as any;
+import { callHost } from '../ffi';
 
 export function useFileDrop(handler: (path: string) => void): void {
   const seqRef = useRef<number>(-1);
@@ -24,16 +23,16 @@ export function useFileDrop(handler: (path: string) => void): void {
   useEffect(() => {
     // Initialize the baseline so the first mount doesn't fire stale drops.
     if (seqRef.current === -1) {
-      seqRef.current = host().__filedropSeq?.() ?? 0;
+      seqRef.current = callHost<number>('__filedropSeq', 0);
     }
   }, []);
 
   // Read on every render — this hook deliberately re-evaluates as part of
   // the regular render pass (markDirty wakes us).
-  const seq: number = host().__filedropSeq?.() ?? 0;
+  const seq = callHost<number>('__filedropSeq', 0);
   if (seqRef.current !== -1 && seq !== seqRef.current) {
     seqRef.current = seq;
-    const path: string = host().__filedropLastPath?.() ?? '';
+    const path = callHost<string>('__filedropLastPath', '');
     if (path) handler(path);
   }
 }

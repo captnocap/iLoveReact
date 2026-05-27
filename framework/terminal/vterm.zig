@@ -946,6 +946,24 @@ pub fn writePtyByName(name: []const u8, data: []const u8) void {
     p.writePty(data);
 }
 
+// Dumb-render path: feed ANSI bytes straight into the parser (the screen),
+// no PTY involved. Creates the pipe on first feed at the given dims; paint
+// resizes it to the laid-out grid afterward. Backs <Terminal dumb />.
+pub fn feedByName(name: []const u8, rows: u16, cols: u16, data: []const u8) void {
+    const p = getOrCreatePipe(name, rows, cols) orelse return;
+    p.feedData(data);
+}
+
+pub fn hasDamageByName(name: []const u8) bool {
+    const p = getPipe(name) orelse return false;
+    return p.has_damage;
+}
+
+pub fn clearDamageByName(name: []const u8) void {
+    const p = getPipe(name) orelse return;
+    p.clearDamage();
+}
+
 pub fn resizeByName(name: []const u8, rows: u16, cols: u16) void {
     const p = getPipe(name) orelse return;
     p.resizeTerminal(rows, cols);

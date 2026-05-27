@@ -27,7 +27,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { callHost } from '../ffi';
+import { callHost, callHostJson } from '../ffi';
 
 export type VideoStatus = 'loading' | 'ready' | 'error' | 'none';
 
@@ -66,11 +66,7 @@ export function videoControl(src: string): VideoControl {
     setMuted: (m) => callHost('__video_set_muted', undefined, src, m ? 1 : 0),
     setLoop: (l) => callHost('__video_set_loop', undefined, src, l ? 1 : 0),
     getStatus: () => callHost<VideoStatus>('__video_get_status', 'none', src),
-    getDimensions: () => {
-      const raw = callHost<string>('__video_get_dimensions', 'null', src);
-      if (!raw || raw === 'null') return null;
-      try { return JSON.parse(raw); } catch { return null; }
-    },
+    getDimensions: () => callHostJson<{ w: number; h: number } | null>('__video_get_dimensions', null, src),
     getCurrentTime: () => callHost<number>('__video_get_time', -1, src),
     getDuration: () => callHost<number>('__video_get_duration', -1, src),
     getPaused: () => callHost<boolean>('__video_get_paused', true, src),

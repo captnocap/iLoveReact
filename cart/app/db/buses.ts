@@ -7,7 +7,7 @@
 // hooked into useIFTTT, but more entities can be added as the rule
 // surface grows.
 //
-// Importing this module also imports `runtime/hooks/ifttt-supervisor`,
+// Importing this module also imports `runtime/hooks/ifttt/supervisor`,
 // which performs the trigger-source / action-runner registrations on
 // load. So `import 'cart/app/db'` is enough to get the whole supervisor
 // IFTTT surface live.
@@ -20,7 +20,7 @@ import {
   emitRunLifecycle,
   emitSessionLifecycle,
   emitClaimLifecycle,
-} from '@reactjit/runtime/hooks/ifttt-supervisor';
+} from '@reactjit/runtime/hooks/ifttt/supervisor';
 
 type Notifier = (row: any) => void;
 

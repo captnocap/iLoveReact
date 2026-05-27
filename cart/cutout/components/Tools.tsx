@@ -13,6 +13,8 @@ import { NUM_COLOR_SLOTS, SLOT_LABELS } from './MaskQuad';
 const TOOLS: { id: Tool; label: string; icon: string }[] = [
   { id: 'hand', label: 'Move', icon: 'Hand' },
   { id: 'brush', label: 'Brush', icon: 'Brush' },
+  { id: 'refine', label: 'Refine brush', icon: 'ScanLine' },
+  { id: 'lasso', label: 'Lasso', icon: 'Spline' },
   { id: 'smart', label: 'Smart select', icon: 'WandSparkles' },
 ];
 
@@ -80,6 +82,7 @@ export function Tools({ s }: { s: CutoutState }) {
           />
         ))}
         <IconTile icon="X" label="Clear mask" active={false} color={COLORS.bad} onPress={s.clearMask} />
+        <IconTile icon="RefreshCcw" label="Invert mask" active={false} color={COLORS.accent} onPress={s.invertMask} />
       </Row>
 
       <Divider />

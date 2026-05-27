@@ -22,10 +22,32 @@ const std = @import("std");
 // ── Configuration ────────────────────────────────────────────────────────
 
 const MAX_CLIENTS = 64;
-const MAX_REQ = 8192;
+// Per-connection request buffer (headers + body). 256 KB ≈ 64k tokens of
+// text — comfortably covers large API requests like an OpenAI-compatible
+// chat-completions body that carries conversation history + a full tools
+// schema. The previous 8 KB silently truncated such requests: the buffer
+// filled, the body stayed incomplete, the next read hit a zero-length
+// slice → read returned 0 → the server mistook it for EOF and closed, so
+// the request was never parsed or delivered. Oversized requests now get a
+// clean 413 (see tryParseRequest) instead of hanging.
+const MAX_REQ = 262144;
 const MAX_RESP = 65536;
 const MAX_PATH = 512;
 const MAX_ROUTES = 16;
+
+// ── Diagnostic logging (env-gated; no-op unless REACTJIT_HTTPSRV_DEBUG=1) ──
+// Writes to stderr. Run the cart with `2>/tmp/srv.log` to capture cleanly
+// without corrupting a TUI's stdout. Temporary instrument for the
+// "accepted-but-never-read" investigation.
+var g_dbg_checked: bool = false;
+var g_dbg: bool = false;
+fn dbg(comptime fmt: []const u8, args: anytype) void {
+    if (!g_dbg_checked) {
+        g_dbg_checked = true;
+        g_dbg = std.posix.getenv("REACTJIT_HTTPSRV_DEBUG") != null;
+    }
+    if (g_dbg) std.debug.print("[httpsrv] " ++ fmt ++ "\n", args);
+}
 
 // ── Public types ─────────────────────────────────────────────────────────
 
@@ -124,8 +146,12 @@ pub const HttpServer = struct {
 
         // Accept new connections
         while (true) {
-            const accepted = std.posix.accept(self.listener, null, null, std.posix.SOCK.NONBLOCK) catch break;
+            const accepted = std.posix.accept(self.listener, null, null, std.posix.SOCK.NONBLOCK) catch |err| {
+                if (err != error.WouldBlock) dbg("accept ERR={s}", .{@errorName(err)});
+                break;
+            };
             const slot = self.findSlot() orelse {
+                dbg("accept fd={d} NO FREE SLOT (closing)", .{accepted});
                 std.posix.close(accepted);
                 break;
             };
@@ -135,6 +161,7 @@ pub const HttpServer = struct {
                 .stream = .{ .handle = accepted },
                 .state = .reading,
             };
+            dbg("accept fd={d} -> slot={d} id={d}", .{ accepted, slot, self.next_id });
             self.next_id += 1;
         }
 
@@ -188,31 +215,56 @@ pub const HttpServer = struct {
         const stream = client.stream orelse return;
         const n = stream.read(client.req_buf[client.req_len..]) catch |err| {
             if (err == error.WouldBlock) {
+                dbg("read id={d} WOULDBLOCK req_len={d}", .{ client.id, client.req_len });
                 if (client.req_len > 0) self.tryParseRequest(client, out);
                 return;
             }
+            dbg("read id={d} ERR={s}", .{ client.id, @errorName(err) });
             client.active = false;
             return;
         };
         if (n == 0) {
+            dbg("read id={d} EOF n=0 (closing)", .{client.id});
             client.active = false;
             return;
         }
         client.req_len += n;
+        dbg("read id={d} n={d} req_len={d}", .{ client.id, n, client.req_len });
         self.tryParseRequest(client, out);
     }
 
     fn tryParseRequest(self: *HttpServer, client: *HttpClient, out: []HttpEvent) void {
         const req = client.req_buf[0..client.req_len];
         // Need complete headers
-        const header_end = std.mem.indexOf(u8, req, "\r\n\r\n") orelse return;
+        const header_end = std.mem.indexOf(u8, req, "\r\n\r\n") orelse {
+            // Headers alone overflowed the buffer with no terminator —
+            // malformed or absurdly large. Reject cleanly rather than
+            // looping forever / EOF-closing silently.
+            if (client.req_len >= MAX_REQ) {
+                dbg("parse id={d} HEADERS TOO LARGE (req_len={d} >= MAX_REQ)", .{ client.id, client.req_len });
+                self.respondDirect(client, 413, "Payload Too Large");
+            }
+            return;
+        };
 
         // Parse Content-Length to know if we have the full body
         const headers = req[0..header_end];
         const content_length = parseContentLength(headers);
         const body_start = header_end + 4;
+        // Will the full request fit? If the declared body can't fit in the
+        // buffer we'll never complete the read — reject with 413 instead of
+        // hanging (the old bug: buffer fills, next read returns 0 = EOF,
+        // connection closes, request silently lost).
+        if (body_start + content_length > MAX_REQ) {
+            dbg("parse id={d} TOO LARGE body_start={d} content_length={d} > MAX_REQ={d}", .{ client.id, body_start, content_length, MAX_REQ });
+            self.respondDirect(client, 413, "Payload Too Large");
+            return;
+        }
         const body_received = if (client.req_len > body_start) client.req_len - body_start else 0;
-        if (body_received < content_length) return; // wait for full body
+        if (body_received < content_length) {
+            dbg("parse id={d} INCOMPLETE body_received={d} content_length={d} (waiting)", .{ client.id, body_received, content_length });
+            return; // wait for full body
+        }
 
         // Parse request line: "METHOD /path HTTP/1.1"
         const first_line_end = std.mem.indexOf(u8, req[0..header_end], "\r\n") orelse return;
@@ -244,6 +296,7 @@ pub const HttpServer = struct {
         }
 
         // Dynamic route — emit event
+        dbg("parse id={d} COMPLETE method={s} path={s} body_recv={d} -> EMIT", .{ client.id, method, path, body_received });
         if (self.event_count < out.len) {
             var ev = &out[self.event_count];
             ev.client_id = client.id;

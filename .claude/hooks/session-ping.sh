@@ -6,6 +6,11 @@
 
 set +e  # explicit error handling; set -e causes false-positive exit codes
 
+# Bridge-driven chat sessions (cart/claudewrap headless pool) opt out:
+# they want a vanilla chat, not the "[SESSION AWARENESS] You are session
+# X" context that a fresh claude parrots back. The launcher exports this.
+[ -n "$REACTJIT_BRIDGE_CHAT" ] && exit 0
+
 SESSIONS_DIR="/run/user/$(id -u)/claude-sessions/reactjit"
 mkdir -p "$SESSIONS_DIR"
 

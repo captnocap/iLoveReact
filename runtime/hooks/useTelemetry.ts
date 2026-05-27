@@ -25,8 +25,9 @@
  *   const { data: bbox } = useTelemetry({ kind: 'nodeBoxModel', nodeId: 42 });
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { callHost } from '../ffi';
+import { useLatest } from './useLatest';
 
 // ── Spec types ─────────────────────────────────────────────────────
 
@@ -52,7 +53,6 @@ export type JsonKind =
   | 'frame'       // __tel_frame()       per-frame timing record
   | 'gpu'         // __tel_gpu()         GPU pipeline stats
   | 'nodes'       // __tel_nodes()       node tree summary
-  | 'state'       // __tel_state()       state-slot occupancy
   | 'history'     // __tel_history()     ring of recent frames
   | 'input'       // __tel_input()       input pipeline counters
   | 'layout'      // __tel_layout()      layout-engine internals
@@ -111,7 +111,6 @@ const JSON_HOST_FN: Record<JsonKind, string> = {
   frame: '__tel_frame',
   gpu: '__tel_gpu',
   nodes: '__tel_nodes',
-  state: '__tel_state',
   history: '__tel_history',
   input: '__tel_input',
   layout: '__tel_layout',
@@ -146,8 +145,7 @@ export function useTelemetry<T = any>(spec: NodeTelemetrySpec): JsonTelemetryRes
 export function useTelemetry(spec: TelemetrySpec): ScalarTelemetryResult | JsonTelemetryResult {
   const [scalar, setScalar] = useState<number>(0);
   const [json, setJson] = useState<any>(null);
-  const specRef = useRef(spec);
-  specRef.current = spec;
+  const specRef = useLatest(spec);
 
   // Stable poll-key — restart the effect only when kind / nodeId / pollMs change.
   const nodeId = (spec as NodeTelemetrySpec).nodeId ?? 0;

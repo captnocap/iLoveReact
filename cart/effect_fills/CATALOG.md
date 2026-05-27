@@ -56,6 +56,21 @@ trashy register.
 | F16–18 | **Corkboard** | bare | photos | red-string | the "AI playing Clue" `Case` board — safehouse interior / detective surface. | static |
 | F19–21 | **Substance** | pills | lines+razor | residue | the `HighState` system's prop; `consumable` `ItemType` use-screen. | static |
 
+## Board G / Liminal — the *threshold* surfaces
+Not quite environment, not quite object. These are the surfaces at the edge of state-change:
+condensation becoming water, water becoming ice, flame becoming ash, polish becoming patina,
+sand becoming glass. Grade at **Std/Max** to preserve the translucent and micro-detail reads.
+
+| ID | Material | v0 | v1 | v2 | scape3d target | Live? |
+|----|----------|----|----|----|----------------|-------|
+| G01–03 | **Fogged Mirror** | steam | wiped trails | droplets | bathroom/cloakroom interior `Wall`/`Mirror` surface; implies humidity and habitation. | static |
+| G04–06 | **Salt Flat** | white | pink-lake | borax | desert `ZONE_HEX` ground (dry lake bed), mineral extraction site. | static |
+| G07–09 | **Moss Carpet** | deep green | bright lichen | dried peat | forest `ZONE_HEX` ground, damp `Building` roof, shrine/stone overgrowth. | static |
+| G10–12 | **Tarnished Silver** | diagonal buff | circular polish | crosshatch | heirloom `ItemType`, trophy, ritual object; reflects light dynamically. | static |
+| G13–15 | **Ice Sheet** | arctic clear | glacial blue | sunset melt | frozen `ZONE_HEX`, glacier face, refrigerated interior. | static |
+| G16–18 | **Charcoal Bed** | orange ember | yellow coals | red coals | campfire/bonfire `Event` site, burnt `Building` interior, forge. | **ember** |
+| G19–21 | **Stained Glass** | warm cathedral | cool chapel | sunset rose | church/mansion `Building` window, `Sign` backlit pane. | static |
+
 ---
 
 ## How these become scape3d textures

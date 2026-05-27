@@ -19,10 +19,10 @@
  * watcher_id.
  */
 
-import { useEffect, useRef } from 'react';
-import { registerIfttSource } from './ifttt-registry';
-
-const host = (): any => globalThis as any;
+import { useEffect } from 'react';
+import { callHost, callHostJson } from '../ffi';
+import { useLatest } from './useLatest';
+import { registerIfttSource } from './ifttt/registry';
 
 export interface FileWatchEvent {
   watcherId: number;
@@ -55,10 +55,8 @@ function ensureDrainTimer(): void {
   // poll faster than events can arrive.
   drainTimer = setInterval(() => {
     if (listeners.size === 0) return;
-    const raw: string = host().__fswatchDrain?.() ?? '[]';
-    if (!raw || raw === '[]') return;
-    let events: any[] = [];
-    try { events = JSON.parse(raw); } catch { return; }
+    const events = callHostJson<any[]>('__fswatchDrain', []);
+    if (events.length === 0) return;
     for (const ev of events) {
       const fn = listeners.get(ev.w);
       if (fn) fn({ watcherId: ev.w, type: ev.t, path: ev.p, size: ev.s, mtimeNs: ev.m });
@@ -79,11 +77,10 @@ export function useFileWatch(
   handler: (event: FileWatchEvent) => void,
   opts: FileWatchOptions = {},
 ): void {
-  const handlerRef = useRef(handler);
-  handlerRef.current = handler;
+  const latest = useLatest(handler);
 
   useEffect(() => {
-    const off = attachWatcher(path, (ev) => handlerRef.current(ev), opts);
+    const off = attachWatcher(path, (ev) => latest.current(ev), opts);
     return off;
   }, [path, opts.recursive, opts.intervalMs, opts.pattern]);
 }
@@ -99,17 +96,19 @@ export function attachWatcher(
   opts: FileWatchOptions = {},
 ): () => void {
   if (!path) return () => {};
-  const id: number = host().__fswatchAdd?.(
+  const id = callHost<number>(
+    '__fswatchAdd',
+    -1,
     path,
     opts.recursive ? 1 : 0,
     opts.intervalMs ?? 1000,
     opts.pattern ?? '',
-  ) ?? -1;
+  );
   if (id < 0) return () => {};
   listeners.set(id, fn);
   ensureDrainTimer();
   return () => {
-    host().__fswatchRemove?.(id);
+    callHost('__fswatchRemove', undefined, id);
     listeners.delete(id);
     stopDrainTimerIfIdle();
   };

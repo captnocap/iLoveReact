@@ -14,24 +14,16 @@
 // auto-rule is wrong (e.g. an "ipc.recv" you want flagged because the
 // payload is suspiciously large).
 
-const host: any = globalThis as any;
+import { callHost, callHostJson } from './ffi';
 
 function callHostString(name: string, ...args: unknown[]): string | null {
-  const fn = host[name];
-  if (typeof fn !== 'function') return null;
-  try {
-    const r = fn.apply(host, args);
-    return typeof r === 'string' ? r : null;
-  } catch { return null; }
+  const r = callHost<unknown>(name, null, ...args);
+  return typeof r === 'string' ? r : null;
 }
 
 function callHostNumber(name: string, ...args: unknown[]): number {
-  const fn = host[name];
-  if (typeof fn !== 'function') return 0;
-  try {
-    const r = fn.apply(host, args);
-    return typeof r === 'number' ? r : 0;
-  } catch { return 0; }
+  const r = callHost<unknown>(name, 0, ...args);
+  return typeof r === 'number' ? r : 0;
 }
 
 function payloadToJson(payload: unknown): string {
@@ -91,9 +83,7 @@ export function emit(
  * ~/.cache/reactjit/events-<sessionId>.ndjson.
  */
 export function recent(maxCount = 200, minImportance = 0): BusEvent[] {
-  const json = callHostString('__busRecent', maxCount, minImportance);
-  if (!json) return [];
-  try { return JSON.parse(json) as BusEvent[]; } catch { return []; }
+  return callHostJson<BusEvent[]>('__busRecent', [], maxCount, minImportance);
 }
 
 /**

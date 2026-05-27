@@ -93,7 +93,6 @@ export function pushEntry(
  *  important fields match. Used to skip pushes from no-op commits
  *  (debounced fires that didn't change anything). */
 export function snapshotsEqual(a: CanvasSnapshot, b: CanvasSnapshot): boolean {
-  if (a.bag.cols !== b.bag.cols) return false;
   if (a.slots.length !== b.slots.length) return false;
   for (let i = 0; i < a.slots.length; i++) if (a.slots[i] !== b.slots[i]) return false;
   if (a.panels.length !== b.panels.length) return false;

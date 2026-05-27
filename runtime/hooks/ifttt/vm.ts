@@ -22,14 +22,14 @@
 // before any VM is attached; the source's match() returns a
 // subscription that listens on the namespaced bus channel directly.
 
-import { subscribe } from '../ffi';
-import { registerIfttSource, type IfttSubscription } from './ifttt-registry';
+import { subscribe } from '../../ffi';
+import { registerIfttSource, type IfttSubscription } from './registry';
 import {
   openVsock,
   namespaceMirror,
   namespaceForward,
   type VsockTransport,
-} from './vsock';
+} from '../vsock';
 
 const PREFIX = 'vm:';
 

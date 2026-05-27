@@ -2,7 +2,7 @@
 // agent. Clicking fires props.onPress so the parent can target the matching
 // Canvas.Node (pan the camera onto it).
 
-import { C } from './style_cls';
+import { C } from './style.cls';
 
 export function RaidFrame(props: any) {
   const isActive = props.active === 1;

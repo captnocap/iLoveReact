@@ -11,9 +11,10 @@ import { Box, Col, Row, Text, Pressable, Window } from '@reactjit/runtime/primit
 const PANELS = ['bridge', 'backends', 'memory', 'library', 'vm', 'canvas'];
 
 export default function TuiWindowSmoke() {
+  const [active, setActive] = React.useState('bridge');
   return (
     <Col style={{ width: '100%', height: '100%' }}>
-      <Text style={{ color: '#fbbf24' }}>tui_window_smoke</Text>
+      <Text style={{ color: '#fbbf24' }}>tui_window_smoke · active = {active}</Text>
       <Window title="smoke · panel-nav repro" width={900} height={620}>
         <Row style={{ width: '100%', height: '100%', backgroundColor: '#0b1020' }}>
           <Col style={{
@@ -27,33 +28,31 @@ export default function TuiWindowSmoke() {
             <Box style={{ paddingLeft: 1, paddingBottom: 1 }}>
               <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>panels</Text>
             </Box>
-            {PANELS.map((label, i) => (
-              <Pressable key={label}>
-                <Box style={{
-                  paddingLeft: 2,
-                  paddingRight: 2,
-                  backgroundColor: i === 0 ? '#fbbf24' : '#111827',
+            {PANELS.map((label) => {
+              const isActive = label === active;
+              return (
+                <Pressable key={label} onPress={() => {
+                  try { (globalThis as any).__writeStderr?.(`[click] panel=${label}\n`); } catch {}
+                  setActive(label);
                 }}>
-                  <Text style={{
-                    color: i === 0 ? '#000000' : '#94a3b8',
-                    fontWeight: i === 0 ? 'bold' : 'normal',
-                  }}>{label}</Text>
-                </Box>
-              </Pressable>
-            ))}
+                  <Box style={{
+                    paddingLeft: 2,
+                    paddingRight: 2,
+                    backgroundColor: isActive ? '#fbbf24' : '#111827',
+                  }}>
+                    <Text style={{
+                      color: isActive ? '#000000' : '#94a3b8',
+                      fontWeight: isActive ? 'bold' : 'normal',
+                    }}>{label}</Text>
+                  </Box>
+                </Pressable>
+              );
+            })}
           </Col>
           <Col style={{ flexGrow: 1, padding: 1 }}>
-            {/* Inner Col mimics what BridgePanel returns — nested. */}
             <Col style={{ gap: 1, flexGrow: 1 }}>
-              <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>bridge</Text>
-              <Row style={{ gap: 1 }}>
-                <Text style={{ color: '#94a3b8' }}>port</Text>
-                <Box style={{ width: 8, borderWidth: 1, borderColor: '#475569', paddingLeft: 1, paddingRight: 1 }}>
-                  <Text>7781</Text>
-                </Box>
-                <Text style={{ color: '#94a3b8' }}>(changes rebind on save — open/close panel to retry)</Text>
-              </Row>
-              <Text style={{ color: '#94a3b8', fontWeight: 'bold' }}>endpoints</Text>
+              <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>{active}</Text>
+              <Text style={{ color: '#94a3b8' }}>showing the {active} panel</Text>
             </Col>
           </Col>
         </Row>

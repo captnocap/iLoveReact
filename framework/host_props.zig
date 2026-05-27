@@ -637,6 +637,23 @@ pub fn applyStyleEntry(
         if (scaledFloat(val)) |f| node.style.padding_bottom = f;
         return true;
     }
+    // RN axis shorthands. Without these, `paddingVertical`/`paddingHorizontal`
+    // silently no-op (padTop/padLeft fall back to `padding` = 0) — which is how
+    // a multiline input ended up rendering its text flush against the corner.
+    if (eq(u8, key, "paddingVertical")) {
+        if (scaledFloat(val)) |f| {
+            node.style.padding_top = f;
+            node.style.padding_bottom = f;
+        }
+        return true;
+    }
+    if (eq(u8, key, "paddingHorizontal")) {
+        if (scaledFloat(val)) |f| {
+            node.style.padding_left = f;
+            node.style.padding_right = f;
+        }
+        return true;
+    }
 
     // Margin (scaled + "auto" sentinel via scaledSpacing)
     if (eq(u8, key, "margin")) {
@@ -657,6 +674,20 @@ pub fn applyStyleEntry(
     }
     if (eq(u8, key, "marginBottom")) {
         if (scaledSpacing(val)) |f| node.style.margin_bottom = f;
+        return true;
+    }
+    if (eq(u8, key, "marginVertical")) {
+        if (scaledSpacing(val)) |f| {
+            node.style.margin_top = f;
+            node.style.margin_bottom = f;
+        }
+        return true;
+    }
+    if (eq(u8, key, "marginHorizontal")) {
+        if (scaledSpacing(val)) |f| {
+            node.style.margin_left = f;
+            node.style.margin_right = f;
+        }
         return true;
     }
 

@@ -1,5 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { hasHost } from '../ffi';
+import { useLatest } from './useLatest';
+import { useAsyncResource } from './useAsyncResource';
 import { nsDelete, nsGet, nsHas, nsKeys, nsSet } from './localstore';
 
 type ComparisonOp = '$eq' | '$ne' | '$gt' | '$gte' | '$lt' | '$lte' | '$in' | '$contains';
@@ -236,64 +238,11 @@ export function useCRUD<T extends Record<string, any>>(
     return applyQuery(out, query);
   }, [namespace, keyPrefix, readRecord, schema, migrations, autoMigrate, writeRecord]);
 
-  const useQuery = (id: string) => {
-    const [data, setData] = useState<T | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
-    const [version, setVersion] = useState(0);
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-
-      get(id)
-        .then(result => {
-          if (!cancelled) setData(result);
-        })
-        .catch(err => {
-          if (!cancelled) setError(err instanceof Error ? err : new Error(String(err)));
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-
-      return () => { cancelled = true; };
-    }, [id, version]);
-
-    const refetch = useCallback(() => setVersion(v => v + 1), []);
-    return { data, loading, error, refetch };
-  };
+  const useQuery = (id: string) => useAsyncResource<T | null>(() => get(id), [id]);
 
   const useListQuery = (query?: Query) => {
-    const [data, setData] = useState<T[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
-    const [version, setVersion] = useState(0);
-    const queryRef = useRef(query);
-    queryRef.current = query;
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-
-      list(queryRef.current)
-        .then(result => {
-          if (!cancelled) setData(result);
-        })
-        .catch(err => {
-          if (!cancelled) setError(err instanceof Error ? err : new Error(String(err)));
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-
-      return () => { cancelled = true; };
-    }, [version]);
-
-    const refetch = useCallback(() => setVersion(v => v + 1), []);
-    return { data, loading, error, refetch };
+    const queryRef = useLatest(query);
+    return useAsyncResource<T[]>(() => list(queryRef.current), []);
   };
 
   return {

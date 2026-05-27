@@ -31,7 +31,7 @@ function parseStageReply(text: string): StageVerb | null {
   return null;
 }
 import { useAssistantChat } from './useAssistantChat';
-import { appendTurn, getTurns, nextTurnId, pushAsker, setChatStatus, setTurnPending, updateTurnBody, updateTurnSurface } from './store';
+import { appendTurn, getTurns, nextTurnId, pushAsker, setChatStatus, setTurnPending, updateTurnBody, updateTurnMetadata, updateTurnSurface } from './store';
 import type { AssistantTurn } from './types';
 import {
   grantPermission,
@@ -172,9 +172,14 @@ function friendlyToolLabel(call: ToolCall): string {
   return `→ ${call.name}`;
 }
 
-export function AssistantChatProvider() {
+type AssistantChatProviderProps = {
+  surfaceMode?: 'intent' | 'text';
+};
+
+export function AssistantChatProvider({ surfaceMode = 'intent' }: AssistantChatProviderProps = {}) {
   const chat = useAssistantChat();
   const route = useRoute();
+  const wantsIntentSurface = surfaceMode === 'intent';
 
   // Live route ref so the asker closure (mounted via setAsker once)
   // can read the *current* path at submit time, not the path that was
@@ -267,7 +272,9 @@ export function AssistantChatProvider() {
       if (respawned) {
         const transcript = renderTranscriptForBootstrap(priorTurns);
         const routeLine = `[Context: User is on route ${currentRoute}.]`;
-        const sections = [LOOM_SYSTEM_PROMPT, '', routeLine];
+        const sections = wantsIntentSurface
+          ? [LOOM_SYSTEM_PROMPT, '', routeLine]
+          : [routeLine];
         if (transcript) {
           sections.push('', '--- prior conversation ---', transcript, '--- end prior conversation ---');
         }
@@ -291,9 +298,11 @@ export function AssistantChatProvider() {
         const final = await chat.ask(canvasNote + prompt, {
           onPart: (partial) => updateTurnBody(asstId, stripLeading(partial)),
         });
+        const meta = chat.getLastRunMetadata?.();
+        if (meta) updateTurnMetadata(asstId, meta);
         const finalText = final && final.length > 0 ? stripLeading(final) : '';
         if (finalText) updateTurnBody(asstId, finalText);
-        if (finalText) {
+        if (wantsIntentSurface && finalText) {
           try {
             const nodes = parseIntent(finalText);
             if (hasIntentTags(nodes)) {
@@ -417,7 +426,7 @@ export function AssistantChatProvider() {
     };
 
     return pushAsker(orchestratedAsk);
-  }, [chat.ask]);
+  }, [chat.ask, wantsIntentSurface]);
 
   return null;
 }

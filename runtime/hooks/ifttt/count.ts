@@ -36,8 +36,8 @@
 //     'notify-user:agent is spamming stdout',
 //   );
 
-import { subscribe } from '../ffi';
-import { registerIfttSource } from './ifttt-registry';
+import { subscribe } from '../../ffi';
+import { registerIfttSource } from './registry';
 
 const PREFIX = 'count:';
 const SEP = '::';

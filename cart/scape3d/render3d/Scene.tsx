@@ -81,7 +81,7 @@ export function Scene({
       <Scene3D.PointLight position={[25, 8, 22]} color="#ff2d95" intensity={0.5} />
       <Scene3D.PointLight position={[40, 6, 16]} color="#18e0d8" intensity={0.35} />
 
-      <World doors={doors} entities={entities} worldItems={worldItems} />
+      <World px={sim.px} py={sim.py} doors={doors} entities={entities} worldItems={worldItems} />
       <Npcs3D entities={entities} />
       <Player3D px={sim.px} py={sim.py} facing={sim.body.facing} costumeColor={resolveCostume(sim.body.costume.color)} heldModel={heldModel} />
       <PathMarkers path={sim.path} />

@@ -15,8 +15,8 @@ import { useEffect, useState } from 'react';
 import { Box, Col, Pressable, Row, Text } from '@reactjit/runtime/primitives';
 import { busEmit, useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { subscribe } from '@reactjit/runtime/ffi';
-import { listIfttSources, listIfttActions } from '@reactjit/runtime/hooks/ifttt-registry';
-import '@reactjit/runtime/hooks/ifttt-supervisor';
+import { listIfttSources, listIfttActions } from '@reactjit/runtime/hooks/ifttt/registry';
+import '@reactjit/runtime/hooks/ifttt/supervisor';
 
 const ROW_BG = '#101824';
 const PAGE_BG = '#090d13';

@@ -264,7 +264,7 @@ function extractFromJsxProps(tagBody) {
 
 function listDir(path) {
   let raw;
-  try { raw = __readDir(path); } catch { return []; }
+  try { raw = __fs_list_json(path); } catch { return []; }
   if (raw === null || raw === undefined) return [];
   if (Array.isArray(raw)) return raw;
   try { const p = JSON.parse(raw); if (Array.isArray(p)) return p; } catch {}
@@ -273,7 +273,7 @@ function listDir(path) {
 
 function statOf(path) {
   let raw;
-  try { raw = __stat(path); } catch { return null; }
+  try { raw = __fs_stat_json(path); } catch { return null; }
   if (!raw) return null;
   if (typeof raw === 'string') {
     try { return JSON.parse(raw); } catch { return null; }
@@ -297,7 +297,7 @@ function isFileAt(path) {
 }
 
 function readText(path) {
-  try { return __readFile(path); } catch { return null; }
+  try { return __fs_read(path); } catch { return null; }
 }
 
 // Resolve a relative import (./foo) against `dir` to a real file on disk,

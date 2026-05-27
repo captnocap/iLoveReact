@@ -18,6 +18,10 @@ interface Tab {
 const TABS: Tab[] = [
   { path: '/chat',     label: 'chat' },
   { path: '/sessions', label: 'sessions' },
+  { path: '/user',     label: 'user' },
+  { path: '/providers', label: 'providers' },
+  { path: '/models',   label: 'models' },
+  { path: '/metadata', label: 'meta' },
   { path: '/status',   label: 'status' },
 ];
 

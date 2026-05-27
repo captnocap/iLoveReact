@@ -3,7 +3,8 @@
 // Map (root) → zones (downtown / overlook / trap-lot) → buildings → objects.
 // Everything is authored relative-to-itself; bake() flattens to absolute. This is
 // the single source of truth: the query API (packedAt/kindAt/propAt/heightAt/
-// propsIn) feeds pathfinding/picking/minimap, and `frags` feeds the one <Scene3D>.
+// propsIn) feeds pathfinding/picking/minimap, and `staticChunks` feeds the one
+// <Scene3D> with a player-centered mount window.
 
 import {
   T, CITY_W, CITY_H, RECTS, BLDGS, PROPS, type Bldg, type Prop,
@@ -106,4 +107,5 @@ export const propsIn = WORLD.propsIn;
 export const featureAt = WORLD.featureAt;
 export const byPath = WORLD.byPath;
 export const features = WORLD.features;
+export const staticChunks = WORLD.staticChunks;
 export const frags = WORLD.frags;

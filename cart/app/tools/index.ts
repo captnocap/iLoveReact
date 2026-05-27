@@ -27,3 +27,4 @@ export {
 } from './dispatch';
 export type { ParsedGrant } from './dispatch';
 export { registerBuiltinTools, setRouteRef } from './builtins';
+export { registerBrowseTools } from './browse';

@@ -10,10 +10,9 @@ const localstore = @import("storage/localstore.zig");
 const hotstate = @import("state/hotstate.zig");
 const sqlite_mod = @import("storage/sqlite.zig");
 const pty_mod = @import("terminal/pty.zig");
+const canvas_mod = @import("primitive/canvas.zig");
 
-extern fn heavy_compute(n: c_long) c_long;
-extern fn heavy_compute_timed(n: c_long) c_long;
-extern fn set_compute_n(n: c_long) void;
+
 
 const MAX_PTYS: usize = 16;
 var g_ptys: [MAX_PTYS]?pty_mod.Pty = .{null} ** MAX_PTYS;
@@ -264,6 +263,32 @@ fn telCanvasCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectFloat(ctx, obj, "cam_y", s.canvas_cam_y);
     setObjectFloat(ctx, obj, "cam_zoom", s.canvas_cam_zoom);
     setObjectNumber(ctx, obj, "type_count", s.canvas_type_count);
+    info.getReturnValue().set(obj.toValue());
+}
+
+// Convert a screen-space pixel (e.g. mouse event coords) into the active
+// Canvas's world-space (gx/gy) coordinates. Mirrors the Zig-side
+// canvas.screenToGraphFor() so cart code can paint/hit-test inside a
+// <Canvas> regardless of its current pan/zoom.
+//
+// Args: (screen_x, screen_y, vp_cx, vp_cy [, canvas_id=0])
+//   vp_cx/vp_cy = center of the canvas's screen rect (cart computes
+//   this from onLayout: vp_cx = rect.x + rect.width/2, etc.)
+//
+// Returns: { gx: number, gy: number }
+fn canvasScreenToGraphCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const sx: f32 = @floatCast(argF64(info, 0, 0));
+    const sy: f32 = @floatCast(argF64(info, 1, 0));
+    const vpcx: f32 = @floatCast(argF64(info, 2, 0));
+    const vpcy: f32 = @floatCast(argF64(info, 3, 0));
+    const cid: u8 = @intCast(@min(argU32(info, 4, 0), 255));
+    const out = canvas_mod.screenToGraphFor(cid, sx, sy, vpcx, vpcy);
+    const obj = iso.initObject();
+    setObjectFloat(ctx, obj, "gx", @floatCast(out[0]));
+    setObjectFloat(ctx, obj, "gy", @floatCast(out[1]));
     info.getReturnValue().set(obj.toValue());
 }
 
@@ -794,37 +819,6 @@ fn getCoreCountCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setNumberReturn(info, @floatFromInt(count));
 }
 
-fn heavyComputeCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) {
-        setNumberReturn(info, 0);
-        return;
-    }
-    const n = argI32(info, 0, 0);
-    setNumberReturn(info, @floatFromInt(heavy_compute(@intCast(n))));
-}
-
-fn heavyComputeTimedCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) {
-        setNumberReturn(info, 0);
-        return;
-    }
-    const n = argI32(info, 0, 0);
-    setNumberReturn(info, @floatFromInt(heavy_compute_timed(@intCast(n))));
-}
-
-fn setComputeNCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) {
-        retUndefined(info_c);
-        return;
-    }
-    const n = argI32(info, 0, 0);
-    set_compute_n(@intCast(n));
-    retUndefined(info_c);
-}
-
 fn sqlDbs() *std.AutoHashMap(u32, *sqlite_mod.Database) {
     if (g_sql_dbs == null) {
         g_sql_dbs = std.AutoHashMap(u32, *sqlite_mod.Database).init(std.heap.page_allocator);
@@ -1237,14 +1231,11 @@ pub fn registerTelemetry(_: anytype) void {
     v8rt.registerHostFn("__tel_node_count", telNodeCountCb);
     v8rt.registerHostFn("__tel_system", telSystemCb);
     v8rt.registerHostFn("__tel_canvas", telCanvasCb);
+    v8rt.registerHostFn("__canvas_screen_to_graph", canvasScreenToGraphCb);
 
     v8rt.registerHostFn("getProcessesJson", getProcessesJsonCb);
     v8rt.registerHostFn("getThreadsJson", getThreadsJsonCb);
     v8rt.registerHostFn("getCoreCount", getCoreCountCb);
-
-    v8rt.registerHostFn("heavy_compute", heavyComputeCb);
-    v8rt.registerHostFn("heavy_compute_timed", heavyComputeTimedCb);
-    v8rt.registerHostFn("set_compute_n", setComputeNCb);
 
     v8rt.registerHostFn("__pty_open", ptyOpenCb);
     v8rt.registerHostFn("__pty_read", ptyReadCb);

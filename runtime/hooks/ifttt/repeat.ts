@@ -30,8 +30,8 @@
 // emit with no model dependency. When a semantic similarity primitive
 // lands, we add `repeat:semantic:<...>` as a sibling source.
 
-import { subscribe } from '../ffi';
-import { registerIfttSource } from './ifttt-registry';
+import { subscribe } from '../../ffi';
+import { registerIfttSource } from './registry';
 
 const PREFIX = 'repeat:';
 const SEP = '::';

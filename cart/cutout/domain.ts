@@ -41,6 +41,7 @@ export interface LayerConfig {
    *  the cart's gallery. Use `inflateSurface` to get the self-contained
    *  Surface form at export boundaries. */
   mode: SurfaceId;
+  blend: BlendMode;
   hueOffset: number;
   phaseOffset: number;
   muted: boolean;
@@ -52,6 +53,9 @@ export interface LayerConfig {
    *  prop. */
   dim: number;
 }
+
+export type BlendMode = 'normal' | 'add' | 'multiply' | 'screen';
+export const BLEND_MODES: BlendMode[] = ['normal', 'add', 'multiply', 'screen'];
 
 // ── Composition stack ─────────────────────────────────────────────────
 

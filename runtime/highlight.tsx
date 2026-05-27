@@ -17,7 +17,7 @@ import * as React from 'react';
 import { useState, useEffect, useRef } from 'react';
 import { Box, Pressable } from './primitives';
 import { Background, type BackgroundType } from './background';
-import { useThemeColors, type ThemeColors } from './theme';
+import { useThemeColors, type ThemeColors } from './classifier';
 
 interface HighlightProps {
   active?: boolean;

@@ -30,11 +30,15 @@
  * trigger source.
  */
 
-import { resolveTrigger, type IfttSubscription } from './ifttt-registry';
+import { resolveTrigger, type IfttSubscription } from './registry';
 
 // ── Public shape ──────────────────────────────────────────────────
 
-export type IFTTTLeaf = string | (() => boolean);
+/** Anything exposing `subscribe(fn)` — an IFTTTResult, `flow.completed`,
+ *  or any other Reactive edge source. Treated as a leaf in composables. */
+export type IFTTTReactiveLeaf = { subscribe(fn: (event: unknown) => void): () => void };
+
+export type IFTTTLeaf = string | (() => boolean) | IFTTTReactiveLeaf;
 
 export type IFTTTComposable =
   | IFTTTLeaf
@@ -94,6 +98,41 @@ function compileLeafString(spec: string): Node {
       level = true;
       for (const fn of Array.from(subs)) fn(true, payload);
       // Auto-clear next microtask — string triggers are edges, not levels.
+      queueMicrotask(() => {
+        if (!level) return;
+        level = false;
+        for (const fn of Array.from(subs)) fn(false, payload);
+      });
+    });
+  };
+
+  return {
+    value: () => level,
+    subscribe(fn) {
+      subs.add(fn);
+      ensureSubscribed();
+      return () => {
+        subs.delete(fn);
+        if (subs.size === 0 && unsub) { unsub(); unsub = null; }
+      };
+    },
+  };
+}
+
+/** Wrap a ReactiveEdgeSource (an IFTTTResult, `flow.completed`, or any
+ *  object with `subscribe(fn)`) into a compose Node. Like compileLeafString,
+ *  edges latch true momentarily then auto-clear next microtask so the
+ *  source combines cleanly with sustained-level siblings. */
+function compileLeafReactive(src: { subscribe: (fn: (event: unknown) => void) => () => void }): Node {
+  let level = false;
+  const subs = new Set<LevelListener>();
+  let unsub: (() => void) | null = null;
+
+  const ensureSubscribed = () => {
+    if (unsub != null) return;
+    unsub = src.subscribe((payload?: unknown) => {
+      level = true;
+      for (const fn of Array.from(subs)) fn(true, payload);
       queueMicrotask(() => {
         if (!level) return;
         level = false;
@@ -342,6 +381,15 @@ function compileModifier(spec: {
 function compile(node: IFTTTComposable): Node {
   if (typeof node === 'string') return compileLeafString(node);
   if (typeof node === 'function') return compileLeafFn(node);
+  // Reactive leaf check goes BEFORE the composer-shape checks because
+  // a ReactiveEdgeSource is `{ subscribe }` only — distinct from
+  // `{ on / all / any / seq / trigger }` keys. An IFTTTResult could
+  // structurally satisfy both if we ever add a key like 'all' there,
+  // so handle the leaf case explicitly.
+  if (typeof node === 'object' && node != null
+      && typeof (node as { subscribe?: unknown }).subscribe === 'function') {
+    return compileLeafReactive(node as { subscribe: (fn: (e: unknown) => void) => () => void });
+  }
   if ('all' in node) return compileAll(node.all);
   if ('any' in node) return compileAny(node.any);
   if ('seq' in node) return compileSeq(node.seq, node.within);

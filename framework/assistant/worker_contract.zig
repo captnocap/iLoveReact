@@ -938,6 +938,9 @@ pub const WorkerStore = struct {
             },
             .completion => {
                 self.status = .active;
+                // The SDK captured the backend's session id off the
+                // response (claudewrap bridge → claude's sid). Surface it
+                // so a chat thread can persist + resume it.
                 try self.appendEvent(.{
                     .session_id = session.id,
                     .backend = .openai_compat,
@@ -945,7 +948,7 @@ pub const WorkerStore = struct {
                     .role = .internal,
                     .model = session.model,
                     .text = event.text,
-                    .external_session_id = session.external_session_id,
+                    .external_session_id = event.external_session_id orelse session.external_session_id,
                     .status_text = "success",
                 });
             },

@@ -377,168 +377,15 @@ fn writeStderr(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setUndefined(info);
 }
 
-// ── filesystem ─────────────────────────────────────────────────────────
-
-fn readFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const path = argStringAlloc(alloc, info, 0) orelse {
-        setNull(info);
-        return;
-    };
-    defer alloc.free(path);
-    const data = std.fs.cwd().readFileAlloc(alloc, path, 128 * 1024 * 1024) catch {
-        setNull(info);
-        return;
-    };
-    defer alloc.free(data);
-    setString(info, data);
-}
-
-fn writeFile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const path = argStringAlloc(alloc, info, 0) orelse {
-        setBool(info, false);
-        return;
-    };
-    defer alloc.free(path);
-    const content = argStringAlloc(alloc, info, 1) orelse {
-        setBool(info, false);
-        return;
-    };
-    defer alloc.free(content);
-
-    if (std.mem.lastIndexOfScalar(u8, path, '/')) |idx| {
-        std.fs.cwd().makePath(path[0..idx]) catch {};
-    }
-    const f = std.fs.cwd().createFile(path, .{ .truncate = true }) catch {
-        setBool(info, false);
-        return;
-    };
-    defer f.close();
-    f.writeAll(content) catch {
-        setBool(info, false);
-        return;
-    };
-    setBool(info, true);
-}
-
-fn exists(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const path = argStringAlloc(alloc, info, 0) orelse {
-        setBool(info, false);
-        return;
-    };
-    defer alloc.free(path);
-    _ = std.fs.cwd().statFile(path) catch {
-        setBool(info, false);
-        return;
-    };
-    setBool(info, true);
-}
-
-fn mkdirp(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const path = argStringAlloc(alloc, info, 0) orelse {
-        setBool(info, false);
-        return;
-    };
-    defer alloc.free(path);
-    std.fs.cwd().makePath(path) catch {
-        setBool(info, false);
-        return;
-    };
-    setBool(info, true);
-}
-
-fn removePath(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const path = argStringAlloc(alloc, info, 0) orelse {
-        setBool(info, false);
-        return;
-    };
-    defer alloc.free(path);
-    const st = std.fs.cwd().statFile(path) catch {
-        setBool(info, false);
-        return;
-    };
-    switch (st.kind) {
-        .directory => std.fs.cwd().deleteTree(path) catch {
-            setBool(info, false);
-            return;
-        },
-        else => std.fs.cwd().deleteFile(path) catch {
-            setBool(info, false);
-            return;
-        },
-    }
-    setBool(info, true);
-}
-
-fn statJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const path = argStringAlloc(alloc, info, 0) orelse {
-        setNull(info);
-        return;
-    };
-    defer alloc.free(path);
-    const st = std.fs.cwd().statFile(path) catch {
-        setNull(info);
-        return;
-    };
-    const mtime_ms: i64 = @intCast(@divTrunc(st.mtime, std.time.ns_per_ms));
-    const is_dir = st.kind == .directory;
-    var buf: [256]u8 = undefined;
-    const s = std.fmt.bufPrint(&buf, "{{\"size\":{d},\"mtimeMs\":{d},\"isDir\":{s}}}", .{
-        st.size, mtime_ms, if (is_dir) "true" else "false",
-    }) catch {
-        setNull(info);
-        return;
-    };
-    setString(info, s);
-}
-
-fn readDirJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    const alloc = std.heap.page_allocator;
-    const path = argStringAlloc(alloc, info, 0) orelse {
-        setString(info, "[]");
-        return;
-    };
-    defer alloc.free(path);
-
-    var out: std.ArrayList(u8) = .{};
-    defer out.deinit(alloc);
-    out.append(alloc, '[') catch {
-        setString(info, "[]");
-        return;
-    };
-
-    var dir = std.fs.cwd().openDir(path, .{ .iterate = true }) catch {
-        out.append(alloc, ']') catch {};
-        setString(info, out.items);
-        return;
-    };
-    defer dir.close();
-
-    var first = true;
-    var iter = dir.iterate();
-    while (iter.next() catch null) |entry| {
-        if (!first) out.append(alloc, ',') catch break;
-        first = false;
-        appendJsonEscaped(&out, alloc, entry.name) catch break;
-    }
-    out.append(alloc, ']') catch {
-        setString(info, "[]");
-        return;
-    };
-    setString(info, out.items);
-}
+// ── filesystem: see framework/v8_bindings_fs.zig ───────────────────────
+//
+// Filesystem ops live in v8_bindings_fs.zig as __fs_read / __fs_write /
+// __fs_exists / __fs_mkdir / __fs_remove / __fs_stat_json /
+// __fs_list_json. cli used to shadow them under un-prefixed names
+// (__readFile / __writeFile / __exists / __mkdirp / __remove / __stat /
+// __readDir) which bypassed the metafile gate. Deleted 2026-05-18.
+// Callers in tui/, scripts/, and runtime/hooks now go through the
+// __fs_* surface.
 
 // ── child processes ────────────────────────────────────────────────────
 //
@@ -1109,13 +956,8 @@ pub fn registerAll() void {
     v8_runtime.registerHostFn("__hotClear", hotClear);
     v8_runtime.registerHostFn("__hotKeys", hotKeys);
 
-    v8_runtime.registerHostFn("__readFile", readFile);
-    v8_runtime.registerHostFn("__writeFile", writeFile);
-    v8_runtime.registerHostFn("__exists", exists);
-    v8_runtime.registerHostFn("__mkdirp", mkdirp);
-    v8_runtime.registerHostFn("__remove", removePath);
-    v8_runtime.registerHostFn("__stat", statJson);
-    v8_runtime.registerHostFn("__readDir", readDirJson);
+    // fs lives in v8_bindings_fs.zig (__fs_*). Hosts register that
+    // module separately. cli no longer shadows it.
 
     v8_runtime.registerHostFn("__spawnSync", spawnSync);
     v8_runtime.registerHostFn("__spawn", spawn);

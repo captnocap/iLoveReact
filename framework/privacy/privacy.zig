@@ -21,7 +21,7 @@ const X25519 = crypto.dh.X25519;
 const XChaCha20Poly1305 = crypto.aead.chacha_poly.XChaCha20Poly1305;
 const HmacSha256 = crypto.auth.hmac.sha2.HmacSha256;
 
-const crmod = @import("../crypto.zig");
+const crmod = @import("crypto.zig");
 const sodium = @import("sodium.zig");
 
 /// Backend selector for any operation that can be served by either

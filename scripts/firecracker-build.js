@@ -66,7 +66,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 if (!recipePath) die('usage: firecracker-build.js <recipe.ts>');
 recipePath = abs(recipePath);
-if (!__exists(recipePath)) die('recipe not found: ' + recipePath);
+if (!__fs_exists(recipePath)) die('recipe not found: ' + recipePath);
 
 // ---------------------------------------------------------------------------
 // 2. Bundle + eval the TS recipe
@@ -157,7 +157,7 @@ for (const step of (spec.steps || [])) {
   } else if (step.copyFromHost) {
     const cf = step.copyFromHost;
     const src = abs(cf.src);
-    if (!__exists(src)) die('copyFromHost src not found: ' + src);
+    if (!__fs_exists(src)) die('copyFromHost src not found: ' + src);
     // Pick the right mmdebstrap built-in based on src kind. These hooks run
     // with mmdebstrap's own credentials, sidestepping the user-namespace
     // permission problem we hit when shelling out to cp.
@@ -184,8 +184,8 @@ for (const step of (spec.steps || [])) {
 // resize2fs after if it's larger than mmdebstrap's auto-pick.
 const outPath = abs(spec.output.path);
 const outDir = outPath.substring(0, outPath.lastIndexOf('/'));
-__mkdirp(outDir);
-if (__exists(outPath)) runCapture('/bin/rm', ['-f', outPath], '');
+__fs_mkdir(outDir);
+if (__fs_exists(outPath)) runCapture('/bin/rm', ['-f', outPath], '');
 
 const mmdbArgs = [
   '--variant=minbase',
@@ -240,7 +240,7 @@ const manifest = {
   buildElapsedMs: __nowMs() - t0,
 };
 const manifestPath = outPath.replace(/\.[^.]+$/, '') + '.manifest.json';
-__writeFile(manifestPath, JSON.stringify(manifest, null, 2));
+__fs_write(manifestPath, JSON.stringify(manifest, null, 2));
 log('manifest → ' + manifestPath);
 
 log('done. output: ' + outPath + ' (' + (sizeBytes / 1024 / 1024).toFixed(1) + ' MB)');

@@ -10,7 +10,7 @@ import { subscribeKey } from '../../host';
 
 const { useState, useEffect } = React;
 
-declare const __readFile: ((path: string) => string | null) | undefined;
+declare const __fs_read: ((path: string) => string | null) | undefined;
 
 type Meta = {
   inputs: Record<string, { bytes: number }>;
@@ -83,12 +83,12 @@ export function BundlePane({ cart }: { cart: string }) {
   const [scrollY, setScrollY] = useState(0);
 
   useEffect(() => {
-    if (typeof __readFile !== 'function') {
-      setError('__readFile not available — bundle stats require v8cli');
+    if (typeof __fs_read !== 'function') {
+      setError('__fs_read not available — bundle stats require v8cli');
       return;
     }
     const path = `.cache/bundle-${cart}.js.metafile.json`;
-    const raw = __readFile(path);
+    const raw = __fs_read(path);
     if (raw === null) {
       setError(`no metafile at ${path}\n(run scripts/dev ${cart} to produce one)`);
       return;

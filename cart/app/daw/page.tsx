@@ -8,7 +8,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { Box, Col, Row, Pressable } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
 import { Audio, useAudio, AUDIO_SOUND } from '@reactjit/runtime/audio';
-import { AudioControls } from '@reactjit/runtime/audio-controls';
+import { AudioControls } from '@reactjit/runtime/audio/controls';
 import { BipolarSlider } from '../gallery/components/controls-specimen/BipolarSlider';
 import { RotaryKnob } from '../gallery/components/controls-specimen/RotaryKnob';
 import { VerticalMeterStrip } from '../gallery/components/controls-specimen/VerticalMeterStrip';

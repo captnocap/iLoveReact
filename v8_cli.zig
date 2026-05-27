@@ -12,6 +12,7 @@
 const std = @import("std");
 const v8rt = @import("framework/v8_runtime.zig");
 const cli_bindings = @import("framework/v8_bindings_cli.zig");
+const fs_bindings = @import("framework/v8_bindings_fs.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -56,6 +57,9 @@ pub fn main() !void {
 
     cli_bindings.setArgv(@constCast(script_argv));
     cli_bindings.registerAll();
+    // Build scripts always need fs. cli no longer shadows __fs_* with
+    // un-prefixed names, so register fs explicitly here.
+    fs_bindings.registerFs({});
     // SIGINT/SIGTERM/SIGHUP → kill tracked children before exiting. Prevents
     // Ctrl-C on scripts/dev from orphaning the esbuild watch child.
     cli_bindings.installSignalHandlers();

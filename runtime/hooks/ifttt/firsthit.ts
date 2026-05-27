@@ -16,8 +16,8 @@
 // Use `match:` instead when you want every hit; `firsthit:` is for
 // "I only care about the first one in this scope."
 
-import { subscribe } from '../ffi';
-import { registerIfttSource } from './ifttt-registry';
+import { subscribe } from '../../ffi';
+import { registerIfttSource } from './registry';
 
 const PREFIX = 'firsthit:';
 const SEP = '::';

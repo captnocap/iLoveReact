@@ -26,6 +26,7 @@ const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
 const tcp = @import("net/tcp.zig");
 const udp = @import("net/udp.zig");
+const uds = @import("net/uds.zig");
 const socks5 = @import("net/socks5.zig");
 const tor_lib = @import("net/tor.zig");
 
@@ -35,6 +36,7 @@ const alloc = std.heap.c_allocator;
 
 const TcpEntry = struct { id: u32, client: *tcp.TcpClient };
 const UdpEntry = struct { id: u32, sock: *udp.UdpSocket };
+const UdsEntry = struct { id: u32, server: *uds.UdsServer };
 const Socks5Spec = struct {
     id: u32,
     host: []u8,
@@ -45,6 +47,7 @@ const Socks5Spec = struct {
 
 var g_tcp: std.ArrayList(TcpEntry) = .{};
 var g_udp: std.ArrayList(UdpEntry) = .{};
+var g_uds: std.ArrayList(UdsEntry) = .{};
 var g_socks5: std.ArrayList(Socks5Spec) = .{};
 
 fn findSocks5(id: u32) ?*Socks5Spec {
@@ -96,6 +99,24 @@ fn removeUdp(id: u32) void {
             g_udp.items[i].sock.close();
             alloc.destroy(g_udp.items[i].sock);
             _ = g_udp.orderedRemove(i);
+            return;
+        }
+    }
+}
+
+fn findUds(id: u32) ?*UdsEntry {
+    for (g_uds.items) |*e| if (e.id == id) return e;
+    return null;
+}
+
+fn removeUds(id: u32) void {
+    var i: usize = g_uds.items.len;
+    while (i > 0) {
+        i -= 1;
+        if (g_uds.items[i].id == id) {
+            g_uds.items[i].server.deinit();
+            alloc.destroy(g_uds.items[i].server);
+            _ = g_uds.orderedRemove(i);
             return;
         }
     }
@@ -365,12 +386,182 @@ fn hostUdpClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     removeUdp(id);
 }
 
+// ── UDS host fns ───────────────────────────────────────────────────
+//
+// JS surface:
+//   __uds_listen(id, path)
+//   __uds_send(id, conn_id, data)
+//   __uds_close_conn(id, conn_id)
+//   __uds_close(id)
+//
+// Events:
+//   __ffiEmit('uds:accept:<id>', '<conn_id>')
+//   __ffiEmit('uds:data:<id>:<conn_id>', bytes)
+//   __ffiEmit('uds:close:<id>:<conn_id>', '{}')
+//   __ffiEmit('uds:error:<id>:<conn_id>', message)
+//   __ffiEmit('uds:listen-error:<id>', message)
+//
+// Used by tui/sync-host.ts to listen for firecracker vsock guest→host
+// connections at <vsock_uds>_<port>. Replaces scripts/claudewrap-sync-
+// host.py end-to-end.
+
+fn hostUdsListen(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 2) return;
+    const id = argToU32(info, 0) orelse return;
+    const path = argToStringAlloc(info, 1) orelse return;
+    defer alloc.free(path);
+
+    if (findUds(id) != null) return;
+
+    const server = alloc.create(uds.UdsServer) catch return;
+    server.* = uds.UdsServer.listen(path) catch |e| {
+        alloc.destroy(server);
+        var chan_buf: [64]u8 = undefined;
+        const chan = std.fmt.bufPrint(&chan_buf, "uds:listen-error:{d}", .{id}) catch return;
+        var msg_buf: [256]u8 = undefined;
+        const msg = std.fmt.bufPrint(&msg_buf, "listen {s}: {s}", .{ path, @errorName(e) }) catch "listen failed";
+        emitEvent(chan, msg);
+        return;
+    };
+    g_uds.append(alloc, .{ .id = id, .server = server }) catch {
+        server.deinit();
+        alloc.destroy(server);
+        return;
+    };
+}
+
+fn hostUdsSend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 3) return;
+    const id = argToU32(info, 0) orelse return;
+    const conn_id = argToU32(info, 1) orelse return;
+    const data = argToStringAlloc(info, 2) orelse return;
+    defer alloc.free(data);
+    const e = findUds(id) orelse return;
+    e.server.send(conn_id, data);
+}
+
+fn hostUdsCloseConn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 2) return;
+    const id = argToU32(info, 0) orelse return;
+    const conn_id = argToU32(info, 1) orelse return;
+    const e = findUds(id) orelse return;
+    e.server.closeConn(conn_id);
+}
+
+fn hostUdsClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 1) return;
+    const id = argToU32(info, 0) orelse return;
+    removeUds(id);
+}
+
+// ── UDS workspace-sync host fns ────────────────────────────────────
+//
+// Higher-level helpers used by tui/sync-host.ts. Keep all byte
+// handling Zig-side so the cart never has to round-trip binary
+// payloads through V8 strings.
+//
+// JS surface:
+//   __uds_set_workspace_root(id, cwd)
+//       Switch server <id> into workspace mode; inbound bytes route
+//       to filesystem under <cwd> via framework/sync/workspace
+//       InboundParser.
+//   __uds_send_workspace_init(id, conn_id, cwd)
+//       Build a git-aware workspace tar of <cwd> and ship as INIT
+//       frame to the given conn. Blocks (subprocess) for the tar
+//       build duration (~1s for a typical repo).
+//   __uds_send_file_frame(id, conn_id, op, rel_path, local_path)
+//       Emit a SET frame: op should be "SET", payload = file at
+//       local_path. Streams from disk; no JS-side buffering.
+//   __uds_send_msg_frame(id, conn_id, op, rel_path)
+//       Emit a header-only frame (DEL/DIR/PING).
+
+const workspace = @import("sync/workspace.zig");
+
+fn hostUdsSetWorkspaceRoot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 2) return;
+    const id = argToU32(info, 0) orelse return;
+    const cwd = argToStringAlloc(info, 1) orelse return;
+    defer alloc.free(cwd);
+    const e = findUds(id) orelse return;
+    e.server.setWorkspaceRoot(alloc, cwd) catch |err| {
+        var chan_buf: [64]u8 = undefined;
+        const chan = std.fmt.bufPrint(&chan_buf, "uds:workspace-error:{d}", .{id}) catch return;
+        var msg_buf: [128]u8 = undefined;
+        const msg = std.fmt.bufPrint(&msg_buf, "set-root: {s}", .{@errorName(err)}) catch "set-root failed";
+        emitEvent(chan, msg);
+    };
+}
+
+fn emitFrameErr(server_id: u32, conn_id: u32, msg: []const u8) void {
+    var chan_buf: [96]u8 = undefined;
+    const chan = std.fmt.bufPrint(&chan_buf, "uds:error:{d}:{d}", .{ server_id, conn_id }) catch return;
+    emitEvent(chan, msg);
+}
+
+fn hostUdsSendWorkspaceInit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 3) return;
+    const id = argToU32(info, 0) orelse return;
+    const conn_id = argToU32(info, 1) orelse return;
+    const cwd = argToStringAlloc(info, 2) orelse return;
+    defer alloc.free(cwd);
+    const e = findUds(id) orelse return;
+    const w = uds.writerForConn(e.server, conn_id);
+    workspace.writeInitTar(w, alloc, cwd, "/workspace") catch |err| {
+        var msg_buf: [128]u8 = undefined;
+        const msg = std.fmt.bufPrint(&msg_buf, "init-tar: {s}", .{@errorName(err)}) catch "init-tar failed";
+        emitFrameErr(id, conn_id, msg);
+    };
+}
+
+fn hostUdsSendFileFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 4) return;
+    const id = argToU32(info, 0) orelse return;
+    const conn_id = argToU32(info, 1) orelse return;
+    const rel = argToStringAlloc(info, 2) orelse return;
+    defer alloc.free(rel);
+    const local = argToStringAlloc(info, 3) orelse return;
+    defer alloc.free(local);
+    const e = findUds(id) orelse return;
+    const w = uds.writerForConn(e.server, conn_id);
+    workspace.writeSetFromFile(w, rel, local) catch |err| {
+        var msg_buf: [128]u8 = undefined;
+        const msg = std.fmt.bufPrint(&msg_buf, "set-file {s}: {s}", .{ rel, @errorName(err) }) catch "set-file failed";
+        emitFrameErr(id, conn_id, msg);
+    };
+}
+
+fn hostUdsSendMsgFrame(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 3) return;
+    const id = argToU32(info, 0) orelse return;
+    const conn_id = argToU32(info, 1) orelse return;
+    const op = argToStringAlloc(info, 2) orelse return;
+    defer alloc.free(op);
+    const arg: []u8 = if (info.length() >= 4) (argToStringAlloc(info, 3) orelse @as([]u8, &.{})) else @as([]u8, &.{});
+    defer if (arg.len > 0) alloc.free(arg);
+    const e = findUds(id) orelse return;
+    const w = uds.writerForConn(e.server, conn_id);
+    workspace.writeMsgFrame(w, op, arg) catch |err| {
+        var msg_buf: [128]u8 = undefined;
+        const msg = std.fmt.bufPrint(&msg_buf, "msg-frame {s}: {s}", .{ op, @errorName(err) }) catch "msg-frame failed";
+        emitFrameErr(id, conn_id, msg);
+    };
+}
+
 // ── Tick drain ─────────────────────────────────────────────────────
 // Same lesson as wsserver: keep the per-call read scratch off the native
 // stack so V8's __jsTick budget isn't squeezed.
 
 var g_tcp_ev_buf: [1]tcp.Event = undefined;
 var g_udp_ev_buf: [1]udp.Event = undefined;
+var g_uds_ev_buf: [4]uds.Event = undefined;
 
 pub fn tickDrain() void {
     // TCP
@@ -430,6 +621,43 @@ pub fn tickDrain() void {
         }
         j += 1;
     }
+
+    // UDS — accept + per-conn read drain. update() returns several
+    // events per call so we loop until empty (zero) per server.
+    var k: usize = 0;
+    while (k < g_uds.items.len) {
+        const e = g_uds.items[k];
+        var chan_buf: [96]u8 = undefined;
+        while (true) {
+            const n = e.server.update(&g_uds_ev_buf);
+            if (n == 0) break;
+            var ei: usize = 0;
+            while (ei < n) : (ei += 1) {
+                const ev = g_uds_ev_buf[ei];
+                switch (ev) {
+                    .accepted => |conn_id| {
+                        const chan = std.fmt.bufPrint(&chan_buf, "uds:accept:{d}", .{e.id}) catch continue;
+                        var payload_buf: [16]u8 = undefined;
+                        const payload = std.fmt.bufPrint(&payload_buf, "{d}", .{conn_id}) catch continue;
+                        emitEvent(chan, payload);
+                    },
+                    .data => |d| {
+                        const chan = std.fmt.bufPrint(&chan_buf, "uds:data:{d}:{d}", .{ e.id, d.conn_id }) catch continue;
+                        emitEvent(chan, d.bytes);
+                    },
+                    .closed => |conn_id| {
+                        const chan = std.fmt.bufPrint(&chan_buf, "uds:close:{d}:{d}", .{ e.id, conn_id }) catch continue;
+                        emitEvent(chan, "{}");
+                    },
+                    .err => |er| {
+                        const chan = std.fmt.bufPrint(&chan_buf, "uds:error:{d}:{d}", .{ e.id, er.conn_id }) catch continue;
+                        emitEvent(chan, er.msg);
+                    },
+                }
+            }
+        }
+        k += 1;
+    }
 }
 
 // ── Registration ───────────────────────────────────────────────────
@@ -441,6 +669,14 @@ pub fn registerNet(_: anytype) void {
     v8_runtime.registerHostFn("__udp_open", hostUdpOpen);
     v8_runtime.registerHostFn("__udp_send", hostUdpSend);
     v8_runtime.registerHostFn("__udp_close", hostUdpClose);
+    v8_runtime.registerHostFn("__uds_listen", hostUdsListen);
+    v8_runtime.registerHostFn("__uds_send", hostUdsSend);
+    v8_runtime.registerHostFn("__uds_close_conn", hostUdsCloseConn);
+    v8_runtime.registerHostFn("__uds_close", hostUdsClose);
+    v8_runtime.registerHostFn("__uds_set_workspace_root", hostUdsSetWorkspaceRoot);
+    v8_runtime.registerHostFn("__uds_send_workspace_init", hostUdsSendWorkspaceInit);
+    v8_runtime.registerHostFn("__uds_send_file_frame", hostUdsSendFileFrame);
+    v8_runtime.registerHostFn("__uds_send_msg_frame", hostUdsSendMsgFrame);
     v8_runtime.registerHostFn("__socks5_register", hostSocks5Register);
     v8_runtime.registerHostFn("__socks5_unregister", hostSocks5Unregister);
 }

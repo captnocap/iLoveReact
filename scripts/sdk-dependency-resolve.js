@@ -30,7 +30,7 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 function readJson(path, label) {
-  const raw = __readFile(path);
+  const raw = __fs_read(path);
   if (raw === null) {
     __writeStderr('[sdk-dependency-resolve] cannot read ' + label + ': ' + path + '\n');
     __exit(1);
@@ -44,7 +44,7 @@ function readJson(path, label) {
 }
 
 function readText(path, label) {
-  const raw = __readFile(path);
+  const raw = __fs_read(path);
   if (raw === null) {
     __writeStderr('[sdk-dependency-resolve] cannot read ' + label + ': ' + path + '\n');
     __exit(1);

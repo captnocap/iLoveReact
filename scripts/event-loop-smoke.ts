@@ -20,16 +20,16 @@
   ((fn: () => void) => Promise.resolve().then(fn));
 
 import { subscribe, emit, subscribeAll } from '../runtime/ffi';
-import { resolveTrigger } from '../runtime/hooks/ifttt-registry';
-import { registerGate } from '../runtime/hooks/ifttt-gate';
-import { similarity } from '../runtime/hooks/ifttt-repeat';
+import { resolveTrigger } from '../runtime/hooks/ifttt/registry';
+import { registerGate } from '../runtime/hooks/ifttt/gate';
+import { similarity } from '../runtime/hooks/ifttt/repeat';
 import { openVsock, mirrorChannel, namespaceMirror, namespaceForward } from '../runtime/hooks/vsock';
 
 // Side-effect imports — register the sources.
-import '../runtime/hooks/ifttt-match';
-import '../runtime/hooks/ifttt-count';
-import '../runtime/hooks/ifttt-firsthit';
-import '../runtime/hooks/ifttt-repeat';
+import '../runtime/hooks/ifttt/match';
+import '../runtime/hooks/ifttt/count';
+import '../runtime/hooks/ifttt/firsthit';
+import '../runtime/hooks/ifttt/repeat';
 
 // ── Test harness ──────────────────────────────────────────────────
 

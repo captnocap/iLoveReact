@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAudio } from '../audio';
-
-declare const globalThis: any;
+import { callHost, hasHost } from '../ffi';
+import { useLatest } from './useLatest';
 
 export type MidiEventType = 'note_on' | 'note_off' | 'cc' | 'clock' | 'start' | 'stop';
 
@@ -68,36 +68,35 @@ const subs = new Set<Handler>();
 let pollTimer: any = null;
 let pollPeriodMs = 16;
 
-const G = globalThis as any;
+// MIDI Zig bindings exist under two spellings — camelCase (newer) and
+// snake_case (legacy). Try camelCase first, fall back to snake_case.
+function midiCall<T>(camel: string, snake: string, fallback: T, ...args: any[]): T {
+  if (hasHost(camel)) return callHost<T>(camel, fallback, ...args);
+  return callHost<T>(snake, fallback, ...args);
+}
 
 function hostStart(): boolean {
-  const fn = G.__midiStart ?? G.__midi_start;
-  return typeof fn === 'function' ? Number(fn() ?? 0) > 0 : false;
+  return Number(midiCall<unknown>('__midiStart', '__midi_start', 0) ?? 0) > 0;
 }
 
 function hostStop(): void {
-  const fn = G.__midiStop ?? G.__midi_stop;
-  if (typeof fn === 'function') fn();
+  midiCall<void>('__midiStop', '__midi_stop', undefined);
 }
 
 function hostAvailable(): boolean {
-  const fn = G.__midiIsAvailable ?? G.__midi_is_available;
-  return typeof fn === 'function' ? Number(fn() ?? 0) > 0 : false;
+  return Number(midiCall<unknown>('__midiIsAvailable', '__midi_is_available', 0) ?? 0) > 0;
 }
 
 function hostPoll(): number {
-  const fn = G.__midiPoll ?? G.__midi_poll;
-  return typeof fn === 'function' ? Number(fn() ?? 0) : 0;
+  return Number(midiCall<unknown>('__midiPoll', '__midi_poll', 0) ?? 0);
 }
 
 function hostNextEventJson(): string {
-  const fn = G.__midiNextEventJson ?? G.__midi_next_event_json;
-  return typeof fn === 'function' ? String(fn() ?? '') : '';
+  return String(midiCall<unknown>('__midiNextEventJson', '__midi_next_event_json', '') ?? '');
 }
 
 function hostDevicesJson(): string {
-  const fn = G.__midiDevicesJson ?? G.__midi_devices_json;
-  return typeof fn === 'function' ? String(fn() ?? '[]') : '[]';
+  return String(midiCall<unknown>('__midiDevicesJson', '__midi_devices_json', '[]') ?? '[]');
 }
 
 function emit(event: MidiEvent) {
@@ -174,7 +173,6 @@ export { subscribeMIDI };
 
 export function useMIDI(options: MIDIOptions = {}): MIDIHandle {
   const audio = useAudio();
-  const audioRef = useRef(audio);
   const [available, setAvailable] = useState(false);
   const [inputs, setInputs] = useState<MidiPort[]>([]);
   const [lastEvent, setLastEvent] = useState<MidiEvent | null>(null);
@@ -182,20 +180,13 @@ export function useMIDI(options: MIDIOptions = {}): MIDIHandle {
   const [mappings, setMappings] = useState<MidiMapping[]>([]);
   const [learning, setLearning] = useState<MidiLearnTarget | null>(null);
 
-  const mappingsRef = useRef<MidiMapping[]>([]);
-  const learningRef = useRef<MidiLearnTarget | null>(null);
-  const targetRef = useRef<string | number | undefined>(options.target);
-  const clockTargetRef = useRef<string | number | undefined>(options.clockTarget);
-  const routeNotesRef = useRef(options.routeNotes !== false);
-  const syncTransportRef = useRef(Boolean(options.syncTransport));
-
-  audioRef.current = audio;
-  mappingsRef.current = mappings;
-  learningRef.current = learning;
-  targetRef.current = options.target;
-  clockTargetRef.current = options.clockTarget;
-  routeNotesRef.current = options.routeNotes !== false;
-  syncTransportRef.current = Boolean(options.syncTransport);
+  const audioRef = useLatest(audio);
+  const mappingsRef = useLatest(mappings);
+  const learningRef = useLatest(learning);
+  const targetRef = useLatest(options.target);
+  const clockTargetRef = useLatest(options.clockTarget);
+  const routeNotesRef = useLatest(options.routeNotes !== false);
+  const syncTransportRef = useLatest(Boolean(options.syncTransport));
 
   const refreshDevices = useCallback(() => {
     const next = readDevices();

@@ -17,8 +17,7 @@
  */
 
 import { useState, useCallback } from 'react';
-
-const host = (): any => globalThis as any;
+import { callHost } from '../ffi';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -28,18 +27,14 @@ export function useLocalStore<T>(
   initial: T,
 ): [T, (next: Updater<T>) => void] {
   const [value, setValue] = useState<T>(() => {
-    try {
-      const raw: string = host().__localstoreGet?.(namespace, key) ?? '';
-      const has: number = host().__localstoreHas?.(namespace, key) ?? 0;
-      if (has === 1) return JSON.parse(raw) as T;
-    } catch {
-      // Corrupt entry — fall through to initial.
+    const has = callHost<number>('__localstoreHas', 0, namespace, key);
+    if (has === 1) {
+      const raw = callHost<string>('__localstoreGet', '', namespace, key);
+      try { return JSON.parse(raw) as T; } catch { /* corrupt — fall through */ }
     }
     // Seed the store so a process restart sees the chosen initial even
     // if the user never explicitly setValue's.
-    try {
-      host().__localstoreSet?.(namespace, key, JSON.stringify(initial));
-    } catch {}
+    callHost('__localstoreSet', undefined, namespace, key, JSON.stringify(initial));
     return initial;
   });
 
@@ -47,9 +42,7 @@ export function useLocalStore<T>(
     (next: Updater<T>): void => {
       setValue((prev) => {
         const resolved = typeof next === 'function' ? (next as (p: T) => T)(prev) : next;
-        try {
-          host().__localstoreSet?.(namespace, key, JSON.stringify(resolved));
-        } catch {}
+        callHost('__localstoreSet', undefined, namespace, key, JSON.stringify(resolved));
         return resolved;
       });
     },
@@ -61,10 +54,10 @@ export function useLocalStore<T>(
 
 /** One-shot remove for a key. */
 export function deleteLocalStoreKey(namespace: string, key: string): void {
-  host().__localstoreDelete?.(namespace, key);
+  callHost('__localstoreDelete', undefined, namespace, key);
 }
 
 /** Clear an entire namespace; pass `''` to wipe all namespaces. */
 export function clearLocalStore(namespace: string = ''): void {
-  host().__localstoreClear?.(namespace);
+  callHost('__localstoreClear', undefined, namespace);
 }

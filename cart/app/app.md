@@ -2,7 +2,7 @@
 
 Living index of every file under `cart/app/` — what each one is, how it's wired, and what's still pending. Format is per-file: a status word (Stub / WIP / Complete) + a checklist. "Complete" means *complete for what it is meant to do today*, not "feature-complete forever". Line numbers are best-effort and drift quickly; treat them as hints, not contracts.
 
-The app is a router-driven cart with a **three-state shell** — see **Animation principles → Input-strip shell morph (GOLDEN)** for the canonical description. Top window chrome (titlebar + nav + window controls) plus a persistent supervisor `<InputStrip>` that morphs between two slots (full-width bottom bar / docked side panel) based on `(routeMode, inputFocal)`. Routes currently register at `/`, `/settings`, `/settings/customize`, `/activity/sweatshop`, `/composer`, `/character`, and `/gallery`; each declares or derives `mode: 'full' | 'side'` metadata. An `OnboardingProvider` wraps the route tree.
+The app is a router-driven cart with a **three-state shell** — see **Animation principles → Input-strip shell morph (GOLDEN)** for the canonical description. Top window chrome (titlebar + nav + window controls) plus a persistent supervisor `<InputStrip>` that morphs between two slots (full-width bottom bar / docked side panel) based on `(routeMode, inputFocal)`. Routes currently registered: `/`, `/chat`, `/settings`, `/settings/customize`, `/sweatshop`, `/sweatshop/canvas`, `/sweatshop/plan`, `/sweatshop/composer`, `/canvas`, `/character`, `/face3d`, `/world`, `/gallery`, `/daw`. Each ROUTES entry now carries two axes: `mode: 'full' | 'side'` (drives the GOLDEN morph) and `inputDock: 'bottom' | 'rail'` (drives where the InputStrip sits when in side mode — `bottom` keeps the full-width bar, `rail` docks it into the side panel). Settings descendants derive side mode via path-prefix; sweatshop descendants likewise. An `OnboardingProvider` wraps the route tree.
 
 Two parallel state mechanisms drive the shell:
 - **IFTTT bus** (`app:navigate`) — input-strip token submissions fire here so every future input tier (@-token catalog, router model, supervisor session) hits the same handler the router subscribes to. Bus events are for *intents* that other components might want to observe.
@@ -142,9 +142,9 @@ The pattern is reusable. To promote another route's sub-nav:
 ### App shell — `index.tsx` — WIP
 
 CHECKLIST:
-- Purpose: Cart entry. Boots the gallery theme, mounts the providers (`TooltipRoot > OnboardingProvider > Router > NavigationBus > ShellBody`), and houses the three-state shell machinery in `ShellBody`. Registers the `/`, `/settings`, `/settings/customize`, `/activity/sweatshop`, `/composer`, `/character`, and `/gallery` routes. The `ROUTES` table carries `mode: 'full' | 'side'` per top-level entry; settings descendants derive side mode via `route.path.startsWith('/settings')`. `ShellBody` derives `headingTo` from `(routeMode, inputFocal)` and runs the morph machinery on changes (see **Animation principles → Input-strip shell morph (GOLDEN)** for the full description). `NavigationBus` (no DOM output) subscribes to `app:navigate` on the IFTTT bus and converts emitted paths into `nav.push(...)` calls so every input tier fires the same event the router subscribes to.
+- Purpose: Cart entry. Boots the gallery theme, mounts the providers (`TooltipRoot > OnboardingProvider > Router > NavigationBus > AssistantChatProvider > ShellBody`), and houses the three-state shell machinery in `ShellBody`. Registers `/`, `/chat`, `/settings`, `/settings/customize`, `/sweatshop`, `/sweatshop/canvas`, `/sweatshop/plan`, `/sweatshop/composer`, `/canvas`, `/character`, `/face3d`, `/world`, `/gallery`, `/daw`. Each top-level ROUTES entry carries `mode: 'full' | 'side'` plus `inputDock: 'bottom' | 'rail'`; settings + sweatshop descendants derive their mode/dock via path-prefix. `ShellBody` derives `headingTo` from `(routeMode, inputFocal)` and runs the morph machinery on changes (see **Animation principles → Input-strip shell morph (GOLDEN)**). `NavigationBus` (no DOM output) subscribes to `app:navigate` on the IFTTT bus and converts emitted paths into `nav.push(...)`. `AssistantChatProvider` mounts the generation hook one level above the chat panel so the GOLDEN morph (which re-mounts the chat) doesn't tear down the worker between rail/activity slots.
 - isRoute: FALSE
-- Route: N/A (registers `/`, `/settings`, `/settings/customize`, `/activity/sweatshop`, `/composer`, `/character`, `/gallery` inside the `<Router>`; ROUTES table also carries the `mode` axis the shell reads)
+- Route: N/A (the ROUTES table is the source of truth — see purpose above for the full list; `mode` and `inputDock` are the axes the shell reads)
 - hasDatashape: FALSE
 - Datashape: consumes `onboarding/state.jsx` (`useOnboarding`); subscribes to the IFTTT bus event `app:navigate` (payload = path string) via `NavigationBus`; reads route via `useRoute()` and focal via `useInputFocal()` from `cart/app/shell.tsx`; reads variant via `useActiveVariant()` from `runtime/theme.tsx` (variant is the lagging render state — which slot hosts the input — flipped at the right moment in the morph)
 - exposedDatashapes: `onb.step`, `onb.totalSteps`, `onb.setStep`, `onb.complete`, `onb.loading`, `onb.tourStatus`, `onb.acceptTour`, `onb.declineTour`
@@ -156,7 +156,7 @@ CHECKLIST:
   - **Shell state derivation** — settings paths are forced to side mode (`route.path.startsWith('/settings') ? 'side' : ...`), otherwise `routeMode = ROUTES.find(r => r.path === route.path)?.mode ?? 'full'`; then `headingTo = deriveHeadingTo(routeMode, focal)` returning `'home' | 'activity-docked' | 'activity-focal'`. The `useEffect([headingTo])` dispatches morphs via the `TARGETS` table; same-mode route navigations don't change `headingTo`, so the effect doesn't fire and only the page-area content swaps.
   - **Variant flip pivot** — TO PANEL (`null → 'side'`): morph "shrink" first (input + side parallel), variant flip on input completion, then bottom morph. TO BAR (`'side' → null`): variant flip + ALL morphs in PARALLEL. No-variant-change (A↔C): just animate whichever morphs differ.
   - `NavigationBus` subscribes once at mount; `useIFTTT('app:navigate', cb)` validates the payload is a string starting with `/` before calling `nav.push(payload)`.
-- Components: `TooltipRoot`, `OnboardingProvider`, `Router`, `NavigationBus`, `ShellBody`, `Route`, `IndexPage`, `SettingsPage`, `SweatshopPage`, `ComposerPage`, `CharacterPage`, `GalleryPage`, `Chrome`, `NavLink`, `StepCubes`, `TourBanner`, `ConditionalInputStrip`, `InputStrip`, `AssistantChat`
+- Components: `TooltipRoot`, `OnboardingProvider`, `Router`, `NavigationBus`, `AssistantChatProvider`, `ShellBody`, `Route`, `IndexPage`, `SettingsPage` (+ `SettingsNav` lifted into the rail), `SweatshopPage`, `CanvasPage`, `PlanPage`, `ComposerPage`, `CharacterPage`, `Face3DPage`, `WorldPage`, `GalleryPage`, `DawPage`, `ChatPage`, `Chrome`, `NavLink`, `StepCubes`, `TourBanner`, `ConditionalInputStrip`, `InputStrip`, `AssistantChat`
 - Atoms: `Box`, `Pressable`, `Text`, `S.AppBottomInputBar`, `S.AppSideMenuInput`, plus all the legacy chrome atoms (`S.AppChrome`, `S.AppChromeBrandRow`, etc. — see commit `3bad2f07d` for the slot classifiers' contract)
 - isUsingTheme: TRUE — every surface goes through a classifier in `components.cls.ts`
 - hasIcons: TRUE
@@ -231,10 +231,10 @@ CHECKLIST:
 - hasAnimation: FALSE
 - Animations: —
 - TODO:
-  - `@sweatshop` / `@composer` / `@gallery` / `@chatbot` wait for token-catalog cleanup. `/composer` and `/gallery` are real routes now; the token catalog has not caught up.
+  - `@sweatshop`, `@chat`, `@canvas`, `@plan`, `@composer`, `@gallery`, `@daw`, `@face3d`, `@world` wait for token-catalog cleanup. All of these are live routes now (see the live-route table near the top of this file); the token catalog has not caught up.
   - Add the `{ type: 'app'; id: string }` variant when cartridges are mountable — `InputStrip.submit()` will branch on `token.type` to fire either `app:navigate` (route) or `app:open` (app).
   - Lift the catalog to a persisted gallery row when third-party cartridges can register their own tokens at install time. Until then, cart code is the authority.
-- LANDED: `@home`, `@settings`, `@character` point at live routes. `@about` is now stale because the `/about` route was removed from `index.tsx`; remove or retarget it when the token catalog is cleaned up. Add `@composer` and `@gallery` next.
+- LANDED: `@home`, `@settings`, `@character` point at live routes. `@about` is dead and should be removed (`/about` is gone from `index.tsx`). Add `@chat`, `@sweatshop`, `@canvas`, `@plan`, `@composer`, `@gallery`, `@daw`, `@face3d`, `@world` next — every one of those routes is live.
 - PROBLEMS:
   - Catalog can drift from the actual route list. If a token's `path` no longer matches a registered route, `nav.push(path)` silently lands on an empty Route slot. Add a build-time check against the routes registered in `index.tsx` once the route catalog is extracted to a shared constant.
   - `@-token` names share namespace across types (route / app / command). When the catalog grows, collision becomes a real concern — first-match-wins or explicit prefixes (`@route:home` vs `@app:sweatshop`) are the next decisions.
@@ -345,8 +345,8 @@ CHECKLIST:
 
 CHECKLIST:
 - Purpose: The "open scene" — a canvas substrate where every cart's logic composes. A FlowEditor surface plus a three-tier palette (capability / domain / rules). Capability nodes are pulled live from the IFTTT registry (`listIfttSources()` / `listIfttActions()` — every registered source/action prefix becomes a draggable node). Domain nodes come from the gallery shape catalog. Rule stamps are a curated starter library that will eventually read from the `rule` table. The seed scene shows a Goal node pulled from the persisted onboarding row plus a starter trigger → action chain.
-- isRoute: TRUE (mounted at `/activity/sweatshop` in `index.tsx`'s `ROUTES` table; declared `mode: 'side'`)
-- Route: `/activity/sweatshop`
+- isRoute: TRUE (mounted at `/sweatshop` in `index.tsx`'s `ROUTES` table; declared `mode: 'side', inputDock: 'rail'`). Sub-routes `/sweatshop/canvas`, `/sweatshop/plan`, `/sweatshop/composer` mount the canvas substrate, planning surface, and composer respectively (see their own entries below — `canvas/`, `plan/`, `composer/`).
+- Route: `/sweatshop`, `/sweatshop/canvas`, `/sweatshop/plan`, `/sweatshop/composer`
 - hasDatashape: FALSE (the canvas state is local to the FlowEditor; persistence to a `composition` row is queued)
 - Datashape: reads `Goal` via `useLatestGoal()`; reads `User` via `useUser()`. Writes nothing yet.
 - exposedDatashapes: —
@@ -371,9 +371,9 @@ CHECKLIST:
 ### Composer page — `composer/page.tsx` — WIP
 
 CHECKLIST:
-- Purpose: `/composer` route. First in-app pass of the UI authoring canvas described in `docs/11-composer.md`: a Figma-style page canvas where the canonical state is an editable `SNode` tree, not generated DOM or opaque screenshots. The route lives inside the app shell in side mode, with a left atom library rail, center `Canvas`, right inspector/layers column, and bottom code drawer. The canvas output is intentionally composer-native primitives (`Page`, `Box`, `Text`, `Pressable`, `GalleryAtom`) so the emitted JSX is visible and selectable.
+- Purpose: `/sweatshop/composer` route. First in-app pass of the UI authoring canvas described in `docs/11-composer.md`: a Figma-style page canvas where the canonical state is an editable `SNode` tree, not generated DOM or opaque screenshots. The route lives inside the app shell in side mode (`inputDock: 'rail'`), with a left atom library rail, center `Canvas`, right inspector/layers column, and bottom code drawer. The canvas output is intentionally composer-native primitives (`Page`, `Box`, `Text`, `Pressable`, `GalleryAtom`) so the emitted JSX is visible and selectable. The standalone `/composer` top-level route was retired when the canvas substrate (`canvas/`) absorbed the top-level slot; composer now lives under sweatshop alongside `canvas` and `plan`.
 - isRoute: TRUE
-- Route: `/composer` (`mode: 'side'` in `index.tsx`)
+- Route: `/sweatshop/composer` (`mode: 'side', inputDock: 'rail'` in `index.tsx`)
 - hasDatashape: TRUE (local composer draft shape, not `useCRUD`)
 - Datashape:
   - `ComposerDoc` stored through the host store at `composer:draft:default`; index metadata stored at `composer:drafts`
@@ -1126,7 +1126,7 @@ The three-state shell (A / B / C) and the input morph machinery shipped in commi
 
 **Top-chrome reconciliation.** Today's `Chrome` carries brand + nav + window controls. In states B/C the side menu would normally replace the chrome's nav row; chrome reduces to brand + window controls. Decide whether the brand stays at the top or moves into the side menu's header.
 
-**Routing inside activities.** `/`, `/settings`, `/composer`, `/character`, and `/gallery` are page-sized routes. In activity mode they currently still render at the page level — should some instead live inside the `ActivityHost`? Likely yes for tool-shaped routes (`/composer`, `/gallery`, maybe `/settings`); `/` stays as the home anchor.
+**Routing inside activities.** `/`, `/settings`, `/character`, `/gallery`, `/canvas`, `/face3d`, `/world`, `/daw`, and the `/sweatshop/*` family are page-sized routes. In activity mode they currently still render at the page level — should some instead live inside the `ActivityHost`? Likely yes for tool-shaped routes (`/sweatshop/composer`, `/canvas`, `/gallery`, maybe `/settings`); `/` stays as the home anchor.
 
 **Open problems** (still open):
 - **InputStrip sizing in the 360w side dock.** `CommandComposerFrame` has `minHeight: 206`, `CommandComposerMain` has asymmetric `paddingLeft: 32, paddingRight: 24`. At 360w the strip looks chunky and the asymmetric padding is visible. `useBreakpoint` is window-scoped (not container-scoped), so the `sm` variant won't fire from a dock. Cheapest fix: a `compact` prop the shell sets explicitly when docked.
@@ -1175,7 +1175,7 @@ CHECKLIST:
   - Decide the writing path for the **dismiss** branch: either reuse the same recipe with a third "raw" prompt fragment (cleanest), or fire `system_prompt_only(write_after_clarify)` with no answers and let the model handle it. Cleanest is to add a `frag_onboarding_write_raw` to the recipe — same shape, no "given the answers" framing — and select via the prompt composition's first-match.
   - Persist `clarificationStatus` alongside the rest of the onboarding record in `User.onboarding`, in the same lock-in pass that restores `useCRUD`.
   - Decide notification copy ("Care to clarify?" was the user's phrasing — likely keeps it, but worth A/B'ing once we have telemetry).
-  - Wire `comp_concern_structurer` into the upset path. The composition is already in the recipe stamp (`frag_concern_structurer` + `comp_concern_structurer`). Cart side: spawn a separate single-turn `claude_runner` session against that composition's system prompt, hand it the user's last message as the user-turn, capture the structured-concerns table, prepend to the writing turn's user-message, then fire the writer.
+  - Wire `comp_concern_structurer` into the upset path. The composition is already in the recipe stamp (`frag_concern_structurer` + `comp_concern_structurer`). Cart side: spawn a separate single-turn `useAssistant({ backend: 'claude_code', systemPrompt: <composition>, ... })` mount, hand it the user's last message as the user-turn, capture the structured-concerns table from the events stream, prepend to the writing turn's user-message, then fire the writer.
   - Decide the upset-detection heuristic. v1 can be cheap and blunt — token-based (presence of "??", ALL CAPS bursts, "this is exactly what I was worried about", explicit profanity) plus a length floor. v2 could be a small classifier turn against a frozen prompt. Don't over-engineer this; false positives on the structurer just cost an extra short turn (~$0.03) and never make the output worse — false negatives mean the writer doesn't get the structured-concerns prepend.
   - Theme-bridge for the embedded chat-loom render. Today `runtime/intent/render` (and `cart/chat-loom.tsx`) carry hardcoded hex literals (`#0b1020`, `#1e293b`, `#f1f5f9`, …). Inside the cart/app shell that's a `no-color-drift` violation. Either route the intent renderer through `cart/app/gallery/components.cls.ts` classifiers (preferred), or wrap the rendered tree in an override that swaps the inline backgroundColor/color/borderColor to `theme:NAME` tokens. Do this as part of the deferred-clarify pass; don't expand the surface area of inline hex first.
 - PROBLEMS:
@@ -1189,7 +1189,9 @@ CHECKLIST:
 
 ---
 
-### Persistent assistant chat (full ↔ side fluid surface) — Stub
+### Persistent assistant chat (full ↔ side fluid surface) — SUPERSEDED (was Stub)
+
+> **Status (2026-05-11):** This section's "files don't exist yet" claim is no longer true — `cart/app/chat/` shipped. The real implementation has its own per-file entry in the **Routes & screens** index (search "Persistent assistant chat — `chat/`"). Treat the rest of this section as historical scope-setting / design intent; mismatches with the live `chat/` implementation should be resolved by trusting the on-disk code.
 
 The supervisor chat lives **above** the InputStrip and is present in every window. It has two visible shapes — `full` (page-area panel; concept image #2) and `side` (docked rail above the side input; concept image #1) — and the same conversation continues across the swap. The chat is one logical surface that re-parents between two slots; the InputStrip already migrates between the same two slots via the GOLDEN morph (A bar / B docked / C bar-with-side-rail), so the chat rides the same axes.
 
@@ -1293,15 +1295,20 @@ These need a coordinated touch — not localized to a single file.
 - **Avatar + voice-thumbnail pipeline (Character)** — `Character.avatarRef` and `Character.voiceThumbnailRef` are opaque locators. Three viable paths (local-file upload, external URL, generated-from-prompt); the data shape is stable across all three so the pick can be deferred. UI uses placeholders until one lands. See `cart/app/docs/character/99-open-questions.md`.
 - **Character grain across profiles** — Character is Assistant-grain via `Assistant.activeCharacterId`; Settings may still scope visibility/profile defaults. Open whether a character should be visible across profiles or per-profile. Leaning: User-owned (already true via `character.userId`), per-profile *exposed* via a `Settings.sharedCharacterIds[]` opt-in. Deferred until multi-profile lands.
 - **Manifest privacy tier** — PRD §6 calls for per-dimension visibility ('visible' / 'anonymized' / 'hidden' / 'deletable'). Sketch: extend `Privacy` (`cart/app/gallery/data/privacy.ts`) with a `manifest` namespace mirroring the `tools` / `filesystem` shape; `src_user-manifest-snapshot` reads the tier and skips hidden dimensions. Deferred to a Privacy revision; data shapes here don't depend on the answer.
-- **Token registry cleanup** — `@composer` and `@gallery` should be added now that both routes are registered. `@about` should be removed or retargeted because `/about` no longer exists. `@manifest` still waits for a real route. `@character` already points at a live route.
+- **Token registry cleanup** — add `@chat`, `@sweatshop`, `@canvas`, `@plan`, `@composer`, `@gallery`, `@daw`, `@face3d`, `@world` (every one of these is a live route in the ROUTES table). Remove `@about` (`/about` was retired). `@manifest` still waits for a real route. `@character` already points at a live route.
 
 ### Recently landed
 
 A short rolling log so cross-file work doesn't keep getting re-planned. Trim entries older than the last few weeks.
 
-> **Note (2026-05-10):** Older entries below name the per-backend host fns (`__claude_*`, `__kimi_*`, `__localai_*`) and the `useLocalChat` / `claude_runner` paths. These were unified into the single `__worker_*` host-fn surface (`framework/assistant/worker_bindings.zig`) and the `useAssistant` React hook (`runtime/hooks/useAssistant.ts`). Read those entries as historical record; for new code use `useAssistant({ backend, ... })`. SDK files moved from `framework/{claude_sdk, codex_sdk, kimi_wire_sdk, openai_compat_sdk, local_ai_runtime, llama_exports, tool_framework, tools_builtin, embed, v8_bindings_sdk, v8_bindings_embed, api_types}` into `framework/assistant/` at the same time.
+- **Unified assistant surface** (2026-05-10) — collapsed every per-backend host fn (`__claude_*`, `__kimi_*`, `__localai_*`) and React hook (`useLocalChat`, `claude_runner`-style helpers) into one surface:
+  - **One host-fn family** — `__worker_start(backend, opts_json)` / `__worker_send` / `__worker_poll` / `__worker_respond` / `__worker_close` in `framework/assistant/worker_bindings.zig`. The Zig WorkerStore normalizes per-backend events into one append-only `WorkerEvent` timeline.
+  - **One React hook** — `useAssistant({ backend, model, opts_json, tools, ... })` in `runtime/hooks/useAssistant.ts`. Backends: `'claude_code' | 'codex_app_server' | 'kimi_cli_wire' | 'local_ai' | 'openai_compat'`. Returns `{ events, ask, respond, ... }` — cart code never sees provider-shaped data, only normalized events.
+  - **SDK files moved** — `framework/{claude_sdk, codex_sdk, kimi_wire_sdk, openai_compat_sdk, local_ai_runtime, llama_exports, tool_framework, tools_builtin, embed, v8_bindings_sdk, v8_bindings_embed, api_types}` → `framework/assistant/<same-name>`.
+  - **Cart wrapper** — `cart/app/chat/useAssistantChat.ts` reads `Settings.defaultConnectionId` → looks up `Connection.kind` → maps to backend (`claude-code-cli`/`anthropic-api-key` → `claude_code`; `kimi-api-key` → `kimi_cli_wire`; `codex-cli` → `codex_app_server`; `openai-api-key`/`openai-api-like` → `openai_compat`; `local-runtime` → `local_ai`). Single hook call regardless of backend.
+  - **Tool dispatch** — `useAssistantTools(assistant)` (in `cart/app/tools/useAssistantTools.ts`) bridges `tool_call` events through the cart's permission-gated tool registry and pushes results back via `assistant.respond(requestId, result)`.
 
-- **Composer route + canvas authoring first pass** (2026-05-04) — moved the `docs/11-composer.md` plan into a real app route at `/composer` and registered it in the shell (`mode: 'side'`). Also registered `/gallery` as a side-mode route and removed the stale `/about` route from `index.tsx`. Main pieces:
+- **Composer route + canvas authoring first pass** (2026-05-04, route subsequently moved to `/sweatshop/composer`) — moved the `docs/11-composer.md` plan into a real app route, registered in the shell (`mode: 'side'`). Also registered `/gallery` as a side-mode route and removed the stale `/about` route from `index.tsx`. Main pieces:
   - **Canvas substrate** — `composer/page.tsx` owns `ComposerDoc` + `SNode` state, persists one default draft through `__store_get/__store_set`, autosaves with a debounce, and normalizes ids/selection on every edit. Pages are `Canvas.Node`s with persisted `x/y/width/height`; new pages are blank and placed beside existing pages instead of stacked on top of each other.
   - **Canvas clamp toolbar** — replaced the top toolbar with a bottom-center actionbar inside `Canvas.Clamp`. It uses the gallery layer-control button atom (`LayerToolButton`) plus runtime icons for select/pan/draw, Box/Text/Button creation, copy/paste/duplicate/delete, group/ungroup, and page creation.
   - **Atom library rail** — moved the full primitive/gallery atom catalog off the toolbar into the left rail. Rail tabs are `ALL`, `PRIM`, `SHAPE`, `UI`, and `HIDE/OPEN`; the visible menu has search/filter and adds atoms to the current selection target.
@@ -1321,24 +1328,241 @@ A short rolling log so cross-file work doesn't keep getting re-planned. Trim ent
 - **Three-state shell + input morph** (commits `3bad2f07d` → `6aa1cd24c`, 2026-05-01) — A/B/C state machine, route+focal driver axes, smoke-and-mirrors variant flip, GOLDEN regression list. Canonical reference: **Animation principles → Input-strip shell morph (GOLDEN)**. `git log --grep GOLDEN`.
 - **HUD / iframe split + settings sub-nav promotion** (commits `25910df18` (Phase A) → `0e49af62f` (Phase B), 2026-05-02) — fixed the `/settings` morph-flash regression. Phase A: bar bg → `theme:transparent`, routes wrapper drops `paddingBottom`, pages own internal `paddingBottom` via the new `useHudInsets()` store in `cart/app/shell.tsx`. Phase B: `SettingsNav` lifts out of the page tree and renders inside `S.AppSideMenuInput` at the top of the assistant rail, reading active section from a new `useSettingsSection()` shell store. Canonical reference: **Animation principles → HUD / iframe split**. Covers `cart/app/{index.tsx,shell.tsx,page.tsx,about/page.jsx,settings/page.jsx,sweatshop/page.tsx}`.
 - **Settings Customize + runtime theme token overrides** (2026-05-03) — added `/settings/customize` and the Customize settings section. `settings/routes/customize.tsx` edits component-gallery color token overrides; `cart/app/gallery/gallery-theme.ts` persists them at `component-gallery-theme-token-overrides` and applies them after the active gallery theme's flattened token categories are pushed into `runtime/theme.tsx`. This keeps app components classifier-only while allowing user-entered runtime colors.
-- **Local chat: subprocess pivot — full GPU inference inside cart/app** (commits `ea3e1654d` → `d2b1a3981`, 2026-05-02) — the in-process llama.cpp link-time path (entry just below) hit two compounding walls: (a) struct-ABI mismatch with whichever upstream commit our prebuilt `libllama_ffi.so` was built against — `llama_model_default_params()`'s 72-byte return struct shape was drifting under us, leaving garbage in `progress_callback` that triggered a `cancelled model load` mid-offload; (b) once we got past the struct issue, the original wgpu/Vulkan `VkInstance` fight was still there and killed the offload at the buffer-allocation boundary anyway. Pivoted to running inference in a separate process so each side gets its own `VkInstance` (see `framework/ffi/llm_worker.cpp`). Pieces:
-  - `framework/ffi/llm_worker.cpp` — small C++ subprocess that loads a `.gguf` on Vulkan, talks to the cart over a line-delimited LOAD/CHAT/READY/TOK/DONE/ERR protocol on stdin/stdout. Sniffs the model's embedded Jinja chat template for known markers (gemma / chatml / llama2 / phi3) since llama.cpp's `apply_template` doesn't render full Jinja.
+- **Local chat — subprocess inference inside cart/app** (commits `ea3e1654d` → `d2b1a3981`, 2026-05-02; subsequently re-homed under the unified `useAssistant({ backend: 'local_ai' })` surface on 2026-05-10). Why a subprocess: the in-process llama.cpp link-time path hit two compounding walls — (a) struct-ABI mismatch with whichever upstream commit `libllama.so` was built against (`llama_model_default_params()`'s 72-byte struct shape drifted under us, leaving garbage in `progress_callback` and cancelling the model load mid-offload); (b) the wgpu/Vulkan `VkInstance` fight killed the offload at the buffer-allocation boundary even after the struct issue was fixed. Subprocess gives each side its own `VkInstance`. Current pieces:
+  - `framework/ffi/llm_worker.cpp` — C++ subprocess that loads a `.gguf` on Vulkan, talks to the cart over a line-delimited LOAD/CHAT/READY/TOK/DONE/ERR protocol on stdin/stdout. Sniffs the model's embedded Jinja chat template for known markers (gemma / chatml / llama2 / phi3) since llama.cpp's `apply_template` doesn't render full Jinja.
   - `framework/ffi/llama_headers/` — vendored `llama.h` + `ggml*.h` + `gguf.h` from llama.cpp upstream. Knows gemma4, qwen3.6, every current arch.
-  - `framework/local_ai_runtime.zig` — rewritten (old version preserved as `_old.zig`). Public API (`Session`, `SessionOptions`, `SubmitOptions`, `EventKind`, `OwnedEvent`) is identical so `framework/v8_bindings_sdk.zig`, `framework/qjs_runtime.zig`, and `useLocalChat` need zero changes. Worker spawn sets `LD_LIBRARY_PATH=<exe_dir>/lib + dev fallback` so the bundled libs resolve.
-  - `framework/v8_bindings_sdk.zig` — pre-existing field-name mismatch fixed: hook reads `evt.kind` / `evt.text`; binding was setting `"type"` / `"result"`. Was masked while the in-process load failed silently; surfaced once events actually flowed.
-  - `runtime/hooks/useLocalChat.ts` — model swap now tears down + respawns; empty model is inert (lets `useAssistantChat` always call this hook unconditionally).
-  - `cart/app/chat/useAssistantChat.ts` — routes to `useLocalChat` when the active `Connection.kind === 'local-runtime'`. The `.gguf` path comes from `Connection.credentialRef.locator` (LocalForm already captures the typed path there). Both hooks always called per rules-of-hooks; the inactive one short-circuits.
-  - `scripts/ship` — when `WANT_SDK` is on (which `useLocalChat` triggers), copies `rjit-llm-worker` + `libllama.so` + `libggml{,-base,-cpu,-vulkan}.so` from `deps/llama.cpp-fresh/build/bin` into the cart payload. Self-extracting wrapper unpacks them next to `app.bin` and the cart's other libs. No external runtime install required.
-  - `cart/llm_lab/` — minimal test cart for the subprocess path. Pick Gemma 4 E4B or Qwen 3.6 27B, hit Ask, watch tokens stream into the OUTPUT panel.
-  - `deps/llama.cpp-fresh/` — fresh upstream clone (gitignored), built locally via cmake with `-DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=ON`. Knows current archs the older copies in `love2d/llama.cpp` and `deps/llama.cpp.zig` predate.
-  - `sdk/dependency-registry.json` — `useLocalChat` trigger moved from the `embed` gate to the `sdk` gate (chat path no longer needs `libllama_ffi.so` linked at build).
-  - Confirmed end-to-end on AMD Radeon RX 7900 XTX: 43/43 layers offloaded to GPU via Vulkan, tokens stream back through pipes to the cart UI without fighting wgpu's `VkInstance`. Switching models in `cart/llm_lab` tears down + respawns cleanly.
-  - The existing Step2 'I have local models' tile already commits as `kind='local-runtime'` (state.jsx remap at line 470), so onboarding flows that pick a `.gguf` path now drive the cart/app `AssistantChat` through this subprocess by default — no UI change needed.
-  - Open: the in-process path entry below is now historical context, not a live target. Replace mention of `framework/llama_exports.zig` in the gemma recipe with the subprocess wire protocol once the recipe is rewritten.
-- **Local chat hook (`useLocalChat`) + manifest-gate cart + extern-link refactor** (2026-05-02) — net-new generation path through the framework's Vulkan llama runtime, alongside the existing embedding path. Pieces:
-  - `runtime/hooks/useLocalChat.ts` — wraps `__localai_init` / `_send` / `_poll` / `_close` with React state. Exposes `phase` (`init` / `loading` / `loaded` / `generating` / `idle` / `failed`), a `pulse` heartbeat counter, `lastStatus`, and `streaming` (assistant tokens accumulated mid-`ask`). Defaults `persistAcrossUnmount: true` so dev hot-reload doesn't tear down the session and cancel the model load. New 4th arg to `__localai_init` plumbs `n_ctx` through (Zig-side `hostLocalAiInit` in `framework/v8_bindings_sdk.zig`).
-  - `cart/manifest_gate/{index.tsx,cart.json}` — Round-2 of the line-manifest benchmark. Reads `experiments/manifest_check/target.py` + `manifest.md` via `runtime/hooks/fs`, walks claims sequentially, asks Gemma-4 for a `TRUE`/`FALSE` verdict per line, writes the preamble to `experiments/manifest_check/results/round2_preamble.txt`. UI: pulsing heartbeat dot, phase label, live token-stream panel, active-row highlight in the verdicts list. Triggers `has-embed=true` at ship time via the `useLocalChat` import (registered in `sdk/dependency-registry.json` as a second trigger of the existing `embed` gate).
-  - `cart/app/recipes/gemma-line-gate-for-claude-edits.{md,ts}` — recipe file pair documenting the two-round benchmark (Claude SDK casual review, then local Gemma-4 TRUE/FALSE preamble feeding back into Claude). Uses `useLocalChat` and references `framework/local_ai_runtime.zig` + `framework/llama_exports.zig` as the bake-in path.
-  - `framework/local_ai_runtime.zig` — dropped `std.DynLib` + the dlopen candidate-path search. Replaced `Fn*` typedefs with `extern "c"` declarations at module scope (link-time bound against `libllama_ffi.so`, same .so already linked by `framework/embed.zig`). `LlamaApi` struct kept as a thin wrapper of function pointers defaulting to `&llama_foo` so the 33 `api.foo(...)` call sites are unchanged. Reason: a second runtime dlopen of the same llama.cpp build re-initialized `ggml-vulkan` on a worker thread, contending with the renderer's already-active `VkInstance` and cancelling the model load mid-offload (matches the clippy pattern that originally went to LuaJIT FFI for the same reason). The link-time path shares one `VkInstance` across embed + chat.
-  - `build.zig` — when `has-embed=true`, prefers root `zig-out/lib/libllama_ffi.so` over `tsz/zig-out/lib/...` so a newer .so dropped at the root wins (current setup symlinks LMS Vulkan 2.14.0 there for gemma-4 architecture support, which the Apr-18 frozen tsz build pre-dates). Adds `$ORIGIN/../lib` rpath so the binary at `zig-out/bin/` resolves the .so at runtime without `LD_LIBRARY_PATH`.
-  - Open: end-to-end gemma-4 run still needs to be observed completing (see Open threads above).
+  - `framework/assistant/local_ai_runtime.zig` (formerly `framework/local_ai_runtime.zig`) — Zig-side worker spawn + protocol parser. Spawn sets `LD_LIBRARY_PATH=<exe_dir>/lib + dev fallback` so the bundled libs resolve. Public API surfaced through the unified `__worker_*` host fns (no separate `__localai_*` surface).
+  - `cart/app/chat/useAssistantChat.ts` — when `Connection.kind === 'local-runtime'`, calls `useAssistant({ backend: 'local_ai', model: <gguf path>, ... })`. The `.gguf` path comes from `Connection.credentialRef.locator` (LocalForm captures the typed path there).
+  - `scripts/ship` — when `WANT_SDK` is on (any `useAssistant` import triggers it), copies `rjit-llm-worker` + `libllama.so` + `libggml{,-base,-cpu,-vulkan}.so` from `deps/llama.cpp-fresh/build/bin` into the cart payload. Self-extracting wrapper unpacks them next to `app.bin`. No external runtime install required.
+  - `cart/isolated_tests/llm_lab/` — minimal test cart for the subprocess path. Pick Gemma 4 E4B or Qwen 3.6 27B, hit Ask, watch tokens stream into the OUTPUT panel.
+  - `deps/llama.cpp-fresh/` — fresh upstream clone (gitignored), built locally via cmake with `-DGGML_VULKAN=ON -DBUILD_SHARED_LIBS=ON`.
+  - `sdk/dependency-registry.json` — `useAssistant` (with `backend: 'local_ai'`) triggers the `sdk` gate. Chat path no longer needs `libllama_ffi.so` linked at build.
+  - Confirmed end-to-end on AMD Radeon RX 7900 XTX: 43/43 layers offloaded to GPU via Vulkan, tokens stream back through pipes to the cart UI without fighting wgpu's `VkInstance`.
+  - The Step2 'I have local models' tile commits as `kind='local-runtime'`, so onboarding flows that pick a `.gguf` path drive the cart/app `AssistantChat` through this subprocess by default — no UI change needed.
+- **Manifest-gate cart + extern-link prelude** (2026-05-02, since superseded) — `cart/manifest_gate/` was the original benchmark cart for the local-chat path; it predated the subprocess pivot and the unified worker surface. Kept around as a reference; `cart/app/recipes/gemma-line-gate-for-claude-edits.{md,ts}` still references the old `framework/llama_exports.zig` + dlopen path and needs a rewrite against `useAssistant({ backend: 'local_ai' })` and the subprocess wire protocol.
+
+---
+
+## 2026-05-11 catch-up — files added to the per-file index
+
+Sweep landed 2026-05-11. The dated names (`useLocalChat`, `__localai_*`, `/activity/sweatshop`, `/composer` route, etc.) were rewritten in place; this section now hosts only the per-file entries for newly-landed dirs / files that didn't exist when the rest of the index was written. Promote each into the main **Routes & screens** / **State, library, manifest** index when it's next touched.
+
+### Live route list (canonical)
+
+| path | mode | inputDock | file |
+|------|------|-----------|------|
+| `/` | full | bottom | `page.tsx` |
+| `/chat` | side | bottom | `chat/page.tsx` |
+| `/settings` | side | rail | `settings/page.tsx` |
+| `/settings/customize` | side | rail | `settings/routes/customize.tsx` |
+| `/sweatshop` | side | rail | `sweatshop/page.tsx` |
+| `/sweatshop/canvas` | side | rail | `canvas/page.tsx` (also reachable directly at `/canvas`) |
+| `/sweatshop/plan` | side | rail | `plan/page.tsx` |
+| `/sweatshop/composer` | side | rail | `composer/page.tsx` |
+| `/canvas` | side | rail | `canvas/page.tsx` |
+| `/character` | side | rail | `character/page.tsx` |
+| `/face3d` | side | rail | `face3d/page.tsx` |
+| `/world` | side | rail | `world/page.tsx` |
+| `/gallery` | side | rail | `gallery/index.tsx` |
+| `/daw` | side | bottom | `daw/page.tsx` |
+
+`inputDock` is a second axis the older doc never named: it picks where the persistent `<InputStrip>` sits when the route is in side mode. `'bottom'` keeps the full-width bar across the bottom of the page area; `'rail'` docks it into the assistant rail. `index.tsx`'s morph machinery now reads both `mode` and `inputDock` per route.
+
+### Three-mode shell — `AppShell.tsx` — WIP
+
+CHECKLIST:
+- Purpose: Successor to the `index.tsx`-internal `ShellBody` — a single transitioning surface with three modes (`home` / `chat` / `activity`) instead of the GOLDEN section's `home` / `activity-docked` / `activity-focal`. Replaces the chrome + body + bottom-strip layout. The grid menu becomes a side-nav in `chat` mode; in `activity` mode the chat panel + input dock collapse into the bottom-left sidebar and the activity host fills the right pane.
+- isRoute: FALSE
+- Status: parallel implementation living alongside `index.tsx`. Not yet wired as the cart entry — `index.tsx` still owns the GOLDEN morph in production. Treat AppShell.tsx as the next-shell-shape sketch; if it lands as the entry, the GOLDEN section needs a follow-up rewrite.
+- TODO: decide which shell wins and delete the other; today both compile but only one mounts.
+- PROBLEMS: two shells means two sources of truth for shell-state derivation. Mode-name drift (`activity-docked` vs `activity`) will bite if a future change touches both.
+
+### Persistent assistant chat — `chat/` — WIP (was a Stub plan; now real)
+
+Supersedes the **Persistent assistant chat (full ↔ side fluid surface) — Stub** entry in **Planned work**. The chat directory exists; treat the Planned-work entry as historical scope-setting.
+
+CHECKLIST:
+- Purpose: Pinned supervisor chat present in every window once onboarding completes. Two visible shapes: `'side'` (rail, above InputStrip — 95% of the time) and `'activity'` (fills the activity content area, only on the `/chat` route). Identity-continuity: thread state lives in `chat/store.ts`, so the panel can re-mount across the GOLDEN morph without losing scroll, streaming buffer, or surface-card state. Empty state shows a clickable history list of past sessions; sending the first message replaces it with the live transcript.
+- isRoute: TRUE for `chat/page.tsx` (`/chat`); the panel itself is also rendered inside the rail by `index.tsx`'s `ShellBody`.
+- Route: `/chat` (`mode: 'side', inputDock: 'bottom'`).
+- hasDatashape: TRUE
+- Datashape:
+  - `cart-chat-session` row (assistant bucket, JSONB) — one per session, holds metadata.
+  - `cart-chat-turn` row (assistant bucket, JSONB) — one per turn, linked by `session_id`. `chat/store.ts` lazy-loads sessions and keeps the active session's turns in `_turns`.
+  - `AssistantTurn` discriminated union (asst / user). asst turns may carry `surface?: ChatSurface` (audit / fleet card variants), `lift?: boolean`, `pending?: boolean`. See `chat/types.ts`.
+  - `ChatSurface` is the assistant-emitted card shape; v1 hand-renders `audit` and `fleet` directly, v2 routes through `<RenderIntent>` so model-emitted chat-loom trees collapse to the same surface.
+  - `ParallelCandidate` — `chat/page.tsx` fans one user message out to multiple model lanes; the user's pick becomes the canonical asst turn for the next round. See `ParallelAssistantTurn.tsx`.
+- exposedDatashapes: `askAssistant(text)` (module-level call into the provider — re-exported from `chat/store`); `loadSession`, `startNewSession`, `appendTurn`, `setTurnPending`, `useChatTurns`, `useChatSessions`, `selectParallelCandidate`, `pushAsker`, `updateParallelCandidate`.
+- Hooks: `useAssistantChat` (the cart-side wrapper around the unified `useAssistant`); `useEffect`/`useRef`/`useMemo`/`useState`; `useRoute`, `useHudInsets`, `useCRUD`. The provider mounts the generation hook one level above the panel so re-mounts don't kill the worker.
+- Conditions:
+  - `AssistantChatProvider` translates `Connection.kind` → backend, derives model + opts, calls `useAssistant`, and exposes `askAssistant` via the module-level store. It is mounted in `index.tsx`'s `ShellBody` chain (above `<Router>`'s subtree). InputStrip's submit calls `askAssistant(text)` — InputStrip never sees the worker.
+  - The `/chat` route's `chat/page.tsx` overrides the InputStrip's ask handler while mounted: one user message fans out to N lanes, user picks the canonical reply. When `/chat` unmounts, the rail-side single-lane chat resumes ownership of the InputStrip.
+  - The chat panel re-parents between rail (`'side'`) and activity (`'activity'`) slots; the React subtree is one stable instance with a stable key, NOT two trees that swap. `chatShape` is derived from `useRoute()`.
+  - Pending-turn render wraps the body+surface area in a pixelate `<Filter>` that oscillates while `pending` is true and tweens to 0 over ~400ms when `pending` flips false — turns "materialize" out of the scramble.
+  - `AssistantSurface` parses canvas-mutation reply strings (`@stage/accept|retry|cancel`) and dispatches via the bus; the chat card the assistant emits after canvas mutations carries one of those three replies.
+- Components: `AssistantChat`, `AssistantChatProvider`, `AssistantTurn`, `AssistantSurface`, `ParallelAssistantTurn`, plus the page-level `ChatPage`.
+- Atoms: `S.AppChat*` family in `gallery/components.cls.ts` (panel chrome, transcript, turn header/body, surface-slot, status pills, surface-action buttons). Continuous border-dash flow via `GenericCardShell` for "alive" cards.
+- isUsingTheme: TRUE — every surface is a classifier; surface-card actions use `S.AppChatSurfaceAction` / `AppChatSurfaceActionPrimary`.
+- hasIcons: minimal (header collapse / lift glyphs).
+- hasAnimation: TRUE — list-building (spring on add, FLIP-tween on reorder, fade+scale on remove); pending-turn pixelate; rail↔activity panel fade.
+- TODO:
+  - `useAssistantChat` currently maps `Connection.kind` → backend per the table at the top of the file; the OpenAI-compat path defaults the model from a small heuristic on endpoint URL. Wire a real `Settings.defaultModelId` read once Step2 / Settings hand a model id through cleanly for openai-compat.
+  - `ChatSurface` v2: route through `<RenderIntent>` so the assistant can emit chat-loom-shaped trees instead of the cart hand-rendering `audit` / `fleet` shapes.
+  - Multi-thread / per-activity scoping. Today one canonical `_turns` stream per cart instance (matches "PERSISTENT · 14 TURNS" concept-art copy); per-activity scoping waits for the activity-registry follow-up.
+- PROBLEMS:
+  - `AssistantChatProvider` mounts above `<Router>`'s subtree but consumes `useRoute()` indirectly (through the chat page on `/chat`). If a future shell collapse moves it inside the routes wrapper, the GOLDEN morph teardown bug returns — keep it above ShellBody.
+  - `chat/store.ts` writes the full turn row on every mutation. Acceptable at v1's turn counts; consider an append-only log if a thread crosses ~200 turns.
+
+### Canvas substrate — `canvas/` — WIP
+
+CHECKLIST:
+- Purpose: The merged sweatshop+composer surface. A single full-bleed pan/zoom `<Canvas>`; every piece of chrome is a `Canvas.Clamp`-pinned panel that floats over it (WoW-HUD style). Panels live at one of 9 viewport anchors (TL/TC/TR/ML/MC/MR/BL/BC/BR) with cell-quantised offsets. Edit-UI mode shows a snap grid and lets the user drag any panel to a new anchor+offset. Collision walks panels in priority order, slides along the anchored edge on overlap, and stashes panels that don't fit; the bag-bar shows a chip per stashed panel.
+- isRoute: TRUE
+- Route: `/canvas` (top-level) and `/sweatshop/canvas` (sweatshop-scoped); both mount `canvas/page.tsx`.
+- hasDatashape: TRUE (page-local, persisted via localStorage on the `canvas_*_v0` keys; `useCRUD` migration deferred per `pg-throwaway` memory).
+- Datashape:
+  - `Panel`, `Atom`, `CanvasSelection`, `CanvasSnapshot` — see `canvas/atoms.ts`, `canvas/tools.ts`, `canvas/properties/types.ts`.
+  - `atoms.ts` is the unified registry of "anything the user can drop on a slot, drop on the canvas, or invoke from the bag" — composer's tool palette + sweatshop's IFTTT registry + cart-local extensions all flow through one Atom shape.
+  - `history.ts` keeps a linear ring-buffered chain of `CanvasSnapshot` (HISTORY_MAX = 100) with a head index; undo decrements, redo increments, new commits mid-chain truncate the forward chain (git-style).
+- exposedDatashapes: `Atom`, `AtomKind`, `Panel`, `PanelAnchor`, `CanvasSnapshot`, `DesignPatch`, `FlowPatch`, `SelectionPatch`, `CanvasSelection`.
+- Hooks: page-local `useState` + `useEffect`; `useIFTTT` for keyboard shortcuts and bus subscriptions; `useMeasure` for snap-grid sizing.
+- Components: `CanvasPage`, `PropertiesPanel`, `DesignProps`, `FlowProps`, `Field`, plus the panel stubs (`ModeTabs`, `Bag`, `BagBar`, `Code`, `Properties`, `Minimap`, `ActionBar`).
+- Atoms: `<Canvas>`, `<Canvas.Node>`, `<Canvas.Clamp>`, plus `S.*` chrome classifiers.
+- isUsingTheme: TRUE
+- hasIcons: TRUE
+- hasAnimation: minimal (tile_drag pattern via raf + mouse-globals polling for drag).
+- TODO:
+  - Wire each Atom's `invoke` to its real subsystem (today they emit on a bus channel the engine listens for; the engine doesn't always do anything with it).
+  - Promote canvas state from localStorage to `useCRUD` once the shape stops moving.
+  - Bridge the assistant-tools surface (`canvas/tools.ts`) through `tools/registry` so canvas chrome ops + atom invocations are first-class to the chat assistant.
+- PROBLEMS:
+  - `/canvas` and `/sweatshop/canvas` both mount the same page; the persisted snapshot is shared, which is correct but means the routes are aliases rather than separate surfaces. Decide if one should be the canonical entry.
+  - PropertiesPanel routes by `selection.kind` (design vs flow); a "mixed" multi-selection has no defined inspector yet.
+
+### Planning surface — `plan/` — WIP
+
+CHECKLIST:
+- Purpose: `/sweatshop/plan` route. Paper-document plan view with @target comments staged into a bottom dock; the InputStrip claims the input surface and routes typed text either to the planner (no draft anchor) or to the comment dock (active anchor). The chat transcript replaces the rail's `01 ASSISTANT` slot with `02 PLANNING` so plan and chat feel like numbered tabs of the same chrome. Reuses the gallery's document-viewer chrome but renders block contents directly so font sizes are explicit and the targeted-block indicator is visible.
+- isRoute: TRUE
+- Route: `/sweatshop/plan`
+- hasDatashape: TRUE — JSON files under `.reactjit/plans/<planId>.json`, project-scoped. Each file holds the full rev history; head rev is `revs[0]`. The plans index is the directory listing — no separate index file.
+- Datashape:
+  - `Plan` (canonical structured form; prose is rendered from it per `docs/03-sequencer-plan-trace.md`).
+  - `Phase`, `Cell` (`reactive` / `declarative` kinds — `reactive` references a `useIFTTT` spec, `declarative` references a Composition id; see `docs/02-canvas-and-substrates.md`).
+  - `Comment` (pinned to a structural node `id`).
+  - `Modifier` (rev-applied modifications to nodes).
+  - chat turns + active draft target — module-level `chatStore.ts`.
+- exposedDatashapes: `Plan`, `Phase`, `Cell`, `CellKind`, `Comment`, `Modifier`, `setPendingIntent` / `consumePendingIntent` (cross-route handoff from InputStrip's `/plan` slash command).
+- Hooks: `useChatTurns`, `useDraft` (chat store); `useEffect`, `useRef`, `useMemo`, `useState`; fs hooks via `@reactjit/runtime/hooks/fs`.
+- Components: `PlanPage`, `PlanDocument`, `PlanChatRail`, `CommentDock`, plus a planning `workerStub` placeholder.
+- Atoms: `S.*` classifiers; uses gallery document-viewer chrome but renders block contents directly.
+- isUsingTheme: TRUE
+- hasAnimation: minimal (scroll-driven outline highlight)
+- TODO:
+  - Replace `workerStub.ts` with the real wire layer through `useAssistant` + the embed hooks (`searchCode` / `searchPriorPlans` / `searchChat`). The contract `(plan, comments) → newPlan` stays.
+  - Persist the chat transcript alongside plan revs once the planning worker is real.
+- PROBLEMS:
+  - Plans are project-scoped (working directory at cart launch). Switching working directories mid-session would surface a different plans set; not handled today.
+
+### Composer page — `composer/page.tsx` — WIP (route moved)
+
+The existing **Composer page** entry above is correct in shape but the route changed: it is now mounted at `/sweatshop/composer`, not `/composer`. The standalone `/composer` route was retired when the canvas substrate (above) absorbed the top-level slot. Treat the existing entry's references to `/composer` as `/sweatshop/composer`.
+
+### Tools surface — `tools/` — WIP
+
+CHECKLIST:
+- Purpose: Cart's tool registry that the unified `useAssistant` hook calls into when the worker emits `tool_call` events. `useAssistantTools(assistant)` is the bridge — it reads `assistant.events` for `tool_call`s, parses the payload, runs through `invokeTool` (permission-gated), and pushes results back via `assistant.respond(requestId, result)`. Tools register at boot via `registerBuiltinTools()` (`./builtins`); cart-specific tools call `register()` once at module load.
+- isRoute: FALSE
+- Datashape: `Tool`, `ToolCall`, `ToolResult`, `ToolScope`, `ToolPermission`, `GrantOptions`. Permission grants persist via `permissions.ts` (uses local store).
+- exposedDatashapes: `register` / `unregister` / `get` / `listTools` (registry); `ensureGrantsLoaded` / `reloadGrants` / `checkPermission` / `grantPermission` / `revokePermission` / `activeGrants` / `useGrants` (permissions); `invokeTool` (dispatch); `useAssistantTools` (React bridge).
+- Hooks: `useAssistantTools(assistant: AssistantToolHandle)`; `useGrants()` for live grant state.
+- Files:
+  - `tools/types.ts` — Tool / ToolCall / ToolResult / Scope / Permission shapes.
+  - `tools/registry.ts` — module-level `Map<name, Tool>`. Throws on duplicate registration.
+  - `tools/permissions.ts` — grant/revoke + `checkPermission`. Scopes follow the convention in `builtins.ts`: `chrome ops → scope = panelId`, `bag ops → scope = '*'`, `slot ops → scope = String(slot)`, `highlight → scope = '*'`, `invoke-atom → scope = atomId`, `describe / list → scope = '*'`.
+  - `tools/builtins.ts` — built-in tool surface. Canvas chrome ops, bag ops, slot ops, highlight, invoke-atom, describe / list-atoms, etc.
+  - `tools/dispatch.ts` — `invokeTool(name, args, scope)`. Permission-gates, runs, returns ToolResult.
+  - `tools/useAssistantTools.ts` — drop-in React bridge after `useAssistant`.
+  - `tools/index.ts` — barrel export.
+- TODO: surface a UI for grant review (today grants are inspectable but not editable from the app); add a tool-call inspector panel to the chat surface.
+- PROBLEMS: re-registering the same tool throws — modules that hot-reload need to call `unregister` first or guard with `get(name)`.
+
+### Recipe library — `recipes/` — WIP
+
+CHECKLIST:
+- Purpose: Structured adaptations of platform.claude.com recipe pages. Each recipe is a `<slug>.md` (verbatim source) + `<slug>.ts` (`recipe: RecipeDocument`) pair, schema in `recipes/recipe-document.ts`. Some recipes additionally ship a `<slug>.tsx` runtime entry (`character-creator.tsx`, `personality-quiz-engine.tsx`, `onboarding-first-impression.tsx`, `build-agents-that-remember-your-users.tsx`) that wires the recipe into the cart through compositions / fragments and IFTTT events.
+- isRoute: FALSE (recipes are referenced from cart code, not surfaced as routes today; gallery may eventually browse them).
+- Datashape: `RecipeDocument`, `RecipeSection` (`paragraph` / `bullet-list` / `code-block`), `RecipeCodeLanguage`.
+- Recipes that ship a runtime `.tsx`: `character-creator`, `personality-quiz-engine`, `onboarding-first-impression`, `build-agents-that-remember-your-users`.
+- Recipes that are .md+.ts only (research material, not yet wired): `context-management-for-long-running-agents`, `context-management-on-a-200k-token-window`, `frontend-aesthetics-prompting-guide`, `gemma-line-gate-for-claude-edits`, `giving-claude-a-crop-tool-for-better-image-analysis`, `knowledge-graph-construction-with-claude`, `local-rag-claude-logs`, `sre-incident-response-agent`.
+- TODO:
+  - `gemma-line-gate-for-claude-edits` references the dated `framework/llama_exports.zig` + `useLocalChat` path; rewrite against `useAssistant({ backend: 'local_ai' })` and the subprocess wire protocol (see "Note on dated references" above).
+  - Surface a recipe browser in the gallery once the schema stabilizes.
+
+### Claude model helpers — `claude-models.ts` — Complete
+
+CHECKLIST:
+- Purpose: Family + effort-tier helpers shared by `onboarding/Step2.jsx` (`ClaudeForm` initial setup) and `settings/page.tsx` (`ConnectionEditor` re-probe). Lives outside the inference-parameter catalog because (1) effort tiers vary per model id, not per kind (Opus has `xhigh`/`max`, Sonnet caps at `high`, Haiku has none) — the catalog can't express that without a per-model row that would have to be regenerated as new models ship; (2) Anthropic's `/v1/models` response doesn't publish an `effort` capability — derived from the model id, not server-declared.
+- `applicableKinds` is `['anthropic-api-key', 'claude-code-cli']` — both routes hit the same API.
+- TODO: regenerate the family list when Anthropic ships new model ids.
+
+### Effect profiler overlay — `EffectProfilerOverlay.tsx` — Complete
+
+CHECKLIST:
+- Purpose: Keyboard-toggled (Ctrl+Shift+F) floating panel that polls `__getTopEffects` every 500ms and shows the worst offenders by total effect time. Backed by `runtime/effect_tracker.ts`. Hidden by default. Reset zeros stats; useful for isolating a specific interaction (mount the gallery, hit reset, scroll, see which components paid). Click `×` or press the chord again to dismiss.
+- Hooks: `useIFTTT('key:f', ...)` with the Ctrl+Shift modifier; internal `useEffect` polling.
+- TODO: none — diagnostic-only.
+
+### DAW — `daw/page.tsx` — WIP
+
+CHECKLIST:
+- Purpose: `/daw` route (`mode: 'side', inputDock: 'bottom'`). Digital Audio Workstation built on gallery atoms + runtime audio. Self-contained controls call the engine directly — no lifted drag state, so the page doesn't re-render on every slider tick.
+- isRoute: TRUE
+- Route: `/daw`
+- Hooks: `useAudio`, `useState`, `useCallback`, `useEffect` from runtime audio + React.
+- Components: `BipolarSlider`, `RotaryKnob`, `VerticalMeterStrip`, `Mono`, `Body`, `SparkBars` (controls-specimen gallery atoms); `AudioControls`, `Audio`, `AUDIO_SOUND` from runtime.
+- isUsingTheme: TRUE (uses `CTRL` controls-specimen theme tokens for the audio chrome)
+- TODO: persistence (track / preset saves), keyboard shortcuts.
+
+### Face3D — `face3d/page.tsx` — WIP
+
+CHECKLIST:
+- Purpose: `/face3d` route. Fullscreen testbench for the `BlockFace3D` voxel-on-sphere experiment. Big avatar, side rail of knobs (face wrap, gap, thickness, camera distance, archetype, seed, frame). For scrutinizing whether the avatar shape hits.
+- isRoute: TRUE; mode: side, dock: rail.
+- Components: `Avatar`, `BlockFace3D`, `ChipRow`, archetype/backdrop pickers.
+- TODO: lift any settled knob into the Character workbench; kill once the avatar pipeline ships per the **Open threads → Avatar + voice-thumbnail pipeline (Character)** thread.
+
+### World — `world/page.tsx` — WIP
+
+CHECKLIST:
+- Purpose: `/world` route. Single-player workspace with reusable 3D components. Architecture invariant: ONE `<Scene3D>` root; everything inside is a component returning `<Scene3D.Mesh>` / `<Scene3D.Light>` fragments. No nested Scene3D containers — that creates multiple render-to-texture surfaces instead of one shared scene.
+- Hooks: `useIFTTT`, `busOn` for input bindings; `useEffect`/`useRef`/`useState` for player state.
+- Constants: `MOVE_SPEED 2.5`, `TURN_SPEED 1.8`, `LOOK_SPEED 1.2`, `FPS_CAM_Y 1.58`, `TPS_CAM_DIST 4.2`, `TPS_CAM_HEIGHT 2.6`, `TPS_TARGET_Y 1.1`.
+- isRoute: TRUE; mode: side, dock: rail.
+- TODO: integrate with `/character` so the player avatar uses the active Character's `avatarRef`; persist position/orientation.
+
+### Gallery audit page — `gallery/audit-page.tsx` — Complete
+
+CHECKLIST:
+- Purpose: Diagnostic page that shows every "suspect" gallery entry (score ≥ 3 from `scripts/gallery-suspects.js`) on its own tab so we can see at a glance what's a real component vs. what's a page/dashboard/scene in disguise. For each suspect, renders EVERY variant from its story file stacked vertically with labels; storyless suspects render the dir's primary component directly.
+- Not wired to any cart route — invoked via gallery's internal nav for audit sessions.
+
+### Isolated tests — `isolated_tests/` — N/A
+
+Catch-all for one-off probes: `chat-loom`, `clipboard_menu_test`, `composer`, `context_menu_demo`, `dictation`, `embed_lab`, `flow_editor`, `font_lab`, `ifttt_test`, `input_lab`, `llm_lab`, `rotate_text`, `rule-engine-smoke`, `scene3d_lab`, `shadow_test`, `tile_drag`, `transparency_test`, `whisper_bench`. Each is a standalone test/probe surface — labs (`embed_lab`, `font_lab`, `input_lab`, `llm_lab`, `scene3d_lab`) ship a `cart.json` so they can be `./scripts/ship`'d as their own carts. Reference material; not part of the user-facing surface. Don't promote into the index unless one becomes load-bearing.
+
+### Docs — `docs/` — Reference
+
+CHECKLIST:
+- Files: `01-console-cartridges.md`, `02-canvas-and-substrates.md`, `03-sequencer-plan-trace.md`, `04-cells-and-tiers.md`, `05-pathology-catalog.md`, `06-laws-and-promotion.md`, `07-supervision-vocabulary.md`, `08-recipes.md`, `09-the-four-principles.md`, `10-current-substrate.md`, `11-composer.md`, `12-the-three-roles.md`, `99-open-questions.md`, `README.md`, plus `docs/character/` subdirectory referenced by the Character page.
+- These are design corpus, not generated. The plan/canvas/sequencer entries above point at specific files. When you cite them in cart code, link the path so the doc and the implementation don't drift silently.
+
+### Sequencer brief — `sequencer.md` — Reference
+
+Top-level brief for the sequencer surface (one-page synopsis sibling to `docs/03-sequencer-plan-trace.md`). Read alongside `plan/` when working on the planning ↔ sequencer handoff.
+
+---
+
+## Stale-references checklist (swept 2026-05-11)
+
+The 2026-05-11 sweep applied the route renames (`/activity/sweatshop` → `/sweatshop`, `/composer` → `/sweatshop/composer`), the unified worker rewrites (`useLocalChat` → `useAssistant({ backend: 'local_ai' })`, `__localai_*` → `__worker_*`, framework SDK file relocations to `framework/assistant/`), and the token-registry update in place. The App shell, Sweatshop, and Composer entries above now name the live routes; the Recently-landed log shows the unified surface as the canonical entry. If you grep for the dated names and find anything left, it's a regression — fix in place.

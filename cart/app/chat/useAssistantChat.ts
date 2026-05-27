@@ -15,7 +15,9 @@
 
 import { useEffect, useMemo, useRef } from 'react';
 import { useCRUD } from '../db';
+import { useCurrentSessionExternalId, setCurrentSessionExternalId } from './store';
 import { useAssistant, type AssistantBackend } from '@reactjit/runtime/hooks/useAssistant';
+import type { WorkerEvent } from '@reactjit/runtime/hooks/useAssistant';
 import { callHost, hasHost } from '@reactjit/runtime/ffi';
 import { listTools } from '../tools/registry';
 import { useAssistantTools } from '../tools/useAssistantTools';
@@ -108,6 +110,68 @@ export interface UseAssistantChatOpts {
   persistAcrossUnmount?: boolean;
 }
 
+export type AssistantRunMetadata = {
+  backend?: string;
+  model?: string;
+  workerSessionId?: string;
+  externalSessionId?: string;
+  costUsd?: number;
+  usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+  };
+};
+
+function emptyRunMetadata(): AssistantRunMetadata {
+  return {
+    usage: {
+      input_tokens: 0,
+      output_tokens: 0,
+      cache_creation_input_tokens: 0,
+      cache_read_input_tokens: 0,
+    },
+    costUsd: 0,
+  };
+}
+
+function foldMetadata(meta: AssistantRunMetadata, ev: WorkerEvent): void {
+  meta.backend = meta.backend || ev.backend;
+  meta.model = ev.model || meta.model;
+  meta.workerSessionId = ev.session_id || meta.workerSessionId;
+  meta.externalSessionId = ev.external_session_id || meta.externalSessionId;
+  if (typeof ev.cost_usd_delta === 'number') {
+    meta.costUsd = (meta.costUsd || 0) + ev.cost_usd_delta;
+  }
+  if (ev.usage) {
+    const u = meta.usage || emptyRunMetadata().usage!;
+    u.input_tokens += ev.usage.input_tokens || 0;
+    u.output_tokens += ev.usage.output_tokens || 0;
+    u.cache_creation_input_tokens += ev.usage.cache_creation_input_tokens || 0;
+    u.cache_read_input_tokens += ev.usage.cache_read_input_tokens || 0;
+    meta.usage = u;
+  }
+}
+
+function normalizeMetadata(meta: AssistantRunMetadata): AssistantRunMetadata {
+  const usage = meta.usage;
+  const hasUsage = !!usage && (
+    usage.input_tokens > 0 ||
+    usage.output_tokens > 0 ||
+    usage.cache_creation_input_tokens > 0 ||
+    usage.cache_read_input_tokens > 0
+  );
+  return {
+    backend: meta.backend,
+    model: meta.model,
+    workerSessionId: meta.workerSessionId,
+    externalSessionId: meta.externalSessionId,
+    costUsd: meta.costUsd && meta.costUsd > 0 ? meta.costUsd : undefined,
+    usage: hasUsage ? usage : undefined,
+  };
+}
+
 export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
   const settingsStore = useCRUD<any>('settings', passthrough, { namespace: NS });
   const connectionStore = useCRUD<any>('connection', passthrough, { namespace: NS });
@@ -162,11 +226,20 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
     [usesCartTools],
   );
 
+  // The current thread's backend session id (claude's sid for the
+  // claudewrap bridge). Sent as the worker's sessionId → OpenAI `user`
+  // field → the bridge's resume key, so this thread keeps its own claude
+  // process across turns. Only meaningful for openai_compat; other
+  // backends read sessionId differently, so scope it.
+  const threadExternalId = useCurrentSessionExternalId();
+  const resumeSessionId = backend === 'openai_compat' ? (threadExternalId || '') : '';
+
   const assistant = useAssistant({
     backend,
     cwd,
     model,
     modelPath,
+    sessionId: resumeSessionId,
     configDir: cfgDir,
     // Local model context: pull from the model row's contextLength
     // (set by the gguf-walk / list fetch in settings/lib/fetch.ts), but
@@ -198,7 +271,9 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
     resolve: ((s: string) => void) | null;
     reject: ((e: any) => void) | null;
     accum: string;
+    metadata: AssistantRunMetadata;
   } | null>(null);
+  const lastRunMetadataRef = useRef<AssistantRunMetadata | null>(null);
 
   useEffect(() => {
     const p = pendingRef.current;
@@ -210,6 +285,7 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
     let errored: string | null = null;
     for (let i = p.cursor; i < events.length; i++) {
       const ev = events[i];
+      foldMetadata(p.metadata, ev);
       if (ev.kind === 'assistant_message' && ev.role === 'assistant' && typeof ev.text === 'string') {
         p.accum += ev.text;
         if (p.onPart) p.onPart(p.accum);
@@ -222,6 +298,11 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
     p.cursor = events.length;
     if (resolved) {
       pendingRef.current = null;
+      const finalMeta = normalizeMetadata(p.metadata);
+      lastRunMetadataRef.current = finalMeta;
+      // Persist the backend's session id on this thread so the next turn
+      // resumes the same process (claudewrap bridge → claude's sid).
+      if (finalMeta.externalSessionId) setCurrentSessionExternalId(finalMeta.externalSessionId);
       p.resolve?.(p.accum);
     } else if (errored) {
       pendingRef.current = null;
@@ -261,6 +342,7 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
         onPart: opts.onPart || null,
         resolve, reject,
         accum: '',
+        metadata: emptyRunMetadata(),
       };
       const ok = assistant.ask(text);
       if (!ok) {
@@ -282,5 +364,6 @@ export function useAssistantChat(opts: UseAssistantChatOpts = {}) {
      *  decide whether to re-prime the new worker with the cart-owned
      *  transcript. */
     workerId: assistant.workerId,
+    getLastRunMetadata: () => lastRunMetadataRef.current,
   };
 }

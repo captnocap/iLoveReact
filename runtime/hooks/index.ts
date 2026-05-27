@@ -22,9 +22,11 @@ export * as websocket from './websocket';
 export * as media from './media';
 export { useFetchBrowser, fetchPageAsync } from './useFetchBrowser';
 export type { BrowserPageResponse } from './useFetchBrowser';
-export { useBrowse, browseRequest, setBrowsePort, createBrowseTools } from './useBrowse';
-export type { BrowseHandle, BrowseOptions, PageContent as BrowsePageContent, ToolDefinition as BrowseToolDefinition } from './useBrowse';
+export { useBrowse, browseRequest, setBrowsePort } from './useBrowse';
+export type { BrowseHandle, BrowseOptions, PageContent as BrowsePageContent } from './useBrowse';
 export { useHotState, removeHotState, clearHotState, hotStateKeys } from './useHotState';
+export { useDuring } from './useDuring';
+export type { DuringBody, DuringLifetime, UseDuringHandle } from './useDuring';
 export { useIFTTT, busOn, busEmit, getSharedState, setSharedState, dispatchClaudeEvent } from './useIFTTT';
 export type { IFTTTTrigger, IFTTTAction, IFTTTResult } from './useIFTTT';
 export {
@@ -35,10 +37,10 @@ export {
   dispatchAction,
   listIfttSources,
   listIfttActions,
-} from './ifttt-registry';
-export type { IfttSource, IfttSubscription, IfttActionRunner } from './ifttt-registry';
-export { compileTrigger, isComposable, substituteAction } from './ifttt-compose';
-export type { IFTTTComposable, IFTTTLeaf } from './ifttt-compose';
+} from './ifttt/registry';
+export type { IfttSource, IfttSubscription, IfttActionRunner } from './ifttt/registry';
+export { compileTrigger, isComposable, substituteAction } from './ifttt/compose';
+export type { IFTTTComposable, IFTTTLeaf } from './ifttt/compose';
 export { useHost } from './useHost';
 export type {
   HostSpec,
@@ -211,19 +213,20 @@ export function installResizeBridge(): void {
 
   const themeMod = require('../theme') as typeof import('../theme');
   const ifttt = require('./useIFTTT') as typeof import('./useIFTTT');
+  const ffi = require('../ffi') as typeof import('../ffi');
+  // `host` here mixes Zig FFI (__viewport_width) with browser globals
+  // (innerWidth, addEventListener); the latter aren't on HostGlobals.
   const host = globalThis as any;
 
   // Seed initial width — try the native host fn first, fall back to the
   // browser path. If neither responds, the theme store stays at its
   // default (1280 / lg) which is fine for the first frame.
   let initialW = 0;
-  try {
-    if (typeof host.__viewport_width === 'function') {
-      initialW = Number(host.__viewport_width()) || 0;
-    } else if (typeof host.innerWidth === 'number') {
-      initialW = host.innerWidth;
-    }
-  } catch { /* ignore */ }
+  if (ffi.hasHost('__viewport_width')) {
+    initialW = Number(ffi.callHost('__viewport_width', 0)) || 0;
+  } else if (typeof host.innerWidth === 'number') {
+    initialW = host.innerWidth;
+  }
   if (initialW > 0) themeMod.setViewportWidth(initialW);
 
   // Live channel — Zig fires __ifttt_onSystemResize on tier crossings,

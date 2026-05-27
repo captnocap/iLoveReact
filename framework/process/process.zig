@@ -164,14 +164,17 @@ pub fn spawn(opts: SpawnOptions) !Process {
             var argc: usize = 0;
             while (args_ptr[argc] != null) argc += 1;
 
-            // Build full argv on stack (max 32 args)
-            var argv_buf: [34]?[*:0]const u8 = undefined;
+            // Cap matches v8_bindings_process.zig (MAX_ARGV=1024). Long
+            // magick chains from cart/cutout overflow the old 32-cap.
+            // 1025 slots = exe + 1024 args + null sentinel.
+            const MAX_ARGV_HERE: usize = 1024;
+            var argv_buf: [MAX_ARGV_HERE + 2]?[*:0]const u8 = undefined;
             argv_buf[0] = opts.exe;
             for (0..argc) |i| {
-                if (i + 1 >= 33) break;
+                if (i + 1 >= MAX_ARGV_HERE + 1) break;
                 argv_buf[i + 1] = args_ptr[i];
             }
-            const total = @min(argc + 1, 33);
+            const total = @min(argc + 1, MAX_ARGV_HERE + 1);
             argv_buf[total] = null;
             _ = execvp(opts.exe, &argv_buf);
         } else {

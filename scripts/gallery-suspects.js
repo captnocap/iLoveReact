@@ -18,7 +18,7 @@ const COMPONENTS_DIR = 'cart/app/gallery/components';
 
 function listDir(p) {
   let raw;
-  try { raw = __readDir(p); } catch { return []; }
+  try { raw = __fs_list_json(p); } catch { return []; }
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
   try { const x = JSON.parse(raw); if (Array.isArray(x)) return x; } catch {}
@@ -26,7 +26,7 @@ function listDir(p) {
 }
 function statOf(p) {
   let raw;
-  try { raw = __stat(p); } catch { return null; }
+  try { raw = __fs_stat_json(p); } catch { return null; }
   if (!raw) return null;
   if (typeof raw === 'string') { try { return JSON.parse(raw); } catch { return null; } }
   return raw;
@@ -35,7 +35,7 @@ function isDirAt(p) {
   const s = statOf(p); if (!s) return false;
   return !!(s.isDir || s.is_dir || s.type === 'dir');
 }
-function readText(p) { try { return __readFile(p); } catch { return null; } }
+function readText(p) { try { return __fs_read(p); } catch { return null; } }
 
 function walkFiles(dir, out = []) {
   for (const n of listDir(dir)) {

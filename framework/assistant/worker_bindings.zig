@@ -810,12 +810,17 @@ fn hostWorkerStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
             const api_key = jsonStrField(parsed.value, "api_key");
             const system_prompt = jsonStrField(parsed.value, "system_prompt");
             const tools_json = jsonStrField(parsed.value, "tools_json");
+            // session_id rides through as the OpenAI `user` field — the
+            // claudewrap bridge reads it as a thread's resume key (claude's
+            // sid), so one chat thread keeps the same claude process.
+            const user_field = jsonStrField(parsed.value, "session_id");
             const inner = openai_compat_sdk.Session.init(std.heap.c_allocator, .{
                 .base_url = base_url,
                 .api_key = api_key,
                 .model = model_id,
                 .system_prompt = system_prompt,
                 .tools_json = tools_json,
+                .user = user_field,
             }) catch return setReturnString(info, cx.iso, "");
             const os = std.heap.c_allocator.create(OpenAiSession) catch {
                 inner.deinit();

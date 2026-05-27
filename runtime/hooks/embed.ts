@@ -194,33 +194,81 @@ export function search(
 // ── Multi-worker ingest pool ───────────────────────────────────────────
 
 /**
- * Which corpus shape the worker pool should ingest. The framework picks
- * the parser, walker, chunk shape, and canonical source_type from this:
+ * Canonical content kind. Picks the walker and chunker:
  *
- *   'code'             — recursive walk + line-window code chunks
- *   'claude'           — ~/.claude/projects/<slug>/*.jsonl (chat-log)
- *   'claude-overflow'  — ~/.claude-overflow/projects/<slug>/*.jsonl
- *   'codex'            — ~/.codex/sessions/**\/*.jsonl
- *   'kimi'             — ~/.kimi/sessions/<acct>/<sess>/context.jsonl
- *   'memory'           — ~/.claude*\/projects/<slug>/memory/*.md
+ *   'code'                 — recursive walk for embeddable source files,
+ *                            line-window chunker (default 200 lines).
+ *   'documentation'        — same walker + chunker as code; lands as
+ *                            `document-chunk` in source_type for separate
+ *                            HNSW filtering.
+ *   'conversation-history' — walks .jsonl/.json under root, applies the
+ *                            user-supplied mapping per record to extract
+ *                            (role, content, timestamp), windows N events.
+ *   'knowledge'            — same structured walker; each record is one
+ *                            chunk (no windowing), mapped via title +
+ *                            content + source_uri.
+ *
+ * For backward compat the manager accepts the legacy vendor names
+ * ('claude', 'codex', 'kimi', 'memory', 'claude-overflow') and migrates
+ * them to canonical kinds at read time.
  */
 export type EmbedKind =
   | 'code'
-  | 'claude'
-  | 'claude-overflow'
-  | 'codex'
-  | 'kimi'
-  | 'memory';
+  | 'documentation'
+  | 'conversation-history'
+  | 'knowledge';
+
+/**
+ * Mapping declaration for structured kinds. Each value is a dotted JSON
+ * path into the source record (e.g. `"message.content"`,
+ * `"payload.body.text"`). Empty / omitted means "field not present" —
+ * the parser substitutes a sensible default (role → "user", timestamp
+ * → "", etc.).
+ *
+ * `content` is the only required field; without it the structured
+ * parsers produce zero events. Use the route's preset buttons for
+ * known formats (Claude/Codex/Kimi JSONL).
+ */
+export interface EmbedMapping {
+  // conversation-history fields
+  role?: string;
+  content?: string;
+  timestamp?: string;
+  session_id?: string;
+  // knowledge fields
+  title?: string;
+  source_uri?: string;
+}
 
 export interface IngestStartOpts {
   /** Path to the .gguf the framework will load into VRAM for the workers. */
   modelPath: string;
   /** Sanitized slug — controls the per-model table name `chunks_<slug>`. */
   slug: string;
-  /** Corpus kind. The framework picks parser + walker + canonical source_type. */
+  /** Canonical kind. Drives walker, chunker, source_type. */
   kind: EmbedKind;
   /** Number of OS threads in the worker pool. 1–16. */
   nWorkers: number;
+  /**
+   * Path-substring matches to skip during the walk. Each entry is checked
+   * against every path segment of every file the walker visits. Empty or
+   * omitted = no user excludes (a small framework default still applies:
+   * dotfiles, common build dirs).
+   */
+  excludes?: string[];
+  /**
+   * Chunk-window size, in the unit each kind uses:
+   *   code / documentation  — lines per chunk (default 200)
+   *   conversation-history  — events per window (default 4)
+   *   knowledge             — ignored (one record = one chunk)
+   * Pass 0 / omit to keep the framework default.
+   */
+  chunkSize?: number;
+  /**
+   * Required for `conversation-history` and `knowledge`. Maps source
+   * JSON paths to canonical fields. Ignored for raw kinds.
+   */
+  mapping?: EmbedMapping;
 }
 
 export interface IngestProgress {
@@ -259,6 +307,8 @@ const EMPTY_PROGRESS: IngestProgress = {
  * the first is still running returns false.
  */
 export function ingestStart(rootPath: string, opts: IngestStartOpts): boolean {
+  const excludesJson = JSON.stringify(opts.excludes ?? []);
+  const mappingJson = JSON.stringify(opts.mapping ?? {});
   const ok = callHost<number>(
     '__embed_ingest_start',
     0,
@@ -267,6 +317,9 @@ export function ingestStart(rootPath: string, opts: IngestStartOpts): boolean {
     opts.modelPath,
     opts.slug,
     opts.nWorkers | 0,
+    excludesJson,
+    (opts.chunkSize ?? 0) | 0,
+    mappingJson,
   );
   return ok === 1;
 }

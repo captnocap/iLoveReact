@@ -15,7 +15,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { changes, exec, query } from './connections';
-import { ensureBootstrapped } from './bootstrap';
+import { ensureEntityTable } from './bootstrap';
 import { bucketFor } from './registry';
 import { ident, lit, tableName, val } from './sql';
 import { notifyRowChange } from './buses';
@@ -128,7 +128,7 @@ export function useCRUD<T extends Record<string, any>>(
   const tableId = useMemo(() => ident(table), [table]);
 
   const create = useCallback(async (data: T): Promise<string> => {
-    await ensureBootstrapped();
+    await ensureEntityTable(collection);
     const validated = schema.parse(data);
     const id = (validated as any).id ?? generateId();
     const row = { ...validated, id };
@@ -141,7 +141,7 @@ export function useCRUD<T extends Record<string, any>>(
   }, [bucket, tableId, collection, schema]);
 
   const get = useCallback(async (id: string): Promise<T | null> => {
-    await ensureBootstrapped();
+    await ensureEntityTable(collection);
     const rows = query<{ data: any }>(bucket, `SELECT data FROM ${tableId} WHERE id = ${lit(id)} LIMIT 1`);
     if (rows.length === 0) return null;
     const data = rows[0].data;
@@ -150,7 +150,7 @@ export function useCRUD<T extends Record<string, any>>(
   }, [bucket, tableId, schema]);
 
   const update = useCallback(async (id: string, partial: Partial<T>): Promise<void> => {
-    await ensureBootstrapped();
+    await ensureEntityTable(collection);
     const cur = await get(id);
     if (!cur) throw new Error(`Not found: ${collection}/${id}`);
     const merged = { ...cur, ...partial, id };
@@ -162,13 +162,13 @@ export function useCRUD<T extends Record<string, any>>(
   }, [bucket, tableId, collection, schema, get]);
 
   const del = useCallback(async (id: string): Promise<void> => {
-    await ensureBootstrapped();
+    await ensureEntityTable(collection);
     const sql = `DELETE FROM ${tableId} WHERE id = ${lit(id)}`;
     if (!exec(bucket, sql)) throw new Error(`DELETE ${collection}/${id} failed.`);
   }, [bucket, tableId, collection]);
 
   const list = useCallback(async (q?: Query): Promise<T[]> => {
-    await ensureBootstrapped();
+    await ensureEntityTable(collection);
     const rows = query<{ data: any }>(bucket, `SELECT data FROM ${tableId}`);
     const out: T[] = rows.map(r => {
       const parsed = typeof r.data === 'string' ? JSON.parse(r.data) : r.data;

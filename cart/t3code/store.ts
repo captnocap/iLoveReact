@@ -165,11 +165,14 @@ export function useT3Store(): T3Store {
   useEffect(() => storeSet(KEYS.uiState, uiState), [uiState]);
 
   const addProject = useCallback((cwd: string, name?: string): Project => {
+    const now = nowMs();
     const p: Project = {
       id: newId(),
       name: name || cwd.split('/').pop() || 'untitled',
       cwd,
       environmentId: 'local',
+      createdAt: now,
+      updatedAt: now,
       defaultModelSelection: settings.providers.find(pr => pr.enabled)
         ? { instanceId: settings.providers.find(pr => pr.enabled)!.id, model: settings.providers.find(pr => pr.enabled)!.model }
         : undefined,

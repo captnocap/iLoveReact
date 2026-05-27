@@ -12,7 +12,23 @@
  * `getFps`, `setNodeDim`, `__markDirty`) that predate the split.
  */
 
-const host: any = (globalThis as any);
+import { G } from './host-globals';
+
+const host = G as Record<string, unknown>;
+
+// ── Host call catalog ─────────────────────────────────────────────
+// Augmentable per-subsystem. Each entry maps a `__name` to its signature.
+// Subsystems that haven't been typed yet still flow through the wide
+// overload below.
+//
+//   declare module '@reactjit/runtime/ffi' {
+//     interface HostCalls {
+//       __my_op(a: number, b: string): boolean;
+//     }
+//   }
+
+/* eslint-disable @typescript-eslint/consistent-type-definitions */
+export interface HostCalls {}
 
 // ── Availability ───────────────────────────────────────────────────
 
@@ -27,11 +43,23 @@ export function hasHost(name: string): boolean {
  * Call a host function. Returns the result or `fallback` if the function
  * isn't registered. Use this when a feature is optional — the cart should
  * degrade gracefully when the Zig side hasn't been wired yet.
+ *
+ * Two overloads:
+ *   - Typed: `callHost('__ifttt_wire_alloc', 0)` — args + return inferred
+ *     from `HostCalls`. Catches arity mismatches and arg-shape typos.
+ *   - Wide:  `callHost<T>('__legacy_thing', fallback, ...args)` — for
+ *     globals not yet entered in the catalog.
  */
-export function callHost<T>(name: string, fallback: T, ...args: any[]): T {
+export function callHost<K extends keyof HostCalls>(
+  name: K,
+  fallback: HostCalls[K] extends (...a: any[]) => infer R ? R : never,
+  ...args: HostCalls[K] extends (...a: infer A) => any ? A : never
+): HostCalls[K] extends (...a: any[]) => infer R ? R : never;
+export function callHost<T>(name: string, fallback: T, ...args: any[]): T;
+export function callHost(name: string, fallback: any, ...args: any[]): any {
   const fn = host[name];
   if (typeof fn !== 'function') return fallback;
-  try { return fn(...args); } catch { return fallback; }
+  try { return (fn as (...a: any[]) => any)(...args); } catch { return fallback; }
 }
 
 /**
@@ -39,12 +67,17 @@ export function callHost<T>(name: string, fallback: T, ...args: any[]): T {
  * load-bearing ops where "not wired" should be a loud error, not silent
  * degradation.
  */
-export function callHostStrict<T>(name: string, ...args: any[]): T {
+export function callHostStrict<K extends keyof HostCalls>(
+  name: K,
+  ...args: HostCalls[K] extends (...a: infer A) => any ? A : never
+): HostCalls[K] extends (...a: any[]) => infer R ? R : never;
+export function callHostStrict<T>(name: string, ...args: any[]): T;
+export function callHostStrict(name: string, ...args: any[]): any {
   const fn = host[name];
   if (typeof fn !== 'function') {
     throw new Error(`ffi: host function '${name}' is not registered`);
   }
-  return fn(...args);
+  return (fn as (...a: any[]) => any)(...args);
 }
 
 // ── JSON I/O ──────────────────────────────────────────────────────
@@ -112,6 +145,6 @@ export function emit(channel: string, payload?: any): void {
   dispatchListeners(channel, payload);
 }
 
-(host as any).__ffiEmit = (channel: string, payload: any): void => {
+G.__ffiEmit = (channel: string, payload: unknown): void => {
   setTimeout(() => dispatchListeners(channel, payload), 0);
 };

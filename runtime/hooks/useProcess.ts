@@ -7,6 +7,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { spawn, kill, stdinWrite, stdinClose, onStdout, onStderr, onExit } from './process';
+import { useLatest } from './useLatest';
 
 export type ProcessState = 'starting' | 'running' | 'stopped' | 'error';
 
@@ -38,8 +39,7 @@ export function useProcess(spec: UseProcessSpec): UseProcessHandle {
   const pidRef = useRef<number>(0);
   pidRef.current = pid;
 
-  const specRef = useRef(spec);
-  specRef.current = spec;
+  const specRef = useLatest(spec);
 
   const procKey = JSON.stringify({
     cmd: spec.cmd,

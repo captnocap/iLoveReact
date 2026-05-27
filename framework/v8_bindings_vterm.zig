@@ -184,6 +184,23 @@ fn hostVtermWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     vterm.scrollToBottomByName(name);
 }
 
+// ── __vterm_feed(name, data) ────────────────────────────────────────
+//
+// Dumb render: feed ANSI bytes straight into the parser/screen, no PTY.
+// Creates the pipe at the default 24×80 on first feed (paintTerminal
+// resizes to the laid-out grid). This is the write path for <Terminal
+// dumb /> — the cart blits its own content; nothing echoes back.
+
+fn hostVtermFeed(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const name = argSessionAlloc(info) orelse return;
+    defer std.heap.c_allocator.free(name);
+    const data = argToStringAlloc(info, 1) orelse return;
+    defer std.heap.c_allocator.free(data);
+    vterm.feedByName(name, 24, 80, data);
+    classifier.markDirtyByName(name);
+}
+
 // ── __vterm_scroll(name, delta) ─────────────────────────────────────
 //
 // Positive delta → scroll DOWN (toward live view, smaller offset).
@@ -360,6 +377,7 @@ pub fn registerVterm(_: anytype) void {
     v8_runtime.registerHostFn("__vterm_close", hostVtermClose);
     v8_runtime.registerHostFn("__vterm_poll", hostVtermPoll);
     v8_runtime.registerHostFn("__vterm_write", hostVtermWrite);
+    v8_runtime.registerHostFn("__vterm_feed", hostVtermFeed);
     v8_runtime.registerHostFn("__vterm_resize", hostVtermResize);
     v8_runtime.registerHostFn("__vterm_get_row", hostVtermGetRow);
     v8_runtime.registerHostFn("__vterm_scroll", hostVtermScroll);

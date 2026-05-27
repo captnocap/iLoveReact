@@ -63,12 +63,12 @@ if (!outPath.startsWith('/')) outPath = ROOT + '/' + outPath;
 
 // ── load registry ─────────────────────────────────────────────────────
 const REGISTRY_PATH = ROOT + '/sdk/dependency-registry.json';
-if (!__exists(REGISTRY_PATH)) die('registry missing: ' + REGISTRY_PATH);
-const registry = JSON.parse(__readFile(REGISTRY_PATH));
+if (!__fs_exists(REGISTRY_PATH)) die('registry missing: ' + REGISTRY_PATH);
+const registry = JSON.parse(__fs_read(REGISTRY_PATH));
 
 // ── stage dir ─────────────────────────────────────────────────────────
 const STAGE = '/tmp/rjit-stage-' + Date.now();
-__mkdirp(STAGE);
+__fs_mkdir(STAGE);
 log('staging at ' + STAGE);
 
 // Anything matching these globs is dropped on the floor when staging.
@@ -81,20 +81,20 @@ const EXCLUDES = [
 ];
 
 function copyTree(srcAbs, destAbs, label) {
-  if (!__exists(srcAbs)) die('missing payload: ' + (label || srcAbs));
-  __mkdirp(destAbs.replace(/\/[^/]+$/, ''));
+  if (!__fs_exists(srcAbs)) die('missing payload: ' + (label || srcAbs));
+  __fs_mkdir(destAbs.replace(/\/[^/]+$/, ''));
   // rsync -a preserves perms/symlinks like cp -a; --exclude prunes per-name.
   // Trailing '/' on src and dest gives us "copy contents into" semantics.
   const args = ['-a'];
   for (const e of EXCLUDES) args.push('--exclude=' + e);
   args.push(srcAbs + '/', destAbs + '/');
-  __mkdirp(destAbs);
+  __fs_mkdir(destAbs);
   shOrDie('rsync', args, 'rsync ' + (label || srcAbs));
 }
 
 function copyFile(srcAbs, destAbs) {
-  if (!__exists(srcAbs)) die('missing file: ' + srcAbs);
-  __mkdirp(destAbs.replace(/\/[^/]+$/, ''));
+  if (!__fs_exists(srcAbs)) die('missing file: ' + srcAbs);
+  __fs_mkdir(destAbs.replace(/\/[^/]+$/, ''));
   shOrDie('cp', ['-a', srcAbs, destAbs], 'cp ' + srcAbs);
 }
 
@@ -120,7 +120,7 @@ const ZIG_PATH_DEPS = [
   'deps/sysroot',          // vendored headers + .so for SDL3/freetype/luajit/curl — build.zig --Dsysroot
 ];
 for (const sub of ZIG_PATH_DEPS) {
-  if (__exists(ROOT + '/' + sub)) {
+  if (__fs_exists(ROOT + '/' + sub)) {
     log('copy ' + sub + '/');
     copyTree(ROOT + '/' + sub, STAGE + '/' + sub, sub);
   }
@@ -129,7 +129,7 @@ for (const sub of ZIG_PATH_DEPS) {
 // Top-level build entry files. build.zig.zon declares zig package deps
 // (wgpu_native_zig, etc.) that build.zig pulls in via b.dependency().
 for (const f of ['build.zig', 'build.zig.zon', 'v8_app.zig', 'qjs_app.zig', 'v8_cli.zig', 'v8_hello.zig']) {
-  if (__exists(ROOT + '/' + f)) {
+  if (__fs_exists(ROOT + '/' + f)) {
     log('copy ' + f);
     copyFile(ROOT + '/' + f, STAGE + '/' + f);
   }
@@ -144,7 +144,7 @@ for (const [name, spec] of Object.entries(tools)) {
     copyFile(ROOT + '/' + spec.payloadPath, STAGE + '/' + spec.payloadPath);
   }
   for (const sup of spec.supportPaths || []) {
-    if (__exists(ROOT + '/' + sup)) {
+    if (__fs_exists(ROOT + '/' + sup)) {
       log('tool ' + name + ' support ← ' + sup);
       copyTree(ROOT + '/' + sup, STAGE + '/' + sup, sup);
     }
@@ -159,7 +159,7 @@ for (const [name, spec] of Object.entries(tools)) {
 // Filters: skip glibc family (handled separately below), the X11 family
 // (system-assumed — every desktop Linux has it), linux-vdso (kernel virtual).
 const SR_LIB_STAGE = STAGE + '/deps/sysroot/usr/lib';
-__mkdirp(SR_LIB_STAGE);
+__fs_mkdir(SR_LIB_STAGE);
 const SDL3_HOST_PATH = '/lib/x86_64-linux-gnu/libSDL3.so.0';
 const SKIP_FAMILIES = [
   /^libc\.so\./, /^libm\.so\./, /^libpthread\.so\./, /^libdl\.so\./,
@@ -171,20 +171,20 @@ const SKIP_FAMILIES = [
 ];
 function copyLibChain(realPath, soname, label) {
   const dest = SR_LIB_STAGE + '/' + soname;
-  if (__exists(dest)) return false;
+  if (__fs_exists(dest)) return false;
   copyFile(realPath, dest);
   // Also drop a soname symlink one step up the version chain
   // (lib<name>.so.<MAJOR> → real file's basename).
   return true;
 }
-if (__exists(SDL3_HOST_PATH)) {
+if (__fs_exists(SDL3_HOST_PATH)) {
   const lddOut = sh('ldd', [SDL3_HOST_PATH], '').stdout || '';
   for (const line of lddOut.split('\n')) {
     const m = line.match(/^\s*(\S+)\s*=>\s*(\S+)/);
     if (!m) continue;
     const soname = m[1];
     const libPath = m[2];
-    if (libPath === 'not' || !__exists(libPath)) continue;
+    if (libPath === 'not' || !__fs_exists(libPath)) continue;
     if (SKIP_FAMILIES.some(rx => rx.test(soname))) continue;
     const realPath = sh('readlink', ['-f', libPath], '').stdout.trim() || libPath;
     if (copyLibChain(realPath, soname, 'SDL3-dep')) {
@@ -211,13 +211,13 @@ const GLIBC_FAMILY = [
   '/lib/x86_64-linux-gnu/libresolv.so.2',
   '/lib64/ld-linux-x86-64.so.2',  // fallback path on some distros
 ];
-__mkdirp(STAGE + '/deps/sysroot/usr/lib');
+__fs_mkdir(STAGE + '/deps/sysroot/usr/lib');
 for (const p of GLIBC_FAMILY) {
-  if (!__exists(p)) continue;
+  if (!__fs_exists(p)) continue;
   const realPath = sh('readlink', ['-f', p], '').stdout.trim() || p;
   const baseName = p.replace(/^.*\//, '');
   const dest = STAGE + '/deps/sysroot/usr/lib/' + baseName;
-  if (__exists(dest)) continue;
+  if (__fs_exists(dest)) continue;
   log('glibc ' + baseName + ' ← ' + realPath);
   copyFile(realPath, dest);
 }
@@ -229,9 +229,9 @@ for (const p of GLIBC_FAMILY) {
 // Without this, off-tree builds on Whonix fail with "libwgpu_native.a:
 // file not found" because zluajit + wgpu-native-prebuilt aren't there.
 const HOST_ZIG_CACHE = (__env('HOME') || '/root') + '/.cache/zig/p';
-if (__exists(HOST_ZIG_CACHE)) {
+if (__fs_exists(HOST_ZIG_CACHE)) {
   log('zig pkg cache ← ' + HOST_ZIG_CACHE);
-  __mkdirp(STAGE + '/tools/zig/cache/p');
+  __fs_mkdir(STAGE + '/tools/zig/cache/p');
   shOrDie('rsync', [
     '-a',
     '--exclude=.zig-cache', '--exclude=zig-out',
@@ -256,12 +256,12 @@ for (const [name, spec] of Object.entries(nativeLibs)) {
       continue;
     }
     const src = ROOT + '/' + spec.payloadPath;
-    if (!__exists(src)) {
+    if (!__fs_exists(src)) {
       missingLibs.push(name + ' (' + spec.payloadPath + ' missing)');
       continue;
     }
     log('native ' + name + ' ← ' + spec.payloadPath);
-    const stat = JSON.parse(__stat(src) || 'null');
+    const stat = JSON.parse(__fs_stat_json(src) || 'null');
     if (stat && stat.isDir) copyTree(src, STAGE + '/' + spec.payloadPath, name);
     else copyFile(src, STAGE + '/' + spec.payloadPath);
     continue;
@@ -318,18 +318,18 @@ const WRAPPER = [
   '',
 ].join('\n');
 
-__mkdirp(outPath.replace(/\/[^/]+$/, ''));
+__fs_mkdir(outPath.replace(/\/[^/]+$/, ''));
 const STAGED = outPath + '.staged';
-if (__exists(STAGED)) __remove(STAGED);
-__writeFile(STAGED, WRAPPER);
+if (__fs_exists(STAGED)) __fs_remove(STAGED);
+__fs_write(STAGED, WRAPPER);
 shOrDie('sh', ['-c', "cat '" + TARBALL + "' >> '" + STAGED + "'"], 'concat');
 shOrDie('chmod', ['+x', STAGED], 'chmod');
 shOrDie('mv', ['-f', STAGED, outPath], 'mv');
 
 // ── cleanup + report ──────────────────────────────────────────────────
 if (!keepStage) {
-  __remove(STAGE);
-  __remove(TARBALL);
+  __fs_remove(STAGE);
+  __fs_remove(TARBALL);
 }
 
 const sizeOut = sh('du', ['-h', outPath], '').stdout.trim().split(/\s+/)[0];

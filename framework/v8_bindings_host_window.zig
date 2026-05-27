@@ -268,27 +268,12 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
     }
 }
 
-// ────────────────────────────────────────────────────────────────────
-// __hostFlush v8 binding — drives host_tree from JS reconciler stream
-// ────────────────────────────────────────────────────────────────────
+// __hostFlush is registered by framework/v8_bindings_reconciler.zig (the
+// single owner across both shells). v8_tui_app.zig calls reconciler.register()
+// directly. The default `.sync` mode routes payloads through
+// host_tree.applyCommandBatch — exactly what this file used to do inline.
 
-fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) return;
-    const isolate = info.getIsolate();
-    const arg = info.getArg(0);
-    if (!arg.isString()) return;
-    const str = arg.castTo(v8.String);
-    const len = str.lenUtf8(isolate);
-    const buf = std.heap.c_allocator.alloc(u8, @intCast(len)) catch return;
-    defer std.heap.c_allocator.free(buf);
-    _ = str.writeUtf8(isolate, buf);
-    host_tree.applyCommandBatch(buf);
-}
-
-pub fn register() void {
-    v8_runtime.registerHostFn("__hostFlush", hostFlush);
-}
+pub fn register() void {}
 
 // ────────────────────────────────────────────────────────────────────
 // Per-tick pump: SDL events → routeEvent; layout + paint all windows

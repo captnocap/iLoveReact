@@ -8,7 +8,7 @@ declare const __unixConnect: ((path: string) => number) | undefined;
 declare const __unixWrite:   ((fd: number, content: string) => number) | undefined;
 declare const __unixReadAll: ((fd: number, timeoutMs: number, maxBytes: number) => string | null) | undefined;
 declare const __unixClose:   ((fd: number) => void) | undefined;
-declare const __exists:      ((path: string) => boolean) | undefined;
+declare const __fs_exists:      ((path: string) => boolean) | undefined;
 
 const SOCK = '/tmp/reactjit.sock';
 const POLL_MS = 1000;
@@ -26,7 +26,7 @@ export type Event = {
 
 function fetchRecent(n: number): Event[] | null {
   if (typeof __unixConnect !== 'function') return null;
-  if (typeof __exists === 'function' && !__exists(SOCK)) return null;
+  if (typeof __fs_exists === 'function' && !__fs_exists(SOCK)) return null;
   const fd = __unixConnect(SOCK);
   if (fd < 0) return null;
   try {

@@ -32,12 +32,77 @@
 // persistence: a cart can wire useIFTTT in a unit test by stubbing
 // the 'supervisor:*' subscriber and never touching Postgres.
 
-import { subscribe, emit } from '../ffi';
+import { subscribe, emit } from '../../ffi';
 import {
   registerIfttSource,
   registerIfttAction,
   resolveTrigger,
-} from './ifttt-registry';
+} from './registry';
+import type { ActionString } from './types/triggers';
+
+// Supervisor bus channels and the rows the DB writers put on them.
+// Payloads are kept open (extra fields tolerated) since each subsystem
+// owns its row shape.
+
+export type EventRow = {
+  kind: string;
+  subjectType?: string;
+  subjectId?: string;
+  at?: number;
+  [k: string]: unknown;
+};
+export type RuleFiringRow = {
+  ruleId: string;
+  at?: number;
+  trigger?: unknown;
+  [k: string]: unknown;
+};
+export type VerbInvocationRow = {
+  verbId: string;
+  status: 'started' | 'succeeded' | 'failed' | 'timed-out' | 'killed';
+  runId?: string;
+  at?: number;
+  [k: string]: unknown;
+};
+export type WorkerLifecycleRow = {
+  workerId: string;
+  lifecycle: string;
+  at?: number;
+  [k: string]: unknown;
+};
+export type RunLifecycleRow = {
+  runId: string;
+  status: string;
+  at?: number;
+  [k: string]: unknown;
+};
+
+declare module './types/events' {
+  interface IFTTTEventMap {
+    'event:append':     EventRow;
+    'rule:fired':       RuleFiringRow;
+    'verb:lifecycle':   VerbInvocationRow;
+    'worker:lifecycle': WorkerLifecycleRow;
+    'run:lifecycle':    RunLifecycleRow;
+  }
+}
+
+// Register the supervisor action verbs against the closed action union.
+declare module './types/triggers' {
+  interface IFTTTActionMap {
+    'queue-job:':           true;
+    'halt-run':             true;
+    'flag-pathology:':      true;
+    'invoke-verb:':         true;
+    'fire-rule:':           true;
+    'kick-to-supervisor':   true;
+    'notify-user:':         true;
+  }
+}
+
+// Silence "imported but unused" for the action-string type pulled in for
+// docs/IntelliSense; it's referenced from the augmentation above.
+type _SupervisorActionRef = ActionString;
 
 // ── Spec matcher ──────────────────────────────────────────────────
 // Supports exact and suffix-wildcard match: 'task.completed' is exact;

@@ -23,12 +23,19 @@ import { Box } from '@reactjit/runtime/primitives';
 import { Router } from '../app/gallery/local-router';
 import { AssistantChatProvider } from '../app/chat/AssistantChatProvider';
 import { Shell } from './Shell';
+import { HeadlessBridge } from './bridge/HeadlessBridge';
 
 export default function TuiApp() {
   return (
     <Box style={{ width: '100%', height: '100%' }}>
       <Router initialPath="/chat" hotKey="tui_app">
-        <AssistantChatProvider />
+        <AssistantChatProvider surfaceMode="text" />
+        {/* Invisible. Binds the OpenAI-compatible HTTP bridge and spawns
+            interactive claude into a headless PTY — the claude -p
+            billing workaround, running with no visible terminal. Seeds a
+            selectable "Claude (headless bridge)" provider; not bound as
+            default until the user picks it in /models. */}
+        <HeadlessBridge />
         <Shell />
       </Router>
     </Box>

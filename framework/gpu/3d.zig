@@ -56,6 +56,34 @@ comptime {
     }
 }
 
+// Skybox uniforms — must match SkyUniforms in shaders.skybox_wgsl. Each vec3 is
+// followed by a scalar so the std140 16-byte alignment holds with no padding.
+const SkyUniforms = extern struct {
+    inv_vp: [16]f32,
+    cam_pos: [3]f32,
+    time: f32,
+    sun_dir: [3]f32,
+    sun_size: f32,
+    zenith: [3]f32,
+    haze: f32,
+    horizon: [3]f32,
+    cloud: f32,
+    ground: [3]f32,
+    sun_glow: f32,
+    sun_color: [3]f32,
+    night: f32,
+};
+
+comptime {
+    // Size == 160 already proves there is no surprise padding; every vec3 sits
+    // at a 16-byte-aligned offset followed by its scalar, matching WGSL's
+    // uniform layout. (@alignOf is only 4 — no vec field — but writeBuffer is a
+    // byte copy, so the field *offsets* are what must match, and they do.)
+    if (@sizeOf(SkyUniforms) != 160) {
+        @compileError("SkyUniforms must match skybox_wgsl uniform layout");
+    }
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Procedural geometry
 // ════════════════════════════════════════════════════════════════════════
@@ -77,7 +105,7 @@ comptime {
 // generous headroom. Non-indexed, u64 offsets — no 16-bit index limit applies. If a
 // scene ever needs HUNDREDS of detailed objects, the real fix is retained/instanced
 // buffers (generate once, redraw), not a bigger scratch buffer.
-const MAX_MESH_VERTS = 4096;
+const MAX_MESH_VERTS = 16384; // heightfield terrain meshes need headroom (~52×52 cells + skirt)
 const MAX_FRAME_VERTS = 262144;
 var g_geo_buf: [MAX_MESH_VERTS]Vertex = undefined;
 
@@ -218,6 +246,160 @@ fn generatePlane(sx: f32, sz: f32) struct { count: u32 } {
     return .{ .count = @intCast(idx) };
 }
 
+// ── Heightfield ───────────────────────────────────────────────────────────
+// A continuous terrain surface: a (cols×rows) grid of corner heights becomes a
+// triangle mesh with smooth per-vertex normals (central-difference gradient),
+// plus a perimeter skirt dropping the boundary edges to `base` so cliffs aren't
+// see-through. Centered at origin spanning ±w/2 × ±h/2 in X/Z; vertex Y IS the
+// corner height (so the cart passes position.y = 0 and absolute heights). This
+// is what turns a per-tile-stepped hill into a real ramp.
+fn hfClamped(heights: []const f32, cols: u32, rows: u32, i: i32, j: i32) f32 {
+    const ci: u32 = @intCast(std.math.clamp(i, 0, @as(i32, @intCast(cols)) - 1));
+    const cj: u32 = @intCast(std.math.clamp(j, 0, @as(i32, @intCast(rows)) - 1));
+    return heights[cj * cols + ci];
+}
+
+const HeightfieldWave = struct {
+    amplitude: f32 = 0,
+    length: f32 = 0,
+    speed: f32 = 0,
+    dir_x: f32 = 1,
+    dir_z: f32 = 0,
+    phase: f32 = 0,
+};
+
+fn hfWaveHeight(wave: HeightfieldWave, x: f32, z: f32, t: f32) f32 {
+    if (@abs(wave.amplitude) <= 0.0001 or wave.length <= 0.0001) return 0;
+    const dlen = @sqrt(wave.dir_x * wave.dir_x + wave.dir_z * wave.dir_z);
+    const dx = if (dlen > 0.0001) wave.dir_x / dlen else 1;
+    const dz = if (dlen > 0.0001) wave.dir_z / dlen else 0;
+    const cycles = ((x * dx + z * dz) / wave.length) + wave.phase + t * wave.speed;
+    return @sin(cycles * std.math.tau) * wave.amplitude;
+}
+
+fn hfHeightAt(heights: []const f32, cols: u32, rows: u32, i: i32, j: i32, x0: f32, z0: f32, dx: f32, dz: f32, wave: HeightfieldWave, t: f32) f32 {
+    const ci_i32 = std.math.clamp(i, 0, @as(i32, @intCast(cols)) - 1);
+    const cj_i32 = std.math.clamp(j, 0, @as(i32, @intCast(rows)) - 1);
+    const ci: u32 = @intCast(ci_i32);
+    const cj: u32 = @intCast(cj_i32);
+    const x = x0 + @as(f32, @floatFromInt(ci)) * dx;
+    const z = z0 + @as(f32, @floatFromInt(cj)) * dz;
+    return heights[cj * cols + ci] + hfWaveHeight(wave, x, z, t);
+}
+
+fn hfNormal(heights: []const f32, cols: u32, rows: u32, i: u32, j: u32, x0: f32, z0: f32, dx: f32, dz: f32, wave: HeightfieldWave, t: f32) [3]f32 {
+    const ii: i32 = @intCast(i);
+    const jj: i32 = @intCast(j);
+    const hl = hfHeightAt(heights, cols, rows, ii - 1, jj, x0, z0, dx, dz, wave, t);
+    const hr = hfHeightAt(heights, cols, rows, ii + 1, jj, x0, z0, dx, dz, wave, t);
+    const hu = hfHeightAt(heights, cols, rows, ii, jj - 1, x0, z0, dx, dz, wave, t);
+    const hd = hfHeightAt(heights, cols, rows, ii, jj + 1, x0, z0, dx, dz, wave, t);
+    var n = [3]f32{ -(hr - hl) / (2.0 * dx), 1.0, -(hd - hu) / (2.0 * dz) };
+    const len = @sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+    if (len > 1e-5) {
+        n[0] /= len;
+        n[1] /= len;
+        n[2] /= len;
+    }
+    return n;
+}
+
+fn hfQuad(a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32, n: [3]f32, idx: *usize) void {
+    const uv = [2]f32{ 0, 0 };
+    _ = pushVertex(&g_geo_buf, idx, a, n, uv);
+    _ = pushVertex(&g_geo_buf, idx, b, n, uv);
+    _ = pushVertex(&g_geo_buf, idx, c, n, uv);
+    _ = pushVertex(&g_geo_buf, idx, a, n, uv);
+    _ = pushVertex(&g_geo_buf, idx, c, n, uv);
+    _ = pushVertex(&g_geo_buf, idx, d, n, uv);
+}
+
+fn generateHeightfield(heights: []const f32, cols: u32, rows: u32, w: f32, h: f32, base: f32, wave: HeightfieldWave) struct { count: u32 } {
+    if (cols < 2 or rows < 2) return .{ .count = 0 };
+    if (heights.len != @as(usize, cols) * @as(usize, rows)) return .{ .count = 0 };
+    var idx: usize = 0;
+    const dx = w / @as(f32, @floatFromInt(cols - 1));
+    const dz = h / @as(f32, @floatFromInt(rows - 1));
+    const x0 = -w * 0.5;
+    const z0 = -h * 0.5;
+    const cf = @as(f32, @floatFromInt(cols - 1));
+    const rf = @as(f32, @floatFromInt(rows - 1));
+    const t_ms = @mod(std.time.milliTimestamp(), 1_000_000);
+    const t = @as(f32, @floatFromInt(t_ms)) * 0.001;
+
+    const pt = struct {
+        fn at(hs: []const f32, c: u32, x0_: f32, z0_: f32, dx_: f32, dz_: f32, i: u32, j: u32, wave_: HeightfieldWave, t_: f32) [3]f32 {
+            const x = x0_ + @as(f32, @floatFromInt(i)) * dx_;
+            const z = z0_ + @as(f32, @floatFromInt(j)) * dz_;
+            return .{ x, hs[j * c + i] + hfWaveHeight(wave_, x, z, t_), z };
+        }
+        fn drop(p: [3]f32, base_: f32) [3]f32 {
+            return .{ p[0], base_, p[2] };
+        }
+    };
+
+    // top surface — wound to FACE +Y (up). The top-down camera back-face-culls
+    // anything facing -Y (the generatePlane orientation), which is exactly why
+    // floors use boxes not planes; a -Y heightfield top renders black from above.
+    var j: u32 = 0;
+    while (j + 1 < rows) : (j += 1) {
+        var i: u32 = 0;
+        while (i + 1 < cols) : (i += 1) {
+            const pa = pt.at(heights, cols, x0, z0, dx, dz, i, j, wave, t);
+            const pb = pt.at(heights, cols, x0, z0, dx, dz, i + 1, j, wave, t);
+            const pc = pt.at(heights, cols, x0, z0, dx, dz, i + 1, j + 1, wave, t);
+            const pd = pt.at(heights, cols, x0, z0, dx, dz, i, j + 1, wave, t);
+            const na = hfNormal(heights, cols, rows, i, j, x0, z0, dx, dz, wave, t);
+            const nb = hfNormal(heights, cols, rows, i + 1, j, x0, z0, dx, dz, wave, t);
+            const nc = hfNormal(heights, cols, rows, i + 1, j + 1, x0, z0, dx, dz, wave, t);
+            const nd = hfNormal(heights, cols, rows, i, j + 1, x0, z0, dx, dz, wave, t);
+            const ua = [2]f32{ @as(f32, @floatFromInt(i)) / cf, @as(f32, @floatFromInt(j)) / rf };
+            const ub = [2]f32{ @as(f32, @floatFromInt(i + 1)) / cf, @as(f32, @floatFromInt(j)) / rf };
+            const uc = [2]f32{ @as(f32, @floatFromInt(i + 1)) / cf, @as(f32, @floatFromInt(j + 1)) / rf };
+            const ud = [2]f32{ @as(f32, @floatFromInt(i)) / cf, @as(f32, @floatFromInt(j + 1)) / rf };
+            _ = pushVertex(&g_geo_buf, &idx, pa, na, ua);
+            _ = pushVertex(&g_geo_buf, &idx, pc, nc, uc);
+            _ = pushVertex(&g_geo_buf, &idx, pb, nb, ub);
+            _ = pushVertex(&g_geo_buf, &idx, pa, na, ua);
+            _ = pushVertex(&g_geo_buf, &idx, pd, nd, ud);
+            _ = pushVertex(&g_geo_buf, &idx, pc, nc, uc);
+        }
+    }
+
+    // perimeter skirt — seal each boundary edge down to `base`. Winding per
+    // edge mirrors the matching box side face, so each skirt faces outward.
+    var ix2: u32 = 0;
+    while (ix2 + 1 < cols) : (ix2 += 1) {
+        const tn0 = pt.at(heights, cols, x0, z0, dx, dz, ix2, 0, wave, t);
+        const tn1 = pt.at(heights, cols, x0, z0, dx, dz, ix2 + 1, 0, wave, t);
+        if (tn0[1] > base or tn1[1] > base) {
+            hfQuad(pt.drop(tn1, base), pt.drop(tn0, base), tn0, tn1, .{ 0, 0, -1 }, &idx); // north (-Z)
+        }
+        const js = rows - 1;
+        const ts0 = pt.at(heights, cols, x0, z0, dx, dz, ix2, js, wave, t);
+        const ts1 = pt.at(heights, cols, x0, z0, dx, dz, ix2 + 1, js, wave, t);
+        if (ts0[1] > base or ts1[1] > base) {
+            hfQuad(pt.drop(ts0, base), pt.drop(ts1, base), ts1, ts0, .{ 0, 0, 1 }, &idx); // south (+Z)
+        }
+    }
+    var j2: u32 = 0;
+    while (j2 + 1 < rows) : (j2 += 1) {
+        const tw0 = pt.at(heights, cols, x0, z0, dx, dz, 0, j2, wave, t);
+        const tw1 = pt.at(heights, cols, x0, z0, dx, dz, 0, j2 + 1, wave, t);
+        if (tw0[1] > base or tw1[1] > base) {
+            hfQuad(pt.drop(tw0, base), pt.drop(tw1, base), tw1, tw0, .{ -1, 0, 0 }, &idx); // west (-X)
+        }
+        const ie = cols - 1;
+        const te0 = pt.at(heights, cols, x0, z0, dx, dz, ie, j2, wave, t);
+        const te1 = pt.at(heights, cols, x0, z0, dx, dz, ie, j2 + 1, wave, t);
+        if (te0[1] > base or te1[1] > base) {
+            hfQuad(pt.drop(te1, base), pt.drop(te0, base), te0, te1, .{ 1, 0, 0 }, &idx); // east (+X)
+        }
+    }
+
+    return .{ .count = @intCast(idx) };
+}
+
 fn generateCylinder(radius: f32, height: f32, segments: u32) struct { count: u32 } {
     var idx: usize = 0;
     const pi = std.math.pi;
@@ -318,6 +500,12 @@ const MeshSpec = struct {
     tex_h: u32 = 0,
     tex_rgba: ?[]const u8 = null,
     tex_key: ?[]const u8 = null,
+    // Heightfield (geometry="heightfield"): a cols×rows grid of corner heights.
+    // size[0]/size[2] = world X/Z span; size[1] = skirt base Y.
+    heights: ?[]const f32 = null,
+    hf_cols: u32 = 0,
+    hf_rows: u32 = 0,
+    wave: HeightfieldWave = .{},
 };
 
 // ════════════════════════════════════════════════════════════════════════
@@ -330,6 +518,13 @@ var g_uniform_buffer: ?*wgpu.Buffer = null;
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 var g_tex_bind_group_layout: ?*wgpu.BindGroupLayout = null;
+// Skybox: a separate pipeline + uniform buffer. Drawn as one fullscreen
+// triangle before the meshes, depth-test = always / depth-write = off, so it
+// fills the background and meshes paint over it. See shaders.skybox_wgsl.
+var g_sky_pipeline: ?*wgpu.RenderPipeline = null;
+var g_sky_uniform_buffer: ?*wgpu.Buffer = null;
+var g_sky_bind_group: ?*wgpu.BindGroup = null;
+var g_sky_bind_group_layout: ?*wgpu.BindGroupLayout = null;
 // 1×1 white default texture so every mesh has *something* to sample —
 // multiplying by white collapses to the uniform color, preserving the
 // pre-texture look for meshes that don't supply their own texture.
@@ -548,6 +743,78 @@ pub fn init() void {
         .mag_filter = .linear,
         .min_filter = .linear,
     });
+
+    // ── Skybox pipeline ──
+    // One uniform buffer (group 0), a fullscreen triangle generated from
+    // @builtin(vertex_index) (no vertex buffer), no culling, and depth
+    // compare = always with depth-write off so the sky never occludes the
+    // meshes drawn after it. Same rgba8 color target as the mesh pipeline.
+    const sky_desc = wgpu.shaderModuleWGSLDescriptor(.{ .label = "skybox_shader", .code = shaders.skybox_wgsl });
+    const sky_shader = device.createShaderModule(&sky_desc);
+    if (sky_shader) |sky_mod| {
+        defer sky_mod.release();
+        g_sky_uniform_buffer = device.createBuffer(&.{
+            .label = wgpu.StringView.fromSlice("skybox_uniforms"),
+            .size = @sizeOf(SkyUniforms),
+            .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+            .mapped_at_creation = 0,
+        });
+        g_sky_bind_group_layout = device.createBindGroupLayout(&.{
+            .entry_count = 1,
+            .entries = @ptrCast(&wgpu.BindGroupLayoutEntry{
+                .binding = 0,
+                .visibility = wgpu.ShaderStages.vertex | wgpu.ShaderStages.fragment,
+                .buffer = .{ .type = .uniform, .has_dynamic_offset = 0, .min_binding_size = @sizeOf(SkyUniforms) },
+            }),
+        });
+        if (g_sky_bind_group_layout != null and g_sky_uniform_buffer != null) {
+            g_sky_bind_group = device.createBindGroup(&.{
+                .layout = g_sky_bind_group_layout.?,
+                .entry_count = 1,
+                .entries = @ptrCast(&wgpu.BindGroupEntry{
+                    .binding = 0,
+                    .buffer = g_sky_uniform_buffer.?,
+                    .offset = 0,
+                    .size = @sizeOf(SkyUniforms),
+                }),
+            });
+            const sky_layout = [_]?*wgpu.BindGroupLayout{g_sky_bind_group_layout.?};
+            const sky_pipeline_layout = device.createPipelineLayout(&.{
+                .bind_group_layout_count = sky_layout.len,
+                .bind_group_layouts = @ptrCast(&sky_layout),
+            });
+            if (sky_pipeline_layout) |spl| {
+                defer spl.release();
+                const sky_color_target = wgpu.ColorTargetState{
+                    .format = .rgba8_unorm,
+                    .blend = &wgpu.BlendState.premultiplied_alpha_blending,
+                    .write_mask = wgpu.ColorWriteMasks.all,
+                };
+                const sky_frag = wgpu.FragmentState{
+                    .module = sky_mod,
+                    .entry_point = wgpu.StringView.fromSlice("sky_fs"),
+                    .target_count = 1,
+                    .targets = @ptrCast(&sky_color_target),
+                };
+                const sky_depth = wgpu.DepthStencilState{
+                    .format = .depth24_plus,
+                    .depth_write_enabled = .false,
+                    .depth_compare = .always,
+                    .stencil_front = .{},
+                    .stencil_back = .{},
+                };
+                g_sky_pipeline = device.createRenderPipeline(&.{
+                    .layout = spl,
+                    .vertex = .{ .module = sky_mod, .entry_point = wgpu.StringView.fromSlice("sky_vs"), .buffer_count = 0 },
+                    .primitive = .{ .topology = .triangle_list, .cull_mode = .none, .front_face = .ccw },
+                    .depth_stencil = &sky_depth,
+                    .multisample = .{},
+                    .fragment = &sky_frag,
+                });
+            }
+        }
+    }
+
     g_initialized = g_pipeline != null;
 }
 
@@ -579,6 +846,10 @@ pub fn deinit() void {
     if (g_uniform_buffer) |b| b.release();
     if (g_vertex_buffer) |b| b.release();
     if (g_pipeline) |p| p.release();
+    if (g_sky_bind_group) |bg| bg.release();
+    if (g_sky_bind_group_layout) |l| l.release();
+    if (g_sky_uniform_buffer) |b| b.release();
+    if (g_sky_pipeline) |p| p.release();
     g_initialized = false;
 }
 
@@ -679,6 +950,15 @@ fn estimateMeshRadius(node: *const Node) f32 {
     if (std.mem.eql(u8, geo, "torus")) {
         return (node.scene3d_radius + node.scene3d_tube_radius) * @max(sx, sz);
     }
+    if (std.mem.eql(u8, geo, "heightfield")) {
+        // footprint diagonal + the tallest corner — generous so it never culls.
+        var max_h: f32 = node.scene3d_size_y;
+        if (node.scene3d_heights) |hs| {
+            for (hs) |v| max_h = @max(max_h, @abs(v));
+        }
+        max_h += @abs(node.scene3d_wave_amplitude);
+        return math.length3(node.scene3d_size_x * sx * 0.5, max_h, node.scene3d_size_z * sz * 0.5);
+    }
     const hx = node.scene3d_size_x * sx * 0.5;
     const hy = node.scene3d_size_y * sy * 0.5;
     const hz = node.scene3d_size_z * sz * 0.5;
@@ -699,6 +979,17 @@ fn buildMeshSpec(node: *const Node) MeshSpec {
         .tex_h = node.scene3d_tex_h,
         .tex_rgba = node.scene3d_tex_rgba,
         .tex_key = node.scene3d_tex_key,
+        .heights = node.scene3d_heights,
+        .hf_cols = node.scene3d_hf_cols,
+        .hf_rows = node.scene3d_hf_rows,
+        .wave = .{
+            .amplitude = node.scene3d_wave_amplitude,
+            .length = node.scene3d_wave_length,
+            .speed = node.scene3d_wave_speed,
+            .dir_x = node.scene3d_wave_dir_x,
+            .dir_z = node.scene3d_wave_dir_z,
+            .phase = node.scene3d_wave_phase,
+        },
     };
 }
 
@@ -846,6 +1137,10 @@ fn generateGeometry(spec: MeshSpec) u32 {
     }
     if (std.mem.eql(u8, spec.geometry, "torus")) {
         return generateTorus(spec.radius, spec.tube_radius, 24, 16).count;
+    }
+    if (std.mem.eql(u8, spec.geometry, "heightfield")) {
+        const hs = spec.heights orelse return 0;
+        return generateHeightfield(hs, spec.hf_cols, spec.hf_rows, spec.size[0], spec.size[2], spec.size[1], spec.wave).count;
     }
     return generateBox(spec.size[0], spec.size[1], spec.size[2]).count;
 }
@@ -1045,6 +1340,42 @@ pub fn flushPending() void {
     g_pending_count = 0;
 }
 
+// Draw the analytic skybox as one fullscreen triangle. Reconstructs each
+// pixel's world ray from inv(vp) in the shader, so the only data it needs is
+// that inverse, the camera position, a wrapped wall-clock for cloud drift, and
+// the sky colour/sun/haze/cloud/night params off the Scene3D node.
+fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_pos: math.Vec3) void {
+    const sky_pipeline = g_sky_pipeline orelse return;
+    const sky_bg = g_sky_bind_group orelse return;
+    const sky_buf = g_sky_uniform_buffer orelse return;
+    const inv_vp = math.m4invert(vp) orelse return;
+
+    // Wrap the clock so float32 keeps cloud-noise precision (a raw epoch in
+    // seconds is ~1.7e9 and quantises the drift to a stutter).
+    const t: f32 = @as(f32, @floatFromInt(@mod(std.time.milliTimestamp(), 1_000_000))) / 1000.0;
+
+    const u = SkyUniforms{
+        .inv_vp = inv_vp,
+        .cam_pos = .{ cam_pos.x, cam_pos.y, cam_pos.z },
+        .time = t,
+        .sun_dir = node.scene3d_sky_sun_dir,
+        .sun_size = node.scene3d_sky_sun_size,
+        .zenith = node.scene3d_sky_zenith,
+        .haze = node.scene3d_sky_haze,
+        .horizon = node.scene3d_sky_horizon,
+        .cloud = node.scene3d_sky_cloud,
+        .ground = node.scene3d_sky_ground,
+        .sun_glow = node.scene3d_sky_sun_glow,
+        .sun_color = node.scene3d_sky_sun_color,
+        .night = node.scene3d_sky_night,
+    };
+    queue.writeBuffer(sky_buf, 0, @ptrCast(&u), @sizeOf(SkyUniforms));
+
+    pass.setPipeline(sky_pipeline);
+    pass.setBindGroup(0, sky_bg, 0, null);
+    pass.draw(3, 1, 0, 0);
+}
+
 fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
@@ -1064,8 +1395,13 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
             @as(f32, @floatFromInt(bg.b)) / 255.0,
         };
     }
+    // <Scene3D.Skybox> is a child View carrying scene3d_skybox + the sky_*
+    // params, the same way Camera/Light are. Captured here, used for both the
+    // sky draw and the horizon-coloured distance fog.
+    var sky_node: ?*Node = null;
 
     for (node.children) |*child| {
+        if (child.scene3d_skybox) sky_node = child;
         if (child.scene3d_camera) {
             cam_pos = .{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
             cam_look = .{ .x = child.scene3d_look_x, .y = child.scene3d_look_y, .z = child.scene3d_look_z };
@@ -1110,6 +1446,10 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     const view = math.m4lookAt(cam_pos, cam_look, .{ .x = 0, .y = 1, .z = 0 });
     const vp = math.m4multiply(projection, view);
 
+    // With a skybox, distant geometry should melt into the HORIZON colour, not
+    // the flat clear colour — that distance fade is most of what sells the sky.
+    const fog_color: [3]f32 = if (sky_node) |s| s.scene3d_sky_horizon else clear_color;
+
     // ── Begin render pass ──
     const color_view = slot.color_view orelse return;
     const depth_view = slot.depth_view orelse return;
@@ -1136,6 +1476,9 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         return;
     };
 
+    // ── Skybox first: fills the whole target behind the meshes ──
+    if (sky_node) |s| drawSky(pass, queue, s, vp, cam_pos);
+
     pass.setPipeline(g_pipeline.?);
     var uniform_index: u32 = 0;
     var vert_byte_offset: u64 = 0;
@@ -1143,11 +1486,11 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     // ── Draw each mesh ──
     for (node.children) |*child| {
         if (!child.scene3d_mesh) continue;
-        drawMesh(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, clear_color, fog_near, fog_far, buildMeshSpec(child));
+        drawMesh(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, buildMeshSpec(child));
     }
 
     if (node.scene3d_show_grid or node.scene3d_show_axes) {
-        drawSceneGuides(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, clear_color, fog_near, fog_far, scene_extent, node.scene3d_show_grid, node.scene3d_show_axes);
+        drawSceneGuides(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, scene_extent, node.scene3d_show_grid, node.scene3d_show_axes);
     }
 
     pass.end();

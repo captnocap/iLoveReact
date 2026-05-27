@@ -97,6 +97,7 @@ export function TopBar({ s }: { s: CutoutState }) {
         <Row style={{ gap: 8, alignItems: 'center', flexShrink: 0 }}>
           <IconAction icon="Plus" label="New blank" primary onPress={() => s.createBlankSurface()} />
           <IconAction icon="FileImage" label="Pick image" onPress={s.pickFile} />
+          <IconAction icon="FolderInput" label="Import SQI" onPress={() => s.importSqi()} />
           <ActionButton
             icon="Save"
             label={s.srcDims ? `Save PNG ${s.srcDims.w}×${s.srcDims.h}` : 'Save PNG'}

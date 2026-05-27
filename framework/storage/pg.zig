@@ -281,6 +281,22 @@ fn allocSlot() usize {
     return 0;
 }
 
+// Connections per bucket pool. The cart is single-threaded V8 issuing
+// SYNCHRONOUS pg.query/exec — a query runs to completion before any other JS
+// runs, so there is never more than ONE query in flight in a process. One
+// connection per bucket is all that's ever used; the "pool" is just
+// acquire/release bookkeeping around that single connection. (The library
+// default of 16 was dead capacity; there is no concurrency for it to serve.)
+//
+// It also bounds clients against the shared embedded cluster:
+// (live app processes) × (buckets touched) × 1. At the old 16, ONE app process
+// touching ~8 buckets + the cluster default opened ~144 connections — enough to
+// trip "too many clients already" by itself against a default-100 cluster (the
+// max_connections=300 arg below only applies when THIS code SPAWNS postgres
+// fresh; a running cluster keeps its original cap). NOTE: nothing to do with
+// the number of Claude Code sessions.
+const POOL_SIZE = 1;
+
 pub fn connect(uri: []const u8) usize {
     const a = allocator();
 
@@ -312,7 +328,7 @@ fn connectDefault(a: std.mem.Allocator) !*pg.Pool {
     defer paths.deinit(a);
 
     if (pg.Pool.init(a, .{
-        .size = 16,
+        .size = POOL_SIZE,
         .connect = .{ .host = paths.sock_path },
         .auth = .{ .username = default_user, .database = default_database },
     })) |pool| {
@@ -326,7 +342,7 @@ fn connectDefault(a: std.mem.Allocator) !*pg.Pool {
 
 fn connectUri(a: std.mem.Allocator, uri: []const u8) !*pg.Pool {
     const parsed = std.Uri.parse(uri) catch return error.ConnectFailed;
-    return pg.Pool.initUri(a, parsed, .{ .size = 16, .timeout = 10_000 }) catch return error.ConnectFailed;
+    return pg.Pool.initUri(a, parsed, .{ .size = POOL_SIZE, .timeout = 10_000 }) catch return error.ConnectFailed;
 }
 
 fn spawnEmbeddedPostgres(a: std.mem.Allocator, paths: EmbedPaths) !void {

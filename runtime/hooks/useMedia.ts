@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
+import { useLatest } from './useLatest';
+import { useAsyncResource } from './useAsyncResource';
 import { useAudio } from '../audio';
 import { exists as fileExists, listDir, stat as fileStat, type FsStat } from './fs';
 import { useFileDrop } from './useFileDrop';
@@ -89,6 +91,8 @@ export type UseAudioFileOptions = {
   place?: AudioPlacementOptions;
 };
 
+// ── Pure helpers ─────────────────────────────────────────────────────
+
 function basename(path: string): string {
   const normalized = String(path || '').replace(/\\/g, '/');
   return normalized.split('/').filter(Boolean).pop() || normalized;
@@ -99,7 +103,7 @@ function mediaPath(input: MediaInput): string {
   return typeof input === 'string' ? input : input.path;
 }
 
-function mediaFileFromPath(path: string): MediaFile {
+export function mediaFileFromPath(path: string): MediaFile {
   const st = fileStat(path);
   return {
     path,
@@ -117,7 +121,7 @@ function normalizeMediaFile(input: MediaInput): MediaFile | null {
   return typeof input === 'string' ? mediaFileFromPath(path) : input;
 }
 
-function isFilesystemAudio(input: MediaInput): boolean {
+export function isFilesystemAudio(input: MediaInput): boolean {
   const file = normalizeMediaFile(input);
   return !!file && file.source === 'filesystem' && file.type === 'audio';
 }
@@ -163,72 +167,150 @@ function queryItems(items: MediaFile[], options: QueryOptions): MediaFile[] {
   return limited.slice(0, options.limit);
 }
 
-export function useMedia() {
-  const audio = useAudio();
+// ── Imperative media operations (module-level, React-free) ──────────
 
-  const runScan = useCallback(async (options: ScanOptions): Promise<MediaFile[]> => {
-    if (!options.dir) return [];
-    return filterKinds(
-      scan(options.dir, {
-        recursive: options.recursive ?? true,
-        maxDepth: options.maxDepth ?? 10,
-      }),
-      options.kinds,
-    );
-  }, []);
-
-  const runStats = useCallback(async (options: StatsOptions): Promise<DirStats> => {
-    const empty: DirStats = { total: 0, byType: {}, totalSize: 0, largestFile: null };
-    if (!options.dir) return empty;
-    return dirStats(options.dir, {
+export async function scanMedia(options: ScanOptions): Promise<MediaFile[]> {
+  if (!options.dir) return [];
+  return filterKinds(
+    scan(options.dir, {
       recursive: options.recursive ?? true,
       maxDepth: options.maxDepth ?? 10,
-    });
-  }, []);
+    }),
+    options.kinds,
+  );
+}
 
-  const runIndex = useCallback(async (options: IndexOptions): Promise<MediaFile[]> => {
-    if (!options.dir) return [];
-    return filterKinds(
-      indexDeep(options.dir, {
-        recursive: options.recursive ?? true,
-        maxDepth: options.maxDepth ?? 10,
-        indexArchives: options.indexArchives ?? true,
+export async function statsMedia(options: StatsOptions): Promise<DirStats> {
+  const empty: DirStats = { total: 0, byType: {}, totalSize: 0, largestFile: null };
+  if (!options.dir) return empty;
+  return dirStats(options.dir, {
+    recursive: options.recursive ?? true,
+    maxDepth: options.maxDepth ?? 10,
+  });
+}
+
+export async function indexMedia(options: IndexOptions): Promise<MediaFile[]> {
+  if (!options.dir) return [];
+  return filterKinds(
+    indexDeep(options.dir, {
+      recursive: options.recursive ?? true,
+      maxDepth: options.maxDepth ?? 10,
+      indexArchives: options.indexArchives ?? true,
+      archivePattern: options.archivePattern,
+    }),
+    options.kinds,
+  );
+}
+
+export async function queryMedia(options: QueryOptions): Promise<MediaFile[]> {
+  if (!options.dir) return [];
+  const source = options.source ?? 'scan';
+  const items = source === 'index'
+    ? await indexMedia({
+        dir: options.dir,
+        recursive: options.recursive,
+        maxDepth: options.maxDepth,
+        indexArchives: options.indexArchives,
         archivePattern: options.archivePattern,
-      }),
-      options.kinds,
-    );
-  }, []);
+      })
+    : await scanMedia({
+        dir: options.dir,
+        recursive: options.recursive,
+        maxDepth: options.maxDepth,
+      });
+  return queryItems(items, options);
+}
 
-  const runQuery = useCallback(async (options: QueryOptions): Promise<MediaFile[]> => {
-    if (!options.dir) return [];
-    const source = options.source ?? 'scan';
-    const items = source === 'index'
-      ? await runIndex({
-          dir: options.dir,
-          recursive: options.recursive,
-          maxDepth: options.maxDepth,
-          indexArchives: options.indexArchives,
-          archivePattern: options.archivePattern,
-        })
-      : await runScan({
-          dir: options.dir,
-          recursive: options.recursive,
-          maxDepth: options.maxDepth,
-        });
-    return queryItems(items, options);
-  }, [runIndex, runScan]);
+// ── Reactive hooks (each a top-level export) ─────────────────────────
+
+export function useMediaScan(options: ScanOptions) {
+  const ref = useLatest(options);
+  const depsKey = JSON.stringify(options);
+  const r = useAsyncResource<MediaFile[]>(() => scanMedia(ref.current), [depsKey]);
+  return { files: r.data ?? [], loading: r.loading, error: r.error, rescan: r.refetch };
+}
+
+export function useMediaStats(options: StatsOptions) {
+  const ref = useLatest(options);
+  const depsKey = JSON.stringify(options);
+  const r = useAsyncResource<DirStats>(() => statsMedia(ref.current), [depsKey]);
+  return {
+    stats: r.data ?? { total: 0, byType: {}, totalSize: 0, largestFile: null },
+    loading: r.loading, error: r.error, rescan: r.refetch,
+  };
+}
+
+export function useMediaIndex(options: IndexOptions) {
+  const ref = useLatest(options);
+  const depsKey = JSON.stringify(options);
+  const r = useAsyncResource<MediaFile[]>(() => indexMedia(ref.current), [depsKey]);
+  return { index: r.data ?? [], loading: r.loading, error: r.error, rescan: r.refetch };
+}
+
+export function useMediaQuery(options: QueryOptions) {
+  const ref = useLatest(options);
+  const depsKey = JSON.stringify(options);
+  const r = useAsyncResource<MediaFile[]>(() => queryMedia(ref.current), [depsKey]);
+  return { results: r.data ?? [], loading: r.loading, error: r.error, refetch: r.refetch };
+}
+
+export function useMediaWatchedScan(options: ScanOptions, watchOptions: FileWatchOptions = {}) {
+  const result = useMediaScan(options);
+  useFileWatch(options.dir ?? '', () => result.rescan(), {
+    recursive: watchOptions.recursive ?? options.recursive ?? true,
+    intervalMs: watchOptions.intervalMs,
+    pattern: watchOptions.pattern,
+  });
+  return result;
+}
+
+export function useMediaAudioFile(input: MediaInput, options: UseAudioFileOptions = {}) {
+  const m = useMedia();
+  const path = mediaPath(input);
+  const optsKey = JSON.stringify(options);
+  const r = useAsyncResource<LoadedAudioMedia | null>(
+    async () => options.place ? m.placeAudio(input, options.place) : m.loadAudio(input),
+    [path, optsKey],
+  );
+  return { audio: r.data, loading: r.loading, error: r.error, reload: r.refetch };
+}
+
+export function useMediaDrop(
+  handler: (event: MediaDropEvent) => void,
+  options: MediaDropOptions = {},
+): void {
+  const m = useMedia();
+  const handlerRef = useLatest(handler);
+  const optionsRef = useLatest(options);
+  useFileDrop((path) => {
+    const file = mediaFileFromPath(path);
+    const opts = optionsRef.current;
+    if (opts.kinds && opts.kinds.length > 0 && !opts.kinds.includes(file.type)) return;
+    const audioResult = opts.placeAudio
+      ? m.placeAudio(file, opts.placeAudio)
+      : opts.loadAudio
+        ? m.loadAudio(file)
+        : null;
+    handlerRef.current({ path, file, stat: fileStat(path), audio: audioResult });
+  });
+}
+
+// ── Imperative facade ────────────────────────────────────────────────
+// Bundles imperative methods + audio-dependent loaders behind a single
+// `const m = useMedia()` call. The reactive variants are top-level
+// exports above (useMediaScan etc.) — those follow rules-of-hooks
+// natively, whereas the facade's audio methods need `audio` from
+// useAudio().
+
+export function useMedia() {
+  const audio = useAudio();
 
   const loadAudio = useCallback((input: MediaInput): LoadedAudioMedia | null => {
     const file = normalizeMediaFile(input);
     if (!file || file.source !== 'filesystem' || file.type !== 'audio') return null;
     const sound = audio.loadSound(file.path);
     if (!sound) return null;
-    return {
-      path: file.path,
-      file,
-      sound,
-      duration: audio.dur(sound),
-    };
+    return { path: file.path, file, sound, duration: audio.dur(sound) };
   }, [audio]);
 
   const loadSample = useCallback((
@@ -259,182 +341,14 @@ export function useMedia() {
     else audio.insertMedia(sound, options.track, start);
     if (options.play) audio.play();
 
-    return {
-      ...loaded,
-      sound,
-      duration: audio.dur(sound),
-    };
+    return { ...loaded, sound, duration: audio.dur(sound) };
   }, [audio, loadAudio]);
 
-  const useScan = (options: ScanOptions) => {
-    const [files, setFiles] = useState<MediaFile[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
-    const [version, setVersion] = useState(0);
-    const depsKey = JSON.stringify(options);
-    const ref = useRef(options);
-    ref.current = options;
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-      runScan(ref.current)
-        .then((next) => { if (!cancelled) setFiles(next); })
-        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e : new Error(String(e))); })
-        .finally(() => { if (!cancelled) setLoading(false); });
-      return () => { cancelled = true; };
-    }, [version, depsKey]);
-
-    const rescan = useCallback(() => setVersion((v) => v + 1), []);
-    return { files, loading, error, rescan };
-  };
-
-  const useStats = (options: StatsOptions) => {
-    const [stats, setStats] = useState<DirStats>({ total: 0, byType: {}, totalSize: 0, largestFile: null });
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
-    const [version, setVersion] = useState(0);
-    const depsKey = JSON.stringify(options);
-    const ref = useRef(options);
-    ref.current = options;
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-      runStats(ref.current)
-        .then((next) => { if (!cancelled) setStats(next); })
-        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e : new Error(String(e))); })
-        .finally(() => { if (!cancelled) setLoading(false); });
-      return () => { cancelled = true; };
-    }, [version, depsKey]);
-
-    const rescan = useCallback(() => setVersion((v) => v + 1), []);
-    return { stats, loading, error, rescan };
-  };
-
-  const useIndex = (options: IndexOptions) => {
-    const [index, setIndex] = useState<MediaFile[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
-    const [version, setVersion] = useState(0);
-    const depsKey = JSON.stringify(options);
-    const ref = useRef(options);
-    ref.current = options;
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-      runIndex(ref.current)
-        .then((next) => { if (!cancelled) setIndex(next); })
-        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e : new Error(String(e))); })
-        .finally(() => { if (!cancelled) setLoading(false); });
-      return () => { cancelled = true; };
-    }, [version, depsKey]);
-
-    const rescan = useCallback(() => setVersion((v) => v + 1), []);
-    return { index, loading, error, rescan };
-  };
-
-  const useQuery = (options: QueryOptions) => {
-    const [results, setResults] = useState<MediaFile[]>([]);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<Error | null>(null);
-    const [version, setVersion] = useState(0);
-    const depsKey = JSON.stringify(options);
-    const ref = useRef(options);
-    ref.current = options;
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-      runQuery(ref.current)
-        .then((next) => { if (!cancelled) setResults(next); })
-        .catch((e) => { if (!cancelled) setError(e instanceof Error ? e : new Error(String(e))); })
-        .finally(() => { if (!cancelled) setLoading(false); });
-      return () => { cancelled = true; };
-    }, [version, depsKey]);
-
-    const refetch = useCallback(() => setVersion((v) => v + 1), []);
-    return { results, loading, error, refetch };
-  };
-
-  const useWatchedScan = (options: ScanOptions, watchOptions: FileWatchOptions = {}) => {
-    const result = useScan(options);
-    useFileWatch(options.dir ?? '', () => result.rescan(), {
-      recursive: watchOptions.recursive ?? options.recursive ?? true,
-      intervalMs: watchOptions.intervalMs,
-      pattern: watchOptions.pattern,
-    });
-    return result;
-  };
-
-  const useAudioFile = (input: MediaInput, options: UseAudioFileOptions = {}) => {
-    const [value, setValue] = useState<LoadedAudioMedia | null>(null);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<Error | null>(null);
-    const [version, setVersion] = useState(0);
-    const path = mediaPath(input);
-    const optsKey = JSON.stringify(options);
-
-    useEffect(() => {
-      let cancelled = false;
-      setLoading(true);
-      setError(null);
-      try {
-        const loaded = options.place ? placeAudio(input, options.place) : loadAudio(input);
-        if (!cancelled) setValue(loaded);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e : new Error(String(e)));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-      return () => { cancelled = true; };
-    }, [path, optsKey, version]);
-
-    const reload = useCallback(() => setVersion((v) => v + 1), []);
-    return { audio: value, loading, error, reload };
-  };
-
-  const useDrop = (handler: (event: MediaDropEvent) => void, options: MediaDropOptions = {}) => {
-    const handlerRef = useRef(handler);
-    const optionsRef = useRef(options);
-    handlerRef.current = handler;
-    optionsRef.current = options;
-
-    useFileDrop((path) => {
-      const file = mediaFileFromPath(path);
-      const opts = optionsRef.current;
-      if (opts.kinds && opts.kinds.length > 0 && !opts.kinds.includes(file.type)) return;
-      const audioResult = opts.placeAudio
-        ? placeAudio(file, opts.placeAudio)
-        : opts.loadAudio
-          ? loadAudio(file)
-          : null;
-      handlerRef.current({
-        path,
-        file,
-        stat: fileStat(path),
-        audio: audioResult,
-      });
-    });
-  };
-
   return {
-    scan: runScan,
-    stats: runStats,
-    index: runIndex,
-    query: runQuery,
-    useScan,
-    useStats,
-    useIndex,
-    useQuery,
-    useWatchedScan,
-    useAudioFile,
-    useDrop,
+    scan: scanMedia,
+    stats: statsMedia,
+    index: indexMedia,
+    query: queryMedia,
     fileFromPath: mediaFileFromPath,
     exists: fileExists,
     stat: fileStat,

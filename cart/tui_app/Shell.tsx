@@ -13,27 +13,47 @@
 // the routes never have to know about each other.
 
 import * as React from 'react';
-import { Col } from '@reactjit/runtime/primitives';
+import { Col, ScrollView } from '@reactjit/runtime/primitives';
 import { useRoute } from '../app/gallery/local-router';
 import { NavBar } from './components/NavBar';
 import { Footer } from './components/Footer';
 import { ChatRoute } from './routes/chat';
 import { SessionsRoute } from './routes/sessions';
 import { StatusRoute } from './routes/status';
+import { UserRoute } from './routes/user';
+import { ProvidersRoute } from './routes/providers';
+import { ModelsRoute } from './routes/models';
+import { MetadataRoute } from './routes/metadata';
 
 export function Shell() {
   const { path } = useRoute();
+  const isChat = !path.startsWith('/sessions')
+    && !path.startsWith('/user')
+    && !path.startsWith('/providers')
+    && !path.startsWith('/models')
+    && !path.startsWith('/metadata')
+    && !path.startsWith('/status');
 
   let body: React.ReactNode;
   if (path.startsWith('/sessions')) body = <SessionsRoute />;
+  else if (path.startsWith('/user')) body = <UserRoute />;
+  else if (path.startsWith('/providers')) body = <ProvidersRoute />;
+  else if (path.startsWith('/models')) body = <ModelsRoute />;
+  else if (path.startsWith('/metadata')) body = <MetadataRoute />;
   else if (path.startsWith('/status')) body = <StatusRoute />;
   else body = <ChatRoute />;
 
   return (
-    <Col style={{ width: '100%', height: '100%' }}>
+    <Col style={{ width: '100%', height: '100%', backgroundColor: '#0a0e17' }}>
       <NavBar activePath={path} />
-      <Col style={{ flexGrow: 1, width: '100%' }}>
-        {body}
+      <Col style={{ flexGrow: 1, flexShrink: 1, width: '100%', minHeight: 0 }}>
+        {isChat ? (
+          body
+        ) : (
+          <ScrollView showScrollbar style={{ flexGrow: 1, flexShrink: 1, width: '100%' }}>
+            {body}
+          </ScrollView>
+        )}
       </Col>
       <Footer />
     </Col>

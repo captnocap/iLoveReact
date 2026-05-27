@@ -9,7 +9,7 @@
 //   • a packed-tile lookup (kind | tier | style) and prop lookup  → pathfinding,
 //     picking, minimap streaming
 //   • a continuous height field                                   → camera, feet, pick raycast
-//   • a flat list of mesh fragments                               → the ONE <Scene3D>
+//   • chunked mesh fragments                                      → the ONE <Scene3D>
 // Relative to author, absolute at runtime — so any glitch has one canonical coord.
 //
 // Two passes: pass 1 stamps tiles/props and collects relief + render entries;
@@ -20,7 +20,7 @@
 import { Fragment } from 'react';
 import { Scene3D } from '@reactjit/runtime/primitives';
 import { T, VOID, type PropKind } from './citymap';
-import { ZONE_HEX, PLAZA_A, PLAZA_B, ROAD_LINE, HILL_SIDE } from '../render3d/palette3d';
+import { ZONE_HEX, PLAZA_A, PLAZA_B, ROAD_LINE } from '../render3d/palette3d';
 import { checkerTex, asphaltTex } from '../render3d/textures';
 
 // ── types ──────────────────────────────────────────────────────────────────
@@ -69,7 +69,19 @@ export interface Feature {
 
 export interface Decor { id: string; kind: PropKind; x: number; y: number; tint: number; }
 interface PropRec { x: number; y: number; kind: PropKind; tint: number; }
-interface Relief { x0: number; y0: number; x1: number; y1: number; ax: number; ay: number; fn: (lx: number, ly: number) => number; }
+interface Relief {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  ax: number;
+  ay: number;
+  w: number;
+  h: number;
+  cols: number;
+  rows: number;
+  heights: number[];
+}
 interface AbsConnector extends Connector { zx0: number; zy0: number; zx1: number; zy1: number; }
 
 export interface BakedWorld {
@@ -81,8 +93,22 @@ export interface BakedWorld {
   features: Feature[];
   featureAt(x: number, y: number): Feature | null;
   byPath(path: string): Feature | null;
+  staticChunks: StaticChunk[];
   frags: any[];
 }
+
+export interface StaticChunk {
+  id: string;
+  cx: number;
+  cy: number;
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+  frags: any[];
+}
+
+export const STATIC_CHUNK_SIZE = 16;
 
 const SURFACE_KIND: Record<Surface, T> = {
   road: T.Road, sidewalk: T.Sidewalk, plaza: T.Plaza, water: T.Water, sand: T.Sand, grime: T.Grime,
@@ -95,6 +121,7 @@ const WHITE = '#ffffff';
 // so the squares + grout stay crisp instead of bilinear-smearing into soft diamonds.
 const PLAZA_TEX = checkerTex(20, 16, 32, PLAZA_A, PLAZA_B);
 const ROAD_TEX = asphaltTex(ZONE_HEX.road, ROAD_LINE);
+const WATER_WAVE = { amplitude: 0.08, length: 4.8, speed: 0.18, dirX: 1, dirZ: 0.35 };
 
 function zoneHex(t: T): string {
   switch (t) {
@@ -118,6 +145,32 @@ function groundFrag(key: string, surface: Surface, ax: number, ay: number, w: nu
   const cx = ax + w / 2;
   const cz = ay + h / 2;
   const textured = surface === 'plaza' ? PLAZA_TEX : surface === 'road' ? ROAD_TEX : null;
+  if (surface === 'water') {
+    const cols = w + 1;
+    const rows = h + 1;
+    const heights = new Array(cols * rows).fill(0);
+    const dlen = Math.hypot(WATER_WAVE.dirX, WATER_WAVE.dirZ) || 1;
+    const phase = ((cx * (WATER_WAVE.dirX / dlen)) + (cz * (WATER_WAVE.dirZ / dlen))) / WATER_WAVE.length;
+    return (
+      <Scene3D.Mesh
+        key={key}
+        geometry="heightfield"
+        heights={heights}
+        hfCols={cols}
+        hfRows={rows}
+        material={zoneHex(SURFACE_KIND.water)}
+        position={[cx, 0, cz]}
+        sizeX={w}
+        sizeY={-0.14}
+        sizeZ={h}
+        waveAmplitude={WATER_WAVE.amplitude}
+        waveLength={WATER_WAVE.length}
+        waveSpeed={WATER_WAVE.speed}
+        waveDirection={[WATER_WAVE.dirX, 0, WATER_WAVE.dirZ]}
+        wavePhase={phase}
+      />
+    );
+  }
   const pieces: any[] = [
     <Scene3D.Mesh key="floor" geometry="box" material={textured ? WHITE : zoneHex(SURFACE_KIND[surface])}
       texture={textured ?? undefined} position={[cx, y0, cz]} sizeX={w} sizeY={0.1} sizeZ={h} />,
@@ -144,29 +197,105 @@ function groundFrag(key: string, surface: Surface, ax: number, ay: number, w: nu
   return <Fragment key={key}>{pieces}</Fragment>;
 }
 
-// Terraced relief: a box per row spanning the entity width, height = heightAt.
-// Solid tones (a stretched texture across a wide band smears).
-function terraceFrag(key: string, surface: Surface, ax: number, ay: number, w: number, h: number, fn: (lx: number, ly: number) => number) {
-  const cx = ax + w / 2;
+// Smooth relief: ONE heightfield mesh instead of a box per row. Corner heights
+// are sampled from the relief fn over a (w+1)×(h+1) grid; the host meshes a
+// continuous sloped surface (smooth normals) plus a perimeter skirt down to
+// ground, so a hill reads as a RAMP, not a staircase. Carries the SAME surface
+// texture as the flat ground fill (plaza checker / road) so the slope matches
+// the rest of the ground instead of reading as a solid color.
+function terraceFrag(key: string, surface: Surface, ax: number, ay: number, w: number, h: number, heights: number[]) {
   const cap = zoneHex(SURFACE_KIND[surface]);
-  const pieces: any[] = [];
-  for (let z = 0; z < h; z++) {
-    const top = fn(w / 2, z + 0.5);
-    if (top < 0.03) continue;
-    const bz = ay + z + 0.5;
-    pieces.push(
-      <Scene3D.Mesh key={`slab-${z}`} geometry="box" material={HILL_SIDE} position={[cx, top / 2, bz]} sizeX={w} sizeY={top} sizeZ={1} />,
-      <Scene3D.Mesh key={`cap-${z}`} geometry="box" material={cap} position={[cx, top - 0.04, bz]} sizeX={w} sizeY={0.12} sizeZ={1} />,
-    );
-  }
-  return <Fragment key={key}>{pieces}</Fragment>;
+  const textured = surface === 'plaza' ? PLAZA_TEX : surface === 'road' ? ROAD_TEX : null;
+  const cols = w + 1;
+  const rows = h + 1;
+  return (
+    <Scene3D.Mesh
+      key={key}
+      geometry="heightfield"
+      heights={heights}
+      hfCols={cols}
+      hfRows={rows}
+      material={textured ? WHITE : cap}
+      texture={textured ?? undefined}
+      position={[ax + w / 2, 0, ay + h / 2]}
+      sizeX={w}
+      sizeY={0}
+      sizeZ={h}
+    />
+  );
 }
 
 // ── bake ─────────────────────────────────────────────────────────────────
 type Entry =
   | { kind: 'ground'; surface: Surface; ax: number; ay: number; w: number; h: number }
-  | { kind: 'terrace'; surface: Surface; ax: number; ay: number; w: number; h: number; fn: (lx: number, ly: number) => number }
+  | { kind: 'terrace'; surface: Surface; ax: number; ay: number; w: number; h: number; relief: Relief }
   | { kind: 'custom'; e: Entity; ax: number; ay: number };
+
+function buildRelief(ax: number, ay: number, w: number, h: number, fn: (lx: number, ly: number) => number): Relief {
+  const cols = w + 1;
+  const rows = h + 1;
+  const heights: number[] = [];
+  for (let j = 0; j < rows; j++) {
+    for (let i = 0; i < cols; i++) heights.push(fn(i, j));
+  }
+  return { x0: ax, y0: ay, x1: ax + w - 1, y1: ay + h - 1, ax, ay, w, h, cols, rows, heights };
+}
+
+function reliefCorner(r: Relief, i: number, j: number): number {
+  const ci = Math.max(0, Math.min(r.cols - 1, i));
+  const cj = Math.max(0, Math.min(r.rows - 1, j));
+  return r.heights[cj * r.cols + ci] ?? 0;
+}
+
+function sliceReliefHeights(r: Relief, ax: number, ay: number, w: number, h: number): number[] {
+  const ox = ax - r.ax;
+  const oy = ay - r.ay;
+  const out: number[] = [];
+  for (let j = 0; j <= h; j++) {
+    for (let i = 0; i <= w; i++) out.push(reliefCorner(r, ox + i, oy + j));
+  }
+  return out;
+}
+
+function reliefHeightAt(r: Relief, x: number, y: number): number {
+  const lx = Math.max(0, Math.min(r.w, x - r.ax));
+  const ly = Math.max(0, Math.min(r.h, y - r.ay));
+  const i0 = Math.min(Math.floor(lx), r.w - 1);
+  const j0 = Math.min(Math.floor(ly), r.h - 1);
+  const tx = lx - i0;
+  const ty = ly - j0;
+  const h00 = reliefCorner(r, i0, j0);
+  const h10 = reliefCorner(r, i0 + 1, j0);
+  const h01 = reliefCorner(r, i0, j0 + 1);
+  const h11 = reliefCorner(r, i0 + 1, j0 + 1);
+  // Match framework/gpu/3d.zig generateHeightfield exactly: each cell is two
+  // planar triangles split on h00→h11, not a curved bilinear patch.
+  if (ty <= tx) return h00 + tx * (h10 - h00) + ty * (h11 - h10);
+  return h00 + ty * (h01 - h00) + tx * (h11 - h01);
+}
+
+function chunkCoord(v: number): number {
+  return Math.floor(v / STATIC_CHUNK_SIZE);
+}
+
+function chunkKey(cx: number, cy: number): string {
+  return `${cx},${cy}`;
+}
+
+function ensureChunk(chunks: Map<string, StaticChunk>, cx: number, cy: number): StaticChunk {
+  const id = chunkKey(cx, cy);
+  const found = chunks.get(id);
+  if (found) return found;
+  const x0 = cx * STATIC_CHUNK_SIZE;
+  const y0 = cy * STATIC_CHUNK_SIZE;
+  const ch: StaticChunk = { id, cx, cy, x0, y0, x1: x0 + STATIC_CHUNK_SIZE, y1: y0 + STATIC_CHUNK_SIZE, frags: [] };
+  chunks.set(id, ch);
+  return ch;
+}
+
+function chunkRange(min: number, span: number): [number, number] {
+  return [chunkCoord(min), chunkCoord(min + span - 0.0001)];
+}
 
 export function bake(root: Entity): BakedWorld {
   const packed = new Map<string, number>();
@@ -186,9 +315,10 @@ export function bake(root: Entity): BakedWorld {
   (function walk(e: Entity, ax: number, ay: number, path: string) {
     const [w, h] = e.size;
     const here = e.id ? (path ? `${path}.${e.id}` : e.id) : path; // accumulate the dotted address
+    const relief = e.height ? buildRelief(ax, ay, w, h, e.height) : null;
     if (e.ground !== undefined) {
       stamp(ax, ay, w, h, SURFACE_KIND[e.ground]);
-      if (e.height) entries.push({ kind: 'terrace', surface: e.ground, ax, ay, w, h, fn: e.height });
+      if (relief) entries.push({ kind: 'terrace', surface: e.ground, ax, ay, w, h, relief });
       else entries.push({ kind: 'ground', surface: e.ground, ax, ay, w, h });
     }
     if (e.pack !== undefined) stamp(ax, ay, w, h, e.pack);
@@ -203,7 +333,7 @@ export function bake(root: Entity): BakedWorld {
       for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) featureMap.set(`${ax + x},${ay + y}`, f);
       pathMap.set(here, f);
     }
-    if (e.height) reliefs.push({ x0: ax, y0: ay, x1: ax + w - 1, y1: ay + h - 1, ax, ay, fn: e.height });
+    if (relief) reliefs.push(relief);
     if (e.render) entries.push({ kind: 'custom', e, ax, ay });
     if (e.connections) for (const c of e.connections) connectors.push({ ...c, zx0: ax, zy0: ay, zx1: ax + w - 1, zy1: ay + h - 1 });
     if (e.contents) for (const c of e.contents) walk(c.of, ax + c.at[0], ay + c.at[1], here);
@@ -213,7 +343,7 @@ export function bake(root: Entity): BakedWorld {
     for (let i = reliefs.length - 1; i >= 0; i--) {
       const r = reliefs[i];
       if (x >= r.x0 && x <= r.x1 + 1 && y >= r.y0 && y <= r.y1 + 1) {
-        const hh = r.fn(x - r.ax, y - r.ay);
+        const hh = reliefHeightAt(r, x, y);
         if (hh > 0) return hh;
       }
     }
@@ -225,11 +355,56 @@ export function bake(root: Entity): BakedWorld {
   // STILL road after every stamp — no lane lines floating over water/buildings.
   const isRoad = (x: number, y: number): boolean => ((packed.get(`${x},${y}`) ?? VOID) & 7) === T.Road;
   let gi = 0; // ground paint order → tiny y stack so overlapping fills don't z-fight
+  const staticChunkMap = new Map<string, StaticChunk>();
+  const addChunkFrag = (cx: number, cy: number, frag: any) => ensureChunk(staticChunkMap, cx, cy).frags.push(frag);
+  const addSurfaceChunks = (
+    key: string,
+    surface: Surface,
+    ax: number,
+    ay: number,
+    w: number,
+    h: number,
+    paintY: number,
+    relief?: Relief,
+  ) => {
+    const [cx0, cx1] = chunkRange(ax, w);
+    const [cy0, cy1] = chunkRange(ay, h);
+    for (let cy = cy0; cy <= cy1; cy++) {
+      for (let cx = cx0; cx <= cx1; cx++) {
+        const sx0 = Math.max(ax, cx * STATIC_CHUNK_SIZE);
+        const sy0 = Math.max(ay, cy * STATIC_CHUNK_SIZE);
+        const sx1 = Math.min(ax + w, (cx + 1) * STATIC_CHUNK_SIZE);
+        const sy1 = Math.min(ay + h, (cy + 1) * STATIC_CHUNK_SIZE);
+        const sw = sx1 - sx0;
+        const sh = sy1 - sy0;
+        if (sw <= 0 || sh <= 0) continue;
+        const fragKey = `${key}-${cx}-${cy}`;
+        if (relief) {
+          addChunkFrag(cx, cy, terraceFrag(fragKey, surface, sx0, sy0, sw, sh, sliceReliefHeights(relief, sx0, sy0, sw, sh)));
+        } else {
+          addChunkFrag(cx, cy, groundFrag(fragKey, surface, sx0, sy0, sw, sh, paintY, isRoad));
+        }
+      }
+    }
+  };
   const frags: any[] = entries.map((en, i) => {
-    if (en.kind === 'ground') return groundFrag(`g${i}`, en.surface, en.ax, en.ay, en.w, en.h, -0.05 + gi++ * 0.004, isRoad);
-    if (en.kind === 'terrace') return terraceFrag(`t${i}`, en.surface, en.ax, en.ay, en.w, en.h, en.fn);
-    return <Fragment key={`c${i}`}>{en.e.render!(en.ax, en.ay, heightAt)}</Fragment>;
+    if (en.kind === 'ground') {
+      const paintY = -0.05 + gi++ * 0.004;
+      const frag = groundFrag(`g${i}`, en.surface, en.ax, en.ay, en.w, en.h, paintY, isRoad);
+      addSurfaceChunks(`g${i}`, en.surface, en.ax, en.ay, en.w, en.h, paintY);
+      return frag;
+    }
+    if (en.kind === 'terrace') {
+      const frag = terraceFrag(`t${i}`, en.surface, en.ax, en.ay, en.w, en.h, en.relief.heights);
+      addSurfaceChunks(`t${i}`, en.surface, en.ax, en.ay, en.w, en.h, 0, en.relief);
+      return frag;
+    }
+    const frag = <Fragment key={`c${i}`}>{en.e.render!(en.ax, en.ay, heightAt)}</Fragment>;
+    const [w, h] = en.e.size;
+    addChunkFrag(chunkCoord(en.ax + w / 2), chunkCoord(en.ay + h / 2), frag);
+    return frag;
   });
+  const staticChunks = [...staticChunkMap.values()].sort((a, b) => (a.cy - b.cy) || (a.cx - b.cx));
 
   validateSeams(connectors);
 
@@ -244,6 +419,7 @@ export function bake(root: Entity): BakedWorld {
     features,
     featureAt: (x, y) => featureMap.get(`${Math.floor(x)},${Math.floor(y)}`) ?? null,
     byPath: (p) => pathMap.get(p) ?? null,
+    staticChunks,
     frags,
   };
 }

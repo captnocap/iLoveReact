@@ -26,4 +26,4 @@ export {
   Render,
   Effect,
   Native,
-} from '../runtime/primitives';
+} from './primitives';

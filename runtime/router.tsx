@@ -24,10 +24,9 @@
  */
 
 const React = require('react');
+import { callHost } from './ffi';
 
 // ── Host bridge ─────────────────────────────────────────────
-
-const host = (): any => globalThis as any;
 const DEFAULT_ROUTER_HOT_KEY = 'router:path';
 type RouterListener = () => void;
 const routerListeners = new Set<RouterListener>();
@@ -50,35 +49,35 @@ function notifyRouterListeners(): void {
 }
 
 function hostInit(path: string): void {
-  host().__routerInit?.(path);
+  callHost('__routerInit', undefined, path);
 }
 
 function hostPush(path: string, hotKey: string): void {
-  host().__routerPush?.(normalizePath(path));
+  callHost('__routerPush', undefined, normalizePath(path));
   persistCurrentPath(hotKey);
   notifyRouterListeners();
 }
 
 function hostReplace(path: string, hotKey: string): void {
-  host().__routerReplace?.(normalizePath(path));
+  callHost('__routerReplace', undefined, normalizePath(path));
   persistCurrentPath(hotKey);
   notifyRouterListeners();
 }
 
 function hostBack(hotKey: string): void {
-  host().__routerBack?.();
+  callHost('__routerBack', undefined);
   persistCurrentPath(hotKey);
   notifyRouterListeners();
 }
 
 function hostForward(hotKey: string): void {
-  host().__routerForward?.();
+  callHost('__routerForward', undefined);
   persistCurrentPath(hotKey);
   notifyRouterListeners();
 }
 
 function hostCurrentPath(): string {
-  return host().__routerCurrentPath?.() ?? '/';
+  return callHost<string>('__routerCurrentPath', '/');
 }
 
 function normalizePath(path: any, fallback = '/'): string {
@@ -87,26 +86,19 @@ function normalizePath(path: any, fallback = '/'): string {
 }
 
 function readHotPath(hotKey: string): string | null {
+  const raw = callHost<string | null>('__hot_get', null, hotKey);
+  if (raw == null || raw.length === 0) return null;
   try {
-    const raw = host().__hot_get?.(hotKey);
-    if (raw == null) return null;
-    if (typeof raw !== 'string' || raw.length === 0) return null;
-    try {
-      const parsed = JSON.parse(raw);
-      return typeof parsed === 'string' && parsed.length > 0 ? normalizePath(parsed) : null;
-    } catch {
-      return raw.startsWith('/') ? raw : null;
-    }
+    const parsed = JSON.parse(raw);
+    return typeof parsed === 'string' && parsed.length > 0 ? normalizePath(parsed) : null;
   } catch {
-    return null;
+    return raw.startsWith('/') ? raw : null;
   }
 }
 
 function writeHotPath(hotKey: string, path: string): void {
   if (!hotKey) return;
-  try {
-    host().__hot_set?.(hotKey, JSON.stringify(normalizePath(path)));
-  } catch {}
+  callHost('__hot_set', undefined, hotKey, JSON.stringify(normalizePath(path)));
 }
 
 function persistCurrentPath(hotKey: string): void {

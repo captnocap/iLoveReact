@@ -8,7 +8,7 @@
 export { BUCKETS, BUCKET_IDS, type Bucket, type BucketId } from './buckets';
 export { ENTITY_TO_BUCKET, bucketFor, entitiesByBucket } from './registry';
 export { useCRUD } from './useCRUD';
-export { ensureBootstrapped, resetBucket, resetAll } from './bootstrap';
+export { ensureBootstrapped, ensureEntityTable, resetBucket, resetAll } from './bootstrap';
 export { getHandle, query, exec, changes } from './connections';
 export { bindRules, rebindRules, unbindAllRules, listBoundRules } from './rule-binder';
 export { installMechanicalWires, uninstallMechanicalWires, refreshMechanicalCaches } from './mechanical-wires';

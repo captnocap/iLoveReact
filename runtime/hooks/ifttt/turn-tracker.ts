@@ -35,8 +35,41 @@
 // Other phases (post-tool, etc.) flow through `system:claude:<phase>`
 // untouched; this module only canonicalizes the boundaries.
 
-import { subscribe, emit } from '../ffi';
-import { registerIfttSource } from './ifttt-registry';
+import { subscribe, emit } from '../../ffi';
+import { registerIfttSource } from './registry';
+
+export type TurnStartPayload = {
+  at: number;
+  turnId: string;
+  phase: 'session-start' | 'user-prompt' | 'unknown';
+};
+export type TurnEndPayload = {
+  at: number;
+  turnId: string;
+  count: number;
+  tools: string[];
+  durationMs: number;
+};
+export type TurnToolUsePayload = {
+  at: number;
+  turnId: string;
+  name: string;
+  count: number;
+};
+export type TurnToolCountPayload = {
+  count: number;
+  name: string;
+  turnId: string;
+};
+
+declare module './types/events' {
+  interface IFTTTEventMap {
+    'turn:start':       TurnStartPayload;
+    'turn:end':         TurnEndPayload;
+    'turn:tool-use':    TurnToolUsePayload;
+    'turn:tool-count':  TurnToolCountPayload;
+  }
+}
 
 interface TurnState {
   turnId: string;

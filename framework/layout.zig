@@ -476,6 +476,22 @@ pub const Node = struct {
     scene3d_size_z: f32 = 1, // Box depth
     scene3d_show_grid: bool = false, // Scene3D navigation grid overlay
     scene3d_show_axes: bool = false, // Scene3D origin axes overlay
+    // Skybox — a <Scene3D.Skybox> child flips this on. gpu/3d.zig draws an
+    // analytic fullscreen sky (gradient + sun + haze + clouds + stars) before
+    // the meshes and feeds `horizon` into the fog color so distant geometry
+    // melts into the sky. Every field is a live uniform: animate them per
+    // commit for day cycle / weather / per-zone mood.
+    scene3d_skybox: bool = false,
+    scene3d_sky_zenith: [3]f32 = .{ 0.16, 0.33, 0.62 }, // straight up
+    scene3d_sky_horizon: [3]f32 = .{ 0.62, 0.72, 0.86 }, // at the horizon line
+    scene3d_sky_ground: [3]f32 = .{ 0.10, 0.11, 0.13 }, // below horizon
+    scene3d_sky_sun_dir: [3]f32 = .{ 0.4, 0.6, 0.3 }, // direction TO the sun
+    scene3d_sky_sun_color: [3]f32 = .{ 1.0, 0.93, 0.78 },
+    scene3d_sky_sun_size: f32 = 0.012, // angular radius of the disk (0..1)
+    scene3d_sky_sun_glow: f32 = 0.25, // 0 = tight halo, 1 = broad wash
+    scene3d_sky_haze: f32 = 0.3, // milky horizon lift / turbidity (0..1)
+    scene3d_sky_cloud: f32 = 0.0, // cloud coverage (0 clear .. 1 overcast)
+    scene3d_sky_night: f32 = 0.0, // star intensity (0 day .. 1 night)
     // Per-mesh diffuse texture. When tex_w * tex_h > 0 and tex_rgba is set,
     // gpu/3d.zig uploads it to a wgpu texture (cached by hash) and binds
     // it as group(1) for that mesh's draw call. Otherwise the mesh samples
@@ -484,6 +500,17 @@ pub const Node = struct {
     scene3d_tex_h: u32 = 0,
     scene3d_tex_rgba: ?[]const u8 = null, // raw RGBA bytes, length = w*h*4
     scene3d_tex_key: ?[]const u8 = null, // StaticSurface key — looked up in gpu/gpu.zig
+    scene3d_heights: ?[]const f32 = null, // heightfield corner heights
+    scene3d_hf_cols: u32 = 0,
+    scene3d_hf_rows: u32 = 0,
+    // Heightfield-only host-side wave deformation. The cart passes a few stable
+    // scalars; gpu/3d.zig adds the animated sine offset while rebuilding verts.
+    scene3d_wave_amplitude: f32 = 0,
+    scene3d_wave_length: f32 = 0,
+    scene3d_wave_speed: f32 = 0,
+    scene3d_wave_dir_x: f32 = 1,
+    scene3d_wave_dir_z: f32 = 0,
+    scene3d_wave_phase: f32 = 0,
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container
@@ -518,6 +545,11 @@ pub const Node = struct {
     // engine spawns "bash". Read once on the tick that spawns this session's
     // PTY; ignored on later updates of the same session.
     terminal_shell: ?[*:0]const u8 = null,
+    // <Terminal dumb /> — no PTY, no shell. The pipe is a pure cell-grid the
+    // cart paints into via __vterm_feed (ANSI bytes → parser → cells). The
+    // engine tick skips spawn + poll for these and drives repaints off the
+    // vterm damage flag instead. Backs the TUI playground's live preview.
+    terminal_dumb: bool = false,
     graph_container: bool = false, // true = Graph element (SVG paths, no pan/zoom)
     // true = Graph/Canvas uses DOM-style origin (0,0 at element top-left).
     // Default is center-origin (world 0,0 sits at the element midpoint), which
@@ -621,6 +653,19 @@ pub const Node = struct {
     _cache_iw: f32 = -1,
     _cache_ih: f32 = -1,
     _cache_ih_avail: f32 = -1,
+    // ── incremental relayout (the "dirty cycle") ──
+    // Parent link + cached call frame let us replay ONE subtree's layout with
+    // the exact inputs its parent gave it last full pass — so a change inside a
+    // size-locked node reflows only that subtree, not the whole tree. All
+    // additive: the full-reflow path never reads these.
+    parent: ?*Node = null,
+    _size_locked: bool = false, // outer size independent of descendant content
+    _in_px: f32 = 0,
+    _in_py: f32 = 0,
+    _in_pw: f32 = 0,
+    _in_ph: f32 = 0,
+    _in_flexw: ?f32 = null,
+    _in_stretchh: ?f32 = null,
 };
 pub const MeasureTextFn = *const fn (text: []const u8, font_size: u16, font_family_id: u8, max_width: f32, letter_spacing: f32, line_height: f32, max_lines: u16, no_wrap: bool, bold: bool) TextMetrics;
 pub const MeasureImageFn = *const fn (path: []const u8) ImageDims;
@@ -659,6 +704,31 @@ var layoutCount: usize = 0;
 /// When false, the main loop may skip `layout.layout(root)` until something calls `markLayoutDirty`.
 /// Starts true so the first frame always runs flex layout after app init.
 var g_layout_dirty: bool = true;
+
+// ── incremental-relayout state ──
+// `markNodeDirty` records a single changed node; a second distinct node or any
+// structural change (`markLayoutFull`) escalates the next pass to a full reflow.
+// `g_have_layout` gates incremental until one full pass has populated parent
+// links + cached frames. Default full so the first pass is always complete.
+var g_dirty_one: ?*Node = null;
+var g_dirty_full: bool = true;
+var g_have_layout: bool = false;
+
+/// Mark a node whose layout-affecting style just changed (call from applyStyle
+/// before the next `layout()`). Two distinct nodes in one frame → full pass.
+pub fn markNodeDirty(node: *Node) void {
+    if (g_dirty_one) |d| {
+        if (d != node) g_dirty_full = true;
+    } else {
+        g_dirty_one = node;
+    }
+}
+
+/// Force the next `layout()` to be a full pass — resize, or any structural
+/// change (CREATE / APPEND / INSERT_BEFORE / REMOVE).
+pub fn markLayoutFull() void {
+    g_dirty_full = true;
+}
 
 /// True for the duration of a layout pass that was driven by an actual
 /// mutation (state change, resize, hot-reload, etc.). `setRect` emits onLayout
@@ -1014,14 +1084,13 @@ fn estimateIntrinsicWidthUncached(node: *Node) f32 {
     const pr = padRight(s);
     const g = s.gap;
     const isRow = s.flex_direction == .row or s.flex_direction == .row_reverse;
-    if (node.text != null) {
-        const m = measureNodeText(node);
-        return m.width + pl + pr;
-    }
-    if (node.image_src != null) {
-        const dims = measureNodeImage(node);
-        return dims.width + pl + pr;
-    }
+    // Input nodes check BEFORE text — v8_app.zig:syncInputValue mirrors the
+    // typed value into both input.syncValue(slot, ...) AND node.text, so on
+    // an input the text branch below would otherwise win and measure the
+    // typed string as wrap-able body text (every wrap line growing the
+    // intrinsic). That caused cart/composer's library-rail SampleRow edit
+    // mode to push its checkmark/cancel buttons down by one row every ~30
+    // characters typed, even though the input renders single-line.
     if (node.input_id != null) {
         // TextInput's typed value lives in framework/input.zig's inputs[],
         // not node.text, so at intrinsic-sizing time we only see the
@@ -1040,6 +1109,14 @@ fn estimateIntrinsicWidthUncached(node: *Node) f32 {
             w = @as(f32, @floatFromInt(node.font_size)) * 8.0;
         }
         return w + pl + pr;
+    }
+    if (node.text != null) {
+        const m = measureNodeText(node);
+        return m.width + pl + pr;
+    }
+    if (node.image_src != null) {
+        const dims = measureNodeImage(node);
+        return dims.width + pl + pr;
     }
     if (node.children.len == 0) {
         return pl + pr;
@@ -1155,6 +1232,13 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
         resolveMaybePct(s.max_width, availableWidth),
     );
     const innerW = @max(0, ownW - pl - pr);
+    // Input check BEFORE text — see estimateIntrinsicWidthUncached above for
+    // the same reasoning. syncInputValue mirrors typed text into node.text,
+    // so the text branch would otherwise wrap-measure the typed string and
+    // grow the input's height by one line per ~30 typed characters.
+    if (node.input_id != null) {
+        return @as(f32, @floatFromInt(node.font_size)) * 1.4 + pt + pb;
+    }
     if (node.text != null) {
         const m = measureNodeTextW(node, innerW);
         return m.height + pt + pb;
@@ -1162,9 +1246,6 @@ fn estimateIntrinsicHeightUncached(node: *Node, availableWidth: f32) f32 {
     if (node.image_src != null) {
         const dims = measureNodeImage(node);
         return dims.height + pt + pb;
-    }
-    if (node.input_id != null) {
-        return @as(f32, @floatFromInt(node.font_size)) * 1.4 + pt + pb;
     }
     if (node.children.len == 0) {
         return pt + pb;
@@ -1348,6 +1429,22 @@ fn computeMinContentW(node: *Node) f32 {
     const s = node.style;
     const pl = padLeft(s);
     const pr = padRight(s);
+    // Input nodes BEFORE text — same hazard as estimateIntrinsicWidthUncached
+    // (~1024) and estimateIntrinsicHeightUncached (~1169). syncInputValue
+    // (v8_bindings_host_window.zig) mirrors the typed value into node.text,
+    // but an input renders its content in a scroll/wrap viewport — the typed
+    // string is NOT layout content. If it were treated as min-content, a long
+    // no-space run (e.g. holding one key) becomes one giant unbreakable
+    // "word", the flex basis floor (a few lines below) bumps the input up to
+    // that width, and it shoves its row-siblings off-screen. An input's
+    // min-content is just its padding box: it can shrink toward nothing
+    // because the content scrolls/wraps inside whatever width it ends up with.
+    // (Note: the placeholder is deliberately NOT measured here — it's a hint,
+    // not a content floor; flooring to it would re-introduce the same class
+    // of bug for a long placeholder.)
+    if (node.input_id != null) {
+        return pl + pr;
+    }
     if (node.text != null and measureFn != null) {
         var maxWordW: f32 = 0;
         var i: usize = 0;
@@ -1554,6 +1651,18 @@ pub fn layoutNode(node: *Node, px: f32, py: f32, pw: f32, ph: f32) void {
         return;
     }
     const s = node.style;
+    // Incremental-relayout bookkeeping (additive — full reflow ignores it).
+    // Snapshot the call frame BEFORE _flex_w/_stretch_h are consumed below;
+    // flag whether this node's outer size is content-independent (a valid
+    // relayout boundary); link children to parent for the boundary walk.
+    node._in_px = px;
+    node._in_py = py;
+    node._in_pw = pw;
+    node._in_ph = ph;
+    node._in_flexw = node._flex_w;
+    node._in_stretchh = node._stretch_h;
+    node._size_locked = (node._flex_w != null or s.width != null) and (node._stretch_h != null or s.height != null);
+    for (node.children) |*c| c.parent = node;
     if (s.display == .none) {
         setRect(node, .{ .x = px, .y = py, .w = 0, .h = 0 });
         return;
@@ -2377,7 +2486,51 @@ fn accumulateVisibleContentExtent(container: *const Node, node: *const Node, out
     }
 }
 
+/// Nearest size-locked ancestor of the changed node — the subtree we can reflow
+/// in isolation. The changed node's own size may shift, so start at its parent
+/// (siblings redistribute) and walk up to the first locked node.
+fn findBoundary(changed: *Node) ?*Node {
+    var n = changed.parent;
+    while (n) |cur| {
+        if (cur._size_locked) return cur;
+        n = cur.parent;
+    }
+    return null; // reached the top with no locked ancestor → full pass
+}
+
+/// Replay one subtree's layout with the exact inputs its parent gave it last
+/// full pass. Valid only when `b` is size-locked and the change is inside it:
+/// the parent's distribution is then unaffected, so these inputs are unchanged
+/// and the result is identical to a full pass — but only `b`'s subtree is touched.
+fn relayoutSubtree(b: *Node) void {
+    layoutCount = 0;
+    invalidateTextCache();
+    invalidateCaches(b); // cache reset scoped to this subtree
+    g_emit_layout_pass = g_layout_dirty;
+    g_layout_dirty = false;
+    b._flex_w = b._in_flexw;
+    b._stretch_h = b._in_stretchh;
+    layoutNode(b, b._in_px, b._in_py, b._in_pw, b._in_ph);
+    g_emit_layout_pass = false;
+}
+
 pub fn layout(root: *Node, x: f32, y: f32, w: f32, h: f32) void {
+    // Incremental path: one marked node, a prior full pass to replay from, no
+    // escalation, and the root frame unchanged (a resize forces a full pass).
+    if (g_have_layout and !g_dirty_full and g_dirty_one != null and
+        root._in_px == x and root._in_py == y and root._in_pw == w and root._in_ph == h)
+    {
+        const changed = g_dirty_one.?;
+        g_dirty_one = null;
+        if (findBoundary(changed)) |b| {
+            relayoutSubtree(b);
+            return;
+        }
+        // no locked ancestor → fall through to a full pass
+    }
+    g_dirty_one = null;
+    g_dirty_full = false;
+    g_have_layout = true;
     layoutCount = 0;
     invalidateTextCache();
     invalidateCaches(root);

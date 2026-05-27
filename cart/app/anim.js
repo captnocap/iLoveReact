@@ -66,19 +66,24 @@ export function useAnimationTimeline(opts) {
   const [t, setT] = useState(0);
   const tRef = useRef(0);
   const frameRef = useRef(null);
-  // Tracks the largest `b` ever passed to range() — once elapsed
-  // exceeds it (with a small grace window), every range() call would
-  // saturate at 1 anyway, so there's no reason to keep ticking. The
-  // previous implementation ran RAF forever, which forced every
-  // consumer of `range()` to re-render every frame for the cart's
-  // lifetime — fine for tiny trees, catastrophic for pages with
-  // bound styles on a ScrollView (each tick re-paints the scroll
-  // content's static surface, producing visible flicker).
+  // Tracks the largest `b` ever passed to range(). Once effective time
+  // is past it (plus a grace frame), every range() call saturates at 1,
+  // so there is nothing left to animate and we go *idle*.
+  //
+  // Idle means: stop calling setT (no re-render, no repaint, no
+  // ScrollView static-surface flicker — that flicker, from re-rendering
+  // every frame for the cart's lifetime, is the bug this gating fixes).
+  // It does NOT mean stop the RAF loop. The loop keeps running so that:
+  //   (1) tRef.current stays *live* — interaction handlers
+  //       (provider-tile click, Next, exit transitions) capture the real
+  //       elapsed time, not a value frozen at the end of the intro; and
+  //   (2) the moment a handler schedules a new range() whose upper bound
+  //       pushes maxBRef forward, the next tick sees we're no longer idle
+  //       and resumes setT, so the new fade actually plays.
+  // A prior version stopped the RAF entirely on idle; that froze tRef and
+  // killed every post-intro animation (probe menu never faded in, the
+  // step 1→2 exit froze for ~1.9s instead of cross-fading).
   const maxBRef = useRef(0);
-  // Bumped from a tick callback to wake the effect when the cap
-  // changes. Keeps the dependency-array small — we don't want to
-  // restart the timer just because a new `range` call happened.
-  const stopAtRef = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,15 +93,11 @@ export function useAnimationTimeline(opts) {
       if (cancelled) return;
       const elapsed = nowMs() - startedAt;
       const eff = skip ? elapsed + skipOffsetMs : elapsed;
-      tRef.current = eff;
-      setT(elapsed);
-      stopAtRef.current = maxBRef.current;
-      // Stop ticking once every range() call would clamp to 1. We
-      // require maxBRef > 0 so we don't stop before the first render
-      // populates it.
-      if (stopAtRef.current > 0 && eff >= stopAtRef.current + GRACE_MS) {
-        return;
-      }
+      tRef.current = eff; // always live, even while idle
+      // Re-render only while something is still animating. We require
+      // maxBRef > 0 so the first render populates it before we can idle.
+      const idle = maxBRef.current > 0 && eff >= maxBRef.current + GRACE_MS;
+      if (!idle) setT(elapsed);
       frameRef.current = scheduleFrame(tick);
     };
     frameRef.current = scheduleFrame(tick);

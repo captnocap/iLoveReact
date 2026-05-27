@@ -23,7 +23,7 @@
  */
 
 import { callHost, callHostJson, hasHost, subscribe } from '../ffi';
-import { registerIfttSource, registerIfttAction } from './ifttt-registry';
+import { registerIfttSource, registerIfttAction } from './ifttt/registry';
 
 export interface SpawnOptions {
   cmd: string;
@@ -70,9 +70,20 @@ export function onStderr(pid: Pid, fn: (line: string) => void): () => void {
   return subscribe(`proc:stderr:${pid}`, fn);
 }
 
-/** Subscribe to a child's exit event. */
+/** Subscribe to a child's exit event. Zig emits this as a JSON-string payload
+ *  `{"code":N,"signal":null}` (see framework/v8_bindings_process.zig:365);
+ *  the dispatcher hands the payload through verbatim, so we parse it here so
+ *  callers get a real object instead of `res.code === undefined`. */
 export function onExit(pid: Pid, fn: (res: { code: number; signal: string | null }) => void): () => void {
-  return subscribe(`proc:exit:${pid}`, fn);
+  return subscribe(`proc:exit:${pid}`, (payload: any) => {
+    let parsed: { code: number; signal: string | null } = { code: -1, signal: null };
+    if (typeof payload === 'string') {
+      try { parsed = JSON.parse(payload); } catch {}
+    } else if (payload && typeof payload === 'object') {
+      parsed = payload;
+    }
+    fn(parsed);
+  });
 }
 
 // ── Environment ────────────────────────────────────────────────────
@@ -131,9 +142,9 @@ export interface ExecResult {
 export function execAsync(cmd: string): Promise<ExecResult> {
   return new Promise((resolve) => {
     if (!hasHost('__exec_async')) {
-      const sync = (globalThis as any).__exec;
-      if (typeof sync === 'function') {
-        try { resolve({ code: 0, stdout: String(sync(cmd) ?? '') }); return; } catch {}
+      if (hasHost('__exec')) {
+        resolve({ code: 0, stdout: String(callHost('__exec', '', cmd) ?? '') });
+        return;
       }
       resolve({ code: -1, stdout: '' });
       return;

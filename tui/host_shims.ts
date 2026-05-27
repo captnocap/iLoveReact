@@ -21,6 +21,23 @@ import { forcePaint, dispatchTo } from './host';
 declare const globalThis: any;
 
 export function installHostShims(): void {
+  // Wire process.stderr.write so anything in the bundle that uses
+  // `process.stderr.write(...)` actually lands on stderr. v8-preamble.js
+  // wires process.stdout but not process.stderr — the omission was
+  // silently swallowing every stderr write across the cart (React error
+  // reporter, transportFlush errors, etc).
+  try {
+    const g: any = globalThis as any;
+    g.process = g.process || {};
+    g.process.stderr = g.process.stderr || {};
+    if (typeof g.process.stderr.write !== 'function') {
+      g.process.stderr.write = (s: any) => {
+        try { g.__writeStderr?.(typeof s === 'string' ? s : String(s)); } catch {}
+        return true;
+      };
+    }
+  } catch {}
+
   // ── stdout-side shims ──────────────────────────────────────────────
 
   // hostConfig falls back to globalThis.__hostFlush when no transport is
@@ -73,30 +90,33 @@ export function installHostShims(): void {
   // We route through tui/host.ts's dispatchTo — same handlerRegistry the
   // ANSI-side mouse path uses, so a button works identically whether you
   // click it in the terminal grid or in the SDL3 Window subtree.
-  if (typeof globalThis.__dispatchEvent !== 'function') {
-    globalThis.__dispatchEvent = (id: number, type: string) => {
-      const aliases =
-        type === 'onClick'      ? ['onClick', 'onPress'] :
-        type === 'onPress'      ? ['onPress', 'onClick'] :
-        type === 'onMouseDown'  ? ['onMouseDown', 'onPointerDown', 'onPressIn'] :
-        type === 'onMouseMove'  ? ['onMouseMove', 'onPointerMove'] :
-        type === 'onMouseUp'    ? ['onMouseUp', 'onPointerUp', 'onPressOut'] :
-        type === 'onHoverEnter' ? ['onHoverEnter', 'onMouseEnter'] :
-        type === 'onHoverExit'  ? ['onHoverExit', 'onMouseLeave'] :
-        [type];
+  // Unconditional install — any prior __dispatchEvent (e.g. a stub from
+  // runtime/index.tsx if it slipped into the TUI bundle) gets replaced
+  // with the TUI-shell version that routes through dispatchTo. The earlier
+  // guard skipped the install if a function was already present, which
+  // hid the failure mode where a no-op stub had been registered.
+  globalThis.__dispatchEvent = (id: number, type: string) => {
+    const aliases =
+      type === 'onClick'      ? ['onClick', 'onPress'] :
+      type === 'onPress'      ? ['onPress', 'onClick'] :
+      type === 'onMouseDown'  ? ['onMouseDown', 'onPointerDown', 'onPressIn'] :
+      type === 'onMouseMove'  ? ['onMouseMove', 'onPointerMove'] :
+      type === 'onMouseUp'    ? ['onMouseUp', 'onPointerUp', 'onPressOut'] :
+      type === 'onHoverEnter' ? ['onHoverEnter', 'onMouseEnter'] :
+      type === 'onHoverExit'  ? ['onHoverExit', 'onMouseLeave'] :
+      [type];
+    try {
+      dispatchTo(id, aliases, { targetId: id });
+    } catch (e: any) {
+      // Swallow handler errors — letting them propagate triggers the V8
+      // no-stack-trace path that floods stderr into the TUI grid.
       try {
-        dispatchTo(id, aliases, { targetId: id });
-      } catch (e: any) {
-        // Swallow handler errors here — letting them propagate triggers
-        // the V8 no-stack-trace path that floods stderr into the TUI grid.
-        try {
-          (globalThis.process?.stderr as any)?.write?.(
-            `[__dispatchEvent] id=${id} type=${type} err: ${e?.stack || e?.message || e}\n`
-          );
-        } catch {}
-      }
-    };
-  }
+        (globalThis.process?.stderr as any)?.write?.(
+          `[__dispatchEvent] id=${id} type=${type} err: ${e?.stack || e?.message || e}\n`
+        );
+      } catch {}
+    }
+  };
 
   // ── Animation shims (Phase 2) ──────────────────────────────────────
 

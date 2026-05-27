@@ -13,7 +13,7 @@
 import { useState, useRef } from 'react';
 import { TextEditor } from '@reactjit/runtime/primitives';
 import { classifiers as S } from '@reactjit/core';
-import { useBreakpoint } from '@reactjit/runtime/theme';
+import { useBreakpoint } from '@reactjit/runtime/classifier';
 import { useRoute } from '@reactjit/runtime/router';
 import { busEmit } from '@reactjit/runtime/hooks/useIFTTT';
 import { CommandComposerHeader } from './gallery/components/command-composer/CommandComposerHeader';

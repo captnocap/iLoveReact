@@ -189,11 +189,18 @@ fn hostSpawn(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
 
     // Build a null-terminated argv pointer array (excluding argv[0]; spawnPiped adds exe).
-    var argv_buf: [33]?[*:0]const u8 = undefined;
+    // The previous cap of 32 silently truncated longer commands — magick
+    // chains in cart/cutout/backends/flood.ts blow this when the user
+    // accumulates ~25+ click masks, and the partial command then fails with
+    // confusing "MissingArgument" / "unbalanced parenthesis" errors from
+    // magick because trailing args got dropped. 1024 covers any realistic
+    // cart and is still well under POSIX ARG_MAX (~131072).
+    const MAX_ARGV: usize = 1024;
+    var argv_buf: [MAX_ARGV + 1]?[*:0]const u8 = undefined;
     var argv_count: usize = 0;
     if (args) |a| {
         for (a) |s| {
-            if (argv_count >= 32) break;
+            if (argv_count >= MAX_ARGV) break;
             argv_buf[argv_count] = s.ptr;
             argv_count += 1;
         }

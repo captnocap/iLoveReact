@@ -42,8 +42,8 @@
 // bound by emitting `match:<surface-channel>::<spec>` once per row.
 // Adding a new banned phrase becomes a data write.
 
-import { subscribe } from '../ffi';
-import { registerIfttSource } from './ifttt-registry';
+import { subscribe } from '../../ffi';
+import { registerIfttSource } from './registry';
 
 const PREFIX = 'match:';
 const SEPARATOR = '::';

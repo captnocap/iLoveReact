@@ -14,7 +14,7 @@
 const std = @import("std");
 const ipc = @import("../net/ipc.zig");
 const telemetry = @import("telemetry.zig");
-const app_crypto = @import("../crypto.zig");
+const app_crypto = @import("../privacy/crypto.zig");
 const json_probe = @import("json_probe.zig");
 
 const jsonStr = json_probe.str;

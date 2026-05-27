@@ -11,6 +11,7 @@ import { Box } from '@reactjit/runtime/primitives';
 import { useHudInsets } from '../shell';
 import { useCRUD } from '../db';
 import { AssistantChat } from './AssistantChat';
+import { BrowseActivityPanel } from './BrowseActivityPanel';
 import { useAssistantChat } from './useAssistantChat';
 import {
   appendTurn,
@@ -308,6 +309,7 @@ export default function ChatPage() {
           onUpdate={onLaneUpdate}
         />
       ) : null)}
+      <BrowseActivityPanel />
       <AssistantChat
         shape="activity"
         parallel={{

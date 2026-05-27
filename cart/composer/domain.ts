@@ -16,8 +16,24 @@ export interface SampleRef {
   label: string;          // display name in the library UI
   path: string;           // repo-relative WAV path
   durationMs: number;     // measured at import; informational
-  source: 'imported' | 'captured';
+  source: 'imported' | 'captured' | 'fetched';
   capturedAt?: number;    // unix ms; set when source === 'captured'
+  provenance?: SampleProvenance; // set when source === 'fetched'
+}
+
+/** Where a fetched sample came from online, captured at import time so the
+ *  project can credit the author / honour the licence without another API
+ *  call. The downloaded file is decoupled from its origin once on disk, so
+ *  this is the only record of attribution we keep. */
+export interface SampleProvenance {
+  provider: string;       // SourceId, e.g. 'freesound'
+  sourceId: string;       // provider-native id
+  sourceUrl: string | null; // human page on the provider site
+  licenseFamily: string;  // normalized licence, e.g. 'cc-by'
+  licenseUrl: string | null;
+  requiresAttribution: boolean | null;
+  authorName: string | null;
+  authorUrl: string | null;
 }
 
 /** Composer-cart-specific session payload. Wrapped in

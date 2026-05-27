@@ -2,11 +2,12 @@
 // returning Promises; no React state, no UI.
 
 import { run } from '@reactjit/runtime/hooks/process';
-import { writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
+import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
 
 export const SCRATCH_DIR = '/tmp/_reactjit_cutout';
 
 export interface Dims { w: number; h: number }
+export interface GrayImage { w: number; h: number; pixels: Uint8Array }
 
 /** Query native pixel dimensions of an image file. */
 export async function identify(path: string): Promise<Dims | null> {
@@ -16,6 +17,33 @@ export async function identify(path: string): Promise<Dims | null> {
   const w = parts[0], h = parts[1];
   if (!w || !h) return null;
   return { w, h };
+}
+
+function bytesFromHostString(s: string): Uint8Array {
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i) & 0xff;
+  return out;
+}
+
+/** Decode source image to one byte per pixel grayscale. Used by edge-aware
+ *  refine brush; cached by state.ts per source image. */
+export async function loadGrayImage(path: string, dims: Dims): Promise<GrayImage | null> {
+  mkdir(SCRATCH_DIR);
+  const outPath = `${SCRATCH_DIR}/gray_${Date.now().toString(36)}_${Math.floor(Math.random() * 100000).toString(36)}.u8`;
+  const r = await run('magick', [
+    path,
+    '-auto-orient',
+    '-resize', `${dims.w}x${dims.h}!`,
+    '-colorspace', 'Gray',
+    '-depth', '8',
+    `gray:${outPath}`,
+  ]);
+  if (r.code !== 0) return null;
+  const raw = readFile(outPath);
+  if (!raw) return null;
+  const pixels = bytesFromHostString(raw);
+  if (pixels.length < dims.w * dims.h) return null;
+  return { w: dims.w, h: dims.h, pixels: pixels.subarray(0, dims.w * dims.h) };
 }
 
 /** Encode a Uint8Array as a P5 binary PGM with maxval=1. magick reads bytes

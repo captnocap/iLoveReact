@@ -12,10 +12,11 @@
 // Single-terminal model (vterm.zig is one global). Multi-slot variant arrives
 // when the host fns gain Idx parameters.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { callHost } from '../ffi';
+import { useLatest } from './useLatest';
 
-const host = (): any => globalThis as any;
-const call = (name: string, ...args: any[]): any => host()[name]?.(...args);
+const call = (name: string, ...args: any[]): any => callHost<any>(name, undefined, ...args);
 
 // ── Public types ─────────────────────────────────────────────────────────
 
@@ -189,8 +190,7 @@ export function useTerminal(opts: UseTerminalOpts = {}): UseTerminal {
   const [semFrame, setSemFrame] = useState(0);
   const [hasDiff, setHasDiff] = useState(false);
 
-  const optsRef = useRef(opts);
-  optsRef.current = opts;
+  const optsRef = useLatest(opts);
 
   // Apply initial classifier mode once.
   useEffect(() => {

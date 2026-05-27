@@ -21,7 +21,7 @@
 // at runtime — same shape as Pathology rows.
 
 import { subscribe, emit } from '@reactjit/runtime/ffi';
-import { registerGate } from '@reactjit/runtime/hooks/ifttt-gate';
+import { registerGate } from '@reactjit/runtime/hooks/ifttt/gate';
 import type {
   Claim,
   ClaimKind,

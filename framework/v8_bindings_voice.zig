@@ -81,6 +81,12 @@ fn hostRecordingDevicesJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(
     setReturnString(info, voice.recordingDevicesJson(&buf));
 }
 
+fn hostPlaybackDevicesJson(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var buf: [4096]u8 = undefined;
+    setReturnString(info, voice.playbackDevicesJson(&buf));
+}
+
 pub fn registerVoice(_: anytype) void {
     v8_runtime.registerHostFn("__voice_start", hostStart);
     v8_runtime.registerHostFn("__voice_stop", hostStop);
@@ -90,6 +96,7 @@ pub fn registerVoice(_: anytype) void {
     v8_runtime.registerHostFn("__voice_release_buffer", hostReleaseBuffer);
     v8_runtime.registerHostFn("__audio_input_devices_json", hostRecordingDevicesJson);
     v8_runtime.registerHostFn("__voice_recording_devices_json", hostRecordingDevicesJson);
+    v8_runtime.registerHostFn("__audio_output_devices_json", hostPlaybackDevicesJson);
 }
 
 pub fn tickDrain() void {

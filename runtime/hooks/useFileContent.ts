@@ -12,8 +12,7 @@
 // unmounts. There is exactly one TextEditor reading per handle by design.
 // If you need the same buffer in multiple places, load it twice.
 import { useEffect, useState } from 'react';
-declare const __hostLoadFileToBuffer: ((path: string) => number) | undefined;
-declare const __hostReleaseFileBuffer: ((handle: number) => void) | undefined;
+import { callHost, hasHost } from '../ffi';
 
 export function useFileContent(path: string | null | undefined): number {
   const [handle, setHandle] = useState(0);
@@ -23,16 +22,14 @@ export function useFileContent(path: string | null | undefined): number {
       setHandle(0);
       return;
     }
-    const load = (globalThis as any).__hostLoadFileToBuffer as ((p: string) => number) | undefined;
-    const release = (globalThis as any).__hostReleaseFileBuffer as ((h: number) => void) | undefined;
-    if (typeof load !== 'function') {
+    if (!hasHost('__hostLoadFileToBuffer')) {
       setHandle(0);
       return;
     }
-    const h = load(path) | 0;
+    const h = callHost<number>('__hostLoadFileToBuffer', 0, path) | 0;
     setHandle(h);
     return () => {
-      if (h > 0 && typeof release === 'function') release(h);
+      if (h > 0) callHost('__hostReleaseFileBuffer', undefined, h);
     };
   }, [path]);
 

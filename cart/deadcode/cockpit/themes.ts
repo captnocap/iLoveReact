@@ -1,6 +1,6 @@
 // Cockpit themes — ported from tsz/carts/cockpit/theme/*.tcls.tsz.
 // Each export is a full color map + design tokens, merged into ThemeProvider.
-// Classifier lookups use `theme:<key>` (see style_cls.tsx).
+// Classifier lookups use `theme:<key>` (see style.cls.ts).
 
 export type ThemeMap = Record<string, any>;
 

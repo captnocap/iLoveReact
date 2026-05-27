@@ -22,24 +22,24 @@
  * persistence is per-process either way). Functionally behaves as useState.
  */
 
+import { callHost, callHostJson } from '../ffi';
+
 type Updater<T> = T | ((prev: T) => T);
 
 export function useHotState<T>(key: string, initial: T): [T, (v: Updater<T>) => void] {
   const [value, setValue] = React.useState<T>(() => {
-    const raw = (globalThis as any).__hot_get?.(key);
-    if (raw != null) {
-      try { return JSON.parse(raw) as T; } catch { /* fall through */ }
-    }
+    const stored = callHostJson<T | undefined>('__hot_get', undefined, key);
+    if (stored !== undefined) return stored;
     // First time seeing this key — seed the store with the initial value so a
     // hot reload before the first setState still recovers it.
-    try { (globalThis as any).__hot_set?.(key, JSON.stringify(initial)); } catch {}
+    callHost('__hot_set', undefined, key, JSON.stringify(initial));
     return initial;
   });
 
   const set = React.useCallback((updater: Updater<T>) => {
     setValue((prev: T) => {
       const next = typeof updater === 'function' ? (updater as (p: T) => T)(prev) : updater;
-      try { (globalThis as any).__hot_set?.(key, JSON.stringify(next)); } catch {}
+      callHost('__hot_set', undefined, key, JSON.stringify(next));
       return next;
     });
   }, [key]);
@@ -49,17 +49,15 @@ export function useHotState<T>(key: string, initial: T): [T, (v: Updater<T>) => 
 
 /** Remove a single atom. Equivalent to "forget this key across reloads." */
 export function removeHotState(key: string): void {
-  (globalThis as any).__hot_remove?.(key);
+  callHost('__hot_remove', undefined, key);
 }
 
 /** Wipe every atom. Useful from a dev-tools "reset state" button. */
 export function clearHotState(): void {
-  (globalThis as any).__hot_clear?.();
+  callHost('__hot_clear', undefined);
 }
 
 /** List all atom keys currently stored. */
 export function hotStateKeys(): string[] {
-  const raw = (globalThis as any).__hot_keys_json?.();
-  if (!raw) return [];
-  try { return JSON.parse(raw) as string[]; } catch { return []; }
+  return callHostJson<string[]>('__hot_keys_json', []);
 }

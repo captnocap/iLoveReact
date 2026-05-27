@@ -1,0 +1,2312 @@
+{
+  "generatedFrom": "framework/v8_ingredients.zig",
+  "bindings": {
+    "core": {
+      "required": true,
+      "module": "framework/v8_bindings_core.zig",
+      "registerFn": "registerCore",
+      "grepPrefix": "",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__getInputTextForNode",
+          "zig": "hostGetInputTextForNode"
+        },
+        {
+          "js": "__hostLoadFileToBuffer",
+          "zig": "hostLoadFileToBuffer"
+        },
+        {
+          "js": "__hostReleaseFileBuffer",
+          "zig": "hostReleaseFileBuffer"
+        },
+        {
+          "js": "__hostLog",
+          "zig": "hostLog"
+        },
+        {
+          "js": "__js_eval",
+          "zig": "hostJsEval"
+        },
+        {
+          "js": "__latchSet",
+          "zig": "hostLatchSet"
+        },
+        {
+          "js": "__latchGet",
+          "zig": "hostLatchGet"
+        },
+        {
+          "js": "__anim_register",
+          "zig": "hostAnimRegister"
+        },
+        {
+          "js": "__anim_unregister",
+          "zig": "hostAnimUnregister"
+        },
+        {
+          "js": "getMouseX",
+          "zig": "hostGetMouseX"
+        },
+        {
+          "js": "getMouseY",
+          "zig": "hostGetMouseY"
+        },
+        {
+          "js": "getMouseDown",
+          "zig": "hostGetMouseDown"
+        },
+        {
+          "js": "getMouseRightDown",
+          "zig": "hostGetMouseRightDown"
+        },
+        {
+          "js": "__viewport_width",
+          "zig": "hostViewportWidth"
+        },
+        {
+          "js": "__viewport_height",
+          "zig": "hostViewportHeight"
+        },
+        {
+          "js": "isKeyDown",
+          "zig": "hostIsKeyDown"
+        },
+        {
+          "js": "getInputText",
+          "zig": "hostGetInputText"
+        },
+        {
+          "js": "__setInputText",
+          "zig": "hostSetInputText"
+        },
+        {
+          "js": "__pollInputSubmit",
+          "zig": "hostPollInputSubmit"
+        },
+        {
+          "js": "__getPreparedRightClick",
+          "zig": "hostGetPreparedRightClick"
+        },
+        {
+          "js": "__getPreparedScroll",
+          "zig": "hostGetPreparedScroll"
+        },
+        {
+          "js": "__clipboard_set",
+          "zig": "hostClipboardSet"
+        },
+        {
+          "js": "__clipboard_get",
+          "zig": "hostClipboardGet"
+        },
+        {
+          "js": "__selection_get",
+          "zig": "hostSelectionGet"
+        },
+        {
+          "js": "__sys_drop_path",
+          "zig": "hostSysDropPath"
+        },
+        {
+          "js": "__sys_selection_get",
+          "zig": "hostSysSelectionGet"
+        },
+        {
+          "js": "__exec_async",
+          "zig": "hostExecAsync"
+        },
+        {
+          "js": "__routerInit",
+          "zig": "hostRouterInit"
+        },
+        {
+          "js": "__routerPush",
+          "zig": "hostRouterPush"
+        },
+        {
+          "js": "__routerReplace",
+          "zig": "hostRouterReplace"
+        },
+        {
+          "js": "__routerBack",
+          "zig": "hostRouterBack"
+        },
+        {
+          "js": "__routerForward",
+          "zig": "hostRouterForward"
+        },
+        {
+          "js": "__routerCurrentPath",
+          "zig": "hostRouterCurrentPath"
+        },
+        {
+          "js": "__filedropLastPath",
+          "zig": "hostFiledropLastPath"
+        },
+        {
+          "js": "__filedropSeq",
+          "zig": "hostFiledropSeq"
+        },
+        {
+          "js": "__localstoreGet",
+          "zig": "hostLocalstoreGet"
+        },
+        {
+          "js": "__localstoreHas",
+          "zig": "hostLocalstoreHas"
+        },
+        {
+          "js": "__localstoreSet",
+          "zig": "hostLocalstoreSet"
+        },
+        {
+          "js": "__localstoreDelete",
+          "zig": "hostLocalstoreDelete"
+        },
+        {
+          "js": "__localstoreClear",
+          "zig": "hostLocalstoreClear"
+        },
+        {
+          "js": "__localstoreKeysJson",
+          "zig": "hostLocalstoreKeysJson"
+        },
+        {
+          "js": "__fswatchAdd",
+          "zig": "hostFswatchAdd"
+        },
+        {
+          "js": "__fswatchRemove",
+          "zig": "hostFswatchRemove"
+        },
+        {
+          "js": "__fswatchDrain",
+          "zig": "hostFswatchDrain"
+        }
+      ]
+    },
+    "eventbus": {
+      "required": true,
+      "module": "framework/v8_bindings_eventbus.zig",
+      "registerFn": "registerEventBus",
+      "grepPrefix": "",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__busEmit",
+          "zig": "hostBusEmit"
+        },
+        {
+          "js": "__busEmitWithImportance",
+          "zig": "hostBusEmitWithImportance"
+        },
+        {
+          "js": "__busEmitChild",
+          "zig": "hostBusEmitChild"
+        },
+        {
+          "js": "__busRecent",
+          "zig": "hostBusRecent"
+        },
+        {
+          "js": "__busSessionId",
+          "zig": "hostBusSessionId"
+        },
+        {
+          "js": "__busDbPath",
+          "zig": "hostBusDbPath"
+        }
+      ]
+    },
+    "ifttt": {
+      "required": true,
+      "module": "framework/v8_bindings_ifttt.zig",
+      "registerFn": "registerIFTTT",
+      "grepPrefix": "",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__ifttt_wire_alloc",
+          "zig": "hostWireAlloc"
+        },
+        {
+          "js": "__ifttt_wire_free",
+          "zig": "hostWireFree"
+        },
+        {
+          "js": "__ifttt_wire_bump",
+          "zig": "hostWireBump"
+        },
+        {
+          "js": "__ifttt_wire_count",
+          "zig": "hostWireCount"
+        },
+        {
+          "js": "__ifttt_wire_last_at",
+          "zig": "hostWireLastAt"
+        },
+        {
+          "js": "__ifttt_timer_register",
+          "zig": "hostTimerRegister"
+        },
+        {
+          "js": "__ifttt_timer_cancel",
+          "zig": "hostTimerCancel"
+        },
+        {
+          "js": "__ifttt_key_register",
+          "zig": "hostKeyRegister"
+        },
+        {
+          "js": "__ifttt_key_unregister",
+          "zig": "hostKeyUnregister"
+        },
+        {
+          "js": "__ifttt_last_key",
+          "zig": "hostLastKey"
+        },
+        {
+          "js": "__ifttt_state_get",
+          "zig": "hostStateGet"
+        },
+        {
+          "js": "__ifttt_state_set",
+          "zig": "hostStateSet"
+        }
+      ]
+    },
+    "env": {
+      "required": true,
+      "module": "framework/v8_bindings_env.zig",
+      "registerFn": "registerEnv",
+      "grepPrefix": "",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__getenv",
+          "zig": "getEnv"
+        },
+        {
+          "js": "__env_get",
+          "zig": "envGet"
+        },
+        {
+          "js": "__env_set",
+          "zig": "envSet"
+        },
+        {
+          "js": "__getpid",
+          "zig": "getPid"
+        },
+        {
+          "js": "__exec",
+          "zig": "execCmd"
+        },
+        {
+          "js": "__exit",
+          "zig": "exitHost"
+        },
+        {
+          "js": "__spawn_self",
+          "zig": "spawnSelf"
+        },
+        {
+          "js": "__get_app_dir",
+          "zig": "getAppDir"
+        },
+        {
+          "js": "__get_run_path",
+          "zig": "getRunPath"
+        },
+        {
+          "js": "__beginTerminalDockResize",
+          "zig": "beginTerminalDockResize"
+        },
+        {
+          "js": "__endTerminalDockResize",
+          "zig": "endTerminalDockResize"
+        },
+        {
+          "js": "__getTerminalDockResizeState",
+          "zig": "getTerminalDockResizeState"
+        }
+      ]
+    },
+    "window": {
+      "required": true,
+      "module": "framework/v8_bindings_window.zig",
+      "registerFn": "registerWindow",
+      "grepPrefix": "",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__window_close",
+          "zig": "windowClose"
+        },
+        {
+          "js": "__windowClose",
+          "zig": "windowClose"
+        },
+        {
+          "js": "__window_minimize",
+          "zig": "windowMinimize"
+        },
+        {
+          "js": "__windowMinimize",
+          "zig": "windowMinimize"
+        },
+        {
+          "js": "__window_maximize",
+          "zig": "windowMaximize"
+        },
+        {
+          "js": "__windowMaximize",
+          "zig": "windowMaximize"
+        },
+        {
+          "js": "__window_is_maximized",
+          "zig": "windowIsMaximized"
+        },
+        {
+          "js": "__openWindow",
+          "zig": "openWindow"
+        }
+      ]
+    },
+    "inspector": {
+      "required": true,
+      "module": "framework/v8_bindings_inspector.zig",
+      "registerFn": "registerInspector",
+      "grepPrefix": "",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "getActiveNode",
+          "zig": "getActiveNode"
+        },
+        {
+          "js": "getSelectedNode",
+          "zig": "getSelectedNode"
+        },
+        {
+          "js": "setFlowEnabled",
+          "zig": "setFlowEnabled"
+        },
+        {
+          "js": "setNodeDim",
+          "zig": "setNodeDim"
+        },
+        {
+          "js": "resetNodeDim",
+          "zig": "resetNodeDim"
+        },
+        {
+          "js": "setPathFlow",
+          "zig": "setPathFlow"
+        },
+        {
+          "js": "resetPathFlow",
+          "zig": "resetPathFlow"
+        }
+      ]
+    },
+    "fs": {
+      "required": false,
+      "module": "framework/v8_bindings_fs.zig",
+      "registerFn": "registerFs",
+      "grepPrefix": "__fs_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__fs_read",
+          "zig": "fsRead"
+        },
+        {
+          "js": "__fs_write",
+          "zig": "fsWrite"
+        },
+        {
+          "js": "__fs_scandir",
+          "zig": "fsScandir"
+        },
+        {
+          "js": "__fs_deletefile",
+          "zig": "fsDeletefile"
+        },
+        {
+          "js": "__fs_readfile",
+          "zig": "fsReadfile"
+        },
+        {
+          "js": "__fs_writefile",
+          "zig": "fsWritefile"
+        },
+        {
+          "js": "__fs_exists",
+          "zig": "fsExists"
+        },
+        {
+          "js": "__fs_list_json",
+          "zig": "fsListJson"
+        },
+        {
+          "js": "__fs_stat_json",
+          "zig": "fsStatJson"
+        },
+        {
+          "js": "__fs_mkdir",
+          "zig": "fsMkdir"
+        },
+        {
+          "js": "__fs_remove",
+          "zig": "fsRemove"
+        },
+        {
+          "js": "__fs_media_scan_json",
+          "zig": "fsMediaScanJson"
+        },
+        {
+          "js": "__fs_media_stats_json",
+          "zig": "fsMediaStatsJson"
+        },
+        {
+          "js": "__fs_media_index_json",
+          "zig": "fsMediaIndexJson"
+        }
+      ]
+    },
+    "websocket": {
+      "required": false,
+      "module": "framework/v8_bindings_websocket.zig",
+      "registerFn": "registerWebSocket",
+      "grepPrefix": "__ws_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__ws_open",
+          "zig": "hostWsOpen"
+        },
+        {
+          "js": "__ws_send",
+          "zig": "hostWsSend"
+        },
+        {
+          "js": "__ws_close",
+          "zig": "hostWsClose"
+        }
+      ]
+    },
+    "telemetry": {
+      "required": false,
+      "module": "framework/v8_bindings_telemetry.zig",
+      "registerFn": "registerTelemetry",
+      "grepPrefix": "__tel_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "getFps",
+          "zig": "getFpsCb"
+        },
+        {
+          "js": "getLayoutUs",
+          "zig": "getLayoutUsCb"
+        },
+        {
+          "js": "getPaintUs",
+          "zig": "getPaintUsCb"
+        },
+        {
+          "js": "getTickUs",
+          "zig": "getTickUsCb"
+        },
+        {
+          "js": "__tel_frame",
+          "zig": "telFrameCb"
+        },
+        {
+          "js": "__tel_gpu",
+          "zig": "telGpuCb"
+        },
+        {
+          "js": "__tel_nodes",
+          "zig": "telNodesCb"
+        },
+        {
+          "js": "__tel_history",
+          "zig": "telHistoryCb"
+        },
+        {
+          "js": "__tel_input",
+          "zig": "telInputCb"
+        },
+        {
+          "js": "__tel_layout",
+          "zig": "telLayoutCb"
+        },
+        {
+          "js": "__tel_net",
+          "zig": "telNetCb"
+        },
+        {
+          "js": "__tel_node",
+          "zig": "telNodeCb"
+        },
+        {
+          "js": "__tel_node_box_model",
+          "zig": "telNodeBoxModelCb"
+        },
+        {
+          "js": "__tel_node_style",
+          "zig": "telNodeStyleCb"
+        },
+        {
+          "js": "__tel_node_count",
+          "zig": "telNodeCountCb"
+        },
+        {
+          "js": "__tel_system",
+          "zig": "telSystemCb"
+        },
+        {
+          "js": "__tel_canvas",
+          "zig": "telCanvasCb"
+        },
+        {
+          "js": "__canvas_screen_to_graph",
+          "zig": "canvasScreenToGraphCb"
+        },
+        {
+          "js": "getProcessesJson",
+          "zig": "getProcessesJsonCb"
+        },
+        {
+          "js": "getThreadsJson",
+          "zig": "getThreadsJsonCb"
+        },
+        {
+          "js": "getCoreCount",
+          "zig": "getCoreCountCb"
+        },
+        {
+          "js": "__pty_open",
+          "zig": "ptyOpenCb"
+        },
+        {
+          "js": "__pty_read",
+          "zig": "ptyReadCb"
+        },
+        {
+          "js": "__pty_write",
+          "zig": "ptyWriteCb"
+        },
+        {
+          "js": "__pty_alive",
+          "zig": "ptyAliveCb"
+        },
+        {
+          "js": "__pty_close",
+          "zig": "ptyCloseCb"
+        },
+        {
+          "js": "__pty_focus",
+          "zig": "ptyFocusCb"
+        },
+        {
+          "js": "__pty_cwd",
+          "zig": "ptyCwdCb"
+        },
+        {
+          "js": "__store_set",
+          "zig": "storeSetCb"
+        },
+        {
+          "js": "__store_get",
+          "zig": "storeGetCb"
+        },
+        {
+          "js": "__store_remove",
+          "zig": "storeRemoveCb"
+        },
+        {
+          "js": "__store_clear",
+          "zig": "storeClearCb"
+        },
+        {
+          "js": "__store_keys_json",
+          "zig": "storeKeysJsonCb"
+        },
+        {
+          "js": "__hot_set",
+          "zig": "hotSetCb"
+        },
+        {
+          "js": "__hot_get",
+          "zig": "hotGetCb"
+        },
+        {
+          "js": "__hot_remove",
+          "zig": "hotRemoveCb"
+        },
+        {
+          "js": "__hot_clear",
+          "zig": "hotClearCb"
+        },
+        {
+          "js": "__hot_keys_json",
+          "zig": "hotKeysJsonCb"
+        },
+        {
+          "js": "__sql_open",
+          "zig": "sqlOpenCb"
+        },
+        {
+          "js": "__sql_close",
+          "zig": "sqlCloseCb"
+        },
+        {
+          "js": "__sql_exec",
+          "zig": "sqlExecCb"
+        },
+        {
+          "js": "__sql_query_json",
+          "zig": "sqlQueryJsonCb"
+        },
+        {
+          "js": "__sql_changes",
+          "zig": "sqlChangesCb"
+        },
+        {
+          "js": "__sql_last_rowid",
+          "zig": "sqlLastRowIdCb"
+        },
+        {
+          "js": "__db_query",
+          "zig": "dbQueryCb"
+        }
+      ]
+    },
+    "zigcall": {
+      "required": false,
+      "module": "framework/v8_bindings_zigcall.zig",
+      "registerFn": "registerZigCall",
+      "grepPrefix": "__zig_call",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__zig_call",
+          "zig": "zigCall"
+        }
+      ]
+    },
+    "zigcall_list": {
+      "required": false,
+      "module": "framework/v8_bindings_zigcall.zig",
+      "registerFn": "registerZigCallList",
+      "grepPrefix": "__zig_call",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__zig_call_list",
+          "zig": "listCallable"
+        }
+      ]
+    },
+    "process": {
+      "required": false,
+      "module": "framework/v8_bindings_process.zig",
+      "registerFn": "registerProcess",
+      "grepPrefix": "__proc_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__proc_spawn",
+          "zig": "hostSpawn"
+        },
+        {
+          "js": "__proc_kill",
+          "zig": "hostKill"
+        },
+        {
+          "js": "__proc_stdin_write",
+          "zig": "hostStdinWrite"
+        },
+        {
+          "js": "__proc_stdin_close",
+          "zig": "hostStdinClose"
+        },
+        {
+          "js": "__proc_stat",
+          "zig": "hostProcStat"
+        },
+        {
+          "js": "__proc_watch_add",
+          "zig": "hostProcWatchAdd"
+        },
+        {
+          "js": "__proc_watch_remove",
+          "zig": "hostProcWatchRemove"
+        }
+      ]
+    },
+    "httpsrv": {
+      "required": false,
+      "module": "framework/v8_bindings_httpserver.zig",
+      "registerFn": "registerHttpServer",
+      "grepPrefix": "__httpsrv_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__httpsrv_listen",
+          "zig": "hostListen"
+        },
+        {
+          "js": "__httpsrv_respond",
+          "zig": "hostRespond"
+        },
+        {
+          "js": "__httpsrv_close",
+          "zig": "hostClose"
+        }
+      ]
+    },
+    "wssrv": {
+      "required": false,
+      "module": "framework/v8_bindings_wsserver.zig",
+      "registerFn": "registerWsServer",
+      "grepPrefix": "__wssrv_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__wssrv_listen",
+          "zig": "hostListen"
+        },
+        {
+          "js": "__wssrv_send",
+          "zig": "hostSend"
+        },
+        {
+          "js": "__wssrv_broadcast",
+          "zig": "hostBroadcast"
+        },
+        {
+          "js": "__wssrv_close",
+          "zig": "hostClose"
+        }
+      ]
+    },
+    "net": {
+      "required": false,
+      "module": "framework/v8_bindings_net.zig",
+      "registerFn": "registerNet",
+      "grepPrefix": "__tcp_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__tcp_connect",
+          "zig": "hostTcpConnect"
+        },
+        {
+          "js": "__tcp_send",
+          "zig": "hostTcpSend"
+        },
+        {
+          "js": "__tcp_close",
+          "zig": "hostTcpClose"
+        },
+        {
+          "js": "__udp_open",
+          "zig": "hostUdpOpen"
+        },
+        {
+          "js": "__udp_send",
+          "zig": "hostUdpSend"
+        },
+        {
+          "js": "__udp_close",
+          "zig": "hostUdpClose"
+        },
+        {
+          "js": "__uds_listen",
+          "zig": "hostUdsListen"
+        },
+        {
+          "js": "__uds_send",
+          "zig": "hostUdsSend"
+        },
+        {
+          "js": "__uds_close_conn",
+          "zig": "hostUdsCloseConn"
+        },
+        {
+          "js": "__uds_close",
+          "zig": "hostUdsClose"
+        },
+        {
+          "js": "__uds_set_workspace_root",
+          "zig": "hostUdsSetWorkspaceRoot"
+        },
+        {
+          "js": "__uds_send_workspace_init",
+          "zig": "hostUdsSendWorkspaceInit"
+        },
+        {
+          "js": "__uds_send_file_frame",
+          "zig": "hostUdsSendFileFrame"
+        },
+        {
+          "js": "__uds_send_msg_frame",
+          "zig": "hostUdsSendMsgFrame"
+        },
+        {
+          "js": "__socks5_register",
+          "zig": "hostSocks5Register"
+        },
+        {
+          "js": "__socks5_unregister",
+          "zig": "hostSocks5Unregister"
+        }
+      ]
+    },
+    "gameserver": {
+      "required": false,
+      "module": "framework/v8_bindings_gameserver.zig",
+      "registerFn": "registerGameServer",
+      "grepPrefix": "__rcon_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__rcon_open",
+          "zig": "hostRconOpen"
+        },
+        {
+          "js": "__rcon_command",
+          "zig": "hostRconCommand"
+        },
+        {
+          "js": "__rcon_close",
+          "zig": "hostRconClose"
+        },
+        {
+          "js": "__a2s_open",
+          "zig": "hostA2sOpen"
+        },
+        {
+          "js": "__a2s_query",
+          "zig": "hostA2sQuery"
+        },
+        {
+          "js": "__a2s_close",
+          "zig": "hostA2sClose"
+        }
+      ]
+    },
+    "tor": {
+      "required": false,
+      "module": "framework/v8_bindings_tor.zig",
+      "registerFn": "registerTor",
+      "grepPrefix": "__tor_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__tor_start",
+          "zig": "hostTorStart"
+        },
+        {
+          "js": "__tor_stop",
+          "zig": "hostTorStop"
+        }
+      ]
+    },
+    "privacy": {
+      "required": false,
+      "module": "framework/v8_bindings_privacy.zig",
+      "registerFn": "registerPrivacy",
+      "grepPrefix": "__priv_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__priv_sha256",
+          "zig": "privSha256"
+        },
+        {
+          "js": "__priv_hmac_sha256",
+          "zig": "privHmacSha256"
+        },
+        {
+          "js": "__priv_hkdf_sha256",
+          "zig": "privHkdfSha256"
+        },
+        {
+          "js": "__priv_xchacha_encrypt",
+          "zig": "privXchachaEncrypt"
+        },
+        {
+          "js": "__priv_xchacha_decrypt",
+          "zig": "privXchachaDecrypt"
+        },
+        {
+          "js": "__priv_random_bytes",
+          "zig": "privRandomBytes"
+        },
+        {
+          "js": "__priv_hash_file",
+          "zig": "privHashFile"
+        },
+        {
+          "js": "__priv_hash_directory",
+          "zig": "privHashDirectory"
+        },
+        {
+          "js": "__priv_verify_manifest",
+          "zig": "privVerifyManifest"
+        },
+        {
+          "js": "__priv_secbuf_alloc",
+          "zig": "privSecbufAlloc"
+        },
+        {
+          "js": "__priv_secbuf_read",
+          "zig": "privSecbufRead"
+        },
+        {
+          "js": "__priv_secbuf_free",
+          "zig": "privSecbufFree"
+        },
+        {
+          "js": "__priv_secbuf_protect",
+          "zig": "privSecbufProtect"
+        },
+        {
+          "js": "__priv_encrypt_file",
+          "zig": "privEncryptFile"
+        },
+        {
+          "js": "__priv_decrypt_file",
+          "zig": "privDecryptFile"
+        },
+        {
+          "js": "__priv_secure_delete",
+          "zig": "privSecureDelete"
+        },
+        {
+          "js": "__priv_steg_embed",
+          "zig": "privStegEmbed"
+        },
+        {
+          "js": "__priv_steg_extract",
+          "zig": "privStegExtract"
+        },
+        {
+          "js": "__priv_tokenize",
+          "zig": "privTokenize"
+        },
+        {
+          "js": "__priv_gpg_encrypt",
+          "zig": "privGpgEncrypt"
+        },
+        {
+          "js": "__priv_gpg_decrypt",
+          "zig": "privGpgDecrypt"
+        },
+        {
+          "js": "__priv_gpg_sign",
+          "zig": "privGpgSign"
+        },
+        {
+          "js": "__priv_gpg_verify",
+          "zig": "privGpgVerify"
+        },
+        {
+          "js": "__priv_gpg_list_keys",
+          "zig": "privGpgListKeys"
+        },
+        {
+          "js": "__priv_gpg_import",
+          "zig": "privGpgImport"
+        },
+        {
+          "js": "__priv_gpg_export",
+          "zig": "privGpgExport"
+        },
+        {
+          "js": "__priv_meta_strip",
+          "zig": "privMetaStrip"
+        },
+        {
+          "js": "__priv_meta_read",
+          "zig": "privMetaRead"
+        },
+        {
+          "js": "__priv_anonymous_id",
+          "zig": "privAnonymousId"
+        },
+        {
+          "js": "__priv_pseudonym",
+          "zig": "privPseudonym"
+        },
+        {
+          "js": "__priv_isolated_credential",
+          "zig": "privIsolatedCredential"
+        },
+        {
+          "js": "__priv_noise_initiate",
+          "zig": "privNoiseInitiate"
+        },
+        {
+          "js": "__priv_noise_respond",
+          "zig": "privNoiseRespond"
+        },
+        {
+          "js": "__priv_noise_send",
+          "zig": "privNoiseSend"
+        },
+        {
+          "js": "__priv_noise_receive",
+          "zig": "privNoiseReceive"
+        },
+        {
+          "js": "__priv_noise_close",
+          "zig": "privNoiseClose"
+        },
+        {
+          "js": "__priv_keyring_create",
+          "zig": "privKeyringCreate"
+        },
+        {
+          "js": "__priv_keyring_open",
+          "zig": "privKeyringOpen"
+        },
+        {
+          "js": "__priv_keyring_close",
+          "zig": "privKeyringClose"
+        },
+        {
+          "js": "__priv_keyring_generate",
+          "zig": "privKeyringGenerate"
+        },
+        {
+          "js": "__priv_keyring_list",
+          "zig": "privKeyringList"
+        },
+        {
+          "js": "__priv_keyring_get",
+          "zig": "privKeyringGet"
+        },
+        {
+          "js": "__priv_keyring_rotate",
+          "zig": "privKeyringRotate"
+        },
+        {
+          "js": "__priv_keyring_revoke",
+          "zig": "privKeyringRevoke"
+        },
+        {
+          "js": "__priv_keyring_export",
+          "zig": "privKeyringExport"
+        },
+        {
+          "js": "__priv_pii_detect",
+          "zig": "privPiiDetect"
+        },
+        {
+          "js": "__priv_pii_redact",
+          "zig": "privPiiRedact"
+        },
+        {
+          "js": "__priv_sanitize_html",
+          "zig": "privSanitizeHtml"
+        },
+        {
+          "js": "__priv_shamir_split",
+          "zig": "privShamirSplit"
+        },
+        {
+          "js": "__priv_shamir_combine",
+          "zig": "privShamirCombine"
+        },
+        {
+          "js": "__priv_envelope_encrypt",
+          "zig": "privEnvelopeEncrypt"
+        },
+        {
+          "js": "__priv_envelope_decrypt",
+          "zig": "privEnvelopeDecrypt"
+        },
+        {
+          "js": "__priv_steg_image_embed",
+          "zig": "privStegImageEmbed"
+        },
+        {
+          "js": "__priv_steg_image_extract",
+          "zig": "privStegImageExtract"
+        },
+        {
+          "js": "__priv_audit_create",
+          "zig": "privAuditCreate"
+        },
+        {
+          "js": "__priv_audit_append",
+          "zig": "privAuditAppend"
+        },
+        {
+          "js": "__priv_audit_verify",
+          "zig": "privAuditVerify"
+        },
+        {
+          "js": "__priv_audit_entries",
+          "zig": "privAuditEntries"
+        },
+        {
+          "js": "__priv_policy_set_retention",
+          "zig": "privPolicySetRetention"
+        },
+        {
+          "js": "__priv_policy_record_consent",
+          "zig": "privPolicyRecordConsent"
+        },
+        {
+          "js": "__priv_policy_check_consent",
+          "zig": "privPolicyCheckConsent"
+        },
+        {
+          "js": "__priv_policy_revoke_consent",
+          "zig": "privPolicyRevokeConsent"
+        },
+        {
+          "js": "__priv_policy_erasure",
+          "zig": "privPolicyErasure"
+        },
+        {
+          "js": "__priv_check_algorithm",
+          "zig": "privCheckAlgo"
+        },
+        {
+          "js": "__priv_sanitize_filename",
+          "zig": "privSanitizeFilename"
+        },
+        {
+          "js": "__priv_normalize_timestamp",
+          "zig": "privNormalizeTimestamp"
+        }
+      ]
+    },
+    "sdk": {
+      "required": false,
+      "module": "framework/v8_bindings_sdk.zig",
+      "registerFn": "registerSdk",
+      "grepPrefix": "__http_request_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__fetch",
+          "zig": "hostFetch"
+        },
+        {
+          "js": "__http_request_sync",
+          "zig": "hostHttpRequestSync"
+        },
+        {
+          "js": "__http_request_async",
+          "zig": "hostHttpRequestAsync"
+        },
+        {
+          "js": "__http_stream_open",
+          "zig": "hostHttpStreamOpen"
+        },
+        {
+          "js": "__http_stream_close",
+          "zig": "hostHttpStreamClose"
+        },
+        {
+          "js": "__http_download_to_file",
+          "zig": "hostHttpDownloadToFile"
+        },
+        {
+          "js": "__browser_page_sync",
+          "zig": "hostBrowserPageSync"
+        },
+        {
+          "js": "__browser_page_async",
+          "zig": "hostBrowserPageAsync"
+        },
+        {
+          "js": "__browse_request_sync",
+          "zig": "hostBrowseRequestSync"
+        },
+        {
+          "js": "__browse_request_async",
+          "zig": "hostBrowseRequestAsync"
+        },
+        {
+          "js": "__browse_set_port",
+          "zig": "hostBrowseSetPort"
+        },
+        {
+          "js": "__play_load",
+          "zig": "hostPlayLoad"
+        },
+        {
+          "js": "__play_play",
+          "zig": "hostPlayPlay"
+        },
+        {
+          "js": "__play_pause",
+          "zig": "hostPlayPause"
+        },
+        {
+          "js": "__play_toggle",
+          "zig": "hostPlayToggle"
+        },
+        {
+          "js": "__play_seek",
+          "zig": "hostPlaySeek"
+        },
+        {
+          "js": "__play_step",
+          "zig": "hostPlayStep"
+        },
+        {
+          "js": "__play_speed",
+          "zig": "hostPlaySpeed"
+        },
+        {
+          "js": "__play_state",
+          "zig": "hostPlayState"
+        },
+        {
+          "js": "__rec_start",
+          "zig": "hostRecStart"
+        },
+        {
+          "js": "__rec_stop",
+          "zig": "hostRecStop"
+        },
+        {
+          "js": "__rec_toggle",
+          "zig": "hostRecToggle"
+        },
+        {
+          "js": "__rec_save",
+          "zig": "hostRecSave"
+        },
+        {
+          "js": "__rec_is_recording",
+          "zig": "hostRecIsRecording"
+        },
+        {
+          "js": "__rec_frame_count",
+          "zig": "hostRecFrameCount"
+        },
+        {
+          "js": "__ipc_connect",
+          "zig": "hostIpcConnect"
+        },
+        {
+          "js": "__ipc_disconnect",
+          "zig": "hostIpcDisconnect"
+        },
+        {
+          "js": "__ipc_status",
+          "zig": "hostIpcStatus"
+        },
+        {
+          "js": "__ipc_perf",
+          "zig": "hostIpcPerf"
+        },
+        {
+          "js": "__ipc_poll",
+          "zig": "hostIpcPoll"
+        },
+        {
+          "js": "__ipc_enable_telemetry",
+          "zig": "hostIpcEnableTelemetry"
+        },
+        {
+          "js": "__ipc_request",
+          "zig": "hostIpcRequest"
+        },
+        {
+          "js": "__ipc_request_node",
+          "zig": "hostIpcRequestNode"
+        },
+        {
+          "js": "__ipc_response",
+          "zig": "hostIpcResponse"
+        },
+        {
+          "js": "__ipc_submit_code",
+          "zig": "hostIpcSubmitCode"
+        },
+        {
+          "js": "__ipc_tree_count",
+          "zig": "hostIpcTreeCount"
+        },
+        {
+          "js": "__ipc_tree_node",
+          "zig": "hostIpcTreeNode"
+        },
+        {
+          "js": "__sem_build_graph",
+          "zig": "hostSemBuildGraph"
+        },
+        {
+          "js": "__sem_cache_count",
+          "zig": "hostSemCacheCount"
+        },
+        {
+          "js": "__sem_cache_entry",
+          "zig": "hostSemCacheEntry"
+        },
+        {
+          "js": "__sem_export",
+          "zig": "hostSemExport"
+        },
+        {
+          "js": "__sem_frame",
+          "zig": "hostSemFrame"
+        },
+        {
+          "js": "__sem_has_diff",
+          "zig": "hostSemHasDiff"
+        },
+        {
+          "js": "__sem_node_count",
+          "zig": "hostSemNodeCount"
+        },
+        {
+          "js": "__sem_node",
+          "zig": "hostSemNode"
+        },
+        {
+          "js": "__sem_row_text",
+          "zig": "hostSemRowText"
+        },
+        {
+          "js": "__sem_row_token",
+          "zig": "hostSemRowToken"
+        },
+        {
+          "js": "__sem_set_mode",
+          "zig": "hostSemSetMode"
+        },
+        {
+          "js": "__sem_set_row_token",
+          "zig": "hostSemSetRowToken"
+        },
+        {
+          "js": "__sem_snapshot",
+          "zig": "hostSemSnapshot"
+        },
+        {
+          "js": "__sem_state",
+          "zig": "hostSemState"
+        },
+        {
+          "js": "__sem_tree",
+          "zig": "hostSemTree"
+        },
+        {
+          "js": "__sem_vterm_rows",
+          "zig": "hostSemVtermRows"
+        }
+      ]
+    },
+    "voice": {
+      "required": false,
+      "module": "framework/v8_bindings_voice.zig",
+      "registerFn": "registerVoice",
+      "grepPrefix": "__voice_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__voice_start",
+          "zig": "hostStart"
+        },
+        {
+          "js": "__voice_stop",
+          "zig": "hostStop"
+        },
+        {
+          "js": "__voice_set_mode",
+          "zig": "hostSetMode"
+        },
+        {
+          "js": "__voice_set_floor",
+          "zig": "hostSetFloor"
+        },
+        {
+          "js": "__voice_set_preview_stride_ms",
+          "zig": "hostSetPreviewStrideMs"
+        },
+        {
+          "js": "__voice_release_buffer",
+          "zig": "hostReleaseBuffer"
+        },
+        {
+          "js": "__audio_input_devices_json",
+          "zig": "hostRecordingDevicesJson"
+        },
+        {
+          "js": "__voice_recording_devices_json",
+          "zig": "hostRecordingDevicesJson"
+        },
+        {
+          "js": "__audio_output_devices_json",
+          "zig": "hostPlaybackDevicesJson"
+        }
+      ]
+    },
+    "audio_input": {
+      "required": false,
+      "module": "framework/v8_bindings_audio_input.zig",
+      "registerFn": "registerAudioInput",
+      "grepPrefix": "__rawCapture_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__rawCapture_start",
+          "zig": "hostStart"
+        },
+        {
+          "js": "__rawCapture_stop",
+          "zig": "hostStop"
+        },
+        {
+          "js": "__rawCapture_isRecording",
+          "zig": "hostIsRecording"
+        },
+        {
+          "js": "__rawCapture_level",
+          "zig": "hostLevel"
+        },
+        {
+          "js": "__rawCapture_wasCapped",
+          "zig": "hostWasCapped"
+        }
+      ]
+    },
+    "whisper": {
+      "required": false,
+      "module": "framework/v8_bindings_whisper.zig",
+      "registerFn": "registerWhisper",
+      "grepPrefix": "__whisper_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__whisper_transcribe",
+          "zig": "hostTranscribe"
+        }
+      ]
+    },
+    "onnx": {
+      "required": false,
+      "module": "framework/v8_bindings_onnx.zig",
+      "registerFn": "registerOnnx",
+      "grepPrefix": "__onnx_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__onnx_test",
+          "zig": "hostTest"
+        },
+        {
+          "js": "__segment_open",
+          "zig": "hostSegmentOpen"
+        },
+        {
+          "js": "__segment_close",
+          "zig": "hostSegmentClose"
+        },
+        {
+          "js": "__segment_refine",
+          "zig": "hostSegmentRefine"
+        }
+      ]
+    },
+    "pg": {
+      "required": false,
+      "module": "framework/v8_bindings_pg.zig",
+      "registerFn": "registerPg",
+      "grepPrefix": "__pg_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__pg_connect",
+          "zig": "hostConnect"
+        },
+        {
+          "js": "__pg_close",
+          "zig": "hostClose"
+        },
+        {
+          "js": "__pg_exec",
+          "zig": "hostExec"
+        },
+        {
+          "js": "__pg_query_json",
+          "zig": "hostQueryJson"
+        },
+        {
+          "js": "__pg_changes",
+          "zig": "hostChanges"
+        }
+      ]
+    },
+    "embed": {
+      "required": false,
+      "module": "framework/v8_bindings_embed.zig",
+      "registerFn": "registerEmbed",
+      "grepPrefix": "__embed_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__embed_load_model",
+          "zig": "hostLoadModel"
+        },
+        {
+          "js": "__embed_free_model",
+          "zig": "hostFreeModel"
+        },
+        {
+          "js": "__embed_n_dim",
+          "zig": "hostNDim"
+        },
+        {
+          "js": "__embed_text",
+          "zig": "hostEmbedText"
+        },
+        {
+          "js": "__embed_batch",
+          "zig": "hostEmbedBatch"
+        },
+        {
+          "js": "__embed_rerank",
+          "zig": "hostRerank"
+        },
+        {
+          "js": "__embed_store_open",
+          "zig": "hostStoreOpen"
+        },
+        {
+          "js": "__embed_store_close",
+          "zig": "hostStoreClose"
+        },
+        {
+          "js": "__embed_store_upsert",
+          "zig": "hostStoreUpsert"
+        },
+        {
+          "js": "__embed_ingest_start",
+          "zig": "hostIngestStart"
+        },
+        {
+          "js": "__embed_ingest_progress",
+          "zig": "hostIngestProgress"
+        },
+        {
+          "js": "__embed_ingest_cancel",
+          "zig": "hostIngestCancel"
+        },
+        {
+          "js": "__embed_store_search_json",
+          "zig": "hostStoreSearch"
+        }
+      ]
+    },
+    "video": {
+      "required": false,
+      "module": "framework/v8_bindings_video.zig",
+      "registerFn": "registerVideo",
+      "grepPrefix": "__video_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__video_set_paused",
+          "zig": "hostSetPaused"
+        },
+        {
+          "js": "__video_set_volume",
+          "zig": "hostSetVolume"
+        },
+        {
+          "js": "__video_set_muted",
+          "zig": "hostSetMuted"
+        },
+        {
+          "js": "__video_set_loop",
+          "zig": "hostSetLoop"
+        },
+        {
+          "js": "__video_seek",
+          "zig": "hostSeek"
+        },
+        {
+          "js": "__video_get_time",
+          "zig": "hostGetTime"
+        },
+        {
+          "js": "__video_get_duration",
+          "zig": "hostGetDuration"
+        },
+        {
+          "js": "__video_get_paused",
+          "zig": "hostGetPaused"
+        },
+        {
+          "js": "__video_get_status",
+          "zig": "hostGetStatus"
+        },
+        {
+          "js": "__video_get_dimensions",
+          "zig": "hostGetDimensions"
+        },
+        {
+          "js": "__video_count",
+          "zig": "hostCount"
+        }
+      ]
+    },
+    "audio": {
+      "required": false,
+      "module": "framework/v8_bindings_audio.zig",
+      "registerFn": "registerAudio",
+      "grepPrefix": "__audio_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__audioAddModule",
+          "zig": "hostAudioAddModule"
+        },
+        {
+          "js": "__audioRemoveModule",
+          "zig": "hostAudioRemoveModule"
+        },
+        {
+          "js": "__audioConnect",
+          "zig": "hostAudioConnect"
+        },
+        {
+          "js": "__audioDisconnect",
+          "zig": "hostAudioDisconnect"
+        },
+        {
+          "js": "__audioConnectModules",
+          "zig": "hostAudioConnectModules"
+        },
+        {
+          "js": "__audioDisconnectModules",
+          "zig": "hostAudioDisconnectModules"
+        },
+        {
+          "js": "__audioSetParam",
+          "zig": "hostAudioSetParam"
+        },
+        {
+          "js": "__audioNoteOn",
+          "zig": "hostAudioNoteOn"
+        },
+        {
+          "js": "__audioNoteOff",
+          "zig": "hostAudioNoteOff"
+        },
+        {
+          "js": "__audioMasterGain",
+          "zig": "hostAudioMasterGain"
+        },
+        {
+          "js": "__audioSetMasterVolume",
+          "zig": "hostAudioMasterGain"
+        },
+        {
+          "js": "__audioSetTempo",
+          "zig": "hostAudioSetTempo"
+        },
+        {
+          "js": "__audioMakeBeat",
+          "zig": "hostAudioMakeBeat"
+        },
+        {
+          "js": "__audioMakeBeatSlice",
+          "zig": "hostAudioMakeBeatSlice"
+        },
+        {
+          "js": "__audioMakePattern",
+          "zig": "hostAudioMakeBeat"
+        },
+        {
+          "js": "__audioMakeSlicePattern",
+          "zig": "hostAudioMakeBeatSlice"
+        },
+        {
+          "js": "__audioInsertMedia",
+          "zig": "hostAudioInsertMedia"
+        },
+        {
+          "js": "__audioFitMedia",
+          "zig": "hostAudioFitMedia"
+        },
+        {
+          "js": "__audioInsertMediaSection",
+          "zig": "hostAudioInsertMediaSection"
+        },
+        {
+          "js": "__audioClearTrack",
+          "zig": "hostAudioClearTrack"
+        },
+        {
+          "js": "__audioSetTrackVolume",
+          "zig": "hostAudioSetTrackVolume"
+        },
+        {
+          "js": "__audioSetTrackPan",
+          "zig": "hostAudioSetTrackPan"
+        },
+        {
+          "js": "__audioSetTrackMute",
+          "zig": "hostAudioSetTrackMute"
+        },
+        {
+          "js": "__audioSetTrackSolo",
+          "zig": "hostAudioSetTrackSolo"
+        },
+        {
+          "js": "__audioSetStepVelocity",
+          "zig": "hostAudioSetStepVelocity"
+        },
+        {
+          "js": "__audioSetStepProbability",
+          "zig": "hostAudioSetStepProbability"
+        },
+        {
+          "js": "__audioSetStepOffset",
+          "zig": "hostAudioSetStepOffset"
+        },
+        {
+          "js": "__audioSetStep",
+          "zig": "hostAudioSetStep"
+        },
+        {
+          "js": "__audioSetTrackTarget",
+          "zig": "hostAudioSetTrackTarget"
+        },
+        {
+          "js": "__audioClearPattern",
+          "zig": "hostAudioClearPattern"
+        },
+        {
+          "js": "__audioClockPulse",
+          "zig": "hostAudioClockPulse"
+        },
+        {
+          "js": "__audioClockStart",
+          "zig": "hostAudioClockStart"
+        },
+        {
+          "js": "__audioClockStop",
+          "zig": "hostAudioClockStop"
+        },
+        {
+          "js": "__audioDur",
+          "zig": "hostAudioDur"
+        },
+        {
+          "js": "__audioCreateAudioStretch",
+          "zig": "hostAudioCreateAudioStretch"
+        },
+        {
+          "js": "__audioCreateAudioSlice",
+          "zig": "hostAudioCreateAudioSlice"
+        },
+        {
+          "js": "__audioStretchSound",
+          "zig": "hostAudioCreateAudioStretch"
+        },
+        {
+          "js": "__audioSliceSound",
+          "zig": "hostAudioCreateAudioSlice"
+        },
+        {
+          "js": "__audioLoadSound",
+          "zig": "hostAudioLoadSound"
+        },
+        {
+          "js": "__audioLoadSample",
+          "zig": "hostAudioLoadSample"
+        },
+        {
+          "js": "__audioClearSample",
+          "zig": "hostAudioClearSample"
+        },
+        {
+          "js": "__audioPlay",
+          "zig": "hostAudioPlay"
+        },
+        {
+          "js": "__audioPause",
+          "zig": "hostAudioTransportPause"
+        },
+        {
+          "js": "__audioStop",
+          "zig": "hostAudioStop"
+        },
+        {
+          "js": "__audioSetPlayhead",
+          "zig": "hostAudioSetPlayhead"
+        },
+        {
+          "js": "__audioGetPlayhead",
+          "zig": "hostAudioGetPlayhead"
+        },
+        {
+          "js": "__audioIsPlaying",
+          "zig": "hostAudioIsPlaying"
+        },
+        {
+          "js": "__audioGetModuleCount",
+          "zig": "hostAudioGetModuleCount"
+        },
+        {
+          "js": "__audioGetConnectionCount",
+          "zig": "hostAudioGetConnectionCount"
+        },
+        {
+          "js": "__audioGetCallbackTime",
+          "zig": "hostAudioGetCallbackUs"
+        },
+        {
+          "js": "__audioGetPeakLevel",
+          "zig": "hostAudioGetPeakLevel"
+        },
+        {
+          "js": "__audio_init",
+          "zig": "hostAudioInit"
+        },
+        {
+          "js": "__audio_deinit",
+          "zig": "hostAudioDeinit"
+        },
+        {
+          "js": "__audio_is_initialized",
+          "zig": "hostAudioIsInitialized"
+        },
+        {
+          "js": "__audio_pause",
+          "zig": "hostAudioPause"
+        },
+        {
+          "js": "__audio_resume",
+          "zig": "hostAudioResume"
+        },
+        {
+          "js": "__audio_add_module",
+          "zig": "hostAudioAddModule"
+        },
+        {
+          "js": "__audio_remove_module",
+          "zig": "hostAudioRemoveModule"
+        },
+        {
+          "js": "__audio_connect",
+          "zig": "hostAudioConnect"
+        },
+        {
+          "js": "__audio_disconnect",
+          "zig": "hostAudioDisconnect"
+        },
+        {
+          "js": "__audio_connect_modules",
+          "zig": "hostAudioConnectModules"
+        },
+        {
+          "js": "__audio_disconnect_modules",
+          "zig": "hostAudioDisconnectModules"
+        },
+        {
+          "js": "__audio_set_param",
+          "zig": "hostAudioSetParam"
+        },
+        {
+          "js": "__audio_get_param",
+          "zig": "hostAudioGetParam"
+        },
+        {
+          "js": "__audio_note_on",
+          "zig": "hostAudioNoteOn"
+        },
+        {
+          "js": "__audio_note_off",
+          "zig": "hostAudioNoteOff"
+        },
+        {
+          "js": "__audio_set_master_gain",
+          "zig": "hostAudioMasterGain"
+        },
+        {
+          "js": "__audio_set_master_volume",
+          "zig": "hostAudioMasterGain"
+        },
+        {
+          "js": "__audio_set_tempo",
+          "zig": "hostAudioSetTempo"
+        },
+        {
+          "js": "__audio_make_beat",
+          "zig": "hostAudioMakeBeat"
+        },
+        {
+          "js": "__audio_make_beat_slice",
+          "zig": "hostAudioMakeBeatSlice"
+        },
+        {
+          "js": "__audio_make_pattern",
+          "zig": "hostAudioMakeBeat"
+        },
+        {
+          "js": "__audio_make_slice_pattern",
+          "zig": "hostAudioMakeBeatSlice"
+        },
+        {
+          "js": "__audio_insert_media",
+          "zig": "hostAudioInsertMedia"
+        },
+        {
+          "js": "__audio_fit_media",
+          "zig": "hostAudioFitMedia"
+        },
+        {
+          "js": "__audio_insert_media_section",
+          "zig": "hostAudioInsertMediaSection"
+        },
+        {
+          "js": "__audio_clear_track",
+          "zig": "hostAudioClearTrack"
+        },
+        {
+          "js": "__audio_set_track_volume",
+          "zig": "hostAudioSetTrackVolume"
+        },
+        {
+          "js": "__audio_set_track_pan",
+          "zig": "hostAudioSetTrackPan"
+        },
+        {
+          "js": "__audio_set_track_mute",
+          "zig": "hostAudioSetTrackMute"
+        },
+        {
+          "js": "__audio_set_track_solo",
+          "zig": "hostAudioSetTrackSolo"
+        },
+        {
+          "js": "__audio_set_step_velocity",
+          "zig": "hostAudioSetStepVelocity"
+        },
+        {
+          "js": "__audio_set_step_probability",
+          "zig": "hostAudioSetStepProbability"
+        },
+        {
+          "js": "__audio_set_step_offset",
+          "zig": "hostAudioSetStepOffset"
+        },
+        {
+          "js": "__audio_set_step",
+          "zig": "hostAudioSetStep"
+        },
+        {
+          "js": "__audio_set_track_target",
+          "zig": "hostAudioSetTrackTarget"
+        },
+        {
+          "js": "__audio_clear_pattern",
+          "zig": "hostAudioClearPattern"
+        },
+        {
+          "js": "__audio_clock_pulse",
+          "zig": "hostAudioClockPulse"
+        },
+        {
+          "js": "__audio_clock_start",
+          "zig": "hostAudioClockStart"
+        },
+        {
+          "js": "__audio_clock_stop",
+          "zig": "hostAudioClockStop"
+        },
+        {
+          "js": "__audio_dur",
+          "zig": "hostAudioDur"
+        },
+        {
+          "js": "__audio_create_audio_stretch",
+          "zig": "hostAudioCreateAudioStretch"
+        },
+        {
+          "js": "__audio_create_audio_slice",
+          "zig": "hostAudioCreateAudioSlice"
+        },
+        {
+          "js": "__audio_stretch_sound",
+          "zig": "hostAudioCreateAudioStretch"
+        },
+        {
+          "js": "__audio_slice_sound",
+          "zig": "hostAudioCreateAudioSlice"
+        },
+        {
+          "js": "__audio_load_sound",
+          "zig": "hostAudioLoadSound"
+        },
+        {
+          "js": "__audio_load_sample",
+          "zig": "hostAudioLoadSample"
+        },
+        {
+          "js": "__audio_clear_sample",
+          "zig": "hostAudioClearSample"
+        },
+        {
+          "js": "__audio_play",
+          "zig": "hostAudioPlay"
+        },
+        {
+          "js": "__audio_transport_pause",
+          "zig": "hostAudioTransportPause"
+        },
+        {
+          "js": "__audio_stop",
+          "zig": "hostAudioStop"
+        },
+        {
+          "js": "__audio_set_playhead",
+          "zig": "hostAudioSetPlayhead"
+        },
+        {
+          "js": "__audio_get_playhead",
+          "zig": "hostAudioGetPlayhead"
+        },
+        {
+          "js": "__audio_is_playing",
+          "zig": "hostAudioIsPlaying"
+        },
+        {
+          "js": "__audio_get_module_count",
+          "zig": "hostAudioGetModuleCount"
+        },
+        {
+          "js": "__audio_get_connection_count",
+          "zig": "hostAudioGetConnectionCount"
+        },
+        {
+          "js": "__audio_get_callback_count",
+          "zig": "hostAudioGetCallbackCount"
+        },
+        {
+          "js": "__audio_get_callback_us",
+          "zig": "hostAudioGetCallbackUs"
+        },
+        {
+          "js": "__audio_get_sample_rate",
+          "zig": "hostAudioGetSampleRate"
+        },
+        {
+          "js": "__audio_get_buffer_size",
+          "zig": "hostAudioGetBufferSize"
+        },
+        {
+          "js": "__audio_get_peak_level",
+          "zig": "hostAudioGetPeakLevel"
+        },
+        {
+          "js": "__audio_get_param_count",
+          "zig": "hostAudioGetParamCount"
+        },
+        {
+          "js": "__audio_get_port_count",
+          "zig": "hostAudioGetPortCount"
+        },
+        {
+          "js": "__audio_get_module_type",
+          "zig": "hostAudioGetModuleType"
+        },
+        {
+          "js": "__audio_get_param_min",
+          "zig": "hostAudioGetParamMin"
+        },
+        {
+          "js": "__audio_get_param_max",
+          "zig": "hostAudioGetParamMax"
+        }
+      ]
+    },
+    "midi": {
+      "required": false,
+      "module": "framework/v8_bindings_midi.zig",
+      "registerFn": "registerMidi",
+      "grepPrefix": "__midi_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__midiStart",
+          "zig": "hostMidiStart"
+        },
+        {
+          "js": "__midiStop",
+          "zig": "hostMidiStop"
+        },
+        {
+          "js": "__midiIsAvailable",
+          "zig": "hostMidiIsAvailable"
+        },
+        {
+          "js": "__midiPoll",
+          "zig": "hostMidiPoll"
+        },
+        {
+          "js": "__midiDevicesJson",
+          "zig": "hostMidiDevicesJson"
+        },
+        {
+          "js": "__midiNextEventJson",
+          "zig": "hostMidiNextEventJson"
+        },
+        {
+          "js": "__midi_start",
+          "zig": "hostMidiStart"
+        },
+        {
+          "js": "__midi_stop",
+          "zig": "hostMidiStop"
+        },
+        {
+          "js": "__midi_is_available",
+          "zig": "hostMidiIsAvailable"
+        },
+        {
+          "js": "__midi_poll",
+          "zig": "hostMidiPoll"
+        },
+        {
+          "js": "__midi_devices_json",
+          "zig": "hostMidiDevicesJson"
+        },
+        {
+          "js": "__midi_next_event_json",
+          "zig": "hostMidiNextEventJson"
+        }
+      ]
+    },
+    "vterm": {
+      "required": false,
+      "module": "framework/v8_bindings_vterm.zig",
+      "registerFn": "registerVterm",
+      "grepPrefix": "__vterm_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__terminal_set_cwd",
+          "zig": "hostTerminalSetCwd"
+        },
+        {
+          "js": "__vterm_open",
+          "zig": "hostVtermOpen"
+        },
+        {
+          "js": "__vterm_spawn",
+          "zig": "hostVtermOpen"
+        },
+        {
+          "js": "__vterm_close",
+          "zig": "hostVtermClose"
+        },
+        {
+          "js": "__vterm_poll",
+          "zig": "hostVtermPoll"
+        },
+        {
+          "js": "__vterm_write",
+          "zig": "hostVtermWrite"
+        },
+        {
+          "js": "__vterm_resize",
+          "zig": "hostVtermResize"
+        },
+        {
+          "js": "__vterm_get_row",
+          "zig": "hostVtermGetRow"
+        },
+        {
+          "js": "__vterm_scroll",
+          "zig": "hostVtermScroll"
+        },
+        {
+          "js": "__vterm_get_mouse_mode",
+          "zig": "hostVtermGetMouseMode"
+        }
+      ]
+    },
+    "doom": {
+      "required": false,
+      "module": "framework/v8_bindings_doom.zig",
+      "registerFn": "registerDoom",
+      "grepPrefix": "__doom_",
+      "tickDrain": "real",
+      "hostFns": [
+        {
+          "js": "__doom_init",
+          "zig": "hostInit"
+        },
+        {
+          "js": "__doom_tick",
+          "zig": "hostTick"
+        },
+        {
+          "js": "__doom_is_ready",
+          "zig": "hostIsReady"
+        },
+        {
+          "js": "__doom_framebuffer",
+          "zig": "hostFramebuffer"
+        },
+        {
+          "js": "__doom_key",
+          "zig": "hostKey"
+        }
+      ]
+    },
+    "paintable": {
+      "required": false,
+      "module": "framework/v8_bindings_paintable.zig",
+      "registerFn": "registerPaintable",
+      "grepPrefix": "__paintable_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__paintable_circle",
+          "zig": "paintCircle"
+        },
+        {
+          "js": "__paintable_circle_edge",
+          "zig": "paintCircleEdge"
+        },
+        {
+          "js": "__paintable_polygon",
+          "zig": "paintPolygon"
+        },
+        {
+          "js": "__paintable_clear",
+          "zig": "paintClear"
+        },
+        {
+          "js": "__paintable_upload",
+          "zig": "paintUpload"
+        },
+        {
+          "js": "__paintable_readback",
+          "zig": "paintReadback"
+        }
+      ]
+    }
+  }
+}

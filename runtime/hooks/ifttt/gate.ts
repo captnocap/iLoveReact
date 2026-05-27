@@ -30,7 +30,7 @@
 // from data — the binder for the Pathology dictionary, for instance,
 // can call `registerGate` once per row.
 
-import { subscribe } from '../ffi';
+import { subscribe } from '../../ffi';
 
 export interface GateOptions<A = any, S = any, R = any> {
   /** Bus channel that opens the verification window. */

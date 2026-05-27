@@ -146,14 +146,14 @@ function readme(ctx, templateName) {
     : templateName === 'stdlib'
     ? [
       '- `index.tsx` is the cart entry point and stdlib primitive example.',
-      '- `style_cls.tsx` registers classifier components with `theme:` tokens.',
+      '- `style.cls.ts` registers classifier components with `theme:` tokens.',
       '- `theme.ts` defines the local color and style palette.',
       '- `media/sample.mp4` is the video path used by the generated `<video>` example.',
       '- `cart.json` controls the host window metadata.',
     ]
     : [
       '- `index.tsx` is the cart entry point and app behavior.',
-      '- `style_cls.tsx` registers classifier components with `theme:` tokens.',
+      '- `style.cls.ts` registers classifier components with `theme:` tokens.',
       '- `theme.ts` defines the local color and style palette.',
       '- `cart.json` controls the host window metadata.',
     ];
@@ -386,8 +386,8 @@ export { C };
 function routesIndex(ctx) {
   return `import { Route, Router, useNavigate } from '${ctx.routerImport}';
 import { ThemeProvider } from '${ctx.themeImport}';
-import './style_cls';
-import { C } from './style_cls';
+import './style.cls';
+import { C } from './style.cls';
 import { APP_COLORS, APP_STYLES } from './theme';
 
 function Home() {
@@ -421,7 +421,7 @@ function Shell() {
           <C.AppTitleBlock>
             <C.AppKicker>ROUTED CART</C.AppKicker>
             <C.AppTitle>${ctx.title}</C.AppTitle>
-            <C.AppSubtle>Edit ${displayPath(ctx.targetDir)}/index.tsx and style_cls.tsx.</C.AppSubtle>
+            <C.AppSubtle>Edit ${displayPath(ctx.targetDir)}/index.tsx and style.cls.ts.</C.AppSubtle>
           </C.AppTitleBlock>
           <C.AppNav>
             <C.AppNavItem onPress={() => nav.push('/')}><C.AppNavText>Home</C.AppNavText></C.AppNavItem>
@@ -453,8 +453,8 @@ export default function App() {
 function dashboardIndex(ctx) {
   return `import { Route, Router, useNavigate } from '${ctx.routerImport}';
 import { ThemeProvider } from '${ctx.themeImport}';
-import './style_cls';
-import { C } from './style_cls';
+import './style.cls';
+import { C } from './style.cls';
 import { APP_COLORS, APP_STYLES } from './theme';
 
 const metrics = [
@@ -477,7 +477,7 @@ function Overview() {
       </C.AppRow>
       <C.AppPanel>
         <C.AppPanelTitle>Where to edit</C.AppPanelTitle>
-        <C.AppSubtle>Build app behavior in index.tsx. Put reusable theme-token styles in style_cls.tsx.</C.AppSubtle>
+        <C.AppSubtle>Build app behavior in index.tsx. Put reusable theme-token styles in style.cls.ts.</C.AppSubtle>
       </C.AppPanel>
     </C.AppBody>
   );
@@ -534,8 +534,8 @@ export default function App() {
 function taskboardIndex(ctx) {
   return `import React from 'react';
 import { ThemeProvider } from '${ctx.themeImport}';
-import './style_cls';
-import { C } from './style_cls';
+import './style.cls';
+import { C } from './style.cls';
 import { APP_COLORS, APP_STYLES } from './theme';
 
 const initialTasks = ['Wire up host data', 'Tune classifier tokens', 'Ship the cart'];
@@ -558,7 +558,7 @@ export default function App() {
             <C.AppTitleBlock>
               <C.AppKicker>TASKBOARD</C.AppKicker>
               <C.AppTitle>${ctx.title}</C.AppTitle>
-              <C.AppSubtle>Edit index.tsx for behavior and style_cls.tsx for theme-token components.</C.AppSubtle>
+              <C.AppSubtle>Edit index.tsx for behavior and style.cls.ts for theme-token components.</C.AppSubtle>
             </C.AppTitleBlock>
             <C.AppBadge><C.AppBadgeText>{tasks.length} tasks</C.AppBadgeText></C.AppBadge>
           </C.AppHeader>
@@ -587,8 +587,8 @@ export default function App() {
 function canvasIndex(ctx) {
   return `import { Canvas } from '${ctx.primitivesImport}';
 import { ThemeProvider } from '${ctx.themeImport}';
-import './style_cls';
-import { C } from './style_cls';
+import './style.cls';
+import { C } from './style.cls';
 import { APP_COLORS, APP_STYLES } from './theme';
 
 const nodes = [
@@ -636,8 +636,8 @@ function stdlibIndex(ctx) {
 import { Icon } from '${ctx.iconImport}';
 import { Activity, Boxes, ChartLine, Film, Waypoints } from '${ctx.iconPackImport}';
 import { ThemeProvider } from '${ctx.themeImport}';
-import './style_cls';
-import { C } from './style_cls';
+import './style.cls';
+import { C } from './style.cls';
 import { APP_COLORS, APP_STYLES } from './theme';
 
 const iconRows = [
@@ -744,7 +744,7 @@ const templates = {
     files: (ctx) => ({
       'index.tsx': routesIndex(ctx),
       'theme.ts': themeSource(ctx.themeImport),
-      'style_cls.tsx': styleClsSource(ctx.classifierImport),
+      'style.cls.ts': styleClsSource(ctx.classifierImport),
     }),
   },
   dashboard: {
@@ -754,7 +754,7 @@ const templates = {
     files: (ctx) => ({
       'index.tsx': dashboardIndex(ctx),
       'theme.ts': themeSource(ctx.themeImport),
-      'style_cls.tsx': styleClsSource(ctx.classifierImport),
+      'style.cls.ts': styleClsSource(ctx.classifierImport),
     }),
   },
   taskboard: {
@@ -764,7 +764,7 @@ const templates = {
     files: (ctx) => ({
       'index.tsx': taskboardIndex(ctx),
       'theme.ts': themeSource(ctx.themeImport),
-      'style_cls.tsx': styleClsSource(ctx.classifierImport),
+      'style.cls.ts': styleClsSource(ctx.classifierImport),
     }),
   },
   canvas: {
@@ -774,7 +774,7 @@ const templates = {
     files: (ctx) => ({
       'index.tsx': canvasIndex(ctx),
       'theme.ts': themeSource(ctx.themeImport),
-      'style_cls.tsx': styleClsSource(ctx.classifierImport),
+      'style.cls.ts': styleClsSource(ctx.classifierImport),
     }),
   },
   stdlib: {
@@ -784,7 +784,7 @@ const templates = {
     files: (ctx) => ({
       'index.tsx': stdlibIndex(ctx),
       'theme.ts': themeSource(ctx.themeImport),
-      'style_cls.tsx': styleClsSource(ctx.classifierImport),
+      'style.cls.ts': styleClsSource(ctx.classifierImport),
       'media/README.md': mediaReadme(),
     }),
   },
@@ -796,7 +796,7 @@ const template = templates[parsed.template];
 if (!template) die('unknown template: ' + parsed.template, 2);
 
 const targetDir = resolveTarget(parsed.directory);
-if (__exists(targetDir)) die('target already exists: ' + displayPath(targetDir), 1);
+if (__fs_exists(targetDir)) die('target already exists: ' + displayPath(targetDir), 1);
 
 const name = cartNameFor(targetDir);
 const title = name.split(/[-_]+/).filter(Boolean).map((part) => part.slice(0, 1).toUpperCase() + part.slice(1)).join(' ') || name;
@@ -814,7 +814,7 @@ const ctx = {
   iconPackImport: importPath(targetDir, 'icons/icons'),
 };
 
-if (!__mkdirp(targetDir)) die('failed to create ' + displayPath(targetDir), 1);
+if (!__fs_mkdir(targetDir)) die('failed to create ' + displayPath(targetDir), 1);
 
 const files = template.files(ctx);
 files['cart.json'] = manifest(title, template.description, template.width, template.height);
@@ -825,8 +825,8 @@ for (let i = 0; i < fileNames.length; i++) {
   const fileName = fileNames[i];
   const path = joinPath(targetDir, fileName);
   const parent = dirname(path);
-  if (!__exists(parent) && !__mkdirp(parent)) die('failed to create ' + displayPath(parent), 1);
-  if (!__writeFile(path, files[fileName])) die('failed to write ' + displayPath(path), 1);
+  if (!__fs_exists(parent) && !__fs_mkdir(parent)) die('failed to create ' + displayPath(parent), 1);
+  if (!__fs_write(path, files[fileName])) die('failed to write ' + displayPath(path), 1);
 }
 
 __writeStdout('[init] created ' + displayPath(targetDir) + '\n');

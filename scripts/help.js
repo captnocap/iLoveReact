@@ -72,7 +72,7 @@ const SUBCOMMAND_DOC = {
 };
 
 function readRegistry() {
-  const raw = __readFile(REGISTRY_PATH);
+  const raw = __fs_read(REGISTRY_PATH);
   if (raw === null) return null;
   try {
     return JSON.parse(raw);

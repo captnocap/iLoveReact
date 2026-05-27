@@ -28,8 +28,8 @@ import { isInputClaimed, getCopyOverride } from './services/InputClaim';
 
 const { useState, useEffect } = React;
 
-declare const __exists: ((path: string) => boolean) | undefined;
-const probeHost = (): boolean => (typeof __exists === 'function') ? __exists('/tmp/reactjit.sock') : false;
+declare const __fs_exists: ((path: string) => boolean) | undefined;
+const probeHost = (): boolean => (typeof __fs_exists === 'function') ? __fs_exists('/tmp/reactjit.sock') : false;
 
 installShellTokens();
 

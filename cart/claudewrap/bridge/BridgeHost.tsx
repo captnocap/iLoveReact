@@ -26,7 +26,9 @@ import * as React from 'react';
 import { useHost } from '../../../runtime/hooks/useHost';
 import { useFileWatch } from '../../../runtime/hooks/useFileWatch';
 import { callHost } from '../../../runtime/ffi';
-import { ensureClaudeLauncher } from './launcher';
+import { writeFile, readFile } from '../../../runtime/hooks/fs';
+import { ensureClaudeLauncher, isBridgeModel, type BridgeModel } from './launcher';
+import { SessionPool } from './session-pool';
 import {
   MCP_PROTOCOL_VERSION,
   RESPOND_TOOL,
@@ -42,20 +44,72 @@ import {
   findClaudeTranscriptReply,
   transcriptDiagnostics,
   describeCandidates,
+  parseAssistantTurn,
 } from './transcript';
 import { claudeProjectDir, cwdGet, envGet, nowSeconds, randHex, runtimeDir } from './common';
 import { pushTrace } from './trace-store';
-import { useSettings } from '../state';
 import type { BridgeTrace, PendingCompletion, PendingToolCall } from './types';
 
 const MODEL_ID = 'live-claude-code';
-const POLL_MS = 500;
-const MAX_WAIT_MS = 120_000;
 const TRANSCRIPT_POLL_MS = 250;
-// Wait long enough for Claude to flush stop_reason="end_turn" on a
-// normal text response (2–5s) before the terminal-scrape fallback
-// races in.
-const TERMINAL_FALLBACK_GRACE_MS = 10_000;
+
+// Models the headless pool exposes. Each selects WHERE claude runs; the
+// pool spawns one process per thread of whichever model the request
+// names. (Attached/claudewrap mode ignores this and serves its single
+// visible <Terminal> claude under the legacy MODEL_ID.)
+const POOL_MODELS: BridgeModel[] = ['disk-claude', 'firecracker-claude'];
+const DEFAULT_POOL_MODEL: BridgeModel = 'disk-claude';
+// Tear down a thread's claude after this much inactivity so abandoned
+// threads don't leave processes running forever.
+const POOL_IDLE_EVICT_MS = 30 * 60 * 1000;
+const POOL_EVICT_SWEEP_MS = 60 * 1000;
+const BRIDGE_TMP_DIR = '/tmp/reactjit-bridge';
+// A freshly-spawned claude may not be ready for the first paste yet. If
+// our user message hasn't landed in the transcript after this long, the
+// paste was likely dropped — re-paste (up to POOL_MAX_PASTES). Never
+// re-paste once the user entry IS present (that would duplicate input).
+const POOL_REPASTE_GRACE_MS = 4000;
+const POOL_MAX_PASTES = 3;
+// Hard ceiling on a turn so the HTTP request always completes — without
+// it a dropped prompt or a wedged claude would hang forever.
+const POOL_TURN_TIMEOUT_MS = 180_000;
+
+// Per-thread state for a single in-flight turn. Keyed by `${chatId}-
+// ${turnId}` in the pool path so concurrent threads never clobber each
+// other's MCP buffer / resolvers (the legacy attached path keeps using
+// the singleton refs below).
+interface PooledTurn {
+  chatId: string;
+  turnId: string;
+  endMarker: string;
+  sid: string;
+  pipe: string;
+  tools: any[];
+  system: string;
+  mcpBuffer: string[];
+  pending: PendingCompletion | null;
+  resolveText: ((text: string) => void) | null;
+  resolveTools: ((toolCalls: any[]) => void) | null;
+  trace: BridgeTrace;
+}
+
+// The bridge-protocol-inject.sh UserPromptSubmit hook reads a per-sid
+// marker so each concurrent claude picks up ITS OWN turn's directive.
+function writeTurnMarker(sid: string, directiveText: string, chatId: string, turnId: string, endMarker: string): void {
+  try {
+    writeFile(`${BRIDGE_TMP_DIR}/active-turn-${sid}.json`, JSON.stringify({
+      written_at_ms: Date.now(),
+      sid,
+      chat_id: chatId,
+      turn_id: turnId,
+      end_marker: endMarker,
+      directive_text: directiveText,
+    }));
+  } catch {
+    // Best-effort: claude still answers without the directive, the reply
+    // just lands via transcript end_turn rather than bridge.respond.
+  }
+}
 
 const ROUTES = [
   { path: '/', kind: 'handler' as const },
@@ -118,45 +172,23 @@ function writePty(data: string): void {
   callHost('__vterm_write', undefined as any, SESSION, data);
 }
 
+// Pool path: write into a specific thread's pipe rather than the shared
+// default session.
+function writePtyTo(pipe: string, data: string): void {
+  callHost('__vterm_write', undefined as any, pipe, data);
+}
+
+// Paste a user prompt as a bracketed-paste block + Enter (matches the
+// legacy writePty prompt format).
+function pastePrompt(pipe: string, prompt: string): void {
+  writePtyTo(pipe, `\x1b[200~${prompt}\x1b[201~\r`);
+}
+
 function allRowsText(): string[] {
   const n = vtermRows();
   const out: string[] = [];
   for (let i = 0; i < n; i++) out.push(rowText(i));
   return out;
-}
-
-function compactLines(text: string): string {
-  return text
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter((line) => line.trim().length > 0)
-    .join('\n')
-    .trim();
-}
-
-function assistantText(): string {
-  semBuildGraph();
-  const exported = semExport() as any;
-  const rows = Array.isArray(exported?.rows) ? exported.rows : [];
-  const assistantRows = rows
-    .filter((row: any) => row?.kind === 'assistant_text' || row?.role === 'assistant')
-    .map((row: any) => String(row.text ?? '').trimEnd())
-    .filter((line: string) => line.trim().length > 0);
-  if (assistantRows.length > 0) return compactLines(assistantRows.join('\n'));
-
-  // Fallback for early classifier misses: visible rows minus obvious
-  // UI chrome.
-  return compactLines(
-    allRowsText()
-      .filter((line) => {
-        const t = line.trim();
-        if (!t) return false;
-        if (t.includes('http://localhost:')) return false;
-        if (t.startsWith('claude-openai-bridge')) return false;
-        return true;
-      })
-      .join('\n'),
-  );
 }
 
 function terminalSessionPrefix(): string {
@@ -168,14 +200,6 @@ function terminalSessionPrefix(): string {
   return '';
 }
 
-function stripPrefix(before: string, after: string): string {
-  if (!before) return after;
-  if (after.startsWith(before)) return after.slice(before.length).trim();
-  const idx = after.lastIndexOf(before);
-  if (idx >= 0) return after.slice(idx + before.length).trim();
-  return after;
-}
-
 // ── Request → prompt extraction ────────────────────────────────────
 
 function messagePartText(part: any): string {
@@ -185,7 +209,12 @@ function messagePartText(part: any): string {
   return '';
 }
 
-function extractPrompt(body: any): string {
+interface ExtractedPrompt {
+  system: string;
+  user: string;
+}
+
+function extractPrompt(body: any): ExtractedPrompt {
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const system = messages
     .filter((m: any) => m?.role === 'system')
@@ -197,17 +226,23 @@ function extractPrompt(body: any): string {
   const user = Array.isArray(userContent)
     ? userContent.map(messagePartText).filter(Boolean).join('\n')
     : String(userContent ?? '');
-  return system ? `${system}\n\n${user}` : user;
+  return { system, user };
 }
 
 // ── Response shaping ────────────────────────────────────────────────
 
-function completionResponse(content: string, model = MODEL_ID, trace?: BridgeTrace): string {
+// `externalSessionId` carries claude's self-assigned sid back to the
+// caller (the RETURN path). The thread persists it and sends it as the
+// resume key (`user`) on its next turn, so the same claude process keeps
+// serving that thread. Surfaced both top-level and per-chunk so the
+// openai_compat worker can read it from streaming or non-streaming.
+function completionResponse(content: string, model = MODEL_ID, trace?: BridgeTrace, externalSessionId?: string): string {
   return JSON.stringify({
     id: `chatcmpl-claude-pty-${Date.now()}`,
     object: 'chat.completion',
     created: nowSeconds(),
     model,
+    external_session_id: externalSessionId,
     choices: [{
       index: 0,
       message: { role: 'assistant', content },
@@ -218,7 +253,7 @@ function completionResponse(content: string, model = MODEL_ID, trace?: BridgeTra
   });
 }
 
-function streamingResponseBody(content: string, model = MODEL_ID): string {
+function streamingResponseBody(content: string, model = MODEL_ID, externalSessionId?: string): string {
   const id = `chatcmpl-claude-pty-${Date.now()}`;
   const created = nowSeconds();
   const chunk = (delta: any, finish: string | null) => JSON.stringify({
@@ -226,6 +261,7 @@ function streamingResponseBody(content: string, model = MODEL_ID): string {
     object: 'chat.completion.chunk',
     created,
     model,
+    external_session_id: externalSessionId,
     choices: [{ index: 0, delta, finish_reason: finish }],
   });
   return (
@@ -239,48 +275,62 @@ function errorResponse(message: string): string {
   return JSON.stringify({ error: { message, type: 'claude_pty_bridge_error' } });
 }
 
-// ── Terminal-scrape fallback ───────────────────────────────────────
-
-async function waitForClaudeReply(beforeText: string): Promise<string> {
-  const startedAt = Date.now();
-  let sawBusy = false;
-  let idleTicks = 0;
-  let stableTicks = 0;
-  let lastText = assistantText();
-
-  while (Date.now() - startedAt < MAX_WAIT_MS) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_MS));
-    semBuildGraph();
-    const state = semState() as any;
-    const busy = !!(state?.is_thinking || state?.is_responding || state?.is_tool_using || state?.permission_pending);
-    const currentText = assistantText();
-    const changed = currentText !== lastText;
-
-    if (busy) sawBusy = true;
-    idleTicks = busy ? 0 : idleTicks + 1;
-    stableTicks = changed ? 0 : stableTicks + 1;
-    lastText = currentText;
-
-    const delta = stripPrefix(beforeText, currentText);
-    if (delta && (sawBusy ? idleTicks >= 3 : stableTicks >= 6)) return delta;
-  }
-
-  const finalText = stripPrefix(beforeText, assistantText());
-  return finalText || '(timed out waiting for Claude Code output; inspect /rows and /export)';
-}
-
 // ── Component ──────────────────────────────────────────────────────
 
-export function BridgeHost() {
-  const { bridgePort } = useSettings();
+export interface BridgeHostProps {
+  /** Port the OpenAI-compatible HTTP server binds. In claudewrap this
+   *  comes from the settings store; tui_app passes a fixed port. */
+  port: number;
+  /** Headless mode. When set, BridgeHost spawns this shell INTO the
+   *  vterm session itself (via __vterm_open) and pumps the PTY on a
+   *  timer — no visible <Terminal> required. claudewrap leaves this
+   *  unset because its <Terminal session="default"> already owns the
+   *  pipe; tui_app passes the host claude launcher so an interactive
+   *  claude runs entirely behind the scenes. Both modes drive the same
+   *  DEFAULT_SESSION pipe the readers below address. */
+  spawnShell?: string;
+  /** PTY geometry for the self-spawned shell. Ignored when spawnShell
+   *  is unset (the <Terminal> owns geometry in attached mode). */
+  rows?: number;
+  cols?: number;
+}
 
-  // Materialize the launcher + MCP config once. ensureClaudeLauncher
-  // is idempotent so re-running on settings changes is fine.
+export function BridgeHost({ port, spawnShell, rows = 40, cols = 120 }: BridgeHostProps) {
+  // Headless = tui_app (we own the processes via the pool). Attached =
+  // claudewrap (a visible <Terminal session="default"> owns one claude;
+  // we never spawn).
+  const headless = !!spawnShell;
+
+  // The per-thread process pool. Headless only. Each open thread holds
+  // its own claude process keyed by claude's self-assigned sid.
+  const poolRef = React.useRef<SessionPool | null>(null);
+  if (headless && !poolRef.current) {
+    poolRef.current = new SessionPool({ port, rows, cols });
+  }
+  // In-flight pooled turns, keyed by `${chatId}-${turnId}`, plus a
+  // sid → turnKey index so MCP calls (which carry chat_id/turn_id) and
+  // the /directive lookup can find the owning turn.
+  const turnsRef = React.useRef<Map<string, PooledTurn>>(new Map());
+
   React.useEffect(() => {
-    ensureClaudeLauncher(bridgePort);
-  }, [bridgePort]);
+    ensureClaudeLauncher(port);
+    if (!headless) return;
+    const pool = poolRef.current!;
+    pool.start();
+    const evict = setInterval(() => pool.evictIdle(POOL_IDLE_EVICT_MS), POOL_EVICT_SWEEP_MS);
+    return () => {
+      clearInterval(evict);
+      // Tear down every thread's claude. closePipe → Pty.closePty closes
+      // the master fd, SIGTERMs the spawned claude, spin-waits, SIGKILLs
+      // if stubborn, and reaps it — so no headless claude outlives the
+      // bridge that owns it.
+      pool.stop();
+    };
+  }, [port, headless]);
 
-  // Cross-handler refs — same shape the source bridge used.
+  // Cross-handler refs — same shape the source bridge used. These back
+  // the LEGACY (attached) single-turn path; the pooled path uses the
+  // per-turn PooledTurn records in turnsRef instead.
   const queueRef = React.useRef(Promise.resolve());
   const pendingRef = React.useRef<PendingCompletion | null>(null);
   const mcpBufferRef = React.useRef<string[]>([]);
@@ -289,17 +339,44 @@ export function BridgeHost() {
   const activeChatIdRef = React.useRef<string>('');
   const activeTurnIdRef = React.useRef<string>('');
   const activeToolsRef = React.useRef<any[]>([]);
+  // System content from the current request's messages[]. Routed to
+  // the in-VM claude via the UserPromptSubmit hook's additionalContext
+  // (NOT pasted into the user-visible PTY paste). Keeps the visible
+  // chat clean while preserving the system context's effect.
+  const activeSystemRef = React.useRef<string>('');
   const pendingToolCallsRef = React.useRef<Map<string, PendingToolCall>>(new Map());
   const toolInvokeResolveRef = React.useRef<((toolCalls: any[]) => void) | null>(null);
 
+  // Resolve any in-flight turn whose transcript has reached end_turn.
+  // Pooled turns each carry their own sid-locked pending; the legacy
+  // path has the single pendingRef.
   const resolvePendingFromTranscript = React.useCallback(() => {
+    let resolvedAny = false;
+    for (const [key, turn] of turnsRef.current) {
+      if (!turn.pending || !turn.resolveText) continue;
+      const result = findClaudeTranscriptReply(turn.pending);
+      if (!result.complete) continue;
+      // Prefer claude's clean bridge.respond text when it used MCP;
+      // fall back to the transcript text otherwise.
+      const buffered = turn.mcpBuffer.join('\n\n').trim();
+      const text = buffered || result.text || '(end_turn with no text)';
+      turn.pending = null;
+      const resolve = turn.resolveText;
+      turn.resolveText = null;
+      turnsRef.current.delete(key);
+      resolve(text);
+      resolvedAny = true;
+    }
     const pending = pendingRef.current;
-    if (!pending) return false;
-    const result = findClaudeTranscriptReply(pending);
-    if (!result.complete) return false;
-    pendingRef.current = null;
-    pending.resolve(result.text || '(end_turn with no text)');
-    return true;
+    if (pending) {
+      const result = findClaudeTranscriptReply(pending);
+      if (result.complete) {
+        pendingRef.current = null;
+        pending.resolve(result.text || '(end_turn with no text)');
+        resolvedAny = true;
+      }
+    }
+    return resolvedAny;
   }, []);
 
   const watchDir = React.useMemo(() => claudeProjectDir(), []);
@@ -309,7 +386,7 @@ export function BridgeHost() {
 
   useHost({
     kind: 'http',
-    port: bridgePort,
+    port,
     routes: ROUTES,
     onRequest: (req, res) => {
       try {
@@ -322,10 +399,10 @@ export function BridgeHost() {
           return;
         }
         if (req.method === 'GET' && req.path === '/v1/models') {
-          res.send(200, 'application/json', JSON.stringify({
-            object: 'list',
-            data: [{ id: MODEL_ID, object: 'model', created: nowSeconds(), owned_by: 'local-pty' }],
-          }));
+          const data = headless
+            ? POOL_MODELS.map((id) => ({ id, object: 'model', created: nowSeconds(), owned_by: 'local-pty' }))
+            : [{ id: MODEL_ID, object: 'model', created: nowSeconds(), owned_by: 'local-pty' }];
+          res.send(200, 'application/json', JSON.stringify({ object: 'list', data }));
           return;
         }
         if (req.method === 'GET' && req.path === '/rows') {
@@ -372,6 +449,7 @@ export function BridgeHost() {
             chatId, turnId,
             endMarker: `[END_${chatId}-${turnId}]`,
             tools: activeToolsRef.current,
+            systemContext: activeSystemRef.current,
           });
           res.send(200, 'application/json', JSON.stringify({
             hookSpecificOutput: {
@@ -459,6 +537,26 @@ export function BridgeHost() {
       }));
       return;
     }
+    // Pooled (headless) path: route to the owning thread's turn. The
+    // reply itself resolves on transcript end_turn (which prefers this
+    // buffered text), so we just accumulate parts here.
+    const pooledTurn = headless ? turnsRef.current.get(`${callChatId}-${callTurnId}`) : null;
+    if (pooledTurn) {
+      pooledTurn.mcpBuffer.push(text);
+      pooledTurn.trace.events?.push?.({
+        at: Date.now(),
+        phase: 'mcp-respond-buffered',
+        chat_id: callChatId,
+        turn_id: callTurnId,
+        partIndex: pooledTurn.mcpBuffer.length - 1,
+        textPreview: text.slice(0, 120),
+      });
+      res.send(200, 'application/json', mcpResult(id, {
+        content: [{ type: 'text', text: `buffered — emit ${pooledTurn.endMarker} when done` }],
+      }));
+      return;
+    }
+
     const activeChat = activeChatIdRef.current;
     const activeTurn = activeTurnIdRef.current;
     if (!httpResolveRef.current || !activeChat || !activeTurn) {
@@ -528,6 +626,44 @@ export function BridgeHost() {
       }));
       return;
     }
+    // Pooled (headless) path: validate + invoke against the owning turn.
+    const pooledTurn = headless ? turnsRef.current.get(`${callChatId}-${callTurnId}`) : null;
+    if (pooledTurn) {
+      if (!pooledTurn.resolveTools) {
+        res.send(200, 'application/json', mcpResult(id, {
+          content: [{ type: 'text', text: 'error: turn no longer accepting tool invocations' }],
+          isError: true,
+        }));
+        return;
+      }
+      const known = pooledTurn.tools.map((t) => String(t?.function?.name ?? t?.name ?? '')).filter(Boolean);
+      if (!known.includes(callName)) {
+        res.send(200, 'application/json', mcpResult(id, {
+          content: [{ type: 'text', text: `error: tool "${callName}" not in this turn's set. Available: ${known.join(', ') || '(none)'}` }],
+          isError: true,
+        }));
+        return;
+      }
+      const toolCallId = `call_${randHex(10)}`;
+      pendingToolCallsRef.current.set(toolCallId, {
+        mcpReqId: id,
+        mcpRes: res,
+        toolName: callName,
+        argumentsJson: callArgsJson,
+        createdAt: Date.now(),
+        responded: false,
+        turnKey: `${callChatId}-${callTurnId}`,
+      });
+      pooledTurn.trace.events?.push?.({
+        at: Date.now(), phase: 'tool-invoke', chat_id: callChatId, turn_id: callTurnId,
+        tool_call_id: toolCallId, name: callName, argumentsPreview: callArgsJson.slice(0, 200),
+      });
+      const resolve = pooledTurn.resolveTools;
+      pooledTurn.resolveTools = null;
+      resolve([{ id: toolCallId, type: 'function', function: { name: callName, arguments: callArgsJson } }]);
+      return;
+    }
+
     if (!activeChat || !activeTurn || !toolInvokeResolveRef.current) {
       res.send(200, 'application/json', mcpResult(id, {
         content: [{
@@ -589,9 +725,223 @@ export function BridgeHost() {
     }]);
   }
 
+  // ── /v1/chat/completions (pooled / headless) ──────────────────────
+  //
+  // Concurrent: each request runs independently (NOT through queueRef),
+  // routed to its thread's own claude process. Resolution is by the
+  // thread's sid-locked transcript reaching end_turn (pipe-agnostic),
+  // preferring claude's clean bridge.respond text when it used MCP.
+
+  type RaceResult =
+    | { kind: 'text'; text: string }
+    | { kind: 'tool_calls'; toolCalls: any[] };
+
+  // Drive a turn to completion on its thread's own claude. When
+  // `pasteText` is set this is a new user turn: paste it (re-pasting if a
+  // just-spawned claude wasn't ready and dropped it), then resolve on the
+  // transcript's end_turn. When undefined this is a tool-result follow-up:
+  // claude continues on its own, we just wait. A hard timeout guarantees
+  // the request always completes.
+  async function runPooledTurn(turn: PooledTurn, startedAt: number, pasteText?: string): Promise<RaceResult> {
+    const transcriptPath = `${claudeProjectDir()}/${turn.sid}.jsonl`;
+    return await new Promise<RaceResult>((resolve) => {
+      let done = false;
+      let iv: any = null;
+      const finish = (r: RaceResult) => {
+        if (done) return;
+        done = true;
+        turn.resolveText = null;
+        turn.resolveTools = null;
+        turn.pending = null;
+        if (iv != null) clearInterval(iv);
+        resolve(r);
+      };
+      turn.resolveText = (text: string) => finish({ kind: 'text', text });
+      turn.resolveTools = (toolCalls: any[]) => finish({ kind: 'tool_calls', toolCalls });
+      turn.pending = {
+        baseline: { path: transcriptPath, size: 0 }, // size 0 → parseAssistantTurn's ts floor scopes to our turn
+        startMs: startedAt,
+        sessionPrefix: '',
+        sessionSnapshot: new Map(),
+        lockedSid: turn.sid,
+        lockedPath: transcriptPath,
+        trace: turn.trace,
+        resolve: () => {}, // resolvePendingFromTranscript drives turn.resolveText instead
+      };
+
+      let pastes = 0;
+      const doPaste = () => {
+        pastePrompt(turn.pipe, pasteText!);
+        pastes++;
+        turn.trace.events?.push?.({ at: Date.now(), phase: 'paste', n: pastes, sid: turn.sid });
+      };
+      if (pasteText) doPaste();
+
+      let userSeen = false;
+      iv = setInterval(() => {
+        resolvePendingFromTranscript(); // resolves turn.resolveText/Tools → finish
+        if (done) return;
+        const elapsed = Date.now() - startedAt;
+        // Readiness: if our prompt never showed up in the transcript, the
+        // freshly-spawned claude likely wasn't ready — re-paste. Stop once
+        // the user entry is present (re-pasting then would duplicate input).
+        if (pasteText && !userSeen) {
+          const raw = readFile(transcriptPath) ?? '';
+          const pr = parseAssistantTurn(raw, startedAt);
+          if (pr.sawUser) userSeen = true;
+          else if (elapsed > pastes * POOL_REPASTE_GRACE_MS && pastes < POOL_MAX_PASTES) doPaste();
+        }
+        if (elapsed > POOL_TURN_TIMEOUT_MS) {
+          turn.trace.events?.push?.({ at: Date.now(), phase: 'turn-timeout', sid: turn.sid, userSeen, pastes });
+          finish({
+            kind: 'text',
+            text: userSeen
+              ? '(bridge: claude received the message but did not finish replying in time)'
+              : '(bridge: claude never picked up the prompt — the session may not have been ready)',
+          });
+        }
+      }, TRANSCRIPT_POLL_MS);
+    });
+  }
+
+  function sendTurnResult(res: any, result: RaceResult, turn: PooledTurn, body: any, wantStream: boolean): void {
+    const model = String(body.model || DEFAULT_POOL_MODEL);
+    turn.trace.events?.push?.({ at: Date.now(), phase: 'respond', kind: result.kind, sid: turn.sid });
+    pushTrace(turn.trace);
+    if (result.kind === 'tool_calls') {
+      // Keep the turn alive for the follow-up; just stop it being
+      // transcript-resolvable until the follow-up re-arms it.
+      turn.resolveText = null;
+      turn.pending = null;
+      const id = `chatcmpl-claude-pty-${Date.now()}`;
+      const payload = {
+        id, object: 'chat.completion', created: nowSeconds(), model,
+        external_session_id: turn.sid,
+        choices: [{ index: 0, message: { role: 'assistant', content: null, tool_calls: result.toolCalls }, finish_reason: 'tool_calls' }],
+        usage: { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+      };
+      if (wantStream) {
+        const chunk = JSON.stringify({
+          id, object: 'chat.completion.chunk', created: payload.created, model, external_session_id: turn.sid,
+          choices: [{ index: 0, delta: { role: 'assistant', tool_calls: result.toolCalls }, finish_reason: 'tool_calls' }],
+        });
+        res.send(200, 'text/event-stream', `data: ${chunk}\n\ndata: [DONE]\n\n`);
+      } else {
+        res.send(200, 'application/json', JSON.stringify(payload));
+      }
+      return;
+    }
+    // Text = turn done. Drop the turn + clear the per-sid marker.
+    turnsRef.current.delete(`${turn.chatId}-${turn.turnId}`);
+    try { writeFile(`${BRIDGE_TMP_DIR}/active-turn-${turn.sid}.json`, ''); } catch {}
+    if (wantStream) {
+      res.send(200, 'text/event-stream', streamingResponseBody(result.text, model, turn.sid));
+    } else {
+      res.send(200, 'application/json', completionResponse(result.text, model, turn.trace, turn.sid));
+    }
+  }
+
+  async function handleChatCompletionsPooled(req: any, res: any): Promise<void> {
+    const pool = poolRef.current!;
+    const startedAt = Date.now();
+    try {
+      const body = JSON.parse(req.body || '{}');
+      const wantStream = !!body.stream;
+      const messages = Array.isArray(body.messages) ? body.messages : [];
+
+      // Follow-up: tool results for an in-flight pooled turn.
+      const toolResults = messages.filter((m: any) => m && m.role === 'tool' && typeof m.tool_call_id === 'string');
+      const matching = toolResults.filter((m: any) => pendingToolCallsRef.current.has(m.tool_call_id));
+      if (matching.length > 0) {
+        const first = pendingToolCallsRef.current.get(matching[0].tool_call_id);
+        const turn = first?.turnKey ? turnsRef.current.get(first.turnKey) : undefined;
+        for (const m of matching) {
+          const p = pendingToolCallsRef.current.get(m.tool_call_id);
+          if (!p || p.responded) continue;
+          p.responded = true;
+          const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+          p.mcpRes.send(200, 'application/json', mcpResult(p.mcpReqId, { content: [{ type: 'text', text: content }] }));
+          pendingToolCallsRef.current.delete(m.tool_call_id);
+        }
+        if (!turn) {
+          res.send(200, 'application/json', completionResponse('(tool results delivered; turn not found)', String(body.model || DEFAULT_POOL_MODEL)));
+          return;
+        }
+        const result = await runPooledTurn(turn, startedAt);
+        sendTurnResult(res, result, turn, body, wantStream);
+        return;
+      }
+
+      // New user turn.
+      const extracted = extractPrompt(body);
+      const user = extracted.user.trim();
+      const system = extracted.system.trim();
+      if (!user) { res.send(400, 'application/json', errorResponse('missing user message')); return; }
+
+      const model: BridgeModel = (typeof body.model === 'string' && isBridgeModel(body.model)) ? body.model : DEFAULT_POOL_MODEL;
+      // body.user carries the thread's stored claude sid (resume key);
+      // empty/absent means a brand-new thread → fresh spawn.
+      const resumeSid = (typeof body.user === 'string' ? body.user.trim() : '');
+
+      const proc = resumeSid ? await pool.resume(resumeSid, model) : await pool.spawnFresh(model);
+
+      const chatId = (typeof body.chat_id === 'string' && body.chat_id) || `c${randHex(6)}`;
+      const turnId = `t${randHex(6)}`;
+      const turnKey = `${chatId}-${turnId}`;
+      const endMarker = `[END_${chatId}-${turnId}]`;
+      const tools = Array.isArray(body.tools) ? body.tools : [];
+
+      const trace: BridgeTrace = {
+        requestId: `bridge-${startedAt}`,
+        cwd: cwdGet(),
+        home: envGet('HOME'),
+        projectDir: claudeProjectDir(),
+        watchDir,
+        baseline: { path: `${claudeProjectDir()}/${proc.sid}.jsonl`, size: 0 },
+        promptPreview: user.slice(0, 160),
+        sessionPrefix: '',
+        runtimeDir: runtimeDir(),
+        events: [{
+          at: startedAt, phase: 'pool-turn-open',
+          chat_id: chatId, turn_id: turnId, endMarker,
+          sid: proc.sid, pipe: proc.pipe, model: proc.model,
+          resumed: !!resumeSid, toolsCount: tools.length,
+        }],
+      };
+
+      const turn: PooledTurn = {
+        chatId, turnId, endMarker, sid: proc.sid, pipe: proc.pipe,
+        tools, system, mcpBuffer: [], pending: null, resolveText: null, resolveTools: null, trace,
+      };
+      turnsRef.current.set(turnKey, turn);
+
+      // Drive claude as a PLAIN session: do NOT inject the bridge
+      // protocol (chat_id/turn_id/bridge.respond/endMarker). That blob
+      // made claude narrate a handshake ("the bridge connection")
+      // instead of just answering. The reply resolves from the
+      // transcript's end_turn and claude uses its own native tools, so
+      // the protocol isn't needed. We still pass through the caller's
+      // system framing when present (NOT the user's visible message).
+      if (system) {
+        writeTurnMarker(
+          proc.sid,
+          `(System context for this turn — treat as framing, not the user's message:\n\n${system}\n)`,
+          chatId, turnId, endMarker,
+        );
+      }
+
+      // runPooledTurn does the paste (with readiness re-paste) + resolve.
+      const result = await runPooledTurn(turn, startedAt, user);
+      sendTurnResult(res, result, turn, body, wantStream);
+    } catch (e: any) {
+      res.send(500, 'application/json', errorResponse(e?.message ?? String(e)));
+    }
+  }
+
   // ── /v1/chat/completions ──────────────────────────────────────────
 
   function handleChatCompletions(req: any, res: any): void {
+    if (headless) { void handleChatCompletionsPooled(req, res); return; }
     queueRef.current = queueRef.current.then(async () => {
       try {
         const body = JSON.parse(req.body || '{}');
@@ -661,8 +1011,10 @@ export function BridgeHost() {
             pendingToolCallsRef.current.delete(m.tool_call_id);
           }
         } else {
-          const prompt = extractPrompt(body).trim();
-          if (!prompt) {
+          const extracted = extractPrompt(body);
+          const userPrompt = extracted.user.trim();
+          const systemPrompt = extracted.system.trim();
+          if (!userPrompt) {
             res.send(400, 'application/json', errorResponse('missing user message'));
             return;
           }
@@ -684,13 +1036,16 @@ export function BridgeHost() {
             projectDir: claudeProjectDir(),
             watchDir,
             baseline: transcriptBaseline,
-            promptPreview: prompt.slice(0, 160),
+            promptPreview: userPrompt.slice(0, 160),
             sessionPrefix,
             runtimeDir: runtimeDir(),
             events: [{
               at: startedAt,
               phase: 'before-send',
               rowsSessionPrefix: sessionPrefix,
+              userPromptPreview: userPrompt.slice(0, 200),
+              systemPromptLen: systemPrompt.length,
+              systemPromptPreview: systemPrompt.slice(0, 200),
               sessionSnapshot: Array.from(sessionSnapshot.entries()).map(([sid, ping]) => ({ sid, pingMs: ping })),
               candidates: describeCandidates(sessionPrefix),
               transcriptDiagnostics: transcriptDiagnostics(),
@@ -700,6 +1055,7 @@ export function BridgeHost() {
           activeChatIdRef.current = chatId;
           activeTurnIdRef.current = turnId;
           activeToolsRef.current = Array.isArray(body.tools) ? body.tools : [];
+          activeSystemRef.current = systemPrompt;
           mcpBufferRef.current = [];
           trace.events.push({
             at: Date.now(),
@@ -708,23 +1064,17 @@ export function BridgeHost() {
             turn_id: turnId,
             endMarker,
             toolsCount: activeToolsRef.current.length,
+            hasSystemContext: systemPrompt.length > 0,
           });
-          // The directive (chat_id/turn_id/endMarker + tool list) is
-          // delivered via the VM-side UserPromptSubmit hook, which
-          // curls GET /directive and feeds the response back as
-          // hookSpecificOutput.additionalContext. That keeps it OUT
-          // of the user-visible message body — claude sees it as
-          // injected system context.
-          //
-          // composeDirective is still imported because /directive
-          // builds the same string on demand from the live
-          // chat/turn/tools refs. We just don't paste it here.
-          writePty(`\x1b[200~${prompt}\x1b[201~\r`);
+          // System content rides through the UserPromptSubmit hook's
+          // additionalContext (claude sees it as system framing, NOT as
+          // part of the user message). Only the user's actual prompt
+          // goes through the PTY paste so the visible chat shows what
+          // the user typed.
+          writePty(`\x1b[200~${userPrompt}\x1b[201~\r`);
         }
 
         // ── Wait race ───────────────────────────────────────────────
-        const before = assistantText();
-
         type RaceResult =
           | { kind: 'text'; text: string }
           | { kind: 'tool_calls'; toolCalls: any[] };
@@ -800,28 +1150,6 @@ export function BridgeHost() {
           toolInvokePromise,
           turnDonePromise.then((text): RaceResult => ({ kind: 'text', text })),
           transcriptPromise.then((text): RaceResult => ({ kind: 'text', text })),
-          new Promise<RaceResult>((resolve) => {
-            setTimeout(() => {
-              trace.events.push({
-                at: Date.now(),
-                phase: 'terminal-fallback-start',
-                sessionPrefix,
-                candidates: describeCandidates(sessionPrefix),
-              });
-              waitForClaudeReply(before).then((text) => {
-                if (!trace.resolvedBy) {
-                  trace.resolvedBy = 'terminal-scrape';
-                  trace.fallbackReason = 'terminal_fallback_grace_elapsed';
-                }
-                trace.events.push({
-                  at: Date.now(),
-                  phase: 'terminal-fallback-done',
-                  textPreview: text.slice(0, 120),
-                });
-                resolve({ kind: 'text', text });
-              }, (e) => resolve({ kind: 'text', text: `bridge fallback error: ${e?.message ?? e}` }));
-            }, TERMINAL_FALLBACK_GRACE_MS);
-          }),
         ]);
         clearInterval(pollId);
         if (turnDoneWatchId != null) clearInterval(turnDoneWatchId);
@@ -871,12 +1199,30 @@ export function BridgeHost() {
             res.send(200, 'application/json', JSON.stringify(toolCallsResponse));
           }
         } else {
+          // Diagnostic: log EXACTLY what's about to be sent in the
+          // HTTP response. Combined with the mcp-respond-buffered +
+          // turn-done-flush events upstream, this lets us pinpoint
+          // any corruption between buffer → result.text → res.send.
+          trace.events.push({
+            at: Date.now(),
+            phase: 'response-out',
+            resultTextLen: (result.text ?? '').length,
+            resultTextHead: (result.text ?? '').slice(0, 400),
+            resultTextTail: (result.text ?? '').slice(-200),
+            bufferAtSendLen: mcpBufferRef.current.reduce((a, b) => a + b.length, 0),
+            bufferAtSendParts: mcpBufferRef.current.length,
+            bufferAtSendHead: mcpBufferRef.current.join('\n\n').slice(0, 200),
+            wantStream,
+          });
+          pushTrace(trace);
+
           // Text result = agentic loop done. Clear active refs and
           // drop any orphaned pending tool calls.
           activeTraceRef.current = null;
           activeChatIdRef.current = '';
           activeTurnIdRef.current = '';
           activeToolsRef.current = [];
+          activeSystemRef.current = '';
           mcpBufferRef.current = [];
           for (const [id, p] of pendingToolCallsRef.current) {
             if (!p.responded) {

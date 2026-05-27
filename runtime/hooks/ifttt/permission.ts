@@ -32,7 +32,7 @@
 //   useIFTTT('permission:bash', (e) => autoApprove(e))
 //   useIFTTT('permission:dismissed', 'send:permission-handled')
 
-import { emit, subscribe } from '../../ffi';
+import { callHost, emit, subscribe } from '../../ffi';
 import { registerIfttSource, registerIfttAction } from './registry';
 
 declare module './types/events' {
@@ -42,8 +42,7 @@ declare module './types/events' {
   }
 }
 
-const G = globalThis as any;
-const call = (name: string, ...args: any[]): any => G[name]?.(...args);
+const call = (name: string, ...args: any[]): any => callHost<any>(name, undefined, ...args);
 
 // Canonical Claude Code tool names. Permission prompt verbs map to these
 // so `permission:Write` aligns with `PreToolUse { tool_name: 'Write' }`.
@@ -263,8 +262,7 @@ registerIfttSource('permission:', {
 // '' targets whichever pipe the cart's Terminal pinned to default —
 // which is the canonical setup for single-Terminal carts like claudewrap.
 function writeToVterm(s: string): void {
-  const g: any = globalThis;
-  if (typeof g.__vterm_write === 'function') g.__vterm_write('', s);
+  callHost('__vterm_write', undefined, '', s);
 }
 
 // Emit on the bus so observers (IFTTT activity feeds, audit recipes) can

@@ -19,7 +19,9 @@ import { callHost, hasHost } from '@reactjit/runtime/ffi';
 import { useT3Store, selectActiveThread, selectProviderForThread } from './store';
 import type {
   Thread, ThreadId, ChatMessage, TurnId, ModelSelection,
-  RuntimeMode, InteractionMode, TerminalContextSelection,
+  RuntimeMode, InteractionMode, TerminalContextSelection, TerminalContextDraft,
+  PendingApproval, PendingUserInput, PendingUserInputQuestion,
+  ProposedPlan, ContextWindowSnapshot,
 } from './types';
 
 import Sidebar from './components/Sidebar';
@@ -73,21 +75,6 @@ function deriveSessionPhase(phase: AssistantPhase): 'idle' | 'streaming' | 'fail
   }
 }
 
-// ── PendingApproval / PendingUserInput types for Composer ──────────────────
-
-export type PendingApproval = {
-  id: string;
-  requestId: string;
-  title: string;
-  description?: string;
-};
-
-export type PendingUserInput = {
-  id: string;
-  requestId: string;
-  questions: { id: string; label: string; type: 'text' | 'choice'; options?: string[] }[];
-};
-
 // ── App ────────────────────────────────────────────────────────────────────
 
 export default function T3CodeApp() {
@@ -132,12 +119,16 @@ export default function T3CodeApp() {
     }]);
   }, [assistant, activeThread, store]);
 
+  const handleInterrupt = useCallback(() => {
+    // In a full port this calls assistant.interrupt() or similar.
+  }, []);
+
   const handleApprove = useCallback((_requestId: string, _decision: 'accept' | 'reject') => {
     // In a full port this calls assistant.respond() with the tool result.
     // For now the worker contract handles approvals interactively.
   }, []);
 
-  const handleRespondUserInput = useCallback((_requestId: string, _answers: Record<string, string>) => {
+  const handleRespondUserInput = useCallback((_requestId: string, _answers: Record<string, string | string[]>) => {
     // Stub — wire to assistant.respond() when the backend exposes user-input rows.
   }, []);
 
@@ -177,6 +168,18 @@ export default function T3CodeApp() {
   const handleRenameThread = useCallback((id: ThreadId, title: string) => {
     store.renameThread(id, title);
   }, [store]);
+
+  // ── terminal contexts ────────────────────────────────────────────────
+  const [terminalContexts, setTerminalContexts] = useState<TerminalContextDraft[]>([]);
+
+  const handleAddTerminalContext = useCallback((ctx: TerminalContextSelection) => {
+    const draft: TerminalContextDraft = { ...ctx, id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}` };
+    setTerminalContexts((prev) => [...prev, draft]);
+  }, []);
+
+  const handleRemoveTerminalContext = useCallback((id: string) => {
+    setTerminalContexts((prev) => prev.filter((c) => c.id !== id));
+  }, []);
 
   // ── keyboard shortcuts ───────────────────────────────────────────────
   useEffect(() => {
@@ -268,18 +271,47 @@ export default function T3CodeApp() {
       try {
         const payload = JSON.parse(last.payload_json);
         if (payload?.name && !payload?.result) {
-          return [{ id: last.id.toString(), requestId: last.id.toString(), title: payload.name, description: payload.arguments ? JSON.stringify(payload.arguments) : undefined }];
+          const requestKind: PendingApproval['requestKind'] =
+            payload.name.includes('read') ? 'file-read'
+            : payload.name.includes('patch') || payload.name.includes('edit') ? 'file-change'
+            : 'command';
+          return [{
+            requestId: last.id.toString(),
+            requestKind,
+            detail: payload.arguments ? JSON.stringify(payload.arguments) : undefined,
+          }];
         }
       } catch { /* ignore */ }
     }
     return [];
   }, [assistant.events]);
 
-  const pendingUserInputs: PendingUserInput[] = [];
-  const terminalContexts: TerminalContextSelection[] = [];
-  const contextWindow = undefined;
-  const hasActionableProposedPlan = false;
-  const proposedPlan = activeThread?.proposedPlans?.find(p => p.status === 'pending') ?? null;
+  const pendingUserInputs: PendingUserInput[] = useMemo(() => {
+    // In a full port this derives from assistant events / server state.
+    return [];
+  }, [assistant.events]);
+
+  const respondingRequestIds: string[] = useMemo(() => {
+    // Track which approval/user-input requests are currently being responded to.
+    return [];
+  }, []);
+
+  const contextWindow: ContextWindowSnapshot | undefined = useMemo(() => {
+    // Approximate context window from message history length.
+    if (!activeThread) return undefined;
+    const totalChars = activeThread.messages.reduce((sum, m) => sum + m.text.length, 0);
+    const limit = 200000;
+    return { used: Math.min(totalChars, limit), limit };
+  }, [activeThread]);
+
+  const hasActionableProposedPlan = useMemo(() => {
+    return activeThread?.proposedPlans?.some((p) => p.status === 'pending') ?? false;
+  }, [activeThread?.proposedPlans]);
+
+  const proposedPlan = activeThread?.proposedPlans?.find((p) => p.status === 'pending') ?? null;
+  const showPlanFollowUpPrompt = hasActionableProposedPlan;
+  const activePlan = proposedPlan ? { turnId: undefined } : null;
+  const sidebarProposedPlan = proposedPlan ? { turnId: undefined } : null;
 
   // ── render ───────────────────────────────────────────────────────────
   return (
@@ -329,6 +361,7 @@ export default function T3CodeApp() {
             ready={assistant.ready()}
             providers={store.settings.providers}
             onSend={handleSend}
+            onInterrupt={handleInterrupt}
             onApprove={handleApprove}
             onRespondUserInput={handleRespondUserInput}
             onModelChange={handleModelChange}
@@ -338,13 +371,24 @@ export default function T3CodeApp() {
             planSidebarOpen={store.planSidebarOpen}
             pendingApprovals={pendingApprovals}
             pendingUserInputs={pendingUserInputs}
+            respondingRequestIds={respondingRequestIds}
             terminalContexts={terminalContexts}
-            onAddTerminalContext={() => {}}
+            onAddTerminalContext={handleAddTerminalContext}
+            onRemoveTerminalContext={handleRemoveTerminalContext}
             contextWindow={contextWindow}
             hasActionableProposedPlan={hasActionableProposedPlan}
             proposedPlan={proposedPlan}
             onAcceptPlan={() => {}}
             onRejectPlan={() => {}}
+            onImplementPlanInNewThread={() => {}}
+            environmentUnavailable={null}
+            isPreparingWorktree={false}
+            isSendBusy={false}
+            isConnecting={assistant.phase === 'starting'}
+            showPlanFollowUpPrompt={showPlanFollowUpPrompt}
+            activePlan={activePlan}
+            sidebarProposedPlan={sidebarProposedPlan}
+            planSidebarLabel="Tasks"
           />
         </Box>
 
@@ -364,7 +408,7 @@ export default function T3CodeApp() {
               onNewTerminal={store.newTerminal}
               onCloseTerminal={store.closeTerminal}
               onActiveTerminalChange={store.setActiveTerminal}
-              onAddTerminalContext={() => {}}
+              onAddTerminalContext={handleAddTerminalContext}
               splitShortcutLabel="Ctrl+Shift+D"
               newShortcutLabel="Ctrl+Shift+T"
               closeShortcutLabel="Ctrl+Shift+W"
@@ -380,6 +424,7 @@ export default function T3CodeApp() {
         threads={store.threads}
         projects={store.projects}
         activeThreadId={store.activeThreadId}
+        settings={store.settings}
         onSelectThread={handleSelectThread}
         onNewThread={handleNewThread}
         onOpenSettings={() => store.setShowSettings(true)}

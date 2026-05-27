@@ -12,8 +12,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { Box, Canvas, TextInput } from '@reactjit/runtime/primitives';
 import { ThemeProvider } from '@reactjit/runtime/theme';
-import './style_cls';
-import { C } from './style_cls';
+import './style.cls';
+import { C } from './style.cls';
 import { THEMES, THEME_NAMES } from './themes';
 import { ChatFrame } from './ChatFrame';
 import { RaidFrame, RaidFrameEmpty } from './RaidFrame';

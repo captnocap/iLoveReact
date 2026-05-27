@@ -883,7 +883,7 @@ function resolveThemeSystemPath(rawPath, slug, pascalName) {
 }
 
 function existsPath(path) {
-  return __exists(path) === true;
+  return __fs_exists(path) === true;
 }
 
 function resolveExistingRepoFile(rawPath) {
@@ -1092,7 +1092,7 @@ function inspectDataShape(rawShape) {
       `data shape not found: ${toRepoRelative(shapePath)} — pass --data-shape <slug> for an existing file in cart/app/gallery/data/`
     );
   }
-  const source = __readFile(shapePath);
+  const source = __fs_read(shapePath);
   if (typeof source !== 'string') {
     fail(`failed to read ${toRepoRelative(shapePath)}`);
   }
@@ -1335,13 +1335,13 @@ if (format === 'component' && kind === 'top-level' && composedOf.includes(target
   fail('top-level components cannot list their own source file in --composed-of');
 }
 
-if (!__mkdirp(storiesDir)) {
+if (!__fs_mkdir(storiesDir)) {
   fail(`failed to create ${toRepoRelative(storiesDir)}`);
 }
-if (!__mkdirp(dirname(targetPath))) {
+if (!__fs_mkdir(dirname(targetPath))) {
   fail(`failed to create ${toRepoRelative(dirname(targetPath))}`);
 }
-if (format === 'theme' && !__mkdirp(sharedThemeDir)) {
+if (format === 'theme' && !__fs_mkdir(sharedThemeDir)) {
   fail(`failed to create ${toRepoRelative(sharedThemeDir)}`);
 }
 
@@ -1520,20 +1520,20 @@ ${tagsBlock}      variants: [
 `;
 }
 
-if (!__writeFile(targetPath, targetContent)) {
+if (!__fs_write(targetPath, targetContent)) {
   fail(`failed to write ${targetDisplay}`);
 }
 for (const file of extraFiles) {
-  if (!__writeFile(file.path, file.content)) {
+  if (!__fs_write(file.path, file.content)) {
     fail(`failed to write ${toRepoRelative(file.path)}`);
   }
 }
-if (!__writeFile(storyPath, storyContent)) {
+if (!__fs_write(storyPath, storyContent)) {
   fail(`failed to write ${toRepoRelative(storyPath)}`);
 }
 
 if (!existsPath(storyIndexPath)) {
-  if (!__writeFile(
+  if (!__fs_write(
     storyIndexPath,
     `import type { GallerySection } from '../types';\n\n// component-gallery:imports\n\nexport const storySections: GallerySection[] = [\n  // component-gallery:sections\n];\n`
   )) {
@@ -1541,7 +1541,7 @@ if (!existsPath(storyIndexPath)) {
   }
 }
 
-const readIndex = __readFile(storyIndexPath);
+const readIndex = __fs_read(storyIndexPath);
 if (readIndex === null) {
   fail(`failed to read ${toRepoRelative(storyIndexPath)}`);
 }
@@ -1560,14 +1560,14 @@ if (!indexSource.includes(importLine) || !indexSource.includes(sectionLine)) {
   fail('missing registry markers in cart/app/gallery/stories/index.ts');
 }
 
-if (!__writeFile(storyIndexPath, indexSource)) {
+if (!__fs_write(storyIndexPath, indexSource)) {
   fail(`failed to write ${toRepoRelative(storyIndexPath)}`);
 }
 
 if (format === 'theme') {
   if (!existsPath(themeIndexPath)) {
     if (
-      !__writeFile(
+      !__fs_write(
         themeIndexPath,
         `import type { ThemeSystemDefinition } from '../theme-system';\n\nexport type RegisteredGalleryThemeSystem = {\n  id: string;\n  title: string;\n  source: string;\n  system: ThemeSystemDefinition;\n};\n\n// component-gallery:theme-imports\n\nexport const galleryThemeSystems: RegisteredGalleryThemeSystem[] = [\n  // component-gallery:theme-systems\n];\n`
       )
@@ -1576,7 +1576,7 @@ if (format === 'theme') {
     }
   }
 
-  const readThemeIndex = __readFile(themeIndexPath);
+  const readThemeIndex = __fs_read(themeIndexPath);
   if (readThemeIndex === null) {
     fail(`failed to read ${toRepoRelative(themeIndexPath)}`);
   }
@@ -1602,7 +1602,7 @@ if (format === 'theme') {
     fail('missing registry markers in cart/app/gallery/themes/index.ts');
   }
 
-  if (!__writeFile(themeIndexPath, themeIndexSource)) {
+  if (!__fs_write(themeIndexPath, themeIndexSource)) {
     fail(`failed to write ${toRepoRelative(themeIndexPath)}`);
   }
 }

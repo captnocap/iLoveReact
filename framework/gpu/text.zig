@@ -844,12 +844,25 @@ pub fn drawSelectionRects(text: []const u8, x: f32, y: f32, size_px: u16, max_wi
         sel_end: usize,
         size_px: u16,
         line_h: f32,
+        max_width: f32,
         pub fn onLine(self: @This(), byte_start: usize, byte_end: usize, lx: f32, ly: f32) void {
             const lo = @max(self.sel_start, byte_start);
             const hi = @min(self.sel_end, byte_end);
             if (lo >= hi) return;
             const x_off_lo = subLineAdvance(self.text[byte_start..lo], self.size_px);
-            const x_off_hi = subLineAdvance(self.text[byte_start..hi], self.size_px);
+            var x_off_hi = subLineAdvance(self.text[byte_start..hi], self.size_px);
+            // Clip the highlight to the painter's visible width. walkLines
+            // here doesn't char-wrap the way primitive/text.zig:wordWrap
+            // does, so a long single word (e.g. a sample id like
+            // "captured_mphd_blah") emits as one over-wide line; without
+            // this clip, the selection rect extended past the container's
+            // right edge while the painted glyphs were truncated by the
+            // single-line text painter. Clamp to max_width so the rect
+            // stops at the last visible letter.
+            if (self.max_width > 0 and x_off_hi > self.max_width) {
+                x_off_hi = self.max_width;
+            }
+            if (x_off_hi <= x_off_lo) return;
             const sel_r: f32 = 0.2;
             const sel_g: f32 = 0.4;
             const sel_b: f32 = 0.8;
@@ -863,6 +876,7 @@ pub fn drawSelectionRects(text: []const u8, x: f32, y: f32, size_px: u16, max_wi
         .sel_end = sel_end,
         .size_px = size_px,
         .line_h = line_h,
+        .max_width = max_width,
     };
     _ = walkLines(text, x, y, size_px, max_width, 0, ctx);
 }

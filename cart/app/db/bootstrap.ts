@@ -19,7 +19,7 @@
 
 import * as pg from '@reactjit/runtime/hooks/pg';
 import { BUCKETS, BUCKET_IDS, type BucketId } from './buckets';
-import { entitiesByBucket } from './registry';
+import { entitiesByBucket, bucketFor } from './registry';
 import { getClusterHandle, getHandle } from './connections';
 import { ident, lit, tableName } from './sql';
 
@@ -70,6 +70,18 @@ function createMissingDatabases(): void {
   }
 }
 
+/** The generic JSONB-blob DDL, shared by boot-time and on-demand creation. */
+function createTableSql(t: string): string {
+  return (
+    `CREATE TABLE IF NOT EXISTS ${ident(t)} (` +
+    `id TEXT PRIMARY KEY, ` +
+    `data JSONB NOT NULL, ` +
+    `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), ` +
+    `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` +
+    `)`
+  );
+}
+
 function createMissingTables(): void {
   const grouped = entitiesByBucket();
   for (const id of BUCKET_IDS) {
@@ -78,17 +90,30 @@ function createMissingTables(): void {
     const handle = getHandle(id);
     for (const entity of entities) {
       const t = tableName(entity);
-      const sql =
-        `CREATE TABLE IF NOT EXISTS ${ident(t)} (` +
-        `id TEXT PRIMARY KEY, ` +
-        `data JSONB NOT NULL, ` +
-        `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), ` +
-        `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()` +
-        `)`;
-      const ok = pg.exec(handle, sql);
-      if (!ok) throw new Error(`CREATE TABLE ${id}.${t} failed.`);
+      if (!pg.exec(handle, createTableSql(t))) throw new Error(`CREATE TABLE ${id}.${t} failed.`);
+      ensuredTables.add(entity);
     }
   }
+}
+
+// Per-entity table guard. ensureBootstrapped only creates the entities that
+// were registered at boot — anything registered LATER (a new entity added
+// during a dev session) was invisible until a restart. This closes that hole:
+// every collection self-heals its own table on first CRUD access, idempotently
+// (CREATE TABLE IF NOT EXISTS is cheap, and we memoize per entity).
+const ensuredTables = new Set<string>();
+
+/** Guarantee the table for one entity exists before reading/writing it.
+ *  Cheap and idempotent — safe to call on every CRUD op. */
+export async function ensureEntityTable(entity: string): Promise<void> {
+  await ensureBootstrapped();
+  if (ensuredTables.has(entity)) return;
+  const bucket = bucketFor(entity);
+  const t = tableName(entity);
+  if (!pg.exec(getHandle(bucket), createTableSql(t))) {
+    throw new Error(`CREATE TABLE ${bucket}.${t} failed.`);
+  }
+  ensuredTables.add(entity);
 }
 
 /** Hard reset of one bucket. DROP DATABASE then re-bootstrap. Use when

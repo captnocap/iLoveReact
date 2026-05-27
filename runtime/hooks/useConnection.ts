@@ -31,6 +31,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useLatest } from './useLatest';
 import {
   nextId,
   subscribe,
@@ -782,8 +783,7 @@ function useConnectionImpl(spec: ConnectionSpec): ConnectionHandle {
   const [rconAuthed, setRconAuthed] = useState<boolean>(false);
   const rconReqSeq = useRef<number>(1);
 
-  const specRef = useRef(spec);
-  specRef.current = spec;
+  const specRef = useLatest(spec);
   const getSpec = <T extends ConnectionSpec>() => specRef.current as T;
 
   const identity = connectionIdentity(spec);

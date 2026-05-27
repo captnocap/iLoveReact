@@ -4,9 +4,32 @@
  * These globals are already registered by framework/qjs_runtime.zig (see
  * hostClipboardSet / hostClipboardGet), so this module is live today without
  * any Zig-side additions.
+ *
+ * ── DSL surface (self-registered) ─────────────────────────────────
+ *
+ * Importing this module also registers:
+ *   - `clipboard:` action verb — `'clipboard:<text>'` copies <text>
+ *     (literal or after `$payload` substitution) to the system clipboard.
+ *   - `system:clipboard` bus channel — emitted by the engine on every
+ *     clipboard change; payload is the new text.
+ *
+ * useIFTTT side-effect imports this module so carts get the surface
+ * without manually pulling clipboard.ts. Pattern parallels
+ * process/useFileWatch/system_selection/ifttt-*; the previous version
+ * had useIFTTT.ts wiring these up *for* clipboard, which was the only
+ * outlier in the codebase (clipboard was one of the first capabilities,
+ * predating the registry pattern).
  */
 
-import { callHost } from '../ffi';
+import { callHost, emit } from '../ffi';
+import { G } from '../host-globals';
+import { registerIfttAction } from './ifttt/registry';
+
+declare module '../host-globals' {
+  interface HostGlobals {
+    __ifttt_onClipboardChange?(): void;
+  }
+}
 
 /** Read the system clipboard as a UTF-8 string. */
 export function get(): string {
@@ -29,4 +52,26 @@ export function set(value: string): void {
  */
 export function getSelection(): string {
   return callHost<string>('__selection_get', '');
+}
+
+// ── IFTTT registration ─────────────────────────────────────────────
+//
+// `clipboard:<text>` — copy <text> to the system clipboard. Composable
+// with $payload substitution (handled by useIFTTT.runStringAction before
+// this runner sees the string).
+registerIfttAction('clipboard:', (rest, _payload) => {
+  try { set(rest); } catch (e: any) {
+    console.error('[clipboard] set failed:', e?.message || e);
+  }
+});
+
+// `system:clipboard` bus event — fired by the Zig host on every clipboard
+// change. Idempotent install: a second module-load (test envs, hot reload)
+// doesn't double-wire.
+if (!G.__ifttt_onClipboardChange) {
+  G.__ifttt_onClipboardChange = () => {
+    let text = '';
+    try { text = get(); } catch { /* ignore */ }
+    emit('system:clipboard', text);
+  };
 }

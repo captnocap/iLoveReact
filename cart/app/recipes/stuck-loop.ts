@@ -32,7 +32,7 @@ export const recipe: RecipeDocument = {
       title: "Dependencies",
       text:
         "None — rides on the existing verb:lifecycle channel from " +
-        "runtime/hooks/ifttt-supervisor. Works today.",
+        "runtime/hooks/ifttt/supervisor. Works today.",
     },
     {
       kind: "paragraph",

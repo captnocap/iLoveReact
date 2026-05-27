@@ -52,7 +52,7 @@ export function SessionsRoute() {
   };
 
   return (
-    <Col style={{ width: '100%', height: '100%', padding: 1 }}>
+    <Col style={{ width: '100%', padding: 1 }}>
       <Row style={{ gap: 2, paddingBottom: 1 }}>
         <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>sessions</Text>
         <Text style={{ color: '#64748b' }}>

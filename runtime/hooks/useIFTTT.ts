@@ -56,24 +56,44 @@
  *
  * ── Render behavior ────────────────────────────────────────
  *
- * Lazy reactivity. `fired` / `lastEvent` / `lastFiredAt` are getters
- * reading directly from the Zig-side registry (counters) and a JS-side
- * mirror (lastEvent). The host re-renders on fire ONLY if any of those
- * fields has been read at least once during the component's lifetime.
- * Carts that just pass an action and ignore the return value are
- * zero-rerender — useIFTTT('timer:every:100', tick) won't re-render the
- * host 10x/sec.
+ * Lazy reactivity. `fired` / `lastEvent` / `lastFiredAt` and
+ * `action.active` / `action.startedAt` / `action.done` are getters that
+ * each flip a sticky "subscribed" flag the first time they're read. After
+ * that flip, the host re-renders on every relevant edge for the rest of
+ * the component's lifetime — there is no "unsubscribe by stopping to
+ * read." Carts that pass an action and never look at the result stay
+ * zero-rerender; carts that read once-in-a-conditional pay forever.
+ *
+ * `fired` / `lastEvent` / `lastFiredAt` share one flag, so reading any
+ * one of them subscribes to all three. That's fine for this set (they
+ * change together) — but note `lastEvent` is set JS-side before the
+ * render commits, while `fired` / `lastFiredAt` are read from Zig at
+ * render time, so an in-flight burst can show `fired` ahead of
+ * `lastEvent` by one. Not a bug; document it.
+ *
+ * `flow.completed` fires for every trigger that produced an action, even
+ * if the action verb was a typo (no registered prefix). That's deliberate
+ * so chains never silently stall — a `console.warn` in dev tells you.
+ *
+ * Type/runtime drift. `PayloadOf<S>` is a compile-time table; the
+ * registry resolves at runtime by prefix. If someone registers a custom
+ * source whose actual payload differs from the table's entry, TypeScript
+ * will infer the table's type and won't catch it. Keep the table in sync
+ * with the registrations.
  *
  * Internals: trigger families and action verbs are registered through
- * `ifttt-registry.ts`. Other hooks (process, voice, fs, host, …) can
- * `registerIfttSource`/`registerIfttAction` to expose themselves through
- * this same DSL. The shared bus lives in `runtime/ffi.ts`. Timers,
- * fired-count, and lastFiredAt live in framework/ifttt_zig.zig and are
- * driven by the engine frame loop.
+ * `ifttt/registry.ts` (longest-prefix wins regardless of registration
+ * order — enforced inside `resolveTrigger` / `dispatchAction`). Other
+ * hooks (process, voice, fs, host, …) call `registerIfttSource` /
+ * `registerIfttAction` to expose themselves through this same DSL. The
+ * shared bus lives in `runtime/ffi.ts`. Timers, fired-count, and
+ * lastFiredAt live in framework/ifttt_zig.zig and are driven by the
+ * engine frame loop.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import * as clipboard from './clipboard';
+import { useLatest } from './useLatest';
 import { subscribe, emit, callHost } from '../ffi';
+import { G } from '../host-globals';
 import {
   registerIfttSource,
   registerIfttAction,
@@ -81,13 +101,83 @@ import {
   resolveTrigger,
   dispatchAction,
   type IfttSubscription,
-} from './ifttt-registry';
+} from './ifttt/registry';
 import {
   compileTrigger,
   isComposable,
   substituteAction,
   type IFTTTComposable,
-} from './ifttt-compose';
+} from './ifttt/compose';
+import type {
+  TriggerString,
+  ActionString,
+  PayloadOf,
+  ComposableTrigger,
+  IFTTTResult,
+  ReactiveEdgeSource,
+  ReactiveLevelSource,
+} from './ifttt/types/triggers';
+
+// Augment the FFI host-call catalog with the IFTTT family. Anything not
+// in this list still flows through the wide `callHost<T>` overload.
+declare module '../ffi' {
+  interface HostCalls {
+    __ifttt_state_get(key: string): string | null;
+    __ifttt_state_set(key: string, json: string): void;
+    __ifttt_wire_alloc(): number;
+    __ifttt_wire_free(id: number): void;
+    __ifttt_wire_bump(id: number, at: number): void;
+    __ifttt_wire_count(id: number): number;
+    __ifttt_wire_last_at(id: number): number;
+    __ifttt_last_key(): number;
+    __ifttt_key_register(
+      sym: number,
+      ctrl: number,
+      shift: number,
+      alt: number,
+      meta: number,
+      isKeyup: number,
+      dispatchWire: number,
+    ): number;
+    __ifttt_key_unregister(keyId: number): void;
+    __ifttt_timer_register(ms: number, kind: 0 | 1, dispatchWire: number): number;
+    __ifttt_timer_cancel(tid: number): void;
+  }
+}
+
+// Augment globalThis with the reverse-dispatch hooks that Zig calls into.
+declare module '../host-globals' {
+  interface HostGlobals {
+    __ifttt_dispatch_installed?: boolean;
+    __ifttt_handlers_installed?: boolean;
+    __ifttt_dispatch_timer?(wireId: number): void;
+    __ifttt_dispatch_key?(wireId: number): void;
+    __ifttt_onKeyDown?(packed: number): void;
+    __ifttt_onKeyUp?(packed: number): void;
+    // `__ifttt_onClipboardChange` is declared in clipboard.ts via the same
+    // augmentation channel — TypeScript merges the interfaces across files.
+    __ifttt_onSystemFocus?(gained: number): void;
+    __ifttt_onSystemDrop?(): void;
+    __ifttt_onSystemCursor?(x: number, y: number, dx: number, dy: number): void;
+    __ifttt_onSystemSlowFrame?(ms: number): void;
+    __ifttt_onSystemHang?(count: number): void;
+    __ifttt_onSystemRam?(used: number, total: number): void;
+    __ifttt_onSystemVram?(used: number, total: number): void;
+    __ifttt_onSystemResize?(w: number, h: number): void;
+    __ifttt_onSystemSelection?(
+      textLen: number,
+      downX: number,
+      downY: number,
+      upX: number,
+      upY: number,
+      screenW: number,
+      screenH: number,
+    ): void;
+    __ifttt_onSystemSelectionCleared?(): void;
+    __sys_drop_path?(): string;
+    __sys_selection_get?(): string;
+  }
+}
 
 // ── Source side-effects ───────────────────────────────────────────────
 //
@@ -99,11 +189,13 @@ import {
 import './process';          // proc:* triggers + actions, per-pid memory
 import './useFileWatch';     // fs:* triggers
 import './system_selection'; // select:* + clipboard:copy triggers
-import './ifttt-match';      // match:<channel>::<pattern> generic text-pattern source
-import './ifttt-count';      // count:<channel>::<n>:<windowMs> windowed counter
-import './ifttt-firsthit';   // firsthit:<channel>::<pattern> single-shot pattern
-import './ifttt-repeat';     // repeat:<channel>::<lookback>:<minSim> claim-shape similarity
-import './turn-tracker';     // turn:start / turn:end / turn:tool-use canonical channels
+import './clipboard';        // clipboard: action + system:clipboard channel
+import './ifttt/match';      // match:<channel>::<pattern> generic text-pattern source
+import './ifttt/count';      // count:<channel>::<n>:<windowMs> windowed counter
+import './ifttt/firsthit';   // firsthit:<channel>::<pattern> single-shot pattern
+import './ifttt/repeat';     // repeat:<channel>::<lookback>:<minSim> claim-shape similarity
+import './ifttt/permission'; // permission:any / permission:<tool> / permission:dismissed
+import './ifttt/turn-tracker';     // turn:start / turn:end / turn:tool-use canonical channels
 
 // ── Bus + state store ─────────────────────────────────────────────────────
 
@@ -176,7 +268,6 @@ type WireEntry = {
 };
 const _wires = new Map<number, WireEntry>();
 
-const G = globalThis as any;
 if (!G.__ifttt_dispatch_installed) {
   G.__ifttt_dispatch_installed = true;
   // Called by framework/ifttt_zig.zig when a registered Zig timer fires.
@@ -235,6 +326,11 @@ function bumpWire(id: number, ev?: any): void {
 //   mod  — SDL_Keymod bitmask: 1=LSHIFT 2=RSHIFT 64=LCTRL 128=RCTRL 256=LALT
 //          512=RALT 1024=LGUI 2048=RGUI etc.
 
+// SDL3 keymod bitmask constants. Pinned to SDL3 (the version Zig links
+// against in framework/engine.zig). SDL2 had the same numeric values for
+// CTRL/SHIFT but the bit layout for ALT/GUI shifted in SDL3 — if Zig is
+// ever migrated to a different SDL major, re-verify these. Each constant
+// covers BOTH left and right variants (e.g. CTRL = LCTRL | RCTRL).
 const SDL_KMOD_SHIFT = 0x0003;
 const SDL_KMOD_CTRL = 0x00C0;
 const SDL_KMOD_ALT = 0x0300;
@@ -274,11 +370,7 @@ if (!G.__ifttt_handlers_installed) {
   G.__ifttt_handlers_installed = true;
   G.__ifttt_onKeyDown = (packed: number) => emit('__keydown', decodeKey(packed));
   G.__ifttt_onKeyUp = (packed: number) => emit('__keyup', decodeKey(packed));
-  G.__ifttt_onClipboardChange = () => {
-    let text = '';
-    try { text = clipboard.get(); } catch { /* ignore */ }
-    emit('system:clipboard', text);
-  };
+  // `__ifttt_onClipboardChange` lives in clipboard.ts (self-registered).
   G.__ifttt_onSystemFocus = (gained: number) => {
     emit(gained ? 'system:focus' : 'system:blur', { at: Date.now() });
   };
@@ -403,7 +495,18 @@ registerIfttSource('mount', {
   match(spec) {
     if (spec !== 'mount') return null;
     return {
-      subscribe(onFire) { onFire({ at: Date.now() }); return () => {}; },
+      subscribe(onFire) {
+        // Defer the fire so any subscribers the caller registers AFTER
+        // useIFTTT returns (e.g. `flow.subscribe(fn)` in the same render)
+        // still see the mount edge. Firing synchronously inside subscribe()
+        // would deliver only to subscribers that exist at this instant —
+        // which excludes anyone who hasn't received the hook's return value
+        // yet. queueMicrotask runs after the current sync block but before
+        // any I/O or rAF, which is the correct edge for "just mounted."
+        let cancelled = false;
+        queueMicrotask(() => { if (!cancelled) onFire({ at: Date.now() }); });
+        return () => { cancelled = true; };
+      },
     };
   },
 });
@@ -573,15 +676,70 @@ registerIfttAction('log:', (rest, payload) => {
   console.log('[ifttt]', rest, payload ?? '');
 });
 
-registerIfttAction('clipboard:', (rest, _payload) => {
-  clipboard.set(rest);
-});
+// `clipboard:` action verb lives in clipboard.ts (self-registered).
 
-function runStringAction(action: string, payload: any): void {
+function runStringAction(action: string, payload: any): void | Promise<void> {
   const resolved = substituteAction(action, payload);
-  if (!dispatchAction(resolved, payload)) {
-    console.warn(`[ifttt] unknown action '${resolved}'`);
+  const { handled, ret } = dispatchAction(resolved, payload);
+  if (!handled) console.warn(`[ifttt] unknown action '${resolved}'`);
+  return ret;
+}
+
+function isReactive(v: unknown): v is ReactiveEdgeSource<any> {
+  return !!v
+    && typeof v === 'object'
+    && typeof (v as { subscribe?: unknown }).subscribe === 'function';
+}
+
+function isThenable(v: unknown): v is Promise<void> {
+  return !!v && typeof v === 'object' && typeof (v as { then?: unknown }).then === 'function';
+}
+
+// Stable-identity key for object triggers (Reactive sources) and inline
+// functions inside composables. One WeakMap-assigned id per instance, so
+// changing a `when:` predicate function (or any nested fn leaf) flips the
+// composeKey and triggers a re-subscribe — without it, JSON.stringify
+// silently drops function-valued fields and two different composables
+// would collide.
+let _reactiveIdCounter = 0;
+const _reactiveIds = new WeakMap<object, number>();
+function reactiveKey(obj: object): string {
+  let id = _reactiveIds.get(obj);
+  if (id == null) { id = ++_reactiveIdCounter; _reactiveIds.set(obj, id); }
+  return `r:${id}`;
+}
+/** Identity key for any value — primitives via JSON, objects/functions
+ *  via the WeakMap. Stable across renders for the same instance; differs
+ *  when the instance differs. */
+function identityKey(v: unknown): string {
+  if (v == null) return String(v);
+  const t = typeof v;
+  if (t === 'string' || t === 'number' || t === 'boolean') return `${t[0]}:${v}`;
+  if (t === 'function' || t === 'object') return reactiveKey(v as object);
+  return `?:${t}`;
+}
+
+/** Walk a composable structure producing a stable key that respects
+ *  function identities. JSON.stringify would silently drop functions
+ *  (so two `{ on:'click', when:fn }` with different fn would collide);
+ *  this stamps every function/object leaf through the WeakMap. */
+function composableKey(node: unknown, depth = 0): string {
+  if (depth > 8) return '…';
+  if (node == null) return String(node);
+  const t = typeof node;
+  if (t === 'string' || t === 'number' || t === 'boolean') return `${t[0]}:${node}`;
+  if (t === 'function') return identityKey(node);
+  if (Array.isArray(node)) return `[${node.map((c) => composableKey(c, depth + 1)).join(',')}]`;
+  if (t === 'object') {
+    // Reactive (has `subscribe`) — key by object identity, don't descend.
+    if (typeof (node as { subscribe?: unknown }).subscribe === 'function') {
+      return identityKey(node);
+    }
+    const o = node as Record<string, unknown>;
+    const keys = Object.keys(o).sort();
+    return `{${keys.map((k) => `${k}=${composableKey(o[k], depth + 1)}`).join(',')}}`;
   }
+  return `?:${t}`;
 }
 
 // ── Public types ──────────────────────────────────────────────────────────
@@ -589,70 +747,255 @@ function runStringAction(action: string, payload: any): void {
 /**
  * Trigger shape accepted by useIFTTT.
  *
- * Plain forms (Phase A):
+ * Plain forms:
  *   'key:ctrl+s'          string DSL — resolved through the registry
  *   () => boolean         reactive condition — fires on false→true edge
+ *   flow1                 another IFTTTResult — fires on trigger edge
+ *   flow1.completed       another IFTTTResult's completion — fires on settle
+ *   anything { subscribe }  any ReactiveEdgeSource
  *
- * Composable forms (Phase B — see ifttt-compose.ts):
+ * Composable forms (see ifttt/compose.ts):
  *   { on: trigger, when?: () => boolean }
  *   { all: triggers[] }   AND, edge-detected
  *   { any: triggers[] }   OR, edge-detected
  *   { seq: triggers[], within: number }
  *   { trigger, debounce?, throttle?, once?, cooldown? }
+ *
+ * The string form is typed against `TriggerString` (known prefixes
+ * autocomplete; arbitrary strings still allowed via `string & {}`).
+ * The function form yields `undefined` payload. Composable forms are
+ * generic in P; the action callback gets the right argument type.
+ *
+ * The returned IFTTTResult is three reactive surfaces in one object:
+ *
+ *   flow            — edge: fired the moment the trigger matched
+ *   flow.action     — level: open while the bound action is in flight
+ *                     (async actions only; sync actions never visibly open)
+ *   flow.completed  — edge: action settled (sync = same tick as trigger;
+ *                     async = on Promise settle)
+ *
+ * You pick the temporal semantics by which surface you reference. There
+ * is no default — `useIFTTT(flow1, …)` is distinct from
+ * `useIFTTT(flow1.completed, …)`.
  */
-export type IFTTTTrigger = IFTTTComposable;
-export type IFTTTAction = string | ((event?: any) => void);
-
-export type IFTTTResult = {
-  fired: number;
-  lastEvent: any;
-  lastFiredAt: number;
-  fire: (event?: any) => void;
-};
+export type IFTTTTrigger<P = unknown> = ComposableTrigger<P>;
+export type IFTTTAction<P = unknown> = ActionString | ((event: P) => void | Promise<void>);
+export type { IFTTTResult, TriggerString, ActionString, PayloadOf, ComposableTrigger };
 
 // ── The hook ──────────────────────────────────────────────────────────────
 
-export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResult {
-  const actionRef = useRef(action);
-  actionRef.current = action;
+/** Literal string trigger — payload inferred from `TriggerString`. */
+export function useIFTTT<S extends TriggerString>(
+  trigger: S,
+  action: ActionString | ((event: PayloadOf<S>) => void | Promise<void>),
+): IFTTTResult<PayloadOf<S>>;
+/** Function trigger — `false → true` edge, no payload. */
+export function useIFTTT(
+  trigger: () => boolean,
+  action: ActionString | (() => void | Promise<void>),
+): IFTTTResult<undefined>;
+/** Reactive trigger — another IFTTTResult, `flow.completed`, or any
+ *  object exposing `subscribe(fn)`. Edges on fn invocation. */
+export function useIFTTT<P>(
+  trigger: ReactiveEdgeSource<P>,
+  action: ActionString | ((event: P) => void | Promise<void>),
+): IFTTTResult<P>;
+/** Composable trigger — payload generic, defaults to `unknown`. */
+export function useIFTTT<P = unknown>(
+  trigger: Exclude<ComposableTrigger<P>, string | (() => boolean) | ReactiveEdgeSource<P>>,
+  action: ActionString | ((event: P) => void | Promise<void>),
+): IFTTTResult<P>;
+export function useIFTTT(
+  trigger: ComposableTrigger<unknown>,
+  action: ActionString | ((event?: any) => void | Promise<void>),
+): IFTTTResult<unknown> {
+  const actionRef = useLatest(action);
 
-  // Allocate a wireId on first render. This is the hook's own counter row
-  // (separate from any per-trigger dispatch wires the source registry may
-  // allocate); we never call setState off it, so the host doesn't rerender.
-  const wireRef = useRef<number>(0);
-  if (wireRef.current === 0) {
-    wireRef.current = allocWire((ev) => fireRef.current(ev));
-  }
+  // Allocate a wireId via the useState lazy initialiser so React tracks the
+  // value through bailed renders (StrictMode runs render bodies twice in dev;
+  // a render-body `useRef` assignment would leak the first wire). The
+  // initialiser captures fireRef *by closure*, but at init time fireRef
+  // hasn't been declared yet — so the wire's fire callback reaches through
+  // fireRef.current at dispatch time, by which point fireRef is populated.
+  // The allocator itself runs once per component instance.
+  const [wireId] = useState(() => allocWire((ev: any) => fireRef.current(ev)));
+  const wireRef = useRef(wireId);
   useEffect(() => {
-    return () => {
-      const id = wireRef.current;
-      wireRef.current = 0;
-      freeWire(id);
-    };
+    const id = wireRef.current;
+    return () => { freeWire(id); };
   }, []);
 
-  // Lazy reactivity: the host doesn't rerender on fire by default.
-  // First read of any result field flips `subscribedRef`; thereafter
-  // each fire bumps a useState so consumers (diagnostic dashboards,
-  // counters in render) update. Carts that ignore the return value
-  // never set the flag and stay zero-rerender.
+  // ── Subscriber registries (per-hook) ──────────────────────────────────
+  //
+  // triggerSubs    — fired on the trigger edge BEFORE the action runs.
+  //                  These are what `flow.subscribe(fn)` adds to.
+  // completedSubs  — fired after the action settles. `flow.completed.subscribe`.
+  // Both stored in refs so the result object can capture stable add/remove
+  // closures without re-rendering.
+  const triggerSubsRef = useRef<Set<(event: any) => void>>(new Set());
+  const completedSubsRef = useRef<Set<(event: any) => void>>(new Set());
+
+  // ── Action-in-flight tracker (`flow.action` level source) ────────────
+  //
+  // pendingCount   — number of currently-running action invocations.
+  //                  Overlapping fires increment; settles decrement.
+  // actionStartedAt — performance.now() when pendingCount went 0 → 1.
+  // actionDone     — always a pending promise. Resolves when pendingCount
+  //                  next goes back to 0; a fresh pending promise is
+  //                  installed atomically so awaiters captured BEFORE the
+  //                  next open will still see "the next close from now."
+  // actionGen      — monotonic counter; each open assigns a gen, each
+  //                  fire's settle checks gen still matches. `cancel()`
+  //                  bumps gen so stale settles become no-ops (no double
+  //                  `completed`, no negative pendingCount drift).
+  const pendingCountRef = useRef(0);
+  const actionStartedAtRef = useRef(0);
+  const actionGenRef = useRef(0);
+  const actionDoneRef = useRef<{ promise: Promise<void>; resolve: () => void } | null>(null);
+
+  // Eagerly seed a pending promise so `await flow.action.done` BEFORE the
+  // first fire still blocks until the next close (rather than resolving
+  // instantly). Lazy-init guards against SSR / repeated module load.
+  if (actionDoneRef.current == null) {
+    let resolve!: () => void;
+    const promise = new Promise<void>((r) => { resolve = r; });
+    actionDoneRef.current = { promise, resolve };
+  }
+
+  /** Open one in-flight slot. Returns the gen token the caller's settle
+   *  must present back; if the gen has moved on (cancel between fires)
+   *  the settle is a stale ghost and must be ignored. */
+  function openAction(): number {
+    if (pendingCountRef.current === 0) {
+      actionStartedAtRef.current = performance.now();
+    }
+    pendingCountRef.current += 1;
+    const gen = ++actionGenRef.current;
+    if (actionSubscribedRef.current) forceTick((n) => (n + 1) & 0xffff);
+    return gen;
+  }
+
+  /** Close one in-flight slot. Pass the gen returned from openAction;
+   *  a stale gen (after cancel) returns false so the caller can skip
+   *  `emitCompleted`. */
+  function closeAction(gen: number): boolean {
+    if (gen !== actionGenRef.current && pendingCountRef.current === 0) {
+      // Stale: a cancel already zeroed the counter and bumped gen.
+      return false;
+    }
+    pendingCountRef.current = Math.max(0, pendingCountRef.current - 1);
+    if (pendingCountRef.current === 0) {
+      actionStartedAtRef.current = 0;
+      // Resolve the current pending; install a fresh pending atomically
+      // so subsequent `await flow.action.done` awaiters block on the
+      // NEXT window's close, not on the just-resolved one.
+      const prior = actionDoneRef.current!;
+      let nextResolve!: () => void;
+      actionDoneRef.current = {
+        promise: new Promise<void>((r) => { nextResolve = r; }),
+        resolve: nextResolve,
+      };
+      prior.resolve();
+    }
+    if (actionSubscribedRef.current) forceTick((n) => (n + 1) & 0xffff);
+    return true;
+  }
+
+  /** Force-close every in-flight slot regardless of pending promises.
+   *  Underlying action Promises still run; their `.finally` settles
+   *  will present stale gens and be ignored. `completed` will not fire
+   *  for the cancelled fires. */
+  function cancelAction(): void {
+    if (pendingCountRef.current === 0) return;
+    pendingCountRef.current = 0;
+    actionStartedAtRef.current = 0;
+    actionGenRef.current += 1;  // invalidate every outstanding gen
+    const prior = actionDoneRef.current!;
+    let nextResolve!: () => void;
+    actionDoneRef.current = {
+      promise: new Promise<void>((r) => { nextResolve = r; }),
+      resolve: nextResolve,
+    };
+    prior.resolve();
+    if (actionSubscribedRef.current) forceTick((n) => (n + 1) & 0xffff);
+  }
+
+  function emitCompleted(event: any): void {
+    for (const fn of Array.from(completedSubsRef.current)) {
+      try { fn(event); } catch (e: any) {
+        console.error('[ifttt] completed subscriber error:', e?.message || e);
+      }
+    }
+  }
+
+  // Lazy reactivity: separate flags for trigger-counter reads vs
+  // action-level reads. Reading any field opts the host into rerender on
+  // the corresponding event; carts that ignore everything stay
+  // zero-rerender.
   const subscribedRef = useRef(false);
+  const actionSubscribedRef = useRef(false);
   const [, forceTick] = useState(0);
 
+  // ── Fire ──────────────────────────────────────────────────────────────
+  //
+  // Order matters and is the user-facing contract:
+  //   1. Emit `flow.subscribe` listeners (trigger edge, sync)
+  //   2. Bump the Zig wire counter + force tick if subscribed
+  //   3. Run the action; capture its return
+  //   4. If Promise: open the action window, await, close on settle
+  //   5. Emit `flow.completed` listeners (sync action = same tick;
+  //      async action = on settle, regardless of resolve/reject)
+  //
+  // Errors in the action are logged but never propagate into `completed`
+  // suppression — `flow.completed` always fires once per trigger so chains
+  // don't silently stall.
   const fire = (event?: any) => {
+    // 1. Trigger-edge subscribers first.
+    for (const fn of Array.from(triggerSubsRef.current)) {
+      try { fn(event); } catch (e: any) {
+        console.error('[ifttt] trigger subscriber error:', e?.message || e);
+      }
+    }
+    // 2. Wire bump + tick.
     const wid = wireRef.current;
     if (wid > 0) bumpWire(wid, event);
-    const a = actionRef.current;
-    if (typeof a === 'function') a(event);
-    else runStringAction(a, event);
     if (subscribedRef.current) forceTick((n) => (n + 1) & 0xffff);
+
+    // 3. Run the action.
+    const a = actionRef.current;
+    let ret: void | Promise<void> = undefined;
+    try {
+      ret = typeof a === 'function'
+        ? (a(event) as void | Promise<void>)
+        : runStringAction(a, event);
+    } catch (e: any) {
+      console.error('[ifttt] action threw:', e?.message || e);
+      emitCompleted(event);
+      return;
+    }
+    // 4 + 5. Track in-flight if async; emit completed on settle either way.
+    if (isThenable(ret)) {
+      const gen = openAction();
+      ret
+        .catch((e: any) => console.error('[ifttt] async action rejected:', e?.message || e))
+        .finally(() => {
+          // Stale settle (cancelAction was called between fire and settle):
+          // gen no longer matches → swallow. No `completed` edge, no
+          // pendingCount decrement — the cancel already accounted for it.
+          if (closeAction(gen)) emitCompleted(event);
+        });
+    } else {
+      emitCompleted(event);
+    }
   };
-  const fireRef = useRef(fire);
-  fireRef.current = fire;
+  const fireRef = useLatest(fire);
 
   // ── Function trigger: false → true edge, polled at frame rate ──────────
   // RAF-driven so the predicate cadence is independent of the host's
-  // render cycle (no more re-evaluating every commit).
+  // render cycle (no more re-evaluating every commit). The tick reads
+  // through triggerRef so changing the function identity between renders
+  // picks up the new predicate without re-subscribing every RAF.
+  const triggerRef = useLatest(trigger);
   const isFnTrigger = typeof trigger === 'function';
   const prevCondRef = useRef(false);
   useEffect(() => {
@@ -661,25 +1004,35 @@ export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResul
     let raf = 0;
     const tick = () => {
       if (cancelled) return;
+      const t = triggerRef.current;
       let cur = false;
-      try { cur = !!(trigger as () => boolean)(); } catch { cur = false; }
+      if (typeof t === 'function') {
+        try { cur = !!(t as () => boolean)(); } catch { cur = false; }
+      }
       if (cur && !prevCondRef.current) fireRef.current(undefined);
       prevCondRef.current = cur;
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => { cancelled = true; cancelAnimationFrame(raf); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isFnTrigger]);
 
   // ── Compose key: re-subscribe only when the trigger shape changes ─────
+  // composableKey walks the trigger and stamps every function/object leaf
+  // through the reactive WeakMap, so a composable whose `when:` predicate
+  // changes identity (but whose surrounding shape looks the same) DOES
+  // get re-subscribed. Function triggers (RAF poll path) skip this — the
+  // RAF tick reads triggerRef.current directly.
   const composeKey = useMemo(() => {
     if (typeof trigger === 'string') return `s:${trigger}`;
     if (typeof trigger === 'function') return null;
-    try { return `c:${JSON.stringify(trigger)}`; } catch { return null; }
+    if (isReactive(trigger)) return reactiveKey(trigger as object);
+    return `c:${composableKey(trigger)}`;
   }, [trigger]);
 
-  // ── String / composable trigger subscription ──────────────────────────
+  // ── Trigger subscription ──────────────────────────────────────────────
+  // Branches: string (registry), Reactive object (direct subscribe),
+  // composable (compile through compose.ts), function (handled above).
   useEffect(() => {
     if (typeof trigger === 'function') return;
     let sub: IfttSubscription | null;
@@ -689,6 +1042,8 @@ export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResul
         console.warn(`[ifttt] no source for trigger '${trigger}'`);
         return;
       }
+    } else if (isReactive(trigger)) {
+      sub = trigger as unknown as IfttSubscription;
     } else if (isComposable(trigger)) {
       sub = compileTrigger(trigger as IFTTTComposable);
     } else {
@@ -702,19 +1057,59 @@ export function useIFTTT(trigger: IFTTTTrigger, action: IFTTTAction): IFTTTResul
   // demand; `lastEvent` is JS-side (mirrored in WireEntry by bumpWire).
   // Reading any field opts the host into rerender-on-fire (lazy
   // subscription). Carts that never read these never trigger renders.
-  return useMemo<IFTTTResult>(() => ({
-    get fired(): number {
-      subscribedRef.current = true;
-      return callHost<number>('__ifttt_wire_count', 0, wireRef.current);
-    },
-    get lastEvent(): any {
-      subscribedRef.current = true;
-      return _wires.get(wireRef.current)?.lastEvent;
-    },
-    get lastFiredAt(): number {
-      subscribedRef.current = true;
-      return callHost<number>('__ifttt_wire_last_at', 0, wireRef.current);
-    },
-    fire: (event?: any) => fireRef.current(event),
-  }), []);
+  return useMemo<IFTTTResult<unknown>>(() => {
+    const subscribeTrigger = (fn: (event: any) => void): (() => void) => {
+      triggerSubsRef.current.add(fn);
+      return () => { triggerSubsRef.current.delete(fn); };
+    };
+    const subscribeCompleted = (fn: (event: any) => void): (() => void) => {
+      completedSubsRef.current.add(fn);
+      return () => { completedSubsRef.current.delete(fn); };
+    };
+    const action: ReactiveLevelSource = {
+      get active(): boolean {
+        actionSubscribedRef.current = true;
+        return pendingCountRef.current > 0;
+      },
+      get startedAt(): number {
+        actionSubscribedRef.current = true;
+        return actionStartedAtRef.current;
+      },
+      get done(): Promise<void> {
+        // Always returns the "next close from now" — a perpetually-pending
+        // promise that's swapped to a fresh pending atomically on each
+        // close. So `await flow.action.done` before any fire blocks until
+        // the next action settles, instead of resolving instantly.
+        actionSubscribedRef.current = true;
+        return actionDoneRef.current!.promise;
+      },
+      cancel(): void {
+        // Force-close every in-flight slot, resolve `.done`, bump the gen
+        // token so subsequent settles of those underlying Promises become
+        // ghosts — no double `completed`, no negative pendingCount drift.
+        // The underlying Promises still run their action work; this only
+        // unsubscribes the reactive surface from observing them.
+        cancelAction();
+      },
+    };
+    const completed: ReactiveEdgeSource<unknown> = { subscribe: subscribeCompleted };
+    return {
+      get fired(): number {
+        subscribedRef.current = true;
+        return callHost<number>('__ifttt_wire_count', 0, wireRef.current);
+      },
+      get lastEvent(): any {
+        subscribedRef.current = true;
+        return _wires.get(wireRef.current)?.lastEvent;
+      },
+      get lastFiredAt(): number {
+        subscribedRef.current = true;
+        return callHost<number>('__ifttt_wire_last_at', 0, wireRef.current);
+      },
+      fire: (event?: any) => fireRef.current(event),
+      subscribe: subscribeTrigger,
+      action,
+      completed,
+    };
+  }, []);
 }

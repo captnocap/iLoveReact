@@ -667,6 +667,17 @@ fn jsonInt(v: std.json.Value) ?i64 {
     };
 }
 
+// A [r, g, b] (or [x, y, z]) JSON array → [3]f32. Used by the skybox props,
+// which receive colors already resolved to 0..1 floats on the JS side.
+fn jsonVec3(v: std.json.Value) ?[3]f32 {
+    if (v != .array or v.array.items.len < 3) return null;
+    return .{
+        jsonFloat(v.array.items[0]) orelse return null,
+        jsonFloat(v.array.items[1]) orelse return null,
+        jsonFloat(v.array.items[2]) orelse return null,
+    };
+}
+
 // JSX idiom is `hoverable={1}` / `noWrap={0}` — accept bool or numeric 0/1 so
 // carts don't have to care which literal the reconciler happens to emit.
 fn jsonBool(v: std.json.Value) ?bool {
@@ -1679,6 +1690,10 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                     node.terminal_session = s;
                 } else |_| {}
             }
+        } else if (is_terminal and std.mem.eql(u8, k, "dumb")) {
+            // <Terminal dumb /> — pure cell-grid, no PTY. The tick skips
+            // spawn/poll; the cart feeds bytes via __vterm_feed.
+            node.terminal_dumb = jsonBool(v) orelse false;
         } else if (std.mem.eql(u8, k, "color")) {
             if (v == .string) node.text_color = parseColor(v.string);
         } else if (std.mem.eql(u8, k, "letterSpacing")) {
@@ -1863,12 +1878,66 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonBool(v)) |b| node.scene3d_show_grid = b;
         } else if (std.mem.eql(u8, k, "scene3dShowAxes")) {
             if (jsonBool(v)) |b| node.scene3d_show_axes = b;
+        }
+        // ── Skybox props (one <Scene3D.Skybox> child). Colors arrive as
+        // [r,g,b] 0..1 arrays already resolved on the JS side. ──
+        else if (std.mem.eql(u8, k, "scene3dSkybox")) {
+            if (jsonBool(v)) |b| node.scene3d_skybox = b;
+        } else if (std.mem.eql(u8, k, "scene3dSkyZenith")) {
+            if (jsonVec3(v)) |c| node.scene3d_sky_zenith = c;
+        } else if (std.mem.eql(u8, k, "scene3dSkyHorizon")) {
+            if (jsonVec3(v)) |c| node.scene3d_sky_horizon = c;
+        } else if (std.mem.eql(u8, k, "scene3dSkyGround")) {
+            if (jsonVec3(v)) |c| node.scene3d_sky_ground = c;
+        } else if (std.mem.eql(u8, k, "scene3dSkySunDir")) {
+            if (jsonVec3(v)) |c| node.scene3d_sky_sun_dir = c;
+        } else if (std.mem.eql(u8, k, "scene3dSkySunColor")) {
+            if (jsonVec3(v)) |c| node.scene3d_sky_sun_color = c;
+        } else if (std.mem.eql(u8, k, "scene3dSkySunSize")) {
+            if (jsonFloat(v)) |f| node.scene3d_sky_sun_size = f;
+        } else if (std.mem.eql(u8, k, "scene3dSkySunGlow")) {
+            if (jsonFloat(v)) |f| node.scene3d_sky_sun_glow = f;
+        } else if (std.mem.eql(u8, k, "scene3dSkyHaze")) {
+            if (jsonFloat(v)) |f| node.scene3d_sky_haze = f;
+        } else if (std.mem.eql(u8, k, "scene3dSkyCloud")) {
+            if (jsonFloat(v)) |f| node.scene3d_sky_cloud = f;
+        } else if (std.mem.eql(u8, k, "scene3dSkyNight")) {
+            if (jsonFloat(v)) |f| node.scene3d_sky_night = f;
         } else if (std.mem.eql(u8, k, "scene3dTexW")) {
             if (jsonInt(v)) |i| node.scene3d_tex_w = if (i > 0 and i < 65536) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dTexH")) {
             if (jsonInt(v)) |i| node.scene3d_tex_h = if (i > 0 and i < 65536) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dTexKey")) {
             if (dupJsonText(v)) |s| node.scene3d_tex_key = s;
+        } else if (std.mem.eql(u8, k, "scene3dHfCols")) {
+            if (jsonInt(v)) |i| node.scene3d_hf_cols = if (i > 1 and i < 4096) @intCast(i) else 0;
+        } else if (std.mem.eql(u8, k, "scene3dHfRows")) {
+            if (jsonInt(v)) |i| node.scene3d_hf_rows = if (i > 1 and i < 4096) @intCast(i) else 0;
+        } else if (std.mem.eql(u8, k, "scene3dHeights")) {
+            // Flat array of corner heights (length = hfCols*hfRows). Copied into
+            // a g_alloc-owned []f32 the gpu/3d.zig heightfield generator reads.
+            if (v == .array) {
+                const items = v.array.items;
+                if (items.len > 0 and items.len <= (1 << 20)) {
+                    const buf = g_alloc.alloc(f32, items.len) catch null;
+                    if (buf) |out| {
+                        for (items, 0..) |hv, n| out[n] = jsonFloat(hv) orelse 0;
+                        node.scene3d_heights = out;
+                    }
+                }
+            }
+        } else if (std.mem.eql(u8, k, "scene3dWaveAmplitude")) {
+            if (jsonFloat(v)) |f| node.scene3d_wave_amplitude = f;
+        } else if (std.mem.eql(u8, k, "scene3dWaveLength")) {
+            if (jsonFloat(v)) |f| node.scene3d_wave_length = f;
+        } else if (std.mem.eql(u8, k, "scene3dWaveSpeed")) {
+            if (jsonFloat(v)) |f| node.scene3d_wave_speed = f;
+        } else if (std.mem.eql(u8, k, "scene3dWaveDirX")) {
+            if (jsonFloat(v)) |f| node.scene3d_wave_dir_x = f;
+        } else if (std.mem.eql(u8, k, "scene3dWaveDirZ")) {
+            if (jsonFloat(v)) |f| node.scene3d_wave_dir_z = f;
+        } else if (std.mem.eql(u8, k, "scene3dWavePhase")) {
+            if (jsonFloat(v)) |f| node.scene3d_wave_phase = f;
         } else if (std.mem.eql(u8, k, "scene3dTexData")) {
             // RRGGBBAA hex string, 8 chars per pixel. Length must equal
             // 8 * w * h. Decoded into a fresh RGBA byte buffer owned by

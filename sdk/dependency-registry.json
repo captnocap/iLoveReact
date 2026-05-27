@@ -717,6 +717,26 @@
         "voice"
       ]
     },
+    "audio_input": {
+      "shipGate": "audio_input",
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useRawCapture.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useAudioInput.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-audio-input"
+      ],
+      "v8Bindings": [
+        "audio_input"
+      ],
+      "note": "Raw mic capture (44.1kHz f32 mono, no VAD) for music sampling. Sibling to voice — same SDL3 input source, different state machine. framework/audio_input/audio_input.zig is always compiled (wired unconditionally into engine.run); this gate only controls __rawCapture_* host-fn registration."
+    },
     "whisper": {
       "shipGate": "whisper",
       "triggers": [
@@ -852,6 +872,7 @@
       "zigcall",
       "sdk",
       "voice",
+      "audio_input",
       "whisper",
       "paintable",
       "onnx",

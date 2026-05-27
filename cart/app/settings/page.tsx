@@ -34,6 +34,7 @@ import ProvidersRoute from './routes/providers';
 import ModelsRoute    from './routes/models';
 import ActionsRoute   from './routes/actions';
 import DataRoute      from './routes/data';
+import EmbedRoute     from './routes/embed';
 import PrivacyRoute   from './routes/privacy';
 import AboutRoute     from './routes/about';
 import TestsRoute     from './routes/tests';
@@ -45,6 +46,7 @@ export const NAV_ITEMS = [
   { id: 'models',    label: 'Models' },
   { id: 'actions',   label: 'Actions' },
   { id: 'data',      label: 'Data' },
+  { id: 'embed',     label: 'Embed' },
   { id: 'privacy',   label: 'Privacy' },
   { id: 'about',     label: 'About' },
   { id: 'tests',     label: 'Tests' },
@@ -144,6 +146,7 @@ export default function SettingsPage() {
               {active === 'models'    && <ModelsRoute />}
               {active === 'actions'   && <ActionsRoute />}
               {active === 'data'      && <DataRoute />}
+              {active === 'embed'     && <EmbedRoute />}
               {active === 'privacy'   && <PrivacyRoute />}
               {active === 'about'     && <AboutRoute />}
               {active === 'tests'     && <TestsRoute />}

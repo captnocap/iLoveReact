@@ -45,6 +45,7 @@
  */
 
 import { classifier } from '@reactjit/core';
+import { monoText, fixedPill } from './gallery-builders';
 
 // Natural height of the app's bottom input bar. Used by the
 // AppBottomInputBar classifier (its explicit height) and re-exported so
@@ -4121,42 +4122,19 @@ classifier({
   // state so the border / text colors stay token-driven and never drift
   // into hex. Add new states by adding a sibling classifier; never
   // inline a color here.
-  AppChatStatusPill: { type: 'Box', style: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 18, paddingLeft: 6, paddingRight: 6,
-    borderWidth: 1, borderColor: 'theme:ok',
-    backgroundColor: 'theme:bg',
-  }},
+  AppChatStatusPill: {
+    ...fixedPill({ height: 18, padX: 6, border: 'theme:ok' }),
+    '.Tool':  { style: { borderColor: 'theme:accent' } },
+    '.Stuck': { style: { borderColor: 'theme:warn'   } },
+    '.Rat':   { style: { borderColor: 'theme:flag'   } },
+  },
 
-  AppChatStatusPillTool: { type: 'Box', style: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 18, paddingLeft: 6, paddingRight: 6,
-    borderWidth: 1, borderColor: 'theme:accent',
-    backgroundColor: 'theme:bg',
-  }},
-
-  AppChatStatusPillStuck: { type: 'Box', style: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 18, paddingLeft: 6, paddingRight: 6,
-    borderWidth: 1, borderColor: 'theme:warn',
-    backgroundColor: 'theme:bg',
-  }},
-
-  AppChatStatusPillRat: { type: 'Box', style: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    height: 18, paddingLeft: 6, paddingRight: 6,
-    borderWidth: 1, borderColor: 'theme:flag',
-    backgroundColor: 'theme:bg',
-  }},
-
-  AppChatStatusPillText:      { type: 'Text', size: 9, bold: true, color: 'theme:ok',
-                                style: { fontFamily: 'theme:fontMono', letterSpacing: 2, lineHeight: 11, whiteSpace: 'pre' } },
-  AppChatStatusPillTextTool:  { type: 'Text', size: 9, bold: true, color: 'theme:accent',
-                                style: { fontFamily: 'theme:fontMono', letterSpacing: 2, lineHeight: 11, whiteSpace: 'pre' } },
-  AppChatStatusPillTextStuck: { type: 'Text', size: 9, bold: true, color: 'theme:warn',
-                                style: { fontFamily: 'theme:fontMono', letterSpacing: 2, lineHeight: 11, whiteSpace: 'pre' } },
-  AppChatStatusPillTextRat:   { type: 'Text', size: 9, bold: true, color: 'theme:flag',
-                                style: { fontFamily: 'theme:fontMono', letterSpacing: 2, lineHeight: 11, whiteSpace: 'pre' } },
+  AppChatStatusPillText: {
+    ...monoText(9, 'theme:ok', { bold: true, letterSpacing: 2, lineHeight: 11 }),
+    '.Tool':  { color: 'theme:accent' },
+    '.Stuck': { color: 'theme:warn'   },
+    '.Rat':   { color: 'theme:flag'   },
+  },
 
   AppChatFleetGrid: { type: 'Box', style: {
     flexDirection: 'column',

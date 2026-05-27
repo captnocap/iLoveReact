@@ -78,6 +78,10 @@ export type TerminalContextSelection = {
   text: string;
 };
 
+export type TerminalContextDraft = TerminalContextSelection & {
+  id: string;
+};
+
 export type TerminalTab = {
   id: string;
   label: string;
@@ -132,3 +136,55 @@ export type EnvironmentUnavailableState = {
 };
 
 export type SessionPhase = 'idle' | 'streaming' | 'failed' | 'starting';
+
+// ── Composer-specific types ────────────────────────────────────────────────
+
+export type PendingApproval = {
+  requestId: string;
+  requestKind: 'command' | 'file-read' | 'file-change';
+  detail?: string;
+};
+
+export type PendingUserInputQuestion = {
+  id: string;
+  header: string;
+  question: string;
+  multiSelect?: boolean;
+  options: { label: string; description?: string }[];
+};
+
+export type PendingUserInput = {
+  requestId: string;
+  questions: PendingUserInputQuestion[];
+};
+
+export type PendingUserInputDraftAnswer = {
+  selectedOptionLabels?: string[];
+  customAnswer?: string;
+};
+
+export type ComposerImageAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataUrl?: string;
+};
+
+export type ComposerCommandItem =
+  | { id: string; type: 'path'; path: string; pathKind: 'file' | 'directory'; label: string; description: string }
+  | { id: string; type: 'slash-command'; command: string; label: string; description: string }
+  | { id: string; type: 'provider-slash-command'; provider: string; command: { name: string; description?: string }; label: string; description: string }
+  | { id: string; type: 'skill'; provider: string; skill: { name: string; shortDescription?: string; description?: string }; label: string; description: string };
+
+export type ProviderSkill = {
+  name: string;
+  shortDescription?: string;
+  description?: string;
+  scope?: string;
+};
+
+export type ContextWindowSnapshot = {
+  used: number;
+  limit: number;
+};

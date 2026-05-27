@@ -23,7 +23,7 @@
  *   The hook converts to/from Uint8Array on the JS side.
  */
 
-import { callHost } from '../ffi';
+import { callHost, callHostJson } from '../ffi';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -114,14 +114,10 @@ export function usePrivacy(opts: PrivacyOptions = {}): PrivacyAPI {
       return callHost<string>('__priv_hash_file', '', path);
     },
     directory(path: string, recursive: boolean = false): Manifest | null {
-      const json = callHost<string>('__priv_hash_directory', '', path, recursive);
-      if (!json) return null;
-      try { return JSON.parse(json) as Manifest; } catch { return null; }
+      return callHostJson<Manifest | null>('__priv_hash_directory', null, path, recursive);
     },
     verify(manifest: Manifest): VerifyResult | null {
-      const json = callHost<string>('__priv_verify_manifest', '', JSON.stringify(manifest));
-      if (!json) return null;
-      try { return JSON.parse(json) as VerifyResult; } catch { return null; }
+      return callHostJson<VerifyResult | null>('__priv_verify_manifest', null, JSON.stringify(manifest));
     },
   };
 
@@ -324,13 +320,10 @@ export function usePrivacy(opts: PrivacyOptions = {}): PrivacyAPI {
       return callHost<string>('__priv_keyring_generate', '', handle, JSON.stringify(opts));
     },
     list(handle: number): KeyringEntryView[] {
-      const json = callHost<string>('__priv_keyring_list', '[]', handle);
-      try { return JSON.parse(json) as KeyringEntryView[]; } catch { return []; }
+      return callHostJson<KeyringEntryView[]>('__priv_keyring_list', [], handle);
     },
     get(handle: number, keyId: string): KeyringEntryView | null {
-      const json = callHost<string>('__priv_keyring_get', '', handle, keyId);
-      if (!json) return null;
-      try { return JSON.parse(json) as KeyringEntryView; } catch { return null; }
+      return callHostJson<KeyringEntryView | null>('__priv_keyring_get', null, handle, keyId);
     },
     rotate(handle: number, keyId: string): string {
       return callHost<string>('__priv_keyring_rotate', '', handle, keyId);
@@ -348,8 +341,7 @@ export function usePrivacy(opts: PrivacyOptions = {}): PrivacyAPI {
 
   const pii = {
     detect(text: string): { type: string; start: number; end: number }[] {
-      const json = callHost<string>('__priv_pii_detect', '[]', text);
-      try { return JSON.parse(json); } catch { return []; }
+      return callHostJson<{ type: string; start: number; end: number }[]>('__priv_pii_detect', [], text);
     },
     redact(text: string): string {
       return callHost<string>('__priv_pii_redact', '', text);
@@ -452,17 +444,15 @@ export function usePrivacy(opts: PrivacyOptions = {}): PrivacyAPI {
       return callHost<boolean>('__priv_audit_create', false, chainKeyHex);
     },
     append(event: string, data: unknown): AuditEntry | null {
-      const json = callHost<string>('__priv_audit_append', '', event, JSON.stringify(data ?? null));
-      if (!json) return null;
-      try { return JSON.parse(json) as AuditEntry; } catch { return null; }
+      return callHostJson<AuditEntry | null>('__priv_audit_append', null, event, JSON.stringify(data ?? null));
     },
     verify(): { valid: boolean; entries: number; brokenAt: number } {
-      const json = callHost<string>('__priv_audit_verify', '');
-      try { return JSON.parse(json); } catch { return { valid: false, entries: 0, brokenAt: -1 }; }
+      return callHostJson<{ valid: boolean; entries: number; brokenAt: number }>(
+        '__priv_audit_verify', { valid: false, entries: 0, brokenAt: -1 },
+      );
     },
     entries(from: number = 0, to: number = 0x7fffffff): AuditEntry[] {
-      const json = callHost<string>('__priv_audit_entries', '[]', from, to);
-      try { return JSON.parse(json) as AuditEntry[]; } catch { return []; }
+      return callHostJson<AuditEntry[]>('__priv_audit_entries', [], from, to);
     },
   };
 
@@ -484,8 +474,9 @@ export function usePrivacy(opts: PrivacyOptions = {}): PrivacyAPI {
         : callHost<boolean>('__priv_policy_revoke_consent', false, userId);
     },
     rightToErasure(userId: string): { recordsFound: number; recordsDeleted: number } {
-      const json = callHost<string>('__priv_policy_erasure', '', userId);
-      try { return JSON.parse(json); } catch { return { recordsFound: 0, recordsDeleted: 0 }; }
+      return callHostJson<{ recordsFound: number; recordsDeleted: number }>(
+        '__priv_policy_erasure', { recordsFound: 0, recordsDeleted: 0 }, userId,
+      );
     },
   };
 
@@ -493,10 +484,9 @@ export function usePrivacy(opts: PrivacyOptions = {}): PrivacyAPI {
 
   const algorithm = {
     check(name: string): { strength: 'strong' | 'acceptable' | 'weak' | 'broken'; deprecated: boolean; recommendation: string } {
-      const json = callHost<string>('__priv_check_algorithm', '', name);
-      try { return JSON.parse(json); } catch {
-        return { strength: 'weak', deprecated: false, recommendation: '' };
-      }
+      return callHostJson<{ strength: 'strong' | 'acceptable' | 'weak' | 'broken'; deprecated: boolean; recommendation: string }>(
+        '__priv_check_algorithm', { strength: 'weak', deprecated: false, recommendation: '' }, name,
+      );
     },
     /** Pure-JS config validator; mirrors love2d/lua/privacy.lua:Privacy.validateConfig. */
     validateConfig(config: Record<string, unknown> | null): { valid: boolean; errors: string[]; warnings: string[] } {

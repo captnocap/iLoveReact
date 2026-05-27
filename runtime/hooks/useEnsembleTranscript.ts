@@ -30,6 +30,8 @@ import {
   type VoiceInputOptions,
 } from './useVoiceInput';
 import { transcribe } from './whisper';
+import { callHost } from '../ffi';
+import { useLatest } from './useLatest';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -264,14 +266,10 @@ export function useEnsembleTranscript(opts: UseEnsembleTranscriptOptions): UseEn
   const [livePreview, setLivePreview] = useState('');
 
   const lastIdRef = useRef(0);
-  const modelsRef = useRef(models);
-  modelsRef.current = models;
-  const escalateRef = useRef(escalateTo);
-  escalateRef.current = escalateTo;
-  const thresholdRef = useRef(escalationThreshold ?? 2);
-  thresholdRef.current = escalationThreshold ?? 2;
-  const liveModelRef = useRef(livePreviewResolved);
-  liveModelRef.current = livePreviewResolved;
+  const modelsRef = useLatest(models);
+  const escalateRef = useLatest(escalateTo);
+  const thresholdRef = useLatest(escalationThreshold ?? 2);
+  const liveModelRef = useLatest(livePreviewResolved);
   // Single in-flight preview at a time. Whisper's worker is sequential, so
   // queueing more would stall ensemble jobs without producing fresher
   // text — Zig keeps firing PreviewReady events; we just drop the ones
@@ -299,7 +297,6 @@ export function useEnsembleTranscript(opts: UseEnsembleTranscriptOptions): UseEn
     setEscalatedWith([]);
 
     (async () => {
-      const G = globalThis as any;
       const collected: { name: string; text: string }[] = [];
 
       for (let i = 0; i < selected.length; i++) {
@@ -357,8 +354,7 @@ export function useEnsembleTranscript(opts: UseEnsembleTranscriptOptions): UseEn
       }
 
       // Release the buffer now that all models are done.
-      const rel = G.__voice_release_buffer;
-      if (typeof rel === 'function') rel(id);
+      callHost('__voice_release_buffer', undefined, id);
       setProcessing(false);
     })();
   }, [v.utteranceId]);
@@ -373,7 +369,6 @@ export function useEnsembleTranscript(opts: UseEnsembleTranscriptOptions): UseEn
   // Both are no-ops when livePreviewModel is null.
   useEffect(() => {
     if (liveModelRef.current === null) return;
-    const G = globalThis as any;
 
     const offStart = subscribeSpeechStart(() => {
       previewGenRef.current += 1;
@@ -383,15 +378,13 @@ export function useEnsembleTranscript(opts: UseEnsembleTranscriptOptions): UseEn
     const offPreview = subscribePreview(({ id }) => {
       const liveModel = liveModelRef.current;
       if (liveModel === null) {
-        const rel = G.__voice_release_buffer;
-        if (typeof rel === 'function') rel(id);
+        callHost('__voice_release_buffer', undefined, id);
         return;
       }
       if (previewBusyRef.current) {
         // Already running a preview — drop this snapshot to avoid
         // queueing behind the worker. The next stride will fire another.
-        const rel = G.__voice_release_buffer;
-        if (typeof rel === 'function') rel(id);
+        callHost('__voice_release_buffer', undefined, id);
         return;
       }
       previewBusyRef.current = true;
@@ -406,8 +399,7 @@ export function useEnsembleTranscript(opts: UseEnsembleTranscriptOptions): UseEn
         })
         .catch(() => { /* swallow — live preview is best-effort */ })
         .finally(() => {
-          const rel = G.__voice_release_buffer;
-          if (typeof rel === 'function') rel(id);
+          callHost('__voice_release_buffer', undefined, id);
           previewBusyRef.current = false;
         });
     });

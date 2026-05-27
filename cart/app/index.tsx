@@ -5,7 +5,7 @@ import { EASINGS } from '@reactjit/runtime/easing';
 import { Box, Pressable } from '@reactjit/runtime/primitives';
 import { Route, Router, useNavigate, useRoute } from '@reactjit/runtime/router';
 import { installBrowserShims } from '@reactjit/runtime/hooks';
-import { useBreakpoint, useActiveVariant, setVariant } from '@reactjit/runtime/theme';
+import { useBreakpoint, useActiveVariant, setVariant } from '@reactjit/runtime/classifier';
 import { TooltipRoot } from '@reactjit/runtime/tooltip/Tooltip';
 import { BotMessageSquare, Boxes, Home, KeyboardMusic, LayoutGrid, Maximize, Minimize, Settings, User2, X } from '@reactjit/runtime/icons/icons';
 import { callHost } from '@reactjit/runtime/ffi';

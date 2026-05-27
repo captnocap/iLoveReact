@@ -1,6 +1,6 @@
 import React from 'react';
 import { Route, Router, useNavigate, useRoute } from '../../runtime/router';
-import { ThemeProvider } from '../../runtime/theme';
+import { ThemeProvider } from '../../runtime/classifier';
 import { Box, Image, Pressable, Video } from '../../runtime/primitives';
 import { useMedia } from '../../runtime/hooks';
 import { useFileWatch } from '../../runtime/hooks/useFileWatch';
@@ -16,8 +16,8 @@ function formatVideoTime(totalSeconds: number): string {
 }
 import { fs } from '../../runtime/hooks';
 import type { MediaFile } from '../../runtime/hooks/media';
-import './style_cls';
-import { C } from './style_cls';
+import './style.cls';
+import { C } from './style.cls';
 import { APP_COLORS, APP_STYLES } from './theme';
 import {
   getDb, upsertMedia, listMedia, getMediaByPath, toggleFavorite, toggleOrganized,

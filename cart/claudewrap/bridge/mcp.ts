@@ -85,8 +85,13 @@ export function composeDirective(args: {
   turnId: string;
   endMarker: string;
   tools: any[];
+  /** OpenAI `system`-role content from the request's messages[]. Lives
+   *  in this same additionalContext blob (NOT pasted into the visible
+   *  PTY paste) so claude treats it as framing rather than as part of
+   *  the user's actual message. */
+  systemContext?: string;
 }): string {
-  const { chatId, turnId, endMarker, tools } = args;
+  const { chatId, turnId, endMarker, tools, systemContext } = args;
   let toolsBlock = '';
   if (tools.length > 0) {
     const lines = tools.map((t) => {
@@ -102,7 +107,14 @@ export function composeDirective(args: {
       `name=<tool name>, arguments_json=<stringified JSON args>. The bridge will hold ` +
       `your call until the upstream client returns a result, then deliver it back to you.`;
   }
+  // System content from the OpenAI request goes ABOVE the bridge
+  // protocol block so claude reads framing first, then the protocol
+  // instructions for how to respond.
+  const systemBlock = systemContext && systemContext.length > 0
+    ? `(Caller-supplied system context for this turn — treat as framing, not as the user's message:\n\n${systemContext}\n)\n\n`
+    : '';
   return (
+    systemBlock +
     `(Bridge protocol — this turn: chat_id="${chatId}" turn_id="${turnId}". ` +
     `Deliver your final answer by calling the bridge.respond MCP tool with ` +
     `chat_id="${chatId}", turn_id="${turnId}", text=<your answer>. You may ` +

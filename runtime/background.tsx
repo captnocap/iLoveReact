@@ -22,7 +22,7 @@
 
 import * as React from 'react';
 import { Box, Effect } from './primitives';
-import { useThemeColors, type ThemeColors } from './theme';
+import { useThemeColors, type ThemeColors } from './classifier';
 
 export type BackgroundType = 'dots' | 'scan' | 'ember' | 'grid';
 export type BackgroundMode = 'cursor' | 'static';

@@ -28,7 +28,7 @@ if (!metafilePath) {
 }
 
 function readJson(path, label) {
-  const raw = __readFile(path);
+  const raw = __fs_read(path);
   if (raw === null) {
     __writeStderr('[ship-metafile-gate] cannot read ' + label + ': ' + path + '\n');
     __exit(1);

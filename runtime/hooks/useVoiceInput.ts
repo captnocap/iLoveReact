@@ -43,11 +43,15 @@
  *     if (v.transcript) console.log('heard:', v.transcript);
  *   }, [v.transcript]);
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { callHost, hasHost } from '../ffi';
+import { G as G_typed } from '../host-globals';
+import { useLatest } from './useLatest';
 
 // ── Bridge globals (installed by framework/voice.zig + v8_bindings_voice) ─
-
-declare const globalThis: any;
+// Zig→JS callbacks are *assigned* to globalThis here so the Zig side can call
+// back into JS. JS→Zig invocations go through callHost/hasHost.
+const G = G_typed as any;
 
 // Install the receiving callbacks once (idempotent — same pattern as useIFTTT
 // guarding with __ifttt_handlers_installed). All hook instances share the
@@ -73,7 +77,6 @@ function emit(set: Set<Handler>, payload?: any) {
   }
 }
 
-const G = globalThis;
 if (!G.__voice_handlers_installed) {
   G.__voice_handlers_installed = true;
   G.__voice_onLevel = (rms_x100: number, vad_verdict?: number) => {
@@ -188,21 +191,18 @@ export function useVoiceInput(opts: VoiceInputOptions = {}): VoiceInputResult {
   const [utterance, setUtterance] = useState({ id: 0, ms: 0 });
 
   const autoRelease = opts.autoRelease !== false;
-  const autoReleaseRef = useRef(autoRelease);
-  autoReleaseRef.current = autoRelease;
+  const autoReleaseRef = useLatest(autoRelease);
 
   // Mode application: re-apply on change (cheap, fvad_set_mode only flips an int).
   useEffect(() => {
-    const fn = G.__voice_set_mode;
-    if (typeof fn === 'function') fn(opts.mode ?? 2);
+    callHost('__voice_set_mode', undefined, opts.mode ?? 2);
   }, [opts.mode]);
 
   // Amplitude floor: convert 0..1 → 0..10000 for the Zig side.
   useEffect(() => {
-    const fn = G.__voice_set_floor;
-    if (typeof fn !== 'function') return;
+    if (!hasHost('__voice_set_floor')) return;
     const f = Math.max(0, Math.min(1, opts.floor ?? 0));
-    fn(Math.round(f * 10000));
+    callHost('__voice_set_floor', undefined, Math.round(f * 10000));
   }, [opts.floor]);
 
   // Live-preview stride: forward to Zig if the cart specified one. Skip
@@ -210,9 +210,8 @@ export function useVoiceInput(opts: VoiceInputOptions = {}): VoiceInputResult {
   // stays in effect — VAD-only carts get zero overhead.
   useEffect(() => {
     if (opts.previewStrideMs === undefined) return;
-    const fn = G.__voice_set_preview_stride_ms;
-    if (typeof fn !== 'function') return;
-    fn(Math.max(0, Math.round(opts.previewStrideMs)));
+    if (!hasHost('__voice_set_preview_stride_ms')) return;
+    callHost('__voice_set_preview_stride_ms', undefined, Math.max(0, Math.round(opts.previewStrideMs)));
   }, [opts.previewStrideMs]);
 
   // Subscribe to bridge events for this instance's lifetime.
@@ -223,10 +222,7 @@ export function useVoiceInput(opts: VoiceInputOptions = {}): VoiceInputResult {
     const onSpeechEnd: Handler = (e: { id: number; lenSamples: number; durationMs: number }) => {
       setSpeaking(false);
       setUtterance({ id: e.id, ms: e.durationMs });
-      if (autoReleaseRef.current) {
-        const rel = G.__voice_release_buffer;
-        if (typeof rel === 'function') rel(e.id);
-      }
+      if (autoReleaseRef.current) callHost('__voice_release_buffer', undefined, e.id);
     };
     const onTranscript: Handler = (text) => setTranscript(String(text ?? ''));
 
@@ -245,19 +241,17 @@ export function useVoiceInput(opts: VoiceInputOptions = {}): VoiceInputResult {
   }, []);
 
   const start = useCallback(() => {
-    const fn = G.__voice_start;
-    if (typeof fn !== 'function') {
+    if (!hasHost('__voice_start')) {
       console.warn('[voice] __voice_start missing — was -Dhas-voice=true set?');
       return false;
     }
-    const ok = !!fn();
+    const ok = !!callHost('__voice_start', false);
     if (ok) setListening(true);
     return ok;
   }, []);
 
   const stop = useCallback(() => {
-    const fn = G.__voice_stop;
-    if (typeof fn === 'function') fn();
+    callHost('__voice_stop', undefined);
     setListening(false);
     setSpeaking(false);
     setLevel(0);

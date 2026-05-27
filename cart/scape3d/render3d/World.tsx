@@ -1,11 +1,12 @@
 // The meshed world dropped into the single <Scene3D>. STATIC geometry (ground,
 // buildings, props, furniture) is baked once by the entity tree (world/atlas.tsx →
-// frags). Only the DYNAMIC thingymajiggers live here: doors (open/close), floorboards
-// (pry state), storefront awnings — read from live game state and resolved through the
-// SAME registry as the static ones, so no world object's mesh lives in two places.
+// chunked frags) and mounted only near the player. Only the DYNAMIC thingymajiggers
+// live here: doors (open/close), floorboards (pry state), storefront awnings — read
+// from live game state and resolved through the SAME registry as the static ones, so
+// no world object's mesh lives in two places.
 
 import { Fragment } from 'react';
-import { frags, kindAt, features } from '../world/atlas';
+import { staticChunks, kindAt, features } from '../world/atlas';
 import { heightAt } from '../world/terrain';
 import { T } from '../world/citymap';
 import { THINGYMAJIGGERS } from '../thingymajiggers';
@@ -13,10 +14,27 @@ import { itemModule } from '../registries/items';
 import type { Door } from '../systems/doors';
 import type { Ent, WorldItem3D } from '../state/world';
 
-export function World({ doors, entities, worldItems }: { doors: Door[]; entities: Ent[]; worldItems: WorldItem3D[] }) {
+const STATIC_MOUNT_RADIUS = 400;
+
+function chunkNearPlayer(ch: { x0: number; y0: number; x1: number; y1: number }, px: number, py: number): boolean {
+  return ch.x1 >= px - STATIC_MOUNT_RADIUS &&
+    ch.x0 <= px + STATIC_MOUNT_RADIUS &&
+    ch.y1 >= py - STATIC_MOUNT_RADIUS &&
+    ch.y0 <= py + STATIC_MOUNT_RADIUS;
+}
+
+export function World({ px, py, doors, entities, worldItems }: {
+  px: number;
+  py: number;
+  doors: Door[];
+  entities: Ent[];
+  worldItems: WorldItem3D[];
+}) {
   return (
     <>
-      {frags}
+      {staticChunks.filter((ch) => chunkNearPlayer(ch, px, py)).map((ch) => (
+        <Fragment key={`chunk-${ch.id}`}>{ch.frags}</Fragment>
+      ))}
       {worldItems.map((wi) => {
         const model = itemModule(wi.typeKey)?.world.model;
         return model ? (

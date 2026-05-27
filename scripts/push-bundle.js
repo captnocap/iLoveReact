@@ -21,13 +21,13 @@ if (!name || !bundlePath) {
   __exit(1);
 }
 
-const bundle = __readFile(bundlePath);
+const bundle = __fs_read(bundlePath);
 if (bundle === null) {
   __writeStderr('[push-bundle] cannot read ' + bundlePath + '\n');
   __exit(1);
 }
 
-if (!__exists(SOCKET_PATH)) {
+if (!__fs_exists(SOCKET_PATH)) {
   // Host not running — don't emit noise; scripts/dev treats exit 2 as "spawn one".
   __exit(2);
 }

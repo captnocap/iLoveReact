@@ -24,7 +24,7 @@
 import {
   resolveTrigger,
   dispatchAction,
-} from '@reactjit/runtime/hooks/ifttt-registry';
+} from '@reactjit/runtime/hooks/ifttt/registry';
 import { ensureBootstrapped } from './bootstrap';
 import { query, exec } from './connections';
 import { ident, lit, tableName, val } from './sql';

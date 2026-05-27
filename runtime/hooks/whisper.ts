@@ -21,8 +21,12 @@
  *   }, [v.utteranceId]);
  */
 
-declare const globalThis: any;
-const G = globalThis;
+import { callHost, hasHost } from '../ffi';
+import { G as G_typed } from '../host-globals';
+
+// Zig calls back into JS via __whisper_onResult — we assign it on globalThis
+// below so the Zig dispatcher can find it.
+const G = G_typed as any;
 
 export interface TranscribeResult {
   bufId: number;
@@ -73,13 +77,12 @@ if (!G.__whisper_handlers_installed) {
  */
 export function transcribe(bufId: number, modelPath: string): Promise<TranscribeResult> {
   return new Promise<TranscribeResult>((resolve, reject) => {
-    const fn = G.__whisper_transcribe;
-    if (typeof fn !== 'function') {
+    if (!hasHost('__whisper_transcribe')) {
       reject(new Error('__whisper_transcribe missing — was -Dhas-whisper=true set?'));
       return;
     }
     pending.set(bufId, resolve);
-    const ok = fn(bufId, modelPath);
+    const ok = callHost<boolean>('__whisper_transcribe', false, bufId, modelPath);
     if (!ok) {
       pending.delete(bufId);
       reject(new Error(`whisper.transcribe(${bufId}) refused — buffer missing or queue full`));

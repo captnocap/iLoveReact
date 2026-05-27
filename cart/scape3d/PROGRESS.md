@@ -34,10 +34,11 @@ relative-to-itself; the parent injects position. `Map → Zone → Building → 
   pack?, prop?, height?, render?, contents? }` + **`bake(root)`**: a single two-pass
   recursive walk that flattens the relative tree into the flat ABSOLUTE outputs the
   engine/systems want — `packedAt`/`kindAt`/`propAt` (tiles, for pathfinding/picking/
-  minimap), a continuous `heightAt` (camera/feet/raycast), `features`/`featureAt`/
-  `byPath` (interactables), and `frags` (mesh fragments for the one scene). Pass 1
-  stamps tiles/props/features + collects relief; pass 2 emits frags once `heightAt`
-  exists (so a building sits on the terrain it stands on).
+  minimap), `heightAt` sampled from the same relief grids as the visible mesh
+  (camera/feet/raycast), `features`/`featureAt`/`byPath` (interactables), and
+  `staticChunks` (mesh fragments chunked for the one scene). Pass 1 stamps tiles/
+  props/features + collects relief; pass 2 emits frags once `heightAt` exists (so a
+  building sits on the terrain it stands on) and buckets them into 16×16 static chunks.
 - **`world/atlas.tsx`** — the root entity tree, baked once into `WORLD`. Composes
   `downtown` (the original city, rebuilt from its `citymap` RECTS/BLDGS/PROPS),
   `overlook` (a raised neon park to the NORTH at negative-y, linked across downtown's
@@ -206,6 +207,126 @@ objects — noted in `3d.zig`.
 **Still open (next):** doors/ENTRY-TO-BUILDING — doors open/close + block pathfinding, but only
 the crackhouse has an interior; the citymap `BLDGS` are solid `CityBuilding` blocks. Real entry
 (interiors for buildings + roof fade/cull so the top-down camera sees in) is unbuilt.
+
+## Heightfield terrain — smooth slopes, not staircases (2026-05-26)
+
+The overlook's relief used to be a stack of one flat box per row (`terraceFrag`) → a visible
+**staircase**. Replaced with a real `geometry="heightfield"` on `Scene3D.Mesh`: a `cols×rows`
+grid of corner heights becomes ONE triangle surface with smooth per-vertex normals (central-
+difference gradient) **plus a perimeter skirt** that drops boundary edges to a base Y so cliff
+sides aren't see-through. `world/entity.tsx terraceFrag` now samples the relief fn at tile corners
+(`(w+1)×(h+1)`) and emits one heightfield mesh, textured with the SAME surface texture as the flat
+ground fill (`PLAZA_TEX`/`ROAD_TEX`, `material=WHITE`) so the slope matches the rest of the ground
+instead of reading as a solid block.
+
+Framework pieces (`framework/gpu/3d.zig` unless noted):
+- `generateHeightfield(heights, cols, rows, w, h, base)` + helpers `hfClamped`/`hfNormal`/`hfQuad`;
+  `generateGeometry` dispatch on `"heightfield"`; `MeshSpec.{heights, hf_cols, hf_rows}`;
+  `buildMeshSpec` + `estimateMeshRadius` handle it; `MAX_MESH_VERTS` 4096→16384 (a terrain mesh +
+  skirt is large; a single heightfield caps ~52×52 cells — bigger needs chunking, see handoff).
+- Plumbing: `framework/layout.zig` Node fields `scene3d_heights/_hf_cols/_hf_rows`; `v8_app.zig`
+  parses `scene3dHeights` (JSON float array) / `scene3dHfCols` / `scene3dHfRows`; `runtime/
+  primitives.tsx` `Scene3D.Mesh` forwards `heights` / `hfCols` / `hfRows`.
+
+**LESSON (cost a debug loop): the top surface must be wound to FACE +Y.** I first matched
+`generatePlane`'s winding — but a plane faces −Y and the top-down camera back-face-CULLS it (that's
+the whole reason floors are boxes, not planes). A −Y heightfield top renders **black** from above
+while a low/side camera still sees it — which is exactly how it presented: side-view purple, top-down
+black, and it was NOT the texture (reverting to solid colour was still black). Reversed the two top
+triangles → +Y → visible. The per-vertex normals already pointed +Y for lighting; only the winding
+was inverted. Skirt winding is derived per-edge from the matching box side face.
+
+### HANDOFF — vertex/terrain build-out (next Claude: this is yours)
+
+The heightfield is "one demo hill." Everything below was designed + agreed this session; build it in
+THIS order — #1 is the keystone that makes the rest perf-trivial.
+
+1. **CHUNKED WINDOWING (do first — it bounds everything).** The 3D world currently renders ALL baked
+   `frags` every update (`render3d/World.tsx` renders `{frags}` = the entire map). The streaming
+   window (`world/window.ts`, `winOX/winOY`) only feeds the 2D minimap — it was never ported to the
+   3D bake. Works today only because the map is tiny. Fix: bake per chunk (~16×16 tiles) and MOUNT
+   only the chunks within the player's ~400-tile bubble, unmounting far ones as he walks (plain
+   conditional render — React mounts near chunks, tears down far). Keeps the live mesh count constant
+   regardless of map size → the reconciler never chokes (the real bottleneck is React/the V8↔host
+   bridge, never the GPU; a modern box laughs at a PS2-era city).
+2. **heightAt must match the mesh, or feet float.** The mesh samples the height fn at integer tile
+   CORNERS and linearly interpolates between; `world/terrain.ts heightAt` evaluates the CONTINUOUS fn
+   at the exact spot. Linear relief (the current overlook) agrees — a curvy/noise fn won't, and the
+   player sinks into / hovers over the visible surface. Fix: either sub-tile mesh sampling, or make
+   `heightAt` bilinear-interpolate the SAME corner grid the mesh uses. This is the one that affects
+   gameplay — nail it before shipping nonlinear terrain.
+3. **Animated vertices = waves (the "multi vertex update" the user wants).** No per-mesh VERTEX shader
+   exists (one fixed pipeline/`vs_main`), but per-mesh vertex DATA is fully supported — the renderer
+   rebuilds + uploads each mesh's verts every frame anyway. So real geometric waves = animate the
+   heights over time. Cheap version: add a host-side wave param to `generateHeightfield` (amplitude/
+   wavelength/speed) so it adds the `sin` term at generate-time and nothing crosses the bridge per
+   frame — DON'T re-pass the whole heights array from the cart each frame (bridge cost). A ripcurl /
+   breaking wave is NOT a heightfield (an overhang has >1 height per column) → needs a real mesh.
+4. **Water depth.** Bed = heightfield with NEGATIVE heights (terrain dipping below water level).
+   Surface = a separate translucent mesh at water level — the mesh pipeline already uses
+   premultiplied-alpha blending (`3d.zig:683`), so a mesh with `alpha<1` shows the bed through it
+   (draw it AFTER the bed). "Deeper = darker" = bake a depth-tint texture (`water_level − bed_height`
+   → pale→deep-blue) onto the surface; reuses the texture-on-mesh path, no shader needed.
+5. **UV tiling + skirt-at-seams.** Big terrain stretches the 0→1 texture — add UV tiling (repeat
+   sampler + per-mesh uv scale). And contiguous chunks each skirt their whole perimeter → back-to-back
+   walls at internal seams; suppress skirts where chunks abut (the connector system knows seams).
+6. **Per-mesh fragment shaders (optional, unlocks live water/lava/glass).** Feasible and small:
+   add a `shader` prop to `Scene3D.Mesh`, cache compiled pipelines by source (compile-once, like the
+   texture cache), fall back to the fixed shader when absent. Fragment-only first (covers all the
+   *look* cases); GPU vertex shaders are a bigger step (batching). Not dangerous, just unbuilt — the
+   only real reason it's fixed today is that engineering, not perf (windowing makes count tiny anyway).
+
+**Architecture rule for all of the above:** `useIFTTT` for discrete game events; refs + the scheduled
+loop (render only when something visible changed — see `/world`'s held-keys-via-raw-`busOn` pattern,
+NOT `useIFTTT`, to avoid per-frame render churn) for the frame treadmill; a host fn for anything heavy
+or per-frame-hot (pathfinding, LoS, culling, geometry gen). React stays the thin declaration layer.
+
+> Commit note: the heightfield framework changes (`3d.zig`/`gpu.zig`/`v8_app.zig`/`layout.zig`/
+> `primitives.tsx`) were on disk but UNCOMMITTED at session end — `3d.zig` was tangled with another
+> session's in-flight skybox, so the commit was held to avoid sweeping up their WIP. Verify with
+> `git log`/`git diff` before assuming state.
+
+### Update — chunked static world windowing (2026-05-26)
+
+Handoff #1 is built. `bake()` now emits `staticChunks` alongside the legacy flat `frags` list.
+Ground and heightfield surfaces are split on 16×16 chunk boundaries, including negative-world
+coords; discrete static thingymajiggers are assigned to the chunk containing their footprint
+centre. `render3d/World.tsx` no longer mounts the whole static world — it filters baked chunks
+against a player-centred 400-tile bubble and mounts only those fragments. The current tiny map
+still all fits inside that bubble, but the render contract is now bounded for larger maps.
+
+Verification: `./scripts/ship scape3d` succeeds and produces `zig-out/bin/scape3d`;
+`timeout 6s ./zig-out/bin/scape3d` launches clean until the expected timeout exit.
+
+### Update — heightAt follows the heightfield grid (2026-05-26)
+
+Handoff #2 is built. Relief is now baked into a `Relief` object once: `(w+1)×(h+1)`
+corner samples, bounds, and dimensions. Full heightfield meshes, chunk-split heightfield
+meshes, and `heightAt` all read from that same sampled grid instead of re-calling the
+authoring function at arbitrary continuous coords. `heightAt` deliberately matches the
+host mesh's actual split (`generateHeightfield` uses two planar triangles on the h00→h11
+diagonal) rather than a smooth bilinear patch, so feet/camera/raycast track the visible
+surface on nonlinear terrain.
+
+Verification: `./scripts/ship scape3d` succeeds; `timeout 6s ./zig-out/bin/scape3d`
+launches clean until the expected timeout exit.
+
+### Update — host-side heightfield waves (2026-05-26)
+
+Handoff #3 is built. `Scene3D.Mesh` heightfields can now take scalar wave props:
+`waveAmplitude`, `waveLength`, `waveSpeed`, `waveDirection` (or `waveDirX`/`waveDirZ`),
+and `wavePhase`. The JS side forwards those through `runtime/primitives.tsx`; `v8_app.zig`
+stores them on the node; `framework/gpu/3d.zig` applies the sine offset while generating
+heightfield vertices and normals each frame. No animated height arrays cross the JS↔host
+bridge.
+
+The scape3d canal now uses this path: water ground fills render as flat heightfield meshes
+with a small host-side wave. This is visual geometry only — water is already non-walkable,
+so `heightAt` stays stable for terrain/camera/picking. Walkable terrain should keep
+`waveAmplitude=0` unless a future matching height query exists.
+
+Verification: `./scripts/ship scape3d` succeeds; `timeout 6s ./zig-out/bin/scape3d`
+launches clean until the expected timeout exit.
 
 ---
 

@@ -12,7 +12,7 @@ if (!manifestPath || !fieldName) {
   __exit(1);
 }
 
-const raw = __readFile(manifestPath);
+const raw = __fs_read(manifestPath);
 if (raw === null) {
   __writeStderr('[cart-manifest-field] cannot read ' + manifestPath + '\n');
   __exit(1);

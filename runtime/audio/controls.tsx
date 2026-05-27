@@ -1,7 +1,8 @@
 const React = require('react');
 
-import { AUDIO_SOUND, type AudioSound, type AudioParamDefinition, useAudio } from './audio';
-import { Box, Text, Pressable, TextInput } from './primitives';
+import { AUDIO_SOUND, type AudioSound, type AudioParamDefinition, useAudio } from './';
+import { Box, Text, Pressable, TextInput } from '../primitives';
+import { useInterval } from '../hooks/useInterval';
 
 type ControlEvent = {
   defaultPrevented: boolean;
@@ -61,15 +62,6 @@ function cyclePatternLevel(level: PatternTrackStep, levels: number): PatternStep
 
 function patternStringFromSteps(steps: readonly PatternTrackStep[]): string {
   return steps.map((level) => Number(level) > 0 ? '0' : '-').join('');
-}
-
-function useInterval(fn: () => void, ms: number): void {
-  const fnRef = React.useRef(fn);
-  React.useEffect(() => { fnRef.current = fn; }, [fn]);
-  React.useEffect(() => {
-    const id = setInterval(() => fnRef.current(), ms);
-    return () => clearInterval(id);
-  }, [ms]);
 }
 
 function valueFromPointer(event: any, rect: any, min: number, max: number, orientation: SliderOrientation): number | null {

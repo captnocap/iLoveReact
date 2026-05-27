@@ -33,6 +33,7 @@
 // painter's natural cadence, smooth even when the JS thread is busy.
 
 import { useEffect } from 'react';
+import { callHost, hasHost } from '../ffi';
 
 export type CurveName =
   | 'linear' | 'easeIn' | 'easeOut' | 'easeInOut' | 'spring' | 'bounce' | 'sine'
@@ -71,14 +72,11 @@ export function useHostAnimation(config: HostAnimationConfig): void {
     startOffsetMs = 0,
   } = config;
   useEffect(() => {
-    const host = globalThis as any;
-    if (typeof host.__anim_register !== 'function') return;
-    const id = host.__anim_register(latch, curve, loop, from, to, durationMs, startOffsetMs);
+    if (!hasHost('__anim_register')) return;
+    const id = callHost<number>('__anim_register', 0, latch, curve, loop, from, to, durationMs, startOffsetMs);
     if (typeof id !== 'number' || id <= 0) return;
     return () => {
-      if (typeof host.__anim_unregister === 'function') {
-        try { host.__anim_unregister(id); } catch {}
-      }
+      callHost('__anim_unregister', undefined, id);
     };
   }, [latch, curve, from, to, durationMs, loop, startOffsetMs]);
 }

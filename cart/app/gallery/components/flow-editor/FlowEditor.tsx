@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Box, Canvas, Graph } from '@reactjit/runtime/primitives';
 import { FLOW_EDITOR_DEFAULT_THEME, type FlowEditorTheme } from './flowEditorTheme';
 import { bezierFor } from './bezier';
@@ -27,6 +28,12 @@ export type FlowEditorProps = {
   edges?: FlowEdge[];
   onNodesChange?: (next: FlowNode[]) => void;
   onEdgesChange?: (next: FlowEdge[]) => void;
+  /** Fires whenever the editor's selectedId changes. Receives the
+   *  currently-selected node (or null when the selection clears).
+   *  Cheap to ignore — the editor still owns selectedId internally;
+   *  this is an observation hook for hosts that want to render a
+   *  Properties panel against the selected node. */
+  onSelectChange?: (node: FlowNode | null) => void;
 
   // Uncontrolled seeds (ignored if `nodes`/`edges` are passed)
   initialNodes?: FlowNode[];
@@ -44,7 +51,34 @@ export type FlowEditorProps = {
   allowDelete?: boolean; // false hides the × button on tiles
 };
 
+// Inner-content variant — same nodes/edges/state plumbing as FlowEditor
+// but renders ONLY the edge Graph + node tiles, without wrapping in a
+// Box + Canvas. Host it directly inside an existing <Canvas> (e.g. the
+// /canvas page's substrate) when you want the flow graph to share that
+// canvas's pan/zoom + grid instead of getting its own.
+export function FlowEditorChildren(props: FlowEditorProps) {
+  return renderFlowEditorBody(props);
+}
+
 export function FlowEditor(props: FlowEditorProps) {
+  const theme: FlowEditorTheme = { ...FLOW_EDITOR_DEFAULT_THEME, ...(props.theme ?? {}) };
+  return (
+    <Box style={{ width: '100%', height: '100%', backgroundColor: theme.bg }}>
+      <Canvas
+        style={{ width: '100%', height: '100%', backgroundColor: theme.bg }}
+        gridStep={theme.gridStep}
+        gridStroke={1}
+        gridColor={theme.gridColor}
+        gridMajorColor={theme.gridMajorColor}
+        gridMajorEvery={theme.gridMajorEvery}
+      >
+        {renderFlowEditorBody(props)}
+      </Canvas>
+    </Box>
+  );
+}
+
+function renderFlowEditorBody(props: FlowEditorProps) {
   const theme: FlowEditorTheme = { ...FLOW_EDITOR_DEFAULT_THEME, ...(props.theme ?? {}) };
   const stateOptions: UseFlowEditorStateOptions = {
     initialNodes: props.initialNodes,
@@ -61,6 +95,23 @@ export function FlowEditor(props: FlowEditorProps) {
   const controlledEdges = props.edges;
   const nodes = controlledNodes ?? state.nodes;
   const edges = controlledEdges ?? state.edges;
+
+  // Observation hook for hosts that want to render a Properties panel
+  // against the selected node. Fires whenever selectedId changes —
+  // resolves the node by id against the current `nodes` list (so it
+  // works in controlled mode too) and hands it to the host.
+  const onSelectChangeRef = useRef(props.onSelectChange);
+  onSelectChangeRef.current = props.onSelectChange;
+  const lastSelectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (state.selectedId === lastSelectedIdRef.current) return;
+    lastSelectedIdRef.current = state.selectedId;
+    const cb = onSelectChangeRef.current;
+    if (!cb) return;
+    if (state.selectedId == null) { cb(null); return; }
+    const node = nodes.find((n) => n.id === state.selectedId) ?? null;
+    cb(node);
+  }, [state.selectedId, nodes]);
 
   const propagateNodes = (next: FlowNode[]) => {
     if (props.onNodesChange) props.onNodesChange(next);
@@ -195,26 +246,17 @@ export function FlowEditor(props: FlowEditorProps) {
   ));
 
   return (
-    <Box style={{ width: '100%', height: '100%', backgroundColor: theme.bg }}>
-      <Canvas
-        style={{ width: '100%', height: '100%', backgroundColor: theme.bg }}
-        gridStep={theme.gridStep}
-        gridStroke={1}
-        gridColor={theme.gridColor}
-        gridMajorColor={theme.gridMajorColor}
-        gridMajorEvery={theme.gridMajorEvery}
+    <>
+      <Graph
+        style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%' }}
+        viewX={0}
+        viewY={0}
+        viewZoom={1}
       >
-        <Graph
-          style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%' }}
-          viewX={0}
-          viewY={0}
-          viewZoom={1}
-        >
-          {edgePaths}
-        </Graph>
-        {tiles}
-      </Canvas>
-    </Box>
+        {edgePaths}
+      </Graph>
+      {tiles}
+    </>
   );
 }
 

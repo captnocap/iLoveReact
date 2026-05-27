@@ -29,6 +29,15 @@ if [[ ! -x "$ZIG" ]]; then
     ZIG="zig"
 fi
 
+# Prefer the freshly built v8cli (zig-out/bin/v8cli) when it's newer than
+# the stable copy committed under tools/. Same pattern scripts/tui uses.
+# Without this, a v8_cli.zig or framework/v8_bindings_* change won't take
+# effect until tools/v8cli is manually re-stamped.
+V8CLI="$RJIT_HOME/tools/v8cli"
+if [[ -x "$RJIT_HOME/zig-out/bin/v8cli" && "$RJIT_HOME/zig-out/bin/v8cli" -nt "$V8CLI" ]]; then
+    V8CLI="$RJIT_HOME/zig-out/bin/v8cli"
+fi
+
 NAME="${1:-}"
 if [[ -z "$NAME" ]]; then
     echo "Usage: scripts/dev <cart-name>" >&2
@@ -95,9 +104,9 @@ unset _orphan_pid _orphan_ppid _gc _gp _pcmd _is_orphan
 
 echo "[dev] bundling ${CART_FILE} → ${PER_CART_BUNDLE}"
 # BUNDLE_FROM_HARNESS=1 is the sentinel the bundler looks for. Direct
-# `tools/v8cli scripts/cart-bundle.js ...` invocations (e.g. ad-hoc from an
+# `"$V8CLI" scripts/cart-bundle.js ...` invocations (e.g. ad-hoc from an
 # agent) are refused — they race with the watcher and stamp stale bundles over disk.
-BUNDLE_FROM_HARNESS=1 CART_ROOT="$CART_ROOT" tools/v8cli scripts/cart-bundle.js "$CART_FILE" --out "$PER_CART_BUNDLE"
+BUNDLE_FROM_HARNESS=1 CART_ROOT="$CART_ROOT" "$V8CLI" scripts/cart-bundle.js "$CART_FILE" --out "$PER_CART_BUNDLE"
 
 # Decide if the dev binary is stale BEFORE picking fast-push vs spawn.
 # A running host that's older than current framework source serves
@@ -140,7 +149,7 @@ if [[ "$host_alive" -eq 1 ]]; then
         exit 1
     fi
     echo "[dev] host detected — pushing '${NAME}'"
-    if tools/v8cli scripts/push-bundle.js "$NAME" "$PER_CART_BUNDLE"; then
+    if "$V8CLI" scripts/push-bundle.js "$NAME" "$PER_CART_BUNDLE"; then
         echo "[dev] host switched to tab '${NAME}'"
         exit 0
     fi
@@ -164,7 +173,7 @@ if [[ "$needs_build" -eq 1 ]]; then
     # RUNTIME flag, it doesn't need Debug compilation. Smaller binary too.
     # V8 is the default runtime (per CLAUDE.md). QJS is legacy maintenance-only.
     echo "[dev] compiling dev binary ($BIN, V8 fat host, ReleaseFast)..."
-    DEV_FEATURE_FLAGS=$(tools/v8cli scripts/sdk-dependency-resolve.js --format dev-zig-flags --build-zig build.zig)
+    DEV_FEATURE_FLAGS=$("$V8CLI" scripts/sdk-dependency-resolve.js --format dev-zig-flags --build-zig build.zig)
     if [[ -z "$DEV_FEATURE_FLAGS" ]]; then
         echo "[dev] FATAL: sdk-dependency-resolve produced no dev flags" >&2
         exit 1
@@ -301,4 +310,4 @@ trap cleanup INT TERM HUP EXIT
 echo "[dev] host PID=$BIN_PID — run 'scripts/dev <other>' from another terminal to add tabs"
 
 # Watch loop pushes each rebuild to the host over the socket.
-CART_ROOT="$CART_ROOT" tools/v8cli scripts/watch-and-push.js "$NAME" "$CART_FILE" "$PER_CART_BUNDLE"
+CART_ROOT="$CART_ROOT" "$V8CLI" scripts/watch-and-push.js "$NAME" "$CART_FILE" "$PER_CART_BUNDLE"

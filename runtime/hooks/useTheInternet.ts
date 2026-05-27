@@ -132,6 +132,65 @@ export function udpClose(id: number): void {
   callHost<void>('__udp_close', undefined as any, id);
 }
 
+// ── UDS (Unix Domain Socket server) ────────────────────────────────
+//
+// Bind/listen on a UDS path, accept inbound connections, send bytes
+// per-connection. Used by tui/sync-host.ts to accept firecracker
+// vsock guest→host connections (the host listens at <uds>_<port>).
+//
+// Events delivered via subscribe():
+//   uds:accept:<id>           — body is the new conn_id (decimal string)
+//   uds:data:<id>:<conn_id>   — raw bytes received on that connection
+//   uds:close:<id>:<conn_id>  — that connection closed
+//   uds:error:<id>:<conn_id>  — per-conn error
+//   uds:listen-error:<id>     — bind/listen failed
+
+export function udsListen(id: number, path: string): void {
+  callHost<void>('__uds_listen', undefined as any, id, path);
+}
+
+export function udsSend(id: number, connId: number, data: string): void {
+  callHost<void>('__uds_send', undefined as any, id, connId, data);
+}
+
+export function udsCloseConn(id: number, connId: number): void {
+  callHost<void>('__uds_close_conn', undefined as any, id, connId);
+}
+
+export function udsClose(id: number): void {
+  callHost<void>('__uds_close', undefined as any, id);
+}
+
+// ── UDS workspace sync (binary-safe, Zig-side byte handling) ───────
+//
+// These wrap host-side helpers that build/parse the SET/DEL/DIR/INIT
+// frame protocol in Zig, so cart code only orchestrates with paths
+// and never touches binary payloads through V8 strings.
+
+/** Switch server <id> into workspace mode. Inbound bytes get parsed
+ *  as SET/DEL/DIR frames and applied to <cwd> on the local filesystem.
+ *  Must be called before guests start streaming changes back. */
+export function udsSetWorkspaceRoot(id: number, cwd: string): void {
+  callHost<void>('__uds_set_workspace_root', undefined as any, id, cwd);
+}
+
+/** Build a workspace tar of <cwd> and ship it as INIT frame to the
+ *  given connection. Used on each guest-accept event. */
+export function udsSendWorkspaceInit(id: number, connId: number, cwd: string): void {
+  callHost<void>('__uds_send_workspace_init', undefined as any, id, connId, cwd);
+}
+
+/** Send a SET frame for <relPath>: header + file contents streamed
+ *  from <localPath>. Zig reads the file directly. */
+export function udsSendFileFrame(id: number, connId: number, relPath: string, localPath: string): void {
+  callHost<void>('__uds_send_file_frame', undefined as any, id, connId, relPath, localPath);
+}
+
+/** Send a header-only frame (DEL / DIR / PING). */
+export function udsSendMsgFrame(id: number, connId: number, op: string, arg: string): void {
+  callHost<void>('__uds_send_msg_frame', undefined as any, id, connId, op, arg);
+}
+
 // ── Tor ────────────────────────────────────────────────────────────
 
 export function torStart(id: number, opts: string): void {

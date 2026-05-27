@@ -172,13 +172,21 @@ function asNumber(v: unknown): number | null {
 // in character cells. RJIT_TUI_SCALE divides every numeric sizing value
 // before layout. Set it (via env var) to ~8 for GPU carts; leave at 1
 // for cell-native TUI carts (counter, devshell). Read once at module init.
-const TUI_SCALE: number = (() => {
+let TUI_SCALE: number = (() => {
   try {
     const env: any = (globalThis as any).process?.env?.RJIT_TUI_SCALE;
     const n = env ? parseFloat(env) : NaN;
     return Number.isFinite(n) && n > 0 ? n : 1;
   } catch { return 1; }
 })();
+
+// Override the pixel→cell divisor at runtime. The live TUI backend reads it
+// once from env; an in-process rasterizer (e.g. the React playground driving
+// rasterizeInstance) calls this to render pixel-styled carts at a sane cell
+// density without re-launching under an env var.
+export function setTuiScale(n: number): void {
+  if (Number.isFinite(n) && n > 0) TUI_SCALE = n;
+}
 
 // Convert a numeric pixel-style value to cells. Scaled values clamp to >=0.
 function cells(n: number): number {
@@ -517,7 +525,7 @@ function intrinsic(node: Instance): { w: number; h: number } {
   return { w, h };
 }
 
-function layout(node: Instance, x: number, y: number, w: number, h: number, out: LaidOut[], clip: Clip | null = null): void {
+export function layout(node: Instance, x: number, y: number, w: number, h: number, out: LaidOut[], clip: Clip | null = null): void {
   out.push({ x, y, w, h, node, clip });
   if (node.type === 'Text' || node.type === 'Image' || node.type === 'TextInput' ||
       node.type === 'TextArea' || node.type === 'TextEditor' || node.type === 'Canvas' ||
@@ -1175,7 +1183,7 @@ function paintSelection(grid: Cell[][]): void {
   }
 }
 
-function buildGrid(W: number, H: number, layoutOut: LaidOut[]): Cell[][] {
+export function buildGrid(W: number, H: number, layoutOut: LaidOut[]): Cell[][] {
   const grid: Cell[][] = Array.from({ length: H }, () => Array.from({ length: W }, blank));
   // Pass 1: bg + leaf content (root → deepest).
   for (const b of layoutOut) {
@@ -1195,6 +1203,49 @@ function buildGrid(W: number, H: number, layoutOut: LaidOut[]): Cell[][] {
   // everything else.
   paintSelection(grid);
   return grid;
+}
+
+// ── Off-screen rasterization (no TTY) ───────────────────────────────
+//
+// The live backend diffs against the previous frame and streams only the
+// dirty cells to its own stdout. An off-screen caller (the React playground)
+// instead wants the WHOLE grid as one self-contained ANSI string it can
+// blit into a <Terminal dumb> pipe via __vterm_feed. frameToAnsi serializes
+// a full frame with absolute cursor moves per row; rasterizeInstance is the
+// one-call path: lay a single Instance subtree out on a W×H cell grid and
+// return the ANSI for it. Shares the exact layout + paint pipeline the live
+// TUI backend uses, so a cart rasterizes identically here and under ship-tui.
+
+export function frameToAnsi(grid: Cell[][]): string {
+  const H = grid.length;
+  const W = grid[0]?.length ?? 0;
+  let out = '';
+  for (let y = 0; y < H; y++) {
+    out += `\x1b[${y + 1};1H\x1b[0m`;
+    let fg: string | null = null, bg: string | null = null;
+    let bold = false, dim = false, italic = false, underline = false, reverse = false, strike = false;
+    for (let x = 0; x < W; ) {
+      const c = grid[y][x];
+      if (c.ch === WIDE_CONT) { x++; continue; }
+      if (c.fg !== fg) { out += c.fg ? fgEsc(c.fg) : '\x1b[39m'; fg = c.fg; }
+      if (c.bg !== bg) { out += c.bg ? bgEsc(c.bg) : '\x1b[49m'; bg = c.bg; }
+      if (c.bold !== bold) { out += c.bold ? '\x1b[1m' : '\x1b[22m'; bold = c.bold; if (!c.bold) dim = false; }
+      if (c.dim !== dim) { out += c.dim ? '\x1b[2m' : '\x1b[22m'; dim = c.dim; }
+      if (c.italic !== italic) { out += c.italic ? '\x1b[3m' : '\x1b[23m'; italic = c.italic; }
+      if (c.underline !== underline) { out += c.underline ? '\x1b[4m' : '\x1b[24m'; underline = c.underline; }
+      if (c.reverse !== reverse) { out += c.reverse ? '\x1b[7m' : '\x1b[27m'; reverse = c.reverse; }
+      if (c.strike !== strike) { out += c.strike ? '\x1b[9m' : '\x1b[29m'; strike = c.strike; }
+      out += c.ch;
+      x += charWidth(c.ch.charCodeAt(0));
+    }
+  }
+  return out + '\x1b[0m';
+}
+
+export function rasterizeInstance(root: Instance, W: number, H: number): string {
+  const out: LaidOut[] = [];
+  layout(root, 0, 0, W, H, out, null);
+  return frameToAnsi(buildGrid(W, H, out));
 }
 
 // Extract the selected text from the current grid for clipboard. Joins
@@ -1466,46 +1517,54 @@ export function headlessSnapshot(width: number, height: number): string {
   return grid.map(row => row.map(c => c.ch === WIDE_CONT ? '' : c.ch).join('')).join('\n');
 }
 
-process.stdout.on('resize', () => {
-  // Defensive: re-assert alt-screen + mouse modes in case the host
-  // terminal dropped them during a fullscreen/maximize transition.
-  // Then invalidate the diff buffer + kick the inner-Terminal warm
-  // pump so SIGWINCH-driven redraws have something to land in.
-  //
-  // The synchronous reassert covers most cases, but some terminals
-  // (notably kitty on monitor-edge maximize) finish their mode-reset
-  // dance AFTER our resize event fires. The two-stage delayed reassert
-  // catches that window — cheap (~60 bytes), invisible to user.
-  reAssertTerminalModes();
-  prev = null;
-  markTermWarm();
-  setTimeout(reAssertTerminalModes, 100);
-  setTimeout(reAssertTerminalModes, 400);
-});
-process.on('exit', leave);
-process.on('SIGINT',  () => { leave(); process.exit(0); });
-process.on('SIGTERM', () => { leave(); process.exit(0); });
-process.on('SIGHUP',  () => { leave(); process.exit(0); });
+// Terminal-restore + crash-net wiring is meaningful only when this module
+// is the active backend driving a real TTY. When host.ts is imported purely
+// for its pure rasterizer core (the GPU React playground calls
+// rasterizeInstance), `process` may be absent — and even if present we must
+// not hijack its signals or write escape codes to a window cart's stdout.
+// Gate the whole block on a usable process.
+if (typeof process !== 'undefined' && typeof (process as any).on === 'function') {
+  process.stdout.on('resize', () => {
+    // Defensive: re-assert alt-screen + mouse modes in case the host
+    // terminal dropped them during a fullscreen/maximize transition.
+    // Then invalidate the diff buffer + kick the inner-Terminal warm
+    // pump so SIGWINCH-driven redraws have something to land in.
+    //
+    // The synchronous reassert covers most cases, but some terminals
+    // (notably kitty on monitor-edge maximize) finish their mode-reset
+    // dance AFTER our resize event fires. The two-stage delayed reassert
+    // catches that window — cheap (~60 bytes), invisible to user.
+    reAssertTerminalModes();
+    prev = null;
+    markTermWarm();
+    setTimeout(reAssertTerminalModes, 100);
+    setTimeout(reAssertTerminalModes, 400);
+  });
+  process.on('exit', leave);
+  process.on('SIGINT',  () => { leave(); process.exit(0); });
+  process.on('SIGTERM', () => { leave(); process.exit(0); });
+  process.on('SIGHUP',  () => { leave(); process.exit(0); });
 
-// Crash safety net. Without this, an exception in repaint / a cart
-// component / a host callback exits the process via V8's default
-// handler — which doesn't run our exit hook, leaving the user's
-// terminal in alt-screen + MOUSE_ON. The shell underneath then
-// echoes mouse SGR sequences (e.g. `^[[<65;111;31M` on scroll)
-// because kitty doesn't know our process is dead.
-//
-// We also log the exception to stderr; users running with
-// `2>/tmp/cw.err` can read what blew up.
-process.on('uncaughtException', (e: any) => {
-  try { leave(); } catch {}
-  try { (process.stderr as any).write?.(`[uncaughtException] ${e?.stack ?? e}\n`); } catch {}
-  process.exit(1);
-});
-process.on('unhandledRejection', (e: any) => {
-  try { leave(); } catch {}
-  try { (process.stderr as any).write?.(`[unhandledRejection] ${e?.stack ?? e}\n`); } catch {}
-  process.exit(1);
-});
+  // Crash safety net. Without this, an exception in repaint / a cart
+  // component / a host callback exits the process via V8's default
+  // handler — which doesn't run our exit hook, leaving the user's
+  // terminal in alt-screen + MOUSE_ON. The shell underneath then
+  // echoes mouse SGR sequences (e.g. `^[[<65;111;31M` on scroll)
+  // because kitty doesn't know our process is dead.
+  //
+  // We also log the exception to stderr; users running with
+  // `2>/tmp/cw.err` can read what blew up.
+  process.on('uncaughtException', (e: any) => {
+    try { leave(); } catch {}
+    try { (process.stderr as any).write?.(`[uncaughtException] ${e?.stack ?? e}\n`); } catch {}
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (e: any) => {
+    try { leave(); } catch {}
+    try { (process.stderr as any).write?.(`[unhandledRejection] ${e?.stack ?? e}\n`); } catch {}
+    process.exit(1);
+  });
+}
 
 // ── Key bus ─────────────────────────────────────────────────────────
 

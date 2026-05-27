@@ -20,7 +20,7 @@
  * wrappers needed on the JS side.
  */
 
-declare const globalThis: any;
+import { callHost, callHostJson, hasHost } from '../ffi';
 
 export type Vec2 = { x: number; y: number };
 export type Vec3 = { x: number; y: number; z: number };
@@ -36,9 +36,8 @@ export type SmoothDampResult = { value: number; velocity: number };
 // runtime resolution.
 
 function zigCall(module: string, fn: string, ...args: any[]): any {
-  const host = globalThis as any;
-  if (typeof host.__zig_call !== 'function') return null;
-  return host.__zig_call(module, fn, ...args);
+  if (!hasHost('__zig_call')) return null;
+  return callHost<any>('__zig_call', null, module, fn, ...args);
 }
 
 type MathSurface = {
@@ -151,11 +150,5 @@ export const math: MathSurface = new Proxy({} as MathSurface, {
 
 /** Returns `{ moduleName: [fnName, ...] }` for every callable Zig fn. */
 export function listZigCallable(): Record<string, string[]> {
-  const host = globalThis as any;
-  if (typeof host.__zig_call_list !== 'function') return {};
-  try {
-    return JSON.parse(host.__zig_call_list()) as Record<string, string[]>;
-  } catch {
-    return {};
-  }
+  return callHostJson<Record<string, string[]>>('__zig_call_list', {});
 }

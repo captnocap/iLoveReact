@@ -27,7 +27,6 @@ const c = @import("engine.zig").c;
 var g_content_store: std.AutoHashMap(u32, []u8) = undefined;
 var g_content_store_inited: bool = false;
 var g_content_store_next_id: u32 = 1;
-var g_pending_flush: std.ArrayList([]u8) = .{};
 
 fn ensureContentStore() void {
     if (!g_content_store_inited) {
@@ -85,33 +84,9 @@ fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
     return info.getArg(idx).toF64(infoCtx(info)) catch return null;
 }
 
-fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
-    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (info.length() < 1) return;
-    const payload = argToStringAlloc(info, 0) orelse return;
-    defer std.heap.c_allocator.free(payload);
-
-    const owned = std.heap.c_allocator.dupe(u8, payload) catch return;
-    g_pending_flush.append(std.heap.c_allocator, owned) catch {
-        std.heap.c_allocator.free(owned);
-        return;
-    };
-
-    // host.flush fires per React commit — that's hundreds-thousands per
-    // second on a busy cart, and persisting that to SQL bloats the events
-    // table catastrophically (12hr session = 2.4GB observed). Per-frame
-    // commit telemetry belongs in framework/telemetry.zig (snapshot
-    // counters), not in event_bus (append stream). The outlier emit below
-    // — large flushes — is rare enough to be worth keeping as a real
-    // event you'd want to see.
-    if (owned.len >= 256 * 1024) {
-        var pbuf2: [64]u8 = undefined;
-        if (std.fmt.bufPrint(&pbuf2, "{{\"bytes\":{d}}}", .{owned.len})) |p2| {
-            _ = event_bus.emitWithImportance("host.flush.large", "v8_bindings_core", 0.7, null, p2);
-        } else |_| {}
-    }
-}
-
+// __hostFlush now lives in framework/v8_bindings_reconciler.zig (single
+// registration site shared by both v8_app and v8_tui_app). The pending-
+// flush queue + drain + clear all moved there too.
 
 fn hostGetInputTextForNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
@@ -494,30 +469,9 @@ pub fn tickDrain() void {
     exec_async.drain(emitExecResult);
 }
 
-pub const DrainCallback = *const fn (bytes: []const u8) void;
-
-pub fn drainPendingFlushes(apply: DrainCallback) void {
-    if (g_pending_flush.items.len == 0) return;
-    const batches = g_pending_flush.toOwnedSlice(std.heap.c_allocator) catch return;
-    defer {
-        for (batches) |b| std.heap.c_allocator.free(b);
-        std.heap.c_allocator.free(batches);
-    }
-    for (batches) |b| apply(b);
-}
-
-/// Drop any queued mutation batches without applying them. Call this from the
-/// dev-mode reload path AFTER the tree has been wiped but BEFORE the new
-/// bundle is eval'd: any commands queued by the prior bundle reference node
-/// IDs that were just freed; replaying them on top of a fresh React mount
-/// produces parent/child cycles in g_children_ids and infinite recursion in
-/// materializeChildren. (The original comment in clearTreeStateForReload
-/// claimed the queue is freed on VM tear-down — but reload only swaps the V8
-/// Context, the queue persists.)
-pub fn clearPendingFlushForReload() void {
-    for (g_pending_flush.items) |b| std.heap.c_allocator.free(b);
-    g_pending_flush.clearRetainingCapacity();
-}
+// The pending-flush queue + drain + reload-clear moved to
+// framework/v8_bindings_reconciler.zig. Callers route through
+// `v8_bindings_reconciler.drainPending` / `clearPending` now.
 
 pub fn contentStoreGet(id: u32) ?[]const u8 {
     if (!g_content_store_inited) return null;
@@ -814,7 +768,8 @@ fn hostFswatchDrain(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
 pub fn registerCore(vm: anytype) void {
     _ = vm;
     ensureContentStore();
-    v8_runtime.registerHostFn("__hostFlush", hostFlush);
+    // __hostFlush is registered by framework/v8_bindings_reconciler.zig
+    // (the shell calls reconciler.register() directly).
     v8_runtime.registerHostFn("__getInputTextForNode", hostGetInputTextForNode);
     v8_runtime.registerHostFn("__hostLoadFileToBuffer", hostLoadFileToBuffer);
     v8_runtime.registerHostFn("__hostReleaseFileBuffer", hostReleaseFileBuffer);

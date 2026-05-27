@@ -99,9 +99,15 @@ pub const rect_wgsl =
     \\// ── SDF rounded rectangle ────────────────────────────────────
     \\fn sdf_rounded_rect(p: vec2f, half_size: vec2f, radii: vec4f) -> f32 {
     \\    // radii: tl, tr, br, bl
-    \\    // Select corner radius based on quadrant
-    \\    let r_top = select(radii.x, radii.y, p.x > 0.0);
-    \\    let r_bot = select(radii.w, radii.z, p.x > 0.0);
+    \\    // Cap each corner to the short edge. Without this, a pill-style
+    \\    // `borderRadius: 999` on a 24px-tall button pushes q = abs(p) -
+    \\    // half_size + r positive even at the rect's CENTER, which
+    \\    // inverts the SDF and renders a torn / blown-out interior. Cap
+    \\    // before quadrant-selection so EVERY corner is bounded.
+    \\    let r_max = max(min(half_size.x, half_size.y), 0.0);
+    \\    let clamped = min(max(radii, vec4f(0.0)), vec4f(r_max));
+    \\    let r_top = select(clamped.x, clamped.y, p.x > 0.0);
+    \\    let r_bot = select(clamped.w, clamped.z, p.x > 0.0);
     \\    let r = select(r_top, r_bot, p.y > 0.0);
     \\    let q = abs(p) - half_size + r;
     \\    return min(max(q.x, q.y), 0.0) + length(max(q, vec2f(0.0))) - r;
@@ -812,6 +818,128 @@ pub const scene3d_wgsl =
     \\    let final_rgb = mix(lit, u.fog_color, fog_t);
     \\
     \\    return vec4f(final_rgb, u.color.a * tex_sample.a);
+    \\}
+;
+
+/// Analytic procedural skybox. Drawn as ONE fullscreen triangle BEFORE the
+/// meshes, with depth-test = always + depth-write off, so it fills the whole
+/// 3D target and meshes paint over it. Every visual is driven by uniforms, so
+/// the cart animates a day cycle / weather / per-zone mood just by changing
+/// props each commit — there is no baked image and no cubemap.
+///
+/// Per-pixel: reconstruct the world-space view ray from inv(view*proj), then
+///   - gradient: ground (dir.y<0) → horizon (dir.y≈0) → zenith (dir.y→1)
+///   - sun: a crisp disk plus a wide power-law glow along sun_dir
+///   - haze: milky lift in the horizon band (turbidity / overcast)
+///   - clouds: 2-D fbm value-noise projected onto the sky dome, drifting by time
+///   - stars: hashed points that fade in as `night` rises
+pub const skybox_wgsl =
+    \\struct SkyUniforms {
+    \\    inv_vp: mat4x4f,
+    \\    cam_pos: vec3f,
+    \\    time: f32,
+    \\    sun_dir: vec3f,
+    \\    sun_size: f32,
+    \\    zenith: vec3f,
+    \\    haze: f32,
+    \\    horizon: vec3f,
+    \\    cloud: f32,
+    \\    ground: vec3f,
+    \\    sun_glow: f32,
+    \\    sun_color: vec3f,
+    \\    night: f32,
+    \\};
+    \\@group(0) @binding(0) var<uniform> u: SkyUniforms;
+    \\
+    \\struct SkyOut {
+    \\    @builtin(position) clip: vec4f,
+    \\    @location(0) ndc: vec2f,
+    \\};
+    \\
+    \\@vertex
+    \\fn sky_vs(@builtin(vertex_index) vid: u32) -> SkyOut {
+    \\    var corners = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+    \\    var out: SkyOut;
+    \\    let p = corners[vid];
+    \\    out.clip = vec4f(p, 1.0, 1.0);
+    \\    out.ndc = p;
+    \\    return out;
+    \\}
+    \\
+    \\fn hash21(p: vec2f) -> f32 {
+    \\    let h = dot(p, vec2f(127.1, 311.7));
+    \\    return fract(sin(h) * 43758.5453);
+    \\}
+    \\
+    \\fn vnoise(p: vec2f) -> f32 {
+    \\    let i = floor(p);
+    \\    let f = fract(p);
+    \\    let w = f * f * (3.0 - 2.0 * f);
+    \\    let a = hash21(i);
+    \\    let b = hash21(i + vec2f(1.0, 0.0));
+    \\    let c = hash21(i + vec2f(0.0, 1.0));
+    \\    let d = hash21(i + vec2f(1.0, 1.0));
+    \\    return mix(mix(a, b, w.x), mix(c, d, w.x), w.y);
+    \\}
+    \\
+    \\fn fbm(p: vec2f) -> f32 {
+    \\    var v = 0.0;
+    \\    var amp = 0.5;
+    \\    var pp = p;
+    \\    for (var i: i32 = 0; i < 5; i = i + 1) {
+    \\        v = v + amp * vnoise(pp);
+    \\        pp = pp * 2.02;
+    \\        amp = amp * 0.5;
+    \\    }
+    \\    return v;
+    \\}
+    \\
+    \\@fragment
+    \\fn sky_fs(in: SkyOut) -> @location(0) vec4f {
+    \\    // Reconstruct the world-space ray for this pixel.
+    \\    let far = u.inv_vp * vec4f(in.ndc, 1.0, 1.0);
+    \\    let world = far.xyz / far.w;
+    \\    let dir = normalize(world - u.cam_pos);
+    \\    let s = normalize(u.sun_dir);
+    \\
+    \\    // ── Vertical gradient ──
+    \\    let up = clamp(dir.y, 0.0, 1.0);
+    \\    let sky = mix(u.horizon, u.zenith, pow(up, 0.45));
+    \\    let dn = clamp(-dir.y, 0.0, 1.0);
+    \\    var col = mix(sky, u.ground, smoothstep(0.0, 0.18, dn));
+    \\
+    \\    // ── Haze: milky lift hugging the horizon line ──
+    \\    let band = exp(-abs(dir.y) * 6.0);
+    \\    col = mix(col, u.horizon * 1.18 + vec3f(0.04), band * u.haze);
+    \\
+    \\    // ── Stars (night only), behind clouds ──
+    \\    if (u.night > 0.01 && dir.y > 0.0) {
+    \\        let cell = floor(dir.xz / max(dir.y, 0.05) * 220.0);
+    \\        let star = step(0.992, hash21(cell)) * step(0.5, hash21(cell + 7.3));
+    \\        col = col + vec3f(star * u.night * up);
+    \\    }
+    \\
+    \\    // ── Sun: glow then crisp disk ──
+    \\    let d = dot(dir, s);
+    \\    let glow = pow(max(d, 0.0), 220.0 * (1.0 - u.sun_glow) + 6.0);
+    \\    col = col + u.sun_color * glow * (0.6 + u.sun_glow);
+    \\    let disk = smoothstep(1.0 - u.sun_size, 1.0 - u.sun_size * 0.55, d);
+    \\    col = mix(col, u.sun_color * 1.4, disk * step(0.0, s.y + 0.02));
+    \\
+    \\    // ── Clouds: fbm value-noise projected onto the dome, drifting ──
+    \\    if (u.cloud > 0.001 && dir.y > 0.02) {
+    \\        let proj = dir.xz / dir.y;
+    \\        let uv = proj * 0.6 + vec2f(u.time * 0.012, u.time * 0.006);
+    \\        let n = fbm(uv);
+    \\        let cover = smoothstep(1.0 - u.cloud, 1.0 - u.cloud * 0.4 + 0.05, n);
+    \\        let edge = fbm(uv * 3.1 + 4.0);
+    \\        let mask = cover * smoothstep(0.0, 0.12, dir.y);
+    \\        let lit = mix(0.55, 1.0, edge) * (0.5 + 0.5 * max(d, 0.0));
+    \\        let cloud_col = mix(u.horizon * 0.7, u.sun_color * 0.5 + vec3f(0.85), lit);
+    \\        col = mix(col, cloud_col, mask * 0.92);
+    \\    }
+    \\
+    \\    return vec4f(col, 1.0);
     \\}
 ;
 

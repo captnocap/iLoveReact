@@ -7,6 +7,20 @@
 
 import type { Node } from '@reactjit/runtime/intent/parser';
 
+export type ChatTurnMetadata = {
+  backend?: string;
+  model?: string;
+  workerSessionId?: string;
+  externalSessionId?: string;
+  costUsd?: number;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
+  };
+};
+
 /** A turn is one prose row in the transcript. Surfaces (audit / fleet
  *  cards) are attached to assistant turns; user turns are prose only. */
 export type AssistantTurn =
@@ -22,6 +36,7 @@ export type AssistantTurn =
        *  oscillates while pending and tweens out on flip-to-false so
        *  the surface "materializes" from a scrambled placeholder. */
       pending?: boolean;
+      metadata?: ChatTurnMetadata;
     }
   | {
       id: string;
@@ -106,4 +121,9 @@ export interface ChatSession {
   created_at: string;     // ISO.
   updated_at: string;     // ISO. Bumped on each new turn for sort order.
   turn_count: number;     // denormalized for the rail history list.
+  // The backend's own session id for this thread — for the claudewrap
+  // headless bridge this is claude's self-assigned sid. Durable: it's
+  // sent back as the resume key so the SAME claude process keeps serving
+  // this thread across turns (and `--resume`s it after a restart).
+  external_session_id?: string;
 }

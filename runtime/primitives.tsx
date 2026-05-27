@@ -228,9 +228,30 @@ export const ScrollView: any = (props: any) => {
   };
   return h('ScrollView', forwardedProps, props.children);
 };
-export const TextInput: any = (props: any) => h('TextInput', props, props.children);
-export const TextArea: any = (props: any) => h('TextArea', props, props.children);
-export const TextEditor: any = (props: any) => h('TextEditor', props, props.children);
+// One input primitive. `type` picks the shape — there is no separate
+// single-line vs multi-line component (that's the HTML <input>/<textarea>
+// mistake; RN already collapsed it to one). Under the hood the Zig host is
+// a single input with one `multiline` flag (framework/primitive/input.zig);
+// these just select it:
+//   type="text"       → single line, scrolls horizontally   (host: TextInput)
+//   type="multiline"  → wraps, grows vertically             (host: TextArea)
+//   type="code"       → code editor                          (host: TextEditor)
+// Controlled only: pass `text` (state-owned) + `onChange`. The element never
+// owns the value — React state is the source of truth. `value` is accepted
+// as an alias of `text` for back-compat.
+export const Input: any = (props: any) => {
+  const { type, text, value, children, ...rest } = props;
+  const hostType =
+    type === 'multiline' ? 'TextArea' :
+    type === 'code' ? 'TextEditor' :
+    'TextInput';
+  return h(hostType, { ...rest, value: text ?? value }, children);
+};
+// Back-compat aliases — single implementation, no duplicated logic. Prefer
+// <Input type="…"> in new code.
+export const TextInput: any = (props: any) => Input({ ...props, type: 'text' });
+export const TextArea: any = (props: any) => Input({ ...props, type: 'multiline' });
+export const TextEditor: any = (props: any) => Input({ ...props, type: 'code' });
 export const Terminal: any = (props: any) => h('Terminal', props, props.children);
 export const terminal: any = Terminal;
 // Window + Notification live in their own file so the esbuild metafile
@@ -437,7 +458,37 @@ Scene3DBase.Camera = ({ position, target, fov, ...rest }: any) => {
     scene3dFov: fov ?? 60,
   });
 };
-Scene3DBase.Mesh = ({ geometry, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ, texture, textureKey, ...rest }: any) => {
+// Skybox — an analytic procedural sky drawn behind every mesh (gradient + sun
+// + haze + clouds + stars). A child of <Scene3D> like Camera/Light. Every prop
+// is a live uniform on the host, so animating them per render gives a day cycle
+// (sunDir + colors), weather (cloud/haze), or a per-zone mood — one sky, params
+// lerped. There is no image/cubemap here; for that and the other limits see
+// cart/skybox_demo.tsx.
+//
+//   <Scene3D.Skybox
+//     zenith="#1a3a78" horizon="#a9c4e8" ground="#0c0d10"
+//     sunDir={[0.4, 0.5, 0.3]} sunColor="#ffe7b0"
+//     sunSize={0.02} sunGlow={0.3} haze={0.35} cloud={0.2} night={0} />
+Scene3DBase.Skybox = ({ zenith, horizon, ground, sunDir, sunColor, sunSize, sunGlow, haze, cloud, night, ...rest }: any) =>
+  h('View', {
+    ...rest,
+    scene3dSkybox: true,
+    scene3dSkyZenith: _hexToRgb(zenith, [0.16, 0.33, 0.62]),
+    scene3dSkyHorizon: _hexToRgb(horizon, [0.62, 0.72, 0.86]),
+    scene3dSkyGround: _hexToRgb(ground, [0.10, 0.11, 0.13]),
+    scene3dSkySunDir: _vec3(sunDir, 0.4, 0.6, 0.3),
+    scene3dSkySunColor: _hexToRgb(sunColor, [1.0, 0.93, 0.78]),
+    scene3dSkySunSize: sunSize ?? 0.012,
+    scene3dSkySunGlow: sunGlow ?? 0.25,
+    scene3dSkyHaze: haze ?? 0.3,
+    scene3dSkyCloud: cloud ?? 0.0,
+    scene3dSkyNight: night ?? 0.0,
+  });
+Scene3DBase.Mesh = ({
+  geometry, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
+  texture, textureKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
+  waveDirection, waveDirX, waveDirZ, wavePhase, ...rest
+}: any) => {
   const matColor = typeof material === 'string' ? material : (material?.color ?? color);
   const [r, g, b] = _hexToRgb(matColor, [0.8, 0.8, 0.8]);
   const [px, py, pz] = _vec3(position, 0, 0, 0);
@@ -454,6 +505,7 @@ Scene3DBase.Mesh = ({ geometry, material, color, position, rotation, scale, radi
   const texH = tex && Number.isFinite(tex.height) ? Math.max(0, tex.height | 0) : 0;
   const texHex = tex && typeof tex.hex === 'string' ? tex.hex : '';
   const texKey = typeof textureKey === 'string' && textureKey.length > 0 ? textureKey : '';
+  const [wdx, _wdy, wdz] = _vec3(waveDirection, waveDirX ?? 1, 0, waveDirZ ?? 0);
   return h('View', {
     ...rest,
     scene3dMesh: true,
@@ -471,6 +523,18 @@ Scene3DBase.Mesh = ({ geometry, material, color, position, rotation, scale, radi
     scene3dTexH: texH,
     scene3dTexData: texHex && texW > 0 && texH > 0 && texHex.length === texW * texH * 8 ? texHex : '',
     ...(texKey ? { scene3dTexKey: texKey } : {}),
+    // Heightfield: a flat cols×rows array of corner heights (geometry="heightfield").
+    // sizeX/sizeZ = world span, sizeY = skirt base Y. The host meshes a smooth
+    // sloped surface + perimeter skirt from these.
+    ...(Array.isArray(heights) && heights.length > 0
+      ? { scene3dHeights: heights, scene3dHfCols: hfCols | 0, scene3dHfRows: hfRows | 0 }
+      : {}),
+    scene3dWaveAmplitude: waveAmplitude ?? 0,
+    scene3dWaveLength: waveLength ?? 0,
+    scene3dWaveSpeed: waveSpeed ?? 0,
+    scene3dWaveDirX: wdx,
+    scene3dWaveDirZ: wdz,
+    scene3dWavePhase: wavePhase ?? 0,
   });
 };
 Scene3DBase.AmbientLight = ({ color, intensity, ...rest }: any) => {
@@ -540,20 +604,20 @@ export const Audio: any = AudioBase;
 // These are UI atoms backed by useAudio(): keybeds, pads, sliders, step grids,
 // transport, scopes, generated module panels, and host-managed pattern tracks.
 const AudioControlsBase: any = {};
-AudioControlsBase.Keybed = function Keybed(props: any) { return require('./audio-controls').AudioControls.Keybed(props); };
-AudioControlsBase.Pads = function Pads(props: any) { return require('./audio-controls').AudioControls.Pads(props); };
-AudioControlsBase.Slider = function Slider(props: any) { return require('./audio-controls').AudioControls.Slider(props); };
-AudioControlsBase.XYPad = function XYPad(props: any) { return require('./audio-controls').AudioControls.XYPad(props); };
-AudioControlsBase.StepGrid = function StepGrid(props: any) { return require('./audio-controls').AudioControls.StepGrid(props); };
-AudioControlsBase.StepPattern = function StepPattern(props: any) { return require('./audio-controls').AudioControls.StepPattern(props); };
-AudioControlsBase.StepMeter = function StepMeter(props: any) { return require('./audio-controls').AudioControls.StepMeter(props); };
-AudioControlsBase.LevelMeter = function LevelMeter(props: any) { return require('./audio-controls').AudioControls.LevelMeter(props); };
-AudioControlsBase.Knob = function Knob(props: any) { return require('./audio-controls').AudioControls.Knob(props); };
-AudioControlsBase.TrackSelector = function TrackSelector(props: any) { return require('./audio-controls').AudioControls.TrackSelector(props); };
-AudioControlsBase.PatternTrack = function PatternTrack(props: any) { return require('./audio-controls').AudioControls.PatternTrack(props); };
-AudioControlsBase.Transport = function Transport(props: any) { return require('./audio-controls').AudioControls.Transport(props); };
-AudioControlsBase.Scope = function Scope(props: any) { return require('./audio-controls').AudioControls.Scope(props); };
-AudioControlsBase.ModulePanel = function ModulePanel(props: any) { return require('./audio-controls').AudioControls.ModulePanel(props); };
+AudioControlsBase.Keybed = function Keybed(props: any) { return require('./audio/controls').AudioControls.Keybed(props); };
+AudioControlsBase.Pads = function Pads(props: any) { return require('./audio/controls').AudioControls.Pads(props); };
+AudioControlsBase.Slider = function Slider(props: any) { return require('./audio/controls').AudioControls.Slider(props); };
+AudioControlsBase.XYPad = function XYPad(props: any) { return require('./audio/controls').AudioControls.XYPad(props); };
+AudioControlsBase.StepGrid = function StepGrid(props: any) { return require('./audio/controls').AudioControls.StepGrid(props); };
+AudioControlsBase.StepPattern = function StepPattern(props: any) { return require('./audio/controls').AudioControls.StepPattern(props); };
+AudioControlsBase.StepMeter = function StepMeter(props: any) { return require('./audio/controls').AudioControls.StepMeter(props); };
+AudioControlsBase.LevelMeter = function LevelMeter(props: any) { return require('./audio/controls').AudioControls.LevelMeter(props); };
+AudioControlsBase.Knob = function Knob(props: any) { return require('./audio/controls').AudioControls.Knob(props); };
+AudioControlsBase.TrackSelector = function TrackSelector(props: any) { return require('./audio/controls').AudioControls.TrackSelector(props); };
+AudioControlsBase.PatternTrack = function PatternTrack(props: any) { return require('./audio/controls').AudioControls.PatternTrack(props); };
+AudioControlsBase.Transport = function Transport(props: any) { return require('./audio/controls').AudioControls.Transport(props); };
+AudioControlsBase.Scope = function Scope(props: any) { return require('./audio/controls').AudioControls.Scope(props); };
+AudioControlsBase.ModulePanel = function ModulePanel(props: any) { return require('./audio/controls').AudioControls.ModulePanel(props); };
 export const AudioControls: any = AudioControlsBase;
 
 // ── Canvas — pan/zoomable node surface ──────────────────────

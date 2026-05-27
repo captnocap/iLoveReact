@@ -19,6 +19,16 @@ import { useAudioInput, type AudioInputDevice, type AudioOutputDevice } from '@r
 import { mkdir, exists } from '@reactjit/runtime/hooks/fs';
 import { execAsync } from '@reactjit/runtime/hooks/process';
 import {
+  searchSource,
+  importSampleAsWav,
+  availableSources,
+  credentials,
+  type NormalizedSample,
+  type SearchPage,
+  type SearchQuery,
+  type SourceId,
+} from './sources';
+import {
   CART_NAME,
   SESSION_VERSION,
   samplesDirFor,
@@ -60,6 +70,13 @@ export interface ComposerState {
   addSampleFromFile: () => Promise<void>;
   removeSample: (id: string) => void;
   renameSample: (id: string, nextId: string) => void;
+
+  // Online sample sources (Freesound, …). Token handling is temporary
+  // (localstore via sources/credentials); real data layer next iteration.
+  availableSources: SourceId[];
+  searchSources: (source: SourceId, query: SearchQuery) => Promise<SearchPage>;
+  addSampleFromSource: (sample: NormalizedSample) => Promise<void>;
+  setSourceToken: (source: SourceId, token: string) => void;
 
   // Mic capture (raw, 44.1kHz mono → WAV at samplesDirFor(stem))
   isCapturing: boolean;
@@ -313,6 +330,68 @@ export function useComposerState(): ComposerState {
     setStatus(`renamed · ${id} → ${nextId}`);
   }, [ws]);
 
+  // ── Online sample sources ──────────────────────────────────────────
+  // Search a provider (Freesound first) and import a chosen result as a WAV
+  // into the project library — same library surface as imported/captured
+  // samples, plus provenance for attribution.
+  const searchSources = useCallback(
+    (source: SourceId, query: SearchQuery): Promise<SearchPage> => searchSource(source, query),
+    [],
+  );
+
+  const setSourceToken = useCallback((source: SourceId, token: string) => {
+    credentials.setToken(source, token);
+    setStatus(`token set · ${source}`);
+  }, []);
+
+  const addSampleFromSource = useCallback(async (sample: NormalizedSample) => {
+    // Allocate a code-safe id from the title, de-duping against the library
+    // and reserved sandbox names — same rule as addSampleFromFile.
+    const baseId = sanitizeSampleId(sample.title);
+    const existingIds = new Set(samplesRef.current.map((s) => s.id));
+    let id = baseId;
+    let n = 2;
+    while (existingIds.has(id) || RESERVED_SANDBOX_NAMES.has(id)) { id = `${baseId}_${n}`; n++; }
+
+    const stem = ws.stem;
+    mkdir(samplesDirFor(stem));
+    const dstPath = samplePathFor(stem, id);
+    setStatus(`downloading ${sample.title}…`);
+    try {
+      const result = await importSampleAsWav({
+        sample,
+        destPath: dstPath,
+        onProgress: (p) => {
+          if (p.total > 0) {
+            setStatus(`downloading ${sample.title}… ${Math.round((p.bytes / p.total) * 100)}%`);
+          }
+        },
+      });
+      ws.commit();
+      const ref: SampleRef = {
+        id,
+        label: sample.title,
+        path: dstPath,
+        durationMs: result.durationMs,
+        source: 'fetched',
+        provenance: {
+          provider: sample.source,
+          sourceId: sample.sourceId,
+          sourceUrl: sample.sourceUrl,
+          licenseFamily: sample.license.family,
+          licenseUrl: sample.license.url,
+          requiresAttribution: sample.license.requiresAttribution,
+          authorName: sample.author.name,
+          authorUrl: sample.author.profileUrl,
+        },
+      };
+      setSamples((cur) => [...cur, ref]);
+      setStatus(`added sample · ${id} (${result.sourceFormat} → wav)`);
+    } catch (e) {
+      setStatus(`fetch failed · ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [ws]);
+
   // ── Input device selection ─────────────────────────────────────────
   // Resolve the persisted device name to the current SDL id by walking
   // audioInput.devices. If the named device is gone (unplugged, etc.)
@@ -434,6 +513,10 @@ export function useComposerState(): ComposerState {
     addSampleFromFile,
     removeSample,
     renameSample,
+    availableSources: availableSources(),
+    searchSources,
+    addSampleFromSource,
+    setSourceToken,
     isCapturing: audioInput.isRecording,
     captureLevel: audioInput.level,
     startCapture,

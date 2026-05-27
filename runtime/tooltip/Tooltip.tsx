@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useId, useMemo, useState } from 'react';
 import { Box, Row, Text } from '@reactjit/runtime/primitives';
 import { useAutoFlip, type TooltipRect, type TooltipViewport } from './useAutoFlip';
+import { callHost, hasHost } from '../ffi';
 
 type TooltipSide = 'top' | 'bottom' | 'left' | 'right';
 export type TooltipVariant = 'sweatshop-ui' | 'sweatshop-chart' | 'component-gallery-chart';
@@ -126,10 +127,9 @@ const PRESETS: Record<TooltipVariant, TooltipPreset> = {
 };
 
 function getMousePoint() {
-  const host: any = globalThis as any;
   return {
-    x: typeof host.getMouseX === 'function' ? Number(host.getMouseX()) : 0,
-    y: typeof host.getMouseY === 'function' ? Number(host.getMouseY()) : 0,
+    x: Number(callHost<number>('getMouseX', 0)) || 0,
+    y: Number(callHost<number>('getMouseY', 0)) || 0,
   };
 }
 
@@ -172,7 +172,9 @@ function useCursorPoint(active: boolean) {
 }
 
 function getViewport(): TooltipViewport {
-  const host: any = globalThis as any;
+  // Browser globals (innerWidth/innerHeight) first; fall back to legacy Zig
+  // FFI fields (__viewportWidth/__viewportHeight, plain values not fns).
+  const host = globalThis as any;
   const width = typeof host?.innerWidth === 'number' ? host.innerWidth : typeof host?.__viewportWidth === 'number' ? host.__viewportWidth : 0;
   const height = typeof host?.innerHeight === 'number' ? host.innerHeight : typeof host?.__viewportHeight === 'number' ? host.__viewportHeight : 0;
   return { width, height };
@@ -335,7 +337,8 @@ export function TooltipRoot(props: { children: any }) {
   const [active, setActive] = useState<TooltipState | null>(null);
 
   useEffect(() => {
-    const host: any = globalThis as any;
+    // addEventListener is a DOM API, not Zig FFI — host stays cast.
+    const host = globalThis as any;
     const target = typeof host?.addEventListener === 'function' ? host : (typeof window !== 'undefined' ? window : null);
     if (!target || typeof target.addEventListener !== 'function') return;
     const update = () => setViewport(getViewport());

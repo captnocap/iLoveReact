@@ -42,6 +42,10 @@ pub const SessionOptions = struct {
     /// `[{"type":"function","function":{"name","description","parameters":{...}}}]`.
     /// When set, included in every request body so the model can call tools.
     tools_json: ?[]const u8 = null,
+    /// OpenAI `user` field, sent verbatim in every request body. The
+    /// claudewrap bridge uses it as a thread's resume key (claude's sid),
+    /// so the same claude process keeps serving one chat thread.
+    user: ?[]const u8 = null,
 };
 
 pub const EventKind = enum { delta, tool_call, completion, error_ };
@@ -55,16 +59,22 @@ pub const Event = struct {
     tool_call_id: ?[]u8 = null,
     tool_call_name: ?[]u8 = null,
     tool_call_args: ?[]u8 = null,
+    // completion extra: the backend's session id (claudewrap bridge sets
+    // `external_session_id` on the response = claude's sid). Surfaced to
+    // JS so a chat thread can persist + resume it.
+    external_session_id: ?[]u8 = null,
 
     pub fn deinit(self: *Event) void {
         if (self.text) |t| self.allocator.free(t);
         if (self.tool_call_id) |v| self.allocator.free(v);
         if (self.tool_call_name) |v| self.allocator.free(v);
         if (self.tool_call_args) |v| self.allocator.free(v);
+        if (self.external_session_id) |v| self.allocator.free(v);
         self.text = null;
         self.tool_call_id = null;
         self.tool_call_name = null;
         self.tool_call_args = null;
+        self.external_session_id = null;
     }
 };
 
@@ -109,6 +119,10 @@ pub const Session = struct {
     auth_header: ?[]u8 = null,
     url_owned: []u8,
     tools_json_owned: ?[]u8 = null,
+    user_owned: ?[]u8 = null,
+    /// Last `external_session_id` seen on a response chunk — attached to
+    /// the completion event so the host learns claude's sid.
+    external_session_id_owned: ?[]u8 = null,
 
     messages: std.ArrayList(Message) = .{},
 
@@ -152,6 +166,7 @@ pub const Session = struct {
             },
             .url_owned = try std.fmt.allocPrint(allocator, "{s}/chat/completions", .{options.base_url}),
             .tools_json_owned = if (options.tools_json) |t| try allocator.dupe(u8, t) else null,
+            .user_owned = if (options.user) |u| try allocator.dupe(u8, u) else null,
         };
         if (options.system_prompt) |sys| {
             try self.messages.append(allocator, .{
@@ -183,6 +198,8 @@ pub const Session = struct {
         if (self.auth_header) |a| self.allocator.free(a);
         self.allocator.free(self.url_owned);
         if (self.tools_json_owned) |t| self.allocator.free(t);
+        if (self.user_owned) |u| self.allocator.free(u);
+        if (self.external_session_id_owned) |v| self.allocator.free(v);
         self.allocator.destroy(self);
     }
 
@@ -250,6 +267,7 @@ pub const Session = struct {
             self.model_owned,
             self.messages.items,
             self.tools_json_owned,
+            self.user_owned,
         );
         self.body_owned = body;
 
@@ -308,6 +326,15 @@ pub const Session = struct {
         defer parsed.deinit();
         const root = parsed.value;
         if (root != .object) return;
+        // Backend session id (claudewrap bridge → claude's sid). Remember
+        // the latest non-empty value; attached to the completion event.
+        if (root.object.get("external_session_id")) |esid| if (esid == .string and esid.string.len > 0) {
+            const dup = self.allocator.dupe(u8, esid.string) catch null;
+            if (dup) |d| {
+                if (self.external_session_id_owned) |old| self.allocator.free(old);
+                self.external_session_id_owned = d;
+            }
+        };
         const choices_val = root.object.get("choices") orelse return;
         if (choices_val != .array or choices_val.array.items.len == 0) return;
         const choice = choices_val.array.items[0];
@@ -411,7 +438,13 @@ pub const Session = struct {
                 };
             }
         }
-        self.pushEvent(.{ .allocator = self.allocator, .kind = .completion }) catch {};
+        const esid: ?[]u8 = if (self.external_session_id_owned) |v|
+            (self.allocator.dupe(u8, v) catch null)
+        else
+            null;
+        self.pushEvent(.{ .allocator = self.allocator, .kind = .completion, .external_session_id = esid }) catch {
+            if (esid) |e| self.allocator.free(e);
+        };
         self.kickNextPending();
     }
 
@@ -552,6 +585,7 @@ fn buildRequestBodyJson(
     model: []const u8,
     messages: []const Message,
     tools_json: ?[]const u8,
+    user: ?[]const u8,
 ) ![]u8 {
     var buf: std.ArrayList(u8) = .{};
     errdefer buf.deinit(allocator);
@@ -578,6 +612,10 @@ fn buildRequestBodyJson(
     if (tools_json) |tools| {
         try buf.appendSlice(allocator, ",\"tools\":");
         try buf.appendSlice(allocator, tools);
+    }
+    if (user) |u| {
+        try buf.appendSlice(allocator, ",\"user\":");
+        try jsonEscape(allocator, &buf, u);
     }
     try buf.append(allocator, '}');
     return try buf.toOwnedSlice(allocator);

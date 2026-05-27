@@ -385,52 +385,74 @@ fn executeRequestOnClient(client: *std.http.Client, req: *const Request, resp: *
 }
 
 // ── Streaming ────────────────────────────────────────────────────────────
+//
+// Streaming reuses the EXACT request/read mechanism of the non-streaming
+// path (executeRequestOnClient): client.request + receiveHead + a manual
+// reader.readSliceShort loop, pushing each read as a .chunk and a terminal
+// .complete at EOF.
+//
+// The earlier implementation drove client.fetch(.{ .response_writer = … }).
+// That higher-level API blocks indefinitely reading a `Connection: close`
+// response from our own httpserver — fetch's internal reader never sees the
+// body "end", so the worker never returned and the terminal done event
+// never fired. Every streaming client against a useHost server hung as a
+// result (the symptom: server reads the request, client waits forever).
+//
+// readSliceShort breaks cleanly on EOF/error, so this works for BOTH
+// incremental SSE (each short read returns a token batch → one chunk per
+// read, real streaming preserved) AND atomic responses that arrive and
+// close at once (one chunk, then done) — e.g. the claudewrap bridge, whose
+// MCP/transcript reply lands all at once with nothing to stream.
+fn streamRequestOnClient(client: *std.http.Client, req: *const Request, status_out: *u16) !void {
+    const url = req.url[0..req.url_len];
+    const method = methodFromReq(req);
+    var extra_headers = buildExtraHeaders(req);
+    const payload = if (req.body_len > 0) req.body[0..req.body_len] else null;
 
-const StreamWriter = struct {
-    req_id: u32,
-    interface: std.Io.Writer,
+    const uri = try std.Uri.parse(url);
+    var request_obj = try client.request(method, uri, .{
+        .extra_headers = extra_headers[0..req.header_count],
+        .headers = .{ .accept_encoding = .omit },
+        .keep_alive = false,
+        .redirect_behavior = .init(10),
+    });
+    defer request_obj.deinit();
 
-    pub fn init(req_id: u32) StreamWriter {
-        return .{
-            .req_id = req_id,
-            .interface = .{
-                .vtable = &.{
-                    .drain = drain,
-                    .sendFile = std.Io.Writer.unimplementedSendFile,
-                },
-                .buffer = &.{},
-            },
-        };
+    if (payload) |p| {
+        request_obj.transfer_encoding = .{ .content_length = p.len };
+        var body = try request_obj.sendBodyUnflushed(&.{});
+        try body.writer.writeAll(p);
+        try body.end();
+        try request_obj.connection.?.flush();
+    } else {
+        try request_obj.sendBodiless();
     }
 
-    pub fn drain(io_w: *std.Io.Writer, data: []const []const u8, splat: usize) std.Io.Writer.Error!usize {
-        const self: *StreamWriter = @fieldParentPtr("interface", io_w);
-        var total: usize = 0;
-        var s: usize = 0;
-        while (s < splat) : (s += 1) {
-            for (data) |slice| {
-                total += slice.len;
-                var off: usize = 0;
-                while (off < slice.len) {
-                    var chunk = Response{};
-                    chunk.id = self.req_id;
-                    chunk.response_type = .chunk;
-                    const remaining = slice.len - off;
-                    const to_copy = @min(remaining, MAX_BODY);
-                    if (to_copy > 0) {
-                        @memcpy(chunk.body[0..to_copy], slice[off..off + to_copy]);
-                    }
-                    chunk.body_len = to_copy;
-                    while (!response_queue.push(chunk)) {
-                        std.Thread.sleep(1_000_000); // 1ms backoff if queue full
-                    }
-                    off += to_copy;
-                }
+    var redirect_buf: [8192]u8 = undefined;
+    var response = try request_obj.receiveHead(&redirect_buf);
+    status_out.* = @intFromEnum(response.head.status);
+
+    var transfer_buf: [4096]u8 = undefined;
+    const reader = response.reader(&transfer_buf);
+    while (true) {
+        var buf: [4096]u8 = undefined;
+        const n = reader.readSliceShort(&buf) catch break;
+        if (n == 0) break;
+        var off: usize = 0;
+        while (off < n) {
+            var chunk = Response{};
+            chunk.id = req.id;
+            chunk.response_type = .chunk;
+            const to_copy = @min(n - off, MAX_BODY);
+            @memcpy(chunk.body[0..to_copy], buf[off .. off + to_copy]);
+            chunk.body_len = to_copy;
+            while (!response_queue.push(chunk)) {
+                std.Thread.sleep(1_000_000); // 1ms backoff if queue full
             }
+            off += to_copy;
         }
-        return total;
     }
-};
+}
 
 // ── Download ─────────────────────────────────────────────────────────────
 
@@ -490,22 +512,14 @@ fn executeStreamOrDownload(client: *std.http.Client, req: *const Request) void {
     const payload = if (req.body_len > 0) req.body[0..req.body_len] else null;
 
     if (req.stream) {
-        var stream_writer = StreamWriter.init(req.id);
-        const result = client.fetch(.{
-            .location = .{ .url = url },
-            .method = method,
-            .payload = payload,
-            .extra_headers = extra_headers[0..req.header_count],
-            .response_writer = &stream_writer.interface,
-            .keep_alive = false,
-            .redirect_behavior = .init(10),
-        });
+        var status: u16 = 0;
+        const result = streamRequestOnClient(client, req, &status);
 
         var done = Response{};
         done.id = req.id;
-        if (result) |r| {
+        if (result) |_| {
             done.response_type = .complete;
-            done.status = @intFromEnum(r.status);
+            done.status = status;
         } else |err| {
             done.response_type = .err;
             const msg = @errorName(err);

@@ -16,11 +16,18 @@
 import * as React from 'react';
 import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
 import * as pg from '@reactjit/runtime/hooks/pg';
-import { useCRUD } from '../../app/db';
 import { useChatStatus } from '../../app/chat/store';
-
-const passthrough: any = { parse: (v: unknown) => v };
-const SETTINGS_ID = 'settings_default';
+import {
+  SETTINGS_ID,
+  PRIVACY_ID,
+  USER_ID,
+  short,
+  useConnectionStore,
+  useModelStore,
+  usePrivacyStore,
+  useSettingsStore,
+  useUserStore,
+} from '../settings';
 
 function Field({ label, value, color }: { label: string; value: string; color: string }) {
   return (
@@ -42,10 +49,16 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 export function StatusRoute() {
   const pgBound = pg.isAvailable();
-  const settingsStore = useCRUD<any>('settings', passthrough, { namespace: 'app' });
-  const modelStore = useCRUD<any>('model', passthrough, { namespace: 'app' });
-  const connectionStore = useCRUD<any>('connection', passthrough, { namespace: 'app' });
+  const settingsStore = useSettingsStore();
+  const modelStore = useModelStore();
+  const connectionStore = useConnectionStore();
+  const userStore = useUserStore();
+  const privacyStore = usePrivacyStore();
   const { data: settings } = settingsStore.useQuery(SETTINGS_ID);
+  const { data: user } = userStore.useQuery(USER_ID);
+  const { data: privacy } = privacyStore.useQuery(PRIVACY_ID);
+  const { data: connections } = connectionStore.useListQuery({ orderBy: 'createdAt', order: 'desc' });
+  const { data: models } = modelStore.useListQuery({ orderBy: 'createdAt', order: 'desc' });
   const assistantModelId: string = settings?.actionDefaults?.assistant || '';
   const { data: model } = modelStore.useQuery(assistantModelId);
   const connId: string = model?.connectionId || '';
@@ -56,7 +69,7 @@ export function StatusRoute() {
   const modelLabel = model?.remoteId ? String(model.remoteId) : '(no model bound)';
 
   return (
-    <Col style={{ width: '100%', height: '100%', padding: 1, gap: 1 }}>
+    <Col style={{ width: '100%', padding: 1, gap: 1 }}>
       <Section title="bindings">
         <Field label="__pg_connect" value={pgBound ? 'bound' : 'MISSING'} color={pgBound ? '#22d3ee' : '#f87171'} />
       </Section>
@@ -81,6 +94,38 @@ export function StatusRoute() {
             </Text>
           </Box>
         ) : null}
+      </Section>
+
+      <Section title="settings rows">
+        <Field label="user.name" value={String(user?.displayName || user?.name || '(empty)')} color="#e7eaff" />
+        <Field label="user.goal" value={short(user?.goal || user?.bio || '(empty)', 76)} color="#94a3b8" />
+        <Field label="connections" value={String((connections || []).length)} color="#22d3ee" />
+        {(connections || []).map((c: any) => (
+          <Field
+            key={c.id}
+            label={`conn ${short(c.label || c.id, 20)}`}
+            value={`${c.kind || '(kind?)'} ${short(c.endpoint || c?.credentialRef?.locator || '', 48)}`}
+            color="#94a3b8"
+          />
+        ))}
+        <Field label="models" value={String((models || []).length)} color="#22d3ee" />
+        {(models || []).slice(0, 8).map((m: any) => (
+          <Field
+            key={m.id}
+            label={`model ${short(m.displayName || m.remoteId || m.id, 20)}`}
+            value={`${m.modality || 'text'} · ${short(m.connectionId || '', 42)}`}
+            color={m.id === assistantModelId ? '#fbbf24' : '#94a3b8'}
+          />
+        ))}
+        {(models || []).length > 8 ? (
+          <Field label="model list" value={`+${(models || []).length - 8} more`} color="#64748b" />
+        ) : null}
+      </Section>
+
+      <Section title="privacy">
+        <Field label="proxy" value={String(privacy?.network?.proxy || '(direct)')} color="#94a3b8" />
+        <Field label="tools.allow" value={String(privacy?.tools?.allow?.length || 0)} color="#94a3b8" />
+        <Field label="filesystem.allow" value={String(privacy?.filesystem?.allow?.length || 0)} color="#94a3b8" />
       </Section>
 
       <Section title="live phase">

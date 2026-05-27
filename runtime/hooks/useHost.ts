@@ -12,6 +12,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { useLatest } from './useLatest';
 import {
   httpSrvListen,
   httpSrvRespond,
@@ -107,8 +108,7 @@ export function useHost(spec: HostSpec): HostHandle {
   const [state, setState] = useState<HostState>('starting');
   const [error, setError] = useState<string | undefined>(undefined);
 
-  const specRef = useRef(spec);
-  specRef.current = spec;
+  const specRef = useLatest(spec);
 
   const routesKey = spec.kind === 'http' ? JSON.stringify(spec.routes ?? []) : '';
   const viaKey = spec.via ? `${spec.via.kind}:${spec.via.id}` : '';

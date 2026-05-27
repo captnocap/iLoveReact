@@ -30,7 +30,16 @@ export type IfttSource = {
   match(spec: string): IfttSubscription | null;
 };
 
-export type IfttActionRunner = (rest: string, payload: any) => void;
+export type IfttActionRunner = (rest: string, payload: any) => void | Promise<void>;
+
+/** Resolved dispatch — runner output (possibly a Promise) + whether the
+ *  registry actually found a handler. useIFTTT consumes this to drive the
+ *  `.action` in-flight tracker and `.completed` edge on each result. */
+export type IfttDispatchResult = {
+  handled: boolean;
+  /** Whatever the runner returned. `undefined` for unhandled or sync-void. */
+  ret: void | Promise<void>;
+};
 
 const _sources = new Map<string, IfttSource>();
 const _actions = new Map<string, IfttActionRunner>();
@@ -56,7 +65,13 @@ export function setIfttFallback(src: IfttSource): void {
 }
 
 /** Resolve a trigger spec to its Subscription. Returns null if no source
- *  claims it AND no fallback is set. */
+ *  claims it AND no fallback is set.
+ *
+ *  Longest-prefix wins, by string length — NOT registration order. So
+ *  registering `'state:set:'` after `'state:'` is fine, and registering it
+ *  before is fine; either way `'state:set:foo'` routes to the longer
+ *  prefix. The `if (p.length > bestPrefix.length)` check is what enforces
+ *  this; do not switch to a Map iteration that bails on first match. */
 export function resolveTrigger(spec: string): IfttSubscription | null {
   let bestPrefix = '';
   let bestSrc: IfttSource | null = null;
@@ -77,19 +92,21 @@ export function registerIfttAction(prefix: string, run: IfttActionRunner): void 
   _actions.set(prefix, run);
 }
 
-/** Dispatch a string action through the registry. Returns true if a
- *  registered prefix handled it. The runner receives the remainder of the
- *  action string (after the matched prefix) plus the trigger payload. */
-export function dispatchAction(action: string, payload: any): boolean {
+/** Dispatch a string action through the registry. Returns `{ handled, ret }`
+ *  — `ret` is whatever the runner returned (possibly a Promise) so useIFTTT
+ *  can await action settlement for its `.completed` edge. The runner gets
+ *  the remainder of the action string (after the matched prefix) plus the
+ *  trigger payload. */
+export function dispatchAction(action: string, payload: any): IfttDispatchResult {
   let bestPrefix = '';
   let bestRunner: IfttActionRunner | null = null;
   for (const [p, r] of _actions) {
     if (!prefixMatches(action, p)) continue;
     if (p.length > bestPrefix.length) { bestPrefix = p; bestRunner = r; }
   }
-  if (!bestRunner) return false;
-  bestRunner(action.slice(bestPrefix.length), payload);
-  return true;
+  if (!bestRunner) return { handled: false, ret: undefined };
+  const ret = bestRunner(action.slice(bestPrefix.length), payload);
+  return { handled: true, ret };
 }
 
 // ── Introspection (debugging) ─────────────────────────────────────

@@ -14,8 +14,8 @@ import registry from '../../sdk/dependency-registry.json';
 declare const __spawnSync: (bin: string, argsJson: string, stdin: string) => string;
 declare const __spawn: (bin: string, argsJson: string) => number;
 declare const __childReadLine: (id: number, timeoutMs: number) => string | null;
-declare const __readFile: (path: string) => string;
-declare const __writeFile: (path: string, content: string) => void;
+declare const __fs_read: (path: string) => string;
+declare const __fs_write: (path: string, content: string) => void;
 declare const __env: (name: string) => string | null;
 
 const palette = {
@@ -171,10 +171,10 @@ function pathLine(): string { return `export PATH="${INSTALL_ROOT}/bin:$PATH"  #
 function appendPath(): { ok: boolean; rc: string; msg: string } {
   const rc = detectShellRc();
   let body = '';
-  try { body = __readFile(rc); } catch { body = ''; }
+  try { body = __fs_read(rc); } catch { body = ''; }
   if (body.includes('# reactjit')) return { ok: true, rc, msg: 'already on PATH' };
   const next = (body.endsWith('\n') ? body : body + '\n') + pathLine() + '\n';
-  try { __writeFile(rc, next); return { ok: true, rc, msg: `appended → ${rc}` }; }
+  try { __fs_write(rc, next); return { ok: true, rc, msg: `appended → ${rc}` }; }
   catch (e: any) { return { ok: false, rc, msg: 'write failed: ' + (e?.message || String(e)) }; }
 }
 

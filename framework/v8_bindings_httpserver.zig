@@ -260,7 +260,10 @@ fn hostClose(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 // native stack would eat into V8's call-stack budget and __jsTick would trip
 // "Maximum call stack size exceeded" before the event handler even runs.
 var g_http_ev_buf: [16]httpserver.HttpEvent = undefined;
-var g_http_payload: [16384]u8 = undefined;
+// Must hold the emitted JSON: clientId + method + path + JSON-escaped body.
+// The body can now be up to MAX_REQ (256 KB); escaping is ~1.1× for typical
+// JSON but can expand control chars to \u00XX (6×), so size generously.
+var g_http_payload: [1572864]u8 = undefined;
 
 pub fn tickDrain() void {
     const ev_buf = &g_http_ev_buf;

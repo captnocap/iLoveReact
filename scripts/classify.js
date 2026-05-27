@@ -318,15 +318,15 @@ function normalizeStat(stat) {
 }
 
 function statSync(pathValue) {
-  return normalizeStat(__stat(pathValue));
+  return normalizeStat(__fs_stat_json(pathValue));
 }
 
 function existsSync(pathValue) {
-  return !!__exists(pathValue);
+  return !!__fs_exists(pathValue);
 }
 
 function readFileSync(pathValue) {
-  const text = __readFile(pathValue);
+  const text = __fs_read(pathValue);
   if (text == null) {
     throw new Error(`ENOENT: no such file ${pathValue}`);
   }
@@ -334,13 +334,13 @@ function readFileSync(pathValue) {
 }
 
 function writeFileSync(pathValue, data) {
-  const ok = __writeFile(pathValue, String(data));
+  const ok = __fs_write(pathValue, String(data));
   if (!ok) throw new Error(`EIO: unable to write ${pathValue}`);
   return undefined;
 }
 
 function readdirSync(pathValue, options = {}) {
-  const raw = __readDir(pathValue);
+  const raw = __fs_list_json(pathValue);
   let names = null;
   if (Array.isArray(raw)) names = raw;
   else {
@@ -370,7 +370,7 @@ function readdirSync(pathValue, options = {}) {
 
 function loadTypeScript() {
   const tsPath = join(__cwd(), 'vendor', 'typescript', 'typescript.js');
-  const code = __readFile(tsPath);
+  const code = __fs_read(tsPath);
   if (code === null) {
     throw new Error(`Missing deps/typescript/typescript.js at ${tsPath}`);
   }
@@ -1135,6 +1135,109 @@ function formatValue(v) {
   return JSON.stringify(v);
 }
 
+/**
+ * Find near-duplicate sibling groups (same primitive, name-prefix relationship,
+ * 1–2 differing fields) and fold the children into the parent as `.Suffix`
+ * appendages. Mutates groups in place: parents gain `appendages: [{suffix, styleDelta, propDelta}]`,
+ * children are marked `isAppendage: true` so the emitter skips their top-level entry.
+ */
+function clusterAppendages(groups, maxDeltaFields = 2) {
+  // Index by primitive so we only compare apples to apples.
+  const byPrimitive = new Map();
+  for (const g of groups) {
+    if (!byPrimitive.has(g.primitive)) byPrimitive.set(g.primitive, []);
+    byPrimitive.get(g.primitive).push(g);
+  }
+
+  for (const [, bucket] of byPrimitive) {
+    // Longest names first so a child is matched to its most-specific parent.
+    const sortedByLen = [...bucket].sort((a, b) => b.suggestedName.length - a.suggestedName.length);
+    for (const child of sortedByLen) {
+      if (child.isAppendage) continue;
+      // Candidate parents: any sibling whose name is a strict prefix of child's.
+      const candidates = bucket.filter(p =>
+        p !== child &&
+        !p.isAppendage &&
+        child.suggestedName.startsWith(p.suggestedName) &&
+        child.suggestedName.length > p.suggestedName.length,
+      );
+      if (candidates.length === 0) continue;
+
+      // Prefer the longest-prefix parent (most specific match).
+      candidates.sort((a, b) => b.suggestedName.length - a.suggestedName.length);
+
+      for (const parent of candidates) {
+        const styleDelta = {};
+        for (const k of Object.keys(child.styleStatics)) {
+          if (JSON.stringify(child.styleStatics[k]) !== JSON.stringify(parent.styleStatics[k])) {
+            styleDelta[k] = child.styleStatics[k];
+          }
+        }
+        const propDelta = {};
+        for (const k of Object.keys(child.jsxProps)) {
+          if (JSON.stringify(child.jsxProps[k]) !== JSON.stringify(parent.jsxProps[k])) {
+            propDelta[k] = child.jsxProps[k];
+          }
+        }
+        // Also flag keys the parent has but the child drops — these can't be
+        // expressed as a pure additive appendage, so leave such pairs alone.
+        const parentDropsStyle = Object.keys(parent.styleStatics).some(k => !(k in child.styleStatics));
+        const parentDropsProps = Object.keys(parent.jsxProps).some(k => !(k in child.jsxProps));
+        const totalDelta = Object.keys(styleDelta).length + Object.keys(propDelta).length;
+        if (totalDelta === 0 || totalDelta > maxDeltaFields) continue;
+        if (parentDropsStyle || parentDropsProps) continue;
+
+        const suffix = child.suggestedName.slice(parent.suggestedName.length);
+        if (!/^[A-Z][A-Za-z0-9]*$/.test(suffix)) continue;
+
+        parent.appendages = parent.appendages || [];
+        parent.appendages.push({ suffix, styleDelta, propDelta, occurrences: child.occurrences });
+        child.isAppendage = true;
+        child.appendageOf = parent.suggestedName;
+        break; // matched to one parent — done.
+      }
+    }
+  }
+}
+
+/**
+ * Format a child appendage body. Mirrors the parent's emission shape:
+ *  - for Text parents, promote style.color/fontWeight/fontSize to flat color/bold/size
+ *  - everything else goes under `style: { ... }`
+ *  - flat jsxProp deltas stay flat
+ */
+function formatAppendageBody(primitive, styleDelta, propDelta) {
+  const parts = [];
+  let remainingStyle = { ...styleDelta };
+
+  if (primitive === 'Text') {
+    if ('color' in remainingStyle) {
+      parts.push(`color: ${formatValue(remainingStyle.color)}`);
+      delete remainingStyle.color;
+    }
+    if ('fontWeight' in remainingStyle) {
+      if (remainingStyle.fontWeight === 'bold') parts.push(`bold: true`);
+      delete remainingStyle.fontWeight;
+    }
+    if ('fontSize' in remainingStyle) {
+      parts.push(`size: ${remainingStyle.fontSize}`);
+      delete remainingStyle.fontSize;
+    }
+  }
+
+  for (const [k, v] of Object.entries(propDelta)) {
+    parts.push(`${k}: ${formatValue(v)}`);
+  }
+
+  const styleKeys = Object.keys(remainingStyle);
+  if (styleKeys.length > 0) {
+    const styleParts = styleKeys.map(k => `${k}: ${formatValue(remainingStyle[k])}`);
+    parts.push(`style: { ${styleParts.join(', ')} }`);
+  }
+
+  return parts.join(', ');
+}
+
 function generateClsFile(groups, prefix) {
   const lines = [
     `/**`,
@@ -1152,6 +1255,7 @@ function generateClsFile(groups, prefix) {
   ];
 
   for (const group of groups) {
+    if (group.isAppendage) continue; // emitted under its parent below
     const { primitive, styleStatics, jsxProps, suggestedName, occurrences } = group;
     const fileCount = new Set(occurrences.map(o => o.file)).size;
 
@@ -1212,7 +1316,19 @@ function generateClsFile(groups, prefix) {
       entry = entryParts.join(', ');
     }
 
-    lines.push(`  ${suggestedName}: { ${entry} },`);
+    if (group.appendages && group.appendages.length > 0) {
+      // Emit parent body open + nested `.Suffix` siblings + close.
+      lines.push(`  ${suggestedName}: { ${entry},`);
+      for (const ap of group.appendages) {
+        const childBody = formatAppendageBody(primitive, ap.styleDelta, ap.propDelta);
+        const apFiles = new Set(ap.occurrences.map(o => o.file)).size;
+        lines.push(`    // ${ap.occurrences.length} occurrences across ${apFiles} files`);
+        lines.push(`    '.${ap.suffix}': { ${childBody} },`);
+      }
+      lines.push(`  },`);
+    } else {
+      lines.push(`  ${suggestedName}: { ${entry} },`);
+    }
     lines.push(``);
   }
 
@@ -1224,12 +1340,14 @@ function generateClsFile(groups, prefix) {
 
 function generateReport(groups, fileCount) {
   const lines = [];
+  const emittedGroups = groups.filter(g => !g.isAppendage);
+  const appendageCount = groups.length - emittedGroups.length;
   const totalOccurrences = groups.reduce((s, g) => s + g.occurrences.length, 0);
 
   lines.push(`\n  Classifier Pattern Analysis`);
   lines.push(`  ${'─'.repeat(50)}`);
   lines.push(`  Files scanned: ${fileCount}`);
-  lines.push(`  Patterns found: ${groups.length}`);
+  lines.push(`  Patterns found: ${emittedGroups.length} (+${appendageCount} folded as .Suffix)`);
   lines.push(`  Total inline styles replaced: ${totalOccurrences}`);
   lines.push(`  ${'─'.repeat(50)}\n`);
 
@@ -1238,6 +1356,7 @@ function generateReport(groups, fileCount) {
   lines.push(`  ${'─'.repeat(25)} ${'─'.repeat(12)} ${'─'.repeat(5)} ${'─'.repeat(6)}  ${'─'.repeat(30)}`);
 
   for (const group of groups) {
+    if (group.isAppendage) continue;
     const { primitive, styleStatics, jsxProps, suggestedName, occurrences } = group;
     const fileCount = new Set(occurrences.map(o => o.file)).size;
 
@@ -2836,6 +2955,14 @@ async function classifyCommand(args) {
   // Sanitize all names to valid JS identifiers
   for (const group of groups) {
     group.suggestedName = group.suggestedName.replace(/%/g, 'Pct').replace(/[^A-Za-z0-9]/g, '');
+  }
+
+  // Fold near-duplicate siblings (≤2 differing fields, same primitive,
+  // name-prefix relationship) into the parent as `.Suffix` appendages.
+  clusterAppendages(groups);
+  const appendageCount = groups.filter(g => g.isAppendage).length;
+  if (appendageCount > 0) {
+    console.log(`  Folded ${appendageCount} near-duplicate sibling(s) into parent classifiers as .Suffix appendages.`);
   }
 
   // Print report

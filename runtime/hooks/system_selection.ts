@@ -19,7 +19,7 @@
  */
 
 import { subscribe } from '../ffi';
-import { registerIfttSource } from './ifttt-registry';
+import { registerIfttSource } from './ifttt/registry';
 
 registerIfttSource('select:cleared', {
   match(spec) {

@@ -18,7 +18,7 @@
 //   - `uninstallVmBridges()` reverses it; useful for hot-reload.
 
 import { subscribe } from '@reactjit/runtime/ffi';
-import { attachVm, detachVm, listAttachedVms } from '@reactjit/runtime/hooks/ifttt-vm';
+import { attachVm, detachVm, listAttachedVms } from '@reactjit/runtime/hooks/ifttt/vm';
 
 type SessionEvent = {
   sessionId: string;

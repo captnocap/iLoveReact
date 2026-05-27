@@ -3,7 +3,7 @@
 
 import { ChatCard, WorkerQuestAttachment } from './ChatCard';
 import { Box, Text } from '@reactjit/runtime/primitives';
-import { C } from './style_cls';
+import { C } from './style.cls';
 
 const MODEL_VARIANTS = [
   { id: 'opus-4-7', label: '7', tooltip: 'Opus 4.7', color: '#D97757' },

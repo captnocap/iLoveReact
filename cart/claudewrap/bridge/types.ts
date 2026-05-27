@@ -44,6 +44,9 @@ export interface PendingToolCall {
   argumentsJson: string;
   createdAt: number;
   responded: boolean;
+  /** Pooled (headless) path: `${chatId}-${turnId}` of the owning turn,
+   *  so a follow-up tool-result request can find the right thread. */
+  turnKey?: string;
 }
 
 export interface BridgeTrace {

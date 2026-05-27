@@ -3,7 +3,7 @@
 // Step state:   0=unused 1=pending 2=active 3=verify_pending
 //               4=verify_passed 5=planner_confirmed 6=done 7=rejected
 
-import { C } from './style_cls';
+import { C } from './style.cls';
 
 function StepPip(props: any) {
   const s = props.state;

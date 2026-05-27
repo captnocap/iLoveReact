@@ -84,12 +84,13 @@ export const ENTITY_TO_BUCKET: Record<string, BucketId> = {
   'semantic-memory': 'memories',
   'working-memory': 'memories',
 
-  // ── user-sweatshop (20) ───────────────────────────────────────────
+  // ── user-sweatshop (21) ───────────────────────────────────────────
   'budget': 'user-sweatshop',
   'budget-ledger': 'user-sweatshop',
   'chart-demo-data': 'user-sweatshop',
   'git-activity': 'user-sweatshop',
   'goal': 'user-sweatshop',
+  'if-then-config': 'user-sweatshop',
   'merge-conflict': 'user-sweatshop',
   'merge-proposal': 'user-sweatshop',
   'news-feed-post': 'user-sweatshop',

@@ -45,8 +45,8 @@ const flags = [
   '--jsx-factory=__jsx',
   '--jsx-fragment=Fragment',
   '--inject:' + ROOT + '/runtime/jsx_shim.ts',
-  '--inject:' + ROOT + '/framework/ambient.ts',
-  '--inject:' + ROOT + '/framework/ambient_primitives.ts',
+  '--inject:' + ROOT + '/runtime/ambient.ts',
+  '--inject:' + ROOT + '/runtime/ambient_primitives.ts',
   '--alias:@reactjit/core=' + ROOT + '/runtime/core_stub.ts',
   '--alias:@reactjit/runtime=' + ROOT + '/runtime',
   '--alias:@cart-entry=' + entryAbs,
@@ -70,7 +70,7 @@ if (id < 0) {
 __writeStdout('[dev] watching ' + cartFile + " — edits rebuild + push automatically (ctrl-c to stop)\n");
 
 function statMtime(p) {
-  const s = __stat(p);
+  const s = __fs_stat_json(p);
   if (s === null) return 0;
   try { return Number(JSON.parse(s).mtimeMs) || 0; } catch { return 0; }
 }

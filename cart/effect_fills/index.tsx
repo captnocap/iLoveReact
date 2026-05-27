@@ -67,6 +67,17 @@ const CONTRA_MATERIALS = [
   { id: 6, name: 'Substance' },
 ] as const;
 
+// Board G / Liminal — Kimi's threshold surfaces (board id 6).
+const LIMINAL_MATERIALS = [
+  { id: 0, name: 'Fogged Mirror' },
+  { id: 1, name: 'Salt Flat' },
+  { id: 2, name: 'Moss Carpet' },
+  { id: 3, name: 'Tarnished Silver' },
+  { id: 4, name: 'Ice Sheet' },
+  { id: 5, name: 'Charcoal Bed' },
+  { id: 6, name: 'Stained Glass' },
+] as const;
+
 const QUALITY_GRADES = [
   { id: 0, label: 'PSX', note: '32px snap, 6-bit color' },
   { id: 1, label: 'PS2', note: '64px snap, banded color' },
@@ -75,7 +86,7 @@ const QUALITY_GRADES = [
   { id: 4, label: 'Max', note: 'extra detail' },
 ] as const;
 type QualityGrade = typeof QUALITY_GRADES[number]['id'];
-type BoardId = 0 | 1 | 2 | 3 | 4 | 5;
+type BoardId = 0 | 1 | 2 | 3 | 4 | 5 | 6;
 
 const FILL_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
@@ -1132,6 +1143,194 @@ fn substance_spill(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   return sat3(col);
 }
 
+// ── Board G / Liminal — Kimi's threshold surfaces ────────────────────────────
+// Not environment, not object, not dream, not rot. These are the surfaces at
+// the edge of state-change: condensation becoming water, water becoming ice,
+// flame becoming ash, polish becoming patina, sand becoming glass. Each is
+// defined by its transition zone — the liminal band where two phases meet.
+
+fn fogged_mirror(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Reflection gradient that implies a bathroom or cloakroom mirror.
+  let refl = mix(vec3f(0.10, 0.12, 0.16), vec3f(0.68, 0.72, 0.78), smoothstep(0.0, 1.0, uv.y));
+  // Mist layer: settled condensation + fresh droplets.
+  let mist = fbm(uv.x * 7.0 + seed, uv.y * 7.0 - seed, 5.0) * 0.5 + 0.5;
+  let drops = speckle(px, 3.2, seed, 0.86);
+  // Wipe trails — fingers dragged through condensation, clearing narrow arcs.
+  let trail1 = line_near(uv.y - 0.32 - sin(uv.x * 2.8 + seed) * 0.09, 0.022);
+  let trail2 = line_near(uv.y - 0.58 - sin(uv.x * 2.2 + seed + 1.3) * 0.07, 0.018);
+  let trail3 = line_near(uv.y - 0.78 - sin(uv.x * 3.5 + seed + 2.7) * 0.05, 0.014);
+  let trails = sat(trail1 + trail2 + trail3);
+  var col = mix(refl, vec3f(0.80, 0.82, 0.84), mist * 0.40);
+  col = mix(col, refl, trails * 0.60);   // clearer where wiped
+  col = mix(col, vec3f(0.88, 0.90, 0.92), drops * 0.28);
+  // Cold-edge bleed at bottom — mirror frame chill.
+  col = mix(col, vec3f(0.55, 0.60, 0.65), (1.0 - smoothstep(0.82, 1.0, uv.y)) * 0.18);
+  return sat3(col);
+}
+
+fn salt_flat(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Crusty salt pan with pressure ridges and mineral halos.
+  let ridge_noise = fbm(uv.x * 4.5 + seed, uv.y * 4.5 - seed, 5.0);
+  let ridge = line_near(ridge_noise, 0.030 + variant * 0.008);
+  let salt = fbm(uv.x * 24.0 + seed, uv.y * 24.0, 4.0) * 0.5 + 0.5;
+  var col = mix(vec3f(0.76, 0.74, 0.66), vec3f(0.94, 0.92, 0.84), salt);
+  // Concentric mineral deposit rings — evaporation history.
+  let rings = line_near(fract(length((uv - vec2f(0.48, 0.52)) * vec2f(1.3, 0.85)) * 5.5) - 0.5, 0.045);
+  col = mix(col, vec3f(0.58, 0.54, 0.42), rings * 0.32);
+  // Deep pressure cracks with shadow.
+  col = mix(col, vec3f(0.14, 0.12, 0.10), ridge * 0.58);
+  // Sun-bleached top, damp shadow bottom.
+  col = col + vec3f(0.05, 0.04, 0.03) * (1.0 - smoothstep(0.25, 0.65, uv.y));
+  // Variant colour shifts: 1 pink-lake, 2 borax-white.
+  if (variant > 0.5 && variant < 1.5) {
+    col = mix(col, vec3f(0.82, 0.62, 0.64), 0.22);
+  } else if (variant >= 1.5) {
+    col = mix(col, vec3f(0.88, 0.88, 0.90), 0.18);
+  }
+  return sat3(col - vec3f(speckle(px, 2.8, seed, 0.93) * 0.05));
+}
+
+fn moss_carpet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Dense cushion moss with spore capsules and damp sheen.
+  let tuft = fbm(uv.x * 14.0 + seed, uv.y * 14.0 - seed, 5.0) * 0.5 + 0.5;
+  let grain = fbm(uv.x * 42.0 + seed, uv.y * 38.0, 4.0) * 0.5 + 0.5;
+  var low = vec3f(0.030, 0.085, 0.045);
+  var high = vec3f(0.12, 0.34, 0.16);
+  if (variant > 0.5 && variant < 1.5) {
+    low = vec3f(0.065, 0.20, 0.10);
+    high = vec3f(0.24, 0.48, 0.28);
+  } else if (variant >= 1.5) {
+    low = vec3f(0.16, 0.12, 0.06);
+    high = vec3f(0.38, 0.32, 0.18);
+  }
+  var col = mix(low, high, tuft * 0.55 + grain * 0.22 + 0.15);
+  // Spore pods — tiny pale capsules on stalks.
+  let spore = speckle(px + vec2f(7.0, 13.0), 5.0, seed, 0.93);
+  col = mix(col, vec3f(0.48, 0.44, 0.30), spore * 0.32);
+  // Moisture sheen — darker, glossier patches.
+  let damp = smoothstep(0.42, 0.80, fbm(uv.x * 6.0 - seed, uv.y * 6.0 + seed, 4.0) * 0.5 + 0.5);
+  col = col + vec3f(0.06, 0.09, 0.05) * damp;
+  // Micro-fronds at high frequency.
+  let frond = line_near(sin((uv.x + fbm(uv.x * 3.0, uv.y * 3.0 + seed, 3.0) * 0.04) * 68.0), 0.14);
+  col = col + vec3f(0.04, 0.08, 0.03) * frond * (0.5 + variant * 0.15);
+  return sat3(col);
+}
+
+fn tarnished_silver(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Polished metal with sulphide patina and directional buff marks.
+  let scratch = fbm(uv.x * 32.0 + seed, uv.y * 32.0 - seed, 4.0) * 0.5 + 0.5;
+  var col = mix(vec3f(0.42, 0.44, 0.45), vec3f(0.80, 0.82, 0.83), scratch * 0.48 + 0.28);
+  // Buffing streaks — diagonal on variant 0, circular on 1, crosshatch on 2.
+  var streak = 0.0;
+  if (variant < 0.5) {
+    streak = line_near(sin((uv.x + uv.y * 0.35) * 85.0 + seed), 0.07);
+  } else if (variant < 1.5) {
+    let p = uv - vec2f(0.5, 0.5);
+    let r = length(p);
+    streak = line_near(sin(r * 110.0 + seed), 0.08);
+  } else {
+    streak = line_near(sin((uv.x + uv.y * 0.35) * 75.0 + seed), 0.06) + line_near(sin((uv.x - uv.y * 0.35) * 75.0 + seed), 0.06);
+  }
+  col = col + vec3f(0.07, 0.07, 0.07) * streak;
+  // Chemical tarnish — sulphide blues and browns.
+  let patina = smoothstep(0.46, 0.76, fbm(uv.x * 6.5 + seed, uv.y * 6.5 - seed, 5.0) * 0.5 + 0.5);
+  col = mix(col, vec3f(0.20, 0.26, 0.22), patina * 0.50);
+  // Engraved monogram or scrollwork.
+  let engrave = line_near(sin(uv.x * 55.0) * sin(uv.y * 48.0 + seed), 0.10) * smoothstep(0.25, 0.75, uv.y);
+  col = col - vec3f(0.10, 0.10, 0.10) * engrave;
+  // Edge wear — brighter on raised rims.
+  let rim = (1.0 - smoothstep(0.0, 0.04, uv.x)) + (1.0 - smoothstep(0.0, 0.04, 1.0 - uv.x));
+  col = col + vec3f(0.10, 0.10, 0.10) * rim * 0.35;
+  return sat3(col);
+}
+
+fn ice_sheet(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Glacier ice: fracture network, trapped air bubbles, caustic refraction.
+  let frac1 = line_near(snoise(uv.x * 3.5 + seed, uv.y * 3.5 - seed), 0.016);
+  let frac2 = line_near(snoise(uv.x * 8.0 - seed, uv.y * 6.0 + seed), 0.010);
+  let fractures = sat(frac1 + frac2);
+  // Bubble inclusions.
+  let bubble = speckle(px, 4.2, seed, 0.80);
+  var col = mix(vec3f(0.50, 0.66, 0.76), vec3f(0.74, 0.86, 0.92), fbm(uv.x * 10.0 + seed, uv.y * 10.0, 4.0) * 0.5 + 0.5);
+  col = mix(col, vec3f(0.84, 0.92, 0.96), bubble * 0.22);
+  // Caustic refraction — light focused through thickness variations.
+  let caustic = line_near(sin(uv.x * 26.0 + uv.y * 16.0 + seed) * sin(uv.x * 16.0 - uv.y * 20.0), 0.09);
+  col = col + vec3f(0.10, 0.14, 0.16) * caustic * smoothstep(0.35, 0.85, uv.y);
+  // Fracture depth — darkens lines, then adds internal frost glow.
+  col = mix(col, vec3f(0.16, 0.30, 0.36), fractures * 0.45);
+  col = col + vec3f(0.06, 0.09, 0.11) * fractures;
+  // Variant tint: 0 clear arctic, 1 glacial blue, 2 sunset melt (pink).
+  if (variant > 0.5 && variant < 1.5) {
+    col = mix(col, vec3f(0.35, 0.55, 0.72), 0.18);
+  } else if (variant >= 1.5) {
+    col = mix(col, vec3f(0.72, 0.55, 0.58), 0.14);
+  }
+  return sat3(col);
+}
+
+fn charcoal_bed(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Ember bed: porous char, crack-glow, ash dust, heat shimmer.
+  let porous = fbm(uv.x * 16.0 + seed, uv.y * 16.0 - seed, 5.0) * 0.5 + 0.5;
+  var col = mix(vec3f(0.03, 0.03, 0.03), vec3f(0.14, 0.12, 0.10), porous);
+  // Glowing crack field — ember veins.
+  let ember = crack_field(uv, seed + 3.0, 4.5) * smoothstep(0.25, 0.75, fbm(uv.x * 2.5, uv.y * 2.5 + seed, 3.0) * 0.5 + 0.5);
+  var glow = vec3f(0.95, 0.32, 0.06);
+  if (variant > 0.5 && variant < 1.5) {
+    glow = vec3f(0.88, 0.52, 0.10);
+  } else if (variant >= 1.5) {
+    glow = vec3f(0.78, 0.22, 0.16);
+  }
+  col = mix(col, glow, ember * 0.72);
+  // Ash powder — light grey settling on cooler regions.
+  let ash = speckle(px, 2.4, seed, 0.76);
+  col = mix(col, vec3f(0.68, 0.66, 0.62), ash * 0.28);
+  // Heat shimmer tint in the highs.
+  col = col + vec3f(0.05, 0.012, 0.0) * smoothstep(0.45, 0.88, ember);
+  // Char ring marks — concentric burn circles.
+  let ring = line_near(fract(length((uv - vec2f(0.5, 0.5)) * vec2f(1.1, 0.9)) * 3.5) - 0.5, 0.035);
+  col = mix(col, vec3f(0.06, 0.05, 0.05), ring * 0.25);
+  return sat3(col);
+}
+
+fn stained_glass(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Leaded glass window with irregular came, coloured panes, and transmitted light.
+  let cell_uv = uv * 5.0;
+  let cell = floor(cell_uv);
+  let local = fract(cell_uv);
+  // Irregular lead came — hand-drawn wobble.
+  let warp = fbm(uv.x * 3.0 + seed, uv.y * 3.0 - seed, 3.0) * 0.06;
+  let came_x = 1.0 - smoothstep(0.035 + warp, 0.065 + warp, min(local.x, 1.0 - local.x));
+  let came_y = 1.0 - smoothstep(0.035 + warp, 0.065 + warp, min(local.y, 1.0 - local.y));
+  let came = sat(came_x + came_y);
+  // Cell palette — three-colour rotation per variant.
+  let cell_rand = rand(cell + vec2f(seed, seed * 2.0));
+  var p0 = vec3f(0.72, 0.10, 0.16);
+  var p1 = vec3f(0.08, 0.42, 0.68);
+  var p2 = vec3f(0.85, 0.68, 0.10);
+  if (variant > 0.5 && variant < 1.5) {
+    p0 = vec3f(0.10, 0.58, 0.34);
+    p1 = vec3f(0.68, 0.16, 0.50);
+    p2 = vec3f(0.14, 0.22, 0.62);
+  } else if (variant >= 1.5) {
+    p0 = vec3f(0.78, 0.38, 0.10);
+    p1 = vec3f(0.10, 0.52, 0.56);
+    p2 = vec3f(0.88, 0.84, 0.72);
+  }
+  var pane = p0;
+  if (cell_rand > 0.66) { pane = p2; }
+  else if (cell_rand > 0.33) { pane = p1; }
+  // Transmitted light — backlit intensity varies across pane.
+  let light = smoothstep(0.25, 0.85, fbm(uv.x * 5.0 + seed, uv.y * 5.0, 4.0) * 0.5 + 0.5);
+  pane = pane * (0.50 + light * 0.50);
+  // Slight handmade glass texture (ripples).
+  let tex = fbm(uv.x * 28.0 + seed, uv.y * 28.0, 4.0) * 0.5 + 0.5;
+  pane = pane + vec3f((tex - 0.5) * 0.05);
+  var col = mix(pane, vec3f(0.07, 0.07, 0.08), came);
+  // Lead bloom — light catches the raised came edges.
+  col = col + vec3f(0.35, 0.35, 0.28) * came * light * 0.14;
+  return sat3(col);
+}
+
 fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, board: f32) -> vec3f {
   let raw_q = clamp(quality, 0.0, 4.0);
   let q = clamp(raw_q - 2.0, 0.0, 2.0);
@@ -1162,11 +1361,18 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     out_col = out_col + out_col * bloom * (0.12 + q * 0.06);
     out_col = out_col - vec3f(fleck * (0.010 + q * 0.010));
   }
-  if (board > 4.5) {
+  if (board > 4.5 && board < 5.5) {
     // Board F contraband — Spun squalor grade: shadow-mold in the lows, lint in
     // the speckle. Mirrors Board B's condemned grime.
     out_col = mix(out_col, vec3f(0.020, 0.022, 0.018), smoothstep(0.60 - q * 0.05, 0.94, coarse) * (0.12 + q * 0.10));
     out_col = mix(out_col, vec3f(0.10, 0.09, 0.07), fleck * (0.08 + q * 0.06));
+  }
+  if (board > 5.5) {
+    // Board G liminal — threshold surfaces: preserve translucency, add a faint
+    // frost/ash bloom in the highs, keep the mid-tones clean so state-changes read.
+    let threshold_bloom = smoothstep(0.55 - q * 0.04, 0.92, luma);
+    out_col = out_col + out_col * threshold_bloom * (0.10 + q * 0.05);
+    out_col = mix(out_col, vec3f(0.015, 0.018, 0.020), fleck * (0.06 + q * 0.04));
   }
   if (retro > 0.001) {
     let dither_cell = floor(px / (1.0 + retro));
@@ -1236,7 +1442,7 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 4) { col = car_paint(uv, px, variant, seed); }
     else if (material == 5) { col = crt_screen(uv, px, variant, seed); }
     else { col = palm_canopy(uv, px, variant, seed); }
-  } else {
+  } else if (board < 5.5) {
     if (material == 0) { col = cash_stack(uv, px, variant, seed); }
     else if (material == 1) { col = product_baggie(uv, px, variant, seed); }
     else if (material == 2) { col = blood_pool(uv, px, variant, seed); }
@@ -1244,6 +1450,14 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 4) { col = refuse(uv, px, variant, seed); }
     else if (material == 5) { col = corkboard(uv, px, variant, seed); }
     else { col = substance_spill(uv, px, variant, seed); }
+  } else {
+    if (material == 0) { col = fogged_mirror(uv, px, variant, seed); }
+    else if (material == 1) { col = salt_flat(uv, px, variant, seed); }
+    else if (material == 2) { col = moss_carpet(uv, px, variant, seed); }
+    else if (material == 3) { col = tarnished_silver(uv, px, variant, seed); }
+    else if (material == 4) { col = ice_sheet(uv, px, variant, seed); }
+    else if (material == 5) { col = charcoal_bed(uv, px, variant, seed); }
+    else { col = stained_glass(uv, px, variant, seed); }
   }
 
   let vignette = 1.0 - smoothstep(0.20, 0.88, length(uv - vec2f(0.5, 0.5)));
@@ -1264,7 +1478,9 @@ function fillData(materialId: number, variant: number, quality: QualityGrade, bo
           ? materialId * 31.0 + variant * 17.0 + 131.0
           : board === 4
             ? materialId * 37.0 + variant * 19.0 + 181.0
-            : materialId * 41.0 + variant * 23.0 + 229.0;
+            : board === 5
+              ? materialId * 41.0 + variant * 23.0 + 229.0
+              : materialId * 43.0 + variant * 27.0 + 271.0;
   return [materialId, variant, seed, quality, board];
 }
 
@@ -1355,6 +1571,17 @@ function ContraColumn({ material, quality }: { material: typeof CONTRA_MATERIALS
       <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
       {VARIANTS.map((variant) => (
         <Swatch key={`f-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 5)} idLabel={swatchId('F', material.id, variant)} />
+      ))}
+    </Col>
+  );
+}
+
+function LiminalColumn({ material, quality }: { material: typeof LIMINAL_MATERIALS[number]; quality: QualityGrade }) {
+  return (
+    <Col style={{ width: SWATCH, gap: 10 }}>
+      <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
+      {VARIANTS.map((variant) => (
+        <Swatch key={`g-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 6)} idLabel={swatchId('G', material.id, variant)} />
       ))}
     </Col>
   );
@@ -1467,6 +1694,15 @@ export default function EffectFills() {
             <Row style={{ gap: 18, alignItems: 'flex-start' }}>
               {CONTRA_MATERIALS.map((material) => (
                 <ContraColumn key={material.id} material={material} quality={quality} />
+              ))}
+            </Row>
+          </Col>
+
+          <Col style={{ gap: 18 }}>
+            <BoardHeader title="Board G / Liminal — Kimi" subtitle="G01-G21: fogged mirror, salt flat, moss carpet, tarnished silver, ice sheet, charcoal bed, stained glass — surfaces at the threshold of state-change" />
+            <Row style={{ gap: 18, alignItems: 'flex-start' }}>
+              {LIMINAL_MATERIALS.map((material) => (
+                <LiminalColumn key={material.id} material={material} quality={quality} />
               ))}
             </Row>
           </Col>

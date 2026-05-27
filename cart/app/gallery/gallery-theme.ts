@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { setTokens, setStyleTokens, setVariant } from '@reactjit/runtime/theme';
+import { setTokens, setStyleTokens, setVariant } from '@reactjit/runtime/classifier';
 import { mergeThemeTokenCategories } from './theme-system';
 import { galleryThemeSystems } from './themes';
 import { applyGallerySurfaceTheme } from './surface';

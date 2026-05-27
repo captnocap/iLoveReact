@@ -5,8 +5,9 @@
 // All Rows wrap so the layout still reads on a 60-column terminal.
 
 import * as React from 'react';
-import { Box, Row, Col, Text, Pressable, ScrollView, Terminal, TextInput } from '../../runtime/primitives';
+import { Box, Row, Col, Text, Pressable, ScrollView, Terminal, TextInput, Effect } from '../../runtime/primitives';
 import { Router, Route, Link, useRoute } from '../../runtime/router';
+import { subscribeKey } from '../host';
 
 const palette = {
   bg:      '#0b1020',
@@ -30,6 +31,7 @@ const PAGES = [
   { path: '/glyphs', label: 'Glyphs' },
   { path: '/fonts',  label: 'Fonts' },
   { path: '/wide',   label: 'Wide' },
+  { path: '/fx',     label: 'FX' },
   { path: '/term',   label: 'Term' },
   { path: '/input',  label: 'Input' },
   { path: '/chat',   label: 'Chat' },
@@ -42,21 +44,38 @@ export default function Gallery() {
         <Header />
         <Row style={{ flexGrow: 1, flexShrink: 1 }}>
           <Sidebar />
-          <ScrollView style={{ flexGrow: 1, flexShrink: 1, paddingLeft: 1, paddingRight: 1, paddingTop: 1, paddingBottom: 1 }}>
-            <Route path="/styles">{() => <StylesPage />}</Route>
-            <Route path="/colors">{() => <ColorsPage />}</Route>
-            <Route path="/glyphs">{() => <GlyphsPage />}</Route>
-            <Route path="/fonts">{() => <FontsPage />}</Route>
-            <Route path="/wide">{() => <WidePage />}</Route>
-            <Route path="/term">{() => <TermPage />}</Route>
-            <Route path="/input">{() => <InputPage />}</Route>
-            <Route path="/chat">{() => <ChatPage />}</Route>
-            <Route fallback>{() => <StylesPage />}</Route>
-          </ScrollView>
+          <Content />
         </Row>
         <Footer />
       </Box>
     </Router>
+  );
+}
+
+// Content — the FX page wants a full-bleed surface (no inner ScrollView,
+// no padding) so an <Effect> can paint the entire viewport. Every other
+// page wants the standard scrolling content area.
+function Content() {
+  const route = useRoute();
+  if (route.path === '/fx') {
+    return (
+      <Box style={{ flexGrow: 1, flexShrink: 1 }}>
+        <FxPage />
+      </Box>
+    );
+  }
+  return (
+    <ScrollView style={{ flexGrow: 1, flexShrink: 1, paddingLeft: 1, paddingRight: 1, paddingTop: 1, paddingBottom: 1 }}>
+      <Route path="/styles">{() => <StylesPage />}</Route>
+      <Route path="/colors">{() => <ColorsPage />}</Route>
+      <Route path="/glyphs">{() => <GlyphsPage />}</Route>
+      <Route path="/fonts">{() => <FontsPage />}</Route>
+      <Route path="/wide">{() => <WidePage />}</Route>
+      <Route path="/term">{() => <TermPage />}</Route>
+      <Route path="/input">{() => <InputPage />}</Route>
+      <Route path="/chat">{() => <ChatPage />}</Route>
+      <Route fallback>{() => <StylesPage />}</Route>
+    </ScrollView>
   );
 }
 
@@ -769,6 +788,551 @@ function TermPage() {
       </Box>
       <Spacer />
       <Sub>spawned with $SHELL or /bin/sh. supports ANSI / xterm-256color / SGR — same wire format the host uses for our own paint.</Sub>
+    </Col>
+  );
+}
+
+// ── FX (WGSL shaders compiled and sampled per cell) ───────────────
+//
+// Full-screen viewer that cycles through shaders with ←/→ arrow keys. The
+// shaders are the same `<Effect shader={WGSL}>` elements you'd use on the
+// GPU host; the TUI compiles each one once (memoized) into a JS sampler
+// and renders via the upper-half-block (▀) trick. Hover the mouse over
+// the surface and shaders that read U.mouse_x / U.mouse_y track it.
+
+const FX_PLASMA = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let x = in.uv.x * U.size_w;
+  let y = in.uv.y * U.size_h;
+  let t = U.time;
+  let fx = x * 0.18;
+  let fy = y * 0.18;
+  let v1 = sin(fx + t);
+  let v2 = sin(fy + t * 0.7);
+  let v3 = sin(fx + fy + t * 0.5);
+  let v4 = sin(sqrt(fx * fx + fy * fy) + t);
+  let v = (v1 + v2 + v3 + v4) * 0.25 + 0.5;
+  let r = sin(v * 3.14159) * 0.5 + 0.5;
+  let g = sin(v * 3.14159 + 2.094) * 0.5 + 0.5;
+  let b = sin(v * 3.14159 + 4.189) * 0.5 + 0.5;
+  return vec4f(r, g, b, 1.0);
+}
+`;
+
+const FX_RINGS = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let p = (in.uv - vec2f(0.5, 0.5)) * 2.0;
+  let d = sqrt(p.x * p.x + p.y * p.y);
+  let t = U.time;
+  let band = sin(d * 18.0 - t * 3.0) * 0.5 + 0.5;
+  let hue_t = d + t * 0.15;
+  let r = sin(hue_t * 6.28318) * 0.5 + 0.5;
+  let g = sin(hue_t * 6.28318 + 2.094) * 0.5 + 0.5;
+  let b = sin(hue_t * 6.28318 + 4.189) * 0.5 + 0.5;
+  let edge = 1.0 - smoothstep(0.92, 1.02, d);
+  let v = band * edge;
+  return vec4f(r * v, g * v, b * v, edge);
+}
+`;
+
+const FX_VORTEX = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let p = (in.uv - vec2f(0.5, 0.5)) * 2.0;
+  let r = sqrt(p.x * p.x + p.y * p.y);
+  let a = atan2(p.y, p.x);
+  let t = U.time;
+  let arm = sin(a * 4.0 + r * 8.0 - t * 2.0) * 0.5 + 0.5;
+  let pulse = sin(r * 6.0 - t * 1.5) * 0.5 + 0.5;
+  let mask = 1.0 - smoothstep(0.85, 1.05, r);
+  let cr = 0.10 + arm * 0.9;
+  let cg = 0.05 + pulse * 0.6;
+  let cb = 0.50 + arm * 0.5;
+  return vec4f(cr * mask, cg * mask, cb * mask, mask);
+}
+`;
+
+// Animated sunset gradient that drifts horizontally and pulses the vignette.
+// The earlier version was time-independent — looked correct but felt dead in
+// a viewer that's supposed to show off motion. Now everything in the FX page
+// is alive.
+const FX_GRADIENT = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let t = U.time;
+  // Sliding offset so the color bands drift left/right with a slow sine.
+  let slide = sin(t * 0.35) * 0.20 + sin(t * 0.11) * 0.10;
+  let u = in.uv.x + slide;
+  let c0 = vec3f(0.04, 0.05, 0.20);
+  let c1 = vec3f(0.50, 0.10, 0.45);
+  let c2 = vec3f(0.95, 0.36, 0.20);
+  let c3 = vec3f(1.00, 0.84, 0.30);
+  // wrap into [0,3) so the gradient is a continuous loop.
+  let ts0 = u * 3.0;
+  let ts = ts0 - floor(ts0 / 3.0) * 3.0;
+  var rgb = c0;
+  if (ts < 1.0) { rgb = mix(c0, c1, ts); }
+  else if (ts < 2.0) { rgb = mix(c1, c2, ts - 1.0); }
+  else { rgb = mix(c2, c3, ts - 2.0); }
+  // Vignette breathes with time, plus a soft horizontal scan-line shimmer.
+  let pulse = 0.85 + 0.15 * sin(t * 1.6);
+  let v = (1.0 - abs(in.uv.y - 0.5) * 0.6) * pulse;
+  let shimmer = 0.06 * sin(in.uv.y * 60.0 + t * 4.0);
+  return vec4f(rgb.x * v + shimmer, rgb.y * v + shimmer, rgb.z * v + shimmer, 1.0);
+}
+`;
+
+const FX_CHECKER = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let p = in.uv * 8.0;
+  let cx = floor(p.x);
+  let cy = floor(p.y);
+  let parity = (cx + cy) - 2.0 * floor((cx + cy) * 0.5);
+  let t = U.time;
+  let hue = (cx * 0.07 + cy * 0.11 + t * 0.2);
+  let r = sin(hue * 6.28318) * 0.5 + 0.5;
+  let g = sin(hue * 6.28318 + 2.094) * 0.5 + 0.5;
+  let b = sin(hue * 6.28318 + 4.189) * 0.5 + 0.5;
+  let k = 0.20 + parity * 0.80;
+  return vec4f(r * k, g * k, b * k, 1.0);
+}
+`;
+
+// Storage-binding example: a multi-blob field with isolines, same shape the
+// real contour_demo.tsx uses on the GPU.
+const FX_CONTOUR = `
+@group(0) @binding(1) var<storage, read> ys: array<f32>;
+
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let n = u32(ys[0]);
+  let level_step = ys[1];
+
+  let p = (in.uv - vec2f(0.5, 0.5)) * 2.0;
+  var f = 0.0;
+  for (var i = 0u; i < n; i = i + 1u) {
+    let base = 4u + i * 4u;
+    let cx = ys[base + 0u];
+    let cy = ys[base + 1u];
+    let strength = ys[base + 2u];
+    let sigma = ys[base + 3u];
+    let dx = p.x - cx;
+    let dy = p.y - cy;
+    let r2 = dx * dx + dy * dy;
+    f = f + strength * exp(-r2 / (sigma * sigma));
+  }
+
+  let c0 = vec3f(0.04, 0.06, 0.16);
+  let c1 = vec3f(0.18, 0.30, 0.62);
+  let c2 = vec3f(0.22, 0.66, 0.74);
+  let c3 = vec3f(0.55, 0.85, 0.45);
+  let c4 = vec3f(0.96, 0.86, 0.30);
+  let c5 = vec3f(0.96, 0.42, 0.30);
+
+  let tcl = clamp(f, 0.0, 1.0);
+  let ts = tcl * 5.0;
+  var bg = c0;
+  if (ts < 1.0) { bg = mix(c0, c1, ts); }
+  else if (ts < 2.0) { bg = mix(c1, c2, ts - 1.0); }
+  else if (ts < 3.0) { bg = mix(c2, c3, ts - 2.0); }
+  else if (ts < 4.0) { bg = mix(c3, c4, ts - 3.0); }
+  else { bg = mix(c4, c5, ts - 4.0); }
+
+  let nearest = round(f / level_step) * level_step;
+  let dist = abs(f - nearest);
+  let line = 1.0 - smoothstep(0.008, 0.020, dist);
+  let col = mix(bg, vec3f(0.95, 0.97, 1.00), line * 0.7);
+  return vec4f(col.x, col.y, col.z, 1.0);
+}
+`;
+
+// Parallax dots — same pattern as runtime/background.tsx (the GPU cart's
+// cursor-glow background). Three layers of dots translate inversely to mouse
+// position, a soft radial glow follows the cursor, and ghost glows orbit the
+// surface when the mouse is outside. Hover the FX viewport and move; when
+// you leave, the ghost lights take over.
+const FX_DOTS = `
+fn rand2(x: f32, y: f32) -> f32 {
+  let d = sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return d - floor(d);
+}
+
+fn layer(x: f32, y: f32, cell: f32, ox: f32, oy: f32, radius: f32) -> f32 {
+  let sx = x + ox;
+  let sy = y + oy;
+  let cx = floor(sx / cell);
+  let cy = floor(sy / cell);
+  let lx = sx - cx * cell;
+  let ly = sy - cy * cell;
+  let center = cell * 0.5;
+  let dx = lx - center;
+  let dy = ly - center;
+  let dist = sqrt(dx * dx + dy * dy);
+  let brightness = 0.50 + rand2(cx, cy) * 0.50;
+  let edge = 1.0 - smoothstep(radius - 0.8, radius + 0.4, dist);
+  return edge * brightness;
+}
+
+fn lightAt(x: f32, y: f32, lx: f32, ly: f32, sigma: f32) -> f32 {
+  let dx = x - lx;
+  let dy = y - ly;
+  return exp(-(dx * dx + dy * dy) / (2.0 * sigma * sigma));
+}
+
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let x = in.uv.x * U.size_w;
+  let y = in.uv.y * U.size_h;
+  let t = U.time;
+
+  let mxN = ((U.mouse_x / U.size_w) * 2.0 - 1.0) * U.mouse_inside;
+  let myN = ((U.mouse_y / U.size_h) * 2.0 - 1.0) * U.mouse_inside;
+  let idle = 1.0 - U.mouse_inside;
+
+  // Background — vertical lerp from deep navy to a hint of magenta.
+  let bg0 = vec3f(0.04, 0.05, 0.14);
+  let bg1 = vec3f(0.10, 0.06, 0.22);
+  var col = mix(bg0, bg1, in.uv.y);
+
+  // Glow under the cursor scales with the surface short edge so it reads on
+  // both a 40-row terminal and a 10-row preview pane. Kept tight (~12% of
+  // short edge) so the lit region feels like a flashlight cone, not a full-
+  // surface wash.
+  let SIGMA = clamp(min(U.size_w, U.size_h) * 0.12, 4.0, 22.0);
+
+  let cursorPulse = 0.85 + 0.15 * sin(t * 2.4);
+  let cursorGlow = lightAt(x, y, U.mouse_x, U.mouse_y, SIGMA) * U.mouse_inside * cursorPulse;
+
+  // Ghost lights orbit when the mouse isn't here.
+  let g1x = U.size_w * (0.5 + 0.36 * sin(t * 0.27));
+  let g1y = U.size_h * (0.5 + 0.30 * cos(t * 0.21));
+  let g2x = U.size_w * (0.5 + 0.40 * cos(t * 0.19 + 1.7));
+  let g2y = U.size_h * (0.5 + 0.32 * sin(t * 0.23 + 2.3));
+  let g3x = U.size_w * (0.5 + 0.30 * sin(t * 0.33 + 4.1));
+  let g3y = U.size_h * (0.5 + 0.28 * cos(t * 0.29 + 5.0));
+  let ghost = (lightAt(x, y, g1x, g1y, SIGMA * 1.15)
+             + lightAt(x, y, g2x, g2y, SIGMA)
+             + lightAt(x, y, g3x, g3y, SIGMA * 1.25)) * 0.55 * idle;
+
+  let glow = cursorGlow + ghost;
+
+  // Idle drift so the layers never look frozen even with no mouse over.
+  let driftX = sin(t * 0.17) * 0.30 + cos(t * 0.09) * 0.22;
+  let driftY = cos(t * 0.13) * 0.28 + sin(t * 0.11) * 0.24;
+  let driftMix = 0.30 + 0.70 * idle;
+  let pX = mxN + driftX * driftMix;
+  let pY = myN + driftY * driftMix;
+
+  // Three parallax-translated layers. Cell sizes shrunk to read in the
+  // terminal: GPU shader uses 26/18/12 px cells; we use 8/5/3 sub-cell px.
+  let back  = layer(x, y, 8.0, pX *  2.0, pY *  1.5, 1.5);
+  let mid   = layer(x, y, 5.0, pX *  7.0, pY *  4.5, 1.2);
+  let front = layer(x, y, 3.0, pX * 20.0, pY * 14.0, 0.9);
+
+  let cool   = vec3f(0.20, 0.40, 0.70);
+  let body   = vec3f(0.50, 0.55, 0.95);
+  let bright = vec3f(0.95, 0.97, 1.00);
+  let hot    = vec3f(1.00, 0.80, 0.45);
+
+  let reveal = glow * 2.6;
+  col = col + cool   * back  * 0.45 * reveal;
+  col = col + body   * mid   * 0.70 * reveal;
+  col = col + bright * front * 1.00 * reveal;
+  col = col + hot    * glow  * 0.15;
+
+  return vec4f(col.x, col.y, col.z, 1.0);
+}
+`;
+
+// Tunnel — classic VJ shader. Polar coords give us (angle, radius); flipping
+// 1/radius gives perspective depth. Sampling a (twist*angle + speed*depth)
+// stripe pattern reads as flying down an infinite hallway. Walls hue-cycle
+// with depth so it never feels static even at low frame rates.
+const FX_TUNNEL = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let p = (in.uv - vec2f(0.5, 0.5)) * 2.0;
+  let t = U.time;
+  let r = sqrt(p.x * p.x + p.y * p.y);
+  let a = atan2(p.y, p.x);
+
+  // Hyperbolic depth — far away cells get r→0, near cells r→1.
+  let depth = 0.6 / max(r, 0.05) + t * 0.8;
+  let twist = a * 6.0 + sin(t * 0.4) * 1.5;
+
+  // Brick pattern walking outward. Stripe x stripe gives a tile, mod 2 picks
+  // light/dark.
+  let sx = depth * 0.6;
+  let sy = twist * (0.35 + 0.20 * sin(t * 0.3));
+  let tx = sx - 2.0 * floor(sx * 0.5);
+  let ty = sy - 2.0 * floor(sy * 0.5);
+  let brick = step(1.0, tx) * step(1.0, ty) + step(tx, 1.0) * step(ty, 1.0);
+  let line = smoothstep(0.0, 0.05, abs(tx - 1.0)) * smoothstep(0.0, 0.05, abs(ty - 1.0));
+
+  // Hue rolls with depth + time.
+  let hue = depth * 0.05 + t * 0.10;
+  let cr = sin(hue * 6.28318) * 0.5 + 0.5;
+  let cg = sin(hue * 6.28318 + 2.094) * 0.5 + 0.5;
+  let cb = sin(hue * 6.28318 + 4.189) * 0.5 + 0.5;
+
+  // Fog: distant cells fade to black.
+  let fog = smoothstep(0.0, 0.35, r);
+  let v = brick * 0.55 * line * fog;
+  // Central tunnel "light" pours out of the vanishing point.
+  let core = smoothstep(0.35, 0.0, r);
+  return vec4f(cr * v + core * 0.9, cg * v + core * 0.7, cb * v + core * 1.0, 1.0);
+}
+`;
+
+// Voronoi — F1 distance to nearest of 9 animated seeds in a 3x3 cell grid.
+// Cells colorize by seed index; edges glow brighter where two seeds tie.
+// No data buffer needed; the seed positions are computed analytically from
+// (cellX, cellY, time) using a hash so every cell stays distinct.
+const FX_VORONOI = `
+fn hash21(x: f32, y: f32) -> f32 {
+  let d = sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return d - floor(d);
+}
+
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let SCALE = 6.0;
+  let p = in.uv * SCALE;
+  let cx = floor(p.x);
+  let cy = floor(p.y);
+  let fx = p.x - cx;
+  let fy = p.y - cy;
+  let t = U.time;
+
+  var d1 = 1e9;
+  var d2 = 1e9;
+  var hueOfWinner = 0.0;
+
+  for (var oy = -1; oy < 2; oy = oy + 1) {
+    for (var ox = -1; ox < 2; ox = ox + 1) {
+      let nx = cx + f32(ox);
+      let ny = cy + f32(oy);
+      let h1 = hash21(nx, ny);
+      let h2 = hash21(nx + 7.31, ny - 3.97);
+      // Seed wobbles around its cell center.
+      let sx = f32(ox) + 0.5 + 0.40 * sin(t * 0.9 + h1 * 6.28);
+      let sy = f32(oy) + 0.5 + 0.40 * cos(t * 0.7 + h2 * 6.28);
+      let dx = sx - fx;
+      let dy = sy - fy;
+      let d = sqrt(dx * dx + dy * dy);
+      if (d < d1) {
+        d2 = d1; d1 = d;
+        hueOfWinner = h1;
+      } else if (d < d2) {
+        d2 = d;
+      }
+    }
+  }
+
+  // Cell color from winning seed hue, plus edge glow at boundaries.
+  let cr = sin(hueOfWinner * 6.28318) * 0.4 + 0.5;
+  let cg = sin(hueOfWinner * 6.28318 + 2.094) * 0.4 + 0.5;
+  let cb = sin(hueOfWinner * 6.28318 + 4.189) * 0.4 + 0.5;
+  let interior = 1.0 - smoothstep(0.0, 0.5, d1);
+  let edge = 1.0 - smoothstep(0.0, 0.08, d2 - d1);
+  let v = interior * 0.55 + edge * 0.9;
+  return vec4f(cr * v + edge * 0.3, cg * v + edge * 0.3, cb * v + edge * 0.3, 1.0);
+}
+`;
+
+// Kaleidoscope — fold uv into a six-way symmetric wedge, then sample a
+// rotating sin field inside it. The fold mirrors any radial input pattern,
+// so even a simple stripe becomes a mandala. Cursor pushes the rotation
+// rate so hovering swirls the field.
+const FX_MANDALA = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let PI = 3.14159265;
+  let p = (in.uv - vec2f(0.5, 0.5)) * 2.0;
+  let t = U.time;
+  // Cursor pushes rotation speed up to 2x; idle hold = 1x.
+  let mxN = ((U.mouse_x / U.size_w) * 2.0 - 1.0) * U.mouse_inside;
+  let push = 1.0 + 0.8 * abs(mxN);
+
+  let r = sqrt(p.x * p.x + p.y * p.y);
+  var a = atan2(p.y, p.x) + t * 0.20 * push;
+
+  // 6-fold fold: bring a into [-pi/6, pi/6] and reflect via |.|.
+  let SEG = PI / 6.0;
+  let aMod = a - 2.0 * SEG * floor((a + SEG) / (2.0 * SEG));
+  let af = abs(aMod);
+
+  // Two rotating sin layers inside the wedge.
+  let l1 = sin(r * 12.0 - t * 1.4) * sin(af * 5.0);
+  let l2 = sin(r * 7.0 + t * 0.9) * cos(af * 3.0 + t * 0.5);
+  let pat = (l1 + l2) * 0.5;
+
+  // Hue cycles slowly; brightness tracks the pattern.
+  let hue = t * 0.07 + r * 0.3;
+  let cr = sin(hue * 6.28318) * 0.5 + 0.5;
+  let cg = sin(hue * 6.28318 + 2.094) * 0.5 + 0.5;
+  let cb = sin(hue * 6.28318 + 4.189) * 0.5 + 0.5;
+  let bright = clamp(pat * 0.5 + 0.55, 0.0, 1.0);
+  let edge = 1.0 - smoothstep(0.95, 1.05, r);
+  let v = bright * edge;
+  return vec4f(cr * v, cg * v, cb * v, edge);
+}
+`;
+
+// Chladni plate — same standing-wave equation as cymatics.js in audio-canvas:
+//   z(x,y) = cos(n*pi*x)*cos(m*pi*y) - cos(m*pi*x)*cos(n*pi*y)
+// Particles would normally drift toward |z| ≈ 0 (nodal lines); we just render
+// |z| directly. (n, m) drift over time so the pattern morphs continuously.
+const FX_CHLADNI = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let PI = 3.14159265;
+  let p = (in.uv - vec2f(0.5, 0.5)) * 2.0;
+  let r2 = p.x * p.x + p.y * p.y;
+  let t = U.time;
+
+  // Non-integer (n, m) sweep through partial standing-wave modes — the
+  // pattern lives most of its time between named modes which is where the
+  // shape feels alive.
+  let n = 3.0 + 2.5 * sin(t * 0.13);
+  let m = 4.0 + 2.5 * cos(t * 0.11 + 1.4);
+  let z = cos(n * PI * p.x) * cos(m * PI * p.y)
+        - cos(m * PI * p.x) * cos(n * PI * p.y);
+  let nodal = 1.0 - smoothstep(0.0, 0.18, abs(z));
+
+  // Inside-plate mask, soft edge.
+  let mask = 1.0 - smoothstep(0.92, 1.02, sqrt(r2));
+
+  // Background = deep teal; lit nodal lines = pale gold over a midnight bath.
+  let bg = vec3f(0.04, 0.10, 0.14);
+  let line = vec3f(0.96, 0.92, 0.68);
+  let col = mix(bg, line, nodal * 0.95);
+  return vec4f(col.x * mask, col.y * mask, col.z * mask, mask);
+}
+`;
+
+// Mandelbrot — the original fractal. Slow zoom over time + slight pan so we
+// stay near the boundary where the structure is interesting. Coloring is
+// smooth-iter (escape-time + log fractional part of |z|) for continuous hue
+// rather than banded.
+const FX_MANDELBROT = `
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let t = U.time;
+  // Slow zoom on a known pretty seahorse-region target.
+  let zoom = 1.6 * exp(-t * 0.08);
+  let cx = -0.745 + sin(t * 0.05) * 0.02 * zoom + (in.uv.x - 0.5) * 2.0 * zoom;
+  let cy =  0.113 + cos(t * 0.07) * 0.02 * zoom + (in.uv.y - 0.5) * 2.0 * zoom;
+
+  var zx = 0.0;
+  var zy = 0.0;
+  var i = 0.0;
+  let MAX = 48.0;
+  for (var step = 0.0; step < MAX; step = step + 1.0) {
+    let zx2 = zx * zx;
+    let zy2 = zy * zy;
+    if (zx2 + zy2 > 4.0) { break; }
+    let nzx = zx2 - zy2 + cx;
+    let nzy = 2.0 * zx * zy + cy;
+    zx = nzx; zy = nzy;
+    i = i + 1.0;
+  }
+  // Inside set → black; outside → smooth-iter colored.
+  if (i >= MAX) { return vec4f(0.0, 0.0, 0.0, 1.0); }
+  let smooth = i - log(log(sqrt(zx * zx + zy * zy)) / log(2.0)) / log(2.0);
+  let h = smooth * 0.02 + t * 0.05;
+  let r = sin(h * 6.28318) * 0.5 + 0.5;
+  let g = sin(h * 6.28318 + 2.094) * 0.5 + 0.5;
+  let b = sin(h * 6.28318 + 4.189) * 0.5 + 0.5;
+  let v = clamp(smooth / MAX * 1.6, 0.0, 1.0);
+  return vec4f(r * v, g * v, b * v, 1.0);
+}
+`;
+
+function useContourData() {
+  const [tick, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 80);
+    return () => clearInterval(id);
+  }, []);
+  // Six animated blobs orbiting their home positions.
+  const blobs = [
+    { cx: -0.40, cy: -0.20, s: 1.0, sig: 0.40, px: 0.0, py: 0.5, ax: 0.20, ay: 0.10 },
+    { cx:  0.55, cy:  0.30, s: 0.8, sig: 0.32, px: 1.0, py: 1.5, ax: 0.16, ay: 0.18 },
+    { cx: -0.10, cy:  0.45, s: 0.7, sig: 0.28, px: 2.0, py: 0.0, ax: 0.14, ay: 0.12 },
+    { cx:  0.30, cy: -0.40, s: 0.6, sig: 0.30, px: 0.5, py: 2.5, ax: 0.22, ay: 0.08 },
+    { cx: -0.55, cy:  0.25, s: 0.5, sig: 0.26, px: 1.5, py: 1.0, ax: 0.12, ay: 0.14 },
+    { cx:  0.10, cy:  0.05, s: 0.6, sig: 0.24, px: 2.5, py: 2.0, ax: 0.10, ay: 0.12 },
+  ];
+  const t = tick * 0.08;
+  const out: number[] = [blobs.length, 0.10, 0, 0];
+  for (const b of blobs) {
+    out.push(
+      b.cx + Math.sin(t + b.px) * b.ax,
+      b.cy + Math.cos(t + b.py) * b.ay,
+      b.s,
+      b.sig,
+    );
+  }
+  return out;
+}
+
+type FxEntry = { title: string; note: string; shader: string; useData?: () => number[] };
+
+const FX_LIST: FxEntry[] = [
+  { title: 'dots',       note: 'parallax dots — hover/move the cursor to push the layers',     shader: FX_DOTS },
+  { title: 'tunnel',     note: 'infinite VJ tunnel — polar coords + 1/r perspective depth',     shader: FX_TUNNEL },
+  { title: 'voronoi',    note: 'F1 cellular noise w/ animated seeds, edge glow on F2-F1 tie',   shader: FX_VORONOI },
+  { title: 'mandala',    note: 'six-fold kaleidoscope with two layered sin fields — hover swirls', shader: FX_MANDALA },
+  { title: 'chladni',    note: 'standing-wave nodal pattern (same eqn as audio-canvas cymatics)', shader: FX_CHLADNI },
+  { title: 'mandelbrot', note: 'slow zoom into the seahorse valley, smooth-iter coloring',       shader: FX_MANDELBROT },
+  { title: 'plasma',     note: 'four-wave sin field, same shader as cart/plasma.tsx',           shader: FX_PLASMA },
+  { title: 'rings',      note: 'pulsing concentric circles, hue cycles with radius',            shader: FX_RINGS },
+  { title: 'vortex',     note: 'spiral arms + radial pulse, alpha mask to a disk',              shader: FX_VORTEX },
+  { title: 'gradient',   note: 'animated three-stop sunset with shimmer and pulse',             shader: FX_GRADIENT },
+  { title: 'checker',    note: '8x8 hue-cycling checker',                                       shader: FX_CHECKER },
+  { title: 'contour',    note: 'six animated gaussian blobs + isolines (storage buffer)',       shader: FX_CONTOUR, useData: useContourData },
+];
+
+// Full-screen viewer. ←/→ cycle, hover the surface for shaders that read
+// U.mouse_x / U.mouse_y. The HUD strip floats on top of the shader; the
+// shader covers the entire viewport behind it.
+function FxPage() {
+  const [idx, setIdx] = React.useState(0);
+  React.useEffect(() => subscribeKey((k: string) => {
+    // Arrow keys send CSI sequences. Also accept h/l (vim) and , / . so users
+    // without an arrow-key-emitting terminal still have a way through.
+    if (k === '\x1b[C' || k === 'l' || k === '.') setIdx((i) => (i + 1) % FX_LIST.length);
+    else if (k === '\x1b[D' || k === 'h' || k === ',') setIdx((i) => (i - 1 + FX_LIST.length) % FX_LIST.length);
+  }), []);
+  const fx = FX_LIST[idx];
+  return (
+    <Box style={{ width: '100%', height: '100%', position: 'relative', backgroundColor: '#000000' }}>
+      <FxSurface fx={fx} />
+      <FxHud idx={idx} fx={fx} />
+    </Box>
+  );
+}
+
+// Surface is keyed by title so React tears down + remounts when the user
+// cycles. That way each shader gets a fresh hook chain — useContourData
+// only runs for the contour shader, not as a parallel `if (fx.useData)`
+// call that would violate React's rules of hooks across re-renders.
+function FxSurface({ fx }: { fx: FxEntry }) {
+  return <FxRunner key={fx.title} fx={fx} />;
+}
+
+function FxRunner({ fx }: { fx: FxEntry }) {
+  const data = fx.useData ? fx.useData() : undefined;
+  return (
+    <Box style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%' }}>
+      <Effect shader={fx.shader} data={data} style={{ width: '100%', height: '100%' }} />
+    </Box>
+  );
+}
+
+function FxHud({ idx, fx }: { idx: number; fx: FxEntry }) {
+  return (
+    <Col style={{ position: 'absolute', left: 0, top: 0, width: '100%' }}>
+      <Row style={{ paddingLeft: 1, paddingRight: 1, gap: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+        <Text style={{ color: '#fef3c7', fontWeight: 'bold' }}> {idx + 1}/{FX_LIST.length} </Text>
+        <Text style={{ color: '#fbbf24', fontWeight: 'bold' }}>{fx.title}</Text>
+        <Text style={{ color: '#e5e7eb' }}>· {fx.note}</Text>
+      </Row>
+      <Row style={{ paddingLeft: 1, paddingRight: 1, gap: 1 }}>
+        <Text style={{ color: '#94a3b8' }}>←/→ or h/l to cycle · hover the surface to drive U.mouse_x/y</Text>
+      </Row>
     </Col>
   );
 }

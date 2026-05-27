@@ -41,18 +41,18 @@ export type ModuleType = keyof typeof MODULE_TYPE;
 
 // ── Host bridge ────────────────────────────────────────────────────────
 
-const host = (): any => globalThis as any;
+import { callHost } from '../ffi';
 
-const hostAdd = (id: number, mt: number) => host().__audioAddModule?.(id, mt);
-const hostRemove = (id: number) => host().__audioRemoveModule?.(id);
+const hostAdd = (id: number, mt: number) => callHost('__audioAddModule', undefined, id, mt);
+const hostRemove = (id: number) => callHost('__audioRemoveModule', undefined, id);
 const hostConnect = (a: number, ap: number, b: number, bp: number) =>
-  host().__audioConnect?.(a, ap, b, bp);
+  callHost('__audioConnect', undefined, a, ap, b, bp);
 const hostDisconnect = (a: number, ap: number, b: number, bp: number) =>
-  host().__audioDisconnect?.(a, ap, b, bp);
-const hostSetParam = (id: number, p: number, v: number) => host().__audioSetParam?.(id, p, v);
-const hostNoteOn = (id: number, midi: number) => host().__audioNoteOn?.(id, midi);
-const hostNoteOff = (id: number) => host().__audioNoteOff?.(id);
-const hostMasterGain = (g: number) => host().__audioMasterGain?.(g);
+  callHost('__audioDisconnect', undefined, a, ap, b, bp);
+const hostSetParam = (id: number, p: number, v: number) => callHost('__audioSetParam', undefined, id, p, v);
+const hostNoteOn = (id: number, midi: number) => callHost('__audioNoteOn', undefined, id, midi);
+const hostNoteOff = (id: number) => callHost('__audioNoteOff', undefined, id);
+const hostMasterGain = (g: number) => callHost('__audioMasterGain', undefined, g);
 
 // Master is module id 0 by convention. Module ids are assigned sequentially
 // from 1 by the Synth provider as children mount.

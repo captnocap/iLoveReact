@@ -16,7 +16,7 @@ declare const __unixConnect: ((path: string) => number) | undefined;
 declare const __unixWrite:   ((fd: number, content: string) => number) | undefined;
 declare const __unixReadAll: ((fd: number, timeoutMs: number, maxBytes: number) => string | null) | undefined;
 declare const __unixClose:   ((fd: number) => void) | undefined;
-declare const __exists:      ((path: string) => boolean) | undefined;
+declare const __fs_exists:      ((path: string) => boolean) | undefined;
 
 const SOCK = '/tmp/reactjit.sock';
 const TIMEOUT_MS = 200;
@@ -32,7 +32,7 @@ export const LEVELS: { name: LogLevelName; value: number; color: string }[] = [
 
 function txn(line: string): number | null {
   if (typeof __unixConnect !== 'function') return null;
-  if (typeof __exists === 'function' && !__exists(SOCK)) return null;
+  if (typeof __fs_exists === 'function' && !__fs_exists(SOCK)) return null;
   const fd = __unixConnect(SOCK);
   if (fd < 0) return null;
   try {
