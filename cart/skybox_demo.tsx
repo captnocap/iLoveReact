@@ -21,6 +21,8 @@
 // Ship:  ./scripts/ship skybox_demo
 import { useEffect, useRef, useState } from 'react';
 import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+// Geometry generators (namespaced — `Box` here would collide with the 2D primitive).
+import * as Geometry from '@reactjit/geometries';
 
 // ── tiny color helpers (sky colors are DATA, so they're literal here) ──
 type RGB = [number, number, number];
@@ -213,16 +215,16 @@ export default function SkyboxDemo() {
         <Scene3D.DirectionalLight direction={sky.sunDir} color={sky.lightColor} intensity={sky.lightI} />
 
         {/* Ground — a big thin box (a plane back-face-culls from above). */}
-        <Scene3D.Mesh geometry="box" material="#2b3326" position={[0, -0.1, -4]} sizeX={60} sizeY={0.2} sizeZ={60} />
+        <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 60, height: 0.2, depth: 60 }} material="#2b3326" position={[0, -0.1, -4]} />
 
         {/* Props to catch the light + recede into the horizon fog. */}
         {PROPS.map((p, i) =>
           p.kind === 'sphere' ? (
-            <Scene3D.Mesh key={i} geometry="sphere" material={p.c} radius={p.h / 2} position={[p.x, p.h / 2, p.z]} />
+            <Scene3D.Mesh key={i} geometry={Geometry.Sphere} params={{ radius: p.h / 2 }} material={p.c} position={[p.x, p.h / 2, p.z]} />
           ) : p.kind === 'cylinder' ? (
-            <Scene3D.Mesh key={i} geometry="cylinder" material={p.c} radius={0.7} sizeY={p.h} position={[p.x, p.h / 2, p.z]} />
+            <Scene3D.Mesh key={i} geometry={Geometry.Cylinder} params={{ radius: 0.7, height: p.h }} material={p.c} position={[p.x, p.h / 2, p.z]} />
           ) : (
-            <Scene3D.Mesh key={i} geometry="box" material={p.c} sizeX={1.6} sizeY={p.h} sizeZ={1.6} position={[p.x, p.h / 2, p.z]} />
+            <Scene3D.Mesh key={i} geometry={Geometry.Box} params={{ width: 1.6, height: p.h, depth: 1.6 }} material={p.c} position={[p.x, p.h / 2, p.z]} />
           ),
         )}
       </Scene3D>
