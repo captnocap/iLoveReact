@@ -75,26 +75,36 @@ function normalize3(v: Vec3): Vec3 {
 // the chunky faceted register the N64 used.
 function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number): void {
   const ringPts = rings.map((r) => ringVerts(r, sides));
+  // ringVerts winds CCW around +Y. cross((p1-p0),(p3-p0)) at a +X-face quad gives
+  // an outward normal ONLY when b is below a (e2 = p3-p0 points -Y, e.g. limbs:
+  // shoulder→hand, hip→foot). When b is above a (trunk: hip→crown, ascending y),
+  // e2 points +Y and the same cross flips inward — exactly what made the trunk
+  // hollow before. Detect direction once per sweep and pick the winding + cross
+  // order that puts the outward face on the camera side either way.
+  const descending = rings.length >= 2 && rings[1].y <= rings[0].y;
   for (let i = 0; i < ringPts.length - 1; i++) {
     const a = ringPts[i];
     const b = ringPts[i + 1];
     for (let s = 0; s < sides; s++) {
       const s2 = (s + 1) % sides;
-      const p0 = a[s];  // lower ring, angle s   (one corner)
-      const p1 = a[s2]; // lower ring, angle s+1 (CCW-next around +Y)
-      const p2 = b[s2]; // upper ring, angle s+1
-      const p3 = b[s];  // upper ring, angle s
-      // ringVerts winds CCW around +Y. From OUTSIDE a front-hemisphere quad
-      // (e.g. +Z face), increasing s goes screen-LEFT, so the quad p0→p1→p2→p3
-      // traces CW. To render front-facing (cull_mode=.back, front_face=.ccw),
-      // wind p0→p3→p2 and p0→p2→p1 (which IS CCW from outside) and take the
-      // matching cross — e2 first, then e1 — so the normal points outward.
+      const p0 = a[s];
+      const p1 = a[s2];
+      const p2 = b[s2];
+      const p3 = b[s];
       const e1 = sub(p1, p0);
       const e2 = sub(p3, p0);
-      const n = normalize3(cross(e2, e1));
-      // Two triangles. Per-vertex normals all equal n → flat shading.
-      g.tri(p0, n, [0, 0] as Vec2, p3, n, [0, 1] as Vec2, p2, n, [1, 1] as Vec2);
-      g.tri(p0, n, [0, 0] as Vec2, p2, n, [1, 1] as Vec2, p1, n, [1, 0] as Vec2);
+      if (descending) {
+        // Limbs: b below a. Original outward-correct winding.
+        const n = normalize3(cross(e1, e2));
+        g.tri(p0, n, [0, 0] as Vec2, p1, n, [1, 0] as Vec2, p2, n, [1, 1] as Vec2);
+        g.tri(p0, n, [0, 0] as Vec2, p2, n, [1, 1] as Vec2, p3, n, [0, 1] as Vec2);
+      } else {
+        // Trunk: b above a. Flip the winding and negate the cross to keep the
+        // outward face on the camera side.
+        const n = normalize3(cross(e2, e1));
+        g.tri(p0, n, [0, 0] as Vec2, p3, n, [0, 1] as Vec2, p2, n, [1, 1] as Vec2);
+        g.tri(p0, n, [0, 0] as Vec2, p2, n, [1, 1] as Vec2, p1, n, [1, 0] as Vec2);
+      }
     }
   }
 }
