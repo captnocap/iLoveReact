@@ -62,6 +62,10 @@ export const CONE_DEFAULTS = ConeMod.CONE_DEFAULTS;
 export const TORUS_DEFAULTS = TorusMod.TORUS_DEFAULTS;
 export const HEIGHTFIELD_DEFAULTS = HeightfieldMod.HEIGHTFIELD_DEFAULTS;
 export const HUMANOID_DEFAULTS = HumanoidMod.HUMANOID_DEFAULTS;
+// The Humanoid's UV atlas — top-left=head, top-right=arms, bottom-left=torso,
+// bottom-right=legs. Painters target a single texture image with those four
+// rectangles and the generator's UVs route each body part into its rectangle.
+export const HUMANOID_ATLAS = HumanoidMod.HUMANOID_ATLAS;
 export const WAVE_NONE = HeightfieldMod.WAVE_NONE;
 
 export type { BoxParams } from './Box';
@@ -71,7 +75,7 @@ export type { CylinderParams } from './Cylinder';
 export type { ConeParams } from './Cone';
 export type { TorusParams } from './Torus';
 export type { HeightfieldParams, HeightfieldWave } from './Heightfield';
-export type { HumanoidParams } from './Humanoid';
+export type { HumanoidParams, UVRect } from './Humanoid';
 
 /**
  * The registry keyed by id. The bake step serializes a def's `id` + resolved

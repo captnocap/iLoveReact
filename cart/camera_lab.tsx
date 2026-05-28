@@ -38,6 +38,64 @@ const SCENE_BG = '#141d2e';
 // character materials
 const SKIN = '#caa07a'; const SHIRT = '#c23b8e'; const PANTS = '#272238';
 const SHOE = '#15121f'; const HAT = '#e8c14a'; const EYE = '#0a0a12';
+
+// ── procedural test texture for the Humanoid atlas ────────────────────────────
+// Targets the Geometry.HUMANOID_ATLAS layout: a 32×32 image split into four
+// quadrants — head (top-left) with painted eyes + mouth, arms (top-right) =
+// shirt sleeve, torso (bottom-left) = shirt, legs (bottom-right) = pants.
+// Each pixel is 8 hex chars (RRGGBBAA); the framework parses the continuous
+// string straight onto the GPU. v=0 is the image TOP — crown of head sits at
+// y=0 inside the head quadrant; hip sits at y=H-1 inside the torso quadrant.
+// The eyes are what move the figure from "smooth pink blob" to "character."
+function buildHumanoidAtlasTexture(): { width: number; height: number; hex: string } {
+  const W = 32, H = 32;
+  const px = (rgb: string, a = 255) => rgb.replace('#', '') + a.toString(16).padStart(2, '0');
+  const SKIN_PX = px(SKIN);
+  const SHIRT_PX = px(SHIRT);
+  const PANTS_PX = px(PANTS);
+  const EYE_PX = px(EYE);
+  const COLLAR_PX = px('#8d2a6a');
+  const LIP_PX = px('#5a2030');
+  let hex = '';
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const left = x < W / 2;
+      const top = y < H / 2;
+      let c: string;
+      if (top && left) {
+        // HEAD: skin + face features. Inside the head rect (u ∈ [0, 0.5]), the
+        // face (+Z front) lands at u ≈ 0.25 in u-of-image space = x ≈ W/4. The
+        // ring s=0 is -Z (back, the seam), so eyes/mouth go at the MIDDLE of
+        // the head u range, NOT at the edge.
+        c = SKIN_PX;
+        const faceX = W * 0.25; // middle of the head quadrant in image-x
+        const eyeY = Math.floor(H * 0.18); // a bit below the crown
+        if (Math.abs(y - eyeY) <= 1) {
+          const eL = faceX - W * 0.06; const eR = faceX + W * 0.06;
+          if (Math.abs(x - eL) <= 1 || Math.abs(x - eR) <= 1) c = EYE_PX;
+        }
+        const mouthY = Math.floor(H * 0.30);
+        if (y === mouthY) {
+          if (x >= faceX - W * 0.04 && x <= faceX + W * 0.04) c = LIP_PX;
+        }
+      } else if (top && !left) {
+        c = SHIRT_PX; // ARMS = sleeves
+      } else if (!top && left) {
+        // TORSO: shirt, with a slightly darker collar line at the top edge
+        // (which sits next to the head rect — reads as the collar where shirt
+        // meets neck/skin).
+        c = SHIRT_PX;
+        if (y === Math.floor(H / 2)) c = COLLAR_PX;
+      } else {
+        c = PANTS_PX; // LEGS
+      }
+      hex += c;
+    }
+  }
+  return { width: W, height: H, hex };
+}
+
+const HUMANOID_TEXTURE = buildHumanoidAtlasTexture();
 const BELT = '#2b2638'; const NOSE = '#b8906a';
 
 // ── the character — a parts array, mirroring the thingymajigger/PalmTree shape ─
@@ -282,8 +340,9 @@ export default function CameraLab() {
           generator instead of a math solid. No internal surfaces, no seams. */}
       <Scene3D.Mesh
         geometry={Geometry.Humanoid}
-        params={{ height: 2.0, shoulderWidth: 0.72, hipWidth: 0.46, headSize: 0.34, limbThickness: 1.0, sides: 10, smoothShading: true }}
-        material="#c23b8e"
+        params={{ height: 2.0, shoulderWidth: 0.72, hipWidth: 0.46, headSize: 0.24, limbThickness: 1.0, sides: 10, smoothShading: true }}
+        material="#ffffff"
+        texture={HUMANOID_TEXTURE}
         position={[1.5, 0, 0]}
       />
       <PalmTree position={[5, 0, -3]} />

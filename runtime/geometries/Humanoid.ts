@@ -59,8 +59,13 @@ type Ring = { y: number; cx: number; cz: number; rx: number; rz: number; twist?:
 function ringVerts(r: Ring, sides: number): Vec3[] {
   const out: Vec3[] = [];
   const t = r.twist ?? 0;
+  // Start the ring at -π/2 so s=0 lands at -Z (the BACK of the figure). With
+  // u walking 0→1 around the ring, that puts the texture seam down the back
+  // and the face (+Z, front) at u = middle of the rect — the standard
+  // character-UV-unwrap layout where a painter draws the face at the centre
+  // of the head rectangle, not at its edge.
   for (let i = 0; i < sides; i++) {
-    const a = t + (i / sides) * Math.PI * 2;
+    const a = -Math.PI / 2 + t + (i / sides) * Math.PI * 2;
     const x = r.cx + Math.cos(a) * r.rx;
     const z = r.cz + Math.sin(a) * r.rz;
     out.push([x, r.y, z]);
@@ -77,6 +82,37 @@ function normalize3(v: Vec3): Vec3 {
   return [v[0] / L, v[1] / L, v[2] / L];
 }
 
+// ── UV atlas: each body part owns a rectangle in texture space ─────────────
+// A painter targets the atlas with known sub-rects (head in top-left of the
+// image, arms top-right, torso bottom-left, legs bottom-right) and the
+// generator's UVs put every face of that part inside its rect — no per-quad
+// tiling. v=0 is the TOP of the image (matches the @reactjit/geometries
+// face() helper convention).
+export type UVRect = { u0: number; u1: number; v0: number; v1: number };
+
+// Per-part rects oriented so a painter draws an UPRIGHT figure: the first
+// ring of each sweep (the end nearest the trunk join) sits at the rect's
+// "down" edge, the last ring at the rect's "up" edge. That means v1 < v0 for
+// head and torso (their last ring is at the image-top edge of the rect),
+// and v0 < v1 for arms and legs (their last ring is at the image-bottom edge
+// — limbs hang downward both in world and on the image).
+//
+//   image:  ┌─────────┬─────────┐
+//           │  HEAD   │  ARMS   │  ← v=0 = image top
+//           │ crown↑  │ shldr↑  │
+//           │ neck ↓  │  tip ↓  │
+//           ├─────────┼─────────┤
+//           │  TORSO  │  LEGS   │
+//           │ neck ↑  │  hip ↑  │
+//           │  hip ↓  │  toe ↓  │
+//           └─────────┴─────────┘  ← v=1 = image bottom
+export const HUMANOID_ATLAS: { head: UVRect; arms: UVRect; torso: UVRect; legs: UVRect } = {
+  head:  { u0: 0.00, u1: 0.50, v0: 0.50, v1: 0.00 }, // top-left, flipped (crown→image top)
+  arms:  { u0: 0.50, u1: 1.00, v0: 0.00, v1: 0.50 }, // top-right (shoulder→top, tip→middle)
+  torso: { u0: 0.00, u1: 0.50, v0: 1.00, v1: 0.50 }, // bottom-left, flipped (hip→image bottom)
+  legs:  { u0: 0.50, u1: 1.00, v0: 0.50, v1: 1.00 }, // bottom-right (hip→middle, toe→image bottom)
+};
+
 // ── stitch a sweep of rings together with quads ──────────────────────────────
 // rings[i] connects to rings[i+1] side-by-side; the same `sides` count for all.
 // Two shading modes:
@@ -84,7 +120,12 @@ function normalize3(v: Vec3): Vec3 {
 //   smooth=true  → per-vertex normals averaged from the 4 adjacent quad faces,
 //                  so the GPU interpolates lighting across facets (N64 Gouraud).
 //                  Same vertex count; only the normals differ.
-function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number, smooth: boolean): void {
+//
+// UVs: each ring i maps to v ∈ [rect.v0, rect.v1] linearly, each side s to u ∈
+// [rect.u0, rect.u1] linearly. CRITICAL: positions wrap (s=sides-1's neighbour
+// is s=0 — the cylinder closes) but UVs do NOT (s=sides-1's neighbour has u=
+// rect.u1, not back to u0) — otherwise the texture mirrors at the seam.
+function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number, smooth: boolean, rect: UVRect): void {
   const ringPts = rings.map((r) => ringVerts(r, sides));
   const numRings = ringPts.length;
   // ringVerts winds CCW around +Y. cross((p1-p0),(p3-p0)) at a +X-face quad gives
@@ -140,7 +181,9 @@ function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number, smo
   }
 
   // 3) emit triangles. Winding mirrors the original logic exactly; only the
-  //    normals fed to each corner differ between flat and smooth.
+  //    normals and UVs fed to each corner differ.
+  const uAt = (s: number) => rect.u0 + (s / sides) * (rect.u1 - rect.u0);
+  const vAt = (i: number) => numRings > 1 ? rect.v0 + (i / (numRings - 1)) * (rect.v1 - rect.v0) : rect.v0;
   for (let i = 0; i < numRings - 1; i++) {
     const a = ringPts[i];
     const b = ringPts[i + 1];
@@ -155,35 +198,54 @@ function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number, smo
       const n1 = vertN ? vertN[i][s2]     : fn;
       const n2 = vertN ? vertN[i + 1][s2] : fn;
       const n3 = vertN ? vertN[i + 1][s]  : fn;
+      // UV: positions wrap at s=sides-1, UVs do NOT — use s+1 (not s2).
+      const uv0: Vec2 = [uAt(s),     vAt(i)];
+      const uv1: Vec2 = [uAt(s + 1), vAt(i)];
+      const uv2: Vec2 = [uAt(s + 1), vAt(i + 1)];
+      const uv3: Vec2 = [uAt(s),     vAt(i + 1)];
       if (descending) {
-        g.tri(p0, n0, [0, 0] as Vec2, p1, n1, [1, 0] as Vec2, p2, n2, [1, 1] as Vec2);
-        g.tri(p0, n0, [0, 0] as Vec2, p2, n2, [1, 1] as Vec2, p3, n3, [0, 1] as Vec2);
+        g.tri(p0, n0, uv0, p1, n1, uv1, p2, n2, uv2);
+        g.tri(p0, n0, uv0, p2, n2, uv2, p3, n3, uv3);
       } else {
-        g.tri(p0, n0, [0, 0] as Vec2, p3, n3, [0, 1] as Vec2, p2, n2, [1, 1] as Vec2);
-        g.tri(p0, n0, [0, 0] as Vec2, p2, n2, [1, 1] as Vec2, p1, n1, [1, 0] as Vec2);
+        g.tri(p0, n0, uv0, p3, n3, uv3, p2, n2, uv2);
+        g.tri(p0, n0, uv0, p2, n2, uv2, p1, n1, uv1);
       }
     }
   }
 }
 
 // ── cap a ring with a triangle fan from its center, normal +Y or -Y ──────────
-function emitCap(g: ReturnType<typeof mesh>, ring: Ring, sides: number, up: boolean): void {
+// UVs: perimeter vertices match what the matching sweep would put at this ring
+// (u walks rect.u0→rect.u1, v at boundary `vEdge`), and the cap center sits at
+// the midpoint of u with v offset slightly INSIDE the rect so the fan has
+// some area in the texture image instead of collapsing to a line at the edge.
+function emitCap(
+  g: ReturnType<typeof mesh>,
+  ring: Ring,
+  sides: number,
+  up: boolean,
+  rect: UVRect,
+  vEdge: 'v0' | 'v1',
+): void {
   const pts = ringVerts(ring, sides);
   const center: Vec3 = [ring.cx, ring.y, ring.cz];
   const n: Vec3 = up ? [0, 1, 0] : [0, -1, 0];
+  const perimeterV = vEdge === 'v0' ? rect.v0 : rect.v1;
+  // Inset the cap center toward the inside of the rect by 8% of the v range.
+  const dv = (rect.v1 - rect.v0) * 0.08 * (vEdge === 'v0' ? 1 : -1);
+  const centerUV: Vec2 = [(rect.u0 + rect.u1) * 0.5, perimeterV + dv];
+  const uAt = (s: number) => rect.u0 + (s / sides) * (rect.u1 - rect.u0);
   for (let s = 0; s < sides; s++) {
     const s2 = (s + 1) % sides;
     // ringVerts winds CCW around +Y, so cross(pts[s]−c, pts[s2]−c) points −Y.
-    // For the TOP cap (n=+Y, e.g. crown of head) we need cross to give +Y, which
-    // means winding (center, pts[s2], pts[s]). For the BOTTOM cap (n=−Y, e.g.
-    // sole of foot) we want cross −Y, i.e. (center, pts[s], pts[s2]). The two
-    // branches' windings were previously swapped relative to the up flag, which
-    // made the crown render only from below and the sole only from above — both
-    // invisible from the normal viewing angle, contributing to the hollow read.
+    // For the TOP cap (n=+Y) we need (center, pts[s2], pts[s]); for the BOTTOM
+    // cap (n=−Y) we want (center, pts[s], pts[s2]).
+    const uv_s: Vec2 = [uAt(s),     perimeterV];
+    const uv_s2: Vec2 = [uAt(s + 1), perimeterV]; // s+1 (not wrapped) for the UV neighbour
     if (up) {
-      g.tri(center, n, [0.5, 0.5] as Vec2, pts[s2], n, [1, 0] as Vec2, pts[s], n, [0, 0] as Vec2);
+      g.tri(center, n, centerUV, pts[s2], n, uv_s2, pts[s], n, uv_s);
     } else {
-      g.tri(center, n, [0.5, 0.5] as Vec2, pts[s], n, [0, 0] as Vec2, pts[s2], n, [1, 0] as Vec2);
+      g.tri(center, n, centerUV, pts[s], n, uv_s, pts[s2], n, uv_s2);
     }
   }
 }
@@ -208,21 +270,33 @@ export function generate(p: HumanoidParams): GeometryData {
   const shoulderHalf = p.shoulderWidth * 0.5;
   const hipHalf = p.hipWidth * 0.5;
 
-  // ── trunk: hip → crown. Extra ring above face + tiny crown so the cap is
-  //    a near-point dome, not a wide flat disk on top of the head ────────────
-  const trunkRings: Ring[] = [
-    { y: hipY,        cx: 0, cz: 0,    rx: hipHalf * 1.08, rz: hipHalf * 0.85 }, // hip
-    { y: waistY,      cx: 0, cz: 0,    rx: hipHalf * 0.95, rz: hipHalf * 0.78 }, // waist
-    { y: chestY,      cx: 0, cz: 0,    rx: shoulderHalf * 0.88, rz: shoulderHalf * 0.62 }, // chest
-    { y: shoulderY,   cx: 0, cz: 0,    rx: shoulderHalf, rz: shoulderHalf * 0.62 }, // shoulder
-    { y: neckY,       cx: 0, cz: 0,    rx: H * 0.07, rz: H * 0.06 }, // neck (narrow)
-    { y: chinY,       cx: 0, cz: 0.01, rx: p.headSize * 0.72, rz: p.headSize * 0.78 }, // jaw
-    { y: faceY,       cx: 0, cz: 0.01, rx: p.headSize * 1.00, rz: p.headSize * 1.00 }, // face (widest)
-    { y: H * 0.96,    cx: 0, cz: 0,    rx: p.headSize * 0.70, rz: p.headSize * 0.70 }, // upper-skull dome
-    { y: crownY,      cx: 0, cz: 0,    rx: p.headSize * 0.22, rz: p.headSize * 0.22 }, // crown (near-point)
+  // ── trunk split into two sweeps so the texture atlas can put shirt on the
+  //    body and skin on the head. The neck ring lives in BOTH sweeps: same
+  //    vertex positions, different UVs (top edge of TORSO rect = bottom edge
+  //    of HEAD rect), so the painter gets a clean collar boundary while the
+  //    geometry stays continuous.
+  const neckRing: Ring = { y: neckY, cx: 0, cz: 0, rx: H * 0.07, rz: H * 0.06 };
+  // Trunk taper: hip → waist → shoulder, no chest ring between. The chest
+  // ring used to swell wider than the waist (radius 0.30 vs 0.22 → 36% bust
+  // bulge), giving the figure an hourglass / inflatable-doll silhouette.
+  // Removing it lets the torso linearly widen from waist to shoulder — t-shirt
+  // shape, no swell — and the shoulder remains the wide point.
+  const bodyRings: Ring[] = [
+    { y: hipY,      cx: 0, cz: 0, rx: hipHalf * 1.08, rz: hipHalf * 0.85 }, // hip
+    { y: waistY,    cx: 0, cz: 0, rx: hipHalf * 1.02, rz: hipHalf * 0.82 }, // waist (no narrowing — straight column)
+    { y: shoulderY, cx: 0, cz: 0, rx: shoulderHalf,   rz: shoulderHalf * 0.62 }, // shoulder
+    neckRing,
   ];
-  emitSweep(g, trunkRings, sides, p.smoothShading);
-  emitCap(g, trunkRings[trunkRings.length - 1], sides, true); // tiny fan at the top
+  const headRings: Ring[] = [
+    neckRing,
+    { y: chinY,    cx: 0, cz: 0.01, rx: p.headSize * 0.72, rz: p.headSize * 0.78 }, // jaw
+    { y: faceY,    cx: 0, cz: 0.01, rx: p.headSize * 1.00, rz: p.headSize * 1.00 }, // face (widest)
+    { y: H * 0.96, cx: 0, cz: 0,    rx: p.headSize * 0.70, rz: p.headSize * 0.70 }, // upper-skull dome
+    { y: crownY,   cx: 0, cz: 0,    rx: p.headSize * 0.22, rz: p.headSize * 0.22 }, // crown (near-point)
+  ];
+  emitSweep(g, bodyRings, sides, p.smoothShading, HUMANOID_ATLAS.torso);
+  emitSweep(g, headRings, sides, p.smoothShading, HUMANOID_ATLAS.head);
+  emitCap(g, headRings[headRings.length - 1], sides, true, HUMANOID_ATLAS.head, 'v0'); // top of head (v=v0 is image top)
 
   // ── legs: hip → foot. Foot stretches FORWARD only (no X-widen so it doesn't
   //    bell out sideways like a trouser flare) and tapers slightly at the toe.
@@ -237,8 +311,8 @@ export function generate(p: HumanoidParams): GeometryData {
   const legXOffset = hipHalf * 0.55;
   for (const sx of [-legXOffset, legXOffset]) {
     const rings = legRings(sx);
-    emitSweep(g, rings, sides, p.smoothShading);
-    emitCap(g, rings[rings.length - 1], sides, false); // tip of toe
+    emitSweep(g, rings, sides, p.smoothShading, HUMANOID_ATLAS.legs);
+    emitCap(g, rings[rings.length - 1], sides, false, HUMANOID_ATLAS.legs, 'v1'); // toe tip
   }
 
   // ── arms: shoulder → end. Continuously TAPERS to a near-point (no flare,
@@ -255,8 +329,8 @@ export function generate(p: HumanoidParams): GeometryData {
   const armX = shoulderHalf * 1.02;
   for (const sx of [-armX, armX]) {
     const rings = armRings(sx);
-    emitSweep(g, rings, sides, p.smoothShading);
-    emitCap(g, rings[rings.length - 1], sides, false); // tiny fan at arm end
+    emitSweep(g, rings, sides, p.smoothShading, HUMANOID_ATLAS.arms);
+    emitCap(g, rings[rings.length - 1], sides, false, HUMANOID_ATLAS.arms, 'v1'); // arm tip
   }
 
   return g.build();
