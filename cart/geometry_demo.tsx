@@ -138,9 +138,10 @@ const RandomBlob = {
       for (let j = 0; j < segments; j++) {
         const p1 = (2 * PI * j) / segments, p2 = (2 * PI * (j + 1)) / segments;
         const a = pt(t1, p1), b = pt(t1, p2), c = pt(t2, p2), d = pt(t2, p1);
-        // same winding as the built-in Sphere: (a,d,c) then (a,c,b)
-        g.tri(a.p, a.n, [0, 0], d.p, d.n, [0, 1], c.p, c.n, [1, 1]);
-        g.tri(a.p, a.n, [0, 0], c.p, c.n, [1, 1], b.p, b.n, [1, 0]);
+        // (a,c,d) + (a,b,c) — outward winding. See Sphere.ts for why this isn't
+        // (a,d,c) + (a,c,b) (which is back-facing for `a` = top corner).
+        g.tri(a.p, a.n, [0, 0], c.p, c.n, [1, 1], d.p, d.n, [0, 1]);
+        g.tri(a.p, a.n, [0, 0], b.p, b.n, [1, 0], c.p, c.n, [1, 1]);
       }
     }
     return g.build();

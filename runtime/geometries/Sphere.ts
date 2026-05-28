@@ -34,9 +34,15 @@ export function generate(p: SphereParams): GeometryData {
       const p2 = (2 * PI * (j + 1)) / segments;
       const a = pos(r, t1, p1), b = pos(r, t1, p2), c = pos(r, t2, p2), d = pos(r, t2, p1);
       const na = nrm(t1, p1), nb = nrm(t1, p2), nc = nrm(t2, p2), nd = nrm(t2, p1);
-      // Tri 1: a, d, c   Tri 2: a, c, b  (matches Zig winding)
-      g.tri(a, na, uv(na), d, nd, uv(nd), c, nc, uv(nc));
-      g.tri(a, na, uv(na), c, nc, uv(nc), b, nb, uv(nb));
+      // a=top@p1, b=top@p2, c=bottom@p2, d=bottom@p1. The pipeline is
+      // cull_mode=.back / front_face=.ccw, and `a` being the TOP corner (opposite
+      // sign of `a` in Cylinder/Cone, where it's the BOTTOM) flips chirality —
+      // so the outward winding is (a,c,d) + (a,b,c), NOT the (a,d,c)+(a,c,b) the
+      // original Zig generateSphere used. That bug went unnoticed until a large
+      // sphere had geometry behind it (camera_lab character head + neck) and the
+      // far hemisphere bled through what should have been the occluding front.
+      g.tri(a, na, uv(na), c, nc, uv(nc), d, nd, uv(nd));
+      g.tri(a, na, uv(na), b, nb, uv(nb), c, nc, uv(nc));
     }
   }
   return g.build();
