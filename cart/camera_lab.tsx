@@ -275,7 +275,17 @@ export default function CameraLab() {
       <Scene3D.PointLight position={[-7, 5, -4]} color="#39d6ff" intensity={0.35} />
       {/* ground slab (thin box, not a plane — a plane back-face-culls top-down) */}
       <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 44, height: 0.2, depth: 44 }} material="#222a40" position={[0, -0.1, 0]} />
-      <Figure position={[0, 0, 0]} parts={HUMANOID} />
+      {/* LEFT: the parts-based figure (18 separate primitives — see the seams). */}
+      <Figure position={[-1.5, 0, 0]} parts={HUMANOID} />
+      {/* RIGHT: the same character as ONE authored low-poly mesh — N64/PS1
+          register. Same registry path as Box/Sphere/etc., just a hand-shaped
+          generator instead of a math solid. No internal surfaces, no seams. */}
+      <Scene3D.Mesh
+        geometry={Geometry.Humanoid}
+        params={{ height: 2.0, shoulderWidth: 0.72, hipWidth: 0.46, headSize: 0.34, limbThickness: 1.0, sides: 6 }}
+        material="#c23b8e"
+        position={[1.5, 0, 0]}
+      />
       <PalmTree position={[5, 0, -3]} />
       <PalmTree position={[-6, 0, -5]} />
       <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 3, height: 4.5, depth: 3 }} material="#3a4668" position={[-7.5, 2.25, 5]} />

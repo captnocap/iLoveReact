@@ -17,6 +17,7 @@ import * as CylinderMod from './Cylinder';
 import * as ConeMod from './Cone';
 import * as TorusMod from './Torus';
 import * as HeightfieldMod from './Heightfield';
+import * as HumanoidMod from './Humanoid';
 
 export type { GeometryData, Vec2, Vec3 } from './_util';
 // The vertex-assembly kit, so a cart can hand-author its own generator:
@@ -47,6 +48,10 @@ export const Torus = def('Torus', TorusMod.generate, TorusMod.TORUS_DEFAULTS);
 // Heightfield has no full defaults (heights/cols/rows are mandatory); callers
 // always supply them. defaults here is the partial { width, depth, base, wave, t }.
 export const Heightfield = def('Heightfield', HeightfieldMod.generate, HeightfieldMod.HEIGHTFIELD_DEFAULTS as any);
+// Humanoid — an authored single-mesh low-poly character body (N64/PS1 register).
+// Unlike the primitives above, it isn't a math solid — it's one bespoke mesh
+// hand-shaped so the figure reads as a body, not a stack of parts.
+export const Humanoid = def('Humanoid', HumanoidMod.generate, HumanoidMod.HUMANOID_DEFAULTS);
 
 // DEFAULTS re-exports (spread-override friendly: { ...SPHERE_DEFAULTS, radius: 2 }).
 export const BOX_DEFAULTS = BoxMod.BOX_DEFAULTS;
@@ -56,6 +61,7 @@ export const CYLINDER_DEFAULTS = CylinderMod.CYLINDER_DEFAULTS;
 export const CONE_DEFAULTS = ConeMod.CONE_DEFAULTS;
 export const TORUS_DEFAULTS = TorusMod.TORUS_DEFAULTS;
 export const HEIGHTFIELD_DEFAULTS = HeightfieldMod.HEIGHTFIELD_DEFAULTS;
+export const HUMANOID_DEFAULTS = HumanoidMod.HUMANOID_DEFAULTS;
 export const WAVE_NONE = HeightfieldMod.WAVE_NONE;
 
 export type { BoxParams } from './Box';
@@ -65,6 +71,7 @@ export type { CylinderParams } from './Cylinder';
 export type { ConeParams } from './Cone';
 export type { TorusParams } from './Torus';
 export type { HeightfieldParams, HeightfieldWave } from './Heightfield';
+export type { HumanoidParams } from './Humanoid';
 
 /**
  * The registry keyed by id. The bake step serializes a def's `id` + resolved
@@ -72,5 +79,5 @@ export type { HeightfieldParams, HeightfieldWave } from './Heightfield';
  * id through this map.
  */
 export const GEOMETRIES: Record<string, GeometryDef> = {
-  Box, Sphere, Plane, Cylinder, Cone, Torus, Heightfield,
+  Box, Sphere, Plane, Cylinder, Cone, Torus, Heightfield, Humanoid,
 };
