@@ -2,14 +2,14 @@ import {
   DEFAULT_CELL_SIZE_METERS,
   DEFAULT_CHUNK_CELL_SPAN,
   GameState,
-  HSMC_STATE_SCHEMA_VERSION,
+  HMSC_STATE_SCHEMA_VERSION,
 } from '../design';
 import { commandCell, placeCell } from '../world/grid';
 
 declare const globalThis: any;
 
-const HSMC_STORE_KEY = 'hsmc:game-state';
-const HSMC_HOT_KEY = 'hsmc:hot-game-state';
+const HMSC_STORE_KEY = 'hmsc:game-state';
+const HMSC_HOT_KEY = 'hmsc:hot-game-state';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -22,7 +22,7 @@ function cloneGameState(state: GameState): GameState {
 export function createInitialGameState(): GameState {
   const now = nowIso();
   let state: GameState = {
-    schemaVersion: HSMC_STATE_SCHEMA_VERSION,
+    schemaVersion: HMSC_STATE_SCHEMA_VERSION,
     sessionName: 'shitcity_dev',
     sceneStep: 'boot.console',
     nextEntitySerial: 1,
@@ -63,7 +63,7 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.schemaVersion !== HSMC_STATE_SCHEMA_VERSION) return null;
+    if (!parsed || parsed.schemaVersion !== HMSC_STATE_SCHEMA_VERSION) return null;
     return cloneGameState({
       ...createInitialGameState(),
       ...parsed,
@@ -84,18 +84,18 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
 }
 
 export function readStoredGameState(): GameState | null {
-  const hotRaw = typeof globalThis.__hot_get === 'function' ? globalThis.__hot_get(HSMC_HOT_KEY) : null;
+  const hotRaw = typeof globalThis.__hot_get === 'function' ? globalThis.__hot_get(HMSC_HOT_KEY) : null;
   const hotState = reviveGameState(hotRaw);
   if (hotState) return hotState;
 
-  const storedRaw = typeof globalThis.__store_get === 'function' ? globalThis.__store_get(HSMC_STORE_KEY) : null;
+  const storedRaw = typeof globalThis.__store_get === 'function' ? globalThis.__store_get(HMSC_STORE_KEY) : null;
   return reviveGameState(storedRaw);
 }
 
 export function mirrorGameStateForHotReload(state: GameState): void {
   if (typeof globalThis.__hot_set !== 'function') return;
   try {
-    globalThis.__hot_set(HSMC_HOT_KEY, JSON.stringify(state));
+    globalThis.__hot_set(HMSC_HOT_KEY, JSON.stringify(state));
   } catch {}
 }
 
@@ -103,7 +103,7 @@ export function saveGameState(state: GameState): GameState {
   const savedState = { ...state, savedAt: nowIso(), updatedAt: nowIso() };
   if (typeof globalThis.__store_set === 'function') {
     try {
-      globalThis.__store_set(HSMC_STORE_KEY, JSON.stringify(savedState));
+      globalThis.__store_set(HMSC_STORE_KEY, JSON.stringify(savedState));
     } catch {}
   }
   mirrorGameStateForHotReload(savedState);

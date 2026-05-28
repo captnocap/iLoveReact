@@ -27,12 +27,12 @@ function initialGameState(): GameState {
   return readStoredGameState() ?? createInitialGameState();
 }
 
-export default function HsmcCart() {
+export default function HmscCart() {
   const [gameState, setGameState] = useState<GameState>(initialGameState);
   const [commandLine, setCommandLine] = useState('');
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [entries, setEntries] = useState<CommandEntry[]>([
-    commandEntry('output', 'HSMC console online. Run help.'),
+    commandEntry('output', 'HMSC console online. Run help.'),
   ]);
 
   useEffect(() => {
@@ -86,7 +86,7 @@ export default function HsmcCart() {
       {consoleOpen ? (
         <Box style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 420, zIndex: 1, borderBottomWidth: 1, borderBottomColor: '#334155' }}>
           <Console
-            title="HSMC COMMAND"
+            title="HMSC COMMAND"
             entries={entries}
             commandLine={commandLine}
             onCommandLineChange={setCommandLine}

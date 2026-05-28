@@ -1,5 +1,5 @@
 import { MapCanvas } from './MapCanvas';
 
-export default function HsmcInternalMapToolingCart() {
+export default function HmscInternalMapToolingCart() {
   return <MapCanvas />;
 }

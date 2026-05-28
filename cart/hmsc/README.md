@@ -1,18 +1,18 @@
-# HSMC - Blank Game Shell
+# HMSC - Blank Game Shell
 
-HSMC means Hitman Shitcity.
+HMSC means Hitman Shitcity.
 
 Build the game with:
 
 ```sh
-./scripts/ship hsmc
+./scripts/ship hmsc
 ```
 
 The game cart deliberately renders a blank play surface with a console drop
 down. Internal map tooling is a separate cart:
 
 ```sh
-./scripts/ship hsmc-int
+./scripts/ship hmsc-int
 ```
 
 The first product surface is still the console. It can mutate every meaningful
@@ -23,7 +23,7 @@ UI, tools, and hotloops call into the same path.
 ## Architecture
 
 ```
-cart/hsmc/
+cart/hmsc/
   index.tsx              composition root
   design.ts              JSON game-state contract
   state/gameState.ts     create/load/save/revive GameState
@@ -31,7 +31,7 @@ cart/hsmc/
   world/grid.ts          grid storage helpers over continuous movement
   ui/Console.tsx         command terminal
 
-cart/hsmc-int/
+cart/hmsc-int/
   index.tsx              internal map tooling shell
   MapCanvas.tsx          blank map surface until map authoring exists
 ```

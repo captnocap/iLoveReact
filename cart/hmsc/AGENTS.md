@@ -1,6 +1,6 @@
-# AGENTS.md - HSMC
+# AGENTS.md - HMSC
 
-HSMC is the game cart for Hitman Shitcity. Ship it with `./scripts/ship hsmc`.
+HMSC is the game cart for Hitman Shitcity. Ship it with `./scripts/ship hmsc`.
 This cart starts from a blank game surface and a command console, not from
 internal tooling.
 
@@ -19,7 +19,7 @@ building, testing, and later modding the game: teleport, spawn, place, remove,
 set player values, jump scene steps, save, load, and inspect state. UI buttons
 can call commands later; they should not create a second mutation path.
 
-Map tooling belongs in `cart/hsmc-int/`, not in this cart.
+Map tooling belongs in `cart/hmsc-int/`, not in this cart.
 
 ## State Rule
 
