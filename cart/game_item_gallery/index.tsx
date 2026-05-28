@@ -11,6 +11,12 @@ type ModelFn = (ctx: ModelCtx) => any;
 const PI = Math.PI;
 const CIG_TEXTURE_KEY = 'game-item-gallery-cig-pack-ui';
 const CASH_TEXTURE_KEY = 'game-item-gallery-cash-effect';
+const BEER_TEXTURE_KEY = 'game-item-gallery-beer-label-ui';
+const LIQUOR_TEXTURE_KEY = 'game-item-gallery-liquor-label-ui';
+const PILL_TEXTURE_KEY = 'game-item-gallery-pill-label-ui';
+const MEDKIT_TEXTURE_KEY = 'game-item-gallery-medkit-ui';
+const FOOTBALL_TEXTURE_KEY = 'game-item-gallery-football-effect';
+const BASKETBALL_TEXTURE_KEY = 'game-item-gallery-basketball-effect';
 const TEX_W = 256;
 const TEX_H = 256;
 
@@ -27,6 +33,36 @@ const CASH_SHADER = `
   let paper = mix(base, vec3f(0.84, 0.95, 0.78), band * 0.55);
   let color = mix(paper, ink, max(edge * 0.7, oval * 0.42));
   return vec4f(color, 1.0);
+}
+`;
+
+const FOOTBALL_SHADER = `
+@group(0) @binding(1) var<storage, read> ys: array<f32>;
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let uv = in.uv;
+  let leather = vec3f(0.44, 0.22, 0.10) + 0.035 * sin(uv.x * 80.0) + 0.025 * sin(uv.y * 55.0);
+  let stripeL = select(0.0, 1.0, abs(uv.x - 0.18) < 0.035 && uv.y > 0.22 && uv.y < 0.78);
+  let stripeR = select(0.0, 1.0, abs(uv.x - 0.82) < 0.035 && uv.y > 0.22 && uv.y < 0.78);
+  let seam = select(0.0, 1.0, abs(uv.y - 0.5) < 0.018 && uv.x > 0.32 && uv.x < 0.68);
+  let lace = select(0.0, 1.0, abs(uv.x - 0.5) < 0.018 && uv.y > 0.34 && uv.y < 0.66);
+  let tick = select(0.0, 1.0, abs(fract((uv.y - 0.36) * 12.0) - 0.5) < 0.11 && abs(uv.x - 0.5) < 0.085 && uv.y > 0.36 && uv.y < 0.64);
+  let white = max(max(stripeL, stripeR), max(seam, max(lace, tick)));
+  return vec4f(mix(leather, vec3f(0.92, 0.86, 0.72), white), 1.0);
+}
+`;
+
+const BASKETBALL_SHADER = `
+@group(0) @binding(1) var<storage, read> ys: array<f32>;
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let uv = in.uv;
+  let pebble = 0.04 * sin(uv.x * 140.0) * sin(uv.y * 120.0);
+  let orange = vec3f(0.86, 0.36, 0.10) + pebble;
+  let vertical = select(0.0, 1.0, abs(uv.x - 0.5) < 0.022);
+  let horizontal = select(0.0, 1.0, abs(uv.y - 0.5) < 0.022);
+  let arc1 = select(0.0, 1.0, abs(length((uv - vec2f(0.22, 0.5)) * vec2f(1.0, 1.55)) - 0.28) < 0.018);
+  let arc2 = select(0.0, 1.0, abs(length((uv - vec2f(0.78, 0.5)) * vec2f(1.0, 1.55)) - 0.28) < 0.018);
+  let seam = max(max(vertical, horizontal), max(arc1, arc2));
+  return vec4f(mix(orange, vec3f(0.08, 0.07, 0.06), seam), 1.0);
 }
 `;
 
@@ -237,26 +273,58 @@ function Surf(ctx: ModelCtx) {
 
 function Football(ctx: ModelCtx) {
   return <>
-    <Part ctx={ctx} geometry={sphere} params={sphere12} material="#8a4e2b" p={[0, 0.42, 0]} s={[0.82, 0.46, 0.46]} />
+    <Scene3D.Mesh
+      geometry={sphere}
+      params={sphere12}
+      material="#ffffff"
+      textureKey={FOOTBALL_TEXTURE_KEY}
+      position={local(ctx, [0, 0.42, 0])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.82, 0.46, 0.46])}
+    />
   </>;
 }
 
 function Basketball(ctx: ModelCtx) {
   return <>
-    <Part ctx={ctx} geometry={sphere} params={{ radius: 0.5, segments: 24, rings: 14 }} material="#da7627" p={[0, 0.48, 0]} s={[0.75, 0.75, 0.75]} />
+    <Scene3D.Mesh
+      geometry={sphere}
+      params={{ radius: 0.5, segments: 24, rings: 14 }}
+      material="#ffffff"
+      textureKey={BASKETBALL_TEXTURE_KEY}
+      position={local(ctx, [0, 0.48, 0])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.75, 0.75, 0.75])}
+    />
   </>;
 }
 
 function PillBottle(ctx: ModelCtx) {
   return <>
-    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#d98238" p={[0, 0.42, 0]} s={[0.32, 0.72, 0.32]} />
+    <Scene3D.Mesh
+      geometry={cyl}
+      params={cyl18}
+      material="#ffffff"
+      textureKey={PILL_TEXTURE_KEY}
+      position={local(ctx, [0, 0.42, 0])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.32, 0.72, 0.32])}
+    />
     <Part ctx={ctx} geometry={cyl} params={cyl18} material="#f7f1df" p={[0, 0.84, 0]} s={[0.34, 0.14, 0.34]} />
   </>;
 }
 
 function BeerBottle(ctx: ModelCtx) {
   return <>
-    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#2f593a" p={[0, 0.42, 0]} s={[0.22, 0.62, 0.22]} />
+    <Scene3D.Mesh
+      geometry={cyl}
+      params={cyl18}
+      material="#ffffff"
+      textureKey={BEER_TEXTURE_KEY}
+      position={local(ctx, [0, 0.42, 0])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.22, 0.62, 0.22])}
+    />
     <Part ctx={ctx} geometry={cyl} params={cyl18} material="#24472f" p={[0, 0.88, 0]} s={[0.11, 0.42, 0.11]} />
     <Part ctx={ctx} geometry={cyl} params={cyl18} material="#d7b46a" p={[0, 1.11, 0]} s={[0.13, 0.05, 0.13]} />
   </>;
@@ -264,7 +332,15 @@ function BeerBottle(ctx: ModelCtx) {
 
 function LiquorBottle(ctx: ModelCtx) {
   return <>
-    <Part ctx={ctx} geometry={box} params={box1} material="#5d3a8d" p={[0, 0.46, 0]} s={[0.42, 0.7, 0.28]} />
+    <Scene3D.Mesh
+      geometry={box}
+      params={box1}
+      material="#ffffff"
+      textureKey={LIQUOR_TEXTURE_KEY}
+      position={local(ctx, [0, 0.46, 0])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.42, 0.7, 0.28])}
+    />
     <Part ctx={ctx} geometry={cyl} params={cyl18} material="#3b2763" p={[0, 0.96, 0]} s={[0.12, 0.38, 0.12]} />
   </>;
 }
@@ -328,9 +404,15 @@ function Backpack(ctx: ModelCtx) {
 
 function MedKit(ctx: ModelCtx) {
   return <>
-    <Part ctx={ctx} geometry={box} params={box1} material="#f1f4f4" p={[0, 0.38, 0]} s={[0.82, 0.52, 0.32]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#cc3232" p={[0, 0.39, 0.178]} s={[0.16, 0.38, 0.035]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#cc3232" p={[0, 0.39, 0.18]} s={[0.42, 0.13, 0.04]} />
+    <Scene3D.Mesh
+      geometry={box}
+      params={box1}
+      material="#ffffff"
+      textureKey={MEDKIT_TEXTURE_KEY}
+      position={local(ctx, [0, 0.38, 0])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.82, 0.52, 0.32])}
+    />
     <Part ctx={ctx} geometry={cyl} params={cyl12} material="#c8ccd0" p={[0, 0.71, 0]} r={[0, 0, PI / 2]} s={[0.055, 0.44, 0.055]} />
   </>;
 }
@@ -437,6 +519,54 @@ function TextureSources() {
 
       <StaticSurface staticKey={CASH_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Effect shader={CASH_SHADER} data={[0]} style={{ width: TEX_W, height: TEX_H }} />
+      </StaticSurface>
+
+      <StaticSurface staticKey={BEER_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#2f593a', paddingTop: 58, paddingBottom: 58, paddingLeft: 22, paddingRight: 22 }}>
+          <Box style={{ width: '100%', height: '100%', backgroundColor: '#efe0b8', borderWidth: 8, borderColor: '#b98d36', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Text style={{ color: '#22452f', fontSize: 22, fontWeight: 'bold' }}>PIER 18</Text>
+            <Box style={{ width: '58%', height: 7, backgroundColor: '#22452f' }} />
+            <Text style={{ color: '#6c4b22', fontSize: 17 }}>LAGER</Text>
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={LIQUOR_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#5d3a8d', padding: 24 }}>
+          <Box style={{ flexGrow: 1, backgroundColor: '#2d174d', borderWidth: 9, borderColor: '#d6b46c', padding: 16, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
+            <Text style={{ color: '#f3d98d', fontSize: 20, fontWeight: 'bold' }}>NO. 7</Text>
+            <Text style={{ color: '#fff1bf', fontSize: 28, fontWeight: 'bold' }}>VELVET</Text>
+            <Box style={{ width: '70%', height: 6, backgroundColor: '#d6b46c' }} />
+            <Text style={{ color: '#d6b46c', fontSize: 15 }}>RESERVE</Text>
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={PILL_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#d98238', paddingTop: 74, paddingBottom: 74, paddingLeft: 18, paddingRight: 18 }}>
+          <Box style={{ width: '100%', height: '100%', backgroundColor: '#fbf4df', borderWidth: 6, borderColor: '#f1d28c', padding: 12, justifyContent: 'center', gap: 7 }}>
+            <Text style={{ color: '#253045', fontSize: 18, fontWeight: 'bold' }}>RX-42</Text>
+            <Box style={{ width: '82%', height: 5, backgroundColor: '#d98238' }} />
+            <Text style={{ color: '#6b7280', fontSize: 12 }}>30 CAPS</Text>
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={MEDKIT_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#f1f4f4', padding: 22 }}>
+          <Box style={{ flexGrow: 1, backgroundColor: '#ffffff', borderWidth: 8, borderColor: '#c8ccd0', alignItems: 'center', justifyContent: 'center' }}>
+            <Box style={{ width: 42, height: 132, backgroundColor: '#cc3232', position: 'absolute', left: 85, top: 38 }} />
+            <Box style={{ width: 132, height: 42, backgroundColor: '#cc3232', position: 'absolute', left: 40, top: 83 }} />
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={FOOTBALL_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Effect shader={FOOTBALL_SHADER} data={[0]} style={{ width: TEX_W, height: TEX_H }} />
+      </StaticSurface>
+
+      <StaticSurface staticKey={BASKETBALL_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Effect shader={BASKETBALL_SHADER} data={[0]} style={{ width: TEX_W, height: TEX_H }} />
       </StaticSurface>
     </>
   );
