@@ -272,11 +272,12 @@ function Weed(ctx: ModelCtx) {
 }
 
 function Cigarettes(ctx: ModelCtx) {
+  const tips = [-0.42, -0.28, -0.14];
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#d73e36" p={[-0.28, 0.33, 0]} s={[0.42, 0.62, 0.18]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#f7f3e7" p={[-0.28, 0.57, 0.19]} s={[0.36, 0.16, 0.025]} />
-    {[0, 1, 2].map((i) => <Part key={`cig-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#f4f0df" p={[0.24 + i * 0.11, 0.28 + i * 0.04, 0.06]} r={[PI / 2, 0, -0.6]} s={[0.045, 0.68, 0.045]} />)}
-    {[0, 1, 2].map((i) => <Part key={`filter-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#d49a55" p={[0.43 + i * 0.11, 0.17 + i * 0.04, 0.06]} r={[PI / 2, 0, -0.6]} s={[0.047, 0.16, 0.047]} />)}
+    <Part ctx={ctx} geometry={box} params={box1} material="#f7f3e7" p={[-0.28, 0.57, 0.095]} s={[0.36, 0.16, 0.025]} />
+    {tips.map((x, i) => <Part key={`cig-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#f4f0df" p={[x, 0.82 + i * 0.03, 0.02]} s={[0.045, 0.42, 0.045]} />)}
+    {tips.map((x, i) => <Part key={`filter-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#d49a55" p={[x, 0.61 + i * 0.03, 0.02]} s={[0.047, 0.12, 0.047]} />)}
   </>;
 }
 
@@ -293,8 +294,8 @@ function Backpack(ctx: ModelCtx) {
 function MedKit(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#f1f4f4" p={[0, 0.38, 0]} s={[0.82, 0.52, 0.32]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#cc3232" p={[0, 0.39, 0.335]} s={[0.16, 0.38, 0.035]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#cc3232" p={[0, 0.39, 0.34]} s={[0.42, 0.13, 0.04]} />
+    <Part ctx={ctx} geometry={box} params={box1} material="#cc3232" p={[0, 0.39, 0.178]} s={[0.16, 0.38, 0.035]} />
+    <Part ctx={ctx} geometry={box} params={box1} material="#cc3232" p={[0, 0.39, 0.18]} s={[0.42, 0.13, 0.04]} />
     <Part ctx={ctx} geometry={cyl} params={cyl12} material="#c8ccd0" p={[0, 0.71, 0]} r={[0, 0, PI / 2]} s={[0.055, 0.44, 0.055]} />
   </>;
 }
