@@ -1,5 +1,11 @@
-import type { GameState, GridCell, PlacedCell, TileKind, Vec3 } from '../design';
-import { tileKindDefinition } from './tileKinds';
+import type { GameState, GridCell, PlacedCell, TileKind, Vec3, WorldSurfaceRegion } from '../design';
+import { tileKindDefinition, type TileKindDefinition } from './tileKinds';
+import { placedCellTopMeters, surfaceRegionTopMeters } from './surfaceHeights';
+
+export type PlaceCellOptions = {
+  triggerCommand?: string;
+  triggerLabel?: string;
+};
 
 export function cellKey(cell: GridCell): string {
   return `${cell.x},${cell.y},${cell.z}`;
@@ -31,12 +37,14 @@ export function commandCell(x: number, z: number, y = 0): GridCell {
   return { x, y, z };
 }
 
-export function placeCell(state: GameState, kind: TileKind, cell: GridCell, sourceLine: string): GameState {
+export function placeCell(state: GameState, kind: TileKind, cell: GridCell, sourceLine: string, options: PlaceCellOptions = {}): GameState {
   const key = cellKey(cell);
   const placedCell: PlacedCell = {
     key,
     kind,
     cell,
+    ...(options.triggerCommand ? { triggerCommand: options.triggerCommand } : {}),
+    ...(options.triggerLabel ? { triggerLabel: options.triggerLabel } : {}),
     createdByCommand: sourceLine,
   };
   return {
@@ -55,10 +63,102 @@ export function placedCellAt(state: GameState, cell: GridCell): PlacedCell | und
   return state.world.placedCells[cellKey(cell)];
 }
 
+export function surfaceRegionAtCell(state: GameState, cell: GridCell): WorldSurfaceRegion | undefined {
+  for (let index = state.world.surfaceRegions.length - 1; index >= 0; index -= 1) {
+    const region = state.world.surfaceRegions[index];
+    if (
+      cell.y === region.y
+      && cell.x >= region.x
+      && cell.x < region.x + region.width
+      && cell.z >= region.z
+      && cell.z < region.z + region.depth
+    ) {
+      return region;
+    }
+  }
+  return undefined;
+}
+
+export function setCellTrigger(state: GameState, cell: GridCell, triggerCommand: string | null, triggerLabel?: string): GameState {
+  const key = cellKey(cell);
+  const placedCell = state.world.placedCells[key];
+  if (!placedCell) return state;
+  const nextPlacedCell: PlacedCell = {
+    ...placedCell,
+    ...(triggerCommand ? { triggerCommand } : {}),
+    ...(triggerCommand && triggerLabel ? { triggerLabel } : {}),
+  };
+  if (!triggerCommand) {
+    delete nextPlacedCell.triggerCommand;
+    delete nextPlacedCell.triggerLabel;
+  }
+  return {
+    ...state,
+    world: {
+      ...state.world,
+      placedCells: {
+        ...state.world.placedCells,
+        [key]: nextPlacedCell,
+      },
+    },
+  };
+}
+
+export function placedCellAtWorldPosition(state: GameState, position: Vec3): PlacedCell | undefined {
+  return placedCellAt(state, worldToCell(position, state.world.cellSizeMeters));
+}
+
+export function triggerCellAtWorldPosition(state: GameState, position: Vec3): PlacedCell | undefined {
+  const placedCell = placedCellAtWorldPosition(state, position);
+  return placedCell?.triggerCommand ? placedCell : undefined;
+}
+
+export function tileKindAtWorldPosition(state: GameState, position: Vec3): TileKind | undefined {
+  const cell = worldToCell(position, state.world.cellSizeMeters);
+  return placedCellAt(state, cell)?.kind ?? surfaceRegionAtCell(state, cell)?.kind;
+}
+
+export function tileDefinitionAtWorldPosition(state: GameState, position: Vec3): TileKindDefinition | undefined {
+  const kind = tileKindAtWorldPosition(state, position);
+  return kind ? tileKindDefinition(kind) : undefined;
+}
+
+export function groundTopAtWorldPosition(state: GameState, position: Vec3, stepHeightMeters: number): number | undefined {
+  const cellSizeMeters = state.world.cellSizeMeters;
+  const cellX = Math.floor(position.x / cellSizeMeters);
+  const cellZ = Math.floor(position.z / cellSizeMeters);
+  const maxReachableTop = position.y + stepHeightMeters;
+  let groundTop: number | undefined;
+
+  for (const region of state.world.surfaceRegions) {
+    const minX = region.x * cellSizeMeters;
+    const minZ = region.z * cellSizeMeters;
+    const maxX = minX + region.width * cellSizeMeters;
+    const maxZ = minZ + region.depth * cellSizeMeters;
+    if (position.x < minX || position.x >= maxX || position.z < minZ || position.z >= maxZ) continue;
+    const tile = tileKindDefinition(region.kind);
+    if (!tile.pathing.walkable) continue;
+    const top = surfaceRegionTopMeters(region, cellSizeMeters);
+    if (top > maxReachableTop) continue;
+    groundTop = groundTop == null ? top : Math.max(groundTop, top);
+  }
+
+  for (const placedCell of Object.values(state.world.placedCells)) {
+    if (placedCell.cell.x !== cellX || placedCell.cell.z !== cellZ) continue;
+    const tile = tileKindDefinition(placedCell.kind);
+    if (!tile.pathing.walkable) continue;
+    const top = placedCellTopMeters(placedCell, cellSizeMeters);
+    if (top > maxReachableTop) continue;
+    groundTop = groundTop == null ? top : Math.max(groundTop, top);
+  }
+
+  return groundTop;
+}
+
 export function canPathThroughCell(state: GameState, cell: GridCell): boolean {
-  const placedCell = placedCellAt(state, cell);
-  if (!placedCell) return false;
-  return tileKindDefinition(placedCell.kind).pathing.walkable;
+  const kind = placedCellAt(state, cell)?.kind ?? surfaceRegionAtCell(state, cell)?.kind;
+  if (!kind) return false;
+  return tileKindDefinition(kind).pathing.walkable;
 }
 
 export function canOccupyWorldPosition(state: GameState, position: Vec3): boolean {

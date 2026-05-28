@@ -1,8 +1,11 @@
 import { Scene3D } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
-import type { GameState, PlacedCell, TileKind } from '../design';
+import type { GameState, PlacedCell, SpawnedEntity, TileKind, WorldSurfaceRegion } from '../design';
+import { HMSC_GAMEPLAY_CAMERA } from '../gameplay/camera';
 import { tileKindDefinition } from '../world/tileKinds';
+import { surfaceRegionTopMeters } from '../world/surfaceHeights';
 import { PlayerFigure } from './PlayerFigure';
+import { buildHmscSky } from './sky';
 
 type WorldMeshRect = {
   key: string;
@@ -86,8 +89,66 @@ function MapRectMesh(props: { rect: WorldMeshRect }) {
     <Scene3D.Mesh
       geometry={Geometry.Box}
       params={{ width: props.rect.width, height: style.heightMeters, depth: props.rect.depth }}
-      material={style.color}
+      material={style.textureKey ? '#ffffff' : style.color}
+      textureKey={style.textureKey}
       position={rectMeshPosition(props.rect, style.heightMeters)}
+    />
+  );
+}
+
+function SurfaceRegionMesh(props: { region: WorldSurfaceRegion; cellSizeMeters: number }) {
+  const style = tileKindDefinition(props.region.kind).render;
+  const widthMeters = props.region.width * props.cellSizeMeters;
+  const depthMeters = props.region.depth * props.cellSizeMeters;
+  const topMeters = surfaceRegionTopMeters(props.region, props.cellSizeMeters);
+  return (
+    <Scene3D.Mesh
+      geometry={Geometry.Box}
+      params={{ width: widthMeters, height: style.heightMeters, depth: depthMeters }}
+      material={style.textureKey ? '#ffffff' : style.color}
+      textureKey={style.textureKey}
+      position={[
+        props.region.x * props.cellSizeMeters + widthMeters / 2,
+        topMeters - style.heightMeters / 2,
+        props.region.z * props.cellSizeMeters + depthMeters / 2,
+      ]}
+    />
+  );
+}
+
+function SpawnedEntityMesh(props: { entity: SpawnedEntity }) {
+  const entity = props.entity;
+  const radius = entity.physics?.radiusMeters ?? 0.28;
+  const position: [number, number, number] = [entity.position.x, entity.position.y, entity.position.z];
+  if (/crate|box/i.test(entity.kind)) {
+    const side = radius * 1.75;
+    return (
+      <Scene3D.Mesh
+        geometry={Geometry.Box}
+        params={{ width: side, height: side, depth: side }}
+        material="#d97745"
+        position={position}
+        rotation={[entity.yawDegrees, entity.yawDegrees * 0.37, 0]}
+      />
+    );
+  }
+  if (/can|barrel/i.test(entity.kind)) {
+    return (
+      <Scene3D.Mesh
+        geometry={Geometry.Cylinder}
+        params={{ radius, height: radius * 2.2, segments: 18 }}
+        material="#60a5fa"
+        position={position}
+        rotation={[0, entity.yawDegrees, 0]}
+      />
+    );
+  }
+  return (
+    <Scene3D.Mesh
+      geometry={Geometry.Sphere}
+      params={{ radius }}
+      material={/ball|sphere/i.test(entity.kind) ? '#facc15' : '#a78bfa'}
+      position={position}
     />
   );
 }
@@ -99,34 +160,68 @@ export function GameWorld3D(props: {
   playerRunning: boolean;
   cameraYawDegrees: number;
   cameraPitchRadians: number;
+  aiming?: boolean;
+  sceneChildren?: any;
 }) {
   const state = props.state;
   const placedCells = Object.values(state.world.placedCells);
+  const surfaceRegions = state.world.surfaceRegions;
+  const spawnedEntities = Object.values(state.world.spawnedEntities);
   const worldRects = coalesceCellsIntoWorldRects(placedCells);
+  const sky = buildHmscSky(state.config.sky.hour, state.config.sky.weather, state.config.sky.gloom);
   const player = state.player.position;
   const cameraYawRadians = props.cameraYawDegrees * Math.PI / 180;
+  const right: [number, number, number] = [-Math.cos(cameraYawRadians), 0, Math.sin(cameraYawRadians)];
+  const shoulderShift = props.aiming ? HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters : 0;
   const cameraPosition: [number, number, number] = [
-    player.x - Math.sin(cameraYawRadians) * 4.9,
-    player.y + 3.05,
-    player.z - Math.cos(cameraYawRadians) * 5.9,
+    player.x - Math.sin(cameraYawRadians) * HMSC_GAMEPLAY_CAMERA.distanceMeters + right[0] * shoulderShift,
+    player.y + HMSC_GAMEPLAY_CAMERA.heightMeters,
+    player.z - Math.cos(cameraYawRadians) * HMSC_GAMEPLAY_CAMERA.distanceMeters + right[2] * shoulderShift,
   ];
-  const cameraTarget: [number, number, number] = [player.x, player.y + 1.18, player.z];
+  const cameraTarget: [number, number, number] = [
+    player.x + right[0] * shoulderShift * HMSC_GAMEPLAY_CAMERA.aimTargetShiftRatio,
+    player.y + HMSC_GAMEPLAY_CAMERA.targetHeightMeters - props.cameraPitchRadians * HMSC_GAMEPLAY_CAMERA.pitchTargetMetersPerRadian,
+    player.z + right[2] * shoulderShift * HMSC_GAMEPLAY_CAMERA.aimTargetShiftRatio,
+  ];
 
   return (
-    <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#070b12" showGrid={false} showAxes={false}>
-      <Scene3D.Camera position={cameraPosition} target={cameraTarget} fov={48} />
-      <Scene3D.AmbientLight color="#9fb0d6" intensity={0.55} />
-      <Scene3D.DirectionalLight direction={[0.45, 0.9, 0.35]} color="#ffe0b0" intensity={0.82} />
-      <Scene3D.PointLight position={[0, 3, 0]} color="#22d3ee" intensity={0.45} />
-      <Scene3D.Mesh
-        geometry={Geometry.Box}
-        params={{ width: 28, height: 0.04, depth: 22 }}
-        material="#0d1320"
-        position={[0.5, -0.03, 0.5]}
+    <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={sky.ground} showGrid={false} showAxes={false}>
+      <Scene3D.Camera position={cameraPosition} target={cameraTarget} fov={props.aiming ? HMSC_GAMEPLAY_CAMERA.aimFovDegrees : HMSC_GAMEPLAY_CAMERA.fovDegrees} />
+      <Scene3D.Skybox
+        zenith={sky.zenith}
+        horizon={sky.horizon}
+        ground={sky.ground}
+        sunDir={sky.sunDir}
+        sunColor={sky.sunColor}
+        sunSize={sky.sunSize}
+        sunGlow={sky.sunGlow}
+        haze={sky.haze}
+        cloud={sky.cloud}
+        night={sky.night}
       />
+      <Scene3D.AmbientLight color={sky.horizon} intensity={sky.ambient} />
+      <Scene3D.DirectionalLight direction={sky.sunDir} color={sky.lightColor} intensity={sky.lightIntensity} />
+      <Scene3D.DirectionalLight direction={[-0.25, 0.74, -0.45]} color="#8fb8ff" intensity={sky.night * 0.32} />
+      <Scene3D.PointLight position={cameraPosition} color="#9edcff" intensity={0.38 + sky.night * 0.32} />
+      <Scene3D.PointLight position={[player.x + 1.8, player.y + 3.2, player.z + 1.4]} color="#ffd2a3" intensity={0.18 + sky.night * 0.18} />
+      {surfaceRegions.length === 0 ? (
+        <Scene3D.Mesh
+          geometry={Geometry.Box}
+          params={{ width: 28, height: 0.04, depth: 22 }}
+          material="#0d1320"
+          position={[0.5, -0.03, 0.5]}
+        />
+      ) : null}
+      {surfaceRegions.map((region) => (
+        <SurfaceRegionMesh key={region.id} region={region} cellSizeMeters={state.world.cellSizeMeters} />
+      ))}
       {worldRects.map((rect) => (
         <MapRectMesh key={rect.key} rect={rect} />
       ))}
+      {spawnedEntities.map((entity) => (
+        <SpawnedEntityMesh key={entity.id} entity={entity} />
+      ))}
+      {props.sceneChildren}
       <PlayerFigure
         position={player}
         yawDegrees={state.player.yawDegrees}

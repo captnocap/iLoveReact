@@ -26,6 +26,7 @@ const HAT = '#e8c14a';
 const EYE = '#0a0a12';
 const BELT = '#2b2638';
 const NOSE = '#b8906a';
+const POSITION_MARKER = '#18e0d8';
 
 function radians(degrees: number): number {
   return degrees * Math.PI / 180;
@@ -161,6 +162,8 @@ export function PlayerFigure(props: { position: Vec3; yawDegrees: number; animat
 
   return (
     <>
+      <Scene3D.Mesh geometry={Geometry.Cylinder} params={{ radius: 0.08, height: 0.035, segments: 16 }} material={POSITION_MARKER} position={[props.position.x, props.position.y + 0.02, props.position.z]} />
+      <Scene3D.Mesh geometry={Geometry.Torus} params={{ radius: 0.26, tube: 0.012, segments: 24, sides: 6 }} material={POSITION_MARKER} position={[props.position.x, props.position.y + 0.04, props.position.z]} />
       <LimbSegment joint={hipL} length={0.48} radius={0.105} material={PANTS} swing={pose.leftLeg} side={-2} yawRadians={yawRadians} rootPitch={rootPitch} />
       <LimbSegment joint={hipR} length={0.48} radius={0.105} material={PANTS} swing={pose.rightLeg} side={2} yawRadians={yawRadians} rootPitch={rootPitch} />
       <LimbSegment joint={thighL.end} length={0.48} radius={0.095} material={PANTS} swing={pose.leftLeg - pose.leftKnee} side={-1} yawRadians={yawRadians} rootPitch={rootPitch} />

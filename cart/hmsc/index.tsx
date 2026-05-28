@@ -14,15 +14,19 @@ import {
   readStoredGameState,
   saveGameState,
 } from './state/gameState';
-import { usePlayerDrive } from './state/usePlayerDrive';
-import { GameWorld3D } from './render3d/GameWorld3D';
-import { Hud } from './render/Hud';
+import { recordAndPublishGameEvent } from './events/gameEvents';
+import { useHmscEventRules } from './events/useHmscEventRules';
+import { HmscGameplayRig } from './gameplay/HmscGameplayRig';
+import { hmscLabForSceneStep } from './labs/labDefinitions';
+import { AimLabScene } from './labs/AimLabScene';
+import { ScaleLabScene } from './labs/ScaleLabScene';
+import { TextureLabScene } from './labs/TextureLabScene';
+import { normalizeSkyHour } from './render3d/sky';
+import {
+  REAL_MILLISECONDS_PER_MINUTE,
+  SKY_TICK_INTERVAL_MS,
+} from './state/defaults';
 import { Console } from './ui/Console';
-
-const CAMERA_YAW_RADIANS_PER_PIXEL = 0.0032;
-const CAMERA_PITCH_RADIANS_PER_PIXEL = 0.0024;
-const CAMERA_SMOOTHING_PER_SECOND = 24;
-const MAX_CAMERA_FRAME_SECONDS = 0.05;
 
 function nextCommandEntryId(): string {
   return `${Date.now().toString(36)}-${Math.floor(Math.random() * 100_000).toString(36)}`;
@@ -36,32 +40,41 @@ function initialGameState(): GameState {
   return readStoredGameState() ?? createInitialGameState();
 }
 
-function clampNumber(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
-}
-
-function angleDeltaDegrees(fromDegrees: number, toDegrees: number): number {
-  const deltaRadians = (toDegrees - fromDegrees) * Math.PI / 180;
-  return Math.atan2(Math.sin(deltaRadians), Math.cos(deltaRadians)) * 180 / Math.PI;
-}
-
 export default function HmscCart() {
   const [gameState, setGameState] = useState<GameState>(initialGameState);
   const [commandLine, setCommandLine] = useState('');
   const [consoleOpen, setConsoleOpen] = useState(false);
-  const [cameraYawDegrees, setCameraYawDegrees] = useState(0);
-  const [cameraPitchRadians, setCameraPitchRadians] = useState(0.05);
-  const cameraDragRef = useRef<{ x: number; y: number } | null>(null);
-  const cameraAimRef = useRef({ yawDegrees: 0, pitchRadians: 0.05 });
   const liveGameStateRef = useRef(gameState);
   const [entries, setEntries] = useState<CommandEntry[]>([
-    commandEntry('output', 'HMSC console online. Run help.'),
+    commandEntry('output', 'HMSC console online. Run cmd_help.'),
   ]);
-  const driveFrame = usePlayerDrive(!consoleOpen, cameraYawDegrees, setGameState);
+  const activeLab = hmscLabForSceneStep(gameState.sceneStep);
+  const labScene = activeLab?.name === 'scale'
+    ? <ScaleLabScene />
+    : activeLab?.name === 'textures'
+      ? <TextureLabScene />
+      : activeLab?.name === 'aim'
+        ? (context: any) => <AimLabScene state={gameState} context={context} />
+        : null;
+
+  useHmscEventRules(setGameState);
 
   useEffect(() => {
     liveGameStateRef.current = gameState;
   }, [gameState]);
+
+  useEffect(() => {
+    setGameState((current) => recordAndPublishGameEvent(current, {
+      type: 'game.booted',
+      source: 'hmsc-cart',
+      actor: { kind: 'system', id: 'hmsc' },
+      tags: ['game'],
+      payload: {
+        sessionName: current.sessionName,
+        sceneStep: current.sceneStep,
+      },
+    }).state);
+  }, []);
 
   useEffect(() => {
     publishLiveGameState(liveGameStateRef.current);
@@ -69,33 +82,6 @@ export default function HmscCart() {
       publishLiveGameState(liveGameStateRef.current);
     }, DEFAULT_LIVE_SYNC_INTERVAL_MS);
     return () => clearInterval(liveSyncTimer);
-  }, []);
-
-  useEffect(() => {
-    const host: any = globalThis;
-    const schedule = host.requestAnimationFrame ? host.requestAnimationFrame.bind(host) : (fn: any) => setTimeout(fn, 16);
-    const cancel = host.cancelAnimationFrame ? host.cancelAnimationFrame.bind(host) : clearTimeout;
-    let handle: any = 0;
-    let lastNow = host.performance?.now?.() ?? Date.now();
-
-    const tickCamera = () => {
-      const now = host.performance?.now?.() ?? Date.now();
-      const dt = Math.max(0.001, Math.min(MAX_CAMERA_FRAME_SECONDS, (now - lastNow) / 1000));
-      lastNow = now;
-      const smoothing = 1 - Math.exp(-CAMERA_SMOOTHING_PER_SECOND * dt);
-      setCameraYawDegrees((yaw) => {
-        const nextYaw = yaw + angleDeltaDegrees(yaw, cameraAimRef.current.yawDegrees) * smoothing;
-        return Math.abs(angleDeltaDegrees(nextYaw, yaw)) < 0.001 ? yaw : nextYaw;
-      });
-      setCameraPitchRadians((pitch) => {
-        const nextPitch = pitch + (cameraAimRef.current.pitchRadians - pitch) * smoothing;
-        return Math.abs(nextPitch - pitch) < 0.0001 ? pitch : nextPitch;
-      });
-      handle = schedule(tickCamera);
-    };
-
-    handle = schedule(tickCamera);
-    return () => cancel(handle);
   }, []);
 
   useEffect(() => {
@@ -109,8 +95,30 @@ export default function HmscCart() {
     return () => clearInterval(autosaveTimer);
   }, []);
 
+  useEffect(() => {
+    const skyTimer = setInterval(() => {
+      setGameState((current) => {
+        const sky = current.config.sky;
+        if (!sky.dayCycleEnabled || sky.cycleHoursPerRealMinute === 0) return current;
+        const hourDelta = sky.cycleHoursPerRealMinute * SKY_TICK_INTERVAL_MS / REAL_MILLISECONDS_PER_MINUTE;
+        const nextHour = normalizeSkyHour(sky.hour + hourDelta);
+        return markGameStateUpdated({
+          ...current,
+          config: {
+            ...current.config,
+            sky: {
+              ...sky,
+              hour: nextHour,
+            },
+          },
+        });
+      });
+    }, SKY_TICK_INTERVAL_MS);
+    return () => clearInterval(skyTimer);
+  }, []);
+
   const submitCommand = (line: string) => {
-    const result = runCommandLine(line, gameState);
+    const result = runCommandLine(line, gameState, { source: 'console' });
     const nextState = result.state === gameState ? gameState : markGameStateUpdated(result.state);
     setGameState(nextState);
     setCommandLine('');
@@ -121,46 +129,20 @@ export default function HmscCart() {
     ]);
   };
 
-  const beginCameraDrag = (event: any) => {
-    if (consoleOpen) return;
-    cameraDragRef.current = { x: Number(event?.x ?? 0), y: Number(event?.y ?? 0) };
-  };
-
-  const moveCameraDrag = (event: any) => {
-    const drag = cameraDragRef.current;
-    if (!drag || consoleOpen) return;
-    const x = Number(event?.x ?? drag.x);
-    const y = Number(event?.y ?? drag.y);
-    cameraAimRef.current.yawDegrees -= (x - drag.x) * CAMERA_YAW_RADIANS_PER_PIXEL * 180 / Math.PI;
-    cameraAimRef.current.pitchRadians = clampNumber(
-      cameraAimRef.current.pitchRadians + (y - drag.y) * CAMERA_PITCH_RADIANS_PER_PIXEL,
-      -0.65,
-      0.85,
-    );
-    drag.x = x;
-    drag.y = y;
-  };
-
-  const endCameraDrag = () => {
-    cameraDragRef.current = null;
-  };
-
   return (
-    <Pressable
-      style={{ width: '100%', height: '100%', backgroundColor: '#020617' }}
-      onMouseDown={beginCameraDrag}
-      onMouseMove={moveCameraDrag}
-      onMouseUp={endCameraDrag}
-    >
-      <GameWorld3D
+    <Box style={{ width: '100%', height: '100%', backgroundColor: '#020617' }}>
+      <HmscGameplayRig
         state={gameState}
-        animationSeconds={driveFrame.animationSeconds}
-        playerMoving={driveFrame.moving}
-        playerRunning={driveFrame.running}
-        cameraYawDegrees={cameraYawDegrees}
-        cameraPitchRadians={cameraPitchRadians}
+        setGameState={setGameState}
+        inputBlocked={consoleOpen}
+        sceneChildren={labScene}
       />
-      <Hud state={gameState} />
+      {activeLab ? (
+        <Box style={{ position: 'absolute', left: 18, bottom: 18, padding: 10, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f172acc' }}>
+          <Text fontSize={12} color="#e5eefc" style={{ fontWeight: 800 }}>{activeLab.label}</Text>
+          <Text fontSize={11} color="#94a3b8">lab_exit returns to game</Text>
+        </Box>
+      ) : null}
       <Box style={{ position: 'absolute', top: 16, left: 18, zIndex: 2 }}>
         <Pressable
           onPress={() => setConsoleOpen((open) => !open)}
@@ -191,6 +173,6 @@ export default function HmscCart() {
           />
         </Box>
       ) : null}
-    </Pressable>
+    </Box>
   );
 }

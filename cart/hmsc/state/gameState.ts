@@ -6,6 +6,17 @@ import {
   LivePlayerSnapshot,
 } from '../design';
 import { addDemoMapToState } from '../world/demoMap';
+import { groundTopAtWorldPosition } from '../world/grid';
+import {
+  DEFAULT_GAME_CONFIG,
+  DEFAULT_ENTITY_RADIUS_METERS,
+  DEFAULT_ENTITY_RESTITUTION,
+  DEFAULT_PLAYER_HEALTH,
+  DEFAULT_PLAYER_HEAT,
+  DEFAULT_PLAYER_MONEY,
+  DEFAULT_PLAYER_RUN_SPEED_METERS_PER_SECOND,
+  DEFAULT_PLAYER_WALK_SPEED_METERS_PER_SECOND,
+} from './defaults';
 
 declare const globalThis: any;
 
@@ -67,25 +78,67 @@ export function createInitialGameState(): GameState {
     createdAt: now,
     updatedAt: now,
     savedAt: null,
+    config: DEFAULT_GAME_CONFIG,
+    command: {
+      cheatsEnabled: false,
+      debugHudEnabled: false,
+    },
+    story: {
+      flags: {},
+      counters: {},
+    },
+    events: {
+      nextEventSerial: 1,
+      recent: [],
+    },
     player: {
       position: { x: 0.5, y: 0, z: 0.5 },
       yawDegrees: 0,
-      walkSpeedMetersPerSecond: 2.4,
-      runSpeedMetersPerSecond: 5.8,
-      health: 100,
-      heat: 0,
-      money: 0,
+      noclip: false,
+      physics: {
+        velocity: { x: 0, y: 0, z: 0 },
+        grounded: true,
+      },
+      walkSpeedMetersPerSecond: DEFAULT_PLAYER_WALK_SPEED_METERS_PER_SECOND,
+      runSpeedMetersPerSecond: DEFAULT_PLAYER_RUN_SPEED_METERS_PER_SECOND,
+      health: DEFAULT_PLAYER_HEALTH,
+      heat: DEFAULT_PLAYER_HEAT,
+      money: DEFAULT_PLAYER_MONEY,
       inventory: [],
     },
     world: {
       cellSizeMeters: DEFAULT_CELL_SIZE_METERS,
       chunkCellSpan: DEFAULT_CHUNK_CELL_SPAN,
+      layout: {
+        key: 'unset',
+        label: 'Unset layout',
+        widthCells: 0,
+        depthCells: 0,
+      },
+      surfaceRegions: [],
       placedCells: {},
       spawnedEntities: {},
     },
   };
 
-  return addDemoMapToState(state);
+  state = addDemoMapToState(state);
+  const spawnGroundTop = groundTopAtWorldPosition(
+    state,
+    state.player.position,
+    state.config.physics.playerStepHeightMeters,
+  );
+  return spawnGroundTop == null
+    ? state
+    : {
+      ...state,
+      player: {
+        ...state.player,
+        position: {
+          ...state.player.position,
+          y: spawnGroundTop,
+        },
+      },
+    };
 }
 
 export function markGameStateUpdated(state: GameState): GameState {
@@ -96,19 +149,89 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
-    if (!parsed || parsed.schemaVersion !== HMSC_STATE_SCHEMA_VERSION) return null;
+    if (!parsed || Number(parsed.schemaVersion ?? 0) > HMSC_STATE_SCHEMA_VERSION) return null;
+    const initial = createInitialGameState();
+    const storedWorldMatchesCurrentLayout = parsed.world?.layout?.key === initial.world.layout.key;
     return cloneGameState({
-      ...createInitialGameState(),
+      ...initial,
       ...parsed,
+      schemaVersion: HMSC_STATE_SCHEMA_VERSION,
+      config: {
+        ...initial.config,
+        ...(parsed.config ?? {}),
+        physics: {
+          ...initial.config.physics,
+          ...(parsed.config?.physics ?? {}),
+        },
+        sky: {
+          ...initial.config.sky,
+          ...(parsed.config?.sky ?? {}),
+        },
+      },
+      command: {
+        ...initial.command,
+        ...(parsed.command ?? {}),
+      },
+      story: {
+        ...initial.story,
+        ...(parsed.story ?? {}),
+        flags: {
+          ...initial.story.flags,
+          ...(parsed.story?.flags ?? {}),
+        },
+        counters: {
+          ...initial.story.counters,
+          ...(parsed.story?.counters ?? {}),
+        },
+      },
+      events: {
+        ...initial.events,
+        ...(parsed.events ?? {}),
+        nextEventSerial: Number(parsed.events?.nextEventSerial ?? initial.events.nextEventSerial),
+        recent: Array.isArray(parsed.events?.recent) ? parsed.events.recent : [],
+      },
       player: {
-        ...createInitialGameState().player,
-        ...(parsed.player ?? {}),
+        ...initial.player,
+        ...(storedWorldMatchesCurrentLayout ? (parsed.player ?? {}) : {}),
+        physics: {
+          ...initial.player.physics,
+          ...(storedWorldMatchesCurrentLayout ? (parsed.player?.physics ?? {}) : {}),
+          velocity: {
+            ...initial.player.physics.velocity,
+            ...(storedWorldMatchesCurrentLayout ? (parsed.player?.physics?.velocity ?? {}) : {}),
+          },
+        },
       },
       world: {
-        ...createInitialGameState().world,
-        ...(parsed.world ?? {}),
-        placedCells: parsed.world?.placedCells ?? {},
-        spawnedEntities: parsed.world?.spawnedEntities ?? {},
+        ...initial.world,
+        ...(storedWorldMatchesCurrentLayout ? (parsed.world ?? {}) : {}),
+        layout: {
+          ...initial.world.layout,
+          ...(storedWorldMatchesCurrentLayout ? (parsed.world?.layout ?? {}) : {}),
+        },
+        surfaceRegions: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.surfaceRegions)
+          ? parsed.world.surfaceRegions
+          : initial.world.surfaceRegions,
+        placedCells: storedWorldMatchesCurrentLayout ? (parsed.world?.placedCells ?? {}) : initial.world.placedCells,
+        spawnedEntities: Object.fromEntries(Object.entries(parsed.world?.spawnedEntities ?? {}).map(([id, rawEntity]: [string, any]) => [
+          id,
+          {
+            ...rawEntity,
+            physics: {
+              enabled: true,
+              radiusMeters: DEFAULT_ENTITY_RADIUS_METERS,
+              restitution: DEFAULT_ENTITY_RESTITUTION,
+              grounded: false,
+              ...(rawEntity?.physics ?? {}),
+              velocity: {
+                x: 0,
+                y: 0,
+                z: 0,
+                ...(rawEntity?.physics?.velocity ?? {}),
+              },
+            },
+          },
+        ])),
       },
     });
   } catch {

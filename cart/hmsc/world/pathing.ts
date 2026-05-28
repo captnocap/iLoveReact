@@ -1,6 +1,8 @@
 import type { GameState, GridCell } from '../design';
-import { canPathThroughCell, cellKey, placedCellAt } from './grid';
-import { tileKindDefinition } from './tileKinds';
+import { cellKey, placedCellAt } from './grid';
+import { tileKindDefinition, type TileTraversalMode } from './tileKinds';
+
+export type PathAgentKind = 'pedestrian' | 'runner' | 'vehicle';
 
 type PathNode = {
   cell: GridCell;
@@ -18,10 +20,22 @@ function manhattanDistance(a: GridCell, b: GridCell): number {
   return Math.abs(a.x - b.x) + Math.abs(a.z - b.z) + Math.abs(a.y - b.y);
 }
 
-function movementCostForCell(state: GameState, cell: GridCell): number {
+function movementCostForCell(state: GameState, cell: GridCell, agent: PathAgentKind): number {
   const placedCell = placedCellAt(state, cell);
   if (!placedCell) return Infinity;
-  return tileKindDefinition(placedCell.kind).pathing.movementCost;
+  const tile = tileKindDefinition(placedCell.kind);
+  if (!tile.pathing.walkable || !tile.npc.traversable) return Infinity;
+  const mode: TileTraversalMode = agent === 'vehicle' ? 'drive' : agent === 'runner' ? 'run' : 'walk';
+  if (!tile.traversal.allowedModes.includes(mode)) return Infinity;
+  const baseCost = agent === 'vehicle' ? tile.npc.vehicleCost : agent === 'runner' ? tile.npc.runCost : tile.npc.walkCost;
+  if (!Number.isFinite(baseCost)) return Infinity;
+  const doorCost = tile.door.isDoor ? tile.door.openCost : 0;
+  const narrowCost = tile.traversal.width === 'narrow' ? 0.22 : 0;
+  return baseCost * tile.pathing.movementCost + doorCost + narrowCost;
+}
+
+function canTraverseCell(state: GameState, cell: GridCell, agent: PathAgentKind): boolean {
+  return Number.isFinite(movementCostForCell(state, cell, agent));
 }
 
 function neighborsForCell(cell: GridCell): GridCell[] {
@@ -56,8 +70,8 @@ function rebuildPath(cameFrom: Record<string, string>, cellsByKey: Record<string
   return path.reverse();
 }
 
-export function findGridPath(state: GameState, start: GridCell, goal: GridCell): GridCell[] {
-  if (!canPathThroughCell(state, start) || !canPathThroughCell(state, goal)) return [];
+export function findGridPath(state: GameState, start: GridCell, goal: GridCell, agent: PathAgentKind = 'pedestrian'): GridCell[] {
+  if (!canTraverseCell(state, start, agent) || !canTraverseCell(state, goal, agent)) return [];
 
   const startKey = cellKey(start);
   const goalKey = cellKey(goal);
@@ -73,9 +87,9 @@ export function findGridPath(state: GameState, start: GridCell, goal: GridCell):
     if (currentKey === goalKey) return rebuildPath(cameFrom, cellsByKey, goalKey);
 
     for (const next of neighborsForCell(current)) {
-      if (!canPathThroughCell(state, next)) continue;
+      if (!canTraverseCell(state, next, agent)) continue;
       const nextKey = cellKey(next);
-      const nextCost = costSoFar[currentKey] + movementCostForCell(state, next);
+      const nextCost = costSoFar[currentKey] + movementCostForCell(state, next, agent);
       if (costSoFar[nextKey] !== undefined && nextCost >= costSoFar[nextKey]) continue;
 
       costSoFar[nextKey] = nextCost;

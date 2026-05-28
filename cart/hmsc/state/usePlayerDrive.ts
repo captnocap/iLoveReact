@@ -1,22 +1,100 @@
 import { useEffect, useRef, useState } from 'react';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { runCommandLine } from '../commands/registry';
 import type { GameState } from '../design';
-import { canOccupyWorldPosition } from '../world/grid';
+import { cellEventRef, playerEventActor, recordAndPublishGameEvent } from '../events/gameEvents';
+import { canOccupyWorldPosition, cellKey, placedCellAt, triggerCellAtWorldPosition, worldToCell } from '../world/grid';
+import { MIN_DRIVE_FRAME_SECONDS, MOVEMENT_INTENT_DEADZONE, NOCLIP_MIN_HEIGHT_METERS } from './defaults';
+import { advanceHostPhysics, movementSurfaceForPlayer } from './hostPhysics';
 
 type PlayerDriveFrame = {
   animationSeconds: number;
   moving: boolean;
   running: boolean;
+  hostPhysicsUs: number;
 };
 
-const MAX_FRAME_SECONDS = 0.05;
+const SDL_SCANCODE_C = 6;
+const SDL_SCANCODE_SPACE = 44;
+const SDL_SCANCODE_LCTRL = 224;
+const SDL_SCANCODE_LSHIFT = 225;
+const SDL_SCANCODE_RCTRL = 228;
+const SDL_SCANCODE_RSHIFT = 229;
 
 function radians(degrees: number): number {
   return degrees * Math.PI / 180;
 }
 
+function hostScancodeDown(scancode: number): boolean {
+  const host: any = globalThis;
+  const fn = host.isKeyDown;
+  if (typeof fn !== 'function') return false;
+  const value = Number(fn(scancode));
+  return Number.isFinite(value) && value > 0;
+}
+
 function normalizeYawDegrees(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
+}
+
+function runEnteredCellTrigger(state: GameState, lastTriggerKeyRef: { current: string | null }): GameState {
+  if (state.sceneStep !== 'boot.console') {
+    lastTriggerKeyRef.current = null;
+    return state;
+  }
+  const triggerCell = triggerCellAtWorldPosition(state, state.player.position);
+  if (!triggerCell?.triggerCommand) {
+    lastTriggerKeyRef.current = null;
+    return state;
+  }
+  const triggerKey = `${triggerCell.key}:${triggerCell.triggerCommand}`;
+  if (lastTriggerKeyRef.current === triggerKey) return state;
+  lastTriggerKeyRef.current = triggerKey;
+  const triggerEvent = recordAndPublishGameEvent(state, {
+    type: 'world.trigger.entered',
+    source: 'player-drive',
+    actor: playerEventActor(),
+    subject: { kind: 'cell', id: triggerCell.key, label: triggerCell.triggerLabel },
+    tags: ['world', 'trigger', 'story'],
+    payload: {
+      command: triggerCell.triggerCommand,
+      label: triggerCell.triggerLabel ?? null,
+      kind: triggerCell.kind,
+    },
+  });
+  const result = runCommandLine(triggerCell.triggerCommand, triggerEvent.state, {
+    source: 'world-trigger',
+    parentEventId: triggerEvent.event.id,
+  });
+  return result.output.some((line) => line.startsWith('error:')) ? triggerEvent.state : result.state;
+}
+
+function recordEnteredPlayerCell(state: GameState, lastPlayerCellKeyRef: { current: string | null }): GameState {
+  if (state.sceneStep !== 'boot.console') {
+    lastPlayerCellKeyRef.current = null;
+    return state;
+  }
+  const cell = worldToCell(state.player.position, state.world.cellSizeMeters);
+  const key = cellKey(cell);
+  if (lastPlayerCellKeyRef.current == null) {
+    lastPlayerCellKeyRef.current = key;
+    return state;
+  }
+  if (lastPlayerCellKeyRef.current === key) return state;
+  lastPlayerCellKeyRef.current = key;
+  const placedCell = placedCellAt(state, cell);
+  return recordAndPublishGameEvent(state, {
+    type: 'player.cell.entered',
+    source: 'player-drive',
+    actor: playerEventActor(),
+    subject: cellEventRef(cell),
+    tags: ['player', 'movement', 'cell'],
+    payload: {
+      cell,
+      tileKind: placedCell?.kind ?? null,
+      triggerCommand: placedCell?.triggerCommand ?? null,
+    },
+  }).state;
 }
 
 export function usePlayerDrive(
@@ -27,10 +105,13 @@ export function usePlayerDrive(
   const enabledRef = useRef(enabled);
   const cameraYawRef = useRef(cameraYawDegrees);
   const keysRef = useRef<Record<string, boolean>>({});
+  const lastTriggerKeyRef = useRef<string | null>(null);
+  const lastPlayerCellKeyRef = useRef<string | null>(null);
   const [driveFrame, setDriveFrame] = useState<PlayerDriveFrame>({
     animationSeconds: 0,
     moving: false,
     running: false,
+    hostPhysicsUs: 0,
   });
 
   useEffect(() => {
@@ -59,13 +140,21 @@ export function usePlayerDrive(
 
     const tick = () => {
       const now = host.performance?.now?.() ?? Date.now();
-      const dt = Math.max(0.001, Math.min(MAX_FRAME_SECONDS, (now - lastNow) / 1000));
+      const rawDt = Math.max(MIN_DRIVE_FRAME_SECONDS, (now - lastNow) / 1000);
       lastNow = now;
 
       let moving = false;
-      const running = !!keysRef.current.__shift;
+      let hostPhysicsUs = 0;
+      let frameSeconds = rawDt;
+      const running = !!(
+        keysRef.current.__shift ||
+        hostScancodeDown(SDL_SCANCODE_LSHIFT) ||
+        hostScancodeDown(SDL_SCANCODE_RSHIFT)
+      );
       if (enabledRef.current) {
         setGameState((current) => {
+          const dt = Math.min(current.config.physics.maxDriveFrameSeconds, rawDt);
+          frameSeconds = dt;
           const keys = keysRef.current;
           const cameraYaw = cameraYawRef.current;
           const cameraYawRadians = radians(cameraYaw);
@@ -73,7 +162,9 @@ export function usePlayerDrive(
           const forwardZ = Math.cos(cameraYawRadians);
           const rightX = -Math.cos(cameraYawRadians);
           const rightZ = Math.sin(cameraYawRadians);
-          const speed = running ? current.player.runSpeedMetersPerSecond : current.player.walkSpeedMetersPerSecond;
+          const baseSpeed = running ? current.player.runSpeedMetersPerSecond : current.player.walkSpeedMetersPerSecond;
+          const surface = movementSurfaceForPlayer(current, running);
+          const speed = baseSpeed * surface.speedMultiplier;
           let intentX = 0;
           let intentZ = 0;
           if (keys.w || keys.up) {
@@ -92,11 +183,78 @@ export function usePlayerDrive(
             intentX -= rightX;
             intentZ -= rightZ;
           }
+          const jumpDown = !!(keys[' '] || keys.space || keys.spacebar || hostScancodeDown(SDL_SCANCODE_SPACE));
+          const crouchDown = !!(
+            keys.control ||
+            keys.ctrl ||
+            keys.c ||
+            hostScancodeDown(SDL_SCANCODE_LCTRL) ||
+            hostScancodeDown(SDL_SCANCODE_RCTRL) ||
+            hostScancodeDown(SDL_SCANCODE_C)
+          );
 
           let position = current.player.position;
           let yawDegrees = current.player.yawDegrees;
           const intentLength = Math.hypot(intentX, intentZ);
-          if (intentLength > 0.001) {
+          if (current.player.noclip) {
+            const moveX = intentLength > MOVEMENT_INTENT_DEADZONE ? intentX / intentLength : 0;
+            const moveZ = intentLength > MOVEMENT_INTENT_DEADZONE ? intentZ / intentLength : 0;
+            const verticalIntent = (jumpDown ? 1 : 0) - (crouchDown ? 1 : 0);
+            const proposedPosition = {
+              x: position.x + moveX * speed * dt,
+              y: Math.max(NOCLIP_MIN_HEIGHT_METERS, position.y + verticalIntent * speed * dt),
+              z: position.z + moveZ * speed * dt,
+            };
+            moving = intentLength > MOVEMENT_INTENT_DEADZONE || verticalIntent !== 0;
+            if (intentLength > MOVEMENT_INTENT_DEADZONE) {
+              yawDegrees = normalizeYawDegrees(Math.atan2(-moveX, -moveZ) * 180 / Math.PI);
+            }
+            if (!moving && yawDegrees === current.player.yawDegrees) return current;
+            const nextState = {
+              ...current,
+              player: {
+                ...current.player,
+                position: proposedPosition,
+                yawDegrees,
+                physics: {
+                  ...current.player.physics,
+                  velocity: { x: 0, y: 0, z: 0 },
+                  grounded: false,
+                },
+              },
+            };
+            return runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef);
+          }
+          const hostResult = advanceHostPhysics(
+            current,
+            dt,
+            intentX,
+            intentZ,
+            speed,
+            jumpDown,
+            surface.accelerationMultiplier,
+            surface.friction,
+            surface.restitution,
+          );
+          if (hostResult) {
+            hostPhysicsUs = hostResult.hostUs;
+            moving = hostResult.moving;
+            if (intentLength > MOVEMENT_INTENT_DEADZONE) {
+              const moveX = intentX / intentLength;
+              const moveZ = intentZ / intentLength;
+              yawDegrees = normalizeYawDegrees(Math.atan2(-moveX, -moveZ) * 180 / Math.PI);
+              const nextState = {
+                ...hostResult.state,
+                player: {
+                  ...hostResult.state.player,
+                  yawDegrees,
+                },
+              };
+              return runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef);
+            }
+            return runEnteredCellTrigger(recordEnteredPlayerCell(hostResult.state, lastPlayerCellKeyRef), lastTriggerKeyRef);
+          }
+          if (intentLength > MOVEMENT_INTENT_DEADZONE) {
             const moveX = intentX / intentLength;
             const moveZ = intentZ / intentLength;
             const proposedPosition = {
@@ -111,8 +269,10 @@ export function usePlayerDrive(
             }
           }
 
-          if (position === current.player.position && yawDegrees === current.player.yawDegrees) return current;
-          return {
+          if (position === current.player.position && yawDegrees === current.player.yawDegrees) {
+            return runEnteredCellTrigger(recordEnteredPlayerCell(current, lastPlayerCellKeyRef), lastTriggerKeyRef);
+          }
+          const nextState = {
             ...current,
             player: {
               ...current.player,
@@ -120,11 +280,12 @@ export function usePlayerDrive(
               yawDegrees,
             },
           };
+          return runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef);
         });
       }
 
-      animationSeconds += dt;
-      setDriveFrame({ animationSeconds, moving, running: moving && running });
+      animationSeconds += frameSeconds;
+      setDriveFrame({ animationSeconds, moving, running: moving && running, hostPhysicsUs });
       handle = schedule(tick);
     };
 

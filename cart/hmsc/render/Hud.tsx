@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, Effect, Text } from '@reactjit/runtime/primitives';
 import type { GameState, GridCell } from '../design';
-import { cellKey, worldToCell } from '../world/grid';
+import { cellKey, surfaceRegionAtCell, worldToCell } from '../world/grid';
 
 const HUD = {
   panelBg: '#0c0614ee',
@@ -21,8 +21,12 @@ const HUD = {
 
 const MINIMAP_CELL_SPAN = 15;
 const MINIMAP_PIXELS = 144;
-const MINIMAP_DATA_HEADER = 3;
-const GAME_START_HOUR = 20;
+const MINIMAP_DATA_HEADER = 5;
+const MINIMAP_MIN_FRAME_SECONDS = 0.001;
+const MINIMAP_MAX_FRAME_SECONDS = 0.05;
+const MINIMAP_SMOOTHING_PER_SECOND = 18;
+const MINIMAP_SETTLED_DISTANCE_CELLS = 0.002;
+const MINIMAP_SETTLED_YAW_RADIANS = 0.002;
 
 const HMSC_MINIMAP_WGSL = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
@@ -30,17 +34,24 @@ const WIN: i32 = ${MINIMAP_CELL_SPAN};
 const HDR: i32 = ${MINIMAP_DATA_HEADER};
 
 fn tileColor(kind: i32) -> vec3f {
-  if (kind == 0) { return vec3f(0.126, 0.141, 0.176); }
-  if (kind == 1) { return vec3f(0.349, 0.380, 0.439); }
-  if (kind == 2) { return vec3f(0.796, 0.835, 0.882); }
-  if (kind == 3) { return vec3f(0.961, 0.620, 0.043); }
-  if (kind == 4) { return vec3f(0.133, 0.827, 0.933); }
+  if (kind == 0) { return vec3f(0.306, 0.627, 0.875); }
+  if (kind == 1) { return vec3f(0.094, 0.290, 0.408); }
+  if (kind == 2) { return vec3f(0.400, 0.184, 0.196); }
+  if (kind == 3) { return vec3f(0.024, 0.267, 0.078); }
+  if (kind == 4) { return vec3f(0.122, 0.145, 0.188); }
+  if (kind == 5) { return vec3f(0.126, 0.141, 0.176); }
+  if (kind == 6) { return vec3f(0.349, 0.380, 0.439); }
+  if (kind == 7) { return vec3f(0.357, 0.275, 0.212); }
+  if (kind == 8) { return vec3f(0.784, 0.714, 0.435); }
+  if (kind == 9) { return vec3f(0.796, 0.835, 0.882); }
+  if (kind == 10) { return vec3f(0.961, 0.620, 0.043); }
+  if (kind == 11) { return vec3f(0.133, 0.827, 0.933); }
   return vec3f(0.071, 0.035, 0.106);
 }
 
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let lx = clamp(i32(in.uv.x * f32(WIN)), 0, WIN - 1);
-  let ly = clamp(i32(in.uv.y * f32(WIN)), 0, WIN - 1);
+  let lx = clamp(i32(in.uv.x * f32(WIN) + D[3]), 0, WIN - 1);
+  let ly = clamp(i32(in.uv.y * f32(WIN) + D[4]), 0, WIN - 1);
   let kind = i32(D[HDR + ly * WIN + lx] + 0.5);
   var col = tileColor(kind);
 
@@ -63,25 +74,15 @@ function clampNumber(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function ledClockFromElapsed(elapsedSeconds: number): string {
-  const minutes = GAME_START_HOUR * 60 + Math.floor(elapsedSeconds);
-  const hour = Math.floor(minutes / 60) % 24;
-  const minute = ((minutes % 60) + 60) % 60;
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+function angleDeltaRadians(target: number, current: number): number {
+  return Math.atan2(Math.sin(target - current), Math.cos(target - current));
 }
 
-function useHudClock(): string {
-  const startMsRef = useRef(Date.now());
-  const [clock, setClock] = useState(() => ledClockFromElapsed(0));
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setClock(ledClockFromElapsed((Date.now() - startMsRef.current) / 1000));
-    }, 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  return clock;
+function ledClockFromSkyHour(skyHour: number): string {
+  const totalMinutes = Math.floor((((skyHour % 24) + 24) % 24) * 60);
+  const hour = Math.floor(totalMinutes / 60) % 24;
+  const minute = totalMinutes % 60;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 function Led(props: { text: string; color: string; size: number; track?: number }) {
@@ -143,27 +144,110 @@ function visibleMinimapCells(center: GridCell): GridCell[] {
 }
 
 function minimapTileCode(kind: string | undefined): number {
-  if (kind === 'asphalt') return 0;
-  if (kind === 'sidewalk') return 1;
-  if (kind === 'wall') return 2;
-  if (kind === 'door') return 3;
-  if (kind === 'marker') return 4;
-  return 5;
+  if (kind === 'water') return 0;
+  if (kind === 'residential') return 1;
+  if (kind === 'downtown') return 2;
+  if (kind === 'mixed') return 3;
+  if (kind === 'road') return 4;
+  if (kind === 'asphalt') return 5;
+  if (kind === 'sidewalk') return 6;
+  if (kind === 'mud') return 7;
+  if (kind === 'sand') return 8;
+  if (kind === 'wall') return 9;
+  if (kind === 'door') return 10;
+  if (kind === 'marker') return 11;
+  return 12;
+}
+
+function useSmoothedMinimapView(state: GameState): { x: number; z: number; yawRadians: number } {
+  const targetRef = useRef({
+    x: state.player.position.x / state.world.cellSizeMeters,
+    z: state.player.position.z / state.world.cellSizeMeters,
+    yawRadians: state.player.yawDegrees * Math.PI / 180,
+  });
+  const [view, setView] = useState(targetRef.current);
+
+  useEffect(() => {
+    targetRef.current = {
+      x: state.player.position.x / state.world.cellSizeMeters,
+      z: state.player.position.z / state.world.cellSizeMeters,
+      yawRadians: state.player.yawDegrees * Math.PI / 180,
+    };
+  }, [
+    state.player.position.x,
+    state.player.position.z,
+    state.player.yawDegrees,
+    state.world.cellSizeMeters,
+  ]);
+
+  useEffect(() => {
+    const host: any = globalThis;
+    const schedule = host.requestAnimationFrame ? host.requestAnimationFrame.bind(host) : (fn: any) => setTimeout(fn, 16);
+    const cancel = host.cancelAnimationFrame ? host.cancelAnimationFrame.bind(host) : clearTimeout;
+    let handle: any = 0;
+    let lastNow = host.performance?.now?.() ?? Date.now();
+
+    const tick = () => {
+      const now = host.performance?.now?.() ?? Date.now();
+      const frameSeconds = Math.max(MINIMAP_MIN_FRAME_SECONDS, Math.min(MINIMAP_MAX_FRAME_SECONDS, (now - lastNow) / 1000));
+      lastNow = now;
+      const smoothing = 1 - Math.exp(-MINIMAP_SMOOTHING_PER_SECOND * frameSeconds);
+      setView((current) => {
+        const target = targetRef.current;
+        const dx = target.x - current.x;
+        const dz = target.z - current.z;
+        const dyaw = angleDeltaRadians(target.yawRadians, current.yawRadians);
+        if (
+          Math.abs(dx) < MINIMAP_SETTLED_DISTANCE_CELLS
+          && Math.abs(dz) < MINIMAP_SETTLED_DISTANCE_CELLS
+          && Math.abs(dyaw) < MINIMAP_SETTLED_YAW_RADIANS
+        ) {
+          return current;
+        }
+        return {
+          x: current.x + dx * smoothing,
+          z: current.z + dz * smoothing,
+          yawRadians: current.yawRadians + dyaw * smoothing,
+        };
+      });
+      handle = schedule(tick);
+    };
+
+    handle = schedule(tick);
+    return () => cancel(handle);
+  }, []);
+
+  return view;
 }
 
 function MiniMap(props: { state: GameState }) {
-  const playerCell = worldToCell(props.state.player.position, props.state.world.cellSizeMeters);
-  const cells = visibleMinimapCells(playerCell);
-  const placedCellsByKey = props.state.world.placedCells;
+  const smoothedView = useSmoothedMinimapView(props.state);
   const radius = Math.floor(MINIMAP_CELL_SPAN / 2);
-  const playerLocalX = clampNumber(props.state.player.position.x / props.state.world.cellSizeMeters - (playerCell.x - radius), 0, MINIMAP_CELL_SPAN);
-  const playerLocalY = clampNumber(props.state.player.position.z / props.state.world.cellSizeMeters - (playerCell.z - radius), 0, MINIMAP_CELL_SPAN);
-  const yawRadians = props.state.player.yawDegrees * Math.PI / 180;
+  const centerCell: GridCell = {
+    x: Math.floor(smoothedView.x),
+    y: 0,
+    z: Math.floor(smoothedView.z),
+  };
+  const cells = visibleMinimapCells(centerCell);
+  const placedCellsByKey = props.state.world.placedCells;
+  const smoothedOriginX = smoothedView.x - radius;
+  const smoothedOriginZ = smoothedView.z - radius;
+  const playerX = props.state.player.position.x / props.state.world.cellSizeMeters;
+  const playerZ = props.state.player.position.z / props.state.world.cellSizeMeters;
+  const playerLocalX = clampNumber(playerX - smoothedOriginX, 0, MINIMAP_CELL_SPAN);
+  const playerLocalY = clampNumber(playerZ - smoothedOriginZ, 0, MINIMAP_CELL_SPAN);
+  const scrollX = smoothedView.x - centerCell.x;
+  const scrollZ = smoothedView.z - centerCell.z;
   const minimapData = [
     playerLocalX,
     playerLocalY,
-    yawRadians,
-    ...cells.map((cell) => minimapTileCode(placedCellsByKey[cellKey(cell)]?.kind)),
+    smoothedView.yawRadians,
+    scrollX,
+    scrollZ,
+    ...cells.map((cell) => {
+      const placedCell = placedCellsByKey[cellKey(cell)];
+      return minimapTileCode(placedCell?.kind ?? surfaceRegionAtCell(props.state, cell)?.kind);
+    }),
   ];
 
   return (
@@ -174,7 +258,7 @@ function MiniMap(props: { state: GameState }) {
 }
 
 export function Hud(props: { state: GameState }) {
-  const clock = useHudClock();
+  const clock = ledClockFromSkyHour(props.state.config.sky.hour);
   const player = props.state.player;
   const money = String(Math.max(0, Math.round(player.money))).padStart(8, '0');
   const armor = Math.max(0, Math.round((player as any).armor ?? 0));
