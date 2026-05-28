@@ -10,6 +10,14 @@
 // This module has NO dependency on the shape files or on primitives — it only
 // duck-types the def ({ id, generate, defaults }) — so importing it into the
 // primitives layer pulls in no geometry code a cart didn't already import.
+//
+// Build-time bake: `rjit bake-geometry` runs generators at build time and emits
+// BAKED (./_baked.generated) keyed by the SAME internKey() the runtime computes.
+// We pre-seed the cache from it on load, so a baked mesh's internGeometry() is a
+// cache hit and generate() never runs in V8. A non-baked / dynamic mesh misses
+// the seed and falls back to runtime generation — nothing is lost either way.
+
+import { BAKED } from './_baked.generated';
 
 export type GeometryDefLike = {
   id: string;
@@ -28,6 +36,11 @@ export type InternedGeometry = {
 
 const cache = new Map<string, InternedGeometry>();
 
+// Pre-seed from the build-time bake. A baked entry is byte-identical to what
+// runtime generation would produce (same generator, same params, same key), so
+// the runtime simply finds it already present and skips generate() entirely.
+for (const key of Object.keys(BAKED)) cache.set(key, BAKED[key]!);
+
 // Deterministic stringify (recursively sorted keys) so two call sites that build
 // logically-equal params in different key order still collapse to one entry.
 function stable(v: any): string {
@@ -37,18 +50,29 @@ function stable(v: any): string {
   return '{' + keys.map((k) => JSON.stringify(k) + ':' + stable(v[k])).join(',') + '}';
 }
 
-export function internGeometry(def: GeometryDefLike, params: any): InternedGeometry {
+/**
+ * The canonical intern key: id + '|' + stable(resolved params). The build-time
+ * bake MUST compute this identically (it imports this function) so a baked key
+ * matches the runtime key exactly — that identity is what makes the pre-seed a
+ * transparent hit rather than a parallel cache.
+ */
+export function internKey(def: GeometryDefLike, params: any): string {
   const resolved = { ...(def.defaults ?? {}), ...(params ?? {}) };
-  const key = def.id + '|' + stable(resolved);
+  return def.id + '|' + stable(resolved);
+}
+
+/** Run a generator and package its output as an InternedGeometry under `key`. */
+export function bakeEntry(def: GeometryDefLike, params: any): InternedGeometry {
+  const key = internKey(def, params);
+  const data = def.generate({ ...(def.defaults ?? {}), ...(params ?? {}) });
+  return { key, vertices: Array.from(data.positions), count: data.count, bounds: data.bounds.radius };
+}
+
+export function internGeometry(def: GeometryDefLike, params: any): InternedGeometry {
+  const key = internKey(def, params);
   let entry = cache.get(key);
   if (!entry) {
-    const data = def.generate(resolved);
-    entry = {
-      key,
-      vertices: Array.from(data.positions),
-      count: data.count,
-      bounds: data.bounds.radius,
-    };
+    entry = bakeEntry(def, params);
     cache.set(key, entry);
   }
   return entry;
