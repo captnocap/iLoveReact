@@ -164,7 +164,19 @@ export default function CameraLab() {
   useEffect(() => {
     const needsClock = ANIMATED[rig] || swayOn;
     // always listen for keys (cheap); only spin the clock when something moves
-    const setk = (e: any, v: boolean) => { const k = String(e?.key ?? '').toLowerCase(); if (k) keysRef.current[k] = v; };
+    // Shift/Ctrl/Alt never come through as a `key` name in the bus payload —
+    // the runtime decoder (runtime/hooks/useIFTTT.ts decodeKey) routes them to
+    // `sdl:<scancode>` because they're not in SDL_KEY_NAMES. The MODIFIER flags
+    // on every event (shiftKey/ctrlKey/altKey) are how you actually detect a
+    // held modifier — including on the modifier's own keydown/keyup. Track
+    // them as `__shift`/`__ctrl`/`__alt` so callers can read them by intent.
+    const setk = (e: any, v: boolean) => {
+      const k = String(e?.key ?? '').toLowerCase();
+      if (k) keysRef.current[k] = v;
+      if (typeof e?.shiftKey === 'boolean') keysRef.current['__shift'] = e.shiftKey;
+      if (typeof e?.ctrlKey === 'boolean')  keysRef.current['__ctrl']  = e.ctrlKey;
+      if (typeof e?.altKey === 'boolean')   keysRef.current['__alt']   = e.altKey;
+    };
     const offD = busOn('__keydown', (e: any) => setk(e, true));
     const offU = busOn('__keyup', (e: any) => setk(e, false));
     if (!needsClock) return () => { offD(); offU(); };
@@ -196,9 +208,11 @@ export default function CameraLab() {
         if (k['d']) { x += rx * sp; z += rz * sp; }
         if (k['a']) { x -= rx * sp; z -= rz * sp; }
         // world-Y override — Q/E (Unity/Unreal scene-cam) AND Space/Shift (FPS
-        // creative fly). Both work, no floor — it's a fly cam.
-        if (k['e'] || k[' '] || k['space']) y += sp;
-        if (k['q'] || k['shift']) y -= sp;
+        // creative fly). Shift comes through as a modifier flag (__shift), not
+        // a 'shift' key name — the runtime decoder routes non-ASCII keys to
+        // sdl:<scancode>. Same reason space is 'space', never ' '.
+        if (k['e'] || k['space']) y += sp;
+        if (k['q'] || k['__shift']) y -= sp;
         freeRef.current = [x, y, z];
       }
       setClock((c) => c + dt);
