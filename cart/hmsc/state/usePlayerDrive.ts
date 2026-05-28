@@ -71,8 +71,8 @@ export function usePlayerDrive(
           const cameraYawRadians = radians(cameraYaw);
           const forwardX = Math.sin(cameraYawRadians);
           const forwardZ = Math.cos(cameraYawRadians);
-          const rightX = Math.cos(cameraYawRadians);
-          const rightZ = -Math.sin(cameraYawRadians);
+          const rightX = -Math.cos(cameraYawRadians);
+          const rightZ = Math.sin(cameraYawRadians);
           const speed = running ? current.player.runSpeedMetersPerSecond : current.player.walkSpeedMetersPerSecond;
           let intentX = 0;
           let intentZ = 0;

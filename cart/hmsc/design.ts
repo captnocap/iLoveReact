@@ -1,5 +1,6 @@
 export const HMSC_STATE_SCHEMA_VERSION = 3;
 export const DEFAULT_AUTOSAVE_INTERVAL_MS = 120_000;
+export const DEFAULT_LIVE_SYNC_INTERVAL_MS = 100;
 export const DEFAULT_CELL_SIZE_METERS = 1;
 export const DEFAULT_CHUNK_CELL_SPAN = 16;
 
@@ -26,6 +27,13 @@ export type PlayerState = {
   heat: number;
   money: number;
   inventory: string[];
+};
+
+export type LivePlayerSnapshot = {
+  schemaVersion: number;
+  sessionName: string;
+  updatedAt: string;
+  player: PlayerState;
 };
 
 export type PlacedCell = {

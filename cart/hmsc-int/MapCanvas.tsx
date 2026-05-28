@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Box, Canvas, Pressable, Text } from '@reactjit/runtime/primitives';
-import type { GameState, GridCell, PlacedCell } from '../hmsc/design';
-import { createInitialGameState, readStoredGameState } from '../hmsc/state/gameState';
+import { DEFAULT_LIVE_SYNC_INTERVAL_MS, type GameState, type GridCell, type PlacedCell } from '../hmsc/design';
+import { createInitialGameState, readLivePlayerSnapshot, readStoredGameState } from '../hmsc/state/gameState';
 import { cellKey, chunkKeyForCell, worldToCell } from '../hmsc/world/grid';
 import { tileKindDefinition } from '../hmsc/world/tileKinds';
 
@@ -9,7 +9,27 @@ const MAP_CELL_PIXELS = 32;
 const MAP_PADDING_CELLS = 2;
 
 function loadMapState(): GameState {
-  return readStoredGameState() ?? createInitialGameState();
+  const state = readStoredGameState() ?? createInitialGameState();
+  const livePlayer = readLivePlayerSnapshot();
+  if (!livePlayer) return state;
+  return {
+    ...state,
+    sessionName: livePlayer.sessionName,
+    updatedAt: livePlayer.updatedAt,
+    player: {
+      ...state.player,
+      ...livePlayer.player,
+    },
+  };
+}
+
+function sameMapView(a: GameState, b: GameState): boolean {
+  return a.updatedAt === b.updatedAt
+    && a.player.position.x === b.player.position.x
+    && a.player.position.y === b.player.position.y
+    && a.player.position.z === b.player.position.z
+    && a.player.yawDegrees === b.player.yawDegrees
+    && Object.keys(a.world.placedCells).length === Object.keys(b.world.placedCells).length;
 }
 
 function cellFill(placedCell: PlacedCell): string {
@@ -54,8 +74,27 @@ function canvasY(cellZ: number, bounds: { minZ: number }): number {
   return (cellZ - bounds.minZ) * MAP_CELL_PIXELS;
 }
 
+function canvasWorldX(worldX: number, state: GameState, bounds: { minX: number }): number {
+  return (worldX / state.world.cellSizeMeters - bounds.minX) * MAP_CELL_PIXELS;
+}
+
+function canvasWorldY(worldZ: number, state: GameState, bounds: { minZ: number }): number {
+  return (worldZ / state.world.cellSizeMeters - bounds.minZ) * MAP_CELL_PIXELS;
+}
+
 export function MapCanvas() {
   const [state, setState] = useState<GameState>(loadMapState);
+
+  useEffect(() => {
+    const refreshLiveMapState = () => {
+      const nextState = loadMapState();
+      setState((current) => sameMapView(current, nextState) ? current : nextState);
+    };
+    refreshLiveMapState();
+    const timer = setInterval(refreshLiveMapState, DEFAULT_LIVE_SYNC_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
   const placedCells = Object.values(state.world.placedCells);
   const placedCellsByKey = state.world.placedCells;
   const bounds = mapBounds(placedCells);
@@ -104,8 +143,8 @@ export function MapCanvas() {
           );
         })}
         <Canvas.Node
-          gx={canvasX(playerCell.x, bounds) + 8}
-          gy={canvasY(playerCell.z, bounds) + 8}
+          gx={canvasWorldX(state.player.position.x, state, bounds) - 8}
+          gy={canvasWorldY(state.player.position.z, state, bounds) - 8}
           gw={16}
           gh={16}
         >

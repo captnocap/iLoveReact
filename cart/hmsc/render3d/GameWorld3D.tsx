@@ -107,10 +107,10 @@ export function GameWorld3D(props: {
   const cameraYawRadians = props.cameraYawDegrees * Math.PI / 180;
   const cameraPosition: [number, number, number] = [
     player.x - Math.sin(cameraYawRadians) * 4.9,
-    player.y + 3.05 + Math.sin(props.cameraPitchRadians) * 1.6,
+    player.y + 3.05,
     player.z - Math.cos(cameraYawRadians) * 5.9,
   ];
-  const cameraTarget: [number, number, number] = [player.x, player.y + 1.18 + Math.sin(props.cameraPitchRadians) * 0.7, player.z];
+  const cameraTarget: [number, number, number] = [player.x, player.y + 1.18, player.z];
 
   return (
     <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#070b12" showGrid={false} showAxes={false}>

@@ -46,6 +46,8 @@ cart/hmsc-int/
 
 The whole game state is one JSON object. The cart stores it through host storage
 and mirrors it into hot state after every command. Autosave runs on a timer.
+The game also publishes a compact live player snapshot so `hmsc-int` can track
+the player marker without turning movement frames into autosaves.
 
 World construction is grid-locked: cell keys, chunk keys, placed cells. Player
 and spawned entities move in continuous coordinates on top of the grid.
