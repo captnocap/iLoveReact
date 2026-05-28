@@ -253,9 +253,21 @@ function Pills(ctx: ModelCtx) {
 }
 
 function Weed(ctx: ModelCtx) {
+  const buds: { p: V3; s: V3; c: string }[] = [
+    { p: [-0.18, 0.3, 0.02], s: [0.24, 0.22, 0.2], c: '#2f7d37' },
+    { p: [0.02, 0.36, -0.02], s: [0.28, 0.26, 0.22], c: '#3f9a43' },
+    { p: [0.22, 0.28, 0.04], s: [0.22, 0.2, 0.18], c: '#2d7135' },
+    { p: [-0.02, 0.18, 0.14], s: [0.22, 0.18, 0.16], c: '#5fb858' },
+    { p: [0.12, 0.2, -0.16], s: [0.18, 0.16, 0.14], c: '#6fbd5b' },
+  ];
+  const leaves: { p: V3; r: V3; s: V3; c: string }[] = [
+    { p: [-0.22, 0.16, -0.08], r: [0.1, -0.6, 0.7], s: [0.42, 0.9, 0.42], c: '#4fb84e' },
+    { p: [0.18, 0.15, 0.08], r: [0.05, 0.8, -0.65], s: [0.38, 0.82, 0.38], c: '#5fca59' },
+    { p: [0.02, 0.14, 0.0], r: [0.18, 0.1, PI / 2], s: [0.34, 0.72, 0.34], c: '#3f9f42' },
+  ];
   return <>
-    {[-0.28, -0.1, 0.08, 0.24].map((x, i) => <Part key={`bud-${i}`} ctx={ctx} geometry={cone} params={cone12} material={i % 2 ? '#4a9c43' : '#337a38'} p={[x, 0.28 + i * 0.035, (i - 1.5) * 0.08]} r={[0.4, i * 0.7, 0.2]} s={[0.18, 0.5, 0.18]} />)}
-    {[0, 1, 2].map((i) => <Part key={`leaf-${i}`} ctx={ctx} geometry={Surfboard} params={{ length: 0.55, width: 0.13, thickness: 0.02, segments: 12 }} material="#5fc25b" p={[(i - 1) * 0.2, 0.32, 0.12]} r={[0, i * 0.8, PI / 2]} />)}
+    {leaves.map((leaf, i) => <Part key={`leaf-${i}`} ctx={ctx} geometry={Surfboard} params={{ length: 0.46, width: 0.12, thickness: 0.018, segments: 12 }} material={leaf.c} p={leaf.p} r={leaf.r} s={leaf.s} />)}
+    {buds.map((bud, i) => <Part key={`bud-${i}`} ctx={ctx} geometry={sphere} params={sphere12} material={bud.c} p={bud.p} s={bud.s} />)}
   </>;
 }
 
