@@ -47,6 +47,11 @@ game view and the internal map read from that source.
   localstore snapshot.
 - Added continuous player marker rendering in `hmsc-int`.
 - Added click-to-inspect tile diagnostics in `hmsc-int`.
+- Ported the player-facing Scape3D HUD shape into `hmsc`:
+  - GTA-style clock, cash, health, armor, item box, and wanted stars
+  - circular bottom-right minimap rendered from `GameState.world.placedCells`
+  - player marker and facing pip driven by continuous player position/yaw
+  - item menu and debug panels intentionally left out for now
 
 ## Internal Map Diagnostics
 

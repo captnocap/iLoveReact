@@ -16,6 +16,7 @@ import {
 } from './state/gameState';
 import { usePlayerDrive } from './state/usePlayerDrive';
 import { GameWorld3D } from './render3d/GameWorld3D';
+import { Hud } from './render/Hud';
 import { Console } from './ui/Console';
 
 const CAMERA_YAW_RADIANS_PER_PIXEL = 0.0032;
@@ -159,7 +160,8 @@ export default function HmscCart() {
         cameraYawDegrees={cameraYawDegrees}
         cameraPitchRadians={cameraPitchRadians}
       />
-      <Box style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}>
+      <Hud state={gameState} />
+      <Box style={{ position: 'absolute', top: 16, left: 18, zIndex: 2 }}>
         <Pressable
           onPress={() => setConsoleOpen((open) => !open)}
           style={{
