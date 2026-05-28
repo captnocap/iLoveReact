@@ -1,49 +1,69 @@
-// Plasma — the classic four-wave sine plasma, as a reusable registry Effect.
-// This is THE canonical plasma for ReactJIT; carts import it instead of
-// re-rolling the shader. Drives off U.time and reuses effect_math's hsv2rgb.
+// Plasma — classic four-wave sine plasma, the canonical reusable Effect.
 //
-//   import { Plasma } from '@reactjit/effects';
-//   <Plasma style={{ flexGrow: 1 }} speed={1.4} scale={1} />
+//   import { Plasma, PLASMA_DEFAULTS } from '@reactjit/effects';
+//   <Plasma params={PLASMA_DEFAULTS} style={{ flexGrow: 1 }} />
+//   <Plasma params={{ ...PLASMA_DEFAULTS, velocity: 2 }} />
 import { Effect } from '../primitives';
+import { rgb } from './_util';
 
-export interface PlasmaProps {
-  /** Animation speed multiplier (1 = default). */
-  speed?: number;
-  /** Spatial frequency of the waves (1 = default; higher = tighter). */
-  scale?: number;
-  /** Color saturation 0..1. */
-  saturation?: number;
-  /** Static hue offset 0..1 added to the cycling rainbow. */
-  hueShift?: number;
-  style?: any;
-  [k: string]: any;
-}
+export type PlasmaParams = {
+  colors: { primary: string; secondary: string; tertiary: string };
+  /** Spatial frequency of the waves (higher = tighter). */
+  drift: number;
+  /** Animation rate multiplier. */
+  velocity: number;
+  /** Overall opacity 0..1. */
+  opacity: number;
+};
 
-// Params reach WGSL through the storage buffer at @group(0) @binding(1).
+export const PLASMA_DEFAULTS: PlasmaParams = {
+  colors: { primary: '#ff00aa', secondary: '#00ffcc', tertiary: '#ffee00' },
+  drift: 0.02,
+  velocity: 1.0,
+  opacity: 1.0,
+};
+
+// WGSL unpacks P[] in the SAME order the component packs it below.
 const PLASMA_WGSL = `
 @group(0) @binding(1) var<storage, read> P: array<f32>;
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let speed = P[0];
-  let scale = P[1];
-  let sat = P[2];
-  let hueShift = P[3];
-  let t = U.time * speed;
+  // Param unpacking — order must match the TS packer.
+  let c1       = vec3f(P[0], P[1], P[2]);   // primary
+  let c2       = vec3f(P[3], P[4], P[5]);   // secondary
+  let c3       = vec3f(P[6], P[7], P[8]);   // tertiary
+  let drift    = P[9];
+  let velocity = P[10];
+  let opacity  = P[11];
+
   let x = in.uv.x * U.size_w;
   let y = in.uv.y * U.size_h;
-  let fx = x * 0.02 * scale;
-  let fy = y * 0.02 * scale;
+  let t = U.time * velocity;
+  let fx = x * drift;
+  let fy = y * drift;
   let v1 = sin(fx + t);
   let v2 = sin(fy + t * 0.7);
   let v3 = sin(fx + fy + t * 0.5);
   let v4 = sin(sqrt(fx * fx + fy * fy) + t);
-  let v = (v1 + v2 + v3 + v4) * 0.25 * 0.5 + 0.5;
-  let col = hsv2rgb(fract(v + hueShift), sat, 1.0);
-  return vec4f(col, 1.0);
+  let v = (v1 + v2 + v3 + v4) * 0.25 + 0.5;
+
+  let col = c1 * (sin(v * 3.14159) * 0.5 + 0.5)
+          + c2 * (sin(v * 3.14159 + 2.094) * 0.5 + 0.5)
+          + c3 * (sin(v * 3.14159 + 4.189) * 0.5 + 0.5);
+  return vec4f(col * opacity, opacity);
 }
 `;
 
-export function Plasma({ speed = 1, scale = 1, saturation = 0.7, hueShift = 0, ...rest }: PlasmaProps) {
-  return <Effect shader={PLASMA_WGSL} data={[speed, scale, saturation, hueShift]} {...rest} />;
+export function Plasma({ params, ...rest }: { params: PlasmaParams; [k: string]: any }) {
+  // Packer — order must match the WGSL unpacker above.
+  const data = [
+    ...rgb(params.colors.primary),
+    ...rgb(params.colors.secondary),
+    ...rgb(params.colors.tertiary),
+    params.drift,
+    params.velocity,
+    params.opacity,
+  ];
+  return <Effect shader={PLASMA_WGSL} data={data} {...rest} />;
 }
 
 export default Plasma;

@@ -1,16 +1,26 @@
 // @reactjit/effects — the shared registry of reusable <Effect>s.
 //
-// The point: <Effect> is the ONE user-WGSL surface in ReactJIT, and anything
-// worth reusing (plasma, gradients, rings, …) lives here ONCE so carts import
-// it by name instead of re-rolling private WGSL. Add a liked effect here and
-// every cart gets it for free.
+// <Effect> is the ONE user-WGSL surface in ReactJIT, and anything worth reusing
+// (plasma, gradients, rings, crt, …) lives here ONCE so carts import it by name
+// instead of re-rolling private WGSL. Add a liked effect here and every cart
+// gets it for free.
 //
-//   import { Plasma, Gradient, Rings } from '@reactjit/effects';
-//   <Plasma style={{ flexGrow: 1 }} speed={1.4} />
+// Convention (see ./README.md): each entry takes a single `params` object,
+// exports a `<NAME>_DEFAULTS` you spread-override, and packs params → data[]
+// in the same order its WGSL unpacks P[].
 //
-// See ./README.md for the authoring contract (the uniforms/effect_math the
-// host injects) and how to add a new entry.
+//   import { Plasma, PLASMA_DEFAULTS } from '@reactjit/effects';
+//   <Plasma params={{ ...PLASMA_DEFAULTS, velocity: 2 }} style={{ flexGrow: 1 }} />
+//
+// Entries with children sample them via `subtree(uv)` (e.g. Crt) — that's the
+// "Effect used as a parent" / former-Filter case.
 
-export { Plasma, type PlasmaProps } from './Plasma';
-export { Gradient, type GradientProps } from './Gradient';
-export { Rings, type RingsProps } from './Rings';
+export { Plasma, PLASMA_DEFAULTS, type PlasmaParams } from './Plasma';
+export { Gradient, GRADIENT_DEFAULTS, type GradientParams } from './Gradient';
+export { Rings, RINGS_DEFAULTS, type RingsParams } from './Rings';
+export { Crt, CRT_DEFAULTS, type CrtParams } from './Crt';
+// Water.tsx exports Water + WaterProps but not yet a WATER_DEFAULTS / WaterParams
+// (it takes variant/seed/frame props directly, not the single `params` object the
+// convention above expects). Barrel-exported so WaterSurface.tsx resolves; the
+// active session should finish the params/DEFAULTS convention.
+export { Water, type WaterProps } from './Water';

@@ -6,12 +6,26 @@ lives here **once**, and carts import it by name instead of re-rolling private
 WGSL. This is how we avoid "N iterations of plasma."
 
 ```tsx
-import { Plasma, Gradient, Rings } from '@reactjit/effects';
+import { Plasma, PLASMA_DEFAULTS, Gradient, GRADIENT_DEFAULTS } from '@reactjit/effects';
 
-<Plasma style={{ flexGrow: 1 }} speed={1.4} />
-<Gradient from="#1b2a4a" to="#0a0d14" angle={135} style={{ flexGrow: 1 }} />
-<Rings color="#48d1ff" count={8} style={{ flexGrow: 1 }} />
+<Plasma params={PLASMA_DEFAULTS} style={{ flexGrow: 1 }} />
+<Plasma params={{ ...PLASMA_DEFAULTS, velocity: 2 }} style={{ flexGrow: 1 }} />
+<Gradient params={{ ...GRADIENT_DEFAULTS, angle: 135 }} style={{ flexGrow: 1 }} />
 ```
+
+## Entry API convention
+
+Every entry follows the same shape so they're predictable and preset-friendly:
+
+- Takes a **single `params` object** (not scattered props) — config is one value
+  you can store, serialize, or build presets from.
+- Exports **`<NAME>_DEFAULTS`** and a **`<Name>Params`** type — callers spread-
+  override (`{ ...PLASMA_DEFAULTS, velocity: 2 }`).
+- **Packer/unpacker symmetry**: the component flattens `params → data[]` in a
+  fixed order; the WGSL unpacks `P[i]` in that *same* order, with a
+  `// order must match` comment on both sides. Colors pack via `rgb()` (3 floats).
+- Entries that filter their **children** sample them with `subtree(uv)` (see
+  `Crt.tsx`) — the "Effect used as a parent" case.
 
 ## The authoring contract
 
@@ -34,23 +48,29 @@ don't redefine them:
 - `voronoi(px, py) -> vec2f`
 - `hsv2rgb(h, s, v) -> vec3f`, `hsl2rgb(h, s, l) -> vec3f` (h,s,v are **scalars**)
 
-**Parameters** — pass `data={[...numbers]}` and read them in WGSL via a storage
-binding you declare yourself:
+**Parameters** — the component packs `params` into `data={[...numbers]}`; the
+WGSL reads them from a storage binding it declares:
 ```wgsl
 @group(0) @binding(1) var<storage, read> P: array<f32>;
-// ... P[0], P[1], ...
+// Param unpacking — order must match the TS packer.
+let speed = P[0];
 ```
-Resolve colors to floats on the JS side with `rgb()` from `./_util` and flatten
-into `data` (see `Gradient.tsx`).
+Resolve colors with `rgb()` from `./_util` (3 floats each) and flatten into
+`data` in the same order the WGSL unpacks. See `Plasma.tsx`.
+
+**Children (filter case)** — when an entry wraps a subtree, sample it with
+`subtree(uv) -> vec4f` (the captured children). That's all `<Filter>` ever was.
 
 **WGSL gotchas:** no unary `+` (`+0.85` crashes module creation — write `0.85`);
 no backticks inside WGSL comments (they end the JS template literal).
 
 ## Adding an entry
 
-1. `runtime/effects/MyEffect.tsx` — export a component + a `MyEffectProps`.
-2. Re-export it from `index.ts`.
-3. Keep params semantic (speed/scale/color), not raw shader constants.
+1. `runtime/effects/MyEffect.tsx` — export `MyEffect`, `MY_EFFECT_DEFAULTS`, and
+   a `MyEffectParams` type. Component signature: `{ params: MyEffectParams }`.
+2. Re-export all three from `index.ts`.
+3. Keep params semantic (color/speed/intensity), not raw shader constants, and
+   keep the packer/unpacker order comment in sync on both sides.
 
 No framework rebuild is needed to add or restyle an entry — it's all cart-side
 TSX/WGSL compiled by esbuild.
