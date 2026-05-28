@@ -39,6 +39,8 @@ export async function run(argv: string[]): Promise<number> {
   if (icon) out(`[ship] app icon: ${icon}`);
 
   runFixReactImports(rjitHome, cartRoot);
+  const restoreGeometrySeed = bakeGeometryForCart(rjitHome, parsed.name, cart);
+  if (!restoreGeometrySeed) return 1;
 
   out(`[ship] bundling ${cart.entry} -> ${bundleOut}...`);
   const bundle = bundleCart({
@@ -48,6 +50,7 @@ export async function run(argv: string[]): Promise<number> {
     mode: substrate === 'tui' ? 'tui-host' : 'gpu-host',
   });
   writeSpawnOutput(bundle);
+  restoreGeometrySeed();
   if (bundle.code !== 0) return bundle.code || 1;
 
   if (embedBundle !== bundleOut) {
@@ -157,6 +160,33 @@ function runFixReactImports(rjitHome: string, cartRoot: string): void {
   const result = spawnSync('env', [`RJIT_HOME=${rjitHome}`, `CART_ROOT=${cartRoot}`, script]);
   writeSpawnOutput(result);
   if (result.code !== 0) throw new Error(`fix-react-imports exited ${result.code}`);
+}
+
+function bakeGeometryForCart(rjitHome: string, name: string, cart: CartPaths): (() => void) | null {
+  const manifestPath = `/tmp/reactjit-${sanitizeName(name)}-geometry-bake.json`;
+  const seedPath = `${rjitHome}/runtime/geometries/_baked.generated.ts`;
+  const previousSeed = tryFsRead(seedPath);
+
+  out('[ship] baking static Scene3D geometry...');
+  const scan = spawnSync(`${rjitHome}/tools/rjit`, ['bake-geometry-auto', cart.entry, '--out', manifestPath]);
+  writeSpawnOutput(scan);
+  if (scan.code !== 0) return null;
+
+  const bake = spawnSync(`${rjitHome}/tools/rjit`, ['bake-geometry', '--manifest', manifestPath, '--out', seedPath]);
+  writeSpawnOutput(bake);
+  if (bake.code !== 0) return null;
+
+  return () => {
+    if (previousSeed !== null) {
+      fsWrite(seedPath, previousSeed);
+    } else {
+      spawnSync('rm', ['-f', seedPath]);
+    }
+  };
+}
+
+function sanitizeName(name: string): string {
+  return name.replace(/[^A-Za-z0-9_.-]/g, '_');
 }
 
 function resolveSubstrate(flag: Substrate | null, manifestPath: string): Substrate {

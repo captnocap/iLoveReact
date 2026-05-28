@@ -151,20 +151,95 @@ function geometryDefId(node: any, ts: any): string | null {
 }
 
 interface ManifestItem { geometry: string; params: Record<string, unknown>; }
-interface ScanResult { items: ManifestItem[]; meshTotal: number; }
+interface ScanResult { items: ManifestItem[]; meshTotal: number; fileTotal: number; }
+interface ScanState {
+  items: ManifestItem[];
+  seenItems: Set<string>;
+  seenFiles: Set<string>;
+  meshTotal: number;
+}
 
-function scan(source: string, filename: string, ts: any): ScanResult {
+function isRelativeSpecifier(specifier: string): boolean {
+  return specifier === '.' || specifier === '..' || specifier.startsWith('./') || specifier.startsWith('../');
+}
+
+function isAbsolutePath(path: string): boolean {
+  return path.startsWith('/');
+}
+
+function normalizePath(path: string): string {
+  const absolute = isAbsolutePath(path);
+  const parts = path.split('/');
+  const stack: string[] = [];
+  for (const part of parts) {
+    if (!part || part === '.') continue;
+    if (part === '..') {
+      if (stack.length > 0 && stack[stack.length - 1] !== '..') stack.pop();
+      else if (!absolute) stack.push(part);
+    } else {
+      stack.push(part);
+    }
+  }
+  return `${absolute ? '/' : ''}${stack.join('/')}` || (absolute ? '/' : '.');
+}
+
+function dirname(path: string): string {
+  const normalized = normalizePath(path);
+  const index = normalized.lastIndexOf('/');
+  if (index < 0) return '.';
+  if (index === 0) return '/';
+  return normalized.slice(0, index);
+}
+
+function joinPath(base: string, next: string): string {
+  return normalizePath(`${base}/${next}`);
+}
+
+function resolveImportPath(importer: string, specifier: string): string | null {
+  if (!isRelativeSpecifier(specifier)) return null;
+  const base = joinPath(dirname(importer), specifier);
+  const candidates = /\.(tsx?|jsx?)$/.test(base)
+    ? [base]
+    : [
+      `${base}.tsx`,
+      `${base}.ts`,
+      `${base}.jsx`,
+      `${base}.js`,
+      `${base}/index.tsx`,
+      `${base}/index.ts`,
+      `${base}/index.jsx`,
+      `${base}/index.js`,
+    ];
+  return candidates.find((candidate) => !candidate.endsWith('.d.ts') && fsExists(candidate)) ?? null;
+}
+
+function importedSourcePaths(sf: any, filename: string, ts: any): string[] {
+  const paths: string[] = [];
+  for (const statement of sf.statements ?? []) {
+    if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
+    const specifier = statement.moduleSpecifier;
+    if (!specifier || !ts.isStringLiteral(specifier)) continue;
+    const resolved = resolveImportPath(filename, specifier.text);
+    if (resolved) paths.push(resolved);
+  }
+  return paths;
+}
+
+function scanFile(filename: string, ts: any, state: ScanState): void {
+  const normalizedFilename = normalizePath(filename);
+  if (state.seenFiles.has(normalizedFilename)) return;
+  state.seenFiles.add(normalizedFilename);
+
+  const source = fsRead(normalizedFilename);
   const sf = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const items: ManifestItem[] = [];
-  let meshTotal = 0;
-  const seen = new Set<string>(); // dedup by stable JSON of (id,params)
 
   function visit(node: any): void {
     const opening = ts.isJsxSelfClosingElement(node) ? node
       : ts.isJsxElement(node) ? node.openingElement
       : null;
-    if (opening && tagName(opening, ts) === 'Scene3D.Mesh') {
-      meshTotal++;
+    const tag = opening ? tagName(opening, ts) : null;
+    if (opening && (tag === 'Scene3D.Mesh' || tag === 'Scene3D.Instances')) {
+      state.meshTotal++;
       let geomNode: any = null;
       let paramsNode: any = null;
       for (const attr of opening.attributes.properties) {
@@ -179,9 +254,9 @@ function scan(source: string, filename: string, ts: any): ScanResult {
         const params = extractLiteral(paramsNode, ts);
         if (defId && params.ok && params.value !== null && typeof params.value === 'object') {
           const key = defId + '|' + JSON.stringify(params.value, Object.keys(params.value as object).sort());
-          if (!seen.has(key)) {
-            seen.add(key);
-            items.push({ geometry: defId, params: params.value as Record<string, unknown> });
+          if (!state.seenItems.has(key)) {
+            state.seenItems.add(key);
+            state.items.push({ geometry: defId, params: params.value as Record<string, unknown> });
           }
         }
       }
@@ -189,7 +264,21 @@ function scan(source: string, filename: string, ts: any): ScanResult {
     ts.forEachChild(node, visit);
   }
   visit(sf);
-  return { items, meshTotal };
+
+  for (const importPath of importedSourcePaths(sf, normalizedFilename, ts)) {
+    scanFile(importPath, ts, state);
+  }
+}
+
+function scan(entryPath: string, ts: any): ScanResult {
+  const state: ScanState = {
+    items: [],
+    seenItems: new Set<string>(),
+    seenFiles: new Set<string>(),
+    meshTotal: 0,
+  };
+  scanFile(entryPath, ts, state);
+  return { items: state.items, meshTotal: state.meshTotal, fileTotal: state.seenFiles.size };
 }
 
 // ── Command ───────────────────────────────────────────────────────────────
@@ -214,17 +303,17 @@ export async function run(argv: string[]): Promise<number> {
     return 1;
   }
 
-  const { items, meshTotal } = scan(fsRead(cartArg), cartArg, ts);
+  const { items, meshTotal, fileTotal } = scan(cartArg, ts);
   const json = JSON.stringify(items, null, 2);
   const outPath = args.flags.out as string | undefined;
 
   if (outPath) {
     fsWrite(outPath, json + '\n');
-    out(`bake-geometry-auto: ${cartArg} → ${items.length}/${meshTotal} Scene3D.Mesh elements bakeable → ${outPath}`);
+    out(`bake-geometry-auto: ${cartArg} → ${items.length}/${meshTotal} Scene3D geometry elements bakeable across ${fileTotal} files → ${outPath}`);
     out(`  next: rjit bake-geometry --manifest ${outPath}`);
   } else {
     __writeStdout(json + '\n');
-    err(`bake-geometry-auto: ${cartArg} → ${items.length}/${meshTotal} Scene3D.Mesh elements bakeable`);
+    err(`bake-geometry-auto: ${cartArg} → ${items.length}/${meshTotal} Scene3D geometry elements bakeable across ${fileTotal} files`);
   }
   return 0;
 }

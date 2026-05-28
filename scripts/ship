@@ -251,6 +251,7 @@ SDK_FLAG=""
 VOICE_FLAG=""
 WHISPER_FLAG=""
 PAINTABLE_FLAG=""
+PHYSICS_LAB_FLAG=""
 ONNX_FLAG=""
 PG_FLAG=""
 EMBED_FLAG=""
@@ -271,6 +272,7 @@ WANT_PG=0
 WANT_EMBED=0
 WANT_SQLITE=0
 WANT_TERMINAL=0
+WANT_PHYSICS_LAB=0
 if [[ -f "$METAFILE" ]]; then
     # Pure JSON membership check — v8cli reads the metafile, walks
     # outputs[].inputs (bytes-actually-shipped), and emits a single line of
@@ -366,6 +368,11 @@ else
     echo "[ship] WARNING: no metafile at $METAFILE — all opt-in V8 bindings disabled" >&2
 fi
 
+if [[ -f "$BUNDLE_OUT" ]] && grep -Eq "__physics_lab_|__hmsc_physics_" "$BUNDLE_OUT"; then
+    WANT_PHYSICS_LAB=1
+    PHYSICS_LAB_FLAG="-Dhas-physics-lab=true"
+fi
+
 BUILD_BINDINGS=()
 BUILD_LIBS=()
 BUILD_TRIGGERS=()
@@ -411,6 +418,10 @@ fi
 if [[ "$WANT_PAINTABLE" == "1" ]]; then
     BUILD_BINDINGS+=("paintable")
     BUILD_TRIGGERS+=("paintable: runtime/hooks/usePaintable.ts")
+fi
+if [[ "$WANT_PHYSICS_LAB" == "1" ]]; then
+    BUILD_BINDINGS+=("physics_lab")
+    BUILD_TRIGGERS+=("physics_lab: __physics_lab_* or __hmsc_physics_* host calls")
 fi
 if [[ "$WANT_ONNX" == "1" ]]; then
     BUILD_BINDINGS+=("onnx")
@@ -476,7 +487,7 @@ if [[ -d "$RJIT_HOME/deps/sysroot/usr/include" ]]; then
     done
 fi
 
-echo "[ship]   zig flags: $V8_FLAG${CUSTOM_CHROME_FLAG:+ $CUSTOM_CHROME_FLAG} $OPT_FLAG${SYSROOT_FLAG:+ $SYSROOT_FLAG}${PRIVACY_FLAG:+ $PRIVACY_FLAG}${PROCESS_FLAG:+ $PROCESS_FLAG}${HTTPSRV_FLAG:+ $HTTPSRV_FLAG}${WSSRV_FLAG:+ $WSSRV_FLAG}${NET_FLAG:+ $NET_FLAG}${TOR_FLAG:+ $TOR_FLAG}${FS_FLAG:+ $FS_FLAG}${WS_FLAG:+ $WS_FLAG}${TEL_FLAG:+ $TEL_FLAG}${ZIGCALL_FLAG:+ $ZIGCALL_FLAG}${SDK_FLAG:+ $SDK_FLAG}${VOICE_FLAG:+ $VOICE_FLAG}${WHISPER_FLAG:+ $WHISPER_FLAG}${PAINTABLE_FLAG:+ $PAINTABLE_FLAG}${ONNX_FLAG:+ $ONNX_FLAG}${PG_FLAG:+ $PG_FLAG}${EMBED_FLAG:+ $EMBED_FLAG}${SQLITE_FLAG:+ $SQLITE_FLAG}${TERMINAL_FLAG:+ $TERMINAL_FLAG}${DOOM_FLAG:+ $DOOM_FLAG}"
+echo "[ship]   zig flags: $V8_FLAG${CUSTOM_CHROME_FLAG:+ $CUSTOM_CHROME_FLAG} $OPT_FLAG${SYSROOT_FLAG:+ $SYSROOT_FLAG}${PRIVACY_FLAG:+ $PRIVACY_FLAG}${PROCESS_FLAG:+ $PROCESS_FLAG}${HTTPSRV_FLAG:+ $HTTPSRV_FLAG}${WSSRV_FLAG:+ $WSSRV_FLAG}${NET_FLAG:+ $NET_FLAG}${TOR_FLAG:+ $TOR_FLAG}${FS_FLAG:+ $FS_FLAG}${WS_FLAG:+ $WS_FLAG}${TEL_FLAG:+ $TEL_FLAG}${ZIGCALL_FLAG:+ $ZIGCALL_FLAG}${SDK_FLAG:+ $SDK_FLAG}${VOICE_FLAG:+ $VOICE_FLAG}${WHISPER_FLAG:+ $WHISPER_FLAG}${PAINTABLE_FLAG:+ $PAINTABLE_FLAG}${PHYSICS_LAB_FLAG:+ $PHYSICS_LAB_FLAG}${ONNX_FLAG:+ $ONNX_FLAG}${PG_FLAG:+ $PG_FLAG}${EMBED_FLAG:+ $EMBED_FLAG}${SQLITE_FLAG:+ $SQLITE_FLAG}${TERMINAL_FLAG:+ $TERMINAL_FLAG}${DOOM_FLAG:+ $DOOM_FLAG}"
 
 # Zig package cache override — ONLY when running off-tree (rjit-driven).
 # In rjit-driven mode the SDK ships a bundled cache at tools/zig/cache/p/
@@ -487,7 +498,7 @@ if [[ "$CART_ROOT" != "$RJIT_HOME" ]]; then
     export ZIG_GLOBAL_CACHE_DIR="$RJIT_HOME/tools/zig/cache"
 fi
 
-"$ZIG" build app -p "$CART_ROOT/zig-out" -Dapp-name="$NAME" -Dapp-source="$APP_SOURCE" -Dbundle-path="$EMBED_BUNDLE" $V8_FLAG $CUSTOM_CHROME_FLAG $OPT_FLAG $SYSROOT_FLAG $PRIVACY_FLAG $PROCESS_FLAG $HTTPSRV_FLAG $WSSRV_FLAG $NET_FLAG $TOR_FLAG $FS_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $SDK_FLAG $VOICE_FLAG $WHISPER_FLAG $PAINTABLE_FLAG $ONNX_FLAG $PG_FLAG $EMBED_FLAG $SQLITE_FLAG $TERMINAL_FLAG $DOOM_FLAG
+"$ZIG" build app -p "$CART_ROOT/zig-out" -Dapp-name="$NAME" -Dapp-source="$APP_SOURCE" -Dbundle-path="$EMBED_BUNDLE" $V8_FLAG $CUSTOM_CHROME_FLAG $OPT_FLAG $SYSROOT_FLAG $PRIVACY_FLAG $PROCESS_FLAG $HTTPSRV_FLAG $WSSRV_FLAG $NET_FLAG $TOR_FLAG $FS_FLAG $WS_FLAG $TEL_FLAG $ZIGCALL_FLAG $SDK_FLAG $VOICE_FLAG $WHISPER_FLAG $PAINTABLE_FLAG $PHYSICS_LAB_FLAG $ONNX_FLAG $PG_FLAG $EMBED_FLAG $SQLITE_FLAG $TERMINAL_FLAG $DOOM_FLAG
 
 BUILD_BIN="$CART_ROOT/zig-out/bin/$NAME"
 if [[ ! -f "$BUILD_BIN" ]]; then
@@ -519,9 +530,10 @@ declare -A EXPECTED=(
     [websocket]="$WANT_WS"
     [telemetry]="$WANT_TEL"
     [zigcall]="$WANT_ZIGCALL"
+    [physics_lab]="$WANT_PHYSICS_LAB"
 )
 LABEL_MISMATCH=0
-for ing in privacy process httpsrv wssrv net tor fs websocket telemetry zigcall; do
+for ing in privacy process httpsrv wssrv net tor fs websocket telemetry zigcall physics_lab; do
     flag_file="$LABEL_DIR/${ing}.flag"
     expected="${EXPECTED[$ing]:-0}"
     if [[ ! -f "$flag_file" ]]; then

@@ -379,7 +379,7 @@
       const n2 = [c2, 0, s2];
       g.tri(a, n1, [0, 0], d, n1, [0, 1], c, n2, [1, 1]);
       g.tri(a, n1, [0, 0], c, n2, [1, 1], b, n2, [1, 0]);
-      g.triFlat([0, hy, 0], b, a, [0, 1, 0]);
+      g.triFlat([0, hy, 0], c, d, [0, 1, 0]);
       g.triFlat([0, -hy, 0], a, b, [0, -1, 0]);
     }
     return g.build();
@@ -536,15 +536,16 @@
     height: 2,
     shoulderWidth: 0.72,
     hipWidth: 0.46,
-    headSize: 0.34,
+    headSize: 0.24,
     limbThickness: 1,
-    sides: 6
+    sides: 8,
+    smoothShading: true
   };
   function ringVerts(r, sides) {
     const out2 = [];
     const t = r.twist ?? 0;
     for (let i = 0; i < sides; i++) {
-      const a = t + i / sides * Math.PI * 2;
+      const a = -Math.PI / 2 + t + i / sides * Math.PI * 2;
       const x = r.cx + Math.cos(a) * r.rx;
       const z = r.cz + Math.sin(a) * r.rz;
       out2.push([x, r.y, z]);
@@ -561,9 +562,65 @@
     const L = Math.hypot(v[0], v[1], v[2]) || 1;
     return [v[0] / L, v[1] / L, v[2] / L];
   }
-  function emitSweep(g, rings, sides) {
+  var HUMANOID_ATLAS = {
+    head: { u0: 0, u1: 0.5, v0: 0.5, v1: 0 },
+    // top-left, flipped (crown→image top)
+    arms: { u0: 0.5, u1: 1, v0: 0, v1: 0.5 },
+    // top-right (shoulder→top, tip→middle)
+    torso: { u0: 0, u1: 0.5, v0: 1, v1: 0.5 },
+    // bottom-left, flipped (hip→image bottom)
+    legs: { u0: 0.5, u1: 1, v0: 0.5, v1: 1 }
+    // bottom-right (hip→middle, toe→image bottom)
+  };
+  function emitSweep(g, rings, sides, smooth, rect) {
     const ringPts = rings.map((r) => ringVerts(r, sides));
-    for (let i = 0; i < ringPts.length - 1; i++) {
+    const numRings = ringPts.length;
+    const descending = rings.length >= 2 && rings[1].y <= rings[0].y;
+    const faceN = [];
+    for (let i = 0; i < numRings - 1; i++) {
+      const a = ringPts[i];
+      const b = ringPts[i + 1];
+      const row = [];
+      for (let s = 0; s < sides; s++) {
+        const s2 = (s + 1) % sides;
+        const p0 = a[s];
+        const p1 = a[s2];
+        const p3 = b[s];
+        const e1 = sub(p1, p0);
+        const e2 = sub(p3, p0);
+        const n = normalize3(descending ? cross(e1, e2) : cross(e2, e1));
+        row.push(n);
+      }
+      faceN.push(row);
+    }
+    let vertN = null;
+    if (smooth) {
+      vertN = [];
+      for (let i = 0; i < numRings; i++) {
+        const row = [];
+        for (let s = 0; s < sides; s++) {
+          const sPrev = (s + sides - 1) % sides;
+          let nx = 0, ny = 0, nz = 0;
+          const acc = (qi, qs) => {
+            if (qi < 0 || qi >= faceN.length) return;
+            const n = faceN[qi][qs];
+            nx += n[0];
+            ny += n[1];
+            nz += n[2];
+          };
+          acc(i - 1, sPrev);
+          acc(i - 1, s);
+          acc(i, sPrev);
+          acc(i, s);
+          const L = Math.hypot(nx, ny, nz);
+          row.push(L > 1e-6 ? [nx / L, ny / L, nz / L] : [0, 1, 0]);
+        }
+        vertN.push(row);
+      }
+    }
+    const uAt = (s) => rect.u0 + s / sides * (rect.u1 - rect.u0);
+    const vAt = (i) => numRings > 1 ? rect.v0 + i / (numRings - 1) * (rect.v1 - rect.v0) : rect.v0;
+    for (let i = 0; i < numRings - 1; i++) {
       const a = ringPts[i];
       const b = ringPts[i + 1];
       for (let s = 0; s < sides; s++) {
@@ -572,24 +629,41 @@
         const p1 = a[s2];
         const p2 = b[s2];
         const p3 = b[s];
-        const e1 = sub(p1, p0);
-        const e2 = sub(p3, p0);
-        const n = normalize3(cross(e1, e2));
-        g.tri(p0, n, [0, 0], p1, n, [1, 0], p2, n, [1, 1]);
-        g.tri(p0, n, [0, 0], p2, n, [1, 1], p3, n, [0, 1]);
+        const fn = faceN[i][s];
+        const n0 = vertN ? vertN[i][s] : fn;
+        const n1 = vertN ? vertN[i][s2] : fn;
+        const n2 = vertN ? vertN[i + 1][s2] : fn;
+        const n3 = vertN ? vertN[i + 1][s] : fn;
+        const uv0 = [uAt(s), vAt(i)];
+        const uv1 = [uAt(s + 1), vAt(i)];
+        const uv2 = [uAt(s + 1), vAt(i + 1)];
+        const uv3 = [uAt(s), vAt(i + 1)];
+        if (descending) {
+          g.tri(p0, n0, uv0, p1, n1, uv1, p2, n2, uv2);
+          g.tri(p0, n0, uv0, p2, n2, uv2, p3, n3, uv3);
+        } else {
+          g.tri(p0, n0, uv0, p3, n3, uv3, p2, n2, uv2);
+          g.tri(p0, n0, uv0, p2, n2, uv2, p1, n1, uv1);
+        }
       }
     }
   }
-  function emitCap(g, ring, sides, up) {
+  function emitCap(g, ring, sides, up, rect, vEdge) {
     const pts = ringVerts(ring, sides);
     const center = [ring.cx, ring.y, ring.cz];
     const n = up ? [0, 1, 0] : [0, -1, 0];
+    const perimeterV = vEdge === "v0" ? rect.v0 : rect.v1;
+    const dv = (rect.v1 - rect.v0) * 0.08 * (vEdge === "v0" ? 1 : -1);
+    const centerUV = [(rect.u0 + rect.u1) * 0.5, perimeterV + dv];
+    const uAt = (s) => rect.u0 + s / sides * (rect.u1 - rect.u0);
     for (let s = 0; s < sides; s++) {
       const s2 = (s + 1) % sides;
+      const uv_s = [uAt(s), perimeterV];
+      const uv_s2 = [uAt(s + 1), perimeterV];
       if (up) {
-        g.tri(center, n, [0.5, 0.5], pts[s], n, [0, 0], pts[s2], n, [1, 0]);
+        g.tri(center, n, centerUV, pts[s2], n, uv_s2, pts[s], n, uv_s);
       } else {
-        g.tri(center, n, [0.5, 0.5], pts[s2], n, [1, 0], pts[s], n, [0, 0]);
+        g.tri(center, n, centerUV, pts[s], n, uv_s, pts[s2], n, uv_s2);
       }
     }
   }
@@ -608,61 +682,69 @@
     const crownY = H * 1;
     const shoulderHalf = p.shoulderWidth * 0.5;
     const hipHalf = p.hipWidth * 0.5;
-    const trunkRings = [
+    const neckRing = { y: neckY, cx: 0, cz: 0, rx: H * 0.07, rz: H * 0.06 };
+    const bodyRings = [
       { y: hipY, cx: 0, cz: 0, rx: hipHalf * 1.08, rz: hipHalf * 0.85 },
       // hip
-      { y: waistY, cx: 0, cz: 0, rx: hipHalf * 0.95, rz: hipHalf * 0.78 },
-      // waist
-      { y: chestY, cx: 0, cz: 0, rx: shoulderHalf * 0.88, rz: shoulderHalf * 0.62 },
-      // chest
+      { y: waistY, cx: 0, cz: 0, rx: hipHalf * 1.02, rz: hipHalf * 0.82 },
+      // waist (no narrowing — straight column)
       { y: shoulderY, cx: 0, cz: 0, rx: shoulderHalf, rz: shoulderHalf * 0.62 },
       // shoulder
-      { y: neckY, cx: 0, cz: 0, rx: H * 0.07, rz: H * 0.06 },
-      // neck (narrow)
+      neckRing
+    ];
+    const headRings = [
+      neckRing,
       { y: chinY, cx: 0, cz: 0.01, rx: p.headSize * 0.72, rz: p.headSize * 0.78 },
       // jaw
       { y: faceY, cx: 0, cz: 0.01, rx: p.headSize * 1, rz: p.headSize * 1 },
-      // face/head widest
-      { y: crownY, cx: 0, cz: 0, rx: p.headSize * 0.62, rz: p.headSize * 0.62 }
-      // crown
+      // face (widest)
+      { y: H * 0.96, cx: 0, cz: 0, rx: p.headSize * 0.7, rz: p.headSize * 0.7 },
+      // upper-skull dome
+      { y: crownY, cx: 0, cz: 0, rx: p.headSize * 0.22, rz: p.headSize * 0.22 }
+      // crown (near-point)
     ];
-    emitSweep(g, trunkRings, sides);
-    emitCap(g, trunkRings[trunkRings.length - 1], sides, true);
+    emitSweep(g, bodyRings, sides, p.smoothShading, HUMANOID_ATLAS.torso);
+    emitSweep(g, headRings, sides, p.smoothShading, HUMANOID_ATLAS.head);
+    emitCap(g, headRings[headRings.length - 1], sides, true, HUMANOID_ATLAS.head, "v0");
     const legRings = (sx) => [
       { y: hipY + 0.04, cx: sx, cz: 0, rx: H * 0.085 * t, rz: H * 0.085 * t },
       // root inside trunk
       { y: hipY - H * 0.05, cx: sx, cz: 0, rx: H * 0.085 * t, rz: H * 0.085 * t },
       // upper thigh
-      { y: hipY - H * 0.18, cx: sx, cz: 0, rx: H * 0.075 * t, rz: H * 0.075 * t },
+      { y: hipY - H * 0.18, cx: sx, cz: 0, rx: H * 0.078 * t, rz: H * 0.078 * t },
       // knee
       { y: hipY - H * 0.34, cx: sx, cz: 0.01, rx: H * 0.07 * t, rz: H * 0.07 * t },
       // ankle
-      { y: hipY - H * 0.4, cx: sx, cz: 0.06, rx: H * 0.085 * t, rz: H * 0.13 * t }
-      // foot (forward-stretched)
+      { y: hipY - H * 0.39, cx: sx, cz: 0.06, rx: H * 0.07 * t, rz: H * 0.14 * t },
+      // foot (forward-stretched, no X widen)
+      { y: hipY - H * 0.4, cx: sx, cz: 0.1, rx: H * 0.05 * t, rz: H * 0.09 * t }
+      // toe (taper forward + down)
     ];
     const legXOffset = hipHalf * 0.55;
     for (const sx of [-legXOffset, legXOffset]) {
       const rings = legRings(sx);
-      emitSweep(g, rings, sides);
-      emitCap(g, rings[rings.length - 1], sides, false);
+      emitSweep(g, rings, sides, p.smoothShading, HUMANOID_ATLAS.legs);
+      emitCap(g, rings[rings.length - 1], sides, false, HUMANOID_ATLAS.legs, "v1");
     }
     const armRings = (sx) => [
       { y: shoulderY, cx: sx * 0.55, cz: 0, rx: H * 0.07 * t, rz: H * 0.07 * t },
       // root inside trunk
       { y: shoulderY - H * 0.04, cx: sx, cz: 0, rx: H * 0.07 * t, rz: H * 0.07 * t },
       // shoulder bulge
-      { y: shoulderY - H * 0.16, cx: sx, cz: 0, rx: H * 0.06 * t, rz: H * 0.06 * t },
+      { y: shoulderY - H * 0.16, cx: sx, cz: 0, rx: H * 0.062 * t, rz: H * 0.062 * t },
       // bicep
       { y: shoulderY - H * 0.3, cx: sx, cz: 0, rx: H * 0.055 * t, rz: H * 0.055 * t },
+      // forearm
+      { y: shoulderY - H * 0.4, cx: sx, cz: 0, rx: H * 0.045 * t, rz: H * 0.045 * t },
       // wrist
-      { y: shoulderY - H * 0.36, cx: sx, cz: 0.02, rx: H * 0.075 * t, rz: H * 0.075 * t }
-      // hand (mitt bulge)
+      { y: shoulderY - H * 0.43, cx: sx, cz: 0, rx: H * 0.02 * t, rz: H * 0.02 * t }
+      // arm end (near-point)
     ];
     const armX = shoulderHalf * 1.02;
     for (const sx of [-armX, armX]) {
       const rings = armRings(sx);
-      emitSweep(g, rings, sides);
-      emitCap(g, rings[rings.length - 1], sides, false);
+      emitSweep(g, rings, sides, p.smoothShading, HUMANOID_ATLAS.arms);
+      emitCap(g, rings[rings.length - 1], sides, false, HUMANOID_ATLAS.arms, "v1");
     }
     return g.build();
   }
@@ -897,15 +979,74 @@
     if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) return node.name.text;
     return null;
   }
-  function scan(source, filename, ts) {
+  function isRelativeSpecifier(specifier) {
+    return specifier === "." || specifier === ".." || specifier.startsWith("./") || specifier.startsWith("../");
+  }
+  function isAbsolutePath(path) {
+    return path.startsWith("/");
+  }
+  function normalizePath(path) {
+    const absolute = isAbsolutePath(path);
+    const parts = path.split("/");
+    const stack = [];
+    for (const part of parts) {
+      if (!part || part === ".") continue;
+      if (part === "..") {
+        if (stack.length > 0 && stack[stack.length - 1] !== "..") stack.pop();
+        else if (!absolute) stack.push(part);
+      } else {
+        stack.push(part);
+      }
+    }
+    return `${absolute ? "/" : ""}${stack.join("/")}` || (absolute ? "/" : ".");
+  }
+  function dirname(path) {
+    const normalized = normalizePath(path);
+    const index = normalized.lastIndexOf("/");
+    if (index < 0) return ".";
+    if (index === 0) return "/";
+    return normalized.slice(0, index);
+  }
+  function joinPath(base, next) {
+    return normalizePath(`${base}/${next}`);
+  }
+  function resolveImportPath(importer, specifier) {
+    if (!isRelativeSpecifier(specifier)) return null;
+    const base = joinPath(dirname(importer), specifier);
+    const candidates = /\.(tsx?|jsx?)$/.test(base) ? [base] : [
+      `${base}.tsx`,
+      `${base}.ts`,
+      `${base}.jsx`,
+      `${base}.js`,
+      `${base}/index.tsx`,
+      `${base}/index.ts`,
+      `${base}/index.jsx`,
+      `${base}/index.js`
+    ];
+    return candidates.find((candidate) => !candidate.endsWith(".d.ts") && fsExists(candidate)) ?? null;
+  }
+  function importedSourcePaths(sf, filename, ts) {
+    const paths = [];
+    for (const statement of sf.statements ?? []) {
+      if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
+      const specifier = statement.moduleSpecifier;
+      if (!specifier || !ts.isStringLiteral(specifier)) continue;
+      const resolved = resolveImportPath(filename, specifier.text);
+      if (resolved) paths.push(resolved);
+    }
+    return paths;
+  }
+  function scanFile(filename, ts, state) {
+    const normalizedFilename = normalizePath(filename);
+    if (state.seenFiles.has(normalizedFilename)) return;
+    state.seenFiles.add(normalizedFilename);
+    const source = fsRead(normalizedFilename);
     const sf = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-    const items = [];
-    let meshTotal = 0;
-    const seen = /* @__PURE__ */ new Set();
     function visit(node) {
       const opening = ts.isJsxSelfClosingElement(node) ? node : ts.isJsxElement(node) ? node.openingElement : null;
-      if (opening && tagName(opening, ts) === "Scene3D.Mesh") {
-        meshTotal++;
+      const tag = opening ? tagName(opening, ts) : null;
+      if (opening && (tag === "Scene3D.Mesh" || tag === "Scene3D.Instances")) {
+        state.meshTotal++;
         let geomNode = null;
         let paramsNode = null;
         for (const attr of opening.attributes.properties) {
@@ -920,9 +1061,9 @@
           const params = extractLiteral(paramsNode, ts);
           if (defId && params.ok && params.value !== null && typeof params.value === "object") {
             const key = defId + "|" + JSON.stringify(params.value, Object.keys(params.value).sort());
-            if (!seen.has(key)) {
-              seen.add(key);
-              items.push({ geometry: defId, params: params.value });
+            if (!state.seenItems.has(key)) {
+              state.seenItems.add(key);
+              state.items.push({ geometry: defId, params: params.value });
             }
           }
         }
@@ -930,7 +1071,19 @@
       ts.forEachChild(node, visit);
     }
     visit(sf);
-    return { items, meshTotal };
+    for (const importPath2 of importedSourcePaths(sf, normalizedFilename, ts)) {
+      scanFile(importPath2, ts, state);
+    }
+  }
+  function scan(entryPath, ts) {
+    const state = {
+      items: [],
+      seenItems: /* @__PURE__ */ new Set(),
+      seenFiles: /* @__PURE__ */ new Set(),
+      meshTotal: 0
+    };
+    scanFile(entryPath, ts, state);
+    return { items: state.items, meshTotal: state.meshTotal, fileTotal: state.seenFiles.size };
   }
   async function run3(argv) {
     const args = parseArgs(argv, { positional: ["cart"], flags: { out: "string" } });
@@ -950,16 +1103,16 @@
       err(`bake-geometry-auto: ${e.message}`);
       return 1;
     }
-    const { items, meshTotal } = scan(fsRead(cartArg), cartArg, ts);
+    const { items, meshTotal, fileTotal } = scan(cartArg, ts);
     const json = JSON.stringify(items, null, 2);
     const outPath = args.flags.out;
     if (outPath) {
       fsWrite(outPath, json + "\n");
-      out(`bake-geometry-auto: ${cartArg} \u2192 ${items.length}/${meshTotal} Scene3D.Mesh elements bakeable \u2192 ${outPath}`);
+      out(`bake-geometry-auto: ${cartArg} \u2192 ${items.length}/${meshTotal} Scene3D geometry elements bakeable across ${fileTotal} files \u2192 ${outPath}`);
       out(`  next: rjit bake-geometry --manifest ${outPath}`);
     } else {
       __writeStdout(json + "\n");
-      err(`bake-geometry-auto: ${cartArg} \u2192 ${items.length}/${meshTotal} Scene3D.Mesh elements bakeable`);
+      err(`bake-geometry-auto: ${cartArg} \u2192 ${items.length}/${meshTotal} Scene3D geometry elements bakeable across ${fileTotal} files`);
     }
     return 0;
   }
@@ -1636,7 +1789,7 @@ ${atlasW} ${atlasH}
     log: (...args) => __writeStdout(args.map((x) => String(x)).join(" ") + "\n"),
     error: (...args) => __writeStderr(args.map((x) => String(x)).join(" ") + "\n")
   };
-  function normalizePath(value) {
+  function normalizePath2(value) {
     const raw = String(value || "");
     const absolute = raw.startsWith("/");
     const parts = [];
@@ -1657,16 +1810,16 @@ ${atlasW} ${atlasH}
       if (!p) continue;
       filtered.push(String(p));
     }
-    return normalizePath(filtered.join("/"));
+    return normalizePath2(filtered.join("/"));
   }
   function basename2(pathValue) {
-    const normalized = normalizePath(pathValue);
+    const normalized = normalizePath2(pathValue);
     if (!normalized || normalized === "/") return "";
     const segs = normalized.split("/");
     return segs[segs.length - 1];
   }
   function splitPath(pathValue) {
-    const normalized = normalizePath(pathValue);
+    const normalized = normalizePath2(pathValue);
     if (normalized === "/" || normalized === ".") return { absolute: normalized === "/", parts: [] };
     const absolute = normalized.startsWith("/");
     const noRoot = absolute ? normalized.slice(1) : normalized;
@@ -1675,7 +1828,7 @@ ${atlasW} ${atlasH}
   function relative(from, to) {
     const fromParts = splitPath(from);
     const toParts = splitPath(to);
-    if (fromParts.absolute !== toParts.absolute) return normalizePath(to);
+    if (fromParts.absolute !== toParts.absolute) return normalizePath2(to);
     const a = fromParts.parts;
     const b = toParts.parts;
     let i = 0;
@@ -4348,9 +4501,9 @@ ${entry}
   }
   function resolveCart2(cartRoot, name) {
     const dirEntry = `${cartRoot}/cart/${name}/index.tsx`;
-    if (fsExists(dirEntry)) return { entry: dirEntry, dir: dirname(dirEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    if (fsExists(dirEntry)) return { entry: dirEntry, dir: dirname2(dirEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
     const fileEntry = `${cartRoot}/cart/${name}.tsx`;
-    if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname2(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
     return null;
   }
   function resolveSubstrate(flag, manifestPath) {
@@ -4510,7 +4663,7 @@ ${entry}
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
   }
-  function dirname(path) {
+  function dirname2(path) {
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
@@ -4545,7 +4698,7 @@ ${entry}
     if (valid) return fail4(valid);
     log2(`recipe: id=${spec.id} base=${spec.base} apt=${spec.apt.length} steps=${(spec.steps || []).length}`);
     const outPath = abs(root, spec.output.path);
-    const outDir = dirname2(outPath);
+    const outDir = dirname3(outPath);
     fsMkdir(outDir);
     if (fsExists(outPath)) spawnSync("/bin/rm", ["-f", outPath]);
     const hooks = buildCustomizeHooks(root, spec);
@@ -4671,7 +4824,7 @@ ${entry}
     const trimmed = path.startsWith("./") ? path.slice(2) : path;
     return `${root}/${trimmed}`;
   }
-  function dirname2(path) {
+  function dirname3(path) {
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
@@ -4929,7 +5082,7 @@ ${entry}
     if (fsExists(targetDir)) return fail5(`target already exists: ${displayPath(root, targetDir)}`, 1);
     const name = cartNameFor(targetDir);
     const title = titleForName(name);
-    const inCart = dirname3(targetDir) === joinPath(root, "cart");
+    const inCart = dirname4(targetDir) === joinPath2(root, "cart");
     const ctx = {
       targetDir,
       name,
@@ -4948,8 +5101,8 @@ ${entry}
       files["cart.json"] = manifest(title, template.description, template.width, template.height);
       files["README.md"] = readme(root, ctx, parsed.template);
       for (const [fileName, content] of Object.entries(files)) {
-        const path = joinPath(targetDir, fileName);
-        const parent = dirname3(path);
+        const path = joinPath2(targetDir, fileName);
+        const parent = dirname4(path);
         if (!fsExists(parent)) fsMkdir(parent);
         fsWrite(path, content);
       }
@@ -5000,7 +5153,7 @@ ${entry}
     err(`[init] ${message}`);
     return code || 1;
   }
-  function normalizePath2(path) {
+  function normalizePath3(path) {
     const absolute = path.startsWith("/");
     const parts = [];
     for (const part of path.replace(/\\/g, "/").split("/")) {
@@ -5014,19 +5167,19 @@ ${entry}
     }
     return (absolute ? "/" : "") + parts.join("/");
   }
-  function joinPath(a, b) {
-    if (!a) return normalizePath2(b);
-    if (!b) return normalizePath2(a);
-    return normalizePath2(a.replace(/\/+$/, "") + "/" + b.replace(/^\/+/, ""));
+  function joinPath2(a, b) {
+    if (!a) return normalizePath3(b);
+    if (!b) return normalizePath3(a);
+    return normalizePath3(a.replace(/\/+$/, "") + "/" + b.replace(/^\/+/, ""));
   }
-  function dirname3(path) {
-    const normalized = normalizePath2(path);
+  function dirname4(path) {
+    const normalized = normalizePath3(path);
     const index = normalized.lastIndexOf("/");
     if (index <= 0) return normalized.startsWith("/") ? "/" : ".";
     return normalized.slice(0, index);
   }
   function basename3(path) {
-    const normalized = normalizePath2(path);
+    const normalized = normalizePath3(path);
     const index = normalized.lastIndexOf("/");
     return index === -1 ? normalized : normalized.slice(index + 1);
   }
@@ -5035,13 +5188,13 @@ ${entry}
   }
   function resolveTarget(root, input) {
     if (!input || input.startsWith("-")) throw new Error("directory must be a positional argument, not a flag");
-    if (!hasPathSeparator(input) && !input.startsWith("/")) return normalizePath2(joinPath(root, `cart/${input}`));
-    if (input.startsWith("/")) return normalizePath2(input);
-    return normalizePath2(joinPath(root, input));
+    if (!hasPathSeparator(input) && !input.startsWith("/")) return normalizePath3(joinPath2(root, `cart/${input}`));
+    if (input.startsWith("/")) return normalizePath3(input);
+    return normalizePath3(joinPath2(root, input));
   }
   function relativeDir(fromDir, toDir) {
-    const from = normalizePath2(fromDir).split("/").filter(Boolean);
-    const to = normalizePath2(toDir).split("/").filter(Boolean);
+    const from = normalizePath3(fromDir).split("/").filter(Boolean);
+    const to = normalizePath3(toDir).split("/").filter(Boolean);
     let index = 0;
     while (index < from.length && index < to.length && from[index] === to[index]) index++;
     const up = from.slice(index).map(() => "..");
@@ -5049,7 +5202,7 @@ ${entry}
     return rel3 || ".";
   }
   function importPath(root, targetDir, runtimeModule) {
-    return `${relativeDir(targetDir, joinPath(root, "runtime"))}/${runtimeModule}`;
+    return `${relativeDir(targetDir, joinPath2(root, "runtime"))}/${runtimeModule}`;
   }
   function displayPath(root, path) {
     return path.startsWith(`${root}/`) ? path.slice(root.length + 1) : path;
@@ -5931,6 +6084,8 @@ export default function App() {
     const icon = resolveIcon(cartRoot, cart, parsed.name);
     if (icon) out(`[ship] app icon: ${icon}`);
     runFixReactImports2(rjitHome, cartRoot);
+    const restoreGeometrySeed = bakeGeometryForCart(rjitHome, parsed.name, cart);
+    if (!restoreGeometrySeed) return 1;
     out(`[ship] bundling ${cart.entry} -> ${bundleOut}...`);
     const bundle = bundleCart({
       rjitHome,
@@ -5939,9 +6094,10 @@ export default function App() {
       mode: substrate === "tui" ? "tui-host" : "gpu-host"
     });
     writeSpawnOutput3(bundle);
+    restoreGeometrySeed();
     if (bundle.code !== 0) return bundle.code || 1;
     if (embedBundle !== bundleOut) {
-      fsMkdir(dirname4(embedBundle));
+      fsMkdir(dirname5(embedBundle));
       const copy = spawnSync("cp", ["-f", bundleOut, embedBundle]);
       writeSpawnOutput3(copy);
       if (copy.code !== 0) return copy.code || 1;
@@ -6021,9 +6177,9 @@ export default function App() {
   }
   function resolveCart3(cartRoot, name) {
     const dirEntry = `${cartRoot}/cart/${name}/index.tsx`;
-    if (fsExists(dirEntry)) return { entry: dirEntry, dir: dirname4(dirEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    if (fsExists(dirEntry)) return { entry: dirEntry, dir: dirname5(dirEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
     const fileEntry = `${cartRoot}/cart/${name}.tsx`;
-    if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname4(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
+    if (fsExists(fileEntry)) return { entry: fileEntry, dir: dirname5(fileEntry), manifest: `${cartRoot}/cart/${name}/cart.json` };
     return null;
   }
   function resolveZig2(rjitHome) {
@@ -6037,6 +6193,28 @@ export default function App() {
     const result = spawnSync("env", [`RJIT_HOME=${rjitHome}`, `CART_ROOT=${cartRoot}`, script]);
     writeSpawnOutput3(result);
     if (result.code !== 0) throw new Error(`fix-react-imports exited ${result.code}`);
+  }
+  function bakeGeometryForCart(rjitHome, name, cart) {
+    const manifestPath = `/tmp/reactjit-${sanitizeName(name)}-geometry-bake.json`;
+    const seedPath = `${rjitHome}/runtime/geometries/_baked.generated.ts`;
+    const previousSeed = tryFsRead(seedPath);
+    out("[ship] baking static Scene3D geometry...");
+    const scan2 = spawnSync(`${rjitHome}/tools/rjit`, ["bake-geometry-auto", cart.entry, "--out", manifestPath]);
+    writeSpawnOutput3(scan2);
+    if (scan2.code !== 0) return null;
+    const bake = spawnSync(`${rjitHome}/tools/rjit`, ["bake-geometry", "--manifest", manifestPath, "--out", seedPath]);
+    writeSpawnOutput3(bake);
+    if (bake.code !== 0) return null;
+    return () => {
+      if (previousSeed !== null) {
+        fsWrite(seedPath, previousSeed);
+      } else {
+        spawnSync("rm", ["-f", seedPath]);
+      }
+    };
+  }
+  function sanitizeName(name) {
+    return name.replace(/[^A-Za-z0-9_.-]/g, "_");
   }
   function resolveSubstrate2(flag, manifestPath) {
     if (flag) return flag;
@@ -6134,7 +6312,7 @@ export default function App() {
   }
   function runLockedBuild(rjitHome, command) {
     const lockFile = `${rjitHome}/.zig-cache/.ship.lock`;
-    fsMkdir(dirname4(lockFile));
+    fsMkdir(dirname5(lockFile));
     const first = spawnSync("flock", ["-n", "-E", "75", lockFile, ...command]);
     if (first.code !== 75) return first;
     out("[ship] another build in progress - waiting for lock...");
@@ -6417,7 +6595,7 @@ __ARCHIVE__
     err(`[ship] ${message}`);
     return code;
   }
-  function dirname4(path) {
+  function dirname5(path) {
     const index = path.lastIndexOf("/");
     return index <= 0 ? "/" : path.slice(0, index);
   }

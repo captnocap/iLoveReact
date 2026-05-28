@@ -3,7 +3,7 @@
 This cart is internal tooling for Hitman Shitcity. Ship it with:
 
 ```sh
-./scripts/ship hmsc-int
+./tools/rjit ship hmsc-int
 ```
 
 Keep it separate from the game cart. Map authoring, world inspection, chunk

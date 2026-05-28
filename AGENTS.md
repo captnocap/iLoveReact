@@ -83,8 +83,8 @@ cart/<name>/
 
 Or single-file: `cart/<name>.tsx`.
 
-Build: `./scripts/ship <name>` → self-extracting binary at `zig-out/bin/<name>`.
-Debug: `./scripts/ship <name> -d` → raw ELF at `zig-out/bin/<name>-raw`.
+Build: `./tools/rjit ship <name>` → self-extracting binary at `zig-out/bin/<name>`.
+Fast local verification build: `SHIP_RUN_PACKAGE=0 ./tools/rjit ship <name>` → raw app binary at `zig-out/bin/<name>` without self-extractor packaging.
 
 The active cart is `cart/sweatshop/` (evolved from `cursor-ide`). It contains the IDE surface: file tree, editor, git panel, search, command palette, agent chat, settings, theme editor.
 
@@ -96,7 +96,7 @@ Before changing any of these carts, read its nested `AGENTS.md` when present.
 
 ## Runtime: V8 Default
 
-- **V8** (`v8_app.zig`) is the default. `scripts/ship` builds V8. Embedded via zig-v8. ~6MB binary overhead. Fast.
+- **V8** (`v8_app.zig`) is the default. `tools/rjit ship` builds V8 through the TypeScript CLI pipeline. Embedded via zig-v8. ~6MB binary overhead. Fast.
 - **QJS** (`qjs_app.zig`) is maintenance-only legacy. Hit a 2000ms-per-click ceiling. `--qjs` flag is opt-in legacy. Do not add new features to QJS bindings.
 - **JSRT** (`framework/lua/jsrt/`) is the LuaJIT evaluator alternate path. 12/13 targets passing. Interesting but not the default.
 
