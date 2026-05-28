@@ -514,13 +514,18 @@ Scene3DBase.Mesh = ({
   const geomIntern = require('./geometries/intern');
   if (geomIntern.isGeometryDef(geometry)) {
     const g3 = geomIntern.internGeometry(geometry, params);
+    // Bridge-cost dedup: the first mesh per key ships {key + verts + count + bounds}
+    // so the host caches them; every subsequent mesh ships only {key} and the host
+    // looks up the cache. 500 coconuts → ONE vertex payload across the bridge, not 500.
+    const firstForKey = !geomIntern.hasShipped(g3.key);
+    if (firstForKey) geomIntern.markShipped(g3.key);
+    const geomProps = firstForKey
+      ? { scene3dGeomKey: g3.key, scene3dVertices: g3.vertices, scene3dVertCount: g3.count, scene3dBoundsRadius: g3.bounds }
+      : { scene3dGeomKey: g3.key };
     return h('View', {
       ...rest,
       scene3dMesh: true,
-      scene3dGeomKey: g3.key,
-      scene3dVertices: g3.vertices,
-      scene3dVertCount: g3.count,
-      scene3dBoundsRadius: g3.bounds,
+      ...geomProps,
       scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
       scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
       scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,

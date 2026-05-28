@@ -61,6 +61,20 @@ export function internKey(def: GeometryDefLike, params: any): string {
   return def.id + '|' + stable(resolved);
 }
 
+// Bridge-cost dedup. The reconciler serializes props per-CREATE; without this,
+// 500 coconut meshes each ship the same ~20KB vertex array across the V8/Zig
+// bridge — 10MB of duplicate JSON at scene start. Track which keys we've already
+// shipped: the first mesh per key ships {key + verts}, subsequent meshes ship
+// only {key} and rely on the host's intern cache already having uploaded them.
+const shipped = new Set<string>();
+/** True if a mesh for this intern key has already shipped its verts to the host. */
+export function hasShipped(key: string): boolean { return shipped.has(key); }
+/** Mark `key` as shipped — call after a mesh emits the full vertex payload. */
+export function markShipped(key: string): void { shipped.add(key); }
+/** Reset the shipped-set (dev hot-reload, tests). The host cache persists; this
+ *  only forces the next mesh per key to re-include verts as a re-registration. */
+export function resetShipped(): void { shipped.clear(); }
+
 /** Run a generator and package its output as an InternedGeometry under `key`. */
 export function bakeEntry(def: GeometryDefLike, params: any): InternedGeometry {
   const key = internKey(def, params);

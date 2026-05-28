@@ -744,11 +744,20 @@ const GeoSlice = struct { offset: u64, count: u32 };
 // Resolve a geometry key to a retained (offset, count), uploading the verts on
 // first sight. Returns null when the cache or retained buffer is full — the
 // caller then falls back to a per-frame upload (correct, just not retained).
-fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
+/// Cache-only lookup. Returns the retained (offset, count) if the key is already
+/// cached (from an earlier mesh's CREATE, or the build-time bake seed), else null.
+/// Used by the ship-once-per-key dedup path so a deduped mesh node with NO verts
+/// can still draw, riding on the upload an earlier sibling did.
+fn lookupGeometry(key: []const u8) ?GeoSlice {
     const hash = hashKey(key);
     for (g_geo_cache[0..g_geo_cache_len]) |*e| {
         if (e.present and e.hash == hash) return .{ .offset = e.offset_bytes, .count = e.count };
     }
+    return null;
+}
+
+fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count: u32) ?GeoSlice {
+    if (lookupGeometry(key)) |slot| return slot;
     if (g_geo_cache_len >= GEO_CACHE_SIZE) return null;
     const buf = g_retained_vbuf orelse return null;
     const bytes: u64 = @as(u64, count) * @sizeOf(Vertex);
@@ -756,7 +765,7 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     queue.writeBuffer(buf, g_retained_top, @ptrCast(verts.ptr), bytes);
     const off = g_retained_top;
     g_retained_top += bytes;
-    g_geo_cache[g_geo_cache_len] = .{ .hash = hash, .offset_bytes = off, .count = count, .present = true };
+    g_geo_cache[g_geo_cache_len] = .{ .hash = hashKey(key), .offset_bytes = off, .count = count, .present = true };
     g_geo_cache_len += 1;
     return .{ .offset = off, .count = count };
 }
@@ -773,22 +782,32 @@ fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_of
     const frame_cap_bytes: u64 = @as(u64, MAX_FRAME_VERTS) * @sizeOf(Vertex);
 
     if (spec.geom_key) |key| {
-        const verts = spec.vertices orelse return;
-        if (spec.vert_count == 0) return;
-        if (verts.len < @as(usize, spec.vert_count) * 8) return; // 8 floats/vertex
-        if (internGeometry(queue, key, verts, spec.vert_count)) |slot| {
+        // Cache-first: a deduped mesh node (everything past the first per key) has
+        // NO verts but the same key — an earlier sibling already registered them,
+        // so we just hit the cache. Same path used by the build-time bake seed.
+        if (lookupGeometry(key)) |slot| {
             draw_buffer = g_retained_vbuf.?;
             draw_offset = slot.offset;
             vert_count = slot.count;
         } else {
-            // Cache/buffer full — degrade to a per-frame upload (still correct).
-            const bytes: u64 = @as(u64, spec.vert_count) * @sizeOf(Vertex);
-            if (vert_byte_offset.* + bytes > frame_cap_bytes) return;
-            queue.writeBuffer(g_vertex_buffer.?, vert_byte_offset.*, @ptrCast(verts.ptr), bytes);
-            draw_buffer = g_vertex_buffer.?;
-            draw_offset = vert_byte_offset.*;
-            vert_count = spec.vert_count;
-            advance_frame_buf = true;
+            // Cache miss: this is the first mesh per key. Need verts to register.
+            const verts = spec.vertices orelse return;
+            if (spec.vert_count == 0) return;
+            if (verts.len < @as(usize, spec.vert_count) * 8) return; // 8 floats/vertex
+            if (internGeometry(queue, key, verts, spec.vert_count)) |slot| {
+                draw_buffer = g_retained_vbuf.?;
+                draw_offset = slot.offset;
+                vert_count = slot.count;
+            } else {
+                // Cache/buffer full — degrade to a per-frame upload (still correct).
+                const bytes: u64 = @as(u64, spec.vert_count) * @sizeOf(Vertex);
+                if (vert_byte_offset.* + bytes > frame_cap_bytes) return;
+                queue.writeBuffer(g_vertex_buffer.?, vert_byte_offset.*, @ptrCast(verts.ptr), bytes);
+                draw_buffer = g_vertex_buffer.?;
+                draw_offset = vert_byte_offset.*;
+                vert_count = spec.vert_count;
+                advance_frame_buf = true;
+            }
         }
     } else {
         // No geometry supplied. A cart still on the removed string-geometry path
