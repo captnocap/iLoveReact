@@ -48,14 +48,35 @@ const SHOE = '#15121f'; const HAT = '#e8c14a'; const EYE = '#0a0a12';
 // y=0 inside the head quadrant; hip sits at y=H-1 inside the torso quadrant.
 // The eyes are what move the figure from "smooth pink blob" to "character."
 function buildHumanoidAtlasTexture(): { width: number; height: number; hex: string } {
-  const W = 32, H = 32;
+  // 64×64 — quadruples the previous resolution. Bilinear filtering across a
+  // 200-screen-pixel head means each texture pixel covers ~3 screen pixels;
+  // at 32×32 it was ~6 and any "1-px" mark smeared to a Slender Man blot.
+  // The head quadrant is now 32×32 — enough room for crisp 2-px eyes, brows,
+  // a small mouth, and a hairline along the crown.
+  const W = 64, H = 64;
   const px = (rgb: string, a = 255) => rgb.replace('#', '') + a.toString(16).padStart(2, '0');
   const SKIN_PX = px(SKIN);
   const SHIRT_PX = px(SHIRT);
   const PANTS_PX = px(PANTS);
   const EYE_PX = px(EYE);
+  const HAIR_PX = px('#241a18');         // dark band along the crown
+  const BROW_PX = px('#3a1f15');         // a touch warmer than the eye, brows over eyes
+  const LIP_PX = px('#7a2a3a');
   const COLLAR_PX = px('#8d2a6a');
-  const LIP_PX = px('#5a2030');
+  const NOSE_PX = px('#a67855');         // tiny nose shadow tick
+
+  // HEAD quadrant: image-x ∈ [0, W/2=32], image-y ∈ [0, H/2=32].
+  // With ringVerts starting at -π/2, the SEAM is at -Z (back) → image-x=0 and
+  // image-x=W/2-1; the FACE (+Z front) is at image-x = W/4 = 16. v0=0.5,
+  // v1=0 for the head rect, so image-y=0 = CROWN, image-y=H/2=32 = NECK.
+  const faceCx = W * 0.25;               // ≈ 16
+  const eyeY = Math.floor(H * 0.22);     // ~14 — face ring is ~y=16
+  const eyeDX = W * 0.07;                // ≈ 4.5 px on each side of face center
+  const browY = eyeY - 2;
+  const noseY = eyeY + 2;
+  const mouthY = eyeY + 5;
+  const hairTop = 2;
+  const hairBot = 6;
   let hex = '';
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
@@ -63,29 +84,32 @@ function buildHumanoidAtlasTexture(): { width: number; height: number; hex: stri
       const top = y < H / 2;
       let c: string;
       if (top && left) {
-        // HEAD: skin + face features. Inside the head rect (u ∈ [0, 0.5]), the
-        // face (+Z front) lands at u ≈ 0.25 in u-of-image space = x ≈ W/4. The
-        // ring s=0 is -Z (back, the seam), so eyes/mouth go at the MIDDLE of
-        // the head u range, NOT at the edge.
         c = SKIN_PX;
-        const faceX = W * 0.25; // middle of the head quadrant in image-x
-        const eyeY = Math.floor(H * 0.18); // a bit below the crown
-        if (Math.abs(y - eyeY) <= 1) {
-          const eL = faceX - W * 0.06; const eR = faceX + W * 0.06;
-          if (Math.abs(x - eL) <= 1 || Math.abs(x - eR) <= 1) c = EYE_PX;
+        // hair band — only across the front of the head (skip the back/seam
+        // strip so the hairline reads as a fringe, not a wrap-around helmet)
+        if (y >= hairTop && y <= hairBot && x >= 6 && x <= 26) c = HAIR_PX;
+        // eyes: 2×2 dots
+        if (y >= eyeY && y <= eyeY + 1) {
+          const eL = faceCx - eyeDX, eR = faceCx + eyeDX;
+          if (x >= eL && x <= eL + 1) c = EYE_PX;
+          if (x >= eR && x <= eR + 1) c = EYE_PX;
         }
-        const mouthY = Math.floor(H * 0.30);
-        if (y === mouthY) {
-          if (x >= faceX - W * 0.04 && x <= faceX + W * 0.04) c = LIP_PX;
+        // brows: short 3-px dashes above each eye
+        if (y === browY) {
+          const eL = faceCx - eyeDX, eR = faceCx + eyeDX;
+          if (x >= eL - 1 && x <= eL + 1) c = BROW_PX;
+          if (x >= eR - 1 && x <= eR + 1) c = BROW_PX;
         }
+        // tiny nose shadow (1 px) right below center
+        if (y === noseY && x === Math.round(faceCx)) c = NOSE_PX;
+        // mouth: a neutral 3-px line, not a horror slash
+        if (y === mouthY && x >= faceCx - 2 && x <= faceCx + 2) c = LIP_PX;
       } else if (top && !left) {
         c = SHIRT_PX; // ARMS = sleeves
       } else if (!top && left) {
-        // TORSO: shirt, with a slightly darker collar line at the top edge
-        // (which sits next to the head rect — reads as the collar where shirt
-        // meets neck/skin).
         c = SHIRT_PX;
-        if (y === Math.floor(H / 2)) c = COLLAR_PX;
+        // collar line where shirt meets the neck (top edge of torso rect)
+        if (y >= H / 2 && y <= H / 2 + 1) c = COLLAR_PX;
       } else {
         c = PANTS_PX; // LEGS
       }
