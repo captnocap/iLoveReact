@@ -19,6 +19,9 @@ import * as TorusMod from './Torus';
 import * as HeightfieldMod from './Heightfield';
 
 export type { GeometryData, Vec2, Vec3 } from './_util';
+// The vertex-assembly kit, so a cart can hand-author its own generator:
+//   const Gem = { id: 'gem', defaults: {...}, generate: (p) => { const g = mesh(); … return g.build(); } };
+export { mesh, normalize, Mesh } from './_util';
 
 /**
  * A registry entry. `id` is part of the intern hash key — it must be unique and
