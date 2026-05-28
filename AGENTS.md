@@ -88,9 +88,9 @@ Debug: `./scripts/ship <name> -d` → raw ELF at `zig-out/bin/<name>-raw`.
 
 The active cart is `cart/sweatshop/` (evolved from `cursor-ide`). It contains the IDE surface: file tree, editor, git panel, search, command palette, agent chat, settings, theme editor.
 
-Game work currently lives in `cart/scape3d/`. Before changing it, read
-`cart/scape3d/AGENTS.md`; that cart has its own rule of thumb, tone, and progress
-handoff.
+New game work currently lives in `cart/hmsc/`; `cart/scape3d/` is the learned
+prototype/reference fork. Before changing either cart, read its nested
+`AGENTS.md`.
 
 ---
 
