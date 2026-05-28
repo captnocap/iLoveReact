@@ -45,7 +45,7 @@ export const HUMANOID_DEFAULTS: HumanoidParams = {
   height: 2.0,
   shoulderWidth: 0.72,
   hipWidth: 0.46,
-  headSize: 0.34,
+  headSize: 0.24,
   limbThickness: 1.0,
   sides: 8,
   smoothShading: true,
@@ -208,48 +208,55 @@ export function generate(p: HumanoidParams): GeometryData {
   const shoulderHalf = p.shoulderWidth * 0.5;
   const hipHalf = p.hipWidth * 0.5;
 
-  // ── trunk: hip → crown ──────────────────────────────────────────────────
+  // ── trunk: hip → crown. Extra ring above face + tiny crown so the cap is
+  //    a near-point dome, not a wide flat disk on top of the head ────────────
   const trunkRings: Ring[] = [
-    { y: hipY,      cx: 0, cz: 0,    rx: hipHalf * 1.08, rz: hipHalf * 0.85 }, // hip
-    { y: waistY,    cx: 0, cz: 0,    rx: hipHalf * 0.95, rz: hipHalf * 0.78 }, // waist
-    { y: chestY,    cx: 0, cz: 0,    rx: shoulderHalf * 0.88, rz: shoulderHalf * 0.62 }, // chest
-    { y: shoulderY, cx: 0, cz: 0,    rx: shoulderHalf, rz: shoulderHalf * 0.62 }, // shoulder
-    { y: neckY,     cx: 0, cz: 0,    rx: H * 0.07, rz: H * 0.06 }, // neck (narrow)
-    { y: chinY,     cx: 0, cz: 0.01, rx: p.headSize * 0.72, rz: p.headSize * 0.78 }, // jaw
-    { y: faceY,     cx: 0, cz: 0.01, rx: p.headSize * 1.0,  rz: p.headSize * 1.0  }, // face/head widest
-    { y: crownY,    cx: 0, cz: 0,    rx: p.headSize * 0.62, rz: p.headSize * 0.62 }, // crown
+    { y: hipY,        cx: 0, cz: 0,    rx: hipHalf * 1.08, rz: hipHalf * 0.85 }, // hip
+    { y: waistY,      cx: 0, cz: 0,    rx: hipHalf * 0.95, rz: hipHalf * 0.78 }, // waist
+    { y: chestY,      cx: 0, cz: 0,    rx: shoulderHalf * 0.88, rz: shoulderHalf * 0.62 }, // chest
+    { y: shoulderY,   cx: 0, cz: 0,    rx: shoulderHalf, rz: shoulderHalf * 0.62 }, // shoulder
+    { y: neckY,       cx: 0, cz: 0,    rx: H * 0.07, rz: H * 0.06 }, // neck (narrow)
+    { y: chinY,       cx: 0, cz: 0.01, rx: p.headSize * 0.72, rz: p.headSize * 0.78 }, // jaw
+    { y: faceY,       cx: 0, cz: 0.01, rx: p.headSize * 1.00, rz: p.headSize * 1.00 }, // face (widest)
+    { y: H * 0.96,    cx: 0, cz: 0,    rx: p.headSize * 0.70, rz: p.headSize * 0.70 }, // upper-skull dome
+    { y: crownY,      cx: 0, cz: 0,    rx: p.headSize * 0.22, rz: p.headSize * 0.22 }, // crown (near-point)
   ];
   emitSweep(g, trunkRings, sides, p.smoothShading);
-  emitCap(g, trunkRings[trunkRings.length - 1], sides, true); // top of head
+  emitCap(g, trunkRings[trunkRings.length - 1], sides, true); // tiny fan at the top
 
-  // ── legs: hip → foot. First ring sits inside the trunk hip so the join hides
+  // ── legs: hip → foot. Foot stretches FORWARD only (no X-widen so it doesn't
+  //    bell out sideways like a trouser flare) and tapers slightly at the toe.
   const legRings = (sx: number): Ring[] => [
     { y: hipY + 0.04,            cx: sx, cz: 0,    rx: H * 0.085 * t, rz: H * 0.085 * t }, // root inside trunk
     { y: hipY - H * 0.05,        cx: sx, cz: 0,    rx: H * 0.085 * t, rz: H * 0.085 * t }, // upper thigh
-    { y: hipY - H * 0.18,        cx: sx, cz: 0,    rx: H * 0.075 * t, rz: H * 0.075 * t }, // knee
-    { y: hipY - H * 0.34,        cx: sx, cz: 0.01, rx: H * 0.07 * t,  rz: H * 0.07 * t  }, // ankle
-    { y: hipY - H * 0.40,        cx: sx, cz: 0.06, rx: H * 0.085 * t, rz: H * 0.13 * t  }, // foot (forward-stretched)
+    { y: hipY - H * 0.18,        cx: sx, cz: 0,    rx: H * 0.078 * t, rz: H * 0.078 * t }, // knee
+    { y: hipY - H * 0.34,        cx: sx, cz: 0.01, rx: H * 0.07  * t, rz: H * 0.07  * t }, // ankle
+    { y: hipY - H * 0.39,        cx: sx, cz: 0.06, rx: H * 0.07  * t, rz: H * 0.14  * t }, // foot (forward-stretched, no X widen)
+    { y: hipY - H * 0.40,        cx: sx, cz: 0.10, rx: H * 0.05  * t, rz: H * 0.09  * t }, // toe (taper forward + down)
   ];
   const legXOffset = hipHalf * 0.55;
   for (const sx of [-legXOffset, legXOffset]) {
     const rings = legRings(sx);
     emitSweep(g, rings, sides, p.smoothShading);
-    emitCap(g, rings[rings.length - 1], sides, false); // sole of foot
+    emitCap(g, rings[rings.length - 1], sides, false); // tip of toe
   }
 
-  // ── arms: shoulder → hand. First ring inside the trunk shoulder ──────────
+  // ── arms: shoulder → end. Continuously TAPERS to a near-point (no flare,
+  //    no fake mitt — at this poly count a clean tapered arm reads cleaner
+  //    than a flared "is that a hand or a sleeve" bulge).
   const armRings = (sx: number): Ring[] => [
-    { y: shoulderY,              cx: sx * 0.55, cz: 0,    rx: H * 0.07 * t,  rz: H * 0.07 * t  }, // root inside trunk
-    { y: shoulderY - H * 0.04,   cx: sx,        cz: 0,    rx: H * 0.07 * t,  rz: H * 0.07 * t  }, // shoulder bulge
-    { y: shoulderY - H * 0.16,   cx: sx,        cz: 0,    rx: H * 0.06 * t,  rz: H * 0.06 * t  }, // bicep
-    { y: shoulderY - H * 0.30,   cx: sx,        cz: 0,    rx: H * 0.055 * t, rz: H * 0.055 * t }, // wrist
-    { y: shoulderY - H * 0.36,   cx: sx,        cz: 0.02, rx: H * 0.075 * t, rz: H * 0.075 * t }, // hand (mitt bulge)
+    { y: shoulderY,              cx: sx * 0.55, cz: 0,    rx: H * 0.07  * t, rz: H * 0.07  * t }, // root inside trunk
+    { y: shoulderY - H * 0.04,   cx: sx,        cz: 0,    rx: H * 0.07  * t, rz: H * 0.07  * t }, // shoulder bulge
+    { y: shoulderY - H * 0.16,   cx: sx,        cz: 0,    rx: H * 0.062 * t, rz: H * 0.062 * t }, // bicep
+    { y: shoulderY - H * 0.30,   cx: sx,        cz: 0,    rx: H * 0.055 * t, rz: H * 0.055 * t }, // forearm
+    { y: shoulderY - H * 0.40,   cx: sx,        cz: 0,    rx: H * 0.045 * t, rz: H * 0.045 * t }, // wrist
+    { y: shoulderY - H * 0.43,   cx: sx,        cz: 0,    rx: H * 0.020 * t, rz: H * 0.020 * t }, // arm end (near-point)
   ];
   const armX = shoulderHalf * 1.02;
   for (const sx of [-armX, armX]) {
     const rings = armRings(sx);
     emitSweep(g, rings, sides, p.smoothShading);
-    emitCap(g, rings[rings.length - 1], sides, false); // end of hand
+    emitCap(g, rings[rings.length - 1], sides, false); // tiny fan at arm end
   }
 
   return g.build();
