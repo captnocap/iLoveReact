@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Col, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
+import { OrbitCamera } from '@reactjit/cameras';
 
 type V3 = [number, number, number];
 type ModelCtx = { origin: V3; yaw: number; scale: number; active: boolean };
@@ -329,40 +330,30 @@ function Pedestal({ ctx, item }: { ctx: ModelCtx; item: Item }) {
   </>;
 }
 
-function GalleryScene({ selected, spin }: { selected: string; spin: number }) {
+function GalleryScene({ item, spin, yaw, pitch }: { item: Item; spin: number; yaw: number; pitch: number }) {
+  const ctx: ModelCtx = { origin: [0, 0.18, 0], yaw: spin, scale: 1.95, active: true };
   return (
-    <Scene3D style={{ width: '100%', height: '100%' }}>
-      <Scene3D.Camera position={[0, 8.7, 15.5]} target={[0, 0.38, 0]} fov={49} />
+    <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#111827">
+      <OrbitCamera target={[0, 0.72, 0]} yaw={yaw} pitch={pitch} dist={4.6} zoom={1} fov={38} />
       <Scene3D.Skybox
-        zenith="#17233a"
-        horizon="#4d5d72"
-        ground="#080a0f"
+        zenith="#1b2a43"
+        horizon="#657792"
+        ground="#090c12"
         sunDir={[0.45, 0.7, 0.25]}
         sunColor="#ffe0a8"
         sunSize={0.015}
-        sunGlow={0.28}
-        haze={0.2}
-        cloud={0.08}
+        sunGlow={0.22}
+        haze={0.16}
+        cloud={0.04}
         night={0}
       />
-      <Scene3D.AmbientLight color="#cad9f5" intensity={0.34} />
-      <Scene3D.DirectionalLight direction={[0.35, 0.86, 0.28]} color="#ffe2b6" intensity={0.95} />
-      <Scene3D.PointLight position={[-5, 4.5, 5]} color="#8cc8ff" intensity={0.42} />
-      <Scene3D.PointLight position={[5, 3.2, -4]} color="#ffb380" intensity={0.3} />
-      <Scene3D.Mesh geometry={box} params={box1} material="#111722" position={[0, -0.16, 0]} scale={[19, 0.08, 11.5]} />
-      {ITEMS.map((item, i) => {
-        const col = i % 6;
-        const row = Math.floor(i / 6);
-        const active = item.id === selected;
-        const origin: V3 = [(col - 2.5) * 3.0, 0.13 + (active ? 0.09 : 0), (row - 1) * 3.15];
-        const ctx: ModelCtx = { origin, yaw: spin * (active ? 1.35 : 0.7) + i * 0.38, scale: active ? 1.12 : 0.88, active };
-        return (
-          <Fragment key={item.id}>
-            <Pedestal ctx={{ ...ctx, origin }} item={item} />
-            {item.model(ctx)}
-          </Fragment>
-        );
-      })}
+      <Scene3D.AmbientLight color="#c9d8f4" intensity={0.58} />
+      <Scene3D.DirectionalLight direction={[0.45, 0.88, 0.32]} color="#ffe0b0" intensity={0.95} />
+      <Scene3D.PointLight position={[-2.2, 2.6, 3.2]} color="#8cc8ff" intensity={0.82} />
+      <Scene3D.PointLight position={[2.4, 2.0, -2.6]} color="#ffb380" intensity={0.45} />
+      <Scene3D.Mesh geometry={box} params={box1} material="#0d131f" position={[0, -0.17, 0]} scale={[8.5, 0.08, 6.2]} />
+      <Pedestal ctx={{ ...ctx, yaw: 0, scale: 1.18 }} item={item} />
+      {item.model(ctx)}
     </Scene3D>
   );
 }
@@ -394,6 +385,9 @@ function ItemButton({ item, active, onPress }: { item: Item; active: boolean; on
 export default function GameItemGallery() {
   const [selected, setSelected] = useState('knife');
   const [spin, setSpin] = useState(0);
+  const [orbitYaw, setOrbitYaw] = useState(35);
+  const [orbitPitch, setOrbitPitch] = useState(28);
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
   const current = ITEMS.find((item) => item.id === selected) ?? ITEMS[0];
 
   useEffect(() => {
@@ -406,13 +400,37 @@ export default function GameItemGallery() {
     return () => clearTimeout(handle);
   }, []);
 
+  const onDown = (e: any) => {
+    dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) };
+  };
+  const onMove = (e: any) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const nx = Number(e?.x ?? 0);
+    const ny = Number(e?.y ?? 0);
+    const dx = nx - d.x;
+    const dy = ny - d.y;
+    d.x = nx;
+    d.y = ny;
+    setOrbitYaw((v) => v + dx * 0.38);
+    setOrbitPitch((v) => Math.max(8, Math.min(70, v - dy * 0.28)));
+  };
+  const onUp = () => { dragRef.current = null; };
+
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#070a10' }}>
-      <GalleryScene selected={selected} spin={spin} />
+      <Pressable
+        onMouseDown={onDown}
+        onMouseMove={onMove}
+        onMouseUp={onUp}
+        style={{ width: '100%', height: '100%' }}
+      >
+        <GalleryScene item={current} spin={spin} yaw={orbitYaw} pitch={orbitPitch} />
+      </Pressable>
 
       <Col style={{ position: 'absolute', left: 18, top: 16, gap: 6 }}>
         <Text style={{ color: '#f3f7ff', fontSize: 26, fontWeight: 'bold' }}>Game Item Gallery</Text>
-        <Text style={{ color: '#96a4b8', fontSize: 13 }}>18 low-poly pickup and prop models, built from cart-local geometry and mesh primitives</Text>
+        <Text style={{ color: '#96a4b8', fontSize: 13 }}>single-item close view · drag the scene to orbit</Text>
       </Col>
 
       <Col style={{
