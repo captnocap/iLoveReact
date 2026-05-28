@@ -172,6 +172,7 @@ fn telFrameCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "tick_us", s.tick_us);
     setObjectNumber(ctx, obj, "layout_us", s.layout_us);
     setObjectNumber(ctx, obj, "paint_us", s.paint_us);
+    setObjectNumber(ctx, obj, "gpu_us", s.gpu_us);
     setObjectNumber(ctx, obj, "frame_total_us", s.frame_total_us);
     setObjectNumber(ctx, obj, "frame_number", s.frame_number);
     setObjectNumber(ctx, obj, "bridge_calls_per_sec", s.bridge_calls_per_sec);
@@ -198,6 +199,13 @@ fn telGpuCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "gpu_surface_h", s.gpu_surface_h);
     setObjectNumber(ctx, obj, "frame_hash", s.frame_hash);
     setObjectNumber(ctx, obj, "frames_since_drain", s.frames_since_drain);
+    setObjectNumber(ctx, obj, "scene3d_scene_count", s.scene3d_scene_count);
+    setObjectNumber(ctx, obj, "scene3d_mesh_children", s.scene3d_mesh_children);
+    setObjectNumber(ctx, obj, "scene3d_meshes_collected", s.scene3d_meshes_collected);
+    setObjectNumber(ctx, obj, "scene3d_meshes_dropped", s.scene3d_meshes_dropped);
+    setObjectNumber(ctx, obj, "scene3d_instances", s.scene3d_instances);
+    setObjectNumber(ctx, obj, "scene3d_draw_calls", s.scene3d_draw_calls);
+    setObjectNumber(ctx, obj, "scene3d_draw_us", s.scene3d_draw_us);
     info.getReturnValue().set(obj.toValue());
 }
 

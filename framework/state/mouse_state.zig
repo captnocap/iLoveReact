@@ -11,12 +11,26 @@
 
 pub var g_mouse_x: f32 = 0;
 pub var g_mouse_y: f32 = 0;
+pub var g_mouse_delta_x: f32 = 0;
+pub var g_mouse_delta_y: f32 = 0;
 pub var g_mouse_down: bool = false;
 pub var g_mouse_right_down: bool = false;
 
 pub fn updateMouse(x: f32, y: f32) void {
     g_mouse_x = x;
     g_mouse_y = y;
+}
+
+pub fn addMouseDelta(dx: f32, dy: f32) void {
+    g_mouse_delta_x += dx;
+    g_mouse_delta_y += dy;
+}
+
+pub fn consumeMouseDelta() [2]f32 {
+    const delta = .{ g_mouse_delta_x, g_mouse_delta_y };
+    g_mouse_delta_x = 0;
+    g_mouse_delta_y = 0;
+    return delta;
 }
 
 pub fn updateMouseButton(down: bool, right: bool) void {

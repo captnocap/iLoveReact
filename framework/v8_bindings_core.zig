@@ -307,6 +307,28 @@ fn hostGetMouseRightDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c)
     setReturnNumber(info, if (mouse_state.g_mouse_right_down) 1 else 0);
 }
 
+fn hostMouseCapture(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const enabled = (argToI32(info, 0) orelse 0) != 0;
+    input.unfocus();
+    const ok = @import("engine.zig").setRelativeMouseMode(enabled);
+    setReturnNumber(info, if (ok) 1 else 0);
+}
+
+fn hostMouseDelta(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const ctx = infoCtx(info);
+    const delta = mouse_state.consumeMouseDelta();
+    const obj = newObject(info);
+    objectSetNumber(obj, ctx, "dx", @floatCast(delta[0]));
+    objectSetNumber(obj, ctx, "dy", @floatCast(delta[1]));
+    info.getReturnValue().set(obj);
+}
+
+fn hostInputUnfocus(_: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    input.unfocus();
+}
+
 fn hostIsKeyDown(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     if (info.length() < 1) {
@@ -783,6 +805,9 @@ pub fn registerCore(vm: anytype) void {
     v8_runtime.registerHostFn("getMouseY", hostGetMouseY);
     v8_runtime.registerHostFn("getMouseDown", hostGetMouseDown);
     v8_runtime.registerHostFn("getMouseRightDown", hostGetMouseRightDown);
+    v8_runtime.registerHostFn("__mouse_capture", hostMouseCapture);
+    v8_runtime.registerHostFn("__mouse_delta", hostMouseDelta);
+    v8_runtime.registerHostFn("__input_unfocus", hostInputUnfocus);
     v8_runtime.registerHostFn("__viewport_width", hostViewportWidth);
     v8_runtime.registerHostFn("__viewport_height", hostViewportHeight);
     v8_runtime.registerHostFn("isKeyDown", hostIsKeyDown);

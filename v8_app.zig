@@ -59,17 +59,23 @@ const state = @import("framework/state/dirty.zig");
 const events = @import("framework/events.zig");
 const context_menu = if (HEADLESS) struct {
     pub const MenuItem = struct { label: []const u8 = "" };
-    pub fn activeNodeId() u32 { return 0; }
+    pub fn activeNodeId() u32 {
+        return 0;
+    }
 } else @import("framework/primitive/context_menu.zig");
 const engine = if (HEADLESS) struct {
-    pub fn run(_: anytype) !void { unreachable; }
+    pub fn run(_: anytype) !void {
+        unreachable;
+    }
     pub fn windowMinimize() void {}
     pub fn windowMaximize() void {}
     pub fn windowClose() void {}
     pub fn dispatchScrollChanged(_: anytype, _: anytype) void {}
 } else @import("framework/engine.zig");
 const gpu = if (HEADLESS) struct {
-    pub fn frameCounter() u64 { return 0; }
+    pub fn frameCounter() u64 {
+        return 0;
+    }
 } else @import("framework/gpu/gpu.zig");
 const latches = @import("framework/state/latches.zig");
 const animations = if (HEADLESS) struct {
@@ -78,14 +84,20 @@ const animations = if (HEADLESS) struct {
 } else @import("framework/gpu/animations.zig");
 const paintable = if (HEADLESS) struct {
     pub fn destroy(_: anytype) void {}
-    pub fn ensure(_: anytype, _: anytype, _: anytype) u32 { return 0; }
+    pub fn ensure(_: anytype, _: anytype, _: anytype) u32 {
+        return 0;
+    }
 } else @import("framework/gpu/paintable.zig");
 const windows = if (HEADLESS) struct {
     pub const WindowKind = enum { window, notification };
     const Slot = opaque {};
-    pub fn open(_: anytype) !usize { return 0; }
+    pub fn open(_: anytype) !usize {
+        return 0;
+    }
     pub fn close(_: anytype) void {}
-    pub fn getSlot(_: anytype) ?*Slot { return null; }
+    pub fn getSlot(_: anytype) ?*Slot {
+        return null;
+    }
     pub fn sendLineToChild(_: anytype, _: anytype) void {}
     pub fn setJsDispatchFn(_: anytype) void {}
     pub fn setRoot(_: anytype) void {}
@@ -95,7 +107,9 @@ const ipc = @import("framework/net/ipc.zig");
 const prepared_input = @import("framework/state/prepared_input.zig");
 const v8_runtime = @import("framework/v8_runtime.zig");
 const v8_bindings_core = if (HEADLESS) struct {
-    pub fn contentStoreGet(_: anytype) ?[]const u8 { return null; }
+    pub fn contentStoreGet(_: anytype) ?[]const u8 {
+        return null;
+    }
 } else @import("framework/v8_bindings_core.zig");
 const v8_bindings_reconciler = @import("framework/v8_bindings_reconciler.zig");
 const host_tree = @import("framework/host_tree.zig");
@@ -1916,6 +1930,21 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonInt(v)) |i| node.scene3d_vert_count = if (i > 0 and i < (1 << 22)) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dBoundsRadius")) {
             if (jsonFloat(v)) |f| node.scene3d_bounds_radius = f;
+        } else if (std.mem.eql(u8, k, "scene3dInstanceData")) {
+            if (v == .array) {
+                const items = v.array.items;
+                if (items.len > 0 and items.len <= (1 << 24)) {
+                    const buf = g_alloc.alloc(f32, items.len) catch null;
+                    if (buf) |out| {
+                        for (items, 0..) |fv, n| out[n] = jsonFloat(fv) orelse 0;
+                        node.scene3d_instance_data = out;
+                    }
+                }
+            }
+        } else if (std.mem.eql(u8, k, "scene3dInstanceCount")) {
+            if (jsonInt(v)) |i| node.scene3d_instance_count = if (i > 0 and i < (1 << 20)) @intCast(i) else 0;
+        } else if (std.mem.eql(u8, k, "scene3dInstanceStride")) {
+            if (jsonInt(v)) |i| node.scene3d_instance_stride = if (i >= 9 and i <= 16) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dTexData")) {
             // RRGGBBAA hex string, 8 chars per pixel. Length must equal
             // 8 * w * h. Decoded into a fresh RGBA byte buffer owned by
@@ -2173,9 +2202,13 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
                 if (arr) |out| {
                     var ok = true;
                     for (v.array.items, 0..) |item, i| {
-                        if (item != .string) { ok = false; break; }
+                        if (item != .string) {
+                            ok = false;
+                            break;
+                        }
                         const dup = g_alloc.dupe(u8, item.string) catch {
-                            ok = false; break;
+                            ok = false;
+                            break;
                         };
                         out[i] = dup;
                     }
@@ -2575,7 +2608,9 @@ fn applyCommandBatch(json_bytes: []const u8) void {
                 if (update_seen < 4) {
                     update_seen += 1;
                     var id_v: i64 = -1;
-                    if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| { id_v = i; };
+                    if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| {
+                        id_v = i;
+                    };
                     update_summary.writer(g_alloc).print(" #{d}=id:{d}[", .{ update_seen, id_v }) catch {};
                     if (cmd.object.get("props")) |pv| if (pv == .object) {
                         var iter = pv.object.iterator();
@@ -2608,7 +2643,9 @@ fn applyCommandBatch(json_bytes: []const u8) void {
                 if (first_other_op.len == 0) {
                     first_other_op = op;
                     var id_v: i64 = -1;
-                    if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| { id_v = i; };
+                    if (cmd.object.get("id")) |idv| if (jsonInt(idv)) |i| {
+                        id_v = i;
+                    };
                     update_summary.writer(g_alloc).print(" other=id:{d}", .{id_v}) catch {};
                     if (cmd.object.get("text")) |tv| if (tv == .string) {
                         const t = tv.string;
@@ -2628,8 +2665,8 @@ fn applyCommandBatch(json_bytes: []const u8) void {
         const apply_us = t1 - t0;
         const cleanup_us = t2 - t1;
         std.debug.print("[batch-timing] bytes={d} cmds={d} apply={d}ms cleanup={d}ms\n", .{
-            json_bytes.len,                cmd_count,
-            @divTrunc(apply_us, 1000),     @divTrunc(cleanup_us, 1000),
+            json_bytes.len,            cmd_count,
+            @divTrunc(apply_us, 1000), @divTrunc(cleanup_us, 1000),
         });
     }
 }

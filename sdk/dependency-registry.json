@@ -801,6 +801,25 @@
       ],
       "note": "Off-thread LuaJIT compute worker (framework/process/luajit_worker.zig). Always compiled; libluajit-5.1 is dlopen'd at runtime so there is no -D flag. Carts that import runtime/hooks/useLuaWorker.ts pull in __lua_* bindings (always-registered, see v8_ingredients.zig) AND get libluajit-5.1.so staged next to the binary by pack-sdk."
     },
+    "physics-lab-host": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "cart/physics_lab.tsx"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/hmsc/state/hostPhysics.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-physics-lab"
+      ],
+      "v8Bindings": [
+        "physics_lab"
+      ],
+      "note": "Registers the packed host physics bindings used by the standalone physics lab and by HMSC gameplay physics. HMSC calls __hmsc_physics_step; the older physics lab calls __physics_lab_* from the same Zig binding module."
+    },
     "pg": {
       "shipGate": "pg",
       "triggers": [

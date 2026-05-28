@@ -550,6 +550,31 @@ Scene3DBase.Mesh = ({
     `(sizeX/Y/Z → params.width/height/depth; sphere radius → params.radius; cylinder radius+sizeY → params.radius+height.)`,
   );
 };
+Scene3DBase.Instances = ({
+  geometry, params, data, count, stride, boundsRadius, center, textureKey, ...rest
+}: any) => {
+  const [cx, cy, cz] = _vec3(center, 0, 0, 0);
+  const geomIntern = require('./geometries/intern');
+  if (!geomIntern.isGeometryDef(geometry)) {
+    throw new Error('<Scene3D.Instances geometry={...}> requires a @reactjit/geometries generator.');
+  }
+  const g3 = geomIntern.internGeometry(geometry, params);
+  const firstForKey = !geomIntern.hasShipped(g3.key);
+  if (firstForKey) geomIntern.markShipped(g3.key);
+  const geomProps = firstForKey
+    ? { scene3dGeomKey: g3.key, scene3dVertices: g3.vertices, scene3dVertCount: g3.count, scene3dBoundsRadius: boundsRadius ?? g3.bounds }
+    : { scene3dGeomKey: g3.key, scene3dBoundsRadius: boundsRadius ?? g3.bounds };
+  return h('View', {
+    ...rest,
+    scene3dMesh: true,
+    ...geomProps,
+    scene3dPosX: cx, scene3dPosY: cy, scene3dPosZ: cz,
+    scene3dInstanceData: data,
+    scene3dInstanceCount: count ?? 0,
+    scene3dInstanceStride: stride ?? 9,
+    ...(textureKey ? { scene3dTexKey: textureKey } : {}),
+  });
+};
 Scene3DBase.AmbientLight = ({ color, intensity, ...rest }: any) => {
   const [r, g, b] = _hexToRgb(color, [1, 1, 1]);
   return h('View', {

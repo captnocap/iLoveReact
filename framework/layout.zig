@@ -501,6 +501,12 @@ pub const Node = struct {
     scene3d_vertices: ?[]const f32 = null, // interleaved verts, read once on cache miss
     scene3d_vert_count: u32 = 0,
     scene3d_bounds_radius: f32 = 0, // unscaled bounding radius from the generator (culling)
+    // Packed instance stream for large static batches. One Scene3D node can
+    // submit thousands of transforms/colors without creating one host node per
+    // object. Layout: [px,py,pz, sx,sy,sz, r,g,b] * count when stride=9.
+    scene3d_instance_data: ?[]const f32 = null,
+    scene3d_instance_count: u32 = 0,
+    scene3d_instance_stride: u32 = 0,
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container

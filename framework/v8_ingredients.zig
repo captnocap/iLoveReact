@@ -230,6 +230,9 @@ const v8_bindings_lua = @import("v8_bindings_lua.zig");
 // because it has no native deps (SDL is foundational); inert until the
 // cart calls __input_bench_set_enabled(true).
 const v8_bindings_input_bench = @import("v8_bindings_input_bench.zig");
+const v8_bindings_physics_lab = if (enabledFor("physics_lab")) @import("v8_bindings_physics_lab.zig") else struct {
+    pub fn registerPhysicsLab(_: anytype) void {}
+};
 
 // ── INGREDIENTS ─────────────────────────────────────────────────────
 //
@@ -305,6 +308,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "vterm", .required = false, .grep_prefix = "__vterm_", .reg_fn = "registerVterm", .mod = v8_bindings_vterm },
     .{ .name = "doom", .required = false, .grep_prefix = "__doom_", .reg_fn = "registerDoom", .mod = v8_bindings_doom },
     .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },
+    .{ .name = "physics_lab", .required = false, .grep_prefix = "__physics_lab_", .reg_fn = "registerPhysicsLab", .mod = v8_bindings_physics_lab },
 };
 
 /// Register every ingredient's host fns into the current V8 context.

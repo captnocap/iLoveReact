@@ -7,6 +7,7 @@
 const std = @import("std");
 const layout = @import("../layout.zig");
 const gpu = @import("../gpu/gpu.zig");
+const scene3d = @import("../gpu/3d.zig");
 const canvas = @import("../primitive/canvas.zig");
 const selection = @import("../state/selection.zig");
 const input = @import("../primitive/input.zig");
@@ -52,6 +53,13 @@ pub const Snapshot = struct {
     gpu_surface_h: u32 = 0,
     frame_hash: u64 = 0,
     frames_since_drain: u64 = 0,
+    scene3d_scene_count: u32 = 0,
+    scene3d_mesh_children: u32 = 0,
+    scene3d_meshes_collected: u32 = 0,
+    scene3d_meshes_dropped: u32 = 0,
+    scene3d_instances: u32 = 0,
+    scene3d_draw_calls: u32 = 0,
+    scene3d_draw_us: u64 = 0,
 
     // ── Text/Font ──
     glyph_cache_count: u32 = 0,
@@ -271,6 +279,14 @@ pub fn collect(args: CollectArgs) void {
     snap.gpu_surface_h = gpu_stats.surface_h;
     snap.frame_hash = gpu_stats.frame_hash;
     snap.frames_since_drain = gpu_stats.frames_since_drain;
+    const scene3d_stats = scene3d.telemetryStats();
+    snap.scene3d_scene_count = scene3d_stats.scene_count;
+    snap.scene3d_mesh_children = scene3d_stats.mesh_children;
+    snap.scene3d_meshes_collected = scene3d_stats.meshes_collected;
+    snap.scene3d_meshes_dropped = scene3d_stats.meshes_dropped;
+    snap.scene3d_instances = scene3d_stats.instances;
+    snap.scene3d_draw_calls = scene3d_stats.draw_calls;
+    snap.scene3d_draw_us = scene3d_stats.draw_us;
 
     // ── Layout ──
     snap.layout_budget = layout.telemetryBudget();

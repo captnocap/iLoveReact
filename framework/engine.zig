@@ -913,6 +913,7 @@ var g_dispatch_js_event: ?*const fn (id: u32, handler: []const u8) void = null;
 
 var g_chrome_root: ?*Node = null; // root node for hit-test callback
 var g_chrome_window: ?*c.SDL_Window = null; // window pointer for control functions
+var g_main_window: ?*c.SDL_Window = null;
 const CHROME_DOUBLE_CLICK_MS: u32 = 400;
 const CHROME_DOUBLE_CLICK_DIST: f32 = 8;
 var g_chrome_last_click_ms: u32 = 0;
@@ -933,6 +934,11 @@ var g_chrome_drag_window_y: c_int = 0;
 var g_received_quit_signal: bool = false;
 fn quitSignalHandler(_: c_int) callconv(.c) void {
     g_received_quit_signal = true;
+}
+
+pub fn setRelativeMouseMode(enabled: bool) bool {
+    const window = g_main_window orelse return false;
+    return c.SDL_SetWindowRelativeMouseMode(window, enabled);
 }
 
 /// SDL hit-test callback — called by SDL to determine what region of a borderless
@@ -3131,6 +3137,9 @@ pub fn run(config_in: AppConfig) !void {
         init_h,
         window_flags,
     ) orelse return error.WindowCreateFailed;
+    g_main_window = window;
+    defer g_main_window = null;
+    defer _ = c.SDL_SetWindowRelativeMouseMode(window, false);
     defer c.SDL_DestroyWindow(window);
     defer windows.deinitAll(); // close all secondary windows before SDL_Quit
     // SDL3: position is set after creation (not in CreateWindow)
@@ -3746,6 +3755,7 @@ pub fn run(config_in: AppConfig) !void {
                     const mx: f32 = event.motion.x;
                     const my: f32 = event.motion.y;
                     mouse_state.updateMouse(mx, my);
+                    mouse_state.addMouseDelta(event.motion.xrel, event.motion.yrel);
                     effects.pollMouse(mx, my, 0.016);
                     if (g_chrome_dragging) {
                         // Use the LIVE global mouse state, not event.motion.state.

@@ -33,18 +33,18 @@ const Vertex = extern struct {
 // ════════════════════════════════════════════════════════════════════════
 
 const SceneUniforms = extern struct {
-    vp: [16]f32,              // 0
-    light_dir: [3]f32,        // 64
-    specular_power: f32,      // 76
-    light_color: [3]f32,      // 80
-    _pad1: f32 = 0,           // 92
-    ambient_color: [3]f32,    // 96
-    _pad2: f32 = 0,           // 108
-    camera_pos: [3]f32,       // 112
-    _pad3: f32 = 0,           // 124
-    fog_color: [3]f32,        // 128
-    fog_near: f32,            // 140
-    fog_far: f32,             // 144
+    vp: [16]f32, // 0
+    light_dir: [3]f32, // 64
+    specular_power: f32, // 76
+    light_color: [3]f32, // 80
+    _pad1: f32 = 0, // 92
+    ambient_color: [3]f32, // 96
+    _pad2: f32 = 0, // 108
+    camera_pos: [3]f32, // 112
+    _pad3: f32 = 0, // 124
+    fog_color: [3]f32, // 128
+    fog_near: f32, // 140
+    fog_far: f32, // 144
     // @Vector(4, f32) has align 16 — forces the extern struct's alignment to 16
     // (which WGSL std140 requires for uniforms) and naturally pads from offset
     // 148 to the 16-aligned 160 before the vec4 sits at 160..176.
@@ -56,7 +56,7 @@ const SceneUniforms = extern struct {
 // matches WGSL VertexInput locations 3–7 (mat4 cols + vec4 color).
 const InstanceData = extern struct {
     model: [16]f32, // 4 vec4 columns; locations 3,4,5,6
-    color: [4]f32,  // location 7
+    color: [4]f32, // location 7
 };
 
 comptime {
@@ -136,7 +136,7 @@ var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persis
 // = 640 KB reserved. drawScene bump-fills this each frame; uploads only the bytes
 // actually written, so a larger ceiling costs reserved GPU memory, not per-frame work.
 const MAX_INSTANCES: u32 = 8192;
-
+const MAX_SCENE_MESHES: usize = 8192;
 
 // ════════════════════════════════════════════════════════════════════════
 // Pipeline state
@@ -145,7 +145,7 @@ const MAX_INSTANCES: u32 = 8192;
 var g_pipeline: ?*wgpu.RenderPipeline = null;
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
-var g_instance_buf: ?*wgpu.Buffer = null;  // per-frame InstanceData buffer (step=instance, vbuf 1)
+var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
 var g_uniform_buffer: ?*wgpu.Buffer = null;
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
@@ -206,6 +206,21 @@ var g_rt_cursor: usize = 0;
 const Pending = struct { node: *Node, slot: *Rt, w: f32, h: f32 };
 var g_pending: [MAX_RT_POOL]Pending = undefined;
 var g_pending_count: usize = 0;
+
+pub const TelemetryStats = struct {
+    scene_count: u32 = 0,
+    mesh_children: u32 = 0,
+    meshes_collected: u32 = 0,
+    meshes_dropped: u32 = 0,
+    instances: u32 = 0,
+    draw_calls: u32 = 0,
+    draw_us: u64 = 0,
+};
+var g_telemetry = TelemetryStats{};
+
+pub fn telemetryStats() TelemetryStats {
+    return g_telemetry;
+}
 
 // ════════════════════════════════════════════════════════════════════════
 // Init / deinit (same as before — pipeline, bind groups, sampler)
@@ -361,14 +376,14 @@ pub fn init() void {
     // Per-instance attributes (vertex buffer 1, step=instance) — model matrix as
     // 4 vec4 columns (locations 3–6) + instance color (location 7). 80 bytes / instance.
     const inst_attrs = [_]wgpu.VertexAttribute{
-        .{ .format = .float32x4, .offset = 0,  .shader_location = 3 },
+        .{ .format = .float32x4, .offset = 0, .shader_location = 3 },
         .{ .format = .float32x4, .offset = 16, .shader_location = 4 },
         .{ .format = .float32x4, .offset = 32, .shader_location = 5 },
         .{ .format = .float32x4, .offset = 48, .shader_location = 6 },
         .{ .format = .float32x4, .offset = 64, .shader_location = 7 },
     };
     const vert_layouts = [_]wgpu.VertexBufferLayout{
-        .{ .step_mode = .vertex,   .array_stride = @sizeOf(Vertex),       .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
+        .{ .step_mode = .vertex, .array_stride = @sizeOf(Vertex), .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
         .{ .step_mode = .instance, .array_stride = @sizeOf(InstanceData), .attribute_count = inst_attrs.len, .attributes = &inst_attrs },
     };
     const color_target = wgpu.ColorTargetState{
@@ -772,7 +787,6 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     return .{ .offset = off, .count = count };
 }
 
-
 // ════════════════════════════════════════════════════════════════════════
 // Public API
 // ════════════════════════════════════════════════════════════════════════
@@ -820,7 +834,11 @@ pub fn render(node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
 // gpu.frame(), after StaticSurface captures and before the main 2D pass, so
 // textureKey-sampled surfaces are already populated for this frame.
 pub fn flushPending() void {
+    g_telemetry = .{ .scene_count = @intCast(g_pending_count) };
+    const started = std.time.microTimestamp();
     for (g_pending[0..g_pending_count]) |p| drawScene(p.node, p.slot, p.w, p.h);
+    const ended = std.time.microTimestamp();
+    g_telemetry.draw_us = @intCast(@max(0, ended - started));
     g_pending_count = 0;
 }
 
@@ -858,6 +876,20 @@ fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_po
     pass.setPipeline(sky_pipeline);
     pass.setBindGroup(0, sky_bg, 0, null);
     pass.draw(3, 1, 0, 0);
+}
+
+fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, sy: f32, sz: f32, cr: f32, cg: f32, cb: f32) InstanceData {
+    const deg2rad = std.math.pi / 180.0;
+    var model = math.m4scale(math.m4identity(), .{ .x = sx, .y = sy, .z = sz });
+    model = math.m4multiply(math.m4rotateZ(math.m4identity(), rz * deg2rad), model);
+    model = math.m4multiply(math.m4rotateX(math.m4identity(), rx * deg2rad), model);
+    model = math.m4multiply(math.m4rotateY(math.m4identity(), ry * deg2rad), model);
+    model = math.m4multiply(math.m4translate(math.m4identity(), .{ .x = px, .y = py, .z = pz }), model);
+
+    return InstanceData{
+        .model = math.m4transpose(model),
+        .color = .{ cr, cg, cb, 1.0 },
+    };
 }
 
 fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
@@ -912,18 +944,23 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
 
     const focus_dist = math.v3distance(cam_pos, cam_look);
     var scene_extent: f32 = @max(8.0, focus_dist);
+    var scene_mesh_children: u32 = 0;
     for (node.children) |*child| {
         if (!child.scene3d_mesh) continue;
+        scene_mesh_children += if (child.scene3d_instance_count > 0) child.scene3d_instance_count else 1;
         const center = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
         scene_extent = @max(scene_extent, math.v3distance(center, cam_look) + estimateMeshRadius(child));
     }
+    g_telemetry.mesh_children += scene_mesh_children;
     const fog_near = @max(6.0, focus_dist * 0.9);
     const fog_far = @max(fog_near + 12.0, fog_near + scene_extent * 1.5);
 
     // ── Build view + projection ──
     const aspect = w / @max(h, 1);
     const fov_rad = cam_fov * std.math.pi / 180.0;
-    const projection = math.m4perspective(fov_rad, aspect, 0.1, 1000.0);
+    const projection_near = @min(1.0, @max(0.1, focus_dist * 0.01));
+    const projection_far = @min(12000.0, @max(1000.0, focus_dist + scene_extent + 64.0));
+    const projection = math.m4perspective(fov_rad, aspect, projection_near, projection_far);
     const view = math.m4lookAt(cam_pos, cam_look, .{ .x = 0, .y = 1, .z = 0 });
     const vp = math.m4multiply(projection, view);
 
@@ -980,15 +1017,17 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
 
     // ── Pass 1: resolve each mesh (geometry slot, texture bind group). Skips
     //    nodes whose first-paint upload would miss the cache (broken state). ──
-    const MAX_MESHES = 1024;
-    var midx: [MAX_MESHES]u32 = undefined;
-    var mslot: [MAX_MESHES]GeoSlice = undefined;
-    var mtex: [MAX_MESHES]?*wgpu.BindGroup = undefined;
-    var mvisited: [MAX_MESHES]bool = [_]bool{false} ** MAX_MESHES;
+    // Keep mesh collection aligned with the instance-buffer cap. A lower
+    // collection cap silently drops later Scene3D.Mesh children in large maps.
+    var midx: [MAX_SCENE_MESHES]u32 = undefined;
+    var mslot: [MAX_SCENE_MESHES]GeoSlice = undefined;
+    var mtex: [MAX_SCENE_MESHES]?*wgpu.BindGroup = undefined;
+    var mvisited: [MAX_SCENE_MESHES]bool = [_]bool{false} ** MAX_SCENE_MESHES;
     var mcount: usize = 0;
+    var collected_logical: u32 = 0;
 
     var ci: u32 = 0;
-    while (ci < node.children.len and mcount < MAX_MESHES) : (ci += 1) {
+    while (ci < node.children.len and mcount < MAX_SCENE_MESHES) : (ci += 1) {
         const child = &node.children[ci];
         if (!child.scene3d_mesh) continue;
         const key = child.scene3d_geom_key orelse continue;
@@ -1016,12 +1055,17 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         mslot[mcount] = maybe_slot.?;
         mtex[mcount] = tex_bg;
         mcount += 1;
+        collected_logical += if (child.scene3d_instance_count > 0) child.scene3d_instance_count else 1;
     }
+    const collected_count: u32 = collected_logical;
+    g_telemetry.meshes_collected += collected_count;
+    if (scene_mesh_children > collected_count) g_telemetry.meshes_dropped += scene_mesh_children - collected_count;
 
     // ── Pass 2: group by (slot.offset, tex_bg) and issue ONE instanced draw per
     //    group. slot.offset is the cache offset for a key — identity-by-offset
     //    is equivalent to identity-by-key since each key has one cache entry. ──
     const inst_cap_bytes: u64 = @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
+    var inst_scratch: [MAX_INSTANCES]InstanceData = undefined;
     var inst_top: u64 = 0;
     var gi: usize = 0;
     while (gi < mcount) : (gi += 1) {
@@ -1040,33 +1084,66 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
             if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break; // overflow
 
             const child = &node.children[midx[hi]];
-            const deg2rad = std.math.pi / 180.0;
-            var model = math.m4scale(math.m4identity(), .{
-                .x = child.scene3d_scale_x, .y = child.scene3d_scale_y, .z = child.scene3d_scale_z,
-            });
-            model = math.m4multiply(math.m4rotateZ(math.m4identity(), child.scene3d_rot_z * deg2rad), model);
-            model = math.m4multiply(math.m4rotateX(math.m4identity(), child.scene3d_rot_x * deg2rad), model);
-            model = math.m4multiply(math.m4rotateY(math.m4identity(), child.scene3d_rot_y * deg2rad), model);
-            model = math.m4multiply(math.m4translate(math.m4identity(), .{
-                .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z,
-            }), model);
-
-            const inst = InstanceData{
-                .model = math.m4transpose(model),
-                .color = .{ child.scene3d_color_r, child.scene3d_color_g, child.scene3d_color_b, 1.0 },
-            };
-            queue.writeBuffer(g_instance_buf.?, inst_top, @ptrCast(&inst), @sizeOf(InstanceData));
-            inst_top += @sizeOf(InstanceData);
-            group_count += 1;
+            if (child.scene3d_instance_data) |idata| {
+                const stride = child.scene3d_instance_stride;
+                const icount = child.scene3d_instance_count;
+                if (stride >= 9 and icount > 0 and idata.len >= @as(usize, icount) * stride) {
+                    var ii: u32 = 0;
+                    while (ii < icount and inst_top + @sizeOf(InstanceData) <= inst_cap_bytes) : (ii += 1) {
+                        const base = @as(usize, ii) * stride;
+                        const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
+                        const scale_base: usize = if (stride >= 12) 6 else 3;
+                        const color_base: usize = if (stride >= 12) 9 else 6;
+                        inst_scratch[inst_index] = makeInstance(
+                            idata[base + 0],
+                            idata[base + 1],
+                            idata[base + 2],
+                            if (stride >= 12) idata[base + 3] else 0,
+                            if (stride >= 12) idata[base + 4] else 0,
+                            if (stride >= 12) idata[base + 5] else 0,
+                            idata[base + scale_base + 0],
+                            idata[base + scale_base + 1],
+                            idata[base + scale_base + 2],
+                            idata[base + color_base + 0],
+                            idata[base + color_base + 1],
+                            idata[base + color_base + 2],
+                        );
+                        inst_top += @sizeOf(InstanceData);
+                        group_count += 1;
+                    }
+                }
+            } else {
+                const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
+                inst_scratch[inst_index] = makeInstance(
+                    child.scene3d_pos_x,
+                    child.scene3d_pos_y,
+                    child.scene3d_pos_z,
+                    child.scene3d_rot_x,
+                    child.scene3d_rot_y,
+                    child.scene3d_rot_z,
+                    child.scene3d_scale_x,
+                    child.scene3d_scale_y,
+                    child.scene3d_scale_z,
+                    child.scene3d_color_r,
+                    child.scene3d_color_g,
+                    child.scene3d_color_b,
+                );
+                inst_top += @sizeOf(InstanceData);
+                group_count += 1;
+            }
             mvisited[hi] = true;
         }
 
         if (group_count == 0) continue;
+        const inst_start_index: usize = @intCast(inst_start / @sizeOf(InstanceData));
+        queue.writeBuffer(g_instance_buf.?, inst_start, @ptrCast(&inst_scratch[inst_start_index]), @as(u64, group_count) * @sizeOf(InstanceData));
         if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
         const geo_bytes: u64 = @as(u64, group_slot.count) * @sizeOf(Vertex);
         pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, geo_bytes);
         pass.setVertexBuffer(1, g_instance_buf.?, inst_start, @as(u64, group_count) * @sizeOf(InstanceData));
         pass.draw(group_slot.count, group_count, 0, 0);
+        g_telemetry.draw_calls += 1;
+        g_telemetry.instances += group_count;
     }
 
     pass.end();
