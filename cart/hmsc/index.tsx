@@ -13,6 +13,7 @@ import {
   readStoredGameState,
   saveGameState,
 } from './state/gameState';
+import { GameWorld3D } from './render3d/GameWorld3D';
 import { Console } from './ui/Console';
 
 function nextCommandEntryId(): string {
@@ -64,6 +65,7 @@ export default function HmscCart() {
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#020617' }}>
+      <GameWorld3D state={gameState} />
       <Box style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}>
         <Pressable
           onPress={() => setConsoleOpen((open) => !open)}

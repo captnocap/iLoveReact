@@ -28,12 +28,14 @@ cart/hmsc/
   design.ts              JSON game-state contract
   state/gameState.ts     create/load/save/revive GameState
   commands/              parser + command registry
+  world/demoMap.ts       one authored seed map shared by game + internal map
   world/grid.ts          grid storage helpers over continuous movement
+  render3d/GameWorld3D.tsx  3D renderer over GameState.world
   ui/Console.tsx         command terminal
 
 cart/hmsc-int/
   index.tsx              internal map tooling shell
-  MapCanvas.tsx          blank map surface until map authoring exists
+  MapCanvas.tsx          2D Canvas renderer over the same GameState.world
 ```
 
 ## State Model

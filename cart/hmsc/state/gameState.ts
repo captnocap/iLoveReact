@@ -4,7 +4,7 @@ import {
   GameState,
   HMSC_STATE_SCHEMA_VERSION,
 } from '../design';
-import { commandCell, placeCell } from '../world/grid';
+import { addDemoMapToState } from '../world/demoMap';
 
 declare const globalThis: any;
 
@@ -47,12 +47,7 @@ export function createInitialGameState(): GameState {
     },
   };
 
-  state = placeCell(state, 'asphalt', commandCell(0, 0), 'boot');
-  state = placeCell(state, 'sidewalk', commandCell(1, 0), 'boot');
-  state = placeCell(state, 'wall', commandCell(2, 0), 'boot');
-  state = placeCell(state, 'door', commandCell(2, 1), 'boot');
-  state = placeCell(state, 'marker', commandCell(0, 2), 'boot');
-  return state;
+  return addDemoMapToState(state);
 }
 
 export function markGameStateUpdated(state: GameState): GameState {
