@@ -80,17 +80,21 @@ function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number): vo
     const b = ringPts[i + 1];
     for (let s = 0; s < sides; s++) {
       const s2 = (s + 1) % sides;
-      const p0 = a[s]; // bottom-left
-      const p1 = a[s2]; // bottom-right
-      const p2 = b[s2]; // top-right
-      const p3 = b[s]; // top-left
-      // face normal — outward, from the quad's two edges
+      const p0 = a[s];  // lower ring, angle s   (one corner)
+      const p1 = a[s2]; // lower ring, angle s+1 (CCW-next around +Y)
+      const p2 = b[s2]; // upper ring, angle s+1
+      const p3 = b[s];  // upper ring, angle s
+      // ringVerts winds CCW around +Y. From OUTSIDE a front-hemisphere quad
+      // (e.g. +Z face), increasing s goes screen-LEFT, so the quad p0→p1→p2→p3
+      // traces CW. To render front-facing (cull_mode=.back, front_face=.ccw),
+      // wind p0→p3→p2 and p0→p2→p1 (which IS CCW from outside) and take the
+      // matching cross — e2 first, then e1 — so the normal points outward.
       const e1 = sub(p1, p0);
       const e2 = sub(p3, p0);
-      const n = normalize3(cross(e1, e2));
+      const n = normalize3(cross(e2, e1));
       // Two triangles. Per-vertex normals all equal n → flat shading.
-      g.tri(p0, n, [0, 0] as Vec2, p1, n, [1, 0] as Vec2, p2, n, [1, 1] as Vec2);
-      g.tri(p0, n, [0, 0] as Vec2, p2, n, [1, 1] as Vec2, p3, n, [0, 1] as Vec2);
+      g.tri(p0, n, [0, 0] as Vec2, p3, n, [0, 1] as Vec2, p2, n, [1, 1] as Vec2);
+      g.tri(p0, n, [0, 0] as Vec2, p2, n, [1, 1] as Vec2, p1, n, [1, 0] as Vec2);
     }
   }
 }
@@ -102,11 +106,17 @@ function emitCap(g: ReturnType<typeof mesh>, ring: Ring, sides: number, up: bool
   const n: Vec3 = up ? [0, 1, 0] : [0, -1, 0];
   for (let s = 0; s < sides; s++) {
     const s2 = (s + 1) % sides;
-    // winding so the normal points the right way
+    // ringVerts winds CCW around +Y, so cross(pts[s]−c, pts[s2]−c) points −Y.
+    // For the TOP cap (n=+Y, e.g. crown of head) we need cross to give +Y, which
+    // means winding (center, pts[s2], pts[s]). For the BOTTOM cap (n=−Y, e.g.
+    // sole of foot) we want cross −Y, i.e. (center, pts[s], pts[s2]). The two
+    // branches' windings were previously swapped relative to the up flag, which
+    // made the crown render only from below and the sole only from above — both
+    // invisible from the normal viewing angle, contributing to the hollow read.
     if (up) {
-      g.tri(center, n, [0.5, 0.5] as Vec2, pts[s], n, [0, 0] as Vec2, pts[s2], n, [1, 0] as Vec2);
-    } else {
       g.tri(center, n, [0.5, 0.5] as Vec2, pts[s2], n, [1, 0] as Vec2, pts[s], n, [0, 0] as Vec2);
+    } else {
+      g.tri(center, n, [0.5, 0.5] as Vec2, pts[s], n, [0, 0] as Vec2, pts[s2], n, [1, 0] as Vec2);
     }
   }
 }
