@@ -32,6 +32,13 @@ export type HumanoidParams = {
   limbThickness: number;
   /** ring polygon sides. 6 = PS1 chunky, 8 = N64, 12+ = smoother. */
   sides: number;
+  /**
+   * Shading model: false = flat (one normal per quad, hard creases between
+   * facets — PS1 gem look), true = smooth/Gouraud (per-vertex averaged normals,
+   * lighting interpolates across facets so the surface reads round at low poly
+   * count — the N64 head register). Same vertex count either way.
+   */
+  smoothShading: boolean;
 };
 
 export const HUMANOID_DEFAULTS: HumanoidParams = {
@@ -40,7 +47,8 @@ export const HUMANOID_DEFAULTS: HumanoidParams = {
   hipWidth: 0.46,
   headSize: 0.34,
   limbThickness: 1.0,
-  sides: 6,
+  sides: 8,
+  smoothShading: true,
 };
 
 // ── a single ring cross-section ──────────────────────────────────────────────
@@ -69,12 +77,16 @@ function normalize3(v: Vec3): Vec3 {
   return [v[0] / L, v[1] / L, v[2] / L];
 }
 
-// ── stitch a sweep of rings together with flat-shaded quads ──────────────────
+// ── stitch a sweep of rings together with quads ──────────────────────────────
 // rings[i] connects to rings[i+1] side-by-side; the same `sides` count for all.
-// Each quad gets a single face normal so adjacent quads show a hard crease —
-// the chunky faceted register the N64 used.
-function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number): void {
+// Two shading modes:
+//   smooth=false → one face normal per quad (hard creases between facets, PS1)
+//   smooth=true  → per-vertex normals averaged from the 4 adjacent quad faces,
+//                  so the GPU interpolates lighting across facets (N64 Gouraud).
+//                  Same vertex count; only the normals differ.
+function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number, smooth: boolean): void {
   const ringPts = rings.map((r) => ringVerts(r, sides));
+  const numRings = ringPts.length;
   // ringVerts winds CCW around +Y. cross((p1-p0),(p3-p0)) at a +X-face quad gives
   // an outward normal ONLY when b is below a (e2 = p3-p0 points -Y, e.g. limbs:
   // shoulder→hand, hip→foot). When b is above a (trunk: hip→crown, ascending y),
@@ -82,7 +94,54 @@ function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number): vo
   // hollow before. Detect direction once per sweep and pick the winding + cross
   // order that puts the outward face on the camera side either way.
   const descending = rings.length >= 2 && rings[1].y <= rings[0].y;
-  for (let i = 0; i < ringPts.length - 1; i++) {
+
+  // 1) face normals — one per quad (i, s) between ring i and ring i+1, side s.
+  const faceN: Vec3[][] = [];
+  for (let i = 0; i < numRings - 1; i++) {
+    const a = ringPts[i];
+    const b = ringPts[i + 1];
+    const row: Vec3[] = [];
+    for (let s = 0; s < sides; s++) {
+      const s2 = (s + 1) % sides;
+      const p0 = a[s];
+      const p1 = a[s2];
+      const p3 = b[s];
+      const e1 = sub(p1, p0);
+      const e2 = sub(p3, p0);
+      const n = normalize3(descending ? cross(e1, e2) : cross(e2, e1));
+      row.push(n);
+    }
+    faceN.push(row);
+  }
+
+  // 2) per-vertex normals (smooth only). vertN[i][s] = normalize(sum of up to 4
+  //    surrounding face normals: below-left, below-right, above-left, above-right).
+  //    At the top/bottom ring fewer faces touch — clamp those out.
+  let vertN: Vec3[][] | null = null;
+  if (smooth) {
+    vertN = [];
+    for (let i = 0; i < numRings; i++) {
+      const row: Vec3[] = [];
+      for (let s = 0; s < sides; s++) {
+        const sPrev = (s + sides - 1) % sides;
+        let nx = 0, ny = 0, nz = 0;
+        const acc = (qi: number, qs: number) => {
+          if (qi < 0 || qi >= faceN.length) return;
+          const n = faceN[qi][qs];
+          nx += n[0]; ny += n[1]; nz += n[2];
+        };
+        acc(i - 1, sPrev); acc(i - 1, s);
+        acc(i, sPrev);     acc(i, s);
+        const L = Math.hypot(nx, ny, nz);
+        row.push(L > 1e-6 ? [nx / L, ny / L, nz / L] as Vec3 : [0, 1, 0]);
+      }
+      vertN.push(row);
+    }
+  }
+
+  // 3) emit triangles. Winding mirrors the original logic exactly; only the
+  //    normals fed to each corner differ between flat and smooth.
+  for (let i = 0; i < numRings - 1; i++) {
     const a = ringPts[i];
     const b = ringPts[i + 1];
     for (let s = 0; s < sides; s++) {
@@ -91,19 +150,17 @@ function emitSweep(g: ReturnType<typeof mesh>, rings: Ring[], sides: number): vo
       const p1 = a[s2];
       const p2 = b[s2];
       const p3 = b[s];
-      const e1 = sub(p1, p0);
-      const e2 = sub(p3, p0);
+      const fn = faceN[i][s];
+      const n0 = vertN ? vertN[i][s]      : fn;
+      const n1 = vertN ? vertN[i][s2]     : fn;
+      const n2 = vertN ? vertN[i + 1][s2] : fn;
+      const n3 = vertN ? vertN[i + 1][s]  : fn;
       if (descending) {
-        // Limbs: b below a. Original outward-correct winding.
-        const n = normalize3(cross(e1, e2));
-        g.tri(p0, n, [0, 0] as Vec2, p1, n, [1, 0] as Vec2, p2, n, [1, 1] as Vec2);
-        g.tri(p0, n, [0, 0] as Vec2, p2, n, [1, 1] as Vec2, p3, n, [0, 1] as Vec2);
+        g.tri(p0, n0, [0, 0] as Vec2, p1, n1, [1, 0] as Vec2, p2, n2, [1, 1] as Vec2);
+        g.tri(p0, n0, [0, 0] as Vec2, p2, n2, [1, 1] as Vec2, p3, n3, [0, 1] as Vec2);
       } else {
-        // Trunk: b above a. Flip the winding and negate the cross to keep the
-        // outward face on the camera side.
-        const n = normalize3(cross(e2, e1));
-        g.tri(p0, n, [0, 0] as Vec2, p3, n, [0, 1] as Vec2, p2, n, [1, 1] as Vec2);
-        g.tri(p0, n, [0, 0] as Vec2, p2, n, [1, 1] as Vec2, p1, n, [1, 0] as Vec2);
+        g.tri(p0, n0, [0, 0] as Vec2, p3, n3, [0, 1] as Vec2, p2, n2, [1, 1] as Vec2);
+        g.tri(p0, n0, [0, 0] as Vec2, p2, n2, [1, 1] as Vec2, p1, n1, [1, 0] as Vec2);
       }
     }
   }
@@ -162,7 +219,7 @@ export function generate(p: HumanoidParams): GeometryData {
     { y: faceY,     cx: 0, cz: 0.01, rx: p.headSize * 1.0,  rz: p.headSize * 1.0  }, // face/head widest
     { y: crownY,    cx: 0, cz: 0,    rx: p.headSize * 0.62, rz: p.headSize * 0.62 }, // crown
   ];
-  emitSweep(g, trunkRings, sides);
+  emitSweep(g, trunkRings, sides, p.smoothShading);
   emitCap(g, trunkRings[trunkRings.length - 1], sides, true); // top of head
 
   // ── legs: hip → foot. First ring sits inside the trunk hip so the join hides
@@ -176,7 +233,7 @@ export function generate(p: HumanoidParams): GeometryData {
   const legXOffset = hipHalf * 0.55;
   for (const sx of [-legXOffset, legXOffset]) {
     const rings = legRings(sx);
-    emitSweep(g, rings, sides);
+    emitSweep(g, rings, sides, p.smoothShading);
     emitCap(g, rings[rings.length - 1], sides, false); // sole of foot
   }
 
@@ -191,7 +248,7 @@ export function generate(p: HumanoidParams): GeometryData {
   const armX = shoulderHalf * 1.02;
   for (const sx of [-armX, armX]) {
     const rings = armRings(sx);
-    emitSweep(g, rings, sides);
+    emitSweep(g, rings, sides, p.smoothShading);
     emitCap(g, rings[rings.length - 1], sides, false); // end of hand
   }
 

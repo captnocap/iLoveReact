@@ -282,7 +282,7 @@ export default function CameraLab() {
           generator instead of a math solid. No internal surfaces, no seams. */}
       <Scene3D.Mesh
         geometry={Geometry.Humanoid}
-        params={{ height: 2.0, shoulderWidth: 0.72, hipWidth: 0.46, headSize: 0.34, limbThickness: 1.0, sides: 6 }}
+        params={{ height: 2.0, shoulderWidth: 0.72, hipWidth: 0.46, headSize: 0.34, limbThickness: 1.0, sides: 10, smoothShading: true }}
         material="#c23b8e"
         position={[1.5, 0, 0]}
       />
