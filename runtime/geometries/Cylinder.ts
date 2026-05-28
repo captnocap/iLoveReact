@@ -25,7 +25,14 @@ export function generate(p: CylinderParams): GeometryData {
     const n2: Vec3 = [c2, 0, s2];
     g.tri(a, n1, [0, 0], d, n1, [0, 1], c, n2, [1, 1]);
     g.tri(a, n1, [0, 0], c, n2, [1, 1], b, n2, [1, 0]);
-    g.triFlat([0, hy, 0], b, a, [0, 1, 0]); // top cap
+    // Top cap: top-center + the TWO TOP-RING vertices (c, d). The original Zig
+    // generateCylinder (which this file was a byte-equivalent port of) used b, a
+    // here — both BOTTOM-ring vertices — which built 24 diagonal triangles fanning
+    // from top-center down to the bottom rim instead of a flat top cap. From most
+    // side views the bogus cone is hidden inside the cylinder shell, but looking
+    // into the open top (or any path where the cone's outward face becomes visible
+    // through the side wall's grazing edge) shows straight through the missing top.
+    g.triFlat([0, hy, 0], c, d, [0, 1, 0]); // top cap
     g.triFlat([0, -hy, 0], a, b, [0, -1, 0]); // bottom cap
   }
   return g.build();
