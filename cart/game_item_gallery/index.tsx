@@ -140,7 +140,6 @@ const cyl12 = { radius: 0.5, height: 1, segments: 12 };
 const cyl18 = { radius: 0.5, height: 1, segments: 18 };
 const cone12 = { radius: 0.5, height: 1, segments: 12 };
 const sphere12 = { radius: 0.5, segments: 16, rings: 10 };
-const torus16 = { radius: 0.5, tube: 0.1, segments: 18, sides: 8 };
 
 function Knife(ctx: ModelCtx) {
   return <>
@@ -153,10 +152,8 @@ function Knife(ctx: ModelCtx) {
 function Pistol(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#20242d" p={[0, 0.42, 0]} s={[0.9, 0.23, 0.2]} />
-    <Part ctx={ctx} geometry={cyl} params={cyl12} material="#11151c" p={[0.57, 0.46, 0]} r={[0, 0, PI / 2]} s={[0.09, 0.62, 0.09]} />
+    <Part ctx={ctx} geometry={box} params={box1} material="#11151c" p={[0.42, 0.39, 0]} s={[0.28, 0.12, 0.18]} />
     <Part ctx={ctx} geometry={box} params={box1} material="#2e333c" p={[-0.25, 0.2, 0]} r={[0, 0, -0.45]} s={[0.22, 0.56, 0.2]} />
-    <Part ctx={ctx} geometry={torus} params={torus16} material="#151922" p={[0.05, 0.18, 0]} r={[PI / 2, 0, 0]} s={[0.25, 0.25, 0.12]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#c0a062" p={[0.15, 0.33, 0]} s={[0.09, 0.16, 0.04]} />
   </>;
 }
 
@@ -171,27 +168,25 @@ function Pitchfork(ctx: ModelCtx) {
 
 function Bat(ctx: ModelCtx) {
   return <>
-    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#b77a42" p={[0.08, 0.62, 0]} r={[0, 0, -0.38]} s={[0.17, 1.55, 0.17]} />
-    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#5b371f" p={[-0.25, -0.03, 0]} r={[0, 0, -0.38]} s={[0.08, 0.52, 0.08]} />
-    <Part ctx={ctx} geometry={sphere} params={sphere12} material="#d09a5d" p={[0.39, 1.2, 0]} s={[0.22, 0.22, 0.22]} />
+    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#b77a42" p={[0, 0.62, 0]} r={[0, 0, -0.34]} s={[0.16, 1.6, 0.16]} />
+    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#6a3f22" p={[-0.25, -0.02, 0]} r={[0, 0, -0.34]} s={[0.09, 0.5, 0.09]} />
   </>;
 }
 
 function Cash(ctx: ModelCtx) {
   return <>
-    {[0, 1, 2].map((i) => <Part key={`bill-${i}`} ctx={ctx} geometry={box} params={box1} material={i === 1 ? '#7ac77d' : '#63b66a'} p={[0, 0.08 + i * 0.05, 0]} r={[0, 0.18 * i, 0]} s={[0.9, 0.035, 0.45]} />)}
-    <Part ctx={ctx} geometry={box} params={box1} material="#e2efdf" p={[0, 0.27, 0]} s={[0.38, 0.025, 0.16]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#2d8646" p={[-0.26, 0.3, 0]} s={[0.08, 0.035, 0.2]} />
+    <Part ctx={ctx} geometry={box} params={box1} material="#5fb86b" p={[0, 0.13, 0]} s={[1.0, 0.16, 0.5]} />
+    <Part ctx={ctx} geometry={box} params={box1} material="#79cf7f" p={[0.03, 0.23, -0.02]} r={[0, 0.08, 0]} s={[0.96, 0.04, 0.48]} />
   </>;
 }
 
 function Vehicle(ctx: ModelCtx) {
-  const wheels: V3[] = [[-0.52, 0.07, -0.34], [0.52, 0.07, -0.34], [-0.52, 0.07, 0.34], [0.52, 0.07, 0.34]];
+  const wheels: V3[] = [[-0.52, 0.08, 0.37], [0.52, 0.08, 0.37]];
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#c34c42" p={[0, 0.34, 0]} s={[1.25, 0.36, 0.66]} />
     <Part ctx={ctx} geometry={box} params={box1} material="#f08a6b" p={[-0.12, 0.64, 0]} s={[0.62, 0.34, 0.54]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#91c8e8" p={[-0.14, 0.72, 0.28]} s={[0.34, 0.16, 0.035]} />
-    {wheels.map((p, i) => <Part key={i} ctx={ctx} geometry={cyl} params={cyl18} material="#111111" p={p} r={[PI / 2, 0, 0]} s={[0.19, 0.14, 0.19]} />)}
+    <Part ctx={ctx} geometry={box} params={box1} material="#91c8e8" p={[-0.14, 0.72, 0.285]} s={[0.34, 0.16, 0.04]} />
+    {wheels.map((p, i) => <Part key={i} ctx={ctx} geometry={cyl} params={cyl18} material="#111111" p={p} r={[PI / 2, 0, 0]} s={[0.23, 0.16, 0.23]} />)}
   </>;
 }
 
@@ -215,33 +210,27 @@ function Surf(ctx: ModelCtx) {
 function Football(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={sphere} params={sphere12} material="#8a4e2b" p={[0, 0.42, 0]} s={[0.82, 0.46, 0.46]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#f2ead8" p={[0, 0.43, 0.48]} s={[0.54, 0.04, 0.025]} />
-    {[-0.16, 0, 0.16].map((x, i) => <Part key={i} ctx={ctx} geometry={box} params={box1} material="#f2ead8" p={[x, 0.47, 0.505]} s={[0.035, 0.12, 0.025]} />)}
   </>;
 }
 
 function Basketball(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={sphere} params={{ radius: 0.5, segments: 24, rings: 14 }} material="#da7627" p={[0, 0.48, 0]} s={[0.75, 0.75, 0.75]} />
-    <Part ctx={ctx} geometry={torus} params={{ radius: 0.51, tube: 0.018, segments: 32, sides: 6 }} material="#1e2025" p={[0, 0.48, 0]} r={[PI / 2, 0, 0]} s={[0.75, 0.75, 0.75]} />
-    <Part ctx={ctx} geometry={torus} params={{ radius: 0.51, tube: 0.018, segments: 32, sides: 6 }} material="#1e2025" p={[0, 0.48, 0]} r={[0, PI / 2, 0]} s={[0.75, 0.75, 0.75]} />
   </>;
 }
 
 function PillBottle(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={cyl} params={cyl18} material="#d98238" p={[0, 0.42, 0]} s={[0.32, 0.72, 0.32]} />
-    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#f7f1df" p={[0, 0.84, 0]} s={[0.36, 0.16, 0.36]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#f7f7f0" p={[0, 0.44, 0.325]} s={[0.36, 0.22, 0.025]} />
+    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#f7f1df" p={[0, 0.84, 0]} s={[0.34, 0.14, 0.34]} />
   </>;
 }
 
 function BeerBottle(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={cyl} params={cyl18} material="#2f593a" p={[0, 0.42, 0]} s={[0.22, 0.62, 0.22]} />
-    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#24472f" p={[0, 0.88, 0]} s={[0.11, 0.44, 0.11]} />
-    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#d7b46a" p={[0, 1.12, 0]} s={[0.13, 0.06, 0.13]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#efe2b2" p={[0, 0.45, 0.225]} s={[0.28, 0.2, 0.025]} />
+    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#24472f" p={[0, 0.88, 0]} s={[0.11, 0.42, 0.11]} />
+    <Part ctx={ctx} geometry={cyl} params={cyl18} material="#d7b46a" p={[0, 1.11, 0]} s={[0.13, 0.05, 0.13]} />
   </>;
 }
 
@@ -249,19 +238,17 @@ function LiquorBottle(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#5d3a8d" p={[0, 0.46, 0]} s={[0.42, 0.7, 0.28]} />
     <Part ctx={ctx} geometry={cyl} params={cyl18} material="#3b2763" p={[0, 0.96, 0]} s={[0.12, 0.38, 0.12]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#f2d58e" p={[0, 0.46, 0.292]} s={[0.28, 0.26, 0.025]} />
   </>;
 }
 
 function Pills(ctx: ModelCtx) {
   const pillData = [
     { p: [-0.34, 0.18, -0.12] as V3, c: '#f7f4e8', r: 0.2 },
-    { p: [0.08, 0.2, 0.05] as V3, c: '#e65353', r: -0.4 },
-    { p: [0.38, 0.17, -0.03] as V3, c: '#70a8f0', r: 0.7 },
+    { p: [0.04, 0.19, 0.05] as V3, c: '#e65353', r: -0.4 },
+    { p: [0.36, 0.17, -0.03] as V3, c: '#70a8f0', r: 0.7 },
   ];
   return <>
-    {pillData.map((d, i) => <Part key={`pill-${i}`} ctx={ctx} geometry={cyl} params={cyl18} material={d.c} p={d.p} r={[PI / 2, 0, d.r]} s={[0.13, 0.36, 0.13]} />)}
-    {pillData.map((d, i) => <Part key={`pill-cap-${i}`} ctx={ctx} geometry={sphere} params={sphere12} material={i === 1 ? '#fff3f3' : d.c} p={[d.p[0] + Math.cos(d.r) * 0.18, d.p[1], d.p[2] + Math.sin(d.r) * 0.18]} s={[0.13, 0.13, 0.13]} />)}
+    {pillData.map((d, i) => <Part key={`pill-${i}`} ctx={ctx} geometry={cyl} params={cyl18} material={d.c} p={d.p} r={[PI / 2, 0, d.r]} s={[0.13, 0.38, 0.13]} />)}
   </>;
 }
 
