@@ -1820,8 +1820,6 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonBool(v)) |b| node.scene3d_light = b;
         } else if (std.mem.eql(u8, k, "scene3dGroup")) {
             if (jsonBool(v)) |b| node.scene3d_group = b;
-        } else if (std.mem.eql(u8, k, "scene3dGeometry")) {
-            if (dupJsonText(v)) |s| node.scene3d_geometry = s;
         } else if (std.mem.eql(u8, k, "scene3dLightType")) {
             if (dupJsonText(v)) |s| node.scene3d_light_type = s;
         } else if (std.mem.eql(u8, k, "scene3dColorR")) {
@@ -1864,16 +1862,6 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.scene3d_fov = f;
         } else if (std.mem.eql(u8, k, "scene3dIntensity")) {
             if (jsonFloat(v)) |f| node.scene3d_intensity = f;
-        } else if (std.mem.eql(u8, k, "scene3dRadius")) {
-            if (jsonFloat(v)) |f| node.scene3d_radius = f;
-        } else if (std.mem.eql(u8, k, "scene3dTubeRadius")) {
-            if (jsonFloat(v)) |f| node.scene3d_tube_radius = f;
-        } else if (std.mem.eql(u8, k, "scene3dSizeX")) {
-            if (jsonFloat(v)) |f| node.scene3d_size_x = f;
-        } else if (std.mem.eql(u8, k, "scene3dSizeY")) {
-            if (jsonFloat(v)) |f| node.scene3d_size_y = f;
-        } else if (std.mem.eql(u8, k, "scene3dSizeZ")) {
-            if (jsonFloat(v)) |f| node.scene3d_size_z = f;
         } else if (std.mem.eql(u8, k, "scene3dShowGrid")) {
             if (jsonBool(v)) |b| node.scene3d_show_grid = b;
         } else if (std.mem.eql(u8, k, "scene3dShowAxes")) {
@@ -1909,23 +1897,6 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonInt(v)) |i| node.scene3d_tex_h = if (i > 0 and i < 65536) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dTexKey")) {
             if (dupJsonText(v)) |s| node.scene3d_tex_key = s;
-        } else if (std.mem.eql(u8, k, "scene3dHfCols")) {
-            if (jsonInt(v)) |i| node.scene3d_hf_cols = if (i > 1 and i < 4096) @intCast(i) else 0;
-        } else if (std.mem.eql(u8, k, "scene3dHfRows")) {
-            if (jsonInt(v)) |i| node.scene3d_hf_rows = if (i > 1 and i < 4096) @intCast(i) else 0;
-        } else if (std.mem.eql(u8, k, "scene3dHeights")) {
-            // Flat array of corner heights (length = hfCols*hfRows). Copied into
-            // a g_alloc-owned []f32 the gpu/3d.zig heightfield generator reads.
-            if (v == .array) {
-                const items = v.array.items;
-                if (items.len > 0 and items.len <= (1 << 20)) {
-                    const buf = g_alloc.alloc(f32, items.len) catch null;
-                    if (buf) |out| {
-                        for (items, 0..) |hv, n| out[n] = jsonFloat(hv) orelse 0;
-                        node.scene3d_heights = out;
-                    }
-                }
-            }
         } else if (std.mem.eql(u8, k, "scene3dGeomKey")) {
             // @reactjit/geometries intern key (e.g. "Sphere:r0.12s24g16"). gpu/3d.zig
             // caches the retained vertex slice under this key; identical keys across
@@ -1949,18 +1920,6 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonInt(v)) |i| node.scene3d_vert_count = if (i > 0 and i < (1 << 22)) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dBoundsRadius")) {
             if (jsonFloat(v)) |f| node.scene3d_bounds_radius = f;
-        } else if (std.mem.eql(u8, k, "scene3dWaveAmplitude")) {
-            if (jsonFloat(v)) |f| node.scene3d_wave_amplitude = f;
-        } else if (std.mem.eql(u8, k, "scene3dWaveLength")) {
-            if (jsonFloat(v)) |f| node.scene3d_wave_length = f;
-        } else if (std.mem.eql(u8, k, "scene3dWaveSpeed")) {
-            if (jsonFloat(v)) |f| node.scene3d_wave_speed = f;
-        } else if (std.mem.eql(u8, k, "scene3dWaveDirX")) {
-            if (jsonFloat(v)) |f| node.scene3d_wave_dir_x = f;
-        } else if (std.mem.eql(u8, k, "scene3dWaveDirZ")) {
-            if (jsonFloat(v)) |f| node.scene3d_wave_dir_z = f;
-        } else if (std.mem.eql(u8, k, "scene3dWavePhase")) {
-            if (jsonFloat(v)) |f| node.scene3d_wave_phase = f;
         } else if (std.mem.eql(u8, k, "scene3dTexData")) {
             // RRGGBBAA hex string, 8 chars per pixel. Length must equal
             // 8 * w * h. Decoded into a fresh RGBA byte buffer owned by

@@ -447,7 +447,6 @@ pub const Node = struct {
     scene3d_camera: bool = false, // true = 3D.Camera
     scene3d_light: bool = false, // true = 3D.Light
     scene3d_group: bool = false, // true = 3D.Group
-    scene3d_geometry: ?[]const u8 = null, // "box", "sphere", "plane", etc.
     scene3d_light_type: ?[]const u8 = null, // "ambient", "directional", "point"
     scene3d_color_r: f32 = 0.8,
     scene3d_color_g: f32 = 0.8,
@@ -469,11 +468,6 @@ pub const Node = struct {
     scene3d_dir_z: f32 = 0,
     scene3d_fov: f32 = 60, // Camera fov in degrees
     scene3d_intensity: f32 = 1.0, // Light intensity
-    scene3d_radius: f32 = 0.5, // Sphere/cylinder radius
-    scene3d_tube_radius: f32 = 0.25, // Torus tube radius
-    scene3d_size_x: f32 = 1, // Box/plane width
-    scene3d_size_y: f32 = 1, // Box/plane height
-    scene3d_size_z: f32 = 1, // Box depth
     scene3d_show_grid: bool = false, // Scene3D navigation grid overlay
     scene3d_show_axes: bool = false, // Scene3D origin axes overlay
     // Skybox — a <Scene3D.Skybox> child flips this on. gpu/3d.zig draws an
@@ -500,27 +494,15 @@ pub const Node = struct {
     scene3d_tex_h: u32 = 0,
     scene3d_tex_rgba: ?[]const u8 = null, // raw RGBA bytes, length = w*h*4
     scene3d_tex_key: ?[]const u8 = null, // StaticSurface key — looked up in gpu/gpu.zig
-    scene3d_heights: ?[]const f32 = null, // heightfield corner heights
-    scene3d_hf_cols: u32 = 0,
-    scene3d_hf_rows: u32 = 0,
-    // @reactjit/geometries registry mesh. A geometry generator (TS) produced
-    // these interleaved verts [px,py,pz,nx,ny,nz,u,v]×count; gpu/3d.zig interns
-    // them by `scene3d_geom_key` (id+paramHash) into a RETAINED GPU buffer and
-    // redraws the slice every frame — NO per-frame regeneration. The framework
-    // knows zero shape names; it just uploads bytes. When geom_key is set the
-    // legacy string `scene3d_geometry` + generate* path is bypassed entirely.
-    scene3d_geom_key: ?[]const u8 = null, // intern key; null = legacy string geometry
+    // @reactjit/geometries registry mesh. A geometry generator (TS) produced these
+    // interleaved verts [px,py,pz,nx,ny,nz,u,v]×count; gpu/3d.zig interns them by
+    // `scene3d_geom_key` (id+paramHash) into a RETAINED GPU buffer and redraws the
+    // slice every frame — NO per-frame regeneration. The framework knows zero shape
+    // names; it just uploads bytes. This is the ONLY way a mesh gets geometry.
+    scene3d_geom_key: ?[]const u8 = null, // intern key
     scene3d_vertices: ?[]const f32 = null, // interleaved verts, read once on cache miss
     scene3d_vert_count: u32 = 0,
     scene3d_bounds_radius: f32 = 0, // unscaled bounding radius from the generator (culling)
-    // Heightfield-only host-side wave deformation. The cart passes a few stable
-    // scalars; gpu/3d.zig adds the animated sine offset while rebuilding verts.
-    scene3d_wave_amplitude: f32 = 0,
-    scene3d_wave_length: f32 = 0,
-    scene3d_wave_speed: f32 = 0,
-    scene3d_wave_dir_x: f32 = 1,
-    scene3d_wave_dir_z: f32 = 0,
-    scene3d_wave_phase: f32 = 0,
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container
