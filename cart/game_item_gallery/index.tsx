@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Box, Col, Effect, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Filter, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';
@@ -10,6 +10,11 @@ type ModelFn = (ctx: ModelCtx) => any;
 
 const PI = Math.PI;
 const CIG_TEXTURE_KEY = 'game-item-gallery-cig-pack-ui';
+const CIG_SIDE_TEXTURE_KEY = 'game-item-gallery-cig-side-ui';
+const CIG_TOP_TEXTURE_KEY = 'game-item-gallery-cig-top-ui';
+const CIG_BACK_TEXTURE_KEY = 'game-item-gallery-cig-back-ui';
+const CIG_BOTTOM_TEXTURE_KEY = 'game-item-gallery-cig-bottom-ui';
+const TV_SCREEN_TEXTURE_KEY = 'game-item-gallery-tv-screen-crt-ui';
 const CASH_TEXTURE_KEY = 'game-item-gallery-cash-effect';
 const BEER_TEXTURE_KEY = 'game-item-gallery-beer-label-ui';
 const LIQUOR_TEXTURE_KEY = 'game-item-gallery-liquor-label-ui';
@@ -378,15 +383,12 @@ function Weed(ctx: ModelCtx) {
 function Cigarettes(ctx: ModelCtx) {
   const tips = [-0.42, -0.28, -0.14];
   return <>
-    <Scene3D.Mesh
-      geometry={box}
-      params={box1}
-      material="#ffffff"
-      textureKey={CIG_TEXTURE_KEY}
-      position={local(ctx, [-0.28, 0.33, 0])}
-      rotation={rot(ctx)}
-      scale={scl(ctx, [0.42, 0.62, 0.18])}
-    />
+    <Part ctx={ctx} geometry={box} params={box1} material="#d9362e" p={[-0.28, 0.33, 0]} s={[0.42, 0.62, 0.18]} />
+    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_TEXTURE_KEY} position={local(ctx, [-0.28, 0.33, 0.096])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.52, 0.012])} />
+    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_SIDE_TEXTURE_KEY} position={local(ctx, [-0.062, 0.33, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.012, 0.52, 0.16])} />
+    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_TOP_TEXTURE_KEY} position={local(ctx, [-0.28, 0.648, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.012, 0.16])} />
+    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_BACK_TEXTURE_KEY} position={local(ctx, [-0.28, 0.33, -0.096])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.52, 0.012])} />
+    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_BOTTOM_TEXTURE_KEY} position={local(ctx, [-0.28, 0.012, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.012, 0.16])} />
     {tips.map((x, i) => <Part key={`cig-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#f4f0df" p={[x, 0.82 + i * 0.03, 0.02]} s={[0.045, 0.42, 0.045]} />)}
     {tips.map((x, i) => <Part key={`filter-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#d49a55" p={[x, 0.61 + i * 0.03, 0.02]} s={[0.047, 0.12, 0.047]} />)}
   </>;
@@ -417,6 +419,25 @@ function MedKit(ctx: ModelCtx) {
   </>;
 }
 
+function Tv(ctx: ModelCtx) {
+  return <>
+    <Part ctx={ctx} geometry={box} params={box1} material="#242a34" p={[0, 0.55, 0]} s={[1.15, 0.78, 0.32]} />
+    <Scene3D.Mesh
+      geometry={box}
+      params={box1}
+      material="#ffffff"
+      textureKey={TV_SCREEN_TEXTURE_KEY}
+      position={local(ctx, [-0.13, 0.58, 0.174])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.68, 0.42, 0.018])}
+    />
+    <Part ctx={ctx} geometry={cyl} params={cyl12} material="#11151c" p={[0.42, 0.64, 0.19]} r={[PI / 2, 0, 0]} s={[0.055, 0.045, 0.055]} />
+    <Part ctx={ctx} geometry={cyl} params={cyl12} material="#11151c" p={[0.42, 0.48, 0.19]} r={[PI / 2, 0, 0]} s={[0.055, 0.045, 0.055]} />
+    <Part ctx={ctx} geometry={box} params={box1} material="#151922" p={[-0.34, 0.1, 0]} s={[0.16, 0.2, 0.18]} />
+    <Part ctx={ctx} geometry={box} params={box1} material="#151922" p={[0.34, 0.1, 0]} s={[0.16, 0.2, 0.18]} />
+  </>;
+}
+
 type Item = { id: string; label: string; tone: string; note: string; model: ModelFn };
 
 const ITEMS: Item[] = [
@@ -438,6 +459,7 @@ const ITEMS: Item[] = [
   { id: 'cigarettes', label: 'Cigarettes', tone: '#d73e36', note: 'pack and loose smokes', model: Cigarettes },
   { id: 'backpack', label: 'Backpack', tone: '#315c8f', note: 'straps, pouch, zipper pull', model: Backpack },
   { id: 'medkit', label: 'Med kit', tone: '#f1f4f4', note: 'bonus utility prop', model: MedKit },
+  { id: 'tv', label: 'TV', tone: '#8cc8ff', note: 'React dashboard through CRT filter', model: Tv },
 ];
 
 function Pedestal({ ctx, item }: { ctx: ModelCtx; item: Item }) {
@@ -515,6 +537,84 @@ function TextureSources() {
             </Box>
           </Box>
         </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={CIG_SIDE_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#f7f0df', padding: 18, gap: 14 }}>
+          <Text style={{ color: '#20242d', fontSize: 18, fontWeight: 'bold' }}>WARNING</Text>
+          <Box style={{ height: 9, width: '92%', backgroundColor: '#20242d' }} />
+          <Box style={{ height: 9, width: '74%', backgroundColor: '#20242d' }} />
+          <Box style={{ height: 9, width: '86%', backgroundColor: '#20242d' }} />
+          <Row style={{ gap: 4, alignItems: 'flex-end', marginTop: 16 }}>
+            {[20, 34, 26, 44, 18, 38, 30, 46, 24, 36, 28, 42].map((h, i) => (
+              <Box key={i} style={{ width: 7, height: h, backgroundColor: '#151922' }} />
+            ))}
+          </Row>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={CIG_TOP_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', padding: 24 }}>
+          <Box style={{ flexGrow: 1, backgroundColor: '#f7f0df', borderWidth: 7, borderColor: '#a51f21', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Text style={{ color: '#a51f21', fontSize: 26, fontWeight: 'bold' }}>OPEN</Text>
+            <Box style={{ width: '68%', height: 8, backgroundColor: '#d6b46c' }} />
+            <Text style={{ color: '#20242d', fontSize: 14 }}>SEAL BROKEN</Text>
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={CIG_BACK_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', padding: 16 }}>
+          <Box style={{ flexGrow: 1, backgroundColor: '#f7f0df', padding: 14, gap: 8 }}>
+            <Text style={{ color: '#20242d', fontSize: 17, fontWeight: 'bold' }}>CONTENTS</Text>
+            {[0, 1, 2, 3, 4, 5].map((i) => (
+              <Box key={i} style={{ width: `${92 - i * 8}%`, height: 7, backgroundColor: i % 2 ? '#9b9485' : '#4a4f58' }} />
+            ))}
+            <Text style={{ color: '#4a4f58', fontSize: 13 }}>LOT A17-409</Text>
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={CIG_BOTTOM_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#76191b', padding: 28 }}>
+          <Box style={{ flexGrow: 1, backgroundColor: '#e9c05f', borderWidth: 7, borderColor: '#2b2416', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
+            <Text style={{ color: '#2b2416', fontSize: 18, fontWeight: 'bold' }}>TAX</Text>
+            <Text style={{ color: '#2b2416', fontSize: 14 }}>NV-13</Text>
+            <Text style={{ color: '#2b2416', fontSize: 12 }}>STORE 044</Text>
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={TV_SCREEN_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Filter shader="crt" intensity={0.86} style={{ width: '100%', height: '100%' }}>
+          <Box style={{ width: '100%', height: '100%', backgroundColor: '#07111d', padding: 14, gap: 10 }}>
+            <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ color: '#8fffd2', fontSize: 18, fontWeight: 'bold' }}>OPS BOARD</Text>
+              <Text style={{ color: '#f7d36a', fontSize: 12 }}>LIVE</Text>
+            </Row>
+            <Row style={{ gap: 8 }}>
+              <Col style={{ width: 68, gap: 5 }}>
+                <Text style={{ color: '#6fa8ff', fontSize: 11 }}>CASH</Text>
+                <Text style={{ color: '#e6f1ff', fontSize: 22, fontWeight: 'bold' }}>$18K</Text>
+              </Col>
+              <Col style={{ width: 68, gap: 5 }}>
+                <Text style={{ color: '#ff8f70', fontSize: 11 }}>HEAT</Text>
+                <Text style={{ color: '#ffb99f', fontSize: 22, fontWeight: 'bold' }}>42%</Text>
+              </Col>
+              <Col style={{ width: 68, gap: 5 }}>
+                <Text style={{ color: '#8fffd2', fontSize: 11 }}>RUNS</Text>
+                <Text style={{ color: '#b9ffe9', fontSize: 22, fontWeight: 'bold' }}>07</Text>
+              </Col>
+            </Row>
+            <Row style={{ gap: 5, alignItems: 'flex-end', height: 68 }}>
+              {[22, 42, 30, 58, 46, 64, 38, 52, 70, 48].map((h, i) => (
+                <Box key={i} style={{ width: 15, height: h, backgroundColor: i % 3 === 0 ? '#6fa8ff' : i % 3 === 1 ? '#8fffd2' : '#f7d36a' }} />
+              ))}
+            </Row>
+            <Box style={{ height: 5, width: '88%', backgroundColor: '#23435f' }} />
+            <Text style={{ color: '#7894aa', fontSize: 11 }}>north pier inventory sync</Text>
+          </Box>
+        </Filter>
       </StaticSurface>
 
       <StaticSurface staticKey={CASH_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
