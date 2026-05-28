@@ -8,6 +8,7 @@ type ConsoleProps = {
   commandLine: string;
   onCommandLineChange: (value: string) => void;
   onSubmitCommand: (line: string) => void;
+  title?: string;
 };
 
 function entryColor(kind: CommandEntry['kind']): string {
@@ -26,7 +27,7 @@ export function Console(props: ConsoleProps) {
   return (
     <Box style={{ height: '100%', backgroundColor: '#080b10', borderLeftWidth: 1, borderLeftColor: '#1f2937' }}>
       <Box style={{ padding: 12, borderBottomWidth: 1, borderBottomColor: '#1f2937', gap: 8 }}>
-        <Text fontSize={15} color="#f8fafc" style={{ fontWeight: 800 }}>HMSC COMMAND</Text>
+        <Text fontSize={15} color="#f8fafc" style={{ fontWeight: 800 }}>{props.title ?? 'HSMC COMMAND'}</Text>
         <Box style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
           {QUICK_COMMANDS.map((command) => (
             <Pressable

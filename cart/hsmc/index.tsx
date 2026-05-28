@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Box } from '@reactjit/runtime/primitives';
+import { useEffect, useState } from 'react';
+import { Box, Pressable, Text } from '@reactjit/runtime/primitives';
 import {
   CommandEntry,
   DEFAULT_AUTOSAVE_INTERVAL_MS,
@@ -14,7 +14,6 @@ import {
   saveGameState,
 } from './state/gameState';
 import { Console } from './ui/Console';
-import { MapCanvas } from './ui/MapCanvas';
 
 function nextCommandEntryId(): string {
   return `${Date.now().toString(36)}-${Math.floor(Math.random() * 100_000).toString(36)}`;
@@ -28,11 +27,12 @@ function initialGameState(): GameState {
   return readStoredGameState() ?? createInitialGameState();
 }
 
-export default function HmscCart() {
+export default function HsmcCart() {
   const [gameState, setGameState] = useState<GameState>(initialGameState);
   const [commandLine, setCommandLine] = useState('');
+  const [consoleOpen, setConsoleOpen] = useState(false);
   const [entries, setEntries] = useState<CommandEntry[]>([
-    commandEntry('output', 'HMSC console online. Run help.'),
+    commandEntry('output', 'HSMC console online. Run help.'),
   ]);
 
   useEffect(() => {
@@ -62,21 +62,38 @@ export default function HmscCart() {
     ]);
   };
 
-  const shellWidth = useMemo(() => ({ width: 420 }), []);
-
   return (
-    <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#020617' }}>
-      <Box style={{ flex: 1, minWidth: 0 }}>
-        <MapCanvas state={gameState} />
+    <Box style={{ width: '100%', height: '100%', backgroundColor: '#020617' }}>
+      <Box style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}>
+        <Pressable
+          onPress={() => setConsoleOpen((open) => !open)}
+          style={{
+            paddingLeft: 12,
+            paddingRight: 12,
+            paddingTop: 8,
+            paddingBottom: 8,
+            borderRadius: 6,
+            borderWidth: 1,
+            borderColor: '#334155',
+            backgroundColor: '#0f172a',
+          }}
+        >
+          <Text fontSize={12} color="#f8fafc" style={{ fontWeight: 800 }}>
+            {consoleOpen ? 'CLOSE CONSOLE' : 'CONSOLE'}
+          </Text>
+        </Pressable>
       </Box>
-      <Box style={shellWidth}>
-        <Console
-          entries={entries}
-          commandLine={commandLine}
-          onCommandLineChange={setCommandLine}
-          onSubmitCommand={submitCommand}
-        />
-      </Box>
+      {consoleOpen ? (
+        <Box style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 420, zIndex: 1, borderBottomWidth: 1, borderBottomColor: '#334155' }}>
+          <Console
+            title="HSMC COMMAND"
+            entries={entries}
+            commandLine={commandLine}
+            onCommandLineChange={setCommandLine}
+            onSubmitCommand={submitCommand}
+          />
+        </Box>
+      ) : null}
     </Box>
   );
 }

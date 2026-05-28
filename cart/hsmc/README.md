@@ -1,23 +1,39 @@
-# HMSC - Command-First Scaffold
+# HSMC - Blank Game Shell
 
-HMSC means Hitman Shitcity.
+HSMC means Hitman Shitcity.
 
-The first product surface is a console that can mutate every meaningful part of
-the game state. That gives development the same power shape as a classic engine
-console or an ultimate mod menu: commands are the stable interface, while UI,
-tools, and hotloops call into the same path.
+Build the game with:
+
+```sh
+./scripts/ship hsmc
+```
+
+The game cart deliberately renders a blank play surface with a console drop
+down. Internal map tooling is a separate cart:
+
+```sh
+./scripts/ship hsmc-int
+```
+
+The first product surface is still the console. It can mutate every meaningful
+part of the game state, giving development the same power shape as a classic
+engine console or an ultimate mod menu: commands are the stable interface, while
+UI, tools, and hotloops call into the same path.
 
 ## Architecture
 
 ```
-cart/hmsc/
+cart/hsmc/
   index.tsx              composition root
   design.ts              JSON game-state contract
   state/gameState.ts     create/load/save/revive GameState
   commands/              parser + command registry
   world/grid.ts          grid storage helpers over continuous movement
   ui/Console.tsx         command terminal
-  ui/MapCanvas.tsx       internal map on Canvas
+
+cart/hsmc-int/
+  index.tsx              internal map tooling shell
+  MapCanvas.tsx          blank map surface until map authoring exists
 ```
 
 ## State Model
