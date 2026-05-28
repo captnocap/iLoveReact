@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Box, Col, Effect, Filter, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
@@ -521,7 +521,8 @@ function ItemButton({ item, active, onPress }: { item: Item; active: boolean; on
   );
 }
 
-function TextureSources() {
+function TextureSources({ tvTick }: { tvTick: number }) {
+  const crawlTop = 224 - (tvTick % 360);
   return (
     <>
       <StaticSurface staticKey={CIG_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
@@ -587,32 +588,28 @@ function TextureSources() {
 
       <StaticSurface staticKey={TV_SCREEN_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Filter shader="crt" intensity={0.86} style={{ width: '100%', height: '100%' }}>
-          <Box style={{ width: '100%', height: '100%', backgroundColor: '#07111d', padding: 14, gap: 10 }}>
+          <Box style={{ width: '100%', height: '100%', backgroundColor: '#03070f', padding: 14, overflow: 'hidden' }}>
             <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
-              <Text style={{ color: '#8fffd2', fontSize: 18, fontWeight: 'bold' }}>OPS BOARD</Text>
+              <Text style={{ color: '#8fffd2', fontSize: 16, fontWeight: 'bold' }}>TRANSMISSION</Text>
               <Text style={{ color: '#f7d36a', fontSize: 12 }}>LIVE</Text>
             </Row>
-            <Row style={{ gap: 8 }}>
-              <Col style={{ width: 68, gap: 5 }}>
-                <Text style={{ color: '#6fa8ff', fontSize: 11 }}>CASH</Text>
-                <Text style={{ color: '#e6f1ff', fontSize: 22, fontWeight: 'bold' }}>$18K</Text>
+            <Box style={{ position: 'absolute', left: 16, top: 42, width: 224, height: 196, backgroundColor: '#050911' }}>
+              <Col style={{ position: 'absolute', left: 17, top: crawlTop, width: 190, gap: 9, alignItems: 'center' }}>
+                <Text style={{ color: '#f7d36a', fontSize: 18, fontWeight: 'bold' }}>EPISODE RJ-1</Text>
+                <Text style={{ color: '#f7d36a', fontSize: 15, fontWeight: 'bold' }}>A NEW PROP</Text>
+                <Box style={{ width: '62%', height: 4, backgroundColor: '#f7d36a' }} />
+                {[
+                  'Semantic faces now carry the evidence.',
+                  'A package is no longer one smeared skin.',
+                  'Front, side, top, back, and bottom speak independently.',
+                  'React surfaces become labels, screens, stamps, and traces.',
+                  'The mesh stays simple while the prop becomes readable.',
+                  'The transmission loops for inspection.',
+                ].map((line, i) => (
+                  <Text key={i} style={{ color: '#f7d36a', fontSize: 13, textAlign: 'center' }}>{line}</Text>
+                ))}
               </Col>
-              <Col style={{ width: 68, gap: 5 }}>
-                <Text style={{ color: '#ff8f70', fontSize: 11 }}>HEAT</Text>
-                <Text style={{ color: '#ffb99f', fontSize: 22, fontWeight: 'bold' }}>42%</Text>
-              </Col>
-              <Col style={{ width: 68, gap: 5 }}>
-                <Text style={{ color: '#8fffd2', fontSize: 11 }}>RUNS</Text>
-                <Text style={{ color: '#b9ffe9', fontSize: 22, fontWeight: 'bold' }}>07</Text>
-              </Col>
-            </Row>
-            <Row style={{ gap: 5, alignItems: 'flex-end', height: 68 }}>
-              {[22, 42, 30, 58, 46, 64, 38, 52, 70, 48].map((h, i) => (
-                <Box key={i} style={{ width: 15, height: h, backgroundColor: i % 3 === 0 ? '#6fa8ff' : i % 3 === 1 ? '#8fffd2' : '#f7d36a' }} />
-              ))}
-            </Row>
-            <Box style={{ height: 5, width: '88%', backgroundColor: '#23435f' }} />
-            <Text style={{ color: '#7894aa', fontSize: 11 }}>north pier inventory sync</Text>
+            </Box>
           </Box>
         </Filter>
       </StaticSurface>
@@ -676,8 +673,19 @@ export default function GameItemGallery() {
   const [selected, setSelected] = useState('knife');
   const [orbitYaw, setOrbitYaw] = useState(35);
   const [orbitPitch, setOrbitPitch] = useState(28);
+  const [tvTick, setTvTick] = useState(0);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const current = ITEMS.find((item) => item.id === selected) ?? ITEMS[0];
+
+  useEffect(() => {
+    let handle: any = 0;
+    const tick = () => {
+      setTvTick((v) => (v + 2) % 360);
+      handle = setTimeout(tick, 40);
+    };
+    handle = setTimeout(tick, 40);
+    return () => clearTimeout(handle);
+  }, []);
 
   const onDown = (e: any) => {
     dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) };
@@ -738,7 +746,7 @@ export default function GameItemGallery() {
         </ScrollView>
       </Col>
 
-      <TextureSources />
+      <TextureSources tvTick={tvTick} />
     </Box>
   );
 }
