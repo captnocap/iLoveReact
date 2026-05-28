@@ -468,8 +468,6 @@ pub const Node = struct {
     scene3d_dir_z: f32 = 0,
     scene3d_fov: f32 = 60, // Camera fov in degrees
     scene3d_intensity: f32 = 1.0, // Light intensity
-    scene3d_show_grid: bool = false, // Scene3D navigation grid overlay
-    scene3d_show_axes: bool = false, // Scene3D origin axes overlay
     // Skybox — a <Scene3D.Skybox> child flips this on. gpu/3d.zig draws an
     // analytic fullscreen sky (gradient + sun + haze + clouds + stars) before
     // the meshes and feeds `horizon` into the fog color so distant geometry

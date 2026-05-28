@@ -193,7 +193,7 @@ export default function SkyboxDemo() {
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#04060c' }}>
-      <Scene3D style={{ width: '100%', height: '100%' }} showGrid={false}>
+      <Scene3D style={{ width: '100%', height: '100%' }}>
         <Scene3D.Camera position={[0, 3.2, 13]} target={[0, 1.4, 0]} fov={56} />
 
         {/* The star of the show — one skybox, fully driven by the params above. */}

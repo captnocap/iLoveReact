@@ -440,12 +440,10 @@ function _scaleVec3(v: any): [number, number, number] {
   if (Array.isArray(v) && v.length === 3) return [v[0] ?? 1, v[1] ?? 1, v[2] ?? 1];
   return [1, 1, 1];
 }
-const Scene3DBase: any = ({ showGrid, showAxes, ...rest }: any) =>
+const Scene3DBase: any = ({ ...rest }: any) =>
   h('View', {
     ...rest,
     scene3d: true,
-    scene3dShowGrid: !!showGrid,
-    scene3dShowAxes: !!showAxes,
   }, rest.children);
 Scene3DBase.Camera = ({ position, target, fov, ...rest }: any) => {
   const [px, py, pz] = _vec3(position, 3, 2, 4);

@@ -253,7 +253,6 @@ function useKeyTracker() {
 
 export default function WorldPage() {
   const [camMode, setCamMode] = useState<'fps' | 'tps'>('tps');
-  const [showGrid, setShowGrid] = useState(false);
   const [, setHudTick] = useState(0);
 
   const sim = useRef({ x: 0, z: 4, yaw: 0, pitch: 0.1 });
@@ -291,7 +290,6 @@ export default function WorldPage() {
   }, []);
 
   useIFTTT('key:tab', () => setCamMode((m) => (m === 'fps' ? 'tps' : 'fps')));
-  useIFTTT('key:g', () => setShowGrid((g) => !g));
 
   // Mouse drag look
   const dragging = useRef(false);
@@ -394,7 +392,7 @@ export default function WorldPage() {
         onMouseUp={onMouseUp}
       >
         {/* ONE Scene3D root. Everything inside is a fragment of meshes/lights. */}
-        <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0c111a" showGrid={showGrid} showAxes={false}>
+        <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0c111a">
           <Scene3D.Camera position={camPos} target={camTarget} fov={camMode === 'fps' ? 75 : 50} />
           <Scene3D.AmbientLight color="#ffffff" intensity={0.3} />
           <Scene3D.DirectionalLight direction={[0.4, 0.9, 0.5]} color="#ffffff" intensity={0.7} />

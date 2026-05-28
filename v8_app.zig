@@ -1862,10 +1862,6 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.scene3d_fov = f;
         } else if (std.mem.eql(u8, k, "scene3dIntensity")) {
             if (jsonFloat(v)) |f| node.scene3d_intensity = f;
-        } else if (std.mem.eql(u8, k, "scene3dShowGrid")) {
-            if (jsonBool(v)) |b| node.scene3d_show_grid = b;
-        } else if (std.mem.eql(u8, k, "scene3dShowAxes")) {
-            if (jsonBool(v)) |b| node.scene3d_show_axes = b;
         }
         // ── Skybox props (one <Scene3D.Skybox> child). Colors arrive as
         // [r,g,b] 0..1 arrays already resolved on the JS side. ──

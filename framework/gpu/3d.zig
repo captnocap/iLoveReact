@@ -981,9 +981,6 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         const center = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
         scene_extent = @max(scene_extent, math.v3distance(center, cam_look) + estimateMeshRadius(child));
     }
-    if (node.scene3d_show_grid or node.scene3d_show_axes) {
-        scene_extent = @max(scene_extent, focus_dist * 1.8);
-    }
     const fog_near = @max(6.0, focus_dist * 0.9);
     const fog_far = @max(fog_near + 12.0, fog_near + scene_extent * 1.5);
 
@@ -1036,10 +1033,6 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         if (!child.scene3d_mesh) continue;
         drawMesh(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, buildMeshSpec(child));
     }
-
-    // (showGrid/showAxes were drawn via a hardwired box; that debug grid was
-    // removed with the rest of the shape coupling. Re-add later via @reactjit/
-    // geometries if wanted — the flags are currently inert.)
 
     pass.end();
     pass.release();
