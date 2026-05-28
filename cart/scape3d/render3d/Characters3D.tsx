@@ -50,7 +50,7 @@ function humanoidBoxes(colors: { skin: string; shirt: string; pants: string }): 
 }
 
 function Figure({
-  prefix, wx, wz, face, boxes, eyeColor = EYE, hood, heldModel,
+  prefix, wx, wz, face, boxes, eyeColor = EYE, hood, heldModel, hideHead = false,
 }: {
   prefix: string;
   wx: number;
@@ -60,6 +60,10 @@ function Figure({
   eyeColor?: string;
   hood?: string; // optional hood/cap colour over the head (marks the player)
   heldModel?: HeldModel; // the in-hand item's 3D model, gripped in the right hand
+  // FP: when this is the local viewer, skip head/eyes/hood — the camera sits at
+  // 1.78 (FP_EYE_HEIGHT) so rendering the head box would punch the near plane;
+  // the rest of the body stays so looking down still shows your own torso/legs.
+  hideHead?: boolean;
 }) {
   const yaw = modelYaw(face);
   const baseY = heightAt(wx, wz); // feet ride the terrain
@@ -68,9 +72,11 @@ function Figure({
     return [wx + r[0], baseY + r[1], wz + r[2]];
   };
   const hand = place([0.43, 0.8, 0.02]); // right-hand world point — where a held item grips
+  // The head box is part of `boxes` (humanoidBoxes) — filter it out when hiding.
+  const visibleBoxes = hideHead ? boxes.filter((b) => b.id !== 'head') : boxes;
   return (
     <>
-      {boxes.map((b) => (
+      {visibleBoxes.map((b) => (
         <Scene3D.Mesh
           key={`${prefix}-${b.id}`}
           geometry="box"
@@ -83,11 +89,15 @@ function Figure({
         />
       ))}
       {/* eyes — two dark pips on the +Z face of the head */}
-      <Scene3D.Mesh key={`${prefix}-eye-l`} geometry="box" material={eyeColor}
-        position={place([-0.09, 1.82, 0.18])} rotation={[0, yaw, 0]} sizeX={0.07} sizeY={0.07} sizeZ={0.04} />
-      <Scene3D.Mesh key={`${prefix}-eye-r`} geometry="box" material={eyeColor}
-        position={place([0.09, 1.82, 0.18])} rotation={[0, yaw, 0]} sizeX={0.07} sizeY={0.07} sizeZ={0.04} />
-      {hood ? (
+      {hideHead ? null : (
+        <>
+          <Scene3D.Mesh key={`${prefix}-eye-l`} geometry="box" material={eyeColor}
+            position={place([-0.09, 1.82, 0.18])} rotation={[0, yaw, 0]} sizeX={0.07} sizeY={0.07} sizeZ={0.04} />
+          <Scene3D.Mesh key={`${prefix}-eye-r`} geometry="box" material={eyeColor}
+            position={place([0.09, 1.82, 0.18])} rotation={[0, yaw, 0]} sizeX={0.07} sizeY={0.07} sizeZ={0.04} />
+        </>
+      )}
+      {hood && !hideHead ? (
         <>
           {/* hood shell over the crown */}
           <Scene3D.Mesh key={`${prefix}-hood`} geometry="box" material={hood}
@@ -104,11 +114,12 @@ function Figure({
 }
 
 // ── Player ───────────────────────────────────────────────────────────────
-export function Player3D({ px, py, facing, costumeColor, heldModel }: {
+export function Player3D({ px, py, facing, costumeColor, heldModel, hideHead = false }: {
   px: number; py: number; facing: number; costumeColor: string; heldModel?: HeldModel;
+  hideHead?: boolean; // true in FP — head/eyes/hood/brim suppressed so the camera doesn't sit inside them
 }) {
   const boxes = humanoidBoxes({ skin: SKIN[0], shirt: costumeColor, pants: '#1b1620' });
-  return <Figure prefix="player" wx={px} wz={py} face={facing} boxes={boxes} hood={costumeColor} heldModel={heldModel} />;
+  return <Figure prefix="player" wx={px} wz={py} face={facing} boxes={boxes} hood={costumeColor} heldModel={heldModel} hideHead={hideHead} />;
 }
 
 // ── NPCs ───────────────────────────────────────────────────────────────

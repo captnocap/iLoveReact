@@ -789,12 +789,17 @@
       "note": "Embeds onnxruntime + registers __onnx_* / __segment_* host fns. Phase 1 is a smoke-test only (__onnx_test); Phase 2 adds MobileSAM segmentation for cart/cutout. Carts that don't import runtime/hooks/useSegment.ts pay nothing — onnxruntime.so is ~22MB."
     },
     "lua-worker": {
-      "triggers": [],
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/hooks/useLuaWorker.ts"
+        }
+      ],
       "buildOptions": [],
       "nativeLibraries": [
         "luajit"
       ],
-      "note": "Off-thread LuaJIT compute worker (framework/process/luajit_worker.zig). Always compiled; libluajit-5.1 is dlopen'd at runtime so there is no -D flag. Trigger this feature so pack-sdk stages libluajit-5.1.so next to the cart."
+      "note": "Off-thread LuaJIT compute worker (framework/process/luajit_worker.zig). Always compiled; libluajit-5.1 is dlopen'd at runtime so there is no -D flag. Carts that import runtime/hooks/useLuaWorker.ts pull in __lua_* bindings (always-registered, see v8_ingredients.zig) AND get libluajit-5.1.so staged next to the binary by pack-sdk."
     },
     "pg": {
       "shipGate": "pg",

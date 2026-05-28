@@ -71,6 +71,21 @@ sand becoming glass. Grade at **Std/Max** to preserve the translucent and micro-
 | G16–18 | **Charcoal Bed** | orange ember | yellow coals | red coals | campfire/bonfire `Event` site, burnt `Building` interior, forge. | **ember** |
 | G19–21 | **Stained Glass** | warm cathedral | cool chapel | sunset rose | church/mansion `Building` window, `Sign` backlit pane. | static |
 
+## Board H / Second Pass — the environment do-over
+Alternative shader approaches for the core Board A set. Same scape3d targets,
+new technique: heavier SDF crispness, more surface storytelling, different colour
+science. Grade at **Std/Max** for the aggregate detail to read.
+
+| ID | Material | v0 | v1 | v2 | scape3d target | Live? |
+|----|----------|----|----|----|----------------|-------|
+| H01–03 | **Asphalt** | double-yellow | crosswalk+manhole | oil+skids | `ZONE_HEX` road / parking lot. Aggregate stones, iridescent oil slicks, tire marks, manhole cover. | static |
+| H04–06 | **Sidewalk** | grey | terracotta | flagstone | `ZONE_HEX` sidewalk / pedestrian zone. Irregular poured slabs, expansion joints, rebar rust drips, gum, leaf stains. | static |
+| H07–09 | **Stone Wall** | granite | sandstone | basalt | `CityBuilding` masonry face, `Wall` stone variant. Ashlar blocks with irregular edges, lichen, weathering gradient. | static |
+| H10–12 | **Dune** | golden | white gypsum | red Martian | desert `ZONE_HEX` ground. Sine-curve ridges with wind ripples, lee-side shadow, sparse vegetation. | static |
+| H13–15 | **Deep Water** | deep ocean | tropical | storm grey | `water` zone / ocean backdrop. Sharp whitecaps, caustic light patterns, foam patches, depth gradient. | static |
+| H16–18 | **Turf** | mowed stripes | clover meadow | dry summer | park `ZONE_HEX` ground, sports field. Mower stripe bands, clover patches, bare dirt, dandelions. | static |
+| H19–21 | **Plank Deck** | fresh cedar | weathered grey | water-stained | pier/boardwalk `ZONE_HEX`, `Building` balcony. Horizontal planks with end-checking cracks, nail pops, water stain. | static |
+
 ---
 
 ## How these become scape3d textures

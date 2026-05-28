@@ -78,6 +78,17 @@ const LIMINAL_MATERIALS = [
   { id: 6, name: 'Stained Glass' },
 ] as const;
 
+// Board H / Second Pass — Kimi's alt takes on the core environment set (board id 7).
+const ALT_MATERIALS = [
+  { id: 0, name: 'Asphalt' },
+  { id: 1, name: 'Sidewalk' },
+  { id: 2, name: 'Stone Wall' },
+  { id: 3, name: 'Dune' },
+  { id: 4, name: 'Deep Water' },
+  { id: 5, name: 'Turf' },
+  { id: 6, name: 'Plank Deck' },
+] as const;
+
 const QUALITY_GRADES = [
   { id: 0, label: 'PSX', note: '32px snap, 6-bit color' },
   { id: 1, label: 'PS2', note: '64px snap, banded color' },
@@ -86,7 +97,7 @@ const QUALITY_GRADES = [
   { id: 4, label: 'Max', note: 'extra detail' },
 ] as const;
 type QualityGrade = typeof QUALITY_GRADES[number]['id'];
-type BoardId = 0 | 1 | 2 | 3 | 4 | 5 | 6;
+type BoardId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 const FILL_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
@@ -1331,6 +1342,249 @@ fn stained_glass(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   return sat3(col);
 }
 
+// ── Board H / Second Pass — alt takes on the core environment set ─────────────
+// Kimi's do-over board. These shadow the Board A materials (road, concrete, brick,
+// sand, water, grass, wood) with completely different shader techniques and a
+// heavier dose of SDF crispness + surface storytelling. Pick whichever road
+// you hate least.
+
+fn asphalt(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Aggregate base + iridescent oil + manhole + tire skids. The road re-do.
+  let agg = fbm(uv.x * 35.0 + seed, uv.y * 35.0 - seed, 4.0) * 0.5 + 0.5;
+  let stone = speckle(px, 1.4, seed, 0.78);
+  var col = mix(vec3f(0.06, 0.065, 0.06), vec3f(0.18, 0.19, 0.17), agg);
+  col = col + vec3f(0.08, 0.08, 0.07) * stone;
+
+  // Oil slick — iridescent SDF ellipse.
+  let oil_uv = uv - vec2f(0.35, 0.62);
+  let oil_r = length(oil_uv * vec2f(1.4, 0.8));
+  let oil = 1.0 - smoothstep(0.08, 0.14, oil_r);
+  let oil_ang = atan2(oil_uv.y, oil_uv.x);
+  let irid = vec3f(0.5 + 0.5*sin(oil_ang*3.0 + seed), 0.5 + 0.5*sin(oil_ang*3.0 + 2.0 + seed), 0.5 + 0.5*sin(oil_ang*3.0 + 4.0 + seed));
+  col = mix(col, irid * 0.55 + col * 0.45, oil * 0.48);
+
+  // Manhole cover — polar SDF ring + bolts.
+  let mh_uv = uv - vec2f(0.68, 0.28);
+  let mh_r = length(mh_uv);
+  let mh_ring = line_near(mh_r - 0.08, 0.008) + line_near(mh_r - 0.05, 0.005);
+  let mh_ang = atan2(mh_uv.y, mh_uv.x);
+  let mh_bolts = line_near(sin(mh_ang * 6.0), 0.08) * step(0.04, mh_r) * (1.0 - step(0.07, mh_r));
+  let mh = sat(mh_ring + mh_bolts) * step(mh_r, 0.10);
+  col = mix(col, vec3f(0.22, 0.20, 0.18), mh * 0.85);
+
+  // Tire skid marks — directional streaks.
+  let skid = line_near(sin((uv.x + fbm(uv.x * 2.0, uv.y * 2.0 + seed, 3.0) * 0.03) * 45.0), 0.06) * smoothstep(0.65, 0.95, uv.y);
+  col = mix(col, vec3f(0.03, 0.03, 0.03), skid * 0.42);
+
+  if (variant < 0.5) {
+    let dline = line_near(uv.x - 0.50, 0.018);
+    let dash = step(0.4, fract(uv.y * 6.0));
+    col = mix(col, vec3f(0.92, 0.78, 0.22), dline * dash * 0.9);
+  } else if (variant < 1.5) {
+    let cross = line_near(sin(uv.x * 18.0), 0.10) * smoothstep(0.35, 0.45, uv.y) * smoothstep(0.55, 0.45, uv.y);
+    col = mix(col, vec3f(0.88, 0.88, 0.82), cross * 0.8);
+    col = mix(col, vec3f(0.28, 0.26, 0.24), mh * 0.9);
+  } else {
+    let oil2 = 1.0 - smoothstep(0.06, 0.12, length((uv - vec2f(0.72, 0.55)) * vec2f(1.2, 0.9)));
+    col = mix(col, irid * 0.45 + col * 0.55, oil2 * 0.38);
+    let skid2 = line_near(sin((uv.x + 0.1) * 55.0 + seed), 0.04) * smoothstep(0.40, 0.80, uv.y);
+    col = mix(col, vec3f(0.025, 0.025, 0.025), skid2 * 0.32);
+  }
+  return sat3(col);
+}
+
+fn sidewalk(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Poured concrete slabs with irregular widths, expansion joints, rebar rust
+  // drips, gum spots, and leaf stains.
+  let row = floor(uv.y * 4.0);
+  let ywarp = sin(uv.x * 3.0 + row + seed) * 0.006;
+  let local_y = fract(uv.y * 4.0 + ywarp);
+  let joint_y = 1.0 - smoothstep(0.012, 0.032, min(local_y, 1.0 - local_y));
+
+  let slab_x = fract(uv.x * 2.0 + rand(vec2f(row, seed + 1.0)) * 0.3);
+  let joint_x = 1.0 - smoothstep(0.010, 0.028, min(slab_x, 1.0 - slab_x));
+  let joints = sat(joint_x + joint_y);
+
+  var col = mix(vec3f(0.55, 0.53, 0.50), vec3f(0.72, 0.70, 0.66), fbm(uv.x * 12.0 + seed, uv.y * 12.0, 5.0) * 0.5 + 0.5);
+
+  let rust_drip = vertical_drips(uv + vec2f(0.05, 0.0), seed + 7.0, 0.6) * joint_x;
+  col = mix(col, vec3f(0.42, 0.22, 0.10), rust_drip * 0.55);
+
+  let gum = speckle(px, 5.0, seed + 3.0, 0.96) * smoothstep(0.2, 0.8, fbm(uv.x * 4.0, uv.y * 4.0 + seed, 3.0) * 0.5 + 0.5);
+  col = mix(col, vec3f(0.75, 0.20, 0.35), gum * 0.62);
+
+  let leaf = blotch(uv, vec2f(0.24, 0.72), 0.14, vec2f(1.3, 0.7), seed + 2.0) + blotch(uv, vec2f(0.68, 0.38), 0.12, vec2f(0.8, 1.2), seed + 5.0);
+  col = mix(col, vec3f(0.42, 0.35, 0.18), sat(leaf) * 0.32);
+
+  col = mix(col, vec3f(0.35, 0.33, 0.30), joints * 0.78);
+
+  if (variant > 0.5 && variant < 1.5) {
+    col = mix(col, vec3f(0.68, 0.42, 0.32), 0.18);
+  } else if (variant >= 1.5) {
+    col = mix(col, vec3f(0.78, 0.72, 0.58), 0.15);
+  }
+  return sat3(col - vec3f(speckle(px, 3.0, seed, 0.92) * 0.06));
+}
+
+fn stone_wall(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Coursed ashlar with per-cell edge distortion, thick mortar, lichen on the
+  // top edges, and a weathering gradient from top.
+  let grid = uv * 3.0;
+  let cell = floor(grid);
+  let local = fract(grid);
+  let distort_x = (rand(cell + vec2f(seed, seed)) - 0.5) * 0.22;
+  let distort_y = (rand(cell + vec2f(seed + 1.0, seed * 2.0)) - 0.5) * 0.22;
+  let stone_local = local + vec2f(distort_x, distort_y);
+  let in_stone = step(0.05, stone_local.x) * step(stone_local.x, 0.95) * step(0.05, stone_local.y) * step(stone_local.y, 0.95);
+  let mortar = 1.0 - in_stone;
+
+  var lo = vec3f(0.38, 0.38, 0.40);
+  var hi = vec3f(0.62, 0.62, 0.64);
+  if (variant > 0.5 && variant < 1.5) {
+    lo = vec3f(0.52, 0.38, 0.24);
+    hi = vec3f(0.82, 0.62, 0.38);
+  } else if (variant >= 1.5) {
+    lo = vec3f(0.18, 0.18, 0.20);
+    hi = vec3f(0.32, 0.32, 0.34);
+  }
+  let stone_tex = fbm(uv.x * 14.0 + seed, uv.y * 14.0 - seed, 5.0) * 0.5 + 0.5;
+  var col = mix(lo, hi, stone_tex);
+
+  let lichen = smoothstep(0.55, 0.82, fbm(uv.x * 8.0 + seed, uv.y * 8.0 - seed, 4.0) * 0.5 + 0.5) * smoothstep(0.0, 0.5, local.y);
+  col = mix(col, vec3f(0.35, 0.42, 0.28), lichen * 0.42);
+  col = mix(col, vec3f(0.55, 0.53, 0.50), smoothstep(0.0, 0.35, uv.y) * 0.22);
+  col = mix(col, vec3f(0.45, 0.43, 0.38), mortar * 0.88);
+  return sat3(col - vec3f(speckle(px, 4.0, seed, 0.94) * 0.06));
+}
+
+fn dune(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Sine-curve ridge lines with wind ripples, lee-side shadow, and sparse veg.
+  let ridge1 = uv.y - (0.25 + sin(uv.x * 2.5 + seed) * 0.12 + sin(uv.x * 4.2 - seed) * 0.06);
+  let ridge2 = uv.y - (0.55 + sin(uv.x * 1.8 + seed + 1.3) * 0.10 + sin(uv.x * 3.5 - seed) * 0.05);
+  let ridge3 = uv.y - (0.82 + sin(uv.x * 3.0 + seed + 2.7) * 0.08);
+  let near_ridge = min(abs(ridge1), min(abs(ridge2), abs(ridge3)));
+  let ridge_mask = 1.0 - smoothstep(0.0, 0.06, near_ridge);
+
+  let ripple = line_near(sin((uv.x * 0.3 + uv.y) * 55.0 + seed), 0.08);
+
+  let shadow = smoothstep(0.0, 0.08, ridge1) * (1.0 - smoothstep(0.0, 0.20, ridge1)) * 0.5
+             + smoothstep(0.0, 0.08, ridge2) * (1.0 - smoothstep(0.0, 0.20, ridge2)) * 0.5
+             + smoothstep(0.0, 0.08, ridge3) * (1.0 - smoothstep(0.0, 0.20, ridge3)) * 0.5;
+
+  var lo = vec3f(0.62, 0.44, 0.18);
+  var hi = vec3f(0.90, 0.74, 0.38);
+  if (variant > 0.5 && variant < 1.5) {
+    lo = vec3f(0.78, 0.76, 0.72);
+    hi = vec3f(0.94, 0.92, 0.88);
+  } else if (variant >= 1.5) {
+    lo = vec3f(0.42, 0.14, 0.08);
+    hi = vec3f(0.78, 0.28, 0.14);
+  }
+  let tex = fbm(uv.x * 8.0 + seed, uv.y * 8.0 - seed, 5.0) * 0.5 + 0.5;
+  var col = mix(lo, hi, tex);
+  col = col + vec3f(0.10, 0.08, 0.04) * ripple;
+  col = col - vec3f(0.12, 0.08, 0.04) * shadow;
+  col = col + vec3f(0.14, 0.10, 0.04) * ridge_mask;
+
+  let veg = speckle(px + vec2f(11.0, 7.0), 7.0, seed, 0.96) * smoothstep(0.3, 0.7, uv.y);
+  col = mix(col, vec3f(0.25, 0.35, 0.10), veg * 0.32);
+  return sat3(col);
+}
+
+fn deep_water(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Deep ocean with sharp whitecaps, caustic light, and foam patches.
+  var deep = vec3f(0.015, 0.045, 0.12);
+  var shallow = vec3f(0.06, 0.32, 0.55);
+  if (variant > 0.5 && variant < 1.5) {
+    deep = vec3f(0.02, 0.18, 0.22);
+    shallow = vec3f(0.14, 0.68, 0.62);
+  } else if (variant >= 1.5) {
+    deep = vec3f(0.03, 0.04, 0.06);
+    shallow = vec3f(0.18, 0.20, 0.24);
+  }
+  let depth_grad = smoothstep(0.0, 1.0, uv.y);
+  var col = mix(deep, shallow, depth_grad);
+
+  let wave_a = sin(uv.x * 28.0 + uv.y * 8.0 + seed);
+  let wave_b = sin(uv.x * -18.0 + uv.y * 22.0 - seed);
+  let wave_c = sin(uv.x * 12.0 + uv.y * 35.0 + seed * 0.5);
+  let crest = smoothstep(1.4, 1.9, wave_a + wave_b + wave_c);
+  col = mix(col, vec3f(0.82, 0.88, 0.92), crest * 0.65);
+
+  let caustic = line_near(sin(uv.x * 20.0 + seed) * sin(uv.y * 16.0 - seed), 0.08);
+  col = col + vec3f(0.08, 0.14, 0.16) * caustic * (1.0 - depth_grad * 0.5);
+
+  let foam = speckle(px, 5.5, seed + 4.0, 0.90) * smoothstep(0.6, 0.9, fbm(uv.x * 5.0 + seed, uv.y * 5.0, 4.0) * 0.5 + 0.5);
+  col = mix(col, vec3f(0.88, 0.92, 0.90), foam * 0.30);
+  return sat3(col);
+}
+
+fn turf(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Mowed lawn with stripe bands, clover patches, bare dirt, dandelions.
+  let stripe = step(0.5, fract(uv.y * 7.0 + seed * 0.1));
+  let stripe_blend = mix(1.0, 0.88, stripe);
+
+  var lo = vec3f(0.10, 0.28, 0.08);
+  var hi = vec3f(0.28, 0.52, 0.16);
+  if (variant > 0.5 && variant < 1.5) {
+    lo = vec3f(0.14, 0.38, 0.18);
+    hi = vec3f(0.38, 0.62, 0.28);
+  } else if (variant >= 1.5) {
+    lo = vec3f(0.28, 0.24, 0.08);
+    hi = vec3f(0.52, 0.44, 0.16);
+  }
+  let tex = fbm(uv.x * 16.0 + seed, uv.y * 16.0 - seed, 5.0) * 0.5 + 0.5;
+  var col = mix(lo, hi, tex) * stripe_blend;
+
+  let clover = speckle(px + vec2f(3.0, 9.0), 4.5, seed, 0.92);
+  col = mix(col, vec3f(0.18, 0.42, 0.14), clover * 0.32);
+
+  let bare = smoothstep(0.48, 0.68, fbm(uv.x * 5.0 - seed, uv.y * 5.0 + seed, 4.0) * 0.5 + 0.5);
+  let dirt = mix(vec3f(0.38, 0.28, 0.16), vec3f(0.52, 0.40, 0.24), fbm(uv.x * 10.0, uv.y * 10.0, 4.0) * 0.5 + 0.5);
+  col = mix(col, dirt, bare * 0.52);
+
+  let dandelion = speckle(px + vec2f(19.0, 5.0), 8.0, seed, 0.96) * (1.0 - bare);
+  col = mix(col, vec3f(0.92, 0.86, 0.14), dandelion * 0.50);
+  return sat3(col);
+}
+
+fn plank_deck(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Weathered deck boards with end-checking cracks, nail pops, water stain.
+  let row = floor(uv.y * 5.0);
+  let row_warp = (rand(vec2f(row, seed)) - 0.5) * 0.006;
+  let local_y = fract(uv.y * 5.0 + row_warp);
+  let gap = 1.0 - smoothstep(0.012, 0.032, min(local_y, 1.0 - local_y));
+
+  let grain = sin((uv.x + fbm(uv.x * 4.0, uv.y * 1.0 + seed, 3.0) * 0.03) * 65.0 + row) * 0.5 + 0.5;
+  let knot = 1.0 - smoothstep(0.04, 0.07, length((uv - vec2f(0.35 + rand(vec2f(row, seed + 1.0)) * 0.3, (row + 0.5) / 5.0)) * vec2f(1.0, 4.0)));
+
+  var lo = vec3f(0.58, 0.38, 0.18);
+  var hi = vec3f(0.86, 0.62, 0.32);
+  if (variant > 0.5 && variant < 1.5) {
+    lo = vec3f(0.42, 0.42, 0.40);
+    hi = vec3f(0.68, 0.68, 0.64);
+  } else if (variant >= 1.5) {
+    lo = vec3f(0.32, 0.26, 0.18);
+    hi = vec3f(0.52, 0.44, 0.30);
+  }
+  var col = mix(lo, hi, grain * 0.6 + 0.25);
+  col = mix(col, vec3f(0.48, 0.30, 0.14), knot * 0.42);
+
+  let end_crack = line_near(uv.x - 0.5, 0.006) * (smoothstep(0.0, 0.12, local_y) + smoothstep(1.0, 0.88, local_y));
+  col = mix(col, vec3f(0.22, 0.16, 0.10), end_crack * 0.52);
+
+  let nail_x = step(0.5, fract(uv.x * 6.0 + row * 0.3));
+  let nail_y = step(0.35, local_y) * step(local_y, 0.65);
+  let nail = nail_x * nail_y * speckle(px, 2.2, seed, 0.88);
+  col = col + vec3f(0.12, 0.10, 0.06) * nail;
+
+  let water = smoothstep(0.55, 0.92, uv.y) * smoothstep(0.45, 0.75, fbm(uv.x * 3.0 + row, uv.y * 2.0 + seed, 3.0) * 0.5 + 0.5);
+  col = mix(col, vec3f(0.24, 0.18, 0.10), water * 0.32);
+
+  col = mix(col, vec3f(0.08, 0.07, 0.06), gap * 0.88);
+  return sat3(col);
+}
+
 fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, board: f32) -> vec3f {
   let raw_q = clamp(quality, 0.0, 4.0);
   let q = clamp(raw_q - 2.0, 0.0, 2.0);
@@ -1367,12 +1621,18 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     out_col = mix(out_col, vec3f(0.020, 0.022, 0.018), smoothstep(0.60 - q * 0.05, 0.94, coarse) * (0.12 + q * 0.10));
     out_col = mix(out_col, vec3f(0.10, 0.09, 0.07), fleck * (0.08 + q * 0.06));
   }
-  if (board > 5.5) {
+  if (board > 5.5 && board < 6.5) {
     // Board G liminal — threshold surfaces: preserve translucency, add a faint
     // frost/ash bloom in the highs, keep the mid-tones clean so state-changes read.
     let threshold_bloom = smoothstep(0.55 - q * 0.04, 0.92, luma);
     out_col = out_col + out_col * threshold_bloom * (0.10 + q * 0.05);
     out_col = mix(out_col, vec3f(0.015, 0.018, 0.020), fleck * (0.06 + q * 0.04));
+  }
+  if (board > 6.5) {
+    // Board H second pass — environment alts: aggregate fleck, subtle weathering
+    // in the lows, but keep the crisp SDF reads intact.
+    out_col = mix(out_col, vec3f(0.022, 0.024, 0.020), smoothstep(0.55 - q * 0.04, 0.88, coarse) * (0.08 + q * 0.06));
+    out_col = out_col + vec3f((fine - 0.5) * (0.012 + q * 0.018));
   }
   if (retro > 0.001) {
     let dither_cell = floor(px / (1.0 + retro));
@@ -1450,7 +1710,7 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 4) { col = refuse(uv, px, variant, seed); }
     else if (material == 5) { col = corkboard(uv, px, variant, seed); }
     else { col = substance_spill(uv, px, variant, seed); }
-  } else {
+  } else if (board < 6.5) {
     if (material == 0) { col = fogged_mirror(uv, px, variant, seed); }
     else if (material == 1) { col = salt_flat(uv, px, variant, seed); }
     else if (material == 2) { col = moss_carpet(uv, px, variant, seed); }
@@ -1458,6 +1718,14 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 4) { col = ice_sheet(uv, px, variant, seed); }
     else if (material == 5) { col = charcoal_bed(uv, px, variant, seed); }
     else { col = stained_glass(uv, px, variant, seed); }
+  } else {
+    if (material == 0) { col = asphalt(uv, px, variant, seed); }
+    else if (material == 1) { col = sidewalk(uv, px, variant, seed); }
+    else if (material == 2) { col = stone_wall(uv, px, variant, seed); }
+    else if (material == 3) { col = dune(uv, px, variant, seed); }
+    else if (material == 4) { col = deep_water(uv, px, variant, seed); }
+    else if (material == 5) { col = turf(uv, px, variant, seed); }
+    else { col = plank_deck(uv, px, variant, seed); }
   }
 
   let vignette = 1.0 - smoothstep(0.20, 0.88, length(uv - vec2f(0.5, 0.5)));
@@ -1480,7 +1748,9 @@ function fillData(materialId: number, variant: number, quality: QualityGrade, bo
             ? materialId * 37.0 + variant * 19.0 + 181.0
             : board === 5
               ? materialId * 41.0 + variant * 23.0 + 229.0
-              : materialId * 43.0 + variant * 27.0 + 271.0;
+              : board === 6
+                ? materialId * 43.0 + variant * 27.0 + 271.0
+                : materialId * 47.0 + variant * 29.0 + 313.0;
   return [materialId, variant, seed, quality, board];
 }
 
@@ -1582,6 +1852,17 @@ function LiminalColumn({ material, quality }: { material: typeof LIMINAL_MATERIA
       <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
       {VARIANTS.map((variant) => (
         <Swatch key={`g-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 6)} idLabel={swatchId('G', material.id, variant)} />
+      ))}
+    </Col>
+  );
+}
+
+function AltColumn({ material, quality }: { material: typeof ALT_MATERIALS[number]; quality: QualityGrade }) {
+  return (
+    <Col style={{ width: SWATCH, gap: 10 }}>
+      <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
+      {VARIANTS.map((variant) => (
+        <Swatch key={`h-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 7)} idLabel={swatchId('H', material.id, variant)} />
       ))}
     </Col>
   );
@@ -1703,6 +1984,15 @@ export default function EffectFills() {
             <Row style={{ gap: 18, alignItems: 'flex-start' }}>
               {LIMINAL_MATERIALS.map((material) => (
                 <LiminalColumn key={material.id} material={material} quality={quality} />
+              ))}
+            </Row>
+          </Col>
+
+          <Col style={{ gap: 18 }}>
+            <BoardHeader title="Board H / Second Pass — Kimi" subtitle="H01-H21: asphalt, sidewalk, stone wall, dune, deep water, turf, plank deck — alternative environment takes, pick your least-shitty road" />
+            <Row style={{ gap: 18, alignItems: 'flex-start' }}>
+              {ALT_MATERIALS.map((material) => (
+                <AltColumn key={material.id} material={material} quality={quality} />
               ))}
             </Row>
           </Col>

@@ -1,0 +1,70 @@
+// cli/main.ts - rjit <subcommand> [args] dispatcher.
+
+import { err } from './host/log.ts';
+import * as autotest from './commands/autotest.ts';
+import * as bakeGeometry from './commands/bake-geometry.ts';
+import * as bakeGeometryAuto from './commands/bake-geometry-auto.ts';
+import * as bakeIcons from './commands/bake-icons.ts';
+import * as cartManifestField from './commands/cart-manifest-field.ts';
+import * as cartBundle from './commands/cart-bundle.ts';
+import * as classify from './commands/classify.ts';
+import * as codegenBindings from './commands/codegen-bindings.ts';
+import * as dev from './commands/dev.ts';
+import * as firecrackerBuild from './commands/firecracker-build.ts';
+import * as help from './commands/help.ts';
+import * as init from './commands/init.ts';
+import * as metafileGate from './commands/metafile-gate.ts';
+import * as packSdk from './commands/pack-sdk.ts';
+import * as pushBundle from './commands/push-bundle.ts';
+import * as ship from './commands/ship.ts';
+import * as shipTui from './commands/ship-tui.ts';
+import * as tui from './commands/tui.ts';
+import * as watchAndPush from './commands/watch-and-push.ts';
+
+interface Command {
+  run: (argv: string[]) => Promise<number>;
+}
+
+const COMMANDS: Record<string, Command> = {
+  'autotest': autotest,
+  'bake-geometry': bakeGeometry,
+  'bake-geometry-auto': bakeGeometryAuto,
+  'bake-icons': bakeIcons,
+  'cart-bundle': cartBundle,
+  'cart-manifest-field': cartManifestField,
+  'classify': classify,
+  'codegen-bindings': codegenBindings,
+  'dev': dev,
+  'firecracker-build': firecrackerBuild,
+  'help': help,
+  'init': init,
+  'metafile-gate': metafileGate,
+  'pack-sdk': packSdk,
+  'push-bundle': pushBundle,
+  'ship': ship,
+  'ship-tui': shipTui,
+  'tui': tui,
+  'watch-and-push': watchAndPush,
+};
+
+async function main(): Promise<number> {
+  const subcommand = process.argv[1];
+  if (!subcommand) {
+    help.printTopLevel();
+    return 0;
+  }
+
+  const command = COMMANDS[subcommand];
+  if (!command) {
+    err(`rjit: unknown subcommand: ${subcommand}`);
+    err('try: rjit help');
+    return 1;
+  }
+
+  return command.run(process.argv.slice(2));
+}
+
+main().then(__exit, (error: Error) => {
+  err(`rjit: ${error.message}`);
+  __exit(1);
+});

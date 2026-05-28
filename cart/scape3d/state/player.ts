@@ -107,12 +107,14 @@ export function createInitialPlayerState(): ScapePlayerState {
   const px = 22.5;
   const py = 24.5;
   const facing = -Math.PI / 2;
-  const state = {
+  const state: ScapePlayerState = {
     px: 22.5,
     py: 24.5,
     yaw: Math.PI * 0.25,
     pitch: 0.62,
     zoom: 1.1,
+    mode: 'tp',
+    lookPitch: 0,
     body: createInitialPlayerBody(tileFromPosition(px, py), facing),
     path: [],
   };

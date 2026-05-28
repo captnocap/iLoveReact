@@ -50,9 +50,18 @@ function resolveCostume(color: string): string {
 // Woozy camera under the high: gentle drifting sway on yaw/pitch/zoom that scales
 // with intensity (0 when sober). Kept subtle — a manic shimmer, not nausea — and
 // it's thematic that aim drifts a touch while you're spun (the sim never lies).
+// In FP we sway `lookPitch` (the FP look angle) instead of `pitch` (which is TP
+// orbit elevation and unused in FP); zoom doesn't apply in FP.
 function swayCam(cam: Cam, high: number): Cam {
   if (high <= 0.01) return cam;
   const t = ((globalThis as any).performance?.now?.() ?? 0) / 1000;
+  if (cam.mode === 'fp') {
+    return {
+      ...cam,
+      yaw: cam.yaw + Math.sin(t * 1.3) * 0.035 * high,
+      lookPitch: cam.lookPitch + Math.sin(t * 0.9 + 1.7) * 0.03 * high,
+    };
+  }
   return {
     ...cam,
     yaw: cam.yaw + Math.sin(t * 1.3) * 0.035 * high,
@@ -72,6 +81,7 @@ export function Scene({
   heldModel?: (a: ItemAnchor) => ReactNode;
 }) {
   const c = cameraFor(swayCam(cam, sim.body.high.intensity));
+  const fp = cam.mode === 'fp';
   return (
     <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={SKY} showGrid={false} showAxes={false}>
       <Scene3D.Camera position={c.pos} target={c.target} fov={c.fov} />
@@ -83,7 +93,7 @@ export function Scene({
 
       <World px={sim.px} py={sim.py} doors={doors} entities={entities} worldItems={worldItems} />
       <Npcs3D entities={entities} />
-      <Player3D px={sim.px} py={sim.py} facing={sim.body.facing} costumeColor={resolveCostume(sim.body.costume.color)} heldModel={heldModel} />
+      <Player3D px={sim.px} py={sim.py} facing={sim.body.facing} costumeColor={resolveCostume(sim.body.costume.color)} heldModel={heldModel} hideHead={fp} />
       <PathMarkers path={sim.path} />
     </Scene3D>
   );

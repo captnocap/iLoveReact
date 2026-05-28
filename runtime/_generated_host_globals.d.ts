@@ -103,6 +103,26 @@ declare global {
   function setPathFlow(...args: unknown[]): unknown;
   function resetPathFlow(...args: unknown[]): unknown;
 
+  // lua (framework/v8_bindings_lua.zig)
+  function __lua_available(...args: unknown[]): unknown;
+  function __lua_start(...args: unknown[]): unknown;
+  function __lua_stop(...args: unknown[]): unknown;
+  function __lua_eval(...args: unknown[]): unknown;
+  function __lua_send_msg(...args: unknown[]): unknown;
+  function __lua_recv_msg(...args: unknown[]): unknown;
+  function __lua_elapsed_us(...args: unknown[]): unknown;
+  function __lua_send(...args: unknown[]): unknown;
+  function __lua_recv_count(...args: unknown[]): unknown;
+  function __lua_set_n(...args: unknown[]): unknown;
+
+  // input_bench (framework/v8_bindings_input_bench.zig)
+  function __input_bench_reset(...args: unknown[]): unknown;
+  function __input_bench_set_yaw(...args: unknown[]): unknown;
+  function __input_bench_set_speed(...args: unknown[]): unknown;
+  function __input_bench_set_enabled(...args: unknown[]): unknown;
+  function __input_bench_pos(...args: unknown[]): unknown;
+  function __bench_now_us(...args: unknown[]): unknown;
+
   // fs (framework/v8_bindings_fs.zig)
   function __fs_read(...args: unknown[]): unknown;
   function __fs_write(...args: unknown[]): unknown;
@@ -551,6 +571,7 @@ declare global {
   function __vterm_close(...args: unknown[]): unknown;
   function __vterm_poll(...args: unknown[]): unknown;
   function __vterm_write(...args: unknown[]): unknown;
+  function __vterm_feed(...args: unknown[]): unknown;
   function __vterm_resize(...args: unknown[]): unknown;
   function __vterm_get_row(...args: unknown[]): unknown;
   function __vterm_scroll(...args: unknown[]): unknown;

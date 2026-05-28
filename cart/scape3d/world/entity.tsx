@@ -121,7 +121,11 @@ const WHITE = '#ffffff';
 // so the squares + grout stay crisp instead of bilinear-smearing into soft diamonds.
 const PLAZA_TEX = checkerTex(20, 16, 32, PLAZA_A, PLAZA_B);
 const ROAD_TEX = asphaltTex(ZONE_HEX.road, ROAD_LINE);
-const WATER_WAVE = { amplitude: 0.08, length: 4.8, speed: 0.18, dirX: 1, dirZ: 0.35 };
+// Water samples the LIVE A13 effect surface (render3d/WaterSurface.tsx renders
+// @reactjit/effects <Water> into staticKey "water-a13"); the mesh references it
+// by textureKey so the face shows the real animated shader, not a baked frame.
+const WATER_LEVEL = 0.24;
+const WATER_WAVE = { amplitude: 0.18, length: 2.2, speed: 0.55, dirX: 1, dirZ: 0.35 };
 
 function zoneHex(t: T): string {
   switch (t) {
@@ -158,10 +162,11 @@ function groundFrag(key: string, surface: Surface, ax: number, ay: number, w: nu
         heights={heights}
         hfCols={cols}
         hfRows={rows}
-        material={zoneHex(SURFACE_KIND.water)}
-        position={[cx, 0, cz]}
+        material={WHITE}
+        textureKey="water-a13"
+        position={[cx, WATER_LEVEL, cz]}
         sizeX={w}
-        sizeY={-0.14}
+        sizeY={-0.34}
         sizeZ={h}
         waveAmplitude={WATER_WAVE.amplitude}
         waveLength={WATER_WAVE.length}

@@ -210,9 +210,9 @@
     return 1;
   }
 
-  // cli/commands/cart-manifest-field.ts
-  var cart_manifest_field_exports = {};
-  __export(cart_manifest_field_exports, {
+  // cli/commands/bake-geometry.ts
+  var bake_geometry_exports = {};
+  __export(bake_geometry_exports, {
     run: () => run2
   });
 
@@ -253,6 +253,1062 @@
     return out2;
   }
 
+  // runtime/geometries/_util.ts
+  function normalize(x, y, z) {
+    const len = Math.sqrt(x * x + y * y + z * z);
+    if (len < 1e-6) return [0, 0, 0];
+    return [x / len, y / len, z / len];
+  }
+  var Mesh = class {
+    v = [];
+    maxR2 = 0;
+    /** Push one vertex (position, normal, uv). */
+    vert(p, n, uv2) {
+      this.v.push(p[0], p[1], p[2], n[0], n[1], n[2], uv2[0], uv2[1]);
+      const r2 = p[0] * p[0] + p[1] * p[1] + p[2] * p[2];
+      if (r2 > this.maxR2) this.maxR2 = r2;
+    }
+    /** A triangle with per-corner normals + UVs (mirrors Zig addTri). */
+    tri(a, na, ua, b, nb, ub, c, nc, uc) {
+      this.vert(a, na, ua);
+      this.vert(b, nb, ub);
+      this.vert(c, nc, uc);
+    }
+    /** Flat-shaded triangle: one normal, default UVs (mirrors Zig addTriFlat). */
+    triFlat(a, b, c, n) {
+      this.tri(a, n, [0, 0], b, n, [1, 0], c, n, [1, 1]);
+    }
+    /**
+     * A quad as two triangles with a single face normal. Mirrors Zig addFace
+     * exactly: corners run world bottom→top (BL,BR,TR,TL), V is flipped so a
+     * texture stays upright on the face, winding is [0,1,2, 0,2,3].
+     */
+    face(v1, v2, v3, v4, n) {
+      const corners = [v1, v2, v3, v4];
+      const uvs = [[0, 1], [1, 1], [1, 0], [0, 0]];
+      const order = [0, 1, 2, 0, 2, 3];
+      for (const ti of order) this.vert(corners[ti], n, uvs[ti]);
+    }
+    build() {
+      return {
+        positions: new Float32Array(this.v),
+        count: this.v.length / 8,
+        bounds: { radius: Math.sqrt(this.maxR2) }
+      };
+    }
+  };
+  function mesh() {
+    return new Mesh();
+  }
+
+  // runtime/geometries/Box.ts
+  var BOX_DEFAULTS = { width: 1, height: 1, depth: 1 };
+  function generate(p) {
+    const hx = p.width * 0.5;
+    const hy = p.height * 0.5;
+    const hz = p.depth * 0.5;
+    const g = mesh();
+    g.face([-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz], [0, 0, 1]);
+    g.face([hx, -hy, -hz], [-hx, -hy, -hz], [-hx, hy, -hz], [hx, hy, -hz], [0, 0, -1]);
+    g.face([hx, -hy, hz], [hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz], [1, 0, 0]);
+    g.face([-hx, -hy, -hz], [-hx, -hy, hz], [-hx, hy, hz], [-hx, hy, -hz], [-1, 0, 0]);
+    g.face([-hx, hy, hz], [hx, hy, hz], [hx, hy, -hz], [-hx, hy, -hz], [0, 1, 0]);
+    g.face([-hx, -hy, -hz], [hx, -hy, -hz], [hx, -hy, hz], [-hx, -hy, hz], [0, -1, 0]);
+    return g.build();
+  }
+
+  // runtime/geometries/Sphere.ts
+  var SPHERE_DEFAULTS = { radius: 0.5, segments: 24, rings: 16 };
+  var PI = Math.PI;
+  function pos(r, theta, phi) {
+    const st = Math.sin(theta);
+    return [r * st * Math.cos(phi), r * Math.cos(theta), r * st * Math.sin(phi)];
+  }
+  function nrm(theta, phi) {
+    const st = Math.sin(theta);
+    return [st * Math.cos(phi), Math.cos(theta), st * Math.sin(phi)];
+  }
+  function uv(n) {
+    return [(n[0] + 1) * 0.5, (1 - n[1]) * 0.5];
+  }
+  function generate2(p) {
+    const g = mesh();
+    const { radius: r, segments, rings } = p;
+    for (let i = 0; i < rings; i++) {
+      const t1 = PI * i / rings;
+      const t2 = PI * (i + 1) / rings;
+      for (let j = 0; j < segments; j++) {
+        const p1 = 2 * PI * j / segments;
+        const p2 = 2 * PI * (j + 1) / segments;
+        const a = pos(r, t1, p1), b = pos(r, t1, p2), c = pos(r, t2, p2), d = pos(r, t2, p1);
+        const na = nrm(t1, p1), nb = nrm(t1, p2), nc = nrm(t2, p2), nd = nrm(t2, p1);
+        g.tri(a, na, uv(na), c, nc, uv(nc), d, nd, uv(nd));
+        g.tri(a, na, uv(na), b, nb, uv(nb), c, nc, uv(nc));
+      }
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Plane.ts
+  var PLANE_DEFAULTS = { width: 1, depth: 1 };
+  function generate3(p) {
+    const hx = p.width * 0.5;
+    const hz = p.depth * 0.5;
+    const g = mesh();
+    g.face([-hx, 0, -hz], [hx, 0, -hz], [hx, 0, hz], [-hx, 0, hz], [0, 1, 0]);
+    return g.build();
+  }
+
+  // runtime/geometries/Cylinder.ts
+  var CYLINDER_DEFAULTS = { radius: 0.5, height: 1, segments: 24 };
+  var PI2 = Math.PI;
+  function generate4(p) {
+    const { radius: r, height, segments } = p;
+    const hy = height * 0.5;
+    const g = mesh();
+    for (let j = 0; j < segments; j++) {
+      const a1 = 2 * PI2 * j / segments;
+      const a2 = 2 * PI2 * (j + 1) / segments;
+      const c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const c2 = Math.cos(a2), s2 = Math.sin(a2);
+      const a = [r * c1, -hy, r * s1];
+      const b = [r * c2, -hy, r * s2];
+      const c = [r * c2, hy, r * s2];
+      const d = [r * c1, hy, r * s1];
+      const n1 = [c1, 0, s1];
+      const n2 = [c2, 0, s2];
+      g.tri(a, n1, [0, 0], d, n1, [0, 1], c, n2, [1, 1]);
+      g.tri(a, n1, [0, 0], c, n2, [1, 1], b, n2, [1, 0]);
+      g.triFlat([0, hy, 0], b, a, [0, 1, 0]);
+      g.triFlat([0, -hy, 0], a, b, [0, -1, 0]);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Cone.ts
+  var CONE_DEFAULTS = { radius: 0.5, height: 1, segments: 24 };
+  var PI3 = Math.PI;
+  function generate5(p) {
+    const { radius: r, height, segments } = p;
+    const hy = height * 0.5;
+    const slope = Math.abs(height) > 1e-3 ? r / height : 1;
+    const apex = [0, hy, 0];
+    const g = mesh();
+    for (let j = 0; j < segments; j++) {
+      const a1 = 2 * PI3 * j / segments;
+      const a2 = 2 * PI3 * (j + 1) / segments;
+      const mid = (a1 + a2) * 0.5;
+      const c1 = Math.cos(a1), s1 = Math.sin(a1);
+      const c2 = Math.cos(a2), s2 = Math.sin(a2);
+      const a = [r * c1, -hy, r * s1];
+      const b = [r * c2, -hy, r * s2];
+      const n1 = normalize(c1, slope, s1);
+      const n2 = normalize(c2, slope, s2);
+      const na = normalize(Math.cos(mid), slope, Math.sin(mid));
+      g.tri(a, n1, [0, 0], apex, na, [0.5, 1], b, n2, [1, 0]);
+      g.triFlat([0, -hy, 0], a, b, [0, -1, 0]);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Torus.ts
+  var TORUS_DEFAULTS = { radius: 0.5, tube: 0.25, segments: 24, sides: 16 };
+  var PI4 = Math.PI;
+  function pos2(r, tr, u, v) {
+    const ring = r + tr * Math.cos(v);
+    return [ring * Math.cos(u), tr * Math.sin(v), ring * Math.sin(u)];
+  }
+  function nrm2(u, v) {
+    return [Math.cos(u) * Math.cos(v), Math.sin(v), Math.sin(u) * Math.cos(v)];
+  }
+  function generate6(p) {
+    const { radius: r, tube: tr, segments, sides } = p;
+    const g = mesh();
+    for (let i = 0; i < segments; i++) {
+      const u1 = 2 * PI4 * i / segments;
+      const u2 = 2 * PI4 * (i + 1) / segments;
+      for (let j = 0; j < sides; j++) {
+        const v1 = 2 * PI4 * j / sides;
+        const v2 = 2 * PI4 * (j + 1) / sides;
+        const a = pos2(r, tr, u1, v1), b = pos2(r, tr, u2, v1), c = pos2(r, tr, u2, v2), d = pos2(r, tr, u1, v2);
+        const na = nrm2(u1, v1), nb = nrm2(u2, v1), nc = nrm2(u2, v2), nd = nrm2(u1, v2);
+        g.tri(a, na, [0, 0], d, nd, [0, 1], c, nc, [1, 1]);
+        g.tri(a, na, [0, 0], c, nc, [1, 1], b, nb, [1, 0]);
+      }
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Heightfield.ts
+  var WAVE_NONE = { amplitude: 0, length: 0, speed: 0, dirX: 1, dirZ: 0, phase: 0 };
+  var HEIGHTFIELD_DEFAULTS = {
+    width: 1,
+    depth: 1,
+    base: 0,
+    wave: WAVE_NONE,
+    t: 0
+  };
+  var TAU = Math.PI * 2;
+  function waveHeight(w, x, z, t) {
+    if (Math.abs(w.amplitude) <= 1e-4 || w.length <= 1e-4) return 0;
+    const dlen = Math.sqrt(w.dirX * w.dirX + w.dirZ * w.dirZ);
+    const dx = dlen > 1e-4 ? w.dirX / dlen : 1;
+    const dz = dlen > 1e-4 ? w.dirZ / dlen : 0;
+    const cycles = (x * dx + z * dz) / w.length + w.phase + t * w.speed;
+    return Math.sin(cycles * TAU) * w.amplitude;
+  }
+  function generate7(p) {
+    const { cols, rows, width: w, depth: h, base, wave, t } = p;
+    const hs = p.heights;
+    const g = mesh();
+    if (cols < 2 || rows < 2) return g.build();
+    if (hs.length !== cols * rows) return g.build();
+    const dx = w / (cols - 1);
+    const dz = h / (rows - 1);
+    const x0 = -w * 0.5;
+    const z0 = -h * 0.5;
+    const cf = cols - 1;
+    const rf = rows - 1;
+    const at = (i, j) => {
+      const x = x0 + i * dx;
+      const z = z0 + j * dz;
+      return [x, hs[j * cols + i] + waveHeight(wave, x, z, t), z];
+    };
+    const drop = (pt) => [pt[0], base, pt[2]];
+    const heightAt = (i, j) => {
+      const ci = Math.min(Math.max(i, 0), cols - 1);
+      const cj = Math.min(Math.max(j, 0), rows - 1);
+      const x = x0 + ci * dx;
+      const z = z0 + cj * dz;
+      return hs[cj * cols + ci] + waveHeight(wave, x, z, t);
+    };
+    const normalAt = (i, j) => {
+      const hl = heightAt(i - 1, j);
+      const hr = heightAt(i + 1, j);
+      const hu = heightAt(i, j - 1);
+      const hd = heightAt(i, j + 1);
+      return normalize(-(hr - hl) / (2 * dx), 1, -(hd - hu) / (2 * dz));
+    };
+    for (let j = 0; j + 1 < rows; j++) {
+      for (let i = 0; i + 1 < cols; i++) {
+        const pa = at(i, j), pb = at(i + 1, j), pc = at(i + 1, j + 1), pd = at(i, j + 1);
+        const na = normalAt(i, j), nb = normalAt(i + 1, j), nc = normalAt(i + 1, j + 1), nd = normalAt(i, j + 1);
+        const ua = [i / cf, j / rf];
+        const ub = [(i + 1) / cf, j / rf];
+        const uc = [(i + 1) / cf, (j + 1) / rf];
+        const ud = [i / cf, (j + 1) / rf];
+        g.vert(pa, na, ua);
+        g.vert(pc, nc, uc);
+        g.vert(pb, nb, ub);
+        g.vert(pa, na, ua);
+        g.vert(pd, nd, ud);
+        g.vert(pc, nc, uc);
+      }
+    }
+    const skirt = (a, b, c, d, n) => {
+      const uv2 = [0, 0];
+      g.vert(a, n, uv2);
+      g.vert(b, n, uv2);
+      g.vert(c, n, uv2);
+      g.vert(a, n, uv2);
+      g.vert(c, n, uv2);
+      g.vert(d, n, uv2);
+    };
+    for (let i = 0; i + 1 < cols; i++) {
+      const tn0 = at(i, 0), tn1 = at(i + 1, 0);
+      if (tn0[1] > base || tn1[1] > base) skirt(drop(tn1), drop(tn0), tn0, tn1, [0, 0, -1]);
+      const js = rows - 1;
+      const ts0 = at(i, js), ts1 = at(i + 1, js);
+      if (ts0[1] > base || ts1[1] > base) skirt(drop(ts0), drop(ts1), ts1, ts0, [0, 0, 1]);
+    }
+    for (let j = 0; j + 1 < rows; j++) {
+      const tw0 = at(0, j), tw1 = at(0, j + 1);
+      if (tw0[1] > base || tw1[1] > base) skirt(drop(tw0), drop(tw1), tw1, tw0, [-1, 0, 0]);
+      const ie = cols - 1;
+      const te0 = at(ie, j), te1 = at(ie, j + 1);
+      if (te0[1] > base || te1[1] > base) skirt(drop(te1), drop(te0), te0, te1, [1, 0, 0]);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Humanoid.ts
+  var HUMANOID_DEFAULTS = {
+    height: 2,
+    shoulderWidth: 0.72,
+    hipWidth: 0.46,
+    headSize: 0.34,
+    limbThickness: 1,
+    sides: 6
+  };
+  function ringVerts(r, sides) {
+    const out2 = [];
+    const t = r.twist ?? 0;
+    for (let i = 0; i < sides; i++) {
+      const a = t + i / sides * Math.PI * 2;
+      const x = r.cx + Math.cos(a) * r.rx;
+      const z = r.cz + Math.sin(a) * r.rz;
+      out2.push([x, r.y, z]);
+    }
+    return out2;
+  }
+  function cross(a, b) {
+    return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  }
+  function sub(a, b) {
+    return [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  }
+  function normalize3(v) {
+    const L = Math.hypot(v[0], v[1], v[2]) || 1;
+    return [v[0] / L, v[1] / L, v[2] / L];
+  }
+  function emitSweep(g, rings, sides) {
+    const ringPts = rings.map((r) => ringVerts(r, sides));
+    for (let i = 0; i < ringPts.length - 1; i++) {
+      const a = ringPts[i];
+      const b = ringPts[i + 1];
+      for (let s = 0; s < sides; s++) {
+        const s2 = (s + 1) % sides;
+        const p0 = a[s];
+        const p1 = a[s2];
+        const p2 = b[s2];
+        const p3 = b[s];
+        const e1 = sub(p1, p0);
+        const e2 = sub(p3, p0);
+        const n = normalize3(cross(e1, e2));
+        g.tri(p0, n, [0, 0], p1, n, [1, 0], p2, n, [1, 1]);
+        g.tri(p0, n, [0, 0], p2, n, [1, 1], p3, n, [0, 1]);
+      }
+    }
+  }
+  function emitCap(g, ring, sides, up) {
+    const pts = ringVerts(ring, sides);
+    const center = [ring.cx, ring.y, ring.cz];
+    const n = up ? [0, 1, 0] : [0, -1, 0];
+    for (let s = 0; s < sides; s++) {
+      const s2 = (s + 1) % sides;
+      if (up) {
+        g.tri(center, n, [0.5, 0.5], pts[s], n, [0, 0], pts[s2], n, [1, 0]);
+      } else {
+        g.tri(center, n, [0.5, 0.5], pts[s2], n, [1, 0], pts[s], n, [0, 0]);
+      }
+    }
+  }
+  function generate8(p) {
+    const g = mesh();
+    const sides = Math.max(4, p.sides | 0);
+    const t = p.limbThickness;
+    const H = p.height;
+    const hipY = H * 0.46;
+    const waistY = H * 0.54;
+    const chestY = H * 0.66;
+    const shoulderY = H * 0.74;
+    const neckY = H * 0.78;
+    const chinY = H * 0.83;
+    const faceY = H * 0.92;
+    const crownY = H * 1;
+    const shoulderHalf = p.shoulderWidth * 0.5;
+    const hipHalf = p.hipWidth * 0.5;
+    const trunkRings = [
+      { y: hipY, cx: 0, cz: 0, rx: hipHalf * 1.08, rz: hipHalf * 0.85 },
+      // hip
+      { y: waistY, cx: 0, cz: 0, rx: hipHalf * 0.95, rz: hipHalf * 0.78 },
+      // waist
+      { y: chestY, cx: 0, cz: 0, rx: shoulderHalf * 0.88, rz: shoulderHalf * 0.62 },
+      // chest
+      { y: shoulderY, cx: 0, cz: 0, rx: shoulderHalf, rz: shoulderHalf * 0.62 },
+      // shoulder
+      { y: neckY, cx: 0, cz: 0, rx: H * 0.07, rz: H * 0.06 },
+      // neck (narrow)
+      { y: chinY, cx: 0, cz: 0.01, rx: p.headSize * 0.72, rz: p.headSize * 0.78 },
+      // jaw
+      { y: faceY, cx: 0, cz: 0.01, rx: p.headSize * 1, rz: p.headSize * 1 },
+      // face/head widest
+      { y: crownY, cx: 0, cz: 0, rx: p.headSize * 0.62, rz: p.headSize * 0.62 }
+      // crown
+    ];
+    emitSweep(g, trunkRings, sides);
+    emitCap(g, trunkRings[trunkRings.length - 1], sides, true);
+    const legRings = (sx) => [
+      { y: hipY + 0.04, cx: sx, cz: 0, rx: H * 0.085 * t, rz: H * 0.085 * t },
+      // root inside trunk
+      { y: hipY - H * 0.05, cx: sx, cz: 0, rx: H * 0.085 * t, rz: H * 0.085 * t },
+      // upper thigh
+      { y: hipY - H * 0.18, cx: sx, cz: 0, rx: H * 0.075 * t, rz: H * 0.075 * t },
+      // knee
+      { y: hipY - H * 0.34, cx: sx, cz: 0.01, rx: H * 0.07 * t, rz: H * 0.07 * t },
+      // ankle
+      { y: hipY - H * 0.4, cx: sx, cz: 0.06, rx: H * 0.085 * t, rz: H * 0.13 * t }
+      // foot (forward-stretched)
+    ];
+    const legXOffset = hipHalf * 0.55;
+    for (const sx of [-legXOffset, legXOffset]) {
+      const rings = legRings(sx);
+      emitSweep(g, rings, sides);
+      emitCap(g, rings[rings.length - 1], sides, false);
+    }
+    const armRings = (sx) => [
+      { y: shoulderY, cx: sx * 0.55, cz: 0, rx: H * 0.07 * t, rz: H * 0.07 * t },
+      // root inside trunk
+      { y: shoulderY - H * 0.04, cx: sx, cz: 0, rx: H * 0.07 * t, rz: H * 0.07 * t },
+      // shoulder bulge
+      { y: shoulderY - H * 0.16, cx: sx, cz: 0, rx: H * 0.06 * t, rz: H * 0.06 * t },
+      // bicep
+      { y: shoulderY - H * 0.3, cx: sx, cz: 0, rx: H * 0.055 * t, rz: H * 0.055 * t },
+      // wrist
+      { y: shoulderY - H * 0.36, cx: sx, cz: 0.02, rx: H * 0.075 * t, rz: H * 0.075 * t }
+      // hand (mitt bulge)
+    ];
+    const armX = shoulderHalf * 1.02;
+    for (const sx of [-armX, armX]) {
+      const rings = armRings(sx);
+      emitSweep(g, rings, sides);
+      emitCap(g, rings[rings.length - 1], sides, false);
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/index.ts
+  function def(id, generate9, defaults) {
+    return { id, generate: generate9, defaults };
+  }
+  var Box = def("Box", generate, BOX_DEFAULTS);
+  var Sphere = def("Sphere", generate2, SPHERE_DEFAULTS);
+  var Plane = def("Plane", generate3, PLANE_DEFAULTS);
+  var Cylinder = def("Cylinder", generate4, CYLINDER_DEFAULTS);
+  var Cone = def("Cone", generate5, CONE_DEFAULTS);
+  var Torus = def("Torus", generate6, TORUS_DEFAULTS);
+  var Heightfield = def("Heightfield", generate7, HEIGHTFIELD_DEFAULTS);
+  var Humanoid = def("Humanoid", generate8, HUMANOID_DEFAULTS);
+  var GEOMETRIES = {
+    Box,
+    Sphere,
+    Plane,
+    Cylinder,
+    Cone,
+    Torus,
+    Heightfield,
+    Humanoid
+  };
+
+  // runtime/geometries/_baked.generated.ts
+  var BAKED = {};
+
+  // runtime/geometries/intern.ts
+  var cache = /* @__PURE__ */ new Map();
+  for (const key of Object.keys(BAKED)) cache.set(key, BAKED[key]);
+  function stable(v) {
+    if (v === null || typeof v !== "object") return JSON.stringify(v);
+    if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+    const keys = Object.keys(v).sort();
+    return "{" + keys.map((k) => JSON.stringify(k) + ":" + stable(v[k])).join(",") + "}";
+  }
+  function internKey(def2, params) {
+    const resolved = { ...def2.defaults ?? {}, ...params ?? {} };
+    return def2.id + "|" + stable(resolved);
+  }
+  function bakeEntry(def2, params) {
+    const key = internKey(def2, params);
+    const data = def2.generate({ ...def2.defaults ?? {}, ...params ?? {} });
+    return { key, vertices: Array.from(data.positions), count: data.count, bounds: data.bounds.radius };
+  }
+
+  // cli/commands/bake-geometry.ts
+  var SEED_PATH = "runtime/geometries/_baked.generated.ts";
+  async function run2(argv) {
+    const args = parseArgs(argv, { flags: { check: "bool", clear: "bool", manifest: "string", out: "string" } });
+    const seedPath = args.flags.out ?? SEED_PATH;
+    let entries = [];
+    if (!args.flags.clear) {
+      const manifestPath = args.flags.manifest;
+      if (!manifestPath) {
+        err("bake-geometry: --manifest <path> required (or --clear to empty the seed)");
+        return 2;
+      }
+      if (!fsExists(manifestPath)) {
+        err(`bake-geometry: manifest not found: ${manifestPath}`);
+        return 2;
+      }
+      let items;
+      try {
+        items = JSON.parse(fsRead(manifestPath));
+      } catch (e) {
+        err(`bake-geometry: manifest is not valid JSON: ${e.message}`);
+        return 2;
+      }
+      for (const item of items) {
+        const def2 = GEOMETRIES[item.geometry];
+        if (!def2) {
+          err(`bake-geometry: unknown geometry "${item.geometry}" (known: ${Object.keys(GEOMETRIES).join(", ")})`);
+          return 1;
+        }
+        entries.push(bakeEntry(def2, item.params ?? {}));
+      }
+    }
+    const content = emitSeed(entries);
+    if (args.flags.check) {
+      const onDisk = fsExists(seedPath) ? fsRead(seedPath) : "";
+      if (onDisk !== content) {
+        err(`bake-geometry: ${seedPath} drift`);
+        return 1;
+      }
+      out("bake-geometry: clean");
+      return 0;
+    }
+    fsWrite(seedPath, content);
+    out(`bake-geometry: wrote ${seedPath} (${entries.length} geometr${entries.length === 1 ? "y" : "ies"} baked)`);
+    return 0;
+  }
+  function emitSeed(entries) {
+    const lines = [
+      "// runtime/geometries/_baked.generated.ts \u2014 DO NOT EDIT.",
+      "// Regenerated by `rjit bake-geometry`. Committed EMPTY so the import in intern.ts",
+      "// always resolves; a build with bakeable geometry overwrites it with the seed.",
+      "//",
+      "// Each entry is an InternedGeometry (key/vertices/count/bounds) computed at build",
+      "// time. intern.ts pre-seeds its cache from this, so a baked mesh's internGeometry",
+      "// is a transparent cache hit and generate() never runs in V8. Keys are produced",
+      "// by internKey() so they match the runtime keys exactly.",
+      "",
+      "export type BakedEntry = { key: string; vertices: number[]; count: number; bounds: number };",
+      ""
+    ];
+    if (entries.length === 0) {
+      lines.push("export const BAKED: Record<string, BakedEntry> = {};");
+      lines.push("");
+      return lines.join("\n");
+    }
+    lines.push("export const BAKED: Record<string, BakedEntry> = {");
+    for (const e of entries) {
+      lines.push(`  ${JSON.stringify(e.key)}: { key: ${JSON.stringify(e.key)}, count: ${e.count}, bounds: ${e.bounds}, vertices: [${e.vertices.join(",")}] },`);
+    }
+    lines.push("};");
+    lines.push("");
+    return lines.join("\n");
+  }
+
+  // cli/commands/bake-geometry-auto.ts
+  var bake_geometry_auto_exports = {};
+  __export(bake_geometry_auto_exports, {
+    run: () => run3
+  });
+  function loadTypeScript() {
+    const root = __cwd();
+    const candidates = [`${root}/vendor/typescript/typescript.js`, `${root}/deps/typescript/typescript.js`];
+    const tsPath = candidates.find((c) => __fs_exists(c));
+    if (!tsPath) throw new Error(`bake-geometry-auto: deps/typescript/typescript.js not found`);
+    const code = __fs_read(tsPath);
+    const moduleObj = { exports: {} };
+    const exportsObj = moduleObj.exports;
+    const localProcess = {
+      nextTick: void 0,
+      argv: [],
+      env: {},
+      cwd: () => root,
+      pid: 1,
+      platform: "linux",
+      execArgv: [],
+      platformVersion: "",
+      version: "",
+      memoryUsage: () => ({ heapUsed: 0 }),
+      stdout: { write: (s) => __writeStdout(String(s)), columns: 80, isTTY: false },
+      stderr: { write: (s) => __writeStderr(String(s)) },
+      exit: (code2) => __exit(code2 | 0)
+    };
+    function noopRequire(name) {
+      throw new Error(`require("${name}") is unavailable under v8cli`);
+    }
+    const minimalBuffer2 = { isBuffer: () => false, from: (x) => x };
+    (function(module, exports, require2, process3, global, setTimeout, clearTimeout, setInterval, clearInterval, Buffer2, performance) {
+      (0, eval)(code + "\n;");
+    })(
+      moduleObj,
+      exportsObj,
+      noopRequire,
+      localProcess,
+      globalThis,
+      () => {
+      },
+      () => {
+      },
+      () => {
+      },
+      () => {
+      },
+      minimalBuffer2,
+      void 0
+    );
+    const ts = globalThis.ts || moduleObj.exports || exportsObj;
+    if (!ts || typeof ts.createSourceFile !== "function") {
+      throw new Error("bake-geometry-auto: failed to load TypeScript API");
+    }
+    return ts;
+  }
+  function extractLiteral(node, ts) {
+    if (!node) return { value: null, ok: false };
+    if (ts.isNumericLiteral(node)) return { value: parseFloat(node.text), ok: true };
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      return { value: node.text, ok: true };
+    }
+    if (node.kind === ts.SyntaxKind.TrueKeyword) return { value: true, ok: true };
+    if (node.kind === ts.SyntaxKind.FalseKeyword) return { value: false, ok: true };
+    if (node.kind === ts.SyntaxKind.NullKeyword) return { value: null, ok: true };
+    if (ts.isPrefixUnaryExpression(node) && node.operator === ts.SyntaxKind.MinusToken) {
+      const inner = extractLiteral(node.operand, ts);
+      if (inner.ok && typeof inner.value === "number") return { value: -inner.value, ok: true };
+      return { value: null, ok: false };
+    }
+    if (ts.isParenthesizedExpression(node)) return extractLiteral(node.expression, ts);
+    if (ts.isArrayLiteralExpression(node)) {
+      const arr = [];
+      for (const el of node.elements) {
+        const v = extractLiteral(el, ts);
+        if (!v.ok) return { value: null, ok: false };
+        arr.push(v.value);
+      }
+      return { value: arr, ok: true };
+    }
+    if (ts.isObjectLiteralExpression(node)) {
+      const obj = {};
+      for (const p of node.properties) {
+        if (!ts.isPropertyAssignment(p)) return { value: null, ok: false };
+        let name;
+        if (ts.isIdentifier(p.name)) name = p.name.text;
+        else if (ts.isStringLiteral(p.name)) name = p.name.text;
+        else return { value: null, ok: false };
+        const v = extractLiteral(p.initializer, ts);
+        if (!v.ok) return { value: null, ok: false };
+        obj[name] = v.value;
+      }
+      return { value: obj, ok: true };
+    }
+    return { value: null, ok: false };
+  }
+  function tagName(element, ts) {
+    const tag = element.tagName;
+    if (ts.isIdentifier(tag)) return tag.text;
+    if (ts.isPropertyAccessExpression(tag)) {
+      const lhs = ts.isIdentifier(tag.expression) ? tag.expression.text : null;
+      return lhs ? `${lhs}.${tag.name.text}` : tag.name.text;
+    }
+    return null;
+  }
+  function geometryDefId(node, ts) {
+    if (ts.isIdentifier(node)) return node.text;
+    if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) return node.name.text;
+    return null;
+  }
+  function scan(source, filename, ts) {
+    const sf = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const items = [];
+    let meshTotal = 0;
+    const seen = /* @__PURE__ */ new Set();
+    function visit(node) {
+      const opening = ts.isJsxSelfClosingElement(node) ? node : ts.isJsxElement(node) ? node.openingElement : null;
+      if (opening && tagName(opening, ts) === "Scene3D.Mesh") {
+        meshTotal++;
+        let geomNode = null;
+        let paramsNode = null;
+        for (const attr of opening.attributes.properties) {
+          if (!ts.isJsxAttribute(attr) || !attr.name) continue;
+          const init = attr.initializer;
+          if (!init || !ts.isJsxExpression(init) || !init.expression) continue;
+          if (attr.name.text === "geometry") geomNode = init.expression;
+          else if (attr.name.text === "params") paramsNode = init.expression;
+        }
+        if (geomNode && paramsNode) {
+          const defId = geometryDefId(geomNode, ts);
+          const params = extractLiteral(paramsNode, ts);
+          if (defId && params.ok && params.value !== null && typeof params.value === "object") {
+            const key = defId + "|" + JSON.stringify(params.value, Object.keys(params.value).sort());
+            if (!seen.has(key)) {
+              seen.add(key);
+              items.push({ geometry: defId, params: params.value });
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, visit);
+    }
+    visit(sf);
+    return { items, meshTotal };
+  }
+  async function run3(argv) {
+    const args = parseArgs(argv, { positional: ["cart"], flags: { out: "string" } });
+    const cartArg = args.positional.cart;
+    if (!cartArg) {
+      err("bake-geometry-auto: usage: rjit bake-geometry-auto <cart-source.tsx> [--out <manifest.json>]");
+      return 2;
+    }
+    if (!fsExists(cartArg)) {
+      err(`bake-geometry-auto: source not found: ${cartArg}`);
+      return 2;
+    }
+    let ts;
+    try {
+      ts = loadTypeScript();
+    } catch (e) {
+      err(`bake-geometry-auto: ${e.message}`);
+      return 1;
+    }
+    const { items, meshTotal } = scan(fsRead(cartArg), cartArg, ts);
+    const json = JSON.stringify(items, null, 2);
+    const outPath = args.flags.out;
+    if (outPath) {
+      fsWrite(outPath, json + "\n");
+      out(`bake-geometry-auto: ${cartArg} \u2192 ${items.length}/${meshTotal} Scene3D.Mesh elements bakeable \u2192 ${outPath}`);
+      out(`  next: rjit bake-geometry --manifest ${outPath}`);
+    } else {
+      __writeStdout(json + "\n");
+      err(`bake-geometry-auto: ${cartArg} \u2192 ${items.length}/${meshTotal} Scene3D.Mesh elements bakeable`);
+    }
+    return 0;
+  }
+
+  // cli/commands/bake-icons.ts
+  var bake_icons_exports = {};
+  __export(bake_icons_exports, {
+    run: () => run4
+  });
+  var ROOT = __cwd();
+  var ICONS_TS = `${ROOT}/runtime/icons/icons.ts`;
+  var OUT_ZIG = `${ROOT}/framework/gpu/icon_atlas.zig`;
+  var OUT_PGM_HEX = `${ROOT}/framework/gpu/icon_atlas_debug.ppm.txt`;
+  var OUT_TS = `${ROOT}/runtime/icons/baked-names.ts`;
+  var VIEWBOX = 24;
+  var HIRES = 256;
+  var TILE = 32;
+  var STROKE_HIRES = 4;
+  var SPREAD_HIRES = 18;
+  var ATLAS_COLS = 16;
+  var PADDING = 2;
+  var ICON_NAMES = [
+    "Heart",
+    "Search",
+    "ArrowRight",
+    "Plus",
+    "X",
+    "Settings",
+    "Star",
+    "Home",
+    "Eye",
+    "User",
+    "Bell",
+    "Bookmark",
+    "Upload",
+    "Download",
+    "Save",
+    "FileImage",
+    "Image",
+    "Hand",
+    "Brush",
+    "WandSparkles",
+    "Eraser",
+    "RotateCcw",
+    "Palette",
+    "Minus",
+    "Square",
+    "Maximize",
+    "Minimize",
+    "Scissors",
+    "FolderOpen",
+    "FolderInput",
+    "PanelTop",
+    "PanelLeft",
+    "Undo2",
+    "Redo2",
+    "RefreshCw",
+    "RefreshCcw",
+    "Copy",
+    "ArrowUp",
+    "ArrowDown",
+    "Merge",
+    "Trash2",
+    "Package",
+    "ScanLine",
+    "Spline"
+  ];
+  var HEX = "0123456789abcdef";
+  async function run4(argv) {
+    if (argv[0] === "--help" || argv[0] === "-h") {
+      __writeStdout("Usage: rjit bake-icons\n");
+      return 0;
+    }
+    if (argv.length !== 0) {
+      err("[bake-icons] usage: rjit bake-icons");
+      return 1;
+    }
+    const srcRaw = fsRead(ICONS_TS);
+    const polylines = {};
+    const missing = [];
+    for (const name of ICON_NAMES) {
+      const data = loadIcon(srcRaw, name);
+      if (!data) {
+        missing.push(name);
+        continue;
+      }
+      polylines[name] = data;
+    }
+    if (missing.length) return fail2(`missing icons in icons.ts: ${missing.join(", ")}`);
+    const cols = ATLAS_COLS;
+    const rows = Math.ceil(ICON_NAMES.length / cols);
+    const cellPx = TILE + PADDING * 2;
+    const atlasW = cols * cellPx;
+    const atlasH = rows * cellPx;
+    const atlas = new Uint8Array(atlasW * atlasH);
+    const meta = [];
+    log(`baking ${ICON_NAMES.length} icons into ${atlasW}\xD7${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`);
+    for (let i = 0; i < ICON_NAMES.length; i++) {
+      const name = ICON_NAMES[i];
+      const t0 = Date.now();
+      const mask = rasterizePolylines(polylines[name]);
+      const sdf = distanceTransform(mask);
+      const hi = encodeSdf(sdf);
+      const tile = downsample(hi);
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const u = col * cellPx + PADDING;
+      const v = row * cellPx + PADDING;
+      for (let y = 0; y < TILE; y++) {
+        for (let x = 0; x < TILE; x++) {
+          atlas[(v + y) * atlasW + (u + x)] = tile[y * TILE + x];
+        }
+      }
+      meta.push({ name, u, v, w: TILE, h: TILE });
+      log(`  [${i + 1}/${ICON_NAMES.length}] ${name} (${Date.now() - t0}ms)`);
+    }
+    fsWrite(OUT_ZIG, emitZig(atlas, meta, atlasW, atlasH));
+    log(`wrote ${OUT_ZIG} (${meta.length} icons + ${atlas.length}-byte atlas inlined)`);
+    fsWrite(OUT_PGM_HEX, emitPgmHex(atlas, atlasW, atlasH));
+    log(`wrote ${OUT_PGM_HEX} - preview via:`);
+    log(`  xxd -r -p ${OUT_PGM_HEX} > /tmp/icon_atlas.pgm && xdg-open /tmp/icon_atlas.pgm`);
+    fsWrite(OUT_TS, emitNamesTs(meta));
+    log(`wrote ${OUT_TS}`);
+    log("done.");
+    return 0;
+  }
+  function loadIcon(src, name) {
+    const needle = `export const ${name}: number[][] = `;
+    const start = src.indexOf(needle);
+    if (start < 0) return null;
+    let i = start + needle.length;
+    let depth = 0;
+    const begin = i;
+    while (i < src.length) {
+      const ch = src[i];
+      if (ch === "[") depth++;
+      else if (ch === "]") {
+        depth--;
+        if (depth === 0) {
+          return JSON.parse(src.slice(begin, i + 1));
+        }
+      }
+      i++;
+    }
+    return null;
+  }
+  function plotDisc(mask, w, h, cx, cy, r) {
+    const r2 = r * r;
+    const x0 = Math.max(0, Math.floor(cx - r));
+    const x1 = Math.min(w - 1, Math.ceil(cx + r));
+    const y0 = Math.max(0, Math.floor(cy - r));
+    const y1 = Math.min(h - 1, Math.ceil(cy + r));
+    for (let y = y0; y <= y1; y++) {
+      const dy = y - cy;
+      for (let x = x0; x <= x1; x++) {
+        const dx = x - cx;
+        if (dx * dx + dy * dy <= r2) mask[y * w + x] = 1;
+      }
+    }
+  }
+  function plotSegment(mask, w, h, x0, y0, x1, y1, r) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len < 1e-3) {
+      plotDisc(mask, w, h, x0, y0, r);
+      return;
+    }
+    const steps = Math.max(1, Math.ceil(len * 1.5));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      plotDisc(mask, w, h, x0 + dx * t, y0 + dy * t, r);
+    }
+  }
+  function rasterizePolylines(polylines) {
+    const mask = new Uint8Array(HIRES * HIRES);
+    const scale = HIRES / VIEWBOX;
+    const r = STROKE_HIRES * 0.5;
+    for (const poly of polylines) {
+      if (poly.length < 2) continue;
+      plotDisc(mask, HIRES, HIRES, poly[0] * scale, poly[1] * scale, r);
+      for (let i = 2; i + 1 < poly.length; i += 2) {
+        plotSegment(
+          mask,
+          HIRES,
+          HIRES,
+          poly[i - 2] * scale,
+          poly[i - 1] * scale,
+          poly[i] * scale,
+          poly[i + 1] * scale,
+          r
+        );
+      }
+    }
+    return mask;
+  }
+  function distanceTransform(mask) {
+    const w = HIRES;
+    const h = HIRES;
+    const sdf = new Float32Array(w * h);
+    const r = SPREAD_HIRES;
+    const r2 = r * r;
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
+        if (mask[idx]) {
+          sdf[idx] = 0;
+          continue;
+        }
+        let best = r2;
+        const x0 = Math.max(0, x - r);
+        const x1 = Math.min(w - 1, x + r);
+        const y0 = Math.max(0, y - r);
+        const y1 = Math.min(h - 1, y + r);
+        for (let yy = y0; yy <= y1; yy++) {
+          const dy = yy - y;
+          const dy2 = dy * dy;
+          if (dy2 >= best) continue;
+          const row = yy * w;
+          for (let xx = x0; xx <= x1; xx++) {
+            if (!mask[row + xx]) continue;
+            const dx = xx - x;
+            const d2 = dx * dx + dy2;
+            if (d2 < best) best = d2;
+          }
+        }
+        sdf[idx] = Math.sqrt(best);
+      }
+    }
+    return sdf;
+  }
+  function encodeSdf(sdf) {
+    const out2 = new Uint8Array(sdf.length);
+    for (let i = 0; i < sdf.length; i++) {
+      const v = 1 - sdf[i] / SPREAD_HIRES;
+      out2[i] = Math.max(0, Math.min(255, Math.round(v * 255)));
+    }
+    return out2;
+  }
+  function downsample(hi) {
+    const factor = HIRES / TILE;
+    if (Math.floor(factor) !== factor) throw new Error("HIRES must be integer multiple of TILE");
+    const lo = new Uint8Array(TILE * TILE);
+    const f2 = factor * factor;
+    for (let y = 0; y < TILE; y++) {
+      for (let x = 0; x < TILE; x++) {
+        let sum = 0;
+        const sy = y * factor;
+        const sx = x * factor;
+        for (let dy = 0; dy < factor; dy++) {
+          const row = (sy + dy) * HIRES;
+          for (let dx = 0; dx < factor; dx++) {
+            sum += hi[row + sx + dx];
+          }
+        }
+        lo[y * TILE + x] = Math.round(sum / f2);
+      }
+    }
+    return lo;
+  }
+  function emitZig(atlas, meta, atlasW, atlasH) {
+    let zig = "// Auto-generated by scripts/bake-icons.js \u2014 do not edit.\n";
+    zig += "// Source: runtime/icons/icons.ts\n";
+    zig += `// Atlas: ${atlasW}\xD7${atlasH} R8, ${ICON_NAMES.length} icons, tile=${TILE}, hires=${HIRES}.
+`;
+    zig += `// SDF encoding: byte = clamp(255 * (1 - dist/${SPREAD_HIRES}_hires_px), 0, 255).
+`;
+    zig += `// Effective spread in tile space: ${SPREAD_HIRES * TILE / HIRES} px.
+`;
+    zig += `// Smoothstep edge sits at byte 128 (== distance ${SPREAD_HIRES / 2} hires px).
+
+`;
+    zig += `pub const ATLAS_W: u32 = ${atlasW};
+`;
+    zig += `pub const ATLAS_H: u32 = ${atlasH};
+`;
+    zig += `pub const TILE: u32 = ${TILE};
+`;
+    zig += `pub const SPREAD_TILE_PX: f32 = ${(SPREAD_HIRES * TILE / HIRES).toFixed(4)};
+
+`;
+    zig += "pub const IconUv = struct { name: []const u8, u: u32, v: u32, w: u32, h: u32 };\n\n";
+    zig += "pub const ICONS = [_]IconUv{\n";
+    for (const m of meta) {
+      zig += `    .{ .name = "${m.name}", .u = ${m.u}, .v = ${m.v}, .w = ${m.w}, .h = ${m.h} },
+`;
+    }
+    zig += "};\n\n";
+    zig += "pub const ATLAS = [_]u8{\n";
+    for (let i = 0; i < atlas.length; i += 16) {
+      let row = "   ";
+      for (let j = 0; j < 16 && i + j < atlas.length; j++) {
+        row += ` ${atlas[i + j]},`;
+      }
+      zig += `${row}
+`;
+    }
+    zig += "};\n";
+    return zig;
+  }
+  function emitPgmHex(atlas, atlasW, atlasH) {
+    const header = `P5
+${atlasW} ${atlasH}
+255
+`;
+    let hexDump = "";
+    for (let i = 0; i < header.length; i++) hexDump += hexByte(header.charCodeAt(i));
+    hexDump += bytesToHex(atlas);
+    let wrapped = "";
+    for (let i = 0; i < hexDump.length; i += 64) {
+      wrapped += `${hexDump.slice(i, i + 64)}
+`;
+    }
+    return wrapped;
+  }
+  function emitNamesTs(meta) {
+    let ts = "// Auto-generated by scripts/bake-icons.js \u2014 do not edit.\n";
+    ts += "// Names of icons present in the SDF atlas (framework/gpu/icon_atlas.zig).\n";
+    ts += "// Icon.tsx checks membership before routing to the SDF primitive; misses\n";
+    ts += "// fall through to the legacy <Graph.Path> renderer.\n\n";
+    ts += "export const BAKED_ICON_NAMES: ReadonlySet<string> = new Set([\n";
+    for (const m of meta) ts += `  "${m.name}",
+`;
+    ts += "]);\n";
+    return ts;
+  }
+  function bytesToHex(bytes) {
+    let out2 = "";
+    for (let i = 0; i < bytes.length; i++) out2 += hexByte(bytes[i]);
+    return out2;
+  }
+  function hexByte(value) {
+    return HEX[value >> 4] + HEX[value & 15];
+  }
+  function log(message) {
+    __writeStderr(`[bake-icons] ${message}
+`);
+  }
+  function fail2(message) {
+    err(`[bake-icons] ${message}`);
+    return 1;
+  }
+
+  // cli/commands/cart-manifest-field.ts
+  var cart_manifest_field_exports = {};
+  __export(cart_manifest_field_exports, {
+    run: () => run5
+  });
+
   // cli/cart/manifest.ts
   function loadManifest(path) {
     return fsReadJson(path);
@@ -269,7 +1325,7 @@
   }
 
   // cli/commands/cart-manifest-field.ts
-  async function run2(argv) {
+  async function run5(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["manifestPath", "fieldName"] });
@@ -295,7 +1351,7 @@
   // cli/commands/cart-bundle.ts
   var cart_bundle_exports = {};
   __export(cart_bundle_exports, {
-    run: () => run3
+    run: () => run6
   });
 
   // cli/cart/bundle.ts
@@ -340,6 +1396,9 @@
     flags.push(
       `--alias:@reactjit/core=${opts.rjitHome}/runtime/core_stub.ts`,
       `--alias:@reactjit/runtime=${opts.rjitHome}/runtime`,
+      `--alias:@reactjit/effects=${opts.rjitHome}/runtime/effects`,
+      `--alias:@reactjit/geometries=${opts.rjitHome}/runtime/geometries`,
+      `--alias:@reactjit/cameras=${opts.rjitHome}/runtime/cameras`,
       `--alias:@cart-entry=${opts.cartEntry}`,
       `--alias:react=${reactAlias}`,
       `--alias:react-reconciler=${reconcilerAlias}`,
@@ -357,7 +1416,7 @@
   }
 
   // cli/commands/cart-bundle.ts
-  async function run3(argv) {
+  async function run6(argv) {
     if (__env("BUNDLE_FROM_HARNESS") !== "1") {
       err("[cart-bundle] REFUSING to run - this is an internal script, not an entry point.");
       err("[cart-bundle]");
@@ -428,7 +1487,7 @@
   // cli/commands/classify.ts
   var classify_exports = {};
   __export(classify_exports, {
-    run: () => run4
+    run: () => run7
   });
   function normalizeArgv(raw) {
     if (Array.isArray(raw)) return raw;
@@ -741,7 +1800,7 @@
     }
     return [...names];
   }
-  function loadTypeScript() {
+  function loadTypeScript2() {
     const tsPath = [join(__cwd(), "vendor", "typescript", "typescript.js"), join(__cwd(), "deps", "typescript", "typescript.js")].find((candidate) => __fs_exists(candidate));
     const code = tsPath ? __fs_read(tsPath) : null;
     if (code === null) {
@@ -834,8 +1893,8 @@
     "Graph": "Graph",
     "Native": "Native"
   };
-  function injectFlexDirectionForTag(tagName, styleStatics) {
-    if ((tagName === "Row" || tagName === "FlexRow") && !("flexDirection" in styleStatics)) {
+  function injectFlexDirectionForTag(tagName2, styleStatics) {
+    if ((tagName2 === "Row" || tagName2 === "FlexRow") && !("flexDirection" in styleStatics)) {
       styleStatics.flexDirection = "row";
     }
   }
@@ -1288,8 +2347,8 @@
   function walkJsx(node, sourceFile, filePath, ts, groups) {
     if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
       const element = ts.isJsxElement(node) ? node.openingElement : node;
-      const tagName = getTagName(element, ts);
-      const primitive = tagName ? TAG_TO_PRIMITIVE[tagName] : null;
+      const tagName2 = getTagName(element, ts);
+      const primitive = tagName2 ? TAG_TO_PRIMITIVE[tagName2] : null;
       if (primitive) {
         let styleStatics = {};
         let dynamicKeys = [];
@@ -1308,7 +2367,7 @@
             }
           }
         }
-        injectFlexDirectionForTag(tagName, styleStatics);
+        injectFlexDirectionForTag(tagName2, styleStatics);
         if (!hasSpread) {
           const jsxProps = extractJsxProps(element, ts);
           const sig = makeSignature(primitive, styleStatics, jsxProps);
@@ -1329,7 +2388,7 @@
             }
             p = p.parent;
           }
-          const pos = ts.getLineAndCharacterOfPosition(sourceFile, element.getStart(sourceFile));
+          const pos3 = ts.getLineAndCharacterOfPosition(sourceFile, element.getStart(sourceFile));
           if (!groups.has(sig)) {
             groups.set(sig, {
               primitive,
@@ -1342,7 +2401,7 @@
           }
           groups.get(sig).occurrences.push({
             file: filePath,
-            line: pos.line + 1,
+            line: pos3.line + 1,
             parentFn
           });
         }
@@ -1357,8 +2416,8 @@
       let visit2 = function(node) {
         if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
           const element = ts.isJsxElement(node) ? node.openingElement : node;
-          const tagName = getTagName(element, ts);
-          const primitive = tagName ? TAG_TO_PRIMITIVE[tagName] : null;
+          const tagName2 = getTagName(element, ts);
+          const primitive = tagName2 ? TAG_TO_PRIMITIVE[tagName2] : null;
           if (primitive) {
             let styleStatics = {};
             let dynamicKeys = [];
@@ -1377,18 +2436,18 @@
                 }
               }
             }
-            injectFlexDirectionForTag(tagName, styleStatics);
+            injectFlexDirectionForTag(tagName2, styleStatics);
             if (!hasSpread && dynamicKeys.length === 0) {
               const jsxProps = extractJsxProps(element, ts);
               const propCount = Object.keys(styleStatics).length + Object.keys(jsxProps).length;
               if (propCount > 0) {
-                const pos = ts.getLineAndCharacterOfPosition(sf, element.getStart(sf));
+                const pos3 = ts.getLineAndCharacterOfPosition(sf, element.getStart(sf));
                 elements.push({
                   primitive,
                   styleStatics,
                   jsxProps,
                   file: filePath,
-                  line: pos.line + 1
+                  line: pos3.line + 1
                 });
               }
             }
@@ -1625,9 +2684,9 @@
     for (const entry of entries) {
       const full = join(dir, entry.name);
       if (entry.isDirectory() && !entry.name.startsWith(".") && entry.name !== "node_modules") {
-        const sub = findRenameTargets(full);
-        results.cls.push(...sub.cls);
-        results.tsx.push(...sub.tsx);
+        const sub2 = findRenameTargets(full);
+        results.cls.push(...sub2.cls);
+        results.tsx.push(...sub2.tsx);
       } else if (entry.isFile()) {
         if (entry.name.endsWith(".cls.ts")) results.cls.push(full);
         else if (/\.tsx?$/.test(entry.name) && !entry.name.endsWith(".cls.ts")) results.tsx.push(full);
@@ -1879,8 +2938,8 @@
     function visitJsx(node) {
       if (ts.isJsxElement(node) || ts.isJsxSelfClosingElement(node)) {
         const element = ts.isJsxElement(node) ? node.openingElement : node;
-        const tagName = getTagName(element, ts);
-        const primitive = tagName ? TAG_TO_PRIMITIVE[tagName] : null;
+        const tagName2 = getTagName(element, ts);
+        const primitive = tagName2 ? TAG_TO_PRIMITIVE[tagName2] : null;
         if (primitive) {
           let styleStatics = {};
           let dynamicKeys = [];
@@ -1909,7 +2968,7 @@
             ts.forEachChild(node, visitJsx);
             return;
           }
-          injectFlexDirectionForTag(tagName, styleStatics);
+          injectFlexDirectionForTag(tagName2, styleStatics);
           const jsxProps = extractJsxProps(element, ts);
           const sig = makeSignature(primitive, styleStatics, jsxProps);
           let match = bySig.get(sig);
@@ -2265,22 +3324,22 @@ import { classifiers as ${alias} } from '@reactjit/core';` + result.slice(lastIm
       console.error(`  Name must be PascalCase (e.g., MyPanel): "${name}"`);
       process2.exit(1);
     }
-    let def;
+    let def2;
     try {
-      def = JSON.parse(defStr);
+      def2 = JSON.parse(defStr);
     } catch (e) {
       console.error(`  Invalid JSON definition: ${e.message}`);
       console.error(`  Got: ${defStr}`);
       process2.exit(1);
     }
-    const primitive = def.type;
+    const primitive = def2.type;
     if (!primitive || !CLASSIFIER_PRIMITIVES.has(primitive)) {
       console.error(`  Invalid type "${primitive}". Valid: ${[...CLASSIFIER_PRIMITIVES].join(", ")}`);
       process2.exit(1);
     }
-    const styleStatics = { ...def.style || {} };
+    const styleStatics = { ...def2.style || {} };
     const jsxProps = {};
-    for (const [k, v] of Object.entries(def)) {
+    for (const [k, v] of Object.entries(def2)) {
       if (k === "type" || k === "style" || k === "use") continue;
       if (primitive === "Text") {
         if (k === "size") {
@@ -2336,9 +3395,9 @@ import { classifiers as ${alias} } from '@reactjit/core';` + result.slice(lastIm
       matchFileCount = matchFiles.size;
     }
     const matchCount = exactCount + partialCount;
-    const entryStyleStatics = { ...def.style || {} };
+    const entryStyleStatics = { ...def2.style || {} };
     const entryJsxProps = {};
-    for (const [k, v] of Object.entries(def)) {
+    for (const [k, v] of Object.entries(def2)) {
       if (k === "type" || k === "style" || k === "use") continue;
       if (primitive === "Text") {
         if (k === "size") {
@@ -2599,21 +3658,21 @@ ${entry}
     return patterns.filter((_, i) => !dominated.has(i));
   }
   function buildAddCommand(primitive, styleStatics, jsxProps) {
-    const def = { type: primitive };
+    const def2 = { type: primitive };
     if (primitive === "Text") {
-      if (styleStatics.fontSize != null) def.size = styleStatics.fontSize;
-      if (styleStatics.fontWeight === "bold") def.bold = true;
-      if (styleStatics.color != null) def.color = styleStatics.color;
+      if (styleStatics.fontSize != null) def2.size = styleStatics.fontSize;
+      if (styleStatics.fontWeight === "bold") def2.bold = true;
+      if (styleStatics.color != null) def2.color = styleStatics.color;
       const remaining = {};
       for (const [k, v] of Object.entries(styleStatics)) {
         if (k !== "fontSize" && k !== "fontWeight" && k !== "color") remaining[k] = v;
       }
-      if (Object.keys(remaining).length > 0) def.style = remaining;
+      if (Object.keys(remaining).length > 0) def2.style = remaining;
     } else {
-      if (Object.keys(styleStatics).length > 0) def.style = styleStatics;
+      if (Object.keys(styleStatics).length > 0) def2.style = styleStatics;
     }
-    for (const [k, v] of Object.entries(jsxProps)) def[k] = v;
-    return JSON.stringify(def);
+    for (const [k, v] of Object.entries(jsxProps)) def2[k] = v;
+    return JSON.stringify(def2);
   }
   async function partialCommand(args, ts) {
     const cwd = process2.cwd();
@@ -2957,7 +4016,7 @@ ${entry}
     const cwd = process2.cwd();
     let ts;
     try {
-      ts = loadTypeScript();
+      ts = loadTypeScript2();
     } catch (err2) {
       console.error("  Failed to load vendored TypeScript:", err2?.stack || err2?.message || err2);
       process2.exit(1);
@@ -3039,7 +4098,7 @@ ${entry}
     }
     console.log("");
   }
-  async function run4(argv) {
+  async function run7(argv) {
     try {
       await classifyCommand(argv);
       return 0;
@@ -3052,12 +4111,12 @@ ${entry}
   // cli/commands/codegen-bindings.ts
   var codegen_bindings_exports = {};
   __export(codegen_bindings_exports, {
-    run: () => run5
+    run: () => run8
   });
-  async function run5(argv) {
+  async function run8(argv) {
     const args = parseArgs(argv, { flags: { check: "bool", strict: "bool" } });
     const ingredients = loadIngredients();
-    const zig = emitZig(ingredients);
+    const zig = emitZig2(ingredients);
     const dts = emitDts(ingredients);
     const json = emitJson(ingredients);
     const outputs = [
@@ -3134,7 +4193,7 @@ ${entry}
     }
     return fns;
   }
-  function emitZig(ingredients) {
+  function emitZig2(ingredients) {
     return [
       "// framework/_generated_bindings.zig - DO NOT EDIT.",
       "// Regenerated by `rjit codegen-bindings`.",
@@ -3196,15 +4255,15 @@ ${entry}
   // cli/commands/dev.ts
   var dev_exports = {};
   __export(dev_exports, {
-    run: () => run6
+    run: () => run9
   });
-  async function run6(argv) {
+  async function run9(argv) {
     const parsed = parseDevArgs(argv);
     if (typeof parsed === "number") return parsed;
     const cartRoot = __cwd();
     const rjitHome = __env("RJIT_HOME") || cartRoot;
     const cart = resolveCart2(cartRoot, parsed.name);
-    if (!cart) return fail2(`[dev] not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
+    if (!cart) return fail3(`[dev] not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
     const substrate = resolveSubstrate(parsed.substrateFlag, cart.manifest);
     const bundleMode = substrate === "tui" ? "tui-host" : "gpu-host";
     const perCartBundle = `${cartRoot}/.cache/bundle-${parsed.name}.js`;
@@ -3356,7 +4415,7 @@ ${entry}
     writeSpawnOutput2(flagsResult);
     if (flagsResult.code !== 0) return flagsResult.code || 1;
     const devFlags = flagsResult.stdout.trim().split(/\s+/).filter(Boolean);
-    if (devFlags.length === 0) return fail2("[dev] FATAL: sdk-dependency-resolve produced no dev flags", 1);
+    if (devFlags.length === 0) return fail3("[dev] FATAL: sdk-dependency-resolve produced no dev flags", 1);
     const zig = resolveZig(rjitHome);
     const args = [
       "build",
@@ -3455,7 +4514,7 @@ ${entry}
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
-  function fail2(message, code) {
+  function fail3(message, code) {
     err(message);
     return code;
   }
@@ -3463,13 +4522,13 @@ ${entry}
   // cli/commands/firecracker-build.ts
   var firecracker_build_exports = {};
   __export(firecracker_build_exports, {
-    run: () => run7
+    run: () => run10
   });
-  async function run7(argv) {
+  async function run10(argv) {
     const root = __cwd();
     const parsed = parseArgs2(argv, root);
     if (typeof parsed === "number") return parsed;
-    log(`bundling recipe: ${parsed}`);
+    log2(`bundling recipe: ${parsed}`);
     const bundled = spawnSync(`${root}/tools/esbuild`, [
       "--bundle",
       "--format=cjs",
@@ -3479,12 +4538,12 @@ ${entry}
       parsed
     ]);
     if (bundled.stderr) __writeStderr(bundled.stderr);
-    if (bundled.code !== 0) return fail3(`esbuild failed: ${bundled.code}`, bundled.code || 1);
+    if (bundled.code !== 0) return fail4(`esbuild failed: ${bundled.code}`, bundled.code || 1);
     const spec = evalRecipe(bundled.stdout);
-    if (!spec) return fail3("recipe must default-export an object");
+    if (!spec) return fail4("recipe must default-export an object");
     const valid = validateSpec(spec);
-    if (valid) return fail3(valid);
-    log(`recipe: id=${spec.id} base=${spec.base} apt=${spec.apt.length} steps=${(spec.steps || []).length}`);
+    if (valid) return fail4(valid);
+    log2(`recipe: id=${spec.id} base=${spec.base} apt=${spec.apt.length} steps=${(spec.steps || []).length}`);
     const outPath = abs(root, spec.output.path);
     const outDir = dirname2(outPath);
     fsMkdir(outDir);
@@ -3499,16 +4558,16 @@ ${entry}
       spec.base,
       outPath
     ];
-    log(`mmdebstrap -> ${outPath}`);
+    log2(`mmdebstrap -> ${outPath}`);
     const t0 = __nowMs();
     const mmdb = runTee("/usr/bin/mmdebstrap", mmdbArgs);
     if (mmdb !== 0) return mmdb;
-    log(`mmdebstrap done in ${((__nowMs() - t0) / 1e3).toFixed(1)}s`);
+    log2(`mmdebstrap done in ${((__nowMs() - t0) / 1e3).toFixed(1)}s`);
     if (spec.output.kind === "ext4" && spec.output.sizeMb) {
       const cur = fileSize(outPath);
       const targetBytes = spec.output.sizeMb * 1024 * 1024;
       if (targetBytes > cur) {
-        log(`growing ext4: ${cur >> 20}MB -> ${spec.output.sizeMb}MB`);
+        log2(`growing ext4: ${cur >> 20}MB -> ${spec.output.sizeMb}MB`);
         const trunc = runTee("/usr/bin/truncate", ["-s", `${spec.output.sizeMb}M`, outPath]);
         if (trunc !== 0) return trunc;
         const resize = runTee("/usr/sbin/resize2fs", [outPath]);
@@ -3529,20 +4588,20 @@ ${entry}
     };
     const manifestPath = outPath.replace(/\.[^.]+$/, "") + ".manifest.json";
     fsWrite(manifestPath, JSON.stringify(manifest2, null, 2));
-    log(`manifest -> ${manifestPath}`);
-    log(`done. output: ${outPath} (${(sizeBytes / 1024 / 1024).toFixed(1)} MB)`);
+    log2(`manifest -> ${manifestPath}`);
+    log2(`done. output: ${outPath} (${(sizeBytes / 1024 / 1024).toFixed(1)} MB)`);
     return 0;
   }
   function parseArgs2(argv, root) {
     let recipePath = "";
     for (const arg of argv) {
-      if (arg.startsWith("--")) return fail3(`unknown flag: ${arg}`);
+      if (arg.startsWith("--")) return fail4(`unknown flag: ${arg}`);
       if (!recipePath) recipePath = arg;
-      else return fail3(`extra positional arg: ${arg}`);
+      else return fail4(`extra positional arg: ${arg}`);
     }
-    if (!recipePath) return fail3("usage: firecracker-build.js <recipe.ts>");
+    if (!recipePath) return fail4("usage: firecracker-build.js <recipe.ts>");
     const resolved = abs(root, recipePath);
-    if (!fsExists(resolved)) return fail3(`recipe not found: ${resolved}`);
+    if (!fsExists(resolved)) return fail4(`recipe not found: ${resolved}`);
     return resolved;
   }
   function evalRecipe(code) {
@@ -3580,7 +4639,7 @@ ${entry}
       } else if ("copyFromHost" in step) {
         const cf = step.copyFromHost;
         const src = abs(root, cf.src);
-        if (!fsExists(src)) return fail3(`copyFromHost src not found: ${src}`);
+        if (!fsExists(src)) return fail4(`copyFromHost src not found: ${src}`);
         const kind = spawnSync("/usr/bin/stat", ["-c", "%F", src]).stdout.trim();
         if (kind === "directory") {
           hooks.push(`chroot "$1" /bin/sh -c ${shellEscape(`mkdir -p ${cf.dest}`)}`);
@@ -3591,7 +4650,7 @@ ${entry}
           hooks.push(`upload ${src} ${cf.dest}`);
         }
       } else {
-        return fail3(`unknown step shape: ${JSON.stringify(step)}`);
+        return fail4(`unknown step shape: ${JSON.stringify(step)}`);
       }
     }
     return hooks;
@@ -3600,7 +4659,7 @@ ${entry}
     const result = spawnSync(bin, args);
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
-    if (result.code !== 0) return fail3(`${bin} exited ${result.code}`, result.code || 1);
+    if (result.code !== 0) return fail4(`${bin} exited ${result.code}`, result.code || 1);
     return 0;
   }
   function fileSize(path) {
@@ -3634,10 +4693,10 @@ ${entry}
     }
     return out2;
   }
-  function log(message) {
+  function log2(message) {
     out(`[fc-build] ${message}`);
   }
-  function fail3(message, code = 1) {
+  function fail4(message, code = 1) {
     err(`[fc-build] ${message}`);
     return code;
   }
@@ -3646,10 +4705,10 @@ ${entry}
   var help_exports = {};
   __export(help_exports, {
     printTopLevel: () => printTopLevel,
-    run: () => run8
+    run: () => run11
   });
   var TEMPLATES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  var SUBCOMMANDS = ["init", "dev", "tui", "ship", "ship-tui", "autotest", "classify", "firecracker-build", "help"];
+  var SUBCOMMANDS = ["init", "dev", "tui", "ship", "ship-tui", "autotest", "classify", "bake-icons", "pack-sdk", "firecracker-build", "help"];
   var SUBCOMMAND_DOC = {
     init: {
       summary: "scaffold a new cart from a template",
@@ -3745,6 +4804,25 @@ ${entry}
         "suggestions."
       ]
     },
+    "bake-icons": {
+      summary: "bake runtime icon polylines into the GPU SDF atlas",
+      usage: ["rjit bake-icons"],
+      detail: [
+        "Reads runtime/icons/icons.ts and writes:",
+        "  framework/gpu/icon_atlas.zig",
+        "  framework/gpu/icon_atlas_debug.ppm.txt",
+        "  runtime/icons/baked-names.ts"
+      ]
+    },
+    "pack-sdk": {
+      summary: "build the self-extracting rjit SDK distributable",
+      usage: ["rjit pack-sdk [--out path] [--keep-stage]"],
+      detail: [
+        "Stages the toolchain, runtime/framework sources, dependency registry,",
+        "vendored packages, generated CLI bundle, and sysroot payload into a",
+        "single shell self-extractor."
+      ]
+    },
     "firecracker-build": {
       summary: "build a Firecracker rootfs from a TS recipe",
       usage: ["rjit firecracker-build <recipe.ts>"],
@@ -3760,7 +4838,7 @@ ${entry}
       detail: []
     }
   };
-  async function run8(argv) {
+  async function run11(argv) {
     const target = argv[0];
     const registry = readRegistry();
     if (!target) {
@@ -3839,16 +4917,16 @@ ${entry}
   // cli/commands/init.ts
   var init_exports = {};
   __export(init_exports, {
-    run: () => run9
+    run: () => run12
   });
   var TEMPLATE_NAMES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  async function run9(argv) {
+  async function run12(argv) {
     const parsed = parseArgs3(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
     const template = TEMPLATES2[parsed.template];
     const targetDir = resolveTarget(root, parsed.directory);
-    if (fsExists(targetDir)) return fail4(`target already exists: ${displayPath(root, targetDir)}`, 1);
+    if (fsExists(targetDir)) return fail5(`target already exists: ${displayPath(root, targetDir)}`, 1);
     const name = cartNameFor(targetDir);
     const title = titleForName(name);
     const inCart = dirname3(targetDir) === joinPath(root, "cart");
@@ -3876,7 +4954,7 @@ ${entry}
         fsWrite(path, content);
       }
     } catch (error) {
-      return fail4(error.message, 1);
+      return fail5(error.message, 1);
     }
     out(`[init] created ${displayPath(root, targetDir)}`);
     out(`[init] template ${parsed.template}`);
@@ -3890,7 +4968,7 @@ ${entry}
       return 2;
     }
     for (const arg of argv) {
-      if (arg.startsWith("-")) return fail4("flags are not supported by init", 2);
+      if (arg.startsWith("-")) return fail5("flags are not supported by init", 2);
     }
     if (argv.length === 1) return { directory: argv[0], template: "basic" };
     if (argv.length === 2) {
@@ -3901,9 +4979,9 @@ ${entry}
       if (aIsTemplate && !bIsTemplate) return { directory: b, template: a };
       if (bIsTemplate && !aIsTemplate) return { directory: a, template: b };
       if (bIsTemplate) return { directory: a, template: b };
-      return fail4(`unknown template: ${b}`, 2);
+      return fail5(`unknown template: ${b}`, 2);
     }
-    return fail4("too many positional arguments", 2);
+    return fail5("too many positional arguments", 2);
   }
   function usage2() {
     out([
@@ -3918,7 +4996,7 @@ ${entry}
       "The one-argument form uses the basic template."
     ].join("\n"));
   }
-  function fail4(message, code) {
+  function fail5(message, code) {
     err(`[init] ${message}`);
     return code || 1;
   }
@@ -4197,7 +5275,7 @@ export default function App() {
   // cli/commands/metafile-gate.ts
   var metafile_gate_exports = {};
   __export(metafile_gate_exports, {
-    run: () => run10
+    run: () => run13
   });
 
   // cli/cart/metafile.ts
@@ -4322,7 +5400,7 @@ export default function App() {
   }
 
   // cli/commands/metafile-gate.ts
-  async function run10(argv) {
+  async function run13(argv) {
     let registryPath = "sdk/dependency-registry.json";
     let metafilePath = "";
     let format = "ship-gate";
@@ -4407,10 +5485,324 @@ export default function App() {
     return out2;
   }
 
+  // cli/commands/pack-sdk.ts
+  var pack_sdk_exports = {};
+  __export(pack_sdk_exports, {
+    run: () => run14
+  });
+  var ROOT2 = __cwd();
+  var EXCLUDES = [
+    ".zig-cache",
+    "zig-cache",
+    "zig-out",
+    ".cache",
+    "node_modules",
+    "__pycache__",
+    ".DS_Store"
+  ];
+  var SOURCE_TREES = [
+    "framework",
+    "runtime",
+    "renderer",
+    "cli",
+    "scripts",
+    "sdk",
+    "vendor",
+    "stb",
+    "love2d/quickjs"
+  ];
+  var ZIG_PATH_DEPS = [
+    "deps/tls.zig",
+    "deps/wgpu_native_zig",
+    "deps/zig-v8",
+    "deps/sysroot"
+  ];
+  var TOP_LEVEL_FILES = [
+    "build.zig",
+    "build.zig.zon",
+    "v8_app.zig",
+    "qjs_app.zig",
+    "v8_cli.zig",
+    "v8_hello.zig"
+  ];
+  var SKIP_FAMILIES = [
+    /^libc\.so\./,
+    /^libm\.so\./,
+    /^libpthread\.so\./,
+    /^libdl\.so\./,
+    /^libresolv\.so\./,
+    /^ld-linux/,
+    /^linux-vdso/,
+    /^libX11\.so\./,
+    /^libXext\.so\./,
+    /^libXcursor\.so\./,
+    /^libXi\.so\./,
+    /^libXfixes\.so\./,
+    /^libXrandr\.so\./,
+    /^libXss\.so\./,
+    /^libXrender\.so\./,
+    /^libxcb\.so\./,
+    /^libxcb-/
+  ];
+  var GLIBC_FAMILY = [
+    "/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+    "/lib/x86_64-linux-gnu/libc.so.6",
+    "/lib/x86_64-linux-gnu/libm.so.6",
+    "/lib/x86_64-linux-gnu/libpthread.so.0",
+    "/lib/x86_64-linux-gnu/libdl.so.2",
+    "/lib/x86_64-linux-gnu/libresolv.so.2",
+    "/lib64/ld-linux-x86-64.so.2"
+  ];
+  async function run14(argv) {
+    const parsed = parsePackArgs(argv);
+    if (typeof parsed === "number") return parsed;
+    const registryPath = `${ROOT2}/sdk/dependency-registry.json`;
+    if (!fsExists(registryPath)) return fail6(`registry missing: ${registryPath}`, 1);
+    const registry = fsReadJson(registryPath);
+    const stage = `/tmp/rjit-stage-${Date.now()}`;
+    fsMkdir(stage);
+    log3(`staging at ${stage}`);
+    try {
+      stageSourceTrees(stage);
+      stageZigDeps(stage);
+      stageTopLevelFiles(stage);
+      stageToolchain(stage, registry);
+      stageRjitTool(stage);
+      stageSdlDeps(stage);
+      stageGlibc(stage);
+      stageZigPackageCache(stage);
+      const missing = stageAlwaysNativeLibraries(stage, registry);
+      if (missing.length) {
+        for (const item of missing) err(`  - ${item}`);
+        return fail6("cannot pack SDK with missing foundational libs", 3);
+      }
+      const tarball = `/tmp/rjit-payload-${Date.now()}.tar.gz`;
+      log3(`compressing -> ${tarball}`);
+      shOrDie("sh", ["-c", `cd '${stage}' && tar czf '${tarball}' .`], "tar");
+      writeSelfExtractor(parsed.outPath, tarball);
+      if (!parsed.keepStage) {
+        fsRemove(stage);
+        fsRemove(tarball);
+      }
+      const sizeOut = sh("du", ["-h", parsed.outPath]).stdout.trim().split(/\s+/)[0] ?? "?";
+      log3(`done -> ${parsed.outPath} (${sizeOut})`);
+      return 0;
+    } catch (error) {
+      if (!parsed.keepStage) fsRemove(stage);
+      throw error;
+    }
+  }
+  function parsePackArgs(argv) {
+    let outPath = `${ROOT2}/dist/rjit`;
+    let keepStage = false;
+    for (let i = 0; i < argv.length; i++) {
+      const arg = argv[i];
+      if (arg === "--out" || arg === "-o") {
+        const value = argv[++i];
+        if (!value) return fail6("flag requires value: --out", 2);
+        outPath = value;
+      } else if (arg === "--keep-stage") {
+        keepStage = true;
+      } else if (arg === "--help" || arg === "-h") {
+        out("Usage: rjit pack-sdk [--out path] [--keep-stage]");
+        return 0;
+      } else {
+        return fail6(`unknown flag: ${arg}`, 2);
+      }
+    }
+    if (!outPath.startsWith("/")) outPath = `${ROOT2}/${outPath}`;
+    return { outPath, keepStage };
+  }
+  function stageSourceTrees(stage) {
+    for (const sub2 of SOURCE_TREES) {
+      if (!fsExists(`${ROOT2}/${sub2}`)) continue;
+      log3(`copy ${sub2}/`);
+      copyTree(`${ROOT2}/${sub2}`, `${stage}/${sub2}`, sub2);
+    }
+  }
+  function stageZigDeps(stage) {
+    for (const sub2 of ZIG_PATH_DEPS) {
+      if (!fsExists(`${ROOT2}/${sub2}`)) continue;
+      log3(`copy ${sub2}/`);
+      copyTree(`${ROOT2}/${sub2}`, `${stage}/${sub2}`, sub2);
+    }
+  }
+  function stageTopLevelFiles(stage) {
+    for (const file of TOP_LEVEL_FILES) {
+      if (!fsExists(`${ROOT2}/${file}`)) continue;
+      log3(`copy ${file}`);
+      copyFile(`${ROOT2}/${file}`, `${stage}/${file}`);
+    }
+  }
+  function stageToolchain(stage, registry) {
+    const tools = registry.cliPayload?.tools ?? {};
+    for (const [name, spec] of Object.entries(tools)) {
+      if (spec.packPolicy === "optional") continue;
+      if (spec.payloadPath) {
+        log3(`tool ${name} <- ${spec.payloadPath}`);
+        copyFile(`${ROOT2}/${spec.payloadPath}`, `${stage}/${spec.payloadPath}`);
+      }
+      for (const supportPath of spec.supportPaths ?? []) {
+        if (!fsExists(`${ROOT2}/${supportPath}`)) continue;
+        log3(`tool ${name} support <- ${supportPath}`);
+        copyTree(`${ROOT2}/${supportPath}`, `${stage}/${supportPath}`, supportPath);
+      }
+    }
+  }
+  function stageRjitTool(stage) {
+    for (const file of ["tools/rjit", "tools/rjit.js"]) {
+      if (!fsExists(`${ROOT2}/${file}`)) throw new Error(`missing rjit tool payload: ${file}`);
+      log3(`tool rjit <- ${file}`);
+      copyFile(`${ROOT2}/${file}`, `${stage}/${file}`);
+    }
+  }
+  function stageSdlDeps(stage) {
+    const sysrootLib = `${stage}/deps/sysroot/usr/lib`;
+    fsMkdir(sysrootLib);
+    const sdlHostPath = "/lib/x86_64-linux-gnu/libSDL3.so.0";
+    if (!fsExists(sdlHostPath)) return;
+    const lddOut = sh("ldd", [sdlHostPath]).stdout;
+    for (const line of lddOut.split("\n")) {
+      const match = /^\s*(\S+)\s*=>\s*(\S+)/.exec(line);
+      if (!match) continue;
+      const soname = match[1];
+      const libPath = match[2];
+      if (libPath === "not" || !fsExists(libPath)) continue;
+      if (SKIP_FAMILIES.some((rx) => rx.test(soname))) continue;
+      const realPath = sh("readlink", ["-f", libPath]).stdout.trim() || libPath;
+      const dest = `${sysrootLib}/${soname}`;
+      if (fsExists(dest)) continue;
+      copyFile(realPath, dest);
+      log3(`SDL3 dep ${soname} <- ${realPath}`);
+    }
+  }
+  function stageGlibc(stage) {
+    const sysrootLib = `${stage}/deps/sysroot/usr/lib`;
+    fsMkdir(sysrootLib);
+    for (const path of GLIBC_FAMILY) {
+      if (!fsExists(path)) continue;
+      const realPath = sh("readlink", ["-f", path]).stdout.trim() || path;
+      const baseName = path.replace(/^.*\//, "");
+      const dest = `${sysrootLib}/${baseName}`;
+      if (fsExists(dest)) continue;
+      log3(`glibc ${baseName} <- ${realPath}`);
+      copyFile(realPath, dest);
+    }
+  }
+  function stageZigPackageCache(stage) {
+    const hostZigCache = `${__env("HOME") || "/root"}/.cache/zig/p`;
+    if (!fsExists(hostZigCache)) {
+      err(`[pack-sdk] WARN: ${hostZigCache} missing - packed SDK may fail to find zluajit/wgpu prebuilt archives offline.`);
+      return;
+    }
+    log3(`zig pkg cache <- ${hostZigCache}`);
+    fsMkdir(`${stage}/tools/zig/cache/p`);
+    shOrDie("rsync", [
+      "-a",
+      "--exclude=.zig-cache",
+      "--exclude=zig-out",
+      `${hostZigCache}/`,
+      `${stage}/tools/zig/cache/p/`
+    ], "rsync zig pkg cache");
+  }
+  function stageAlwaysNativeLibraries(stage, registry) {
+    const missing = [];
+    const nativeLibs = registry.nativeLibraries ?? {};
+    for (const [name, spec] of Object.entries(nativeLibs)) {
+      if (spec.bundlePolicy !== "always") continue;
+      if (spec.kind !== "static-library" && spec.kind !== "zig-package") continue;
+      if (!spec.payloadPath) {
+        missing.push(`${name} (kind=${spec.kind}, no payloadPath)`);
+        continue;
+      }
+      const payloads = Array.isArray(spec.payloadPath) ? spec.payloadPath : [spec.payloadPath];
+      for (const payloadPath of payloads) {
+        const src = `${ROOT2}/${payloadPath}`;
+        if (!fsExists(src)) {
+          missing.push(`${name} (${payloadPath} missing)`);
+          continue;
+        }
+        log3(`native ${name} <- ${payloadPath}`);
+        const stat = tryFsStat(src);
+        if (stat?.isDir) copyTree(src, `${stage}/${payloadPath}`, name);
+        else copyFile(src, `${stage}/${payloadPath}`);
+      }
+    }
+    return missing;
+  }
+  function writeSelfExtractor(outPath, tarball) {
+    const wrapper = [
+      "#!/bin/sh",
+      "set -e",
+      'SELF="$0"',
+      'CMD="${1:-help}"',
+      '[ "$#" -gt 0 ] && shift',
+      "CACHE_HOME=${XDG_CACHE_HOME:-$HOME/.cache}",
+      "APP_DIR=$CACHE_HOME/rjit",
+      'SIG=$(md5sum "$SELF" 2>/dev/null | cut -c1-8 || cksum "$SELF" | cut -d" " -f1)',
+      "CACHE=$APP_DIR/$SIG",
+      'if [ ! -f "$CACHE/.ready" ]; then',
+      '  rm -rf "$APP_DIR"',
+      '  mkdir -p "$CACHE"',
+      `  SKIP=$(awk '/^__ARCHIVE__$/{print NR + 1; exit}' "$SELF")`,
+      '  tail -n+"$SKIP" "$SELF" | tar xz -C "$CACHE"',
+      '  touch "$CACHE/.ready"',
+      "fi",
+      'export RJIT_HOME="$CACHE"',
+      "# Do not export LD_LIBRARY_PATH here. The sysroot libraries are for",
+      "# shipped cart launchers, not for the rjit dispatcher process itself.",
+      'case "$CMD" in',
+      '  help|--help|-h) exec "$CACHE/tools/rjit" help "$@" ;;',
+      '  *) exec "$CACHE/tools/rjit" "$CMD" "$@" ;;',
+      "esac",
+      "__ARCHIVE__",
+      ""
+    ].join("\n");
+    fsMkdir(outPath.replace(/\/[^/]+$/, ""));
+    const staged = `${outPath}.staged`;
+    if (fsExists(staged)) fsRemove(staged);
+    fsWrite(staged, wrapper);
+    shOrDie("sh", ["-c", `cat '${tarball}' >> '${staged}'`], "concat");
+    shOrDie("chmod", ["+x", staged], "chmod");
+    shOrDie("mv", ["-f", staged, outPath], "mv");
+  }
+  function copyTree(srcAbs, destAbs, label) {
+    if (!fsExists(srcAbs)) throw new Error(`missing payload: ${label || srcAbs}`);
+    fsMkdir(destAbs.replace(/\/[^/]+$/, ""));
+    const args = ["-a"];
+    for (const exclude of EXCLUDES) args.push(`--exclude=${exclude}`);
+    args.push(`${srcAbs}/`, `${destAbs}/`);
+    fsMkdir(destAbs);
+    shOrDie("rsync", args, `rsync ${label || srcAbs}`);
+  }
+  function copyFile(srcAbs, destAbs) {
+    if (!fsExists(srcAbs)) throw new Error(`missing file: ${srcAbs}`);
+    fsMkdir(destAbs.replace(/\/[^/]+$/, ""));
+    shOrDie("cp", ["-a", srcAbs, destAbs], `cp ${srcAbs}`);
+  }
+  function sh(cmd, args, stdin = "") {
+    return spawnSync(cmd, args, stdin);
+  }
+  function shOrDie(cmd, args, label) {
+    const result = sh(cmd, args);
+    if (result.code !== 0) {
+      if (result.stderr) __writeStderr(result.stderr);
+      throw new Error(`${label || cmd} failed (code ${result.code})`);
+    }
+    return result;
+  }
+  function log3(message) {
+    out(`[pack-sdk] ${message}`);
+  }
+  function fail6(message, code) {
+    err(`[pack-sdk] ${message}`);
+    return code;
+  }
+
   // cli/commands/push-bundle.ts
   var push_bundle_exports = {};
   __export(push_bundle_exports, {
-    run: () => run11
+    run: () => run15
   });
 
   // cli/host/net.ts
@@ -4443,7 +5835,7 @@ export default function App() {
   // cli/commands/push-bundle.ts
   var SOCKET_PATH = "/tmp/reactjit.sock";
   var TIMEOUT_MS = 3e3;
-  async function run11(argv) {
+  async function run15(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["tabName", "bundlePath"] });
@@ -4522,9 +5914,9 @@ export default function App() {
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run12
+    run: () => run16
   });
-  async function run12(argv) {
+  async function run16(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -4532,12 +5924,13 @@ export default function App() {
     const cartRoot = root;
     const zig = resolveZig2(rjitHome);
     const cart = resolveCart3(cartRoot, parsed.name);
-    if (!cart) return fail5(`not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
+    if (!cart) return fail7(`not found: ${cartRoot}/cart/${parsed.name}/index.tsx or ${cartRoot}/cart/${parsed.name}.tsx`, 1);
     const substrate = resolveSubstrate2(parsed.substrateFlag, cart.manifest);
     const bundleOut = `${cartRoot}/bundle-${parsed.name}.js`;
     const embedBundle = cartRoot === rjitHome ? bundleOut : `${rjitHome}/bundles/bundle-${parsed.name}.js`;
     const icon = resolveIcon(cartRoot, cart, parsed.name);
     if (icon) out(`[ship] app icon: ${icon}`);
+    runFixReactImports2(rjitHome, cartRoot);
     out(`[ship] bundling ${cart.entry} -> ${bundleOut}...`);
     const bundle = bundleCart({
       rjitHome,
@@ -4555,6 +5948,7 @@ export default function App() {
     }
     const customChromeFlag = customChromeFlagFor(cart.manifest, bundleOut);
     const zigFlags = resolveZigFlags(rjitHome, `${bundleOut}.metafile.json`);
+    const sysrootFlags = resolveSysrootFlags(rjitHome);
     const substrateFlags = substrate === "tui" ? ["-Dhas-gpu=false"] : [];
     const flags = [
       "build",
@@ -4568,28 +5962,30 @@ export default function App() {
       ...customChromeFlag,
       ...substrateFlags,
       "-Doptimize=ReleaseFast",
+      ...sysrootFlags,
       ...zigFlags.filter((flag) => flag !== "-Duse-v8=true")
     ];
     out("[ship] compiling native binary...");
     out(`[ship]   zig flags: ${flags.slice(2).join(" ")}`);
-    const build = spawnSync(zig, flags);
+    const build = runLockedBuild(rjitHome, buildCommand(rjitHome, cartRoot, zig, flags));
     writeSpawnOutput3(build);
     if (build.code !== 0) return build.code || 1;
     const buildBin = `${cartRoot}/zig-out/bin/${parsed.name}`;
-    if (!fsExists(buildBin)) return fail5(`build produced no binary: ${buildBin}`, 1);
+    if (!fsExists(buildBin)) return fail7(`build produced no binary: ${buildBin}`, 1);
+    if (!verifyIngredientLabels(cartRoot, buildBin, flags)) return 1;
     if (__env("SHIP_RUN_PACKAGE") === "0") {
       out(`[ship] done (packaging skipped) -> ${buildBin}`);
       return 0;
     }
-    if ((__env("OS") || "") === "Darwin") {
-      out(`[ship] packaging not implemented in rjit ship for Darwin yet - leaving build output at ${buildBin}`);
-      return 0;
+    const os = spawnSync("uname", ["-s"]).stdout.trim();
+    if (os === "Darwin") {
+      return packageMacos({ name: parsed.name, buildBin, cartRoot, icon });
     }
-    if (spawnSync("uname", ["-s"]).stdout.trim() !== "Linux") {
+    if (os !== "Linux") {
       out(`[ship] packaging not implemented for this OS - leaving build output at ${buildBin}`);
       return 0;
     }
-    return packageLinux({ name: parsed.name, buildBin, rjitHome, cartRoot, fat: parsed.fat, bundleOut, icon });
+    return packageLinux({ name: parsed.name, buildBin, rjitHome, cartRoot, fat: parsed.fat, bundleOut, icon, buildFlags: flags });
   }
   function parseShipArgs(argv) {
     let name = "";
@@ -4634,6 +6030,13 @@ export default function App() {
     const bundled = __env("REACTJIT_ZIG") || `${rjitHome}/tools/zig/zig`;
     if (fsExists(bundled)) return bundled;
     return "zig";
+  }
+  function runFixReactImports2(rjitHome, cartRoot) {
+    const script = `${rjitHome}/scripts/fix-react-imports`;
+    if (!fsExists(script)) return;
+    const result = spawnSync("env", [`RJIT_HOME=${rjitHome}`, `CART_ROOT=${cartRoot}`, script]);
+    writeSpawnOutput3(result);
+    if (result.code !== 0) throw new Error(`fix-react-imports exited ${result.code}`);
   }
   function resolveSubstrate2(flag, manifestPath) {
     if (flag) return flag;
@@ -4708,6 +6111,86 @@ export default function App() {
     if (enabled.has("embed") && !flags.includes("-Dhas-pg=true")) flags.push("-Dhas-pg=true");
     return flags;
   }
+  function resolveSysrootFlags(rjitHome) {
+    const sysroot = `${rjitHome}/deps/sysroot`;
+    if (!fsExists(`${sysroot}/usr/include`)) return [];
+    ensureSystemDevSymlink(rjitHome, "X11");
+    return [`-Dsysroot=${sysroot}`];
+  }
+  function ensureSystemDevSymlink(rjitHome, name) {
+    const sysrootLib = `${rjitHome}/deps/sysroot/usr/lib`;
+    const link = `${sysrootLib}/lib${name}.so`;
+    if (fsExists(link)) return;
+    const ldconfig = spawnSync("sh", ["-c", `ldconfig -p 2>/dev/null | awk '$1 ~ /^lib${name}\\\\.so/ {print $NF; exit}'`]);
+    const target = ldconfig.stdout.trim();
+    if (!target || !fsExists(target)) return;
+    const result = spawnSync("ln", ["-sfn", target, link]);
+    writeSpawnOutput3(result);
+    if (result.code === 0) out(`[ship] sysroot: linked lib${name}.so -> ${target}`);
+  }
+  function buildCommand(rjitHome, cartRoot, zig, flags) {
+    if (cartRoot === rjitHome) return [zig, ...flags];
+    return ["env", `ZIG_GLOBAL_CACHE_DIR=${rjitHome}/tools/zig/cache`, zig, ...flags];
+  }
+  function runLockedBuild(rjitHome, command) {
+    const lockFile = `${rjitHome}/.zig-cache/.ship.lock`;
+    fsMkdir(dirname4(lockFile));
+    const first = spawnSync("flock", ["-n", "-E", "75", lockFile, ...command]);
+    if (first.code !== 75) return first;
+    out("[ship] another build in progress - waiting for lock...");
+    const second = spawnSync("flock", [lockFile, ...command]);
+    if (second.code === 0) out("[ship] got lock, proceeding");
+    return second;
+  }
+  function verifyIngredientLabels(cartRoot, buildBin, flags) {
+    const labelDir = `${cartRoot}/zig-out/manifest/v8-ingredients`;
+    const expected = {
+      privacy: hasBuildFlag(flags, "has-privacy"),
+      process: hasBuildFlag(flags, "has-process"),
+      httpsrv: hasBuildFlag(flags, "has-httpsrv"),
+      wssrv: hasBuildFlag(flags, "has-wssrv"),
+      net: hasBuildFlag(flags, "has-net"),
+      tor: hasBuildFlag(flags, "has-tor"),
+      fs: hasBuildFlag(flags, "has-fs"),
+      websocket: hasBuildFlag(flags, "has-websocket"),
+      telemetry: hasBuildFlag(flags, "has-telemetry"),
+      zigcall: hasBuildFlag(flags, "has-zigcall"),
+      sdk: hasBuildFlag(flags, "has-sdk"),
+      voice: hasBuildFlag(flags, "has-voice"),
+      audio_input: hasBuildFlag(flags, "has-audio-input"),
+      paintable: hasBuildFlag(flags, "has-paintable"),
+      pg: hasBuildFlag(flags, "has-pg") || hasBuildFlag(flags, "has-embed"),
+      embed: hasBuildFlag(flags, "has-embed"),
+      whisper: hasBuildFlag(flags, "has-whisper"),
+      onnx: hasBuildFlag(flags, "has-onnx"),
+      audio: hasBuildFlag(flags, "has-audio"),
+      midi: hasBuildFlag(flags, "has-midi"),
+      vterm: hasBuildFlag(flags, "has-terminal"),
+      doom: hasBuildFlag(flags, "has-doom")
+    };
+    let mismatch = false;
+    for (const [name, want] of Object.entries(expected)) {
+      const flagFile = `${labelDir}/${name}.flag`;
+      if (!fsExists(flagFile)) {
+        err(`[ship] LABEL MISSING: ${flagFile} (expected ${want ? "1" : "0"})`);
+        mismatch = true;
+        continue;
+      }
+      const actual = fsRead(flagFile).trim();
+      const expectedText = want ? "1" : "0";
+      if (actual !== expectedText) {
+        err(`[ship] LABEL MISMATCH: ${name} - cart asked for '${expectedText}' but binary built '${actual}'`);
+        mismatch = true;
+      }
+    }
+    if (!mismatch) return true;
+    err("[ship] DESTROYING binary - manifest disagrees with cart declaration");
+    spawnSync("rm", ["-f", buildBin]);
+    return false;
+  }
+  function hasBuildFlag(flags, name) {
+    return flags.includes(`-D${name}=true`);
+  }
   function packageLinux(opts) {
     out("[ship] packaging self-extracting binary...");
     const tmpDir = `/tmp/reactjit-dist-${opts.name}`;
@@ -4716,15 +6199,143 @@ export default function App() {
     runOrThrow("rm", ["-rf", tmpDir, tarball]);
     fsMkdir(libDir);
     runOrThrow("cp", [opts.buildBin, `${tmpDir}/app.bin`]);
+    bundleLocalAiWorker(opts.rjitHome, tmpDir, libDir, opts.buildFlags);
+    bundleLibMpv(opts.rjitHome, libDir, opts.bundleOut);
     const libCount = bundleLinkedLibs(opts.buildBin, libDir, opts.rjitHome, opts.fat);
+    bundlePostgres(opts.rjitHome, tmpDir);
     if (opts.icon) writeDesktopFiles(tmpDir, opts.name, opts.icon);
     writeLauncher(`${tmpDir}/run`);
     runOrThrow("tar", ["czf", tarball, "-C", tmpDir, "."]);
-    writeSelfExtractor(opts.buildBin, tarball, opts.name, opts.icon ? `${opts.name}.${extension(opts.icon)}` : "");
+    writeSelfExtractor2(opts.buildBin, tarball, opts.name, opts.icon ? `${opts.name}.${extension(opts.icon)}` : "");
     const size = spawnSync("du", ["-m", opts.buildBin]).stdout.trim().split(/\s+/)[0] || "?";
     out(`[ship] done (${size}MB self-extracting, ${libCount} libs bundled) -> ${opts.buildBin}`);
     runOrThrow("rm", ["-rf", tmpDir, tarball]);
     return 0;
+  }
+  function packageMacos(opts) {
+    out("[ship] packaging macOS .app bundle...");
+    const appBundle = `${opts.cartRoot}/zig-out/bin/${opts.name}.app`;
+    const contents = `${appBundle}/Contents`;
+    const macosDir = `${contents}/MacOS`;
+    const fwDir = `${contents}/Frameworks`;
+    const resDir = `${contents}/Resources`;
+    runOrThrow("rm", ["-rf", appBundle]);
+    fsMkdir(macosDir);
+    fsMkdir(fwDir);
+    fsMkdir(resDir);
+    runOrThrow("cp", [opts.buildBin, `${macosDir}/${opts.name}`]);
+    let iconPlist = "";
+    if (opts.icon) {
+      const iconFile = `${opts.name}.${extension(opts.icon)}`;
+      runOrThrow("cp", [opts.icon, `${resDir}/${iconFile}`]);
+      if (extension(opts.icon) === "icns") {
+        iconPlist = `    <key>CFBundleIconFile</key>
+    <string>${iconFile}</string>`;
+      } else {
+        err(`[ship] macOS icon copied to Resources/${iconFile}; Finder icon requires .icns`);
+      }
+    }
+    fsWrite(`${contents}/Info.plist`, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleExecutable</key>
+    <string>${opts.name}</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.reactjit.${opts.name}</string>
+    <key>CFBundleName</key>
+    <string>${opts.name}</string>
+    <key>CFBundleVersion</key>
+    <string>1.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+${iconPlist}
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSMinimumSystemVersion</key>
+    <string>13.0</string>
+</dict>
+</plist>
+`);
+    runOrThrow("sh", ["-c", `
+set -e
+collect_dylibs() {
+  for bin in "$@"; do
+    otool -L "$bin" 2>/dev/null | tail -n +2 | awk '{print $1}' | while read -r lib_path; do
+      case "$lib_path" in /usr/lib/*|/System/*|@rpath/*|@executable_path/*) continue ;; esac
+      [ -f "$lib_path" ] || continue
+      lib_name=$(basename "$lib_path")
+      [ -f "${fwDir}/$lib_name" ] && continue
+      cp "$lib_path" "${fwDir}/$lib_name"
+    done
+  done
+}
+rewrite_dylib_paths() {
+  bin="$1"
+  otool -L "$bin" 2>/dev/null | tail -n +2 | awk '{print $1}' | while read -r lib_path; do
+    case "$lib_path" in /usr/lib/*|/System/*|@rpath/*|@executable_path/*) continue ;; esac
+    lib_name=$(basename "$lib_path")
+    install_name_tool -change "$lib_path" "@executable_path/../Frameworks/$lib_name" "$bin" 2>/dev/null || true
+  done
+}
+collect_dylibs "${macosDir}/${opts.name}"
+collect_dylibs "${fwDir}"/*.dylib >/dev/null 2>/dev/null || true
+rewrite_dylib_paths "${macosDir}/${opts.name}"
+install_name_tool -add_rpath "@executable_path/../Frameworks" "${macosDir}/${opts.name}" 2>/dev/null || true
+for dylib in "${fwDir}"/*.dylib; do
+  [ -f "$dylib" ] || continue
+  lib_name=$(basename "$dylib")
+  install_name_tool -id "@executable_path/../Frameworks/$lib_name" "$dylib" 2>/dev/null || true
+  rewrite_dylib_paths "$dylib"
+done
+codesign --force --sign - --deep "${appBundle}" 2>/dev/null || true
+`]);
+    const libCount = spawnSync("sh", ["-c", `find "${fwDir}" -name '*.dylib' 2>/dev/null | wc -l | tr -d ' '`]).stdout.trim() || "0";
+    const size = spawnSync("du", ["-sm", appBundle]).stdout.trim().split(/\s+/)[0] || "?";
+    out(`[ship] done (${size}MB .app bundle, ${libCount} dylibs) -> ${appBundle}`);
+    return 0;
+  }
+  function bundleLocalAiWorker(rjitHome, tmpDir, libDir, buildFlags) {
+    if (!hasBuildFlag(buildFlags, "has-embed")) return;
+    const worker = `${rjitHome}/zig-out/bin/rjit-llm-worker`;
+    const libSource = `${rjitHome}/deps/llama.cpp-fresh/build/bin`;
+    if (!fsExists(worker) || !fsExists(libSource)) {
+      err(`[ship]   WARNING: has-embed needs ${worker} + ${libSource} - skipping local-runtime bundle`);
+      return;
+    }
+    runOrThrow("cp", [worker, `${tmpDir}/rjit-llm-worker`]);
+    runOrThrow("chmod", ["+x", `${tmpDir}/rjit-llm-worker`]);
+    runOrThrow("sh", ["-c", `
+set -e
+for so_pattern in libllama libggml libggml-base libggml-cpu libggml-vulkan; do
+  for f in "${libSource}/$so_pattern.so"*; do
+    [ -e "$f" ] || continue
+    soname=$(basename "$f")
+    real=$(readlink -f "$f")
+    cp "$real" "${libDir}/$soname"
+  done
+done
+`]);
+    out("[ship]   bundled rjit-llm-worker + libllama.so + ggml-vulkan backend");
+  }
+  function bundleLibMpv(rjitHome, libDir, bundleOut) {
+    const bundle = tryFsRead(bundleOut) ?? "";
+    if (!/__jsxs?\(Video,/.test(bundle)) return;
+    const src = `${rjitHome}/love2d/storybook/lib/libmpv.so.2`;
+    if (fsExists(src)) {
+      runOrThrow("cp", ["-L", src, `${libDir}/libmpv.so.2`]);
+      out("[ship]   bundled libmpv.so.2 (video cart - Video primitive detected)");
+      return;
+    }
+    err(`[ship]   WARNING: cart uses Video but pinned libmpv.so.2 not found at ${src}`);
+    err("[ship]            video playback will fall back to user system libmpv if installed, else no-op");
+  }
+  function bundlePostgres(rjitHome, tmpDir) {
+    const pg = `${rjitHome}/.pg-bundle`;
+    if (!fsExists(pg)) return;
+    runOrThrow("cp", ["-RL", pg, `${tmpDir}/pg`]);
+    const size = spawnSync("du", ["-sh", `${tmpDir}/pg`]).stdout.trim().split(/\s+/)[0] || "?";
+    out(`[ship]   bundled postgres (${size}) - extract dir -> pg/bin/postgres`);
   }
   function bundleLinkedLibs(buildBin, libDir, rjitHome, fat) {
     const prefixes = ["libSDL3", "libfreetype", "libsodium", "libsqlite3", "libwhisper", "libllama_ffi", "libmpv", "libbox2d", "libvterm", "libluajit", "libllama", "libggml"];
@@ -4769,7 +6380,7 @@ exec "$DIR/app.bin" "$@"
 `);
     runOrThrow("chmod", ["+x", path]);
   }
-  function writeSelfExtractor(buildBin, tarball, name, iconFile) {
+  function writeSelfExtractor2(buildBin, tarball, name, iconFile) {
     const staged = `${buildBin}.staged`;
     const header = `#!/bin/sh
 set -e
@@ -4802,7 +6413,7 @@ __ARCHIVE__
     if (result.stderr) __writeStderr(result.stderr);
     if (result.stdout) __writeStdout(result.stdout);
   }
-  function fail5(message, code) {
+  function fail7(message, code) {
     err(`[ship] ${message}`);
     return code;
   }
@@ -4818,28 +6429,28 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run13
+    run: () => run17
   });
-  async function run13(argv) {
-    return run12([...argv, "--tui"]);
+  async function run17(argv) {
+    return run16([...argv, "--tui"]);
   }
 
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run14
+    run: () => run18
   });
-  async function run14(argv) {
-    return run6([...argv, "--tui"]);
+  async function run18(argv) {
+    return run9([...argv, "--tui"]);
   }
 
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run15
+    run: () => run19
   });
   var POLL_MS = 200;
-  async function run15(argv) {
+  async function run19(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -4900,6 +6511,9 @@ __ARCHIVE__
   // cli/main.ts
   var COMMANDS = {
     "autotest": autotest_exports,
+    "bake-geometry": bake_geometry_exports,
+    "bake-geometry-auto": bake_geometry_auto_exports,
+    "bake-icons": bake_icons_exports,
     "cart-bundle": cart_bundle_exports,
     "cart-manifest-field": cart_manifest_field_exports,
     "classify": classify_exports,
@@ -4909,6 +6523,7 @@ __ARCHIVE__
     "help": help_exports,
     "init": init_exports,
     "metafile-gate": metafile_gate_exports,
+    "pack-sdk": pack_sdk_exports,
     "push-bundle": push_bundle_exports,
     "ship": ship_exports,
     "ship-tui": ship_tui_exports,

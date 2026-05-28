@@ -10,6 +10,7 @@
 
 import { Box, Filter, Pressable } from '@reactjit/runtime/primitives';
 import { Scene } from './render3d/Scene';
+import { WaterSurface } from './render3d/WaterSurface';
 import { Hud } from './render/Hud';
 import { createScapeFrame } from './render/sprites';
 import { useScapeWorld } from './state/world';
@@ -36,6 +37,9 @@ export default function Scape3D() {
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#0a0612' }}>
+      {/* Offscreen: renders the live A13 <Water> into staticKey "water-a13",
+          which the canal heightfield mesh samples via textureKey. */}
+      <WaterSurface />
       <Pressable
         onLayout={(lr: any) => {
           world.rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height };

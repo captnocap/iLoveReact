@@ -1,0 +1,192 @@
+#!/usr/bin/env python3
+"""Bridge stdin/stdout to a Firecracker guest port via vsock UDS.
+
+Usage: vsock-bridge <uds-path> <port> [<control-port>]
+
+Connects to the Firecracker vsock Unix domain socket, performs the
+CONNECT handshake, then proxies stdin<->socket transparently. Run as
+a child of claude-ss (not exec'd) so the shell's EXIT trap still fires.
+
+When <control-port> is supplied, opens a second vsock connection to that
+port and ships a "RESIZE rows cols\\n" message on every SIGWINCH the
+host PTY emits. The VM-side listener on the control port applies the
+size to the inner pty via TIOCSWINSZ so claude redraws at the new
+geometry instead of being stuck at boot-time size.
+"""
+import fcntl, os, select, signal, socket, struct, sys, termios, time, tty
+
+def connect_vsock(uds_path: str, port: int, timeout_s: float = 30):
+    """Connect to a Firecracker vsock UDS and CONNECT to a guest port.
+    Returns (socket, leftover_bytes_after_OK_handshake) or raises."""
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        s = None
+        try:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect(uds_path)
+            s.sendall(f'CONNECT {port}\n'.encode())
+            buf = b''
+            while b'\n' not in buf:
+                chunk = s.recv(256)
+                if not chunk:
+                    raise ConnectionError
+                buf += chunk
+            if buf.startswith(b'OK'):
+                return s, buf[buf.index(b'\n') + 1:]
+            s.close()
+        except (ConnectionRefusedError, FileNotFoundError,
+                ConnectionError, socket.timeout, OSError):
+            if s:
+                try: s.close()
+                except OSError: pass
+        time.sleep(0.3)
+    raise TimeoutError(f'vsock port {port}')
+
+def winsize_from_fd(fd: int):
+    """Return (rows, cols) by ioctl(TIOCGWINSZ) on fd, or None if not a tty."""
+    try:
+        raw = fcntl.ioctl(fd, termios.TIOCGWINSZ, b'\0' * 8)
+    except OSError:
+        return None
+    rows, cols, _, _ = struct.unpack('HHHH', raw)
+    return rows, cols
+
+def main():
+    if len(sys.argv) < 3:
+        sys.stderr.write('usage: vsock-bridge <uds-path> <port> [<control-port>]\n')
+        sys.exit(2)
+    uds_path = sys.argv[1]
+    port = int(sys.argv[2])
+    ctrl_port = int(sys.argv[3]) if len(sys.argv) > 3 else None
+
+    try:
+        s, leftover = connect_vsock(uds_path, port)
+    except TimeoutError as e:
+        sys.stderr.write(f'vsock-bridge: timed out waiting for {e}\n')
+        sys.exit(1)
+
+    # Optional control channel for live SIGWINCH forwarding. Best-effort
+    # — if the listener isn't up (older rootfs without claude-control.py),
+    # we just skip live resize and carry on with the data channel.
+    ctrl = None
+    if ctrl_port is not None:
+        try:
+            ctrl, _ = connect_vsock(uds_path, ctrl_port, timeout_s=5)
+        except TimeoutError:
+            sys.stderr.write('vsock-bridge: control port unavailable, live-resize disabled\n')
+            ctrl = None
+
+    # SIGWINCH handler: read the current size off stdin and ship it to
+    # the VM control channel. Fires on every kitty/claudewrap resize.
+    def send_resize():
+        if ctrl is None:
+            return
+        sz = winsize_from_fd(0)
+        if sz is None:
+            return
+        rows, cols = sz
+        try:
+            ctrl.sendall(f'RESIZE {rows} {cols}\n'.encode())
+        except OSError:
+            pass
+
+    if ctrl is not None:
+        signal.signal(signal.SIGWINCH, lambda *_: send_resize())
+        # Prime with the current size on connect — the boot-time .termsize
+        # may already be right, but a fresh RESIZE is harmless and covers
+        # the case where the host resized between cred-staging and now.
+        send_resize()
+
+    # Put the host PTY into raw mode so the line discipline doesn't
+    # mangle bytes in either direction (onlcr, icrnl, echo, etc.).
+    old_termios = None
+    if os.isatty(0):
+        old_termios = termios.tcgetattr(0)
+        tty.setraw(0)
+
+    if leftover:
+        write_all(1, leftover)
+
+    s.setblocking(False)
+    # Read end of stdin needs to be non-blocking so select can guard
+    # short reads, but fd 0/1/2 share the same open file description
+    # (they were dup2'd from the same PTY slave in claudewrap's
+    # framework/terminal/pty.zig), so setting O_NONBLOCK on 0 bleeds
+    # onto 1 and 2 — making writes to stdout EAGAIN-prone too. Dup fd 0
+    # first so the flag only affects the dup, leaving fd 1 blocking.
+    stdin_fd = os.dup(0)
+    fl = fcntl.fcntl(stdin_fd, fcntl.F_GETFL)
+    fcntl.fcntl(stdin_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+
+    try:
+        while True:
+            try:
+                rlist, _, _ = select.select([stdin_fd, s], [], [])
+            except InterruptedError:
+                # SIGWINCH interrupts select; loop back to re-arm. The
+                # signal handler has already shipped the resize.
+                continue
+            for fd in rlist:
+                if fd == stdin_fd:
+                    try:
+                        data = os.read(stdin_fd, 65536)
+                    except BlockingIOError:
+                        continue
+                    if not data:
+                        return
+                    s.sendall(data.replace(b'\n', b'\r'))
+                else:
+                    data = s.recv(65536)
+                    if not data:
+                        return
+                    # Critical: large inner redraws (claude-code post-
+                    # SIGWINCH at max screen size) exceed the PTY buffer
+                    # and trigger EAGAIN / short writes. Loop until all
+                    # bytes land or the fd is genuinely dead.
+                    if not write_all(1, data):
+                        return
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        pass
+    finally:
+        try: os.close(stdin_fd)
+        except OSError: pass
+        if old_termios:
+            termios.tcsetattr(0, termios.TCSANOW, old_termios)
+        if ctrl is not None:
+            try: ctrl.close()
+            except OSError: pass
+
+
+def write_all(fd: int, data: bytes) -> bool:
+    """Write all of `data` to `fd`, retrying on EAGAIN and short writes.
+    Returns True on success, False if the fd is dead (EPIPE/ECONNRESET).
+    Necessary because the inner claude's full-screen SIGWINCH redraw
+    can be 100KB+ — well past the PTY's internal buffer — and the
+    naive single-shot os.write either drops bytes (short write) or
+    raises BlockingIOError (EAGAIN, when the fd is non-blocking).
+    """
+    pos = 0
+    n = len(data)
+    while pos < n:
+        try:
+            written = os.write(fd, data[pos:])
+            if written <= 0:
+                return False
+            pos += written
+        except BlockingIOError:
+            # PTY buffer full — block until it drains, then retry.
+            try:
+                select.select([], [fd], [])
+            except (OSError, InterruptedError):
+                pass
+        except (BrokenPipeError, ConnectionResetError):
+            return False
+        except OSError:
+            return False
+    return True
+
+if __name__ == '__main__':
+    signal.signal(signal.SIGINT, lambda *_: sys.exit(0))
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+    main()

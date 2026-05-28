@@ -218,6 +218,18 @@ const v8_bindings_doom = if (enabledFor("doom")) @import("v8_bindings_doom.zig")
 const v8_bindings_paintable = if (enabledFor("paintable")) @import("v8_bindings_paintable.zig") else struct {
     pub fn registerPaintable(_: anytype) void {}
 };
+// LuaJIT off-thread worker — bindings are always registered. The worker
+// itself dlopens libluajit-5.1 lazily, so carts that never call __lua_*
+// pay only the host-fn registrations (no native lib link). engine.zig:91
+// force-references the worker module, so the exported C symbols are
+// always linkable from this file. Carts that actually USE lua must import
+// runtime/hooks/useLuaWorker.ts so dep-registry triggers libluajit
+// bundling (see sdk/dependency-registry.json `lua-worker`).
+const v8_bindings_lua = @import("v8_bindings_lua.zig");
+// Input-bench — pure-Zig WASD controller for cart/input_bench. Always-on
+// because it has no native deps (SDL is foundational); inert until the
+// cart calls __input_bench_set_enabled(true).
+const v8_bindings_input_bench = @import("v8_bindings_input_bench.zig");
 
 // ── INGREDIENTS ─────────────────────────────────────────────────────
 //
@@ -254,6 +266,14 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "env", .required = true, .grep_prefix = "", .reg_fn = "registerEnv", .mod = v8_bindings_env },
     .{ .name = "window", .required = true, .grep_prefix = "", .reg_fn = "registerWindow", .mod = v8_bindings_window },
     .{ .name = "inspector", .required = true, .grep_prefix = "", .reg_fn = "registerInspector", .mod = v8_bindings_inspector },
+    // LuaJIT bindings — always-on. The worker module is force-imported by
+    // engine.zig, so its C exports are universally linkable; libluajit
+    // itself is dlopen'd inside the worker, so this binding stays cheap
+    // (just host-fn registrations) for carts that never touch __lua_*.
+    .{ .name = "lua", .required = true, .grep_prefix = "", .reg_fn = "registerLua", .mod = v8_bindings_lua },
+    // Input-bench — pure-Zig WASD controller. Always-on but inert until
+    // a cart calls __input_bench_set_enabled(true). No native deps.
+    .{ .name = "input_bench", .required = true, .grep_prefix = "", .reg_fn = "registerInputBench", .mod = v8_bindings_input_bench },
     // Everything below is source-gated: scripts/ship reads the esbuild
     // metafile and only flips the matching -Dhas-X=true if a JS file
     // that calls into the binding is actually shipped.

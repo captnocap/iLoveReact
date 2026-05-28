@@ -328,6 +328,22 @@ so `heightAt` stays stable for terrain/camera/picking. Walkable terrain should k
 Verification: `./scripts/ship scape3d` succeeds; `timeout 6s ./zig-out/bin/scape3d`
 launches clean until the expected timeout exit.
 
+Follow-up from eyeballing: a dark single-material top-down heightfield made the water look
+gone / static even when the mesh existed. Water now uses a procedural `waterTex()` with
+diagonal neon glints plus a larger water-only displacement (`0.18m`), so waves should read
+from texture shimmer and canal-edge silhouette instead of relying on barely visible normals.
+
+Follow-up visual test: swapped the canal surface texture to a baked approximation of
+`cart/effect_fills` **A13** (Board A / water / variant 0). The live effect_fills version is
+WGSL-time animated; scape3d mesh materials are diffuse bitmaps, so this bakes the A13 deep-to-
+shallow teal ramp, warp, and caustic bands into `waterA13Tex()` while keeping the host-side
+heightfield wave for motion.
+
+Dev-host gotcha found in the same check: `scripts/dev` used `ss -lUp` to detect the live
+Unix socket, but this system's `ss` rejects `-U`. That made dev think the socket was dead,
+remove it, and spawn duplicate `reactjit-dev` hosts. Patched to `ss -lx -p`; `./scripts/dev
+scape3d` now detects the existing host and pushes the updated `.cache/bundle-scape3d.js`.
+
 ---
 
 # Scape Progress (inherited 2D-era history below)

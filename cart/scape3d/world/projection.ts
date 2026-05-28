@@ -10,13 +10,28 @@ import { heightAt } from './terrain';
 
 export const TILE_PX = 30;
 
+// Two camera modes share the same Cam record so unproject() / cameraFor() / the
+// renderer all stay one code path. `tp` is the orbit that scape3d shipped with;
+// `fp` puts the eye at the player's head and uses `lookPitch` for free up/down
+// look (TP's `pitch` is camera elevation, [0.40,0.86], so we keep them separate
+// — toggling back to TP preserves the framing you had).
+export type CamMode = 'tp' | 'fp';
+
 export interface Cam {
   px: number;
   py: number;
   yaw: number;
   pitch: number;
   zoom: number;
+  mode: CamMode;
+  lookPitch: number; // FP only: radians; >0 = look up, <0 = look down
 }
+
+// Eye height in metres above the foot point — matches the humanoid head box centre
+// in Characters3D (head pos y = 1.78). Sitting AT 1.78 means the FP eye is exactly
+// where the (now-hidden) head model used to be, so other players see no offset.
+export const FP_EYE_HEIGHT = 1.78;
+export const FP_LOOK_PITCH_LIMIT = 1.2; // ~69° up/down — enough to see your own feet
 
 export interface Rect {
   x: number;
@@ -47,11 +62,27 @@ export function elevationFor(pitch: number): number {
   return ELEV_LO + (ELEV_HI - ELEV_LO) * frac;
 }
 
+// FP forward direction in world space — same yaw convention the TP eye uses so
+// that toggling modes doesn't spin you: TP eye is `c.px - sin(yaw)*horiz`, so the
+// camera looks down `(+sin(yaw), 0, +cos(yaw))` horizontally. `lookPitch` adds the
+// vertical component.
+export function fpForward(yaw: number, lookPitch: number): V3 {
+  const cp = Math.cos(lookPitch);
+  return [Math.sin(yaw) * cp, Math.sin(lookPitch), Math.cos(yaw) * cp];
+}
+
+const FP_FOV = 75; // wider than TP — typical FP feel, also stops fisheye/zoom mismatch
+
 // Eye, look-target, and fov for the current camera state. The renderer feeds this
 // straight into <Scene3D.Camera>; unproject() inverts it. Both eye and target
 // ride the player's ground elevation so the framing holds as you climb the hill.
 export function cameraFor(c: Cam): { pos: V3; target: V3; fov: number } {
   const ground = heightAt(c.px, c.py);
+  if (c.mode === 'fp') {
+    const eye: V3 = [c.px, ground + FP_EYE_HEIGHT, c.py];
+    const f = fpForward(c.yaw, c.lookPitch);
+    return { pos: eye, target: [eye[0] + f[0], eye[1] + f[1], eye[2] + f[2]], fov: FP_FOV };
+  }
   const target: V3 = [c.px, ground + TARGET_Y, c.py];
   const dist = BASE_DIST / Math.max(0.35, c.zoom);
   const elev = elevationFor(c.pitch);

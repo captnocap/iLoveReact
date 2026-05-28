@@ -14,6 +14,8 @@ export default defineBindings({
   env: { required: true, module: 'framework/v8_bindings_env.zig', registerSuffix: 'Env', hostFns: [] },
   window: { required: true, module: 'framework/v8_bindings_window.zig', registerSuffix: 'Window', hostFns: [] },
   inspector: { required: true, module: 'framework/v8_bindings_inspector.zig', registerSuffix: 'Inspector', hostFns: [] },
+  lua: { required: true, module: 'framework/v8_bindings_lua.zig', registerSuffix: 'Lua', hostFns: [] },
+  input_bench: { required: true, module: 'framework/v8_bindings_input_bench.zig', registerSuffix: 'InputBench', hostFns: [] },
   fs: { required: false, module: 'framework/v8_bindings_fs.zig', registerSuffix: 'Fs', grepPrefix: '__fs_', hostFns: [] },
   websocket: { required: false, module: 'framework/v8_bindings_websocket.zig', registerSuffix: 'WebSocket', grepPrefix: '__ws_', hostFns: [] },
   telemetry: { required: false, module: 'framework/v8_bindings_telemetry.zig', registerSuffix: 'Telemetry', grepPrefix: '__tel_', hostFns: [] },

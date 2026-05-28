@@ -411,6 +411,88 @@
         }
       ]
     },
+    "lua": {
+      "required": true,
+      "module": "framework/v8_bindings_lua.zig",
+      "registerFn": "registerLua",
+      "grepPrefix": "",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__lua_available",
+          "zig": "hostAvailable"
+        },
+        {
+          "js": "__lua_start",
+          "zig": "hostStart"
+        },
+        {
+          "js": "__lua_stop",
+          "zig": "hostStop"
+        },
+        {
+          "js": "__lua_eval",
+          "zig": "hostEval"
+        },
+        {
+          "js": "__lua_send_msg",
+          "zig": "hostSendMsg"
+        },
+        {
+          "js": "__lua_recv_msg",
+          "zig": "hostRecvMsg"
+        },
+        {
+          "js": "__lua_elapsed_us",
+          "zig": "hostElapsedUs"
+        },
+        {
+          "js": "__lua_send",
+          "zig": "hostSend"
+        },
+        {
+          "js": "__lua_recv_count",
+          "zig": "hostRecvCount"
+        },
+        {
+          "js": "__lua_set_n",
+          "zig": "hostSetN"
+        }
+      ]
+    },
+    "input_bench": {
+      "required": true,
+      "module": "framework/v8_bindings_input_bench.zig",
+      "registerFn": "registerInputBench",
+      "grepPrefix": "",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__input_bench_reset",
+          "zig": "hostReset"
+        },
+        {
+          "js": "__input_bench_set_yaw",
+          "zig": "hostSetYaw"
+        },
+        {
+          "js": "__input_bench_set_speed",
+          "zig": "hostSetSpeed"
+        },
+        {
+          "js": "__input_bench_set_enabled",
+          "zig": "hostSetEnabled"
+        },
+        {
+          "js": "__input_bench_pos",
+          "zig": "hostPos"
+        },
+        {
+          "js": "__bench_now_us",
+          "zig": "hostNowUs"
+        }
+      ]
+    },
     "fs": {
       "required": false,
       "module": "framework/v8_bindings_fs.zig",
@@ -2227,6 +2309,10 @@
         {
           "js": "__vterm_write",
           "zig": "hostVtermWrite"
+        },
+        {
+          "js": "__vterm_feed",
+          "zig": "hostVtermFeed"
         },
         {
           "js": "__vterm_resize",

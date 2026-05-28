@@ -1,0 +1,176 @@
+//! Lua host bindings — V8 FFI bridge for framework/process/luajit_worker.zig.
+//!
+//! The LuaJIT off-thread worker has been compiled into every cart since
+//! engine.zig:91 force-references it, but its C exports were unreachable
+//! from cart JS until this file existed. Now exposed as the `__lua_*`
+//! family.
+//!
+//! Host fns:
+//!   __lua_available()                   1 if libluajit-5.1 is loadable
+//!   __lua_start()                       1 = started, 0 = already running, -1 = no luajit
+//!   __lua_stop()                        1 = stopped, 0 = was idle
+//!   __lua_eval(code)                    bytes copied into the worker script slot
+//!   __lua_send_msg(msg)                 bytes pushed onto the worker's inbox
+//!   __lua_recv_msg()                    string popped from outbox, or "" on empty
+//!   __lua_elapsed_us()                  last send→ack roundtrip in microseconds
+//!   __lua_send(count)                   counter-mode: enqueue N units
+//!   __lua_recv_count()                  counter-mode: total acked
+//!   __lua_set_n(n)                      counter-mode: set bridge_n
+//!
+//! libluajit is dlopen'd lazily inside luajit_worker — there is no link-time
+//! dependency. Every host fn here returns a safe zero/empty if luajit isn't
+//! installed, so this binding is cheap to register universally.
+
+const std = @import("std");
+const v8 = @import("v8");
+const v8_runtime = @import("v8_runtime.zig");
+
+const alloc = std.heap.c_allocator;
+
+// ── extern C exports from process/luajit_worker.zig ──────────────────
+
+extern fn lua_worker_start() c_long;
+extern fn lua_worker_stop() c_long;
+extern fn lua_worker_send(count: c_long) c_long;
+extern fn lua_worker_recv_count() c_long;
+extern fn lua_worker_bridge_n() c_long;
+extern fn lua_worker_set_n(n: c_long) c_long;
+extern fn lua_worker_elapsed_us() c_long;
+extern fn lua_worker_send_msg(msg: [*c]const u8, len: c_long) c_long;
+extern fn lua_worker_recv_msg(buf: [*c]u8, buf_len: c_long) c_long;
+extern fn lua_worker_eval(code: [*c]const u8, len: c_long) c_long;
+
+const luajit_worker = @import("process/luajit_worker.zig");
+
+// ── helpers (same pattern as v8_bindings_process) ────────────────────
+
+fn argToStringAlloc(info: v8.FunctionCallbackInfo, idx: u32) ?[]u8 {
+    if (idx >= info.length()) return null;
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const s = info.getArg(idx).toString(ctx) catch return null;
+    const n = s.lenUtf8(iso);
+    const buf = alloc.alloc(u8, n) catch return null;
+    _ = s.writeUtf8(iso, buf);
+    return buf;
+}
+
+fn argToI32(info: v8.FunctionCallbackInfo, idx: u32) ?i32 {
+    if (idx >= info.length()) return null;
+    const ctx = info.getIsolate().getCurrentContext();
+    return info.getArg(idx).toI32(ctx) catch null;
+}
+
+fn setReturnNumber(info: v8.FunctionCallbackInfo, value: f64) void {
+    const iso = info.getIsolate();
+    info.getReturnValue().set(v8.Number.init(iso, value));
+}
+
+fn setReturnString(info: v8.FunctionCallbackInfo, text: []const u8) void {
+    const iso = info.getIsolate();
+    info.getReturnValue().set(v8.String.initUtf8(iso, text));
+}
+
+// ── host fns ─────────────────────────────────────────────────────────
+
+fn hostAvailable(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, if (luajit_worker.available()) 1 else 0);
+}
+
+fn hostStart(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatFromInt(lua_worker_start()));
+}
+
+fn hostStop(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatFromInt(lua_worker_stop()));
+}
+
+fn hostEval(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 1) {
+        setReturnNumber(info, 0);
+        return;
+    }
+    const code = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, 0);
+        return;
+    };
+    defer alloc.free(code);
+    const n = lua_worker_eval(code.ptr, @intCast(code.len));
+    setReturnNumber(info, @floatFromInt(n));
+}
+
+fn hostSendMsg(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    if (info.length() < 1) {
+        setReturnNumber(info, -1);
+        return;
+    }
+    const msg = argToStringAlloc(info, 0) orelse {
+        setReturnNumber(info, -1);
+        return;
+    };
+    defer alloc.free(msg);
+    const n = lua_worker_send_msg(msg.ptr, @intCast(msg.len));
+    setReturnNumber(info, @floatFromInt(n));
+}
+
+// recv_msg returns the popped string (or "" if the outbox is empty).
+// Cap at 1KB which matches MAX_MSG_LEN×2 — recvMsg always reads at most
+// one slot, and slots are MAX_MSG_LEN=512 in luajit_worker.zig.
+fn hostRecvMsg(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    var buf: [1024]u8 = undefined;
+    const n = lua_worker_recv_msg(&buf, @intCast(buf.len));
+    if (n <= 0) {
+        setReturnString(info, "");
+        return;
+    }
+    setReturnString(info, buf[0..@intCast(n)]);
+}
+
+fn hostElapsedUs(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatFromInt(lua_worker_elapsed_us()));
+}
+
+fn hostSend(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const count: c_long = if (info.length() >= 1)
+        @intCast(argToI32(info, 0) orelse 0)
+    else
+        0;
+    setReturnNumber(info, @floatFromInt(lua_worker_send(count)));
+}
+
+fn hostRecvCount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    setReturnNumber(info, @floatFromInt(lua_worker_recv_count()));
+}
+
+fn hostSetN(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const n: c_long = if (info.length() >= 1)
+        @intCast(argToI32(info, 0) orelse 10)
+    else
+        10;
+    setReturnNumber(info, @floatFromInt(lua_worker_set_n(n)));
+}
+
+// ── Registration ─────────────────────────────────────────────────────
+
+pub fn registerLua(_: anytype) void {
+    v8_runtime.registerHostFn("__lua_available", hostAvailable);
+    v8_runtime.registerHostFn("__lua_start", hostStart);
+    v8_runtime.registerHostFn("__lua_stop", hostStop);
+    v8_runtime.registerHostFn("__lua_eval", hostEval);
+    v8_runtime.registerHostFn("__lua_send_msg", hostSendMsg);
+    v8_runtime.registerHostFn("__lua_recv_msg", hostRecvMsg);
+    v8_runtime.registerHostFn("__lua_elapsed_us", hostElapsedUs);
+    v8_runtime.registerHostFn("__lua_send", hostSend);
+    v8_runtime.registerHostFn("__lua_recv_count", hostRecvCount);
+    v8_runtime.registerHostFn("__lua_set_n", hostSetN);
+}

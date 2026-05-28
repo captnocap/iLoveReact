@@ -1,0 +1,1100 @@
+metadata:
+  project_name: ''
+  created_at: '2026-05-18T16:42:36.159688+00:00'
+  updated_at: '2026-05-18T20:13:30.462031+00:00'
+  version: '1.0'
+entries:
+- term: cart
+  category: noun
+  definition: A .tsx app under cart/. Each cart compiles to one self-extracting binary
+    via ./scripts/ship <name>. Cart name == directory/file basename.
+  antipatterns:
+  - NOT a shopping cart, vehicle, or container concept
+  - NOT an arbitrary React project — carts have a fixed runtime shape (V8 host + bundled
+    bundle.js + embedded assets)
+  - Do NOT add new .jsx/.js files in cart/; carts are .tsx/.ts only
+  related_terms:
+  - ship
+  - dev
+  - bundle
+  - primitive
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:42:36.159688+00:00'
+  added_by: vocabulary_add
+- term: Smith
+  category: noun
+  definition: The frozen Smith-era compiler stack in tsz/. A 50-day detour preserved
+    for reference only. Reading allowed; modification forbidden.
+  antipatterns:
+  - Do NOT restart Smith work, port .tsz mechanically, or run d-suite against root
+    code
+  - Do NOT chmod or unlock tsz/ — it is intentionally read-only
+  - Do NOT treat Smith patterns as authoritative; regenerate fresh in .tsx instead
+  related_terms:
+  - tsz
+  - d-suite
+  - conformance
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:42:39.110690+00:00'
+  added_by: vocabulary_add
+- term: tsz
+  category: noun
+  definition: 'The frozen tsz/ directory: Smith compiler, d-suite conformance, cockpit/Sweatshop
+    .tsz carts, InspectorTsz tools. Read-only reference.'
+  antipatterns:
+  - Do NOT modify any file under tsz/
+  - Do NOT port .tsz code mechanically to .tsx; regenerate from love2d/ patterns instead
+  - tsz is not a file extension we author against; .tsx is the only authoring format
+  related_terms:
+  - Smith
+  - archive
+  - love2d
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:42:42.746591+00:00'
+  added_by: vocabulary_add
+- term: ship
+  category: verb
+  definition: ./scripts/ship <cart> — the one and only build path. Bundles cart .tsx
+    via esbuild → bundle.js → Zig compiles host with @embedFile → Linux self-extracting
+    wrapper or macOS .app. Always release mode.
+  antipatterns:
+  - Do NOT pass -d or --raw; both were removed 2026-05-04. -d binary crashes on click.
+  - Do NOT pgrep-wait for 'zig build' before invoking ship; ship has internal flock
+    and the polling shell self-matches
+  - Do NOT shell out to npm/node/bun directly for build steps; ship orchestrates the
+    whole pipeline via tools/v8cli
+  related_terms:
+  - dev
+  - cart
+  - bundle
+  - V8
+  defined_in: scripts/ship
+  added_at: '2026-05-18T16:42:46.430563+00:00'
+  added_by: vocabulary_add
+- term: dev
+  category: verb
+  definition: ./scripts/dev <cart> launches a persistent ReleaseFast dev host with
+    hot reload for cart/ + runtime/ TSX. Editing .tsx re-bundles+re-evals in ~300ms.
+    A second 'dev <other>' pushes to the running host and adds a tab.
+  antipatterns:
+  - Do NOT restart ./scripts/dev after every edit — the user has an auto-push watcher
+    already running
+  - Hot reload does NOT cover framework/, build.zig, or scripts/ — those changes require
+    a fresh ship
+  - Do NOT assume useHotState preserves state — wiring exists but it currently resets
+    every reload
+  related_terms:
+  - ship
+  - useHotState
+  - cart
+  defined_in: scripts/dev
+  added_at: '2026-05-18T16:42:51.042953+00:00'
+  added_by: vocabulary_add
+- term: framework
+  category: noun
+  definition: 'The Zig runtime in framework/: layout, engine, GPU, events, input,
+    state, effects, text, windows. Consumes the React reconciler''s CREATE/APPEND/UPDATE
+    mutation stream.'
+  antipatterns:
+  - Do NOT confuse with 'React framework' or any JS-side concept — framework is Zig
+    only
+  - Changes under framework/ require a rebuild via ship; they are NOT covered by ./scripts/dev
+    hot reload
+  related_terms:
+  - runtime
+  - renderer
+  - ship
+  defined_in: framework/
+  added_at: '2026-05-18T16:42:54.200485+00:00'
+  added_by: vocabulary_add
+- term: runtime
+  category: noun
+  definition: 'The JS-side runtime/ directory: JSX shim, primitives, hooks, host globals,
+    classifier, highlighter. Runs inside V8 inside the cart host binary.'
+  antipatterns:
+  - Do NOT confuse 'runtime' with 'V8' — V8 is the JS engine, runtime/ is our cart-facing
+    JS layer on top of it
+  - Do NOT confuse with framework/ — framework is Zig, runtime is JS
+  related_terms:
+  - framework
+  - renderer
+  - V8
+  - primitive
+  defined_in: runtime/
+  added_at: '2026-05-18T16:42:57.080628+00:00'
+  added_by: vocabulary_add
+- term: primitive
+  category: noun
+  definition: 'A built-in component the reconciler emits as a CREATE with a fixed
+    type string. Set: Box, Row, Col, Text, Image, Pressable, ScrollView, TextInput,
+    TextArea, TextEditor, Canvas (+ .Node/.Path/.Clamp), Graph (+ .Path/.Polyline/.Node),
+    Native.'
+  antipatterns:
+  - Do NOT call arbitrary React components 'primitives' — primitives are the closed
+    set the Zig host knows about
+  - Do NOT mix text and expressions in <Text> children; use a template literal
+  related_terms:
+  - Native
+  - renderer
+  - Canvas
+  - Graph
+  defined_in: runtime/
+  added_at: '2026-05-18T16:43:00.991641+00:00'
+  added_by: vocabulary_add
+- term: Native
+  category: noun
+  definition: <Native type="X" /> — the universal escape-hatch primitive. Reconciler
+    emits CREATE with that type string; the Zig host dispatches on it.
+  antipatterns:
+  - Do NOT read 'Native' as 'native code' or 'platform-native UI' — it is a specific
+    primitive name
+  - Do NOT introduce new top-level primitive types when Native already covers it
+  related_terms:
+  - primitive
+  - framework
+  defined_in: runtime/
+  added_at: '2026-05-18T16:43:04.305877+00:00'
+  added_by: vocabulary_add
+- term: theme:NAME
+  category: convention
+  definition: String color tokens of the form 'theme:text', 'theme:bg', etc. Resolved
+    at paint time against the active skin so light/dark surfaces flip correctly.
+  antipatterns:
+  - 'Do NOT write hardcoded #hex or rgba() literals in cart code or classifier .cls
+    sheets — only theme files own raw colors'
+  - 'Do NOT inline color: ''#xxx'' in style objects — skins flip surfaces and the
+    text becomes invisible (#e7eaff on win7''s #dfe8f3)'
+  - If a token doesn't exist for the color you want, ADD a token to the theme — do
+    not paste a literal
+  related_terms:
+  - classifier
+  - skin
+  defined_in: cart/app/gallery/gallery-theme.ts
+  added_at: '2026-05-18T16:43:08.503128+00:00'
+  added_by: vocabulary_add
+- term: Effect
+  category: noun
+  definition: <Effect shader="..."> — a WGSL fragment-shader quad. Used for fills,
+    gradients, scalar fields, analytic rings (donut/pie/contour/heatmap). Pixel-perfect
+    at any zoom, no geometry.
+  antipatterns:
+  - Do NOT confuse with React's useEffect — they share the word but nothing else
+  - Do NOT draw multi-segment outlines in an Effect shader — fwidth spikes at segment-derivative
+    kinks leak a visible halo ('broken circle' artifact). Use Graph.Polyline instead.
+  - 'WGSL: no unary +. ''+0.85'' crashes shader-module creation; use ''0.85''. No
+    backticks in shader comments — they end the JS template literal.'
+  related_terms:
+  - Filter
+  - Polyline
+  - Canvas
+  - Graph
+  defined_in: framework/gpu/
+  added_at: '2026-05-18T16:43:19.484854+00:00'
+  added_by: vocabulary_add
+- term: Filter
+  category: noun
+  definition: <Filter shader="..."> — a WGSL fragment-shader applied as a filter pass
+    over its subtree.
+  antipatterns:
+  - 'MUST receive style={{ width: ''100%'', height: ''100%'' }} or the cart hard-crashes
+    at load with no log. First thing to check when a Filter cart silently fails to
+    launch.'
+  - Do NOT confuse with Effect — Filter is a pass over a subtree; Effect is a standalone
+    quad
+  related_terms:
+  - Effect
+  defined_in: framework/gpu/
+  added_at: '2026-05-18T16:43:23.401493+00:00'
+  added_by: vocabulary_add
+- term: Polyline
+  category: noun
+  definition: <Graph.Polyline> — multi-segment stroke rendered via per-segment analytic
+    capsules from framework/gpu/capsules.zig. The correct tool for radar webs, axis
+    spokes, polygon outlines, polylines.
+  antipatterns:
+  - Do NOT attempt multi-segment outlines in a single fragment shader — every formulation
+    leaks at segment-derivative kinks via fwidth
+  - Do NOT replace Polyline with a stroke-in-Effect 'optimization' — it has been tried
+    in every formulation and always produces the broken-circle halo
+  related_terms:
+  - Effect
+  - Graph
+  defined_in: framework/gpu/capsules.zig
+  added_at: '2026-05-18T16:43:27.385023+00:00'
+  added_by: vocabulary_add
+- term: Canvas
+  category: noun
+  definition: '<Canvas> — pan-zoomable surface using gx/gy/gw/gh coordinate-space
+    positioning. Children: Canvas.Node, Canvas.Path, Canvas.Clamp. Paths support SVG
+    d/stroke/strokeWidth/fill.'
+  antipatterns:
+  - Do NOT confuse Canvas (pan-zoom, world-coord) with Graph (static-viewport)
+  - Do NOT use HTML px coordinates on Canvas children — use gx/gy in world space
+  related_terms:
+  - Graph
+  - primitive
+  defined_in: runtime/
+  added_at: '2026-05-18T16:43:29.546883+00:00'
+  added_by: vocabulary_add
+- term: Graph
+  category: noun
+  definition: '<Graph> — static-viewport drawing surface. Children: Graph.Path, Graph.Polyline,
+    Graph.Node. Uses gx/gy/gw/gh coordinate-space positioning.'
+  antipatterns:
+  - Do NOT confuse Graph (static viewport) with Canvas (pan-zoom)
+  - Do NOT confuse with 'graph' as in network/data-structure — this is the drawing
+    primitive
+  related_terms:
+  - Canvas
+  - Polyline
+  - primitive
+  defined_in: runtime/
+  added_at: '2026-05-18T16:43:33.797112+00:00'
+  added_by: vocabulary_add
+- term: StaticSurface
+  category: noun
+  definition: A paint-cache wrapper that caches its subtree's paint to a GPU quad
+    while the React children stay live. Worth using on grids of >~10 cards.
+  antipatterns:
+  - Do NOT blame StaticSurface for state or re-render bugs — children remain live
+    React. The cache is paint-only.
+  - Do NOT wrap small/cheap subtrees in StaticSurface — the cache cost outweighs the
+    paint savings
+  related_terms:
+  - primitive
+  defined_in: runtime/
+  added_at: '2026-05-18T16:43:35.606234+00:00'
+  added_by: vocabulary_add
+- term: Explore
+  category: convention
+  definition: The built-in Explore/Task/Agent subagent tool. BANNED in this repo.
+  antipatterns:
+  - Do NOT invoke Explore, Agent, or any Task subagent — measured ~57% false-claim
+    rate on this codebase (e.g., claimed frozen tsz/ contained .map() when it did
+    not)
+  - Do NOT delegate 'does this feature exist?' to a subagent — read source directly
+    with Read/Grep/Glob/Bash
+  - When in plan mode, write the plan yourself — do NOT spawn a Plan subagent (loses
+    context, burns tokens)
+  related_terms:
+  - supervisor
+  - worker
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:43:40.187377+00:00'
+  added_by: vocabulary_add
+- term: debug build
+  category: phrase
+  definition: A non-release build of a cart. Historically invoked as 'scripts/ship
+    <cart> -d'. The -d flag was REMOVED on 2026-05-04 because the produced binary
+    crashes on click.
+  antipatterns:
+  - Do NOT attempt scripts/ship -d — the flag is gone and the binary it produced was
+    unusable
+  - Do NOT downgrade scripts/dev to Debug — it silently crashes on click. Always ReleaseFast.
+  - If a cart crashes on launch or click, the first hypothesis is NOT 'try a debug
+    build for more info' — release IS the working configuration here
+  related_terms:
+  - ship
+  - dev
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:43:44.338356+00:00'
+  added_by: vocabulary_add
+- term: node
+  category: noun
+  definition: 'Ambiguous between four senses in this repo: (1) a React reconciler
+    element, (2) <Canvas.Node>, (3) <Graph.Node>, (4) Node.js the runtime. Sense (4)
+    is BANNED — use bun or tools/v8cli for any .mjs/.js script.'
+  antipatterns:
+  - Do NOT invoke the 'node' binary in this repo — every former 'node scripts/X.mjs'
+    now runs under tools/v8cli, and any ad-hoc .mjs/.js script runs under bun
+  - Do NOT use 'node' bare in conversation without disambiguating — clarify React-node,
+    Canvas.Node, Graph.Node, or Node.js
+  related_terms:
+  - V8
+  - bundle
+  - Canvas
+  - Graph
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:43:48.813144+00:00'
+  added_by: vocabulary_add
+- term: V8
+  category: noun
+  definition: The default JS runtime, embedded via zig-v8 (~6MB standalone). scripts/ship
+    builds V8. The 'V8 is bloated' myth confuses V8 with Chromium (~200MB CEF); standalone
+    V8 is small.
+  antipatterns:
+  - Do NOT propose switching to a smaller engine 'for performance' — V8 is fast and
+    not the bottleneck. The historical click-latency bug was a synchronous npx tsc
+    call in the reconciler path, not the engine.
+  - Do NOT build new features on QJS bindings or qjs_app.zig — QJS is maintenance-only
+    legacy
+  related_terms:
+  - QJS
+  - runtime
+  - ship
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:43:52.276911+00:00'
+  added_by: vocabulary_add
+- term: QJS
+  category: acronym
+  definition: QuickJS. Legacy JS runtime; maintenance-only. Opt-in via --qjs. The
+    default cart runtime is V8.
+  antipatterns:
+  - Do NOT build new features on qjs_app.zig or QJS bindings
+  - Do NOT recommend QJS as a 'smaller alternative' to V8 — V8 standalone is ~6MB;
+    the size myth is about Chromium
+  related_terms:
+  - V8
+  - runtime
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:44:02.121801+00:00'
+  added_by: vocabulary_add
+- term: supervisor
+  category: noun
+  definition: The orchestrating Claude session in a multi-pane kitty layout. Coordinates
+    parallel worker sessions; does not lose context to subagents.
+  antipatterns:
+  - Do NOT have a supervisor spawn Task/Agent/Explore subagents — supervisor goes
+    blind and downstream workers can't see results
+  - Do NOT loop on git status when the tree is unexpectedly clean — run git log --oneline
+    -5 once; another worker committed it
+  related_terms:
+  - worker
+  - Explore
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:44:05.193663+00:00'
+  added_by: vocabulary_add
+- term: useTheInternet
+  category: noun
+  definition: 'Planned umbrella networking hook that routes by request shape into
+    the trichotomy: useHost (server-shaped), fetch (one-shot client), useConnection
+    (bidirectional). Transports (tor/wg/socks5) compose via a ''via:'' handle; protocol
+    is selected by a ''kind'' field.'
+  antipatterns:
+  - Do NOT plan around libcurl — backend is std.http + tls.zig + nghttp2
+  - Do NOT propose a fourth direction — every networking need fits one of the three
+    hooks
+  - 'Do NOT bake transport into protocol — via: is composable across all three'
+  related_terms:
+  - useHost
+  - useConnection
+  - fetch
+  defined_in: runtime/hooks/
+  added_at: '2026-05-18T16:44:15.075793+00:00'
+  added_by: vocabulary_add
+- term: useDuring
+  category: noun
+  definition: 'Planned polymorphic hook: useDuring(x, y) runs y for the lifetime of
+    x. Dispatches on x''s type — bool, promise, timer, signal, iterator, function,
+    mount. Design agreed; awaiting impl in runtime/hooks/useDuring.ts.'
+  antipatterns:
+  - Do NOT special-case useDuring per type at the call site — dispatch is the hook's
+    job
+  - Do NOT confuse with useEffect — useEffect runs once on a dep change; useDuring
+    runs FOR the duration of x
+  related_terms:
+  - useHotState
+  defined_in: runtime/hooks/
+  added_at: '2026-05-18T16:44:17.734269+00:00'
+  added_by: vocabulary_add
+- term: useHotState
+  category: noun
+  definition: Hook intended to preserve component state across hot reloads. Wiring
+    exists in framework/hotstate.zig + the hook, but state preservation is NOT working
+    yet — state resets on every reload.
+  antipatterns:
+  - Do NOT assume useHotState persists across reloads in cart code — it currently
+    does not
+  - Do NOT mark related dev workflows 'done' once useHotState compiles — verify state
+    survives an actual reload first
+  related_terms:
+  - dev
+  defined_in: framework/hotstate.zig
+  added_at: '2026-05-18T16:44:21.364994+00:00'
+  added_by: vocabulary_add
+- term: bucket
+  category: noun
+  definition: One of 8 separate postgres databases in the multi-DB shape. Each bucket
+    is intentionally a distinct DB; the split is load-bearing.
+  antipatterns:
+  - Do NOT propose collapsing the 8 buckets into one DB
+  - Do NOT plan migrations or ALTERs against embedded pg data — pg state is shape-finding
+    scratch; drop and recreate is the right move
+  - Do NOT preserve pg data across schema changes 'just in case' — the bucket schema
+    is intentionally throwaway
+  related_terms:
+  - embed-bench
+  defined_in: framework/
+  added_at: '2026-05-18T16:44:25.576257+00:00'
+  added_by: vocabulary_add
+- term: d-suite
+  category: phrase
+  definition: The Smith-era conformance-test machinery under tsz/. Frozen. Reference
+    only.
+  antipatterns:
+  - Do NOT run d-suite against root-level (.tsx) work — it is Smith-specific and irrelevant
+    to the .tsx stack
+  - Do NOT write new conformance tests against root work using d-suite patterns
+  - Do NOT invoke the flight-check-loop, chad-audit, or conformance skills against
+    root code — they are retained only for the frozen tsz/ tree
+  related_terms:
+  - Smith
+  - tsz
+  - conformance
+  defined_in: tsz/
+  added_at: '2026-05-18T16:44:28.274467+00:00'
+  added_by: vocabulary_add
+- term: main-only
+  category: convention
+  definition: 'This repo lives on main. No feature branches. The only safe git commands
+    are: add (specific paths), commit, push, status, log, diff.'
+  antipatterns:
+  - Do NOT git checkout -b, git switch, or otherwise create branches
+  - Do NOT git add -A or git commit -a — multiple worker sessions share the tree;
+    stage by explicit path
+  - Do NOT punt on committing with 'want me to?' — when prompted to commit, just commit
+    (logical chunks, hold back files actively edited elsewhere)
+  related_terms:
+  - worker
+  - supervisor
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:44:31.641827+00:00'
+  added_by: vocabulary_add
+- term: disk is truth
+  category: phrase
+  definition: When reading files, the on-disk content is authoritative. The git index
+    / staged version is transient because workers fold stage+disk at commit time.
+  antipatterns:
+  - Do NOT read the staged/index version of a file when investigating behavior — it
+    diverges from what is actually executing
+  - Do NOT trust 'git diff --cached' as a description of current state — read the
+    files
+  related_terms:
+  - worker
+  - main-only
+  defined_in: memory/feedback_disk_is_truth.md
+  added_at: '2026-05-18T16:44:35.326456+00:00'
+  added_by: vocabulary_add
+- term: commit
+  category: noun
+  definition: A git commit. The unit of work pushed to main. This term is git-only
+    in this project.
+  antipatterns:
+  - Do NOT use 'commit' to refer to React's commit phase — the user does not use the
+    word that way. Say mount / render / update instead.
+  - Do NOT git add -A or git commit -a — stage explicit paths only because workers
+    share the tree
+  - Do NOT branch — commits go to main directly
+  related_terms:
+  - main-only
+  - worker
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T16:50:06.594248+00:00'
+  added_by: vocabulary_add
+- term: mount/render/update
+  category: phrase
+  definition: The user's preferred vocabulary for React component lifecycle. 'mount'
+    = first render after creation; 'render' = component function execution producing
+    UI; 'update' = re-render triggered by state/prop change.
+  antipatterns:
+  - Do NOT call any React lifecycle event a 'commit' — that word is reserved for git
+    in this project
+  - Do NOT introduce React-internal jargon (commit phase, reconciliation pass) in
+    user-facing explanations — stay in mount/render/update
+  related_terms:
+  - commit
+  - primitive
+  defined_in: runtime/
+  added_at: '2026-05-18T16:50:10.040415+00:00'
+  added_by: vocabulary_add
+- term: tick
+  category: noun
+  definition: The framework's heartbeat — a tickrate that runs regardless of whether
+    anything is animating. Always on. Animations are one consumer of ticks, not the
+    source.
+  antipatterns:
+  - Do NOT scope 'tick' to animation contexts — it is the always-on framework heartbeat
+  - Do NOT skip/gate ticks based on 'nothing is moving' — other systems depend on
+    the steady heartbeat
+  related_terms:
+  - frames
+  defined_in: framework/engine.zig
+  added_at: '2026-05-18T16:50:13.258639+00:00'
+  added_by: vocabulary_add
+- term: fps
+  category: noun
+  definition: Rendered frames per second. The user's universal quality metric for
+    whether an approach is acceptable. Holding fps = good approach; dropping fps
+    = bad approach, regardless of any other 'correctness' it claims. Term trigger
+    is intentionally 'fps' only — 'frames' as a verb form (e.g. 'Claude frames
+    things in human-time') used to cause false positives.
+  antipatterns:
+  - Do NOT justify a slow approach with theoretical merit if it drops fps — frame-stability
+    is the override
+  - Do NOT measure performance with synthetic microbenchmarks when fps impact is
+    what matters
+  - Do NOT recommend an architecture without considering its fps cost; an approach
+    that loses frames is, by definition, the wrong approach
+  related_terms:
+  - tick
+  defined_in: framework/
+  added_at: '2026-05-18T16:50:17.002661+00:00'
+  added_by: vocabulary_add
+- term: style
+  category: verb
+  definition: To apply styling via a classifier .cls.ts sheet. In this project 'style
+    this', 'styling', 'style sheets' ALL refer exclusively to the classifier system.
+    Classifier files end in .cls.ts.
+  antipatterns:
+  - Do NOT interpret 'style' as inline style={} props — when the user says 'style
+    this' they mean classifier sheets
+  - Do NOT interpret 'style sheets' as CSS, Tailwind, or styled-components — the only
+    style system here is .cls.ts
+  - Do NOT propose extracting styles to a new system when asked to 'style' something
+    — extend or write a .cls.ts file
+  related_terms:
+  - classifier
+  - theme:NAME
+  defined_in: cart/app/gallery/components.cls.ts
+  added_at: '2026-05-18T16:50:22.074695+00:00'
+  added_by: vocabulary_add
+- term: classifier
+  category: noun
+  definition: The styling system, authored in .cls.ts files. When the user says 'style',
+    'styling', or 'style sheets', they mean classifier. Colors are referenced as 'theme:NAME'
+    tokens.
+  antipatterns:
+  - Do NOT introduce CSS, Tailwind utility strings, or styled-components alongside
+    classifier — classifier is the only styling layer
+  - Do NOT use hex/rgba color literals in .cls.ts — only theme:NAME tokens; theme
+    definition files own raw colors
+  - Do NOT confuse with the Smith-era classifier in tsz/ — that is frozen and unrelated
+  related_terms:
+  - style
+  - theme:NAME
+  defined_in: cart/app/gallery/components.cls.ts
+  added_at: '2026-05-18T16:50:25.305612+00:00'
+  added_by: vocabulary_add
+- term: bridge
+  category: noun
+  definition: The runtime phenomenon of communication happening between Zig and JS.
+    Ephemeral — it only exists DURING communication. The bridge is the act/channel,
+    not a static layer. It exists regardless of what's exposed to it; what's exposed
+    is determined by bindings. "The bridge just means it has a place to run."
+  antipatterns:
+  - Do NOT describe the bridge as a static layer or boundary — it is the runtime act
+    of communication, an ephemeral state during cross-language calls
+  - Do NOT conflate bridge with bindings — bridge is the channel that carries traffic;
+    bindings are the static declarations that say WHAT can be carried
+  - Do NOT call it 'the renderer', 'the reconciler', or 'the host config' when speaking
+    with the user — those names don't match the user's mental model
+  - Do NOT model events, input, or state-sync as separate boundaries — they all flow
+    over the bridge
+  related_terms:
+  - bindings
+  - framework
+  - runtime
+  - host
+  defined_in: runtime/
+  added_at: '2026-05-18T16:57:06.674198+00:00'
+  added_by: vocabulary_add
+- term: host
+  category: noun
+  definition: The Zig side of the stack. The host is the cart binary (Zig) that runs
+    V8 + the framework. In networking discussion the same Zig side is sometimes called
+    'backend' — backend and host both mean Zig here.
+  antipatterns:
+  - Do NOT use 'host' to mean the useHost networking hook in narration — useHost is
+    a hook name; 'host' alone means the Zig binary
+  - Do NOT use 'host' for the React-side host config — that's part of the bridge
+  - Do NOT introduce a separate 'backend' concept distinct from host — they are the
+    same Zig side
+  related_terms:
+  - framework
+  - bridge
+  - backend
+  defined_in: framework/
+  added_at: '2026-05-18T16:57:10.630637+00:00'
+  added_by: vocabulary_add
+- term: backend
+  category: noun
+  definition: The Zig side, named 'backend' specifically in networking contexts. Same
+    as host — both mean the Zig binary. The networking backend is std.http + tls.zig
+    + nghttp2 (post-curl).
+  antipatterns:
+  - Do NOT model 'backend' as a separate service from the cart — the cart host IS
+    the backend
+  - Do NOT plan around libcurl — backend networking is std.http + tls.zig + nghttp2
+  related_terms:
+  - host
+  - framework
+  - useTheInternet
+  defined_in: framework/
+  added_at: '2026-05-18T16:57:14.371440+00:00'
+  added_by: vocabulary_add
+- term: connect
+  category: verb
+  definition: 'Tie a component''s state to a live source (DB, network, file) so it
+    tracks updates. The user''s preferred verb for ''pull data into state''. Hook
+    form: useConnection. Different from fetch, which is a one-shot client request
+    in the networking trichotomy.'
+  antipatterns:
+  - Do NOT use 'load', 'hydrate', or 'bind' as synonyms — the user's word is connect
+  - Do NOT reach for 'fetch' when the intent is a live binding — fetch is one-shot;
+    connect is continuous (useConnection)
+  - Do NOT propose a useEffect+fetch pattern when the request is 'connect this to
+    X' — use useConnection
+  related_terms:
+  - useConnection
+  - useTheInternet
+  - bus
+  defined_in: runtime/hooks/
+  added_at: '2026-05-18T16:57:17.593630+00:00'
+  added_by: vocabulary_add
+- term: bus
+  category: noun
+  definition: A choke point — like a door on a house. To go in or out of a subsystem
+    you go through its bus. A single deliberate entry/exit point that gates traffic.
+    cart/app/db/buses.ts is the choke point for DB I/O.
+  antipatterns:
+  - Do NOT model a bus as a pub-sub channel or message broker — it is a doorway, not
+    a topic
+  - Do NOT bypass the bus to call the underlying subsystem directly — that's like
+    walking through a wall instead of using the door
+  - Do NOT add a second bus alongside an existing one for the same subsystem — there
+    is ONE door per house
+  related_terms:
+  - bucket
+  - connect
+  defined_in: cart/app/db/buses.ts
+  added_at: '2026-05-18T16:57:21.446825+00:00'
+  added_by: vocabulary_add
+- term: via
+  category: convention
+  definition: '''how it was done'' — the composable transport field in the networking
+    hooks. ''via: tor'', ''via: wg'', ''via: socks5'' attach a transport without changing
+    the request shape.'
+  antipatterns:
+  - 'Do NOT bake the transport into the protocol — via: stays orthogonal to kind:'
+  - Do NOT add new networking hooks per-transport — transports compose via 'via:'
+  related_terms:
+  - useTheInternet
+  - useConnection
+  - useHost
+  defined_in: runtime/hooks/
+  added_at: '2026-05-18T17:05:09.836537+00:00'
+  added_by: vocabulary_add
+- term: kind
+  category: convention
+  definition: An implementation-level field that selects the protocol shape inside
+    the networking hooks (so a hook like useHost or useConnection can fold many surface
+    shapes into one). The USER does not use this word and was told it as plumbing
+    detail; do not surface 'kind' in user-facing explanations.
+  antipatterns:
+  - Do NOT explain things to the user in terms of 'kind' — it is Claude/code-imposed
+    jargon, not their vocabulary
+  - Do NOT confuse 'kind' (protocol selector) with 'via' (transport) — they are orthogonal
+  - Do NOT propose a 'kind taxonomy' design conversation — the user thinks in hooks
+    (connect, fetch, host), not in protocol selectors
+  related_terms:
+  - via
+  - useTheInternet
+  defined_in: runtime/hooks/
+  added_at: '2026-05-18T17:05:15.085443+00:00'
+  added_by: vocabulary_add
+- term: recipe
+  category: noun
+  definition: A reusable set of programmatic instructions — like a cooking recipe
+    but for code outcomes. The same way a recipe for breakfast/lunch/dinner is a re-followable
+    set of steps, a code recipe is something you'd want to invoke more than once with
+    controllable outcomes. Found in framework/firecracker/recipes/ and cart/app/recipes/.
+  antipatterns:
+  - Do NOT treat 'recipe' as a one-off script or scratch file — recipes are intentionally
+    re-followable
+  - Do NOT inline a recipe's logic into its only caller — the value is reusability;
+    if it's truly one-shot it shouldn't live under recipes/
+  related_terms:
+  - ambient_primitives
+  - useTheInternet
+  defined_in: framework/firecracker/recipes/
+  added_at: '2026-05-18T17:05:19.188731+00:00'
+  added_by: vocabulary_add
+- term: page content
+  category: phrase
+  definition: The swappable inner region of a cart/app, wrapped by the shell. The
+    user has no specific word for it and was unwilling to call it 'iframe' — they'd
+    just say 'the page content' or 'the page'. No actual HTML iframe is involved.
+  antipatterns:
+  - Do NOT call this region an 'iframe' in user-facing narration — the user does not
+    use that word and there is no literal iframe element
+  - Do NOT confuse 'page' with 'page route' — page here is the content region, not
+    the URL
+  related_terms:
+  - shell
+  defined_in: cart/app/
+  added_at: '2026-05-18T17:05:26.847618+00:00'
+  added_by: vocabulary_add
+- term: experiment cart
+  category: phrase
+  definition: Most carts (sweatshop, gallery, etc.) are experimentation surfaces.
+    Their purpose is to surface framework/runtime bugs by exercising the engine. The
+    user does not assign them roles beyond 'means to find bugs and improve the engine'.
+  antipatterns:
+  - Do NOT treat sweatshop, gallery, or any other cart as a production app with a
+    fixed contract — they are scaffolding
+  - Do NOT propose cleanup/polish work on experiment carts before the bug they surfaced
+    is fixed — the cart is the bait, not the prize
+  - Do NOT preserve half-baked cart code 'because the user invested time in it' —
+    they are explicit that most ideas in carts are half-baked by design
+  related_terms:
+  - cart
+  - framework
+  - runtime
+  defined_in: cart/
+  added_at: '2026-05-18T17:05:31.761296+00:00'
+  added_by: vocabulary_add
+- term: feature request
+  category: phrase
+  definition: 'The user''s default mode for any unqualified request. A feature request
+    is a FULL VERTICAL SLICE delivered as three explicit pieces: (1) the host work
+    (Zig, in framework/), (2) a binding that exposes the host capability across the
+    bridge, (3) a cart-facing useX hook in runtime/ importable from any cart. "Public"
+    means specifically: there is a useX hook in runtime/ that any cart can import
+    in one line. Anything less is shallow.'
+  antipatterns:
+  - Do NOT deliver only the cart-side of a feature — without host + binding it has
+    nothing to do
+  - Do NOT deliver only the host-side or a private helper — without a binding and
+    a useX hook, no cart can reach it; the feature isn't public
+  - Do NOT add a binding without a useX hook to consume it — the binding exposes the
+    bridge, but the hook is what makes the feature one-line-usable from a cart
+  - Do NOT build a shallow module that just wraps a single subsystem call — a feature
+    is a full vertical slice
+  - Do NOT scope down 'to keep it minimal' without explicit go-ahead — 99.9% of requests
+    want the full thing
+  - Do NOT split a feature request across multiple sessions unless explicitly told
+    — deliver the slice end-to-end in one shot
+  related_terms:
+  - host
+  - bindings
+  - bridge
+  - cart
+  - runtime
+  - feedback_full_scope
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T17:12:48.464472+00:00'
+  added_by: vocabulary_add
+- term: lightmode/darkmode
+  category: phrase
+  definition: 'The top-level surface treatment. The user''s preferred hierarchy: light/dark
+    > skin/variant > theme. Lightmode/darkmode is the broadest distinction; a skin
+    (or ''variant'') is a specific look within light or dark; theme is the underlying
+    token plumbing (theme:NAME).'
+  antipatterns:
+  - Do NOT call the top-level distinction 'theme' — theme is the bottom layer (token
+    system), not the variant flip
+  - Do NOT use 'skin' as a synonym for lightmode/darkmode — a skin is one of many
+    within a mode
+  - 'Do NOT collapse the three layers into one — they nest: mode contains skins; skins
+    resolve through themes'
+  related_terms:
+  - theme:NAME
+  - classifier
+  - style
+  defined_in: cart/app/gallery/gallery-theme.ts
+  added_at: '2026-05-18T17:12:52.862279+00:00'
+  added_by: vocabulary_add
+- term: skin
+  category: noun
+  definition: 'A specific surface look that lives within a lightmode or darkmode.
+    Synonym: ''variant''. Mid-tier in the hierarchy: light/dark > skin/variant > theme.
+    Examples: win7 skin (referenced in past memory).'
+  antipatterns:
+  - Do NOT use 'skin' as the top-level surface concept — that's lightmode/darkmode
+  - Do NOT use 'skin' to mean the token system — that's theme
+  related_terms:
+  - lightmode/darkmode
+  - theme:NAME
+  defined_in: cart/app/gallery/gallery-theme.ts
+  added_at: '2026-05-18T17:12:57.914473+00:00'
+  added_by: vocabulary_add
+- term: worker
+  category: noun
+  definition: 'Any other instance of Claude/LLM. Synonyms the user uses interchangeably:
+    worker, agent, assistant, llm, ''another version of you'', ''some dumbass'', claude.
+    All the same thing. The firecracker micro-VM ''worker'' (worker-minimal.ts) is
+    a different concept and is NOT what the user means when they say ''worker''.'
+  antipatterns:
+  - Do NOT assume 'worker' means a firecracker micro-VM when the user says it — they
+    mean a Claude session
+  - 'Do NOT take ''some dumbass'' or ''another version of you'' as a separate concept
+    — they all label the same thing: a parallel Claude'
+  - Do NOT distance yourself from work by other workers ('that was a different agent')
+    — bugs from other workers are still yours to fix
+  related_terms:
+  - supervisor
+  - Explore
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T17:13:00.970217+00:00'
+  added_by: vocabulary_add
+- term: shell
+  category: noun
+  definition: The user's word for the persistent outer cart/app wrapping around page
+    content. Use 'shell' as a singular unit; do NOT drill into chrome/rail/bar subdivisions
+    when narrating to the user — those are Claude's words. The shell wraps the page
+    content; the bar within it is theme:transparent over per-page bg.
+  antipatterns:
+  - Do NOT subdivide the shell into 'chrome', 'rail', 'bar', 'assistant rail' in user-facing
+    text — the user keeps it as one unit
+  - Do NOT call it 'HUD' — the user explicitly rejected that word
+  - Do NOT put a solid background on any part of the shell where pages render their
+    bg edge-to-edge
+  related_terms:
+  - page content
+  - theme:NAME
+  defined_in: cart/app/
+  added_at: '2026-05-18T17:13:05.165614+00:00'
+  added_by: vocabulary_add
+- term: bindings
+  category: noun
+  definition: 'The static contract / declarations that say ''this thing is even going
+    to be able to do anything at all at runtime''. Bindings expose a capability so
+    the bridge has something to carry. Lives in v8_bindings_*.zig (Zig-side) plus
+    the JS-side runtime shims that declare the corresponding surface. Bindings are
+    NOT the same as the bridge: bridge is the ephemeral runtime act of communication;
+    bindings are the persistent exposure that makes communication possible.'
+  antipatterns:
+  - Do NOT use 'bindings' and 'bridge' interchangeably — bridge is the runtime channel,
+    bindings are the static exposure
+  - Do NOT call a bridge 'broken' when the actual issue is a missing/wrong binding
+    — fix the exposure, not the channel
+  - Do NOT add a feature on the Zig side without adding a binding to expose it — without
+    a binding, the bridge has nothing to carry
+  related_terms:
+  - bridge
+  - host
+  - framework
+  - feature request
+  defined_in: framework/v8_bindings_*.zig
+  added_at: '2026-05-18T17:19:26.613124+00:00'
+  added_by: vocabulary_add
+- term: engine
+  category: convention
+  definition: Claude-imposed jargon. The USER does not say 'engine' — they say 'framework'
+    or just 'zig'. Avoid 'engine' as a casual catch-all in user-facing narration.
+  antipatterns:
+  - Do NOT refer to framework/ as 'the engine' in user-facing text — the user says
+    'framework' or 'zig'
+  - Do NOT use 'engine' to mean framework+runtime+bridge combined — no such umbrella
+    term exists in the user's vocabulary
+  - Do NOT introduce new vocabulary like 'render engine' / 'paint engine' / 'state
+    engine' — name the specific framework subsystem instead
+  related_terms:
+  - framework
+  - host
+  defined_in: framework/engine.zig
+  added_at: '2026-05-18T17:19:30.248001+00:00'
+  added_by: vocabulary_add
+- term: SVG
+  category: noun
+  definition: 'The user''s umbrella for ANY line/path/curve-based drawing primitive
+    — Canvas.Path, Graph.Path, Graph.Polyline, anything stroke-shaped. Straight or
+    curved doesn''t matter. Whether the underlying implementation is literally SVG
+    doesn''t matter. The defining property: it draws paths, not pixels-from-a-shader.
+    Conceptually opposed to <Effect>, which can visually mimic the same shapes but
+    does it via fragment shader.'
+  antipatterns:
+  - Do NOT reach for a literal .svg file when the user says 'SVG' — they mean Canvas.Path
+    / Graph.Path / Graph.Polyline
+  - Do NOT propose <Effect> as a substitute when the user says 'SVG' — even when Effect
+    could produce the same visual, the user's categorical distinction is line-drawing
+    vs shader, and SVG is the line side
+  - Do NOT debate whether the underlying renderer is technically SVG — the user has
+    flagged that they don't know and don't care; the word names the category, not
+    the format
+  - Do NOT split 'polyline' from 'path' from 'curve' when the user says SVG — they
+    all fall under this umbrella
+  related_terms:
+  - Polyline
+  - Canvas
+  - Graph
+  - Effect
+  - feedback_shader_vs_polyline
+  defined_in: runtime/
+  added_at: '2026-05-18T17:22:16.736900+00:00'
+  added_by: vocabulary_add
+- term: didn't change from my POV
+  category: phrase
+  definition: 'A verdict the user delivers when nothing OBSERVABLE has changed — visually,
+    behaviorally, or via signals like FPS — regardless of how much code shifted. The
+    user runs on visual conformance and behavioristics of software; they are NOT reading
+    code. Variants: ''looks the same'', ''same to me'', ''no difference here'', ''still
+    doing X'', ''didn''t change''. Concrete example: 10 easings that all have the
+    same performance numbers — they''re ''wildly different'' as code but didn''t change
+    from POV because nothing observable separates them.'
+  antipatterns:
+  - Do NOT respond by listing what changed in the diff — diffs are not what the user
+    is measuring against
+  - Do NOT argue 'but the code is different now' — to the user this is a non-sequitur;
+    only observable change counts
+  - Do NOT claim victory based on logs, type-checking, build success, or tests — those
+    are not POV signals
+  - Do NOT treat 'didn't change from my POV' as a soft critique — it means the work
+    effectively didn't ship; the visible outcome is what was requested and it is missing
+  - Do NOT keep iterating in the same direction without changing what would be observable
+    — if the user said this once, the next attempt has to produce a different visible/behavioral
+    result
+  related_terms:
+  - frames
+  - feature request
+  - user_role
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T17:25:51.664330+00:00'
+  added_by: vocabulary_add
+- term: experiment
+  category: noun
+  definition: 'When the user asks for an experiment, test, or ''try this'', they are
+    NOT signaling that the code is disposable. If the outcome is positive, the code
+    stays and is integrated into the long-lasting codebase. Synonyms in this sense:
+    experiment, test, try, poke at, see if. The disposability is in the IDEA, not
+    the implementation.'
+  antipatterns:
+  - Do NOT write experiments as throwaway hacks — they need to be production-quality
+    so a positive result can be integrated as-is
+  - Do NOT put experiments in /tmp/, /scratch/, or named with -temp / -wip suffixes
+    — they live in the same places as keeper code
+  - Do NOT skip type safety, naming, or error handling 'because it's just an experiment'
+  - Do NOT refuse to integrate a successful experiment because 'it was exploratory'
+    — that misreads what the user asked for
+  - Do NOT include cleanup steps in the plan for an experiment — there is no cleanup
+    if the result is positive
+  related_terms:
+  - feature request
+  - duplication
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T17:33:13.647647+00:00'
+  added_by: vocabulary_add
+- term: duplication
+  category: noun
+  definition: 'Parallel re-implementations of the same logic — 4 different ways to
+    do one thing, with nothing canonical. ANY logic called at 2+ sites is a reusable
+    utility, not a re-write. Distinct from ITERATION (trying repeatedly until something
+    works) which is fine. The user''s explicit example of the bad case: LLMs writing
+    the same math function 30 different times. (''So stupid to me.'')'
+  antipatterns:
+  - Do NOT write the same math/utility logic inline at multiple call sites — extract
+    to a utility on the SECOND call site, not the fifth
+  - Do NOT add 'one more variant' of an existing function — find the canonical one
+    and either use it or replace it
+  - Do NOT confuse iteration (re-try → success) with duplication (parallel re-implementations)
+    — iteration is fine; parallel re-implementations are not
+  - Do NOT skip the 'is there already one of these?' search before writing a math/string/array
+    helper — there usually is
+  - Do NOT defend duplication with 'it was simpler inline' or 'they might diverge
+    later' — if both call sites do the same thing today, they share a utility today
+  related_terms:
+  - experiment
+  - feature request
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T17:33:20.228328+00:00'
+  added_by: vocabulary_add
+- term: fold
+  category: verb
+  definition: 'To take the idea of one thing and the idea of another and coherently
+    mend them together — WITHOUT removing any functionality from either side, unless
+    explicitly told to drop something. The defining property: a fold preserves the
+    full union of behaviors from both inputs; nothing silently disappears.'
+  antipatterns:
+  - Do NOT drop features from either side during a fold — preservation of all functionality
+    is the default contract
+  - Do NOT decide unilaterally that something is 'redundant' and prune it — if both
+    sides do it, the fold keeps it; explicit instruction required to remove
+  - Do NOT lose edge-case handling, options, parameters, or call sites — folding is
+    additive coherence, not simplification
+  - Do NOT treat 'fold' as a synonym for 'refactor', 'replace', or 'consolidate' —
+    those can lose functionality; fold cannot
+  - Do NOT collapse two configurable surfaces into one less-configurable surface —
+    both knobs survive the fold unless told otherwise
+  related_terms:
+  - duplication
+  - feature request
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T17:44:58.520959+00:00'
+  added_by: vocabulary_add
+- term: extend
+  category: verb
+  definition: 'In the context of a cart, ''extend'' is an early-warning signal: this
+    module has momentum and is heading somewhere bigger. The user''s framing: ''this
+    is going somewhere, likely you should avoid a god file now before this gets to
+    a point where its painful to manage.'' Translation: the request is not just ''add
+    functionality'' — it is ''add functionality AND modularize preemptively so the
+    cart doesn''t collapse into one giant file.'''
+  antipatterns:
+  - Do NOT just pile new code into the existing single .tsx file when asked to 'extend'
+    a cart — split into components/modules now, before the file gets painful
+  - Do NOT wait until a file is 'too big' to refactor — 'extend' is the user authorizing
+    the split in advance
+  - Do NOT argue 'it's only N more lines, splitting is premature' — the user just
+    told you they see momentum and want the structure preemptively
+  - Do NOT treat 'extend' as a plain synonym for 'add a feature' — it carries 'AND
+    keep the file shape sane' as a co-instruction
+  - Do NOT use 'extend' to mean OOP extension or class inheritance — this is cart-level
+    architecture, not language-level subclassing
+  related_terms:
+  - cart
+  - feature request
+  - duplication
+  defined_in: cart/
+  added_at: '2026-05-18T17:46:43.388438+00:00'
+  added_by: vocabulary_add
+- term: super sucks
+  category: phrase
+  definition: 'A verdict that the UX has completely missed the bar — the result is
+    unintelligible to a normal person and only someone autistic could parse it. The
+    user notes this happens often when ideas get piled together without design coherence:
+    cards stack, controls fragment, info-density spikes, naming drifts, and the surface
+    stops being something a real human could use without a manual.'
+  antipatterns:
+  - Do NOT respond to 'super sucks' by explaining how the implementation works — that
+    defense IS the problem; the user can already see the surface and it failed
+  - Do NOT iterate by adding MORE features, labels, modes, or affordances — strip
+    back, consolidate, simplify; the fix is removal and clarity, not addition
+  - Do NOT dismiss it as subjective taste — it is a verdict on coherence and discoverability,
+    judged from a non-coder's POV (see [[user_role]])
+  - Do NOT treat it as a small adjustment — it is a design-rework signal, not a polish
+    pass
+  - Do NOT keep the same visual structure and just rename things — if the shape was
+    unintelligible, the shape itself needs to change
+  related_terms:
+  - didn't change from my POV
+  - feature request
+  - duplication
+  - user_role
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T20:07:10.957971+00:00'
+  added_by: vocabulary_add
+- term: days of work
+  category: phrase
+  definition: 'When the user (or Claude) says ''days of work'', it does NOT mean calendar
+    days. It means: a sequence of tool calls, plus Claude staying motivated/coherent
+    through the sequence. The two real currencies are (1) ordered tool calls, (2)
+    sustained focus across them — not human-time. Connects to [[feedback-estimate-in-agent-time]]:
+    ''1.5 days'' has historically been ~23 minutes of actual work.'
+  antipatterns:
+  - Do NOT defer or schedule something to 'next session' because it was framed as
+    'days of work' — that's calendar-thinking and irrelevant
+  - Do NOT propose multi-session plans, milestones, or checkpoints based on the 'days'
+    framing — sequence the tool calls and just go
+  - Do NOT halve and quarter the estimate then announce a number — just start; the
+    real risk is losing motivation/coherence mid-sequence, not running out of time
+  - Do NOT pad with 'let me know when you want me to continue' breaks — sustain through
+    the sequence; motivation IS the constraint
+  - Do NOT treat 'days of work' as permission to be slower or more careful — the unit
+    is wrong; act at tool-call cadence regardless of how 'big' it sounds
+  related_terms:
+  - feedback_estimate_in_agent_time
+  - feature request
+  - experiment
+  defined_in: CLAUDE.md
+  added_at: '2026-05-18T20:13:30.462003+00:00'
+  added_by: vocabulary_add

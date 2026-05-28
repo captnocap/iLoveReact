@@ -21,6 +21,10 @@ function hash2(x: number, y: number): number {
   return n - Math.floor(n);
 }
 
+// (clamp01 / smoothstep / lerp / valueNoise / fbm2 / rgbHex were removed with
+// waterA13Tex — they existed only to bake the now-deleted still-frame of A13.
+// The live A13 shader runs on the GPU via @reactjit/effects <Water>.)
+
 // Lerp two colors in sRGB-ish space and return RRGGBBAA.
 function mix(aHex: string, bHex: string, t: number): string {
   const a = comp(aHex);
@@ -65,6 +69,11 @@ export function asphaltTex(baseHex: string, _lineHex: string): Tex {
   }
   return { width: w, height: h, hex };
 }
+
+// Water is no longer a baked texture. It samples the LIVE A13 effect via
+// `textureKey="water-a13"` (render3d/WaterSurface.tsx → @reactjit/effects
+// <Water>). The old waterA13Tex() baked a single still frame of A13 — a dead
+// JS re-port that silently dropped the animation — and was deleted here.
 
 // ── building facade: lit window grid with dark frames ──────────────────────
 export function facadeTex(wallHex: string, winHex: string, cols: number, rows: number): Tex {

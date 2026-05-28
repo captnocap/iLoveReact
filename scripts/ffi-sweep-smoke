@@ -1,0 +1,11 @@
+#!/bin/bash
+# ffi-sweep-smoke — bundle + run scripts/ffi-sweep-smoke.ts under v8cli.
+# Behaviour-parity test for the runtime/ffi sweep (task #1).
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+mkdir -p .cache
+tools/esbuild scripts/ffi-sweep-smoke.ts \
+  --bundle --platform=neutral --format=iife --target=es2022 \
+  --outfile=.cache/ffi-sweep-smoke.bundle.js \
+  --tsconfig-raw='{"compilerOptions":{"target":"es2022","module":"esnext","moduleResolution":"bundler","strict":false}}'
+exec tools/v8cli .cache/ffi-sweep-smoke.bundle.js

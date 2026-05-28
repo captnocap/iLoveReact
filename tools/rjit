@@ -1,0 +1,4 @@
+#!/bin/sh
+set -e
+DIR="$(cd "$(dirname "$0")" && pwd)"
+exec "$DIR/v8cli" "$DIR/rjit.js" "$@"

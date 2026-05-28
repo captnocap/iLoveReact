@@ -5,7 +5,7 @@ import { featureAt } from '../world/atlas';
 import { THINGYMAJIGGERS } from '../thingymajiggers';
 import { findPath, nearestWalkable } from '../world/pathfinding';
 import { buildDecorWindow, buildTileWindow, HALF, type Decor } from '../world/window';
-import { unproject, type Cam, type Rect } from '../world/projection';
+import { unproject, FP_LOOK_PITCH_LIMIT, type Cam, type Rect } from '../world/projection';
 import type { EvidenceAxis, LifeState, Player, VisualSignature } from '../design';
 import {
   adjustArmor,
@@ -144,6 +144,21 @@ function useSceneControls(
       const k = String(ev?.key ?? '').toLowerCase();
       if (k === 'w' || k === 'a' || k === 's' || k === 'd') keys.current[k] = down;
       if (down && k === 'h') increaseHigh(sim.current);
+      // v toggles TP↔FP. Snapping yaw on entry keeps the look direction lined up
+      // with where the player was already facing, so the world doesn't spin under
+      // you; lookPitch resets to 0 (horizon). Leaving FP preserves TP's stored
+      // pitch/zoom, so the orbit framing returns intact.
+      if (down && k === 'v') {
+        const s = sim.current;
+        if (s.mode === 'tp') {
+          s.mode = 'fp';
+          s.yaw = Math.PI / 2 - s.body.facing;
+          s.lookPitch = 0;
+        } else {
+          s.mode = 'tp';
+        }
+        refresh();
+      }
       if (down && k === 'q') {
         dropInHand(sim.current.body, inventory.current, sim.current.px + Math.cos(sim.current.body.facing) * 0.9, sim.current.py + Math.sin(sim.current.body.facing) * 0.9);
         refresh();
@@ -188,8 +203,18 @@ function useWorldLoop({
       const k = keys.current;
       if (k.a) s.yaw -= ROT_SPEED * dt;
       if (k.d) s.yaw += ROT_SPEED * dt;
-      if (k.w) s.pitch = Math.min(0.86, s.pitch + PITCH_SPEED * dt);
-      if (k.s) s.pitch = Math.max(0.40, s.pitch - PITCH_SPEED * dt);
+      // W/S means different things per mode:
+      //  - TP: tilt the orbit (W=more top-down, S=more horizon-level).
+      //  - FP: free-look up/down (W=look up, S=look down). Body facing is
+      //    decoupled from yaw in FP — your body still turns with movement,
+      //    your head can be looking anywhere.
+      if (s.mode === 'fp') {
+        if (k.w) s.lookPitch = Math.min(FP_LOOK_PITCH_LIMIT, s.lookPitch + PITCH_SPEED * dt);
+        if (k.s) s.lookPitch = Math.max(-FP_LOOK_PITCH_LIMIT, s.lookPitch - PITCH_SPEED * dt);
+      } else {
+        if (k.w) s.pitch = Math.min(0.86, s.pitch + PITCH_SPEED * dt);
+        if (k.s) s.pitch = Math.max(0.40, s.pitch - PITCH_SPEED * dt);
+      }
       advancePlayer(s, dt);
       for (const e of entsRef.current) {
         if (e.kind !== 'npc' || e.quest || e.dead) continue;
@@ -589,7 +614,7 @@ export function useScapeWorld(chat: ChatGate): ScapeWorld {
 
   const s = sim.current;
   const r = rectRef.current;
-  const cam: Cam = { px: s.px, py: s.py, yaw: s.yaw, pitch: s.pitch, zoom: s.zoom };
+  const cam: Cam = { px: s.px, py: s.py, yaw: s.yaw, pitch: s.pitch, zoom: s.zoom, mode: s.mode, lookPitch: s.lookPitch };
   const winOX = Math.floor(s.px) - HALF;
   const winOY = Math.floor(s.py) - HALF;
   const winTiles = useMemo(() => buildTileWindow(winOX, winOY), [winOX, winOY]);

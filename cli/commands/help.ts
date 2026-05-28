@@ -1,0 +1,225 @@
+// cli/commands/help.ts - top-level help for the rjit CLI.
+
+import { tryFsRead } from '../host/fs.ts';
+import { err, out } from '../host/log.ts';
+
+const TEMPLATES = ['basic', 'routes', 'dashboard', 'taskboard', 'canvas', 'stdlib'];
+const SUBCOMMANDS = ['init', 'dev', 'tui', 'ship', 'ship-tui', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
+
+type HelpCommand = typeof SUBCOMMANDS[number];
+
+const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; detail: string[] }> = {
+  init: {
+    summary: 'scaffold a new cart from a template',
+    usage: ['rjit init <directory>', 'rjit init <directory> <template>', 'rjit init <template> <directory>'],
+    detail: [
+      'Templates:',
+      `  ${TEMPLATES.join(', ')}`,
+      '',
+      'The one-argument form uses the basic template.',
+      'The directory is created if it does not exist; existing files are',
+      'never overwritten.',
+    ],
+  },
+  dev: {
+    summary: 'iterate on a cart with hot reload',
+    usage: ['rjit dev <cart-name> [--gui|--tui]'],
+    detail: [
+      'Bundles cart/<name>.tsx -> .cache/bundle-<name>.js, then either:',
+      '  1. pushes the bundle to a running dev host (one already on',
+      '     /tmp/reactjit.sock), upserting its tab, or',
+      '  2. spawns a fresh dev host and starts a watch loop that',
+      '     re-pushes on every save.',
+      '',
+      'TSX / TS edits hot-reload in ~300ms. Zig / framework / build.zig',
+      'edits require a rebuild.',
+      '',
+      '--tui (alias --headless) runs the headless substrate; --gui is the',
+      'default unless cart.json declares "surface": "tui".',
+    ],
+  },
+  ship: {
+    summary: 'build a cart into a single self-extracting binary',
+    usage: ['rjit ship <cart-name> [--gui|--tui]          # release, self-extracting'],
+    detail: [
+      'Pipeline:',
+      '  1. esbuild cart/<name>.tsx -> bundle-<name>.js',
+      "  2. resolver inspects the bundle's metafile and selects the",
+      '     -Dhas-* feature flags from sdk/dependency-registry.json',
+      '  3. zig build app -> zig-out/bin/<name>',
+      '  4. ldd-walk + tar + self-extracting shell header',
+      '',
+      'Result is one file you can move anywhere; on first run it',
+      'extracts to ~/.cache/reactjit-<name>/<sig>/ and execs.',
+      '',
+      '--tui (alias --headless) builds the headless substrate; --gui is the',
+      'default unless cart.json declares "surface": "tui".',
+    ],
+  },
+  tui: {
+    summary: 'compatibility alias for dev --tui',
+    usage: ['rjit tui <cart-name>'],
+    detail: [
+      'Equivalent to:',
+      '  rjit dev <cart-name> --tui',
+      '',
+      'Kept for muscle memory during the migration; the canonical command is',
+      'rjit dev <cart-name> --tui.',
+    ],
+  },
+  'ship-tui': {
+    summary: 'compatibility alias for ship --tui',
+    usage: ['rjit ship-tui <cart-name> [--fat]'],
+    detail: [
+      'Equivalent to:',
+      '  rjit ship <cart-name> --tui',
+      '',
+      'Kept for muscle memory during the migration; the canonical command is',
+      'rjit ship <cart-name> --tui.',
+    ],
+  },
+  autotest: {
+    summary: 'run a headless witness test and proof grid',
+    usage: ['rjit autotest <name>'],
+    detail: [
+      'Looks for tests/<name>.autotest and cart/<name>/index.tsx or',
+      'cart/<name>.tsx.',
+      '',
+      'Builds the cart when needed, runs the binary with ZIGOS_WITNESS=autotest,',
+      'then calls scripts/autotest-grid to write tests/screenshots/<name>/proof.png',
+      'and archive the run under a timestamped PASS/FAIL directory.',
+    ],
+  },
+  classify: {
+    summary: 'extract and migrate JSX classifier patterns',
+    usage: [
+      'rjit classify [--dir path] [--output file] [--min n] [--dry-run]',
+      'rjit classify migrate|rename|add|partial|theme|pick ...',
+    ],
+    detail: [
+      'Scans TSX files for repeated primitive style/prop patterns and writes',
+      'a .cls.ts classifier sheet. Subcommands handle migration, renaming,',
+      'manual classifier insertion, partial-pattern mining, and theme-token',
+      'suggestions.',
+    ],
+  },
+  'bake-icons': {
+    summary: 'bake runtime icon polylines into the GPU SDF atlas',
+    usage: ['rjit bake-icons'],
+    detail: [
+      'Reads runtime/icons/icons.ts and writes:',
+      '  framework/gpu/icon_atlas.zig',
+      '  framework/gpu/icon_atlas_debug.ppm.txt',
+      '  runtime/icons/baked-names.ts',
+    ],
+  },
+  'pack-sdk': {
+    summary: 'build the self-extracting rjit SDK distributable',
+    usage: ['rjit pack-sdk [--out path] [--keep-stage]'],
+    detail: [
+      'Stages the toolchain, runtime/framework sources, dependency registry,',
+      'vendored packages, generated CLI bundle, and sysroot payload into a',
+      'single shell self-extractor.',
+    ],
+  },
+  'firecracker-build': {
+    summary: 'build a Firecracker rootfs from a TS recipe',
+    usage: ['rjit firecracker-build <recipe.ts>'],
+    detail: [
+      'Bundles the recipe with esbuild, evaluates its default export, then',
+      'runs mmdebstrap to emit the requested ext4 or squashfs image and',
+      'writes a manifest beside the image.',
+    ],
+  },
+  help: {
+    summary: 'print this help, or per-subcommand help',
+    usage: ['rjit help', 'rjit help <subcommand>'],
+    detail: [],
+  },
+};
+
+interface Registry {
+  features?: Record<string, { buildOptions?: string[] }>;
+}
+
+export async function run(argv: string[]): Promise<number> {
+  const target = argv[0];
+  const registry = readRegistry();
+  if (!target) {
+    printTopLevel(registry);
+    return 0;
+  }
+  return printSubcommand(target);
+}
+
+export function printTopLevel(registry: Registry | null = readRegistry()): void {
+  const lines = [
+    'rjit - ReactJIT cart toolchain',
+    '',
+    'Usage:',
+    '  rjit <subcommand> [args]',
+    '',
+    'Subcommands:',
+  ];
+  for (const name of SUBCOMMANDS) {
+    lines.push(`  ${pad(name, 8)}${SUBCOMMAND_DOC[name].summary}`);
+  }
+  lines.push('');
+  lines.push('Run `rjit help <subcommand>` for details.');
+  lines.push('');
+  const features = listFeatures(registry);
+  if (features.length) {
+    lines.push('Source-driven build features (selected by the resolver from');
+    lines.push("the cart's esbuild metafile; you don't pass these by hand):");
+    lines.push(...features);
+    lines.push('');
+  }
+  __writeStdout(lines.join('\n') + '\n');
+}
+
+function printSubcommand(name: string): number {
+  if (!isHelpCommand(name)) {
+    err(`rjit help: unknown subcommand: ${name}`);
+    err('try: rjit help');
+    return 1;
+  }
+  const doc = SUBCOMMAND_DOC[name];
+  const lines = [`rjit ${name} - ${doc.summary}`, '', 'Usage:'];
+  for (const usage of doc.usage) lines.push(`  ${usage}`);
+  if (doc.detail.length) {
+    lines.push('');
+    lines.push(...doc.detail);
+  }
+  out(lines.join('\n'));
+  return 0;
+}
+
+function readRegistry(): Registry | null {
+  const raw = tryFsRead(`${__cwd()}/sdk/dependency-registry.json`);
+  if (raw === null) return null;
+  try {
+    return JSON.parse(raw) as Registry;
+  } catch {
+    return null;
+  }
+}
+
+function listFeatures(registry: Registry | null): string[] {
+  if (!registry?.features) return [];
+  const lines: string[] = [];
+  for (const name of Object.keys(registry.features).sort()) {
+    const feature = registry.features[name]!;
+    const flags = (feature.buildOptions ?? []).map((option) => `-D${option}=true`).join(' ');
+    lines.push(`  ${pad(name, 16)}${flags || '(no build flag)'}`);
+  }
+  return lines;
+}
+
+function pad(value: string, length: number): string {
+  if (value.length >= length) return `${value}  `;
+  return value + ' '.repeat(length - value.length);
+}
+
+function isHelpCommand(value: string): value is HelpCommand {
+  return (SUBCOMMANDS as readonly string[]).includes(value);
+}
