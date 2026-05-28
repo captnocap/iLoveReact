@@ -85,29 +85,19 @@ comptime {
 }
 
 // ════════════════════════════════════════════════════════════════════════
-// Procedural geometry
+// Geometry buffers
 // ════════════════════════════════════════════════════════════════════════
-
-// Two distinct caps:
-//   MAX_MESH_VERTS — CPU staging buffer for *one* generateGeometry call.
-//                    Each mesh's verts are built into g_geo_buf starting at
-//                    index 0; this caps a single mesh's tessellation.
-//   MAX_FRAME_VERTS — GPU vertex buffer total across all meshes drawn in
-//                    one Scene3D render pass. Each drawMesh appends at a
-//                    cumulative byte offset, so draws don't read each
-//                    other's bytes.
 //
-// Sizing: this is immediate-mode (geometry regenerated + uploaded each frame), but
-// the buffers are allocated ONCE and writeBuffer only uploads the bytes actually
-// drawn — so a larger ceiling costs reserved GPU memory, NOT per-frame work. A full
-// baked city + detailed props (e.g. sphere-bearing palms ×13 ≈ 130k verts) blew the
-// old 64k. Raised to 256k verts / 2048 draws (≈ 8 MB vert + 0.5 MB uniform) for
-// generous headroom. Non-indexed, u64 offsets — no 16-bit index limit applies. If a
-// scene ever needs HUNDREDS of detailed objects, the real fix is retained/instanced
-// buffers (generate once, redraw), not a bigger scratch buffer.
-const MAX_MESH_VERTS = 16384; // heightfield terrain meshes need headroom (~52×52 cells + skirt)
+// The framework knows ZERO shape names. Vertices arrive from @reactjit/geometries
+// (TS generators) as bytes; the framework only uploads + draws them. There is no
+// procedural shape generation here anymore — `generateBox`/`generateSphere`/… and
+// the `generateGeometry` shape-name dispatch were deleted (the debug grid that
+// depended on a hardwired box went with them).
+//
+// MAX_FRAME_VERTS caps the per-frame vertex buffer (the cache-full degrade path
+// uploads here). Allocated once; writeBuffer only uploads bytes actually drawn,
+// so a larger ceiling costs reserved GPU memory, not per-frame work.
 const MAX_FRAME_VERTS = 262144;
-var g_geo_buf: [MAX_MESH_VERTS]Vertex = undefined;
 
 // ── Retained geometry intern cache (@reactjit/geometries) ───────────────────
 //
@@ -133,391 +123,15 @@ var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persis
 const UNIFORM_STRIDE: u32 = 256;
 const MAX_DRAW_UNIFORMS: u32 = 2048;
 
-fn pushVertex(buf: []Vertex, idx: *usize, pos: [3]f32, normal: [3]f32, uv: [2]f32) bool {
-    if (idx.* >= buf.len) return false;
-    buf[idx.*] = .{
-        .px = pos[0],
-        .py = pos[1],
-        .pz = pos[2],
-        .nx = normal[0],
-        .ny = normal[1],
-        .nz = normal[2],
-        .u = uv[0],
-        .v = uv[1],
-    };
-    idx.* += 1;
-    return true;
-}
-
-fn addTri(buf: []Vertex, idx: *usize, a: [3]f32, na: [3]f32, uva: [2]f32, b: [3]f32, nb: [3]f32, uvb: [2]f32, c: [3]f32, nc: [3]f32, uvc: [2]f32) bool {
-    return pushVertex(buf, idx, a, na, uva) and
-        pushVertex(buf, idx, b, nb, uvb) and
-        pushVertex(buf, idx, c, nc, uvc);
-}
-
-fn addTriFlat(buf: []Vertex, idx: *usize, a: [3]f32, b: [3]f32, c: [3]f32, n: [3]f32) bool {
-    return addTri(buf, idx, a, n, .{ 0, 0 }, b, n, .{ 1, 0 }, c, n, .{ 1, 1 });
-}
-
-fn addFace(buf: []Vertex, idx: *usize, v1: [3]f32, v2: [3]f32, v3: [3]f32, v4: [3]f32, n: [3]f32) void {
-    const corners = [4][3]f32{ v1, v2, v3, v4 };
-    // V is flipped from the corner order: corners run world bottom→top
-    // (v1..v4 = BL,BR,TR,TL) but WGSL textureSample treats v=0 as the
-    // texture's TOP row. Mapping world-top to v=0 keeps a texture upright on
-    // the face (a <StaticSurface> screen reads right-side-up; symmetric
-    // procedural facades never exposed this).
-    const uvs = [4][2]f32{ .{ 0, 1 }, .{ 1, 1 }, .{ 1, 0 }, .{ 0, 0 } };
-    const tri = [6]u8{ 0, 1, 2, 0, 2, 3 };
-    for (tri) |ti| {
-        _ = pushVertex(buf, idx, corners[ti], n, uvs[ti]);
-    }
-}
-
-fn toArr(v: math.Vec3) [3]f32 {
-    return .{ v.x, v.y, v.z };
-}
-
-fn normal3(x: f32, y: f32, z: f32) [3]f32 {
-    return toArr(math.v3normalize(.{ .x = x, .y = y, .z = z }));
-}
-
-fn generateBox(sx: f32, sy: f32, sz: f32) struct { count: u32 } {
-    const hx = sx * 0.5;
-    const hy = sy * 0.5;
-    const hz = sz * 0.5;
-    var idx: usize = 0;
-    addFace(&g_geo_buf, &idx, .{ -hx, -hy, hz }, .{ hx, -hy, hz }, .{ hx, hy, hz }, .{ -hx, hy, hz }, .{ 0, 0, 1 }); // front
-    addFace(&g_geo_buf, &idx, .{ hx, -hy, -hz }, .{ -hx, -hy, -hz }, .{ -hx, hy, -hz }, .{ hx, hy, -hz }, .{ 0, 0, -1 }); // back
-    addFace(&g_geo_buf, &idx, .{ hx, -hy, hz }, .{ hx, -hy, -hz }, .{ hx, hy, -hz }, .{ hx, hy, hz }, .{ 1, 0, 0 }); // right
-    addFace(&g_geo_buf, &idx, .{ -hx, -hy, -hz }, .{ -hx, -hy, hz }, .{ -hx, hy, hz }, .{ -hx, hy, -hz }, .{ -1, 0, 0 }); // left
-    addFace(&g_geo_buf, &idx, .{ -hx, hy, hz }, .{ hx, hy, hz }, .{ hx, hy, -hz }, .{ -hx, hy, -hz }, .{ 0, 1, 0 }); // top
-    addFace(&g_geo_buf, &idx, .{ -hx, -hy, -hz }, .{ hx, -hy, -hz }, .{ hx, -hy, hz }, .{ -hx, -hy, hz }, .{ 0, -1, 0 }); // bottom
-    return .{ .count = @intCast(idx) };
-}
-
-fn generateSphere(radius: f32, segments: u32, rings: u32) struct { count: u32 } {
-    var idx: usize = 0;
-    const pi = std.math.pi;
-    var i: u32 = 0;
-    while (i < rings) : (i += 1) {
-        const t1 = pi * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(rings));
-        const t2 = pi * @as(f32, @floatFromInt(i + 1)) / @as(f32, @floatFromInt(rings));
-        var j: u32 = 0;
-        while (j < segments) : (j += 1) {
-            const p1 = 2 * pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
-            const p2 = 2 * pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
-            const pt = struct {
-                fn f(r: f32, theta: f32, phi: f32) [3]f32 {
-                    const st = @sin(theta);
-                    return .{ r * st * @cos(phi), r * @cos(theta), r * st * @sin(phi) };
-                }
-                fn n(theta: f32, phi: f32) [3]f32 {
-                    const st = @sin(theta);
-                    return .{ st * @cos(phi), @cos(theta), st * @sin(phi) };
-                }
-            };
-            const a = pt.f(radius, t1, p1);
-            const b = pt.f(radius, t1, p2);
-            const c = pt.f(radius, t2, p2);
-            const d = pt.f(radius, t2, p1);
-            const na = pt.n(t1, p1);
-            const nb = pt.n(t1, p2);
-            const nc = pt.n(t2, p2);
-            const nd = pt.n(t2, p1);
-            // Planar UV projection onto the +Z hemisphere — `u = (nx+1)/2`,
-            // `v = (1-ny)/2`. A texture stamped through this mapping behaves
-            // like a flat decal stuck to the front of the sphere; the back
-            // hemisphere mirrors the front, but back faces are culled and
-            // when visible (e.g. orbiting around) the camera reads the
-            // same image from the rear. Good enough for a face-on-head
-            // moonshot — no longitude/latitude squashing near the poles.
-            const ua: f32 = (na[0] + 1.0) * 0.5;
-            const va: f32 = (1.0 - na[1]) * 0.5;
-            const ub: f32 = (nb[0] + 1.0) * 0.5;
-            const vb: f32 = (1.0 - nb[1]) * 0.5;
-            const uc: f32 = (nc[0] + 1.0) * 0.5;
-            const vc: f32 = (1.0 - nc[1]) * 0.5;
-            const ud: f32 = (nd[0] + 1.0) * 0.5;
-            const vd: f32 = (1.0 - nd[1]) * 0.5;
-            if (idx + 6 > MAX_MESH_VERTS) return .{ .count = @intCast(idx) };
-            // Triangle 1: a, d, c
-            g_geo_buf[idx] = .{ .px = a[0], .py = a[1], .pz = a[2], .nx = na[0], .ny = na[1], .nz = na[2], .u = ua, .v = va };
-            idx += 1;
-            g_geo_buf[idx] = .{ .px = d[0], .py = d[1], .pz = d[2], .nx = nd[0], .ny = nd[1], .nz = nd[2], .u = ud, .v = vd };
-            idx += 1;
-            g_geo_buf[idx] = .{ .px = c[0], .py = c[1], .pz = c[2], .nx = nc[0], .ny = nc[1], .nz = nc[2], .u = uc, .v = vc };
-            idx += 1;
-            // Triangle 2: a, c, b
-            g_geo_buf[idx] = .{ .px = a[0], .py = a[1], .pz = a[2], .nx = na[0], .ny = na[1], .nz = na[2], .u = ua, .v = va };
-            idx += 1;
-            g_geo_buf[idx] = .{ .px = c[0], .py = c[1], .pz = c[2], .nx = nc[0], .ny = nc[1], .nz = nc[2], .u = uc, .v = vc };
-            idx += 1;
-            g_geo_buf[idx] = .{ .px = b[0], .py = b[1], .pz = b[2], .nx = nb[0], .ny = nb[1], .nz = nb[2], .u = ub, .v = vb };
-            idx += 1;
-        }
-    }
-    return .{ .count = @intCast(idx) };
-}
-
-fn generatePlane(sx: f32, sz: f32) struct { count: u32 } {
-    const hx = sx * 0.5;
-    const hz = sz * 0.5;
-    var idx: usize = 0;
-    addFace(&g_geo_buf, &idx, .{ -hx, 0, -hz }, .{ hx, 0, -hz }, .{ hx, 0, hz }, .{ -hx, 0, hz }, .{ 0, 1, 0 });
-    return .{ .count = @intCast(idx) };
-}
-
-// ── Heightfield ───────────────────────────────────────────────────────────
-// A continuous terrain surface: a (cols×rows) grid of corner heights becomes a
-// triangle mesh with smooth per-vertex normals (central-difference gradient),
-// plus a perimeter skirt dropping the boundary edges to `base` so cliffs aren't
-// see-through. Centered at origin spanning ±w/2 × ±h/2 in X/Z; vertex Y IS the
-// corner height (so the cart passes position.y = 0 and absolute heights). This
-// is what turns a per-tile-stepped hill into a real ramp.
-fn hfClamped(heights: []const f32, cols: u32, rows: u32, i: i32, j: i32) f32 {
-    const ci: u32 = @intCast(std.math.clamp(i, 0, @as(i32, @intCast(cols)) - 1));
-    const cj: u32 = @intCast(std.math.clamp(j, 0, @as(i32, @intCast(rows)) - 1));
-    return heights[cj * cols + ci];
-}
-
-const HeightfieldWave = struct {
-    amplitude: f32 = 0,
-    length: f32 = 0,
-    speed: f32 = 0,
-    dir_x: f32 = 1,
-    dir_z: f32 = 0,
-    phase: f32 = 0,
-};
-
-fn hfWaveHeight(wave: HeightfieldWave, x: f32, z: f32, t: f32) f32 {
-    if (@abs(wave.amplitude) <= 0.0001 or wave.length <= 0.0001) return 0;
-    const dlen = @sqrt(wave.dir_x * wave.dir_x + wave.dir_z * wave.dir_z);
-    const dx = if (dlen > 0.0001) wave.dir_x / dlen else 1;
-    const dz = if (dlen > 0.0001) wave.dir_z / dlen else 0;
-    const cycles = ((x * dx + z * dz) / wave.length) + wave.phase + t * wave.speed;
-    return @sin(cycles * std.math.tau) * wave.amplitude;
-}
-
-fn hfHeightAt(heights: []const f32, cols: u32, rows: u32, i: i32, j: i32, x0: f32, z0: f32, dx: f32, dz: f32, wave: HeightfieldWave, t: f32) f32 {
-    const ci_i32 = std.math.clamp(i, 0, @as(i32, @intCast(cols)) - 1);
-    const cj_i32 = std.math.clamp(j, 0, @as(i32, @intCast(rows)) - 1);
-    const ci: u32 = @intCast(ci_i32);
-    const cj: u32 = @intCast(cj_i32);
-    const x = x0 + @as(f32, @floatFromInt(ci)) * dx;
-    const z = z0 + @as(f32, @floatFromInt(cj)) * dz;
-    return heights[cj * cols + ci] + hfWaveHeight(wave, x, z, t);
-}
-
-fn hfNormal(heights: []const f32, cols: u32, rows: u32, i: u32, j: u32, x0: f32, z0: f32, dx: f32, dz: f32, wave: HeightfieldWave, t: f32) [3]f32 {
-    const ii: i32 = @intCast(i);
-    const jj: i32 = @intCast(j);
-    const hl = hfHeightAt(heights, cols, rows, ii - 1, jj, x0, z0, dx, dz, wave, t);
-    const hr = hfHeightAt(heights, cols, rows, ii + 1, jj, x0, z0, dx, dz, wave, t);
-    const hu = hfHeightAt(heights, cols, rows, ii, jj - 1, x0, z0, dx, dz, wave, t);
-    const hd = hfHeightAt(heights, cols, rows, ii, jj + 1, x0, z0, dx, dz, wave, t);
-    var n = [3]f32{ -(hr - hl) / (2.0 * dx), 1.0, -(hd - hu) / (2.0 * dz) };
-    const len = @sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-    if (len > 1e-5) {
-        n[0] /= len;
-        n[1] /= len;
-        n[2] /= len;
-    }
-    return n;
-}
-
-fn hfQuad(a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32, n: [3]f32, idx: *usize) void {
-    const uv = [2]f32{ 0, 0 };
-    _ = pushVertex(&g_geo_buf, idx, a, n, uv);
-    _ = pushVertex(&g_geo_buf, idx, b, n, uv);
-    _ = pushVertex(&g_geo_buf, idx, c, n, uv);
-    _ = pushVertex(&g_geo_buf, idx, a, n, uv);
-    _ = pushVertex(&g_geo_buf, idx, c, n, uv);
-    _ = pushVertex(&g_geo_buf, idx, d, n, uv);
-}
-
-fn generateHeightfield(heights: []const f32, cols: u32, rows: u32, w: f32, h: f32, base: f32, wave: HeightfieldWave) struct { count: u32 } {
-    if (cols < 2 or rows < 2) return .{ .count = 0 };
-    if (heights.len != @as(usize, cols) * @as(usize, rows)) return .{ .count = 0 };
-    var idx: usize = 0;
-    const dx = w / @as(f32, @floatFromInt(cols - 1));
-    const dz = h / @as(f32, @floatFromInt(rows - 1));
-    const x0 = -w * 0.5;
-    const z0 = -h * 0.5;
-    const cf = @as(f32, @floatFromInt(cols - 1));
-    const rf = @as(f32, @floatFromInt(rows - 1));
-    const t_ms = @mod(std.time.milliTimestamp(), 1_000_000);
-    const t = @as(f32, @floatFromInt(t_ms)) * 0.001;
-
-    const pt = struct {
-        fn at(hs: []const f32, c: u32, x0_: f32, z0_: f32, dx_: f32, dz_: f32, i: u32, j: u32, wave_: HeightfieldWave, t_: f32) [3]f32 {
-            const x = x0_ + @as(f32, @floatFromInt(i)) * dx_;
-            const z = z0_ + @as(f32, @floatFromInt(j)) * dz_;
-            return .{ x, hs[j * c + i] + hfWaveHeight(wave_, x, z, t_), z };
-        }
-        fn drop(p: [3]f32, base_: f32) [3]f32 {
-            return .{ p[0], base_, p[2] };
-        }
-    };
-
-    // top surface — wound to FACE +Y (up). The top-down camera back-face-culls
-    // anything facing -Y (the generatePlane orientation), which is exactly why
-    // floors use boxes not planes; a -Y heightfield top renders black from above.
-    var j: u32 = 0;
-    while (j + 1 < rows) : (j += 1) {
-        var i: u32 = 0;
-        while (i + 1 < cols) : (i += 1) {
-            const pa = pt.at(heights, cols, x0, z0, dx, dz, i, j, wave, t);
-            const pb = pt.at(heights, cols, x0, z0, dx, dz, i + 1, j, wave, t);
-            const pc = pt.at(heights, cols, x0, z0, dx, dz, i + 1, j + 1, wave, t);
-            const pd = pt.at(heights, cols, x0, z0, dx, dz, i, j + 1, wave, t);
-            const na = hfNormal(heights, cols, rows, i, j, x0, z0, dx, dz, wave, t);
-            const nb = hfNormal(heights, cols, rows, i + 1, j, x0, z0, dx, dz, wave, t);
-            const nc = hfNormal(heights, cols, rows, i + 1, j + 1, x0, z0, dx, dz, wave, t);
-            const nd = hfNormal(heights, cols, rows, i, j + 1, x0, z0, dx, dz, wave, t);
-            const ua = [2]f32{ @as(f32, @floatFromInt(i)) / cf, @as(f32, @floatFromInt(j)) / rf };
-            const ub = [2]f32{ @as(f32, @floatFromInt(i + 1)) / cf, @as(f32, @floatFromInt(j)) / rf };
-            const uc = [2]f32{ @as(f32, @floatFromInt(i + 1)) / cf, @as(f32, @floatFromInt(j + 1)) / rf };
-            const ud = [2]f32{ @as(f32, @floatFromInt(i)) / cf, @as(f32, @floatFromInt(j + 1)) / rf };
-            _ = pushVertex(&g_geo_buf, &idx, pa, na, ua);
-            _ = pushVertex(&g_geo_buf, &idx, pc, nc, uc);
-            _ = pushVertex(&g_geo_buf, &idx, pb, nb, ub);
-            _ = pushVertex(&g_geo_buf, &idx, pa, na, ua);
-            _ = pushVertex(&g_geo_buf, &idx, pd, nd, ud);
-            _ = pushVertex(&g_geo_buf, &idx, pc, nc, uc);
-        }
-    }
-
-    // perimeter skirt — seal each boundary edge down to `base`. Winding per
-    // edge mirrors the matching box side face, so each skirt faces outward.
-    var ix2: u32 = 0;
-    while (ix2 + 1 < cols) : (ix2 += 1) {
-        const tn0 = pt.at(heights, cols, x0, z0, dx, dz, ix2, 0, wave, t);
-        const tn1 = pt.at(heights, cols, x0, z0, dx, dz, ix2 + 1, 0, wave, t);
-        if (tn0[1] > base or tn1[1] > base) {
-            hfQuad(pt.drop(tn1, base), pt.drop(tn0, base), tn0, tn1, .{ 0, 0, -1 }, &idx); // north (-Z)
-        }
-        const js = rows - 1;
-        const ts0 = pt.at(heights, cols, x0, z0, dx, dz, ix2, js, wave, t);
-        const ts1 = pt.at(heights, cols, x0, z0, dx, dz, ix2 + 1, js, wave, t);
-        if (ts0[1] > base or ts1[1] > base) {
-            hfQuad(pt.drop(ts0, base), pt.drop(ts1, base), ts1, ts0, .{ 0, 0, 1 }, &idx); // south (+Z)
-        }
-    }
-    var j2: u32 = 0;
-    while (j2 + 1 < rows) : (j2 += 1) {
-        const tw0 = pt.at(heights, cols, x0, z0, dx, dz, 0, j2, wave, t);
-        const tw1 = pt.at(heights, cols, x0, z0, dx, dz, 0, j2 + 1, wave, t);
-        if (tw0[1] > base or tw1[1] > base) {
-            hfQuad(pt.drop(tw0, base), pt.drop(tw1, base), tw1, tw0, .{ -1, 0, 0 }, &idx); // west (-X)
-        }
-        const ie = cols - 1;
-        const te0 = pt.at(heights, cols, x0, z0, dx, dz, ie, j2, wave, t);
-        const te1 = pt.at(heights, cols, x0, z0, dx, dz, ie, j2 + 1, wave, t);
-        if (te0[1] > base or te1[1] > base) {
-            hfQuad(pt.drop(te1, base), pt.drop(te0, base), te0, te1, .{ 1, 0, 0 }, &idx); // east (+X)
-        }
-    }
-
-    return .{ .count = @intCast(idx) };
-}
-
-fn generateCylinder(radius: f32, height: f32, segments: u32) struct { count: u32 } {
-    var idx: usize = 0;
-    const pi = std.math.pi;
-    const hy = height * 0.5;
-    var j: u32 = 0;
-    while (j < segments) : (j += 1) {
-        const a1 = 2 * pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
-        const a2 = 2 * pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
-        const c1 = @cos(a1);
-        const s1 = @sin(a1);
-        const c2 = @cos(a2);
-        const s2 = @sin(a2);
-        const a = .{ radius * c1, -hy, radius * s1 };
-        const b = .{ radius * c2, -hy, radius * s2 };
-        const c = .{ radius * c2, hy, radius * s2 };
-        const d = .{ radius * c1, hy, radius * s1 };
-        const n1 = .{ c1, 0, s1 };
-        const n2 = .{ c2, 0, s2 };
-        if (!addTri(&g_geo_buf, &idx, a, n1, .{ 0, 0 }, d, n1, .{ 0, 1 }, c, n2, .{ 1, 1 })) break;
-        if (!addTri(&g_geo_buf, &idx, a, n1, .{ 0, 0 }, c, n2, .{ 1, 1 }, b, n2, .{ 1, 0 })) break;
-        if (!addTriFlat(&g_geo_buf, &idx, .{ 0, hy, 0 }, b, a, .{ 0, 1, 0 })) break;
-        if (!addTriFlat(&g_geo_buf, &idx, .{ 0, -hy, 0 }, a, b, .{ 0, -1, 0 })) break;
-    }
-    return .{ .count = @intCast(idx) };
-}
-
-fn generateCone(radius: f32, height: f32, segments: u32) struct { count: u32 } {
-    var idx: usize = 0;
-    const pi = std.math.pi;
-    const hy = height * 0.5;
-    const slope = if (@abs(height) > 0.001) radius / height else 1.0;
-    const apex = [3]f32{ 0, hy, 0 };
-    var j: u32 = 0;
-    while (j < segments) : (j += 1) {
-        const a1 = 2 * pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(segments));
-        const a2 = 2 * pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(segments));
-        const mid = (a1 + a2) * 0.5;
-        const c1 = @cos(a1);
-        const s1 = @sin(a1);
-        const c2 = @cos(a2);
-        const s2 = @sin(a2);
-        const a = .{ radius * c1, -hy, radius * s1 };
-        const b = .{ radius * c2, -hy, radius * s2 };
-        const n1 = normal3(c1, slope, s1);
-        const n2 = normal3(c2, slope, s2);
-        const na = normal3(@cos(mid), slope, @sin(mid));
-        if (!addTri(&g_geo_buf, &idx, a, n1, .{ 0, 0 }, apex, na, .{ 0.5, 1 }, b, n2, .{ 1, 0 })) break;
-        if (!addTriFlat(&g_geo_buf, &idx, .{ 0, -hy, 0 }, a, b, .{ 0, -1, 0 })) break;
-    }
-    return .{ .count = @intCast(idx) };
-}
-
-fn generateTorus(radius: f32, tube_radius: f32, segments: u32, sides: u32) struct { count: u32 } {
-    var idx: usize = 0;
-    const pi = std.math.pi;
-    const torus = struct {
-        fn pos(r: f32, tr: f32, u: f32, v: f32) [3]f32 {
-            const ring = r + tr * @cos(v);
-            return .{ ring * @cos(u), tr * @sin(v), ring * @sin(u) };
-        }
-        fn normal(u: f32, v: f32) [3]f32 {
-            return .{ @cos(u) * @cos(v), @sin(v), @sin(u) * @cos(v) };
-        }
-    };
-    var i: u32 = 0;
-    while (i < segments) : (i += 1) {
-        const u_angle_1 = 2 * pi * @as(f32, @floatFromInt(i)) / @as(f32, @floatFromInt(segments));
-        const u_angle_2 = 2 * pi * @as(f32, @floatFromInt(i + 1)) / @as(f32, @floatFromInt(segments));
-        var j: u32 = 0;
-        while (j < sides) : (j += 1) {
-            const v1 = 2 * pi * @as(f32, @floatFromInt(j)) / @as(f32, @floatFromInt(sides));
-            const v2 = 2 * pi * @as(f32, @floatFromInt(j + 1)) / @as(f32, @floatFromInt(sides));
-            const a = torus.pos(radius, tube_radius, u_angle_1, v1);
-            const b = torus.pos(radius, tube_radius, u_angle_2, v1);
-            const c = torus.pos(radius, tube_radius, u_angle_2, v2);
-            const d = torus.pos(radius, tube_radius, u_angle_1, v2);
-            const na = torus.normal(u_angle_1, v1);
-            const nb = torus.normal(u_angle_2, v1);
-            const nc = torus.normal(u_angle_2, v2);
-            const nd = torus.normal(u_angle_1, v2);
-            if (!addTri(&g_geo_buf, &idx, a, na, .{ 0, 0 }, d, nd, .{ 0, 1 }, c, nc, .{ 1, 1 })) return .{ .count = @intCast(idx) };
-            if (!addTri(&g_geo_buf, &idx, a, na, .{ 0, 0 }, c, nc, .{ 1, 1 }, b, nb, .{ 1, 0 })) return .{ .count = @intCast(idx) };
-        }
-    }
-    return .{ .count = @intCast(idx) };
-}
 
 const MeshSpec = struct {
-    geometry: []const u8 = "box",
-    // @reactjit/geometries: when geom_key is set, the mesh uses the retained
-    // intern cache (no Zig-side generation) and `geometry` is ignored.
+    // Geometry is supplied entirely by @reactjit/geometries: `vertices` are the
+    // interleaved Vertex bytes the TS generator produced, `geom_key` is the intern
+    // key. No shape name, no size/radius — dimensions live in the verts (and any
+    // per-instance sizing rides in `scale`).
     geom_key: ?[]const u8 = null,
-    vertices: ?[]const f32 = null, // interleaved Vertex layout, read once on miss
+    vertices: ?[]const f32 = null, // interleaved Vertex layout
     vert_count: u32 = 0,
-    size: [3]f32 = .{ 1, 1, 1 },
-    radius: f32 = 0.5,
-    tube_radius: f32 = 0.25,
     position: math.Vec3 = .{},
     rotation: math.Vec3 = .{},
     scale: math.Vec3 = .{ .x = 1, .y = 1, .z = 1 },
@@ -526,12 +140,6 @@ const MeshSpec = struct {
     tex_h: u32 = 0,
     tex_rgba: ?[]const u8 = null,
     tex_key: ?[]const u8 = null,
-    // Heightfield (geometry="heightfield"): a cols×rows grid of corner heights.
-    // size[0]/size[2] = world X/Z span; size[1] = skirt base Y.
-    heights: ?[]const f32 = null,
-    hf_cols: u32 = 0,
-    hf_rows: u32 = 0,
-    wave: HeightfieldWave = .{},
 };
 
 // ════════════════════════════════════════════════════════════════════════
@@ -968,53 +576,20 @@ fn estimateMeshRadius(node: *const Node) f32 {
     const sx = @abs(node.scene3d_scale_x);
     const sy = @abs(node.scene3d_scale_y);
     const sz = @abs(node.scene3d_scale_z);
-    // Registry geometry ships its own unscaled bounds — cull off that × max scale,
-    // no per-shape switch. This is what lets the framework cull a shape it knows
-    // nothing about.
+    // The generator ships its own unscaled bounds — cull off that × max scale. No
+    // per-shape switch; this is what lets the framework cull a shape it knows
+    // nothing about. A node without bounds (broken legacy mesh) culls as ~unit.
     if (node.scene3d_bounds_radius > 0) {
         return node.scene3d_bounds_radius * max3(sx, sy, sz);
     }
-    const geo = node.scene3d_geometry orelse "box";
-    if (std.mem.eql(u8, geo, "sphere")) {
-        return node.scene3d_radius * max3(sx, sy, sz);
-    }
-    if (std.mem.eql(u8, geo, "plane")) {
-        const hx = node.scene3d_size_x * sx * 0.5;
-        const hz = node.scene3d_size_z * sz * 0.5;
-        return math.length2(hx, hz);
-    }
-    if (std.mem.eql(u8, geo, "cylinder") or std.mem.eql(u8, geo, "cone")) {
-        const r = node.scene3d_radius * @max(sx, sz);
-        const hy = node.scene3d_size_y * sy * 0.5;
-        return math.length2(r, hy);
-    }
-    if (std.mem.eql(u8, geo, "torus")) {
-        return (node.scene3d_radius + node.scene3d_tube_radius) * @max(sx, sz);
-    }
-    if (std.mem.eql(u8, geo, "heightfield")) {
-        // footprint diagonal + the tallest corner — generous so it never culls.
-        var max_h: f32 = node.scene3d_size_y;
-        if (node.scene3d_heights) |hs| {
-            for (hs) |v| max_h = @max(max_h, @abs(v));
-        }
-        max_h += @abs(node.scene3d_wave_amplitude);
-        return math.length3(node.scene3d_size_x * sx * 0.5, max_h, node.scene3d_size_z * sz * 0.5);
-    }
-    const hx = node.scene3d_size_x * sx * 0.5;
-    const hy = node.scene3d_size_y * sy * 0.5;
-    const hz = node.scene3d_size_z * sz * 0.5;
-    return math.length3(hx, hy, hz);
+    return max3(sx, sy, sz);
 }
 
 fn buildMeshSpec(node: *const Node) MeshSpec {
     return .{
-        .geometry = node.scene3d_geometry orelse "box",
         .geom_key = node.scene3d_geom_key,
         .vertices = node.scene3d_vertices,
         .vert_count = node.scene3d_vert_count,
-        .size = .{ node.scene3d_size_x, node.scene3d_size_y, node.scene3d_size_z },
-        .radius = node.scene3d_radius,
-        .tube_radius = node.scene3d_tube_radius,
         .position = .{ .x = node.scene3d_pos_x, .y = node.scene3d_pos_y, .z = node.scene3d_pos_z },
         .rotation = .{ .x = node.scene3d_rot_x, .y = node.scene3d_rot_y, .z = node.scene3d_rot_z },
         .scale = .{ .x = node.scene3d_scale_x, .y = node.scene3d_scale_y, .z = node.scene3d_scale_z },
@@ -1023,17 +598,6 @@ fn buildMeshSpec(node: *const Node) MeshSpec {
         .tex_h = node.scene3d_tex_h,
         .tex_rgba = node.scene3d_tex_rgba,
         .tex_key = node.scene3d_tex_key,
-        .heights = node.scene3d_heights,
-        .hf_cols = node.scene3d_hf_cols,
-        .hf_rows = node.scene3d_hf_rows,
-        .wave = .{
-            .amplitude = node.scene3d_wave_amplitude,
-            .length = node.scene3d_wave_length,
-            .speed = node.scene3d_wave_speed,
-            .dir_x = node.scene3d_wave_dir_x,
-            .dir_z = node.scene3d_wave_dir_z,
-            .phase = node.scene3d_wave_phase,
-        },
     };
 }
 
@@ -1197,34 +761,11 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     return .{ .offset = off, .count = count };
 }
 
-fn generateGeometry(spec: MeshSpec) u32 {
-    if (std.mem.eql(u8, spec.geometry, "sphere")) {
-        return generateSphere(spec.radius, 24, 16).count;
-    }
-    if (std.mem.eql(u8, spec.geometry, "plane")) {
-        return generatePlane(spec.size[0], spec.size[2]).count;
-    }
-    if (std.mem.eql(u8, spec.geometry, "cylinder")) {
-        return generateCylinder(spec.radius, spec.size[1], 24).count;
-    }
-    if (std.mem.eql(u8, spec.geometry, "cone")) {
-        return generateCone(spec.radius, spec.size[1], 24).count;
-    }
-    if (std.mem.eql(u8, spec.geometry, "torus")) {
-        return generateTorus(spec.radius, spec.tube_radius, 24, 16).count;
-    }
-    if (std.mem.eql(u8, spec.geometry, "heightfield")) {
-        const hs = spec.heights orelse return 0;
-        return generateHeightfield(hs, spec.hf_cols, spec.hf_rows, spec.size[0], spec.size[2], spec.size[1], spec.wave).count;
-    }
-    return generateBox(spec.size[0], spec.size[1], spec.size[2]).count;
-}
-
 fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_offset: *u64, vp: math.Mat4, cam_pos: math.Vec3, light_dir: [3]f32, light_color: [3]f32, ambient_color: [3]f32, fog_color: [3]f32, fog_near: f32, fog_far: f32, spec: MeshSpec) void {
     // ── Resolve the vertex source ──
-    // Registry mesh (geom_key set): redraw a RETAINED slice — generated once,
-    // uploaded once, no per-frame work. Legacy mesh: regenerate into the
-    // per-frame buffer (immediate mode, the old path).
+    // Registry mesh (geom_key set): redraw a RETAINED slice — uploaded once on
+    // first sight, no per-frame work. On cache/buffer overflow it degrades to a
+    // per-frame upload. No geom_key = no geometry → nothing drawn.
     var draw_buffer: *wgpu.Buffer = undefined;
     var draw_offset: u64 = 0;
     var vert_count: u32 = 0;
@@ -1250,16 +791,10 @@ fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_of
             advance_frame_buf = true;
         }
     } else {
-        vert_count = generateGeometry(spec);
-        if (vert_count == 0) return;
-        const bytes: u64 = @as(u64, vert_count) * @sizeOf(Vertex);
-        if (vert_byte_offset.* + bytes > frame_cap_bytes) return;
-        // Each mesh writes at a unique cumulative offset so queued writeBuffer
-        // calls survive into the eventual draws (shared offset 0 would clobber).
-        queue.writeBuffer(g_vertex_buffer.?, vert_byte_offset.*, @ptrCast(&g_geo_buf), bytes);
-        draw_buffer = g_vertex_buffer.?;
-        draw_offset = vert_byte_offset.*;
-        advance_frame_buf = true;
+        // No geometry supplied. A cart still on the removed string-geometry path
+        // lands here and draws nothing — the intended breakage that forces it onto
+        // @reactjit/geometries.
+        return;
     }
     if (uniform_index.* >= MAX_DRAW_UNIFORMS) return;
     const vert_bytes: u64 = @as(u64, vert_count) * @sizeOf(Vertex);
@@ -1301,97 +836,6 @@ fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_of
     if (advance_frame_buf) vert_byte_offset.* += vert_bytes;
 }
 
-fn drawSceneGuides(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_offset: *u64, vp: math.Mat4, cam_pos: math.Vec3, light_dir: [3]f32, light_color: [3]f32, ambient_color: [3]f32, fog_color: [3]f32, fog_near: f32, fog_far: f32, scene_extent: f32, show_grid: bool, show_axes: bool) void {
-    if (show_grid) {
-        const spacing: f32 = if (scene_extent > 24.0) 2.0 else 1.0;
-        const steps: i32 = @intFromFloat(@ceil(std.math.clamp(scene_extent, 12.0, 36.0) / spacing));
-        const grid_half = @as(f32, @floatFromInt(steps)) * spacing;
-        const center_x = @round(cam_pos.x / spacing) * spacing;
-        const center_z = @round(cam_pos.z / spacing) * spacing;
-
-        var step: i32 = -steps;
-        while (step <= steps) : (step += 1) {
-            const offset = @as(f32, @floatFromInt(step)) * spacing;
-            const is_major = @mod(@abs(step), 5) == 0;
-            const thickness: f32 = if (is_major) 0.06 else 0.025;
-            const tint: f32 = if (is_major) 0.42 else 0.22;
-            const line_color = [4]f32{
-                std.math.clamp(fog_color[0] + tint, 0.18, 0.62),
-                std.math.clamp(fog_color[1] + tint, 0.20, 0.66),
-                std.math.clamp(fog_color[2] + tint, 0.24, 0.72),
-                1.0,
-            };
-            const line_x = center_x + offset;
-            const line_z = center_z + offset;
-
-            if (@abs(line_x - cam_pos.x) > spacing * 0.45) {
-                drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-                    .geometry = "box",
-                    .size = .{ thickness, thickness, grid_half * 2.0 },
-                    .position = .{ .x = line_x, .y = 0.02, .z = center_z },
-                    .color = line_color,
-                });
-            }
-            if (@abs(line_z - cam_pos.z) > spacing * 0.45) {
-                drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-                    .geometry = "box",
-                    .size = .{ grid_half * 2.0, thickness, thickness },
-                    .position = .{ .x = center_x, .y = 0.02, .z = line_z },
-                    .color = line_color,
-                });
-            }
-        }
-
-        // Exact camera-centered bearings: keep the global snapped grid, but draw
-        // one local cross through the camera so "straight ahead" is not biased by floor().
-        const focus_color = [4]f32{
-            std.math.clamp(fog_color[0] + 0.52, 0.28, 0.72),
-            std.math.clamp(fog_color[1] + 0.54, 0.30, 0.76),
-            std.math.clamp(fog_color[2] + 0.58, 0.36, 0.82),
-            1.0,
-        };
-        drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-            .geometry = "box",
-            .size = .{ 0.05, 0.05, grid_half * 2.0 },
-            .position = .{ .x = cam_pos.x, .y = 0.03, .z = center_z },
-            .color = focus_color,
-        });
-        drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-            .geometry = "box",
-            .size = .{ grid_half * 2.0, 0.05, 0.05 },
-            .position = .{ .x = center_x, .y = 0.03, .z = cam_pos.z },
-            .color = focus_color,
-        });
-    }
-
-    if (show_axes) {
-        const axis_len = std.math.clamp(scene_extent * 0.18, 2.5, 6.0);
-        drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-            .geometry = "box",
-            .size = .{ axis_len, 0.07, 0.07 },
-            .position = .{ .x = axis_len * 0.5, .y = 0.05, .z = 0 },
-            .color = .{ 0.92, 0.28, 0.24, 1.0 },
-        });
-        drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-            .geometry = "box",
-            .size = .{ 0.07, axis_len, 0.07 },
-            .position = .{ .x = 0, .y = axis_len * 0.5, .z = 0 },
-            .color = .{ 0.28, 0.82, 0.36, 1.0 },
-        });
-        drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-            .geometry = "box",
-            .size = .{ 0.07, 0.07, axis_len },
-            .position = .{ .x = 0, .y = 0.05, .z = axis_len * 0.5 },
-            .color = .{ 0.28, 0.52, 0.94, 1.0 },
-        });
-        drawMesh(pass, queue, uniform_index, vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, .{
-            .geometry = "box",
-            .size = .{ 0.16, 0.16, 0.16 },
-            .position = .{ .x = 0, .y = 0.08, .z = 0 },
-            .color = .{ 0.94, 0.94, 0.96, 1.0 },
-        });
-    }
-}
 
 // ════════════════════════════════════════════════════════════════════════
 // Public API
@@ -1593,9 +1037,9 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         drawMesh(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, buildMeshSpec(child));
     }
 
-    if (node.scene3d_show_grid or node.scene3d_show_axes) {
-        drawSceneGuides(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, scene_extent, node.scene3d_show_grid, node.scene3d_show_axes);
-    }
+    // (showGrid/showAxes were drawn via a hardwired box; that debug grid was
+    // removed with the rest of the shape coupling. Re-add later via @reactjit/
+    // geometries if wanted — the flags are currently inert.)
 
     pass.end();
     pass.release();

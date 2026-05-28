@@ -534,39 +534,18 @@ Scene3DBase.Mesh = ({
     });
   }
 
-  // ── Legacy string-geometry path (geometry="box"|"sphere"|…) ──────────
-  // Kept working during migration; deleted once all carts move to defs.
-  const [wdx, _wdy, wdz] = _vec3(waveDirection, waveDirX ?? 1, 0, waveDirZ ?? 0);
-  return h('View', {
-    ...rest,
-    scene3dMesh: true,
-    scene3dGeometry: typeof geometry === 'string' ? geometry : (geometry?.kind ?? 'box'),
-    scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
-    scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
-    scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,
-    scene3dColorR: r, scene3dColorG: g, scene3dColorB: b,
-    scene3dRadius: radius ?? geometry?.radius ?? 0.5,
-    scene3dTubeRadius: tubeRadius ?? geometry?.tube ?? 0.25,
-    scene3dSizeX: sizeX ?? geometry?.width ?? 1,
-    scene3dSizeY: sizeY ?? geometry?.height ?? 1,
-    scene3dSizeZ: sizeZ ?? geometry?.depth ?? 1,
-    scene3dTexW: texW,
-    scene3dTexH: texH,
-    scene3dTexData: texData,
-    ...(texKey ? { scene3dTexKey: texKey } : {}),
-    // Heightfield: a flat cols×rows array of corner heights (geometry="heightfield").
-    // sizeX/sizeZ = world span, sizeY = skirt base Y. The host meshes a smooth
-    // sloped surface + perimeter skirt from these.
-    ...(Array.isArray(heights) && heights.length > 0
-      ? { scene3dHeights: heights, scene3dHfCols: hfCols | 0, scene3dHfRows: hfRows | 0 }
-      : {}),
-    scene3dWaveAmplitude: waveAmplitude ?? 0,
-    scene3dWaveLength: waveLength ?? 0,
-    scene3dWaveSpeed: waveSpeed ?? 0,
-    scene3dWaveDirX: wdx,
-    scene3dWaveDirZ: wdz,
-    scene3dWavePhase: wavePhase ?? 0,
-  });
+  // ── String geometry is GONE ──────────────────────────────────────────
+  // geometry="box"|"sphere"|… and the {kind,radius,…} object form were removed
+  // along with the framework's shape generators. There is exactly one way to
+  // give a mesh geometry now: a @reactjit/geometries generator + params. This
+  // throws on purpose so a cart still on the old path fails loudly with a fix.
+  const got = typeof geometry === 'string' ? `"${geometry}"` : (geometry == null ? String(geometry) : 'a legacy object');
+  throw new Error(
+    `<Scene3D.Mesh geometry={...}> no longer accepts ${got}. Use a @reactjit/geometries ` +
+    `generator + params, e.g.  import * as Geometry from '@reactjit/geometries';  ` +
+    `<Scene3D.Mesh geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }} />. ` +
+    `(sizeX/Y/Z → params.width/height/depth; sphere radius → params.radius; cylinder radius+sizeY → params.radius+height.)`,
+  );
 };
 Scene3DBase.AmbientLight = ({ color, intensity, ...rest }: any) => {
   const [r, g, b] = _hexToRgb(color, [1, 1, 1]);
