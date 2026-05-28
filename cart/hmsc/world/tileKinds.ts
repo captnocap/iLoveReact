@@ -9,6 +9,7 @@ export type TilePathingProfile = {
 export type TileRenderProfile = {
   color: string;
   heightMeters: number;
+  textureKey: string;
 };
 
 export type TileKindDefinition = {
@@ -23,31 +24,31 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     kind: 'asphalt',
     label: 'Asphalt',
     pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
-    render: { color: '#20242d', heightMeters: 0.08 },
+    render: { color: '#20242d', heightMeters: 0.08, textureKey: 'solid.asphalt' },
   },
   sidewalk: {
     kind: 'sidewalk',
     label: 'Sidewalk',
     pathing: { walkable: true, movementCost: 1.08, blocksLineOfSight: false },
-    render: { color: '#596170', heightMeters: 0.11 },
+    render: { color: '#596170', heightMeters: 0.11, textureKey: 'solid.sidewalk' },
   },
   wall: {
     kind: 'wall',
     label: 'Wall',
     pathing: { walkable: false, movementCost: Infinity, blocksLineOfSight: true },
-    render: { color: '#cbd5e1', heightMeters: 1.6 },
+    render: { color: '#cbd5e1', heightMeters: 1.6, textureKey: 'solid.wall.concrete' },
   },
   door: {
     kind: 'door',
     label: 'Door',
     pathing: { walkable: true, movementCost: 1.25, blocksLineOfSight: false },
-    render: { color: '#f59e0b', heightMeters: 1.2 },
+    render: { color: '#f59e0b', heightMeters: 1.2, textureKey: 'solid.door.service' },
   },
   marker: {
     kind: 'marker',
     label: 'Marker',
     pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
-    render: { color: '#22d3ee', heightMeters: 0.095 },
+    render: { color: '#22d3ee', heightMeters: 0.095, textureKey: 'solid.marker.dev' },
   },
 };
 
