@@ -1,14 +1,12 @@
-import type { GameState, GridCell } from '../design';
+import type { GameState, GridCell, TileKind } from '../design';
 import { commandCell, placeCell } from './grid';
 
-export type DemoMapCellKind = 'asphalt' | 'sidewalk' | 'wall' | 'door' | 'marker';
-
 export type DemoMapCell = {
-  kind: DemoMapCellKind;
+  kind: TileKind;
   cell: GridCell;
 };
 
-function rect(kind: DemoMapCellKind, x0: number, z0: number, width: number, depth: number, y = 0): DemoMapCell[] {
+function rect(kind: TileKind, x0: number, z0: number, width: number, depth: number, y = 0): DemoMapCell[] {
   const cells: DemoMapCell[] = [];
   for (let z = z0; z < z0 + depth; z += 1) {
     for (let x = x0; x < x0 + width; x += 1) {
@@ -18,7 +16,7 @@ function rect(kind: DemoMapCellKind, x0: number, z0: number, width: number, dept
   return cells;
 }
 
-function ring(kind: DemoMapCellKind, x0: number, z0: number, width: number, depth: number, y = 0): DemoMapCell[] {
+function ring(kind: TileKind, x0: number, z0: number, width: number, depth: number, y = 0): DemoMapCell[] {
   const cells: DemoMapCell[] = [];
   for (let z = z0; z < z0 + depth; z += 1) {
     for (let x = x0; x < x0 + width; x += 1) {

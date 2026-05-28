@@ -1,39 +1,18 @@
 import { Scene3D } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
-import type { GameState, PlacedCell } from '../design';
-
-const FLOOR_HEIGHT_METERS = 0.08;
-const ROAD_STRIPE_HEIGHT_METERS = 0.095;
-const WALL_HEIGHT_METERS = 1.6;
-const DOOR_HEIGHT_METERS = 1.2;
-const PLAYER_MARKER_HEIGHT_METERS = 0.35;
-
-type CellMeshStyle = {
-  color: string;
-  height: number;
-};
-
-const CELL_MESH_STYLES: Record<string, CellMeshStyle> = {
-  asphalt: { color: '#20242d', height: FLOOR_HEIGHT_METERS },
-  sidewalk: { color: '#596170', height: FLOOR_HEIGHT_METERS * 1.4 },
-  wall: { color: '#cbd5e1', height: WALL_HEIGHT_METERS },
-  door: { color: '#f59e0b', height: DOOR_HEIGHT_METERS },
-  marker: { color: '#22d3ee', height: ROAD_STRIPE_HEIGHT_METERS },
-};
+import type { GameState, PlacedCell, TileKind } from '../design';
+import { tileKindDefinition } from '../world/tileKinds';
+import { PlayerFigure } from './PlayerFigure';
 
 type WorldMeshRect = {
   key: string;
-  kind: string;
+  kind: TileKind;
   x: number;
   y: number;
   z: number;
   width: number;
   depth: number;
 };
-
-function meshStyleForKind(kind: string): CellMeshStyle {
-  return CELL_MESH_STYLES[kind] ?? { color: '#7c3aed', height: FLOOR_HEIGHT_METERS };
-}
 
 function rectMeshPosition(rect: WorldMeshRect, height: number): [number, number, number] {
   return [
@@ -102,26 +81,40 @@ function coalesceCellsIntoWorldRects(placedCells: PlacedCell[]): WorldMeshRect[]
 }
 
 function MapRectMesh(props: { rect: WorldMeshRect }) {
-  const style = meshStyleForKind(props.rect.kind);
+  const style = tileKindDefinition(props.rect.kind).render;
   return (
     <Scene3D.Mesh
       geometry={Geometry.Box}
-      params={{ width: props.rect.width, height: style.height, depth: props.rect.depth }}
+      params={{ width: props.rect.width, height: style.heightMeters, depth: props.rect.depth }}
       material={style.color}
-      position={rectMeshPosition(props.rect, style.height)}
+      position={rectMeshPosition(props.rect, style.heightMeters)}
     />
   );
 }
 
-export function GameWorld3D(props: { state: GameState }) {
+export function GameWorld3D(props: {
+  state: GameState;
+  animationSeconds: number;
+  playerMoving: boolean;
+  playerRunning: boolean;
+  cameraYawDegrees: number;
+  cameraPitchRadians: number;
+}) {
   const state = props.state;
   const placedCells = Object.values(state.world.placedCells);
   const worldRects = coalesceCellsIntoWorldRects(placedCells);
   const player = state.player.position;
+  const cameraYawRadians = props.cameraYawDegrees * Math.PI / 180;
+  const cameraPosition: [number, number, number] = [
+    player.x - Math.sin(cameraYawRadians) * 4.9,
+    player.y + 3.05 + Math.sin(props.cameraPitchRadians) * 1.6,
+    player.z - Math.cos(cameraYawRadians) * 5.9,
+  ];
+  const cameraTarget: [number, number, number] = [player.x, player.y + 1.18 + Math.sin(props.cameraPitchRadians) * 0.7, player.z];
 
   return (
     <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#070b12" showGrid={false} showAxes={false}>
-      <Scene3D.Camera position={[5.8, 7.4, 8.4]} target={[0.8, 0, 0.2]} fov={48} />
+      <Scene3D.Camera position={cameraPosition} target={cameraTarget} fov={48} />
       <Scene3D.AmbientLight color="#9fb0d6" intensity={0.55} />
       <Scene3D.DirectionalLight direction={[0.45, 0.9, 0.35]} color="#ffe0b0" intensity={0.82} />
       <Scene3D.PointLight position={[0, 3, 0]} color="#22d3ee" intensity={0.45} />
@@ -134,11 +127,12 @@ export function GameWorld3D(props: { state: GameState }) {
       {worldRects.map((rect) => (
         <MapRectMesh key={rect.key} rect={rect} />
       ))}
-      <Scene3D.Mesh
-        geometry={Geometry.Box}
-        params={{ width: 0.42, height: PLAYER_MARKER_HEIGHT_METERS, depth: 0.42 }}
-        material="#22c55e"
-        position={[player.x, player.y + PLAYER_MARKER_HEIGHT_METERS / 2, player.z]}
+      <PlayerFigure
+        position={player}
+        yawDegrees={state.player.yawDegrees}
+        animationSeconds={props.animationSeconds}
+        moving={props.playerMoving}
+        running={props.playerRunning}
       />
     </Scene3D>
   );

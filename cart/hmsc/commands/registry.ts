@@ -1,6 +1,8 @@
 import type { CommandDefinition, CommandResult, GameState, SpawnedEntity } from '../design';
 import { createInitialGameState, readStoredGameState, saveGameState } from '../state/gameState';
 import { cellKey, commandCell, placeCell, removeCell, worldToCell } from '../world/grid';
+import { findGridPath } from '../world/pathing';
+import { isTileKind, tileKindNamesForConsole } from '../world/tileKinds';
 import { parseCommandValue, tokenizeCommandLine } from './parser';
 
 function ok(state: GameState, ...output: string[]): CommandResult {
@@ -215,6 +217,7 @@ const COMMANDS: CommandDefinition[] = [
       try {
         const kind = args[0];
         if (!kind) return fail(state, 'usage: place <kind> <x> <z> [y]');
+        if (!isTileKind(kind)) return fail(state, `unknown tile kind ${kind}; expected one of ${tileKindNamesForConsole()}`);
         const x = numberArg(args[1], 'x');
         const z = numberArg(args[2], 'z');
         const y = args[3] == null ? 0 : numberArg(args[3], 'y');
@@ -248,6 +251,25 @@ const COMMANDS: CommandDefinition[] = [
     run(_args, state) {
       const cell = worldToCell(state.player.position, state.world.cellSizeMeters);
       return ok(state, `player = ${jsonLine(state.player.position)}`, `cell = ${cellKey(cell)}`);
+    },
+  },
+  {
+    name: 'path',
+    summary: 'Find a typed-tile grid path between two cells.',
+    usage: 'path <fromX> <fromZ> <toX> <toZ> [y]',
+    run(args, state) {
+      try {
+        const fromX = numberArg(args[0], 'fromX');
+        const fromZ = numberArg(args[1], 'fromZ');
+        const toX = numberArg(args[2], 'toX');
+        const toZ = numberArg(args[3], 'toZ');
+        const y = args[4] == null ? 0 : numberArg(args[4], 'y');
+        const path = findGridPath(state, commandCell(fromX, fromZ, y), commandCell(toX, toZ, y));
+        if (path.length === 0) return fail(state, 'no path through walkable tile kinds');
+        return ok(state, `path ${path.length} cells: ${path.map(cellKey).join(' -> ')}`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
     },
   },
 ];

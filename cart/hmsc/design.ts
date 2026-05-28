@@ -1,4 +1,4 @@
-export const HMSC_STATE_SCHEMA_VERSION = 2;
+export const HMSC_STATE_SCHEMA_VERSION = 3;
 export const DEFAULT_AUTOSAVE_INTERVAL_MS = 120_000;
 export const DEFAULT_CELL_SIZE_METERS = 1;
 export const DEFAULT_CHUNK_CELL_SPAN = 16;
@@ -15,6 +15,8 @@ export type GridCell = {
   z: number;
 };
 
+export type TileKind = 'asphalt' | 'sidewalk' | 'wall' | 'door' | 'marker';
+
 export type PlayerState = {
   position: Vec3;
   yawDegrees: number;
@@ -28,7 +30,7 @@ export type PlayerState = {
 
 export type PlacedCell = {
   key: string;
-  kind: string;
+  kind: TileKind;
   cell: GridCell;
   createdByCommand: string;
 };

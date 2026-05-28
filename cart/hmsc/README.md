@@ -30,7 +30,11 @@ cart/hmsc/
   commands/              parser + command registry
   world/demoMap.ts       one authored seed map shared by game + internal map
   world/grid.ts          grid storage helpers over continuous movement
+  world/tileKinds.ts     typed tile definitions for rendering + pathing
+  world/pathing.ts       grid pathfinder over tile-kind movement metadata
   render3d/GameWorld3D.tsx  3D renderer over GameState.world
+  render3d/PlayerFigure.tsx animation_lab drive-mode figure
+  state/usePlayerDrive.ts   continuous third-person movement over the grid
   ui/Console.tsx         command terminal
 
 cart/hmsc-int/
@@ -61,3 +65,4 @@ and spawned entities move in continuous coordinates on top of the grid.
 - `despawn <entityId>`
 - `place <kind> <x> <z> [y]`
 - `remove <x> <z> [y]`
+- `path <fromX> <fromZ> <toX> <toZ> [y]`

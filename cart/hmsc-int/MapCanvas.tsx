@@ -3,24 +3,17 @@ import { Box, Canvas, Pressable, Text } from '@reactjit/runtime/primitives';
 import type { GameState, GridCell, PlacedCell } from '../hmsc/design';
 import { createInitialGameState, readStoredGameState } from '../hmsc/state/gameState';
 import { cellKey, chunkKeyForCell, worldToCell } from '../hmsc/world/grid';
+import { tileKindDefinition } from '../hmsc/world/tileKinds';
 
 const MAP_CELL_PIXELS = 32;
 const MAP_PADDING_CELLS = 2;
-
-const CELL_COLORS: Record<string, string> = {
-  asphalt: '#20242d',
-  sidewalk: '#596170',
-  wall: '#cbd5e1',
-  door: '#f59e0b',
-  marker: '#22d3ee',
-};
 
 function loadMapState(): GameState {
   return readStoredGameState() ?? createInitialGameState();
 }
 
 function cellFill(placedCell: PlacedCell): string {
-  return CELL_COLORS[placedCell.kind] ?? '#7c3aed';
+  return tileKindDefinition(placedCell.kind).render.color;
 }
 
 function mapBounds(placedCells: PlacedCell[]): { minX: number; minZ: number; maxX: number; maxZ: number } {

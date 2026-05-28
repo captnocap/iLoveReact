@@ -1,4 +1,5 @@
-import type { GameState, GridCell, PlacedCell, Vec3 } from '../design';
+import type { GameState, GridCell, PlacedCell, TileKind, Vec3 } from '../design';
+import { tileKindDefinition } from './tileKinds';
 
 export function cellKey(cell: GridCell): string {
   return `${cell.x},${cell.y},${cell.z}`;
@@ -30,7 +31,7 @@ export function commandCell(x: number, z: number, y = 0): GridCell {
   return { x, y, z };
 }
 
-export function placeCell(state: GameState, kind: string, cell: GridCell, sourceLine: string): GameState {
+export function placeCell(state: GameState, kind: TileKind, cell: GridCell, sourceLine: string): GameState {
   const key = cellKey(cell);
   const placedCell: PlacedCell = {
     key,
@@ -48,6 +49,20 @@ export function placeCell(state: GameState, kind: string, cell: GridCell, source
       },
     },
   };
+}
+
+export function placedCellAt(state: GameState, cell: GridCell): PlacedCell | undefined {
+  return state.world.placedCells[cellKey(cell)];
+}
+
+export function canPathThroughCell(state: GameState, cell: GridCell): boolean {
+  const placedCell = placedCellAt(state, cell);
+  if (!placedCell) return false;
+  return tileKindDefinition(placedCell.kind).pathing.walkable;
+}
+
+export function canOccupyWorldPosition(state: GameState, position: Vec3): boolean {
+  return canPathThroughCell(state, worldToCell(position, state.world.cellSizeMeters));
 }
 
 export function removeCell(state: GameState, cell: GridCell): GameState {
