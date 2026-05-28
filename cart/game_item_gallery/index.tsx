@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import { Box, Col, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';
@@ -9,6 +9,26 @@ type ModelCtx = { origin: V3; yaw: number; scale: number; active: boolean };
 type ModelFn = (ctx: ModelCtx) => any;
 
 const PI = Math.PI;
+const CIG_TEXTURE_KEY = 'game-item-gallery-cig-pack-ui';
+const CASH_TEXTURE_KEY = 'game-item-gallery-cash-effect';
+const TEX_W = 256;
+const TEX_H = 256;
+
+const CASH_SHADER = `
+@group(0) @binding(1) var<storage, read> ys: array<f32>;
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let uv = in.uv;
+  let band = select(0.0, 1.0, abs(uv.y - 0.5) < 0.11);
+  let edge = select(0.0, 1.0, uv.x < 0.08 || uv.x > 0.92 || uv.y < 0.12 || uv.y > 0.88);
+  let oval = smoothstep(0.24, 0.235, length((uv - vec2f(0.5, 0.5)) * vec2f(1.35, 2.2)));
+  let line = 0.06 * sin(uv.x * 95.0) + 0.04 * sin((uv.x + uv.y) * 44.0);
+  let base = vec3f(0.47, 0.82, 0.49) + line;
+  let ink = vec3f(0.10, 0.38, 0.18);
+  let paper = mix(base, vec3f(0.84, 0.95, 0.78), band * 0.55);
+  let color = mix(paper, ink, max(edge * 0.7, oval * 0.42));
+  return vec4f(color, 1.0);
+}
+`;
 
 function def<P>(id: string, defaults: P, generate: (params: P) => GeometryData) {
   return { id, defaults, generate };
@@ -176,7 +196,15 @@ function Bat(ctx: ModelCtx) {
 function Cash(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#5fb86b" p={[0, 0.13, 0]} s={[1.0, 0.16, 0.5]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#79cf7f" p={[0.03, 0.23, -0.02]} r={[0, 0.08, 0]} s={[0.96, 0.04, 0.48]} />
+    <Scene3D.Mesh
+      geometry={box}
+      params={box1}
+      material="#ffffff"
+      textureKey={CASH_TEXTURE_KEY}
+      position={local(ctx, [0.03, 0.23, -0.02])}
+      rotation={rot(ctx, [0, 0.08, 0])}
+      scale={scl(ctx, [0.96, 0.04, 0.48])}
+    />
   </>;
 }
 
@@ -274,8 +302,15 @@ function Weed(ctx: ModelCtx) {
 function Cigarettes(ctx: ModelCtx) {
   const tips = [-0.42, -0.28, -0.14];
   return <>
-    <Part ctx={ctx} geometry={box} params={box1} material="#d73e36" p={[-0.28, 0.33, 0]} s={[0.42, 0.62, 0.18]} />
-    <Part ctx={ctx} geometry={box} params={box1} material="#f7f3e7" p={[-0.28, 0.57, 0.095]} s={[0.36, 0.16, 0.025]} />
+    <Scene3D.Mesh
+      geometry={box}
+      params={box1}
+      material="#ffffff"
+      textureKey={CIG_TEXTURE_KEY}
+      position={local(ctx, [-0.28, 0.33, 0])}
+      rotation={rot(ctx)}
+      scale={scl(ctx, [0.42, 0.62, 0.18])}
+    />
     {tips.map((x, i) => <Part key={`cig-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#f4f0df" p={[x, 0.82 + i * 0.03, 0.02]} s={[0.045, 0.42, 0.045]} />)}
     {tips.map((x, i) => <Part key={`filter-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#d49a55" p={[x, 0.61 + i * 0.03, 0.02]} s={[0.047, 0.12, 0.047]} />)}
   </>;
@@ -382,6 +417,31 @@ function ItemButton({ item, active, onPress }: { item: Item; active: boolean; on
   );
 }
 
+function TextureSources() {
+  return (
+    <>
+      <StaticSurface staticKey={CIG_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', padding: 18 }}>
+          <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', borderWidth: 10, borderColor: '#f7f0df', padding: 14, gap: 12 }}>
+            <Box style={{ height: 60, backgroundColor: '#f7f0df', alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: '#20242d', fontSize: 34, fontWeight: 'bold' }}>RJIT</Text>
+            </Box>
+            <Box style={{ flexGrow: 1, backgroundColor: '#a51f21', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+              <Text style={{ color: '#fff2d8', fontSize: 32, fontWeight: 'bold' }}>FILTER</Text>
+              <Box style={{ width: '68%', height: 8, backgroundColor: '#f1c15a' }} />
+              <Text style={{ color: '#ffd58a', fontSize: 18 }}>UI TEXTURE</Text>
+            </Box>
+          </Box>
+        </Box>
+      </StaticSurface>
+
+      <StaticSurface staticKey={CASH_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
+        <Effect shader={CASH_SHADER} data={[0]} style={{ width: TEX_W, height: TEX_H }} />
+      </StaticSurface>
+    </>
+  );
+}
+
 export default function GameItemGallery() {
   const [selected, setSelected] = useState('knife');
   const [orbitYaw, setOrbitYaw] = useState(35);
@@ -447,6 +507,8 @@ export default function GameItemGallery() {
           </Col>
         </ScrollView>
       </Col>
+
+      <TextureSources />
     </Box>
   );
 }
