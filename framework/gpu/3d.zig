@@ -33,26 +33,38 @@ const Vertex = extern struct {
 // ════════════════════════════════════════════════════════════════════════
 
 const SceneUniforms = extern struct {
-    mvp: [16]f32,
-    model: [16]f32,
-    light_dir: [3]f32,
-    specular_power: f32,
-    light_color: [3]f32,
-    _pad1: f32 = 0,
-    ambient_color: [3]f32,
-    _pad2: f32 = 0,
-    camera_pos: [3]f32,
-    _pad3: f32 = 0,
-    color: [4]f32,
-    fog_color: [3]f32,
-    fog_near: f32,
-    fog_far: f32,
-    _pad4: @Vector(4, f32) = .{ 0, 0, 0, 0 },
+    vp: [16]f32,              // 0
+    light_dir: [3]f32,        // 64
+    specular_power: f32,      // 76
+    light_color: [3]f32,      // 80
+    _pad1: f32 = 0,           // 92
+    ambient_color: [3]f32,    // 96
+    _pad2: f32 = 0,           // 108
+    camera_pos: [3]f32,       // 112
+    _pad3: f32 = 0,           // 124
+    fog_color: [3]f32,        // 128
+    fog_near: f32,            // 140
+    fog_far: f32,             // 144
+    // @Vector(4, f32) has align 16 — forces the extern struct's alignment to 16
+    // (which WGSL std140 requires for uniforms) and naturally pads from offset
+    // 148 to the 16-aligned 160 before the vec4 sits at 160..176.
+    _pad4: @Vector(4, f32) = .{ 0, 0, 0, 0 }, // 160 → 176 total
+};
+
+// Per-instance vertex attributes (vertex buffer 1, step=instance) — packed as the
+// model matrix's 4 columns followed by the instance color. 80 bytes per instance,
+// matches WGSL VertexInput locations 3–7 (mat4 cols + vec4 color).
+const InstanceData = extern struct {
+    model: [16]f32, // 4 vec4 columns; locations 3,4,5,6
+    color: [4]f32,  // location 7
 };
 
 comptime {
-    if (@sizeOf(SceneUniforms) != 256 or @alignOf(SceneUniforms) != 16) {
-        @compileError("SceneUniforms must match scene3d_wgsl uniform layout");
+    if (@sizeOf(SceneUniforms) != 176 or @alignOf(SceneUniforms) != 16) {
+        @compileError("SceneUniforms must match scene3d_wgsl uniform layout (176 bytes, align 16)");
+    }
+    if (@sizeOf(InstanceData) != 80 or @alignOf(InstanceData) != 4) {
+        @compileError("InstanceData must match scene3d_wgsl per-instance vertex layout (80 bytes)");
     }
 }
 
@@ -120,27 +132,11 @@ var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
 var g_geo_cache_len: usize = 0;
 var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
 
-const UNIFORM_STRIDE: u32 = 256;
-const MAX_DRAW_UNIFORMS: u32 = 2048;
+// Per-instance vertex buffer cap. With InstanceData = 80 bytes, 8192 instances
+// = 640 KB reserved. drawScene bump-fills this each frame; uploads only the bytes
+// actually written, so a larger ceiling costs reserved GPU memory, not per-frame work.
+const MAX_INSTANCES: u32 = 8192;
 
-
-const MeshSpec = struct {
-    // Geometry is supplied entirely by @reactjit/geometries: `vertices` are the
-    // interleaved Vertex bytes the TS generator produced, `geom_key` is the intern
-    // key. No shape name, no size/radius — dimensions live in the verts (and any
-    // per-instance sizing rides in `scale`).
-    geom_key: ?[]const u8 = null,
-    vertices: ?[]const f32 = null, // interleaved Vertex layout
-    vert_count: u32 = 0,
-    position: math.Vec3 = .{},
-    rotation: math.Vec3 = .{},
-    scale: math.Vec3 = .{ .x = 1, .y = 1, .z = 1 },
-    color: [4]f32 = .{ 0.8, 0.8, 0.8, 1.0 },
-    tex_w: u32 = 0,
-    tex_h: u32 = 0,
-    tex_rgba: ?[]const u8 = null,
-    tex_key: ?[]const u8 = null,
-};
 
 // ════════════════════════════════════════════════════════════════════════
 // Pipeline state
@@ -149,6 +145,7 @@ const MeshSpec = struct {
 var g_pipeline: ?*wgpu.RenderPipeline = null;
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
+var g_instance_buf: ?*wgpu.Buffer = null;  // per-frame InstanceData buffer (step=instance, vbuf 1)
 var g_uniform_buffer: ?*wgpu.Buffer = null;
 var g_bind_group: ?*wgpu.BindGroup = null;
 var g_bind_group_layout: ?*wgpu.BindGroupLayout = null;
@@ -234,10 +231,22 @@ pub fn init() void {
         .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
+    // Scene uniforms — ONE set per frame (no dynamic offset). Was per-draw with
+    // a 256-byte stride × MAX_DRAW_UNIFORMS; instancing moved per-mesh data (model
+    // matrix, color) into the per-instance vertex buffer below.
     g_uniform_buffer = device.createBuffer(&.{
-        .label = wgpu.StringView.fromSlice("render3d_uniforms"),
-        .size = @as(u64, UNIFORM_STRIDE) * @as(u64, MAX_DRAW_UNIFORMS),
+        .label = wgpu.StringView.fromSlice("render3d_scene_uniforms"),
+        .size = @sizeOf(SceneUniforms),
         .usage = wgpu.BufferUsages.uniform | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+    // Per-instance vertex buffer — packed InstanceData (model + color), step=instance.
+    // drawScene writes one record per mesh, grouped by (geom_key, texture); each
+    // group issues ONE pass.draw(vert_count, instance_count, ...).
+    g_instance_buf = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("render3d_instances"),
+        .size = MAX_INSTANCES * @sizeOf(InstanceData),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
     g_bind_group_layout = device.createBindGroupLayout(&.{
@@ -245,7 +254,7 @@ pub fn init() void {
         .entries = @ptrCast(&wgpu.BindGroupLayoutEntry{
             .binding = 0,
             .visibility = wgpu.ShaderStages.vertex | wgpu.ShaderStages.fragment,
-            .buffer = .{ .type = .uniform, .has_dynamic_offset = 1, .min_binding_size = @sizeOf(SceneUniforms) },
+            .buffer = .{ .type = .uniform, .has_dynamic_offset = 0, .min_binding_size = @sizeOf(SceneUniforms) },
         }),
     }) orelse return;
     g_bind_group = device.createBindGroup(&.{
@@ -343,16 +352,24 @@ pub fn init() void {
         .bind_group_layouts = @ptrCast(&layouts),
     }) orelse return;
     defer pipeline_layout.release();
+    // Per-vertex attributes (vertex buffer 0, step=vertex) — position/normal/uv.
     const vert_attrs = [_]wgpu.VertexAttribute{
         .{ .format = .float32x3, .offset = 0, .shader_location = 0 },
         .{ .format = .float32x3, .offset = 12, .shader_location = 1 },
         .{ .format = .float32x2, .offset = 24, .shader_location = 2 },
     };
-    const vert_layout = wgpu.VertexBufferLayout{
-        .step_mode = .vertex,
-        .array_stride = @sizeOf(Vertex),
-        .attribute_count = vert_attrs.len,
-        .attributes = &vert_attrs,
+    // Per-instance attributes (vertex buffer 1, step=instance) — model matrix as
+    // 4 vec4 columns (locations 3–6) + instance color (location 7). 80 bytes / instance.
+    const inst_attrs = [_]wgpu.VertexAttribute{
+        .{ .format = .float32x4, .offset = 0,  .shader_location = 3 },
+        .{ .format = .float32x4, .offset = 16, .shader_location = 4 },
+        .{ .format = .float32x4, .offset = 32, .shader_location = 5 },
+        .{ .format = .float32x4, .offset = 48, .shader_location = 6 },
+        .{ .format = .float32x4, .offset = 64, .shader_location = 7 },
+    };
+    const vert_layouts = [_]wgpu.VertexBufferLayout{
+        .{ .step_mode = .vertex,   .array_stride = @sizeOf(Vertex),       .attribute_count = vert_attrs.len, .attributes = &vert_attrs },
+        .{ .step_mode = .instance, .array_stride = @sizeOf(InstanceData), .attribute_count = inst_attrs.len, .attributes = &inst_attrs },
     };
     const color_target = wgpu.ColorTargetState{
         .format = .rgba8_unorm,
@@ -374,7 +391,7 @@ pub fn init() void {
     };
     g_pipeline = device.createRenderPipeline(&.{
         .layout = pipeline_layout,
-        .vertex = .{ .module = shader_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = 1, .buffers = @ptrCast(&vert_layout) },
+        .vertex = .{ .module = shader_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
         .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
         .depth_stencil = &depth_stencil,
         .multisample = .{},
@@ -487,6 +504,7 @@ pub fn deinit() void {
     if (g_bind_group) |bg| bg.release();
     if (g_bind_group_layout) |l| l.release();
     if (g_uniform_buffer) |b| b.release();
+    if (g_instance_buf) |b| b.release();
     if (g_vertex_buffer) |b| b.release();
     if (g_pipeline) |p| p.release();
     if (g_sky_bind_group) |bg| bg.release();
@@ -583,22 +601,6 @@ fn estimateMeshRadius(node: *const Node) f32 {
         return node.scene3d_bounds_radius * max3(sx, sy, sz);
     }
     return max3(sx, sy, sz);
-}
-
-fn buildMeshSpec(node: *const Node) MeshSpec {
-    return .{
-        .geom_key = node.scene3d_geom_key,
-        .vertices = node.scene3d_vertices,
-        .vert_count = node.scene3d_vert_count,
-        .position = .{ .x = node.scene3d_pos_x, .y = node.scene3d_pos_y, .z = node.scene3d_pos_z },
-        .rotation = .{ .x = node.scene3d_rot_x, .y = node.scene3d_rot_y, .z = node.scene3d_rot_z },
-        .scale = .{ .x = node.scene3d_scale_x, .y = node.scene3d_scale_y, .z = node.scene3d_scale_z },
-        .color = .{ node.scene3d_color_r, node.scene3d_color_g, node.scene3d_color_b, 1.0 },
-        .tex_w = node.scene3d_tex_w,
-        .tex_h = node.scene3d_tex_h,
-        .tex_rgba = node.scene3d_tex_rgba,
-        .tex_key = node.scene3d_tex_key,
-    };
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -768,91 +770,6 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     g_geo_cache[g_geo_cache_len] = .{ .hash = hashKey(key), .offset_bytes = off, .count = count, .present = true };
     g_geo_cache_len += 1;
     return .{ .offset = off, .count = count };
-}
-
-fn drawMesh(pass: anytype, queue: *wgpu.Queue, uniform_index: *u32, vert_byte_offset: *u64, vp: math.Mat4, cam_pos: math.Vec3, light_dir: [3]f32, light_color: [3]f32, ambient_color: [3]f32, fog_color: [3]f32, fog_near: f32, fog_far: f32, spec: MeshSpec) void {
-    // ── Resolve the vertex source ──
-    // Registry mesh (geom_key set): redraw a RETAINED slice — uploaded once on
-    // first sight, no per-frame work. On cache/buffer overflow it degrades to a
-    // per-frame upload. No geom_key = no geometry → nothing drawn.
-    var draw_buffer: *wgpu.Buffer = undefined;
-    var draw_offset: u64 = 0;
-    var vert_count: u32 = 0;
-    var advance_frame_buf = false;
-    const frame_cap_bytes: u64 = @as(u64, MAX_FRAME_VERTS) * @sizeOf(Vertex);
-
-    if (spec.geom_key) |key| {
-        // Cache-first: a deduped mesh node (everything past the first per key) has
-        // NO verts but the same key — an earlier sibling already registered them,
-        // so we just hit the cache. Same path used by the build-time bake seed.
-        if (lookupGeometry(key)) |slot| {
-            draw_buffer = g_retained_vbuf.?;
-            draw_offset = slot.offset;
-            vert_count = slot.count;
-        } else {
-            // Cache miss: this is the first mesh per key. Need verts to register.
-            const verts = spec.vertices orelse return;
-            if (spec.vert_count == 0) return;
-            if (verts.len < @as(usize, spec.vert_count) * 8) return; // 8 floats/vertex
-            if (internGeometry(queue, key, verts, spec.vert_count)) |slot| {
-                draw_buffer = g_retained_vbuf.?;
-                draw_offset = slot.offset;
-                vert_count = slot.count;
-            } else {
-                // Cache/buffer full — degrade to a per-frame upload (still correct).
-                const bytes: u64 = @as(u64, spec.vert_count) * @sizeOf(Vertex);
-                if (vert_byte_offset.* + bytes > frame_cap_bytes) return;
-                queue.writeBuffer(g_vertex_buffer.?, vert_byte_offset.*, @ptrCast(verts.ptr), bytes);
-                draw_buffer = g_vertex_buffer.?;
-                draw_offset = vert_byte_offset.*;
-                vert_count = spec.vert_count;
-                advance_frame_buf = true;
-            }
-        }
-    } else {
-        // No geometry supplied. A cart still on the removed string-geometry path
-        // lands here and draws nothing — the intended breakage that forces it onto
-        // @reactjit/geometries.
-        return;
-    }
-    if (uniform_index.* >= MAX_DRAW_UNIFORMS) return;
-    const vert_bytes: u64 = @as(u64, vert_count) * @sizeOf(Vertex);
-
-    const deg2rad = std.math.pi / 180.0;
-    var model = math.m4scale(math.m4identity(), spec.scale);
-    model = math.m4multiply(math.m4rotateZ(math.m4identity(), spec.rotation.z * deg2rad), model);
-    model = math.m4multiply(math.m4rotateX(math.m4identity(), spec.rotation.x * deg2rad), model);
-    model = math.m4multiply(math.m4rotateY(math.m4identity(), spec.rotation.y * deg2rad), model);
-    model = math.m4multiply(math.m4translate(math.m4identity(), spec.position), model);
-
-    const uniforms = SceneUniforms{
-        .mvp = math.m4transpose(math.m4multiply(vp, model)),
-        .model = math.m4transpose(model),
-        .light_dir = light_dir,
-        .specular_power = 64.0,
-        .light_color = light_color,
-        .ambient_color = ambient_color,
-        .camera_pos = .{ cam_pos.x, cam_pos.y, cam_pos.z },
-        .color = spec.color,
-        .fog_color = fog_color,
-        .fog_near = fog_near,
-        .fog_far = fog_far,
-    };
-    const dynamic_offset = uniform_index.* * UNIFORM_STRIDE;
-    queue.writeBuffer(g_uniform_buffer.?, dynamic_offset, @ptrCast(&uniforms), @sizeOf(SceneUniforms));
-    uniform_index.* += 1;
-    pass.setBindGroup(0, g_bind_group.?, 1, @ptrCast(&dynamic_offset));
-    var tex_bg: ?*wgpu.BindGroup = g_default_tex_bind_group;
-    if (spec.tex_rgba) |rgba| {
-        if (getOrCreateTexBindGroup(rgba, spec.tex_w, spec.tex_h)) |bg| tex_bg = bg;
-    }
-    if (spec.tex_key) |key| {
-        if (images.staticSurfaceBindGroup3D(key)) |bg| tex_bg = bg;
-    }
-    if (tex_bg) |bg| pass.setBindGroup(1, bg, 0, null);
-    pass.setVertexBuffer(0, draw_buffer, draw_offset, vert_bytes);
-    pass.draw(vert_count, 1, 0, 0);
-    if (advance_frame_buf) vert_byte_offset.* += vert_bytes;
 }
 
 
@@ -1044,13 +961,112 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     if (sky_node) |s| drawSky(pass, queue, s, vp, cam_pos);
 
     pass.setPipeline(g_pipeline.?);
-    var uniform_index: u32 = 0;
-    var vert_byte_offset: u64 = 0;
 
-    // ── Draw each mesh ──
-    for (node.children) |*child| {
+    // ── Scene uniforms: ONE write per frame (no dynamic offset). The per-mesh
+    //    model matrix + color moved into per-instance vertex attributes below. ──
+    const scene_u = SceneUniforms{
+        .vp = math.m4transpose(vp),
+        .light_dir = light_dir,
+        .specular_power = 64.0,
+        .light_color = light_color,
+        .ambient_color = ambient_color,
+        .camera_pos = .{ cam_pos.x, cam_pos.y, cam_pos.z },
+        .fog_color = fog_color,
+        .fog_near = fog_near,
+        .fog_far = fog_far,
+    };
+    queue.writeBuffer(g_uniform_buffer.?, 0, @ptrCast(&scene_u), @sizeOf(SceneUniforms));
+    pass.setBindGroup(0, g_bind_group.?, 0, null);
+
+    // ── Pass 1: resolve each mesh (geometry slot, texture bind group). Skips
+    //    nodes whose first-paint upload would miss the cache (broken state). ──
+    const MAX_MESHES = 1024;
+    var midx: [MAX_MESHES]u32 = undefined;
+    var mslot: [MAX_MESHES]GeoSlice = undefined;
+    var mtex: [MAX_MESHES]?*wgpu.BindGroup = undefined;
+    var mvisited: [MAX_MESHES]bool = [_]bool{false} ** MAX_MESHES;
+    var mcount: usize = 0;
+
+    var ci: u32 = 0;
+    while (ci < node.children.len and mcount < MAX_MESHES) : (ci += 1) {
+        const child = &node.children[ci];
         if (!child.scene3d_mesh) continue;
-        drawMesh(pass, queue, &uniform_index, &vert_byte_offset, vp, cam_pos, light_dir, light_color, ambient_color, fog_color, fog_near, fog_far, buildMeshSpec(child));
+        const key = child.scene3d_geom_key orelse continue;
+
+        var maybe_slot = lookupGeometry(key);
+        if (maybe_slot == null) {
+            // First mesh per key in this scene must carry verts (the dedup path
+            // only ships verts on the first per key; later ones cache-hit).
+            const verts = child.scene3d_vertices orelse continue;
+            if (child.scene3d_vert_count == 0) continue;
+            if (verts.len < @as(usize, child.scene3d_vert_count) * 8) continue;
+            maybe_slot = internGeometry(queue, key, verts, child.scene3d_vert_count);
+            if (maybe_slot == null) continue;
+        }
+
+        var tex_bg: ?*wgpu.BindGroup = g_default_tex_bind_group;
+        if (child.scene3d_tex_rgba) |rgba| {
+            if (getOrCreateTexBindGroup(rgba, child.scene3d_tex_w, child.scene3d_tex_h)) |bg| tex_bg = bg;
+        }
+        if (child.scene3d_tex_key) |tk| {
+            if (images.staticSurfaceBindGroup3D(tk)) |bg| tex_bg = bg;
+        }
+
+        midx[mcount] = ci;
+        mslot[mcount] = maybe_slot.?;
+        mtex[mcount] = tex_bg;
+        mcount += 1;
+    }
+
+    // ── Pass 2: group by (slot.offset, tex_bg) and issue ONE instanced draw per
+    //    group. slot.offset is the cache offset for a key — identity-by-offset
+    //    is equivalent to identity-by-key since each key has one cache entry. ──
+    const inst_cap_bytes: u64 = @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
+    var inst_top: u64 = 0;
+    var gi: usize = 0;
+    while (gi < mcount) : (gi += 1) {
+        if (mvisited[gi]) continue;
+        const group_slot = mslot[gi];
+        const group_tex = mtex[gi];
+
+        const inst_start = inst_top;
+        var group_count: u32 = 0;
+
+        var hi: usize = gi;
+        while (hi < mcount) : (hi += 1) {
+            if (mvisited[hi]) continue;
+            if (mslot[hi].offset != group_slot.offset) continue;
+            if (mtex[hi] != group_tex) continue;
+            if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break; // overflow
+
+            const child = &node.children[midx[hi]];
+            const deg2rad = std.math.pi / 180.0;
+            var model = math.m4scale(math.m4identity(), .{
+                .x = child.scene3d_scale_x, .y = child.scene3d_scale_y, .z = child.scene3d_scale_z,
+            });
+            model = math.m4multiply(math.m4rotateZ(math.m4identity(), child.scene3d_rot_z * deg2rad), model);
+            model = math.m4multiply(math.m4rotateX(math.m4identity(), child.scene3d_rot_x * deg2rad), model);
+            model = math.m4multiply(math.m4rotateY(math.m4identity(), child.scene3d_rot_y * deg2rad), model);
+            model = math.m4multiply(math.m4translate(math.m4identity(), .{
+                .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z,
+            }), model);
+
+            const inst = InstanceData{
+                .model = math.m4transpose(model),
+                .color = .{ child.scene3d_color_r, child.scene3d_color_g, child.scene3d_color_b, 1.0 },
+            };
+            queue.writeBuffer(g_instance_buf.?, inst_top, @ptrCast(&inst), @sizeOf(InstanceData));
+            inst_top += @sizeOf(InstanceData);
+            group_count += 1;
+            mvisited[hi] = true;
+        }
+
+        if (group_count == 0) continue;
+        if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
+        const geo_bytes: u64 = @as(u64, group_slot.count) * @sizeOf(Vertex);
+        pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, geo_bytes);
+        pass.setVertexBuffer(1, g_instance_buf.?, inst_start, @as(u64, group_count) * @sizeOf(InstanceData));
+        pass.draw(group_slot.count, group_count, 0, 0);
     }
 
     pass.end();

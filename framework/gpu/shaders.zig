@@ -744,10 +744,9 @@ pub const image_wgsl =
 /// Vertex: position(vec3f), normal(vec3f), uv(vec2f) = 32 bytes.
 /// Uniforms: MVP, model matrix, lighting, material color.
 pub const scene3d_wgsl =
-    \\// ── Uniforms ───────────────────────────────────────────────────
+    \\// ── Scene-wide uniforms (one set per frame, no dynamic offset) ──
     \\struct SceneUniforms {
-    \\    mvp: mat4x4f,
-    \\    model: mat4x4f,
+    \\    vp: mat4x4f,
     \\    light_dir: vec3f,
     \\    specular_power: f32,
     \\    light_color: vec3f,
@@ -756,21 +755,31 @@ pub const scene3d_wgsl =
     \\    _pad2: f32,
     \\    camera_pos: vec3f,
     \\    _pad3: f32,
-    \\    color: vec4f,
     \\    fog_color: vec3f,
     \\    fog_near: f32,
     \\    fog_far: f32,
     \\    _pad4: vec4f,
     \\};
-    \\@group(0) @binding(0) var<uniform> u: SceneUniforms;
+    \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
     \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
     \\@group(1) @binding(1) var diffuse_smp: sampler;
     \\
     \\// ── Vertex I/O ────────────────────────────────────────────────
+    \\// Per-vertex attrs at locations 0–2 come from vertex buffer 0 (the retained
+    \\// geometry, step=vertex). Per-instance attrs at locations 3–7 come from
+    \\// vertex buffer 1 (the per-frame instance buffer, step=instance): model
+    \\// matrix as 4 vec4 columns + inst_color. drawScene packs the per-instance
+    \\// bytes per (geom_key, texture) group and issues ONE instanced draw per
+    \\// group — the N→1 draw-call collapse.
     \\struct VertexInput {
     \\    @location(0) position: vec3f,
     \\    @location(1) normal: vec3f,
     \\    @location(2) uv: vec2f,
+    \\    @location(3) model_c0: vec4f,
+    \\    @location(4) model_c1: vec4f,
+    \\    @location(5) model_c2: vec4f,
+    \\    @location(6) model_c3: vec4f,
+    \\    @location(7) inst_color: vec4f,
     \\};
     \\
     \\struct VertexOutput {
@@ -778,46 +787,43 @@ pub const scene3d_wgsl =
     \\    @location(0) world_pos: vec3f,
     \\    @location(1) world_normal: vec3f,
     \\    @location(2) uv: vec2f,
+    \\    @location(3) inst_color: vec4f,
     \\};
     \\
     \\// ── Vertex shader ────────────────────────────────────────────
     \\@vertex
     \\fn vs_main(in: VertexInput) -> VertexOutput {
     \\    var out: VertexOutput;
-    \\    out.clip_pos = u.mvp * vec4f(in.position, 1.0);
-    \\    out.world_pos = (u.model * vec4f(in.position, 1.0)).xyz;
-    \\    out.world_normal = normalize((u.model * vec4f(in.normal, 0.0)).xyz);
+    \\    let model = mat4x4f(in.model_c0, in.model_c1, in.model_c2, in.model_c3);
+    \\    let world = model * vec4f(in.position, 1.0);
+    \\    out.clip_pos = S.vp * world;
+    \\    out.world_pos = world.xyz;
+    \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
     \\    out.uv = in.uv;
+    \\    out.inst_color = in.inst_color;
     \\    return out;
     \\}
     \\
     \\// ── Fragment shader (Blinn-Phong + diffuse texture) ──────────
-    \\// Meshes without an explicit texture get a 1×1 white default,
-    \\// so the multiply collapses to the uniform color and behavior
-    \\// matches the pre-texture pipeline.
+    \\// Meshes without an explicit texture get a 1×1 white default, so the multiply
+    \\// collapses to the per-instance color and behavior matches the pre-texture path.
     \\@fragment
     \\fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     \\    let N = normalize(in.world_normal);
-    \\    let L = normalize(u.light_dir);
-    \\    let V = normalize(u.camera_pos - in.world_pos);
-    \\
-    \\    // Diffuse (Lambert)
+    \\    let L = normalize(S.light_dir);
+    \\    let V = normalize(S.camera_pos - in.world_pos);
     \\    let diff = max(dot(N, L), 0.0);
-    \\
-    \\    // Specular (Blinn-Phong)
     \\    let H = normalize(L + V);
-    \\    let spec = pow(max(dot(N, H), 0.0), u.specular_power);
-    \\
+    \\    let spec = pow(max(dot(N, H), 0.0), S.specular_power);
     \\    let tex_sample = textureSample(diffuse_tex, diffuse_smp, in.uv);
-    \\    let base = u.color.rgb * tex_sample.rgb;
-    \\    let ambient = u.ambient_color * base;
-    \\    let diffuse = u.light_color * base * diff;
-    \\    let specular = u.light_color * spec * 0.4;
+    \\    let base = in.inst_color.rgb * tex_sample.rgb;
+    \\    let ambient = S.ambient_color * base;
+    \\    let diffuse = S.light_color * base * diff;
+    \\    let specular = S.light_color * spec * 0.4;
     \\    let lit = ambient + diffuse + specular;
-    \\    let fog_t = smoothstep(u.fog_near, u.fog_far, distance(u.camera_pos, in.world_pos));
-    \\    let final_rgb = mix(lit, u.fog_color, fog_t);
-    \\
-    \\    return vec4f(final_rgb, u.color.a * tex_sample.a);
+    \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
+    \\    let final_rgb = mix(lit, S.fog_color, fog_t);
+    \\    return vec4f(final_rgb, in.inst_color.a * tex_sample.a);
     \\}
 ;
 
