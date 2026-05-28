@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Box, Col, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
@@ -330,8 +330,8 @@ function Pedestal({ ctx, item }: { ctx: ModelCtx; item: Item }) {
   </>;
 }
 
-function GalleryScene({ item, spin, yaw, pitch }: { item: Item; spin: number; yaw: number; pitch: number }) {
-  const ctx: ModelCtx = { origin: [0, 0.18, 0], yaw: spin, scale: 1.95, active: true };
+function GalleryScene({ item, yaw, pitch }: { item: Item; yaw: number; pitch: number }) {
+  const ctx: ModelCtx = { origin: [0, 0.18, 0], yaw: 0, scale: 1.95, active: true };
   return (
     <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#111827">
       <OrbitCamera target={[0, 0.72, 0]} yaw={yaw} pitch={pitch} dist={4.6} zoom={1} fov={38} />
@@ -384,21 +384,10 @@ function ItemButton({ item, active, onPress }: { item: Item; active: boolean; on
 
 export default function GameItemGallery() {
   const [selected, setSelected] = useState('knife');
-  const [spin, setSpin] = useState(0);
   const [orbitYaw, setOrbitYaw] = useState(35);
   const [orbitPitch, setOrbitPitch] = useState(28);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const current = ITEMS.find((item) => item.id === selected) ?? ITEMS[0];
-
-  useEffect(() => {
-    let handle: any = 0;
-    const tick = () => {
-      setSpin((v) => (v + 0.018) % (PI * 2));
-      handle = setTimeout(tick, 33);
-    };
-    handle = setTimeout(tick, 33);
-    return () => clearTimeout(handle);
-  }, []);
 
   const onDown = (e: any) => {
     dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) };
@@ -425,7 +414,7 @@ export default function GameItemGallery() {
         onMouseUp={onUp}
         style={{ width: '100%', height: '100%' }}
       >
-        <GalleryScene item={current} spin={spin} yaw={orbitYaw} pitch={orbitPitch} />
+        <GalleryScene item={current} yaw={orbitYaw} pitch={orbitPitch} />
       </Pressable>
 
       <Col style={{ position: 'absolute', left: 18, top: 16, gap: 6 }}>
