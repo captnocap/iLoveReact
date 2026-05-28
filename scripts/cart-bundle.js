@@ -112,6 +112,12 @@ const flags = [
   // exist. Physically runtime/geometries/; '@reactjit/runtime/geometries' also
   // resolves there via the runtime alias above.
   '--alias:@reactjit/geometries=' + ROOT + '/runtime/geometries',
+  // @reactjit/cameras — the shared registry of drop-in camera rigs (Orbit,
+  // Follow, TopDown, Isometric, FirstPerson, FreeFly, Cinematic). The third leg
+  // beside effects/geometries: each rig is a pure solve(params)→{pos,target,fov}
+  // and picking inverts through one generic unprojectGround. Physically
+  // runtime/cameras/; '@reactjit/runtime/cameras' also resolves via the runtime alias.
+  '--alias:@reactjit/cameras=' + ROOT + '/runtime/cameras',
   '--alias:@cart-entry=' + entryAbs,
   // Vendored npm deps under deps/. Replaces node_modules lookup so
   // bare-specifier imports (react, react-reconciler, ...) resolve without
