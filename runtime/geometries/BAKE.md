@@ -29,7 +29,20 @@ runtime generator's real job is the narrow remainder.
 
 The seed/intern backend is built and proven. Two producers feed it:
 
-### 1. Const-taint propagation — the auto producer (THE NEXT BUILD)
+### 1. Auto producer (literal-detection done; const-taint is the next layer)
+
+**Literal-detection foundation (BUILT)** — `rjit bake-geometry-auto <cart.tsx>`
+walks the cart's TSX via the TypeScript compiler API, finds every
+`<Scene3D.Mesh geometry={NS.Name} params={LITERAL}>` whose params resolve to a
+literal object tree (numeric/string/bool/null/array/object, unary minus), and
+emits a manifest that pipes straight into `rjit bake-geometry --manifest`.
+Strict subset of what taint will eventually catch — handles meshes with their
+params spelled at the JSX site (the easy-mode case), correctly leaves anything
+data-driven for the runtime intern. Verified end-to-end against skybox_demo
+(1/4 bakeable: the literal-param ground box) and geometry_demo (0/2: both
+data-driven, correctly un-baked).
+
+**Const-taint extension (the next layer atop the same emitter)** —
 
 **Not** literal-detection at the use site (`{ width: 60 }` good, `{ radius: p.h/2 }`
 bad) — that's the wrong primitive. Instead, **color the prop graph**:
