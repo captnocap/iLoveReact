@@ -117,7 +117,7 @@ const BLURB: Record<RigName, string> = {
   TopDown: 'Tactical overhead, tilted just off vertical. Drag to spin north. Hitman / Schedule-1.',
   Isometric: 'Fixed-angle ARPG view — long lens flattens perspective. Drag spins it.',
   FirstPerson: 'Eye-level, looking at the figure. Drag to aim on BOTH axes.',
-  FreeFly: 'Spectator cam — WASD to move, Q/E down/up, drag to look. Fly anywhere.',
+  FreeFly: 'Spectator cam — drag to look. WASD flies along the look direction (look up + W = up). Space/Shift (or E/Q) for world up/down.',
   Cinematic: 'Director — hard-cuts between film-grammar shots (hero / over-shoulder / profile / hip / worm / wide / close). Hands-off.',
 };
 
@@ -143,6 +143,7 @@ export default function CameraLab() {
   // mirror live state into refs so the animation loop never reads stale values
   const rigRef = useRef(rig); rigRef.current = rig;
   const lookYawRef = useRef(lookYaw); lookYawRef.current = lookYaw;
+  const lookPitchRef = useRef(lookPitch); lookPitchRef.current = lookPitch;
 
   // params per rig (degrees everywhere)
   const paramsFor = (name: RigName): any => {
@@ -178,17 +179,27 @@ export default function CameraLab() {
       const dt = Math.min(0.05, (now - last) / 1000); last = now;
       if (rigRef.current === 'FreeFly') {
         const k = keysRef.current; const sp = 11 * dt;
+        // Match the FPS yaw convention used by the lookForward rig: forward
+        // includes pitch so W flies along the actual look direction (look up,
+        // W goes up); strafe stays horizontal so A/D never make you sink.
         const yr = lookYawRef.current * Math.PI / 180;
-        const fx = Math.sin(yr), fz = Math.cos(yr);
-        const rx = Math.cos(yr), rz = -Math.sin(yr);
+        const pr = lookPitchRef.current * Math.PI / 180;
+        const cp = Math.cos(pr);
+        const fx = -Math.sin(yr) * cp;
+        const fy = Math.sin(pr);
+        const fz = Math.cos(yr) * cp;
+        const rx = -Math.cos(yr); // camera-right (horizontal): up × (eye-target)
+        const rz = -Math.sin(yr);
         let [x, y, z] = freeRef.current;
-        if (k['w']) { x += fx * sp; z += fz * sp; }
-        if (k['s']) { x -= fx * sp; z -= fz * sp; }
-        if (k['a']) { x -= rx * sp; z -= rz * sp; }
+        if (k['w']) { x += fx * sp; y += fy * sp; z += fz * sp; }
+        if (k['s']) { x -= fx * sp; y -= fy * sp; z -= fz * sp; }
         if (k['d']) { x += rx * sp; z += rz * sp; }
-        if (k['q']) y -= sp;
-        if (k['e']) y += sp;
-        freeRef.current = [x, Math.max(0.5, y), z];
+        if (k['a']) { x -= rx * sp; z -= rz * sp; }
+        // world-Y override — Q/E (Unity/Unreal scene-cam) AND Space/Shift (FPS
+        // creative fly). Both work, no floor — it's a fly cam.
+        if (k['e'] || k[' '] || k['space']) y += sp;
+        if (k['q'] || k['shift']) y -= sp;
+        freeRef.current = [x, y, z];
       }
       setClock((c) => c + dt);
       sched(loop);
