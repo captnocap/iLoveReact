@@ -188,3 +188,12 @@ export function buildHmscSky(hour: number, weather: number, gloom: number): Hmsc
     ground: mixHex(sky.ground, '#07111f', 0.4),
   };
 }
+
+// Flat sky color for a Scene3D backgroundColor. The host <Scene3D.Skybox> dome
+// is broken (renders near-black + a horizon line), so HMSC paints a single
+// day-cycle-tinted sky tone behind the scene instead. Leans toward the up-sky
+// (zenith) so it reads as sky, not a sunset band.
+export function hmscSkyBackgroundColor(hour: number, weather: number, gloom: number): string {
+  const sky = buildHmscSky(hour, weather, gloom);
+  return mixHex(sky.horizon, sky.zenith, 0.62);
+}

@@ -13,10 +13,13 @@ export const MAX_CONSOLE_EVENT_LINES = 40;
 export const SKY_TICK_INTERVAL_MS = 250;
 export const SKY_HOURS_PER_DAY = 24;
 export const REAL_MILLISECONDS_PER_MINUTE = 60_000;
-export const DEFAULT_SKY_HOUR = 17.35;
+// Stable bright midday by default with the auto-cycle OFF, so the sky doesn't
+// silently drift (and gv_reset doesn't appear to change it). Re-enable the
+// day/night cycle with `gv_daycycle 1`.
+export const DEFAULT_SKY_HOUR = 12;
 export const DEFAULT_SKY_WEATHER = 0.12;
 export const DEFAULT_SKY_GLOOM = 0;
-export const DEFAULT_SKY_DAY_CYCLE_ENABLED = true;
+export const DEFAULT_SKY_DAY_CYCLE_ENABLED = false;
 export const DEFAULT_SKY_CYCLE_HOURS_PER_REAL_MINUTE = 1.5;
 
 export const MIN_DRIVE_FRAME_SECONDS = 0.001;

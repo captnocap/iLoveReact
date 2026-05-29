@@ -2,6 +2,13 @@ import { Scene3D } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { Vec3 } from '../design';
 
+// The HMSC player model: an articulated humanoid sculpted from the geometry
+// registry (cylinder limbs, sphere joints/head, box torso, torus belt, cone
+// hat/nose). Pose is driven by drivePose(animationSeconds, moving, running) —
+// idle when standing, a walk/run gait cycle when moving — matching the gait in
+// animation_lab's drive mode. Consumers: hmsc gameplay, hmsc_scale_lab,
+// hmsc_massive_map_lab. Keep the prop signature stable for them.
+
 type Vec3Tuple = [number, number, number];
 
 type PlayerPose = {

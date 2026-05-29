@@ -17,10 +17,6 @@ import {
 import { recordAndPublishGameEvent } from './events/gameEvents';
 import { useHmscEventRules } from './events/useHmscEventRules';
 import { HmscGameplayRig } from './gameplay/HmscGameplayRig';
-import { hmscLabForSceneStep } from './labs/labDefinitions';
-import { AimLabScene } from './labs/AimLabScene';
-import { ScaleLabScene } from './labs/ScaleLabScene';
-import { TextureLabScene } from './labs/TextureLabScene';
 import { normalizeSkyHour } from './render3d/sky';
 import {
   REAL_MILLISECONDS_PER_MINUTE,
@@ -48,14 +44,6 @@ export default function HmscCart() {
   const [entries, setEntries] = useState<CommandEntry[]>([
     commandEntry('output', 'HMSC console online. Run cmd_help.'),
   ]);
-  const activeLab = hmscLabForSceneStep(gameState.sceneStep);
-  const labScene = activeLab?.name === 'scale'
-    ? <ScaleLabScene />
-    : activeLab?.name === 'textures'
-      ? <TextureLabScene />
-      : activeLab?.name === 'aim'
-        ? (context: any) => <AimLabScene state={gameState} context={context} />
-        : null;
 
   useHmscEventRules(setGameState);
 
@@ -135,14 +123,7 @@ export default function HmscCart() {
         state={gameState}
         setGameState={setGameState}
         inputBlocked={consoleOpen}
-        sceneChildren={labScene}
       />
-      {activeLab ? (
-        <Box style={{ position: 'absolute', left: 18, bottom: 18, padding: 10, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f172acc' }}>
-          <Text fontSize={12} color="#e5eefc" style={{ fontWeight: 800 }}>{activeLab.label}</Text>
-          <Text fontSize={11} color="#94a3b8">lab_exit returns to game</Text>
-        </Box>
-      ) : null}
       <Box style={{ position: 'absolute', top: 16, left: 18, zIndex: 2 }}>
         <Pressable
           onPress={() => setConsoleOpen((open) => !open)}

@@ -1,175 +1,92 @@
 import { Scene3D } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
-import type { GameState, PlacedCell, SpawnedEntity, TileKind, WorldSurfaceRegion } from '../design';
-import { HMSC_GAMEPLAY_CAMERA } from '../gameplay/camera';
+import type { GameState, PlacedCell, WorldSurfaceRegion } from '../design';
 import { tileKindDefinition } from '../world/tileKinds';
 import { surfaceRegionTopMeters } from '../world/surfaceHeights';
+import { HMSC_GAMEPLAY_CAMERA } from '../gameplay/camera';
 import { PlayerFigure } from './PlayerFigure';
+import { floorTextureKey } from './tileSurface';
 import { buildHmscSky } from './sky';
 
-type WorldMeshRect = {
-  key: string;
-  kind: TileKind;
-  x: number;
-  y: number;
-  z: number;
-  width: number;
-  depth: number;
-};
+// World renderer. A large tile field (surfaceRegion) is drawn as ONE textured
+// floor mesh — the whole repeating tile grid is a single Effect captured to a
+// texture (see tileSurface.tsx, mounted in HmscGameplayRig). Cost is one node
+// per region no matter how many tiles, so 120x120 and 1200x1200 draw the same.
+// Discrete placements (placedCells: doors, props) stay as individual meshes.
+// 1 tile = 1 meter.
 
-function rectMeshPosition(rect: WorldMeshRect, height: number): [number, number, number] {
-  return [
-    rect.x + rect.width / 2,
-    rect.y + height / 2,
-    rect.z + rect.depth / 2,
-  ];
-}
-
-function occupancyKey(x: number, z: number): string {
-  return `${x},${z}`;
-}
-
-function coalesceCellsIntoWorldRects(placedCells: PlacedCell[]): WorldMeshRect[] {
-  const groups = new Map<string, PlacedCell[]>();
-  for (const placedCell of placedCells) {
-    const groupKey = `${placedCell.kind}:${placedCell.cell.y}`;
-    groups.set(groupKey, [...(groups.get(groupKey) ?? []), placedCell]);
-  }
-
-  const rects: WorldMeshRect[] = [];
-  for (const cells of groups.values()) {
-    const remaining = new Map<string, PlacedCell>();
-    for (const placedCell of cells) remaining.set(occupancyKey(placedCell.cell.x, placedCell.cell.z), placedCell);
-
-    while (remaining.size > 0) {
-      const origin = [...remaining.values()].sort((a, b) => (
-        a.cell.z === b.cell.z ? a.cell.x - b.cell.x : a.cell.z - b.cell.z
-      ))[0];
-
-      let width = 1;
-      while (remaining.has(occupancyKey(origin.cell.x + width, origin.cell.z))) width += 1;
-
-      let depth = 1;
-      let canGrowDepth = true;
-      while (canGrowDepth) {
-        const nextZ = origin.cell.z + depth;
-        for (let dx = 0; dx < width; dx += 1) {
-          if (!remaining.has(occupancyKey(origin.cell.x + dx, nextZ))) {
-            canGrowDepth = false;
-            break;
-          }
-        }
-        if (canGrowDepth) depth += 1;
-      }
-
-      for (let dz = 0; dz < depth; dz += 1) {
-        for (let dx = 0; dx < width; dx += 1) {
-          remaining.delete(occupancyKey(origin.cell.x + dx, origin.cell.z + dz));
-        }
-      }
-
-      rects.push({
-        key: `${origin.kind}:${origin.cell.y}:${origin.cell.x},${origin.cell.z}:${width}x${depth}`,
-        kind: origin.kind,
-        x: origin.cell.x,
-        y: origin.cell.y,
-        z: origin.cell.z,
-        width,
-        depth,
-      });
-    }
-  }
-
-  return rects;
-}
-
-function MapRectMesh(props: { rect: WorldMeshRect }) {
-  const style = tileKindDefinition(props.rect.kind).render;
+// One region = one thin slab sampling its captured tile-grid texture. The slab
+// top is surfaceRegionTopMeters — the SAME value host physics uses for ground —
+// so the player stands exactly on the visible floor. Unit-box params (literal →
+// bakes); scale gives the real footprint.
+function FloorMesh(props: { region: WorldSurfaceRegion; cellSizeMeters: number }) {
+  const region = props.region;
+  const c = props.cellSizeMeters;
+  const thickness = tileKindDefinition(region.kind).render.heightMeters;
+  const top = surfaceRegionTopMeters(region, c);
+  // Host model matrix is translate*rotate*scale and Box is centered, so a
+  // centered position spans [center - w/2, center + w/2] = the region.
   return (
     <Scene3D.Mesh
       geometry={Geometry.Box}
-      params={{ width: props.rect.width, height: style.heightMeters, depth: props.rect.depth }}
-      material={style.textureKey ? '#ffffff' : style.color}
-      textureKey={style.textureKey}
-      position={rectMeshPosition(props.rect, style.heightMeters)}
-    />
-  );
-}
-
-function SurfaceRegionMesh(props: { region: WorldSurfaceRegion; cellSizeMeters: number }) {
-  const style = tileKindDefinition(props.region.kind).render;
-  const widthMeters = props.region.width * props.cellSizeMeters;
-  const depthMeters = props.region.depth * props.cellSizeMeters;
-  const topMeters = surfaceRegionTopMeters(props.region, props.cellSizeMeters);
-  return (
-    <Scene3D.Mesh
-      geometry={Geometry.Box}
-      params={{ width: widthMeters, height: style.heightMeters, depth: depthMeters }}
-      material={style.textureKey ? '#ffffff' : style.color}
-      textureKey={style.textureKey}
+      params={{ width: 1, height: 1, depth: 1 }}
+      scale={[region.width * c, thickness, region.depth * c]}
+      material="#ffffff"
+      textureKey={floorTextureKey(region.id)}
       position={[
-        props.region.x * props.cellSizeMeters + widthMeters / 2,
-        topMeters - style.heightMeters / 2,
-        props.region.z * props.cellSizeMeters + depthMeters / 2,
+        (region.x + region.width / 2) * c,
+        top - thickness / 2,
+        (region.z + region.depth / 2) * c,
       ]}
     />
   );
 }
 
-function SpawnedEntityMesh(props: { entity: SpawnedEntity }) {
-  const entity = props.entity;
-  const radius = entity.physics?.radiusMeters ?? 0.28;
-  const position: [number, number, number] = [entity.position.x, entity.position.y, entity.position.z];
-  if (/crate|box/i.test(entity.kind)) {
-    const side = radius * 1.75;
-    return (
-      <Scene3D.Mesh
-        geometry={Geometry.Box}
-        params={{ width: side, height: side, depth: side }}
-        material="#d97745"
-        position={position}
-        rotation={[entity.yawDegrees, entity.yawDegrees * 0.37, 0]}
-      />
-    );
-  }
-  if (/can|barrel/i.test(entity.kind)) {
-    return (
-      <Scene3D.Mesh
-        geometry={Geometry.Cylinder}
-        params={{ radius, height: radius * 2.2, segments: 18 }}
-        material="#60a5fa"
-        position={position}
-        rotation={[0, entity.yawDegrees, 0]}
-      />
-    );
-  }
+// Discrete placed cell (door, prop). Literal params so the unit box bakes;
+// material/position derive from the cell. height 0.2 mirrors
+// HMSC_SCALE.floorTileThicknessMeters.
+function PlacedCellMesh(props: { placedCell: PlacedCell }) {
+  const render = tileKindDefinition(props.placedCell.kind).render;
+  const cell = props.placedCell.cell;
   return (
     <Scene3D.Mesh
-      geometry={Geometry.Sphere}
-      params={{ radius }}
-      material={/ball|sphere/i.test(entity.kind) ? '#facc15' : '#a78bfa'}
-      position={position}
+      geometry={Geometry.Box}
+      params={{ width: 1, height: 0.2, depth: 1 }}
+      material={render.color}
+      position={[cell.x + 0.5, cell.y + 0.1, cell.z + 0.5]}
+    />
+  );
+}
+
+function Player(props: { state: GameState; animationSeconds: number; moving: boolean; running: boolean }) {
+  const player = props.state.player;
+  return (
+    <PlayerFigure
+      position={player.position}
+      yawDegrees={player.yawDegrees}
+      animationSeconds={props.animationSeconds}
+      moving={props.moving}
+      running={props.running}
     />
   );
 }
 
 export function GameWorld3D(props: {
   state: GameState;
-  animationSeconds: number;
-  playerMoving: boolean;
-  playerRunning: boolean;
   cameraYawDegrees: number;
   cameraPitchRadians: number;
   aiming?: boolean;
-  sceneChildren?: any;
+  animationSeconds: number;
+  playerMoving: boolean;
+  playerRunning: boolean;
 }) {
-  const state = props.state;
-  const placedCells = Object.values(state.world.placedCells);
-  const surfaceRegions = state.world.surfaceRegions;
-  const spawnedEntities = Object.values(state.world.spawnedEntities);
-  const worldRects = coalesceCellsIntoWorldRects(placedCells);
-  const sky = buildHmscSky(state.config.sky.hour, state.config.sky.weather, state.config.sky.gloom);
-  const player = state.player.position;
+  const world = props.state.world;
+  const sky = buildHmscSky(props.state.config.sky.hour, props.state.config.sky.weather, props.state.config.sky.gloom);
+  const player = props.state.player.position;
+
+  // Real third-person camera: orbits the player by the rig's mouse-look yaw,
+  // tilts with pitch, and shifts over the shoulder while aiming. Same math the
+  // shipped rig used. The rig owns yaw/pitch; this only consumes them.
   const cameraYawRadians = props.cameraYawDegrees * Math.PI / 180;
   const right: [number, number, number] = [-Math.cos(cameraYawRadians), 0, Math.sin(cameraYawRadians)];
   const shoulderShift = props.aiming ? HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters : 0;
@@ -183,10 +100,16 @@ export function GameWorld3D(props: {
     player.y + HMSC_GAMEPLAY_CAMERA.targetHeightMeters - props.cameraPitchRadians * HMSC_GAMEPLAY_CAMERA.pitchTargetMetersPerRadian,
     player.z + right[2] * shoulderShift * HMSC_GAMEPLAY_CAMERA.aimTargetShiftRatio,
   ];
+  const cameraFov = props.aiming ? HMSC_GAMEPLAY_CAMERA.aimFovDegrees : HMSC_GAMEPLAY_CAMERA.fovDegrees;
 
   return (
-    <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={sky.ground} showGrid={false} showAxes={false}>
-      <Scene3D.Camera position={cameraPosition} target={cameraTarget} fov={props.aiming ? HMSC_GAMEPLAY_CAMERA.aimFovDegrees : HMSC_GAMEPLAY_CAMERA.fovDegrees} />
+    <>
+      <Scene3D.Camera position={cameraPosition} target={cameraTarget} fov={cameraFov} />
+      {/* Analytic sky: gradient + sun disc/glow for the upper hemisphere; the
+          dark "ground" hemisphere it draws for downward rays is hidden behind
+          the floor mesh, so the sun the floor reflects is actually visible. The
+          flat sky backgroundColor in HmscGameplayRig stays as the clear-color
+          fallback. */}
       <Scene3D.Skybox
         zenith={sky.zenith}
         horizon={sky.horizon}
@@ -199,36 +122,20 @@ export function GameWorld3D(props: {
         cloud={sky.cloud}
         night={sky.night}
       />
-      <Scene3D.AmbientLight color={sky.horizon} intensity={sky.ambient} />
+      <Scene3D.AmbientLight color="#ffffff" intensity={sky.ambient} />
       <Scene3D.DirectionalLight direction={sky.sunDir} color={sky.lightColor} intensity={sky.lightIntensity} />
-      <Scene3D.DirectionalLight direction={[-0.25, 0.74, -0.45]} color="#8fb8ff" intensity={sky.night * 0.32} />
-      <Scene3D.PointLight position={cameraPosition} color="#9edcff" intensity={0.38 + sky.night * 0.32} />
-      <Scene3D.PointLight position={[player.x + 1.8, player.y + 3.2, player.z + 1.4]} color="#ffd2a3" intensity={0.18 + sky.night * 0.18} />
-      {surfaceRegions.length === 0 ? (
-        <Scene3D.Mesh
-          geometry={Geometry.Box}
-          params={{ width: 28, height: 0.04, depth: 22 }}
-          material="#0d1320"
-          position={[0.5, -0.03, 0.5]}
-        />
-      ) : null}
-      {surfaceRegions.map((region) => (
-        <SurfaceRegionMesh key={region.id} region={region} cellSizeMeters={state.world.cellSizeMeters} />
+      {world.surfaceRegions.map((region) => (
+        <FloorMesh key={region.id} region={region} cellSizeMeters={world.cellSizeMeters} />
       ))}
-      {worldRects.map((rect) => (
-        <MapRectMesh key={rect.key} rect={rect} />
+      {Object.values(world.placedCells).map((placedCell) => (
+        <PlacedCellMesh key={placedCell.key} placedCell={placedCell} />
       ))}
-      {spawnedEntities.map((entity) => (
-        <SpawnedEntityMesh key={entity.id} entity={entity} />
-      ))}
-      {props.sceneChildren}
-      <PlayerFigure
-        position={player}
-        yawDegrees={state.player.yawDegrees}
+      <Player
+        state={props.state}
         animationSeconds={props.animationSeconds}
         moving={props.playerMoving}
         running={props.playerRunning}
       />
-    </Scene3D>
+    </>
   );
 }

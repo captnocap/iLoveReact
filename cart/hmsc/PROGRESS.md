@@ -1,6 +1,6 @@
 # HMSC Progress
 
-Last updated: 2026-05-28
+Last updated: 2026-05-29
 
 ## Current Shape
 
@@ -11,10 +11,24 @@ HMSC is split into two carts:
 
 The game state is a single JSON `GameState` object defined in `design.ts`.
 World authoring is grid-locked, while player movement is continuous over that
-grid. The shared map data lives in `GameState.world.placedCells`; both the 3D
-game view and the internal map read from that source.
+grid.
 
-## Implemented
+The current reset point is intentionally simple:
+
+- `hmsc` is back to a blank player-facing shell while the map contract is fixed.
+- `hmsc-int` is back to a blank internal-tooling shell.
+- No generated map or 3D world is mounted by default.
+- The previous generated demo map files and current 3D world renderer files
+  were removed from the active code path.
+- The established scale remains: 1 grid tile = 1 meter.
+- The large-map storage contract is unresolved and should be confirmed before
+  any new implementation.
+
+## Historical Work Before Reset
+
+The list below records work that happened before the reset. Treat anything about
+the removed map renderer, demo map, or internal map canvas as historical context,
+not the current implementation.
 
 - Created the HMSC cart scaffold with a command-first surface.
 - Split the game cart from the internal map cart.
@@ -204,6 +218,12 @@ game view and the internal map read from that source.
   - car = 4m x 2m x 1.5m
   - bus = 11m x 2.5m x 3.2m
   - room, house, shop, and city-block reference sizes
+- Walked back the broken 3D/map pass:
+  - removed the incorrect `hmsc-int` SVG-style overview.
+  - removed the current HMSC 3D world renderer while the tile contract is being
+    corrected.
+  - kept the game cart as a blank surface until the 3D view can be rebuilt from
+    an agreed map contract.
 - Added `hmsc_scale_lab` for inspecting player art, physics capsule, step
   height, ledge heights, door/story targets, and vehicle scale against a 1m
   ruler.

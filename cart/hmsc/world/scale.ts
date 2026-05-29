@@ -1,5 +1,10 @@
 export const HMSC_SCALE = {
   tileMeters: 1,
+  // Fixed thickness of a floor tile. 1 tile = 1 meter on the ground plane; the
+  // thickness is just enough to read as a solid floor. NOTE: GameWorld3D must
+  // inline this number as a literal in the mesh `params` so the geometry bakes
+  // — keep that literal in sync with this value.
+  floorTileThicknessMeters: 0.2,
   playerCapsuleHeightMeters: 1.65,
   playerCapsuleRadiusMeters: 0.34,
   playerStepHeightMeters: 0.35,

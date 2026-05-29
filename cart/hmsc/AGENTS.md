@@ -49,10 +49,11 @@ Labs can also be entered from in-world cells. Store per-cell commands on
 player enters the cell. Use `wv_trigger` to author these, and prefer themed door
 cells over console-only lab entry.
 
-Large authored maps start in `world/masterLayout.ts`: master layout -> zones ->
-nested placements. Use `surfaceRegions` for huge floor materials and reserve
-`placedCells` for things that need cell-level identity, collision, diagnostics,
-or triggers. Do not expand a 1200x1200 floor into individual saved cells.
+Large authored maps are currently paused at the contract stage. The established
+scale remains one grid tile equals one meter, but do not implement a new large
+map from a sketch or partial description without confirming the intended tile
+storage shape first. `placedCells` remains the explicit authored-cell surface
+until the replacement map contract is agreed.
 
 Game events are first-class story facts, not incidental console text. Record
 them through `events/gameEvents.ts` so they land in `GameState.events.recent`,
@@ -60,10 +61,9 @@ the host event bus, and `useIFTTT` channels such as `hmsc:event:lab.entered`.
 Story conditionals belong in `events/useHmscEventRules.ts` unless they are part
 of a lower-level system that owns its own event source.
 
-Tile textures use stable keys from `world/tileTextureKeys.ts`. Procedural
-Effect fills are captured in `render3d/tileTextures.tsx` through `StaticSurface`
-and sampled by `Scene3D.Mesh textureKey`; do not duplicate shader/material
-decisions inside individual labs.
+Tile texture keys remain in `world/tileTextureKeys.ts`, but the previous 3D
+texture capture path was removed during the map/render reset. Do not recreate a
+tile texture renderer before the map and 3D contracts are agreed.
 
 Map tooling belongs in `cart/hmsc-int/`, not in this cart.
 

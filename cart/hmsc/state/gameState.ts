@@ -1,12 +1,13 @@
 import {
   DEFAULT_CELL_SIZE_METERS,
-  DEFAULT_CHUNK_CELL_SPAN,
   GameState,
   HMSC_STATE_SCHEMA_VERSION,
   LivePlayerSnapshot,
+  TileKind,
+  WorldState,
+  WorldSurfaceRegion,
 } from '../design';
-import { addDemoMapToState } from '../world/demoMap';
-import { groundTopAtWorldPosition } from '../world/grid';
+import { surfaceRegionTopMeters } from '../world/surfaceHeights';
 import {
   DEFAULT_GAME_CONFIG,
   DEFAULT_ENTITY_RADIUS_METERS,
@@ -68,9 +69,69 @@ function localStoreSet(key: string, value: string): void {
   }
 }
 
+// A CHUNK is one fixed-size tile field stored as a surfaceRegion with its own
+// texture capture (each capture fits the window — see tileSurface). The world
+// is built by tiling chunks; here a 2x2 grid of 120-tile chunks → a 240x240
+// world. Each chunk gets a distinct material so the chunk seams are visible.
+// Changing this layout key invalidates older saved worlds in reviveGameState.
+const FLOOR_LAYOUT_KEY = 'hmsc.chunks2x2.v1';
+const CHUNK_TILES = 120;
+const CHUNKS_PER_SIDE = 2;
+// 2x2 grid centered on the origin: chunk min-corners at -120 and 0.
+const CHUNK_GRID: { dx: number; dz: number; kind: TileKind; label: string }[] = [
+  { dx: 0, dz: 0, kind: 'sidewalk', label: 'Sidewalk chunk' },
+  { dx: -1, dz: 0, kind: 'road', label: 'Road chunk' },
+  { dx: 0, dz: -1, kind: 'sand', label: 'Sand chunk' },
+  { dx: -1, dz: -1, kind: 'asphalt', label: 'Asphalt chunk' },
+];
+
+function chunkRegions(): WorldSurfaceRegion[] {
+  return CHUNK_GRID.map((c) => ({
+    id: `chunk_${c.dx}_${c.dz}`,
+    label: c.label,
+    kind: c.kind,
+    x: c.dx * CHUNK_TILES,
+    y: 0,
+    z: c.dz * CHUNK_TILES,
+    width: CHUNK_TILES,
+    depth: CHUNK_TILES,
+    zoneKey: `chunk_${c.dx}_${c.dz}`,
+  }));
+}
+
+// Spawn chunk = the one the player stands on (the (0,0) sidewalk chunk).
+const SPAWN_CHUNK_KIND: TileKind = 'sidewalk';
+
+function createInitialWorld(): WorldState {
+  const totalTiles = CHUNK_TILES * CHUNKS_PER_SIDE;
+  return {
+    cellSizeMeters: DEFAULT_CELL_SIZE_METERS,
+    chunkCellSpan: CHUNK_TILES,
+    layout: {
+      key: FLOOR_LAYOUT_KEY,
+      label: `Chunks ${CHUNKS_PER_SIDE}x${CHUNKS_PER_SIDE} (${CHUNK_TILES}-tile)`,
+      widthCells: totalTiles,
+      depthCells: totalTiles,
+    },
+    surfaceRegions: chunkRegions(),
+    placedCells: {},
+    spawnedEntities: {},
+  };
+}
+
+// The player spawns standing on the spawn chunk's physics top — the SAME value
+// host physics uses for ground — so the player neither floats nor sinks.
+export function initialPlayerFeetHeightMeters(): number {
+  const spawnRegion: WorldSurfaceRegion = {
+    id: 'spawn', label: 'spawn', kind: SPAWN_CHUNK_KIND,
+    x: 0, y: 0, z: 0, width: CHUNK_TILES, depth: CHUNK_TILES, zoneKey: 'spawn',
+  };
+  return surfaceRegionTopMeters(spawnRegion, DEFAULT_CELL_SIZE_METERS);
+}
+
 export function createInitialGameState(): GameState {
   const now = nowIso();
-  let state: GameState = {
+  const state: GameState = {
     schemaVersion: HMSC_STATE_SCHEMA_VERSION,
     sessionName: 'shitcity_dev',
     sceneStep: 'boot.console',
@@ -92,7 +153,7 @@ export function createInitialGameState(): GameState {
       recent: [],
     },
     player: {
-      position: { x: 0.5, y: 0, z: 0.5 },
+      position: { x: 0.5, y: initialPlayerFeetHeightMeters(), z: 0.5 },
       yawDegrees: 0,
       noclip: false,
       physics: {
@@ -106,39 +167,10 @@ export function createInitialGameState(): GameState {
       money: DEFAULT_PLAYER_MONEY,
       inventory: [],
     },
-    world: {
-      cellSizeMeters: DEFAULT_CELL_SIZE_METERS,
-      chunkCellSpan: DEFAULT_CHUNK_CELL_SPAN,
-      layout: {
-        key: 'unset',
-        label: 'Unset layout',
-        widthCells: 0,
-        depthCells: 0,
-      },
-      surfaceRegions: [],
-      placedCells: {},
-      spawnedEntities: {},
-    },
+    world: createInitialWorld(),
   };
 
-  state = addDemoMapToState(state);
-  const spawnGroundTop = groundTopAtWorldPosition(
-    state,
-    state.player.position,
-    state.config.physics.playerStepHeightMeters,
-  );
-  return spawnGroundTop == null
-    ? state
-    : {
-      ...state,
-      player: {
-        ...state.player,
-        position: {
-          ...state.player.position,
-          y: spawnGroundTop,
-        },
-      },
-    };
+  return state;
 }
 
 export function markGameStateUpdated(state: GameState): GameState {
@@ -163,10 +195,11 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
           ...initial.config.physics,
           ...(parsed.config?.physics ?? {}),
         },
-        sky: {
-          ...initial.config.sky,
-          ...(parsed.config?.sky ?? {}),
-        },
+        // Always load the default sky, NOT the stored one. The hour is a live
+        // session value (driven by the optional day/night cycle), not save data
+        // — persisting it made the sky load dark/drifted and made gv_reset look
+        // like it changed the sky. Default = stable bright midday.
+        sky: initial.config.sky,
       },
       command: {
         ...initial.command,

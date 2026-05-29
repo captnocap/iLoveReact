@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
-import { Box, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Pressable, Scene3D, Text } from '@reactjit/runtime/primitives';
 import type { GameState } from '../design';
-import { HmscDebugHud } from '../render/DebugHud';
-import { Hud } from '../render/Hud';
 import { GameWorld3D } from '../render3d/GameWorld3D';
-import { HmscTileTextureSources } from '../render3d/tileTextures';
+import { TileSurfaceCaptures } from '../render3d/tileSurface';
+import { hmscSkyBackgroundColor } from '../render3d/sky';
+import { Hud } from '../render/Hud';
+import { HmscDebugHud } from '../render/DebugHud';
 import { usePlayerDrive } from '../state/usePlayerDrive';
 import { angleDeltaDegrees, clampCameraValue, HMSC_GAMEPLAY_CAMERA } from './camera';
 
@@ -13,16 +14,7 @@ type HmscGameplayRigProps = {
   state: GameState;
   setGameState: (updater: (current: GameState) => GameState) => void;
   inputBlocked: boolean;
-  sceneChildren?: any | ((context: HmscGameplayRigSceneContext) => any);
-};
-
-export type HmscGameplayRigSceneContext = {
-  cameraYawDegrees: number;
-  cameraPitchRadians: number;
-  aiming: boolean;
-  animationSeconds: number;
-  playerMoving: boolean;
-  playerRunning: boolean;
+  sceneChildren?: any;
 };
 
 function readHostNumber(name: string, fallback = 0): number {
@@ -75,6 +67,13 @@ function HmscAimCrosshair(props: { aiming: boolean }) {
   );
 }
 
+// Camera step of the gameplay rig: the real third-person mouse-look camera.
+// It owns camera yaw/pitch and feeds them to GameWorld3D, which orbits the
+// player. A coalesced rAF/timeout tick smooths the camera and reads mouse
+// input (relative delta while focused, absolute position otherwise) so camera
+// updates don't create a node storm while dragging. Player movement and the
+// walk/run gait still come from usePlayerDrive — added in the next step; for
+// now the player stands idle and you orbit/look around it.
 export function HmscGameplayRig(props: HmscGameplayRigProps) {
   const [cameraYawDegrees, setCameraYawDegrees] = useState(0);
   const [cameraPitchRadians, setCameraPitchRadians] = useState(HMSC_GAMEPLAY_CAMERA.defaultPitchRadians);
@@ -87,6 +86,10 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
     yawDegrees: 0,
     pitchRadians: HMSC_GAMEPLAY_CAMERA.defaultPitchRadians,
   });
+
+  // WASD movement + host physics + walk/run gait. Movement basis follows the
+  // camera yaw; returns the animation clock and moving/running flags the player
+  // model needs. Blocked while the console is open.
   const driveFrame = usePlayerDrive(!props.inputBlocked, cameraYawDegrees, props.setGameState);
 
   useEffect(() => {
@@ -184,41 +187,29 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
     setMouseFocused(true);
   };
 
-  const sceneContext: HmscGameplayRigSceneContext = {
-    cameraYawDegrees,
-    cameraPitchRadians,
-    aiming,
-    animationSeconds: driveFrame.animationSeconds,
-    playerMoving: driveFrame.moving,
-    playerRunning: driveFrame.running,
-  };
-  const sceneChildren = typeof props.sceneChildren === 'function'
-    ? props.sceneChildren(sceneContext)
-    : props.sceneChildren;
+  const sky = props.state.config.sky;
+  const skyBackground = hmscSkyBackgroundColor(sky.hour, sky.weather, sky.gloom);
 
   return (
     <Pressable
-      style={{ width: '100%', height: '100%', backgroundColor: '#020617' }}
+      style={{ width: '100%', height: '100%', backgroundColor: skyBackground }}
       onMouseDown={focusMouseLook}
       onMouseUp={resetCameraPointer}
       onMouseLeave={resetCameraPointer}
     >
-      <GameWorld3D
-        state={props.state}
-        animationSeconds={driveFrame.animationSeconds}
-        playerMoving={driveFrame.moving}
-        playerRunning={driveFrame.running}
-        cameraYawDegrees={cameraYawDegrees}
-        cameraPitchRadians={cameraPitchRadians}
-        aiming={aiming}
-        sceneChildren={sceneChildren}
-      />
+      <Scene3D style={{ width: '100%', height: '100%', backgroundColor: skyBackground }}>
+        <GameWorld3D
+          state={props.state}
+          cameraYawDegrees={cameraYawDegrees}
+          cameraPitchRadians={cameraPitchRadians}
+          aiming={aiming}
+          animationSeconds={driveFrame.animationSeconds}
+          playerMoving={driveFrame.moving}
+          playerRunning={driveFrame.running}
+        />
+        {props.sceneChildren ?? null}
+      </Scene3D>
       <HmscAimCrosshair aiming={aiming} />
-      {!mouseFocused && !props.inputBlocked ? (
-        <Box style={{ position: 'absolute', left: 18, bottom: 18, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#020617cc', zIndex: 2 }}>
-          <Text fontSize={11} color="#cbd5e1">click to focus mouse look - Esc releases</Text>
-        </Box>
-      ) : null}
       <Hud state={props.state} />
       {props.state.command.debugHudEnabled ? (
         <HmscDebugHud
@@ -232,7 +223,14 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
           hostPhysicsUs={driveFrame.hostPhysicsUs}
         />
       ) : null}
-      <HmscTileTextureSources />
+      {!mouseFocused && !props.inputBlocked ? (
+        <Box style={{ position: 'absolute', left: 18, bottom: 18, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#020617cc', zIndex: 2 }}>
+          <Text fontSize={11} color="#cbd5e1">click to focus mouse look — Esc releases</Text>
+        </Box>
+      ) : null}
+      {/* Offscreen tile-grid Effect captures → the floor meshes' textures.
+          Sibling of <Scene3D> (2D tree), parked off-screen. */}
+      <TileSurfaceCaptures regions={props.state.world.surfaceRegions} />
     </Pressable>
   );
 }

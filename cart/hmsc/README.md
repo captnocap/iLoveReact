@@ -42,16 +42,11 @@ cart/hmsc/
   labs/                  lab definitions and in-cart lab scene add-ons
   commands/              parser + command registry
   events/                typed game event recording + story IFTTT rules
-  world/masterLayout.ts  map root -> zones -> nested lab building placements
-  world/demoMap.ts       one authored seed map shared by game + internal map
   world/grid.ts          grid storage helpers over continuous movement
   world/scale.ts         canonical meter scale for players, rooms, vehicles, city blocks
   world/tileKinds.ts     typed tile definitions for rendering, pathing, cover, doors, visibility, traversal, and surfaces
   world/pathing.ts       grid pathfinder over tile-kind NPC traversal metadata
-  render3d/GameWorld3D.tsx  3D renderer over GameState.world
   render3d/sky.ts       analytic skybox model from skybox_demo
-  render3d/tileTextures.tsx procedural texture captures for tile materials
-  render3d/PlayerFigure.tsx animation_lab drive-mode figure
   state/usePlayerDrive.ts   continuous third-person movement over the grid
   state/hostPhysics.ts      typed-buffer bridge to the host physics step
   input/controlContract.ts  canonical player input contract
@@ -60,15 +55,14 @@ cart/hmsc/
 
 cart/hmsc-int/
   index.tsx              internal map tooling shell
-  MapCanvas.tsx          2D Canvas renderer over the same GameState.world
 ```
 
 ## State Model
 
 The whole game state is one JSON object. The cart stores it through host storage
 and mirrors it into hot state after every command. Autosave runs on a timer.
-The game also publishes a compact live player snapshot so `hmsc-int` can track
-the player marker without turning movement frames into autosaves.
+The game can publish compact live player snapshots for future internal tools
+without turning movement frames into autosaves.
 
 Tunable gameplay defaults live in `state/defaults.ts` and runtime tuning lives
 inside `GameState.config`. Use `gv_config` for config-specific inspection or
@@ -77,10 +71,9 @@ mutation. Player speed remains in `GameState.player` and is changed through
 `GameState.config.sky` and are surfaced through dedicated `gv_*` sky commands.
 
 World construction is grid-locked: cell keys, chunk keys, placed cells. Player
-and spawned entities move in continuous coordinates on top of the grid.
-Large floor materials are stored as rectangular `surfaceRegions`; authored
-objects like lab buildings and doors are stored as `placedCells`. This keeps the
-1200x1200 starter map from becoming 1.44 million serialized floor cells.
+and spawned entities move in continuous coordinates on top of the grid. No
+generated map is currently mounted by default; the large-map storage contract
+must be clarified before a new authored map is added.
 
 ## Scale
 
@@ -196,28 +189,6 @@ the diagonal split in high-contrast gradients is fixed lower in the renderer.
 - `wv_trigger <x> <z> [y] [command...|off]`
 - `wv_path <fromX> <fromZ> <toX> <toZ> [y] [pedestrian|runner|vehicle]`
 
-## Map Layout
-
-The starter map is authored in `world/masterLayout.ts` as:
-
-`master layout -> zones -> nested lab building placements -> door cells`.
-
-The current layout is a 1200x1200 water-surrounded district sketch split into
-three islands. Blue residential regions are normal city blocks, red downtown
-regions are denser/high-activity blocks, green mixed regions sit between those
-two densities, and sand regions mark beaches/causeways. Lab buildings are
-spread across the islands as authored placements rather than being hard-coded in
-the renderer.
-
-## Lab Buildings
-
-Labs are in-world easter egg interiors. A placed cell can carry a
-`triggerCommand`, and the player drive loop fires that command once when the
-player enters the cell. The starter map currently includes:
-
-- `Human Measurement Standards Council`: door trigger `lab_spawn scale`
-- `HMSC Materials Annex`: door trigger `lab_spawn textures`
-- `HMSC Coastal Range`: door trigger `lab_spawn aim`
 
 Use `wv_trigger` to inspect or author door triggers:
 
@@ -250,10 +221,9 @@ and story rules have a shared audit trail instead of private logs.
 
 ## Tile Textures
 
-HMSC tile textures are procedural Effect fills captured once through
-`StaticSurface`, then sampled by `Scene3D.Mesh textureKey`. Stable texture keys
-live in `world/tileTextureKeys.ts`; render-time capture sources live in
-`render3d/tileTextures.tsx`.
+Stable tile texture keys live in `world/tileTextureKeys.ts`. The previous 3D
+capture/render path was removed during the map reset, so texture capture should
+not be rebuilt until the map and renderer contracts are clear.
 
 The current material set covers every `TileKind`; no `solid.*` placeholder
 texture keys remain in tile render metadata.
