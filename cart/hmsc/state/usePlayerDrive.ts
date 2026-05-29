@@ -113,6 +113,9 @@ export function usePlayerDrive(
     running: false,
     hostPhysicsUs: 0,
   });
+  // Last frame actually pushed to React state, so the idle tick can skip
+  // redundant setDriveFrame calls that would re-reconcile the whole 3D tree.
+  const lastEmittedFrameRef = useRef<PlayerDriveFrame>(driveFrame);
 
   useEffect(() => {
     enabledRef.current = enabled;
@@ -285,7 +288,19 @@ export function usePlayerDrive(
       }
 
       animationSeconds += frameSeconds;
-      setDriveFrame({ animationSeconds, moving, running: moving && running, hostPhysicsUs });
+      // Only push a new driveFrame when the rendered scene actually changes.
+      // While idle, drivePose() ignores animationSeconds (fixed idle pose), so
+      // advancing the clock into React state would re-reconcile the whole 3D
+      // tree every frame for no visible effect. Emit while moving (the gait
+      // needs the clock), and on any change to moving/running/hostPhysicsUs so
+      // the moving->idle snap and physics readout still land.
+      const nextRunning = moving && running;
+      const last = lastEmittedFrameRef.current;
+      if (moving || moving !== last.moving || nextRunning !== last.running || hostPhysicsUs !== last.hostPhysicsUs) {
+        const frame = { animationSeconds, moving, running: nextRunning, hostPhysicsUs };
+        lastEmittedFrameRef.current = frame;
+        setDriveFrame(frame);
+      }
       handle = schedule(tick);
     };
 

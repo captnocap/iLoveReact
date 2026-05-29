@@ -267,6 +267,22 @@ not the current implementation.
     instance batch rather than one `<Scene3D.Mesh>` per building/road/floor
 - Batched Scene3D instance-buffer uploads per draw group, replacing one
   `queue.writeBuffer` per instance with one upload per grouped draw.
+- Added a real draw radius and distance fog to control what is visible at range:
+  - before, `Scene3D` auto-fit its clip plane and fog to whatever was in the
+    scene, so a small world drew in full from any vantage point (cresting a hill
+    showed the entire map)
+  - `Scene3D.Camera` now takes `far` (the draw radius: hard clip plane plus a
+    per-mesh cull) and optional `near`; omitting them keeps the old auto behavior
+  - new `Scene3D.Fog` primitive fades geometry into a color before the cull edge;
+    fog auto-anchors to the camera `far` (fade finishes at the radius, no
+    popping) unless `near`/`far`/`color` are set to decouple the haze
+  - this is a general engine feature: `runtime/primitives.tsx` props,
+    `framework/layout.zig` node fields, `v8_app.zig` prop appliers, and the
+    `framework/gpu/3d.zig` render path (clip plane, fog anchor, per-mesh cull)
+  - HMSC drives it from `GameState.config.view` (`drawRadiusMeters`,
+    `fogNearMeters`, `fogFarMeters`); default radius is 130m over the 240m world
+  - `gv_view [radius] [fogNear] [fogFar]` prints or sets the view distance live;
+    `gv_view` and `gv_view 80` are console quick-command buttons
 
 ## Massive Map Findings
 

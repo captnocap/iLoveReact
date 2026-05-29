@@ -19,7 +19,9 @@ import {
   DEFAULT_ENTITY_RESTITUTION,
   DEFAULT_PHYSICS_BURST_COUNT,
   MAX_CONSOLE_EVENT_LINES,
+  MAX_DRAW_RADIUS_METERS,
   MAX_PHYSICS_BURST_COUNT,
+  MIN_DRAW_RADIUS_METERS,
   PHYSICS_BURST_ANGLE_ITEM_STEP,
   PHYSICS_BURST_ANGLE_SERIAL_STEP,
   PHYSICS_BURST_BASE_HEIGHT_METERS,
@@ -35,6 +37,10 @@ import {
 } from '../state/defaults';
 import { createInitialGameState, readStoredGameState, saveGameState } from '../state/gameState';
 import { cellKey, commandCell, placeCell, placedCellAt, removeCell, setCellTrigger, worldToCell } from '../world/grid';
+import { placeRoad, removeRoad, roadFootprint } from '../world/roads';
+import { junctionFootprint, placeJunction, removeJunction } from '../world/roadJunctions';
+import { solveRoadCrossSection } from '../world/roadProfile';
+import type { RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment } from '../design';
 import { movementNoiseModesForConsole, surfaceNoiseProfilesForConsole } from '../world/noiseModel';
 import { findGridPath, type PathAgentKind } from '../world/pathing';
 import { isTileKind, tileKindDefinition, tileKindNamesForConsole } from '../world/tileKinds';
@@ -58,6 +64,16 @@ function switchArg(raw: string | undefined, name: string): boolean {
   if (raw === '1' || raw === 'true' || raw === 'on') return true;
   if (raw === '0' || raw === 'false' || raw === 'off') return false;
   throw new Error(`${name} must be 1 or 0`);
+}
+
+// Shared [lanesPerDir] [bike] [sidewalks] tail parser for the road/junction
+// laying commands. Defaults to the minimum profile (1 lane each way, no extras).
+function roadProfileArgs(lanesRaw: string | undefined, bikeRaw: string | undefined, sidewalksRaw: string | undefined): RoadProfile {
+  return {
+    lanesPerDirection: (lanesRaw === '2' ? 2 : 1) as RoadLaneCount,
+    hasBikeLane: bikeRaw == null ? false : switchArg(bikeRaw, 'bike'),
+    hasSidewalks: sidewalksRaw == null ? false : switchArg(sidewalksRaw, 'sidewalks'),
+  };
 }
 
 function toggleArg(raw: string | undefined, current: boolean, name: string): boolean {
@@ -437,6 +453,44 @@ const COMMANDS: CommandDefinition[] = [
     },
   },
   {
+    name: 'gv_view',
+    summary: 'Print or set the draw radius (view distance) and fog.',
+    usage: 'gv_view [radius-meters] [fogNear] [fogFar]',
+    run(args, state) {
+      const view = state.config.view;
+      if (!args[0]) {
+        return ok(
+          state,
+          `drawRadius = ${view.drawRadiusMeters.toFixed(0)} m`,
+          `fogNear = ${view.fogNearMeters.toFixed(0)} m${view.fogNearMeters === 0 ? ' (auto)' : ''}`,
+          `fogFar = ${view.fogFarMeters.toFixed(0)} m${view.fogFarMeters === 0 ? ' (auto)' : ''}`,
+        );
+      }
+      try {
+        const radius = Math.max(
+          MIN_DRAW_RADIUS_METERS,
+          Math.min(MAX_DRAW_RADIUS_METERS, numberArg(args[0], 'radius')),
+        );
+        const fogNear = args[1] == null ? view.fogNearMeters : Math.max(0, numberArg(args[1], 'fogNear'));
+        const fogFar = args[2] == null ? view.fogFarMeters : Math.max(0, numberArg(args[2], 'fogFar'));
+        return ok(
+          {
+            ...state,
+            config: {
+              ...state.config,
+              view: { drawRadiusMeters: radius, fogNearMeters: fogNear, fogFarMeters: fogFar },
+            },
+          },
+          `drawRadius = ${radius.toFixed(0)} m`,
+          `fogNear = ${fogNear.toFixed(0)} m${fogNear === 0 ? ' (auto)' : ''}`,
+          `fogFar = ${fogFar.toFixed(0)} m${fogFar === 0 ? ' (auto)' : ''}`,
+        );
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
     name: 'gv_events',
     summary: 'Print recent HMSC game events from the state ring.',
     usage: 'gv_events [count] [type-filter]',
@@ -762,6 +816,118 @@ const COMMANDS: CommandDefinition[] = [
         const path = findGridPath(state, commandCell(fromX, fromZ, y), commandCell(toX, toZ, y), agent);
         if (path.length === 0) return fail(state, `no ${agent} path through traversable tile kinds`);
         return ok(state, `${agent} path ${path.length} cells: ${path.map(cellKey).join(' -> ')}`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'wv_road',
+    summary: 'List roads, or lay a road (2 lanes + centerline minimum).',
+    usage: 'wv_road [x z length [ns|ew] [lanesPerDir 1|2] [bike 1|0] [sidewalks 1|0]] | wv_road remove <id>',
+    run(args, state, sourceLine) {
+      try {
+        if (args.length === 0) {
+          if (state.world.roads.length === 0) return ok(state, 'no roads laid');
+          return ok(state, ...state.world.roads.map((road) => {
+            const footprint = roadFootprint(road);
+            const width = solveRoadCrossSection(road.profile).totalWidthMeters.toFixed(1);
+            return `${road.id} ${road.orientation} ${width}m wide x ${road.lengthTiles}m @ [${footprint.minX},${footprint.minZ}]`;
+          }));
+        }
+        if (args[0] === 'remove') {
+          const id = args[1];
+          if (!id) return fail(state, 'usage: wv_road remove <id>');
+          if (!state.world.roads.some((road) => road.id === id)) return fail(state, `no road ${id}`);
+          return ok(removeRoad(state, id), `removed road ${id}`);
+        }
+        const x = numberArg(args[0], 'x');
+        const z = numberArg(args[1], 'z');
+        const lengthTiles = numberArg(args[2], 'length');
+        const orientation: RoadOrientation = args[3] === 'ew' ? 'eastWest' : 'northSouth';
+        const road: RoadSegment = {
+          id: `road_user_${state.world.roads.length + 1}`,
+          label: `Road ${state.world.roads.length + 1}`,
+          orientation,
+          x,
+          y: 0,
+          z,
+          lengthTiles,
+          profile: roadProfileArgs(args[4], args[5], args[6]),
+          createdByCommand: sourceLine,
+        };
+        const width = solveRoadCrossSection(road.profile).totalWidthMeters.toFixed(1);
+        return ok(placeRoad(state, road), `laid ${road.id} ${orientation} ${width}m wide x ${lengthTiles}m @ [${x},${z}]`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'wv_intersection',
+    summary: 'Lay a four-way intersection (square box at a road crossing).',
+    usage: 'wv_intersection <x> <z> [lanesPerDir 1|2] [bike 1|0] [sidewalks 1|0] | wv_intersection remove <id>',
+    run(args, state, sourceLine) {
+      try {
+        if (args[0] === 'remove') {
+          const id = args[1];
+          if (!id) return fail(state, 'usage: wv_intersection remove <id>');
+          if (!state.world.junctions.some((junction) => junction.id === id)) return fail(state, `no junction ${id}`);
+          return ok(removeJunction(state, id), `removed junction ${id}`);
+        }
+        const x = numberArg(args[0], 'x');
+        const z = numberArg(args[1], 'z');
+        const junction: RoadIntersection = {
+          kind: 'intersection',
+          id: `junction_user_${state.world.junctions.length + 1}`,
+          label: `Intersection ${state.world.junctions.length + 1}`,
+          x,
+          y: 0,
+          z,
+          profile: roadProfileArgs(args[2], args[3], args[4]),
+          createdByCommand: sourceLine,
+        };
+        const footprint = junctionFootprint(junction);
+        const side = (footprint.maxX - footprint.minX).toFixed(1);
+        return ok(placeJunction(state, junction), `laid ${junction.id} ${side}m box @ [${x},${z}]`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'wv_culdesac',
+    summary: 'Lay a cul-de-sac turnaround bulb at a road dead-end.',
+    usage: 'wv_culdesac <centerX> <centerZ> <bulbRadius> [throat n|s|e|w] [lanesPerDir 1|2] [bike 1|0] [sidewalks 1|0]',
+    run(args, state, sourceLine) {
+      try {
+        if (args[0] === 'remove') {
+          const id = args[1];
+          if (!id) return fail(state, 'usage: wv_culdesac remove <id>');
+          if (!state.world.junctions.some((junction) => junction.id === id)) return fail(state, `no junction ${id}`);
+          return ok(removeJunction(state, id), `removed junction ${id}`);
+        }
+        const centerX = numberArg(args[0], 'centerX');
+        const centerZ = numberArg(args[1], 'centerZ');
+        const bulbRadiusTiles = numberArg(args[2], 'bulbRadius');
+        const throatLetter = (args[3] ?? 's').toLowerCase();
+        const throat: RoadCulDeSacThroat = throatLetter === 'n' ? 'north'
+          : throatLetter === 'e' ? 'east'
+          : throatLetter === 'w' ? 'west'
+          : 'south';
+        const junction: RoadCulDeSac = {
+          kind: 'culDeSac',
+          id: `junction_user_${state.world.junctions.length + 1}`,
+          label: `Cul-de-sac ${state.world.junctions.length + 1}`,
+          centerX,
+          y: 0,
+          centerZ,
+          bulbRadiusTiles,
+          throat,
+          profile: roadProfileArgs(args[4], args[5], args[6]),
+          createdByCommand: sourceLine,
+        };
+        return ok(placeJunction(state, junction), `laid ${junction.id} r=${bulbRadiusTiles}m throat ${throat} @ [${centerX},${centerZ}]`);
       } catch (err: any) {
         return fail(state, err.message);
       }

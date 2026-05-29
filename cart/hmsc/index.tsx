@@ -10,6 +10,7 @@ import { runCommandLine } from './commands/registry';
 import {
   createInitialGameState,
   markGameStateUpdated,
+  mirrorGameStateForHotReload,
   publishLiveGameState,
   readStoredGameState,
   saveGameState,
@@ -17,6 +18,7 @@ import {
 import { recordAndPublishGameEvent } from './events/gameEvents';
 import { useHmscEventRules } from './events/useHmscEventRules';
 import { HmscGameplayRig } from './gameplay/HmscGameplayRig';
+import { PerfMarksHud } from './render/PerfMarksHud';
 import { normalizeSkyHour } from './render3d/sky';
 import {
   REAL_MILLISECONDS_PER_MINUTE,
@@ -69,7 +71,17 @@ export default function HmscCart() {
     const liveSyncTimer = setInterval(() => {
       publishLiveGameState(liveGameStateRef.current);
     }, DEFAULT_LIVE_SYNC_INTERVAL_MS);
-    return () => clearInterval(liveSyncTimer);
+    // Full-state hot-reload mirror on a slow cadence — the heavy
+    // JSON.stringify(whole-state) must NOT ride the 100ms live-sync loop or it
+    // periodically stalls a frame past the vblank (fps variance). 2s is plenty
+    // fresh for dev hot reload.
+    const hotMirrorTimer = setInterval(() => {
+      mirrorGameStateForHotReload(liveGameStateRef.current);
+    }, 2000);
+    return () => {
+      clearInterval(liveSyncTimer);
+      clearInterval(hotMirrorTimer);
+    };
   }, []);
 
   useEffect(() => {
@@ -124,6 +136,7 @@ export default function HmscCart() {
         setGameState={setGameState}
         inputBlocked={consoleOpen}
       />
+      <PerfMarksHud />
       <Box style={{ position: 'absolute', top: 16, left: 18, zIndex: 2 }}>
         <Pressable
           onPress={() => setConsoleOpen((open) => !open)}

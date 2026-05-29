@@ -3,6 +3,9 @@ import { HOST_VELOCITY_DEADZONE_METERS_PER_SECOND, MOVEMENT_INTENT_DEADZONE, SUR
 import { tileKindDefinition, type TileKindDefinition, type TileSurfaceProfile } from '../world/tileKinds';
 import { tileDefinitionAtWorldPosition } from '../world/grid';
 import { placedCellTopMeters, surfaceRegionTopMeters } from '../world/surfaceHeights';
+import { roadPhysicsBands, roadTopMeters } from '../world/roads';
+import { junctionPhysicsBands, junctionTopMeters } from '../world/roadJunctions';
+import { timed } from './perfMarks';
 
 const INPUT_HEADER_FLOATS = 24;
 const ENTITY_FLOATS = 8;
@@ -100,6 +103,45 @@ function physicsRects(state: GameState): number[] {
       tile.surface.restitution,
     );
   }
+  // Each road contributes a flat carriageway rect plus a sidewalk rect per side
+  // (at most three), carrying that band's friction so the road feels like road
+  // and its sidewalks feel like concrete. Roads are always walkable.
+  for (const road of state.world.roads) {
+    const top = roadTopMeters(road);
+    for (const band of roadPhysicsBands(road)) {
+      if (rects.length / RECT_FLOATS >= MAX_RECTS) break;
+      const tile = tileKindDefinition(band.kind);
+      rects.push(
+        band.minX,
+        band.minZ,
+        band.maxX,
+        band.maxZ,
+        top,
+        0,
+        tile.surface.friction,
+        tile.surface.restitution,
+      );
+    }
+  }
+  // Each junction is one flat asphalt pad across its footprint, so the player
+  // stands on the junction surface that the renderer draws.
+  for (const junction of state.world.junctions) {
+    const top = junctionTopMeters(junction);
+    for (const band of junctionPhysicsBands(junction)) {
+      if (rects.length / RECT_FLOATS >= MAX_RECTS) break;
+      const tile = tileKindDefinition(band.kind);
+      rects.push(
+        band.minX,
+        band.minZ,
+        band.maxX,
+        band.maxZ,
+        top,
+        0,
+        tile.surface.friction,
+        tile.surface.restitution,
+      );
+    }
+  }
   return rects;
 }
 
@@ -180,7 +222,7 @@ export function advanceHostPhysics(
   friction = 0.2,
   restitution = 0.8,
 ): HostPhysicsResult | null {
-  const { input, entities } = makeInput(
+  const { input, entities } = timed('phys-input', () => makeInput(
     state,
     dt,
     intentX,
@@ -188,8 +230,8 @@ export function advanceHostPhysics(
     speed,
     jumpDown,
     { accelerationMultiplier, friction, restitution },
-  );
-  const buffer = hostPhysicsStep(input);
+  ));
+  const buffer = timed('phys-step', () => hostPhysicsStep(input));
   if (!buffer) return null;
   const output = new Float32Array(buffer);
   const count = Math.min(entities.length, Math.max(0, Math.floor(output[8] || 0)));

@@ -1,4 +1,4 @@
-export const HMSC_STATE_SCHEMA_VERSION = 11;
+export const HMSC_STATE_SCHEMA_VERSION = 12;
 export const DEFAULT_AUTOSAVE_INTERVAL_MS = 120_000;
 export const DEFAULT_LIVE_SYNC_INTERVAL_MS = 100;
 export const DEFAULT_CELL_SIZE_METERS = 1;
@@ -128,8 +128,78 @@ export type WorldState = {
   };
   surfaceRegions: WorldSurfaceRegion[];
   placedCells: Record<string, PlacedCell>;
+  roads: RoadSegment[];
+  junctions: RoadJunction[];
   spawnedEntities: Record<string, SpawnedEntity>;
 };
+
+export type RoadLaneCount = 1 | 2;
+
+// What a <Road> is made of. The minimum is one car lane each way split by the
+// centerline; bike lane and sidewalks are opt-in. See world/roadProfile.ts for
+// the meter widths these resolve to.
+export type RoadProfile = {
+  lanesPerDirection: RoadLaneCount;
+  hasBikeLane: boolean;
+  hasSidewalks: boolean;
+};
+
+export type RoadOrientation = 'northSouth' | 'eastWest';
+
+// A laid road. (x, y, z) is the footprint's min-corner cell; the road runs for
+// lengthTiles along its orientation axis and is profile-wide across it. Stored
+// as a first-class world layer (peer of surfaceRegions/placedCells) because its
+// cross-section markings can't be expressed as a field of identical tiles.
+export type RoadSegment = {
+  id: string;
+  label: string;
+  orientation: RoadOrientation;
+  x: number;
+  y: number;
+  z: number;
+  lengthTiles: number;
+  profile: RoadProfile;
+  createdByCommand: string;
+};
+
+// Where the road network turns into something other than a straight strip. Both
+// junctions are one slab + one shader (the same pattern as RoadSegment); they
+// share a layer so render/physics/pathing thread them once. The `profile` sizes
+// the junction to the roads it joins (lane/bike/sidewalk widths line up).
+export type RoadCulDeSacThroat = 'north' | 'south' | 'east' | 'west';
+
+// A four-way crossing of a north-south and an east-west road: a square asphalt
+// box at (x,y,z) min-corner, sized to the road width, with zebra crosswalks on
+// each leg and sidewalk corners. Drawn over the crossing roads so it masks
+// their markings through the box.
+export type RoadIntersection = {
+  kind: 'intersection';
+  id: string;
+  label: string;
+  x: number;
+  y: number;
+  z: number;
+  profile: RoadProfile;
+  createdByCommand: string;
+};
+
+// A dead-end turnaround bulb centered at (centerX,y,centerZ): a circular
+// drivable disc with a sidewalk ring and a small center island, opened on one
+// side (`throat`) where its road enters.
+export type RoadCulDeSac = {
+  kind: 'culDeSac';
+  id: string;
+  label: string;
+  centerX: number;
+  y: number;
+  centerZ: number;
+  bulbRadiusTiles: number;
+  throat: RoadCulDeSacThroat;
+  profile: RoadProfile;
+  createdByCommand: string;
+};
+
+export type RoadJunction = RoadIntersection | RoadCulDeSac;
 
 export type WorldSurfaceRegion = {
   id: string;
@@ -162,9 +232,21 @@ export type SkyConfigState = {
   cycleHoursPerRealMinute: number;
 };
 
+// What's visible at distance. drawRadiusMeters = the camera's hard draw radius
+// (clip plane + per-mesh cull) — past it the world is not drawn, so cresting a
+// hill shows a hazed horizon, not the whole map. Fog fades geometry into the sky
+// before that edge; fogNear/fogFar = 0 auto-anchors the fade to the draw radius
+// (fade finishes AT it), set them to decouple the haze from the cull distance.
+export type ViewConfigState = {
+  drawRadiusMeters: number;
+  fogNearMeters: number; // 0 = auto (anchor to draw radius)
+  fogFarMeters: number; // 0 = auto (anchor to draw radius)
+};
+
 export type GameConfigState = {
   physics: PhysicsConfigState;
   sky: SkyConfigState;
+  view: ViewConfigState;
 };
 
 export type CommandSystemState = {

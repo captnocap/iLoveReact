@@ -3,11 +3,15 @@ import {
   GameState,
   HMSC_STATE_SCHEMA_VERSION,
   LivePlayerSnapshot,
+  RoadJunction,
+  RoadProfile,
+  RoadSegment,
   TileKind,
   WorldState,
   WorldSurfaceRegion,
 } from '../design';
 import { surfaceRegionTopMeters } from '../world/surfaceHeights';
+import { timed } from './perfMarks';
 import {
   DEFAULT_GAME_CONFIG,
   DEFAULT_ENTITY_RADIUS_METERS,
@@ -74,7 +78,7 @@ function localStoreSet(key: string, value: string): void {
 // is built by tiling chunks; here a 2x2 grid of 120-tile chunks → a 240x240
 // world. Each chunk gets a distinct material so the chunk seams are visible.
 // Changing this layout key invalidates older saved worlds in reviveGameState.
-const FLOOR_LAYOUT_KEY = 'hmsc.chunks2x2.v1';
+const FLOOR_LAYOUT_KEY = 'hmsc.chunks2x2.v3';
 const CHUNK_TILES = 120;
 const CHUNKS_PER_SIDE = 2;
 // 2x2 grid centered on the origin: chunk min-corners at -120 and 0.
@@ -102,6 +106,76 @@ function chunkRegions(): WorldSurfaceRegion[] {
 // Spawn chunk = the one the player stands on (the (0,0) sidewalk chunk).
 const SPAWN_CHUNK_KIND: TileKind = 'sidewalk';
 
+// A small road network laid through the spawn (0,0) sidewalk chunk so a fresh
+// world shows the system off. Every piece shares one full profile — one car
+// lane each way split by the double-yellow centerline, a bike lane each side,
+// and sidewalks (width 2*(3.5 + 1.6 + 2.0) = 14.2m) — so the lanes and sidewalks
+// line up where the pieces meet:
+//   - a north-south arterial running up from the spawn corner,
+//   - an east-west cross street meeting it at an intersection (z=50),
+//   - a cul-de-sac turnaround capping the arterial's north end (z=110).
+const SPAWN_ROAD_PROFILE: RoadProfile = { lanesPerDirection: 1, hasBikeLane: true, hasSidewalks: true };
+const SPAWN_ARTERIAL_ID = 'road_spawn_arterial';
+const SPAWN_CROSS_STREET_ID = 'road_spawn_cross';
+const SPAWN_INTERSECTION_ID = 'junction_spawn_intersection';
+const SPAWN_CUL_DE_SAC_ID = 'junction_spawn_culdesac';
+
+function createInitialRoads(): RoadSegment[] {
+  return [
+    {
+      id: SPAWN_ARTERIAL_ID,
+      label: 'Spawn arterial',
+      orientation: 'northSouth',
+      x: 3,
+      y: 0,
+      z: 2,
+      lengthTiles: 108,
+      profile: SPAWN_ROAD_PROFILE,
+      createdByCommand: 'initial-world',
+    },
+    {
+      id: SPAWN_CROSS_STREET_ID,
+      label: 'Cross street',
+      orientation: 'eastWest',
+      x: 3,
+      y: 0,
+      z: 43,
+      lengthTiles: 70,
+      profile: SPAWN_ROAD_PROFILE,
+      createdByCommand: 'initial-world',
+    },
+  ];
+}
+
+function createInitialJunctions(): RoadJunction[] {
+  return [
+    {
+      kind: 'intersection',
+      id: SPAWN_INTERSECTION_ID,
+      label: 'Spawn intersection',
+      // Min-corner = (arterial x, cross-street z) so the box covers the crossing.
+      x: 3,
+      y: 0,
+      z: 43,
+      profile: SPAWN_ROAD_PROFILE,
+      createdByCommand: 'initial-world',
+    },
+    {
+      kind: 'culDeSac',
+      id: SPAWN_CUL_DE_SAC_ID,
+      label: 'Arterial cul-de-sac',
+      // Centered on the arterial's north end; its throat opens south onto it.
+      centerX: 10.1,
+      y: 0,
+      centerZ: 110,
+      bulbRadiusTiles: 8,
+      throat: 'south',
+      profile: SPAWN_ROAD_PROFILE,
+      createdByCommand: 'initial-world',
+    },
+  ];
+}
+
 function createInitialWorld(): WorldState {
   const totalTiles = CHUNK_TILES * CHUNKS_PER_SIDE;
   return {
@@ -115,6 +189,8 @@ function createInitialWorld(): WorldState {
     },
     surfaceRegions: chunkRegions(),
     placedCells: {},
+    roads: createInitialRoads(),
+    junctions: createInitialJunctions(),
     spawnedEntities: {},
   };
 }
@@ -200,6 +276,10 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
         // — persisting it made the sky load dark/drifted and made gv_reset look
         // like it changed the sky. Default = stable bright midday.
         sky: initial.config.sky,
+        view: {
+          ...initial.config.view,
+          ...(parsed.config?.view ?? {}),
+        },
       },
       command: {
         ...initial.command,
@@ -246,6 +326,12 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
           ? parsed.world.surfaceRegions
           : initial.world.surfaceRegions,
         placedCells: storedWorldMatchesCurrentLayout ? (parsed.world?.placedCells ?? {}) : initial.world.placedCells,
+        roads: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.roads)
+          ? parsed.world.roads
+          : initial.world.roads,
+        junctions: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.junctions)
+          ? parsed.world.junctions
+          : initial.world.junctions,
         spawnedEntities: Object.fromEntries(Object.entries(parsed.world?.spawnedEntities ?? {}).map(([id, rawEntity]: [string, any]) => [
           id,
           {
@@ -307,23 +393,34 @@ export function readLivePlayerSnapshot(): LivePlayerSnapshot | null {
 export function mirrorGameStateForHotReload(state: GameState): void {
   if (typeof globalThis.__hot_set !== 'function') return;
   try {
-    globalThis.__hot_set(HMSC_HOT_KEY, JSON.stringify(state));
+    timed('hot-mirror', () => globalThis.__hot_set(HMSC_HOT_KEY, JSON.stringify(state)));
   } catch {}
 }
 
+// Lightweight, high-frequency publish: only the small live player snapshot.
+// Deliberately does NOT mirror the full state for hot reload — that is a heavy
+// JSON.stringify(whole-state) and running it at the 100ms live-sync cadence
+// caused periodic main-thread hitches that pushed frames past the vblank
+// (visible fps variance). The full mirror runs on its own slow cadence; see
+// mirrorGameStateForHotReload callers in index.tsx + saveGameState.
 export function publishLiveGameState(state: GameState): void {
-  const raw = JSON.stringify(livePlayerSnapshotFromState(state));
-  try {
-    localStoreSet(HMSC_LIVE_PLAYER_KEY, raw);
-  } catch {}
-  mirrorGameStateForHotReload(state);
+  timed('live-sync', () => {
+    const raw = JSON.stringify(livePlayerSnapshotFromState(state));
+    try {
+      localStoreSet(HMSC_LIVE_PLAYER_KEY, raw);
+    } catch {}
+  });
 }
 
 export function saveGameState(state: GameState): GameState {
   const savedState = { ...state, savedAt: nowIso(), updatedAt: nowIso() };
   try {
-    localStoreSet(HMSC_STORE_KEY, JSON.stringify(savedState));
+    timed('autosave', () => localStoreSet(HMSC_STORE_KEY, JSON.stringify(savedState)));
   } catch {}
   publishLiveGameState(savedState);
+  // Autosave is rare (120s), so mirroring the full state for hot reload here is
+  // free frame-wise — keeps the hot-reload snapshot fresh without paying the
+  // heavy serialize on the 100ms live-sync path.
+  mirrorGameStateForHotReload(savedState);
   return savedState;
 }

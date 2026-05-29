@@ -22,6 +22,16 @@ export const DEFAULT_SKY_GLOOM = 0;
 export const DEFAULT_SKY_DAY_CYCLE_ENABLED = false;
 export const DEFAULT_SKY_CYCLE_HOURS_PER_REAL_MINUTE = 1.5;
 
+// Draw radius / fog. The world is a 240 m field; an 130 m radius keeps most of
+// it visible at ground level while still hiding the far rim behind haze when you
+// climb. Fog auto-anchors to the radius (0 = derive) so the fade finishes right
+// at the cull edge — no popping. Tune live with `gv_view`.
+export const DEFAULT_DRAW_RADIUS_METERS = 130;
+export const MIN_DRAW_RADIUS_METERS = 16;
+export const MAX_DRAW_RADIUS_METERS = 4000;
+export const DEFAULT_FOG_NEAR_METERS = 0;
+export const DEFAULT_FOG_FAR_METERS = 0;
+
 export const MIN_DRIVE_FRAME_SECONDS = 0.001;
 export const MOVEMENT_INTENT_DEADZONE = 0.001;
 export const HOST_VELOCITY_DEADZONE_METERS_PER_SECOND = 0.01;
@@ -44,6 +54,11 @@ export const DEFAULT_GAME_CONFIG: GameConfigState = {
     gloom: DEFAULT_SKY_GLOOM,
     dayCycleEnabled: DEFAULT_SKY_DAY_CYCLE_ENABLED,
     cycleHoursPerRealMinute: DEFAULT_SKY_CYCLE_HOURS_PER_REAL_MINUTE,
+  },
+  view: {
+    drawRadiusMeters: DEFAULT_DRAW_RADIUS_METERS,
+    fogNearMeters: DEFAULT_FOG_NEAR_METERS,
+    fogFarMeters: DEFAULT_FOG_FAR_METERS,
   },
 };
 

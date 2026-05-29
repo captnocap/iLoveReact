@@ -1,6 +1,8 @@
 import type { GameState, GridCell, PlacedCell, TileKind, Vec3, WorldSurfaceRegion } from '../design';
 import { tileKindDefinition, type TileKindDefinition } from './tileKinds';
 import { placedCellTopMeters, surfaceRegionTopMeters } from './surfaceHeights';
+import { roadBandKindAtCell, roadBandKindAtWorldPosition, roadTopAtWorldPosition } from './roads';
+import { junctionBandKindAtCell, junctionBandKindAtWorldPosition, junctionTopAtWorldPosition } from './roadJunctions';
 
 export type PlaceCellOptions = {
   triggerCommand?: string;
@@ -115,7 +117,13 @@ export function triggerCellAtWorldPosition(state: GameState, position: Vec3): Pl
 
 export function tileKindAtWorldPosition(state: GameState, position: Vec3): TileKind | undefined {
   const cell = worldToCell(position, state.world.cellSizeMeters);
-  return placedCellAt(state, cell)?.kind ?? surfaceRegionAtCell(state, cell)?.kind;
+  // Pavement sits on top of the chunk it is laid in, so its band kind wins over
+  // the chunk surface underneath. Junctions sit on top of roads, so they win
+  // over roads (a placed cell still wins over everything).
+  return placedCellAt(state, cell)?.kind
+    ?? junctionBandKindAtWorldPosition(state, position)
+    ?? roadBandKindAtWorldPosition(state, position)
+    ?? surfaceRegionAtCell(state, cell)?.kind;
 }
 
 export function tileDefinitionAtWorldPosition(state: GameState, position: Vec3): TileKindDefinition | undefined {
@@ -152,11 +160,20 @@ export function groundTopAtWorldPosition(state: GameState, position: Vec3, stepH
     groundTop = groundTop == null ? top : Math.max(groundTop, top);
   }
 
+  const roadTop = roadTopAtWorldPosition(state, position, maxReachableTop);
+  if (roadTop != null) groundTop = groundTop == null ? roadTop : Math.max(groundTop, roadTop);
+
+  const junctionTop = junctionTopAtWorldPosition(state, position, maxReachableTop);
+  if (junctionTop != null) groundTop = groundTop == null ? junctionTop : Math.max(groundTop, junctionTop);
+
   return groundTop;
 }
 
 export function canPathThroughCell(state: GameState, cell: GridCell): boolean {
-  const kind = placedCellAt(state, cell)?.kind ?? surfaceRegionAtCell(state, cell)?.kind;
+  const kind = placedCellAt(state, cell)?.kind
+    ?? junctionBandKindAtCell(state, cell)
+    ?? roadBandKindAtCell(state, cell)
+    ?? surfaceRegionAtCell(state, cell)?.kind;
   if (!kind) return false;
   return tileKindDefinition(kind).pathing.walkable;
 }

@@ -1,3 +1,4 @@
+import { memo, useMemo } from 'react';
 import { Effect, StaticSurface } from '@reactjit/runtime/primitives';
 import type { WorldSurfaceRegion } from '../design';
 import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from './tileFill';
@@ -51,24 +52,40 @@ function captureDimension(tiles: number): number {
   return Math.max(256, Math.min(MAX_CAPTURE_PX, Math.round(tiles * 8)));
 }
 
+// One region's offscreen capture. Memoized + every prop identity (data array,
+// both style objects) stabilized with useMemo so a re-render of the parent does
+// NOT commit an Effect UPDATE. That UPDATE stamps the StaticSurface subtree
+// dirty (subtree_last_mutated_frame), which makes the gpu.zig cache miss and
+// re-bake the heavy tile shader EVERY frame — the 40ms paint spike. The capture
+// must depend ONLY on the region's shape/kind, so it bakes once and the cache
+// holds across all player/camera churn. See gpu.zig staticSurfaceReady.
+const RegionCapture = memo(function RegionCapture(props: { region: WorldSurfaceRegion }) {
+  const region = props.region;
+  const w = captureDimension(region.width);
+  const h = captureDimension(region.depth);
+  const data = useMemo(() => tileGridData(region), [region.width, region.depth, region.kind]);
+  const surfaceStyle = useMemo(
+    () => ({ position: 'absolute' as const, left: -99999, top: 0, width: w, height: h }),
+    [w, h],
+  );
+  const effectStyle = useMemo(() => ({ width: w, height: h }), [w, h]);
+  return (
+    <StaticSurface staticKey={floorTextureKey(region.id)} style={surfaceStyle}>
+      <Effect shader={TILE_GRID_SHADER} data={data} style={effectStyle} />
+    </StaticSurface>
+  );
+});
+
 // Offscreen captures (one per region) → texture keys the floor meshes sample.
 // Mount in the 2D tree as a sibling of <Scene3D> (the billboard_demo pattern).
-export function TileSurfaceCaptures(props: { regions: WorldSurfaceRegion[] }) {
+// Memoized so it only re-renders when the regions list itself changes — not on
+// every player/camera frame — keeping the per-region StaticSurface caches warm.
+export const TileSurfaceCaptures = memo(function TileSurfaceCaptures(props: { regions: WorldSurfaceRegion[] }) {
   return (
     <>
-      {props.regions.map((region) => {
-        const w = captureDimension(region.width);
-        const h = captureDimension(region.depth);
-        return (
-          <StaticSurface
-            key={floorTextureKey(region.id)}
-            staticKey={floorTextureKey(region.id)}
-            style={{ position: 'absolute', left: -99999, top: 0, width: w, height: h }}
-          >
-            <Effect shader={TILE_GRID_SHADER} data={tileGridData(region)} style={{ width: w, height: h }} />
-          </StaticSurface>
-        );
-      })}
+      {props.regions.map((region) => (
+        <RegionCapture key={floorTextureKey(region.id)} region={region} />
+      ))}
     </>
   );
-}
+});

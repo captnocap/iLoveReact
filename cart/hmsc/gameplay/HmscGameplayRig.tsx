@@ -4,6 +4,8 @@ import { Box, Pressable, Scene3D, Text } from '@reactjit/runtime/primitives';
 import type { GameState } from '../design';
 import { GameWorld3D } from '../render3d/GameWorld3D';
 import { TileSurfaceCaptures } from '../render3d/tileSurface';
+import { RoadSurfaceCaptures } from '../render3d/Road';
+import { RoadJunctionCaptures } from '../render3d/RoadJunctions';
 import { hmscSkyBackgroundColor } from '../render3d/sky';
 import { Hud } from '../render/Hud';
 import { HmscDebugHud } from '../render/DebugHud';
@@ -228,9 +230,12 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
           <Text fontSize={11} color="#cbd5e1">click to focus mouse look — Esc releases</Text>
         </Box>
       ) : null}
-      {/* Offscreen tile-grid Effect captures → the floor meshes' textures.
-          Sibling of <Scene3D> (2D tree), parked off-screen. */}
+      {/* Offscreen Effect captures → the meshes' textures. Siblings of <Scene3D>
+          (2D tree), parked off-screen: the tile grids for chunk floors, the
+          cross-sections for roads. */}
       <TileSurfaceCaptures regions={props.state.world.surfaceRegions} />
+      <RoadSurfaceCaptures roads={props.state.world.roads} />
+      <RoadJunctionCaptures junctions={props.state.world.junctions} />
     </Pressable>
   );
 }

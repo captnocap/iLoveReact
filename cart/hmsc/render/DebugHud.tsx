@@ -42,11 +42,15 @@ function section(label: string) {
 }
 
 export function HmscDebugHud(props: HmscDebugHudProps) {
-  const fps = useTelemetry({ kind: 'fps', pollMs: 250 }).value;
-  const frame = useTelemetry<any>({ kind: 'frame', pollMs: 250 }).data;
-  const gpu = useTelemetry<any>({ kind: 'gpu', pollMs: 250 }).data;
-  const nodes = useTelemetry<any>({ kind: 'nodes', pollMs: 500 }).data;
-  const input = useTelemetry<any>({ kind: 'input', pollMs: 500 }).data;
+  // DIAGNOSTIC: polls slowed to 1000ms. Every poll changes the on-screen
+  // numbers, which dirties the 2D draw data and forces a full GPU buffer
+  // re-upload (gpu.zig data_changed path) — i.e. the HUD refresh IS the GPU
+  // spike it displays. At 1000ms the spikes should drop to ~1/sec. Was 250/500.
+  const fps = useTelemetry({ kind: 'fps', pollMs: 1000 }).value;
+  const frame = useTelemetry<any>({ kind: 'frame', pollMs: 1000 }).data;
+  const gpu = useTelemetry<any>({ kind: 'gpu', pollMs: 1000 }).data;
+  const nodes = useTelemetry<any>({ kind: 'nodes', pollMs: 1000 }).data;
+  const input = useTelemetry<any>({ kind: 'input', pollMs: 1000 }).data;
   const surface = movementSurfaceForPlayer(props.state, props.playerRunning);
   const player = props.state.player;
   const cell = worldToCell(player.position, props.state.world.cellSizeMeters);
