@@ -902,6 +902,8 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     var cam_pos = math.Vec3{ .x = 0, .y = 5, .z = 10 };
     var cam_look = math.Vec3{ .x = 0, .y = 0, .z = 0 };
     var cam_fov: f32 = 60;
+    var cam_far: f32 = 0; // explicit draw radius; 0 = auto-derive from scene extent
+    var cam_near: f32 = 0; // explicit near clip; 0 = auto
     var ambient_color: [3]f32 = .{ 0.15, 0.15, 0.2 };
     var light_dir: [3]f32 = .{ 0.577, 0.577, 0.577 };
     var light_color: [3]f32 = .{ 1.0, 0.95, 0.9 };
@@ -917,13 +919,18 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     // params, the same way Camera/Light are. Captured here, used for both the
     // sky draw and the horizon-coloured distance fog.
     var sky_node: ?*Node = null;
+    // <Scene3D.Fog> child — explicit distance fog that overrides the auto fade.
+    var fog_node: ?*Node = null;
 
     for (node.children) |*child| {
         if (child.scene3d_skybox) sky_node = child;
+        if (child.scene3d_fog) fog_node = child;
         if (child.scene3d_camera) {
             cam_pos = .{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
             cam_look = .{ .x = child.scene3d_look_x, .y = child.scene3d_look_y, .z = child.scene3d_look_z };
             cam_fov = child.scene3d_fov;
+            cam_far = child.scene3d_far;
+            cam_near = child.scene3d_near;
         }
         if (child.scene3d_light) {
             if (child.scene3d_light_type) |lt| {
@@ -954,27 +961,56 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         scene_extent = @max(scene_extent, math.v3distance(center, cam_look) + estimateMeshRadius(child));
     }
     g_telemetry.mesh_children += scene_mesh_children;
-    // Fog should only fade geometry near the FAR edge of what's in view, based on
-    // scene_extent — NOT on focus_dist (the camera-to-target distance). A close
-    // third-person camera made fog_near ~5m, which fogged a large ground plane to
-    // the sky colour just metres out (the floor looked like a tiny patch in a
-    // void). Tying both planes to scene_extent keeps small scenes the same while
-    // letting big floors stay crisp to their real edge.
-    const fog_near = @max(6.0, scene_extent * 0.8);
-    const fog_far = @max(fog_near + 12.0, scene_extent * 1.1);
+
+    // ── Draw radius. When the camera sets an explicit `far`, THAT is the draw
+    // radius: the hard clip plane and the per-mesh cull distance below. Without
+    // it, fall back to the historical auto extent so existing scenes are
+    // unchanged. ──
+    const draw_radius: f32 = if (cam_far > 0) cam_far else (focus_dist + scene_extent + 64.0);
+
+    // ── Distance fog. Default behaviour:
+    //   * explicit `far` set  → fog anchors to it (fade finishes AT the draw
+    //     radius, starts at 0.7× it) so geometry melts into the horizon right
+    //     before the cull edge — no popping when cresting a hill.
+    //   * no `far`            → the historical scene_extent fade (fog should only
+    //     fade near the FAR edge of what's in view, not at focus_dist; a close
+    //     third-person camera otherwise fogged a big ground plane metres out).
+    // A <Scene3D.Fog> child overrides either plane (0 = keep auto on that side),
+    // decoupling fog falloff from the cull distance when wanted. ──
+    var fog_near: f32 = undefined;
+    var fog_far: f32 = undefined;
+    if (cam_far > 0) {
+        fog_far = cam_far;
+        fog_near = cam_far * 0.7;
+    } else {
+        fog_near = @max(6.0, scene_extent * 0.8);
+        fog_far = @max(fog_near + 12.0, scene_extent * 1.1);
+    }
+    if (fog_node) |f| {
+        if (f.scene3d_fog_far > 0) fog_far = f.scene3d_fog_far;
+        if (f.scene3d_fog_near > 0) fog_near = f.scene3d_fog_near;
+    }
+    if (fog_near >= fog_far) fog_near = fog_far * 0.7; // keep near < far
 
     // ── Build view + projection ──
     const aspect = w / @max(h, 1);
     const fov_rad = cam_fov * std.math.pi / 180.0;
-    const projection_near = @min(1.0, @max(0.1, focus_dist * 0.01));
-    const projection_far = @min(12000.0, @max(1000.0, focus_dist + scene_extent + 64.0));
+    const projection_near = if (cam_near > 0) cam_near else @min(1.0, @max(0.1, focus_dist * 0.01));
+    const projection_far = if (cam_far > 0)
+        @max(cam_far, projection_near + 1.0)
+    else
+        @min(12000.0, @max(1000.0, focus_dist + scene_extent + 64.0));
     const projection = math.m4perspective(fov_rad, aspect, projection_near, projection_far);
     const view = math.m4lookAt(cam_pos, cam_look, .{ .x = 0, .y = 1, .z = 0 });
     const vp = math.m4multiply(projection, view);
 
     // With a skybox, distant geometry should melt into the HORIZON colour, not
     // the flat clear colour — that distance fade is most of what sells the sky.
-    const fog_color: [3]f32 = if (sky_node) |s| s.scene3d_sky_horizon else clear_color;
+    // A <Scene3D.Fog color=...> overrides it (sentinel {-1,-1,-1} = keep auto).
+    var fog_color: [3]f32 = if (sky_node) |s| s.scene3d_sky_horizon else clear_color;
+    if (fog_node) |f| {
+        if (f.scene3d_fog_color[0] >= 0) fog_color = f.scene3d_fog_color;
+    }
 
     // ── Begin render pass ──
     const color_view = slot.color_view orelse return;
@@ -1038,6 +1074,15 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     while (ci < node.children.len and mcount < MAX_SCENE_MESHES) : (ci += 1) {
         const child = &node.children[ci];
         if (!child.scene3d_mesh) continue;
+        // Draw-radius cull. Only with an explicit camera `far`, and only for
+        // single (non-instanced) meshes — an instance batch carries many
+        // positions, not this node's one. Skip if the mesh's nearest point is
+        // past the radius. The clip plane already handles the rest; this saves
+        // the per-mesh CPU/instance work for things fully beyond the horizon.
+        if (cam_far > 0 and child.scene3d_instance_count == 0) {
+            const center = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
+            if (math.v3distance(center, cam_pos) - estimateMeshRadius(child) > draw_radius) continue;
+        }
         const key = child.scene3d_geom_key orelse continue;
 
         var maybe_slot = lookupGeometry(key);

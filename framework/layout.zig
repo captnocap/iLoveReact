@@ -467,6 +467,11 @@ pub const Node = struct {
     scene3d_dir_y: f32 = -1,
     scene3d_dir_z: f32 = 0,
     scene3d_fov: f32 = 60, // Camera fov in degrees
+    // Camera clip planes / draw radius. 0 = auto-derive from scene extent (the
+    // historical behaviour). scene3d_far is BOTH the projection far plane and the
+    // per-mesh cull distance: a mesh whose nearest point is past it is skipped.
+    scene3d_far: f32 = 0, // draw radius (world units); 0 = auto
+    scene3d_near: f32 = 0, // near clip (world units); 0 = auto
     scene3d_intensity: f32 = 1.0, // Light intensity
     // Skybox — a <Scene3D.Skybox> child flips this on. gpu/3d.zig draws an
     // analytic fullscreen sky (gradient + sun + haze + clouds + stars) before
@@ -484,6 +489,14 @@ pub const Node = struct {
     scene3d_sky_haze: f32 = 0.3, // milky horizon lift / turbidity (0..1)
     scene3d_sky_cloud: f32 = 0.0, // cloud coverage (0 clear .. 1 overcast)
     scene3d_sky_night: f32 = 0.0, // star intensity (0 day .. 1 night)
+    // Distance fog — a <Scene3D.Fog> child flips this on. When absent, fog
+    // auto-anchors to the camera draw radius (scene3d_far) if one is set, else to
+    // scene extent. When present, these explicit values win (linked → unlinked).
+    // fog_color = {-1,-1,-1} sentinel means "use the skybox horizon colour".
+    scene3d_fog: bool = false,
+    scene3d_fog_color: [3]f32 = .{ -1, -1, -1 },
+    scene3d_fog_near: f32 = 0, // 0 = auto
+    scene3d_fog_far: f32 = 0, // 0 = auto
     // Per-mesh diffuse texture. When tex_w * tex_h > 0 and tex_rgba is set,
     // gpu/3d.zig uploads it to a wgpu texture (cached by hash) and binds
     // it as group(1) for that mesh's draw call. Otherwise the mesh samples

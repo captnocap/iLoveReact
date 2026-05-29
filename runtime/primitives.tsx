@@ -445,7 +445,13 @@ const Scene3DBase: any = ({ ...rest }: any) =>
     ...rest,
     scene3d: true,
   }, rest.children);
-Scene3DBase.Camera = ({ position, target, fov, ...rest }: any) => {
+// `far` = draw radius in world units: the hard clip plane AND the per-mesh cull
+// distance (meshes whose nearest point is past `far` are skipped entirely). `near`
+// = the near clip plane. Both are OPTIONAL — pass 0 / omit to let the host
+// auto-derive them from the scene extent (the historical behaviour). When `far`
+// is set, the distance fog (see Scene3D.Fog) auto-anchors to it unless a <Fog>
+// overrides, so cresting a hill shows a hazed horizon instead of the whole map.
+Scene3DBase.Camera = ({ position, target, fov, far, near, ...rest }: any) => {
   const [px, py, pz] = _vec3(position, 3, 2, 4);
   const [lx, ly, lz] = _vec3(target, 0, 0, 0);
   return h('View', {
@@ -454,6 +460,8 @@ Scene3DBase.Camera = ({ position, target, fov, ...rest }: any) => {
     scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
     scene3dLookX: lx, scene3dLookY: ly, scene3dLookZ: lz,
     scene3dFov: fov ?? 60,
+    scene3dFar: Number.isFinite(far) && far > 0 ? far : 0,
+    scene3dNear: Number.isFinite(near) && near > 0 ? near : 0,
   });
 };
 // Skybox — an analytic procedural sky drawn behind every mesh (gradient + sun
@@ -481,6 +489,23 @@ Scene3DBase.Skybox = ({ zenith, horizon, ground, sunDir, sunColor, sunSize, sunG
     scene3dSkyHaze: haze ?? 0.3,
     scene3dSkyCloud: cloud ?? 0.0,
     scene3dSkyNight: night ?? 0.0,
+  });
+// Distance fog — fades geometry into a colour as it recedes. A child of
+// <Scene3D> like Camera/Skybox. By default fog auto-anchors to the camera's
+// `far` (draw radius): the fade finishes right at the cull edge so nothing pops
+// when you crest a hill. Set `near`/`far` here to decouple the fade from the
+// draw radius (e.g. a soft haze that starts close while the world still draws
+// far). `color` defaults to the skybox horizon colour; pass a hex to override.
+//
+//   <Scene3D.Camera position={...} target={...} far={140} />
+//   <Scene3D.Fog near={40} far={130} color="#b9c6d8" />
+Scene3DBase.Fog = ({ near, far, color, ...rest }: any) =>
+  h('View', {
+    ...rest,
+    scene3dFog: true,
+    scene3dFogColor: typeof color === 'string' ? _hexToRgb(color, [-1, -1, -1] as any) : [-1, -1, -1],
+    scene3dFogNear: Number.isFinite(near) && near > 0 ? near : 0,
+    scene3dFogFar: Number.isFinite(far) && far > 0 ? far : 0,
   });
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,

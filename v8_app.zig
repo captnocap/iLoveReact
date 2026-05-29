@@ -1874,8 +1874,23 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.scene3d_dir_z = f;
         } else if (std.mem.eql(u8, k, "scene3dFov")) {
             if (jsonFloat(v)) |f| node.scene3d_fov = f;
+        } else if (std.mem.eql(u8, k, "scene3dFar")) {
+            if (jsonFloat(v)) |f| node.scene3d_far = f;
+        } else if (std.mem.eql(u8, k, "scene3dNear")) {
+            if (jsonFloat(v)) |f| node.scene3d_near = f;
         } else if (std.mem.eql(u8, k, "scene3dIntensity")) {
             if (jsonFloat(v)) |f| node.scene3d_intensity = f;
+        }
+        // ── Distance fog (one <Scene3D.Fog> child). near/far in world units,
+        // color as [r,g,b] 0..1. 0 / sentinel = auto (anchor to camera far). ──
+        else if (std.mem.eql(u8, k, "scene3dFog")) {
+            if (jsonBool(v)) |b| node.scene3d_fog = b;
+        } else if (std.mem.eql(u8, k, "scene3dFogColor")) {
+            if (jsonVec3(v)) |c| node.scene3d_fog_color = c;
+        } else if (std.mem.eql(u8, k, "scene3dFogNear")) {
+            if (jsonFloat(v)) |f| node.scene3d_fog_near = f;
+        } else if (std.mem.eql(u8, k, "scene3dFogFar")) {
+            if (jsonFloat(v)) |f| node.scene3d_fog_far = f;
         }
         // ── Skybox props (one <Scene3D.Skybox> child). Colors arrive as
         // [r,g,b] 0..1 arrays already resolved on the JS side. ──
