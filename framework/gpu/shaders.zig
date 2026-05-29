@@ -902,6 +902,14 @@ pub const skybox_wgsl =
     \\
     \\@fragment
     \\fn sky_fs(in: SkyOut) -> @location(0) vec4f {
+    \\    // Screen-space vertical gradient: bottom = horizon, top = zenith. Built
+    \\    // off ndc.y (not the world-ray reconstruction, which renders the sky as
+    \\    // the dark ground hemisphere). Guarded (sun_size >= 0 always) so the
+    \\    // original ray-based body below stays compilable but unused.
+    \\    if (u.sun_size >= 0.0) {
+    \\        let g = clamp(in.ndc.y * 0.5 + 0.5, 0.0, 1.0);
+    \\        return vec4f(mix(u.horizon, u.zenith, pow(g, 0.6)), 1.0);
+    \\    }
     \\    // Reconstruct the world-space ray for this pixel.
     \\    let far = u.inv_vp * vec4f(in.ndc, 1.0, 1.0);
     \\    let world = far.xyz / far.w;

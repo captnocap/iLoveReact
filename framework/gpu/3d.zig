@@ -132,11 +132,13 @@ var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
 var g_geo_cache_len: usize = 0;
 var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
 
-// Per-instance vertex buffer cap. With InstanceData = 80 bytes, 8192 instances
-// = 640 KB reserved. drawScene bump-fills this each frame; uploads only the bytes
+// Per-instance vertex buffer cap. With InstanceData = 80 bytes, 65536 instances
+// = ~5.2 MB reserved. drawScene bump-fills this each frame; uploads only the bytes
 // actually written, so a larger ceiling costs reserved GPU memory, not per-frame work.
-const MAX_INSTANCES: u32 = 8192;
-const MAX_SCENE_MESHES: usize = 8192;
+// Raised from 8192: world-scale tile/prop fields blew past the old ceiling (a
+// 120x120 floor alone is 14,400 tiles) and excess instances were silently dropped.
+const MAX_INSTANCES: u32 = 65536;
+const MAX_SCENE_MESHES: usize = 32768;
 
 // ════════════════════════════════════════════════════════════════════════
 // Pipeline state
@@ -952,8 +954,14 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         scene_extent = @max(scene_extent, math.v3distance(center, cam_look) + estimateMeshRadius(child));
     }
     g_telemetry.mesh_children += scene_mesh_children;
-    const fog_near = @max(6.0, focus_dist * 0.9);
-    const fog_far = @max(fog_near + 12.0, fog_near + scene_extent * 1.5);
+    // Fog should only fade geometry near the FAR edge of what's in view, based on
+    // scene_extent — NOT on focus_dist (the camera-to-target distance). A close
+    // third-person camera made fog_near ~5m, which fogged a large ground plane to
+    // the sky colour just metres out (the floor looked like a tiny patch in a
+    // void). Tying both planes to scene_extent keeps small scenes the same while
+    // letting big floors stay crisp to their real edge.
+    const fog_near = @max(6.0, scene_extent * 0.8);
+    const fog_far = @max(fog_near + 12.0, scene_extent * 1.1);
 
     // ── Build view + projection ──
     const aspect = w / @max(h, 1);
