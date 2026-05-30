@@ -43,13 +43,16 @@ import { junctionFootprint, placeJunction, removeJunction } from '../world/roadJ
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { placeProp, removeProp, setPropSignalOverride } from '../world/props';
 import { isPropKind, propKindDefinition, propKindNamesForConsole } from '../world/propKinds';
-import { buildingFootprint, buildingHeightMeters } from '../world/buildings';
+import { buildingFootprint, buildingHeightMeters, resolveBuildingSkin, setBuildingFaceSkin } from '../world/buildings';
+import { resolveBuildingPlacement } from '../world/buildingPlacement';
+import { buildingSkinNamesForConsole, isBuildingSkin } from '../render3d/buildingSkins';
 import { mountainTrailPads } from '../world/mountain';
 import { buildingKindDefinition, buildingKindNamesForConsole, isBuildingKind } from '../world/buildingKinds';
 import { addBuildingToWorld, enterBuildingInterior, leaveCurrentInterior, removeBuildingFromWorld } from '../world/interiors';
 import { addZone, removeZone, isZoneFlag, zoneFlagNamesForConsole } from '../world/zones';
+import { nextUniqueId } from '../world/idgen';
 import { trafficClockSeconds, trafficSignalPhase } from '../world/traffic';
-import type { Building, BuildingEnclosure, BuildingSide, PropKind, RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment, TrafficSignalPhase, WorldProp, WorldSurfaceRegion, Zone, ZoneFlag } from '../design';
+import type { Building, BuildingEnclosure, BuildingSide, BuildingSkin, PropKind, RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment, TrafficSignalPhase, WorldProp, WorldSurfaceRegion, Zone, ZoneFlag } from '../design';
 import { movementNoiseModesForConsole, surfaceNoiseProfilesForConsole } from '../world/noiseModel';
 import { findGridPath, type PathAgentKind } from '../world/pathing';
 import { isTileKind, tileKindDefinition, tileKindNamesForConsole } from '../world/tileKinds';
@@ -357,11 +360,18 @@ const COMMANDS: CommandDefinition[] = [
   },
   {
     name: 'gv_perflog',
-    summary: 'Toggle the spike-triggered perf flight recorder (flushes to console).',
-    usage: 'gv_perflog [1|0|toggle] [spikeRatio] [minJumpMs]',
+    summary: 'Toggle the spike perf recorder. 2 = JS report + host-side frame trace.',
+    usage: 'gv_perflog [0|1|2|toggle] [spikeRatio] [minJumpMs]',
     run(args, state) {
       try {
-        const perfWatchEnabled = toggleArg(args[0], state.command.perfWatchEnabled, 'perfWatch');
+        // Level 2 also flips the engine's host-side per-frame spike logger
+        // (`__hmsc_spike_trace`) so the host's ground-truth phase breakdown
+        // prints alongside the JS report — cross-check for sampling/attribution
+        // gaps. 1/0/toggle leave the host trace off.
+        const hostTrace = args[0] === '2';
+        const perfWatchEnabled = hostTrace ? true : toggleArg(args[0], state.command.perfWatchEnabled, 'perfWatch');
+        const host: any = globalThis;
+        if (typeof host.__hmsc_spike_trace === 'function') host.__hmsc_spike_trace(hostTrace ? 1 : 0);
         if (args[1] != null && args[1] !== '') {
           const spikeRatio = numberArg(args[1], 'spikeRatio');
           if (spikeRatio <= 1) throw new Error('spikeRatio must be greater than 1');
@@ -378,7 +388,7 @@ const COMMANDS: CommandDefinition[] = [
             ...state.command,
             perfWatchEnabled,
           },
-        }, perfWatchStatusLine(perfWatchEnabled), perfWatchEnabled ? 'spikes flush to the dev terminal — go idle and watch for HMSC PERF SPIKE blocks.' : 'recorder stopped.');
+        }, perfWatchStatusLine(perfWatchEnabled) + (hostTrace ? '  + host-trace ON' : ''), perfWatchEnabled ? `spikes flush to the dev terminal — go idle and watch for HMSC PERF SPIKE blocks${hostTrace ? ' and [host-spike] lines (host ground truth)' : ''}.` : 'recorder stopped (host-trace off).');
       } catch (err: any) {
         return fail(state, err.message);
       }
@@ -916,7 +926,7 @@ const COMMANDS: CommandDefinition[] = [
         const lengthTiles = numberArg(args[2], 'length');
         const orientation: RoadOrientation = args[3] === 'ew' ? 'eastWest' : 'northSouth';
         const road: RoadSegment = {
-          id: `road_user_${state.world.roads.length + 1}`,
+          id: nextUniqueId('road_user_', state.world.roads.map((r) => r.id)),
           label: `Road ${state.world.roads.length + 1}`,
           orientation,
           x,
@@ -949,7 +959,7 @@ const COMMANDS: CommandDefinition[] = [
         const z = numberArg(args[1], 'z');
         const junction: RoadIntersection = {
           kind: 'intersection',
-          id: `junction_user_${state.world.junctions.length + 1}`,
+          id: nextUniqueId('junction_user_', state.world.junctions.map((j) => j.id)),
           label: `Intersection ${state.world.junctions.length + 1}`,
           x,
           y: 0,
@@ -987,7 +997,7 @@ const COMMANDS: CommandDefinition[] = [
           : 'south';
         const junction: RoadCulDeSac = {
           kind: 'culDeSac',
-          id: `junction_user_${state.world.junctions.length + 1}`,
+          id: nextUniqueId('junction_user_', state.world.junctions.map((j) => j.id)),
           label: `Cul-de-sac ${state.world.junctions.length + 1}`,
           centerX,
           y: 0,
@@ -1030,7 +1040,7 @@ const COMMANDS: CommandDefinition[] = [
         const yawDegrees = args[3] == null ? 0 : numberArg(args[3], 'yawDeg');
         const y = args[4] == null ? 0 : numberArg(args[4], 'y');
         const prop: WorldProp = {
-          id: `prop_user_${state.world.props.length + 1}`,
+          id: nextUniqueId('prop_user_', state.world.props.map((p) => p.id)),
           kind: kind as PropKind,
           x,
           y,
@@ -1076,8 +1086,8 @@ const COMMANDS: CommandDefinition[] = [
   },
   {
     name: 'wv_building',
-    summary: 'List buildings, list kinds, or place/remove a building (sealed | hollow | interior).',
-    usage: 'wv_building [kinds] | wv_building <kind> <x> <z> [enclosure] [w] [d] [doorSide n|s|e|w] | wv_building remove <id>',
+    summary: 'List/place/remove a building, or skin one face (front/back/left/right/top).',
+    usage: 'wv_building [kinds|skins] | wv_building <kind> <x> <z> [enclosure] [w] [d] [doorSide n|s|e|w] [skin] [force] | wv_building face <id> <front|back|left|right|top|all> <skin> | wv_building remove <id>',
     run(args, state, sourceLine) {
       try {
         if (args.length === 0) {
@@ -1085,10 +1095,22 @@ const COMMANDS: CommandDefinition[] = [
           return ok(state, ...state.world.buildings.map((b) => {
             const f = buildingFootprint(b);
             const h = buildingHeightMeters(b).toFixed(1);
-            return `${b.id} ${b.kind} ${b.enclosure} ${b.widthTiles}x${b.depthTiles} h${h}m @ [${f.minX},${f.minZ}] door ${b.doorSide}`;
+            return `${b.id} ${b.kind} ${b.enclosure} ${resolveBuildingSkin(b)} ${b.widthTiles}x${b.depthTiles} h${h}m @ [${f.minX},${f.minZ}] door ${b.doorSide}`;
           }));
         }
         if (args[0] === 'kinds') return ok(state, `building kinds: ${buildingKindNamesForConsole()}`);
+        if (args[0] === 'skins') return ok(state, `building skins: ${buildingSkinNamesForConsole()}`);
+        if (args[0] === 'face') {
+          const id = args[1];
+          const roleArg = args[2];
+          const skinArg = args[3];
+          if (!id || !roleArg || !skinArg) return fail(state, 'usage: wv_building face <id> <front|back|left|right|top|all> <skin>');
+          if (!state.world.buildings.some((b) => b.id === id)) return fail(state, `no building ${id}`);
+          const roles = ['front', 'back', 'left', 'right', 'top', 'all'];
+          if (!roles.includes(roleArg)) return fail(state, `face must be one of ${roles.join(', ')}`);
+          if (!isBuildingSkin(skinArg)) return fail(state, `unknown skin ${skinArg}; expected one of ${buildingSkinNamesForConsole()}`);
+          return ok(setBuildingFaceSkin(state, id, roleArg as any, skinArg as BuildingSkin), `${id} ${roleArg} skin = ${skinArg}`);
+        }
         if (args[0] === 'remove') {
           const id = args[1];
           if (!id) return fail(state, 'usage: wv_building remove <id>');
@@ -1113,8 +1135,15 @@ const COMMANDS: CommandDefinition[] = [
           : sideLetter === 'w' || sideLetter === 'west' ? 'west'
           : null;
         if (!doorSide) return fail(state, 'doorSide must be north, south, east, or west');
-        const building: Building = {
-          id: `building_user_${state.world.buildings.length + 1}`,
+        // 'force' anywhere bypasses the placement rules (keeps the given door,
+        // skips overlap/road checks) — the intentional-placement override.
+        const force = args.some((a) => a === 'force');
+        const skinArg = args[7] && args[7] !== 'force' ? args[7] : undefined;
+        if (skinArg != null && !isBuildingSkin(skinArg)) {
+          return fail(state, `unknown skin ${skinArg}; expected one of ${buildingSkinNamesForConsole()}`);
+        }
+        const proposed: Building = {
+          id: nextUniqueId('building_user_', state.world.buildings.map((b) => b.id)),
           kind,
           label: def.label,
           enclosure,
@@ -1124,11 +1153,17 @@ const COMMANDS: CommandDefinition[] = [
           widthTiles,
           depthTiles,
           doorSide,
+          ...(skinArg ? { skin: skinArg as BuildingSkin } : {}),
           createdByCommand: sourceLine,
         };
+        // Auto-snaps the door to the nearest road and rejects overlap/sparse
+        // placement unless forced.
+        const placement = resolveBuildingPlacement(state, proposed, force);
+        if (!placement.ok) return fail(state, placement.reason);
+        const building = placement.building;
         return ok(
           addBuildingToWorld(state, building),
-          `placed ${building.id} ${kind} (${enclosure}) ${widthTiles}x${depthTiles} @ [${x},${z}] door ${doorSide}`,
+          `placed ${building.id} ${kind} (${enclosure}) skin ${resolveBuildingSkin(building)} ${widthTiles}x${depthTiles} @ [${x},${z}] door ${building.doorSide}${force ? ' (forced)' : ''}`,
         );
       } catch (err: any) {
         return fail(state, err.message);
@@ -1222,7 +1257,7 @@ const COMMANDS: CommandDefinition[] = [
           if (!isZoneFlag(flag)) return fail(state, `unknown zone flag ${flag}; expected one of ${zoneFlagNamesForConsole()}`);
         }
         const zone: Zone = {
-          id: `zone_${state.world.zones.length + 1}`,
+          id: nextUniqueId('zone_', state.world.zones.map((z) => z.id)),
           name,
           x,
           y: 0,

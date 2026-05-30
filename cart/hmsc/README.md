@@ -351,7 +351,10 @@ color. The mechanism lives in `@reactjit/geometries` Box
 ## Buildings
 
 A building is a first-class world layer (peer of roads/junctions/props), not a
-field of tiles. Each is an axis-aligned footprint anchored at its min-corner;
+field of tiles. Each carries a collision-free `id` (`world/idgen.ts` walks to the
+first unused `building_user_N` instead of the old `length+1`, which reissued a
+live id after a removal) — so a building can be loaded by id from the internal
+tool. Each is an axis-aligned footprint anchored at its min-corner;
 its solid mass is a set of boxes that feed BOTH host physics (as blocking rects)
 and the renderer (as wall meshes) from one geometry source (`world/buildings.ts`),
 so the wall you see is exactly the wall you collide with. Definitions live in
@@ -403,7 +406,9 @@ appearance peer of `buildingKinds`); panels + captures are in
   is the door side, `top` is the roof. So a warehouse wears its garage on the
   front and plain walls on the sides (the seeded one does), and you can drop a
   billboard/doorway on one side or the roof. Author live with
-  `wv_building face <id> <front|back|left|right|top|all> <skin>`.
+  `wv_building face <id> <front|back|left|right|top|all> <skin>`, or visually in
+  the `hmsc-int` BUILDING FACES panel — click a footprint to load it by id, pick
+  a skin per face, and it emits exactly those `wv_building face` commands.
 - One texture is shared per `(skin, cols, floors)` bucket (windows sized ~3m), so
   a street of offices is a handful of bakes, not one per building. Captures are
   memoized exactly like `tileSurface` to avoid the per-frame re-bake trap.

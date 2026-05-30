@@ -515,6 +515,22 @@ down the sides).
 - A capture's `(0,0)` corner should be the intended edge color (the sign's green
   background) so the fallback reads cleanly. Rule documented in `AGENTS.md`.
 
+## Building Ids And Face Editor
+
+User-placed world entities now get collision-free ids via `world/idgen.ts`
+(`nextUniqueId` walks to the first unused `${prefix}${N}`). The old
+`${prefix}${list.length + 1}` reissued a live id after a removal (place 3 → remove
+#2 → next is #3, a duplicate), which broke id lookups and any load-by-id tool.
+Applied to buildings, roads, junctions, props, and zones.
+
+On top of stable ids, `hmsc-int` gained a BUILDING FACES editor: click a building
+footprint on the map (or a chip in the panel) to load it by id, then set a skin
+per face role (front/back/left/right/top). It STAGES choices and emits the minimal
+`wv_building face <id> <role> <skin>` set (copy to clipboard / show), matching the
+chunk painter's emit-don't-mutate model — hmsc-int reads the shared world but
+can't mutate the running game. Skin resolution reuses `buildingRoleSkin` in
+`world/buildings.ts`; the tool logic is in `hmsc-int/buildingEditor.ts`.
+
 ## Known Next Work
 
 - Add authored map editing commands or map-tool controls for creating cells from

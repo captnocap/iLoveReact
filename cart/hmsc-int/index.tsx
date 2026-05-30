@@ -3,10 +3,19 @@ import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { Box, Effect, Pressable, ScrollView, Text, TextInput } from '@reactjit/runtime/primitives';
 import {
   DEFAULT_LIVE_SYNC_INTERVAL_MS,
+  type BuildingSkin,
   type GameState,
   type PlacedCell,
   type WorldSurfaceRegion,
 } from '../hmsc/design';
+import {
+  type FaceSkins,
+  FACE_ROLES,
+  SKIN_NAMES,
+  buildingAtCell,
+  currentFaceSkins,
+  faceSkinCommands,
+} from './buildingEditor';
 import { createInitialGameState, readLivePlayerSnapshot, readStoredGameState } from '../hmsc/state/gameState';
 import { tileKindDefinition } from '../hmsc/world/tileKinds';
 import { tileKindAtCell } from '../hmsc/world/grid';
@@ -242,6 +251,12 @@ function WorldTreeView(props: { tree: ReturnType<typeof buildWorldTree> }) {
 export default function HmscInternalMapToolingCart() {
   const [world, setWorld] = useState<GameState>(loadWorldState);
   const [selected, setSelected] = useState<{ x: number; z: number } | null>(null);
+  // Building face editor: which building is loaded (by id) + the staged per-face
+  // skin choices for it. Staging mirrors the painter — choices become
+  // `wv_building face` commands on export, never a live mutation.
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const [stagedFaces, setStagedFaces] = useState<FaceSkins | null>(null);
+  const [showBuildingCommands, setShowBuildingCommands] = useState(false);
   const [view, setView] = useState<View>(() => {
     const b = regionsBounds(loadWorldState().world.surfaceRegions);
     const span = Math.max(b.maxX - b.minX, b.maxZ - b.minZ, 1);
@@ -369,6 +384,23 @@ export default function HmscInternalMapToolingCart() {
     setZoneFlags((prev) => (prev.includes(flag) ? prev.filter((f) => f !== flag) : [...prev, flag]));
   };
 
+  // Load a building into the face editor (by footprint click or id-list click):
+  // remember its id and seed the staged faces from its current skins. Passing
+  // null clears the editor (clicked an empty cell).
+  const loadBuilding = (b: { id: string } | null) => {
+    if (!b) {
+      setSelectedBuildingId(null);
+      setStagedFaces(null);
+      return;
+    }
+    const full = world.world.buildings.find((x) => x.id === b.id);
+    setSelectedBuildingId(b.id);
+    setStagedFaces(full ? currentFaceSkins(full) : null);
+  };
+  const setFace = (role: keyof FaceSkins, skin: BuildingSkin) => {
+    setStagedFaces((prev) => (prev ? { ...prev, [role]: skin } : prev));
+  };
+
   useEffect(() => {
     const refresh = () => {
       const next = loadWorldState();
@@ -464,7 +496,12 @@ export default function HmscInternalMapToolingCart() {
     const py = Number(e?.y ?? 0) - r.y;
     const worldX = v.centerX + (px - r.width / 2) / v.pixelsPerTile;
     const worldZ = v.centerZ + (py - r.height / 2) / v.pixelsPerTile;
-    setSelected({ x: Math.floor(worldX), z: Math.floor(worldZ) });
+    const cellX = Math.floor(worldX);
+    const cellZ = Math.floor(worldZ);
+    setSelected({ x: cellX, z: cellZ });
+    // Tapping a building footprint loads it into the face editor; tapping bare
+    // ground clears it.
+    loadBuilding(buildingAtCell(world.world.buildings, cellX, cellZ));
   };
   // Wheel zoom. The map node carries overflow:'scroll' purely so the host
   // routes the wheel here; nothing actually scrolls (content fits), but the
@@ -488,6 +525,24 @@ export default function HmscInternalMapToolingCart() {
     ? (tileKindAtCell(world, { x: selected.x, y: selectedRegion?.y ?? 0, z: selected.z }) ?? null)
     : null;
   const selectedDef = selectedKind ? tileKindDefinition(selectedKind) : null;
+
+  // Building face editor derivations. The loaded building is re-found by id every
+  // render so live sync keeps it current; `faceNow` is its on-disk per-face skin,
+  // and `buildingCommands` is the minimal `wv_building face` set for the staged
+  // edits (only the faces that differ from faceNow).
+  const selectedBuilding = selectedBuildingId
+    ? world.world.buildings.find((b) => b.id === selectedBuildingId) ?? null
+    : null;
+  const faceNow = selectedBuilding ? currentFaceSkins(selectedBuilding) : null;
+  const buildingCommands = selectedBuilding && faceNow && stagedFaces
+    ? faceSkinCommands(selectedBuilding.id, faceNow, stagedFaces)
+    : [];
+  const copyBuildingCommands = () => {
+    const host: any = globalThis;
+    if (buildingCommands.length && typeof host.__clipboard_set === 'function') {
+      host.__clipboard_set(buildingCommands.join('\n'));
+    }
+  };
 
   // Building footprints drawn as a non-blocking TSX overlay (labels + facade
   // color) over the shader raster — same landmarks the minimap shows, one source.
@@ -752,6 +807,69 @@ export default function HmscInternalMapToolingCart() {
 
             <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
             <WorldTreeView tree={buildWorldTree(world, painted)} />
+
+            <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
+            <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>BUILDING FACES</Text>
+            <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>click a footprint on the map, or load an id below</Text>
+            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+              {world.world.buildings.map((b) => (
+                <Pressable
+                  key={b.id}
+                  onPress={() => loadBuilding(b)}
+                  style={{ paddingVertical: 3, paddingHorizontal: 6, borderRadius: 4, borderWidth: selectedBuildingId === b.id ? 2 : 1, borderColor: selectedBuildingId === b.id ? '#fbbf24' : '#334155', backgroundColor: '#0f1a2e' }}
+                >
+                  <Text fontSize={9} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{b.id}</Text>
+                </Pressable>
+              ))}
+              {world.world.buildings.length === 0 ? (
+                <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>no buildings placed</Text>
+              ) : null}
+            </Box>
+            {selectedBuilding && stagedFaces && faceNow ? (
+              <Box style={{ gap: 6 }}>
+                <InfoRow label="id" value={selectedBuilding.id} />
+                <InfoRow label="kind" value={`${selectedBuilding.kind} (${selectedBuilding.enclosure})`} />
+                <InfoRow label="door" value={selectedBuilding.doorSide} />
+                {FACE_ROLES.map((role) => {
+                  const changed = stagedFaces[role] !== faceNow[role];
+                  return (
+                    <Box key={role} style={{ gap: 3 }}>
+                      <Box style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <Text fontSize={10} color="#38bdf8" style={{ fontWeight: 700, letterSpacing: 1 }}>{role.toUpperCase()}</Text>
+                        <Text fontSize={9} color={changed ? '#fbbf24' : '#64748b'} style={{ fontFamily: 'monospace' }}>
+                          {changed ? `${faceNow[role]} → ${stagedFaces[role]}` : faceNow[role]}
+                        </Text>
+                      </Box>
+                      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
+                        {SKIN_NAMES.map((skin) => (
+                          <Pressable
+                            key={skin}
+                            onPress={() => setFace(role, skin as BuildingSkin)}
+                            style={{ paddingVertical: 2, paddingHorizontal: 5, borderRadius: 3, borderWidth: stagedFaces[role] === skin ? 2 : 1, borderColor: stagedFaces[role] === skin ? '#f8fafc' : '#334155', backgroundColor: '#0f1a2e' }}
+                          >
+                            <Text fontSize={9} color="#cbd5e1">{skin}</Text>
+                          </Pressable>
+                        ))}
+                      </Box>
+                    </Box>
+                  );
+                })}
+                <Box style={{ flexDirection: 'row', gap: 6 }}>
+                  <PainterButton label={`Copy (${buildingCommands.length})`} disabled={!buildingCommands.length} onPress={copyBuildingCommands} />
+                  <PainterButton label={showBuildingCommands ? 'Hide' : 'Show'} onPress={() => setShowBuildingCommands((s) => !s)} />
+                  <PainterButton label="Reset" disabled={!buildingCommands.length} onPress={() => setStagedFaces(currentFaceSkins(selectedBuilding))} />
+                </Box>
+                {showBuildingCommands ? (
+                  <Box style={{ minHeight: 40, backgroundColor: '#0b1320', borderWidth: 1, borderColor: '#334155', borderRadius: 4, padding: 6 }}>
+                    <Text fontSize={10} color="#a7f3d0" style={{ fontFamily: 'monospace' }}>
+                      {buildingCommands.join('\n') || '(no changes — pick a different skin per face)'}
+                    </Text>
+                  </Box>
+                ) : null}
+              </Box>
+            ) : (
+              <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>no building loaded</Text>
+            )}
 
             <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
             <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>TILE DIAGNOSTICS</Text>
