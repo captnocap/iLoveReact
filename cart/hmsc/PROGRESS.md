@@ -280,9 +280,24 @@ not the current implementation.
     `framework/layout.zig` node fields, `v8_app.zig` prop appliers, and the
     `framework/gpu/3d.zig` render path (clip plane, fog anchor, per-mesh cull)
   - HMSC drives it from `GameState.config.view` (`drawRadiusMeters`,
-    `fogNearMeters`, `fogFarMeters`); default radius is 130m over the 240m world
+    `fogNearMeters`, `fogFarMeters`); default radius is 140m (one 120m chunk plus
+    a margin) over the 240m world
   - `gv_view [radius] [fogNear] [fogFar]` prints or sets the view distance live;
     `gv_view` and `gv_view 80` are console quick-command buttons
+- Fixed prop collision so the player bumps and stands on solid props:
+  - solid props (hydrant, sign, light/traffic poles, rock, stop sign) had a
+    zero-height blocking rect (`propPhysicsRect` used the ground `prop.y` as the
+    box top), so the host's "feet at/above top" skip fired every frame and the
+    player walked straight through them
+  - the rect top is now the prop's real top (`prop.y + kind heightMeters`), so
+    the side-collision engages while the player is below it — poles are solid
+  - made solid objects standable-on-top as a general host change in
+    `framework/v8_bindings_physics_lab.zig`: `hmscGroundAt`/`hmscSurfaceValueAt`
+    no longer skip solid rects, so a solid's top counts as ground once the
+    player's feet are at/above it (gated by step height). One rule for every
+    solid box: bump from the side, stand from above — hop onto a hydrant GTA-style
+  - the step-height gate keeps it sane: tall walls never count as ground at their
+    base (only once you're on top), and a future low curb/ledge auto-steps up
 
 ## Massive Map Findings
 
