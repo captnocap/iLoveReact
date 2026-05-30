@@ -493,6 +493,8 @@ export default function HmscInternalMapToolingCart() {
   const allMarkers = worldMarkers(world);
   const buildingMarkers = allMarkers.filter((m) => m.layer === 'building');
   const zoneMarkers = allMarkers.filter((m) => m.layer === 'zone');
+  const mountainMarkers = allMarkers.filter((m) => m.layer === 'mountain');
+  const propMarkers = allMarkers.filter((m) => m.layer === 'prop');
 
   // Header (14 floats) + 6 floats per region: minX, minZ, width, depth, matId,
   // variant. Roads + junctions are prepended so they draw OVER the base chunks —
@@ -557,8 +559,21 @@ export default function HmscInternalMapToolingCart() {
               map below still receives drag/click. Footprint -> screen via the
               same transform endDrag inverts. */}
           <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-            {/* Zones drawn first (under buildings): translucent fill + outline +
-                name, colored by flag via worldView.zoneSwatch. */}
+            {/* Mountains at the bottom (scenery landform): translucent fill +
+                outline + name, so the big landform reads as one mass. */}
+            {mountainMarkers.map((m) => {
+              const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
+              const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
+              const w = m.width * view.pixelsPerTile;
+              const h = m.depth * view.pixelsPerTile;
+              return (
+                <Box key={m.id} style={{ position: 'absolute', left, top, width: w, height: h, backgroundColor: `${m.swatchColor}33`, borderWidth: 1, borderColor: m.swatchColor, borderRadius: Math.min(w, h) / 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
+                  {w > 40 && h > 20 ? <Text fontSize={10} color={m.swatchColor} style={{ fontWeight: 800 }}>{m.label}</Text> : null}
+                </Box>
+              );
+            })}
+            {/* Zones (under buildings): translucent fill + outline + name,
+                colored by flag via worldView.zoneSwatch. */}
             {zoneMarkers.map((m) => {
               const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
               const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
@@ -589,6 +604,16 @@ export default function HmscInternalMapToolingCart() {
                     <Text fontSize={9} color="#0b1018" style={{ fontWeight: 800 }}>{m.label}</Text>
                   ) : null}
                 </Box>
+              );
+            })}
+            {/* Props (hydrants, bushes, signs…) as min-size dots — point furniture,
+                so a fixed-floor size keeps them visible at any zoom. */}
+            {propMarkers.map((m) => {
+              const size = Math.max(5, m.width * view.pixelsPerTile);
+              const cx = (m.x + m.width / 2 - view.centerX) * view.pixelsPerTile + rect.width / 2;
+              const cz = (m.z + m.depth / 2 - view.centerZ) * view.pixelsPerTile + rect.height / 2;
+              return (
+                <Box key={m.id} style={{ position: 'absolute', left: cx - size / 2, top: cz - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: m.swatchColor, borderWidth: 1, borderColor: '#0b1018' }} />
               );
             })}
             {/* Staged (un-exported) zones from the painter, brighter + dashed-ish. */}

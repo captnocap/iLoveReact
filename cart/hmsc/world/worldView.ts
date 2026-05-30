@@ -1,6 +1,7 @@
 import type { GameState, ZoneFlag } from '../design';
 import type { WorldLayer } from './placeables';
 import { buildingKindDefinition } from './buildingKinds';
+import { propKindDefinition } from './propKinds';
 
 // The shared map read-model. Both the in-game minimap (render/Hud.tsx) and the
 // internal map (cart/hmsc-int) draw landmarks from worldMarkers() instead of each
@@ -45,7 +46,7 @@ function mountainMarkers(state: GameState): WorldMarker[] {
       layer: 'mountain',
       id: m.id,
       label: m.label,
-      swatchColor: '#6b7280',
+      swatchColor: '#8a6d3b',
       x: m.centerX - r,
       z: m.centerZ - r,
       width: r * 2,
@@ -78,10 +79,37 @@ function zoneMarkers(state: GameState): WorldMarker[] {
   }));
 }
 
-// Provider LIST — the forward seam from WORLD_AUTHORING_PLAN. Phase 2 pushes the
-// zone provider here; the quest slice pushes an objective-pin provider. Every
-// registered provider's markers appear on every map for free.
-const MARKER_PROVIDERS: MarkerProvider[] = [buildingMarkers, mountainMarkers, zoneMarkers];
+// Prop tint: foliage green, hydrant red, rock grey, the rest (signs/lights/
+// signals) amber. Props are point furniture, so the footprint is clamped to at
+// least one cell so a thin hydrant still lands a visible marker on the maps.
+function propSwatch(kind: string): string {
+  if (kind === 'bush' || kind === 'bushLarge') return '#2f6b35';
+  if (kind === 'fireHydrant') return '#ef4444';
+  if (kind === 'rock') return '#9ca3af';
+  return '#f59e0b';
+}
+
+function propMarkers(state: GameState): WorldMarker[] {
+  return state.world.props.map((p) => {
+    const def = propKindDefinition(p.kind);
+    const r = Math.max(0.5, def.footprintRadiusMeters);
+    return {
+      layer: 'prop',
+      id: p.id,
+      label: def.label,
+      swatchColor: propSwatch(p.kind),
+      x: p.x - r,
+      z: p.z - r,
+      width: r * 2,
+      depth: r * 2,
+    };
+  });
+}
+
+// Provider LIST — the forward seam from WORLD_AUTHORING_PLAN. Each registered
+// provider's markers appear on every map for free; the quest slice pushes an
+// objective-pin provider here later.
+const MARKER_PROVIDERS: MarkerProvider[] = [buildingMarkers, mountainMarkers, zoneMarkers, propMarkers];
 
 export function worldMarkers(state: GameState): WorldMarker[] {
   return MARKER_PROVIDERS.flatMap((provider) => provider(state));

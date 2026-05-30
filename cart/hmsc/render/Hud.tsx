@@ -141,17 +141,17 @@ function cellInFootprint(m: FootprintMarker, cell: GridCell): boolean {
   return cell.x >= m.x && cell.x < m.x + m.width && cell.z >= m.z && cell.z < m.z + m.depth;
 }
 
-// Per-cell minimap color: a building footprint wins (landmarks read as solid
-// blocks), else the tile swatch, then a zone tint blended on top if the cell is
-// inside a zone. Buildings + zones come from worldMarkers, so the minimap and the
+// Per-cell minimap color: a SOLID footprint wins (buildings, props — read as
+// solid blocks), else the tile swatch, then any TINT footprints (zones,
+// mountains) blended on top. All come from worldMarkers, so the minimap and the
 // internal map draw the SAME landmarks from one source — no per-map tables.
-function minimapCellRgb(state: GameState, buildings: FootprintMarker[], zones: FootprintMarker[], cell: GridCell): [number, number, number] {
-  for (const m of buildings) {
+function minimapCellRgb(state: GameState, solids: FootprintMarker[], tints: FootprintMarker[], cell: GridCell): [number, number, number] {
+  for (const m of solids) {
     if (cellInFootprint(m, cell)) return hexToRgb01(m.swatchColor);
   }
   const kind = tileKindAtCell(state, cell);
   let rgb = kind ? swatchRgb01ForId(`tile:${kind}`) : MINIMAP_VOID_RGB;
-  for (const z of zones) {
+  for (const z of tints) {
     if (!cellInFootprint(z, cell)) continue;
     const [zr, zg, zb] = hexToRgb01(z.swatchColor);
     const a = 0.28;
@@ -233,8 +233,9 @@ function MiniMap(props: { state: GameState }) {
   const cells = visibleMinimapCells(centerCell);
   const markers = worldMarkers(props.state);
   const toFootprint = (m: typeof markers[number]) => ({ x: m.x, z: m.z, width: m.width, depth: m.depth, swatchColor: m.swatchColor });
-  const buildingFootprints = markers.filter((m) => m.layer === 'building').map(toFootprint);
-  const zoneFootprints = markers.filter((m) => m.layer === 'zone').map(toFootprint);
+  // Solids (buildings, props) paint over the cell; tints (zones, mountains) blend.
+  const solidFootprints = markers.filter((m) => m.layer === 'building' || m.layer === 'prop').map(toFootprint);
+  const tintFootprints = markers.filter((m) => m.layer === 'zone' || m.layer === 'mountain').map(toFootprint);
   const smoothedOriginX = smoothedView.x - radius;
   const smoothedOriginZ = smoothedView.z - radius;
   const playerX = props.state.player.position.x / props.state.world.cellSizeMeters;
@@ -250,7 +251,7 @@ function MiniMap(props: { state: GameState }) {
     smoothedView.yawRadians,
     scrollX,
     scrollZ,
-    ...cells.flatMap((cell) => minimapCellRgb(props.state, buildingFootprints, zoneFootprints, cell)),
+    ...cells.flatMap((cell) => minimapCellRgb(props.state, solidFootprints, tintFootprints, cell)),
   ];
 
   return (
