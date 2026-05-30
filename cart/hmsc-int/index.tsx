@@ -264,7 +264,9 @@ export default function HmscInternalMapToolingCart() {
 
   // Building footprints drawn as a non-blocking TSX overlay (labels + facade
   // color) over the shader raster — same landmarks the minimap shows, one source.
-  const buildingMarkers = worldMarkers(world).filter((m) => m.layer === 'building');
+  const allMarkers = worldMarkers(world);
+  const buildingMarkers = allMarkers.filter((m) => m.layer === 'building');
+  const zoneMarkers = allMarkers.filter((m) => m.layer === 'zone');
 
   // Header (14 floats) + 6 floats per region: minX, minZ, width, depth, matId,
   // variant. Roads + junctions are prepended so they draw OVER the base chunks —
@@ -324,6 +326,24 @@ export default function HmscInternalMapToolingCart() {
               map below still receives drag/click. Footprint -> screen via the
               same transform endDrag inverts. */}
           <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+            {/* Zones drawn first (under buildings): translucent fill + outline +
+                name, colored by flag via worldView.zoneSwatch. */}
+            {zoneMarkers.map((m) => {
+              const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
+              const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
+              const w = m.width * view.pixelsPerTile;
+              const h = m.depth * view.pixelsPerTile;
+              return (
+                <Box
+                  key={m.id}
+                  style={{ position: 'absolute', left, top, width: w, height: h, backgroundColor: `${m.swatchColor}22`, borderWidth: 1, borderColor: m.swatchColor, overflow: 'hidden' }}
+                >
+                  {w > 30 && h > 16 ? (
+                    <Text fontSize={9} color={m.swatchColor} style={{ fontWeight: 800, padding: 2 }}>{m.label}</Text>
+                  ) : null}
+                </Box>
+              );
+            })}
             {buildingMarkers.map((m) => {
               const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
               const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;

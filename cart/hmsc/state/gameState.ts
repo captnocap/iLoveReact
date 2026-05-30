@@ -1,17 +1,21 @@
 import {
+  Building,
   DEFAULT_CELL_SIZE_METERS,
   GameState,
   HMSC_STATE_SCHEMA_VERSION,
   LivePlayerSnapshot,
+  Mountain,
   RoadJunction,
   RoadProfile,
   RoadSegment,
   TileKind,
+  WorldProp,
   WorldState,
   WorldSurfaceRegion,
 } from '../design';
 import { surfaceRegionTopMeters } from '../world/surfaceHeights';
-import { timed } from './perfMarks';
+import { addBuildingToWorld } from '../world/interiors';
+import { buildingKindDefinition } from '../world/buildingKinds';
 import {
   DEFAULT_GAME_CONFIG,
   DEFAULT_ENTITY_RADIUS_METERS,
@@ -78,7 +82,7 @@ function localStoreSet(key: string, value: string): void {
 // is built by tiling chunks; here a 2x2 grid of 120-tile chunks → a 240x240
 // world. Each chunk gets a distinct material so the chunk seams are visible.
 // Changing this layout key invalidates older saved worlds in reviveGameState.
-const FLOOR_LAYOUT_KEY = 'hmsc.chunks2x2.v3';
+const FLOOR_LAYOUT_KEY = 'hmsc.chunks2x2.v4';
 const CHUNK_TILES = 120;
 const CHUNKS_PER_SIDE = 2;
 // 2x2 grid centered on the origin: chunk min-corners at -120 and 0.
@@ -176,6 +180,67 @@ function createInitialJunctions(): RoadJunction[] {
   ];
 }
 
+// Space-filling street furniture seeded around the spawn so a fresh world shows
+// the prop system off, the way the spawn roads do. Yaw 0 faces -Z; a prop that
+// governs or is read from the road turns to face it. The arterial runs z up at
+// x 3..17.2 (sidewalks at x 3..5 west and 15.2..17.2 east); the cross street and
+// intersection meet it at z 43..57.2; the south chunk (z < 0) is sand.
+function createInitialProps(): WorldProp[] {
+  const seed: Array<Omit<WorldProp, 'createdByCommand'>> = [
+    // Cobra-head street lights cantilevered over the arterial, alternating sides.
+    { id: 'prop_light_e1', kind: 'streetLight', x: 16.3, y: 0, z: 18, yawDegrees: 90 },
+    { id: 'prop_light_e2', kind: 'streetLight', x: 16.3, y: 0, z: 68, yawDegrees: 90 },
+    { id: 'prop_light_e3', kind: 'streetLight', x: 16.3, y: 0, z: 92, yawDegrees: 90 },
+    { id: 'prop_light_w1', kind: 'streetLight', x: 3.7, y: 0, z: 32, yawDegrees: 270 },
+    // Traffic lights at the intersection: one faces northbound arterial traffic
+    // (-Z, yaw 0), the cross one faces eastbound cross traffic (-X, yaw 90). Their
+    // facings put them a half-cycle apart so the two flows alternate.
+    { id: 'prop_signal_ns', kind: 'trafficLight', x: 16.4, y: 0, z: 41, yawDegrees: 0 },
+    { id: 'prop_signal_ew', kind: 'trafficLight', x: 1.6, y: 0, z: 50.5, yawDegrees: 90 },
+    // Stop signs on the minor approaches (always-stop control).
+    { id: 'prop_stop_e', kind: 'stopSign', x: 71.5, y: 0, z: 53, yawDegrees: 90 },
+    { id: 'prop_stop_w', kind: 'stopSign', x: 4.5, y: 0, z: 47, yawDegrees: 270 },
+    // Green guide signs at the intersection corners (billboard panels).
+    { id: 'prop_sign_n', kind: 'streetSign', x: 16.6, y: 0, z: 58, yawDegrees: 0 },
+    { id: 'prop_sign_s', kind: 'streetSign', x: 2.4, y: 0, z: 42, yawDegrees: 180 },
+    // Hydrants on the sidewalks.
+    { id: 'prop_hydrant_e', kind: 'fireHydrant', x: 16.4, y: 0, z: 35, yawDegrees: 90 },
+    { id: 'prop_hydrant_w', kind: 'fireHydrant', x: 3.6, y: 0, z: 78, yawDegrees: 270 },
+    // GTA bushes near spawn (walk straight through them).
+    { id: 'prop_bush_1', kind: 'bush', x: 6.5, y: 0, z: 9, yawDegrees: 12 },
+    { id: 'prop_bush_2', kind: 'bush', x: 13.5, y: 0, z: 11, yawDegrees: 40 },
+    { id: 'prop_bush_3', kind: 'bush', x: 50, y: 0, z: -15, yawDegrees: 0 },
+    // A MASSIVE bush in the open east of spawn — big enough to hide a car in.
+    { id: 'prop_bush_mega', kind: 'bushLarge', x: 34, y: 0, z: 24, yawDegrees: 18 },
+    // Rocks scattered on the sand chunk.
+    { id: 'prop_rock_1', kind: 'rock', x: 40, y: 0, z: -20, yawDegrees: 25 },
+    { id: 'prop_rock_2', kind: 'rock', x: 62, y: 0, z: -42, yawDegrees: 70 },
+  ];
+  return seed.map((prop) => ({ ...prop, createdByCommand: 'initial-world' }));
+}
+
+// A large mountain seeded out on the south sand chunk (x 0..120, z -120..0) so a
+// fresh world shows the landform + hiking-trail system off, the way the spawn
+// roads and props do. The player spawns at the origin and walks south onto the
+// sand to reach it. The trail starts on the north rim (angle +Z, facing the
+// approaching player) and spirals up to the peak. baseY 0 = the sand floor, so
+// the first tread is within one step of the player standing on the sand.
+function createInitialMountains(): Mountain[] {
+  return [
+    {
+      id: 'mountain_spawn',
+      label: 'South Mountain',
+      centerX: 62,
+      centerZ: -62,
+      baseY: 0,
+      baseRadiusMeters: 48,
+      peakHeightMeters: 30,
+      trailStartAngleRadians: Math.PI / 2,
+      createdByCommand: 'initial-world',
+    },
+  ];
+}
+
 function createInitialWorld(): WorldState {
   const totalTiles = CHUNK_TILES * CHUNKS_PER_SIDE;
   return {
@@ -191,8 +256,35 @@ function createInitialWorld(): WorldState {
     placedCells: {},
     roads: createInitialRoads(),
     junctions: createInitialJunctions(),
+    props: createInitialProps(),
+    buildings: [],
+    interiors: {},
+    mountains: createInitialMountains(),
+    zones: [],
     spawnedEntities: {},
   };
+}
+
+// Three demo buildings near spawn, one per enclosure mode, so a fresh world
+// shows the building system off the way the spawn roads and props do. Placed
+// east of the arterial, south of the cross street, on the spawn sidewalk chunk.
+// Their interiors/entry pads are wired by addBuildingToWorld (seedBuildings).
+function createInitialBuildings(): Building[] {
+  const seed: Array<Omit<Building, 'createdByCommand' | 'label'>> = [
+    // Sealed: a solid block. Bump it; stand on its roof. No way in.
+    { id: 'building_demo_sealed', kind: 'house', enclosure: 'sealed', x: 26, y: 0, z: 18, widthTiles: 8, depthTiles: 10, doorSide: 'south' },
+    // Hollow: a walk-in shell. The south doorway is a real gap and the floor
+    // inside is the same outer world — see in from outside, out from inside.
+    { id: 'building_demo_hollow', kind: 'shop', enclosure: 'hollow', x: 42, y: 0, z: 18, widthTiles: 8, depthTiles: 10, doorSide: 'south' },
+    // Interior: a closed tower. Its front pad is a portal into a separate space
+    // far larger than this 12x12 footprint.
+    { id: 'building_demo_interior', kind: 'tower', enclosure: 'interior', x: 60, y: 0, z: 16, widthTiles: 12, depthTiles: 12, doorSide: 'south' },
+  ];
+  return seed.map((b) => ({ ...b, label: buildingKindDefinition(b.kind).label, createdByCommand: 'initial-world' }));
+}
+
+function seedBuildings(state: GameState): GameState {
+  return createInitialBuildings().reduce((acc, building) => addBuildingToWorld(acc, building), state);
 }
 
 // The player spawns standing on the spawn chunk's physics top — the SAME value
@@ -219,6 +311,7 @@ export function createInitialGameState(): GameState {
     command: {
       cheatsEnabled: false,
       debugHudEnabled: false,
+      perfWatchEnabled: false,
     },
     story: {
       flags: {},
@@ -244,9 +337,10 @@ export function createInitialGameState(): GameState {
       inventory: [],
     },
     world: createInitialWorld(),
+    suspendedSpaces: [],
   };
 
-  return state;
+  return seedBuildings(state);
 }
 
 export function markGameStateUpdated(state: GameState): GameState {
@@ -332,6 +426,19 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
         junctions: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.junctions)
           ? parsed.world.junctions
           : initial.world.junctions,
+        props: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.props)
+          ? parsed.world.props
+          : initial.world.props,
+        // A save predating the mountain layer has no `mountains` key → seed the
+        // example landform; a save that already has one keeps it.
+        mountains: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.mountains)
+          ? parsed.world.mountains
+          : initial.world.mountains,
+        // Zones are authored (wv_zone); a save predating the layer has no key →
+        // empty. Layout-matched saves keep their stored zones.
+        zones: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.zones)
+          ? parsed.world.zones
+          : initial.world.zones,
         spawnedEntities: Object.fromEntries(Object.entries(parsed.world?.spawnedEntities ?? {}).map(([id, rawEntity]: [string, any]) => [
           id,
           {
@@ -352,6 +459,13 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
           },
         ])),
       },
+      // Scene + suspend stack are only meaningful against a matching world. On a
+      // layout reset the world falls back to the fresh outer city, so a save made
+      // inside a building interior must not revive into a stale swapped world —
+      // force the console scene with an empty suspend stack. When the layout
+      // matches, keep them so reloading inside an interior lands you inside.
+      sceneStep: storedWorldMatchesCurrentLayout ? (parsed.sceneStep ?? 'boot.console') : 'boot.console',
+      suspendedSpaces: storedWorldMatchesCurrentLayout && Array.isArray(parsed.suspendedSpaces) ? parsed.suspendedSpaces : [],
     });
   } catch {
     return null;
@@ -393,7 +507,7 @@ export function readLivePlayerSnapshot(): LivePlayerSnapshot | null {
 export function mirrorGameStateForHotReload(state: GameState): void {
   if (typeof globalThis.__hot_set !== 'function') return;
   try {
-    timed('hot-mirror', () => globalThis.__hot_set(HMSC_HOT_KEY, JSON.stringify(state)));
+    globalThis.__hot_set(HMSC_HOT_KEY, JSON.stringify(state));
   } catch {}
 }
 
@@ -404,18 +518,16 @@ export function mirrorGameStateForHotReload(state: GameState): void {
 // (visible fps variance). The full mirror runs on its own slow cadence; see
 // mirrorGameStateForHotReload callers in index.tsx + saveGameState.
 export function publishLiveGameState(state: GameState): void {
-  timed('live-sync', () => {
-    const raw = JSON.stringify(livePlayerSnapshotFromState(state));
-    try {
-      localStoreSet(HMSC_LIVE_PLAYER_KEY, raw);
-    } catch {}
-  });
+  const raw = JSON.stringify(livePlayerSnapshotFromState(state));
+  try {
+    localStoreSet(HMSC_LIVE_PLAYER_KEY, raw);
+  } catch {}
 }
 
 export function saveGameState(state: GameState): GameState {
   const savedState = { ...state, savedAt: nowIso(), updatedAt: nowIso() };
   try {
-    timed('autosave', () => localStoreSet(HMSC_STORE_KEY, JSON.stringify(savedState)));
+    localStoreSet(HMSC_STORE_KEY, JSON.stringify(savedState));
   } catch {}
   publishLiveGameState(savedState);
   // Autosave is rare (120s), so mirroring the full state for hot reload here is

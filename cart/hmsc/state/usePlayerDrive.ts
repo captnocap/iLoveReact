@@ -4,6 +4,8 @@ import { runCommandLine } from '../commands/registry';
 import type { GameState } from '../design';
 import { cellEventRef, playerEventActor, recordAndPublishGameEvent } from '../events/gameEvents';
 import { canOccupyWorldPosition, cellKey, placedCellAt, triggerCellAtWorldPosition, worldToCell } from '../world/grid';
+import { currentZone } from '../world/zones';
+import { isInteriorSceneStep } from '../world/interiors';
 import { MIN_DRIVE_FRAME_SECONDS, MOVEMENT_INTENT_DEADZONE, NOCLIP_MIN_HEIGHT_METERS } from './defaults';
 import { advanceHostPhysics, movementSurfaceForPlayer } from './hostPhysics';
 
@@ -37,8 +39,15 @@ function normalizeYawDegrees(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
 }
 
+// World cell triggers (doors, building entry/exit pads) fire in the outer city
+// console scene AND inside building interiors (so the exit pad's wv_leave works);
+// lab scenes intentionally do not fire them.
+function triggersActive(sceneStep: string): boolean {
+  return sceneStep === 'boot.console' || isInteriorSceneStep(sceneStep);
+}
+
 function runEnteredCellTrigger(state: GameState, lastTriggerKeyRef: { current: string | null }): GameState {
-  if (state.sceneStep !== 'boot.console') {
+  if (!triggersActive(state.sceneStep)) {
     lastTriggerKeyRef.current = null;
     return state;
   }
@@ -70,7 +79,7 @@ function runEnteredCellTrigger(state: GameState, lastTriggerKeyRef: { current: s
 }
 
 function recordEnteredPlayerCell(state: GameState, lastPlayerCellKeyRef: { current: string | null }): GameState {
-  if (state.sceneStep !== 'boot.console') {
+  if (!triggersActive(state.sceneStep)) {
     lastPlayerCellKeyRef.current = null;
     return state;
   }
@@ -97,6 +106,57 @@ function recordEnteredPlayerCell(state: GameState, lastPlayerCellKeyRef: { curre
   }).state;
 }
 
+// Fire zone enter/exit on boundary crossings, the zones twin of
+// runEnteredCellTrigger but at REGION granularity (innermost zone wins). The
+// emitted zone.entered event is what drives the GTA name-flash HUD, so the flash
+// happens for every zone regardless of onEnterCommand; the commands are EXTRA
+// behavior. Debounced via lastZoneIdRef so it fires once per crossing.
+function runZoneTransitions(state: GameState, lastZoneIdRef: { current: string | null }): GameState {
+  if (!triggersActive(state.sceneStep)) {
+    lastZoneIdRef.current = null;
+    return state;
+  }
+  const zone = currentZone(state, state.player.position);
+  const zoneId = zone?.id ?? null;
+  if (zoneId === lastZoneIdRef.current) return state;
+  const previousId = lastZoneIdRef.current;
+  lastZoneIdRef.current = zoneId;
+
+  let nextState = state;
+  const previousZone = previousId != null ? nextState.world.zones.find((z) => z.id === previousId) : undefined;
+  if (previousZone) {
+    const exitEvent = recordAndPublishGameEvent(nextState, {
+      type: 'zone.exited',
+      source: 'player-drive',
+      actor: playerEventActor(),
+      subject: { kind: 'zone', id: previousZone.id, label: previousZone.name },
+      tags: ['world', 'zone'],
+      payload: { name: previousZone.name, flags: previousZone.flags },
+    });
+    nextState = exitEvent.state;
+    if (previousZone.onExitCommand) {
+      const result = runCommandLine(previousZone.onExitCommand, nextState, { source: 'world-zone', parentEventId: exitEvent.event.id });
+      if (!result.output.some((line) => line.startsWith('error:'))) nextState = result.state;
+    }
+  }
+  if (zone) {
+    const enterEvent = recordAndPublishGameEvent(nextState, {
+      type: 'zone.entered',
+      source: 'player-drive',
+      actor: playerEventActor(),
+      subject: { kind: 'zone', id: zone.id, label: zone.name },
+      tags: ['world', 'zone'],
+      payload: { name: zone.name, flags: zone.flags, private: zone.flags.includes('private') },
+    });
+    nextState = enterEvent.state;
+    if (zone.onEnterCommand) {
+      const result = runCommandLine(zone.onEnterCommand, nextState, { source: 'world-zone', parentEventId: enterEvent.event.id });
+      if (!result.output.some((line) => line.startsWith('error:'))) nextState = result.state;
+    }
+  }
+  return nextState;
+}
+
 export function usePlayerDrive(
   enabled: boolean,
   cameraYawDegrees: number,
@@ -107,6 +167,7 @@ export function usePlayerDrive(
   const keysRef = useRef<Record<string, boolean>>({});
   const lastTriggerKeyRef = useRef<string | null>(null);
   const lastPlayerCellKeyRef = useRef<string | null>(null);
+  const lastZoneIdRef = useRef<string | null>(null);
   const [driveFrame, setDriveFrame] = useState<PlayerDriveFrame>({
     animationSeconds: 0,
     moving: false,
@@ -226,7 +287,7 @@ export function usePlayerDrive(
                 },
               },
             };
-            return runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef);
+            return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
           }
           const hostResult = advanceHostPhysics(
             current,
@@ -253,9 +314,9 @@ export function usePlayerDrive(
                   yawDegrees,
                 },
               };
-              return runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef);
+              return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
             }
-            return runEnteredCellTrigger(recordEnteredPlayerCell(hostResult.state, lastPlayerCellKeyRef), lastTriggerKeyRef);
+            return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(hostResult.state, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
           }
           if (intentLength > MOVEMENT_INTENT_DEADZONE) {
             const moveX = intentX / intentLength;
@@ -273,7 +334,7 @@ export function usePlayerDrive(
           }
 
           if (position === current.player.position && yawDegrees === current.player.yawDegrees) {
-            return runEnteredCellTrigger(recordEnteredPlayerCell(current, lastPlayerCellKeyRef), lastTriggerKeyRef);
+            return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(current, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
           }
           const nextState = {
             ...current,
@@ -283,7 +344,7 @@ export function usePlayerDrive(
               yawDegrees,
             },
           };
-          return runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef);
+          return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
         });
       }
 

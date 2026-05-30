@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import { Box, Effect, Text } from '@reactjit/runtime/primitives';
 import type { GameState, GridCell } from '../design';
 import { tileKindAtCell } from '../world/grid';
@@ -134,20 +135,30 @@ function visibleMinimapCells(center: GridCell): GridCell[] {
 
 const MINIMAP_VOID_RGB: [number, number, number] = [0.071, 0.035, 0.106];
 
-type BuildingFootprintMarker = { x: number; z: number; width: number; depth: number; swatchColor: string };
+type FootprintMarker = { x: number; z: number; width: number; depth: number; swatchColor: string };
 
-// Per-cell minimap color: a building footprint covering this cell wins (landmarks
-// read as solid blocks), else the tile kind's swatch, else void. Buildings come
-// from worldMarkers, so the minimap and the internal map draw the SAME landmarks
-// from one source — no per-map color/kind tables.
-function minimapCellRgb(state: GameState, buildings: BuildingFootprintMarker[], cell: GridCell): [number, number, number] {
+function cellInFootprint(m: FootprintMarker, cell: GridCell): boolean {
+  return cell.x >= m.x && cell.x < m.x + m.width && cell.z >= m.z && cell.z < m.z + m.depth;
+}
+
+// Per-cell minimap color: a building footprint wins (landmarks read as solid
+// blocks), else the tile swatch, then a zone tint blended on top if the cell is
+// inside a zone. Buildings + zones come from worldMarkers, so the minimap and the
+// internal map draw the SAME landmarks from one source — no per-map tables.
+function minimapCellRgb(state: GameState, buildings: FootprintMarker[], zones: FootprintMarker[], cell: GridCell): [number, number, number] {
   for (const m of buildings) {
-    if (cell.x >= m.x && cell.x < m.x + m.width && cell.z >= m.z && cell.z < m.z + m.depth) {
-      return hexToRgb01(m.swatchColor);
-    }
+    if (cellInFootprint(m, cell)) return hexToRgb01(m.swatchColor);
   }
   const kind = tileKindAtCell(state, cell);
-  return kind ? swatchRgb01ForId(`tile:${kind}`) : MINIMAP_VOID_RGB;
+  let rgb = kind ? swatchRgb01ForId(`tile:${kind}`) : MINIMAP_VOID_RGB;
+  for (const z of zones) {
+    if (!cellInFootprint(z, cell)) continue;
+    const [zr, zg, zb] = hexToRgb01(z.swatchColor);
+    const a = 0.28;
+    rgb = [rgb[0] * (1 - a) + zr * a, rgb[1] * (1 - a) + zg * a, rgb[2] * (1 - a) + zb * a];
+    break;
+  }
+  return rgb;
 }
 
 function useSmoothedMinimapView(state: GameState): { x: number; z: number; yawRadians: number } {
@@ -220,9 +231,10 @@ function MiniMap(props: { state: GameState }) {
     z: Math.floor(smoothedView.z),
   };
   const cells = visibleMinimapCells(centerCell);
-  const buildingFootprints = worldMarkers(props.state)
-    .filter((m) => m.layer === 'building')
-    .map((m) => ({ x: m.x, z: m.z, width: m.width, depth: m.depth, swatchColor: m.swatchColor }));
+  const markers = worldMarkers(props.state);
+  const toFootprint = (m: typeof markers[number]) => ({ x: m.x, z: m.z, width: m.width, depth: m.depth, swatchColor: m.swatchColor });
+  const buildingFootprints = markers.filter((m) => m.layer === 'building').map(toFootprint);
+  const zoneFootprints = markers.filter((m) => m.layer === 'zone').map(toFootprint);
   const smoothedOriginX = smoothedView.x - radius;
   const smoothedOriginZ = smoothedView.z - radius;
   const playerX = props.state.player.position.x / props.state.world.cellSizeMeters;
@@ -238,12 +250,42 @@ function MiniMap(props: { state: GameState }) {
     smoothedView.yawRadians,
     scrollX,
     scrollZ,
-    ...cells.flatMap((cell) => minimapCellRgb(props.state, buildingFootprints, cell)),
+    ...cells.flatMap((cell) => minimapCellRgb(props.state, buildingFootprints, zoneFootprints, cell)),
   ];
 
   return (
     <Box style={{ position: 'absolute', right: 18, bottom: 18, width: 150, height: 150, borderRadius: 75, borderWidth: 3, borderColor: HUD.border, backgroundColor: HUD.surround, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' }}>
       <Effect shader={HMSC_MINIMAP_WGSL} data={minimapData} style={{ width: MINIMAP_PIXELS, height: MINIMAP_PIXELS }} />
+    </Box>
+  );
+}
+
+// GTA-style district title: listens for zone.entered on the event bus and flashes
+// the zone's name, fading out after a beat. Driven purely by the event, so EVERY
+// zone flashes its name on entry regardless of any onEnterCommand.
+function ZoneNameFlash() {
+  const [name, setName] = useState<string | null>(null);
+  const timerRef = useRef<any>(null);
+  useEffect(() => {
+    const off = busOn('hmsc:event:zone.entered', (event: any) => {
+      const zoneName = String(event?.payload?.name ?? event?.subject?.label ?? '').trim();
+      if (!zoneName) return;
+      setName(zoneName);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => setName(null), 3200);
+    });
+    return () => {
+      off?.();
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
+  if (!name) return null;
+  return (
+    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 92, alignItems: 'center', pointerEvents: 'none' }}>
+      <Box style={{ position: 'relative' }}>
+        <Text style={{ position: 'absolute', left: 2, top: 2, fontFamily: 'mono', fontSize: 30, fontWeight: '800', letterSpacing: 2, color: HUD.ledShadow }}>{name}</Text>
+        <Text style={{ fontFamily: 'mono', fontSize: 30, fontWeight: '800', letterSpacing: 2, color: HUD.text }}>{name}</Text>
+      </Box>
     </Box>
   );
 }
@@ -272,6 +314,7 @@ export function Hud(props: { state: GameState }) {
         <ItemBox itemLabel={itemLabel} />
       </Box>
       <MiniMap state={props.state} />
+      <ZoneNameFlash />
     </>
   );
 }

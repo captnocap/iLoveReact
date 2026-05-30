@@ -45,6 +45,9 @@ cart/hmsc/
   world/grid.ts          grid storage helpers over continuous movement
   world/scale.ts         canonical meter scale for players, rooms, vehicles, city blocks
   world/tileKinds.ts     typed tile definitions for rendering, pathing, cover, doors, visibility, traversal, and surfaces
+  world/buildingKinds.ts typed building definitions (footprint, storeys, wall tile borrow, default enclosure, facade)
+  world/buildings.ts     building footprint/box geometry + physics rects (one geometry source for physics and render)
+  world/interiors.ts     closed-building interiors: the mini-world per building + the enter/leave world-swap portal
   world/pathing.ts       grid pathfinder over tile-kind NPC traversal metadata
   render3d/sky.ts       analytic skybox model from skybox_demo
   state/usePlayerDrive.ts   continuous third-person movement over the grid
@@ -110,8 +113,8 @@ The canonical control vocabulary lives in `input/controlContract.ts`.
 Current implementation status:
 
 - Implemented: mouse camera orbit, right-hold shoulder aim/crosshair, Shift run,
-  Space jump.
-- Reserved: attack, light action, interact, reload, quick menu, crouch.
+  Space jump, E/F interact (enter/leave closed buildings).
+- Reserved: attack, light action, reload, quick menu, crouch.
 
 ## Noise Model
 
@@ -188,6 +191,13 @@ the diagonal split in high-contrast gradients is fixed lower in the renderer.
 - `wv_remove <x> <z> [y]`
 - `wv_trigger <x> <z> [y] [command...|off]`
 - `wv_path <fromX> <fromZ> <toX> <toZ> [y] [pedestrian|runner|vehicle]`
+- `wv_building [kinds] | wv_building <kind> <x> <z> [enclosure] [w] [d] [doorSide]`
+- `wv_enter <buildingId>`
+- `wv_leave`
+- `wv_zone [name x z w d [flags...]] | wv_zone remove <id>` — define a named area;
+  walking in flashes its name (GTA-style) and fires `zone.entered`. Flags:
+  `private`, `safe`, `hostile`, `restricted`, `interior`. Zones show on the
+  minimap (tint) and the internal map (outline + name).
 
 
 Use `wv_trigger` to inspect or author door triggers:
@@ -243,3 +253,37 @@ texture keys remain in tile render metadata.
 
 Use `lab_spawn textures` to inspect the current tile material board inside the
 real gameplay rig.
+
+## Buildings
+
+A building is a first-class world layer (peer of roads/junctions/props), not a
+field of tiles. Each is an axis-aligned footprint anchored at its min-corner;
+its solid mass is a set of boxes that feed BOTH host physics (as blocking rects)
+and the renderer (as wall meshes) from one geometry source (`world/buildings.ts`),
+so the wall you see is exactly the wall you collide with. Definitions live in
+`world/buildingKinds.ts`: footprint, storeys → height, the `wall` tile bundle the
+mass borrows for cover/line-of-sight/friction, default enclosure, and facade.
+
+The three building types are one `enclosure` field:
+
+- `sealed` — static, no entry. A solid block: bump it from the side, stand on
+  the roof (the standable-solids host rule). No door, no interior.
+- `hollow` — a walk-in shell. The door side is a real gap and the floor inside
+  is the SAME outer world, so you see in from outside and out from inside. No
+  loading, no scene change — one continuous space.
+- `interior` — closed. The exterior is a sealed shell with a door. Walk up to it
+  and a **Press E to enter** prompt appears (proximity-based, `useBuildingInteract`);
+  E swaps the player into a separate interior mini-world that can be far larger
+  than the exterior footprint. Inside, **Press E to leave** returns you outside.
+  A walk-on door mat firing `wv_enter`/`wv_leave` is the same path for NPCs and
+  as a fallback; the console commands `wv_enter <id>` / `wv_leave` do it too.
+
+A closed building's interior is its own `WorldState` (`world/interiors.ts`):
+entering pushes the outer world onto a suspend stack and swaps `state.world` to
+the interior, so the existing renderer and host-physics path draw and simulate
+it with no special casing. The interior's size is independent of the footprint —
+that is the "bigger inside than out" knob (`INTERIOR_FOOTPRINT_SCALE`).
+
+A fresh world seeds one of each near spawn (east of the arterial, south of the
+cross street): a sealed house, a hollow shop, and an interior tower. Author more
+with `wv_building`; `wv_building kinds` lists the kinds.

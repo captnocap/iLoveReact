@@ -36,11 +36,20 @@ import {
   SPAWN_ENTITY_CLEARANCE_METERS,
 } from '../state/defaults';
 import { createInitialGameState, readStoredGameState, saveGameState } from '../state/gameState';
+import { configurePerfWatch, perfWatchStatusLine } from '../state/perfWatch';
 import { cellKey, commandCell, placeCell, placedCellAt, removeCell, setCellTrigger, worldToCell } from '../world/grid';
 import { placeRoad, removeRoad, roadFootprint } from '../world/roads';
 import { junctionFootprint, placeJunction, removeJunction } from '../world/roadJunctions';
 import { solveRoadCrossSection } from '../world/roadProfile';
-import type { RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment } from '../design';
+import { placeProp, removeProp, setPropSignalOverride } from '../world/props';
+import { isPropKind, propKindDefinition, propKindNamesForConsole } from '../world/propKinds';
+import { buildingFootprint, buildingHeightMeters } from '../world/buildings';
+import { mountainTrailPads } from '../world/mountain';
+import { buildingKindDefinition, buildingKindNamesForConsole, isBuildingKind } from '../world/buildingKinds';
+import { addBuildingToWorld, enterBuildingInterior, leaveCurrentInterior, removeBuildingFromWorld } from '../world/interiors';
+import { addZone, removeZone, isZoneFlag, zoneFlagNamesForConsole } from '../world/zones';
+import { trafficClockSeconds, trafficSignalPhase } from '../world/traffic';
+import type { Building, BuildingEnclosure, BuildingSide, PropKind, RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment, TrafficSignalPhase, WorldProp, Zone, ZoneFlag } from '../design';
 import { movementNoiseModesForConsole, surfaceNoiseProfilesForConsole } from '../world/noiseModel';
 import { findGridPath, type PathAgentKind } from '../world/pathing';
 import { isTileKind, tileKindDefinition, tileKindNamesForConsole } from '../world/tileKinds';
@@ -341,6 +350,35 @@ const COMMANDS: CommandDefinition[] = [
             debugHudEnabled,
           },
         }, `debugHud = ${debugHudEnabled ? '1' : '0'}`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'gv_perflog',
+    summary: 'Toggle the spike-triggered perf flight recorder (flushes to console).',
+    usage: 'gv_perflog [1|0|toggle] [spikeRatio] [minJumpMs]',
+    run(args, state) {
+      try {
+        const perfWatchEnabled = toggleArg(args[0], state.command.perfWatchEnabled, 'perfWatch');
+        if (args[1] != null && args[1] !== '') {
+          const spikeRatio = numberArg(args[1], 'spikeRatio');
+          if (spikeRatio <= 1) throw new Error('spikeRatio must be greater than 1');
+          configurePerfWatch({ spikeRatio });
+        }
+        if (args[2] != null && args[2] !== '') {
+          const minJumpMs = numberArg(args[2], 'minJumpMs');
+          if (minJumpMs < 0) throw new Error('minJumpMs must be >= 0');
+          configurePerfWatch({ minJumpUs: minJumpMs * 1000 });
+        }
+        return ok({
+          ...state,
+          command: {
+            ...state.command,
+            perfWatchEnabled,
+          },
+        }, perfWatchStatusLine(perfWatchEnabled), perfWatchEnabled ? 'spikes flush to the dev terminal — go idle and watch for HMSC PERF SPIKE blocks.' : 'recorder stopped.');
       } catch (err: any) {
         return fail(state, err.message);
       }
@@ -928,6 +966,244 @@ const COMMANDS: CommandDefinition[] = [
           createdByCommand: sourceLine,
         };
         return ok(placeJunction(state, junction), `laid ${junction.id} r=${bulbRadiusTiles}m throat ${throat} @ [${centerX},${centerZ}]`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'wv_prop',
+    summary: 'List props, list kinds, or place/remove a space-filling prop.',
+    usage: 'wv_prop [kinds] | wv_prop <kind> <x> <z> [yawDeg] [y] | wv_prop remove <id>',
+    run(args, state, sourceLine) {
+      try {
+        if (args.length === 0) {
+          if (state.world.props.length === 0) return ok(state, 'no props placed');
+          return ok(state, ...state.world.props.map((prop) => {
+            const def = propKindDefinition(prop.kind);
+            return `${prop.id} ${prop.kind} @ [${prop.x},${prop.z}] yaw ${prop.yawDegrees}${def.solid ? '' : ' (non-solid)'}`;
+          }));
+        }
+        if (args[0] === 'kinds') return ok(state, `prop kinds: ${propKindNamesForConsole()}`);
+        if (args[0] === 'remove') {
+          const id = args[1];
+          if (!id) return fail(state, 'usage: wv_prop remove <id>');
+          if (!state.world.props.some((prop) => prop.id === id)) return fail(state, `no prop ${id}`);
+          return ok(removeProp(state, id), `removed prop ${id}`);
+        }
+        const kind = args[0];
+        if (!isPropKind(kind)) return fail(state, `unknown prop kind ${kind}; expected one of ${propKindNamesForConsole()}`);
+        const x = numberArg(args[1], 'x');
+        const z = numberArg(args[2], 'z');
+        const yawDegrees = args[3] == null ? 0 : numberArg(args[3], 'yawDeg');
+        const y = args[4] == null ? 0 : numberArg(args[4], 'y');
+        const prop: WorldProp = {
+          id: `prop_user_${state.world.props.length + 1}`,
+          kind: kind as PropKind,
+          x,
+          y,
+          z,
+          yawDegrees,
+          createdByCommand: sourceLine,
+        };
+        return ok(placeProp(state, prop), `placed ${prop.id} ${kind} @ [${x},${z}] yaw ${yawDegrees}`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'wv_signal',
+    summary: 'Inspect traffic-control props, or pin/clear a signal phase for vehicle pathing tests.',
+    usage: 'wv_signal [id] [stop|caution|go|auto]',
+    run(args, state) {
+      const controlProps = state.world.props.filter((prop) => propKindDefinition(prop.kind).trafficControl !== 'none');
+      if (args.length === 0) {
+        if (controlProps.length === 0) return ok(state, 'no traffic-control props placed');
+        const now = trafficClockSeconds();
+        return ok(state, ...controlProps.map((prop) => {
+          const phase = trafficSignalPhase(prop, now);
+          return `${prop.id} ${prop.kind} = ${phase}${prop.signalOverride ? ' (pinned)' : ''}`;
+        }));
+      }
+      const id = args[0];
+      const prop = controlProps.find((candidate) => candidate.id === id);
+      if (!prop) return fail(state, `no traffic-control prop ${id}`);
+      if (args[1] == null) {
+        return ok(state, `${prop.id} = ${trafficSignalPhase(prop, trafficClockSeconds())}${prop.signalOverride ? ' (pinned)' : ''}`);
+      }
+      const phaseArg = args[1];
+      if (phaseArg === 'auto') {
+        return ok(setPropSignalOverride(state, id, null), `${id} signal resumed (auto)`);
+      }
+      if (phaseArg !== 'stop' && phaseArg !== 'caution' && phaseArg !== 'go') {
+        return fail(state, 'phase must be stop, caution, go, or auto');
+      }
+      return ok(setPropSignalOverride(state, id, phaseArg as TrafficSignalPhase), `${id} signal pinned ${phaseArg}`);
+    },
+  },
+  {
+    name: 'wv_building',
+    summary: 'List buildings, list kinds, or place/remove a building (sealed | hollow | interior).',
+    usage: 'wv_building [kinds] | wv_building <kind> <x> <z> [enclosure] [w] [d] [doorSide n|s|e|w] | wv_building remove <id>',
+    run(args, state, sourceLine) {
+      try {
+        if (args.length === 0) {
+          if (state.world.buildings.length === 0) return ok(state, 'no buildings placed');
+          return ok(state, ...state.world.buildings.map((b) => {
+            const f = buildingFootprint(b);
+            const h = buildingHeightMeters(b).toFixed(1);
+            return `${b.id} ${b.kind} ${b.enclosure} ${b.widthTiles}x${b.depthTiles} h${h}m @ [${f.minX},${f.minZ}] door ${b.doorSide}`;
+          }));
+        }
+        if (args[0] === 'kinds') return ok(state, `building kinds: ${buildingKindNamesForConsole()}`);
+        if (args[0] === 'remove') {
+          const id = args[1];
+          if (!id) return fail(state, 'usage: wv_building remove <id>');
+          if (!state.world.buildings.some((b) => b.id === id)) return fail(state, `no building ${id}`);
+          return ok(removeBuildingFromWorld(state, id), `removed building ${id}`);
+        }
+        const kind = args[0];
+        if (!isBuildingKind(kind)) return fail(state, `unknown building kind ${kind}; expected one of ${buildingKindNamesForConsole()}`);
+        const def = buildingKindDefinition(kind);
+        const x = numberArg(args[1], 'x');
+        const z = numberArg(args[2], 'z');
+        const enclosure = (args[3] ?? def.defaultEnclosure) as BuildingEnclosure;
+        if (enclosure !== 'sealed' && enclosure !== 'hollow' && enclosure !== 'interior') {
+          return fail(state, 'enclosure must be sealed, hollow, or interior');
+        }
+        const widthTiles = args[4] == null ? def.defaultWidthTiles : numberArg(args[4], 'w');
+        const depthTiles = args[5] == null ? def.defaultDepthTiles : numberArg(args[5], 'd');
+        const sideLetter = (args[6] ?? 'south').toLowerCase();
+        const doorSide: BuildingSide | null = sideLetter === 'n' || sideLetter === 'north' ? 'north'
+          : sideLetter === 's' || sideLetter === 'south' ? 'south'
+          : sideLetter === 'e' || sideLetter === 'east' ? 'east'
+          : sideLetter === 'w' || sideLetter === 'west' ? 'west'
+          : null;
+        if (!doorSide) return fail(state, 'doorSide must be north, south, east, or west');
+        const building: Building = {
+          id: `building_user_${state.world.buildings.length + 1}`,
+          kind,
+          label: def.label,
+          enclosure,
+          x,
+          y: 0,
+          z,
+          widthTiles,
+          depthTiles,
+          doorSide,
+          createdByCommand: sourceLine,
+        };
+        return ok(
+          addBuildingToWorld(state, building),
+          `placed ${building.id} ${kind} (${enclosure}) ${widthTiles}x${depthTiles} @ [${x},${z}] door ${doorSide}`,
+        );
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'wv_enter',
+    summary: 'Enter a closed (interior) building, swapping the player into its interior space.',
+    usage: 'wv_enter <buildingId>',
+    run(args, state) {
+      const id = args[0];
+      if (!id) return fail(state, 'usage: wv_enter <buildingId>');
+      const building = state.world.buildings.find((b) => b.id === id);
+      if (!building) return fail(state, `no building ${id}`);
+      if (building.enclosure !== 'interior') return fail(state, `${id} has no interior (enclosure ${building.enclosure})`);
+      if (!building.interiorId || !state.world.interiors[building.interiorId]) return fail(state, `${id} interior not found`);
+      return ok(enterBuildingInterior(state, building), `entered ${building.label} interior`);
+    },
+  },
+  {
+    name: 'wv_leave',
+    summary: 'Leave the current building interior, returning to the outer world.',
+    usage: 'wv_leave',
+    run(args, state) {
+      const result = leaveCurrentInterior(state);
+      if (!result) return fail(state, 'not inside a building interior');
+      return ok(result, 'left the interior');
+    },
+  },
+  {
+    name: 'wv_mountain',
+    summary: 'List mountains, or teleport to a mountain trailhead to start the climb.',
+    usage: 'wv_mountain | wv_mountain trailhead [id]',
+    run(args, state) {
+      const mountains = state.world.mountains ?? [];
+      if (args.length === 0) {
+        if (mountains.length === 0) return ok(state, 'no mountains');
+        return ok(state, ...mountains.map((m) => {
+          const treads = mountainTrailPads(m).length;
+          return `${m.id} ${m.label} peak ${m.peakHeightMeters}m r=${m.baseRadiusMeters}m @ [${m.centerX},${m.centerZ}] (${treads} treads)`;
+        }));
+      }
+      if (args[0] === 'trailhead') {
+        const mountain = args[1] ? mountains.find((m) => m.id === args[1]) : mountains[0];
+        if (!mountain) return fail(state, args[1] ? `no mountain ${args[1]}` : 'no mountains');
+        const pads = mountainTrailPads(mountain);
+        if (pads.length === 0) return fail(state, `${mountain.id} has no trail`);
+        const head = pads[0];
+        return ok(
+          {
+            ...state,
+            player: {
+              ...state.player,
+              position: { x: head.x, y: head.top + 0.05, z: head.z },
+              physics: { ...state.player.physics, velocity: { x: 0, y: 0, z: 0 }, grounded: true },
+            },
+          },
+          `at ${mountain.label} trailhead [${head.x.toFixed(1)},${head.z.toFixed(1)}] — walk the switchbacks up`,
+        );
+      }
+      return fail(state, 'usage: wv_mountain | wv_mountain trailhead [id]');
+    },
+  },
+  {
+    name: 'wv_zone',
+    summary: 'List zones, or define/remove a named area (flashes its name on enter; flags like private).',
+    usage: 'wv_zone [name x z w d [flags...]] | wv_zone remove <id>',
+    run(args, state, sourceLine) {
+      try {
+        if (args.length === 0) {
+          if (state.world.zones.length === 0) return ok(state, `no zones defined; flags: ${zoneFlagNamesForConsole()}`);
+          return ok(state, ...state.world.zones.map((zone) => (
+            `${zone.id} "${zone.name}" ${zone.width}x${zone.depth} @ [${zone.x},${zone.z}]${zone.flags.length ? ` {${zone.flags.join(',')}}` : ''}`
+          )));
+        }
+        if (args[0] === 'remove') {
+          const id = args[1];
+          if (!id) return fail(state, 'usage: wv_zone remove <id>');
+          if (!state.world.zones.some((zone) => zone.id === id)) return fail(state, `no zone ${id}`);
+          return ok(removeZone(state, id), `removed zone ${id}`);
+        }
+        const name = args[0];
+        const x = numberArg(args[1], 'x');
+        const z = numberArg(args[2], 'z');
+        const width = numberArg(args[3], 'width');
+        const depth = numberArg(args[4], 'depth');
+        if (width <= 0 || depth <= 0) return fail(state, 'width and depth must be positive');
+        const flags = args.slice(5);
+        for (const flag of flags) {
+          if (!isZoneFlag(flag)) return fail(state, `unknown zone flag ${flag}; expected one of ${zoneFlagNamesForConsole()}`);
+        }
+        const zone: Zone = {
+          id: `zone_${state.world.zones.length + 1}`,
+          name,
+          x,
+          y: 0,
+          z,
+          width,
+          depth,
+          flags: flags as ZoneFlag[],
+          createdByCommand: sourceLine,
+        };
+        return ok(
+          addZone(state, zone),
+          `defined zone ${zone.id} "${name}" ${width}x${depth} @ [${x},${z}]${flags.length ? ` {${flags.join(',')}}` : ''}`,
+        );
       } catch (err: any) {
         return fail(state, err.message);
       }

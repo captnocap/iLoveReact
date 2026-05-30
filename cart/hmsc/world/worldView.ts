@@ -1,4 +1,4 @@
-import type { GameState } from '../design';
+import type { GameState, ZoneFlag } from '../design';
 import type { WorldLayer } from './placeables';
 import { buildingKindDefinition } from './buildingKinds';
 
@@ -55,10 +55,33 @@ function mountainMarkers(state: GameState): WorldMarker[] {
   });
 }
 
-// Provider LIST — the forward seam from WORLD_AUTHORING_PLAN. Phase 2 pushes a
+// Zone tint by flag so private property reads red, safe green, hostile orange,
+// etc. — the maps and the painter palette share this one mapping.
+export function zoneSwatch(flags: ZoneFlag[]): string {
+  if (flags.includes('private')) return '#ff5e5e';
+  if (flags.includes('hostile')) return '#ff9f43';
+  if (flags.includes('restricted')) return '#ffd166';
+  if (flags.includes('safe')) return '#5fe08c';
+  return '#a060ff';
+}
+
+function zoneMarkers(state: GameState): WorldMarker[] {
+  return state.world.zones.map((zone) => ({
+    layer: 'zone',
+    id: zone.id,
+    label: zone.name,
+    swatchColor: zoneSwatch(zone.flags),
+    x: zone.x,
+    z: zone.z,
+    width: zone.width,
+    depth: zone.depth,
+  }));
+}
+
+// Provider LIST — the forward seam from WORLD_AUTHORING_PLAN. Phase 2 pushes the
 // zone provider here; the quest slice pushes an objective-pin provider. Every
 // registered provider's markers appear on every map for free.
-const MARKER_PROVIDERS: MarkerProvider[] = [buildingMarkers, mountainMarkers];
+const MARKER_PROVIDERS: MarkerProvider[] = [buildingMarkers, mountainMarkers, zoneMarkers];
 
 export function worldMarkers(state: GameState): WorldMarker[] {
   return MARKER_PROVIDERS.flatMap((provider) => provider(state));
