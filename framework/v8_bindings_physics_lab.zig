@@ -773,7 +773,12 @@ fn hmscGroundAt(rects: []const f32, x: f32, z: f32, current_y: f32, step_height:
     var ground_y: f32 = -1000000;
     var at: usize = 0;
     while (at + HMSC_RECT_FLOATS <= rects.len) : (at += HMSC_RECT_FLOATS) {
-        if (rects[at + 5] > 0.5) continue;
+        // Solid rects (walls, props) ARE standable tops, not just side blockers.
+        // The step-height gate below keeps a tall wall from counting as ground at
+        // its base (its top is far above current_y + step), so it only becomes
+        // ground once you're actually on it — hop onto a hydrant and stand. The
+        // side push (hmscCollideSolidRects) still blocks you while your feet are
+        // below the top, so "bump from the side, stand from above" both hold.
         if (x >= rects[at] and x <= rects[at + 2] and z >= rects[at + 1] and z <= rects[at + 3]) {
             const rect_height = rects[at + 4];
             if (rect_height <= current_y + step_height) ground_y = @max(ground_y, rect_height);
@@ -787,7 +792,9 @@ fn hmscSurfaceValueAt(rects: []const f32, x: f32, z: f32, current_y: f32, step_h
     var value = fallback;
     var at: usize = 0;
     while (at + HMSC_RECT_FLOATS <= rects.len) : (at += HMSC_RECT_FLOATS) {
-        if (rects[at + 5] > 0.5) continue;
+        // Mirror hmscGroundAt: solids are standable, so when you rest on a prop's
+        // top its friction/restitution (rect[6]/rect[7]) is the surface you read,
+        // not the fallback. Same step-height gate keeps wall bases out.
         if (x >= rects[at] and x <= rects[at + 2] and z >= rects[at + 1] and z <= rects[at + 3]) {
             const rect_height = rects[at + 4];
             if (rect_height <= current_y + step_height and rect_height >= ground_y) {
