@@ -1,13 +1,18 @@
 import { useEffect, useRef, useState } from 'react';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
-import { Box, Effect, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Effect, Pressable, ScrollView, Text } from '@reactjit/runtime/primitives';
 import {
   DEFAULT_LIVE_SYNC_INTERVAL_MS,
   type GameState,
+  type PlacedCell,
   type WorldSurfaceRegion,
 } from '../hmsc/design';
 import { createInitialGameState, readLivePlayerSnapshot, readStoredGameState } from '../hmsc/state/gameState';
 import { tileKindDefinition } from '../hmsc/world/tileKinds';
+import { tileKindAtCell } from '../hmsc/world/grid';
+import { worldMarkers } from '../hmsc/world/worldView';
+import { roadFootprint } from '../hmsc/world/roads';
+import { junctionFootprint } from '../hmsc/world/roadJunctions';
 import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from '../hmsc/render3d/tileFill';
 
 // hmsc-int renders the SAME WorldState the game uses, top-down, as ONE Effect
@@ -127,16 +132,43 @@ function regionAtCell(regions: WorldSurfaceRegion[], x: number, z: number): Worl
   return null;
 }
 
+// Trigger data + any hand-placed override live on PlacedCell, not the region.
+// The map only draws regions, so a placed cell can sit at any y over the same
+// (x,z) column; match the column and take the first hit.
+function placedCellAtColumn(placedCells: Record<string, PlacedCell>, x: number, z: number): PlacedCell | null {
+  for (const cell of Object.values(placedCells)) {
+    if (cell.cell.x === x && cell.cell.z === z) return cell;
+  }
+  return null;
+}
+
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
+function fmtNum(n: number): string {
+  if (!Number.isFinite(n)) return n > 0 ? '∞' : '-∞';
+  return Number.isInteger(n) ? String(n) : n.toFixed(2);
+}
+
+function yesNo(b: boolean): string {
+  return b ? 'yes' : 'no';
+}
+
 function InfoRow(props: { label: string; value: string }) {
   return (
-    <Box style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
-      <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>{props.label}</Text>
-      <Text fontSize={11} color="#e2e8f0" style={{ fontFamily: 'monospace' }}>{props.value}</Text>
+    <Box style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+      <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace', flexShrink: 0 }}>{props.label}</Text>
+      <Text fontSize={11} color="#e2e8f0" style={{ fontFamily: 'monospace', flexShrink: 1, textAlign: 'right' }}>{props.value}</Text>
     </Box>
+  );
+}
+
+function Section(props: { title: string }) {
+  return (
+    <Text fontSize={10} color="#38bdf8" style={{ fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
+      {props.title}
+    </Text>
   );
 }
 
@@ -221,19 +253,47 @@ export default function HmscInternalMapToolingCart() {
 
   const [waterR, waterG, waterB] = rgb01(tileKindDefinition('water').render.color);
   const selectedRegion = selected ? regionAtCell(regions, selected.x, selected.z) : null;
-  const selectedDef = selectedRegion ? tileKindDefinition(selectedRegion.kind) : null;
+  const selectedPlaced = selected ? placedCellAtColumn(world.world.placedCells, selected.x, selected.z) : null;
+  // Resolve the true layered kind through the shared resolver (placed > junction
+  // band > road band > surface) so the inspector reports what the GAME sees, not
+  // just placed-or-region. The region/placed records still drive the labels below.
+  const selectedKind = selected
+    ? (tileKindAtCell(world, { x: selected.x, y: selectedRegion?.y ?? 0, z: selected.z }) ?? null)
+    : null;
+  const selectedDef = selectedKind ? tileKindDefinition(selectedKind) : null;
 
-  // Header (14 floats) + 6 floats per region: minX, minZ, width, depth, matId, variant.
+  // Building footprints drawn as a non-blocking TSX overlay (labels + facade
+  // color) over the shader raster — same landmarks the minimap shows, one source.
+  const buildingMarkers = worldMarkers(world).filter((m) => m.layer === 'building');
+
+  // Header (14 floats) + 6 floats per region: minX, minZ, width, depth, matId,
+  // variant. Roads + junctions are prepended so they draw OVER the base chunks —
+  // the shader breaks on the FIRST region containing a cell, so lower index wins.
+  const roadMatId = tileFillMaterialId('road');
+  const roadVariant = tileFillVariant('road');
+  type MapRegion = { x: number; z: number; w: number; d: number; matId: number; variant: number };
+  const mapRegions: MapRegion[] = [];
+  for (const road of world.world.roads) {
+    const f = roadFootprint(road);
+    mapRegions.push({ x: f.minX, z: f.minZ, w: f.maxX - f.minX, d: f.maxZ - f.minZ, matId: roadMatId, variant: roadVariant });
+  }
+  for (const junction of world.world.junctions) {
+    const f = junctionFootprint(junction);
+    mapRegions.push({ x: f.minX, z: f.minZ, w: f.maxX - f.minX, d: f.maxZ - f.minZ, matId: roadMatId, variant: roadVariant });
+  }
+  for (const r of regions) {
+    mapRegions.push({ x: r.x, z: r.z, w: r.width, d: r.depth, matId: tileFillMaterialId(r.kind), variant: tileFillVariant(r.kind) });
+  }
   const data = [
     rect.width, rect.height,
     view.centerX, view.centerZ, view.pixelsPerTile,
     selected ? selected.x : 0, selected ? selected.z : 0, selected ? 1 : 0,
     player.position.x / cellSize, player.position.z / cellSize,
     waterR, waterG, waterB,
-    regions.length,
+    mapRegions.length,
   ];
-  for (const r of regions) {
-    data.push(r.x, r.z, r.width, r.depth, tileFillMaterialId(r.kind), tileFillVariant(r.kind));
+  for (const mr of mapRegions) {
+    data.push(mr.x, mr.z, mr.w, mr.d, mr.matId, mr.variant);
   }
 
   return (
@@ -260,31 +320,135 @@ export default function HmscInternalMapToolingCart() {
           style={{ flexGrow: 1, position: 'relative', overflow: 'scroll' }}
         >
           <Effect shader={MAP_SHADER} data={data} style={{ width: '100%', height: '100%' }} />
+          {/* Building landmarks: facade-colored, labeled, non-blocking so the
+              map below still receives drag/click. Footprint -> screen via the
+              same transform endDrag inverts. */}
+          <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'hidden' }}>
+            {buildingMarkers.map((m) => {
+              const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
+              const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
+              const w = m.width * view.pixelsPerTile;
+              const h = m.depth * view.pixelsPerTile;
+              return (
+                <Box
+                  key={m.id}
+                  style={{ position: 'absolute', left, top, width: w, height: h, backgroundColor: `${m.swatchColor}aa`, borderWidth: 1, borderColor: m.swatchColor, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
+                >
+                  {w > 26 && h > 14 ? (
+                    <Text fontSize={9} color="#0b1018" style={{ fontWeight: 800 }}>{m.label}</Text>
+                  ) : null}
+                </Box>
+              );
+            })}
+          </Box>
         </Pressable>
 
-        <Box style={{ width: 320, backgroundColor: '#0b1424', borderLeftWidth: 1, borderLeftColor: '#1e293b', padding: 18, gap: 14 }}>
-          <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>TILE DIAGNOSTICS</Text>
-          {selected ? (
+        <Box style={{ width: 340, backgroundColor: '#0b1424', borderLeftWidth: 1, borderLeftColor: '#1e293b', flexDirection: 'column', minHeight: 0 }}>
+          <ScrollView style={{ flexGrow: 1, height: '100%' }} contentContainerStyle={{ padding: 18, gap: 12 }}>
+            <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>TILE DIAGNOSTICS</Text>
+            {selected ? (
+              <Box style={{ gap: 6 }}>
+                <Section title="CELL" />
+                <InfoRow label="cell" value={`${selected.x}, ${selectedRegion ? selectedRegion.y : 0}, ${selected.z}`} />
+                <InfoRow label="chunk" value={selectedRegion ? selectedRegion.id : 'none (void)'} />
+                {selectedRegion ? <InfoRow label="region label" value={selectedRegion.label} /> : null}
+                {selectedRegion ? <InfoRow label="zone" value={selectedRegion.zoneKey} /> : null}
+                {selectedRegion ? <InfoRow label="region size" value={`${selectedRegion.width}×${selectedRegion.depth}`} /> : null}
+                {selectedPlaced ? <InfoRow label="placed" value={selectedPlaced.key} /> : null}
+                {selectedPlaced ? <InfoRow label="placed by" value={selectedPlaced.createdByCommand} /> : null}
+                {selectedPlaced?.triggerCommand ? <InfoRow label="trigger cmd" value={selectedPlaced.triggerCommand} /> : null}
+                {selectedPlaced?.triggerLabel ? <InfoRow label="trigger label" value={selectedPlaced.triggerLabel} /> : null}
+
+                {selectedDef ? (
+                  <Box style={{ gap: 6 }}>
+                    <Section title="KIND" />
+                    <InfoRow label="kind" value={selectedDef.kind} />
+                    <InfoRow label="label" value={selectedDef.label} />
+
+                    <Section title="PATHING" />
+                    <InfoRow label="walkable" value={yesNo(selectedDef.pathing.walkable)} />
+                    <InfoRow label="movementCost" value={fmtNum(selectedDef.pathing.movementCost)} />
+                    <InfoRow label="blocksLoS" value={yesNo(selectedDef.pathing.blocksLineOfSight)} />
+
+                    <Section title="SURFACE" />
+                    <InfoRow label="material" value={selectedDef.surface.material} />
+                    <InfoRow label="walkSpeed×" value={fmtNum(selectedDef.surface.walkSpeedMultiplier)} />
+                    <InfoRow label="runSpeed×" value={fmtNum(selectedDef.surface.runSpeedMultiplier)} />
+                    <InfoRow label="vehSpeed×" value={fmtNum(selectedDef.surface.vehicleSpeedMultiplier)} />
+                    <InfoRow label="accel×" value={fmtNum(selectedDef.surface.accelerationMultiplier)} />
+                    <InfoRow label="friction" value={fmtNum(selectedDef.surface.friction)} />
+                    <InfoRow label="lateralGrip" value={fmtNum(selectedDef.surface.lateralGrip)} />
+                    <InfoRow label="restitution" value={fmtNum(selectedDef.surface.restitution)} />
+
+                    <Section title="TRAVERSAL" />
+                    <InfoRow label="modes" value={selectedDef.traversal.allowedModes.join(', ') || 'none'} />
+                    <InfoRow label="width" value={selectedDef.traversal.width} />
+                    <InfoRow label="maxStepUp m" value={fmtNum(selectedDef.traversal.maxStepUpMeters)} />
+                    <InfoRow label="minClear m" value={fmtNum(selectedDef.traversal.minClearanceMeters)} />
+                    <InfoRow label="slopeLimit°" value={fmtNum(selectedDef.traversal.slopeLimitDegrees)} />
+                    <InfoRow label="crouch" value={yesNo(selectedDef.traversal.requiresCrouch)} />
+                    <InfoRow label="mantle" value={yesNo(selectedDef.traversal.requiresMantle)} />
+                    <InfoRow label="vehGrip×" value={fmtNum(selectedDef.traversal.vehicleGripMultiplier)} />
+
+                    <Section title="COVER" />
+                    <InfoRow label="height" value={selectedDef.cover.height} />
+                    <InfoRow label="protection" value={fmtNum(selectedDef.cover.protection)} />
+                    <InfoRow label="concealment" value={fmtNum(selectedDef.cover.concealment)} />
+                    <InfoRow label="shootOver" value={yesNo(selectedDef.cover.shootOver)} />
+                    <InfoRow label="leanAround" value={yesNo(selectedDef.cover.leanAround)} />
+                    <InfoRow label="crouchReq" value={yesNo(selectedDef.cover.crouchRequired)} />
+
+                    <Section title="VISIBILITY" />
+                    <InfoRow label="opacity" value={fmtNum(selectedDef.visibility.opacity)} />
+                    <InfoRow label="concealment" value={fmtNum(selectedDef.visibility.concealment)} />
+                    <InfoRow label="lightTrans" value={fmtNum(selectedDef.visibility.lightTransmission)} />
+                    <InfoRow label="soundOcc" value={fmtNum(selectedDef.visibility.soundOcclusion)} />
+                    <InfoRow label="blocksLoS" value={yesNo(selectedDef.visibility.blocksLineOfSight)} />
+
+                    <Section title="NPC" />
+                    <InfoRow label="traversable" value={yesNo(selectedDef.npc.traversable)} />
+                    <InfoRow label="walkCost" value={fmtNum(selectedDef.npc.walkCost)} />
+                    <InfoRow label="runCost" value={fmtNum(selectedDef.npc.runCost)} />
+                    <InfoRow label="vehicleCost" value={fmtNum(selectedDef.npc.vehicleCost)} />
+                    <InfoRow label="prefByVeh" value={yesNo(selectedDef.npc.preferredByVehicles)} />
+                    <InfoRow label="cover" value={selectedDef.npc.cover} />
+                    <InfoRow label="noise" value={fmtNum(selectedDef.npc.noise)} />
+
+                    {selectedDef.door.isDoor ? (
+                      <Box style={{ gap: 6 }}>
+                        <Section title="DOOR" />
+                        <InfoRow label="defaultState" value={selectedDef.door.defaultState} />
+                        <InfoRow label="interaction" value={selectedDef.door.interaction} />
+                        <InfoRow label="width m" value={fmtNum(selectedDef.door.widthMeters)} />
+                        <InfoRow label="blockMoveClosed" value={yesNo(selectedDef.door.blocksMovementWhenClosed)} />
+                        <InfoRow label="blockLoSClosed" value={yesNo(selectedDef.door.blocksLineOfSightWhenClosed)} />
+                        <InfoRow label="vehPassable" value={yesNo(selectedDef.door.vehiclePassable)} />
+                        <InfoRow label="openCost" value={fmtNum(selectedDef.door.openCost)} />
+                      </Box>
+                    ) : null}
+
+                    <Section title="RENDER" />
+                    <InfoRow label="color" value={selectedDef.render.color} />
+                    <InfoRow label="height m" value={fmtNum(selectedDef.render.heightMeters)} />
+                    <InfoRow label="texture" value={selectedDef.render.textureKey} />
+                  </Box>
+                ) : (
+                  <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>void — no tile at this cell</Text>
+                )}
+              </Box>
+            ) : (
+              <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>click a tile to inspect</Text>
+            )}
+
+            <Box style={{ height: 1, backgroundColor: '#1e293b', marginTop: 6 }} />
+            <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>LIVE PLAYER</Text>
             <Box style={{ gap: 6 }}>
-              <InfoRow label="cell" value={`${selected.x}, ${selectedRegion ? selectedRegion.y : 0}, ${selected.z}`} />
-              <InfoRow label="chunk" value={selectedRegion ? selectedRegion.id : 'none (void)'} />
-              {selectedDef ? <InfoRow label="kind" value={selectedDef.kind} /> : null}
-              {selectedRegion ? <InfoRow label="label" value={selectedRegion.label} /> : null}
-              {selectedDef ? <InfoRow label="texture" value={selectedDef.render.textureKey} /> : null}
-              {selectedDef ? <InfoRow label="color" value={selectedDef.render.color} /> : null}
-              {selectedDef ? <InfoRow label="walkable" value={selectedDef.pathing.walkable ? 'yes' : 'no'} /> : null}
+              <InfoRow label="x" value={player.position.x.toFixed(2)} />
+              <InfoRow label="y" value={player.position.y.toFixed(2)} />
+              <InfoRow label="z" value={player.position.z.toFixed(2)} />
+              <InfoRow label="yaw°" value={player.yawDegrees.toFixed(1)} />
             </Box>
-          ) : (
-            <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>click a tile to inspect</Text>
-          )}
-          <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-          <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>LIVE PLAYER</Text>
-          <Box style={{ gap: 6 }}>
-            <InfoRow label="x" value={player.position.x.toFixed(2)} />
-            <InfoRow label="y" value={player.position.y.toFixed(2)} />
-            <InfoRow label="z" value={player.position.z.toFixed(2)} />
-            <InfoRow label="yaw°" value={player.yawDegrees.toFixed(1)} />
-          </Box>
+          </ScrollView>
         </Box>
       </Box>
     </Box>

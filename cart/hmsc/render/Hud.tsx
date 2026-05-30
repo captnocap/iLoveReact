@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Box, Effect, Text } from '@reactjit/runtime/primitives';
 import type { GameState, GridCell } from '../design';
-import { cellKey, surfaceRegionAtCell, worldToCell } from '../world/grid';
+import { tileKindAtCell } from '../world/grid';
+import { worldMarkers } from '../world/worldView';
+import { hexToRgb01, swatchRgb01ForId } from '../world/placeables';
 
 const HUD = {
   panelBg: '#0c0614ee',
@@ -28,32 +30,19 @@ const MINIMAP_SMOOTHING_PER_SECOND = 18;
 const MINIMAP_SETTLED_DISTANCE_CELLS = 0.002;
 const MINIMAP_SETTLED_YAW_RADIANS = 0.002;
 
+// Per-cell colors are supplied as 3 floats (rgb) straight from the Placeable
+// registry's swatchColor — no kind->int->color table in here anymore (that
+// duplicated CPU minimapTileCode + this WGSL switch). One color source now.
 const HMSC_MINIMAP_WGSL = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
 const WIN: i32 = ${MINIMAP_CELL_SPAN};
 const HDR: i32 = ${MINIMAP_DATA_HEADER};
 
-fn tileColor(kind: i32) -> vec3f {
-  if (kind == 0) { return vec3f(0.306, 0.627, 0.875); }
-  if (kind == 1) { return vec3f(0.094, 0.290, 0.408); }
-  if (kind == 2) { return vec3f(0.400, 0.184, 0.196); }
-  if (kind == 3) { return vec3f(0.024, 0.267, 0.078); }
-  if (kind == 4) { return vec3f(0.122, 0.145, 0.188); }
-  if (kind == 5) { return vec3f(0.126, 0.141, 0.176); }
-  if (kind == 6) { return vec3f(0.349, 0.380, 0.439); }
-  if (kind == 7) { return vec3f(0.357, 0.275, 0.212); }
-  if (kind == 8) { return vec3f(0.784, 0.714, 0.435); }
-  if (kind == 9) { return vec3f(0.796, 0.835, 0.882); }
-  if (kind == 10) { return vec3f(0.961, 0.620, 0.043); }
-  if (kind == 11) { return vec3f(0.133, 0.827, 0.933); }
-  return vec3f(0.071, 0.035, 0.106);
-}
-
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
   let lx = clamp(i32(in.uv.x * f32(WIN) + D[3]), 0, WIN - 1);
   let ly = clamp(i32(in.uv.y * f32(WIN) + D[4]), 0, WIN - 1);
-  let kind = i32(D[HDR + ly * WIN + lx] + 0.5);
-  var col = tileColor(kind);
+  let base = HDR + (ly * WIN + lx) * 3;
+  var col = vec3f(D[base], D[base + 1], D[base + 2]);
 
   let player = vec2f(D[0] / f32(WIN), D[1] / f32(WIN));
   let yaw = D[2];
@@ -143,20 +132,22 @@ function visibleMinimapCells(center: GridCell): GridCell[] {
   return cells;
 }
 
-function minimapTileCode(kind: string | undefined): number {
-  if (kind === 'water') return 0;
-  if (kind === 'residential') return 1;
-  if (kind === 'downtown') return 2;
-  if (kind === 'mixed') return 3;
-  if (kind === 'road') return 4;
-  if (kind === 'asphalt') return 5;
-  if (kind === 'sidewalk') return 6;
-  if (kind === 'mud') return 7;
-  if (kind === 'sand') return 8;
-  if (kind === 'wall') return 9;
-  if (kind === 'door') return 10;
-  if (kind === 'marker') return 11;
-  return 12;
+const MINIMAP_VOID_RGB: [number, number, number] = [0.071, 0.035, 0.106];
+
+type BuildingFootprintMarker = { x: number; z: number; width: number; depth: number; swatchColor: string };
+
+// Per-cell minimap color: a building footprint covering this cell wins (landmarks
+// read as solid blocks), else the tile kind's swatch, else void. Buildings come
+// from worldMarkers, so the minimap and the internal map draw the SAME landmarks
+// from one source — no per-map color/kind tables.
+function minimapCellRgb(state: GameState, buildings: BuildingFootprintMarker[], cell: GridCell): [number, number, number] {
+  for (const m of buildings) {
+    if (cell.x >= m.x && cell.x < m.x + m.width && cell.z >= m.z && cell.z < m.z + m.depth) {
+      return hexToRgb01(m.swatchColor);
+    }
+  }
+  const kind = tileKindAtCell(state, cell);
+  return kind ? swatchRgb01ForId(`tile:${kind}`) : MINIMAP_VOID_RGB;
 }
 
 function useSmoothedMinimapView(state: GameState): { x: number; z: number; yawRadians: number } {
@@ -229,7 +220,9 @@ function MiniMap(props: { state: GameState }) {
     z: Math.floor(smoothedView.z),
   };
   const cells = visibleMinimapCells(centerCell);
-  const placedCellsByKey = props.state.world.placedCells;
+  const buildingFootprints = worldMarkers(props.state)
+    .filter((m) => m.layer === 'building')
+    .map((m) => ({ x: m.x, z: m.z, width: m.width, depth: m.depth, swatchColor: m.swatchColor }));
   const smoothedOriginX = smoothedView.x - radius;
   const smoothedOriginZ = smoothedView.z - radius;
   const playerX = props.state.player.position.x / props.state.world.cellSizeMeters;
@@ -238,16 +231,14 @@ function MiniMap(props: { state: GameState }) {
   const playerLocalY = clampNumber(playerZ - smoothedOriginZ, 0, MINIMAP_CELL_SPAN);
   const scrollX = smoothedView.x - centerCell.x;
   const scrollZ = smoothedView.z - centerCell.z;
+  // Header (5 floats) then 3 floats (rgb) per cell, row-major over the window.
   const minimapData = [
     playerLocalX,
     playerLocalY,
     smoothedView.yawRadians,
     scrollX,
     scrollZ,
-    ...cells.map((cell) => {
-      const placedCell = placedCellsByKey[cellKey(cell)];
-      return minimapTileCode(placedCell?.kind ?? surfaceRegionAtCell(props.state, cell)?.kind);
-    }),
+    ...cells.flatMap((cell) => minimapCellRgb(props.state, buildingFootprints, cell)),
   ];
 
   return (

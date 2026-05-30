@@ -1,5 +1,5 @@
 import type { GameState, GridCell } from '../design';
-import { cellKey, placedCellAt } from './grid';
+import { cellKey, tileKindAtCell } from './grid';
 import { tileKindDefinition, type TileTraversalMode } from './tileKinds';
 
 export type PathAgentKind = 'pedestrian' | 'runner' | 'vehicle';
@@ -21,9 +21,15 @@ function manhattanDistance(a: GridCell, b: GridCell): number {
 }
 
 function movementCostForCell(state: GameState, cell: GridCell, agent: PathAgentKind): number {
-  const placedCell = placedCellAt(state, cell);
-  if (!placedCell) return Infinity;
-  const tile = tileKindDefinition(placedCell.kind);
+  // Resolve through the shared cell-granular resolver so A* covers the WHOLE
+  // world (surfaceRegions, road bands, junction bands), not just hand-placed
+  // cells — previously this read placedCellAt only, so NPCs couldn't path across
+  // a sidewalk/road chunk. See grid.tileKindAtCell + WORLD_AUTHORING_PLAN Phase 1.
+  // FLOW HINT slice-in: a future directional NPC-flow layer scales cost HERE
+  // (see WORLD_AUTHORING_PLAN -> Future layer: NPC flow hints).
+  const kind = tileKindAtCell(state, cell);
+  if (!kind) return Infinity;
+  const tile = tileKindDefinition(kind);
   if (!tile.pathing.walkable || !tile.npc.traversable) return Infinity;
   const mode: TileTraversalMode = agent === 'vehicle' ? 'drive' : agent === 'runner' ? 'run' : 'walk';
   if (!tile.traversal.allowedModes.includes(mode)) return Infinity;

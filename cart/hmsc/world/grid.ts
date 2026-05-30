@@ -3,6 +3,8 @@ import { tileKindDefinition, type TileKindDefinition } from './tileKinds';
 import { placedCellTopMeters, surfaceRegionTopMeters } from './surfaceHeights';
 import { roadBandKindAtCell, roadBandKindAtWorldPosition, roadTopAtWorldPosition } from './roads';
 import { junctionBandKindAtCell, junctionBandKindAtWorldPosition, junctionTopAtWorldPosition } from './roadJunctions';
+import { anyBuildingBlocksWorldPoint } from './buildings';
+import { mountainTopAtWorldPosition, mountainTrailKindAtWorldPosition } from './mountain';
 
 export type PlaceCellOptions = {
   triggerCommand?: string;
@@ -123,6 +125,9 @@ export function tileKindAtWorldPosition(state: GameState, position: Vec3): TileK
   return placedCellAt(state, cell)?.kind
     ?? junctionBandKindAtWorldPosition(state, position)
     ?? roadBandKindAtWorldPosition(state, position)
+    // A mountain tread the player is resting on reports the trail footing, so the
+    // climbing gait/friction apply on the path but not on the ground beside it.
+    ?? mountainTrailKindAtWorldPosition(state, position)
     ?? surfaceRegionAtCell(state, cell)?.kind;
 }
 
@@ -166,19 +171,34 @@ export function groundTopAtWorldPosition(state: GameState, position: Vec3, stepH
   const junctionTop = junctionTopAtWorldPosition(state, position, maxReachableTop);
   if (junctionTop != null) groundTop = groundTop == null ? junctionTop : Math.max(groundTop, junctionTop);
 
+  const mountainTop = mountainTopAtWorldPosition(state, position, maxReachableTop);
+  if (mountainTop != null) groundTop = groundTop == null ? mountainTop : Math.max(groundTop, mountainTop);
+
   return groundTop;
 }
 
-export function canPathThroughCell(state: GameState, cell: GridCell): boolean {
-  const kind = placedCellAt(state, cell)?.kind
+// Cell-granular kind resolver — the grid-consumer twin of
+// tileKindAtWorldPosition (which stays position-precise for surface physics,
+// reading sub-cell road/junction/mountain band geometry). Maps and NPC A*
+// pathing share THIS one so they agree on "what kind is at this cell" across
+// every world layer, not just placed cells. Layering matches the world-position
+// resolver minus the position-only mountain trail: a placed cell wins, then the
+// junction band, then the road band, then the chunk surface region.
+export function tileKindAtCell(state: GameState, cell: GridCell): TileKind | undefined {
+  return placedCellAt(state, cell)?.kind
     ?? junctionBandKindAtCell(state, cell)
     ?? roadBandKindAtCell(state, cell)
     ?? surfaceRegionAtCell(state, cell)?.kind;
+}
+
+export function canPathThroughCell(state: GameState, cell: GridCell): boolean {
+  const kind = tileKindAtCell(state, cell);
   if (!kind) return false;
   return tileKindDefinition(kind).pathing.walkable;
 }
 
 export function canOccupyWorldPosition(state: GameState, position: Vec3): boolean {
+  if (anyBuildingBlocksWorldPoint(state, position.x, position.z)) return false;
   return canPathThroughCell(state, worldToCell(position, state.world.cellSizeMeters));
 }
 
