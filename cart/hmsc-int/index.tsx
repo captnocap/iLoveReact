@@ -13,6 +13,7 @@ import { tileKindAtCell } from '../hmsc/world/grid';
 import { worldMarkers } from '../hmsc/world/worldView';
 import { roadFootprint } from '../hmsc/world/roads';
 import { junctionFootprint } from '../hmsc/world/roadJunctions';
+import { HMSC_ROAD_SCALE } from '../hmsc/world/roadProfile';
 import { PLACEABLES, placeableById } from '../hmsc/world/placeables';
 import { buildWorldTree } from '../hmsc/world/worldTree';
 import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from '../hmsc/render3d/tileFill';
@@ -496,6 +497,14 @@ export default function HmscInternalMapToolingCart() {
   const mountainMarkers = allMarkers.filter((m) => m.layer === 'mountain');
   const propMarkers = allMarkers.filter((m) => m.layer === 'prop');
 
+  // World -> screen-pixel transform (the inverse of endDrag's tap math).
+  const ppt = view.pixelsPerTile;
+  const sx = (wx: number) => (wx - view.centerX) * ppt + rect.width / 2;
+  const sz = (wz: number) => (wz - view.centerZ) * ppt + rect.height / 2;
+  const roadColor = tileKindDefinition('road').render.color;
+  const sidewalkColor = tileKindDefinition('sidewalk').render.color;
+  const culDeSacs = world.world.junctions.filter((j) => j.kind === 'culDeSac');
+
   // Header (14 floats) + 6 floats per region: minX, minZ, width, depth, matId,
   // variant. Roads + junctions are prepended so they draw OVER the base chunks —
   // the shader breaks on the FIRST region containing a cell, so lower index wins.
@@ -513,6 +522,9 @@ export default function HmscInternalMapToolingCart() {
     mapRegions.push({ x: f.minX, z: f.minZ, w: f.maxX - f.minX, d: f.maxZ - f.minZ, matId: roadMatId, variant: roadVariant });
   }
   for (const junction of world.world.junctions) {
+    // Cul-de-sacs are a circle + center island, not a square — drawn as a shaped
+    // overlay below. Intersections ARE square, so the rect is faithful.
+    if (junction.kind !== 'intersection') continue;
     const f = junctionFootprint(junction);
     mapRegions.push({ x: f.minX, z: f.minZ, w: f.maxX - f.minX, d: f.maxZ - f.minZ, matId: roadMatId, variant: roadVariant });
   }
@@ -559,16 +571,44 @@ export default function HmscInternalMapToolingCart() {
               map below still receives drag/click. Footprint -> screen via the
               same transform endDrag inverts. */}
           <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-            {/* Mountains at the bottom (scenery landform): translucent fill +
-                outline + name, so the big landform reads as one mass. */}
+            {/* Road centerlines (double-yellow), drawn first so the cul-de-sac
+                bulb below covers the line where it meets the circle. */}
+            {world.world.roads.map((r) => {
+              const f = roadFootprint(r);
+              if (r.orientation === 'northSouth') {
+                return <Box key={r.id} style={{ position: 'absolute', left: sx((f.minX + f.maxX) / 2) - 1, top: sz(f.minZ), width: 2, height: (f.maxZ - f.minZ) * ppt, backgroundColor: '#fde047' }} />;
+              }
+              return <Box key={r.id} style={{ position: 'absolute', left: sx(f.minX), top: sz((f.minZ + f.maxZ) / 2) - 1, width: (f.maxX - f.minX) * ppt, height: 2, backgroundColor: '#fde047' }} />;
+            })}
+            {/* Cul-de-sac: drivable road bulb (circle) + landscaped center island
+                — the shader can only draw the square footprint, so its true round
+                shape + center lives here. */}
+            {culDeSacs.map((j) => {
+              const bulb = j.bulbRadiusTiles * ppt;
+              const island = HMSC_ROAD_SCALE.culDeSacIslandRadiusMeters * ppt;
+              const cx = sx(j.centerX);
+              const cz = sz(j.centerZ);
+              return (
+                <Box key={j.id}>
+                  <Box style={{ position: 'absolute', left: cx - bulb, top: cz - bulb, width: bulb * 2, height: bulb * 2, borderRadius: bulb, backgroundColor: roadColor }} />
+                  <Box style={{ position: 'absolute', left: cx - island, top: cz - island, width: island * 2, height: island * 2, borderRadius: island, backgroundColor: sidewalkColor, borderWidth: 1, borderColor: '#3f4654' }} />
+                </Box>
+              );
+            })}
+            {/* Mountains (scenery landform): translucent fill + outline + name,
+                so the big landform reads as one mass. */}
             {mountainMarkers.map((m) => {
               const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
               const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
               const w = m.width * view.pixelsPerTile;
               const h = m.depth * view.pixelsPerTile;
+              const ringAlpha = ['40', '70', 'b0'];
               return (
-                <Box key={m.id} style={{ position: 'absolute', left, top, width: w, height: h, backgroundColor: `${m.swatchColor}33`, borderWidth: 1, borderColor: m.swatchColor, borderRadius: Math.min(w, h) / 2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}>
-                  {w > 40 && h > 20 ? <Text fontSize={10} color={m.swatchColor} style={{ fontWeight: 800 }}>{m.label}</Text> : null}
+                <Box key={m.id} style={{ position: 'absolute', left, top, width: w, height: h, alignItems: 'center', justifyContent: 'center' }}>
+                  {[1, 0.62, 0.3].map((fr, i) => (
+                    <Box key={i} style={{ position: 'absolute', left: (w - w * fr) / 2, top: (h - h * fr) / 2, width: w * fr, height: h * fr, borderRadius: (Math.min(w, h) * fr) / 2, backgroundColor: `${m.swatchColor}${ringAlpha[i]}`, borderWidth: i === 0 ? 2 : 1, borderColor: '#2b241a' }} />
+                  ))}
+                  {w > 36 ? <Text fontSize={10} color="#fdf6e3" style={{ fontWeight: 800 }}>{m.label}</Text> : null}
                 </Box>
               );
             })}
