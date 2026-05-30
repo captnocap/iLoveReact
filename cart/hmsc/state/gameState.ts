@@ -77,6 +77,17 @@ function localStoreSet(key: string, value: string): void {
   }
 }
 
+// Exported namespaced store handles for other hmsc modules (the chunk-painter
+// draft + history). Same 'hmsc' namespace + host shim as the internal callers —
+// one wrapper, multiple consumers, no second storage path.
+export function hmscStoreGet(key: string): string | null {
+  return localStoreGet(key);
+}
+
+export function hmscStoreSet(key: string, value: string): void {
+  localStoreSet(key, value);
+}
+
 // A CHUNK is one fixed-size tile field stored as a surfaceRegion with its own
 // texture capture (each capture fits the window — see tileSurface). The world
 // is built by tiling chunks; here a 2x2 grid of 120-tile chunks → a 240x240

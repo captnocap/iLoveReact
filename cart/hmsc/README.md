@@ -188,6 +188,8 @@ the diagonal split in high-contrast gradients is fixed lower in the renderer.
 - `ev_burst [count]`
 - `ev_despawn <entityId>`
 - `wv_place <kind> <x> <z> [y]`
+- `wv_fill <kind> <x> <z> <width> <depth> [y]` — fill a rectangle as one surface
+  region (chunk-native). The chunk painter in `cart/hmsc-int` emits these.
 - `wv_remove <x> <z> [y]`
 - `wv_trigger <x> <z> [y] [command...|off]`
 - `wv_path <fromX> <fromZ> <toX> <toZ> [y] [pedestrian|runner|vehicle]`

@@ -37,7 +37,7 @@ import {
 } from '../state/defaults';
 import { createInitialGameState, readStoredGameState, saveGameState } from '../state/gameState';
 import { configurePerfWatch, perfWatchStatusLine } from '../state/perfWatch';
-import { cellKey, commandCell, placeCell, placedCellAt, removeCell, setCellTrigger, worldToCell } from '../world/grid';
+import { addSurfaceRegion, cellKey, commandCell, placeCell, placedCellAt, removeCell, setCellTrigger, worldToCell } from '../world/grid';
 import { placeRoad, removeRoad, roadFootprint } from '../world/roads';
 import { junctionFootprint, placeJunction, removeJunction } from '../world/roadJunctions';
 import { solveRoadCrossSection } from '../world/roadProfile';
@@ -49,7 +49,7 @@ import { buildingKindDefinition, buildingKindNamesForConsole, isBuildingKind } f
 import { addBuildingToWorld, enterBuildingInterior, leaveCurrentInterior, removeBuildingFromWorld } from '../world/interiors';
 import { addZone, removeZone, isZoneFlag, zoneFlagNamesForConsole } from '../world/zones';
 import { trafficClockSeconds, trafficSignalPhase } from '../world/traffic';
-import type { Building, BuildingEnclosure, BuildingSide, PropKind, RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment, TrafficSignalPhase, WorldProp, Zone, ZoneFlag } from '../design';
+import type { Building, BuildingEnclosure, BuildingSide, PropKind, RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment, TrafficSignalPhase, WorldProp, WorldSurfaceRegion, Zone, ZoneFlag } from '../design';
 import { movementNoiseModesForConsole, surfaceNoiseProfilesForConsole } from '../world/noiseModel';
 import { findGridPath, type PathAgentKind } from '../world/pathing';
 import { isTileKind, tileKindDefinition, tileKindNamesForConsole } from '../world/tileKinds';
@@ -770,6 +770,38 @@ const COMMANDS: CommandDefinition[] = [
         const y = args[3] == null ? 0 : numberArg(args[3], 'y');
         const cell = commandCell(x, z, y);
         return ok(placeCell(state, kind, cell, sourceLine), `placed ${kind} at cell ${cellKey(cell)}`);
+      } catch (err: any) {
+        return fail(state, err.message);
+      }
+    },
+  },
+  {
+    name: 'wv_fill',
+    summary: 'Fill a rectangle of one tile kind as a surface region (chunk-native).',
+    usage: 'wv_fill <kind> <x> <z> <width> <depth> [y]',
+    run(args, state, sourceLine) {
+      try {
+        const kind = args[0];
+        if (!kind) return fail(state, 'usage: wv_fill <kind> <x> <z> <width> <depth> [y]');
+        if (!isTileKind(kind)) return fail(state, `unknown tile kind ${kind}; expected one of ${tileKindNamesForConsole()}`);
+        const x = numberArg(args[1], 'x');
+        const z = numberArg(args[2], 'z');
+        const width = numberArg(args[3], 'width');
+        const depth = numberArg(args[4], 'depth');
+        const y = args[5] == null ? 0 : numberArg(args[5], 'y');
+        if (width <= 0 || depth <= 0) return fail(state, 'width and depth must be positive');
+        const region: WorldSurfaceRegion = {
+          id: `fill_${x}_${z}_${width}x${depth}`,
+          label: `${tileKindDefinition(kind).label} fill`,
+          kind,
+          x,
+          y,
+          z,
+          width,
+          depth,
+          zoneKey: `fill_${x}_${z}`,
+        };
+        return ok(addSurfaceRegion(state, region), `filled ${kind} ${width}x${depth} @ [${x},${z}]`);
       } catch (err: any) {
         return fail(state, err.message);
       }

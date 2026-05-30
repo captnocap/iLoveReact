@@ -67,6 +67,19 @@ export function placedCellAt(state: GameState, cell: GridCell): PlacedCell | und
   return state.world.placedCells[cellKey(cell)];
 }
 
+// Append a surface region (a chunk-native rectangle of one kind). The base unit
+// the chunk painter emits via wv_fill; also useful for hand-authoring districts.
+// Immutable push, mirroring placeCell.
+export function addSurfaceRegion(state: GameState, region: WorldSurfaceRegion): GameState {
+  return {
+    ...state,
+    world: {
+      ...state.world,
+      surfaceRegions: [...state.world.surfaceRegions, region],
+    },
+  };
+}
+
 export function surfaceRegionAtCell(state: GameState, cell: GridCell): WorldSurfaceRegion | undefined {
   for (let index = state.world.surfaceRegions.length - 1; index >= 0; index -= 1) {
     const region = state.world.surfaceRegions[index];
