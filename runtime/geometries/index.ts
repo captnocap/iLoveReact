@@ -68,7 +68,7 @@ export const HUMANOID_DEFAULTS = HumanoidMod.HUMANOID_DEFAULTS;
 export const HUMANOID_ATLAS = HumanoidMod.HUMANOID_ATLAS;
 export const WAVE_NONE = HeightfieldMod.WAVE_NONE;
 
-export type { BoxParams } from './Box';
+export type { BoxParams, BoxFace } from './Box';
 export type { SphereParams } from './Sphere';
 export type { PlaneParams } from './Plane';
 export type { CylinderParams } from './Cylinder';

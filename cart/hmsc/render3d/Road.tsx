@@ -28,7 +28,9 @@ export const Road = memo(function Road(props: { road: RoadSegment }) {
   return (
     <Scene3D.Mesh
       geometry={Geometry.Box}
-      params={{ width: 1, height: 1, depth: 1 }}
+      // The slab's top is the road surface; sides/bottom pin to the corner texel
+      // (see hmsc AGENTS.md "Textured boxes").
+      params={{ width: 1, height: 1, depth: 1, texturedFaces: ['top'] }}
       scale={[spanX, thickness, spanZ]}
       material="#ffffff"
       textureKey={roadTextureKey(road.id)}

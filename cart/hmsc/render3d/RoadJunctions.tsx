@@ -26,7 +26,9 @@ const JunctionSlab = memo(function JunctionSlab(props: { junction: RoadJunction 
   return (
     <Scene3D.Mesh
       geometry={Geometry.Box}
-      params={{ width: 1, height: 1, depth: 1 }}
+      // Top is the crossing surface; sides/bottom pin to the corner texel
+      // (see hmsc AGENTS.md "Textured boxes").
+      params={{ width: 1, height: 1, depth: 1, texturedFaces: ['top'] }}
       scale={[side, thickness, side]}
       material="#ffffff"
       textureKey={junctionTextureKey(junction.id)}

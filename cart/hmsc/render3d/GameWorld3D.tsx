@@ -9,7 +9,20 @@ import { PlayerFigure } from './PlayerFigure';
 import { floorTextureKey } from './tileSurface';
 import { Road } from './Road';
 import { CulDeSac, Intersection } from './RoadJunctions';
+import { Prop } from './Prop';
+import { Building3D } from './Building';
+import { BuildingFacades } from './BuildingFacades';
+import { nearestBuildingHitFraction } from '../world/buildings';
+import { Mountain } from './Mountain';
+import { Hills } from './Hills';
+import { EstateHill } from './EstateHill';
 import { buildHmscSky } from './sky';
+
+// How far to keep the camera off a wall it pulls in to, so it never clips through.
+const CAMERA_WALL_MARGIN_METERS = 0.35;
+// Lower bound on the pulled-in distance fraction, so a wall right behind the
+// player doesn't slam the camera onto the player's head.
+const CAMERA_MIN_DISTANCE_FRACTION = 0.12;
 
 // World renderer. A large tile field (surfaceRegion) is drawn as ONE textured
 // floor mesh — the whole repeating tile grid is a single Effect captured to a
@@ -32,7 +45,9 @@ function FloorMesh(props: { region: WorldSurfaceRegion; cellSizeMeters: number }
   return (
     <Scene3D.Mesh
       geometry={Geometry.Box}
-      params={{ width: 1, height: 1, depth: 1 }}
+      // Top is the walkable floor; sides/bottom pin to the corner texel
+      // (see hmsc AGENTS.md "Textured boxes").
+      params={{ width: 1, height: 1, depth: 1, texturedFaces: ['top'] }}
       scale={[region.width * c, thickness, region.depth * c]}
       material="#ffffff"
       textureKey={floorTextureKey(region.id)}
@@ -129,6 +144,39 @@ const WorldStatics = memo(function WorldStatics(props: {
       {Object.values(world.placedCells).map((placedCell) => (
         <PlacedCellMesh key={placedCell.key} placedCell={placedCell} />
       ))}
+      {/* Space-filling street furniture — rocks, hydrants, signs, lights,
+          bushes, traffic control — each sculpted by its kind through the Prop
+          registry. Drawn after the ground/roads they stand on. */}
+      {world.props.map((prop) => (
+        <Prop key={prop.id} prop={prop} />
+      ))}
+      {/* Buildings: sealed blocks, hollow walk-in shells, and the exterior shells
+          of closed (interior) buildings. Drawn from the same boxes host physics
+          collides with. Inside an interior, world.buildings holds only that
+          interior's shell, so this same map renders the room walls too. */}
+      {world.buildings.map((building) => (
+        <Building3D key={building.id} building={building} />
+      ))}
+      {/* Facade skins: thin textured panels on the exterior wall faces, sampling
+          each building's captured skin texture (office/residential/retail/
+          industrial). 'plain' buildings get none and show their bare wall. */}
+      <BuildingFacades buildings={world.buildings} />
+      {/* Mountains: a conical Heightfield mass with a switchback hiking trail of
+          tread ledges spiralling to the peak — the only walkable way up. The
+          treads are the same boxes host physics stands the player on. */}
+      {(world.mountains ?? []).map((mountain) => (
+        <Mountain key={mountain.id} mountain={mountain} />
+      ))}
+      {/* Hills: a rolling Heightfield patch (golden California register), the same
+          terrain machinery as a mountain with a gentler, summed-bump profile. */}
+      {(world.hills ?? []).map((hills) => (
+        <Hills key={hills.id} hills={hills} />
+      ))}
+      {/* Estate hills: flat-topped domes with a road carved up the flank (the
+          mountain-trail bench, textured as a street). */}
+      {(world.estateHills ?? []).map((estate) => (
+        <EstateHill key={estate.id} estate={estate} />
+      ))}
     </>
   );
 });
@@ -163,12 +211,32 @@ export function GameWorld3D(props: {
   const cameraFov = props.aiming ? HMSC_GAMEPLAY_CAMERA.aimFovDegrees : HMSC_GAMEPLAY_CAMERA.fovDegrees;
   const view = props.state.config.view;
 
+  // Camera wall collision: if a building wall sits between the look pivot (near
+  // the player's head) and the desired third-person camera spot, pull the camera
+  // in to just before that wall, so the player stays visible inside hollow shells
+  // and interior rooms instead of being hidden behind a wall the camera clipped
+  // through. Walls are the active world's buildings (including an interior's
+  // shell), drawn from the same boxes the player collides with.
+  const pivot = { x: player.x, y: player.y + HMSC_GAMEPLAY_CAMERA.targetHeightMeters, z: player.z };
+  const desiredCamera = { x: cameraPosition[0], y: cameraPosition[1], z: cameraPosition[2] };
+  const wallHitFraction = nearestBuildingHitFraction(props.state.world.buildings, pivot, desiredCamera);
+  const segmentLength = Math.hypot(desiredCamera.x - pivot.x, desiredCamera.y - pivot.y, desiredCamera.z - pivot.z);
+  const marginFraction = segmentLength > 1e-3 ? CAMERA_WALL_MARGIN_METERS / segmentLength : 0;
+  const cameraFraction = wallHitFraction < 1
+    ? Math.max(CAMERA_MIN_DISTANCE_FRACTION, wallHitFraction - marginFraction)
+    : 1;
+  const resolvedCamera: [number, number, number] = [
+    pivot.x + (desiredCamera.x - pivot.x) * cameraFraction,
+    pivot.y + (desiredCamera.y - pivot.y) * cameraFraction,
+    pivot.z + (desiredCamera.z - pivot.z) * cameraFraction,
+  ];
+
   return (
     <>
       {/* far = draw radius: the world is culled + clipped past it, so a hilltop
           shows a hazed horizon, not the whole map. Fog (anchored to far unless
           fogNear/Far override) melts geometry into the sky before the cull edge. */}
-      <Scene3D.Camera position={cameraPosition} target={cameraTarget} fov={cameraFov} far={view.drawRadiusMeters} />
+      <Scene3D.Camera position={resolvedCamera} target={cameraTarget} fov={cameraFov} far={view.drawRadiusMeters} />
       <Scene3D.Fog near={view.fogNearMeters} far={view.fogFarMeters} />
       <WorldStatics world={props.state.world} skyConfig={props.state.config.sky} />
       <Player

@@ -1,6 +1,6 @@
 # HMSC Progress
 
-Last updated: 2026-05-29
+Last updated: 2026-05-30
 
 ## Current Shape
 
@@ -298,6 +298,103 @@ not the current implementation.
     solid box: bump from the side, stand from above — hop onto a hydrant GTA-style
   - the step-height gate keeps it sane: tall walls never count as ground at their
     base (only once you're on top), and a future low curb/ledge auto-steps up
+- Added the building system as a first-class world layer (peer of
+  roads/junctions/props), expressing three building types as ONE `enclosure`
+  field rather than three parallel systems:
+  - `world/buildingKinds.ts` is the per-kind property bundle (footprint, storeys
+    → height, the `wall` tile bundle the mass borrows, default enclosure,
+    facade) — the buildings twin of `propKinds.ts`.
+  - `world/buildings.ts` exposes `buildingBoxes()` as the ONE geometry source
+    consumed by both host physics (blocking rects) and the renderer (wall
+    meshes), so the wall you see is exactly the wall you collide with.
+  - `sealed` = solid block (bump the side, stand on the roof via the existing
+    standable-solids host rule); `hollow` = perimeter walls with a real doorway
+    gap and the same outer-world floor inside (see in/out, one continuous
+    space); `interior` = a sealed shell whose front pad is a portal.
+  - `world/interiors.ts` backs closed buildings with a mini-world PER building
+    (its own `WorldState`). Entering pushes the outer world onto a new
+    `GameState.suspendedSpaces` stack and swaps `state.world` to the interior,
+    so the existing renderer (`GameWorld3D` reads `state.world`) and host
+    physics draw/simulate it with NO special casing — the world-swap is the
+    whole mechanism, cleaner than the lab scene-overlay. The interior size is
+    decoupled from the footprint (bigger inside than out).
+  - entry/exit are door triggers: an interior building drops a `wv_enter` pad in
+    front; the interior's exit pad carries `wv_leave`. The cell-trigger guard in
+    `usePlayerDrive` now fires in interior scenes too, not only `boot.console`.
+  - `render3d/Building.tsx` draws all three from `buildingBoxes`; physics packs
+    them in `state/hostPhysics.ts`; `grid.canOccupyWorldPosition` blocks the
+    JS-fallback path. `wv_building`/`wv_enter`/`wv_leave` are the command
+    surface. Schema bumped 13 → 14; a fresh world seeds one of each enclosure
+    near spawn (sealed house, hollow shop, interior tower).
+  - Camera now respects walls: the third-person camera casts from the look pivot
+    (player head) to the desired spot and pulls in to just before the first
+    building wall it hits (`nearestBuildingHitFraction`, 3D segment-vs-AABB over
+    `buildingBoxes`), so the player stays visible inside hollow shells and
+    interiors instead of being hidden behind a wall the camera clipped through.
+  - Fixed closed-building entry: the `wv_enter` pad now sits flush in front of
+    the door (one cell out, not two) and spans the full doorway width as a 2-cell
+    mat, so walking up to the closed door reliably fires the trigger — the old
+    single pad sat a cell too far out and, on an even-width building whose door
+    center lands on a cell boundary, could be approached "between" it. The
+    interior exit mat spans the shell doorway the same way, and the entry/exit
+    geometry comes from `buildingDoorFrontCells`/`buildingDoorFrontPoint`.
+  - Added E/F interact (`state/useBuildingInteract.ts`): standing near a closed
+    building's door shows a "Press E to enter <label>" prompt; inside, "Press E
+    to leave". Proximity-based (3.2m of the door front point) and it runs
+    `wv_enter`/`wv_leave` directly, so it does not depend on landing on the exact
+    mat cell — the discoverable path players actually reach for. The walk-on mat
+    stays as a fallback and for NPCs. Prompt renders in `HmscGameplayRig`; E/F
+    was the reserved interact binding in `input/controlContract.ts`.
+- Added building skins — facade appearance as a SEPARATE axis from kind, so any
+  footprint can wear any look:
+  - `render3d/buildingSkins.tsx` is the catalog (a `BUILDING_SKINS` registry, the
+    appearance peer of `buildingKinds`): office (glass curtain grid), residential
+    (brick + balconies + address), retail (storefront awning + sign), industrial
+    (corrugated + roller door), plus `plain` (bare wall, no panel). Each is a 2D
+    `Box`/`Text` facade laid out to a window grid (`cols`≈width/3m, `floors`≈height/3m).
+  - `render3d/BuildingFacades.tsx` lays a thin textured panel on each exterior
+    wall face (billboard pattern; structural wall stays solid for physics) and
+    captures one shared texture per `(skin, cols, floors)` bucket — memoized like
+    `tileSurface` so a street of offices is a few bakes, not one per building and
+    not a per-frame re-bake. Only a HOLLOW building's door side is left unskinned
+    (it has a real walk-through gap); sealed/interior walls are fully skinned.
+  - Per-face skins: `Building.skin` is either a single `BuildingSkin` (all walls)
+    or a `BuildingFaceSkins` map `{ front, back, left, right, top, all }`. Roles
+    are relative to the door side (front = door side); `resolveFaceSkin`/
+    `resolveTopSkin`/`buildingFaceRole` in `world/buildings.ts` resolve them, and
+    a roof panel renders when `top` is set. `wv_building face <id> <role> <skin>`
+    authors one face. The seeded warehouse wears `{ front: industrial, all: plain }`
+    — garage on the front, plain metal walls on the sides — proving the taxonomy.
+  - `buildingKinds.defaultSkin` (house→residential, shop→retail, tower→office,
+    warehouse→industrial). Seed has four demo buildings, one per skin; the fourth
+    is a `warehouse` kind (a taller, wider garage). Schema already 14.
+  - Crash fix: entering an interior swaps `state.world` to the mini-world, which
+    must be a COMPLETE WorldState — a missing `zones` layer (added elsewhere) made
+    `MiniMap` throw on `world.zones.map`. The interior space now spreads the outer
+    world first (so any future layer exists) then empties every known layer.
+  - Perception SURFACE built, not yet live (per the agreed slice): added
+    `PlayerState.perception` (a 0–1 `high` channel) and threaded it into the skin
+    render context, so a later slice can make a skin scramble text or go to a live
+    plasma `Effect` on player state. Static skins accept but ignore it; the
+    capture's bake deps deliberately exclude perception so it never re-bakes. The
+    reactive slice is a per-skin change adding a perception bucket to its key.
+- Added building placement rules (`world/buildingPlacement.ts`), applied by
+  `wv_building`: reject overlap (edge-to-edge touch allowed) and sitting on a
+  road; reject too-far-from-road (> ~18m, the "feels sparse" guard); and
+  AUTO-SNAP the door to face the nearest road so placement never thinks about
+  orientation. A trailing `force` arg bypasses everything (keeps the given door,
+  skips checks) for intentional/sandbox placement. The seed was re-laid to obey
+  — the four demo buildings now line the east side of the spawn arterial with
+  road-facing (west) doors, set back ~3m, no overlaps. Authored seed complies
+  directly; the rules gate console placement and any future generator.
+  - Follow-ups (building map rendering): NEITHER map surface draws buildings yet
+    — both the `hmsc-int` internal map tool AND the in-game circular minimap
+    (`render/Hud.tsx`, fed from `GameState.world`). They read the same world
+    layers, so add building footprints to both in ONE pass when this is picked
+    up, rather than wiring one and leaving the other behind. Also: the live
+    player snapshot reports interior-local coords while inside an interior, so
+    both map views show the player marker jumping when entering a closed
+    building — fold that fix into the same pass.
 
 ## Massive Map Findings
 
@@ -400,6 +497,23 @@ timeout 6s ./zig-out/bin/hmsc_massive_map_lab
 
 The timeout checks are expected to exit with code `124`; success means the carts
 reached the render loop before timeout.
+
+## Textured Box Faces
+
+Every `Geometry.Box` carrying a `textureKey` now declares `texturedFaces` — the
+faces that actually show the texture. Undeclared faces pin their UVs to the
+capture's `(0,0)` corner texel, so they read as one flat color instead of
+cramping the whole texture onto a thin edge (the street sign was stretching
+"HMSC AVE" sideways down its 0.03 m side; flat slabs were smearing their surface
+down the sides).
+
+- Mechanism lives in `@reactjit/geometries` Box (`texturedFaces?: BoxFace[]`).
+  Omitting it textures all six faces (back-compat); no hmsc textured box does.
+- Flat slabs (road, junction, floor, crater water) declare `['top']`.
+- Upright panels (street sign, building facade walls) declare the two broad
+  faces — `['front','back']` or `['left','right']` by orientation.
+- A capture's `(0,0)` corner should be the intended edge color (the sign's green
+  background) so the fallback reads cleanly. Rule documented in `AGENTS.md`.
 
 ## Known Next Work
 

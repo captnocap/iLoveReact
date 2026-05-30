@@ -58,10 +58,15 @@ export class Mesh {
    * A quad as two triangles with a single face normal. Mirrors Zig addFace
    * exactly: corners run world bottom→top (BL,BR,TR,TL), V is flipped so a
    * texture stays upright on the face, winding is [0,1,2, 0,2,3].
+   *
+   * `pinUv` collapses all four corner UVs to a single texel so the face samples
+   * one flat color instead of stretching the whole texture across it — the
+   * "this face isn't textured" path (e.g. the thin edge of a sign). Omit it for
+   * the normal upright 0..1 mapping.
    */
-  face(v1: Vec3, v2: Vec3, v3: Vec3, v4: Vec3, n: Vec3): void {
+  face(v1: Vec3, v2: Vec3, v3: Vec3, v4: Vec3, n: Vec3, pinUv?: Vec2): void {
     const corners: Vec3[] = [v1, v2, v3, v4];
-    const uvs: Vec2[] = [[0, 1], [1, 1], [1, 0], [0, 0]];
+    const uvs: Vec2[] = pinUv ? [pinUv, pinUv, pinUv, pinUv] : [[0, 1], [1, 1], [1, 0], [0, 0]];
     const order = [0, 1, 2, 0, 2, 3];
     for (const ti of order) this.vert(corners[ti], n, uvs[ti]);
   }

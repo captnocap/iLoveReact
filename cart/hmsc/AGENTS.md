@@ -76,3 +76,21 @@ Grid cells store construction. Continuous coordinates store movement.
 
 - Grid: chunks, tiles, authored placement, serialization, console addresses.
 - Continuous: player position, entity position, smooth locomotion.
+
+## Textured boxes
+
+Every `Geometry.Box` that carries a `textureKey` MUST declare `texturedFaces` —
+the faces that actually show the texture. Any face left out pins its UVs to the
+capture's `(0,0)` corner texel, so it reads as one flat color instead of cramping
+the whole texture onto it (a thin sign edge stretching "HMSC AVE" sideways, a
+floor slab smearing the surface down its sides). Declare the real faces:
+
+- Flat slabs (road, junction, floor, water): `['top']`.
+- Upright panels (street sign, building facade wall): the two broad faces —
+  `['front', 'back']` for a panel whose thin axis is Z, `['left', 'right']` for
+  one whose thin axis is X.
+
+So that the corner-texel fallback reads cleanly, a capture's `(0,0)` corner
+should be the intended edge color (e.g. the sign's green background). The
+mechanism lives in `@reactjit/geometries` Box (`texturedFaces?: BoxFace[]`);
+omitting it textures all six faces, which no hmsc textured box should do.
