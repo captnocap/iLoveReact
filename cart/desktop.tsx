@@ -4,12 +4,22 @@
 // drives the screen directly through DRM/KMS (framework/render/kms.zig). There
 // is no X, no Wayland, no compositor — reactjit IS the display server.
 //
-// Milestone 1 is "see something happen": a live desktop (plasma wallpaper, a
-// top bar with a ticking clock, a window, a dock). Input (evdev) comes next.
+// A live desktop: plasma wallpaper, a top bar with a ticking clock, a window,
+// and a clickable dock. Pointer input arrives over evdev (framework/render/
+// evdev.zig) since the dummy SDL video driver delivers none — click a dock
+// icon and it lifts + rings, and the top bar names the open app.
 
 import { useEffect, useState } from 'react';
-import { Box, Row, Col, Text } from '@reactjit/primitives';
+import { Box, Row, Col, Text, Pressable } from '@reactjit/primitives';
 import { Plasma, PLASMA_DEFAULTS } from '@reactjit/effects';
+
+const DOCK = [
+  { label: 'Files', color: '#5b8cff' },
+  { label: 'Chat', color: '#ff7eb6' },
+  { label: 'Notes', color: '#ffd166' },
+  { label: 'Music', color: '#5be0b5' },
+  { label: 'Settings', color: '#c792ea' },
+];
 
 function useClock() {
   const [now, setNow] = useState(() => new Date());
@@ -24,7 +34,7 @@ function pad(n: number) {
   return n < 10 ? `0${n}` : `${n}`;
 }
 
-function TopBar() {
+function TopBar({ active }: { active: string }) {
   const now = useClock();
   const time = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   return (
@@ -39,6 +49,8 @@ function TopBar() {
       }}
     >
       <Text style={{ color: '#cdd6ff', fontSize: 15, fontWeight: 600 }}>reactjit desktop</Text>
+      <Box style={{ width: 14 }} />
+      <Text style={{ color: '#8ea2ff', fontSize: 14 }}>{active}</Text>
       <Box style={{ flexGrow: 1 }} />
       <Text style={{ color: '#8ea2ff', fontSize: 14 }}>no display server</Text>
       <Box style={{ width: 24 }} />
@@ -72,7 +84,7 @@ function Window() {
         <Text style={{ color: '#eef1ff', fontSize: 20, fontWeight: 700 }}>It booted.</Text>
         <Box style={{ height: 12 }} />
         <Text style={{ color: '#b9c1e6', fontSize: 14, lineHeight: 21 }}>
-          Alpine kernel → /dev/dri/card0 → reactjit drew this straight to the framebuffer.
+          {'Alpine kernel -> /dev/dri/card0 -> reactjit drew this straight to the framebuffer.'}
         </Text>
         <Box style={{ height: 8 }} />
         <Text style={{ color: '#b9c1e6', fontSize: 14, lineHeight: 21 }}>
@@ -84,12 +96,11 @@ function Window() {
   );
 }
 
-function Dock() {
-  const items = ['#5b8cff', '#ff7eb6', '#ffd166', '#5be0b5', '#c792ea'];
+function Dock({ selected, onSelect }: { selected: number; onSelect: (i: number) => void }) {
   return (
     <Row
       style={{
-        height: 60,
+        height: 64,
         backgroundColor: 'rgba(12,14,24,0.7)',
         borderRadius: 18,
         alignItems: 'center',
@@ -97,23 +108,32 @@ function Dock() {
         paddingRight: 12,
       }}
     >
-      {items.map((c, i) => (
-        <Box
-          key={i}
-          style={{
-            width: 42,
-            height: 42,
-            borderRadius: 11,
-            backgroundColor: c,
-            marginLeft: i === 0 ? 0 : 10,
-          }}
-        />
-      ))}
+      {DOCK.map((item, i) => {
+        const on = i === selected;
+        return (
+          <Pressable key={item.label} onPress={() => onSelect(i)}>
+            <Box
+              style={{
+                width: 44,
+                height: 44,
+                borderRadius: 12,
+                backgroundColor: item.color,
+                marginLeft: i === 0 ? 0 : 10,
+                marginBottom: on ? 8 : 0, // selected icon lifts
+                borderWidth: on ? 2 : 0,
+                borderColor: '#ffffff',
+              }}
+            />
+          </Pressable>
+        );
+      })}
     </Row>
   );
 }
 
 export default function Desktop() {
+  const [selected, setSelected] = useState(0);
+  const active = `${DOCK[selected].label} open`;
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#05060c' }}>
       {/* Wallpaper */}
@@ -121,12 +141,12 @@ export default function Desktop() {
 
       {/* Foreground UI */}
       <Col style={{ position: 'absolute', width: '100%', height: '100%' }}>
-        <TopBar />
+        <TopBar active={active} />
         <Box style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center' }}>
           <Window />
         </Box>
         <Box style={{ alignItems: 'center', paddingBottom: 18 }}>
-          <Dock />
+          <Dock selected={selected} onSelect={setSelected} />
         </Box>
       </Col>
     </Box>

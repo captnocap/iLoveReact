@@ -9,6 +9,7 @@ const layout = @import("layout.zig");
 const text_mod = @import("primitive/text.zig");
 const gpu = @import("gpu/gpu.zig");
 const kms = @import("render/kms.zig");
+const evdev = @import("render/evdev.zig");
 const geometry = @import("storage/geometry.zig");
 const selection = @import("state/selection.zig");
 const windows = @import("primitive/windows.zig");
@@ -3220,6 +3221,11 @@ pub fn run(config_in: AppConfig) !void {
         log.print("[startup] gpu: {d}ms\n", .{dt});
     }
 
+    // KMS mode: SDL's dummy video driver delivers no input, so bridge the raw
+    // kernel input devices (/dev/input/event*) into the SDL event queue.
+    if (kms_mode) evdev.init(window, @floatFromInt(init_w), @floatFromInt(init_h));
+    defer if (kms_mode) evdev.deinit();
+
     // Text engine (FreeType)
     var te = TextEngine.initHeadless("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") catch
         TextEngine.initHeadless("/usr/share/fonts/dejavu/DejaVuSans.ttf") catch // Alpine (font-dejavu)
@@ -3368,6 +3374,10 @@ pub fn run(config_in: AppConfig) !void {
         const dt_evt_start = dt_iter_start;
         var dt_evt_count: u32 = 0;
         var dt_motion_count: u32 = 0;
+
+        // KMS mode: pump raw input devices into the SDL queue first, so the
+        // poll loop below sees synthesized mouse events just like real ones.
+        if (kms_mode) evdev.poll();
 
         var event: c.SDL_Event = undefined;
         while (c.SDL_PollEvent(&event)) {
