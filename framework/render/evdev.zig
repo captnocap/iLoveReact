@@ -47,6 +47,17 @@ var g_h: f32 = 0;
 var g_mx: f32 = 0;
 var g_my: f32 = 0;
 var g_btn_mask: u32 = 0;
+var g_motion_logged: bool = false;
+
+pub fn deviceCount() usize {
+    return g_ndev;
+}
+pub fn mouseX() f32 {
+    return g_mx;
+}
+pub fn mouseY() f32 {
+    return g_my;
+}
 
 /// _IOR('E', 0x40 + abs, struct input_absinfo) — the EVIOCGABS macro takes an
 /// argument so translate-c can't expose it; build the request number by hand.
@@ -182,7 +193,11 @@ fn flushMotion(dev: *Device) void {
     sev.motion.y = g_my;
     sev.motion.xrel = dx;
     sev.motion.yrel = dy;
-    _ = c.SDL_PushEvent(&sev);
+    const pushed = c.SDL_PushEvent(&sev);
+    if (!g_motion_logged) {
+        g_motion_logged = true;
+        log.print("[evdev] first motion x={d:.0} y={d:.0} pushed={} winID={d}\n", .{ g_mx, g_my, pushed, g_win_id });
+    }
 }
 
 fn pushButton(button: u8, down: bool) void {
@@ -197,7 +212,8 @@ fn pushButton(button: u8, down: bool) void {
     sev.button.clicks = 1;
     sev.button.x = g_mx;
     sev.button.y = g_my;
-    _ = c.SDL_PushEvent(&sev);
+    const pushed = c.SDL_PushEvent(&sev);
+    log.print("[evdev] button {d} down={} at x={d:.0} y={d:.0} pushed={}\n", .{ button, down, g_mx, g_my, pushed });
 }
 
 pub fn deinit() void {

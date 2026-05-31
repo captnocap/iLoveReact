@@ -3027,6 +3027,34 @@ noinline fn paintCanvasContainer(node: *Node) void {
     gpu.popScissor();
 }
 
+// ── Software cursor (KMS mode — no compositor draws a pointer) ───────────
+
+/// Classic arrow pointer, hotspot at the tip (ox,oy). Triangle-fan from tip.
+fn drawCursorArrow(ox: f32, oy: f32, r: f32, g: f32, b: f32, a: f32) void {
+    const ax = ox;
+    const ay = oy + 17;
+    const bx = ox + 4;
+    const by = oy + 13;
+    const cx = ox + 7;
+    const cy = oy + 20;
+    const dx = ox + 10;
+    const dy = oy + 19;
+    const ex = ox + 7;
+    const ey = oy + 12;
+    const fx = ox + 11;
+    const fy = oy + 11;
+    gpu.drawTri(ox, oy, ax, ay, bx, by, r, g, b, a);
+    gpu.drawTri(ox, oy, bx, by, ex, ey, r, g, b, a);
+    gpu.drawTri(ox, oy, ex, ey, fx, fy, r, g, b, a);
+    gpu.drawTri(bx, by, cx, cy, dx, dy, r, g, b, a);
+    gpu.drawTri(bx, by, dx, dy, ex, ey, r, g, b, a);
+}
+
+fn drawSoftwareCursor(x: f32, y: f32) void {
+    drawCursorArrow(x + 1.5, y + 1.5, 0.0, 0.0, 0.0, 0.55); // drop shadow
+    drawCursorArrow(x, y, 1.0, 1.0, 1.0, 1.0); // white pointer
+}
+
 // ── Engine entry point ──────────────────────────────────────────────────
 
 pub fn run(config_in: AppConfig) !void {
@@ -4542,6 +4570,10 @@ pub fn run(config_in: AppConfig) !void {
             // Hint
             _ = gpu.drawTextWrapped("Enter this code in tsz-tools", cx + 20, cy + 108, 11, cw - 40, 0.58, 0.63, 0.73, 0.8, 0);
         }
+
+        // KMS mode: no compositor draws a pointer, so render a software cursor
+        // at the evdev position on top of everything else this frame.
+        if (kms_mode) drawSoftwareCursor(evdev.mouseX(), evdev.mouseY());
 
         const t5 = std.time.microTimestamp();
         frame_telemetry.telemetry_paint_us = @intCast(@max(0, t5 - t4));
