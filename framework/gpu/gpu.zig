@@ -91,6 +91,87 @@ pub var g_gpu_ops: u32 = 0;
 
 var g_instance: ?*wgpu.Instance = null;
 var g_surface: ?*wgpu.Surface = null;
+
+// KMS / no-display-server mode: render surfaceless into an offscreen texture
+// and scan the result out via DRM (framework/render/kms.zig). Set by the
+// engine before gpu.init() when ZIGOS_KMS is active.
+const kms = @import("../render/kms.zig");
+var g_kms: bool = false;
+var g_offscreen: ?*wgpu.Texture = null;
+var g_offscreen_view: ?*wgpu.TextureView = null;
+
+/// Enable surfaceless DRM scanout. Must be called before init().
+pub fn setKmsMode(on: bool) void {
+    g_kms = on;
+}
+
+/// (Re)create the offscreen render target used in KMS mode.
+fn createOffscreen(w: u32, h: u32) void {
+    const device = g_device orelse return;
+    if (g_offscreen_view) |v| {
+        v.release();
+        g_offscreen_view = null;
+    }
+    if (g_offscreen) |t| {
+        t.release();
+        g_offscreen = null;
+    }
+    const tex = device.createTexture(&.{
+        .label = wgpu.StringView.fromSlice("kms_scanout"),
+        .size = .{ .width = w, .height = h, .depth_or_array_layers = 1 },
+        .mip_level_count = 1,
+        .sample_count = 1,
+        .dimension = .@"2d",
+        .format = g_format,
+        .usage = wgpu.TextureUsages.render_attachment | wgpu.TextureUsages.copy_src,
+    }) orelse return;
+    g_offscreen = tex;
+    g_offscreen_view = tex.createView(null);
+}
+
+/// Readback the offscreen texture and hand the pixels to the DRM scanout.
+/// BGRA8 with 256-aligned rows — kms.present() reconciles the stride.
+fn presentKms() void {
+    const device = g_device orelse return;
+    const queue = g_queue orelse return;
+    const texture = g_offscreen orelse return;
+    const w = g_width;
+    const h = g_height;
+    if (w == 0 or h == 0) return;
+
+    const unaligned_bpr = w * 4;
+    const bytes_per_row = (unaligned_bpr + 255) & ~@as(u32, 255);
+    const buf_size: u64 = @as(u64, bytes_per_row) * @as(u64, h);
+
+    const staging = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("kms_staging"),
+        .size = buf_size,
+        .usage = wgpu.BufferUsages.copy_dst | wgpu.BufferUsages.map_read,
+        .mapped_at_creation = 0,
+    }) orelse return;
+    defer staging.release();
+
+    const enc = device.createCommandEncoder(&.{}) orelse return;
+    enc.copyTextureToBuffer(
+        &.{ .texture = texture, .mip_level = 0, .origin = .{ .x = 0, .y = 0, .z = 0 }, .aspect = .all },
+        &.{ .layout = .{ .offset = 0, .bytes_per_row = bytes_per_row, .rows_per_image = h }, .buffer = staging },
+        &.{ .width = w, .height = h, .depth_or_array_layers = 1 },
+    );
+    const cmd = enc.finish(null) orelse return;
+    enc.release();
+    queue.submit(&.{cmd});
+    cmd.release();
+
+    _ = staging.mapAsync(wgpu.MapModes.read, 0, @intCast(buf_size), .{
+        .mode = .allow_process_events,
+        .callback = &captureMapCallback,
+    });
+    _ = device.poll(true, null);
+
+    const mapped_ptr = staging.getConstMappedRange(0, @intCast(buf_size)) orelse return;
+    kms.present(@ptrCast(mapped_ptr), w, h, bytes_per_row);
+    staging.unmap();
+}
 var g_adapter: ?*wgpu.Adapter = null;
 var g_device: ?*wgpu.Device = null;
 var g_queue: ?*wgpu.Queue = null;
@@ -1092,6 +1173,23 @@ pub fn finishFilterCapture(
 var g_prev_frame_hash: u64 = 0;
 var g_prev_dims: [2]u32 = .{ 0, 0 };
 
+// Per-pipeline content hashes from the previous frame. Each 2D vertex buffer
+// re-uploads only when ITS OWN data changed — so one on-screen change (a HUD
+// number ticking, a debug readout refreshing) re-uploads just that pipeline's
+// buffer instead of forcing a full re-upload of rects+text+curves+capsules+
+// polys every time (which showed up as a per-change frame spike).
+const PipelineHashes = struct {
+    rects: u64 = 0,
+    text: u64 = 0,
+    curves: u64 = 0,
+    capsules: u64 = 0,
+    polys: u64 = 0,
+};
+var g_prev_pipeline_hashes: PipelineHashes = .{};
+// Forces every pipeline to upload next frame regardless of hash: first frame,
+// and after a drain() recreates the GPU buffers (their contents are gone).
+var g_force_full_upload: bool = true;
+
 const DRAIN_INTERVAL: u64 = 36000; // ~10 minutes at 60fps
 var g_frame_counter: u64 = 0;
 
@@ -1437,9 +1535,10 @@ fn drainMemory() void {
     polys.drain(device, globals_buffer);
     images.drain(device, globals_buffer);
 
-    // Force full redraw on next frame
+    // Force full redraw on next frame — the buffers were just recreated.
     g_prev_frame_hash = 0;
     g_prev_dims = .{ 0, 0 };
+    g_force_full_upload = true;
 
     log.print("[gpu] Memory drain: buffers recreated at frame {d}\n", .{g_frame_counter});
 }
@@ -1536,13 +1635,15 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     g_instance = wgpu.Instance.create(&desc) orelse return error.WGPUInstanceFailed;
     const instance = g_instance.?;
 
-    // Create surface from native window handle (SDL3 properties API)
-    g_surface = createSurfaceFromSDL(instance, window) orelse return error.SurfaceCreateFailed;
-    const surface = g_surface.?;
+    // Create surface from native window handle (SDL3 properties API).
+    // KMS mode is surfaceless — render to an offscreen texture, scan out via DRM.
+    if (!g_kms) {
+        g_surface = createSurfaceFromSDL(instance, window) orelse return error.SurfaceCreateFailed;
+    }
 
-    // Request adapter
+    // Request adapter (no compatible surface in KMS mode)
     const adapter_response = instance.requestAdapterSync(&.{
-        .compatible_surface = surface,
+        .compatible_surface = g_surface,
         .power_preference = .high_performance,
     }, 200_000_000);
     if (adapter_response.status != .success) {
@@ -1577,7 +1678,14 @@ pub fn init(window: if (is_web) *anyopaque else *c.SDL_Window) !void {
     g_width = @intCast(w);
     g_height = @intCast(h);
 
-    configureSurface(g_width, g_height);
+    if (g_kms) {
+        // No swapchain to configure — pick the readback-friendly format and
+        // allocate the offscreen scanout target instead.
+        g_format = .bgra8_unorm;
+        createOffscreen(g_width, g_height);
+    } else {
+        configureSurface(g_width, g_height);
+    }
 
     // Create globals uniform buffer
     g_globals_buffer = device.createBuffer(&.{
@@ -1612,11 +1720,15 @@ pub fn deinit() void {
     text.deinit();
     rects.deinit();
     if (g_globals_buffer) |b| b.release();
+    if (g_offscreen_view) |v| v.release();
+    if (g_offscreen) |t| t.release();
     if (g_queue) |q| q.release();
     if (g_device) |d| d.release();
     if (g_adapter) |a| a.release();
     if (g_surface) |s| s.release();
     if (g_instance) |i| i.release();
+    g_offscreen_view = null;
+    g_offscreen = null;
     g_globals_buffer = null;
     g_queue = null;
     g_device = null;
@@ -1629,12 +1741,16 @@ pub fn resize(width: u32, height: u32) void {
     if (width == 0 or height == 0) return;
     g_width = width;
     g_height = height;
-    configureSurface(width, height);
+    if (g_kms) {
+        // The DRM scanout mode is fixed; only the offscreen target follows.
+        createOffscreen(width, height);
+    } else {
+        configureSurface(width, height);
+    }
 }
 
 /// Render all queued primitives and present.
 pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
-    const surface = g_surface orelse return;
     const device = g_device orelse return;
     const queue = g_queue orelse return;
 
@@ -1643,51 +1759,96 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     if (g_frame_counter % DRAIN_INTERVAL == 0) drainMemory();
     filters.frameReset();
 
-    // Get current surface texture
+    // Acquire the render-target view: the swapchain's current texture in
+    // windowed mode, or the persistent offscreen texture in KMS mode (which
+    // is read back and scanned out via DRM after the frame).
     var surface_texture: wgpu.SurfaceTexture = undefined;
-    surface.getCurrentTexture(&surface_texture);
-    if (surface_texture.status != .success_optimal and surface_texture.status != .success_suboptimal) {
-        if (surface_texture.texture) |t| t.release();
-        if (g_width > 0 and g_height > 0) configureSurface(g_width, g_height);
-        rects.reset();
-        text.reset();
-        curves.reset();
-        capsules.reset();
-        polys.reset();
-        images.reset();
-        sdf_icons.reset();
-        gcurve_fill.reset();
-        g_static_capture_count = 0;
-        g_scissor_count = 0;
-        g_scissor_depth = 0;
-        return;
+    var owned_view: ?*wgpu.TextureView = null; // swapchain view — released each frame
+    var capture_tex: ?*wgpu.Texture = null; // texture the pre-present capture hook reads (windowed)
+    const view: *wgpu.TextureView = blk: {
+        if (g_kms) break :blk g_offscreen_view orelse return;
+        const surface = g_surface orelse return;
+        surface.getCurrentTexture(&surface_texture);
+        if (surface_texture.status != .success_optimal and surface_texture.status != .success_suboptimal) {
+            if (surface_texture.texture) |t| t.release();
+            if (g_width > 0 and g_height > 0) configureSurface(g_width, g_height);
+            rects.reset();
+            text.reset();
+            curves.reset();
+            capsules.reset();
+            polys.reset();
+            images.reset();
+            sdf_icons.reset();
+            gcurve_fill.reset();
+            g_static_capture_count = 0;
+            g_scissor_count = 0;
+            g_scissor_depth = 0;
+            return;
+        }
+        const texture_obj = surface_texture.texture orelse return;
+        capture_tex = texture_obj;
+        const v = texture_obj.createView(null) orelse return;
+        owned_view = v;
+        break :blk v;
+    };
+    defer if (capture_tex) |t| t.release();
+    defer if (owned_view) |v| v.release();
+
+    // Per-pipeline dirty upload. Each 2D vertex buffer re-uploads only when its
+    // own content changed this frame, so a single on-screen change touches only
+    // the buffer it actually affected (a HUD number → text), instead of the old
+    // combined-hash gate that re-uploaded ALL five buffers on ANY change — a
+    // full-buffer re-upload spike on every frame something on screen ticked.
+    //
+    // force_all covers: the first frame and a post-drain frame (buffers were
+    // recreated), a resize (globals + every buffer must refresh), and a pending
+    // StaticSurface capture (the whole 2D pass re-runs into an offscreen target,
+    // so every buffer must be live that frame).
+    const dims_changed = (g_width != g_prev_dims[0] or g_height != g_prev_dims[1]);
+    const force_all = g_force_full_upload or dims_changed or g_static_capture_count > 0;
+    g_force_full_upload = false;
+    if (dims_changed) g_prev_dims = .{ g_width, g_height };
+
+    const rects_hash = rects.hashData();
+    const text_hash = text.hashData();
+    const curves_hash = curves.hashData();
+    const capsules_hash = capsules.hashData();
+    const polys_hash = polys.hashData();
+
+    var uploaded_any = force_all;
+    if (force_all or rects_hash != g_prev_pipeline_hashes.rects) {
+        g_prev_pipeline_hashes.rects = rects_hash;
+        rects.upload(queue);
+        uploaded_any = true;
+    }
+    if (force_all or text_hash != g_prev_pipeline_hashes.text) {
+        g_prev_pipeline_hashes.text = text_hash;
+        text.upload(queue);
+        uploaded_any = true;
+    }
+    if (force_all or curves_hash != g_prev_pipeline_hashes.curves) {
+        g_prev_pipeline_hashes.curves = curves_hash;
+        curves.upload(queue);
+        uploaded_any = true;
+    }
+    if (force_all or capsules_hash != g_prev_pipeline_hashes.capsules) {
+        g_prev_pipeline_hashes.capsules = capsules_hash;
+        capsules.upload(queue);
+        uploaded_any = true;
+    }
+    if (force_all or polys_hash != g_prev_pipeline_hashes.polys) {
+        g_prev_pipeline_hashes.polys = polys_hash;
+        polys.upload(queue);
+        uploaded_any = true;
     }
 
-    const texture_obj = surface_texture.texture orelse return;
-    defer texture_obj.release();
-    const view = texture_obj.createView(null) orelse return;
-    defer view.release();
-
-    // Dirty check
-    const data_changed = blk: {
-        const hash = frameDataHash();
-        const changed = (g_width != g_prev_dims[0] or g_height != g_prev_dims[1] or hash != g_prev_frame_hash);
-        if (changed) g_prev_frame_hash = hash;
-        break :blk changed;
-    };
-
-    if (data_changed or g_static_capture_count > 0) {
-        if (data_changed) g_prev_dims = .{ g_width, g_height };
-
-        // Update globals uniform (screen size)
+    // Whenever we touched a buffer (or a capture will run), make sure the globals
+    // uniform holds the screen size before the main pass. Captures overwrite it
+    // with their own dims and restore screen dims when they finish; this covers
+    // the no-capture path. Telemetry frame_hash mirrors the combined content.
+    if (uploaded_any) {
         writeGlobals(queue, g_width, g_height);
-
-        // Upload pipeline data
-        rects.upload(queue);
-        text.upload(queue);
-        curves.upload(queue);
-        capsules.upload(queue);
-        polys.upload(queue);
+        g_prev_frame_hash = rects_hash ^ text_hash ^ curves_hash ^ capsules_hash ^ polys_hash;
     }
 
     // Image quads always upload (video frames change independently of UI dirty state)
@@ -1843,11 +2004,15 @@ pub fn frame(bg_r: f64, bg_g: f64, bg_b: f64) void {
     // Capture hook — readback the rendered frame before present (like Love2D's captureScreenshot)
     // Sync readback requires device.poll() — not available on web.
     if (!is_web and g_capture_requested) {
-        performCapture(device, queue, texture_obj);
+        const cap_t = if (g_kms) g_offscreen else capture_tex;
+        if (cap_t) |t| performCapture(device, queue, t);
     }
 
-    if (!is_web) {
-        _ = surface.present();
+    if (g_kms) {
+        // No swapchain — read back the offscreen texture and scan it out via DRM.
+        presentKms();
+    } else if (!is_web) {
+        if (g_surface) |s| _ = s.present();
     }
 
     // Release deferred 3D render targets after image compositing, before reset

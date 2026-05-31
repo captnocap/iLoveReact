@@ -8,6 +8,7 @@ pub const c = @import("c.zig").imports;
 const layout = @import("layout.zig");
 const text_mod = @import("primitive/text.zig");
 const gpu = @import("gpu/gpu.zig");
+const kms = @import("render/kms.zig");
 const geometry = @import("storage/geometry.zig");
 const selection = @import("state/selection.zig");
 const windows = @import("primitive/windows.zig");
@@ -345,6 +346,15 @@ const witness = @import("testing/witness.zig");
 // ── Cursor blink state ───────────────────────────────────────────────────
 var g_cursor_visible: bool = true;
 var g_prev_tick: u32 = 0;
+
+// Host-side per-frame spike trace. Off by default; the cart flips it on via the
+// `__hmsc_spike_trace` host fn (driven by `gv_perflog 2`). When on, every frame
+// slower than the budget below logs its REAL phase breakdown to stderr — the
+// host's ground truth, to cross-check the JS perfWatch report (which only
+// samples telemetry ~60Hz and can mis-attribute). Logged with the gpu frame
+// counter so its lines line up with the JS report.
+pub var g_host_spike_trace: bool = false;
+const HOST_SPIKE_TRACE_US: i64 = 12_000; // log frames slower than ~83fps
 
 // ── Resize HUD state ────────────────────────────────────────────────────
 var g_resize_hud_until_ms: u64 = 0;
@@ -3059,6 +3069,22 @@ pub fn run(config_in: AppConfig) !void {
     _ = c.SDL_SetHint("SDL_AUDIO_DRIVER", "pulseaudio");
     _ = c.SDL_SetHint("SDL_AUDIO_INCLUDE_MONITORS", "1");
 
+    // KMS / no-display-server mode: reactjit IS the display server. Take over
+    // the console via DRM scanout (framework/render/kms.zig) and run SDL with
+    // the dummy video+audio drivers — we keep SDL only for its window/event
+    // bookkeeping; pixels go straight to the framebuffer, input via evdev.
+    const kms_mode = std.posix.getenv("ZIGOS_KMS") != null;
+    if (kms_mode) {
+        kms.init() catch |err| {
+            log.print("[kms] init failed: {}\n", .{err});
+            return error.KmsInitFailed;
+        };
+        _ = c.SDL_SetHint("SDL_VIDEO_DRIVER", "dummy");
+        _ = c.SDL_SetHint("SDL_AUDIO_DRIVER", "dummy");
+        gpu.setKmsMode(true);
+    }
+    defer if (kms_mode) kms.deinit();
+
     if (!c.SDL_Init(c.SDL_INIT_VIDEO | c.SDL_INIT_AUDIO)) return error.SDLInitFailed;
     defer {
         // Release any held SDL captures BEFORE SDL_Quit so the X server (or
@@ -3121,6 +3147,15 @@ pub fn run(config_in: AppConfig) !void {
     }
     if (config.x) |x| init_x = x;
     if (config.y) |y| init_y = y;
+
+    // KMS mode: the offscreen window must match the DRM scanout size exactly,
+    // since gpu.init reads the window size for the offscreen render target.
+    if (kms_mode) {
+        init_w = @intCast(kms.width());
+        init_h = @intCast(kms.height());
+        init_x = 0;
+        init_y = 0;
+    }
 
     const builtin_os = @import("builtin").os.tag;
     const headless = std.posix.getenv("ZIGOS_HEADLESS") != null;
@@ -3187,6 +3222,7 @@ pub fn run(config_in: AppConfig) !void {
 
     // Text engine (FreeType)
     var te = TextEngine.initHeadless("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf") catch
+        TextEngine.initHeadless("/usr/share/fonts/dejavu/DejaVuSans.ttf") catch // Alpine (font-dejavu)
         TextEngine.initHeadless("/System/Library/Fonts/Supplemental/Arial.ttf") catch
         TextEngine.initHeadless("C:/Windows/Fonts/segoeui.ttf") catch
         return error.FontNotFound;
@@ -4566,6 +4602,25 @@ pub fn run(config_in: AppConfig) !void {
             .window = window,
             .hovered_node = hovered_node,
         });
+
+        // Host-side spike trace (gv_perflog 2). Ground-truth per-frame phases to
+        // cross-check the JS perfWatch report. Triggers on CPU work only —
+        // tick+layout+paint — NOT total: the gpu phase is the present/vsync
+        // wait (≈4ms at 240Hz, ≈16ms at 60Hz), so a frame merely capped at the
+        // display refresh is gpu-bound idle, not a stall. Real spikes (content
+        // swap / capture re-bake) live in paint. `other` = leftover (native /
+        // scheduling). gpu frame counter prefixes for JS-report alignment.
+        if (g_host_spike_trace) {
+            const cpu_i: i64 = (t1 - t0) + (t3 - t2) + (t5 - t4);
+            if (cpu_i > HOST_SPIKE_TRACE_US) {
+                const frame_total_i: i64 = t6 - t0;
+                const gpu_i: i64 = phase_t_postframe - phase_t_preframe;
+                const other_i: i64 = @max(0, frame_total_i - cpu_i - gpu_i);
+                std.debug.print("[host-spike] frame={d} total={d}us cpu={d} tick={d} layout={d} paint={d} gpu={d} other={d}\n", .{
+                    gpu.frameCounter(), frame_total_i, cpu_i, t1 - t0, t3 - t2, t5 - t4, gpu_i, other_i,
+                });
+            }
+        }
 
         // Debug server — poll for requests + push telemetry stream
         debug_server.poll();
