@@ -4,7 +4,7 @@ import {
   GameState,
   HMSC_STATE_SCHEMA_VERSION,
   LivePlayerSnapshot,
-  Mountain,
+  Landform,
   RoadJunction,
   RoadProfile,
   RoadSegment,
@@ -222,10 +222,82 @@ function createInitialProps(): WorldProp[] {
     { id: 'prop_bush_2', kind: 'bush', x: 13.5, y: 0, z: 11, yawDegrees: 40 },
     { id: 'prop_bush_3', kind: 'bush', x: 50, y: 0, z: -15, yawDegrees: 0 },
     // A MASSIVE bush in the open east of spawn — big enough to hide a car in.
-    { id: 'prop_bush_mega', kind: 'bushLarge', x: 34, y: 0, z: 24, yawDegrees: 18 },
-    // Rocks scattered on the sand chunk.
+    { id: 'prop_bush_mega', kind: 'bushLarge', x: 30, y: 0, z: 96, yawDegrees: 18 },
+    // ── Rocks: a rugged shoreline on the sand chunk (south, z < 0) plus some ──
+    // deliberate clusters near spawn and the road edge so they're impossible to miss.
     { id: 'prop_rock_1', kind: 'rock', x: 40, y: 0, z: -20, yawDegrees: 25 },
     { id: 'prop_rock_2', kind: 'rock', x: 62, y: 0, z: -42, yawDegrees: 70 },
+    { id: 'prop_rock_large_1', kind: 'rockLarge', x: 75, y: 0, z: -55, yawDegrees: 15 },
+    { id: 'prop_rock_large_2', kind: 'rockLarge', x: 28, y: 0, z: -80, yawDegrees: 110 },
+    { id: 'prop_rock_small_1', kind: 'rockSmall', x: 52, y: 0, z: -12, yawDegrees: 45 },
+    { id: 'prop_rock_small_2', kind: 'rockSmall', x: 88, y: 0, z: -35, yawDegrees: 5 },
+    { id: 'prop_rock_small_3', kind: 'rockSmall', x: 35, y: 0, z: -65, yawDegrees: 80 },
+    { id: 'prop_rock_small_4', kind: 'rockSmall', x: 15, y: 0, z: -30, yawDegrees: 33 },
+    // A small rock cluster right near spawn — visible the instant you turn around.
+    { id: 'prop_rock_small_5', kind: 'rockSmall', x: -4, y: 0, z: 5, yawDegrees: 10 },
+    { id: 'prop_rock_small_6', kind: 'rockSmall', x: -6, y: 0, z: 8, yawDegrees: 65 },
+    { id: 'prop_rock_3', kind: 'rock', x: -5, y: 0, z: 12, yawDegrees: 35 },
+    // Rocks along the west edge of the arterial sidewalk.
+    { id: 'prop_rock_4', kind: 'rock', x: 2, y: 0, z: 55, yawDegrees: 15 },
+    { id: 'prop_rock_small_7', kind: 'rockSmall', x: 1, y: 0, z: 65, yawDegrees: 50 },
+    // A big boulder guarding the used-car lot entrance.
+    { id: 'prop_rock_large_3', kind: 'rockLarge', x: 42, y: 0, z: 105, yawDegrees: 40 },
+    // ── Bushes: dense clusters near spawn, along sidewalks, and in green patches ──
+    // (The GTA-style hide-in shrubs near spawn — prop_bush_1/2/3 + prop_bush_mega —
+    //  are seeded once at the top of this list; not repeated here.)
+    // Low hedges lining the approach to the mall.
+    { id: 'prop_hedge_1', kind: 'bushLow', x: 68, y: 0, z: 58, yawDegrees: 0 },
+    { id: 'prop_hedge_2', kind: 'bushLow', x: 72, y: 0, z: 58, yawDegrees: 0 },
+    { id: 'prop_hedge_3', kind: 'bushLow', x: 76, y: 0, z: 58, yawDegrees: 0 },
+    { id: 'prop_hedge_4', kind: 'bushLow', x: 80, y: 0, z: 58, yawDegrees: 0 },
+    // A second hedge row along the east side of the commercial strip.
+    { id: 'prop_hedge_5', kind: 'bushLow', x: 36, y: 0, z: 30, yawDegrees: 0 },
+    { id: 'prop_hedge_6', kind: 'bushLow', x: 40, y: 0, z: 30, yawDegrees: 0 },
+    { id: 'prop_hedge_7', kind: 'bushLow', x: 44, y: 0, z: 30, yawDegrees: 0 },
+    { id: 'prop_hedge_8', kind: 'bushLow', x: 48, y: 0, z: 30, yawDegrees: 0 },
+    // Sparse scraggly bushes in a dry patch east of the arterial.
+    { id: 'prop_sparse_1', kind: 'bushSparse', x: 22, y: 0, z: 5, yawDegrees: 20 },
+    { id: 'prop_sparse_2', kind: 'bushSparse', x: 26, y: 0, z: 14, yawDegrees: 55 },
+    { id: 'prop_sparse_3', kind: 'bushSparse', x: 24, y: 0, z: 22, yawDegrees: 90 },
+    // More sparse bushes near the gas station (dry urban soil).
+    { id: 'prop_sparse_4', kind: 'bushSparse', x: 78, y: 0, z: 12, yawDegrees: 15 },
+    { id: 'prop_sparse_5', kind: 'bushSparse', x: 82, y: 0, z: 16, yawDegrees: 70 },
+    // A big bush cluster north of the cross street — visible from the road.
+    { id: 'prop_bush_4', kind: 'bush', x: 10, y: 0, z: 60, yawDegrees: 25 },
+    { id: 'prop_bush_5', kind: 'bush', x: 14, y: 0, z: 62, yawDegrees: 80 },
+    { id: 'prop_bush_6', kind: 'bush', x: 18, y: 0, z: 58, yawDegrees: 45 },
+    // ── Dumpsters: back alleys and service roads ──
+    { id: 'prop_dumpster_1', kind: 'dumpster', x: 55, y: 0, z: 18, yawDegrees: 180 },
+    { id: 'prop_dumpster_2', kind: 'dumpster', x: 71, y: 0, z: 18, yawDegrees: 175 },
+    { id: 'prop_dumpster_3', kind: 'dumpster', x: 95, y: 0, z: 80, yawDegrees: 90 },
+    // ── Mailboxes: curbside near residential and commercial fronts ──
+    { id: 'prop_mailbox_1', kind: 'mailbox', x: 19, y: 0, z: 3, yawDegrees: 270 },
+    { id: 'prop_mailbox_2', kind: 'mailbox', x: 19, y: 0, z: 15, yawDegrees: 270 },
+    { id: 'prop_mailbox_3', kind: 'mailbox', x: 38, y: 0, z: 45, yawDegrees: 0 },
+    { id: 'prop_mailbox_4', kind: 'mailbox', x: 74, y: 0, z: 5, yawDegrees: 90 },
+    // ── Fences: used car lot perimeter plus a gas station border ──
+    { id: 'prop_fence_1', kind: 'fence', x: 42, y: 0, z: 82, yawDegrees: 0 },
+    { id: 'prop_fence_2', kind: 'fence', x: 47, y: 0, z: 82, yawDegrees: 0 },
+    { id: 'prop_fence_3', kind: 'fence', x: 52, y: 0, z: 82, yawDegrees: 0 },
+    { id: 'prop_fence_4', kind: 'fence', x: 57, y: 0, z: 82, yawDegrees: 0 },
+    { id: 'prop_fence_5', kind: 'fence', x: 62, y: 0, z: 82, yawDegrees: 0 },
+    { id: 'prop_fence_6', kind: 'fence', x: 67, y: 0, z: 82, yawDegrees: 0 },
+    { id: 'prop_fence_7', kind: 'fence', x: 70, y: 0, z: 84, yawDegrees: 90 },
+    { id: 'prop_fence_8', kind: 'fence', x: 70, y: 0, z: 89, yawDegrees: 90 },
+    { id: 'prop_fence_9', kind: 'fence', x: 70, y: 0, z: 94, yawDegrees: 90 },
+    { id: 'prop_fence_10', kind: 'fence', x: 70, y: 0, z: 99, yawDegrees: 90 },
+    { id: 'prop_fence_11', kind: 'fence', x: 42, y: 0, z: 102, yawDegrees: 0 },
+    { id: 'prop_fence_12', kind: 'fence', x: 47, y: 0, z: 102, yawDegrees: 0 },
+    { id: 'prop_fence_13', kind: 'fence', x: 52, y: 0, z: 102, yawDegrees: 0 },
+    { id: 'prop_fence_14', kind: 'fence', x: 57, y: 0, z: 102, yawDegrees: 0 },
+    { id: 'prop_fence_15', kind: 'fence', x: 62, y: 0, z: 102, yawDegrees: 0 },
+    { id: 'prop_fence_16', kind: 'fence', x: 67, y: 0, z: 102, yawDegrees: 0 },
+    { id: 'prop_fence_17', kind: 'fence', x: 74, y: 0, z: 28, yawDegrees: 0 },
+    { id: 'prop_fence_18', kind: 'fence', x: 79, y: 0, z: 28, yawDegrees: 0 },
+    { id: 'prop_fence_19', kind: 'fence', x: 84, y: 0, z: 28, yawDegrees: 0 },
+    // Payphones on the sidewalks — the low-tech comms prop near spawn + the cafe.
+    { id: 'prop_payphone_1', kind: 'payphone', x: 16.4, y: 0, z: 24, yawDegrees: 90 },
+    { id: 'prop_payphone_2', kind: 'payphone', x: 39, y: 0, z: 4, yawDegrees: 0 },
   ];
   return seed.map((prop) => ({ ...prop, createdByCommand: 'initial-world' }));
 }
@@ -236,17 +308,45 @@ function createInitialProps(): WorldProp[] {
 // sand to reach it. The trail starts on the north rim (angle +Z, facing the
 // approaching player) and spirals up to the peak. baseY 0 = the sand floor, so
 // the first tread is within one step of the player standing on the sand.
-function createInitialMountains(): Mountain[] {
+// Registry-driven terrain — the unified landform layer. Each entry is pure data
+// ({ kind, center, params }) resolved through world/landforms; a new terrain shape
+// is one entry here plus one registerLandformKind, zero wiring. Seeded so a fresh
+// world shows the family off:
+//   - hills:    rolling Hollywood-Hills patch on the southwest chunk.
+//   - mountain: a conical peak with a switchback trail + crater lake on the south
+//               sand chunk; the trail is the only walkable way up.
+//   - estate:   a flat-topped dome with a road spiralling to a building-pad summit
+//               on the west chunk; the road start faces spawn.
+function createInitialLandforms(): Landform[] {
   return [
     {
+      id: 'hills_southwest',
+      kind: 'hills',
+      label: 'West Hills',
+      centerX: -60,
+      centerZ: -60,
+      baseY: 0,
+      params: { halfWidth: 55, amplitude: 13, seed: 7 },
+      createdByCommand: 'initial-world',
+    },
+    {
       id: 'mountain_spawn',
+      kind: 'mountain',
       label: 'South Mountain',
       centerX: 62,
       centerZ: -62,
       baseY: 0,
-      baseRadiusMeters: 48,
-      peakHeightMeters: 30,
-      trailStartAngleRadians: Math.PI / 2,
+      params: { baseRadius: 48, peak: 30, trailStartAngle: Math.PI / 2 },
+      createdByCommand: 'initial-world',
+    },
+    {
+      id: 'estate_west',
+      kind: 'estate',
+      label: 'West Estate Hill',
+      centerX: -55,
+      centerZ: 55,
+      baseY: 0,
+      params: { baseRadius: 38, flatTopRadius: 13, height: 17, roadStartAngle: -Math.PI / 4 },
       createdByCommand: 'initial-world',
     },
   ];
@@ -270,9 +370,10 @@ function createInitialWorld(): WorldState {
     props: createInitialProps(),
     buildings: [],
     interiors: {},
-    mountains: createInitialMountains(),
+    landforms: createInitialLandforms(),
     zones: [],
     spawnedEntities: {},
+    npcs: {},
   };
 }
 
@@ -281,15 +382,36 @@ function createInitialWorld(): WorldState {
 // east of the arterial, south of the cross street, on the spawn sidewalk chunk.
 // Their interiors/entry pads are wired by addBuildingToWorld (seedBuildings).
 function createInitialBuildings(): Building[] {
+  // Laid to obey the placement rules: a row down the EAST side of the spawn
+  // arterial (its east curb is ~x17.2), each set back ~3m at x20 with its door
+  // facing WEST onto the road, no overlaps, all within the cross street (z<43)
+  // except the warehouse north of it — so the block reads like a real street.
   const seed: Array<Omit<Building, 'createdByCommand' | 'label'>> = [
     // Sealed: a solid block. Bump it; stand on its roof. No way in.
-    { id: 'building_demo_sealed', kind: 'house', enclosure: 'sealed', x: 26, y: 0, z: 18, widthTiles: 8, depthTiles: 10, doorSide: 'south' },
-    // Hollow: a walk-in shell. The south doorway is a real gap and the floor
-    // inside is the same outer world — see in from outside, out from inside.
-    { id: 'building_demo_hollow', kind: 'shop', enclosure: 'hollow', x: 42, y: 0, z: 18, widthTiles: 8, depthTiles: 10, doorSide: 'south' },
+    { id: 'building_demo_sealed', kind: 'house', enclosure: 'sealed', x: 20, y: 0, z: 4, widthTiles: 8, depthTiles: 10, doorSide: 'west' },
+    // Hollow: a walk-in shell. The doorway is a real gap and the floor inside is
+    // the same outer world — see in from outside, out from inside.
+    { id: 'building_demo_hollow', kind: 'shop', enclosure: 'hollow', x: 20, y: 0, z: 16, widthTiles: 8, depthTiles: 10, doorSide: 'west' },
     // Interior: a closed tower. Its front pad is a portal into a separate space
     // far larger than this 12x12 footprint.
-    { id: 'building_demo_interior', kind: 'tower', enclosure: 'interior', x: 60, y: 0, z: 16, widthTiles: 12, depthTiles: 12, doorSide: 'south' },
+    { id: 'building_demo_interior', kind: 'tower', enclosure: 'interior', x: 20, y: 0, z: 28, widthTiles: 12, depthTiles: 12, doorSide: 'west' },
+    // A warehouse north of the cross street: the industrial garage on the FRONT
+    // (road-facing) face only, plain metal walls on the other sides — shows the
+    // per-face skin taxonomy.
+    { id: 'building_demo_industrial', kind: 'warehouse', enclosure: 'sealed', x: 20, y: 0, z: 60, widthTiles: 14, depthTiles: 16, doorSide: 'west', skin: { front: 'industrial', all: 'plain' } },
+
+    // ── Commercial box buildings (existing box+facade pipeline, new skins) ──────
+    // Internet cafe + Spray-N-Pray gun shop: walk-in shells wearing their themed
+    // storefront skins on the front, plain side walls.
+    { id: 'building_internet_cafe', kind: 'shop', enclosure: 'hollow', x: 40, y: 0, z: 6, widthTiles: 10, depthTiles: 8, doorSide: 'south', skin: { front: 'internetCafe', all: 'plain' } },
+    { id: 'building_gun_shop', kind: 'shop', enclosure: 'hollow', x: 56, y: 0, z: 6, widthTiles: 10, depthTiles: 8, doorSide: 'south', skin: { front: 'gunShop', all: 'plain' } },
+    // A mall: a big walk-in shell with the corporate mall facade on its front.
+    { id: 'building_mall', kind: 'shop', enclosure: 'hollow', x: 72, y: 0, z: 64, widthTiles: 30, depthTiles: 22, doorSide: 'south', skin: { front: 'mall', all: 'plain' } },
+
+    // ── Open structures (custom models + custom collision) ──────────────────────
+    { id: 'building_parking_garage', kind: 'parkingGarage', enclosure: 'hollow', x: 42, y: 0, z: 52, widthTiles: 26, depthTiles: 26, doorSide: 'south' },
+    { id: 'building_gas_station', kind: 'gasStation', enclosure: 'hollow', x: 74, y: 0, z: 8, widthTiles: 20, depthTiles: 16, doorSide: 'south' },
+    { id: 'building_used_car_lot', kind: 'usedCarLot', enclosure: 'hollow', x: 44, y: 0, z: 86, widthTiles: 26, depthTiles: 18, doorSide: 'south' },
   ];
   return seed.map((b) => ({ ...b, label: buildingKindDefinition(b.kind).label, createdByCommand: 'initial-world' }));
 }
@@ -345,6 +467,7 @@ export function createInitialGameState(): GameState {
       health: DEFAULT_PLAYER_HEALTH,
       heat: DEFAULT_PLAYER_HEAT,
       money: DEFAULT_PLAYER_MONEY,
+      perception: { high: 0 },
       inventory: [],
     },
     world: createInitialWorld(),
@@ -440,11 +563,11 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
         props: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.props)
           ? parsed.world.props
           : initial.world.props,
-        // A save predating the mountain layer has no `mountains` key → seed the
-        // example landform; a save that already has one keeps it.
-        mountains: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.mountains)
-          ? parsed.world.mountains
-          : initial.world.mountains,
+        // A save predating the landform layer has no `landforms` key → seed the
+        // example terrain; a save that already has it keeps it.
+        landforms: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.landforms)
+          ? parsed.world.landforms
+          : initial.world.landforms,
         // Zones are authored (wv_zone); a save predating the layer has no key →
         // empty. Layout-matched saves keep their stored zones.
         zones: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.zones)
@@ -469,6 +592,9 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
             },
           },
         ])),
+        // NPCs are placed into the world (nv_spawn later); a save predating the
+        // layer has no key → empty. Layout-matched saves keep their crowd.
+        npcs: storedWorldMatchesCurrentLayout ? (parsed.world?.npcs ?? {}) : initial.world.npcs,
       },
       // Scene + suspend stack are only meaningful against a matching world. On a
       // layout reset the world falls back to the fresh outer city, so a save made
