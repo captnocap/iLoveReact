@@ -1,6 +1,6 @@
 {
-  "name": "HMSC INT",
-  "description": "Hitman Shitcity internal map tooling shell.",
+  "name": "HMSC World Editor",
+  "description": "Hitman Shitcity world editor — author the world the game boots from.",
   "width": 1280,
   "height": 800
 }

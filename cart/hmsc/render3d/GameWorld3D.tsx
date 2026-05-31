@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { GameState, PlacedCell, WorldSurfaceRegion } from '../design';
 import { tileKindDefinition } from '../world/tileKinds';
@@ -13,9 +13,8 @@ import { Prop } from './Prop';
 import { Building3D } from './Building';
 import { BuildingFacades } from './BuildingFacades';
 import { nearestBuildingHitFraction } from '../world/buildings';
-import { Mountain } from './Mountain';
-import { Hills } from './Hills';
-import { EstateHill } from './EstateHill';
+import { Landform } from './Landform';
+import { nearestLandformCameraHit } from '../world/landforms';
 import { buildHmscSky } from './sky';
 
 // How far to keep the camera off a wall it pulls in to, so it never clips through.
@@ -96,7 +95,11 @@ function Player(props: { state: GameState; animationSeconds: number; moving: boo
 // camera and PlayerFigure, not the whole world tree. Without this, every step's
 // setGameState re-reconciles all floor/placed/light nodes — the fps drop while
 // moving. Mirrors the StaticSurface capture fix in tileSurface.tsx.
-const WorldStatics = memo(function WorldStatics(props: {
+// Exported so the hmsc-int editor's iso preview renders the EXACT same static
+// world the game draws (floors/roads/junctions/props/buildings/facades/landforms)
+// — one renderer, no editor-side fork. The editor supplies its own <Scene3D> +
+// camera + the matching TileSurfaceCaptures; this is just the world contents.
+export const WorldStatics = memo(function WorldStatics(props: {
   world: GameState['world'];
   skyConfig: GameState['config']['sky'];
 }) {
@@ -161,21 +164,12 @@ const WorldStatics = memo(function WorldStatics(props: {
           each building's captured skin texture (office/residential/retail/
           industrial). 'plain' buildings get none and show their bare wall. */}
       <BuildingFacades buildings={world.buildings} />
-      {/* Mountains: a conical Heightfield mass with a switchback hiking trail of
-          tread ledges spiralling to the peak — the only walkable way up. The
-          treads are the same boxes host physics stands the player on. */}
-      {(world.mountains ?? []).map((mountain) => (
-        <Mountain key={mountain.id} mountain={mountain} />
-      ))}
-      {/* Hills: a rolling Heightfield patch (golden California register), the same
-          terrain machinery as a mountain with a gentler, summed-bump profile. */}
-      {(world.hills ?? []).map((hills) => (
-        <Hills key={hills.id} hills={hills} />
-      ))}
-      {/* Estate hills: flat-topped domes with a road carved up the flank (the
-          mountain-trail bench, textured as a street). */}
-      {(world.estateHills ?? []).map((estate) => (
-        <EstateHill key={estate.id} estate={estate} />
+      {/* Registry-driven landforms (mountains, hills, estates): ONE component for
+          every kind — a Heightfield mesh baked from the kind's height function,
+          tiled with the surface material, plus any kind decoration (crater lake,
+          road ribbon). A new terrain shape is one registry entry, zero wiring. */}
+      {(world.landforms ?? []).map((landform) => (
+        <Landform key={landform.id} landform={landform} />
       ))}
     </>
   );
@@ -219,11 +213,16 @@ export function GameWorld3D(props: {
   // shell), drawn from the same boxes the player collides with.
   const pivot = { x: player.x, y: player.y + HMSC_GAMEPLAY_CAMERA.targetHeightMeters, z: player.z };
   const desiredCamera = { x: cameraPosition[0], y: cameraPosition[1], z: cameraPosition[2] };
+  // Same pull-in for the heightfield landforms: if the orbit would put the camera
+  // inside a hill/mountain, stop it at the surface — no seeing inside the mesh from
+  // a low angle. Take whichever obstruction (wall or terrain) is nearer.
   const wallHitFraction = nearestBuildingHitFraction(props.state.world.buildings, pivot, desiredCamera);
+  const landformHitFraction = nearestLandformCameraHit(props.state, pivot, desiredCamera);
+  const hitFraction = Math.min(wallHitFraction, landformHitFraction);
   const segmentLength = Math.hypot(desiredCamera.x - pivot.x, desiredCamera.y - pivot.y, desiredCamera.z - pivot.z);
   const marginFraction = segmentLength > 1e-3 ? CAMERA_WALL_MARGIN_METERS / segmentLength : 0;
-  const cameraFraction = wallHitFraction < 1
-    ? Math.max(CAMERA_MIN_DISTANCE_FRACTION, wallHitFraction - marginFraction)
+  const cameraFraction = hitFraction < 1
+    ? Math.max(CAMERA_MIN_DISTANCE_FRACTION, hitFraction - marginFraction)
     : 1;
   const resolvedCamera: [number, number, number] = [
     pivot.x + (desiredCamera.x - pivot.x) * cameraFraction,

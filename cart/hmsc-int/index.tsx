@@ -1,981 +1,498 @@
-import { useEffect, useRef, useState } from 'react';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
-import { Box, Effect, Pressable, ScrollView, Text, TextInput } from '@reactjit/runtime/primitives';
-import {
-  DEFAULT_LIVE_SYNC_INTERVAL_MS,
-  type BuildingSkin,
-  type GameState,
-  type PlacedCell,
-  type WorldSurfaceRegion,
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { busOn } from '@reactjit/hooks/useIFTTT';
+import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
+import type {
+  BuildingEnclosure,
+  BuildingSkin,
+  GameState,
+  PropKind,
+  TileKind,
+  ZoneFlag,
 } from '../hmsc/design';
-import {
-  type FaceSkins,
-  FACE_ROLES,
-  SKIN_NAMES,
-  buildingAtCell,
-  currentFaceSkins,
-  faceSkinCommands,
-} from './buildingEditor';
-import { createInitialGameState, readLivePlayerSnapshot, readStoredGameState } from '../hmsc/state/gameState';
-import { tileKindDefinition } from '../hmsc/world/tileKinds';
+import { BUILDING_KINDS, buildingKindDefinition } from '../hmsc/world/buildingKinds';
+import { PROP_KINDS, propKindDefinition } from '../hmsc/world/propKinds';
+import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
+import { ZONE_FLAGS } from '../hmsc/world/zones';
 import { tileKindAtCell } from '../hmsc/world/grid';
-import { worldMarkers } from '../hmsc/world/worldView';
-import { roadFootprint } from '../hmsc/world/roads';
-import { junctionFootprint } from '../hmsc/world/roadJunctions';
-import { HMSC_ROAD_SCALE } from '../hmsc/world/roadProfile';
-import { PLACEABLES, placeableById } from '../hmsc/world/placeables';
-import { buildWorldTree } from '../hmsc/world/worldTree';
-import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from '../hmsc/render3d/tileFill';
+import { setBuildingFaceSkin } from '../hmsc/world/buildings';
+import { swatchColorForId } from '../hmsc/world/placeables';
 import {
-  type PaintedZone,
-  type PainterBackup,
-  cellKeyOf,
-  snapshotOf,
-  restoreSnapshot,
-  saveDraft,
-  loadDraft,
-  loadBackups,
-  appendBackup,
-  emitChunkCommands,
-  paintedTileRects,
-} from './painter';
+  loadEditorWorld,
+  compileEditorWorld,
+  resetEditorWorld,
+  placeBuilding,
+  removeBuilding,
+  buildingFootprintBlocked,
+  placeWorldProp,
+  removeWorldProp,
+  propNearPoint,
+  fillTiles,
+  defineZone,
+} from './editorWorld';
+import { MapCanvas, MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE, ZOOM_STEP, type MapView, type CellRect, type DragMode, type Ghost } from './MapCanvas';
+import { IsoPreview, type IsoView } from './IsoPreview';
+import { cellAddress, chunkOfCell, parseAddress } from './address';
+import { FACE_ROLES, SKIN_NAMES, buildingAtCell, currentFaceSkins } from './buildingEditor';
 
-// hmsc-int renders the SAME WorldState the game uses, top-down, as ONE Effect
-// shader quad — the whole tile field is a single draw no matter the size (the
-// world_as_shader_quad pattern). Per-cell nodes don't scale (they cap out and
-// lag at 14,400); instead the shader draws every cell, and clicks are mapped to
-// a cell by inverting the pan/zoom transform. Same one draw at 120x120 or
-// 1200x1200. The shader also draws the selection highlight and the live player.
+// hmsc-int is the world EDITOR. It authors a real GameState — the same record the
+// game boots from — and "compile" persists it to the shared 'hmsc'/'game-state'
+// key (one storage root across carts), so the game loads exactly what you built.
+// No wv_* copy-paste: every tool calls the game's own world mutators on a staged
+// GameState, so an authored building/prop/zone/tile is identical to one the game
+// made. Author top-down in 2D (left), preview live in iso-3D (right), compile.
 
-const DEFAULT_PIXELS_PER_TILE = 7;
-const MIN_PIXELS_PER_TILE = 1.5;
-const MAX_PIXELS_PER_TILE = 48;
-const ZOOM_STEP = 1.3;
-const CLICK_DRAG_THRESHOLD_PX = 5;
+type Tool = 'inspect' | 'tile' | 'building' | 'prop' | 'zone' | 'bulldoze';
 
-type View = { centerX: number; centerZ: number; pixelsPerTile: number };
-type Rect = { x: number; y: number; width: number; height: number };
+const TOOLS: { id: Tool; label: string; hint: string }[] = [
+  { id: 'inspect', label: 'Inspect', hint: 'click a cell or building' },
+  { id: 'tile', label: 'Tile', hint: 'drag a rectangle to fill ground' },
+  { id: 'building', label: 'Building', hint: 'click to place (ghost shows fit)' },
+  { id: 'prop', label: 'Prop', hint: 'click to place street furniture' },
+  { id: 'zone', label: 'Zone', hint: 'drag a rectangle, name it' },
+  { id: 'bulldoze', label: 'Bulldoze', hint: 'click a building or prop to remove' },
+];
 
-// D layout (f32): header [0]W [1]H [2]centerX [3]centerZ [4]ppt [5]selX [6]selZ
-// [7]hasSel [8]playerX [9]playerZ [10..12]water [13]regionCount, then per
-// region (6 floats from index 14): minX, minZ, width, depth, matId, variant.
-// Every chunk is one region; the shader finds which chunk a cell is in and
-// renders that chunk's effect_fills material. One draw for the whole world.
-const MAP_HEADER = 14;
-const MAP_REGION_STRIDE = 6;
-const MAP_SHADER = `
-@group(0) @binding(1) var<storage, read> D: array<f32>;
-${TILE_FILL_WGSL}
-@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let W = D[0]; let H = D[1];
-  let center = vec2f(D[2], D[3]);
-  let ppt = D[4];
-  let sel = vec2f(D[5], D[6]); let hasSel = D[7];
-  let player = vec2f(D[8], D[9]);
-  let water = vec3f(D[10], D[11], D[12]);
-  let regionCount = i32(D[13]);
-
-  let px = in.uv * vec2f(W, H);
-  let world = center + (px - vec2f(W, H) * 0.5) / ppt;
-  let id = floor(world);
-  let f = fract(world);
-  let edgePx = min(min(f.x, 1.0 - f.x), min(f.y, 1.0 - f.y)) * ppt;
-
-  var col = water;
-  var inAny = false;
-  for (var r = 0; r < regionCount; r = r + 1) {
-    let b = ${MAP_HEADER} + r * ${MAP_REGION_STRIDE};
-    let minX = D[b]; let minZ = D[b + 1];
-    let w = D[b + 2]; let d = D[b + 3];
-    if (id.x >= minX && id.x < minX + w && id.y >= minZ && id.y < minZ + d) {
-      let seed = tf_rand(id + vec2f(3.1, 7.7)) * 50.0;
-      col = tileMaterial(D[b + 4], f, f * 64.0, D[b + 5], seed);
-      inAny = true;
-      break;
-    }
-  }
-
-  if (inAny) {
-    col = mix(col, col * 0.5, (1.0 - smoothstep(0.0, 1.2, edgePx)) * 0.7); // slab joints
-    if (hasSel > 0.5 && id.x == sel.x && id.y == sel.y) {
-      col = mix(col, vec3f(1.0), 1.0 - smoothstep(0.0, 2.5, edgePx));
-      col = mix(col, vec3f(1.0), 0.18);
-    }
-  }
-
-  let pdist = length(world - player) * ppt; // live player marker
-  if (pdist < 7.0) {
-    col = mix(col, vec3f(0.94, 0.97, 1.0), 1.0 - smoothstep(2.0, 4.0, pdist));
-    col = mix(col, vec3f(0.05, 0.65, 0.95), (1.0 - smoothstep(4.0, 7.0, pdist)) * step(3.0, pdist));
-  }
-
-  return vec4f(col, 1.0);
-}
-`;
-
-function rgb01(hex: string): [number, number, number] {
-  const s = hex.startsWith('#') ? hex.slice(1) : hex;
-  const n = parseInt(s.length === 3 ? s.split('').map((c) => c + c).join('') : s, 16);
-  if (!Number.isFinite(n)) return [0.8, 0.8, 0.8];
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
-}
-
-function loadWorldState(): GameState {
-  const state = readStoredGameState() ?? createInitialGameState();
-  const live = readLivePlayerSnapshot();
-  if (!live) return state;
-  return { ...state, sessionName: live.sessionName, updatedAt: live.updatedAt, player: { ...state.player, ...live.player } };
-}
-
-function sameMapView(a: GameState, b: GameState): boolean {
-  return a.updatedAt === b.updatedAt
-    && a.player.position.x === b.player.position.x
-    && a.player.position.z === b.player.position.z
-    && a.world.layout.key === b.world.layout.key
-    && a.world.surfaceRegions.length === b.world.surfaceRegions.length;
-}
-
-function regionsBounds(regions: WorldSurfaceRegion[]): { minX: number; minZ: number; maxX: number; maxZ: number } {
-  let minX = Infinity;
-  let minZ = Infinity;
-  let maxX = -Infinity;
-  let maxZ = -Infinity;
-  for (const r of regions) {
-    minX = Math.min(minX, r.x);
-    minZ = Math.min(minZ, r.z);
-    maxX = Math.max(maxX, r.x + r.width);
-    maxZ = Math.max(maxZ, r.z + r.depth);
-  }
-  if (!Number.isFinite(minX)) return { minX: 0, minZ: 0, maxX: 1, maxZ: 1 };
-  return { minX, minZ, maxX, maxZ };
-}
-
-function regionAtCell(regions: WorldSurfaceRegion[], x: number, z: number): WorldSurfaceRegion | null {
-  for (const r of regions) {
-    if (x >= r.x && x < r.x + r.width && z >= r.z && z < r.z + r.depth) return r;
-  }
-  return null;
-}
-
-// Trigger data + any hand-placed override live on PlacedCell, not the region.
-// The map only draws regions, so a placed cell can sit at any y over the same
-// (x,z) column; match the column and take the first hit.
-function placedCellAtColumn(placedCells: Record<string, PlacedCell>, x: number, z: number): PlacedCell | null {
-  for (const cell of Object.values(placedCells)) {
-    if (cell.cell.x === x && cell.cell.z === z) return cell;
-  }
-  return null;
-}
+const ENCLOSURES: BuildingEnclosure[] = ['sealed', 'hollow', 'interior'];
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
 }
 
-function fmtNum(n: number): string {
+function fmt(n: number): string {
   if (!Number.isFinite(n)) return n > 0 ? '∞' : '-∞';
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
-function yesNo(b: boolean): string {
-  return b ? 'yes' : 'no';
+// World bounds from the surface regions, for the initial fit + iso center.
+function worldBounds(state: GameState) {
+  let minX = Infinity, minZ = Infinity, maxX = -Infinity, maxZ = -Infinity;
+  for (const r of state.world.surfaceRegions) {
+    minX = Math.min(minX, r.x); minZ = Math.min(minZ, r.z);
+    maxX = Math.max(maxX, r.x + r.width); maxZ = Math.max(maxZ, r.z + r.depth);
+  }
+  if (!Number.isFinite(minX)) return { minX: 0, minZ: 0, maxX: 1, maxZ: 1 };
+  return { minX, minZ, maxX, maxZ };
 }
 
 function InfoRow(props: { label: string; value: string }) {
   return (
-    <Box style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+    <Box style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 12 }}>
       <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace', flexShrink: 0 }}>{props.label}</Text>
       <Text fontSize={11} color="#e2e8f0" style={{ fontFamily: 'monospace', flexShrink: 1, textAlign: 'right' }}>{props.value}</Text>
     </Box>
   );
 }
 
-function Section(props: { title: string }) {
-  return (
-    <Text fontSize={10} color="#38bdf8" style={{ fontWeight: 800, letterSpacing: 1, marginTop: 4 }}>
-      {props.title}
-    </Text>
-  );
-}
-
-function PainterButton(props: { label: string; onPress: () => void; disabled?: boolean; danger?: boolean }) {
-  const color = props.disabled ? '#475569' : props.danger ? '#fca5a5' : '#cbd5e1';
-  const border = props.disabled ? '#1e293b' : props.danger ? '#7f1d1d' : '#334155';
+function Chip(props: { label: string; active: boolean; onPress: () => void; color?: string; small?: boolean }) {
   return (
     <Pressable
-      onPress={() => { if (!props.disabled) props.onPress(); }}
-      style={{ flexGrow: 1, paddingVertical: 5, borderRadius: 4, alignItems: 'center', borderWidth: 1, borderColor: border, backgroundColor: '#0f1a2e' }}
+      onPress={props.onPress}
+      style={{
+        flexDirection: 'row', alignItems: 'center', gap: 5,
+        paddingVertical: props.small ? 3 : 5, paddingHorizontal: props.small ? 6 : 9,
+        borderRadius: 5, borderWidth: props.active ? 2 : 1,
+        borderColor: props.active ? '#f8fafc' : '#334155', backgroundColor: props.active ? '#1e293b' : '#0f1a2e',
+      }}
     >
-      <Text fontSize={10} color={color} style={{ fontWeight: 700 }}>{props.label}</Text>
+      {props.color ? <Box style={{ width: 11, height: 11, borderRadius: 2, backgroundColor: props.color }} /> : null}
+      <Text fontSize={props.small ? 9 : 10} color="#cbd5e1" style={{ fontWeight: props.active ? 700 : 500 }}>{props.label}</Text>
     </Pressable>
   );
 }
 
-// Collapsible-ish master list: world totals, then each chunk with base kind,
-// overrides, zones, buildings. Staged paint (paintedTotals) shown at top.
-function WorldTreeView(props: { tree: ReturnType<typeof buildWorldTree> }) {
-  const t = props.tree;
-  const totalEntries = Object.entries(t.worldTotals).sort((a, b) => b[1] - a[1]);
+function Btn(props: { label: string; onPress: () => void; disabled?: boolean; tone?: 'default' | 'go' | 'danger' }) {
+  const tone = props.tone ?? 'default';
+  const bg = props.disabled ? '#0f1a2e' : tone === 'go' ? '#0f3d2e' : tone === 'danger' ? '#3d1414' : '#0f1a2e';
+  const border = props.disabled ? '#1e293b' : tone === 'go' ? '#22c55e' : tone === 'danger' ? '#ef4444' : '#334155';
+  const color = props.disabled ? '#475569' : tone === 'go' ? '#86efac' : tone === 'danger' ? '#fca5a5' : '#cbd5e1';
   return (
-    <Box style={{ gap: 4 }}>
-      <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>WORLD TREE</Text>
-      <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${t.widthCells}×${t.depthCells}  ${t.layoutKey}`}</Text>
-      {t.paintedTotals ? (
-        <Text fontSize={9} color="#a7f3d0" style={{ fontFamily: 'monospace' }}>
-          {`staged: ${Object.entries(t.paintedTotals).map(([id, n]) => `${id} ${n}`).join(' · ')}`}
-        </Text>
-      ) : null}
-      <Text fontSize={9} color="#94a3b8" style={{ fontFamily: 'monospace' }}>
-        {`totals: ${totalEntries.map(([k, n]) => `${k} ${n}`).join(' · ')}`}
-      </Text>
-      {t.chunks.map((chunk) => (
-        <Box key={chunk.id} style={{ gap: 1, paddingLeft: 6, borderLeftWidth: 1, borderLeftColor: '#1e293b' }}>
-          <Text fontSize={9} color="#cbd5e1" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
-            {`${chunk.label} (${chunk.bounds.width}×${chunk.bounds.depth})`}
-          </Text>
-          <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>{`base ${chunk.baseKind} ${chunk.baseCount}`}</Text>
-          {Object.entries(chunk.overrides).map(([kind, group]) => (
-            <Text key={kind} fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${kind} ${group?.count ?? 0}`}</Text>
-          ))}
-          {chunk.zones.map((z) => (
-            <Text key={z.id} fontSize={9} color="#c084fc" style={{ fontFamily: 'monospace' }}>{`zone ${z.name}`}</Text>
-          ))}
-          {chunk.buildings.map((b) => (
-            <Text key={b.id} fontSize={9} color="#fbbf24" style={{ fontFamily: 'monospace' }}>{`${b.kind} ${b.id}`}</Text>
-          ))}
-        </Box>
-      ))}
-    </Box>
+    <Pressable
+      onPress={() => { if (!props.disabled) props.onPress(); }}
+      style={{ flexGrow: 1, paddingVertical: 6, borderRadius: 5, alignItems: 'center', borderWidth: 1, borderColor: border, backgroundColor: bg }}
+    >
+      <Text fontSize={11} color={color} style={{ fontWeight: 700 }}>{props.label}</Text>
+    </Pressable>
   );
 }
 
-export default function HmscInternalMapToolingCart() {
-  const [world, setWorld] = useState<GameState>(loadWorldState);
-  const [selected, setSelected] = useState<{ x: number; z: number } | null>(null);
-  // Building face editor: which building is loaded (by id) + the staged per-face
-  // skin choices for it. Staging mirrors the painter — choices become
-  // `wv_building face` commands on export, never a live mutation.
-  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
-  const [stagedFaces, setStagedFaces] = useState<FaceSkins | null>(null);
-  const [showBuildingCommands, setShowBuildingCommands] = useState(false);
-  const [view, setView] = useState<View>(() => {
-    const b = regionsBounds(loadWorldState().world.surfaceRegions);
-    const span = Math.max(b.maxX - b.minX, b.maxZ - b.minZ, 1);
-    return {
-      centerX: (b.minX + b.maxX) / 2,
-      centerZ: (b.minZ + b.maxZ) / 2,
-      pixelsPerTile: clamp((720 * 0.85) / span, MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE),
-    };
-  });
-  const [rect, setRect] = useState<Rect>({ x: 0, y: 0, width: 900, height: 700 });
-  const rectRef = useRef(rect);
-  const viewRef = useRef(view);
-  const dragRef = useRef<{ x: number; y: number; dist: number } | null>(null);
-  rectRef.current = rect;
-  viewRef.current = view;
+export default function HmscWorldEditorCart() {
+  // The staged world IS a GameState — the same shape the game boots from. Every
+  // tool mutates it through the game's own mutators; compile persists it.
+  const [world, setWorld] = useState<GameState>(loadEditorWorld);
+  const [tool, setTool] = useState<Tool>('inspect');
+  const [dirty, setDirty] = useState(false);
+  const [status, setStatus] = useState<string>('loaded world');
 
-  // ── Chunk painter ────────────────────────────────────────────────────
-  // Paint is a STAGING buffer: it never mutates the live world, only produces
-  // command text on export. Painting is impossible unless paintArmed is true
-  // (the drag handlers below bypass the paint branch entirely when off).
-  const PAINTABLES = PLACEABLES.filter((p) => p.paint !== 'none');
-  const [paintArmed, setPaintArmed] = useState(false);
-  const [activeId, setActiveId] = useState<string>('tile:road');
-  const [brushRadius, setBrushRadius] = useState(0);
-  const paintedRef = useRef<Map<string, string>>(new Map());
-  const [painted, setPainted] = useState<Map<string, string>>(paintedRef.current);
-  const [paintedZones, setPaintedZones] = useState<PaintedZone[]>([]);
+  // In-memory undo stack of whole-world snapshots (compile is the durable save).
+  const undoRef = useRef<GameState[]>([]);
+  const [undoDepth, setUndoDepth] = useState(0);
+
+  // Tool selections.
+  const [tileKind, setTileKind] = useState<TileKind>('sidewalk');
+  const [buildingKind, setBuildingKind] = useState<typeof BUILDING_KINDS[number]>('house');
+  const [enclosure, setEnclosure] = useState<BuildingEnclosure>('hollow');
+  const [forcePlace, setForcePlace] = useState(false);
+  const [propKind, setPropKind] = useState<PropKind>('fireHydrant');
   const [zoneName, setZoneName] = useState('District');
-  const [zoneFlags, setZoneFlags] = useState<string[]>([]);
-  const [zonePreview, setZonePreview] = useState<{ x: number; z: number; width: number; depth: number } | null>(null);
-  const [clearArmed, setClearArmed] = useState(false);
-  const [backups, setBackups] = useState<PainterBackup[]>(() => loadBackups());
-  const [showCommands, setShowCommands] = useState(false);
-  const strokeRef = useRef<{ mode: 'cell' | 'rect'; start?: { x: number; z: number } } | null>(null);
-  // In-memory undo/redo over full snapshots; histVersion bumps to refresh the
-  // enabled state (refs alone don't trigger a re-render).
-  const historyRef = useRef<{ painted: Map<string, string>; zones: PaintedZone[] }[]>([{ painted: new Map(), zones: [] }]);
-  const histIdxRef = useRef(0);
-  const [histVersion, setHistVersion] = useState(0);
-  void histVersion;
+  const [zoneFlags, setZoneFlags] = useState<ZoneFlag[]>([]);
 
-  const activePlaceable = placeableById(activeId);
-  const activePaintMode: 'cell' | 'rect' = activeId === 'erase' ? 'cell' : (activePlaceable?.paint === 'rect' ? 'rect' : 'cell');
-  const canUndo = histIdxRef.current > 0;
-  const canRedo = histIdxRef.current < historyRef.current.length - 1;
+  // Selection + hover.
+  const [selected, setSelected] = useState<{ x: number; z: number } | null>(null);
+  const [selectedBuildingId, setSelectedBuildingId] = useState<string | null>(null);
+  const hoverRef = useRef<{ x: number; z: number } | null>(null);
+  const [hover, setHover] = useState<{ x: number; z: number } | null>(null);
 
-  const syncPainted = () => setPainted(new Map(paintedRef.current));
+  // View (shared anchor for the 2D map + iso preview).
+  const [view, setView] = useState<MapView>(() => {
+    const b = worldBounds(loadEditorWorld());
+    const span = Math.max(b.maxX - b.minX, b.maxZ - b.minZ, 1);
+    return { centerX: (b.minX + b.maxX) / 2, centerZ: (b.minZ + b.maxZ) / 2, pixelsPerTile: clamp(612 / span, MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE) };
+  });
+  const [isoYaw, setIsoYaw] = useState(45);
+  const [gotoText, setGotoText] = useState('');
 
-  const screenToCell = (clientX: number, clientY: number): { x: number; z: number } => {
-    const r = rectRef.current;
-    const v = viewRef.current;
-    const px = clientX - r.x;
-    const py = clientY - r.y;
-    return {
-      x: Math.floor(v.centerX + (px - r.width / 2) / v.pixelsPerTile),
-      z: Math.floor(v.centerZ + (py - r.height / 2) / v.pixelsPerTile),
-    };
+  // ── Staging helpers ────────────────────────────────────────────────────────
+  // Every mutation snapshots first (undo), applies, and marks dirty.
+  const mutate = (next: GameState, note: string) => {
+    undoRef.current = [...undoRef.current.slice(-49), world];
+    setUndoDepth(undoRef.current.length);
+    setWorld(next);
+    setDirty(true);
+    setStatus(note);
+  };
+  const undo = () => {
+    const prev = undoRef.current.pop();
+    if (!prev) return;
+    setUndoDepth(undoRef.current.length);
+    setWorld(prev);
+    setDirty(true);
+    setStatus('undo');
   };
 
-  const stampBrush = (cell: { x: number; z: number }) => {
-    const radius = brushRadius;
-    for (let dz = -radius; dz <= radius; dz += 1) {
-      for (let dx = -radius; dx <= radius; dx += 1) {
-        if (dx * dx + dz * dz > radius * radius + radius) continue; // round-ish
-        const key = cellKeyOf(cell.x + dx, cell.z + dz);
-        if (activeId === 'erase') paintedRef.current.delete(key);
-        else paintedRef.current.set(key, activeId);
-      }
-    }
+  const compile = () => {
+    const saved = compileEditorWorld(world);
+    setWorld(saved);
+    setDirty(false);
+    setStatus(`compiled → game boots this world (${saved.world.buildings.length} buildings, ${saved.world.props.length} props)`);
+  };
+  const reset = () => {
+    const fresh = resetEditorWorld();
+    undoRef.current = [...undoRef.current.slice(-49), world];
+    setUndoDepth(undoRef.current.length);
+    setWorld(fresh);
+    setDirty(true);
+    setStatus('reset to demo world (compile to make it the booted world)');
   };
 
-  // Push a committed stroke onto the in-memory undo stack AND the persisted
-  // backup ring (restore-to-any-point), and save the working draft.
-  const commitStroke = (nextZones: PaintedZone[]) => {
-    const trimmed = historyRef.current.slice(0, histIdxRef.current + 1);
-    trimmed.push({ painted: new Map(paintedRef.current), zones: nextZones.map((z) => ({ ...z, flags: [...z.flags] })) });
-    while (trimmed.length > 60) trimmed.shift();
-    historyRef.current = trimmed;
-    histIdxRef.current = trimmed.length - 1;
-    const snap = snapshotOf(paintedRef.current, nextZones);
-    saveDraft(snap);
-    setBackups(appendBackup(snap));
-    setHistVersion((n) => n + 1);
+  // Keyboard zoom, mirroring the game's +/- feel.
+  useEffect(() => busOn('__keydown', (event: any) => {
+    const key = String(event?.key ?? '').toLowerCase();
+    if (key === '=' || key === '+') setView((v) => ({ ...v, pixelsPerTile: clamp(v.pixelsPerTile * ZOOM_STEP, MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE) }));
+    if (key === '-' || key === '_') setView((v) => ({ ...v, pixelsPerTile: clamp(v.pixelsPerTile / ZOOM_STEP, MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE) }));
+  }), []);
+
+  // ── Tool → gesture wiring ────────────────────────────────────────────────
+  const dragMode: DragMode = tool === 'tile' || tool === 'zone' ? 'rect' : tool === 'inspect' || tool === 'building' || tool === 'prop' || tool === 'bulldoze' ? 'pan' : 'pan';
+
+  const buildingFootprintAt = (cell: { x: number; z: number }) => {
+    const def = buildingKindDefinition(buildingKind);
+    const w = def.defaultWidthTiles;
+    const d = def.defaultDepthTiles;
+    return { x: cell.x - Math.floor(w / 2), z: cell.z - Math.floor(d / 2), width: w, depth: d };
   };
 
-  const loadHistoryEntry = (idx: number) => {
-    const entry = historyRef.current[idx];
-    if (!entry) return;
-    histIdxRef.current = idx;
-    paintedRef.current = new Map(entry.painted);
-    syncPainted();
-    setPaintedZones(entry.zones.map((z) => ({ ...z, flags: [...z.flags] })));
-    setHistVersion((n) => n + 1);
-  };
-  const undo = () => { if (canUndo) loadHistoryEntry(histIdxRef.current - 1); };
-  const redo = () => { if (canRedo) loadHistoryEntry(histIdxRef.current + 1); };
+  // Ghost for the placement tools, colored by validity at the hovered cell.
+  let ghost: Ghost = null;
+  if (hover && tool === 'building') {
+    const fp = buildingFootprintAt(hover);
+    const blocked = buildingFootprintBlocked(world, { x: fp.x, z: fp.z, widthTiles: fp.width, depthTiles: fp.depth });
+    ghost = { rect: fp, ok: !blocked };
+  } else if (hover && tool === 'prop') {
+    ghost = { rect: { x: hover.x, z: hover.z, width: 1, depth: 1 }, ok: true };
+  }
 
-  // Adopt a snapshot (from Load Draft or a Restore-panel click) as the live
-  // buffer, then commit it so it becomes a non-destructive new history point.
-  const adoptSnapshot = (snap: { painted: [string, string][]; zones: PaintedZone[] }) => {
-    const restored = restoreSnapshot(snap);
-    paintedRef.current = restored.painted;
-    syncPainted();
-    setPaintedZones(restored.zones);
-    commitStroke(restored.zones);
+  const onHover = (cell: { x: number; z: number }) => {
+    const prev = hoverRef.current;
+    hoverRef.current = cell;
+    // Only re-render on hover for tools that draw a ghost, and only when the cell
+    // actually changes — a same-cell mouse move must not churn the 3D preview.
+    if ((tool === 'building' || tool === 'prop') && (!prev || prev.x !== cell.x || prev.z !== cell.z)) setHover(cell);
   };
 
-  const clearPaint = () => {
-    if (!clearArmed) { setClearArmed(true); return; }
-    paintedRef.current = new Map();
-    syncPainted();
-    setPaintedZones([]);
-    setZonePreview(null);
-    commitStroke([]);
-    setClearArmed(false);
-  };
-
-  const copyCommands = () => {
-    const text = emitChunkCommands(paintedRef.current, paintedZones);
-    const host: any = globalThis;
-    if (typeof host.__clipboard_set === 'function') host.__clipboard_set(text);
-  };
-
-  const toggleZoneFlag = (flag: string) => {
-    setZoneFlags((prev) => (prev.includes(flag) ? prev.filter((f) => f !== flag) : [...prev, flag]));
-  };
-
-  // Load a building into the face editor (by footprint click or id-list click):
-  // remember its id and seed the staged faces from its current skins. Passing
-  // null clears the editor (clicked an empty cell).
-  const loadBuilding = (b: { id: string } | null) => {
-    if (!b) {
-      setSelectedBuildingId(null);
-      setStagedFaces(null);
+  const onTap = (cell: { x: number; z: number }) => {
+    if (tool === 'inspect') {
+      setSelected(cell);
+      const b = buildingAtCell(world.world.buildings, cell.x, cell.z);
+      setSelectedBuildingId(b ? b.id : null);
       return;
     }
-    const full = world.world.buildings.find((x) => x.id === b.id);
-    setSelectedBuildingId(b.id);
-    setStagedFaces(full ? currentFaceSkins(full) : null);
-  };
-  const setFace = (role: keyof FaceSkins, skin: BuildingSkin) => {
-    setStagedFaces((prev) => (prev ? { ...prev, [role]: skin } : prev));
-  };
-
-  useEffect(() => {
-    const refresh = () => {
-      const next = loadWorldState();
-      setWorld((current) => (sameMapView(current, next) ? current : next));
-    };
-    refresh();
-    const timer = setInterval(refresh, DEFAULT_LIVE_SYNC_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, []);
-
-  useEffect(() => {
-    return busOn('__keydown', (event: any) => {
-      const key = String(event?.key ?? '').toLowerCase();
-      if (key === '=' || key === '+') setView((v) => ({ ...v, pixelsPerTile: clamp(v.pixelsPerTile * ZOOM_STEP, MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE) }));
-      if (key === '-' || key === '_') setView((v) => ({ ...v, pixelsPerTile: clamp(v.pixelsPerTile / ZOOM_STEP, MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE) }));
-    });
-  }, []);
-
-  const regions = world.world.surfaceRegions;
-  const cellSize = world.world.cellSizeMeters;
-  const player = world.player;
-
-  // Paint stroke handlers — only reached when paintArmed (see the drag branches).
-  const beginPaint = (e: any) => {
-    const cell = screenToCell(Number(e?.x ?? 0), Number(e?.y ?? 0));
-    if (activePaintMode === 'rect') {
-      strokeRef.current = { mode: 'rect', start: cell };
-      setZonePreview({ x: cell.x, z: cell.z, width: 1, depth: 1 });
-    } else {
-      strokeRef.current = { mode: 'cell' };
-      stampBrush(cell);
-      syncPainted();
-    }
-  };
-  const movePaint = (e: any) => {
-    const stroke = strokeRef.current;
-    if (!stroke) return;
-    const cell = screenToCell(Number(e?.x ?? 0), Number(e?.y ?? 0));
-    if (stroke.mode === 'rect' && stroke.start) {
-      setZonePreview({
-        x: Math.min(stroke.start.x, cell.x),
-        z: Math.min(stroke.start.z, cell.z),
-        width: Math.abs(cell.x - stroke.start.x) + 1,
-        depth: Math.abs(cell.z - stroke.start.z) + 1,
+    if (tool === 'building') {
+      const fp = buildingFootprintAt(cell);
+      const result = placeBuilding(world, {
+        kind: buildingKind, x: fp.x, z: fp.z, enclosure, force: forcePlace,
       });
-    } else {
-      stampBrush(cell);
-      syncPainted();
+      if (result.ok) {
+        mutate(result.state, `placed ${result.building.kind} ${result.building.id} @ ${cellAddress(fp.x, fp.z)}`);
+        setSelectedBuildingId(result.building.id);
+      } else {
+        setStatus(`can't place: ${result.reason}`);
+      }
+      return;
+    }
+    if (tool === 'prop') {
+      const { state, prop } = placeWorldProp(world, { kind: propKind, x: cell.x + 0.5, z: cell.z + 0.5 });
+      mutate(state, `placed ${prop.kind} ${prop.id} @ ${cellAddress(cell.x, cell.z)}`);
+      return;
+    }
+    if (tool === 'bulldoze') {
+      const b = buildingAtCell(world.world.buildings, cell.x, cell.z);
+      if (b) { mutate(removeBuilding(world, b.id), `removed building ${b.id}`); return; }
+      const p = propNearPoint(world, cell.x + 0.5, cell.z + 0.5, 2);
+      if (p) { mutate(removeWorldProp(world, p.id), `removed prop ${p.id}`); return; }
+      setStatus('nothing to bulldoze here');
+      return;
     }
   };
-  const endPaint = () => {
-    const stroke = strokeRef.current;
-    strokeRef.current = null;
-    if (!stroke) return;
-    if (stroke.mode === 'rect') {
-      if (!zonePreview) return;
-      const zone: PaintedZone = { ...zonePreview, name: zoneName.trim() || 'Zone', flags: [...zoneFlags] };
-      const nextZones = [...paintedZones, zone];
-      setPaintedZones(nextZones);
-      setZonePreview(null);
-      commitStroke(nextZones);
-    } else {
-      commitStroke(paintedZones);
+
+  const onRectCommit = (rect: CellRect) => {
+    if (tool === 'tile') {
+      mutate(fillTiles(world, { kind: tileKind, x: rect.x, z: rect.z, width: rect.width, depth: rect.depth }), `filled ${tileKind} ${rect.width}×${rect.depth} @ ${cellAddress(rect.x, rect.z)}`);
+      return;
+    }
+    if (tool === 'zone') {
+      mutate(defineZone(world, { name: zoneName.trim() || 'Zone', x: rect.x, z: rect.z, width: rect.width, depth: rect.depth, flags: zoneFlags }), `zone "${zoneName}" ${rect.width}×${rect.depth} @ ${cellAddress(rect.x, rect.z)}`);
+      return;
     }
   };
 
-  const beginDrag = (e: any) => {
-    if (paintArmed) { beginPaint(e); return; }
-    dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0), dist: 0 };
-  };
-  const moveDrag = (e: any) => {
-    if (paintArmed) { movePaint(e); return; }
-    const d = dragRef.current;
-    if (!d) return;
-    const x = Number(e?.x ?? d.x);
-    const y = Number(e?.y ?? d.y);
-    const dx = x - d.x;
-    const dy = y - d.y;
-    d.dist += Math.abs(dx) + Math.abs(dy);
-    d.x = x;
-    d.y = y;
-    setView((v) => ({ ...v, centerX: v.centerX - dx / v.pixelsPerTile, centerZ: v.centerZ - dy / v.pixelsPerTile }));
-  };
-  const endDrag = (e: any) => {
-    if (paintArmed) { endPaint(); return; }
-    const d = dragRef.current;
-    dragRef.current = null;
-    if (!d || d.dist >= CLICK_DRAG_THRESHOLD_PX) return;
-    // a tap → invert the transform to a cell coordinate
-    const r = rectRef.current;
-    const v = viewRef.current;
-    const px = Number(e?.x ?? 0) - r.x;
-    const py = Number(e?.y ?? 0) - r.y;
-    const worldX = v.centerX + (px - r.width / 2) / v.pixelsPerTile;
-    const worldZ = v.centerZ + (py - r.height / 2) / v.pixelsPerTile;
-    const cellX = Math.floor(worldX);
-    const cellZ = Math.floor(worldZ);
-    setSelected({ x: cellX, z: cellZ });
-    // Tapping a building footprint loads it into the face editor; tapping bare
-    // ground clears it.
-    loadBuilding(buildingAtCell(world.world.buildings, cellX, cellZ));
-  };
-  // Wheel zoom. The map node carries overflow:'scroll' purely so the host
-  // routes the wheel here; nothing actually scrolls (content fits), but the
-  // onScroll handler still receives deltaY. Zoom is about the screen center.
-  const onScrollZoom = (payload: any) => {
-    const dz = Number(payload?.deltaY ?? 0);
-    if (!dz) return;
-    setView((v) => {
-      const next = clamp(v.pixelsPerTile * (dz > 0 ? ZOOM_STEP : 1 / ZOOM_STEP), MIN_PIXELS_PER_TILE, MAX_PIXELS_PER_TILE);
-      return next === v.pixelsPerTile ? v : { ...v, pixelsPerTile: next };
-    });
+  const goToAddress = () => {
+    const parsed = parseAddress(gotoText);
+    if (!parsed) { setStatus(`bad address "${gotoText}" — try e.g. DP119`); return; }
+    setView((v) => ({ ...v, centerX: parsed.x + 0.5, centerZ: parsed.z + 0.5 }));
+    setSelected(parsed);
+    setStatus(`jumped to ${cellAddress(parsed.x, parsed.z)}`);
   };
 
-  const [waterR, waterG, waterB] = rgb01(tileKindDefinition('water').render.color);
-  const selectedRegion = selected ? regionAtCell(regions, selected.x, selected.z) : null;
-  const selectedPlaced = selected ? placedCellAtColumn(world.world.placedCells, selected.x, selected.z) : null;
-  // Resolve the true layered kind through the shared resolver (placed > junction
-  // band > road band > surface) so the inspector reports what the GAME sees, not
-  // just placed-or-region. The region/placed records still drive the labels below.
-  const selectedKind = selected
-    ? (tileKindAtCell(world, { x: selected.x, y: selectedRegion?.y ?? 0, z: selected.z }) ?? null)
-    : null;
-  const selectedDef = selectedKind ? tileKindDefinition(selectedKind) : null;
+  // Apply a face skin directly to the staged building (no command emit).
+  const setFace = (role: typeof FACE_ROLES[number], skin: BuildingSkin) => {
+    if (!selectedBuildingId) return;
+    mutate(setBuildingFaceSkin(world, selectedBuildingId, role, skin), `${selectedBuildingId} ${role} = ${skin}`);
+  };
 
-  // Building face editor derivations. The loaded building is re-found by id every
-  // render so live sync keeps it current; `faceNow` is its on-disk per-face skin,
-  // and `buildingCommands` is the minimal `wv_building face` set for the staged
-  // edits (only the faces that differ from faceNow).
-  const selectedBuilding = selectedBuildingId
-    ? world.world.buildings.find((b) => b.id === selectedBuildingId) ?? null
-    : null;
+  // Iso preview follows the map center; dist scales inversely with zoom so the
+  // preview frames the same area you're editing. Memoized so the 3D preview's memo
+  // holds across unrelated re-renders (hover, tool switches) — only an actual
+  // center/yaw/zoom change re-solves the camera.
+  const isoView: IsoView = useMemo(() => ({
+    centerX: view.centerX,
+    centerZ: view.centerZ,
+    yawDegrees: isoYaw,
+    distMeters: clamp(900 / view.pixelsPerTile, 24, 320),
+  }), [view.centerX, view.centerZ, view.pixelsPerTile, isoYaw]);
+
+  // ── Derived inspector data ──────────────────────────────────────────────
+  const selKind = selected ? tileKindAtCell(world, { x: selected.x, y: 0, z: selected.z }) ?? null : null;
+  const selDef = selKind ? tileKindDefinition(selKind) : null;
+  const selectedBuilding = selectedBuildingId ? world.world.buildings.find((b) => b.id === selectedBuildingId) ?? null : null;
   const faceNow = selectedBuilding ? currentFaceSkins(selectedBuilding) : null;
-  const buildingCommands = selectedBuilding && faceNow && stagedFaces
-    ? faceSkinCommands(selectedBuilding.id, faceNow, stagedFaces)
-    : [];
-  const copyBuildingCommands = () => {
-    const host: any = globalThis;
-    if (buildingCommands.length && typeof host.__clipboard_set === 'function') {
-      host.__clipboard_set(buildingCommands.join('\n'));
-    }
-  };
 
-  // Building footprints drawn as a non-blocking TSX overlay (labels + facade
-  // color) over the shader raster — same landmarks the minimap shows, one source.
-  const allMarkers = worldMarkers(world);
-  const buildingMarkers = allMarkers.filter((m) => m.layer === 'building');
-  const zoneMarkers = allMarkers.filter((m) => m.layer === 'zone');
-  const mountainMarkers = allMarkers.filter((m) => m.layer === 'mountain');
-  const propMarkers = allMarkers.filter((m) => m.layer === 'prop');
-
-  // World -> screen-pixel transform (the inverse of endDrag's tap math).
-  const ppt = view.pixelsPerTile;
-  const sx = (wx: number) => (wx - view.centerX) * ppt + rect.width / 2;
-  const sz = (wz: number) => (wz - view.centerZ) * ppt + rect.height / 2;
-  const roadColor = tileKindDefinition('road').render.color;
-  const sidewalkColor = tileKindDefinition('sidewalk').render.color;
-  const culDeSacs = world.world.junctions.filter((j) => j.kind === 'culDeSac');
-
-  // Header (14 floats) + 6 floats per region: minX, minZ, width, depth, matId,
-  // variant. Roads + junctions are prepended so they draw OVER the base chunks —
-  // the shader breaks on the FIRST region containing a cell, so lower index wins.
-  const roadMatId = tileFillMaterialId('road');
-  const roadVariant = tileFillVariant('road');
-  type MapRegion = { x: number; z: number; w: number; d: number; matId: number; variant: number };
-  const mapRegions: MapRegion[] = [];
-  // Painted tile cells render live, FIRST (highest priority), through the same
-  // raster — decomposed into rects so a solid fill is one region, not N cells.
-  for (const pr of paintedTileRects(painted)) {
-    mapRegions.push({ x: pr.x, z: pr.z, w: pr.width, d: pr.depth, matId: tileFillMaterialId(pr.kind as any), variant: tileFillVariant(pr.kind as any) });
-  }
-  for (const road of world.world.roads) {
-    const f = roadFootprint(road);
-    mapRegions.push({ x: f.minX, z: f.minZ, w: f.maxX - f.minX, d: f.maxZ - f.minZ, matId: roadMatId, variant: roadVariant });
-  }
-  for (const junction of world.world.junctions) {
-    // Cul-de-sacs are a circle + center island, not a square — drawn as a shaped
-    // overlay below. Intersections ARE square, so the rect is faithful.
-    if (junction.kind !== 'intersection') continue;
-    const f = junctionFootprint(junction);
-    mapRegions.push({ x: f.minX, z: f.minZ, w: f.maxX - f.minX, d: f.maxZ - f.minZ, matId: roadMatId, variant: roadVariant });
-  }
-  for (const r of regions) {
-    mapRegions.push({ x: r.x, z: r.z, w: r.width, d: r.depth, matId: tileFillMaterialId(r.kind), variant: tileFillVariant(r.kind) });
-  }
-  const data = [
-    rect.width, rect.height,
-    view.centerX, view.centerZ, view.pixelsPerTile,
-    selected ? selected.x : 0, selected ? selected.z : 0, selected ? 1 : 0,
-    player.position.x / cellSize, player.position.z / cellSize,
-    waterR, waterG, waterB,
-    mapRegions.length,
-  ];
-  for (const mr of mapRegions) {
-    data.push(mr.x, mr.z, mr.w, mr.d, mr.matId, mr.variant);
-  }
+  const activeHint = TOOLS.find((t) => t.id === tool)?.hint ?? '';
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#080d16', flexDirection: 'column' }}>
-      <Box style={{ height: 52, paddingLeft: 16, paddingRight: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#1f2937', backgroundColor: '#111827' }}>
-        <Box>
-          <Text fontSize={14} color="#f8fafc" style={{ fontWeight: 800 }}>HMSC INTERNAL MAP</Text>
-          <Text fontSize={10} color="#94a3b8" style={{ fontFamily: 'monospace' }}>
-            {`layout ${world.world.layout.widthCells}×${world.world.layout.depthCells}  one shader quad  drag to pan, +/- to zoom, click a tile`}
-          </Text>
+      {/* Top bar: title + tool belt + actions. */}
+      <Box style={{ paddingLeft: 14, paddingRight: 14, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#1f2937', backgroundColor: '#111827', gap: 8 }}>
+        <Box style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+          <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <Text fontSize={14} color="#f8fafc" style={{ fontWeight: 800 }}>HMSC WORLD EDITOR</Text>
+            <Text fontSize={10} color={dirty ? '#fbbf24' : '#475569'} style={{ fontFamily: 'monospace' }}>{dirty ? '● uncompiled' : '○ compiled'}</Text>
+          </Box>
+          <Box style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+            <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+              <TextInput text={gotoText} onChangeText={setGotoText} placeholder="goto DP119" style={{ width: 96, backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#334155', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 3, color: '#e2e8f0', fontSize: 11 }} />
+              <Pressable onPress={goToAddress} style={{ paddingVertical: 4, paddingHorizontal: 8, borderRadius: 4, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f1a2e' }}>
+                <Text fontSize={10} color="#cbd5e1">Go</Text>
+              </Pressable>
+            </Box>
+            <Pressable onPress={undo} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 5, borderWidth: 1, borderColor: undoDepth ? '#334155' : '#1e293b', backgroundColor: '#0f1a2e' }}>
+              <Text fontSize={10} color={undoDepth ? '#cbd5e1' : '#475569'} style={{ fontWeight: 700 }}>{`Undo (${undoDepth})`}</Text>
+            </Pressable>
+            <Pressable onPress={reset} style={{ paddingVertical: 5, paddingHorizontal: 10, borderRadius: 5, borderWidth: 1, borderColor: '#7f1d1d', backgroundColor: '#3d1414' }}>
+              <Text fontSize={10} color="#fca5a5" style={{ fontWeight: 700 }}>Reset</Text>
+            </Pressable>
+            <Pressable onPress={compile} style={{ paddingVertical: 5, paddingHorizontal: 14, borderRadius: 5, borderWidth: 1, borderColor: '#22c55e', backgroundColor: dirty ? '#0f3d2e' : '#0f1a2e' }}>
+              <Text fontSize={11} color={dirty ? '#86efac' : '#4ade80'} style={{ fontWeight: 800, letterSpacing: 1 }}>COMPILE</Text>
+            </Pressable>
+          </Box>
         </Box>
-        <Text fontSize={10} color="#475569" style={{ fontFamily: 'monospace' }}>
-          {`${view.pixelsPerTile.toFixed(1)} px/tile  ${readLivePlayerSnapshot() ? 'live: synced' : 'live: initial'}`}
-        </Text>
+        <Box style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
+          {TOOLS.map((t) => (
+            <Chip key={t.id} label={t.label} active={tool === t.id} onPress={() => setTool(t.id)} />
+          ))}
+          <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace', marginLeft: 8 }}>{activeHint}</Text>
+        </Box>
       </Box>
 
       <Box style={{ flexGrow: 1, flexDirection: 'row', minHeight: 0 }}>
-        <Pressable
-          onLayout={(lr: any) => setRect({ x: Number(lr?.x ?? 0), y: Number(lr?.y ?? 0), width: Number(lr?.width ?? 900), height: Number(lr?.height ?? 700) })}
-          onMouseDown={beginDrag}
-          onMouseMove={moveDrag}
-          onMouseUp={endDrag}
-          onScroll={onScrollZoom}
-          style={{ flexGrow: 1, position: 'relative', overflow: 'scroll' }}
-        >
-          <Effect shader={MAP_SHADER} data={data} style={{ width: '100%', height: '100%' }} />
-          {/* Building landmarks: facade-colored, labeled, non-blocking so the
-              map below still receives drag/click. Footprint -> screen via the
-              same transform endDrag inverts. */}
-          <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', overflow: 'hidden' }}>
-            {/* Road centerlines (double-yellow), drawn first so the cul-de-sac
-                bulb below covers the line where it meets the circle. */}
-            {world.world.roads.map((r) => {
-              const f = roadFootprint(r);
-              if (r.orientation === 'northSouth') {
-                return <Box key={r.id} style={{ position: 'absolute', left: sx((f.minX + f.maxX) / 2) - 1, top: sz(f.minZ), width: 2, height: (f.maxZ - f.minZ) * ppt, backgroundColor: '#fde047' }} />;
-              }
-              return <Box key={r.id} style={{ position: 'absolute', left: sx(f.minX), top: sz((f.minZ + f.maxZ) / 2) - 1, width: (f.maxX - f.minX) * ppt, height: 2, backgroundColor: '#fde047' }} />;
-            })}
-            {/* Cul-de-sac: drivable road bulb (circle) + landscaped center island
-                — the shader can only draw the square footprint, so its true round
-                shape + center lives here. */}
-            {culDeSacs.map((j) => {
-              const bulb = j.bulbRadiusTiles * ppt;
-              const island = HMSC_ROAD_SCALE.culDeSacIslandRadiusMeters * ppt;
-              const cx = sx(j.centerX);
-              const cz = sz(j.centerZ);
-              return (
-                <Box key={j.id}>
-                  <Box style={{ position: 'absolute', left: cx - bulb, top: cz - bulb, width: bulb * 2, height: bulb * 2, borderRadius: bulb, backgroundColor: roadColor }} />
-                  <Box style={{ position: 'absolute', left: cx - island, top: cz - island, width: island * 2, height: island * 2, borderRadius: island, backgroundColor: sidewalkColor, borderWidth: 1, borderColor: '#3f4654' }} />
-                </Box>
-              );
-            })}
-            {/* Mountains (scenery landform): translucent fill + outline + name,
-                so the big landform reads as one mass. */}
-            {mountainMarkers.map((m) => {
-              const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
-              const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
-              const w = m.width * view.pixelsPerTile;
-              const h = m.depth * view.pixelsPerTile;
-              const ringAlpha = ['40', '70', 'b0'];
-              return (
-                <Box key={m.id} style={{ position: 'absolute', left, top, width: w, height: h, alignItems: 'center', justifyContent: 'center' }}>
-                  {[1, 0.62, 0.3].map((fr, i) => (
-                    <Box key={i} style={{ position: 'absolute', left: (w - w * fr) / 2, top: (h - h * fr) / 2, width: w * fr, height: h * fr, borderRadius: (Math.min(w, h) * fr) / 2, backgroundColor: `${m.swatchColor}${ringAlpha[i]}`, borderWidth: i === 0 ? 2 : 1, borderColor: '#2b241a' }} />
-                  ))}
-                  {w > 36 ? <Text fontSize={10} color="#fdf6e3" style={{ fontWeight: 800 }}>{m.label}</Text> : null}
-                </Box>
-              );
-            })}
-            {/* Zones (under buildings): translucent fill + outline + name,
-                colored by flag via worldView.zoneSwatch. */}
-            {zoneMarkers.map((m) => {
-              const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
-              const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
-              const w = m.width * view.pixelsPerTile;
-              const h = m.depth * view.pixelsPerTile;
-              return (
-                <Box
-                  key={m.id}
-                  style={{ position: 'absolute', left, top, width: w, height: h, backgroundColor: `${m.swatchColor}22`, borderWidth: 1, borderColor: m.swatchColor, overflow: 'hidden' }}
-                >
-                  {w > 30 && h > 16 ? (
-                    <Text fontSize={9} color={m.swatchColor} style={{ fontWeight: 800, padding: 2 }}>{m.label}</Text>
-                  ) : null}
-                </Box>
-              );
-            })}
-            {buildingMarkers.map((m) => {
-              const left = (m.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
-              const top = (m.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
-              const w = m.width * view.pixelsPerTile;
-              const h = m.depth * view.pixelsPerTile;
-              return (
-                <Box
-                  key={m.id}
-                  style={{ position: 'absolute', left, top, width: w, height: h, backgroundColor: `${m.swatchColor}aa`, borderWidth: 1, borderColor: m.swatchColor, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }}
-                >
-                  {w > 26 && h > 14 ? (
-                    <Text fontSize={9} color="#0b1018" style={{ fontWeight: 800 }}>{m.label}</Text>
-                  ) : null}
-                </Box>
-              );
-            })}
-            {/* Props (hydrants, bushes, signs…) as min-size dots — point furniture,
-                so a fixed-floor size keeps them visible at any zoom. */}
-            {propMarkers.map((m) => {
-              const size = Math.max(5, m.width * view.pixelsPerTile);
-              const cx = (m.x + m.width / 2 - view.centerX) * view.pixelsPerTile + rect.width / 2;
-              const cz = (m.z + m.depth / 2 - view.centerZ) * view.pixelsPerTile + rect.height / 2;
-              return (
-                <Box key={m.id} style={{ position: 'absolute', left: cx - size / 2, top: cz - size / 2, width: size, height: size, borderRadius: size / 2, backgroundColor: m.swatchColor, borderWidth: 1, borderColor: '#0b1018' }} />
-              );
-            })}
-            {/* Staged (un-exported) zones from the painter, brighter + dashed-ish. */}
-            {paintedZones.map((z, i) => {
-              const left = (z.x - view.centerX) * view.pixelsPerTile + rect.width / 2;
-              const top = (z.z - view.centerZ) * view.pixelsPerTile + rect.height / 2;
-              return (
-                <Box key={`pz_${i}`} style={{ position: 'absolute', left, top, width: z.width * view.pixelsPerTile, height: z.depth * view.pixelsPerTile, backgroundColor: '#d8b4fe22', borderWidth: 2, borderColor: '#d8b4fe', overflow: 'hidden' }}>
-                  <Text fontSize={9} color="#d8b4fe" style={{ fontWeight: 800, padding: 2 }}>{z.name}</Text>
-                </Box>
-              );
-            })}
-            {zonePreview ? (
-              <Box style={{ position: 'absolute', left: (zonePreview.x - view.centerX) * view.pixelsPerTile + rect.width / 2, top: (zonePreview.z - view.centerZ) * view.pixelsPerTile + rect.height / 2, width: zonePreview.width * view.pixelsPerTile, height: zonePreview.depth * view.pixelsPerTile, backgroundColor: '#f0abfc33', borderWidth: 2, borderColor: '#f0abfc' }} />
-            ) : null}
-          </Box>
-          {/* Armed border: unmistakable signal that a click WILL paint. */}
-          {paintArmed ? (
-            <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, pointerEvents: 'none', borderWidth: 3, borderColor: '#f59e0b' }} />
-          ) : null}
-        </Pressable>
+        {/* 2D placement canvas. */}
+        <MapCanvas
+          state={world}
+          view={view}
+          onView={setView}
+          selected={selected}
+          dragMode={dragMode}
+          ghost={ghost}
+          onTap={onTap}
+          onPaintCell={undefined}
+          onRectCommit={onRectCommit}
+          onHover={onHover}
+        />
 
-        <Box style={{ width: 340, backgroundColor: '#0b1424', borderLeftWidth: 1, borderLeftColor: '#1e293b', flexDirection: 'column', minHeight: 0 }}>
-          <ScrollView style={{ flexGrow: 1, height: '100%' }} contentContainerStyle={{ padding: 18, gap: 12 }}>
-            <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>CHUNK PAINTER</Text>
-            <Pressable onPress={() => setPaintArmed((a) => !a)} style={{ paddingVertical: 8, borderRadius: 6, alignItems: 'center', backgroundColor: paintArmed ? '#f59e0b' : '#1e293b' }}>
-              <Text fontSize={12} color={paintArmed ? '#0b1018' : '#94a3b8'} style={{ fontWeight: 800, letterSpacing: 1 }}>{paintArmed ? 'PAINT: ON' : 'PAINT: OFF'}</Text>
-            </Pressable>
-            {paintArmed ? (
-              <Box style={{ gap: 8 }}>
+        {/* Right column: iso preview + tool panel + inspector. */}
+        <Box style={{ width: 360, backgroundColor: '#0b1424', borderLeftWidth: 1, borderLeftColor: '#1e293b', flexDirection: 'column', minHeight: 0 }}>
+          {/* Live iso-3D preview of the staged world (the game's own renderer). */}
+          <Box style={{ height: 280, borderBottomWidth: 1, borderBottomColor: '#1e293b', position: 'relative' }}>
+            <IsoPreview state={world} view={isoView} />
+            <Box style={{ position: 'absolute', left: 8, top: 8, flexDirection: 'row', gap: 4 }}>
+              <Pressable onPress={() => setIsoYaw((y) => y - 45)} style={{ width: 26, height: 22, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1424cc', borderWidth: 1, borderColor: '#334155' }}>
+                <Text fontSize={11} color="#cbd5e1">↺</Text>
+              </Pressable>
+              <Pressable onPress={() => setIsoYaw((y) => y + 45)} style={{ width: 26, height: 22, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1424cc', borderWidth: 1, borderColor: '#334155' }}>
+                <Text fontSize={11} color="#cbd5e1">↻</Text>
+              </Pressable>
+            </Box>
+            <Text fontSize={9} color="#475569" style={{ fontFamily: 'monospace', position: 'absolute', right: 8, top: 10 }}>preview · yaw {isoYaw % 360}°</Text>
+          </Box>
+
+          <ScrollView style={{ flexGrow: 1, height: '100%' }} contentContainerStyle={{ padding: 14, gap: 10 }}>
+            {/* Per-tool panel. */}
+            {tool === 'tile' ? (
+              <Box style={{ gap: 6 }}>
+                <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>TILE FILL</Text>
                 <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                  {PAINTABLES.map((p) => (
-                    <Pressable key={p.id} onPress={() => setActiveId(p.id)} style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingVertical: 3, paddingHorizontal: 6, borderRadius: 4, borderWidth: activeId === p.id ? 2 : 1, borderColor: activeId === p.id ? '#f8fafc' : '#334155', backgroundColor: '#0f1a2e' }}>
-                      <Box style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: p.swatchColor }} />
-                      <Text fontSize={10} color="#cbd5e1">{p.label}</Text>
-                    </Pressable>
+                  {TILE_KINDS.map((k) => (
+                    <Chip key={k} small label={tileKindDefinition(k).label} active={tileKind === k} color={tileKindDefinition(k).render.color} onPress={() => setTileKind(k)} />
                   ))}
-                  <Pressable onPress={() => setActiveId('erase')} style={{ paddingVertical: 3, paddingHorizontal: 6, borderRadius: 4, borderWidth: activeId === 'erase' ? 2 : 1, borderColor: activeId === 'erase' ? '#f8fafc' : '#334155', backgroundColor: '#0f1a2e' }}>
-                    <Text fontSize={10} color="#cbd5e1">Erase</Text>
-                  </Pressable>
                 </Box>
-                {activePaintMode === 'cell' ? (
-                  <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text fontSize={10} color="#64748b">brush</Text>
-                    {[0, 1, 2, 3].map((r) => (
-                      <Pressable key={r} onPress={() => setBrushRadius(r)} style={{ width: 22, height: 22, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: brushRadius === r ? 2 : 1, borderColor: brushRadius === r ? '#f8fafc' : '#334155' }}>
-                        <Text fontSize={10} color="#cbd5e1">{r}</Text>
-                      </Pressable>
-                    ))}
-                  </Box>
-                ) : (
-                  <Box style={{ gap: 4 }}>
-                    <Text fontSize={10} color="#64748b">zone name</Text>
-                    <TextInput text={zoneName} onChangeText={(t: string) => setZoneName(t)} style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#334155', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 4, color: '#e2e8f0', fontSize: 11 }} />
-                    <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-                      {['private', 'safe', 'hostile', 'restricted'].map((f) => (
-                        <Pressable key={f} onPress={() => toggleZoneFlag(f)} style={{ paddingVertical: 2, paddingHorizontal: 6, borderRadius: 4, borderWidth: 1, borderColor: zoneFlags.includes(f) ? '#f0abfc' : '#334155', backgroundColor: zoneFlags.includes(f) ? '#3b1d52' : '#0f1a2e' }}>
-                          <Text fontSize={9} color="#cbd5e1">{f}</Text>
-                        </Pressable>
-                      ))}
-                    </Box>
-                    <Text fontSize={9} color="#64748b">drag on the map to box a zone</Text>
-                  </Box>
-                )}
-                <Box style={{ flexDirection: 'row', gap: 6 }}>
-                  <PainterButton label="Undo" disabled={!canUndo} onPress={undo} />
-                  <PainterButton label="Redo" disabled={!canRedo} onPress={redo} />
-                  <PainterButton label={clearArmed ? 'Confirm?' : 'Clear'} danger onPress={clearPaint} />
-                </Box>
-                <Box style={{ flexDirection: 'row', gap: 6 }}>
-                  <PainterButton label="Save draft" onPress={() => saveDraft(snapshotOf(paintedRef.current, paintedZones))} />
-                  <PainterButton label="Load draft" onPress={() => { const d = loadDraft(); if (d) adoptSnapshot(d); }} />
-                </Box>
-                <Box style={{ flexDirection: 'row', gap: 6 }}>
-                  <PainterButton label="Copy commands" onPress={copyCommands} />
-                  <PainterButton label={showCommands ? 'Hide' : 'Show'} onPress={() => setShowCommands((s) => !s)} />
-                </Box>
-                {showCommands ? (
-                  <Box style={{ minHeight: 60, backgroundColor: '#0b1320', borderWidth: 1, borderColor: '#334155', borderRadius: 4, padding: 6 }}>
-                    <Text fontSize={10} color="#a7f3d0" style={{ fontFamily: 'monospace' }}>{emitChunkCommands(painted, paintedZones) || '(paint something)'}</Text>
-                  </Box>
-                ) : null}
-                {backups.length ? (
-                  <Box style={{ gap: 3 }}>
-                    <Text fontSize={10} color="#64748b" style={{ letterSpacing: 1 }}>{`RESTORE (${backups.length})`}</Text>
-                    {backups.slice().reverse().slice(0, 8).map((b, i) => (
-                      <Pressable key={`${b.at}_${i}`} onPress={() => adoptSnapshot(b.snapshot)} style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 3, paddingHorizontal: 6, borderRadius: 4, backgroundColor: '#0f1a2e' }}>
-                        <Text fontSize={9} color="#94a3b8" style={{ fontFamily: 'monospace' }}>{b.at.slice(11, 19)}</Text>
-                        <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${b.snapshot.painted.length}c ${b.snapshot.zones.length}z`}</Text>
-                      </Pressable>
-                    ))}
-                  </Box>
-                ) : null}
+                <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>drag a rectangle on the map to fill it with {tileKind}</Text>
               </Box>
             ) : null}
 
-            <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-            <WorldTreeView tree={buildWorldTree(world, painted)} />
-
-            <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-            <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>BUILDING FACES</Text>
-            <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>click a footprint on the map, or load an id below</Text>
-            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-              {world.world.buildings.map((b) => (
-                <Pressable
-                  key={b.id}
-                  onPress={() => loadBuilding(b)}
-                  style={{ paddingVertical: 3, paddingHorizontal: 6, borderRadius: 4, borderWidth: selectedBuildingId === b.id ? 2 : 1, borderColor: selectedBuildingId === b.id ? '#fbbf24' : '#334155', backgroundColor: '#0f1a2e' }}
-                >
-                  <Text fontSize={9} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{b.id}</Text>
-                </Pressable>
-              ))}
-              {world.world.buildings.length === 0 ? (
-                <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>no buildings placed</Text>
-              ) : null}
-            </Box>
-            {selectedBuilding && stagedFaces && faceNow ? (
+            {tool === 'building' ? (
               <Box style={{ gap: 6 }}>
+                <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>BUILDING</Text>
+                <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                  {BUILDING_KINDS.map((k) => (
+                    <Chip key={k} small label={buildingKindDefinition(k).label} active={buildingKind === k} color={swatchColorForId(`building:${k}`)} onPress={() => setBuildingKind(k)} />
+                  ))}
+                </Box>
+                <Box style={{ flexDirection: 'row', gap: 4, alignItems: 'center' }}>
+                  <Text fontSize={9} color="#64748b">enclosure</Text>
+                  {ENCLOSURES.map((e) => (
+                    <Chip key={e} small label={e} active={enclosure === e} onPress={() => setEnclosure(e)} />
+                  ))}
+                </Box>
+                <Chip label={forcePlace ? 'force: ON (ignore road/overlap rules)' : 'force: OFF (snap to road, no overlap)'} active={forcePlace} onPress={() => setForcePlace((f) => !f)} />
+                <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>
+                  {(() => { const d = buildingKindDefinition(buildingKind); return `${d.defaultWidthTiles}×${d.defaultDepthTiles}m, ${d.storeys} storey — click to place`; })()}
+                </Text>
+              </Box>
+            ) : null}
+
+            {tool === 'prop' ? (
+              <Box style={{ gap: 6 }}>
+                <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>PROP</Text>
+                <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                  {PROP_KINDS.map((k) => (
+                    <Chip key={k} small label={propKindDefinition(k).label} active={propKind === k} onPress={() => setPropKind(k)} />
+                  ))}
+                </Box>
+                <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>click to drop a {propKindDefinition(propKind).label}</Text>
+              </Box>
+            ) : null}
+
+            {tool === 'zone' ? (
+              <Box style={{ gap: 6 }}>
+                <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>ZONE</Text>
+                <TextInput text={zoneName} onChangeText={setZoneName} style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#334155', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 4, color: '#e2e8f0', fontSize: 11 }} />
+                <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+                  {ZONE_FLAGS.map((f) => (
+                    <Chip key={f} small label={f} active={zoneFlags.includes(f)} onPress={() => setZoneFlags((prev) => prev.includes(f) ? prev.filter((x) => x !== f) : [...prev, f])} />
+                  ))}
+                </Box>
+                <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>drag a rectangle to define the zone</Text>
+              </Box>
+            ) : null}
+
+            {tool === 'bulldoze' ? (
+              <Box style={{ gap: 6 }}>
+                <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>BULLDOZE</Text>
+                <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>click a building or prop on the map to remove it</Text>
+              </Box>
+            ) : null}
+
+            {/* Building face editor — appears whenever a building is selected. */}
+            {selectedBuilding && faceNow ? (
+              <Box style={{ gap: 6, borderTopWidth: 1, borderTopColor: '#1e293b', paddingTop: 10 }}>
+                <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>BUILDING FACES</Text>
                 <InfoRow label="id" value={selectedBuilding.id} />
                 <InfoRow label="kind" value={`${selectedBuilding.kind} (${selectedBuilding.enclosure})`} />
                 <InfoRow label="door" value={selectedBuilding.doorSide} />
-                {FACE_ROLES.map((role) => {
-                  const changed = stagedFaces[role] !== faceNow[role];
-                  return (
-                    <Box key={role} style={{ gap: 3 }}>
-                      <Box style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <Text fontSize={10} color="#38bdf8" style={{ fontWeight: 700, letterSpacing: 1 }}>{role.toUpperCase()}</Text>
-                        <Text fontSize={9} color={changed ? '#fbbf24' : '#64748b'} style={{ fontFamily: 'monospace' }}>
-                          {changed ? `${faceNow[role]} → ${stagedFaces[role]}` : faceNow[role]}
-                        </Text>
-                      </Box>
-                      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
-                        {SKIN_NAMES.map((skin) => (
-                          <Pressable
-                            key={skin}
-                            onPress={() => setFace(role, skin as BuildingSkin)}
-                            style={{ paddingVertical: 2, paddingHorizontal: 5, borderRadius: 3, borderWidth: stagedFaces[role] === skin ? 2 : 1, borderColor: stagedFaces[role] === skin ? '#f8fafc' : '#334155', backgroundColor: '#0f1a2e' }}
-                          >
-                            <Text fontSize={9} color="#cbd5e1">{skin}</Text>
-                          </Pressable>
-                        ))}
-                      </Box>
+                <InfoRow label="at" value={cellAddress(Math.round(selectedBuilding.x), Math.round(selectedBuilding.z))} />
+                {FACE_ROLES.map((role) => (
+                  <Box key={role} style={{ gap: 3 }}>
+                    <Box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                      <Text fontSize={10} color="#38bdf8" style={{ fontWeight: 700, letterSpacing: 1 }}>{role.toUpperCase()}</Text>
+                      <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>{faceNow[role]}</Text>
                     </Box>
-                  );
-                })}
-                <Box style={{ flexDirection: 'row', gap: 6 }}>
-                  <PainterButton label={`Copy (${buildingCommands.length})`} disabled={!buildingCommands.length} onPress={copyBuildingCommands} />
-                  <PainterButton label={showBuildingCommands ? 'Hide' : 'Show'} onPress={() => setShowBuildingCommands((s) => !s)} />
-                  <PainterButton label="Reset" disabled={!buildingCommands.length} onPress={() => setStagedFaces(currentFaceSkins(selectedBuilding))} />
-                </Box>
-                {showBuildingCommands ? (
-                  <Box style={{ minHeight: 40, backgroundColor: '#0b1320', borderWidth: 1, borderColor: '#334155', borderRadius: 4, padding: 6 }}>
-                    <Text fontSize={10} color="#a7f3d0" style={{ fontFamily: 'monospace' }}>
-                      {buildingCommands.join('\n') || '(no changes — pick a different skin per face)'}
-                    </Text>
+                    <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
+                      {SKIN_NAMES.map((skin) => (
+                        <Chip key={skin} small label={skin} active={faceNow[role] === skin} onPress={() => setFace(role, skin as BuildingSkin)} />
+                      ))}
+                    </Box>
                   </Box>
-                ) : null}
+                ))}
+                <Btn label="Remove building" tone="danger" onPress={() => { mutate(removeBuilding(world, selectedBuilding.id), `removed ${selectedBuilding.id}`); setSelectedBuildingId(null); }} />
               </Box>
-            ) : (
-              <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>no building loaded</Text>
-            )}
+            ) : null}
 
-            <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-            <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>TILE DIAGNOSTICS</Text>
-            {selected ? (
-              <Box style={{ gap: 6 }}>
-                <Section title="CELL" />
-                <InfoRow label="cell" value={`${selected.x}, ${selectedRegion ? selectedRegion.y : 0}, ${selected.z}`} />
-                <InfoRow label="chunk" value={selectedRegion ? selectedRegion.id : 'none (void)'} />
-                {selectedRegion ? <InfoRow label="region label" value={selectedRegion.label} /> : null}
-                {selectedRegion ? <InfoRow label="zone" value={selectedRegion.zoneKey} /> : null}
-                {selectedRegion ? <InfoRow label="region size" value={`${selectedRegion.width}×${selectedRegion.depth}`} /> : null}
-                {selectedPlaced ? <InfoRow label="placed" value={selectedPlaced.key} /> : null}
-                {selectedPlaced ? <InfoRow label="placed by" value={selectedPlaced.createdByCommand} /> : null}
-                {selectedPlaced?.triggerCommand ? <InfoRow label="trigger cmd" value={selectedPlaced.triggerCommand} /> : null}
-                {selectedPlaced?.triggerLabel ? <InfoRow label="trigger label" value={selectedPlaced.triggerLabel} /> : null}
-
-                {selectedDef ? (
-                  <Box style={{ gap: 6 }}>
-                    <Section title="KIND" />
-                    <InfoRow label="kind" value={selectedDef.kind} />
-                    <InfoRow label="label" value={selectedDef.label} />
-
-                    <Section title="PATHING" />
-                    <InfoRow label="walkable" value={yesNo(selectedDef.pathing.walkable)} />
-                    <InfoRow label="movementCost" value={fmtNum(selectedDef.pathing.movementCost)} />
-                    <InfoRow label="blocksLoS" value={yesNo(selectedDef.pathing.blocksLineOfSight)} />
-
-                    <Section title="SURFACE" />
-                    <InfoRow label="material" value={selectedDef.surface.material} />
-                    <InfoRow label="walkSpeed×" value={fmtNum(selectedDef.surface.walkSpeedMultiplier)} />
-                    <InfoRow label="runSpeed×" value={fmtNum(selectedDef.surface.runSpeedMultiplier)} />
-                    <InfoRow label="vehSpeed×" value={fmtNum(selectedDef.surface.vehicleSpeedMultiplier)} />
-                    <InfoRow label="accel×" value={fmtNum(selectedDef.surface.accelerationMultiplier)} />
-                    <InfoRow label="friction" value={fmtNum(selectedDef.surface.friction)} />
-                    <InfoRow label="lateralGrip" value={fmtNum(selectedDef.surface.lateralGrip)} />
-                    <InfoRow label="restitution" value={fmtNum(selectedDef.surface.restitution)} />
-
-                    <Section title="TRAVERSAL" />
-                    <InfoRow label="modes" value={selectedDef.traversal.allowedModes.join(', ') || 'none'} />
-                    <InfoRow label="width" value={selectedDef.traversal.width} />
-                    <InfoRow label="maxStepUp m" value={fmtNum(selectedDef.traversal.maxStepUpMeters)} />
-                    <InfoRow label="minClear m" value={fmtNum(selectedDef.traversal.minClearanceMeters)} />
-                    <InfoRow label="slopeLimit°" value={fmtNum(selectedDef.traversal.slopeLimitDegrees)} />
-                    <InfoRow label="crouch" value={yesNo(selectedDef.traversal.requiresCrouch)} />
-                    <InfoRow label="mantle" value={yesNo(selectedDef.traversal.requiresMantle)} />
-                    <InfoRow label="vehGrip×" value={fmtNum(selectedDef.traversal.vehicleGripMultiplier)} />
-
-                    <Section title="COVER" />
-                    <InfoRow label="height" value={selectedDef.cover.height} />
-                    <InfoRow label="protection" value={fmtNum(selectedDef.cover.protection)} />
-                    <InfoRow label="concealment" value={fmtNum(selectedDef.cover.concealment)} />
-                    <InfoRow label="shootOver" value={yesNo(selectedDef.cover.shootOver)} />
-                    <InfoRow label="leanAround" value={yesNo(selectedDef.cover.leanAround)} />
-                    <InfoRow label="crouchReq" value={yesNo(selectedDef.cover.crouchRequired)} />
-
-                    <Section title="VISIBILITY" />
-                    <InfoRow label="opacity" value={fmtNum(selectedDef.visibility.opacity)} />
-                    <InfoRow label="concealment" value={fmtNum(selectedDef.visibility.concealment)} />
-                    <InfoRow label="lightTrans" value={fmtNum(selectedDef.visibility.lightTransmission)} />
-                    <InfoRow label="soundOcc" value={fmtNum(selectedDef.visibility.soundOcclusion)} />
-                    <InfoRow label="blocksLoS" value={yesNo(selectedDef.visibility.blocksLineOfSight)} />
-
-                    <Section title="NPC" />
-                    <InfoRow label="traversable" value={yesNo(selectedDef.npc.traversable)} />
-                    <InfoRow label="walkCost" value={fmtNum(selectedDef.npc.walkCost)} />
-                    <InfoRow label="runCost" value={fmtNum(selectedDef.npc.runCost)} />
-                    <InfoRow label="vehicleCost" value={fmtNum(selectedDef.npc.vehicleCost)} />
-                    <InfoRow label="prefByVeh" value={yesNo(selectedDef.npc.preferredByVehicles)} />
-                    <InfoRow label="cover" value={selectedDef.npc.cover} />
-                    <InfoRow label="noise" value={fmtNum(selectedDef.npc.noise)} />
-
-                    {selectedDef.door.isDoor ? (
-                      <Box style={{ gap: 6 }}>
-                        <Section title="DOOR" />
-                        <InfoRow label="defaultState" value={selectedDef.door.defaultState} />
-                        <InfoRow label="interaction" value={selectedDef.door.interaction} />
-                        <InfoRow label="width m" value={fmtNum(selectedDef.door.widthMeters)} />
-                        <InfoRow label="blockMoveClosed" value={yesNo(selectedDef.door.blocksMovementWhenClosed)} />
-                        <InfoRow label="blockLoSClosed" value={yesNo(selectedDef.door.blocksLineOfSightWhenClosed)} />
-                        <InfoRow label="vehPassable" value={yesNo(selectedDef.door.vehiclePassable)} />
-                        <InfoRow label="openCost" value={fmtNum(selectedDef.door.openCost)} />
-                      </Box>
-                    ) : null}
-
-                    <Section title="RENDER" />
-                    <InfoRow label="color" value={selectedDef.render.color} />
-                    <InfoRow label="height m" value={fmtNum(selectedDef.render.heightMeters)} />
-                    <InfoRow label="texture" value={selectedDef.render.textureKey} />
+            {/* Inspector — cell diagnostics (compact). */}
+            {tool === 'inspect' && selected && !selectedBuilding ? (
+              <Box style={{ gap: 6, borderTopWidth: 1, borderTopColor: '#1e293b', paddingTop: 10 }}>
+                <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>CELL</Text>
+                <InfoRow label="address" value={cellAddress(selected.x, selected.z)} />
+                <InfoRow label="cell" value={`${selected.x}, ${selected.z}`} />
+                <InfoRow label="chunk" value={chunkOfCell(selected.x, selected.z).label} />
+                {selDef ? (
+                  <Box style={{ gap: 4 }}>
+                    <InfoRow label="kind" value={selDef.label} />
+                    <InfoRow label="walkable" value={selDef.pathing.walkable ? 'yes' : 'no'} />
+                    <InfoRow label="cover" value={selDef.cover.height} />
+                    <InfoRow label="blocksLoS" value={selDef.visibility.blocksLineOfSight ? 'yes' : 'no'} />
+                    <InfoRow label="vehSpeed×" value={fmt(selDef.surface.vehicleSpeedMultiplier)} />
+                    <InfoRow label="friction" value={fmt(selDef.surface.friction)} />
                   </Box>
                 ) : (
-                  <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>void — no tile at this cell</Text>
+                  <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>void — no tile here</Text>
                 )}
               </Box>
-            ) : (
-              <Text fontSize={11} color="#64748b" style={{ fontFamily: 'monospace' }}>click a tile to inspect</Text>
-            )}
+            ) : null}
 
-            <Box style={{ height: 1, backgroundColor: '#1e293b', marginTop: 6 }} />
-            <Text fontSize={12} color="#e2e8f0" style={{ fontWeight: 800 }}>LIVE PLAYER</Text>
-            <Box style={{ gap: 6 }}>
-              <InfoRow label="x" value={player.position.x.toFixed(2)} />
-              <InfoRow label="y" value={player.position.y.toFixed(2)} />
-              <InfoRow label="z" value={player.position.z.toFixed(2)} />
-              <InfoRow label="yaw°" value={player.yawDegrees.toFixed(1)} />
+            {/* World summary. */}
+            <Box style={{ gap: 3, borderTopWidth: 1, borderTopColor: '#1e293b', paddingTop: 10 }}>
+              <Text fontSize={10} color="#64748b" style={{ letterSpacing: 1, fontWeight: 700 }}>WORLD</Text>
+              <InfoRow label="layout" value={`${world.world.layout.widthCells}×${world.world.layout.depthCells}`} />
+              <InfoRow label="buildings" value={String(world.world.buildings.length)} />
+              <InfoRow label="props" value={String(world.world.props.length)} />
+              <InfoRow label="regions" value={String(world.world.surfaceRegions.length)} />
+              <InfoRow label="zones" value={String(world.world.zones.length)} />
             </Box>
           </ScrollView>
+
+          {/* Status line. */}
+          <Box style={{ paddingVertical: 6, paddingHorizontal: 12, borderTopWidth: 1, borderTopColor: '#1e293b', backgroundColor: '#0a1120' }}>
+            <Text fontSize={10} color="#94a3b8" style={{ fontFamily: 'monospace' }}>{status}</Text>
+          </Box>
         </Box>
       </Box>
     </Box>
