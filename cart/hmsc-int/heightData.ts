@@ -1,0 +1,79 @@
+// heightfield.ts — the heightfield DATA model, built for scale.
+//
+// A chunk's terrain is a flat Float32Array of cell heights (meters), edited in
+// place. This is the whole point of the rebuild: the brush mutates the buffer in
+// O(brush) and the renderer uploads it as ONE Effect storage buffer, so a stroke
+// costs one GPU upload no matter how big the grid is. There are NO per-cell React
+// nodes and NO per-cell state — the thing that would melt at real chunk sizes.
+//
+// Dimensions are data, so the same code runs the 8-tile demo patch and a full
+// 120-tile chunk; placing chunks next to chunks is just more fields side by side.
+
+// Shared layout (1 tile = 1m). The dot grid samples at shared tile corners, so a
+// W-tile span has W*DOTS_PER_TILE+1 columns.
+export const TILE_UNITS = 24;       // canvas units per 1m tile (display scale)
+export const DOTS_PER_TILE = 2;     // height samples per tile per axis
+export const DOT_M = 1 / DOTS_PER_TILE; // meters between samples
+export const VIS_REF = 6;           // |Z| that saturates the colormap
+export const HEIGHT_LIMIT = 12;     // |Z| clamp (meters), headroom to stack
+
+export interface HeightField {
+  cols: number;      // sample columns (x)
+  rows: number;      // sample rows (y)
+  tilesX: number;    // tiles spanned (x)
+  tilesY: number;    // tiles spanned (y)
+  z: Float32Array;   // cols*rows heights, row-major
+}
+
+export function makeHeightField(tilesX: number, tilesY: number): HeightField {
+  const cols = tilesX * DOTS_PER_TILE + 1;
+  const rows = tilesY * DOTS_PER_TILE + 1;
+  return { cols, rows, tilesX, tilesY, z: new Float32Array(cols * rows) };
+}
+
+export function clearField(f: HeightField): void {
+  f.z.fill(0);
+}
+
+export interface StampOpts {
+  centerZ: number;   // peak height at the brush center (signed)
+  falloff: number;   // meters of Z lost per meter out (cone slope)
+  erase?: boolean;   // pull cells in range to 0 instead of stamping
+}
+
+// Stamp a cone centered on cell (cix,ciy): each cell in range gets the linear
+// falloff profile ADDED (stacks; overlap builds smooth relief), clamped. Erase
+// zeros the cells in range. O(radius^2), independent of total grid size.
+export function stampCone(f: HeightField, cix: number, ciy: number, opts: StampOpts): void {
+  const radiusM = Math.max(DOT_M, Math.abs(opts.centerZ) / Math.max(0.0001, opts.falloff));
+  const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
+  const sign = opts.centerZ >= 0 ? 1 : -1;
+  for (let dy = -rd; dy <= rd; dy++) {
+    const jy = ciy + dy;
+    if (jy < 0 || jy >= f.rows) continue;
+    for (let dx = -rd; dx <= rd; dx++) {
+      const jx = cix + dx;
+      if (jx < 0 || jx >= f.cols) continue;
+      const dm = Math.hypot(dx, dy) * DOT_M;
+      if (dm > radiusM) continue;
+      const idx = jy * f.cols + jx;
+      if (opts.erase) { f.z[idx] = 0; continue; }
+      const mag = Math.abs(opts.centerZ) - opts.falloff * dm;
+      if (mag <= 0) continue;
+      f.z[idx] = Math.max(-HEIGHT_LIMIT, Math.min(HEIGHT_LIMIT, f.z[idx] + sign * mag));
+    }
+  }
+}
+
+// Encode for the Effect storage buffer: header [cols, rows, visRef, tilesX,
+// tilesY] then the row-major heights. Matches HEIGHT_FIELD_WGSL's D[] layout.
+export function encodeField(f: HeightField): Float32Array {
+  const out = new Float32Array(5 + f.z.length);
+  out[0] = f.cols;
+  out[1] = f.rows;
+  out[2] = VIS_REF;
+  out[3] = f.tilesX;
+  out[4] = f.tilesY;
+  out.set(f.z, 5);
+  return out;
+}

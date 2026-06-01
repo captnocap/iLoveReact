@@ -59,6 +59,32 @@ export function resetEditorWorld(): GameState {
   return createInitialGameState();
 }
 
+// A clean slate: the same GameState shape the game boots from, but with NO
+// authored content — no buildings, props, roads, junctions, landforms, zones, or
+// surface regions. The grid layout + config are kept so the preview camera and
+// addressing still have a frame; everything is placed from nothing. This is the
+// "no built world" start for authoring on top of the kept mutators below.
+export function emptyEditorWorld(): GameState {
+  const base = createInitialGameState();
+  return {
+    ...base,
+    world: {
+      ...base.world,
+      surfaceRegions: [],
+      placedCells: {},
+      roads: [],
+      junctions: [],
+      props: [],
+      buildings: [],
+      interiors: {},
+      landforms: [],
+      zones: [],
+      spawnedEntities: {},
+      npcs: {},
+    },
+  };
+}
+
 // ── Building placement ──────────────────────────────────────────────────────
 
 export type BuildResult =
