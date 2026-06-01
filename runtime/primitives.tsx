@@ -804,8 +804,19 @@ const __packBoxxx = (boxes: BoxxxRect[]): number[] => {
   }
   return out;
 };
-export const Boxxx: any = ({ boxes, ...rest }: any) =>
-  h('RectBatch', { ...rest, effectData: __packBoxxx(boxes || []) }, null);
+// Two modes:
+//   <Boxxx boxes={[...]}>            flat-spec — boxes are pure DATA (no nodes,
+//                                    no layout, no MAX_CHILDREN). Max speed.
+//   <Boxxx><Box/><Box/></Boxxx>      children — normal JSX, laid out by flex as
+//                                    real nodes, but PAINTED as one batched
+//                                    emit (the host walks their computed boxes
+//                                    instead of scatter-painting each). Box
+//                                    children only for now; Text is the next
+//                                    layer (glyph-atlas emit).
+export const Boxxx: any = ({ boxes, children, ...rest }: any) =>
+  boxes != null
+    ? h('RectBatch', { ...rest, effectData: __packBoxxx(boxes) }, null)
+    : h('RectBatch', rest, children);
 
 // ── Paintable — persistent GPU mask texture, no visible rendering ─
 // <Paintable id="my-mask" w={W} h={H} />

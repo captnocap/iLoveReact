@@ -2275,23 +2275,73 @@ fn paintCanvasPath(node: *Node) callconv(.auto) void {
 /// box 14 floats: x, y, w, h, fillR, fillG, fillB, fillA, radius, borderW,
 /// borderR, borderG, borderB, borderA. Box x/y are relative to this node.
 fn paintRectBatch(node: *Node) void {
-    const data = node.effect_data orelse return;
-    if (data.len < 1) return;
-    const r = node.computed;
-    const total: usize = @intFromFloat(@max(0.0, data[0]));
-    var i: usize = 0;
-    while (i < total) : (i += 1) {
-        const o = 1 + i * 14;
-        if (o + 13 >= data.len) break;
-        const rad = data[o + 8];
-        gpu.drawRectCorners(
-            r.x + data[o], r.y + data[o + 1], data[o + 2], data[o + 3],
-            data[o + 4], data[o + 5], data[o + 6], data[o + 7] * g_paint_opacity,
-            rad, rad, rad, rad,
-            data[o + 9],
-            data[o + 10], data[o + 11], data[o + 12], data[o + 13] * g_paint_opacity,
-        );
+    if (node.effect_data) |data| {
+        // Flat-spec path: boxes are pure data (no child nodes, no layout).
+        if (data.len < 1) return;
+        const r = node.computed;
+        const total: usize = @intFromFloat(@max(0.0, data[0]));
+        var i: usize = 0;
+        while (i < total) : (i += 1) {
+            const o = 1 + i * 14;
+            if (o + 13 >= data.len) break;
+            const rad = data[o + 8];
+            gpu.drawRectCorners(
+                r.x + data[o], r.y + data[o + 1], data[o + 2], data[o + 3],
+                data[o + 4], data[o + 5], data[o + 6], data[o + 7] * g_paint_opacity,
+                rad, rad, rad, rad,
+                data[o + 9],
+                data[o + 10], data[o + 11], data[o + 12], data[o + 13] * g_paint_opacity,
+            );
+        }
+        return;
     }
+    // Children path (<Boxxx>{normal JSX}</Boxxx>): the subtree is already laid
+    // out as real nodes; walk it and emit each node's bg+border as ONE batched
+    // rect instead of scatter-painting each. Box children only — Text/Image are
+    // skipped for now (next layer: glyph-atlas emit for Text).
+    for (node.children) |*child| emitNodeRect(child);
+}
+
+/// Emit one laid-out node's bg+border into the rect pipeline, then recurse.
+/// The batch fast-path analog of paintNodeVisuals' bg/border block (no shadow,
+/// gradient, hover, text — those need the full paint walk).
+fn emitNodeRect(node: *Node) void {
+    if (node.style.display == .none) return;
+    const r = node.computed;
+    if (r.w > 0 and r.h > 0) {
+        if (node.style.background_color) |bg| {
+            if (bg.a > 0) {
+                const bc = node.style.border_color orelse Color.rgb(0, 0, 0);
+                gpu.drawRectCorners(
+                    r.x, r.y, r.w, r.h,
+                    @as(f32, @floatFromInt(bg.r)) / 255.0,
+                    @as(f32, @floatFromInt(bg.g)) / 255.0,
+                    @as(f32, @floatFromInt(bg.b)) / 255.0,
+                    @as(f32, @floatFromInt(bg.a)) / 255.0 * g_paint_opacity,
+                    node.style.radiusTL(), node.style.radiusTR(), node.style.radiusBR(), node.style.radiusBL(),
+                    node.style.brdTop(),
+                    @as(f32, @floatFromInt(bc.r)) / 255.0,
+                    @as(f32, @floatFromInt(bc.g)) / 255.0,
+                    @as(f32, @floatFromInt(bc.b)) / 255.0,
+                    @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+                );
+            }
+        } else if (node.style.border_color) |bc| {
+            if (node.style.brdTop() > 0 and bc.a > 0) {
+                gpu.drawRectCorners(
+                    r.x, r.y, r.w, r.h,
+                    0, 0, 0, 0,
+                    node.style.radiusTL(), node.style.radiusTR(), node.style.radiusBR(), node.style.radiusBL(),
+                    node.style.brdTop(),
+                    @as(f32, @floatFromInt(bc.r)) / 255.0,
+                    @as(f32, @floatFromInt(bc.g)) / 255.0,
+                    @as(f32, @floatFromInt(bc.b)) / 255.0,
+                    @as(f32, @floatFromInt(bc.a)) / 255.0 * g_paint_opacity,
+                );
+            }
+        }
+    }
+    for (node.children) |*child| emitNodeRect(child);
 }
 
 /// Paint node visuals: background, hover, text, selection, text input.
