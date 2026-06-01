@@ -13,7 +13,6 @@
 
 const std = @import("std");
 const c = @import("../c.zig").imports;
-const log = @import("../diag/log.zig");
 
 const ie = @cImport({
     @cInclude("linux/input.h");
@@ -95,10 +94,11 @@ pub fn init(window: *c.SDL_Window, width: f32, height: f32) void {
             dev.ay_min = @floatFromInt(ay.minimum);
             dev.ay_max = @floatFromInt(ay.maximum);
         }
+        std.debug.print("[evdev] opened {s} abs={}\n", .{ path, dev.abs });
         g_devs[g_ndev] = dev;
         g_ndev += 1;
     }
-    log.print("[evdev] {d} input device(s)\n", .{g_ndev});
+    std.debug.print("[evdev] {d} input device(s)\n", .{g_ndev});
 }
 
 /// Drain all pending input and push synthesized SDL events. Call once per
@@ -196,7 +196,7 @@ fn flushMotion(dev: *Device) void {
     const pushed = c.SDL_PushEvent(&sev);
     if (!g_motion_logged) {
         g_motion_logged = true;
-        log.print("[evdev] first motion x={d:.0} y={d:.0} pushed={} winID={d}\n", .{ g_mx, g_my, pushed, g_win_id });
+        std.debug.print("[evdev] first motion x={d:.0} y={d:.0} pushed={} winID={d}\n", .{ g_mx, g_my, pushed, g_win_id });
     }
 }
 
@@ -213,7 +213,7 @@ fn pushButton(button: u8, down: bool) void {
     sev.button.x = g_mx;
     sev.button.y = g_my;
     const pushed = c.SDL_PushEvent(&sev);
-    log.print("[evdev] button {d} down={} at x={d:.0} y={d:.0} pushed={}\n", .{ button, down, g_mx, g_my, pushed });
+    std.debug.print("[evdev] button {d} down={} at x={d:.0} y={d:.0} pushed={}\n", .{ button, down, g_mx, g_my, pushed });
 }
 
 pub fn deinit() void {
