@@ -1469,6 +1469,10 @@ fn applyTypeDefaults(node: *Node, id: u32, type_name: []const u8) void {
         node.canvas_path = true;
     } else if (eq(u8, type_name, "Canvas.Clamp")) {
         node.canvas_clamp = true;
+    } else if (eq(u8, type_name, "RectBatch")) {
+        // <Boxxx> — direct-to-instanced-rect batch. The box buffer arrives via
+        // the effectData prop (→ node.effect_data); engine.paintRectBatch emits.
+        node.rect_batch = true;
     } else if (eq(u8, type_name, "Paintable")) {
         // Persistent GPU mask texture, never painted visibly. The real
         // texture allocation happens in applyProps once paintableW/H and
@@ -1842,6 +1846,8 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonFloat(v)) |f| node.scene3d_color_g = f;
         } else if (std.mem.eql(u8, k, "scene3dColorB")) {
             if (jsonFloat(v)) |f| node.scene3d_color_b = f;
+        } else if (std.mem.eql(u8, k, "scene3dColorA")) {
+            if (jsonFloat(v)) |f| node.scene3d_color_a = f;
         } else if (std.mem.eql(u8, k, "scene3dPosX")) {
             if (jsonFloat(v)) |f| node.scene3d_pos_x = f;
         } else if (std.mem.eql(u8, k, "scene3dPosY")) {

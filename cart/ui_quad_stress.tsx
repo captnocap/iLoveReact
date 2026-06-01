@@ -21,7 +21,7 @@
 // setTimeout, per the framework's rAF-absent contract.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text, Pressable, Effect } from '@reactjit/primitives';
+import { Box, Text, Pressable, Effect, Boxxx } from '@reactjit/primitives';
 
 const VIEW_W = 900;
 const VIEW_H = 560;
@@ -146,7 +146,7 @@ fn sdRoundBox(p: vec2f, c: vec2f, hs: vec2f, r: f32) -> f32 {
 const CARD_OPTIONS = [10, 40, 150, 500];
 
 export default function UiQuadStress() {
-  const [mode, setMode] = useState<'scatter' | 'gather'>('gather');
+  const [mode, setMode] = useState<'scatter' | 'gather' | 'batch'>('batch');
   const [cards, setCards] = useState(40);
   const [frame, setFrame] = useState(0);
   const [fps, setFps] = useState(0);
@@ -199,6 +199,11 @@ export default function UiQuadStress() {
             <Text style={{ fontSize: 12, color: '#fff' }}>SCATTER (N boxes)</Text>
           </Box>
         </Pressable>
+        <Pressable onPress={() => setMode('batch')}>
+          <Box style={{ paddingLeft: 12, paddingRight: 12, paddingTop: 6, paddingBottom: 6, borderRadius: 6, backgroundColor: mode === 'batch' ? '#d26a2a' : '#262b3b' }}>
+            <Text style={{ fontSize: 12, color: '#fff' }}>BATCH (direct rects)</Text>
+          </Box>
+        </Pressable>
 
         <Box style={{ width: 1, height: 22, backgroundColor: '#333a4d' }} />
 
@@ -219,6 +224,8 @@ export default function UiQuadStress() {
       <Box style={{ width: VIEW_W, height: VIEW_H, position: 'relative' }}>
         {mode === 'gather' ? (
           <Effect shader={SHADER} data={packed!} style={{ width: VIEW_W, height: VIEW_H }} />
+        ) : mode === 'batch' ? (
+          <Boxxx boxes={boxes} style={{ width: VIEW_W, height: VIEW_H }} />
         ) : (
           boxes.map((b, i) => (
             <Box

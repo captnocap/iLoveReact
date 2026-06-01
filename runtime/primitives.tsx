@@ -497,15 +497,22 @@ Scene3DBase.Skybox = ({ zenith, horizon, ground, sunDir, sunColor, sunSize, sunG
 // draw radius (e.g. a soft haze that starts close while the world still draws
 // far). `color` defaults to the skybox horizon colour; pass a hex to override.
 //
+// Distance fog is auto-on for EVERY <Scene3D>, fading geometry toward the
+// background colour as it recedes. That's wrong for a studio / object viewer —
+// with no skybox it just reads as the model going dark at the far edge. Pass
+// `enabled={false}` to opt out: it pushes the fade so far past any geometry that
+// nothing ever fades. The only way to turn fog off.
+//
 //   <Scene3D.Camera position={...} target={...} far={140} />
 //   <Scene3D.Fog near={40} far={130} color="#b9c6d8" />
-Scene3DBase.Fog = ({ near, far, color, ...rest }: any) =>
+//   <Scene3D.Fog enabled={false} />          // flat, fully-lit — no distance fade
+Scene3DBase.Fog = ({ near, far, color, enabled = true, ...rest }: any) =>
   h('View', {
     ...rest,
     scene3dFog: true,
     scene3dFogColor: typeof color === 'string' ? _hexToRgb(color, [-1, -1, -1] as any) : [-1, -1, -1],
-    scene3dFogNear: Number.isFinite(near) && near > 0 ? near : 0,
-    scene3dFogFar: Number.isFinite(far) && far > 0 ? far : 0,
+    scene3dFogNear: enabled === false ? 1e7 : (Number.isFinite(near) && near > 0 ? near : 0),
+    scene3dFogFar: enabled === false ? 2e7 : (Number.isFinite(far) && far > 0 ? far : 0),
   });
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
@@ -514,6 +521,11 @@ Scene3DBase.Mesh = ({
 }: any) => {
   const matColor = typeof material === 'string' ? material : (material?.color ?? color);
   const [r, g, b] = _hexToRgb(matColor, [0.8, 0.8, 0.8]);
+  // Opacity comes only from an object material (`{ color, opacity }`). <1 makes
+  // the mesh glass: the host routes it through the back-to-front transparent pass.
+  const matOpacity = (material && typeof material === 'object' && Number.isFinite(material.opacity))
+    ? Math.max(0, Math.min(1, material.opacity))
+    : 1;
   const [px, py, pz] = _vec3(position, 0, 0, 0);
   const [rx, ry, rz] = _vec3(rotation, 0, 0, 0);
   const [sx, sy, sz] = _scaleVec3(scale);
@@ -539,14 +551,21 @@ Scene3DBase.Mesh = ({
   const geomIntern = require('./geometries/intern');
   if (geomIntern.isGeometryDef(geometry)) {
     const g3 = geomIntern.internGeometry(geometry, params);
-    // Bridge-cost dedup: the first mesh per key ships {key + verts + count + bounds}
-    // so the host caches them; every subsequent mesh ships only {key} and the host
-    // looks up the cache. 500 coconuts → ONE vertex payload across the bridge, not 500.
+    // Bridge-cost dedup: the first mesh per key ships {key + verts + count}
+    // so the host caches the heavy VERTICES; every subsequent mesh ships only the
+    // key and the host looks up the cached buffer. 500 coconuts → ONE vertex
+    // payload across the bridge, not 500.
+    // BUT bounds is a per-NODE prop (estimateMeshRadius reads node.scene3d_bounds_radius
+    // for the draw-radius cull), so it must ride EVERY mesh — gating it behind
+    // firstForKey leaves any node recreated after the key was first shipped (a
+    // hot-reload, a world swap, an instance sibling) with bounds 0 → the cull falls
+    // back to radius ~1 and pops a big mesh (e.g. a mountain) while it's still on
+    // screen. Cheap float; always send it, like Scene3D.Instances already does.
     const firstForKey = !geomIntern.hasShipped(g3.key);
     if (firstForKey) geomIntern.markShipped(g3.key);
     const geomProps = firstForKey
       ? { scene3dGeomKey: g3.key, scene3dVertices: g3.vertices, scene3dVertCount: g3.count, scene3dBoundsRadius: g3.bounds }
-      : { scene3dGeomKey: g3.key };
+      : { scene3dGeomKey: g3.key, scene3dBoundsRadius: g3.bounds };
     return h('View', {
       ...rest,
       scene3dMesh: true,
@@ -554,7 +573,7 @@ Scene3DBase.Mesh = ({
       scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
       scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
       scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,
-      scene3dColorR: r, scene3dColorG: g, scene3dColorB: b,
+      scene3dColorR: r, scene3dColorG: g, scene3dColorB: b, scene3dColorA: matOpacity,
       scene3dTexW: texW,
       scene3dTexH: texH,
       scene3dTexData: texData,
@@ -754,6 +773,39 @@ export const Render: any = (props: any) => h('Render', props, props.children);
 //   pipeline. Aliased to engine prop `effectData`.
 export const Effect: any = ({ data, ...rest }: any) =>
   h('Effect', { ...rest, ...(data != null ? { effectData: data } : {}) }, rest.children);
+
+// ── Boxxx — a batch of rounded rects emitted DIRECTLY into the instanced-rect
+// pipeline as ONE node. No per-box reconciler node, no layout solve, no
+// MAX_CHILDREN cap, and no Effect/gather pass. `boxes` is a flat spec; colors
+// are '#rrggbb'/'#rrggbbaa'. Box x/y are relative to the Boxxx box's top-left,
+// so give it a size via style (e.g. width/height: '100%').
+const __boxxxHexRGBA = (hex?: string): [number, number, number, number] => {
+  if (!hex || hex[0] !== '#') return [0, 0, 0, 0];
+  const s = hex.slice(1);
+  const n = (a: number, b: number) => parseInt(s.slice(a, b), 16) / 255;
+  return [n(0, 2), n(2, 4), n(4, 6), s.length >= 8 ? n(6, 8) : 1];
+};
+export type BoxxxRect = {
+  x: number; y: number; w: number; h: number;
+  radius?: number; borderW?: number; bg?: string; border?: string;
+};
+const __packBoxxx = (boxes: BoxxxRect[]): number[] => {
+  const out = new Array<number>(1 + boxes.length * 14);
+  out[0] = boxes.length;
+  let o = 1;
+  for (let j = 0; j < boxes.length; j++) {
+    const b = boxes[j];
+    const f = __boxxxHexRGBA(b.bg);
+    const d = __boxxxHexRGBA(b.border);
+    out[o++] = b.x; out[o++] = b.y; out[o++] = b.w; out[o++] = b.h;
+    out[o++] = f[0]; out[o++] = f[1]; out[o++] = f[2]; out[o++] = f[3];
+    out[o++] = b.radius ?? 0; out[o++] = b.borderW ?? 0;
+    out[o++] = d[0]; out[o++] = d[1]; out[o++] = d[2]; out[o++] = d[3];
+  }
+  return out;
+};
+export const Boxxx: any = ({ boxes, ...rest }: any) =>
+  h('RectBatch', { ...rest, effectData: __packBoxxx(boxes || []) }, null);
 
 // ── Paintable — persistent GPU mask texture, no visible rendering ─
 // <Paintable id="my-mask" w={W} h={H} />

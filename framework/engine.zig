@@ -1554,16 +1554,24 @@ fn markScrollActivity(node: *Node) void {
 fn dispatchScrollChanged(node: *Node, dx: f32, dy: f32) void {
     markScrollActivity(node);
     luajit_runtime.persistScrollSlot(node.scroll_persist_slot, node.scroll_y);
-    if (node.handlers.on_scroll) |handler| {
-        prepared_input.prepareScrollEvent(
-            node.scroll_persist_slot,
-            node.scroll_x,
-            node.scroll_y,
-            dx,
-            dy,
-        );
-        handler();
-    }
+    fireScrollHandlers(node, dx, dy);
+}
+
+/// Deliver a wheel delta to a node's onScroll handler(s). The Lua path uses the
+/// on_scroll fn pointer; the V8 path uses js_on_scroll, an installed
+/// `__dispatchScroll(id)` expr that reads the prepared scroll payload. Both read
+/// the same prepared globals, so we stage them once and fire whichever exists.
+fn fireScrollHandlers(node: *Node, dx: f32, dy: f32) void {
+    if (node.handlers.on_scroll == null and node.handlers.js_on_scroll == null) return;
+    prepared_input.prepareScrollEvent(
+        node.scroll_persist_slot,
+        node.scroll_x,
+        node.scroll_y,
+        dx,
+        dy,
+    );
+    if (node.handlers.on_scroll) |handler| handler();
+    if (node.handlers.js_on_scroll) |expr| runJsHandlerExpr(std.mem.span(expr));
 }
 
 fn scrollbarOpacity(node: *Node) f32 {
@@ -1831,6 +1839,15 @@ fn paintNode(node: *Node) void {
     // Canvas.Path: draw before size check
     if (node.canvas_path or node.canvas_path_d != null) {
         paintCanvasPath(node);
+        return;
+    }
+
+    // RectBatch (<Boxxx>): emit the whole box buffer as native instanced rects
+    // in one pass — the direct-to-pipeline alternative to per-box <Box> nodes
+    // (no MAX_CHILDREN, no per-box layout solve) and to the gather shader
+    // (native instancing, not per-pixel O(N)). Boxes are origin-relative.
+    if (node.rect_batch) {
+        paintRectBatch(node);
         return;
     }
 
@@ -2250,6 +2267,30 @@ fn paintCanvasPath(node: *Node) callconv(.auto) void {
             @as(u32, @truncate(c.SDL_GetTicks())),
         );
         if (is_icon) restoreGpuTransform(saved_icon_tf);
+    }
+}
+
+/// Emit a flat box buffer straight into the instanced-rect pipeline. One node,
+/// N rects, no per-box layout. Buffer layout (effect_data): [count], then per
+/// box 14 floats: x, y, w, h, fillR, fillG, fillB, fillA, radius, borderW,
+/// borderR, borderG, borderB, borderA. Box x/y are relative to this node.
+fn paintRectBatch(node: *Node) void {
+    const data = node.effect_data orelse return;
+    if (data.len < 1) return;
+    const r = node.computed;
+    const total: usize = @intFromFloat(@max(0.0, data[0]));
+    var i: usize = 0;
+    while (i < total) : (i += 1) {
+        const o = 1 + i * 14;
+        if (o + 13 >= data.len) break;
+        const rad = data[o + 8];
+        gpu.drawRectCorners(
+            r.x + data[o], r.y + data[o + 1], data[o + 2], data[o + 3],
+            data[o + 4], data[o + 5], data[o + 6], data[o + 7] * g_paint_opacity,
+            rad, rad, rad, rad,
+            data[o + 9],
+            data[o + 10], data[o + 11], data[o + 12], data[o + 13] * g_paint_opacity,
+        );
     }
 }
 
@@ -4254,16 +4295,7 @@ pub fn run(config_in: AppConfig) !void {
                             scroll_node.scroll_y = @max(0.0, @min(scroll_node.scroll_y, max_sy));
                             markScrollActivity(scroll_node);
                             luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
-                            if (scroll_node.handlers.on_scroll) |handler| {
-                                prepared_input.prepareScrollEvent(
-                                    scroll_node.scroll_persist_slot,
-                                    scroll_node.scroll_x,
-                                    scroll_node.scroll_y,
-                                    event.wheel.x,
-                                    event.wheel.y,
-                                );
-                                handler();
-                            }
+                            fireScrollHandlers(scroll_node, event.wheel.x, event.wheel.y);
                         } else {
                             const delta: f32 = event.wheel.y;
                             canvas.handleScroll(mx - cn.computed.x, my - cn.computed.y, delta, cn.computed.w, cn.computed.h);
@@ -4285,16 +4317,13 @@ pub fn run(config_in: AppConfig) !void {
                         scroll_node.scroll_y = @max(0.0, @min(scroll_node.scroll_y, max_scroll_y));
                         markScrollActivity(scroll_node);
                         luajit_runtime.persistScrollSlot(scroll_node.scroll_persist_slot, scroll_node.scroll_y);
-                        if (scroll_node.handlers.on_scroll) |handler| {
-                            prepared_input.prepareScrollEvent(
-                                scroll_node.scroll_persist_slot,
-                                scroll_node.scroll_x,
-                                scroll_node.scroll_y,
-                                event.wheel.x,
-                                event.wheel.y,
-                            );
-                            handler();
-                        }
+                        fireScrollHandlers(scroll_node, event.wheel.x, event.wheel.y);
+                    } else if (events.hitTestScroll(config.root, mx, my)) |scroll_node| {
+                        // No scroll container under the cursor, but a node opted
+                        // into the raw wheel via onScroll (e.g. a transparent
+                        // overlay driving a 3D camera dolly). Deliver the delta
+                        // straight to its handler — nothing scrolls in the layout.
+                        fireScrollHandlers(scroll_node, event.wheel.x, event.wheel.y);
                     }
                 },
                 c.SDL_EVENT_DROP_FILE => {

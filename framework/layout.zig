@@ -451,6 +451,7 @@ pub const Node = struct {
     scene3d_color_r: f32 = 0.8,
     scene3d_color_g: f32 = 0.8,
     scene3d_color_b: f32 = 0.8,
+    scene3d_color_a: f32 = 1.0, // <1 routes the mesh through the transparent pass (glass)
     scene3d_pos_x: f32 = 0,
     scene3d_pos_y: f32 = 0,
     scene3d_pos_z: f32 = 0,
@@ -643,6 +644,11 @@ pub const Node = struct {
     // owned by the engine alloc, leaked on prop replace (same pattern as
     // canvas_path_d / polyline_points).
     effect_data: ?[]f32 = null,
+    // <Boxxx>/RectBatch — effect_data holds a flat box buffer (count, then 14
+    // floats/box: x,y,w,h, fill rgba, radius, borderW, border rgba). Emitted
+    // directly into the instanced-rect pipeline in one paint pass: no per-box
+    // reconciler node, no layout solve, no MAX_CHILDREN cap, no Effect/gather.
+    rect_batch: bool = false,
     effect_background: bool = false, // true = render behind parent's children
     effect_mask: bool = false, // true = post-process parent's rendered content
     // Custom window chrome — borderless window drag/resize regions
