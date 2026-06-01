@@ -96,7 +96,17 @@ pub fn isEffect(name: []const u8) bool {
 // rows ≈ 1232×7624). Modern desktop GPUs support 8192–16384 max
 // texture dim trivially; bumping past 2048 unblocks tall grids
 // without per-frame downscale-and-stretch artifacts.
-const MAX_EFFECT_PIXELS: u32 = 64_000_000; // ~8192×7812 total per frame
+// Per-frame fragment budget across all on-screen effects. The hmsc-int world
+// editor paints one full-resolution Effect quad per visible 120-tile chunk
+// (~2880² ≈ 8.3M px each at 1:1 zoom), so the old 64M ceiling skipped every
+// chunk past ~8. Effect targets are rgba8 (4 B/px), so this budget caps VRAM at
+// 4×: 1.5e9 px ≈ 6 GB, ~180 full-res chunks — safe even if wgpu renders on the
+// 12 GB RTX 3060 rather than the 24 GB RX 7900 XTX. Past this it's fragment FILL
+// RATE (fps), not VRAM, that bites, because each chunk is ~24× oversampled
+// (120×120 cells at 2880²); a per-effect resolution cap is the smooth path to
+// hundreds. resolveEffectSize downscales the overflowing effect to the remaining
+// budget, so g_frame_effect_pixels never exceeds this (no u32 wrap).
+const MAX_EFFECT_PIXELS: u32 = 1_500_000_000; // ~6 GB of rgba8 targets / frame
 const MAX_EFFECT_DIM: u32 = 8192; // no single dimension > 8192
 const MAX_UPLOAD_BYTES: u32 = 32 * 1024 * 1024; // 32MB texture uploads per frame
 var g_frame_effect_pixels: u32 = 0;
