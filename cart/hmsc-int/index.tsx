@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { Box, Pressable, Text } from '@reactjit/primitives';
+import { Box, Text } from '@reactjit/primitives';
 import { readFile } from '@reactjit/hooks/fs';
 import {
   useWorkspace,
@@ -10,7 +10,8 @@ import {
 } from '@reactjit/workspace';
 import type { GameState } from '../hmsc/design';
 import { emptyEditorWorld } from './editorWorld';
-import { IsoPreview, type IsoView } from './IsoPreview';
+import { chunkFloorRegion, type ChunkFloor } from './chunkFloor';
+import { IsoPreview } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
@@ -85,7 +86,15 @@ function Pane(props: { label: string; children?: React.ReactNode }) {
 }
 
 export default function HmscWorldEditorCart() {
-  const [world] = useState<GameState>(emptyEditorWorld);
+  // The iso-3D preview world: a real GameState whose surfaceRegions are mirrored
+  // (throttled) from the painted chunks by PaintCanvas. baseWorld is the empty
+  // editor world built once; only surfaceRegions change as you paint.
+  const baseWorld = useMemo(emptyEditorWorld, []);
+  const [floors, setFloors] = useState<ChunkFloor[]>([]);
+  const previewWorld = useMemo<GameState>(
+    () => ({ ...baseWorld, world: { ...baseWorld.world, surfaceRegions: floors.map((f) => chunkFloorRegion(f.cx, f.cz)) } }),
+    [baseWorld, floors],
+  );
 
   // Seed view state from disk once (lazy initializer → runs only on mount).
   const [initial] = useState(readInitialView);
@@ -165,15 +174,7 @@ export default function HmscWorldEditorCart() {
     [layer, selPlacement?.cat, selPlacement?.kind],
   );
   const shownFocus: Focus = placeFocus?.focus ?? { kind: 'tile', tile };
-  const focusWorld = placeFocus?.world ?? world;
-
-  // The preview frames the origin; an empty world has nothing to fit to yet.
-  const isoView: IsoView = useMemo(() => ({
-    centerX: 0,
-    centerZ: 0,
-    yawDegrees: yaw,
-    distMeters: 120,
-  }), [yaw]);
+  const focusWorld = placeFocus?.world ?? baseWorld;
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#080d16' }}>
@@ -196,20 +197,10 @@ export default function HmscWorldEditorCart() {
             onPlace={placeObject}
           />
         }
-        bottomLeft={<PaintCanvas tool={tool} onTool={setTool} tile={tile} onTile={setTile} layer={layer} onLayer={setLayer} place={place} showGrid={showGrid} />}
+        bottomLeft={<PaintCanvas tool={tool} onTool={setTool} tile={tile} onTile={setTile} layer={layer} onLayer={setLayer} place={place} showGrid={showGrid} onFloors={setFloors} />}
         bottomRight={
           <Pane label="preview">
-            <IsoPreview state={world} view={isoView} />
-            {/* The preview's own orbit controls. */}
-            <Box style={{ position: 'absolute', left: 8, top: 8, flexDirection: 'row', gap: 4 }}>
-              <Pressable onPress={() => setYaw((y) => y - 45)} style={{ width: 28, height: 24, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1424cc', borderWidth: 1, borderColor: '#334155' }}>
-                <Text fontSize={12} color="#cbd5e1">↺</Text>
-              </Pressable>
-              <Pressable onPress={() => setYaw((y) => y + 45)} style={{ width: 28, height: 24, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: '#0b1424cc', borderWidth: 1, borderColor: '#334155' }}>
-                <Text fontSize={12} color="#cbd5e1">↻</Text>
-              </Pressable>
-            </Box>
-            <Text fontSize={9} color="#475569" style={{ fontFamily: 'monospace', position: 'absolute', right: 8, top: 8 }}>{`yaw ${yaw % 360}°`}</Text>
+            <IsoPreview state={previewWorld} floors={floors} />
           </Pane>
         }
       />

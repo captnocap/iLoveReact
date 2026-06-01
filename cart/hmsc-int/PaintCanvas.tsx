@@ -19,11 +19,12 @@
 // rail / buttons / filter panel are absolute siblings rendered AFTER it so they
 // stay clickable (the host hit-tests children in reverse). alt-drag pans.
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Canvas, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { callHost } from '@reactjit/ffi';
 import { columnLabel } from './address';
+import { focusedFloors, type ChunkFloor } from './chunkFloor';
 import type { TileKind, ZoneFlag } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
 import { ZONE_FLAGS } from '../hmsc/world/zones';
@@ -69,6 +70,10 @@ const Z_STEP = 0.5, Z_MIN = -12, Z_MAX = 12;
 // Shared brush size = RADIUS in tiles (0 = a single cell). 1 tile = 1m, so it also
 // reads as the height cone's radius in metres. Footprint shown as width-across.
 const SIZE_STEP = 1, SIZE_MIN = 0, SIZE_MAX = 40;
+
+// Throttle for the live preview mirror — rebuilding regions + re-baking the
+// preview's floor captures is heavy, so cap it to ~3 syncs/sec.
+const REGION_SYNC_MS = 320;
 
 const TOOLS: { id: Tool; icon: string }[] = [
   { id: 'pointer', icon: 'MousePointer' },
@@ -335,6 +340,9 @@ export function PaintCanvas(props: {
   onLayer: (l: Layer) => void;
   place: PlaceProps;
   showGrid?: boolean;
+  // Throttled mirror of the focused chunks' painted tiles (one floor snapshot per
+  // chunk) — drives the live iso-3D preview.
+  onFloors?: (floors: ChunkFloor[]) => void;
 }) {
   const { tool, tile, layer, place } = props;
   const grid = props.showGrid !== false;
@@ -361,6 +369,24 @@ export function PaintCanvas(props: {
   const chunks = chunksRef.current;
   const [chunkRev, setChunkRev] = useState(0);
   const [focus, setFocus] = useState<Set<ChunkKey>>(() => new Set([chunkKey(0, 0)]));
+  const focusRef = useRef(focus);
+  focusRef.current = focus;
+
+  // Live preview sync: mirror the focused chunks' painted tiles to the iso-3D
+  // preview as world regions, THROTTLED. Tile paints and focus changes schedule a
+  // sync; it fires at most once per REGION_SYNC_MS reading the live buffers + focus.
+  const onFloorsRef = useRef(props.onFloors);
+  onFloorsRef.current = props.onFloors;
+  const regionSyncPending = useRef(false);
+  const syncRegionsNow = useCallback(() => {
+    onFloorsRef.current?.(focusedFloors(chunks, focusRef.current));
+  }, [chunks]);
+  const scheduleRegionSync = useCallback(() => {
+    if (regionSyncPending.current) return;
+    regionSyncPending.current = true;
+    setTimeout(() => { regionSyncPending.current = false; syncRegionsNow(); }, REGION_SYNC_MS);
+  }, [syncRegionsNow]);
+  useEffect(() => { syncRegionsNow(); }, [syncRegionsNow]); // initial mirror on mount
 
   const allChunks = useMemo(() => Array.from(chunks.values()), [chunks, chunkRev]);
   const focusedChunks = allChunks.filter((c) => focus.has(chunkKey(c.cx, c.cz)));
@@ -379,13 +405,15 @@ export function PaintCanvas(props: {
     chunks.set(k, makeChunk(cx, cz));
     setChunkRev((r) => r + 1);
     setFocus((f) => { const n = new Set(f); n.add(k); return n; }); // bring the new chunk into view
-  }, [chunks]);
+    scheduleRegionSync();
+  }, [chunks, scheduleRegionSync]);
 
-  const toggleFocus = useCallback((k: ChunkKey) => setFocus((f) => {
-    const n = new Set(f); if (n.has(k)) n.delete(k); else n.add(k); return n;
-  }), []);
-  const focusAll = useCallback(() => setFocus(new Set(Array.from(chunks.keys()))), [chunks]);
-  const focusNone = useCallback(() => setFocus(new Set()), []);
+  const toggleFocus = useCallback((k: ChunkKey) => {
+    setFocus((f) => { const n = new Set(f); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+    scheduleRegionSync();
+  }, [scheduleRegionSync]);
+  const focusAll = useCallback(() => { setFocus(new Set(Array.from(chunks.keys()))); scheduleRegionSync(); }, [chunks, scheduleRegionSync]);
+  const focusNone = useCallback(() => { setFocus(new Set()); scheduleRegionSync(); }, [scheduleRegionSync]);
 
   // The open "+" slots = unique in-bounds, unoccupied neighbours of focused chunks.
   const addSlots = useMemo(() => {
@@ -463,6 +491,7 @@ export function PaintCanvas(props: {
     const idx = p.tool === 'eraser' ? -1 : tileKindIndex(p.tile);
     stampDisc(p.size, c.cellX, c.cellZ, (x, z) => paintTile(c.chunk.tiles, x, z, idx));
     touchChunk(c.k);
+    scheduleRegionSync(); // mirror to the iso-3D preview (throttled)
   };
 
   const paintZoneAtScreen = (sx: number, sy: number) => {
