@@ -1,10 +1,13 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@reactjit/primitives';
-import { readFile } from '@reactjit/hooks/fs';
+import { readFile, writeFile, mkdir } from '@reactjit/hooks/fs';
 import {
   useWorkspace,
   parseEnvelope,
+  buildEnvelope,
+  serializeEnvelope,
   sessionPathFor,
+  sessionsDirFor,
   lastPointerPath,
   type SessionEnvelope,
 } from '@reactjit/workspace';
@@ -13,38 +16,44 @@ import { emptyEditorWorld, placeBuilding, placeWorldProp } from './editorWorld';
 import { type ChunkFloor } from './chunkFloor';
 import { IsoPreview } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
-import { PaintCanvas, type Tool, type Layer } from './PaintCanvas';
+import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
 import { RightPanel, type TabId } from './RightPanel';
 import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
+import { serializeMap, deserializeMap, emptyMap, type MapSnapshot, type EditorWorld } from './mapStore';
+import { ProjectBar } from './ProjectBar';
+import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS } from './heightData';
 import { CHUNK_TILES } from './chunks';
 import type { TileKind } from '../hmsc/design';
 
-// hmsc-int laid out as a 2x2 pane grid (QuadSplit) with a resizable cross divider:
+// hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
+// one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
+// (the ProjectBar) manages the SET of maps; below it the editor is a 2x2 pane grid:
 //
 //   ┌──────────┬──────────┐
-//   │  (open)  │  (open)   │   top row — reserved for later
+//   │ in-focus │  right    │   top row — properties + tabbed rail
 //   ├──────────┼──────────┤
 //   │  canvas  │  preview  │   bottom row — 2D paint canvas + live iso-3D
 //   └──────────┴──────────┘
 //
-// The editor's VIEW state (divider fractions, preview yaw, active tool + tile) is
-// persisted via the workspace layer (runtime/workspace — the cutout "disk = truth"
-// pattern). Hot reloads re-mount the cart and reset every useState, so without this
-// the divider would snap back to center on every edit; the workspace autosaves the
-// view to cart/hmsc-int/sessions/ and restores it on mount. We ALSO seed the
-// initial state synchronously from that file so the divider never flashes to
-// center for a frame before the restore lands.
+// Each map is its own session file (cart/hmsc-int/sessions/<name>.session.json) via
+// the workspace layer's "disk = truth" pattern: the CURRENT map autosaves (debounced)
+// on every edit and restores on mount, so iterating the UI (hot reload) no longer
+// wipes the painted world. The payload carries the WORLD (chunks + heights + zones +
+// placements) alongside the view; the world is a thin set of REFERENCES into the
+// shared global registries (tile kinds, objects), never copies — change a global and
+// every map follows (see mapStore.ts).
 
 const CART = 'hmsc-int';
-const VERSION = 1;
+// v2: the payload gained `world`. v1 (view-only) files cleanly fail to parse and
+// boot blank — those had no world to lose.
+const VERSION = 2;
 const MIN_FRAC = 0.06; // never collapse a pane fully — keep a grabbable sliver
 
-// The persisted editor view. The authored world will join this payload once
-// authoring lands; for now it is the UI state that hot reload would otherwise eat.
-interface ViewPayload {
+// The persisted state of ONE map: the editor view + the authored world.
+interface MapPayload {
   fx: number;
   fy: number;
   yaw: number;
@@ -54,6 +63,7 @@ interface ViewPayload {
   tab: TabId;
   notes: string;
   showGrid: boolean;
+  world: MapSnapshot;
 }
 
 function clampFrac(f: number): number {
@@ -67,20 +77,29 @@ function rotToSide(rotation: number): Building['doorSide'] {
   return (['south', 'west', 'north', 'east'] as const)[q];
 }
 
-// Synchronous read of the last-saved view, used to seed initial state so there is
-// no center→saved flash on mount. Mirrors useWorkspace's restore path; the hook
-// still runs its own restore (same values) plus autosave/undo on top.
-function readInitialView(): Partial<ViewPayload> {
+// Synchronous read of the last-open map's VIEW, to seed initial pane fractions so
+// the divider never flashes to centre on mount. The WORLD is seeded by the
+// workspace restore (applyPayload, which remounts PaintCanvas with the decoded map).
+function readInitialView(): Partial<MapPayload> {
   try {
     const stem = readFile(lastPointerPath(CART))?.trim();
     if (!stem) return {};
     const text = readFile(sessionPathFor(CART, stem));
     if (!text) return {};
-    const env = parseEnvelope<ViewPayload>(text, { cartName: CART, version: VERSION });
+    const env = parseEnvelope<MapPayload>(text, { cartName: CART, version: VERSION });
     return env?.payload ?? {};
   } catch {
     return {};
   }
+}
+
+// Highest pl_<n> in a placement list — so a restored map's next placement id
+// doesn't collide with the ones it loaded.
+function maxPlacementSeq(placements: Placement[]): number {
+  return placements.reduce((mx, p) => {
+    const n = Number(/^pl_(\d+)$/.exec(p.id)?.[1] ?? 0);
+    return n > mx ? n : mx;
+  }, 0);
 }
 
 // A labeled empty pane so each quadrant is visible/identifiable while we build out.
@@ -92,6 +111,11 @@ function Pane(props: { label: string; children?: React.ReactNode }) {
     </Box>
   );
 }
+
+// Memoized so a per-stroke autosave bump in the cart (worldRev) doesn't re-render
+// the heavy canvas — its props are stable between strokes; it remounts only when
+// the map key changes (open / new).
+const MemoPaintCanvas = memo(PaintCanvas);
 
 export default function HmscWorldEditorCart() {
   // The 3D preview world. baseWorld is the empty editor GameState (built once);
@@ -114,10 +138,32 @@ export default function HmscWorldEditorCart() {
   const [notes, setNotes] = useState<string>(() => initial.notes ?? '');
   const [showGrid, setShowGrid] = useState<boolean>(() => initial.showGrid ?? true);
 
-  // Persist the view. Autosave (debounced) fires whenever any deps slice changes;
-  // restore-on-mount reapplies the same values the synchronous seed already set.
-  const buildPayload = useCallback((): ViewPayload => ({ fx, fy, yaw, tool, tile, layer, tab, notes, showGrid }), [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid]);
-  const applyPayload = useCallback((env: SessionEnvelope<ViewPayload>) => {
+  // ── The authored world ───────────────────────────────────────────────────────
+  // The chunk buffers live INSIDE PaintCanvas (the de-thrashed paint path); the cart
+  // reaches them through paintApiRef to serialize, and seeds a freshly-opened map
+  // through `seedWorld` + a remount (worldEpoch in the PaintCanvas key). Placements
+  // live here (they drive the preview). worldRev bumps once per stroke / structural
+  // edit (PaintCanvas.onEdit) to trip the debounced autosave.
+  const paintApiRef = useRef<PaintCanvasApi | null>(null);
+  const [seedWorld, setSeedWorld] = useState<EditorWorld | null>(null);
+  const [worldEpoch, setWorldEpoch] = useState(0);
+  const [worldRev, setWorldRev] = useState(0);
+  const onWorldEdit = useCallback(() => setWorldRev((r) => r + 1), []);
+
+  const placeSeq = useRef(0);
+  const [placements, setPlacements] = useState<Placement[]>([]);
+  const [selPlaceId, setSelPlaceId] = useState<string | null>(null);
+
+  // ── Persistence: build / apply the whole map payload ──────────────────────────
+  const buildPayload = useCallback((): MapPayload | null => {
+    const api = paintApiRef.current;
+    if (!api) return null; // canvas not mounted yet — skip this autosave tick
+    const w = api.getWorld();
+    const world = serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements });
+    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world };
+  }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements]);
+
+  const applyPayload = useCallback((env: SessionEnvelope<MapPayload>) => {
     const p = env.payload;
     if (typeof p.fx === 'number') setFx(p.fx);
     if (typeof p.fy === 'number') setFy(p.fy);
@@ -128,8 +174,95 @@ export default function HmscWorldEditorCart() {
     if (p.tab) setTab(p.tab);
     if (typeof p.notes === 'string') setNotes(p.notes);
     if (typeof p.showGrid === 'boolean') setShowGrid(p.showGrid);
+    // Decode the world and remount PaintCanvas onto it.
+    const w = p.world ? deserializeMap(p.world) : emptyMap();
+    placeSeq.current = Math.max(placeSeq.current, maxPlacementSeq(w.placements));
+    setPlacements(w.placements);
+    setSelPlaceId(null);
+    setSeedWorld(w);
+    setWorldEpoch((e) => e + 1);
   }, []);
-  const ws = useWorkspace<ViewPayload>({ cartName: CART, version: VERSION, buildPayload, applyPayload, deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid] });
+
+  const ws = useWorkspace<MapPayload>({
+    cartName: CART,
+    version: VERSION,
+    buildPayload,
+    applyPayload,
+    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev],
+  });
+
+  // ── Multi-map management (the project manager surface is ProjectBar) ──────────
+  const [maps, setMaps] = useState<string[]>(() => listMaps());
+  const refreshMaps = useCallback(() => setMaps(listMaps()), []);
+
+  // Write a map file directly (used by new / rename so the file exists immediately,
+  // not only after the autosave debounce). Mirrors the workspace flush.
+  const writeMapFile = useCallback((stem: string, payload: MapPayload) => {
+    mkdir(sessionsDirFor(CART));
+    const env = buildEnvelope({ cartName: CART, version: VERSION, stem, payload });
+    writeFile(sessionPathFor(CART, stem), serializeEnvelope(env));
+    writeFile(lastPointerPath(CART), stem);
+  }, []);
+
+  // Flush the CURRENT map to disk synchronously. Called before switching away so a
+  // stroke painted within the autosave debounce window isn't lost when the timer
+  // gets rescheduled onto the next map.
+  const flushCurrent = useCallback(() => {
+    const p = buildPayload();
+    if (p) writeMapFile(ws.stem, p);
+  }, [buildPayload, writeMapFile, ws]);
+
+  const openMap = useCallback((name: string) => {
+    if (name === ws.stem) return;
+    const text = readFile(sessionPathFor(CART, name));
+    if (!text) return;
+    const env = parseEnvelope<MapPayload>(text, { cartName: CART, version: VERSION });
+    if (!env) return;
+    flushCurrent(); // don't lose the current map's just-painted edits
+    applyPayload(env);
+    ws.setStem(name);
+    ws.history.clear();
+    writeFile(lastPointerPath(CART), name);
+    refreshMaps();
+  }, [ws, applyPayload, refreshMaps, flushCurrent]);
+
+  const newMap = useCallback(() => {
+    flushCurrent(); // don't lose the current map's just-painted edits
+    const name = uniqueMapName('untitled');
+    const payload: MapPayload = { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world: serializeMap(emptyMap()) };
+    writeMapFile(name, payload);
+    placeSeq.current = 0;
+    setPlacements([]);
+    setSelPlaceId(null);
+    setSeedWorld(emptyMap());
+    setWorldEpoch((e) => e + 1);
+    ws.setStem(name);
+    ws.history.clear();
+    refreshMaps();
+  }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, writeMapFile, refreshMaps, flushCurrent]);
+
+  const renameMap = useCallback((rawNext: string) => {
+    const old = ws.stem;
+    const next = sanitizeMapName(rawNext);
+    if (!next || next === old) return;
+    const finalName = mapExists(next) ? uniqueMapName(next) : next;
+    const payload = buildPayload();
+    if (payload) writeMapFile(finalName, payload);
+    ws.setStem(finalName);
+    if (old !== finalName) deleteMap(old);
+    refreshMaps();
+  }, [ws, buildPayload, writeMapFile, refreshMaps]);
+
+  const deleteMapAndAdvance = useCallback((name: string) => {
+    deleteMap(name);
+    if (name === ws.stem) {
+      const remaining = listMaps().filter((m) => m !== name);
+      if (remaining.length) openMap(remaining[0]);
+      else newMap();
+    } else {
+      refreshMaps();
+    }
+  }, [ws, openMap, newMap, refreshMaps]);
 
   // Divider drags arrive as per-event fraction deltas; accumulate + clamp here.
   const onResize = useCallback((axis: 'col' | 'row', d: number) => {
@@ -140,10 +273,6 @@ export default function HmscWorldEditorCart() {
   const clearNotes = useCallback(() => setNotes(''), []);
 
   // ── Object placements (the 'place' layer) ───────────────────────────────────
-  const placeSeq = useRef(0);
-  const [placements, setPlacements] = useState<Placement[]>([]);
-  const [selPlaceId, setSelPlaceId] = useState<string | null>(null);
-
   // The model viewer's + drops the selected kind at the origin, selects it, and
   // switches the painter to the place layer ("brings the view into this layer").
   const placeObject = useCallback((cat: PlaceCat, kind: string) => {
@@ -208,34 +337,65 @@ export default function HmscWorldEditorCart() {
     return s;
   }, [baseWorld, placements]);
 
+  // The current map always shows in the switcher even before its file lands on disk.
+  const displayMaps = maps.includes(ws.stem) ? maps : [...maps, ws.stem].sort();
+
   return (
-    <Box style={{ width: '100%', height: '100%', backgroundColor: '#080d16' }}>
-      <QuadSplit
-        fx={fx}
-        fy={fy}
-        onResize={onResize}
-        topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} />}
-        topRight={
-          <RightPanel
-            tab={tab}
-            onTab={setTab}
-            notes={notes}
-            onNotes={setNotes}
-            showGrid={showGrid}
-            onShowGrid={setShowGrid}
-            onResetLayout={resetLayout}
-            onClearNotes={clearNotes}
-            lastSavedAt={ws.lastSavedAt}
-            onPlace={placeObject}
-          />
-        }
-        bottomLeft={<PaintCanvas tool={tool} onTool={setTool} tile={tile} onTile={setTile} layer={layer} onLayer={setLayer} place={place} showGrid={showGrid} onFloors={setFloors} />}
-        bottomRight={
-          <Pane label="preview">
-            <IsoPreview state={previewWorld} floors={floors} />
-          </Pane>
-        }
+    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#080d16' }}>
+      <ProjectBar
+        mapName={ws.stem}
+        maps={displayMaps}
+        lastSavedAt={ws.lastSavedAt}
+        onOpen={openMap}
+        onNew={newMap}
+        onRename={renameMap}
+        onDelete={deleteMapAndAdvance}
+        onRefresh={refreshMaps}
       />
+      <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
+        <QuadSplit
+          fx={fx}
+          fy={fy}
+          onResize={onResize}
+          topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} />}
+          topRight={
+            <RightPanel
+              tab={tab}
+              onTab={setTab}
+              notes={notes}
+              onNotes={setNotes}
+              showGrid={showGrid}
+              onShowGrid={setShowGrid}
+              onResetLayout={resetLayout}
+              onClearNotes={clearNotes}
+              lastSavedAt={ws.lastSavedAt}
+              onPlace={placeObject}
+            />
+          }
+          bottomLeft={
+            <MemoPaintCanvas
+              key={`${ws.stem}#${worldEpoch}`}
+              initialWorld={seedWorld}
+              apiRef={paintApiRef}
+              onEdit={onWorldEdit}
+              tool={tool}
+              onTool={setTool}
+              tile={tile}
+              onTile={setTile}
+              layer={layer}
+              onLayer={setLayer}
+              place={place}
+              showGrid={showGrid}
+              onFloors={setFloors}
+            />
+          }
+          bottomRight={
+            <Pane label="preview">
+              <IsoPreview state={previewWorld} floors={floors} />
+            </Pane>
+          }
+        />
+      </Box>
     </Box>
   );
 }

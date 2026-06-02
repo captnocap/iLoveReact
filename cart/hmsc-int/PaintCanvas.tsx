@@ -23,6 +23,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Canvas, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { callHost } from '@reactjit/ffi';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 import { columnLabel } from './address';
 import { type ChunkFloor } from './chunkFloor';
 import type { TileKind, ZoneFlag } from '../hmsc/design';
@@ -34,6 +35,7 @@ import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneD
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
 import type { Placement } from './placements';
+import type { EditorWorld } from './mapStore';
 
 type HeightTool = 'brush' | 'erase';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
@@ -42,6 +44,12 @@ type HoverSink = { current: ((h: HoverState) => void) | null };
 
 export type Tool = 'pointer' | 'brush' | 'eraser';
 export type Layer = 'paint' | 'height' | 'place' | 'zone';
+
+// The serialize seam: the cart pulls the live world (chunks + zone defs + focus)
+// through this on autosave. Placements live in the cart, so they're added there.
+export interface PaintCanvasApi {
+  getWorld: () => Pick<EditorWorld, 'chunks' | 'zones' | 'focus'>;
+}
 
 // Two-letter flag tags for the cramped zone rail.
 const FLAG_TAG: Record<ZoneFlag, string> = { private: 'PV', safe: 'SF', hostile: 'HO', restricted: 'RS', interior: 'IN' };
@@ -352,7 +360,9 @@ function HoverReadout(props: { sink: HoverSink }) {
 // ── Canvas ───────────────────────────────────────────────────────────────────
 
 // Controlled: tool / tile / layer live in the parent so they persist across hot
-// reloads. Chunk buffers + focus live here (v1, not yet persisted).
+// reloads. Chunk buffers + zone defs + focus live here; they're seeded from the
+// opened map (props.initialWorld) on mount, exposed for serialize via props.apiRef,
+// and props.onEdit fires once per stroke / structural change to drive autosave.
 export function PaintCanvas(props: {
   tool: Tool;
   onTool: (t: Tool) => void;
@@ -365,6 +375,15 @@ export function PaintCanvas(props: {
   // Throttled mirror of the focused chunks' painted tiles (one floor snapshot per
   // chunk) — drives the live iso-3D preview.
   onFloors?: (floors: ChunkFloor[]) => void;
+  // The map to seed from on mount. The cart remounts PaintCanvas (key=map name)
+  // when opening a different map, so this only ever reads on the first render of
+  // each mount. null/undefined = a blank map (one seed chunk).
+  initialWorld?: EditorWorld | null;
+  // Registered with the live-world getter so the cart can serialize on autosave.
+  apiRef?: { current: PaintCanvasApi | null };
+  // Fired once per meaningful edit (stroke end, chunk add, focus / zone change) so
+  // the cart can schedule a debounced autosave. NOT per painted cell.
+  onEdit?: () => void;
 }) {
   const { tool, tile, layer, place } = props;
   const grid = props.showGrid !== false;
@@ -379,18 +398,62 @@ export function PaintCanvas(props: {
   const rectRef = useRef<CanvasRect>(null);
   const drawing = useRef(false);
 
+  // ── WASD pans the view ───────────────────────────────────────────────────────
+  // The Canvas's built-in `drift` (px/s, animated engine-side while no drag) does
+  // the panning, so a held key streams smoothly with NO per-frame re-render — we
+  // only re-render when the held-key SET changes. drift divides by zoom, so the
+  // px/s speed stays constant at any zoom. Held keys sum, so W+A drifts diagonally.
+  // Gated on no text field being focused anywhere (the zone-name input, the notes
+  // pane, etc.) so typing never pans; blur clears so alt-tab can't strand a drift.
+  const PAN_SPEED = 700; // px/s while a direction key is held
+  const [drift, setDrift] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const heldKeys = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const DIR: Record<string, { x: number; y: number }> = {
+      d: { x: 1, y: 0 }, a: { x: -1, y: 0 }, s: { x: 0, y: 1 }, w: { x: 0, y: -1 },
+    };
+    const recompute = () => {
+      let x = 0, y = 0;
+      for (const k of heldKeys.current) { const v = DIR[k]; if (v) { x += v.x; y += v.y; } }
+      setDrift({ x: x * PAN_SPEED, y: y * PAN_SPEED });
+    };
+    const textFocused = () => {
+      const t = callHost<{ focused_id?: number } | null>('__tel_input', null);
+      return !!t && Number(t.focused_id ?? -1) >= 0;
+    };
+    const onDown = (ev: any) => {
+      const k = String(ev?.key ?? '').toLowerCase();
+      if (!DIR[k] || ev?.ctrlKey || ev?.altKey || ev?.metaKey) return;
+      if (heldKeys.current.has(k) || textFocused()) return; // ignore key-repeat / typing
+      heldKeys.current.add(k); recompute();
+    };
+    const onUp = (ev: any) => {
+      const k = String(ev?.key ?? '').toLowerCase();
+      if (heldKeys.current.delete(k)) recompute();
+    };
+    const clear = () => { if (heldKeys.current.size) { heldKeys.current.clear(); recompute(); } };
+    const offDown = busOn('__keydown', onDown);
+    const offUp = busOn('__keyup', onUp);
+    const offBlur = busOn('system:blur', clear);
+    return () => { offDown(); offUp(); offBlur(); heldKeys.current.clear(); };
+  }, []);
+
   // ── Chunk registry: a sparse grid of 120x120 chunks, seeded with (0,0) = a0.
   //    The Map holds the (big, non-React) buffers; chunkRev bumps when the SET of
   //    chunks changes so derived lists re-read it. ────────────────────────────
   const chunksRef = useRef<Map<ChunkKey, Chunk> | null>(null);
   if (!chunksRef.current) {
-    const m = new Map<ChunkKey, Chunk>();
-    m.set(chunkKey(0, 0), makeChunk(0, 0));
-    chunksRef.current = m;
+    if (props.initialWorld) {
+      chunksRef.current = props.initialWorld.chunks; // seed from the opened map
+    } else {
+      const m = new Map<ChunkKey, Chunk>();
+      m.set(chunkKey(0, 0), makeChunk(0, 0));
+      chunksRef.current = m;
+    }
   }
   const chunks = chunksRef.current;
   const [chunkRev, setChunkRev] = useState(0);
-  const [focus, setFocus] = useState<Set<ChunkKey>>(() => new Set([chunkKey(0, 0)]));
+  const [focus, setFocus] = useState<Set<ChunkKey>>(() => props.initialWorld ? new Set(props.initialWorld.focus) : new Set([chunkKey(0, 0)]));
   const focusRef = useRef(focus);
   focusRef.current = focus;
 
@@ -401,6 +464,11 @@ export function PaintCanvas(props: {
   // re-bake) — the preview only redoes the part that changed.
   const onFloorsRef = useRef(props.onFloors);
   onFloorsRef.current = props.onFloors;
+  // Edit notifier — coalesced to once per stroke / structural change (NOT per
+  // cell) so the cart's autosave debounce fires without thrashing the paint path.
+  const onEditRef = useRef(props.onEdit);
+  onEditRef.current = props.onEdit;
+  const notifyEdit = useCallback(() => { onEditRef.current?.(); }, []);
   const tileDirty = useRef<Set<ChunkKey>>(new Set());
   const heightDirty = useRef<Set<ChunkKey>>(new Set());
   const tileCache = useRef<Map<ChunkKey, number[]>>(new Map());
@@ -451,14 +519,16 @@ export function PaintCanvas(props: {
     setChunkRev((r) => r + 1);
     setFocus((f) => { const n = new Set(f); n.add(k); return n; }); // bring the new chunk into view
     scheduleRegionSync();
-  }, [chunks, scheduleRegionSync]);
+    notifyEdit();
+  }, [chunks, scheduleRegionSync, notifyEdit]);
 
   const toggleFocus = useCallback((k: ChunkKey) => {
     setFocus((f) => { const n = new Set(f); if (n.has(k)) n.delete(k); else n.add(k); return n; });
     scheduleRegionSync();
-  }, [scheduleRegionSync]);
-  const focusAll = useCallback(() => { setFocus(new Set(Array.from(chunks.keys()))); scheduleRegionSync(); }, [chunks, scheduleRegionSync]);
-  const focusNone = useCallback(() => { setFocus(new Set()); scheduleRegionSync(); }, [scheduleRegionSync]);
+    notifyEdit();
+  }, [scheduleRegionSync, notifyEdit]);
+  const focusAll = useCallback(() => { setFocus(new Set(Array.from(chunks.keys()))); scheduleRegionSync(); notifyEdit(); }, [chunks, scheduleRegionSync, notifyEdit]);
+  const focusNone = useCallback(() => { setFocus(new Set()); scheduleRegionSync(); notifyEdit(); }, [scheduleRegionSync, notifyEdit]);
 
   // The open "+" slots = unique in-bounds, unoccupied neighbours of focused chunks.
   const addSlots = useMemo(() => {
@@ -555,12 +625,20 @@ export function PaintCanvas(props: {
   const clearHeights = () => {
     for (const c of focusedChunks) { clearField(c.height); touchChunk(chunkKey(c.cx, c.cz)); heightDirty.current.add(chunkKey(c.cx, c.cz)); }
     scheduleRegionSync();
+    notifyEdit();
   };
 
   // ── Zones: per-cell membership is per chunk; the DEFS are shared world-wide ───
-  const [zones, setZones] = useState<ZoneDef[]>([]);
+  const [zones, setZones] = useState<ZoneDef[]>(() => props.initialWorld ? props.initialWorld.zones : []);
   const [activeZone, setActiveZone] = useState(0);
-  const zoneSeq = useRef(0);
+  // Start the id counter past any seeded zone (ids are `z_<n>`) so new zones in an
+  // opened map don't collide with restored ones.
+  const zoneSeq = useRef(
+    (props.initialWorld?.zones ?? []).reduce((mx, z) => {
+      const n = Number(/^z_(\d+)$/.exec(z.id)?.[1] ?? 0);
+      return n > mx ? n : mx;
+    }, 0),
+  );
   const activeZoneRef = useRef(activeZone);
   activeZoneRef.current = activeZone;
 
@@ -571,14 +649,20 @@ export function PaintCanvas(props: {
     setZones((zs) => [...zs, { id, name: `Zone ${zs.length + 1}`, color: ZONE_COLORS[zs.length % ZONE_COLORS.length], flags: [] }]);
     setActiveZone(i);
     props.onTool('brush');
+    notifyEdit();
   };
-  const updateZone = (i: number, patch: Partial<ZoneDef>) => setZones((zs) => zs.map((z, j) => (j === i ? { ...z, ...patch } : z)));
+  const updateZone = (i: number, patch: Partial<ZoneDef>) => { setZones((zs) => zs.map((z, j) => (j === i ? { ...z, ...patch } : z))); notifyEdit(); };
   const deleteZone = (i: number) => {
     for (const c of allChunks) dropZoneIndex(c.zones, i); // keep zone indices consistent across all chunks
     for (const c of focusedChunks) touchChunk(chunkKey(c.cx, c.cz));
     setZones((zs) => zs.filter((_, j) => j !== i));
     setActiveZone((a) => (a >= i ? Math.max(0, a - 1) : a));
+    notifyEdit();
   };
+
+  // Register the live-world getter so the cart can serialize on autosave. Reassign
+  // each render so it captures the latest zones / focus (chunks is a stable ref).
+  if (props.apiRef) props.apiRef.current = { getWorld: () => ({ chunks, zones, focus }) };
 
   // Unified brush dispatch: paint paints tiles, zone paints the active zone, height
   // sculpts; all with brush/eraser (pointer pans). Place has no brush (draggable).
@@ -614,6 +698,9 @@ export function PaintCanvas(props: {
         gridColor="#13203200"
         gridMajorColor={grid ? '#1b2a40' : '#00000000'}
         gridMajorEvery={2}
+        driftX={drift.x}
+        driftY={drift.y}
+        driftActive={drift.x !== 0 || drift.y !== 0}
       >
         {/* Each focused chunk = one Effect quad at its lattice slot (own buffer). */}
         {focusedChunks.map((c) => (
@@ -670,8 +757,8 @@ export function PaintCanvas(props: {
         <Pressable
           onMouseDown={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; onBrush(sx, sy); }}
           onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) onBrush(sx, sy); updateHover(sx, sy); }}
-          onMouseUp={() => { drawing.current = false; }}
-          onMouseLeave={() => { drawing.current = false; hoverSink.current?.(null); }}
+          onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) notifyEdit(); }}
+          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); if (was) notifyEdit(); }}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
         />
       ) : null}
