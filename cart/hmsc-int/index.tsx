@@ -8,9 +8,9 @@ import {
   lastPointerPath,
   type SessionEnvelope,
 } from '@reactjit/workspace';
-import type { GameState } from '../hmsc/design';
-import { emptyEditorWorld } from './editorWorld';
-import { chunkFloorRegion, type ChunkFloor } from './chunkFloor';
+import type { Building, GameState } from '../hmsc/design';
+import { emptyEditorWorld, placeBuilding, placeWorldProp } from './editorWorld';
+import { type ChunkFloor } from './chunkFloor';
 import { IsoPreview } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer } from './PaintCanvas';
@@ -19,6 +19,7 @@ import { RightPanel, type TabId } from './RightPanel';
 import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { TILE_UNITS } from './heightData';
+import { CHUNK_TILES } from './chunks';
 import type { TileKind } from '../hmsc/design';
 
 // hmsc-int laid out as a 2x2 pane grid (QuadSplit) with a resizable cross divider:
@@ -59,6 +60,13 @@ function clampFrac(f: number): number {
   return Math.max(MIN_FRAC, Math.min(1 - MIN_FRAC, f));
 }
 
+// A placement's free rotation → the building's door side (nearest quadrant). The
+// preview can't show an arbitrary yaw on a box building, so snap it.
+function rotToSide(rotation: number): Building['doorSide'] {
+  const q = ((Math.round(rotation / 90) % 4) + 4) % 4;
+  return (['south', 'west', 'north', 'east'] as const)[q];
+}
+
 // Synchronous read of the last-saved view, used to seed initial state so there is
 // no center→saved flash on mount. Mirrors useWorkspace's restore path; the hook
 // still runs its own restore (same values) plus autosave/undo on top.
@@ -86,15 +94,13 @@ function Pane(props: { label: string; children?: React.ReactNode }) {
 }
 
 export default function HmscWorldEditorCart() {
-  // The iso-3D preview world: a real GameState whose surfaceRegions are mirrored
-  // (throttled) from the painted chunks by PaintCanvas. baseWorld is the empty
-  // editor world built once; only surfaceRegions change as you paint.
+  // The 3D preview world. baseWorld is the empty editor GameState (built once);
+  // floors (the painted tile/height per chunk) are mirrored from PaintCanvas and
+  // drive the preview's floor MESHES directly (not surfaceRegions). previewWorld
+  // is baseWorld + the placements applied as real buildings/props (below), so
+  // WorldStatics draws them — it only rebuilds when placements change, not on paint.
   const baseWorld = useMemo(emptyEditorWorld, []);
   const [floors, setFloors] = useState<ChunkFloor[]>([]);
-  const previewWorld = useMemo<GameState>(
-    () => ({ ...baseWorld, world: { ...baseWorld.world, surfaceRegions: floors.map((f) => chunkFloorRegion(f.cx, f.cz)) } }),
-    [baseWorld, floors],
-  );
 
   // Seed view state from disk once (lazy initializer → runs only on mount).
   const [initial] = useState(readInitialView);
@@ -175,6 +181,32 @@ export default function HmscWorldEditorCart() {
   );
   const shownFocus: Focus = placeFocus?.focus ?? { kind: 'tile', tile };
   const focusWorld = placeFocus?.world ?? baseWorld;
+
+  // The preview world = baseWorld with every placement applied via the game's own
+  // mutators, so WorldStatics renders them exactly as the game would. Placement
+  // graph coords → world cells: graph origin is the seed chunk's centre, so
+  // worldCell = gx/TILE_UNITS + CHUNK_TILES/2. Buildings are placed by min-corner
+  // (centre − half-footprint) with the door snapped to the rotation quadrant.
+  const previewWorld = useMemo<GameState>(() => {
+    let s = baseWorld;
+    for (const p of placements) {
+      const wx = Math.round(p.gx / TILE_UNITS + CHUNK_TILES / 2);
+      const wz = Math.round(p.gy / TILE_UNITS + CHUNK_TILES / 2);
+      if (p.cat === 'building') {
+        const r = placeBuilding(s, {
+          kind: p.kind as Building['kind'],
+          x: wx - Math.floor(p.footW / 2),
+          z: wz - Math.floor(p.footD / 2),
+          doorSide: rotToSide(p.rotation),
+          force: true,
+        });
+        if (r.ok) s = r.state;
+      } else {
+        s = placeWorldProp(s, { kind: p.kind as Parameters<typeof placeWorldProp>[1]['kind'], x: wx, z: wz, yawDegrees: p.rotation }).state;
+      }
+    }
+    return s;
+  }, [baseWorld, placements]);
 
   return (
     <Box style={{ width: '100%', height: '100%', backgroundColor: '#080d16' }}>

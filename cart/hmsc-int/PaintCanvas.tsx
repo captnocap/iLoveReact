@@ -24,12 +24,12 @@ import { Box, Canvas, Pressable, ScrollView, Text, TextInput } from '@reactjit/p
 import { Icon } from '@reactjit/icons/Icon';
 import { callHost } from '@reactjit/ffi';
 import { columnLabel } from './address';
-import { focusedFloors, type ChunkFloor } from './chunkFloor';
+import { type ChunkFloor } from './chunkFloor';
 import type { TileKind, ZoneFlag } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
 import { ZONE_FLAGS } from '../hmsc/world/zones';
 import { TILE_UNITS, stampCone, clearField } from './heightData';
-import { paintTile, tileKindIndex } from './tileData';
+import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
@@ -74,6 +74,28 @@ const SIZE_STEP = 1, SIZE_MIN = 0, SIZE_MAX = 40;
 // Throttle for the live preview mirror — rebuilding regions + re-baking the
 // preview's floor captures is heavy, so cap it to ~3 syncs/sec.
 const REGION_SYNC_MS = 320;
+
+// Preview height-mesh resolution (vertices per side). The full field is 241x241;
+// the geometry intern key is the SERIALIZED heights array shipped as a node prop,
+// so a 241^2 field is a ~580KB key + ~350k verts re-shipped on every sculpt — that
+// overwhelms the bridge and the floor mesh vanishes. The fine tile detail rides
+// the TEXTURE; the mesh only needs the height silhouette, so we downsample to a
+// coarse grid (61 over 120m = ~2m spacing): small key, cheap re-ship.
+const HF_RES = 61;
+
+// Downsample a chunk's full height field (cols x rows) to an HF_RES x HF_RES grid.
+function downsampleHeights(z: Float32Array, cols: number, rows: number): number[] {
+  const out = new Array<number>(HF_RES * HF_RES);
+  const sx = (cols - 1) / (HF_RES - 1);
+  const sy = (rows - 1) / (HF_RES - 1);
+  for (let j = 0; j < HF_RES; j++) {
+    const jj = Math.round(j * sy);
+    for (let i = 0; i < HF_RES; i++) {
+      out[j * HF_RES + i] = z[jj * cols + Math.round(i * sx)];
+    }
+  }
+  return out;
+}
 
 const TOOLS: { id: Tool; icon: string }[] = [
   { id: 'pointer', icon: 'MousePointer' },
@@ -372,15 +394,36 @@ export function PaintCanvas(props: {
   const focusRef = useRef(focus);
   focusRef.current = focus;
 
-  // Live preview sync: mirror the focused chunks' painted tiles to the iso-3D
-  // preview as world regions, THROTTLED. Tile paints and focus changes schedule a
-  // sync; it fires at most once per REGION_SYNC_MS reading the live buffers + focus.
+  // Live preview sync: mirror the focused chunks' painted tiles + height to the 3D
+  // preview, THROTTLED. tileData / heights are cached per chunk and only re-encoded
+  // when that LAYER was painted (dirty set), so a tile stroke keeps heights stable
+  // (no height-mesh regen) and a height stroke keeps tileData stable (no texture
+  // re-bake) — the preview only redoes the part that changed.
   const onFloorsRef = useRef(props.onFloors);
   onFloorsRef.current = props.onFloors;
+  const tileDirty = useRef<Set<ChunkKey>>(new Set());
+  const heightDirty = useRef<Set<ChunkKey>>(new Set());
+  const tileCache = useRef<Map<ChunkKey, number[]>>(new Map());
+  const heightCache = useRef<Map<ChunkKey, number[]>>(new Map());
   const regionSyncPending = useRef(false);
-  const syncRegionsNow = useCallback(() => {
-    onFloorsRef.current?.(focusedFloors(chunks, focusRef.current));
+  const buildFloors = useCallback((): ChunkFloor[] => {
+    const out: ChunkFloor[] = [];
+    for (const c of chunks.values()) {
+      const k = chunkKey(c.cx, c.cz);
+      if (!focusRef.current.has(k)) continue;
+      if (tileDirty.current.has(k) || !tileCache.current.has(k)) {
+        tileCache.current.set(k, encodeTileMap(c.tiles));
+        tileDirty.current.delete(k);
+      }
+      if (heightDirty.current.has(k) || !heightCache.current.has(k)) {
+        heightCache.current.set(k, downsampleHeights(c.height.z, c.height.cols, c.height.rows));
+        heightDirty.current.delete(k);
+      }
+      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: HF_RES, hrows: HF_RES });
+    }
+    return out;
   }, [chunks]);
+  const syncRegionsNow = useCallback(() => { onFloorsRef.current?.(buildFloors()); }, [buildFloors]);
   const scheduleRegionSync = useCallback(() => {
     if (regionSyncPending.current) return;
     regionSyncPending.current = true;
@@ -480,6 +523,7 @@ export function PaintCanvas(props: {
     const falloff = Math.abs(b.centerZ) / Math.max(0.5, b.size);
     stampCone(c.chunk.height, cix, ciy, { centerZ: b.centerZ, falloff, erase: b.tool === 'erase' });
     touchChunk(c.k);
+    heightDirty.current.add(c.k); scheduleRegionSync(); // mirror height to the preview mesh
   };
 
   const paintTileAtScreen = (sx: number, sy: number) => {
@@ -491,7 +535,7 @@ export function PaintCanvas(props: {
     const idx = p.tool === 'eraser' ? -1 : tileKindIndex(p.tile);
     stampDisc(p.size, c.cellX, c.cellZ, (x, z) => paintTile(c.chunk.tiles, x, z, idx));
     touchChunk(c.k);
-    scheduleRegionSync(); // mirror to the iso-3D preview (throttled)
+    tileDirty.current.add(c.k); scheduleRegionSync(); // mirror the floor texture to the preview
   };
 
   const paintZoneAtScreen = (sx: number, sy: number) => {
@@ -507,7 +551,8 @@ export function PaintCanvas(props: {
   };
 
   const clearHeights = () => {
-    for (const c of focusedChunks) { clearField(c.height); touchChunk(chunkKey(c.cx, c.cz)); }
+    for (const c of focusedChunks) { clearField(c.height); touchChunk(chunkKey(c.cx, c.cz)); heightDirty.current.add(chunkKey(c.cx, c.cz)); }
+    scheduleRegionSync();
   };
 
   // ── Zones: per-cell membership is per chunk; the DEFS are shared world-wide ───

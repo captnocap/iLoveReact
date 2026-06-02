@@ -16,6 +16,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Effect, Pressable, Scene3D, Text, StaticSurface } from '@reactjit/primitives';
+import { Heightfield } from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import type { GameState } from '../hmsc/design';
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
@@ -38,21 +39,51 @@ const CAP_PX = 480;
 // chunk so the texture (and its bind group) persists across paints — only the
 // contents re-bake. Identities stabilized so an unrelated re-render does not commit
 // an Effect UPDATE that would re-bake every frame.
-const ChunkFloorCapture = memo(function ChunkFloorCapture(props: { cx: number; cz: number; data: number[] }) {
+const ChunkFloorCapture = memo(function ChunkFloorCapture(props: { cx: number; cz: number; tileData: number[] }) {
   const surfaceStyle = useMemo(() => ({ position: 'absolute' as const, left: -99999, top: 0, width: CAP_PX, height: CAP_PX }), []);
   const effectStyle = useMemo(() => ({ width: CAP_PX, height: CAP_PX }), []);
   return (
     <StaticSurface staticKey={floorTextureKey(chunkFloorId(props.cx, props.cz))} style={surfaceStyle}>
-      <Effect shader={TILE_FIELD_WGSL} data={props.data} style={effectStyle} />
+      <Effect shader={TILE_FIELD_WGSL} data={props.tileData} style={effectStyle} />
     </StaticSurface>
   );
 });
 
+// The 2D offscreen textures (one per focused chunk). Memoized on tileData so a
+// height-only stroke (tileData unchanged) never re-bakes the texture.
 const ChunkFloorCaptures = memo(function ChunkFloorCaptures(props: { floors: ChunkFloor[] }) {
   return (
     <>
       {props.floors.map((f) => (
-        <ChunkFloorCapture key={chunkFloorId(f.cx, f.cz)} cx={f.cx} cz={f.cz} data={f.data} />
+        <ChunkFloorCapture key={chunkFloorId(f.cx, f.cz)} cx={f.cx} cz={f.cz} tileData={f.tileData} />
+      ))}
+    </>
+  );
+});
+
+// One displaced floor mesh per focused chunk: a Heightfield slab displaced by the
+// chunk's height samples, textured by its tile capture. params is memoized on the
+// heights identity (stable from the painter's cache) so a tile-only stroke never
+// regenerates the mesh.
+const ChunkFloorMesh = memo(function ChunkFloorMesh(props: { cx: number; cz: number; heights: number[]; hcols: number; hrows: number }) {
+  const params = useMemo(
+    () => ({ heights: props.heights, cols: props.hcols, rows: props.hrows, width: CHUNK_TILES, depth: CHUNK_TILES, base: 0.3 }),
+    [props.heights, props.hcols, props.hrows],
+  );
+  const position = useMemo<Vec3>(
+    () => [props.cx * CHUNK_TILES + CHUNK_TILES / 2, 0, props.cz * CHUNK_TILES + CHUNK_TILES / 2],
+    [props.cx, props.cz],
+  );
+  return (
+    <Scene3D.Mesh geometry={Heightfield} params={params} material="#ffffff" textureKey={floorTextureKey(chunkFloorId(props.cx, props.cz))} position={position} />
+  );
+});
+
+const ChunkFloorMeshes = memo(function ChunkFloorMeshes(props: { floors: ChunkFloor[] }) {
+  return (
+    <>
+      {props.floors.map((f) => (
+        <ChunkFloorMesh key={chunkFloorId(f.cx, f.cz)} cx={f.cx} cz={f.cz} heights={f.heights} hcols={f.hcols} hrows={f.hrows} />
       ))}
     </>
   );
@@ -144,6 +175,9 @@ export const IsoPreview = memo(function IsoPreview(props: { state: GameState; fl
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showGrid={false} showAxes={false}>
         <Scene3D.Camera position={eye} target={target} fov={FOV} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
+        {/* Floors are our displaced per-chunk meshes; WorldStatics draws the rest
+            (skybox, lights, and the placements applied as buildings/props). */}
+        <ChunkFloorMeshes floors={floors} />
         <WorldStatics world={world} skyConfig={state.config.sky} />
       </Scene3D>
 
