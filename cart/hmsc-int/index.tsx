@@ -22,11 +22,16 @@ import { RightPanel, type TabId } from './RightPanel';
 import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { serializeMap, deserializeMap, emptyMap, type MapSnapshot, type EditorWorld } from './mapStore';
-import { ProjectBar, MapsMenu, SaveLog, type SaveEvent } from './ProjectBar';
+import { ProjectBar, MapsMenu, EventLog } from './ProjectBar';
+import { type EditNote, type EditEvent } from './editLog';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS } from './heightData';
 import { CHUNK_TILES } from './chunks';
 import type { TileKind } from '../hmsc/design';
+import {
+  cellKey, serializeOverrides, deserializeOverrides,
+  type SelCell, type OverrideStore, type OverrideValue, type OverrideSnap,
+} from './tileOverrides';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -69,6 +74,7 @@ interface MapPayload {
   sel?: string | null;                 // the in-focus placement id (place layer)
   wasd?: 'canvas' | 'preview';         // which bottom quad owns the WASD keys
   cam?: PreviewCamera;                 // the 3D preview's free-fly pose
+  overrides?: OverrideSnap[];          // per-cell property overrides (patch on kind)
 }
 
 function clampFrac(f: number): number {
@@ -160,7 +166,6 @@ export default function HmscWorldEditorCart() {
   const [seedWorld, setSeedWorld] = useState<EditorWorld | null>(null);
   const [worldEpoch, setWorldEpoch] = useState(0);
   const [worldRev, setWorldRev] = useState(0);
-  const onWorldEdit = useCallback(() => setWorldRev((r) => r + 1), []);
 
   // The 3D preview camera persists too (per map). camApiRef pulls the live pose for
   // serialize; seedCam seeds the pane on mount/open; viewRev bumps when the camera
@@ -168,11 +173,52 @@ export default function HmscWorldEditorCart() {
   const camApiRef = useRef<PreviewCameraApi | null>(null);
   const [seedCam, setSeedCam] = useState<PreviewCamera | null>(() => initial.cam ?? null);
   const [viewRev, setViewRev] = useState(0);
-  const onViewSettle = useCallback(() => setViewRev((r) => r + 1), []);
 
   const placeSeq = useRef(0);
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [selPlaceId, setSelPlaceId] = useState<string | null>(() => initial.sel ?? null);
+
+  // ── Tile selection + per-cell overrides ──────────────────────────────────────
+  // selCells = the group in focus (pointer-tool clicks in the canvas; ctrl-click to
+  // add). overrides = a flat store keyed by global cell → { dotted-path → value },
+  // patched on top of each cell's kind (the kind never changes). Both cart-owned so
+  // the top-left panel can read the selection and edit the whole group at once.
+  const [selCells, setSelCells] = useState<SelCell[]>([]);
+  const [overrides, setOverrides] = useState<OverrideStore>(() => new Map());
+  const tileSelect = useMemo(() => ({
+    cells: selCells,
+    set: (c: SelCell) => setSelCells([c]),
+    toggle: (c: SelCell) => setSelCells((prev) => {
+      const k = cellKey(c.gx, c.gz);
+      return prev.some((p) => cellKey(p.gx, p.gz) === k) ? prev.filter((p) => cellKey(p.gx, p.gz) !== k) : [...prev, c];
+    }),
+    clear: () => setSelCells([]),
+  }), [selCells]);
+  // Edit one property across EVERY selected cell at once (the bulk override).
+  const applyOverride = useCallback((path: string, value: OverrideValue) => {
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      for (const c of selCells) {
+        const k = cellKey(c.gx, c.gz);
+        next.set(k, { ...(next.get(k) ?? {}), [path]: value });
+      }
+      return next;
+    });
+    setWorldRev((r) => r + 1); // trip autosave
+  }, [selCells]);
+  const clearOverride = useCallback((path: string) => {
+    setOverrides((prev) => {
+      const next = new Map(prev);
+      for (const c of selCells) {
+        const k = cellKey(c.gx, c.gz);
+        const o = next.get(k); if (!o || !(path in o)) continue;
+        const rest = { ...o }; delete rest[path];
+        if (Object.keys(rest).length) next.set(k, rest); else next.delete(k);
+      }
+      return next;
+    });
+    setWorldRev((r) => r + 1);
+  }, [selCells]);
 
   // ── Persistence: build / apply the whole map payload ──────────────────────────
   const buildPayload = useCallback((): MapPayload | null => {
@@ -180,8 +226,8 @@ export default function HmscWorldEditorCart() {
     if (!api) return null; // canvas not mounted yet — skip this autosave tick
     const w = api.getWorld();
     const world = serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements });
-    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get() };
-  }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad]);
+    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides) };
+  }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
   const applyPayload = useCallback((env: SessionEnvelope<MapPayload>) => {
     const p = env.payload;
@@ -201,6 +247,8 @@ export default function HmscWorldEditorCart() {
     setSelPlaceId(p.sel ?? null);
     if (p.wasd) setWasdQuad(p.wasd);
     setSeedCam(p.cam ?? null);
+    setOverrides(deserializeOverrides(p.overrides));
+    setSelCells([]); // selection is transient — never carries across a map switch
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
   }, []);
@@ -210,7 +258,7 @@ export default function HmscWorldEditorCart() {
     version: VERSION,
     buildPayload,
     applyPayload,
-    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev],
+    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev, overrides],
   });
 
   // Undo history: snapshot the PRE-edit state at the START of each undoable action
@@ -235,23 +283,40 @@ export default function HmscWorldEditorCart() {
   // have added/removed a map).
   useEffect(() => { if (menuOpen) setMaps(listMaps()); }, [menuOpen]);
 
-  // ── Save-log trace (shown in the ProjectBar popover) ──────────────────────────
-  const EVENTS_CAP = 80;
-  const [events, setEvents] = useState<SaveEvent[]>([]);
-  const pushEvent = useCallback((kind: SaveEvent['kind'], map: string, t = Date.now()) => {
+  // ── Event-log trace (the categorized eventbus shown in the ProjectBar popover) ──
+  // A stream of WHAT happened (tile painted, object moved, camera moved, ...), not
+  // autosave spam — the "saved" pill already shows save state.
+  const EVENTS_CAP = 100;
+  const [events, setEvents] = useState<EditEvent[]>([]);
+  const logEvent = useCallback((note: EditNote, t = Date.now()) => {
     setEvents((es) => {
-      const next = [...es, { t, kind, map }];
+      const next = [...es, { ...note, t }];
       return next.length > EVENTS_CAP ? next.slice(next.length - EVENTS_CAP) : next;
     });
   }, []);
-  // Each debounced autosave bumps ws.lastSavedAt — log one 'save' entry per bump.
-  const lastLoggedSaveRef = useRef<number | null>(ws.lastSavedAt);
-  useEffect(() => {
-    if (ws.lastSavedAt && ws.lastSavedAt !== lastLoggedSaveRef.current) {
-      lastLoggedSaveRef.current = ws.lastSavedAt;
-      pushEvent('save', ws.stem, ws.lastSavedAt);
-    }
-  }, [ws.lastSavedAt, ws.stem, pushEvent]);
+  // Continuous edits (drag, rotate, fly) would flood the trace — coalesce them to
+  // one entry per ~600ms per category.
+  const lastCatAtRef = useRef<Record<string, number>>({});
+  const logCoalesced = useCallback((note: EditNote) => {
+    const now = Date.now();
+    if (now - (lastCatAtRef.current[note.cat] ?? 0) < 600) { lastCatAtRef.current[note.cat] = now; return; }
+    lastCatAtRef.current[note.cat] = now;
+    logEvent(note, now);
+  }, [logEvent]);
+
+  // PaintCanvas reports each edit with a semantic note (or none for silent edits like
+  // focus toggles): trip the autosave + log the note. Stable for the memoized canvas.
+  const onCanvasEdit = useCallback((e?: EditNote) => {
+    setWorldRev((r) => r + 1);
+    if (e) logEvent(e);
+  }, [logEvent]);
+
+  // The 3D preview camera settled (stopped flying) — trip the view autosave + log it
+  // (coalesced so a long fly is one entry, not a stream).
+  const onCameraSettle = useCallback(() => {
+    setViewRev((r) => r + 1);
+    logCoalesced({ cat: 'camera', text: 'camera moved' });
+  }, [logCoalesced]);
 
   // Write a map file directly (used by new / rename so the file exists immediately,
   // not only after the autosave debounce). Mirrors the workspace flush.
@@ -282,8 +347,8 @@ export default function HmscWorldEditorCart() {
     ws.history.clear();
     writeFile(lastPointerPath(CART), name);
     refreshMaps();
-    pushEvent('open', name);
-  }, [ws, applyPayload, refreshMaps, flushCurrent, pushEvent]);
+    logEvent({ cat: 'map', text: `opened ${name}` });
+  }, [ws, applyPayload, refreshMaps, flushCurrent, logEvent]);
 
   const newMap = useCallback(() => {
     flushCurrent(); // don't lose the current map's just-painted edits
@@ -298,8 +363,8 @@ export default function HmscWorldEditorCart() {
     ws.setStem(name);
     ws.history.clear();
     refreshMaps();
-    pushEvent('new', name);
-  }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, writeMapFile, refreshMaps, flushCurrent, pushEvent]);
+    logEvent({ cat: 'map', text: `new map ${name}` });
+  }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, writeMapFile, refreshMaps, flushCurrent, logEvent]);
 
   const renameMap = useCallback((rawNext: string) => {
     const old = ws.stem;
@@ -311,12 +376,12 @@ export default function HmscWorldEditorCart() {
     ws.setStem(finalName);
     if (old !== finalName) deleteMap(old);
     refreshMaps();
-    pushEvent('rename', finalName);
-  }, [ws, buildPayload, writeMapFile, refreshMaps, pushEvent]);
+    logEvent({ cat: 'map', text: `renamed → ${finalName}` });
+  }, [ws, buildPayload, writeMapFile, refreshMaps, logEvent]);
 
   const deleteMapAndAdvance = useCallback((name: string) => {
     deleteMap(name);
-    pushEvent('delete', name);
+    logEvent({ cat: 'map', text: `deleted ${name}` });
     if (name === ws.stem) {
       const remaining = listMaps().filter((m) => m !== name);
       if (remaining.length) openMap(remaining[0]);
@@ -324,7 +389,7 @@ export default function HmscWorldEditorCart() {
     } else {
       refreshMaps();
     }
-  }, [ws, openMap, newMap, refreshMaps, pushEvent]);
+  }, [ws, openMap, newMap, refreshMaps, logEvent]);
 
   // Divider drags arrive as per-event fraction deltas; accumulate + clamp here.
   const onResize = useCallback((axis: 'col' | 'row', d: number) => {
@@ -337,6 +402,12 @@ export default function HmscWorldEditorCart() {
   // ── Object placements (the 'place' layer) ───────────────────────────────────
   // The model viewer's + drops the selected kind at the origin, selects it, and
   // switches the painter to the place layer ("brings the view into this layer").
+  // A ref so the id-only handlers can name a placement in the log without a stale
+  // closure over `placements`.
+  const placementsRef = useRef(placements);
+  placementsRef.current = placements;
+  const labelOf = (id: string) => placementsRef.current.find((p) => p.id === id)?.label ?? 'object';
+
   const placeObject = useCallback((cat: PlaceCat, kind: string) => {
     snapshotForUndo(); // pre-add
     placeSeq.current += 1;
@@ -345,13 +416,20 @@ export default function HmscWorldEditorCart() {
     setPlacements((ps) => [...ps, { id, cat, kind, ...base, gx: 0, gy: 0, rotation: 0, locked: false }]);
     setSelPlaceId(id);
     setLayer('place');
-  }, [snapshotForUndo]);
-  // Drag/update coalesce — one undo step per drag, not per move event.
-  const movePlacement = useCallback((id: string, gx: number, gy: number) => { snapshotForUndoCoalesced(); setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, gx, gy } : p))); }, [snapshotForUndoCoalesced]);
-  const updatePlacement = useCallback((id: string, patch: Partial<Placement>) => { snapshotForUndoCoalesced(); setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p))); }, [snapshotForUndoCoalesced]);
-  const removePlacement = useCallback((id: string) => { snapshotForUndo(); setPlacements((ps) => ps.filter((p) => p.id !== id)); setSelPlaceId((s) => (s === id ? null : s)); }, [snapshotForUndo]);
+    logEvent({ cat: 'object', text: `placed ${base.label}` });
+  }, [snapshotForUndo, logEvent]);
+  // Drag/update coalesce — one undo step + one log entry per drag, not per move.
+  const movePlacement = useCallback((id: string, gx: number, gy: number) => { snapshotForUndoCoalesced(); setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, gx, gy } : p))); logCoalesced({ cat: 'object', text: `moved ${labelOf(id)}` }); }, [snapshotForUndoCoalesced, logCoalesced]);
+  const updatePlacement = useCallback((id: string, patch: Partial<Placement>) => {
+    snapshotForUndoCoalesced();
+    setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+    if ('locked' in patch) logEvent({ cat: 'object', text: `${patch.locked ? 'locked' : 'unlocked'} ${labelOf(id)}` });
+    else logCoalesced({ cat: 'object', text: `rotated ${labelOf(id)}` });
+  }, [snapshotForUndoCoalesced, logEvent, logCoalesced]);
+  const removePlacement = useCallback((id: string) => { snapshotForUndo(); logEvent({ cat: 'object', text: `removed ${labelOf(id)}` }); setPlacements((ps) => ps.filter((p) => p.id !== id)); setSelPlaceId((s) => (s === id ? null : s)); }, [snapshotForUndo, logEvent]);
   const clonePlacement = useCallback((id: string) => {
     snapshotForUndo(); // pre-clone
+    logEvent({ cat: 'object', text: `cloned ${labelOf(id)}` });
     placeSeq.current += 1;
     const nid = `pl_${placeSeq.current}`;
     setPlacements((ps) => {
@@ -359,21 +437,24 @@ export default function HmscWorldEditorCart() {
       return src ? [...ps, { ...src, id: nid, gx: src.gx + TILE_UNITS, gy: src.gy + TILE_UNITS, locked: false }] : ps;
     });
     setSelPlaceId(nid);
-  }, [snapshotForUndo]);
+  }, [snapshotForUndo, logEvent]);
   const place = useMemo(() => ({
     items: placements, selId: selPlaceId, onSelect: setSelPlaceId,
     onMove: movePlacement, onUpdate: updatePlacement, onClone: clonePlacement, onDelete: removePlacement,
   }), [placements, selPlaceId, movePlacement, updatePlacement, clonePlacement, removePlacement]);
 
-  // The top-left "in focus" panel. On the place layer it shows the SELECTED
-  // placement's object (built into a one-object world so the panel resolves it);
-  // otherwise it falls back to the active paint tile so it is always live.
+  // The top-left "in focus" panel. A tile SELECTION (group) wins — it's the
+  // bulk-override surface. Else the place layer shows the SELECTED placement's
+  // object (built into a one-object world so the panel resolves it); else it falls
+  // back to the active paint tile so it is always live.
   const selPlacement = placements.find((p) => p.id === selPlaceId) ?? null;
   const placeFocus = useMemo(
     () => (layer === 'place' && selPlacement ? buildObjectWorld(selPlacement.cat, selPlacement.kind) : null),
     [layer, selPlacement?.cat, selPlacement?.kind],
   );
-  const shownFocus: Focus = placeFocus?.focus ?? { kind: 'tile', tile };
+  const shownFocus: Focus = selCells.length
+    ? { kind: 'tiles', cells: selCells }
+    : (placeFocus?.focus ?? { kind: 'tile', tile });
   const focusWorld = placeFocus?.world ?? baseWorld;
 
   // The preview world = baseWorld with every placement applied via the game's own
@@ -425,7 +506,7 @@ export default function HmscWorldEditorCart() {
           fx={fx}
           fy={fy}
           onResize={onResize}
-          topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} />}
+          topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} />}
           topRight={
             <RightPanel
               tab={tab}
@@ -445,7 +526,7 @@ export default function HmscWorldEditorCart() {
               key={`${ws.stem}#${worldEpoch}`}
               initialWorld={seedWorld}
               apiRef={paintApiRef}
-              onEdit={onWorldEdit}
+              onEdit={onCanvasEdit}
               tool={tool}
               onTool={setTool}
               tile={tile}
@@ -458,6 +539,7 @@ export default function HmscWorldEditorCart() {
               onEditBegin={snapshotForUndo}
               wasdFocused={wasdQuad === 'canvas'}
               onWasdFocus={focusCanvas}
+              select={tileSelect}
             />
           }
           bottomRight={
@@ -470,7 +552,7 @@ export default function HmscWorldEditorCart() {
                 onWasdFocus={focusPreview}
                 initialCamera={seedCam}
                 cameraApiRef={camApiRef}
-                onCameraSettle={onViewSettle}
+                onCameraSettle={onCameraSettle}
               />
             </Pane>
           }
@@ -490,9 +572,9 @@ export default function HmscWorldEditorCart() {
         />
       ) : null}
 
-      {/* Save-log trace — also a root last-child overlay (same layering rule). */}
+      {/* Event-log trace — also a root last-child overlay (same layering rule). */}
       {logOpen ? (
-        <SaveLog events={events} now={Date.now()} onClose={() => setLogOpen(false)} />
+        <EventLog events={events} now={Date.now()} onClose={() => setLogOpen(false)} />
       ) : null}
     </Box>
   );

@@ -36,6 +36,8 @@ import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
 import type { Placement } from './placements';
 import type { EditorWorld } from './mapStore';
+import type { SelCell } from './tileOverrides';
+import type { EditNote } from './editLog';
 
 type HeightTool = 'brush' | 'erase';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
@@ -382,8 +384,10 @@ export function PaintCanvas(props: {
   // Registered with the live-world getter so the cart can serialize on autosave.
   apiRef?: { current: PaintCanvasApi | null };
   // Fired once per meaningful edit (stroke end, chunk add, focus / zone change) so
-  // the cart can schedule a debounced autosave. NOT per painted cell.
-  onEdit?: () => void;
+  // the cart can schedule a debounced autosave. NOT per painted cell. The optional
+  // note categorizes the edit for the event log; omit it for silent edits (focus
+  // toggles, zone-name keystrokes) that should autosave but not clutter the trace.
+  onEdit?: (e?: EditNote) => void;
   // Fired at the START of an undoable action (before it mutates) — stroke begin,
   // chunk add, zone add/delete, clear — so the cart can snapshot the PRE-edit state
   // onto the undo stack. Pairs with onEdit (which fires after, for autosave).
@@ -394,6 +398,17 @@ export function PaintCanvas(props: {
   // hover — so the cursor wandering between quads can't steal an in-progress fly.
   wasdFocused?: boolean;
   onWasdFocus?: () => void;
+  // Tile SELECTION (the pointer tool): click a cell to focus it, ctrl-click to
+  // build a group. The selection drives the top-left override panel; the canvas
+  // only reports clicks + draws the highlight. Owned by the cart so the panel can
+  // read it. Never explodes to a Canvas.Node per tile — only the (small) selection
+  // is drawn as highlight nodes.
+  select?: {
+    cells: SelCell[];
+    set: (c: SelCell) => void;
+    toggle: (c: SelCell) => void;
+    clear: () => void;
+  };
 }) {
   const { tool, tile, layer, place } = props;
   const grid = props.showGrid !== false;
@@ -424,6 +439,9 @@ export function PaintCanvas(props: {
   const recomputeDriftRef = useRef<() => void>(() => {});
   const wasdFocusedRef = useRef(false);
   wasdFocusedRef.current = !!props.wasdFocused;
+  // Ctrl-held state — mouse events carry no modifier flags, so track it off the key
+  // bus (every key event reports the live modifier mask). Drives ctrl-click select.
+  const ctrlHeldRef = useRef(false);
   // Lost focus (another quad claimed WASD) → drop held keys so the pan stops at once.
   useEffect(() => {
     if (!props.wasdFocused && heldKeys.current.size) { heldKeys.current.clear(); recomputeDriftRef.current(); }
@@ -443,6 +461,7 @@ export function PaintCanvas(props: {
       return !!t && Number(t.focused_id ?? -1) >= 0;
     };
     const onDown = (ev: any) => {
+      if (typeof ev?.ctrlKey === 'boolean') ctrlHeldRef.current = ev.ctrlKey || ev.metaKey;
       const k = String(ev?.key ?? '').toLowerCase();
       if (!DIR[k] || ev?.ctrlKey || ev?.altKey || ev?.metaKey) return;
       if (!wasdFocusedRef.current) return; // only the focused quad pans
@@ -450,6 +469,7 @@ export function PaintCanvas(props: {
       heldKeys.current.add(k); recompute();
     };
     const onUp = (ev: any) => {
+      if (typeof ev?.ctrlKey === 'boolean') ctrlHeldRef.current = ev.ctrlKey || ev.metaKey;
       const k = String(ev?.key ?? '').toLowerCase();
       if (heldKeys.current.delete(k)) recompute();
     };
@@ -492,7 +512,7 @@ export function PaintCanvas(props: {
   // cell) so the cart's autosave debounce fires without thrashing the paint path.
   const onEditRef = useRef(props.onEdit);
   onEditRef.current = props.onEdit;
-  const notifyEdit = useCallback(() => { onEditRef.current?.(); }, []);
+  const notifyEdit = useCallback((e?: EditNote) => { onEditRef.current?.(e); }, []);
   const onEditBeginRef = useRef(props.onEditBegin);
   onEditBeginRef.current = props.onEditBegin;
   const notifyEditBegin = useCallback(() => { onEditBeginRef.current?.(); }, []);
@@ -547,7 +567,7 @@ export function PaintCanvas(props: {
     setChunkRev((r) => r + 1);
     setFocus((f) => { const n = new Set(f); n.add(k); return n; }); // bring the new chunk into view
     scheduleRegionSync();
-    notifyEdit();
+    notifyEdit({ cat: 'chunk', text: `added chunk ${chunkLabel(cx, cz)}` });
   }, [chunks, scheduleRegionSync, notifyEdit, notifyEditBegin]);
 
   const toggleFocus = useCallback((k: ChunkKey) => {
@@ -654,7 +674,7 @@ export function PaintCanvas(props: {
     notifyEditBegin(); // snapshot pre-clear state for undo
     for (const c of focusedChunks) { clearField(c.height); touchChunk(chunkKey(c.cx, c.cz)); heightDirty.current.add(chunkKey(c.cx, c.cz)); }
     scheduleRegionSync();
-    notifyEdit();
+    notifyEdit({ cat: 'height', text: 'cleared height' });
   };
 
   // ── Zones: per-cell membership is per chunk; the DEFS are shared world-wide ───
@@ -679,7 +699,7 @@ export function PaintCanvas(props: {
     setZones((zs) => [...zs, { id, name: `Zone ${zs.length + 1}`, color: ZONE_COLORS[zs.length % ZONE_COLORS.length], flags: [] }]);
     setActiveZone(i);
     props.onTool('brush');
-    notifyEdit();
+    notifyEdit({ cat: 'zone', text: `added zone Zone ${i + 1}` });
   };
   const updateZone = (i: number, patch: Partial<ZoneDef>) => { setZones((zs) => zs.map((z, j) => (j === i ? { ...z, ...patch } : z))); notifyEdit(); };
   const deleteZone = (i: number) => {
@@ -688,7 +708,7 @@ export function PaintCanvas(props: {
     for (const c of focusedChunks) touchChunk(chunkKey(c.cx, c.cz));
     setZones((zs) => zs.filter((_, j) => j !== i));
     setActiveZone((a) => (a >= i ? Math.max(0, a - 1) : a));
-    notifyEdit();
+    notifyEdit({ cat: 'zone', text: 'removed zone' });
   };
 
   // Register the live-world getter so the cart can serialize on autosave. Reassign
@@ -698,10 +718,32 @@ export function PaintCanvas(props: {
   // Unified brush dispatch: paint paints tiles, zone paints the active zone, height
   // sculpts; all with brush/eraser (pointer pans). Place has no brush (draggable).
   const showBrush = layer === 'height' || ((layer === 'paint' || layer === 'zone') && tool !== 'pointer');
+  // What a just-finished stroke did, for the event log — read from the active layer
+  // + tool at stroke end.
+  const strokeNote = (): EditNote => {
+    if (layer === 'height') return { cat: 'height', text: hTool === 'erase' ? 'lowered terrain' : 'raised terrain' };
+    if (layer === 'zone') { const z = zones[activeZone]; return { cat: 'zone', text: tool === 'eraser' ? 'erased zone' : `painted ${z ? z.name : 'zone'}` }; }
+    return { cat: 'tile', text: tool === 'eraser' ? 'erased tiles' : `painted ${tile}` };
+  };
   const onBrush = (sx: number, sy: number) => {
     if (layer === 'height') stampAtScreen(sx, sy);
     else if (layer === 'zone') paintZoneAtScreen(sx, sy);
     else paintTileAtScreen(sx, sy);
+  };
+
+  // The pointer tool SELECTS tiles (paint/zone layers): click = focus one cell,
+  // ctrl-click = add/remove from the group. The selection (cart-owned) drives the
+  // top-left override panel. A select overlay (sibling, like the brush) captures the
+  // click without one Canvas.Node per tile; only the chosen cells get a highlight.
+  const showSelect = !!props.select && tool === 'pointer' && (layer === 'paint' || layer === 'zone');
+  const selectAtScreen = (sx: number, sy: number) => {
+    const sel = props.select; if (!sel) return;
+    const g = screenToGraph(sx, sy); if (!g) return;
+    const c = resolveCell(g.gx, g.gy);
+    if (!c) { if (!ctrlHeldRef.current) sel.clear(); return; } // plain click on empty = deselect
+    const idx = c.chunk.tiles.idx[c.cellZ * c.chunk.tiles.cols + c.cellX];
+    const cell: SelCell = { gx: c.gCellX, gz: c.gCellZ, kind: idx >= 0 ? (TILE_KINDS[idx] ?? null) : null };
+    if (ctrlHeldRef.current) sel.toggle(cell); else sel.set(cell);
   };
 
   // One-at-a-time coordinate readout: the hovered cell's address (col letter + row),
@@ -744,6 +786,23 @@ export function PaintCanvas(props: {
             unregister={unregisterTouch}
           />
         ))}
+
+        {/* Selection highlight — one thin outline Canvas.Node per SELECTED cell
+            (bounded by the selection, never per-tile). Non-interactive: the select
+            overlay (sibling, on top) owns the clicks. */}
+        {(props.select?.cells ?? []).map((cell) => {
+          const cx = Math.floor(cell.gx / CHUNK_TILES), cz = Math.floor(cell.gz / CHUNK_TILES);
+          if (!focus.has(chunkKey(cx, cz))) return null;
+          // Canvas.Node positions by CENTRE (chunks sit at gx=cx*PATCH), so place the
+          // highlight at the cell's centre: chunk left edge + (cellX + 0.5) tiles.
+          const wx = cx * PATCH - PATCH / 2 + (cell.gx - cx * CHUNK_TILES + 0.5) * TILE_UNITS;
+          const wz = cz * PATCH - PATCH / 2 + (cell.gz - cz * CHUNK_TILES + 0.5) * TILE_UNITS;
+          return (
+            <Canvas.Node key={`sel_${cell.gx}_${cell.gz}`} gx={wx} gy={wz} gw={TILE_UNITS} gh={TILE_UNITS}>
+              <Box style={{ width: '100%', height: '100%', borderWidth: 2, borderColor: '#f8fafc', backgroundColor: '#f8fafc26' }} />
+            </Canvas.Node>
+          );
+        })}
 
         {/* "+" ghost on every open side — clicking attaches a chunk flush there.
             Clickable directly when no brush overlay is up (pointer / place); while
@@ -788,8 +847,20 @@ export function PaintCanvas(props: {
         <Pressable
           onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; notifyEditBegin(); onBrush(sx, sy); }}
           onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) onBrush(sx, sy); updateHover(sx, sy); }}
-          onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) notifyEdit(); }}
-          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); if (was) notifyEdit(); }}
+          onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) notifyEdit(strokeNote()); }}
+          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); if (was) notifyEdit(strokeNote()); }}
+          style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
+        />
+      ) : null}
+
+      {/* Select layer — pointer tool, paint/zone. Click focuses a cell (ctrl-click
+          adds to the group); forwards "+" ghost clicks like the brush overlay. Pan
+          here is via WASD (this overlay owns the clicks). */}
+      {showSelect ? (
+        <Pressable
+          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; selectAtScreen(sx, sy); }}
+          onMouseMove={(p: any) => { updateHover(Number(p?.x ?? 0), Number(p?.y ?? 0)); }}
+          onMouseLeave={() => { hoverSink.current?.(null); }}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
         />
       ) : null}
