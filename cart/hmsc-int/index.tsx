@@ -14,7 +14,7 @@ import {
 import type { Building, GameState } from '../hmsc/design';
 import { emptyEditorWorld, placeBuilding, placeWorldProp } from './editorWorld';
 import { type ChunkFloor } from './chunkFloor';
-import { IsoPreview } from './IsoPreview';
+import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
@@ -64,6 +64,11 @@ interface MapPayload {
   notes: string;
   showGrid: boolean;
   world: MapSnapshot;
+  // Per-quad view state — the "little things" that should survive an update, not
+  // just the world. All optional so older v2 files (without them) still parse.
+  sel?: string | null;                 // the in-focus placement id (place layer)
+  wasd?: 'canvas' | 'preview';         // which bottom quad owns the WASD keys
+  cam?: PreviewCamera;                 // the 3D preview's free-fly pose
 }
 
 function clampFrac(f: number): number {
@@ -137,6 +142,13 @@ export default function HmscWorldEditorCart() {
   const [tab, setTab] = useState<TabId>(() => initial.tab ?? 'objects');
   const [notes, setNotes] = useState<string>(() => initial.notes ?? '');
   const [showGrid, setShowGrid] = useState<boolean>(() => initial.showGrid ?? true);
+  // Which bottom quad owns the WASD keys. Both the 2D canvas and the 3D preview use
+  // WASD, so exactly one is "focused" at a time — claimed by a CLICK in that quad
+  // (not hover), so the cursor wandering across the divider can't steal an
+  // in-progress fly/pan. Default to the canvas (the primary editing surface).
+  const [wasdQuad, setWasdQuad] = useState<'canvas' | 'preview'>(() => initial.wasd ?? 'canvas');
+  const focusCanvas = useCallback(() => setWasdQuad('canvas'), []);
+  const focusPreview = useCallback(() => setWasdQuad('preview'), []);
 
   // ── The authored world ───────────────────────────────────────────────────────
   // The chunk buffers live INSIDE PaintCanvas (the de-thrashed paint path); the cart
@@ -150,9 +162,17 @@ export default function HmscWorldEditorCart() {
   const [worldRev, setWorldRev] = useState(0);
   const onWorldEdit = useCallback(() => setWorldRev((r) => r + 1), []);
 
+  // The 3D preview camera persists too (per map). camApiRef pulls the live pose for
+  // serialize; seedCam seeds the pane on mount/open; viewRev bumps when the camera
+  // settles (or focus/selection changes) to trip the same debounced autosave.
+  const camApiRef = useRef<PreviewCameraApi | null>(null);
+  const [seedCam, setSeedCam] = useState<PreviewCamera | null>(() => initial.cam ?? null);
+  const [viewRev, setViewRev] = useState(0);
+  const onViewSettle = useCallback(() => setViewRev((r) => r + 1), []);
+
   const placeSeq = useRef(0);
   const [placements, setPlacements] = useState<Placement[]>([]);
-  const [selPlaceId, setSelPlaceId] = useState<string | null>(null);
+  const [selPlaceId, setSelPlaceId] = useState<string | null>(() => initial.sel ?? null);
 
   // ── Persistence: build / apply the whole map payload ──────────────────────────
   const buildPayload = useCallback((): MapPayload | null => {
@@ -160,8 +180,8 @@ export default function HmscWorldEditorCart() {
     if (!api) return null; // canvas not mounted yet — skip this autosave tick
     const w = api.getWorld();
     const world = serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements });
-    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world };
-  }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements]);
+    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get() };
+  }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad]);
 
   const applyPayload = useCallback((env: SessionEnvelope<MapPayload>) => {
     const p = env.payload;
@@ -178,7 +198,9 @@ export default function HmscWorldEditorCart() {
     const w = p.world ? deserializeMap(p.world) : emptyMap();
     placeSeq.current = Math.max(placeSeq.current, maxPlacementSeq(w.placements));
     setPlacements(w.placements);
-    setSelPlaceId(null);
+    setSelPlaceId(p.sel ?? null);
+    if (p.wasd) setWasdQuad(p.wasd);
+    setSeedCam(p.cam ?? null);
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
   }, []);
@@ -188,7 +210,7 @@ export default function HmscWorldEditorCart() {
     version: VERSION,
     buildPayload,
     applyPayload,
-    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev],
+    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev],
   });
 
   // ── Multi-map management (the project manager surface is ProjectBar) ──────────
@@ -386,11 +408,22 @@ export default function HmscWorldEditorCart() {
               place={place}
               showGrid={showGrid}
               onFloors={setFloors}
+              wasdFocused={wasdQuad === 'canvas'}
+              onWasdFocus={focusCanvas}
             />
           }
           bottomRight={
             <Pane label="preview">
-              <IsoPreview state={previewWorld} floors={floors} />
+              <IsoPreview
+                key={`${ws.stem}#${worldEpoch}`}
+                state={previewWorld}
+                floors={floors}
+                wasdFocused={wasdQuad === 'preview'}
+                onWasdFocus={focusPreview}
+                initialCamera={seedCam}
+                cameraApiRef={camApiRef}
+                onCameraSettle={onViewSettle}
+              />
             </Pane>
           }
         />
