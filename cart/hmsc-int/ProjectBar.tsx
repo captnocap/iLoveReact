@@ -1,15 +1,17 @@
-// ProjectBar — the workspace shell's persistent top strip + its maps menu.
+// ProjectBar — the workspace shell's persistent top strip + its overlays.
 //
 // hmsc-int is a multi-map workspace (the city, every building interior, ...).
 // This is the project manager: it shows the CURRENT map, switches between maps,
-// makes new ones, renames + deletes — VSCode's "open folder" role. It is the one
-// piece of chrome that never resets while you iterate; the editor panes live below.
+// makes new ones, renames + deletes — VSCode's "open folder" role. It also carries
+// undo/redo and a save-log trace. It is the one piece of chrome that never resets
+// while you iterate; the editor panes live below.
 //
-// IMPORTANT layering note: the maps menu is a SEPARATE export (MapsMenu) rendered
-// by the cart as the LAST child of the shell root — NOT nested in the 38px strip.
-// Nested, it overflowed the short bar and the editor panes (a later sibling) painted
-// on top of it, so this engine's reverse hit-test routed clicks to the canvas and
-// you couldn't pick a map. As the root's last child it's on top of everything.
+// IMPORTANT layering note: the menus (MapsMenu, SaveLog) are SEPARATE exports
+// rendered by the cart as the LAST children of the shell root — NOT nested in the
+// 38px strip. Nested, they overflowed the short bar and the editor panes (a later
+// sibling) painted on top, so this engine's reverse hit-test routed clicks to the
+// canvas. As the root's last child they sit on top of everything. See memory
+// overlays_must_be_root_last_child.
 
 import { useState } from 'react';
 import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
@@ -18,8 +20,29 @@ import { sanitizeMapName } from './projects';
 
 export const PROJECT_BAR_H = 38;
 
-function savedLabel(at: number | null): string {
-  return at ? 'saved' : 'autosaving';
+// One entry in the save-log trace.
+export type SaveKind = 'save' | 'open' | 'new' | 'rename' | 'delete';
+export interface SaveEvent {
+  t: number;     // Date.now() when it happened
+  kind: SaveKind;
+  map: string;   // the map it concerned
+}
+
+const KIND_META: Record<SaveKind, { color: string; label: string }> = {
+  save: { color: '#22c55e', label: 'saved' },
+  open: { color: '#7dd3fc', label: 'opened' },
+  new: { color: '#86efac', label: 'new' },
+  rename: { color: '#fbbf24', label: 'renamed' },
+  delete: { color: '#b45757', label: 'deleted' },
+};
+
+function relTime(t: number, now: number): string {
+  const s = Math.max(0, Math.round((now - t) / 1000));
+  if (s < 2) return 'now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.round(m / 60)}h ago`;
 }
 
 // ── The strip ────────────────────────────────────────────────────────────────
@@ -27,9 +50,27 @@ function savedLabel(at: number | null): string {
 interface ProjectBarProps {
   mapName: string;
   menuOpen: boolean;
+  logOpen: boolean;
   lastSavedAt: number | null;
+  canUndo: boolean;
+  canRedo: boolean;
   onToggleMenu: () => void;
+  onToggleLog: () => void;
   onNew: () => void;
+  onUndo: () => void;
+  onRedo: () => void;
+}
+
+function IconBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
+  const enabled = props.enabled !== false;
+  return (
+    <Pressable
+      onPress={() => { if (enabled) props.onPress(); }}
+      style={{ width: 28, height: 26, alignItems: 'center', justifyContent: 'center', borderRadius: 6, borderWidth: 1, borderColor: props.on ? '#f8fafc' : '#27364a', backgroundColor: props.on ? '#1e293b' : '#0f1a2e', opacity: enabled ? 1 : 0.35 }}
+    >
+      <Icon name={props.icon} size={14} color={enabled ? '#cbd5e1' : '#475569'} />
+    </Pressable>
+  );
 }
 
 export function ProjectBar(props: ProjectBarProps) {
@@ -57,11 +98,20 @@ export function ProjectBar(props: ProjectBarProps) {
 
       <Box style={{ flexGrow: 1 }} />
 
-      {/* Save status */}
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5 }}>
-        <Icon name="Check" size={12} color="#22c55e" />
-        <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>{savedLabel(props.lastSavedAt)}</Text>
+      {/* Undo / redo */}
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <IconBtn icon="Undo2" enabled={props.canUndo} onPress={props.onUndo} />
+        <IconBtn icon="Redo2" enabled={props.canRedo} onPress={props.onRedo} />
       </Box>
+
+      <Box style={{ width: 1, height: 18, backgroundColor: '#1e293b' }} />
+
+      {/* Save status — click to expand the save-log trace */}
+      <Pressable onPress={props.onToggleLog} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 8, paddingTop: 5, paddingBottom: 5, borderRadius: 6, borderWidth: 1, borderColor: props.logOpen ? '#f8fafc' : '#27364a', backgroundColor: props.logOpen ? '#1e293b' : '#0f1a2e' }}>
+        <Icon name="Check" size={12} color="#22c55e" />
+        <Text fontSize={10} color="#94a3b8" style={{ fontFamily: 'monospace' }}>{props.lastSavedAt ? 'saved' : 'autosaving'}</Text>
+        <Icon name="ChevronDown" size={12} color="#94a3b8" />
+      </Pressable>
     </Box>
   );
 }
@@ -134,6 +184,37 @@ export function MapsMenu(props: MapsMenuProps) {
             );
           })}
         </ScrollView>
+      </Box>
+    </>
+  );
+}
+
+// ── The save-log trace (overlay) ───────────────────────────────────────────────
+
+export function SaveLog(props: { events: SaveEvent[]; now: number; onClose: () => void }) {
+  const rows = props.events.slice().reverse(); // newest first
+  return (
+    <>
+      <Pressable onPress={props.onClose} style={{ position: 'absolute', left: 0, top: PROJECT_BAR_H, right: 0, bottom: 0, backgroundColor: '#00000001' }} />
+      <Box style={{ position: 'absolute', right: 10, top: PROJECT_BAR_H + 2, width: 264, maxHeight: 360, backgroundColor: '#0b1320', borderWidth: 1, borderColor: '#27364a', borderRadius: 8, paddingTop: 6, paddingBottom: 6 }}>
+        <Text fontSize={8} color="#475569" style={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1, paddingLeft: 10, marginBottom: 4 }}>SAVE LOG · {props.events.length}</Text>
+        {rows.length === 0 ? (
+          <Text fontSize={10} color="#475569" style={{ fontFamily: 'monospace', paddingLeft: 10, paddingTop: 4, paddingBottom: 6 }}>nothing saved yet</Text>
+        ) : (
+          <ScrollView showScrollbar style={{ maxHeight: 320 }} contentContainerStyle={{ paddingLeft: 6, paddingRight: 6, gap: 1 }}>
+            {rows.map((e, i) => {
+              const m = KIND_META[e.kind];
+              return (
+                <Box key={`${e.t}_${i}`} style={{ flexDirection: 'row', alignItems: 'center', gap: 7, paddingLeft: 6, paddingRight: 6, paddingTop: 5, paddingBottom: 5, borderRadius: 4 }}>
+                  <Box style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: m.color }} />
+                  <Text fontSize={10} color={m.color} style={{ fontFamily: 'monospace', fontWeight: 700, width: 56 }}>{m.label}</Text>
+                  <Text fontSize={11} color="#cbd5e1" style={{ flexGrow: 1 }}>{e.map}</Text>
+                  <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>{relTime(e.t, props.now)}</Text>
+                </Box>
+              );
+            })}
+          </ScrollView>
+        )}
       </Box>
     </>
   );

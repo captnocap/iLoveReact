@@ -384,6 +384,16 @@ export function PaintCanvas(props: {
   // Fired once per meaningful edit (stroke end, chunk add, focus / zone change) so
   // the cart can schedule a debounced autosave. NOT per painted cell.
   onEdit?: () => void;
+  // Fired at the START of an undoable action (before it mutates) — stroke begin,
+  // chunk add, zone add/delete, clear — so the cart can snapshot the PRE-edit state
+  // onto the undo stack. Pairs with onEdit (which fires after, for autosave).
+  onEditBegin?: () => void;
+  // WASD-pan focus is owned by the cart (shared with the 3D preview, which also
+  // uses WASD) so exactly ONE quad consumes the keys. true = this pane is focused;
+  // onWasdFocus fires on a click in this pane to claim it. Click-to-focus, never
+  // hover — so the cursor wandering between quads can't steal an in-progress fly.
+  wasdFocused?: boolean;
+  onWasdFocus?: () => void;
 }) {
   const { tool, tile, layer, place } = props;
   const grid = props.showGrid !== false;
@@ -403,11 +413,21 @@ export function PaintCanvas(props: {
   // the panning, so a held key streams smoothly with NO per-frame re-render — we
   // only re-render when the held-key SET changes. drift divides by zoom, so the
   // px/s speed stays constant at any zoom. Held keys sum, so W+A drifts diagonally.
-  // Gated on no text field being focused anywhere (the zone-name input, the notes
-  // pane, etc.) so typing never pans; blur clears so alt-tab can't strand a drift.
+  // Gated on props.wasdFocused (click-to-focus, owned by the cart and shared with
+  // the 3D preview) so the cursor merely passing over this quad can't steal WASD
+  // mid-fly — only a click claims it. Also gated on no text field being focused
+  // anywhere (zone-name input, notes pane) so typing never pans; blur clears so
+  // alt-tab can't strand a drift.
   const PAN_SPEED = 700; // px/s while a direction key is held
   const [drift, setDrift] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const heldKeys = useRef<Set<string>>(new Set());
+  const recomputeDriftRef = useRef<() => void>(() => {});
+  const wasdFocusedRef = useRef(false);
+  wasdFocusedRef.current = !!props.wasdFocused;
+  // Lost focus (another quad claimed WASD) → drop held keys so the pan stops at once.
+  useEffect(() => {
+    if (!props.wasdFocused && heldKeys.current.size) { heldKeys.current.clear(); recomputeDriftRef.current(); }
+  }, [props.wasdFocused]);
   useEffect(() => {
     const DIR: Record<string, { x: number; y: number }> = {
       d: { x: 1, y: 0 }, a: { x: -1, y: 0 }, s: { x: 0, y: 1 }, w: { x: 0, y: -1 },
@@ -417,6 +437,7 @@ export function PaintCanvas(props: {
       for (const k of heldKeys.current) { const v = DIR[k]; if (v) { x += v.x; y += v.y; } }
       setDrift({ x: x * PAN_SPEED, y: y * PAN_SPEED });
     };
+    recomputeDriftRef.current = recompute;
     const textFocused = () => {
       const t = callHost<{ focused_id?: number } | null>('__tel_input', null);
       return !!t && Number(t.focused_id ?? -1) >= 0;
@@ -424,6 +445,7 @@ export function PaintCanvas(props: {
     const onDown = (ev: any) => {
       const k = String(ev?.key ?? '').toLowerCase();
       if (!DIR[k] || ev?.ctrlKey || ev?.altKey || ev?.metaKey) return;
+      if (!wasdFocusedRef.current) return; // only the focused quad pans
       if (heldKeys.current.has(k) || textFocused()) return; // ignore key-repeat / typing
       heldKeys.current.add(k); recompute();
     };
@@ -437,6 +459,8 @@ export function PaintCanvas(props: {
     const offBlur = busOn('system:blur', clear);
     return () => { offDown(); offUp(); offBlur(); heldKeys.current.clear(); };
   }, []);
+  // Claim WASD focus on a click anywhere in the canvas working area.
+  const claimWasd = props.onWasdFocus;
 
   // ── Chunk registry: a sparse grid of 120x120 chunks, seeded with (0,0) = a0.
   //    The Map holds the (big, non-React) buffers; chunkRev bumps when the SET of
@@ -469,6 +493,9 @@ export function PaintCanvas(props: {
   const onEditRef = useRef(props.onEdit);
   onEditRef.current = props.onEdit;
   const notifyEdit = useCallback(() => { onEditRef.current?.(); }, []);
+  const onEditBeginRef = useRef(props.onEditBegin);
+  onEditBeginRef.current = props.onEditBegin;
+  const notifyEditBegin = useCallback(() => { onEditBeginRef.current?.(); }, []);
   const tileDirty = useRef<Set<ChunkKey>>(new Set());
   const heightDirty = useRef<Set<ChunkKey>>(new Set());
   const tileCache = useRef<Map<ChunkKey, number[]>>(new Map());
@@ -515,12 +542,13 @@ export function PaintCanvas(props: {
   const addChunk = useCallback((cx: number, cz: number) => {
     const k = chunkKey(cx, cz);
     if (chunks.has(k) || !inBounds(cx, cz)) return;
+    notifyEditBegin(); // snapshot pre-add state for undo
     chunks.set(k, makeChunk(cx, cz));
     setChunkRev((r) => r + 1);
     setFocus((f) => { const n = new Set(f); n.add(k); return n; }); // bring the new chunk into view
     scheduleRegionSync();
     notifyEdit();
-  }, [chunks, scheduleRegionSync, notifyEdit]);
+  }, [chunks, scheduleRegionSync, notifyEdit, notifyEditBegin]);
 
   const toggleFocus = useCallback((k: ChunkKey) => {
     setFocus((f) => { const n = new Set(f); if (n.has(k)) n.delete(k); else n.add(k); return n; });
@@ -623,6 +651,7 @@ export function PaintCanvas(props: {
   };
 
   const clearHeights = () => {
+    notifyEditBegin(); // snapshot pre-clear state for undo
     for (const c of focusedChunks) { clearField(c.height); touchChunk(chunkKey(c.cx, c.cz)); heightDirty.current.add(chunkKey(c.cx, c.cz)); }
     scheduleRegionSync();
     notifyEdit();
@@ -643,6 +672,7 @@ export function PaintCanvas(props: {
   activeZoneRef.current = activeZone;
 
   const addZone = () => {
+    notifyEditBegin(); // snapshot pre-add state for undo
     zoneSeq.current += 1;
     const id = `z_${zoneSeq.current}`;
     const i = zones.length;
@@ -653,6 +683,7 @@ export function PaintCanvas(props: {
   };
   const updateZone = (i: number, patch: Partial<ZoneDef>) => { setZones((zs) => zs.map((z, j) => (j === i ? { ...z, ...patch } : z))); notifyEdit(); };
   const deleteZone = (i: number) => {
+    notifyEditBegin(); // snapshot pre-delete state for undo
     for (const c of allChunks) dropZoneIndex(c.zones, i); // keep zone indices consistent across all chunks
     for (const c of focusedChunks) touchChunk(chunkKey(c.cx, c.cz));
     setZones((zs) => zs.filter((_, j) => j !== i));
@@ -719,7 +750,7 @@ export function PaintCanvas(props: {
             brushing, the overlay forwards the click via tryAddSlotAt. */}
         {addSlots.map((s) => (
           <Canvas.Node key={`add_${s.cx}_${s.cz}`} gx={s.cx * PATCH} gy={s.cz * PATCH} gw={PATCH} gh={PATCH}>
-            <Pressable onPress={() => addChunk(s.cx, s.cz)} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#2b3f5e', borderRadius: 12, backgroundColor: '#0b132044' }}>
+            <Pressable onPress={() => { claimWasd?.(); addChunk(s.cx, s.cz); }} style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#2b3f5e', borderRadius: 12, backgroundColor: '#0b132044' }}>
               <Box style={{ width: 72, height: 72, borderRadius: 36, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#3b5170', backgroundColor: '#11203add' }}>
                 <Text fontSize={44} color="#86efac" style={{ fontWeight: 800 }}>+</Text>
               </Box>
@@ -738,8 +769,8 @@ export function PaintCanvas(props: {
               gy={p.gy}
               gw={p.footW * TILE_UNITS}
               gh={p.footD * TILE_UNITS}
-              onPress={() => place.onSelect(p.id)}
-              onMove={p.locked ? undefined : (evt: any) => { place.onMove(p.id, Number(evt?.gx ?? p.gx), Number(evt?.gy ?? p.gy)); if (p.id !== place.selId) place.onSelect(p.id); }}
+              onPress={() => { claimWasd?.(); place.onSelect(p.id); }}
+              onMove={p.locked ? undefined : (evt: any) => { claimWasd?.(); place.onMove(p.id, Number(evt?.gx ?? p.gx), Number(evt?.gy ?? p.gy)); if (p.id !== place.selId) place.onSelect(p.id); }}
             >
               <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: `${p.color}cc`, borderWidth: isSel ? 2 : 1, borderColor: isSel ? '#f8fafc' : '#0b1320', transform: { rotate: p.rotation } }}>
                 <Box style={{ position: 'absolute', top: 2, width: '40%', height: 3, borderRadius: 2, backgroundColor: isSel ? '#f8fafc' : '#0b1320' }} />
@@ -755,7 +786,7 @@ export function PaintCanvas(props: {
           slot attaches a chunk instead of painting. */}
       {showBrush ? (
         <Pressable
-          onMouseDown={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; onBrush(sx, sy); }}
+          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; notifyEditBegin(); onBrush(sx, sy); }}
           onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) onBrush(sx, sy); updateHover(sx, sy); }}
           onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) notifyEdit(); }}
           onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); if (was) notifyEdit(); }}

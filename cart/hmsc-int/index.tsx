@@ -1,4 +1,4 @@
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@reactjit/primitives';
 import { readFile, writeFile, mkdir } from '@reactjit/hooks/fs';
 import {
@@ -22,7 +22,7 @@ import { RightPanel, type TabId } from './RightPanel';
 import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { serializeMap, deserializeMap, emptyMap, type MapSnapshot, type EditorWorld } from './mapStore';
-import { ProjectBar, MapsMenu } from './ProjectBar';
+import { ProjectBar, MapsMenu, SaveLog, type SaveEvent } from './ProjectBar';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS } from './heightData';
 import { CHUNK_TILES } from './chunks';
@@ -213,11 +213,45 @@ export default function HmscWorldEditorCart() {
     deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev],
   });
 
+  // Undo history: snapshot the PRE-edit state at the START of each undoable action
+  // (stroke begin via onEditBegin, placement actions below). ws identity changes
+  // each render, so route through a ref to keep the handlers (and the memoized
+  // canvas's props) stable. undo/redo replay via applyPayload — they don't start
+  // actions, so they never record spurious steps. ctrl+z/ctrl+y are already bound.
+  const wsRef = useRef(ws);
+  wsRef.current = ws;
+  const snapshotForUndo = useCallback(() => wsRef.current.commit(), []);
+  const snapshotForUndoCoalesced = useCallback(() => wsRef.current.commitCoalesced(), []);
+
   // ── Multi-map management (the project manager surface is ProjectBar) ──────────
   const [maps, setMaps] = useState<string[]>(() => listMaps());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [logOpen, setLogOpen] = useState(false);
   const refreshMaps = useCallback(() => setMaps(listMaps()), []);
-  const toggleMenu = useCallback(() => setMenuOpen((o) => { if (!o) setMaps(listMaps()); return !o; }), []);
+  // The two toolbar popovers are mutually exclusive; opening one closes the other.
+  const toggleMenu = useCallback(() => { setMenuOpen((o) => !o); setLogOpen(false); }, []);
+  const toggleLog = useCallback(() => { setLogOpen((o) => !o); setMenuOpen(false); }, []);
+  // Refresh the map list from disk whenever the menu opens (a sibling session may
+  // have added/removed a map).
+  useEffect(() => { if (menuOpen) setMaps(listMaps()); }, [menuOpen]);
+
+  // ── Save-log trace (shown in the ProjectBar popover) ──────────────────────────
+  const EVENTS_CAP = 80;
+  const [events, setEvents] = useState<SaveEvent[]>([]);
+  const pushEvent = useCallback((kind: SaveEvent['kind'], map: string, t = Date.now()) => {
+    setEvents((es) => {
+      const next = [...es, { t, kind, map }];
+      return next.length > EVENTS_CAP ? next.slice(next.length - EVENTS_CAP) : next;
+    });
+  }, []);
+  // Each debounced autosave bumps ws.lastSavedAt — log one 'save' entry per bump.
+  const lastLoggedSaveRef = useRef<number | null>(ws.lastSavedAt);
+  useEffect(() => {
+    if (ws.lastSavedAt && ws.lastSavedAt !== lastLoggedSaveRef.current) {
+      lastLoggedSaveRef.current = ws.lastSavedAt;
+      pushEvent('save', ws.stem, ws.lastSavedAt);
+    }
+  }, [ws.lastSavedAt, ws.stem, pushEvent]);
 
   // Write a map file directly (used by new / rename so the file exists immediately,
   // not only after the autosave debounce). Mirrors the workspace flush.
@@ -248,7 +282,8 @@ export default function HmscWorldEditorCart() {
     ws.history.clear();
     writeFile(lastPointerPath(CART), name);
     refreshMaps();
-  }, [ws, applyPayload, refreshMaps, flushCurrent]);
+    pushEvent('open', name);
+  }, [ws, applyPayload, refreshMaps, flushCurrent, pushEvent]);
 
   const newMap = useCallback(() => {
     flushCurrent(); // don't lose the current map's just-painted edits
@@ -263,7 +298,8 @@ export default function HmscWorldEditorCart() {
     ws.setStem(name);
     ws.history.clear();
     refreshMaps();
-  }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, writeMapFile, refreshMaps, flushCurrent]);
+    pushEvent('new', name);
+  }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, writeMapFile, refreshMaps, flushCurrent, pushEvent]);
 
   const renameMap = useCallback((rawNext: string) => {
     const old = ws.stem;
@@ -275,10 +311,12 @@ export default function HmscWorldEditorCart() {
     ws.setStem(finalName);
     if (old !== finalName) deleteMap(old);
     refreshMaps();
-  }, [ws, buildPayload, writeMapFile, refreshMaps]);
+    pushEvent('rename', finalName);
+  }, [ws, buildPayload, writeMapFile, refreshMaps, pushEvent]);
 
   const deleteMapAndAdvance = useCallback((name: string) => {
     deleteMap(name);
+    pushEvent('delete', name);
     if (name === ws.stem) {
       const remaining = listMaps().filter((m) => m !== name);
       if (remaining.length) openMap(remaining[0]);
@@ -286,7 +324,7 @@ export default function HmscWorldEditorCart() {
     } else {
       refreshMaps();
     }
-  }, [ws, openMap, newMap, refreshMaps]);
+  }, [ws, openMap, newMap, refreshMaps, pushEvent]);
 
   // Divider drags arrive as per-event fraction deltas; accumulate + clamp here.
   const onResize = useCallback((axis: 'col' | 'row', d: number) => {
@@ -300,17 +338,20 @@ export default function HmscWorldEditorCart() {
   // The model viewer's + drops the selected kind at the origin, selects it, and
   // switches the painter to the place layer ("brings the view into this layer").
   const placeObject = useCallback((cat: PlaceCat, kind: string) => {
+    snapshotForUndo(); // pre-add
     placeSeq.current += 1;
     const id = `pl_${placeSeq.current}`;
     const base = resolvePlaceable(cat, kind);
     setPlacements((ps) => [...ps, { id, cat, kind, ...base, gx: 0, gy: 0, rotation: 0, locked: false }]);
     setSelPlaceId(id);
     setLayer('place');
-  }, []);
-  const movePlacement = useCallback((id: string, gx: number, gy: number) => setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, gx, gy } : p))), []);
-  const updatePlacement = useCallback((id: string, patch: Partial<Placement>) => setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p))), []);
-  const removePlacement = useCallback((id: string) => { setPlacements((ps) => ps.filter((p) => p.id !== id)); setSelPlaceId((s) => (s === id ? null : s)); }, []);
+  }, [snapshotForUndo]);
+  // Drag/update coalesce — one undo step per drag, not per move event.
+  const movePlacement = useCallback((id: string, gx: number, gy: number) => { snapshotForUndoCoalesced(); setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, gx, gy } : p))); }, [snapshotForUndoCoalesced]);
+  const updatePlacement = useCallback((id: string, patch: Partial<Placement>) => { snapshotForUndoCoalesced(); setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p))); }, [snapshotForUndoCoalesced]);
+  const removePlacement = useCallback((id: string) => { snapshotForUndo(); setPlacements((ps) => ps.filter((p) => p.id !== id)); setSelPlaceId((s) => (s === id ? null : s)); }, [snapshotForUndo]);
   const clonePlacement = useCallback((id: string) => {
+    snapshotForUndo(); // pre-clone
     placeSeq.current += 1;
     const nid = `pl_${placeSeq.current}`;
     setPlacements((ps) => {
@@ -318,7 +359,7 @@ export default function HmscWorldEditorCart() {
       return src ? [...ps, { ...src, id: nid, gx: src.gx + TILE_UNITS, gy: src.gy + TILE_UNITS, locked: false }] : ps;
     });
     setSelPlaceId(nid);
-  }, []);
+  }, [snapshotForUndo]);
   const place = useMemo(() => ({
     items: placements, selId: selPlaceId, onSelect: setSelPlaceId,
     onMove: movePlacement, onUpdate: updatePlacement, onClone: clonePlacement, onDelete: removePlacement,
@@ -369,9 +410,15 @@ export default function HmscWorldEditorCart() {
       <ProjectBar
         mapName={ws.stem}
         menuOpen={menuOpen}
+        logOpen={logOpen}
         lastSavedAt={ws.lastSavedAt}
+        canUndo={ws.canUndo}
+        canRedo={ws.canRedo}
         onToggleMenu={toggleMenu}
+        onToggleLog={toggleLog}
         onNew={() => { setMenuOpen(false); newMap(); }}
+        onUndo={ws.undo}
+        onRedo={ws.redo}
       />
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
         <QuadSplit
@@ -408,6 +455,7 @@ export default function HmscWorldEditorCart() {
               place={place}
               showGrid={showGrid}
               onFloors={setFloors}
+              onEditBegin={snapshotForUndo}
               wasdFocused={wasdQuad === 'canvas'}
               onWasdFocus={focusCanvas}
             />
@@ -440,6 +488,11 @@ export default function HmscWorldEditorCart() {
           onDelete={deleteMapAndAdvance}
           onClose={() => setMenuOpen(false)}
         />
+      ) : null}
+
+      {/* Save-log trace — also a root last-child overlay (same layering rule). */}
+      {logOpen ? (
+        <SaveLog events={events} now={Date.now()} onClose={() => setLogOpen(false)} />
       ) : null}
     </Box>
   );
