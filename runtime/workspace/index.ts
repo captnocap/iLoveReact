@@ -34,3 +34,10 @@ export {
   sessionPathFor,
   lastPointerPath,
 } from './paths';
+export {
+  encodeGrid,
+  decodeGrid,
+  encodeRleRow,
+  decodeRleRow,
+} from './rle';
+export type { RleEntry, RleRows, RleGrid } from './rle';
