@@ -309,3 +309,8 @@ cache/*.js
 /os/
 # Firecracker artifacts (kernel + built rootfs images)
 images/
+
+# Workspace-cart session scratch — per-cart autosaved working state (cutout,
+# hmsc-int, ...). Runtime "disk = truth" state, written every few hundred ms
+# while editing; never commit it, and keep file-trail watchers from churning on it.
+cart/*/sessions/
