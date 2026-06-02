@@ -4,6 +4,13 @@
 // a human line), instead of the old useless "saved" spam. The cart collects them
 // into a capped ring of EditEvents (note + timestamp) shown in the ProjectBar's
 // log popover. Categories drive the row colour so the trace is scannable at a glance.
+//
+// The trace PERSISTS to its own file (sessions/_eventlog.json) so it survives hot
+// updates instead of resetting every reload — see loadEvents/saveEvents. That file
+// is workspace-wide (events span maps), gitignored, and NOT in the cart's import
+// graph, so writing it triggers no rebuild and can't loop.
+
+import { readFile, writeFile, mkdir } from '@reactjit/hooks/fs';
 
 export type EditCategory =
   | 'tile'    // painting / erasing the tile layer
@@ -52,4 +59,32 @@ export function relTime(t: number, now: number): string {
   const m = Math.round(s / 60);
   if (m < 60) return `${m}m ago`;
   return `${Math.round(m / 60)}h ago`;
+}
+
+// ── Persistence (workspace-wide, survives hot updates) ─────────────────────────
+// Its own file beside the per-map sessions; gitignored runtime scratch. Read once
+// on mount, written debounced by the cart on change. Pure I/O — no state, no loop.
+
+const LOG_DIR = 'cart/hmsc-int/sessions';
+const LOG_PATH = `${LOG_DIR}/_eventlog.json`;
+
+export function loadEvents(): EditEvent[] {
+  try {
+    const text = readFile(LOG_PATH);
+    if (!text) return [];
+    const arr = JSON.parse(text);
+    if (!Array.isArray(arr)) return [];
+    return arr.filter((e: any) => e && typeof e.t === 'number' && typeof e.text === 'string' && typeof e.cat === 'string');
+  } catch {
+    return [];
+  }
+}
+
+export function saveEvents(events: EditEvent[]): void {
+  try {
+    mkdir(LOG_DIR);
+    writeFile(LOG_PATH, JSON.stringify(events));
+  } catch {
+    // best-effort; the log is non-critical scratch
+  }
 }

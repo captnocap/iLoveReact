@@ -23,7 +23,7 @@ import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { serializeMap, deserializeMap, emptyMap, type MapSnapshot, type EditorWorld } from './mapStore';
 import { ProjectBar, MapsMenu, EventLog } from './ProjectBar';
-import { type EditNote, type EditEvent } from './editLog';
+import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS } from './heightData';
 import { CHUNK_TILES } from './chunks';
@@ -287,13 +287,25 @@ export default function HmscWorldEditorCart() {
   // A stream of WHAT happened (tile painted, object moved, camera moved, ...), not
   // autosave spam — the "saved" pill already shows save state.
   const EVENTS_CAP = 100;
-  const [events, setEvents] = useState<EditEvent[]>([]);
+  // Seed from disk so the trace survives hot updates (it's the whole point of a
+  // "history"). Written debounced below; never an input to any save → cannot loop.
+  const [events, setEvents] = useState<EditEvent[]>(() => loadEvents());
   const logEvent = useCallback((note: EditNote, t = Date.now()) => {
     setEvents((es) => {
       const next = [...es, { ...note, t }];
       return next.length > EVENTS_CAP ? next.slice(next.length - EVENTS_CAP) : next;
     });
   }, []);
+  // Debounced one-way writer: events change → write the file. Skips the first run
+  // (the just-loaded value) so a mount doesn't rewrite identical content.
+  const logWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logWriteReady = useRef(false);
+  useEffect(() => {
+    if (!logWriteReady.current) { logWriteReady.current = true; return; }
+    if (logWriteTimer.current) clearTimeout(logWriteTimer.current);
+    logWriteTimer.current = setTimeout(() => saveEvents(events), 500);
+    return () => { if (logWriteTimer.current) clearTimeout(logWriteTimer.current); };
+  }, [events]);
   // Continuous edits (drag, rotate, fly) would flood the trace — coalesce them to
   // one entry per ~600ms per category.
   const lastCatAtRef = useRef<Record<string, number>>({});
