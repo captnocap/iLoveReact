@@ -22,7 +22,7 @@ import { RightPanel, type TabId } from './RightPanel';
 import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { serializeMap, deserializeMap, emptyMap, type MapSnapshot, type EditorWorld } from './mapStore';
-import { ProjectBar } from './ProjectBar';
+import { ProjectBar, MapsMenu } from './ProjectBar';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS } from './heightData';
 import { CHUNK_TILES } from './chunks';
@@ -193,7 +193,9 @@ export default function HmscWorldEditorCart() {
 
   // ── Multi-map management (the project manager surface is ProjectBar) ──────────
   const [maps, setMaps] = useState<string[]>(() => listMaps());
+  const [menuOpen, setMenuOpen] = useState(false);
   const refreshMaps = useCallback(() => setMaps(listMaps()), []);
+  const toggleMenu = useCallback(() => setMenuOpen((o) => { if (!o) setMaps(listMaps()); return !o; }), []);
 
   // Write a map file directly (used by new / rename so the file exists immediately,
   // not only after the autosave debounce). Mirrors the workspace flush.
@@ -344,13 +346,10 @@ export default function HmscWorldEditorCart() {
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#080d16' }}>
       <ProjectBar
         mapName={ws.stem}
-        maps={displayMaps}
+        menuOpen={menuOpen}
         lastSavedAt={ws.lastSavedAt}
-        onOpen={openMap}
-        onNew={newMap}
-        onRename={renameMap}
-        onDelete={deleteMapAndAdvance}
-        onRefresh={refreshMaps}
+        onToggleMenu={toggleMenu}
+        onNew={() => { setMenuOpen(false); newMap(); }}
       />
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
         <QuadSplit
@@ -396,6 +395,19 @@ export default function HmscWorldEditorCart() {
           }
         />
       </Box>
+
+      {/* The maps menu lives here — the shell root's LAST child — so it paints on
+          top of the editor panes (this engine hit-tests later siblings first). */}
+      {menuOpen ? (
+        <MapsMenu
+          mapName={ws.stem}
+          maps={displayMaps}
+          onOpen={(m) => { openMap(m); setMenuOpen(false); }}
+          onRename={(n) => { renameMap(n); setMenuOpen(false); }}
+          onDelete={deleteMapAndAdvance}
+          onClose={() => setMenuOpen(false)}
+        />
+      ) : null}
     </Box>
   );
 }
