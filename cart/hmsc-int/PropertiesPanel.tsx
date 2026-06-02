@@ -1,29 +1,44 @@
-// PropertiesPanel — the top-left quadrant. Whatever is in FOCUS populates here:
-// a tile, a building, or an object (prop). It is a wide, double-column face that
-// lists every property the focused thing carries, grouped by category, plus the
-// texture / skin swatches that drive its appearance.
+// PropertiesPanel — the in-focus (top-left) panel. Whatever is in FOCUS (tile,
+// building, or object) populates here as a dense, grouped "spec strip": every
+// property rendered as the control matching its type (toggle / scalar bar /
+// swatch / value), grouped by category. Edits here are PER-INSTANCE (the panel
+// to the right edits the kind). It sizes to its content — the shell wraps it.
 //
-// "Focus" is a separate concern (the canvas pointer will set it). This component
-// only renders a Focus descriptor + the staged world it resolves ids against, so
-// it stays a pure display surface — hand it a focus and it populates.
+// Styling is entirely classifier-driven: every colour/size comes from theme.ts
+// via studio.cls (importing it seeds the studio theme). No raw UI colours here;
+// the only literal colours are game DATA (a tile's render colour, a swatch fill).
+// Theme tokens needed for the bespoke vizzes are pulled with accentFor().
+//
+// Face skins show a SWATCH OF WHAT IT IS — a live mini-render of the real facade
+// (office glass / residential brick / plain wall), via the game's own skin
+// catalog. Pick a face, then pick a skin; both are visual, no text-name lists.
 
-import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
+import { useState } from 'react';
+import { Box, ScrollView } from '@reactjit/primitives';
 import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from '../hmsc/design';
 import { tileKindDefinition } from '../hmsc/world/tileKinds';
 import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
 import { propKindDefinition } from '../hmsc/world/propKinds';
+import { buildingSkinFacade } from '../hmsc/render3d/buildingSkins';
 import { FACE_ROLES, SKIN_NAMES, currentFaceSkins } from './buildingEditor';
 import { cellAddress } from './address';
+import { C, accentFor } from './studio.cls';
 
-// What is being inspected. The pointer tool will produce these; for now the cart
-// can hand a tile focus straight from the active paint tile.
 export type Focus =
   | { kind: 'tile'; tile: TileKind; cell?: { x: number; z: number } }
   | { kind: 'building'; id: string }
   | { kind: 'prop'; id: string };
 
-type Row = [label: string, value: string];
-type Group = { title: string; rows: Row[] };
+type Role = typeof FACE_ROLES[number];
+
+// Control kind + optional bespoke viz for scalars that tell a story.
+type Ctl = 'bool' | 'scalar' | 'num' | 'text' | 'color';
+type Viz = 'opacity' | 'light' | 'height';
+type Row = { label: string; ctl: Ctl; value: unknown; viz?: Viz };
+type Group = { title: string; accent: string; rows: Row[] };
+
+const NEUTRAL_PERCEPTION = { high: 0 };
+const TRACK_W = 60;
 
 function fmt(v: unknown): string {
   if (typeof v === 'boolean') return v ? 'yes' : 'no';
@@ -32,242 +47,356 @@ function fmt(v: unknown): string {
   if (v == null) return '—';
   return String(v);
 }
+const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
-// ── Atoms ────────────────────────────────────────────────────────────────────
+// ── Control atoms ──────────────────────────────────────────────────────────
 
-function Swatch(props: { color: string; size?: number; active?: boolean }) {
-  const s = props.size ?? 22;
-  return <Box style={{ width: s, height: s, borderRadius: 3, backgroundColor: props.color, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#f8fafc' : '#1e293b' }} />;
+function ToggleView({ on }: { on: boolean }) {
+  const Track = on ? C.ToggleTrackOn : C.ToggleTrack;
+  const Knob = on ? C.ToggleKnobOn : C.ToggleKnob;
+  return <Track><Knob /></Track>;
 }
 
-function PropRow(props: { label: string; value: string }) {
+// Scalar 0–1 bar (pixel widths — the layout engine doesn't resolve % on an
+// absolutely-positioned fill, so compute from the fixed track width).
+function ScalarView({ v }: { v: number }) {
+  const fw = Math.round(TRACK_W * clamp01(v));
   return (
-    <Box style={{ flexBasis: '48%', flexGrow: 1, minWidth: 118, flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-      <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace', flexShrink: 0 }}>{props.label}</Text>
-      <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace', flexShrink: 1, textAlign: 'right' }}>{props.value}</Text>
+    <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <C.SliderTrack>
+        <C.SliderFill style={{ width: fw }} />
+        <C.SliderKnob style={{ left: Math.max(0, fw - 5) }} />
+      </C.SliderTrack>
+      <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
     </Box>
   );
 }
 
-function Section(props: { title: string; rows: Row[] }) {
-  if (!props.rows.length) return null;
+// opacity → literal translucency over a checker
+function OpacityViz({ v }: { v: number }) {
+  const a = accentFor('offTrack'), b = accentFor('controlBg');
+  const cell = (c: string) => <Box style={{ width: 10, height: 10, backgroundColor: c }} />;
   return (
-    <Box style={{ gap: 5, borderTopWidth: 1, borderTopColor: '#16202f', paddingTop: 8 }}>
-      <Text fontSize={9} color="#38bdf8" style={{ fontWeight: 800, letterSpacing: 1 }}>{props.title}</Text>
-      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', columnGap: 14, rowGap: 5 }}>
-        {props.rows.map(([label, value]) => <PropRow key={label} label={label} value={value} />)}
+    <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <Box style={{ width: 20, height: 20, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('controlBorder') }}>
+        <Box style={{ flexDirection: 'row' }}>{cell(a)}{cell(b)}</Box>
+        <Box style={{ flexDirection: 'row' }}>{cell(b)}{cell(a)}</Box>
+        <Box style={{ position: 'absolute', left: 0, top: 0, width: 20, height: 20, backgroundColor: accentFor('valText'), opacity: clamp01(v) }} />
       </Box>
+      <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
     </Box>
+  );
+}
+
+// lightThru → a dark window with an amber glow scaled by transmission
+function LightViz({ v }: { v: number }) {
+  return (
+    <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <Box style={{ width: 20, height: 20, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('controlBorder'), backgroundColor: accentFor('bgAlt') }}>
+        <Box style={{ position: 'absolute', left: 3, top: 3, width: 14, height: 14, backgroundColor: accentFor('warning'), opacity: clamp01(v) }} />
+      </Box>
+      <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
+    </Box>
+  );
+}
+
+// height (meters) → a bar against a ~2m human reference tick
+function HeightViz({ m }: { m: number }) {
+  const maxM = 4, H = 24;
+  const fillH = Math.round(H * clamp01(m / maxM));
+  const refY = Math.round(H * (Math.min(2, maxM) / maxM));
+  return (
+    <Box style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>
+      <Box style={{ width: 10, height: H, position: 'relative', justifyContent: 'flex-end', overflow: 'visible', backgroundColor: accentFor('track') }}>
+        <Box style={{ width: 10, height: fillH, backgroundColor: accentFor('warning') }} />
+        <Box style={{ position: 'absolute', left: -2, bottom: refY, width: 14, height: 1, backgroundColor: accentFor('textDim') }} />
+      </Box>
+      <C.FieldValueNum>{`${fmt(m)}m`}</C.FieldValueNum>
+    </Box>
+  );
+}
+
+// `color` is game DATA (a real tile/material colour), not UI chrome — legit literal.
+function Swatch({ color, size = 20 }: { color: string; size?: number }) {
+  return <C.ChipSwatch style={{ width: size, height: size, backgroundColor: color }} />;
+}
+
+function Field({ row }: { row: Row }) {
+  const ctl =
+    row.viz === 'opacity' ? <OpacityViz v={Number(row.value)} />
+    : row.viz === 'light' ? <LightViz v={Number(row.value)} />
+    : row.viz === 'height' ? <HeightViz m={Number(row.value)} />
+    : row.ctl === 'bool' ? <ToggleView on={!!row.value} />
+    : row.ctl === 'scalar' ? <ScalarView v={Number(row.value)} />
+    : row.ctl === 'color' ? (
+        <>
+          <Swatch color={String(row.value)} size={16} />
+          <C.FieldValue>{String(row.value)}</C.FieldValue>
+        </>
+      )
+    : row.ctl === 'num' ? <C.FieldValueNum>{fmt(row.value)}</C.FieldValueNum>
+    : <C.FieldValue>{fmt(row.value)}</C.FieldValue>;
+  return (
+    <C.Field>
+      <C.FieldLabel>{row.label}</C.FieldLabel>
+      {ctl}
+    </C.Field>
+  );
+}
+
+function GroupView({ group }: { group: Group }) {
+  if (!group.rows.length) return null;
+  const accent = accentFor(group.accent);
+  return (
+    <C.Group>
+      <C.GroupHead>
+        <C.GroupAccentBar style={{ backgroundColor: accent }} />
+        <C.GroupTitle color={accent}>{group.title}</C.GroupTitle>
+        <C.GroupRule />
+        <C.GroupCount>{String(group.rows.length)}</C.GroupCount>
+      </C.GroupHead>
+      <C.FieldStrip>
+        {group.rows.map((r) => <Field key={r.label} row={r} />)}
+      </C.FieldStrip>
+    </C.Group>
   );
 }
 
 function Header(props: { kind: string; title: string; sub?: string }) {
   return (
-    <Box style={{ gap: 2 }}>
+    <Box style={{ gap: 3, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 6 }}>
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Text fontSize={9} color="#0b1320" style={{ fontWeight: 800, letterSpacing: 1, backgroundColor: '#38bdf8', paddingLeft: 5, paddingRight: 5, paddingTop: 1, paddingBottom: 1, borderRadius: 3 }}>{props.kind}</Text>
-        <Text fontSize={13} color="#f8fafc" style={{ fontWeight: 800 }}>{props.title}</Text>
+        <C.KindChip><C.KindChipText>{props.kind}</C.KindChipText></C.KindChip>
+        <C.HeroName>{props.title}</C.HeroName>
       </Box>
-      {props.sub ? <Text fontSize={9} color="#475569" style={{ fontFamily: 'monospace' }}>{props.sub}</Text> : null}
+      {props.sub ? <C.HeroSub>{props.sub}</C.HeroSub> : null}
     </Box>
+  );
+}
+
+function HeroSwatch(props: { color: string; label: string; value: string }) {
+  return (
+    <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingBottom: 6 }}>
+      <Swatch color={props.color} size={34} />
+      <Box style={{ gap: 1 }}>
+        <C.FieldLabel>{props.label}</C.FieldLabel>
+        <C.FieldValue>{props.value}</C.FieldValue>
+      </Box>
+    </Box>
+  );
+}
+
+// ── Face skins as facade-thumbnail swatches ─────────────────────────────────
+
+// A swatch IS the skin: render the real facade small (office glass, brick, …).
+// 'plain' has no facade panel → the bare wall colour.
+function SkinThumb(props: { skin: BuildingSkin; facadeColor: string; w?: number; h?: number; on?: boolean; onPress?: () => void }) {
+  const w = props.w ?? 42, h = props.h ?? 30;
+  const facade = buildingSkinFacade(props.skin);
+  const inner = facade
+    ? facade({ skin: props.skin, cols: 2, floors: 3, widthMeters: 6, heightMeters: 9, perception: NEUTRAL_PERCEPTION })
+    : <Box style={{ width: '100%', height: '100%', backgroundColor: props.facadeColor }} />;
+  return (
+    <C.SkinSwatch
+      onPress={props.onPress}
+      style={{ width: w, height: h, overflow: 'hidden', borderColor: props.on ? accentFor('knob') : accentFor('controlBorder'), borderWidth: props.on ? 2 : 1 }}
+    >
+      {inner}
+    </C.SkinSwatch>
+  );
+}
+
+function FaceSkins(props: { building: Building; onSetFace?: (id: string, role: Role, skin: BuildingSkin) => void }) {
+  const b = props.building;
+  const def = buildingKindDefinition(b.kind);
+  const faces = currentFaceSkins(b);
+  const [role, setRole] = useState<Role>('front');
+  const accent = accentFor('success');
+  return (
+    <C.Group>
+      <C.GroupHead>
+        <C.GroupAccentBar style={{ backgroundColor: accent }} />
+        <C.GroupTitle color={accent}>FACE SKINS</C.GroupTitle>
+        <C.GroupRule />
+        <C.GroupCount>{faces[role]}</C.GroupCount>
+      </C.GroupHead>
+
+      {/* the five faces, each showing its current skin; tap one to target it */}
+      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 2 }}>
+        {FACE_ROLES.map((r) => (
+          <Box key={r} style={{ alignItems: 'center', gap: 3 }}>
+            <SkinThumb skin={faces[r]} facadeColor={def.facadeColor} on={r === role} onPress={() => setRole(r)} />
+            <C.SkinRoleLabel>{r.toUpperCase()}</C.SkinRoleLabel>
+          </Box>
+        ))}
+      </Box>
+
+      {/* skin palette — pick one to apply to the targeted face */}
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, paddingTop: 8 }}>
+        <C.SkinRoleLabel>{`APPLY TO ${role.toUpperCase()} →`}</C.SkinRoleLabel>
+      </Box>
+      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: 12, paddingRight: 12, paddingTop: 4 }}>
+        {SKIN_NAMES.map((skin) => (
+          <Box key={skin} style={{ alignItems: 'center', gap: 3 }}>
+            <SkinThumb
+              skin={skin}
+              facadeColor={def.facadeColor}
+              on={faces[role] === skin}
+              onPress={() => props.onSetFace?.(b.id, role, skin)}
+            />
+            <C.SkinRoleLabel>{skin}</C.SkinRoleLabel>
+          </Box>
+        ))}
+      </Box>
+    </C.Group>
   );
 }
 
 // ── Per-kind bodies ──────────────────────────────────────────────────────────
 
-function TileBody(props: { tile: TileKind; cell?: { x: number; z: number } }) {
-  const def = tileKindDefinition(props.tile);
+function TileBody({ tile, cell }: { tile: TileKind; cell?: { x: number; z: number } }) {
+  const def = tileKindDefinition(tile);
+  // RENDER no longer repeats colour/texture — the hero swatch already shows them.
   const groups: Group[] = [
-    { title: 'RENDER', rows: [
-      ['color', def.render.color],
-      ['texture', def.render.textureKey],
-      ['heightM', fmt(def.render.heightMeters)],
+    { title: 'RENDER', accent: 'primary', rows: [
+      { label: 'heightM', ctl: 'num', value: def.render.heightMeters, viz: 'height' },
     ] },
-    { title: 'PATHING', rows: [
-      ['walkable', fmt(def.pathing.walkable)],
-      ['moveCost', fmt(def.pathing.movementCost)],
-      ['blocksLoS', fmt(def.pathing.blocksLineOfSight)],
+    { title: 'PATHING', accent: 'info', rows: [
+      { label: 'walkable', ctl: 'bool', value: def.pathing.walkable },
+      { label: 'moveCost', ctl: 'num', value: def.pathing.movementCost },
+      { label: 'blocksLoS', ctl: 'bool', value: def.pathing.blocksLineOfSight },
     ] },
-    { title: 'COVER', rows: [
-      ['height', def.cover.height],
-      ['protection', fmt(def.cover.protection)],
-      ['conceal', fmt(def.cover.concealment)],
-      ['shootOver', fmt(def.cover.shootOver)],
-      ['leanAround', fmt(def.cover.leanAround)],
-      ['crouchReq', fmt(def.cover.crouchRequired)],
+    { title: 'COVER', accent: 'error', rows: [
+      { label: 'height', ctl: 'text', value: def.cover.height },
+      { label: 'protection', ctl: 'scalar', value: def.cover.protection },
+      { label: 'conceal', ctl: 'scalar', value: def.cover.concealment },
+      { label: 'shootOver', ctl: 'bool', value: def.cover.shootOver },
+      { label: 'leanAround', ctl: 'bool', value: def.cover.leanAround },
+      { label: 'crouchReq', ctl: 'bool', value: def.cover.crouchRequired },
     ] },
-    { title: 'VISIBILITY', rows: [
-      ['opacity', fmt(def.visibility.opacity)],
-      ['conceal', fmt(def.visibility.concealment)],
-      ['lightThru', fmt(def.visibility.lightTransmission)],
-      ['soundOcc', fmt(def.visibility.soundOcclusion)],
-      ['blocksLoS', fmt(def.visibility.blocksLineOfSight)],
+    { title: 'VISIBILITY', accent: 'accentTeal', rows: [
+      { label: 'opacity', ctl: 'scalar', value: def.visibility.opacity, viz: 'opacity' },
+      { label: 'conceal', ctl: 'scalar', value: def.visibility.concealment },
+      { label: 'lightThru', ctl: 'scalar', value: def.visibility.lightTransmission, viz: 'light' },
+      { label: 'soundOcc', ctl: 'scalar', value: def.visibility.soundOcclusion },
+      { label: 'blocksLoS', ctl: 'bool', value: def.visibility.blocksLineOfSight },
     ] },
-    { title: 'TRAVERSAL', rows: [
-      ['modes', fmt(def.traversal.allowedModes)],
-      ['width', def.traversal.width],
-      ['stepUpM', fmt(def.traversal.maxStepUpMeters)],
-      ['clearM', fmt(def.traversal.minClearanceMeters)],
-      ['slopeLim°', fmt(def.traversal.slopeLimitDegrees)],
-      ['crouch', fmt(def.traversal.requiresCrouch)],
-      ['mantle', fmt(def.traversal.requiresMantle)],
-      ['vehGrip×', fmt(def.traversal.vehicleGripMultiplier)],
+    { title: 'TRAVERSAL', accent: 'info', rows: [
+      { label: 'modes', ctl: 'text', value: def.traversal.allowedModes },
+      { label: 'width', ctl: 'text', value: def.traversal.width },
+      { label: 'stepUpM', ctl: 'num', value: def.traversal.maxStepUpMeters },
+      { label: 'clearM', ctl: 'num', value: def.traversal.minClearanceMeters },
+      { label: 'slopeLim°', ctl: 'num', value: def.traversal.slopeLimitDegrees },
+      { label: 'crouch', ctl: 'bool', value: def.traversal.requiresCrouch },
+      { label: 'mantle', ctl: 'bool', value: def.traversal.requiresMantle },
+      { label: 'vehGrip×', ctl: 'num', value: def.traversal.vehicleGripMultiplier },
     ] },
-    { title: 'SURFACE', rows: [
-      ['material', def.surface.material],
-      ['walk×', fmt(def.surface.walkSpeedMultiplier)],
-      ['run×', fmt(def.surface.runSpeedMultiplier)],
-      ['veh×', fmt(def.surface.vehicleSpeedMultiplier)],
-      ['accel×', fmt(def.surface.accelerationMultiplier)],
-      ['friction', fmt(def.surface.friction)],
-      ['latGrip', fmt(def.surface.lateralGrip)],
-      ['restitution', fmt(def.surface.restitution)],
+    { title: 'SURFACE', accent: 'warning', rows: [
+      { label: 'material', ctl: 'text', value: def.surface.material },
+      { label: 'walk×', ctl: 'num', value: def.surface.walkSpeedMultiplier },
+      { label: 'run×', ctl: 'num', value: def.surface.runSpeedMultiplier },
+      { label: 'veh×', ctl: 'num', value: def.surface.vehicleSpeedMultiplier },
+      { label: 'accel×', ctl: 'num', value: def.surface.accelerationMultiplier },
+      { label: 'friction', ctl: 'scalar', value: def.surface.friction },
+      { label: 'latGrip', ctl: 'scalar', value: def.surface.lateralGrip },
+      { label: 'restitution', ctl: 'scalar', value: def.surface.restitution },
     ] },
-    { title: 'NPC', rows: [
-      ['traversable', fmt(def.npc.traversable)],
-      ['walkCost', fmt(def.npc.walkCost)],
-      ['runCost', fmt(def.npc.runCost)],
-      ['vehCost', fmt(def.npc.vehicleCost)],
-      ['vehPref', fmt(def.npc.preferredByVehicles)],
-      ['cover', def.npc.cover],
-      ['noise', fmt(def.npc.noise)],
+    { title: 'NPC', accent: 'success', rows: [
+      { label: 'traversable', ctl: 'bool', value: def.npc.traversable },
+      { label: 'walkCost', ctl: 'num', value: def.npc.walkCost },
+      { label: 'runCost', ctl: 'num', value: def.npc.runCost },
+      { label: 'vehCost', ctl: 'num', value: def.npc.vehicleCost },
+      { label: 'vehPref', ctl: 'bool', value: def.npc.preferredByVehicles },
+      { label: 'cover', ctl: 'text', value: def.npc.cover },
+      { label: 'noise', ctl: 'scalar', value: def.npc.noise },
     ] },
   ];
   return (
-    <Box style={{ gap: 8 }}>
-      <Header kind="TILE" title={def.label} sub={props.cell ? `${cellAddress(props.cell.x, props.cell.z)} · ${props.cell.x}, ${props.cell.z}` : `kind: ${props.tile}`} />
-      {/* Texture swatch */}
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Swatch color={def.render.color} size={34} />
-        <Box style={{ gap: 1 }}>
-          <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>texture</Text>
-          <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{def.render.textureKey}</Text>
-        </Box>
-      </Box>
-      {groups.map((g) => <Section key={g.title} title={g.title} rows={g.rows} />)}
+    <Box>
+      <Header kind="TILE" title={def.label} sub={cell ? `${cellAddress(cell.x, cell.z)} · ${cell.x}, ${cell.z}` : `kind: ${tile}`} />
+      <HeroSwatch color={def.render.color} label="texture" value={def.render.textureKey} />
+      {groups.map((g) => <GroupView key={g.title} group={g} />)}
     </Box>
   );
 }
 
-function BuildingBody(props: { building: Building; onSetFace?: (id: string, role: typeof FACE_ROLES[number], skin: BuildingSkin) => void }) {
+function BuildingBody(props: { building: Building; onSetFace?: (id: string, role: Role, skin: BuildingSkin) => void }) {
   const b = props.building;
   const def = buildingKindDefinition(b.kind);
-  const faces = currentFaceSkins(b);
   const groups: Group[] = [
-    { title: 'IDENTITY', rows: [
-      ['id', b.id],
-      ['kind', b.kind],
-      ['label', b.label],
-      ['enclosure', b.enclosure],
-      ['doorSide', b.doorSide],
-      ['interiorId', fmt(b.interiorId)],
-      ['by', b.createdByCommand],
+    { title: 'IDENTITY', accent: 'primary', rows: [
+      { label: 'id', ctl: 'text', value: b.id },
+      { label: 'kind', ctl: 'text', value: b.kind },
+      { label: 'label', ctl: 'text', value: b.label },
+      { label: 'enclosure', ctl: 'text', value: b.enclosure },
+      { label: 'doorSide', ctl: 'text', value: b.doorSide },
+      { label: 'interiorId', ctl: 'text', value: b.interiorId },
+      { label: 'by', ctl: 'text', value: b.createdByCommand },
     ] },
-    { title: 'FOOTPRINT', rows: [
-      ['at', cellAddress(Math.round(b.x), Math.round(b.z))],
-      ['x,y,z', `${fmt(b.x)}, ${fmt(b.y)}, ${fmt(b.z)}`],
-      ['width', `${fmt(b.widthTiles)}m`],
-      ['depth', `${fmt(b.depthTiles)}m`],
+    { title: 'FOOTPRINT', accent: 'info', rows: [
+      { label: 'at', ctl: 'text', value: cellAddress(Math.round(b.x), Math.round(b.z)) },
+      { label: 'x,y,z', ctl: 'text', value: `${fmt(b.x)}, ${fmt(b.y)}, ${fmt(b.z)}` },
+      { label: 'width', ctl: 'text', value: `${fmt(b.widthTiles)}m` },
+      { label: 'depth', ctl: 'text', value: `${fmt(b.depthTiles)}m` },
     ] },
-    { title: 'KIND DEFAULTS', rows: [
-      ['structure', def.structureModel],
-      ['storeys', fmt(def.storeys)],
-      ['wallTile', def.wallTileKind],
-      ['defEnclose', def.defaultEnclosure],
-      ['defSkin', def.defaultSkin],
-      ['default w×d', `${fmt(def.defaultWidthTiles)}×${fmt(def.defaultDepthTiles)}`],
+    { title: 'KIND DEFAULTS', accent: 'warning', rows: [
+      { label: 'structure', ctl: 'text', value: def.structureModel },
+      { label: 'storeys', ctl: 'num', value: def.storeys },
+      { label: 'wallTile', ctl: 'text', value: def.wallTileKind },
+      { label: 'defEnclose', ctl: 'text', value: def.defaultEnclosure },
+      { label: 'default w×d', ctl: 'text', value: `${fmt(def.defaultWidthTiles)}×${fmt(def.defaultDepthTiles)}` },
     ] },
   ];
   return (
-    <Box style={{ gap: 8 }}>
+    <Box>
       <Header kind="BUILDING" title={def.label} sub={b.id} />
-      {/* Facade fallback color swatch */}
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Swatch color={def.facadeColor} size={34} />
-        <Box style={{ gap: 1 }}>
-          <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>facade</Text>
-          <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{def.facadeColor}</Text>
-        </Box>
-      </Box>
-      {groups.map((g) => <Section key={g.title} title={g.title} rows={g.rows} />)}
-      {/* Per-face skin swatches — the building's "textures". */}
-      <Box style={{ gap: 6, borderTopWidth: 1, borderTopColor: '#16202f', paddingTop: 8 }}>
-        <Text fontSize={9} color="#38bdf8" style={{ fontWeight: 800, letterSpacing: 1 }}>FACE SKINS</Text>
-        {FACE_ROLES.map((role) => (
-          <Box key={role} style={{ gap: 3 }}>
-            <Box style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              <Text fontSize={9} color="#94a3b8" style={{ fontWeight: 700, letterSpacing: 1 }}>{role.toUpperCase()}</Text>
-              <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>{faces[role]}</Text>
-            </Box>
-            <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
-              {SKIN_NAMES.map((skin) => {
-                const on = faces[role] === skin;
-                return (
-                  <Pressable
-                    key={skin}
-                    onPress={() => props.onSetFace?.(b.id, role, skin as BuildingSkin)}
-                    style={{ paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, borderRadius: 3, borderWidth: on ? 2 : 1, borderColor: on ? '#f8fafc' : '#27364a', backgroundColor: on ? '#1e293b' : '#0f1a2e' }}
-                  >
-                    <Text fontSize={8} color={on ? '#f8fafc' : '#94a3b8'} style={{ fontWeight: on ? 700 : 500 }}>{skin}</Text>
-                  </Pressable>
-                );
-              })}
-            </Box>
-          </Box>
-        ))}
-      </Box>
+      <HeroSwatch color={def.facadeColor} label="facade" value={def.facadeColor} />
+      {groups.map((g) => <GroupView key={g.title} group={g} />)}
+      <FaceSkins building={b} onSetFace={props.onSetFace} />
     </Box>
   );
 }
 
-function PropBody(props: { prop: WorldProp }) {
-  const p = props.prop;
+function PropBody({ prop }: { prop: WorldProp }) {
+  const p = prop;
   const def = propKindDefinition(p.kind);
   const groups: Group[] = [
-    { title: 'IDENTITY', rows: [
-      ['id', p.id],
-      ['kind', p.kind],
-      ['label', def.label],
-      ['by', p.createdByCommand],
+    { title: 'IDENTITY', accent: 'primary', rows: [
+      { label: 'id', ctl: 'text', value: p.id },
+      { label: 'kind', ctl: 'text', value: p.kind },
+      { label: 'label', ctl: 'text', value: def.label },
+      { label: 'by', ctl: 'text', value: p.createdByCommand },
     ] },
-    { title: 'PLACEMENT', rows: [
-      ['at', cellAddress(Math.round(p.x), Math.round(p.z))],
-      ['x,y,z', `${fmt(p.x)}, ${fmt(p.y)}, ${fmt(p.z)}`],
-      ['yaw°', fmt(p.yawDegrees)],
-      ['signal', fmt(p.signalOverride)],
+    { title: 'PLACEMENT', accent: 'info', rows: [
+      { label: 'at', ctl: 'text', value: cellAddress(Math.round(p.x), Math.round(p.z)) },
+      { label: 'x,y,z', ctl: 'text', value: `${fmt(p.x)}, ${fmt(p.y)}, ${fmt(p.z)}` },
+      { label: 'yaw°', ctl: 'num', value: p.yawDegrees },
+      { label: 'signal', ctl: 'text', value: p.signalOverride },
     ] },
-    { title: 'KIND', rows: [
-      ['solid', fmt(def.solid)],
-      ['footprintR', `${fmt(def.footprintRadiusMeters)}m`],
-      ['heightM', fmt(def.heightMeters)],
-      ['borrowsTile', def.tileKind],
-      ['traffic', fmt(def.trafficControl)],
+    { title: 'KIND', accent: 'warning', rows: [
+      { label: 'solid', ctl: 'bool', value: def.solid },
+      { label: 'footprintR', ctl: 'text', value: `${fmt(def.footprintRadiusMeters)}m` },
+      { label: 'heightM', ctl: 'num', value: def.heightMeters, viz: 'height' },
+      { label: 'borrowsTile', ctl: 'text', value: def.tileKind },
+      { label: 'traffic', ctl: 'text', value: def.trafficControl },
     ] },
   ];
-  // Props have no swatch color of their own — they borrow a tile's gameplay
-  // bundle, so show that tile's color as the appearance proxy.
   const propColor = tileKindDefinition(def.tileKind).render.color;
   return (
-    <Box style={{ gap: 8 }}>
+    <Box>
       <Header kind="OBJECT" title={def.label} sub={p.id} />
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <Swatch color={propColor} size={34} />
-        <Box style={{ gap: 1 }}>
-          <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace' }}>borrows tile</Text>
-          <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{def.tileKind}</Text>
-        </Box>
-      </Box>
-      {groups.map((g) => <Section key={g.title} title={g.title} rows={g.rows} />)}
+      <HeroSwatch color={propColor} label="borrows tile" value={def.tileKind} />
+      {groups.map((g) => <GroupView key={g.title} group={g} />)}
     </Box>
   );
 }
 
 function Empty() {
   return (
-    <Box style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 6, padding: 20 }}>
-      <Text fontSize={11} color="#475569" style={{ fontWeight: 700, letterSpacing: 1 }}>NOTHING IN FOCUS</Text>
-      <Text fontSize={9} color="#3a4a63" style={{ fontFamily: 'monospace', textAlign: 'center' }}>pick the pointer ▸ and click a tile, building, or object</Text>
-    </Box>
+    <C.EmptyState>
+      <C.EmptyTitle>NOTHING IN FOCUS</C.EmptyTitle>
+      <C.EmptyHint>pick the pointer ▸ and click a tile, building, or object</C.EmptyHint>
+    </C.EmptyState>
   );
 }
 
@@ -276,7 +405,7 @@ function Empty() {
 export function PropertiesPanel(props: {
   focus: Focus | null;
   world: GameState;
-  onSetFace?: (id: string, role: typeof FACE_ROLES[number], skin: BuildingSkin) => void;
+  onSetFace?: (id: string, role: Role, skin: BuildingSkin) => void;
 }) {
   const { focus, world } = props;
 
@@ -294,13 +423,11 @@ export function PropertiesPanel(props: {
   }
 
   return (
-    <Box style={{ width: '100%', height: '100%', backgroundColor: '#0b1320', flexDirection: 'column' }}>
-      <Box style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: '#16202f' }}>
-        <Text fontSize={10} color="#64748b" style={{ fontWeight: 800, letterSpacing: 1 }}>PROPERTIES</Text>
-      </Box>
-      <ScrollView style={{ flexGrow: 1, height: '100%' }} contentContainerStyle={{ paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 14, gap: 8 }}>
+    <C.StudioBg>
+      <C.StatusBar><C.StatusKicker>PROPERTIES</C.StatusKicker></C.StatusBar>
+      <ScrollView style={{ flexGrow: 1, height: '100%' }} contentContainerStyle={{ paddingBottom: 14 }}>
         {body}
       </ScrollView>
-    </Box>
+    </C.StudioBg>
   );
 }

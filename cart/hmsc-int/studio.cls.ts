@@ -13,10 +13,25 @@
 //   import { C } from './studio.cls';
 //   <C.Group><C.GroupHead>…</C.GroupHead></C.Group>
 //
-// Group accents (the per-category header colour) are passed per instance as a
-// theme token, e.g. <C.GroupTitle color="theme:info">, so one class serves all.
+// Group accents (the per-category header colour) are passed per instance — but
+// note user props are NOT token-resolved (only class defs are), so pass a raw
+// colour read from getColors(), e.g. accentFor('info'), not a 'theme:' string.
+//
+// Importing this module SEEDS the studio theme (setTokens/setStyleTokens) so the
+// classes resolve against the studio palette without a ThemeProvider at the root.
 
-import { classifier, classifiers as C } from '../../runtime/classifier';
+import { classifier, classifiers as C, setTokens, setStyleTokens, getColors } from '../../runtime/classifier';
+import { STUDIO_COLORS, STUDIO_STYLES } from './theme';
+
+// Seed the global theme store on import (idempotent; matches gallery-theme.ts).
+setTokens(STUDIO_COLORS);
+setStyleTokens(STUDIO_STYLES);
+
+/** Resolve a theme colour token to its raw value — for user props (which the
+ *  classifier does not token-resolve). e.g. accentFor('info'). */
+export function accentFor(token: string): string {
+  return (getColors() as Record<string, string>)[token] ?? token;
+}
 
 const MONO = 'monospace';
 
@@ -83,8 +98,8 @@ classifier({
   // CONTROLS — boolean / scalar / number / enum / colour / material
   // ─────────────────────────────────────────────────────────────
   // toggle (boolean): Track + Knob; component swaps the …On siblings + knob x
-  ToggleTrack:    { type: 'Box', style: { width: 22, height: 12, borderRadius: 7, backgroundColor: 'theme:offTrack' } },
-  ToggleTrackOn:  { type: 'Box', style: { width: 22, height: 12, borderRadius: 7, backgroundColor: 'theme:onTrack' } },
+  ToggleTrack:    { type: 'Box', style: { width: 22, height: 12, borderRadius: 7, backgroundColor: 'theme:offTrack', position: 'relative' } },
+  ToggleTrackOn:  { type: 'Box', style: { width: 22, height: 12, borderRadius: 7, backgroundColor: 'theme:onTrack', position: 'relative' } },
   ToggleKnob:     { type: 'Box', style: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'theme:offKnob', position: 'absolute', top: 1, left: 1 } },
   ToggleKnobOn:   { type: 'Box', style: { width: 10, height: 10, borderRadius: 5, backgroundColor: 'theme:success', position: 'absolute', top: 1, left: 11 } },
 
