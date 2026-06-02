@@ -1,20 +1,22 @@
 // PropertiesPanel — the in-focus (top-left) panel. Whatever is in FOCUS (tile,
-// building, or object) populates here as a dense, grouped "spec strip": every
-// property rendered as the control matching its type (toggle / scalar bar /
-// swatch / value), grouped by category. Edits here are PER-INSTANCE (the panel
-// to the right edits the kind). It sizes to its content — the shell wraps it.
+// building, or object) populates here. Two bands: a HEADER BANNER that gathers
+// every visual indicator in one place (swatch + the bespoke "numbers that
+// resonate" gauges + the profile radar), and below it a dense grouped DATA STRIP
+// (the precise values as compact controls). Edits here are PER-INSTANCE.
 //
 // Styling is entirely classifier-driven: every colour/size comes from theme.ts
 // via studio.cls (importing it seeds the studio theme). No raw UI colours here;
 // the only literal colours are game DATA (a tile's render colour, a swatch fill).
-// Theme tokens needed for the bespoke vizzes are pulled with accentFor().
+// Theme tokens for the vizzes are pulled with accentFor().
+//
+// Graph-based vizzes (radar, friction gauge) draw as SVG-category strokes/fills
+// today; the SDF/Effect substrate can swap in underneath without touching this.
 //
 // Face skins show a SWATCH OF WHAT IT IS — a live mini-render of the real facade
-// (office glass / residential brick / plain wall), via the game's own skin
-// catalog. Pick a face, then pick a skin; both are visual, no text-name lists.
+// (office glass / residential brick / plain wall). Pick a face, then a skin.
 
 import { useState } from 'react';
-import { Box, ScrollView } from '@reactjit/primitives';
+import { Box, ScrollView, Text, Graph } from '@reactjit/primitives';
 import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from '../hmsc/design';
 import { tileKindDefinition } from '../hmsc/world/tileKinds';
 import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
@@ -31,10 +33,8 @@ export type Focus =
 
 type Role = typeof FACE_ROLES[number];
 
-// Control kind + optional bespoke viz for scalars that tell a story.
 type Ctl = 'bool' | 'scalar' | 'num' | 'text' | 'color';
-type Viz = 'opacity' | 'light' | 'height';
-type Row = { label: string; ctl: Ctl; value: unknown; viz?: Viz };
+type Row = { label: string; ctl: Ctl; value: unknown };
 type Group = { title: string; accent: string; rows: Row[] };
 
 const NEUTRAL_PERCEPTION = { high: 0 };
@@ -49,16 +49,9 @@ function fmt(v: unknown): string {
 }
 const clamp01 = (n: number) => Math.max(0, Math.min(1, n));
 
-// ── Control atoms ──────────────────────────────────────────────────────────
+// ── Indicator vizzes (live in the header banner) ────────────────────────────
 
-function ToggleView({ on }: { on: boolean }) {
-  const Track = on ? C.ToggleTrackOn : C.ToggleTrack;
-  const Knob = on ? C.ToggleKnobOn : C.ToggleKnob;
-  return <Track><Knob /></Track>;
-}
-
-// Scalar 0–1 bar (pixel widths — the layout engine doesn't resolve % on an
-// absolutely-positioned fill, so compute from the fixed track width).
+// scalar 0–1 bar (pixel widths — % on an absolute fill isn't resolved by layout)
 function ScalarView({ v }: { v: number }) {
   const fw = Math.round(TRACK_W * clamp01(v));
   return (
@@ -75,13 +68,13 @@ function ScalarView({ v }: { v: number }) {
 // opacity → literal translucency over a checker
 function OpacityViz({ v }: { v: number }) {
   const a = accentFor('offTrack'), b = accentFor('controlBg');
-  const cell = (c: string) => <Box style={{ width: 10, height: 10, backgroundColor: c }} />;
+  const cell = (c: string) => <Box style={{ width: 12, height: 12, backgroundColor: c }} />;
   return (
     <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-      <Box style={{ width: 20, height: 20, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('controlBorder') }}>
+      <Box style={{ width: 24, height: 24, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('controlBorder') }}>
         <Box style={{ flexDirection: 'row' }}>{cell(a)}{cell(b)}</Box>
         <Box style={{ flexDirection: 'row' }}>{cell(b)}{cell(a)}</Box>
-        <Box style={{ position: 'absolute', left: 0, top: 0, width: 20, height: 20, backgroundColor: accentFor('valText'), opacity: clamp01(v) }} />
+        <Box style={{ position: 'absolute', left: 0, top: 0, width: 24, height: 24, backgroundColor: accentFor('valText'), opacity: clamp01(v) }} />
       </Box>
       <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
     </Box>
@@ -92,8 +85,8 @@ function OpacityViz({ v }: { v: number }) {
 function LightViz({ v }: { v: number }) {
   return (
     <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-      <Box style={{ width: 20, height: 20, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('controlBorder'), backgroundColor: accentFor('bgAlt') }}>
-        <Box style={{ position: 'absolute', left: 3, top: 3, width: 14, height: 14, backgroundColor: accentFor('warning'), opacity: clamp01(v) }} />
+      <Box style={{ width: 24, height: 24, position: 'relative', overflow: 'hidden', borderWidth: 1, borderColor: accentFor('controlBorder'), backgroundColor: accentFor('bgAlt') }}>
+        <Box style={{ position: 'absolute', left: 4, top: 4, width: 16, height: 16, backgroundColor: accentFor('warning'), opacity: clamp01(v) }} />
       </Box>
       <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
     </Box>
@@ -102,18 +95,94 @@ function LightViz({ v }: { v: number }) {
 
 // height (meters) → a bar against a ~2m human reference tick
 function HeightViz({ m }: { m: number }) {
-  const maxM = 4, H = 24;
+  const maxM = 4, H = 26;
   const fillH = Math.round(H * clamp01(m / maxM));
   const refY = Math.round(H * (Math.min(2, maxM) / maxM));
   return (
     <Box style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6 }}>
-      <Box style={{ width: 10, height: H, position: 'relative', justifyContent: 'flex-end', overflow: 'visible', backgroundColor: accentFor('track') }}>
+      <Box style={{ width: 10, height: H, position: 'relative', justifyContent: 'flex-end', backgroundColor: accentFor('track') }}>
         <Box style={{ width: 10, height: fillH, backgroundColor: accentFor('warning') }} />
         <Box style={{ position: 'absolute', left: -2, bottom: refY, width: 14, height: 1, backgroundColor: accentFor('textDim') }} />
       </Box>
       <C.FieldValueNum>{`${fmt(m)}m`}</C.FieldValueNum>
     </Box>
   );
+}
+
+// ── Graph (SVG-category) helpers ────────────────────────────────────────────
+function radarRing(cx: number, cy: number, r: number, vals: number[]): number[] {
+  const out: number[] = []; const n = vals.length;
+  for (let i = 0; i <= n; i++) {
+    const k = i % n; const a = -Math.PI / 2 + (Math.PI * 2 * k) / n; const v = clamp01(vals[k]);
+    out.push(cx + Math.cos(a) * v * r, cy + Math.sin(a) * v * r);
+  }
+  return out;
+}
+function radarSpoke(cx: number, cy: number, r: number, i: number, n: number): number[] {
+  const a = -Math.PI / 2 + (Math.PI * 2 * i) / n;
+  return [cx, cy, cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+}
+function arcPts(cx: number, cy: number, r: number, a0: number, a1: number, steps = 18): number[] {
+  const out: number[] = [];
+  for (let i = 0; i <= steps; i++) { const a = a0 + (a1 - a0) * i / steps; out.push(cx + Math.cos(a) * r, cy - Math.sin(a) * r); }
+  return out;
+}
+
+// friction → slick↔grip gauge (track arc + value arc + needle)
+function FrictionGauge({ v }: { v: number }) {
+  const t = clamp01(v), W = 50, H = 28, cx = W / 2, cy = H - 4, r = 19;
+  const ang = Math.PI * (1 - t);
+  const zone = t < 0.4 ? accentFor('error') : t < 0.7 ? accentFor('warning') : accentFor('success');
+  return (
+    <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+      <Graph style={{ width: W, height: H }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+        <Graph.Polyline points={arcPts(cx, cy, r, Math.PI, 0)} stroke={accentFor('track')} strokeWidth={3} />
+        <Graph.Polyline points={arcPts(cx, cy, r, Math.PI, ang)} stroke={zone} strokeWidth={3} />
+        <Graph.Polyline points={[cx, cy, cx + Math.cos(ang) * r * 0.82, cy - Math.sin(ang) * r * 0.82]} stroke={accentFor('knob')} strokeWidth={1.5} />
+      </Graph>
+      <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
+    </Box>
+  );
+}
+
+// profile radar — the tile's character at a glance (5 gameplay axes)
+function ProfileRadar({ axes }: { axes: { label: string; v: number }[] }) {
+  const S = 84, CX = S / 2, CY = S / 2, R = S / 2 - 15, N = axes.length;
+  const vals = axes.map((a) => a.v);
+  const grid = accentFor('borderSoft'), spoke = accentFor('track'), line = accentFor('primary');
+  const fill = accentFor('primary') + '44', dim = accentFor('textFaint');
+  return (
+    <Box style={{ width: S, height: S, position: 'relative' }}>
+      <Graph style={{ width: S, height: S }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
+        {[0.34, 0.67, 1].map((g) => <Graph.Polyline key={g} points={radarRing(CX, CY, R, new Array(N).fill(g))} stroke={grid} strokeWidth={1} />)}
+        {axes.map((_, i) => <Graph.Polyline key={i} points={radarSpoke(CX, CY, R, i, N)} stroke={spoke} strokeWidth={1} />)}
+        <Graph.Polygon points={radarRing(CX, CY, R, vals)} fill={fill} />
+        <Graph.Polyline points={radarRing(CX, CY, R, vals)} stroke={line} strokeWidth={1.5} />
+      </Graph>
+      {axes.map((a, i) => {
+        const ang = -Math.PI / 2 + (Math.PI * 2 * i) / N;
+        const lx = CX + Math.cos(ang) * (R + 9), ly = CY + Math.sin(ang) * (R + 6);
+        return <Text key={a.label} style={{ position: 'absolute', left: lx - 14, top: ly - 4, width: 28, textAlign: 'center', fontSize: 7, fontFamily: 'monospace', color: dim }}>{a.label}</Text>;
+      })}
+    </Box>
+  );
+}
+
+function Indicator({ label, children }: { label: string; children: any }) {
+  return (
+    <Box style={{ alignItems: 'flex-start', gap: 3 }}>
+      {children}
+      <C.SkinRoleLabel>{label}</C.SkinRoleLabel>
+    </Box>
+  );
+}
+
+// ── Strip controls ───────────────────────────────────────────────────────────
+
+function ToggleView({ on }: { on: boolean }) {
+  const Track = on ? C.ToggleTrackOn : C.ToggleTrack;
+  const Knob = on ? C.ToggleKnobOn : C.ToggleKnob;
+  return <Track><Knob /></Track>;
 }
 
 // `color` is game DATA (a real tile/material colour), not UI chrome — legit literal.
@@ -123,10 +192,7 @@ function Swatch({ color, size = 20 }: { color: string; size?: number }) {
 
 function Field({ row }: { row: Row }) {
   const ctl =
-    row.viz === 'opacity' ? <OpacityViz v={Number(row.value)} />
-    : row.viz === 'light' ? <LightViz v={Number(row.value)} />
-    : row.viz === 'height' ? <HeightViz m={Number(row.value)} />
-    : row.ctl === 'bool' ? <ToggleView on={!!row.value} />
+    row.ctl === 'bool' ? <ToggleView on={!!row.value} />
     : row.ctl === 'scalar' ? <ScalarView v={Number(row.value)} />
     : row.ctl === 'color' ? (
         <>
@@ -162,34 +228,31 @@ function GroupView({ group }: { group: Group }) {
   );
 }
 
-function Header(props: { kind: string; title: string; sub?: string }) {
-  return (
-    <Box style={{ gap: 3, paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 6 }}>
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-        <C.KindChip><C.KindChipText>{props.kind}</C.KindChipText></C.KindChip>
-        <C.HeroName>{props.title}</C.HeroName>
-      </Box>
-      {props.sub ? <C.HeroSub>{props.sub}</C.HeroSub> : null}
-    </Box>
-  );
-}
+// ── Header banner — identity + the consolidated visual indicators ────────────
 
-function HeroSwatch(props: { color: string; label: string; value: string }) {
+// The banner is a row: a left column (identity + sub + the small indicators)
+// and an optional `aside` (the radar) pinned top-right so its height overlaps
+// the identity lines instead of stacking below them — keeps the banner short.
+function HeaderBar(props: { kind: string; title: string; sub?: string; children?: any; aside?: any }) {
   return (
-    <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 12, paddingBottom: 6 }}>
-      <Swatch color={props.color} size={34} />
-      <Box style={{ gap: 1 }}>
-        <C.FieldLabel>{props.label}</C.FieldLabel>
-        <C.FieldValue>{props.value}</C.FieldValue>
+    <Box style={{ backgroundColor: accentFor('surface'), borderBottomWidth: 1, borderBottomColor: accentFor('border'), paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
+      <Box style={{ flexGrow: 1, minWidth: 0, gap: props.children ? 9 : 5 }}>
+        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          <C.KindChip><C.KindChipText>{props.kind}</C.KindChipText></C.KindChip>
+          <C.HeroName>{props.title}</C.HeroName>
+        </Box>
+        {props.sub ? <C.HeroSub>{props.sub}</C.HeroSub> : null}
+        {props.children ? (
+          <Box style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14, flexWrap: 'wrap' }}>{props.children}</Box>
+        ) : null}
       </Box>
+      {props.aside ?? null}
     </Box>
   );
 }
 
 // ── Face skins as facade-thumbnail swatches ─────────────────────────────────
 
-// A swatch IS the skin: render the real facade small (office glass, brick, …).
-// 'plain' has no facade panel → the bare wall colour.
 function SkinThumb(props: { skin: BuildingSkin; facadeColor: string; w?: number; h?: number; on?: boolean; onPress?: () => void }) {
   const w = props.w ?? 42, h = props.h ?? 30;
   const facade = buildingSkinFacade(props.skin);
@@ -221,7 +284,6 @@ function FaceSkins(props: { building: Building; onSetFace?: (id: string, role: R
         <C.GroupCount>{faces[role]}</C.GroupCount>
       </C.GroupHead>
 
-      {/* the five faces, each showing its current skin; tap one to target it */}
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingLeft: 12, paddingRight: 12, paddingTop: 2 }}>
         {FACE_ROLES.map((r) => (
           <Box key={r} style={{ alignItems: 'center', gap: 3 }}>
@@ -231,19 +293,13 @@ function FaceSkins(props: { building: Building; onSetFace?: (id: string, role: R
         ))}
       </Box>
 
-      {/* skin palette — pick one to apply to the targeted face */}
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 12, paddingRight: 12, paddingTop: 8 }}>
         <C.SkinRoleLabel>{`APPLY TO ${role.toUpperCase()} →`}</C.SkinRoleLabel>
       </Box>
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingLeft: 12, paddingRight: 12, paddingTop: 4 }}>
         {SKIN_NAMES.map((skin) => (
           <Box key={skin} style={{ alignItems: 'center', gap: 3 }}>
-            <SkinThumb
-              skin={skin}
-              facadeColor={def.facadeColor}
-              on={faces[role] === skin}
-              onPress={() => props.onSetFace?.(b.id, role, skin)}
-            />
+            <SkinThumb skin={skin} facadeColor={def.facadeColor} on={faces[role] === skin} onPress={() => props.onSetFace?.(b.id, role, skin)} />
             <C.SkinRoleLabel>{skin}</C.SkinRoleLabel>
           </Box>
         ))}
@@ -256,11 +312,12 @@ function FaceSkins(props: { building: Building; onSetFace?: (id: string, role: R
 
 function TileBody({ tile, cell }: { tile: TileKind; cell?: { x: number; z: number } }) {
   const def = tileKindDefinition(tile);
-  // RENDER no longer repeats colour/texture — the hero swatch already shows them.
+  const sub = cell
+    ? `${cellAddress(cell.x, cell.z)} · ${cell.x}, ${cell.z} · ${def.render.textureKey}`
+    : `kind: ${tile} · ${def.render.textureKey}`;
+  // The header banner owns the visuals; the strip is the precise data table, so
+  // the header-promoted scalars (opacity / lightThru / friction) show as values.
   const groups: Group[] = [
-    { title: 'RENDER', accent: 'primary', rows: [
-      { label: 'heightM', ctl: 'num', value: def.render.heightMeters, viz: 'height' },
-    ] },
     { title: 'PATHING', accent: 'info', rows: [
       { label: 'walkable', ctl: 'bool', value: def.pathing.walkable },
       { label: 'moveCost', ctl: 'num', value: def.pathing.movementCost },
@@ -275,9 +332,9 @@ function TileBody({ tile, cell }: { tile: TileKind; cell?: { x: number; z: numbe
       { label: 'crouchReq', ctl: 'bool', value: def.cover.crouchRequired },
     ] },
     { title: 'VISIBILITY', accent: 'accentTeal', rows: [
-      { label: 'opacity', ctl: 'scalar', value: def.visibility.opacity, viz: 'opacity' },
+      { label: 'opacity', ctl: 'num', value: def.visibility.opacity },
       { label: 'conceal', ctl: 'scalar', value: def.visibility.concealment },
-      { label: 'lightThru', ctl: 'scalar', value: def.visibility.lightTransmission, viz: 'light' },
+      { label: 'lightThru', ctl: 'num', value: def.visibility.lightTransmission },
       { label: 'soundOcc', ctl: 'scalar', value: def.visibility.soundOcclusion },
       { label: 'blocksLoS', ctl: 'bool', value: def.visibility.blocksLineOfSight },
     ] },
@@ -297,7 +354,7 @@ function TileBody({ tile, cell }: { tile: TileKind; cell?: { x: number; z: numbe
       { label: 'run×', ctl: 'num', value: def.surface.runSpeedMultiplier },
       { label: 'veh×', ctl: 'num', value: def.surface.vehicleSpeedMultiplier },
       { label: 'accel×', ctl: 'num', value: def.surface.accelerationMultiplier },
-      { label: 'friction', ctl: 'scalar', value: def.surface.friction },
+      { label: 'friction', ctl: 'num', value: def.surface.friction },
       { label: 'latGrip', ctl: 'scalar', value: def.surface.lateralGrip },
       { label: 'restitution', ctl: 'scalar', value: def.surface.restitution },
     ] },
@@ -311,10 +368,22 @@ function TileBody({ tile, cell }: { tile: TileKind; cell?: { x: number; z: numbe
       { label: 'noise', ctl: 'scalar', value: def.npc.noise },
     ] },
   ];
+  const radarAxes = [
+    { label: 'fric', v: def.surface.friction },
+    { label: 'grip', v: def.surface.lateralGrip },
+    { label: 'light', v: def.visibility.lightTransmission },
+    { label: 'cover', v: def.cover.protection },
+    { label: 'concl', v: def.cover.concealment },
+  ];
   return (
     <Box>
-      <Header kind="TILE" title={def.label} sub={cell ? `${cellAddress(cell.x, cell.z)} · ${cell.x}, ${cell.z}` : `kind: ${tile}`} />
-      <HeroSwatch color={def.render.color} label="texture" value={def.render.textureKey} />
+      <HeaderBar kind="TILE" title={def.label} sub={sub} aside={<ProfileRadar axes={radarAxes} />}>
+        <Indicator label="colour"><Swatch color={def.render.color} size={34} /></Indicator>
+        <Indicator label="height"><HeightViz m={def.render.heightMeters} /></Indicator>
+        <Indicator label="opacity"><OpacityViz v={def.visibility.opacity} /></Indicator>
+        <Indicator label="lightThru"><LightViz v={def.visibility.lightTransmission} /></Indicator>
+        <Indicator label="friction"><FrictionGauge v={def.surface.friction} /></Indicator>
+      </HeaderBar>
       {groups.map((g) => <GroupView key={g.title} group={g} />)}
     </Box>
   );
@@ -349,8 +418,9 @@ function BuildingBody(props: { building: Building; onSetFace?: (id: string, role
   ];
   return (
     <Box>
-      <Header kind="BUILDING" title={def.label} sub={b.id} />
-      <HeroSwatch color={def.facadeColor} label="facade" value={def.facadeColor} />
+      <HeaderBar kind="BUILDING" title={def.label} sub={b.id}>
+        <Indicator label="facade"><Swatch color={def.facadeColor} size={34} /></Indicator>
+      </HeaderBar>
       {groups.map((g) => <GroupView key={g.title} group={g} />)}
       <FaceSkins building={b} onSetFace={props.onSetFace} />
     </Box>
@@ -360,6 +430,7 @@ function BuildingBody(props: { building: Building; onSetFace?: (id: string, role
 function PropBody({ prop }: { prop: WorldProp }) {
   const p = prop;
   const def = propKindDefinition(p.kind);
+  const propColor = tileKindDefinition(def.tileKind).render.color;
   const groups: Group[] = [
     { title: 'IDENTITY', accent: 'primary', rows: [
       { label: 'id', ctl: 'text', value: p.id },
@@ -376,16 +447,16 @@ function PropBody({ prop }: { prop: WorldProp }) {
     { title: 'KIND', accent: 'warning', rows: [
       { label: 'solid', ctl: 'bool', value: def.solid },
       { label: 'footprintR', ctl: 'text', value: `${fmt(def.footprintRadiusMeters)}m` },
-      { label: 'heightM', ctl: 'num', value: def.heightMeters, viz: 'height' },
       { label: 'borrowsTile', ctl: 'text', value: def.tileKind },
       { label: 'traffic', ctl: 'text', value: def.trafficControl },
     ] },
   ];
-  const propColor = tileKindDefinition(def.tileKind).render.color;
   return (
     <Box>
-      <Header kind="OBJECT" title={def.label} sub={p.id} />
-      <HeroSwatch color={propColor} label="borrows tile" value={def.tileKind} />
+      <HeaderBar kind="OBJECT" title={def.label} sub={`${p.id} · borrows ${def.tileKind}`}>
+        <Indicator label="tile"><Swatch color={propColor} size={34} /></Indicator>
+        <Indicator label="height"><HeightViz m={def.heightMeters} /></Indicator>
+      </HeaderBar>
       {groups.map((g) => <GroupView key={g.title} group={g} />)}
     </Box>
   );
@@ -416,10 +487,10 @@ export function PropertiesPanel(props: {
     body = <TileBody tile={focus.tile} cell={focus.cell} />;
   } else if (focus.kind === 'building') {
     const b = world.world.buildings.find((x) => x.id === focus.id);
-    body = b ? <BuildingBody building={b} onSetFace={props.onSetFace} /> : <Header kind="BUILDING" title="missing" sub={focus.id} />;
+    body = b ? <BuildingBody building={b} onSetFace={props.onSetFace} /> : <HeaderBar kind="BUILDING" title="missing" sub={focus.id} />;
   } else {
     const p = world.world.props.find((x) => x.id === focus.id);
-    body = p ? <PropBody prop={p} /> : <Header kind="OBJECT" title="missing" sub={focus.id} />;
+    body = p ? <PropBody prop={p} /> : <HeaderBar kind="OBJECT" title="missing" sub={focus.id} />;
   }
 
   return (
