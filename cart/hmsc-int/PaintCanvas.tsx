@@ -405,6 +405,7 @@ export function PaintCanvas(props: {
   const heightDirty = useRef<Set<ChunkKey>>(new Set());
   const tileCache = useRef<Map<ChunkKey, number[]>>(new Map());
   const heightCache = useRef<Map<ChunkKey, number[]>>(new Map());
+  const heightVer = useRef<Map<ChunkKey, number>>(new Map()); // bumps per re-downsample → host slot overwrite
   const regionSyncPending = useRef(false);
   const buildFloors = useCallback((): ChunkFloor[] => {
     const out: ChunkFloor[] = [];
@@ -417,9 +418,10 @@ export function PaintCanvas(props: {
       }
       if (heightDirty.current.has(k) || !heightCache.current.has(k)) {
         heightCache.current.set(k, downsampleHeights(c.height.z, c.height.cols, c.height.rows));
+        heightVer.current.set(k, (heightVer.current.get(k) ?? 0) + 1);
         heightDirty.current.delete(k);
       }
-      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: HF_RES, hrows: HF_RES });
+      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: HF_RES, hrows: HF_RES, hver: heightVer.current.get(k) ?? 0 });
     }
     return out;
   }, [chunks]);

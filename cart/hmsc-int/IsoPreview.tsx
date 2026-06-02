@@ -65,7 +65,7 @@ const ChunkFloorCaptures = memo(function ChunkFloorCaptures(props: { floors: Chu
 // chunk's height samples, textured by its tile capture. params is memoized on the
 // heights identity (stable from the painter's cache) so a tile-only stroke never
 // regenerates the mesh.
-const ChunkFloorMesh = memo(function ChunkFloorMesh(props: { cx: number; cz: number; heights: number[]; hcols: number; hrows: number }) {
+const ChunkFloorMesh = memo(function ChunkFloorMesh(props: { cx: number; cz: number; heights: number[]; hcols: number; hrows: number; hver: number }) {
   const params = useMemo(
     () => ({ heights: props.heights, cols: props.hcols, rows: props.hrows, width: CHUNK_TILES, depth: CHUNK_TILES, base: 0.3 }),
     [props.heights, props.hcols, props.hrows],
@@ -74,8 +74,17 @@ const ChunkFloorMesh = memo(function ChunkFloorMesh(props: { cx: number; cz: num
     () => [props.cx * CHUNK_TILES + CHUNK_TILES / 2, 0, props.cz * CHUNK_TILES + CHUNK_TILES / 2],
     [props.cx, props.cz],
   );
+  // Live geometry: a stable per-chunk slot id + a version that bumps each edit, so
+  // the host overwrites one reused vertex slot instead of leaking a new one.
   return (
-    <Scene3D.Mesh geometry={Heightfield} params={params} material="#ffffff" textureKey={floorTextureKey(chunkFloorId(props.cx, props.cz))} position={position} />
+    <Scene3D.Mesh
+      geometry={Heightfield}
+      params={params}
+      dynamicKey={`${chunkFloorId(props.cx, props.cz)}~${props.hver}`}
+      material="#ffffff"
+      textureKey={floorTextureKey(chunkFloorId(props.cx, props.cz))}
+      position={position}
+    />
   );
 });
 
@@ -83,7 +92,7 @@ const ChunkFloorMeshes = memo(function ChunkFloorMeshes(props: { floors: ChunkFl
   return (
     <>
       {props.floors.map((f) => (
-        <ChunkFloorMesh key={chunkFloorId(f.cx, f.cz)} cx={f.cx} cz={f.cz} heights={f.heights} hcols={f.hcols} hrows={f.hrows} />
+        <ChunkFloorMesh key={chunkFloorId(f.cx, f.cz)} cx={f.cx} cz={f.cz} heights={f.heights} hcols={f.hcols} hrows={f.hrows} hver={f.hver} />
       ))}
     </>
   );

@@ -42,13 +42,17 @@ const SceneUniforms = extern struct {
     _pad2: f32 = 0, // 108
     camera_pos: [3]f32, // 112
     _pad3: f32 = 0, // 124
-    fog_color: [3]f32, // 128
+    fog_color: [3]f32, // 128  flat fade target (used when fog_sky == 0)
     fog_near: f32, // 140
     fog_far: f32, // 144
+    fog_sky: f32, // 148  1 = fade toward the screen-space sky gradient, 0 = flat fog_color
+    _pad4a: f32 = 0, // 152
+    _pad4b: f32 = 0, // 156  (pad up to the 16-aligned 160 the vec3 needs)
+    sky_horizon: [3]f32 = .{ 0, 0, 0 }, // 160
+    _pad5: f32 = 0, // 172
     // @Vector(4, f32) has align 16 — forces the extern struct's alignment to 16
-    // (which WGSL std140 requires for uniforms) and naturally pads from offset
-    // 148 to the 16-aligned 160 before the vec4 sits at 160..176.
-    _pad4: @Vector(4, f32) = .{ 0, 0, 0, 0 }, // 160 → 176 total
+    // (WGSL std140) and sits at the 16-aligned 176. Only .xyz is used (sky zenith).
+    sky_zenith: @Vector(4, f32) = .{ 0, 0, 0, 0 }, // 176 → 192 total (multiple of 16)
 };
 
 // Per-instance vertex attributes (vertex buffer 1, step=instance) — packed as the
@@ -60,8 +64,8 @@ const InstanceData = extern struct {
 };
 
 comptime {
-    if (@sizeOf(SceneUniforms) != 176 or @alignOf(SceneUniforms) != 16) {
-        @compileError("SceneUniforms must match scene3d_wgsl uniform layout (176 bytes, align 16)");
+    if (@sizeOf(SceneUniforms) != 192 or @alignOf(SceneUniforms) != 16) {
+        @compileError("SceneUniforms must match scene3d_wgsl uniform layout (192 bytes, align 16)");
     }
     if (@sizeOf(InstanceData) != 80 or @alignOf(InstanceData) != 4) {
         @compileError("InstanceData must match scene3d_wgsl per-instance vertex layout (80 bytes)");
@@ -132,6 +136,24 @@ var g_geo_cache: [GEO_CACHE_SIZE]GeoEntry = [_]GeoEntry{.{}} ** GEO_CACHE_SIZE;
 var g_geo_cache_len: usize = 0;
 var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persists across frames
 
+// ── Dynamic geometry slots ──────────────────────────────────────────────────
+// LIVE-edited geometry (a sculpted heightfield, etc.) cannot use the intern cache:
+// every edit is a new content key, so it would consume a permanent slot per edit
+// and fill the cache (then the mesh vanishes). Instead a mesh ships a key of the
+// form "~dyn~<slotId>~<version>": the host keeps ONE reused slot per slotId in a
+// reserved tail region of g_retained_vbuf, and OVERWRITES its verts in place when
+// the version changes. Bounded (DYN_SLOTS), never grows. The region lives in the
+// same buffer so the draw binding is unchanged.
+const DYN_SLOTS = 48; // distinct live meshes (e.g. focused chunks)
+const MAX_DYN_VERTS = 32768; // per-slot vertex ceiling (a 61x61 heightfield ≈ 23k)
+const DYN_REGION_VERTS = DYN_SLOTS * MAX_DYN_VERTS;
+const DynSlot = struct { id_hash: u64 = 0, version_hash: u64 = 0, count: u32 = 0, present: bool = false };
+var g_dyn_slots: [DYN_SLOTS]DynSlot = [_]DynSlot{.{}} ** DYN_SLOTS;
+var g_dyn_len: usize = 0;
+fn dynSlotOffset(i: usize) u64 {
+    return (@as(u64, MAX_RETAINED_VERTS) + @as(u64, i) * MAX_DYN_VERTS) * @sizeOf(Vertex);
+}
+
 // Per-instance vertex buffer cap. With InstanceData = 80 bytes, 65536 instances
 // = ~5.2 MB reserved. drawScene bump-fills this each frame; uploads only the bytes
 // actually written, so a larger ceiling costs reserved GPU memory, not per-frame work.
@@ -145,6 +167,10 @@ const MAX_SCENE_MESHES: usize = 32768;
 // ════════════════════════════════════════════════════════════════════════
 
 var g_pipeline: ?*wgpu.RenderPipeline = null;
+// Same pipeline as g_pipeline but depth-WRITE off (depth-test stays on). Glass
+// and other alpha<1 meshes draw through this in a second, back-to-front pass so
+// they composite over the opaque scene without occluding each other via depth.
+var g_pipeline_transparent: ?*wgpu.RenderPipeline = null;
 var g_vertex_buffer: ?*wgpu.Buffer = null;
 var g_retained_vbuf: ?*wgpu.Buffer = null; // persistent verts for interned registry geometry
 var g_instance_buf: ?*wgpu.Buffer = null; // per-frame InstanceData buffer (step=instance, vbuf 1)
@@ -244,7 +270,8 @@ pub fn init() void {
     // key, never reset per frame (unlike g_vertex_buffer which bump-resets).
     g_retained_vbuf = device.createBuffer(&.{
         .label = wgpu.StringView.fromSlice("render3d_retained_verts"),
-        .size = MAX_RETAINED_VERTS * @sizeOf(Vertex),
+        // Intern region [0, MAX_RETAINED_VERTS) + a reserved dynamic-slot tail.
+        .size = (MAX_RETAINED_VERTS + DYN_REGION_VERTS) * @sizeOf(Vertex),
         .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
         .mapped_at_creation = 0,
     });
@@ -411,6 +438,26 @@ pub fn init() void {
         .vertex = .{ .module = shader_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
         .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
         .depth_stencil = &depth_stencil,
+        .multisample = .{},
+        .fragment = &frag,
+    });
+    // Transparent companion: identical layout/shader/blend, depth-test on but
+    // depth-write OFF, so translucent meshes drawn after the opaque batch read
+    // the depth buffer (hidden behind walls) without writing it (no self-occlusion
+    // between panes). Reuses pipeline_layout/shader_module/frag, which the createRenderPipeline
+    // calls retain — both stay valid until this fn's deferred releases fire.
+    const depth_stencil_transparent = wgpu.DepthStencilState{
+        .format = .depth24_plus,
+        .depth_write_enabled = .false,
+        .depth_compare = .less,
+        .stencil_front = .{},
+        .stencil_back = .{},
+    };
+    g_pipeline_transparent = device.createRenderPipeline(&.{
+        .layout = pipeline_layout,
+        .vertex = .{ .module = shader_module, .entry_point = wgpu.StringView.fromSlice("vs_main"), .buffer_count = vert_layouts.len, .buffers = &vert_layouts },
+        .primitive = .{ .topology = .triangle_list, .cull_mode = .back, .front_face = .ccw },
+        .depth_stencil = &depth_stencil_transparent,
         .multisample = .{},
         .fragment = &frag,
     });
@@ -789,6 +836,43 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     return .{ .offset = off, .count = count };
 }
 
+/// Resolve a dynamic key "~dyn~<slotId>~<version>" to a reused slot, overwriting
+/// its verts in place when the version changed. `verts` may be null on a frame the
+/// node didn't re-ship (then we draw the slot's existing contents). Returns null
+/// only if there's no slot free and none yet uploaded.
+fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, count: u32) ?GeoSlice {
+    const rest = key["~dyn~".len..]; // "<slotId>~<version>"
+    const sep = std.mem.lastIndexOfScalar(u8, rest, '~') orelse return null;
+    const id_hash = hashKey(rest[0..sep]);
+    const ver_hash = hashKey(rest[sep + 1 ..]);
+
+    var idx: ?usize = null;
+    for (g_dyn_slots[0..g_dyn_len], 0..) |*s, i| {
+        if (s.present and s.id_hash == id_hash) { idx = i; break; }
+    }
+    if (idx == null) {
+        if (g_dyn_len >= DYN_SLOTS) return null;
+        idx = g_dyn_len;
+        g_dyn_slots[g_dyn_len] = .{ .id_hash = id_hash, .present = true };
+        g_dyn_len += 1;
+    }
+    const i = idx.?;
+    const s = &g_dyn_slots[i];
+    const off = dynSlotOffset(i);
+
+    if (s.version_hash != ver_hash or s.count == 0) {
+        const v = verts orelse return if (s.count > 0) .{ .offset = off, .count = s.count } else null;
+        if (count == 0 or count > MAX_DYN_VERTS or v.len < @as(usize, count) * 8) {
+            return if (s.count > 0) .{ .offset = off, .count = s.count } else null;
+        }
+        const buf = g_retained_vbuf orelse return null;
+        queue.writeBuffer(buf, off, @ptrCast(v.ptr), @as(u64, count) * @sizeOf(Vertex));
+        s.version_hash = ver_hash;
+        s.count = count;
+    }
+    return .{ .offset = off, .count = s.count };
+}
+
 // ════════════════════════════════════════════════════════════════════════
 // Public API
 // ════════════════════════════════════════════════════════════════════════
@@ -880,7 +964,7 @@ fn drawSky(pass: anytype, queue: *wgpu.Queue, node: *Node, vp: math.Mat4, cam_po
     pass.draw(3, 1, 0, 0);
 }
 
-fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, sy: f32, sz: f32, cr: f32, cg: f32, cb: f32) InstanceData {
+fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, sy: f32, sz: f32, cr: f32, cg: f32, cb: f32, ca: f32) InstanceData {
     const deg2rad = std.math.pi / 180.0;
     var model = math.m4scale(math.m4identity(), .{ .x = sx, .y = sy, .z = sz });
     model = math.m4multiply(math.m4rotateZ(math.m4identity(), rz * deg2rad), model);
@@ -890,7 +974,7 @@ fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, s
 
     return InstanceData{
         .model = math.m4transpose(model),
-        .color = .{ cr, cg, cb, 1.0 },
+        .color = .{ cr, cg, cb, ca },
     };
 }
 
@@ -1008,8 +1092,24 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     // the flat clear colour — that distance fade is most of what sells the sky.
     // A <Scene3D.Fog color=...> overrides it (sentinel {-1,-1,-1} = keep auto).
     var fog_color: [3]f32 = if (sky_node) |s| s.scene3d_sky_horizon else clear_color;
+    // Aerial perspective: with a skybox, geometry fades toward the sky colour in
+    // its own screen direction (the same vertical gradient drawSky paints), not a
+    // flat horizon colour — so a tall peak melts into the upper sky instead of
+    // leaving a horizon-coloured silhouette that pops when culled. An explicit
+    // <Fog color> falls back to that flat colour.
+    var sky_horizon: [3]f32 = fog_color;
+    var sky_zenith: [3]f32 = fog_color;
+    var fog_sky: f32 = 0;
+    if (sky_node) |s| {
+        sky_horizon = s.scene3d_sky_horizon;
+        sky_zenith = s.scene3d_sky_zenith;
+        fog_sky = 1;
+    }
     if (fog_node) |f| {
-        if (f.scene3d_fog_color[0] >= 0) fog_color = f.scene3d_fog_color;
+        if (f.scene3d_fog_color[0] >= 0) {
+            fog_color = f.scene3d_fog_color;
+            fog_sky = 0; // explicit flat fog colour overrides the gradient
+        }
     }
 
     // ── Begin render pass ──
@@ -1055,6 +1155,9 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         .fog_color = fog_color,
         .fog_near = fog_near,
         .fog_far = fog_far,
+        .fog_sky = fog_sky,
+        .sky_horizon = sky_horizon,
+        .sky_zenith = .{ sky_zenith[0], sky_zenith[1], sky_zenith[2], 0 },
     };
     queue.writeBuffer(g_uniform_buffer.?, 0, @ptrCast(&scene_u), @sizeOf(SceneUniforms));
     pass.setBindGroup(0, g_bind_group.?, 0, null);
@@ -1069,6 +1172,13 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     var mvisited: [MAX_SCENE_MESHES]bool = [_]bool{false} ** MAX_SCENE_MESHES;
     var mcount: usize = 0;
     var collected_logical: u32 = 0;
+    // Transparent (alpha<1) single meshes are collected separately and drawn in a
+    // back-to-front pass after the opaque batch. Distance is cached for the sort.
+    var tidx: [MAX_SCENE_MESHES]u32 = undefined;
+    var tslot: [MAX_SCENE_MESHES]GeoSlice = undefined;
+    var ttex: [MAX_SCENE_MESHES]?*wgpu.BindGroup = undefined;
+    var tdist: [MAX_SCENE_MESHES]f32 = undefined;
+    var tcount: usize = 0;
 
     var ci: u32 = 0;
     while (ci < node.children.len and mcount < MAX_SCENE_MESHES) : (ci += 1) {
@@ -1085,15 +1195,22 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         }
         const key = child.scene3d_geom_key orelse continue;
 
-        var maybe_slot = lookupGeometry(key);
-        if (maybe_slot == null) {
-            // First mesh per key in this scene must carry verts (the dedup path
-            // only ships verts on the first per key; later ones cache-hit).
-            const verts = child.scene3d_vertices orelse continue;
-            if (child.scene3d_vert_count == 0) continue;
-            if (verts.len < @as(usize, child.scene3d_vert_count) * 8) continue;
-            maybe_slot = internGeometry(queue, key, verts, child.scene3d_vert_count);
+        var maybe_slot: ?GeoSlice = null;
+        if (std.mem.startsWith(u8, key, "~dyn~")) {
+            // Live-edited geometry: reused per-slot, overwritten on version change.
+            maybe_slot = resolveDynamicGeom(queue, key, child.scene3d_vertices, child.scene3d_vert_count);
             if (maybe_slot == null) continue;
+        } else {
+            maybe_slot = lookupGeometry(key);
+            if (maybe_slot == null) {
+                // First mesh per key in this scene must carry verts (the dedup path
+                // only ships verts on the first per key; later ones cache-hit).
+                const verts = child.scene3d_vertices orelse continue;
+                if (child.scene3d_vert_count == 0) continue;
+                if (verts.len < @as(usize, child.scene3d_vert_count) * 8) continue;
+                maybe_slot = internGeometry(queue, key, verts, child.scene3d_vert_count);
+                if (maybe_slot == null) continue;
+            }
         }
 
         var tex_bg: ?*wgpu.BindGroup = g_default_tex_bind_group;
@@ -1102,6 +1219,21 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         }
         if (child.scene3d_tex_key) |tk| {
             if (images.staticSurfaceBindGroup3D(tk)) |bg| tex_bg = bg;
+        }
+
+        // Route alpha<1 single meshes to the transparent list; everything else
+        // (opaque, and all instanced batches) stays on the opaque fast path.
+        if (child.scene3d_instance_count == 0 and child.scene3d_color_a < 0.999) {
+            if (tcount < MAX_SCENE_MESHES) {
+                const tc = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
+                tidx[tcount] = ci;
+                tslot[tcount] = maybe_slot.?;
+                ttex[tcount] = tex_bg;
+                tdist[tcount] = math.v3distance(tc, cam_pos);
+                tcount += 1;
+                collected_logical += 1;
+            }
+            continue;
         }
 
         midx[mcount] = ci;
@@ -1160,6 +1292,7 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
                             idata[base + color_base + 0],
                             idata[base + color_base + 1],
                             idata[base + color_base + 2],
+                            1.0, // instanced batches stay opaque (3-float color stride)
                         );
                         inst_top += @sizeOf(InstanceData);
                         group_count += 1;
@@ -1180,6 +1313,7 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
                     child.scene3d_color_r,
                     child.scene3d_color_g,
                     child.scene3d_color_b,
+                    child.scene3d_color_a,
                 );
                 inst_top += @sizeOf(InstanceData);
                 group_count += 1;
@@ -1197,6 +1331,66 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         pass.draw(group_slot.count, group_count, 0, 0);
         g_telemetry.draw_calls += 1;
         g_telemetry.instances += group_count;
+    }
+
+    // ── Transparent pass ──────────────────────────────────────────────────
+    // Glass and other alpha<1 meshes, drawn after every opaque draw so they read
+    // a complete depth buffer, sorted far→near so overlapping panes blend in the
+    // correct order. depth-write is off (g_pipeline_transparent), so panes don't
+    // occlude each other or the geometry seen through them. Drawn one mesh per
+    // draw — the exact sort matters more than batching, and glass is sparse.
+    if (tcount > 0 and g_pipeline_transparent != null) {
+        // Insertion sort by distance, far → near (descending).
+        var si: usize = 1;
+        while (si < tcount) : (si += 1) {
+            const d = tdist[si];
+            const vi = tidx[si];
+            const vs = tslot[si];
+            const vt = ttex[si];
+            var sj: usize = si;
+            while (sj > 0 and tdist[sj - 1] < d) : (sj -= 1) {
+                tdist[sj] = tdist[sj - 1];
+                tidx[sj] = tidx[sj - 1];
+                tslot[sj] = tslot[sj - 1];
+                ttex[sj] = ttex[sj - 1];
+            }
+            tdist[sj] = d;
+            tidx[sj] = vi;
+            tslot[sj] = vs;
+            ttex[sj] = vt;
+        }
+        pass.setPipeline(g_pipeline_transparent.?);
+        pass.setBindGroup(0, g_bind_group.?, 0, null);
+        var ti: usize = 0;
+        while (ti < tcount) : (ti += 1) {
+            if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break;
+            const child = &node.children[tidx[ti]];
+            const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
+            inst_scratch[inst_index] = makeInstance(
+                child.scene3d_pos_x,
+                child.scene3d_pos_y,
+                child.scene3d_pos_z,
+                child.scene3d_rot_x,
+                child.scene3d_rot_y,
+                child.scene3d_rot_z,
+                child.scene3d_scale_x,
+                child.scene3d_scale_y,
+                child.scene3d_scale_z,
+                child.scene3d_color_r,
+                child.scene3d_color_g,
+                child.scene3d_color_b,
+                child.scene3d_color_a,
+            );
+            queue.writeBuffer(g_instance_buf.?, inst_top, @ptrCast(&inst_scratch[inst_index]), @sizeOf(InstanceData));
+            if (ttex[ti]) |bg| pass.setBindGroup(1, bg, 0, null);
+            const geo_bytes: u64 = @as(u64, tslot[ti].count) * @sizeOf(Vertex);
+            pass.setVertexBuffer(0, g_retained_vbuf.?, tslot[ti].offset, geo_bytes);
+            pass.setVertexBuffer(1, g_instance_buf.?, inst_top, @sizeOf(InstanceData));
+            pass.draw(tslot[ti].count, 1, 0, 0);
+            inst_top += @sizeOf(InstanceData);
+            g_telemetry.draw_calls += 1;
+            g_telemetry.instances += 1;
+        }
     }
 
     pass.end();

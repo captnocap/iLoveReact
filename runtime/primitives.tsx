@@ -516,7 +516,7 @@ Scene3DBase.Fog = ({ near, far, color, enabled = true, ...rest }: any) =>
   });
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
-  texture, textureKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
+  texture, textureKey, dynamicKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
   waveDirection, waveDirX, waveDirZ, wavePhase, ...rest
 }: any) => {
   const matColor = typeof material === 'string' ? material : (material?.color ?? color);
@@ -550,6 +550,33 @@ Scene3DBase.Mesh = ({
   // This is the canonical path; the string branch below is legacy (migrating).
   const geomIntern = require('./geometries/intern');
   if (geomIntern.isGeometryDef(geometry)) {
+    // Dynamic (live-edited) geometry path: a mesh whose verts change as the user
+    // edits (a sculpted heightfield). The intern cache is for STATIC shapes — a
+    // new content key per edit fills it and the mesh vanishes. Instead, generate
+    // fresh verts (no JS cache) and ship them under a STABLE "~dyn~<id>~<ver>" key;
+    // the host keeps one reused slot per id and overwrites it on version change.
+    // dynamicKey must already encode a version that changes when the verts change.
+    const dyn = typeof dynamicKey === 'string' && dynamicKey.length > 0 ? dynamicKey : '';
+    if (dyn) {
+      const merged = { ...(geometry.defaults || {}), ...(params || {}) };
+      const gd = geometry.generate(merged);
+      return h('View', {
+        ...rest,
+        scene3dMesh: true,
+        scene3dGeomKey: '~dyn~' + dyn,
+        scene3dVertices: Array.from(gd.positions),
+        scene3dVertCount: gd.count,
+        scene3dBoundsRadius: gd.bounds.radius,
+        scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
+        scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
+        scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,
+        scene3dColorR: r, scene3dColorG: g, scene3dColorB: b, scene3dColorA: matOpacity,
+        scene3dTexW: texW,
+        scene3dTexH: texH,
+        scene3dTexData: texData,
+        ...(texKey ? { scene3dTexKey: texKey } : {}),
+      });
+    }
     const g3 = geomIntern.internGeometry(geometry, params);
     // Bridge-cost dedup: the first mesh per key ships {key + verts + count}
     // so the host caches the heavy VERTICES; every subsequent mesh ships only the

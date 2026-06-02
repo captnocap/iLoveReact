@@ -21,4 +21,5 @@ export type ChunkFloor = {
   heights: number[];  // the height samples — mesh displacement (stable unless height painted)
   hcols: number;      // height-sample columns / rows (cols*rows = heights.length)
   hrows: number;
+  hver: number;       // height version — bumps each height edit; drives the host's dynamic-slot overwrite
 };
