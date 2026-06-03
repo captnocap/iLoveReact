@@ -41,9 +41,13 @@ export interface StampOpts {
   erase?: boolean;   // pull cells in range to 0 instead of stamping
 }
 
-// Stamp a cone centered on cell (cix,ciy): each cell in range gets the linear
-// falloff profile ADDED (stacks; overlap builds smooth relief), clamped. Erase
-// zeros the cells in range. O(radius^2), independent of total grid size.
+// Stamp a cone centered on cell (cix,ciy): each cell in range is RAISED TOWARD the
+// linear falloff profile (peak |centerZ| at the center, 0 at the radius), not summed.
+// "Raise toward" = signed max, so the brush sculpts a dome capped at centerZ instead
+// of piling up — overlapping stamps form the UNION of domes (a smooth ridge), and the
+// painted height equals the intensity you set. Summing made every drag saturate to the
+// clamp (a flat max-height mesa); a ceiling can't. Erase zeros the cells in range.
+// O(radius^2), independent of total grid size.
 export function stampCone(f: HeightField, cix: number, ciy: number, opts: StampOpts): void {
   const radiusM = Math.max(DOT_M, Math.abs(opts.centerZ) / Math.max(0.0001, opts.falloff));
   const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
@@ -60,7 +64,10 @@ export function stampCone(f: HeightField, cix: number, ciy: number, opts: StampO
       if (opts.erase) { f.z[idx] = 0; continue; }
       const mag = Math.abs(opts.centerZ) - opts.falloff * dm;
       if (mag <= 0) continue;
-      f.z[idx] = Math.max(-HEIGHT_LIMIT, Math.min(HEIGHT_LIMIT, f.z[idx] + sign * mag));
+      // Raise toward the signed target: take whichever value is farther from 0 in the
+      // brush's direction, so re-stamping or overlapping never climbs past centerZ.
+      const target = sign * Math.min(mag, HEIGHT_LIMIT);
+      f.z[idx] = sign > 0 ? Math.max(f.z[idx], target) : Math.min(f.z[idx], target);
     }
   }
 }
