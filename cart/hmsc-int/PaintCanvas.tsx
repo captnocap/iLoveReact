@@ -29,7 +29,7 @@ import { type ChunkFloor } from './chunkFloor';
 import type { TileKind, ZoneFlag } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
 import { ZONE_FLAGS } from '../hmsc/world/zones';
-import { TILE_UNITS, DOT_M, stampBrush, clearField, type BrushShape, type BrushProfile } from './heightData';
+import { TILE_UNITS, DOT_M, HEIGHT_LIMIT, stampBrush, clearField, type BrushShape, type BrushProfile } from './heightData';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { ChunkSurface } from './ChunkSurface';
@@ -83,7 +83,8 @@ const GUTTER_W = 58; // right-edge chunk-focus dock — thin so the centre stays
 const PATCH = CHUNK_TILES * TILE_UNITS;
 
 // Brush profile steppers.
-const Z_STEP = 0.5, Z_MIN = -12, Z_MAX = 12;
+// Brush peak-height range mirrors the terrain clamp (single knob in heightData).
+const Z_MAX = HEIGHT_LIMIT, Z_MIN = -HEIGHT_LIMIT, Z_STEP = 1;
 // Shared brush size = RADIUS in tiles (0 = a single cell). 1 tile = 1m, so it also
 // reads as the height cone's radius in metres. Footprint shown as width-across.
 const SIZE_STEP = 1, SIZE_MIN = 0, SIZE_MAX = 40;
@@ -316,6 +317,31 @@ function HeightRail(props: {
 
 const ROT_STEP = 15; // degrees per rotate tap
 
+// The spawn↔save link picker — shown only when a SAVE marker is selected. Lists
+// every spawn marker (the manual pairing target) so the author chooses which spawn
+// this save reappears the player at; clicking the armed one again unpairs it.
+function SaveLinkPicker(props: { sel: Placement; place: PlaceProps }) {
+  const spawns = props.place.items.filter((p) => p.cat === 'marker' && p.kind === 'spawn');
+  const armed = props.sel.spawnId;
+  const pick = (id: string) => props.place.onUpdate(props.sel.id, { spawnId: armed === id ? undefined : id });
+  return (
+    <Box style={{ gap: 4 }}>
+      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
+      <Text fontSize={8} color="#a855f7" style={{ fontFamily: 'monospace', fontWeight: 700 }}>RESPAWN AT</Text>
+      {spawns.length === 0 ? (
+        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>place a spawn first</Text>
+      ) : spawns.map((sp, i) => {
+        const on = armed === sp.id;
+        return (
+          <Pressable key={sp.id} onPress={() => pick(sp.id)} style={{ alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: on ? '#22c55e' : '#334155', backgroundColor: on ? '#0f3d2e' : '#0f1a2e' }}>
+            <Text fontSize={8} color={on ? '#86efac' : '#cbd5e1'} style={{ fontFamily: 'monospace', fontWeight: on ? 700 : 500 }}>{`spawn ${i + 1}`}</Text>
+          </Pressable>
+        );
+      })}
+    </Box>
+  );
+}
+
 // Place rail — controls for the SELECTED placement (conditional on selection).
 function PlaceRail(props: { sel: Placement | null; place: PlaceProps }) {
   const sel = props.sel;
@@ -336,6 +362,7 @@ function PlaceRail(props: { sel: Placement | null; place: PlaceProps }) {
       <Pressable onPress={() => set({ locked: !sel.locked })} style={{ alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: sel.locked ? '#22c55e' : '#334155', backgroundColor: sel.locked ? '#0f3d2e' : '#0f1a2e' }}>
         <Text fontSize={8} color={sel.locked ? '#86efac' : '#cbd5e1'} style={{ fontWeight: 700 }}>{sel.locked ? 'LOCKED' : 'lock'}</Text>
       </Pressable>
+      {sel.cat === 'marker' && sel.kind === 'save' ? <SaveLinkPicker sel={sel} place={props.place} /> : null}
     </Box>
   );
 }

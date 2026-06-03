@@ -14,7 +14,13 @@
 export const TILE_UNITS = 24;       // canvas units per 1m tile (display scale)
 export const DOTS_PER_TILE = 2;     // height samples per tile per axis
 export const DOT_M = 1 / DOTS_PER_TILE; // meters between samples
-export const HEIGHT_LIMIT = 12;     // |Z| clamp (meters), headroom to stack
+// |Z| clamp (metres) — the tallest a hill can rise / deepest a pit can sink. This is
+// the SINGLE knob for terrain height range: the brush z stepper (Z_MIN/Z_MAX), the
+// stamp clamp, the 2D colormap span (VIS_REF), and the saved-state clamp all derive
+// from it. 64 m ≈ 32× a ~2 m player — real hills/small mountains in a 120 m chunk,
+// not the old 12 m (~6×, barely a mound). Pure constant; raise/lower freely (the
+// heightfield collider + host-gen mesh handle any height).
+export const HEIGHT_LIMIT = 64;
 // |Z| that saturates the 2D colormap. Span the FULL paint range so 6–12 m read as
 // distinct colours instead of all-max-warm (the colormap is a multi-stop elevation
 // ramp now — see heightField.wgsl.ts — so low ground still gets its own colour).

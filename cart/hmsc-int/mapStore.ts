@@ -37,9 +37,9 @@ import {
 import { type ZoneDef } from './zoneData';
 import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
 
-// Height quantization: heights are metres in ±HEIGHT_LIMIT (12). 0.01m steps are
+// Height quantization: heights are metres in ±HEIGHT_LIMIT. 0.01m steps are
 // imperceptible on the coarse preview mesh and keep the value a small integer
-// (±1200) that RLE-collapses to nothing across flat ground.
+// (e.g. ±6400 at HEIGHT_LIMIT=64) that RLE-collapses to nothing across flat ground.
 const HEIGHT_Q = 100;
 
 // A placement as stored: identity + kind reference + pose. Everything visual is
@@ -52,6 +52,10 @@ interface PlacementSnap {
   gy: number;
   rotation: number;
   locked: boolean;
+  // The save↔spawn link on a 'save' marker (the id of its paired 'spawn' marker).
+  // Per-INSTANCE, not re-resolvable from the kind, so unlike footprint/colour it
+  // must ride the snapshot or the pairing is lost on reload.
+  spawnId?: string;
 }
 
 interface ChunkSnap {
