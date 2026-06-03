@@ -1,28 +1,31 @@
-// head_lab — paint a head into existence.
+// head_lab — paint a whole character into existence.
 //
-// The user's pipeline, verbatim: take a face picture, put it on a HEAD-SHAPED
-// unwrap (not a flat plane), paint depth over it with a brush, and the painted
-// rectangle wraps back around a 3D head. The paint surface IS the unwrap —
-// photo, depth strokes, and the head's texture all live in the same 2:1
-// equirect space (Geometry.Globe), so nothing ever needs un/re-wrapping.
+// The pipeline, designed turn by turn with the user: every body part is the
+// SAME sculptable surface (Geometry.Globe) wearing a different silhouette
+// profile — head egg, tall+wide torso barrel, ONE limb pipe placed eight
+// times (upper/fore arms and thighs/shins both), wide flat hand and foot
+// blocks. Each part has a 2:1 unwrap you paint depth onto; the head also
+// carries .hed feature layers (generated faces, photo, animations). Nothing
+// is ever unwrapped or re-wrapped — paint space IS texture space IS sculpt
+// space, per part.
 //
-//   left:  the unwrap canvas — skin base, dropped photo (position/scale knobs),
-//          heat overlay = painted depth (blue = raised, orange = carved in)
-//   right: the live 3D head — drag orbits; mesh re-sculpts on stroke release
+//   left:  part tabs + the selected part's unwrap painter
+//          (blue = raised, orange = carved in)
+//   right: the selected part alone, or the ASSEMBLED FIGURE (view toggle)
 //
-// Depth is SIGNED around a neutral midpoint: `raise` pushes the surface out
-// (nose, brow, chin), `lower` carves in (eye sockets, temples), `flatten`
-// erases back to the bare skull. Strokes paint straight into a GPU texture
-// (usePaintable) and the overlay is one <Effect> quad sampling it — no React
-// re-render happens while the brush moves; only releasing a stroke reads the
-// texture back and re-sculpts the mesh.
+// Strokes paint straight into a per-part GPU texture (usePaintable); the
+// overlay is one <Effect> quad; React only sees a stroke on release (readback
+// → 48×24 grid → mesh re-sculpt through a dynamic geometry slot).
+//
+// Documents: .hed.json = a head (face layers + sculpt). .body.json = the
+// whole character (all five part sculpts + the face). Drop either back in.
 //
 // Ship: ./scripts/ship head_lab      Dev: ./scripts/dev head_lab
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Row, Effect, Image, Paintable, Pressable, Text, Scene3D, StaticSurface } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
-import { usePaintable } from '@reactjit/runtime/hooks/usePaintable';
+import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
 import * as Geometry from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';
@@ -31,11 +34,16 @@ import {
   animateHed, HED_ANIM_FRAMES,
   type HedDocument, type HedLayer, type HedAnimation,
 } from './hed';
+import {
+  PART_IDS, PART_PRESETS, ASSEMBLY, buildBody, parseBody, serializeBody,
+  type PartId,
+} from './parts';
 
 const BG = '#0b1018';
 const INK = '#e8eef8';
 const DIM = '#7f93b1';
 const ACCENT = '#3da9ff';
+const GOOD = '#34d399';
 
 // Unwrap canvas + bake share these dims (2:1 equirect).
 const UNWRAP_W = 512;
@@ -52,12 +60,13 @@ const NEUTRAL = 0.5;
 const SKINS = ['#caa07a', '#8d5a3c', '#e0b48c', '#a9785a'];
 
 type Mode = 'raise' | 'lower' | 'flatten';
+type View = 'part' | 'figure';
 
-// Heat overlay shader: samples the paint texture, tints raised regions blue
-// and carved regions orange, stays transparent at neutral so the photo reads
-// through. Declares the FULL textures-mode binding set (2 tex + 2 samp) like
-// cutout's MaskQuad shaders — the textures-enabled pipeline layout expects all
-// four slots; unused ones fall through to the framework's dummy 1×1.
+// Heat overlay shader: samples the selected part's paint texture, tints raised
+// regions blue and carved regions orange, stays transparent at neutral so the
+// content reads through. Declares the FULL textures-mode binding set (2 tex +
+// 2 samp) like cutout's MaskQuad shaders — the textures-enabled pipeline
+// layout expects all four slots; unused ones fall through to the dummy 1×1.
 // (No backticks in WGSL — they'd close the JS template literal.)
 const DEPTH_OVERLAY_WGSL = `
 @group(0) @binding(1) var<storage, read> data: array<f32>;
@@ -110,10 +119,9 @@ function HedLayerPaint(props: { layers: HedLayer[] }) {
   return <>{boxes}</>;
 }
 
-// ── the unwrap composition — rendered TWICE: once as the visible paint canvas
-// (with the heat overlay on top) and once inside the StaticSurface bake that
-// the head samples. One component, so display and texture can never disagree.
-// Stack: skin base → photo → .hed feature layers.
+// ── the unwrap composition — rendered for display AND inside the StaticSurface
+// bakes, so canvas and texture can never disagree. Stack: skin base → photo
+// (head only) → .hed feature layers (head only).
 function UnwrapContent(props: { skin: string; photo: Photo | null; photoScale: number; photoY: number; layers: HedLayer[] | null }) {
   const side = props.photoScale * UNWRAP_W;
   return (
@@ -147,7 +155,25 @@ function Knob(props: { label: string; value: string; onMinus: () => void; onPlus
   );
 }
 
+function Chip(props: { label: string; active: boolean; color?: string; onPress: () => void }) {
+  const color = props.color ?? ACCENT;
+  return (
+    <Pressable
+      onPress={props.onPress}
+      style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: props.active ? color : '#22324a', backgroundColor: props.active ? '#11263d' : '#101a2a' }}
+    >
+      <Text fontSize={12} color={props.active ? color : DIM}>{props.label}</Text>
+    </Pressable>
+  );
+}
+
+const emptyGrid = () => new Array(GRID_W * GRID_H).fill(0);
+const emptyGrids = (): Record<PartId, number[]> =>
+  Object.fromEntries(PART_IDS.map((id) => [id, emptyGrid()])) as Record<PartId, number[]>;
+
 export default function HeadLab() {
+  const [selPart, setSelPart] = useState<PartId>('head');
+  const [view, setView] = useState<View>('part');
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [photoScale, setPhotoScale] = useState(0.4);
   const [photoY, setPhotoY] = useState(0);
@@ -156,15 +182,15 @@ export default function HeadLab() {
   const [strength, setStrength] = useState(0.5);
   const [mode, setMode] = useState<Mode>('raise');
   const [amount, setAmount] = useState(0.35);
-  const [scaleY, setScaleY] = useState(1.2);
+  const [scaleY, setScaleY] = useState(1.2); // head skull stretch
   const [yaw, setYaw] = useState(20);
   const [pitch, setPitch] = useState(12);
   const [dist, setDist] = useState(4.2);
-  // The mesh's displacement grid (signed −1..1), refreshed from the paint
-  // texture on stroke release. This is the ONLY paint state React sees.
-  const [grid, setGrid] = useState<number[]>(() => new Array(GRID_W * GRID_H).fill(0));
-  // Bumped whenever the grid changes — versions the mesh's dynamicKey.
-  const [sculptSeq, setSculptSeq] = useState(0);
+  // Per-part displacement grids (signed −1..1) + per-part sculpt versions.
+  const [grids, setGrids] = useState<Record<PartId, number[]>>(emptyGrids);
+  const [seqs, setSeqs] = useState<Record<PartId, number>>(
+    () => Object.fromEntries(PART_IDS.map((id) => [id, 0])) as Record<PartId, number>,
+  );
   // The loaded/generated .hed face (feature layers); id versions keys/caches.
   const [face, setFace] = useState<{ doc: HedDocument; id: string } | null>(null);
   // Playing animation + its frame clock (setInterval — the cart host has no
@@ -177,9 +203,14 @@ export default function HeadLab() {
   const canvasRect = useRef({ x: 0, y: 0, width: UNWRAP_W, height: UNWRAP_H });
   const orbitRef = useRef<{ x: number; y: number } | null>(null);
 
-  // GPU paint surface. Strokes call straight into the host — zero re-renders.
-  const depth = usePaintable({ id: 'headlab-depth', w: PAINT_W, h: PAINT_H });
-  useEffect(() => { depth.paint.clear(NEUTRAL); }, []);
+  // One GPU paint surface PER PART (PART_IDS is constant → stable hook order).
+  // Strokes call straight into the host — zero re-renders while brushing.
+  const paints = {} as Record<PartId, PaintableHandle>;
+  for (const id of PART_IDS) {
+    // eslint-disable-next-line react-hooks/rules-of-hooks -- fixed-length constant list
+    paints[id] = usePaintable({ id: `bodylab-${id}`, w: PAINT_W, h: PAINT_H });
+  }
+  useEffect(() => { for (const id of PART_IDS) paints[id].paint.clear(NEUTRAL); }, []);
 
   // Animation clock — only ticks while something is playing on a face.
   useEffect(() => {
@@ -197,16 +228,8 @@ export default function HeadLab() {
     [face, anim, phase],
   );
 
-  // Apply a .hed document: knobs from the doc, hand-sculpt residue into the
-  // paint texture + grid, feature layers kept (with sculpt zeroed so it can't
-  // double-count — the residue now lives in the paint texture).
-  const applyDoc = (doc: HedDocument, id: string) => {
-    setSkin(doc.skin);
-    setAmount(doc.amount);
-    setScaleY(doc.scaleY);
-    const g = doc.sculpt.map((b) => b / 127);
-    setGrid(g);
-    setSculptSeq((s) => s + 1);
+  // Write a signed grid into a part's paint texture (nearest-upscaled).
+  const uploadGrid = (id: PartId, g: number[]) => {
     const bytes = new Uint8Array(PAINT_W * PAINT_H);
     for (let py = 0; py < PAINT_H; py++) {
       const gy = Math.min(GRID_H - 1, Math.floor((py / PAINT_H) * GRID_H));
@@ -215,7 +238,24 @@ export default function HeadLab() {
         bytes[py * PAINT_W + px] = Math.max(0, Math.min(255, Math.round((g[gy * GRID_W + gx] / 2 + NEUTRAL) * 255)));
       }
     }
-    depth.paint.upload(bytes);
+    paints[id].paint.upload(bytes);
+  };
+
+  const setPartGrid = (id: PartId, g: number[]) => {
+    setGrids((prev) => ({ ...prev, [id]: g }));
+    setSeqs((prev) => ({ ...prev, [id]: prev[id] + 1 }));
+  };
+
+  // Apply a .hed document to the HEAD: knobs from the doc, hand-sculpt residue
+  // into the paint texture + grid, feature layers kept (with sculpt zeroed so
+  // it can't double-count — the residue now lives in the paint texture).
+  const applyDoc = (doc: HedDocument, id: string) => {
+    setSkin(doc.skin);
+    setAmount(doc.amount);
+    setScaleY(doc.scaleY);
+    const g = doc.sculpt.map((b) => b / 127);
+    setPartGrid('head', g);
+    uploadGrid('head', g);
     setFace({ doc: { ...doc, sculpt: new Array(doc.cols * doc.rows).fill(0) }, id });
   };
 
@@ -230,7 +270,7 @@ export default function HeadLab() {
     const stamp = Date.now();
     const doc = buildHed({
       skin, amount, scaleY,
-      sculpt: grid,
+      sculpt: grids.head,
       layers: face?.doc.layers ?? [],
       title: `head ${stamp}`,
       seed: face?.doc.metadata?.seed,
@@ -239,16 +279,68 @@ export default function HeadLab() {
     setStatus(`saved cart/heads/head_${stamp}.hed.json — drop it back in to reload`);
   };
 
-  // Drop: a .hed.json reloads a saved head; anything else is a face photo.
+  const saveBody = () => {
+    mkdir('cart/heads');
+    const stamp = Date.now();
+    const doc = buildBody({
+      skin, amount, headScaleY: scaleY,
+      sculpts: grids,
+      headLayers: face?.doc.layers ?? [],
+      title: `body ${stamp}`,
+    });
+    writeFile(`cart/heads/body_${stamp}.body.json`, serializeBody(doc));
+    setStatus(`saved cart/heads/body_${stamp}.body.json — the whole character`);
+  };
+
+  const loadBody = (doc: ReturnType<typeof parseBody> & {}) => {
+    if (!doc) return;
+    setSkin(doc.skin);
+    setAmount(doc.amount);
+    setScaleY(doc.headScaleY);
+    const nextGrids = emptyGrids();
+    for (const id of PART_IDS) {
+      const sculpt = doc.parts[id]?.sculpt ?? [];
+      const g = sculpt.length === GRID_W * GRID_H ? sculpt.map((b: number) => b / 127) : emptyGrid();
+      nextGrids[id] = g;
+      uploadGrid(id, g);
+    }
+    setGrids(nextGrids);
+    setSeqs((prev) => Object.fromEntries(PART_IDS.map((id) => [id, prev[id] + 1])) as Record<PartId, number>);
+    const headLayers = doc.parts.head?.layers ?? [];
+    if (headLayers.length > 0) {
+      setFace({
+        doc: {
+          kind: 'hed', version: 1, cols: GRID_W, rows: GRID_H,
+          skin: doc.skin, amount: doc.amount, scaleY: doc.headScaleY,
+          sculpt: emptyGrid(), layers: headLayers,
+        },
+        id: `body${Date.now()}`,
+      });
+    } else {
+      setFace(null);
+    }
+  };
+
+  // Drop: .body.json = whole character, .hed.json = a head, else a face photo.
   useFileDrop((path) => {
+    if (path.endsWith('.body.json')) {
+      const text = readFile(path);
+      const doc = text ? parseBody(text) : null;
+      if (!doc) { setStatus(`${path.split('/').pop()} is not a .body document`); return; }
+      loadBody(doc);
+      setStatus(`loaded ${path.split('/').pop()}`);
+      return;
+    }
     if (path.endsWith('.json')) {
       const text = readFile(path);
       const doc = text ? parseHed(text) : null;
       if (!doc) { setStatus(`${path.split('/').pop()} is not a .hed head document`); return; }
+      setSelPart('head');
       applyDoc(doc, `load${Date.now()}`);
       setStatus(`loaded ${path.split('/').pop()}`);
       return;
     }
+    setSelPart('head');
     setPhoto({ path, stamp: Date.now() });
   });
 
@@ -257,16 +349,16 @@ export default function HeadLab() {
     const tx = ((sx - r.x) / r.width) * PAINT_W;
     const ty = ((sy - r.y) / r.height) * PAINT_H;
     const value = mode === 'flatten' ? NEUTRAL : mode === 'raise' ? NEUTRAL + 0.5 * strength : NEUTRAL - 0.5 * strength;
-    depth.paint.circle(tx, ty, brush, value);
+    paints[selPart].paint.circle(tx, ty, brush, value);
   };
 
   // Stroke release → read the paint texture back, average 4×4 blocks down to
   // the mesh grid, recenter to signed −1..1. The one expensive hop, once per
   // stroke instead of per mousemove.
   const syncGrid = () => {
-    const bytes = depth.paint.readback();
+    const bytes = paints[selPart].paint.readback();
     if (!bytes || bytes.length < PAINT_W * PAINT_H) return;
-    const next = new Array(GRID_W * GRID_H).fill(0);
+    const next = emptyGrid();
     const bx = PAINT_W / GRID_W;
     const by = PAINT_H / GRID_H;
     for (let gy = 0; gy < GRID_H; gy++) {
@@ -280,8 +372,7 @@ export default function HeadLab() {
         next[gy * GRID_W + gx] = (sum / (bx * by) / 255 - NEUTRAL) * 2;
       }
     }
-    setGrid(next);
-    setSculptSeq((s) => s + 1);
+    setPartGrid(selPart, next);
   };
 
   const onPaintDown = (e: any) => { paintingRef.current = true; dab(Number(e?.x ?? 0), Number(e?.y ?? 0)); };
@@ -293,35 +384,43 @@ export default function HeadLab() {
   };
 
   const clearStrokes = () => {
-    depth.paint.clear(NEUTRAL);
-    setGrid(new Array(GRID_W * GRID_H).fill(0));
-    setSculptSeq((s) => s + 1);
+    paints[selPart].paint.clear(NEUTRAL);
+    setPartGrid(selPart, emptyGrid());
   };
 
-  // Final displacement = hand sculpt (paint texture) + the face's feature
-  // relief, clamped. Both live in the same grid space, so this is one add.
-  // Reads the SHOWN doc, so a playing animation moves the geometry too.
+  // Final HEAD displacement = hand sculpt + the face's feature relief (the
+  // shown doc, so a playing animation moves the geometry too).
   const faceDepth = useMemo(() => (shownDoc ? hedDepthGrid(shownDoc) : null), [shownDoc]);
-  const displace = useMemo(
-    () => (faceDepth ? grid.map((v, i) => Math.max(-1, Math.min(1, v + faceDepth[i]))) : grid),
-    [grid, faceDepth],
+  const headDisplace = useMemo(
+    () => (faceDepth ? grids.head.map((v, i) => Math.max(-1, Math.min(1, v + faceDepth[i]))) : grids.head),
+    [grids.head, faceDepth],
   );
 
-  // Geometry identity changes only on stroke release / knob change — the
-  // interned mesh regenerates exactly then, never per mousemove.
-  const params = useMemo(
-    () => ({
+  // Per-part geometry. All meshes ride dynamic geometry slots (one per part),
+  // so only the KEY matters for regeneration — params can be built inline.
+  const partDisplace = (id: PartId) => (id === 'head' ? headDisplace : grids[id]);
+  const partParams = (id: PartId) => {
+    const preset = PART_PRESETS[id];
+    return {
       radius: 1, segments: 48, rings: 24,
-      displace, dCols: GRID_W, dRows: GRID_H,
-      amount, scaleY,
-    }),
-    [displace, amount, scaleY],
-  );
+      displace: partDisplace(id), dCols: GRID_W, dRows: GRID_H,
+      amount,
+      profile: preset.profile,
+      scaleX: preset.scaleX,
+      scaleY: id === 'head' ? scaleY : preset.scaleY,
+      scaleZ: preset.scaleZ,
+    };
+  };
+  const partDynKey = (id: PartId) => {
+    const headBits = id === 'head' ? `${face?.id ?? 'nf'}.${anim ?? 'still'}.${phase}.${scaleY.toFixed(2)}` : 'x';
+    return `bodylab-${id}~${seqs[id]}.${headBits}.${amount.toFixed(2)}`;
+  };
 
-  // Content-addressed texture key: the bake is a pure function of these values,
-  // so a key can never serve a stale image (the carve_lab hot-reload lesson),
-  // and stepping a knob back reuses the earlier bake.
-  const texKey = `head.lab.${photo?.stamp ?? 'bare'}.${face?.id ?? 'noface'}.${anim ?? 'still'}.${phase}.${skin}.${photoScale.toFixed(2)}.${photoY}`;
+  // Content-addressed texture keys (pure functions of their inputs — the
+  // carve_lab stale-bake lesson). All non-head parts share the skin bake.
+  const headTexKey = `head.lab.${photo?.stamp ?? 'bare'}.${face?.id ?? 'noface'}.${anim ?? 'still'}.${phase}.${skin}.${photoScale.toFixed(2)}.${photoY}`;
+  const skinTexKey = `body.skin.${skin}`;
+  const partTexKey = (id: PartId) => (id === 'head' ? headTexKey : skinTexKey);
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
     [],
@@ -338,25 +437,26 @@ export default function HeadLab() {
   };
   const orbitUp = () => { orbitRef.current = null; };
 
-  const modeBtn = (m: Mode, label: string, color: string) => (
-    <Pressable
-      onPress={() => setMode(m)}
-      style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: mode === m ? color : '#22324a', backgroundColor: mode === m ? '#11263d' : '#101a2a' }}
-    >
-      <Text fontSize={12} color={mode === m ? color : DIM}>{label}</Text>
-    </Pressable>
-  );
+  const isHead = selPart === 'head';
+  const camTarget: [number, number, number] = view === 'figure' ? [0, 1.05, 0] : [0, 1.4, 0];
 
   return (
     <Row style={{ width: '100%', height: '100%', backgroundColor: BG }}>
-      {/* ── left: the unwrap painter ── */}
+      {/* ── left: part tabs + the unwrap painter ── */}
       <Col style={{ width: UNWRAP_W + 28, padding: 14, gap: 10 }}>
         <Text fontSize={15} color={INK} style={{ fontWeight: 900 }}>HEAD LAB</Text>
         <Text fontSize={11} color={DIM}>
           {status ?? (photo || face
-            ? 'paint depth over the face — blue pushes out, orange carves in'
+            ? 'paint depth — blue pushes out, orange carves in'
             : 'drop a face picture (or generate one), then paint depth over it')}
         </Text>
+        <Row style={{ gap: 6, alignItems: 'center' }}>
+          {PART_IDS.map((id) => (
+            <Chip key={id} label={PART_PRESETS[id].label} active={selPart === id} onPress={() => setSelPart(id)} />
+          ))}
+          <Box style={{ width: 10 }} />
+          <Chip label="figure" active={view === 'figure'} color={GOOD} onPress={() => setView((v) => (v === 'figure' ? 'part' : 'figure'))} />
+        </Row>
         <Pressable
           onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
           onMouseDown={onPaintDown}
@@ -364,64 +464,62 @@ export default function HeadLab() {
           onMouseUp={onPaintUp}
           style={{ width: UNWRAP_W, height: UNWRAP_H, borderWidth: 1, borderColor: '#22324a', position: 'relative' }}
         >
-          <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={shownDoc?.layers ?? null} />
+          <UnwrapContent
+            skin={skin}
+            photo={isHead ? photo : null}
+            photoScale={photoScale}
+            photoY={photoY}
+            layers={isHead ? shownDoc?.layers ?? null : null}
+          />
           <Effect
             shader={DEPTH_OVERLAY_WGSL}
             data={[0]}
-            textures={[depth.id]}
+            textures={[paints[selPart].id]}
             style={{ position: 'absolute', left: 0, top: 0, width: UNWRAP_W, height: UNWRAP_H }}
           />
         </Pressable>
         <Row style={{ gap: 8, alignItems: 'center' }}>
-          {modeBtn('raise', 'raise', ACCENT)}
-          {modeBtn('lower', 'carve in', '#ff9445')}
-          {modeBtn('flatten', 'flatten', '#94a3b8')}
-          <Pressable onPress={clearStrokes} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
-            <Text fontSize={12} color={DIM}>clear</Text>
-          </Pressable>
+          <Chip label="raise" active={mode === 'raise'} onPress={() => setMode('raise')} />
+          <Chip label="carve in" active={mode === 'lower'} color="#ff9445" onPress={() => setMode('lower')} />
+          <Chip label="flatten" active={mode === 'flatten'} color="#94a3b8" onPress={() => setMode('flatten')} />
+          <Chip label="clear" active={false} onPress={clearStrokes} />
         </Row>
-        <Row style={{ gap: 8, alignItems: 'center' }}>
-          <Pressable onPress={generate} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#34d399', backgroundColor: '#0d2a20' }}>
-            <Text fontSize={12} color="#34d399">generate face</Text>
-          </Pressable>
-          <Pressable onPress={saveHead} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
-            <Text fontSize={12} color={INK}>save head</Text>
-          </Pressable>
-          {face ? (
-            <Pressable onPress={() => { setFace(null); setAnim(null); setStatus(null); }} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
-              <Text fontSize={12} color={DIM}>remove face</Text>
-            </Pressable>
-          ) : null}
-        </Row>
-        {face ? (
+        {isHead ? (
+          <Row style={{ gap: 8, alignItems: 'center' }}>
+            <Chip label="generate face" active={false} color={GOOD} onPress={generate} />
+            <Chip label="save head" active={false} onPress={saveHead} />
+            {face ? <Chip label="remove face" active={false} onPress={() => { setFace(null); setAnim(null); setStatus(null); }} /> : null}
+          </Row>
+        ) : null}
+        {isHead && face ? (
           <Row style={{ gap: 8, alignItems: 'center' }}>
             <Text fontSize={11} color={DIM} style={{ width: 84 }}>animate</Text>
             {(['talk', 'chew', 'cry'] as HedAnimation[]).map((a) => (
-              <Pressable
-                key={a}
-                onPress={() => setAnim((cur) => (cur === a ? null : a))}
-                style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: anim === a ? '#34d399' : '#22324a', backgroundColor: anim === a ? '#0d2a20' : '#101a2a' }}
-              >
-                <Text fontSize={12} color={anim === a ? '#34d399' : DIM}>{anim === a ? `${a} ■` : a}</Text>
-              </Pressable>
+              <Chip key={a} label={anim === a ? `${a} ■` : a} active={anim === a} color={GOOD} onPress={() => setAnim((cur) => (cur === a ? null : a))} />
             ))}
           </Row>
         ) : null}
-        <Row style={{ gap: 6, alignItems: 'center' }}>
-          <Text fontSize={11} color={DIM} style={{ width: 84 }}>skin</Text>
-          {SKINS.map((s) => (
-            <Pressable key={s} onPress={() => setSkin(s)} style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: s, borderWidth: 2, borderColor: skin === s ? ACCENT : '#22324a' }} />
-          ))}
+        <Row style={{ gap: 8, alignItems: 'center' }}>
+          <Chip label="save body" active={false} color={GOOD} onPress={saveBody} />
+          <Row style={{ gap: 6, alignItems: 'center' }}>
+            {SKINS.map((s) => (
+              <Pressable key={s} onPress={() => setSkin(s)} style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: s, borderWidth: 2, borderColor: skin === s ? ACCENT : '#22324a' }} />
+            ))}
+          </Row>
         </Row>
         <Knob label="brush size" value={String(brush)} onMinus={() => setBrush((v) => Math.max(4, v - 2))} onPlus={() => setBrush((v) => Math.min(40, v + 2))} />
         <Knob label="strength" value={strength.toFixed(1)} onMinus={() => setStrength((v) => Math.max(0.1, v - 0.1))} onPlus={() => setStrength((v) => Math.min(1, v + 0.1))} />
         <Knob label="depth amount" value={amount.toFixed(2)} onMinus={() => setAmount((v) => Math.max(0.05, v - 0.05))} onPlus={() => setAmount((v) => Math.min(0.8, v + 0.05))} />
-        <Knob label="skull stretch" value={scaleY.toFixed(2)} onMinus={() => setScaleY((v) => Math.max(0.9, v - 0.05))} onPlus={() => setScaleY((v) => Math.min(1.6, v + 0.05))} />
-        <Knob label="photo size" value={photoScale.toFixed(2)} onMinus={() => setPhotoScale((v) => Math.max(0.15, v - 0.05))} onPlus={() => setPhotoScale((v) => Math.min(0.95, v + 0.05))} />
-        <Knob label="photo up/down" value={String(photoY)} onMinus={() => setPhotoY((v) => v - 8)} onPlus={() => setPhotoY((v) => v + 8)} />
+        {isHead ? (
+          <>
+            <Knob label="skull stretch" value={scaleY.toFixed(2)} onMinus={() => setScaleY((v) => Math.max(0.9, v - 0.05))} onPlus={() => setScaleY((v) => Math.min(1.6, v + 0.05))} />
+            <Knob label="photo size" value={photoScale.toFixed(2)} onMinus={() => setPhotoScale((v) => Math.max(0.15, v - 0.05))} onPlus={() => setPhotoScale((v) => Math.min(0.95, v + 0.05))} />
+            <Knob label="photo up/down" value={String(photoY)} onMinus={() => setPhotoY((v) => v - 8)} onPlus={() => setPhotoY((v) => v + 8)} />
+          </>
+        ) : null}
       </Col>
 
-      {/* ── right: the live head ── */}
+      {/* ── right: the selected part, or the assembled figure ── */}
       <Pressable
         onMouseDown={orbitDown}
         onMouseMove={orbitMove}
@@ -429,39 +527,53 @@ export default function HeadLab() {
         style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden' }}
       >
         <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={BG} showGrid={false} showAxes={false}>
-          <OrbitCamera target={[0, 1.4, 0]} yaw={yaw} pitch={pitch} dist={dist} fov={45} />
+          <OrbitCamera target={camTarget} yaw={yaw} pitch={pitch} dist={dist} fov={45} />
           <Scene3D.AmbientLight color="#aab8d6" intensity={0.6} />
           <Scene3D.DirectionalLight direction={[0.4, 0.9, 0.35]} color="#fff0d6" intensity={0.85} />
           <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 8, height: 0.03, depth: 8 }} material="#0e1726" position={[0, -0.015, 0]} />
-          {/* dynamicKey routes the sculpt through ONE reused host geometry
-              slot, overwritten per version — WITHOUT it every stroke release
-              interns a brand-new mesh into the host's fixed static pool, and
-              when that pool fills the head silently vanishes mid-session.
-              Contract: equal key ⇒ equal verts, so the version encodes
-              everything the verts depend on. */}
-          <Scene3D.Mesh
-            geometry={Geometry.Globe}
-            params={params}
-            dynamicKey={`headlab~${sculptSeq}.${face?.id ?? 'noface'}.${anim ?? 'still'}.${phase}.${amount.toFixed(2)}.${scaleY.toFixed(2)}`}
-            material="#ffffff"
-            textureKey={texKey}
-            position={[0, 1.4, 0]}
-          />
+          {view === 'part' ? (
+            <Scene3D.Mesh
+              geometry={Geometry.Globe}
+              params={partParams(selPart)}
+              dynamicKey={partDynKey(selPart)}
+              material="#ffffff"
+              textureKey={partTexKey(selPart)}
+              position={[0, 1.4, 0]}
+            />
+          ) : (
+            ASSEMBLY.map((inst, i) => (
+              <Scene3D.Mesh
+                key={i}
+                geometry={Geometry.Globe}
+                params={partParams(inst.part)}
+                dynamicKey={partDynKey(inst.part)}
+                material="#ffffff"
+                textureKey={partTexKey(inst.part)}
+                position={inst.position}
+                scale={inst.scale}
+              />
+            ))
+          )}
         </Scene3D>
         <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
           <Knob label="zoom" value={dist.toFixed(1)} onMinus={() => setDist((v) => Math.max(1.6, v - 0.4))} onPlus={() => setDist((v) => Math.min(12, v + 0.4))} />
         </Box>
       </Pressable>
 
-      {/* offscreen: the GPU paint texture + the unwrap baked to the head's
-          texture. The Paintable MUST sit outside the flex flow (a bare host
-          node here would take proportional-fallback space in the Row and blow
-          up the whole layout). */}
+      {/* offscreen: per-part GPU paint textures + the two unwrap bakes (the
+          head's composition + the shared plain-skin bake every other part
+          samples). Paintables MUST sit outside the flex flow — a bare host
+          node here takes proportional-fallback space and blows up the layout. */}
       <Box style={{ position: 'absolute', left: -99999, top: 0, width: 1, height: 1 }}>
-        <Paintable id={depth.id} w={PAINT_W} h={PAINT_H} />
+        {PART_IDS.map((id) => (
+          <Paintable key={id} id={paints[id].id} w={PAINT_W} h={PAINT_H} />
+        ))}
       </Box>
-      <StaticSurface staticKey={texKey} style={surfaceStyle}>
+      <StaticSurface staticKey={headTexKey} style={surfaceStyle}>
         <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={shownDoc?.layers ?? null} />
+      </StaticSurface>
+      <StaticSurface staticKey={skinTexKey} style={surfaceStyle}>
+        <UnwrapContent skin={skin} photo={null} photoScale={photoScale} photoY={photoY} layers={null} />
       </StaticSurface>
     </Row>
   );
