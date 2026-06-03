@@ -269,17 +269,38 @@ export default function Assistant3DDemo() {
   // your prompts, tracked locally — the worker stream's user_message events are
   // tool_result echoes / the preamble, never clean transcript material.
   const [myPrompts, setMyPrompts] = useState<{ text: string; ts: number }[]>([]);
+  // inspector comment, scoped to the selected mesh
+  const [comment, setComment] = useState('');
+  const commentRef = useRef(''); commentRef.current = comment;
+
+  // One send path for both the free-form chat box and the inspector comment.
+  // `modelText` is what claude reads; `displayText` is the clean "you" line.
+  const sendToAssistant = (modelText: string, displayText: string): boolean => {
+    const msg = sentPreambleRef.current
+      ? `${modelText}\n\n(Overwrite the whole scene file at ${scenePath}.)`
+      : `${buildPreamble(scenePath)}\n\nRequest: ${modelText}`;
+    if (!assistant.ask(msg)) return false;
+    sentPreambleRef.current = true;
+    setMyPrompts((p) => [...p, { text: displayText, ts: Date.now() }]);
+    return true;
+  };
 
   const submit = () => {
     const text = inputRef.current.trim();
     if (!text) return;
-    const msg = sentPreambleRef.current
-      ? `${text}\n\n(Overwrite the whole scene file at ${scenePath}.)`
-      : `${buildPreamble(scenePath)}\n\nRequest: ${text}`;
-    if (!assistant.ask(msg)) return;
-    sentPreambleRef.current = true;
-    setMyPrompts((p) => [...p, { text, ts: Date.now() }]);
-    setInput('');
+    if (sendToAssistant(text, text)) setInput('');
+  };
+
+  // Comment on the selected piece → a mesh-scoped instruction. We name the mesh
+  // by id (that's the stable handle claude wrote into scene.json) so it edits the
+  // right piece instead of guessing, and echo a tidy "↳ id: comment" to the log.
+  const sendComment = () => {
+    const c = commentRef.current.trim();
+    const m = selMesh;
+    if (!c || !m) return;
+    const target = `the mesh whose id is "${m.id}" (a ${m.geometry} at position [${m.position.map(round).join(', ')}], material ${m.material})`;
+    const modelText = `In the scene file, ${c.replace(/\.$/, '')} — applied to ${target}. Keep the rest of the scene unchanged unless the change requires it.`;
+    if (sendToAssistant(modelText, `↳ ${m.id}: ${c}`)) setComment('');
   };
 
   // merge your local prompts with assistant-side events, ordered by timestamp
@@ -413,9 +434,38 @@ export default function Assistant3DDemo() {
           </Box>
         </Pressable>
 
-        {/* ── RIGHT: inspector ─────────────────────────────────────────── */}
+        {/* ── RIGHT: object tree + inspector + comment ─────────────────── */}
         <Col style={{ width: 280, backgroundColor: PANEL, borderColor: FRAME, borderLeftWidth: 1, minHeight: 0 }}>
+          {/* object tree — every mesh, click to select. The escape hatch for
+              pieces ray-pick can't reach (a thin Torus collar nested inside a
+              fat Sphere body: its bounding sphere is occluded, so the click
+              always lands on the body). The list selects by id regardless. */}
           <Row style={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, borderColor: FRAME, borderBottomWidth: 1, alignItems: 'baseline', gap: 8 }}>
+            <Text fontSize={12} color={INK} style={{ fontWeight: 'bold' }}>objects</Text>
+            <Box style={{ flexGrow: 1 }} />
+            <Text fontSize={10} color={DIM} style={{ fontFamily: 'mono' }}>{scene.meshes.length}</Text>
+          </Row>
+          <ScrollView style={{ height: 168, minHeight: 0, paddingTop: 4, paddingBottom: 4, paddingLeft: 6, paddingRight: 6 }}>
+            {scene.meshes.length === 0
+              ? <Text fontSize={11} color={DIM} style={{ paddingLeft: 6, paddingTop: 6 }}>no meshes yet</Text>
+              : scene.meshes.map((m, i) => {
+                const on = i === selected;
+                return (
+                  <Pressable
+                    key={m.id + '#' + i}
+                    onPress={() => setSelected(i)}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 4, paddingBottom: 4, paddingLeft: 6, paddingRight: 6, borderRadius: 5, backgroundColor: on ? '#23314a' : 'transparent' }}
+                  >
+                    <Box style={{ width: 11, height: 11, borderRadius: 3, backgroundColor: m.material, borderWidth: 1, borderColor: FRAME }} />
+                    <Text fontSize={11} color={on ? ACCENT : INK} style={{ fontWeight: on ? 'bold' : 'normal' }}>{m.id}</Text>
+                    <Box style={{ flexGrow: 1 }} />
+                    <Text fontSize={9} color={DIM} style={{ fontFamily: 'mono' }}>{m.geometry}</Text>
+                  </Pressable>
+                );
+              })}
+          </ScrollView>
+
+          <Row style={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, borderColor: FRAME, borderTopWidth: 1, borderBottomWidth: 1, alignItems: 'baseline', gap: 8 }}>
             <Text fontSize={12} color={INK} style={{ fontWeight: 'bold' }}>inspector</Text>
             <Box style={{ flexGrow: 1 }} />
             <Text fontSize={10} color={DIM} style={{ fontFamily: 'mono' }}>{selMesh ? `#${selected}` : '—'}</Text>
@@ -450,6 +500,25 @@ export default function Assistant3DDemo() {
               </Col>
             )}
           </ScrollView>
+
+          {/* comment on the selected piece → mesh-scoped instruction to claude */}
+          {selMesh ? (
+            <Col style={{ padding: 10, gap: 6, borderColor: FRAME, borderTopWidth: 1, backgroundColor: '#0d1422' }}>
+              <Text fontSize={9} color={ACCENT} style={{ fontFamily: 'mono', letterSpacing: 0.5 }}>{`COMMENT ON "${selMesh.id}"`}</Text>
+              <Box style={{ backgroundColor: '#0e1116', borderColor: FRAME, borderWidth: 1, borderRadius: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6 }}>
+                <TextInput
+                  value={comment}
+                  onChangeText={setComment}
+                  onSubmitEditing={sendComment}
+                  placeholder="make it bigger, recolor, move…"
+                  style={{ color: INK, fontSize: 12 }}
+                />
+              </Box>
+              <Pressable onPress={sendComment} style={{ paddingTop: 6, paddingBottom: 6, borderRadius: 6, alignItems: 'center', backgroundColor: '#2a1d10', borderWidth: 1, borderColor: ACCENT }}>
+                <Text fontSize={11} color={ACCENT} style={{ fontWeight: 'bold' }}>send to assistant ↳</Text>
+              </Pressable>
+            </Col>
+          ) : null}
 
           <Col style={{ padding: 10, gap: 4, borderColor: FRAME, borderTopWidth: 1 }}>
             <Text fontSize={9} color={DIM} style={{ fontFamily: 'mono' }}>watching</Text>
