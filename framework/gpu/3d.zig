@@ -145,7 +145,15 @@ var g_retained_top: u64 = 0; // bump cursor (bytes) into g_retained_vbuf; persis
 // the version changes. Bounded (DYN_SLOTS), never grows. The region lives in the
 // same buffer so the draw binding is unchanged.
 const DYN_SLOTS = 48; // distinct live meshes (e.g. focused chunks)
-const MAX_DYN_VERTS = 32768; // per-slot vertex ceiling (a 61x61 heightfield ≈ 23k)
+// Per-slot vertex ceiling. The heightfield mesh is NON-indexed (6 verts/quad), so a
+// tile-resolution chunk — hmsc-int paints at one mesh vertex per tile, 121x121 over
+// a 120-tile chunk — is 120*120*6 = 86,400 top verts + perimeter skirt ≈ 89k. The
+// old 32,768 (sized for a 61x61 ≈ 23k mesh) silently dropped that whole mesh, so a
+// tile-res painted chunk vanished. 98,304 (= 3 * 32,768) fits it with headroom.
+// Cost is reserved GPU vbuf only (48 * 98,304 * 32 B ≈ 150 MB), not per-frame work —
+// uploads write only the verts a slot actually uses. (Indexed meshes would cut this
+// ~6x and are the real fix, but that's a vertex+index pipeline change for later.)
+const MAX_DYN_VERTS = 98304;
 const DYN_REGION_VERTS = DYN_SLOTS * MAX_DYN_VERTS;
 const DynSlot = struct { id_hash: u64 = 0, version_hash: u64 = 0, count: u32 = 0, present: bool = false };
 var g_dyn_slots: [DYN_SLOTS]DynSlot = [_]DynSlot{.{}} ** DYN_SLOTS;
