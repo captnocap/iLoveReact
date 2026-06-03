@@ -38,6 +38,7 @@ import type { Placement } from './placements';
 import type { EditorWorld } from './mapStore';
 import type { SelCell } from './tileOverrides';
 import type { EditNote } from './editLog';
+import { plog, useChurn, countersSnapshot, counterDelta } from './perfLog';
 
 type HeightTool = 'brush' | 'erase';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
@@ -422,6 +423,13 @@ export function PaintCanvas(props: {
   // The canvas viewport rect (screen space), for screen→graph.
   const rectRef = useRef<CanvasRect>(null);
   const drawing = useRef(false);
+  // Per-stroke churn counters, logged at stroke end so we see what a single drag
+  // costs without a line per sample. `cells` = UNIQUE cells touched (a slow drag
+  // re-stamps the same cell many times, so this is the honest "how many tiles did I
+  // paint"); `stamps` = total paint-calls (cells × overlap). `snap` = render-counter
+  // snapshot at stroke begin, diffed at end to count how many UPDATES fired — the
+  // guard against the old "one state update per painted tile" regression.
+  const strokeStats = useRef<{ samples: number; stamps: number; cells: Set<string>; touches: number; coalesced: number; t0: number; snap: Record<string, number> }>({ samples: 0, stamps: 0, cells: new Set(), touches: 0, coalesced: 0, t0: 0, snap: {} });
 
   // ── WASD pans the view ───────────────────────────────────────────────────────
   // The Canvas's built-in `drift` (px/s, animated engine-side while no drag) does
@@ -523,26 +531,39 @@ export function PaintCanvas(props: {
   const heightVer = useRef<Map<ChunkKey, number>>(new Map()); // bumps per re-downsample → host slot overwrite
   const regionSyncPending = useRef(false);
   const buildFloors = useCallback((): ChunkFloor[] => {
+    const t0 = (globalThis as any).performance?.now?.() ?? 0;
+    let focused = 0, tileEnc = 0, heightEnc = 0;
     const out: ChunkFloor[] = [];
     for (const c of chunks.values()) {
       const k = chunkKey(c.cx, c.cz);
       if (!focusRef.current.has(k)) continue;
+      focused++;
       if (tileDirty.current.has(k) || !tileCache.current.has(k)) {
         tileCache.current.set(k, encodeTileMap(c.tiles));
         tileDirty.current.delete(k);
+        tileEnc++;
       }
       if (heightDirty.current.has(k) || !heightCache.current.has(k)) {
         heightCache.current.set(k, downsampleHeights(c.height.z, c.height.cols, c.height.rows));
         heightVer.current.set(k, (heightVer.current.get(k) ?? 0) + 1);
         heightDirty.current.delete(k);
+        heightEnc++;
       }
       out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: HF_RES, hrows: HF_RES, hver: heightVer.current.get(k) ?? 0 });
     }
+    const dt = ((globalThis as any).performance?.now?.() ?? 0) - t0;
+    plog('buildFloors', `focused=${focused} tileEncoded=${tileEnc} heightEncoded=${heightEnc} took ${dt.toFixed(2)}ms`);
     return out;
   }, [chunks]);
-  const syncRegionsNow = useCallback(() => { onFloorsRef.current?.(buildFloors()); }, [buildFloors]);
+  const syncRegionsNow = useCallback(() => {
+    plog('regionSync', `FIRE → onFloors (coalesced ${strokeStats.current.coalesced} schedule calls)`);
+    strokeStats.current.coalesced = 0;
+    onFloorsRef.current?.(buildFloors());
+  }, [buildFloors]);
   const scheduleRegionSync = useCallback(() => {
-    if (regionSyncPending.current) return;
+    // Already pending: just tally it (one paint sample = one schedule call). Logging
+    // each would bury the signal — the count rides the next FIRE line instead.
+    if (regionSyncPending.current) { strokeStats.current.coalesced++; return; }
     regionSyncPending.current = true;
     setTimeout(() => { regionSyncPending.current = false; syncRegionsNow(); }, REGION_SYNC_MS);
   }, [syncRegionsNow]);
@@ -557,7 +578,7 @@ export function PaintCanvas(props: {
   const touchMapRef = useRef<Map<ChunkKey, () => void>>(new Map());
   const registerTouch = useCallback((k: ChunkKey, t: () => void) => { touchMapRef.current.set(k, t); }, []);
   const unregisterTouch = useCallback((k: ChunkKey) => { touchMapRef.current.delete(k); }, []);
-  const touchChunk = (k: ChunkKey) => { touchMapRef.current.get(k)?.(); };
+  const touchChunk = (k: ChunkKey) => { strokeStats.current.touches++; touchMapRef.current.get(k)?.(); };
 
   const addChunk = useCallback((cx: number, cz: number) => {
     const k = chunkKey(cx, cz);
@@ -628,6 +649,13 @@ export function PaintCanvas(props: {
   // ── Brush params (ref so the screen-space handler never goes stale) ──────────
   const brushRef = useRef({ centerZ, size: brushSize, tool: hTool });
   brushRef.current = { centerZ, size: brushSize, tool: hTool };
+  // Height is ADDITIVE (heightData.stampCone stacks), but onMouseMove fires at input
+  // rate (~100/s) — re-stamping a stationary brush every event saturates cells to
+  // HEIGHT_LIMIT in a few frames, flattening everything to one max plateau and making
+  // the z intensity look inert. The design's "overlap builds relief" comes from the
+  // brush MOVING, so deposit the cone at most once per center-cell per stroke; genuine
+  // drag motion still stacks across cells, separate strokes still stack on top.
+  const heightStamped = useRef<Set<string>>(new Set());
   const paintRef = useRef({ tile, tool, size: brushSize });
   paintRef.current = { tile, tool, size: brushSize };
 
@@ -638,6 +666,9 @@ export function PaintCanvas(props: {
     if (!c) return;
     const cix = Math.round((c.lx / PATCH) * (c.chunk.height.cols - 1));
     const ciy = Math.round((c.lz / PATCH) * (c.chunk.height.rows - 1));
+    const stampKey = `${c.k}:${cix}:${ciy}`;
+    if (heightStamped.current.has(stampKey)) return; // already deposited here this stroke
+    heightStamped.current.add(stampKey);
     const b = brushRef.current;
     // Cone radius = brush size (metres); falloff derived so it reaches 0 there.
     const falloff = Math.abs(b.centerZ) / Math.max(0.5, b.size);
@@ -653,7 +684,11 @@ export function PaintCanvas(props: {
     if (!c) return;
     const p = paintRef.current;
     const idx = p.tool === 'eraser' ? -1 : tileKindIndex(p.tile);
-    stampDisc(p.size, c.cellX, c.cellZ, (x, z) => paintTile(c.chunk.tiles, x, z, idx));
+    stampDisc(p.size, c.cellX, c.cellZ, (x, z) => {
+      const s = strokeStats.current; s.stamps++;
+      if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
+      paintTile(c.chunk.tiles, x, z, idx);
+    });
     touchChunk(c.k);
     tileDirty.current.add(c.k); scheduleRegionSync(); // mirror the floor texture to the preview
   };
@@ -666,7 +701,11 @@ export function PaintCanvas(props: {
     if (!c) return;
     const p = paintRef.current;
     const idx = p.tool === 'eraser' ? -1 : activeZoneRef.current;
-    stampDisc(p.size, c.cellX, c.cellZ, (x, z) => paintZoneCell(c.chunk.zones, x, z, idx));
+    stampDisc(p.size, c.cellX, c.cellZ, (x, z) => {
+      const s = strokeStats.current; s.stamps++;
+      if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
+      paintZoneCell(c.chunk.zones, x, z, idx);
+    });
     touchChunk(c.k);
   };
 
@@ -726,9 +765,38 @@ export function PaintCanvas(props: {
     return { cat: 'tile', text: tool === 'eraser' ? 'erased tiles' : `painted ${tile}` };
   };
   const onBrush = (sx: number, sy: number) => {
+    strokeStats.current.samples++;
     if (layer === 'height') stampAtScreen(sx, sy);
     else if (layer === 'zone') paintZoneAtScreen(sx, sy);
     else paintTileAtScreen(sx, sy);
+  };
+  const strokeNow = () => (globalThis as any).performance?.now?.() ?? 0;
+  const beginStroke = () => {
+    strokeStats.current = { samples: 0, stamps: 0, cells: new Set(), touches: 0, coalesced: 0, t0: strokeNow(), snap: countersSnapshot() };
+    heightStamped.current.clear(); // fresh per-stroke dedup of height deposits
+    plog('stroke', `BEGIN ${layer}/${tool}`);
+  };
+  const endStroke = () => {
+    const s = strokeStats.current;
+    const dt = strokeNow() - s.t0;
+    const tiles = s.cells.size; // UNIQUE cells painted (the honest count)
+    // How many UPDATES (component re-renders) fired across the stroke, by component.
+    const cart = counterDelta(s.snap, 'render:cart');
+    const paint = counterDelta(s.snap, 'render:PaintCanvas');
+    const preview = counterDelta(s.snap, 'render:IsoPreview');
+    const chunk = counterDelta(s.snap, 'render:chunkSurface');
+    const updates = cart + paint + preview + chunk;
+    plog('stroke', `END ${layer}/${tool} tiles=${tiles} (stamps=${s.stamps} samples=${s.samples}) gpuTouches=${s.touches} | UPDATES=${updates} (cart ${cart}, PaintCanvas ${paint}, IsoPreview ${preview}, chunkSurface ${chunk}) over ${dt.toFixed(0)}ms`);
+    // The regression guard (this is the old bug): paint mutates refs, so PaintCanvas
+    // must NOT update mid-stroke, and cart updates should track region-syncs
+    // (~dt/REGION_SYNC_MS), NEVER the cell count. If updates scale with cells, a
+    // per-cell setState has crept back in.
+    const expectedSyncs = Math.ceil(dt / REGION_SYNC_MS) + 2;
+    if (paint > 0 || cart > expectedSyncs * 2 || (tiles > 4 && updates >= tiles * 0.5)) {
+      plog('stroke', `⚠ UPDATE STORM — ${updates} updates for ${tiles} cells (expected ~${expectedSyncs} syncs). Per-tile state update regression!`);
+    } else {
+      plog('stroke', `✓ clean — ${updates} updates decoupled from ${tiles} cells (state updates track region-syncs, not paint)`);
+    }
   };
 
   // The pointer tool SELECTS tiles (paint/zone layers): click = focus one cell,
@@ -758,6 +826,14 @@ export function PaintCanvas(props: {
     if (!c) { hoverSink.current?.(null); return; }
     hoverSink.current?.({ x: sx - r!.x + 12, y: sy - r!.y + 12, addr: `${columnLabel(c.gCellX).toLowerCase()}${c.gCellZ}` });
   };
+
+  // Churn probe: PaintCanvas is memoized + paints through refs, so it should NOT
+  // re-render while you paint. A line here mid-stroke means a prop/state churned
+  // it (e.g. focus/zones/drift/select) — naming which is the lead.
+  useChurn('PaintCanvas', {
+    focus, chunkRev, zones, drift, tool, tile, layer, place,
+    selCells: props.select?.cells, brushSize, centerZ, hTool, wasdFocused: props.wasdFocused,
+  });
 
   return (
     <Box
@@ -845,10 +921,10 @@ export function PaintCanvas(props: {
           slot attaches a chunk instead of painting. */}
       {showBrush ? (
         <Pressable
-          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; notifyEditBegin(); onBrush(sx, sy); }}
+          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; beginStroke(); notifyEditBegin(); onBrush(sx, sy); }}
           onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) onBrush(sx, sy); updateHover(sx, sy); }}
-          onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) notifyEdit(strokeNote()); }}
-          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); if (was) notifyEdit(strokeNote()); }}
+          onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) { endStroke(); notifyEdit(strokeNote()); } }}
+          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); if (was) { endStroke(); notifyEdit(strokeNote()); } }}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
         />
       ) : null}
