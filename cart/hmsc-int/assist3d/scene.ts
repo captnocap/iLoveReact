@@ -31,6 +31,10 @@ export interface SceneSpec {
 
 export const EMPTY_SCENE: SceneSpec = { background: '#0a111d', meshes: [] };
 
+// In-process bus event fired when the cart writes scene.json itself — lets every
+// useAssistScene reload instantly instead of waiting on the per-frame file watcher.
+export const SCENE_WRITTEN_EVENT = 'assist3d:scene-written';
+
 // The set of geometry names the assistant is allowed to emit (and the explorer
 // can render). Anything else is dropped on parse.
 export const ALLOWED_GEOMETRY = ['Box', 'Sphere', 'Cylinder', 'Cone', 'Torus', 'Plane'] as const;

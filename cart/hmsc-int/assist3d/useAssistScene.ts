@@ -5,9 +5,9 @@
 // (disk = truth), so the explorer reflects whatever the route's assistant wrote
 // without any cross-tree state plumbing.
 
-import { useEffect, useMemo, useState } from 'react';
-import { useFileWatch, fs } from '@reactjit/hooks';
-import { EMPTY_SCENE, parseScene, sceneFilePath, type SceneSpec } from './scene';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFileWatch, fs, busOn } from '@reactjit/hooks';
+import { EMPTY_SCENE, parseScene, sceneFilePath, SCENE_WRITTEN_EVENT, type SceneSpec } from './scene';
 
 export interface AssistSceneState {
   scene: SceneSpec;
@@ -33,8 +33,19 @@ export function useAssistScene(): AssistSceneState {
     setReloads((n) => n + 1);
   };
 
+  // Always call the freshest reload from the (identity-changing) closure.
+  const reloadRef = useRef(reload);
+  reloadRef.current = reload;
+
   useEffect(() => { reload(); /* eslint-disable-line */ }, [scenePath]);
+
+  // External hand-edits to scene.json arrive via the poll-based file watcher.
   useFileWatch(scenePath, (e) => { if (e.type !== 'deleted') reload(); });
+
+  // The cart's OWN writes (useSceneAssistant) come through the in-process bus —
+  // the file watcher only ticks per engine frame and misses self-writes once the
+  // cart goes idle, which is why the scene used to update only on navigate-back.
+  useEffect(() => busOn(SCENE_WRITTEN_EVENT, () => reloadRef.current()), []);
 
   return { scene, loadErr, reloads, scenePath, reload };
 }

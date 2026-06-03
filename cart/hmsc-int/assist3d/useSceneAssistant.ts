@@ -13,8 +13,8 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAssistant, type AssistantPhase, type WorkerEvent } from '@reactjit/hooks/useAssistant';
-import { fs } from '@reactjit/hooks';
-import { parseScene, processCwd, type SceneSpec } from './scene';
+import { fs, busEmit } from '@reactjit/hooks';
+import { parseScene, processCwd, SCENE_WRITTEN_EVENT, type SceneSpec } from './scene';
 import {
   buildAssistantOpts, configReady, firstTurnPreamble, turnReminder, parseToolCall,
   writesOwnFile, type BackendConfig,
@@ -101,7 +101,7 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
     const json = JSON.stringify(s, null, 2);
     if (json === lastWrittenRef.current) return true; // no change — skip the write
     const ok = fs.writeFile(scenePath, json + '\n');
-    if (ok) lastWrittenRef.current = json;
+    if (ok) { lastWrittenRef.current = json; busEmit(SCENE_WRITTEN_EVENT, scenePath); }
     setNote(ok ? `wrote ${s.meshes.length} meshes` : 'write failed');
     return ok;
   };
