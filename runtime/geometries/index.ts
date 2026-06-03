@@ -13,6 +13,7 @@ import type { GeometryData } from './_util';
 import * as BoxMod from './Box';
 import * as SphereMod from './Sphere';
 import * as HeadMod from './Head';
+import * as CarveMod from './Carve';
 import * as PlaneMod from './Plane';
 import * as CylinderMod from './Cylinder';
 import * as ConeMod from './Cone';
@@ -51,6 +52,9 @@ export const Sphere = def('Sphere', SphereMod.generate, SphereMod.SPHERE_DEFAULT
 // Head — Sphere variant with face-decal UVs (front -Z hemisphere planar, back
 // clamped to the decal border). Pair with a face texture via `textureKey`.
 export const Head = def('Head', HeadMod.generate, HeadMod.HEAD_DEFAULTS);
+// Carve — a piece carved from a flat occupancy mask (image cutout → inflated
+// 3D, the Teddy technique). Front/back UVs map the source image onto the piece.
+export const Carve = def('Carve', CarveMod.generate, CarveMod.CARVE_DEFAULTS);
 export const Plane = def('Plane', PlaneMod.generate, PlaneMod.PLANE_DEFAULTS);
 export const Cylinder = def('Cylinder', CylinderMod.generate, CylinderMod.CYLINDER_DEFAULTS);
 export const Cone = def('Cone', ConeMod.generate, ConeMod.CONE_DEFAULTS);
@@ -67,6 +71,7 @@ export const Humanoid = def('Humanoid', HumanoidMod.generate, HumanoidMod.HUMANO
 export const BOX_DEFAULTS = BoxMod.BOX_DEFAULTS;
 export const SPHERE_DEFAULTS = SphereMod.SPHERE_DEFAULTS;
 export const HEAD_DEFAULTS = HeadMod.HEAD_DEFAULTS;
+export const CARVE_DEFAULTS = CarveMod.CARVE_DEFAULTS;
 export const PLANE_DEFAULTS = PlaneMod.PLANE_DEFAULTS;
 export const CYLINDER_DEFAULTS = CylinderMod.CYLINDER_DEFAULTS;
 export const CONE_DEFAULTS = ConeMod.CONE_DEFAULTS;
@@ -82,6 +87,7 @@ export const WAVE_NONE = HeightfieldMod.WAVE_NONE;
 export type { BoxParams, BoxFace } from './Box';
 export type { SphereParams } from './Sphere';
 export type { HeadParams } from './Head';
+export type { CarveParams } from './Carve';
 export type { PlaneParams } from './Plane';
 export type { CylinderParams } from './Cylinder';
 export type { ConeParams } from './Cone';
@@ -95,5 +101,5 @@ export type { HumanoidParams, UVRect } from './Humanoid';
  * id through this map.
  */
 export const GEOMETRIES: Record<string, GeometryDef> = {
-  Box, Sphere, Head, Plane, Cylinder, Cone, Torus, Heightfield, Humanoid,
+  Box, Sphere, Head, Carve, Plane, Cylinder, Cone, Torus, Heightfield, Humanoid,
 };

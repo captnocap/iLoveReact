@@ -17,6 +17,7 @@ import { run, execAsync } from '@reactjit/runtime/hooks/process';
 import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
 import { callHost } from '@reactjit/runtime/ffi';
 import { PixelIcon, MaskOverlay, PaintOverlay, type PixelMatrix } from './pixel_icons/PixelIcon';
+import { parseTxt } from './pixel_icons/matrix';
 
 // Bridge to framework/v8_bindings_telemetry.zig:canvasScreenToGraphCb —
 // converts a screen-space pixel (mouse coord) into the active <Canvas>'s
@@ -49,32 +50,8 @@ function basenameStem(path: string): string {
   return (dot > 0 ? name.slice(0, dot) : name).replace(/[^A-Za-z0-9_-]+/g, '_');
 }
 
-// Parse ImageMagick's `txt:` enumeration format into a palette-indexed matrix.
-// Each line:  `X,Y: (R,G,B,A)  #RRGGBBAA  srgba(...)`
-function parseTxt(txt: string, size: number): PixelMatrix {
-  const pixels: Array<number | null> = new Array(size * size).fill(null);
-  const palette: string[] = [];
-  const colorToIdx = new Map<string, number>();
-  const re = /^(\d+),(\d+):\s*\((\d+),(\d+),(\d+)(?:,(\d+))?\)\s+#([0-9A-Fa-f]{6,8})/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(txt)) !== null) {
-    const x = +m[1], y = +m[2];
-    if (x >= size || y >= size) continue;
-    const hex = m[7].toUpperCase();
-    const alpha = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) : 255;
-    const i = y * size + x;
-    if (alpha < 16) { pixels[i] = null; continue; }
-    const rgb = '#' + hex.slice(0, 6);
-    let pi = colorToIdx.get(rgb);
-    if (pi === undefined) {
-      pi = palette.length;
-      palette.push(rgb);
-      colorToIdx.set(rgb, pi);
-    }
-    pixels[i] = pi;
-  }
-  return { size, palette, pixels };
-}
+// parseTxt (ImageMagick `txt:` → PixelMatrix) lives in pixel_icons/matrix.ts,
+// shared with carve_lab.
 
 async function imageToMatrix(srcPath: string, size: number, colors: number): Promise<PixelMatrix> {
   mkdir(SCRATCH_DIR);
