@@ -1,5 +1,5 @@
 import { memo } from 'react';
-import { Box, StaticSurface } from '@reactjit/primitives';
+import { Box, Image, Render, StaticSurface } from '@reactjit/primitives';
 import { NPC_PALETTES, PLAYER_PALETTE, npcPaletteIndex } from './palette';
 
 // Humanoid FACES. A face is a tiny 2D composition (eyes, brows, mouth) baked
@@ -172,6 +172,45 @@ const FaceCapture = memo(function FaceCapture(props: { staticKey: string; skin: 
   );
 });
 
+// ── photo / webcam faces ────────────────────────────────────────────────────
+//
+// The decal slot doesn't care how the face image was authored — Boxes, a photo
+// off disk, or a live webcam feed all bake the same way. A photo should be
+// cropped roughly square with the face centered (features inside the inscribed
+// circle — the border pixels wrap the back of the head). The cam face is LIVE:
+// the feed re-bakes continuously, so your actual face is on the figure's head.
+export type FaceSource =
+  | { kind: 'preset' }
+  | { kind: 'image'; src: string }
+  | { kind: 'cam'; device?: number };
+
+// The one knob for what the player's head wears:
+//   { kind: 'preset' }                      — the authored face below
+//   { kind: 'image', src: '/path/face.png' } — a photo off disk
+//   { kind: 'cam' }                          — live webcam (FFmpeg/v4l2 cam:0)
+export const PLAYER_FACE_SOURCE: FaceSource = { kind: 'preset' };
+
+const FACE_FILL_STYLE = { width: FACE_PX, height: FACE_PX };
+
+function PlayerFaceCapture() {
+  const source = PLAYER_FACE_SOURCE;
+  if (source.kind === 'image') {
+    return (
+      <StaticSurface staticKey={PLAYER_FACE_KEY} style={SURFACE_STYLE}>
+        <Image src={source.src} style={FACE_FILL_STYLE} />
+      </StaticSurface>
+    );
+  }
+  if (source.kind === 'cam') {
+    return (
+      <StaticSurface staticKey={PLAYER_FACE_KEY} style={SURFACE_STYLE}>
+        <Render renderSrc={`cam:${source.device ?? 0}`} style={FACE_FILL_STYLE} />
+      </StaticSurface>
+    );
+  }
+  return <FaceCapture staticKey={PLAYER_FACE_KEY} skin={PLAYER_PALETTE.skin} features={PLAYER_FACE} />;
+}
+
 // Offscreen captures for the WHOLE face pool (player + every palette×preset
 // combination). Mount once as a 2D sibling of <Scene3D>, alongside the other
 // *SurfaceCaptures — any figure's faceKey then always resolves to a baked
@@ -179,7 +218,7 @@ const FaceCapture = memo(function FaceCapture(props: { staticKey: string; skin: 
 export const HumanoidFaceCaptures = memo(function HumanoidFaceCaptures() {
   return (
     <>
-      <FaceCapture staticKey={PLAYER_FACE_KEY} skin={PLAYER_PALETTE.skin} features={PLAYER_FACE} />
+      <PlayerFaceCapture />
       {NPC_PALETTES.map((palette, paletteIndex) =>
         FACE_FEATURES.map((features, featureIndex) => (
           <FaceCapture
