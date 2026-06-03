@@ -23,8 +23,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Row, Effect, Image, Paintable, Pressable, Text, Scene3D, StaticSurface } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { usePaintable } from '@reactjit/runtime/hooks/usePaintable';
+import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
 import * as Geometry from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';
+import {
+  buildHed, parseHed, serializeHed, generateFace, hedDepthGrid,
+  type HedDocument, type HedLayer,
+} from './hed';
 
 const BG = '#0b1018';
 const INK = '#e8eef8';
@@ -72,10 +77,43 @@ const DEPTH_OVERLAY_WGSL = `
 
 type Photo = { path: string; stamp: number };
 
+// The .hed feature layers as paint: every colored shape (plus its mirror twin)
+// is one absolutely-positioned Box in unwrap px. Depth-only layers (color
+// null) draw nothing here — they exist purely in the displacement grid.
+function HedLayerPaint(props: { layers: HedLayer[] }) {
+  const boxes: any[] = [];
+  for (const layer of props.layers) {
+    if (!layer.color) continue;
+    layer.shapes.forEach((s, si) => {
+      const centers = s.mirror ? [s.cx, 1 - s.cx] : [s.cx];
+      centers.forEach((cx, ci) => {
+        const w = s.rx * 2 * UNWRAP_W;
+        const h = s.ry * 2 * UNWRAP_H;
+        boxes.push(
+          <Box
+            key={`${layer.id}.${si}.${ci}`}
+            style={{
+              position: 'absolute',
+              left: cx * UNWRAP_W - w / 2,
+              top: s.cy * UNWRAP_H - h / 2,
+              width: w,
+              height: h,
+              backgroundColor: layer.color,
+              borderRadius: s.kind === 'ellipse' ? Math.min(w, h) / 2 : 2,
+            }}
+          />,
+        );
+      });
+    });
+  }
+  return <>{boxes}</>;
+}
+
 // ── the unwrap composition — rendered TWICE: once as the visible paint canvas
 // (with the heat overlay on top) and once inside the StaticSurface bake that
 // the head samples. One component, so display and texture can never disagree.
-function UnwrapContent(props: { skin: string; photo: Photo | null; photoScale: number; photoY: number }) {
+// Stack: skin base → photo → .hed feature layers.
+function UnwrapContent(props: { skin: string; photo: Photo | null; photoScale: number; photoY: number; layers: HedLayer[] | null }) {
   const side = props.photoScale * UNWRAP_W;
   return (
     <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin, position: 'relative', overflow: 'hidden' }}>
@@ -91,6 +129,7 @@ function UnwrapContent(props: { skin: string; photo: Photo | null; photoScale: n
           }}
         />
       ) : null}
+      {props.layers ? <HedLayerPaint layers={props.layers} /> : null}
     </Box>
   );
 }
@@ -125,6 +164,9 @@ export default function HeadLab() {
   const [grid, setGrid] = useState<number[]>(() => new Array(GRID_W * GRID_H).fill(0));
   // Bumped whenever the grid changes — versions the mesh's dynamicKey.
   const [sculptSeq, setSculptSeq] = useState(0);
+  // The loaded/generated .hed face (feature layers); id versions keys/caches.
+  const [face, setFace] = useState<{ doc: HedDocument; id: string } | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
   const paintingRef = useRef(false);
   const canvasRect = useRef({ x: 0, y: 0, width: UNWRAP_W, height: UNWRAP_H });
   const orbitRef = useRef<{ x: number; y: number } | null>(null);
@@ -133,7 +175,60 @@ export default function HeadLab() {
   const depth = usePaintable({ id: 'headlab-depth', w: PAINT_W, h: PAINT_H });
   useEffect(() => { depth.paint.clear(NEUTRAL); }, []);
 
-  useFileDrop((path) => setPhoto({ path, stamp: Date.now() }));
+  // Apply a .hed document: knobs from the doc, hand-sculpt residue into the
+  // paint texture + grid, feature layers kept (with sculpt zeroed so it can't
+  // double-count — the residue now lives in the paint texture).
+  const applyDoc = (doc: HedDocument, id: string) => {
+    setSkin(doc.skin);
+    setAmount(doc.amount);
+    setScaleY(doc.scaleY);
+    const g = doc.sculpt.map((b) => b / 127);
+    setGrid(g);
+    setSculptSeq((s) => s + 1);
+    const bytes = new Uint8Array(PAINT_W * PAINT_H);
+    for (let py = 0; py < PAINT_H; py++) {
+      const gy = Math.min(GRID_H - 1, Math.floor((py / PAINT_H) * GRID_H));
+      for (let px = 0; px < PAINT_W; px++) {
+        const gx = Math.min(GRID_W - 1, Math.floor((px / PAINT_W) * GRID_W));
+        bytes[py * PAINT_W + px] = Math.max(0, Math.min(255, Math.round((g[gy * GRID_W + gx] / 2 + NEUTRAL) * 255)));
+      }
+    }
+    depth.paint.upload(bytes);
+    setFace({ doc: { ...doc, sculpt: new Array(doc.cols * doc.rows).fill(0) }, id });
+  };
+
+  const generate = () => {
+    const seed = (Date.now() ^ Math.floor(Math.random() * 0xffff)) >>> 0;
+    applyDoc(generateFace(seed), `gen${seed}`);
+    setStatus(`generated face ${seed} — sculpt over it, or generate again`);
+  };
+
+  const saveHead = () => {
+    mkdir('cart/heads');
+    const stamp = Date.now();
+    const doc = buildHed({
+      skin, amount, scaleY,
+      sculpt: grid,
+      layers: face?.doc.layers ?? [],
+      title: `head ${stamp}`,
+      seed: face?.doc.metadata?.seed,
+    });
+    writeFile(`cart/heads/head_${stamp}.hed.json`, serializeHed(doc));
+    setStatus(`saved cart/heads/head_${stamp}.hed.json — drop it back in to reload`);
+  };
+
+  // Drop: a .hed.json reloads a saved head; anything else is a face photo.
+  useFileDrop((path) => {
+    if (path.endsWith('.json')) {
+      const text = readFile(path);
+      const doc = text ? parseHed(text) : null;
+      if (!doc) { setStatus(`${path.split('/').pop()} is not a .hed head document`); return; }
+      applyDoc(doc, `load${Date.now()}`);
+      setStatus(`loaded ${path.split('/').pop()}`);
+      return;
+    }
+    setPhoto({ path, stamp: Date.now() });
+  });
 
   const dab = (sx: number, sy: number) => {
     const r = canvasRect.current;
@@ -181,21 +276,29 @@ export default function HeadLab() {
     setSculptSeq((s) => s + 1);
   };
 
+  // Final displacement = hand sculpt (paint texture) + the face's feature
+  // relief, clamped. Both live in the same grid space, so this is one add.
+  const faceDepth = useMemo(() => (face ? hedDepthGrid(face.doc) : null), [face]);
+  const displace = useMemo(
+    () => (faceDepth ? grid.map((v, i) => Math.max(-1, Math.min(1, v + faceDepth[i]))) : grid),
+    [grid, faceDepth],
+  );
+
   // Geometry identity changes only on stroke release / knob change — the
   // interned mesh regenerates exactly then, never per mousemove.
   const params = useMemo(
     () => ({
       radius: 1, segments: 48, rings: 24,
-      displace: grid, dCols: GRID_W, dRows: GRID_H,
+      displace, dCols: GRID_W, dRows: GRID_H,
       amount, scaleY,
     }),
-    [grid, amount, scaleY],
+    [displace, amount, scaleY],
   );
 
   // Content-addressed texture key: the bake is a pure function of these values,
   // so a key can never serve a stale image (the carve_lab hot-reload lesson),
   // and stepping a knob back reuses the earlier bake.
-  const texKey = `head.lab.${photo?.stamp ?? 'bare'}.${skin}.${photoScale.toFixed(2)}.${photoY}`;
+  const texKey = `head.lab.${photo?.stamp ?? 'bare'}.${face?.id ?? 'noface'}.${skin}.${photoScale.toFixed(2)}.${photoY}`;
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
     [],
@@ -227,7 +330,9 @@ export default function HeadLab() {
       <Col style={{ width: UNWRAP_W + 28, padding: 14, gap: 10 }}>
         <Text fontSize={15} color={INK} style={{ fontWeight: 900 }}>HEAD LAB</Text>
         <Text fontSize={11} color={DIM}>
-          {photo ? 'paint depth over the face — blue pushes out, orange carves in' : 'drop a face picture, then paint depth over it'}
+          {status ?? (photo || face
+            ? 'paint depth over the face — blue pushes out, orange carves in'
+            : 'drop a face picture (or generate one), then paint depth over it')}
         </Text>
         <Pressable
           onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
@@ -236,7 +341,7 @@ export default function HeadLab() {
           onMouseUp={onPaintUp}
           style={{ width: UNWRAP_W, height: UNWRAP_H, borderWidth: 1, borderColor: '#22324a', position: 'relative' }}
         >
-          <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} />
+          <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={face?.doc.layers ?? null} />
           <Effect
             shader={DEPTH_OVERLAY_WGSL}
             data={[0]}
@@ -251,6 +356,19 @@ export default function HeadLab() {
           <Pressable onPress={clearStrokes} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
             <Text fontSize={12} color={DIM}>clear</Text>
           </Pressable>
+        </Row>
+        <Row style={{ gap: 8, alignItems: 'center' }}>
+          <Pressable onPress={generate} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#34d399', backgroundColor: '#0d2a20' }}>
+            <Text fontSize={12} color="#34d399">generate face</Text>
+          </Pressable>
+          <Pressable onPress={saveHead} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
+            <Text fontSize={12} color={INK}>save head</Text>
+          </Pressable>
+          {face ? (
+            <Pressable onPress={() => { setFace(null); setStatus(null); }} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
+              <Text fontSize={12} color={DIM}>remove face</Text>
+            </Pressable>
+          ) : null}
         </Row>
         <Row style={{ gap: 6, alignItems: 'center' }}>
           <Text fontSize={11} color={DIM} style={{ width: 84 }}>skin</Text>
@@ -287,7 +405,7 @@ export default function HeadLab() {
           <Scene3D.Mesh
             geometry={Geometry.Globe}
             params={params}
-            dynamicKey={`headlab~${sculptSeq}.${amount.toFixed(2)}.${scaleY.toFixed(2)}`}
+            dynamicKey={`headlab~${sculptSeq}.${face?.id ?? 'noface'}.${amount.toFixed(2)}.${scaleY.toFixed(2)}`}
             material="#ffffff"
             textureKey={texKey}
             position={[0, 1.4, 0]}
@@ -306,7 +424,7 @@ export default function HeadLab() {
         <Paintable id={depth.id} w={PAINT_W} h={PAINT_H} />
       </Box>
       <StaticSurface staticKey={texKey} style={surfaceStyle}>
-        <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} />
+        <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={face?.doc.layers ?? null} />
       </StaticSurface>
     </Row>
   );
