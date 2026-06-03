@@ -250,6 +250,8 @@ export default function HeadLab() {
   const [brush, setBrush] = useState(14); // paint-texture px
   const [strength, setStrength] = useState(0.5);
   const [mode, setMode] = useState<Mode>('raise');
+  // Symmetry brush: every dab also lands mirrored across the front meridian.
+  const [mirror, setMirror] = useState(true);
   const [amount, setAmount] = useState(0.35);
   const [scaleY, setScaleY] = useState(1.2); // head skull stretch
   const [yaw, setYaw] = useState(20);
@@ -416,20 +418,25 @@ export default function HeadLab() {
     setPhoto({ path, stamp: Date.now() });
   });
 
+  const modeValue = () =>
+    mode === 'flatten' ? NEUTRAL : mode === 'raise' ? NEUTRAL + 0.5 * strength : NEUTRAL - 0.5 * strength;
+
   const dab = (sx: number, sy: number) => {
     const r = canvasRect.current;
     const tx = ((sx - r.x) / r.width) * PAINT_W;
     const ty = ((sy - r.y) / r.height) * PAINT_H;
-    const value = mode === 'flatten' ? NEUTRAL : mode === 'raise' ? NEUTRAL + 0.5 * strength : NEUTRAL - 0.5 * strength;
+    const value = modeValue();
     paints[selPart].paint.circle(tx, ty, brush, value);
+    // symmetry: also dab mirrored across the front meridian (u=0.5) — limbs
+    // and faces are symmetric, so one stroke does both sides
+    if (mirror) {
+      const mx = PAINT_W - tx;
+      if (Math.abs(mx - tx) > 2) paints[selPart].paint.circle(mx, ty, brush, value);
+    }
   };
 
-  // Stroke release → read the paint texture back, average 4×4 blocks down to
-  // the mesh grid, recenter to signed −1..1. The one expensive hop, once per
-  // stroke instead of per mousemove.
-  const syncGrid = () => {
-    const bytes = paints[selPart].paint.readback();
-    if (!bytes || bytes.length < PAINT_W * PAINT_H) return;
+  // bytes (paint-texture R8) → mesh grid: average 4×4 blocks, recenter signed.
+  const gridFromBytes = (bytes: Uint8Array): number[] => {
     const next = emptyGrid();
     const bx = PAINT_W / GRID_W;
     const by = PAINT_H / GRID_H;
@@ -444,7 +451,15 @@ export default function HeadLab() {
         next[gy * GRID_W + gx] = (sum / (bx * by) / 255 - NEUTRAL) * 2;
       }
     }
-    setPartGrid(selPart, next);
+    return next;
+  };
+
+  // Stroke release → read the paint texture back into the mesh grid. The one
+  // expensive hop, once per stroke instead of per mousemove.
+  const syncGrid = () => {
+    const bytes = paints[selPart].paint.readback();
+    if (!bytes || bytes.length < PAINT_W * PAINT_H) return;
+    setPartGrid(selPart, gridFromBytes(bytes));
   };
 
   const onPaintDown = (e: any) => { paintingRef.current = true; dab(Number(e?.x ?? 0), Number(e?.y ?? 0)); };
@@ -458,6 +473,40 @@ export default function HeadLab() {
   const clearStrokes = () => {
     paints[selPart].paint.clear(NEUTRAL);
     setPartGrid(selPart, emptyGrid());
+  };
+
+  // One-click whole-part raise/carve at the current mode+strength — what the
+  // user was doing by scrubbing the brush over the entire unwrap. The result
+  // is uniform, so the grid is computed directly (no readback race with the
+  // queued clear op).
+  const fillAll = () => {
+    const value = modeValue();
+    paints[selPart].paint.clear(value);
+    setPartGrid(selPart, new Array(GRID_W * GRID_H).fill((value - NEUTRAL) * 2));
+  };
+
+  // 3×3 box blur over the paint texture — evens out lumpy hand strokes.
+  const soften = () => {
+    const p = paints[selPart].paint;
+    const src = p.readback();
+    if (!src || src.length < PAINT_W * PAINT_H) return;
+    const out = new Uint8Array(PAINT_W * PAINT_H);
+    for (let y = 0; y < PAINT_H; y++) {
+      for (let x = 0; x < PAINT_W; x++) {
+        let sum = 0, n = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const yy = y + dy, xx = x + dx;
+            if (xx < 0 || yy < 0 || xx >= PAINT_W || yy >= PAINT_H) continue;
+            sum += src[yy * PAINT_W + xx];
+            n++;
+          }
+        }
+        out[y * PAINT_W + x] = Math.round(sum / n);
+      }
+    }
+    p.upload(out);
+    setPartGrid(selPart, gridFromBytes(out));
   };
 
   // Final HEAD displacement = hand sculpt + the face's feature relief (the
@@ -577,6 +626,11 @@ export default function HeadLab() {
           <Chip label="raise" active={mode === 'raise'} onPress={() => setMode('raise')} />
           <Chip label="carve in" active={mode === 'lower'} color="#ff9445" onPress={() => setMode('lower')} />
           <Chip label="flatten" active={mode === 'flatten'} color="#94a3b8" onPress={() => setMode('flatten')} />
+        </Row>
+        <Row style={{ gap: 8, alignItems: 'center' }}>
+          <Chip label="fill" active={false} onPress={fillAll} />
+          <Chip label="soften" active={false} onPress={soften} />
+          <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
           <Chip label="clear" active={false} onPress={clearStrokes} />
         </Row>
         {isHead ? (
