@@ -184,7 +184,7 @@ export function Assist3DRoute(props: { onBack: () => void }) {
             onForgetModel={(p) => setModelHistory(forgetModelPath(p))}
           />
 
-          <ScrollView ref={transcriptRef} showScrollbar style={{ flexGrow: 1, height: '100%', minHeight: 0 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12 }}>
+          <ScrollView ref={transcriptRef} showScrollbar style={{ flexGrow: 1, minHeight: 0 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12 }}>
             {transcript.length === 0 ? (
               <Col style={{ gap: 6 }}>
                 <Text fontSize={11} color={DIM}>Ask for a 3D scene. Examples:</Text>
@@ -255,7 +255,7 @@ export function Assist3DRoute(props: { onBack: () => void }) {
             <Text fontSize={9} color={FAINT} style={{ fontFamily: 'monospace' }}>{selMesh ? `#${selected}` : '—'}</Text>
           </Row>
 
-          <ScrollView showScrollbar style={{ flexGrow: 1, height: '100%', minHeight: 0 }} contentContainerStyle={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 12, paddingRight: 12 }}>
+          <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }} contentContainerStyle={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 12, paddingRight: 12 }}>
             {!selMesh ? (
               <Text fontSize={11} color={DIM}>Click a mesh or pick one from the tree to inspect its geometry, material, and transform.</Text>
             ) : (
