@@ -87,7 +87,7 @@ function clampFrac(f: number): number {
   return Math.max(MIN_FRAC, Math.min(1 - MIN_FRAC, f));
 }
 
-const DEFAULT_BRUSH: BrushSettings = { size: 2, centerZ: 3, heightTool: 'brush', heightShape: 'cone' };
+const DEFAULT_BRUSH: BrushSettings = { size: 2, centerZ: 3, heightTool: 'brush', heightProfile: 'cone', heightShape: 'circle' };
 
 function clampNum(n: unknown, lo: number, hi: number, fallback: number): number {
   const v = Number(n);
@@ -100,7 +100,8 @@ function normalizeBrushSettings(value: Partial<BrushSettings> | undefined): Brus
     size: Math.round(clampNum(value?.size, 0, 40, DEFAULT_BRUSH.size)),
     centerZ: clampNum(value?.centerZ, -12, 12, DEFAULT_BRUSH.centerZ),
     heightTool: value?.heightTool === 'erase' ? 'erase' : DEFAULT_BRUSH.heightTool,
-    heightShape: value?.heightShape === 'flat' || value?.heightShape === 'dome' ? value.heightShape : DEFAULT_BRUSH.heightShape,
+    heightProfile: value?.heightProfile === 'flat' || value?.heightProfile === 'dome' ? value.heightProfile : DEFAULT_BRUSH.heightProfile,
+    heightShape: value?.heightShape === 'square' || value?.heightShape === 'diamond' ? value.heightShape : DEFAULT_BRUSH.heightShape,
   };
 }
 

@@ -35,24 +35,32 @@ export function clearField(f: HeightField): void {
   f.z.fill(0);
 }
 
-// The cross-section profile a brush stamps across its disc. t = distance/radius
-// (0 at centre … 1 at the rim):
-//   cone — peak·(1−t): a linear slope that fans out to nothing at the rim.
-//   flat — peak everywhere: a vertical-walled plateau/mesa; does NOT fan out, the
-//          edge is a cliff. (The "doesn't fan out" brush.)
-//   dome — peak·√(1−t²): a hemispherical cap — rounded on top, steepening to the rim.
-export type BrushShape = 'cone' | 'flat' | 'dome';
+// A height brush has TWO independent dials:
+//   PROFILE — the cross-section across the footprint (how height falls from centre
+//     to rim). t = distance/radius (0 centre … 1 rim):
+//       cone — peak·(1−t): linear slope, fans out to nothing at the rim.
+//       flat — peak everywhere: vertical-walled plateau/mesa, edge is a cliff.
+//       dome — peak·√(1−t²): hemispherical cap, rounded on top.
+//   SHAPE — the FOOTPRINT outline (which cells the brush covers), set by the distance
+//     metric used for `t`:
+//       circle  — Euclidean  (√(dx²+dy²)).
+//       square  — Chebyshev  (max(|dx|,|dy|)).
+//       diamond — Manhattan  (|dx|+|dy|).
+//   So flat+square = a square plateau, cone+diamond = a diamond pyramid, etc.
+export type BrushProfile = 'cone' | 'flat' | 'dome';
+export type BrushShape = 'circle' | 'square' | 'diamond';
 
 export interface StampOpts {
-  centerZ: number;    // peak height at the brush center (signed)
-  radiusM: number;    // brush radius in metres (where the profile reaches its edge)
-  shape: BrushShape;  // cross-section profile across the radius
-  erase?: boolean;    // pull cells in range to 0 instead of stamping
+  centerZ: number;      // peak height at the brush center (signed)
+  radiusM: number;      // brush radius in metres (where the footprint reaches its edge)
+  shape: BrushShape;    // footprint outline
+  profile: BrushProfile; // cross-section across the footprint
+  erase?: boolean;      // pull cells in range to 0 instead of stamping
 }
 
-// Brush profile value at normalized distance t (0..1) for a unit peak.
-function brushProfile(shape: BrushShape, t: number): number {
-  switch (shape) {
+// Profile value at normalized distance t (0..1) for a unit peak.
+function brushProfile(profile: BrushProfile, t: number): number {
+  switch (profile) {
     case 'flat': return 1;
     case 'dome': return Math.sqrt(Math.max(0, 1 - t * t));
     case 'cone':
@@ -60,12 +68,24 @@ function brushProfile(shape: BrushShape, t: number): number {
   }
 }
 
-// Stamp a brush centered on cell (cix,ciy): each cell in range is RAISED TOWARD the
-// shape's profile (peak |centerZ| at the center, falling to the rim per `shape`), not
-// summed. "Raise toward" = signed max, so the brush sculpts a cap at centerZ instead
-// of piling up — overlapping stamps form the UNION of the shapes (a smooth ridge), and
-// the painted height equals the intensity you set. Summing made every drag saturate to
-// the clamp (a flat max-height mesa); a ceiling can't. Erase zeros the cells in range.
+// Distance from the brush centre under the footprint's metric, in metres. Cells with
+// distance <= radius are inside the footprint; that distance also drives the profile.
+function footprintDistance(shape: BrushShape, dx: number, dy: number): number {
+  const ax = Math.abs(dx), ay = Math.abs(dy);
+  switch (shape) {
+    case 'square': return Math.max(ax, ay) * DOT_M;
+    case 'diamond': return (ax + ay) * DOT_M;
+    case 'circle':
+    default: return Math.hypot(dx, dy) * DOT_M;
+  }
+}
+
+// Stamp a brush centered on cell (cix,ciy): each cell inside the footprint is RAISED
+// TOWARD the profile (peak |centerZ| at the center, falling to the rim), not summed.
+// "Raise toward" = signed max, so the brush sculpts a cap at centerZ instead of piling
+// up — overlapping stamps form the UNION (a smooth ridge), and the painted height
+// equals the intensity you set. Summing made every drag saturate to the clamp (a flat
+// max-height mesa); a ceiling can't. Erase zeros the cells in the footprint.
 // O(radius^2), independent of total grid size.
 export function stampBrush(f: HeightField, cix: number, ciy: number, opts: StampOpts): void {
   const radiusM = Math.max(DOT_M, opts.radiusM);
@@ -78,11 +98,11 @@ export function stampBrush(f: HeightField, cix: number, ciy: number, opts: Stamp
     for (let dx = -rd; dx <= rd; dx++) {
       const jx = cix + dx;
       if (jx < 0 || jx >= f.cols) continue;
-      const dm = Math.hypot(dx, dy) * DOT_M;
+      const dm = footprintDistance(opts.shape, dx, dy);
       if (dm > radiusM) continue;
       const idx = jy * f.cols + jx;
       if (opts.erase) { f.z[idx] = 0; continue; }
-      const mag = peak * brushProfile(opts.shape, dm / radiusM);
+      const mag = peak * brushProfile(opts.profile, dm / radiusM);
       if (mag <= 0) continue;
       // Raise toward the signed target: take whichever value is farther from 0 in the
       // brush's direction, so re-stamping or overlapping never climbs past centerZ.

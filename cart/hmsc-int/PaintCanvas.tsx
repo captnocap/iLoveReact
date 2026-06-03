@@ -29,7 +29,7 @@ import { type ChunkFloor } from './chunkFloor';
 import type { TileKind, ZoneFlag } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
 import { ZONE_FLAGS } from '../hmsc/world/zones';
-import { TILE_UNITS, DOT_M, stampBrush, clearField, type BrushShape } from './heightData';
+import { TILE_UNITS, DOT_M, stampBrush, clearField, type BrushShape, type BrushProfile } from './heightData';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { ChunkSurface } from './ChunkSurface';
@@ -46,13 +46,13 @@ type HoverState = { x: number; y: number; addr: string } | null;
 type HoverSink = { current: ((h: HoverState) => void) | null };
 // The visible brush footprint: a circle at screen position (x,y), diameter d px,
 // `on` = over a paintable cell (filled) vs off-grid (outline only).
-type BrushVis = { x: number; y: number; d: number; color: string; on: boolean } | null;
+type BrushVis = { x: number; y: number; d: number; color: string; on: boolean; shape?: BrushShape } | null;
 type BrushSink = { current: ((b: BrushVis) => void) | null };
 
 export type Tool = 'pointer' | 'brush' | 'eraser';
 export type Layer = 'paint' | 'height' | 'place' | 'zone';
-export type { BrushShape };
-export type BrushSettings = { size: number; centerZ: number; heightTool: HeightTool; heightShape: BrushShape };
+export type { BrushShape, BrushProfile };
+export type BrushSettings = { size: number; centerZ: number; heightTool: HeightTool; heightProfile: BrushProfile; heightShape: BrushShape };
 
 // The serialize seam: the cart pulls the live world (chunks + zone defs + focus)
 // through this on autosave. Placements live in the cart, so they're added there.
@@ -246,39 +246,64 @@ function PaintRail(props: { tool: Tool; onTool: (t: Tool) => void; tile: TileKin
   );
 }
 
-// Brush cross-section shapes, with a tiny ASCII glyph hint of the profile.
-const HEIGHT_SHAPES: { id: BrushShape; label: string; hint: string }[] = [
-  { id: 'cone', label: 'cone', hint: '▲' }, // ▲ slopes to nothing
-  { id: 'flat', label: 'flat', hint: '▬' }, // ▬ plateau, vertical edge
-  { id: 'dome', label: 'dome', hint: '◖' }, // ◖ rounded cap
+// Cross-section profiles (height falloff) and footprint shapes (covered area), each
+// with a tiny ASCII glyph hint. Combine freely: flat+square = square plateau, etc.
+const HEIGHT_PROFILES: { id: BrushProfile; label: string; hint: string }[] = [
+  { id: 'cone', label: 'cone', hint: '▲' }, // slopes to nothing
+  { id: 'flat', label: 'flat', hint: '▬' }, // plateau, vertical edge
+  { id: 'dome', label: 'dome', hint: '◗' }, // rounded cap
 ];
+const HEIGHT_FOOTPRINTS: { id: BrushShape; label: string; hint: string }[] = [
+  { id: 'circle', label: 'circle', hint: '●' },
+  { id: 'square', label: 'square', hint: '■' },
+  { id: 'diamond', label: 'diamond', hint: '◆' },
+];
+
+// A 2-wide chip grid (wraps): 3 items render 2-on-top + 1-below, never 3-across tight.
+function ChipGrid(props: {
+  items: ReadonlyArray<{ id: string; label: string; hint: string }>;
+  value: string; onPick: (id: string) => void; dim?: boolean;
+}) {
+  return (
+    <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, opacity: props.dim ? 0.4 : 1 }}>
+      {props.items.map((it) => {
+        const active = props.value === it.id;
+        return (
+          <Pressable key={it.id} onPress={() => props.onPick(it.id)} style={{ width: '47%', alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: active ? '#f8fafc' : '#334155', backgroundColor: active ? '#1e293b' : '#0f1a2e' }}>
+            <Text fontSize={11} color={active ? '#7dd3fc' : '#64748b'}>{it.hint}</Text>
+            <Text fontSize={7} color={active ? '#f8fafc' : '#94a3b8'} style={{ fontFamily: 'monospace' }}>{it.label}</Text>
+          </Pressable>
+        );
+      })}
+    </Box>
+  );
+}
+
+function RailLabel(props: { text: string }) {
+  return <Text fontSize={7} color="#64748b" style={{ fontFamily: 'monospace', letterSpacing: 0.5 }}>{props.text}</Text>;
+}
 
 function HeightRail(props: {
   hTool: HeightTool; onHTool: (t: HeightTool) => void;
+  profile: BrushProfile; onProfile: (p: BrushProfile) => void;
   shape: BrushShape; onShape: (s: BrushShape) => void;
   centerZ: number; onCenterZ: (z: number) => void;
   size: number; onSize: (n: number) => void;
   onClear: () => void;
 }) {
+  const dim = props.hTool === 'erase'; // profile/shape only matter when raising
   return (
     <Box style={{ gap: 6 }}>
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
         <ToolBtn icon="Brush" active={props.hTool === 'brush'} onPress={() => props.onHTool('brush')} />
         <ToolBtn icon="Eraser" active={props.hTool === 'erase'} onPress={() => props.onHTool('erase')} />
       </Box>
-      {/* Brush shape — the profile the brush stamps. Only meaningful when raising
-          (the eraser just zeros its disc), so it dims under the eraser. */}
-      <Box style={{ flexDirection: 'row', gap: 4, opacity: props.hTool === 'erase' ? 0.4 : 1 }}>
-        {HEIGHT_SHAPES.map((s) => {
-          const active = props.shape === s.id;
-          return (
-            <Pressable key={s.id} onPress={() => props.onShape(s.id)} style={{ flex: 1, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: active ? '#f8fafc' : '#334155', backgroundColor: active ? '#1e293b' : '#0f1a2e' }}>
-              <Text fontSize={11} color={active ? '#7dd3fc' : '#64748b'}>{s.hint}</Text>
-              <Text fontSize={7} color={active ? '#f8fafc' : '#94a3b8'} style={{ fontFamily: 'monospace' }}>{s.label}</Text>
-            </Pressable>
-          );
-        })}
-      </Box>
+      {/* Footprint outline (which cells) + cross-section profile (how tall across).
+          Both dim under the eraser, which just zeros its footprint. */}
+      <RailLabel text="shape" />
+      <ChipGrid items={HEIGHT_FOOTPRINTS} value={props.shape} onPick={(v) => props.onShape(v as BrushShape)} dim={dim} />
+      <RailLabel text="profile" />
+      <ChipGrid items={HEIGHT_PROFILES} value={props.profile} onPick={(v) => props.onProfile(v as BrushProfile)} dim={dim} />
       <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
       <MiniStepper label="z (m)" value={props.centerZ.toFixed(1)} onDec={() => props.onCenterZ(clamp(props.centerZ - Z_STEP, Z_MIN, Z_MAX))} onInc={() => props.onCenterZ(clamp(props.centerZ + Z_STEP, Z_MIN, Z_MAX))} />
       <SizeStepper size={props.size} onSize={props.onSize} />
@@ -422,10 +447,18 @@ function BrushCursor(props: { sink: BrushSink }) {
   props.sink.current = setB; // stable setter; idempotent to assign each render
   if (!b) return null;
   const r = b.d / 2;
+  const shape = b.shape ?? 'circle';
+  // Match the cursor to the footprint: diamond = a square rotated 45°, scaled by 1/√2
+  // so its points (not its corners) sit on the footprint radius; square = sharp; circle
+  // = round. So you're not painting squares behind a round cursor.
+  const isDiamond = shape === 'diamond';
+  const sz = isDiamond ? b.d * 0.70711 : b.d;
+  const off = (b.d - sz) / 2;
+  const c = sz / 2;
   return (
-    <Box style={{ position: 'absolute', left: b.x - r, top: b.y - r, width: b.d, height: b.d, borderRadius: r, borderWidth: 2, borderColor: b.color, backgroundColor: b.on ? `${b.color}26` : '#00000000' }}>
+    <Box style={{ position: 'absolute', left: b.x - r + off, top: b.y - r + off, width: sz, height: sz, borderRadius: shape === 'circle' ? sz / 2 : 2, borderWidth: 2, borderColor: b.color, backgroundColor: b.on ? `${b.color}26` : '#00000000', ...(isDiamond ? { transform: { rotate: 45 } } : {}) }}>
       {/* centre pip — the exact cell the next stamp lands on */}
-      <Box style={{ position: 'absolute', left: r - 2, top: r - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: b.color }} />
+      <Box style={{ position: 'absolute', left: c - 2, top: c - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: b.color }} />
     </Box>
   );
 }
@@ -491,8 +524,10 @@ export function PaintCanvas(props: {
   const centerZ = clamp(Number(props.brush.centerZ), Z_MIN, Z_MAX);
   // One brush size (radius in tiles) shared by paint, zone, and height.
   const brushSize = clamp(Math.round(Number(props.brush.size)), SIZE_MIN, SIZE_MAX);
-  const heightShape: BrushShape = props.brush.heightShape ?? 'cone';
+  const heightProfile: BrushProfile = props.brush.heightProfile ?? 'cone';
+  const heightShape: BrushShape = props.brush.heightShape ?? 'circle';
   const setHTool = useCallback((heightTool: HeightTool) => props.onBrushChange({ heightTool }), [props.onBrushChange]);
+  const setHeightProfile = useCallback((heightProfile: BrushProfile) => props.onBrushChange({ heightProfile }), [props.onBrushChange]);
   const setHeightShape = useCallback((heightShape: BrushShape) => props.onBrushChange({ heightShape }), [props.onBrushChange]);
   const setCenterZ = useCallback((z: number) => props.onBrushChange({ centerZ: clamp(z, Z_MIN, Z_MAX) }), [props.onBrushChange]);
   const setBrushSize = useCallback((size: number) => props.onBrushChange({ size: clamp(Math.round(size), SIZE_MIN, SIZE_MAX) }), [props.onBrushChange]);
@@ -728,8 +763,8 @@ export function PaintCanvas(props: {
   };
 
   // ── Brush params (ref so the screen-space handler never goes stale) ──────────
-  const brushRef = useRef({ centerZ, size: brushSize, tool: hTool, shape: heightShape });
-  brushRef.current = { centerZ, size: brushSize, tool: hTool, shape: heightShape };
+  const brushRef = useRef({ centerZ, size: brushSize, tool: hTool, shape: heightShape, profile: heightProfile });
+  brushRef.current = { centerZ, size: brushSize, tool: hTool, shape: heightShape, profile: heightProfile };
   // Height is ADDITIVE (heightData.stampCone stacks), but onMouseMove fires at input
   // rate (~100/s) — re-stamping a stationary brush every event saturates cells to
   // HEIGHT_LIMIT in a few frames, flattening everything to one max plateau and making
@@ -776,7 +811,7 @@ export function PaintCanvas(props: {
       const ciy = Math.round((gy - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1));
       // Skip chunks the brush can't reach (cheap: avoids touching/re-uploading them).
       if (cix + rd < 0 || cix - rd > cols - 1 || ciy + rd < 0 || ciy - rd > rows - 1) continue;
-      stampBrush(ch.height, cix, ciy, { centerZ: b.centerZ, radiusM, shape: b.shape, erase: b.tool === 'erase' });
+      stampBrush(ch.height, cix, ciy, { centerZ: b.centerZ, radiusM, shape: b.shape, profile: b.profile, erase: b.tool === 'erase' });
       const k = chunkKey(ch.cx, ch.cz);
       touched.add(k);
       heightDirty.current.add(k);
@@ -1001,7 +1036,7 @@ export function PaintCanvas(props: {
     // Snap the ring to the cell centre it'll paint; off any focused chunk, ride the cursor.
     const cxp = c ? sx + (c.cgx - g.gx) * zoom : sx;
     const cyp = c ? sy + (c.cgy - g.gy) * zoom : sy;
-    brushSink.current?.({ x: cxp - r.x, y: cyp - r.y, d: dia, on: !!c, color });
+    brushSink.current?.({ x: cxp - r.x, y: cyp - r.y, d: dia, on: !!c, color, shape: layer === 'height' ? heightShape : 'circle' });
   };
 
   // ── Cursor pump: live ring + pan-paint ───────────────────────────────────────
@@ -1172,7 +1207,7 @@ export function PaintCanvas(props: {
       {/* Left rail — conditional on the active layer (absolute overlay, on top). */}
       <Box style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, backgroundColor: '#0b1320ee', borderRightWidth: 1, borderRightColor: '#1e293b', paddingLeft: 5, paddingRight: 5, paddingTop: 6, paddingBottom: 6 }}>
         {layer === 'paint' ? <PaintRail tool={tool} onTool={props.onTool} tile={tile} onTile={props.onTile} size={brushSize} onSize={setBrushSize} /> : null}
-        {layer === 'height' ? <HeightRail hTool={hTool} onHTool={setHTool} shape={heightShape} onShape={setHeightShape} centerZ={centerZ} onCenterZ={setCenterZ} size={brushSize} onSize={setBrushSize} onClear={clearHeights} /> : null}
+        {layer === 'height' ? <HeightRail hTool={hTool} onHTool={setHTool} profile={heightProfile} onProfile={setHeightProfile} shape={heightShape} onShape={setHeightShape} centerZ={centerZ} onCenterZ={setCenterZ} size={brushSize} onSize={setBrushSize} onClear={clearHeights} /> : null}
         {layer === 'place' ? <PlaceRail sel={selPlacement} place={place} /> : null}
         {layer === 'zone' ? <ZoneRail tool={tool} onTool={props.onTool} size={brushSize} onSize={setBrushSize} zones={zones} activeZone={activeZone} onActiveZone={setActiveZone} onAddZone={addZone} onUpdateZone={updateZone} onDeleteZone={deleteZone} /> : null}
       </Box>
