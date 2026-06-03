@@ -22,7 +22,7 @@
 //
 // Ship: ./scripts/ship head_lab      Dev: ./scripts/dev head_lab
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Row, Effect, Image, Paintable, Pressable, Text, Scene3D, StaticSurface } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
@@ -170,6 +170,49 @@ function Chip(props: { label: string; active: boolean; color?: string; onPress: 
 const emptyGrid = () => new Array(GRID_W * GRID_H).fill(0);
 const emptyGrids = (): Record<PartId, number[]> =>
   Object.fromEntries(PART_IDS.map((id) => [id, emptyGrid()])) as Record<PartId, number[]>;
+
+// The 3D meshes, memo'd HARD. Orbit drag updates yaw/pitch per mousemove and
+// re-renders the whole cart — and every mesh node carries the full sculpt
+// vertex payload through the reconciler, so re-diffing ~14 of them per move
+// is the lag. Props here are stable identities (one useMemo bundle), so a
+// drag re-renders ONLY the camera node; the meshes update on sculpt/knob/
+// animation changes alone. Same perf isolation hmsc's GameWorld3D uses.
+type PartRender = { params: any; dynKey: string; texKey: string };
+const PartMeshes = memo(function PartMeshes(props: { view: View; selPart: PartId; parts: Record<PartId, PartRender> }) {
+  if (props.view === 'part') {
+    const p = props.parts[props.selPart];
+    return (
+      <Scene3D.Mesh
+        geometry={Geometry.Globe}
+        params={p.params}
+        dynamicKey={p.dynKey}
+        material="#ffffff"
+        textureKey={p.texKey}
+        position={[0, 1.4, 0]}
+      />
+    );
+  }
+  return (
+    <>
+      {ASSEMBLY.map((inst, i) => {
+        const p = props.parts[inst.part];
+        return (
+          <Scene3D.Mesh
+            key={i}
+            geometry={Geometry.Globe}
+            params={p.params}
+            dynamicKey={p.dynKey}
+            material="#ffffff"
+            textureKey={p.texKey}
+            position={inst.position}
+            rotation={inst.rotation ?? [0, 0, 0]}
+            scale={inst.thickness != null ? [inst.scale * inst.thickness, inst.scale, inst.scale * inst.thickness] : inst.scale}
+          />
+        );
+      })}
+    </>
+  );
+});
 
 export default function HeadLab() {
   const [selPart, setSelPart] = useState<PartId>('head');
@@ -421,6 +464,18 @@ export default function HeadLab() {
   const headTexKey = `head.lab.${photo?.stamp ?? 'bare'}.${face?.id ?? 'noface'}.${anim ?? 'still'}.${phase}.${skin}.${photoScale.toFixed(2)}.${photoY}`;
   const skinTexKey = `body.skin.${skin}`;
   const partTexKey = (id: PartId) => (id === 'head' ? headTexKey : skinTexKey);
+
+  // One stable bundle for the memo'd meshes — identity changes only when
+  // something a mesh actually depends on changes, never on orbit drag.
+  const partRender = useMemo(() => {
+    const out = {} as Record<PartId, PartRender>;
+    for (const id of PART_IDS) {
+      out[id] = { params: partParams(id), dynKey: partDynKey(id), texKey: partTexKey(id) };
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the helpers read exactly these
+  }, [grids, headDisplace, seqs, face?.id, anim, phase, amount, scaleY, skin, headTexKey]);
+
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
     [],
@@ -531,30 +586,7 @@ export default function HeadLab() {
           <Scene3D.AmbientLight color="#aab8d6" intensity={0.6} />
           <Scene3D.DirectionalLight direction={[0.4, 0.9, 0.35]} color="#fff0d6" intensity={0.85} />
           <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 8, height: 0.03, depth: 8 }} material="#0e1726" position={[0, -0.015, 0]} />
-          {view === 'part' ? (
-            <Scene3D.Mesh
-              geometry={Geometry.Globe}
-              params={partParams(selPart)}
-              dynamicKey={partDynKey(selPart)}
-              material="#ffffff"
-              textureKey={partTexKey(selPart)}
-              position={[0, 1.4, 0]}
-            />
-          ) : (
-            ASSEMBLY.map((inst, i) => (
-              <Scene3D.Mesh
-                key={i}
-                geometry={Geometry.Globe}
-                params={partParams(inst.part)}
-                dynamicKey={partDynKey(inst.part)}
-                material="#ffffff"
-                textureKey={partTexKey(inst.part)}
-                position={inst.position}
-                rotation={inst.rotation ?? [0, 0, 0]}
-                scale={inst.scale}
-              />
-            ))
-          )}
+          <PartMeshes view={view} selPart={selPart} parts={partRender} />
         </Scene3D>
         <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
           <Knob label="zoom" value={dist.toFixed(1)} onMinus={() => setDist((v) => Math.max(1.6, v - 0.4))} onPlus={() => setDist((v) => Math.min(12, v + 0.4))} />

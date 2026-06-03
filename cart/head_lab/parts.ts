@@ -44,6 +44,9 @@ export type BodyInstance = {
   scale: number;
   /** degrees [rx, ry, rz] — small rz tilts hang the limbs naturally. */
   rotation?: [number, number, number];
+  /** lateral (x/z) thickness multiplier on top of `scale` — proportions:
+   *  the same pipe sculpt renders slimmer as a forearm than as a thigh. */
+  thickness?: number;
 };
 
 // Standing figure, ground at y=0, ~2.2 units tall. Parts are radius-1 globes,
@@ -51,22 +54,25 @@ export type BodyInstance = {
 // limbs sit CLEAR of the torso (arms out at the sides, legs spread a touch)
 // instead of nesting inside it like a matryoshka. Pipes still kiss at the
 // elbows/knees on purpose — the rounded profile ends read as the joint.
+// Proportions follow the body, not the part: thighs are the thickest limb,
+// shins middle, upper arms slimmer, forearms slimmest. One pipe sculpt
+// serves all of them — `thickness` does the anatomy.
 export const ASSEMBLY: BodyInstance[] = [
   { part: 'torso', position: [0, 1.3, 0], scale: 0.3 },
   { part: 'head', position: [0, 1.8, 0], scale: 0.21 },
   // arms: slim pipes chained shoulder → elbow → hand, hanging close to the
   // torso with a gentle outward drift toward the hands
-  { part: 'pipe', position: [-0.4, 1.36, 0], scale: 0.19, rotation: [0, 0, -5] },
-  { part: 'pipe', position: [0.4, 1.36, 0], scale: 0.19, rotation: [0, 0, 5] },
-  { part: 'pipe', position: [-0.45, 0.88, 0], scale: 0.17, rotation: [0, 0, -8] },
-  { part: 'pipe', position: [0.45, 0.88, 0], scale: 0.17, rotation: [0, 0, 8] },
+  { part: 'pipe', position: [-0.4, 1.36, 0], scale: 0.19, rotation: [0, 0, -5], thickness: 0.85 },
+  { part: 'pipe', position: [0.4, 1.36, 0], scale: 0.19, rotation: [0, 0, 5], thickness: 0.85 },
+  { part: 'pipe', position: [-0.45, 0.88, 0], scale: 0.17, rotation: [0, 0, -8], thickness: 0.7 },
+  { part: 'pipe', position: [0.45, 0.88, 0], scale: 0.17, rotation: [0, 0, 8], thickness: 0.7 },
   { part: 'hand', position: [-0.5, 0.52, 0], scale: 0.13 },
   { part: 'hand', position: [0.5, 0.52, 0], scale: 0.13 },
   // legs: thigh + shin pipes with a slight stance, feet pointing forward
-  { part: 'pipe', position: [-0.15, 0.65, 0], scale: 0.2, rotation: [0, 0, -3] },
-  { part: 'pipe', position: [0.15, 0.65, 0], scale: 0.2, rotation: [0, 0, 3] },
-  { part: 'pipe', position: [-0.19, 0.27, 0], scale: 0.18 },
-  { part: 'pipe', position: [0.19, 0.27, 0], scale: 0.18 },
+  { part: 'pipe', position: [-0.15, 0.65, 0], scale: 0.21, rotation: [0, 0, -3], thickness: 1.3 },
+  { part: 'pipe', position: [0.15, 0.65, 0], scale: 0.21, rotation: [0, 0, 3], thickness: 1.3 },
+  { part: 'pipe', position: [-0.19, 0.27, 0], scale: 0.19 },
+  { part: 'pipe', position: [0.19, 0.27, 0], scale: 0.19 },
   { part: 'foot', position: [-0.2, 0.07, -0.1], scale: 0.14 },
   { part: 'foot', position: [0.2, 0.07, -0.1], scale: 0.14 },
 ];
