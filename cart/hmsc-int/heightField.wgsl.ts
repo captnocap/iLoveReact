@@ -18,6 +18,37 @@ fn hAt(ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
   return D[5 + cy * cols + cx];
 }
 
+// Elevation ramp for raised ground: t in [0,1] across the full height range. Five
+// segments (dark ground → green → gold → orange → red → near-white peak) so each
+// metre band reads as a distinct colour instead of one neutral→warm wash that
+// saturated halfway up.
+fn warmRamp(t: f32) -> vec3f {
+  let c0 = vec3f(0.10, 0.13, 0.19);
+  let c1 = vec3f(0.20, 0.55, 0.34);
+  let c2 = vec3f(0.80, 0.80, 0.22);
+  let c3 = vec3f(0.97, 0.60, 0.15);
+  let c4 = vec3f(0.93, 0.30, 0.22);
+  let c5 = vec3f(0.99, 0.93, 0.88);
+  let s = clamp(t, 0.0, 1.0) * 5.0;
+  if (s < 1.0) { return mix(c0, c1, s); }
+  if (s < 2.0) { return mix(c1, c2, s - 1.0); }
+  if (s < 3.0) { return mix(c2, c3, s - 2.0); }
+  if (s < 4.0) { return mix(c3, c4, s - 3.0); }
+  return mix(c4, c5, s - 4.0);
+}
+
+// Depth ramp for dug ground (negative Z): teal → blue → deep navy.
+fn coolRamp(t: f32) -> vec3f {
+  let c0 = vec3f(0.10, 0.13, 0.19);
+  let c1 = vec3f(0.18, 0.45, 0.55);
+  let c2 = vec3f(0.15, 0.35, 0.72);
+  let c3 = vec3f(0.07, 0.14, 0.38);
+  let s = clamp(t, 0.0, 1.0) * 3.0;
+  if (s < 1.0) { return mix(c0, c1, s); }
+  if (s < 2.0) { return mix(c1, c2, s - 1.0); }
+  return mix(c2, c3, s - 2.0);
+}
+
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
   let cols = i32(D[0]);
   let rows = i32(D[1]);
@@ -36,13 +67,17 @@ fn hAt(ix: i32, iy: i32, cols: i32, rows: i32) -> f32 {
   let h11 = hAt(ix + 1, iy + 1, cols, rows);
   let hz = mix(mix(h00, h10, fr.x), mix(h01, h11, fr.x), fr.y);
 
-  let neutral = vec3f(0.10, 0.13, 0.19);
-  let warm = vec3f(0.98, 0.75, 0.15);
-  let cool = vec3f(0.22, 0.62, 0.95);
   let t = clamp(abs(hz) / visRef, 0.0, 1.0);
-  var col = neutral;
-  if (hz > 0.0) { col = mix(neutral, warm, t); }
-  if (hz < 0.0) { col = mix(neutral, cool, t); }
+  var col = vec3f(0.10, 0.13, 0.19);
+  if (hz > 0.0) { col = warmRamp(t); }
+  if (hz < 0.0) { col = coolRamp(t); }
+
+  // Topographic contour lines every 1 m — a fine elevation cue inside each colour
+  // band, so a gentle slope still reads as steps of height.
+  let af = fract(abs(hz));
+  let near = min(af, 1.0 - af);             // 0 at each integer metre
+  let contour = 1.0 - smoothstep(0.0, 0.05, near);
+  col = mix(col, col * 0.62, contour * 0.45 * step(0.04, abs(hz)));
 
   // Faint 1m tile grid.
   let tile = in.uv * vec2f(tilesX, tilesY);

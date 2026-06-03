@@ -14,8 +14,11 @@
 export const TILE_UNITS = 24;       // canvas units per 1m tile (display scale)
 export const DOTS_PER_TILE = 2;     // height samples per tile per axis
 export const DOT_M = 1 / DOTS_PER_TILE; // meters between samples
-export const VIS_REF = 6;           // |Z| that saturates the colormap
 export const HEIGHT_LIMIT = 12;     // |Z| clamp (meters), headroom to stack
+// |Z| that saturates the 2D colormap. Span the FULL paint range so 6–12 m read as
+// distinct colours instead of all-max-warm (the colormap is a multi-stop elevation
+// ramp now — see heightField.wgsl.ts — so low ground still gets its own colour).
+export const VIS_REF = HEIGHT_LIMIT;
 
 export interface HeightField {
   cols: number;      // sample columns (x)
