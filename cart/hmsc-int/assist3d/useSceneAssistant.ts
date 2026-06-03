@@ -30,35 +30,50 @@ export interface SceneAssistant {
   note: string | null;
 }
 
-// Pull a scene out of a free-text assistant message: a ```json fenced block, or the
-// first balanced {...} that mentions "meshes". The fallback for models that print
-// the scene instead of calling the tool.
 // Strip harmony / chat-template control tokens (Qwen3 etc. emit <|channel|>,
 // <|message|>, <|im_start|>…) so they don't break JSON extraction.
 function stripMarkup(text: string): string {
   return text.replace(/<\|[^|]*\|>/g, ' ');
 }
 
+// Every COMPLETE top-level {...} region, found by brace-depth scanning. This is
+// the fix for the gemma case: the model dumped 10K chars of reasoning prose with
+// braces in it AND the scene, with no fences. A naive firstBrace…lastBrace grabs
+// the prose braces too and yields invalid JSON; depth scanning isolates each
+// balanced object so the scene object parses on its own. (Our scene values never
+// contain a literal "{" or "}" inside a string, so we don't need string-awareness.)
+function balancedObjects(text: string): string[] {
+  const out: string[] = [];
+  let depth = 0, start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '{') { if (depth === 0) start = i; depth++; }
+    else if (ch === '}' && depth > 0) {
+      depth--;
+      if (depth === 0 && start >= 0) { out.push(text.slice(start, i + 1)); start = -1; }
+    }
+  }
+  return out;
+}
+
+// Pull a scene out of a free-text reply: fenced ```json blocks first, then every
+// balanced {...} region. Returns the candidate that parses to the MOST meshes (the
+// real scene, not a tiny draft/example the model mentioned while thinking).
 function extractSceneFromText(raw: string): SceneSpec | null {
   const text = stripMarkup(raw);
   if (text.indexOf('"meshes"') < 0) return null;
   const candidates: string[] = [];
-  // every fenced block (a reasoning model may emit several; the scene is usually
-  // the last complete one)
   const fence = /```(?:json)?\s*([\s\S]*?)```/gi;
   let m: RegExpExecArray | null;
   while ((m = fence.exec(text))) candidates.push(m[1]);
-  // the widest balanced-looking {...} as a fallback for un-fenced output
-  const open = text.indexOf('{');
-  const close = text.lastIndexOf('}');
-  if (open >= 0 && close > open) candidates.push(text.slice(open, close + 1));
-  // prefer the LAST valid candidate (the model's final answer, not a thinking draft)
-  let found: SceneSpec | null = null;
+  for (const region of balancedObjects(text)) candidates.push(region);
+  let best: SceneSpec | null = null, bestN = 0;
   for (const c of candidates) {
+    if (c.indexOf('"meshes"') < 0) continue;
     const s = parseScene(c);
-    if (s && s.meshes.length > 0) found = s;
+    if (s && s.meshes.length > bestN) { best = s; bestN = s.meshes.length; }
   }
-  return found;
+  return best;
 }
 
 export function useSceneAssistant(params: { config: BackendConfig; scenePath: string }): SceneAssistant {
@@ -126,8 +141,13 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
         assistant.respond(call.id, ok ? { ok: true, meshes: scene.meshes.length } : { ok: false, error: 'cart failed to write the scene file' });
       } else if (ev.kind === 'assistant_message' && ev.text) {
         accumRef.current += ev.text;
-        const scene = extractSceneFromText(accumRef.current);
-        if (scene) { foundThisTurnRef.current = true; writeScene(scene); }
+        // Only run the (O(n)) extract when this delta closed a brace and the
+        // buffer actually mentions meshes — avoids re-scanning the whole growing
+        // buffer on every token. The completion branch does a final attempt.
+        if (ev.text.indexOf('}') >= 0 && accumRef.current.indexOf('"meshes"') >= 0) {
+          const scene = extractSceneFromText(accumRef.current);
+          if (scene) { foundThisTurnRef.current = true; writeScene(scene); }
+        }
       } else if (ev.kind === 'completion') {
         const scene = extractSceneFromText(accumRef.current);
         if (scene) { foundThisTurnRef.current = true; writeScene(scene); }

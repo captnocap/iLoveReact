@@ -28,15 +28,17 @@ import { loadModelHistory, rememberModelPath, forgetModelPath } from './modelHis
 interface Block { tag: string; text: string; color: string; ts: number; dim?: boolean }
 
 // Clean a message for display: strip harmony / chat-template control tokens
-// (Qwen3 streams <|channel|>, <|message|>…) and collapse an emitted scene JSON
-// to a marker so the transcript shows the resolution, not a wall of JSON.
+// (Qwen3 streams <|channel|>, <|message|>…) and collapse an emitted scene JSON to
+// a neutral marker so the transcript shows reasoning, not a wall of JSON. Whether
+// the scene actually got WRITTEN is reported separately (sa.note) — we don't claim
+// success here just because the text mentioned meshes.
 function cleanForDisplay(raw: string): string {
   let t = raw.replace(/<\|[^|]*\|>/g, ' ');
   if (t.indexOf('"meshes"') >= 0) {
-    t = t.replace(/```(?:json)?[\s\S]*?```/gi, ' ✓ scene written ');
+    t = t.replace(/```(?:json)?[\s\S]*?```/gi, ' ⟨scene json⟩ ');
     if (t.indexOf('"meshes"') >= 0) {
       const open = t.indexOf('{'), close = t.lastIndexOf('}');
-      if (open >= 0 && close > open) t = t.slice(0, open) + ' ✓ scene written ' + t.slice(close + 1);
+      if (open >= 0 && close > open) t = t.slice(0, open) + ' ⟨scene json⟩ ' + t.slice(close + 1);
     }
   }
   return t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
