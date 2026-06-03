@@ -1,6 +1,6 @@
 // A ~3 m storefront sign on a pole — the neon panel reads above head height.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { SIGN_POLE, signNeon } from '../render3d/palette3d';
 import { defineThingymajigger, type ThingProps } from './kit';
 

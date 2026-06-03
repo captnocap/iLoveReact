@@ -19,7 +19,7 @@
 // footer — while sharing every byte of the underlying chat/db model.
 
 import * as React from 'react';
-import { Box } from '@reactjit/runtime/primitives';
+import { Box } from '@reactjit/primitives';
 import { Router } from '../app/gallery/local-router';
 import { AssistantChatProvider } from '../app/chat/AssistantChatProvider';
 import { Shell } from './Shell';

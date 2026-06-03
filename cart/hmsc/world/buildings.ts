@@ -128,7 +128,10 @@ export function buildingBoxes(b: Building): BuildingBox[] {
 // [minX, minZ, maxX, maxZ, top]. top = the wall top, so the host collides with
 // the sides while the player is below and lets them stand on the roof once above
 // (the standable-solid-rects rule in v8_bindings_physics_lab.zig).
-export type BuildingPhysicsRect = BuildingBox & { topMeters: number };
+// topMeters is the solid top; floorMeters (optional) the solid BOTTOM — a raised
+// platform (parking deck) sets it so the host lets you walk under, while a wall
+// omits it and stays solid to the ground. See state/hostPhysics RECT_SOLID_FLOOR.
+export type BuildingPhysicsRect = BuildingBox & { topMeters: number; floorMeters?: number };
 
 export function buildingPhysicsRects(b: Building): BuildingPhysicsRect[] {
   // Open structures own their collision: full-height columns (pillars) and back

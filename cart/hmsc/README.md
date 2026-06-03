@@ -317,9 +317,6 @@ The current material set covers every `TileKind`; no `solid.*` placeholder
 texture keys remain in tile render metadata.
 
 - `hmsc.tile.water`
-- `hmsc.tile.residential`
-- `hmsc.tile.downtown`
-- `hmsc.tile.mixed`
 - `hmsc.tile.road`
 - `hmsc.tile.asphalt`
 - `hmsc.tile.sidewalk`

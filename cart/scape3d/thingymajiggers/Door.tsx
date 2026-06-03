@@ -1,7 +1,7 @@
 // A door leaf, oriented to the wall it sits in; open = swung ~80°. Dynamic: the
 // caller passes live `open` + which way the wall runs. ~2.1 m so the 2 m player
 // actually clears it (was 1.7 m — you couldn't fit through).
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { DOOR_LEAF, DOOR_FRAME } from '../render3d/palette3d';
 import { defineThingymajigger, type ThingProps } from './kit';
 

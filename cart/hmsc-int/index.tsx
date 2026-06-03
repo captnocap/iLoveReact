@@ -483,7 +483,6 @@ function EditorShell() {
   const shownFocus: Focus = selCells.length
     ? { kind: 'tiles', cells: selCells }
     : (placeFocus?.focus ?? { kind: 'tile', tile });
-  const focusWorld = placeFocus?.world ?? baseWorld;
 
   // The preview world = baseWorld + the painted chunks as REAL heightfield
   // landforms (so WorldStatics draws the terrain the game's own way and placement
@@ -515,6 +514,7 @@ function EditorShell() {
     }
     return s;
   }), [baseWorld, placements, floors]);
+  const focusWorld = placeFocus?.world ?? previewWorld;
 
   // Compile = persist the authored world (the SAME GameState the preview shows:
   // painted terrain as heightfield landforms + placements) to the game's boot key

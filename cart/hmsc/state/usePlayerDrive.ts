@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 import { runCommandLine } from '../commands/registry';
 import type { GameState } from '../design';
 import { cellEventRef, playerEventActor, recordAndPublishGameEvent } from '../events/gameEvents';

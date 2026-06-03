@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text } from '@reactjit/primitives';
 import { Button, Field, Input, KeyValue } from '../components/Field';
 import { SETTINGS_ID, USER_ID, nowIso, text, useUserStore } from '../settings';
 

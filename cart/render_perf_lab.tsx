@@ -23,9 +23,9 @@
  *     so you can't pile on past what the machine can hold.
  */
 import { useState, useEffect, useRef } from 'react';
-import { Box, Row, Col, Text, Pressable, Render } from '@reactjit/runtime/primitives';
-import { useTelemetry } from '@reactjit/runtime/hooks/useTelemetry';
-import { readFile } from '@reactjit/runtime/hooks/fs';
+import { Box, Row, Col, Text, Pressable, Render } from '@reactjit/primitives';
+import { useTelemetry } from '@reactjit/hooks/useTelemetry';
+import { readFile } from '@reactjit/hooks/fs';
 
 const CAP = 64; // mirrors MAX_FEEDS
 const SAMPLE_MS = 500;

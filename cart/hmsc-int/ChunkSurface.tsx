@@ -21,6 +21,7 @@ import { ZONE_VIEW_WGSL } from './zoneView.wgsl';
 import { usePaintedField } from './usePaintedField';
 import { chunkKey, CHUNK_TILES, type Chunk } from './chunks';
 import type { Layer } from './PaintCanvas';
+import { plog, bumpCounter } from './perfLog';
 
 const PATCH = CHUNK_TILES * TILE_UNITS;
 const QUAD_STYLE = { width: '100%' as const, height: '100%' as const };
@@ -39,6 +40,11 @@ function ChunkSurfaceImpl(props: {
 }) {
   const { chunk, layer, zones, register, unregister } = props;
   const key = chunkKey(chunk.cx, chunk.cz);
+  // One chunk re-rendering per painted stroke is EXPECTED (the one you drew on, via
+  // usePaintedField). Many lines, or a chunk you didn't touch, is the fan-out bug.
+  // Counted (bumpCounter) so the per-stroke UPDATES tally can see these.
+  bumpCounter('render:chunkSurface');
+  plog('chunkSurface', `render ${key} layer=${layer}`);
 
   // Encode reads the live chunk buffers; recomputes only on a flushed stroke or a
   // layer/zone-def change (usePaintedField caps it at one encode+upload per frame).

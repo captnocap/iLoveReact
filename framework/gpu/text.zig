@@ -1236,6 +1236,20 @@ fn cacheGlyph(codepoint: u32, size_px: u16) ?*const AtlasGlyphInfo {
     }
     if (g_atlas_count >= MAX_ATLAS_GLYPHS) return null;
 
+    // DIAG: reaching here is a cache MISS — about to FreeType-rasterize a
+    // (codepoint, size_px, font) never seen before. After warmup this should be
+    // ~0 per frame; a steady stream means some text is re-rendering at changing
+    // sizes, which is the CPU paint spike. Logs the char + size to find it.
+    if (std.posix.getenv("HMSC_GLYPH_TRACE") != null) {
+        std.debug.print("[glyph-raster] cp={d} '{c}' size={d} font={d} atlas_total={d}\n", .{
+            codepoint,
+            if (codepoint >= 32 and codepoint < 127) @as(u8, @intCast(codepoint)) else @as(u8, '?'),
+            size_px,
+            font_id,
+            g_atlas_count,
+        });
+    }
+
     // Load glyph — try primary face, then fallbacks. Fallback faces are
     // shared regular-only (CJK/emoji/symbols rarely have weighted variants);
     // a missing glyph in the bold face still routes through them.

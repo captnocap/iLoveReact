@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/runtime/primitives';
-import { useAssistant, type WorkerEvent } from '@reactjit/runtime/hooks/useAssistant';
-import { callHost, hasHost } from '@reactjit/runtime/ffi';
+import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
+import { useAssistant, type WorkerEvent } from '@reactjit/hooks/useAssistant';
+import { callHost, hasHost } from '@reactjit/ffi';
 import type { Ent } from '../state/world';
 import { UI } from '../render/palette';
 

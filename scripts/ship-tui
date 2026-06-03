@@ -93,7 +93,7 @@ echo "[ship-tui] bundling $ENTRY → $OUT_BUNDLE"
   --conditions=default \
   --alias:@cart-entry="$ENTRY_ABS" \
   --alias:@reactjit/core="$ROOT/runtime/core_stub.ts" \
-  --alias:@reactjit/runtime="$ROOT/runtime" \
+  --alias:@reactjit="$ROOT/runtime" \
   --alias:react="$ROOT/deps/react" \
   --alias:react-reconciler="$ROOT/deps/react-reconciler" \
   --alias:scheduler="$ROOT/deps/scheduler" \
@@ -175,7 +175,7 @@ if [ -f "$METAFILE" ]; then
     [ "$WANT_ONNX" = "1" ]    && ONNX_FLAG="-Dhas-onnx=true"
     if [ "$WANT_WINDOW" = "1" ]; then
         # Auto-fires when the cart imports <Window>/<Notification> from
-        # @reactjit/runtime/primitives. ship-tui keys SDL3 + the window
+        # @reactjit/primitives. ship-tui keys SDL3 + the window
         # engine subset off this flag so an otherwise-ANSI binary can
         # paint a <Window> subtree as a real GPU window from inside the
         # same React tree. Currently informational — the link wiring is

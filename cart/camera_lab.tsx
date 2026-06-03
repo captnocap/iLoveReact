@@ -16,7 +16,7 @@
 // Ship: ./scripts/ship camera_lab
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
   OrbitCamera, FollowCamera, TopDownCamera, IsometricCamera,
@@ -24,7 +24,7 @@ import {
   CAMERAS, solveCamera, unprojectGround, sway,
   type Vec3,
 } from '@reactjit/cameras';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 
 // ── palette ──────────────────────────────────────────────────────────────────
 const PAGE = '#06080f';

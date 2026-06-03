@@ -22,7 +22,7 @@
 // owns lifetimes (start on mount, stop on unmount).
 //
 // @example
-//   import { luaWorker } from '@reactjit/runtime/hooks/useLuaWorker';
+//   import { luaWorker } from '@reactjit/hooks/useLuaWorker';
 //   useEffect(() => {
 //     if (!luaWorker.available()) return;
 //     luaWorker.eval(`

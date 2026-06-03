@@ -1,4 +1,4 @@
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { HMSC_TILE_TEXTURE_KEYS } from '../world/tileTextureKeys';
 
@@ -10,17 +10,14 @@ const PANEL_Y_METERS = 0.82;
 
 const TEXTURE_PANELS = [
   { key: HMSC_TILE_TEXTURE_KEYS.water, x: 0, z: 0 },
-  { key: HMSC_TILE_TEXTURE_KEYS.residential, x: 1.35, z: 0 },
-  { key: HMSC_TILE_TEXTURE_KEYS.downtown, x: 2.7, z: 0 },
-  { key: HMSC_TILE_TEXTURE_KEYS.mixed, x: 4.05, z: 0 },
-  { key: HMSC_TILE_TEXTURE_KEYS.road, x: 0, z: 1.35 },
-  { key: HMSC_TILE_TEXTURE_KEYS.asphalt, x: 1.35, z: 1.35 },
-  { key: HMSC_TILE_TEXTURE_KEYS.sidewalk, x: 2.7, z: 1.35 },
-  { key: HMSC_TILE_TEXTURE_KEYS.mud, x: 4.05, z: 1.35 },
-  { key: HMSC_TILE_TEXTURE_KEYS.sand, x: 0, z: 2.7 },
-  { key: HMSC_TILE_TEXTURE_KEYS.wall, x: 1.35, z: 2.7 },
-  { key: HMSC_TILE_TEXTURE_KEYS.door, x: 2.7, z: 2.7 },
-  { key: HMSC_TILE_TEXTURE_KEYS.marker, x: 4.05, z: 2.7 },
+  { key: HMSC_TILE_TEXTURE_KEYS.road, x: 1.35, z: 0 },
+  { key: HMSC_TILE_TEXTURE_KEYS.asphalt, x: 2.7, z: 0 },
+  { key: HMSC_TILE_TEXTURE_KEYS.sidewalk, x: 4.05, z: 0 },
+  { key: HMSC_TILE_TEXTURE_KEYS.mud, x: 0, z: 1.35 },
+  { key: HMSC_TILE_TEXTURE_KEYS.sand, x: 1.35, z: 1.35 },
+  { key: HMSC_TILE_TEXTURE_KEYS.wall, x: 2.7, z: 1.35 },
+  { key: HMSC_TILE_TEXTURE_KEYS.door, x: 4.05, z: 1.35 },
+  { key: HMSC_TILE_TEXTURE_KEYS.marker, x: 0, z: 2.7 },
 ];
 
 export function TextureLabScene() {

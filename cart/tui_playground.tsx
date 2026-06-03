@@ -25,14 +25,14 @@
 
 import * as React from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { Box, Col, Row, Text, TextEditor, Terminal, Cartridge } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, TextEditor, Terminal, Cartridge } from '@reactjit/primitives';
 // useTerminal's presence in the bundle is the registry signal that links the
 // terminal ingredient (-Dhas-terminal → libvterm + __vterm_*). The dumb
 // preview pipe needs it.
-import { useTerminal } from '@reactjit/runtime/hooks/useTerminal';
-import { writeFile } from '@reactjit/runtime/hooks/fs';
-import { spawn, onExit, onStderr, envSet } from '@reactjit/runtime/hooks/process';
-import { evictCartridge } from '@reactjit/runtime/cartridge_loader';
+import { useTerminal } from '@reactjit/hooks/useTerminal';
+import { writeFile } from '@reactjit/hooks/fs';
+import { spawn, onExit, onStderr, envSet } from '@reactjit/hooks/process';
+import { evictCartridge } from '@reactjit/cartridge_loader';
 // Reached by relative path — carts only alias @reactjit/runtime, not the
 // renderer / tui trees. getRootInstances is the live shared reconciler tree
 // (one module instance across the whole bundle); rasterizeInstance is the
@@ -54,7 +54,7 @@ const feed = (data: string) => (globalThis as any).__vterm_feed?.(SESSION, data)
 // Starter component. A plain React tree — borders become box-drawing,
 // backgroundColor becomes filled cells, Text becomes text. Edit it and watch
 // the right pane re-rasterize.
-const DEFAULT_CODE = `import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
+const DEFAULT_CODE = `import { Box, Col, Row, Text } from '@reactjit/primitives';
 
 export default function App() {
   return (

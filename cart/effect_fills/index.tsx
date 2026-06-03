@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Box, Col, Effect, Pressable, Row, ScrollView, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Pressable, Row, ScrollView, Text } from '@reactjit/primitives';
 
 const SWATCH = 125;
 const VARIANTS = [0, 1, 2] as const;

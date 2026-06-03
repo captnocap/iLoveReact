@@ -5,7 +5,7 @@
 // player holds / that lies on the ground) — separate from the HUD icon (SDF for now,
 // pixel_icon/cutout later). A dropped item is anchored at its CENTRE on the ground
 // (x,z) and built UP from baseY.
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 
 export const CM = 0.01;
 // `yaw` spins the whole item about its anchor (radians). 0 = its authored pose lying

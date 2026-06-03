@@ -6,12 +6,12 @@
 // surfaces instead of one shared scene.
 
 import { useEffect, useRef, useState } from 'react';
-import { Box, Col, Row, Pressable, Scene3D, StaticSurface, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Pressable, Scene3D, StaticSurface, Text } from '@reactjit/primitives';
 import { classifiers as S } from '@reactjit/core';
-import { useIFTTT, busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { useIFTTT, busOn } from '@reactjit/hooks/useIFTTT';
 import { DEFAULT_AVATAR } from '../character/catalog';
 import { BlockFace3D } from '../gallery/components/block-faces/BlockFace3D';
-import type { AvatarPart, Vec3 } from '@reactjit/runtime/avatar';
+import type { AvatarPart, Vec3 } from '@reactjit/avatar';
 
 // ── Constants ────────────────────────────────────────────────────────
 

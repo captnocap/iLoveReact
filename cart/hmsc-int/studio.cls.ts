@@ -133,6 +133,15 @@ classifier({
   SkinSwatchOn: { type: 'Pressable', style: { width: 22, height: 22, borderWidth: 'theme:borderMedium', borderColor: 'theme:knob' } },
   SkinRoleLabel: { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:textDim', style: { fontFamily: MONO, fontWeight: 700, letterSpacing: 0.5 } },
 
+  // The same Stepper/Toggle controls become editable in the in-focus panel when a
+  // tile (or group) is selected; these …On siblings accent the value of a property
+  // that currently carries an OVERRIDE (per-instance state, off the variant axis).
+  StepperOn:      { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:controlBg' } },
+  StepperValueOn: { type: 'Text', fontSize: 'theme:fontLg', color: 'theme:primary', style: { fontFamily: MONO, fontWeight: 700, minWidth: 36, textAlign: 'center', paddingLeft: 4, paddingRight: 4, borderLeftWidth: 'theme:borderThin', borderLeftColor: 'theme:primary', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:primary' } },
+  // tiny inline clear-override affordance (resets a property to its kind default)
+  ClearBtn:     { type: 'Pressable', style: { width: 15, height: 18, alignItems: 'center', justifyContent: 'center' } },
+  ClearBtnText: { type: 'Text', fontSize: 'theme:fontLg', color: 'theme:textFaint', style: { fontFamily: MONO, fontWeight: 700 } },
+
   // ─────────────────────────────────────────────────────────────
   // TREE
   // ─────────────────────────────────────────────────────────────

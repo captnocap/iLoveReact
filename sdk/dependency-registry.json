@@ -356,7 +356,7 @@
       "buildOptions": [
         "has-window"
       ],
-      "note": "Auto-fires when a cart imports <Window> (or <Notification>) from @reactjit/runtime/primitives. For ship-tui, this is the trigger that links SDL3 + the window-rendering engine subset into an otherwise-ANSI-only TUI binary so a <Window> subtree can paint as a real GPU window from inside the same React tree. For ship (GPU app), the deps are already foundational \u2014 -Dhas-window is informational. Carts that don't reference Window pay zero (the file tree-shakes out)."
+      "note": "Auto-fires when a cart imports <Window> (or <Notification>) from @reactjit/primitives. For ship-tui, this is the trigger that links SDL3 + the window-rendering engine subset into an otherwise-ANSI-only TUI binary so a <Window> subtree can paint as a real GPU window from inside the same React tree. For ship (GPU app), the deps are already foundational \u2014 -Dhas-window is informational. Carts that don't reference Window pay zero (the file tree-shakes out)."
     },
     "canvas": {
       "triggers": [],

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Canvas, Col, Row, Text } from '@reactjit/runtime/primitives';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { Box, Canvas, Col, Row, Text } from '@reactjit/primitives';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 
 // ── Constants ───────────────────────────────────────────────────────────
 

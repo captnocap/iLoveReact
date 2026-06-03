@@ -14,8 +14,8 @@
 // come back here.
 
 import * as React from 'react';
-import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
-import * as pg from '@reactjit/runtime/hooks/pg';
+import { Box, Col, Row, Text } from '@reactjit/primitives';
+import * as pg from '@reactjit/hooks/pg';
 import { useChatStatus } from '../../app/chat/store';
 import {
   SETTINGS_ID,

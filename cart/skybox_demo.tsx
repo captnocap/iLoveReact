@@ -20,7 +20,7 @@
 //
 // Ship:  ./scripts/ship skybox_demo
 import { useEffect, useRef, useState } from 'react';
-import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/primitives';
 // Geometry generators (namespaced — `Box` here would collide with the 2D primitive).
 import * as Geometry from '@reactjit/geometries';
 

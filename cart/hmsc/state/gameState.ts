@@ -412,6 +412,13 @@ function createInitialBuildings(): Building[] {
     { id: 'building_parking_garage', kind: 'parkingGarage', enclosure: 'hollow', x: 42, y: 0, z: 52, widthTiles: 26, depthTiles: 26, doorSide: 'south' },
     { id: 'building_gas_station', kind: 'gasStation', enclosure: 'hollow', x: 74, y: 0, z: 8, widthTiles: 20, depthTiles: 16, doorSide: 'south' },
     { id: 'building_used_car_lot', kind: 'usedCarLot', enclosure: 'hollow', x: 44, y: 0, z: 86, widthTiles: 26, depthTiles: 18, doorSide: 'south' },
+    // Drive-in theatre on the flat open pocket south of the mall (the only big
+    // flat ground — every other chunk has a landform in its middle). The screen
+    // wall pins to the back (maxZ) and faces -Z toward the lot/spawn, so the
+    // player walking up from spawn arrives in the lot facing the screen; the
+    // projector booth out front opens a file picker on E. The screen plays a live
+    // <Video> (NO SIGNAL until picked) via the billboard texture pattern.
+    { id: 'building_drive_in', kind: 'driveIn', enclosure: 'hollow', x: 74, y: 0, z: 28, widthTiles: 44, depthTiles: 32, doorSide: 'north' },
   ];
   return seed.map((b) => ({ ...b, label: buildingKindDefinition(b.kind).label, createdByCommand: 'initial-world' }));
 }

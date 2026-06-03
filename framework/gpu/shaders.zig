@@ -758,7 +758,12 @@ pub const scene3d_wgsl =
     \\    fog_color: vec3f,
     \\    fog_near: f32,
     \\    fog_far: f32,
-    \\    _pad4: vec4f,
+    \\    fog_sky: f32,
+    \\    _pad4a: f32,
+    \\    _pad4b: f32,
+    \\    sky_horizon: vec3f,
+    \\    _pad5: f32,
+    \\    sky_zenith: vec4f,
     \\};
     \\@group(0) @binding(0) var<uniform> S: SceneUniforms;
     \\@group(1) @binding(0) var diffuse_tex: texture_2d<f32>;
@@ -788,6 +793,8 @@ pub const scene3d_wgsl =
     \\    @location(1) world_normal: vec3f,
     \\    @location(2) uv: vec2f,
     \\    @location(3) inst_color: vec4f,
+    \\    // Screen-space NDC.y (linear so it matches the screen-space sky gradient).
+    \\    @location(4) @interpolate(linear) screen_y: f32,
     \\};
     \\
     \\// ── Vertex shader ────────────────────────────────────────────
@@ -801,6 +808,7 @@ pub const scene3d_wgsl =
     \\    out.world_normal = normalize((model * vec4f(in.normal, 0.0)).xyz);
     \\    out.uv = in.uv;
     \\    out.inst_color = in.inst_color;
+    \\    out.screen_y = out.clip_pos.y / out.clip_pos.w;
     \\    return out;
     \\}
     \\
@@ -822,8 +830,20 @@ pub const scene3d_wgsl =
     \\    let specular = S.light_color * spec * 0.4;
     \\    let lit = ambient + diffuse + specular;
     \\    let fog_t = smoothstep(S.fog_near, S.fog_far, distance(S.camera_pos, in.world_pos));
-    \\    let final_rgb = mix(lit, S.fog_color, fog_t);
-    \\    return vec4f(final_rgb, in.inst_color.a * tex_sample.a);
+    \\    // Aerial perspective: fade toward the sky colour in this fragment's screen
+    \\    // direction (the same vertical gradient drawSky paints), so geometry melts
+    \\    // into the exact sky behind it — a tall peak no longer leaves a flat
+    \\    // horizon-coloured silhouette that pops when culled. fog_sky == 0 keeps the
+    \\    // flat fog_color (no skybox / explicit <Fog color>).
+    \\    let g = clamp(in.screen_y * 0.5 + 0.5, 0.0, 1.0);
+    \\    let sky_grad = mix(S.sky_horizon, S.sky_zenith.xyz, pow(g, 0.6));
+    \\    let fog_target = mix(S.fog_color, sky_grad, S.fog_sky);
+    \\    let final_rgb = mix(lit, fog_target, fog_t);
+    \\    // Premultiplied-alpha output: the mesh pipeline blends with
+    \\    // premultiplied_alpha_blending, so scale rgb by alpha here. Opaque meshes
+    \\    // (a == 1) are unchanged; glass (a < 1) composites correctly over the scene.
+    \\    let out_a = in.inst_color.a * tex_sample.a;
+    \\    return vec4f(final_rgb * out_a, out_a);
     \\}
 ;
 

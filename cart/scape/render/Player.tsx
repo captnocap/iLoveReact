@@ -1,4 +1,4 @@
-import { Box } from '@reactjit/runtime/primitives';
+import { Box } from '@reactjit/primitives';
 
 const SHADOW = '#16241c88';
 

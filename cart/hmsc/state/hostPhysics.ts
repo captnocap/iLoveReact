@@ -5,14 +5,41 @@ import { tileDefinitionAtWorldPosition } from '../world/grid';
 import { placedCellTopMeters, surfaceRegionTopMeters } from '../world/surfaceHeights';
 import { roadPhysicsBands, roadTopMeters } from '../world/roads';
 import { junctionPhysicsBands, junctionTopMeters } from '../world/roadJunctions';
-import { timed } from './perfMarks';
+import { propPhysicsRect } from '../world/props';
+import { propKindDefinition } from '../world/propKinds';
+import { buildingPhysicsRects, buildingWallSurface } from '../world/buildings';
 
-const INPUT_HEADER_FLOATS = 24;
+// Header gained slot 24 = oriented-rect count (after the legacy rect count at 13).
+// Bumping this shifts the entity/rect sections consistently because both this
+// packer and the host read body offsets off the same constant.
+const INPUT_HEADER_FLOATS = 25;
 const ENTITY_FLOATS = 8;
-const RECT_FLOATS = 8;
+// [minX, minZ, maxX, maxZ, top, solid, friction, restitution, floor]. `floor` is
+// the bottom of the solid band (host index 8): a rect blocks horizontally only
+// while the body overlaps [floor, top]. Walls/roads/props use RECT_SOLID_FLOOR
+// (solid to the ground, the old behavior); raised platforms (parking decks, the
+// cars on them) carry their real bottom so you walk UNDER them.
+const RECT_FLOATS = 9;
+// An oriented rect is the same 9-float AABB in the building's OWN un-rotated
+// frame, then [pivotX, pivotZ, yawRadians]. Only a rotated box building emits
+// these; the host collides them as OBBs (transform the query point into the
+// frame, reuse the AABB math, rotate the push back out). yaw 0 stays an AABB rect
+// in the array above, so the entire flat city is byte-identical to before.
+const ORIENTED_FLOATS = 12;
+const MAX_ORIENTED = 256;
 const OUTPUT_HEADER_FLOATS = 9;
 const MAX_ENTITIES = 128;
 const MAX_RECTS = 512;
+// floor = −∞ sentinel: the rect is solid all the way down, as every rect was
+// before banded platforms existed.
+const RECT_SOLID_FLOOR = -1e9;
+// Below this per-axis delta (meters / m·s⁻¹) the host step counts as "no change",
+// so advanceHostPhysics returns the SAME state reference and React bails out of
+// the render. Without it, an idle player churns a fresh-but-identical state
+// object every 60Hz tick — re-rendering the whole cart, flipping frame_hash, and
+// forcing a full 2D GPU re-upload each idle frame (the stutter the perf recorder
+// caught). 1e-4 is well under the host's resting jitter and the velocity deadzone.
+const IDLE_REST_EPSILON = 1e-4;
 
 type HostPhysicsResult = {
   state: GameState;
@@ -84,6 +111,7 @@ function physicsRects(state: GameState): number[] {
       blocksPlayer ? 1 : 0,
       tile.surface.friction,
       tile.surface.restitution,
+      RECT_SOLID_FLOOR,
     );
   }
   for (const placedCell of Object.values(state.world.placedCells)) {
@@ -101,6 +129,7 @@ function physicsRects(state: GameState): number[] {
       blocksPlayer ? 1 : 0,
       tile.surface.friction,
       tile.surface.restitution,
+      RECT_SOLID_FLOOR,
     );
   }
   // Each road contributes a flat carriageway rect plus a sidewalk rect per side
@@ -120,6 +149,7 @@ function physicsRects(state: GameState): number[] {
         0,
         tile.surface.friction,
         tile.surface.restitution,
+        RECT_SOLID_FLOOR,
       );
     }
   }
@@ -139,10 +169,107 @@ function physicsRects(state: GameState): number[] {
         0,
         tile.surface.friction,
         tile.surface.restitution,
+        RECT_SOLID_FLOOR,
       );
     }
   }
+  // Each solid prop (hydrant, sign post, light pole, rock, traffic control) adds
+  // one small blocking rect at its footprint so the player bumps it. Non-solid
+  // props (bushes) add nothing — they are walk-through. Friction/restitution
+  // come from the prop's gameplay tile (wall), like the road/junction bands.
+  for (const prop of state.world.props) {
+    if (rects.length / RECT_FLOATS >= MAX_RECTS) break;
+    const rect = propPhysicsRect(prop);
+    if (!rect) continue;
+    const tile = tileKindDefinition(propKindDefinition(prop.kind).tileKind);
+    rects.push(
+      rect.minX,
+      rect.minZ,
+      rect.maxX,
+      rect.maxZ,
+      rect.topMeters,
+      1,
+      tile.surface.friction,
+      tile.surface.restitution,
+      RECT_SOLID_FLOOR,
+    );
+  }
+  // Each building adds its solid masses as blocking rects: a sealed block is one
+  // rect, a hollow/interior shell is its wall strips (hollow leaves a doorway
+  // gap). The rect top is the wall top, so the player bumps the walls from the
+  // side and can stand on the roof from above (the standable-solids host rule).
+  // Friction/restitution come from the building's wall tile, like prop rects.
+  for (const building of state.world.buildings) {
+    // A rotated box building's walls are oriented rects (physicsOrientedRects);
+    // skip it here so its collision matches the rotated mesh, not an AABB.
+    if (buildingUsesOrientedCollision(building)) continue;
+    const tile = tileKindDefinition(buildingWallSurface(building));
+    for (const rect of buildingPhysicsRects(building)) {
+      if (rects.length / RECT_FLOATS >= MAX_RECTS) break;
+      rects.push(
+        rect.minX,
+        rect.minZ,
+        rect.maxX,
+        rect.maxZ,
+        rect.topMeters,
+        1,
+        tile.surface.friction,
+        tile.surface.restitution,
+        // Raised platforms (parking decks + cars on them) carry their real bottom
+        // so the host lets you walk underneath; walls fall back to solid-to-ground.
+        rect.floorMeters ?? RECT_SOLID_FLOOR,
+      );
+    }
+  }
+  // Mountains contribute NO rects: they collide as heightfield terrain registered
+  // with the host (mountainColliderData → __hmsc_register_heightfield in
+  // useMountainColliders), so the host samples the real sloped surface every frame
+  // instead of approximating it with flat boxes. See world/mountain.ts.
   return rects;
+}
+
+// Any building rotated off-axis — box OR open structure — collides as an OBB; an
+// axis-aligned one stays a cheap AABB rect. Every building turns the same way
+// (render3d/buildingTransform), so its solid rects (walls or structureSolids
+// parapets/columns/booths) turn with it. The parking garage's heightfield FLOOR
+// is rotated separately via its terrain collider (state/terrainColliders.ts).
+// Gating on yaw≠0 keeps the un-rotated city on the plain AABB path.
+function buildingUsesOrientedCollision(building: { kind: string; yawDegrees?: number }): boolean {
+  return (building.yawDegrees ?? 0) !== 0;
+}
+
+// The oriented (yawed) building walls, packed as ORIENTED_FLOATS each: the same
+// un-rotated wall box [minX..floor] the AABB path uses, then the building centre
+// (pivot) and yaw in radians. The host rotates the player into this frame, runs
+// the AABB push, and rotates the result back — so a turned building blocks and is
+// standable exactly as drawn (render3d/buildingTransform.ts is the visual twin).
+function physicsOrientedRects(state: GameState): number[] {
+  const oriented: number[] = [];
+  for (const building of state.world.buildings) {
+    if (!buildingUsesOrientedCollision(building)) continue;
+    const tile = tileKindDefinition(buildingWallSurface(building));
+    const pivotX = building.x + building.widthTiles / 2;
+    const pivotZ = building.z + building.depthTiles / 2;
+    const yaw = (building.yawDegrees ?? 0) * Math.PI / 180;
+    for (const rect of buildingPhysicsRects(building)) {
+      if (oriented.length / ORIENTED_FLOATS >= MAX_ORIENTED) break;
+      oriented.push(
+        rect.minX,
+        rect.minZ,
+        rect.maxX,
+        rect.maxZ,
+        rect.topMeters,
+        1,
+        tile.surface.friction,
+        tile.surface.restitution,
+        rect.floorMeters ?? RECT_SOLID_FLOOR,
+        pivotX,
+        pivotZ,
+        yaw,
+      );
+    }
+  }
+  return oriented;
 }
 
 export function movementSurfaceForPlayer(state: GameState, running: boolean): MovementSurface {
@@ -168,7 +295,8 @@ function makeInput(
 ): { input: Float32Array; entities: SpawnedEntity[] } {
   const entities = sortedPhysicsEntities(state);
   const rects = physicsRects(state);
-  const input = new Float32Array(INPUT_HEADER_FLOATS + entities.length * ENTITY_FLOATS + rects.length);
+  const oriented = physicsOrientedRects(state);
+  const input = new Float32Array(INPUT_HEADER_FLOATS + entities.length * ENTITY_FLOATS + rects.length + oriented.length);
   const player = state.player;
   input[0] = dt;
   input[1] = intentX;
@@ -185,6 +313,7 @@ function makeInput(
   input[12] = entities.length;
   input[13] = rects.length / RECT_FLOATS;
   input[14] = state.config.physics.gravityMetersPerSecondSquared;
+  // (slot 24 = oriented-rect count, set after the static-config block below)
   input[15] = state.config.physics.jumpSpeedMetersPerSecond;
   input[16] = state.config.physics.playerCapsuleRadiusMeters;
   input[17] = state.config.physics.playerCapsuleHeightMeters;
@@ -194,6 +323,7 @@ function makeInput(
   input[21] = surface.accelerationMultiplier;
   input[22] = surface.friction;
   input[23] = surface.restitution;
+  input[24] = oriented.length / ORIENTED_FLOATS;
 
   let at = INPUT_HEADER_FLOATS;
   for (const entity of entities) {
@@ -208,6 +338,7 @@ function makeInput(
     input[at++] = physics.restitution;
   }
   input.set(rects, at);
+  input.set(oriented, at + rects.length);
   return { input, entities };
 }
 
@@ -222,7 +353,7 @@ export function advanceHostPhysics(
   friction = 0.2,
   restitution = 0.8,
 ): HostPhysicsResult | null {
-  const { input, entities } = timed('phys-input', () => makeInput(
+  const { input, entities } = makeInput(
     state,
     dt,
     intentX,
@@ -230,12 +361,17 @@ export function advanceHostPhysics(
     speed,
     jumpDown,
     { accelerationMultiplier, friction, restitution },
-  ));
-  const buffer = timed('phys-step', () => hostPhysicsStep(input));
+  );
+  const buffer = hostPhysicsStep(input);
   if (!buffer) return null;
   const output = new Float32Array(buffer);
   const count = Math.min(entities.length, Math.max(0, Math.floor(output[8] || 0)));
   if (output.length < OUTPUT_HEADER_FLOATS + count * ENTITY_FLOATS) return null;
+
+  // Track whether anything actually moved beyond the idle epsilon. If not, we
+  // return the original `state` reference at the end so React skips the render.
+  let changed = false;
+  const moved = (next: number, prev: number) => Math.abs(next - prev) > IDLE_REST_EPSILON;
 
   const nextEntities = { ...state.world.spawnedEntities };
   let at = OUTPUT_HEADER_FLOATS;
@@ -249,6 +385,15 @@ export function advanceHostPhysics(
     const vz = output[at++];
     const radius = output[at++] || entity.physics.radiusMeters;
     const grounded = (output[at++] || 0) > 0;
+    if (
+      !changed && (
+        moved(x, entity.position.x) || moved(y, entity.position.y) || moved(z, entity.position.z) ||
+        moved(vx, entity.physics.velocity.x) || moved(vy, entity.physics.velocity.y) || moved(vz, entity.physics.velocity.z) ||
+        grounded !== entity.physics.grounded
+      )
+    ) {
+      changed = true;
+    }
     nextEntities[entity.id] = {
       ...entity,
       position: { x, y, z },
@@ -261,17 +406,37 @@ export function advanceHostPhysics(
     };
   }
 
+  const playerPosition = { x: output[1] || 0, y: output[2] || 0, z: output[3] || 0 };
   const playerVelocity = { x: output[4] || 0, y: output[5] || 0, z: output[6] || 0 };
+  const playerGrounded = (output[7] || 0) > 0;
+  if (
+    !changed && (
+      moved(playerPosition.x, state.player.position.x) || moved(playerPosition.y, state.player.position.y) || moved(playerPosition.z, state.player.position.z) ||
+      moved(playerVelocity.x, state.player.physics.velocity.x) || moved(playerVelocity.y, state.player.physics.velocity.y) || moved(playerVelocity.z, state.player.physics.velocity.z) ||
+      playerGrounded !== state.player.physics.grounded
+    )
+  ) {
+    changed = true;
+  }
+
+  const moving = Math.hypot(playerVelocity.x, playerVelocity.z) > HOST_VELOCITY_DEADZONE_METERS_PER_SECOND || Math.hypot(intentX, intentZ) > MOVEMENT_INTENT_DEADZONE;
+
+  // Nothing moved past the idle epsilon → hand back the SAME state reference so
+  // setGameState(prev => prev) bails out and the whole cart skips re-rendering.
+  if (!changed) {
+    return { state, moving, hostUs: output[0] || 0 };
+  }
+
   return {
     state: {
       ...state,
       player: {
         ...state.player,
-        position: { x: output[1] || 0, y: output[2] || 0, z: output[3] || 0 },
+        position: playerPosition,
         physics: {
           ...state.player.physics,
           velocity: playerVelocity,
-          grounded: (output[7] || 0) > 0,
+          grounded: playerGrounded,
         },
       },
       world: {
@@ -279,7 +444,7 @@ export function advanceHostPhysics(
         spawnedEntities: nextEntities,
       },
     },
-    moving: Math.hypot(playerVelocity.x, playerVelocity.z) > HOST_VELOCITY_DEADZONE_METERS_PER_SECOND || Math.hypot(intentX, intentZ) > MOVEMENT_INTENT_DEADZONE,
+    moving,
     hostUs: output[0] || 0,
   };
 }

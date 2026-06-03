@@ -1,6 +1,6 @@
 // A floor lamp — thin stem + a glowing shade.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { defineThingymajigger } from './kit';
 
 export default defineThingymajigger({

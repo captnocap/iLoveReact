@@ -1,4 +1,4 @@
-import { Box, Effect, Text } from '@reactjit/runtime/primitives';
+import { Box, Effect, Text } from '@reactjit/primitives';
 import { MINIMAP_WGSL } from './minimap.wgsl';
 import { ITEM_ICON_WGSL } from './itemIcon.wgsl';
 import { UI } from './palette';

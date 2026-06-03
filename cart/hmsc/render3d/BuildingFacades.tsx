@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { Scene3D, StaticSurface } from '@reactjit/runtime/primitives';
+import { Scene3D, StaticSurface } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { BoxFace } from '@reactjit/geometries';
 import type { Building, BuildingSkin, PerceptionState } from '../design';
@@ -18,6 +18,7 @@ import {
   skinTextureKey,
 } from './buildingSkins';
 import { isOpenBuildingKind } from '../world/buildingKinds';
+import { buildingYawDegrees, yawAboutCenter } from './buildingTransform';
 
 // Building facades: a thin textured panel laid flat on each wall face (and the
 // roof), sampling that face's skin texture (the billboard_demo / tileSurface
@@ -80,19 +81,29 @@ function buildingPanels(building: Building): Panel[] {
 }
 
 const BuildingFacadePanels = memo(function BuildingFacadePanels(props: { building: Building }) {
+  const b = props.building;
+  const yaw = buildingYawDegrees(b);
   return (
     <>
-      {buildingPanels(props.building).map((panel) => (
-        <Scene3D.Mesh
-          key={panel.key}
-          geometry={Geometry.Box}
-          params={{ width: 1, height: 1, depth: 1, texturedFaces: panel.texturedFaces }}
-          scale={panel.scale}
-          material="#ffffff"
-          textureKey={skinTextureKey(panel.bucket.skin, panel.bucket.cols, panel.bucket.floors)}
-          position={panel.position}
-        />
-      ))}
+      {buildingPanels(b).map((panel) => {
+        // Rotate the panel's anchor (the outward nudge rotates with it) about the
+        // building centre and spin the panel itself, so a skinned wall turns WITH
+        // its structural box (Building.tsx) instead of staying axis-aligned over a
+        // rotated shell — the "grey walls don't turn" break.
+        const [wx, wz] = yawAboutCenter(b, panel.position[0], panel.position[2]);
+        return (
+          <Scene3D.Mesh
+            key={panel.key}
+            geometry={Geometry.Box}
+            params={{ width: 1, height: 1, depth: 1, texturedFaces: panel.texturedFaces }}
+            scale={panel.scale}
+            rotation={[0, yaw, 0]}
+            material="#ffffff"
+            textureKey={skinTextureKey(panel.bucket.skin, panel.bucket.cols, panel.bucket.floors)}
+            position={[wx, panel.position[1], wz]}
+          />
+        );
+      })}
     </>
   );
 });

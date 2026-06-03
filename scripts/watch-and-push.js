@@ -48,7 +48,7 @@ const flags = [
   '--inject:' + ROOT + '/runtime/ambient.ts',
   '--inject:' + ROOT + '/runtime/ambient_primitives.ts',
   '--alias:@reactjit/core=' + ROOT + '/runtime/core_stub.ts',
-  '--alias:@reactjit/runtime=' + ROOT + '/runtime',
+  '--alias:@reactjit=' + ROOT + '/runtime',
   '--alias:@cart-entry=' + entryAbs,
   '--alias:react=' + ROOT + '/deps/react',
   '--alias:react-reconciler=' + ROOT + '/deps/react-reconciler',

@@ -1,6 +1,6 @@
 // A blocking wall segment, sized by its footprint (w×h tiles). Interior/exterior
 // wall runs are composed from these. Owns the wall height.
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { defineThingymajigger, type ThingProps } from './kit';
 
 const WALL_H = 2.4; // ~1.2× the player — interior walls read just over head height

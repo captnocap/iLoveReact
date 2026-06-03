@@ -4,7 +4,7 @@ import { placedCellTopMeters, surfaceRegionTopMeters } from './surfaceHeights';
 import { roadBandKindAtCell, roadBandKindAtWorldPosition, roadTopAtWorldPosition } from './roads';
 import { junctionBandKindAtCell, junctionBandKindAtWorldPosition, junctionTopAtWorldPosition } from './roadJunctions';
 import { anyBuildingBlocksWorldPoint } from './buildings';
-import { mountainTopAtWorldPosition, mountainTrailKindAtWorldPosition } from './mountain';
+import { landformTileKindAtWorldPosition, landformTopAtWorldPosition, landformWaterKindAtWorldPosition } from './landforms';
 
 export type PlaceCellOptions = {
   triggerCommand?: string;
@@ -135,12 +135,15 @@ export function tileKindAtWorldPosition(state: GameState, position: Vec3): TileK
   // Pavement sits on top of the chunk it is laid in, so its band kind wins over
   // the chunk surface underneath. Junctions sit on top of roads, so they win
   // over roads (a placed cell still wins over everything).
-  return placedCellAt(state, cell)?.kind
+  // Submerged in a landform's water (a crater lake) overrides any footing —
+  // you're wading, not standing on the bed.
+  return landformWaterKindAtWorldPosition(state, position)
+    ?? placedCellAt(state, cell)?.kind
     ?? junctionBandKindAtWorldPosition(state, position)
     ?? roadBandKindAtWorldPosition(state, position)
-    // A mountain tread the player is resting on reports the trail footing, so the
-    // climbing gait/friction apply on the path but not on the ground beside it.
-    ?? mountainTrailKindAtWorldPosition(state, position)
+    // Registry landforms report their surface/region footing (a mountain trail's
+    // 'mud', an estate road's 'road', else the kind's surface tile).
+    ?? landformTileKindAtWorldPosition(state, position)
     ?? surfaceRegionAtCell(state, cell)?.kind;
 }
 
@@ -184,8 +187,8 @@ export function groundTopAtWorldPosition(state: GameState, position: Vec3, stepH
   const junctionTop = junctionTopAtWorldPosition(state, position, maxReachableTop);
   if (junctionTop != null) groundTop = groundTop == null ? junctionTop : Math.max(groundTop, junctionTop);
 
-  const mountainTop = mountainTopAtWorldPosition(state, position, maxReachableTop);
-  if (mountainTop != null) groundTop = groundTop == null ? mountainTop : Math.max(groundTop, mountainTop);
+  const landformTop = landformTopAtWorldPosition(state, position, maxReachableTop);
+  if (landformTop != null) groundTop = groundTop == null ? landformTop : Math.max(groundTop, landformTop);
 
   return groundTop;
 }

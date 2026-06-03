@@ -1,6 +1,6 @@
 // A ~1.3 m skip — chest-high on the 2 m player.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { DUMPSTER, DUMPSTER_LID } from '../render3d/palette3d';
 import { defineThingymajigger } from './kit';
 

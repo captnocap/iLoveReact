@@ -17,7 +17,7 @@
 // vector column + HNSW index). Embedding tables ship with stub blob
 // schemas now and will get bespoke schema in a follow-up.
 
-import * as pg from '@reactjit/runtime/hooks/pg';
+import * as pg from '@reactjit/hooks/pg';
 import { BUCKETS, BUCKET_IDS, type BucketId } from './buckets';
 import { entitiesByBucket, bucketFor } from './registry';
 import { getClusterHandle, getHandle } from './connections';

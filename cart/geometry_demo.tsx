@@ -11,7 +11,7 @@
 //      press picks a new seed, which changes the params, which re-runs the
 //      generator (the runtime/dynamic path) and re-interns a brand-new mesh.
 import { useState } from 'react';
-import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
 
 // ── tiny vector helper: outward face normal from a triangle's winding ──────────

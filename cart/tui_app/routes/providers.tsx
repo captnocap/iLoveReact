@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Box, Col, Row, Text, Pressable } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Pressable } from '@reactjit/primitives';
 import { Button, Field, Input } from '../components/Field';
 import { Picker } from '../components/Picker';
 import { SETTINGS_ID, nowIso, short, text, useConnectionStore } from '../settings';

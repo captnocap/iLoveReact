@@ -16,9 +16,9 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useCRUD } from '../db';
 import { useCurrentSessionExternalId, setCurrentSessionExternalId } from './store';
-import { useAssistant, type AssistantBackend } from '@reactjit/runtime/hooks/useAssistant';
-import type { WorkerEvent } from '@reactjit/runtime/hooks/useAssistant';
-import { callHost, hasHost } from '@reactjit/runtime/ffi';
+import { useAssistant, type AssistantBackend } from '@reactjit/hooks/useAssistant';
+import type { WorkerEvent } from '@reactjit/hooks/useAssistant';
+import { callHost, hasHost } from '@reactjit/ffi';
 import { listTools } from '../tools/registry';
 import { useAssistantTools } from '../tools/useAssistantTools';
 

@@ -14,7 +14,7 @@
 //   5. On success: resume play. On error: leave audio silent + return
 //      the error message for the editor gutter.
 
-import { AUDIO_SOUND, type AudioHandle, type AudioSound } from '@reactjit/runtime/audio';
+import { AUDIO_SOUND, type AudioHandle, type AudioSound } from '@reactjit/audio';
 import type { SampleRef } from './domain';
 
 const MAX_TRACKS_TO_CLEAR = 16;

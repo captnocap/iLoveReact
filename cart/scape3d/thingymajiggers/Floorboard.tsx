@@ -1,7 +1,7 @@
 // A floorboard. Dynamic: reads `opened` (flipped by the 'pry' action). Intact boards
 // sit flush; a pried board tilts up beside a dark gap in the floor.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { defineThingymajigger, type ThingProps } from './kit';
 
 interface FloorboardProps extends ThingProps { opened?: boolean; }

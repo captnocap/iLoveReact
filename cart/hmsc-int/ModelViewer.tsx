@@ -29,6 +29,30 @@ const ZOOM_STEP = 1.1;
 
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
 
+// The scene contents (studio lights + the object's meshes), factored out so a
+// palette THUMBNAIL can render the exact same model under a fixed camera. Must
+// be a child of a <Scene3D>. No camera / no input here — the wrapper owns those.
+// `facades` (default true) bakes the storefront skin onto the walls — skip it
+// for tiny thumbnails (massing alone differentiates kinds, and a per-chip facade
+// capture is the expensive part / unreadable at that size).
+export function ModelScene(props: { building?: Building; prop?: WorldProp; tile?: TileKind; facades?: boolean }) {
+  return (
+    <>
+      {/* studio lighting, no fog — read flat + fully lit */}
+      <Scene3D.Fog enabled={false} />
+      <Scene3D.AmbientLight color="#ffffff" intensity={0.55} />
+      <Scene3D.DirectionalLight direction={[0.5, 1, 0.35]} color="#ffffff" intensity={0.95} />
+      {props.building ? <Building3D building={props.building} /> : null}
+      {props.building && props.facades !== false ? <BuildingFacades buildings={[props.building]} /> : null}
+      {props.prop ? <Prop prop={props.prop} /> : null}
+      {props.tile ? ((() => {
+        const h = Math.max(0.3, tileKindDefinition(props.tile).render.heightMeters);
+        return <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 8, height: h, depth: 8 }} color={tileKindDefinition(props.tile).render.color} position={[0, h / 2, 0]} />;
+      })()) : null}
+    </>
+  );
+}
+
 export function ModelViewer(props: {
   building?: Building;
   prop?: WorldProp;
@@ -66,21 +90,7 @@ export function ModelViewer(props: {
     <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0e1622'} showGrid showAxes={false}>
         <OrbitCamera target={[0, props.targetY, 0]} yaw={yaw} pitch={pitch} dist={props.baseDist} zoom={zoom} fov={38} />
-        {/* No distance fog: a studio object viewer should read flat + fully lit,
-            not fade into the dark background at the far edge of the model. */}
-        <Scene3D.Fog enabled={false} />
-        <Scene3D.AmbientLight color="#ffffff" intensity={0.55} />
-        <Scene3D.DirectionalLight direction={[0.5, 1, 0.35]} color="#ffffff" intensity={0.95} />
-        {props.building ? <Building3D building={props.building} /> : null}
-        {props.building ? <BuildingFacades buildings={[props.building]} /> : null}
-        {props.prop ? <Prop prop={props.prop} /> : null}
-        {props.tile ? ((() => {
-          // Embedded tiles (wall 1.6m, door 1.2m) read as their real height; thin
-          // ground surfaces (~0.02–0.11m) keep a 0.3m floor so they stay a visible
-          // slab rather than a sliver.
-          const h = Math.max(0.3, tileKindDefinition(props.tile).render.heightMeters);
-          return <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 8, height: h, depth: 8 }} color={tileKindDefinition(props.tile).render.color} position={[0, h / 2, 0]} />;
-        })()) : null}
+        <ModelScene building={props.building} prop={props.prop} tile={props.tile} />
       </Scene3D>
 
       {/* Transparent input layer over the scene: drag orbits, wheel zooms. */}

@@ -45,8 +45,9 @@ import { placeProp, removeProp, setPropSignalOverride } from '../world/props';
 import { isPropKind, propKindDefinition, propKindNamesForConsole } from '../world/propKinds';
 import { buildingFootprint, buildingHeightMeters, resolveBuildingSkin, setBuildingFaceSkin } from '../world/buildings';
 import { resolveBuildingPlacement } from '../world/buildingPlacement';
+import { checkPlacement, formatPlacementIssues, buildingSubject, propSubject, landformSubject, type PlacementSubject } from '../world/placementCheck';
 import { buildingSkinNamesForConsole, isBuildingSkin } from '../render3d/buildingSkins';
-import { mountainTrailPads } from '../world/mountain';
+import { mountainTrailheadPoint } from '../world/landforms';
 import { buildingKindDefinition, buildingKindNamesForConsole, isBuildingKind } from '../world/buildingKinds';
 import { addBuildingToWorld, enterBuildingInterior, leaveCurrentInterior, removeBuildingFromWorld } from '../world/interiors';
 import { addZone, removeZone, isZoneFlag, zoneFlagNamesForConsole } from '../world/zones';
@@ -231,6 +232,87 @@ function spawnPhysicsBurst(state: GameState, count: number, sourceLine: string):
     };
   }
   return nextState;
+}
+
+function subjectsForAudit(state: GameState): PlacementSubject[] {
+  return [
+    ...state.world.buildings.map(buildingSubject),
+    ...state.world.props.map(propSubject),
+    ...(state.world.landforms ?? []).map(landformSubject),
+  ];
+}
+
+function findSubjectById(state: GameState, id: string): PlacementSubject | undefined {
+  const building = state.world.buildings.find((b) => b.id === id);
+  if (building) return buildingSubject(building);
+  const prop = state.world.props.find((p) => p.id === id);
+  if (prop) return propSubject(prop);
+  const landform = (state.world.landforms ?? []).find((l) => l.id === id);
+  if (landform) return landformSubject(landform);
+  return undefined;
+}
+
+// A not-yet-placed building/prop, so the AI can check a spot BEFORE committing.
+// The sentinel id matches nothing in the world, so the neighbour-scanning rules
+// treat every existing thing as "other".
+function previewBuildingSubject(args: string[]): PlacementSubject {
+  const kind = args[0];
+  if (!isBuildingKind(kind)) throw new Error(`unknown building kind ${kind}; expected one of ${buildingKindNamesForConsole()}`);
+  const x = numberArg(args[1], 'x');
+  const z = numberArg(args[2], 'z');
+  const def = buildingKindDefinition(kind);
+  const widthTiles = args[3] != null ? numberArg(args[3], 'width') : def.defaultWidthTiles;
+  const depthTiles = args[4] != null ? numberArg(args[4], 'depth') : def.defaultDepthTiles;
+  const building: Building = {
+    id: '__preview__', kind, label: def.label, enclosure: def.defaultEnclosure,
+    x, y: 0, z, widthTiles, depthTiles, doorSide: 'south', createdByCommand: 'wv_validate',
+  };
+  return buildingSubject(building);
+}
+
+function previewPropSubject(args: string[]): PlacementSubject {
+  const kind = args[0];
+  if (!isPropKind(kind)) throw new Error(`unknown prop kind ${kind}; expected one of ${propKindNamesForConsole()}`);
+  const x = numberArg(args[1], 'x');
+  const z = numberArg(args[2], 'z');
+  const prop: WorldProp = { id: '__preview__', kind: kind as PropKind, x, y: 0, z, yawDegrees: 0, createdByCommand: 'wv_validate' };
+  return propSubject(prop);
+}
+
+function runValidateCommand(args: string[], state: GameState): CommandResult {
+  try {
+    // Dry-run a proposed thing (the "check before you place it" path).
+    if (args[0] === 'building' || args[0] === 'prop') {
+      const subject = args[0] === 'building' ? previewBuildingSubject(args.slice(1)) : previewPropSubject(args.slice(1));
+      const issues = checkPlacement(state, subject);
+      return ok(state, `preview ${subject.label} @ [${subject.footprint.minX},${subject.footprint.minZ}]: ${issues.length ? `${issues.length} issue(s)` : 'all clear'}`, ...formatPlacementIssues(issues));
+    }
+    // Audit one already-placed thing by id.
+    if (args.length === 1) {
+      const subject = findSubjectById(state, args[0]);
+      if (!subject) return fail(state, `no building/prop/landform with id ${args[0]}`);
+      const issues = checkPlacement(state, subject);
+      return ok(state, `${subject.id} (${subject.label}): ${issues.length ? `${issues.length} issue(s)` : 'all clear'}`, ...formatPlacementIssues(issues));
+    }
+    // Audit the whole world.
+    const subjects = subjectsForAudit(state);
+    if (subjects.length === 0) return ok(state, 'nothing placed to validate');
+    const lines: string[] = [];
+    let total = 0;
+    let flagged = 0;
+    for (const subject of subjects) {
+      const issues = checkPlacement(state, subject);
+      if (issues.length === 0) continue;
+      flagged += 1;
+      total += issues.length;
+      lines.push(`${subject.id} (${subject.label}):`);
+      for (const line of formatPlacementIssues(issues)) lines.push(`  ${line}`);
+    }
+    if (total === 0) return ok(state, `all ${subjects.length} placed things look fine`);
+    return ok(state, `${total} issue(s) across ${flagged}/${subjects.length} placed things:`, ...lines);
+  } catch (err: any) {
+    return fail(state, err.message);
+  }
 }
 
 const COMMANDS: CommandDefinition[] = [
@@ -1048,7 +1130,9 @@ const COMMANDS: CommandDefinition[] = [
           yawDegrees,
           createdByCommand: sourceLine,
         };
-        return ok(placeProp(state, prop), `placed ${prop.id} ${kind} @ [${x},${z}] yaw ${yawDegrees}`);
+        const placedState = placeProp(state, prop);
+        const issues = checkPlacement(placedState, propSubject(prop));
+        return ok(placedState, `placed ${prop.id} ${kind} @ [${x},${z}] yaw ${yawDegrees}`, ...formatPlacementIssues(issues));
       } catch (err: any) {
         return fail(state, err.message);
       }
@@ -1161,9 +1245,14 @@ const COMMANDS: CommandDefinition[] = [
         const placement = resolveBuildingPlacement(state, proposed, force);
         if (!placement.ok) return fail(state, placement.reason);
         const building = placement.building;
+        const placedState = addBuildingToWorld(state, building);
+        // Audit the building as actually placed (post door-snap) and surface any
+        // scale/tile warnings inline — the safety net for blind/AI placement.
+        const issues = checkPlacement(placedState, buildingSubject(building));
         return ok(
-          addBuildingToWorld(state, building),
+          placedState,
           `placed ${building.id} ${kind} (${enclosure}) skin ${resolveBuildingSkin(building)} ${widthTiles}x${depthTiles} @ [${x},${z}] door ${building.doorSide}${force ? ' (forced)' : ''}`,
+          ...formatPlacementIssues(issues),
         );
       } catch (err: any) {
         return fail(state, err.message);
@@ -1199,20 +1288,17 @@ const COMMANDS: CommandDefinition[] = [
     summary: 'List mountains, or teleport to a mountain trailhead to start the climb.',
     usage: 'wv_mountain | wv_mountain trailhead [id]',
     run(args, state) {
-      const mountains = state.world.mountains ?? [];
+      const mountains = (state.world.landforms ?? []).filter((l) => l.kind === 'mountain');
       if (args.length === 0) {
         if (mountains.length === 0) return ok(state, 'no mountains');
-        return ok(state, ...mountains.map((m) => {
-          const treads = mountainTrailPads(m).length;
-          return `${m.id} ${m.label} peak ${m.peakHeightMeters}m r=${m.baseRadiusMeters}m @ [${m.centerX},${m.centerZ}] (${treads} treads)`;
-        }));
+        return ok(state, ...mountains.map((m) =>
+          `${m.id} ${m.label} peak ${m.params.peak}m r=${m.params.baseRadius}m @ [${m.centerX},${m.centerZ}]`,
+        ));
       }
       if (args[0] === 'trailhead') {
         const mountain = args[1] ? mountains.find((m) => m.id === args[1]) : mountains[0];
         if (!mountain) return fail(state, args[1] ? `no mountain ${args[1]}` : 'no mountains');
-        const pads = mountainTrailPads(mountain);
-        if (pads.length === 0) return fail(state, `${mountain.id} has no trail`);
-        const head = pads[0];
+        const head = mountainTrailheadPoint(mountain);
         return ok(
           {
             ...state,
@@ -1274,6 +1360,14 @@ const COMMANDS: CommandDefinition[] = [
       } catch (err: any) {
         return fail(state, err.message);
       }
+    },
+  },
+  {
+    name: 'wv_validate',
+    summary: 'Audit placed things (or preview one) for bad tile/scale/spacing.',
+    usage: 'wv_validate | wv_validate <id> | wv_validate building <kind> <x> <z> [w d] | wv_validate prop <kind> <x> <z>',
+    run(args, state) {
+      return runValidateCommand(args, state);
     },
   },
 ];

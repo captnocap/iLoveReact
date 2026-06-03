@@ -1,5 +1,5 @@
-import { Box, Text } from '@reactjit/runtime/primitives';
-import { useTelemetry } from '@reactjit/runtime/hooks/useTelemetry';
+import { Box, Text } from '@reactjit/primitives';
+import { useTelemetry } from '@reactjit/hooks/useTelemetry';
 import type { GameState, Vec3 } from '../design';
 import { movementSurfaceForPlayer } from '../state/hostPhysics';
 import { worldToCell } from '../world/grid';

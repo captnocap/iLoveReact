@@ -5,7 +5,7 @@
 // not enough to lock in a wire format. The follow-up commit that wires
 // useCRUD will firm these up against `cart/component-gallery/data/`.
 
-import type { Node } from '@reactjit/runtime/intent/parser';
+import type { Node } from '@reactjit/intent/parser';
 
 export type ChatTurnMetadata = {
   backend?: string;

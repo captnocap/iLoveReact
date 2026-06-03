@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Box, Col, Effect, Filter, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Filter, Pressable, Row, Scene3D, ScrollView, StaticSurface, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';

@@ -71,9 +71,25 @@ const SNAPSHOT_BODY_FLOATS: usize = 9;
 const SNAPSHOT_FLOATS: usize = SNAPSHOT_HEADER_FLOATS + MAX_BALLS * SNAPSHOT_BODY_FLOATS;
 const HMSC_MAX_ENTITIES: usize = 128;
 const HMSC_MAX_RECTS: usize = 512;
-const HMSC_INPUT_HEADER_FLOATS: usize = 24;
+const HMSC_MAX_ORIENTED: usize = 256;
+const HMSC_INPUT_HEADER_FLOATS: usize = 25;
 const HMSC_ENTITY_FLOATS: usize = 8;
-const HMSC_RECT_FLOATS: usize = 8;
+// A rect is [minX, minZ, maxX, maxZ, top, solid, friction, restitution, floor].
+// `floor` (index 8) is the BOTTOM of the solid band: the rect blocks horizontally
+// only while the body overlaps [floor, top], so a thin platform (floor = top −
+// thickness) is solid to stand ON yet open to walk UNDER — the primitive that
+// makes stacked parking decks, overpasses, and mezzanines possible. A normal wall
+// passes floor = −∞ (HMSC_RECT_SOLID_FLOOR) so it stays solid to the ground exactly
+// as before. Standing-on-top is unchanged (the top + step-height gate already only
+// grounds you when your feet are within a step of the top, so a deck overhead never
+// snaps a player on the floor below up onto it).
+const HMSC_RECT_FLOATS: usize = 9;
+// An oriented rect: the same 9-float AABB in the building's OWN un-rotated frame,
+// then [pivotX, pivotZ, yawRadians]. The host tests a point by rotating it into
+// that frame about the pivot (inverse of the mesh's +Y yaw) and reusing the AABB
+// math; a push is rotated back out. yaw 0 would be identical to an AABB rect, so
+// only rotated buildings are sent here (state/hostPhysics.ts physicsOrientedRects).
+const HMSC_ORIENTED_FLOATS: usize = 12;
 const HMSC_OUTPUT_HEADER_FLOATS: usize = 9;
 const HMSC_OUTPUT_FLOATS: usize = HMSC_OUTPUT_HEADER_FLOATS + HMSC_MAX_ENTITIES * HMSC_ENTITY_FLOATS;
 const WORLD_HALF: f32 = 6.2;
@@ -133,6 +149,41 @@ var g_last_ns: i64 = 0;
 var g_spawn_seq: u32 = 0;
 var g_snapshot: [SNAPSHOT_FLOATS]f32 = undefined;
 var g_hmsc_snapshot: [HMSC_OUTPUT_FLOATS]f32 = undefined;
+
+// ── Heightfield colliders ──────────────────────────────────────────────
+// A generic terrain collider: a cols×rows grid of corner heights the host
+// samples bilinearly to get the ground under a point, plus a per-field walk
+// slope cosine. Surfaces flatter than the limit (normal.y >= walk_cos) are
+// walkable ground you stand on; steeper ones are walls you can't ascend. The
+// host knows ZERO shapes — TS bakes the grid (a cone, a carved trail, anything)
+// the same way it bakes a Heightfield mesh, registers it once via
+// __hmsc_register_heightfield, and the step samples it every frame. This is what
+// makes hit detection follow a real slope instead of a stack of flat boxes.
+// 64 slots × HMSC_HF_MAX_SAMPLES f32 = ~2 MB of static memory — negligible for a
+// desktop binary (one tile texture dwarfs it), and the per-frame step only samples
+// ACTIVE fields, so an empty slot is free. Headroom for many heightfield-floored
+// structures (garages, ramps, overpasses) on top of the terrain landforms.
+const HMSC_MAX_HEIGHTFIELDS: usize = 64;
+const HMSC_HF_MAX_SAMPLES: usize = 8192; // up to a ~90×90 grid (80×80 = 6400 fits)
+
+const HmscHeightfield = struct {
+    active: bool = false,
+    origin_x: f32 = 0, // world position of sample (0,0)
+    origin_z: f32 = 0,
+    cell: f32 = 1, // world meters between samples
+    cols: usize = 0,
+    rows: usize = 0,
+    base_y: f32 = 0, // world Y the stored heights are measured above
+    walk_cos: f32 = 1, // cos(slope limit): normal.y >= this ⇒ walkable
+    // Rotation of the grid about (pivot_x, pivot_z), radians +Y. 0 = axis-aligned
+    // (mountains/hills/painted terrain). A rotated building's heightfield floor (a
+    // parking garage) sets these so the ramp you walk follows the rotated model.
+    yaw: f32 = 0,
+    pivot_x: f32 = 0,
+    pivot_z: f32 = 0,
+    samples: [HMSC_HF_MAX_SAMPLES]f32 = [_]f32{0} ** HMSC_HF_MAX_SAMPLES,
+};
+var g_hmsc_heightfields: [HMSC_MAX_HEIGHTFIELDS]HmscHeightfield = [_]HmscHeightfield{.{}} ** HMSC_MAX_HEIGHTFIELDS;
 
 fn makePlayer() Player {
     return .{
@@ -769,7 +820,153 @@ fn hostStepBuffer(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF32Buffer(info, snapshot);
 }
 
-fn hmscGroundAt(rects: []const f32, x: f32, z: f32, current_y: f32, step_height: f32) f32 {
+// Bilinear height of one heightfield at (x,z), in stored units (above base_y).
+// null when (x,z) is outside the grid.
+fn hmscHfRawHeight(hf: *const HmscHeightfield, x: f32, z: f32) ?f32 {
+    if (hf.cols < 2 or hf.rows < 2 or hf.cell <= 0) return null;
+    // A rotated grid (a turned parking garage's floor) is sampled in its own
+    // un-rotated frame: rotate the query point into local coords about the pivot.
+    // The returned height (above base_y) and the Y-normal are rotation-invariant,
+    // so only the sample coordinate moves. Axis-aligned grids skip this.
+    var qx = x;
+    var qz = z;
+    if (hf.yaw != 0) {
+        hmscWorldToLocal(x, z, hf.pivot_x, hf.pivot_z, @cos(hf.yaw), @sin(hf.yaw), &qx, &qz);
+    }
+    const fx = (qx - hf.origin_x) / hf.cell;
+    const fz = (qz - hf.origin_z) / hf.cell;
+    if (fx < 0 or fz < 0) return null;
+    const fxi = @floor(fx);
+    const fzi = @floor(fz);
+    const ix: usize = @intFromFloat(fxi);
+    const iz: usize = @intFromFloat(fzi);
+    if (ix + 1 >= hf.cols or iz + 1 >= hf.rows) return null;
+    const tx = fx - fxi;
+    const tz = fz - fzi;
+    const h00 = hf.samples[iz * hf.cols + ix];
+    const h10 = hf.samples[iz * hf.cols + ix + 1];
+    const h01 = hf.samples[(iz + 1) * hf.cols + ix];
+    const h11 = hf.samples[(iz + 1) * hf.cols + ix + 1];
+    const h0 = h00 + (h10 - h00) * tx;
+    const h1 = h01 + (h11 - h01) * tx;
+    return h0 + (h1 - h0) * tz;
+}
+
+const HmscHfSurface = struct { height: f32, normal_y: f32, walk_cos: f32 };
+
+// The highest registered-heightfield surface under (x,z), with its up-normal —
+// the terrain's contribution to ground/wall resolution. normal.y comes from a
+// central difference of the sampled height (the real surface slope), so a steep
+// face reports a low normal.y the step treats as a wall.
+fn hmscHeightfieldSurfaceAt(x: f32, z: f32) ?HmscHfSurface {
+    var best: ?HmscHfSurface = null;
+    for (&g_hmsc_heightfields) |*hf| {
+        if (!hf.active) continue;
+        const raw = hmscHfRawHeight(hf, x, z) orelse continue;
+        const h = hf.base_y + raw;
+        const e = hf.cell;
+        const hx0 = hmscHfRawHeight(hf, x - e, z) orelse raw;
+        const hx1 = hmscHfRawHeight(hf, x + e, z) orelse raw;
+        const hz0 = hmscHfRawHeight(hf, x, z - e) orelse raw;
+        const hz1 = hmscHfRawHeight(hf, x, z + e) orelse raw;
+        const dhdx = (hx1 - hx0) / (2 * e);
+        const dhdz = (hz1 - hz0) / (2 * e);
+        const ny = 1.0 / @sqrt(dhdx * dhdx + 1.0 + dhdz * dhdz);
+        if (best == null or h > best.?.height) best = .{ .height = h, .normal_y = ny, .walk_cos = hf.walk_cos };
+    }
+    return best;
+}
+
+// __hmsc_register_heightfield(id, originX, originZ, cell, cols, rows, baseY,
+// walkCos, samplesFloat32Array) — upload/replace a terrain grid by id. Called
+// once when a mountain loads (the grid is static), then referenced every frame
+// by the step. Heights are stored above baseY, row-major (iz*cols + ix).
+fn hostHmscRegisterHeightfield(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const id_f = argToF64(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const id: usize = @intFromFloat(@max(0.0, id_f));
+    if (id >= HMSC_MAX_HEIGHTFIELDS) {
+        setReturnNull(info);
+        return;
+    }
+    const cols: usize = @intFromFloat(@max(0.0, argToF64(info, 4) orelse 0));
+    const rows: usize = @intFromFloat(@max(0.0, argToF64(info, 5) orelse 0));
+    const cell = argToF64(info, 3) orelse 1;
+    const count = cols * rows;
+    if (count < 4 or count > HMSC_HF_MAX_SAMPLES or cell <= 0) {
+        setReturnNull(info);
+        return;
+    }
+    const bytes = argBytes(info, 8) orelse {
+        setReturnNull(info);
+        return;
+    };
+    if (bytes.len < count * @sizeOf(f32)) {
+        setReturnNull(info);
+        return;
+    }
+    var hf = &g_hmsc_heightfields[id];
+    hf.origin_x = @floatCast(argToF64(info, 1) orelse 0);
+    hf.origin_z = @floatCast(argToF64(info, 2) orelse 0);
+    hf.cell = @floatCast(cell);
+    hf.cols = cols;
+    hf.rows = rows;
+    hf.base_y = @floatCast(argToF64(info, 6) orelse 0);
+    hf.walk_cos = @floatCast(argToF64(info, 7) orelse 1);
+    // Optional rotation (args after the samples array): yaw radians + pivot. A
+    // mountain/hill/painted field passes 0s (axis-aligned); a rotated building's
+    // floor passes its yaw + centre so the collider turns with the model.
+    hf.yaw = @floatCast(argToF64(info, 9) orelse 0);
+    hf.pivot_x = @floatCast(argToF64(info, 10) orelse 0);
+    hf.pivot_z = @floatCast(argToF64(info, 11) orelse 0);
+    // Byte copy (the source view may be unaligned) into the sample store.
+    const dst_bytes = std.mem.sliceAsBytes(hf.samples[0..count]);
+    @memcpy(dst_bytes, bytes[0 .. count * @sizeOf(f32)]);
+    hf.active = true;
+    setReturnNull(info);
+}
+
+// __hmsc_clear_heightfields() — drop all registered terrain (world reset / cart
+// swap). TS re-registers what the new world needs.
+fn hostHmscClearHeightfields(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    for (&g_hmsc_heightfields) |*hf| hf.active = false;
+    setReturnNull(info);
+}
+
+// __hmsc_spike_trace(on) — flip the engine's host-side per-frame spike logger.
+// Driven by `gv_perflog 2` so the host's ground-truth frame phases print
+// alongside the JS perfWatch report for cross-checking.
+fn hostHmscSpikeTrace(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    @import("engine.zig").g_host_spike_trace = argToBool(info, 0) orelse false;
+    setReturnNull(info);
+}
+
+// A world XZ point rotated into an oriented rect's local (un-rotated) frame —
+// the inverse of the mesh's +Y yaw about the pivot. `cs`/`sn` are cos/sin(yaw);
+// the inverse rotation is [[cs, -sn],[sn, cs]] applied to (point - pivot). Matches
+// render3d/buildingTransform.ts (whose local→world offset is its transpose).
+// (cos/sin are passed in, not named `c` — `c` is the engine C-import at file top.)
+fn hmscWorldToLocal(x: f32, z: f32, pivot_x: f32, pivot_z: f32, cs: f32, sn: f32, out_x: *f32, out_z: *f32) void {
+    const dx = x - pivot_x;
+    const dz = z - pivot_z;
+    out_x.* = pivot_x + cs * dx - sn * dz;
+    out_z.* = pivot_z + sn * dx + cs * dz;
+}
+
+// The reverse: a local point/push back to world (forward +Y yaw), [[cs, sn],[-sn, cs]].
+fn hmscLocalToWorld(x: f32, z: f32, pivot_x: f32, pivot_z: f32, cs: f32, sn: f32, out_x: *f32, out_z: *f32) void {
+    const dx = x - pivot_x;
+    const dz = z - pivot_z;
+    out_x.* = pivot_x + cs * dx + sn * dz;
+    out_z.* = pivot_z - sn * dx + cs * dz;
+}
+
+fn hmscGroundAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y: f32, step_height: f32) f32 {
     var ground_y: f32 = -1000000;
     var at: usize = 0;
     while (at + HMSC_RECT_FLOATS <= rects.len) : (at += HMSC_RECT_FLOATS) {
@@ -784,10 +981,22 @@ fn hmscGroundAt(rects: []const f32, x: f32, z: f32, current_y: f32, step_height:
             if (rect_height <= current_y + step_height) ground_y = @max(ground_y, rect_height);
         }
     }
+    // Oriented walls: rotate the foot point into each rect's frame, same test.
+    var o: usize = 0;
+    while (o + HMSC_ORIENTED_FLOATS <= oriented.len) : (o += HMSC_ORIENTED_FLOATS) {
+        const yaw = oriented[o + 11];
+        var lx: f32 = undefined;
+        var lz: f32 = undefined;
+        hmscWorldToLocal(x, z, oriented[o + 9], oriented[o + 10], @cos(yaw), @sin(yaw), &lx, &lz);
+        if (lx >= oriented[o] and lx <= oriented[o + 2] and lz >= oriented[o + 1] and lz <= oriented[o + 3]) {
+            const rect_height = oriented[o + 4];
+            if (rect_height <= current_y + step_height) ground_y = @max(ground_y, rect_height);
+        }
+    }
     return ground_y;
 }
 
-fn hmscSurfaceValueAt(rects: []const f32, x: f32, z: f32, current_y: f32, step_height: f32, value_offset: usize, fallback: f32) f32 {
+fn hmscSurfaceValueAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y: f32, step_height: f32, value_offset: usize, fallback: f32) f32 {
     var ground_y: f32 = -1000000;
     var value = fallback;
     var at: usize = 0;
@@ -800,6 +1009,20 @@ fn hmscSurfaceValueAt(rects: []const f32, x: f32, z: f32, current_y: f32, step_h
             if (rect_height <= current_y + step_height and rect_height >= ground_y) {
                 ground_y = rect_height;
                 value = rects[at + value_offset];
+            }
+        }
+    }
+    var o: usize = 0;
+    while (o + HMSC_ORIENTED_FLOATS <= oriented.len) : (o += HMSC_ORIENTED_FLOATS) {
+        const yaw = oriented[o + 11];
+        var lx: f32 = undefined;
+        var lz: f32 = undefined;
+        hmscWorldToLocal(x, z, oriented[o + 9], oriented[o + 10], @cos(yaw), @sin(yaw), &lx, &lz);
+        if (lx >= oriented[o] and lx <= oriented[o + 2] and lz >= oriented[o + 1] and lz <= oriented[o + 3]) {
+            const rect_height = oriented[o + 4];
+            if (rect_height <= current_y + step_height and rect_height >= ground_y) {
+                ground_y = rect_height;
+                value = oriented[o + value_offset];
             }
         }
     }
@@ -838,15 +1061,48 @@ fn hmscCollideCircleRect(x: *f32, z: *f32, vx: *f32, vz: *f32, radius: f32, rect
     return true;
 }
 
-fn hmscCollideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, restitution: f32, step_height: f32) void {
+fn hmscCollideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, oriented: []const f32, restitution: f32, step_height: f32) void {
     var at: usize = 0;
     while (at + HMSC_RECT_FLOATS <= rects.len) : (at += HMSC_RECT_FLOATS) {
         const solid = rects[at + 5] > 0.5;
         const rect_height = rects[at + 4];
+        const rect_floor = rects[at + 8];
         const too_tall_to_step = rect_height > y + step_height;
         if (!solid and !too_tall_to_step) continue;
         if (y >= rect_height - 0.04 or y + height < 0) continue;
+        // Banded solid: skip the side push when the body is entirely below the
+        // rect's floor — you walk UNDER a raised platform (a parking deck), not
+        // into it. Walls pass floor = −∞ so this never skips them.
+        if (y + height <= rect_floor) continue;
         _ = hmscCollideCircleRect(x, z, vx, vz, radius, rects[at .. at + HMSC_RECT_FLOATS], restitution);
+    }
+    // Oriented walls (yawed buildings): rotate the body + its velocity into the
+    // rect's frame, run the SAME AABB push there, then rotate the result back to
+    // world. The first 9 floats are the AABB the push reads; [9..12] are pivot+yaw.
+    var o: usize = 0;
+    while (o + HMSC_ORIENTED_FLOATS <= oriented.len) : (o += HMSC_ORIENTED_FLOATS) {
+        const solid = oriented[o + 5] > 0.5;
+        const rect_height = oriented[o + 4];
+        const rect_floor = oriented[o + 8];
+        const too_tall_to_step = rect_height > y + step_height;
+        if (!solid and !too_tall_to_step) continue;
+        if (y >= rect_height - 0.04 or y + height < 0) continue;
+        if (y + height <= rect_floor) continue;
+        const pivot_x = oriented[o + 9];
+        const pivot_z = oriented[o + 10];
+        const yaw = oriented[o + 11];
+        const cs = @cos(yaw);
+        const sn = @sin(yaw);
+        var lx: f32 = undefined;
+        var lz: f32 = undefined;
+        hmscWorldToLocal(x.*, z.*, pivot_x, pivot_z, cs, sn, &lx, &lz);
+        var lvx = cs * vx.* - sn * vz.*;
+        var lvz = sn * vx.* + cs * vz.*;
+        if (hmscCollideCircleRect(&lx, &lz, &lvx, &lvz, radius, oriented[o .. o + HMSC_RECT_FLOATS], restitution)) {
+            hmscLocalToWorld(lx, lz, pivot_x, pivot_z, cs, sn, x, z);
+            vx.* = cs * lvx + sn * lvz;
+            vz.* = -sn * lvx + cs * lvz;
+        }
     }
 }
 
@@ -915,6 +1171,7 @@ fn hostHmscPhysicsStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     var pvz = input[10];
     const entity_count = @min(HMSC_MAX_ENTITIES, @as(usize, @intFromFloat(@max(0, input[12]))));
     const rect_count = @min(HMSC_MAX_RECTS, @as(usize, @intFromFloat(@max(0, input[13]))));
+    const oriented_count = @min(HMSC_MAX_ORIENTED, @as(usize, @intFromFloat(@max(0, input[24]))));
     const gravity = @max(0, input[14]);
     const jump_speed = @max(0, input[15]);
     const player_radius = @max(0.05, input[16]);
@@ -928,11 +1185,13 @@ fn hostHmscPhysicsStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
 
     const entity_start = HMSC_INPUT_HEADER_FLOATS;
     const rect_start = entity_start + entity_count * HMSC_ENTITY_FLOATS;
-    if (input.len < rect_start + rect_count * HMSC_RECT_FLOATS) {
+    const oriented_start = rect_start + rect_count * HMSC_RECT_FLOATS;
+    if (input.len < oriented_start + oriented_count * HMSC_ORIENTED_FLOATS) {
         setReturnNull(info);
         return;
     }
     const rects = input[rect_start .. rect_start + rect_count * HMSC_RECT_FLOATS];
+    const oriented = input[oriented_start .. oriented_start + oriented_count * HMSC_ORIENTED_FLOATS];
 
     const move_len = @sqrt(move_x * move_x + move_z * move_z);
     if (move_len > 0.001) {
@@ -947,18 +1206,50 @@ fn hostHmscPhysicsStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         pvz *= drag;
     }
 
-    const player_ground_y = hmscGroundAt(rects, px, pz, py, step_height);
+    // Ground support = highest of the rect floor and any walkable terrain
+    // surface under the feet (terrain steeper than its slope limit does not
+    // support you, so it is excluded here and handled as a wall after the move).
+    var player_ground_y = hmscGroundAt(rects, oriented, px, pz, py, step_height);
+    if (hmscHeightfieldSurfaceAt(px, pz)) |s| {
+        if (s.normal_y >= s.walk_cos and s.height <= py + step_height) player_ground_y = @max(player_ground_y, s.height);
+    }
     var player_grounded = py <= player_ground_y + 0.015 and pvy <= 0;
     if (jump_down and player_grounded) {
         pvy = jump_speed;
         player_grounded = false;
     }
     pvy -= gravity * dt;
+    const prev_px = px;
+    const prev_pz = pz;
     px += pvx * dt;
     py += pvy * dt;
     pz += pvz * dt;
-    hmscCollideSolidRects(&px, py, &pz, &pvx, &pvz, player_radius, player_height, rects, @max(wall_restitution, player_surface_restitution * 0.15), step_height);
-    const next_ground_y = hmscGroundAt(rects, px, pz, py, step_height);
+    hmscCollideSolidRects(&px, py, &pz, &pvx, &pvz, player_radius, player_height, rects, oriented, @max(wall_restitution, player_surface_restitution * 0.15), step_height);
+    var next_ground_y = hmscGroundAt(rects, oriented, px, pz, py, step_height);
+    // Terrain hit detection on the real slope. The slope LIMIT is enforced by the
+    // surface normal, not the step height: a single frame only nudges the player a
+    // few cm, so a step-height gate would let them creep up any grade. Instead —
+    //   • walkable surface (normal.y >= limit): stand on it, climbing the gentle
+    //     grade smoothly (this is the carved trail);
+    //   • too-steep surface that rises ABOVE the feet (by any amount): a wall —
+    //     cancel the move into it so the steep cone face can't be climbed at all;
+    //   • too-steep surface at/below the feet: stand on it (sidehill / descend,
+    //     no fall-through) but you still can't gain height on it.
+    // So the only way UP a steep cone is the gently-graded trail cut into it.
+    if (hmscHeightfieldSurfaceAt(px, pz)) |s| {
+        const walkable = s.normal_y >= s.walk_cos;
+        if (!walkable and s.height > py + 0.02) {
+            px = prev_px;
+            pz = prev_pz;
+            pvx = 0;
+            pvz = 0;
+            if (hmscHeightfieldSurfaceAt(px, pz)) |held| {
+                if (held.height <= py + step_height) next_ground_y = @max(next_ground_y, held.height);
+            }
+        } else if (s.height <= py + step_height) {
+            next_ground_y = @max(next_ground_y, s.height);
+        }
+    }
     if (py <= next_ground_y) {
         py = next_ground_y;
         if (pvy < 0) pvy = 0;
@@ -983,10 +1274,10 @@ fn hostHmscPhysicsStep(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
         y += vy * dt;
         z += vz * dt;
         const entity_step_height = @max(0.05, r * 0.35);
-        hmscCollideSolidRects(&x, y - r, &z, &vx, &vz, r, r * 2, rects, wall_restitution, entity_step_height);
-        const gy = hmscGroundAt(rects, x, z, y - r, entity_step_height) + r;
-        const surface_friction = clamp(hmscSurfaceValueAt(rects, x, z, y - r, entity_step_height, 6, 0.2), 0, 1);
-        const surface_restitution = clamp(hmscSurfaceValueAt(rects, x, z, y - r, entity_step_height, 7, 0.8), 0, 1);
+        hmscCollideSolidRects(&x, y - r, &z, &vx, &vz, r, r * 2, rects, oriented, wall_restitution, entity_step_height);
+        const gy = hmscGroundAt(rects, oriented, x, z, y - r, entity_step_height) + r;
+        const surface_friction = clamp(hmscSurfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 6, 0.2), 0, 1);
+        const surface_restitution = clamp(hmscSurfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 7, 0.8), 0, 1);
         var grounded: f32 = 0;
         if (y <= gy) {
             y = gy;
@@ -1053,4 +1344,7 @@ pub fn registerPhysicsLab(_: anytype) void {
     v8_runtime.registerHostFn("__physics_lab_step", hostStep);
     v8_runtime.registerHostFn("__physics_lab_step_buffer", hostStepBuffer);
     v8_runtime.registerHostFn("__hmsc_physics_step", hostHmscPhysicsStep);
+    v8_runtime.registerHostFn("__hmsc_register_heightfield", hostHmscRegisterHeightfield);
+    v8_runtime.registerHostFn("__hmsc_clear_heightfields", hostHmscClearHeightfields);
+    v8_runtime.registerHostFn("__hmsc_spike_trace", hostHmscSpikeTrace);
 }

@@ -1,6 +1,6 @@
 // A grimy, detailed toilet. 1×1 footprint.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { defineThingymajigger } from './kit';
 
 export default defineThingymajigger({

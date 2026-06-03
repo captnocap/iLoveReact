@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Box, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Pressable, Text } from '@reactjit/primitives';
 import {
   CommandEntry,
   DEFAULT_AUTOSAVE_INTERVAL_MS,
@@ -18,7 +18,6 @@ import {
 import { recordAndPublishGameEvent } from './events/gameEvents';
 import { useHmscEventRules } from './events/useHmscEventRules';
 import { HmscGameplayRig } from './gameplay/HmscGameplayRig';
-import { PerfMarksHud } from './render/PerfMarksHud';
 import { normalizeSkyHour } from './render3d/sky';
 import {
   REAL_MILLISECONDS_PER_MINUTE,
@@ -136,7 +135,6 @@ export default function HmscCart() {
         setGameState={setGameState}
         inputBlocked={consoleOpen}
       />
-      <PerfMarksHud />
       <Box style={{ position: 'absolute', top: 16, left: 18, zIndex: 2 }}>
         <Pressable
           onPress={() => setConsoleOpen((open) => !open)}

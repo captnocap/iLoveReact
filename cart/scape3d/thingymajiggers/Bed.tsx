@@ -4,7 +4,7 @@
 // the bed stays low, just longer + wider. Tune the look by editing the design numbers;
 // tune the size by editing S + the footprint together.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { defineThingymajigger } from './kit';
 
 const S = 2; // 2×1 design space → 4×2 footprint

@@ -3,8 +3,8 @@
 // Ship: ./scripts/ship hmsc_scale_lab
 
 import { useEffect, useRef, useState } from 'react';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
-import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { busOn } from '@reactjit/hooks/useIFTTT';
+import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { PlayerFigure } from './hmsc/render3d/PlayerFigure';
 import { HMSC_SCALE } from './hmsc/world/scale';

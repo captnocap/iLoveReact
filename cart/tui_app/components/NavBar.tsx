@@ -7,7 +7,7 @@
 // Pressable + mouse click works today and is enough for the basics.
 
 import * as React from 'react';
-import { Box, Row, Text, Pressable } from '@reactjit/runtime/primitives';
+import { Box, Row, Text, Pressable } from '@reactjit/primitives';
 import { useNavigate } from '../../app/gallery/local-router';
 
 interface Tab {

@@ -18,7 +18,7 @@
 // dynamic and live in the render tree, not here.
 
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { T, VOID, type PropKind } from './citymap';
 import { ZONE_HEX, PLAZA_A, PLAZA_B, ROAD_LINE } from '../render3d/palette3d';
 import { checkerTex, asphaltTex } from '../render3d/textures';

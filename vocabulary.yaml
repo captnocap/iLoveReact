@@ -1,7 +1,7 @@
 metadata:
   project_name: ''
   created_at: '2026-05-18T16:42:36.159688+00:00'
-  updated_at: '2026-05-18T20:13:30.462031+00:00'
+  updated_at: '2026-05-31T22:23:15.977213+00:00'
   version: '1.0'
 entries:
 - term: cart
@@ -524,15 +524,15 @@ entries:
 - term: fps
   category: noun
   definition: Rendered frames per second. The user's universal quality metric for
-    whether an approach is acceptable. Holding fps = good approach; dropping fps
-    = bad approach, regardless of any other 'correctness' it claims. Term trigger
-    is intentionally 'fps' only — 'frames' as a verb form (e.g. 'Claude frames
-    things in human-time') used to cause false positives.
+    whether an approach is acceptable. Holding fps = good approach; dropping fps =
+    bad approach, regardless of any other 'correctness' it claims. Term trigger is
+    intentionally 'fps' only — 'frames' as a verb form (e.g. 'Claude frames things
+    in human-time') used to cause false positives.
   antipatterns:
   - Do NOT justify a slow approach with theoretical merit if it drops fps — frame-stability
     is the override
-  - Do NOT measure performance with synthetic microbenchmarks when fps impact is
-    what matters
+  - Do NOT measure performance with synthetic microbenchmarks when fps impact is what
+    matters
   - Do NOT recommend an architecture without considering its fps cost; an approach
     that loses frames is, by definition, the wrong approach
   related_terms:
@@ -1097,4 +1097,91 @@ entries:
   - experiment
   defined_in: CLAUDE.md
   added_at: '2026-05-18T20:13:30.462003+00:00'
+  added_by: vocabulary_add
+- term: decal
+  category: noun
+  definition: A look authored in React (Box/Text/Image) and baked to a texture — the
+    drawn-in-React source in the art layer. What building facades and street signs
+    already are.
+  antipatterns:
+  - Do NOT call this a skin — skin is reserved (theme variant + BuildingSkin).
+  - Do NOT confuse a decal (drawn in React) with a shader (computed WGSL) or an imported
+    image — they are three different material sources.
+  related_terms: []
+  defined_in: cart/hmsc/render3d/buildingSkins.tsx
+  added_at: '2026-05-31T22:23:04.708184+00:00'
+  added_by: vocabulary_add
+- term: shader
+  category: noun
+  definition: A tunable WGSL recipe (an Effect) that COMPUTES a look; an art-layer
+    source. Its canvas is exactly 1 tile (1x1) — wider looks decompose into per-tile
+    materials. Materializes into a material.
+  antipatterns:
+  - Do NOT treat a shader as a material — a shader Materializes INTO a material; it
+    is the recipe, not the assignable asset.
+  - Do NOT author a shader wider than one tile — slice it into per-tile materials
+    (the road = asphalt base + yellow/white/bike tile-materials).
+  related_terms: []
+  defined_in: cart/hmsc/render3d/roadFill.ts
+  added_at: '2026-05-31T22:23:04.876708+00:00'
+  added_by: vocabulary_add
+- term: material
+  category: noun
+  definition: A baked, named, assignable look produced by Materializing an art-layer
+    source (shader/decal/image). Frozen (baked once) or live (re-baked per frame).
+    Assigned to a tile or a building/object face via its material slot (render.textureKey).
+  antipatterns:
+  - Do NOT use material for the authoring source — that is a shader/decal/image; a
+    material is what they Materialize INTO.
+  - Do NOT confuse the visual material with surface.material (concrete/road/sand),
+    which is the PHYSICS/gameplay material — two separate axes.
+  related_terms: []
+  defined_in: cart/hmsc-int/shaderCatalog.ts
+  added_at: '2026-05-31T22:23:05.040010+00:00'
+  added_by: vocabulary_add
+- term: materialize
+  category: verb
+  definition: Bake an art-layer source (shader/decal/image) into a named material
+    in the Materials library.
+  antipatterns:
+  - Do NOT use materialize loosely for any rendering or for the per-frame bake — it
+    is specifically the art-source to named-material freeze step.
+  related_terms: []
+  defined_in: cart/hmsc-int/ShaderLab.tsx
+  added_at: '2026-05-31T22:23:05.203681+00:00'
+  added_by: vocabulary_add
+- term: art layer
+  category: phrase
+  definition: 'The look-authoring layer of hmsc-int: shaders + decals (+ images) are
+    tuned, then Materialized into materials in a library.'
+  antipatterns:
+  - Do NOT conflate the art layer with the paint layer (placing tile kinds + colors)
+    or the texture layer (assigning materials).
+  related_terms: []
+  defined_in: cart/hmsc-int/tabs/ObjectsTab.tsx
+  added_at: '2026-05-31T22:23:15.651921+00:00'
+  added_by: vocabulary_add
+- term: paint layer
+  category: phrase
+  definition: 'The map-authoring layer: lay tile KINDS + flat colors on the 2D grid
+    (the PaintCanvas). Carries structure + gameplay (a sidewalk walks/sounds like
+    a sidewalk).'
+  antipatterns:
+  - Do NOT conflate the paint layer with assigning materials — that is the texture
+    layer. Paint sets kind + color, not the material look.
+  related_terms: []
+  defined_in: cart/hmsc-int/PaintCanvas.tsx
+  added_at: '2026-05-31T22:23:15.814409+00:00'
+  added_by: vocabulary_add
+- term: texture layer
+  category: phrase
+  definition: 'The dressing layer: assign library materials onto painted tiles AND
+    building/object faces, via the per-placement material slot (render.textureKey).
+    A cell defaults to its kind material until overridden here.'
+  antipatterns:
+  - Do NOT use texture here to mean the raw pixel image — this layer is the ASSIGNMENT
+    of a material to a surface, not the pixels.
+  related_terms: []
+  defined_in: cart/hmsc-int/PropertiesPanel.tsx
+  added_at: '2026-05-31T22:23:15.977186+00:00'
   added_by: vocabulary_add

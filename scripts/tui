@@ -83,7 +83,7 @@ mkdir -p "$ROOT/tui/.cache"
   --conditions=default \
   --alias:@cart-entry="$ENTRY_ABS" \
   --alias:@reactjit/core="$ROOT/runtime/core_stub.ts" \
-  --alias:@reactjit/runtime="$ROOT/runtime" \
+  --alias:@reactjit="$ROOT/runtime" \
   --alias:react="$ROOT/deps/react" \
   --alias:react-reconciler="$ROOT/deps/react-reconciler" \
   --alias:scheduler="$ROOT/deps/scheduler" \

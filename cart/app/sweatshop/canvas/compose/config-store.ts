@@ -6,8 +6,8 @@
 // throwaway/derivable, so the file is what actually survives and travels.
 // One pretty-printed JSON file per config under the user's sweatshop dir.
 
-import { writeFile, mkdir, readFile, remove } from '@reactjit/runtime/hooks/fs';
-import { callHost, hasHost } from '@reactjit/runtime/ffi';
+import { writeFile, mkdir, readFile, remove } from '@reactjit/hooks/fs';
+import { callHost, hasHost } from '@reactjit/ffi';
 import type { IfThenConfig } from './types';
 
 function homeDir(): string {

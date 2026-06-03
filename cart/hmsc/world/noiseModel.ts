@@ -84,9 +84,6 @@ export const MOVEMENT_NOISE_MODES: Record<MovementNoiseMode['mode'], MovementNoi
 
 export const TILE_KIND_NOISE_MATERIALS: Record<TileKind, SurfaceNoiseMaterial> = {
   water: 'waterShallow',
-  residential: 'concrete',
-  downtown: 'concrete',
-  mixed: 'concrete',
   road: 'concrete',
   asphalt: 'concrete',
   sidewalk: 'concrete',
@@ -94,6 +91,7 @@ export const TILE_KIND_NOISE_MATERIALS: Record<TileKind, SurfaceNoiseMaterial> =
   sand: 'dirt',
   wall: 'concrete',
   door: 'woodFloor',
+  bush: 'dirt',
   marker: 'concrete',
 };
 

@@ -7,7 +7,7 @@
 // and (b) a chromatic post-process applied in index.tsx. Sober → no sway, the
 // truth; peaking → the world breathes and the colour splits.
 
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { cameraFor, type Cam } from '../world/projection';
 import { heightAt } from '../world/terrain';
 import { hex, PATH_DOT, PATH_TARGET } from './palette3d';

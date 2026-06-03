@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# hmsc-check — audit the hmsc seed world from the shell, no game window.
+#
+# Runs the placement validator over the world as authored in code
+# (state/gameState.ts), printing the ⚠/✗ report and exiting non-zero on any
+# hard error. Use it after editing the seed (buildings/props/mountains/roads) to
+# catch bad tile/scale/spacing before launching the game.
+#
+# Bundled with tools/esbuild DIRECTLY (the runner is a plain script, not a cart
+# App, so scripts/cart-bundle.js — which only wraps Apps — can't build it). The
+# runner imports only the React-free seed builders + validator.
+#
+# Usage:  ./scripts/hmsc-check
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+mkdir -p "$ROOT/.cache"
+OUT="$ROOT/.cache/hmsc-world-check.js"
+
+"$ROOT/tools/esbuild" cart/hmsc/tools/runWorldScript.ts \
+  --bundle --format=iife --platform=neutral --target=es2022 \
+  --outfile="$OUT" --log-level=warning
+
+"$ROOT/tools/v8cli" "$OUT"

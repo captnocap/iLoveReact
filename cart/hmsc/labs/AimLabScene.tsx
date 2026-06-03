@@ -1,4 +1,4 @@
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { GameState } from '../design';
 import { HMSC_GAMEPLAY_CAMERA } from '../gameplay/camera';

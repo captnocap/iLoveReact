@@ -5,7 +5,7 @@
 // row behaves like active chat tabs rather than a recents drawer.
 
 import * as React from 'react';
-import { Box, Row, Text, TextInput, Pressable } from '@reactjit/runtime/primitives';
+import { Box, Row, Text, TextInput, Pressable } from '@reactjit/primitives';
 import {
   loadSession,
   renameSession,

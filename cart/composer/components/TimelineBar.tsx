@@ -5,7 +5,7 @@
 // provides lightweight event metadata; playback still goes through the
 // audio engine unchanged.
 
-import { Row, Col, Box, Text, ScrollView } from '@reactjit/runtime/primitives';
+import { Row, Col, Box, Text, ScrollView } from '@reactjit/primitives';
 import { COLORS, SIZES } from '../theme';
 import type { ComposerState } from '../state';
 import type { TimelineEvent } from '../compiler';

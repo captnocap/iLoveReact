@@ -16,7 +16,7 @@
 // is ALWAYS an `other` option for "none of these — let me clarify" / "not
 // supported". Few options when intent is specific, several when ambiguous.
 
-import { listIfttSources, listIfttActions } from '@reactjit/runtime/hooks/ifttt/registry';
+import { listIfttSources, listIfttActions } from '@reactjit/hooks/ifttt/registry';
 import { catalogPromptBlock, entriesFor, type Side } from './catalog';
 import { compositionGuide } from './composition';
 import { OTHER_ID, parseChain, type Suggestion } from './types';

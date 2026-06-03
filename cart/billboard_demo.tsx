@@ -12,7 +12,7 @@
 // without any extra geometry. Ship: ./scripts/ship billboard_demo
 
 import { useEffect, useState } from 'react';
-import { Box, Text, Scene3D, StaticSurface, Effect, Filter } from '@reactjit/runtime/primitives';
+import { Box, Text, Scene3D, StaticSurface, Effect, Filter } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 
 const TEX_W = 512;

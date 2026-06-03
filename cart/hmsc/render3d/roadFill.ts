@@ -18,64 +18,57 @@ import { TILE_FILL_WGSL } from './tileFill';
 //   D[7] dashPeriodMeters            D[8] dashMarkFraction (mark / period)
 //   D[9] markingHalfWidthMeters      D[10] curbHalfWidthMeters
 //   D[11] centerlineHalfGapMeters
-export const ROAD_CROSS_SECTION_SHADER = `
-@group(0) @binding(1) var<storage, read> D: array<f32>;
-${TILE_FILL_WGSL}
+// The road cross-section as a reusable WGSL function, painted purely by distance
+// d from the centerline (and along-position yM for the dashes). Both the straight
+// <Road> slab and the estate-hill spiral road call this, so a curved hill road
+// gets the IDENTICAL asphalt + double-yellow lanes and the two connect seamlessly.
+// Assumes TILE_FILL_WGSL (fill_road / fill_concrete / line_near / tf_rand) is
+// already included before it.
+export const ROAD_CROSS_SECTION_WGSL = `
 const ROAD_MARK_PAINT = vec3f(0.86, 0.87, 0.83);
 const ROAD_CENTER_YELLOW = vec3f(0.93, 0.74, 0.18);
 const ROAD_CURB = vec3f(0.30, 0.31, 0.33);
 const ROAD_BIKE_TINT = vec3f(0.10, 0.34, 0.18);
-@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let acrossAxis = D[0];
-  let widthM = D[1];
-  let lengthM = D[2];
-  let lanesPerDir = D[3];
-  let laneW = D[4];
-  let bikeM = D[5];
-  let walkM = D[6];
-  let dashPeriod = D[7];
-  let dashMarkFrac = D[8];
-  let markHalf = D[9];
-  let curbHalf = D[10];
-  let centerHalfGap = D[11];
-
-  var across = in.uv.x;
-  var along = in.uv.y;
-  if (acrossAxis > 0.5) { across = in.uv.y; along = in.uv.x; }
-
-  let xM = across * widthM;
-  let yM = along * lengthM;
+fn road_cross_section(xM: f32, yM: f32, widthM: f32, lanesPerDir: f32, laneW: f32, bikeM: f32, walkM: f32, dashPeriod: f32, dashMarkFrac: f32, markHalf: f32, curbHalf: f32, centerHalfGap: f32) -> vec3f {
   let d = abs(xM - widthM * 0.5);
   let carriageHalf = lanesPerDir * laneW + bikeM;
-
   let seed = tf_rand(floor(vec2f(xM, yM) * 0.5)) * 50.0;
   let uvLocal = vec2f(fract(xM), fract(yM));
   let px = vec2f(xM, yM) * 64.0;
-
   var col: vec3f;
   if (walkM > 0.0 && d > carriageHalf) {
     col = fill_concrete(uvLocal, px, 0.0, seed);
   } else {
     col = fill_road(uvLocal, px, 0.0, seed);
-    // Bike lane: green tint between the outer car lane and the curb, with a
-    // solid white line on its inner edge.
     if (bikeM > 0.0 && d > carriageHalf - bikeM) {
       col = mix(col, ROAD_BIKE_TINT, 0.30);
       col = mix(col, ROAD_MARK_PAINT, line_near(d - (carriageHalf - bikeM), markHalf) * 0.9);
     }
-    // Dashed divider between the two car lanes (only exists at 2 lanes/dir).
     if (lanesPerDir > 1.5) {
       let dash = 1.0 - step(dashMarkFrac, fract(yM / dashPeriod));
       col = mix(col, ROAD_MARK_PAINT, line_near(d - laneW, markHalf) * dash * 0.9);
     }
-    // Double-yellow centerline = the separator the minimum road must have.
     col = mix(col, ROAD_CENTER_YELLOW, line_near(d - centerHalfGap, markHalf) * 0.95);
   }
-  // Curb joint where the carriageway meets a sidewalk.
   if (walkM > 0.0) {
     col = mix(col, ROAD_CURB, line_near(d - carriageHalf, curbHalf) * 0.8);
   }
-  return vec4f(col, 1.0);
+  return col;
+}
+`;
+
+export const ROAD_CROSS_SECTION_SHADER = `
+@group(0) @binding(1) var<storage, read> D: array<f32>;
+${TILE_FILL_WGSL}
+${ROAD_CROSS_SECTION_WGSL}
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let acrossAxis = D[0];
+  let widthM = D[1];
+  let lengthM = D[2];
+  var across = in.uv.x;
+  var along = in.uv.y;
+  if (acrossAxis > 0.5) { across = in.uv.y; along = in.uv.x; }
+  return vec4f(road_cross_section(across * widthM, along * lengthM, widthM, D[3], D[4], D[5], D[6], D[7], D[8], D[9], D[10], D[11]), 1.0);
 }
 `;
 

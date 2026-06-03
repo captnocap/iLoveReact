@@ -1,5 +1,5 @@
-import { busEmit } from '@reactjit/runtime/hooks/useIFTTT';
-import { bus as hostEventBus } from '@reactjit/runtime/eventBus';
+import { busEmit } from '@reactjit/hooks/useIFTTT';
+import { bus as hostEventBus } from '@reactjit/eventBus';
 import type { CommandResult, GameState, GridCell, HmscEventRef, HmscGameEvent } from '../design';
 import { DEFAULT_GAME_EVENT_LOG_LIMIT } from '../state/defaults';
 import { cellKey, worldToCell } from '../world/grid';

@@ -3,10 +3,10 @@
 // Ship: ./scripts/ship hmsc_massive_map_lab
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
-import { useTelemetry } from '@reactjit/runtime/hooks/useTelemetry';
-import { set as setClipboard } from '@reactjit/runtime/hooks/clipboard';
-import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { busOn } from '@reactjit/hooks/useIFTTT';
+import { useTelemetry } from '@reactjit/hooks/useTelemetry';
+import { set as setClipboard } from '@reactjit/hooks/clipboard';
+import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { PlayerFigure } from './hmsc/render3d/PlayerFigure';
 import { HMSC_SCALE } from './hmsc/world/scale';

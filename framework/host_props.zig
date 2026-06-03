@@ -127,6 +127,7 @@ pub fn applyMouseHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     node.handlers.js_on_mouse_up = null;
     node.handlers.js_on_hover_enter = null;
     node.handlers.js_on_hover_exit = null;
+    node.handlers.js_on_scroll = null;
     if (cmdHasAnyHandlerName(cmd, &.{ "onClick", "onPress" })) {
         node.handlers.js_on_press = installJsExpr("__dispatchEvent({d},'onClick')\x00", id);
     }
@@ -144,6 +145,15 @@ pub fn applyMouseHandlerFlags(node: *Node, id: u32, cmd: std.json.Value) void {
     }
     if (cmdHasAnyHandlerName(cmd, &.{ "onHoverExit", "onMouseLeave" })) {
         node.handlers.js_on_hover_exit = installJsExpr("__dispatchEvent({d},'onHoverExit')\x00", id);
+    }
+    // onScroll: the GPU shell delivers the raw wheel delta to JS via
+    // __dispatchScroll(id) (which reads the prepared scroll payload). A node
+    // with onScroll need NOT be a scroll container — a transparent overlay
+    // can opt into the wheel to drive a 3D camera dolly, a zoomable surface,
+    // etc. The wheel handler in engine.zig hit-tests js_on_scroll as a
+    // fallback when no scroll container captured the event.
+    if (cmdHasHandlerName(cmd, "onScroll")) {
+        node.handlers.js_on_scroll = installJsExpr("__dispatchScroll({d})\x00", id);
     }
 }
 

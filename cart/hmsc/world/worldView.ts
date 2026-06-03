@@ -2,6 +2,7 @@ import type { GameState, ZoneFlag } from '../design';
 import type { WorldLayer } from './placeables';
 import { buildingKindDefinition } from './buildingKinds';
 import { propKindDefinition } from './propKinds';
+import { landformKindDef } from './landforms';
 
 // The shared map read-model. Both the in-game minimap (render/Hud.tsx) and the
 // internal map (cart/hmsc-int) draw landmarks from worldMarkers() instead of each
@@ -39,16 +40,20 @@ function buildingMarkers(state: GameState): WorldMarker[] {
   }));
 }
 
-function mountainMarkers(state: GameState): WorldMarker[] {
-  return state.world.mountains.map((m) => {
-    const r = m.baseRadiusMeters;
+// Terrain landmarks — the registry-driven landforms (mountains/hills/estate).
+// Each reads its footprint radius from its kind def, so a new landform shows on
+// every map for free. Drawn under the 'mountain' map layer (the terrain layer).
+function landformMarkers(state: GameState): WorldMarker[] {
+  return (state.world.landforms ?? []).map((lf) => {
+    const def = landformKindDef(lf.kind);
+    const r = def ? def.footprintRadius(lf.params, lf.field) : 1;
     return {
-      layer: 'mountain',
-      id: m.id,
-      label: m.label,
+      layer: 'mountain' as const,
+      id: lf.id,
+      label: lf.label,
       swatchColor: '#8a6d3b',
-      x: m.centerX - r,
-      z: m.centerZ - r,
+      x: lf.centerX - r,
+      z: lf.centerZ - r,
       width: r * 2,
       depth: r * 2,
       icon: '^',
@@ -109,7 +114,7 @@ function propMarkers(state: GameState): WorldMarker[] {
 // Provider LIST — the forward seam from WORLD_AUTHORING_PLAN. Each registered
 // provider's markers appear on every map for free; the quest slice pushes an
 // objective-pin provider here later.
-const MARKER_PROVIDERS: MarkerProvider[] = [buildingMarkers, mountainMarkers, zoneMarkers, propMarkers];
+const MARKER_PROVIDERS: MarkerProvider[] = [buildingMarkers, landformMarkers, zoneMarkers, propMarkers];
 
 export function worldMarkers(state: GameState): WorldMarker[] {
   return MARKER_PROVIDERS.flatMap((provider) => provider(state));

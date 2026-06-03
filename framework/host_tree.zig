@@ -298,14 +298,17 @@ pub fn ensureNode(id: u32) !*Node {
 pub fn appendChild(parent_id: u32, child_id: u32) !void {
     _ = try ensureNode(parent_id);
     _ = try ensureNode(child_id);
+    // Already in the tree ⇒ React is REPOSITIONING this node, not mounting it.
+    const is_move = g_parent_id.get(child_id) != null;
     if (g_children_ids.getPtr(parent_id)) |list| try list.append(g_alloc, child_id);
     try g_parent_id.put(child_id, parent_id);
-    markSubtreeDirty(child_id);
+    dirtyForPlacement(parent_id, child_id, is_move);
     g_dirty = true;
 }
 
 pub fn insertBefore(parent_id: u32, child_id: u32, before_id: u32) !void {
     _ = try ensureNode(child_id);
+    const is_move = g_parent_id.get(child_id) != null;
     if (g_children_ids.getPtr(parent_id)) |list| {
         var idx: usize = list.items.len;
         for (list.items, 0..) |x, i| if (x == before_id) {
@@ -315,8 +318,20 @@ pub fn insertBefore(parent_id: u32, child_id: u32, before_id: u32) !void {
         try list.insert(g_alloc, idx, child_id);
     }
     try g_parent_id.put(child_id, parent_id);
-    markSubtreeDirty(child_id);
+    dirtyForPlacement(parent_id, child_id, is_move);
     g_dirty = true;
+}
+
+/// Stamp the content-dirty frame for a child placement. A fresh mount dirties
+/// the child (its subtree is new). A REPOSITION (the child already lived in the
+/// tree — a sibling-array shift) dirties only the parent/ancestors, whose child
+/// ORDER changed, and deliberately NOT the moved node: a `<StaticSurface>`'s
+/// baked texture is position-independent, so re-baking it on a move is pure
+/// waste (this was the idle paint spike — a toggled sibling shifted the floor
+/// captures and re-baked their 900×900 shaders every frame). Layout still
+/// redraws the moved node's quad at its new spot from the cached texture.
+fn dirtyForPlacement(parent_id: u32, child_id: u32, is_move: bool) void {
+    if (is_move) markSubtreeDirty(parent_id) else markSubtreeDirty(child_id);
 }
 
 pub fn removeChild(parent_id: u32, child_id: u32) void {

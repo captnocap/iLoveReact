@@ -16,9 +16,9 @@
 // call `askAssistant(text)` from the store.
 
 import { useEffect, useRef } from 'react';
-import { useRoute } from '@reactjit/runtime/router';
-import { parseIntent, type Node } from '@reactjit/runtime/intent/parser';
-import { busEmit } from '@reactjit/runtime/hooks/useIFTTT';
+import { useRoute } from '@reactjit/router';
+import { parseIntent, type Node } from '@reactjit/intent/parser';
+import { busEmit } from '@reactjit/hooks/useIFTTT';
 
 // Parse a `@stage/accept|retry|cancel` Btn reply. The chat card the
 // assistant emits after canvas mutations carries one of those three

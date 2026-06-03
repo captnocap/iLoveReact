@@ -81,6 +81,7 @@ pub const EventHandler = struct {
     on_submit: ?*const fn () void = null,
     on_scroll: ?*const fn () void = null,
     on_right_click: ?*const fn (x: f32, y: f32) void = null,
+    js_on_scroll: ?[*:0]const u8 = null,
     js_on_press: ?[*:0]const u8 = null,
     js_on_mouse_down: ?[*:0]const u8 = null,
     js_on_mouse_move: ?[*:0]const u8 = null,
@@ -157,6 +158,7 @@ fn hasHandlers(h: *const EventHandler) bool {
         h.on_change_text != null or
         h.on_submit != null or
         h.on_scroll != null or
+        h.js_on_scroll != null or
         h.on_right_click != null or
         h.js_on_mouse_down != null or
         h.js_on_mouse_move != null or
@@ -368,6 +370,49 @@ pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
     }
 
     if (node.handlers.on_right_click != null or node.context_menu_items != null) {
+        if (mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
+            return node;
+        }
+    }
+
+    return null;
+}
+
+/// Walk the tree back-to-front to find the deepest node containing (mx, my)
+/// that has an onScroll handler but is NOT itself a scroll container. This is
+/// the wheel-event fallback for nodes that opt into the raw wheel delta — e.g.
+/// a transparent <Pressable onScroll> over a <Scene3D> driving camera dolly.
+/// A real scroll container is handled earlier by findScrollContainer; this only
+/// runs when no container captured the wheel, so the two never double-fire.
+pub fn hitTestScroll(node: *Node, mx: f32, my: f32) ?*Node {
+    if (node.style.display == .none) return null;
+
+    const r = node.computed;
+    const ov = node.style.overflow;
+    const is_scroll = (ov == .scroll or (ov == .auto and node.content_height > r.h));
+    var child_mx = mx;
+    var child_my = my;
+    if (is_scroll) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        child_my = my + node.scroll_y;
+        child_mx = mx + node.scroll_x;
+    }
+
+    // Filter-aware warp — see hitTest comment.
+    if (node.filter_name != null) {
+        const w = warpForFilter(node, r, child_mx, child_my);
+        if (!w.in_bounds) return null;
+        child_mx = w.x;
+        child_my = w.y;
+    }
+
+    var i = node.children.len;
+    while (i > 0) {
+        i -= 1;
+        if (hitTestScroll(&node.children[i], child_mx, child_my)) |hit| return hit;
+    }
+
+    if (node.handlers.js_on_scroll != null or node.handlers.on_scroll != null) {
         if (mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
             return node;
         }

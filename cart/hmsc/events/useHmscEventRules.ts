@@ -1,4 +1,4 @@
-import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
+import { useIFTTT } from '@reactjit/hooks/useIFTTT';
 import type { GameState, HmscGameEvent, StoryValue } from '../design';
 import { recordAndPublishGameEvent } from './gameEvents';
 

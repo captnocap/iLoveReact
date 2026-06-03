@@ -1,7 +1,7 @@
 // Scape composition root. World math, runtime state, shaders, sprites, HUD, and
 // chat live in focused modules; this file only wires them together.
 
-import { Box, Effect, Pressable } from '@reactjit/runtime/primitives';
+import { Box, Effect, Pressable } from '@reactjit/primitives';
 import { GROUND_WGSL } from './render/ground.wgsl';
 import { Hud } from './render/Hud';
 import { Player } from './render/Player';

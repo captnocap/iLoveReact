@@ -15,15 +15,13 @@
 // re-bakes a chunk's texture in place.
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Effect, Pressable, Scene3D, Text, StaticSurface } from '@reactjit/primitives';
+import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import { Heightfield } from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import type { GameState } from '../hmsc/design';
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
-import { floorTextureKey } from '../hmsc/render3d/tileSurface';
-import { TILE_FIELD_WGSL } from './tileField.wgsl';
-import { chunkFloorId, type ChunkFloor } from './chunkFloor';
-import { CHUNK_TILES } from './chunks';
+import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
+import { useChurn } from './perfLog';
 
 type Vec3 = [number, number, number];
 
@@ -31,72 +29,12 @@ const FLY_SPEED = 45; // metres / second (a chunk is 120m across)
 const FAR_CLIP = 4000; // metres — push the cull plane far past the world so nothing clips
 const FOV = 65;
 
-// Capture resolution per chunk: ~4px per 1m tile over a 120-tile chunk. Well under
-// any window framebuffer (a capture can't exceed it — see tileSurface).
-const CAP_PX = 480;
-
-// One chunk's floor texture: its per-cell tile field captured offscreen, keyed by
-// chunk so the texture (and its bind group) persists across paints — only the
-// contents re-bake. Identities stabilized so an unrelated re-render does not commit
-// an Effect UPDATE that would re-bake every frame.
-const ChunkFloorCapture = memo(function ChunkFloorCapture(props: { cx: number; cz: number; tileData: number[] }) {
-  const surfaceStyle = useMemo(() => ({ position: 'absolute' as const, left: -99999, top: 0, width: CAP_PX, height: CAP_PX }), []);
-  const effectStyle = useMemo(() => ({ width: CAP_PX, height: CAP_PX }), []);
-  return (
-    <StaticSurface staticKey={floorTextureKey(chunkFloorId(props.cx, props.cz))} style={surfaceStyle}>
-      <Effect shader={TILE_FIELD_WGSL} data={props.tileData} style={effectStyle} />
-    </StaticSurface>
-  );
-});
-
-// The 2D offscreen textures (one per focused chunk). Memoized on tileData so a
-// height-only stroke (tileData unchanged) never re-bakes the texture.
-const ChunkFloorCaptures = memo(function ChunkFloorCaptures(props: { floors: ChunkFloor[] }) {
-  return (
-    <>
-      {props.floors.map((f) => (
-        <ChunkFloorCapture key={chunkFloorId(f.cx, f.cz)} cx={f.cx} cz={f.cz} tileData={f.tileData} />
-      ))}
-    </>
-  );
-});
-
-// One displaced floor mesh per focused chunk: a Heightfield slab displaced by the
-// chunk's height samples, textured by its tile capture. params is memoized on the
-// heights identity (stable from the painter's cache) so a tile-only stroke never
-// regenerates the mesh.
-const ChunkFloorMesh = memo(function ChunkFloorMesh(props: { cx: number; cz: number; heights: number[]; hcols: number; hrows: number; hver: number }) {
-  const params = useMemo(
-    () => ({ heights: props.heights, cols: props.hcols, rows: props.hrows, width: CHUNK_TILES, depth: CHUNK_TILES, base: 0.3 }),
-    [props.heights, props.hcols, props.hrows],
-  );
-  const position = useMemo<Vec3>(
-    () => [props.cx * CHUNK_TILES + CHUNK_TILES / 2, 0, props.cz * CHUNK_TILES + CHUNK_TILES / 2],
-    [props.cx, props.cz],
-  );
-  // Live geometry: a stable per-chunk slot id + a version that bumps each edit, so
-  // the host overwrites one reused vertex slot instead of leaking a new one.
-  return (
-    <Scene3D.Mesh
-      geometry={Heightfield}
-      params={params}
-      dynamicKey={`${chunkFloorId(props.cx, props.cz)}~${props.hver}`}
-      material="#ffffff"
-      textureKey={floorTextureKey(chunkFloorId(props.cx, props.cz))}
-      position={position}
-    />
-  );
-});
-
-const ChunkFloorMeshes = memo(function ChunkFloorMeshes(props: { floors: ChunkFloor[] }) {
-  return (
-    <>
-      {props.floors.map((f) => (
-        <ChunkFloorMesh key={chunkFloorId(f.cx, f.cz)} cx={f.cx} cz={f.cz} heights={f.heights} hcols={f.hcols} hrows={f.hrows} hver={f.hver} />
-      ))}
-    </>
-  );
-});
+// Terrain is no longer drawn by a bespoke editor mesh — the cart folds the painted
+// chunks into the preview world as REAL heightfield landforms (floorsToLandforms +
+// index.tsx previewWorld), so WorldStatics draws them through the game's own
+// landform path and LandformSurfaceCaptures bakes their painted tile textures. The
+// preview now renders terrain exactly as the booted game will (preview == game),
+// and a building/prop sits on the hill under it. This pane just draws the world.
 
 export interface PreviewCamera {
   pos: Vec3;
@@ -110,7 +48,6 @@ export interface PreviewCameraApi {
 
 export const IsoPreview = memo(function IsoPreview(props: {
   state: GameState;
-  floors: ChunkFloor[];
   // WASD-fly focus is owned by the cart (shared with the 2D canvas, which also uses
   // WASD). true = this pane drives the camera; onWasdFocus fires on a click here to
   // claim it. Click-to-focus, never hover — so the cursor passing over the other
@@ -126,8 +63,12 @@ export const IsoPreview = memo(function IsoPreview(props: {
   cameraApiRef?: { current: PreviewCameraApi | null };
   onCameraSettle?: () => void;
 }) {
-  const { state, floors } = props;
+  const { state } = props;
   const world = state.world;
+  // Churn probe: `state` is the cart's previewWorld. If it changes per stroke, the
+  // preview rebuilds + re-bakes landform captures every sync — the choke's far end.
+  // (bumpTick/look churn here too, but those are camera-fly, not paint.)
+  useChurn('IsoPreview', { state, world, wasdFocused: props.wasdFocused });
 
   // ── Free-fly camera ─────────────────────────────────────────────────────────
   // Look (yaw/pitch) is state so a drag re-renders; position is a ref the movement
@@ -220,13 +161,15 @@ export const IsoPreview = memo(function IsoPreview(props: {
 
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
-      <ChunkFloorCaptures floors={floors} />
+      {/* Painted-tile textures for the heightfield-landform terrain (offscreen
+          captures, the game's own path) — siblings of the Scene3D, like the
+          captures HmscGameplayRig mounts in the live game. */}
+      <LandformSurfaceCaptures landforms={world.landforms ?? []} />
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showGrid={false} showAxes={false}>
         <Scene3D.Camera position={eye} target={target} fov={FOV} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
-        {/* Floors are our displaced per-chunk meshes; WorldStatics draws the rest
-            (skybox, lights, and the placements applied as buildings/props). */}
-        <ChunkFloorMeshes floors={floors} />
+        {/* WorldStatics draws everything — terrain (the painted chunks as
+            heightfield landforms), skybox, lights, and the placements. */}
         <WorldStatics world={world} skyConfig={state.config.sky} />
       </Scene3D>
 

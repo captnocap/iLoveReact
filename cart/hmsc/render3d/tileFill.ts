@@ -6,7 +6,7 @@ import type { TileKind } from '../design';
 // hmsc-int map quad both. Prepend TILE_FILL_WGSL to a shader, then call
 // tileMaterial(matId, uv, px, variant, seed) per cell.
 //
-// matId: 0 concrete (sidewalk/districts), 1 road (road/asphalt), 2 sand (sand/mud).
+// matId: 0 concrete (sidewalk), 1 road (road/asphalt), 2 sand (sand/mud).
 export const TILE_FILL_WGSL = `
 fn sat(v: f32) -> f32 { return clamp(v, 0.0, 1.0); }
 fn sat3(v: vec3f) -> vec3f { return clamp(v, vec3f(0.0), vec3f(1.0)); }
@@ -75,7 +75,7 @@ export function tileFillMaterialId(kind: TileKind): number {
     case 'mud':
       return 2;
     default:
-      return 0; // concrete: sidewalk, districts, etc.
+      return 0; // concrete: sidewalk, etc.
   }
 }
 

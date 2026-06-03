@@ -10,7 +10,7 @@
 // will mint the actual row.
 
 import * as React from 'react';
-import { Box, Col, Row, Text, Pressable } from '@reactjit/runtime/primitives';
+import { Box, Col, Row, Text, Pressable } from '@reactjit/primitives';
 import {
   loadSession,
   startNewSession,

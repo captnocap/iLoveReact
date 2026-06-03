@@ -1,4 +1,4 @@
-import { Box, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Pressable, Text } from '@reactjit/primitives';
 import type { InventoryActions } from '../state/world';
 import type { InventorySlot } from '../systems/inventory';
 import { UI } from '../render/palette';

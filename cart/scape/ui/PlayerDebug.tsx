@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Box, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Pressable, Text } from '@reactjit/primitives';
 import type { EvidenceAxis, LifeState, Player, VisualSignature } from '../design';
 import type { PlayerDebugActions } from '../state/world';
 import { UI } from '../render/palette';

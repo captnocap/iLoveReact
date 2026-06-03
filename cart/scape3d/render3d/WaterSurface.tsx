@@ -15,7 +15,7 @@
 //
 // Mounted once in index.tsx; offscreen (left:-99999) so it only feeds the key.
 import { useEffect, useState } from 'react';
-import { StaticSurface } from '@reactjit/runtime/primitives';
+import { StaticSurface } from '@reactjit/primitives';
 import { Water } from '@reactjit/effects';
 
 const TEX = 256; // capture resolution stretched across each water face

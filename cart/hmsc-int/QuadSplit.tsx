@@ -15,13 +15,18 @@
 // whole window with no capture gaps. onMouseDown/onMouseUp on the bars only
 // bracket the gesture (begin/end).
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, Pressable } from '@reactjit/primitives';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 
 const DIVIDER = 6; // px thickness of the divider bars
+const KNOB = 20; // px diameter of the visible center grab dot
+const HIT = 28; // px square of the (invisible) hover/grab target around the dot
 
-type Axis = 'col' | 'row';
+// 'col'/'row' come from the edge bars (one axis each); 'both' from the center
+// knob, which trades width AND height at once so you can sweep one pane into
+// focus diagonally instead of dragging two bars in sequence.
+type Axis = 'col' | 'row' | 'both';
 
 export function QuadSplit(props: {
   fx: number;
@@ -34,6 +39,11 @@ export function QuadSplit(props: {
 }) {
   const { fx, fy } = props;
   const sizeRef = useRef<{ width: number; height: number }>({ width: 1, height: 1 });
+  // Measured size in *state* (not just the ref) so the absolute knob can be placed
+  // in real pixels: the layout path doesn't resolve percentage left/top for
+  // absolute children, so `left: '50%'` would pin it to the corner.
+  const [dims, setDims] = useState<{ width: number; height: number }>({ width: 0, height: 0 });
+  const [knobHot, setKnobHot] = useState(false); // hover (or active drag) → paint the dot
   const dragRef = useRef<Axis | null>(null);
   // Mirror the latest onResize so the cursor subscription never needs to re-bind.
   const onResizeRef = useRef(props.onResize);
@@ -45,8 +55,8 @@ export function QuadSplit(props: {
     const axis = dragRef.current;
     if (!axis) return;
     const { width, height } = sizeRef.current;
-    if (axis === 'col') onResizeRef.current('col', Number(e?.dx ?? 0) / width);
-    else onResizeRef.current('row', Number(e?.dy ?? 0) / height);
+    if (axis === 'col' || axis === 'both') onResizeRef.current('col', Number(e?.dx ?? 0) / width);
+    if (axis === 'row' || axis === 'both') onResizeRef.current('row', Number(e?.dy ?? 0) / height);
   }), []);
 
   const begin = (axis: Axis) => () => { dragRef.current = axis; };
@@ -58,7 +68,11 @@ export function QuadSplit(props: {
 
   return (
     <Box
-      onLayout={(lr: any) => { sizeRef.current = { width: Number(lr?.width ?? 1), height: Number(lr?.height ?? 1) }; }}
+      onLayout={(lr: any) => {
+        const w = Number(lr?.width ?? 1), h = Number(lr?.height ?? 1);
+        sizeRef.current = { width: w, height: h };
+        setDims((d) => (d.width === w && d.height === h ? d : { width: w, height: h }));
+      }}
       onMouseUp={end}
       style={{ width: '100%', height: '100%', flexDirection: 'column' }}
     >
@@ -78,6 +92,42 @@ export function QuadSplit(props: {
         {vDivider}
         <Box style={{ flexGrow: 1, height: '100%', overflow: 'hidden' }}>{props.bottomRight}</Box>
       </Box>
+
+      {/* Center knob — an always-present (but invisible) hit target on the divider
+          cross that drags both axes at once, so one pane sweeps into focus
+          diagonally. The dot only paints while hovered/held. Pixel-positioned (not
+          %) because the absolute-layout path ignores percentage left/top; offset by
+          DIVIDER/2 to land on the visual center of the 6px-thick bars. */}
+      {dims.width > 0 && (
+        <Pressable
+          onMouseDown={begin('both')}
+          onMouseUp={end}
+          onHoverEnter={() => setKnobHot(true)}
+          onHoverExit={() => setKnobHot(false)}
+          style={{
+            position: 'absolute',
+            left: fx * dims.width + DIVIDER / 2 - HIT / 2,
+            top: fy * dims.height + DIVIDER / 2 - HIT / 2,
+            width: HIT,
+            height: HIT,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {knobHot && (
+            <Box
+              style={{
+                width: KNOB,
+                height: KNOB,
+                borderRadius: KNOB / 2,
+                backgroundColor: '#334155',
+                borderWidth: 2,
+                borderColor: '#64748b',
+              }}
+            />
+          )}
+        </Pressable>
+      )}
     </Box>
   );
 }

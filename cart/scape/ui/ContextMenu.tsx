@@ -1,4 +1,4 @@
-import { Box, Pressable, Text } from '@reactjit/runtime/primitives';
+import { Box, Pressable, Text } from '@reactjit/primitives';
 import type { ActionOption } from '../design';
 import { UI } from '../render/palette';
 import { perceivedChance } from '../systems/perception';

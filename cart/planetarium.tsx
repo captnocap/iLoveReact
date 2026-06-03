@@ -8,7 +8,7 @@
 // procedural seed (data buffer update, no shader recompile).
 
 import * as React from 'react';
-import { Box, Row, Col, Text, Pressable, Effect } from '@reactjit/runtime/primitives';
+import { Box, Row, Col, Text, Pressable, Effect } from '@reactjit/primitives';
 
 // ── palette ─────────────────────────────────────────────────────────
 const P = {

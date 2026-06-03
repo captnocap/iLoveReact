@@ -1,4 +1,4 @@
-export const HMSC_STATE_SCHEMA_VERSION = 14;
+export const HMSC_STATE_SCHEMA_VERSION = 15;
 export const DEFAULT_AUTOSAVE_INTERVAL_MS = 120_000;
 export const DEFAULT_LIVE_SYNC_INTERVAL_MS = 100;
 export const DEFAULT_CELL_SIZE_METERS = 1;
@@ -18,9 +18,6 @@ export type GridCell = {
 
 export type TileKind =
   | 'water'
-  | 'residential'
-  | 'downtown'
-  | 'mixed'
   | 'road'
   | 'asphalt'
   | 'sidewalk'
@@ -30,6 +27,15 @@ export type TileKind =
   | 'door'
   | 'bush'
   | 'marker';
+
+// Altered-perception channel. Drives how building skins (and later other
+// surfaces) reinterpret themselves — e.g. being high scrambling facade text or
+// turning a wall into a live plasma wash. Each value is a 0..1 intensity. The
+// static skin catalog accepts this in its render context but ignores it for now;
+// the reactive slice lights these up without changing the skin contract.
+export type PerceptionState = {
+  high: number;
+};
 
 export type PlayerState = {
   position: Vec3;
@@ -44,6 +50,7 @@ export type PlayerState = {
   health: number;
   heat: number;
   money: number;
+  perception: PerceptionState;
   inventory: string[];
 };
 
@@ -75,6 +82,66 @@ export type SpawnedEntity = {
     restitution: number;
     grounded: boolean;
   };
+  createdByCommand: string;
+};
+
+// An NPC: a living actor, distinct from SpawnedEntity (which is a dumb physics
+// prop — a crate or a ball). An NPC has three orthogonal axes, each resolved by
+// its own registry the same way a tile resolves through tileKinds:
+//   - kind    (what it is): body/health/speed defaults — npc/kinds.ts
+//   - faction (who it fights): combat allegiance, through the hostility matrix
+//             in npc/factions.ts
+//   - role    (what it means to the player): an OPEN registry of narrative
+//             designations (person of interest, target, informant, witness…) in
+//             npc/roles.ts. Stored as a role-id string so new roles are a
+//             registry entry, never a type edit.
+// The model and its locational hitbox are the shared humanoid (render3d/humanoid);
+// `moving`/`running` are DERIVED from velocity at draw time, never stored, so the
+// gait can't disagree with motion. NPCs live on WorldState.npcs, so an interior
+// (itself a WorldState) carries its own NPCs through the active-world swap with
+// no special casing — same as every other world layer.
+export type NpcKind = 'civilian' | 'thug' | 'police';
+
+// Combat allegiance. A closed set; who-regards-whom-how is the matrix in
+// npc/factions.ts. Orthogonal to role: a `civilian` faction NPC can be your
+// `target` (the Hitman mark who won't fight back).
+export type NpcFaction = 'civilian' | 'gang' | 'police';
+
+// Body posture. Crouch lowers the head/torso hitbox capsules and the incoming
+// hit chance — cover actually protects. No prone (out of scope).
+export type NpcStance = 'stand' | 'crouch';
+
+// AI/animation state. `down` is dead/incapacitated; the figure stops driving and
+// the entity is no longer a threat. The brain that moves between these is the
+// next layer — the entity just stores the current one.
+export type NpcPosture = 'idle' | 'wander' | 'alert' | 'flee' | 'fight' | 'down';
+
+export type NpcHealth = {
+  current: number;
+  max: number;
+};
+
+export type NpcState = {
+  id: string;
+  kind: NpcKind;
+  faction: NpcFaction;
+  // A role-id into npc/roles.ts (the open designation registry). 'none' = an
+  // anonymous background body. The story layer reassigns this (nv_role later).
+  role: string;
+  position: Vec3;
+  yawDegrees: number;
+  stance: NpcStance;
+  posture: NpcPosture;
+  health: NpcHealth;
+  // This NPC's own gait clock, so a crowd isn't lockstep.
+  animationSeconds: number;
+  // Physics + motion. moving/running are derived from |velocity| at render time.
+  velocity: Vec3;
+  grounded: boolean;
+  // Where it's walking to (fed to world/pathing.ts) and who it's fighting (the
+  // player id or another npc id). Both optional — an idle civilian has neither.
+  pathTarget?: GridCell;
+  targetId?: string;
   createdByCommand: string;
 };
 
@@ -138,20 +205,44 @@ export type WorldState = {
   // inside than out). Empty inside an interior's own space; only the outer world
   // owns interiors. See world/interiors.ts.
   interiors: Record<string, InteriorSpace>;
-  mountains: Mountain[];
+  // Registry-driven terrain (world/landforms): mountains, hills, estates, … all as
+  // pure data resolved by kind. A new terrain shape is a registry entry, not a new
+  // array on WorldState.
+  landforms: Landform[];
   // Named rectangular areas with enter/exit behavior (district names, private
   // property, safe houses…). A first-class world layer, peer of surfaceRegions.
   zones: Zone[];
   spawnedEntities: Record<string, SpawnedEntity>;
+  // Living actors in this space, keyed by npc id. A first-class world layer, so
+  // an interior carries its own crowd through the active-world swap. See npc/.
+  npcs: Record<string, NpcState>;
 }
 
 // A placed building. Like a road or a prop, a building is a first-class world
 // layer (not a field of tiles): each one owns a footprint and a sculpted mass.
 // The shared property bundle (solidity, cover, line of sight, wall friction) is
-// resolved by kind through world/buildingKinds.ts. Axis-aligned (no arbitrary
-// yaw) so its wall collision stays as cheap AABB rects; `doorSide` picks the
-// entry edge. 1 tile = 1 meter.
-export type BuildingKind = 'house' | 'shop' | 'tower';
+// resolved by kind through world/buildingKinds.ts. The footprint is authored
+// axis-aligned (min-corner + width/depth); an optional `yawDegrees` then spins
+// the whole mass about its footprint centre. yaw 0 (the default) stays a cheap
+// AABB rect for collision; a rotated building emits an ORIENTED rect the host
+// collides as an OBB, so the wall you see is still the wall you hit. `doorSide`
+// picks the entry edge in the building's own (rotated) frame. 1 tile = 1 meter.
+// Box kinds (house/shop/tower/warehouse) wear wall boxes + a captured facade
+// skin through the one uniform Building3D renderer. Open kinds (parkingGarage/
+// gasStation/usedCarLot) are sculpted structures — decks on pillars, a fuel
+// canopy, a sales lot — that don't read as a sealed box, so each owns a custom
+// model + custom collision rects (the per-kind dispatch in render3d/buildingModels
+// and world/structures, mirroring how a PropKind owns its model). The model axis
+// is `structureModel` in BUILDING_KIND_DEFINITIONS; 'box' is the default path.
+export type BuildingKind =
+  | 'house'
+  | 'shop'
+  | 'tower'
+  | 'warehouse'
+  | 'parkingGarage'
+  | 'gasStation'
+  | 'usedCarLot'
+  | 'driveIn';
 
 // How a building meets the player. The three product types, as one field:
 //   - 'sealed':   static, no entry. A solid block you bump and can stand on.
@@ -165,6 +256,31 @@ export type BuildingEnclosure = 'sealed' | 'hollow' | 'interior';
 // east = +X edge, west = -X edge. Ignored when enclosure === 'sealed'.
 export type BuildingSide = 'north' | 'south' | 'east' | 'west';
 
+// The facade skin — appearance, a SEPARATE axis from kind (size/physics) so any
+// footprint can wear any look. A skin is a 2D facade (windows/signage/address,
+// captured to a texture and mapped onto the wall faces) resolved through the
+// BUILDING_SKINS registry in render3d/buildingSkins.tsx. 'plain' = the bare
+// solid-color wall (no facade panel), the default when a kind/placement does not
+// pick one.
+export type BuildingSkin =
+  | 'plain'
+  | 'office'
+  | 'residential'
+  | 'retail'
+  | 'industrial'
+  | 'internetCafe'
+  | 'gunShop'
+  | 'mall';
+
+// A skin can be applied per face instead of to the whole building, so e.g. a
+// warehouse wears its garage on the FRONT only and plain walls on the sides, or
+// a billboard goes on one side. Face roles are RELATIVE to the building's facing:
+// 'front' = the door side, 'back' = opposite, 'left'/'right' = the perpendicular
+// walls, 'top' = the roof. `all` is the fallback for any unset face. A bare
+// BuildingSkin string applies to every wall (and leaves the roof plain).
+export type BuildingFaceRole = 'front' | 'back' | 'left' | 'right' | 'top';
+export type BuildingFaceSkins = { all?: BuildingSkin } & Partial<Record<BuildingFaceRole, BuildingSkin>>;
+
 export type Building = {
   id: string;
   kind: BuildingKind;
@@ -174,9 +290,16 @@ export type Building = {
   x: number;
   y: number;
   z: number;
-  widthTiles: number; // extent along +X
-  depthTiles: number; // extent along +Z
+  widthTiles: number; // extent along +X (before yaw)
+  depthTiles: number; // extent along +Z (before yaw)
+  // Rotation of the whole mass about its footprint centre, degrees, +Y (CCW
+  // looking down). Omitted/0 = axis-aligned (the legacy path). doorSide is in
+  // this rotated frame, so a yawed building's door turns with it.
+  yawDegrees?: number;
   doorSide: BuildingSide;
+  // Facade appearance: a single skin for every wall, or a per-face map (front/
+  // back/left/right/top). Omitted falls back to the kind's default skin.
+  skin?: BuildingSkin | BuildingFaceSkins;
   // For enclosure === 'interior': the key into world.interiors this door leads
   // to. Authored alongside the building (see world/interiors.ts).
   interiorId?: string;
@@ -208,13 +331,21 @@ export type InteriorSpace = {
 // a tile resolves through tileKindDefinition. 1 tile = 1 meter.
 export type PropKind =
   | 'rock'
+  | 'rockLarge'
+  | 'rockSmall'
   | 'fireHydrant'
   | 'streetSign'
   | 'streetLight'
   | 'bush'
   | 'bushLarge'
+  | 'bushLow'
+  | 'bushSparse'
   | 'stopSign'
-  | 'trafficLight';
+  | 'trafficLight'
+  | 'payphone'
+  | 'dumpster'
+  | 'mailbox'
+  | 'fence';
 
 // A traffic-control prop tells an approaching vehicle to stop, slow, or go. A
 // stop sign is always 'stop'; a traffic light cycles through all three. The
@@ -238,23 +369,44 @@ export type WorldProp = {
   createdByCommand: string;
 };
 
-// A large walkable landform: a smooth conical mass (rendered as ONE Heightfield
-// mesh) wrapped by a switchback hiking trail that spirals up its flank — the only
-// walkable way to the peak. A first-class world layer, peer of roads/props,
-// because a mountain is not a field of identical floor tiles. The cone is
-// scenery; the trail's flat treads ARE the physics. (centerX, centerZ) is the
-// peak's ground anchor in world meters, baseY the terrain it rises from. See
-// world/mountain.ts. 1 tile = 1 meter.
-export type Mountain = {
+// A baked height grid carried BY a landform (the 'heightfield' kind authored in
+// hmsc-int). Most kinds are parametric — their shape comes from a `rise` function
+// of `params` — but a freely painted hill has no formula, so its samples ride
+// here: a cols×rows grid of metres-above-baseY, row-major, with `cell` metres
+// between samples. The grid is centred on the landform's centre, so sample (i,j)
+// sits at local ((i-(cols-1)/2)*cell, (j-(rows-1)/2)*cell). The kind's `rise`
+// bilinearly samples it; the SAME field drives the mesh, collider, and queries.
+//
+// `tiles` is the painted per-cell SURFACE on top of the height — a separate,
+// finer grid of tile-kind indices (into TILE_KINDS, -1 = empty) that drapes over
+// the relief as the mesh texture (the editor's "tiles on the mesh"). Its grid is
+// per-1m-cell, so it is denser than the height samples; it spans the same footprint
+// centred on the landform centre. The render captures it via the tile-field shader
+// (render3d/heightfieldSurface); footing still resolves through surfaceTileKind.
+export type LandformField = {
+  cols: number;
+  rows: number;
+  cell: number;
+  heights: number[];
+  tiles?: { cols: number; rows: number; idx: number[] };
+};
+
+// A placed landform — the registry-driven terrain layer (world/landforms). Pure
+// data: `kind` selects a LandformKindDef (height function + surface tile kind +
+// footprint), `params` are its knobs (radius, height, seed, …). One array, one
+// renderer/collider/camera/query path; a new terrain shape is a registry entry,
+// not new wiring. Supersedes the per-type Mountain/Hills/EstateHill arrays as they
+// migrate in. `field` is the optional baked grid a non-parametric kind
+// ('heightfield', a painted hill) carries instead of a formula. 1 tile = 1 meter.
+export type Landform = {
   id: string;
+  kind: string;
   label: string;
   centerX: number;
   centerZ: number;
   baseY: number;
-  baseRadiusMeters: number;
-  peakHeightMeters: number;
-  // Where on the rim the trail begins; the spiral winds up from here.
-  trailStartAngleRadians: number;
+  params: Record<string, number>;
+  field?: LandformField;
   createdByCommand: string;
 };
 

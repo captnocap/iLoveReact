@@ -96,28 +96,14 @@ const flags = [
   '--inject:' + ROOT + '/runtime/ambient.ts',
   '--inject:' + ROOT + '/runtime/ambient_primitives.ts',
   '--alias:@reactjit/core=' + ROOT + '/runtime/core_stub.ts',
-  // @reactjit/runtime is the portable handle for cart code to import SDK
-  // primitives, hooks, classifiers, etc. — replaces brittle '../runtime/X'
-  // and '../../runtime/X' relative paths that only work when the cart lives
-  // inside the SDK tree. Off-tree carts (rjit-mode) need this.
-  '--alias:@reactjit/runtime=' + ROOT + '/runtime',
-  // @reactjit/effects — the shared registry of reusable <Effect>s (Plasma,
-  // Rings, Gradient, …). Authored once for ReactJIT so carts import a named
-  // effect instead of re-rolling private WGSL. Physically runtime/effects/;
-  // '@reactjit/runtime/effects' also resolves there via the line above.
-  '--alias:@reactjit/effects=' + ROOT + '/runtime/effects',
-  // @reactjit/geometries — the shared registry of 3D geometry generators
-  // (Box, Sphere, Cylinder, …). The 3D analog of @reactjit/effects: each entry
-  // is a pure generate(params)→vertices; the framework never knows what shapes
-  // exist. Physically runtime/geometries/; '@reactjit/runtime/geometries' also
-  // resolves there via the runtime alias above.
-  '--alias:@reactjit/geometries=' + ROOT + '/runtime/geometries',
-  // @reactjit/cameras — the shared registry of drop-in camera rigs (Orbit,
-  // Follow, TopDown, Isometric, FirstPerson, FreeFly, Cinematic). The third leg
-  // beside effects/geometries: each rig is a pure solve(params)→{pos,target,fov}
-  // and picking inverts through one generic unprojectGround. Physically
-  // runtime/cameras/; '@reactjit/runtime/cameras' also resolves via the runtime alias.
-  '--alias:@reactjit/cameras=' + ROOT + '/runtime/cameras',
+  // @reactjit is the portable handle for cart code to import everything the SDK
+  // exposes — primitives, hooks, classifiers, and the effects/geometries/cameras
+  // registries. Physically the runtime/ dir: '@reactjit/primitives' → runtime/
+  // primitives, '@reactjit/effects' → runtime/effects, etc. Replaces the old
+  // '@reactjit/runtime/X' form and brittle '../runtime/X' relative paths.
+  // @reactjit/core stays an explicit longer-match override (→ core_stub, not
+  // runtime/core).
+  '--alias:@reactjit=' + ROOT + '/runtime',
   '--alias:@cart-entry=' + entryAbs,
   // Vendored npm deps under deps/. Replaces node_modules lookup so
   // bare-specifier imports (react, react-reconciler, ...) resolve without

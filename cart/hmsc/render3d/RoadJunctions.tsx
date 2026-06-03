@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { Effect, Scene3D, StaticSurface } from '@reactjit/runtime/primitives';
+import { Effect, Scene3D, StaticSurface } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { RoadCulDeSac, RoadIntersection, RoadJunction } from '../design';
 import { HMSC_ROAD_SCALE } from '../world/roadProfile';

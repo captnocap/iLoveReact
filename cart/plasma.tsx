@@ -1,7 +1,7 @@
 // Plasma — now just the registry effect. The four-wave sine shader lives once
 // in @reactjit/effects (runtime/effects/Plasma.tsx), not copy-pasted per cart.
 
-import { Box } from '@reactjit/runtime/primitives';
+import { Box } from '@reactjit/primitives';
 import { Plasma, PLASMA_DEFAULTS } from '@reactjit/effects';
 
 export default function PlasmaDemo() {

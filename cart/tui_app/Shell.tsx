@@ -13,7 +13,7 @@
 // the routes never have to know about each other.
 
 import * as React from 'react';
-import { Col, ScrollView } from '@reactjit/runtime/primitives';
+import { Col, ScrollView } from '@reactjit/primitives';
 import { useRoute } from '../app/gallery/local-router';
 import { NavBar } from './components/NavBar';
 import { Footer } from './components/Footer';

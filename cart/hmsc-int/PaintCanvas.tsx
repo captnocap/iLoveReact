@@ -29,7 +29,7 @@ import { type ChunkFloor } from './chunkFloor';
 import type { TileKind, ZoneFlag } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
 import { ZONE_FLAGS } from '../hmsc/world/zones';
-import { TILE_UNITS, stampCone, clearField } from './heightData';
+import { TILE_UNITS, DOT_M, stampCone, clearField } from './heightData';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { ChunkSurface } from './ChunkSurface';
@@ -44,6 +44,10 @@ type HeightTool = 'brush' | 'erase';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
 type HoverState = { x: number; y: number; addr: string } | null;
 type HoverSink = { current: ((h: HoverState) => void) | null };
+// The visible brush footprint: a circle at screen position (x,y), diameter d px,
+// `on` = over a paintable cell (filled) vs off-grid (outline only).
+type BrushVis = { x: number; y: number; d: number; color: string; on: boolean } | null;
+type BrushSink = { current: ((b: BrushVis) => void) | null };
 
 export type Tool = 'pointer' | 'brush' | 'eraser';
 export type Layer = 'paint' | 'height' | 'place' | 'zone';
@@ -360,6 +364,25 @@ function HoverReadout(props: { sink: HoverSink }) {
   );
 }
 
+// The visible brush footprint — a ring that tracks the cursor, snapped to the cell
+// it'll paint, sized to the footprint in SCREEN pixels (so it scales as you zoom),
+// and tinted to the active tool. Same trick as HoverReadout: it owns its own state
+// and registers its setter into a sink ref, so cursor moves repaint ONLY this node,
+// never the whole PaintCanvas (the re-render storm that chokes paint past a few
+// chunks). A plain Box never hit-tests, so it sits over the brush overlay harmlessly.
+function BrushCursor(props: { sink: BrushSink }) {
+  const [b, setB] = useState<BrushVis>(null);
+  props.sink.current = setB; // stable setter; idempotent to assign each render
+  if (!b) return null;
+  const r = b.d / 2;
+  return (
+    <Box style={{ position: 'absolute', left: b.x - r, top: b.y - r, width: b.d, height: b.d, borderRadius: r, borderWidth: 2, borderColor: b.color, backgroundColor: b.on ? `${b.color}26` : '#00000000' }}>
+      {/* centre pip — the exact cell the next stamp lands on */}
+      <Box style={{ position: 'absolute', left: r - 2, top: r - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: b.color }} />
+    </Box>
+  );
+}
+
 // ── Canvas ───────────────────────────────────────────────────────────────────
 
 // Controlled: tool / tile / layer live in the parent so they persist across hot
@@ -629,7 +652,11 @@ export function PaintCanvas(props: {
     const cellX = Math.floor(lx / TILE_UNITS);
     const cellZ = Math.floor(lz / TILE_UNITS);
     if (cellX < 0 || cellZ < 0 || cellX >= CHUNK_TILES || cellZ >= CHUNK_TILES) return null;
-    return { chunk, k, lx, lz, cellX, cellZ, gCellX: cx * CHUNK_TILES + cellX, gCellZ: cz * CHUNK_TILES + cellZ };
+    // The cell's CENTRE in graph space (chunk left edge + (cell + 0.5) tiles) — where
+    // the brush footprint snaps so the visible circle sits on what it'll actually paint.
+    const cgx = cx * PATCH - PATCH / 2 + (cellX + 0.5) * TILE_UNITS;
+    const cgy = cz * PATCH - PATCH / 2 + (cellZ + 0.5) * TILE_UNITS;
+    return { chunk, k, lx, lz, cellX, cellZ, cgx, cgy, gCellX: cx * CHUNK_TILES + cellX, gCellZ: cz * CHUNK_TILES + cellZ };
   };
 
   // Clicking an empty open slot (through the brush overlay) attaches a chunk there.
@@ -659,28 +686,55 @@ export function PaintCanvas(props: {
   const paintRef = useRef({ tile, tool, size: brushSize });
   paintRef.current = { tile, tool, size: brushSize };
 
-  const stampAtScreen = (sx: number, sy: number) => {
-    const g = screenToGraph(sx, sy);
-    if (!g) return;
-    const c = resolveCell(g.gx, g.gy);
-    if (!c) return;
-    const cix = Math.round((c.lx / PATCH) * (c.chunk.height.cols - 1));
-    const ciy = Math.round((c.lz / PATCH) * (c.chunk.height.rows - 1));
-    const stampKey = `${c.k}:${cix}:${ciy}`;
+  // Height sculpt. The cone is stamped in a SHARED GLOBAL sample frame, not clipped to
+  // the one chunk under the cursor — so a stroke straddling a chunk border deposits the
+  // SAME cone into both chunks. Because the shared edge column maps to the identical
+  // global sample distance on each side (chunk widths are exact multiples), both sides
+  // compute the same height there: no seam, no clipped half-dome at the border.
+  const GSAMPLE = TILE_UNITS * DOT_M; // graph units between adjacent height samples
+
+  // The stamps below take a GRAPH point (not screen) and accumulate the chunks they
+  // dirtied into `touched`, but never touch the GPU or schedule a sync themselves —
+  // onBrush coalesces those once per call. That's what lets onBrush interpolate a
+  // whole segment (many sub-stamps) without firing one GPU re-upload per sub-stamp.
+
+  // Height sculpt. The cone is stamped in a SHARED GLOBAL sample frame, not clipped to
+  // the one chunk under the cursor — so a stroke straddling a chunk border deposits the
+  // SAME cone into both chunks. Because the shared edge column maps to the identical
+  // global sample distance on each side (chunk widths are exact multiples), both sides
+  // compute the same height there: no seam, no clipped half-dome at the border.
+  const stampHeightAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
+    const b = brushRef.current;
+    // Per-stroke dedup on the GLOBAL sample cell (chunk-independent) so a stationary
+    // brush deposits once but genuine drag motion still stacks across cells.
+    const gsx = Math.round(gx / GSAMPLE), gsy = Math.round(gy / GSAMPLE);
+    const stampKey = `${gsx}:${gsy}`;
     if (heightStamped.current.has(stampKey)) return; // already deposited here this stroke
     heightStamped.current.add(stampKey);
-    const b = brushRef.current;
     // Cone radius = brush size (metres); falloff derived so it reaches 0 there.
-    const falloff = Math.abs(b.centerZ) / Math.max(0.5, b.size);
-    stampCone(c.chunk.height, cix, ciy, { centerZ: b.centerZ, falloff, erase: b.tool === 'erase' });
-    touchChunk(c.k);
-    heightDirty.current.add(c.k); scheduleRegionSync(); // mirror height to the preview mesh
+    const radiusM = Math.max(0.5, b.size);
+    const falloff = Math.abs(b.centerZ) / radiusM;
+    const rd = Math.max(1, Math.ceil(radiusM / DOT_M)); // cone reach in samples
+    for (const ch of focusedChunks) {
+      const cols = ch.height.cols, rows = ch.height.rows;
+      // Express the global cone centre in THIS chunk's local sample index space. Chunk
+      // (cx,cz) is centred at (cx*PATCH, cz*PATCH); its sample 0 sits at the left edge.
+      const cix = Math.round((gx - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1));
+      const ciy = Math.round((gy - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1));
+      // Skip chunks the cone can't reach (cheap: avoids touching/re-uploading them).
+      if (cix + rd < 0 || cix - rd > cols - 1 || ciy + rd < 0 || ciy - rd > rows - 1) continue;
+      stampCone(ch.height, cix, ciy, { centerZ: b.centerZ, falloff, erase: b.tool === 'erase' });
+      const k = chunkKey(ch.cx, ch.cz);
+      touched.add(k);
+      heightDirty.current.add(k);
+    }
+    // The 3D preview-mesh mirror is DEFERRED to stroke end (endStroke → syncRegionsNow):
+    // a height edit re-ships the whole ~65k-float mesh across the bridge, so doing it
+    // mid-stroke per dirty chunk freezes paint. The 2D canvas is live via the touch.
   };
 
-  const paintTileAtScreen = (sx: number, sy: number) => {
-    const g = screenToGraph(sx, sy);
-    if (!g) return;
-    const c = resolveCell(g.gx, g.gy);
+  const stampTileAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
+    const c = resolveCell(gx, gy);
     if (!c) return;
     const p = paintRef.current;
     const idx = p.tool === 'eraser' ? -1 : tileKindIndex(p.tile);
@@ -689,15 +743,13 @@ export function PaintCanvas(props: {
       if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
       paintTile(c.chunk.tiles, x, z, idx);
     });
-    touchChunk(c.k);
-    tileDirty.current.add(c.k); scheduleRegionSync(); // mirror the floor texture to the preview
+    touched.add(c.k);
+    tileDirty.current.add(c.k); // mirror the floor texture to the preview (synced by onBrush)
   };
 
-  const paintZoneAtScreen = (sx: number, sy: number) => {
+  const stampZoneAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
     if (!zones.length) return;
-    const g = screenToGraph(sx, sy);
-    if (!g) return;
-    const c = resolveCell(g.gx, g.gy);
+    const c = resolveCell(gx, gy);
     if (!c) return;
     const p = paintRef.current;
     const idx = p.tool === 'eraser' ? -1 : activeZoneRef.current;
@@ -706,7 +758,7 @@ export function PaintCanvas(props: {
       if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
       paintZoneCell(c.chunk.zones, x, z, idx);
     });
-    touchChunk(c.k);
+    touched.add(c.k);
   };
 
   const clearHeights = () => {
@@ -764,16 +816,53 @@ export function PaintCanvas(props: {
     if (layer === 'zone') { const z = zones[activeZone]; return { cat: 'zone', text: tool === 'eraser' ? 'erased zone' : `painted ${z ? z.name : 'zone'}` }; }
     return { cat: 'tile', text: tool === 'eraser' ? 'erased tiles' : `painted ${tile}` };
   };
+  // Where the last stamp landed, in GRAPH space, so onBrush can fill the gap to the
+  // current point. null between strokes (reset in beginStroke) so a new stroke never
+  // draws a line from the previous stroke's end.
+  const lastStampG = useRef<{ x: number; y: number } | null>(null);
+  const stampOneAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
+    if (layer === 'height') stampHeightAtGraph(gx, gy, touched);
+    else if (layer === 'zone') stampZoneAtGraph(gx, gy, touched);
+    else stampTileAtGraph(gx, gy, touched);
+  };
+  // One brush sample. The world can slide a long way between samples — a fast drag, or
+  // (the hard case) a held-WASD pan when zoomed out, where each screen pixel spans many
+  // tiles so the graph point under a STILL cursor leaps cells per tick. Stamping only at
+  // the endpoint there leaves a dashed line. So interpolate from the last stamp to here
+  // and stamp along the segment. Step spacing scales with the brush radius (a wide disc
+  // already covers the gaps, so it needs far fewer sub-stamps) and is capped, so a big
+  // brush at extreme zoom can't explode into millions of paintTile calls — that blow-up
+  // was the lag. Coalesce all the segment's GPU touches + the preview sync to ONE each.
   const onBrush = (sx: number, sy: number) => {
     strokeStats.current.samples++;
-    if (layer === 'height') stampAtScreen(sx, sy);
-    else if (layer === 'zone') paintZoneAtScreen(sx, sy);
-    else paintTileAtScreen(sx, sy);
+    const g = screenToGraph(sx, sy);
+    if (!g) return;
+    const touched = new Set<ChunkKey>();
+    const prev = lastStampG.current;
+    if (!prev) {
+      stampOneAtGraph(g.gx, g.gy, touched); // first sample of the stroke: just the point
+    } else {
+      const dx = g.gx - prev.x, dy = g.gy - prev.y;
+      const dist = Math.hypot(dx, dy);
+      const radiusTiles = layer === 'height' ? brushRef.current.size : paintRef.current.size;
+      const stepG = TILE_UNITS * Math.max(0.5, radiusTiles * 0.5); // ≤ ½ disc, so stamps overlap
+      const steps = Math.min(256, Math.max(1, Math.ceil(dist / stepG)));
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        stampOneAtGraph(prev.x + dx * t, prev.y + dy * t, touched);
+      }
+    }
+    lastStampG.current = { x: g.gx, y: g.gy };
+    if (touched.size) {
+      for (const k of touched) touchChunk(k);
+      if (layer !== 'height') scheduleRegionSync(); // height defers its 3D mirror to stroke end
+    }
   };
   const strokeNow = () => (globalThis as any).performance?.now?.() ?? 0;
   const beginStroke = () => {
     strokeStats.current = { samples: 0, stamps: 0, cells: new Set(), touches: 0, coalesced: 0, t0: strokeNow(), snap: countersSnapshot() };
     heightStamped.current.clear(); // fresh per-stroke dedup of height deposits
+    lastStampG.current = null;     // fresh interpolation anchor (no line from the last stroke)
     plog('stroke', `BEGIN ${layer}/${tool}`);
   };
   const endStroke = () => {
@@ -797,6 +886,13 @@ export function PaintCanvas(props: {
     } else {
       plog('stroke', `✓ clean — ${updates} updates decoupled from ${tiles} cells (state updates track region-syncs, not paint)`);
     }
+    // Flush the 3D preview mirror ONCE on release. Height strokes defer ALL their
+    // mesh re-ship to here (stamping above only marks heightDirty + updates the live
+    // 2D canvas), so this lands the final terrain in 3D in a single hitch instead of
+    // re-shipping every dirty chunk's ~65k-float mesh on every mid-stroke sync. Tile
+    // strokes already mirrored mid-stroke; this just lands the last few cells crisply.
+    plog('stroke', 'flush preview on release');
+    syncRegionsNow();
   };
 
   // The pointer tool SELECTS tiles (paint/zone layers): click = focus one cell,
@@ -826,6 +922,79 @@ export function PaintCanvas(props: {
     if (!c) { hoverSink.current?.(null); return; }
     hoverSink.current?.({ x: sx - r!.x + 12, y: sy - r!.y + 12, addr: `${columnLabel(c.gCellX).toLowerCase()}${c.gCellZ}` });
   };
+
+  // The brush ring (see BrushCursor). Drives BOTH the address pill and the ring from a
+  // SINGLE resolve so a brush-layer move costs the same as before. The canvas exposes
+  // no graph→screen, but screenToGraph is affine, so the zoom (px per graph unit) falls
+  // out of a second probe BRUSH_PROBE px to the side; with it, the cell-centre graph
+  // point maps back to a screen pixel and the footprint width to a pixel diameter.
+  const brushSink = useRef<((b: BrushVis) => void) | null>(null);
+  const BRUSH_PROBE = 100;
+  const updateCursor = (sx: number, sy: number) => {
+    const r = rectRef.current;
+    const g = r ? screenToGraph(sx, sy) : null;
+    const c = g ? resolveCell(g.gx, g.gy) : null;
+    if (!c) hoverSink.current?.(null);
+    else hoverSink.current?.({ x: sx - r!.x + 12, y: sy - r!.y + 12, addr: `${columnLabel(c.gCellX).toLowerCase()}${c.gCellZ}` });
+    if (!g || !r) { brushSink.current?.(null); return; }
+    const g2 = screenToGraph(sx + BRUSH_PROBE, sy);
+    const zoom = g2 && g2.gx !== g.gx ? BRUSH_PROBE / (g2.gx - g.gx) : 1; // px per graph unit
+    const dia = (brushSize * 2 + 1) * TILE_UNITS * zoom; // footprint width across, in px
+    const erasing = layer === 'height' ? hTool === 'erase' : tool === 'eraser';
+    const color = erasing ? '#f87171'
+      : layer === 'height' ? '#fbbf24'
+      : layer === 'zone' ? (zones[activeZone]?.color ?? '#22d3ee')
+      : tileKindDefinition(tile).render.color;
+    // Snap the ring to the cell centre it'll paint; off any focused chunk, ride the cursor.
+    const cxp = c ? sx + (c.cgx - g.gx) * zoom : sx;
+    const cyp = c ? sy + (c.cgy - g.gy) * zoom : sy;
+    brushSink.current?.({ x: cxp - r.x, y: cyp - r.y, d: dia, on: !!c, color });
+  };
+
+  // ── Cursor pump: live ring + pan-paint ───────────────────────────────────────
+  // A Pressable's onMouseMove only fires while the button is CAPTURED (held) — see
+  // engine.zig dispatchPointerHandler(.move), gated on dragging_left. So a free-moving
+  // cursor delivers no move events and the ring would only appear once you start
+  // painting (blind to where the brush is until you commit). The host already tracks
+  // the live cursor (mouse_state.g_mouse_x/y, exposed as getMouseX/getMouseY), so poll
+  // it here: drive the ring from the real cursor whether or not the button is down.
+  // The same loop also covers pan-paint — while a stroke is live and the view drifts
+  // under a still cursor (held WASD), keep stamping at the live cursor so a held
+  // direction paints a clean straight line. Idle (cursor parked, no drift) → no work.
+  const onBrushRef = useRef<(sx: number, sy: number) => void>(() => {});
+  const updateCursorRef = useRef<(sx: number, sy: number) => void>(() => {});
+  const driftActiveRef = useRef(false);
+  const brushShownRef = useRef(false); // mirrors showBrush — no ring on place/pointer
+  const lastPollRef = useRef<{ x: number; y: number }>({ x: -1, y: -1 });
+  useEffect(() => {
+    const host: any = globalThis as any;
+    const id = setInterval(() => {
+      const r = rectRef.current;
+      if (!r || typeof host.getMouseX !== 'function') return;
+      const mx = Number(host.getMouseX()), my = Number(host.getMouseY());
+      if (!Number.isFinite(mx) || !Number.isFinite(my)) return;
+      const panPainting = drawing.current && driftActiveRef.current;
+      // Skip a parked cursor (the common idle case) so the ring doesn't churn at 40Hz;
+      // pan-paint forces through because the world is moving under a still cursor.
+      const last = lastPollRef.current;
+      if (mx === last.x && my === last.y && !panPainting) return;
+      lastPollRef.current = { x: mx, y: my };
+      if (panPainting) onBrushRef.current(mx, my); // straight-line paint as the view drifts
+      // Show the ring over this pane's working area (not the left rail / right gutter);
+      // hide it elsewhere so it never strays onto the chrome or a neighbouring quad.
+      const inWork = mx >= r.x + RAIL_W && mx <= r.x + r.width - GUTTER_W && my >= r.y && my <= r.y + r.height;
+      if (brushShownRef.current && inWork) updateCursorRef.current(mx, my);
+      else brushSink.current?.(null);
+    }, 24); // ~40Hz; < 1 tile/tick at the 700px/s pan speed, so no gaps in the line
+    return () => clearInterval(id);
+  }, []);
+
+  // Feed the cursor pump the latest closures + drift each render (it reads through
+  // refs so the interval set up once on mount never goes stale on tool/layer change).
+  onBrushRef.current = onBrush;
+  updateCursorRef.current = updateCursor;
+  driftActiveRef.current = drift.x !== 0 || drift.y !== 0;
+  brushShownRef.current = showBrush;
 
   // Churn probe: PaintCanvas is memoized + paints through refs, so it should NOT
   // re-render while you paint. A line here mid-stroke means a prop/state churned
@@ -921,10 +1090,10 @@ export function PaintCanvas(props: {
           slot attaches a chunk instead of painting. */}
       {showBrush ? (
         <Pressable
-          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; beginStroke(); notifyEditBegin(); onBrush(sx, sy); }}
-          onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) onBrush(sx, sy); updateHover(sx, sy); }}
+          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; beginStroke(); notifyEditBegin(); onBrush(sx, sy); updateCursor(sx, sy); }}
+          onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) onBrush(sx, sy); updateCursor(sx, sy); }}
           onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) { endStroke(); notifyEdit(strokeNote()); } }}
-          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); if (was) { endStroke(); notifyEdit(strokeNote()); } }}
+          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); brushSink.current?.(null); if (was) { endStroke(); notifyEdit(strokeNote()); } }}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
         />
       ) : null}
@@ -943,6 +1112,9 @@ export function PaintCanvas(props: {
 
       {/* The one-at-a-time address readout — owns its own state (see HoverReadout). */}
       <HoverReadout sink={hoverSink} />
+
+      {/* The visible brush footprint — only while a brush is the active tool. */}
+      {showBrush ? <BrushCursor sink={brushSink} /> : null}
 
       {/* Left rail — conditional on the active layer (absolute overlay, on top). */}
       <Box style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, backgroundColor: '#0b1320ee', borderRightWidth: 1, borderRightColor: '#1e293b', paddingLeft: 5, paddingRight: 5, paddingTop: 6, paddingBottom: 6 }}>

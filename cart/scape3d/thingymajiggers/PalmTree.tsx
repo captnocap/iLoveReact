@@ -1,6 +1,6 @@
 // A stylised, curving palm ~4.2 m tall with dead fronds and coconuts.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { PALM_TRUNK, PALM_FROND } from '../render3d/palette3d';
 import { defineThingymajigger } from './kit';
 

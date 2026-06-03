@@ -1,4 +1,4 @@
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { WorldProp } from '../../design';
 import { propKindDefinition } from '../../world/propKinds';

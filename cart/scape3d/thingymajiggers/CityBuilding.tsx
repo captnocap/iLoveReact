@@ -2,7 +2,7 @@
 // stands on) + roof cap + neon rim cage. A building is just a thingymajigger with a
 // big footprint; it owns its own height scale and facade textures here.
 import { Fragment } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import { HEIGHTS } from '../world/citymap';
 import { buildingFacade, buildingRoof, neonRim, windowGlow } from '../render3d/palette3d';
 import { facadeTex } from '../render3d/textures';

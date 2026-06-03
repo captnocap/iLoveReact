@@ -3,8 +3,8 @@
 // Ship: ./scripts/ship physics_lab
 
 import { useEffect, useRef, useState } from 'react';
-import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/primitives';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 as GeoVec3 } from '@reactjit/geometries';
 

@@ -3,7 +3,7 @@
 // Ship: ./scripts/ship animation_lab
 
 import { useEffect, useRef, useState } from 'react';
-import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/runtime/primitives';
+import { Box, Row, Col, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 
 type Vec3 = [number, number, number];

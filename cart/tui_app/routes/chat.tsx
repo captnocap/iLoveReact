@@ -12,8 +12,8 @@
 // renderer exists. Future add.
 
 import * as React from 'react';
-import { Box, Col, Row, Text, TextInput, ScrollView } from '@reactjit/runtime/primitives';
-import { callHost, hasHost } from '@reactjit/runtime/ffi';
+import { Box, Col, Row, Text, TextInput, ScrollView } from '@reactjit/primitives';
+import { callHost, hasHost } from '@reactjit/ffi';
 import { askAssistant, useChatTurns, useCurrentSessionId } from '../../app/chat/store';
 import type { AssistantTurn as TurnT } from '../../app/chat/types';
 import { SETTINGS_ID, short, useSettingsStore } from '../settings';

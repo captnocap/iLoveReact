@@ -8,7 +8,7 @@
 // NPC lies flat as a body. Facing maps scape's 2D angle → a Y-rotation.
 
 import type { ReactNode } from 'react';
-import { Scene3D } from '@reactjit/runtime/primitives';
+import { Scene3D } from '@reactjit/primitives';
 import type { V3 } from '../world/projection';
 import { heightAt } from '../world/terrain';
 import type { Player } from '../design';

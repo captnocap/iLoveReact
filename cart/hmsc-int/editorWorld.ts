@@ -30,6 +30,7 @@ import {
 } from '../hmsc/state/gameState';
 import { addBuildingToWorld, removeBuildingFromWorld } from '../hmsc/world/interiors';
 import { resolveBuildingPlacement } from '../hmsc/world/buildingPlacement';
+import { landformGroundTopAt } from '../hmsc/world/landforms';
 import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
 import { buildingFootprint } from '../hmsc/world/buildings';
 import { placeProp, removeProp, propFootprint } from '../hmsc/world/props';
@@ -106,22 +107,29 @@ export function placeBuilding(
     enclosure?: BuildingEnclosure;
     widthTiles?: number;
     depthTiles?: number;
+    yawDegrees?: number;
     doorSide?: BuildingSide;
     skin?: Building['skin'];
     force?: boolean;
   },
 ): BuildResult {
   const def = buildingKindDefinition(opts.kind);
+  const widthTiles = opts.widthTiles ?? def.defaultWidthTiles;
+  const depthTiles = opts.depthTiles ?? def.defaultDepthTiles;
+  // Sit the pad on the terrain: sample the landform surface under the footprint
+  // centre (a painted hill, the mountain, …). Flat ground returns nothing → y 0.
+  const groundY = landformGroundTopAt(state, opts.x + widthTiles / 2, opts.z + depthTiles / 2) ?? 0;
   const proposed: Building = {
     id: nextUniqueId('building_int_', state.world.buildings.map((b) => b.id)),
     kind: opts.kind,
     label: def.label,
     enclosure: opts.enclosure ?? def.defaultEnclosure,
     x: opts.x,
-    y: 0,
+    y: groundY,
     z: opts.z,
-    widthTiles: opts.widthTiles ?? def.defaultWidthTiles,
-    depthTiles: opts.depthTiles ?? def.defaultDepthTiles,
+    widthTiles,
+    depthTiles,
+    ...(opts.yawDegrees ? { yawDegrees: opts.yawDegrees } : {}),
     doorSide: opts.doorSide ?? 'south',
     ...(opts.skin ? { skin: opts.skin } : {}),
     createdByCommand: 'hmsc-int:place',
@@ -160,7 +168,8 @@ export function placeWorldProp(
     id: nextUniqueId('prop_int_', state.world.props.map((p) => p.id)),
     kind: opts.kind,
     x: opts.x,
-    y: 0,
+    // Stand the prop on the terrain under its anchor; flat ground → y 0.
+    y: landformGroundTopAt(state, opts.x, opts.z) ?? 0,
     z: opts.z,
     yawDegrees: opts.yawDegrees ?? 0,
     createdByCommand: 'hmsc-int:place',

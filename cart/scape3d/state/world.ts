@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 import { decorAt } from '../world/tiles';
 import { featureAt } from '../world/atlas';
 import { THINGYMAJIGGERS } from '../thingymajiggers';

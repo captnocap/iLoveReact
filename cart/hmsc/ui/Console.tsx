@@ -1,4 +1,4 @@
-import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/runtime/primitives';
+import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import type { CommandEntry } from '../design';
 
 const QUICK_COMMANDS = ['cmd_help', 'gv_debug_hud', 'gv_sky', 'gv_time noon', 'gv_daycycle 1', 'gv_weather storm', 'gv_weather clear', 'gv_view', 'gv_view 80', 'gv_events', 'lab_spawn scale', 'lab_spawn textures', 'lab_spawn aim', 'lab_exit', 'pv_where', 'cmd_cheats 1', 'pv_noclip 1', 'gv_state player', 'gv_save', 'gv_reset'];

@@ -8,7 +8,7 @@
 // chat / debug overlays. The sprite frame is still built — only to feed the
 // minimap radar shader its data buffer.
 
-import { Box, Filter, Pressable } from '@reactjit/runtime/primitives';
+import { Box, Filter, Pressable } from '@reactjit/primitives';
 import { Scene } from './render3d/Scene';
 import { WaterSurface } from './render3d/WaterSurface';
 import { Hud } from './render/Hud';

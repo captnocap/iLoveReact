@@ -24,7 +24,7 @@
 // ─────────────────────────────────────────────────────────────────────
 
 import { useRef, useState } from 'react';
-import { Col, Input, Pressable, Row, Text } from '@reactjit/runtime/primitives';
+import { Col, Input, Pressable, Row, Text } from '@reactjit/primitives';
 import { classifiers as S } from '@reactjit/core';
 import { useAssistantChat } from '../../chat/useAssistantChat';
 import { useCRUD } from '../../db';

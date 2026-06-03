@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
-import { Box, Effect, Text } from '@reactjit/runtime/primitives';
+import { busOn } from '@reactjit/hooks/useIFTTT';
+import { Box, Effect, Text } from '@reactjit/primitives';
 import type { GameState, GridCell } from '../design';
 import { tileKindAtCell } from '../world/grid';
 import { worldMarkers } from '../world/worldView';

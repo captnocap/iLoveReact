@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Graph, Pressable, Text } from '@reactjit/runtime/primitives';
-import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
+import { Box, Graph, Pressable, Text } from '@reactjit/primitives';
+import { busOn } from '@reactjit/hooks/useIFTTT';
 
 type Vec = { x: number; y: number };
 type Rect = { x: number; y: number; width: number; height: number };

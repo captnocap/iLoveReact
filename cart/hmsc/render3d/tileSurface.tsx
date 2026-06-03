@@ -1,5 +1,5 @@
 import { memo, useMemo } from 'react';
-import { Effect, StaticSurface } from '@reactjit/runtime/primitives';
+import { Effect, StaticSurface } from '@reactjit/primitives';
 import type { WorldSurfaceRegion } from '../design';
 import { TILE_FILL_WGSL, tileFillMaterialId, tileFillVariant } from './tileFill';
 
