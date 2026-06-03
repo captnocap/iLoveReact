@@ -123,6 +123,8 @@ export default function HeadLab() {
   // The mesh's displacement grid (signed −1..1), refreshed from the paint
   // texture on stroke release. This is the ONLY paint state React sees.
   const [grid, setGrid] = useState<number[]>(() => new Array(GRID_W * GRID_H).fill(0));
+  // Bumped whenever the grid changes — versions the mesh's dynamicKey.
+  const [sculptSeq, setSculptSeq] = useState(0);
   const paintingRef = useRef(false);
   const canvasRect = useRef({ x: 0, y: 0, width: UNWRAP_W, height: UNWRAP_H });
   const orbitRef = useRef<{ x: number; y: number } | null>(null);
@@ -162,6 +164,7 @@ export default function HeadLab() {
       }
     }
     setGrid(next);
+    setSculptSeq((s) => s + 1);
   };
 
   const onPaintDown = (e: any) => { paintingRef.current = true; dab(Number(e?.x ?? 0), Number(e?.y ?? 0)); };
@@ -175,6 +178,7 @@ export default function HeadLab() {
   const clearStrokes = () => {
     depth.paint.clear(NEUTRAL);
     setGrid(new Array(GRID_W * GRID_H).fill(0));
+    setSculptSeq((s) => s + 1);
   };
 
   // Geometry identity changes only on stroke release / knob change — the
@@ -274,9 +278,16 @@ export default function HeadLab() {
           <Scene3D.AmbientLight color="#aab8d6" intensity={0.6} />
           <Scene3D.DirectionalLight direction={[0.4, 0.9, 0.35]} color="#fff0d6" intensity={0.85} />
           <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 8, height: 0.03, depth: 8 }} material="#0e1726" position={[0, -0.015, 0]} />
+          {/* dynamicKey routes the sculpt through ONE reused host geometry
+              slot, overwritten per version — WITHOUT it every stroke release
+              interns a brand-new mesh into the host's fixed static pool, and
+              when that pool fills the head silently vanishes mid-session.
+              Contract: equal key ⇒ equal verts, so the version encodes
+              everything the verts depend on. */}
           <Scene3D.Mesh
             geometry={Geometry.Globe}
             params={params}
+            dynamicKey={`headlab~${sculptSeq}.${amount.toFixed(2)}.${scaleY.toFixed(2)}`}
             material="#ffffff"
             textureKey={texKey}
             position={[0, 1.4, 0]}
