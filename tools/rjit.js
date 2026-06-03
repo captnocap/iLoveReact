@@ -282,10 +282,15 @@
      * A quad as two triangles with a single face normal. Mirrors Zig addFace
      * exactly: corners run world bottom→top (BL,BR,TR,TL), V is flipped so a
      * texture stays upright on the face, winding is [0,1,2, 0,2,3].
+     *
+     * `pinUv` collapses all four corner UVs to a single texel so the face samples
+     * one flat color instead of stretching the whole texture across it — the
+     * "this face isn't textured" path (e.g. the thin edge of a sign). Omit it for
+     * the normal upright 0..1 mapping.
      */
-    face(v1, v2, v3, v4, n) {
+    face(v1, v2, v3, v4, n, pinUv) {
       const corners = [v1, v2, v3, v4];
-      const uvs = [[0, 1], [1, 1], [1, 0], [0, 0]];
+      const uvs = pinUv ? [pinUv, pinUv, pinUv, pinUv] : [[0, 1], [1, 1], [1, 0], [0, 0]];
       const order = [0, 1, 2, 0, 2, 3];
       for (const ti of order) this.vert(corners[ti], n, uvs[ti]);
     }
@@ -303,17 +308,20 @@
 
   // runtime/geometries/Box.ts
   var BOX_DEFAULTS = { width: 1, height: 1, depth: 1 };
+  var PIN = [0, 0];
   function generate(p) {
     const hx = p.width * 0.5;
     const hy = p.height * 0.5;
     const hz = p.depth * 0.5;
+    const faces = p.texturedFaces;
+    const pin = (face) => faces && !faces.includes(face) ? PIN : void 0;
     const g = mesh();
-    g.face([-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz], [0, 0, 1]);
-    g.face([hx, -hy, -hz], [-hx, -hy, -hz], [-hx, hy, -hz], [hx, hy, -hz], [0, 0, -1]);
-    g.face([hx, -hy, hz], [hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz], [1, 0, 0]);
-    g.face([-hx, -hy, -hz], [-hx, -hy, hz], [-hx, hy, hz], [-hx, hy, -hz], [-1, 0, 0]);
-    g.face([-hx, hy, hz], [hx, hy, hz], [hx, hy, -hz], [-hx, hy, -hz], [0, 1, 0]);
-    g.face([-hx, -hy, -hz], [hx, -hy, -hz], [hx, -hy, hz], [-hx, -hy, hz], [0, -1, 0]);
+    g.face([-hx, -hy, hz], [hx, -hy, hz], [hx, hy, hz], [-hx, hy, hz], [0, 0, 1], pin("front"));
+    g.face([hx, -hy, -hz], [-hx, -hy, -hz], [-hx, hy, -hz], [hx, hy, -hz], [0, 0, -1], pin("back"));
+    g.face([hx, -hy, hz], [hx, -hy, -hz], [hx, hy, -hz], [hx, hy, hz], [1, 0, 0], pin("right"));
+    g.face([-hx, -hy, -hz], [-hx, -hy, hz], [-hx, hy, hz], [-hx, hy, -hz], [-1, 0, 0], pin("left"));
+    g.face([-hx, hy, hz], [hx, hy, hz], [hx, hy, -hz], [-hx, hy, -hz], [0, 1, 0], pin("top"));
+    g.face([-hx, -hy, -hz], [hx, -hy, -hz], [hx, -hy, hz], [-hx, -hy, hz], [0, -1, 0], pin("bottom"));
     return g.build();
   }
 
@@ -1178,7 +1186,19 @@
     "Trash2",
     "Package",
     "ScanLine",
-    "Spline"
+    "Spline",
+    // hmsc-int world editor — bars, tabs, log, paint tools, assist route.
+    "Activity",
+    "ArrowLeft",
+    "Check",
+    "ChevronDown",
+    "FolderTree",
+    "Hammer",
+    "Map",
+    "MessageSquare",
+    "MousePointer",
+    "NotebookPen",
+    "Sparkles"
   ];
   var HEX = "0123456789abcdef";
   async function run4(argv) {

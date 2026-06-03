@@ -58,6 +58,9 @@ const ICON_NAMES = [
   'Copy', 'ArrowUp', 'ArrowDown', 'Merge', 'Trash2', 'Package',
   // Cutout tool palette — refine brush + lasso.
   'ScanLine', 'Spline',
+  // hmsc-int world editor — bars, tabs, log, paint tools, assist route.
+  'Activity', 'ArrowLeft', 'Check', 'ChevronDown', 'FolderTree', 'Hammer',
+  'Map', 'MessageSquare', 'MousePointer', 'NotebookPen', 'Sparkles',
 ];
 
 // ── Boilerplate ───────────────────────────────────────────────────────

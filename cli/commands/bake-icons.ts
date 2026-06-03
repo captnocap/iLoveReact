@@ -38,6 +38,9 @@ const ICON_NAMES = [
   'Undo2', 'Redo2', 'RefreshCw', 'RefreshCcw',
   'Copy', 'ArrowUp', 'ArrowDown', 'Merge', 'Trash2', 'Package',
   'ScanLine', 'Spline',
+  // hmsc-int world editor — bars, tabs, log, paint tools, assist route.
+  'Activity', 'ArrowLeft', 'Check', 'ChevronDown', 'FolderTree', 'Hammer',
+  'Map', 'MessageSquare', 'MousePointer', 'NotebookPen', 'Sparkles',
 ];
 
 const HEX = '0123456789abcdef';
