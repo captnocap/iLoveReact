@@ -62,26 +62,52 @@ const SKINS = ['#caa07a', '#8d5a3c', '#e0b48c', '#a9785a'];
 type Mode = 'raise' | 'lower' | 'flatten';
 type View = 'part' | 'figure';
 
-// Heat overlay shader: samples the selected part's paint texture, tints raised
-// regions blue and carved regions orange, stays transparent at neutral so the
-// content reads through. Declares the FULL textures-mode binding set (2 tex +
-// 2 samp) like cutout's MaskQuad shaders — the textures-enabled pipeline
-// layout expects all four slots; unused ones fall through to the dummy 1×1.
+// Painter overlay shader. Three layers in one quad:
+//   1. live stroke heat — blue raised / orange carved (the paint texture)
+//   2. CONTOUR RINGS of the current form — the combined relief (sculpt +
+//      face features) rides in the second texture slot; a topo line every
+//      1/12 of full depth, tinted by direction and faded where flat, shows
+//      where the surface already curves before you stroke
+//   3. faint unwrap guides — front meridian (u=.5), side/ear meridians
+//      (u=.25/.75), equator — so you always know where on the head you are
+// Declares the FULL textures-mode binding set (2 tex + 2 samp) like cutout's
+// MaskQuad shaders — the textures-enabled pipeline layout expects all four.
 // (No backticks in WGSL — they'd close the JS template literal.)
 const DEPTH_OVERLAY_WGSL = `
 @group(0) @binding(1) var<storage, read> data: array<f32>;
 @group(0) @binding(2) var depth_tex: texture_2d<f32>;
 @group(0) @binding(3) var depth_samp: sampler;
-@group(0) @binding(4) var unused_tex: texture_2d<f32>;
-@group(0) @binding(5) var unused_samp: sampler;
+@group(0) @binding(4) var relief_tex: texture_2d<f32>;
+@group(0) @binding(5) var relief_samp: sampler;
 
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let v = textureSampleLevel(depth_tex, depth_samp, in.uv, 0.0).r - 0.5;
-  let a = clamp(abs(v) * 2.0, 0.0, 1.0) * 0.55;
+  let live = textureSampleLevel(depth_tex, depth_samp, in.uv, 0.0).r - 0.5;
+  let relief = textureSampleLevel(relief_tex, relief_samp, in.uv, 0.0).r - 0.5;
+
   let raised = vec3f(0.24, 0.66, 1.0);
   let carved = vec3f(1.0, 0.58, 0.2);
-  let tint = select(carved, raised, v > 0.0);
-  return vec4f(tint * a, a);
+
+  // contour rings of the current form, faded out where the surface is flat
+  let levels = 12.0;
+  let t = fract(abs(relief) * levels);
+  let ring = 1.0 - smoothstep(0.0, 0.18, min(t, 1.0 - t));
+  let contour_a = ring * 0.3 * smoothstep(0.01, 0.05, abs(relief));
+  let contour_c = select(carved, raised, relief > 0.0);
+
+  // unwrap guides
+  let gx = min(abs(in.uv.x - 0.5), min(abs(in.uv.x - 0.25), abs(in.uv.x - 0.75)));
+  let gy = abs(in.uv.y - 0.5);
+  let guide_a = max((1.0 - smoothstep(0.0015, 0.0035, gx)) * 0.13,
+                    (1.0 - smoothstep(0.003, 0.007, gy)) * 0.09);
+
+  // live stroke heat
+  let heat_a = clamp(abs(live) * 2.0, 0.0, 1.0) * 0.5;
+  let heat_c = select(carved, raised, live > 0.0);
+
+  let ink = vec3f(0.07, 0.1, 0.16);
+  let color = heat_c * heat_a + contour_c * contour_a + ink * guide_a;
+  let a = min(heat_a + contour_a + guide_a, 0.85);
+  return vec4f(color, a);
 }
 `;
 
@@ -254,6 +280,9 @@ export default function HeadLab() {
     paints[id] = usePaintable({ id: `bodylab-${id}`, w: PAINT_W, h: PAINT_H });
   }
   useEffect(() => { for (const id of PART_IDS) paints[id].paint.clear(NEUTRAL); }, []);
+  // The selected part's combined relief (sculpt + face features) as a small
+  // texture — the overlay's contour-ring layer samples it.
+  const relief = usePaintable({ id: 'bodylab-relief', w: GRID_W, h: GRID_H });
 
   // Animation clock — only ticks while something is playing on a face.
   useEffect(() => {
@@ -439,6 +468,17 @@ export default function HeadLab() {
     [grids.head, faceDepth],
   );
 
+  // Keep the overlay's contour texture in sync with the selected part's
+  // current form, packed around the same midpoint convention as the brush.
+  const selDisplace = selPart === 'head' ? headDisplace : grids[selPart];
+  useEffect(() => {
+    const bytes = new Uint8Array(GRID_W * GRID_H);
+    for (let i = 0; i < bytes.length; i++) {
+      bytes[i] = Math.max(0, Math.min(255, Math.round((selDisplace[i] / 2 + NEUTRAL) * 255)));
+    }
+    relief.paint.upload(bytes);
+  }, [selDisplace]);
+
   // Per-part geometry. All meshes ride dynamic geometry slots (one per part),
   // so only the KEY matters for regeneration — params can be built inline.
   const partDisplace = (id: PartId) => (id === 'head' ? headDisplace : grids[id]);
@@ -529,7 +569,7 @@ export default function HeadLab() {
           <Effect
             shader={DEPTH_OVERLAY_WGSL}
             data={[0]}
-            textures={[paints[selPart].id]}
+            textures={[paints[selPart].id, relief.id]}
             style={{ position: 'absolute', left: 0, top: 0, width: UNWRAP_W, height: UNWRAP_H }}
           />
         </Pressable>
@@ -601,6 +641,7 @@ export default function HeadLab() {
         {PART_IDS.map((id) => (
           <Paintable key={id} id={paints[id].id} w={PAINT_W} h={PAINT_H} />
         ))}
+        <Paintable id={relief.id} w={GRID_W} h={GRID_H} />
       </Box>
       <StaticSurface staticKey={headTexKey} style={surfaceStyle}>
         <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={shownDoc?.layers ?? null} />
