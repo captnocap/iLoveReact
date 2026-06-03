@@ -24,7 +24,10 @@ export function Figure(props: { rig: HumanoidRig; palette: HumanoidPalette; mark
           key={index}
           geometry={part.geometry}
           params={part.params}
-          material={palette[part.slot]}
+          // A textured part (the face-decal head) renders white so the baked
+          // texture reads true — same rule as PartMesh in render3d/parts.tsx.
+          material={part.textureKey ? '#ffffff' : palette[part.slot]}
+          textureKey={part.textureKey}
           position={part.position}
           rotation={part.rotation}
         />

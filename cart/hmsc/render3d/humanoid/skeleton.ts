@@ -36,6 +36,9 @@ export type RigPart = {
   position: Vec3Tuple;
   rotation?: Vec3Tuple;
   slot: MaterialSlot;
+  // A baked StaticSurface key sampled by this part's mesh (the face decal on the
+  // head). When set, Figure renders the mesh white so the texture reads true.
+  textureKey?: string;
 };
 
 // A capsule (segment a->b with a radius) tagged with the zone it represents.
@@ -125,7 +128,12 @@ function limbPart(seg: Segment, length: number, radius: number, slot: MaterialSl
 // Solve a pose into a full rig. `base` is the ground point under the figure;
 // `yawDegrees` faces it; `pose` is the gait frame. Returns the render parts and
 // the hitbox zones, both in world space.
-export function solveHumanoid(base: Vec3Tuple, yawDegrees: number, pose: HumanoidPose): HumanoidRig {
+//
+// `faceKey` (optional) is a baked face texture (humanoid/face.tsx) — the head
+// becomes a Head-geometry decal sphere sampling it and the box eyes drop (the
+// decal carries eyes/brows/mouth). Without it the original sphere+box-eyes head
+// renders unchanged, so consumers that don't mount face captures keep working.
+export function solveHumanoid(base: Vec3Tuple, yawDegrees: number, pose: HumanoidPose, faceKey?: string): HumanoidRig {
   const yawRadians = radians(yawDegrees);
   const origin = add(base, [0, pose.bodyY, 0]);
   const rootPitch = pose.rootPitch;
@@ -174,11 +182,20 @@ export function solveHumanoid(base: Vec3Tuple, yawDegrees: number, pose: Humanoi
     { geometry: Geometry.Sphere, params: { radius: 0.1, segments: 12, rings: 8 }, position: foreArmL.end, slot: 'skin' },
     { geometry: Geometry.Sphere, params: { radius: 0.1, segments: 12, rings: 8 }, position: foreArmR.end, slot: 'skin' },
 
-    // head
+    // head — with a face the head is a Head-geometry decal sphere sampling the
+    // baked face texture (eyes/brows/mouth live in the decal, so the box eyes
+    // drop); without one it's the original sphere + box eyes, unchanged. The
+    // cone nose stays either way — it gives the profile its silhouette.
     { geometry: Geometry.Cylinder, params: { radius: 0.08, height: 0.12, segments: 12 }, position: neck, rotation: uprightRotation, slot: 'skin' },
-    { geometry: Geometry.Sphere, params: { radius: 0.2, segments: 16, rings: 10 }, position: head, rotation: headRotation, slot: 'skin' },
-    { geometry: Geometry.Box, params: { width: 0.06, height: 0.06, depth: 0.04 }, position: point(origin, [0.08, 1.88, -0.18], yawRadians, rootPitch), rotation: headRotation, slot: 'eye' },
-    { geometry: Geometry.Box, params: { width: 0.06, height: 0.06, depth: 0.04 }, position: point(origin, [-0.08, 1.88, -0.18], yawRadians, rootPitch), rotation: headRotation, slot: 'eye' },
+    ...(faceKey
+      ? [
+          { geometry: Geometry.Head, params: { radius: 0.2, segments: 16, rings: 10 }, position: head, rotation: headRotation, slot: 'skin', textureKey: faceKey } as RigPart,
+        ]
+      : [
+          { geometry: Geometry.Sphere, params: { radius: 0.2, segments: 16, rings: 10 }, position: head, rotation: headRotation, slot: 'skin' } as RigPart,
+          { geometry: Geometry.Box, params: { width: 0.06, height: 0.06, depth: 0.04 }, position: point(origin, [0.08, 1.88, -0.18], yawRadians, rootPitch), rotation: headRotation, slot: 'eye' } as RigPart,
+          { geometry: Geometry.Box, params: { width: 0.06, height: 0.06, depth: 0.04 }, position: point(origin, [-0.08, 1.88, -0.18], yawRadians, rootPitch), rotation: headRotation, slot: 'eye' } as RigPart,
+        ]),
     { geometry: Geometry.Cone, params: { radius: 0.05, height: 0.13, segments: 12 }, position: point(origin, [0, 1.82, -0.2], yawRadians, rootPitch), rotation: [-90 + pose.headNod + rootPitch, yawDegrees, 0], slot: 'nose' },
     { geometry: Geometry.Cone, params: { radius: 0.23, height: 0.34, segments: 16 }, position: point(origin, [0, 2.12, 0], yawRadians, rootPitch), rotation: uprightRotation, slot: 'hat' },
   ];

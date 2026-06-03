@@ -30,12 +30,18 @@ export const NPC_PALETTES: HumanoidPalette[] = [
   { skin: '#a9785a', shirt: '#5a5560', pants: '#1f1d24', shoe: '#15121f', hat: '#3a3640', eye: '#0a0a12', belt: '#18161c', nose: '#946a4e', marker: '#888888' },
 ];
 
-// Pick a stable palette for an NPC by hashing its id. Same id -> same look.
-export function npcPalette(id: string): HumanoidPalette {
+// Pick a stable palette index for an NPC by hashing its id. Exported so the
+// face pool (face.tsx) keys off the SAME pick — a face's skin tone always
+// matches the body it's drawn on.
+export function npcPaletteIndex(id: string): number {
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
     hash = (hash * 31 + id.charCodeAt(i)) | 0;
   }
-  const index = Math.abs(hash) % NPC_PALETTES.length;
-  return NPC_PALETTES[index];
+  return Math.abs(hash) % NPC_PALETTES.length;
+}
+
+// Pick a stable palette for an NPC by hashing its id. Same id -> same look.
+export function npcPalette(id: string): HumanoidPalette {
+  return NPC_PALETTES[npcPaletteIndex(id)];
 }

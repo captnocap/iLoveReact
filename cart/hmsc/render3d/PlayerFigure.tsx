@@ -1,5 +1,5 @@
 import type { Vec3 } from '../design';
-import { drivePose, solveHumanoid, Figure, PLAYER_PALETTE } from './humanoid';
+import { drivePose, solveHumanoid, Figure, PLAYER_PALETTE, PLAYER_FACE_KEY } from './humanoid';
 import type { Vec3Tuple } from './humanoid';
 
 // The HMSC player model. As of the humanoid extraction this is a thin wrapper:
@@ -12,9 +12,12 @@ import type { Vec3Tuple } from './humanoid';
 // The prop signature is unchanged for its consumers: hmsc gameplay,
 // hmsc_scale_lab, hmsc_massive_map_lab.
 
+// The head wears the player's baked face decal (humanoid/face.tsx). Any mount
+// that draws this must also mount <HumanoidFaceCaptures /> as a 2D sibling of
+// its Scene3D so the key resolves — HmscGameplayRig and both labs do.
 export function PlayerFigure(props: { position: Vec3; yawDegrees: number; animationSeconds: number; moving: boolean; running: boolean }) {
   const pose = drivePose(props.animationSeconds, props.moving, props.running);
   const base: Vec3Tuple = [props.position.x, props.position.y, props.position.z];
-  const rig = solveHumanoid(base, props.yawDegrees, pose);
+  const rig = solveHumanoid(base, props.yawDegrees, pose, PLAYER_FACE_KEY);
   return <Figure rig={rig} palette={PLAYER_PALETTE} marker={base} />;
 }

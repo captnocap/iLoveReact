@@ -9,6 +9,7 @@ import { set as setClipboard } from '@reactjit/hooks/clipboard';
 import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { PlayerFigure } from './hmsc/render3d/PlayerFigure';
+import { HumanoidFaceCaptures } from './hmsc/render3d/humanoid';
 import { HMSC_SCALE } from './hmsc/world/scale';
 
 type Vec3 = [number, number, number];
@@ -698,6 +699,9 @@ export default function HmscMassiveMapLab() {
           />
         ) : null}
       </Scene3D>
+
+      {/* Offscreen face bakes — the PlayerFigure's head decal samples these. */}
+      <HumanoidFaceCaptures />
 
       <Box style={{ position: 'absolute', top: 14, left: 14, width: 560, padding: 12, borderRadius: 6, borderWidth: 1, borderColor: '#1e293b', backgroundColor: '#08111f' }}>
         <Col style={{ gap: 8 }}>

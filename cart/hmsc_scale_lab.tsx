@@ -7,6 +7,7 @@ import { busOn } from '@reactjit/hooks/useIFTTT';
 import { Box, Col, Row, Text, Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { PlayerFigure } from './hmsc/render3d/PlayerFigure';
+import { HumanoidFaceCaptures } from './hmsc/render3d/humanoid';
 import { HMSC_SCALE } from './hmsc/world/scale';
 
 const PLAYER_CAPSULE_HEIGHT = HMSC_SCALE.playerCapsuleHeightMeters;
@@ -260,6 +261,9 @@ export default function HmscScaleLab() {
         ))}
         <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 0.035, height: 3.3, depth: 0.035 }} material="#94a3b8" position={[-2.8, 1.65, 0]} />
       </Scene3D>
+
+      {/* Offscreen face bakes — the PlayerFigure's head decal samples these. */}
+      <HumanoidFaceCaptures />
 
       <Box style={{ position: 'absolute', top: 14, left: 14, width: 368, padding: 12, borderRadius: 6, borderWidth: 1, borderColor: '#1e293b', backgroundColor: '#08111f' }}>
         <Col style={{ gap: 8 }}>

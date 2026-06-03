@@ -1,5 +1,5 @@
 import type { Vec3 } from '../design';
-import { drivePose, solveHumanoid, Figure, npcPalette } from './humanoid';
+import { drivePose, solveHumanoid, Figure, npcPalette, npcFaceKey } from './humanoid';
 import type { HumanoidRig, Vec3Tuple } from './humanoid';
 
 // An NPC, drawn. Same shared humanoid skeleton as the player, recolored by a
@@ -27,7 +27,10 @@ export type NpcDrive = {
 export function solveNpcRig(npc: NpcDrive): HumanoidRig {
   const pose = drivePose(npc.animationSeconds, npc.moving, npc.running);
   const base: Vec3Tuple = [npc.position.x, npc.position.y, npc.position.z];
-  return solveHumanoid(base, npc.yawDegrees, pose);
+  // Face picked deterministically from the id, like the palette — same NPC,
+  // same face. The whole pool is pre-baked by HumanoidFaceCaptures, so any id's
+  // key resolves. Harmless on the raycast path (capsules ignore textures).
+  return solveHumanoid(base, npc.yawDegrees, pose, npcFaceKey(npc.id));
 }
 
 export function NpcFigure(props: NpcDrive) {
