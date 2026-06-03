@@ -31,8 +31,8 @@ export const PART_PRESETS: Record<PartId, PartPreset> = {
   // arms and legs are not the michelin man), slightly waisted, rounded ends
   // so two of them visually connect at an elbow/knee without a seam gap
   pipe: { label: 'pipe', scaleY: 2.2, scaleX: 0.42, scaleZ: 0.42, profile: [0.45, 0.85, 0.8, 0.85, 0.45] },
-  // wider than tall, flattened front-to-back
-  hand: { label: 'hand', scaleY: 1.0, scaleZ: 0.45, profile: [0.55, 1.0, 0.85] },
+  // a touch taller than wide, flattened front-to-back (a palm, not a paddle)
+  hand: { label: 'hand', scaleX: 0.78, scaleY: 1.05, scaleZ: 0.45, profile: [0.55, 1.0, 0.85] },
   // like the hand but squat and stretched forward (toes at -Z, the facing
   // convention every sculpt surface shares)
   foot: { label: 'foot', scaleY: 0.6, scaleX: 0.8, scaleZ: 1.5, profile: [0.7, 1.0, 0.9] },
