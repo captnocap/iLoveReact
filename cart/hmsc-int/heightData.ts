@@ -35,23 +35,43 @@ export function clearField(f: HeightField): void {
   f.z.fill(0);
 }
 
+// The cross-section profile a brush stamps across its disc. t = distance/radius
+// (0 at centre … 1 at the rim):
+//   cone — peak·(1−t): a linear slope that fans out to nothing at the rim.
+//   flat — peak everywhere: a vertical-walled plateau/mesa; does NOT fan out, the
+//          edge is a cliff. (The "doesn't fan out" brush.)
+//   dome — peak·√(1−t²): a hemispherical cap — rounded on top, steepening to the rim.
+export type BrushShape = 'cone' | 'flat' | 'dome';
+
 export interface StampOpts {
-  centerZ: number;   // peak height at the brush center (signed)
-  falloff: number;   // meters of Z lost per meter out (cone slope)
-  erase?: boolean;   // pull cells in range to 0 instead of stamping
+  centerZ: number;    // peak height at the brush center (signed)
+  radiusM: number;    // brush radius in metres (where the profile reaches its edge)
+  shape: BrushShape;  // cross-section profile across the radius
+  erase?: boolean;    // pull cells in range to 0 instead of stamping
 }
 
-// Stamp a cone centered on cell (cix,ciy): each cell in range is RAISED TOWARD the
-// linear falloff profile (peak |centerZ| at the center, 0 at the radius), not summed.
-// "Raise toward" = signed max, so the brush sculpts a dome capped at centerZ instead
-// of piling up — overlapping stamps form the UNION of domes (a smooth ridge), and the
-// painted height equals the intensity you set. Summing made every drag saturate to the
-// clamp (a flat max-height mesa); a ceiling can't. Erase zeros the cells in range.
+// Brush profile value at normalized distance t (0..1) for a unit peak.
+function brushProfile(shape: BrushShape, t: number): number {
+  switch (shape) {
+    case 'flat': return 1;
+    case 'dome': return Math.sqrt(Math.max(0, 1 - t * t));
+    case 'cone':
+    default: return 1 - t;
+  }
+}
+
+// Stamp a brush centered on cell (cix,ciy): each cell in range is RAISED TOWARD the
+// shape's profile (peak |centerZ| at the center, falling to the rim per `shape`), not
+// summed. "Raise toward" = signed max, so the brush sculpts a cap at centerZ instead
+// of piling up — overlapping stamps form the UNION of the shapes (a smooth ridge), and
+// the painted height equals the intensity you set. Summing made every drag saturate to
+// the clamp (a flat max-height mesa); a ceiling can't. Erase zeros the cells in range.
 // O(radius^2), independent of total grid size.
-export function stampCone(f: HeightField, cix: number, ciy: number, opts: StampOpts): void {
-  const radiusM = Math.max(DOT_M, Math.abs(opts.centerZ) / Math.max(0.0001, opts.falloff));
+export function stampBrush(f: HeightField, cix: number, ciy: number, opts: StampOpts): void {
+  const radiusM = Math.max(DOT_M, opts.radiusM);
   const rd = Math.max(1, Math.ceil(radiusM / DOT_M));
   const sign = opts.centerZ >= 0 ? 1 : -1;
+  const peak = Math.abs(opts.centerZ);
   for (let dy = -rd; dy <= rd; dy++) {
     const jy = ciy + dy;
     if (jy < 0 || jy >= f.rows) continue;
@@ -62,7 +82,7 @@ export function stampCone(f: HeightField, cix: number, ciy: number, opts: StampO
       if (dm > radiusM) continue;
       const idx = jy * f.cols + jx;
       if (opts.erase) { f.z[idx] = 0; continue; }
-      const mag = Math.abs(opts.centerZ) - opts.falloff * dm;
+      const mag = peak * brushProfile(opts.shape, dm / radiusM);
       if (mag <= 0) continue;
       // Raise toward the signed target: take whichever value is farther from 0 in the
       // brush's direction, so re-stamping or overlapping never climbs past centerZ.

@@ -29,7 +29,7 @@ import { type ChunkFloor } from './chunkFloor';
 import type { TileKind, ZoneFlag } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
 import { ZONE_FLAGS } from '../hmsc/world/zones';
-import { TILE_UNITS, DOT_M, stampCone, clearField } from './heightData';
+import { TILE_UNITS, DOT_M, stampBrush, clearField, type BrushShape } from './heightData';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { ChunkSurface } from './ChunkSurface';
@@ -51,7 +51,8 @@ type BrushSink = { current: ((b: BrushVis) => void) | null };
 
 export type Tool = 'pointer' | 'brush' | 'eraser';
 export type Layer = 'paint' | 'height' | 'place' | 'zone';
-export type BrushSettings = { size: number; centerZ: number; heightTool: HeightTool };
+export type { BrushShape };
+export type BrushSettings = { size: number; centerZ: number; heightTool: HeightTool; heightShape: BrushShape };
 
 // The serialize seam: the cart pulls the live world (chunks + zone defs + focus)
 // through this on autosave. Placements live in the cart, so they're added there.
@@ -245,8 +246,16 @@ function PaintRail(props: { tool: Tool; onTool: (t: Tool) => void; tile: TileKin
   );
 }
 
+// Brush cross-section shapes, with a tiny ASCII glyph hint of the profile.
+const HEIGHT_SHAPES: { id: BrushShape; label: string; hint: string }[] = [
+  { id: 'cone', label: 'cone', hint: '▲' }, // ▲ slopes to nothing
+  { id: 'flat', label: 'flat', hint: '▬' }, // ▬ plateau, vertical edge
+  { id: 'dome', label: 'dome', hint: '◖' }, // ◖ rounded cap
+];
+
 function HeightRail(props: {
   hTool: HeightTool; onHTool: (t: HeightTool) => void;
+  shape: BrushShape; onShape: (s: BrushShape) => void;
   centerZ: number; onCenterZ: (z: number) => void;
   size: number; onSize: (n: number) => void;
   onClear: () => void;
@@ -256,6 +265,19 @@ function HeightRail(props: {
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
         <ToolBtn icon="Brush" active={props.hTool === 'brush'} onPress={() => props.onHTool('brush')} />
         <ToolBtn icon="Eraser" active={props.hTool === 'erase'} onPress={() => props.onHTool('erase')} />
+      </Box>
+      {/* Brush shape — the profile the brush stamps. Only meaningful when raising
+          (the eraser just zeros its disc), so it dims under the eraser. */}
+      <Box style={{ flexDirection: 'row', gap: 4, opacity: props.hTool === 'erase' ? 0.4 : 1 }}>
+        {HEIGHT_SHAPES.map((s) => {
+          const active = props.shape === s.id;
+          return (
+            <Pressable key={s.id} onPress={() => props.onShape(s.id)} style={{ flex: 1, alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: active ? '#f8fafc' : '#334155', backgroundColor: active ? '#1e293b' : '#0f1a2e' }}>
+              <Text fontSize={11} color={active ? '#7dd3fc' : '#64748b'}>{s.hint}</Text>
+              <Text fontSize={7} color={active ? '#f8fafc' : '#94a3b8'} style={{ fontFamily: 'monospace' }}>{s.label}</Text>
+            </Pressable>
+          );
+        })}
       </Box>
       <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
       <MiniStepper label="z (m)" value={props.centerZ.toFixed(1)} onDec={() => props.onCenterZ(clamp(props.centerZ - Z_STEP, Z_MIN, Z_MAX))} onInc={() => props.onCenterZ(clamp(props.centerZ + Z_STEP, Z_MIN, Z_MAX))} />
@@ -469,7 +491,9 @@ export function PaintCanvas(props: {
   const centerZ = clamp(Number(props.brush.centerZ), Z_MIN, Z_MAX);
   // One brush size (radius in tiles) shared by paint, zone, and height.
   const brushSize = clamp(Math.round(Number(props.brush.size)), SIZE_MIN, SIZE_MAX);
+  const heightShape: BrushShape = props.brush.heightShape ?? 'cone';
   const setHTool = useCallback((heightTool: HeightTool) => props.onBrushChange({ heightTool }), [props.onBrushChange]);
+  const setHeightShape = useCallback((heightShape: BrushShape) => props.onBrushChange({ heightShape }), [props.onBrushChange]);
   const setCenterZ = useCallback((z: number) => props.onBrushChange({ centerZ: clamp(z, Z_MIN, Z_MAX) }), [props.onBrushChange]);
   const setBrushSize = useCallback((size: number) => props.onBrushChange({ size: clamp(Math.round(size), SIZE_MIN, SIZE_MAX) }), [props.onBrushChange]);
 
@@ -704,8 +728,8 @@ export function PaintCanvas(props: {
   };
 
   // ── Brush params (ref so the screen-space handler never goes stale) ──────────
-  const brushRef = useRef({ centerZ, size: brushSize, tool: hTool });
-  brushRef.current = { centerZ, size: brushSize, tool: hTool };
+  const brushRef = useRef({ centerZ, size: brushSize, tool: hTool, shape: heightShape });
+  brushRef.current = { centerZ, size: brushSize, tool: hTool, shape: heightShape };
   // Height is ADDITIVE (heightData.stampCone stacks), but onMouseMove fires at input
   // rate (~100/s) — re-stamping a stationary brush every event saturates cells to
   // HEIGHT_LIMIT in a few frames, flattening everything to one max plateau and making
@@ -741,19 +765,18 @@ export function PaintCanvas(props: {
     const stampKey = `${gsx}:${gsy}`;
     if (heightStamped.current.has(stampKey)) return; // already deposited here this stroke
     heightStamped.current.add(stampKey);
-    // Cone radius = brush size (metres); falloff derived so it reaches 0 there.
+    // Brush radius = brush size (metres); the shape sets the cross-section profile.
     const radiusM = Math.max(0.5, b.size);
-    const falloff = Math.abs(b.centerZ) / radiusM;
-    const rd = Math.max(1, Math.ceil(radiusM / DOT_M)); // cone reach in samples
+    const rd = Math.max(1, Math.ceil(radiusM / DOT_M)); // brush reach in samples
     for (const ch of focusedChunks) {
       const cols = ch.height.cols, rows = ch.height.rows;
-      // Express the global cone centre in THIS chunk's local sample index space. Chunk
+      // Express the global brush centre in THIS chunk's local sample index space. Chunk
       // (cx,cz) is centred at (cx*PATCH, cz*PATCH); its sample 0 sits at the left edge.
       const cix = Math.round((gx - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1));
       const ciy = Math.round((gy - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1));
-      // Skip chunks the cone can't reach (cheap: avoids touching/re-uploading them).
+      // Skip chunks the brush can't reach (cheap: avoids touching/re-uploading them).
       if (cix + rd < 0 || cix - rd > cols - 1 || ciy + rd < 0 || ciy - rd > rows - 1) continue;
-      stampCone(ch.height, cix, ciy, { centerZ: b.centerZ, falloff, erase: b.tool === 'erase' });
+      stampBrush(ch.height, cix, ciy, { centerZ: b.centerZ, radiusM, shape: b.shape, erase: b.tool === 'erase' });
       const k = chunkKey(ch.cx, ch.cz);
       touched.add(k);
       heightDirty.current.add(k);
@@ -1149,7 +1172,7 @@ export function PaintCanvas(props: {
       {/* Left rail — conditional on the active layer (absolute overlay, on top). */}
       <Box style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, backgroundColor: '#0b1320ee', borderRightWidth: 1, borderRightColor: '#1e293b', paddingLeft: 5, paddingRight: 5, paddingTop: 6, paddingBottom: 6 }}>
         {layer === 'paint' ? <PaintRail tool={tool} onTool={props.onTool} tile={tile} onTile={props.onTile} size={brushSize} onSize={setBrushSize} /> : null}
-        {layer === 'height' ? <HeightRail hTool={hTool} onHTool={setHTool} centerZ={centerZ} onCenterZ={setCenterZ} size={brushSize} onSize={setBrushSize} onClear={clearHeights} /> : null}
+        {layer === 'height' ? <HeightRail hTool={hTool} onHTool={setHTool} shape={heightShape} onShape={setHeightShape} centerZ={centerZ} onCenterZ={setCenterZ} size={brushSize} onSize={setBrushSize} onClear={clearHeights} /> : null}
         {layer === 'place' ? <PlaceRail sel={selPlacement} place={place} /> : null}
         {layer === 'zone' ? <ZoneRail tool={tool} onTool={props.onTool} size={brushSize} onSize={setBrushSize} zones={zones} activeZone={activeZone} onActiveZone={setActiveZone} onAddZone={addZone} onUpdateZone={updateZone} onDeleteZone={deleteZone} /> : null}
       </Box>

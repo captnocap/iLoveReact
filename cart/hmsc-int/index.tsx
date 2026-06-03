@@ -11,12 +11,13 @@ import {
   lastPointerPath,
   type SessionEnvelope,
 } from '@reactjit/workspace';
-import type { Building, GameState } from '../hmsc/design';
+import type { Building, BuildingFaceRole, BuildingSkin, GameState } from '../hmsc/design';
+import { applyFaceSkin } from './buildingEditor';
 import { compileEditorWorld, emptyEditorWorld, placeBuilding, placeWorldProp } from './editorWorld';
 import { type ChunkFloor, floorsToLandforms } from './chunkFloor';
 import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
-import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi } from './PaintCanvas';
+import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi, type BrushSettings } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
 import { RightPanel, type TabId } from './RightPanel';
 import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
@@ -79,10 +80,28 @@ interface MapPayload {
   wasd?: 'canvas' | 'preview';         // which bottom quad owns the WASD keys
   cam?: PreviewCamera;                 // the 3D preview's free-fly pose
   overrides?: OverrideSnap[];          // per-cell property overrides (patch on kind)
+  brush?: BrushSettings;               // paint/zone/height brush controls
 }
 
 function clampFrac(f: number): number {
   return Math.max(MIN_FRAC, Math.min(1 - MIN_FRAC, f));
+}
+
+const DEFAULT_BRUSH: BrushSettings = { size: 2, centerZ: 3, heightTool: 'brush', heightShape: 'cone' };
+
+function clampNum(n: unknown, lo: number, hi: number, fallback: number): number {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return fallback;
+  return Math.max(lo, Math.min(hi, v));
+}
+
+function normalizeBrushSettings(value: Partial<BrushSettings> | undefined): BrushSettings {
+  return {
+    size: Math.round(clampNum(value?.size, 0, 40, DEFAULT_BRUSH.size)),
+    centerZ: clampNum(value?.centerZ, -12, 12, DEFAULT_BRUSH.centerZ),
+    heightTool: value?.heightTool === 'erase' ? 'erase' : DEFAULT_BRUSH.heightTool,
+    heightShape: value?.heightShape === 'flat' || value?.heightShape === 'dome' ? value.heightShape : DEFAULT_BRUSH.heightShape,
+  };
 }
 
 // Synchronous read of the last-open map's VIEW, to seed initial pane fractions so
@@ -163,6 +182,9 @@ function EditorShell() {
   const [tab, setTab] = useState<TabId>(() => initial.tab ?? 'objects');
   const [notes, setNotes] = useState<string>(() => initial.notes ?? '');
   const [showGrid, setShowGrid] = useState<boolean>(() => initial.showGrid ?? true);
+  const [brush, setBrush] = useState<BrushSettings>(() => normalizeBrushSettings(initial.brush));
+  const brushRef = useRef(brush);
+  brushRef.current = brush;
   // Which bottom quad owns the WASD keys. Both the 2D canvas and the 3D preview use
   // WASD, so exactly one is "focused" at a time — claimed by a CLICK in that quad
   // (not hover), so the cursor wandering across the divider can't steal an
@@ -241,7 +263,7 @@ function EditorShell() {
     if (!api) return null; // canvas not mounted yet — skip this autosave tick
     const w = api.getWorld();
     const world = ptime('autosave', `serializeMap chunks=${w.chunks.size}`, () => serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements }));
-    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides) };
+    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current };
   }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
   const applyPayload = useCallback((env: SessionEnvelope<MapPayload>) => {
@@ -263,6 +285,7 @@ function EditorShell() {
     if (p.wasd) setWasdQuad(p.wasd);
     setSeedCam(p.cam ?? null);
     setOverrides(deserializeOverrides(p.overrides));
+    setBrush(normalizeBrushSettings(p.brush));
     setSelCells([]); // selection is transient — never carries across a map switch
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
@@ -273,7 +296,7 @@ function EditorShell() {
     version: VERSION,
     buildPayload,
     applyPayload,
-    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev, overrides],
+    deps: [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, worldRev, selPlaceId, wasdQuad, viewRev, overrides, brush],
   });
 
   // Undo history: snapshot the PRE-edit state at the START of each undoable action
@@ -363,6 +386,16 @@ function EditorShell() {
     if (p) writeMapFile(ws.stem, p);
   }, [buildPayload, writeMapFile, ws]);
 
+  const updateBrush = useCallback((patch: Partial<BrushSettings>) => {
+    snapshotForUndoCoalesced();
+    const next = normalizeBrushSettings({ ...brushRef.current, ...patch });
+    brushRef.current = next;
+    setBrush(next);
+    setViewRev((r) => r + 1);
+    const payload = buildPayload();
+    if (payload) writeMapFile(ws.stem, payload);
+  }, [snapshotForUndoCoalesced, buildPayload, writeMapFile, ws.stem]);
+
   const openMap = useCallback((name: string) => {
     if (name === ws.stem) return;
     const text = readFile(sessionPathFor(CART, name));
@@ -381,7 +414,7 @@ function EditorShell() {
   const newMap = useCallback(() => {
     flushCurrent(); // don't lose the current map's just-painted edits
     const name = uniqueMapName('untitled');
-    const payload: MapPayload = { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world: serializeMap(emptyMap()) };
+    const payload: MapPayload = { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, brush, world: serializeMap(emptyMap()) };
     writeMapFile(name, payload);
     placeSeq.current = 0;
     setPlacements([]);
@@ -392,7 +425,7 @@ function EditorShell() {
     ws.history.clear();
     refreshMaps();
     logEvent({ cat: 'map', text: `new map ${name}` });
-  }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, writeMapFile, refreshMaps, flushCurrent, logEvent]);
+  }, [ws, fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, brush, writeMapFile, refreshMaps, flushCurrent, logEvent]);
 
   const renameMap = useCallback((rawNext: string) => {
     const old = ws.stem;
@@ -477,9 +510,20 @@ function EditorShell() {
   // back to the active paint tile so it is always live.
   const selPlacement = placements.find((p) => p.id === selPlaceId) ?? null;
   const placeFocus = useMemo(
-    () => (layer === 'place' && selPlacement ? buildObjectWorld(selPlacement.cat, selPlacement.kind) : null),
-    [layer, selPlacement?.cat, selPlacement?.kind],
+    () => (layer === 'place' && selPlacement ? buildObjectWorld(selPlacement.cat, selPlacement.kind, selPlacement.skin) : null),
+    [layer, selPlacement?.cat, selPlacement?.kind, selPlacement?.skin],
   );
+
+  // Assign a texture to one face of the SELECTED building placement. Promotes the
+  // placement's skin to a per-face map and persists it via updatePlacement, so it
+  // rides undo/save and compiles into the game (the previously-dead picker path).
+  const setFaceTexture = useCallback((_buildingId: string, role: BuildingFaceRole, skin: BuildingSkin) => {
+    if (!selPlaceId) return;
+    const cur = placements.find((p) => p.id === selPlaceId);
+    if (!cur || cur.cat !== 'building') return;
+    updatePlacement(selPlaceId, { skin: applyFaceSkin(cur.skin, role, skin) });
+    logEvent({ cat: 'object', text: `textured ${role} of ${cur.label}` });
+  }, [selPlaceId, placements, updatePlacement, logEvent]);
   const shownFocus: Focus = selCells.length
     ? { kind: 'tiles', cells: selCells }
     : (placeFocus?.focus ?? { kind: 'tile', tile });
@@ -505,6 +549,9 @@ function EditorShell() {
           // mass turns (render3d/buildingTransform + the host OBB), so the 3D box
           // matches the rotated 2D node instead of just flipping a door quadrant.
           yawDegrees: p.rotation,
+          // Per-face texture assignment authored on the placement rides into the
+          // derived building, so the preview AND the compiled game wear it.
+          skin: p.skin,
           force: true,
         });
         if (r.ok) s = r.state;
@@ -536,7 +583,7 @@ function EditorShell() {
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
   useChurn('cart', {
     floors, previewWorld, worldRev, viewRev, placements, events, selCells, overrides,
-    seedWorld, tool, tile, layer, tab, notes, showGrid, wasdQuad, menuOpen, logOpen, maps,
+    seedWorld, tool, tile, layer, tab, notes, showGrid, wasdQuad, brush, menuOpen, logOpen, maps,
   });
 
   return (
@@ -562,7 +609,7 @@ function EditorShell() {
           fx={fx}
           fy={fy}
           onResize={onResize}
-          topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} />}
+          topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />}
           topRight={
             <RightPanel
               tab={tab}
@@ -589,6 +636,8 @@ function EditorShell() {
               onTile={setTile}
               layer={layer}
               onLayer={setLayer}
+              brush={brush}
+              onBrushChange={updateBrush}
               place={place}
               showGrid={showGrid}
               onFloors={onFloors}
