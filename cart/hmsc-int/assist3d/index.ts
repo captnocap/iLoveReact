@@ -7,7 +7,13 @@
 export { Assist3DRoute } from './Assist3DRoute';
 export { AssistMeshViewer } from './AssistMeshViewer';
 export { SceneSurface } from './SceneSurface';
+export { BackendBar } from './BackendBar';
 export { useAssistScene, type AssistSceneState } from './useAssistScene';
+export { useSceneAssistant, type SceneAssistant } from './useSceneAssistant';
+export {
+  type Backend, type BackendConfig, BACKEND_LABELS, DEFAULT_CONFIG,
+  writesOwnFile, configReady, buildAssistantOpts, SET_SCENE_TOOL,
+} from './backends';
 export {
   type MeshSpec, type SceneSpec, EMPTY_SCENE, ALLOWED_GEOMETRY,
   parseScene, sceneFilePath, processCwd, boundingRadius, buildPreamble, round,

@@ -1,41 +1,46 @@
 // assist3d/Assist3DRoute — the /assist3d overlay route.
 //
-// The loop: you prompt the assistant → useAssistant (claude_code) writes the
-// whole scene to assist3d/scene.json → useAssistScene hot-reloads it into the
-// center <Scene3D> → click any mesh (ray-pick) or pick it from the tree → comment
-// on the selected piece to send a mesh-scoped edit back to claude. The Objects
-// explorer reads the SAME scene file, so generated meshes show up there too.
+// The loop: you prompt the assistant → it authors the whole scene to
+// assist3d/scene.json → useAssistScene hot-reloads it into the center <Scene3D> →
+// click any mesh (ray-pick) or pick it from the tree → comment on the selected
+// piece to send a mesh-scoped edit back. The Objects explorer reads the SAME scene
+// file, so generated meshes show up there too.
+//
+// The backend is swappable (BackendBar): Claude writes the file itself; HTTP /
+// local-GGUF models call a set_scene tool and useSceneAssistant writes the file.
+// The route doesn't care which — it just calls sa.send(text).
 //
 // Themed through accentFor() so it sits inside the editor's skin.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Row, Col, Text, Pressable, ScrollView, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
-import { useAssistant, type WorkerEvent } from '@reactjit/hooks/useAssistant';
+import { type WorkerEvent } from '@reactjit/hooks/useAssistant';
 import { accentFor } from '../studio.cls';
-import { buildPreamble, processCwd, round } from './scene';
+import { round } from './scene';
 import { useAssistScene } from './useAssistScene';
 import { SceneSurface } from './SceneSurface';
+import { useSceneAssistant } from './useSceneAssistant';
+import { BackendBar } from './BackendBar';
+import { BACKEND_LABELS, DEFAULT_CONFIG, type Backend, type BackendConfig } from './backends';
 
-const MODEL = 'claude-opus-4-7';
-
-// Drop user_message events: the worker echoes tool_results back as user-role
-// messages, and the first turn carries the preamble — neither is something you
-// typed. Your prompts are tracked locally instead.
+// Drop user_message events (tool_result echoes + the preamble — not things you
+// typed; your prompts are tracked locally). A tool_call / file write both mean the
+// same thing here: the scene is being authored.
 function eventLine(ev: WorkerEvent): { tag: string; text: string; color: string } | null {
-  if (ev.kind === 'assistant_message') return { tag: 'claude', text: ev.text ?? '', color: accentFor('info') };
-  if (ev.kind === 'tool_call') {
-    const name = ev.text || ev.status_text || '';
-    const label = /write/i.test(name) ? 'writing scene.json…' : /read/i.test(name) ? 'reading scene…' : (name || 'tool');
-    return { tag: 'tool', text: label, color: accentFor('warning') };
+  if (ev.kind === 'assistant_message') {
+    const t = ev.text ?? '';
+    // cart-write models sometimes echo the raw JSON — collapse it
+    if (t.indexOf('"meshes"') >= 0) return { tag: 'claude', text: '(scene update)', color: accentFor('info') };
+    return { tag: 'claude', text: t, color: accentFor('info') };
   }
+  if (ev.kind === 'tool_call') return { tag: 'tool', text: 'writing scene…', color: accentFor('warning') };
   if (ev.kind === 'error_') return { tag: 'error', text: ev.text || ev.status_text || 'error', color: accentFor('error') };
   if (ev.kind === 'completion') return { tag: 'done', text: '— turn complete —', color: accentFor('textFaint') };
   return null;
 }
 
 export function Assist3DRoute(props: { onBack: () => void }) {
-  const cwd = useMemo(processCwd, []);
   const { scene, loadErr, reloads, scenePath } = useAssistScene();
 
   // ── selection ── (camera + drag/pick live in the memo'd SceneSurface, so
@@ -46,9 +51,18 @@ export function Assist3DRoute(props: { onBack: () => void }) {
   // stable identity so SceneSurface's memo holds while the chat streams
   const onPick = useCallback((i: number | null) => setSelected(i), []);
 
-  // ── assistant ──
-  const assistant = useAssistant({ backend: 'claude_code', cwd, model: MODEL, persistAcrossUnmount: true });
-  const sentPreambleRef = useRef(false);
+  // ── assistant (swappable backend) ──
+  const [config, setConfig] = useState<BackendConfig>(DEFAULT_CONFIG.claude_code);
+  // remember each backend's edited config so switching away and back keeps it
+  const savedRef = useRef<Record<Backend, BackendConfig>>({ ...DEFAULT_CONFIG });
+  const pickBackend = (b: Backend) => {
+    savedRef.current[config.backend] = config;
+    setConfig(savedRef.current[b]);
+  };
+  const patchConfig = (patch: Partial<BackendConfig>) => setConfig((c) => ({ ...c, ...patch }));
+
+  const sa = useSceneAssistant({ config, scenePath });
+
   const [input, setInput] = useState('');
   const inputRef = useRef(''); inputRef.current = input;
   const [comment, setComment] = useState('');
@@ -56,11 +70,7 @@ export function Assist3DRoute(props: { onBack: () => void }) {
   const [myPrompts, setMyPrompts] = useState<{ text: string; ts: number }[]>([]);
 
   const sendToAssistant = (modelText: string, displayText: string): boolean => {
-    const msg = sentPreambleRef.current
-      ? `${modelText}\n\n(Overwrite the whole scene file at ${scenePath}.)`
-      : `${buildPreamble(scenePath)}\n\nRequest: ${modelText}`;
-    if (!assistant.ask(msg)) return false;
-    sentPreambleRef.current = true;
+    if (!sa.send(modelText)) return false;
     setMyPrompts((p) => [...p, { text: displayText, ts: Date.now() }]);
     return true;
   };
@@ -79,20 +89,21 @@ export function Assist3DRoute(props: { onBack: () => void }) {
 
   const transcript = useMemo(() => {
     const lines: { tag: string; text: string; color: string; ts: number }[] = [];
-    for (const ev of assistant.events) {
+    for (const ev of sa.events) {
       const l = eventLine(ev);
       if (l) lines.push({ ...l, ts: ev.created_at_ms || 0 });
     }
     for (const p of myPrompts) lines.push({ tag: 'you', text: p.text, color: accentFor('text'), ts: p.ts });
     lines.sort((a, b) => a.ts - b.ts);
     return lines;
-  }, [assistant.events, myPrompts]);
+  }, [sa.events, myPrompts]);
   const transcriptRef = useRef<any>(null);
   useEffect(() => { try { transcriptRef.current?.scrollToEnd?.(); } catch { /* ignore */ } }, [transcript.length]);
 
-  const phaseColor = assistant.error ? accentFor('error')
-    : assistant.phase === 'streaming' ? accentFor('warning')
-    : assistant.phase === 'idle' ? accentFor('success') : accentFor('textFaint');
+  const phaseColor = sa.error ? accentFor('error')
+    : sa.phase === 'streaming' ? accentFor('warning')
+    : sa.phase === 'idle' ? accentFor('success') : accentFor('textFaint');
+  const streaming = sa.phase === 'streaming';
 
   const BG = accentFor('bg'), PANEL = accentFor('bgAlt'), BORDER = accentFor('border');
   const INK = accentFor('text'), DIM = accentFor('textDim'), FAINT = accentFor('textFaint');
@@ -120,10 +131,12 @@ export function Assist3DRoute(props: { onBack: () => void }) {
         <Col style={{ width: 300, backgroundColor: PANEL, borderColor: BORDER, borderRightWidth: 1, minHeight: 0 }}>
           <Row style={{ paddingTop: 7, paddingBottom: 7, paddingLeft: 12, paddingRight: 12, borderColor: BORDER, borderBottomWidth: 1, gap: 8, alignItems: 'baseline' }}>
             <Text fontSize={11} color={INK} style={{ fontWeight: 'bold' }}>assistant</Text>
-            <Text fontSize={9} color={phaseColor} style={{ fontFamily: 'monospace' }}>{assistant.phase}</Text>
+            <Text fontSize={9} color={phaseColor} style={{ fontFamily: 'monospace' }}>{sa.phase}</Text>
             <Box style={{ flexGrow: 1 }} />
-            <Text fontSize={9} color={FAINT} style={{ fontFamily: 'monospace' }}>{MODEL}</Text>
+            <Text fontSize={9} color={FAINT} style={{ fontFamily: 'monospace' }}>{BACKEND_LABELS[config.backend]}</Text>
           </Row>
+
+          <BackendBar config={config} onPickBackend={pickBackend} onPatch={patchConfig} />
 
           <ScrollView ref={transcriptRef} style={{ flexGrow: 1, minHeight: 0, paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12 }}>
             {transcript.length === 0 ? (
@@ -151,10 +164,11 @@ export function Assist3DRoute(props: { onBack: () => void }) {
             <Box style={{ backgroundColor: accentFor('controlBg'), borderColor: BORDER, borderWidth: 1, borderRadius: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 6, paddingBottom: 6 }}>
               <TextInput value={input} onChangeText={setInput} onSubmitEditing={submit} placeholder="describe a 3D scene…" style={{ color: INK, fontSize: 12 }} />
             </Box>
-            <Pressable onPress={submit} style={{ paddingTop: 7, paddingBottom: 7, borderRadius: 6, alignItems: 'center', backgroundColor: assistant.phase === 'streaming' ? accentFor('bgElevated') : accentFor('controlBg'), borderWidth: 1, borderColor: assistant.phase === 'streaming' ? ACCENT : BORDER }}>
-              <Text fontSize={12} color={assistant.phase === 'streaming' ? ACCENT : INK} style={{ fontWeight: 'bold' }}>{assistant.phase === 'streaming' ? 'generating…' : 'generate scene'}</Text>
+            <Pressable onPress={submit} style={{ paddingTop: 7, paddingBottom: 7, borderRadius: 6, alignItems: 'center', backgroundColor: streaming ? accentFor('bgElevated') : accentFor('controlBg'), borderWidth: 1, borderColor: streaming ? ACCENT : BORDER }}>
+              <Text fontSize={12} color={streaming ? ACCENT : INK} style={{ fontWeight: 'bold' }}>{streaming ? 'generating…' : sa.ready ? 'generate scene' : 'configure backend ↑'}</Text>
             </Pressable>
-            {assistant.error ? <Text fontSize={10} color={accentFor('error')}>{assistant.error}</Text> : null}
+            {sa.error ? <Text fontSize={10} color={accentFor('error')}>{sa.error}</Text>
+              : sa.note ? <Text fontSize={9} color={FAINT} style={{ fontFamily: 'monospace' }}>{sa.note}</Text> : null}
           </Col>
         </Col>
 
