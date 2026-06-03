@@ -38,6 +38,23 @@ export const PART_PRESETS: Record<PartId, PartPreset> = {
   foot: { label: 'foot', scaleY: 0.6, scaleX: 0.8, scaleZ: 1.5, profile: [0.7, 1.0, 0.9] },
 };
 
+// Editable outline resolution: each part's silhouette is PROFILE_N radius
+// samples top→bottom, dragged in the lab's outline editor. The presets above
+// are only the DEFAULTS — resampled to this grid on init/reset.
+export const PROFILE_N = 16;
+
+export function defaultProfile(id: PartId): number[] {
+  const src = PART_PRESETS[id].profile ?? [1];
+  const out: number[] = [];
+  for (let i = 0; i < PROFILE_N; i++) {
+    if (src.length === 1) { out.push(src[0]); continue; }
+    const t = (i / (PROFILE_N - 1)) * (src.length - 1);
+    const j = Math.min(src.length - 2, Math.floor(t));
+    out.push(src[j] + (src[j + 1] - src[j]) * (t - j));
+  }
+  return out;
+}
+
 export type BodyInstance = {
   part: PartId;
   position: [number, number, number];
@@ -91,8 +108,9 @@ export type BodyDocument = {
   amount: number;
   headScaleY: number;
   /** per part: quantized signed sculpt bytes (−127..127) + feature layers
-   *  (the head's face lives in parts.head.layers). */
-  parts: Record<PartId, { sculpt: number[]; layers: HedLayer[] }>;
+   *  (the head's face lives in parts.head.layers) + the dragged outline
+   *  (PROFILE_N radius samples; absent = the part's preset default). */
+  parts: Record<PartId, { sculpt: number[]; layers: HedLayer[]; profile?: number[] }>;
   metadata?: { title?: string; createdAt?: number };
 };
 
@@ -102,6 +120,8 @@ export function buildBody(args: {
   headScaleY: number;
   /** signed floats −1..1 per part (the lab's live grids). */
   sculpts: Record<PartId, number[]>;
+  /** dragged outlines per part (PROFILE_N samples). */
+  profiles: Record<PartId, number[]>;
   headLayers: HedLayer[];
   title?: string;
 }): BodyDocument {
@@ -110,6 +130,7 @@ export function buildBody(args: {
     parts[id] = {
       sculpt: (args.sculpts[id] ?? []).map((v) => Math.max(-127, Math.min(127, Math.round(v * 127)))),
       layers: id === 'head' ? args.headLayers : [],
+      profile: id === 'head' ? undefined : (args.profiles[id] ?? defaultProfile(id)).slice(),
     };
   }
   return {

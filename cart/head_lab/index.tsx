@@ -36,6 +36,7 @@ import {
 } from './hed';
 import {
   PART_IDS, PART_PRESETS, ASSEMBLY, buildBody, parseBody, serializeBody,
+  PROFILE_N, defaultProfile,
   type PartId,
 } from './parts';
 
@@ -262,6 +263,16 @@ export default function HeadLab() {
   const [seqs, setSeqs] = useState<Record<PartId, number>>(
     () => Object.fromEntries(PART_IDS.map((id) => [id, 0])) as Record<PartId, number>,
   );
+  // Per-part editable OUTLINES — the part's silhouette as radius samples
+  // top→bottom. A limb's identity is its outline, not a displacement field
+  // (the head is the only part that's actually a displaced sphere), so this
+  // is the PRIMARY editor for non-head parts; the paint field is the detail
+  // pass. Live state updates per drag; the mesh re-sculpts on release.
+  const [profiles, setProfiles] = useState<Record<PartId, number[]>>(
+    () => Object.fromEntries(PART_IDS.map((id) => [id, defaultProfile(id)])) as Record<PartId, number[]>,
+  );
+  // What the non-head canvas shows: drag the outline, or paint detail depth.
+  const [editTab, setEditTab] = useState<'outline' | 'detail'>('outline');
   // The loaded/generated .hed face (feature layers); id versions keys/caches.
   const [face, setFace] = useState<{ doc: HedDocument; id: string } | null>(null);
   // Playing animation + its frame clock (setInterval — the cart host has no
@@ -359,6 +370,7 @@ export default function HeadLab() {
     const doc = buildBody({
       skin, amount, headScaleY: scaleY,
       sculpts: grids,
+      profiles,
       headLayers: face?.doc.layers ?? [],
       title: `body ${stamp}`,
     });
@@ -372,13 +384,17 @@ export default function HeadLab() {
     setAmount(doc.amount);
     setScaleY(doc.headScaleY);
     const nextGrids = emptyGrids();
+    const nextProfiles = {} as Record<PartId, number[]>;
     for (const id of PART_IDS) {
       const sculpt = doc.parts[id]?.sculpt ?? [];
       const g = sculpt.length === GRID_W * GRID_H ? sculpt.map((b: number) => b / 127) : emptyGrid();
       nextGrids[id] = g;
       uploadGrid(id, g);
+      const profile = doc.parts[id]?.profile;
+      nextProfiles[id] = profile && profile.length === PROFILE_N ? profile.slice() : defaultProfile(id);
     }
     setGrids(nextGrids);
+    setProfiles(nextProfiles);
     setSeqs((prev) => Object.fromEntries(PART_IDS.map((id) => [id, prev[id] + 1])) as Record<PartId, number>);
     const headLayers = doc.parts.head?.layers ?? [];
     if (headLayers.length > 0) {
@@ -475,6 +491,34 @@ export default function HeadLab() {
     setPartGrid(selPart, emptyGrid());
   };
 
+  // ── outline editor: drag the silhouette edge in/out, lathe-style ──────────
+  // Live state per drag (the silhouette boxes follow the mouse); the mesh
+  // re-sculpts on release via the seq bump (dynamicKey contract).
+  const profDab = (sx: number, sy: number) => {
+    const r = canvasRect.current;
+    const row = Math.max(0, Math.min(PROFILE_N - 1, Math.floor(((sy - r.y) / r.height) * PROFILE_N)));
+    const v = Math.max(0.08, Math.min(1, Math.abs(sx - r.x - r.width / 2) / (r.width * 0.45)));
+    setProfiles((prev) => {
+      const next = prev[selPart].slice();
+      next[row] = v;
+      // blend the neighbors halfway so a drag carves a smooth curve
+      if (row > 0) next[row - 1] = (next[row - 1] + v) / 2;
+      if (row < PROFILE_N - 1) next[row + 1] = (next[row + 1] + v) / 2;
+      return { ...prev, [selPart]: next };
+    });
+  };
+  const onProfDown = (e: any) => { paintingRef.current = true; profDab(Number(e?.x ?? 0), Number(e?.y ?? 0)); };
+  const onProfMove = (e: any) => { if (paintingRef.current) profDab(Number(e?.x ?? 0), Number(e?.y ?? 0)); };
+  const onProfUp = () => {
+    if (!paintingRef.current) return;
+    paintingRef.current = false;
+    setSeqs((prev) => ({ ...prev, [selPart]: prev[selPart] + 1 }));
+  };
+  const resetOutline = () => {
+    setProfiles((prev) => ({ ...prev, [selPart]: defaultProfile(selPart) }));
+    setSeqs((prev) => ({ ...prev, [selPart]: prev[selPart] + 1 }));
+  };
+
   // One-click whole-part raise/carve at the current mode+strength — what the
   // user was doing by scrubbing the brush over the entire unwrap. The result
   // is uniform, so the grid is computed directly (no readback race with the
@@ -537,7 +581,8 @@ export default function HeadLab() {
       radius: 1, segments: 48, rings: 24,
       displace: partDisplace(id), dCols: GRID_W, dRows: GRID_H,
       amount,
-      profile: preset.profile,
+      // non-head parts wear their DRAGGED outline; the head stays a sphere
+      profile: id === 'head' ? preset.profile : profiles[id],
       scaleX: preset.scaleX,
       scaleY: id === 'head' ? scaleY : preset.scaleY,
       scaleZ: preset.scaleZ,
@@ -563,7 +608,7 @@ export default function HeadLab() {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the helpers read exactly these
-  }, [grids, headDisplace, seqs, face?.id, anim, phase, amount, scaleY, skin, headTexKey]);
+  }, [grids, headDisplace, seqs, profiles, face?.id, anim, phase, amount, scaleY, skin, headTexKey]);
 
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
@@ -601,38 +646,73 @@ export default function HeadLab() {
           <Box style={{ width: 10 }} />
           <Chip label="figure" active={view === 'figure'} color={GOOD} onPress={() => setView((v) => (v === 'figure' ? 'part' : 'figure'))} />
         </Row>
-        <Pressable
-          onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
-          onMouseDown={onPaintDown}
-          onMouseMove={onPaintMove}
-          onMouseUp={onPaintUp}
-          style={{ width: UNWRAP_W, height: UNWRAP_H, borderWidth: 1, borderColor: '#22324a', position: 'relative' }}
-        >
-          <UnwrapContent
-            skin={skin}
-            photo={isHead ? photo : null}
-            photoScale={photoScale}
-            photoY={photoY}
-            layers={isHead ? shownDoc?.layers ?? null : null}
-          />
-          <Effect
-            shader={DEPTH_OVERLAY_WGSL}
-            data={[0]}
-            textures={[paints[selPart].id, relief.id]}
-            style={{ position: 'absolute', left: 0, top: 0, width: UNWRAP_W, height: UNWRAP_H }}
-          />
-        </Pressable>
-        <Row style={{ gap: 8, alignItems: 'center' }}>
-          <Chip label="raise" active={mode === 'raise'} onPress={() => setMode('raise')} />
-          <Chip label="carve in" active={mode === 'lower'} color="#ff9445" onPress={() => setMode('lower')} />
-          <Chip label="flatten" active={mode === 'flatten'} color="#94a3b8" onPress={() => setMode('flatten')} />
-        </Row>
-        <Row style={{ gap: 8, alignItems: 'center' }}>
-          <Chip label="fill" active={false} onPress={fillAll} />
-          <Chip label="soften" active={false} onPress={soften} />
-          <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
-          <Chip label="clear" active={false} onPress={clearStrokes} />
-        </Row>
+        {!isHead ? (
+          <Row style={{ gap: 8, alignItems: 'center' }}>
+            <Chip label="outline" active={editTab === 'outline'} onPress={() => setEditTab('outline')} />
+            <Chip label="detail paint" active={editTab === 'detail'} onPress={() => setEditTab('detail')} />
+            {editTab === 'outline' ? <Chip label="reset outline" active={false} onPress={resetOutline} /> : null}
+          </Row>
+        ) : null}
+        {!isHead && editTab === 'outline' ? (
+          // the part's actual silhouette, dragged like a lathe: pull the edge
+          // out or push it in at any height — this IS the shape, not a field
+          <Pressable
+            onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
+            onMouseDown={onProfDown}
+            onMouseMove={onProfMove}
+            onMouseUp={onProfUp}
+            style={{ width: UNWRAP_W, height: UNWRAP_H, borderWidth: 1, borderColor: '#22324a', position: 'relative', backgroundColor: '#0a1322' }}
+          >
+            {profiles[selPart].map((p, i) => {
+              const rowH = UNWRAP_H / PROFILE_N;
+              const w = p * UNWRAP_W * 0.9;
+              return (
+                <Box
+                  key={i}
+                  style={{ position: 'absolute', left: UNWRAP_W / 2 - w / 2, top: i * rowH, width: w, height: rowH - 1, backgroundColor: skin, borderRadius: 4 }}
+                />
+              );
+            })}
+            <Box style={{ position: 'absolute', left: UNWRAP_W / 2 - 1, top: 0, width: 2, height: UNWRAP_H, backgroundColor: '#22324a' }} />
+          </Pressable>
+        ) : (
+          <Pressable
+            onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
+            onMouseDown={onPaintDown}
+            onMouseMove={onPaintMove}
+            onMouseUp={onPaintUp}
+            style={{ width: UNWRAP_W, height: UNWRAP_H, borderWidth: 1, borderColor: '#22324a', position: 'relative' }}
+          >
+            <UnwrapContent
+              skin={skin}
+              photo={isHead ? photo : null}
+              photoScale={photoScale}
+              photoY={photoY}
+              layers={isHead ? shownDoc?.layers ?? null : null}
+            />
+            <Effect
+              shader={DEPTH_OVERLAY_WGSL}
+              data={[0]}
+              textures={[paints[selPart].id, relief.id]}
+              style={{ position: 'absolute', left: 0, top: 0, width: UNWRAP_W, height: UNWRAP_H }}
+            />
+          </Pressable>
+        )}
+        {isHead || editTab === 'detail' ? (
+          <>
+            <Row style={{ gap: 8, alignItems: 'center' }}>
+              <Chip label="raise" active={mode === 'raise'} onPress={() => setMode('raise')} />
+              <Chip label="carve in" active={mode === 'lower'} color="#ff9445" onPress={() => setMode('lower')} />
+              <Chip label="flatten" active={mode === 'flatten'} color="#94a3b8" onPress={() => setMode('flatten')} />
+            </Row>
+            <Row style={{ gap: 8, alignItems: 'center' }}>
+              <Chip label="fill" active={false} onPress={fillAll} />
+              <Chip label="soften" active={false} onPress={soften} />
+              <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
+              <Chip label="clear" active={false} onPress={clearStrokes} />
+            </Row>
+          </>
+        ) : null}
         {isHead ? (
           <Row style={{ gap: 8, alignItems: 'center' }}>
             <Chip label="generate face" active={false} color={GOOD} onPress={generate} />
