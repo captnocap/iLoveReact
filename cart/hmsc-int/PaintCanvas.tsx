@@ -40,7 +40,7 @@ import type { SelCell } from './tileOverrides';
 import type { EditNote } from './editLog';
 import { plog, useChurn, countersSnapshot, counterDelta } from './perfLog';
 
-type HeightTool = 'brush' | 'erase';
+export type HeightTool = 'brush' | 'erase';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
 type HoverState = { x: number; y: number; addr: string } | null;
 type HoverSink = { current: ((h: HoverState) => void) | null };
@@ -51,6 +51,7 @@ type BrushSink = { current: ((b: BrushVis) => void) | null };
 
 export type Tool = 'pointer' | 'brush' | 'eraser';
 export type Layer = 'paint' | 'height' | 'place' | 'zone';
+export type BrushSettings = { size: number; centerZ: number; heightTool: HeightTool };
 
 // The serialize seam: the cart pulls the live world (chunks + zone defs + focus)
 // through this on autosave. Placements live in the cart, so they're added there.
@@ -99,14 +100,36 @@ const REGION_SYNC_MS = 320;
 const HF_RES = 61;
 
 // Downsample a chunk's full height field (cols x rows) to an HF_RES x HF_RES grid.
+// MAX-MAGNITUDE POOLING, not point-sampling: each coarse sample takes the most
+// extreme source height (largest |z|) in its footprint, keeping the sign. The full
+// field is 0.5m-spaced and HF_RES is ~2m-spaced (sx≈4), so nearest-sampling skipped
+// 3 of every 4 source samples — a thin painted ridge/pit (a 1-tile brush is only a
+// few samples wide) fell between the kept points and vanished from the mesh while
+// the 2D field still showed it. Max-pooling guarantees a painted feature survives at
+// its full height, just snapped to the mesh grid. Window half-extent = ceil(step/2)
+// so footprints tile the source with no gaps.
 function downsampleHeights(z: Float32Array, cols: number, rows: number): number[] {
   const out = new Array<number>(HF_RES * HF_RES);
   const sx = (cols - 1) / (HF_RES - 1);
   const sy = (rows - 1) / (HF_RES - 1);
+  const hx = Math.max(1, Math.ceil(sx / 2));
+  const hy = Math.max(1, Math.ceil(sy / 2));
   for (let j = 0; j < HF_RES; j++) {
-    const jj = Math.round(j * sy);
+    const cy = Math.round(j * sy);
     for (let i = 0; i < HF_RES; i++) {
-      out[j * HF_RES + i] = z[jj * cols + Math.round(i * sx)];
+      const cx = Math.round(i * sx);
+      let best = 0;
+      for (let dy = -hy; dy <= hy; dy++) {
+        const yy = cy + dy;
+        if (yy < 0 || yy >= rows) continue;
+        for (let dx = -hx; dx <= hx; dx++) {
+          const xx = cx + dx;
+          if (xx < 0 || xx >= cols) continue;
+          const v = z[yy * cols + xx];
+          if (Math.abs(v) > Math.abs(best)) best = v;
+        }
+      }
+      out[j * HF_RES + i] = best;
     }
   }
   return out;
@@ -396,6 +419,8 @@ export function PaintCanvas(props: {
   onTile: (k: TileKind) => void;
   layer: Layer;
   onLayer: (l: Layer) => void;
+  brush: BrushSettings;
+  onBrushChange: (patch: Partial<BrushSettings>) => void;
   place: PlaceProps;
   showGrid?: boolean;
   // Throttled mirror of the focused chunks' painted tiles (one floor snapshot per
@@ -438,10 +463,13 @@ export function PaintCanvas(props: {
   const grid = props.showGrid !== false;
   const selPlacement = place.items.find((p) => p.id === place.selId) ?? null;
 
-  const [hTool, setHTool] = useState<HeightTool>('brush');
-  const [centerZ, setCenterZ] = useState(3);
+  const hTool: HeightTool = props.brush.heightTool === 'erase' ? 'erase' : 'brush';
+  const centerZ = clamp(Number(props.brush.centerZ), Z_MIN, Z_MAX);
   // One brush size (radius in tiles) shared by paint, zone, and height.
-  const [brushSize, setBrushSize] = useState(2);
+  const brushSize = clamp(Math.round(Number(props.brush.size)), SIZE_MIN, SIZE_MAX);
+  const setHTool = useCallback((heightTool: HeightTool) => props.onBrushChange({ heightTool }), [props.onBrushChange]);
+  const setCenterZ = useCallback((z: number) => props.onBrushChange({ centerZ: clamp(z, Z_MIN, Z_MAX) }), [props.onBrushChange]);
+  const setBrushSize = useCallback((size: number) => props.onBrushChange({ size: clamp(Math.round(size), SIZE_MIN, SIZE_MAX) }), [props.onBrushChange]);
 
   // The canvas viewport rect (screen space), for screen→graph.
   const rectRef = useRef<CanvasRect>(null);
