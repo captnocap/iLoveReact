@@ -12,8 +12,10 @@ export { useAssistScene, type AssistSceneState } from './useAssistScene';
 export { useSceneAssistant, type SceneAssistant } from './useSceneAssistant';
 export {
   type Backend, type BackendConfig, BACKEND_LABELS, DEFAULT_CONFIG,
+  LOCAL_DEFAULT_N_CTX, LOCAL_DEFAULT_MAX_TOKENS,
   writesOwnFile, configReady, buildAssistantOpts, SET_SCENE_TOOL,
 } from './backends';
+export { loadModelHistory, rememberModelPath, forgetModelPath, modelLabel } from './modelHistory';
 export {
   type MeshSpec, type SceneSpec, EMPTY_SCENE, ALLOWED_GEOMETRY,
   parseScene, sceneFilePath, processCwd, boundingRadius, buildPreamble, round,

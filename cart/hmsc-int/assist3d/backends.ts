@@ -25,7 +25,14 @@ export interface BackendConfig {
   baseUrl?: string;     // openai_compat endpoint (…/v1)
   apiKey?: string;      // openai_compat bearer
   modelPath?: string;   // local_ai absolute .gguf path
+  nCtx?: number;        // local_ai context window (KV cache)
+  maxTokens?: number;   // local_ai per-turn generation cap
 }
+
+// local_ai generation defaults — the floor a reasoning model needs to think AND
+// finish the JSON. Exposed in the UI (BackendBar) so they're tunable per run.
+export const LOCAL_DEFAULT_N_CTX = 16384;
+export const LOCAL_DEFAULT_MAX_TOKENS = 8192;
 
 export const BACKEND_LABELS: Record<Backend, string> = {
   claude_code: 'Claude',
@@ -39,7 +46,7 @@ export const DEFAULT_CONFIG: Record<Backend, BackendConfig> = {
   // Default to claudewrap's local OpenAI-compat bridge — free under the user's
   // Max subscription, no API tokens. Any other …/v1 endpoint + key works too.
   openai_compat: { backend: 'openai_compat', baseUrl: 'http://localhost:7781/v1', apiKey: 'bridge', model: 'disk-claude' },
-  local_ai: { backend: 'local_ai', modelPath: '', model: 'local' },
+  local_ai: { backend: 'local_ai', modelPath: '', model: 'local', nCtx: LOCAL_DEFAULT_N_CTX, maxTokens: LOCAL_DEFAULT_MAX_TOKENS },
 };
 
 // claude_code writes scene.json itself; everyone else hands us structured output.
@@ -146,11 +153,11 @@ export function buildAssistantOpts(config: BackendConfig, cwd: string): UseAssis
         backend: 'local_ai',
         cwd,
         modelPath: config.modelPath || '',
-        // Reasoning models burn a lot of tokens thinking BEFORE the JSON — a
-        // "detailed" ask overran the old 4096 cap mid-scene. Give the buffer room
-        // (and the context to hold the running session) so the JSON completes.
-        nCtx: 16384,
-        maxTokens: 8192,
+        // Tunable in the UI (BackendBar). Reasoning models burn a lot of tokens
+        // thinking BEFORE the JSON, so these are the floor that lets the scene
+        // finish — raise them for elaborate asks, lower to save memory.
+        nCtx: (config.nCtx && config.nCtx >= 512) ? config.nCtx : LOCAL_DEFAULT_N_CTX,
+        maxTokens: (config.maxTokens && config.maxTokens >= 256) ? config.maxTokens : LOCAL_DEFAULT_MAX_TOKENS,
         sessionId: 'assist3d',
         persistAcrossUnmount: true,
       };

@@ -72,7 +72,7 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
   // A signature of the spawn-affecting config. When it changes useAssistant
   // respawns a fresh worker, so the preamble must be re-sent on the next turn.
   const sig = useMemo(
-    () => JSON.stringify([config.backend, config.model, config.baseUrl, config.apiKey, config.modelPath]),
+    () => JSON.stringify([config.backend, config.model, config.baseUrl, config.apiKey, config.modelPath, config.nCtx, config.maxTokens]),
     [config],
   );
   const sentPreambleRef = useRef(false);

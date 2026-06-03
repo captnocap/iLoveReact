@@ -23,6 +23,7 @@ import { SceneSurface } from './SceneSurface';
 import { useSceneAssistant } from './useSceneAssistant';
 import { BackendBar } from './BackendBar';
 import { BACKEND_LABELS, DEFAULT_CONFIG, type Backend, type BackendConfig } from './backends';
+import { loadModelHistory, rememberModelPath, forgetModelPath } from './modelHistory';
 
 interface Block { tag: string; text: string; color: string; ts: number; dim?: boolean }
 
@@ -91,6 +92,9 @@ export function Assist3DRoute(props: { onBack: () => void }) {
   };
   const patchConfig = (patch: Partial<BackendConfig>) => setConfig((c) => ({ ...c, ...patch }));
 
+  // Recently-used local .gguf paths (persisted), so you pick instead of paste.
+  const [modelHistory, setModelHistory] = useState<string[]>(() => loadModelHistory());
+
   const sa = useSceneAssistant({ config, scenePath });
 
   const [input, setInput] = useState('');
@@ -102,6 +106,8 @@ export function Assist3DRoute(props: { onBack: () => void }) {
   const sendToAssistant = (modelText: string, displayText: string): boolean => {
     if (!sa.send(modelText)) return false;
     setMyPrompts((p) => [...p, { text: displayText, ts: Date.now() }]);
+    // a successfully-used local model earns its spot in the recents
+    if (config.backend === 'local_ai' && config.modelPath) setModelHistory(rememberModelPath(config.modelPath));
     return true;
   };
   const submit = () => {
@@ -170,7 +176,13 @@ export function Assist3DRoute(props: { onBack: () => void }) {
             <Text fontSize={9} color={FAINT} style={{ fontFamily: 'monospace' }}>{BACKEND_LABELS[config.backend]}</Text>
           </Row>
 
-          <BackendBar config={config} onPickBackend={pickBackend} onPatch={patchConfig} />
+          <BackendBar
+            config={config}
+            onPickBackend={pickBackend}
+            onPatch={patchConfig}
+            modelHistory={modelHistory}
+            onForgetModel={(p) => setModelHistory(forgetModelPath(p))}
+          />
 
           <ScrollView ref={transcriptRef} showScrollbar style={{ flexGrow: 1, height: '100%', minHeight: 0 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12 }}>
             {transcript.length === 0 ? (
