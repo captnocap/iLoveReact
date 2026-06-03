@@ -95,7 +95,8 @@ function Knob(props: { label: string; value: string; onMinus: () => void; onPlus
 export default function CarveLab() {
   const [srcPath, setSrcPath] = useState<string | null>(null);
   const [matrix, setMatrix] = useState<PixelMatrix | null>(null);
-  const [texSeq, setTexSeq] = useState(0); // bumps per ingest; versions path + staticKey
+  // Per-ingest texture identity (stamp-unique path + staticKey — see ingest).
+  const [tex, setTex] = useState<{ path: string; key: string } | null>(null);
   const [res, setRes] = useState<number>(48);
   const [depth, setDepth] = useState(0.55);
   const [inflate, setInflate] = useState(0.7);
@@ -111,13 +112,18 @@ export default function CarveLab() {
     busyRef.current = true;
     setStatus('carving…');
     try {
-      const seq = texSeq + 1;
-      const texPath = `${SCRATCH_DIR}/tex_${seq}.png`;
+      // Stamp-unique texture path AND staticKey. The host's StaticSurface cache
+      // outlives hot reloads, so a resettable counter ('tex.1') can collide with
+      // a stale bake from a previous load and the mesh samples the WRONG image
+      // (mostly-transparent front, sliver artifacts). A fresh stamp per ingest
+      // can never collide.
+      const stamp = Date.now();
+      const texPath = `${SCRATCH_DIR}/tex_${stamp}.png`;
       await imageToTexture(path, texPath);
       const grid = await imageToGrid(path, gridSize);
       setSrcPath(path);
       setMatrix(grid);
-      setTexSeq(seq);
+      setTex({ path: texPath, key: `carve.lab.tex.${stamp}` });
       const cells = grid.pixels.filter((px) => px != null).length;
       setStatus(`${path.split('/').pop()} — ${gridSize}×${gridSize} grid, ${cells} solid cells`);
     } catch (err) {
@@ -145,8 +151,8 @@ export default function CarveLab() {
     [mask, matrix, res, depth, inflate],
   );
 
-  const texPath = matrix ? `${SCRATCH_DIR}/tex_${texSeq}.png` : null;
-  const texKey = matrix ? `carve.lab.tex.${texSeq}` : undefined;
+  const texPath = matrix && tex ? tex.path : null;
+  const texKey = matrix && tex ? tex.key : undefined;
   const texStyle = useMemo(() => ({ width: 256, height: 256 }), []);
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: 256, height: 256 }),
