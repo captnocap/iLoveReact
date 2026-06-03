@@ -1,16 +1,37 @@
-// ObjectsTab — the first right-rail tab: a file-tree explorer of every placeable
-// object, with a live 3D model viewer and its full property sheet.
+// ObjectsTab — the Objects right-rail tab.
 //
-//   <row> <col>file tree</col> <col> model viewer / model properties </col> </row>
+//   ┌───────────────────────────────┐
+//   │  3D viewer (full width)        │   inspected kind, real ModelViewer
+//   ├───────────────────────────────┤
+//   │  properties (full width)       │   shared PropertiesPanel
+//   ├───────────────────────────────┤
+//   │  BUILDINGS  ▸  House       ▴   │   breadcrumb foot: category ▸ item
+//   └───────────────────────────────┘
 //
-// The tree groups the real kind registries (Buildings / Objects / Tiles). Picking
-// a leaf builds the object through the SAME mutators the editor uses, hands the
-// single record to ModelViewer (a clean studio viewer — no sky/fog, drag-orbit +
-// scroll-zoom) and the staged world to the shared PropertiesPanel — so the model
-// is exactly what the game draws and the properties are complete.
+// The foot is a BREADCRUMB TOOLBAR, not a model gallery. Two segments:
+//   • CATEGORY  → popover list of the groups (switch which list you browse)
+//   • ITEM      → popover list of that category's items (filterable)
+// Pick a row to INSPECT it (loads the viewer + properties above); the green + on a
+// placeable row PLACES it without changing what's inspected. Browse (palCat) is
+// kept separate from inspect (sel) so opening the item list never disturbs the
+// viewer until you actually choose.
+//
+// The ASSISTANT category is live: it lists the meshes from the assistant's
+// scene.json (assist3d/), so whatever the /assist3d route generates shows up here
+// to browse + inspect. Those are raw geometry, not game kinds — they render in a
+// dedicated <AssistMeshViewer> (the game's ModelViewer only knows building/prop/
+// tile kinds) and are inspect-only for now (no placement bridge yet).
+//
+// There is deliberately NO live 3D in the foot. An earlier build rendered every
+// model in the category as a real <Scene3D> strip — a third full 3D pass redrawn
+// every frame on a screen that already runs two (the viewer here + the iso
+// preview). The single ModelViewer above is the only static-kind 3D this tab draws.
+//
+// Themed through accentFor() (theme tokens), no raw UI colours.
 
 import { useMemo, useState } from 'react';
-import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
+import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
+import { Icon } from '@reactjit/icons/Icon';
 import type { TileKind } from '../../hmsc/design';
 import { BUILDING_KINDS, buildingKindDefinition } from '../../hmsc/world/buildingKinds';
 import { PROP_KINDS, propKindDefinition } from '../../hmsc/world/propKinds';
@@ -20,28 +41,36 @@ import { ModelViewer } from '../ModelViewer';
 import { PropertiesPanel } from '../PropertiesPanel';
 import { HMSC_SHADERS, shaderSpec } from '../shaderCatalog';
 import { ShaderLab } from '../ShaderLab';
+import { accentFor } from '../studio.cls';
+import { useAssistScene } from '../assist3d/useAssistScene';
+import { AssistMeshViewer } from '../assist3d/AssistMeshViewer';
+import { round, type MeshSpec } from '../assist3d/scene';
 
-type Cat = 'building' | 'prop' | 'tile' | 'embedded' | 'shader';
+type Cat = 'building' | 'prop' | 'tile' | 'embedded' | 'shader' | 'assistant';
 type Sel = { cat: Cat; kind: string };
+type Group = { cat: Cat; title: string; items: { kind: string; label: string }[] };
 
-const STOREY_M = 3; // wall height per storey, for framing the camera
+const STOREY_M = 3;
+function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
 
-const GROUPS: { cat: Cat; title: string; items: { kind: string; label: string }[] }[] = [
+// The fixed game-kind categories. ASSISTANT is appended in-component because its
+// items are live (driven by the watched scene.json).
+const STATIC_GROUPS: Group[] = [
   { cat: 'building', title: 'BUILDINGS', items: BUILDING_KINDS.map((k) => ({ kind: k, label: buildingKindDefinition(k).label })) },
   { cat: 'prop', title: 'OBJECTS', items: PROP_KINDS.map((k) => ({ kind: k, label: propKindDefinition(k).label })) },
   { cat: 'tile', title: 'TILES', items: PAINTABLE_TILE_KINDS.map((k) => ({ kind: k, label: tileKindDefinition(k as TileKind).label })) },
-  { cat: 'embedded', title: 'EMBEDDED TILES', items: EMBEDDED_TILE_KINDS.map((k) => ({ kind: k, label: tileKindDefinition(k as TileKind).label })) },
+  { cat: 'embedded', title: 'EMBEDDED', items: EMBEDDED_TILE_KINDS.map((k) => ({ kind: k, label: tileKindDefinition(k as TileKind).label })) },
   { cat: 'shader', title: 'SHADERS', items: HMSC_SHADERS.map((s) => ({ kind: s.id, label: s.label })) },
 ];
 
-function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
+const isPlaceable = (cat: Cat) => cat === 'building' || cat === 'prop';
 
 type Preview = ObjectWorld & { tile?: TileKind; baseDist: number; targetY: number };
 
-// One-object world (shared builder) + camera framing for the preview. Shaders
-// are NOT built here — they render through ShaderLab, not the 3D ModelViewer.
+// One-object world + camera framing for a (cat, kind). Shaders / assistant meshes
+// never reach here — they render through their own surfaces.
 function buildPreview(sel: Sel): Preview {
-  const ow = buildObjectWorld(sel.cat as Exclude<Cat, 'shader'>, sel.kind);
+  const ow = buildObjectWorld(sel.cat as Exclude<Cat, 'shader' | 'assistant'>, sel.kind);
   if (sel.cat === 'tile' || sel.cat === 'embedded') {
     return { ...ow, tile: sel.kind as TileKind, baseDist: 16, targetY: 0.3 };
   }
@@ -54,90 +83,194 @@ function buildPreview(sel: Sel): Preview {
   return { ...ow, baseDist: clamp(def.heightMeters * 4 + 4, 5, 30), targetY: def.heightMeters * 0.5 };
 }
 
-// A tree leaf. Hovering reveals a + (when placeable) — clicking it is additive
-// (drops the object into the place layer); clicking the row selects it.
-//
-// Hover is tracked by onMouseEnter ONLY (the parent records which row). We never
-// clear on the leaf's own leave — that's the trap: moving the cursor onto the
-// child + would fire the leaf's leave and unmount the + before it can be clicked.
-// Instead the hover key only changes when ANOTHER row/header is entered (or the
-// tree is left), so the + stays put under the cursor and stays clickable.
-function Leaf(props: { label: string; active: boolean; hovered: boolean; onPress: () => void; onEnter: () => void; onAdd?: () => void }) {
+// ── Popovers (open upward from the foot) ─────────────────────────────────────
+
+// The CATEGORY segment's list: pick which group the item list browses.
+function CatPop(props: { groups: Group[]; palCat: Cat; onPick: (c: Cat) => void }) {
+  return (
+    <Box style={{ position: 'absolute', left: 0, bottom: 28, width: 200, zIndex: 20, borderWidth: 1, borderColor: accentFor('border'), backgroundColor: accentFor('bgAlt') }}>
+      {props.groups.map((g) => {
+        const on = g.cat === props.palCat;
+        return (
+          <Pressable key={g.cat} onPress={() => props.onPick(g.cat)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 30, paddingLeft: 10, paddingRight: 10, backgroundColor: on ? accentFor('bgElevated') : 'transparent' }}>
+            <Text fontSize={11} color={on ? accentFor('text') : accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: 700 }}>{g.title}</Text>
+            <Box style={{ flexGrow: 1 }} />
+            <Text fontSize={8} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{String(g.items.length)}</Text>
+          </Pressable>
+        );
+      })}
+    </Box>
+  );
+}
+
+// The ITEM segment's list: every item in the browsed category, with a filter.
+// Click a row to inspect; the + (placeable categories only) drops it into the map.
+function ItemPop(props: {
+  title: string; cat: Cat; items: { kind: string; label: string }[]; selKind: string | null;
+  onInspect: (kind: string) => void; onPlace?: (kind: string) => void;
+}) {
+  const [q, setQ] = useState('');
+  const f = q.trim().toLowerCase();
+  const items = props.items.filter((it) => !f || it.label.toLowerCase().includes(f) || it.kind.toLowerCase().includes(f));
+  return (
+    <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 28, maxHeight: 360, zIndex: 20, borderWidth: 1, borderColor: accentFor('border'), backgroundColor: accentFor('bgAlt') }}>
+      <Box style={{ padding: 8, borderBottomWidth: 1, borderBottomColor: accentFor('border') }}>
+        <TextInput value={q} onChangeText={setQ} placeholder={`search ${props.title.toLowerCase()}…`} style={{ backgroundColor: accentFor('bg'), borderWidth: 1, borderColor: accentFor('controlBorder'), color: accentFor('text'), paddingLeft: 8, paddingRight: 8, paddingTop: 7, paddingBottom: 7 }} />
+      </Box>
+      <ScrollView style={{ flexGrow: 1, maxHeight: 312 }} contentContainerStyle={{ paddingTop: 4, paddingBottom: 6 }}>
+        {items.map((it) => {
+          const on = props.selKind === it.kind;
+          return (
+            <Pressable key={it.kind} onPress={() => props.onInspect(it.kind)} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, height: 26, paddingLeft: 14, paddingRight: 8, backgroundColor: on ? accentFor('bgElevated') : 'transparent', borderLeftWidth: 2, borderLeftColor: on ? accentFor('primary') : '#00000000' }}>
+              <Text fontSize={11} color={on ? accentFor('text') : accentFor('textDim')} style={{ fontFamily: 'monospace', fontWeight: on ? 700 : 500 }}>{it.label}</Text>
+              <Box style={{ flexGrow: 1 }} />
+              {props.onPlace ? (
+                <Pressable onPress={() => props.onPlace!(it.kind)} style={{ width: 16, height: 16, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: accentFor('success'), backgroundColor: '#0f3d2e' }}>
+                  <Text fontSize={11} color="#86efac" style={{ fontWeight: 800 }}>+</Text>
+                </Pressable>
+              ) : null}
+            </Pressable>
+          );
+        })}
+        {items.length === 0 ? (
+          <Text fontSize={10} color={accentFor('textFaint')} style={{ fontFamily: 'monospace', paddingLeft: 14, paddingTop: 8 }}>no matches</Text>
+        ) : null}
+      </ScrollView>
+    </Box>
+  );
+}
+
+// ── Breadcrumb segment ───────────────────────────────────────────────────────
+
+function Crumb(props: { value: string; count?: number; grow?: boolean; muted?: boolean; onPress: () => void }) {
   return (
     <Pressable
       onPress={props.onPress}
-      onMouseEnter={props.onEnter}
-      // FIXED height so the highlight never grows when the + mounts on hover.
-      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6, height: 22, paddingLeft: 18, paddingRight: 6, backgroundColor: props.active ? '#1e293b' : props.hovered ? '#10203a' : 'transparent', borderLeftWidth: 2, borderLeftColor: props.active ? '#38bdf8' : 'transparent' }}
+      style={{ flexGrow: props.grow ? 1 : 0, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 9, paddingRight: 9 }}
     >
-      <Text fontSize={11} color={props.active ? '#f8fafc' : '#94a3b8'} style={{ fontFamily: 'monospace', fontWeight: props.active ? 700 : 500 }}>{props.label}</Text>
-      {props.onAdd && props.hovered ? (
-        <Pressable onPress={props.onAdd} style={{ width: 16, height: 16, alignItems: 'center', justifyContent: 'center', borderRadius: 3, borderWidth: 1, borderColor: '#22c55e', backgroundColor: '#0f3d2e' }}>
-          <Text fontSize={11} color="#86efac" style={{ fontWeight: 800 }}>+</Text>
-        </Pressable>
-      ) : null}
+      <Text fontSize={10} color={props.muted ? accentFor('textDim') : accentFor('text')} style={{ fontFamily: 'monospace', fontWeight: 700 }} numberOfLines={1}>{props.value}</Text>
+      {props.count != null ? <Text fontSize={8} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>{String(props.count)}</Text> : null}
+      <Icon name="ArrowUp" size={9} color={accentFor('textFaint')} />
     </Pressable>
   );
 }
 
+// ── Assistant-mesh inspect panel (raw geometry, not a game kind) ──────────────
+
+function AssistInspect(props: { mesh: MeshSpec }) {
+  const m = props.mesh;
+  const Row = (r: { label: string; value: string }) => (
+    <Box style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, paddingTop: 2, paddingBottom: 2 }}>
+      <Text fontSize={11} color={accentFor('textDim')}>{r.label}</Text>
+      <Text fontSize={11} color={accentFor('text')} style={{ fontFamily: 'monospace' }}>{r.value}</Text>
+    </Box>
+  );
+  return (
+    <Box style={{ width: '100%', height: '100%', paddingLeft: 12, paddingRight: 12, paddingTop: 10, paddingBottom: 10, backgroundColor: accentFor('bg') }}>
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Box style={{ width: 16, height: 16, borderRadius: 4, backgroundColor: m.material, borderWidth: 1, borderColor: accentFor('border') }} />
+        <Text fontSize={13} color={accentFor('text')} style={{ fontWeight: 'bold' }}>{m.id}</Text>
+      </Box>
+      <Row label="geometry" value={m.geometry} />
+      <Row label="material" value={m.material} />
+      <Row label="position" value={`[${m.position.map(round).join(', ')}]`} />
+      {Object.entries(m.params).map(([k, v]) => <Row key={k} label={k} value={String(round(Number(v)))} />)}
+    </Box>
+  );
+}
+
+// ── Tab ──────────────────────────────────────────────────────────────────────
+
 export function ObjectsTab(props: { onPlace?: (cat: 'building' | 'prop', kind: string) => void }) {
   const [sel, setSel] = useState<Sel>({ cat: 'building', kind: BUILDING_KINDS[0] });
-  const [open, setOpen] = useState<Record<Cat, boolean>>({ building: true, prop: false, tile: false, embedded: false, shader: false });
-  const [hoverKey, setHoverKey] = useState<string | null>(null);
+  // The category whose item list is showing in the breadcrumb. Kept apart from
+  // `sel` so switching categories to browse doesn't reload the viewer until you
+  // pick an item.
+  const [palCat, setPalCat] = useState<Cat>('building');
+  const [catOpen, setCatOpen] = useState(false);
+  const [itemOpen, setItemOpen] = useState(false);
+
+  // Live ASSISTANT category — the meshes the assistant wrote to scene.json.
+  const { scene } = useAssistScene();
+  const groups = useMemo<Group[]>(() => [
+    ...STATIC_GROUPS,
+    { cat: 'assistant', title: 'ASSISTANT', items: scene.meshes.map((m) => ({ kind: m.id, label: m.id })) },
+  ], [scene]);
+  const groupOf = (cat: Cat) => groups.find((g) => g.cat === cat) ?? groups[0];
+  const labelOf = (cat: Cat, kind: string) => groupOf(cat).items.find((it) => it.kind === kind)?.label ?? kind;
 
   const isShader = sel.cat === 'shader';
+  const isAssist = sel.cat === 'assistant';
   const spec = isShader ? shaderSpec(sel.kind) : undefined;
-  // Only the 3D path needs a built world; shaders render through ShaderLab.
-  const pv = useMemo(() => (isShader ? null : buildPreview(sel)), [isShader, sel.cat, sel.kind]);
+  const assistMesh = isAssist ? scene.meshes.find((m) => m.id === sel.kind) : undefined;
+  const pv = useMemo(() => ((isShader || isAssist) ? null : buildPreview(sel)), [isShader, isAssist, sel.cat, sel.kind]);
+
+  const palGroup = groupOf(palCat);
+  const inspect = (cat: Cat, kind: string) => { setSel({ cat, kind }); setPalCat(cat); setCatOpen(false); setItemOpen(false); };
+  const place = (cat: Cat, kind: string) => { if (isPlaceable(cat)) props.onPlace?.(cat as 'building' | 'prop', kind); };
+  const pickCat = (c: Cat) => { setPalCat(c); setCatOpen(false); setItemOpen(true); };
+
+  // Breadcrumb item value: the selected kind when it's in the browsed category,
+  // else a prompt (you switched categories but haven't picked yet).
+  const itemValue = sel.cat === palCat ? labelOf(sel.cat, sel.kind) : 'select…';
 
   return (
-    <Box style={{ width: '100%', height: '100%', flexDirection: 'row' }}>
-      {/* File tree. onMouseLeave on the container clears the hover key when the
-          cursor leaves the tree entirely; moving within it only fires the rows'
-          onMouseEnter, so the + never flickers. */}
-      <Box style={{ width: '42%', height: '100%', borderRightWidth: 1, borderRightColor: '#16202f', backgroundColor: '#0a111d' }} onMouseLeave={() => setHoverKey(null)}>
-        <ScrollView style={{ flexGrow: 1, height: '100%' }} contentContainerStyle={{ paddingTop: 6, paddingBottom: 10 }}>
-          {GROUPS.map((g) => (
-            <Box key={g.cat} style={{ gap: 1 }}>
-              <Pressable onPress={() => setOpen((o) => ({ ...o, [g.cat]: !o[g.cat] }))} onMouseEnter={() => setHoverKey(null)} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 6, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}>
-                <Text fontSize={9} color="#64748b" style={{ width: 8 }}>{open[g.cat] ? '▾' : '▸'}</Text>
-                <Text fontSize={10} color="#cbd5e1" style={{ fontWeight: 800, letterSpacing: 1 }}>{g.title}</Text>
-                <Text fontSize={8} color="#3a4a63" style={{ fontFamily: 'monospace' }}>{g.items.length}</Text>
-              </Pressable>
-              {open[g.cat] ? g.items.map((it) => {
-                const key = `${g.cat}:${it.kind}`;
-                return (
-                  <Leaf
-                    key={it.kind}
-                    label={it.label}
-                    active={sel.cat === g.cat && sel.kind === it.kind}
-                    hovered={hoverKey === key}
-                    onEnter={() => setHoverKey(key)}
-                    onPress={() => setSel({ cat: g.cat, kind: it.kind })}
-                    onAdd={props.onPlace && (g.cat === 'building' || g.cat === 'prop') ? () => props.onPlace!(g.cat as 'building' | 'prop', it.kind) : undefined}
-                  />
-                );
-              }) : null}
-            </Box>
-          ))}
-        </ScrollView>
-      </Box>
-
-      {/* Preview pane: a shader gets the live ShaderLab (flat quad + sliders);
-          everything else gets the 3D model viewer + its property sheet. */}
+    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg'), position: 'relative' }}>
+      {/* viewer (+ properties for non-shaders), full width */}
       {isShader && spec ? (
-        <Box style={{ flexGrow: 1, height: '100%' }}>
-          <ShaderLab spec={spec} />
-        </Box>
-      ) : pv ? (
-        <Box style={{ flexGrow: 1, height: '100%', flexDirection: 'column' }}>
-          <Box style={{ height: '46%', borderBottomWidth: 1, borderBottomColor: '#16202f' }}>
-            <ModelViewer building={pv.building} prop={pv.prop} tile={pv.tile} baseDist={pv.baseDist} targetY={pv.targetY} />
+        <Box style={{ flexGrow: 1, minHeight: 0 }}><ShaderLab spec={spec} /></Box>
+      ) : isAssist ? (
+        assistMesh ? (
+          <>
+            <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: accentFor('border') }}>
+              <AssistMeshViewer mesh={assistMesh} background={scene.background} />
+            </Box>
+            <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+              <AssistInspect mesh={assistMesh} />
+            </Box>
+          </>
+        ) : (
+          <Box style={{ flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+            <Text fontSize={11} color={accentFor('textDim')} style={{ fontFamily: 'monospace', textAlign: 'center' }}>
+              {scene.meshes.length === 0 ? 'No assistant meshes yet — open the Sparkles ✦ surface and generate a scene.' : 'Pick a mesh from the list below.'}
+            </Text>
           </Box>
-          <Box style={{ flexGrow: 1, minHeight: 0 }}>
+        )
+      ) : pv ? (
+        <>
+          <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0, borderBottomWidth: 1, borderBottomColor: accentFor('border') }}>
+            <ModelViewer
+              building={pv.building} prop={pv.prop} tile={pv.tile} baseDist={pv.baseDist} targetY={pv.targetY}
+              onAdd={isPlaceable(sel.cat) ? () => place(sel.cat, sel.kind) : undefined}
+            />
+          </Box>
+          <Box style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
             <PropertiesPanel focus={pv.focus} world={pv.world} />
           </Box>
+        </>
+      ) : null}
+
+      {/* breadcrumb foot: CATEGORY ▸ ITEM — one compact row */}
+      <Box style={{ height: 28, flexShrink: 0, flexDirection: 'row', alignItems: 'stretch', borderTopWidth: 1, borderTopColor: accentFor('border'), backgroundColor: accentFor('bgAlt') }}>
+        <Box style={{ borderRightWidth: 1, borderRightColor: accentFor('border'), backgroundColor: accentFor('controlBg'), justifyContent: 'center' }}>
+          <Crumb value={palGroup.title} count={palGroup.items.length} onPress={() => { setItemOpen(false); setCatOpen((o) => !o); }} />
         </Box>
+        <Box style={{ width: 16, alignItems: 'center', justifyContent: 'center' }}>
+          <Icon name="ArrowRight" size={10} color={accentFor('textFaint')} />
+        </Box>
+        <Crumb value={itemValue} grow muted={sel.cat !== palCat} onPress={() => { setCatOpen(false); setItemOpen((o) => !o); }} />
+      </Box>
+
+      {catOpen ? <CatPop groups={groups} palCat={palCat} onPick={pickCat} /> : null}
+      {itemOpen ? (
+        <ItemPop
+          title={palGroup.title}
+          cat={palCat}
+          items={palGroup.items}
+          selKind={sel.cat === palCat ? sel.kind : null}
+          onInspect={(kind) => inspect(palCat, kind)}
+          onPlace={isPlaceable(palCat) ? (kind) => place(palCat, kind) : undefined}
+        />
       ) : null}
     </Box>
   );

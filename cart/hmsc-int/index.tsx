@@ -12,8 +12,8 @@ import {
   type SessionEnvelope,
 } from '@reactjit/workspace';
 import type { Building, GameState } from '../hmsc/design';
-import { emptyEditorWorld, placeBuilding, placeWorldProp } from './editorWorld';
-import { type ChunkFloor } from './chunkFloor';
+import { compileEditorWorld, emptyEditorWorld, placeBuilding, placeWorldProp } from './editorWorld';
+import { type ChunkFloor, floorsToLandforms } from './chunkFloor';
 import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi } from './PaintCanvas';
@@ -32,6 +32,10 @@ import {
   cellKey, serializeOverrides, deserializeOverrides,
   type SelCell, type OverrideStore, type OverrideValue, type OverrideSnap,
 } from './tileOverrides';
+import { plog, ptime, useChurn } from './perfLog';
+import { Router, Route, useNavigate } from '@reactjit/router';
+import { LogView } from './LogView';
+import { Assist3DRoute } from './assist3d';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -81,13 +85,6 @@ function clampFrac(f: number): number {
   return Math.max(MIN_FRAC, Math.min(1 - MIN_FRAC, f));
 }
 
-// A placement's free rotation → the building's door side (nearest quadrant). The
-// preview can't show an arbitrary yaw on a box building, so snap it.
-function rotToSide(rotation: number): Building['doorSide'] {
-  const q = ((Math.round(rotation / 90) % 4) + 4) % 4;
-  return (['south', 'west', 'north', 'east'] as const)[q];
-}
-
 // Synchronous read of the last-open map's VIEW, to seed initial pane fractions so
 // the divider never flashes to centre on mount. The WORLD is seeded by the
 // workspace restore (applyPayload, which remounts PaintCanvas with the decoded map).
@@ -128,7 +125,19 @@ function Pane(props: { label: string; children?: React.ReactNode }) {
 // the map key changes (open / new).
 const MemoPaintCanvas = memo(PaintCanvas);
 
+// The cart's router: the editor at "/", the in-app churn-log viewer at "/log".
+// `hotKey` persists the active route across hot reloads. The editor stays MOUNTED
+// while the log overlays it (the Route is the shell's last child), so peeking at
+// the log never resets your painted world / undo / camera.
 export default function HmscWorldEditorCart() {
+  return (
+    <Router hotKey="hmsc-int:route" initialPath="/">
+      <EditorShell />
+    </Router>
+  );
+}
+
+function EditorShell() {
   // The 3D preview world. baseWorld is the empty editor GameState (built once);
   // floors (the painted tile/height per chunk) are mirrored from PaintCanvas and
   // drive the preview's floor MESHES directly (not surfaceRegions). previewWorld
@@ -136,6 +145,12 @@ export default function HmscWorldEditorCart() {
   // WorldStatics draws them — it only rebuilds when placements change, not on paint.
   const baseWorld = useMemo(emptyEditorWorld, []);
   const [floors, setFloors] = useState<ChunkFloor[]>([]);
+  // Churn probe: PaintCanvas mirrors the focused chunks here (throttled). Each call
+  // re-renders the whole cart AND rebuilds previewWorld — so log every one.
+  const onFloors = useCallback((f: ChunkFloor[]) => {
+    plog('floors', `setFloors n=${f.length} chunks=[${f.map((x) => `${x.cx},${x.cz}:h${x.hver}`).join(' ')}]`);
+    setFloors(f);
+  }, []);
 
   // Seed view state from disk once (lazy initializer → runs only on mount).
   const [initial] = useState(readInitialView);
@@ -225,7 +240,7 @@ export default function HmscWorldEditorCart() {
     const api = paintApiRef.current;
     if (!api) return null; // canvas not mounted yet — skip this autosave tick
     const w = api.getWorld();
-    const world = serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements });
+    const world = ptime('autosave', `serializeMap chunks=${w.chunks.size}`, () => serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements }));
     return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides) };
   }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
@@ -319,6 +334,7 @@ export default function HmscWorldEditorCart() {
   // PaintCanvas reports each edit with a semantic note (or none for silent edits like
   // focus toggles): trip the autosave + log the note. Stable for the memoized canvas.
   const onCanvasEdit = useCallback((e?: EditNote) => {
+    plog('edit', `onCanvasEdit → setWorldRev${e ? ` + logEvent(${e.cat}:${e.text})` : ' (silent)'}`);
     setWorldRev((r) => r + 1);
     if (e) logEvent(e);
   }, [logEvent]);
@@ -469,13 +485,15 @@ export default function HmscWorldEditorCart() {
     : (placeFocus?.focus ?? { kind: 'tile', tile });
   const focusWorld = placeFocus?.world ?? baseWorld;
 
-  // The preview world = baseWorld with every placement applied via the game's own
-  // mutators, so WorldStatics renders them exactly as the game would. Placement
-  // graph coords → world cells: graph origin is the seed chunk's centre, so
-  // worldCell = gx/TILE_UNITS + CHUNK_TILES/2. Buildings are placed by min-corner
-  // (centre − half-footprint) with the door snapped to the rotation quadrant.
-  const previewWorld = useMemo<GameState>(() => {
-    let s = baseWorld;
+  // The preview world = baseWorld + the painted chunks as REAL heightfield
+  // landforms (so WorldStatics draws the terrain the game's own way and placement
+  // samples its height) + every placement applied via the game's own mutators.
+  // Landforms fold in BEFORE placements so a building/prop sits on the hill under
+  // it. Placement graph coords → world cells: graph origin is the seed chunk's
+  // centre, so worldCell = gx/TILE_UNITS + CHUNK_TILES/2; buildings place by
+  // min-corner (centre − half-footprint) and carry the placement's free rotation.
+  const previewWorld = useMemo<GameState>(() => ptime('previewWorld', `rebuild floors=${floors.length} placements=${placements.length}`, () => {
+    let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms: floorsToLandforms(floors) } };
     for (const p of placements) {
       const wx = Math.round(p.gx / TILE_UNITS + CHUNK_TILES / 2);
       const wz = Math.round(p.gy / TILE_UNITS + CHUNK_TILES / 2);
@@ -484,7 +502,10 @@ export default function HmscWorldEditorCart() {
           kind: p.kind as Building['kind'],
           x: wx - Math.floor(p.footW / 2),
           z: wz - Math.floor(p.footD / 2),
-          doorSide: rotToSide(p.rotation),
+          // The placement's free rotation IS the building's yaw now — the whole
+          // mass turns (render3d/buildingTransform + the host OBB), so the 3D box
+          // matches the rotated 2D node instead of just flipping a door quadrant.
+          yawDegrees: p.rotation,
           force: true,
         });
         if (r.ok) s = r.state;
@@ -493,10 +514,30 @@ export default function HmscWorldEditorCart() {
       }
     }
     return s;
-  }, [baseWorld, placements]);
+  }), [baseWorld, placements, floors]);
+
+  // Compile = persist the authored world (the SAME GameState the preview shows:
+  // painted terrain as heightfield landforms + placements) to the game's boot key
+  // via saveGameState. The standalone game's readStoredGameState then boots THIS
+  // map — what you see in the preview is what the game runs. Deliberate (a button),
+  // not on every keystroke, so authoring doesn't clobber the booted world midway.
+  const compileToGame = useCallback(() => {
+    compileEditorWorld(previewWorld);
+    logEvent({ cat: 'map', text: `compiled ${ws.stem} → game` });
+  }, [previewWorld, logEvent, ws.stem]);
 
   // The current map always shows in the switcher even before its file lands on disk.
   const displayMaps = maps.includes(ws.stem) ? maps : [...maps, ws.stem].sort();
+
+  // Router nav — the ProjectBar's churn-log button opens /log; LogView returns to /.
+  const nav = useNavigate();
+
+  // Churn probe: which cart-level state drove this whole-cart re-render? During a
+  // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
+  useChurn('cart', {
+    floors, previewWorld, worldRev, viewRev, placements, events, selCells, overrides,
+    seedWorld, tool, tile, layer, tab, notes, showGrid, wasdQuad, menuOpen, logOpen, maps,
+  });
 
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#080d16' }}>
@@ -510,8 +551,11 @@ export default function HmscWorldEditorCart() {
         onToggleMenu={toggleMenu}
         onToggleLog={toggleLog}
         onNew={() => { setMenuOpen(false); newMap(); }}
+        onPerf={() => nav.push('/log')}
+        onAssist={() => nav.push('/assist3d')}
         onUndo={ws.undo}
         onRedo={ws.redo}
+        onCompile={compileToGame}
       />
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
         <QuadSplit
@@ -547,7 +591,7 @@ export default function HmscWorldEditorCart() {
               onLayer={setLayer}
               place={place}
               showGrid={showGrid}
-              onFloors={setFloors}
+              onFloors={onFloors}
               onEditBegin={snapshotForUndo}
               wasdFocused={wasdQuad === 'canvas'}
               onWasdFocus={focusCanvas}
@@ -559,7 +603,6 @@ export default function HmscWorldEditorCart() {
               <IsoPreview
                 key={`${ws.stem}#${worldEpoch}`}
                 state={previewWorld}
-                floors={floors}
                 wasdFocused={wasdQuad === 'preview'}
                 onWasdFocus={focusPreview}
                 initialCamera={seedCam}
@@ -588,6 +631,15 @@ export default function HmscWorldEditorCart() {
       {logOpen ? (
         <EventLog events={events} now={Date.now()} onClose={() => setLogOpen(false)} />
       ) : null}
+
+      {/* /log route — the in-app churn-log viewer. A full-screen overlay (the shell
+          root's last child) so it paints over the editor while the editor stays
+          mounted underneath; "editor" button (onBack) returns to "/". */}
+      <Route path="/log">{() => <LogView onBack={() => nav.push('/')} />}</Route>
+
+      {/* /assist3d route — assistant-authored hot 3D surface (assist3d/). Same
+          overlay rule: the editor stays mounted underneath while you generate. */}
+      <Route path="/assist3d">{() => <Assist3DRoute onBack={() => nav.push('/')} />}</Route>
     </Box>
   );
 }

@@ -35,6 +35,14 @@ interface ProjectBarProps {
   onNew: () => void;
   onUndo: () => void;
   onRedo: () => void;
+  // Write the authored world (painted terrain as landforms + placements) to the
+  // game's boot key, so the standalone game boots THIS map. Deliberate, not on
+  // every keystroke — see index.tsx compileToGame.
+  onCompile: () => void;
+  // Navigate to the /log route — the in-app churn-log viewer (perf diagnostics).
+  onPerf: () => void;
+  // Navigate to the /assist3d route — the assistant-authored hot 3D surface.
+  onAssist: () => void;
 }
 
 function IconBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
@@ -74,11 +82,25 @@ export function ProjectBar(props: ProjectBarProps) {
 
       <Box style={{ flexGrow: 1 }} />
 
+      {/* Assistant 3D surface (the /assist3d route) */}
+      <IconBtn icon="Sparkles" onPress={props.onAssist} title="assistant 3D" />
+
+      {/* Churn-log viewer (the /log route) */}
+      <IconBtn icon="Activity" onPress={props.onPerf} title="churn log" />
+
       {/* Undo / redo */}
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconBtn icon="Undo2" enabled={props.canUndo} onPress={props.onUndo} />
         <IconBtn icon="Redo2" enabled={props.canRedo} onPress={props.onRedo} />
       </Box>
+
+      <Box style={{ width: 1, height: 18, backgroundColor: '#1e293b' }} />
+
+      {/* Compile → write this authored map to the game's boot key */}
+      <Pressable onPress={props.onCompile} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 9, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 6, borderWidth: 1, borderColor: '#3f6f4a', backgroundColor: '#13351f' }}>
+        <Icon name="Hammer" size={13} color="#86efac" />
+        <Text fontSize={11} color="#bbf7d0" style={{ fontWeight: 700 }}>Compile</Text>
+      </Pressable>
 
       <Box style={{ width: 1, height: 18, backgroundColor: '#1e293b' }} />
 
