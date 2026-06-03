@@ -28,6 +28,16 @@ export type GlobeParams = {
   amount?: number;
   /** Vertical stretch of the whole globe (1 = sphere). */
   scaleY?: number;
+  /**
+   * Silhouette profile: radius multipliers sampled (lerped) top→bottom along
+   * v. This is what turns the egg into ANY body part — [0.5, 0.9, 1, 0.9, 0.5]
+   * is a limb, [0.7, 1, 1, 0.95, 0.6] a torso — while the unwrap, the paint
+   * space, and the displacement grid stay identical. Omit for a sphere.
+   */
+  profile?: number[];
+  /** Per-axis squash of the whole shape (hands/feet flatten with scaleZ). */
+  scaleX?: number;
+  scaleZ?: number;
 };
 
 export const GLOBE_DEFAULTS: GlobeParams = { radius: 0.5, segments: 32, rings: 16, amount: 0, scaleY: 1 };
@@ -38,10 +48,22 @@ export function generate(p: GlobeParams): GeometryData {
   const { radius, segments, rings } = p;
   const amount = p.amount ?? 0;
   const scaleY = p.scaleY ?? 1;
+  const scaleX = p.scaleX ?? 1;
+  const scaleZ = p.scaleZ ?? 1;
   const grid = p.displace;
   const dCols = p.dCols ?? 0;
   const dRows = p.dRows ?? 0;
   const hasGrid = !!grid && dCols > 1 && dRows > 1 && amount !== 0;
+
+  // Silhouette profile: lerped radius multiplier along v (top→bottom).
+  const prof = p.profile && p.profile.length > 0 ? p.profile : null;
+  const profileAt = (v: number): number => {
+    if (!prof) return 1;
+    if (prof.length === 1) return prof[0];
+    const t = Math.max(0, Math.min(1, v)) * (prof.length - 1);
+    const i = Math.min(prof.length - 2, Math.floor(t));
+    return prof[i] + (prof[i + 1] - prof[i]) * (t - i);
+  };
 
   // Row-averages for the pole rows: every column converges to one point at a
   // pole, so they must share one displacement or the cap cracks.
@@ -77,14 +99,16 @@ export function generate(p: GlobeParams): GeometryData {
 
   // Displaced position at param (i ring, j segment). phi DECREASES with u so
   // the unwrap reads unmirrored to a viewer facing the front (-Z at u=0.5).
+  // Profile shapes the base silhouette; displacement is world-units on top so
+  // sculpt strength doesn't shrink where the part is thin.
   const pos = (i: number, j: number): Vec3 => {
     const v = i / rings;
     const u = j / segments;
     const theta = PI * v;
     const phi = PI / 2 - 2 * PI * u;
     const st = Math.sin(theta);
-    const r = radius + amount * sample(u, v);
-    return [st * Math.cos(phi) * r, Math.cos(theta) * r * scaleY, st * Math.sin(phi) * r];
+    const r = radius * profileAt(v) + amount * sample(u, v);
+    return [st * Math.cos(phi) * r * scaleX, Math.cos(theta) * r * scaleY, st * Math.sin(phi) * r * scaleZ];
   };
 
   // Finite-difference outward normal; pole rows fall back to the axis.
