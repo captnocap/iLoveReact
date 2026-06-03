@@ -68,6 +68,11 @@ export const ASSEMBLY: BodyInstance[] = [
   { part: 'pipe', position: [0.45, 0.88, 0], scale: 0.17, rotation: [0, 0, 8], thickness: 0.7 },
   { part: 'hand', position: [-0.5, 0.52, 0], scale: 0.13 },
   { part: 'hand', position: [0.5, 0.52, 0], scale: 0.13 },
+  // thumbs — the mitten rule: four fingers fused (the hand blob) but real
+  // opposable thumbs. Tiny stubby pipes on each hand's INNER edge, angled up
+  // toward the body; placed per side (not mirrored geometry) so they oppose.
+  { part: 'pipe', position: [-0.405, 0.58, -0.02], scale: 0.05, rotation: [0, 0, -35], thickness: 2.0 },
+  { part: 'pipe', position: [0.405, 0.58, -0.02], scale: 0.05, rotation: [0, 0, 35], thickness: 2.0 },
   // legs: thigh + shin pipes with a slight stance, feet pointing forward
   { part: 'pipe', position: [-0.15, 0.65, 0], scale: 0.21, rotation: [0, 0, -3], thickness: 1.3 },
   { part: 'pipe', position: [0.15, 0.65, 0], scale: 0.21, rotation: [0, 0, 3], thickness: 1.3 },
