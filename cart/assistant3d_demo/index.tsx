@@ -181,10 +181,18 @@ function buildPreamble(scenePath: string): string {
 }
 
 // ── compact transcript line ───────────────────────────────────────────────────
+// NB: we deliberately DROP `user_message` events. The worker echoes every
+// tool_result back into the stream as a user-role message (that's the raw
+// `[{"type":"tool_result"...}]` blobs), and the first real user turn carries
+// our whole preamble. Neither is something you typed — your prompts are tracked
+// locally instead (myPrompts), so "YOU" only ever shows what you actually sent.
 function eventLine(ev: WorkerEvent): { tag: string; text: string; color: string } | null {
-  if (ev.kind === 'user_message') return { tag: 'you', text: ev.text ?? '', color: INK };
   if (ev.kind === 'assistant_message') return { tag: 'claude', text: ev.text ?? '', color: '#bcd0ff' };
-  if (ev.kind === 'tool_call') return { tag: 'tool', text: ev.text || ev.status_text || 'writing scene…', color: ACCENT };
+  if (ev.kind === 'tool_call') {
+    const name = ev.text || ev.status_text || '';
+    const label = /write/i.test(name) ? 'writing scene.json…' : /read/i.test(name) ? 'reading scene…' : (name || 'tool');
+    return { tag: 'tool', text: label, color: ACCENT };
+  }
   if (ev.kind === 'error_') return { tag: 'error', text: ev.text || ev.status_text || 'error', color: BAD };
   if (ev.kind === 'completion') return { tag: 'done', text: '— turn complete —', color: DIM };
   return null;
@@ -258,6 +266,9 @@ export default function Assistant3DDemo() {
   const sentPreambleRef = useRef(false);
   const [input, setInput] = useState('');
   const inputRef = useRef(''); inputRef.current = input;
+  // your prompts, tracked locally — the worker stream's user_message events are
+  // tool_result echoes / the preamble, never clean transcript material.
+  const [myPrompts, setMyPrompts] = useState<{ text: string; ts: number }[]>([]);
 
   const submit = () => {
     const text = inputRef.current.trim();
@@ -267,13 +278,22 @@ export default function Assistant3DDemo() {
       : `${buildPreamble(scenePath)}\n\nRequest: ${text}`;
     if (!assistant.ask(msg)) return;
     sentPreambleRef.current = true;
+    setMyPrompts((p) => [...p, { text, ts: Date.now() }]);
     setInput('');
   };
 
-  const transcript = useMemo(
-    () => assistant.events.map(eventLine).filter(Boolean) as { tag: string; text: string; color: string }[],
-    [assistant.events],
-  );
+  // merge your local prompts with assistant-side events, ordered by timestamp
+  // (both are ms-epoch, so they interleave correctly across turns).
+  const transcript = useMemo(() => {
+    const lines: { tag: string; text: string; color: string; ts: number }[] = [];
+    for (const ev of assistant.events) {
+      const l = eventLine(ev);
+      if (l) lines.push({ ...l, ts: ev.created_at_ms || 0 });
+    }
+    for (const p of myPrompts) lines.push({ tag: 'you', text: p.text, color: INK, ts: p.ts });
+    lines.sort((a, b) => a.ts - b.ts);
+    return lines;
+  }, [assistant.events, myPrompts]);
   const transcriptRef = useRef<any>(null);
   useEffect(() => { try { transcriptRef.current?.scrollToEnd?.(); } catch { /* ignore */ } }, [transcript.length]);
 
