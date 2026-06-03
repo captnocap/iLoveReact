@@ -1534,6 +1534,7 @@ fn drainMemory() void {
     capsules.drain(device, globals_buffer);
     polys.drain(device, globals_buffer);
     images.drain(device, globals_buffer);
+    sdf_icons.drain(device, globals_buffer);
 
     // Force full redraw on next frame — the buffers were just recreated.
     g_prev_frame_hash = 0;

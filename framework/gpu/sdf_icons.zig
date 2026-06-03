@@ -371,6 +371,39 @@ pub fn reset() void {
     g_icon_count = 0;
 }
 
+/// Rebind after a memory drain. drainMemory() in gpu.zig releases and recreates
+/// the shared globals buffer (screen_size), so every pipeline's bind group — which
+/// captured the OLD buffer — must be rebuilt against the new one. Without this the
+/// icon bind group keeps pointing at the freed buffer: it reads the screen size it
+/// held at drain time, so icons look fine until the window is resized, then divide
+/// by a stale size and fly off. Mirrors text.drain / rects.drain; reuses the
+/// existing layout + atlas view/sampler, only the instance buffer + bind group are
+/// recreated.
+pub fn drain(device: *wgpu.Device, globals_buffer: *wgpu.Buffer) void {
+    if (g_bind_group) |bg| bg.release();
+    if (g_buffer) |b| b.release();
+
+    g_buffer = device.createBuffer(&.{
+        .label = wgpu.StringView.fromSlice("sdf_icon_instances"),
+        .size = MAX_ICONS * @sizeOf(SdfIconInstance),
+        .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+        .mapped_at_creation = 0,
+    });
+
+    if (g_bind_group_layout) |layout| {
+        const bind_entries = [_]wgpu.BindGroupEntry{
+            .{ .binding = 0, .buffer = globals_buffer, .offset = 0, .size = 8 },
+            .{ .binding = 1, .texture_view = g_atlas_view },
+            .{ .binding = 2, .sampler = g_atlas_sampler },
+        };
+        g_bind_group = device.createBindGroup(&.{
+            .layout = layout,
+            .entry_count = bind_entries.len,
+            .entries = &bind_entries,
+        });
+    }
+}
+
 pub fn deinit() void {
     if (g_bind_group) |bg| bg.release();
     if (g_bind_group_layout) |l| l.release();
