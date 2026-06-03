@@ -1951,6 +1951,29 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonInt(v)) |i| node.scene3d_vert_count = if (i > 0 and i < (1 << 22)) @intCast(i) else 0;
         } else if (std.mem.eql(u8, k, "scene3dBoundsRadius")) {
             if (jsonFloat(v)) |f| node.scene3d_bounds_radius = f;
+        } else if (std.mem.eql(u8, k, "scene3dHeights")) {
+            // Host-generated heightfield: the cols×rows height grid (1 f32/sample).
+            // gpu/3d.zig builds the mesh verts from these — see scene3d_heights.
+            if (v == .array) {
+                const items = v.array.items;
+                if (items.len > 0 and items.len <= (1 << 22)) {
+                    const buf = g_alloc.alloc(f32, items.len) catch null;
+                    if (buf) |out| {
+                        for (items, 0..) |fv, n| out[n] = jsonFloat(fv) orelse 0;
+                        node.scene3d_heights = out;
+                    }
+                }
+            }
+        } else if (std.mem.eql(u8, k, "scene3dHfCols")) {
+            if (jsonInt(v)) |i| node.scene3d_hf_cols = if (i > 0 and i < (1 << 16)) @intCast(i) else 0;
+        } else if (std.mem.eql(u8, k, "scene3dHfRows")) {
+            if (jsonInt(v)) |i| node.scene3d_hf_rows = if (i > 0 and i < (1 << 16)) @intCast(i) else 0;
+        } else if (std.mem.eql(u8, k, "scene3dHfWidth")) {
+            if (jsonFloat(v)) |f| node.scene3d_hf_width = f;
+        } else if (std.mem.eql(u8, k, "scene3dHfDepth")) {
+            if (jsonFloat(v)) |f| node.scene3d_hf_depth = f;
+        } else if (std.mem.eql(u8, k, "scene3dHfBase")) {
+            if (jsonFloat(v)) |f| node.scene3d_hf_base = f;
         } else if (std.mem.eql(u8, k, "scene3dInstanceData")) {
             if (v == .array) {
                 const items = v.array.items;

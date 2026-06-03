@@ -844,16 +844,15 @@ fn internGeometry(queue: *wgpu.Queue, key: []const u8, verts: []const f32, count
     return .{ .offset = off, .count = count };
 }
 
-/// Resolve a dynamic key "~dyn~<slotId>~<version>" to a reused slot, overwriting
-/// its verts in place when the version changed. `verts` may be null on a frame the
-/// node didn't re-ship (then we draw the slot's existing contents). Returns null
-/// only if there's no slot free and none yet uploaded.
-fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, count: u32) ?GeoSlice {
-    const rest = key["~dyn~".len..]; // "<slotId>~<version>"
+/// Find (or claim) the reused slot for a dynamic key "<prefix><slotId>~<version>".
+/// Shared by every dynamic-geom path (verts-shipped and host-generated). Returns the
+/// slot index, its byte offset, and the version hash; null only if no slot is free.
+const DynLoc = struct { i: usize, off: u64, ver_hash: u64 };
+fn dynSlotLocate(prefix_len: usize, key: []const u8) ?DynLoc {
+    const rest = key[prefix_len..]; // "<slotId>~<version>"
     const sep = std.mem.lastIndexOfScalar(u8, rest, '~') orelse return null;
     const id_hash = hashKey(rest[0..sep]);
     const ver_hash = hashKey(rest[sep + 1 ..]);
-
     var idx: ?usize = null;
     for (g_dyn_slots[0..g_dyn_len], 0..) |*s, i| {
         if (s.present and s.id_hash == id_hash) { idx = i; break; }
@@ -864,21 +863,161 @@ fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, 
         g_dyn_slots[g_dyn_len] = .{ .id_hash = id_hash, .present = true };
         g_dyn_len += 1;
     }
-    const i = idx.?;
-    const s = &g_dyn_slots[i];
-    const off = dynSlotOffset(i);
+    return .{ .i = idx.?, .off = dynSlotOffset(idx.?), .ver_hash = ver_hash };
+}
 
-    if (s.version_hash != ver_hash or s.count == 0) {
-        const v = verts orelse return if (s.count > 0) .{ .offset = off, .count = s.count } else null;
+/// Resolve a dynamic key "~dyn~<slotId>~<version>" to a reused slot, overwriting
+/// its verts in place when the version changed. `verts` may be null on a frame the
+/// node didn't re-ship (then we draw the slot's existing contents). Returns null
+/// only if there's no slot free and none yet uploaded.
+fn resolveDynamicGeom(queue: *wgpu.Queue, key: []const u8, verts: ?[]const f32, count: u32) ?GeoSlice {
+    const loc = dynSlotLocate("~dyn~".len, key) orelse return null;
+    const s = &g_dyn_slots[loc.i];
+    if (s.version_hash != loc.ver_hash or s.count == 0) {
+        const v = verts orelse return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
         if (count == 0 or count > MAX_DYN_VERTS or v.len < @as(usize, count) * 8) {
-            return if (s.count > 0) .{ .offset = off, .count = s.count } else null;
+            return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
         }
         const buf = g_retained_vbuf orelse return null;
-        queue.writeBuffer(buf, off, @ptrCast(v.ptr), @as(u64, count) * @sizeOf(Vertex));
-        s.version_hash = ver_hash;
+        queue.writeBuffer(buf, loc.off, @ptrCast(v.ptr), @as(u64, count) * @sizeOf(Vertex));
+        s.version_hash = loc.ver_hash;
         s.count = count;
     }
-    return .{ .offset = off, .count = s.count };
+    return .{ .offset = loc.off, .count = s.count };
+}
+
+// ── Host-generated heightfield ──────────────────────────────────────────────
+// Faithful port of runtime/geometries/Heightfield.ts (top surface + central-
+// difference normals + perimeter skirt down to `base`). The live painted-terrain
+// path streams ONLY the cols×rows height grid; the host bakes the mesh verts here,
+// instead of the JS side shipping ~86k baked verts across the bridge every sculpt.
+// Painted terrain is static-t, so the TS generator's optional travelling wave is
+// omitted. KEEP IN PARITY with Heightfield.ts (winding, normals, skirt).
+var g_hf_scratch: [MAX_DYN_VERTS]Vertex = undefined;
+
+fn hfHeightAt(hs: []const f32, cols: usize, rows: usize, ix: i64, iz: i64) f32 {
+    const ci: usize = @intCast(std.math.clamp(ix, 0, @as(i64, @intCast(cols)) - 1));
+    const cj: usize = @intCast(std.math.clamp(iz, 0, @as(i64, @intCast(rows)) - 1));
+    return hs[cj * cols + ci];
+}
+
+fn hfNormalAt(hs: []const f32, cols: usize, rows: usize, i: usize, j: usize, dx: f32, dz: f32) [3]f32 {
+    const ii: i64 = @intCast(i);
+    const jj: i64 = @intCast(j);
+    const hl = hfHeightAt(hs, cols, rows, ii - 1, jj);
+    const hr = hfHeightAt(hs, cols, rows, ii + 1, jj);
+    const hu = hfHeightAt(hs, cols, rows, ii, jj - 1);
+    const hd = hfHeightAt(hs, cols, rows, ii, jj + 1);
+    var nx = -(hr - hl) / (2.0 * dx);
+    var ny: f32 = 1.0;
+    var nz = -(hd - hu) / (2.0 * dz);
+    const len = @sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 1e-6) {
+        nx /= len;
+        ny /= len;
+        nz /= len;
+    }
+    return .{ nx, ny, nz };
+}
+
+fn hfPos(hs: []const f32, cols: usize, i: usize, j: usize, x0: f32, dx: f32, z0: f32, dz: f32) [3]f32 {
+    return .{ x0 + @as(f32, @floatFromInt(i)) * dx, hs[j * cols + i], z0 + @as(f32, @floatFromInt(j)) * dz };
+}
+
+fn hfPush(n: *usize, p: [3]f32, nrm: [3]f32, u: f32, vv: f32) void {
+    if (n.* >= MAX_DYN_VERTS) return;
+    g_hf_scratch[n.*] = .{ .px = p[0], .py = p[1], .pz = p[2], .nx = nrm[0], .ny = nrm[1], .nz = nrm[2], .u = u, .v = vv };
+    n.* += 1;
+}
+
+fn hfSkirt(n: *usize, a: [3]f32, b: [3]f32, c: [3]f32, d: [3]f32, nrm: [3]f32) void {
+    hfPush(n, a, nrm, 0, 0);
+    hfPush(n, b, nrm, 0, 0);
+    hfPush(n, c, nrm, 0, 0);
+    hfPush(n, a, nrm, 0, 0);
+    hfPush(n, c, nrm, 0, 0);
+    hfPush(n, d, nrm, 0, 0);
+}
+
+/// Build the heightfield mesh into g_hf_scratch; returns the vertex count (0 = bad
+/// input). Caller uploads g_hf_scratch[0..count] to the slot.
+fn hfGen(hs: []const f32, cols: usize, rows: usize, width: f32, depth: f32, base: f32) u32 {
+    if (cols < 2 or rows < 2 or hs.len < cols * rows) return 0;
+    const cf: f32 = @floatFromInt(cols - 1);
+    const rf: f32 = @floatFromInt(rows - 1);
+    const dx = width / cf;
+    const dz = depth / rf;
+    const x0 = -width * 0.5;
+    const z0 = -depth * 0.5;
+    var n: usize = 0;
+
+    // Top surface — wound to face +Y.
+    var j: usize = 0;
+    while (j + 1 < rows) : (j += 1) {
+        var i: usize = 0;
+        while (i + 1 < cols) : (i += 1) {
+            const pa = hfPos(hs, cols, i, j, x0, dx, z0, dz);
+            const pb = hfPos(hs, cols, i + 1, j, x0, dx, z0, dz);
+            const pc = hfPos(hs, cols, i + 1, j + 1, x0, dx, z0, dz);
+            const pd = hfPos(hs, cols, i, j + 1, x0, dx, z0, dz);
+            const na = hfNormalAt(hs, cols, rows, i, j, dx, dz);
+            const nb = hfNormalAt(hs, cols, rows, i + 1, j, dx, dz);
+            const nc = hfNormalAt(hs, cols, rows, i + 1, j + 1, dx, dz);
+            const nd = hfNormalAt(hs, cols, rows, i, j + 1, dx, dz);
+            const ua0 = @as(f32, @floatFromInt(i)) / cf;
+            const ub0 = @as(f32, @floatFromInt(i + 1)) / cf;
+            const va0 = @as(f32, @floatFromInt(j)) / rf;
+            const vb0 = @as(f32, @floatFromInt(j + 1)) / rf;
+            hfPush(&n, pa, na, ua0, va0);
+            hfPush(&n, pc, nc, ub0, vb0);
+            hfPush(&n, pb, nb, ub0, va0);
+            hfPush(&n, pa, na, ua0, va0);
+            hfPush(&n, pd, nd, ua0, vb0);
+            hfPush(&n, pc, nc, ub0, vb0);
+        }
+    }
+
+    // Perimeter skirt — seal each boundary edge down to `base`, faces outward.
+    var si: usize = 0;
+    while (si + 1 < cols) : (si += 1) {
+        const tn0 = hfPos(hs, cols, si, 0, x0, dx, z0, dz);
+        const tn1 = hfPos(hs, cols, si + 1, 0, x0, dx, z0, dz);
+        if (tn0[1] > base or tn1[1] > base) hfSkirt(&n, .{ tn1[0], base, tn1[2] }, .{ tn0[0], base, tn0[2] }, tn0, tn1, .{ 0, 0, -1 });
+        const js = rows - 1;
+        const ts0 = hfPos(hs, cols, si, js, x0, dx, z0, dz);
+        const ts1 = hfPos(hs, cols, si + 1, js, x0, dx, z0, dz);
+        if (ts0[1] > base or ts1[1] > base) hfSkirt(&n, .{ ts0[0], base, ts0[2] }, .{ ts1[0], base, ts1[2] }, ts1, ts0, .{ 0, 0, 1 });
+    }
+    var sj: usize = 0;
+    while (sj + 1 < rows) : (sj += 1) {
+        const tw0 = hfPos(hs, cols, 0, sj, x0, dx, z0, dz);
+        const tw1 = hfPos(hs, cols, 0, sj + 1, x0, dx, z0, dz);
+        if (tw0[1] > base or tw1[1] > base) hfSkirt(&n, .{ tw0[0], base, tw0[2] }, .{ tw1[0], base, tw1[2] }, tw1, tw0, .{ -1, 0, 0 });
+        const ie = cols - 1;
+        const te0 = hfPos(hs, cols, ie, sj, x0, dx, z0, dz);
+        const te1 = hfPos(hs, cols, ie, sj + 1, x0, dx, z0, dz);
+        if (te0[1] > base or te1[1] > base) hfSkirt(&n, .{ te1[0], base, te1[2] }, .{ te0[0], base, te0[2] }, te0, te1, .{ 1, 0, 0 });
+    }
+
+    return @intCast(n);
+}
+
+/// Resolve a "~hf~<slotId>~<version>" key: generate the heightfield mesh from the
+/// streamed height grid into the reused slot, overwriting on version change. The
+/// grid is the same one the collider takes, so render == collide.
+fn resolveDynamicHeightfield(queue: *wgpu.Queue, key: []const u8, heights: ?[]const f32, cols: u32, rows: u32, width: f32, depth: f32, base: f32) ?GeoSlice {
+    const loc = dynSlotLocate("~hf~".len, key) orelse return null;
+    const s = &g_dyn_slots[loc.i];
+    if (s.version_hash != loc.ver_hash or s.count == 0) {
+        const hs = heights orelse return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
+        const cnt = hfGen(hs, @intCast(cols), @intCast(rows), width, depth, base);
+        if (cnt == 0) return if (s.count > 0) .{ .offset = loc.off, .count = s.count } else null;
+        const buf = g_retained_vbuf orelse return null;
+        queue.writeBuffer(buf, loc.off, @ptrCast(&g_hf_scratch), @as(u64, cnt) * @sizeOf(Vertex));
+        s.version_hash = loc.ver_hash;
+        s.count = cnt;
+    }
+    return .{ .offset = loc.off, .count = s.count };
 }
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1204,7 +1343,22 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         const key = child.scene3d_geom_key orelse continue;
 
         var maybe_slot: ?GeoSlice = null;
-        if (std.mem.startsWith(u8, key, "~dyn~")) {
+        if (std.mem.startsWith(u8, key, "~hf~")) {
+            // Host-generated heightfield: JS ships only the cols×rows height grid;
+            // the host bakes the mesh verts into the slot (topology is fixed, only y
+            // moves). Far cheaper across the bridge than re-shipping ~86k verts/sculpt.
+            maybe_slot = resolveDynamicHeightfield(
+                queue,
+                key,
+                child.scene3d_heights,
+                child.scene3d_hf_cols,
+                child.scene3d_hf_rows,
+                child.scene3d_hf_width,
+                child.scene3d_hf_depth,
+                child.scene3d_hf_base,
+            );
+            if (maybe_slot == null) continue;
+        } else if (std.mem.startsWith(u8, key, "~dyn~")) {
             // Live-edited geometry: reused per-slot, overwritten on version change.
             maybe_slot = resolveDynamicGeom(queue, key, child.scene3d_vertices, child.scene3d_vert_count);
             if (maybe_slot == null) continue;

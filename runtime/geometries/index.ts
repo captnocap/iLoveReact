@@ -33,6 +33,12 @@ export type GeometryDef<P = any> = {
   id: string;
   generate: (params: P) => GeometryData;
   defaults: P;
+  // A geometry the HOST can regenerate from compact params (vs. shipping baked
+  // verts). 'heightfield' = a regular grid the host bakes from the streamed height
+  // array (gpu/3d.zig hfGen) — used for live-sculpted terrain so a sculpt ships the
+  // cols×rows heights, not ~86k verts. The TS `generate` stays the source of truth
+  // for static/baked uses; the host path must stay in parity with it.
+  hostKind?: 'heightfield';
 };
 
 function def<P>(id: string, generate: (p: P) => GeometryData, defaults: P): GeometryDef<P> {
@@ -47,7 +53,7 @@ export const Cone = def('Cone', ConeMod.generate, ConeMod.CONE_DEFAULTS);
 export const Torus = def('Torus', TorusMod.generate, TorusMod.TORUS_DEFAULTS);
 // Heightfield has no full defaults (heights/cols/rows are mandatory); callers
 // always supply them. defaults here is the partial { width, depth, base, wave, t }.
-export const Heightfield = def('Heightfield', HeightfieldMod.generate, HeightfieldMod.HEIGHTFIELD_DEFAULTS as any);
+export const Heightfield: GeometryDef = { ...def('Heightfield', HeightfieldMod.generate, HeightfieldMod.HEIGHTFIELD_DEFAULTS as any), hostKind: 'heightfield' };
 // Humanoid — an authored single-mesh low-poly character body (N64/PS1 register).
 // Unlike the primitives above, it isn't a math solid — it's one bespoke mesh
 // hand-shaped so the figure reads as a body, not a stack of parts.

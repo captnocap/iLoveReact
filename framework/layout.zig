@@ -515,6 +515,18 @@ pub const Node = struct {
     scene3d_vertices: ?[]const f32 = null, // interleaved verts, read once on cache miss
     scene3d_vert_count: u32 = 0,
     scene3d_bounds_radius: f32 = 0, // unscaled bounding radius from the generator (culling)
+    // Host-generated heightfield (live-sculpted terrain). A regular grid's topology
+    // (x/z, UVs, triangulation) is fixed; only the heights move as you paint. So
+    // instead of shipping ~86k baked verts every sculpt, ship just the cols×rows
+    // height grid + dims and let gpu/3d.zig generate the mesh verts host-side under a
+    // "~hf~" key. ~47× less bridge traffic, and it's the SAME grid the heightfield
+    // collider already takes (see-it==walk-it). heights len = hf_cols*hf_rows.
+    scene3d_heights: ?[]const f32 = null,
+    scene3d_hf_cols: u32 = 0,
+    scene3d_hf_rows: u32 = 0,
+    scene3d_hf_width: f32 = 0,
+    scene3d_hf_depth: f32 = 0,
+    scene3d_hf_base: f32 = 0,
     // Packed instance stream for large static batches. One Scene3D node can
     // submit thousands of transforms/colors without creating one host node per
     // object. Layout: [px,py,pz, sx,sy,sz, r,g,b] * count when stride=9.

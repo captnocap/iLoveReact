@@ -559,6 +559,39 @@ Scene3DBase.Mesh = ({
     const dyn = typeof dynamicKey === 'string' && dynamicKey.length > 0 ? dynamicKey : '';
     if (dyn) {
       const merged = { ...(geometry.defaults || {}), ...(params || {}) };
+      // Host-generated heightfield fast path: a live-sculpted regular grid has fixed
+      // topology, only its heights move — so ship the cols×rows height grid (the host
+      // bakes the verts via gpu/3d.zig hfGen) instead of ~86k baked verts/sculpt
+      // across the bridge. Skip it for a travelling wave (amplitude>0), which needs
+      // per-t regeneration — that stays on the verts path below.
+      const wv = (merged as any).wave;
+      const hasWave = wv && Math.abs(wv.amplitude) > 0.0001 && wv.length > 0.0001;
+      if ((geometry as any).hostKind === 'heightfield' && (merged as any).heights && !hasWave) {
+        const m: any = merged;
+        // Conservative bounds radius without baking verts: corner extent + tallest
+        // sample (skirt drops to base 0, so |y| is bounded by max|height|).
+        let maxAbsY = 0;
+        for (let n = 0; n < m.heights.length; n++) { const a = Math.abs(m.heights[n]); if (a > maxAbsY) maxAbsY = a; }
+        const halfW = (m.width ?? 1) / 2, halfD = (m.depth ?? 1) / 2;
+        const boundsRadius = Math.sqrt(halfW * halfW + halfD * halfD + maxAbsY * maxAbsY);
+        return h('View', {
+          ...rest,
+          scene3dMesh: true,
+          scene3dGeomKey: '~hf~' + dyn,
+          scene3dHeights: Array.from(m.heights as ArrayLike<number>),
+          scene3dHfCols: m.cols, scene3dHfRows: m.rows,
+          scene3dHfWidth: m.width ?? 1, scene3dHfDepth: m.depth ?? 1, scene3dHfBase: m.base ?? 0,
+          scene3dBoundsRadius: boundsRadius,
+          scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
+          scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
+          scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,
+          scene3dColorR: r, scene3dColorG: g, scene3dColorB: b, scene3dColorA: matOpacity,
+          scene3dTexW: texW,
+          scene3dTexH: texH,
+          scene3dTexData: texData,
+          ...(texKey ? { scene3dTexKey: texKey } : {}),
+        });
+      }
       const gd = geometry.generate(merged);
       return h('View', {
         ...rest,
