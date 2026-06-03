@@ -36,7 +36,7 @@ import {
   type SelCell, type OverrideStore, type OverrideValue, type OverrideSnap,
 } from './tileOverrides';
 import { plog, ptime, useChurn } from './perfLog';
-import { Router, Route, useNavigate } from '@reactjit/router';
+import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
 import { LogView } from './LogView';
 import { Assist3DRoute } from './assist3d';
 
@@ -147,10 +147,10 @@ function Pane(props: { label: string; children?: React.ReactNode }) {
 // the map key changes (open / new).
 const MemoPaintCanvas = memo(PaintCanvas);
 
-// The cart's router: the editor at "/", the in-app churn-log viewer at "/log".
-// `hotKey` persists the active route across hot reloads. The editor stays MOUNTED
-// while the log overlays it (the Route is the shell's last child), so peeking at
-// the log never resets your painted world / undo / camera.
+// The cart's router: the editor at "/", the in-app churn-log viewer at "/log",
+// and the assistant-authored 3D route at "/assist3d". `hotKey` persists the
+// active route across hot reloads. The editor stays MOUNTED below the persistent
+// ProjectBar shell while route surfaces overlay the shell body.
 export default function HmscWorldEditorCart() {
   return (
     <Router hotKey="hmsc-int:route" initialPath="/">
@@ -628,8 +628,10 @@ function EditorShell() {
   // The current map always shows in the switcher even before its file lands on disk.
   const displayMaps = maps.includes(ws.stem) ? maps : [...maps, ws.stem].sort();
 
-  // Router nav — the ProjectBar's churn-log button opens /log; LogView returns to /.
+  // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
+  const route = useRoute();
+  const activeRoute = route.path === '/assist3d' ? 'assist3d' : route.path === '/log' ? 'log' : 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
@@ -642,6 +644,7 @@ function EditorShell() {
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#080d16' }}>
       <ProjectBar
         mapName={ws.stem}
+        activeRoute={activeRoute}
         menuOpen={menuOpen}
         logOpen={logOpen}
         lastSavedAt={ws.lastSavedAt}
@@ -650,6 +653,7 @@ function EditorShell() {
         onToggleMenu={toggleMenu}
         onToggleLog={toggleLog}
         onNew={() => { setMenuOpen(false); newMap(); }}
+        onEditor={() => nav.push('/')}
         onPerf={() => nav.push('/log')}
         onAssist={() => nav.push('/assist3d')}
         onUndo={ws.undo}
@@ -713,6 +717,11 @@ function EditorShell() {
             </Pane>
           }
         />
+
+        {/* Route surfaces live inside the shell body, so ProjectBar remains the
+            one navigation shell and the editor stays mounted underneath. */}
+        <Route path="/log">{() => <LogView />}</Route>
+        <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
       </Box>
 
       {/* The maps menu lives here — the shell root's LAST child — so it paints on
@@ -733,14 +742,6 @@ function EditorShell() {
         <EventLog events={events} now={Date.now()} onClose={() => setLogOpen(false)} />
       ) : null}
 
-      {/* /log route — the in-app churn-log viewer. A full-screen overlay (the shell
-          root's last child) so it paints over the editor while the editor stays
-          mounted underneath; "editor" button (onBack) returns to "/". */}
-      <Route path="/log">{() => <LogView onBack={() => nav.push('/')} />}</Route>
-
-      {/* /assist3d route — assistant-authored hot 3D surface (assist3d/). Same
-          overlay rule: the editor stays mounted underneath while you generate. */}
-      <Route path="/assist3d">{() => <Assist3DRoute onBack={() => nav.push('/')} />}</Route>
     </Box>
   );
 }

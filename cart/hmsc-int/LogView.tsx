@@ -60,7 +60,7 @@ function HeaderBtn(props: { icon?: string; label: string; on?: boolean; danger?:
   );
 }
 
-export function LogView(props: { onBack: () => void }) {
+export function LogView() {
   // Re-render on each flush (subscribeLog) so the view tails the log live.
   const [, bump] = useReducer((n: number) => n + 1, 0);
   useEffect(() => subscribeLog(bump), []);
@@ -75,7 +75,6 @@ export function LogView(props: { onBack: () => void }) {
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#080d16', flexDirection: 'column' }}>
       {/* Header */}
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8, backgroundColor: '#0b1320', borderBottomWidth: 1, borderBottomColor: '#1e293b' }}>
-        <HeaderBtn icon="ArrowLeft" label="editor" onPress={props.onBack} />
         <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
           <Icon name="Activity" size={14} color="#7dd3fc" />
           <Text fontSize={11} color="#cbd5e1" style={{ fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1 }}>CHURN LOG</Text>

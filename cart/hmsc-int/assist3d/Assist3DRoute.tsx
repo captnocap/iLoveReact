@@ -73,7 +73,7 @@ function buildTranscript(events: WorkerEvent[], assistantTag: string): Block[] {
   return blocks;
 }
 
-export function Assist3DRoute(props: { onBack: () => void }) {
+export function Assist3DRoute() {
   const { scene, loadErr, reloads, scenePath } = useAssistScene();
 
   // ── selection ── (camera + drag/pick live in the memo'd SceneSurface, so
@@ -153,27 +153,15 @@ export function Assist3DRoute(props: { onBack: () => void }) {
 
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: BG, flexDirection: 'column' }}>
-      {/* header */}
-      <Row style={{ backgroundColor: accentFor('surface'), borderColor: BORDER, borderBottomWidth: 1, paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, gap: 10, alignItems: 'center' }}>
-        <Pressable onPress={props.onBack} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 8, paddingRight: 9, paddingTop: 4, paddingBottom: 4, borderRadius: 6, borderWidth: 1, borderColor: BORDER, backgroundColor: accentFor('controlBg') }}>
-          <Icon name="ArrowLeft" size={13} color={INK} />
-          <Text fontSize={11} color={INK} style={{ fontWeight: 600 }}>editor</Text>
-        </Pressable>
-        <Icon name="Sparkles" size={14} color={ACCENT} />
-        <Text fontSize={13} color={INK} style={{ fontWeight: 'bold', letterSpacing: 0.5 }}>ASSISTANT 3D</Text>
-        <Text fontSize={10} color={FAINT} style={{ fontFamily: 'monospace' }}>prompt → writes scene.json → hot surface → click to inspect → comment back</Text>
-        <Box style={{ flexGrow: 1 }} />
-        <Text fontSize={10} color={loadErr ? accentFor('error') : accentFor('success')} style={{ fontFamily: 'monospace' }}>
-          {loadErr ? `⚠ ${loadErr}` : `● ${scene.meshes.length} meshes · reload #${reloads}`}
-        </Text>
-      </Row>
-
       <Row style={{ flexGrow: 1, minHeight: 0 }}>
         {/* LEFT: chat */}
         <Col style={{ width: 300, height: '100%', backgroundColor: PANEL, borderColor: BORDER, borderRightWidth: 1, minHeight: 0 }}>
           <Row style={{ paddingTop: 7, paddingBottom: 7, paddingLeft: 12, paddingRight: 12, borderColor: BORDER, borderBottomWidth: 1, gap: 8, alignItems: 'baseline' }}>
             <Text fontSize={11} color={INK} style={{ fontWeight: 'bold' }}>assistant</Text>
             <Text fontSize={9} color={phaseColor} style={{ fontFamily: 'monospace' }}>{sa.phase}</Text>
+            <Text fontSize={9} color={loadErr ? accentFor('error') : FAINT} style={{ fontFamily: 'monospace' }}>
+              {loadErr ? `scene error: ${loadErr}` : `reload #${reloads}`}
+            </Text>
             <Box style={{ flexGrow: 1 }} />
             <Text fontSize={9} color={FAINT} style={{ fontFamily: 'monospace' }}>{BACKEND_LABELS[config.backend]}</Text>
           </Row>

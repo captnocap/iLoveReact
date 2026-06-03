@@ -25,6 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
+  activeRoute?: 'editor' | 'assist3d' | 'log';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -33,6 +34,7 @@ interface ProjectBarProps {
   onToggleMenu: () => void;
   onToggleLog: () => void;
   onNew: () => void;
+  onEditor: () => void;
   onUndo: () => void;
   onRedo: () => void;
   // Write the authored world (painted terrain as landforms + placements) to the
@@ -82,11 +84,12 @@ export function ProjectBar(props: ProjectBarProps) {
 
       <Box style={{ flexGrow: 1 }} />
 
-      {/* Assistant 3D surface (the /assist3d route) */}
-      <IconBtn icon="Sparkles" onPress={props.onAssist} title="assistant 3D" />
-
-      {/* Churn-log viewer (the /log route) */}
-      <IconBtn icon="Activity" onPress={props.onPerf} title="churn log" />
+      {/* Route navigation — this is the persistent shell for every hmsc-int route. */}
+      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+        <IconBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
+        <IconBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
+        <IconBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
+      </Box>
 
       {/* Undo / redo */}
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
