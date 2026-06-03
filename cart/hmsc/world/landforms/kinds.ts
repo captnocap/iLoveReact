@@ -271,20 +271,15 @@ export function landformRoadCenterline(lf: Landform): number[] {
 
 // ── heightfield: a freely PAINTED hill (hmsc-int's terrain brush) ──
 // No formula — the shape rides in the landform's `field` grid, so `rise`
-// bilinearly samples it. footprintRadius is the grid's inscribed half-extent.
-//
-// resolution is the RENDER/COLLIDE grid size, decoupled from the paint grid. The
-// brush paints at DOTS_PER_TILE=2 (0.5 m samples), so a 120 m chunk's field is
-// 241×241 — baking that 1:1 made one chunk a ~58k-vertex / 115k-triangle mesh that
-// re-baked (mesh + collider) on every height stroke and dragged the preview down.
-// The visible surface needs nothing like 0.5 m triangles, so we resample the field
-// (bilinear, via `rise`) onto a ~2 m grid, capped so it never upsamples. Mesh and
-// collider share `resolution`, so see-it==walk-it still holds at the coarser grid.
-// 1 tile = 1 m.
+// bilinearly samples it. footprintRadius is the grid's inscribed half-extent, and
+// resolution = the field's own column count, so the render mesh AND collider bake
+// the authored grid 1:1 (no resampling). The field IS the intended resolution: the
+// editor (hmsc-int's HF_RES) already downsamples the fine 0.5 m brush field to the
+// mesh grid it ships, so that's the single resolution knob — re-coarsening here just
+// destroyed authored tiles (distinct strokes collapsed into one blob). Mesh ==
+// collider == field, so see-it==walk-it holds and what you paint per tile shows per
+// tile. 1 tile = 1 m.
 const HEIGHTFIELD_DEFAULT_WALK_DEGREES = 38;
-// Target render/collide vertex spacing for painted terrain (metres). A 120 m chunk
-// resamples 241→61 samples per axis: ~3.7k verts vs ~58k, a ~16× cut.
-const HEIGHTFIELD_RENDER_SPACING_METERS = 2;
 
 function sampleHeightfield(field: LandformField | undefined, localX: number, localZ: number): number {
   if (!field) return 0;
@@ -312,12 +307,7 @@ registerLandformKind({
   rise: (_p, localX, localZ, field) => sampleHeightfield(field, localX, localZ),
   footprintRadius: (_p, field) => (field ? (Math.max(field.cols, field.rows) - 1) * field.cell * 0.5 : 0),
   walkCos: (p) => Math.cos(((p.walkDegrees ?? HEIGHTFIELD_DEFAULT_WALK_DEGREES) * Math.PI) / 180),
-  resolution: (field) => {
-    if (!field) return 2;
-    const spanMeters = (field.cols - 1) * field.cell;
-    const samples = Math.round(spanMeters / HEIGHTFIELD_RENDER_SPACING_METERS) + 1;
-    return Math.max(2, Math.min(field.cols, samples)); // never upsample past the paint grid
-  },
+  resolution: (field) => (field ? field.cols : 2),
   // Painted ground reads as the natural-terrain blend (sand base + grass + rock),
   // tiled like the hills, until per-cell tile drape lands. Soft 'sand' footing.
   surfaceTileKind: () => 'sand',

@@ -91,23 +91,25 @@ const SIZE_STEP = 1, SIZE_MIN = 0, SIZE_MAX = 40;
 // preview's floor captures is heavy, so cap it to ~3 syncs/sec.
 const REGION_SYNC_MS = 320;
 
-// Preview height-mesh resolution (vertices per side). The full field is 241x241;
-// the geometry intern key is the SERIALIZED heights array shipped as a node prop,
-// so a 241^2 field is a ~580KB key + ~350k verts re-shipped on every sculpt — that
-// overwhelms the bridge and the floor mesh vanishes. The fine tile detail rides
-// the TEXTURE; the mesh only needs the height silhouette, so we downsample to a
-// coarse grid (61 over 120m = ~2m spacing): small key, cheap re-ship.
-const HF_RES = 61;
+// Preview height-mesh resolution (vertices per side). The brush field is sampled at
+// DOTS_PER_TILE (0.5 m → 241² for a 120-tile chunk), far finer than the mesh needs;
+// baking that 1:1 ships a ~580KB heights key + ~350k verts per sculpt and chokes.
+// But the mesh MUST resolve at least per TILE, or distinct 1-tile strokes collapse
+// into the same mesh cell (3 painted dots and a filled 2×2 rendered identically).
+// So pin it to ONE VERTEX PER TILE: CHUNK_TILES+1 (121 over 120 m = 1 m spacing).
+// That's the authoring grain — what you paint per tile shows per tile — at 1/4 the
+// cost of the full 0.5 m field. The landform renders this field 1:1 (no further
+// downsample; see hmsc/world/landforms/kinds.ts heightfield resolution).
+const HF_RES = CHUNK_TILES + 1;
 
 // Downsample a chunk's full height field (cols x rows) to an HF_RES x HF_RES grid.
 // MAX-MAGNITUDE POOLING, not point-sampling: each coarse sample takes the most
-// extreme source height (largest |z|) in its footprint, keeping the sign. The full
-// field is 0.5m-spaced and HF_RES is ~2m-spaced (sx≈4), so nearest-sampling skipped
-// 3 of every 4 source samples — a thin painted ridge/pit (a 1-tile brush is only a
-// few samples wide) fell between the kept points and vanished from the mesh while
-// the 2D field still showed it. Max-pooling guarantees a painted feature survives at
-// its full height, just snapped to the mesh grid. Window half-extent = ceil(step/2)
-// so footprints tile the source with no gaps.
+// extreme source height (largest |z|) in its footprint, keeping the sign. The field
+// is 0.5m-spaced and the mesh is 1m (sx≈2), so nearest-sampling dropped every other
+// source sample — a thin painted ridge/pit could fall between the kept points and
+// vanish from the mesh while the 2D field still showed it. Max-pooling guarantees a
+// painted feature survives at its full height, snapped to the mesh grid. Window
+// half-extent = ceil(step/2) so footprints tile the source with no gaps.
 function downsampleHeights(z: Float32Array, cols: number, rows: number): number[] {
   const out = new Array<number>(HF_RES * HF_RES);
   const sx = (cols - 1) / (HF_RES - 1);
