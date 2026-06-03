@@ -41,27 +41,32 @@ export type BodyInstance = {
   part: PartId;
   position: [number, number, number];
   scale: number;
+  /** degrees [rx, ry, rz] — small rz tilts hang the limbs naturally. */
+  rotation?: [number, number, number];
 };
 
-// Standing figure, ground at y=0. Pipes overlap at elbows/knees on purpose —
-// the rounded profile ends read as the joint.
+// Standing figure, ground at y=0, ~2.2 units tall. Parts are radius-1 globes,
+// so a part's half-extents ≈ scale × (profile·scaleX/Y/Z) — sized here so
+// limbs sit CLEAR of the torso (arms out at the sides, legs spread a touch)
+// instead of nesting inside it like a matryoshka. Pipes still kiss at the
+// elbows/knees on purpose — the rounded profile ends read as the joint.
 export const ASSEMBLY: BodyInstance[] = [
-  { part: 'torso', position: [0, 1.22, 0], scale: 0.66 },
-  { part: 'head', position: [0, 1.98, 0], scale: 0.38 },
-  // arms: shoulder pipe + forearm pipe + hand, hanging at the sides
-  { part: 'pipe', position: [-0.42, 1.32, 0], scale: 0.33 },
-  { part: 'pipe', position: [0.42, 1.32, 0], scale: 0.33 },
-  { part: 'pipe', position: [-0.42, 0.78, 0], scale: 0.3 },
-  { part: 'pipe', position: [0.42, 0.78, 0], scale: 0.3 },
-  { part: 'hand', position: [-0.42, 0.34, 0], scale: 0.17 },
-  { part: 'hand', position: [0.42, 0.34, 0], scale: 0.17 },
-  // legs: thigh pipe + shin pipe + foot
-  { part: 'pipe', position: [-0.17, 0.74, 0], scale: 0.32 },
-  { part: 'pipe', position: [0.17, 0.74, 0], scale: 0.32 },
-  { part: 'pipe', position: [-0.17, 0.28, 0], scale: 0.3 },
-  { part: 'pipe', position: [0.17, 0.28, 0], scale: 0.3 },
-  { part: 'foot', position: [-0.17, 0.07, -0.07], scale: 0.18 },
-  { part: 'foot', position: [0.17, 0.07, -0.07], scale: 0.18 },
+  { part: 'torso', position: [0, 1.3, 0], scale: 0.3 },
+  { part: 'head', position: [0, 1.97, 0], scale: 0.21 },
+  // arms: shoulder pipe + forearm pipe + hand, hanging just off the torso
+  { part: 'pipe', position: [-0.46, 1.38, 0], scale: 0.19, rotation: [0, 0, 10] },
+  { part: 'pipe', position: [0.46, 1.38, 0], scale: 0.19, rotation: [0, 0, -10] },
+  { part: 'pipe', position: [-0.54, 0.88, 0], scale: 0.17, rotation: [0, 0, 6] },
+  { part: 'pipe', position: [0.54, 0.88, 0], scale: 0.17, rotation: [0, 0, -6] },
+  { part: 'hand', position: [-0.6, 0.54, 0], scale: 0.1, rotation: [0, 0, 8] },
+  { part: 'hand', position: [0.6, 0.54, 0], scale: 0.1, rotation: [0, 0, -8] },
+  // legs: thigh pipe + shin pipe + foot, spread a bit
+  { part: 'pipe', position: [-0.17, 0.64, 0], scale: 0.2, rotation: [0, 0, 4] },
+  { part: 'pipe', position: [0.17, 0.64, 0], scale: 0.2, rotation: [0, 0, -4] },
+  { part: 'pipe', position: [-0.21, 0.25, 0], scale: 0.18, rotation: [0, 0, 2] },
+  { part: 'pipe', position: [0.21, 0.25, 0], scale: 0.18, rotation: [0, 0, -2] },
+  { part: 'foot', position: [-0.23, 0.07, -0.08], scale: 0.11 },
+  { part: 'foot', position: [0.23, 0.07, -0.08], scale: 0.11 },
 ];
 
 // ── .body documents — a whole character, sqi/hed conventions ────────────────

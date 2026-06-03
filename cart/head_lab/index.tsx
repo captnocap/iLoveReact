@@ -550,6 +550,7 @@ export default function HeadLab() {
                 material="#ffffff"
                 textureKey={partTexKey(inst.part)}
                 position={inst.position}
+                rotation={inst.rotation ?? [0, 0, 0]}
                 scale={inst.scale}
               />
             ))
