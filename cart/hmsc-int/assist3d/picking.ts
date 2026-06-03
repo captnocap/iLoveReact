@@ -2,14 +2,20 @@
 //
 // screenRay reconstructs the exact view basis framework m4lookAt builds (the same
 // math as @reactjit/cameras unprojectGround) and returns the world-space ray.
-// pickMesh intersects that ray against each mesh's bounding sphere, nearest wins.
+// pickMesh intersects that ray against each mesh's axis-aligned bounding box
+// (NOT a sphere): a sphere test fails for the flat ground slab — its bounding
+// sphere is ~14 units while the camera orbits at ~12, so the camera sits INSIDE
+// it and the near hit lands behind the eye, making the ground unclickable. An AABB
+// slab test hits the slab's top face at a proper near t, so the ground (and every
+// wide/thin box) is selectable, and small objects resting on it still win on a
+// direct click because their entry t is nearer.
 //
-// Known limit: bounding-SPHERE picking favours the larger enclosing solid when
-// meshes nest (a thin Torus inside a fat Sphere is occluded). The Objects tree is
-// the deliberate escape hatch for that — select by id, geometry overlap be damned.
+// Rotation is ignored (the AABB is axis-aligned in world space) — an approximation
+// that's plenty for click-rate selection; the Objects tree remains the exact
+// escape hatch for anything geometry overlap makes ambiguous.
 
 import type { Solved, Rect, Vec3 } from '@reactjit/cameras';
-import { boundingRadius, type MeshSpec } from './scene';
+import { type MeshSpec } from './scene';
 
 export function screenRay(sx: number, sy: number, rect: Rect, cam: Solved): { o: Vec3; d: Vec3 } {
   const { pos, target, fov } = cam;
@@ -31,21 +37,49 @@ export function screenRay(sx: number, sy: number, rect: Rect, cam: Solved): { o:
   return { o: pos, d: [dx, dy, dz] };
 }
 
+// World-space axis-aligned half-extents per geometry (before scale). The ground
+// (a wide thin Box) and a Plane both collapse to a flat slab in Y — exactly what
+// makes them selectable from above.
+export function halfExtents(geometry: string, p: Record<string, number>): Vec3 {
+  switch (geometry) {
+    case 'Box': return [(p.width ?? 1) / 2, (p.height ?? 1) / 2, (p.depth ?? 1) / 2];
+    case 'Sphere': { const r = p.radius ?? 0.5; return [r, r, r]; }
+    case 'Cylinder':
+    case 'Cone': { const r = p.radius ?? 0.5; return [r, (p.height ?? 1) / 2, r]; }
+    case 'Torus': { const R = (p.radius ?? 0.5) + (p.tube ?? 0.2); return [R, (p.tube ?? 0.2), R]; }
+    case 'Plane': return [(p.width ?? 1) / 2, 0.02, (p.height ?? 1) / 2];
+    default: return [0.6, 0.6, 0.6];
+  }
+}
+
+// Slab method. Returns the nearest positive hit distance, or -1 for a miss.
+function rayAabb(o: Vec3, d: Vec3, c: Vec3, half: Vec3): number {
+  let tmin = -Infinity, tmax = Infinity;
+  for (let a = 0; a < 3; a++) {
+    const lo = c[a] - half[a], hi = c[a] + half[a];
+    if (Math.abs(d[a]) < 1e-9) {
+      if (o[a] < lo || o[a] > hi) return -1;     // parallel & outside the slab
+    } else {
+      let t1 = (lo - o[a]) / d[a], t2 = (hi - o[a]) / d[a];
+      if (t1 > t2) { const s = t1; t1 = t2; t2 = s; }
+      if (t1 > tmin) tmin = t1;
+      if (t2 < tmax) tmax = t2;
+      if (tmin > tmax) return -1;
+    }
+  }
+  if (tmax < 0) return -1;                        // box entirely behind the eye
+  return tmin > 0 ? tmin : tmax;                  // inside the box → use the exit
+}
+
 export function pickMesh(sx: number, sy: number, rect: Rect, cam: Solved, meshes: MeshSpec[]): number {
   const { o, d } = screenRay(sx, sy, rect, cam);
   let best = -1, bestT = Infinity;
   for (let i = 0; i < meshes.length; i++) {
     const m = meshes[i];
     const sc = m.scale ?? 1;
-    const R = boundingRadius(m.geometry, m.params) * sc;
-    const ox = o[0] - m.position[0], oy = o[1] - m.position[1], oz = o[2] - m.position[2];
-    const b = ox * d[0] + oy * d[1] + oz * d[2];
-    const c = ox * ox + oy * oy + oz * oz - R * R;
-    const disc = b * b - c;
-    if (disc < 0) continue;
-    const root = Math.sqrt(disc);
-    const t0 = -b - root, t1 = -b + root;
-    const t = t0 > 0 ? t0 : (t1 > 0 ? t1 : -1);
+    const he = halfExtents(m.geometry, m.params);
+    const half: Vec3 = [he[0] * sc, he[1] * sc, he[2] * sc];
+    const t = rayAabb(o, d, m.position, half);
     if (t > 0 && t < bestT) { bestT = t; best = i; }
   }
   return best;

@@ -8,16 +8,14 @@
 //
 // Themed through accentFor() so it sits inside the editor's skin.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Row, Col, Text, Pressable, ScrollView, TextInput, Scene3D } from '@reactjit/primitives';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Box, Row, Col, Text, Pressable, ScrollView, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
-import * as Geometry from '@reactjit/geometries';
-import { OrbitCamera, solveCamera, CAMERAS, type Vec3, type Rect } from '@reactjit/cameras';
 import { useAssistant, type WorkerEvent } from '@reactjit/hooks/useAssistant';
 import { accentFor } from '../studio.cls';
-import { buildPreamble, processCwd, round, type MeshSpec } from './scene';
-import { pickMesh } from './picking';
+import { buildPreamble, processCwd, round } from './scene';
 import { useAssistScene } from './useAssistScene';
+import { SceneSurface } from './SceneSurface';
 
 const MODEL = 'claude-opus-4-7';
 
@@ -40,41 +38,13 @@ export function Assist3DRoute(props: { onBack: () => void }) {
   const cwd = useMemo(processCwd, []);
   const { scene, loadErr, reloads, scenePath } = useAssistScene();
 
-  // ── camera (orbit; drag to turn, tap to pick) ──
-  const [yaw, setYaw] = useState(38);
-  const [pitch, setPitch] = useState(28);
-  const [dist, setDist] = useState(12);
-  const orbitParams = useMemo(() => ({ target: [0, 1, 0] as Vec3, yaw, pitch, dist, zoom: 1, fov: 52 }), [yaw, pitch, dist]);
-  const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 700 });
-  const dragRef = useRef<{ x: number; y: number; dist: number } | null>(null);
-
-  // ── selection ──
+  // ── selection ── (camera + drag/pick live in the memo'd SceneSurface, so
+  // orbiting never re-renders this route's streaming chat log)
   const [selected, setSelected] = useState<number | null>(null);
   const selMesh = selected != null ? scene.meshes[selected] : null;
   useEffect(() => { setSelected((cur) => (cur != null && cur < scene.meshes.length ? cur : null)); }, [scene]);
-
-  const onDown = (e: any) => { dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0), dist: 0 }; };
-  const onMove = (e: any) => {
-    const d = dragRef.current; if (!d) return;
-    const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
-    const dx = nx - d.x, dy = ny - d.y;
-    d.dist += Math.abs(dx) + Math.abs(dy); d.x = nx; d.y = ny;
-    setYaw((v) => v + dx * 0.4);
-    setPitch((v) => Math.max(6, Math.min(85, v - dy * 0.3)));
-  };
-  const onUp = (e: any) => {
-    const d = dragRef.current; dragRef.current = null;
-    if (!d || d.dist >= 6) return;                       // a drag, not a tap
-    const r = rectRef.current;
-    const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-    const solved = solveCamera(CAMERAS.Orbit, orbitParams);
-    const hit = pickMesh(sx, sy, r, solved, scene.meshes);
-    setSelected(hit >= 0 ? hit : null);
-  };
-  const onWheel = (e: any) => {
-    const dy = Number(e?.deltaY ?? e?.dy ?? 0);
-    setDist((v) => Math.max(3, Math.min(40, v + (dy > 0 ? 1 : -1) * 1.1)));
-  };
+  // stable identity so SceneSurface's memo holds while the chat streams
+  const onPick = useCallback((i: number | null) => setSelected(i), []);
 
   // ── assistant ──
   const assistant = useAssistant({ backend: 'claude_code', cwd, model: MODEL, persistAcrossUnmount: true });
@@ -123,19 +93,6 @@ export function Assist3DRoute(props: { onBack: () => void }) {
   const phaseColor = assistant.error ? accentFor('error')
     : assistant.phase === 'streaming' ? accentFor('warning')
     : assistant.phase === 'idle' ? accentFor('success') : accentFor('textFaint');
-
-  // base scene meshes, memoized on `scene` so orbiting never re-ships vertices
-  const sceneMeshes = useMemo(() => scene.meshes.map((m, i) => (
-    <Scene3D.Mesh
-      key={m.id + '#' + i}
-      geometry={Geometry.GEOMETRIES[m.geometry]}
-      params={m.params}
-      material={m.material}
-      position={m.position}
-      rotation={m.rotation ?? [0, 0, 0]}
-      scale={m.scale ?? 1}
-    />
-  )), [scene]);
 
   const BG = accentFor('bg'), PANEL = accentFor('bgAlt'), BORDER = accentFor('border');
   const INK = accentFor('text'), DIM = accentFor('textDim'), FAINT = accentFor('textFaint');
@@ -201,33 +158,9 @@ export function Assist3DRoute(props: { onBack: () => void }) {
           </Col>
         </Col>
 
-        {/* CENTER: hot 3D surface */}
-        <Pressable
-          onLayout={(lr: any) => { rectRef.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
-          onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onWheel={onWheel}
-          style={{ flexGrow: 1, position: 'relative', overflow: 'hidden' }}
-        >
-          <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={scene.background} showGrid={true} showAxes={false}>
-            <OrbitCamera {...orbitParams} />
-            <Scene3D.AmbientLight color="#5b6488" intensity={0.7} />
-            <Scene3D.DirectionalLight direction={[0.5, 0.9, 0.35]} color="#ffd9a8" intensity={0.9} />
-            <Scene3D.PointLight position={[-7, 6, -4]} color="#39d6ff" intensity={0.3} />
-            {sceneMeshes}
-            {selMesh ? (
-              <Scene3D.Mesh
-                geometry={Geometry.GEOMETRIES[selMesh.geometry]}
-                params={selMesh.params}
-                material={{ color: ACCENT, opacity: 0.28 }}
-                position={selMesh.position}
-                rotation={selMesh.rotation ?? [0, 0, 0]}
-                scale={(selMesh.scale ?? 1) * 1.12}
-              />
-            ) : null}
-          </Scene3D>
-          <Box style={{ position: 'absolute', left: 12, bottom: 10 }}>
-            <Text fontSize={10} color={FAINT} style={{ fontFamily: 'monospace' }}>drag orbit · wheel zoom · click a mesh to inspect</Text>
-          </Box>
-        </Pressable>
+        {/* CENTER: hot 3D surface — own memo'd component (camera + drag/pick
+            live inside it, so orbiting never re-renders the chat log) */}
+        <SceneSurface scene={scene} selected={selected} onPick={onPick} />
 
         {/* RIGHT: object tree + inspector + comment */}
         <Col style={{ width: 280, backgroundColor: PANEL, borderColor: BORDER, borderLeftWidth: 1, minHeight: 0 }}>

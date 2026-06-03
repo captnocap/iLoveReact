@@ -6,6 +6,7 @@
 
 export { Assist3DRoute } from './Assist3DRoute';
 export { AssistMeshViewer } from './AssistMeshViewer';
+export { SceneSurface } from './SceneSurface';
 export { useAssistScene, type AssistSceneState } from './useAssistScene';
 export {
   type MeshSpec, type SceneSpec, EMPTY_SCENE, ALLOWED_GEOMETRY,

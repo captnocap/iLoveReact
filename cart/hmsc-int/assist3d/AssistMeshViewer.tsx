@@ -6,7 +6,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { Pressable, Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { OrbitCamera, type Vec3 } from '@reactjit/cameras';
+import { solveCamera, CAMERAS, type Vec3 } from '@reactjit/cameras';
 import { boundingRadius, type MeshSpec } from './scene';
 
 export function AssistMeshViewer(props: { mesh: MeshSpec; background?: string }) {
@@ -20,8 +20,10 @@ export function AssistMeshViewer(props: { mesh: MeshSpec; background?: string })
   const dist = Math.max(2.5, R * 3.2);
   const target = mesh.position as Vec3;
 
-  const orbit = useMemo(
-    () => ({ target, yaw, pitch, dist, zoom: 1, fov: 48 }),
+  // solve to a plain {pos,target,fov} and feed <Scene3D.Camera> directly (no rig
+  // wrapper element re-created per drag) — same no-lag pattern as IsoPreview.
+  const solved = useMemo(
+    () => solveCamera(CAMERAS.Orbit, { target, yaw, pitch, dist, zoom: 1, fov: 48 }),
     [target[0], target[1], target[2], yaw, pitch, dist],
   );
 
@@ -37,8 +39,8 @@ export function AssistMeshViewer(props: { mesh: MeshSpec; background?: string })
 
   return (
     <Pressable onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} style={{ width: '100%', height: '100%' }}>
-      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0a111d'} showGrid={true} showAxes={false}>
-        <OrbitCamera {...orbit} />
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0a111d'} showGrid={false} showAxes={false}>
+        <Scene3D.Camera position={solved.pos} target={solved.target} fov={solved.fov} />
         <Scene3D.AmbientLight color="#5b6488" intensity={0.75} />
         <Scene3D.DirectionalLight direction={[0.5, 0.9, 0.35]} color="#ffd9a8" intensity={0.9} />
         <Scene3D.PointLight position={[-6, 6, -4]} color="#39d6ff" intensity={0.3} />
