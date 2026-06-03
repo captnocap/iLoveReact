@@ -27,9 +27,10 @@ export const PART_PRESETS: Record<PartId, PartPreset> = {
   head: { label: 'head', scaleY: 1.2 },
   // taller and wider than the egg: shoulders → chest → waist → hips
   torso: { label: 'torso', scaleY: 1.5, scaleZ: 0.62, profile: [0.62, 1.0, 0.94, 0.88, 0.6] },
-  // the limb pipe: a long segment, slightly waisted, rounded ends so two of
-  // them visually connect at an elbow/knee without a seam gap
-  pipe: { label: 'pipe', scaleY: 2.2, profile: [0.45, 0.85, 0.8, 0.85, 0.45] },
+  // the limb pipe: a long SLIM segment (narrow in x/z, full length in y —
+  // arms and legs are not the michelin man), slightly waisted, rounded ends
+  // so two of them visually connect at an elbow/knee without a seam gap
+  pipe: { label: 'pipe', scaleY: 2.2, scaleX: 0.42, scaleZ: 0.42, profile: [0.45, 0.85, 0.8, 0.85, 0.45] },
   // wider than tall, flattened front-to-back
   hand: { label: 'hand', scaleY: 1.0, scaleZ: 0.45, profile: [0.55, 1.0, 0.85] },
   // like the hand but squat and stretched forward (toes at -Z, the facing
@@ -52,21 +53,22 @@ export type BodyInstance = {
 // elbows/knees on purpose — the rounded profile ends read as the joint.
 export const ASSEMBLY: BodyInstance[] = [
   { part: 'torso', position: [0, 1.3, 0], scale: 0.3 },
-  { part: 'head', position: [0, 1.97, 0], scale: 0.21 },
-  // arms: shoulder pipe + forearm pipe + hand, hanging just off the torso
-  { part: 'pipe', position: [-0.46, 1.38, 0], scale: 0.19, rotation: [0, 0, 10] },
-  { part: 'pipe', position: [0.46, 1.38, 0], scale: 0.19, rotation: [0, 0, -10] },
-  { part: 'pipe', position: [-0.54, 0.88, 0], scale: 0.17, rotation: [0, 0, 6] },
-  { part: 'pipe', position: [0.54, 0.88, 0], scale: 0.17, rotation: [0, 0, -6] },
-  { part: 'hand', position: [-0.6, 0.54, 0], scale: 0.1, rotation: [0, 0, 8] },
-  { part: 'hand', position: [0.6, 0.54, 0], scale: 0.1, rotation: [0, 0, -8] },
-  // legs: thigh pipe + shin pipe + foot, spread a bit
-  { part: 'pipe', position: [-0.17, 0.64, 0], scale: 0.2, rotation: [0, 0, 4] },
-  { part: 'pipe', position: [0.17, 0.64, 0], scale: 0.2, rotation: [0, 0, -4] },
-  { part: 'pipe', position: [-0.21, 0.25, 0], scale: 0.18, rotation: [0, 0, 2] },
-  { part: 'pipe', position: [0.21, 0.25, 0], scale: 0.18, rotation: [0, 0, -2] },
-  { part: 'foot', position: [-0.23, 0.07, -0.08], scale: 0.11 },
-  { part: 'foot', position: [0.23, 0.07, -0.08], scale: 0.11 },
+  { part: 'head', position: [0, 1.8, 0], scale: 0.21 },
+  // arms: slim pipes chained shoulder → elbow → hand, hanging close to the
+  // torso with a gentle outward drift toward the hands
+  { part: 'pipe', position: [-0.4, 1.36, 0], scale: 0.19, rotation: [0, 0, -5] },
+  { part: 'pipe', position: [0.4, 1.36, 0], scale: 0.19, rotation: [0, 0, 5] },
+  { part: 'pipe', position: [-0.45, 0.88, 0], scale: 0.17, rotation: [0, 0, -8] },
+  { part: 'pipe', position: [0.45, 0.88, 0], scale: 0.17, rotation: [0, 0, 8] },
+  { part: 'hand', position: [-0.5, 0.52, 0], scale: 0.13 },
+  { part: 'hand', position: [0.5, 0.52, 0], scale: 0.13 },
+  // legs: thigh + shin pipes with a slight stance, feet pointing forward
+  { part: 'pipe', position: [-0.15, 0.65, 0], scale: 0.2, rotation: [0, 0, -3] },
+  { part: 'pipe', position: [0.15, 0.65, 0], scale: 0.2, rotation: [0, 0, 3] },
+  { part: 'pipe', position: [-0.19, 0.27, 0], scale: 0.18 },
+  { part: 'pipe', position: [0.19, 0.27, 0], scale: 0.18 },
+  { part: 'foot', position: [-0.2, 0.07, -0.1], scale: 0.14 },
+  { part: 'foot', position: [0.2, 0.07, -0.1], scale: 0.14 },
 ];
 
 // ── .body documents — a whole character, sqi/hed conventions ────────────────
