@@ -101,6 +101,26 @@ export function buildToolPreamble(): string {
   ].join('\n');
 }
 
+// Instruction preamble for local GGUFs. The minimal rjit-llm-worker is built
+// WITHOUT --with-tools, so a local model can't emit a structured tool call — it
+// only streams text. So we ask for the scene as a fenced ```json block and the
+// cart extracts it (useSceneAssistant's text path). Reasoning models may think
+// first; the extractor ignores the thinking and reads the JSON.
+export function buildJsonPreamble(): string {
+  return [
+    'You drive a live, hot-reloaded 3D viewer. When I ask for a scene or an edit,',
+    'output the FULL scene (every mesh, not a diff) as ONE fenced ```json code block.',
+    'The scene becomes exactly what that block contains.',
+    '',
+    SCENE_SCHEMA_TEXT,
+    '',
+    SCENE_RULES,
+    '',
+    'Your final answer MUST be a single ```json … ``` block and nothing after it.',
+    'Do not describe the scene in prose — just emit the JSON block.',
+  ].join('\n');
+}
+
 // Build the useAssistant opts for a config. cwd is needed for claude_code's
 // subprocess; scenePath for claude's file-write preamble (sent per-turn, not here).
 export function buildAssistantOpts(config: BackendConfig, cwd: string): UseAssistantOpts {
@@ -120,11 +140,12 @@ export function buildAssistantOpts(config: BackendConfig, cwd: string): UseAssis
     case 'local_ai':
       // No default `model`: useAssistant's spawn gate is `model || modelPath`, so
       // omitting model means it waits for a real .gguf path before spawning.
+      // No `tools` either — the minimal worker has no tool support; it emits a
+      // ```json block instead (buildJsonPreamble), which the cart extracts.
       return {
         backend: 'local_ai',
         cwd,
         modelPath: config.modelPath || '',
-        tools: SET_SCENE_TOOL,
         nCtx: 8192,
         maxTokens: 4096,
         sessionId: 'assist3d',
@@ -141,17 +162,19 @@ export function configReady(c: BackendConfig): boolean {
   return true; // claude_code resolves cwd itself
 }
 
-// The first-turn instruction for a backend: claude gets the file-write preamble
-// (path-targeted), cart-write backends get the tool preamble.
+// The first-turn instruction per backend: claude writes the file, openai_compat
+// calls the set_scene tool, local_ai emits a ```json block.
 export function firstTurnPreamble(config: BackendConfig, scenePath: string): string {
-  return writesOwnFile(config.backend) ? buildPreamble(scenePath) : buildToolPreamble();
+  if (config.backend === 'claude_code') return buildPreamble(scenePath);
+  if (config.backend === 'openai_compat') return buildToolPreamble();
+  return buildJsonPreamble();
 }
 
 // Per-turn reminder appended after the first turn.
 export function turnReminder(config: BackendConfig, scenePath: string): string {
-  return writesOwnFile(config.backend)
-    ? `(Overwrite the whole scene file at ${scenePath}.)`
-    : '(Apply this by calling set_scene with the full scene.)';
+  if (config.backend === 'claude_code') return `(Overwrite the whole scene file at ${scenePath}.)`;
+  if (config.backend === 'openai_compat') return '(Apply this by calling set_scene with the full scene.)';
+  return '(Reply with the full updated scene as one ```json block.)';
 }
 
 interface ToolCall { id: string; name: string; input_json: string }

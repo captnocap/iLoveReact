@@ -24,20 +24,50 @@ import { useSceneAssistant } from './useSceneAssistant';
 import { BackendBar } from './BackendBar';
 import { BACKEND_LABELS, DEFAULT_CONFIG, type Backend, type BackendConfig } from './backends';
 
-// Drop user_message events (tool_result echoes + the preamble — not things you
-// typed; your prompts are tracked locally). A tool_call / file write both mean the
-// same thing here: the scene is being authored.
-function eventLine(ev: WorkerEvent): { tag: string; text: string; color: string } | null {
-  if (ev.kind === 'assistant_message') {
-    const t = ev.text ?? '';
-    // cart-write models sometimes echo the raw JSON — collapse it
-    if (t.indexOf('"meshes"') >= 0) return { tag: 'claude', text: '(scene update)', color: accentFor('info') };
-    return { tag: 'claude', text: t, color: accentFor('info') };
+interface Block { tag: string; text: string; color: string; ts: number; dim?: boolean }
+
+// Clean a message for display: strip harmony / chat-template control tokens
+// (Qwen3 streams <|channel|>, <|message|>…) and collapse an emitted scene JSON
+// to a marker so the transcript shows the resolution, not a wall of JSON.
+function cleanForDisplay(raw: string): string {
+  let t = raw.replace(/<\|[^|]*\|>/g, ' ');
+  if (t.indexOf('"meshes"') >= 0) {
+    t = t.replace(/```(?:json)?[\s\S]*?```/gi, ' ✓ scene written ');
+    if (t.indexOf('"meshes"') >= 0) {
+      const open = t.indexOf('{'), close = t.lastIndexOf('}');
+      if (open >= 0 && close > open) t = t.slice(0, open) + ' ✓ scene written ' + t.slice(close + 1);
+    }
   }
-  if (ev.kind === 'tool_call') return { tag: 'tool', text: 'writing scene…', color: accentFor('warning') };
-  if (ev.kind === 'error_') return { tag: 'error', text: ev.text || ev.status_text || 'error', color: accentFor('error') };
-  if (ev.kind === 'completion') return { tag: 'done', text: '— turn complete —', color: accentFor('textFaint') };
-  return null;
+  return t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Coalesce the worker's event stream into transcript blocks. Local backends stream
+// one assistant_message per TOKEN, so consecutive assistant/reasoning events are
+// merged into a single growing bubble (the fix for "every word on its own line").
+// user_message events are dropped (tool_result echoes + the preamble); your prompts
+// come from the local list instead.
+function buildTranscript(events: WorkerEvent[], assistantTag: string): Block[] {
+  const blocks: Block[] = [];
+  let cur: Block | null = null;
+  const flush = () => { if (cur) { blocks.push(cur); cur = null; } };
+  for (const ev of events) {
+    const ts = ev.created_at_ms || 0;
+    if (ev.kind === 'assistant_message') {
+      if (cur && cur.tag === assistantTag) cur.text += ev.text ?? '';
+      else { flush(); cur = { tag: assistantTag, text: ev.text ?? '', color: accentFor('info'), ts }; }
+    } else if (ev.kind === 'reasoning') {
+      if (cur && cur.tag === 'thinking') cur.text += ev.text ?? '';
+      else { flush(); cur = { tag: 'thinking', text: ev.text ?? '', color: accentFor('textFaint'), ts, dim: true }; }
+    } else if (ev.kind === 'tool_call') {
+      flush(); blocks.push({ tag: 'tool', text: 'writing scene…', color: accentFor('warning'), ts });
+    } else if (ev.kind === 'error_') {
+      flush(); blocks.push({ tag: 'error', text: ev.text || ev.status_text || 'error', color: accentFor('error'), ts });
+    } else if (ev.kind === 'completion') {
+      flush(); blocks.push({ tag: 'done', text: '— turn complete —', color: accentFor('textFaint'), ts, dim: true });
+    }
+  }
+  flush();
+  return blocks;
 }
 
 export function Assist3DRoute(props: { onBack: () => void }) {
@@ -87,16 +117,20 @@ export function Assist3DRoute(props: { onBack: () => void }) {
     if (sendToAssistant(modelText, `↳ ${m.id}: ${c}`)) setComment('');
   };
 
+  // The label for assistant bubbles — the actual model, not always "claude".
+  const assistantTag = useMemo(() => {
+    if (config.backend === 'claude_code') return 'claude';
+    if (config.backend === 'openai_compat') return (config.model || 'model').toLowerCase();
+    const base = (config.modelPath || '').split('/').pop() || 'local';
+    return base.replace(/\.gguf$/i, '').toLowerCase().slice(0, 22);
+  }, [config]);
+
   const transcript = useMemo(() => {
-    const lines: { tag: string; text: string; color: string; ts: number }[] = [];
-    for (const ev of sa.events) {
-      const l = eventLine(ev);
-      if (l) lines.push({ ...l, ts: ev.created_at_ms || 0 });
-    }
-    for (const p of myPrompts) lines.push({ tag: 'you', text: p.text, color: accentFor('text'), ts: p.ts });
-    lines.sort((a, b) => a.ts - b.ts);
-    return lines;
-  }, [sa.events, myPrompts]);
+    const blocks = buildTranscript(sa.events, assistantTag);
+    for (const p of myPrompts) blocks.push({ tag: 'you', text: p.text, color: accentFor('text'), ts: p.ts });
+    blocks.sort((a, b) => a.ts - b.ts);
+    return blocks;
+  }, [sa.events, myPrompts, assistantTag]);
   const transcriptRef = useRef<any>(null);
   useEffect(() => { try { transcriptRef.current?.scrollToEnd?.(); } catch { /* ignore */ } }, [transcript.length]);
 
@@ -150,12 +184,16 @@ export function Assist3DRoute(props: { onBack: () => void }) {
               </Col>
             ) : (
               <Col style={{ gap: 8 }}>
-                {transcript.map((l, i) => (
-                  <Col key={i} style={{ gap: 2 }}>
-                    <Text fontSize={8} color={l.color} style={{ fontFamily: 'monospace', letterSpacing: 0.5 }}>{l.tag.toUpperCase()}</Text>
-                    <Text fontSize={11} color={l.tag === 'you' ? INK : DIM}>{l.text}</Text>
-                  </Col>
-                ))}
+                {transcript.map((l, i) => {
+                  const body = l.tag === 'you' ? l.text : cleanForDisplay(l.text);
+                  if (!body) return null;
+                  return (
+                    <Col key={i} style={{ gap: 2 }}>
+                      <Text fontSize={8} color={l.color} style={{ fontFamily: 'monospace', letterSpacing: 0.5 }}>{l.tag.toUpperCase()}</Text>
+                      <Text fontSize={11} color={l.tag === 'you' ? INK : l.dim ? FAINT : DIM}>{body}</Text>
+                    </Col>
+                  );
+                })}
               </Col>
             )}
           </ScrollView>

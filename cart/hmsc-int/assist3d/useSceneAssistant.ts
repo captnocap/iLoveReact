@@ -33,19 +33,32 @@ export interface SceneAssistant {
 // Pull a scene out of a free-text assistant message: a ```json fenced block, or the
 // first balanced {...} that mentions "meshes". The fallback for models that print
 // the scene instead of calling the tool.
-function extractSceneFromText(text: string): SceneSpec | null {
-  if (!text || text.indexOf('"meshes"') < 0) return null;
-  const fenced = /```(?:json)?\s*([\s\S]*?)```/i.exec(text);
+// Strip harmony / chat-template control tokens (Qwen3 etc. emit <|channel|>,
+// <|message|>, <|im_start|>…) so they don't break JSON extraction.
+function stripMarkup(text: string): string {
+  return text.replace(/<\|[^|]*\|>/g, ' ');
+}
+
+function extractSceneFromText(raw: string): SceneSpec | null {
+  const text = stripMarkup(raw);
+  if (text.indexOf('"meshes"') < 0) return null;
   const candidates: string[] = [];
-  if (fenced) candidates.push(fenced[1]);
+  // every fenced block (a reasoning model may emit several; the scene is usually
+  // the last complete one)
+  const fence = /```(?:json)?\s*([\s\S]*?)```/gi;
+  let m: RegExpExecArray | null;
+  while ((m = fence.exec(text))) candidates.push(m[1]);
+  // the widest balanced-looking {...} as a fallback for un-fenced output
   const open = text.indexOf('{');
   const close = text.lastIndexOf('}');
   if (open >= 0 && close > open) candidates.push(text.slice(open, close + 1));
+  // prefer the LAST valid candidate (the model's final answer, not a thinking draft)
+  let found: SceneSpec | null = null;
   for (const c of candidates) {
     const s = parseScene(c);
-    if (s && s.meshes.length > 0) return s;
+    if (s && s.meshes.length > 0) found = s;
   }
-  return null;
+  return found;
 }
 
 export function useSceneAssistant(params: { config: BackendConfig; scenePath: string }): SceneAssistant {
@@ -66,15 +79,27 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
   const lastSigRef = useRef(sig);
   if (lastSigRef.current !== sig) { lastSigRef.current = sig; sentPreambleRef.current = false; }
 
+  // Last scene we wrote (serialized), so streaming deltas that re-extract the same
+  // scene don't rewrite the file every token.
+  const lastWrittenRef = useRef<string>('');
   const writeScene = (s: SceneSpec): boolean => {
-    const ok = fs.writeFile(scenePath, JSON.stringify(s, null, 2) + '\n');
+    const json = JSON.stringify(s, null, 2);
+    if (json === lastWrittenRef.current) return true; // no change — skip the write
+    const ok = fs.writeFile(scenePath, json + '\n');
+    if (ok) lastWrittenRef.current = json;
     setNote(ok ? `wrote ${s.meshes.length} meshes` : 'write failed');
     return ok;
   };
 
-  // Cart-write dispatch: turn the model's set_scene tool calls (and any fenced-JSON
-  // fallback) into scene.json writes. No-op for claude_code, which writes its own.
+  // Cart-write dispatch. Two paths:
+  //   • openai_compat — a structured set_scene tool_call; write its args, respond.
+  //   • local_ai      — text only (no tool support in the minimal worker). Tokens
+  //     stream as many tiny assistant_message events, so we ACCUMULATE them across
+  //     the turn and extract the ```json scene from the running buffer. dedupe via
+  //     lastWrittenRef so partial buffers that re-parse to the same scene write once.
+  // No-op for claude_code, which writes its own file.
   const cursorRef = useRef(0);
+  const accumRef = useRef('');
   useEffect(() => {
     if (writesOwnFile(config.backend)) { cursorRef.current = assistant.events.length; return; }
     const events = assistant.events;
@@ -95,8 +120,16 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
         const ok = writeScene(scene);
         assistant.respond(call.id, ok ? { ok: true, meshes: scene.meshes.length } : { ok: false, error: 'cart failed to write the scene file' });
       } else if (ev.kind === 'assistant_message' && ev.text) {
-        const scene = extractSceneFromText(ev.text);
+        accumRef.current += ev.text;
+        const scene = extractSceneFromText(accumRef.current);
         if (scene) writeScene(scene);
+      } else if (ev.kind === 'user_message' || ev.kind === 'completion') {
+        // turn boundary — one last extraction attempt, then reset the buffer
+        if (ev.kind === 'completion') {
+          const scene = extractSceneFromText(accumRef.current);
+          if (scene) writeScene(scene);
+        }
+        accumRef.current = '';
       }
     }
     cursorRef.current = events.length;
