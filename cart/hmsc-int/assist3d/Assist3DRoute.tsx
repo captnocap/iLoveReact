@@ -162,7 +162,7 @@ export function Assist3DRoute(props: { onBack: () => void }) {
 
       <Row style={{ flexGrow: 1, minHeight: 0 }}>
         {/* LEFT: chat */}
-        <Col style={{ width: 300, backgroundColor: PANEL, borderColor: BORDER, borderRightWidth: 1, minHeight: 0 }}>
+        <Col style={{ width: 300, height: '100%', backgroundColor: PANEL, borderColor: BORDER, borderRightWidth: 1, minHeight: 0 }}>
           <Row style={{ paddingTop: 7, paddingBottom: 7, paddingLeft: 12, paddingRight: 12, borderColor: BORDER, borderBottomWidth: 1, gap: 8, alignItems: 'baseline' }}>
             <Text fontSize={11} color={INK} style={{ fontWeight: 'bold' }}>assistant</Text>
             <Text fontSize={9} color={phaseColor} style={{ fontFamily: 'monospace' }}>{sa.phase}</Text>
@@ -172,7 +172,7 @@ export function Assist3DRoute(props: { onBack: () => void }) {
 
           <BackendBar config={config} onPickBackend={pickBackend} onPatch={patchConfig} />
 
-          <ScrollView ref={transcriptRef} showScrollbar style={{ flexGrow: 1, minHeight: 0 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12 }}>
+          <ScrollView ref={transcriptRef} showScrollbar style={{ flexGrow: 1, height: '100%', minHeight: 0 }} contentContainerStyle={{ paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12 }}>
             {transcript.length === 0 ? (
               <Col style={{ gap: 6 }}>
                 <Text fontSize={11} color={DIM}>Ask for a 3D scene. Examples:</Text>
@@ -215,7 +215,7 @@ export function Assist3DRoute(props: { onBack: () => void }) {
         <SceneSurface scene={scene} selected={selected} onPick={onPick} />
 
         {/* RIGHT: object tree + inspector + comment */}
-        <Col style={{ width: 280, backgroundColor: PANEL, borderColor: BORDER, borderLeftWidth: 1, minHeight: 0 }}>
+        <Col style={{ width: 280, height: '100%', backgroundColor: PANEL, borderColor: BORDER, borderLeftWidth: 1, minHeight: 0 }}>
           <Row style={{ paddingTop: 7, paddingBottom: 7, paddingLeft: 12, paddingRight: 12, borderColor: BORDER, borderBottomWidth: 1, alignItems: 'baseline', gap: 8 }}>
             <Text fontSize={11} color={INK} style={{ fontWeight: 'bold' }}>objects</Text>
             <Box style={{ flexGrow: 1 }} />
@@ -243,7 +243,7 @@ export function Assist3DRoute(props: { onBack: () => void }) {
             <Text fontSize={9} color={FAINT} style={{ fontFamily: 'monospace' }}>{selMesh ? `#${selected}` : '—'}</Text>
           </Row>
 
-          <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }} contentContainerStyle={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 12, paddingRight: 12 }}>
+          <ScrollView showScrollbar style={{ flexGrow: 1, height: '100%', minHeight: 0 }} contentContainerStyle={{ paddingTop: 10, paddingBottom: 10, paddingLeft: 12, paddingRight: 12 }}>
             {!selMesh ? (
               <Text fontSize={11} color={DIM}>Click a mesh or pick one from the tree to inspect its geometry, material, and transform.</Text>
             ) : (

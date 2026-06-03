@@ -100,6 +100,10 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
   // No-op for claude_code, which writes its own file.
   const cursorRef = useRef(0);
   const accumRef = useRef('');
+  // Did THIS turn yield a valid scene? Cleared by send(); checked on completion so
+  // a turn that emits no parseable scene (e.g. the model ran past the token limit
+  // mid-JSON) reports a visible error instead of silently leaving the old scene.
+  const foundThisTurnRef = useRef(false);
   useEffect(() => {
     if (writesOwnFile(config.backend)) { cursorRef.current = assistant.events.length; return; }
     const events = assistant.events;
@@ -117,19 +121,20 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
           assistant.respond(call.id, { ok: false, error: 'no valid meshes in set_scene args' });
           continue;
         }
+        foundThisTurnRef.current = true;
         const ok = writeScene(scene);
         assistant.respond(call.id, ok ? { ok: true, meshes: scene.meshes.length } : { ok: false, error: 'cart failed to write the scene file' });
       } else if (ev.kind === 'assistant_message' && ev.text) {
         accumRef.current += ev.text;
         const scene = extractSceneFromText(accumRef.current);
-        if (scene) writeScene(scene);
-      } else if (ev.kind === 'user_message' || ev.kind === 'completion') {
-        // turn boundary — one last extraction attempt, then reset the buffer
-        if (ev.kind === 'completion') {
-          const scene = extractSceneFromText(accumRef.current);
-          if (scene) writeScene(scene);
+        if (scene) { foundThisTurnRef.current = true; writeScene(scene); }
+      } else if (ev.kind === 'completion') {
+        const scene = extractSceneFromText(accumRef.current);
+        if (scene) { foundThisTurnRef.current = true; writeScene(scene); }
+        if (!foundThisTurnRef.current) {
+          setNote('⚠ no scene in the reply — likely cut off mid-JSON. Try a simpler ask or fewer parts.');
         }
-        accumRef.current = '';
+        accumRef.current = '';   // turn done — clear so the next turn starts clean
       }
     }
     cursorRef.current = events.length;
@@ -143,6 +148,11 @@ export function useSceneAssistant(params: { config: BackendConfig; scenePath: st
       : `${firstTurnPreamble(config, scenePath)}\n\nRequest: ${text}`;
     if (!assistant.ask(msg)) return false;
     sentPreambleRef.current = true;
+    // New turn: never carry a prior turn's text (or its already-written scene)
+    // into this one — that's what made "make a dog" silently keep the cat.
+    accumRef.current = '';
+    foundThisTurnRef.current = false;
+    setNote('generating…');
     return true;
   };
 

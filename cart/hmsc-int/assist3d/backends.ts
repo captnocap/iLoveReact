@@ -146,8 +146,11 @@ export function buildAssistantOpts(config: BackendConfig, cwd: string): UseAssis
         backend: 'local_ai',
         cwd,
         modelPath: config.modelPath || '',
-        nCtx: 8192,
-        maxTokens: 4096,
+        // Reasoning models burn a lot of tokens thinking BEFORE the JSON — a
+        // "detailed" ask overran the old 4096 cap mid-scene. Give the buffer room
+        // (and the context to hold the running session) so the JSON completes.
+        nCtx: 16384,
+        maxTokens: 8192,
         sessionId: 'assist3d',
         persistAcrossUnmount: true,
       };
