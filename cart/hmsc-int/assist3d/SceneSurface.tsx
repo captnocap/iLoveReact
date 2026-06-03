@@ -9,8 +9,9 @@
 //      BOTH the render and the pick, so click selection stays exact.
 //
 // The scene meshes are memoized on `scene` identity, so orbiting never re-ships
-// vertices across the bridge. The ground is just mesh #0 (a real, exported,
-// selectable Box) — there's no decorative grid standing in for it (showGrid off).
+// vertices across the bridge. The floor is the viewer's reference grid (showGrid)
+// — NOT a scene mesh: it's stage chrome, so it isn't in the tree, isn't selectable,
+// and never ships on export. The scene contains only the model's real objects.
 
 import { memo, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
@@ -81,7 +82,7 @@ export const SceneSurface = memo(function SceneSurface(props: {
       onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onWheel={onWheel}
       style={{ flexGrow: 1, position: 'relative', overflow: 'hidden' }}
     >
-      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={scene.background} showGrid={false} showAxes={false}>
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={scene.background} showGrid={true} showAxes={false}>
         <Scene3D.Camera position={solved.pos} target={solved.target} fov={solved.fov} />
         <Scene3D.AmbientLight color="#5b6488" intensity={0.7} />
         <Scene3D.DirectionalLight direction={[0.5, 0.9, 0.35]} color="#ffd9a8" intensity={0.9} />
@@ -99,7 +100,7 @@ export const SceneSurface = memo(function SceneSurface(props: {
         ) : null}
       </Scene3D>
       <Box style={{ position: 'absolute', left: 12, bottom: 10 }}>
-        <Text fontSize={10} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>drag orbit · wheel zoom · click any mesh (incl. the ground) to inspect</Text>
+        <Text fontSize={10} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>drag orbit · wheel zoom · click a mesh to inspect · grid is viewer chrome, not exported</Text>
       </Box>
     </Pressable>
   );

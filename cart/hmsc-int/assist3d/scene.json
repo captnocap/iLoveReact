@@ -1,7 +1,6 @@
 {
   "background": "#0a111d",
   "meshes": [
-    { "id": "ground", "geometry": "Box", "params": { "width": 20, "height": 0.2, "depth": 20 }, "material": "#16202f", "position": [0, -0.1, 0] },
     { "id": "trunk", "geometry": "Cylinder", "params": { "radius": 0.18, "height": 2.4 }, "material": "#6b4f2a", "position": [0, 1.2, 0] },
     { "id": "canopy", "geometry": "Cone", "params": { "radius": 1.1, "height": 1.6 }, "material": "#3f8a4a", "position": [0, 2.9, 0] },
     { "id": "sun", "geometry": "Sphere", "params": { "radius": 0.6 }, "material": "#ffce54", "position": [3.4, 2.2, -2.2] }

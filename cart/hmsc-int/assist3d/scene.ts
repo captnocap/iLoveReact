@@ -108,10 +108,13 @@ export function buildPreamble(scenePath: string): string {
     '  Box: {width,height,depth}   Sphere: {radius}   Cylinder/Cone: {radius,height}',
     '  Torus: {radius,tube}        Plane: {width,height}',
     '',
-    'Rules: +Y is up, 1 unit = 1 meter. The first mesh is always a thin Box ground slab.',
-    'Keep objects within a ~20x20 ground area, resting on or above y=0. Use 5-25 meshes so',
-    'the result is recognizable. Give every mesh a unique descriptive id and a tasteful hex',
-    'color. Do NOT print the JSON in chat — just write the file and end with a one-line summary.',
+    'Rules: +Y is up, 1 unit = 1 meter. The meshes ARE the model — author ONLY the',
+    'object(s) the user asked for. Do NOT add a ground, floor, base slab, grass plane,',
+    'or backdrop: the viewer already draws its own reference floor, and anything you add',
+    'would ship with the model on export. The model rests on or above y=0 (its lowest',
+    'point near y=0 so it sits ON the viewer floor). Use 4-25 meshes so the result is',
+    'recognizable. Give every mesh a unique descriptive id and a tasteful hex color.',
+    'Do NOT print the JSON in chat — just write the file and end with a one-line summary.',
   ].join('\n');
 }
 

@@ -3,12 +3,12 @@
 // screenRay reconstructs the exact view basis framework m4lookAt builds (the same
 // math as @reactjit/cameras unprojectGround) and returns the world-space ray.
 // pickMesh intersects that ray against each mesh's axis-aligned bounding box
-// (NOT a sphere): a sphere test fails for the flat ground slab — its bounding
-// sphere is ~14 units while the camera orbits at ~12, so the camera sits INSIDE
-// it and the near hit lands behind the eye, making the ground unclickable. An AABB
-// slab test hits the slab's top face at a proper near t, so the ground (and every
-// wide/thin box) is selectable, and small objects resting on it still win on a
-// direct click because their entry t is nearer.
+// (NOT a sphere): a sphere test fails for wide/thin geometry — a flat slab's
+// bounding sphere can be many units across while the camera orbits closer, so the
+// camera sits INSIDE the sphere and the near hit lands behind the eye, making the
+// piece unclickable. An AABB slab test hits the actual face at a proper near t, so
+// flat pieces are selectable and small objects in front still win on a direct
+// click because their entry t is nearer.
 //
 // Rotation is ignored (the AABB is axis-aligned in world space) — an approximation
 // that's plenty for click-rate selection; the Objects tree remains the exact

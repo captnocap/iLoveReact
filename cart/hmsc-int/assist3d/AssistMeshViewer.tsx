@@ -39,7 +39,7 @@ export function AssistMeshViewer(props: { mesh: MeshSpec; background?: string })
 
   return (
     <Pressable onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} style={{ width: '100%', height: '100%' }}>
-      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0a111d'} showGrid={false} showAxes={false}>
+      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0a111d'} showGrid={true} showAxes={false}>
         <Scene3D.Camera position={solved.pos} target={solved.target} fov={solved.fov} />
         <Scene3D.AmbientLight color="#5b6488" intensity={0.75} />
         <Scene3D.DirectionalLight direction={[0.5, 0.9, 0.35]} color="#ffd9a8" intensity={0.9} />
