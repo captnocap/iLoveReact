@@ -282,8 +282,8 @@ deps/zig-v8/v8-build/
 
 # Test screenshots (local artifacts)
 tests/
-bundle*
-bundle-*/
+/bundle*
+/bundle-*/
 $HOME
 
 

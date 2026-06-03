@@ -1572,6 +1572,12 @@ ${atlasW} ${atlasH}
       `--alias:@reactjit/effects=${opts.rjitHome}/runtime/effects`,
       `--alias:@reactjit/geometries=${opts.rjitHome}/runtime/geometries`,
       `--alias:@reactjit/cameras=${opts.rjitHome}/runtime/cameras`,
+      // Catch-all: every other @reactjit/* subpath resolves under runtime/ —
+      // @reactjit/primitives, /hooks/*, /workspace, /router, /icons/*, etc. esbuild
+      // matches the most-specific alias first, so the explicit entries above still
+      // win (core -> core_stub.ts, runtime -> the index). Mirrors the proven
+      // scripts/cart-bundle.js; without it nothing outside the five above resolves.
+      `--alias:@reactjit=${opts.rjitHome}/runtime`,
       `--alias:@cart-entry=${opts.cartEntry}`,
       `--alias:react=${reactAlias}`,
       `--alias:react-reconciler=${reconcilerAlias}`,
