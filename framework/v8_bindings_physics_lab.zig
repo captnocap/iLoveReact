@@ -159,12 +159,17 @@ var g_hmsc_snapshot: [HMSC_OUTPUT_FLOATS]f32 = undefined;
 // the same way it bakes a Heightfield mesh, registers it once via
 // __hmsc_register_heightfield, and the step samples it every frame. This is what
 // makes hit detection follow a real slope instead of a stack of flat boxes.
-// 64 slots × HMSC_HF_MAX_SAMPLES f32 = ~2 MB of static memory — negligible for a
+// 64 slots × HMSC_HF_MAX_SAMPLES f32 = ~4 MB of static memory — negligible for a
 // desktop binary (one tile texture dwarfs it), and the per-frame step only samples
 // ACTIVE fields, so an empty slot is free. Headroom for many heightfield-floored
 // structures (garages, ramps, overpasses) on top of the terrain landforms.
 const HMSC_MAX_HEIGHTFIELDS: usize = 64;
-const HMSC_HF_MAX_SAMPLES: usize = 8192; // up to a ~90×90 grid (80×80 = 6400 fits)
+// Must fit hmsc-int's tile-resolution painted chunks: one collider sample per tile,
+// 121×121 = 14,641 over a 120-tile chunk (mesh and collider share the field, so
+// see-it==walk-it). The old 8192 cap rejected that whole field — count >
+// HMSC_HF_MAX_SAMPLES returns null and registers NO collider, so a tile-res painted
+// chunk would have rendered but had no collision (walk straight through it).
+const HMSC_HF_MAX_SAMPLES: usize = 16384; // up to a 127×127 grid (121×121 = 14,641 fits)
 
 const HmscHeightfield = struct {
     active: bool = false,
