@@ -28,7 +28,8 @@ import * as Geometry from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';
 import {
   buildHed, parseHed, serializeHed, generateFace, hedDepthGrid,
-  type HedDocument, type HedLayer,
+  animateHed, HED_ANIM_FRAMES,
+  type HedDocument, type HedLayer, type HedAnimation,
 } from './hed';
 
 const BG = '#0b1018';
@@ -166,6 +167,11 @@ export default function HeadLab() {
   const [sculptSeq, setSculptSeq] = useState(0);
   // The loaded/generated .hed face (feature layers); id versions keys/caches.
   const [face, setFace] = useState<{ doc: HedDocument; id: string } | null>(null);
+  // Playing animation + its frame clock (setInterval — the cart host has no
+  // requestAnimationFrame). Phase is frame % loop length, so every key the
+  // animation produces is one of a small cycling set: N cached bakes total.
+  const [anim, setAnim] = useState<HedAnimation | null>(null);
+  const [animFrame, setAnimFrame] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   const paintingRef = useRef(false);
   const canvasRect = useRef({ x: 0, y: 0, width: UNWRAP_W, height: UNWRAP_H });
@@ -174,6 +180,22 @@ export default function HeadLab() {
   // GPU paint surface. Strokes call straight into the host — zero re-renders.
   const depth = usePaintable({ id: 'headlab-depth', w: PAINT_W, h: PAINT_H });
   useEffect(() => { depth.paint.clear(NEUTRAL); }, []);
+
+  // Animation clock — only ticks while something is playing on a face.
+  useEffect(() => {
+    if (!anim || !face) return;
+    const iv = setInterval(() => setAnimFrame((f) => f + 1), 150);
+    return () => clearInterval(iv);
+  }, [anim, !!face]);
+
+  // The doc the canvas/bake/mesh actually show: the face with the playing
+  // animation's frame applied (a pure transform — base doc stays untouched,
+  // so save/sculpt always work on the still face).
+  const phase = anim ? animFrame % HED_ANIM_FRAMES[anim] : 0;
+  const shownDoc = useMemo(
+    () => (face ? (anim ? animateHed(face.doc, anim, phase) : face.doc) : null),
+    [face, anim, phase],
+  );
 
   // Apply a .hed document: knobs from the doc, hand-sculpt residue into the
   // paint texture + grid, feature layers kept (with sculpt zeroed so it can't
@@ -278,7 +300,8 @@ export default function HeadLab() {
 
   // Final displacement = hand sculpt (paint texture) + the face's feature
   // relief, clamped. Both live in the same grid space, so this is one add.
-  const faceDepth = useMemo(() => (face ? hedDepthGrid(face.doc) : null), [face]);
+  // Reads the SHOWN doc, so a playing animation moves the geometry too.
+  const faceDepth = useMemo(() => (shownDoc ? hedDepthGrid(shownDoc) : null), [shownDoc]);
   const displace = useMemo(
     () => (faceDepth ? grid.map((v, i) => Math.max(-1, Math.min(1, v + faceDepth[i]))) : grid),
     [grid, faceDepth],
@@ -298,7 +321,7 @@ export default function HeadLab() {
   // Content-addressed texture key: the bake is a pure function of these values,
   // so a key can never serve a stale image (the carve_lab hot-reload lesson),
   // and stepping a knob back reuses the earlier bake.
-  const texKey = `head.lab.${photo?.stamp ?? 'bare'}.${face?.id ?? 'noface'}.${skin}.${photoScale.toFixed(2)}.${photoY}`;
+  const texKey = `head.lab.${photo?.stamp ?? 'bare'}.${face?.id ?? 'noface'}.${anim ?? 'still'}.${phase}.${skin}.${photoScale.toFixed(2)}.${photoY}`;
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
     [],
@@ -341,7 +364,7 @@ export default function HeadLab() {
           onMouseUp={onPaintUp}
           style={{ width: UNWRAP_W, height: UNWRAP_H, borderWidth: 1, borderColor: '#22324a', position: 'relative' }}
         >
-          <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={face?.doc.layers ?? null} />
+          <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={shownDoc?.layers ?? null} />
           <Effect
             shader={DEPTH_OVERLAY_WGSL}
             data={[0]}
@@ -365,11 +388,25 @@ export default function HeadLab() {
             <Text fontSize={12} color={INK}>save head</Text>
           </Pressable>
           {face ? (
-            <Pressable onPress={() => { setFace(null); setStatus(null); }} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
+            <Pressable onPress={() => { setFace(null); setAnim(null); setStatus(null); }} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: '#22324a', backgroundColor: '#101a2a' }}>
               <Text fontSize={12} color={DIM}>remove face</Text>
             </Pressable>
           ) : null}
         </Row>
+        {face ? (
+          <Row style={{ gap: 8, alignItems: 'center' }}>
+            <Text fontSize={11} color={DIM} style={{ width: 84 }}>animate</Text>
+            {(['talk', 'chew', 'cry'] as HedAnimation[]).map((a) => (
+              <Pressable
+                key={a}
+                onPress={() => setAnim((cur) => (cur === a ? null : a))}
+                style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: anim === a ? '#34d399' : '#22324a', backgroundColor: anim === a ? '#0d2a20' : '#101a2a' }}
+              >
+                <Text fontSize={12} color={anim === a ? '#34d399' : DIM}>{anim === a ? `${a} ■` : a}</Text>
+              </Pressable>
+            ))}
+          </Row>
+        ) : null}
         <Row style={{ gap: 6, alignItems: 'center' }}>
           <Text fontSize={11} color={DIM} style={{ width: 84 }}>skin</Text>
           {SKINS.map((s) => (
@@ -405,7 +442,7 @@ export default function HeadLab() {
           <Scene3D.Mesh
             geometry={Geometry.Globe}
             params={params}
-            dynamicKey={`headlab~${sculptSeq}.${face?.id ?? 'noface'}.${amount.toFixed(2)}.${scaleY.toFixed(2)}`}
+            dynamicKey={`headlab~${sculptSeq}.${face?.id ?? 'noface'}.${anim ?? 'still'}.${phase}.${amount.toFixed(2)}.${scaleY.toFixed(2)}`}
             material="#ffffff"
             textureKey={texKey}
             position={[0, 1.4, 0]}
@@ -424,7 +461,7 @@ export default function HeadLab() {
         <Paintable id={depth.id} w={PAINT_W} h={PAINT_H} />
       </Box>
       <StaticSurface staticKey={texKey} style={surfaceStyle}>
-        <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={face?.doc.layers ?? null} />
+        <UnwrapContent skin={skin} photo={photo} photoScale={photoScale} photoY={photoY} layers={shownDoc?.layers ?? null} />
       </StaticSurface>
     </Row>
   );

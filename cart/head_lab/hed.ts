@@ -174,6 +174,117 @@ export function hedDepthGrid(doc: HedDocument): number[] {
   return out;
 }
 
+// ── animation ────────────────────────────────────────────────────────────────
+//
+// An animation is a pure document transform: (doc, anim, phase) → doc with the
+// affected layers replaced. Because a layer is color+depth TOGETHER, one
+// transform animates the texture and the sculpt in lockstep — an open mouth
+// paints the dark interior AND carves the jaw; a tear is paint that moves.
+// Deterministic per (anim, phase), so texture keys and mesh keys stay
+// content-addressed: a looping animation cycles N cached bakes, not N×time.
+
+export type HedAnimation = 'talk' | 'chew' | 'cry';
+
+/** Loop length per animation — drive with `frame % HED_ANIM_FRAMES[anim]`. */
+export const HED_ANIM_FRAMES: Record<HedAnimation, number> = { talk: 4, chew: 4, cry: 6 };
+
+function firstShape(doc: HedDocument, layerId: string): HedShape | null {
+  const layer = doc.layers.find((l) => l.id === layerId);
+  return layer && layer.shapes.length > 0 ? layer.shapes[0] : null;
+}
+
+function layerColor(doc: HedDocument, layerId: string, fallback: string): string {
+  const layer = doc.layers.find((l) => l.id === layerId);
+  return layer?.color ?? fallback;
+}
+
+export function animateHed(doc: HedDocument, anim: HedAnimation, phase: number): HedDocument {
+  // Anchors from the doc's own layers (hand-authored docs without them get the
+  // generator's canonical positions).
+  const mouth = firstShape(doc, 'mouth') ?? { kind: 'ellipse' as const, cx: 0.5, cy: 0.68, rx: 0.034, ry: 0.016 };
+  const eye = firstShape(doc, 'whites') ?? { kind: 'ellipse' as const, cx: 0.442, cy: 0.43, rx: 0.022, ry: 0.042, mirror: true };
+  const lipColor = layerColor(doc, 'mouth', '#7a4a3a');
+
+  if (anim === 'talk') {
+    // jaw flaps: closed → half → open(+teeth) → half
+    const open = [0, 0.5, 1, 0.5][phase % 4];
+    const mouthLayers: HedLayer[] =
+      open === 0
+        ? [{ id: 'mouth', label: 'mouth', color: lipColor, depth: -0.07, feather: 0.4, shapes: [mouth] }]
+        : [
+            {
+              id: 'mouth', label: 'mouth (open)', color: '#2a1410', depth: -0.16 - 0.22 * open, feather: 0.4,
+              shapes: [{ kind: 'ellipse', cx: mouth.cx, cy: mouth.cy + 0.012 * open, rx: Math.max(mouth.rx, 0.028), ry: 0.014 + 0.030 * open }],
+            },
+            ...(open === 1
+              ? [{
+                  id: 'teeth', label: 'teeth', color: '#e8e2d4', depth: 0,
+                  shapes: [{ kind: 'rect' as const, cx: mouth.cx, cy: mouth.cy - 0.014, rx: Math.max(mouth.rx, 0.028) * 0.7, ry: 0.006 }],
+                }]
+              : []),
+          ];
+    return { ...doc, layers: doc.layers.filter((l) => l.id !== 'mouth').concat(mouthLayers) };
+  }
+
+  if (anim === 'chew') {
+    // closed-mouth munch: the wad bulges one cheek, then the other; the mouth
+    // wiggles slightly off-axis on the in-between frames.
+    const side = [-1, 0, 1, 0][phase % 4];
+    const wobble = (phase % 2) * 0.008;
+    const layers = doc.layers
+      .filter((l) => l.id !== 'mouth')
+      .concat([
+        {
+          id: 'mouth', label: 'mouth (chewing)', color: lipColor, depth: -0.07, feather: 0.4,
+          shapes: [{ kind: 'ellipse', cx: mouth.cx + wobble * 0.5, cy: mouth.cy + wobble, rx: mouth.rx, ry: mouth.ry }],
+        },
+        {
+          id: 'chew-wad', label: 'chew wad', color: null, depth: 0.24, feather: 0.6,
+          shapes: side === 0 ? [] : [{ kind: 'ellipse', cx: mouth.cx + side * 0.055, cy: mouth.cy - 0.03, rx: 0.028, ry: 0.05 }],
+        },
+      ]);
+    return { ...doc, layers };
+  }
+
+  // cry: sad brows, squeezed eyes, frown, and two tears running down each
+  // cheek (offset half a loop apart so there's always one falling).
+  const t = phase % 6;
+  const browColor = layerColor(doc, 'brows', '#2a2018');
+  const tearY = (k: number) => eye.cy + 0.055 + (((t + k) % 6) / 6) * 0.17;
+  const layers = doc.layers
+    .filter((l) => l.id !== 'mouth' && l.id !== 'brows')
+    .concat([
+      {
+        // sad brows: inner ends pulled up, outer ends dropped
+        id: 'brows', label: 'brows (sad)', color: browColor, depth: 0.05, feather: 0.3,
+        shapes: [
+          { kind: 'rect', cx: eye.cx + 0.014, cy: eye.cy - 0.064, rx: 0.013, ry: 0.009, mirror: true },
+          { kind: 'rect', cx: eye.cx - 0.012, cy: eye.cy - 0.050, rx: 0.014, ry: 0.009, mirror: true },
+        ],
+      },
+      {
+        // squeezed lids over the top half of the whites
+        id: 'lids', label: 'lids', color: darken(doc.skin, 0.82), depth: 0,
+        shapes: [{ kind: 'rect', cx: eye.cx, cy: eye.cy - 0.018, rx: eye.rx + 0.002, ry: 0.018, mirror: true }],
+      },
+      {
+        id: 'mouth', label: 'mouth (frown)', color: lipColor, depth: -0.07, feather: 0.4,
+        shapes: [
+          { kind: 'ellipse', cx: mouth.cx, cy: mouth.cy + (t % 2) * 0.006, rx: mouth.rx * 0.8, ry: 0.014 },
+          { kind: 'ellipse', cx: mouth.cx - mouth.rx * 0.8, cy: mouth.cy + 0.012, rx: 0.008, ry: 0.011, mirror: true },
+        ],
+      },
+      {
+        id: 'tears', label: 'tears', color: '#8fd4f6', depth: 0,
+        shapes: [
+          { kind: 'ellipse', cx: eye.cx, cy: tearY(0), rx: 0.006, ry: 0.014, mirror: true },
+          { kind: 'ellipse', cx: eye.cx + 0.005, cy: tearY(3), rx: 0.004, ry: 0.010, mirror: true },
+        ],
+      },
+    ]);
+  return { ...doc, layers };
+}
+
 // ── face generation ──────────────────────────────────────────────────────────
 
 // Deterministic seeded rand (mulberry32) — same seed, same face.
