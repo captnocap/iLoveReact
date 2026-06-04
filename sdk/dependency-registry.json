@@ -820,6 +820,21 @@
       ],
       "note": "Registers the packed host physics bindings used by the standalone physics lab and by HMSC gameplay physics. HMSC calls __hmsc_physics_step; the older physics lab calls __physics_lab_* from the same Zig binding module."
     },
+    "pathing": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/pathing.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-pathing"
+      ],
+      "v8Bindings": [
+        "pathing"
+      ],
+      "note": "Host-side tile-grid A* pathing (framework/v8_bindings_pathing.zig). Carts that import runtime/pathing.ts get __path_* registered: publish a kind grid + per-agent cost profiles once, the host owns pathfinding, lane offsets (drive/walk on the correct side), and the disruption generation counter that tells precomputed paths when to re-ask."
+    },
     "pg": {
       "shipGate": "pg",
       "triggers": [

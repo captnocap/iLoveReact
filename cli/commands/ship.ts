@@ -328,6 +328,7 @@ function verifyIngredientLabels(cartRoot: string, buildBin: string, flags: strin
     midi: hasBuildFlag(flags, 'has-midi'),
     vterm: hasBuildFlag(flags, 'has-terminal'),
     doom: hasBuildFlag(flags, 'has-doom'),
+    pathing: hasBuildFlag(flags, 'has-pathing'),
   };
 
   let mismatch = false;

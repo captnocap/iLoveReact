@@ -357,9 +357,280 @@
     return g.build();
   }
 
+  // runtime/geometries/Head.ts
+  var HEAD_DEFAULTS = { radius: 0.5, segments: 24, rings: 16 };
+  var PI2 = Math.PI;
+  function pos2(r, theta, phi) {
+    const st = Math.sin(theta);
+    return [r * st * Math.cos(phi), r * Math.cos(theta), r * st * Math.sin(phi)];
+  }
+  function nrm2(theta, phi) {
+    const st = Math.sin(theta);
+    return [st * Math.cos(phi), Math.cos(theta), st * Math.sin(phi)];
+  }
+  function uvDecal(n) {
+    let x = -n[0];
+    let y = n[1];
+    if (n[2] > 0) {
+      const len = Math.hypot(x, y);
+      if (len < 1e-6) {
+        x = 0;
+        y = 1;
+      } else {
+        x /= len;
+        y /= len;
+      }
+    }
+    return [(x + 1) * 0.5, (1 - y) * 0.5];
+  }
+  function generate3(p) {
+    const g = mesh();
+    const { radius: r, segments, rings } = p;
+    for (let i = 0; i < rings; i++) {
+      const t1 = PI2 * i / rings;
+      const t2 = PI2 * (i + 1) / rings;
+      for (let j = 0; j < segments; j++) {
+        const p1 = 2 * PI2 * j / segments;
+        const p2 = 2 * PI2 * (j + 1) / segments;
+        const a = pos2(r, t1, p1), b = pos2(r, t1, p2), c = pos2(r, t2, p2), d = pos2(r, t2, p1);
+        const na = nrm2(t1, p1), nb = nrm2(t1, p2), nc = nrm2(t2, p2), nd = nrm2(t2, p1);
+        g.tri(a, na, uvDecal(na), c, nc, uvDecal(nc), d, nd, uvDecal(nd));
+        g.tri(a, na, uvDecal(na), b, nb, uvDecal(nb), c, nc, uvDecal(nc));
+      }
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Carve.ts
+  var CARVE_DEFAULTS = {
+    mask: [1],
+    cols: 1,
+    rows: 1,
+    width: 1,
+    height: 1,
+    depth: 0.25,
+    inflate: 0.6
+  };
+  function generate4(p) {
+    const { cols, rows, width, height, depth, inflate } = p;
+    const g = mesh();
+    const cellW = width / cols;
+    const cellH = height / rows;
+    const INF = 1e9;
+    const solid = (cx, cy) => cx >= 0 && cy >= 0 && cx < cols && cy < rows && p.mask[cy * cols + cx] > 0.5;
+    const dist = new Float64Array(cols * rows);
+    for (let i = 0; i < cols * rows; i++) dist[i] = p.mask[i] > 0.5 ? INF : 0;
+    const dAt = (cx, cy) => cx < 0 || cy < 0 || cx >= cols || cy >= rows ? 0 : dist[cy * cols + cx];
+    for (let cy = 0; cy < rows; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        const i = cy * cols + cx;
+        if (dist[i] === 0) continue;
+        dist[i] = Math.min(dist[i], dAt(cx - 1, cy) + 1, dAt(cx, cy - 1) + 1, dAt(cx - 1, cy - 1) + 1.4, dAt(cx + 1, cy - 1) + 1.4);
+      }
+    }
+    for (let cy = rows - 1; cy >= 0; cy--) {
+      for (let cx = cols - 1; cx >= 0; cx--) {
+        const i = cy * cols + cx;
+        dist[i] = Math.min(dist[i], dAt(cx + 1, cy) + 1, dAt(cx, cy + 1) + 1, dAt(cx + 1, cy + 1) + 1.4, dAt(cx - 1, cy + 1) + 1.4);
+      }
+    }
+    let dmax = 1;
+    for (let i = 0; i < cols * rows; i++) {
+      if (dist[i] < INF && dist[i] > dmax) dmax = dist[i];
+    }
+    const cw = cols + 1;
+    const half = new Float64Array(cw * (rows + 1));
+    for (let cy = 0; cy <= rows; cy++) {
+      for (let cx = 0; cx <= cols; cx++) {
+        const d = Math.min(dAt(cx - 1, cy - 1), dAt(cx, cy - 1), dAt(cx - 1, cy), dAt(cx, cy));
+        const rounded = Math.sqrt(Math.min(d, dmax) / dmax);
+        half[cy * cw + cx] = 0.5 * depth * (1 - inflate + inflate * rounded);
+      }
+    }
+    const hAt = (cx, cy) => half[cy * cw + cx];
+    const lateral = (cx, cy) => {
+      const x0 = Math.max(0, cx - 1), x1 = Math.min(cols, cx + 1);
+      const y0 = Math.max(0, cy - 1), y1 = Math.min(rows, cy + 1);
+      const dhdx = (hAt(x1, cy) - hAt(x0, cy)) / ((x1 - x0) * cellW);
+      const dhdy = (hAt(cx, y1) - hAt(cx, y0)) / ((y1 - y0) * -cellH);
+      return [-dhdx, -dhdy];
+    };
+    const frontN = (cx, cy) => {
+      const [lx, ly] = lateral(cx, cy);
+      return normalize(lx, ly, -1);
+    };
+    const backN = (cx, cy) => {
+      const [lx, ly] = lateral(cx, cy);
+      return normalize(lx, ly, 1);
+    };
+    const X = (cx) => -width / 2 + cx * cellW;
+    const Y = (cy) => height / 2 - cy * cellH;
+    const U = (cx) => 1 - cx / cols;
+    const V = (cy) => cy / rows;
+    const uv2 = (cx, cy) => [U(cx), V(cy)];
+    const EPS = 1e-5;
+    for (let cy = 0; cy < rows; cy++) {
+      for (let cx = 0; cx < cols; cx++) {
+        if (!solid(cx, cy)) continue;
+        const x0 = X(cx), x1 = X(cx + 1);
+        const yt = Y(cy), yb = Y(cy + 1);
+        const h00 = hAt(cx, cy), h10 = hAt(cx + 1, cy);
+        const h01 = hAt(cx, cy + 1), h11 = hAt(cx + 1, cy + 1);
+        g.tri(
+          [x1, yb, -h11],
+          frontN(cx + 1, cy + 1),
+          uv2(cx + 1, cy + 1),
+          [x0, yb, -h01],
+          frontN(cx, cy + 1),
+          uv2(cx, cy + 1),
+          [x0, yt, -h00],
+          frontN(cx, cy),
+          uv2(cx, cy)
+        );
+        g.tri(
+          [x1, yb, -h11],
+          frontN(cx + 1, cy + 1),
+          uv2(cx + 1, cy + 1),
+          [x0, yt, -h00],
+          frontN(cx, cy),
+          uv2(cx, cy),
+          [x1, yt, -h10],
+          frontN(cx + 1, cy),
+          uv2(cx + 1, cy)
+        );
+        g.tri(
+          [x0, yb, h01],
+          backN(cx, cy + 1),
+          uv2(cx, cy + 1),
+          [x1, yb, h11],
+          backN(cx + 1, cy + 1),
+          uv2(cx + 1, cy + 1),
+          [x1, yt, h10],
+          backN(cx + 1, cy),
+          uv2(cx + 1, cy)
+        );
+        g.tri(
+          [x0, yb, h01],
+          backN(cx, cy + 1),
+          uv2(cx, cy + 1),
+          [x1, yt, h10],
+          backN(cx + 1, cy),
+          uv2(cx + 1, cy),
+          [x0, yt, h00],
+          backN(cx, cy),
+          uv2(cx, cy)
+        );
+        const pin = [1 - (cx + 0.5) / cols, (cy + 0.5) / rows];
+        if (!solid(cx + 1, cy) && h10 + h11 > EPS) {
+          g.face([x1, yb, h11], [x1, yb, -h11], [x1, yt, -h10], [x1, yt, h10], [1, 0, 0], pin);
+        }
+        if (!solid(cx - 1, cy) && h00 + h01 > EPS) {
+          g.face([x0, yb, -h01], [x0, yb, h01], [x0, yt, h00], [x0, yt, -h00], [-1, 0, 0], pin);
+        }
+        if (!solid(cx, cy - 1) && h00 + h10 > EPS) {
+          g.face([x0, yt, h00], [x1, yt, h10], [x1, yt, -h10], [x0, yt, -h00], [0, 1, 0], pin);
+        }
+        if (!solid(cx, cy + 1) && h01 + h11 > EPS) {
+          g.face([x0, yb, -h01], [x1, yb, -h11], [x1, yb, h11], [x0, yb, h01], [0, -1, 0], pin);
+        }
+      }
+    }
+    return g.build();
+  }
+
+  // runtime/geometries/Globe.ts
+  var GLOBE_DEFAULTS = { radius: 0.5, segments: 32, rings: 16, amount: 0, scaleY: 1 };
+  var PI3 = Math.PI;
+  function generate5(p) {
+    const { radius, segments, rings } = p;
+    const amount = p.amount ?? 0;
+    const scaleY = p.scaleY ?? 1;
+    const scaleX = p.scaleX ?? 1;
+    const scaleZ = p.scaleZ ?? 1;
+    const grid = p.displace;
+    const dCols = p.dCols ?? 0;
+    const dRows = p.dRows ?? 0;
+    const hasGrid = !!grid && dCols > 1 && dRows > 1 && amount !== 0;
+    const prof = p.profile && p.profile.length > 0 ? p.profile : null;
+    const profileAt = (v) => {
+      if (!prof) return 1;
+      if (prof.length === 1) return prof[0];
+      const t = Math.max(0, Math.min(1, v)) * (prof.length - 1);
+      const i = Math.min(prof.length - 2, Math.floor(t));
+      return prof[i] + (prof[i + 1] - prof[i]) * (t - i);
+    };
+    let topAvg = 0;
+    let botAvg = 0;
+    if (hasGrid) {
+      for (let x = 0; x < dCols; x++) {
+        topAvg += grid[x];
+        botAvg += grid[(dRows - 1) * dCols + x];
+      }
+      topAvg /= dCols;
+      botAvg /= dCols;
+    }
+    const sample = (u, v) => {
+      if (!hasGrid) return 0;
+      if (v <= 0) return topAvg;
+      if (v >= 1) return botAvg;
+      const fx = u * dCols - 0.5;
+      const fy = v * dRows - 0.5;
+      const x0 = Math.floor(fx);
+      const y0 = Math.max(0, Math.min(dRows - 1, Math.floor(fy)));
+      const y1 = Math.max(0, Math.min(dRows - 1, y0 + 1));
+      const tx = fx - x0;
+      const ty = fy - y0;
+      const xa = (x0 % dCols + dCols) % dCols;
+      const xb = (xa + 1) % dCols;
+      const d00 = grid[y0 * dCols + xa], d10 = grid[y0 * dCols + xb];
+      const d01 = grid[y1 * dCols + xa], d11 = grid[y1 * dCols + xb];
+      return (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
+    };
+    const pos4 = (i, j) => {
+      const v = i / rings;
+      const u = j / segments;
+      const theta = PI3 * v;
+      const phi = PI3 / 2 - 2 * PI3 * u;
+      const st = Math.sin(theta);
+      const d = amount * sample(u, v);
+      const rxz = radius * profileAt(v) + d;
+      const ry = radius + d;
+      return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * ry * scaleY, st * Math.sin(phi) * rxz * scaleZ];
+    };
+    const nrm4 = (i, j) => {
+      if (i <= 0) return [0, 1, 0];
+      if (i >= rings) return [0, -1, 0];
+      const pu0 = pos4(i, j - 1), pu1 = pos4(i, j + 1);
+      const pv0 = pos4(i - 1, j), pv1 = pos4(i + 1, j);
+      const tu = [pu1[0] - pu0[0], pu1[1] - pu0[1], pu1[2] - pu0[2]];
+      const tv = [pv1[0] - pv0[0], pv1[1] - pv0[1], pv1[2] - pv0[2]];
+      return normalize(
+        tv[1] * tu[2] - tv[2] * tu[1],
+        tv[2] * tu[0] - tv[0] * tu[2],
+        tv[0] * tu[1] - tv[1] * tu[0]
+      );
+    };
+    const g = mesh();
+    for (let i = 0; i < rings; i++) {
+      for (let j = 0; j < segments; j++) {
+        const a = pos4(i, j), na = nrm4(i, j);
+        const b = pos4(i, j + 1), nb = nrm4(i, j + 1);
+        const c = pos4(i + 1, j + 1), nc = nrm4(i + 1, j + 1);
+        const d = pos4(i + 1, j), nd = nrm4(i + 1, j);
+        const ua = [j / segments, i / rings];
+        const ub = [(j + 1) / segments, i / rings];
+        const uc = [(j + 1) / segments, (i + 1) / rings];
+        const ud = [j / segments, (i + 1) / rings];
+        g.tri(a, na, ua, d, nd, ud, c, nc, uc);
+        g.tri(a, na, ua, c, nc, uc, b, nb, ub);
+      }
+    }
+    return g.build();
+  }
+
   // runtime/geometries/Plane.ts
   var PLANE_DEFAULTS = { width: 1, depth: 1 };
-  function generate3(p) {
+  function generate6(p) {
     const hx = p.width * 0.5;
     const hz = p.depth * 0.5;
     const g = mesh();
@@ -369,14 +640,14 @@
 
   // runtime/geometries/Cylinder.ts
   var CYLINDER_DEFAULTS = { radius: 0.5, height: 1, segments: 24 };
-  var PI2 = Math.PI;
-  function generate4(p) {
+  var PI4 = Math.PI;
+  function generate7(p) {
     const { radius: r, height, segments } = p;
     const hy = height * 0.5;
     const g = mesh();
     for (let j = 0; j < segments; j++) {
-      const a1 = 2 * PI2 * j / segments;
-      const a2 = 2 * PI2 * (j + 1) / segments;
+      const a1 = 2 * PI4 * j / segments;
+      const a2 = 2 * PI4 * (j + 1) / segments;
       const c1 = Math.cos(a1), s1 = Math.sin(a1);
       const c2 = Math.cos(a2), s2 = Math.sin(a2);
       const a = [r * c1, -hy, r * s1];
@@ -395,16 +666,16 @@
 
   // runtime/geometries/Cone.ts
   var CONE_DEFAULTS = { radius: 0.5, height: 1, segments: 24 };
-  var PI3 = Math.PI;
-  function generate5(p) {
+  var PI5 = Math.PI;
+  function generate8(p) {
     const { radius: r, height, segments } = p;
     const hy = height * 0.5;
     const slope = Math.abs(height) > 1e-3 ? r / height : 1;
     const apex = [0, hy, 0];
     const g = mesh();
     for (let j = 0; j < segments; j++) {
-      const a1 = 2 * PI3 * j / segments;
-      const a2 = 2 * PI3 * (j + 1) / segments;
+      const a1 = 2 * PI5 * j / segments;
+      const a2 = 2 * PI5 * (j + 1) / segments;
       const mid = (a1 + a2) * 0.5;
       const c1 = Math.cos(a1), s1 = Math.sin(a1);
       const c2 = Math.cos(a2), s2 = Math.sin(a2);
@@ -421,25 +692,25 @@
 
   // runtime/geometries/Torus.ts
   var TORUS_DEFAULTS = { radius: 0.5, tube: 0.25, segments: 24, sides: 16 };
-  var PI4 = Math.PI;
-  function pos2(r, tr, u, v) {
+  var PI6 = Math.PI;
+  function pos3(r, tr, u, v) {
     const ring = r + tr * Math.cos(v);
     return [ring * Math.cos(u), tr * Math.sin(v), ring * Math.sin(u)];
   }
-  function nrm2(u, v) {
+  function nrm3(u, v) {
     return [Math.cos(u) * Math.cos(v), Math.sin(v), Math.sin(u) * Math.cos(v)];
   }
-  function generate6(p) {
+  function generate9(p) {
     const { radius: r, tube: tr, segments, sides } = p;
     const g = mesh();
     for (let i = 0; i < segments; i++) {
-      const u1 = 2 * PI4 * i / segments;
-      const u2 = 2 * PI4 * (i + 1) / segments;
+      const u1 = 2 * PI6 * i / segments;
+      const u2 = 2 * PI6 * (i + 1) / segments;
       for (let j = 0; j < sides; j++) {
-        const v1 = 2 * PI4 * j / sides;
-        const v2 = 2 * PI4 * (j + 1) / sides;
-        const a = pos2(r, tr, u1, v1), b = pos2(r, tr, u2, v1), c = pos2(r, tr, u2, v2), d = pos2(r, tr, u1, v2);
-        const na = nrm2(u1, v1), nb = nrm2(u2, v1), nc = nrm2(u2, v2), nd = nrm2(u1, v2);
+        const v1 = 2 * PI6 * j / sides;
+        const v2 = 2 * PI6 * (j + 1) / sides;
+        const a = pos3(r, tr, u1, v1), b = pos3(r, tr, u2, v1), c = pos3(r, tr, u2, v2), d = pos3(r, tr, u1, v2);
+        const na = nrm3(u1, v1), nb = nrm3(u2, v1), nc = nrm3(u2, v2), nd = nrm3(u1, v2);
         g.tri(a, na, [0, 0], d, nd, [0, 1], c, nc, [1, 1]);
         g.tri(a, na, [0, 0], c, nc, [1, 1], b, nb, [1, 0]);
       }
@@ -465,7 +736,7 @@
     const cycles = (x * dx + z * dz) / w.length + w.phase + t * w.speed;
     return Math.sin(cycles * TAU) * w.amplitude;
   }
-  function generate7(p) {
+  function generate10(p) {
     const { cols, rows, width: w, depth: h, base, wave, t } = p;
     const hs = p.heights;
     const g = mesh();
@@ -675,7 +946,7 @@
       }
     }
   }
-  function generate8(p) {
+  function generate11(p) {
     const g = mesh();
     const sides = Math.max(4, p.sides | 0);
     const t = p.limbThickness;
@@ -758,20 +1029,26 @@
   }
 
   // runtime/geometries/index.ts
-  function def(id, generate9, defaults) {
-    return { id, generate: generate9, defaults };
+  function def(id, generate12, defaults) {
+    return { id, generate: generate12, defaults };
   }
   var Box = def("Box", generate, BOX_DEFAULTS);
   var Sphere = def("Sphere", generate2, SPHERE_DEFAULTS);
-  var Plane = def("Plane", generate3, PLANE_DEFAULTS);
-  var Cylinder = def("Cylinder", generate4, CYLINDER_DEFAULTS);
-  var Cone = def("Cone", generate5, CONE_DEFAULTS);
-  var Torus = def("Torus", generate6, TORUS_DEFAULTS);
-  var Heightfield = def("Heightfield", generate7, HEIGHTFIELD_DEFAULTS);
-  var Humanoid = def("Humanoid", generate8, HUMANOID_DEFAULTS);
+  var Head = def("Head", generate3, HEAD_DEFAULTS);
+  var Carve = def("Carve", generate4, CARVE_DEFAULTS);
+  var Globe = def("Globe", generate5, GLOBE_DEFAULTS);
+  var Plane = def("Plane", generate6, PLANE_DEFAULTS);
+  var Cylinder = def("Cylinder", generate7, CYLINDER_DEFAULTS);
+  var Cone = def("Cone", generate8, CONE_DEFAULTS);
+  var Torus = def("Torus", generate9, TORUS_DEFAULTS);
+  var Heightfield = { ...def("Heightfield", generate10, HEIGHTFIELD_DEFAULTS), hostKind: "heightfield" };
+  var Humanoid = def("Humanoid", generate11, HUMANOID_DEFAULTS);
   var GEOMETRIES = {
     Box,
     Sphere,
+    Head,
+    Carve,
+    Globe,
     Plane,
     Cylinder,
     Cone,
@@ -2567,7 +2844,7 @@ ${atlasW} ${atlasH}
             }
             p = p.parent;
           }
-          const pos3 = ts.getLineAndCharacterOfPosition(sourceFile, element.getStart(sourceFile));
+          const pos4 = ts.getLineAndCharacterOfPosition(sourceFile, element.getStart(sourceFile));
           if (!groups.has(sig)) {
             groups.set(sig, {
               primitive,
@@ -2580,7 +2857,7 @@ ${atlasW} ${atlasH}
           }
           groups.get(sig).occurrences.push({
             file: filePath,
-            line: pos3.line + 1,
+            line: pos4.line + 1,
             parentFn
           });
         }
@@ -2620,13 +2897,13 @@ ${atlasW} ${atlasH}
               const jsxProps = extractJsxProps(element, ts);
               const propCount = Object.keys(styleStatics).length + Object.keys(jsxProps).length;
               if (propCount > 0) {
-                const pos3 = ts.getLineAndCharacterOfPosition(sf, element.getStart(sf));
+                const pos4 = ts.getLineAndCharacterOfPosition(sf, element.getStart(sf));
                 elements.push({
                   primitive,
                   styleStatics,
                   jsxProps,
                   file: filePath,
-                  line: pos3.line + 1
+                  line: pos4.line + 1
                 });
               }
             }
@@ -6370,7 +6647,8 @@ export default function App() {
       audio: hasBuildFlag(flags, "has-audio"),
       midi: hasBuildFlag(flags, "has-midi"),
       vterm: hasBuildFlag(flags, "has-terminal"),
-      doom: hasBuildFlag(flags, "has-doom")
+      doom: hasBuildFlag(flags, "has-doom"),
+      pathing: hasBuildFlag(flags, "has-pathing")
     };
     let mismatch = false;
     for (const [name, want] of Object.entries(expected)) {

@@ -29,10 +29,12 @@ import { OrbitCamera } from '@reactjit/cameras';
 import { buildRigFrameFromBones, buildSkeleton, type BoneId, type SkeletonBone } from '../head_lab/parts';
 import {
   createRagdoll, stepRagdoll, ragdollImpulse, ragdollMaxMotion, ragdollCenter, bonesFromRagdoll,
+  offsetBones, blendBones,
   type JointId, type Ragdoll, type V3,
 } from '../head_lab/ragdoll';
 import { generateFace, hedDepthGrid } from '../head_lab/hed';
 import { buildPartRender, CharacterCaptures, FigureMeshes } from '../head_lab/figureRender';
+import { CarMeshes } from './car';
 
 const BG = '#0b1018';
 const INK = '#e8eef8';
@@ -96,62 +98,14 @@ function hpColor(hp: number): string {
   return t > 0.5 ? mixHex(WARN, GOOD, (t - 0.5) * 2) : mixHex(BAD, WARN, t * 2);
 }
 
-// ── bone-record helpers ──────────────────────────────────────────────────────
+// ── bone-record helpers live in head_lab/ragdoll.ts (shared with pathing_lab)
 
 const lerp3 = (a: V3, b: V3, t: number): V3 => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-const wrap180 = (d: number) => ((d + 180) % 360 + 360) % 360 - 180;
 
-function offsetBones(bones: Record<BoneId, SkeletonBone>, o: V3): Record<BoneId, SkeletonBone> {
-  const out = {} as Record<BoneId, SkeletonBone>;
-  for (const id of Object.keys(bones) as BoneId[]) {
-    const b = bones[id];
-    out[id] = { ...b, position: [b.position[0] + o[0], b.position[1] + o[1], b.position[2] + o[2]] };
-  }
-  return out;
-}
+// ── the car — model shared with pathing_lab (see ./car.tsx) ─────────────────
 
-function blendBones(from: Record<BoneId, SkeletonBone>, to: Record<BoneId, SkeletonBone>, t: number): Record<BoneId, SkeletonBone> {
-  const out = {} as Record<BoneId, SkeletonBone>;
-  for (const id of Object.keys(to) as BoneId[]) {
-    const a = from[id], b = to[id];
-    out[id] = {
-      ...b,
-      position: lerp3(a.position, b.position, t),
-      rotation: [
-        a.rotation[0] + wrap180(b.rotation[0] - a.rotation[0]) * t,
-        a.rotation[1] + wrap180(b.rotation[1] - a.rotation[1]) * t,
-        a.rotation[2] + wrap180(b.rotation[2] - a.rotation[2]) * t,
-      ],
-    };
-  }
-  return out;
-}
-
-// ── the car ──────────────────────────────────────────────────────────────────
-
-const CAR_HALF: V3 = [1.85, 0.7, 0.95]; // collision box half-extents
+const CAR_HALF: V3 = [1.85, 0.7, 0.95]; // collision box half-extents (x-major lane)
 const CAR_CENTER_Y = 0.7;
-const CHASSIS_PARAMS = { width: 3.7, height: 0.6, depth: 1.8 };
-const CABIN_PARAMS = { width: 1.7, height: 0.55, depth: 1.55 };
-const WHEEL_PARAMS = { radius: 0.36, height: 0.26, segments: 14 };
-const LIGHT_PARAMS = { width: 0.1, height: 0.14, depth: 0.3 };
-
-function CarMeshes(props: { x: number; z: number; dir: 1 | -1 }) {
-  const { x, z, dir } = props;
-  return (
-    <>
-      <Scene3D.Mesh geometry={Geometry.Box} params={CHASSIS_PARAMS} material="#b3382f" position={[x, 0.62, z]} />
-      <Scene3D.Mesh geometry={Geometry.Box} params={CABIN_PARAMS} material="#8c241d" position={[x - dir * 0.25, 1.18, z]} />
-      <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 1.55, height: 0.4, depth: 1.4 }} material={{ color: '#9fc3e8', opacity: 0.85 }} position={[x - dir * 0.25, 1.16, z]} />
-      {[-1.18, 1.18].map((wx) => [-0.85, 0.85].map((wz) => (
-        <Scene3D.Mesh key={`w${wx}.${wz}`} geometry={Geometry.Cylinder} params={WHEEL_PARAMS} material="#16181d"
-          position={[x + wx, 0.36, z + wz]} rotation={[90, 0, 0]} />
-      )))}
-      <Scene3D.Mesh geometry={Geometry.Box} params={LIGHT_PARAMS} material="#ffe9a8" position={[x + dir * 1.86, 0.72, z - 0.55]} />
-      <Scene3D.Mesh geometry={Geometry.Box} params={LIGHT_PARAMS} material="#ffe9a8" position={[x + dir * 1.86, 0.72, z + 0.55]} />
-    </>
-  );
-}
 
 // ── sim state ────────────────────────────────────────────────────────────────
 
@@ -595,7 +549,7 @@ export default function RagdollLab() {
             );
           }) : null}
 
-          {s.car.active ? <CarMeshes x={s.car.x} z={s.car.z} dir={s.car.dir} /> : null}
+          {s.car.active ? <CarMeshes x={s.car.x} z={s.car.z} yawDeg={s.car.dir * 90} /> : null}
         </Scene3D>
 
         {sloMoActive ? (

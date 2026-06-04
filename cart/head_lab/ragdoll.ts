@@ -248,6 +248,58 @@ export function ragdollCenter(r: Ragdoll): V3 {
   return [...r.pos.pelvis] as V3;
 }
 
+// ── bone-record helpers — shared by every cart that places/blends figures ───
+
+/** Translate every bone (an animated local-space skeleton → world). */
+export function offsetBones(bones: Record<BoneId, SkeletonBone>, o: V3): Record<BoneId, SkeletonBone> {
+  const out = {} as Record<BoneId, SkeletonBone>;
+  for (const id of Object.keys(bones) as BoneId[]) {
+    const b = bones[id];
+    out[id] = { ...b, position: [b.position[0] + o[0], b.position[1] + o[1], b.position[2] + o[2]] };
+  }
+  return out;
+}
+
+/** Yaw the whole skeleton about Y then translate — a figure standing at
+ *  (x, z) facing heading yawDeg (parts face -Z at yaw 0, so pass h + 180 to
+ *  face along a movement heading h). Host order Ry·Rx·Rz makes the prepend
+ *  exact: rotate positions, add yawDeg to each ry. */
+export function placeBones(bones: Record<BoneId, SkeletonBone>, yawDeg: number, x: number, z: number): Record<BoneId, SkeletonBone> {
+  const rad = yawDeg * Math.PI / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  const out = {} as Record<BoneId, SkeletonBone>;
+  for (const id of Object.keys(bones) as BoneId[]) {
+    const b = bones[id];
+    out[id] = {
+      ...b,
+      position: [b.position[0] * c + b.position[2] * s + x, b.position[1], -b.position[0] * s + b.position[2] * c + z],
+      rotation: [b.rotation[0], b.rotation[1] + yawDeg, b.rotation[2]],
+    };
+  }
+  return out;
+}
+
+const wrap180 = (d: number) => ((d + 180) % 360 + 360) % 360 - 180;
+
+/** Per-bone lerp between two bone records (positions linear, rotations
+ *  shortest-arc per component) — the ragdoll → stand get-up blend. */
+export function blendBones(from: Record<BoneId, SkeletonBone>, to: Record<BoneId, SkeletonBone>, t: number): Record<BoneId, SkeletonBone> {
+  const out = {} as Record<BoneId, SkeletonBone>;
+  for (const id of Object.keys(to) as BoneId[]) {
+    const a = from[id], b = to[id];
+    out[id] = {
+      ...b,
+      position: lerp3(a.position as V3, b.position as V3, t),
+      rotation: [
+        a.rotation[0] + wrap180(b.rotation[0] - a.rotation[0]) * t,
+        a.rotation[1] + wrap180(b.rotation[1] - a.rotation[1]) * t,
+        a.rotation[2] + wrap180(b.rotation[2] - a.rotation[2]) * t,
+      ],
+    };
+  }
+  return out;
+}
+
 /**
  * Rebuild a full bones record from the particles. Positions/rotations come
  * from the joints; scale/thickness/hitbox/parent copy from the stand-pose

@@ -233,6 +233,11 @@ const v8_bindings_input_bench = @import("v8_bindings_input_bench.zig");
 const v8_bindings_physics_lab = if (enabledFor("physics_lab")) @import("v8_bindings_physics_lab.zig") else struct {
     pub fn registerPhysicsLab(_: anytype) void {}
 };
+// Pure-Zig grid A* for NPC walk/drive pathing — no native deps, but still
+// opt-in: only carts whose bundle calls __path_* pay the binding surface.
+const v8_bindings_pathing = if (enabledFor("pathing")) @import("v8_bindings_pathing.zig") else struct {
+    pub fn registerPathing(_: anytype) void {}
+};
 
 // ── INGREDIENTS ─────────────────────────────────────────────────────
 //
@@ -309,6 +314,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "doom", .required = false, .grep_prefix = "__doom_", .reg_fn = "registerDoom", .mod = v8_bindings_doom },
     .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },
     .{ .name = "physics_lab", .required = false, .grep_prefix = "__physics_lab_", .reg_fn = "registerPhysicsLab", .mod = v8_bindings_physics_lab },
+    .{ .name = "pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerPathing", .mod = v8_bindings_pathing },
 };
 
 /// Register every ingredient's host fns into the current V8 context.
