@@ -137,7 +137,7 @@ export type SpawnedEntity = {
 // gait can't disagree with motion. NPCs live on WorldState.npcs, so an interior
 // (itself a WorldState) carries its own NPCs through the active-world swap with
 // no special casing — same as every other world layer.
-export type NpcKind = 'civilian' | 'thug' | 'police';
+export type NpcKind = 'civilian' | 'paramedic' | 'thug' | 'police';
 
 // Combat allegiance. A closed set; who-regards-whom-how is the matrix in
 // npc/factions.ts. Orthogonal to role: a `civilian` faction NPC can be your
