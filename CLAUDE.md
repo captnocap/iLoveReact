@@ -237,6 +237,24 @@ Documentation is a completion criterion. After major features:
 2. Update affected docs
 3. Commit code + docs together
 
+### The game knowledge layer (`docs/game/`)
+
+There are effectively TWO projects in this repo: **reactjit** (the platform) and
+**the game** (a factor of reactjit). `docs/game/` is the game's knowledge layer
+and covers ONLY the game's carts/modules — the 33 documented there ARE the game.
+Do not add app/tui/chat/test carts to it; they are platform-side and unrelated.
+
+- `docs/game/<cart>.md` — per-cart English audit (mechanism-specific: host fn vs
+  JS, file:line). `_reports/CONSENSUS.md` — the tallied consolidation queue.
+- `docs/game/_index/` — typed, queryable extraction (DocIndex / InterfaceRecord /
+  PatternRecord / HazardRecord). Query it before re-deriving what exists:
+  `byPurpose('camera')`, `byStatus('dormant')`, `hazardsBySeverity('high')`,
+  `patternsByStatus('promote')`, `duplicateNames()`.
+- **Maintenance contract:** touching a documented game cart = update its `.md`
+  AND its `_index/records/<name>.ts` in the same commit. A new game cart isn't
+  done until it has both. An index that lags the code is the disease this layer
+  was built to cure (see the physics_lab/physics3d naming inversion).
+
 ---
 
 ## Skills & Agents
