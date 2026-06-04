@@ -277,6 +277,20 @@ head_lab's oriented boxes. hmsc's `render3d/humanoid/` retires (its consumers
 migrate); bodylab's third solver and the inline parts-array copies
 (animation_lab/camera_lab/input_bench) are deleted.
 
+**V2-AMENDED (2026-06-04, second pass): AUTHOR IN JS, BAKE INTO THE HOST.**
+head_lab is the choice as the AUTHORING system — but if the model stays
+evaluation-based at runtime "we are going to have a real problem." Ruling:
+author it in JavaScript (the head_lab editor, the `.hed`/`.body` documents, the
+seeded generators — "the variety of life is the right shape"), then the models
+are COMPILED (baked) into the host. The game-runtime figure is host-side data —
+geometry, textures, skeleton, hitboxes — instantiated by the one physics system
+(V1) and the animation system (V6), not re-evaluated through JS per figure per
+frame. The current JS evaluation path (per-frame `buildRigFrame`, dyn-geometry
+slots, on-the-fly face bakes) remains the EDITOR/LAB preview path only — never
+the game path. The bake must preserve the generated variety: seeds/documents in,
+compiled population out. (This is P1 applied to characters, and the existing
+bake direction — `feedback_react_3d_is_authoring_not_runtime` — made law.)
+
 **V3 — Camera: the registry, but the aim rig exposed it.**
 `@reactjit/cameras` is the one system — with the hard finding that the shipped
 Follow rig is inadequate for combat ("could barely hit head height before hitting
