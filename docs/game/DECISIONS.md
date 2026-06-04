@@ -436,6 +436,11 @@ that the game output isn't carrying the feature or doesn't work at all. So:
   the user to press a button.
 - A feature isn't "done in the tool" — it's done when the COMPILED GAME carries
   it and the verify run proves it.
+- **GREEN HAS AN EXPLICIT MEANING (clarified 2026-06-04).** The entire testing
+  surface is REPLAYABLE all the time and DEEP: if we need to test anything, we
+  can SCRIPT it. The console commands already in hmsc move into the internal
+  tooling (`game/commands/`) and double as the test scripting language — a
+  verify script is a recorded/saved command sequence, replayed headless.
 
 **V20 — Persistence: stateless, micro-saved, with an UNBREAKABLE total history. (Added 2026-06-04.)**
 The workspace behavior (stateless design, saved at every micro change,
@@ -453,6 +458,10 @@ historical undo) is the floor — extended:
 - What the game LOADS is not the history: compile/ consumes materialized
   snapshots of the streams. The log is for the tool and the time machine;
   the snapshot is for the game.
+- Streams are NOT git-tracked (gitignored; explicit backup/export story —
+  git is the code time machine, streams are the content time machine). And
+  **the snapshot system GROWS with the addition of any tracking**: a new
+  stream without snapshot support is an incomplete change.
 - This is the storage twin of V8's event-channel state tick and R6's
   RLE/determinism — the whole system is event-shaped; storage just stops
   pretending otherwise.
@@ -473,6 +482,11 @@ things actually live" surface, so it is the home. The end state:
 And the endgame inversion: **hmsc the game is a COMPILED OUTPUT of hmsc-int** —
 the game is not written as a separate cart; the tool emits it.
 
+**V15-TRANSITION (clarified 2026-06-04): `cart/hmsc` is an EXTRACTION SURFACE.**
+Everything is going into one thing — hmsc-int. The playable hmsc is a capture
+source exactly like the labs: feature development on it stops; new game work
+happens inside hmsc-int's structure; hmsc ends as compile/'s output.
+
 **V14 — The ground floor (everything a lab gets for free): ALL IN.**
 useGameLoop-equivalent, camera registry (incl. aim rig + screenRay), the head_lab
 figure stack with auto-mounted captures, vehicle module, host physics +
@@ -490,8 +504,11 @@ with bake-once discipline.
    Note: "this could be bullet tbh" — the projectile sim is a possible revival
    use-case for the dormant Bullet library; include it as a third contender if
    it earns it.
-3. **Render-loop hook: "show me some examples."** → SHOW-ME task: present 2–3
-   candidate hook shapes before committing one.
+3. **Render-loop hook: ruled to be ruled BY A LAB.** "This is what labs are for
+   and why we are doing what we are doing" — the difference between the shapes
+   and how other game mechanics play into them isn't knowable on paper. A
+   loop-shapes lab joins the SHOW-ME queue; until it rules, the ground floor's
+   loop API stays deliberately MINIMAL so nothing is preempted.
 4. **Scale: the WORLD SCALE IS SET. 1 tile = 1 meter.** Player collider = 1.65m
    (verified: `HMSC_SCALE.playerCapsuleHeightMeters`, `cart/hmsc/world/scale.ts:8`);
    the 2.04m in the scale labs is the VISUAL head-top (stylized-tall) — collider

@@ -113,8 +113,8 @@ export const DECISIONS: Decision[] = [
   },
   {
     id: 'V15', name: 'hmsc is a COMPILED OUTPUT of hmsc-int', status: 'ruled',
-    ruling: 'The endgame inversion: hmsc the game is a compiled output FROM hmsc-int — the game is not written as a separate cart; the tool emits it. "Its all the same thing to me. we can keep as hmsc-int and build from there."',
-    keywords: ['compile', 'game compile', 'hmsc-int', 'hmsc output', 'emit', 'build the game', 'inversion'],
+    ruling: 'The endgame inversion: hmsc the game is a compiled output FROM hmsc-int — the game is not written as a separate cart; the tool emits it. TRANSITION: cart/hmsc is an EXTRACTION SURFACE — a capture source like the labs; feature development on it STOPS; new game work happens inside hmsc-int\'s structure.',
+    keywords: ['compile', 'game compile', 'hmsc-int', 'hmsc output', 'emit', 'build the game', 'inversion', 'extraction surface', 'feature freeze', 'where do features go'],
   },
   {
     id: 'V16', name: 'Cutscenes: live, declarative TS files — never baked', status: 'ruled',
@@ -136,12 +136,12 @@ export const DECISIONS: Decision[] = [
   },
   {
     id: 'V19', name: 'The compile is always green and LLM-callable', status: 'ruled',
-    ruling: 'The game compile is a CLI any LLM can run at any time — compile constantly; "make sure it compiles" is a standing duty, not a milestone gate. LLMs can load runtime tests into the output: compile → boot headless → run behavior tests (P4) → exit with a verdict. A feature is done when the COMPILED GAME carries it and the verify run proves it — never discovered broken at the compile button. The dev flow never waits on the user.',
-    keywords: ['compile', 'game compile', 'llm callable', 'always green', 'verify', 'headless', 'runtime tests', 'ci', 'dev flow', 'make sure it compiles'],
+    ruling: 'The game compile is a CLI any LLM can run at any time — compile constantly; "make sure it compiles" is a standing duty, not a milestone gate. LLMs can load runtime tests into the output: compile → boot headless → run behavior tests (P4) → exit with a verdict. A feature is done when the COMPILED GAME carries it and the verify run proves it. GREEN HAS AN EXPLICIT MEANING: the entire testing surface is replayable all the time and DEEP — anything testable is scriptable. hmsc\'s console commands move into the tooling (game/commands/) and double as the test scripting language: a verify script is a saved command sequence replayed headless.',
+    keywords: ['compile', 'game compile', 'llm callable', 'always green', 'verify', 'headless', 'runtime tests', 'ci', 'dev flow', 'make sure it compiles', 'console commands', 'scriptable', 'replayable', 'test script', 'green'],
   },
   {
     id: 'V20', name: 'Persistence: stateless, micro-saved, UNBREAKABLE total cross-session history', status: 'ruled',
-    ruling: 'Workspace behavior (stateless design, saved at every micro change, historical undo) extended: history persists across ALL sessions as one total undo chain that CANNOT break when something new is introduced — ten days of bad changes steps right back to where it went bad. Storage is a LOG THAT SPLITS ITS CONCERNS: per-concern append-only streams (world edits, character edits, tuning, ...), never one monolithic blob; a state update writes to its specific workspace storage. New feature = new stream; old streams stay valid forever (schema evolution by addition, not migration). The game LOADS materialized snapshots, not the history. Disk cost accepted for development.',
+    ruling: 'Workspace behavior (stateless design, saved at every micro change, historical undo) extended: history persists across ALL sessions as one total undo chain that CANNOT break when something new is introduced — ten days of bad changes steps right back to where it went bad. Storage is a LOG THAT SPLITS ITS CONCERNS: per-concern append-only streams (world, characters, tuning, story, missions, activities, ...), never one monolithic blob. New feature = new stream; old streams stay valid forever (schema evolution by addition, not migration). The game LOADS materialized snapshots, not the history. Streams are NOT git-tracked (gitignored; explicit backup story). THE SNAPSHOT SYSTEM GROWS WITH ANY ADDED TRACKING — a new stream without snapshot support is an incomplete change. Disk cost accepted for development.',
     detail: 'The storage twin of V8\'s event-channel state tick and R6\'s RLE/determinism — the system is event-shaped; storage stops pretending otherwise. An undo point is a log position.',
     keywords: ['persistence', 'history', 'undo', 'workspace', 'stateless', 'micro save', 'append only', 'log', 'streams', 'snapshot', 'sessions', 'time machine', 'storage'],
   },
@@ -187,9 +187,9 @@ export const DECISIONS: Decision[] = [
     keywords: ['projectile', 'bullets', 'shooting', 'shot path', 'geometric', 'probabilistic', 'gunfire', 'ballistics'],
   },
   {
-    id: 'R3', name: 'Frame-loop hook shape: show-me (examples presented, not yet ruled)', status: 'show-me',
-    ruling: 'Three candidate shapes were presented (minimal hook / two-clock hook / host-driven subscription). Recommendation on record: two-clock now, host-driven as the destination. Not yet ruled — do not canonize a hook shape.',
-    keywords: ['useGameLoop', 'frame loop', 'hook', 'raf', 'setTimeout', 'loop shape'],
+    id: 'R3', name: 'Frame-loop hook shape: to be ruled BY A LAB', status: 'show-me',
+    ruling: 'The user: "this is what labs are for and why we are doing what we are doing" — the difference between loop shapes and how other mechanics play into them is not knowable on paper. A loop-shapes lab joins the SHOW-ME queue; until it rules, the ground floor\'s loop API stays deliberately MINIMAL. Do not canonize a hook shape.',
+    keywords: ['useGameLoop', 'frame loop', 'hook', 'raf', 'setTimeout', 'loop shape', 'loop lab'],
   },
   {
     id: 'R4', name: 'SCALE CONTRACT: 1 tile = 1 meter; player collider 1.65m, visual head-top ~2.04m', status: 'ruled',

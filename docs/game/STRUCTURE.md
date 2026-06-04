@@ -15,8 +15,10 @@ cart/hmsc-int/
     index.ts           the ONLY door: exports GAME_PHYSICS, GAME_PATHING, GAME_INPUT,
                        GAME_CAMERA, GAME_FIGURE, GAME_VEHICLE, GAME_ITEMS,
                        GAME_ANIMATION, GAME_KINDS, GAME_LOOP, GAME_CHANCE,
-                       GAME_PERCEPTION, GAME_CUTSCENE, GAME_CHROME, GAME_TELEMETRY
+                       GAME_PERCEPTION, GAME_CUTSCENE, GAME_STORY, GAME_MISSIONS,
+                       GAME_ACTIVITIES, GAME_COMMANDS, GAME_CHROME, GAME_TELEMETRY
     loop.ts            frame loop + the ~45/min state tick + event channel (V8)
+                       — API stays MINIMAL until the loop-shapes lab rules R3
     camera.ts          registry + aim rig + screenRay picking (V3)
     input.ts           key/pointer transport only — integration is host-side (V7)
     physics.ts         the host physics interface (V1; speaks the game bindings)
@@ -30,6 +32,14 @@ cart/hmsc-int/
     chance.ts          ONE odds engine: breakdown surface + cover input (V9)
     perception.ts      the awareness ladder + consequence hooks (V12)
     cutscene/          the live scene format: one clock, tracks, scrubbing (V16)
+    story/             narrative arcs, dialog, flags — feeds/consumes perception
+                       consequences (V12) and cutscenes (V16)
+    missions/          scripted objectives — built on the cutscene clock, pathing,
+                       and the state tick's forced events
+    activities/        repeatable side loops (the non-mission gameplay verbs)
+    commands/          the console-command registry (MOVED IN from hmsc) — also
+                       THE test scripting surface: verify scripts are command
+                       sequences (V19); anything testable is scriptable here
     chrome/            lab chrome kit (Chip/Knob/Meter/panel) + lab environment
     telemetry.ts       perf panel + copy-diagnostics
 
@@ -40,7 +50,11 @@ cart/hmsc-int/
     items/             item authoring (+ the scale-audit workbench, V11)
     materials/         shader/texture/material studio (the locked art vocab)
     cutscenes/         timeline editor + scrubber over game/cutscene
+    story/             story / missions / activities authoring (may split into
+                       three routes as the systems grow; starts as one)
     tuning/            P2 made real: every exposed value, edit → compile and go
+    console/           the command console (game/commands surface) — run, record,
+                       and SAVE command sequences as replayable test scripts (V19)
 
   labs/                short scaffolded files — the experiment slots (V13/V17/P5)
     _scaffold.tsx      the template `rjit lab new <name>` copies
@@ -53,12 +67,17 @@ cart/hmsc-int/
 
   data/                what P2 edits, what compile/ consumes. Never logic. (V20)
     streams/           per-concern APPEND-ONLY logs: world/, characters/,
-                       vehicles/, items/, tuning/, cutscenes/ — a state update
-                       writes to ITS stream; new feature = NEW stream, old
-                       streams stay valid forever. One total cross-session undo
-                       chain; an undo point is a log position. Disk is cheap.
+                       vehicles/, items/, tuning/, cutscenes/, story/, missions/,
+                       activities/ — a state update writes to ITS stream; new
+                       feature = NEW stream, old streams stay valid forever. One
+                       total cross-session undo chain; an undo point is a log
+                       position. Disk is cheap. NOT git-tracked (gitignored;
+                       git is the code time machine, streams are the content
+                       time machine) — with an explicit backup/export story.
     snapshots/         materialized views of the streams — THIS is what the
-                       game/compile loads, never the history itself.
+                       game/compile loads, never the history itself. RULE: the
+                       snapshot system GROWS with every added stream — adding
+                       tracking without snapshot support is an incomplete change.
 
   shell/               the tool's own chrome: nav, routes, workspace/session
                        state, the assistant — tool concerns, never game concerns
@@ -156,9 +175,15 @@ is the capture done wrong.
 | combat_lab / pathing_lab / ragdoll_lab / planet_run scenes | labs/<name>.tsx (rebuilt on @game, with notes) |
 | lab Chip/Knob/panel + skybox/lights re-rolls | game/chrome/                            |
 
+| hmsc commands/registry.ts (console commands)| game/commands/ + editors/console/ — and doubles as the V19 test scripting surface |
+
 What does NOT move: `runtime/` and `framework/` stay platform (the registry,
-primitives, workspace, geometries — game/ consumes them). `cart/hmsc/` shrinks
-toward being compile/'s OUTPUT (V15) rather than a hand-written cart.
+primitives, workspace, geometries — game/ consumes them).
+
+**`cart/hmsc` is an EXTRACTION SURFACE (ruled).** Everything goes into one
+thing: hmsc-int. The playable hmsc is a capture source exactly like the labs —
+feature development on it stops; new game work happens in hmsc-int's structure;
+hmsc ends as compile/'s OUTPUT (V15), not a hand-written cart.
 
 ## Build order (Milestone 0, restated against this shape)
 
