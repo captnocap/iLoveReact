@@ -671,21 +671,43 @@ export default function PathingLab() {
       return cellCenter(cx, cz);
     };
 
-    // Traffic goals are AHEAD-ONLY: a destination behind the bumper is how
-    // you get U-turn assholes. Cars arrive, pick the next goal in front of
-    // their nose, and just keep circulating — dense fixed flow, no flips.
-    const pickGoalAhead = (pool: [number, number][], fromX: number, fromZ: number, fx: number, fz: number): PathPoint => {
-      for (let attempt = 0; attempt < 18; attempt++) {
-        const [cx, cz] = pool[Math.floor(rand() * pool.length)];
-        const p = cellCenter(cx, cz);
+    // Traffic goals are AHEAD-ONLY and FLOW-ALIGNED. Ahead-only kills the
+    // turn-around-at-spawn flips; flow alignment kills the sneakier one:
+    // half the lane pool is OPPOSING-direction cells, and a goal "15m ahead
+    // on the westbound lane" is geometrically ahead but only legally
+    // reachable by driving past it, U-turning through a junction, and
+    // coming back. A goal's lane flow must agree with the bearing you'd
+    // arrive on — then no destination ever demands a reversal.
+    const LANE_DIR: Partial<Record<TileKind, [number, number]>> = {
+      laneEast: [1, 0], laneWest: [-1, 0], laneSouth: [0, 1], laneNorth: [0, -1],
+    };
+    const pickGoalAhead = (cells: { x: number; z: number; kind: TileKind }[], fromX: number, fromZ: number, fx: number, fz: number): PathPoint => {
+      for (let attempt = 0; attempt < 28; attempt++) {
+        const lc = cells[Math.floor(rand() * cells.length)];
+        const p = cellCenter(lc.x, lc.z);
         const dx = p[0] - fromX;
         const dz = p[1] - fromZ;
         const d = Math.hypot(dx, dz);
         if (d < 12) continue;
-        if ((dx * fx + dz * fz) / d < 0.25) continue;
+        const bx = dx / d;
+        const bz = dz / d;
+        if (bx * fx + bz * fz < 0.25) continue; // ahead of the nose
+        const flow = LANE_DIR[lc.kind];
+        if (!flow || flow[0] * bx + flow[1] * bz < 0.15) continue; // arrival agrees with bearing
         return p;
       }
-      return pickGoal(pool, fromX, fromZ);
+      // relaxed fallback: keep the no-reversal rule, drop the distance bar
+      for (let attempt = 0; attempt < 28; attempt++) {
+        const lc = cells[Math.floor(rand() * cells.length)];
+        const p = cellCenter(lc.x, lc.z);
+        const dx = p[0] - fromX;
+        const dz = p[1] - fromZ;
+        const d = Math.hypot(dx, dz) || 1;
+        const flow = LANE_DIR[lc.kind];
+        if (!flow || (flow[0] * dx + flow[1] * dz) / d < 0.15) continue;
+        if (d > 6) return p;
+      }
+      return pickGoal(cells.map((c) => [c.x, c.z] as [number, number]), fromX, fromZ);
     };
 
     const logLine = (s: Sim, line: string) => { s.log = [line, ...s.log].slice(0, 6); };
@@ -765,7 +787,7 @@ export default function PathingLab() {
           // (re)route: fresh spawn, arrival (goal null), or barrier repath
           if (!car.plan || car.pathDirty) {
             if (!car.goal) {
-              car.goal = pickGoalAhead(world.laneXY, car.x, car.z, Math.sin(car.yawDeg * RAD), Math.cos(car.yawDeg * RAD));
+              car.goal = pickGoalAhead(world.laneCells, car.x, car.z, Math.sin(car.yawDeg * RAD), Math.cos(car.yawDeg * RAD));
             }
             const found = findPath(VEH_PROFILE, [car.x, car.z], car.goal);
             car.pathDirty = false;
