@@ -244,16 +244,28 @@ There are effectively TWO projects in this repo: **reactjit** (the platform) and
 and covers ONLY the game's carts/modules — the 33 documented there ARE the game.
 Do not add app/tui/chat/test carts to it; they are platform-side and unrelated.
 
+- **`tools/oracle "<query>"` — CALL THIS FIRST.** Before grep/bash searching,
+  before considering code or ideas elsewhere, before any game-side decision:
+  `tools/oracle "which humanoid"`, `tools/oracle "player height"`. It returns
+  the USER'S EXACT RULINGS (docs/game/DECISIONS.md, structured) ranked above
+  index records and hazards — even when competing implementations exist in the
+  code, the RULINGS section is the answer and the competitors are history.
+  Records flagged `⚠ RETIRED by Vn` are dead ends regardless of their status.
+  If RULINGS comes back empty, the area may be genuinely undecided — check
+  DECISIONS.md's open/show-me items before inventing an approach.
+- `docs/game/DECISIONS.md` — the constitution: 16 verdicts + 6 principles ruled
+  by the user. Anything contradicting a verdict is a bug.
 - `docs/game/<cart>.md` — per-cart English audit (mechanism-specific: host fn vs
   JS, file:line). `_reports/CONSENSUS.md` — the tallied consolidation queue.
 - `docs/game/_index/` — typed, queryable extraction (DocIndex / InterfaceRecord /
-  PatternRecord / HazardRecord). Query it before re-deriving what exists:
-  `byPurpose('camera')`, `byStatus('dormant')`, `hazardsBySeverity('high')`,
-  `patternsByStatus('promote')`, `duplicateNames()`.
+  PatternRecord / HazardRecord). Programmatic queries: `byPurpose('camera')`,
+  `byStatus('dormant')`, `hazardsBySeverity('high')`, `duplicateNames()`.
 - **Maintenance contract:** touching a documented game cart = update its `.md`
-  AND its `_index/records/<name>.ts` in the same commit. A new game cart isn't
-  done until it has both. An index that lags the code is the disease this layer
-  was built to cure (see the physics_lab/physics3d naming inversion).
+  AND its `_index/records/<name>.ts` in the same commit. Editing DECISIONS.md =
+  update `_index/decisions.ts` in the same commit (the oracle reads it). A new
+  game cart isn't done until it has both. An index that lags the code is the
+  disease this layer was built to cure (see the physics_lab/physics3d naming
+  inversion).
 
 ---
 

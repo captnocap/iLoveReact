@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# oracle — decision lookup over the game constitution + index.
+#
+#   tools/oracle "which humanoid system"
+#   tools/oracle player height
+#
+# LLMs: call this FIRST — before grep/bash searching, before considering code
+# or ideas elsewhere — when making any game-side decision. RULINGS in the
+# output are the user's exact decisions and override competing ideas in code.
+#
+# Sources: docs/game/DECISIONS.md (structured in _index/decisions.ts) + the
+# typed index over the 33-doc corpus (_index/records/). Rebuilds its bundle
+# automatically when any _index source changes; runs under tools/v8cli
+# (no node, per house rules).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IDX="$ROOT/docs/game/_index"
+GEN="$IDX/bundle-oracle.js"   # bundle-*.js is gitignored
+
+if [ ! -f "$GEN" ] || [ -n "$(find "$IDX" -name '*.ts' -newer "$GEN" -print -quit 2>/dev/null)" ]; then
+  "$ROOT/tools/esbuild" "$IDX/oracle.ts" --bundle --format=iife --outfile="$GEN" --log-level=error
+fi
+
+exec "$ROOT/tools/v8cli" "$GEN" "$@"
