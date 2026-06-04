@@ -20,4 +20,5 @@ export const HMSC_TILE_TEXTURE_KEYS = {
   laneEast: 'hmsc.tile.road',
   laneWest: 'hmsc.tile.road',
   junction: 'hmsc.tile.road',
+  crosswalk: 'hmsc.tile.road',
 } satisfies Record<TileKind, string>;

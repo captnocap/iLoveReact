@@ -35,6 +35,13 @@ export type TileKind =
   | 'laneEast'
   | 'laneWest'
   | 'junction'
+  // The zebra: a band across the road just outside each junction edge. Two
+  // jobs, one tile: it is the ONLY place pedestrian cost shaping makes
+  // crossing a road sane (walk profiles make it cheaper than sidewalk, the
+  // road itself near-blocked), AND it is the car stop line — signal yields
+  // halt BEFORE the crosswalk band, and a walker on the zebra owns the road
+  // regardless of the light.
+  | 'crosswalk'
   | 'mud'
   | 'sand'
   | 'wall'

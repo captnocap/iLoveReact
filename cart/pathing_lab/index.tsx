@@ -65,6 +65,10 @@ const PED_PROFILE = 0;
 const VEH_PROFILE = 1;
 const PED_SPEED = 1.5;
 const RECOVER_SECONDS = 0.8;
+const PED_COLLIDER_R = 0.24;
+const PED_YIELD_R = 0.42;
+const CAR_BODY_WIDTH_SCALE = 0.82;
+const CAR_QUEUE_GAP = 0.42;
 
 const KIND_INDEX = Object.fromEntries(TILE_KINDS.map((k, i) => [k, i])) as Record<TileKind, number>;
 const RAD = Math.PI / 180;
@@ -85,6 +89,9 @@ function pathHostCompiled(): boolean {
 // derive as the ring of ground cells touching road.
 const ROAD_W = 6;
 const ROAD_BANDS = [8, 30]; // band start; covers start..start+ROAD_W-1, both axes
+// zebra band depth (cells) just outside each junction edge — where peds
+// cross and where the signal stop line actually is
+const CROSSWALK_DEPTH = 2;
 const WALL_RECTS: [number, number, number, number][] = [
   [2, 2, 4, 4], [16, 2, 5, 4], [24, 3, 4, 4], [38, 2, 4, 4],
   [2, 17, 4, 5], [17, 16, 6, 3], [25, 21, 4, 5], [38, 17, 4, 4],
@@ -204,14 +211,18 @@ function buildWorld() {
   const at = (x: number, z: number) => kinds[z * COLS + x];
   const set = (x: number, z: number, k: TileKind) => { kinds[z * COLS + x] = KIND_INDEX[k]; };
 
-  // Each 6-wide band is TWO 3-tile lane trios [shoulder, lane, shoulder] —
-  // the center tile carries the flow direction in its KIND. Right-hand
-  // traffic picks the sides (right = forward x up): horizontal roads run
-  // westbound on the low-z half / eastbound high-z; vertical run southbound
+  // Each 6-wide band is TWO 3-tile lane trios — and the WHOLE trio carries
+  // the flow kind, not just the marked center. Flow-less 'road' shoulders
+  // were a legal loophole: A* happily cruised the ONCOMING shoulder as a
+  // wrong-side shortcut (no flow = no against-flow penalty). All three
+  // tiles flow; the |x| marking is purely visual on the center line; cars
+  // hold their column because moving laterally inside a trio is crossFlow.
+  // Right-hand traffic picks the sides (right = forward x up): horizontal
+  // roads run westbound low-z / eastbound high-z; vertical run southbound
   // (+Z) low-x / northbound high-x. Crossings get flow-neutral 'junction'
   // tiles — the grid itself knows where intersections are.
-  const H_TRIOS: TileKind[] = ['road', 'laneWest', 'road', 'road', 'laneEast', 'road'];
-  const V_TRIOS: TileKind[] = ['road', 'laneSouth', 'road', 'road', 'laneNorth', 'road'];
+  const H_TRIOS: TileKind[] = ['laneWest', 'laneWest', 'laneWest', 'laneEast', 'laneEast', 'laneEast'];
+  const V_TRIOS: TileKind[] = ['laneSouth', 'laneSouth', 'laneSouth', 'laneNorth', 'laneNorth', 'laneNorth'];
   for (const band of ROAD_BANDS) {
     for (let i = 0; i < COLS; i++) {
       for (let o = 0; o < ROAD_W; o++) set(i, band + o, H_TRIOS[o]);
@@ -227,24 +238,44 @@ function buildWorld() {
       for (let z = 0; z < ROAD_W; z++) for (let x = 0; x < ROAD_W; x++) set(bx + x, bz + z, 'junction');
     }
   }
+  // crosswalks: zebra bands across each road just OUTSIDE every junction
+  // edge — the only sane pedestrian crossing AND the cars' stop line
+  for (const bx of ROAD_BANDS) {
+    for (const bz of ROAD_BANDS) {
+      for (let o = 0; o < ROAD_W; o++) {
+        for (let d = 1; d <= CROSSWALK_DEPTH; d++) {
+          set(bx - d, bz + o, 'crosswalk'); // west approach (crosses the H road)
+          set(bx + ROAD_W - 1 + d, bz + o, 'crosswalk'); // east
+          set(bx + o, bz - d, 'crosswalk'); // north (crosses the V road)
+          set(bx + o, bz + ROAD_W - 1 + d, 'crosswalk'); // south
+        }
+      }
+    }
+  }
   for (const [x0, z0, w, h] of WALL_RECTS) {
     for (let z = z0; z < z0 + h; z++) for (let x = x0; x < x0 + w; x++) set(x, z, 'wall');
   }
-  // sidewalks: every mud cell that touches the road family becomes pavement
+  // sidewalks TWO tiles wide: the ring pass runs twice (the second ring
+  // seeds off the first) so walkers can pass each other and every crosswalk
+  // mouth lands on pavement
   const ROAD_FAMILY = new Set(
-    (['road', 'laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction'] as TileKind[]).map((k) => KIND_INDEX[k]),
+    (['road', 'laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction', 'crosswalk'] as TileKind[]).map((k) => KIND_INDEX[k]),
   );
   const mud = KIND_INDEX.mud;
-  const sidewalkAt: boolean[] = new Array(COLS * ROWS).fill(false);
-  for (let z = 0; z < ROWS; z++) {
-    for (let x = 0; x < COLS; x++) {
-      if (at(x, z) !== mud) continue;
-      const near = (x > 0 && ROAD_FAMILY.has(at(x - 1, z))) || (x < COLS - 1 && ROAD_FAMILY.has(at(x + 1, z)))
-        || (z > 0 && ROAD_FAMILY.has(at(x, z - 1))) || (z < ROWS - 1 && ROAD_FAMILY.has(at(x, z + 1)));
-      if (near) sidewalkAt[z * COLS + x] = true;
+  const sidewalk = KIND_INDEX.sidewalk;
+  for (let ring = 0; ring < 2; ring++) {
+    const seeds = ring === 0 ? ROAD_FAMILY : new Set([sidewalk]);
+    const mark: boolean[] = new Array(COLS * ROWS).fill(false);
+    for (let z = 0; z < ROWS; z++) {
+      for (let x = 0; x < COLS; x++) {
+        if (at(x, z) !== mud) continue;
+        const near = (x > 0 && seeds.has(at(x - 1, z))) || (x < COLS - 1 && seeds.has(at(x + 1, z)))
+          || (z > 0 && seeds.has(at(x, z - 1))) || (z < ROWS - 1 && seeds.has(at(x, z + 1)));
+        if (near) mark[z * COLS + x] = true;
+      }
     }
+    for (let i = 0; i < kinds.length; i++) if (mark[i]) kinds[i] = sidewalk;
   }
-  for (let i = 0; i < kinds.length; i++) if (sidewalkAt[i]) kinds[i] = KIND_INDEX.sidewalk;
 
   // bushes scattered on open ground
   const rand = seededRandom(909);
@@ -263,8 +294,11 @@ function buildWorld() {
   const laneXY: [number, number][] = [];
   const walkCells: [number, number][] = [];
   const wallCells: [number, number][] = [];
+  const crosswalkCells: { x: number; z: number; alongX: boolean }[] = [];
+  const markCells: { x: number; z: number; kind: TileKind }[] = [];
   const strips: Strip[] = [];
   const LANE_KINDS = new Set<TileKind>(['laneNorth', 'laneSouth', 'laneEast', 'laneWest']);
+  const inHBand = (z: number) => ROAD_BANDS.some((b) => z >= b && z < b + ROAD_W);
   for (let z = 0; z < ROWS; z++) {
     let x = 0;
     while (x < COLS) {
@@ -277,8 +311,12 @@ function buildWorld() {
         if (LANE_KINDS.has(kind)) {
           laneCells.push({ x: x + i, z, kind });
           laneXY.push([x + i, z]);
+          // the |x| marking lives only on the trio's CENTER line
+          const center = (kind === 'laneEast' || kind === 'laneWest') ? z : x + i;
+          if (ROAD_BANDS.some((b) => center === b + 1 || center === b + 4)) markCells.push({ x: x + i, z, kind });
         } else if (kind === 'sidewalk') walkCells.push([x + i, z]);
         else if (kind === 'wall') wallCells.push([x + i, z]);
+        else if (kind === 'crosswalk') crosswalkCells.push({ x: x + i, z, alongX: inHBand(z) });
       }
       x += len;
     }
@@ -318,7 +356,7 @@ function buildWorld() {
     }
   }
 
-  return { kinds, strips, bushes, laneCells, laneXY, walkCells, wallCells, junctions };
+  return { kinds, strips, bushes, laneCells, laneXY, walkCells, wallCells, crosswalkCells, markCells, junctions };
 }
 
 // Behavioral shaping on top of raw tile legality. hmsc's tile costs answer
@@ -330,14 +368,17 @@ function buildWorld() {
 // a walker; strolling the centerline does not). This is the FLOW-HINT
 // slice hmsc's world/pathing.ts reserves for itself.
 const PROFILE_TUNING: Record<'walk' | 'drive', Partial<Record<TileKind, number>>> = {
+  // walkers: the crosswalk undercuts even the sidewalk, so every road
+  // crossing funnels onto a zebra; raw road is priced like a cliff (12x)
+  // so mid-block jaywalking into 50 km/h traffic stops being a lifestyle
   walk: {
-    sidewalk: 0.45, mud: 1.4, sand: 1.6,
-    road: 3.5, asphalt: 3.5, laneNorth: 3.5, laneSouth: 3.5, laneEast: 3.5, laneWest: 3.5, junction: 3.2,
+    sidewalk: 0.45, crosswalk: 0.4, mud: 1.4, sand: 1.6,
+    road: 12, asphalt: 12, laneNorth: 12, laneSouth: 12, laneEast: 12, laneWest: 12, junction: 14,
   },
-  // drivers live on the lane-center tiles; the shoulder is passable but
-  // costly (overtakes/recovery only); everything off-road is a hard block
+  // drivers live on the lane-center tiles; crosswalks are drivable road;
+  // the shoulder is passable but costly; everything off-road is a hard block
   drive: {
-    laneNorth: 1, laneSouth: 1, laneEast: 1, laneWest: 1, junction: 1,
+    laneNorth: 1, laneSouth: 1, laneEast: 1, laneWest: 1, junction: 1, crosswalk: 1,
     road: 1.6, asphalt: 1.4,
     sidewalk: 0, mud: 0, sand: 0, bush: 0,
   },
@@ -372,7 +413,8 @@ const WorldMeshes = memo(function WorldMeshes(props: {
   strips: Strip[];
   bushes: [number, number][];
   wallCells: [number, number][];
-  laneCells: { x: number; z: number; kind: TileKind }[];
+  markCells: { x: number; z: number; kind: TileKind }[];
+  crosswalkCells: { x: number; z: number; alongX: boolean }[];
 }) {
   return (
     <>
@@ -399,8 +441,8 @@ const WorldMeshes = memo(function WorldMeshes(props: {
         <Scene3D.Mesh key={`b${i}`} geometry={Geometry.Cone} params={{ radius: 0.34, height: 0.7, segments: 8 }}
           material="#2f6b35" position={[ORIGIN_X + (x + 0.5) * CELL, 0.38, ORIGIN_Z + (z + 0.5) * CELL]} />
       ))}
-      {/* the |x| markings — dashed paint along every lane-center tile */}
-      {props.laneCells.map((lc, i) => {
+      {/* the |x| markings — dashed paint along each trio's CENTER line */}
+      {props.markCells.map((lc, i) => {
         if ((lc.x + lc.z) % 2 !== 0) return null;
         const horizontal = lc.kind === 'laneEast' || lc.kind === 'laneWest';
         return (
@@ -408,6 +450,12 @@ const WorldMeshes = memo(function WorldMeshes(props: {
             material="#aab3c2" position={[ORIGIN_X + (lc.x + 0.5) * CELL, 0.095, ORIGIN_Z + (lc.z + 0.5) * CELL]} />
         );
       })}
+      {/* zebra stripes — one bar per crosswalk cell, laid along the road axis */}
+      {props.crosswalkCells.map((cc, i) => (
+        <Scene3D.Mesh key={`zb${i}`} geometry={Geometry.Box}
+          params={cc.alongX ? { width: 0.78, height: 0.02, depth: 0.34 } : { width: 0.34, height: 0.02, depth: 0.78 }}
+          material="#c9d2de" position={[ORIGIN_X + (cc.x + 0.5) * CELL, 0.1, ORIGIN_Z + (cc.z + 0.5) * CELL]} />
+      ))}
     </>
   );
 });
@@ -442,6 +490,12 @@ function PlacedVehicle(props: { car: Car; showHitboxes: boolean }) {
           position={place(h.position)} rotation={turn(h.rotation)} scale={h.size}
           material={{ color: h.critical ? '#fb7185' : '#38bdf8', opacity: 0.15 }} />
       )) : null}
+      {props.showHitboxes ? (
+        <Scene3D.Mesh geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
+          position={[car.x, 0.16, car.z]} rotation={[0, car.yawDeg, 0]}
+          scale={[car.halfWidth * 2, 0.08, car.halfLen * 2]}
+          material={{ color: '#34d399', opacity: 0.16 }} />
+      ) : null}
     </>
   );
 }
@@ -470,6 +524,7 @@ type Ped = {
 type Car = {
   doc: VehicleDoc;
   halfLen: number;
+  halfWidth: number;
   wheelCirc: number;
   profile: MotionProfile;
   // rendered state — yaw eases toward the path tangent; steer/brake feed
@@ -620,6 +675,7 @@ export default function PathingLab() {
         s.cars.push({
           doc,
           halfLen: dims.length / 2,
+          halfWidth: (dims.width * CAR_BODY_WIDTH_SCALE) / 2,
           wheelCirc: 2 * Math.PI * dims.wheelR,
           profile: { maxSpeed: 5 + rand() * 2.5, accel: 2.3 + rand() * 0.9, decel: 6.5, minCornerSpeed: 1.5 },
           x, z, yawDeg, steerDeg: 0, speed: 0, accelNow: 0, odometer: 0,
@@ -716,7 +772,14 @@ export default function PathingLab() {
               const rz = ped.z - car.z;
               const ahead = rx * fx + rz * fz;
               const lateral = Math.abs(rx * fz - rz * fx);
-              if (ahead > 0 && ahead < 8 && lateral < 1.4) stopD = Math.min(stopD, ahead - (car.halfLen + 1.1));
+              if (ahead > 0 && ahead < 8 && lateral < car.halfWidth + PED_YIELD_R) stopD = Math.min(stopD, ahead - (car.halfLen + 1.1));
+              // a walker ON a crosswalk owns the road: stop short of the
+              // whole zebra band no matter what the light says
+              const pcx = Math.floor((ped.x - ORIGIN_X) / CELL);
+              const pcz = Math.floor((ped.z - ORIGIN_Z) / CELL);
+              if (pcx < 0 || pcz < 0 || pcx >= COLS || pcz >= ROWS) continue;
+              if (world.kinds[pcz * COLS + pcx] !== KIND_INDEX.crosswalk) continue;
+              if (ahead > 0 && ahead < 11 && lateral < 3.4) stopD = Math.min(stopD, ahead - (car.halfLen + 1.7));
             }
           }
           for (let oi = 0; oi < s.cars.length; oi++) {
@@ -729,7 +792,7 @@ export default function PathingLab() {
             const rz = other.z - car.z;
             const ahead = rx * fx + rz * fz;
             const lateral = Math.abs(rx * fz - rz * fx);
-            if (ahead <= 0 || ahead >= 10 || lateral >= 1.4) continue;
+            if (ahead <= 0 || ahead >= 10 || lateral >= car.halfWidth + other.halfWidth + CAR_QUEUE_GAP) continue;
             if (other.speed < 0.5 && car.speed < 0.5 && ci < oi) continue; // crossing tie-break
             stopD = Math.min(stopD, ahead - (car.halfLen + other.halfLen + 0.8));
           }
@@ -750,8 +813,9 @@ export default function PathingLab() {
                 if (dd >= -0.1 && dd < 10 && car.x > j.x0 - 0.7 && car.x < j.x1 + 0.7) enter = dd;
               }
               if (enter == null) continue;
-              if (phase === 'caution' && enter < car.halfLen + 1.6) continue; // too late — roll through
-              stopD = Math.min(stopD, enter - (car.halfLen + 0.35));
+              if (phase === 'caution' && enter < car.halfLen + CROSSWALK_DEPTH + 1.6) continue; // too late — roll through
+              // the stop line is BEFORE the crosswalk band, not the box edge
+              stopD = Math.min(stopD, enter - (car.halfLen + CROSSWALK_DEPTH + 0.35));
             }
           }
           if (stopD !== Infinity) stopD = Math.max(0, stopD);
@@ -778,7 +842,12 @@ export default function PathingLab() {
           if (car.speed > 2.5) {
             for (const ped of s.peds) {
               if (ped.mode !== 'walk') continue;
-              if (Math.hypot(ped.x - car.x, ped.z - car.z) > car.halfLen + 0.6) continue;
+              const rx = ped.x - car.x;
+              const rz = ped.z - car.z;
+              const ahead = rx * fx + rz * fz;
+              const lateral = Math.abs(rx * fz - rz * fx);
+              if (ahead < -car.halfLen * 0.55 || ahead > car.halfLen + PED_COLLIDER_R) continue;
+              if (lateral > car.halfWidth + PED_COLLIDER_R) continue;
               const local = buildSkeleton('neutral', 'walk', ped.gait % 1);
               const bones = placeBones(local, ped.yawDeg + 180, ped.x, ped.z);
               ped.ragdoll = createRagdoll(bones);
@@ -979,7 +1048,7 @@ export default function PathingLab() {
         <Box style={{ flexGrow: 1 }} />
         <Text fontSize={10} color={DIM}>profiles: walkCost/vehicleCost straight from hmsc tileKinds</Text>
         <Text fontSize={10} color={DIM}>lane TILES carry direction: laneEast/West/North/South centers + flow-neutral junction tiles — right-hand traffic is in the paint</Text>
-        <Text fontSize={10} color={DIM}>drivers brake for walkers, queue behind cars, stop on red (hmsc signal clock) — toggle reckless for the old chaos</Text>
+        <Text fontSize={10} color={DIM}>crosswalks: peds only cross on zebras, cars stop BEFORE them on red, and a walker on the zebra owns the road — toggle reckless for the old chaos</Text>
       </Col>
 
       {/* ── right: the world ── */}
@@ -997,7 +1066,7 @@ export default function PathingLab() {
           <Scene3D.AmbientLight color="#9aa8c4" intensity={0.6} />
           <Scene3D.DirectionalLight direction={[0.45, 0.85, 0.3]} color="#fff2d8" intensity={0.85} />
 
-          <WorldMeshes strips={world.strips} bushes={world.bushes} wallCells={world.wallCells} laneCells={world.laneCells} />
+          <WorldMeshes strips={world.strips} bushes={world.bushes} wallCells={world.wallCells} markCells={world.markCells} crosswalkCells={world.crosswalkCells} />
 
           {/* stop lights — hmsc's signal clock, boxes from the junction tiles */}
           <TrafficLights clock={trafficClockSeconds()} junctions={world.junctions} />

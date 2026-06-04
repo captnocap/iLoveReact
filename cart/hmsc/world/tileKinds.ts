@@ -437,6 +437,22 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#272c37', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // The zebra crossing (see design.ts) — drivable like road, pleasantly
+  // walkable so pedestrian cost shaping funnels every road crossing here.
+  crosswalk: {
+    kind: 'crosswalk',
+    placement: 'surface',
+    label: 'Crosswalk',
+    pathing: { walkable: true, movementCost: 0.95, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 0.9, runCost: 0.95, vehicleCost: 0.75, preferredByVehicles: false, cover: 'none', noise: 0.55 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.19, lateralGrip: 0.92, restitution: 0.84 },
+    render: { color: '#3a4250', heightMeters: 0.085, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];
