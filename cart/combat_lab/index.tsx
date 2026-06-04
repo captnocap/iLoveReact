@@ -595,6 +595,16 @@ function slideMove(pos: V3, vx: number, vz: number, dt: number, radius: number):
 
 // ── small 3D scene helpers ───────────────────────────────────────────────────
 
+// HARD RULE for anything sized per-frame: UNIT geometry params + a `scale`
+// transform. The geometry intern cache (runtime/geometries/intern.ts) keeps
+// every unique (id, params) FOREVER, JS-side and host-side — a continuous
+// float in `params` (a tracer's length, a health bar's width) mints a fresh
+// vertex buffer every frame and OOMs the heap in minutes. Module-const params
+// = one intern entry, ever; the per-instance size rides the transform.
+const UNIT_CYL = { radius: 1, height: 1, segments: 6 };
+const UNIT_BOX = { width: 1, height: 1, depth: 1 };
+const UNIT_SPHERE = { radius: 1, segments: 8, rings: 6 };
+
 // A→B as a thin Y-axis cylinder (swing-around-X then yaw — the host frame).
 function SegmentMesh(props: { a: V3; b: V3; radius: number; material: any }) {
   const [ax, ay, az] = props.a;
@@ -607,10 +617,11 @@ function SegmentMesh(props: { a: V3; b: V3; radius: number; material: any }) {
   return (
     <Scene3D.Mesh
       geometry={Geometry.Cylinder}
-      params={{ radius: props.radius, height: length, segments: 6 }}
+      params={UNIT_CYL}
       material={props.material}
       position={[(ax + bx) / 2, (ay + by) / 2, (az + bz) / 2]}
       rotation={[swing, yaw, 0]}
+      scale={[props.radius, length, props.radius]}
     />
   );
 }
@@ -627,8 +638,8 @@ function HealthBar(props: { x: number; y: number; z: number; frac: number; camPo
   const s = Math.sin(faceYaw * RAD);
   return (
     <>
-      <Scene3D.Mesh geometry={Geometry.Box} params={{ width: w + 0.06, height: 0.1, depth: 0.03 }} material={{ color: '#0c1220', opacity: 0.85 }} position={[props.x, props.y, props.z]} rotation={[0, faceYaw, 0]} />
-      <Scene3D.Mesh geometry={Geometry.Box} params={{ width: fw, height: 0.07, depth: 0.03 }} material={hpColor(props.frac * 100)} position={[props.x + offset * c + 0.02 * s, props.y, props.z - offset * s + 0.02 * c]} rotation={[0, faceYaw, 0]} />
+      <Scene3D.Mesh geometry={Geometry.Box} params={UNIT_BOX} material={{ color: '#0c1220', opacity: 0.85 }} position={[props.x, props.y, props.z]} rotation={[0, faceYaw, 0]} scale={[w + 0.06, 0.1, 0.03]} />
+      <Scene3D.Mesh geometry={Geometry.Box} params={UNIT_BOX} material={hpColor(props.frac * 100)} position={[props.x + offset * c + 0.02 * s, props.y, props.z - offset * s + 0.02 * c]} rotation={[0, faceYaw, 0]} scale={[fw, 0.07, 0.03]} />
     </>
   );
 }
@@ -1387,9 +1398,9 @@ export default function CombatLab() {
             item.kind === 'seg' ? (
               <SegmentMesh key={item.key} a={item.a} b={item.b} radius={item.radius} material={item.material} />
             ) : item.kind === 'box' ? (
-              <Scene3D.Mesh key={item.key} geometry={Geometry.Box} params={{ width: item.size[0], height: item.size[1], depth: item.size[2] }} material={item.material} position={item.p} rotation={item.r} />
+              <Scene3D.Mesh key={item.key} geometry={Geometry.Box} params={UNIT_BOX} material={item.material} position={item.p} rotation={item.r} scale={item.size} />
             ) : (
-              <Scene3D.Mesh key={item.key} geometry={Geometry.Sphere} params={{ radius: 1, segments: 8, rings: 6 }} material={item.material} position={item.p} scale={[item.scale, item.scale, item.scale]} />
+              <Scene3D.Mesh key={item.key} geometry={Geometry.Sphere} params={UNIT_SPHERE} material={item.material} position={item.p} scale={[item.scale, item.scale, item.scale]} />
             ),
           )}
         </Scene3D>
