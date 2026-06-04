@@ -354,14 +354,37 @@ heightfields, host pathing + motion plans, animation system, kinds registries,
 lab chrome kit + environment, telemetry + copy-diagnostics, the texture system
 with bake-once discipline.
 
-### Open items (not yet ruled)
-1. Bullet (the library): keep dormant vs delete the trio (Q1 sub-question).
-2. Projectile physics model: geometric vs probabilistic shot paths (V1).
-3. The render-loop hook's exact shape (V8 rules the state tick, not the frame loop).
-4. Vehicle scale + per-car quality pass (V10).
-5. Item scale audit results (V11).
-6. The RLE/relational animation format design (V6 rules the direction, not the format).
-7. screenRay export confidence was "i think so" — proceed, revisit if it fights back.
+### Open items — RESOLVED (2026-06-04 second pass)
+
+1. **Bullet (the library): KEEP BOTH, let the client decide.** The game uses the
+   hmsc phys, not Bullet. And the verdict on naming is blunt: "physics_lab.zig is
+   a horrible name" — the C1 honesty split is confirmed and urgent.
+2. **Projectile model: UNDECIDED — "someone needs to show me both."** → SHOW-ME
+   task: a lab demonstrating geometric vs probabilistic shot paths side by side.
+   Note: "this could be bullet tbh" — the projectile sim is a possible revival
+   use-case for the dormant Bullet library; include it as a third contender if
+   it earns it.
+3. **Render-loop hook: "show me some examples."** → SHOW-ME task: present 2–3
+   candidate hook shapes before committing one.
+4. **Scale: the WORLD SCALE IS SET. 1 tile = 1 meter.** Player collider = 1.65m
+   (verified: `HMSC_SCALE.playerCapsuleHeightMeters`, `cart/hmsc/world/scale.ts:8`);
+   the 2.04m in the scale labs is the VISUAL head-top (stylized-tall) — collider
+   and visual are different layers, both canonical. Vehicle scale/quality is
+   ongoing work against this fixed contract, not a blocker.
+5. **Items: the IDEAS are on point; the SCALE is trash.** game_item_gallery's
+   concepts stay; every model needs real scale work against the 1-tile=1m contract.
+6. **RLE/determinism is a GAMEPLAY-WIDE design value, not just animation.**
+   "Anything we can do to bring RLE design into the gameplay shape is key —
+   determinism is fast, and a lot of things are heavily reused, not unknown."
+   Treat as an extension of P1: represent repeated/known sequences as runs, not
+   per-frame computation. Applies to animation, NPC schedules, traffic, ambient
+   behavior.
+7. **screenRay: proceed** (internal code dedup — three carts hand-rolled the same
+   click-into-3D math; this just gives it one home. No gameplay implication).
+
+### SHOW-ME queue (demos owed to the user before ruling)
+- Projectile lab: geometric vs probabilistic vs (maybe) Bullet-driven, side by side.
+- Render-loop hook: 2–3 example shapes.
 
 ---
 
