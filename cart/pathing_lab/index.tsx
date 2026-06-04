@@ -148,6 +148,45 @@ function TrafficLights(props: { clock: number; junctions: Junction[] }) {
   );
 }
 
+// ── intersection discipline ──────────────────────────────────────────────────
+// A* through a flow-neutral junction box is a staircase, and every monotone
+// staircase has EQUAL cost — so the heap's tie-break happily cuts the near
+// corner, dragging a left turn across the oncoming half ("right lane into
+// the left lane"). Real turn geometry is the intersection of the two LANE
+// LINES: replace the in-box waypoints with the single apex
+// (exit lane's column, entry lane's row) — early for a right turn, deep past
+// the center for a left turn, exactly where right-hand traffic belongs.
+// Straight passes just drop the stair dust and stay straight.
+function straightenJunctions(points: [number, number][], junctions: Junction[]): [number, number][] {
+  if (points.length < 3) return points;
+  const insideBox = (p: [number, number], j: Junction) =>
+    p[0] > j.x0 - 1e-4 && p[0] < j.x1 + 1e-4 && p[1] > j.z0 - 1e-4 && p[1] < j.z1 + 1e-4;
+  const out: [number, number][] = [points[0]];
+  let i = 1;
+  while (i < points.length) {
+    const p = points[i];
+    const j = junctions.find((jj) => insideBox(p, jj));
+    if (!j) {
+      out.push(p);
+      i++;
+      continue;
+    }
+    let k = i;
+    while (k < points.length && insideBox(points[k], j)) k++;
+    if (k >= points.length) {
+      while (i < k) out.push(points[i++]); // route ends inside the box — keep as-is
+      continue;
+    }
+    const prev = out[out.length - 1];
+    const next = points[k];
+    const horizontalEntry = Math.abs(points[i][0] - prev[0]) > Math.abs(points[i][1] - prev[1]);
+    const straight = horizontalEntry ? Math.abs(next[1] - prev[1]) < 0.6 : Math.abs(next[0] - prev[0]) < 0.6;
+    if (!straight) out.push(horizontalEntry ? [next[0], prev[1]] : [prev[0], next[1]]);
+    i = k;
+  }
+  return out;
+}
+
 function seededRandom(seed: number): () => number {
   let t = seed >>> 0;
   return () => {
@@ -642,7 +681,8 @@ export default function PathingLab() {
             car.pathDirty = false;
             if (!found || found.points.length < 2) { car.goal = null; car.plan = null; continue; }
             car.path = found;
-            car.route = [[car.x, car.z], ...found.points.slice(1)];
+            // proper turn apexes through every junction the route crosses
+            car.route = straightenJunctions([[car.x, car.z], ...found.points.slice(1)], world.junctions);
             const mp = measurePath(car.route);
             car.routeCum = mp.cum;
             car.routeTotal = mp.total;
@@ -975,8 +1015,10 @@ export default function PathingLab() {
           {showPaths ? ([...s.cars, ...s.peds] as (Car | Ped)[]).map((agent, ai) => {
             if (!agent.path) return null;
             const isCar = 'doc' in agent;
+            // cars drive the straightened ROUTE (turn apexes), not raw path points
+            const pts = isCar ? (agent as Car).route : agent.path.points;
             const startIdx = Math.max(0, (isCar ? (agent as Car).crumbIdx : (agent as Ped).nextIdx) - 1);
-            return agent.path.points.slice(startIdx, startIdx + 15).map(([px, pz], i) => (
+            return pts.slice(startIdx, startIdx + 15).map(([px, pz], i) => (
               <Scene3D.Mesh key={`p${ai}.${i}`} geometry={Geometry.Box} params={{ width: 0.16, height: 0.03, depth: 0.16 }}
                 material={isCar ? '#35d0ff' : '#f7c948'} position={[px, 0.14, pz]} />
             ));
