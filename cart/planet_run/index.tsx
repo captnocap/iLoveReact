@@ -372,7 +372,10 @@ function buildPartRender(doc: HedDocument, faceDepth: number[], seed: number): R
         scaleY: id === 'head' ? doc.scaleY : preset.scaleY,
         scaleZ: preset.scaleZ,
       },
-      dynKey: `planetrun.${id}.${seed}`,
+      // Dyn-key contract (3d.zig dynSlotLocate): "<slotId>~<version>" — the
+      // '~' is REQUIRED. Without it the slot lookup returns null and the host
+      // silently skips the mesh (invisible body, visible clothing).
+      dynKey: `planetrun.${id}~${seed}`,
       texKey: id === 'head' ? `planetrun.head.${seed}` : skinTexKey,
     };
   }

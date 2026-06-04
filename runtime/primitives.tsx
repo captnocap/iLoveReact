@@ -514,6 +514,24 @@ Scene3DBase.Fog = ({ near, far, color, enabled = true, ...rest }: any) =>
     scene3dFogNear: enabled === false ? 1e7 : (Number.isFinite(near) && near > 0 ? near : 0),
     scene3dFogFar: enabled === false ? 2e7 : (Number.isFinite(far) && far > 0 ? far : 0),
   });
+
+// Identity-stable shipping caches for the dynamic-geometry paths below. The
+// reconciler diffs non-style props by IDENTITY (hostConfig diffCleanProps), so the
+// shipped array must keep its identity while the source data is unchanged —
+// otherwise every re-render of a heightfield/dyn mesh ships the whole grid (or
+// vert buffer) across the bridge again and the host re-bakes the mesh for nothing.
+// That turns any ancestor re-render into per-chunk re-uploads (the editor's
+// "heightfields choke whenever anything renders" symptom).
+//
+// hf: keyed by the SOURCE heights array — the contract is a NEW array per height
+// edit (see render3d/Landform), so a WeakMap entry lives exactly as long as its
+// version of the terrain and drops with it.
+const _hfShipCache = new WeakMap<object, { arr: number[]; maxAbsY: number }>();
+// dyn verts: keyed by the dynamicKey string, which by contract already encodes a
+// version that changes when the verts change — so equal key ⇒ equal verts. Bounded
+// FIFO because keys are strings (old versions would otherwise accumulate).
+const _dynGeomCache = new Map<string, { verts: number[]; count: number; radius: number }>();
+const _DYN_GEOM_CACHE_MAX = 64;
 Scene3DBase.Mesh = ({
   geometry, params, material, color, position, rotation, scale, radius, tubeRadius, sizeX, sizeY, sizeZ,
   texture, textureKey, dynamicKey, heights, hfCols, hfRows, waveAmplitude, waveLength, waveSpeed,
@@ -558,6 +576,16 @@ Scene3DBase.Mesh = ({
     // dynamicKey must already encode a version that changes when the verts change.
     const dyn = typeof dynamicKey === 'string' && dynamicKey.length > 0 ? dynamicKey : '';
     if (dyn) {
+      // The host's dynSlotLocate parses "<slotId>~<version>" at the LAST '~';
+      // a key without one resolves to no slot and the mesh is SILENTLY skipped
+      // (invisible geometry, no error). Fail loudly here instead.
+      if (!dyn.includes('~')) {
+        throw new Error(
+          `<Scene3D.Mesh dynamicKey="${dyn}"> must be "<slotId>~<version>" — ` +
+          `the '~' separator is required (e.g. "mycart.head~3"). Without it the ` +
+          `host finds no dyn slot and silently drops the mesh.`,
+        );
+      }
       const merged = { ...(geometry.defaults || {}), ...(params || {}) };
       // Host-generated heightfield fast path: a live-sculpted regular grid has fixed
       // topology, only its heights move — so ship the cols×rows height grid (the host
@@ -568,17 +596,28 @@ Scene3DBase.Mesh = ({
       const hasWave = wv && Math.abs(wv.amplitude) > 0.0001 && wv.length > 0.0001;
       if ((geometry as any).hostKind === 'heightfield' && (merged as any).heights && !hasWave) {
         const m: any = merged;
-        // Conservative bounds radius without baking verts: corner extent + tallest
-        // sample (skirt drops to base 0, so |y| is bounded by max|height|).
-        let maxAbsY = 0;
-        for (let n = 0; n < m.heights.length; n++) { const a = Math.abs(m.heights[n]); if (a > maxAbsY) maxAbsY = a; }
+        // Identity-stable shipment: convert + scan ONCE per source heights array.
+        // Re-renders with the SAME source array reuse the same shipped array, so the
+        // prop diff (identity compare) sees "unchanged" and nothing crosses the
+        // bridge — without this, every ancestor re-render re-shipped the whole grid
+        // and re-baked the host mesh.
+        let ship = _hfShipCache.get(m.heights as object);
+        if (!ship) {
+          const arr = Array.from(m.heights as ArrayLike<number>);
+          // Conservative bounds radius without baking verts: corner extent + tallest
+          // sample (skirt drops to base 0, so |y| is bounded by max|height|).
+          let maxAbsY = 0;
+          for (let n = 0; n < arr.length; n++) { const a = Math.abs(arr[n]); if (a > maxAbsY) maxAbsY = a; }
+          ship = { arr, maxAbsY };
+          _hfShipCache.set(m.heights as object, ship);
+        }
         const halfW = (m.width ?? 1) / 2, halfD = (m.depth ?? 1) / 2;
-        const boundsRadius = Math.sqrt(halfW * halfW + halfD * halfD + maxAbsY * maxAbsY);
+        const boundsRadius = Math.sqrt(halfW * halfW + halfD * halfD + ship.maxAbsY * ship.maxAbsY);
         return h('View', {
           ...rest,
           scene3dMesh: true,
           scene3dGeomKey: '~hf~' + dyn,
-          scene3dHeights: Array.from(m.heights as ArrayLike<number>),
+          scene3dHeights: ship.arr,
           scene3dHfCols: m.cols, scene3dHfRows: m.rows,
           scene3dHfWidth: m.width ?? 1, scene3dHfDepth: m.depth ?? 1, scene3dHfBase: m.base ?? 0,
           scene3dBoundsRadius: boundsRadius,
@@ -592,14 +631,27 @@ Scene3DBase.Mesh = ({
           ...(texKey ? { scene3dTexKey: texKey } : {}),
         });
       }
-      const gd = geometry.generate(merged);
+      // Same identity-stability rule as the hf path: the dynamicKey by contract
+      // encodes a version that changes when the verts change, so equal key ⇒ equal
+      // verts — regenerate + reconvert ONLY when the key is new. Without this,
+      // every re-render re-ran the full generator AND re-shipped the vert buffer.
+      let dynShip = _dynGeomCache.get(dyn);
+      if (!dynShip) {
+        const gd = geometry.generate(merged);
+        dynShip = { verts: Array.from(gd.positions), count: gd.count, radius: gd.bounds.radius };
+        if (_dynGeomCache.size >= _DYN_GEOM_CACHE_MAX) {
+          const oldest = _dynGeomCache.keys().next().value;
+          if (oldest != null) _dynGeomCache.delete(oldest);
+        }
+        _dynGeomCache.set(dyn, dynShip);
+      }
       return h('View', {
         ...rest,
         scene3dMesh: true,
         scene3dGeomKey: '~dyn~' + dyn,
-        scene3dVertices: Array.from(gd.positions),
-        scene3dVertCount: gd.count,
-        scene3dBoundsRadius: gd.bounds.radius,
+        scene3dVertices: dynShip.verts,
+        scene3dVertCount: dynShip.count,
+        scene3dBoundsRadius: dynShip.radius,
         scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
         scene3dRotX: rx, scene3dRotY: ry, scene3dRotZ: rz,
         scene3dScaleX: sx, scene3dScaleY: sy, scene3dScaleZ: sz,
