@@ -404,6 +404,37 @@ the game's bindings; sweatshop/tui/chat carts pay zero bytes and zero host fns
 for the game's existence. Follow this through all the way — no exceptions, no
 "cheap dep" carve-outs.
 
+**V19 — The compile is always green and LLM-callable. (Added 2026-06-04.)**
+It would suck ass to build something great and discover at the compile button
+that the game output isn't carrying the feature or doesn't work at all. So:
+- The game compile is a CLI any LLM can run at any time — compile constantly,
+  "make sure it compiles" is a standing duty, not a milestone gate.
+- LLMs can also LOAD RUNTIME TESTS into the output — compile → boot headless →
+  run behavior tests (P4) → exit with a verdict. The dev flow never waits on
+  the user to press a button.
+- A feature isn't "done in the tool" — it's done when the COMPILED GAME carries
+  it and the verify run proves it.
+
+**V20 — Persistence: stateless, micro-saved, with an UNBREAKABLE total history. (Added 2026-06-04.)**
+The workspace behavior (stateless design, saved at every micro change,
+historical undo) is the floor — extended:
+- History is PERSISTENT ACROSS ALL SESSIONS, one total undo chain that CANNOT
+  break when something new is introduced. Ten days of bad changes → step right
+  back to the point it went bad, with zero "did I save it in that state"
+  anxiety. Disk cost is accepted for development.
+- The storage shape: a LOG THAT SPLITS ITS CONCERNS — a state update writes to
+  its specific workspace storage (per-concern append-only streams: world edits,
+  character edits, tuning changes, ...), never one monolithic blob.
+- Why this satisfies "can't break": append-only streams are never rewritten —
+  an undo point is a log position; a NEW feature adds a NEW stream and old
+  streams stay valid forever (schema evolution by addition, not migration).
+- What the game LOADS is not the history: compile/ consumes materialized
+  snapshots of the streams. The log is for the tool and the time machine;
+  the snapshot is for the game.
+- This is the storage twin of V8's event-channel state tick and R6's
+  RLE/determinism — the whole system is event-shaped; storage just stops
+  pretending otherwise.
+
 **Tier C — accepted by default** (no objection raised). C1's dormant-vs-delete
 choice for Bullet inherits Q1's open item; until ruled, the loud DORMANT banner
 applies.

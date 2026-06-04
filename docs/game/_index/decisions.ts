@@ -135,6 +135,17 @@ export const DECISIONS: Decision[] = [
     cites: ['framework/v8_bindings_physics_lab.zig', 'framework/v8_bindings_input_bench.zig', 'framework/v8_bindings_pathing.zig', 'sdk/dependency-registry.json'],
   },
   {
+    id: 'V19', name: 'The compile is always green and LLM-callable', status: 'ruled',
+    ruling: 'The game compile is a CLI any LLM can run at any time — compile constantly; "make sure it compiles" is a standing duty, not a milestone gate. LLMs can load runtime tests into the output: compile → boot headless → run behavior tests (P4) → exit with a verdict. A feature is done when the COMPILED GAME carries it and the verify run proves it — never discovered broken at the compile button. The dev flow never waits on the user.',
+    keywords: ['compile', 'game compile', 'llm callable', 'always green', 'verify', 'headless', 'runtime tests', 'ci', 'dev flow', 'make sure it compiles'],
+  },
+  {
+    id: 'V20', name: 'Persistence: stateless, micro-saved, UNBREAKABLE total cross-session history', status: 'ruled',
+    ruling: 'Workspace behavior (stateless design, saved at every micro change, historical undo) extended: history persists across ALL sessions as one total undo chain that CANNOT break when something new is introduced — ten days of bad changes steps right back to where it went bad. Storage is a LOG THAT SPLITS ITS CONCERNS: per-concern append-only streams (world edits, character edits, tuning, ...), never one monolithic blob; a state update writes to its specific workspace storage. New feature = new stream; old streams stay valid forever (schema evolution by addition, not migration). The game LOADS materialized snapshots, not the history. Disk cost accepted for development.',
+    detail: 'The storage twin of V8\'s event-channel state tick and R6\'s RLE/determinism — the system is event-shaped; storage stops pretending otherwise. An undo point is a log position.',
+    keywords: ['persistence', 'history', 'undo', 'workspace', 'stateless', 'micro save', 'append only', 'log', 'streams', 'snapshot', 'sessions', 'time machine', 'storage'],
+  },
+  {
     id: 'P1', name: 'Zig owns the brute work; JS authors data, never runs it', status: 'ruled',
     ruling: 'No matter how anything folds, the heavy runtime of data is controlled from Zig. JavaScript is a really nice AUTHORING layer for data and a bad RUNTIME for it. If a system moves data every frame, its hot loop is Zig; JS declares, authors, tunes.',
     keywords: ['zig', 'javascript', 'performance', 'runtime', 'authoring', 'hot loop', 'architecture', 'brute work'],

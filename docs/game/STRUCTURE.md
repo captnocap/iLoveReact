@@ -48,10 +48,17 @@ cart/hmsc-int/
     <name>.notes.md    per-lab notes — read by humans, AI, and the oracle (P6)
 
   compile/             V15: data/ + game/ → the emitted hmsc game (the bake)
+    verify/            V19: LLM-callable — compile → boot headless → run the
+                       P4 behavior tests → exit with a verdict. Run constantly.
 
-  data/                authored documents + tuning tables — what P2 edits,
-                       what compile/ consumes (characters/, vehicles/, world/,
-                       tuning/). JSON/documents, never logic.
+  data/                what P2 edits, what compile/ consumes. Never logic. (V20)
+    streams/           per-concern APPEND-ONLY logs: world/, characters/,
+                       vehicles/, items/, tuning/, cutscenes/ — a state update
+                       writes to ITS stream; new feature = NEW stream, old
+                       streams stay valid forever. One total cross-session undo
+                       chain; an undo point is a log position. Disk is cheap.
+    snapshots/         materialized views of the streams — THIS is what the
+                       game/compile loads, never the history itself.
 
   shell/               the tool's own chrome: nav, routes, workspace/session
                        state, the assistant — tool concerns, never game concerns
