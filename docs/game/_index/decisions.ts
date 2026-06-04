@@ -146,6 +146,12 @@ export const DECISIONS: Decision[] = [
     keywords: ['persistence', 'history', 'undo', 'workspace', 'stateless', 'micro save', 'append only', 'log', 'streams', 'snapshot', 'sessions', 'time machine', 'storage'],
   },
   {
+    id: 'V21', name: 'Population homeostasis (NPC "GC") + ambient pathing as a token dictionary', status: 'ruled',
+    ruling: 'The ambient world maintains DISTRIBUTIONS, not individuals: NPCs are seeded samples spawned/collected at the perception boundary, fixed pools, zero allocation (death = slot return + generation bump; all future references are (slot,generation) handles — stale events drop). Identity only by PROMOTION (witness/mission/story/cascade) and decays back when references expire. Ambient NPCs NEVER pathfind: next-token selection over a baked dictionary of micro-paths + junction transition tables (distilled at bake time); perturbation = mask blocked tokens + renormalize; temperature per archetype/district/hour is a P2 knob; heat/wanted = one conditioning column (cops up, civilians to zero, convergence bias, promotion budget). Game state = seed + perturbation log + tenured set; everything ambient is derivable, never saved. Massacre refill curves are tunable, never instant. Promotion-worthiness threshold = SHOW-ME lab.',
+    detail: 'V8 clarified alongside: ~45/MIN is a RECONCILIATION cadence, not a simulation rate — closed-form plans sampled at render; ticks drain scheduled invalidations; blast radius computed at perturbation-insertion time; visible/audible direct contact forces, everything else drains.',
+    keywords: ['npc', 'gc', 'garbage collector', 'population', 'homeostasis', 'spawn', 'despawn', 'ambient', 'crowd', 'pedestrians', 'traffic', 'token', 'micro paths', 'dictionary', 'temperature', 'wanted', 'cops', 'heat', 'promotion', 'identity', 'generation handle', 'stateless', 'tick', 'reconciliation'],
+  },
+  {
     id: 'P1', name: 'Zig owns the brute work; JS authors data, never runs it', status: 'ruled',
     ruling: 'No matter how anything folds, the heavy runtime of data is controlled from Zig. JavaScript is a really nice AUTHORING layer for data and a bad RUNTIME for it. If a system moves data every frame, its hot loop is Zig; JS declares, authors, tunes.',
     keywords: ['zig', 'javascript', 'performance', 'runtime', 'authoring', 'hot loop', 'architecture', 'brute work'],

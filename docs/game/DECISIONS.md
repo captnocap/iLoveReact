@@ -426,6 +426,45 @@ the game's bindings; sweatshop/tui/chat carts pay zero bytes and zero host fns
 for the game's existence. Follow this through all the way — no exceptions, no
 "cheap dep" carve-outs.
 
+**V8-CLARIFIED (2026-06-04, third pass): the tick is a RECONCILIATION cadence,
+not a simulation rate.** ~45/min means MINUTE (state ticks are strategic; frames
+are the other clock). The world runs on closed-form plans sampled at render; the
+tick drains scheduled invalidations and verifies state-vs-plan alignment.
+Perturbations compute their blast radius AT INSERTION TIME (plans are queryable
+futures — intersect, don't discover); unaffected entities are never iterated.
+Forced ticks = perturbation insertion. The cadence bounds indirect-consequence
+staleness (~1.3s worst case); force-vs-wait rule: visible/audible direct contact
+forces, everything else drains. The user's framing: 45 predetermined check-ins
+that ensure game state is aligned with the world — derailed cars get fucked up
+while cars outside the causal cone never know anything happened.
+
+**V21 — Population homeostasis (the NPC "GC") + ambient pathing as a token
+dictionary. (Added 2026-06-04, from the design session.)**
+The ambient world maintains DISTRIBUTIONS, not individuals. NPCs are seeded
+samples (district × time × slot), spawned/collected at the perception boundary,
+in fixed pools with zero allocation (death = slot return + GENERATION BUMP —
+all future-scheduled references are (slot, generation) handles; stale events
+drop on mismatch). Identity exists only by PROMOTION — witness, mission, story,
+cascade (the V12 reference set) — and decays back to ambient when references
+expire. Massacres depress local population on a tunable refill curve (P2 knob),
+never instant. Game state = seed + perturbation log + tenured set; everything
+ambient is derivable, therefore stateless, therefore never saved.
+AMBIENT PATHING (the user's model): NPCs never pathfind — they do NEXT-TOKEN
+SELECTION over a baked dictionary of many small MICRO-PATHS (segments +
+junction transition tables, distilled at bake time from offline goal-directed
+simulation; V4 bake doctrine applied to motion). The machine picks the next
+most probable micro-path in accordance with the player's state changes to the
+world: perturbation = mask the blocked tokens + renormalize (no detour
+computation); temperature per archetype/district/hour is a P2 tuning knob;
+heat (wanted level) is one more conditioning column — cops up, civilians toward
+zero, convergence bias toward the player; promotion budget caps how many cops
+are real agents vs crowd texture. Identity is lazily evaluated: distribution at
+distance, instance in the bubble, individual under attention; no-doubles
+constraint within one attention window; spawn-bias plays (the GTA rare-car
+effect) are deliberate, scriptable knobs.
+SHOW-ME: what counts as a promotion-worthy interaction is a game-feel question
+— a lab, not an architecture ruling.
+
 **V19 — The compile is always green and LLM-callable. (Added 2026-06-04.)**
 It would suck ass to build something great and discover at the compile button
 that the game output isn't carrying the feature or doesn't work at all. So:
