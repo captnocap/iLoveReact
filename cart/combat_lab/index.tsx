@@ -495,6 +495,9 @@ type Spark = { id: number; p: V3; color: string; bornAt: number };
 
 type Sim = {
   t: number;
+  // tick heartbeat — the debug strip renders it, so a dead loop is visible as
+  // a frozen number instead of a silent mystery
+  frame: number;
   player: {
     pos: V3; heading: number; hp: number;
     crouch01: number; crouched: boolean;
@@ -544,6 +547,7 @@ function makeBot(id: string, patrol: V3[]): Bot {
 function makeSim(): Sim {
   return {
     t: 0,
+    frame: 0,
     player: {
       pos: [0, 0, 13], heading: 180, hp: PLAYER_MAX_HP,
       crouch01: 0, crouched: false,
@@ -627,7 +631,7 @@ function SegmentMesh(props: { a: V3; b: V3; radius: number; material: any }) {
 }
 
 // Health bar floating over a bot, yawed to face the camera.
-function HealthBar(props: { x: number; y: number; z: number; frac: number; camPos: V3 }) {
+function HealthBar(props: { x: number; y: number; z: number; frac: number; camPos: V3; hidden?: boolean }) {
   const faceYaw = Math.atan2(props.camPos[0] - props.x, props.camPos[2] - props.z) * DEG;
   const w = 0.7;
   const fw = Math.max(0.02, w * props.frac);
@@ -636,10 +640,11 @@ function HealthBar(props: { x: number; y: number; z: number; frac: number; camPo
   const offset = -(w - fw) / 2;
   const c = Math.cos(faceYaw * RAD);
   const s = Math.sin(faceYaw * RAD);
+  // `hidden` fades instead of unmounting — callers keep a fixed child shape
   return (
     <>
-      <Scene3D.Mesh geometry={Geometry.Box} params={UNIT_BOX} material={{ color: '#0c1220', opacity: 0.85 }} position={[props.x, props.y, props.z]} rotation={[0, faceYaw, 0]} scale={[w + 0.06, 0.1, 0.03]} />
-      <Scene3D.Mesh geometry={Geometry.Box} params={UNIT_BOX} material={hpColor(props.frac * 100)} position={[props.x + offset * c + 0.02 * s, props.y, props.z - offset * s + 0.02 * c]} rotation={[0, faceYaw, 0]} scale={[fw, 0.07, 0.03]} />
+      <Scene3D.Mesh geometry={Geometry.Box} params={UNIT_BOX} material={{ color: '#0c1220', opacity: props.hidden ? 0 : 0.85 }} position={[props.x, props.y, props.z]} rotation={[0, faceYaw, 0]} scale={[w + 0.06, 0.1, 0.03]} />
+      <Scene3D.Mesh geometry={Geometry.Box} params={UNIT_BOX} material={{ color: hpColor(props.frac * 100), opacity: props.hidden ? 0 : 1 }} position={[props.x + offset * c + 0.02 * s, props.y, props.z - offset * s + 0.02 * c]} rotation={[0, faceYaw, 0]} scale={[fw, 0.07, 0.03]} />
     </>
   );
 }
@@ -950,13 +955,14 @@ export default function CombatLab() {
     let handle: any = 0;
     let lastNow = host.performance?.now?.() ?? Date.now();
 
-    const tick = () => {
+    const step = () => {
       const now = host.performance?.now?.() ?? Date.now();
       const dt = Math.min(0.05, Math.max(0.001, (now - lastNow) / 1000));
       lastNow = now;
       const s = simRef.current;
       const ui = uiRef.current;
       const p = s.player;
+      s.frame += 1;
 
       // ── hmsc mouse-look camera, even while paused (you can still look) ────
       // Relative deltas while the host has the mouse; unlike the game we do
@@ -1189,6 +1195,18 @@ export default function CombatLab() {
         s.sparks = s.sparks.filter((sp) => s.t - sp.bornAt < 0.28);
       }
 
+    };
+
+    // One bad frame must not silently kill the loop: a thrown exception used
+    // to end the rAF chain — camera/aim/bots freeze with zero output (console
+    // .log never reaches the dev terminal; console.error does). Catch, scream
+    // to stderr, keep ticking.
+    const tick = () => {
+      try {
+        step();
+      } catch (err: any) {
+        console.error(`[combat_lab] tick #${simRef.current.frame} error: ${String(err?.message ?? err)}`, String(err?.stack ?? ''));
+      }
       setTick((t) => t + 1);
       handle = schedule(tick);
     };
@@ -1368,30 +1386,29 @@ export default function CombatLab() {
             <Scene3D.Mesh key={ob.id} geometry={Geometry.Box} params={{ width: ob.w, height: ob.h, depth: ob.d }} material={TIER_COLOR[ob.tier]} position={[ob.x, ob.h / 2, ob.z]} />
           ))}
 
-          {/* bots — head_lab dressed figures; a down body is its ragdoll */}
+          {/* bots — head_lab dressed figures; a down body is its ragdoll.
+              FIXED-SHAPE fragments: the bar/ring stay MOUNTED when a bot dies
+              and hide via opacity — removing them shifts the Scene3D's
+              flattened child list mid-stream, the reconciler sibling-shift
+              class this repo has burned on before. */}
           {s.bots.map((bot) => {
             const rig = rigsRef.current[bot.id];
             const bones = bonesRef.current[bot.id];
             if (!rig || !bones) return <Fragment key={bot.id} />;
             const def = npcKindDefinition(bot.kind);
+            const down = bot.mode === 'down';
             return (
               <Fragment key={bot.id}>
                 <FigureMeshes rig={rig} parts={characters[bot.id].parts as any} />
-                {bot.mode === 'down' ? null : (
-                  <>
-                    <HealthBar x={bones.head.position[0]} y={bones.head.position[1] + 0.55} z={bones.head.position[2]} frac={bot.hp / def.maxHealth} camPos={cam.position} />
-                    <Scene3D.Mesh geometry={Geometry.Torus} params={{ radius: 0.42, tube: 0.02, segments: 24, sides: 6 }} material={s.targetId === bot.id ? CYAN : (def.canFight ? '#7a3030' : '#3a4a5a')} position={[bot.pos[0], 0.05, bot.pos[2]]} />
-                  </>
-                )}
+                <HealthBar x={bones.head.position[0]} y={bones.head.position[1] + 0.55} z={bones.head.position[2]} frac={bot.hp / def.maxHealth} camPos={cam.position} hidden={down} />
+                <Scene3D.Mesh geometry={Geometry.Torus} params={{ radius: 0.42, tube: 0.02, segments: 24, sides: 6 }} material={{ color: s.targetId === bot.id ? CYAN : (def.canFight ? '#7a3030' : '#3a4a5a'), opacity: down ? 0 : 1 }} position={[bot.pos[0], 0.05, bot.pos[2]]} />
               </Fragment>
             );
           })}
 
-          {/* the player */}
+          {/* the player — ring stays mounted for the same fixed-shape reason */}
           <FigureMeshes rig={rigsRef.current.you} parts={characters.you.parts as any} />
-          {wasted ? null : (
-            <Scene3D.Mesh geometry={Geometry.Torus} params={{ radius: 0.42, tube: 0.02, segments: 24, sides: 6 }} material="#18e0d8" position={[p.pos[0], 0.05, p.pos[2]]} />
-          )}
+          <Scene3D.Mesh geometry={Geometry.Torus} params={{ radius: 0.42, tube: 0.02, segments: 24, sides: 6 }} material={{ color: '#18e0d8', opacity: wasted ? 0 : 1 }} position={[p.pos[0], 0.05, p.pos[2]]} />
 
           {/* ALL variable-length fx in one keyed list, last child */}
           {fx.map((item) =>
@@ -1426,6 +1443,14 @@ export default function CombatLab() {
         ) : null}
         <Box style={{ position: 'absolute', left: 14, bottom: 14 }}>
           <Text fontSize={11} color={DIM}>rmb aim · lmb fire · wasd move · shift run · c crouch · 1/2/3 weapon · v rays · b hitboxes</Text>
+        </Box>
+        {/* debug strip — the raw truth, layer by layer: a frozen t = the tick
+            loop died (check the dev terminal for [combat_lab] tick errors);
+            rmb 1 with no AIM = focus lost; AIM with no crosshair = paint bug. */}
+        <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
+          <Text fontSize={10} color={s.aiming ? CYAN : DIM}>
+            {`t${s.frame} · ${mouseFocused ? 'focus' : 'UNFOCUSED'} · rmb ${readHostNumber('getMouseRightDown', 0)} · lmb ${readHostNumber('getMouseDown', 0)} · ${s.aiming ? 'AIM' : 'idle'}`}
+          </Text>
         </Box>
       </Pressable>
 
