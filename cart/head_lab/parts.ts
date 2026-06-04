@@ -106,9 +106,12 @@ export const BODY_SHAPES: Record<BodyShapeId, {
   head: number;
   hand: number;
   foot: number;
+  /** knee/foot x as a multiple of the hip joint x (default 1.08). Wide hips
+   *  + a sub-1 stance = the femur angle: legs converge toward the knees. */
+  stance?: number;
 }> = {
   neutral: { label: 'neutral', height: 1, shoulder: 1, hip: 1, torsoWide: 1, torsoLong: 1, limbLong: 1, limbThick: 1, head: 1, hand: 1, foot: 1 },
-  female: { label: 'female', height: 0.98, shoulder: 0.9, hip: 1.16, torsoWide: 0.92, torsoLong: 1.02, limbLong: 1, limbThick: 0.92, head: 1.02, hand: 0.94, foot: 0.92 },
+  female: { label: 'female', height: 0.98, shoulder: 0.9, hip: 1.16, torsoWide: 0.92, torsoLong: 1.02, limbLong: 1, limbThick: 0.92, head: 1.02, hand: 0.94, foot: 0.92, stance: 0.82 },
   male: { label: 'male', height: 1.03, shoulder: 1.18, hip: 0.98, torsoWide: 1.1, torsoLong: 1.03, limbLong: 1.02, limbThick: 1.12, head: 1, hand: 1.06, foot: 1.06 },
   tall: { label: 'tall', height: 1.16, shoulder: 1.04, hip: 1, torsoWide: 0.96, torsoLong: 1.08, limbLong: 1.18, limbThick: 0.94, head: 0.94, hand: 1, foot: 1.05 },
   short: { label: 'short', height: 0.86, shoulder: 1.03, hip: 1.04, torsoWide: 1.04, torsoLong: 0.92, limbLong: 0.84, limbThick: 1.04, head: 1.12, hand: 0.96, foot: 0.96 },
@@ -334,10 +337,13 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
     : [walk ? step * 3 : 0, lay * 74, walk ? step * 5 : 0];
   const leftHipPos: [number, number, number] = kneel ? [pelvisPos[0] - hipX, y(0.66), 0.18] : [pelvisPos[0] - hipX, y(0.82) - crouch * y(0.16) - sit * y(0.28) - lay * y(0.45), pelvisPos[2] + strideZ * 0.12];
   const rightHipPos: [number, number, number] = kneel ? [pelvisPos[0] + hipX, y(0.66), 0.18] : [pelvisPos[0] + hipX, y(0.82) - crouch * y(0.16) - sit * y(0.28) - lay * y(0.45), pelvisPos[2] + counterStrideZ * 0.12];
-  const leftFootPos: [number, number, number] = kneel ? [leftHipPos[0] * 0.98, footY, 0.285] : [leftHipPos[0] * (1.08 + sit * 0.28), footY + strideLift * 0.45 + leftKick * y(0.22) + Math.max(0, leftStomp) * y(0.04), -0.055 + strideZ * 1.1 - leftKick * 0.42 + sit * 0.26 + lay * 0.42];
-  const rightFootPos: [number, number, number] = kneel ? [rightHipPos[0] * 0.98, footY, 0.285] : [rightHipPos[0] * (1.08 + sit * 0.28), footY + counterLift * 0.45 + rightKick * y(0.22) + Math.max(0, rightStomp) * y(0.04), -0.055 + counterStrideZ * 1.1 - rightKick * 0.42 + sit * 0.26 + lay * 0.42];
-  const leftKneePos: [number, number, number] = kneel ? [leftHipPos[0] * 1.08, y(0.19), 0.08] : [leftHipPos[0] * 1.08, y(0.44) + strideLift * 0.65 - crouch * y(0.1) - sit * y(0.12) + leftKick * y(0.12), leftHipPos[2] + strideZ * 0.78 - Math.max(0, -step) * 0.035 - leftKick * 0.18 + sit * 0.12 + lay * 0.32];
-  const rightKneePos: [number, number, number] = kneel ? [rightHipPos[0] * 1.08, y(0.19), 0.08] : [rightHipPos[0] * 1.08, y(0.44) + counterLift * 0.65 - crouch * y(0.1) - sit * y(0.12) + rightKick * y(0.12), rightHipPos[2] + counterStrideZ * 0.78 - Math.max(0, step) * 0.035 - rightKick * 0.18 + sit * 0.12 + lay * 0.32];
+  // stance: knee/foot x relative to the hip joint — wide-hip shapes (female)
+  // converge below the hip instead of dropping straight down (femur angle)
+  const stance = s.stance ?? 1.08;
+  const leftFootPos: [number, number, number] = kneel ? [leftHipPos[0] * 0.98, footY, 0.285] : [leftHipPos[0] * (stance + sit * 0.28), footY + strideLift * 0.45 + leftKick * y(0.22) + Math.max(0, leftStomp) * y(0.04), -0.055 + strideZ * 1.1 - leftKick * 0.42 + sit * 0.26 + lay * 0.42];
+  const rightFootPos: [number, number, number] = kneel ? [rightHipPos[0] * 0.98, footY, 0.285] : [rightHipPos[0] * (stance + sit * 0.28), footY + counterLift * 0.45 + rightKick * y(0.22) + Math.max(0, rightStomp) * y(0.04), -0.055 + counterStrideZ * 1.1 - rightKick * 0.42 + sit * 0.26 + lay * 0.42];
+  const leftKneePos: [number, number, number] = kneel ? [leftHipPos[0] * 1.08, y(0.19), 0.08] : [leftHipPos[0] * stance, y(0.44) + strideLift * 0.65 - crouch * y(0.1) - sit * y(0.12) + leftKick * y(0.12), leftHipPos[2] + strideZ * 0.78 - Math.max(0, -step) * 0.035 - leftKick * 0.18 + sit * 0.12 + lay * 0.32];
+  const rightKneePos: [number, number, number] = kneel ? [rightHipPos[0] * 1.08, y(0.19), 0.08] : [rightHipPos[0] * stance, y(0.44) + counterLift * 0.65 - crouch * y(0.1) - sit * y(0.12) + rightKick * y(0.12), rightHipPos[2] + counterStrideZ * 0.78 - Math.max(0, step) * 0.035 - rightKick * 0.18 + sit * 0.12 + lay * 0.32];
   const leftThighPos = mid(leftHipPos, leftKneePos);
   const rightThighPos = mid(rightHipPos, rightKneePos);
   const leftShinPos = mid(leftKneePos, leftFootPos);
@@ -512,8 +518,11 @@ function anatomyFromSkeleton(s: typeof BODY_SHAPES.neutral, shapeId: BodyShapeId
 
   if (bulky) {
     out.push(
-      { part: 'hand', bone: 'torso', position: [-0.11 * s.torsoWide, y(1.43), -0.17], scale: 0.082, rotation: [10, 0, -8], thickness: 1.25 },
-      { part: 'hand', bone: 'torso', position: [0.11 * s.torsoWide, y(1.43), -0.17], scale: 0.082, rotation: [10, 0, 8], thickness: 1.25 },
+      // pecs hang OFF THE TORSO BONE (stand-pose torso center is y(1.3), z 0),
+      // not at absolute body coords — absolute positions strand them at the
+      // origin when the bones are world-space (ragdoll / offset figures)
+      { part: 'hand', bone: 'torso', position: offsetBone(bones.torso, -0.11 * s.torsoWide, y(0.13), -0.17), scale: 0.082, rotation: [10, 0, -8], thickness: 1.25 },
+      { part: 'hand', bone: 'torso', position: offsetBone(bones.torso, 0.11 * s.torsoWide, y(0.13), -0.17), scale: 0.082, rotation: [10, 0, 8], thickness: 1.25 },
       { part: 'pipe', bone: 'lUpperArm', position: offsetBone(bones.lUpperArm, -0.01, 0.02, -0.055), scale: 0.075, rotation: bones.lUpperArm.rotation, thickness: 1.55 },
       { part: 'pipe', bone: 'rUpperArm', position: offsetBone(bones.rUpperArm, 0.01, 0.02, -0.055), scale: 0.075, rotation: bones.rUpperArm.rotation, thickness: 1.55 },
       { part: 'pipe', bone: 'lThigh', position: offsetBone(bones.lThigh, -0.01, 0.0, -0.02), scale: 0.09, rotation: bones.lThigh.rotation, thickness: 1.45 },
@@ -522,8 +531,9 @@ function anatomyFromSkeleton(s: typeof BODY_SHAPES.neutral, shapeId: BodyShapeId
   }
 
   if (shapeId === 'heavy') {
+    // belly rides the torso bone too (same world-space rule as the pecs)
     out.push(
-      { part: 'hand', bone: 'torso', position: [0, y(1.13), -0.19], scale: 0.12, rotation: [10, 0, 0], thickness: 1.45 },
+      { part: 'hand', bone: 'torso', position: offsetBone(bones.torso, 0, -y(0.17), -0.19), scale: 0.12, rotation: [10, 0, 0], thickness: 1.45 },
     );
   }
 
@@ -592,10 +602,19 @@ function offsetBone(bone: SkeletonBone, dx: number, dy: number, dz: number): [nu
 // (wider builds open a wider torso→arm gap to span).
 function shoulderSocket(side: -1 | 1, s: typeof BODY_SHAPES.neutral, bones: Record<BoneId, SkeletonBone>): BodyInstance {
   const shoulder = side < 0 ? bones.lShoulder : bones.rShoulder;
+  const torso = bones.torso;
   return {
     part: 'hand',
     bone: side < 0 ? 'lShoulder' : 'rShoulder',
-    position: [shoulder.position[0] * 0.88, shoulder.position[1] - 0.012, shoulder.position[2]],
+    // tucked 12% toward the TORSO, not toward world x=0 — bones may be
+    // world-space now (ragdoll / offset figures), and scaling the absolute
+    // coordinate sent these floating away from any body off the origin
+    // (the ragdoll_lab "phantom shoulders").
+    position: [
+      shoulder.position[0] + (torso.position[0] - shoulder.position[0]) * 0.12,
+      shoulder.position[1] - 0.012,
+      shoulder.position[2],
+    ],
     scale: 0.105 * Math.max(0.9, (s.shoulder + s.limbThick) / 2),
     rotation: shoulder.rotation,
     thickness: 1.7,
@@ -906,7 +925,41 @@ export function buildClothing(
   // sized off s.hip in z read as a sandwich board from the side. Wrap, don't jut.
   const seatZ = 0.26 * s.hip;
 
-  if (!underDress) {
+  // female underwear is its own garment, not shrunken male boxes: a low-rise
+  // panty (no leg stubs, angled hip cuts) and — when shirtless — a bra.
+  const feminineBody = shapeId === 'female';
+  const panties = bottoms === 'briefs' && feminineBody;
+
+  if (style === 'underwear' && feminineBody) {
+    const pr = bones.torso.rotation;
+    clothes.push(
+      // band wraps the ribcage (the naked torso wears no profile shrink, so
+      // the band must be wider/deeper than the bare chest surface)
+      box(offsetBone(bones.torso, 0, 0.105 * s.height, -0.01), [0.6 * s.torsoWide, 0.055, 0.38 * s.torsoWide], bMain, pr, 1),
+      // cups riding the chest bulge
+      sphere(offsetBone(bones.torso, -0.115 * s.torsoWide, 0.125 * s.height, -0.16), [0.07 * s.torsoWide, 0.055, 0.055], bMain, pr, 1),
+      sphere(offsetBone(bones.torso, 0.115 * s.torsoWide, 0.125 * s.height, -0.16), [0.07 * s.torsoWide, 0.055, 0.055], bMain, pr, 1),
+      // straps up over the shoulder slope
+      box(offsetBone(bones.torso, -0.115 * s.torsoWide, 0.21 * s.height, -0.1), [0.022, 0.16 * s.torsoLong, 0.02], bTrim, pr, 1),
+      box(offsetBone(bones.torso, 0.115 * s.torsoWide, 0.21 * s.height, -0.1), [0.022, 0.16 * s.torsoLong, 0.02], bTrim, pr, 1),
+    );
+  }
+
+  if (!underDress && panties) {
+    const pr = bones.pelvis.rotation;
+    clothes.push(
+      // low-rise seat + slim crotch — no leg stubs, the cut ends at the hip
+      box(offsetBone(bones.pelvis, 0, 0.045 * s.height, -0.004), [0.5 * s.hip, 0.12 * s.torsoLong, seatZ - 0.012], bMain, pr, 1),
+      box(offsetBone(bones.pelvis, 0, -0.055 * s.height, -0.004), [0.14 * s.hip, 0.17 * s.torsoLong, 0.16 * s.hip], bMain, pr, 1),
+      // angled hip cuts — the V silhouette from waist edge down toward the crotch
+      box(offsetBone(bones.pelvis, -0.2 * s.hip, -0.005 * s.height, -0.004), [0.2 * s.hip, 0.075, seatZ - 0.02], bMain, [pr[0], pr[1], pr[2] - 26], 1),
+      box(offsetBone(bones.pelvis, 0.2 * s.hip, -0.005 * s.height, -0.004), [0.2 * s.hip, 0.075, seatZ - 0.02], bMain, [pr[0], pr[1], pr[2] + 26], 1),
+      // thin elastic band at the top edge
+      box(offsetBone(bones.pelvis, 0, 0.105 * s.height, -0.004), [0.51 * s.hip, 0.024, seatZ - 0.004], bTrim, pr, 1),
+    );
+  }
+
+  if (!underDress && !panties) {
     // seat + crotch — the hip wrap every bottom shares
     const seatRise = bottoms === 'briefs' ? 0.07 : 0.1;
     const seatH = bottoms === 'briefs' ? 0.2 : 0.17;
@@ -940,7 +993,8 @@ export function buildClothing(
   if (!underDress || longPants || bottoms === 'shorts') {
     for (const side of [-1, 1] as const) {
       if (bottoms === 'briefs') {
-        clothes.push(legPiece(side, 'thigh', THIGH_TOP, 0.36, 0.33 * s.limbThick, bMain, thighTuck));
+        // panties end at the hip — male briefs get the short leg stubs
+        if (!panties) clothes.push(legPiece(side, 'thigh', THIGH_TOP, 0.36, 0.33 * s.limbThick, bMain, thighTuck));
       } else if (bottoms === 'shorts') {
         clothes.push(
           legPiece(side, 'thigh', THIGH_TOP, 0.52, 0.345 * s.limbThick, bMain, thighTuck),
