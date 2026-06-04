@@ -31,12 +31,10 @@ import { Box, Col, Row, Effect, Pressable, Text, Scene3D, StaticSurface } from '
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
 import * as Geometry from '@reactjit/geometries';
 import { FollowCamera } from '@reactjit/cameras';
-import {
-  buildRigFrame, PART_IDS, PART_PRESETS, defaultProfile,
-  type BodyPoseId, type BodyRigFrame, type ClothingInstance, type PartId,
-} from '../head_lab/parts';
+import { buildRigFrame, type BodyPoseId } from '../head_lab/parts';
 import { parseAnimationDsl, sampleAnimationTimeline } from '../head_lab/animDsl';
-import { generateFace, hedDepthGrid, HED_GRID_W, HED_GRID_H, type HedDocument, type HedLayer } from '../head_lab/hed';
+import { generateFace, hedDepthGrid } from '../head_lab/hed';
+import { buildPartRender, CharacterCaptures, FigureMeshes } from '../head_lab/figureRender';
 
 // ── tuning ───────────────────────────────────────────────────────────────────
 
@@ -161,11 +159,6 @@ function coinRotation(d: V3, spinDeg: number): V3 {
   return eulerYXZ(m);
 }
 
-function rotYVec(p: V3, rad: number): V3 {
-  const c = Math.cos(rad), s = Math.sin(rad);
-  return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c];
-}
-
 // ── the planet surface — one WGSL bake, equirect like the Globe unwrap ──────
 
 const PLANET_TEX_W = 512;
@@ -282,168 +275,8 @@ const PlanetSurfaceCapture = memo(function PlanetSurfaceCapture() {
   );
 });
 
-// ── character textures — head_lab's unwrap-composition pattern ──────────────
-// The generated .hed face layers painted as absolute boxes over the skin base
-// (the compact twin of head_lab's HedLayerPaint/UnwrapContent, photo-less).
-
-const UNWRAP_W = 512;
-const UNWRAP_H = 256;
-
-function FaceLayerPaint(props: { layers: HedLayer[] }) {
-  const boxes: any[] = [];
-  for (const layer of props.layers) {
-    if (!layer.color) continue;
-    layer.shapes.forEach((s, si) => {
-      const centers = s.mirror ? [s.cx, 1 - s.cx] : [s.cx];
-      centers.forEach((cx, ci) => {
-        const w = s.rx * 2 * UNWRAP_W;
-        const h = s.ry * 2 * UNWRAP_H;
-        boxes.push(
-          <Box
-            key={`${layer.id}.${si}.${ci}`}
-            style={{
-              position: 'absolute',
-              left: cx * UNWRAP_W - w / 2,
-              top: s.cy * UNWRAP_H - h / 2,
-              width: w,
-              height: h,
-              backgroundColor: layer.color,
-              borderRadius: s.kind === 'ellipse' ? Math.min(w, h) / 2 : 2,
-            }}
-          />,
-        );
-      });
-    });
-  }
-  return <>{boxes}</>;
-}
-
-const CharacterCaptures = memo(function CharacterCaptures(props: {
-  headTexKey: string;
-  skinTexKey: string;
-  skin: string;
-  layers: HedLayer[];
-}) {
-  const surfaceStyle = useMemo(
-    () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
-    [],
-  );
-  return (
-    <>
-      <StaticSurface staticKey={props.headTexKey} style={surfaceStyle}>
-        <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin, position: 'relative', overflow: 'hidden' }}>
-          <FaceLayerPaint layers={props.layers} />
-        </Box>
-      </StaticSurface>
-      <StaticSurface staticKey={props.skinTexKey} style={surfaceStyle}>
-        <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin }} />
-      </StaticSurface>
-    </>
-  );
-});
-
-// ── the figure — head_lab parts placed at the pole, yawed to the heading ────
-
-const PART_LOD: Record<PartId, { segments: number; rings: number }> = {
-  head: { segments: 40, rings: 20 },
-  torso: { segments: 24, rings: 12 },
-  pipe: { segments: 16, rings: 9 },
-  hand: { segments: 16, rings: 8 },
-  foot: { segments: 14, rings: 8 },
-  finger: { segments: 10, rings: 7 },
-};
-
-type PartRender = { params: any; dynKey: string; texKey: string };
-
-function buildPartRender(doc: HedDocument, faceDepth: number[], seed: number): Record<PartId, PartRender> {
-  const out = {} as Record<PartId, PartRender>;
-  const skinTexKey = `planetrun.skin.${doc.skin}`;
-  for (const id of PART_IDS) {
-    const preset = PART_PRESETS[id];
-    const lod = PART_LOD[id];
-    out[id] = {
-      params: {
-        radius: 1, segments: lod.segments, rings: lod.rings,
-        displace: id === 'head' ? faceDepth : undefined,
-        dCols: HED_GRID_W, dRows: HED_GRID_H,
-        amount: id === 'head' ? doc.amount : 0,
-        profile: id === 'head' ? preset.profile : defaultProfile(id),
-        scaleX: preset.scaleX,
-        scaleY: id === 'head' ? doc.scaleY : preset.scaleY,
-        scaleZ: preset.scaleZ,
-      },
-      // Dyn-key contract (3d.zig dynSlotLocate): "<slotId>~<version>" — the
-      // '~' is REQUIRED. Without it the slot lookup returns null and the host
-      // silently skips the mesh (invisible body, visible clothing).
-      dynKey: `planetrun.${id}~${seed}`,
-      texKey: id === 'head' ? `planetrun.head.${seed}` : skinTexKey,
-    };
-  }
-  return out;
-}
-
-const clothingGeometry = (kind: ClothingInstance['geometry']) =>
-  kind === 'sphere' ? Geometry.Sphere : kind === 'cone' ? Geometry.Cone : kind === 'cylinder' ? Geometry.Cylinder : Geometry.Box;
-
-// The assembled head_lab figure, rotated to face the heading and lifted by the
-// hop. World yaw W prepends cleanly: positions rotate around Y, and because
-// the host composes Ry·Rx·Rz, adding W to each instance's ry IS Ry(W)·R.
-function Figure(props: { rig: BodyRigFrame; yawDeg: number; hopY: number; parts: Record<PartId, PartRender> }) {
-  const rad = props.yawDeg * RAD;
-  const place = (p: V3): V3 => {
-    const r = rotYVec(p, rad);
-    return [r[0], r[1] + props.hopY, r[2]];
-  };
-  const turn = (r?: V3): V3 => [r?.[0] ?? 0, (r?.[1] ?? 0) + props.yawDeg, r?.[2] ?? 0];
-  return (
-    <>
-      {props.rig.assembly.map((inst, i) => {
-        const p = props.parts[inst.part];
-        return (
-          <Scene3D.Mesh
-            key={`a${i}`}
-            geometry={Geometry.Globe}
-            params={p.params}
-            dynamicKey={p.dynKey}
-            material="#ffffff"
-            textureKey={p.texKey}
-            position={place(inst.position)}
-            rotation={turn(inst.rotation)}
-            scale={inst.thickness != null ? [inst.scale * inst.thickness, inst.scale, inst.scale * inst.thickness] : inst.scale}
-          />
-        );
-      })}
-      {props.rig.anatomy.map((inst, i) => {
-        const p = props.parts[inst.part];
-        return (
-          <Scene3D.Mesh
-            key={`n${i}`}
-            geometry={Geometry.Globe}
-            params={p.params}
-            dynamicKey={p.dynKey}
-            material="#ffffff"
-            textureKey={p.texKey}
-            position={place(inst.position)}
-            rotation={turn(inst.rotation)}
-            scale={inst.thickness != null ? [inst.scale * inst.thickness, inst.scale, inst.scale * inst.thickness] : inst.scale}
-          />
-        );
-      })}
-      {props.rig.clothing.map((inst, i) => (
-        <Scene3D.Mesh
-          key={`c${i}`}
-          geometry={clothingGeometry(inst.geometry)}
-          params={inst.params}
-          material={inst.textureKey ? '#ffffff' : inst.color}
-          textureKey={inst.textureKey}
-          position={place(inst.position)}
-          rotation={turn(inst.rotation)}
-          scale={inst.scale ?? 1}
-        />
-      ))}
-    </>
-  );
-}
+// Character textures + part params + figure meshes all come from the shared
+// head_lab figureRender kit (extracted when ragdoll_lab became its second user).
 
 // ── world generation — coins + land-only props, all in planet-local dirs ────
 
@@ -502,7 +335,7 @@ function generateWorld(seed: number) {
   return {
     doc,
     faceDepth,
-    parts: buildPartRender(doc, faceDepth, seed),
+    parts: buildPartRender(doc, faceDepth, 'planetrun', seed),
     coins,
     trees: scatter(8, 0.56, 0.8, 1.35, TREE_TONES),
     rocks: scatter(9, 0.52, 0.5, 1.1, ROCK_TONES),
@@ -816,7 +649,7 @@ export default function PlanetRun() {
         <Scene3D.Mesh geometry={Geometry.Cylinder} params={SHADOW_PARAMS} material={{ color: '#000000', opacity: 0.32 }} position={[0, 0.02, 0]} />
 
         {/* the player — head_lab's whole rig, walking in place at the pole */}
-        <Figure rig={rig} yawDeg={figureYaw} hopY={s.hopY} parts={world.parts} />
+        <FigureMeshes rig={rig} parts={world.parts} yawDeg={figureYaw} lift={s.hopY} />
 
         {/* coin compass — a little golden cone orbiting the player's head,
             pointing along the surface bearing of the nearest coin */}
