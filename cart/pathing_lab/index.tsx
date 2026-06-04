@@ -36,7 +36,9 @@ import {
 } from '../head_lab/ragdoll';
 import { generateFace, hedDepthGrid } from '../head_lab/hed';
 import { buildPartRender, CharacterCaptures, FigureMeshes, type PartRender } from '../head_lab/figureRender';
-import { CarMeshes } from '../ragdoll_lab/car';
+import { buildVehicle, geometryFor, makeVehicle, VEHICLE_STYLES, type VehicleDoc } from '../vehicle_lab/index';
+import type { SampledAction } from '../animationDsl';
+import { measurePath, planMotion, sampleMotion, slicePoints, type MotionPlan, type MotionProfile } from '@reactjit/runtime/motion';
 import { TILE_KINDS, tileKindDefinition, type TileKind } from '../hmsc/world/tileKinds';
 import { TRAFFIC_SIGNAL_CYCLE, trafficClockSeconds } from '../hmsc/world/traffic';
 import {
@@ -371,6 +373,40 @@ const WorldMeshes = memo(function WorldMeshes(props: {
   );
 });
 
+// A vehicle_lab build placed in the world. The lab's local frame has the
+// hood at -Z while our heading convention faces +Z, so the mesh yaw adds
+// 180 (the same convention as the head_lab figure). Wheel spin comes from
+// the ODOMETER (distance / circumference — deterministic), steering from
+// the tangent error, the brake nose-dip from the plan's current accel.
+function PlacedVehicle(props: { car: Car; showHitboxes: boolean }) {
+  const { car } = props;
+  const actions: SampledAction[] = [
+    { target: 'wheels', action: 'spin_loop', phase: ((car.odometer / car.wheelCirc) * 0.5) % 1, weight: 1, args: [] },
+    { target: 'front_wheels', action: 'steer_loop', phase: Math.asin(Math.max(-1, Math.min(1, car.steerDeg / 24))) / (Math.PI * 2), weight: 1, args: [] },
+    { target: 'vehicle', action: 'brake', phase: 1, weight: car.accelNow < -0.4 ? Math.min(1, -car.accelNow / 6.5) : 0, args: [] },
+  ];
+  const build = buildVehicle(car.doc, actions);
+  const meshYaw = car.yawDeg + 180;
+  const rad = meshYaw * RAD;
+  const c = Math.cos(rad);
+  const sn = Math.sin(rad);
+  const place = (p: V3): V3 => [car.x + p[0] * c + p[2] * sn, p[1], car.z - p[0] * sn + p[2] * c];
+  const turn = (r?: V3): V3 => [r?.[0] ?? 0, (r?.[1] ?? 0) + meshYaw, r?.[2] ?? 0];
+  return (
+    <>
+      {build.meshes.map((mm, i) => (
+        <Scene3D.Mesh key={`${mm.id}.${i}`} geometry={geometryFor(mm.kind)} params={mm.params}
+          position={place(mm.position)} rotation={turn(mm.rotation)} scale={mm.scale} material={mm.material} />
+      ))}
+      {props.showHitboxes ? build.hitboxes.map((h, i) => (
+        <Scene3D.Mesh key={`hb${h.id}.${i}`} geometry={Geometry.Box} params={{ width: 1, height: 1, depth: 1 }}
+          position={place(h.position)} rotation={turn(h.rotation)} scale={h.size}
+          material={{ color: h.critical ? '#fb7185' : '#38bdf8', opacity: 0.15 }} />
+      )) : null}
+    </>
+  );
+}
+
 // ── agents ───────────────────────────────────────────────────────────────────
 
 type PedMode = 'walk' | 'ragdoll' | 'recover';
@@ -386,15 +422,32 @@ type Ped = {
   charIdx: number;
 };
 
+// A car is a vehicle_lab build (semantic panels + per-part hitboxes) driven
+// by a DETERMINISTIC motion plan: the route comes from host pathing, the
+// speed/distance schedule from runtime/motion.ts, and position, speed and
+// odometer are pure functions of time — until a yield reason (red light,
+// pedestrian, queue) INTERRUPTS and the plan re-anchors at the sampled
+// state. Between interruptions a car's motion costs zero per-tick math.
 type Car = {
-  x: number; z: number; yawDeg: number; cruise: number; tone: string;
-  speed: number; // live, eased toward the current limit (yields brake it)
-  path: Path | null; nextIdx: number; goal: PathPoint | null;
+  doc: VehicleDoc;
+  halfLen: number;
+  wheelCirc: number;
+  profile: MotionProfile;
+  // rendered state — yaw eases toward the path tangent; steer/brake feed
+  // the vehicle build's wheel-steer and nose-dip channels
+  x: number; z: number; yawDeg: number; steerDeg: number;
+  speed: number; accelNow: number; odometer: number;
+  // route (host path) + the current deterministic plan over a slice of it
+  path: Path | null; goal: PathPoint | null; pathDirty: boolean;
+  route: [number, number][]; routeCum: number[]; routeTotal: number;
+  plan: MotionPlan | null;
+  baseS: number; // route arc consumed by earlier plans of this route
+  planEndS: number; // route arc where the current plan halts
+  crumbIdx: number; // route waypoint index at current progress (viz + disrupt test)
+  interruptions: number;
 };
 
 type Barrier = { cx: number; cz: number; prevKind: number };
-
-const CAR_TONES = ['#b3382f', '#2f6bb3', '#caa12f', '#3f9e63', '#7a4fb3', '#b3662f'];
 const PED_OUTFITS: [string, string, string[], string][] = [
   ['tee', 'plain', ['cap'], 'jeans'],
   ['hoodie', 'plain', [], 'jeans'],
@@ -403,7 +456,7 @@ const PED_OUTFITS: [string, string, string[], string][] = [
   ['dress', 'plain', [], 'briefs'],
 ];
 
-const MAX_CARS = 12;
+const MAX_CARS = 8; // vehicle_lab builds are ~45 meshes each — 8 is the budget
 const MAX_PEDS = 4;
 
 type Sim = {
@@ -429,6 +482,7 @@ export default function PathingLab() {
   const [showPaths, setShowPaths] = useState(true);
   const [paused, setPaused] = useState(false);
   const [reckless, setReckless] = useState(false);
+  const [showHitboxes, setShowHitboxes] = useState(false);
 
   const world = useMemo(() => buildWorld(), []);
   const characters = useMemo(() => {
@@ -514,15 +568,26 @@ export default function PathingLab() {
       lastNow = now;
       const s = simRef.current;
       const ui = uiRef.current;
-      s.animSeconds += dt;
 
       // population control
       while (s.cars.length < ui.carCount) {
-        // spawn ON a lane tile, already facing its flow
+        // spawn ON a lane tile, already facing its flow, as a generated
+        // vehicle_lab car (style/color/gas-tank per seed)
         const lc = world.laneCells[Math.floor(rand() * world.laneCells.length)];
         const [x, z] = cellCenter(lc.x, lc.z);
         const yawDeg = lc.kind === 'laneEast' ? 90 : lc.kind === 'laneWest' ? -90 : lc.kind === 'laneNorth' ? 180 : 0;
-        s.cars.push({ x, z, yawDeg, cruise: 5 + rand() * 2.5, speed: 0, tone: CAR_TONES[s.cars.length % CAR_TONES.length], path: null, nextIdx: 0, goal: null });
+        const doc = makeVehicle(Math.floor(rand() * 0x7fffffff));
+        const dims = VEHICLE_STYLES[doc.style];
+        s.cars.push({
+          doc,
+          halfLen: dims.length / 2,
+          wheelCirc: 2 * Math.PI * dims.wheelR,
+          profile: { maxSpeed: 5 + rand() * 2.5, accel: 2.3 + rand() * 0.9, decel: 6.5, minCornerSpeed: 1.5 },
+          x, z, yawDeg, steerDeg: 0, speed: 0, accelNow: 0, odometer: 0,
+          path: null, goal: null, pathDirty: false,
+          route: [], routeCum: [], routeTotal: 0,
+          plan: null, baseS: 0, planEndS: 0, crumbIdx: 1, interruptions: 0,
+        });
       }
       if (s.cars.length > ui.carCount) s.cars.length = ui.carCount;
       while (s.peds.length < ui.pedCount) {
@@ -533,57 +598,77 @@ export default function PathingLab() {
       if (s.peds.length > ui.pedCount) s.peds.length = ui.pedCount;
 
       if (!ui.paused && pathHostCompiled()) {
+        // the sim clock IS the motion plans' time base — advancing it only
+        // while unpaused freezes every deterministic schedule in place
+        s.animSeconds += dt;
         // disruption sweep: only when the host generation actually moved
         const gen = pathGeneration();
         if (gen !== s.lastGen) {
           s.lastGen = gen;
-          for (const agent of [...s.cars, ...s.peds] as (Car | Ped)[]) {
-            if (!agent.path || !agent.goal) continue;
-            if (pathDisrupted(agent.path, agent.nextIdx)) {
-              const profile = (agent as Ped).mode !== undefined ? PED_PROFILE : VEH_PROFILE;
-              agent.path = findPath(profile, [agent.x, agent.z], agent.goal);
-              agent.nextIdx = 1;
+          for (const ped of s.peds) {
+            if (!ped.path || !ped.goal) continue;
+            if (pathDisrupted(ped.path, ped.nextIdx)) {
+              ped.path = findPath(PED_PROFILE, [ped.x, ped.z], ped.goal);
+              ped.nextIdx = 1;
+              s.repaths += 1;
+            }
+          }
+          for (const car of s.cars) {
+            if (!car.path || !car.goal) continue;
+            if (pathDisrupted(car.path, car.crumbIdx)) {
+              car.pathDirty = true; // reroute + replan next tick, same goal
               s.repaths += 1;
             }
           }
           if (s.repaths > 0) logLine(s, `gen ${gen} — ${s.repaths} repaths total`);
         }
 
-        // cars
+        // ── cars: deterministic plans, replanned ONLY on interruption ─────
+        // Position/speed/odometer come from sampleMotion(plan, now) — exact,
+        // frame-rate independent, zero integration. The yield monitor below
+        // only CHECKS the world; it touches the plan when a reason to stop
+        // appears, tightens, or clears.
         const clock = trafficClockSeconds();
+        const now = s.animSeconds;
         for (let ci = 0; ci < s.cars.length; ci++) {
           const car = s.cars[ci];
-          if (!car.path) {
-            car.goal = pickGoalAhead(world.laneXY, car.x, car.z, Math.sin(car.yawDeg * RAD), Math.cos(car.yawDeg * RAD));
-            car.path = findPath(VEH_PROFILE, [car.x, car.z], car.goal);
-            car.nextIdx = 1;
-            if (!car.path || car.path.points.length < 2) { car.path = null; continue; }
+
+          // (re)route: fresh spawn, arrival (goal null), or barrier repath
+          if (!car.plan || car.pathDirty) {
+            if (!car.goal) {
+              car.goal = pickGoalAhead(world.laneXY, car.x, car.z, Math.sin(car.yawDeg * RAD), Math.cos(car.yawDeg * RAD));
+            }
+            const found = findPath(VEH_PROFILE, [car.x, car.z], car.goal);
+            car.pathDirty = false;
+            if (!found || found.points.length < 2) { car.goal = null; car.plan = null; continue; }
+            car.path = found;
+            car.route = [[car.x, car.z], ...found.points.slice(1)];
+            const mp = measurePath(car.route);
+            car.routeCum = mp.cum;
+            car.routeTotal = mp.total;
+            car.baseS = 0;
+            car.crumbIdx = 1;
+            car.plan = planMotion(car.route, { startTime: now, profile: car.profile, startSpeed: car.speed });
+            car.planEndS = car.routeTotal;
           }
-          const pts = car.path.points;
-          if (car.nextIdx >= pts.length) { car.path = null; continue; }
-          const tgt = pts[car.nextIdx];
-          const dx = tgt[0] - car.x;
-          const dz = tgt[1] - car.z;
-          const d = Math.hypot(dx, dz);
-          const fx0 = Math.sin(car.yawDeg * RAD);
-          const fz0 = Math.cos(car.yawDeg * RAD);
-          // Arrived OR blew past it (waypoint behind the bumper) → advance.
-          // The accept radius must beat the turning circle (~1.4m at cruise
-          // with 240°/s steering) or a near-miss orbits the waypoint forever
-          // — the donuts.
-          if (d < 0.9 || (d < 2.2 && dx * fx0 + dz * fz0 < 0)) { car.nextIdx += 1; continue; }
-          const desired = Math.atan2(dx, dz) * DEG;
-          const err = wrap180(desired - car.yawDeg);
-          car.yawDeg += Math.max(-240 * dt, Math.min(240 * dt, err));
-          const fx = Math.sin(car.yawDeg * RAD);
-          const fz = Math.cos(car.yawDeg * RAD);
 
-          // ── the driver: speed limit = min of every yield reason ─────────
-          // big steering error → creep (tightens the turning circle so a
-          // sharp corner is a pivot, not an orbit)
-          let limit = car.cruise * (Math.abs(err) > 70 ? 0.16 : Math.abs(err) > 35 ? 0.38 : 1);
+          // THE deterministic read
+          const m = sampleMotion(car.plan, now);
+          car.odometer += Math.hypot(m.x - car.x, m.z - car.z);
+          car.x = m.x;
+          car.z = m.z;
+          car.speed = m.speed;
+          car.accelNow = m.accel;
+          const yawErr = wrap180(m.headingDeg - car.yawDeg);
+          if (m.speed > 0.15) car.yawDeg += Math.max(-460 * dt, Math.min(460 * dt, yawErr));
+          car.steerDeg = Math.max(-24, Math.min(24, yawErr * 1.4));
+          const progress = car.baseS + m.s;
+          while (car.crumbIdx < car.routeCum.length - 1 && car.routeCum[car.crumbIdx] < progress) car.crumbIdx++;
+          const fx = Math.sin(m.headingDeg * RAD);
+          const fz = Math.cos(m.headingDeg * RAD);
 
-          // pedestrians in the corridor ahead → brake to a stop short of them
+          // ── yield monitor: the nearest reason to stop, as meters ahead ──
+          let stopD = Infinity;
           if (!ui.reckless) {
             for (const ped of s.peds) {
               if (ped.mode === 'ragdoll') continue;
@@ -591,15 +676,9 @@ export default function PathingLab() {
               const rz = ped.z - car.z;
               const ahead = rx * fx + rz * fz;
               const lateral = Math.abs(rx * fz - rz * fx);
-              if (ahead > 0 && ahead < 4.6 && lateral < 1.35) {
-                limit = Math.min(limit, Math.max(0, (ahead - 1.5) * 1.8));
-              }
+              if (ahead > 0 && ahead < 8 && lateral < 1.4) stopD = Math.min(stopD, ahead - (car.halfLen + 1.1));
             }
           }
-          // car ahead in lane → follow, don't rear-end the red-light queue.
-          // ONCOMING traffic is ignored — the lanes separate it now, and
-          // braking for it was the nose-to-nose mutual freeze that
-          // gridlocked the whole city.
           for (let oi = 0; oi < s.cars.length; oi++) {
             const other = s.cars[oi];
             if (other === car) continue;
@@ -610,14 +689,10 @@ export default function PathingLab() {
             const rz = other.z - car.z;
             const ahead = rx * fx + rz * fz;
             const lateral = Math.abs(rx * fz - rz * fx);
-            if (ahead <= 0 || ahead >= 4.6 || lateral >= 1.2) continue;
-            // crossing tie-break: two near-stopped cars yielding to each
-            // other never move again — the lower index claims right of way
-            if (other.speed < 0.5 && car.speed < 0.5 && ci < oi) continue;
-            limit = Math.min(limit, Math.max(0, (ahead - 2.9) * 2.0));
+            if (ahead <= 0 || ahead >= 10 || lateral >= 1.4) continue;
+            if (other.speed < 0.5 && car.speed < 0.5 && ci < oi) continue; // crossing tie-break
+            stopD = Math.min(stopD, ahead - (car.halfLen + other.halfLen + 0.8));
           }
-          // signals: approaching a junction box on a non-go phase → stop at
-          // the line; already inside → commit and clear the box
           const axis: 0 | 1 = Math.abs(fx) > Math.abs(fz) ? 1 : 0;
           const phase = axisPhase(axis, clock);
           if (phase !== 'go') {
@@ -628,30 +703,42 @@ export default function PathingLab() {
               if (axis === 1) {
                 const dir = fx > 0 ? 1 : -1;
                 const dd = ((dir > 0 ? j.x0 : j.x1) - car.x) * dir;
-                if (dd >= -0.1 && dd < 3.6 && car.z > j.z0 - 0.7 && car.z < j.z1 + 0.7) enter = dd;
+                if (dd >= -0.1 && dd < 10 && car.z > j.z0 - 0.7 && car.z < j.z1 + 0.7) enter = dd;
               } else {
                 const dir = fz > 0 ? 1 : -1;
                 const dd = ((dir > 0 ? j.z0 : j.z1) - car.z) * dir;
-                if (dd >= -0.1 && dd < 3.6 && car.x > j.x0 - 0.7 && car.x < j.x1 + 0.7) enter = dd;
+                if (dd >= -0.1 && dd < 10 && car.x > j.x0 - 0.7 && car.x < j.x1 + 0.7) enter = dd;
               }
               if (enter == null) continue;
-              if (phase === 'caution' && enter < 1.2) continue; // too late — roll through
-              limit = Math.min(limit, Math.max(0, (enter - 0.9) * 2.2));
+              if (phase === 'caution' && enter < car.halfLen + 1.6) continue; // too late — roll through
+              stopD = Math.min(stopD, enter - (car.halfLen + 0.35));
             }
           }
+          if (stopD !== Infinity) stopD = Math.max(0, stopD);
 
-          // ease toward the limit: gentle throttle, hard brakes
-          const rate = limit > car.speed ? 3.2 : 9.5;
-          car.speed += Math.max(-rate * dt, Math.min(rate * dt, limit - car.speed));
-          car.x += fx * car.speed * dt;
-          car.z += fz * car.speed * dt;
+          // ── interruption rules — the ONLY writes to the plan ────────────
+          const targetEndS = stopD === Infinity ? car.routeTotal : Math.min(car.routeTotal, progress + stopD);
+          const freeRun = car.planEndS >= car.routeTotal - 0.3;
+          const tighter = stopD !== Infinity && targetEndS < car.planEndS - 0.5; // new/closer obstacle
+          const cleared = stopD === Infinity && !freeRun; // light went green / ped moved on
+          const creep = stopD !== Infinity && !freeRun && targetEndS > car.planEndS + 0.8 && m.speed < 0.6; // queue advanced
+          if (tighter || cleared || creep) {
+            const pts = slicePoints(car.route, car.routeCum, progress, targetEndS);
+            car.plan = planMotion(pts, { startTime: now, profile: car.profile, startSpeed: m.speed });
+            car.baseS = progress;
+            car.planEndS = targetEndS;
+            car.interruptions += 1;
+          } else if (m.done && freeRun && progress >= car.routeTotal - 0.5) {
+            car.plan = null; // arrived — next tick picks an ahead goal, plans fresh
+            car.goal = null;
+          }
 
           // clip a pedestrian → hand the body to the ragdoll. Speed-gated:
           // a stopped bumper nudges nobody into orbit.
           if (car.speed > 2.5) {
             for (const ped of s.peds) {
               if (ped.mode !== 'walk') continue;
-              if (Math.hypot(ped.x - car.x, ped.z - car.z) > 1.25) continue;
+              if (Math.hypot(ped.x - car.x, ped.z - car.z) > car.halfLen + 0.6) continue;
               const local = buildSkeleton('neutral', 'walk', ped.gait % 1);
               const bones = placeBones(local, ped.yawDeg + 180, ped.x, ped.z);
               ped.ragdoll = createRagdoll(bones);
@@ -800,7 +887,7 @@ export default function PathingLab() {
         ) : null}
         <Row style={{ gap: 6, alignItems: 'center' }}>
           <Text fontSize={11} color={DIM} style={{ width: 44 }}>cars</Text>
-          {[2, 4, 6, 12].map((n) => (
+          {[2, 4, 6, 8].map((n) => (
             <Pressable key={n} onPress={() => setCarCount(Math.min(MAX_CARS, n))} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: carCount === n ? GOOD : '#22324a', backgroundColor: '#101a2a' }}>
               <Text fontSize={12} color={carCount === n ? GOOD : DIM}>{String(n)}</Text>
             </Pressable>
@@ -824,6 +911,9 @@ export default function PathingLab() {
           <Pressable onPress={() => setReckless((v) => !v)} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: reckless ? BAD : '#22324a', backgroundColor: reckless ? '#2a0f12' : '#101a2a' }}>
             <Text fontSize={12} color={reckless ? BAD : DIM}>reckless drivers</Text>
           </Pressable>
+          <Pressable onPress={() => setShowHitboxes((v) => !v)} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: showHitboxes ? '#38bdf8' : '#22324a', backgroundColor: '#101a2a' }}>
+            <Text fontSize={12} color={showHitboxes ? '#38bdf8' : DIM}>hitboxes</Text>
+          </Pressable>
           <Pressable
             onPress={() => {
               const sim = simRef.current;
@@ -838,7 +928,7 @@ export default function PathingLab() {
         <Box style={{ height: 6 }} />
         <Text fontSize={11} color={DIM} style={{ fontWeight: 800 }}>HOST PATHING</Text>
         <Text fontSize={11} color={INK}>{`generation ${s.lastGen} · repaths ${s.repaths} · barriers ${s.barriers.length}`}</Text>
-        <Text fontSize={11} color={INK}>{`pedestrians clipped: ${s.hits}`}</Text>
+        <Text fontSize={11} color={INK}>{`motion interruptions ${s.cars.reduce((n, c) => n + c.interruptions, 0)} · pedestrians clipped ${s.hits}`}</Text>
         <Box style={{ height: 6 }} />
         <Text fontSize={11} color={DIM} style={{ fontWeight: 800 }}>EVENTS</Text>
         {s.log.length === 0 ? (
@@ -884,15 +974,16 @@ export default function PathingLab() {
           {/* live paths — flat crumbs along each agent's remaining waypoints */}
           {showPaths ? ([...s.cars, ...s.peds] as (Car | Ped)[]).map((agent, ai) => {
             if (!agent.path) return null;
-            const isCar = (agent as Car).cruise !== undefined;
-            return agent.path.points.slice(Math.max(0, agent.nextIdx - 1), agent.nextIdx + 14).map(([px, pz], i) => (
+            const isCar = 'doc' in agent;
+            const startIdx = Math.max(0, (isCar ? (agent as Car).crumbIdx : (agent as Ped).nextIdx) - 1);
+            return agent.path.points.slice(startIdx, startIdx + 15).map(([px, pz], i) => (
               <Scene3D.Mesh key={`p${ai}.${i}`} geometry={Geometry.Box} params={{ width: 0.16, height: 0.03, depth: 0.16 }}
                 material={isCar ? '#35d0ff' : '#f7c948'} position={[px, 0.14, pz]} />
             ));
           }) : null}
 
           {s.cars.map((car, i) => (
-            <CarMeshes key={`car${i}`} x={car.x} z={car.z} yawDeg={car.yawDeg} tone={car.tone} />
+            <PlacedVehicle key={`car${i}`} car={car} showHitboxes={showHitboxes} />
           ))}
           {s.peds.map((ped, i) => (
             <FigureMeshes key={`ped${i}`} rig={pedRigs[i]} parts={characters[ped.charIdx].parts} />
