@@ -111,6 +111,31 @@ and a new approach — there is the lab shape, and there is the archive. An
 agent that finds itself extending an old lab cart instead of capturing it has
 gone wrong.
 
+**The capture is a TRIAGE, not a 1:1 lab→lab mapping.** Some "labs" were never
+labs — they are dev tooling wearing a lab name. head_lab is both an idea AND
+the place characters get built: the kit captures into `game/figure/`, the
+authoring interface is REMADE as `editors/characters/` (a tooling route inside
+the tool, not ad-hoc external tooling beside it), and only the test-scene idea
+becomes a `labs/` drop-in. Every old cart resolves into some combination of:
+
+  - a SYSTEM        → `game/`           (logic everything consumes)
+  - an EDITOR       → `editors/`        (an authoring route IN the tool)
+  - a LAB           → `labs/<name>.tsx` (the experiment, reborn on @game)
+  - nothing kept    → archive only
+
+vehicle_lab and game_item_gallery triage the same way (system + editor + lab).
+combat_lab/pathing_lab are mostly system + lab. There is no category of
+"external tool that points at the tool" — if it authors game content, it is an
+editors/ route.
+
+**And triage still means REWRITING the files — never moving them.** The
+existing files are sparse, spread-out logic; they do not get copied or
+relocated into this structure. Capture = write the system fresh in its new
+home to the constitution's bar (P2 no buried constants, P3 deep interfaces,
+P4 tests), using the old file only as the behavior reference — the same
+relationship V1 gives the Verlet solver. A `git mv` into `game/` or `editors/`
+is the capture done wrong.
+
 ## The extraction map (isolated systems → their one home)
 
 | Today (isolated)                          | Lands in                                  |

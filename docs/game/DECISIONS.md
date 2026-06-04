@@ -391,6 +391,18 @@ COHERENT IDEA — there is the lab shape and there is the archive, never an old
 approach and a new one. An agent extending an old lab cart instead of
 capturing it has gone wrong.
 
+**V17-TRIAGE (clarified 2026-06-04): some "labs" are dev tooling — they become
+editors/ routes, and capture means REWRITING, never moving files.**
+head_lab is both an idea AND the place characters get built: its kit captures
+into `game/figure/`, its authoring interface is REMADE as an `editors/` route
+INSIDE the tool (not ad-hoc external tooling beside it), and only the
+test-scene idea becomes a lab. Every old cart triages into some combination of
+SYSTEM (`game/`), EDITOR (`editors/`), LAB (`labs/`), or archive-only. And in
+every case the files are REWRITTEN — the existing files are sparse, spread-out
+logic; they are behavior references only (the V1 Verlet relationship), written
+fresh to the constitution's bar (P2/P3/P4). A `git mv` into the new structure
+is the capture done wrong.
+
 **V18 — Game Zig is organized, properly named, and CONDITIONAL all the way through. (Added 2026-06-04.)**
 "reactjit is the same project and isn't the same project": the framework is
 mostly organized (the `v8_bindings_<capability>.zig` convention + `gpu/`,
