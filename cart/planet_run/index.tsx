@@ -174,30 +174,35 @@ const PLANET_TEX_KEY = 'planetrun.surface';
 
 // fbm continents over a seamless cylinder mapping (cos/sin of longitude feed
 // the noise, so u=0 and u=1 sample identical fields — no seam down the back).
-// Mirrored EXACTLY by fbmLand() below so trees/rocks only spawn on land.
+// Mirrored EXACTLY by terrainAt() below so trees/rocks only spawn on land.
+//
+// Helpers wear a pr_ prefix: the effect pipeline prepends its shared WGSL math
+// library (framework/gpu/effect_math.wgsl — fbm/snoise/voronoi/...), and a
+// bare "fn fbm" here is a redefinition that hard-crashes shader creation.
+// We keep our own [0,1] value-noise pair so the JS mirror stays exact.
 const PLANET_WGSL = `
 const TAU: f32 = 6.28318530718;
 @group(0) @binding(1) var<storage, read> ys: array<f32>;
 
-fn hash2(p: vec2f) -> f32 {
+fn pr_hash(p: vec2f) -> f32 {
   return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453);
 }
-fn vnoise(p: vec2f) -> f32 {
+fn pr_vnoise(p: vec2f) -> f32 {
   let i = floor(p);
   let f = fract(p);
   let u = f * f * (3.0 - 2.0 * f);
-  let a = hash2(i);
-  let b = hash2(i + vec2f(1.0, 0.0));
-  let c = hash2(i + vec2f(0.0, 1.0));
-  let d = hash2(i + vec2f(1.0, 1.0));
+  let a = pr_hash(i);
+  let b = pr_hash(i + vec2f(1.0, 0.0));
+  let c = pr_hash(i + vec2f(0.0, 1.0));
+  let d = pr_hash(i + vec2f(1.0, 1.0));
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
-fn fbm(p: vec2f) -> f32 {
+fn pr_fbm(p: vec2f) -> f32 {
   var v = 0.0;
   var amp = 0.5;
   var q = p;
   for (var i = 0; i < 4; i = i + 1) {
-    v = v + amp * vnoise(q);
+    v = v + amp * pr_vnoise(q);
     q = q * 2.03 + vec2f(13.7, 7.1);
     amp = amp * 0.5;
   }
@@ -208,8 +213,8 @@ fn fbm(p: vec2f) -> f32 {
   let u = in.uv.x;
   let v = in.uv.y;
   let ang = u * TAU;
-  let n = fbm(vec2f(cos(ang) * 1.15 + 5.2, v * 3.1)) * 0.55
-        + fbm(vec2f(sin(ang) * 1.15 - 2.7, v * 3.3 + 9.4)) * 0.45;
+  let n = pr_fbm(vec2f(cos(ang) * 1.15 + 5.2, v * 3.1)) * 0.55
+        + pr_fbm(vec2f(sin(ang) * 1.15 - 2.7, v * 3.3 + 9.4)) * 0.45;
 
   let ocean_deep = vec3f(0.06, 0.20, 0.40);
   let ocean = vec3f(0.10, 0.34, 0.58);
@@ -231,22 +236,22 @@ fn fbm(p: vec2f) -> f32 {
 }
 `;
 
-// JS mirror of the shader's land test so surface props spawn on continents.
-function hash2(px: number, py: number): number {
+// JS mirror of the shader's pr_* land test so props spawn on continents.
+function prHash(px: number, py: number): number {
   const s = Math.sin(px * 127.1 + py * 311.7) * 43758.5453;
   return s - Math.floor(s);
 }
-function vnoise(px: number, py: number): number {
+function prVnoise(px: number, py: number): number {
   const ix = Math.floor(px), iy = Math.floor(py);
   const fx = px - ix, fy = py - iy;
   const ux = fx * fx * (3 - 2 * fx), uy = fy * fy * (3 - 2 * fy);
-  const a = hash2(ix, iy), b = hash2(ix + 1, iy), c = hash2(ix, iy + 1), d = hash2(ix + 1, iy + 1);
+  const a = prHash(ix, iy), b = prHash(ix + 1, iy), c = prHash(ix, iy + 1), d = prHash(ix + 1, iy + 1);
   return (a + (b - a) * ux) * (1 - uy) + (c + (d - c) * ux) * uy;
 }
-function fbm(px: number, py: number): number {
+function prFbm(px: number, py: number): number {
   let v = 0, amp = 0.5, qx = px, qy = py;
   for (let i = 0; i < 4; i++) {
-    v += amp * vnoise(qx, qy);
+    v += amp * prVnoise(qx, qy);
     qx = qx * 2.03 + 13.7;
     qy = qy * 2.03 + 7.1;
     amp *= 0.5;
@@ -259,8 +264,8 @@ function terrainAt(d: V3): number {
   const v = Math.acos(Math.max(-1, Math.min(1, d[1]))) / Math.PI;
   const phi = Math.atan2(d[2], d[0]);
   const ang = Math.PI / 2 - phi; // = u·2π
-  return fbm(Math.cos(ang) * 1.15 + 5.2, v * 3.1) * 0.55
-    + fbm(Math.sin(ang) * 1.15 - 2.7, v * 3.3 + 9.4) * 0.45;
+  return prFbm(Math.cos(ang) * 1.15 + 5.2, v * 3.1) * 0.55
+    + prFbm(Math.sin(ang) * 1.15 - 2.7, v * 3.3 + 9.4) * 0.45;
 }
 
 const PlanetSurfaceCapture = memo(function PlanetSurfaceCapture() {
