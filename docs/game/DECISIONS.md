@@ -454,3 +454,16 @@ BEHAVIOR — written so they survive interface changes. Tests assert what the
 system does (the jump arc, the hit chance at range X under cover Y, the path
 around a dropped barrier), not what its functions are called. Every ground-floor
 module ships with both sides.
+
+**P5 — The core shape is protected; new ideas slot in without touching it.**
+The reason all of this lives in the internal tooling: the game's mechanics are
+still being constructed — cutscenes (V16) are just a start. So the system must
+satisfy two demands at once: (1) everything is NOT a pain in the ass to interface
+with — a new idea is a short file in a lab slot, consuming the ground floor
+through its deep interfaces (P3); and (2) experimenting can never hurt the core
+shape of the game already established — a lab consumes the ground floor, it never
+forks or mutates it. The graduation loop: experiments are written at production
+quality (the house rule — disposability is in the IDEA, not the implementation),
+and when one wins, it graduates INTO the ground floor through this constitution
+(a new verdict), not around it. The ground floor only ever grows by verdict;
+labs are where everything else lives until then.
