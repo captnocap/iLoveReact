@@ -93,6 +93,13 @@ export const TILE_KIND_NOISE_MATERIALS: Record<TileKind, SurfaceNoiseMaterial> =
   door: 'woodFloor',
   bush: 'dirt',
   marker: 'concrete',
+  spawn: 'concrete',
+  save: 'concrete',
+  laneNorth: 'concrete',
+  laneSouth: 'concrete',
+  laneEast: 'concrete',
+  laneWest: 'concrete',
+  junction: 'concrete',
 };
 
 export type ContinuousNoiseRange = {

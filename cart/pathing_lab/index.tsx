@@ -40,7 +40,7 @@ import { CarMeshes } from '../ragdoll_lab/car';
 import { TILE_KINDS, tileKindDefinition, type TileKind } from '../hmsc/world/tileKinds';
 import { TRAFFIC_SIGNAL_CYCLE, trafficClockSeconds } from '../hmsc/world/traffic';
 import {
-  publishPathGrid, setPathProfile, findPath, fillPathRect, pathDisrupted, pathGeneration,
+  publishPathGrid, setPathProfile, setPathFlows, PATH_FLOW, findPath, fillPathRect, pathDisrupted, pathGeneration,
   type Path, type PathPoint,
 } from '@reactjit/runtime/pathing';
 import type { PartId } from '../head_lab/parts';
@@ -90,18 +90,14 @@ const WALL_RECTS: [number, number, number, number][] = [
   [17, 24, 4, 3],
 ];
 
-// ── junctions + signals — hmsc's traffic clock, the lab's junction boxes ────
-// The four places the road bands cross. Lights run hmsc's TRAFFIC_SIGNAL_CYCLE
-// off the same steady clock the hmsc lamps glow on: axis 0 (N-S travel) and
-// axis 1 (E-W) alternate by a half period, exactly like world/traffic.ts'
-// signalPhaseOffsetSeconds.
+// ── junctions + signals — hmsc's traffic clock, junction TILES as the boxes ─
+// Junction boxes are no longer hardcoded geometry: buildWorld paints
+// 'junction' tiles where lanes meet and clusters them into boxes — the grid
+// itself knows where intersections are. Lights run hmsc's
+// TRAFFIC_SIGNAL_CYCLE off the same steady clock the hmsc lamps glow on:
+// axis 0 (N-S travel) and axis 1 (E-W) alternate by a half period, exactly
+// like world/traffic.ts' signalPhaseOffsetSeconds.
 type Junction = { x0: number; z0: number; x1: number; z1: number };
-const JUNCTIONS: Junction[] = ROAD_BANDS.flatMap((bx) => ROAD_BANDS.map((bz) => ({
-  x0: ORIGIN_X + bx * CELL,
-  z0: ORIGIN_Z + bz * CELL,
-  x1: ORIGIN_X + (bx + ROAD_W) * CELL,
-  z1: ORIGIN_Z + (bz + ROAD_W) * CELL,
-})));
 
 type SignalPhase = 'go' | 'caution' | 'stop';
 function axisPhase(axis: 0 | 1, t: number): SignalPhase {
@@ -120,11 +116,11 @@ const POLE_PARAMS = { radius: 0.06, height: 2.3, segments: 8 };
 
 // One pole per junction carrying two 3-lamp heads — one per axis. The lamps
 // are live phase readouts, the same value the cars' yield check reads.
-function TrafficLights(props: { clock: number }) {
+function TrafficLights(props: { clock: number; junctions: Junction[] }) {
   const phases: [SignalPhase, SignalPhase] = [axisPhase(0, props.clock), axisPhase(1, props.clock)];
   return (
     <>
-      {JUNCTIONS.map((j, i) => {
+      {props.junctions.map((j, i) => {
         const px = j.x1 + 0.55;
         const pz = j.z1 + 0.55;
         return (
@@ -167,26 +163,43 @@ function buildWorld() {
   const at = (x: number, z: number) => kinds[z * COLS + x];
   const set = (x: number, z: number, k: TileKind) => { kinds[z * COLS + x] = KIND_INDEX[k]; };
 
+  // Each 6-wide band is TWO 3-tile lane trios [shoulder, lane, shoulder] —
+  // the center tile carries the flow direction in its KIND. Right-hand
+  // traffic picks the sides (right = forward x up): horizontal roads run
+  // westbound on the low-z half / eastbound high-z; vertical run southbound
+  // (+Z) low-x / northbound high-x. Crossings get flow-neutral 'junction'
+  // tiles — the grid itself knows where intersections are.
+  const H_TRIOS: TileKind[] = ['road', 'laneWest', 'road', 'road', 'laneEast', 'road'];
+  const V_TRIOS: TileKind[] = ['road', 'laneSouth', 'road', 'road', 'laneNorth', 'road'];
   for (const band of ROAD_BANDS) {
     for (let i = 0; i < COLS; i++) {
-      for (let o = 0; o < ROAD_W; o++) {
-        set(i, band + o, 'road');
-        set(band + o, i, 'road');
-      }
+      for (let o = 0; o < ROAD_W; o++) set(i, band + o, H_TRIOS[o]);
+    }
+  }
+  for (const band of ROAD_BANDS) {
+    for (let i = 0; i < ROWS; i++) {
+      for (let o = 0; o < ROAD_W; o++) set(band + o, i, V_TRIOS[o]);
+    }
+  }
+  for (const bx of ROAD_BANDS) {
+    for (const bz of ROAD_BANDS) {
+      for (let z = 0; z < ROAD_W; z++) for (let x = 0; x < ROAD_W; x++) set(bx + x, bz + z, 'junction');
     }
   }
   for (const [x0, z0, w, h] of WALL_RECTS) {
     for (let z = z0; z < z0 + h; z++) for (let x = x0; x < x0 + w; x++) set(x, z, 'wall');
   }
-  // sidewalks: every mud cell that touches road becomes pavement
-  const road = KIND_INDEX.road;
+  // sidewalks: every mud cell that touches the road family becomes pavement
+  const ROAD_FAMILY = new Set(
+    (['road', 'laneNorth', 'laneSouth', 'laneEast', 'laneWest', 'junction'] as TileKind[]).map((k) => KIND_INDEX[k]),
+  );
   const mud = KIND_INDEX.mud;
   const sidewalkAt: boolean[] = new Array(COLS * ROWS).fill(false);
   for (let z = 0; z < ROWS; z++) {
     for (let x = 0; x < COLS; x++) {
       if (at(x, z) !== mud) continue;
-      const near = (x > 0 && at(x - 1, z) === road) || (x < COLS - 1 && at(x + 1, z) === road)
-        || (z > 0 && at(x, z - 1) === road) || (z < ROWS - 1 && at(x, z + 1) === road);
+      const near = (x > 0 && ROAD_FAMILY.has(at(x - 1, z))) || (x < COLS - 1 && ROAD_FAMILY.has(at(x + 1, z)))
+        || (z > 0 && ROAD_FAMILY.has(at(x, z - 1))) || (z < ROWS - 1 && ROAD_FAMILY.has(at(x, z + 1)));
       if (near) sidewalkAt[z * COLS + x] = true;
     }
   }
@@ -205,10 +218,12 @@ function buildWorld() {
   }
 
   // goal pools + render strips (run-length merged rows; walls drawn tall)
-  const roadCells: [number, number][] = [];
+  const laneCells: { x: number; z: number; kind: TileKind }[] = [];
+  const laneXY: [number, number][] = [];
   const walkCells: [number, number][] = [];
   const wallCells: [number, number][] = [];
   const strips: Strip[] = [];
+  const LANE_KINDS = new Set<TileKind>(['laneNorth', 'laneSouth', 'laneEast', 'laneWest']);
   for (let z = 0; z < ROWS; z++) {
     let x = 0;
     while (x < COLS) {
@@ -218,14 +233,51 @@ function buildWorld() {
       const kind = TILE_KINDS[k];
       if (kind !== 'wall') strips.push({ x0: x, z, len, kind });
       for (let i = 0; i < len; i++) {
-        if (kind === 'road') roadCells.push([x + i, z]);
-        else if (kind === 'sidewalk') walkCells.push([x + i, z]);
+        if (LANE_KINDS.has(kind)) {
+          laneCells.push({ x: x + i, z, kind });
+          laneXY.push([x + i, z]);
+        } else if (kind === 'sidewalk') walkCells.push([x + i, z]);
         else if (kind === 'wall') wallCells.push([x + i, z]);
       }
       x += len;
     }
   }
-  return { kinds, strips, bushes, roadCells, walkCells, wallCells };
+
+  // intersections resolve from the GRID: cluster painted junction tiles into
+  // boxes (works for any map shape, not just these two bands)
+  const junctions: Junction[] = [];
+  const seen = new Uint8Array(COLS * ROWS);
+  const jk = KIND_INDEX.junction;
+  for (let z = 0; z < ROWS; z++) {
+    for (let x = 0; x < COLS; x++) {
+      const i0 = z * COLS + x;
+      if (kinds[i0] !== jk || seen[i0]) continue;
+      let minX = x, maxX = x, minZ = z, maxZ = z;
+      const stack = [i0];
+      seen[i0] = 1;
+      while (stack.length > 0) {
+        const i = stack.pop()!;
+        const cx = i % COLS, cz = (i / COLS) | 0;
+        if (cx < minX) minX = cx;
+        if (cx > maxX) maxX = cx;
+        if (cz < minZ) minZ = cz;
+        if (cz > maxZ) maxZ = cz;
+        for (const [nx, nz] of [[cx + 1, cz], [cx - 1, cz], [cx, cz + 1], [cx, cz - 1]] as const) {
+          if (nx < 0 || nz < 0 || nx >= COLS || nz >= ROWS) continue;
+          const ni = nz * COLS + nx;
+          if (kinds[ni] === jk && !seen[ni]) { seen[ni] = 1; stack.push(ni); }
+        }
+      }
+      junctions.push({
+        x0: ORIGIN_X + minX * CELL,
+        z0: ORIGIN_Z + minZ * CELL,
+        x1: ORIGIN_X + (maxX + 1) * CELL,
+        z1: ORIGIN_Z + (maxZ + 1) * CELL,
+      });
+    }
+  }
+
+  return { kinds, strips, bushes, laneCells, laneXY, walkCells, wallCells, junctions };
 }
 
 // Behavioral shaping on top of raw tile legality. hmsc's tile costs answer
@@ -237,8 +289,17 @@ function buildWorld() {
 // a walker; strolling the centerline does not). This is the FLOW-HINT
 // slice hmsc's world/pathing.ts reserves for itself.
 const PROFILE_TUNING: Record<'walk' | 'drive', Partial<Record<TileKind, number>>> = {
-  walk: { sidewalk: 0.45, road: 3.5, asphalt: 3.5, mud: 1.4, sand: 1.6 },
-  drive: { road: 1, asphalt: 1.05, sidewalk: 0, mud: 0, sand: 0, bush: 0 },
+  walk: {
+    sidewalk: 0.45, mud: 1.4, sand: 1.6,
+    road: 3.5, asphalt: 3.5, laneNorth: 3.5, laneSouth: 3.5, laneEast: 3.5, laneWest: 3.5, junction: 3.2,
+  },
+  // drivers live on the lane-center tiles; the shoulder is passable but
+  // costly (overtakes/recovery only); everything off-road is a hard block
+  drive: {
+    laneNorth: 1, laneSouth: 1, laneEast: 1, laneWest: 1, junction: 1,
+    road: 1.6, asphalt: 1.4,
+    sidewalk: 0, mud: 0, sand: 0, bush: 0,
+  },
 };
 
 // Cost-per-kind for the host profile — the SAME formula as hmsc's JS
@@ -263,7 +324,15 @@ function profileCosts(mode: 'walk' | 'drive'): number[] {
 
 // ── static world meshes, memo'd hard (they never change after mount) ────────
 
-const WorldMeshes = memo(function WorldMeshes(props: { strips: Strip[]; bushes: [number, number][]; wallCells: [number, number][] }) {
+const DASH_H_PARAMS = { width: 0.55, height: 0.02, depth: 0.09 };
+const DASH_V_PARAMS = { width: 0.09, height: 0.02, depth: 0.55 };
+
+const WorldMeshes = memo(function WorldMeshes(props: {
+  strips: Strip[];
+  bushes: [number, number][];
+  wallCells: [number, number][];
+  laneCells: { x: number; z: number; kind: TileKind }[];
+}) {
   return (
     <>
       {props.strips.map((st, i) => {
@@ -289,6 +358,15 @@ const WorldMeshes = memo(function WorldMeshes(props: { strips: Strip[]; bushes: 
         <Scene3D.Mesh key={`b${i}`} geometry={Geometry.Cone} params={{ radius: 0.34, height: 0.7, segments: 8 }}
           material="#2f6b35" position={[ORIGIN_X + (x + 0.5) * CELL, 0.38, ORIGIN_Z + (z + 0.5) * CELL]} />
       ))}
+      {/* the |x| markings — dashed paint along every lane-center tile */}
+      {props.laneCells.map((lc, i) => {
+        if ((lc.x + lc.z) % 2 !== 0) return null;
+        const horizontal = lc.kind === 'laneEast' || lc.kind === 'laneWest';
+        return (
+          <Scene3D.Mesh key={`lm${i}`} geometry={Geometry.Box} params={horizontal ? DASH_H_PARAMS : DASH_V_PARAMS}
+            material="#aab3c2" position={[ORIGIN_X + (lc.x + 0.5) * CELL, 0.095, ORIGIN_Z + (lc.z + 0.5) * CELL]} />
+        );
+      })}
     </>
   );
 });
@@ -374,11 +452,20 @@ export default function PathingLab() {
   useEffect(() => {
     if (!hostReady) return;
     publishPathGrid({ origin: [ORIGIN_X, ORIGIN_Z], cellSize: CELL, cols: COLS, rows: ROWS, kinds: world.kinds });
+    // the flow table is what makes lane tile NAMES directional in the host
+    const flows = new Uint8Array(TILE_KINDS.length);
+    flows[KIND_INDEX.laneEast] = PATH_FLOW.posX;
+    flows[KIND_INDEX.laneWest] = PATH_FLOW.negX;
+    flows[KIND_INDEX.laneSouth] = PATH_FLOW.posZ;
+    flows[KIND_INDEX.laneNorth] = PATH_FLOW.negZ;
+    setPathFlows(flows);
     setPathProfile(PED_PROFILE, { costs: profileCosts('walk'), laneOffset: 0.18 });
-    // 1.5 = half of a 3-tile lane: each direction holds the center of its own
-    // half of the 6-wide road. The host clamps offset waypoints back onto
-    // traversable ground, so corners never shove the lane into the sidewalk.
-    setPathProfile(VEH_PROFILE, { costs: profileCosts('drive'), laneOffset: 1.5 });
+    // No laneOffset: the lane-CENTER tile is the lane line, so the A* route
+    // is already in lane. Direction comes from the flow table — driving
+    // against a lane's flow costs 30x (never, in practice), crossing it 4x
+    // (lane changes happen, rarely), and junction tiles are flow-neutral so
+    // every turn resolves inside the box.
+    setPathProfile(VEH_PROFILE, { costs: profileCosts('drive'), laneOffset: 0, againstFlow: 30, crossFlow: 4 });
     simRef.current.lastGen = pathGeneration();
   }, [world, hostReady]);
 
@@ -413,9 +500,11 @@ export default function PathingLab() {
 
       // population control
       while (s.cars.length < ui.carCount) {
-        const [cx, cz] = world.roadCells[Math.floor(rand() * world.roadCells.length)];
-        const [x, z] = cellCenter(cx, cz);
-        s.cars.push({ x, z, yawDeg: Math.floor(rand() * 4) * 90, cruise: 5 + rand() * 2.5, speed: 0, tone: CAR_TONES[s.cars.length % CAR_TONES.length], path: null, nextIdx: 0, goal: null });
+        // spawn ON a lane tile, already facing its flow
+        const lc = world.laneCells[Math.floor(rand() * world.laneCells.length)];
+        const [x, z] = cellCenter(lc.x, lc.z);
+        const yawDeg = lc.kind === 'laneEast' ? 90 : lc.kind === 'laneWest' ? -90 : lc.kind === 'laneNorth' ? 180 : 0;
+        s.cars.push({ x, z, yawDeg, cruise: 5 + rand() * 2.5, speed: 0, tone: CAR_TONES[s.cars.length % CAR_TONES.length], path: null, nextIdx: 0, goal: null });
       }
       if (s.cars.length > ui.carCount) s.cars.length = ui.carCount;
       while (s.peds.length < ui.pedCount) {
@@ -447,7 +536,7 @@ export default function PathingLab() {
         for (let ci = 0; ci < s.cars.length; ci++) {
           const car = s.cars[ci];
           if (!car.path) {
-            car.goal = pickGoal(world.roadCells, car.x, car.z);
+            car.goal = pickGoal(world.laneXY, car.x, car.z);
             car.path = findPath(VEH_PROFILE, [car.x, car.z], car.goal);
             car.nextIdx = 1;
             if (!car.path || car.path.points.length < 2) { car.path = null; continue; }
@@ -514,7 +603,7 @@ export default function PathingLab() {
           const axis: 0 | 1 = Math.abs(fx) > Math.abs(fz) ? 1 : 0;
           const phase = axisPhase(axis, clock);
           if (phase !== 'go') {
-            for (const j of JUNCTIONS) {
+            for (const j of world.junctions) {
               const inside = car.x > j.x0 - 0.3 && car.x < j.x1 + 0.3 && car.z > j.z0 - 0.3 && car.z < j.z1 + 0.3;
               if (inside) continue;
               let enter: number | null = null;
@@ -741,7 +830,7 @@ export default function PathingLab() {
         )}
         <Box style={{ flexGrow: 1 }} />
         <Text fontSize={10} color={DIM}>profiles: walkCost/vehicleCost straight from hmsc tileKinds</Text>
-        <Text fontSize={10} color={DIM}>lane offset: drivers keep travel-right, walkers hug the edge</Text>
+        <Text fontSize={10} color={DIM}>lane TILES carry direction: laneEast/West/North/South centers + flow-neutral junction tiles — right-hand traffic is in the paint</Text>
         <Text fontSize={10} color={DIM}>drivers brake for walkers, queue behind cars, stop on red (hmsc signal clock) — toggle reckless for the old chaos</Text>
       </Col>
 
@@ -760,10 +849,10 @@ export default function PathingLab() {
           <Scene3D.AmbientLight color="#9aa8c4" intensity={0.6} />
           <Scene3D.DirectionalLight direction={[0.45, 0.85, 0.3]} color="#fff2d8" intensity={0.85} />
 
-          <WorldMeshes strips={world.strips} bushes={world.bushes} wallCells={world.wallCells} />
+          <WorldMeshes strips={world.strips} bushes={world.bushes} wallCells={world.wallCells} laneCells={world.laneCells} />
 
-          {/* stop lights — hmsc's signal clock, live phase per axis */}
-          <TrafficLights clock={trafficClockSeconds()} />
+          {/* stop lights — hmsc's signal clock, boxes from the junction tiles */}
+          <TrafficLights clock={trafficClockSeconds()} junctions={world.junctions} />
 
           {/* barriers — orange roadworks blocks at patched cells */}
           {s.barriers.map((b, i) => {

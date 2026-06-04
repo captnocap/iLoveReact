@@ -97,10 +97,39 @@ export function fillPathRect(cellX: number, cellZ: number, w: number, h: number,
 }
 
 /** Per-agent cost table, indexed by tile-kind index. <=0 / non-finite = that
- *  kind is impassable for this profile. laneOffset in world units. */
-export function setPathProfile(profileId: number, opts: { costs: ArrayLike<number>; laneOffset?: number }): void {
+ *  kind is impassable for this profile. laneOffset in world units.
+ *  againstFlow / crossFlow (>= 1) multiply a flowed tile's cost when entered
+ *  against / across its flow direction — see setPathFlows. */
+export function setPathProfile(profileId: number, opts: {
+  costs: ArrayLike<number>;
+  laneOffset?: number;
+  againstFlow?: number;
+  crossFlow?: number;
+}): void {
   if (!pathHostReady()) return;
-  host.__path_set_profile(profileId, opts.laneOffset ?? 0, Float32Array.from(opts.costs as any));
+  host.__path_set_profile(
+    profileId,
+    opts.laneOffset ?? 0,
+    opts.againstFlow ?? 1,
+    opts.crossFlow ?? 1,
+    Float32Array.from(opts.costs as any),
+  );
+}
+
+/** Flow direction codes for setPathFlows (match the host's A* neighbor order). */
+export const PATH_FLOW = { none: 0, posX: 1, negX: 2, posZ: 3, negZ: 4 } as const;
+
+/**
+ * Per-KIND flow direction — what makes directional lane TILES directional
+ * (hmsc's laneNorth/laneSouth/laneEast/laneWest). A profile pays its
+ * againstFlow/crossFlow multipliers to enter a flowed kind the wrong way, so
+ * right-hand traffic falls out of the painted grid and turns resolve in
+ * flow-neutral junction tiles. Bumps the generation (flows reshape routes).
+ */
+export function setPathFlows(flows: ArrayLike<number>): number {
+  if (!pathHostReady()) return 0;
+  const gen = Number(host.__path_set_flows(Uint8Array.from(flows as any)));
+  return Number.isFinite(gen) ? gen : 0;
 }
 
 /** Host A*: world-coordinate corner waypoints, lane offset applied. null when

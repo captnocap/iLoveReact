@@ -11,4 +11,13 @@ export const HMSC_TILE_TEXTURE_KEYS = {
   door: 'hmsc.tile.door',
   bush: 'hmsc.tile.bush',
   marker: 'hmsc.tile.marker',
+  spawn: 'hmsc.tile.spawn',
+  save: 'hmsc.tile.save',
+  // lane/junction tiles share the road surface texture — the directional
+  // marking is paint-layer territory, not a separate base material
+  laneNorth: 'hmsc.tile.road',
+  laneSouth: 'hmsc.tile.road',
+  laneEast: 'hmsc.tile.road',
+  laneWest: 'hmsc.tile.road',
+  junction: 'hmsc.tile.road',
 } satisfies Record<TileKind, string>;

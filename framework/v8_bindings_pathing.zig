@@ -13,12 +13,21 @@
 //!       patch a rect of kinds (a placed obstacle, an opened gate).
 //!   __path_fill_rect(cellX, cellZ, w, h, kindIndex)
 //!       patch a rect to ONE kind without building an array.
-//!   __path_set_profile(profileId, laneOffset, costsF32)
+//!   __path_set_profile(profileId, laneOffset, againstFlow, crossFlow, costsF32)
 //!       per-agent costs indexed BY KIND INDEX; <=0 / non-finite = blocked.
 //!       laneOffset (world units) shifts waypoints toward the agent's
 //!       travel-right (right = forward x up = (-fz, fx) in xz), so opposite
 //!       directions naturally take opposite sides — vehicles drive their
 //!       lane, pedestrians keep to one side of the walkway.
+//!       againstFlow / crossFlow (>= 1) multiply a flowed tile's cost when
+//!       entered against / across its flow (see __path_set_flows).
+//!   __path_set_flows(flowsU8)
+//!       per-KIND flow direction: 0 none, 1 +x, 2 -x, 3 +z, 4 -z. This is
+//!       what makes directional lane TILES directional: with-flow rides the
+//!       base cost, against-flow pays the profile's penalty, crossing pays
+//!       crossFlow — so right-hand traffic falls out of the painted kinds
+//!       and turns resolve in flow-neutral junction tiles. Bumps the
+//!       generation (flows reshape every precomputed route).
 //!   __path_find(profileId, startWX, startWZ, goalWX, goalWZ)
 //!       -> ArrayBuffer of f32 [generation, count, x0, z0, x1, z1, ...]
 //!       (JS reads it as new Float32Array(buf) — the physics snapshot idiom)
@@ -52,6 +61,9 @@ const SNAP_RADIUS: i32 = 2;
 const Profile = struct {
     lane_offset: f32 = 0,
     min_cost: f32 = 1, // admissible heuristic scale (min positive cost)
+    // flow penalties, clamped >= 1 (a discount would break the heuristic)
+    against_flow: f32 = 1,
+    cross_flow: f32 = 1,
     costs: [MAX_KINDS]f32 = [_]f32{-1} ** MAX_KINDS,
 };
 
@@ -63,6 +75,18 @@ var g_rows: usize = 0;
 var g_kinds: [MAX_CELLS]u16 = [_]u16{0} ** MAX_CELLS;
 var g_generation: u32 = 0;
 var g_profiles: [MAX_PROFILES]Profile = [_]Profile{.{}} ** MAX_PROFILES;
+
+// Per-kind flow direction. Codes match the A* neighbor order AND the JS
+// PATH_FLOW enum: 0 none, 1 +x, 2 -x, 3 +z, 4 -z.
+var g_flows: [MAX_KINDS]u8 = [_]u8{0} ** MAX_KINDS;
+
+inline fn flowFactor(prof: *const Profile, kind: u16, dir_code: u8) f32 {
+    const flow = g_flows[kind];
+    if (flow == 0 or flow == dir_code) return 1;
+    const opposite = (flow == 1 and dir_code == 2) or (flow == 2 and dir_code == 1) or
+        (flow == 3 and dir_code == 4) or (flow == 4 and dir_code == 3);
+    return if (opposite) prof.against_flow else prof.cross_flow;
+}
 
 // ── A* scratch (query-stamped so nothing is cleared between queries) ────────
 var g_query: u32 = 0;
@@ -187,12 +211,15 @@ fn runAStar(prof: *const Profile, start: u32, goal: u32) usize {
         const cx: i32 = @intCast(current % g_cols);
         const cz: i32 = @intCast(current / g_cols);
         const neighbors = [4][2]i32{ .{ cx + 1, cz }, .{ cx - 1, cz }, .{ cx, cz + 1 }, .{ cx, cz - 1 } };
-        for (neighbors) |n| {
+        for (neighbors, 0..) |n, di| {
             if (n[0] < 0 or n[1] < 0 or n[0] >= cols or n[1] >= rows) continue;
             const nidx = cellIndex(@intCast(n[0]), @intCast(n[1]));
             if (g_closed_stamp[nidx] == g_query) continue;
             const cost = cellCost(prof, nidx) orelse continue;
-            const ng = g_gscore[current] + cost;
+            // neighbor order IS the direction code (+1): entering a flowed
+            // tile against/across its direction pays the profile's penalty
+            const step = cost * flowFactor(prof, g_kinds[nidx], @intCast(di + 1));
+            const ng = g_gscore[current] + step;
             if (g_open_stamp[nidx] == g_query and ng >= g_gscore[nidx]) continue;
             g_gscore[nidx] = ng;
             g_came[nidx] = current;
@@ -446,13 +473,15 @@ fn hostSetProfile(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnNull(info);
         return;
     }
-    const bytes = argBytes(info, 2) orelse {
+    const bytes = argBytes(info, 4) orelse {
         setReturnNull(info);
         return;
     };
     const costs = std.mem.bytesAsSlice(f32, bytes[0 .. (bytes.len / 4) * 4]);
     var prof = &g_profiles[id];
     prof.lane_offset = @floatCast(argToF64(info, 1) orelse 0);
+    prof.against_flow = @max(1.0, @as(f32, @floatCast(argToF64(info, 2) orelse 1)));
+    prof.cross_flow = @max(1.0, @as(f32, @floatCast(argToF64(info, 3) orelse 1)));
     var min_cost: f32 = std.math.floatMax(f32);
     for (0..MAX_KINDS) |i| {
         const c: f32 = if (i < costs.len) costs[i] else -1;
@@ -507,11 +536,23 @@ fn hostGeneration(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF64(info, @floatFromInt(g_generation));
 }
 
+fn hostSetFlows(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const bytes = argBytes(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    for (0..MAX_KINDS) |i| g_flows[i] = if (i < bytes.len and bytes[i] <= 4) bytes[i] else 0;
+    g_generation +%= 1; // flows reshape every route — disrupt precomputed paths
+    setReturnF64(info, @floatFromInt(g_generation));
+}
+
 pub fn registerPathing(_: anytype) void {
     v8_runtime.registerHostFn("__path_set_grid", hostSetGrid);
     v8_runtime.registerHostFn("__path_update_cells", hostUpdateCells);
     v8_runtime.registerHostFn("__path_fill_rect", hostFillRect);
     v8_runtime.registerHostFn("__path_set_profile", hostSetProfile);
+    v8_runtime.registerHostFn("__path_set_flows", hostSetFlows);
     v8_runtime.registerHostFn("__path_find", hostFind);
     v8_runtime.registerHostFn("__path_generation", hostGeneration);
 }

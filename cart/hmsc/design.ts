@@ -1,4 +1,4 @@
-export const HMSC_STATE_SCHEMA_VERSION = 15;
+export const HMSC_STATE_SCHEMA_VERSION = 16;
 export const DEFAULT_AUTOSAVE_INTERVAL_MS = 120_000;
 export const DEFAULT_LIVE_SYNC_INTERVAL_MS = 100;
 export const DEFAULT_CELL_SIZE_METERS = 1;
@@ -21,12 +21,34 @@ export type TileKind =
   | 'road'
   | 'asphalt'
   | 'sidewalk'
+  // Directional lane tiles — the CENTER tile of a 3-tile lane trio
+  // ([shoulder, lane, shoulder]); the painted line cars actually drive.
+  // The kind name carries the lane's legal flow (compass; -Z = north, the
+  // hmsc facing convention). Direction is ENFORCED by host pathing's flow
+  // table (runtime/pathing.ts setPathFlows): with-flow rides cheap,
+  // against-flow pays the profile's penalty — right-hand traffic falls out
+  // of the paint itself. 'junction' is the intersection resolver: flow-
+  // neutral road where routes may legally change heading; right-of-way
+  // (signals, yields) gates the box at runtime, not in the path graph.
+  | 'laneNorth'
+  | 'laneSouth'
+  | 'laneEast'
+  | 'laneWest'
+  | 'junction'
   | 'mud'
   | 'sand'
   | 'wall'
   | 'door'
   | 'bush'
-  | 'marker';
+  | 'marker'
+  // Gameplay markers — single placed cells with identity, not bulk-painted ground.
+  // 'spawn' is where the player (re)appears; 'save' is a checkpoint that, when
+  // stepped on, persists the game and points the respawn at a CHOSEN spawn cell
+  // (PlacedCell.spawnKey). A world can hold many of each; a save never sits on its
+  // own spawn (you save here, you reappear THERE). Authored in hmsc-int's MARKERS
+  // palette, lowered to placedCells on compile.
+  | 'spawn'
+  | 'save';
 
 // Altered-perception channel. Drives how building skins (and later other
 // surfaces) reinterpret themselves — e.g. being high scrambling facade text or
@@ -52,6 +74,10 @@ export type PlayerState = {
   money: number;
   perception: PerceptionState;
   inventory: string[];
+  // The cell the player respawns at — set when stepping on a 'save' checkpoint
+  // (to that save's paired 'spawn' cell) and at boot (the world's default spawn).
+  // Absent → fall back to the player's start position.
+  respawnCell?: GridCell;
 };
 
 export type LivePlayerSnapshot = {
@@ -67,6 +93,10 @@ export type PlacedCell = {
   cell: GridCell;
   triggerCommand?: string;
   triggerLabel?: string;
+  // For a 'save' cell: the key (cellKey) of the 'spawn' cell it reappears the
+  // player at — the manual save↔spawn link. Always a DIFFERENT cell than this one
+  // (a save never spawns you on itself). Absent on spawn cells and unpaired saves.
+  spawnKey?: string;
   createdByCommand: string;
 };
 
@@ -300,6 +330,13 @@ export type Building = {
   // Facade appearance: a single skin for every wall, or a per-face map (front/
   // back/left/right/top). Omitted falls back to the kind's default skin.
   skin?: BuildingSkin | BuildingFaceSkins;
+  // Per-PART textures, keyed by the model's part ids (render3d/parts.tsx). The
+  // general texture channel that works for EVERY building — box faces use the
+  // same role ids as `skin` (front/back/left/right/top), and open structures
+  // (parkingGarage/gasStation/usedCarLot) key their own parts (deck/parapet/…)
+  // that have no face equivalent. Values are TEXTURE_REGISTRY ids. Resolved
+  // through resolvePartTexture; for box buildings `skin` is the legacy fallback.
+  partTextures?: Record<string, string>;
   // For enclosure === 'interior': the key into world.interiors this door leads
   // to. Authored alongside the building (see world/interiors.ts).
   interiorId?: string;
@@ -366,6 +403,10 @@ export type WorldProp = {
   z: number;
   yawDegrees: number;
   signalOverride?: TrafficSignalPhase;
+  // Per-PART textures keyed by the prop model's part ids (render3d/parts.tsx) —
+  // e.g. a street sign's 'panel'/'pole'. Values are TEXTURE_REGISTRY ids,
+  // resolved through resolvePartTexture. Same channel buildings use.
+  partTextures?: Record<string, string>;
   createdByCommand: string;
 };
 

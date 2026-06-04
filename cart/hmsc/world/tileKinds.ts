@@ -92,8 +92,12 @@ export type TileAltitudeProfile = {
 //                and is never freely placed: a building's wall (`wallTileKind`),
 //                a solid prop's footprint (`tileKind`), a doorway, foliage. It
 //                supplies cover / line-of-sight / friction, not a paint swatch.
+//   'gameplay' — a single placed cell WITH identity that means something to the
+//                game loop (spawn / save checkpoint). Not bulk-painted ground and
+//                not a property of something else: authored one cell at a time in
+//                the editor's MARKERS palette, lowered to a placedCell on compile.
 //   'dev'      — debug-only (the cyan marker); not part of authored worlds.
-export type TilePlacement = 'surface' | 'embedded' | 'dev';
+export type TilePlacement = 'surface' | 'embedded' | 'gameplay' | 'dev';
 
 export type TileKindDefinition = {
   kind: TileKind;
@@ -203,6 +207,27 @@ const CELL_BASE_ALTITUDE: TileAltitudeProfile = {
   followsHeightfield: false,
   surfaceOffsetMeters: 0,
 };
+
+// One definition per lane flow direction — identical drivable profile, the
+// NAME is the data (host pathing maps kind -> flow; see design.ts TileKind).
+// vehicleCost undercuts plain road so vehicle A* prefers the painted lane
+// line over the shoulder tiles beside it.
+function laneKindDefinition(kind: TileKind, label: string): TileKindDefinition {
+  return {
+    kind,
+    placement: 'surface',
+    label,
+    pathing: { walkable: true, movementCost: 0.95, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.02, runCost: 1.0, vehicleCost: 0.6, preferredByVehicles: true, cover: 'none', noise: 0.7 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.18, lateralGrip: 0.92, restitution: 0.84 },
+    render: { color: '#232936', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  };
+}
 
 export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
   water: {
@@ -358,6 +383,60 @@ export const TILE_KIND_DEFINITIONS: Record<TileKind, TileKindDefinition> = {
     render: { color: '#22d3ee', heightMeters: 0.095, textureKey: HMSC_TILE_TEXTURE_KEYS.marker },
     altitude: HEIGHTFIELD_ALTITUDE,
   },
+  // Where the player (re)appears. Ordinary walkable ground underneath a marker
+  // look — physics treats it like a normal flat surface so standing/spawning on
+  // it feels like any other tile.
+  spawn: {
+    kind: 'spawn',
+    placement: 'gameplay',
+    label: 'Spawn Point',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.0, runCost: 1.0, vehicleCost: 1.0, preferredByVehicles: false, cover: 'none', noise: 0.0 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: OPEN_TRAVERSAL,
+    surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
+    render: { color: '#22c55e', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.spawn },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // A save checkpoint. Stepping on it persists the game and arms the respawn at
+  // its paired spawn cell (PlacedCell.spawnKey). Walkable, marker look.
+  save: {
+    kind: 'save',
+    placement: 'gameplay',
+    label: 'Save Point',
+    pathing: { walkable: true, movementCost: 1.0, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.0, runCost: 1.0, vehicleCost: 1.0, preferredByVehicles: false, cover: 'none', noise: 0.0 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: OPEN_TRAVERSAL,
+    surface: { material: 'dev', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.2, lateralGrip: 0.9, restitution: 0.8 },
+    render: { color: '#a855f7', heightMeters: 0.05, textureKey: HMSC_TILE_TEXTURE_KEYS.save },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
+  // ── directional lanes + the junction resolver (see design.ts TileKind) ────
+  // Appended LAST so existing kind indices stay stable for any session-scoped
+  // index-keyed grid (host pathing ships kind indices in TILE_KINDS order).
+  laneNorth: laneKindDefinition('laneNorth', 'Lane (north, -Z)'),
+  laneSouth: laneKindDefinition('laneSouth', 'Lane (south, +Z)'),
+  laneEast: laneKindDefinition('laneEast', 'Lane (east, +X)'),
+  laneWest: laneKindDefinition('laneWest', 'Lane (west, -X)'),
+  junction: {
+    kind: 'junction',
+    placement: 'surface',
+    label: 'Junction',
+    pathing: { walkable: true, movementCost: 0.95, blocksLineOfSight: false },
+    npc: { traversable: true, walkCost: 1.04, runCost: 1.0, vehicleCost: 0.7, preferredByVehicles: true, cover: 'none', noise: 0.7 },
+    cover: NO_COVER,
+    door: NO_DOOR,
+    visibility: OPEN_VISIBILITY,
+    traversal: { ...OPEN_TRAVERSAL, vehicleGripMultiplier: 1 },
+    surface: { material: 'road', walkSpeedMultiplier: 1.0, runSpeedMultiplier: 1.0, vehicleSpeedMultiplier: 1.0, accelerationMultiplier: 1.0, friction: 0.18, lateralGrip: 0.92, restitution: 0.84 },
+    render: { color: '#272c37', heightMeters: 0.08, textureKey: HMSC_TILE_TEXTURE_KEYS.road },
+    altitude: HEIGHTFIELD_ALTITUDE,
+  },
 };
 
 export const TILE_KINDS = Object.keys(TILE_KIND_DEFINITIONS) as TileKind[];
@@ -375,6 +454,13 @@ export const PAINTABLE_TILE_KINDS = TILE_KINDS.filter(
 // paint palette. Mirror of PAINTABLE_TILE_KINDS.
 export const EMBEDDED_TILE_KINDS = TILE_KINDS.filter(
   (k) => TILE_KIND_DEFINITIONS[k].placement === 'embedded',
+);
+
+// Gameplay markers (spawn/save) — single placed cells with identity. The editor
+// lists these in their own MARKERS palette; they are placed one cell at a time
+// (not bulk-painted), and a save cell links to a spawn cell it respawns you at.
+export const GAMEPLAY_TILE_KINDS = TILE_KINDS.filter(
+  (k) => TILE_KIND_DEFINITIONS[k].placement === 'gameplay',
 );
 
 export function isTileKind(value: string): value is TileKind {
