@@ -123,10 +123,10 @@ export const DECISIONS: Decision[] = [
     keywords: ['cutscene', 'cinematic', 'dialog', 'talking faces', 'scene', 'camera track', 'scripted', 'story scene'],
   },
   {
-    id: 'V17', name: 'The lab shape: GAME_* standard imports + scaffold script', status: 'ruled',
-    ruling: 'A new lab is a scaffold from a script — every lab carries the same shape: import { GAME_PHYSICS, GAME_PATHING, GAME_INPUT, GAME_CAMERA, ... } from the ground floor. The GAME_* names are STANDARD (the V14 list). Everything arrives ready to use; the lab just exports itself and is loadable via the labs route. Installing this shape is the FIRST build task of the rebuild.',
+    id: 'V17', name: 'The lab shape: GAME_* standard imports + scaffold script; old labs capture → rewrite → ARCHIVE', status: 'ruled',
+    ruling: 'A new lab is a scaffold from a script — every lab carries the same shape: import { GAME_PHYSICS, GAME_PATHING, GAME_INPUT, GAME_CAMERA, ... } from the ground floor. The GAME_* names are STANDARD (the V14 list). Everything arrives ready to use; the lab just exports itself and is loadable via the labs route. Installing this shape is the FIRST build task of the rebuild. LIFECYCLE: ALL existing labs get rewritten as the new approach — old lab carts are SOURCES to capture from, never migrate-in-place targets; after the entire declared corpus is captured, labs are rewritten as new drop-ins and the old carts are ARCHIVED (locked, read-only, the archive//tsz/ treatment). "Make a lab" is ONE coherent idea — never an old approach and a new one. Extending an old lab cart instead of capturing it = gone wrong.',
     detail: 'Host changes to test = rebuild the host; that\'s the accepted deal.',
-    keywords: ['lab shape', 'scaffold', 'GAME_', 'standard imports', 'new lab', 'lab template', 'ground floor imports', 'create lab'],
+    keywords: ['lab shape', 'scaffold', 'GAME_', 'standard imports', 'new lab', 'lab template', 'ground floor imports', 'create lab', 'archive', 'old labs', 'capture', 'rewrite', 'migrate', 'lock'],
   },
   {
     id: 'V18', name: 'Game Zig is organized, properly named, and CONDITIONAL all the way through', status: 'ruled',

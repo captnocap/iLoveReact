@@ -381,6 +381,16 @@ labs route). Host changes to test = rebuild the host — fine, that's the deal.
 **Installing this shape is the FIRST build task of the rebuild** — the shape
 must be a real thing before any lab is rebuilt onto it.
 
+**V17-LIFECYCLE (clarified 2026-06-04): capture → rewrite → archive.**
+ALL existing labs will be rewritten as the new lab approach. Old lab carts are
+SOURCES to capture from, never things to migrate in place. Once a system is
+captured — and after the ENTIRE declared corpus is captured — the labs are
+rewritten as new drop-ins and the old carts are ARCHIVED: locked up and away,
+read-only, the `archive/`/`tsz/` treatment. After that, "make a lab" is ONE
+COHERENT IDEA — there is the lab shape and there is the archive, never an old
+approach and a new one. An agent extending an old lab cart instead of
+capturing it has gone wrong.
+
 **V18 — Game Zig is organized, properly named, and CONDITIONAL all the way through. (Added 2026-06-04.)**
 "reactjit is the same project and isn't the same project": the framework is
 mostly organized (the `v8_bindings_<capability>.zig` convention + `gpu/`,

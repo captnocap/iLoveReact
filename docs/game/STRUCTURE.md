@@ -93,6 +93,24 @@ data/     → imported by everyone, imports nothing (it's data).
 - Every behavior-affecting number in `game/` resolves from `data/tuning/` (P2).
   A literal constant in `game/` logic is a bug.
 
+## The lab lifecycle: capture → rewrite → archive. No second meaning of "lab".
+
+To be abundantly clear (and why this document references no existing files):
+ALL existing labs will be REWRITTEN as the new lab approach. The sequence:
+
+1. **Capture** — each system is extracted from the current approach into
+   `game/` (the extraction map below). The old cart is a SOURCE to capture
+   from, never a thing to migrate in place.
+2. **Rewrite** — after the ENTIRE declared corpus is captured, the labs are
+   rewritten as new drop-ins (`labs/<name>.tsx` on `@game`, with notes).
+3. **Archive** — the old cart is locked up and away (the `archive/` treatment:
+   read-only, frozen, reference-only — same as `tsz/`/`love2d/`).
+
+After this, "make a lab" is ONE COHERENT IDEA. There is never an old approach
+and a new approach — there is the lab shape, and there is the archive. An
+agent that finds itself extending an old lab cart instead of capturing it has
+gone wrong.
+
 ## The extraction map (isolated systems → their one home)
 
 | Today (isolated)                          | Lands in                                  |
