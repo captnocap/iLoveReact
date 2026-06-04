@@ -351,6 +351,24 @@ contract. physics_lab's catalog folds in after review.
 combat_lab's perception ladder produces; scape's consequence layer (WitnessMemory/
 the Case) consumes. More internal tooling is still needed for story/mission/dialog.
 
+**V16 — Cutscenes: live, declarative, never baked. (Added 2026-06-04, second pass.)**
+The gameplay-scene vision: piece together head_lab (talking faces), tile
+coordinates, cameras, the animation DSL, and pathing — correctly — and a whole
+cutscene becomes a SIMPLE TYPESCRIPT FILE: what tile-space the camera occupies at
+what time, the dialog, the movement of models, everything. Cutscenes are never
+baked in — they are live, in the game, and therefore show the player's current
+state (clothes, model changes). Implications:
+- camera_lab's breadth of rigs/PoVs is RETAINED for cinematic work (this answers
+  why the registry keeps more than the gameplay cams — cutscene PoV needs them).
+- The composition is natively deterministic: motion plans are closed-form in t,
+  DSL timelines sample at t, camera solves are pure — a cutscene is one clock
+  driving all of them (the RLE/determinism value, resolution #6, applied to
+  scenes).
+- "Never baked" applies to the SCENE, not the actors: V2-amended figures are
+  still baked host data — the cutscene drives those live instances.
+- This is a ground-floor consumer: the cutscene file format is a lab to build in
+  the rebuilt harness (V13), sitting beside story/mission/dialog tooling (V12).
+
 **Tier C — accepted by default** (no objection raised). C1's dormant-vs-delete
 choice for Bullet inherits Q1's open item; until ruled, the loud DORMANT banner
 applies.
