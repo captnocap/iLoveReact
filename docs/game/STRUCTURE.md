@@ -121,7 +121,14 @@ toward being compile/'s OUTPUT (V15) rather than a hand-written cart.
 
 1. `game/index.ts` + the thin GAME_* wrappers (no host rebuild — they call the
    existing `__hmsc_*`/`__path_*` names until the honest bindings land)
-2. `labs/_scaffold.tsx` + `rjit lab new <name>` + the labs route in shell
-3. `framework/game/` + gated `v8_bindings_game_*` (parallel worker; wrappers
+2. **`compile/` + `compile/verify/` skeleton FIRST-CLASS and EARLY (V19)** —
+   even while the compiled game is nearly empty. The green light exists from
+   day one and never goes dark; every later step lands under it. LLM-callable:
+   `rjit game compile && rjit game verify`.
+3. `labs/_scaffold.tsx` + `rjit lab new <name>` + the labs route in shell
+4. `data/streams/` + `data/snapshots/` persistence layer (V20) — the workspace
+   pattern extended to per-concern append-only streams; editors write to it
+   from their first version, never retrofitted.
+5. `framework/game/` + gated `v8_bindings_game_*` (parallel worker; wrappers
    re-point when it lands)
-4. First lab rebuilt on the shape (proves the contract end to end)
+6. First lab rebuilt on the shape (proves the contract end to end)
