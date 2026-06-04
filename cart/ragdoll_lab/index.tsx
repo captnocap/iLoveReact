@@ -448,8 +448,9 @@ export default function RagdollLab() {
       // physics + settling + getting back up
       // ONE step per tick at the same dt the impulses were scaled with —
       // mismatched impulse/step dt silently rescales every kick velocity.
+      // Arena walls keep an uppercut-stacked body on the platform.
       if (s.mode === 'ragdoll' && s.ragdoll) {
-        stepRagdoll(s.ragdoll, dt);
+        stepRagdoll(s.ragdoll, dt, 15.5);
         if (!s.car.active && ragdollMaxMotion(s.ragdoll) < SETTLE_MOTION) {
           s.settleTicks += 1;
           if (s.settleTicks > SETTLE_TICKS && !ko) {

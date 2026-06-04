@@ -162,18 +162,30 @@ export function ragdollImpulse(r: Ragdoll, id: JointId, v: V3, dt = 1 / 60): voi
   r.prev[id][2] -= v[2] * dt;
 }
 
+// Terminal velocity. Impulses STACK (mashing uppercut keeps pumping the same
+// joint), and unbounded verlet happily launches the body out of the world —
+// the lab's maiden flight. Clamp per-step displacement to this speed.
+const MAX_SPEED = 32; // m/s
+
 /** One physics step: Verlet integrate, relax constraints, collide the ground
  *  plane (y=0) with friction + a little bounce. Call at your tick dt (scaled
- *  dt = slow motion for free). */
-export function stepRagdoll(r: Ragdoll, dt: number): void {
+ *  dt = slow motion for free). `arenaHalf` (optional) adds soft walls at
+ *  |x|,|z| ≤ arenaHalf so the body stays on the map. */
+export function stepRagdoll(r: Ragdoll, dt: number, arenaHalf = 0): void {
   const dt2 = dt * dt;
+  const maxStep = MAX_SPEED * dt;
   // integrate
   for (const id of JOINT_IDS) {
     const p = r.pos[id];
     const q = r.prev[id];
-    const vx = (p[0] - q[0]) * AIR_DAMPING;
-    const vy = (p[1] - q[1]) * AIR_DAMPING;
-    const vz = (p[2] - q[2]) * AIR_DAMPING;
+    let vx = (p[0] - q[0]) * AIR_DAMPING;
+    let vy = (p[1] - q[1]) * AIR_DAMPING;
+    let vz = (p[2] - q[2]) * AIR_DAMPING;
+    const step = Math.hypot(vx, vy, vz);
+    if (step > maxStep) {
+      const k = maxStep / step;
+      vx *= k; vy *= k; vz *= k;
+    }
     q[0] = p[0]; q[1] = p[1]; q[2] = p[2];
     p[0] += vx;
     p[1] += vy + GRAVITY * dt2;
@@ -205,6 +217,19 @@ export function stepRagdoll(r: Ragdoll, dt: number): void {
     // friction: surrender part of the tangential motion
     q[0] = p[0] - (p[0] - q[0]) * GROUND_FRICTION;
     q[2] = p[2] - (p[2] - q[2]) * GROUND_FRICTION;
+  }
+  // arena walls — same treatment as the ground, sideways
+  if (arenaHalf > 0) {
+    for (const id of JOINT_IDS) {
+      const p = r.pos[id];
+      const q = r.prev[id];
+      for (const axis of [0, 2] as const) {
+        if (Math.abs(p[axis]) <= arenaHalf) continue;
+        const v = p[axis] - q[axis];
+        p[axis] = Math.sign(p[axis]) * arenaHalf;
+        q[axis] = p[axis] + Math.abs(v) * GROUND_RESTITUTION * Math.sign(p[axis]);
+      }
+    }
   }
 }
 
