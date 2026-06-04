@@ -10,8 +10,9 @@
 // gameplay/HmscGameplayRig + gameplay/camera + render3d/GameWorld3D: click to
 // focus mouse-look (host __mouse_capture + __mouse_delta), HOLD RIGHT MOUSE
 // to aim — the camera shifts onto the shoulder (aimShoulderShiftMeters), the
-// crosshair appears at screen center, and LEFT MOUSE fires along the
-// crosshair ray (AimLabScene's aimForward math). Esc releases the mouse.
+// crosshair appears at screen center, and LEFT MOUSE fires along the render
+// camera's exact screen-center axis — what's under the crosshair is what
+// gets hit. Esc releases the mouse.
 //
 // THE SHOT RULES are hmsc's two paths, joined the way the game joins them:
 //   1. GEOMETRIC (player → bot): the crosshair ray vs every bot's bone
@@ -406,13 +407,12 @@ function shoulderCamera(px: number, pz: number, yawDegrees: number, pitchRadians
   return { position, target, fov };
 }
 
-// The crosshair ray — AimLabScene's targetUnderCrosshair math: origin at the
-// shoulder camera, forward from camera yaw+pitch.
-function aimForward(yawDegrees: number, pitchRadians: number): V3 {
-  const yaw = yawDegrees * RAD;
-  const cp = Math.cos(pitchRadians);
-  return norm3([Math.sin(yaw) * cp, -Math.sin(pitchRadians), Math.cos(yaw) * cp]);
-}
+// NOTE: AimLabScene's aimForward(yaw,pitch) formula is deliberately NOT used
+// here. The crosshair sits at the render camera's screen center, and that
+// camera's view axis (target − position) includes the pitch-driven target
+// drop plus the 35% shoulder-target shift — aimForward diverges from it by
+// meters at combat range, which made every shot whiff. The fire ray is the
+// camera axis itself (see playerFire).
 
 // host mouse bindings (same readers as HmscGameplayRig)
 function readHostNumber(name: string, fallback = 0): number {
@@ -506,6 +506,12 @@ type Sim = {
   camYaw: number; // smoothed camera yaw/pitch — the hmsc rig's state
   camPitch: number;
   aiming: boolean;
+  // The ONE resolved camera per tick — render, fire, and crosshair targeting
+  // all read this. The fire ray is its exact screen-center axis (position →
+  // target), so what sits under the crosshair is what gets hit. Deriving the
+  // bullet from aimForward(yaw,pitch) instead was the original sin: that ray
+  // diverges from the crosshair line by meters at combat range.
+  cam: { position: V3; target: V3; fov: number };
   bots: Bot[];
   tracers: Tracer[];
   sparks: Spark[];
@@ -549,6 +555,7 @@ function makeSim(): Sim {
     camYaw: 180,
     camPitch: HMSC_GAMEPLAY_CAMERA.defaultPitchRadians,
     aiming: false,
+    cam: shoulderCamera(0, 13, 180, HMSC_GAMEPLAY_CAMERA.defaultPitchRadians, false),
     bots: [
       makeBot('thug-1', [[-13, 0, -13], [-3, 0, -13], [-3, 0, -5], [-13, 0, -5]]),
       makeBot('thug-2', [[13, 0, -13], [13, 0, -1], [8.6, 0, -1], [8.6, 0, -12]]),
@@ -763,14 +770,12 @@ export default function CombatLab() {
     if (p.hp <= 0 || p.fireCooldown > 0) return;
     const weapon = WEAPONS[p.weapon];
 
-    const yawR = s.camYaw * RAD;
-    const right: V3 = [-Math.cos(yawR), 0, Math.sin(yawR)];
-    const origin: V3 = [
-      p.pos[0] - Math.sin(yawR) * HMSC_GAMEPLAY_CAMERA.distanceMeters + right[0] * HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters,
-      HMSC_GAMEPLAY_CAMERA.heightMeters,
-      p.pos[2] - Math.cos(yawR) * HMSC_GAMEPLAY_CAMERA.distanceMeters + right[2] * HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters,
-    ];
-    const dir = aimForward(s.camYaw, s.camPitch);
+    // The bullet flies down the render camera's screen-center axis — the line
+    // the crosshair IS. Never re-derive this from yaw/pitch (aimForward): that
+    // ray diverges from the crosshair by meters at combat range and every
+    // shot whiffs.
+    const origin: V3 = [...s.cam.position] as V3;
+    const dir = norm3(sub(s.cam.target, origin));
     // the camera sits ~6m behind the player — extend the test ray so weapon
     // range still reads from the body, not the lens
     const maxT = weapon.rangeMeters + HMSC_GAMEPLAY_CAMERA.distanceMeters;
@@ -817,8 +822,10 @@ export default function CombatLab() {
       addSpark(impact, '#cbd5e1');
       pushLog(`YOU → cover · blocked`);
     } else {
+      // clean miss — still observable: tracer into the distance + a log line
       const end: V3 = [origin[0] + dir[0] * maxT, origin[1] + dir[1] * maxT, origin[2] + dir[2] * maxT];
       addTracer(muzzle, end, weapon.tracer);
+      pushLog(`YOU → miss`);
     }
   };
 
@@ -959,6 +966,23 @@ export default function CombatLab() {
       const smoothing = 1 - Math.exp(-HMSC_GAMEPLAY_CAMERA.smoothingPerSecond * dt);
       s.camYaw += angleDeltaDegrees(s.camYaw, cameraAimRef.current.yawDegrees) * smoothing;
       s.camPitch += (cameraAimRef.current.pitchRadians - s.camPitch) * smoothing;
+
+      // ── resolve THE camera — render, fire, and targeting all read s.cam ──
+      // hmsc shoulder follow (the ragdoll's pelvis once dead), clamped forward
+      // along its own axis when cover sits between the body and the lens.
+      {
+        const followPos: V3 = p.ragdoll ? (bonesRef.current.you?.pelvis.position ?? p.pos) : p.pos;
+        const cam = shoulderCamera(followPos[0], followPos[2], s.camYaw, s.camPitch, s.aiming);
+        const pivot: V3 = [followPos[0], HMSC_GAMEPLAY_CAMERA.targetHeightMeters, followPos[2]];
+        const toCam = sub(cam.position, pivot);
+        const segLen = len3(toCam);
+        const tHit = nearestCoverT(pivot, norm3(toCam), segLen);
+        if (Number.isFinite(tHit)) {
+          const frac = Math.max(0.18, (tHit - 0.15) / segLen);
+          cam.position = [pivot[0] + toCam[0] * frac, pivot[1] + toCam[1] * frac, pivot[2] + toCam[2] * frac];
+        }
+        s.cam = cam;
+      }
 
       if (!ui.paused) {
         s.t += dt;
@@ -1137,16 +1161,10 @@ export default function CombatLab() {
           }
         }
 
-        // crosshair target: the same ray a shot would take (HUD highlight)
+        // crosshair target: the exact ray a shot would take (HUD highlight)
         if (s.aiming) {
-          const yawRA = s.camYaw * RAD;
-          const rightA: V3 = [-Math.cos(yawRA), 0, Math.sin(yawRA)];
-          const origin: V3 = [
-            p.pos[0] - Math.sin(yawRA) * HMSC_GAMEPLAY_CAMERA.distanceMeters + rightA[0] * HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters,
-            HMSC_GAMEPLAY_CAMERA.heightMeters,
-            p.pos[2] - Math.cos(yawRA) * HMSC_GAMEPLAY_CAMERA.distanceMeters + rightA[2] * HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters,
-          ];
-          const dir = aimForward(s.camYaw, s.camPitch);
+          const origin: V3 = [...s.cam.position] as V3;
+          const dir = norm3(sub(s.cam.target, origin));
           const targets = s.bots.filter((b) => b.mode !== 'down').map((b) => ({ id: b.id, hitboxes: rigsRef.current[b.id]?.hitboxes ?? [] }));
           const coverT = nearestCoverT(origin, dir, 120);
           const pick = raycastFigures(targets, origin, dir, 120);
@@ -1156,7 +1174,7 @@ export default function CombatLab() {
         }
 
         // fx decay
-        s.tracers = s.tracers.filter((tr) => s.t - tr.bornAt < 0.1);
+        s.tracers = s.tracers.filter((tr) => s.t - tr.bornAt < 0.18);
         s.sparks = s.sparks.filter((sp) => s.t - sp.bornAt < 0.28);
       }
 
@@ -1187,20 +1205,8 @@ export default function CombatLab() {
   }
   const playerBones = bonesRef.current.you;
 
-  // hmsc camera: follow the body (the ragdoll's pelvis once dead), shoulder
-  // shift while aiming, clamped forward when cover sits behind the player.
-  const followPos: V3 = p.ragdoll ? bonesRef.current.you.pelvis.position : p.pos;
-  const cam = shoulderCamera(followPos[0], followPos[2], s.camYaw, s.camPitch, s.aiming);
-  {
-    const pivot: V3 = [followPos[0], HMSC_GAMEPLAY_CAMERA.targetHeightMeters, followPos[2]];
-    const toCam = sub(cam.position, pivot);
-    const segLen = len3(toCam);
-    const tHit = nearestCoverT(pivot, norm3(toCam), segLen);
-    if (Number.isFinite(tHit)) {
-      const frac = Math.max(0.18, (tHit - 0.15) / segLen);
-      cam.position = [pivot[0] + toCam[0] * frac, pivot[1] + toCam[1] * frac, pivot[2] + toCam[2] * frac];
-    }
-  }
+  // the ONE camera, resolved by the tick — render what the bullet sees
+  const cam = s.cam;
 
   const maxExposure = Math.max(0, ...s.bots.filter((b) => b.mode !== 'down' && npcKindDefinition(b.kind).canFight).map((b) => b.exposure));
   const wasted = p.hp <= 0;
