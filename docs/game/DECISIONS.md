@@ -467,3 +467,17 @@ quality (the house rule — disposability is in the IDEA, not the implementation
 and when one wins, it graduates INTO the ground floor through this constitution
 (a new verdict), not around it. The ground floor only ever grows by verdict;
 labs are where everything else lives until then.
+
+**P6 — The lab corpus IS the regression suite; breaks force real choices.**
+How we know the system is built the way we want: a new feature is introduced
+somewhere, proves to be THE approach, graduates — and then re-running the
+PREVIOUS labs reveals it breaks behavior somewhere. That break is not an error
+to silently patch; it is a choice that really matters, surfaced to be ruled on
+(keep the old behavior, adopt the new, or split them deliberately). Graduation
+protocol: promote → re-run the whole lab corpus → every behavior change becomes
+an explicit decision → THEN it's done. The compounding benefit runs both ways:
+every lab already made benefits from future ones, because they all consume the
+same ground floor — improve the figure once, every lab with a figure improves.
+(The per-lab notes from V13 are what make "broken" detectable: each lab records
+what it is supposed to demonstrate, so a behavior change against the note is
+visible to human and AI alike.)
