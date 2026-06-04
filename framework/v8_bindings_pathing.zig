@@ -264,10 +264,26 @@ fn emitWaypoints(prof: *const Profile, len: usize) usize {
             ox[w] = -fz * lane;
             oz[w] = fx * lane;
         }
+        // Apply each offset only as far as the ground stays traversable for
+        // this profile — a WIDE lane offset (multi-tile lanes) must never
+        // shove a waypoint onto the sidewalk or into a wall. Pull back toward
+        // the raw cell center until the landing cell is passable; t = 0 is
+        // always legal (it's the A* cell itself).
+        const cols_i: i32 = @intCast(g_cols);
+        const rows_i: i32 = @intCast(g_rows);
         w = 0;
         while (w < count) : (w += 1) {
-            g_wx[w] += ox[w];
-            g_wz[w] += oz[w];
+            for ([_]f32{ 1.0, 0.66, 0.33, 0.0 }) |t| {
+                const wx = g_wx[w] + ox[w] * t;
+                const wz = g_wz[w] + oz[w] * t;
+                const cx = worldToCellX(wx);
+                const cz = worldToCellZ(wz);
+                if (cx < 0 or cz < 0 or cx >= cols_i or cz >= rows_i) continue;
+                if (cellCost(prof, cellIndex(@intCast(cx), @intCast(cz))) == null) continue;
+                g_wx[w] = wx;
+                g_wz[w] = wz;
+                break;
+            }
         }
     }
     return count;

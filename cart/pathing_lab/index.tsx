@@ -76,14 +76,18 @@ function pathHostCompiled(): boolean {
 
 // ── the world — a small city block authored straight in hmsc tile kinds ─────
 
-// road bands (2 cells wide) + buildings; sidewalks derive as the ring of
-// ground cells touching a road, exactly how hmsc streets read.
-const ROAD_BANDS = [10, 32]; // band start; covers start..start+1, both axes
+// road bands SIX cells wide — 3 tiles per direction lane. The sedan is 1.8m
+// on 1m cells: a 1-tile lane couldn't fit ONE car, so oncoming traffic shared
+// a corridor and froze nose-to-nose (the citywide gridlock). Three tiles per
+// lane gives each direction its own half with clearance. Sidewalks still
+// derive as the ring of ground cells touching road.
+const ROAD_W = 6;
+const ROAD_BANDS = [8, 30]; // band start; covers start..start+ROAD_W-1, both axes
 const WALL_RECTS: [number, number, number, number][] = [
-  [3, 3, 4, 4], [16, 4, 5, 4], [25, 5, 4, 4], [37, 3, 4, 4],
-  [4, 17, 4, 5], [18, 16, 7, 3], [26, 20, 4, 6], [37, 17, 4, 4],
-  [3, 37, 5, 4], [16, 36, 4, 5], [25, 37, 5, 4], [37, 37, 4, 4],
-  [18, 25, 4, 4],
+  [2, 2, 4, 4], [16, 2, 5, 4], [24, 3, 4, 4], [38, 2, 4, 4],
+  [2, 17, 4, 5], [17, 16, 6, 3], [25, 21, 4, 5], [38, 17, 4, 4],
+  [2, 38, 5, 4], [16, 37, 4, 5], [25, 38, 4, 4], [38, 38, 4, 4],
+  [17, 24, 4, 3],
 ];
 
 // ── junctions + signals — hmsc's traffic clock, the lab's junction boxes ────
@@ -95,8 +99,8 @@ type Junction = { x0: number; z0: number; x1: number; z1: number };
 const JUNCTIONS: Junction[] = ROAD_BANDS.flatMap((bx) => ROAD_BANDS.map((bz) => ({
   x0: ORIGIN_X + bx * CELL,
   z0: ORIGIN_Z + bz * CELL,
-  x1: ORIGIN_X + (bx + 2) * CELL,
-  z1: ORIGIN_Z + (bz + 2) * CELL,
+  x1: ORIGIN_X + (bx + ROAD_W) * CELL,
+  z1: ORIGIN_Z + (bz + ROAD_W) * CELL,
 })));
 
 type SignalPhase = 'go' | 'caution' | 'stop';
@@ -165,7 +169,7 @@ function buildWorld() {
 
   for (const band of ROAD_BANDS) {
     for (let i = 0; i < COLS; i++) {
-      for (const o of [0, 1]) {
+      for (let o = 0; o < ROAD_W; o++) {
         set(i, band + o, 'road');
         set(band + o, i, 'road');
       }
@@ -224,9 +228,22 @@ function buildWorld() {
   return { kinds, strips, bushes, roadCells, walkCells, wallCells };
 }
 
+// Behavioral shaping on top of raw tile legality. hmsc's tile costs answer
+// "CAN this agent cross this tile" — and by those numbers a pedestrian
+// finds the road CHEAPER than the sidewalk (0.97 vs 1.08) and a car may
+// legally mount the pavement at 1.8x. Legal, but dumb. These multipliers
+// answer "would a sane one": x0 = hard block, <1 = preferred, >1 = only
+// when it's worth it (a short perpendicular road CROSSING stays cheap for
+// a walker; strolling the centerline does not). This is the FLOW-HINT
+// slice hmsc's world/pathing.ts reserves for itself.
+const PROFILE_TUNING: Record<'walk' | 'drive', Partial<Record<TileKind, number>>> = {
+  walk: { sidewalk: 0.45, road: 3.5, asphalt: 3.5, mud: 1.4, sand: 1.6 },
+  drive: { road: 1, asphalt: 1.05, sidewalk: 0, mud: 0, sand: 0, bush: 0 },
+};
+
 // Cost-per-kind for the host profile — the SAME formula as hmsc's JS
 // movementCostForCell (world/pathing.ts), evaluated once per kind here
-// instead of once per A* node there.
+// instead of once per A* node there, then shaped by PROFILE_TUNING.
 function profileCosts(mode: 'walk' | 'drive'): number[] {
   return TILE_KINDS.map((kind) => {
     const def = tileKindDefinition(kind);
@@ -237,6 +254,9 @@ function profileCosts(mode: 'walk' | 'drive'): number[] {
     let cost = base * def.pathing.movementCost;
     if (def.door.isDoor) cost += def.door.openCost;
     if (def.traversal.width === 'narrow') cost += 0.22;
+    const tune = PROFILE_TUNING[mode][kind];
+    if (tune === 0) return -1;
+    if (tune != null) cost *= tune;
     return cost;
   });
 }
@@ -355,7 +375,10 @@ export default function PathingLab() {
     if (!hostReady) return;
     publishPathGrid({ origin: [ORIGIN_X, ORIGIN_Z], cellSize: CELL, cols: COLS, rows: ROWS, kinds: world.kinds });
     setPathProfile(PED_PROFILE, { costs: profileCosts('walk'), laneOffset: 0.18 });
-    setPathProfile(VEH_PROFILE, { costs: profileCosts('drive'), laneOffset: 0.3 });
+    // 1.5 = half of a 3-tile lane: each direction holds the center of its own
+    // half of the 6-wide road. The host clamps offset waypoints back onto
+    // traversable ground, so corners never shove the lane into the sidewalk.
+    setPathProfile(VEH_PROFILE, { costs: profileCosts('drive'), laneOffset: 1.5 });
     simRef.current.lastGen = pathGeneration();
   }, [world, hostReady]);
 
@@ -421,7 +444,8 @@ export default function PathingLab() {
 
         // cars
         const clock = trafficClockSeconds();
-        for (const car of s.cars) {
+        for (let ci = 0; ci < s.cars.length; ci++) {
+          const car = s.cars[ci];
           if (!car.path) {
             car.goal = pickGoal(world.roadCells, car.x, car.z);
             car.path = findPath(VEH_PROFILE, [car.x, car.z], car.goal);
@@ -434,7 +458,13 @@ export default function PathingLab() {
           const dx = tgt[0] - car.x;
           const dz = tgt[1] - car.z;
           const d = Math.hypot(dx, dz);
-          if (d < 0.55) { car.nextIdx += 1; continue; }
+          const fx0 = Math.sin(car.yawDeg * RAD);
+          const fz0 = Math.cos(car.yawDeg * RAD);
+          // Arrived OR blew past it (waypoint behind the bumper) → advance.
+          // The accept radius must beat the turning circle (~1.4m at cruise
+          // with 240°/s steering) or a near-miss orbits the waypoint forever
+          // — the donuts.
+          if (d < 0.9 || (d < 2.2 && dx * fx0 + dz * fz0 < 0)) { car.nextIdx += 1; continue; }
           const desired = Math.atan2(dx, dz) * DEG;
           const err = wrap180(desired - car.yawDeg);
           car.yawDeg += Math.max(-240 * dt, Math.min(240 * dt, err));
@@ -442,7 +472,9 @@ export default function PathingLab() {
           const fz = Math.cos(car.yawDeg * RAD);
 
           // ── the driver: speed limit = min of every yield reason ─────────
-          let limit = car.cruise * (Math.abs(err) > 35 ? 0.38 : 1);
+          // big steering error → creep (tightens the turning circle so a
+          // sharp corner is a pivot, not an orbit)
+          let limit = car.cruise * (Math.abs(err) > 70 ? 0.16 : Math.abs(err) > 35 ? 0.38 : 1);
 
           // pedestrians in the corridor ahead → brake to a stop short of them
           if (!ui.reckless) {
@@ -457,16 +489,25 @@ export default function PathingLab() {
               }
             }
           }
-          // car ahead in lane → follow, don't rear-end the red-light queue
-          for (const other of s.cars) {
+          // car ahead in lane → follow, don't rear-end the red-light queue.
+          // ONCOMING traffic is ignored — the lanes separate it now, and
+          // braking for it was the nose-to-nose mutual freeze that
+          // gridlocked the whole city.
+          for (let oi = 0; oi < s.cars.length; oi++) {
+            const other = s.cars[oi];
             if (other === car) continue;
+            const ofx = Math.sin(other.yawDeg * RAD);
+            const ofz = Math.cos(other.yawDeg * RAD);
+            if (ofx * fx + ofz * fz < -0.3) continue; // oncoming, not our queue
             const rx = other.x - car.x;
             const rz = other.z - car.z;
             const ahead = rx * fx + rz * fz;
             const lateral = Math.abs(rx * fz - rz * fx);
-            if (ahead > 0 && ahead < 4.6 && lateral < 1.2) {
-              limit = Math.min(limit, Math.max(0, (ahead - 2.9) * 2.0));
-            }
+            if (ahead <= 0 || ahead >= 4.6 || lateral >= 1.2) continue;
+            // crossing tie-break: two near-stopped cars yielding to each
+            // other never move again — the lower index claims right of way
+            if (other.speed < 0.5 && car.speed < 0.5 && ci < oi) continue;
+            limit = Math.min(limit, Math.max(0, (ahead - 2.9) * 2.0));
           }
           // signals: approaching a junction box on a non-go phase → stop at
           // the line; already inside → commit and clear the box
