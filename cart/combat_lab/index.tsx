@@ -441,32 +441,70 @@ function ragdollFromShot(bones: Record<BoneId, SkeletonBone>, struckBone: BoneId
 const SETTLE_MOTION = 0.0025;
 const SETTLE_TICKS = 55;
 
-// ── hmsc's over-the-shoulder camera (GameWorld3D math, verbatim) ─────────────
+// ── the camera: hmsc follow cam at rest, a TRUE aim rig on RMB ───────────────
+//
+// hmsc's shipped camera pitches by sliding its look TARGET ±0.82m/rad around
+// a FIXED 3.05m camera height — a look camera, not an aim camera. Composed,
+// its screen axis can never rise above the horizon: at full up-pitch it still
+// points slightly DOWN (3.05 → 2.61 over ~6m), so the crosshair line at 30m
+// sat at ~0.8m — below an enemy's head. That was the "aim ceiling".
+//
+// While AIMING we therefore orbit a shoulder-height pivot with a genuinely
+// pitched forward axis (AimLabScene's aimForward — correct HERE because the
+// camera axis is constructed FROM it, and the fire ray reads the camera
+// axis): full vertical authority, ADS-style closer shoulder framing. Released
+// RMB returns to the verbatim hmsc follow cam.
 
-function shoulderCamera(px: number, pz: number, yawDegrees: number, pitchRadians: number, aiming: boolean) {
+const AIM_CAMERA = {
+  pivotHeightMeters: 1.62, // eye-ish; the crouch tween pulls it down
+  crouchPivotDropMeters: 0.42,
+  distanceMeters: 2.4, // closer than the 5.9m follow cam — ADS framing
+  lookAheadMeters: 12,
+  // wider pitch clamps than the follow cam — aiming needs the sky
+  minPitchRadians: -1.0, // ~57° up
+  maxPitchRadians: 1.15, // ~66° down
+};
+
+function shoulderCamera(px: number, pz: number, yawDegrees: number, pitchRadians: number, aiming: boolean, crouch01 = 0) {
   const yawRadians = yawDegrees * RAD;
   const right: V3 = [-Math.cos(yawRadians), 0, Math.sin(yawRadians)];
-  const shift = aiming ? HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters : 0;
+
+  if (aiming) {
+    const cp = Math.cos(pitchRadians);
+    const fwd: V3 = [Math.sin(yawRadians) * cp, -Math.sin(pitchRadians), Math.cos(yawRadians) * cp];
+    const shift = HMSC_GAMEPLAY_CAMERA.aimShoulderShiftMeters;
+    const pivot: V3 = [
+      px + right[0] * shift,
+      AIM_CAMERA.pivotHeightMeters - crouch01 * AIM_CAMERA.crouchPivotDropMeters,
+      pz + right[2] * shift,
+    ];
+    const position: V3 = [
+      pivot[0] - fwd[0] * AIM_CAMERA.distanceMeters,
+      pivot[1] - fwd[1] * AIM_CAMERA.distanceMeters,
+      pivot[2] - fwd[2] * AIM_CAMERA.distanceMeters,
+    ];
+    const target: V3 = [
+      pivot[0] + fwd[0] * AIM_CAMERA.lookAheadMeters,
+      pivot[1] + fwd[1] * AIM_CAMERA.lookAheadMeters,
+      pivot[2] + fwd[2] * AIM_CAMERA.lookAheadMeters,
+    ];
+    return { position, target, fov: HMSC_GAMEPLAY_CAMERA.aimFovDegrees, pivot };
+  }
+
+  // hmsc GameWorld3D follow cam, verbatim
   const position: V3 = [
-    px - Math.sin(yawRadians) * HMSC_GAMEPLAY_CAMERA.distanceMeters + right[0] * shift,
+    px - Math.sin(yawRadians) * HMSC_GAMEPLAY_CAMERA.distanceMeters,
     HMSC_GAMEPLAY_CAMERA.heightMeters,
-    pz - Math.cos(yawRadians) * HMSC_GAMEPLAY_CAMERA.distanceMeters + right[2] * shift,
+    pz - Math.cos(yawRadians) * HMSC_GAMEPLAY_CAMERA.distanceMeters,
   ];
   const target: V3 = [
-    px + right[0] * shift * HMSC_GAMEPLAY_CAMERA.aimTargetShiftRatio,
+    px,
     HMSC_GAMEPLAY_CAMERA.targetHeightMeters - pitchRadians * HMSC_GAMEPLAY_CAMERA.pitchTargetMetersPerRadian,
-    pz + right[2] * shift * HMSC_GAMEPLAY_CAMERA.aimTargetShiftRatio,
+    pz,
   ];
-  const fov = aiming ? HMSC_GAMEPLAY_CAMERA.aimFovDegrees : HMSC_GAMEPLAY_CAMERA.fovDegrees;
-  return { position, target, fov };
+  const pivot: V3 = [px, HMSC_GAMEPLAY_CAMERA.targetHeightMeters, pz];
+  return { position, target, fov: HMSC_GAMEPLAY_CAMERA.fovDegrees, pivot };
 }
-
-// NOTE: AimLabScene's aimForward(yaw,pitch) formula is deliberately NOT used
-// here. The crosshair sits at the render camera's screen center, and that
-// camera's view axis (target − position) includes the pitch-driven target
-// drop plus the 35% shoulder-target shift — aimForward diverges from it by
-// meters at combat range, which made every shot whiff. The fire ray is the
-// camera axis itself (see playerFire).
 
 // host mouse bindings (same readers as HmscGameplayRig)
 function readHostNumber(name: string, fallback = 0): number {
@@ -1052,28 +1090,32 @@ export default function CombatLab() {
       // NOT track the unfocused absolute pointer — the lab has HUD panels to
       // mouse over, and the game has no side panels to protect.
       s.aiming = readHostNumber('getMouseRightDown', 0) > 0 && mouseFocusedRef.current;
+      // pitch clamps: the follow cam keeps hmsc's narrow look range; the aim
+      // rig opens up — aiming needs the sky. Clamping the accumulator every
+      // tick (not just on deltas) eases a sky-high aim back into the follow
+      // cam's range when RMB releases.
+      const minPitch = s.aiming ? AIM_CAMERA.minPitchRadians : HMSC_GAMEPLAY_CAMERA.minPitchRadians;
+      const maxPitch = s.aiming ? AIM_CAMERA.maxPitchRadians : HMSC_GAMEPLAY_CAMERA.maxPitchRadians;
       if (mouseFocusedRef.current) {
         const { dx, dy } = readHostMouseDelta();
         if (Math.abs(dx) < HMSC_GAMEPLAY_CAMERA.maxMouseDeltaPixels && Math.abs(dy) < HMSC_GAMEPLAY_CAMERA.maxMouseDeltaPixels) {
           cameraAimRef.current.yawDegrees -= dx * HMSC_GAMEPLAY_CAMERA.yawRadiansPerPixel * DEG;
-          cameraAimRef.current.pitchRadians = clampCameraValue(
-            cameraAimRef.current.pitchRadians + dy * HMSC_GAMEPLAY_CAMERA.pitchRadiansPerPixel,
-            HMSC_GAMEPLAY_CAMERA.minPitchRadians,
-            HMSC_GAMEPLAY_CAMERA.maxPitchRadians,
-          );
+          cameraAimRef.current.pitchRadians += dy * HMSC_GAMEPLAY_CAMERA.pitchRadiansPerPixel;
         }
       }
+      cameraAimRef.current.pitchRadians = clampCameraValue(cameraAimRef.current.pitchRadians, minPitch, maxPitch);
       const smoothing = 1 - Math.exp(-HMSC_GAMEPLAY_CAMERA.smoothingPerSecond * dt);
       s.camYaw += angleDeltaDegrees(s.camYaw, cameraAimRef.current.yawDegrees) * smoothing;
       s.camPitch += (cameraAimRef.current.pitchRadians - s.camPitch) * smoothing;
 
       // ── resolve THE camera — render, fire, and targeting all read s.cam ──
-      // hmsc shoulder follow (the ragdoll's pelvis once dead), clamped forward
-      // along its own axis when cover sits between the body and the lens.
+      // follow cam at rest, true aim rig on RMB (the ragdoll's pelvis once
+      // dead), clamped forward along its own axis when cover sits between the
+      // pivot and the lens.
       {
         const followPos: V3 = p.ragdoll ? (bonesRef.current.you?.pelvis.position ?? p.pos) : p.pos;
-        const cam = shoulderCamera(followPos[0], followPos[2], s.camYaw, s.camPitch, s.aiming);
-        const pivot: V3 = [followPos[0], HMSC_GAMEPLAY_CAMERA.targetHeightMeters, followPos[2]];
+        const cam = shoulderCamera(followPos[0], followPos[2], s.camYaw, s.camPitch, s.aiming, p.crouch01);
+        const pivot = cam.pivot;
         const toCam = sub(cam.position, pivot);
         const segLen = len3(toCam);
         const tHit = nearestCoverT(pivot, norm3(toCam), segLen);
