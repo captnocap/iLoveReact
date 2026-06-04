@@ -129,10 +129,10 @@ export const DECISIONS: Decision[] = [
     keywords: ['lab shape', 'scaffold', 'GAME_', 'standard imports', 'new lab', 'lab template', 'ground floor imports', 'create lab'],
   },
   {
-    id: 'V18', name: 'Game Zig is organized and properly named — never ad-hoc', status: 'ruled',
-    ruling: 'The framework is mostly organized (v8_bindings_<capability>.zig convention + gpu/phys/ffi subdirs) EXCEPT the recent ad-hoc game changes. Game Zig follows the same convention: implementation in a proper module home (framework/game/), bindings as thin registrars with honest capability names (v8_bindings_game_physics.zig — not physics_lab; movement out of input_bench). Executes the C1/R1 rename mandate as real structure.',
-    keywords: ['zig organization', 'framework structure', 'bindings naming', 'game zig', 'adhoc', 'module home', 'rename', 'v8_bindings'],
-    cites: ['framework/v8_bindings_physics_lab.zig', 'framework/v8_bindings_input_bench.zig', 'framework/v8_bindings_pathing.zig'],
+    id: 'V18', name: 'Game Zig is organized, properly named, and CONDITIONAL all the way through', status: 'ruled',
+    ruling: 'Game Zig follows the framework convention: implementation in a proper module home (framework/game/), bindings as thin registrars with honest capability names (v8_bindings_game_physics.zig — not physics_lab; movement out of input_bench). AND the game is a gated INGREDIENT like every other capability: declared in sdk/dependency-registry.json, flipped by the metafile-gate walker when a cart imports the GAME_* ground floor, compiled behind has-game* gates in build.zig — never an unconditional addImport. A 2D interface cart pays zero bytes and zero host fns for the game\'s existence. No "cheap dep" carve-outs.',
+    keywords: ['zig organization', 'framework structure', 'bindings naming', 'game zig', 'adhoc', 'module home', 'rename', 'v8_bindings', 'conditional', 'ingredient', 'metafile gate', 'dependency registry', 'has-game', 'bundling'],
+    cites: ['framework/v8_bindings_physics_lab.zig', 'framework/v8_bindings_input_bench.zig', 'framework/v8_bindings_pathing.zig', 'sdk/dependency-registry.json'],
   },
   {
     id: 'P1', name: 'Zig owns the brute work; JS authors data, never runs it', status: 'ruled',

@@ -381,7 +381,7 @@ labs route). Host changes to test = rebuild the host — fine, that's the deal.
 **Installing this shape is the FIRST build task of the rebuild** — the shape
 must be a real thing before any lab is rebuilt onto it.
 
-**V18 — Game Zig is organized and properly named, not ad-hoc. (Added 2026-06-04.)**
+**V18 — Game Zig is organized, properly named, and CONDITIONAL all the way through. (Added 2026-06-04.)**
 "reactjit is the same project and isn't the same project": the framework is
 mostly organized (the `v8_bindings_<capability>.zig` convention + `gpu/`,
 `phys/`, `ffi/` subdirs) — EXCEPT the recent game changes, which are ad-hoc.
@@ -392,6 +392,17 @@ bindings files are thin registrars with honest capability names
 (`v8_bindings_game_physics.zig`, not `v8_bindings_physics_lab.zig`;
 movement out of `v8_bindings_input_bench.zig`). This executes C1/R1's rename
 mandate as part of a real structure, not a one-off rename.
+
+AND the host-binding/source-code rule applies STRICTLY across the board: the
+game is a gated INGREDIENT like every other capability. A 2D interface cart has
+no use for anything the game introduces, so it is all conditional — exactly how
+the greater system already works: declared in `sdk/dependency-registry.json`,
+flipped by the metafile-gate walker when a cart actually imports the `GAME_*`
+ground floor, compiled behind `has-game*` gates in build.zig (never an
+unconditional `addImport`). Importing `cart/game/` is what opts a binary into
+the game's bindings; sweatshop/tui/chat carts pay zero bytes and zero host fns
+for the game's existence. Follow this through all the way — no exceptions, no
+"cheap dep" carve-outs.
 
 **Tier C — accepted by default** (no objection raised). C1's dormant-vs-delete
 choice for Bullet inherits Q1's open item; until ruled, the loud DORMANT banner
