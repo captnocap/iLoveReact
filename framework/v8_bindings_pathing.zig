@@ -230,10 +230,10 @@ fn emitWaypoints(prof: *const Profile, len: usize) usize {
             const a = g_cellpath[i - 1];
             const b = g_cellpath[i];
             const c = g_cellpath[i + 1];
-            const dx1 = @as(i64, b % g_cols) - @as(i64, a % g_cols);
-            const dz1 = @as(i64, b / g_cols) - @as(i64, a / g_cols);
-            const dx2 = @as(i64, c % g_cols) - @as(i64, b % g_cols);
-            const dz2 = @as(i64, c / g_cols) - @as(i64, b / g_cols);
+            const dx1 = @as(i64, @intCast(b % g_cols)) - @as(i64, @intCast(a % g_cols));
+            const dz1 = @as(i64, @intCast(b / g_cols)) - @as(i64, @intCast(a / g_cols));
+            const dx2 = @as(i64, @intCast(c % g_cols)) - @as(i64, @intCast(b % g_cols));
+            const dz2 = @as(i64, @intCast(c / g_cols)) - @as(i64, @intCast(b / g_cols));
             if (dx1 == dx2 and dz1 == dz2) continue; // straight-through cell
         }
         const idx = g_cellpath[i];
