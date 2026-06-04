@@ -362,3 +362,34 @@ with bake-once discipline.
 5. Item scale audit results (V11).
 6. The RLE/relational animation format design (V6 rules the direction, not the format).
 7. screenRay export confidence was "i think so" — proceed, revisit if it fights back.
+
+---
+
+## ARCHITECTURAL PRINCIPLES (ruled 2026-06-04 — apply to every verdict's implementation)
+
+**P1 — Zig owns the brute work. JS authors data; it does not run data.**
+No matter how anything folds, the heavy runtime of data is controlled from Zig.
+JavaScript has proven to be a really nice AUTHORING layer for data and a bad
+RUNTIME for it (the corpus is the evidence: per-frame bridge re-ships, re-render
+storms, every perf lab's conclusion). Implementation rule: if a system moves data
+every frame, its hot loop is Zig; the JS side declares, authors, and tunes.
+
+**P2 — Every value is exposed for the game compile. No private constants.**
+Every number, value, name — all of it — arrives at an interface (the internal
+tool) where it can be changed at any time → compile and go. If the physics has
+numbers, they surface in the tuning interface. The failure mode this kills:
+"have the AI go change a private value and slowly iterate." A constant buried in
+code that affects game behavior is a bug per this principle — it must live in
+data (registries / documents / tuning tables) that the compile consumes.
+
+**P3 — Deep interfaces, readable code, good structure.**
+Small, strict surfaces hiding substantial implementation; names that carry their
+meaning; validation at the boundary so interiors stay simple. The ground-floor
+modules are written to this bar — they are the foundation everything cites.
+
+**P4 — Behavior-level tests, dual-sided.**
+Both runtime testing AND local TypeScript + Zig test suites that validate
+BEHAVIOR — written so they survive interface changes. Tests assert what the
+system does (the jump arc, the hit chance at range X under cover Y, the path
+around a dropped barrier), not what its functions are called. Every ground-floor
+module ships with both sides.
