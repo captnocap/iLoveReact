@@ -186,9 +186,29 @@ function straightenJunctions(points: [number, number][], junctions: Junction[]):
     }
     const prev = out[out.length - 1];
     const next = points[k];
-    const horizontalEntry = Math.abs(points[i][0] - prev[0]) > Math.abs(points[i][1] - prev[1]);
-    const straight = horizontalEntry ? Math.abs(next[1] - prev[1]) < 0.6 : Math.abs(next[0] - prev[0]) < 0.6;
-    if (!straight) out.push(horizontalEntry ? [next[0], prev[1]] : [prev[0], next[1]]);
+    // The apex comes from the BOX's own lane lines + entry/exit directions —
+    // NEVER from raw waypoint coordinates. A* may legally weave columns
+    // inside flow-neutral boxes, and a collinear-merged leg whose both
+    // corners sit inside boxes has no snappable waypoint in between — so
+    // trusting coordinates leaked off-line columns into the apexes and
+    // compounded junction by junction until cars rode the sidewalk line
+    // (probe-verified: 8/41 routes violated; box-derived apexes: 0/89).
+    const entryDx = points[i][0] - prev[0];
+    const entryDz = points[i][1] - prev[1];
+    const hEntry = Math.abs(entryDx) > Math.abs(entryDz);
+    const bx = j.x0 - ORIGIN_X;
+    const bz = j.z0 - ORIGIN_Z;
+    if (hEntry) {
+      const east = entryDx > 0;
+      const exitSouth = next[1] > prev[1];
+      const straight = Math.abs(next[1] - prev[1]) < 0.6;
+      if (!straight) out.push([ORIGIN_X + bx + (exitSouth ? 1.5 : 4.5), ORIGIN_Z + bz + (east ? 4.5 : 1.5)]);
+    } else {
+      const south = entryDz > 0;
+      const exitEast = next[0] > prev[0];
+      const straight = Math.abs(next[0] - prev[0]) < 0.6;
+      if (!straight) out.push([ORIGIN_X + bx + (south ? 1.5 : 4.5), ORIGIN_Z + bz + (exitEast ? 4.5 : 1.5)]);
+    }
     i = k;
   }
   return out;
@@ -241,7 +261,15 @@ function buildCarRoute(start: [number, number], pathPoints: PathPoint[], junctio
     const last = pts[pts.length - 1];
     if (Math.hypot(p[0] - last[0], p[1] - last[1]) > 0.05) pts.push(p);
   }
-  return straightenJunctions(pts, junctions);
+  // dedupe again after apexing — a column weave can produce a collinear
+  // apex that lands on top of its neighbor
+  const apexed = straightenJunctions(pts, junctions);
+  const out: [number, number][] = [apexed[0]];
+  for (let i = 1; i < apexed.length; i++) {
+    const last = out[out.length - 1];
+    if (Math.hypot(apexed[i][0] - last[0], apexed[i][1] - last[1]) > 0.05) out.push(apexed[i]);
+  }
+  return out;
 }
 
 function seededRandom(seed: number): () => number {
