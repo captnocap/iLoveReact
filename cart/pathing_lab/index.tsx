@@ -194,6 +194,40 @@ function straightenJunctions(points: [number, number][], junctions: Junction[]):
   return out;
 }
 
+// ── single-file lanes ────────────────────────────────────────────────────────
+// The whole trio carries the FLOW (direction), but there is exactly ONE
+// driving line per direction: the marked center. A* may route through any
+// of the trio's three columns (uniform cost) — which is how cars ended up
+// riding side by side, 1m apart, 1.8m wide. Snap every road waypoint to its
+// trio's center line; flow already put it in the correct half, the snap
+// just collapses the column choice. Junction points are left alone (the
+// apex pass owns them) and then get computed from exact lane lines.
+function snapToLaneCenters(points: [number, number][]): [number, number][] {
+  return points.map(([x, z]) => {
+    const cx = x - ORIGIN_X;
+    const cz = z - ORIGIN_Z;
+    const hBand = ROAD_BANDS.find((b) => cz >= b && cz < b + ROAD_W);
+    const vBand = ROAD_BANDS.find((b) => cx >= b && cx < b + ROAD_W);
+    if (hBand != null && vBand != null) return [x, z]; // junction box
+    if (hBand != null) return [x, ORIGIN_Z + (cz < hBand + 3 ? hBand + 1.5 : hBand + 4.5)];
+    if (vBand != null) return [ORIGIN_X + (cx < vBand + 3 ? vBand + 1.5 : vBand + 4.5), z];
+    return [x, z];
+  });
+}
+
+// host path → drivable route: live position first (never snapped — the car
+// merges onto the line over the first segment), snapped lane-center points,
+// consecutive duplicates dropped, junction staircases replaced by apexes.
+function buildCarRoute(start: [number, number], pathPoints: PathPoint[], junctions: Junction[]): [number, number][] {
+  const snapped = snapToLaneCenters(pathPoints.slice(1));
+  const pts: [number, number][] = [start];
+  for (const p of snapped) {
+    const last = pts[pts.length - 1];
+    if (Math.hypot(p[0] - last[0], p[1] - last[1]) > 0.05) pts.push(p);
+  }
+  return straightenJunctions(pts, junctions);
+}
+
 function seededRandom(seed: number): () => number {
   let t = seed >>> 0;
   return () => {
@@ -737,8 +771,8 @@ export default function PathingLab() {
             car.pathDirty = false;
             if (!found || found.points.length < 2) { car.goal = null; car.plan = null; continue; }
             car.path = found;
-            // proper turn apexes through every junction the route crosses
-            car.route = straightenJunctions([[car.x, car.z], ...found.points.slice(1)], world.junctions);
+            // snap to the single lane line, then apex every junction turn
+            car.route = buildCarRoute([car.x, car.z], found.points, world.junctions);
             const mp = measurePath(car.route);
             car.routeCum = mp.cum;
             car.routeTotal = mp.total;
