@@ -123,6 +123,18 @@ export const DECISIONS: Decision[] = [
     keywords: ['cutscene', 'cinematic', 'dialog', 'talking faces', 'scene', 'camera track', 'scripted', 'story scene'],
   },
   {
+    id: 'V17', name: 'The lab shape: GAME_* standard imports + scaffold script', status: 'ruled',
+    ruling: 'A new lab is a scaffold from a script — every lab carries the same shape: import { GAME_PHYSICS, GAME_PATHING, GAME_INPUT, GAME_CAMERA, ... } from the ground floor. The GAME_* names are STANDARD (the V14 list). Everything arrives ready to use; the lab just exports itself and is loadable via the labs route. Installing this shape is the FIRST build task of the rebuild.',
+    detail: 'Host changes to test = rebuild the host; that\'s the accepted deal.',
+    keywords: ['lab shape', 'scaffold', 'GAME_', 'standard imports', 'new lab', 'lab template', 'ground floor imports', 'create lab'],
+  },
+  {
+    id: 'V18', name: 'Game Zig is organized and properly named — never ad-hoc', status: 'ruled',
+    ruling: 'The framework is mostly organized (v8_bindings_<capability>.zig convention + gpu/phys/ffi subdirs) EXCEPT the recent ad-hoc game changes. Game Zig follows the same convention: implementation in a proper module home (framework/game/), bindings as thin registrars with honest capability names (v8_bindings_game_physics.zig — not physics_lab; movement out of input_bench). Executes the C1/R1 rename mandate as real structure.',
+    keywords: ['zig organization', 'framework structure', 'bindings naming', 'game zig', 'adhoc', 'module home', 'rename', 'v8_bindings'],
+    cites: ['framework/v8_bindings_physics_lab.zig', 'framework/v8_bindings_input_bench.zig', 'framework/v8_bindings_pathing.zig'],
+  },
+  {
     id: 'P1', name: 'Zig owns the brute work; JS authors data, never runs it', status: 'ruled',
     ruling: 'No matter how anything folds, the heavy runtime of data is controlled from Zig. JavaScript is a really nice AUTHORING layer for data and a bad RUNTIME for it. If a system moves data every frame, its hot loop is Zig; JS declares, authors, tunes.',
     keywords: ['zig', 'javascript', 'performance', 'runtime', 'authoring', 'hot loop', 'architecture', 'brute work'],

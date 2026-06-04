@@ -369,6 +369,30 @@ state (clothes, model changes). Implications:
 - This is a ground-floor consumer: the cutscene file format is a lab to build in
   the rebuilt harness (V13), sitting beside story/mission/dialog tooling (V12).
 
+**V17 — The lab shape: GAME_* standard imports + scaffold script. (Added 2026-06-04.)**
+A new lab is a SCAFFOLD FROM A SCRIPT, so every lab carries the same shape:
+
+    import { GAME_PHYSICS, GAME_PATHING, GAME_INPUT, GAME_CAMERA, ... } from <the ground floor>
+
+The GAME_* names are STANDARD — pathing, physics, input, camera, figure,
+vehicle, animation, kinds, loop, chrome, telemetry (the V14 list). Everything
+arrives ready to use; the lab just exports itself and can be loaded (the V13
+labs route). Host changes to test = rebuild the host — fine, that's the deal.
+**Installing this shape is the FIRST build task of the rebuild** — the shape
+must be a real thing before any lab is rebuilt onto it.
+
+**V18 — Game Zig is organized and properly named, not ad-hoc. (Added 2026-06-04.)**
+"reactjit is the same project and isn't the same project": the framework is
+mostly organized (the `v8_bindings_<capability>.zig` convention + `gpu/`,
+`phys/`, `ffi/` subdirs) — EXCEPT the recent game changes, which are ad-hoc.
+The game's Zig follows the same convention as the rest of the framework:
+implementation logic lives in a proper module home (e.g. `framework/game/` —
+physics, movement, pathing already half-exists in `v8_bindings_pathing.zig`),
+bindings files are thin registrars with honest capability names
+(`v8_bindings_game_physics.zig`, not `v8_bindings_physics_lab.zig`;
+movement out of `v8_bindings_input_bench.zig`). This executes C1/R1's rename
+mandate as part of a real structure, not a one-off rename.
+
 **Tier C — accepted by default** (no objection raised). C1's dormant-vs-delete
 choice for Bullet inherits Q1's open item; until ruled, the loud DORMANT banner
 applies.

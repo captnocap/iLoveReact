@@ -16,6 +16,36 @@ Dynamic content lives in `StringHashMap(Value)` or tagged unions. That's the pat
 
 ---
 
+## Game work: the oracle comes FIRST
+
+For ANY game-side question or decision (hmsc, hmsc-int, the labs, anything in
+docs/game/'s corpus):
+
+```
+tools/oracle "<query>"        # e.g. tools/oracle "which humanoid"
+```
+
+Call it BEFORE grep/bash searching and BEFORE considering code or ideas you find
+elsewhere. The RULINGS section is the user's exact decisions
+(docs/game/DECISIONS.md) and OVERRIDES competing implementations still sitting in
+the tree — records flagged `⚠ RETIRED by Vn` are dead ends no matter how alive
+they look. Empty RULINGS = the area may be genuinely undecided; check
+DECISIONS.md's open/show-me items before inventing an approach.
+
+Three standing disciplines for all game work:
+
+- **Survey before build.** Recreating anything is bad — the worst failure mode
+  in this repo's history. Oracle first, then the `_index` queries, then source.
+  If something exists, use it or formally retire it; never write a parallel one.
+- **Deep interfaces.** Small strict surfaces hiding substantial implementation;
+  validate at the boundary (the deep-interfaces skill applies to all
+  ground-floor and game modules).
+- **Readable code.** Names carry meaning at their scope; no magic numbers — per
+  P2, a behavior-affecting constant buried in code is a bug; it belongs in a
+  tuning table the compile consumes (the readable-code skill applies).
+
+---
+
 ## Primitives
 
 From `runtime/primitives.tsx`:
