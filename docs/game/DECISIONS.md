@@ -30,7 +30,7 @@ Who simulates the game world's bodies?
 
 Consensus lean: D (it's what already ships), with honest renames either way.
 
-ANSWER: ______
+ANSWER: The correct answer isnt here really. C and A are both correct. if you look at the physics_lab this is correct for jumping and gravity and collisions but the ragdoll is also correct for its ragdoll nature and the hitboxes. the ragdoll doesnt have movement or jumping though, so it cant be called the approach, and the physics_lab has no rag doll or hitboxes with the player model we want so its not the correct approach either. but they both are. and then the bullet physics in the combat_lab are still undetermined at this time
 If D: keep Bullet dormant for a future revival, or delete the trio? ______
 
 ### Q2. Humanoid / player model
@@ -50,10 +50,10 @@ One figure stack for every human in the game.
 
 Consensus lean: C — "head_lab geometry + hmsc damage vocabulary".
 
-ANSWER: ______
+ANSWER: A
 Q2b. Damage-zone naming, pick the spelling: `armL/armR/legL/legR` (hmsc) or
-`lArm/rArm/lLeg/rLeg` (head_lab)? ______
-Q2c. Hit volumes: head_lab's oriented boxes or hmsc's capsules? ______
+`lArm/rArm/lLeg/rLeg` (head_lab)? head
+Q2c. Hit volumes: head_lab's oriented boxes or hmsc's capsules? head
 
 ### Q3. Camera
 - **A) The registry** — `runtime/cameras/` (`@reactjit/cameras`): pure
@@ -66,9 +66,9 @@ Q2c. Hit volumes: head_lab's oriented boxes or hmsc's capsules? ______
 
 Consensus lean: A as the one true system; absorb C into it as a rig; delete B holdouts.
 
-ANSWER: ______
-Q3b. Absorb the aim rig into the registry as `AimCamera`/Follow-with-aim? ______
-Q3c. Export the generic `screenRay` from the registry (kills 3 hand-rolled copies)? ______
+ANSWER: A but C revealed why A is shit i could barely hit head height before hitting a ceiling when aiming
+Q3b. Absorb the aim rig into the registry as `AimCamera`/Follow-with-aim? yes
+Q3c. Export the generic `screenRay` from the registry (kills 3 hand-rolled copies)? i think so? 
 
 ### Q4. World substrate (how the game world is represented & rendered)
 - **A) hmsc's system** — tile-kind registries + StaticSurface-baked tile/facade
@@ -83,7 +83,7 @@ Q3c. Export the generic `screenRay` from the registry (kills 3 hand-rolled copie
 Note: these compose (A for close-range + C for mass + D as the end-state). The
 question is what the GROUND FLOOR commits to for THE game.
 
-ANSWER: ______
+ANSWER: We want C performance, with D and A harmonized. the A system is what we are clearly following for gameplay, the tile system IS the system. we want to juice the fuck out of it so we can have a game map the size of gta vice city
 
 ### Q5. Pathing / traffic
 - **A) Host A\*** — `framework/v8_bindings_pathing.zig` (`__path_*`) +
@@ -96,8 +96,8 @@ Consensus lean: A becomes THE traffic backend; the lane-discipline JS
 (snapToLaneCenters / straightenJunctions) migrates host-side or into runtime/pathing.ts
 so the road grammar's lessons live once.
 
-ANSWER: ______
-Q5b. Walkers join cars on deterministic motion plans (currently cars-only)? ______
+ANSWER: whatever we were doing in pathing_lab is the START. we need a real traffic system and a real civilian system. there are parts of this inside of combat_lab also.
+Q5b. Walkers join cars on deterministic motion plans (currently cars-only)? the idea is to do this: to have all of npc pathing be deterministic up until there is a change in their game state. this ideally looks like: all paths are precomputed, and the players effect in the world is what changes it. this is why we are building a full dynamic npc state, which you can see inside of combat lab as a start of it along with pathing_lab 
 
 ### Q6. Animation
 - **A) The DSL** — `cart/animationDsl.ts`: `[dur,target,action;...]` strings,
@@ -112,7 +112,7 @@ Consensus lean: A is the one animation path; B retires. C (gait) stays a pose
 *generator* under A's action layer — gait and DSL actions already compose in
 head_lab's buildRigFrame.
 
-ANSWER: ______
+ANSWER: A, but the dsl was just me also quickly passing off an idea. the real format for this is to RLE it and keep the animation data very relational so that its quick, no hiccups
 
 ### Q7. Movement / input integration
 Where does WASD become velocity?
@@ -126,14 +126,14 @@ Where does WASD become velocity?
 
 Consensus lean: none — this fork was surfaced but not adjudicated.
 
-ANSWER: ______
+ANSWER: B was good, but i cant say i used it enough to say it performed well at scale. the C i used the most, and i think both of them as the same thing
 
 ### Q8. Game loop
 No conflict — unanimous extraction. Confirm: build `useGameLoop` (rAF-probe →
 setTimeout(16) guard + dt-clamp + tick-counter + uiRef mirror) and rebuild all
 real-time carts on it; editors keep `setInterval` clocks.
 
-CONFIRM (y/n): ______
+CONFIRM (y/n): so idk yet. I do know I want to have the game loop be a set amount of ticks per minute, where every npc state updates to an event channel the likes of useIFTTT and then that is how the behavior is reactive from the players interaction. Something like ~45 ticks a minute with forceful updates (player shoots another player, this is a forced game state tick that can be considered as expected for mutation, otherwise the game state follow a very deterministic path
 
 ---
 
@@ -149,7 +149,7 @@ CONFIRM (y/n): ______
 
 Consensus lean: C.
 
-ANSWER: ______
+ANSWER: hybrid, and we need to lab this extensively
 
 ### Q10. Vehicle
 - **A) vehicle_lab** — `cart/vehicle_lab/`: `VehicleDoc` + `buildVehicle` +
@@ -161,7 +161,7 @@ ANSWER: ______
 
 Consensus lean: A is the vehicle module; B/C consume or retire.
 
-ANSWER: ______
+ANSWER: A, this is where our models are coming from like head_lab; as for scale IDK if correct yet, many of the cars need work.
 
 ### Q11. Item / prop models
 - **A) game_item_gallery** — `ITEMS` registry, `model(ctx)` fns (head_lab already
@@ -173,7 +173,7 @@ ANSWER: ______
   object owning mesh+size (memory: migration complete there; scape3d is outside
   this corpus but the doctrine is portable).
 
-ANSWER: ______
+ANSWER: A but idk what B had, i just know that all of A is not to correct scale. the boat is smaller than the player model hand in head_lab alone. 
 
 ### Q12. Perception / NPC awareness
 - **A) combat_lab's ladder** — FoV cones, tile-noise hearing, stimulus/lastKnown
@@ -182,7 +182,7 @@ ANSWER: ______
   no perception).
 - **C) Connect them** — A produces, B consumes: one detective loop.
 
-ANSWER: ______
+ANSWER: C, again we need to work on this, and there is still more internal tooling to make for story/mission/dialog alone. 
 
 ---
 
@@ -217,22 +217,29 @@ Existing machinery that could be the shell:
 - **C) Cartridge loader** — `runtime/cartridge_loader.ts` (`<Cartridge src>`):
   one host cart dynamically evals lab files as guest modules.
 
-ANSWER: ______
+ANSWER: fresh rewrite of everything. start from the internal tooling and what exists in there today, that is the most concrete 'human has been able to interface and declare where things actually live and how it looks' so this is what i want the end result to look like:
+- i can load into the internal tool
+- there is a route to labs
+- this is a collection of every lab i can instantly load into
+- they are short react files, the entire game system is built into the internal tool so that a lab becomes a short scene setup 
+- i can leave notes on a lab that the ai who helps is always aware of when referencing
+- nothing gets recreated
+
 
 ### Q14. What's in the baked ground floor every lab gets for free?
 (Mark each in/out — this defines the "short React file" contract.)
 
-- useGameLoop (Q8): ____
-- Camera registry incl. aim rig + screenRay picking (Q3): ____
-- The figure stack (Q2) with CharacterCaptures auto-mounted: ____
-- Vehicle module (Q10): ____
-- Host physics + heightfield registration (Q1): ____
-- Host pathing + motion plans (Q5): ____
-- Animation DSL (Q6): ____
-- kinds registries (tiles/props/NPCs) as importable data: ____
-- Lab chrome kit (Chip/Knob/MeterRow/panel) + lab environment (skybox/lights/ground): ____
-- Telemetry panel + copy-diagnostics button: ____
-- Effect/StaticSurface texture system with bake-once discipline baked in: ____
+- useGameLoop (Q8): in
+- Camera registry incl. aim rig + screenRay picking (Q3): in
+- The figure stack (Q2) with CharacterCaptures auto-mounted: in
+- Vehicle module (Q10): in
+- Host physics + heightfield registration (Q1): in
+- Host pathing + motion plans (Q5): in
+- Animation DSL (Q6): in
+- kinds registries (tiles/props/NPCs) as importable data: in
+- Lab chrome kit (Chip/Knob/MeterRow/panel) + lab environment (skybox/lights/ground): in
+- Telemetry panel + copy-diagnostics button: in
+- Effect/StaticSurface texture system with bake-once discipline baked in: in
 
 ### Q15. Where does the ground floor live?
 - **A) `runtime/game/`** — alongside the platform's runtime/ (game = factor of reactjit).
@@ -240,10 +247,118 @@ ANSWER: ______
 - **C) Split**: engine-grade pieces (loop, cameras, math) → runtime/; game-semantic
   pieces (figure, kinds, chance) → cart/game/.
 
-ANSWER: ______
+ANSWER: its all the same thing to me. we can keep as hmsc-int and build from there. hmsc should be a compiled game output FROM hmsc-int is the end goal, not needing to write the game as a seperate game. 
 
 ---
 
-When answered: this file gets a `## VERDICTS` section recording each decision +
-rationale, and becomes the constitution for the rebuild. Every lab rebuilt on the
-ground floor cites it; anything contradicting a verdict is a bug.
+## VERDICTS (ruled 2026-06-04 — this is the constitution)
+
+Anything contradicting a verdict is a bug. Open items listed at the bottom.
+
+**V1 — Physics is TWO LAYERS, both correct, neither subsumes the other.**
+The host sim (physics_lab lineage, `__hmsc_*`) is correct for locomotion: jumping,
+gravity, collisions. The Verlet solver (`head_lab/ragdoll.ts`) is correct for body
+physics: ragdoll + hitboxes. The ragdoll has no movement/jumping; the host sim has
+no ragdoll/hitboxes on the player model we want — so the ground floor UNIFIES them:
+host sim owns locomotion, Verlet owns the body, joined through the head_lab figure
+(V2). Projectile ("bullet") physics — combat_lab's geometric-vs-probabilistic shot
+paths — is explicitly UNDETERMINED; do not canonize either yet.
+
+**V2 — Player model: the head_lab kit, outright (overrides the consensus lean).**
+`cart/head_lab/{parts.ts, figureRender.tsx, hed.ts, ragdoll.ts}` is THE figure
+stack. Damage-zone spelling: head_lab's `lArm/rArm/lLeg/rLeg`. Hit volumes:
+head_lab's oriented boxes. hmsc's `render3d/humanoid/` retires (its consumers
+migrate); bodylab's third solver and the inline parts-array copies
+(animation_lab/camera_lab/input_bench) are deleted.
+
+**V3 — Camera: the registry, but the aim rig exposed it.**
+`@reactjit/cameras` is the one system — with the hard finding that the shipped
+Follow rig is inadequate for combat ("could barely hit head height before hitting
+a ceiling"). The ADS aim rig from combat_lab is absorbed into the registry as a
+first-class rig. `screenRay` gets exported (unprojectGround becomes a consumer).
+Hand-rolled trig holdouts are deleted.
+
+**V4 — World: the tile system IS the system; juice it to Vice City scale.**
+hmsc's tile-kind model (A) is the gameplay substrate — that is what we are
+following. The rendering must reach instanced-batch performance (C) harmonized
+with the bake direction (D): target is a game map the size of GTA Vice City.
+Authoring stays tiles; rendering gets juiced until that map runs.
+
+**V5 — Pathing/NPC: pathing_lab is the START of the real thing.**
+Host A* + deterministic motion plans are the foundation for a REAL traffic system
+and a REAL civilian system (combat_lab holds more of the NPC-state pieces). The
+doctrine: ALL NPC pathing is deterministic until a game-state change — paths
+precomputed, and the player's effect on the world is what invalidates them. Full
+dynamic NPC state is the goal; combat_lab + pathing_lab are its two seeds.
+
+**V6 — Animation: DSL semantics win; the string format does not.**
+The action vocabulary/alias system of `cart/animationDsl.ts` is the path, but the
+bracket-string format was a quick pass-off. The real format: RLE'd, relational
+animation data — quick, no hiccups. Redesign the storage/runtime representation,
+keep the action semantics. Per-cart pose tables retire; gait stays a pose
+generator under the action layer.
+
+**V7 — Movement: host-side; B and C are the same thing.**
+WASD-becomes-velocity lives in the host. The input_bench integrator (B) and the
+physics-step movement (C) unify into ONE host-side movement integrator inside the
+physics step. JS keysRef remains only as input transport, never as the integrator.
+
+**V8 — Game loop: two clocks; the game-state tick is the architecture.**
+The render-loop hook (useGameLoop) is NOT yet ruled. What IS ruled: the game
+state runs on a fixed cadence (~45 state-ticks per minute) where every NPC state
+update publishes to an event channel (useIFTTT-like), and player interaction is
+what makes behavior reactive. Player actions (e.g. shooting someone) force an
+immediate state tick — the expected mutation points. Otherwise the game state
+follows a deterministic path. Frame loop (rendering/sim) and game-state tick are
+distinct clocks.
+
+**V9 — Chance: the hybrid — and lab it extensively.**
+scape's ChanceBreakdown legibility + hmsc/combat_lab's cover-fraction input, one
+engine, ground-truth-vs-display law intact. Needs a dedicated lab for extensive
+tuning before it's trusted.
+
+**V10 — Vehicle: vehicle_lab is the source, like head_lab is for people.**
+`VehicleDoc`/`buildVehicle`/semantic part ids are the model. Scale is NOT yet
+verified correct, and many cars need work. CarMeshes and the hmsc structure cars
+retire into it.
+
+**V11 — Items: game_item_gallery, with a mandatory scale audit.**
+The ITEMS registry is the source — but its scale is known-broken (the boat is
+smaller than the player model's hand). Every item gets audited against the scale
+contract. physics_lab's catalog folds in after review.
+
+**V12 — Perception: connect the two halves into one detective loop.**
+combat_lab's perception ladder produces; scape's consequence layer (WitnessMemory/
+the Case) consumes. More internal tooling is still needed for story/mission/dialog.
+
+**Tier C — accepted by default** (no objection raised). C1's dormant-vs-delete
+choice for Bullet inherits Q1's open item; until ruled, the loud DORMANT banner
+applies.
+
+**V13/V15 — The harness: a fresh rewrite anchored on the internal tool.**
+hmsc-int (the internal tooling) is the most concrete "human has declared where
+things actually live" surface, so it is the home. The end state:
+- load into the internal tool → a **labs route**
+- the labs route is a collection of every lab, instantly loadable
+- labs are SHORT React files — the entire game system is built into the internal
+  tool, so a lab is just a scene setup
+- **per-lab notes** persist and are always surfaced to any AI referencing the lab
+- nothing gets recreated
+And the endgame inversion: **hmsc the game is a COMPILED OUTPUT of hmsc-int** —
+the game is not written as a separate cart; the tool emits it.
+
+**V14 — The ground floor (everything a lab gets for free): ALL IN.**
+useGameLoop-equivalent, camera registry (incl. aim rig + screenRay), the head_lab
+figure stack with auto-mounted captures, vehicle module, host physics +
+heightfields, host pathing + motion plans, animation system, kinds registries,
+lab chrome kit + environment, telemetry + copy-diagnostics, the texture system
+with bake-once discipline.
+
+### Open items (not yet ruled)
+1. Bullet (the library): keep dormant vs delete the trio (Q1 sub-question).
+2. Projectile physics model: geometric vs probabilistic shot paths (V1).
+3. The render-loop hook's exact shape (V8 rules the state tick, not the frame loop).
+4. Vehicle scale + per-car quality pass (V10).
+5. Item scale audit results (V11).
+6. The RLE/relational animation format design (V6 rules the direction, not the format).
+7. screenRay export confidence was "i think so" — proceed, revisit if it fights back.
