@@ -255,14 +255,20 @@ ANSWER: its all the same thing to me. we can keep as hmsc-int and build from the
 
 Anything contradicting a verdict is a bug. Open items listed at the bottom.
 
-**V1 — Physics is TWO LAYERS, both correct, neither subsumes the other.**
-The host sim (physics_lab lineage, `__hmsc_*`) is correct for locomotion: jumping,
-gravity, collisions. The Verlet solver (`head_lab/ragdoll.ts`) is correct for body
-physics: ragdoll + hitboxes. The ragdoll has no movement/jumping; the host sim has
-no ragdoll/hitboxes on the player model we want — so the ground floor UNIFIES them:
-host sim owns locomotion, Verlet owns the body, joined through the head_lab figure
-(V2). Projectile ("bullet") physics — combat_lab's geometric-vs-probabilistic shot
-paths — is explicitly UNDETERMINED; do not canonize either yet.
+**V1 — Physics is ONE COHERENT SYSTEM, host-side. (REVISED 2026-06-04, second pass.)**
+Original ruling said "two layers"; the user corrected it: the right option is ONE
+coherent layer/system, not two. The hmsc host sim (physics_lab lineage, `__hmsc_*`)
+is the system — locomotion, gravity, collision, AND it absorbs what the ragdoll
+side actually contributes, which on honest inspection is: (a) the player model we
+want (that's V2's figure, which is data, not physics) and (b) hitboxes. The
+ragdoll *effect* itself is a significant but small slice — the player can't even
+move/play in it. The Verlet solver is cart-side JavaScript and "likely problematic
+the moment it takes a real load" (P1 agrees) — so its BEHAVIOR is the porting
+reference, its implementation is not kept: ragdoll becomes a feature of the one
+host system, written in Zig, validated by P4 behavior tests against what the JS
+solver does today. The bones-in/bones-out seam survives as the interface — the
+figure never knows who computed its bones.
+Projectile ("bullet") physics remains UNDETERMINED pending the SHOW-ME lab.
 
 **V2 — Player model: the head_lab kit, outright (overrides the consensus lean).**
 `cart/head_lab/{parts.ts, figureRender.tsx, hed.ts, ragdoll.ts}` is THE figure
