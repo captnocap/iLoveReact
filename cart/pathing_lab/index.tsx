@@ -403,7 +403,7 @@ const PED_OUTFITS: [string, string, string[], string][] = [
   ['dress', 'plain', [], 'briefs'],
 ];
 
-const MAX_CARS = 6;
+const MAX_CARS = 12;
 const MAX_PEDS = 4;
 
 type Sim = {
@@ -424,7 +424,7 @@ export default function PathingLab() {
   const [yaw, setYaw] = useState(34);
   const [pitch, setPitch] = useState(42);
   const [dist, setDist] = useState(30);
-  const [carCount, setCarCount] = useState(4);
+  const [carCount, setCarCount] = useState(6);
   const [pedCount, setPedCount] = useState(3);
   const [showPaths, setShowPaths] = useState(true);
   const [paused, setPaused] = useState(false);
@@ -462,10 +462,11 @@ export default function PathingLab() {
     setPathProfile(PED_PROFILE, { costs: profileCosts('walk'), laneOffset: 0.18 });
     // No laneOffset: the lane-CENTER tile is the lane line, so the A* route
     // is already in lane. Direction comes from the flow table — driving
-    // against a lane's flow costs 30x (never, in practice), crossing it 4x
-    // (lane changes happen, rarely), and junction tiles are flow-neutral so
-    // every turn resolves inside the box.
-    setPathProfile(VEH_PROFILE, { costs: profileCosts('drive'), laneOffset: 0, againstFlow: 30, crossFlow: 4 });
+    // against a lane's flow costs 30x and CROSSING the centerline costs the
+    // same (at 4x a mid-block U-turn was CHEAPER than going around the
+    // block — rational asshole behavior). Direction changes happen in
+    // flow-neutral junction tiles, where they belong.
+    setPathProfile(VEH_PROFILE, { costs: profileCosts('drive'), laneOffset: 0, againstFlow: 30, crossFlow: 30 });
     simRef.current.lastGen = pathGeneration();
   }, [world, hostReady]);
 
@@ -486,6 +487,23 @@ export default function PathingLab() {
       }
       const [cx, cz] = pool[Math.floor(rand() * pool.length)];
       return cellCenter(cx, cz);
+    };
+
+    // Traffic goals are AHEAD-ONLY: a destination behind the bumper is how
+    // you get U-turn assholes. Cars arrive, pick the next goal in front of
+    // their nose, and just keep circulating — dense fixed flow, no flips.
+    const pickGoalAhead = (pool: [number, number][], fromX: number, fromZ: number, fx: number, fz: number): PathPoint => {
+      for (let attempt = 0; attempt < 18; attempt++) {
+        const [cx, cz] = pool[Math.floor(rand() * pool.length)];
+        const p = cellCenter(cx, cz);
+        const dx = p[0] - fromX;
+        const dz = p[1] - fromZ;
+        const d = Math.hypot(dx, dz);
+        if (d < 12) continue;
+        if ((dx * fx + dz * fz) / d < 0.25) continue;
+        return p;
+      }
+      return pickGoal(pool, fromX, fromZ);
     };
 
     const logLine = (s: Sim, line: string) => { s.log = [line, ...s.log].slice(0, 6); };
@@ -536,7 +554,7 @@ export default function PathingLab() {
         for (let ci = 0; ci < s.cars.length; ci++) {
           const car = s.cars[ci];
           if (!car.path) {
-            car.goal = pickGoal(world.laneXY, car.x, car.z);
+            car.goal = pickGoalAhead(world.laneXY, car.x, car.z, Math.sin(car.yawDeg * RAD), Math.cos(car.yawDeg * RAD));
             car.path = findPath(VEH_PROFILE, [car.x, car.z], car.goal);
             car.nextIdx = 1;
             if (!car.path || car.path.points.length < 2) { car.path = null; continue; }
@@ -782,7 +800,7 @@ export default function PathingLab() {
         ) : null}
         <Row style={{ gap: 6, alignItems: 'center' }}>
           <Text fontSize={11} color={DIM} style={{ width: 44 }}>cars</Text>
-          {[1, 2, 4, 6].map((n) => (
+          {[2, 4, 6, 12].map((n) => (
             <Pressable key={n} onPress={() => setCarCount(Math.min(MAX_CARS, n))} style={{ paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: 1, borderColor: carCount === n ? GOOD : '#22324a', backgroundColor: '#101a2a' }}>
               <Text fontSize={12} color={carCount === n ? GOOD : DIM}>{String(n)}</Text>
             </Pressable>
