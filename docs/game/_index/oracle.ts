@@ -144,8 +144,13 @@ const REC_CAP = 8;
 const PAT_CAP = 4;
 const HAZ_CAP = 5;
 
+/** Damped scores get float-noisy — one decimal is plenty for a rank label. */
+function fmtScore(s: number): string {
+  return String(Math.round(s * 10) / 10);
+}
+
 function decisionBlock(d: Decision, score: number): string {
-  const lines = [`[${d.id} · ${d.status.toUpperCase()} · ${score}] ${d.name}`, `  ${d.ruling}`];
+  const lines = [`[${d.id} · ${d.status.toUpperCase()} · ${fmtScore(score)}] ${d.name}`, `  ${d.ruling}`];
   if (d.detail) lines.push(`  ${d.detail}`);
   if (d.retires?.length) lines.push(`  retires: ${d.retires.join('; ')}`);
   if (d.cites?.length) lines.push(`  files: ${d.cites.join(' · ')}`);
@@ -172,16 +177,16 @@ function interfaceLine(i: OwnedInterface, score: number): string {
   const where = i.codeRef ?? i.sourceFile ?? '';
   const retired = retiredBy(i);
   const status = retired ? `${i.status} ⚠ RETIRED by ${retired}` : i.status;
-  return `[${status} · ${score}] ${i.name} (${i.doc})${where ? ` — ${where}` : ''}\n  ${i.description.slice(0, 200)}`;
+  return `[${status} · ${fmtScore(score)}] ${i.name} (${i.doc})${where ? ` — ${where}` : ''}\n  ${i.description.slice(0, 200)}`;
 }
 
 function patternLine(p: OwnedPattern, score: number): string {
   const promote = p.promoteTo ? ` → promote to: ${p.promoteTo}` : '';
-  return `[${p.status} · ${score}] ${p.name} (seen in: ${p.examples.slice(0, 6).join(', ')})${promote}\n  ${p.description.slice(0, 180)}`;
+  return `[${p.status} · ${fmtScore(score)}] ${p.name} (seen in: ${p.examples.slice(0, 6).join(', ')})${promote}\n  ${p.description.slice(0, 180)}`;
 }
 
 function hazardLine(h: OwnedHazard, score: number): string {
-  return `[${h.severity.toUpperCase()} · ${score}] ${h.name} (${h.doc})\n  ${h.description.slice(0, 200)}${h.fix ? `\n  fix: ${h.fix.slice(0, 150)}` : ''}`;
+  return `[${h.severity.toUpperCase()} · ${fmtScore(score)}] ${h.name} (${h.doc})\n  ${h.description.slice(0, 200)}${h.fix ? `\n  fix: ${h.fix.slice(0, 150)}` : ''}`;
 }
 
 export function oracle(query: string): string {
