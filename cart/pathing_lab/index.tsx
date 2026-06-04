@@ -203,14 +203,30 @@ function straightenJunctions(points: [number, number][], junctions: Junction[]):
 // just collapses the column choice. Junction points are left alone (the
 // apex pass owns them) and then get computed from exact lane lines.
 function snapToLaneCenters(points: [number, number][]): [number, number][] {
-  return points.map(([x, z]) => {
+  return points.map(([x, z], i) => {
     const cx = x - ORIGIN_X;
     const cz = z - ORIGIN_Z;
     const hBand = ROAD_BANDS.find((b) => cz >= b && cz < b + ROAD_W);
     const vBand = ROAD_BANDS.find((b) => cx >= b && cx < b + ROAD_W);
     if (hBand != null && vBand != null) return [x, z]; // junction box
-    if (hBand != null) return [x, ORIGIN_Z + (cz < hBand + 3 ? hBand + 1.5 : hBand + 4.5)];
-    if (vBand != null) return [ORIGIN_X + (cx < vBand + 3 ? vBand + 1.5 : vBand + 4.5), z];
+    // The HALF comes from the DIRECTION OF TRAVEL (right-hand rule), not
+    // from whichever column A* wandered through: the crosswalk bands are
+    // flow-neutral, so junction exits could legally drift across the
+    // oncoming half for a few cells — and a position-based snap pinned
+    // those points to the WRONG lane line (the |Vxx^| swerves). Deriving
+    // the side from travel direction makes the correct line structural.
+    const prev = points[Math.max(0, i - 1)];
+    const next = points[Math.min(points.length - 1, i + 1)];
+    if (hBand != null) {
+      const dirX = next[0] - prev[0];
+      const east = Math.abs(dirX) > 0.05 ? dirX > 0 : cz >= hBand + 3;
+      return [x, ORIGIN_Z + (east ? hBand + 4.5 : hBand + 1.5)];
+    }
+    if (vBand != null) {
+      const dirZ = next[1] - prev[1];
+      const south = Math.abs(dirZ) > 0.05 ? dirZ > 0 : cx < vBand + 3;
+      return [ORIGIN_X + (south ? vBand + 1.5 : vBand + 4.5), z];
+    }
     return [x, z];
   });
 }
