@@ -24,7 +24,7 @@
 //
 // Ship: ./scripts/ship pathing_lab      Dev: ./scripts/dev pathing_lab
 
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Row, Pressable, Text, Scene3D } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { OrbitCamera, Orbit, solveCamera, unprojectGround } from '@reactjit/cameras';
@@ -38,6 +38,7 @@ import { generateFace, hedDepthGrid } from '../head_lab/hed';
 import { buildPartRender, CharacterCaptures, FigureMeshes, type PartRender } from '../head_lab/figureRender';
 import { CarMeshes } from '../ragdoll_lab/car';
 import { TILE_KINDS, tileKindDefinition, type TileKind } from '../hmsc/world/tileKinds';
+import { TRAFFIC_SIGNAL_CYCLE, trafficClockSeconds } from '../hmsc/world/traffic';
 import {
   publishPathGrid, setPathProfile, findPath, fillPathRect, pathDisrupted, pathGeneration,
   type Path, type PathPoint,
@@ -84,6 +85,66 @@ const WALL_RECTS: [number, number, number, number][] = [
   [3, 37, 5, 4], [16, 36, 4, 5], [25, 37, 5, 4], [37, 37, 4, 4],
   [18, 25, 4, 4],
 ];
+
+// ── junctions + signals — hmsc's traffic clock, the lab's junction boxes ────
+// The four places the road bands cross. Lights run hmsc's TRAFFIC_SIGNAL_CYCLE
+// off the same steady clock the hmsc lamps glow on: axis 0 (N-S travel) and
+// axis 1 (E-W) alternate by a half period, exactly like world/traffic.ts'
+// signalPhaseOffsetSeconds.
+type Junction = { x0: number; z0: number; x1: number; z1: number };
+const JUNCTIONS: Junction[] = ROAD_BANDS.flatMap((bx) => ROAD_BANDS.map((bz) => ({
+  x0: ORIGIN_X + bx * CELL,
+  z0: ORIGIN_Z + bz * CELL,
+  x1: ORIGIN_X + (bx + 2) * CELL,
+  z1: ORIGIN_Z + (bz + 2) * CELL,
+})));
+
+type SignalPhase = 'go' | 'caution' | 'stop';
+function axisPhase(axis: 0 | 1, t: number): SignalPhase {
+  const c = TRAFFIC_SIGNAL_CYCLE;
+  const tt = (((t + (axis * c.periodSeconds) / 2) % c.periodSeconds) + c.periodSeconds) % c.periodSeconds;
+  if (tt < c.goSeconds) return 'go';
+  if (tt < c.goSeconds + c.cautionSeconds) return 'caution';
+  return 'stop';
+}
+
+const LAMP_COLOR: Record<SignalPhase, string> = { go: '#22c55e', caution: '#f59e0b', stop: '#ef4444' };
+const LAMP_OFF = '#1d222b';
+const LAMP_PARAMS = { width: 0.2, height: 0.18, depth: 0.2 };
+const HOUSING_PARAMS = { width: 0.26, height: 0.72, depth: 0.26 };
+const POLE_PARAMS = { radius: 0.06, height: 2.3, segments: 8 };
+
+// One pole per junction carrying two 3-lamp heads — one per axis. The lamps
+// are live phase readouts, the same value the cars' yield check reads.
+function TrafficLights(props: { clock: number }) {
+  const phases: [SignalPhase, SignalPhase] = [axisPhase(0, props.clock), axisPhase(1, props.clock)];
+  return (
+    <>
+      {JUNCTIONS.map((j, i) => {
+        const px = j.x1 + 0.55;
+        const pz = j.z1 + 0.55;
+        return (
+          <Fragment key={`tl${i}`}>
+            <Scene3D.Mesh geometry={Geometry.Cylinder} params={POLE_PARAMS} material="#2a2f3a" position={[px, 1.15, pz]} />
+            {([0, 1] as const).map((axis) => {
+              const ph = phases[axis];
+              const ox = axis === 1 ? -0.3 : 0;
+              const oz = axis === 0 ? -0.3 : 0;
+              return (
+                <Fragment key={`h${axis}`}>
+                  <Scene3D.Mesh geometry={Geometry.Box} params={HOUSING_PARAMS} material="#171b22" position={[px + ox, 2.0, pz + oz]} />
+                  <Scene3D.Mesh geometry={Geometry.Box} params={LAMP_PARAMS} material={ph === 'stop' ? LAMP_COLOR.stop : LAMP_OFF} position={[px + ox, 2.22, pz + oz]} />
+                  <Scene3D.Mesh geometry={Geometry.Box} params={LAMP_PARAMS} material={ph === 'caution' ? LAMP_COLOR.caution : LAMP_OFF} position={[px + ox, 2.0, pz + oz]} />
+                  <Scene3D.Mesh geometry={Geometry.Box} params={LAMP_PARAMS} material={ph === 'go' ? LAMP_COLOR.go : LAMP_OFF} position={[px + ox, 1.78, pz + oz]} />
+                </Fragment>
+              );
+            })}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
 
 function seededRandom(seed: number): () => number {
   let t = seed >>> 0;
@@ -229,6 +290,7 @@ type Ped = {
 
 type Car = {
   x: number; z: number; yawDeg: number; cruise: number; tone: string;
+  speed: number; // live, eased toward the current limit (yields brake it)
   path: Path | null; nextIdx: number; goal: PathPoint | null;
 };
 
@@ -268,6 +330,7 @@ export default function PathingLab() {
   const [pedCount, setPedCount] = useState(3);
   const [showPaths, setShowPaths] = useState(true);
   const [paused, setPaused] = useState(false);
+  const [reckless, setReckless] = useState(false);
 
   const world = useMemo(() => buildWorld(), []);
   const characters = useMemo(() => {
@@ -278,8 +341,8 @@ export default function PathingLab() {
   }, []);
 
   const simRef = useRef<Sim>({ cars: [], peds: [], barriers: [], lastGen: 0, repaths: 0, hits: 0, animSeconds: 0, log: [] });
-  const uiRef = useRef({ carCount, pedCount, paused });
-  useEffect(() => { uiRef.current = { carCount, pedCount, paused }; }, [carCount, pedCount, paused]);
+  const uiRef = useRef({ carCount, pedCount, paused, reckless });
+  useEffect(() => { uiRef.current = { carCount, pedCount, paused, reckless }; }, [carCount, pedCount, paused, reckless]);
   const orbitRef = useRef<{ x: number; y: number; moved: number } | null>(null);
   const sceneRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const camRef = useRef({ yaw, pitch, dist });
@@ -329,7 +392,7 @@ export default function PathingLab() {
       while (s.cars.length < ui.carCount) {
         const [cx, cz] = world.roadCells[Math.floor(rand() * world.roadCells.length)];
         const [x, z] = cellCenter(cx, cz);
-        s.cars.push({ x, z, yawDeg: Math.floor(rand() * 4) * 90, cruise: 5 + rand() * 2.5, tone: CAR_TONES[s.cars.length % CAR_TONES.length], path: null, nextIdx: 0, goal: null });
+        s.cars.push({ x, z, yawDeg: Math.floor(rand() * 4) * 90, cruise: 5 + rand() * 2.5, speed: 0, tone: CAR_TONES[s.cars.length % CAR_TONES.length], path: null, nextIdx: 0, goal: null });
       }
       if (s.cars.length > ui.carCount) s.cars.length = ui.carCount;
       while (s.peds.length < ui.pedCount) {
@@ -357,6 +420,7 @@ export default function PathingLab() {
         }
 
         // cars
+        const clock = trafficClockSeconds();
         for (const car of s.cars) {
           if (!car.path) {
             car.goal = pickGoal(world.roadCells, car.x, car.z);
@@ -374,32 +438,89 @@ export default function PathingLab() {
           const desired = Math.atan2(dx, dz) * DEG;
           const err = wrap180(desired - car.yawDeg);
           car.yawDeg += Math.max(-240 * dt, Math.min(240 * dt, err));
-          const speed = car.cruise * (Math.abs(err) > 35 ? 0.38 : 1);
-          car.x += Math.sin(car.yawDeg * RAD) * speed * dt;
-          car.z += Math.cos(car.yawDeg * RAD) * speed * dt;
+          const fx = Math.sin(car.yawDeg * RAD);
+          const fz = Math.cos(car.yawDeg * RAD);
 
-          // clip a pedestrian → hand the body to the ragdoll
-          for (const ped of s.peds) {
-            if (ped.mode !== 'walk') continue;
-            if (Math.hypot(ped.x - car.x, ped.z - car.z) > 1.25) continue;
-            const local = buildSkeleton('neutral', 'walk', ped.gait % 1);
-            const bones = placeBones(local, ped.yawDeg + 180, ped.x, ped.z);
-            ped.ragdoll = createRagdoll(bones);
-            ped.mode = 'ragdoll';
-            ped.settleTicks = 0;
-            ped.path = null;
-            const fx = Math.sin(car.yawDeg * RAD);
-            const fz = Math.cos(car.yawDeg * RAD);
-            const kick: JointId[] = ['pelvis', 'chest', 'head', 'lHip', 'rHip'];
-            for (const j of kick) {
-              ragdollImpulse(ped.ragdoll, j, [
-                fx * speed * (1.1 + rand() * 0.4),
-                2.4 + speed * 0.25 * (0.6 + rand() * 0.5),
-                fz * speed * (1.1 + rand() * 0.4),
-              ], dt);
+          // ── the driver: speed limit = min of every yield reason ─────────
+          let limit = car.cruise * (Math.abs(err) > 35 ? 0.38 : 1);
+
+          // pedestrians in the corridor ahead → brake to a stop short of them
+          if (!ui.reckless) {
+            for (const ped of s.peds) {
+              if (ped.mode === 'ragdoll') continue;
+              const rx = ped.x - car.x;
+              const rz = ped.z - car.z;
+              const ahead = rx * fx + rz * fz;
+              const lateral = Math.abs(rx * fz - rz * fx);
+              if (ahead > 0 && ahead < 4.6 && lateral < 1.35) {
+                limit = Math.min(limit, Math.max(0, (ahead - 1.5) * 1.8));
+              }
             }
-            s.hits += 1;
-            logLine(s, `pedestrian clipped at ${Math.round(speed * 3.6)} km/h — ragdoll`);
+          }
+          // car ahead in lane → follow, don't rear-end the red-light queue
+          for (const other of s.cars) {
+            if (other === car) continue;
+            const rx = other.x - car.x;
+            const rz = other.z - car.z;
+            const ahead = rx * fx + rz * fz;
+            const lateral = Math.abs(rx * fz - rz * fx);
+            if (ahead > 0 && ahead < 4.6 && lateral < 1.2) {
+              limit = Math.min(limit, Math.max(0, (ahead - 2.9) * 2.0));
+            }
+          }
+          // signals: approaching a junction box on a non-go phase → stop at
+          // the line; already inside → commit and clear the box
+          const axis: 0 | 1 = Math.abs(fx) > Math.abs(fz) ? 1 : 0;
+          const phase = axisPhase(axis, clock);
+          if (phase !== 'go') {
+            for (const j of JUNCTIONS) {
+              const inside = car.x > j.x0 - 0.3 && car.x < j.x1 + 0.3 && car.z > j.z0 - 0.3 && car.z < j.z1 + 0.3;
+              if (inside) continue;
+              let enter: number | null = null;
+              if (axis === 1) {
+                const dir = fx > 0 ? 1 : -1;
+                const dd = ((dir > 0 ? j.x0 : j.x1) - car.x) * dir;
+                if (dd >= -0.1 && dd < 3.6 && car.z > j.z0 - 0.7 && car.z < j.z1 + 0.7) enter = dd;
+              } else {
+                const dir = fz > 0 ? 1 : -1;
+                const dd = ((dir > 0 ? j.z0 : j.z1) - car.z) * dir;
+                if (dd >= -0.1 && dd < 3.6 && car.x > j.x0 - 0.7 && car.x < j.x1 + 0.7) enter = dd;
+              }
+              if (enter == null) continue;
+              if (phase === 'caution' && enter < 1.2) continue; // too late — roll through
+              limit = Math.min(limit, Math.max(0, (enter - 0.9) * 2.2));
+            }
+          }
+
+          // ease toward the limit: gentle throttle, hard brakes
+          const rate = limit > car.speed ? 3.2 : 9.5;
+          car.speed += Math.max(-rate * dt, Math.min(rate * dt, limit - car.speed));
+          car.x += fx * car.speed * dt;
+          car.z += fz * car.speed * dt;
+
+          // clip a pedestrian → hand the body to the ragdoll. Speed-gated:
+          // a stopped bumper nudges nobody into orbit.
+          if (car.speed > 2.5) {
+            for (const ped of s.peds) {
+              if (ped.mode !== 'walk') continue;
+              if (Math.hypot(ped.x - car.x, ped.z - car.z) > 1.25) continue;
+              const local = buildSkeleton('neutral', 'walk', ped.gait % 1);
+              const bones = placeBones(local, ped.yawDeg + 180, ped.x, ped.z);
+              ped.ragdoll = createRagdoll(bones);
+              ped.mode = 'ragdoll';
+              ped.settleTicks = 0;
+              ped.path = null;
+              const kick: JointId[] = ['pelvis', 'chest', 'head', 'lHip', 'rHip'];
+              for (const j of kick) {
+                ragdollImpulse(ped.ragdoll, j, [
+                  fx * car.speed * (1.1 + rand() * 0.4),
+                  2.4 + car.speed * 0.25 * (0.6 + rand() * 0.5),
+                  fz * car.speed * (1.1 + rand() * 0.4),
+                ], dt);
+              }
+              s.hits += 1;
+              logLine(s, `pedestrian clipped at ${Math.round(car.speed * 3.6)} km/h — ragdoll`);
+            }
           }
         }
 
@@ -552,6 +673,9 @@ export default function PathingLab() {
           <Pressable onPress={() => setPaused((v) => !v)} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: paused ? WARN : '#22324a', backgroundColor: '#101a2a' }}>
             <Text fontSize={12} color={paused ? WARN : DIM}>{paused ? 'paused' : 'pause'}</Text>
           </Pressable>
+          <Pressable onPress={() => setReckless((v) => !v)} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 5, borderWidth: 1, borderColor: reckless ? BAD : '#22324a', backgroundColor: reckless ? '#2a0f12' : '#101a2a' }}>
+            <Text fontSize={12} color={reckless ? BAD : DIM}>reckless drivers</Text>
+          </Pressable>
           <Pressable
             onPress={() => {
               const sim = simRef.current;
@@ -577,6 +701,7 @@ export default function PathingLab() {
         <Box style={{ flexGrow: 1 }} />
         <Text fontSize={10} color={DIM}>profiles: walkCost/vehicleCost straight from hmsc tileKinds</Text>
         <Text fontSize={10} color={DIM}>lane offset: drivers keep travel-right, walkers hug the edge</Text>
+        <Text fontSize={10} color={DIM}>drivers brake for walkers, queue behind cars, stop on red (hmsc signal clock) — toggle reckless for the old chaos</Text>
       </Col>
 
       {/* ── right: the world ── */}
@@ -595,6 +720,9 @@ export default function PathingLab() {
           <Scene3D.DirectionalLight direction={[0.45, 0.85, 0.3]} color="#fff2d8" intensity={0.85} />
 
           <WorldMeshes strips={world.strips} bushes={world.bushes} wallCells={world.wallCells} />
+
+          {/* stop lights — hmsc's signal clock, live phase per axis */}
+          <TrafficLights clock={trafficClockSeconds()} />
 
           {/* barriers — orange roadworks blocks at patched cells */}
           {s.barriers.map((b, i) => {
