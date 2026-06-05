@@ -43,15 +43,10 @@ export { sway, shake } from './modifiers';
 export { unprojectGround } from './unproject';
 
 // ── The spine: resolve a rig + params (+ modifiers) to a Solved ──────────────
-
-// Pure: spread params over the rig's defaults, solve, then fold the modifier
-// stack in order. Carts call this directly to get the Solved they feed to
-// unprojectGround for picking — the SAME value the matching <*Camera> renders.
-export function solveCamera(rig: CameraDef, params: any = {}, modifiers: Modifier[] = []): Solved {
-  let s = rig.solve({ ...rig.defaults, ...params });
-  for (const m of modifiers) s = m(s);
-  return s;
-}
+// Lives in ./solve.ts (a pure, React-free home) so game logic and headless
+// runs can solve cameras without JSX; re-exported here so carts never notice.
+export { solveCamera } from './solve';
+import { solveCamera } from './solve';
 
 // ── The generic component + named drop-ins ───────────────────────────────────
 
