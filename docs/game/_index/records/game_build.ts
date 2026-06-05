@@ -65,6 +65,16 @@ export const game_build: DocIndex = {
       dependsOn: ['GAME_WORLD', 'GAME_CAMERA'],
       status: 'live',
     },
+    {
+      name: 'GAME_BUILD.placed / PlacedBuildPiece',
+      purpose: ['world_gen', 'physics'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/build/placed.ts',
+      description:
+        'The grammar PLACED in the world (the Creative Build route lane): PlacedBuildPiece {id, pieceId, x/y/z world meters (x/z center, y base), yawDegrees, edit?} stored on the V20 world stream (ids minted by the materializer — replay-deterministic). Pure semantics over that data: placedPieceTags (the one catalog+edit composition), pieceBounds, raycastPieces (oriented-box crosshair targeting), placedPieceColliders (LIVE-PLAY adapter: effective-tag collision → CollisionRect/OrientedCollisionRect bands; a doorway splits into jambs around a walk/vehicle opening, halfHeight tops at low cover — NOT the bake, which consumes the full BakePromise later), placedPieceRamps (ramps/stairs as walkable host heightfields), stampPrefabPieces (rotation-aware stamping twin of decomposePrefab, same see-through law), prefabFromPieces/mintPrefabId (clone-from-world capture), validatePlacement (the strict authoring boundary). All numbers in PLACED_TUNING (P2).',
+      dependsOn: ['GAME_WORLD', 'GAME_PHYSICS'],
+      status: 'live',
+    },
   ],
   patterns: [
     {

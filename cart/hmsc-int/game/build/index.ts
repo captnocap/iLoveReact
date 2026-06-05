@@ -65,6 +65,28 @@ export {
 export type { BuildPrefabDef, DecomposedPiece, PrefabPiece } from './prefabs';
 
 export {
+  PLACED_TUNING,
+  placedPieceDef,
+  placedPieceTags,
+  placedPieceAcceptsEdits,
+  pieceBounds,
+  raycastPieces,
+  placedPieceColliders,
+  placedPieceRamps,
+  stampPrefabPieces,
+  mintPrefabId,
+  prefabFromPieces,
+  validatePlacement,
+} from './placed';
+export type {
+  PieceBounds,
+  PieceHit,
+  PieceRay,
+  PlacedBuildPiece,
+  PlacedPieceColliders,
+} from './placed';
+
+export {
   WORLD_MARKER_TYPES,
   ROOM_ROLES,
   INTEREST_POINT_ROLES,
@@ -123,6 +145,20 @@ import {
   validateMarkers,
   markersOfType,
 } from './markers';
+import {
+  PLACED_TUNING,
+  placedPieceDef,
+  placedPieceTags,
+  placedPieceAcceptsEdits,
+  pieceBounds,
+  raycastPieces,
+  placedPieceColliders,
+  placedPieceRamps,
+  stampPrefabPieces,
+  mintPrefabId,
+  prefabFromPieces,
+  validatePlacement,
+} from './placed';
 
 // The V14/V17 ground-floor handle: `import { GAME_BUILD } from '@game'`.
 export const GAME_BUILD = {
@@ -164,5 +200,22 @@ export const GAME_BUILD = {
     validate: validateMarker,
     validateSet: validateMarkers,
     ofType: markersOfType,
+  },
+  // The V24 grammar PLACED in the world (the Creative Build route's lane):
+  // pure semantics over the world stream's placed-piece records — the stream
+  // (GAME_WORLD.stream) stays the one source of truth for what stands.
+  placed: {
+    tuning: PLACED_TUNING,
+    def: placedPieceDef,
+    tags: placedPieceTags,
+    acceptsEdits: placedPieceAcceptsEdits,
+    bounds: pieceBounds,
+    raycast: raycastPieces,
+    colliders: placedPieceColliders,
+    ramps: placedPieceRamps,
+    stamp: stampPrefabPieces,
+    mintPrefabId,
+    prefabFromPieces,
+    validatePlacement,
   },
 } as const;

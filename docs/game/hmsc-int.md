@@ -401,6 +401,23 @@ VIEWS honored: nothing in the tables assumes a camera/interaction mode.
 `game/build/CAPTURE.md`. The Build/Plan mode EDITORS and the bake emission
 are later consumers of this same door.
 
+**The PLACED family (`placed.ts`, added with the `/build` route 2026-06-04):**
+`PlacedBuildPiece` is the grammar standing IN the world — stored on the V20
+world stream (`piecePlaced`/`pieceRemoved`/`pieceEditSet`/`prefabDefined`/
+`prefabStamped` joined `worldStream` by ADDITION; ids minted by the
+materializer as `bp_<seq>` so replay reproduces them; a prefab stamp is ONE
+event landing as its semantic pieces — the see-through law). Pure semantics
+over that data behind `GAME_BUILD.placed`: effective tags (the one
+catalog+edit composition), bounds, oriented-box raycast (crosshair
+targeting), the LIVE-PLAY collider adapter (doorways split into jambs around
+a walk/vehicle opening, halfHeight tops at low cover, ramps/stairs bake
+walkable host heightfields — explicitly NOT the compile bake, which consumes
+the full BakePromise later), rotation-aware prefab stamping
+(`stampPrefabPieces`, decomposePrefab's stamping twin), clone-from-world
+capture (`prefabFromPieces`/`mintPrefabId`), and the strict authoring
+boundary (`validatePlacement` — the stream materializer stays tolerant).
+Numbers in `PLACED_TUNING` (P2). 21 P4 meaning-tests green (`placed.test.ts`).
+
 ## editors/vehicles/ — the vehicle editor route (editors wave, 2026-06-04)
 
 `cart/vehicle_lab`'s authoring UI REMADE ENTIRELY as the `/vehicles` route in

@@ -58,8 +58,8 @@ export type { CommandOutcome, CommandRegistry, CommandSpec, ScriptResult } from 
 
 // The world grid substrate (V4 capture — landed behind ./world but the door
 // line was missing; consumers were reaching it only via GAME_COMMANDS' ctx).
-export { GAME_WORLD } from './world';
-export type { GridCell, LandformPlacement, PlacedCell, WorldGridState, WorldSurfaceRegion } from './world';
+export { GAME_WORLD, worldStream } from './world';
+export type { GridCell, LandformPlacement, PiecePlacement, PlacedCell, WorldEvent, WorldGridState, WorldStreamState, WorldSurfaceRegion } from './world';
 
 // The V24 building piece grammar: piece kinds + bake contracts, the WallEdit
 // vocabulary, the catalog (P2), prefabs (decompose to semantic pieces), and
@@ -77,6 +77,10 @@ export type {
   BuildSnapMode,
   BuildTheme,
   DecomposedPiece,
+  PieceBounds,
+  PieceHit,
+  PieceRay,
+  PlacedBuildPiece,
   PrefabPiece,
   WallEdit,
   WorldMarker,

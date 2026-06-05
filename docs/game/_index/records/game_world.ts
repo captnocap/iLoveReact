@@ -60,7 +60,7 @@ export const game_world: DocIndex = {
       kind: 'data_model',
       sourceFile: 'cart/hmsc-int/game/world/stream.ts',
       description:
-        'The V20 world concern in ONE registration: grid edits as events (cellPlaced/cellRemoved/regionFilled/triggerSet/landformPlaced/landformRemoved/respawnArmed) folding into the WorldGridState snapshot the game loads; unknown future kinds pass through untouched (schema evolution by addition).',
+        'The V20 world concern in ONE registration: grid edits as events (cellPlaced/cellRemoved/regionFilled/triggerSet/landformPlaced/landformRemoved/respawnArmed) folding into the WorldGridState snapshot the game loads; unknown future kinds pass through untouched (schema evolution by addition). The V24 placed-piece family joined BY ADDITION (the Creative Build route): piecePlaced/pieceRemoved/pieceEditSet/prefabDefined/prefabStamped fold into `pieces` (THE placed-piece truth; ids minted by the materializer as bp_<seq> so replay reproduces them) and `prefabs` (world-saved clone-from-world definitions). A prefab stamp is ONE event landing as its semantic pieces (the see-through law); the materializer is tolerant, the authoring boundary (validatePlacement) is strict.',
       status: 'live',
     },
   ],

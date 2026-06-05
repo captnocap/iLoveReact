@@ -126,7 +126,7 @@ export type { RespawnPoint, SaveStepResult, TriggerStepResult } from './spawn';
 export { authoredWorldFromRecord, AUTHORED_WORLD_STORE, loadAuthoredWorld, readAuthoredWorldRaw } from './authored';
 export type { AuthoredWorld } from './authored';
 export { worldStream } from './stream';
-export type { WorldEvent, WorldStreamState } from './stream';
+export type { PiecePlacement, WorldEvent, WorldStreamState } from './stream';
 
 // The V14/V17 ground-floor handle. One object, the whole substrate.
 export const GAME_WORLD = Object.freeze({

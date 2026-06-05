@@ -1,0 +1,247 @@
+// game/build placed-piece behavior tests (P4) — MEANING tests for the V24
+// grammar standing in the world: a placed doorway admits a body through its
+// collision, a halfHeight wall is waist-high to the physics, a ramp is a
+// walkable slope, a prefab stamp IS its semantic pieces with deterministic
+// replay ids, clone-from-world round-trips. Never function-name assertions.
+
+import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
+import {
+  PLACED_TUNING,
+  pieceBounds,
+  placedPieceColliders,
+  placedPieceRamps,
+  placedPieceTags,
+  prefabFromPieces,
+  mintPrefabId,
+  raycastPieces,
+  stampPrefabPieces,
+  validatePlacement,
+  type PlacedBuildPiece,
+} from './placed';
+import { catalogEntry } from './catalog';
+import { decomposePrefab, prefabDefinition, validatePrefab } from './prefabs';
+import { worldStream, type WorldEvent, type WorldStreamState } from '../world/stream';
+
+let nextId = 0;
+function placed(pieceId: string, x: number, z: number, over: Partial<PlacedBuildPiece> = {}): PlacedBuildPiece {
+  nextId += 1;
+  return { id: `t_${nextId}`, pieceId, x, y: 0, z, yawDegrees: 0, ...over };
+}
+
+function fold(events: WorldEvent[]): WorldStreamState {
+  let state = worldStream.initial();
+  for (const event of events) state = worldStream.apply(state, event);
+  return state;
+}
+
+// ── placed semantics ─────────────────────────────────────────────────────────
+
+test('a placed door wall means portal: effective tags compose on the placement', () => {
+  const wall = placed('wall.concrete.common', 0, 0, { edit: 'door' });
+  assert(placedPieceTags(wall).portal, 'the placed doorway connects rooms');
+  assert(!placedPieceTags(placed('wall.concrete.common', 0, 0)).portal, 'the uncut placement does not');
+});
+
+test('a quarter turn swaps the footprint: the wall stands across the other axis', () => {
+  const flat = pieceBounds(placed('wall.concrete.common', 10, 10));
+  const turned = pieceBounds(placed('wall.concrete.common', 10, 10, { yawDegrees: 90 }));
+  const size = catalogEntry('wall.concrete.common').size;
+  assertClose(flat.maxX - flat.minX, size.widthMeters, 1e-9, 'unturned width spans x');
+  assertClose(flat.maxZ - flat.minZ, size.depthMeters, 1e-9, 'unturned depth spans z');
+  assertClose(turned.maxX - turned.minX, size.depthMeters, 1e-9, 'turned: depth spans x');
+  assertClose(turned.maxZ - turned.minZ, size.widthMeters, 1e-9, 'turned: width spans z');
+});
+
+// ── embodied colliders ───────────────────────────────────────────────────────
+
+test('a solid wall is one solid band; a doorway splits it so a body fits through', () => {
+  const solid = placedPieceColliders([placed('wall.concrete.common', 0, 0)]);
+  assertEqual(solid.rects.length, 1, 'the uncut wall is one band');
+
+  const door = placedPieceColliders([placed('wall.concrete.common', 0, 0, { edit: 'door' })]);
+  assertEqual(door.rects.length, 2, 'the doorway leaves the two jambs');
+  const [left, right] = [...door.rects].sort((a, b) => a.minX - b.minX);
+  const gap = right.minX - left.maxX;
+  assertClose(gap, PLACED_TUNING.walkOpeningWidthMeters, 1e-9, 'the opening is the walk-portal width');
+});
+
+test('a garage door opens a vehicle-wide gap', () => {
+  const garage = placedPieceColliders([placed('wall.metal.industrial', 0, 0, { edit: 'garageDoor' })]);
+  const [left, right] = [...garage.rects].sort((a, b) => a.minX - b.minX);
+  assertClose(right.minX - left.maxX, PLACED_TUNING.vehicleOpeningWidthMeters, 1e-9, 'a car fits');
+});
+
+test('a halfHeight wall collides waist-high, not full-height', () => {
+  const wall = placed('wall.concrete.common', 0, 0, { edit: 'halfHeight' });
+  const { rects } = placedPieceColliders([wall]);
+  assertEqual(rects.length, 1, 'one low band');
+  assertClose(rects[0].topMeters, PLACED_TUNING.halfHeightTopMeters, 1e-9, 'tops out at low cover');
+  const full = placedPieceColliders([placed('wall.concrete.common', 0, 0)]).rects[0];
+  assert(rects[0].topMeters < full.topMeters, 'lower than the solid wall');
+});
+
+test('a window keeps its collision mass (sightline, never a corridor)', () => {
+  const { rects } = placedPieceColliders([placed('wall.concrete.common', 0, 0, { edit: 'window' })]);
+  assertEqual(rects.length, 1, 'the pane still blocks the body');
+});
+
+test('no-collision pieces contribute nothing solid', () => {
+  const { rects, orientedRects } = placedPieceColliders([
+    placed('prop.bush', 0, 0),
+    placed('trim.cornice.downtown', 5, 5),
+  ]);
+  assertEqual(rects.length + orientedRects.length, 0, 'bush and trim have no collision mass');
+});
+
+test('a turned wall blocks across the other axis (quarter turns stay plain rects)', () => {
+  const { rects, orientedRects } = placedPieceColliders([placed('wall.concrete.common', 0, 0, { yawDegrees: 90 })]);
+  assertEqual(orientedRects.length, 0, 'quarter turn needs no oriented frame');
+  assertEqual(rects.length, 1, 'one band');
+  const size = catalogEntry('wall.concrete.common').size;
+  assertClose(rects[0].maxZ - rects[0].minZ, size.widthMeters, 1e-9, 'the wall now runs along z');
+});
+
+test('a free-angled piece lands in the oriented frame', () => {
+  const { rects, orientedRects } = placedPieceColliders([placed('wall.concrete.common', 0, 0, { yawDegrees: 30 })]);
+  assertEqual(rects.length, 0, 'no axis-aligned band');
+  assertEqual(orientedRects.length, 1, 'the band carries pivot + yaw');
+  assertClose(orientedRects[0].yawRadians, (30 * Math.PI) / 180, 1e-9, 'the host gets the turn');
+});
+
+test('a ramp is a walkable slope, never a wall: heightfield, no band', () => {
+  const ramp = placed('ramp.concrete.common', 6, 6);
+  assertEqual(placedPieceColliders([ramp]).rects.length, 0, 'no solid band');
+  const fields = placedPieceRamps([ramp], 3);
+  assertEqual(fields.length, 1, 'one slope');
+  assertEqual(fields[0].slot, 3, 'slots continue after the world terrain bake');
+  const heights = fields[0].heights;
+  assertClose(heights[0], 0, 1e-9, 'back edge at the base');
+  assertClose(heights[heights.length - 1], catalogEntry('ramp.concrete.common').size.heightMeters, 1e-9, 'front edge at the top — the ramp connects floors');
+  assert(fields[0].walkableSlopeCos <= PLACED_TUNING.rampWalkableSlopeCos, 'the slope is walkable');
+});
+
+// ── crosshair targeting ──────────────────────────────────────────────────────
+
+test('the crosshair ray hits the nearest piece face with its outward normal', () => {
+  const near = placed('wall.concrete.common', 0, 0, { z: 5 });
+  const far = placed('wall.concrete.common', 0, 0, { z: 10 });
+  const hit = raycastPieces({ origin: { x: 0, y: 1.5, z: 0 }, dir: { x: 0, y: 0, z: 1 } }, [far, near], 50);
+  assert(!!hit, 'the ray lands');
+  assertEqual(hit!.piece.id, near.id, 'the nearer wall wins');
+  assertClose(hit!.point.z, 5 - catalogEntry('wall.concrete.common').size.depthMeters / 2, 1e-6, 'on the facing surface');
+  assertClose(hit!.normal.z, -1, 1e-6, 'the normal faces the viewer');
+});
+
+test('beyond reach is no target', () => {
+  const wall = placed('wall.concrete.common', 0, 0, { z: 30 });
+  const hit = raycastPieces({ origin: { x: 0, y: 1.5, z: 0 }, dir: { x: 0, y: 0, z: 1 } }, [wall], 10);
+  assertEqual(hit, null, 'out of build reach');
+});
+
+test('a turned piece is hit in its own frame, not its envelope', () => {
+  // wall turned 90°: thin in x, long in z — a ray skimming past its x edge misses
+  const wall = placed('wall.concrete.common', 0, 0, { z: 5, yawDegrees: 90 });
+  const skim = raycastPieces({ origin: { x: 1, y: 1.5, z: 0 }, dir: { x: 0, y: 0, z: 1 } }, [wall], 50);
+  assertEqual(skim, null, 'the envelope would have caught this; the true frame does not');
+  const dead = raycastPieces({ origin: { x: 0, y: 1.5, z: 0 }, dir: { x: 0, y: 0, z: 1 } }, [wall], 50);
+  assert(!!dead, 'dead-on still hits');
+});
+
+// ── prefab stamping + clone-from-world ───────────────────────────────────────
+
+test('a stamp at yaw 0 is exactly the decomposition placement', () => {
+  const prefab = prefabDefinition('prefab.motelRoom');
+  const origin = { x: 12, y: 0, z: 8 };
+  const stamped = stampPrefabPieces(prefab, origin, 0);
+  const decomposed = decomposePrefab(prefab, origin);
+  assertEqual(stamped.length, decomposed.length, 'same pieces');
+  for (let i = 0; i < stamped.length; i += 1) {
+    assertClose(stamped[i].x, decomposed[i].x, 1e-9, `piece ${i} x agrees`);
+    assertClose(stamped[i].z, decomposed[i].z, 1e-9, `piece ${i} z agrees`);
+    assertEqual(stamped[i].edit, decomposed[i].edit, `piece ${i} edit carries`);
+  }
+});
+
+test('a stamp turns as one composition: locals rotate, piece yaw composes', () => {
+  const prefab = prefabDefinition('prefab.motelRoom');
+  const stamped = stampPrefabPieces(prefab, { x: 0, y: 0, z: 0 }, 90);
+  // local (x:0,z:3) window wall under +90: x' = lz, z' = -lx → (3, 0)
+  const window = stamped.find((p) => p.edit === 'window')!;
+  assertClose(window.x, 3, 1e-9, 'the local offset rotated');
+  assertClose(window.z, 0, 1e-9, 'the local offset rotated');
+  assertEqual(window.yawDegrees, 90, 'piece yaw composed with the stamp yaw');
+});
+
+test('clone-from-world round-trips: capture a composition, stamp it back, identical pieces', () => {
+  const composition = [
+    placed('wall.stucco.motel', 4, 4, { edit: 'door' }),
+    placed('wall.stucco.motel', 4, 7, { yawDegrees: 90 }),
+    placed('floor.concrete.common', 5, 5),
+  ];
+  const prefab = prefabFromPieces(mintPrefabId('My Corner'), 'My Corner', 'motel', composition);
+  assertEqual(prefab.id, 'prefab.myCorner', 'the id follows the catalog convention');
+  assertEqual(validatePrefab(prefab).length, 0, 'the captured prefab validates');
+  const stamped = stampPrefabPieces(prefab, { x: 4, y: 0, z: 4 }, 0); // back at the captured origin
+  for (let i = 0; i < composition.length; i += 1) {
+    assertClose(stamped[i].x, composition[i].x, 1e-9, `piece ${i} returns to its spot (x)`);
+    assertClose(stamped[i].z, composition[i].z, 1e-9, `piece ${i} returns to its spot (z)`);
+    assertEqual(stamped[i].edit, composition[i].edit, `piece ${i} keeps its cutout — piece granularity survives cloning`);
+  }
+});
+
+// ── the world stream carries the pieces (one truth, deterministic replay) ────
+
+test('placement events materialize pieces with replay-deterministic ids', () => {
+  const events: WorldEvent[] = [
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0 } },
+    { kind: 'piecePlaced', placement: { pieceId: 'floor.concrete.common', x: 3, y: 0, z: 0, yawDegrees: 0 } },
+  ];
+  const once = fold(events);
+  const twice = fold(events);
+  assertEqual(once.pieces.length, 2, 'both placements stand');
+  assertEqual(once.pieces[0].id, 'bp_1', 'ids are minted in order');
+  assertEqual(twice.pieces[1].id, once.pieces[1].id, 'replaying the log reproduces identical ids');
+});
+
+test('a prefab stamp is ONE event that lands as its semantic pieces', () => {
+  const state = fold([{ kind: 'prefabStamped', prefabId: 'prefab.motelRoom', origin: { x: 10, y: 0, z: 10 }, yawDegrees: 0 }]);
+  const seedCount = prefabDefinition('prefab.motelRoom').pieces.length;
+  assertEqual(state.pieces.length, seedCount, 'the stamp decomposed — no opaque blob');
+  assert(state.pieces.some((p) => p.edit === 'door'), 'the cloned doorway is still a doorway');
+});
+
+test('a world-saved prefab joins the registry family and stamps by id', () => {
+  const def = prefabFromPieces('prefab.testHut', 'Test Hut', 'common', [
+    placed('wall.concrete.common', 0, 0),
+    placed('wall.concrete.common', 0, 3, { yawDegrees: 90 }),
+  ]);
+  const state = fold([
+    { kind: 'prefabDefined', def },
+    { kind: 'prefabStamped', prefabId: 'prefab.testHut', origin: { x: 20, y: 0, z: 20 }, yawDegrees: 0 },
+    { kind: 'prefabStamped', prefabId: 'prefab.testHut', origin: { x: 40, y: 0, z: 20 }, yawDegrees: 0 },
+  ]);
+  assert(!!state.prefabs['prefab.testHut'], 'the definition is world data now');
+  assertEqual(state.pieces.length, 4, 'each stamp landed its pieces');
+});
+
+test('instance edits stay piece-granular after a stamp; removal removes one piece', () => {
+  const state = fold([
+    { kind: 'prefabStamped', prefabId: 'prefab.motelRoom', origin: { x: 0, y: 0, z: 0 }, yawDegrees: 0 },
+    { kind: 'pieceEditSet', id: 'bp_2', edit: 'brokenWindow' },
+    { kind: 'pieceRemoved', id: 'bp_6' },
+  ]);
+  assertEqual(state.pieces.find((p) => p.id === 'bp_2')?.edit, 'brokenWindow', 'one piece of the clone re-edited');
+  assertEqual(state.pieces.length, prefabDefinition('prefab.motelRoom').pieces.length - 1, 'one piece of the clone removed');
+});
+
+test('the materializer is tolerant; the authoring boundary is strict', () => {
+  const state = fold([
+    { kind: 'piecePlaced', placement: { pieceId: 'wall.that.never.was', x: 0, y: 0, z: 0, yawDegrees: 0 } },
+    { kind: 'prefabStamped', prefabId: 'prefab.never', origin: { x: 0, y: 0, z: 0 }, yawDegrees: 0 },
+  ]);
+  assertEqual(state.pieces.length, 0, 'foreign noise places nothing and crashes nothing');
+  assert(validatePlacement({ pieceId: 'wall.that.never.was', x: 0, y: 0, z: 0, yawDegrees: 0 }).length > 0, 'the route-side validator names the problem before append');
+  assert(validatePlacement({ pieceId: 'floor.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'door' }).length > 0, 'edits on editless kinds are refused at the boundary');
+});
+
+finish('build-placed');
