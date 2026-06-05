@@ -31,7 +31,7 @@ Who simulates the game world's bodies?
 Consensus lean: D (it's what already ships), with honest renames either way.
 
 ANSWER: The correct answer isnt here really. C and A are both correct. if you look at the physics_lab this is correct for jumping and gravity and collisions but the ragdoll is also correct for its ragdoll nature and the hitboxes. the ragdoll doesnt have movement or jumping though, so it cant be called the approach, and the physics_lab has no rag doll or hitboxes with the player model we want so its not the correct approach either. but they both are. and then the bullet physics in the combat_lab are still undetermined at this time
-If D: keep Bullet dormant for a future revival, or delete the trio? ______
+If D: keep Bullet dormant for a future revival, or delete the trio? → R1
 
 ### Q2. Humanoid / player model
 One figure stack for every human in the game.
@@ -68,7 +68,7 @@ Consensus lean: A as the one true system; absorb C into it as a rig; delete B ho
 
 ANSWER: A but C revealed why A is shit i could barely hit head height before hitting a ceiling when aiming
 Q3b. Absorb the aim rig into the registry as `AimCamera`/Follow-with-aim? yes
-Q3c. Export the generic `screenRay` from the registry (kills 3 hand-rolled copies)? i think so? 
+Q3c. Export the generic `screenRay` from the registry (kills 3 hand-rolled copies)? i think so? → R7
 
 ### Q4. World substrate (how the game world is represented & rendered)
 - **A) hmsc's system** — tile-kind registries + StaticSurface-baked tile/facade
