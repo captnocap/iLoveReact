@@ -46,6 +46,9 @@ import { LabsRoute } from './shell/LabsRoute';
 import { LABS } from './labs';
 import { CharactersRoute } from './editors/characters/CharactersRoute';
 import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
+import { editorChannel } from './editors/store';
+import { editorSessions } from './editors/sessions';
+import { worldStream } from './game/world/stream';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -354,6 +357,23 @@ function EditorShell() {
   // have added/removed a map).
   useEffect(() => { if (menuOpen) setMaps(listMaps()); }, [menuOpen]);
 
+  // ── The / route's session on the world channel (editors/sessions.ts) ──────────
+  // The user's ruling made live on the MAIN authoring surface: this mount opens a
+  // session on the 'world' channel and every interaction below sprinkles one
+  // edit-commit. The MAP CONTENT still saves through the workspace session files
+  // (the save path above — untouched, zero risk to authored maps); these are
+  // marker-only commits (note()), so the route-scoped commit history exists TODAY
+  // and world content events join the same channel later by ADDITION (V20 schema
+  // evolution — nothing to migrate when the editor's world goes event-sourced).
+  const worldSession = useMemo(() => {
+    try {
+      return editorSessions().open('/', editorChannel(worldStream));
+    } catch {
+      return null; // no __fs_* host — authoring continues without the trace
+    }
+  }, []);
+  useEffect(() => () => worldSession?.close(), [worldSession]);
+
   // ── Event-log trace (the categorized eventbus shown in the ProjectBar popover) ──
   // A stream of WHAT happened (tile painted, object moved, camera moved, ...), not
   // autosave spam — the "saved" pill already shows save state.
@@ -361,12 +381,16 @@ function EditorShell() {
   // Seed from disk so the trace survives hot updates (it's the whole point of a
   // "history"). Written debounced below; never an input to any save → cannot loop.
   const [events, setEvents] = useState<EditEvent[]>(() => loadEvents());
+  // Every semantic interaction funnels through here (canvas strokes, placements,
+  // camera settles, map lifecycle) — exactly where the session's edit-commits get
+  // sprinkled. The label carries the map stem so a multi-map session reads right.
   const logEvent = useCallback((note: EditNote, t = Date.now()) => {
+    worldSession?.note(`${wsRef.current.stem}: ${note.cat}: ${note.text}`);
     setEvents((es) => {
       const next = [...es, { ...note, t }];
       return next.length > EVENTS_CAP ? next.slice(next.length - EVENTS_CAP) : next;
     });
-  }, []);
+  }, [worldSession]);
   // Debounced one-way writer: events change → write the file. Skips the first run
   // (the just-loaded value) so a mount doesn't rewrite identical content.
   const logWriteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
