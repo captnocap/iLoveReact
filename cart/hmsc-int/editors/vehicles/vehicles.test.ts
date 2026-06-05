@@ -12,7 +12,8 @@ import {
   editRole,
   editStyle,
   generateVehicle,
-  moveGasZ,
+  gasZKnobSpec,
+  setGasZ,
   nudgeDamage,
   repaint,
   repairAll,
@@ -59,19 +60,19 @@ test('a role switch coerces style into the role pool and repaints services', () 
   assertEqual(vanMedic.style, 'van', 'a style already in the pool is kept');
 });
 
-test('the gas knob steps by the tuned amount and clamps at the nudge range', () => {
+test('the gas-Z law: setGasZ clamps to the nudge range, the knob spec follows the style', () => {
   const doc: VehicleDoc = { ...civilianDoc(), style: 'sedan', gasZ: 0 };
-  const stepped = moveGasZ(doc, 1);
-  assertClose(stepped.gasZ, VEHICLE_EDITOR_TUNING.gasZ.step, 1e-9, 'one nudge is one step');
-  let walked = doc;
-  for (let i = 0; i < 40; i += 1) walked = moveGasZ(walked, 1);
   const sedanLength = GAME_VEHICLE.tables.styles.sedan.length;
-  assertClose(walked.gasZ, sedanLength * VEHICLE_EDITOR_TUNING.gasZ.nudge.maxLengthScale, 1e-9,
-    'walking the knob saturates at the nudge max');
-  let reversed = doc;
-  for (let i = 0; i < 40; i += 1) reversed = moveGasZ(reversed, -1);
-  assertClose(reversed.gasZ, sedanLength * VEHICLE_EDITOR_TUNING.gasZ.nudge.minLengthScale, 1e-9,
+  assertClose(setGasZ(doc, VEHICLE_EDITOR_TUNING.gasZ.step).gasZ, VEHICLE_EDITOR_TUNING.gasZ.step, 1e-9,
+    'an in-range value passes through');
+  assertClose(setGasZ(doc, 99).gasZ, sedanLength * VEHICLE_EDITOR_TUNING.gasZ.nudge.maxLengthScale, 1e-9,
+    'overshooting saturates at the nudge max');
+  assertClose(setGasZ(doc, -99).gasZ, sedanLength * VEHICLE_EDITOR_TUNING.gasZ.nudge.minLengthScale, 1e-9,
     'and at the nudge min the other way');
+  const spec = gasZKnobSpec('sedan');
+  assertClose(spec.min, sedanLength * VEHICLE_EDITOR_TUNING.gasZ.nudge.minLengthScale, 1e-9, 'spec min follows length');
+  assertClose(spec.max, sedanLength * VEHICLE_EDITOR_TUNING.gasZ.nudge.maxLengthScale, 1e-9, 'spec max follows length');
+  assertEqual(spec.step, VEHICLE_EDITOR_TUNING.gasZ.step, 'spec step is the tuned step');
   assertEqual(editGasSide(doc, 1).gasSide, 1, 'gas side flips to passenger');
   assertEqual(editGasSide(doc, -1).gasSide, -1, 'and back to driver');
 });
@@ -116,7 +117,7 @@ test('every edit step yields a doc the builder accepts (no editor-only fields)',
   let doc = generateVehicle(42);
   doc = editRole(doc, 'fire');
   doc = editStyle(doc, 'pickup');
-  doc = moveGasZ(doc, 1);
+  doc = setGasZ(doc, doc.gasZ + VEHICLE_EDITOR_TUNING.gasZ.step);
   doc = repaint(doc, 7);
   doc = wreck(doc, 7);
   const build = GAME_VEHICLE.build(doc, []);

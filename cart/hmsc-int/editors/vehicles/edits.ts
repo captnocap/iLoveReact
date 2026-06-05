@@ -91,17 +91,27 @@ export function editGasSide(doc: VehicleDoc, gasSide: -1 | 1): VehicleDoc {
   return { ...doc, gasSide };
 }
 
-/** Capability 6 — gas-Z knob nudge, clamped to the wider nudge range. */
-export function moveGasZ(doc: VehicleDoc, direction: -1 | 1): VehicleDoc {
+/** Capability 6 — set the gas-Z directly, clamped to the wider nudge range.
+ *  The UI knob (GAME_CHROME.Knob) owns stepping/rounding via its KnobSpec
+ *  built from VEHICLE_EDITOR_TUNING.gasZ; this step owns the clamp law. */
+export function setGasZ(doc: VehicleDoc, gasZ: number): VehicleDoc {
   const length = GAME_VEHICLE.tables.styles[doc.style].length;
   const range = VEHICLE_EDITOR_TUNING.gasZ.nudge;
   return {
     ...doc,
-    gasZ: clamp(
-      doc.gasZ + VEHICLE_EDITOR_TUNING.gasZ.step * direction,
-      length * range.minLengthScale,
-      length * range.maxLengthScale,
-    ),
+    gasZ: clamp(gasZ, length * range.minLengthScale, length * range.maxLengthScale),
+  };
+}
+
+/** Capability 6 — the knob spec for the active style (min/max follow length). */
+export function gasZKnobSpec(style: VehicleStyleId): { min: number; max: number; step: number; precision: number } {
+  const length = GAME_VEHICLE.tables.styles[style].length;
+  const range = VEHICLE_EDITOR_TUNING.gasZ.nudge;
+  return {
+    min: length * range.minLengthScale,
+    max: length * range.maxLengthScale,
+    step: VEHICLE_EDITOR_TUNING.gasZ.step,
+    precision: 2,
   };
 }
 

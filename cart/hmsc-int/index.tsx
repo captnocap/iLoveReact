@@ -45,6 +45,7 @@ import { VoxelHybridRoute } from './VoxelHybridRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { LABS } from './labs';
 import { CharactersRoute } from './editors/characters/CharactersRoute';
+import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -712,7 +713,7 @@ function EditorShell() {
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
+  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
@@ -738,6 +739,7 @@ function EditorShell() {
         onTest={() => nav.push('/test')}
         onLabs={() => nav.push('/labs')}
         onCharacters={() => nav.push('/characters')}
+        onVehicles={() => nav.push('/vehicles')}
         onVoxels={() => nav.push('/voxels')}
         onPerf={() => nav.push('/log')}
         onAssist={() => nav.push('/assist3d')}
@@ -818,6 +820,8 @@ function EditorShell() {
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
         {/* The characters editor (editors/characters/) — authors what game/figure runs. */}
         <Route path="/characters">{() => <CharactersRoute onExit={() => nav.push('/')} />}</Route>
+        {/* The vehicles editor (editors/vehicles/) — authors what game/vehicle builds. */}
+        <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} />}</Route>
       </Box>
 
       {/* The maps menu lives here — the shell root's LAST child — so it paints on
