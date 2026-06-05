@@ -95,14 +95,27 @@ const flags = [
   '--inject:' + ROOT + '/runtime/jsx_shim.ts',
   '--inject:' + ROOT + '/runtime/ambient.ts',
   '--inject:' + ROOT + '/runtime/ambient_primitives.ts',
+  // The game ground floor (V17): labs/editors write `import { GAME_* } from
+  // '@game'`. Mirrors cli/cart/bundle.ts — keep both alias blocks identical.
+  '--alias:@game=' + ROOT + '/cart/hmsc-int/game',
   '--alias:@reactjit/core=' + ROOT + '/runtime/core_stub.ts',
+  // Explicit subpath aliases mirroring cli/cart/bundle.ts. The load-bearing
+  // one is @reactjit/runtime: without it the catch-all below prefix-matches
+  // '@reactjit' and rewrites '@reactjit/runtime/router' to the nonexistent
+  // runtime/runtime/router — carts on the '@reactjit/runtime/X' form bundled
+  // fine under rjit ship but died here. Both forms are supported in BOTH
+  // bundlers now; effects/geometries/cameras are kept explicit for parity so
+  // drift between the two blocks stays visible.
+  '--alias:@reactjit/runtime=' + ROOT + '/runtime',
+  '--alias:@reactjit/effects=' + ROOT + '/runtime/effects',
+  '--alias:@reactjit/geometries=' + ROOT + '/runtime/geometries',
+  '--alias:@reactjit/cameras=' + ROOT + '/runtime/cameras',
   // @reactjit is the portable handle for cart code to import everything the SDK
   // exposes — primitives, hooks, classifiers, and the effects/geometries/cameras
   // registries. Physically the runtime/ dir: '@reactjit/primitives' → runtime/
-  // primitives, '@reactjit/effects' → runtime/effects, etc. Replaces the old
-  // '@reactjit/runtime/X' form and brittle '../runtime/X' relative paths.
-  // @reactjit/core stays an explicit longer-match override (→ core_stub, not
-  // runtime/core).
+  // primitives, '@reactjit/effects' → runtime/effects, etc. The explicit
+  // longer-match entries above override where needed (core → core_stub, not
+  // runtime/core; runtime → the runtime root).
   '--alias:@reactjit=' + ROOT + '/runtime',
   '--alias:@cart-entry=' + entryAbs,
   // Vendored npm deps under deps/. Replaces node_modules lookup so
