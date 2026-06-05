@@ -34,7 +34,7 @@ test('the door exports all 19 standard GAME_* names (V17)', () => {
 });
 
 test('live doors are live; capture-pending doors say so honestly', () => {
-  const live = [...SEALED_HERE, 'GAME_KINDS', 'GAME_CHANCE', 'GAME_PERCEPTION', 'GAME_ITEMS'];
+  const live = [...SEALED_HERE, 'GAME_KINDS', 'GAME_CHANCE', 'GAME_PERCEPTION', 'GAME_ITEMS', 'GAME_CHROME'];
   for (const name of live) {
     assert(!('status' in (door as any)[name]), `${name} must not claim capture-pending`);
   }
@@ -57,6 +57,8 @@ test('the live doors carry their interface, not a grab-bag', () => {
   assertEqual(typeof door.GAME_ANIMATION.sample, 'function', 'GAME_ANIMATION.sample');
   assertEqual(typeof (door as any).GAME_ITEMS.get, 'function', 'GAME_ITEMS.get');
   assertEqual((door as any).GAME_ITEMS.definitions.length, 19, 'GAME_ITEMS carries the 19-item registry');
+  assertEqual(typeof (door as any).GAME_CHROME.resolveLabEnvironment, 'function', 'GAME_CHROME.resolveLabEnvironment');
+  assertEqual(typeof (door as any).GAME_CHROME.Chip, 'function', 'GAME_CHROME.Chip');
 });
 
 finish('game/index');

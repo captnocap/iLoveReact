@@ -125,6 +125,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/chrome (GAME_CHROME — lab chrome kit + environment)',
+      purpose: ['ui', 'rendering', 'color', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/chrome/index.ts',
+      description:
+        'CHROME capture (2026-06-05): the lab chrome kit and lab environment REWRITTEN fresh from the addendum pointers (carve_lab + physics_lab for Chip/Knob/Meter/panel; skybox_demo + hmsc/render3d/sky.ts + planet_run for skybox/light rigs). Data first: CHROME_TOKENS, CHROME_LAYOUT, CHROME_KNOB_PRESETS, LAB_SKY_TUNING, LAB_ENVIRONMENT_PRESETS. Components: Chip, Knob, Meter, MeterRow, Panel, LabEnvironment. Pure P4 surfaces: resolveKnobValue/formatKnobValue, resolveMeter, resolvePanelLayout, buildLabSky, resolveLabEnvironment. Presets: studio, arena, day-cycle, hmsc-clear/hazy/cloudy/storm, night. CAPTURE.md records the dropped per-cart gameplay/ingest loops and the HMSC host-skybox-vs-flat-background ambiguity. 6 P4 tests; GAME_CHROME pending→live.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
       name: 'ProjectBar',
       purpose: ['ui', 'persistence'],
       kind: 'component',
