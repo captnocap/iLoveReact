@@ -11,6 +11,12 @@
 // re-materializes the snapshot the game/compile loads. View state (camera,
 // selection, playback) is transient by design; the CONTENT lives in data/.
 //
+// Session history (the user's ruling): the route opens a SESSION on the
+// vehicles channel (editors/sessions.ts) — every interaction is one LABELED
+// edit-commit on the one global chain, so "what did I do this session, on
+// this route" is answerable. The channel handle comes from editorChannel()
+// (the tool's ONE store; a private openStore here would fork the undo chain).
+//
 // Deletion contract: editors/vehicles/CAPTURE.md — when every inventory
 // capability is DONE there, the user deletes cart/vehicle_lab.
 
@@ -33,7 +39,9 @@ import {
   type VehiclesEvent,
   type VehiclesStreamState,
 } from '@game';
-import { openStore, type Store, type StreamHandle } from '../../data';
+import type { StreamHandle } from '../../data';
+import { editorChannel } from '../store';
+import { editorSessions, type RouteSession } from '../sessions';
 import {
   editGasSide,
   editRole,
@@ -49,7 +57,6 @@ import {
 } from './edits';
 
 const T = GAME_CHROME.tokens.color;
-const DATA_ROOT = 'cart/hmsc-int/data';
 
 // The editor's own view tuning (P2) — camera feel and playback cadence carried
 // from the reference lab; never gameplay numbers.
@@ -125,8 +132,8 @@ const VehicleMeshes = memo(function VehicleMeshes(props: {
 });
 
 type Garage = {
-  store: Store | null;
-  stream: StreamHandle<VehiclesStreamState, VehiclesEvent> | null;
+  channel: StreamHandle<VehiclesStreamState, VehiclesEvent> | null;
+  session: RouteSession<VehiclesEvent> | null;
   error: string | null;
 };
 
@@ -143,16 +150,19 @@ function freshSeed(): number {
 }
 
 export function VehiclesRoute(props: { onExit: () => void }) {
-  // ── the garage: the V20 'vehicles' stream, opened once per mount ─────────
+  // ── the garage: the 'vehicles' channel on the tool's ONE store, plus this
+  // route visit's session (one edit-commit per interaction) ────────────────
   const garage: Garage = useMemo(() => {
     try {
-      const store = openStore(DATA_ROOT);
-      return { store, stream: store.defineStream(vehiclesStream), error: null };
+      const channel = editorChannel(vehiclesStream);
+      return { channel, session: editorSessions().open('/vehicles', channel), error: null };
     } catch (error: any) {
-      return { store: null, stream: null, error: String(error?.message ?? error) };
+      return { channel: null, session: null, error: String(error?.message ?? error) };
     }
   }, []);
-  const [state, setState] = useState<VehiclesStreamState>(() => garage.stream ? garage.stream.state() : { vehicles: {}, order: [] });
+  // The session boundary: leaving the route records the close marker.
+  useEffect(() => () => garage.session?.close(), [garage]);
+  const [state, setState] = useState<VehiclesStreamState>(() => garage.channel ? garage.channel.state() : { vehicles: {}, order: [] });
   const [activeId, setActiveId] = useState<string | null>(() => state.order[state.order.length - 1] ?? null);
 
   // ── transient view state (never persisted — content lives in the stream) ──
@@ -175,18 +185,18 @@ export function VehiclesRoute(props: { onExit: () => void }) {
 
   const doc: VehicleDoc | null = activeId ? state.vehicles[activeId] ?? null : null;
 
-  // ── capability 13: every edit is one appended event + a fresh snapshot ────
-  const author = (id: string, next: VehicleDoc) => {
-    if (!garage.stream || !garage.store) return;
-    garage.stream.append({ kind: 'authored', id, doc: next });
-    garage.store.materializeSnapshots();
-    setState(garage.stream.state());
+  // ── capability 13: every edit is one LABELED session commit (content event
+  // on the vehicles channel + commit marker + fresh snapshots) ──────────────
+  const author = (id: string, next: VehicleDoc, label: string) => {
+    if (!garage.session || !garage.channel) return;
+    garage.session.commit({ kind: 'authored', id, doc: next }, `${id}: ${label}`);
+    setState(garage.channel.state());
   };
-  const apply = (next: VehicleDoc) => { if (activeId) author(activeId, next); };
+  const apply = (next: VehicleDoc, label: string) => { if (activeId) author(activeId, next, label); };
   const newVehicle = () => {
-    if (!garage.stream) return;
+    if (!garage.session) return;
     const id = freshId(state);
-    author(id, generateVehicle(freshSeed()));
+    author(id, generateVehicle(freshSeed()), 'authored');
     setActiveId(id);
     setSelected('gas_tank');
     setPose('parked');
@@ -194,10 +204,9 @@ export function VehiclesRoute(props: { onExit: () => void }) {
     setRunning(false);
   };
   const removeActive = () => {
-    if (!garage.stream || !garage.store || !activeId) return;
-    garage.stream.append({ kind: 'removed', id: activeId });
-    garage.store.materializeSnapshots();
-    const next = garage.stream.state();
+    if (!garage.session || !garage.channel || !activeId) return;
+    garage.session.commit({ kind: 'removed', id: activeId }, `${activeId}: deleted`);
+    const next = garage.channel.state();
     setState(next);
     setActiveId(next.order[next.order.length - 1] ?? null);
   };
@@ -270,14 +279,14 @@ export function VehiclesRoute(props: { onExit: () => void }) {
                 <Row style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Text fontSize={11} color={T.dim} style={{ width: 56 }}>style</Text>
                   {(Object.keys(tables.styles) as VehicleStyleId[]).map((id) => (
-                    <GAME_CHROME.Chip key={id} label={tables.styles[id].label} active={doc.style === id} color="good" onPress={() => apply(editStyle(doc, id))} />
+                    <GAME_CHROME.Chip key={id} label={tables.styles[id].label} active={doc.style === id} color="good" onPress={() => apply(editStyle(doc, id), `style → ${id}`)} />
                   ))}
                 </Row>
                 {/* capability 2 — role/service */}
                 <Row style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                   <Text fontSize={11} color={T.dim} style={{ width: 56 }}>service</Text>
                   {(Object.keys(tables.roles) as VehicleRoleId[]).map((id) => (
-                    <GAME_CHROME.Chip key={id} label={tables.roles[id].label} active={doc.role === id} color={id === 'police' ? 'accent' : id === 'medical' ? 'bad' : id === 'fire' ? 'warn' : 'dim'} onPress={() => apply(editRole(doc, id))} />
+                    <GAME_CHROME.Chip key={id} label={tables.roles[id].label} active={doc.role === id} color={id === 'police' ? 'accent' : id === 'medical' ? 'bad' : id === 'fire' ? 'warn' : 'dim'} onPress={() => apply(editRole(doc, id), `service → ${id}`)} />
                   ))}
                 </Row>
                 {/* capability 3 — motion poses + run */}
@@ -293,18 +302,18 @@ export function VehiclesRoute(props: { onExit: () => void }) {
                   <Text fontSize={11} color={T.dim} style={{ width: 56 }}>debug</Text>
                   <GAME_CHROME.Chip label="hitboxes" active={showHitboxes} color="accent" onPress={() => setShowHitboxes((v) => !v)} />
                   <GAME_CHROME.Chip label="anchors" active={showAnchors} color="good" onPress={() => setShowAnchors((v) => !v)} />
-                  <GAME_CHROME.Chip label="reroll" color="#a78bfa" onPress={() => apply(generateVehicle(freshSeed()))} />
-                  <GAME_CHROME.Chip label="paint" color={doc.color} onPress={() => apply(repaint(doc, freshSeed()))} />
+                  <GAME_CHROME.Chip label="reroll" color="#a78bfa" onPress={() => apply(generateVehicle(freshSeed()), 'reroll')} />
+                  <GAME_CHROME.Chip label="paint" color={doc.color} onPress={() => apply(repaint(doc, freshSeed()), 'repaint')} />
                 </Row>
 
                 {/* capability 6 — gas tank placement */}
                 <Col style={{ gap: 6, paddingTop: 4 }}>
                   <Text fontSize={11} color={T.dim}>gas tank placement</Text>
                   <Row style={{ gap: 6, flexWrap: 'wrap' }}>
-                    <GAME_CHROME.Chip label="driver side" active={doc.gasSide < 0} color="#eab308" onPress={() => apply(editGasSide(doc, -1))} />
-                    <GAME_CHROME.Chip label="passenger side" active={doc.gasSide > 0} color="#eab308" onPress={() => apply(editGasSide(doc, 1))} />
+                    <GAME_CHROME.Chip label="driver side" active={doc.gasSide < 0} color="#eab308" onPress={() => apply(editGasSide(doc, -1), 'gas → driver side')} />
+                    <GAME_CHROME.Chip label="passenger side" active={doc.gasSide > 0} color="#eab308" onPress={() => apply(editGasSide(doc, 1), 'gas → passenger side')} />
                   </Row>
-                  <GAME_CHROME.Knob label="gas z" value={doc.gasZ} spec={gasZKnobSpec(doc.style)} onChange={(v) => apply(setGasZ(doc, v))} />
+                  <GAME_CHROME.Knob label="gas z" value={doc.gasZ} spec={gasZKnobSpec(doc.style)} onChange={(v) => apply(setGasZ(doc, v), `gas z → ${v.toFixed(2)}`)} />
                 </Col>
 
                 {/* capability 7 — hitbox group selection */}
@@ -322,13 +331,13 @@ export function VehiclesRoute(props: { onExit: () => void }) {
                 <Col style={{ gap: 6, paddingTop: 4 }}>
                   <Text fontSize={11} color={T.dim}>damage state</Text>
                   <Row style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-                    <GAME_CHROME.Chip label="repair" color="good" onPress={() => selected ? apply(setPartDamage(doc, selected, 0)) : apply(repairAll(doc))} />
-                    <GAME_CHROME.Chip label="damage" color="#fb7185" onPress={() => selected ? apply(nudgeDamage(doc, selected, 1)) : undefined} />
-                    <GAME_CHROME.Chip label="wreck" color="warn" onPress={() => apply(wreck(doc, freshSeed()))} />
+                    <GAME_CHROME.Chip label="repair" color="good" onPress={() => selected ? apply(setPartDamage(doc, selected, 0), `repaired ${selected}`) : apply(repairAll(doc), 'repaired all')} />
+                    <GAME_CHROME.Chip label="damage" color="#fb7185" onPress={() => selected ? apply(nudgeDamage(doc, selected, 1), `damaged ${selected}`) : undefined} />
+                    <GAME_CHROME.Chip label="wreck" color="warn" onPress={() => apply(wreck(doc, freshSeed()), 'wrecked')} />
                   </Row>
                   <Row style={{ gap: 6, flexWrap: 'wrap' }}>
                     {([0, 1, 2, 3] as DamageLevel[]).map((level) => (
-                      <GAME_CHROME.Chip key={level} label={tables.damageLabels[level]} active={selectedDamage === level} color={level === 0 ? 'good' : level === 1 ? '#facc15' : level === 2 ? 'warn' : '#fb7185'} onPress={() => selected ? apply(setPartDamage(doc, selected, level)) : undefined} />
+                      <GAME_CHROME.Chip key={level} label={tables.damageLabels[level]} active={selectedDamage === level} color={level === 0 ? 'good' : level === 1 ? '#facc15' : level === 2 ? 'warn' : '#fb7185'} onPress={() => selected ? apply(setPartDamage(doc, selected, level), `${selected} → ${tables.damageLabels[level]}`) : undefined} />
                     ))}
                   </Row>
                 </Col>
@@ -336,7 +345,7 @@ export function VehiclesRoute(props: { onExit: () => void }) {
                 {/* capability 11 — the contract readout */}
                 <Col style={{ gap: 4, paddingTop: 6 }}>
                   <Text fontSize={11} color={T.dim}>contract</Text>
-                  <Text fontSize={11} color={T.ink}>{`id: ${activeId} (saved @ seq ${garage.store ? garage.store.undoPoint() : '—'})`}</Text>
+                  <Text fontSize={11} color={T.ink}>{`id: ${activeId} (saved @ seq ${garage.session ? editorSessions().undoPoint() : '—'})`}</Text>
                   <Text fontSize={11} color={T.ink}>{`style: ${tables.styles[doc.style].label}`}</Text>
                   <Text fontSize={11} color={T.ink}>{`role: ${tables.roles[doc.role].label}`}</Text>
                   <Text fontSize={11} color={T.ink}>scale: 1 unit = 1m, player ref 1.65m</Text>

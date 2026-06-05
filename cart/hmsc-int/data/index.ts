@@ -56,9 +56,10 @@ export type StreamDef<State, Event> = {
    *  events it predates (additions arrive later — tolerate unknown shapes).
    *  `seq` is the event's own log position (its globalSeq) — V20 says an undo
    *  point IS a log position, so a materializer that records positions (the
-   *  sessions stream) reads them here instead of guessing. Two-arg
-   *  materializers ignore it. */
-  apply: (state: State, event: Event, seq: number) => State;
+   *  sessions stream) reads them here instead of guessing. The store always
+   *  passes it; it is optional only so two-arg materializers (and the tests'
+   *  direct-apply idiom) stay valid. */
+  apply: (state: State, event: Event, seq?: number) => State;
 };
 
 export type StreamHandle<State, Event> = {

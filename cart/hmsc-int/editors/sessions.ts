@@ -66,7 +66,7 @@ export type SessionsState = {
 export const sessionsStream: StreamDef<SessionsState, SessionsEvent> = Object.freeze({
   name: 'sessions',
   initial: (): SessionsState => ({ sessions: {}, order: [] }),
-  apply: (state: SessionsState, event: SessionsEvent, seq: number): SessionsState => {
+  apply: (state: SessionsState, event: SessionsEvent, seq = 0): SessionsState => {
     switch (event?.kind) {
       case 'opened': {
         if (event.session in state.sessions) return state; // replays can't fork a session
