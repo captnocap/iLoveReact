@@ -21,7 +21,8 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
-import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_LOOP } from '@game';
+import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_PHYSICS } from '@game';
+import type { CollisionRect } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
 import type { GameState, Vec3 } from '../hmsc/design'; // GAP(W-1) awaiting world grid state
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D'; // GAP(W-2) awaiting world render
@@ -71,12 +72,33 @@ type PlayerPose = {
   x: number;
   y: number;
   z: number;
+  /** carried velocity — the host step integrates it (V7), the route just stores it */
+  vx: number;
+  vy: number;
+  vz: number;
+  grounded: boolean;
   yaw: number;
   moving: boolean;
   running: boolean;
   /** walk-cycle phase in cycles (buildSkeleton's gait clock) */
   gaitPhase: number;
 };
+
+// Surface feel under the player. Tile-below-player resolution is world-grid
+// territory — GAP(W-1); until that door lands, use the game's observed no-tile
+// fallback (hostPhysics behavior reference: `?? tileKindDefinition('road')`),
+// read from the captured kind table — no new numbers.
+const FALLBACK_SURFACE = GAME_KINDS.tiles.get('road').surface;
+const SURFACE_FEEL = {
+  accelerationMultiplier: FALLBACK_SURFACE.accelerationMultiplier,
+  friction: FALLBACK_SURFACE.friction,
+  restitution: FALLBACK_SURFACE.restitution,
+} as const;
+
+// Same epsilon discipline as the game's drive loop (hostPhysics): a resting
+// host step must not publish a fresh pose object every frame — that is the
+// idle re-render storm. Under the host's resting jitter and velocity deadzone.
+const IDLE_REST_EPSILON = 1e-4;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -105,7 +127,34 @@ function groundTop(state: GameState, x: number, z: number): number {
 function initialPlayer(state: GameState): PlayerPose {
   const p = state.player;
   const y = groundTop(state, p.position.x, p.position.z);
-  return { x: p.position.x, y, z: p.position.z, yaw: p.yawDegrees, moving: false, running: false, gaitPhase: 0 };
+  return {
+    x: p.position.x, y, z: p.position.z,
+    vx: 0, vy: 0, vz: 0, grounded: true,
+    yaw: p.yawDegrees, moving: false, running: false, gaitPhase: 0,
+  };
+}
+
+// GAP(W-1): the interim collider feed. The world→collider adapter belongs to
+// the game/world door being captured in a parallel lane; until it lands, the
+// only collider the step gets is a ground band at the locally-sampled ground
+// height (the host arc lands on the painted terrain). The moment that door
+// exposes its adapter, THIS function becomes a door call and the route stops
+// owning any collision shape. Half-width just needs to exceed one frame of
+// travel; it is not a gameplay number.
+const GROUND_BAND_HALF_METERS = 64;
+function collidersFor(state: GameState, around: { x: number; z: number }): { rects: CollisionRect[] } {
+  return {
+    rects: [{
+      minX: around.x - GROUND_BAND_HALF_METERS,
+      maxX: around.x + GROUND_BAND_HALF_METERS,
+      minZ: around.z - GROUND_BAND_HALF_METERS,
+      maxZ: around.z + GROUND_BAND_HALF_METERS,
+      topMeters: groundTop(state, around.x, around.z),
+      blocksPlayer: false,
+      friction: SURFACE_FEEL.friction,
+      restitution: SURFACE_FEEL.restitution,
+    }],
+  };
 }
 
 export function TestRoute(props: { state: GameState; mapName: string; onExit: () => void }) {
@@ -168,18 +217,62 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       const typing = GAME_INPUT.isTextEditing();
       const axes = keys && !typing ? GAME_INPUT.moveAxes(keys) : { forward: 0, strafe: 0 };
       const running = keys != null && !typing && GAME_INPUT.actionDown(keys, 'run');
+      const jumpDown = keys != null && !typing && GAME_INPUT.actionDown(keys, 'jump');
       // The V7 cart-side duty: ship a camera-relative direction vector.
       const intent = GAME_INPUT.moveIntent(axes, lookRef.current.yaw * DEG);
-      if (intent.x !== 0 || intent.z !== 0) {
-        const prev = playerRef.current;
-        // P2: speeds are authored GameState data (defaults 2.4/5.8 — already
-        // one source of truth with GAME_COMMANDS.tuning.player; REWIRE.md).
-        const speed = running ? props.state.player.runSpeedMetersPerSecond : props.state.player.walkSpeedMetersPerSecond;
-        // GAP(W-1): kinematic advance + ground pin. Host integration
-        // (GAME_PHYSICS.step) takes over when the world→collider adapter lands.
+      const moving = intent.x !== 0 || intent.z !== 0;
+      const prev = playerRef.current;
+      // P2: speeds are authored GameState data (defaults 2.4/5.8 — already
+      // one source of truth with GAME_COMMANDS.tuning.player; REWIRE.md).
+      const speed = running ? props.state.player.runSpeedMetersPerSecond : props.state.player.walkSpeedMetersPerSecond;
+      // The host owns integration (V7): movement blend, gravity, the jump arc
+      // (WO-1-proven), ground/step resolution — tuning is the authored
+      // state.config.physics, colliders are the GAP(W-1) interim feed.
+      const stepped = GAME_PHYSICS.hostReady()
+        ? GAME_PHYSICS.step({
+            dtSeconds: dt,
+            intentX: intent.x,
+            intentZ: intent.z,
+            speedMetersPerSecond: speed,
+            jumpDown,
+            player: {
+              position: { x: prev.x, y: prev.y, z: prev.z },
+              velocity: { x: prev.vx, y: prev.vy, z: prev.vz },
+              yawDegrees: prev.yaw,
+            },
+            surface: SURFACE_FEEL,
+            tuning: props.state.config.physics,
+            rects: collidersFor(props.state, prev).rects,
+          })
+        : null;
+      if (stepped) {
+        const p = stepped.player;
+        // The hostPhysics idle discipline: a resting step publishes no new pose.
+        const atRest = !moving && !jumpDown && p.grounded && prev.grounded && !prev.moving && !prev.running
+          && Math.abs(p.position.x - prev.x) < IDLE_REST_EPSILON
+          && Math.abs(p.position.y - prev.y) < IDLE_REST_EPSILON
+          && Math.abs(p.position.z - prev.z) < IDLE_REST_EPSILON;
+        if (!atRest) {
+          const next: PlayerPose = {
+            x: p.position.x, y: p.position.y, z: p.position.z,
+            vx: p.velocity.x, vy: p.velocity.y, vz: p.velocity.z,
+            grounded: p.grounded,
+            yaw: moving ? normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG) : prev.yaw,
+            moving,
+            running: moving && running,
+            gaitPhase: moving ? prev.gaitPhase + dt * (running ? GAIT.runCyclesPerSecond : GAIT.walkCyclesPerSecond) : prev.gaitPhase,
+          };
+          playerRef.current = next;
+          setPlayer(next);
+        }
+      } else if (moving) {
+        // Honest fallback when the host bindings are absent (headless, or a
+        // host built before the has-game-physics gate flipped): the old
+        // kinematic advance + ground pin. No jump here — the arc is host-side.
         const x = prev.x + intent.x * speed * dt;
         const z = prev.z + intent.z * speed * dt;
         const next: PlayerPose = {
+          ...prev,
           x,
           y: groundTop(props.state, x, z),
           z,
@@ -190,8 +283,8 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         };
         playerRef.current = next;
         setPlayer(next);
-      } else if (playerRef.current.moving || playerRef.current.running) {
-        const next = { ...playerRef.current, moving: false, running: false };
+      } else if (prev.moving || prev.running) {
+        const next = { ...prev, vx: 0, vz: 0, moving: false, running: false };
         playerRef.current = next;
         setPlayer(next);
       }
@@ -279,7 +372,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         <Pressable onPress={resetPlayer} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f1a2e' }}>
           <Text fontSize={11} color="#cbd5e1" style={{ fontWeight: 700 }}>Drop in</Text>
         </Pressable>
-        <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>{props.mapName} · WASD move · drag camera · Shift run</Text>
+        <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>{props.mapName} · WASD move · Space jump · drag camera · Shift run</Text>
       </Box>
     </Box>
   );
