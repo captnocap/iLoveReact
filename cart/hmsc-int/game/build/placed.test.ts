@@ -263,4 +263,42 @@ test('the materializer is tolerant; the authoring boundary is strict', () => {
   assert(validatePlacement({ pieceId: 'floor.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'door' }).length > 0, 'edits on editless kinds are refused at the boundary');
 });
 
+// ── RAMPFOOT-0605: the ramp owns footing in its footprint ────────────────────
+
+test('a wall beside a ramp never steals the slope: its band trims flush to the ramp edge', () => {
+  // ramp at (6,6) spans x[4.5,7.5] z[4.5,7.5]; a wall on the z=4.5 line
+  // overhangs 0.125m into the ramp cell — the strip that side-blocked
+  // mid-slope and became a step-onto ledge at the crest (the user's nudge)
+  const ramp = placed('ramp.concrete.common', 6, 6);
+  const wall = placed('wall.concrete.common', 6, 4.5);
+  const { rects } = placedPieceColliders([ramp, wall]);
+  assertEqual(rects.length, 1, 'the wall is still one band');
+  assertClose(rects[0].maxZ, 4.5, 1e-9, 'trimmed flush to the ramp edge — no overhang into the slope');
+  assert(rects[0].minZ < 4.5, 'the non-ramp side keeps its mass');
+});
+
+test('an upper-storey wall at the crest still blocks (its base IS the ramp top)', () => {
+  const ramp = placed('ramp.concrete.common', 6, 6);
+  const upper = placed('wall.concrete.common', 6, 4.5, { y: catalogEntry('ramp.concrete.common').size.heightMeters });
+  const { rects } = placedPieceColliders([ramp, upper]);
+  const depth = catalogEntry('wall.concrete.common').size.depthMeters;
+  assertClose(rects[0].maxZ - rects[0].minZ, depth, 1e-9, 'untrimmed — a wall above the slope is a legitimate blocker');
+});
+
+test('a landing plate over the crest keeps full collision (floors deliver, never trim)', () => {
+  const ramp = placed('ramp.concrete.common', 6, 6);
+  const landing = placed('floor.concrete.common', 6, 6, { y: catalogEntry('ramp.concrete.common').size.heightMeters });
+  const { rects } = placedPieceColliders([ramp, landing]);
+  assertEqual(rects.length, 1, 'the plate is one band');
+  assertClose(rects[0].maxZ - rects[0].minZ, catalogEntry('floor.concrete.common').size.depthMeters, 1e-9, 'full footprint — the crest delivery surface');
+});
+
+test('the surfaced edge case: a wall sandwiched between two ramps trims away entirely', () => {
+  const wall = placed('wall.concrete.common', 6, 4.5);
+  const rampA = placed('ramp.concrete.common', 6, 6);
+  const rampB = placed('ramp.concrete.common', 6, 3);
+  const { rects } = placedPieceColliders([rampA, rampB, wall]);
+  assertEqual(rects.length, 0, 'both overhangs trimmed — the band degenerates (documented in CAPTURE.md)');
+});
+
 finish('build-placed');

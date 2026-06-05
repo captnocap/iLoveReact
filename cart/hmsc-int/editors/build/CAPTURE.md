@@ -127,3 +127,15 @@ This route's doc lines live in `docs/game/hmsc-int.md` (+ the
 `docs/game/_index/records/hmsc_int.ts` route interface). Extending the build
 vocabulary = rows in `game/build/` tables (kinds/edits/catalog), never route
 logic. The bake emission stays compile/'s lane (BakePromise untouched here).
+
+## GRIDSNAP-0605 (2026-06-05): modules tile at their own pitch
+
+USER VERDICT: "the grid needs a better snap. on the 1m ideally, im finding to
+many nudges it can fit into that make something slightly off set from
+everything else." Cause: 3m modules snapped at the 1m substrate pitch (three
+near-miss lateral positions per module width), and 'free' pieces placed at
+the RAW hit (no snap at all). Fix in snap.ts: `modulePitch()` — a piece whose
+size is a clean grid multiple snaps at its OWN module pitch (3m plates have
+ONE lattice; walls' edge lines land on plate edges, never mid-plate);
+sub-module pieces (props, poles) and 'free' mode ride the 1m substrate.
+Tests updated to the new law + nudge-immunity cases (11/11).

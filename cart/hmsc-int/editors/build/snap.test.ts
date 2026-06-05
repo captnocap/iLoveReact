@@ -59,14 +59,20 @@ test('beyond build reach is no target', () => {
 
 // ── snap modes land where the grammar says ───────────────────────────────────
 
-test('grid snap centers the piece on the cell under the crosshair', () => {
+test('grid snap tiles modules at their OWN pitch (GRIDSNAP-0605: one lattice, no near-misses)', () => {
   const target = resolveSnapTarget(snapInput({ snap: 'grid', size: FLOOR_SIZE }));
   assert(!!target, 'a target resolves');
   assertEqual(target!.surface, 'ground', 'on the ground');
-  // hit lands near (0, 0, 4) → cell center (0.5, 4.5) of cell (0, 4)
-  assertClose(target!.placement.x, 0.5, 1e-9, 'cell-centered in x');
-  assertClose(target!.placement.z, 4.5, 1e-9, 'cell-centered in z');
+  // a 3m plate snaps on the 3m module lattice: hit near (0, 0, 4) lands the
+  // module cell centered (1.5, 4.5) — neighbors tile FLUSH, never 1m-offset
+  assertClose(target!.placement.x, 1.5, 1e-9, 'module-centered in x (3m pitch)');
+  assertClose(target!.placement.z, 4.5, 1e-9, 'module-centered in z (3m pitch)');
   assertClose(target!.placement.y, 0, 1e-9, 'based on the ground');
+  // a crosshair nudge inside the same module lands the SAME cell — the
+  // "slightly off set from everything else" positions no longer exist
+  const nudged = resolveSnapTarget(snapInput({ snap: 'grid', size: FLOOR_SIZE, ray: { origin: { x: 0.9, y: 2, z: 0.8 }, dir: norm(0, -0.5, 1) } }));
+  assertClose(nudged!.placement.x, 1.5, 1e-9, 'no sub-module nudge in x');
+  assertClose(nudged!.placement.z, 4.5, 1e-9, 'no sub-module nudge in z');
 });
 
 test('edge snap puts the wall ON the nearer grid line, running along it', () => {
@@ -89,12 +95,15 @@ test('edge snap flips orientation when the other line is nearer', () => {
   assertClose(target!.placement.z, 6, 1e-2, 'pinned to the z line');
 });
 
-test('free snap is the raw hit with the user yaw', () => {
-  const target = resolveSnapTarget(snapInput({ snap: 'free', yawDegrees: 45 }));
+test('free snap rides the 1m substrate with the user yaw (GRIDSNAP-0605: nothing places off-grid)', () => {
+  // a sub-module prop (hydrant 0.54m) snaps at the 1m substrate — the raw-hit
+  // placement was the "slightly off set from everything else" the user vetoed
+  const hydrant = GAME_BUILD.catalog.get('prop.fireHydrant').size;
+  const target = resolveSnapTarget(snapInput({ snap: 'free', yawDegrees: 45, size: hydrant }));
   assert(!!target, 'a target resolves');
-  assertClose(target!.placement.x, target!.hit.x, 1e-9, 'unsnapped x');
-  assertClose(target!.placement.z, target!.hit.z, 1e-9, 'unsnapped z');
-  assertEqual(target!.placement.yawDegrees, 45, 'the ghost rotation is the user\'s');
+  assertClose(target!.placement.x, 0.5, 1e-9, '1m cell-centered in x');
+  assertClose(target!.placement.z, 4.5, 1e-9, '1m cell-centered in z');
+  assertEqual(target!.placement.yawDegrees, 45, 'the ghost rotation is still the user\'s');
 });
 
 // ── piece faces: targeting + stacking ────────────────────────────────────────

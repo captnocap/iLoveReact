@@ -35,7 +35,7 @@ import {
   isCatalogId,
   type BuildPieceDef,
 } from './catalog';
-import { BUILD_KIND_CONTRACTS, type BuildGameplayTags } from './pieces';
+import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
 import type { CollisionRect, Heightfield, OrientedCollisionRect } from '../physics';
@@ -75,6 +75,9 @@ export const PLACED_TUNING = {
   /** ramp/stairs walkable-slope gate (cos): 3m rise over 3m run is 45°;
    *  0.6 keeps the standard ramp walkable with margin */
   rampWalkableSlopeCos: 0.6,
+  /** RAMPFOOT-0605: degenerate-band floor when trimming wall overhangs out of
+   *  ramp footprints — a trimmed band thinner than this is dropped, meters */
+  rampTrimMinBandMeters: 0.01,
 } as const;
 
 // ── basics ───────────────────────────────────────────────────────────────────
@@ -279,10 +282,58 @@ function pieceBands(piece: PlacedBuildPiece, def: BuildPieceDef): Band[] {
  * lands as plain rects, free yaw as oriented rects. Ramps/stairs are NOT here
  * (they are walkable slopes — placedPieceRamps); pieces with no collision tag
  * (bushes, trim, face signs) contribute nothing.
+ *
+ * RAMPFOOT-0605 (USER VERDICT: "place a ramp and then a wall, you get nudged
+ * off at the top because ur standing on the wall not the ramp anymore"):
+ * wall-family bands sit ON grid lines, so half their depth overhangs into the
+ * adjacent cell — when that cell is a ramp, the overhang strip is a solid
+ * whose flat top sits above the slope (a side-block mid-ramp, a step-onto
+ * strip at the crest; the host treats every rect top as standable). The fix
+ * is in the grammar's own semantics: a ramp OWNS the footing in its plan
+ * footprint, so tall thin blockers (wall/fence/railing/pillar/corner/arch)
+ * get their bands TRIMMED out of overlapping ramp footprints. Floors/roofs/
+ * props keep full collision (a landing plate at the crest is the delivery
+ * surface, not a blocker). Free-yaw bands are not trimmed (oriented-rect
+ * subtraction needs host support; quarter-turn is the build grammar's case).
+ * Known edge: a wall sandwiched between two ramps can trim away entirely —
+ * surfaced in CAPTURE.md, not silently special-cased.
  */
+const RAMP_TRIM_KINDS: ReadonlySet<BuildPieceKind> = new Set(['wall', 'fence', 'railing', 'pillar', 'corner', 'arch']);
+
+type PlanRect = { minX: number; maxX: number; minZ: number; maxZ: number };
+
+/** Trim one axis-aligned band out of one ramp footprint: move the cheapest
+ *  edge that eliminates the overlap; null = the band degenerated. */
+function trimBandRect<R extends PlanRect>(rect: R, ramp: PieceBounds): R | null {
+  const ox0 = Math.max(rect.minX, ramp.minX);
+  const ox1 = Math.min(rect.maxX, ramp.maxX);
+  const oz0 = Math.max(rect.minZ, ramp.minZ);
+  const oz1 = Math.min(rect.maxZ, ramp.maxZ);
+  if (ox1 <= ox0 || oz1 <= oz0) return rect; // no overlap
+  type Move = { key: 'minX' | 'maxX' | 'minZ' | 'maxZ'; value: number; cost: number };
+  const moves: Move[] = [];
+  if (ramp.minX <= rect.minX) moves.push({ key: 'minX', value: ox1, cost: (ox1 - rect.minX) * (rect.maxZ - rect.minZ) });
+  if (ramp.maxX >= rect.maxX) moves.push({ key: 'maxX', value: ox0, cost: (rect.maxX - ox0) * (rect.maxZ - rect.minZ) });
+  if (ramp.minZ <= rect.minZ) moves.push({ key: 'minZ', value: oz1, cost: (oz1 - rect.minZ) * (rect.maxX - rect.minX) });
+  if (ramp.maxZ >= rect.maxZ) moves.push({ key: 'maxZ', value: oz0, cost: (rect.maxZ - oz0) * (rect.maxX - rect.minX) });
+  if (moves.length === 0) return rect; // ramp strictly interior — cannot edge-trim
+  moves.sort((a, b) => a.cost - b.cost);
+  const out = { ...rect, [moves[0].key]: moves[0].value } as R;
+  const min = PLACED_TUNING.rampTrimMinBandMeters;
+  if (out.maxX - out.minX <= min || out.maxZ - out.minZ <= min) return null;
+  return out;
+}
+
 export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): PlacedPieceColliders {
   const rects: CollisionRect[] = [];
   const orientedRects: OrientedCollisionRect[] = [];
+  // ramp plan footprints (quarter-turn exact; free-yaw ramps fall back to
+  // their envelope — bounds() already covers both)
+  const rampPlans: PieceBounds[] = [];
+  for (const piece of pieces) {
+    const kind = placedPieceDef(piece).kind;
+    if (kind === 'ramp' || kind === 'stairs') rampPlans.push(pieceBounds(piece));
+  }
   for (const piece of pieces) {
     const def = placedPieceDef(piece);
     if (def.kind === 'ramp' || def.kind === 'stairs') continue; // slopes, not bands
@@ -305,11 +356,20 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
         const along = quarter % 2 === 0 ? 'x' : 'z';
         const flip = quarter === 2 || quarter === 3 ? -1 : 1;
         const cu = centerU * flip;
-        if (along === 'x') {
-          rects.push({ ...base, minX: piece.x + cu - halfU, maxX: piece.x + cu + halfU, minZ: piece.z - halfD, maxZ: piece.z + halfD });
-        } else {
-          rects.push({ ...base, minX: piece.x - halfD, maxX: piece.x + halfD, minZ: piece.z + cu - halfU, maxZ: piece.z + cu + halfU });
+        let rect: CollisionRect | null = along === 'x'
+          ? { ...base, minX: piece.x + cu - halfU, maxX: piece.x + cu + halfU, minZ: piece.z - halfD, maxZ: piece.z + halfD }
+          : { ...base, minX: piece.x - halfD, maxX: piece.x + halfD, minZ: piece.z + cu - halfU, maxZ: piece.z + cu + halfU };
+        // RAMPFOOT-0605: the ramp owns footing in its footprint — trim the
+        // band where it coexists with a slope (band base below the ramp top;
+        // an upper-storey wall whose base IS the crest blocks legitimately)
+        if (RAMP_TRIM_KINDS.has(def.kind)) {
+          for (const ramp of rampPlans) {
+            if (rect === null) break;
+            if (piece.y >= ramp.topY - 1e-6) continue;
+            rect = trimBandRect(rect, ramp);
+          }
         }
+        if (rect !== null) rects.push(rect);
       } else {
         orientedRects.push({
           ...base,

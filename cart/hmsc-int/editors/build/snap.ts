@@ -115,6 +115,18 @@ function quantize(v: number, step: number): number {
   return Math.round(v / step) * step;
 }
 
+/** The snap pitch a piece tiles at (GRIDSNAP-0605, the user's verdict: too
+ *  many sub-module positions "make something slightly off set from everything
+ *  else"). A piece whose size is a CLEAN multiple of the grid is a module —
+ *  it snaps at its own module pitch so neighbors tile FLUSH (a 3m plate has
+ *  exactly one lattice, not three near-misses). Anything else (props, poles)
+ *  snaps at the 1m substrate. */
+export function modulePitch(sizeMeters: number, grid: number): number {
+  const cells = Math.round(sizeMeters / grid);
+  const clean = cells >= 1 && Math.abs(sizeMeters - cells * grid) < 1e-6;
+  return clean ? cells * grid : grid;
+}
+
 /**
  * Resolve the crosshair into the snap target for the selected piece — null
  * when nothing in reach (or the mode demands a face and there is none).
@@ -147,26 +159,43 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
     ? { surface: 'pieceFace' as const, hit, normal: pieceHit!.normal, targetPieceId: pieceHit!.piece.id }
     : { surface: 'ground' as const, hit };
 
+  // GRIDSNAP-0605: modules tile at their OWN pitch (the yawed footprint per
+  // axis), so a 3m plate has ONE lattice instead of three near-miss offsets;
+  // sub-module pieces fall back to the 1m substrate.
+  const turned = Math.round(yaw / 90) % 2 === 1;
+  const spanX = turned ? input.size.depthMeters : input.size.widthMeters;
+  const spanZ = turned ? input.size.widthMeters : input.size.depthMeters;
+  const pitchX = modulePitch(spanX, grid);
+  const pitchZ = modulePitch(spanZ, grid);
+
   switch (input.snap) {
-    case 'grid': {
-      const x = snapToCellCenter(hit.x, grid);
-      const z = snapToCellCenter(hit.z, grid);
+    case 'grid':
+    case 'free': {
+      // 'free' rides the same substrate snap (GRIDSNAP-0605: the user's
+      // verdict — raw-hit placement left props "slightly off set from
+      // everything else"; the 1m grid is the floor for everything placed)
+      const x = snapToCellCenter(hit.x, pitchX);
+      const z = snapToCellCenter(hit.z, pitchZ);
       // ground under the SNAPPED center, so the piece sits on the terrain it covers
       const y = common.surface === 'ground' ? input.groundTopAt(x, z) : baseY;
       return { ...common, placement: { x, y, z, yawDegrees: yaw } };
     }
     case 'edge': {
-      // the nearer grid line owns the wall: the run goes ALONG that line
-      const lineX = Math.round(hit.x / grid) * grid;
-      const lineZ = Math.round(hit.z / grid) * grid;
+      // the nearer MODULE line owns the wall: a wall bounds the plates it
+      // walls in, so its line lattice is the wall's own module pitch (3m
+      // walls land on plate edges, never mid-plate near-misses), and the run
+      // centers along the same pitch
+      const linePitch = modulePitch(input.size.widthMeters, grid);
+      const lineX = Math.round(hit.x / linePitch) * linePitch;
+      const lineZ = Math.round(hit.z / linePitch) * linePitch;
       const onXLine = Math.abs(hit.x - lineX) <= Math.abs(hit.z - lineZ);
       if (onXLine) {
         // plane at x = lineX, running along z (the turned frame)
-        const z = snapToCellCenter(hit.z, grid);
+        const z = snapToCellCenter(hit.z, linePitch);
         const y = common.surface === 'ground' ? input.groundTopAt(lineX, z) : baseY;
         return { ...common, placement: { x: lineX, y, z, yawDegrees: 90 } };
       }
-      const x = snapToCellCenter(hit.x, grid);
+      const x = snapToCellCenter(hit.x, linePitch);
       const y = common.surface === 'ground' ? input.groundTopAt(x, lineZ) : baseY;
       return { ...common, placement: { x, y, z: lineZ, yawDegrees: 0 } };
     }
@@ -195,8 +224,6 @@ export function resolveSnapTarget(input: SnapInput): SnapTarget | null {
         },
       };
     }
-    case 'free':
-      return { ...common, placement: { x: hit.x, y: baseY, z: hit.z, yawDegrees: yaw } };
     default:
       return null;
   }

@@ -106,3 +106,20 @@ same commit. The bake emission task (render/collision/nav/rooms) lands with
 compile/ and must consume `BakePromise`/`effectiveTags`/`decomposePrefab` —
 if it needs a shape this module doesn't declare, the declaration changes
 FIRST, here.
+
+## RAMPFOOT-0605 (2026-06-05): the ramp owns footing in its footprint
+
+USER VERDICT: "if u place a ramp and then a wall, you get nudged off at the
+top because ur standing on the wall not the ramp anymore." Cause: wall-family
+bands sit ON grid lines, overhanging half their depth into the adjacent cell;
+over a ramp cell that strip is a solid with a flat top above the slope (the
+host treats every rect top as standable) — a side-block mid-slope, a
+step-onto ledge at the crest. Fix in placed.ts: tall thin blockers
+(wall/fence/railing/pillar/corner/arch) get their quarter-turn bands TRIMMED
+out of overlapping ramp/stairs plan footprints when the band's base is below
+the ramp top; upper-storey walls (base == crest) and floors/roofs/props are
+untouched (a landing plate is the delivery surface). Free-yaw bands are not
+trimmed (oriented subtraction needs host support). SURFACED EDGE CASE: a wall
+sandwiched between two ramps trims away entirely (collision-free) — pinned by
+test, not silently special-cased; a vertical band split needs the physics
+wire to grow before it can be honest. 4 new P4 cases (26/26).
