@@ -43,6 +43,8 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
   },
   /** orbit drag feel + pitch clamp */
   orbit: { yawPerPx: 0.4, pitchPerPx: 0.3, pitchMin: 4, pitchMax: 85 },
+  /** draft auto-commit debounce (V20 micro-save; AUTOSAVE-0605) */
+  autosaveDebounceMs: 1200,
   /** face-paint palette */
   facePaints: ['#1f2937', '#f8fafc', '#7a4a3a', '#c2410c', '#dc2626', '#facc15', '#38bdf8', '#8b5cf6'],
 });

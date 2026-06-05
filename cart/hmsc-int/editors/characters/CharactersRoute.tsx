@@ -150,6 +150,34 @@ export function CharactersRoute(props: { onExit: () => void }) {
     [live, rosterRev],
   );
 
+  // ── AUTOSAVE-0605 (V20: "saved at every micro change") ────────────────────
+  // Every draft mutation auto-commits the resulting document to the characters
+  // channel, debounced — the route is STATELESS: a hot reload, route switch,
+  // or crash costs at most the debounce window, and each autosave is its own
+  // labeled undo position on the one chain. installDraft (load/import/restore)
+  // arms the skip flag so restoring content never re-commits it unchanged.
+  const draftRef = useRef(draft); draftRef.current = draft;
+  const draftIdRef = useRef(draftId); draftIdRef.current = draftId;
+  const draftNameRef = useRef(draftName); draftNameRef.current = draftName;
+  const autosaveSkipRef = useRef(true); // the mount render never autosaves
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (autosaveSkipRef.current) { autosaveSkipRef.current = false; return; }
+    if (!live.session) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      const id = draftIdRef.current ?? mintCharacterId();
+      if (!draftIdRef.current) setDraftId(id);
+      live.session!.commit(
+        { kind: 'authored', id, doc: draftToDocument(draftRef.current, draftNameRef.current) },
+        `autosave · ${draftNameRef.current}`,
+      );
+      setRosterRev((r) => r + 1);
+    }, TUNE.autosaveDebounceMs);
+  }, [draft]);
+  useEffect(() => () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); }, []);
+
   // ── per-part GPU paint surfaces (PART_IDS is constant → stable hook order) ─
   const paints = {} as Record<PartId, PaintableHandle>;
   for (const id of PART_IDS) {
@@ -168,12 +196,30 @@ export function CharactersRoute(props: { onExit: () => void }) {
     bumpSeq(id);
   };
 
-  /** Replace the whole draft + sync every paint texture and mesh slot. */
+  /** Replace the whole draft + sync every paint texture and mesh slot.
+   *  Installing restored/imported content arms the autosave skip — restoring
+   *  is not an edit; re-committing identical content would churn the chain. */
   const installDraft = (next: CharacterDraft) => {
+    autosaveSkipRef.current = true;
     setDraft(next);
     for (const id of PART_IDS) uploadGrid(id, next.grids[id]);
     bumpAllSeqs();
   };
+
+  // ── AUTOSAVE-0605 mount restore (V20 "stateless design"): reopen the route
+  // exactly where authoring left off — the most recent roster entry IS the
+  // working draft (the autosave keeps it current, so last-on-the-chain =
+  // last-touched). A roster with no entries boots the blank draft. ──────────
+  useEffect(() => {
+    const lastId = rosterState.order[rosterState.order.length - 1];
+    const doc = lastId ? rosterState.characters[lastId] : null;
+    if (!doc) return;
+    installDraft(draftFromDocument(doc));
+    setDraftId(lastId);
+    setDraftName(doc.metadata?.title ?? lastId);
+    setStatus(`restored "${doc.metadata?.title ?? lastId}" — the draft autosaves as you work`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount restore only
+  }, []);
 
   // ── animation clocks (no requestAnimationFrame in the cart host) ──────────
   useEffect(() => {
@@ -440,6 +486,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
   const applyFaceDoc = (doc: HedDocument, label: string) => {
     const next = draftWithFace(draft, doc);
     installDraft(next);
+    autosaveSkipRef.current = false; // new content (generated/imported face) — autosave it
     setSelPart('head');
     setStatus(label);
   };
@@ -453,6 +500,9 @@ export function CharactersRoute(props: { onExit: () => void }) {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffff)) >>> 0;
     const next = generateCharacterDraft(seed);
     installDraft(next);
+    autosaveSkipRef.current = false; // a generated character is authored content — autosave it
+    setDraftId(null); // a NEW character, not an overwrite of the loaded one
+    setDraftName(`character ${seed.toString(36)}`);
     setSelPart('head');
     setView('figure');
     setBodyRigAnim(false);
@@ -510,6 +560,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
       const doc = text ? parseBody(text) : null;
       if (!doc) { setStatus(`${path.split('/').pop()} is not a .body document`); return; }
       installDraft(draftFromDocument(doc));
+      autosaveSkipRef.current = false; // imported content is not on the chain yet — autosave it
       setDraftId(null);
       setDraftName(doc.metadata?.title ?? 'imported character');
       setStatus(`loaded ${path.split('/').pop()}`);

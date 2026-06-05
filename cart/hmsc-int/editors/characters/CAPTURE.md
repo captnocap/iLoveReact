@@ -128,3 +128,13 @@ JSX surfaces are bundle-verified through the real cart pipeline.
   (document event + labeled marker + fresh snapshots); strokes/fill/soften/
   clear/outline drags/region slides are labeled notes. Pinned by the
   `paint session` P4 case (7/7).
+
+## AUTOSAVE-0605 (2026-06-05): the draft auto-commits (V20 "saved at every micro change")
+
+Every draft mutation auto-commits the resulting BodyDocument to the
+characters channel (debounced, `PAINT_EDITOR_TUNING.autosaveDebounceMs`) as
+its own labeled undo position (`autosave · <name>`); the route is STATELESS —
+mount restores the most recent roster entry as the working draft. Restores/
+loads arm a skip (re-committing unchanged content would churn the chain);
+generate/import are authored content and DO autosave. The explicit Save stays
+as the named commit.
