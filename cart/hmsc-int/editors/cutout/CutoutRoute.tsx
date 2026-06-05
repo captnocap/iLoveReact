@@ -27,9 +27,10 @@ import { GAME_CHROME } from '@game';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import {
-  PAINT, usePaintEditor, PaintToolRail, PaintSurface, PaintQuad,
+  PAINT, usePaintEditor, PaintSurface, PaintQuad,
   type Dims, type GraySource, type PaintDocument, type PaintSession,
 } from '../paint';
+import { CutoutToolRail } from './ToolRail';
 import {
   cutoutStream, libraryCutouts, libraryDocuments,
   type CutoutAsset, type CutoutEvent, type SavedPaintDoc,
@@ -49,7 +50,6 @@ const T = GAME_CHROME.tokens.color;
 // (paint behavior lives in editors/paint/tuning.ts).
 const VIEW = Object.freeze({
   railWidth: 216,
-  toolRailWidth: 190,
   headerHeight: 46,
   swatch: 34,
   nameWidth: 150,
@@ -404,14 +404,7 @@ function Workbench(props: {
   return (
     <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, minHeight: 0, position: 'relative' }}>
       <Row style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
-        <Col style={{
-          width: VIEW.toolRailWidth, padding: 10,
-          backgroundColor: T.panelSolid, borderRightWidth: 1, borderColor: T.frame,
-        }}>
-          <ScrollView style={{ flexGrow: 1 }}>
-            <PaintToolRail s={s} />
-          </ScrollView>
-        </Col>
+        <CutoutToolRail s={s} />
         <PaintSurface s={s} />
         <CutoutInspector
           s={s}
