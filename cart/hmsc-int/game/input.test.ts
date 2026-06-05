@@ -63,7 +63,7 @@ test('window blur releases everything — SDL never delivers the keyup after foc
 
 // ── the control contract ─────────────────────────────────────────────────────
 
-test('the bindings table carries the controlContract vocabulary, WASD only — arrows are dead on this wire', () => {
+test('the bindings table carries the controlContract vocabulary, WASD only — the contract, not the wire, rules', () => {
   const byAction = new Map(INPUT_BINDINGS.map((b) => [b.action, b]));
   assertEqual(byAction.get('jump')?.keys?.join(','), 'space', "jump is 'space' — the wire name, not ' '");
   assertEqual(byAction.get('run')?.modifier, 'shift', 'run rides the modifier FLAG, never a key name');
@@ -72,7 +72,8 @@ test('the bindings table carries the controlContract vocabulary, WASD only — a
   for (const binding of INPUT_BINDINGS) {
     for (const key of binding.keys ?? []) {
       assert(!['left', 'right', 'up', 'down'].includes(key),
-        `${binding.action} binds '${key}' — arrow names never arrive on this wire (sym & 0xFFFF truncation)`);
+        `${binding.action} binds '${key}' — the contract is WASD (hmsc controlContract); arrows now ` +
+        `ARRIVE on the wire (key_pack.zig full-width packing) but the table doesn't alias them`);
     }
   }
 });
@@ -81,8 +82,9 @@ test('actionDown walks the table: keys, modifier-as-flag, and pointer actions re
   const keys = GAME_INPUT.createKeyState();
   emit('__keydown', { key: 'f' });
   assertEqual(GAME_INPUT.actionDown(keys, 'interact'), true, 'either bound key satisfies interact');
-  // the camera_lab hazard: shift arrives with a truncated useless key name but a TRUE flag
-  emit('__keydown', { key: 'sdl:225', shiftKey: true });
+  // the camera_lab hazard: shift arrives with a useless key name (`sdl:1073742049`
+  // — the full SDLK_LSHIFT code since key_pack.zig) but a TRUE flag
+  emit('__keydown', { key: 'sdl:1073742049', shiftKey: true });
   assertEqual(GAME_INPUT.actionDown(keys, 'run'), true, 'run must read the shiftKey flag, not a key name');
   assertEqual(GAME_INPUT.actionDown(keys, 'aim'), false, 'pointer actions never read from key state');
   keys.dispose();

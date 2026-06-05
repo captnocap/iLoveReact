@@ -316,15 +316,19 @@ function bumpWire(id: number, ev?: any): void {
 //
 // The framework's engine.zig already invokes __ifttt_onKeyDown(packed) and
 // __ifttt_onKeyUp(packed) on every SDL key event (regardless of focus). We
-// install handlers here that decode the packed payload (mod<<16 | sym),
+// install handlers here that decode the packed payload (mod<<32 | sym),
 // translate the SDL keycode + modifier mask to friendly names, and emit on
 // the shared bus. Trigger sources subscribe to those internal channels.
 //
-// Packed format from Zig: i64 = (mod << 16) | (sym & 0xFFFF)
-//   sym  — SDL3 keycode (SDLK_*). ASCII for printable chars; specific
-//          high values for non-printable keys (Enter, Escape, …).
+// Packed format from Zig (framework/key_pack.zig): i64 = (mod << 32) | sym
+//   sym  — SDL3 keycode (SDLK_*), FULL 32 bits. ASCII for printable chars;
+//          extended keys (arrows, F-keys, nav, standalone modifiers) set
+//          bit 30 (0x40000000) — the old 16-bit packing truncated these
+//          into printable collisions (LEFT arrived as 'p').
 //   mod  — SDL_Keymod bitmask: 1=LSHIFT 2=RSHIFT 64=LCTRL 128=RCTRL 256=LALT
 //          512=RALT 1024=LGUI 2048=RGUI etc.
+// Max value < 2^48 — exact in the f64 crossing the V8 bridge. Decode with
+// arithmetic div/mod, NEVER 32-bit bitwise ops (they'd truncate the mod).
 
 // SDL3 keymod bitmask constants. Pinned to SDL3 (the version Zig links
 // against in framework/engine.zig). SDL2 had the same numeric values for
@@ -350,8 +354,9 @@ const SDL_KEY_NAMES: Record<number, string> = {
 };
 
 function decodeKey(packed: number): { key: string; ctrlKey: boolean; shiftKey: boolean; altKey: boolean; metaKey: boolean } {
-  const sym = packed & 0xffff;
-  const mod = (packed >> 16) & 0xffff;
+  // (mod << 32) | sym — arithmetic decode; 32-bit bitwise would truncate.
+  const sym = packed % 0x100000000;
+  const mod = Math.floor(packed / 0x100000000);
   let key = SDL_KEY_NAMES[sym];
   if (!key) {
     if (sym >= 0x20 && sym < 0x7f) key = String.fromCharCode(sym).toLowerCase();

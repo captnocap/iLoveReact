@@ -16,7 +16,7 @@ no integrator vocabulary on the door).
 | the control contract | `cart/hmsc/input/controlContract.ts` | action ids → inputs/label/playerIntent/availability — carried as the `INPUT_BINDINGS` table (P2) |
 | the pointer rig | `cart/hmsc/gameplay/HmscGameplayRig.tsx` | `__mouse_delta` relative-mode look, `__mouse_capture`, `getMouseX/Y`, `getMouseRightDown` right-hold aim |
 | the typing gate | `cart/hmsc-int/PaintCanvas.tsx` | `__tel_input.focused_id ≥ 0` → keys don't drive movement while typing; `system:blur` clears held keys |
-| the wire vocabulary | `runtime/hooks/useIFTTT.ts` (live platform code) | `decodeKey` (mod<<16 \| sym): space = `'space'`, modifiers = flags with truncated names; `system:cursor:move` {x,y,dx,dy} |
+| the wire vocabulary | `runtime/hooks/useIFTTT.ts` (live platform code) | `decodeKey` (mod<<32 \| sym, framework/key_pack.zig): space = `'space'`, modifiers = flags with useless raw names; `system:cursor:move` {x,y,dx,dy} |
 | the direction formula | `framework/game/movement.zig` (`wasdDirection`) | the canonical camera-relative keys→direction math `moveIntent` twins (see ambiguity 1) |
 
 ## Verification
@@ -46,7 +46,8 @@ no integrator vocabulary on the door).
   takes already-rotated `intentX/intentZ` — so producing the direction vector
   is the transport's job. It is stateless math (no dt/speed/velocity).
 - **Modifiers via flags**: run = `shiftKey`, never a key name — Shift arrives
-  as `sdl:225` (truncated) with a TRUE flag. The camera_lab hazard, honored in
+  as `sdl:1073742049` (full SDLK_LSHIFT since key_pack.zig; was the truncated
+  `sdl:225`) with a TRUE flag. The camera_lab hazard, honored in
   the table shape (`modifier:` is a separate field from `keys:`).
 - **Blur clears held keys**: SDL never delivers the keyup after focus loss; a
   held snapshot would stick forever. The PaintCanvas blur-clear, now in
@@ -79,14 +80,23 @@ no integrator vocabulary on the door).
    + normalization), documented to retire if a binding ever ships. The
    alternative (every consumer re-rolls sin/cos) is the "three mirrored
    copies" hazard at scale.
-2. **Arrow/function/nav keys are DEAD on the `__keydown` wire** (platform bug,
-   pre-existing): `engine.zig:4170` packs `sym & 0xFFFF`, so 0x4000xxxx SDLK
-   codes truncate into printable collisions — LEFT arrives as `'p'`, UP `'r'`,
-   RIGHT `'o'`, DOWN `'q'`, F1 `':'` — and `useIFTTT.ts`'s `SDL_KEY_NAMES`
-   arrow/fn/nav entries can never match a 16-bit sym (dead code). Pressing
-   RIGHT-arrow is indistinguishable from pressing `o`. Platform fix = widen
-   the packing (e.g. `mod<<32 | sym`, still exact in an f64) in engine.zig +
-   decodeKey, framework rebuild. The bindings table is WASD-only until then.
+2. **CLOSED (2026-06-04)** — ~~Arrow/function/nav keys are DEAD on the
+   `__keydown` wire~~: engine.zig packed `sym & 0xFFFF`, truncating 0x4000xxxx
+   SDLK codes into printable collisions (LEFT arrived as `'p'`, UP `'r'`,
+   RIGHT `'o'`, DOWN `'q'`, F1 `':'`). Fixed exactly as proposed: the packing
+   is now `mod<<32 | sym` (< 2^48, exact in the f64 crossing the V8 bridge),
+   owned by `framework/key_pack.zig` and shared by engine.zig (producer),
+   `ifttt/ifttt.zig` and `useIFTTT.ts decodeKey` (decoders; JS decodes with
+   arithmetic div/mod, never 32-bit bitwise). `SDL_KEY_NAMES` arrow/fn/nav
+   entries are live — arrows arrive as `'left'`/`'right'`/`'up'`/`'down'`;
+   standalone modifiers keep useless names (now full-width, e.g. Shift
+   `sdl:1073742049`, was `sdl:225`) with TRUE flags, and no consumer matched
+   the truncated spellings (combat_lab's full-width SHIFT_KEYS match came
+   ALIVE with the fix). Pinned by `zig build test-key-pack` (P4, 5 tests:
+   arrows distinct from printables, modifier isolation, f64 exactness,
+   printables byte-identical to the old packing). The bindings table stays
+   WASD-only because the CONTRACT is WASD — no longer because the wire eats
+   arrows.
 3. **The typing gate rides a telemetry binding** (`__tel_input`) — input
    gating crosses doors at the wire level. Honest when absent, and the
    registry trigger compiles it in, but the coupling should be known.

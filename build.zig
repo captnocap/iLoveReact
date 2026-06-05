@@ -898,4 +898,30 @@ pub fn build(b: *std.Build) void {
     const run_game_pathing_test = b.addRunArtifact(game_pathing_test);
     const game_pathing_test_step = b.step("test-game-pathing", "Run the game pathing behavior tests");
     game_pathing_test_step.dependOn(&run_game_pathing_test.step);
+
+    // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
+    // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key
+    // packing engine.zig produces and ifttt.zig + useIFTTT.ts decode.
+    // Pins arrows/extended keys distinct from printables (the old 16-bit
+    // packing truncated LEFT into 'p'). Pure-math module — no SDL/V8 link.
+    const key_pack_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/key_pack.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const key_pack_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/key_pack.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    key_pack_test_mod.addImport("key_pack", key_pack_mod_for_tests);
+    const key_pack_test = b.addTest(.{
+        .name = "key-pack-test",
+        .root_module = key_pack_test_mod,
+    });
+    const run_key_pack_test = b.addRunArtifact(key_pack_test);
+    const key_pack_test_step = b.step("test-key-pack", "Run the key packing behavior tests");
+    key_pack_test_step.dependOn(&run_key_pack_test.step);
 }

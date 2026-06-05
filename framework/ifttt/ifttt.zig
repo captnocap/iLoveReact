@@ -23,6 +23,7 @@
 
 const std = @import("std");
 const v8_runtime = @import("../v8_runtime.zig");
+const key_pack = @import("../key_pack.zig");
 
 const alloc = std.heap.c_allocator;
 
@@ -193,8 +194,9 @@ pub fn lastDispatchedKey() i64 {
 }
 
 fn dispatchKey(packed_key: i64, is_keyup: bool) void {
-    const sym: u32 = @intCast(packed_key & 0xffff);
-    const mod: u32 = @intCast((packed_key >> 16) & 0xffff);
+    // Full-width (mod << 32 | sym) layout — see framework/key_pack.zig.
+    const sym: u32 = key_pack.symOf(packed_key);
+    const mod: u32 = key_pack.modOf(packed_key);
     const has_ctrl = (mod & SDL_KMOD_CTRL) != 0;
     const has_shift = (mod & SDL_KMOD_SHIFT) != 0;
     const has_alt = (mod & SDL_KMOD_ALT) != 0;

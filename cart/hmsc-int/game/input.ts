@@ -14,12 +14,13 @@
 // THE WIRES (all transport, no behavior):
 // • keys — the framework bus (runtime/ffi.ts): engine.zig fires
 //   `__ifttt_onKeyDown/Up(packed)`, runtime/hooks/useIFTTT.ts decodes
-//   (mod<<16 | sym) into `{key, ctrlKey, shiftKey, altKey, metaKey}` and
-//   publishes `__keydown`/`__keyup` — the same transport hmsc's
-//   usePlayerDrive rides (the behavior reference). Wire truths this door
-//   honors: space arrives as 'space' (not ' '); Shift/Ctrl/Alt arrive as
-//   useless truncated key names (`sdl:225`…) but TRUE modifier flags — read
-//   the flags, never the names (camera_lab's __shift lesson).
+//   (mod<<32 | sym — framework/key_pack.zig) into `{key, ctrlKey, shiftKey,
+//   altKey, metaKey}` and publishes `__keydown`/`__keyup` — the same
+//   transport hmsc's usePlayerDrive rides (the behavior reference). Wire
+//   truths this door honors: space arrives as 'space' (not ' ');
+//   Shift/Ctrl/Alt arrive as useless raw key names (`sdl:1073742049`…) but
+//   TRUE modifier flags — read the flags, never the names (camera_lab's
+//   __shift lesson).
 // • pointer — core host fns (registered unconditionally in
 //   v8_bindings_core.zig): getMouseX/getMouseY/getMouseDown/getMouseRightDown,
 //   `__mouse_delta` (relative-mode deltas for mouse look), `__mouse_capture`
@@ -116,10 +117,11 @@ export function createKeyState(): KeyState {
 
 // ── The control contract as data (P2 — hmsc input/controlContract.ts) ───────
 //
-// WASD only for movement: arrow keys are DEAD on this wire — engine.zig packs
-// `sym & 0xFFFF`, so the 0x4000xxxx SDLK arrow codes truncate into printable
-// collisions (LEFT arrives as 'p', UP as 'r', RIGHT as 'o', DOWN as 'q').
-// Never alias arrows until the packing is widened (see input.CAPTURE.md).
+// WASD only for movement because the CONTRACT says so (hmsc's
+// controlContract verbatim) — the wire no longer forces it: the packing was
+// widened to (mod<<32 | sym) in framework/key_pack.zig (2026-06-04), so
+// arrows now arrive as 'left'/'right'/'up'/'down'. Aliasing arrows into the
+// table is a contract change, not a transport fix; take it to the contract.
 
 export type InputAction =
   | 'moveForward'

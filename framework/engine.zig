@@ -24,6 +24,7 @@ const telemetry = @import("diag/telemetry.zig");
 const filedrop = @import("fs/filedrop.zig");
 const fswatch = @import("fs/fswatch.zig");
 const clipboard_watch = @import("ifttt/clipboard_watch.zig");
+const key_pack = @import("key_pack.zig");
 const selection_watch = @import("ifttt/selection_watch.zig");
 const voice = @import("voice/voice.zig");
 const audio_input = @import("audio_input/audio_input.zig");
@@ -4167,7 +4168,9 @@ pub fn run(config_in: AppConfig) !void {
                 c.SDL_EVENT_KEY_DOWN => {
                     const sym: c_int = @intCast(event.key.key);
                     const mod = event.key.mod;
-                    const packed_key: i64 = (@as(i64, @intCast(mod)) << 16) | (@as(i64, @intCast(sym)) & 0xFFFF);
+                    // Full-width sym packing — extended keys (0x4000xxxx)
+                    // must survive the wire; see framework/key_pack.zig.
+                    const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(mod));
                     // Capture key (F9 recording toggle)
                     if (capture.handleKey(sym)) continue;
                     // Terminal copy/paste: Ctrl+Shift+C/V (not Ctrl+C which is SIGINT)
@@ -4241,9 +4244,8 @@ pub fn run(config_in: AppConfig) !void {
                     }
                 },
                 c.SDL_EVENT_KEY_UP => {
-                    const sym: c_int = @intCast(event.key.key);
-                    const mod = event.key.mod;
-                    const packed_key: i64 = (@as(i64, @intCast(mod)) << 16) | (@as(i64, @intCast(sym)) & 0xFFFF);
+                    // Same full-width packing as KEY_DOWN (key_pack.zig).
+                    const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(event.key.mod));
                     _ = render_surfaces.handleKeyUp(@intCast(event.key.key));
                     ifttt_zig.dispatchKeyUp(packed_key);
                     js_vm.callGlobalInt("__ifttt_onKeyUp", packed_key);
