@@ -115,6 +115,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/items (GAME_ITEMS — the items registry + models)',
+      purpose: ['asset_pipeline', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/items/index.ts',
+      description:
+        'V11 capture (2026-06-05): game_item_gallery’s ITEMS REWRITTEN fresh as DATA (cart/game_item_gallery untouched behavior reference; gallery UI + the V11 scale-audit workbench fenced to editors/items/). The 19 model fns reduced to part TABLES at identity ctx — items.ts carries 73 ItemPart rows (geometry-by-name via ITEM_GEOMETRIES, params, #rrggbb material, ITEM_TEXTURE_KEYS slot, position/rotation/scale verbatim; zero React in the door); geometries.ts holds the 4 custom generators (blade/sail/boatHull/surfboard) as pure generate(params) fns + ITEM_GEOMETRY_DEFAULTS (P2). ALL 19 items scaleStatus "unaudited" — authored numbers verbatim, including the ruling’s evidence (sailboat 1.35m ≈ knife 1.31m, pinned by test, NOT fixed); approxItemBoundsMeters = the audit’s numeric starting data. Texture keys renamed game-items/<id>[/<face>]; texture CONTENT stays gallery-side pending the materials capture. 8 P4 tests (items.test.ts); door test updated GAME_ITEMS pending→live; rjit game verify GREEN. No commands-stub flips (no item-targeting command exists in the 48). CAPTURE.md: 4 ambiguities (physics_lab catalog un-reviewed, vehicle item vs V10, scape item-type layer, surfboard-as-leaf).',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
       name: 'ProjectBar',
       purpose: ['ui', 'persistence'],
       kind: 'component',
