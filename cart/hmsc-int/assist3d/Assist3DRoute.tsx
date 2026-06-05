@@ -24,6 +24,12 @@ import { useSceneAssistant } from './useSceneAssistant';
 import { BackendBar } from './BackendBar';
 import { BACKEND_LABELS, DEFAULT_CONFIG, type Backend, type BackendConfig } from './backends';
 import { loadModelHistory, rememberModelPath, forgetModelPath } from './modelHistory';
+import { editorChannel } from '../editors/store';
+import { editorSessions, type RouteSession } from '../editors/sessions';
+import { assist3dStream, type Assist3dEvent } from './stream';
+
+// AUTOSAVE-0605 (V20 "saved at every micro change"): scene auto-commit debounce
+const AUTOSAVE_DEBOUNCE_MS = 1200;
 
 interface Block { tag: string; text: string; color: string; ts: number; dim?: boolean }
 
@@ -76,6 +82,46 @@ function buildTranscript(events: WorkerEvent[], assistantTag: string): Block[] {
 export function Assist3DRoute() {
   const { scene, loadErr, reloads, scenePath } = useAssistScene();
 
+  // ── the V20 channel + this visit's session (AUTOSAVE-0605): the authored
+  // scene auto-commits to the assist3d channel debounced, REGARDLESS of which
+  // backend wrote scene.json (tool-call write, streamed JSON extract, or
+  // claude_code's own file write — useAssistScene's watcher is the one funnel
+  // they all reach). scene.json stays the live rendezvous; the chain records
+  // every authored state as its own labeled undo position. ──────────────────
+  const live = useMemo(() => {
+    try {
+      const channel = editorChannel(assist3dStream);
+      return { channel, session: editorSessions().open('/assist3d', channel) as RouteSession<Assist3dEvent>, error: null as string | null };
+    } catch (e) {
+      return { channel: null, session: null, error: String(e) };
+    }
+  }, []);
+  useEffect(() => () => live.session?.close(), [live]);
+  const lastCommittedRef = useRef<string>('');
+  const sceneRef = useRef(scene); sceneRef.current = scene;
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!live.session || scene.meshes.length === 0) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      const s = sceneRef.current;
+      const json = JSON.stringify(s);
+      // dedupe: the mount restore / watcher echoes re-deliver identical scenes
+      if (json === lastCommittedRef.current) return;
+      lastCommittedRef.current = json;
+      live.session!.commit({ kind: 'sceneAuthored', scene: s }, `scene authored · ${s.meshes.length} meshes`);
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }, [scene]);
+  // seed the dedupe with the chain's latest so reopening the route never
+  // re-commits the unchanged scene
+  useEffect(() => {
+    const prior = live.channel?.state().scene;
+    if (prior) lastCommittedRef.current = JSON.stringify(prior);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount seed
+  }, []);
+  useEffect(() => () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); }, []);
+
   // ── selection ── (camera + drag/pick live in the memo'd SceneSurface, so
   // orbiting never re-renders this route's streaming chat log)
   const [selected, setSelected] = useState<number | null>(null);
@@ -107,6 +153,7 @@ export function Assist3DRoute() {
 
   const sendToAssistant = (modelText: string, displayText: string): boolean => {
     if (!sa.send(modelText)) return false;
+    live.session?.note(`prompt · ${displayText.slice(0, 80)}`);
     setMyPrompts((p) => [...p, { text: displayText, ts: Date.now() }]);
     // a successfully-used local model earns its spot in the recents
     if (config.backend === 'local_ai' && config.modelPath) setModelHistory(rememberModelPath(config.modelPath));
