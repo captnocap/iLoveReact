@@ -492,8 +492,8 @@ export const hmsc_int: DocIndex = {
       kind: 'component',
       sourceFile: 'cart/hmsc-int/TestRoute.tsx',
       description:
-        'Route /test (197): walk the staged world with a PlayerFigure (landform/surface height sampling) — the editor’s "play test" seam.',
-      dependsOn: ['PlayerFigure'],
+        'Route /test (~260): walk the staged world — the FIRST real consumer of the @game ground floor (rewired 2026-06-04, contract: cart/hmsc-int/TestRoute.REWIRE.md). GAME_INPUT key snapshot + WASD contract + camera-relative moveIntent, GAME_CAMERA Orbit solve, GAME_LOOP frame transport, GAME_FIGURE V2-kit player via the editor-preview render path. Remaining cart/hmsc reads marked GAP(W-1 world grid / W-2 world render / W-3 game sky) awaiting the world lanes.',
+      dependsOn: ['GAME_INPUT', 'GAME_CAMERA', 'GAME_LOOP', 'GAME_FIGURE', 'WorldStatics'],
       status: 'live',
     },
     {
