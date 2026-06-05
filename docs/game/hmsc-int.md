@@ -240,3 +240,28 @@ only per V2-AMENDED; React-free door keeps headless verify clean). 24 P4
 tests across four suites ride `rjit game verify`; CAPTURE.md records drops +
 ambiguities (P2 grain in the FK, visual-height canon, texture-key prefix,
 ragdollHostReady=false until the binding exists).
+
+## game/activities/ — repeatable side loops (V22/V8/V20 capture, 2026-06-04)
+
+The non-mission gameplay verbs, REWRITTEN fresh. V22-MODES is the binding
+ruling: the SAMP/VCMP-tested verb space (role, rob, chase, evade, race, jump,
+accumulate), each a DISTRIBUTION PRESET of the V21 machine, never a new
+system — `verbs.ts` ships the presets as frozen data in V21's own ruling
+vocabulary (cop/civilian/traffic weights, temperature/convergence bias,
+promotion budget); the V21 lane owns interpretation. `defs.ts` is the P2
+table layer: `ActivityDefinition` = stages (ticks / signal / signalWithin
+advance rules, durations in STATE TICKS — the V8 ~45/min cadence consumed
+through GAME_LOOP), the scape `Quest.reward` row verbatim, repeat
+auto/manual, optional quality policy; `defineActivity` validates loud at
+table-build time and is exported for labs. Shipped tables: `dealing`
+(scape's designed earn loop — cook 3 ticks, deliver within 12, quality
+scales payout from a 0.4 floor, sloppy below 0.35 raises heat 12 and still
+pays) and `street-race` (ruling-derived, proves table-generality). `run.ts`
+is the pure engine (one stepRun call = one state tick; signals first, then
+the tick counts; deterministic per R6; events are inert returns — heatRaised
+is the V12 hook surfaced, not built; failed runs always revive — V22's
+failure-degrades-never-ends). `stream.ts` registers the V20 `activities`
+concern in one StreamDef (engine events in, life totals + heat
+materialized). 25 P4 tests ride `rjit game verify`; CAPTURE.md records the
+judgment calls (invented preset values, the single quality channel, the
+caller-cadenced engine pending R3).

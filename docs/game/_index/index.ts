@@ -27,6 +27,7 @@ import { composer } from './records/composer';
 import { cutout } from './records/cutout';
 import { effect_fills } from './records/effect_fills';
 import { game_item_gallery } from './records/game_item_gallery';
+import { game_activities } from './records/game_activities';
 import { game_animation } from './records/game_animation';
 import { game_cutscene } from './records/game_cutscene';
 import { geometry_demo } from './records/geometry_demo';
@@ -58,7 +59,7 @@ export type {
 export const ALL_DOCS: DocIndex[] = [
   animationDsl, animation_lab, bake_geometry, billboard_demo, bodylab,
   boxxx_demo, camera_lab, carve_lab, combat_lab, composer, cutout,
-  effect_fills, game_item_gallery, game_animation, game_cutscene, geometry_demo, head_lab, hmsc, hmsc_int,
+  effect_fills, game_item_gallery, game_activities, game_animation, game_cutscene, geometry_demo, head_lab, hmsc, hmsc_int,
   hmsc_massive_map_lab, hmsc_scale_lab, input_bench, pathing_lab, physics3d,
   physics_lab, pixel_icon_demo, pixel_icon_gallery, planet_run, ragdoll_lab,
   render_perf_lab, scape, shitcoin, skybox_demo, vehicle_lab, voxel_stack_demo,
