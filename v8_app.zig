@@ -82,7 +82,12 @@ const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_opt
     pub fn activeNodeId() u32 {
         return 0;
     }
+    pub fn bindNode(_: u32) void {}
+    pub fn unbindNode(_: u32) void {}
     pub fn stepActive(_: u32) ?Solved {
+        return null;
+    }
+    pub fn stepNode(_: u32, _: u32) ?Solved {
         return null;
     }
     pub fn writeNode(_: anytype, _: Solved) void {
@@ -1378,6 +1383,9 @@ fn removePropKeys(node: *Node, keys_v: std.json.Value) void {
         } else if (std.mem.eql(u8, k, "showScrollbar")) {
             node.show_scrollbar = true;
             continue;
+        } else if (std.mem.eql(u8, k, "scene3dCameraNative")) {
+            game_camera.unbindNode(node.id);
+            continue;
         } else if (std.mem.eql(u8, k, "scrollbarSide")) {
             node.scrollbar_side = .auto;
             continue;
@@ -1846,6 +1854,14 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (jsonBool(v)) |b| node.scene3d_mesh = b;
         } else if (std.mem.eql(u8, k, "scene3dCamera")) {
             if (jsonBool(v)) |b| node.scene3d_camera = b;
+        } else if (std.mem.eql(u8, k, "scene3dCameraNative")) {
+            if (jsonBool(v)) |b| {
+                if (b) {
+                    game_camera.bindNode(node.id);
+                } else {
+                    game_camera.unbindNode(node.id);
+                }
+            }
         } else if (std.mem.eql(u8, k, "scene3dLight")) {
             if (jsonBool(v)) |b| node.scene3d_light = b;
         } else if (std.mem.eql(u8, k, "scene3dGroup")) {
@@ -2593,6 +2609,7 @@ fn beforeNodeDestroy(node: *Node, _: u32) void {
         g_alloc.free(pid);
         node.paintable_id = null;
     }
+    game_camera.unbindNode(node.id);
     if (node.effect_textures) |arr| {
         for (arr) |s| g_alloc.free(s);
         g_alloc.free(arr);
@@ -3569,22 +3586,21 @@ fn appTick(now: u32) void {
     // Must happen BEFORE rebuildTree so the tree reflects the new g_node_by_id.
     drainPendingFlushes();
     if (_probe) std.debug.print("[probe-tick] #{d} after drainPendingFlushes\n", .{_probe_n.v});
-    // V23 native game camera: when a cart explicitly binds a Scene3D.Camera
-    // node, the host owns per-frame solve/smoothing and writes that node's
-    // camera fields before layout/paint. Carts that never call
-    // __game_camera_bind_node stay on the existing JS-props path.
-    const camera_node_id = game_camera.activeNodeId();
-    if (camera_node_id != 0) {
-        if (g_node_by_id.get(camera_node_id)) |camera_node| {
-            if (camera_node.scene3d_camera) {
-                if (game_camera.stepActive(now)) |solved| {
-                    game_camera.writeNode(camera_node, solved);
-                    g_dirty.* = true;
-                }
+    // V23 native game camera: when a cart opts a Scene3D.Camera node into
+    // native ownership, the host solves/smooths that node's camera before
+    // layout/paint. Carts that never opt in stay on the declarative JS-props
+    // path, and multiple native cameras each carry independent per-node state.
+    var camera_it = g_node_by_id.valueIterator();
+    while (camera_it.next()) |camera_node_ptr| {
+        const camera_node = camera_node_ptr.*;
+        if (camera_node.scene3d_camera) {
+            if (game_camera.stepNode(camera_node.id, now)) |solved| {
+                game_camera.writeNode(camera_node, solved);
+                g_dirty.* = true;
             }
         }
     }
-    if (_probe) std.debug.print("[probe-tick] #{d} after game_camera.stepActive\n", .{_probe_n.v});
+    if (_probe) std.debug.print("[probe-tick] #{d} after game_camera.stepNode\n", .{_probe_n.v});
     // Host-side animation tick. Walks the animation registry and writes
     // current values into latches; syncLatchesToNodes then propagates
     // those into node.style. Cart-side `useHostAnimation` registers

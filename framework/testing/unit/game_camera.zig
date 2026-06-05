@@ -230,3 +230,50 @@ test "input deltas update only the active mode parameters" {
     try expectClose(c.aim.pitch, 1.0 / camera.DEG);
     try expectClose(c.orbit.yaw, 15);
 }
+
+test "bound nodes keep independent rigs and per-frame state" {
+    camera.resetForTests();
+    defer camera.resetForTests();
+
+    camera.bindNode(101);
+    camera.setOrbitForNode(101, .{ .target = .{}, .yaw = 0, .pitch = 0, .dist = 10, .fov = 50 });
+    camera.setSmoothingForNode(101, 4);
+
+    camera.bindNode(202);
+    camera.setOrbitForNode(202, .{ .target = .{}, .yaw = 90, .pitch = 0, .dist = 20, .fov = 70 });
+    camera.setSmoothingForNode(202, 0);
+
+    const a0 = camera.stepNode(101, 1) orelse return error.MissingCameraA;
+    const b0 = camera.stepNode(202, 1) orelse return error.MissingCameraB;
+    try expectSolved(a0, .{ .x = 0, .y = 0, .z = -10 }, .{}, 50);
+    try expectSolved(b0, .{ .x = -20, .y = 0, .z = 0 }, .{}, 70);
+
+    camera.setOrbitForNode(101, .{ .target = .{}, .yaw = 180, .pitch = 0, .dist = 10, .fov = 50 });
+    camera.setOrbitForNode(202, .{ .target = .{}, .yaw = 90, .pitch = 0, .dist = 5, .fov = 70 });
+    const a1 = camera.stepNode(101, 17) orelse return error.MissingCameraA;
+    const b1 = camera.stepNode(202, 17) orelse return error.MissingCameraB;
+    const a_want = camera.solveOrbit(.{ .target = .{}, .yaw = 180, .pitch = 0, .dist = 10, .fov = 50 });
+    try expectBetween(a1.pos.z, a0.pos.z, a_want.pos.z);
+    try expectSolved(b1, .{ .x = -5, .y = 0, .z = 0 }, .{}, 70);
+}
+
+test "unbind cleans state and rebind is safe" {
+    camera.resetForTests();
+    defer camera.resetForTests();
+
+    camera.bindNode(77);
+    camera.setOrbitForNode(77, .{ .target = .{}, .yaw = 0, .pitch = 0, .dist = 10, .fov = 50 });
+    const first = camera.stepNode(77, 0) orelse return error.MissingCamera;
+    camera.bindNode(77);
+    const rebound_same = camera.stepNode(77, 16) orelse return error.MissingCamera;
+    try expectSolved(rebound_same, first.pos, first.target, first.fov);
+
+    camera.unbindNode(77);
+    try testing.expect(!camera.isBound(77));
+    try testing.expect(camera.stepNode(77, 32) == null);
+
+    camera.bindNode(77);
+    camera.setOrbitForNode(77, .{ .target = .{}, .yaw = 90, .pitch = 0, .dist = 6, .fov = 40 });
+    const rebound_fresh = camera.stepNode(77, 48) orelse return error.MissingCamera;
+    try expectSolved(rebound_fresh, .{ .x = -6, .y = 0, .z = 0 }, .{}, 40);
+}

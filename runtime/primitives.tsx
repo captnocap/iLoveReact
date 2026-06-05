@@ -451,18 +451,23 @@ const Scene3DBase: any = ({ ...rest }: any) =>
 // auto-derive them from the scene extent (the historical behaviour). When `far`
 // is set, the distance fog (see Scene3D.Fog) auto-anchors to it unless a <Fog>
 // overrides, so cresting a hill shows a hazed horizon instead of the whole map.
-Scene3DBase.Camera = ({ position, target, fov, far, near, ...rest }: any) => {
-  const [px, py, pz] = _vec3(position, 3, 2, 4);
-  const [lx, ly, lz] = _vec3(target, 0, 0, 0);
-  return h('View', {
-    ...rest,
-    scene3dCamera: true,
-    scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
-    scene3dLookX: lx, scene3dLookY: ly, scene3dLookZ: lz,
-    scene3dFov: fov ?? 60,
-    scene3dFar: Number.isFinite(far) && far > 0 ? far : 0,
-    scene3dNear: Number.isFinite(near) && near > 0 ? near : 0,
-  });
+Scene3DBase.Camera = {
+  $$typeof: Symbol.for('react.forward_ref'),
+  render({ position, target, fov, far, near, nativeCamera, scene3dCameraNative, ...rest }: any, ref: any) {
+    const [px, py, pz] = _vec3(position, 3, 2, 4);
+    const [lx, ly, lz] = _vec3(target, 0, 0, 0);
+    return h('View', {
+      ...rest,
+      ref,
+      scene3dCamera: true,
+      scene3dCameraNative: !!(nativeCamera ?? scene3dCameraNative),
+      scene3dPosX: px, scene3dPosY: py, scene3dPosZ: pz,
+      scene3dLookX: lx, scene3dLookY: ly, scene3dLookZ: lz,
+      scene3dFov: fov ?? 60,
+      scene3dFar: Number.isFinite(far) && far > 0 ? far : 0,
+      scene3dNear: Number.isFinite(near) && near > 0 ? near : 0,
+    });
+  },
 };
 // Skybox — an analytic procedural sky drawn behind every mesh (gradient + sun
 // + haze + clouds + stars). A child of <Scene3D> like Camera/Light. Every prop

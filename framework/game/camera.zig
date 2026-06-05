@@ -57,6 +57,7 @@ pub const ControllerParams = struct {
 
 pub const DEG: f32 = std.math.pi / 180.0;
 pub const DEFAULT_SMOOTHING_PER_SECOND: f32 = 14.0;
+pub const MAX_CONTROLLERS: usize = 64;
 
 fn clamp(n: f32, lo: f32, hi: f32) f32 {
     return @max(lo, @min(hi, n));
@@ -211,45 +212,128 @@ pub const Controller = struct {
     }
 };
 
-var g_controller: Controller = .{};
-var g_last_tick_ms: u32 = 0;
+const ControllerSlot = struct {
+    controller: Controller = .{},
+    last_tick_ms: u32 = 0,
+};
+
+var g_controllers: [MAX_CONTROLLERS]ControllerSlot = [_]ControllerSlot{.{}} ** MAX_CONTROLLERS;
+var g_active_node_id: u32 = 0;
+
+fn findSlotIndex(node_id: u32) ?usize {
+    if (node_id == 0) return null;
+    for (&g_controllers, 0..) |*slot, i| {
+        if (slot.controller.enabled and slot.controller.node_id == node_id) return i;
+    }
+    return null;
+}
+
+fn firstFreeSlotIndex() ?usize {
+    for (&g_controllers, 0..) |*slot, i| {
+        if (!slot.controller.enabled) return i;
+    }
+    return null;
+}
+
+fn getSlot(node_id: u32) ?*ControllerSlot {
+    const i = findSlotIndex(node_id) orelse return null;
+    return &g_controllers[i];
+}
+
+fn ensureSlot(node_id: u32) ?*ControllerSlot {
+    if (node_id == 0) return null;
+    if (getSlot(node_id)) |slot| {
+        g_active_node_id = node_id;
+        return slot;
+    }
+    const i = firstFreeSlotIndex() orelse return null;
+    g_controllers[i] = .{};
+    g_controllers[i].controller.bindNode(node_id);
+    g_active_node_id = node_id;
+    return &g_controllers[i];
+}
+
+fn activeSlot() ?*ControllerSlot {
+    return getSlot(g_active_node_id);
+}
 
 pub fn bindNode(node_id: u32) void {
-    g_controller.bindNode(node_id);
+    _ = ensureSlot(node_id);
+}
+
+pub fn unbindNode(node_id: u32) void {
+    const i = findSlotIndex(node_id) orelse return;
+    g_controllers[i] = .{};
+    if (g_active_node_id == node_id) {
+        g_active_node_id = 0;
+        for (&g_controllers) |*slot| {
+            if (slot.controller.enabled) {
+                g_active_node_id = slot.controller.node_id;
+                break;
+            }
+        }
+    }
 }
 
 pub fn disable() void {
-    g_controller.disable();
-    g_last_tick_ms = 0;
+    if (g_active_node_id != 0) unbindNode(g_active_node_id);
+}
+
+pub fn disableNode(node_id: u32) void {
+    unbindNode(node_id);
 }
 
 pub fn setMode(mode: Mode) void {
-    g_controller.setMode(mode);
+    if (activeSlot()) |slot| slot.controller.setMode(mode);
+}
+
+pub fn setModeForNode(node_id: u32, mode: Mode) void {
+    if (ensureSlot(node_id)) |slot| slot.controller.setMode(mode);
 }
 
 pub fn setOrbit(params: OrbitParams) void {
-    g_controller.setOrbit(params);
+    if (activeSlot()) |slot| slot.controller.setOrbit(params);
+}
+
+pub fn setOrbitForNode(node_id: u32, params: OrbitParams) void {
+    if (ensureSlot(node_id)) |slot| slot.controller.setOrbit(params);
 }
 
 pub fn setAim(params: AimParams) void {
-    g_controller.setAim(params);
+    if (activeSlot()) |slot| slot.controller.setAim(params);
+}
+
+pub fn setAimForNode(node_id: u32, params: AimParams) void {
+    if (ensureSlot(node_id)) |slot| slot.controller.setAim(params);
 }
 
 pub fn setSmoothing(per_second: f32) void {
-    g_controller.setSmoothing(per_second);
+    if (activeSlot()) |slot| slot.controller.setSmoothing(per_second);
+}
+
+pub fn setSmoothingForNode(node_id: u32, per_second: f32) void {
+    if (ensureSlot(node_id)) |slot| slot.controller.setSmoothing(per_second);
 }
 
 pub fn applyInputDeltas(yaw_delta: f32, pitch_delta: f32) void {
-    g_controller.applyInputDeltas(yaw_delta, pitch_delta);
+    if (activeSlot()) |slot| slot.controller.applyInputDeltas(yaw_delta, pitch_delta);
+}
+
+pub fn applyInputDeltasForNode(node_id: u32, yaw_delta: f32, pitch_delta: f32) void {
+    if (ensureSlot(node_id)) |slot| slot.controller.applyInputDeltas(yaw_delta, pitch_delta);
 }
 
 pub fn activeNodeId() u32 {
-    return if (g_controller.enabled) g_controller.node_id else 0;
+    return if (getSlot(g_active_node_id) != null) g_active_node_id else 0;
+}
+
+pub fn isBound(node_id: u32) bool {
+    return getSlot(node_id) != null;
 }
 
 pub fn resetForTests() void {
-    g_controller = .{};
-    g_last_tick_ms = 0;
+    g_controllers = [_]ControllerSlot{.{}} ** MAX_CONTROLLERS;
+    g_active_node_id = 0;
 }
 
 pub fn writeNode(node: anytype, solved: Solved) void {
@@ -264,9 +348,13 @@ pub fn writeNode(node: anytype, solved: Solved) void {
 }
 
 pub fn stepActive(now_ms: u32) ?Solved {
-    if (!g_controller.enabled or g_controller.node_id == 0) return null;
-    const dt_ms = if (g_last_tick_ms == 0 or now_ms < g_last_tick_ms) 0 else now_ms - g_last_tick_ms;
-    g_last_tick_ms = now_ms;
+    return stepNode(g_active_node_id, now_ms);
+}
+
+pub fn stepNode(node_id: u32, now_ms: u32) ?Solved {
+    const slot = getSlot(node_id) orelse return null;
+    const dt_ms = if (slot.last_tick_ms == 0 or now_ms < slot.last_tick_ms) 0 else now_ms - slot.last_tick_ms;
+    slot.last_tick_ms = now_ms;
     const dt_seconds = @as(f32, @floatFromInt(dt_ms)) / 1000.0;
-    return g_controller.step(dt_seconds);
+    return slot.controller.step(dt_seconds);
 }
