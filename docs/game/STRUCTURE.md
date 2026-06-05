@@ -58,6 +58,9 @@ cart/hmsc-int/
     world/             paint tiles, place things, preview — the map editor
     characters/        the head_lab EDITOR surface (authors what game/figure runs)
     vehicles/          vehicle authoring
+    cutout/            the cutout painter — skins/textures painting (the cutout
+                       app remade on the shared editors/paint engine; saved
+                       documents + extracted cutouts on the V20 'cutout' stream)
     items/             item authoring (+ the scale-audit workbench, V11)
     materials/         shader/texture/material studio (the locked art vocab)
     cutscenes/         timeline editor + scrubber over game/cutscene

@@ -21,7 +21,7 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 **Spine / shell**
 - `index.tsx` (833) — composition only: workspace persistence (`useWorkspace`, payload v2), multi-map CRUD orchestration, placement state + undo snapshots, tile-selection + override state, `previewWorld` assembly, compile, router. The 2×2 `QuadSplit` layout: PropertiesPanel | RightPanel / PaintCanvas | IsoPreview, under the persistent `ProjectBar`.
 - `AGENTS.md` — the cart's own agent contract (mutator rule, compile-=-persist, shape map). *Drift note: it documents `MapCanvas.tsx`, which has since become `PaintCanvas.tsx`.*
-- `ProjectBar.tsx` (235) — persistent top strip: map switcher (`MapsMenu`), new/rename/delete, undo/redo, route nav buttons (editor/test/voxels/perf/assist/textures), Compile button, save pill, event-log popover. Menus export separately and render as the **root's last children** (the overlays-last hit-test rule, recorded in its header).
+- `ProjectBar.tsx` (235) — persistent top strip: map switcher (`MapsMenu`), new/rename/delete, undo/redo, route nav buttons (editor/test/labs/characters/vehicles/voxels/assist/cutout/textures/perf), Compile button, save pill, event-log popover. Menus export separately and render as the **root's last children** (the overlays-last hit-test rule, recorded in its header).
 - `QuadSplit.tsx` (133) — controlled 2×2 splitter; drag is driven by the host's **global cursor channel** (`system:cursor:move`, pumped by Zig from `SDL_GetGlobalMouseState`) rather than per-node mouse-move, so tracking never loses capture; mouse down/up only bracket the gesture.
 - `theme.ts` / `studio.cls.ts` (206) — classifier-driven styling: every colour is a `theme:` token; importing `studio.cls` seeds the studio theme (`setTokens`); per-instance states are sibling classes (`…On`/`…Active`). The two inspector surfaces render exclusively through these classes.
 
@@ -572,3 +572,52 @@ upgrade seam).
 `rjit game verify` (editors suite root): `paint.test.ts` 29 P4 cases GREEN —
 stroke/compositing/palette/history/document/WGSL-shape laws. JSX surfaces
 bundle-verified through the real cart pipeline aliases.
+
+## editors/cutout/ — the cutout painter route (CUTOUTAPP-0605, 2026-06-05)
+
+`cart/cutout`'s APP EXPERIENCE remade as the `/cutout` route in the one shell
+— the full-canvas, layer-stack, smart-select image/texture editor, for
+painting SKINS/TEXTURES (the user's explicit ask; an earlier wave's
+head-part-painting landing in /characters was ruled NOT it). The ENGINE is
+`editors/paint/` (consumed whole via `PaintEditor`, never forked); this route
+is the app around it. The cutout cart stays an untouched behavior reference;
+`editors/cutout/CAPTURE.md` is the APP-surface deletion contract (17-row
+inventory; the engine's 34 are already contracted in paint's own CAPTURE.md).
+Pieces:
+
+- `editors/cutout/stream.ts` — the V20 `cutout` concern (the LIBRARY): saved
+  working `PaintDocument`s (re-openable, upsert by id) + extracted
+  `CutoutAsset`s (name, source-res binary RLE mask, overlayRes preview cells,
+  pixel count, srcPath, source docId). Events carry the RESULTING artifact
+  (`saved`/`extracted`/`removed`); unknown kinds pass through (V20). Lives
+  route-side until the game compile consumes painted assets (CAPTURE.md
+  ambiguity 1 — graduates behind a game/ door then; the log file never moves).
+- `editors/cutout/extraction.ts` — pure bookkeeping: `extractCutout` (refuses
+  empty selections; mask→asset→mask pinned exact), `cutoutToDocument` (a
+  stored cutout reopens as a one-layer document whose smart base IS the mask
+  — refinable, extendable: the composability law), id mints, collision-free
+  naming.
+- `editors/cutout/sources.ts` — source ingestion, the hosting editor's half
+  of the engine hand-off (`dims`/`srcPath`/`gray` as data): magick `identify`
+  + grayscale load for edge snapping.
+- `editors/cutout/CutoutRoute.tsx` — the page: header (name · save · extract
+  cutout · blank-canvas W×H + presets · image path + load · status), library
+  rail (documents + cutout swatches via `PaintQuad` cells mode; open/remove),
+  and the full painter (`usePaintEditor` + `PaintEditor`) remounted per
+  working target. File drop loads an image anywhere on the route. Smart
+  select auto-arms (`makeDefaultBackend`) only with an image source. Painter
+  hotkeys stay ON — the host suppresses key triggers while a TextInput is
+  focused.
+
+Session history (V20, the user's ruling): the route opens `/cutout` on the
+`cutout` channel — strokes/lasso/smart/layer-ops land as the painter's
+labeled notes; saves, extractions and removals are COMMIT-grade (content
+event + marker + materialized snapshot). Wired as `/cutout` + the Scissors
+nav icon in ProjectBar (beside the texture studio). `rjit game verify`
+(editors suite root): `cutout.test.ts` 7 P4 cases GREEN — extraction
+round-trip/refusal laws, reopen-as-document, library upsert/remove/
+unknown-kind tolerance, the one-commit-per-save session contract, replay
+identity, minting laws. Surfaced, not guessed (CAPTURE.md): file exports
+(PNG/pixel-icon/.sqi) deliberately absent pending the user's export ruling —
+the stream asset is the in-app landing and carries everything a file
+exporter would need.

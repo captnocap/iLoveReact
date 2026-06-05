@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -60,6 +60,9 @@ interface ProjectBarProps {
   // Navigate to the /vehicles route — the vehicle editor (editors/vehicles,
   // the vehicle_lab authoring UI remade; authors what game/vehicle builds).
   onVehicles: () => void;
+  // Navigate to the /cutout route — the cutout painter (editors/cutout, the
+  // cutout app experience remade; paints skins/textures on the shared painter).
+  onCutout: () => void;
 }
 
 function IconBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
@@ -108,6 +111,7 @@ export function ProjectBar(props: ProjectBarProps) {
         <IconBtn icon="Car" on={props.activeRoute === 'vehicles'} onPress={props.onVehicles} title="vehicles" />
         <IconBtn icon="Boxes" on={props.activeRoute === 'voxels'} onPress={props.onVoxels} title="voxel bake" />
         <IconBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
+        <IconBtn icon="Scissors" on={props.activeRoute === 'cutout'} onPress={props.onCutout} title="cutout painter" />
         <IconBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />
         <IconBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
       </Box>
