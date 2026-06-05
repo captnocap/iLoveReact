@@ -11,17 +11,19 @@ import { assert, assertClose, assertEqual, finish, test } from './_testkit';
 
 declare const globalThis: any;
 
-/** Fake host A*: one grid generation counter + straight-line routes. */
+/** Fake host: one grid generation counter + straight-line routes, speaking
+ *  the honest __game_pathing_* names the door is wired to. */
 let generation = 0;
 function installFakeHost(): void {
   generation = 7;
-  globalThis.__path_set_grid = () => ++generation;
-  globalThis.__path_update_cells = () => ++generation;
-  globalThis.__path_fill_rect = () => ++generation;
-  globalThis.__path_set_profile = () => undefined;
-  globalThis.__path_set_flows = () => ++generation;
-  globalThis.__path_generation = () => generation;
-  globalThis.__path_find = (_profile: number, x0: number, z0: number, x1: number, z1: number): ArrayBuffer => {
+  globalThis.__game_pathing_set_grid = () => ++generation;
+  globalThis.__game_pathing_update_cells = () => ++generation;
+  globalThis.__game_pathing_fill_rect = () => ++generation;
+  globalThis.__game_pathing_set_profile = () => undefined;
+  globalThis.__game_pathing_set_flows = () => ++generation;
+  globalThis.__game_pathing_set_kind_classes = () => ++generation;
+  globalThis.__game_pathing_generation = () => generation;
+  globalThis.__game_pathing_find = (_profile: number, x0: number, z0: number, x1: number, z1: number): ArrayBuffer => {
     const out = new Float32Array([generation, 2, x0, z0, x1, z1]);
     return out.buffer;
   };
@@ -29,8 +31,9 @@ function installFakeHost(): void {
 
 function removeFakeHost(): void {
   for (const name of [
-    '__path_set_grid', '__path_update_cells', '__path_fill_rect', '__path_set_profile',
-    '__path_set_flows', '__path_generation', '__path_find',
+    '__game_pathing_set_grid', '__game_pathing_update_cells', '__game_pathing_fill_rect',
+    '__game_pathing_set_profile', '__game_pathing_set_flows', '__game_pathing_set_kind_classes',
+    '__game_pathing_generation', '__game_pathing_find', '__game_pathing_plan',
   ]) delete globalThis[name];
 }
 
@@ -91,6 +94,34 @@ test('motion is deterministic: same t, same sample, ends at rest (R6)', () => {
   assertClose(end.speed, 0, 1e-9, 'the plan must end at rest');
   assertClose(end.x, 10, 1e-6, 'the plan must end at the destination x');
   assertClose(end.z, 10, 1e-6, 'the plan must end at the destination z');
+});
+
+test('publishing kind classes (the lane-discipline opt-in) bumps the generation', () => {
+  installFakeHost();
+  const before = GAME_PATHING.generation();
+  const gen = GAME_PATHING.setKindClasses([0, GAME_PATHING.CLASS.junction, GAME_PATHING.CLASS.crosswalk]);
+  assert(gen > before, 'classes reshape routes — the generation must move');
+  removeFakeHost();
+});
+
+test('a host-compiled plan unpacks into the sampleable MotionPlan shape', () => {
+  installFakeHost();
+  // hand-packed plan: (0,0)→(10,0), one 2s cruise phase at 5 m/s
+  globalThis.__game_pathing_plan = (): ArrayBuffer => {
+    const f = new Float64Array([
+      0, 2, 10, 2, 1, // t0, duration, total, npoints, nphases
+      0, 0, 10, 0, // points
+      0, 10, // cum
+      0, 0, 5, 0, 2, // phase t,s,v,a,dt
+    ]);
+    return f.buffer;
+  };
+  const plan = GAME_PATHING.planMotion([[0, 0], [10, 0]], { startTime: 0, profile: WALK });
+  assertEqual(plan.duration, 2, 'the door must carry the HOST schedule, not rebuild one');
+  const mid = GAME_PATHING.sampleMotion(plan, 1);
+  assertClose(mid.x, 5, 1e-9, 'JS closed-form sampling must read the host phases');
+  assertClose(mid.speed, 5, 1e-9, 'cruise speed comes from the host phase');
+  removeFakeHost();
 });
 
 test('an interruption slice starts exactly where the old sample stood', () => {
