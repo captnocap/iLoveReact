@@ -50,6 +50,11 @@ export type { FrameHandle } from './loop';
 export { GAME_COMMANDS, createCommandRegistry, parseCommandValue, tokenizeCommandLine } from './commands';
 export type { CommandOutcome, CommandRegistry, CommandSpec, ScriptResult } from './commands';
 
+// The world grid substrate (V4 capture — landed behind ./world but the door
+// line was missing; consumers were reaching it only via GAME_COMMANDS' ctx).
+export { GAME_WORLD } from './world';
+export type { GridCell, LandformPlacement, PlacedCell, WorldGridState, WorldSurfaceRegion } from './world';
+
 // ── capture-pending doors (V17: the import line is already the right one) ──
 export { GAME_FIGURE, charactersStream, bakeBodyDocument } from './figure';
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';

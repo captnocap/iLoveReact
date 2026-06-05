@@ -4,27 +4,31 @@
 // reaching into cart/hmsc/** are marked GAP(W-1|W-2|W-3) and move behind the
 // world lanes when those captures land — never half-captured here.
 //
-//   GAME_INPUT   keys (blur-clearing snapshot), WASD contract, camera-relative
-//                moveIntent (the V7 cart-side duty: ship a direction vector),
-//                typing gate.
-//   GAME_CAMERA  Orbit rig solve — boot frame matched to the old hand trig.
-//   GAME_LOOP    frame transport (rAF probe) + monotonic now.
-//   GAME_FIGURE  the V2 kit player (seeded face, dressed rig); render via the
-//                editor-preview path @game/figure/render (V2-AMENDED: per-frame
-//                JS rig eval is editor/lab-only; the compiled game uses the bake).
+//   GAME_INPUT    keys (blur-clearing snapshot), WASD contract, camera-relative
+//                 moveIntent (the V7 cart-side duty: ship a direction vector),
+//                 typing gate.
+//   GAME_CAMERA   BOTH ruled modes (Q3/Q3b): Orbit walk + RMB ADS Aim rig.
+//   GAME_LOOP     frame transport (rAF probe) + monotonic now.
+//   GAME_FIGURE   the V2 kit player (seeded face, dressed rig); render via the
+//                 editor-preview path @game/figure/render (V2-AMENDED: per-frame
+//                 JS rig eval is editor/lab-only; the compiled game uses the bake).
+//   GAME_PHYSICS  the host step owns integration: movement blend, gravity,
+//                 jump arc, ground/step resolution.
+//   GAME_WORLD    W-1 CLOSED — colliders (collisionRects), terrain heightfields
+//                 (registerHeightfields), footing→surface feel, ground heights.
+//   GAME_COMMANDS the backtick console session (CS idiom) over the live route.
 //
-// GAP(W-1) world grid: GameState types, ground-height sampling, the kinematic
-//   advance (host integration per V7 needs the world→collider adapter), spawn.
 // GAP(W-2) world render: WorldStatics + the surface-capture mounts.
 // GAP(W-3) game sky: hmsc config.sky has no captured home (chrome's LabSky is
 //   the lab environment, a different shape).
+// GAP(buildings) building/prop collision + interiors: its own NOT_YET lane.
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
-import { GAME_CAMERA, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_PHYSICS } from '@game';
-import type { CollisionRect } from '@game';
+import { GAME_CAMERA, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_PHYSICS, GAME_WORLD } from '@game';
+import type { WorldGridState } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
-import type { GameState, Vec3 } from '../hmsc/design'; // GAP(W-1) awaiting world grid state
+import type { GameState, Vec3 } from '../hmsc/design'; // GAP: the editor GameState type retires when hmsc becomes compile/'s output (V15)
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D'; // GAP(W-2) awaiting world render
 import { TileSurfaceCaptures } from '../hmsc/render3d/tileSurface'; // GAP(W-2)
 import { RoadSurfaceCaptures } from '../hmsc/render3d/Road'; // GAP(W-2)
@@ -35,8 +39,6 @@ import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures'; // GAP(W-2)
 import { WorldPartCaptures } from '../hmsc/render3d/PartCaptures'; // GAP(W-2)
 import { DriveInScreenCaptures } from '../hmsc/render3d/driveInScreen'; // GAP(W-2)
 import { hmscSkyBackgroundColor } from '../hmsc/render3d/sky'; // GAP(W-3) awaiting game sky
-import { landformGroundTopAt } from '../hmsc/world/landforms'; // GAP(W-1) awaiting ground heights
-import { surfaceRegionTopMeters } from '../hmsc/world/surfaceHeights'; // GAP(W-1)
 
 const DEG = Math.PI / 180;
 
@@ -92,16 +94,11 @@ type PlayerPose = {
   gaitPhase: number;
 };
 
-// Surface feel under the player. Tile-below-player resolution is world-grid
-// territory — GAP(W-1); until that door lands, use the game's observed no-tile
-// fallback (hostPhysics behavior reference: `?? tileKindDefinition('road')`),
-// read from the captured kind table — no new numbers.
+// Surface feel under the player: the door's footing resolution
+// (GAME_WORLD.footingKindAtWorldPosition — water/placed-cell/landform/region,
+// the reference's layer order) into the captured kind table; the no-tile
+// fallback is the game's observed one (hostPhysics: `?? 'road'`).
 const FALLBACK_SURFACE = GAME_KINDS.tiles.get('road').surface;
-const SURFACE_FEEL = {
-  accelerationMultiplier: FALLBACK_SURFACE.accelerationMultiplier,
-  friction: FALLBACK_SURFACE.friction,
-  restitution: FALLBACK_SURFACE.restitution,
-} as const;
 
 // Same epsilon discipline as the game's drive loop (hostPhysics): a resting
 // host step must not publish a fresh pose object every frame — that is the
@@ -116,25 +113,38 @@ function normalizeYawDegrees(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
 }
 
-// GAP(W-1): JS ground sampling. The captured home is host-side
-// (GAME_PHYSICS.step + registerHeightfield) but feeding it needs the
-// GameState-world → CollisionRect[]/Heightfield[] adapter the world-grid lane
-// owns; sampling here keeps the route honest until W-1 lands.
-function groundTop(state: GameState, x: number, z: number): number {
-  let top = 0;
-  const c = state.world.cellSizeMeters;
-  for (const r of state.world.surfaceRegions) {
-    if (x >= r.x * c && x <= (r.x + r.width) * c && z >= r.z * c && z <= (r.z + r.depth) * c) {
-      top = Math.max(top, surfaceRegionTopMeters(r, c));
-    }
-  }
-  return Math.max(top, landformGroundTopAt(state, x, z) ?? top);
+// The authored GameState's world slice IS the captured world-grid shape
+// (the editor lowers paint/placements into these exact records) — this view
+// is what every GAME_WORLD call takes. W-1 CLOSED: colliders, ground heights,
+// and footing all flow from the door now. Buildings/props collision stays
+// with its own lane ('buildings + interiors' in NOT_YET_CAPTURED).
+function worldGridOf(state: GameState): WorldGridState {
+  return {
+    cellSizeMeters: state.world.cellSizeMeters,
+    surfaceRegions: state.world.surfaceRegions as unknown as WorldGridState['surfaceRegions'],
+    placedCells: state.world.placedCells as unknown as WorldGridState['placedCells'],
+    landforms: (state.world.landforms ?? []) as unknown as WorldGridState['landforms'],
+  };
 }
 
-// GAP(W-1): spawn glue — the world grid lane owns spawn/respawn (pv_respawn).
-function initialPlayer(state: GameState): PlayerPose {
+// Spawn-column ground: the highest standable top at (x, z) regardless of the
+// player's current y — region tops + landform surface, all door math. (The
+// door's groundTopAtWorldPosition is step-gated from a KNOWN y; spawning has
+// none yet, so the column scan stays route glue over door functions.)
+function spawnGroundTop(world: WorldGridState, x: number, z: number): number {
+  let top = 0;
+  const c = world.cellSizeMeters;
+  for (const r of world.surfaceRegions) {
+    if (x >= r.x * c && x <= (r.x + r.width) * c && z >= r.z * c && z <= (r.z + r.depth) * c) {
+      top = Math.max(top, GAME_WORLD.surfaceRegionTopMeters(r, c));
+    }
+  }
+  return Math.max(top, GAME_WORLD.landformGroundTopAt(world, x, z) ?? top);
+}
+
+function initialPlayer(state: GameState, world: WorldGridState): PlayerPose {
   const p = state.player;
-  const y = groundTop(state, p.position.x, p.position.z);
+  const y = spawnGroundTop(world, p.position.x, p.position.z);
   return {
     x: p.position.x, y, z: p.position.z,
     vx: 0, vy: 0, vz: 0, grounded: true,
@@ -142,31 +152,30 @@ function initialPlayer(state: GameState): PlayerPose {
   };
 }
 
-// GAP(W-1): the interim collider feed. The world→collider adapter belongs to
-// the game/world door being captured in a parallel lane; until it lands, the
-// only collider the step gets is a ground band at the locally-sampled ground
-// height (the host arc lands on the painted terrain). The moment that door
-// exposes its adapter, THIS function becomes a door call and the route stops
-// owning any collision shape. Half-width just needs to exceed one frame of
-// travel; it is not a gameplay number.
-const GROUND_BAND_HALF_METERS = 64;
-function collidersFor(state: GameState, around: { x: number; z: number }): { rects: CollisionRect[] } {
-  return {
-    rects: [{
-      minX: around.x - GROUND_BAND_HALF_METERS,
-      maxX: around.x + GROUND_BAND_HALF_METERS,
-      minZ: around.z - GROUND_BAND_HALF_METERS,
-      maxZ: around.z + GROUND_BAND_HALF_METERS,
-      topMeters: groundTop(state, around.x, around.z),
-      blocksPlayer: false,
-      friction: SURFACE_FEEL.friction,
-      restitution: SURFACE_FEEL.restitution,
-    }],
-  };
-}
-
 export function TestRoute(props: { state: GameState; mapName: string; onExit: () => void }) {
-  const [player, setPlayer] = useState(() => initialPlayer(props.state));
+  // W-1 CLOSED: the door's view over the authored world — every GAME_WORLD
+  // call (colliders, heightfields, footing, ground) takes this. Memoized per
+  // authored state; the world is static while playing.
+  const worldGrid = useMemo(() => worldGridOf(props.state), [props.state]);
+  // The flat solid bands of the captured layers (regions + placed cells —
+  // blocking tiles like walls now BLOCK). Buildings/props stay with their lane.
+  const colliders = useMemo(() => {
+    const built = GAME_WORLD.collisionRects(worldGrid);
+    if (built.dropped > 0) console.warn(`[test] world colliders past the host cap: ${built.dropped} dropped`);
+    return built;
+  }, [worldGrid]);
+  // Terrain heightfields → host collider slots (see-it == walk-it: painted
+  // hills are walkable, slopes resolve host-side). No-op until the host
+  // carries has-game-physics; cleared on unmount so other routes start clean.
+  useEffect(() => {
+    const baked = GAME_WORLD.registerHeightfields(worldGrid);
+    if (baked.dropped > 0) console.warn(`[test] landforms past the heightfield slots: ${baked.dropped} not baked`);
+    return () => {
+      GAME_PHYSICS.clearHeightfields();
+    };
+  }, [worldGrid]);
+
+  const [player, setPlayer] = useState(() => initialPlayer(props.state, worldGrid));
   const playerRef = useRef(player);
   playerRef.current = player;
   const [look, setLook] = useState(() => ({ yaw: props.state.player.yawDegrees, pitch: CAMERA.initialPitchDegrees }));
@@ -267,11 +276,11 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   const figureOffset = useMemo<[number, number, number]>(() => [player.x, player.y, player.z], [player.x, player.y, player.z]);
 
   useEffect(() => {
-    const next = initialPlayer(props.state);
+    const next = initialPlayer(props.state, worldGrid);
     playerRef.current = next;
     setPlayer(next);
     setLook((l) => ({ ...l, yaw: props.state.player.yawDegrees }));
-  }, [props.state]);
+  }, [props.state, worldGrid]);
 
   // Key transport: the door's held-keys snapshot (blur-clears on focus loss).
   useEffect(() => {
@@ -318,13 +327,21 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       const desiredYaw = aim
         ? normalizeYawDegrees(lookRef.current.yaw)
         : moving ? normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG) : prev.yaw;
+      // Surface under the player through the door: footing kind → the
+      // captured kind table's surface profile (the reference behavior — mud
+      // slows you, asphalt doesn't). No-tile fallback = the observed 'road'.
+      const footing = GAME_WORLD.footingKindAtWorldPosition(worldGrid, { x: prev.x, y: prev.y, z: prev.z });
+      const surfaceProfile = footing ? GAME_KINDS.tiles.get(footing).surface : FALLBACK_SURFACE;
       // P2: speeds are data — the console ctx is the live owner, SEEDED from
       // the authored GameState (defaults 2.4/5.8 = GAME_COMMANDS.tuning), so
-      // `gv_speed` in the console drives the real walk/run on this route.
-      const speed = running ? gameConsole.ctx.player.runSpeedMetersPerSecond : gameConsole.ctx.player.walkSpeedMetersPerSecond;
+      // `gv_speed` in the console drives the real walk/run on this route —
+      // scaled by the footing's walk/run multiplier (movementSurfaceForPlayer).
+      const baseSpeed = running ? gameConsole.ctx.player.runSpeedMetersPerSecond : gameConsole.ctx.player.walkSpeedMetersPerSecond;
+      const speed = baseSpeed * (running ? surfaceProfile.runSpeedMultiplier : surfaceProfile.walkSpeedMultiplier);
       // The host owns integration (V7): movement blend, gravity, the jump arc
       // (WO-1-proven), ground/step resolution — tuning is the authored
-      // state.config.physics, colliders are the GAP(W-1) interim feed.
+      // state.config.physics, colliders + heightfields are the W-1 door's
+      // (GAME_WORLD.collisionRects / registerHeightfields, mounted above).
       const stepped = GAME_PHYSICS.hostReady()
         ? GAME_PHYSICS.step({
             dtSeconds: dt,
@@ -337,9 +354,13 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
               velocity: { x: prev.vx, y: prev.vy, z: prev.vz },
               yawDegrees: prev.yaw,
             },
-            surface: SURFACE_FEEL,
+            surface: {
+              accelerationMultiplier: surfaceProfile.accelerationMultiplier,
+              friction: surfaceProfile.friction,
+              restitution: surfaceProfile.restitution,
+            },
             tuning: props.state.config.physics,
-            rects: collidersFor(props.state, prev).rects,
+            rects: colliders.rects,
           })
         : null;
       if (stepped) {
@@ -372,7 +393,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         const next: PlayerPose = {
           ...prev,
           x,
-          y: groundTop(props.state, x, z),
+          y: spawnGroundTop(worldGrid, x, z),
           z,
           yaw: desiredYaw,
           moving: true,
@@ -393,7 +414,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       alive = false;
       if (handle != null) GAME_LOOP.cancelFrame(handle);
     };
-  }, [props.state, gameConsole]);
+  }, [props.state, gameConsole, worldGrid, colliders]);
 
   // Drag-orbit gesture: route chrome (visible-cursor drag; the door's
   // readPointerDelta capture-mode mouse-look is deliberately not adopted).
@@ -421,7 +442,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   };
   const onUp = () => { dragRef.current = null; };
   const resetPlayer = () => {
-    const next = initialPlayer(props.state);
+    const next = initialPlayer(props.state, worldGrid);
     playerRef.current = next;
     setPlayer(next);
     setLook((l) => ({ ...l, yaw: next.yaw }));
