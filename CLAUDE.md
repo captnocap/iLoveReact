@@ -23,7 +23,7 @@ The following directories are READ-ONLY and FROZEN:
 
 # HARD RULE: V8 IS THE DEFAULT RUNTIME
 
-The default JS runtime is **V8** (embedded via zig-v8). `scripts/ship` builds V8. `--qjs` is legacy opt-in.
+The default JS runtime is **V8** (embedded via zig-v8). `tools/rjit ship` builds V8. `--qjs` is legacy opt-in.
 
 The "V8 has baggage" myth is fake. The baggage is Chromium (~200MB CEF), not V8 itself (~6MB standalone). We measured it.
 
@@ -70,7 +70,7 @@ To stop a specific known PID use `kill <PID>` with the exact numeric PID. Never 
 
 # HARD RULE: NO SELF-MATCHING PGREP POLLS
 
-Do not write `until ! pgrep -f "zig build ..."; do sleep 3; done`-style wait loops. `pgrep -f` finds the *current polling shell* whose command line contains the search string — that's a self-matching deadlock. `scripts/ship` already has internal flock serialization; call it directly and let it queue.
+Do not write `until ! pgrep -f "zig build ..."; do sleep 3; done`-style wait loops. `pgrep -f` finds the *current polling shell* whose command line contains the search string — that's a self-matching deadlock. `tools/rjit ship` already has internal flock serialization (the same `.zig-cache/.ship.lock` the legacy `scripts/ship` holds, so all build paths queue against each other); call it directly and let it queue.
 
 ---
 
@@ -111,8 +111,15 @@ React's reconciler emits CREATE/APPEND/UPDATE mutation commands; the Zig framewo
 ## Ship Path (the only path)
 
 ```bash
-./scripts/ship <cart-name>          # cart/<name>.tsx → zig-out/bin/<name> (self-extracting)
+./tools/rjit ship <cart-name>       # cart/<name>.tsx → zig-out/bin/<name> (self-extracting)
+SHIP_RUN_PACKAGE=0 ./tools/rjit ship <cart-name>   # fast verification: raw app binary, no self-extractor packaging
 ```
+
+**Never invoke `./scripts/ship` (or `./scripts/dev`) directly.** `tools/rjit` is
+what agents invoke for all build/dev work. `scripts/ship` is the legacy bash
+pipeline kept parallel to the TypeScript CLI (`cli/commands/ship.ts`) — rjit does
+NOT call it; both serialize on the same flock lock, but rjit is the ruled entry
+point (see AGENTS.md).
 
 There are no debug or raw-ELF flags. `-d` and `--raw` were removed on 2026-05-04 — `-d` produced a binary that crashed on launch, and `--raw` was never wired up.
 
@@ -125,15 +132,15 @@ What happens: esbuild bundles TSX → `bundle.js`, Zig compiles the cart host wi
 ## Dev Path (iterate without rebuilding)
 
 ```bash
-./scripts/dev <cart-name>       # launches the dev host + watches <cart>
-./scripts/dev <other-cart>      # second terminal: pushes to running host, adds tab
+./tools/rjit dev <cart-name>    # launches the dev host + watches <cart>
+./tools/rjit dev <other-cart>   # second terminal: pushes to running host, adds tab
 ```
 
 The dev host is a single persistent ReleaseFast binary:
 - **Hot reload for React / TSX / TS** — editing files under `cart/` or `runtime/` re-bundles and re-evals in ~300ms. No rebuild needed.
 - **Rebuild required for Zig / framework / build-pipeline changes** — anything under `framework/`, `build.zig`, or `scripts/` needs the binary rebuilt.
 - **Tabs in the titlebar** — borderless host, top strip IS window chrome. Click tab to switch. Double-click empty chrome toggles maximize. Drag to move.
-- **Debug builds silently crash on click.** Always use `ReleaseFast` (default in `scripts/dev`).
+- **Debug builds silently crash on click.** Always use `ReleaseFast` (default in `rjit dev`).
 
 **State preservation across reloads is NOT working yet.** `useHotState` + `framework/hotstate.zig` are wired but state resets on every reload.
 
