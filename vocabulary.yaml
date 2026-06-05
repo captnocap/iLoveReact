@@ -1,13 +1,13 @@
 metadata:
   project_name: ''
   created_at: '2026-05-18T16:42:36.159688+00:00'
-  updated_at: '2026-05-31T22:23:15.977213+00:00'
+  updated_at: '2026-06-05T01:22:14.460762+00:00'
   version: '1.0'
 entries:
 - term: cart
   category: noun
   definition: A .tsx app under cart/. Each cart compiles to one self-extracting binary
-    via ./scripts/ship <name>. Cart name == directory/file basename.
+    via tools/rjit ship <name>. Cart name == directory/file basename.
   antipatterns:
   - NOT a shopping cart, vehicle, or container concept
   - NOT an arbitrary React project — carts have a fixed runtime shape (V8 host + bundled
@@ -54,10 +54,16 @@ entries:
   added_by: vocabulary_add
 - term: ship
   category: verb
-  definition: ./scripts/ship <cart> — the one and only build path. Bundles cart .tsx
-    via esbuild → bundle.js → Zig compiles host with @embedFile → Linux self-extracting
-    wrapper or macOS .app. Always release mode.
+  definition: tools/rjit ship <cart> — the build entry point agents invoke. Bundles
+    cart .tsx via esbuild → bundle.js → Zig compiles host with @embedFile → Linux
+    self-extracting wrapper or macOS .app. Always release mode. Fast verification
+    variant — SHIP_RUN_PACKAGE=0 ./tools/rjit ship <cart> — yields the raw app binary
+    without self-extractor packaging. scripts/ship is the legacy-parallel bash
+    pipeline (rjit does NOT call it; both serialize on the same
+    .zig-cache/.ship.lock flock) and is never invoked directly.
   antipatterns:
+  - Do NOT invoke ./scripts/ship directly for game work — agents always go through
+    tools/rjit ship (ruled; CLAUDE.md 'Ship Path' + AGENTS.md)
   - Do NOT pass -d or --raw; both were removed 2026-05-04. -d binary crashes on click.
   - Do NOT pgrep-wait for 'zig build' before invoking ship; ship has internal flock
     and the polling shell self-matches
@@ -68,26 +74,29 @@ entries:
   - cart
   - bundle
   - V8
-  defined_in: scripts/ship
+  defined_in: cli/commands/ship.ts
   added_at: '2026-05-18T16:42:46.430563+00:00'
   added_by: vocabulary_add
 - term: dev
   category: verb
-  definition: ./scripts/dev <cart> launches a persistent ReleaseFast dev host with
+  definition: tools/rjit dev <cart> launches a persistent ReleaseFast dev host with
     hot reload for cart/ + runtime/ TSX. Editing .tsx re-bundles+re-evals in ~300ms.
-    A second 'dev <other>' pushes to the running host and adds a tab.
+    A second 'dev <other>' pushes to the running host and adds a tab. scripts/dev
+    is the legacy-parallel bash script and is never invoked directly.
   antipatterns:
-  - Do NOT restart ./scripts/dev after every edit — the user has an auto-push watcher
+  - Do NOT invoke ./scripts/dev directly — agents use tools/rjit dev (same ruling
+    as ship; CLAUDE.md + AGENTS.md)
+  - Do NOT restart the dev host after every edit — the user has an auto-push watcher
     already running
-  - Hot reload does NOT cover framework/, build.zig, or scripts/ — those changes require
-    a fresh ship
+  - Hot reload does NOT cover framework/, build.zig, or the build pipeline — those
+    changes require a fresh ship
   - Do NOT assume useHotState preserves state — wiring exists but it currently resets
     every reload
   related_terms:
   - ship
   - useHotState
   - cart
-  defined_in: scripts/dev
+  defined_in: cli/commands/dev.ts
   added_at: '2026-05-18T16:42:51.042953+00:00'
   added_by: vocabulary_add
 - term: framework
@@ -98,8 +107,8 @@ entries:
   antipatterns:
   - Do NOT confuse with 'React framework' or any JS-side concept — framework is Zig
     only
-  - Changes under framework/ require a rebuild via ship; they are NOT covered by ./scripts/dev
-    hot reload
+  - Changes under framework/ require a rebuild via ship; they are NOT covered by
+    rjit dev hot reload
   related_terms:
   - runtime
   - renderer
@@ -290,7 +299,8 @@ entries:
   antipatterns:
   - Do NOT attempt scripts/ship -d — the flag is gone and the binary it produced was
     unusable
-  - Do NOT downgrade scripts/dev to Debug — it silently crashes on click. Always ReleaseFast.
+  - Do NOT downgrade the dev host (rjit dev) to Debug — it silently crashes on click.
+    Always ReleaseFast.
   - If a cart crashes on launch or click, the first hypothesis is NOT 'try a debug
     build for more info' — release IS the working configuration here
   related_terms:
@@ -319,9 +329,9 @@ entries:
   added_by: vocabulary_add
 - term: V8
   category: noun
-  definition: The default JS runtime, embedded via zig-v8 (~6MB standalone). scripts/ship
-    builds V8. The 'V8 is bloated' myth confuses V8 with Chromium (~200MB CEF); standalone
-    V8 is small.
+  definition: The default JS runtime, embedded via zig-v8 (~6MB standalone). tools/rjit
+    ship builds V8. The 'V8 is bloated' myth confuses V8 with Chromium (~200MB CEF);
+    standalone V8 is small.
   antipatterns:
   - Do NOT propose switching to a smaller engine 'for performance' — V8 is fast and
     not the bottleneck. The historical click-latency bug was a synchronous npx tsc
