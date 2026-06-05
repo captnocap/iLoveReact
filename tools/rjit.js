@@ -5875,9 +5875,11 @@ export default function App() {
   var IMPORTS_MARKER = "// rjit:lab-imports";
   var ENTRIES_MARKER = "// rjit:lab-entries";
   async function run14(argv) {
-    if (argv[0] !== "new") {
+    if (argv[0] !== "new" && argv[0] !== "remove") {
       err("Usage: rjit lab new <name>");
+      err("       rjit lab remove <name>");
       err("  scaffolds labs/<name>.tsx + labs/<name>.notes.md and registers the lab");
+      err("  removes labs/<name>.tsx + labs/<name>.notes.md and unregisters the lab");
       return 2;
     }
     const name = argv[1];
@@ -5888,6 +5890,9 @@ export default function App() {
     const root = __cwd();
     const scenePath = `${LABS_DIR}/${name}.tsx`;
     const notesPath = `${LABS_DIR}/${name}.notes.md`;
+    if (argv[0] === "remove") {
+      return removeLab(root, name, scenePath, notesPath);
+    }
     if (fsExists(`${root}/${scenePath}`) || fsExists(`${root}/${notesPath}`)) {
       err(`[lab] ${name} already exists (${scenePath})`);
       return 1;
@@ -5913,6 +5918,37 @@ ${IMPORTS_MARKER}`).replace(
     out(`[lab] scaffolded ${scenePath}`);
     out(`[lab] paired notes ${notesPath}`);
     out(`[lab] registered "${name}" in ${REGISTRY} \u2014 it lists on the labs route`);
+    return 0;
+  }
+  function removeLab(root, name, scenePath, notesPath) {
+    const componentName = pascalCase(name);
+    const registry = fsRead(`${root}/${REGISTRY}`);
+    if (!registry.includes(IMPORTS_MARKER) || !registry.includes(ENTRIES_MARKER)) {
+      err(`[lab] ${REGISTRY} is missing its rjit markers \u2014 restore them before removing labs`);
+      return 1;
+    }
+    const sceneExists = fsExists(`${root}/${scenePath}`);
+    const notesExists = fsExists(`${root}/${notesPath}`);
+    const importLine = `import ${componentName} from './${name}';
+`;
+    const entryLine = `  { name: '${name}', Component: ${componentName}, notesPath: '${notesPath}' },
+`;
+    const importRegistered = registry.includes(importLine);
+    const entryRegistered = registry.includes(entryLine);
+    if (!sceneExists && !notesExists && !importRegistered && !entryRegistered) {
+      err(`[lab] ${name} does not exist`);
+      return 1;
+    }
+    if (!sceneExists || !notesExists || !importRegistered || !entryRegistered) {
+      err(`[lab] ${name} is not a clean lab scaffold \u2014 expected ${scenePath}, ${notesPath}, and registry rows`);
+      return 1;
+    }
+    fsRemove(`${root}/${scenePath}`);
+    fsRemove(`${root}/${notesPath}`);
+    fsWrite(`${root}/${REGISTRY}`, registry.replace(importLine, "").replace(entryLine, ""));
+    out(`[lab] removed ${scenePath}`);
+    out(`[lab] removed paired notes ${notesPath}`);
+    out(`[lab] unregistered "${name}" from ${REGISTRY}`);
     return 0;
   }
   function pascalCase(kebab) {

@@ -1,5 +1,5 @@
-// cli/commands/lab.ts - `rjit lab new <name>` (V17: a new lab is a scaffold
-// from a script, so every lab carries the same shape).
+// cli/commands/lab.ts - `rjit lab new/remove <name>` (V17: a new lab is a
+// scaffold from a script, so every lab carries the same shape).
 //
 // Copies the template pair (labs/_scaffold.tsx + labs/_scaffold.notes.md) to
 // labs/<name>.tsx + labs/<name>.notes.md with the tokens filled, and inserts
@@ -8,7 +8,7 @@
 // file is GAME_* imports + an exported scene, nothing else; the notes are the
 // lab's P6 contract.
 
-import { fsExists, fsRead, fsWrite } from '../host/fs.ts';
+import { fsExists, fsRead, fsRemove, fsWrite } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 
 const LABS_DIR = 'cart/hmsc-int/labs';
@@ -19,9 +19,11 @@ const IMPORTS_MARKER = '// rjit:lab-imports';
 const ENTRIES_MARKER = '// rjit:lab-entries';
 
 export async function run(argv: string[]): Promise<number> {
-  if (argv[0] !== 'new') {
+  if (argv[0] !== 'new' && argv[0] !== 'remove') {
     err('Usage: rjit lab new <name>');
+    err('       rjit lab remove <name>');
     err('  scaffolds labs/<name>.tsx + labs/<name>.notes.md and registers the lab');
+    err('  removes labs/<name>.tsx + labs/<name>.notes.md and unregisters the lab');
     return 2;
   }
   const name = argv[1];
@@ -33,6 +35,10 @@ export async function run(argv: string[]): Promise<number> {
   const root = __cwd();
   const scenePath = `${LABS_DIR}/${name}.tsx`;
   const notesPath = `${LABS_DIR}/${name}.notes.md`;
+  if (argv[0] === 'remove') {
+    return removeLab(root, name, scenePath, notesPath);
+  }
+
   if (fsExists(`${root}/${scenePath}`) || fsExists(`${root}/${notesPath}`)) {
     err(`[lab] ${name} already exists (${scenePath})`);
     return 1;
@@ -67,6 +73,40 @@ export async function run(argv: string[]): Promise<number> {
   out(`[lab] scaffolded ${scenePath}`);
   out(`[lab] paired notes ${notesPath}`);
   out(`[lab] registered "${name}" in ${REGISTRY} — it lists on the labs route`);
+  return 0;
+}
+
+function removeLab(root: string, name: string, scenePath: string, notesPath: string): number {
+  const componentName = pascalCase(name);
+  const registry = fsRead(`${root}/${REGISTRY}`);
+  if (!registry.includes(IMPORTS_MARKER) || !registry.includes(ENTRIES_MARKER)) {
+    err(`[lab] ${REGISTRY} is missing its rjit markers — restore them before removing labs`);
+    return 1;
+  }
+
+  const sceneExists = fsExists(`${root}/${scenePath}`);
+  const notesExists = fsExists(`${root}/${notesPath}`);
+  const importLine = `import ${componentName} from './${name}';\n`;
+  const entryLine = `  { name: '${name}', Component: ${componentName}, notesPath: '${notesPath}' },\n`;
+  const importRegistered = registry.includes(importLine);
+  const entryRegistered = registry.includes(entryLine);
+
+  if (!sceneExists && !notesExists && !importRegistered && !entryRegistered) {
+    err(`[lab] ${name} does not exist`);
+    return 1;
+  }
+  if (!sceneExists || !notesExists || !importRegistered || !entryRegistered) {
+    err(`[lab] ${name} is not a clean lab scaffold — expected ${scenePath}, ${notesPath}, and registry rows`);
+    return 1;
+  }
+
+  fsRemove(`${root}/${scenePath}`);
+  fsRemove(`${root}/${notesPath}`);
+  fsWrite(`${root}/${REGISTRY}`, registry.replace(importLine, '').replace(entryLine, ''));
+
+  out(`[lab] removed ${scenePath}`);
+  out(`[lab] removed paired notes ${notesPath}`);
+  out(`[lab] unregistered "${name}" from ${REGISTRY}`);
   return 0;
 }
 
