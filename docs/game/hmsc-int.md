@@ -197,3 +197,25 @@ gitignored (the content time machine); backup story = `store.exportBackup()`
 `__fs_append` binding yet, so appends are read+concat+write (semantically
 append-only; the reader tolerates a torn trailing line). P4 suite
 `data/data.test.ts` rides `rjit game verify` (suite roots: game/ + data/).
+
+## game/figure/ — the character kit (V2/V2-AMENDED/V1 capture, 2026-06-05)
+
+The head_lab kit REWRITTEN fresh (cart/head_lab untouched — behavior
+reference; its editor UI is fenced to a later editors/characters/ wave).
+Shape: `shapes.ts` (the P2 data layer — part presets, 8 body shapes, garment
+palettes, LODs), `skeleton.ts` (25-bone FK, action-modulated; bone-record
+place/offset/blend helpers), `assembly.ts`/`clothing.ts` (bones-driven parts,
+sockets, finger fans, garments), `rig.ts` (the dressed BodyRigFrame; RULED
+damage zones lArm/rArm/lLeg/rLeg over oriented-box hit volumes, all 25 bones
+mapped; semantic anchors; `buildRigFrameFromBones` = the V1 seam), `hed.ts`
+(.hed codec, one-shape color+relief law, deterministic face animations,
+seeded generateFace), `body.ts` (.body codec, legacy-part validity),
+`ragdoll.ts` (the V1 CONTRACT: seam + RAGDOLL_TUNING data — deliberately NO
+solver; the host feature is the physics lane's, validated against the
+archived JS reference), `bake.ts` (THE BAKE ENTRY: documents/seeds in →
+deterministic host-shaped BakedFigures out; `partGlobeParams` is the one
+param recipe render and bake share), `render.tsx` (EDITOR/LAB PREVIEW path
+only per V2-AMENDED; React-free door keeps headless verify clean). 24 P4
+tests across four suites ride `rjit game verify`; CAPTURE.md records drops +
+ambiguities (P2 grain in the FK, visual-height canon, texture-key prefix,
+ragdollHostReady=false until the binding exists).

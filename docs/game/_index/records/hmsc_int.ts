@@ -75,6 +75,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/figure (GAME_FIGURE — the character kit)',
+      purpose: ['character', 'ragdoll', 'damage', 'asset_pipeline', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/figure/index.ts',
+      description:
+        'V2/V2-AMENDED/V1 capture (2026-06-05): the head_lab kit REWRITTEN fresh (cart/head_lab untouched; editor UI fenced to editors/characters/). shapes.ts = P2 data (presets/8 body shapes/garments/LODs); skeleton.ts = 25-bone action-modulated FK + place/offset/blend; assembly/clothing bones-driven (sockets, finger fans, pose-tracking garments); rig.ts = BodyRigFrame + RULED damage zones (lArm/rArm/lLeg/rLeg over oriented boxes, 25 bones mapped) + anchors + buildRigFrameFromBones (the V1 seam); hed.ts/.body codecs (one-shape color+relief law, deterministic animations, seeded generateFace); ragdoll.ts = the V1 CONTRACT (seam + RAGDOLL_TUNING, deliberately NO solver — host feature is the physics lane, acceptance vs the archived JS reference); bake.ts = THE BAKE ENTRY (seeds/documents → deterministic host-shaped BakedFigures; partGlobeParams shared with render). render.tsx = preview path only (React-free door keeps headless verify clean). 24 P4 tests in 4 suites; CAPTURE.md records drops + ambiguities.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
       name: 'game/kinds (GAME_KINDS registries)',
       purpose: ['world_gen', 'ai_edit', 'maintenance'],
       kind: 'module',

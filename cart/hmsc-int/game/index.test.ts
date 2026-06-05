@@ -18,7 +18,7 @@ const STANDARD_NAMES = [
 
 /** The doors THIS lane sealed; other lanes' doors (e.g. kinds) own their own style. */
 const SEALED_HERE = [
-  'GAME_PHYSICS', 'GAME_PATHING', 'GAME_INPUT', 'GAME_CAMERA', 'GAME_LOOP', 'GAME_COMMANDS',
+  'GAME_PHYSICS', 'GAME_PATHING', 'GAME_INPUT', 'GAME_CAMERA', 'GAME_LOOP', 'GAME_COMMANDS', 'GAME_FIGURE',
 ];
 
 test('the door exports all 19 standard GAME_* names (V17)', () => {
@@ -33,7 +33,7 @@ test('the door exports all 19 standard GAME_* names (V17)', () => {
 });
 
 test('live doors are live; capture-pending doors say so honestly', () => {
-  const live = [...SEALED_HERE, 'GAME_KINDS', 'GAME_CHANCE'];
+  const live = [...SEALED_HERE, 'GAME_KINDS', 'GAME_CHANCE', 'GAME_PERCEPTION'];
   for (const name of live) {
     assert(!('status' in (door as any)[name]), `${name} must not claim capture-pending`);
   }
@@ -50,6 +50,8 @@ test('the live doors carry their interface, not a grab-bag', () => {
   assertEqual(typeof door.GAME_CAMERA.solve, 'function', 'GAME_CAMERA.solve');
   assertEqual(typeof door.GAME_LOOP.scheduleFrame, 'function', 'GAME_LOOP.scheduleFrame');
   assertEqual(typeof door.GAME_COMMANDS.createRegistry, 'function', 'GAME_COMMANDS.createRegistry');
+  assertEqual(typeof door.GAME_FIGURE.buildRigFrame, 'function', 'GAME_FIGURE.buildRigFrame');
+  assertEqual(typeof door.GAME_FIGURE.bake, 'function', 'GAME_FIGURE.bake (the V2-AMENDED game path)');
 });
 
 finish('game/index');
