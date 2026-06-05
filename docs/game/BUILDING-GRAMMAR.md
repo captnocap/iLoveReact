@@ -29,3 +29,18 @@ Key rulings distilled from the conversation:
    Plus: Prop Mode, Drop In (playtest — /test exists), Bake/Compile (V15/V19 — exists).
 
 7. **Tool-shape convergence:** "Fortnite Creative as the authoring UX, HMSC semantic bake as the runtime output."
+
+---
+
+## Addendum (same session) — prefabs/compositions are first-class
+
+User's words, verbatim: "i can just place basic walls, cut them out, make a building, then clone it into a tool, and go place it around. new building is just the same authoring as the last building, i physically make it in the game. then that just leaves props to prompting."
+
+Requirements distilled:
+
+1. A **Prefab** = a NAMED composition of placed pieces (with their edits), saved from the world into the palette/catalog as a placeable unit.
+2. Prefabs **DECOMPOSE** to their semantic pieces underneath — the bake contract sees through them (a cloned motel is still walls/doors/rooms to collision/nav/rooms emission; no opaque blobs).
+3. Placing a prefab is ONE authoring action (one session-history commit), but edits to a placed instance work at PIECE granularity.
+4. Prefab definitions are P2 data (catalog tables / V20-streamable), same registry family as pieces.
+
+And the prop split: props remain PROMPT-GENERATED assets ("that just leaves props to prompting") — the catalog's prop entries get filled by the existing items/model pipelines, not by the builder.

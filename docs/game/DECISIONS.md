@@ -743,3 +743,17 @@ architectural rule, user-endorsed:
   camera (V23 native), crosshair targets a snap surface, category select,
   ghost preview snapped to grid/edge/surface, click places, edit key cycles
   variants/cutouts, props drop, bake emits runtime data.
+- **PREFABS/COMPOSITIONS are first-class (same-session addendum).** The user:
+  "i can just place basic walls, cut them out, make a building, then clone it
+  into a tool, and go place it around. new building is just the same authoring
+  as the last building, i physically make it in the game. then that just
+  leaves props to prompting." A Prefab is a NAMED composition of placed pieces
+  (with their edits), saved from the world into the palette as a placeable
+  unit. Prefabs DECOMPOSE to their semantic pieces — the bake contract sees
+  through them (a cloned motel is still walls/doors/rooms to collision/nav/
+  rooms emission; no opaque blobs). Placing a prefab is ONE authoring action
+  (one session-history commit); edits to a placed instance work at PIECE
+  granularity. Prefab definitions are P2 data (catalog tables/V20-streamable),
+  same registry family as pieces. Props remain PROMPT-GENERATED assets — the
+  catalog's prop entries fill from the existing items/model pipelines, not
+  from the builder.
