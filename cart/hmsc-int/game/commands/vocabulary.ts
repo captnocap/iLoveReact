@@ -19,7 +19,8 @@
 // config.sky.hour, world.spawnedEntities...) so saved command sequences keep
 // meaning the same thing.
 
-import { tileKindDefinition, isTileKind, tileKindNamesForConsole, propKindNamesForConsole } from '../kinds';
+import { GAME_KINDS, tileKindDefinition, isTileKind, tileKindNamesForConsole, propKindNamesForConsole } from '../kinds';
+import { GAME_PERCEPTION } from '../perception';
 import { parseCommandValue } from './parser';
 import type { CommandRegistry } from './index';
 
@@ -117,6 +118,11 @@ export type GameEvent = {
   payload: Record<string, unknown>;
 };
 
+export type CommandPersistence = {
+  save: (state: GameCommandState) => string[];
+  load: () => GameCommandState | null;
+};
+
 export type GameCommandState = {
   sceneStep: string;
   command: { cheatsEnabled: boolean; debugHudEnabled: boolean };
@@ -141,6 +147,7 @@ export type GameCommandState = {
   world: { cellSizeMeters: number; spawnedEntities: Record<string, SpawnedEntity> };
   events: { nextSerial: number; recent: GameEvent[] };
   nextEntitySerial: number;
+  __commandPersistence?: CommandPersistence;
 };
 
 export function createGameCommandState(): GameCommandState {
@@ -237,6 +244,36 @@ function jsonLine(value: unknown): string {
   return JSON.stringify(value, null, 2);
 }
 
+function cloneJson<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+function commandStateSnapshot(game: GameCommandState): GameCommandState {
+  const snapshot = cloneJson({
+    sceneStep: game.sceneStep,
+    command: game.command,
+    config: game.config,
+    player: game.player,
+    world: game.world,
+    events: game.events,
+    nextEntitySerial: game.nextEntitySerial,
+  }) as GameCommandState;
+  delete snapshot.__commandPersistence;
+  return snapshot;
+}
+
+function restoreCommandState(game: GameCommandState, snapshot: GameCommandState): void {
+  const persistence = game.__commandPersistence;
+  Object.assign(game, createGameCommandState(), commandStateSnapshot(snapshot));
+  if (persistence) game.__commandPersistence = persistence;
+}
+
+function mountedPersistence(game: GameCommandState): CommandPersistence {
+  const persistence = game.__commandPersistence;
+  if (!persistence) throw new Error('persistence store not mounted');
+  return persistence;
+}
+
 function cellKey(x: number, y: number, z: number): string {
   return `${x},${y},${z}`;
 }
@@ -300,6 +337,22 @@ function formatEventForConsole(event: GameEvent): string {
   return `${event.id} ${event.type} <${event.source}>${tags}`;
 }
 
+function movementNoiseLine(): string {
+  const footsteps = GAME_PERCEPTION.tuning.hearing.footsteps;
+  return (Object.keys(footsteps) as Array<keyof typeof footsteps>)
+    .map((mode) => {
+      const spec = footsteps[mode];
+      return `${mode}=radius:${spec.radiusMeters}m salience:${spec.salience} cadence:${spec.stepSeconds}s`;
+    })
+    .join(' ');
+}
+
+function tileNoiseLine(): string {
+  return GAME_KINDS.tiles.kinds
+    .map((kind) => `${kind}=${tileKindDefinition(kind).npc.noise.toFixed(2)}`)
+    .join(' ');
+}
+
 // ── the loud not-yet boundary ──
 
 /**
@@ -321,8 +374,6 @@ export const NOT_YET_CAPTURED: Record<string, string[]> = {
   'lab scenes (V13 labs-route integration with the game world)': ['lab_list', 'lab_spawn', 'lab_exit'],
   'input contract data (GAME_INPUT is transport-only today, V7)': ['gv_controls'],
   'telemetry (GAME_TELEMETRY capture-pending)': ['gv_perflog'],
-  'noise model (perception, V12)': ['gv_noise'],
-  'persistence (V20 data/ streams + snapshots integration)': ['gv_save', 'gv_load'],
 };
 
 const NOT_YET_OWNER_BY_COMMAND: Record<string, string> = {};
@@ -550,6 +601,39 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
   });
 
   define({
+    name: 'gv_noise',
+    usage: 'gv_noise',
+    summary: 'Print material and movement noise multipliers.',
+    run: () => {
+      const gunshot = GAME_PERCEPTION.tuning.hearing.gunshot;
+      return [
+        `movement noise: ${movementNoiseLine()}`,
+        `gunshot noise: radius:${gunshot.radiusMeters}m salience:${gunshot.salience}`,
+        `tile noise multipliers: ${tileNoiseLine()}`,
+      ];
+    },
+  });
+
+  define({
+    name: 'gv_save',
+    usage: 'gv_save',
+    summary: 'Persist the current game state.',
+    run: (game) => mountedPersistence(game).save(commandStateSnapshot(game)),
+  });
+
+  define({
+    name: 'gv_load',
+    usage: 'gv_load',
+    summary: 'Load the persisted game state.',
+    run: (game) => {
+      const snapshot = mountedPersistence(game).load();
+      if (!snapshot) throw new Error('no saved game state');
+      restoreCommandState(game, snapshot);
+      return ['loaded persisted game state'];
+    },
+  });
+
+  define({
     name: 'gv_reset',
     usage: 'gv_reset',
     summary: 'Reset to a fresh scaffold state.',
@@ -714,9 +798,6 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
   notYet('lab_exit', 'lab_exit', 'Return from a lab scene to the normal game scene.');
   notYet('gv_controls', 'gv_controls', 'Print the canonical input contract.');
   notYet('gv_perflog', 'gv_perflog [0|1|2|toggle] [spikeRatio] [minJumpMs]', 'Toggle the spike perf recorder.');
-  notYet('gv_noise', 'gv_noise', 'Print material and movement noise multipliers.');
-  notYet('gv_save', 'gv_save', 'Persist the current game state.');
-  notYet('gv_load', 'gv_load', 'Load the persisted game state.');
   notYet('pv_respawn', 'pv_respawn', 'Teleport the player to the armed respawn cell.');
   notYet('wv_place', 'wv_place <kind> <x> <z> [y]', 'Place a world cell on the construction grid.');
   notYet('wv_fill', 'wv_fill <kind> <x> <z> <width> <depth> [y]', 'Fill a rectangle of one tile kind as a surface region.');

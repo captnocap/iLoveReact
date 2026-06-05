@@ -18,28 +18,49 @@ The old files are untouched behavior references (V15-TRANSITION).
 All 48 names are REGISTERED — the script language is complete from day one.
 But behavior splits by whether the command's TARGET SYSTEM is captured:
 
-- **23 captured for real**: cmd_help, cmd_cheats, gv_debug_hud, gv_sky,
+- **26 captured for real**: cmd_help, cmd_cheats, gv_debug_hud, gv_noise,
+  gv_save, gv_load, gv_sky,
   gv_time, gv_daycycle, gv_weather, gv_view, gv_events, gv_emit, gv_state,
   gv_set, gv_config, gv_scene, gv_reset, pv_teleport, pv_where, pv_speed,
   pv_noclip, ev_spawn, ev_burst, ev_despawn, wv_tile. Their targets are the
-  command state itself, the P2 `COMMAND_TUNING`/sky tables, or `GAME_KINDS`.
+  command state itself, the P2 `COMMAND_TUNING`/sky tables, `GAME_KINDS`,
+  `GAME_PERCEPTION`, or the mounted V20 data store.
 - **1 partial**: wv_prop — `wv_prop kinds` answers from GAME_KINDS.props;
   placement/list/remove fail loudly (world system).
-- **24 explicitly NOT-YET** (`NOT_YET_CAPTURED`, exported per owner): they
+- **21 explicitly NOT-YET** (`NOT_YET_CAPTURED`, exported per owner): they
   FAIL LOUDLY with `system not captured yet: <owner>` — never a silent no-op,
   never fake success. When an owning lane lands, it replaces the stub body;
   the name, usage line, and any saved scripts already exist.
 
+### Stub inventory after captured-owner flips
+
+| command(s) | owner | reason it remains a stub |
+|---|---|---|
+| lab_list, lab_spawn, lab_exit | lab scenes | awaits V13 labs-route integration with a live game-world scene mount |
+| gv_controls | input contract | GAME_INPUT is transport-only until the input lane commits the canonical printable contract |
+| gv_perflog | telemetry | skipped this pass; telemetry-owned command waits for that lane's command toggle |
+| pv_respawn, wv_place, wv_fill, wv_remove, wv_trigger | world grid | awaits live placed-cell/surface/trigger/respawn state in the headless boot |
+| wv_path | world grid pathing | GAME_PATHING is captured, but this command awaits the live tile grid published from world state |
+| wv_road, wv_intersection, wv_culdesac | road grammar | awaits a road/junction world-state system |
+| wv_signal | traffic | awaits signal-clock and phase-override state |
+| wv_prop placement/remove | world props placement | kind data is captured; placement/removal awaits world props state |
+| wv_building, wv_enter, wv_leave | buildings + interiors | awaits building/interior world state |
+| wv_mountain | landform instances | kind math is captured; instance state and trailhead selection are not mounted |
+| wv_zone | world zones | awaits zone state |
+| wv_validate | placement validation | awaits placementCheck over live placed-world state |
+
 ## Verification
 
-- P4 suite `vocabulary.test.ts` (14 behavior cases under `tools/v8cli` via the
+- P4 suite `vocabulary.test.ts` (16 behavior cases under `tools/v8cli` via the
   shared `game/_testkit.ts`): name completeness (48), loud-failure boundary
   (every pending command), cheat gating, sky named hours/presets/wrap/bounds,
-  view clamps, dot-path surgery, event ring + filters, spawn radii/burst
-  clamp/despawn, gv_reset wrapper-ctx semantics, help coverage, and a green
-  end-to-end script. 14/14 green.
-- `compile/verify/commands.cmds` — a new verify script of 25 REAL captured
-  commands replayed headless. `rjit game verify`: **GREEN — 17/17 suites,
+  view clamps, gv_noise over perception/kinds, dot-path surgery, event ring +
+  filters, spawn radii/burst clamp/despawn, gv_reset wrapper-ctx semantics,
+  gv_save/gv_load mounted persistence, help coverage, and a green end-to-end
+  script. 16/16 green.
+- `compile/verify/commands.cmds` — a verify script of 30 command lines
+  replayed headless, including gv_noise and a V20 gv_save/gv_load round trip.
+  `rjit game verify`: **GREEN — 26/26 suites,
   2/2 scripts**.
 
 ## Changed shape (same behavior, constitution's bar)
@@ -74,7 +95,8 @@ But behavior splits by whether the command's TARGET SYSTEM is captured:
   now.
 - **localstore persistence** (`gv_save`/`gv_load` via `saveGameState`): V20
   ruled persistence is the data/ streams+snapshots layer — wiring these to
-  localstore would re-roll the dead pattern. Stubbed to the data lane.
+  localstore would re-roll the dead pattern. The flipped command path uses a
+  mounted V20 `commands` stream/snapshot adapter instead.
 
 ## Ambiguities surfaced (NOT guessed)
 

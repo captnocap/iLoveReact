@@ -16,7 +16,8 @@
 // the game becomes THIS output; the boot will load data/snapshots/, V20). The
 // green light exists now so it never goes dark.
 
-import { GAME_COMMANDS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS } from '../game';
+import { openStore } from '../data';
+import { GAME_COMMANDS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS, type GameCommandState } from '../game';
 
 declare const globalThis: any;
 
@@ -30,6 +31,9 @@ type HeadlessGame = ReturnType<typeof GAME_COMMANDS.createGameState> & {
   /** the V8 state-tick counter (~45/min in real time; replay runs it hot) */
   tick: number;
 };
+
+type SavedCommandState = GameCommandState | null;
+type CommandSaveEvent = { type: 'saved'; state: GameCommandState };
 
 function buildRegistry() {
   const registry = GAME_COMMANDS.createRegistry<HeadlessGame>();
@@ -98,6 +102,27 @@ function readScriptLines(path: string): string[] | null {
   return typeof text === 'string' ? text.split('\n') : null;
 }
 
+function mountPersistence(game: HeadlessGame): void {
+  const store = openStore('zig-out/game/headless-data');
+  const stream = store.defineStream<SavedCommandState, CommandSaveEvent>({
+    name: 'commands',
+    initial: () => null,
+    apply: (_state, event) => event.type === 'saved' ? event.state : _state,
+  });
+
+  game.__commandPersistence = {
+    save: (state) => {
+      const pos = stream.append({ type: 'saved', state });
+      const written = store.materializeSnapshots();
+      return [`saved game state seq=${pos.globalSeq}`, `snapshots=${written.length}`];
+    },
+    load: () => {
+      const snapshot = store.loadSnapshot<SavedCommandState>('commands');
+      return snapshot ? snapshot.state : stream.state();
+    },
+  };
+}
+
 function main(): number {
   const scriptPath = (globalThis.process?.argv ?? [])[1];
   if (!scriptPath) {
@@ -111,6 +136,7 @@ function main(): number {
   }
 
   const game: HeadlessGame = { ...GAME_COMMANDS.createGameState(), booted: false, tick: 0 };
+  mountPersistence(game);
   const registry = buildRegistry();
   const result = registry.runScript(game, lines);
   for (const line of result.transcript) console.log(line);

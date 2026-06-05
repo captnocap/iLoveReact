@@ -24,6 +24,7 @@ gv_sky
 # world inspection through the captured kind registry (GAME_KINDS)
 wv_tile road
 wv_prop kinds
+gv_noise
 
 # entity vocabulary (spawn tuning tables)
 ev_spawn crate 12 -7 3
@@ -36,6 +37,10 @@ gv_events 3
 gv_set player.physics.grounded true
 gv_config sky.gloom 0.2
 gv_scene verify.commands
+gv_save
+pv_teleport 99 99 9
+gv_load
+pv_where
 
 tick 40
 status

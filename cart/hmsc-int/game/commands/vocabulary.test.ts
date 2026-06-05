@@ -36,7 +36,10 @@ test('all 48 reference command names are registered — the script language is c
 test('every not-yet command fails LOUDLY, never silently (the capture boundary)', () => {
   const { registry, game } = freshConsole();
   const pending = Object.values(NOT_YET_CAPTURED).flat();
-  assert(pending.length >= 24, 'the pending list covers the uncaptured systems');
+  assert(pending.length >= 21, 'the pending list covers the uncaptured systems');
+  for (const flipped of ['gv_noise', 'gv_save', 'gv_load']) {
+    assert(!pending.includes(flipped), `${flipped} has a captured owner and must not stay in the pending list`);
+  }
   for (const name of pending) {
     if (name === 'wv_prop') continue; // partial: tested separately below
     const outcome = registry.run(game, name);
@@ -116,6 +119,16 @@ test('gv_view clamps the draw radius to the tuning bounds', () => {
   assertEqual(game.config.view.drawRadiusMeters, COMMAND_TUNING.view.minDrawRadiusMeters, 'tiny radii clamp to min');
 });
 
+test('gv_noise reports captured perception and tile-noise tuning', () => {
+  const { registry, game } = freshConsole();
+  const noise = registry.run(game, 'gv_noise');
+  assertEqual(noise.ok, true, 'gv_noise is backed by GAME_PERCEPTION now');
+  const text = noise.output.join('\n');
+  assert(text.includes('run=radius:16m'), 'movement noise must print the run radius');
+  assert(text.includes('gunshot noise: radius:40m'), 'gunshot tuning must print');
+  assert(text.includes('road=0.70'), 'tile noise multipliers must come from GAME_KINDS');
+});
+
 test('dot-path surgery: gv_set / gv_state / gv_config keep the reference paths', () => {
   const { registry, game } = freshConsole();
   registry.run(game, 'gv_set player.physics.grounded false');
@@ -174,6 +187,32 @@ test('gv_reset restores the fresh state but keeps wrapper-ctx fields', () => {
   assertEqual(game.command.cheatsEnabled, false, 'reset must clear cheats');
   assertEqual(game.player.position.x, 0, 'reset must re-home the player');
   assertEqual(game.booted, true, 'wrapper fields outside the command state must survive');
+});
+
+test('gv_save and gv_load require a mounted persistence door and restore the command-state slice', () => {
+  const { registry, game } = freshConsole();
+  const unmounted = registry.run(game, 'gv_save');
+  assertEqual(unmounted.ok, false, 'gv_save without a mounted store must fail loud');
+  assert(unmounted.output[0].includes('persistence store not mounted'), 'the missing mount must be explicit');
+
+  let saved: GameCommandState | null = null;
+  game.__commandPersistence = {
+    save: (state) => {
+      saved = state;
+      return ['saved test state'];
+    },
+    load: () => saved,
+  };
+
+  registry.run(game, 'pv_teleport 3 4 5');
+  const save = registry.run(game, 'gv_save');
+  assertEqual(save.ok, true, 'mounted gv_save must succeed');
+  registry.run(game, 'pv_teleport 30 40 50');
+  assertEqual(game.player.position.x, 30, 'the mutation after save must land before load');
+  const load = registry.run(game, 'gv_load');
+  assertEqual(load.ok, true, 'mounted gv_load must succeed');
+  assertEqual(game.player.position.x, 3, 'load must restore the saved command state');
+  assert(game.__commandPersistence != null, 'loading must keep the mounted persistence door');
 });
 
 test('cmd_help teaches the whole surface, including pending commands', () => {
