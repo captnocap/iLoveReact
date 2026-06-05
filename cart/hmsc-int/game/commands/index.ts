@@ -119,6 +119,12 @@ export {
 } from './vocabulary';
 export type { GameCommandState, GameEvent, SpawnedEntity, Vec3Like } from './vocabulary';
 
+// The in-game console SESSION (the CS idiom: backtick toggle, key-fed line
+// buffer, registry dispatch, transcript ring). Pure + headless — see
+// ./console.ts; overlays that draw a session are route/editor chrome.
+export { CONSOLE_CLOSE_KEYS, CONSOLE_TOGGLE_KEY, createConsoleSession } from './console';
+export type { ConsoleKeyEvent, ConsoleLine, ConsoleLineKind, ConsoleSession } from './console';
+
 import {
   createGameCommandState as createGameCommandStateImpl,
   defineGameCommands as defineGameCommandsImpl,
@@ -126,6 +132,7 @@ import {
   GAME_COMMAND_NAMES as GAME_COMMAND_NAMES_IMPL,
   NOT_YET_CAPTURED as NOT_YET_CAPTURED_IMPL,
 } from './vocabulary';
+import { CONSOLE_TOGGLE_KEY as CONSOLE_TOGGLE_KEY_IMPL, createConsoleSession as createConsoleSessionImpl } from './console';
 
 export const GAME_COMMANDS = Object.freeze({
   createRegistry: createCommandRegistry,
@@ -133,6 +140,8 @@ export const GAME_COMMANDS = Object.freeze({
   parseValue: parseCommandValue,
   createGameState: createGameCommandStateImpl,
   defineGameCommands: defineGameCommandsImpl,
+  createConsoleSession: createConsoleSessionImpl,
+  consoleToggleKey: CONSOLE_TOGGLE_KEY_IMPL,
   tuning: COMMAND_TUNING_IMPL,
   names: GAME_COMMAND_NAMES_IMPL,
   notYetCaptured: NOT_YET_CAPTURED_IMPL,

@@ -21,7 +21,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
-import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_PHYSICS } from '@game';
+import { GAME_CAMERA, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_PHYSICS } from '@game';
 import type { CollisionRect } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
 import type { GameState, Vec3 } from '../hmsc/design'; // GAP(W-1) awaiting world grid state
@@ -63,6 +63,14 @@ const GAIT = {
 const FRAME = { minDtSeconds: 0.001, maxDtSeconds: 0.05 } as const;
 const PLAYER_FIGURE_SEED = 1;
 const PLAYER_FIGURE_CART_KEY = 'hmscint.test.player';
+// Console overlay presentation (route chrome; the SESSION is captured —
+// GAME_COMMANDS.createConsoleSession owns toggle/dispatch/transcript).
+const CONSOLE_UI = {
+  heightPercent: '46%',
+  backdrop: '#0b1220e8',
+  maxVisibleLines: 22,
+  lineColor: { input: '#93c5fd', output: '#d1fae5', error: '#fb7185' } as Record<string, string>,
+} as const;
 
 // memo() so the 57-mesh figure subtree only re-diffs when rig/offset/yaw
 // actually change — an idle camera drag must not pay the figure.
@@ -175,6 +183,65 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   aimingRef.current = aiming;
   const pointerWire = useMemo(() => GAME_INPUT.availability(), []);
 
+  // The in-game console (CS idiom): backtick toggles an overlay; the session
+  // is the captured GAME_COMMANDS console over a per-mount GameCommandState
+  // seeded from the authored map (world slice COPIED — the console edits its
+  // own copy; rendered-world unification is the world lane's integration
+  // ticket). Pose syncs in before each command (pv_where tells the truth) and
+  // position changes adopt back out (pv_teleport/pv_respawn move the player).
+  const gameConsole = useMemo(() => {
+    type GameCtx = ReturnType<typeof GAME_COMMANDS.createGameState>;
+    const registry = GAME_COMMANDS.createRegistry<GameCtx>();
+    GAME_COMMANDS.defineGameCommands(registry);
+    const ctx = GAME_COMMANDS.createGameState();
+    ctx.player.walkSpeedMetersPerSecond = props.state.player.walkSpeedMetersPerSecond;
+    ctx.player.runSpeedMetersPerSecond = props.state.player.runSpeedMetersPerSecond;
+    ctx.world.cellSizeMeters = props.state.world.cellSizeMeters;
+    ctx.world.surfaceRegions = [...props.state.world.surfaceRegions] as GameCtx['world']['surfaceRegions'];
+    ctx.world.placedCells = { ...props.state.world.placedCells } as GameCtx['world']['placedCells'];
+    ctx.world.landforms = [...(props.state.world.landforms ?? [])] as GameCtx['world']['landforms'];
+    const session = GAME_COMMANDS.createConsoleSession(registry, ctx, {
+      beforeRun: (c) => {
+        const p = playerRef.current;
+        c.player.position = { x: p.x, y: p.y, z: p.z };
+        c.player.yawDegrees = p.yaw;
+        c.player.physics.velocity = { x: p.vx, y: p.vy, z: p.vz };
+        c.player.physics.grounded = p.grounded;
+      },
+      afterRun: (c) => {
+        const p = playerRef.current;
+        const moved =
+          Math.abs(c.player.position.x - p.x) > 1e-6 ||
+          Math.abs(c.player.position.y - p.y) > 1e-6 ||
+          Math.abs(c.player.position.z - p.z) > 1e-6;
+        if (moved) {
+          const next: PlayerPose = {
+            ...p,
+            x: c.player.position.x, y: c.player.position.y, z: c.player.position.z,
+            vx: 0, vy: 0, vz: 0,
+            yaw: normalizeYawDegrees(c.player.yawDegrees),
+          };
+          playerRef.current = next;
+          setPlayer(next);
+        }
+      },
+    });
+    return { ctx, session };
+  }, [props.state]);
+  // Mirror the session's revision into React state so the overlay re-renders
+  // on toggle/typing/output. The game KEEPS PLAYING — nothing here pauses the
+  // frame loop; it only gates key reads while open (below).
+  const [, setConsoleRev] = useState(0);
+  const consoleOpen = gameConsole.session.isOpen();
+  useEffect(() => {
+    const off = GAME_INPUT.onKeyDown((event) => {
+      const before = gameConsole.session.revision();
+      gameConsole.session.handleKey(event ?? {});
+      if (gameConsole.session.revision() !== before) setConsoleRev(gameConsole.session.revision());
+    });
+    return off;
+  }, [gameConsole]);
+
   // The V2 player figure: seeded documents → part meshes, built once. The
   // per-update rig solve below is the editor-preview path (V2-AMENDED).
   const figure = useMemo(() => {
@@ -221,8 +288,9 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       last = now;
       const keys = keysRef.current;
       // WASD per the ruled control contract (INPUT_BINDINGS), gated so typing
-      // into a TextInput never walks the player.
-      const typing = GAME_INPUT.isTextEditing();
+      // never walks the player — a focused TextInput OR the open console (the
+      // game keeps playing under the console; only its key reads stop).
+      const typing = gameConsole.session.isOpen() || GAME_INPUT.isTextEditing();
       const axes = keys && !typing ? GAME_INPUT.moveAxes(keys) : { forward: 0, strafe: 0 };
       const running = keys != null && !typing && GAME_INPUT.actionDown(keys, 'run');
       const jumpDown = keys != null && !typing && GAME_INPUT.actionDown(keys, 'jump');
@@ -244,9 +312,10 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       const desiredYaw = aim
         ? normalizeYawDegrees(lookRef.current.yaw)
         : moving ? normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG) : prev.yaw;
-      // P2: speeds are authored GameState data (defaults 2.4/5.8 — already
-      // one source of truth with GAME_COMMANDS.tuning.player; REWIRE.md).
-      const speed = running ? props.state.player.runSpeedMetersPerSecond : props.state.player.walkSpeedMetersPerSecond;
+      // P2: speeds are data — the console ctx is the live owner, SEEDED from
+      // the authored GameState (defaults 2.4/5.8 = GAME_COMMANDS.tuning), so
+      // `gv_speed` in the console drives the real walk/run on this route.
+      const speed = running ? gameConsole.ctx.player.runSpeedMetersPerSecond : gameConsole.ctx.player.walkSpeedMetersPerSecond;
       // The host owns integration (V7): movement blend, gravity, the jump arc
       // (WO-1-proven), ground/step resolution — tuning is the authored
       // state.config.physics, colliders are the GAP(W-1) interim feed.
@@ -318,7 +387,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       alive = false;
       if (handle != null) GAME_LOOP.cancelFrame(handle);
     };
-  }, [props.state]);
+  }, [props.state, gameConsole]);
 
   // Drag-orbit gesture: route chrome (visible-cursor drag; the door's
   // readPointerDelta capture-mode mouse-look is deliberately not adopted).
@@ -416,9 +485,29 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
           <Text fontSize={11} color="#cbd5e1" style={{ fontWeight: 700 }}>Drop in</Text>
         </Pressable>
         <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>
-          {`${props.mapName} · WASD move · Space jump · Shift run · drag camera · ${pointerWire.complete ? 'RMB aim' : `aim unavailable (host missing: ${pointerWire.missing.join(', ')})`}`}
+          {`${props.mapName} · WASD move · Space jump · Shift run · drag camera · \` console · ${pointerWire.complete ? 'RMB aim' : `aim unavailable (host missing: ${pointerWire.missing.join(', ')})`}`}
         </Text>
       </Box>
+
+      {/* The console overlay — root's LAST child (overlays-last hit-test rule).
+          Absolute over the top portion (CS style): the Scene3D underneath keeps
+          its exact size — nothing reflows; the game keeps playing under it. */}
+      {consoleOpen && (
+        <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, height: CONSOLE_UI.heightPercent, backgroundColor: CONSOLE_UI.backdrop, borderBottomWidth: 2, borderBottomColor: '#334155', paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8 }}>
+          <Box style={{ flexGrow: 1, justifyContent: 'flex-end', overflow: 'hidden', gap: 2 }}>
+            {gameConsole.session.transcript().slice(-CONSOLE_UI.maxVisibleLines).map((line) => (
+              <Text key={line.id} fontSize={12} color={CONSOLE_UI.lineColor[line.kind]} style={{ fontFamily: 'monospace', lineHeight: 16 }}>
+                {line.text}
+              </Text>
+            ))}
+          </Box>
+          <Box style={{ flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#1f2937', paddingTop: 6, marginTop: 6 }}>
+            <Text fontSize={12} color="#fbbf24" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
+              {`] ${gameConsole.session.buffer()}▌`}
+            </Text>
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }
