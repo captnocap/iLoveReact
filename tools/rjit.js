@@ -1844,6 +1844,10 @@ ${atlasW} ${atlasH}
       );
     }
     flags.push(
+      // The game ground floor (V17): labs/editors write `import { GAME_* } from
+      // '@game'`. That import is ALSO the metafile-gate signal that opts a cart
+      // into the game's host bindings (V18 — gated ingredient, 2D carts pay zero).
+      `--alias:@game=${opts.rjitHome}/cart/hmsc-int/game`,
       `--alias:@reactjit/core=${opts.rjitHome}/runtime/core_stub.ts`,
       `--alias:@reactjit/runtime=${opts.rjitHome}/runtime`,
       `--alias:@reactjit/effects=${opts.rjitHome}/runtime/effects`,
