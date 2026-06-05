@@ -44,6 +44,9 @@ import type { StreamHandle } from '../../data';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { editorTunables } from '../tunables';
+// MODELPAINT-0605: render /cutout's per-part paintings + deep-link into it
+import { VehiclePaintCaptures } from '../../game/paintedRender';
+import { setPendingModelTarget } from '../cutout/models';
 import {
   editGasSide,
   editRole,
@@ -113,7 +116,10 @@ const VehicleMeshes = memo(function VehicleMeshes(props: {
           position={m.position}
           rotation={m.rotation ?? [0, 0, 0]}
           scale={m.scale}
-          material={m.material}
+          // MODELPAINT-0605: painted panels sample their capture (white base
+          // so the texture reads true); decals/unpainted keep their material
+          material={m.textureKey ? '#ffffff' : m.material}
+          textureKey={m.textureKey}
         />
       ))}
       {props.selected ? props.build.hitboxes.filter((h) => h.id === props.selected).map((h, i) => (
@@ -170,7 +176,7 @@ function freshSeed(): number {
   return (Date.now() ^ Math.floor(Math.random() * 0xffff)) >>> 0;
 }
 
-export function VehiclesRoute(props: { onExit: () => void }) {
+export function VehiclesRoute(props: { onExit: () => void; onPaintTexture?: () => void }) {
   // ── the garage: the 'vehicles' channel on the tool's ONE store, plus this
   // route visit's session (one edit-commit per interaction) ────────────────
   const garage: Garage = useMemo(() => {
@@ -391,6 +397,21 @@ export function VehiclesRoute(props: { onExit: () => void }) {
                   <GAME_CHROME.Chip label="reroll" color="#a78bfa" onPress={() => apply(generateVehicle(freshSeed()), 'reroll')} />
                   <GAME_CHROME.Chip label="paint" color={doc.color} onPress={() => apply(repaint(doc, freshSeed()), 'repaint')} />
                 </Row>
+                {/* MODELPAINT-0605: per-part TEXTURE painting lives in /cutout —
+                    deep-link with the selected part (or the body) preloaded */}
+                <Row style={{ gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+                  <Text fontSize={11} color={T.dim} style={{ width: 56 }}>texture</Text>
+                  <GAME_CHROME.Chip
+                    label={`paint ${selected ?? 'body'} → /cutout`}
+                    color="cyan"
+                    onPress={() => {
+                      if (!activeId) return;
+                      setPendingModelTarget({ family: 'vehicle', docId: activeId, part: selected ?? 'body' });
+                      garage.session?.note(`paint texture → /cutout · ${activeId} · ${selected ?? 'body'}`);
+                      props.onPaintTexture?.();
+                    }}
+                  />
+                </Row>
 
                 {/* capability 6 — gas tank placement */}
                 <Col style={{ gap: 6, paddingTop: 4 }}>
@@ -467,6 +488,8 @@ export function VehiclesRoute(props: { onExit: () => void }) {
             <VehicleMeshes build={build} selected={selected} showHitboxes={showHitboxes} showAnchors={showAnchors} />
           ) : null}
         </Scene3D>
+        {/* MODELPAINT-0605: the painted parts' texture captures (offscreen) */}
+        {doc ? <VehiclePaintCaptures doc={doc} /> : null}
         <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
           <GAME_CHROME.Knob label="zoom" value={dist} spec={GAME_CHROME.knobPresets['orbit.zoom']} onChange={setDist} />
         </Box>

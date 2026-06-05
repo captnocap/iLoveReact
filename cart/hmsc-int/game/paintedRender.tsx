@@ -16,7 +16,8 @@
 
 import { useMemo } from 'react';
 import { Box, Effect, StaticSurface } from '@reactjit/runtime/primitives';
-import { packPaintedLayerData, PAINTED_LAYER_WGSL, type PaintedOverlay } from './painted';
+import { packPaintedLayerData, validatePaintedOverlay, vehiclePaintTextureKey, PAINTED_LAYER_WGSL, type PaintedOverlay } from './painted';
+import type { VehicleDoc } from './vehicle';
 
 export function PaintedOverlayPaint(props: { overlay: PaintedOverlay; w: number; h: number }) {
   const { overlay, w, h } = props;
@@ -43,6 +44,32 @@ export function PaintedOverlayPaint(props: { overlay: PaintedOverlay; w: number;
 }
 
 const OFFSCREEN_LEFT = -99999; // the capture-parking convention (figure/render)
+
+/** Every painted part of a vehicle doc as offscreen captures (256² — the
+ *  vehicle CAPTURE's square box-mapped convention), keyed exactly as
+ *  buildVehicle threads them. `exceptPart` lets a live editor substitute its
+ *  own capture for the part being painted. */
+export function VehiclePaintCaptures(props: { doc: VehicleDoc; exceptPart?: string }) {
+  const paint = props.doc.paint ?? {};
+  return (
+    <>
+      {Object.keys(paint).filter((part) => part !== props.exceptPart).map((part) => {
+        const overlay = validatePaintedOverlay((paint as Record<string, unknown>)[part]);
+        if (!overlay) return null;
+        return (
+          <PaintedOverlaySurface
+            key={`vpaint-${part}`}
+            staticKey={vehiclePaintTextureKey(part, overlay.stamp)}
+            bg={props.doc.color}
+            w={256}
+            h={256}
+            overlay={overlay}
+          />
+        );
+      })}
+    </>
+  );
+}
 
 export function PaintedOverlaySurface(props: {
   staticKey: string;

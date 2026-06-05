@@ -111,3 +111,16 @@ panel's only child — exact). The same idiom was fixed at its two
 shell/LabsRoute.tsx twins (grown `flexGrow:1, minHeight:0` Box wrapping a
 full-height ScrollView, since those sit under fixed-header siblings).
 Visually verified at two window sizes.
+
+## MODELPAINT-0605 (2026-06-05): per-part texture painting (in /cutout)
+
+The route had NO texture tools (paint/repaint chips are seeded COLOR rolls
+— they stay). The new per-part texture capability renders here and authors
+in /cutout:
+
+- the viewport threads `VehicleMesh.textureKey` (painted panels sample
+  their capture on a white base; decals/unpainted keep materials) and
+  mounts `VehiclePaintCaptures` (game/paintedRender.tsx — the one shared
+  capture component, also used by /cutout's live preview).
+- the `texture` row deep-links: `paint <part> → /cutout` with the selected
+  hitbox group (or the body) preloaded via the models.ts mailbox.

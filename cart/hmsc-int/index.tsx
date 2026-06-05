@@ -916,7 +916,7 @@ function EditorShell() {
         {/* The characters editor (editors/characters/) — authors what game/figure runs. */}
         <Route path="/characters">{() => <CharactersRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
         {/* The vehicles editor (editors/vehicles/) — authors what game/vehicle builds. */}
-        <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} />}</Route>
+        <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
         {/* The cutout painter (editors/cutout/) — the cutout app remade for skins/textures. */}
         <Route path="/cutout">{() => <CutoutRoute onExit={() => nav.push('/')} />}</Route>
         {/* The grand settings page (editors/settings/) — the session event bus + the

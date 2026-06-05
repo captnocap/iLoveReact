@@ -20,14 +20,12 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, StaticSurface, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_CAMERA, GAME_CHROME, GAME_NATIVE_CAMERA, GAME_VEHICLE } from '@game';
-import type { BodyDocument, PaintedOverlay, VehicleDoc } from '@game';
-import { vehiclePaintTextureKey } from '../../game/painted';
-import { PaintedOverlayPaint } from '../../game/paintedRender';
+import type { BodyDocument, VehicleDoc } from '@game';
+import { VehiclePaintCaptures } from '../../game/paintedRender';
 import { partGlobeParams } from '../../game/figure/bake';
 import { hedDepthGrid, HED_GRID_H, HED_GRID_W, type HedDocument, type HedLayer } from '../../game/figure/hed';
 import { FaceLayerPaint } from '../../game/figure/render';
 import type { PartId } from '../../game/figure/shapes';
-import { validatePaintedOverlay } from '@game';
 import { PaintQuad, type PaintEditorState } from '../paint';
 import type { PaintLayer } from '../paint';
 import { editorTunables } from '../tunables';
@@ -187,30 +185,8 @@ function VehicleMeshesLive(props: { model: VehicleDoc; part: string }) {
   );
 }
 
-/** Saved-overlay captures for the OTHER painted parts of the vehicle, so
- *  they texture beside the live one (the PaintedOverlaySurface idiom). */
-function VehicleSavedCaptures(props: { model: VehicleDoc; activePart: string }) {
-  const paint = props.model.paint ?? {};
-  return (
-    <>
-      {Object.keys(paint).filter((part) => part !== props.activePart).map((part) => {
-        const overlay: PaintedOverlay | null = validatePaintedOverlay((paint as any)[part]);
-        if (!overlay) return null;
-        return (
-          <StaticSurface
-            key={`saved-${part}`}
-            staticKey={vehiclePaintTextureKey(part, overlay.stamp)}
-            style={{ position: 'absolute', left: -99999, top: 0, width: 256, height: 256 }}
-          >
-            <Box style={{ width: 256, height: 256, backgroundColor: props.model.color, position: 'relative', overflow: 'hidden' }}>
-              <PaintedOverlayPaint overlay={overlay} w={256} h={256} />
-            </Box>
-          </StaticSurface>
-        );
-      })}
-    </>
-  );
-}
+// (saved-overlay captures for the OTHER painted parts come from the shared
+// VehiclePaintCaptures — game/paintedRender.tsx, the one source)
 
 // ── the panel ─────────────────────────────────────────────────────────────────
 
@@ -310,7 +286,7 @@ export function ModelPreview3D(props: {
         bg={props.bg}
         modelLayers={props.modelLayers}
       />
-      {!isFigure ? <VehicleSavedCaptures model={props.model as VehicleDoc} activePart={binding.part} /> : null}
+      {!isFigure ? <VehiclePaintCaptures doc={props.model as VehicleDoc} exceptPart={binding.part} /> : null}
       <Box style={{ position: 'absolute', left: 8, top: 8 }}>
         <Text style={{ color: T.dim, fontSize: 9, fontWeight: '800', letterSpacing: 1 }}>
           {`LIVE · ${binding.docId} · ${binding.part}`}
