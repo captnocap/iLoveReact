@@ -90,10 +90,13 @@ now owns `cart/hmsc-int/editors` as a suite root.
 4. **Scale audit still open** (V10: "many cars need work" against 1-tile=1m).
    The editor displays the same contract line the lab did; auditing the
    dimension tables is a separate ruled work item.
-5. **Orbit yaw sign vs the /test-pinned verdict.** This route's drag has
-   always used `yaw += dx` (carried from the reference lab); the /test +
-   characters routes use `yaw -= dx` (the USER-VERDICT-pinned sign: the
-   engine renders world +X as screen-LEFT under compass yaw). The V23
-   adoption kept this route's existing `+dx` for unchanged feel — whether
-   vehicles should flip to the pinned sign is a one-character call for the
-   user to make, not a thing to change silently.
+5. **Orbit yaw sign vs the /test-pinned verdict — RESOLVED by USER VERDICT
+   (V25, DRAGSIGN-0605, 2026-06-05).** This route's drag carried the
+   reference lab's `yaw += dx`; the /test + characters routes use `yaw -= dx`
+   (the USER-VERDICT-pinned sign: the engine renders world +X as screen-LEFT
+   under compass yaw). The user ruled: flipped to the pinned `-dx`
+   convention — "it always existed" is never a defense for a divergent
+   behavior ("that is exactly why we are doing this... there was once before
+   no cohesive place of everything, so there was 30 different camera
+   approaches effectively"). One drag convention everywhere; pinned
+   conventions beat legacy behavior, always (DECISIONS.md V25).

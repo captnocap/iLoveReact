@@ -271,11 +271,12 @@ export function VehiclesRoute(props: { onExit: () => void }) {
     const dx = nx - d.x, dy = ny - d.y;
     d.x = nx; d.y = ny;
     // Pitch clamps apply HERE so the JS shadow and the host accumulate
-    // identically — only the post-clamp delta is sent. Yaw keeps this route's
-    // established +dx sign (unchanged feel; the /test-pinned sign question is
-    // surfaced in CAPTURE.md).
+    // identically — only the post-clamp delta is sent. Horizontal sign: yaw
+    // DECREASES with a rightward drag — the /test USER-VERDICT-pinned
+    // convention, applied here by V25 (DRAGSIGN-0605: one drag convention
+    // everywhere; the lab's legacy +dx was divergence, not design).
     const l = lookRef.current;
-    const nextYaw = l.yaw + dx * VIEW_TUNING.orbit.yawPerPixel;
+    const nextYaw = l.yaw - dx * VIEW_TUNING.orbit.yawPerPixel;
     const nextPitch = Math.max(VIEW_TUNING.orbit.minPitch, Math.min(VIEW_TUNING.orbit.maxPitch, l.pitch - dy * VIEW_TUNING.orbit.pitchPerPixel));
     camCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
     l.yaw = nextYaw;

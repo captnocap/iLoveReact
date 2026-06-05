@@ -444,9 +444,10 @@ route per the editors-wave coordination rule). `rjit game verify` owns
 `cart/hmsc-int/editors` as a suite root: 8 edit-step cases + 5 stream cases +
 the session-path round trip (`roundtrip.test.ts`), VERDICT GREEN. Open seams (CAPTURE.md): compile/ does not yet consume the
 garage snapshot (placement belongs to the world stream, not the vehicle doc),
-the V10 scale audit remains open, and the route's orbit yaw sign (`+dx`,
-carried from the lab) sits opposite the /test-pinned `-dx` verdict — kept for
-unchanged feel, surfaced as CAPTURE.md ambiguity 5.
+and the V10 scale audit remains open. The orbit yaw sign question is
+RESOLVED (V25 DRAGSIGN-0605, 2026-06-05): the lab's legacy `+dx` FLIPPED to
+the /test-pinned `-dx` convention — one drag convention everywhere; pinned
+conventions beat legacy behavior, always (CAPTURE.md ambiguity 5, resolved).
 
 ## editors/characters/ — the character editor route (editors wave, 2026-06-04)
 

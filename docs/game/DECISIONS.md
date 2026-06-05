@@ -801,3 +801,29 @@ architectural rule, user-endorsed:
   AUTHORING representation that bakes into / references that system's data —
   never a second source of truth. (The overlay EDITOR is later; the marker
   data model is registry scope now.)
+
+**V25 — Pinned conventions beat legacy behavior, always (DRAGSIGN-0605). (Added 2026-06-05.)**
+
+Trigger: the /vehicles editor's orbit drag carried the reference lab's
+`yaw += dx` sign — opposite the /test USER-VERDICT-pinned convention (yaw
+DECREASES with a rightward drag) — and a worker surfaced it as "this always
+existed, it just surfaced" while keeping the divergent feel.
+
+The user, verbatim: "the one note the one worker said about 'this always
+existed, it just surfaced' yeah that doesnt mean it was right, that is
+exactly why we are doing this, there was once before no cohesive place of
+everything, so there was 30 different camera approaches effectively."
+
+The ruling, generalized:
+- **"It always existed" is NEVER a defense for keeping a divergent
+  behavior.** The ground-floor rebuild exists precisely because there were
+  ~30 camera approaches; faithfully capturing a divergence re-creates the
+  disease the rebuild cures.
+- **When a captured surface conflicts with a USER-VERDICT-pinned behavior,
+  the pin wins.** Capture fidelity applies to capabilities, not to
+  contradictions of rulings. Surfacing the conflict was right; the
+  resolution is always the pinned convention, not the legacy one.
+- Applied here: ONE camera drag convention everywhere — the /test-pinned
+  `-dx` family (TestRoute, CharactersRoute, and now VehiclesRoute). Tuning
+  values (per-pixel rates, clamps) stay per-surface P2 data; the SIGN is a
+  pinned convention, not tuning.
