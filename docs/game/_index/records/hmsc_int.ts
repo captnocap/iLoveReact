@@ -75,6 +75,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/telemetry.ts (GAME_TELEMETRY — measurement + copy-diagnostics)',
+      purpose: ['telemetry', 'debug', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/telemetry.ts',
+      description:
+        'V14 capture (2026-06-04): the ground-floor measurement + copy-diagnostics surface REWRITTEN fresh — MEASURES ONLY, renders nothing (the panel is chrome’s; it polls this door at TELEMETRY_TUNING.panel cadences, scalars @250ms / JSON @500ms, and maps fpsTone good≥55/warn≥30/bad to its palette). Reads: the GAME wire subset as table data (SCALAR_HOST_FN getFps/getLayoutUs/getPaintUs/getTickUs/__tel_node_count; SNAPSHOT_HOST_FN __tel_frame/gpu/nodes/input; the __tel_history ring), snake_case→FrameRecord normalization, COUNTER_SPEC diffable set (zero_size excluded — cumulative garbage). HONESTY RULE: every read tolerates a missing host fn AND availability() names exactly which are absent (the ruled-in fix for the “diagnostics silently degrade” hazard — plus the door file is now a metafile-gate trigger on the telemetry registry entry so importing @game compiles __tel_* in). The perfWatch spike flight recorder captured as pure core (median baseline, two-gate detectSpike ratio-1.15-AND-jump-500us, the WHAT-FIRED classifySpike verdict tree, buildSpikeReport) + thin idempotent startSpikeWatch loop (warn-severity, armed heartbeat, 400ms cooldown, 48-frame tape); gv_perflog toggle left to GAME_COMMANDS. Copy-diagnostics: buildDiagnostics(label, extra) — ISO timestamp, scalars, raw blobs, tape, lab extras top-level — pretty-JSON to __clipboard_set (called direct; the runtime clipboard module’s IFTTT side-effect import is wrong baggage). Every knob in TELEMETRY_TUNING (P2). 23 P4 tests green; sqlite3-rides-the-gate + the snapshot-subset choice surfaced in telemetry.CAPTURE.md. References (perfWatch, massive-map button, panel idiom) untouched.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
       name: 'game/chance.ts (GAME_CHANCE — the ONE odds engine)',
       purpose: ['chance', 'ai_edit', 'maintenance'],
       kind: 'module',

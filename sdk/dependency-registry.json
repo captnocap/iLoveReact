@@ -626,6 +626,10 @@
         },
         {
           "kind": "metafileInput",
+          "input": "cart/hmsc-int/game/telemetry.ts"
+        },
+        {
+          "kind": "metafileInput",
           "input": "cart/inspector/bridge.ts"
         },
         {
