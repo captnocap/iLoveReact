@@ -195,7 +195,10 @@ export function emptyMap(): EditorWorld {
 // Uses the chunk lattice law (chunk (cx,cz) is CENTRED at cx*PATCH —
 // see ChunkSurface): cell (x,y) of chunk (cx,cz) sits at
 // cx*PATCH − PATCH/2 + (x + 0.5)*tileUnits.
-export function paintedCenter(world: EditorWorld, tileUnits: number): { gx: number; gy: number } | null {
+export type PaintedBounds = { minX: number; maxX: number; minY: number; maxY: number };
+
+/** Graph-space bounding box of everything painted — null on a blank map. */
+export function paintedBounds(world: EditorWorld, tileUnits: number): PaintedBounds | null {
   const patch = CHUNK_TILES * tileUnits;
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   let any = false;
@@ -213,6 +216,41 @@ export function paintedCenter(world: EditorWorld, tileUnits: number): { gx: numb
       if (y > maxY) maxY = y;
     }
   }
-  if (!any) return null;
-  return { gx: (minX + maxX) / 2, gy: (minY + maxY) / 2 };
+  return any ? { minX, maxX, minY, maxY } : null;
+}
+
+export function paintedCenter(world: EditorWorld, tileUnits: number): { gx: number; gy: number } | null {
+  const bounds = paintedBounds(world, tileUnits);
+  if (!bounds) return null;
+  return { gx: (bounds.minX + bounds.maxX) / 2, gy: (bounds.minY + bounds.maxY) / 2 };
+}
+
+// VIEWRUNAWAY-0605: the saved-view sanity law, applied at BOTH ends — the
+// autosave never writes a view that fails it, and the restore rejects one
+// that does (logged + paintedCenter fallback; the next autosave then
+// overwrites the bad value, so a poisoned file self-heals).
+export const VIEW_SANITY = {
+  /** the host camera's own zoom clamp (framework/primitive/canvas.zig) */
+  zoom: { min: 0.05, max: 100 },
+  /** a sane view centre may wander this many chunks past the painted bounds
+   *  (or past the origin chunk on a blank map) */
+  marginChunks: 2,
+} as const;
+
+/** Is this saved/live 2D camera believable for this world? */
+export function isSaneView2d(
+  view: { x: number; y: number; zoom: number } | null | undefined,
+  world: EditorWorld,
+  tileUnits: number,
+): boolean {
+  if (!view) return false;
+  if (!Number.isFinite(view.x) || !Number.isFinite(view.y) || !Number.isFinite(view.zoom)) return false;
+  if (view.zoom < VIEW_SANITY.zoom.min || view.zoom > VIEW_SANITY.zoom.max) return false;
+  const patch = CHUNK_TILES * tileUnits;
+  const margin = VIEW_SANITY.marginChunks * patch;
+  const bounds = paintedBounds(world, tileUnits) ?? { minX: -patch / 2, maxX: patch / 2, minY: -patch / 2, maxY: patch / 2 };
+  return (
+    view.x >= bounds.minX - margin && view.x <= bounds.maxX + margin &&
+    view.y >= bounds.minY - margin && view.y <= bounds.maxY + margin
+  );
 }

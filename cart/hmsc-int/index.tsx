@@ -24,7 +24,7 @@ import { RightPanel, type TabId } from './RightPanel';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
-import { serializeMap, deserializeMap, emptyMap, paintedCenter, type MapSnapshot, type EditorWorld } from './mapStore';
+import { serializeMap, deserializeMap, emptyMap, paintedCenter, isSaneView2d, type MapSnapshot, type EditorWorld } from './mapStore';
 import { ProjectBar, MapsMenu, EventLog } from './ProjectBar';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
@@ -311,7 +311,14 @@ function EditorShell() {
     if (!api) return null; // canvas not mounted yet — skip this autosave tick
     const w = api.getWorld();
     const world = ptime('autosave', `serializeMap chunks=${w.chunks.size}`, () => serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements }));
-    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d: api.getView() ?? undefined };
+    // VIEWRUNAWAY-0605 write-side invariant: an autosaved view always passes
+    // the sanity law — a camera that ran away (or read degenerate) is OMITTED
+    // (the restore's painted-centre fallback then reframes, and the next sane
+    // sample resumes persisting).
+    const liveView = api.getView();
+    const view2d = liveView && isSaneView2d(liveView, { chunks: w.chunks, zones: w.zones, focus: w.focus, placements }, TILE_UNITS) ? liveView : undefined;
+    if (liveView && !view2d) console.warn(`[viewrunaway] NOT persisting insane live view ${liveView.x.toFixed(0)},${liveView.y.toFixed(0)}@${liveView.zoom.toFixed(2)}`);
+    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d };
   }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
   const applyPayload = useCallback((env: SessionEnvelope<MapPayload>) => {
@@ -344,14 +351,22 @@ function EditorShell() {
     // The 2D camera: the saved view, else centre on the painted content (an
     // older file or a pre-fix save) — never the bare lattice origin on a
     // non-empty map (MAPGONE2-0605).
-    const restoredView = p.view2d && Number.isFinite(p.view2d.x) && Number.isFinite(p.view2d.y) && Number.isFinite(p.view2d.zoom) && p.view2d.zoom > 0
-      ? p.view2d
+    // VIEWRUNAWAY-0605: a saved view must pass the sanity law (finite, sane
+    // zoom, centre within the painted bounds + margin) or it is REJECTED —
+    // logged, paintedCenter fallback, and the next autosave overwrites the
+    // poisoned value (self-healing; the files are never rewritten here).
+    const savedSane = isSaneView2d(p.view2d, w, TILE_UNITS);
+    if (p.view2d && !savedSane) {
+      console.warn(`[viewrunaway] REJECTED saved view2d ${p.view2d.x.toFixed(0)},${p.view2d.y.toFixed(0)}@${p.view2d.zoom.toFixed(2)} — outside the sanity law; falling back to painted centre`);
+    }
+    const restoredView = savedSane
+      ? p.view2d!
       : (() => {
           const center = paintedCenter(w, TILE_UNITS);
           return center ? { x: center.gx, y: center.gy, zoom: 1 } : null;
         })();
     setSeedView(restoredView);
-    console.warn(`[mapgone] applyPayload: view2d=${p.view2d ? 'saved' : 'absent'} → seedView=${restoredView ? `${restoredView.x.toFixed(0)},${restoredView.y.toFixed(0)}@${restoredView.zoom.toFixed(2)}` : 'host default'}`);
+    console.warn(`[mapgone] applyPayload: view2d=${p.view2d ? (savedSane ? 'saved' : 'saved-INSANE') : 'absent'} → seedView=${restoredView ? `${restoredView.x.toFixed(0)},${restoredView.y.toFixed(0)}@${restoredView.zoom.toFixed(2)}` : 'host default'}`);
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
   }, []);
@@ -781,6 +796,13 @@ function EditorShell() {
   const nav = useNavigate();
   const route = useRoute();
   const activeRoute = route.path === '/test' ? 'test' : route.path === '/build' ? 'build' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  // VIEWRUNAWAY-0605: the editor stays MOUNTED under route overlays, but it
+  // must go input-DEAF there — the key bus is global, so a WASD walk in
+  // /build was also driving the buried canvas's drift (700px/s ÷ zoom for
+  // minutes = the million-unit saved views). Quad focus only exists AT the
+  // editor; losing it clears held keys + drift via the existing focus-loss
+  // machinery in each quad.
+  const atEditor = activeRoute === 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
@@ -859,7 +881,7 @@ function EditorShell() {
               showGrid={showGrid}
               onFloors={onFloors}
               onEditBegin={snapshotForUndo}
-              wasdFocused={wasdQuad === 'canvas'}
+              wasdFocused={atEditor && wasdQuad === 'canvas'}
               onWasdFocus={focusCanvas}
               select={tileSelect}
             />
@@ -869,7 +891,7 @@ function EditorShell() {
               <IsoPreview
                 key={`${ws.stem}#${worldEpoch}`}
                 state={previewWorld}
-                wasdFocused={wasdQuad === 'preview'}
+                wasdFocused={atEditor && wasdQuad === 'preview'}
                 onWasdFocus={focusPreview}
                 initialCamera={seedCam}
                 cameraApiRef={camApiRef}

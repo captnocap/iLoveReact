@@ -13,7 +13,7 @@
 // painted-content centre, never the bare origin on a non-empty map).
 
 import { buildEnvelope, parseEnvelope, serializeEnvelope } from '@reactjit/workspace';
-import { deserializeMap, emptyMap, paintedCenter, serializeMap, type EditorWorld, type MapSnapshot } from '../../mapStore';
+import { deserializeMap, emptyMap, isSaneView2d, paintedCenter, VIEW_SANITY, serializeMap, type EditorWorld, type MapSnapshot } from '../../mapStore';
 import { encodeTileMap, paintTile, tileKindIndex, TILE_PALETTE } from '../../tileData';
 import { chunkKey, makeChunk, CHUNK_TILES } from '../../chunks';
 import { TILE_UNITS } from '../../heightData';
@@ -102,6 +102,25 @@ test('a saved 2D view round-trips the envelope (schema addition — old files st
   const old = serializeEnvelope(buildEnvelope({ cartName: CART, version: VERSION, stem: 'old-file', payload: { world: serializeMap(paintedWorld().world) } }));
   const oldEnv = parseEnvelope<{ view2d?: unknown }>(old, { cartName: CART, version: VERSION });
   assert(oldEnv !== null && oldEnv!.payload.view2d === undefined, 'a pre-fix file parses with no view (fallback path)');
+});
+
+test('VIEWRUNAWAY-0605: the sanity law rejects the runaway, accepts the workshop', () => {
+  const { world } = paintedWorld(); // content in chunk (1,1): roughly x/z [3,12] graph units ×24
+  // the user's ACTUAL degraded saves (a buried canvas drifting under /build for minutes)
+  assert(!isSaneView2d({ x: -174185, y: -1439464, zoom: 0.1 }, world, TILE_UNITS), 'the first logged runaway is rejected');
+  assert(!isSaneView2d({ x: -298347, y: -2255629, zoom: 0.1 }, world, TILE_UNITS), 'the later, worse one too');
+  assert(!isSaneView2d({ x: NaN, y: 0, zoom: 1 }, world, TILE_UNITS), 'non-finite is rejected');
+  assert(!isSaneView2d({ x: 0, y: 0, zoom: 0 }, world, TILE_UNITS), 'degenerate zoom is rejected');
+  assert(!isSaneView2d(null, world, TILE_UNITS), 'absent is not sane (the fallback path)');
+  // a view over the painted content (or within the margin) is believable
+  const center = paintedCenter(world, TILE_UNITS)!;
+  assert(isSaneView2d({ x: center.gx, y: center.gy, zoom: 1 }, world, TILE_UNITS), 'the content centre passes');
+  const margin = VIEW_SANITY.marginChunks * CHUNK_TILES * TILE_UNITS;
+  assert(isSaneView2d({ x: center.gx + margin * 0.9, y: center.gy, zoom: 0.2 }, world, TILE_UNITS), 'wandering inside the margin passes');
+  assert(!isSaneView2d({ x: center.gx + margin * 3, y: center.gy, zoom: 1 }, world, TILE_UNITS), 'far past the margin fails');
+  // a blank map measures against the origin chunk
+  assert(isSaneView2d({ x: 0, y: 0, zoom: 1 }, emptyMap(), TILE_UNITS), 'a blank map accepts the origin');
+  assert(!isSaneView2d({ x: -174185, y: -1439464, zoom: 0.1 }, emptyMap(), TILE_UNITS), 'and still rejects the runaway');
 });
 
 finish('editors/world/mapload');
