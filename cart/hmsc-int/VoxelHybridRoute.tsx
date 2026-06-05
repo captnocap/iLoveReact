@@ -1,11 +1,12 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Pressable, Row, Scene3D, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import * as Geometry from '@reactjit/geometries';
-import { CAMERAS, solveCamera, screenRay, type Rect } from '@reactjit/cameras';
 import { mkdir, writeFile } from '@reactjit/hooks/fs';
+import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 
 type Vec3 = [number, number, number];
+type Rect = { x: number; y: number; width: number; height: number };
 type Kind = 'floor' | 'wall' | 'glass' | 'trim';
 type Tool = 'build' | 'mine';
 
@@ -49,6 +50,17 @@ const KINDS: Record<Kind, { label: string; color: string; opacity?: number }> = 
 };
 
 const PALETTE: Kind[] = ['wall', 'glass', 'trim', 'floor'];
+const VIEW = {
+  yawPerPixel: 0.4,
+  pitchPerPixel: 0.3,
+  minPitch: 7,
+  maxPitch: 84,
+  fov: 48,
+  minDistance: 6,
+  maxDistance: 34,
+  zoomStep: 1.1,
+  boot: { yaw: 38, pitch: 31, distance: 14 },
+} as const;
 const FACES: Face[] = [
   { key: 'xp', label: '+X', dx: 1, dy: 0, dz: 0 },
   { key: 'xn', label: '-X', dx: -1, dy: 0, dz: 0 },
@@ -188,7 +200,7 @@ function rayBlockFace(o: Vec3, d: Vec3, block: Block): { t: number; face: Face }
 
 function pickBlockFace(sx: number, sy: number, rect: Rect, cam: { pos: Vec3; target: Vec3; fov: number }, blocks: Block[]): { block: Block; face: Face } | null {
   // the registry's pixel->ray inverse (R7) — this file carried its own copy before
-  const { origin: o, dir: d } = screenRay(sx, sy, rect, cam);
+  const { origin: o, dir: d } = GAME_CAMERA.screenRay(sx, sy, rect, cam);
   let best: { block: Block; face: Face; t: number } | null = null;
   for (const block of blocks) {
     const hit = rayBlockFace(o, d, block);
@@ -271,14 +283,39 @@ function VoxelScene(props: {
   onFaceClick: (block: Block, face: Face) => void;
   onMiss: () => void;
 }) {
-  const [yaw, setYaw] = useState(38);
-  const [pitch, setPitch] = useState(31);
-  const [dist, setDist] = useState(14);
+  const lookRef = useRef({ yaw: VIEW.boot.yaw, pitch: VIEW.boot.pitch });
+  const distRef = useRef(VIEW.boot.distance);
+  const cameraRef = useRef<any>(null);
+  const cameraCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 1000, height: 700 });
   const dragRef = useRef<{ x: number; y: number; dist: number } | null>(null);
 
   const target: Vec3 = [(props.dims.w - 1) / 2, clamp(props.dims.h / 2, 1.2, 5), (props.dims.d - 1) / 2];
-  const solved = useMemo(() => solveCamera(CAMERAS.Orbit, { target, yaw, pitch, dist, zoom: 1, fov: 48 }), [target[0], target[1], target[2], yaw, pitch, dist]);
+  const solveShadow = (t: Vec3, look = lookRef.current, distance = distRef.current) =>
+    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: t, yaw: look.yaw, pitch: look.pitch, dist: distance, zoom: 1, fov: VIEW.fov });
+  const shadowCamRef = useRef(solveShadow(target));
+  const [bootCam] = useState(() => shadowCamRef.current);
+  const sendOrbit = (t: Vec3, look = lookRef.current, distance = distRef.current) => {
+    shadowCamRef.current = solveShadow(t, look, distance);
+    cameraCtlRef.current?.setOrbit({ target: t, yaw: look.yaw, pitch: look.pitch, distance, fov: VIEW.fov, zoom: 1 });
+  };
+  useEffect(() => {
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) {
+      console.warn('[voxels] native camera not engaged — camera node id unavailable');
+      return;
+    }
+    const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
+    cameraCtlRef.current = ctl;
+    ctl.setOrbit({ target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, fov: VIEW.fov, zoom: 1 });
+    ctl.setMode('orbit');
+    return () => {
+      cameraCtlRef.current = null;
+      ctl.disable();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; target changes ride the effect below
+  }, []);
+  useEffect(() => { sendOrbit(target); }, [target[0], target[1], target[2]]);
   const occupied = new Set(props.blocks.map((b) => coordKey(b.x, b.y, b.z)));
   const previewPos = addFace(props.selected, props.activeFace);
   const previewOk = inBounds(previewPos, props.dims) && !occupied.has(coordKey(previewPos.x, previewPos.y, previewPos.z));
@@ -301,8 +338,13 @@ function VoxelScene(props: {
     const dx = nx - d.x, dy = ny - d.y;
     d.dist += Math.abs(dx) + Math.abs(dy);
     d.x = nx; d.y = ny;
-    setYaw((v) => v + dx * 0.4);
-    setPitch((v) => clamp(v - dy * 0.3, 7, 84));
+    const l = lookRef.current;
+    const nextYaw = l.yaw - dx * VIEW.yawPerPixel;
+    const nextPitch = clamp(l.pitch - dy * VIEW.pitchPerPixel, VIEW.minPitch, VIEW.maxPitch);
+    cameraCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    l.yaw = nextYaw;
+    l.pitch = nextPitch;
+    shadowCamRef.current = solveShadow(target);
   };
   const onUp = (e: any) => {
     const d = dragRef.current;
@@ -311,13 +353,14 @@ function VoxelScene(props: {
     const r = rectRef.current;
     const sx = Number(e?.x ?? 0) - r.x;
     const sy = Number(e?.y ?? 0) - r.y;
-    const hit = pickBlockFace(sx, sy, r, solved as any, props.blocks);
+    const hit = pickBlockFace(sx, sy, r, shadowCamRef.current, props.blocks);
     if (hit) props.onFaceClick(hit.block, hit.face);
     else props.onMiss();
   };
   const onWheel = (e: any) => {
     const dy = Number(e?.deltaY ?? e?.dy ?? 0);
-    setDist((v) => clamp(v + (dy > 0 ? 1 : -1) * 1.1, 6, 34));
+    distRef.current = clamp(distRef.current + (dy > 0 ? 1 : -1) * VIEW.zoomStep, VIEW.minDistance, VIEW.maxDistance);
+    sendOrbit(target);
   };
 
   return (
@@ -330,7 +373,7 @@ function VoxelScene(props: {
       style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
     >
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showGrid={false} showAxes={false}>
-        <Scene3D.Camera position={solved.pos} target={solved.target} fov={solved.fov} far={120} />
+        <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={120} />
         <Scene3D.Fog enabled={false} />
         <Scene3D.AmbientLight color="#d8e2ff" intensity={0.48} />
         <Scene3D.DirectionalLight direction={[0.45, 0.9, 0.36]} color="#ffe3a8" intensity={0.9} />
