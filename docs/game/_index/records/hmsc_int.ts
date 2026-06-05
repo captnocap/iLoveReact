@@ -65,6 +65,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/chance.ts (GAME_CHANCE — the ONE odds engine)',
+      purpose: ['chance', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/chance.ts',
+      description:
+        'V9 capture (2026-06-04): the ruled hybrid REWRITTEN fresh — scape ChanceBreakdown surface (base×range×los×cover×stance×awareness×health×time×skill, clamped, true-0 preserved) + hmsc continuous coverFraction law (1−f·0.8; scape partial→0.65 recovered via partialLosCoverFraction 0.4375; combat_lab bone-sample contract as COVER_SAMPLE_SPEC + coverFractionFromSamples). All curves in CHANCE_TUNING (P2). rollHit/rollZone rng-injected + seededRng. Ground-truth law: perception never imported. Scape path numerically identical (1,728 cases); bare-ranged hole filled with the hmsc falloff. 18 P4 tests; conflicts (skill law, crouch×cover, awareness wiring) surfaced in chance.CAPTURE.md. References untouched.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
       name: 'game/kinds (GAME_KINDS registries)',
       purpose: ['world_gen', 'ai_edit', 'maintenance'],
       kind: 'module',

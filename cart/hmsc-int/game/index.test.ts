@@ -33,7 +33,7 @@ test('the door exports all 19 standard GAME_* names (V17)', () => {
 });
 
 test('live doors are live; capture-pending doors say so honestly', () => {
-  const live = [...SEALED_HERE, 'GAME_KINDS'];
+  const live = [...SEALED_HERE, 'GAME_KINDS', 'GAME_CHANCE'];
   for (const name of live) {
     assert(!('status' in (door as any)[name]), `${name} must not claim capture-pending`);
   }
