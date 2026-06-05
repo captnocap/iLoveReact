@@ -9,7 +9,9 @@ import { RoadJunctionCaptures } from '../render3d/RoadJunctions';
 import { PropSurfaceCaptures } from '../render3d/PropCaptures';
 import { LandformSurfaceCaptures } from '../render3d/Landform';
 import { BuildingSurfaceCaptures } from '../render3d/BuildingFacades';
+import { WorldPartCaptures } from '../render3d/PartCaptures';
 import { DriveInScreenCaptures } from '../render3d/driveInScreen';
+import { HumanoidFaceCaptures } from '../render3d/humanoid';
 import { hmscSkyBackgroundColor } from '../render3d/sky';
 import { Hud } from '../render/Hud';
 import { HmscDebugHud } from '../render/DebugHud';
@@ -271,8 +273,12 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
       <PropSurfaceCaptures props={props.state.world.props} />
       <LandformSurfaceCaptures landforms={props.state.world.landforms ?? []} />
       <BuildingSurfaceCaptures buildings={props.state.world.buildings} perception={props.state.player.perception} />
+      {/* Per-PART textures (click-to-pick): open structures' parts + props' parts. */}
+      <WorldPartCaptures buildings={props.state.world.buildings} props={props.state.world.props} perception={props.state.player.perception} />
       {/* Live <Video> (or NO SIGNAL) → each drive-in screen's texture. */}
       <DriveInScreenCaptures buildings={props.state.world.buildings} />
+      {/* The humanoid face pool — the player's and every NPC's head decal. */}
+      <HumanoidFaceCaptures />
     </Pressable>
   );
 }

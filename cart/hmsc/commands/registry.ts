@@ -37,7 +37,7 @@ import {
 } from '../state/defaults';
 import { createInitialGameState, readStoredGameState, saveGameState } from '../state/gameState';
 import { configurePerfWatch, perfWatchStatusLine } from '../state/perfWatch';
-import { addSurfaceRegion, cellKey, commandCell, placeCell, placedCellAt, removeCell, setCellTrigger, worldToCell } from '../world/grid';
+import { addSurfaceRegion, cellCenterToWorld, cellKey, commandCell, groundTopAtWorldPosition, placeCell, placedCellAt, removeCell, setCellTrigger, worldToCell } from '../world/grid';
 import { placeRoad, removeRoad, roadFootprint } from '../world/roads';
 import { junctionFootprint, placeJunction, removeJunction } from '../world/roadJunctions';
 import { solveRoadCrossSection } from '../world/roadProfile';
@@ -727,6 +727,26 @@ const COMMANDS: CommandDefinition[] = [
       } catch (err: any) {
         return fail(state, err.message);
       }
+    },
+  },
+  {
+    name: 'pv_respawn',
+    summary: 'Teleport the player to the armed respawn cell — the spawn paired with the last save checkpoint stepped on, or the world default spawn.',
+    usage: 'pv_respawn',
+    run(_args, state) {
+      const cell = state.player.respawnCell;
+      if (!cell) return fail(state, 'no respawn point set — step on a save point or author a spawn marker');
+      const center = cellCenterToWorld(cell, state.world.cellSizeMeters);
+      const top = groundTopAtWorldPosition(state, center, state.config.physics.playerStepHeightMeters);
+      const y = top ?? state.player.position.y;
+      return ok({
+        ...state,
+        player: {
+          ...state.player,
+          position: { x: center.x, y, z: center.z },
+          physics: { ...state.player.physics, velocity: { x: 0, y: 0, z: 0 }, grounded: true },
+        },
+      }, `respawned at ${cell.x}, ${cell.z}`);
     },
   },
   {

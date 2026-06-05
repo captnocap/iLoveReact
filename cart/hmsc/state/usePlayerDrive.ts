@@ -4,6 +4,7 @@ import { runCommandLine } from '../commands/registry';
 import type { GameState } from '../design';
 import { cellEventRef, playerEventActor, recordAndPublishGameEvent } from '../events/gameEvents';
 import { canOccupyWorldPosition, cellKey, placedCellAt, triggerCellAtWorldPosition, worldToCell } from '../world/grid';
+import { saveGameState } from './gameState';
 import { currentZone } from '../world/zones';
 import { isInteriorSceneStep } from '../world/interiors';
 import { MIN_DRIVE_FRAME_SECONDS, MOVEMENT_INTENT_DEADZONE, NOCLIP_MIN_HEIGHT_METERS } from './defaults';
@@ -106,6 +107,41 @@ function recordEnteredPlayerCell(state: GameState, lastPlayerCellKeyRef: { curre
   }).state;
 }
 
+// A 'save' checkpoint: stepping onto it persists the game (like gv_save) and arms
+// the respawn at the save's PAIRED spawn cell — the manual save↔spawn link authored
+// in hmsc-int. An unpaired save arms the respawn at the save cell itself. Debounced
+// via lastSaveCellKeyRef so it fires once per entry, not every tick you stand on it.
+function runEnteredSaveCell(state: GameState, lastSaveCellKeyRef: { current: string | null }): GameState {
+  if (!triggersActive(state.sceneStep)) {
+    lastSaveCellKeyRef.current = null;
+    return state;
+  }
+  const cell = worldToCell(state.player.position, state.world.cellSizeMeters);
+  const placedCell = placedCellAt(state, cell);
+  if (placedCell?.kind !== 'save') {
+    lastSaveCellKeyRef.current = null;
+    return state;
+  }
+  if (lastSaveCellKeyRef.current === placedCell.key) return state;
+  lastSaveCellKeyRef.current = placedCell.key;
+  const pairedSpawn = placedCell.spawnKey ? state.world.placedCells[placedCell.spawnKey] : undefined;
+  const respawnCell = pairedSpawn?.cell ?? cell;
+  const armed: GameState = { ...state, player: { ...state.player, respawnCell } };
+  const saved = saveGameState(armed);
+  return recordAndPublishGameEvent(saved, {
+    type: 'world.save.recorded',
+    source: 'player-drive',
+    actor: playerEventActor(),
+    subject: { kind: 'cell', id: placedCell.key, label: placedCell.triggerLabel ?? 'save point' },
+    tags: ['world', 'save', 'checkpoint'],
+    payload: {
+      cell,
+      respawnCell,
+      savedAt: saved.savedAt,
+    },
+  }).state;
+}
+
 // Fire zone enter/exit on boundary crossings, the zones twin of
 // runEnteredCellTrigger but at REGION granularity (innermost zone wins). The
 // emitted zone.entered event is what drives the GTA name-flash HUD, so the flash
@@ -167,6 +203,7 @@ export function usePlayerDrive(
   const keysRef = useRef<Record<string, boolean>>({});
   const lastTriggerKeyRef = useRef<string | null>(null);
   const lastPlayerCellKeyRef = useRef<string | null>(null);
+  const lastSaveCellKeyRef = useRef<string | null>(null);
   const lastZoneIdRef = useRef<string | null>(null);
   const [driveFrame, setDriveFrame] = useState<PlayerDriveFrame>({
     animationSeconds: 0,
@@ -287,7 +324,7 @@ export function usePlayerDrive(
                 },
               },
             };
-            return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
+            return runZoneTransitions(runEnteredCellTrigger(runEnteredSaveCell(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastSaveCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
           }
           const hostResult = advanceHostPhysics(
             current,
@@ -314,9 +351,9 @@ export function usePlayerDrive(
                   yawDegrees,
                 },
               };
-              return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
+              return runZoneTransitions(runEnteredCellTrigger(runEnteredSaveCell(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastSaveCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
             }
-            return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(hostResult.state, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
+            return runZoneTransitions(runEnteredCellTrigger(runEnteredSaveCell(recordEnteredPlayerCell(hostResult.state, lastPlayerCellKeyRef), lastSaveCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
           }
           if (intentLength > MOVEMENT_INTENT_DEADZONE) {
             const moveX = intentX / intentLength;
@@ -334,7 +371,7 @@ export function usePlayerDrive(
           }
 
           if (position === current.player.position && yawDegrees === current.player.yawDegrees) {
-            return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(current, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
+            return runZoneTransitions(runEnteredCellTrigger(runEnteredSaveCell(recordEnteredPlayerCell(current, lastPlayerCellKeyRef), lastSaveCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
           }
           const nextState = {
             ...current,
@@ -344,7 +381,7 @@ export function usePlayerDrive(
               yawDegrees,
             },
           };
-          return runZoneTransitions(runEnteredCellTrigger(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
+          return runZoneTransitions(runEnteredCellTrigger(runEnteredSaveCell(recordEnteredPlayerCell(nextState, lastPlayerCellKeyRef), lastSaveCellKeyRef), lastTriggerKeyRef), lastZoneIdRef);
         });
       }
 

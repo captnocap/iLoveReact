@@ -20,39 +20,40 @@
 // stay clickable (the host hit-tests children in reverse). alt-drag pans.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Canvas, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
-import { Icon } from '@reactjit/icons/Icon';
+import { Box, Canvas, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { callHost } from '@reactjit/ffi';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { columnLabel } from './address';
 import { type ChunkFloor } from './chunkFloor';
-import type { TileKind, ZoneFlag } from '../hmsc/design';
+import type { TileKind } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
-import { ZONE_FLAGS } from '../hmsc/world/zones';
-import { TILE_UNITS, DOT_M, HEIGHT_LIMIT, stampBrush, clearField, type BrushShape, type BrushProfile } from './heightData';
+import { TILE_UNITS, DOT_M, HEIGHT_LIMIT, stampBrush, stampRamp, clearField, type BrushProfile } from './heightData';
+import { forEachFootprintCell, type BrushMode, type BrushShape } from './brush';
+import { BrushRail, type BrushRailSettings } from './BrushRail';
+import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
-import type { Placement } from './placements';
+import { placementCellRect, type Placement, type PlaceCat } from './placements';
 import type { EditorWorld } from './mapStore';
 import type { SelCell } from './tileOverrides';
 import type { EditNote } from './editLog';
 import { plog, useChurn, countersSnapshot, counterDelta } from './perfLog';
 
-export type HeightTool = 'brush' | 'erase';
+export type HeightMode = 'brush' | 'ramp';
 type CanvasRect = { x: number; y: number; width: number; height: number } | null;
 type HoverState = { x: number; y: number; addr: string } | null;
 type HoverSink = { current: ((h: HoverState) => void) | null };
 // The visible brush footprint: a circle at screen position (x,y), diameter d px,
 // `on` = over a paintable cell (filled) vs off-grid (outline only).
-type BrushVis = { x: number; y: number; d: number; color: string; on: boolean; shape?: BrushShape } | null;
+type BrushVis = { x: number; y: number; d: number; color: string; on: boolean; shape?: BrushShape; rect?: { w: number; h: number; angle?: number }; ramp?: { w: number; h: number; angle: number } } | null;
 type BrushSink = { current: ((b: BrushVis) => void) | null };
 
 export type Tool = 'pointer' | 'brush' | 'eraser';
 export type Layer = 'paint' | 'height' | 'place' | 'zone';
-export type { BrushShape, BrushProfile };
-export type BrushSettings = { size: number; centerZ: number; heightTool: HeightTool; heightProfile: BrushProfile; heightShape: BrushShape };
+export type { BrushMode, BrushShape, BrushProfile };
+export type BrushSettings = BrushRailSettings;
 
 // The serialize seam: the cart pulls the live world (chunks + zone defs + focus)
 // through this on autosave. Placements live in the cart, so they're added there.
@@ -60,34 +61,32 @@ export interface PaintCanvasApi {
   getWorld: () => Pick<EditorWorld, 'chunks' | 'zones' | 'focus'>;
 }
 
-// Two-letter flag tags for the cramped zone rail.
-const FLAG_TAG: Record<ZoneFlag, string> = { private: 'PV', safe: 'SF', hostile: 'HO', restricted: 'RS', interior: 'IN' };
-
 // The place-layer state + actions, owned by the cart (so placements persist /
 // feed the world). Passed as a bundle to keep the prop list flat.
 export interface PlaceProps {
   items: Placement[];
   selId: string | null;
+  active: { cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null;
   onSelect: (id: string | null) => void;
+  onArm: (cat: PlaceCat, kind: string) => void;
+  onRotateBrush: (delta: number) => void;
+  onPaintAt: (cat: PlaceCat, kind: string, gx: number, gy: number, rotation: number) => void;
   onMove: (id: string, gx: number, gy: number) => void;
   onUpdate: (id: string, patch: Partial<Placement>) => void;
   onClone: (id: string) => void;
   onDelete: (id: string) => void;
 }
 
-const CELL = 24;
-const RAIL_W = 64; // double-wide rail: two 24px columns + gap + padding
+const RAIL_W = 176;
 const GUTTER_W = 58; // right-edge chunk-focus dock — thin so the centre stays clear
 
 // One chunk spans CHUNK_TILES tiles (1 tile = 1m), so PATCH graph-units wide.
 const PATCH = CHUNK_TILES * TILE_UNITS;
 
-// Brush profile steppers.
-// Brush peak-height range mirrors the terrain clamp (single knob in heightData).
-const Z_MAX = HEIGHT_LIMIT, Z_MIN = -HEIGHT_LIMIT, Z_STEP = 1;
+const Z_MAX = HEIGHT_LIMIT, Z_MIN = -HEIGHT_LIMIT;
 // Shared brush size = RADIUS in tiles (0 = a single cell). 1 tile = 1m, so it also
 // reads as the height cone's radius in metres. Footprint shown as width-across.
-const SIZE_STEP = 1, SIZE_MIN = 0, SIZE_MAX = 40;
+const SIZE_MIN = 0, SIZE_MAX = 40;
 
 // Throttle for the live preview mirror — rebuilding regions + re-baking the
 // preview's floor captures is heavy, so cap it to ~3 syncs/sec.
@@ -139,179 +138,16 @@ function downsampleHeights(z: Float32Array, cols: number, rows: number): number[
   return out;
 }
 
-const TOOLS: { id: Tool; icon: string }[] = [
-  { id: 'pointer', icon: 'MousePointer' },
-  { id: 'brush', icon: 'Brush' },
-  { id: 'eraser', icon: 'Eraser' },
-];
-
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
-
-// Stamp a round brush of `radius` cells (0 = single cell) around (cx,cz), calling
-// paintCell per in-disc cell. Cells outside the chunk are dropped by paintCell, so
-// a brush at a chunk edge clips to this chunk (cross-chunk paint is a later pass).
-function stampDisc(radius: number, cx: number, cz: number, paintCell: (x: number, z: number) => void) {
-  const r2 = radius * radius + radius; // ≈ (radius+0.5)², a round footprint
-  for (let dz = -radius; dz <= radius; dz++) {
-    for (let dx = -radius; dx <= radius; dx++) {
-      if (dx * dx + dz * dz <= r2) paintCell(cx + dx, cz + dz);
-    }
-  }
-}
 
 // A chunk's short address label, e.g. (0,0)→"A0", (1,0)→"B0", (0,1)→"A1".
 const chunkLabel = (cx: number, cz: number) => `${columnLabel(cx)}${cz}`;
-
-// ── Atoms ────────────────────────────────────────────────────────────────────
-
-function ToolBtn(props: { icon: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={props.onPress} style={{ width: CELL, height: CELL, borderRadius: 4, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: props.active ? '#f8fafc' : '#334155', backgroundColor: props.active ? '#1e293b' : '#0f1a2e' }}>
-      <Icon name={props.icon} size={14} color={props.active ? '#f8fafc' : '#94a3b8'} />
-    </Pressable>
-  );
-}
-
-function Swatch(props: { color: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={props.onPress} style={{ width: CELL, height: CELL, borderRadius: 3, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#f8fafc' : '#1e293b', backgroundColor: props.color }} />
-  );
-}
-
-function LayerBtn(props: { label: string; color: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable onPress={props.onPress} style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingLeft: 9, paddingRight: 9, paddingTop: 5, paddingBottom: 5, borderRadius: 5, borderWidth: props.active ? 2 : 1, borderColor: props.active ? '#f8fafc' : '#27364a', backgroundColor: props.active ? '#1e293b' : '#0b1320' }}>
-      <Box style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: props.color }} />
-      <Text fontSize={10} color={props.active ? '#f8fafc' : '#94a3b8'} style={{ fontWeight: props.active ? 700 : 600, letterSpacing: 1 }}>{props.label}</Text>
-    </Pressable>
-  );
-}
 
 function MiniBtn(props: { label: string; onPress: () => void }) {
   return (
     <Pressable onPress={props.onPress} style={{ paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, borderRadius: 3, borderWidth: 1, borderColor: '#27364a', backgroundColor: '#0f1a2e' }}>
       <Text fontSize={8} color="#94a3b8" style={{ fontWeight: 700 }}>{props.label}</Text>
     </Pressable>
-  );
-}
-
-function StepBtn(props: { label: string; onPress: () => void }) {
-  return (
-    <Pressable onPress={props.onPress} style={{ width: 16, height: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 3, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f1a2e' }}>
-      <Text fontSize={11} color="#cbd5e1">{props.label}</Text>
-    </Pressable>
-  );
-}
-
-function MiniStepper(props: { label: string; value: string; onDec: () => void; onInc: () => void }) {
-  return (
-    <Box style={{ gap: 2 }}>
-      <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{props.label}</Text>
-      <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 2 }}>
-        <StepBtn label="−" onPress={props.onDec} />
-        <Box style={{ flexGrow: 1, alignItems: 'center', borderWidth: 1, borderColor: '#27364a', borderRadius: 3, paddingTop: 2, paddingBottom: 2, backgroundColor: '#0f1a2e' }}>
-          <Text fontSize={9} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{props.value}</Text>
-        </Box>
-        <StepBtn label="+" onPress={props.onInc} />
-      </Box>
-    </Box>
-  );
-}
-
-// Shared brush-size stepper — radius in tiles, shown as the footprint width across.
-function SizeStepper(props: { size: number; onSize: (n: number) => void }) {
-  return (
-    <MiniStepper
-      label="size"
-      value={`${props.size * 2 + 1}t`}
-      onDec={() => props.onSize(clamp(props.size - SIZE_STEP, SIZE_MIN, SIZE_MAX))}
-      onInc={() => props.onSize(clamp(props.size + SIZE_STEP, SIZE_MIN, SIZE_MAX))}
-    />
-  );
-}
-
-// ── Rails (left, conditional on layer) ───────────────────────────────────────
-
-function PaintRail(props: { tool: Tool; onTool: (t: Tool) => void; tile: TileKind; onTile: (k: TileKind) => void; size: number; onSize: (n: number) => void }) {
-  return (
-    <Box style={{ gap: 6 }}>
-      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        {TOOLS.map((t) => <ToolBtn key={t.id} icon={t.icon} active={props.tool === t.id} onPress={() => props.onTool(t.id)} />)}
-      </Box>
-      <SizeStepper size={props.size} onSize={props.onSize} />
-      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        {TILE_KINDS.map((k) => <Swatch key={k} color={tileKindDefinition(k).render.color} active={props.tile === k} onPress={() => { props.onTile(k); props.onTool('brush'); }} />)}
-      </Box>
-    </Box>
-  );
-}
-
-// Cross-section profiles (height falloff) and footprint shapes (covered area), each
-// with a tiny ASCII glyph hint. Combine freely: flat+square = square plateau, etc.
-const HEIGHT_PROFILES: { id: BrushProfile; label: string; hint: string }[] = [
-  { id: 'cone', label: 'cone', hint: '▲' }, // slopes to nothing
-  { id: 'flat', label: 'flat', hint: '▬' }, // plateau, vertical edge
-  { id: 'dome', label: 'dome', hint: '◗' }, // rounded cap
-];
-const HEIGHT_FOOTPRINTS: { id: BrushShape; label: string; hint: string }[] = [
-  { id: 'circle', label: 'circle', hint: '●' },
-  { id: 'square', label: 'square', hint: '■' },
-  { id: 'diamond', label: 'diamond', hint: '◆' },
-];
-
-// A 2-wide chip grid (wraps): 3 items render 2-on-top + 1-below, never 3-across tight.
-function ChipGrid(props: {
-  items: ReadonlyArray<{ id: string; label: string; hint: string }>;
-  value: string; onPick: (id: string) => void; dim?: boolean;
-}) {
-  return (
-    <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4, opacity: props.dim ? 0.4 : 1 }}>
-      {props.items.map((it) => {
-        const active = props.value === it.id;
-        return (
-          <Pressable key={it.id} onPress={() => props.onPick(it.id)} style={{ width: '47%', alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: active ? '#f8fafc' : '#334155', backgroundColor: active ? '#1e293b' : '#0f1a2e' }}>
-            <Text fontSize={11} color={active ? '#7dd3fc' : '#64748b'}>{it.hint}</Text>
-            <Text fontSize={7} color={active ? '#f8fafc' : '#94a3b8'} style={{ fontFamily: 'monospace' }}>{it.label}</Text>
-          </Pressable>
-        );
-      })}
-    </Box>
-  );
-}
-
-function RailLabel(props: { text: string }) {
-  return <Text fontSize={7} color="#64748b" style={{ fontFamily: 'monospace', letterSpacing: 0.5 }}>{props.text}</Text>;
-}
-
-function HeightRail(props: {
-  hTool: HeightTool; onHTool: (t: HeightTool) => void;
-  profile: BrushProfile; onProfile: (p: BrushProfile) => void;
-  shape: BrushShape; onShape: (s: BrushShape) => void;
-  centerZ: number; onCenterZ: (z: number) => void;
-  size: number; onSize: (n: number) => void;
-  onClear: () => void;
-}) {
-  const dim = props.hTool === 'erase'; // profile/shape only matter when raising
-  return (
-    <Box style={{ gap: 6 }}>
-      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        <ToolBtn icon="Brush" active={props.hTool === 'brush'} onPress={() => props.onHTool('brush')} />
-        <ToolBtn icon="Eraser" active={props.hTool === 'erase'} onPress={() => props.onHTool('erase')} />
-      </Box>
-      {/* Footprint outline (which cells) + cross-section profile (how tall across).
-          Both dim under the eraser, which just zeros its footprint. */}
-      <RailLabel text="shape" />
-      <ChipGrid items={HEIGHT_FOOTPRINTS} value={props.shape} onPick={(v) => props.onShape(v as BrushShape)} dim={dim} />
-      <RailLabel text="profile" />
-      <ChipGrid items={HEIGHT_PROFILES} value={props.profile} onPick={(v) => props.onProfile(v as BrushProfile)} dim={dim} />
-      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-      <MiniStepper label="z (m)" value={props.centerZ.toFixed(1)} onDec={() => props.onCenterZ(clamp(props.centerZ - Z_STEP, Z_MIN, Z_MAX))} onInc={() => props.onCenterZ(clamp(props.centerZ + Z_STEP, Z_MIN, Z_MAX))} />
-      <SizeStepper size={props.size} onSize={props.onSize} />
-      <Pressable onPress={props.onClear} style={{ alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#7f1d1d', backgroundColor: '#3d1414' }}>
-        <Text fontSize={8} color="#fca5a5" style={{ fontWeight: 700 }}>clear focused</Text>
-      </Pressable>
-    </Box>
   );
 }
 
@@ -343,14 +179,72 @@ function SaveLinkPicker(props: { sel: Placement; place: PlaceProps }) {
 }
 
 // Place rail — controls for the SELECTED placement (conditional on selection).
-function PlaceRail(props: { sel: Placement | null; place: PlaceProps }) {
+function PlaceRail(props: { tool: Tool; onTool: (t: Tool) => void; sel: Placement | null; place: PlaceProps }) {
   const sel = props.sel;
+  const active = props.place.active;
+  const recent = (() => {
+    const out: Placement[] = [];
+    const seen = new Set<string>();
+    for (let i = props.place.items.length - 1; i >= 0 && out.length < 8; i--) {
+      const p = props.place.items[i];
+      const k = `${p.cat}:${p.kind}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(p);
+    }
+    return out;
+  })();
+  const toolRow = (
+    <Box style={{ gap: 5 }}>
+      <Box style={{ flexDirection: 'row', gap: 4 }}>
+        <ToolBtn icon="MousePointer" active={props.tool === 'pointer'} onPress={() => props.onTool('pointer')} />
+        <ToolBtn icon="Brush" active={props.tool === 'brush'} onPress={() => props.onTool('brush')} />
+      </Box>
+      {active ? (
+        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingTop: 4, paddingBottom: 4, borderTopWidth: 1, borderTopColor: '#1e293b' }}>
+          <Box style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: active.color }} />
+          <Text fontSize={8} color="#cbd5e1" style={{ flexGrow: 1, minWidth: 0, fontFamily: 'monospace', fontWeight: 700 }} numberOfLines={1}>{active.label}</Text>
+        </Box>
+      ) : (
+        <Text fontSize={8} color="#475569" style={{ fontFamily: 'monospace' }}>pick an object in the Objects tab</Text>
+      )}
+      {active ? (
+        <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+          <ToolBtn icon="RotateCcw" active={false} onPress={() => props.place.onRotateBrush(-ROT_STEP)} />
+          <Box style={{ flexGrow: 1, alignItems: 'center', borderWidth: 1, borderColor: '#27364a', borderRadius: 3, paddingTop: 4, paddingBottom: 4, backgroundColor: '#0f1a2e' }}>
+            <Text fontSize={8} color="#cbd5e1" style={{ fontFamily: 'monospace', fontWeight: 700 }}>{`${((active.rotation % 360) + 360) % 360}deg`}</Text>
+          </Box>
+          <ToolBtn icon="RefreshCw" active={false} onPress={() => props.place.onRotateBrush(ROT_STEP)} />
+        </Box>
+      ) : null}
+      {recent.length ? (
+        <Box style={{ gap: 4 }}>
+          <Text fontSize={7} color="#64748b" style={{ fontFamily: 'monospace', letterSpacing: 0.5 }}>recent</Text>
+          <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+            {recent.map((p) => {
+              const on = active?.cat === p.cat && active?.kind === p.kind;
+              return (
+                <Pressable key={`${p.cat}:${p.kind}`} onPress={() => { props.place.onArm(p.cat, p.kind); props.onTool('brush'); }} style={{ width: '48%', minHeight: 30, paddingLeft: 4, paddingRight: 4, paddingTop: 4, paddingBottom: 4, borderRadius: 4, borderWidth: on ? 2 : 1, borderColor: on ? '#f8fafc' : '#334155', backgroundColor: on ? '#1e293b' : '#0f1a2e' }}>
+                  <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <Box style={{ width: 9, height: 9, borderRadius: 2, backgroundColor: p.color }} />
+                    <Text fontSize={7} color={on ? '#f8fafc' : '#94a3b8'} style={{ flexGrow: 1, minWidth: 0, fontFamily: 'monospace', fontWeight: on ? 700 : 500 }} numberOfLines={1}>{p.label}</Text>
+                  </Box>
+                </Pressable>
+              );
+            })}
+          </Box>
+        </Box>
+      ) : null}
+    </Box>
+  );
   if (!sel) {
-    return <Text fontSize={8} color="#475569" style={{ fontFamily: 'monospace' }}>click + in the model viewer to place an object</Text>;
+    return toolRow;
   }
   const set = (patch: Partial<Placement>) => props.place.onUpdate(sel.id, patch);
   return (
     <Box style={{ gap: 6 }}>
+      {toolRow}
+      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
       <Text fontSize={8} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{sel.label}</Text>
       <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
         <ToolBtn icon="RotateCcw" active={false} onPress={() => set({ rotation: sel.rotation - ROT_STEP })} />
@@ -363,55 +257,6 @@ function PlaceRail(props: { sel: Placement | null; place: PlaceProps }) {
         <Text fontSize={8} color={sel.locked ? '#86efac' : '#cbd5e1'} style={{ fontWeight: 700 }}>{sel.locked ? 'LOCKED' : 'lock'}</Text>
       </Pressable>
       {sel.cat === 'marker' && sel.kind === 'save' ? <SaveLinkPicker sel={sel} place={props.place} /> : null}
-    </Box>
-  );
-}
-
-// Zone rail — paint tools + the zone palette (each a named, coloured, flagged
-// area), plus an editor for the active zone: name, the ZONE_FLAGS trigger
-// taxonomy, delete.
-function ZoneRail(props: {
-  tool: Tool; onTool: (t: Tool) => void; size: number; onSize: (n: number) => void;
-  zones: ZoneDef[]; activeZone: number; onActiveZone: (i: number) => void;
-  onAddZone: () => void; onUpdateZone: (i: number, patch: Partial<ZoneDef>) => void; onDeleteZone: (i: number) => void;
-}) {
-  const z = props.zones[props.activeZone];
-  return (
-    <Box style={{ gap: 6 }}>
-      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        {TOOLS.map((t) => <ToolBtn key={t.id} icon={t.icon} active={props.tool === t.id} onPress={() => props.onTool(t.id)} />)}
-      </Box>
-      <SizeStepper size={props.size} onSize={props.onSize} />
-      <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
-      {/* Zone palette: a swatch per zone + a dashed "new zone" tile. */}
-      <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
-        {props.zones.map((zz, i) => (
-          <Pressable key={zz.id} onPress={() => { props.onActiveZone(i); props.onTool('brush'); }} style={{ width: CELL, height: CELL, borderRadius: 3, borderWidth: i === props.activeZone ? 2 : 1, borderColor: i === props.activeZone ? '#f8fafc' : '#1e293b', backgroundColor: zz.color }} />
-        ))}
-        <Pressable onPress={props.onAddZone} style={{ width: CELL, height: CELL, borderRadius: 3, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f1a2e', alignItems: 'center', justifyContent: 'center' }}>
-          <Text fontSize={13} color="#86efac" style={{ fontWeight: 800 }}>+</Text>
-        </Pressable>
-      </Box>
-      {z ? (
-        <Box style={{ gap: 5, borderTopWidth: 1, borderTopColor: '#1e293b', paddingTop: 6 }}>
-          <TextInput text={z.name} onChangeText={(v: string) => props.onUpdateZone(props.activeZone, { name: v })} style={{ backgroundColor: '#0f1a2e', borderWidth: 1, borderColor: '#27364a', borderRadius: 3, paddingLeft: 4, paddingRight: 4, paddingTop: 2, paddingBottom: 2, color: '#e2e8f0', fontSize: 10 }} />
-          <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3 }}>
-            {ZONE_FLAGS.map((f) => {
-              const on = z.flags.includes(f);
-              return (
-                <Pressable key={f} onPress={() => props.onUpdateZone(props.activeZone, { flags: on ? z.flags.filter((x) => x !== f) : [...z.flags, f] })} style={{ paddingLeft: 4, paddingRight: 4, paddingTop: 2, paddingBottom: 2, borderRadius: 3, borderWidth: on ? 2 : 1, borderColor: on ? '#f8fafc' : '#27364a', backgroundColor: on ? '#1e293b' : '#0f1a2e' }}>
-                  <Text fontSize={8} color={on ? '#f8fafc' : '#94a3b8'} style={{ fontWeight: on ? 700 : 500 }}>{FLAG_TAG[f]}</Text>
-                </Pressable>
-              );
-            })}
-          </Box>
-          <Pressable onPress={() => props.onDeleteZone(props.activeZone)} style={{ alignItems: 'center', paddingTop: 3, paddingBottom: 3, borderRadius: 4, borderWidth: 1, borderColor: '#7f1d1d', backgroundColor: '#3d1414' }}>
-            <Text fontSize={8} color="#fca5a5" style={{ fontWeight: 700 }}>delete zone</Text>
-          </Pressable>
-        </Box>
-      ) : (
-        <Text fontSize={8} color="#475569" style={{ fontFamily: 'monospace' }}>+ a zone, then paint it</Text>
-      )}
     </Box>
   );
 }
@@ -474,6 +319,30 @@ function BrushCursor(props: { sink: BrushSink }) {
   props.sink.current = setB; // stable setter; idempotent to assign each render
   if (!b) return null;
   const r = b.d / 2;
+  if (b.rect) {
+    return (
+      <Box style={{ position: 'absolute', left: b.x - b.rect.w / 2, top: b.y - b.rect.h / 2, width: b.rect.w, height: b.rect.h, borderRadius: 2, borderWidth: 2, borderColor: b.color, backgroundColor: b.on ? `${b.color}26` : '#00000000', transform: { rotate: b.rect.angle ?? 0 } }}>
+        <Box style={{ position: 'absolute', left: b.rect.w / 2 - 2, top: b.rect.h / 2 - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: b.color }} />
+      </Box>
+    );
+  }
+  if (b.ramp) {
+    const capH = Math.max(5, Math.min(14, Math.floor(b.ramp.h * 0.16)));
+    const shaftTop = capH + 3;
+    const shaftH = Math.max(6, b.ramp.h - capH * 2 - 8);
+    const arrowY = Math.max(capH + 6, b.ramp.h - capH - 11);
+    const arrowX = b.ramp.w / 2;
+    return (
+      <Box style={{ position: 'absolute', left: b.x - b.ramp.w / 2, top: b.y - b.ramp.h / 2, width: b.ramp.w, height: b.ramp.h, borderRadius: 2, borderWidth: 2, borderColor: b.color, backgroundColor: b.on ? `${b.color}22` : '#00000000', transform: { rotate: b.ramp.angle } }}>
+        <Box style={{ position: 'absolute', left: 2, right: 2, top: 2, height: capH, borderRadius: 2, backgroundColor: '#38bdf8aa' }} />
+        <Box style={{ position: 'absolute', left: 2, right: 2, bottom: 2, height: capH, borderRadius: 2, backgroundColor: '#f97316cc' }} />
+        <Box style={{ position: 'absolute', left: b.ramp.w / 2 - 2, top: shaftTop, width: 4, height: shaftH, borderRadius: 2, backgroundColor: '#f8fafccc' }} />
+        <Box style={{ position: 'absolute', left: arrowX - 10, top: arrowY, width: 13, height: 4, borderRadius: 2, backgroundColor: '#f8fafc', transform: { rotate: 45 } }} />
+        <Box style={{ position: 'absolute', left: arrowX - 3, top: arrowY, width: 13, height: 4, borderRadius: 2, backgroundColor: '#f8fafc', transform: { rotate: -45 } }} />
+        <Box style={{ position: 'absolute', left: arrowX - 5, top: b.ramp.h - capH - 7, width: 10, height: 10, borderRadius: 5, backgroundColor: '#f97316', borderWidth: 2, borderColor: '#0b1320' }} />
+      </Box>
+    );
+  }
   const shape = b.shape ?? 'circle';
   // Match the cursor to the footprint: diamond = a square rotated 45°, scaled by 1/√2
   // so its points (not its corners) sit on the footprint radius; square = sharp; circle
@@ -547,17 +416,20 @@ export function PaintCanvas(props: {
   const grid = props.showGrid !== false;
   const selPlacement = place.items.find((p) => p.id === place.selId) ?? null;
 
-  const hTool: HeightTool = props.brush.heightTool === 'erase' ? 'erase' : 'brush';
+  const brushMode: BrushMode = props.brush.mode === 'erase' ? 'erase' : 'paint';
+  const activeBrushMode: BrushMode = tool === 'eraser' && (layer === 'paint' || layer === 'zone') ? 'erase' : brushMode;
+  const heightMode: HeightMode = props.brush.heightMode === 'ramp' ? 'ramp' : 'brush';
   const centerZ = clamp(Number(props.brush.centerZ), Z_MIN, Z_MAX);
   // One brush size (radius in tiles) shared by paint, zone, and height.
   const brushSize = clamp(Math.round(Number(props.brush.size)), SIZE_MIN, SIZE_MAX);
-  const heightProfile: BrushProfile = props.brush.heightProfile ?? 'cone';
-  const heightShape: BrushShape = props.brush.heightShape ?? 'circle';
-  const setHTool = useCallback((heightTool: HeightTool) => props.onBrushChange({ heightTool }), [props.onBrushChange]);
-  const setHeightProfile = useCallback((heightProfile: BrushProfile) => props.onBrushChange({ heightProfile }), [props.onBrushChange]);
-  const setHeightShape = useCallback((heightShape: BrushShape) => props.onBrushChange({ heightShape }), [props.onBrushChange]);
-  const setCenterZ = useCallback((z: number) => props.onBrushChange({ centerZ: clamp(z, Z_MIN, Z_MAX) }), [props.onBrushChange]);
-  const setBrushSize = useCallback((size: number) => props.onBrushChange({ size: clamp(Math.round(size), SIZE_MIN, SIZE_MAX) }), [props.onBrushChange]);
+  const brushShape: BrushShape = props.brush.shape ?? 'circle';
+  const heightProfile: BrushProfile = props.brush.profile ?? 'cone';
+  const rampMin = clamp(Number(props.brush.rampMin), Z_MIN, Z_MAX);
+  const rampMax = clamp(Number(props.brush.rampMax), Z_MIN, Z_MAX);
+  const rampWide = Math.max(1, Number(props.brush.rampWide) || 1);
+  const rampLong = Math.max(1, Number(props.brush.rampLong) || 1);
+  const rampAngle = Number(props.brush.rampAngle) || 0;
+  const setBrushPatch = useCallback((patch: Partial<BrushSettings>) => props.onBrushChange(patch), [props.onBrushChange]);
 
   // The canvas viewport rect (screen space), for screen→graph.
   const rectRef = useRef<CanvasRect>(null);
@@ -589,6 +461,7 @@ export function PaintCanvas(props: {
   // Ctrl-held state — mouse events carry no modifier flags, so track it off the key
   // bus (every key event reports the live modifier mask). Drives ctrl-click select.
   const ctrlHeldRef = useRef(false);
+  const placeBrushKeyRef = useRef<{ enabled: boolean; rotate: (delta: number) => void }>({ enabled: false, rotate: () => {} });
   // Lost focus (another quad claimed WASD) → drop held keys so the pan stops at once.
   useEffect(() => {
     if (!props.wasdFocused && heldKeys.current.size) { heldKeys.current.clear(); recomputeDriftRef.current(); }
@@ -610,6 +483,10 @@ export function PaintCanvas(props: {
     const onDown = (ev: any) => {
       if (typeof ev?.ctrlKey === 'boolean') ctrlHeldRef.current = ev.ctrlKey || ev.metaKey;
       const k = String(ev?.key ?? '').toLowerCase();
+      if (placeBrushKeyRef.current.enabled && !ev?.ctrlKey && !ev?.altKey && !ev?.metaKey && (k === 'r' || k === 'e' || k === 'q')) {
+        if (!textFocused()) placeBrushKeyRef.current.rotate(k === 'q' ? -ROT_STEP : ROT_STEP);
+        return;
+      }
       if (!DIR[k] || ev?.ctrlKey || ev?.altKey || ev?.metaKey) return;
       if (!wasdFocusedRef.current) return; // only the focused quad pans
       if (heldKeys.current.has(k) || textFocused()) return; // ignore key-repeat / typing
@@ -790,8 +667,8 @@ export function PaintCanvas(props: {
   };
 
   // ── Brush params (ref so the screen-space handler never goes stale) ──────────
-  const brushRef = useRef({ centerZ, size: brushSize, tool: hTool, shape: heightShape, profile: heightProfile });
-  brushRef.current = { centerZ, size: brushSize, tool: hTool, shape: heightShape, profile: heightProfile };
+  const brushRef = useRef({ centerZ, size: brushSize, mode: brushMode, shape: brushShape, profile: heightProfile, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle });
+  brushRef.current = { centerZ, size: brushSize, mode: brushMode, shape: brushShape, profile: heightProfile, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle };
   // Height is ADDITIVE (heightData.stampCone stacks), but onMouseMove fires at input
   // rate (~100/s) — re-stamping a stationary brush every event saturates cells to
   // HEIGHT_LIMIT in a few frames, flattening everything to one max plateau and making
@@ -799,8 +676,8 @@ export function PaintCanvas(props: {
   // brush MOVING, so deposit the cone at most once per center-cell per stroke; genuine
   // drag motion still stacks across cells, separate strokes still stack on top.
   const heightStamped = useRef<Set<string>>(new Set());
-  const paintRef = useRef({ tile, tool, size: brushSize });
-  paintRef.current = { tile, tool, size: brushSize };
+  const paintRef = useRef({ tile, tool, size: brushSize, mode: activeBrushMode, shape: brushShape });
+  paintRef.current = { tile, tool, size: brushSize, mode: activeBrushMode, shape: brushShape };
 
   // Height sculpt. The cone is stamped in a SHARED GLOBAL sample frame, not clipped to
   // the one chunk under the cursor — so a stroke straddling a chunk border deposits the
@@ -838,7 +715,7 @@ export function PaintCanvas(props: {
       const ciy = Math.round((gy - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1));
       // Skip chunks the brush can't reach (cheap: avoids touching/re-uploading them).
       if (cix + rd < 0 || cix - rd > cols - 1 || ciy + rd < 0 || ciy - rd > rows - 1) continue;
-      stampBrush(ch.height, cix, ciy, { centerZ: b.centerZ, radiusM, shape: b.shape, profile: b.profile, erase: b.tool === 'erase' });
+      stampBrush(ch.height, cix, ciy, { centerZ: b.centerZ, radiusM, shape: b.shape, profile: b.profile, erase: b.mode === 'erase' });
       const k = chunkKey(ch.cx, ch.cz);
       touched.add(k);
       heightDirty.current.add(k);
@@ -848,12 +725,29 @@ export function PaintCanvas(props: {
     // mid-stroke per dirty chunk freezes paint. The 2D canvas is live via the touch.
   };
 
+  const stampRampAtGraph = (gx: number, gy: number, opts: { minZ: number; maxZ: number; wideM: number; longM: number; angleDeg: number }, touched: Set<ChunkKey>) => {
+    const stampKey = `ramp:${Math.round(gx / GSAMPLE)}:${Math.round(gy / GSAMPLE)}:${Math.round(opts.angleDeg)}:${Math.round(opts.longM * 10)}:${Math.round(opts.wideM * 10)}`;
+    if (heightStamped.current.has(stampKey)) return;
+    heightStamped.current.add(stampKey);
+    const rd = Math.ceil(Math.hypot(opts.wideM, opts.longM) / DOT_M / 2) + 2;
+    for (const ch of focusedChunks) {
+      const cols = ch.height.cols, rows = ch.height.rows;
+      const cix = (gx - ch.cx * PATCH + PATCH / 2) / PATCH * (cols - 1);
+      const ciy = (gy - ch.cz * PATCH + PATCH / 2) / PATCH * (rows - 1);
+      if (cix + rd < 0 || cix - rd > cols - 1 || ciy + rd < 0 || ciy - rd > rows - 1) continue;
+      stampRamp(ch.height, cix, ciy, opts);
+      const k = chunkKey(ch.cx, ch.cz);
+      touched.add(k);
+      heightDirty.current.add(k);
+    }
+  };
+
   const stampTileAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
     const c = resolveCell(gx, gy);
     if (!c) return;
     const p = paintRef.current;
-    const idx = p.tool === 'eraser' ? -1 : tileKindIndex(p.tile);
-    stampDisc(p.size, c.cellX, c.cellZ, (x, z) => {
+    const idx = p.tool === 'eraser' || p.mode === 'erase' ? -1 : tileKindIndex(p.tile);
+    forEachFootprintCell(p.shape, p.size, c.cellX, c.cellZ, (x, z) => {
       const s = strokeStats.current; s.stamps++;
       if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
       paintTile(c.chunk.tiles, x, z, idx);
@@ -867,8 +761,8 @@ export function PaintCanvas(props: {
     const c = resolveCell(gx, gy);
     if (!c) return;
     const p = paintRef.current;
-    const idx = p.tool === 'eraser' ? -1 : activeZoneRef.current;
-    stampDisc(p.size, c.cellX, c.cellZ, (x, z) => {
+    const idx = p.tool === 'eraser' || p.mode === 'erase' ? -1 : activeZoneRef.current;
+    forEachFootprintCell(p.shape, p.size, c.cellX, c.cellZ, (x, z) => {
       const s = strokeStats.current; s.stamps++;
       if (x >= 0 && z >= 0 && x < CHUNK_TILES && z < CHUNK_TILES) s.cells.add(`${c.k}:${x}:${z}`);
       paintZoneCell(c.chunk.zones, x, z, idx);
@@ -905,6 +799,7 @@ export function PaintCanvas(props: {
     setZones((zs) => [...zs, { id, name: `Zone ${zs.length + 1}`, color: ZONE_COLORS[zs.length % ZONE_COLORS.length], flags: [] }]);
     setActiveZone(i);
     props.onTool('brush');
+    props.onBrushChange({ mode: 'paint' });
     notifyEdit({ cat: 'zone', text: `added zone Zone ${i + 1}` });
   };
   const updateZone = (i: number, patch: Partial<ZoneDef>) => { setZones((zs) => zs.map((z, j) => (j === i ? { ...z, ...patch } : z))); notifyEdit(); };
@@ -922,24 +817,77 @@ export function PaintCanvas(props: {
   if (props.apiRef) props.apiRef.current = { getWorld: () => ({ chunks, zones, focus }) };
 
   // Unified brush dispatch: paint paints tiles, zone paints the active zone, height
-  // sculpts; all with brush/eraser (pointer pans). Place has no brush (draggable).
-  const showBrush = layer === 'height' || ((layer === 'paint' || layer === 'zone') && tool !== 'pointer');
+  // sculpts; place stamps the armed object when the brush tool is active.
+  const isRampTool = layer === 'height' && heightMode === 'ramp';
+  const showPlaceBrush = layer === 'place' && tool === 'brush' && !!place.active;
+  const showBrush = layer === 'height' || showPlaceBrush || ((layer === 'paint' || layer === 'zone') && tool !== 'pointer');
+  placeBrushKeyRef.current = { enabled: showPlaceBrush, rotate: place.onRotateBrush };
   // What a just-finished stroke did, for the event log — read from the active layer
   // + tool at stroke end.
   const strokeNote = (): EditNote => {
-    if (layer === 'height') return { cat: 'height', text: hTool === 'erase' ? 'lowered terrain' : 'raised terrain' };
-    if (layer === 'zone') { const z = zones[activeZone]; return { cat: 'zone', text: tool === 'eraser' ? 'erased zone' : `painted ${z ? z.name : 'zone'}` }; }
-    return { cat: 'tile', text: tool === 'eraser' ? 'erased tiles' : `painted ${tile}` };
+    if (layer === 'height') return { cat: 'height', text: isRampTool ? 'stamped ramp' : brushMode === 'erase' ? 'lowered terrain' : 'raised terrain' };
+    if (layer === 'place') return { cat: 'object', text: `painted ${place.active?.label ?? 'object'}` };
+    if (layer === 'zone') { const z = zones[activeZone]; return { cat: 'zone', text: activeBrushMode === 'erase' ? 'erased zone' : `painted ${z ? z.name : 'zone'}` }; }
+    return { cat: 'tile', text: activeBrushMode === 'erase' ? 'erased tiles' : `painted ${tile}` };
   };
   // Where the last stamp landed, in GRAPH space, so onBrush can fill the gap to the
   // current point. null between strokes (reset in beginStroke) so a new stroke never
   // draws a line from the previous stroke's end.
   const lastStampG = useRef<{ x: number; y: number } | null>(null);
+  const rampStroke = useRef<{ start: { x: number; y: number }; current: { x: number; y: number } } | null>(null);
   const stampOneAtGraph = (gx: number, gy: number, touched: Set<ChunkKey>) => {
-    if (layer === 'height') stampHeightAtGraph(gx, gy, touched);
+    if (layer === 'height' && !isRampTool) stampHeightAtGraph(gx, gy, touched);
     else if (layer === 'zone') stampZoneAtGraph(gx, gy, touched);
-    else stampTileAtGraph(gx, gy, touched);
+    else if (layer === 'paint') stampTileAtGraph(gx, gy, touched);
   };
+
+  const rampPlan = () => {
+    const b = brushRef.current;
+    const rs = rampStroke.current;
+    if (!rs) return null;
+    const dx = rs.current.x - rs.start.x;
+    const dy = rs.current.y - rs.start.y;
+    const distM = Math.hypot(dx, dy) / TILE_UNITS;
+    if (distM >= 0.5) {
+      return {
+        gx: (rs.start.x + rs.current.x) / 2,
+        gy: (rs.start.y + rs.current.y) / 2,
+        minZ: b.rampMin,
+        maxZ: b.rampMax,
+        wideM: b.rampWide,
+        longM: Math.max(1, distM),
+        angleDeg: Math.atan2(dx, dy) * 180 / Math.PI,
+      };
+    }
+    return { gx: rs.start.x, gy: rs.start.y, minZ: b.rampMin, maxZ: b.rampMax, wideM: b.rampWide, longM: b.rampLong, angleDeg: b.rampAngle };
+  };
+
+  const beginRamp = (sx: number, sy: number) => {
+    const g = screenToGraph(sx, sy);
+    if (!g) return;
+    const c = resolveCell(g.gx, g.gy);
+    const start = c ? { x: c.cgx, y: c.cgy } : { x: g.gx, y: g.gy };
+    rampStroke.current = { start, current: start };
+  };
+
+  const updateRamp = (sx: number, sy: number) => {
+    const g = screenToGraph(sx, sy);
+    if (!g || !rampStroke.current) return;
+    rampStroke.current.current = { x: g.gx, y: g.gy };
+  };
+
+  const finishRamp = () => {
+    const plan = rampPlan();
+    rampStroke.current = null;
+    if (!plan) return false;
+    const touched = new Set<ChunkKey>();
+    strokeStats.current.samples++;
+    stampRampAtGraph(plan.gx, plan.gy, plan, touched);
+    if (!touched.size) return false;
+    for (const k of touched) touchChunk(k);
+    return true;
+  };
+
   // One brush sample. The world can slide a long way between samples — a fast drag, or
   // (the hard case) a held-WASD pan when zoomed out, where each screen pixel spans many
   // tiles so the graph point under a STILL cursor leaps cells per tick. Stamping only at
@@ -952,6 +900,18 @@ export function PaintCanvas(props: {
     strokeStats.current.samples++;
     const g = screenToGraph(sx, sy);
     if (!g) return;
+    if (showPlaceBrush && place.active) {
+      const c = resolveCell(g.gx, g.gy);
+      if (!c) return;
+      const gx = c ? c.cgx : g.gx;
+      const gy = c ? c.cgy : g.gy;
+      const stampKey = `${place.active.cat}:${place.active.kind}:${Math.round(gx / TILE_UNITS)}:${Math.round(gy / TILE_UNITS)}`;
+      if (heightStamped.current.has(stampKey)) return;
+      heightStamped.current.add(stampKey);
+      strokeStats.current.stamps++;
+      place.onPaintAt(place.active.cat, place.active.kind, gx, gy, place.active.rotation);
+      return;
+    }
     const touched = new Set<ChunkKey>();
     const prev = lastStampG.current;
     if (!prev) {
@@ -978,6 +938,7 @@ export function PaintCanvas(props: {
     strokeStats.current = { samples: 0, stamps: 0, cells: new Set(), touches: 0, coalesced: 0, t0: strokeNow(), snap: countersSnapshot() };
     heightStamped.current.clear(); // fresh per-stroke dedup of height deposits
     lastStampG.current = null;     // fresh interpolation anchor (no line from the last stroke)
+    rampStroke.current = null;
     plog('stroke', `BEGIN ${layer}/${tool}`);
   };
   const endStroke = () => {
@@ -1055,15 +1016,45 @@ export function PaintCanvas(props: {
     const g2 = screenToGraph(sx + BRUSH_PROBE, sy);
     const zoom = g2 && g2.gx !== g.gx ? BRUSH_PROBE / (g2.gx - g.gx) : 1; // px per graph unit
     const dia = (brushSize * 2 + 1) * TILE_UNITS * zoom; // footprint width across, in px
-    const erasing = layer === 'height' ? hTool === 'erase' : tool === 'eraser';
+    const erasing = !isRampTool && (layer === 'height' ? brushMode === 'erase' : activeBrushMode === 'erase');
     const color = erasing ? '#f87171'
       : layer === 'height' ? '#fbbf24'
+      : layer === 'place' ? (place.active?.color ?? '#a78bfa')
       : layer === 'zone' ? (zones[activeZone]?.color ?? '#22d3ee')
       : tileKindDefinition(tile).render.color;
+    if (showPlaceBrush && place.active) {
+      // Ghost at the SNAPPED rect (placementCellRect — the same cells the drop
+      // stores and the compile lowers), not the raw cell centre: an even-width
+      // footprint can't centre on a cell centre, so without the snap the ghost
+      // sat half a tile off the cells the object would actually take.
+      const snap = c ? placementCellRect({ gx: c.cgx, gy: c.cgy, footW: place.active.footW, footD: place.active.footD }) : null;
+      const cxp = snap ? sx + (snap.snapGx - g.gx) * zoom : sx;
+      const cyp = snap ? sy + (snap.snapGy - g.gy) * zoom : sy;
+      brushSink.current?.({
+        x: cxp - r.x,
+        y: cyp - r.y,
+        d: TILE_UNITS * zoom,
+        on: !!c,
+        color,
+        rect: { w: Math.max(12, place.active.footW * TILE_UNITS * zoom), h: Math.max(12, place.active.footD * TILE_UNITS * zoom), angle: place.active.rotation },
+      });
+      return;
+    }
+    if (isRampTool) {
+      const plan = rampPlan();
+      const base = c ? { x: c.cgx, y: c.cgy } : { x: g.gx, y: g.gy };
+      const cx = plan ? plan.gx : base.x;
+      const cy = plan ? plan.gy : base.y;
+      const w = Math.max(6, (plan?.wideM ?? rampWide) * TILE_UNITS * zoom);
+      const h = Math.max(6, (plan?.longM ?? rampLong) * TILE_UNITS * zoom);
+      const angle = -(plan?.angleDeg ?? rampAngle);
+      brushSink.current?.({ x: sx + (cx - g.gx) * zoom - r.x, y: sy + (cy - g.gy) * zoom - r.y, d: dia, on: !!c || !!plan, color, ramp: { w, h, angle } });
+      return;
+    }
     // Snap the ring to the cell centre it'll paint; off any focused chunk, ride the cursor.
     const cxp = c ? sx + (c.cgx - g.gx) * zoom : sx;
     const cyp = c ? sy + (c.cgy - g.gy) * zoom : sy;
-    brushSink.current?.({ x: cxp - r.x, y: cyp - r.y, d: dia, on: !!c, color, shape: layer === 'height' ? heightShape : 'circle' });
+    brushSink.current?.({ x: cxp - r.x, y: cyp - r.y, d: dia, on: !!c, color, shape: brushShape });
   };
 
   // ── Cursor pump: live ring + pan-paint ───────────────────────────────────────
@@ -1106,7 +1097,7 @@ export function PaintCanvas(props: {
 
   // Feed the cursor pump the latest closures + drift each render (it reads through
   // refs so the interval set up once on mount never goes stale on tool/layer change).
-  onBrushRef.current = onBrush;
+  onBrushRef.current = isRampTool ? updateRamp : onBrush;
   updateCursorRef.current = updateCursor;
   driftActiveRef.current = drift.x !== 0 || drift.y !== 0;
   brushShownRef.current = showBrush;
@@ -1116,7 +1107,7 @@ export function PaintCanvas(props: {
   // it (e.g. focus/zones/drift/select) — naming which is the lead.
   useChurn('PaintCanvas', {
     focus, chunkRev, zones, drift, tool, tile, layer, place,
-    selCells: props.select?.cells, brushSize, centerZ, hTool, wasdFocused: props.wasdFocused,
+    selCells: props.select?.cells, brushSize, centerZ, activeBrushMode, brushShape, heightMode, wasdFocused: props.wasdFocused,
   });
 
   return (
@@ -1178,7 +1169,12 @@ export function PaintCanvas(props: {
           </Canvas.Node>
         ))}
 
-        {/* Place layer: each placement is a draggable Canvas.Node over the ground. */}
+        {/* Place layer: each placement is a draggable Canvas.Node over the ground.
+            Drawn at the STORED position raw — the engine drags the node natively
+            (it writes canvas_gx straight into the pool), so a snapped display prop
+            would fight the live drag and jitter. The DATA is snapped instead: at
+            creation, on drag-settle (index.tsx movePlacement) and on map load, so
+            at rest the stored position IS the snapped cell rect the compile uses. */}
         {layer === 'place' ? place.items.map((p) => {
           const isSel = p.id === place.selId;
           return (
@@ -1189,7 +1185,7 @@ export function PaintCanvas(props: {
               gw={p.footW * TILE_UNITS}
               gh={p.footD * TILE_UNITS}
               onPress={() => { claimWasd?.(); place.onSelect(p.id); }}
-              onMove={p.locked ? undefined : (evt: any) => { claimWasd?.(); place.onMove(p.id, Number(evt?.gx ?? p.gx), Number(evt?.gy ?? p.gy)); if (p.id !== place.selId) place.onSelect(p.id); }}
+              onMove={p.locked || showPlaceBrush ? undefined : (evt: any) => { claimWasd?.(); place.onMove(p.id, Number(evt?.gx ?? p.gx), Number(evt?.gy ?? p.gy)); if (p.id !== place.selId) place.onSelect(p.id); }}
             >
               <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: `${p.color}cc`, borderWidth: isSel ? 2 : 1, borderColor: isSel ? '#f8fafc' : '#0b1320', transform: { rotate: p.rotation } }}>
                 <Box style={{ position: 'absolute', top: 2, width: '40%', height: 3, borderRadius: 2, backgroundColor: isSel ? '#f8fafc' : '#0b1320' }} />
@@ -1205,10 +1201,10 @@ export function PaintCanvas(props: {
           slot attaches a chunk instead of painting. */}
       {showBrush ? (
         <Pressable
-          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; beginStroke(); notifyEditBegin(); onBrush(sx, sy); updateCursor(sx, sy); }}
-          onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) onBrush(sx, sy); updateCursor(sx, sy); }}
-          onMouseUp={() => { const was = drawing.current; drawing.current = false; if (was) { endStroke(); notifyEdit(strokeNote()); } }}
-          onMouseLeave={() => { const was = drawing.current; drawing.current = false; hoverSink.current?.(null); brushSink.current?.(null); if (was) { endStroke(); notifyEdit(strokeNote()); } }}
+          onMouseDown={(p: any) => { claimWasd?.(); const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (tryAddSlotAt(sx, sy)) return; drawing.current = true; beginStroke(); notifyEditBegin(); if (isRampTool) beginRamp(sx, sy); else onBrush(sx, sy); updateCursor(sx, sy); }}
+          onMouseMove={(p: any) => { const sx = Number(p?.x ?? 0); const sy = Number(p?.y ?? 0); if (drawing.current) { if (isRampTool) updateRamp(sx, sy); else onBrush(sx, sy); } updateCursor(sx, sy); }}
+          onMouseUp={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); if (was) { endStroke(); if (changed || !isRampTool) notifyEdit(strokeNote()); } }}
+          onMouseLeave={() => { const was = drawing.current; drawing.current = false; let changed = false; if (was && isRampTool) changed = finishRamp(); hoverSink.current?.(null); brushSink.current?.(null); if (was) { endStroke(); if (changed || !isRampTool) notifyEdit(strokeNote()); } }}
           style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
         />
       ) : null}
@@ -1233,10 +1229,25 @@ export function PaintCanvas(props: {
 
       {/* Left rail — conditional on the active layer (absolute overlay, on top). */}
       <Box style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: RAIL_W, backgroundColor: '#0b1320ee', borderRightWidth: 1, borderRightColor: '#1e293b', paddingLeft: 5, paddingRight: 5, paddingTop: 6, paddingBottom: 6 }}>
-        {layer === 'paint' ? <PaintRail tool={tool} onTool={props.onTool} tile={tile} onTile={props.onTile} size={brushSize} onSize={setBrushSize} /> : null}
-        {layer === 'height' ? <HeightRail hTool={hTool} onHTool={setHTool} profile={heightProfile} onProfile={setHeightProfile} shape={heightShape} onShape={setHeightShape} centerZ={centerZ} onCenterZ={setCenterZ} size={brushSize} onSize={setBrushSize} onClear={clearHeights} /> : null}
-        {layer === 'place' ? <PlaceRail sel={selPlacement} place={place} /> : null}
-        {layer === 'zone' ? <ZoneRail tool={tool} onTool={props.onTool} size={brushSize} onSize={setBrushSize} zones={zones} activeZone={activeZone} onActiveZone={setActiveZone} onAddZone={addZone} onUpdateZone={updateZone} onDeleteZone={deleteZone} /> : null}
+        {layer === 'paint' || layer === 'height' || layer === 'zone' ? (
+          <BrushRail
+            layer={layer}
+            tool={tool}
+            tile={tile}
+            onTool={props.onTool}
+            onTile={props.onTile}
+            brush={{ size: brushSize, mode: layer === 'height' ? brushMode : activeBrushMode, shape: brushShape, profile: heightProfile, centerZ, heightMode, rampMin, rampMax, rampWide, rampLong, rampAngle }}
+            onBrushChange={setBrushPatch}
+            onClearHeights={clearHeights}
+            zones={zones}
+            activeZone={activeZone}
+            onActiveZone={setActiveZone}
+            onAddZone={addZone}
+            onUpdateZone={updateZone}
+            onDeleteZone={deleteZone}
+          />
+        ) : null}
+        {layer === 'place' ? <PlaceRail tool={tool} onTool={props.onTool} sel={selPlacement} place={place} /> : null}
       </Box>
 
       {/* Right edge: chunk focus gutter (thin dock, keeps the centre clear). */}

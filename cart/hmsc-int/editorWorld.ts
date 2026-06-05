@@ -35,7 +35,7 @@ import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
 import { buildingFootprint } from '../hmsc/world/buildings';
 import { placeProp, removeProp, propFootprint } from '../hmsc/world/props';
 import { addZone, removeZone } from '../hmsc/world/zones';
-import { addSurfaceRegion } from '../hmsc/world/grid';
+import { addSurfaceRegion, placeCell } from '../hmsc/world/grid';
 import { propKindDefinition } from '../hmsc/world/propKinds';
 import { nextUniqueId } from '../hmsc/world/idgen';
 import { rectsOverlap } from '../hmsc/world/rects';
@@ -110,6 +110,7 @@ export function placeBuilding(
     yawDegrees?: number;
     doorSide?: BuildingSide;
     skin?: Building['skin'];
+    partTextures?: Building['partTextures'];
     force?: boolean;
   },
 ): BuildResult {
@@ -132,6 +133,7 @@ export function placeBuilding(
     ...(opts.yawDegrees ? { yawDegrees: opts.yawDegrees } : {}),
     doorSide: opts.doorSide ?? 'south',
     ...(opts.skin ? { skin: opts.skin } : {}),
+    ...(opts.partTextures ? { partTextures: opts.partTextures } : {}),
     createdByCommand: 'hmsc-int:place',
   };
   const placement = resolveBuildingPlacement(state, proposed, opts.force ?? false);
@@ -162,7 +164,7 @@ export function buildingFootprintBlocked(
 
 export function placeWorldProp(
   state: GameState,
-  opts: { kind: PropKind; x: number; z: number; yawDegrees?: number },
+  opts: { kind: PropKind; x: number; z: number; yawDegrees?: number; partTextures?: WorldProp['partTextures'] },
 ): { state: GameState; prop: WorldProp } {
   const prop: WorldProp = {
     id: nextUniqueId('prop_int_', state.world.props.map((p) => p.id)),
@@ -172,6 +174,7 @@ export function placeWorldProp(
     y: landformGroundTopAt(state, opts.x, opts.z) ?? 0,
     z: opts.z,
     yawDegrees: opts.yawDegrees ?? 0,
+    ...(opts.partTextures ? { partTextures: opts.partTextures } : {}),
     createdByCommand: 'hmsc-int:place',
   };
   return { state: placeProp(state, prop), prop };
@@ -222,6 +225,26 @@ export function fillTiles(
     zoneKey: nextUniqueId('zone_int_', state.world.surfaceRegions.map((r) => r.zoneKey)),
   };
   return addSurfaceRegion(state, region);
+}
+
+// ── Gameplay markers (spawn / save) ──────────────────────────────────────────
+
+// Place a spawn or save marker as a single PlacedCell — the same unit the game
+// makes via placeCell, so an authored marker is byte-identical to one a command
+// placed. A save cell carries `spawnKey`, the cellKey of the spawn it respawns
+// the player at (the manual save↔spawn link). 1 tile = 1 m; markers ride the
+// terrain via their tileKind altitude.
+export function placeMarker(
+  state: GameState,
+  opts: { kind: 'spawn' | 'save'; x: number; z: number; spawnKey?: string },
+): GameState {
+  return placeCell(
+    state,
+    opts.kind,
+    { x: opts.x, y: 0, z: opts.z },
+    'hmsc-int:marker',
+    opts.kind === 'save' && opts.spawnKey ? { spawnKey: opts.spawnKey } : {},
+  );
 }
 
 // ── Zones ───────────────────────────────────────────────────────────────────

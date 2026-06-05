@@ -183,10 +183,10 @@ export function hedDepthGrid(doc: HedDocument): number[] {
 // Deterministic per (anim, phase), so texture keys and mesh keys stay
 // content-addressed: a looping animation cycles N cached bakes, not N×time.
 
-export type HedAnimation = 'talk' | 'chew' | 'cry';
+export type HedAnimation = 'talk' | 'chew' | 'cry' | 'yell';
 
 /** Loop length per animation — drive with `frame % HED_ANIM_FRAMES[anim]`. */
-export const HED_ANIM_FRAMES: Record<HedAnimation, number> = { talk: 4, chew: 4, cry: 6 };
+export const HED_ANIM_FRAMES: Record<HedAnimation, number> = { talk: 4, chew: 4, cry: 6, yell: 4 };
 
 function firstShape(doc: HedDocument, layerId: string): HedShape | null {
   const layer = doc.layers.find((l) => l.id === layerId);
@@ -224,6 +224,24 @@ export function animateHed(doc: HedDocument, anim: HedAnimation, phase: number):
               : []),
           ];
     return { ...doc, layers: doc.layers.filter((l) => l.id !== 'mouth').concat(mouthLayers) };
+  }
+
+  if (anim === 'yell') {
+    const open = [0.65, 1, 0.92, 1][phase % 4];
+    const mouthLayers: HedLayer[] = [
+      {
+        id: 'mouth', label: 'mouth (yell)', color: '#1b0d0a', depth: -0.28 - 0.18 * open, feather: 0.45,
+        shapes: [{ kind: 'ellipse', cx: mouth.cx, cy: mouth.cy + 0.02 * open, rx: Math.max(mouth.rx * 1.18, 0.038), ry: 0.032 + 0.04 * open }],
+      },
+      {
+        id: 'teeth', label: 'teeth', color: '#efe8dc', depth: 0,
+        shapes: [
+          { kind: 'rect', cx: mouth.cx, cy: mouth.cy - 0.018, rx: Math.max(mouth.rx, 0.032) * 0.72, ry: 0.006 },
+          { kind: 'rect', cx: mouth.cx, cy: mouth.cy + 0.032, rx: Math.max(mouth.rx, 0.032) * 0.58, ry: 0.005 },
+        ],
+      },
+    ];
+    return { ...doc, layers: doc.layers.filter((l) => l.id !== 'mouth' && l.id !== 'teeth').concat(mouthLayers) };
   }
 
   if (anim === 'chew') {
@@ -305,6 +323,9 @@ function pick<T>(r: () => number, list: T[]): T {
 const GEN_SKINS = ['#caa07a', '#8d5a3c', '#e0b48c', '#a9785a', '#6e4a32'];
 const GEN_HAIR = ['#2a2018', '#4a3520', '#1a1a1e', '#6b4a26', '#7a7570', '#3a2a3e'];
 const GEN_EYES = ['#4a3220', '#2f5d8a', '#456b3a', '#5a4632', '#3a2a1a'];
+const GEN_LIPS = ['#98505d', '#a85c66', '#7f454a', '#b46b72'];
+
+export type FaceStyle = 'masculine' | 'feminine';
 
 function darken(hex: string, f: number): string {
   const c = (i: number) => Math.round(parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16) * f).toString(16).padStart(2, '0');
@@ -314,55 +335,101 @@ function darken(hex: string, f: number): string {
 /** Generate a coherent face as a head document. Anatomy lives at canonical
  *  unwrap positions; the seed varies colors, proportions, hair, and mood.
  *  Color and depth are placed by the SAME shapes, so features always agree. */
-export function generateFace(seed: number): HedDocument {
+export function generateFace(seed: number, opts?: { style?: FaceStyle }): HedDocument {
   const r = rng(seed);
+  const style = opts?.style ?? (r() < 0.45 ? 'feminine' : 'masculine');
+  const feminine = style === 'feminine';
   const skin = pick(r, GEN_SKINS);
   const hair = pick(r, GEN_HAIR);
   const eye = pick(r, GEN_EYES);
   const shade = darken(skin, 0.8);
+  const lip = feminine ? pick(r, GEN_LIPS) : darken(skin, 0.62);
 
   // seeded proportions (all in unwrap UV)
   const eyeU = 0.058 + r() * 0.016;          // eye offset from center
-  const eyeV = 0.40 + r() * 0.05;            // eye height
-  const browTilt = (r() - 0.5) * 0.02;       // grumpy ↔ surprised
-  const mouthW = 0.030 + r() * 0.022;
-  const mouthV = 0.66 + r() * 0.04;
-  const hairLine = 0.16 + r() * 0.10;        // how far the hair reaches down
-  const jawW = 0.10 + r() * 0.04;
+  const eyeV = feminine ? 0.39 + r() * 0.04 : 0.40 + r() * 0.05;
+  const eyeRx = feminine ? 0.026 + r() * 0.004 : 0.022;
+  const eyeRy = feminine ? 0.046 + r() * 0.006 : 0.042;
+  const browTilt = feminine ? -0.004 + r() * 0.014 : (r() - 0.5) * 0.02;
+  const mouthW = feminine ? 0.042 + r() * 0.018 : 0.030 + r() * 0.022;
+  const mouthV = feminine ? 0.655 + r() * 0.026 : 0.66 + r() * 0.04;
+  const hairLine = feminine ? 0.22 + r() * 0.11 : 0.16 + r() * 0.10;
+  const jawW = feminine ? 0.078 + r() * 0.025 : 0.10 + r() * 0.04;
   const smile = r() > 0.5;
-  const stubble = r() > 0.65;
+  const stubble = !feminine && r() > 0.65;
+
+  // hair style — seeded variation instead of one cap for everyone. All pieces
+  // live in the same unwrap space: the cap is a crown band, side curtains are
+  // mirrored ellipses at the temples, back hair is a rect at u=0 (the seam IS
+  // the back of the head — shapeCoverage wraps u, so it stays one piece).
+  type HairStyle = 'crew' | 'buzz' | 'afro' | 'bald' | 'long' | 'bob' | 'bangs';
+  const hairStyle: HairStyle = pick(r, feminine
+    ? (['bob', 'long', 'bangs', 'crew'] as HairStyle[])
+    : (['crew', 'crew', 'buzz', 'afro', 'long', 'bald'] as HairStyle[]));
+  const hairLayers: HedLayer[] = [];
+  if (hairStyle !== 'bald') {
+    const capDepth = hairStyle === 'afro' ? 0.34 : hairStyle === 'buzz' ? 0.04 : feminine ? 0.18 : 0.16;
+    const capLine = hairStyle === 'afro' ? Math.min(0.36, hairLine * 1.35) : hairLine;
+    hairLayers.push({
+      id: 'hair', label: `hair (${hairStyle})`, color: hairStyle === 'buzz' ? darken(hair, 0.92) : hair,
+      depth: capDepth, feather: hairStyle === 'afro' ? 0.32 : 0.5,
+      shapes: [{ kind: 'rect', cx: 0.5, cy: capLine / 2, rx: 0.5, ry: capLine / 2 }],
+    });
+  }
+  if (hairStyle === 'bob' || hairStyle === 'bangs') {
+    hairLayers.push({
+      id: 'sidehair', label: 'side hair', color: hair, depth: 0.12, feather: 0.45,
+      shapes: [{ kind: 'ellipse', cx: 0.36, cy: 0.39, rx: 0.035, ry: 0.16, mirror: true }],
+    });
+    hairLayers.push({
+      id: 'backhair', label: 'back hair', color: hair, depth: 0.1, feather: 0.5,
+      shapes: [{ kind: 'rect', cx: 0, cy: 0.36, rx: 0.13, ry: 0.2 }],
+    });
+  }
+  if (hairStyle === 'long') {
+    // curtains past the ears + a back panel falling toward the neck
+    hairLayers.push({
+      id: 'sidehair', label: 'side hair', color: hair, depth: 0.13, feather: 0.45,
+      shapes: [{ kind: 'ellipse', cx: 0.34, cy: 0.46, rx: 0.05, ry: 0.24, mirror: true }],
+    });
+    hairLayers.push({
+      id: 'backhair', label: 'back hair', color: hair, depth: 0.12, feather: 0.5,
+      shapes: [{ kind: 'rect', cx: 0, cy: 0.44, rx: 0.15, ry: 0.28 }],
+    });
+  }
+  if (hairStyle === 'bangs') {
+    hairLayers.push({
+      id: 'bangs', label: 'bangs', color: hair, depth: 0.07, feather: 0.35,
+      shapes: [{ kind: 'rect', cx: 0.5, cy: hairLine + 0.018, rx: 0.105, ry: 0.032 }],
+    });
+  }
 
   const layers: HedLayer[] = [
-    // hair cap — colors the crown band of the unwrap (wraps the whole back of
-    // the head) and pads it slightly outward so hair reads as volume.
-    {
-      id: 'hair', label: 'hair', color: hair, depth: 0.16, feather: 0.5,
-      shapes: [{ kind: 'rect', cx: 0.5, cy: hairLine / 2, rx: 0.5, ry: hairLine / 2 }],
-    },
+    ...hairLayers,
     // brow ridge + sockets: a soft raised band, then carved-in eye wells UNDER
     // where the eye whites will paint — relief first, paint on top.
     {
-      id: 'browridge', label: 'brow ridge', color: null, depth: 0.18, feather: 0.6,
+      id: 'browridge', label: 'brow ridge', color: null, depth: feminine ? 0.08 : 0.18, feather: 0.6,
       shapes: [{ kind: 'rect', cx: 0.5, cy: eyeV - 0.07, rx: 0.16, ry: 0.035 }],
     },
     {
-      id: 'sockets', label: 'eye sockets', color: null, depth: -0.22, feather: 0.55,
+      id: 'sockets', label: 'eye sockets', color: null, depth: feminine ? -0.14 : -0.22, feather: 0.55,
       shapes: [{ kind: 'ellipse', cx: 0.5 - eyeU, cy: eyeV, rx: 0.035, ry: 0.075, mirror: true }],
     },
     // brows — hair-colored bars riding the ridge
     {
       id: 'brows', label: 'brows', color: darken(hair, 0.9), depth: 0.05, feather: 0.3,
-      shapes: [{ kind: 'rect', cx: 0.5 - eyeU, cy: eyeV - 0.055 + browTilt, rx: 0.026, ry: 0.011, mirror: true }],
+      shapes: [{ kind: 'rect', cx: 0.5 - eyeU, cy: eyeV - 0.055 + browTilt, rx: feminine ? 0.022 : 0.026, ry: feminine ? 0.008 : 0.011, mirror: true }],
     },
     // eyes — whites, iris, pupil. Pure paint (depth 0): they sit inside the
     // sockets the layer above carved.
     {
       id: 'whites', label: 'eye whites', color: '#f2ece2', depth: 0,
-      shapes: [{ kind: 'ellipse', cx: 0.5 - eyeU, cy: eyeV, rx: 0.022, ry: 0.042, mirror: true }],
+      shapes: [{ kind: 'ellipse', cx: 0.5 - eyeU, cy: eyeV, rx: eyeRx, ry: eyeRy, mirror: true }],
     },
     {
       id: 'iris', label: 'iris', color: eye, depth: 0,
-      shapes: [{ kind: 'ellipse', cx: 0.5 - eyeU, cy: eyeV + 0.004, rx: 0.012, ry: 0.026, mirror: true }],
+      shapes: [{ kind: 'ellipse', cx: 0.5 - eyeU, cy: eyeV + 0.004, rx: feminine ? 0.014 : 0.012, ry: feminine ? 0.029 : 0.026, mirror: true }],
     },
     {
       id: 'pupils', label: 'pupils', color: '#16120e', depth: 0,
@@ -370,32 +437,32 @@ export function generateFace(seed: number): HedDocument {
     },
     // nose — one shape, color AND ridge bulge together (the coherence demo)
     {
-      id: 'nose', label: 'nose', color: shade, depth: 0.5, feather: 0.5,
-      shapes: [{ kind: 'ellipse', cx: 0.5, cy: 0.53, rx: 0.016, ry: 0.085 }],
+      id: 'nose', label: 'nose', color: shade, depth: feminine ? 0.36 : 0.5, feather: 0.5,
+      shapes: [{ kind: 'ellipse', cx: 0.5, cy: 0.53, rx: feminine ? 0.013 : 0.016, ry: feminine ? 0.075 : 0.085 }],
     },
     // cheekbones — invisible relief
     {
-      id: 'cheeks', label: 'cheeks', color: null, depth: 0.14, feather: 0.7,
-      shapes: [{ kind: 'ellipse', cx: 0.5 - eyeU - 0.01, cy: 0.56, rx: 0.035, ry: 0.06, mirror: true }],
+      id: 'cheeks', label: 'cheeks', color: null, depth: feminine ? 0.18 : 0.14, feather: 0.7,
+      shapes: [{ kind: 'ellipse', cx: 0.5 - eyeU - 0.01, cy: 0.56, rx: feminine ? 0.043 : 0.035, ry: feminine ? 0.055 : 0.06, mirror: true }],
     },
     // mouth — lips paint + a slight carve so the mouth line reads in profile
     {
-      id: 'mouth', label: 'mouth', color: darken(skin, 0.62), depth: -0.07, feather: 0.4,
+      id: 'mouth', label: 'mouth', color: lip, depth: -0.07, feather: 0.4,
       shapes: smile
         ? [
-            { kind: 'ellipse', cx: 0.5, cy: mouthV, rx: mouthW, ry: 0.018 },
+            { kind: 'ellipse', cx: 0.5, cy: mouthV, rx: mouthW, ry: feminine ? 0.021 : 0.018 },
             { kind: 'ellipse', cx: 0.5 - mouthW, cy: mouthV - 0.012, rx: 0.008, ry: 0.012, mirror: true },
           ]
-        : [{ kind: 'ellipse', cx: 0.5, cy: mouthV, rx: mouthW, ry: 0.016 }],
+        : [{ kind: 'ellipse', cx: 0.5, cy: mouthV, rx: mouthW, ry: feminine ? 0.019 : 0.016 }],
     },
     // chin + jaw — invisible relief that squares the lower face
     {
-      id: 'chin', label: 'chin', color: null, depth: 0.2, feather: 0.65,
-      shapes: [{ kind: 'ellipse', cx: 0.5, cy: 0.80, rx: 0.05, ry: 0.07 }],
+      id: 'chin', label: 'chin', color: null, depth: feminine ? 0.1 : 0.2, feather: 0.65,
+      shapes: [{ kind: 'ellipse', cx: 0.5, cy: feminine ? 0.79 : 0.80, rx: feminine ? 0.038 : 0.05, ry: feminine ? 0.055 : 0.07 }],
     },
     {
-      id: 'jaw', label: 'jaw', color: null, depth: 0.12, feather: 0.7,
-      shapes: [{ kind: 'ellipse', cx: 0.5 - jawW, cy: 0.72, rx: 0.04, ry: 0.07, mirror: true }],
+      id: 'jaw', label: 'jaw', color: null, depth: feminine ? 0.045 : 0.12, feather: 0.7,
+      shapes: [{ kind: 'ellipse', cx: 0.5 - jawW, cy: 0.72, rx: feminine ? 0.026 : 0.04, ry: feminine ? 0.055 : 0.07, mirror: true }],
     },
     // ears — a quarter turn around from the face, color + stick-out
     {
@@ -412,7 +479,7 @@ export function generateFace(seed: number): HedDocument {
   }
 
   return buildHed({
-    skin, amount: 0.35, scaleY: 1.2,
+    skin, amount: feminine ? 0.31 : 0.35, scaleY: feminine ? 1.14 : 1.2,
     sculpt: new Array(HED_GRID_W * HED_GRID_H).fill(0),
     layers,
     title: `face ${seed}`,

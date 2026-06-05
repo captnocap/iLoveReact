@@ -33,6 +33,12 @@ export type GlobeParams = {
    * v. This is what turns the egg into ANY body part — [0.5, 0.9, 1, 0.9, 0.5]
    * is a limb, [0.7, 1, 1, 0.95, 0.6] a torso — while the unwrap, the paint
    * space, and the displacement grid stay identical. Omit for a sphere.
+   *
+   * The profile shapes the RADIAL (x/z) silhouette only — length comes from
+   * scaleY alone, like a lathe with fixed row heights (which is exactly what
+   * the outline editor draws). Thinning a part must never shorten it: body
+   * parts are placed by a skeleton with fixed joint spans, and profile-scaled
+   * length was how limbs used to detach at the wrists/knees.
    */
   profile?: number[];
   /** Per-axis squash of the whole shape (hands/feet flatten with scaleZ). */
@@ -99,16 +105,19 @@ export function generate(p: GlobeParams): GeometryData {
 
   // Displaced position at param (i ring, j segment). phi DECREASES with u so
   // the unwrap reads unmirrored to a viewer facing the front (-Z at u=0.5).
-  // Profile shapes the base silhouette; displacement is world-units on top so
-  // sculpt strength doesn't shrink where the part is thin.
+  // Profile shapes the base RADIAL silhouette only (length stays scaleY's);
+  // displacement is world-units on top so sculpt strength doesn't shrink
+  // where the part is thin.
   const pos = (i: number, j: number): Vec3 => {
     const v = i / rings;
     const u = j / segments;
     const theta = PI * v;
     const phi = PI / 2 - 2 * PI * u;
     const st = Math.sin(theta);
-    const r = radius * profileAt(v) + amount * sample(u, v);
-    return [st * Math.cos(phi) * r * scaleX, Math.cos(theta) * r * scaleY, st * Math.sin(phi) * r * scaleZ];
+    const d = amount * sample(u, v);
+    const rxz = radius * profileAt(v) + d;
+    const ry = radius + d;
+    return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * ry * scaleY, st * Math.sin(phi) * rxz * scaleZ];
   };
 
   // Finite-difference outward normal; pole rows fall back to the axis.

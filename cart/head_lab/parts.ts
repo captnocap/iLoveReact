@@ -226,6 +226,9 @@ export type RigTimelineAction = {
 };
 
 type RigFamily = 'arm' | 'hand' | 'wrist' | 'fist' | 'finger' | 'leg' | 'foot' | 'head' | 'torso' | 'body';
+type V3 = [number, number, number];
+type PunchStyle = 'jab' | 'cross' | 'hook' | 'uppercut' | 'body';
+const PUNCH_STYLES: PunchStyle[] = ['jab', 'cross', 'hook', 'uppercut', 'body'];
 
 const FAMILY_PLURAL: Record<RigFamily, string> = {
   arm: 'arms',
@@ -272,6 +275,17 @@ function actionPhase(actions: RigTimelineAction[] | undefined, family: RigFamily
   return Math.max(0, Math.min(1, out));
 }
 
+function actionArg<T extends string>(actions: RigTimelineAction[] | undefined, family: RigFamily, action: string, side: -1 | 1 | undefined, allowed: readonly T[], fallback: T): T {
+  if (!actions) return fallback;
+  for (const a of actions) {
+    if (a.action !== action) continue;
+    if (!targetMatches(a.target, family, side)) continue;
+    const arg = a.args?.find((v): v is T => (allowed as readonly string[]).includes(v));
+    if (arg) return arg;
+  }
+  return fallback;
+}
+
 function actionOsc(actions: RigTimelineAction[] | undefined, family: RigFamily, action: string, side: -1 | 1 | undefined, cycles: number): number {
   if (!actions) return 0;
   let out = 0;
@@ -281,6 +295,51 @@ function actionOsc(actions: RigTimelineAction[] | undefined, family: RigFamily, 
     out += a.weight * Math.sin(a.phase * Math.PI * 2 * cycles);
   }
   return Math.max(-1, Math.min(1, out));
+}
+
+const DEG2RAD = Math.PI / 180;
+
+function rotateEulerVec(v: V3, r: V3): V3 {
+  let [x, y, z] = v;
+
+  // Host mesh rotations compose as Ry * Rx * Rz.
+  const rz = r[2] * DEG2RAD;
+  let c = Math.cos(rz), s = Math.sin(rz);
+  let nx = x * c - y * s;
+  let ny = x * s + y * c;
+  x = nx; y = ny;
+
+  const rx = r[0] * DEG2RAD;
+  c = Math.cos(rx); s = Math.sin(rx);
+  ny = y * c - z * s;
+  let nz = y * s + z * c;
+  y = ny; z = nz;
+
+  const ry = r[1] * DEG2RAD;
+  c = Math.cos(ry); s = Math.sin(ry);
+  nx = x * c + z * s;
+  nz = -x * s + z * c;
+  return [nx, y, nz];
+}
+
+function addVec(a: V3, b: V3): V3 {
+  return [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+}
+
+function addRot(parent: V3, local: V3): V3 {
+  return [parent[0] + local[0], parent[1] + local[1], parent[2] + local[2]];
+}
+
+function blendVecInto(p: V3, target: V3, t: number): void {
+  const k = Math.max(0, Math.min(1, t));
+  p[0] += (target[0] - p[0]) * k;
+  p[1] += (target[1] - p[1]) * k;
+  p[2] += (target[2] - p[2]) * k;
+}
+
+function smoothstep(edge0: number, edge1: number, x: number): number {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
 }
 
 export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId = 'stand', phase = 0, actions: RigTimelineAction[] = []): Record<BoneId, SkeletonBone> {
@@ -297,31 +356,38 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
   const lay = Math.max(actionPhase(actions, 'body', 'lay'), actionPhase(actions, 'torso', 'lay'));
   const bodyBounce = actionOsc(actions, 'body', 'bounce_loop', undefined, 2);
   const postureDrop = crouch * y(0.26) + sit * y(0.44) + lay * y(0.72);
-  const torsoY = (kneel ? y(1.1) : y(1.3)) - postureDrop + bodyBounce * y(0.025);
+  const torsoBaseY = kneel ? y(1.1) : y(1.3);
+  const torsoY = torsoBaseY - postureDrop + bodyBounce * y(0.025);
+  const headNod = actionOsc(actions, 'head', 'nod_loop', undefined, 2);
+  const headShake = actionOsc(actions, 'head', 'shake_loop', undefined, 2);
+  const torsoTwist = actionOsc(actions, 'torso', 'twist_loop', undefined, 2);
+  const torsoPos: V3 = [0, torsoY, kneel ? 0.11 : lay * 0.34];
+  const torsoRot: V3 = [(kneel ? 4 : 0) + lay * 72, 0, (flex ? 0 : step * 1.5) + torsoTwist * 8];
+  const torsoPoint = (local: V3): V3 => addVec(torsoPos, rotateEulerVec(local, torsoRot));
+  const torsoChildRot = (local: V3): V3 => addRot(torsoRot, local);
   // shoulders tuck IN and DOWN onto the torso egg's slope (0.35/+0.22 left
   // them floating off the naked torso); the deltoid socket bridges the rest
   const shoulderX = 0.3 * s.shoulder * s.torsoWide;
   const hipX = 0.17 * s.hip;
-  const handX = 0.5 * s.shoulder;
-  const armTopY = kneel ? y(1.15) : y(1.36), armLowY = kneel ? y(0.73) : y(0.88), handY = kneel ? y(0.48) : y(0.57);
+  const armTopY = kneel ? y(1.15) : y(1.36);
   const footY = kneel ? y(0.075) : y(0.07);
   const armLen = s.limbLong;
   const legLen = s.limbLong;
-  const armSwing = walk ? step * 20 : 0;
   const legSwing = walk ? step * 18 : 0;
   const strideZ = walk ? step * 0.14 * s.limbLong : 0;
   const strideLift = walk ? Math.max(0, step) * 0.045 * s.height : 0;
   const counterStrideZ = -strideZ;
   const counterLift = walk ? Math.max(0, -step) * 0.045 * s.height : 0;
   const waveLift = wave ? 58 + Math.sin(phase * Math.PI * 4) * 8 : 0;
-  const headY = (kneel ? y(1.62) : y(1.8)) - postureDrop + lay * y(0.16);
-  const mid = (a: [number, number, number], b: [number, number, number]): [number, number, number] =>
+  const headPos = torsoPoint([0, (kneel ? y(1.62) : y(1.8)) - torsoBaseY, 0]);
+  const headRot = torsoChildRot([headNod * 12, step * 3 + headShake * 18, 0]);
+  const mid = (a: V3, b: V3): V3 =>
     [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
-  const segmentEnd = (start: [number, number, number], len: number, rzDeg: number, z = 0): [number, number, number] => {
+  const segmentEnd = (start: V3, len: number, rzDeg: number, z = 0): V3 => {
     const r = rzDeg * Math.PI / 180;
     return [start[0] + Math.sin(r) * len, start[1] - Math.cos(r) * len, start[2] + z];
   };
-  const pitchBetween = (top: [number, number, number], bottom: [number, number, number]) =>
+  const pitchBetween = (top: V3, bottom: V3) =>
     Math.atan2(top[2] - bottom[2], top[1] - bottom[1]) * 180 / Math.PI;
   const leftKick = actionWeight(actions, 'leg', 'kick', -1);
   const rightKick = actionWeight(actions, 'leg', 'kick', 1);
@@ -329,21 +395,63 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
   const rightStomp = actionOsc(actions, 'leg', 'stomp_loop', 1, 2);
   const leftFootTap = actionOsc(actions, 'foot', 'tap_loop', -1, 4);
   const rightFootTap = actionOsc(actions, 'foot', 'tap_loop', 1, 4);
-  const pelvisPos: [number, number, number] = kneel
-    ? [0, y(0.82) - crouch * y(0.12), 0.2 + sit * 0.08]
-    : [walk ? step * 0.025 * s.hip : 0, y(0.9) - crouch * y(0.18) - sit * y(0.34) - lay * y(0.62), (walk ? Math.cos(phase * Math.PI * 2) * 0.018 : 0) + sit * 0.18 + lay * 0.38];
-  const pelvisRot: [number, number, number] = kneel
-    ? [16, 0, 0]
-    : [walk ? step * 3 : 0, lay * 74, walk ? step * 5 : 0];
-  const leftHipPos: [number, number, number] = kneel ? [pelvisPos[0] - hipX, y(0.66), 0.18] : [pelvisPos[0] - hipX, y(0.82) - crouch * y(0.16) - sit * y(0.28) - lay * y(0.45), pelvisPos[2] + strideZ * 0.12];
-  const rightHipPos: [number, number, number] = kneel ? [pelvisPos[0] + hipX, y(0.66), 0.18] : [pelvisPos[0] + hipX, y(0.82) - crouch * y(0.16) - sit * y(0.28) - lay * y(0.45), pelvisPos[2] + counterStrideZ * 0.12];
+  const pelvisLocal: V3 = kneel
+    ? [0, y(0.82) - torsoBaseY - crouch * y(0.12), 0.09]
+    : [
+      walk ? step * 0.025 * s.hip : 0,
+      y(0.9) - torsoBaseY + crouch * y(0.08) + sit * y(0.16) + lay * y(0.08),
+      (walk ? Math.cos(phase * Math.PI * 2) * 0.018 : 0) + sit * 0.08 + lay * 0.04,
+    ];
+  const pelvisLocalRot: V3 = kneel
+    ? [12, 0, 0]
+    : [walk ? step * 3 : sit * 8 - lay * 5, 0, walk ? step * 5 : 0];
+  const pelvisPos = torsoPoint(pelvisLocal);
+  const pelvisRot = torsoChildRot(pelvisLocalRot);
+  const pelvisPoint = (local: V3): V3 => addVec(pelvisPos, rotateEulerVec(local, pelvisRot));
+  const pelvisChildRot = (local: V3): V3 => addRot(pelvisRot, local);
+  const leftHipLocal: V3 = kneel
+    ? [-hipX, -y(0.16), -0.02]
+    : [-hipX, -y(0.08) + sit * y(0.06), strideZ * 0.12 - sit * 0.03];
+  const rightHipLocal: V3 = kneel
+    ? [hipX, -y(0.16), -0.02]
+    : [hipX, -y(0.08) + sit * y(0.06), counterStrideZ * 0.12 - sit * 0.03];
+  const leftHipPos = pelvisPoint(leftHipLocal);
+  const rightHipPos = pelvisPoint(rightHipLocal);
   // stance: knee/foot x relative to the hip joint — wide-hip shapes (female)
   // converge below the hip instead of dropping straight down (femur angle)
   const stance = s.stance ?? 1.08;
-  const leftFootPos: [number, number, number] = kneel ? [leftHipPos[0] * 0.98, footY, 0.285] : [leftHipPos[0] * (stance + sit * 0.28), footY + strideLift * 0.45 + leftKick * y(0.22) + Math.max(0, leftStomp) * y(0.04), -0.055 + strideZ * 1.1 - leftKick * 0.42 + sit * 0.26 + lay * 0.42];
-  const rightFootPos: [number, number, number] = kneel ? [rightHipPos[0] * 0.98, footY, 0.285] : [rightHipPos[0] * (stance + sit * 0.28), footY + counterLift * 0.45 + rightKick * y(0.22) + Math.max(0, rightStomp) * y(0.04), -0.055 + counterStrideZ * 1.1 - rightKick * 0.42 + sit * 0.26 + lay * 0.42];
-  const leftKneePos: [number, number, number] = kneel ? [leftHipPos[0] * 1.08, y(0.19), 0.08] : [leftHipPos[0] * stance, y(0.44) + strideLift * 0.65 - crouch * y(0.1) - sit * y(0.12) + leftKick * y(0.12), leftHipPos[2] + strideZ * 0.78 - Math.max(0, -step) * 0.035 - leftKick * 0.18 + sit * 0.12 + lay * 0.32];
-  const rightKneePos: [number, number, number] = kneel ? [rightHipPos[0] * 1.08, y(0.19), 0.08] : [rightHipPos[0] * stance, y(0.44) + counterLift * 0.65 - crouch * y(0.1) - sit * y(0.12) + rightKick * y(0.12), rightHipPos[2] + counterStrideZ * 0.78 - Math.max(0, step) * 0.035 - rightKick * 0.18 + sit * 0.12 + lay * 0.32];
+  const leftKneeLocal: V3 = kneel
+    ? [-hipX * 1.08, y(0.19) - y(0.82), -0.12]
+    : [
+      -hipX * (stance + sit * 0.24),
+      -y(0.46) + crouch * y(0.08) + sit * y(0.34) + strideLift * 0.65 + leftKick * y(0.12),
+      strideZ * 0.78 - Math.max(0, -step) * 0.035 - leftKick * 0.18 - sit * 0.44 + lay * 0.06,
+    ];
+  const rightKneeLocal: V3 = kneel
+    ? [hipX * 1.08, y(0.19) - y(0.82), -0.12]
+    : [
+      hipX * (stance + sit * 0.24),
+      -y(0.46) + crouch * y(0.08) + sit * y(0.34) + counterLift * 0.65 + rightKick * y(0.12),
+      counterStrideZ * 0.78 - Math.max(0, step) * 0.035 - rightKick * 0.18 - sit * 0.44 + lay * 0.06,
+    ];
+  const leftFootLocal: V3 = kneel
+    ? [-hipX * 0.98, footY - y(0.82), 0.06]
+    : [
+      -hipX * (stance + sit * 0.2),
+      -y(0.83) + strideLift * 0.45 + leftKick * y(0.22) + Math.max(0, leftStomp) * y(0.04) + sit * y(0.28),
+      -0.055 + strideZ * 1.1 - leftKick * 0.42 - sit * 0.24 + lay * 0.08,
+    ];
+  const rightFootLocal: V3 = kneel
+    ? [hipX * 0.98, footY - y(0.82), 0.06]
+    : [
+      hipX * (stance + sit * 0.2),
+      -y(0.83) + counterLift * 0.45 + rightKick * y(0.22) + Math.max(0, rightStomp) * y(0.04) + sit * y(0.28),
+      -0.055 + counterStrideZ * 1.1 - rightKick * 0.42 - sit * 0.24 + lay * 0.08,
+    ];
+  const leftKneePos = pelvisPoint(leftKneeLocal);
+  const rightKneePos = pelvisPoint(rightKneeLocal);
+  const leftFootPos = pelvisPoint(leftFootLocal);
+  const rightFootPos = pelvisPoint(rightFootLocal);
   const leftThighPos = mid(leftHipPos, leftKneePos);
   const rightThighPos = mid(rightHipPos, rightKneePos);
   const leftShinPos = mid(leftKneePos, leftFootPos);
@@ -352,8 +460,8 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
   const rightThighRot: [number, number, number] = [kneel ? 42 : pitchBetween(rightHipPos, rightKneePos), 0, 3];
   const leftShinRot: [number, number, number] = [kneel ? 88 : pitchBetween(leftKneePos, leftFootPos), 0, walk ? -1 : 0];
   const rightShinRot: [number, number, number] = [kneel ? 88 : pitchBetween(rightKneePos, rightFootPos), 0, walk ? 1 : 0];
-  const leftFootRot: [number, number, number] = kneel ? [6, 0, 0] : [(walk ? -4 - legSwing * 0.08 : 0) - leftKick * 18 + leftFootTap * 16, 0, 0];
-  const rightFootRot: [number, number, number] = kneel ? [6, 0, 0] : [(walk ? -4 + legSwing * 0.08 : 0) - rightKick * 18 + rightFootTap * 16, 0, 0];
+  const leftFootRot = pelvisChildRot(kneel ? [6, 0, 0] : [(walk ? -4 - legSwing * 0.08 : 0) - leftKick * 18 + leftFootTap * 16 - sit * 8, 0, 0]);
+  const rightFootRot = pelvisChildRot(kneel ? [6, 0, 0] : [(walk ? -4 + legSwing * 0.08 : 0) - rightKick * 18 + rightFootTap * 16 - sit * 8, 0, 0]);
   const leftLift = actionWeight(actions, 'arm', 'lift_and_bend', -1);
   const rightLift = actionWeight(actions, 'arm', 'lift_and_bend', 1);
   const leftShake = actionWeight(actions, 'arm', 'shake_in_air', -1);
@@ -364,6 +472,16 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
   const rightPoint = Math.max(actionWeight(actions, 'arm', 'point', 1), actionWeight(actions, 'hand', 'point', 1));
   const leftPunch = actionWeight(actions, 'arm', 'punch', -1);
   const rightPunch = actionWeight(actions, 'arm', 'punch', 1);
+  const leftPunchPhase = actionPhase(actions, 'arm', 'punch', -1);
+  const rightPunchPhase = actionPhase(actions, 'arm', 'punch', 1);
+  const leftPunchChamber = leftPunch * (1 - smoothstep(0.2, 0.48, leftPunchPhase));
+  const rightPunchChamber = rightPunch * (1 - smoothstep(0.2, 0.48, rightPunchPhase));
+  const leftPunchThrust = leftPunch * smoothstep(0.28, 0.72, leftPunchPhase);
+  const rightPunchThrust = rightPunch * smoothstep(0.28, 0.72, rightPunchPhase);
+  const leftPunchFollow = leftPunch * smoothstep(0.58, 0.92, leftPunchPhase);
+  const rightPunchFollow = rightPunch * smoothstep(0.58, 0.92, rightPunchPhase);
+  const leftPunchStyle = actionArg(actions, 'arm', 'punch', -1, PUNCH_STYLES, 'cross');
+  const rightPunchStyle = actionArg(actions, 'arm', 'punch', 1, PUNCH_STYLES, 'cross');
   const leftGuard = actionWeight(actions, 'arm', 'guard', -1);
   const rightGuard = actionWeight(actions, 'arm', 'guard', 1);
   const leftReach = actionPhase(actions, 'arm', 'reach', -1);
@@ -382,38 +500,153 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
   const rightWristRoll = actionOsc(actions, 'wrist', 'roll_loop', 1, 3) + actionOsc(actions, 'wrist', 'wrist_roll_loop', 1, 3);
   const leftWristSnap = actionWeight(actions, 'wrist', 'snap', -1);
   const rightWristSnap = actionWeight(actions, 'wrist', 'snap', 1);
-  const lArmLiftZ = -leftLift * 58 - leftShake * 68 - leftPoint * 66 - leftPunch * 78 - leftGuard * 42 - leftReach * 46 - leftSalute * 88 + leftCross * 18 + leftShakeWave * 13 + leftWaveLoop * 15 + leftSwingLoop * 18;
-  const rArmLiftZ = rightLift * 58 + rightShake * 68 + rightPoint * 66 + rightPunch * 78 + rightGuard * 42 + rightReach * 46 + rightSalute * 88 - rightCross * 18 + rightShakeWave * 13 + rightWaveLoop * 15 + rightSwingLoop * 18;
-  const lForeBendZ = -leftLift * 62 - leftShake * 82 - leftPoint * 74 - leftPunch * 86 - leftGuard * 108 - leftReach * 34 - leftSalute * 116 + leftCross * 52 + leftShakeWave * 18 + leftWaveLoop * 28;
-  const rForeBendZ = rightLift * 62 + rightShake * 82 + rightPoint * 74 + rightPunch * 86 + rightGuard * 108 + rightReach * 34 + rightSalute * 116 - rightCross * 52 + rightShakeWave * 18 + rightWaveLoop * 28;
+  const lArmLiftZ = -leftLift * 58 - leftShake * 68 - leftGuard * 18 - leftPunchChamber * 38 - leftPunchFollow * 14 - leftSalute * 88 + leftCross * 18 + leftShakeWave * 13 + leftWaveLoop * 15 + leftSwingLoop * 18;
+  const rArmLiftZ = rightLift * 58 + rightShake * 68 + rightGuard * 18 + rightPunchChamber * 38 + rightPunchFollow * 14 + rightSalute * 88 - rightCross * 18 + rightShakeWave * 13 + rightWaveLoop * 15 + rightSwingLoop * 18;
+  const lForeBendZ = -leftLift * 62 - leftShake * 82 - leftGuard * 96 - leftPunchChamber * 118 - leftPunchThrust * 24 - leftSalute * 116 + leftCross * 52 + leftShakeWave * 18 + leftWaveLoop * 28;
+  const rForeBendZ = rightLift * 62 + rightShake * 82 + rightGuard * 96 + rightPunchChamber * 118 + rightPunchThrust * 24 + rightSalute * 116 - rightCross * 52 + rightShakeWave * 18 + rightWaveLoop * 28;
   const lWristShake = leftShakeWave * 22 + leftWristFlick * 26 + leftWristRoll * 16 - leftWristSnap * 42;
   const rWristShake = rightShakeWave * 22 + rightWristFlick * 26 + rightWristRoll * 16 + rightWristSnap * 42;
-  const leftForward = -leftPoint * 0.12 - leftPunch * 0.42 - leftReach * 0.28 - leftGuard * 0.08;
-  const rightForward = -rightPoint * 0.12 - rightPunch * 0.42 - rightReach * 0.28 - rightGuard * 0.08;
-  const leftUpperArmRot: [number, number, number] = [0, 0, (flex ? -62 : wave ? -waveLift : -5 - armSwing) + lArmLiftZ];
-  const rightUpperArmRot: [number, number, number] = [0, 0, (flex ? 62 : 5 + armSwing) + rArmLiftZ];
-  const leftForearmRot: [number, number, number] = [0, 0, (flex ? -116 : wave ? -84 : -8 - armSwing * 0.8) + lForeBendZ];
-  const rightForearmRot: [number, number, number] = [0, 0, (flex ? 116 : 8 + armSwing * 0.8) + rForeBendZ];
-  const leftHandRot: [number, number, number] = [0, 0, (flex ? -116 : wave ? -84 : -10 - armSwing * 0.5) + lForeBendZ + lWristShake];
-  const rightHandRot: [number, number, number] = [0, 0, (flex ? 116 : 10 + armSwing * 0.5) + rForeBendZ + rWristShake];
-  const leftShoulderPos: [number, number, number] = [-shoulderX, armTopY + 0.16 * armLen, 0];
-  const rightShoulderPos: [number, number, number] = [shoulderX, armTopY + 0.16 * armLen, 0];
+  const leftForward = -leftPoint * 0.34 + leftPunchChamber * 0.24 - leftPunchThrust * 0.9 - leftPunchFollow * 0.36 - leftReach * 0.42 - leftGuard * 0.16 - (walk ? step * 0.16 : 0);
+  const rightForward = -rightPoint * 0.34 + rightPunchChamber * 0.24 - rightPunchThrust * 0.9 - rightPunchFollow * 0.36 - rightReach * 0.42 - rightGuard * 0.16 + (walk ? step * 0.16 : 0);
+  const leftForwardLift = Math.max(leftPoint * 0.72, leftPunchChamber * 0.55, leftPunchThrust * 1.22, leftPunchFollow * 0.72, leftReach * 0.72, leftGuard * 0.45);
+  const rightForwardLift = Math.max(rightPoint * 0.72, rightPunchChamber * 0.55, rightPunchThrust * 1.22, rightPunchFollow * 0.72, rightReach * 0.72, rightGuard * 0.45);
+  const leftUpperArmZ = (flex ? -62 : wave ? -waveLift : -7) + lArmLiftZ;
+  const rightUpperArmZ = (flex ? 62 : 7) + rArmLiftZ;
+  const leftForearmZ = (flex ? -116 : wave ? -84 : -9) + lForeBendZ;
+  const rightForearmZ = (flex ? 116 : 9) + rForeBendZ;
+  const leftShoulderLocal: V3 = [-shoulderX, armTopY + 0.16 * armLen - torsoBaseY + leftPunchChamber * 0.04 * armLen, leftPunchChamber * 0.14 - leftPunchThrust * 0.03];
+  const rightShoulderLocal: V3 = [shoulderX, armTopY + 0.16 * armLen - torsoBaseY + rightPunchChamber * 0.04 * armLen, rightPunchChamber * 0.14 - rightPunchThrust * 0.03];
   // segment lengths: human-ish — fingertips land mid-thigh, not below the knee
-  const leftElbowPos = segmentEnd(leftShoulderPos, 0.4 * armLen, leftUpperArmRot[2], leftForward * 0.32);
-  const rightElbowPos = segmentEnd(rightShoulderPos, 0.4 * armLen, rightUpperArmRot[2], rightForward * 0.32);
-  const leftWristJoint = segmentEnd(leftElbowPos, 0.33 * armLen, leftForearmRot[2], leftForward * 0.48);
-  const rightWristJoint = segmentEnd(rightElbowPos, 0.33 * armLen, rightForearmRot[2], rightForward * 0.48);
-  const leftHandPos = segmentEnd(leftWristJoint, 0.12 * s.hand, leftHandRot[2], leftForward * 0.2);
-  const rightHandPos = segmentEnd(rightWristJoint, 0.12 * s.hand, rightHandRot[2], rightForward * 0.2);
-  const leftUpperArmPos = mid(leftShoulderPos, leftElbowPos);
-  const rightUpperArmPos = mid(rightShoulderPos, rightElbowPos);
-  const leftForearmPos = mid(leftElbowPos, leftWristJoint);
-  const rightForearmPos = mid(rightElbowPos, rightWristJoint);
-  const leftWristPos = mid(leftWristJoint, leftHandPos);
-  const rightWristPos = mid(rightWristJoint, rightHandPos);
-  const headNod = actionOsc(actions, 'head', 'nod_loop', undefined, 2);
-  const headShake = actionOsc(actions, 'head', 'shake_loop', undefined, 2);
-  const torsoTwist = actionOsc(actions, 'torso', 'twist_loop', undefined, 2);
+  const leftElbowLocal = segmentEnd(leftShoulderLocal, 0.4 * armLen, leftUpperArmZ, leftForward * 0.42);
+  const rightElbowLocal = segmentEnd(rightShoulderLocal, 0.4 * armLen, rightUpperArmZ, rightForward * 0.42);
+  leftElbowLocal[1] += leftForwardLift * 0.28 * armLen - leftPunchChamber * 0.06 * armLen;
+  rightElbowLocal[1] += rightForwardLift * 0.28 * armLen - rightPunchChamber * 0.06 * armLen;
+  leftElbowLocal[2] += leftPunchChamber * 0.22 - leftPunchThrust * 0.1;
+  rightElbowLocal[2] += rightPunchChamber * 0.22 - rightPunchThrust * 0.1;
+  const leftWristLocal = segmentEnd(leftElbowLocal, 0.33 * armLen, leftForearmZ, leftForward * 0.58);
+  const rightWristLocal = segmentEnd(rightElbowLocal, 0.33 * armLen, rightForearmZ, rightForward * 0.58);
+  leftWristLocal[1] += leftForwardLift * 0.16 * armLen - leftPunchChamber * 0.1 * armLen;
+  rightWristLocal[1] += rightForwardLift * 0.16 * armLen - rightPunchChamber * 0.1 * armLen;
+  leftWristLocal[2] += leftPunchChamber * 0.16 - leftPunchThrust * 0.42 - leftPunchFollow * 0.2;
+  rightWristLocal[2] += rightPunchChamber * 0.16 - rightPunchThrust * 0.42 - rightPunchFollow * 0.2;
+  const leftHandLocal = segmentEnd(leftWristLocal, 0.12 * s.hand, leftForearmZ + lWristShake, leftForward * 0.28);
+  const rightHandLocal = segmentEnd(rightWristLocal, 0.12 * s.hand, rightForearmZ + rWristShake, rightForward * 0.28);
+  leftHandLocal[2] += leftPunchChamber * 0.08 - leftPunchThrust * 0.28 - leftPunchFollow * 0.14;
+  rightHandLocal[2] += rightPunchChamber * 0.08 - rightPunchThrust * 0.28 - rightPunchFollow * 0.14;
+
+  const punchPose = (
+    side: -1 | 1,
+    shoulder: V3,
+    elbow: V3,
+    wrist: V3,
+    hand: V3,
+    chamber: number,
+    thrust: number,
+    follow: number,
+    style: PunchStyle,
+  ) => {
+    if (chamber <= 0 && thrust <= 0 && follow <= 0) return;
+    const sx = shoulder[0], sy = shoulder[1], sz = shoulder[2];
+    const chamberTargets: Record<PunchStyle, { elbow: V3; wrist: V3; hand: V3 }> = {
+      jab: {
+        elbow: [sx + side * 0.12 * armLen, sy - 0.05 * armLen, sz + 0.06 * armLen],
+        wrist: [sx + side * 0.04 * armLen, sy + 0.03 * armLen, sz - 0.06 * armLen],
+        hand: [sx + side * 0.03 * armLen, sy + 0.04 * armLen, sz - 0.16 * armLen],
+      },
+      cross: {
+        elbow: [sx + side * 0.18 * armLen, sy - 0.08 * armLen, sz + 0.18 * armLen],
+        wrist: [sx + side * 0.06 * armLen, sy + 0.02 * armLen, sz + 0.04 * armLen],
+        hand: [sx + side * 0.04 * armLen, sy + 0.03 * armLen, sz - 0.08 * armLen],
+      },
+      hook: {
+        elbow: [sx + side * 0.36 * armLen, sy + 0.02 * armLen, sz - 0.16 * armLen],
+        wrist: [sx + side * 0.28 * armLen, sy + 0.06 * armLen, sz - 0.32 * armLen],
+        hand: [sx + side * 0.2 * armLen, sy + 0.06 * armLen, sz - 0.42 * armLen],
+      },
+      uppercut: {
+        elbow: [sx + side * 0.16 * armLen, sy - 0.2 * armLen, sz + 0.02 * armLen],
+        wrist: [sx + side * 0.08 * armLen, sy - 0.18 * armLen, sz - 0.12 * armLen],
+        hand: [sx + side * 0.06 * armLen, sy - 0.12 * armLen, sz - 0.18 * armLen],
+      },
+      body: {
+        elbow: [sx + side * 0.16 * armLen, sy - 0.14 * armLen, sz + 0.12 * armLen],
+        wrist: [sx + side * 0.06 * armLen, sy - 0.1 * armLen, sz - 0.02 * armLen],
+        hand: [sx + side * 0.04 * armLen, sy - 0.08 * armLen, sz - 0.12 * armLen],
+      },
+    };
+    const thrustTargets: Record<PunchStyle, { elbow: V3; wrist: V3; hand: V3 }> = {
+      jab: {
+        elbow: [sx + side * 0.08 * armLen, sy - 0.02 * armLen, sz - 0.28 * armLen],
+        wrist: [sx + side * 0.02 * armLen, sy + 0.05 * armLen, sz - 0.82 * armLen],
+        hand: [sx + side * 0.015 * armLen, sy + 0.05 * armLen, sz - 1.02 * armLen],
+      },
+      cross: {
+        elbow: [sx + side * 0.04 * armLen, sy - 0.02 * armLen, sz - 0.36 * armLen],
+        wrist: [sx - side * 0.04 * armLen, sy + 0.04 * armLen, sz - 0.82 * armLen],
+        hand: [sx - side * 0.07 * armLen, sy + 0.04 * armLen, sz - 1.02 * armLen],
+      },
+      hook: {
+        elbow: [sx + side * 0.34 * armLen, sy + 0.04 * armLen, sz - 0.34 * armLen],
+        wrist: [sx - side * 0.14 * armLen, sy + 0.06 * armLen, sz - 0.5 * armLen],
+        hand: [sx - side * 0.34 * armLen, sy + 0.06 * armLen, sz - 0.52 * armLen],
+      },
+      uppercut: {
+        elbow: [sx + side * 0.12 * armLen, sy - 0.14 * armLen, sz - 0.22 * armLen],
+        wrist: [sx + side * 0.02 * armLen, sy + 0.24 * armLen, sz - 0.36 * armLen],
+        hand: [sx + side * 0.01 * armLen, sy + 0.42 * armLen, sz - 0.42 * armLen],
+      },
+      body: {
+        elbow: [sx + side * 0.08 * armLen, sy - 0.16 * armLen, sz - 0.3 * armLen],
+        wrist: [sx + side * 0.02 * armLen, sy - 0.22 * armLen, sz - 0.72 * armLen],
+        hand: [sx + side * 0.01 * armLen, sy - 0.24 * armLen, sz - 0.9 * armLen],
+      },
+    };
+
+    const chamberTarget = chamberTargets[style];
+    blendVecInto(elbow, chamberTarget.elbow, chamber);
+    blendVecInto(wrist, chamberTarget.wrist, chamber);
+    blendVecInto(hand, chamberTarget.hand, chamber);
+
+    const thrustMix = Math.max(thrust, follow * 0.72);
+    const thrustTarget = thrustTargets[style];
+    blendVecInto(elbow, thrustTarget.elbow, thrustMix);
+    blendVecInto(wrist, thrustTarget.wrist, thrustMix);
+    blendVecInto(hand, thrustTarget.hand, thrustMix);
+  };
+
+  punchPose(-1, leftShoulderLocal, leftElbowLocal, leftWristLocal, leftHandLocal, leftPunchChamber, leftPunchThrust, leftPunchFollow, leftPunchStyle);
+  punchPose(1, rightShoulderLocal, rightElbowLocal, rightWristLocal, rightHandLocal, rightPunchChamber, rightPunchThrust, rightPunchFollow, rightPunchStyle);
+
+  const leftUpperArmLocalRot: V3 = [pitchBetween(leftShoulderLocal, leftElbowLocal), 0, leftUpperArmZ];
+  const rightUpperArmLocalRot: V3 = [pitchBetween(rightShoulderLocal, rightElbowLocal), 0, rightUpperArmZ];
+  const leftForearmLocalRot: V3 = [pitchBetween(leftElbowLocal, leftWristLocal), 0, leftForearmZ];
+  const rightForearmLocalRot: V3 = [pitchBetween(rightElbowLocal, rightWristLocal), 0, rightForearmZ];
+  const leftWristLocalRot: V3 = [leftForearmLocalRot[0], 0, leftForearmZ + lWristShake * 0.35];
+  const rightWristLocalRot: V3 = [rightForearmLocalRot[0], 0, rightForearmZ + rWristShake * 0.35];
+  const leftHandLocalRot: V3 = [leftForearmLocalRot[0], 0, leftForearmZ + lWristShake];
+  const rightHandLocalRot: V3 = [rightForearmLocalRot[0], 0, rightForearmZ + rWristShake];
+  const leftUpperArmRot = torsoChildRot(leftUpperArmLocalRot);
+  const rightUpperArmRot = torsoChildRot(rightUpperArmLocalRot);
+  const leftForearmRot = torsoChildRot(leftForearmLocalRot);
+  const rightForearmRot = torsoChildRot(rightForearmLocalRot);
+  const leftWristRot = torsoChildRot(leftWristLocalRot);
+  const rightWristRot = torsoChildRot(rightWristLocalRot);
+  const leftHandRot = torsoChildRot(leftHandLocalRot);
+  const rightHandRot = torsoChildRot(rightHandLocalRot);
+  const leftShoulderPos = torsoPoint(leftShoulderLocal);
+  const rightShoulderPos = torsoPoint(rightShoulderLocal);
+  const leftElbowPos = torsoPoint(leftElbowLocal);
+  const rightElbowPos = torsoPoint(rightElbowLocal);
+  const leftWristJoint = torsoPoint(leftWristLocal);
+  const rightWristJoint = torsoPoint(rightWristLocal);
+  const leftHandPos = torsoPoint(leftHandLocal);
+  const rightHandPos = torsoPoint(rightHandLocal);
+  const leftUpperArmPos = torsoPoint(mid(leftShoulderLocal, leftElbowLocal));
+  const rightUpperArmPos = torsoPoint(mid(rightShoulderLocal, rightElbowLocal));
+  const leftForearmPos = torsoPoint(mid(leftElbowLocal, leftWristLocal));
+  const rightForearmPos = torsoPoint(mid(rightElbowLocal, rightWristLocal));
+  const leftWristPos = torsoPoint(mid(leftWristLocal, leftHandLocal));
+  const rightWristPos = torsoPoint(mid(rightWristLocal, rightHandLocal));
 
   const bone = (
     id: BoneId,
@@ -426,8 +659,8 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
   ): SkeletonBone => ({ id, parent, position, rotation, scale, thickness, hitbox });
 
   return {
-    torso: bone('torso', undefined, [0, torsoY, kneel ? 0.11 : lay * 0.34], [(kneel ? 4 : 0) + lay * 72, 0, (flex ? 0 : step * 1.5) + torsoTwist * 8], 0.3 * s.torsoLong, s.torsoWide, [0.44 * s.torsoWide, 0.92 * s.torsoLong, 0.32 * s.torsoWide]),
-    head: bone('head', 'torso', [0, headY, kneel ? 0.08 : lay * 0.42], [(kneel ? 8 : 0) + lay * 72 + headNod * 12, step * 3 + headShake * 18, 0], 0.21 * s.head, 1, [0.32 * s.head, 0.42 * s.head, 0.32 * s.head]),
+    torso: bone('torso', undefined, torsoPos, torsoRot, 0.3 * s.torsoLong, s.torsoWide, [0.44 * s.torsoWide, 0.92 * s.torsoLong, 0.32 * s.torsoWide]),
+    head: bone('head', 'torso', headPos, headRot, 0.21 * s.head, 1, [0.32 * s.head, 0.42 * s.head, 0.32 * s.head]),
     pelvis: bone('pelvis', 'torso', pelvisPos, pelvisRot, 0.16 * s.torsoLong, s.hip, [0.36 * s.hip, 0.2, 0.28 * s.hip]),
     lHip: bone('lHip', 'pelvis', leftHipPos, pelvisRot, 0.075 * s.hip, 1.15 * s.hip, [0.12 * s.hip, 0.12, 0.12 * s.hip]),
     rHip: bone('rHip', 'pelvis', rightHipPos, pelvisRot, 0.075 * s.hip, 1.15 * s.hip, [0.12 * s.hip, 0.12, 0.12 * s.hip]),
@@ -439,8 +672,8 @@ export function buildSkeleton(shapeId: BodyShapeId = 'neutral', pose: BodyPoseId
     rElbow: bone('rElbow', 'rUpperArm', rightElbowPos, rightForearmRot, 0.064 * s.limbThick, 1.25 * s.limbThick, [0.12 * s.limbThick, 0.12 * s.limbThick, 0.12 * s.limbThick]),
     lForearm: bone('lForearm', 'lElbow', leftForearmPos, leftForearmRot, 0.145 * armLen, 0.82 * s.limbThick, [0.12 * s.limbThick, 0.3 * armLen, 0.12 * s.limbThick]),
     rForearm: bone('rForearm', 'rElbow', rightForearmPos, rightForearmRot, 0.145 * armLen, 0.82 * s.limbThick, [0.12 * s.limbThick, 0.3 * armLen, 0.12 * s.limbThick]),
-    lWrist: bone('lWrist', 'lForearm', leftWristPos, leftHandRot, 0.048 * s.hand, 1.35 * s.limbThick, [0.08, 0.1, 0.08]),
-    rWrist: bone('rWrist', 'rForearm', rightWristPos, rightHandRot, 0.048 * s.hand, 1.35 * s.limbThick, [0.08, 0.1, 0.08]),
+    lWrist: bone('lWrist', 'lForearm', leftWristPos, leftWristRot, 0.048 * s.hand, 1.35 * s.limbThick, [0.08, 0.1, 0.08]),
+    rWrist: bone('rWrist', 'rForearm', rightWristPos, rightWristRot, 0.048 * s.hand, 1.35 * s.limbThick, [0.08, 0.1, 0.08]),
     lHand: bone('lHand', 'lWrist', leftHandPos, leftHandRot, 0.112 * s.hand, 1, [0.14 * s.hand, 0.16 * s.hand, 0.1 * s.hand]),
     rHand: bone('rHand', 'rWrist', rightHandPos, rightHandRot, 0.112 * s.hand, 1, [0.14 * s.hand, 0.16 * s.hand, 0.1 * s.hand]),
     lThigh: bone('lThigh', 'lHip', leftThighPos, leftThighRot, 0.21 * legLen, 1.3 * s.limbThick, [0.18 * s.limbThick, 0.45 * legLen, 0.18 * s.limbThick]),
@@ -593,7 +826,7 @@ export function buildRigAnchors(shapeId: BodyShapeId = 'neutral', pose: BodyPose
 }
 
 function offsetBone(bone: SkeletonBone, dx: number, dy: number, dz: number): [number, number, number] {
-  return [bone.position[0] + dx, bone.position[1] + dy, bone.position[2] + dz];
+  return addVec(bone.position as V3, rotateEulerVec([dx, dy, dz], bone.rotation));
 }
 
 // Deltoid ball: pulled slightly INWARD off the joint so it always bridges
@@ -673,7 +906,6 @@ function kneeSocket(side: -1 | 1, s: typeof BODY_SHAPES.neutral, bones: Record<B
 // INSIDE the palm and the fan stays within its width. (The old fan hung from
 // body-height offsets — fingers floated below and wider than the palm.)
 function fingerFan(hand: SkeletonBone, side: -1 | 1, s: typeof BODY_SHAPES.neutral, actions: RigTimelineAction[] = []): BodyInstance[] {
-  const [cx, cy, cz] = hand.position;
   // palm half-height: hand part scale 0.112 × preset scaleY 0.5
   const palmHalfY = 0.056 * s.hand;
   const out: BodyInstance[] = [];
@@ -697,29 +929,35 @@ function fingerFan(hand: SkeletonBone, side: -1 | 1, s: typeof BODY_SHAPES.neutr
     const off = (i - 1.5) * 0.034 * s.hand;
     const scale = (i === 1 || i === 2 ? 0.078 : 0.068) * s.hand * (1 - curl * 0.22 + extend * 0.2);
     const halfLen = 0.79 * scale; // finger preset scaleY × instance scale
+    const localRot: V3 = [14 + curl * 78 - extend * 18 + live * 9, 0, side * ((i - 1.5) * 3 + curl * 12 + live * 8)];
     out.push({
       part: 'finger',
-      position: [
-        cx + off * (1 - curl * 0.35),
+      bone: hand.id,
+      position: offsetBone(
+        hand,
+        off * (1 - curl * 0.35),
         // root buried in the palm: center sits palmHalf + 55% of the finger below
-        cy - palmHalfY - halfLen * 0.55 + curl * 0.05 * s.hand - extend * 0.014 * s.height + live * 0.006,
-        cz - 0.03 + curl * 0.03 - extend * 0.02,
-      ],
+        -palmHalfY - halfLen * 0.55 + curl * 0.05 * s.hand - extend * 0.014 * s.height + live * 0.006,
+        -0.03 + curl * 0.03 - extend * 0.02,
+      ),
       scale,
-      rotation: [14 + curl * 78 - extend * 18 + live * 9, 0, side * ((i - 1.5) * 3 + curl * 12 + live * 8)],
+      rotation: addRot(hand.rotation, localRot),
       thickness: i === 1 || i === 2 ? 1.12 : 1.0,
     });
   }
   // thumb hugs the palm's inner edge, rooted at its upper corner
+  const thumbRot: V3 = [12 + baseClench * 55 - thumbUp * 30, 0, -side * (58 - baseClench * 30 + thumbUp * 78)];
   out.push({
     part: 'finger',
-    position: [
-      cx - side * (0.068 - baseClench * 0.02) * s.hand,
-      cy - (0.022 - baseClench * 0.036 + thumbUp * 0.055) * s.height,
-      cz - 0.025 + baseClench * 0.025,
-    ],
+    bone: hand.id,
+    position: offsetBone(
+      hand,
+      -side * (0.068 - baseClench * 0.02) * s.hand,
+      -(0.022 - baseClench * 0.036 + thumbUp * 0.055) * s.height,
+      -0.025 + baseClench * 0.025,
+    ),
     scale: 0.058 * s.hand * (1 - baseClench * 0.16 + thumbUp * 0.08),
-    rotation: [12 + baseClench * 55 - thumbUp * 30, 0, -side * (58 - baseClench * 30 + thumbUp * 78)],
+    rotation: addRot(hand.rotation, thumbRot),
     thickness: 1.25,
   });
   return out;
@@ -896,6 +1134,7 @@ export function buildClothing(
   const bMain = matchTop ? c.secondary : b.primary;
   const bTrim = matchTop ? darkShoe(c.secondary) : b.secondary;
   const underDress = style === 'dress';
+  const paintedUnderwear = style === 'underwear';
   const lerp3 = (p: [number, number, number], q: [number, number, number], t: number): [number, number, number] =>
     [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t, p[2] + (q[2] - p[2]) * t];
   const span3 = (p: [number, number, number], q: [number, number, number]) =>
@@ -930,22 +1169,7 @@ export function buildClothing(
   const feminineBody = shapeId === 'female';
   const panties = bottoms === 'briefs' && feminineBody;
 
-  if (style === 'underwear' && feminineBody) {
-    const pr = bones.torso.rotation;
-    clothes.push(
-      // band wraps the ribcage (the naked torso wears no profile shrink, so
-      // the band must be wider/deeper than the bare chest surface)
-      box(offsetBone(bones.torso, 0, 0.105 * s.height, -0.01), [0.6 * s.torsoWide, 0.055, 0.38 * s.torsoWide], bMain, pr, 1),
-      // cups riding the chest bulge
-      sphere(offsetBone(bones.torso, -0.115 * s.torsoWide, 0.125 * s.height, -0.16), [0.07 * s.torsoWide, 0.055, 0.055], bMain, pr, 1),
-      sphere(offsetBone(bones.torso, 0.115 * s.torsoWide, 0.125 * s.height, -0.16), [0.07 * s.torsoWide, 0.055, 0.055], bMain, pr, 1),
-      // straps up over the shoulder slope
-      box(offsetBone(bones.torso, -0.115 * s.torsoWide, 0.21 * s.height, -0.1), [0.022, 0.16 * s.torsoLong, 0.02], bTrim, pr, 1),
-      box(offsetBone(bones.torso, 0.115 * s.torsoWide, 0.21 * s.height, -0.1), [0.022, 0.16 * s.torsoLong, 0.02], bTrim, pr, 1),
-    );
-  }
-
-  if (!underDress && panties) {
+  if (!underDress && !paintedUnderwear && panties) {
     const pr = bones.pelvis.rotation;
     clothes.push(
       // low-rise seat + slim crotch — no leg stubs, the cut ends at the hip
@@ -959,7 +1183,7 @@ export function buildClothing(
     );
   }
 
-  if (!underDress && !panties) {
+  if (!underDress && !paintedUnderwear && !panties) {
     // seat + crotch — the hip wrap every bottom shares
     const seatRise = bottoms === 'briefs' ? 0.07 : 0.1;
     const seatH = bottoms === 'briefs' ? 0.2 : 0.17;
@@ -990,7 +1214,7 @@ export function buildClothing(
   }
 
   // legs — under a dress only long pants would show, so skip the rest there
-  if (!underDress || longPants || bottoms === 'shorts') {
+  if (!paintedUnderwear && (!underDress || longPants || bottoms === 'shorts')) {
     for (const side of [-1, 1] as const) {
       if (bottoms === 'briefs') {
         // panties end at the hip — male briefs get the short leg stubs
@@ -1020,7 +1244,7 @@ export function buildClothing(
     }
   }
 
-  if (style !== 'underwear' || bottoms !== 'briefs') {
+  if (style !== 'underwear') {
     const shoe = style === 'dress' ? '#171717' : style === 'armor' ? c.secondary : style === 'underwear' ? darkShoe(bMain) : darkShoe(c.secondary);
     clothes.push(
       box(offsetBone(bones.lFoot, 0, 0.01, -0.03), [0.2 * s.foot, 0.07 * s.foot, 0.24 * s.foot], shoe, bones.lFoot.rotation, 1),

@@ -9,6 +9,8 @@
 // Dimensions are data, so the same code runs the 8-tile demo patch and a full
 // 120-tile chunk; placing chunks next to chunks is just more fields side by side.
 
+import { footprintDistance, type BrushShape } from './brush';
+
 // Shared layout (1 tile = 1m). The dot grid samples at shared tile corners, so a
 // W-tile span has W*DOTS_PER_TILE+1 columns.
 export const TILE_UNITS = 24;       // canvas units per 1m tile (display scale)
@@ -57,7 +59,7 @@ export function clearField(f: HeightField): void {
 //       diamond — Manhattan  (|dx|+|dy|).
 //   So flat+square = a square plateau, cone+diamond = a diamond pyramid, etc.
 export type BrushProfile = 'cone' | 'flat' | 'dome';
-export type BrushShape = 'circle' | 'square' | 'diamond';
+export type { BrushShape };
 
 export interface StampOpts {
   centerZ: number;      // peak height at the brush center (signed)
@@ -74,18 +76,6 @@ function brushProfile(profile: BrushProfile, t: number): number {
     case 'dome': return Math.sqrt(Math.max(0, 1 - t * t));
     case 'cone':
     default: return 1 - t;
-  }
-}
-
-// Distance from the brush centre under the footprint's metric, in metres. Cells with
-// distance <= radius are inside the footprint; that distance also drives the profile.
-function footprintDistance(shape: BrushShape, dx: number, dy: number): number {
-  const ax = Math.abs(dx), ay = Math.abs(dy);
-  switch (shape) {
-    case 'square': return Math.max(ax, ay) * DOT_M;
-    case 'diamond': return (ax + ay) * DOT_M;
-    case 'circle':
-    default: return Math.hypot(dx, dy) * DOT_M;
   }
 }
 
@@ -107,7 +97,7 @@ export function stampBrush(f: HeightField, cix: number, ciy: number, opts: Stamp
     for (let dx = -rd; dx <= rd; dx++) {
       const jx = cix + dx;
       if (jx < 0 || jx >= f.cols) continue;
-      const dm = footprintDistance(opts.shape, dx, dy);
+      const dm = footprintDistance(opts.shape, dx, dy) * DOT_M;
       if (dm > radiusM) continue;
       const idx = jy * f.cols + jx;
       if (opts.erase) { f.z[idx] = 0; continue; }
@@ -117,6 +107,51 @@ export function stampBrush(f: HeightField, cix: number, ciy: number, opts: Stamp
       // brush's direction, so re-stamping or overlapping never climbs past centerZ.
       const target = sign * Math.min(mag, HEIGHT_LIMIT);
       f.z[idx] = sign > 0 ? Math.max(f.z[idx], target) : Math.min(f.z[idx], target);
+    }
+  }
+}
+
+export interface RampStampOpts {
+  minZ: number;
+  maxZ: number;
+  wideM: number;
+  longM: number;
+  angleDeg: number;
+}
+
+function clampHeight(z: number): number {
+  return Math.max(-HEIGHT_LIMIT, Math.min(HEIGHT_LIMIT, z));
+}
+
+// Stamp a sloped rectangular plane centered on sample (cix,ciy). Fractional centers
+// are intentional: ramp drags are graph-space lines, and rounding the center per
+// chunk makes shallow/diagonal ramps wobble against the sample lattice. The ramp is SET,
+// not raised-toward: every covered sample becomes the lerped height from min→max
+// along the slope axis, constant across width.
+export function stampRamp(f: HeightField, cix: number, ciy: number, opts: RampStampOpts): void {
+  const wideM = Math.max(DOT_M, opts.wideM);
+  const longM = Math.max(DOT_M, opts.longM);
+  const hw = wideM / 2;
+  const hl = longM / 2;
+  const theta = opts.angleDeg * Math.PI / 180;
+  const sx = Math.sin(theta), sy = Math.cos(theta);
+  const px = Math.cos(theta), py = -Math.sin(theta);
+  const rd = Math.ceil(Math.hypot(hw, hl) / DOT_M) + 1;
+  const z0 = clampHeight(opts.minZ);
+  const z1 = clampHeight(opts.maxZ);
+  const minX = Math.max(0, Math.floor(cix - rd));
+  const maxX = Math.min(f.cols - 1, Math.ceil(cix + rd));
+  const minY = Math.max(0, Math.floor(ciy - rd));
+  const maxY = Math.min(f.rows - 1, Math.ceil(ciy + rd));
+
+  for (let jy = minY; jy <= maxY; jy++) {
+    for (let jx = minX; jx <= maxX; jx++) {
+      const mx = (jx - cix) * DOT_M, my = (jy - ciy) * DOT_M;
+      const along = mx * sx + my * sy;
+      const across = mx * px + my * py;
+      if (Math.abs(along) > hl || Math.abs(across) > hw) continue;
+      const t = longM <= 0 ? 0 : (along + hl) / longM;
+      f.z[jy * f.cols + jx] = clampHeight(z0 + (z1 - z0) * Math.max(0, Math.min(1, t)));
     }
   }
 }

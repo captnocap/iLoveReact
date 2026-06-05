@@ -35,7 +35,7 @@ import {
   type ChunkKey,
 } from './chunks';
 import { type ZoneDef } from './zoneData';
-import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
+import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
 
 // Height quantization: heights are metres in ±HEIGHT_LIMIT. 0.01m steps are
 // imperceptible on the coarse preview mesh and keep the value a small integer
@@ -111,6 +111,7 @@ export function serializeMap(world: EditorWorld): MapSnapshot {
     focus: Array.from(world.focus),
     placements: world.placements.map((p) => ({
       id: p.id, cat: p.cat, kind: p.kind, gx: p.gx, gy: p.gy, rotation: p.rotation, locked: p.locked,
+      ...(p.spawnId ? { spawnId: p.spawnId } : {}),
     })),
     chunks,
   };
@@ -167,7 +168,11 @@ export function deserializeMap(snap: MapSnapshot): EditorWorld {
 
   const placements: Placement[] = (snap.placements ?? []).map((p) => {
     const base = resolvePlaceable(p.cat, p.kind); // re-resolve visuals from globals
-    return { id: p.id, cat: p.cat, kind: p.kind, gx: p.gx, gy: p.gy, rotation: p.rotation, locked: p.locked, ...base };
+    // Snap on load: maps saved before snapping (or with old kind footprints) carry
+    // free positions; quantize to the cell rect so the resting node always shows
+    // the exact tiles the compile lowers to.
+    const snap = placementCellRect({ gx: p.gx, gy: p.gy, footW: base.footW, footD: base.footD });
+    return { id: p.id, cat: p.cat, kind: p.kind, gx: snap.snapGx, gy: snap.snapGy, rotation: p.rotation, locked: p.locked, ...base, ...(p.spawnId ? { spawnId: p.spawnId } : {}) };
   });
 
   const focusKeys = (snap.focus ?? []).filter((k) => chunks.has(k));

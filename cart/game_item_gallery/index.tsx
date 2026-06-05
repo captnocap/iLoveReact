@@ -4,9 +4,9 @@ import * as Geometry from '@reactjit/geometries';
 import { mesh, normalize, type GeometryData, type Vec3 } from '@reactjit/geometries';
 import { OrbitCamera } from '@reactjit/cameras';
 
-type V3 = [number, number, number];
-type ModelCtx = { origin: V3; yaw: number; scale: number; active: boolean };
-type ModelFn = (ctx: ModelCtx) => any;
+export type V3 = [number, number, number];
+export type ModelCtx = { origin: V3; yaw: number; scale: number; active: boolean };
+export type ModelFn = (ctx: ModelCtx) => any;
 
 const PI = Math.PI;
 const CIG_TEXTURE_KEY = 'game-item-gallery-cig-pack-ui';
@@ -238,7 +238,7 @@ function Cash(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#5fb86b" p={[0, 0.13, 0]} s={[1.0, 0.16, 0.5]} />
     <Scene3D.Mesh
-      geometry={box}
+      geometry={Geometry.Box}
       params={box1}
       material="#ffffff"
       textureKey={CASH_TEXTURE_KEY}
@@ -279,7 +279,7 @@ function Surf(ctx: ModelCtx) {
 function Football(ctx: ModelCtx) {
   return <>
     <Scene3D.Mesh
-      geometry={sphere}
+      geometry={Geometry.Sphere}
       params={sphere12}
       material="#ffffff"
       textureKey={FOOTBALL_TEXTURE_KEY}
@@ -293,7 +293,7 @@ function Football(ctx: ModelCtx) {
 function Basketball(ctx: ModelCtx) {
   return <>
     <Scene3D.Mesh
-      geometry={sphere}
+      geometry={Geometry.Sphere}
       params={{ radius: 0.5, segments: 24, rings: 14 }}
       material="#ffffff"
       textureKey={BASKETBALL_TEXTURE_KEY}
@@ -307,7 +307,7 @@ function Basketball(ctx: ModelCtx) {
 function PillBottle(ctx: ModelCtx) {
   return <>
     <Scene3D.Mesh
-      geometry={cyl}
+      geometry={Geometry.Cylinder}
       params={cyl18}
       material="#ffffff"
       textureKey={PILL_TEXTURE_KEY}
@@ -322,7 +322,7 @@ function PillBottle(ctx: ModelCtx) {
 function BeerBottle(ctx: ModelCtx) {
   return <>
     <Scene3D.Mesh
-      geometry={cyl}
+      geometry={Geometry.Cylinder}
       params={cyl18}
       material="#ffffff"
       textureKey={BEER_TEXTURE_KEY}
@@ -338,7 +338,7 @@ function BeerBottle(ctx: ModelCtx) {
 function LiquorBottle(ctx: ModelCtx) {
   return <>
     <Scene3D.Mesh
-      geometry={box}
+      geometry={Geometry.Box}
       params={box1}
       material="#ffffff"
       textureKey={LIQUOR_TEXTURE_KEY}
@@ -384,11 +384,11 @@ function Cigarettes(ctx: ModelCtx) {
   const tips = [-0.42, -0.28, -0.14];
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#d9362e" p={[-0.28, 0.33, 0]} s={[0.42, 0.62, 0.18]} />
-    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_TEXTURE_KEY} position={local(ctx, [-0.28, 0.33, 0.096])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.52, 0.012])} />
-    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_SIDE_TEXTURE_KEY} position={local(ctx, [-0.062, 0.33, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.012, 0.52, 0.16])} />
-    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_TOP_TEXTURE_KEY} position={local(ctx, [-0.28, 0.648, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.012, 0.16])} />
-    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_BACK_TEXTURE_KEY} position={local(ctx, [-0.28, 0.33, -0.096])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.52, 0.012])} />
-    <Scene3D.Mesh geometry={box} params={box1} material="#ffffff" textureKey={CIG_BOTTOM_TEXTURE_KEY} position={local(ctx, [-0.28, 0.012, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.012, 0.16])} />
+    <Scene3D.Mesh geometry={Geometry.Box} params={box1} material="#ffffff" textureKey={CIG_TEXTURE_KEY} position={local(ctx, [-0.28, 0.33, 0.096])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.52, 0.012])} />
+    <Scene3D.Mesh geometry={Geometry.Box} params={box1} material="#ffffff" textureKey={CIG_SIDE_TEXTURE_KEY} position={local(ctx, [-0.062, 0.33, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.012, 0.52, 0.16])} />
+    <Scene3D.Mesh geometry={Geometry.Box} params={box1} material="#ffffff" textureKey={CIG_TOP_TEXTURE_KEY} position={local(ctx, [-0.28, 0.648, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.012, 0.16])} />
+    <Scene3D.Mesh geometry={Geometry.Box} params={box1} material="#ffffff" textureKey={CIG_BACK_TEXTURE_KEY} position={local(ctx, [-0.28, 0.33, -0.096])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.52, 0.012])} />
+    <Scene3D.Mesh geometry={Geometry.Box} params={box1} material="#ffffff" textureKey={CIG_BOTTOM_TEXTURE_KEY} position={local(ctx, [-0.28, 0.012, 0])} rotation={rot(ctx)} scale={scl(ctx, [0.36, 0.012, 0.16])} />
     {tips.map((x, i) => <Part key={`cig-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#f4f0df" p={[x, 0.82 + i * 0.03, 0.02]} s={[0.045, 0.42, 0.045]} />)}
     {tips.map((x, i) => <Part key={`filter-${i}`} ctx={ctx} geometry={cyl} params={cyl12} material="#d49a55" p={[x, 0.61 + i * 0.03, 0.02]} s={[0.047, 0.12, 0.047]} />)}
   </>;
@@ -407,7 +407,7 @@ function Backpack(ctx: ModelCtx) {
 function MedKit(ctx: ModelCtx) {
   return <>
     <Scene3D.Mesh
-      geometry={box}
+      geometry={Geometry.Box}
       params={box1}
       material="#ffffff"
       textureKey={MEDKIT_TEXTURE_KEY}
@@ -423,7 +423,7 @@ function Tv(ctx: ModelCtx) {
   return <>
     <Part ctx={ctx} geometry={box} params={box1} material="#242a34" p={[0, 0.55, 0]} s={[1.15, 0.78, 0.32]} />
     <Scene3D.Mesh
-      geometry={box}
+      geometry={Geometry.Box}
       params={box1}
       material="#ffffff"
       textureKey={TV_SCREEN_TEXTURE_KEY}
@@ -438,9 +438,9 @@ function Tv(ctx: ModelCtx) {
   </>;
 }
 
-type Item = { id: string; label: string; tone: string; note: string; model: ModelFn };
+export type Item = { id: string; label: string; tone: string; note: string; model: ModelFn };
 
-const ITEMS: Item[] = [
+export const ITEMS: Item[] = [
   { id: 'knife', label: 'Knife', tone: '#cbd5df', note: 'wedge blade, riveted grip', model: Knife },
   { id: 'pistol', label: 'Pistol', tone: '#9aa4b2', note: 'blocky sidearm silhouette', model: Pistol },
   { id: 'pitchfork', label: 'Pitchfork', tone: '#aeb8c2', note: 'wood shaft and four tines', model: Pitchfork },
@@ -490,7 +490,7 @@ function GalleryScene({ item, yaw, pitch }: { item: Item; yaw: number; pitch: nu
       <Scene3D.DirectionalLight direction={[0.45, 0.88, 0.32]} color="#ffe0b0" intensity={0.95} />
       <Scene3D.PointLight position={[-2.2, 2.6, 3.2]} color="#8cc8ff" intensity={0.82} />
       <Scene3D.PointLight position={[2.4, 2.0, -2.6]} color="#ffb380" intensity={0.45} />
-      <Scene3D.Mesh geometry={box} params={box1} material="#0d131f" position={[0, -0.17, 0]} scale={[8.5, 0.08, 6.2]} />
+      <Scene3D.Mesh geometry={Geometry.Box} params={box1} material="#0d131f" position={[0, -0.17, 0]} scale={[8.5, 0.08, 6.2]} />
       <Pedestal ctx={{ ...ctx, yaw: 0, scale: 1.18 }} item={item} />
       {item.model(ctx)}
     </Scene3D>
@@ -521,10 +521,12 @@ function ItemButton({ item, active, onPress }: { item: Item; active: boolean; on
   );
 }
 
-function TextureSources({ tvTick }: { tvTick: number }) {
+export function TextureSources({ tvTick, itemId }: { tvTick: number; itemId?: string | null }) {
   const crawlTop = 224 - (tvTick % 360);
+  const show = (...ids: string[]) => !itemId || ids.includes(itemId);
   return (
     <>
+      {show('cigarettes') ? (
       <StaticSurface staticKey={CIG_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', padding: 18 }}>
           <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', borderWidth: 10, borderColor: '#f7f0df', padding: 14, gap: 12 }}>
@@ -539,7 +541,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('cigarettes') ? (
       <StaticSurface staticKey={CIG_SIDE_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#f7f0df', padding: 18, gap: 14 }}>
           <Text style={{ color: '#20242d', fontSize: 18, fontWeight: 'bold' }}>WARNING</Text>
@@ -553,7 +557,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Row>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('cigarettes') ? (
       <StaticSurface staticKey={CIG_TOP_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', padding: 24 }}>
           <Box style={{ flexGrow: 1, backgroundColor: '#f7f0df', borderWidth: 7, borderColor: '#a51f21', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -563,7 +569,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('cigarettes') ? (
       <StaticSurface staticKey={CIG_BACK_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#d9362e', padding: 16 }}>
           <Box style={{ flexGrow: 1, backgroundColor: '#f7f0df', padding: 14, gap: 8 }}>
@@ -575,7 +583,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('cigarettes') ? (
       <StaticSurface staticKey={CIG_BOTTOM_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#76191b', padding: 28 }}>
           <Box style={{ flexGrow: 1, backgroundColor: '#e9c05f', borderWidth: 7, borderColor: '#2b2416', alignItems: 'center', justifyContent: 'center', gap: 5 }}>
@@ -585,7 +595,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('tv') ? (
       <StaticSurface staticKey={TV_SCREEN_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Filter shader="crt" intensity={0.86} style={{ width: '100%', height: '100%' }}>
           <Box style={{ width: '100%', height: '100%', backgroundColor: '#03070f', padding: 14, overflow: 'hidden' }}>
@@ -613,11 +625,15 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Filter>
       </StaticSurface>
+      ) : null}
 
+      {show('cash') ? (
       <StaticSurface staticKey={CASH_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Effect shader={CASH_SHADER} data={[0]} style={{ width: TEX_W, height: TEX_H }} />
       </StaticSurface>
+      ) : null}
 
+      {show('beer') ? (
       <StaticSurface staticKey={BEER_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#2f593a', paddingTop: 58, paddingBottom: 58, paddingLeft: 22, paddingRight: 22 }}>
           <Box style={{ width: '100%', height: '100%', backgroundColor: '#efe0b8', borderWidth: 8, borderColor: '#b98d36', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
@@ -627,7 +643,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('liquor') ? (
       <StaticSurface staticKey={LIQUOR_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#5d3a8d', padding: 24 }}>
           <Box style={{ flexGrow: 1, backgroundColor: '#2d174d', borderWidth: 9, borderColor: '#d6b46c', padding: 16, alignItems: 'center', justifyContent: 'center', gap: 10 }}>
@@ -638,7 +656,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('pillbottle') ? (
       <StaticSurface staticKey={PILL_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#d98238', paddingTop: 74, paddingBottom: 74, paddingLeft: 18, paddingRight: 18 }}>
           <Box style={{ width: '100%', height: '100%', backgroundColor: '#fbf4df', borderWidth: 6, borderColor: '#f1d28c', padding: 12, justifyContent: 'center', gap: 7 }}>
@@ -648,7 +668,9 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('medkit') ? (
       <StaticSurface staticKey={MEDKIT_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Box style={{ width: '100%', height: '100%', backgroundColor: '#f1f4f4', padding: 22 }}>
           <Box style={{ flexGrow: 1, backgroundColor: '#ffffff', borderWidth: 8, borderColor: '#c8ccd0', alignItems: 'center', justifyContent: 'center' }}>
@@ -657,14 +679,19 @@ function TextureSources({ tvTick }: { tvTick: number }) {
           </Box>
         </Box>
       </StaticSurface>
+      ) : null}
 
+      {show('football') ? (
       <StaticSurface staticKey={FOOTBALL_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Effect shader={FOOTBALL_SHADER} data={[0]} style={{ width: TEX_W, height: TEX_H }} />
       </StaticSurface>
+      ) : null}
 
+      {show('basketball') ? (
       <StaticSurface staticKey={BASKETBALL_TEXTURE_KEY} style={{ position: 'absolute', left: -99999, top: 0, width: TEX_W, height: TEX_H }}>
         <Effect shader={BASKETBALL_SHADER} data={[0]} style={{ width: TEX_W, height: TEX_H }} />
       </StaticSurface>
+      ) : null}
     </>
   );
 }

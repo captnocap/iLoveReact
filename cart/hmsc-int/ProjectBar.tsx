@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -45,6 +45,13 @@ interface ProjectBarProps {
   onPerf: () => void;
   // Navigate to the /assist3d route — the assistant-authored hot 3D surface.
   onAssist: () => void;
+  // Navigate to the /test route — quick in-editor player drop-in.
+  onTest: () => void;
+  // Navigate to the /textures route — the texture studio (tune a shader recipe,
+  // Materialize it into a stored material the registry serves everywhere).
+  onTextures: () => void;
+  // Navigate to the /voxels route — the 1m³ authoring / baked-mesh proposal.
+  onVoxels: () => void;
 }
 
 function IconBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
@@ -87,7 +94,10 @@ export function ProjectBar(props: ProjectBarProps) {
       {/* Route navigation — this is the persistent shell for every hmsc-int route. */}
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
+        <IconBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="test" />
+        <IconBtn icon="Boxes" on={props.activeRoute === 'voxels'} onPress={props.onVoxels} title="voxel bake" />
         <IconBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
+        <IconBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />
         <IconBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
       </Box>
 

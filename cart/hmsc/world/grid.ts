@@ -9,6 +9,8 @@ import { landformTileKindAtWorldPosition, landformTopAtWorldPosition, landformWa
 export type PlaceCellOptions = {
   triggerCommand?: string;
   triggerLabel?: string;
+  // For a 'save' cell: the cellKey of the paired 'spawn' cell to respawn at.
+  spawnKey?: string;
 };
 
 export function cellKey(cell: GridCell): string {
@@ -49,6 +51,7 @@ export function placeCell(state: GameState, kind: TileKind, cell: GridCell, sour
     cell,
     ...(options.triggerCommand ? { triggerCommand: options.triggerCommand } : {}),
     ...(options.triggerLabel ? { triggerLabel: options.triggerLabel } : {}),
+    ...(options.spawnKey ? { spawnKey: options.spawnKey } : {}),
     createdByCommand: sourceLine,
   };
   return {

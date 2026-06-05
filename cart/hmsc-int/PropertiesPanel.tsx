@@ -345,7 +345,7 @@ function SkinPickerPopover(props: { building: Building; role: Role; onPick: (ski
     <>
       <Pressable onPress={props.onClose} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, zIndex: 10 }} />
       <Box style={{ position: 'absolute', left: 12, top: 52, zIndex: 11, maxWidth: 300, backgroundColor: accentFor('bgAlt'), borderWidth: 1, borderColor: accentFor('border'), padding: 8, gap: 6 }}>
-        <C.SkinRoleLabel>{`SKIN · ${props.role.toUpperCase()}`}</C.SkinRoleLabel>
+        <C.SkinRoleLabel>{`TEXTURE · ${props.role.toUpperCase()}`}</C.SkinRoleLabel>
         <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
           {SKIN_NAMES.map((skin) => (
             <Box key={skin} style={{ alignItems: 'center', gap: 3 }}>

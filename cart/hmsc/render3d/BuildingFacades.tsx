@@ -5,6 +5,7 @@ import type { BoxFace } from '@reactjit/geometries';
 import type { Building, BuildingSkin, PerceptionState } from '../design';
 import {
   buildingExteriorFaces,
+  buildingFaceRole,
   buildingFootprint,
   buildingTopMeters,
   resolveFaceSkin,
@@ -44,6 +45,11 @@ function buildingPanels(building: Building): Panel[] {
   if (isOpenBuildingKind(building.kind)) return out;
   for (const face of buildingExteriorFaces(building)) {
     if (building.enclosure === 'hollow' && face.side === building.doorSide) continue;
+    // A face the part-texture channel owns is drawn by BuildingTexturedFaces; skip
+    // the skin panel here so the two don't z-fight (the panels share the same nudge
+    // and the skin one would otherwise win the depth test, hiding the applied
+    // texture — the "only the roof changes" bug, since the roof has no skin panel).
+    if (building.partTextures?.[buildingFaceRole(building.doorSide, face.side)]) continue;
     const skin = resolveFaceSkin(building, face.side);
     if (skin === 'plain') continue;
     const bucket: FaceBucket = { skin, cols: skinGridCols(face.widthMeters), floors: skinGridFloors(face.heightMeters) };
@@ -65,7 +71,7 @@ function buildingPanels(building: Building): Panel[] {
     });
   }
   const topSkin = resolveTopSkin(building);
-  if (topSkin !== 'plain') {
+  if (topSkin !== 'plain' && !building.partTextures?.top) {
     const f = buildingFootprint(building);
     const spanX = f.maxX - f.minX;
     const spanZ = f.maxZ - f.minZ;

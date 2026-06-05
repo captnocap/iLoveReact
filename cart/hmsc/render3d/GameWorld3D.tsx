@@ -12,6 +12,7 @@ import { CulDeSac, Intersection } from './RoadJunctions';
 import { Prop } from './Prop';
 import { Building3D } from './Building';
 import { BuildingFacades } from './BuildingFacades';
+import { BuildingTexturedFaces } from './PartCaptures';
 import { nearestBuildingHitFraction } from '../world/buildings';
 import { Landform } from './Landform';
 import { nearestLandformCameraHit } from '../world/landforms';
@@ -164,6 +165,9 @@ export const WorldStatics = memo(function WorldStatics(props: {
           each building's captured skin texture (office/residential/retail/
           industrial). 'plain' buildings get none and show their bare wall. */}
       <BuildingFacades buildings={world.buildings} />
+      {/* Part-texture facade panels (the click-to-pick channel) for box buildings —
+          additive over the skin panels above; only textured faces emit a panel. */}
+      <BuildingTexturedFaces buildings={world.buildings} />
       {/* Registry-driven landforms (mountains, hills, estates): ONE component for
           every kind — a Heightfield mesh baked from the kind's height function,
           tiled with the surface material, plus any kind decoration (crater lake,

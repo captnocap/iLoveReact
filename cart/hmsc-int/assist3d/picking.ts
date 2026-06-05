@@ -15,7 +15,6 @@
 // escape hatch for anything geometry overlap makes ambiguous.
 
 import type { Solved, Rect, Vec3 } from '@reactjit/cameras';
-import { type MeshSpec } from './scene';
 
 export function screenRay(sx: number, sy: number, rect: Rect, cam: Solved): { o: Vec3; d: Vec3 } {
   const { pos, target, fov } = cam;
@@ -71,14 +70,28 @@ function rayAabb(o: Vec3, d: Vec3, c: Vec3, half: Vec3): number {
   return tmin > 0 ? tmin : tmax;                  // inside the box → use the exit
 }
 
-export function pickMesh(sx: number, sy: number, rect: Rect, cam: Solved, meshes: MeshSpec[]): number {
+// The minimal mesh shape pick needs: geometry + params (for half-extents),
+// a world position, and a uniform OR per-axis scale. A MeshSpec satisfies it, and
+// so does a render3d/parts.tsx Part (whose scale is often a [x,y,z] array — a wall
+// panel or a garage deck is a flat slab, non-uniform on purpose).
+export type Pickable = {
+  geometry: string;
+  params: Record<string, number>;
+  position: Vec3;
+  scale?: number | [number, number, number];
+};
+
+export function pickMesh(sx: number, sy: number, rect: Rect, cam: Solved, meshes: Pickable[]): number {
   const { o, d } = screenRay(sx, sy, rect, cam);
   let best = -1, bestT = Infinity;
   for (let i = 0; i < meshes.length; i++) {
     const m = meshes[i];
-    const sc = m.scale ?? 1;
+    const s = m.scale ?? 1;
+    const sx3 = Array.isArray(s) ? s[0] : s;
+    const sy3 = Array.isArray(s) ? s[1] : s;
+    const sz3 = Array.isArray(s) ? s[2] : s;
     const he = halfExtents(m.geometry, m.params);
-    const half: Vec3 = [he[0] * sc, he[1] * sc, he[2] * sc];
+    const half: Vec3 = [he[0] * sx3, he[1] * sy3, he[2] * sz3];
     const t = rayAabb(o, d, m.position, half);
     if (t > 0 && t < bestT) { bestT = t; best = i; }
   }

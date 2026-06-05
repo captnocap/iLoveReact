@@ -1,7 +1,7 @@
 // ChunkSurface — one chunk's painted surface as a single Effect quad in the Canvas.
 //
 // Owns the coalesced GPU buffer for ITS chunk (usePaintedField) and renders the
-// shader for the active layer: the tile ground for paint/place, the heightfield for
+// shader for the active layer: the tile ground for paint/place, tile+height for
 // height, the combined tile+zone view for zone. Registers its flush with the parent
 // so the brush can re-upload just this chunk after mutating its buffer in place — a
 // stroke on one chunk never re-encodes or re-uploads the others.
@@ -13,7 +13,7 @@
 import { memo, useEffect } from 'react';
 import { Canvas, Effect } from '@reactjit/primitives';
 import { TILE_UNITS, encodeField } from './heightData';
-import { HEIGHT_FIELD_WGSL } from './heightField.wgsl';
+import { HEIGHT_TILE_VIEW_WGSL } from './heightTileView.wgsl';
 import { encodeTileMap } from './tileData';
 import { TILE_FIELD_WGSL } from './tileField.wgsl';
 import { encodeZoneSection, type ZoneDef } from './zoneData';
@@ -49,7 +49,7 @@ function ChunkSurfaceImpl(props: {
   // Encode reads the live chunk buffers; recomputes only on a flushed stroke or a
   // layer/zone-def change (usePaintedField caps it at one encode+upload per frame).
   const surface = usePaintedField(() => {
-    if (layer === 'height') return Array.from(encodeField(chunk.height));
+    if (layer === 'height') return [...encodeTileMap(chunk.tiles), ...Array.from(encodeField(chunk.height))];
     if (layer === 'zone') return [...encodeTileMap(chunk.tiles), ...encodeZoneSection(chunk.zones, zones)];
     return encodeTileMap(chunk.tiles); // paint + place: the tile ground
   }, [layer, zones]);
@@ -60,7 +60,7 @@ function ChunkSurfaceImpl(props: {
     return () => unregister(key);
   }, [key, surface.touch, register, unregister]);
 
-  const shader = layer === 'height' ? HEIGHT_FIELD_WGSL : layer === 'zone' ? ZONE_VIEW_WGSL : TILE_FIELD_WGSL;
+  const shader = layer === 'height' ? HEIGHT_TILE_VIEW_WGSL : layer === 'zone' ? ZONE_VIEW_WGSL : TILE_FIELD_WGSL;
 
   return (
     <Canvas.Node gx={chunk.cx * PATCH} gy={chunk.cz * PATCH} gw={PATCH} gh={PATCH}>

@@ -17,7 +17,7 @@
 
 import { useMemo, useState } from 'react';
 import { Box, Col, Effect, Pressable, Row, ScrollView, Text } from '@reactjit/primitives';
-import { paramDefaults, type ShaderParam, type ShaderSpec } from './shaderCatalog';
+import { paramDefaults, type ShaderParam, type ShaderSpec } from '../hmsc/render3d/textureShaders';
 
 interface Material { name: string; data: number[] }
 
@@ -67,7 +67,13 @@ function ParamSlider(props: { param: ShaderParam; value: number; onChange: (v: n
   );
 }
 
-export function ShaderLab(props: { spec: ShaderSpec }) {
+export function ShaderLab(props: {
+  spec: ShaderSpec;
+  // When set, Materialize ALSO hands the frozen look out (suggested name + the
+  // exact data[] snapshot) — the texture studio persists it as a stored material.
+  // Without it the lab is self-contained (the in-memory strip only), unchanged.
+  onMaterialize?: (suggestedName: string, data: number[]) => void;
+}) {
   const { spec } = props;
 
   // Shared base values (asphalt) — persist across variant switches.
@@ -98,8 +104,11 @@ export function ShaderLab(props: { spec: ShaderSpec }) {
     setBase(paramDefaults(spec.base));
     setOverlays((s) => ({ ...s, [variant.id]: paramDefaults(variant.params) }));
   };
-  const materialize = () =>
-    setLibrary((lib) => [...lib, { name: `${spec.id}/${variant.id}${lib.length ? `-${lib.length}` : ''}`, data: [...data] }]);
+  const materialize = () => {
+    const name = `${spec.id}/${variant.id}${library.length ? `-${library.length}` : ''}`;
+    setLibrary((lib) => [...lib, { name, data: [...data] }]);
+    props.onMaterialize?.(name, [...data]);
+  };
 
   return (
     <Row style={{ width: '100%', height: '100%' }}>

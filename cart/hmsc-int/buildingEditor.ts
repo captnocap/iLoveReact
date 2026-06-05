@@ -6,7 +6,7 @@
 // this cell" and "what skin is on each face now"; skin resolution itself stays in
 // cart/hmsc/world/buildings.ts (one home, no re-implementation).
 
-import type { Building, BuildingFaceRole, BuildingSkin } from '../hmsc/design';
+import type { Building, BuildingFaceRole, BuildingFaceSkins, BuildingSkin } from '../hmsc/design';
 import { BUILDING_FACE_ROLES, buildingFootprint, buildingRoleSkin } from '../hmsc/world/buildings';
 import { BUILDING_SKIN_NAMES } from '../hmsc/render3d/buildingSkins';
 
@@ -29,4 +29,16 @@ export function currentFaceSkins(b: Building): FaceSkins {
   const out = {} as FaceSkins;
   for (const role of FACE_ROLES) out[role] = buildingRoleSkin(b, role);
   return out;
+}
+
+// Apply one face's texture to a building-skin value (a single skin OR a per-face
+// map), promoting a single skin to a per-face map so the other faces keep their
+// look. Mirrors the game's setBuildingFaceSkin but works on the bare skin value
+// the editor stores on a Placement — no GameState round-trip needed.
+export function applyFaceSkin(current: Building['skin'], role: BuildingFaceRole, skin: BuildingSkin): BuildingFaceSkins {
+  const faces: BuildingFaceSkins = typeof current === 'object' && current !== null
+    ? { ...current }
+    : (typeof current === 'string' ? { all: current } : {});
+  faces[role] = skin;
+  return faces;
 }

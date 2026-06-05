@@ -21,7 +21,7 @@ import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi, type BrushSettings } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
 import { RightPanel, type TabId } from './RightPanel';
-import { resolvePlaceable, type Placement, type PlaceCat } from './placements';
+import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
 import { serializeMap, deserializeMap, emptyMap, type MapSnapshot, type EditorWorld } from './mapStore';
@@ -39,6 +39,9 @@ import { plog, ptime, useChurn } from './perfLog';
 import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
 import { LogView } from './LogView';
 import { Assist3DRoute } from './assist3d';
+import { TextureStudio } from './TextureStudio';
+import { TestRoute } from './TestRoute';
+import { VoxelHybridRoute } from './VoxelHybridRoute';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -89,7 +92,19 @@ function clampFrac(f: number): number {
   return Math.max(MIN_FRAC, Math.min(1 - MIN_FRAC, f));
 }
 
-const DEFAULT_BRUSH: BrushSettings = { size: 2, centerZ: 3, heightTool: 'brush', heightProfile: 'cone', heightShape: 'circle' };
+const DEFAULT_BRUSH: BrushSettings = {
+  size: 2,
+  mode: 'paint',
+  centerZ: 3,
+  profile: 'cone',
+  shape: 'circle',
+  heightMode: 'brush',
+  rampMin: 0,
+  rampMax: 6,
+  rampWide: 4,
+  rampLong: 12,
+  rampAngle: 0,
+};
 
 function clampNum(n: unknown, lo: number, hi: number, fallback: number): number {
   const v = Number(n);
@@ -98,12 +113,22 @@ function clampNum(n: unknown, lo: number, hi: number, fallback: number): number 
 }
 
 function normalizeBrushSettings(value: Partial<BrushSettings> | undefined): BrushSettings {
+  const v: any = value ?? {};
+  const profile = v.profile ?? v.heightProfile;
+  const shape = v.shape ?? v.heightShape;
+  const legacyMode = v.heightTool === 'erase' ? 'erase' : undefined;
   return {
-    size: Math.round(clampNum(value?.size, 0, 40, DEFAULT_BRUSH.size)),
-    centerZ: clampNum(value?.centerZ, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.centerZ),
-    heightTool: value?.heightTool === 'erase' ? 'erase' : DEFAULT_BRUSH.heightTool,
-    heightProfile: value?.heightProfile === 'flat' || value?.heightProfile === 'dome' ? value.heightProfile : DEFAULT_BRUSH.heightProfile,
-    heightShape: value?.heightShape === 'square' || value?.heightShape === 'diamond' ? value.heightShape : DEFAULT_BRUSH.heightShape,
+    size: Math.round(clampNum(v.size, 0, 40, DEFAULT_BRUSH.size)),
+    mode: v.mode === 'erase' || legacyMode === 'erase' ? 'erase' : DEFAULT_BRUSH.mode,
+    centerZ: clampNum(v.centerZ, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.centerZ),
+    profile: profile === 'flat' || profile === 'dome' ? profile : DEFAULT_BRUSH.profile,
+    shape: shape === 'square' || shape === 'diamond' ? shape : DEFAULT_BRUSH.shape,
+    heightMode: v.heightMode === 'ramp' ? 'ramp' : DEFAULT_BRUSH.heightMode,
+    rampMin: clampNum(v.rampMin, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.rampMin),
+    rampMax: clampNum(v.rampMax, -HEIGHT_LIMIT, HEIGHT_LIMIT, DEFAULT_BRUSH.rampMax),
+    rampWide: clampNum(v.rampWide, 1, 120, DEFAULT_BRUSH.rampWide),
+    rampLong: clampNum(v.rampLong, 1, 120, DEFAULT_BRUSH.rampLong),
+    rampAngle: clampNum(v.rampAngle, 0, 359, DEFAULT_BRUSH.rampAngle),
   };
 }
 
@@ -217,6 +242,7 @@ function EditorShell() {
   const placeSeq = useRef(0);
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [selPlaceId, setSelPlaceId] = useState<string | null>(() => initial.sel ?? null);
+  const [activePlaceable, setActivePlaceable] = useState<{ cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null>(null);
 
   // ── Tile selection + per-cell overrides ──────────────────────────────────────
   // selCells = the group in focus (pointer-tool clicks in the canvas; ctrl-click to
@@ -472,18 +498,65 @@ function EditorShell() {
   placementsRef.current = placements;
   const labelOf = (id: string) => placementsRef.current.find((p) => p.id === id)?.label ?? 'object';
 
-  const placeObject = useCallback((cat: PlaceCat, kind: string) => {
-    snapshotForUndo(); // pre-add
+  const armPlaceable = useCallback((cat: PlaceCat, kind: string) => {
+    const base = resolvePlaceable(cat, kind);
+    setActivePlaceable((prev) => ({ cat, kind, ...base, rotation: prev?.rotation ?? 0 }));
+    setLayer('place');
+    setTool('brush');
+    setTab('objects');
+  }, []);
+
+  const rotatePlaceBrush = useCallback((delta: number) => {
+    setActivePlaceable((prev) => prev ? { ...prev, rotation: ((prev.rotation + delta) % 360 + 360) % 360 } : prev);
+  }, []);
+
+  const addPlacement = useCallback((cat: PlaceCat, kind: string, gx: number, gy: number, rotation = 0) => {
     placeSeq.current += 1;
     const id = `pl_${placeSeq.current}`;
     const base = resolvePlaceable(cat, kind);
-    setPlacements((ps) => [...ps, { id, cat, kind, ...base, gx: 0, gy: 0, rotation: 0, locked: false }]);
+    // Store SNAPPED: the resting position is always the exact cell rect the
+    // compile lowers to (placementCellRect), so the canvas draws the truth raw.
+    const snap = placementCellRect({ gx, gy, footW: base.footW, footD: base.footD });
+    setPlacements((ps) => [...ps, { id, cat, kind, ...base, gx: snap.snapGx, gy: snap.snapGy, rotation, locked: false }]);
     setSelPlaceId(id);
+    return base;
+  }, []);
+
+  const placeObject = useCallback((cat: PlaceCat, kind: string) => {
+    snapshotForUndo(); // pre-add
+    armPlaceable(cat, kind);
+    const base = addPlacement(cat, kind, 0, 0, activePlaceable?.rotation ?? 0);
     setLayer('place');
     logEvent({ cat: 'object', text: `placed ${base.label}` });
-  }, [snapshotForUndo, logEvent]);
+  }, [snapshotForUndo, armPlaceable, addPlacement, activePlaceable?.rotation, logEvent]);
+  const paintObjectAt = useCallback((cat: PlaceCat, kind: string, gx: number, gy: number, rotation: number) => {
+    const base = addPlacement(cat, kind, gx, gy, rotation);
+    logCoalesced({ cat: 'object', text: `painted ${base.label}` });
+  }, [addPlacement, logCoalesced]);
   // Drag/update coalesce — one undo step + one log entry per drag, not per move.
-  const movePlacement = useCallback((id: string, gx: number, gy: number) => { snapshotForUndoCoalesced(); setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, gx, gy } : p))); logCoalesced({ cat: 'object', text: `moved ${labelOf(id)}` }); }, [snapshotForUndoCoalesced, logCoalesced]);
+  // Position handling during a drag: the engine moves the node NATIVELY (it owns
+  // canvas_gx while the button is down) and streams onMove (~60Hz + one final on
+  // mouse-up). Snapping the live value would fight that native drag (jitter), so
+  // store raw while moves stream and SETTLE-SNAP once they stop: when no onMove
+  // arrives for a beat, quantize to the cell rect (placementCellRect) — the node
+  // clicks onto the exact tiles the compile will use.
+  const moveSettleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const movePlacement = useCallback((id: string, gx: number, gy: number) => {
+    snapshotForUndoCoalesced();
+    setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, gx, gy } : p)));
+    logCoalesced({ cat: 'object', text: `moved ${labelOf(id)}` });
+    if (moveSettleTimer.current) clearTimeout(moveSettleTimer.current);
+    moveSettleTimer.current = setTimeout(() => {
+      moveSettleTimer.current = null;
+      setPlacements((ps) => {
+        const p = ps.find((q) => q.id === id);
+        if (!p) return ps;
+        const snap = placementCellRect(p);
+        if (p.gx === snap.snapGx && p.gy === snap.snapGy) return ps;
+        return ps.map((q) => (q.id === id ? { ...q, gx: snap.snapGx, gy: snap.snapGy } : q));
+      });
+    }, 140);
+  }, [snapshotForUndoCoalesced, logCoalesced]);
   const updatePlacement = useCallback((id: string, patch: Partial<Placement>) => {
     snapshotForUndoCoalesced();
     setPlacements((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
@@ -503,9 +576,9 @@ function EditorShell() {
     setSelPlaceId(nid);
   }, [snapshotForUndo, logEvent]);
   const place = useMemo(() => ({
-    items: placements, selId: selPlaceId, onSelect: setSelPlaceId,
+    items: placements, selId: selPlaceId, active: activePlaceable, onSelect: setSelPlaceId, onArm: armPlaceable, onRotateBrush: rotatePlaceBrush, onPaintAt: paintObjectAt,
     onMove: movePlacement, onUpdate: updatePlacement, onClone: clonePlacement, onDelete: removePlacement,
-  }), [placements, selPlaceId, movePlacement, updatePlacement, clonePlacement, removePlacement]);
+  }), [placements, selPlaceId, activePlaceable, armPlaceable, rotatePlaceBrush, paintObjectAt, movePlacement, updatePlacement, clonePlacement, removePlacement]);
 
   // The top-left "in focus" panel. A tile SELECTION (group) wins — it's the
   // bulk-override surface. Else the place layer shows the SELECTED placement's
@@ -549,24 +622,27 @@ function EditorShell() {
   // min-corner (centre − half-footprint) and carry the placement's free rotation.
   const previewWorld = useMemo<GameState>(() => ptime('previewWorld', `rebuild floors=${floors.length} placements=${placements.length}`, () => {
     let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms: floorsToLandforms(floors) } };
-    // Placement graph coords → world cell. Markers are single cells, so a marker's
-    // cell is purely a function of its position — precompute every marker's cell up
+    // Placement graph coords → world cells via placementCellRect — the ONE shared
+    // snap (the canvas node draws the same rect), so 2D, preview, and compile agree
+    // on every cell. Markers are single cells; precompute every marker's cell up
     // front so a save can resolve the spawn it links to even if that spawn is placed
     // later in the list.
-    const placementCell = (p: Placement) => ({
-      x: Math.round(p.gx / TILE_UNITS + CHUNK_TILES / 2),
-      z: Math.round(p.gy / TILE_UNITS + CHUNK_TILES / 2),
-    });
     const markerCellOf = new Map<string, { x: number; z: number }>();
-    for (const p of placements) if (p.cat === 'marker') markerCellOf.set(p.id, placementCell(p));
+    for (const p of placements) {
+      if (p.cat !== 'marker') continue;
+      const r = placementCellRect(p);
+      markerCellOf.set(p.id, { x: r.minX, z: r.minZ });
+    }
     const occupiedMarkerCells = new Set<string>();
     for (const p of placements) {
-      const { x: wx, z: wz } = placementCell(p);
+      const rect = placementCellRect(p);
+      const wx = rect.minX;
+      const wz = rect.minZ;
       if (p.cat === 'building') {
         const r = placeBuilding(s, {
           kind: p.kind as Building['kind'],
-          x: wx - Math.floor(p.footW / 2),
-          z: wz - Math.floor(p.footD / 2),
+          x: wx,
+          z: wz,
           // The placement's free rotation IS the building's yaw now — the whole
           // mass turns (render3d/buildingTransform + the host OBB), so the 3D box
           // matches the rotated 2D node instead of just flipping a door quadrant.
@@ -598,7 +674,9 @@ function EditorShell() {
         }
         s = placeMarker(s, { kind: p.kind as 'spawn' | 'save', x: wx, z: wz, spawnKey });
       } else {
-        s = placeWorldProp(s, { kind: p.kind as Parameters<typeof placeWorldProp>[1]['kind'], x: wx, z: wz, yawDegrees: p.rotation, partTextures: mergeKindTextures('prop', p.kind, p.partTextures) }).state;
+        // Props anchor at their CENTER (radial footprint) — the snapped rect's
+        // centre, so the prop sits exactly where its canvas node draws.
+        s = placeWorldProp(s, { kind: p.kind as Parameters<typeof placeWorldProp>[1]['kind'], x: wx + p.footW / 2, z: wz + p.footD / 2, yawDegrees: p.rotation, partTextures: mergeKindTextures('prop', p.kind, p.partTextures) }).state;
       }
     }
     // The world's default spawn — where a fresh game drops the player. The first
@@ -631,7 +709,7 @@ function EditorShell() {
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/assist3d' ? 'assist3d' : route.path === '/log' ? 'log' : 'editor';
+  const activeRoute = route.path === '/test' ? 'test' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
@@ -654,8 +732,11 @@ function EditorShell() {
         onToggleLog={toggleLog}
         onNew={() => { setMenuOpen(false); newMap(); }}
         onEditor={() => nav.push('/')}
+        onTest={() => nav.push('/test')}
+        onVoxels={() => nav.push('/voxels')}
         onPerf={() => nav.push('/log')}
         onAssist={() => nav.push('/assist3d')}
+        onTextures={() => nav.push('/textures')}
         onUndo={ws.undo}
         onRedo={ws.redo}
         onCompile={compileToGame}
@@ -678,6 +759,8 @@ function EditorShell() {
               onClearNotes={clearNotes}
               lastSavedAt={ws.lastSavedAt}
               onPlace={placeObject}
+              activePlaceable={activePlaceable}
+              onArmPlaceable={armPlaceable}
             />
           }
           bottomLeft={
@@ -722,6 +805,9 @@ function EditorShell() {
             one navigation shell and the editor stays mounted underneath. */}
         <Route path="/log">{() => <LogView />}</Route>
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
+        <Route path="/textures">{() => <TextureStudio />}</Route>
+        <Route path="/voxels">{() => <VoxelHybridRoute onExit={() => nav.push('/')} />}</Route>
+        <Route path="/test">{() => <TestRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
       </Box>
 
       {/* The maps menu lives here — the shell root's LAST child — so it paints on
