@@ -30,6 +30,8 @@ export type SavedPaintDoc = {
   name: string;
   /** the image under the paint (null = blank canvas) */
   srcPath: string | null;
+  /** the registry material under the paint (the material canvas), if any */
+  textureId?: string | null;
   doc: PaintDocument;
 };
 
@@ -47,12 +49,18 @@ export type CutoutAsset = {
   pixels: number;
   /** the image the region was cut from (null = cut from a blank canvas) */
   srcPath: string | null;
+  /** the registry material the region was painted ON (the /cutout material
+   *  canvas — textures.tsx id), when the working surface was one */
+  textureId?: string | null;
+  /** the look's color slots at extraction (fill/background candidates for
+   *  materializing the cutout as a stencil material) */
+  colors?: string[];
   /** the working document it was extracted from */
   docId: string | null;
 };
 
 export type CutoutEvent =
-  | { kind: 'saved'; id: string; name: string; srcPath: string | null; doc: PaintDocument }
+  | { kind: 'saved'; id: string; name: string; srcPath: string | null; textureId?: string | null; doc: PaintDocument }
   | { kind: 'extracted'; id: string; asset: CutoutAsset }
   | { kind: 'removed'; id: string; target: 'document' | 'cutout' };
 
@@ -77,7 +85,7 @@ export const cutoutStream: StreamDef<CutoutStreamState, CutoutEvent> = Object.fr
           ...state,
           documents: {
             ...state.documents,
-            [event.id]: { id: event.id, name: event.name, srcPath: event.srcPath ?? null, doc: event.doc },
+            [event.id]: { id: event.id, name: event.name, srcPath: event.srcPath ?? null, textureId: event.textureId ?? null, doc: event.doc },
           },
           docOrder: known ? state.docOrder : [...state.docOrder, event.id],
         };

@@ -162,3 +162,13 @@ coalesce / cap / redo-clear / lazy-builder laws, texture+cells packing
 layouts, defensive hex, custom surface registry + adopt round-trip, WGSL
 shape checks (fs_main, no backticks, no unary plus, in-shader band parity).
 JSX surfaces bundle-verified through the real cart pipeline aliases.
+
+## Post-capture extensions
+
+- **`PaintSurface underlay` prop (CUTOUTQOL2-0605, 2026-06-05).** Additive:
+  the host may pass JSX rendered in the SOURCE slot when no `srcPath`
+  exists (e.g. /cutout painting on a registry material — an `<Effect>`
+  sized to dims). Absent → the blank checkerboard, byte-identical to the
+  pre-addition behavior. The host owns sizing the underlay to `dims`
+  (coordinate discipline unchanged — the painter's masks and input already
+  speak source pixels regardless of what renders beneath them).

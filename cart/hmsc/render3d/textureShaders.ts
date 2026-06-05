@@ -111,6 +111,69 @@ const ROAD: ShaderSpec = {
   ],
 };
 
+// ── Cutout stencil — shapes authored in the cutout painter (/cutout) ─────────
+// The painter Materializes an extracted cutout into THIS recipe: data carries
+// a coarse stencil grid (row-major 0/1 cells) plus fill/background colors —
+// fill inside the shape, background (or transparency) outside. The catalog's
+// slider form edits the colors over a full tile; the painter packs the real
+// cells (editors/cutout/extraction.ts packStencilData — the layout below is
+// pinned by its P4 test).
+//
+// data D[]:
+//   D[0] gridW   stencil grid width  (cells per row)
+//   D[1] gridH   stencil grid height
+//   D[2..4]      fill r,g,b
+//   D[5..7]      background r,g,b
+//   D[8]         background alpha (0 = the shape floats on transparency)
+//   D[9]         reserved
+//   D[10+]       cells, row-major, 0/1
+export const CUTOUT_STENCIL_SHADER = `
+@group(0) @binding(1) var<storage, read> D: array<f32>;
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let gw = max(D[0], 1.0);
+  let gh = max(D[1], 1.0);
+  let igw = u32(gw);
+  let cx = min(u32(floor(in.uv.x * gw)), igw - 1u);
+  let cy = min(u32(floor(in.uv.y * gh)), u32(gh) - 1u);
+  let m = D[10u + cy * igw + cx];
+  if (m < 0.5) {
+    return vec4f(D[5], D[6], D[7], D[8]);
+  }
+  return vec4f(D[2], D[3], D[4], 1.0);
+}
+`;
+
+const STENCIL_SLIDER_GRID = 8; // the slider form's full-tile grid (all cells set)
+
+const CUTOUT_STENCIL: ShaderSpec = {
+  id: 'cutout-stencil',
+  label: 'Cutout Stencil',
+  group: 'HMSC · Game',
+  blurb: 'A shape painted in the cutout painter (/cutout), frozen as a stencil: fill color inside the shape, background or transparency outside. Materialize real shapes from /cutout; the sliders here tune a full tile.',
+  shader: CUTOUT_STENCIL_SHADER,
+  base: [
+    { key: 'fillR', label: 'Fill red', default: 1, min: 0, max: 1, step: 0.05 },
+    { key: 'fillG', label: 'Fill green', default: 1, min: 0, max: 1, step: 0.05 },
+    { key: 'fillB', label: 'Fill blue', default: 1, min: 0, max: 1, step: 0.05 },
+    { key: 'bgR', label: 'Background red', default: 0, min: 0, max: 1, step: 0.05 },
+    { key: 'bgG', label: 'Background green', default: 0, min: 0, max: 1, step: 0.05 },
+    { key: 'bgB', label: 'Background blue', default: 0, min: 0, max: 1, step: 0.05 },
+    { key: 'bgAlpha', label: 'Background alpha', default: 1, min: 0, max: 1, step: 0.05 },
+  ],
+  variants: [{ id: 'full', label: 'Full tile', value: 0, params: [] }],
+  buildData: (_variantValue, base) => {
+    const data = [
+      STENCIL_SLIDER_GRID, STENCIL_SLIDER_GRID,
+      base.fillR ?? 1, base.fillG ?? 1, base.fillB ?? 1,
+      base.bgR ?? 0, base.bgG ?? 0, base.bgB ?? 0,
+      base.bgAlpha ?? 1,
+      0,
+    ];
+    for (let i = 0; i < STENCIL_SLIDER_GRID * STENCIL_SLIDER_GRID; i++) data.push(1);
+    return data;
+  },
+};
+
 // ── The fill boards (effect_fills A–H) ───────────────────────────────────────
 // D = [materialId, variant, seed, quality, board]. Each material's default seed
 // follows the board's spread formula (coefA·materialId + coefB·variant + coefC),
@@ -274,7 +337,7 @@ const FILL_SPECS: ShaderSpec[] = FILL_BOARDS.flatMap((b) => b.materials.map((m, 
 
 // ── The catalog ──────────────────────────────────────────────────────────────
 
-export const HMSC_SHADERS: ShaderSpec[] = [ROAD, ...FILL_SPECS];
+export const HMSC_SHADERS: ShaderSpec[] = [ROAD, CUTOUT_STENCIL, ...FILL_SPECS];
 
 export function shaderSpec(id: string): ShaderSpec | undefined {
   return HMSC_SHADERS.find((s) => s.id === id);

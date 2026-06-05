@@ -823,6 +823,12 @@ Commands present in the registry:
 - Texture recipe catalog.
 - Defines shader params, variants, defaults, and groups.
 - Includes road recipe plus many fill-board recipes.
+- Includes the `cutout-stencil` recipe (CUTOUTQOL2-0605): a coarse 0/1 cell
+  grid rendered fill-inside / background-outside (alpha 0 = the shape floats
+  on transparency). The /cutout painter Materializes extracted cutouts into
+  it (`editors/cutout/extraction.ts packStencilData` — the data layout is
+  documented on the recipe and pinned by the route's P4 test); the slider
+  form tunes a full tile of fill color.
 - Exports `HMSC_SHADERS`, `shaderSpec`, and `shaderGroups`.
 
 `cart/hmsc/render3d/textures.tsx`

@@ -20,10 +20,16 @@
 // asset) goes to the channel stream and the marker records its position.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Col, Pressable, Row, ScrollView, Text, TextArea, TextInput } from '@reactjit/primitives';
+import { Box, Col, Effect, Pressable, Row, ScrollView, Text, TextArea, TextInput } from '@reactjit/primitives';
 import { useFileDrop } from '@reactjit/hooks/useFileDrop';
 import { exists, mkdir, readFile, writeFile } from '@reactjit/hooks/fs';
 import { GAME_CHROME } from '@game';
+// The material/shader lab system (the locked art→material pipeline): the one
+// texture registry + the studio's stored materials. /cutout participates both
+// ways — paint ON a registry texture (the material canvas), and Materialize an
+// extracted cutout INTO a stored material (the 'cutout-stencil' recipe).
+import { allTextures, textureById } from '../../../hmsc/render3d/textures';
+import { saveCustomTexture, useCustomTextures } from '../../../hmsc/render3d/customTextures';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import {
@@ -36,7 +42,8 @@ import {
   type CutoutAsset, type CutoutEvent, type SavedPaintDoc,
 } from './stream';
 import {
-  cutoutToDocument, extractCutout, mintDocumentId, previewCells, uniqueAssetName,
+  cutoutToDocument, extractCutout, mintDocumentId, previewCells,
+  stencilDataFromAsset, STENCIL_RECIPE_ID, uniqueAssetName,
 } from './extraction';
 import { identifyImage, loadGraySource } from './sources';
 import { buildDraft, CUTOUT_DRAFT_PATH, parseDraft, serializeDraft } from './draft';
@@ -64,6 +71,8 @@ type Work = {
   docId: string;
   name: string;
   srcPath: string | null;
+  /** the registry material under the paint (the material canvas), if any */
+  textureId: string | null;
   dims: Dims;
   initial: PaintDocument | null;
   epoch: number;
@@ -74,6 +83,8 @@ type Work = {
 type PainterApi = {
   buildDocument: () => PaintDocument | null;
   composeExportMask: () => Uint8Array | null;
+  /** the active look's color slots (stencil fill/bg at extraction) */
+  lookColors: () => string[];
 };
 
 function freshWork(prev: Work | null, patch: Partial<Omit<Work, 'epoch'>>): Work {
@@ -81,6 +92,7 @@ function freshWork(prev: Work | null, patch: Partial<Omit<Work, 'epoch'>>): Work
     docId: patch.docId ?? mintDocumentId(),
     name: patch.name ?? 'untitled',
     srcPath: patch.srcPath ?? null,
+    textureId: patch.textureId ?? null,
     dims: patch.dims ?? { w: PAINT.tuning.canvas.defaultSize, h: PAINT.tuning.canvas.defaultSize },
     initial: patch.initial ?? null,
     epoch: (prev?.epoch ?? 0) + 1,
@@ -110,6 +122,7 @@ function restoreOrBlank(): Work {
     docId: draft.docId,
     name: draft.name,
     srcPath: srcOk ? draft.srcPath : null,
+    textureId: draft.textureId ?? null,
     dims: { w: draft.doc.dims.w, h: draft.doc.dims.h },
     initial: draft.doc,
     epoch: 0,
@@ -170,7 +183,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
       if (!doc) return;
       const w = workRef.current;
       mkdir(VIEW.sessionsDir);
-      writeFile(CUTOUT_DRAFT_PATH, serializeDraft(buildDraft({ docId: w.docId, name: w.name, srcPath: w.srcPath, doc })));
+      writeFile(CUTOUT_DRAFT_PATH, serializeDraft(buildDraft({ docId: w.docId, name: w.name, srcPath: w.srcPath, textureId: w.textureId, doc })));
     }, VIEW.draftDebounceMs);
   }, []);
   useEffect(() => () => { if (draftTimer.current) clearTimeout(draftTimer.current); }, []);
@@ -207,7 +220,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
     if (!doc || !live.session) { setStatus('nothing to save'); return; }
     const name = work.name.trim() || 'untitled';
     live.session.commit(
-      { kind: 'saved', id: work.docId, name, srcPath: work.srcPath, doc },
+      { kind: 'saved', id: work.docId, name, srcPath: work.srcPath, textureId: work.textureId, doc },
       `save · ${name} · ${doc.dims.w}×${doc.dims.h} · ${doc.layers.length} layer${doc.layers.length === 1 ? '' : 's'}`,
     );
     setLibRev((r) => r + 1);
@@ -225,6 +238,8 @@ export function CutoutRoute(props: { onExit: () => void }) {
       dims: work.dims,
       mask,
       srcPath: work.srcPath,
+      textureId: work.textureId,
+      colors: painterApi.current?.lookColors(),
       docId: work.docId,
     });
     if (!asset) { setStatus('nothing selected — paint or smart-select a region first'); return; }
@@ -239,7 +254,8 @@ export function CutoutRoute(props: { onExit: () => void }) {
 
   const openDocument = (rec: SavedPaintDoc) => {
     setWork((prev) => freshWork(prev, {
-      docId: rec.id, name: rec.name, srcPath: rec.srcPath, dims: rec.doc.dims, initial: rec.doc,
+      docId: rec.id, name: rec.name, srcPath: rec.srcPath, textureId: rec.textureId ?? null,
+      dims: rec.doc.dims, initial: rec.doc,
     }));
     setEdited(true);
     setStatus(`opened ${rec.name}`);
@@ -248,12 +264,45 @@ export function CutoutRoute(props: { onExit: () => void }) {
 
   const openCutout = (asset: CutoutAsset) => {
     setWork((prev) => freshWork(prev, {
-      name: asset.name, srcPath: asset.srcPath, dims: asset.dims, initial: cutoutToDocument(asset),
+      name: asset.name, srcPath: asset.srcPath, textureId: asset.textureId ?? null,
+      dims: asset.dims, initial: cutoutToDocument(asset),
     }));
     setEdited(true);
     setStatus(`opened cutout ${asset.name} as a new document`);
     live.session?.note(`open cutout · ${asset.name}`);
   };
+
+  // ── the material/shader lab connection ─────────────────────────────────────
+  // IN: paint ON a registry texture — the material becomes the canvas under
+  // the paint (1 tile, square canvas). Smart select needs an image FILE, so
+  // it stays off here (like blank canvases); brush/lasso/layers all work.
+  const paintOnMaterial = (id: string, label: string) => {
+    const px = PAINT.tuning.canvas.defaultSize;
+    setWork((prev) => freshWork(prev, { name: label, textureId: id, dims: { w: px, h: px } }));
+    setEdited(false);
+    setStatus(`painting on material · ${label}`);
+    live.session?.note(`paint on material · ${label} (${id})`);
+  };
+
+  // OUT: Materialize an extracted cutout into a stored material through the
+  // system's own door (saveCustomTexture + the 'cutout-stencil' recipe). The
+  // record joins allTextures immediately — assignable in /textures, on
+  // building faces, tiles, and parts.
+  const materializeCutout = (asset: CutoutAsset) => {
+    const record = saveCustomTexture(asset.name, STENCIL_RECIPE_ID, stencilDataFromAsset(asset));
+    live.session?.note(`materialized · ${asset.name} → ${record.id}`);
+    setStatus(`material saved · ${record.id} — assignable in /textures and on faces/tiles`);
+  };
+
+  // The browsable shared system: stored materials re-render on save/remove
+  // (the studio's own subscription); recipes are the catalog at defaults.
+  const customs = useCustomTextures();
+  const shaderTextures = useMemo(
+    () => allTextures().filter((t) => t.source.kind === 'shader'),
+    [customs],
+  );
+  const storedMaterials = shaderTextures.filter((t) => t.id.startsWith('custom:'));
+  const recipes = shaderTextures.filter((t) => !t.id.startsWith('custom:'));
 
   const removeEntry = (id: string, target: 'document' | 'cutout', name: string) => {
     if (!live.session) return;
@@ -314,7 +363,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
                     key={rec.id}
                     active={rec.id === work.docId}
                     label={rec.name}
-                    detail={`${rec.doc.dims.w}×${rec.doc.dims.h} · ${rec.doc.layers.length}L${rec.srcPath ? ' · img' : ''}`}
+                    detail={`${rec.doc.dims.w}×${rec.doc.dims.h} · ${rec.doc.layers.length}L${rec.srcPath ? ' · img' : rec.textureId ? ' · mat' : ''}`}
                     onOpen={() => openDocument(rec)}
                     onRemove={() => removeEntry(rec.id, 'document', rec.name)}
                   />
@@ -327,10 +376,36 @@ export function CutoutRoute(props: { onExit: () => void }) {
                     key={asset.id}
                     asset={asset}
                     onOpen={() => openCutout(asset)}
+                    onMaterialize={() => materializeCutout(asset)}
                     onRemove={() => removeEntry(asset.id, 'cutout', asset.name)}
                   />
                 ))}
-                {cutouts.length === 0 ? <RailHint text="select a region, then extract" /> : null}
+                {cutouts.length === 0 ? <RailHint text="select a region, then extract — →mat saves it as a material" /> : null}
+              </LibrarySection>
+              <LibrarySection title={`MATERIALS · ${storedMaterials.length}`}>
+                {storedMaterials.map((def) => (
+                  <MaterialRow
+                    key={def.id}
+                    id={def.id}
+                    label={def.label}
+                    active={def.id === work.textureId}
+                    swatch={def.source.kind === 'shader' ? def.source : null}
+                    onPress={() => paintOnMaterial(def.id, def.label)}
+                  />
+                ))}
+                {storedMaterials.length === 0 ? <RailHint text="the studio's saved materials land here — paint on any of them" /> : null}
+              </LibrarySection>
+              <LibrarySection title={`RECIPES · ${recipes.length}`}>
+                {recipes.map((def) => (
+                  <MaterialRow
+                    key={def.id}
+                    id={def.id}
+                    label={def.label}
+                    active={def.id === work.textureId}
+                    swatch={null}
+                    onPress={() => paintOnMaterial(def.id, def.label)}
+                  />
+                ))}
               </LibrarySection>
             </Col>
           </ScrollView>
@@ -391,7 +466,28 @@ function Workbench(props: {
     session: props.session,
     initial: work.initial,
   });
-  props.apiRef.current = { buildDocument: s.buildDocument, composeExportMask: s.composeExportMask };
+  const lookColors = () => {
+    const i = s.activeLayer;
+    const cfg = i >= 0 && i < s.layers.length ? s.layers[i].config : null;
+    return (cfg?.colors ?? s.defaults.colors).slice();
+  };
+  props.apiRef.current = { buildDocument: s.buildDocument, composeExportMask: s.composeExportMask, lookColors };
+
+  // The material canvas: the registry texture rendered UNDER the paint (the
+  // PaintSurface underlay slot) — paint masks/shapes directly on the look.
+  const underlay = useMemo(() => {
+    if (!work.textureId) return undefined;
+    const def = textureById(work.textureId);
+    if (!def || def.source.kind !== 'shader') return undefined;
+    return (
+      <Effect
+        shader={def.source.shader}
+        data={def.source.data}
+        style={{ position: 'absolute', left: 0, top: 0, width: work.dims.w, height: work.dims.h }}
+      />
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [work.textureId, work.dims.w, work.dims.h]);
 
   // every meaningful edit → the route's edited flag + draft autosave
   const onDirtyRef = useRef(props.onDirty); onDirtyRef.current = props.onDirty;
@@ -405,13 +501,14 @@ function Workbench(props: {
     <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, minHeight: 0, position: 'relative' }}>
       <Row style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
         <CutoutToolRail s={s} />
-        <PaintSurface s={s} />
+        <PaintSurface s={s} underlay={underlay} />
         <CutoutInspector
           s={s}
           samAvailable={props.samAvailable}
           backendChoice={props.backendChoice}
           onBackendChoice={props.onBackendChoice}
           srcPath={work.srcPath}
+          textureId={work.textureId}
           edited={props.edited}
           lastSavedAt={props.lastSavedAt}
           onNewCanvas={props.onNewCanvas}
@@ -578,9 +675,10 @@ function LibraryRow(props: { active: boolean; label: string; detail: string; onO
   );
 }
 
-function CutoutRow(props: { asset: CutoutAsset; onOpen: () => void; onRemove: () => void }) {
+function CutoutRow(props: { asset: CutoutAsset; onOpen: () => void; onMaterialize: () => void; onRemove: () => void }) {
   const { asset } = props;
   const cells = useMemo(() => previewCells(asset), [asset]);
+  const tag = asset.srcPath ? ' · img' : asset.textureId ? ' · mat' : '';
   return (
     <Pressable onPress={props.onOpen}>
       <Row style={{
@@ -597,12 +695,46 @@ function CutoutRow(props: { asset: CutoutAsset; onOpen: () => void; onRemove: ()
         <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0 }}>
           <Text style={{ color: T.ink, fontSize: 11 }} numberOfLines={1}>{asset.name}</Text>
           <Text style={{ color: T.dim, fontSize: 9 }} numberOfLines={1}>
-            {`${asset.dims.w}×${asset.dims.h} · ${asset.pixels}px${asset.srcPath ? ' · img' : ''}`}
+            {`${asset.dims.w}×${asset.dims.h} · ${asset.pixels}px${tag}`}
           </Text>
         </Col>
+        <Pressable onPress={props.onMaterialize} tooltip="Materialize — save this shape as a stencil material (joins /textures)">
+          <Text style={{ color: T.accent, fontSize: 9, fontWeight: '800', paddingHorizontal: 2 }}>→mat</Text>
+        </Pressable>
         <Pressable onPress={props.onRemove}>
           <Text style={{ color: T.bad, fontSize: 10, paddingHorizontal: 2 }}>✕</Text>
         </Pressable>
+      </Row>
+    </Pressable>
+  );
+}
+
+// A registry texture in the rail: stored materials show a live swatch; the
+// (many) catalog recipes list as rows — pressing either makes it the canvas.
+function MaterialRow(props: {
+  id: string;
+  label: string;
+  active: boolean;
+  swatch: { shader: string; data: number[] } | null;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable onPress={props.onPress} tooltip={`Paint on ${props.label} (${props.id})`}>
+      <Row style={{
+        gap: 8, alignItems: 'center', paddingHorizontal: 8, paddingVertical: 4,
+        borderRadius: 5, borderWidth: 1,
+        borderColor: props.active ? T.accent : T.frame,
+        backgroundColor: props.active ? T.controlAlt : T.control,
+      }}>
+        {props.swatch ? (
+          <Box style={{
+            width: VIEW.swatch, height: VIEW.swatch, position: 'relative',
+            borderWidth: 1, borderColor: T.frame, borderRadius: 4, overflow: 'hidden',
+          }}>
+            <Effect shader={props.swatch.shader} data={props.swatch.data} style={{ position: 'absolute', left: 0, top: 0, width: VIEW.swatch, height: VIEW.swatch }} />
+          </Box>
+        ) : null}
+        <Text style={{ color: props.active ? T.ink : T.dim, fontSize: 10 }} numberOfLines={1}>{props.label}</Text>
       </Row>
     </Pressable>
   );

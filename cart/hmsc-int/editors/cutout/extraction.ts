@@ -18,7 +18,7 @@ import { decodeBinaryMask, encodeBinaryMask } from '@reactjit/workspace/rle';
 import { PAINT_TUNING } from '../paint/tuning';
 import { sampleToCells } from '../paint/strokes';
 import { buildPaintDocument, makeLayer, type PaintDocument, type PaintLookDefaults } from '../paint/layers';
-import { SLOT_DEFAULTS } from '../paint/surfaces';
+import { hexToRgb01, SLOT_DEFAULTS } from '../paint/surfaces';
 import type { CutoutAsset } from './stream';
 
 /** Mint a working-document id: time-sortable, collision-safe at authoring
@@ -45,6 +45,10 @@ export type ExtractArgs = {
   /** the painter's composed export mask (1 = selected) at source resolution */
   mask: Uint8Array;
   srcPath: string | null;
+  /** the registry material under the paint, when the canvas was one */
+  textureId?: string | null;
+  /** the look's color slots at extraction (stencil fill/bg candidates) */
+  colors?: string[];
   docId: string | null;
 };
 
@@ -66,6 +70,8 @@ export function extractCutout(args: ExtractArgs): CutoutAsset | null {
     preview,
     pixels,
     srcPath: args.srcPath,
+    textureId: args.textureId ?? null,
+    colors: args.colors?.slice(),
     docId: args.docId,
   };
 }
@@ -106,6 +112,65 @@ export function cutoutToDocument(asset: CutoutAsset): PaintDocument {
     brushPx: PAINT_TUNING.brushDefaultPx,
     defaults,
     customSurfaces: [],
+  });
+}
+
+// ── Materializing: a cutout as a stencil MATERIAL ────────────────────────────
+// The 'cutout-stencil' recipe (cart/hmsc/render3d/textureShaders.ts) renders
+// a coarse 0/1 cell grid as fill-inside / background-outside. THIS packer
+// builds its data[]; the layout below is the recipe's documented contract
+// and is pinned by test against the live catalog.
+//
+//   data[0] gridW · data[1] gridH · data[2..4] fill rgb · data[5..7] bg rgb
+//   data[8] bgAlpha · data[9] reserved · data[10+] cells (row-major 0/1)
+
+export const STENCIL_RECIPE_ID = 'cutout-stencil';
+export const STENCIL_CELLS_OFFSET = 10;
+
+export type Rgb01 = [number, number, number];
+
+const clamp01 = (v: number) => (Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : 0);
+
+export function packStencilData(args: {
+  /** set-cell indices on the grid (a cutout asset's `preview`) */
+  cells: Iterable<number>;
+  grid: { w: number; h: number };
+  fill: Rgb01;
+  bg: Rgb01;
+  /** 0 = the shape floats on transparency */
+  bgAlpha: number;
+}): number[] {
+  const gw = Math.max(1, Math.round(args.grid.w));
+  const gh = Math.max(1, Math.round(args.grid.h));
+  const data = new Array<number>(STENCIL_CELLS_OFFSET + gw * gh).fill(0);
+  data[0] = gw;
+  data[1] = gh;
+  data[2] = clamp01(args.fill[0]);
+  data[3] = clamp01(args.fill[1]);
+  data[4] = clamp01(args.fill[2]);
+  data[5] = clamp01(args.bg[0]);
+  data[6] = clamp01(args.bg[1]);
+  data[7] = clamp01(args.bg[2]);
+  data[8] = clamp01(args.bgAlpha);
+  for (const idx of args.cells) {
+    if (idx >= 0 && idx < gw * gh) data[STENCIL_CELLS_OFFSET + idx] = 1;
+  }
+  return data;
+}
+
+/** A cutout asset → the stencil recipe's data[], using the asset's preview
+ *  grid and its extraction-time colors (slot 0 = fill, slot 1 = background;
+ *  default: white shape floating on transparency). */
+export function stencilDataFromAsset(asset: CutoutAsset, opts?: { bgAlpha?: number }): number[] {
+  const res = PAINT_TUNING.overlayRes;
+  const fill = hexToRgb01(asset.colors?.[0] ?? '#ffffff');
+  const bg = hexToRgb01(asset.colors?.[1] ?? '#000000');
+  return packStencilData({
+    cells: asset.preview,
+    grid: { w: res, h: res },
+    fill,
+    bg,
+    bgAlpha: opts?.bgAlpha ?? 0,
   });
 }
 

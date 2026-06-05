@@ -874,7 +874,7 @@ export const hmsc: DocIndex = {
       purpose: ['shader', 'texture_bake'],
       kind: 'registry',
       sourceFile: 'cart/hmsc/render3d/textureShaders.ts',
-      description: 'Texture recipe catalog defining shader params, variants, defaults, groups; includes road recipe plus many fill-board recipes. Exports HMSC_SHADERS, shaderSpec, shaderGroups.',
+      description: 'Texture recipe catalog defining shader params, variants, defaults, groups; includes the road recipe, the cutout-stencil recipe (CUTOUTQOL2-0605: a 0/1 cell grid rendered fill-inside/background-outside — /cutout Materializes extracted cutouts into it; data layout documented on the recipe, pinned by editors/cutout P4 test), plus many fill-board recipes. Exports HMSC_SHADERS, shaderSpec, shaderGroups.',
       dependsOn: ['fillShader.ts'],
       status: 'live',
     },

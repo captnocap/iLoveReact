@@ -90,7 +90,12 @@ export function PaintQuad(props: {
 
 // ── The viewport ─────────────────────────────────────────────────────────────
 
-export function PaintSurface({ s, style }: { s: PaintEditorState; style?: Record<string, unknown> }) {
+// `underlay` (post-capture addition, CUTOUTQOL2-0605): the paint target when
+// the host paints on something that is not an image FILE — e.g. /cutout
+// painting on a registry material (an <Effect> sized to dims). Rendered in
+// the source slot when no srcPath exists; absent → the blank checkerboard,
+// exactly the pre-addition behavior.
+export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; style?: Record<string, unknown>; underlay?: any }) {
   const [rect, setRect] = useState<Rect | null>(null);
   const [cursor, setCursor] = useState<ToolCursor | null>(null);
   const drawing = useRef(false);
@@ -142,6 +147,8 @@ export function PaintSurface({ s, style }: { s: PaintEditorState; style?: Record
         <Canvas.Node gx={0} gy={0} gw={s.dims.w} gh={s.dims.h}>
           {s.srcPath ? (
             <Image source={s.srcPath} style={{ width: s.dims.w, height: s.dims.h }} />
+          ) : underlay ? (
+            underlay
           ) : (
             <BlankSurface w={s.dims.w} h={s.dims.h} />
           )}

@@ -25,16 +25,19 @@ export type CutoutDraft = {
   docId: string;
   name: string;
   srcPath: string | null;
+  /** the registry material under the paint (the material canvas), if any */
+  textureId?: string | null;
   doc: PaintDocument;
 };
 
-export function buildDraft(args: { docId: string; name: string; srcPath: string | null; doc: PaintDocument }): CutoutDraft {
+export function buildDraft(args: { docId: string; name: string; srcPath: string | null; textureId?: string | null; doc: PaintDocument }): CutoutDraft {
   return {
     kind: CUTOUT_DRAFT_KIND,
     version: CUTOUT_DRAFT_VERSION,
     docId: args.docId,
     name: args.name,
     srcPath: args.srcPath ?? null,
+    textureId: args.textureId ?? null,
     doc: args.doc,
   };
 }
@@ -52,6 +55,8 @@ export function parseDraft(text: string): CutoutDraft | null {
   if (typeof d.docId !== 'string' || d.docId.length === 0) return null;
   if (typeof d.name !== 'string') return null;
   if (d.srcPath !== null && typeof d.srcPath !== 'string') return null;
+  // textureId arrived by addition — older drafts lack it (→ null)
+  if (d.textureId !== undefined && d.textureId !== null && typeof d.textureId !== 'string') return null;
   const doc = d.doc;
   if (!doc || doc.kind !== PAINT_DOC_KIND || doc.version !== PAINT_DOC_VERSION) return null;
   if (!doc.dims || typeof doc.dims.w !== 'number' || typeof doc.dims.h !== 'number') return null;

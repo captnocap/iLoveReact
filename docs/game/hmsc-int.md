@@ -623,10 +623,13 @@ painting SKINS/TEXTURES (the user's explicit ask; an earlier wave's
 head-part-painting landing in /characters was ruled NOT it). The ENGINE is
 `editors/paint/` (consumed whole via `PaintEditor`, never forked); this route
 is the app around it. The cutout cart stays an untouched behavior reference;
-`editors/cutout/CAPTURE.md` is the APP-surface deletion contract — a 44-row
-line-item audit against cutout.md AND a component-by-component read of the
-reference's workflow affordances (the QoL correction: the fine details ARE
-the product; the engine's 34 are paint's own CAPTURE.md). Pieces:
+`editors/cutout/CAPTURE.md` is the APP-surface deletion contract — a 48-row
+line-item audit against cutout.md, a component-by-component read of the
+reference's workflow affordances, AND an integration section against the
+tool's material system (the QoL corrections: the fine details ARE the
+product, and CAPTURE.md's "audit failure" section records exactly how the
+first audit passed the user's three misses; the engine's 34 are paint's own
+CAPTURE.md). Pieces:
 
 - `editors/cutout/stream.ts` — the V20 `cutout` concern (the LIBRARY): saved
   working `PaintDocument`s (re-openable, upsert by id) + extracted
@@ -643,11 +646,17 @@ the product; the engine's 34 are paint's own CAPTURE.md). Pieces:
 - `editors/cutout/sources.ts` — source ingestion, the hosting editor's half
   of the engine hand-off (`dims`/`srcPath`/`gray` as data): magick `identify`
   + grayscale load for edge snapping.
-- `editors/cutout/CutoutRoute.tsx` + `Inspector.tsx` + `StatusBar.tsx` +
-  `draft.ts` — the page: header (name · gated save/extract · status), library
-  rail (documents + cutout swatches via `PaintQuad` cells mode; open/remove),
-  and the full app remade around `usePaintEditor` + `PaintToolRail` +
-  `PaintSurface`, remounted per working target. The route's own inspector is
+- `editors/cutout/CutoutRoute.tsx` + `ToolRail.tsx` + `Inspector.tsx` +
+  `StatusBar.tsx` + `draft.ts` — the page: header (name · gated save/extract
+  · status), library rail (documents + cutout swatches via `PaintQuad` cells
+  mode; open/remove), and the full app remade around `usePaintEditor` +
+  `PaintSurface`, remounted per working target. `ToolRail.tsx`
+  (CUTOUTQOL2-0605) is the reference's left palette ported faithfully: ICON
+  tiles with tooltips for every tool/mode/action (Hand/Brush/ScanLine/Spline/
+  WandSparkles · Eraser/RotateCcw · X clear / RefreshCcw invert /
+  FlipHorizontal mirror / Check lasso-close) and the DRAGGABLE brush-size
+  slider (track + detents per `PAINT.tuning.brushSizes` + nudge + live px
+  readout), plus the color slots + palette. The route's own inspector is
   the reference's right stack: TOOL tab (mask-state/refining pills, selection
   metrics, the Flood/SAM backend picker with onnx gating, tunable knobs +
   SAM whole/part/subpart candidates, undo/redo), FX tab (LIVE animated
@@ -664,16 +673,33 @@ the product; the engine's 34 are paint's own CAPTURE.md). Pieces:
   Saves. File drop loads an image anywhere; painter hotkeys stay ON (the
   host suppresses key triggers while a TextInput is focused).
 
+The MATERIAL/SHADER LAB CONNECTION (CUTOUTQOL2-0605): /cutout participates
+in the locked art→material pipeline both ways. IN — paint ON a registry
+texture: the library rail's MATERIALS (stored materials, live swatches,
+re-rendering on save/remove via the studio's own bus) and RECIPES (the
+catalog at defaults) sections make any of them the canvas under the paint
+(`PaintSurface underlay`, the engine's recorded post-capture addition; 1-tile
+square canvas; smart select stays off — it needs an image FILE). OUT —
+Materialize: `→mat` on a cutout row saves it as a stored material through the
+system's own door (`saveCustomTexture` + the `cutout-stencil` recipe added to
+the canonical catalog, `cart/hmsc/render3d/textureShaders.ts`): the shape's
+preview grid + the look's extraction-time colors, floating on transparency —
+it joins `allTextures` immediately (assignable in /textures, on faces, tiles,
+parts; deletable in the studio). The material-canvas identity (`textureId`)
+rides extractions, saves, and drafts (V20 additions; old events read null).
+
 Session history (V20, the user's ruling): the route opens `/cutout` on the
 `cutout` channel — strokes/lasso/smart/layer-ops land as the painter's
 labeled notes; saves, extractions and removals are COMMIT-grade (content
 event + marker + materialized snapshot). Wired as `/cutout` + the Scissors
 nav icon in ProjectBar (beside the texture studio). `rjit game verify`
-(editors suite root): `cutout.test.ts` 8 P4 cases GREEN — extraction
+(editors suite root): `cutout.test.ts` 10 P4 cases GREEN — extraction
 round-trip/refusal laws, reopen-as-document, library upsert/remove/
 unknown-kind tolerance, the one-commit-per-save session contract, replay
 identity, minting laws, working-draft round-trip + strict version/shape
-gate. Surfaced, not guessed (CAPTURE.md): file exports
-(PNG/pixel-icon/.sqi) deliberately absent pending the user's export ruling —
-the stream asset is the in-app landing and carries everything a file
-exporter would need.
+gate, the MATERIALIZE contract pinned against the LIVE catalog recipe, and
+the material-canvas identity round-trip. Surfaced, not guessed (CAPTURE.md):
+file exports (PNG/pixel-icon/.sqi) deliberately absent pending the user's
+export ruling — the stream asset is the in-app landing and carries
+everything a file exporter would need; recipes as LAYER overlays (vs the
+canvas) deliberately not built — per-recipe WGSL surgery, awaits a ruling.

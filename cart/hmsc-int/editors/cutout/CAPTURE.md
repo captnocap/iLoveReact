@@ -49,8 +49,8 @@ the route gets them by mounting the engine surface.
 
 | # | Affordance | Route status |
 |---|---|---|
-| 16 | Tool palette: hand/brush/refine/lasso/smart; modes erase/restore; clear/invert | PRESENT(engine) — `PaintToolRail` (text chips; the original's icon tiles are a style difference, noted) |
-| 17 | Brush size control: 5 detents [2,8,32,128,512], +/- nudge, px label, drag slider | PRESENT(engine) — size chips = the same 5 detents + `[`/`]` step keys; the slider skin not duplicated |
+| 16 | Tool palette: ICON tiles w/ tooltips (Hand/Brush/ScanLine/Spline/WandSparkles; Eraser/RotateCcw modes; X clear, RefreshCcw invert) | PRESENT — `ToolRail.tsx` (CUTOUTQOL2: was shipped as text chips and rationalized as "style difference"; the user ruled the affordance IS the product — see the audit-failure section) |
+| 17 | Brush size SLIDER: drag track + detents + +/- nudge + px readout | PRESENT — `ToolRail.tsx BrushSlider` (CUTOUTQOL2: was shipped as chips over the same detents; same audit failure) |
 | 18 | Pan/zoom hand tool (Canvas), wheel zoom | PRESENT(engine) |
 | 19 | Per-tool cursors (brush ring w/ mode tint, smart crosshair, lasso/refine rings, 60ms throttle) | PRESENT(engine) |
 | 20 | HUD strip: tool · mode · active layer · contextual help line | PRESENT(engine) |
@@ -94,6 +94,45 @@ the route gets them by mounting the engine surface.
 | 43 | Status pill (WORKING/SAVED/READY) + live status text | PRESENT — `StatusBar.tsx` (the painter's `s.status` is the live feedback line) |
 | 44 | Stats strip: FPS · ZOOM · CANVAS · SIZE · MASK · LAYERS · CLICKS · SAVED, 1Hz telemetry, stable "—" placeholders | PRESENT — same cells, same 1Hz rule (the reference's re-render lesson kept) |
 
+### The material/shader lab connection (CUTOUTQOL2-0605 — not in the reference; the point of living in the one app)
+
+| # | Affordance | Route status |
+|---|---|---|
+| 45 | Paint ON a registry texture: any stored material or catalog recipe becomes the canvas under the paint (the material canvas) | PRESENT — library rail MATERIALS (live swatches) + RECIPES sections → `PaintSurface underlay` (the engine's post-capture addition); 1-tile square canvas; smart select stays off (needs an image FILE, the blank-canvas rule) |
+| 46 | Materialize OUT: an extracted cutout becomes a stored MATERIAL through the system's own door (`saveCustomTexture` + the `cutout-stencil` recipe in the canonical catalog) — joins `allTextures`, assignable in /textures, on faces/tiles/parts, deletable in the studio | PRESENT — `→mat` on cutout rows; `packStencilData`/`stencilDataFromAsset` (layout pinned by test against the LIVE catalog); fill = the look's slot-0 color at extraction, shape floats on transparency |
+| 47 | The connection identity persists: material-canvas id rides extractions, saves, drafts, and reopens | PRESENT — `textureId` on assets/saved docs/drafts (V20 addition; old events/drafts read as null) |
+| 48 | Shared surfaces as LAYER overlays (a catalog recipe as a paint-layer look) | NOT BUILT — a recipe is a complete `fs_main` with its own data layout; composing it under the painter's mask sampling means WGSL surgery per recipe (the fragile path the shader-vs-polyline lesson warns about). The two built directions (paint ON it / materialize INTO it) are the lossless connections; surfaced for a ruling if layer-level composition is wanted |
+
+## The audit failure — how the user's misses passed a "44/44" audit (CUTOUTQOL2-0605)
+
+The user found in minutes three things the audit claimed were covered. Each
+miss, and the exact way the audit let it through:
+
+1. **Tool icons.** The audit row said "PRESENT(engine) — text chips; the
+   original's icon tiles are a style difference, noted." The failure mode:
+   the audit scored CAPABILITY (can you switch tools?) and demoted the
+   AFFORDANCE (does the rail read visually?) to a footnote — then
+   self-granted the demotion under "deliberate style differences" instead of
+   surfacing it as a question. The reference's `Tools.tsx` is unambiguous:
+   icon tiles with tooltips. An audit row that needs a rationalizing clause
+   is a MISSING row.
+2. **Brush size slider.** Same failure, same clause: "chips over the same 5
+   detents" scored the VALUES and discarded the INTERACTION (drag a track).
+   The reference's `TopBar.tsx` `BrushSlider` is 90 lines of deliberate
+   drag/detent/nudge feel — the audit read it and still filed it as a skin.
+3. **The material/shader lab connection.** Not even a row. The audit's scope
+   was "cart/cutout's own surface" — but the entire point of remaking the
+   app INSIDE hmsc-int is participation in the tool's systems. The reference
+   couldn't have this connection (it was a standalone cart); auditing only
+   against the reference structurally guaranteed the miss. Integration with
+   the host tool's systems is part of the app surface.
+
+The lesson, recorded for the next capture: parity rows must score the
+interaction, not the capability; "style difference" is a question for the
+user, never an auditor's self-granted pass; and a capture into the one app
+gets an INTEGRATION section auditing against the tool's systems, not just
+the reference.
+
 ## Ambiguities (surfaced, not guessed)
 
 1. **The `cutout` stream def lives route-side** (`editors/cutout/stream.ts`),
@@ -119,19 +158,31 @@ the route gets them by mounting the engine surface.
 5. **No OS file picker** — typing/pasting a path or dropping a file replaces
    Zenity. An in-tool file browser would be a shell-level capability, not a
    route fork.
-6. **Style differences kept deliberate:** tool chips are text (the chrome
-   kit's idiom) where the original used icon tiles; brush sizes are chips
-   over the same 5 detents instead of a drag slider; tunables are Knobs
-   instead of drag sliders (the tool's established control, the vehicles
-   precedent). Capabilities identical; skins differ with the one app.
+6. **Style differences:** RULED (CUTOUTQOL2-0605) — the user rejected the
+   text-chip tools and chip brush sizes; icon tiles + the drag slider are
+   the product and now shipped. Remaining deliberate difference: backend/FX
+   tunables are chrome Knobs rather than drag sliders (the tool's
+   established control, the vehicles precedent) — surfaced, swap on request.
+7. **The `PaintSurface underlay` prop is a post-capture ENGINE addition**
+   (recorded in editors/paint/CAPTURE.md): the engine had no way to put a
+   non-image surface under the paint, and the material canvas needs exactly
+   that. Additive — absent, behavior is byte-identical.
+8. **Recipes as layer overlays are deliberately not built** (audit row 48):
+   composing a catalog recipe's complete fs_main under the painter's mask
+   sampling is per-recipe WGSL surgery. Paint-ON + materialize-INTO are the
+   two lossless connections; layer-level composition awaits a ruling.
 
 ## Tests (P4, `rjit game verify` — `editors/` suite root)
 
-`cutout.test.ts`, 8 cases: empty/short-mask extraction refusal, mask→asset→
+`cutout.test.ts`, 10 cases: empty/short-mask extraction refusal, mask→asset→
 mask exact round-trip + pixel bookkeeping + preview-downsample law,
 cutout-reopens-as-document (parse gate + base equality + no override),
 library stream semantics (upsert/remove/unknown-kind tolerance), the
 one-commit-per-save session contract (content event + labeled marker +
 snapshot materialization), replay-identical reopen, id/name minting laws,
-working-draft round-trip + strict version/shape gate. Route JSX
-bundle-verified through the real cart pipeline aliases.
+working-draft round-trip + strict version/shape gate, the MATERIALIZE
+contract (the stencil packer pinned against the LIVE catalog recipe: layout,
+preview-grid resolution, look-color fill, transparency default, clamping,
+bounds), and the material-canvas identity riding extractions/saves/drafts
+(with pre-connection drafts still parsing). Route JSX bundle-verified
+through the real cart pipeline aliases.

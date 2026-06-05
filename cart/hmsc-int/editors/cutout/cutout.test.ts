@@ -24,6 +24,9 @@ import {
   mintCutoutId, mintDocumentId, previewCells, stockLookDefaults, uniqueAssetName,
 } from './extraction';
 import { buildDraft, parseDraft, serializeDraft } from './draft';
+import { packStencilData, stencilDataFromAsset, STENCIL_CELLS_OFFSET, STENCIL_RECIPE_ID } from './extraction';
+// the LIVE material catalog — the materialize contract is pinned against it
+import { defaultShaderData, shaderSpec } from '../../../hmsc/render3d/textureShaders';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
 declare const globalThis: any;
@@ -196,6 +199,63 @@ test('the working draft round-trips and gates strictly (the autosave lifeline)',
   assertEqual(parseDraft('not json'), null, 'garbage → null (boot blank, never half-restore)');
   assertEqual(parseDraft(JSON.stringify({ kind: 'cutout-draft', version: 99, docId: 'x', name: '', srcPath: null, doc })), null, 'future versions are rejected by the gate');
   assertEqual(parseDraft(JSON.stringify({ kind: 'cutout-draft', version: 1, docId: 'x', name: '', srcPath: null, doc: { kind: 'wrong' } })), null, 'a draft with a non-paint document is rejected');
+});
+
+test('materialize contract: the stencil packer matches the LIVE cutout-stencil recipe', () => {
+  const spec = shaderSpec(STENCIL_RECIPE_ID);
+  assert(!!spec, 'the cutout-stencil recipe exists in the material catalog (textureShaders)');
+  // both forms speak the same layout: header, then gridW×gridH cells
+  const sliderData = defaultShaderData(spec!);
+  assertEqual(sliderData.length, STENCIL_CELLS_OFFSET + sliderData[0] * sliderData[1],
+    'the recipe slider form emits header + full cell grid');
+  assertEqual(sliderData[8], 1, 'the slider form defaults to an opaque background');
+
+  const mask = rectMask(16, 16, 0, 0, 8, 16); // left half selected
+  const asset = extractCutout({
+    name: 'half', dims: { w: 16, h: 16 }, mask,
+    srcPath: null, textureId: 'e-stucco-facade', colors: ['#ff4040', '#111827'], docId: null,
+  })!;
+  const data = stencilDataFromAsset(asset);
+  assertEqual(data[0], PAINT_TUNING.overlayRes, 'the packed grid is the painter preview resolution');
+  assertEqual(data.length, STENCIL_CELLS_OFFSET + data[0] * data[1], 'packed data = header + cells');
+  assert(Math.abs(data[2] - 1) < 1e-6 && Math.abs(data[3] - 0x40 / 255) < 1e-6,
+    'fill rgb comes from the look slot-0 color');
+  assertEqual(data[8], 0, 'a materialized cutout floats on transparency by default');
+  const cells = new Set(asset.preview);
+  let setCount = 0;
+  for (let i = 0; i < data[0] * data[1]; i++) {
+    const v = data[STENCIL_CELLS_OFFSET + i];
+    if (v === 1) { setCount += 1; assert(cells.has(i), 'every set cell is a preview cell'); }
+    else if (v !== 0) throw new Error(`cell ${i} is neither 0 nor 1`);
+  }
+  assertEqual(setCount, cells.size, 'every preview cell is set');
+  // out-of-range cells are dropped, never written past the buffer
+  const tiny = packStencilData({ cells: [0, 3, 99], grid: { w: 2, h: 2 }, fill: [2, -1, 0.5], bg: [0, 0, 0], bgAlpha: 0.5 });
+  assertEqual(tiny.length, STENCIL_CELLS_OFFSET + 4, 'tiny grid stays bounded');
+  assertEqual(tiny[2], 1, 'fill components clamp to 0..1');
+  assertEqual(tiny[3], 0, 'negative components clamp to 0');
+  assertEqual(tiny[STENCIL_CELLS_OFFSET + 0] + tiny[STENCIL_CELLS_OFFSET + 3], 2, 'in-range cells land');
+});
+
+test('the material canvas identity rides extraction, saves, and drafts', () => {
+  const mask = rectMask(8, 8, 2, 2, 6, 6);
+  const asset = extractCutout({
+    name: 'on-mat', dims: { w: 8, h: 8 }, mask,
+    srcPath: null, textureId: 'custom:pink-stucco', colors: ['#ffffff'], docId: 'cd-m',
+  })!;
+  assertEqual(asset.textureId, 'custom:pink-stucco', 'the asset remembers the material it was cut on');
+  assertEqual(asset.colors?.[0], '#ffffff', 'and the extraction-time look colors');
+
+  let state = cutoutStream.initial();
+  const doc = sampleDocument('mat skin', 8, 8);
+  state = cutoutStream.apply(state, { kind: 'saved', id: 'cd-m', name: 'mat skin', srcPath: null, textureId: 'road', doc });
+  assertEqual(state.documents['cd-m'].textureId, 'road', 'saved documents carry the material canvas');
+
+  const draft = parseDraft(serializeDraft(buildDraft({ docId: 'cd-m', name: 'mat skin', srcPath: null, textureId: 'road', doc })));
+  assertEqual(draft!.textureId, 'road', 'drafts carry it too');
+  const legacy = parseDraft(JSON.stringify({ kind: 'cutout-draft', version: 1, docId: 'cd-old', name: 'x', srcPath: null, doc }));
+  assert(!!legacy, 'pre-connection drafts (no textureId) still parse');
+  assertEqual(legacy!.textureId ?? null, null, 'and read as no material canvas');
 });
 
 finish('editors/cutout');

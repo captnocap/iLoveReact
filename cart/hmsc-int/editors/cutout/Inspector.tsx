@@ -65,6 +65,8 @@ export function CutoutInspector(props: {
   onBackendChoice: (b: BackendChoice) => void;
   /** the working target (SOURCE tab) */
   srcPath: string | null;
+  /** the registry material under the paint (the material canvas), if any */
+  textureId?: string | null;
   edited: boolean;
   lastSavedAt: number | null;
   onNewCanvas: (w: number, h: number) => void;
@@ -359,6 +361,7 @@ function SurfaceCard(props: {
 function SourceTab(props: {
   s: PaintEditorState;
   srcPath: string | null;
+  textureId?: string | null;
   lastSavedAt: number | null;
   onNewCanvas: (w: number, h: number) => void;
   onLoadImage: (path: string) => void;
@@ -375,6 +378,13 @@ function SourceTab(props: {
           <>
             <Text style={{ color: T.dim, fontSize: 10 }} numberOfLines={3}>{props.srcPath}</Text>
             <Text style={{ color: T.ink, fontSize: 11, fontWeight: '700' }}>{`${s.dims.w} × ${s.dims.h}`}</Text>
+          </>
+        ) : props.textureId ? (
+          <>
+            <Text style={{ color: T.accent, fontSize: 11, fontWeight: '700' }}>Material canvas</Text>
+            <Text style={{ color: T.dim, fontSize: 10 }} numberOfLines={2}>{props.textureId}</Text>
+            <Text style={{ color: T.ink, fontSize: 11, fontWeight: '700' }}>{`${s.dims.w} × ${s.dims.h}`}</Text>
+            <Text style={{ color: T.dim, fontSize: 9 }}>pick materials/recipes in the library rail</Text>
           </>
         ) : (
           <Text style={{ color: T.dim, fontSize: 11 }}>{`Blank canvas · ${s.dims.w} × ${s.dims.h}`}</Text>
