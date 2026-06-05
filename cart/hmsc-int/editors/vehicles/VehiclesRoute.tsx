@@ -43,6 +43,7 @@ import {
 import type { StreamHandle } from '../../data';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
+import { editorTunables } from '../tunables';
 import {
   editGasSide,
   editRole,
@@ -60,12 +61,30 @@ import {
 const T = GAME_CHROME.tokens.color;
 
 // The editor's own view tuning (P2) — camera feel and playback cadence carried
-// from the reference lab; never gameplay numbers.
-const VIEW_TUNING = Object.freeze({
+// from the reference lab; never gameplay numbers. SETTINGS-0605: the numeric
+// leaves register into THE P2 registry below (same values, now
+// /settings-editable; the registry writes through, so no freeze). The target
+// vec3 stays static (registry is numeric v1 — CAPTURE burndown).
+const VIEW_TUNING = {
   orbit: { yawPerPixel: 0.38, pitchPerPixel: 0.3, minPitch: 5, maxPitch: 82, boot: { yaw: 34, pitch: 24, dist: 8.2 }, fov: 42, target: [0, 0.8, 0] as [number, number, number] },
   playback: { frameMs: 33, secondsPerFrame: 1 / 60 },
   highlight: { scale: 1.04 },
-} as const);
+};
+editorTunables().register({
+  system: 'vehicles-view', route: '/vehicles', table: VIEW_TUNING,
+  specs: {
+    'orbit.yawPerPixel': { label: 'yaw/px', min: 0.05, max: 2, step: 0.01, precision: 2 },
+    'orbit.pitchPerPixel': { label: 'pitch/px', min: 0.05, max: 2, step: 0.01, precision: 2 },
+    'orbit.minPitch': { label: 'pitch min', min: -10, max: 45, step: 1, precision: 0 },
+    'orbit.maxPitch': { label: 'pitch max', min: 45, max: 89, step: 1, precision: 0 },
+    'orbit.boot.yaw': { label: 'boot yaw', min: -180, max: 180, step: 1, precision: 0 },
+    'orbit.boot.pitch': { label: 'boot pitch', min: 0, max: 89, step: 1, precision: 0 },
+    'orbit.boot.dist': { label: 'boot dist', min: 2, max: 30, step: 0.2, precision: 1 },
+    'orbit.fov': { label: 'fov', min: 20, max: 90, step: 1, precision: 0 },
+    'playback.frameMs': { label: 'frame ms', min: 8, max: 200, step: 1, precision: 0 },
+    'highlight.scale': { label: 'highlight ×', min: 1, max: 1.5, step: 0.01, precision: 2 },
+  },
+});
 
 /** The renderer-boundary mapping the V10 capture prescribes: the game door
  *  emits mesh KINDS; the editor maps them to geometry objects. */
