@@ -15,7 +15,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/index.ts',
       description:
-        'THE ONLY DOOR (V17): all 19 standard GAME_* exports. Live at milestone-0: GAME_PHYSICS (typed wire over the honest __game_physics_* bindings, v8_bindings_game_physics.zig; no fallback to the legacy __hmsc_* aliases), GAME_PATHING (over runtime/pathing+motion — still the __path_* names; no honest alias yet), GAME_INPUT (transport only, V7), GAME_CAMERA (pure side of @reactjit/cameras), GAME_LOOP (clocks only, NO loop API — R3), GAME_COMMANDS (the V19 scripting surface), GAME_KINDS (the five kind tables). The rest export { status: "capture-pending" }. @game bundler alias (cli/cart/bundle.ts) = the V18 metafile-gate signal. P4 *.test.ts beside every family, run under tools/v8cli.',
+        'THE ONLY DOOR (V17): all 19 standard GAME_* exports. Live at milestone-0: GAME_PHYSICS (typed wire over the honest __game_physics_* bindings, v8_bindings_game_physics.zig; no fallback to the legacy __hmsc_* aliases), GAME_PATHING (over runtime/pathing+motion — still the __path_* names; no honest alias yet), GAME_INPUT (transport only, V7), GAME_CAMERA (pure side of @reactjit/cameras), GAME_LOOP (clocks only, NO loop API — R3), GAME_COMMANDS (the V19 scripting surface), GAME_KINDS (the five kind tables), GAME_VEHICLE (V10 VehicleDoc + buildVehicle + semantic part vocabulary). The rest export { status: "capture-pending" }. @game bundler alias (cli/cart/bundle.ts) = the V18 metafile-gate signal. P4 *.test.ts beside every family, run under tools/v8cli.',
       status: 'live',
     },
     {
@@ -91,6 +91,16 @@ export const hmsc_int: DocIndex = {
       sourceFile: 'cart/hmsc-int/game/figure/index.ts',
       description:
         'V2/V2-AMENDED/V1 capture (2026-06-05): the head_lab kit REWRITTEN fresh (cart/head_lab untouched; editor UI fenced to editors/characters/). shapes.ts = P2 data (presets/8 body shapes/garments/LODs); skeleton.ts = 25-bone action-modulated FK + place/offset/blend; assembly/clothing bones-driven (sockets, finger fans, pose-tracking garments); rig.ts = BodyRigFrame + RULED damage zones (lArm/rArm/lLeg/rLeg over oriented boxes, 25 bones mapped) + anchors + buildRigFrameFromBones (the V1 seam); hed.ts/.body codecs (one-shape color+relief law, deterministic animations, seeded generateFace); ragdoll.ts = the V1 CONTRACT (seam + RAGDOLL_TUNING, deliberately NO solver — host feature is the physics lane, acceptance vs the archived JS reference); bake.ts = THE BAKE ENTRY (seeds/documents → deterministic host-shaped BakedFigures; partGlobeParams shared with render). render.tsx = preview path only (React-free door keeps headless verify clean). 24 P4 tests in 4 suites; CAPTURE.md records drops + ambiguities.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
+      name: 'game/vehicle (GAME_VEHICLE — the V10 vehicle module)',
+      purpose: ['vehicle', 'damage', 'rendering', 'world_gen', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/vehicle/index.ts',
+      description:
+        'V10 capture (2026-06-05): vehicle_lab\'s reusable system REWRITTEN fresh behind the game door (reference untouched; authoring UI deliberately out of scope for editors/vehicles/). Captures VehicleDoc, makeVehicle(seed), buildVehicle(doc, actions), 18 semantic VehiclePartId entries, 8 styles, 4 roles, 5 pose DSL presets, sparse damage map, material metadata, explicit hitboxes, critical parts, named anchors, service liveries, and action-driven wheel/steer/bounce/brake transforms. Renderer dependencies dropped at the boundary: meshes carry kind+params, not Geometry imports. P4 suite sweeps 64 style/role/gas cases and asserts the tables\' meaning; CAPTURE.md records dropped UI and scale/material/animation ambiguities.',
       dependsOn: ['game/_testkit.ts', 'game/index.ts'],
       status: 'live',
     },

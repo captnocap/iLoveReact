@@ -19,7 +19,7 @@ const STANDARD_NAMES = [
 /** The doors THIS lane sealed; other lanes' doors (e.g. kinds) own their own style. */
 const SEALED_HERE = [
   'GAME_PHYSICS', 'GAME_PATHING', 'GAME_INPUT', 'GAME_CAMERA', 'GAME_LOOP', 'GAME_COMMANDS', 'GAME_FIGURE',
-  'GAME_ANIMATION',
+  'GAME_ANIMATION', 'GAME_VEHICLE',
 ];
 
 test('the door exports all 19 standard GAME_* names (V17)', () => {
@@ -55,6 +55,8 @@ test('the live doors carry their interface, not a grab-bag', () => {
   assertEqual(typeof door.GAME_FIGURE.bake, 'function', 'GAME_FIGURE.bake (the V2-AMENDED game path)');
   assertEqual(typeof door.GAME_ANIMATION.parse, 'function', 'GAME_ANIMATION.parse');
   assertEqual(typeof door.GAME_ANIMATION.sample, 'function', 'GAME_ANIMATION.sample');
+  assertEqual(typeof door.GAME_VEHICLE.make, 'function', 'GAME_VEHICLE.make');
+  assertEqual(typeof door.GAME_VEHICLE.build, 'function', 'GAME_VEHICLE.build');
   assertEqual(typeof (door as any).GAME_ITEMS.get, 'function', 'GAME_ITEMS.get');
   assertEqual((door as any).GAME_ITEMS.definitions.length, 19, 'GAME_ITEMS carries the 19-item registry');
   assertEqual(typeof (door as any).GAME_CHROME.resolveLabEnvironment, 'function', 'GAME_CHROME.resolveLabEnvironment');
