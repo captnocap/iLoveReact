@@ -697,6 +697,13 @@ export function buildVehicle(doc: VehicleDoc, actions: readonly VehicleAction[] 
   };
 }
 
+// The V20 authoring concern (the garage) — defined beside the system like
+// world/ and missions/; editors/vehicles/ appends to it, compile/ loads its
+// snapshot. Re-exported here so the game door stays the only public surface.
+export { vehiclesStream } from './stream';
+export type { VehiclesEvent, VehiclesStreamState } from './stream';
+import { vehiclesStream } from './stream';
+
 export const GAME_VEHICLE = Object.freeze({
   make: makeVehicle,
   build: buildVehicle,
@@ -706,6 +713,7 @@ export const GAME_VEHICLE = Object.freeze({
   panelMaterial,
   glassMaterial,
   meshKind: vehicleMeshKind,
+  stream: vehiclesStream,
   tables: Object.freeze({
     parts: VEHICLE_PART_IDS,
     labels: VEHICLE_PART_LABELS,

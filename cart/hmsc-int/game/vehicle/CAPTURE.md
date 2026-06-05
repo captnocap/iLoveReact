@@ -100,3 +100,19 @@ The module is React-free and has no dependency on `vehicle_lab`, `Scene3D`,
 
 No divergences from V10 rulings were introduced. The only intentional boundary
 changes are the UI drop and renderer dependency drop above.
+
+## Editors-wave addition (2026-06-04): the V20 `vehicles` stream
+
+`stream.ts` defines the `vehicles` concern (the GARAGE: authored `VehicleDoc`
+per id + first-authored rail order), following the `world`/`missions`
+precedent of the stream def living beside its system. Events carry the
+RESULTING doc (`authored` upsert / `removed`), never the edit verb — the edit
+logic (style clamps, role coercion, damage nudges) is editor-side in
+`editors/vehicles/edits.ts`, so the materializer is a dumb upsert and the
+round-trip author → stream → snapshot → buildVehicle is exact by
+construction. `GAME_VEHICLE.stream` carries the def; `game/index.ts`
+re-exports `vehiclesStream` + the doc types as NAMED exports (not a 20th
+GAME_* door — the same shape as `createKeyState`/`CAMERA_RIGS`).
+`stream.test.ts` (5 P4 cases) pins garage semantics, schema-evolution
+tolerance, the deletion-contract round-trip through a real on-disk store, and
+undo-as-log-position.

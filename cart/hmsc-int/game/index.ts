@@ -52,7 +52,8 @@ export type { CommandOutcome, CommandRegistry, CommandSpec, ScriptResult } from 
 
 // ── capture-pending doors (V17: the import line is already the right one) ──
 export { GAME_FIGURE } from './figure';
-export { GAME_VEHICLE } from './vehicle';
+export { GAME_VEHICLE, vehiclesStream } from './vehicle';
+export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehiclesEvent, VehiclesStreamState } from './vehicle';
 export { GAME_ITEMS } from './items';
 export { GAME_ANIMATION } from './animation';
 export { GAME_KINDS } from './kinds';
