@@ -625,3 +625,58 @@ same ground floor — improve the figure once, every lab with a figure improves.
 (The per-lab notes from V13 are what make "broken" detectable: each lab records
 what it is supposed to demonstrate, so a behavior change against the note is
 visible to human and AI alike.)
+
+**V22 — The design-session doctrine (recorded 2026-06-04, fourth pass).**
+- **Game modes are distribution presets.** SAMP/VCMP's 15 years A/B-tested the
+  verb space: role, rob, chase, evade, race, jump, accumulate. Each is a
+  conditioning preset of the V21 machine, not a new system.
+- **The opening:** sky-ramp dream cold open (the apex verb, then repossessed) →
+  wake high/broke in the apartment → fired → demoralizing job hunt → delivery
+  gig (the tutorial wearing a job costume; the unfair-rating beat MUST cost
+  visible money before the pivot) → geometry-manufactured backseat-tweaker scare
+  (player-authored crash; calm pitch if they keep control) → Crime-as-a-Service.
+  The real sky ramp exists in the map, unmarked (community mythology asset).
+- **The protagonist is event-sourced.** No backstory: player and character
+  knowledge identical at frame zero; the apartment PROPS the biography (3-4
+  artifacts, never explained). PROTECT THE ZERO: no chosen-one reveal, ever —
+  the platform harvests, it doesn't recruit. Cast = all new faces; relationships
+  accumulate only from witnessed in-log events; character intros = feature
+  unlocks.
+- **CaaS dailies are LLM-generated mission ROWS.** Closed schema (verb set +
+  validated slots); the darknet-gig frame launders generator text (UGC
+  aesthetic — even failure modes are in-fiction). Generation offline →
+  validator proves the row against the queryable future (methods_hinted are
+  AFFORDANCES GUARANTEED — chance-engine LoS checks etc.) → the V19 verify bot
+  PLAYS every daily headless before players see it. The LLM never touches
+  numbers (P2: tuning tables price the gig; the platform diegetically reprices
+  the client's offer). exposure_penalty = modifiers on the V12 consequence
+  engine, never a second truth. narrative_hooks are (text, world_delta) pairs —
+  a hook without a delta is the world calling the app a liar. Fields: client
+  (two-sided missions fall out free), completion predicate (methods stay free),
+  expiry semantics, collateral policy (civilian kills dock the rating),
+  seed + embedding fingerprint (dedup window = no-doubles for narrative).
+  Completion/rating data feeds tomorrow's generation weights — the mission
+  generator and the fiction's antagonist are the same machine.
+- **Positions vs occupants (the Hitman identity model).** The world is a roster
+  of POSITIONS (behavior loop + location + schedule + faction — baked, tenured
+  data); people are seeded OCCUPANTS. Kill vacates the post; homeostasis
+  refills it; replacements can know they're replacements ("covering for
+  Marcus"). Vacancy is a world state — the exploitable window; per-position
+  refill curves are P2 tunables. Contracts declare binding: PERSON (grievance —
+  follows him, voids on unrelated death) or POSITION (racket — re-arms against
+  the replacement).
+- **Replayability:** maps are machines that produce runs (content = verbs ×
+  map). Mission replay is DIEGETIC — posts refill, contracts re-list; canon is
+  the V20 trunk, replays are branches from snapshots (the save system and the
+  replay system are the same system). Failure degrades, never ends (alert =
+  perturbation; fail screens only for impossible predicates). Per-method
+  recognition lives in the app's ratings. Player-spawned ramps/toybox = just
+  perturbations; gate as progression per district.
+- **Multiplayer is latent:** the ambient world is f(seed, t, log) ⇒
+  deterministic lockstep; the network would carry only the log.
+- **Behavioral cloning:** capture the dev's (later, consenting players')
+  movement into the path dictionary — human traces EXTEND the token vocabulary
+  beyond the nav graph (desire paths; flee-sessions are the highest-value
+  capture). Context-tag sessions; every mined token is replayed headless by the
+  NPC figure body before entering the dictionary (the verify bot is the
+  bouncer); provenance tags forever.
