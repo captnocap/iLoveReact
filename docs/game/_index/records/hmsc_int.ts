@@ -51,7 +51,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/editors/sessions.ts',
       description:
-        'The user\'s ruling ("route specific session commit histories... sprinkle in the edit commits after each interaction") on the V20 store: a route opens a session on its concern channel, every interaction appends one LABELED edit-commit. The sessions stream records lifecycle only (opened/committed/closed markers folded with their log positions); content events stay in their concern streams — the one global sequence orders the history cross-channel and an interaction\'s undo point is its commit\'s position. sessionsOnRoute(state, route) answers "what did I do this session, on this route". Two grades: commit(event,label) (content+marker+snapshots — /vehicles, labels like "car-1: style → van") and note(label) (marker-only — the / map editor\'s logEvent funnel; the workspace save path is UNTOUCHED and world content events join the same channel later by addition). editors/store.ts grew editorChannel(def) (cached defineStream on the ONE store — remounts can\'t double-register, private openStore forks the chain). createSessionLog(store) testable door / editorSessions() live singleton (the roster.ts split). P4: editors/sessions.test.ts (7) + editors/vehicles/roundtrip.test.ts (session-path round trip: buildVehicle byte-identical across reload). Characters-lane adoption hand-off: editors/SESSIONS.md.',
+        'The user\'s ruling ("route specific session commit histories... sprinkle in the edit commits after each interaction") on the V20 store: a route opens a session on its concern channel, every interaction appends one LABELED edit-commit. The sessions stream records lifecycle only (opened/committed/closed markers folded with their log positions); content events stay in their concern streams — the one global sequence orders the history cross-channel and an interaction\'s undo point is its commit\'s position. sessionsOnRoute(state, route) answers "what did I do this session, on this route". Two grades: commit(event,label) (content+marker+snapshots — /vehicles, labels like "car-1: style → van") and note(label) (marker-only — the / map editor\'s logEvent funnel; the workspace save path is UNTOUCHED and world content events join the same channel later by addition). editors/store.ts grew editorChannel(def) (cached defineStream on the ONE store — remounts can\'t double-register, private openStore forks the chain). createSessionLog(store) testable door / editorSessions() live singleton (the roster.ts split). P4: editors/sessions.test.ts (7) + editors/vehicles/roundtrip.test.ts (session-path round trip: buildVehicle byte-identical across reload). Characters-lane adoption hand-off: editors/SESSIONS.md. AUTOSAVE-0605 sweep (2026-06-05, USER RULING "every one of these routes needs to have its own auto-save system"): every authoring route now AUTOSAVES to its channel — / (reference), /vehicles + /cutout (per-edit commits, already green), /characters (debounced draft auto-commit + mount restore of the last roster entry), /voxels (NEW editors/voxels stream — the working blockout, restore + debounced auto-commit; was React-state-only), /textures (NEW editors/materials stream — Materialize/delete commits; was legacy-localstore-only), /assist3d (NEW assist3d stream — scene auto-commit through the one watcher funnel covering all backends; was side-files-only). /labs + /log N/A (author nothing); /test + /build wiring owned by the substrate lane.',
       status: 'live',
     },
     {
@@ -89,7 +89,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/telemetry.ts',
       description:
-        'V14 capture (2026-06-04): the ground-floor measurement + copy-diagnostics surface REWRITTEN fresh — MEASURES ONLY, renders nothing (the panel is chrome’s; it polls this door at TELEMETRY_TUNING.panel cadences, scalars @250ms / JSON @500ms, and maps fpsTone good≥55/warn≥30/bad to its palette). Reads: the GAME wire subset as table data (SCALAR_HOST_FN getFps/getLayoutUs/getPaintUs/getTickUs/__tel_node_count; SNAPSHOT_HOST_FN __tel_frame/gpu/nodes/input; the __tel_history ring), snake_case→FrameRecord normalization, COUNTER_SPEC diffable set (zero_size excluded — cumulative garbage). HONESTY RULE: every read tolerates a missing host fn AND availability() names exactly which are absent (the ruled-in fix for the “diagnostics silently degrade” hazard — plus the door file is now a metafile-gate trigger on the telemetry registry entry so importing @game compiles __tel_* in). The perfWatch spike flight recorder captured as pure core (median baseline, two-gate detectSpike ratio-1.15-AND-jump-500us, the WHAT-FIRED classifySpike verdict tree, buildSpikeReport) + thin idempotent startSpikeWatch loop (warn-severity, armed heartbeat, 400ms cooldown, 48-frame tape); gv_perflog toggle left to GAME_COMMANDS. Copy-diagnostics: buildDiagnostics(label, extra) — ISO timestamp, scalars, raw blobs, tape, lab extras top-level — pretty-JSON to __clipboard_set (called direct; the runtime clipboard module’s IFTTT side-effect import is wrong baggage). Every knob in TELEMETRY_TUNING (P2). 23 P4 tests green; sqlite3-rides-the-gate + the snapshot-subset choice surfaced in telemetry.CAPTURE.md. References (perfWatch, massive-map button, panel idiom) untouched.',
+        'V14 capture (2026-06-04): the ground-floor measurement + copy-diagnostics surface REWRITTEN fresh — MEASURES ONLY, renders nothing (the panel is chrome’s; it polls this door at TELEMETRY_TUNING.panel cadences, scalars @250ms / JSON @500ms, and maps fpsTone good≥55/warn≥30/bad to its palette). Reads: the GAME wire subset as table data (SCALAR_HOST_FN getFps/getLayoutUs/getPaintUs/getTickUs/__tel_node_count; SNAPSHOT_HOST_FN __tel_frame/gpu/nodes/input; the __tel_history ring), snake_case→FrameRecord normalization, COUNTER_SPEC diffable set (zero_size excluded — cumulative garbage). HONESTY RULE: every read tolerates a missing host fn AND availability() names exactly which are absent (the ruled-in fix for the “diagnostics silently degrade” hazard — plus the door file is now a metafile-gate trigger on the telemetry registry entry so importing @game compiles __tel_* in). V27 PERFLOG-0605 adds the one runtime diagnostics system: DIAGNOSTIC_CHANNELS (frame/tick/physics/camera/figure/worldStream/bridge/draw/capture/hmr/pools/churn/spikes) are off by default, disabled-channel cost is a branch, enabled hot-path records aggregate over TELEMETRY_TUNING.diagnostics.aggregateWindowMs, and structured JSONL goes to /tmp/hmsc-int-diagnostics.jsonl. The old perfWatch spike recorder and perfLog churn path fold into channels controlled by GAME_COMMANDS log status/log <channel> on|off|toggle/log dump/log overhead plus gv_perflog as a spikes alias; diagnosticToggles exposes settings-ready values. Copy-diagnostics: buildDiagnostics(label, extra) — ISO timestamp, scalars, raw blobs, tape, lab extras top-level — pretty-JSON to __clipboard_set (called direct; the runtime clipboard module’s IFTTT side-effect import is wrong baggage). Every knob in TELEMETRY_TUNING (P2). 26 P4 tests green; sqlite3-rides-the-gate + the snapshot-subset choice + aggregate-only hot-path logging surfaced in telemetry.CAPTURE.md. References (perfWatch, massive-map button, panel idiom) untouched.',
       dependsOn: ['game/_testkit.ts', 'game/index.ts'],
       status: 'live',
     },
@@ -229,7 +229,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/commands/vocabulary.ts',
       description:
-        'Capture wave (2026-06-05): hmsc’s 48-command console vocabulary (cmd_/lab_/gv_/pv_/ev_/wv_) REWRITTEN fresh onto the skeleton’s mutable-ctx conventions (cart/hmsc/commands/registry.ts untouched behavior reference). All 48 names register so the V19 script language is complete: 26 run for REAL against GameCommandState + the P2 tables (COMMAND_TUNING, SKY_NAMED_HOURS, SKY_WEATHER_PRESETS) + GAME_KINDS (wv_tile/tile noise), GAME_PERCEPTION (gv_noise), and mounted V20 data persistence (gv_save/gv_load); wv_prop partial (kinds listing real); 21 explicit NOT-YET stubs FAIL LOUDLY ("system not captured yet: <owner>") — NOT_YET_CAPTURED exports the per-owner hand-off lists (world grid, roads, traffic, buildings/interiors, zones, validation, landform instances, lab scenes, input contract, telemetry). Dot-path state shape preserved so saved scripts keep meaning. Exposed via GAME_COMMANDS.{createGameState,defineGameCommands,tuning,names,notYetCaptured}. 16 P4 tests (vocabulary.test.ts) + compile/verify/commands.cmds; rjit game verify GREEN. CAPTURE.md records the boundary + ambiguities.',
+        'Capture wave (2026-06-05): hmsc’s 49-command console vocabulary (cmd_/lab_/gv_/pv_/ev_/wv_ plus V27 log) REWRITTEN fresh onto the skeleton’s mutable-ctx conventions (cart/hmsc/commands/registry.ts untouched behavior reference). All 49 names register so the V19 script language is complete: captured commands run for REAL against GameCommandState + the P2 tables (COMMAND_TUNING, SKY_NAMED_HOURS, SKY_WEATHER_PRESETS) + GAME_KINDS, GAME_PERCEPTION, mounted V20 data persistence, and V27 GAME_TELEMETRY diagnostics control (log status, log <channel> on|off|toggle, log dump, log overhead, gv_perflog as the spikes alias). wv_prop partial (kinds listing real); 14 explicit NOT-YET stubs FAIL LOUDLY ("system not captured yet: <owner>") — NOT_YET_CAPTURED exports the per-owner hand-off lists (roads, traffic, buildings/interiors, zones, validation, lab scenes, input contract). Dot-path state shape preserved so saved scripts keep meaning. Exposed via GAME_COMMANDS.{createGameState,defineGameCommands,tuning,names,notYetCaptured}. 20 P4 tests (vocabulary.test.ts) + compile/verify/commands.cmds; rjit game verify GREEN. CAPTURE.md records the boundary + ambiguities.',
       dependsOn: ['game/_testkit.ts', 'game/index.ts', 'game/kinds (GAME_KINDS registries)'],
       status: 'live',
     },
@@ -570,7 +570,7 @@ export const hmsc_int: DocIndex = {
       purpose: ['telemetry', 'debug', 'ui'],
       kind: 'component',
       sourceFile: 'cart/hmsc-int/LogView.tsx',
-      description: 'Route /log: in-app tail of the perf churn log.',
+      description: 'Route /log: in-app tail of the V27 diagnostics/churn channel.',
       consumes: ['perfLog.ts'],
       status: 'live',
     },
@@ -608,7 +608,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/perfLog.ts',
       description:
-        'File-backed churn recorder (153; /tmp/hmsc-int-churn.log, debounced batch writes so logging never sits on the paint path). useChurn probes which state drove a whole-cart re-render. Self-declared temporary: "rip out once the choke is settled."',
+        'V27-folded churn recorder: useChurn still names which state drove a whole-cart re-render, but writes through GAME_TELEMETRY diagnostics channel churn into /tmp/hmsc-int-diagnostics.jsonl instead of a separate file. Off by default; log churn on/off controls it live.',
       consumes: ['__fs_write'],
       status: 'dormant',
     },
@@ -743,7 +743,7 @@ export const hmsc_int: DocIndex = {
       name: 'diagnostics as disposable file-backed modules',
       purpose: ['telemetry', 'debug'],
       description:
-        'perfLog/LogView/useChurn + editLog — disposable, file-backed, never on the hot path (debounced batch writes; not in the import graph so writes can’t loop).',
+        'GAME_TELEMETRY diagnostics channels + perfLog/LogView/useChurn + editLog — switchable, file-backed, aggregate-only on hot paths; churn now folds into /tmp/hmsc-int-diagnostics.jsonl while editLog remains the semantic session trace.',
       examples: ['hmsc-int'],
       status: 'recurring',
     },
@@ -814,7 +814,7 @@ export const hmsc_int: DocIndex = {
       name: 'perfLog is explicitly temporary',
       purpose: ['telemetry', 'maintenance'],
       description:
-        'perfLog.ts self-declares "rip out once the choke is settled"; the idle paint-spike hunt it served is still OPEN per memory.',
+        'The old standalone churn file is retired by V27. The remaining perfLog/useChurn call sites are diagnostics-channel feeds and should be deleted only when their call sites stop being useful.',
       evidence: ['cart/hmsc-int/perfLog.ts (153)'],
       fix: 'Remove once the idle paint-spike choke is resolved.',
       severity: 'low',
