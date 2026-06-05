@@ -775,3 +775,29 @@ architectural rule, user-endorsed:
   "authoring itself becomes multiple playable camera modes over the same
   world. Not a separate editor app." (Plan Build mode is recorded here as
   ruled direction; building it is later work, not a current task.)
+- **Sims/Plan mode is THE SEMANTIC OVERLAY EDITOR (same-session addendum 3).**
+  The user, load-bearing: "pathing and triggers are not geometry. They are
+  semantic overlays. Sims mode is basically the semantic overlay editor."
+  Fortnite mode builds and FEELS the world (physical pieces); Sims mode WIRES
+  and reasons about it — the map-brain view of the invisible graph (room
+  volumes, door portals, nav links, patrol paths, traffic lanes, spawn
+  boundaries, trigger boxes, mission zones, camera shot markers, sound/
+  visibility zones, cover regions, service points, restricted areas, AI
+  interest points). The authoring loop: rooms in Sims → drop in to feel/
+  adjust facade+props → back to Sims to mark doors-as-portals, counters-as-
+  service-points, behavior anchors, room roles (public/private/staff/home) →
+  drop in to playtest. DATA MODEL (user-specified): a WorldMarker union —
+  path_node {pos, tags} · trigger {bounds, event} · room {polygon, role} ·
+  portal {fromRoom, toRoom, doorId?} · interest_point {pos, role:
+  sit/work/shop/guard/smoke} · camera_marker {pos, target, shot}. Markers
+  ANNOTATE the physical world (reference pieces/rooms by id) — a THIRD data
+  family beside pieces and prefabs, same one-model rule (any mode reads/edits
+  them; Sims mode is just their natural editor). This feeds the NPC system
+  directly: V21 schedules and micro-path tokens consume authored semantic
+  points ("cashier counter", "smoking spot", "bus stop", "staff door",
+  "apartment bed"). RECONCILIATION LAW: where a marker kind overlaps a
+  captured system's semantics (world trigger cells, mission objective
+  markers, kinds cover/flow, cutscene shots), the marker family is the
+  AUTHORING representation that bakes into / references that system's data —
+  never a second source of truth. (The overlay EDITOR is later; the marker
+  data model is registry scope now.)

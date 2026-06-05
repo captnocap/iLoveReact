@@ -62,3 +62,27 @@ A Sims-style Plan Build mode joins the layered game-as-authoring model. The fram
 - Compile — bake
 
 **Mode-switch UX ruled:** alt-tab-style instant swap / an action-bar mode strip (F1 Map, F2 Build, F3 Plan, F4 Props, F5 Play, F6 Bake) — "authoring itself becomes multiple playable camera modes over the same world. Not a separate editor app."
+
+---
+
+## Addendum 3 (same session) — Sims/Plan mode is THE SEMANTIC OVERLAY EDITOR
+
+User's load-bearing words: "pathing and triggers are not geometry. They are semantic overlays. Sims mode is basically the semantic overlay editor."
+
+The split: Fortnite mode = build and FEEL the world (physical pieces); Sims mode = WIRE and reason about the world — the map-brain view of the invisible graph: room volumes, door portals, nav links, NPC patrol paths, traffic lanes, sidewalks/crosswalks, spawn/despawn boundaries, trigger boxes, mission zones, camera shot markers, sound/visibility zones, cover regions, shop counters/service points, restricted areas, AI interest points.
+
+**The authoring loop ruled:** rooms in Sims → drop in to feel/adjust facade+props → back to Sims to mark doors-as-portals, counters-as-service-points, behavior anchors, room roles (public/private/staff/home) → drop in to playtest.
+
+**Data model (user-specified shape):** a WorldMarker union —
+- `path_node {pos, tags}`
+- `trigger {bounds, event}`
+- `room {polygon, role}`
+- `portal {fromRoom, toRoom, doorId?}`
+- `interest_point {pos, role: sit/work/shop/guard/smoke}`
+- `camera_marker {pos, target, shot}`
+
+Markers ANNOTATE the physical world (reference pieces/rooms by id) — a third data family beside pieces and prefabs, same one-model rule (any mode can read/edit them; Sims mode is just their natural editor).
+
+User note: this feeds the NPC system directly — deterministic schedules and micro-path tokens (V21) consume authored semantic points ("cashier counter", "smoking spot", "bus stop", "staff door", "apartment bed").
+
+**Reconciliation duty:** game/world already has trigger-cell semantics, missions place objective markers, kinds carry cover/flow data, cutscene owns shots — the marker family is the AUTHORING representation that bakes into / references those systems' existing data; never a second source of truth.
