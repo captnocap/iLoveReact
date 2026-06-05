@@ -4,6 +4,12 @@ import { Icon } from '@reactjit/icons/Icon';
 import * as Geometry from '@reactjit/geometries';
 import { mkdir, writeFile } from '@reactjit/hooks/fs';
 import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
+import { editorChannel } from './editors/store';
+import { editorSessions, type RouteSession } from './editors/sessions';
+import { voxelsStream, type VoxelsEvent } from './editors/voxels/stream';
+
+// AUTOSAVE-0605 (V20 "saved at every micro change"): blockout auto-commit debounce
+const AUTOSAVE_DEBOUNCE_MS = 1200;
 
 type Vec3 = [number, number, number];
 type Rect = { x: number; y: number; width: number; height: number };
@@ -393,14 +399,49 @@ function VoxelScene(props: {
 }
 
 export function VoxelHybridRoute(props: { onExit: () => void }) {
-  const [dims, setDims] = useState<Dims>({ w: 5, d: 6, h: 7 });
-  const [custom, setCustom] = useState<Block[]>([]);
+  // ── the V20 channel + this visit's session (AUTOSAVE-0605): the blockout
+  // restores from the voxels snapshot and auto-commits as it changes —
+  // stateless, micro-saved, every autosave its own undo position. ───────────
+  const live = useMemo(() => {
+    try {
+      const channel = editorChannel(voxelsStream);
+      return { channel, session: editorSessions().open('/voxels', channel) as RouteSession<VoxelsEvent>, error: null as string | null };
+    } catch (e) {
+      return { channel: null, session: null, error: String(e) };
+    }
+  }, []);
+  useEffect(() => () => live.session?.close(), [live]);
+  const restored = useMemo(() => live.channel?.state().doc ?? null, [live]);
+
+  const [dims, setDims] = useState<Dims>(() => restored?.dims ?? { w: 5, d: 6, h: 7 });
+  const [custom, setCustom] = useState<Block[]>(() => restored ? restored.blocks.map((b) => ({ ...b })) : []);
   const [selectedId, setSelectedId] = useState(1);
   const [activeKind, setActiveKind] = useState<Kind>('wall');
   const [activeFace, setActiveFace] = useState(FACES[2]);
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>('build');
-  const [status, setStatus] = useState('Click a floor top face to add a block');
+  const [status, setStatus] = useState(restored ? `Restored blockout · ${restored.blocks.length} blocks` : 'Click a floor top face to add a block');
+
+  // debounced auto-commit of the working blockout (the restore above never
+  // re-commits — the skip flag eats the mount render)
+  const autosaveSkipRef = useRef(true);
+  const autosaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dimsRef = useRef(dims); dimsRef.current = dims;
+  const customRef = useRef(custom); customRef.current = custom;
+  useEffect(() => {
+    if (autosaveSkipRef.current) { autosaveSkipRef.current = false; return; }
+    if (!live.session) return;
+    if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    autosaveTimer.current = setTimeout(() => {
+      autosaveTimer.current = null;
+      const doc = {
+        dims: { ...dimsRef.current },
+        blocks: customRef.current.map((b) => ({ id: b.id, x: b.x, y: b.y, z: b.z, kind: b.kind })),
+      };
+      live.session!.commit({ kind: 'authored', doc }, `autosave · ${doc.blocks.length} blocks · ${doc.dims.w}×${doc.dims.d}×${doc.dims.h}`);
+    }, AUTOSAVE_DEBOUNCE_MS);
+  }, [dims, custom]);
+  useEffect(() => () => { if (autosaveTimer.current) clearTimeout(autosaveTimer.current); }, []);
 
   const floor = useMemo(() => makeFloor(dims), [dims]);
   const blocks = useMemo(() => [...floor, ...custom], [floor, custom]);
