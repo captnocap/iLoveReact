@@ -24,7 +24,30 @@ const FULL_WIRE: Record<string, unknown> = {
   getPaintUs: () => 800,
   getTickUs: () => 300,
   __tel_node_count: () => 41,
-  __tel_frame: () => ({ fps: 240, tick_us: 300, layout_us: 120, paint_us: 800, gpu_us: 2900, frame_total_us: 4200, frame_number: 9001 }),
+  __tel_frame: () => ({
+    fps: 240,
+    tick_us: 300,
+    layout_us: 120,
+    paint_us: 800,
+    gpu_us: 2900,
+    frame_total_us: 4200,
+    event_us: 11,
+    app_tick_us: 140,
+    pre_paint_us: 230,
+    post_frame_us: 17,
+    frame_number: 9001,
+  }),
+  __tel_host_flush: () => ({
+    queued_batches: 0,
+    queued_bytes: 0,
+    last_drain_batches: 2,
+    last_drain_bytes: 4096,
+    last_drain_us: 250,
+    total_enqueued_batches: 9,
+    total_enqueued_bytes: 8192,
+    total_drained_batches: 9,
+    total_drained_bytes: 8192,
+  }),
   __tel_gpu: () => ({ frame_hash: 7, rect_count: 64, glyph_count: 210, zero_size: 999999, junk: 'no' }),
   __tel_nodes: () => ({ total: 41, visible: 38, hidden: 3 }),
   __tel_input: () => ({ active_count: 2, type_count: 5 }),
@@ -39,6 +62,7 @@ test('availability() names every missing host fn instead of degrading silently',
   assertEqual(bare.complete, false, 'v8cli has no telemetry wire — must not claim complete');
   assert(bare.missing.includes('getFps'), 'missing must name the fps scalar fn');
   assert(bare.missing.includes('__tel_frame'), 'missing must name the frame snapshot fn');
+  assert(bare.missing.includes('__tel_host_flush'), 'missing must name the host-flush snapshot fn');
   assert(bare.missing.includes('__tel_history'), 'missing must name the history ring fn');
   assert(bare.missing.includes('__clipboard_set'), 'missing must name the clipboard fn');
   withHost(FULL_WIRE, () => {
@@ -74,7 +98,21 @@ test('readFrame normalizes the wire snake_case into the FrameRecord vocabulary',
     assert(frame != null, 'frame must read');
     assertEqual(frame!.totalUs, 4200, 'frame_total_us → totalUs');
     assertEqual(frame!.gpuUs, 2900, 'gpu_us → gpuUs');
+    assertEqual(frame!.eventUs, 11, 'event_us → eventUs');
+    assertEqual(frame!.appTickUs, 140, 'app_tick_us → appTickUs');
+    assertEqual(frame!.prePaintUs, 230, 'pre_paint_us → prePaintUs');
+    assertEqual(frame!.postFrameUs, 17, 'post_frame_us → postFrameUs');
     assertEqual(frame!.frameNumber, 9001, 'frame_number → frameNumber');
+  });
+});
+
+test('hostFlush snapshot exposes queued React drain cost as data, not terminal probes', () => {
+  withHost(FULL_WIRE, () => {
+    const flush = GAME_TELEMETRY.readSnapshot('hostFlush');
+    assert(flush != null, 'host-flush snapshot must read');
+    assertEqual(Number(flush!.last_drain_us), 250, 'last_drain_us must survive as the measured drain cost');
+    assertEqual(Number(flush!.last_drain_batches), 2, 'last_drain_batches must identify batch count');
+    assertEqual(Number(flush!.last_drain_bytes), 4096, 'last_drain_bytes must identify payload size');
   });
 });
 
@@ -281,7 +319,7 @@ test('copyDiagnostics puts pretty JSON on the clipboard wire and reports transpo
 
 test('diagnostics channels are registered, off by default, and expose settings-ready toggles', () => {
   const names = GAME_TELEMETRY.channels.map((c) => c.name);
-  for (const required of ['frame', 'tick', 'physics', 'camera', 'figure', 'worldStream', 'bridge', 'draw', 'capture', 'hmr', 'pools', 'churn', 'spikes']) {
+  for (const required of ['frame', 'tick', 'physics', 'camera', 'figure', 'worldStream', 'bridge', 'hostFlush', 'draw', 'capture', 'hmr', 'pools', 'churn', 'spikes']) {
     assert(names.includes(required), `${required} channel must be registered`);
   }
   for (const toggle of GAME_TELEMETRY.diagnosticToggles()) {
@@ -289,6 +327,19 @@ test('diagnostics channels are registered, off by default, and expose settings-r
     assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled(toggle.channel), false, `${toggle.channel} must be off`);
     assert(toggle.key.startsWith('diagnostics.'), 'toggle keys must match the settings registry hand-off shape');
   }
+});
+
+test('camera diagnostics are sampled data; native camera hot paths do not print terminal probes', () => {
+  const read = (globalThis as any).__fs_read as ((path: string) => string) | undefined;
+  assertEqual(typeof read, 'function', 'v8cli fs read must be available for the source guard');
+  const cameraSource = read!('framework/game/camera.zig');
+  const bindingSource = read!('framework/v8_bindings_game_camera.zig');
+  const v8AppSource = read!('v8_app.zig');
+  assert(!cameraSource.includes('std.debug.print'), 'framework/game/camera.zig must not print from the camera step path');
+  assert(!bindingSource.includes('std.debug.print'), 'game-camera bindings must not print probe lines from host calls');
+  assert(!v8AppSource.includes('[probe-tick]'), 'v8_app ticks must not write unswitchable startup probe lines');
+  assert(cameraSource.includes('pub fn probeSnapshot'), 'camera probe data must remain available as a sampled snapshot');
+  assert(bindingSource.includes('__game_camera_probe'), 'the diagnostics channel must have a host-readable camera probe');
 });
 
 test('diagnostics aggregate only when enabled and flush structured JSONL to the predictable path', () => {

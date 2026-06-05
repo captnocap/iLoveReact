@@ -37,6 +37,10 @@ pub const Snapshot = struct {
     // overhead?"; gpu_us answers "how much actual GPU rasterization?".
     gpu_us: u64 = 0,
     frame_total_us: u64 = 0,
+    event_us: u64 = 0,
+    app_tick_us: u64 = 0,
+    pre_paint_us: u64 = 0,
+    post_frame_us: u64 = 0,
 
     // ── GPU ──
     rect_count: u32 = 0,
@@ -241,6 +245,10 @@ pub const CollectArgs = struct {
     paint_us: u64,
     gpu_us: u64,
     frame_total_us: u64,
+    event_us: u64 = 0,
+    app_tick_us: u64 = 0,
+    pre_paint_us: u64 = 0,
+    post_frame_us: u64 = 0,
     fps: u32,
     bridge_calls_per_sec: u64,
     root: *const Node,
@@ -260,6 +268,10 @@ pub fn collect(args: CollectArgs) void {
     snap.paint_us = args.paint_us;
     snap.gpu_us = args.gpu_us;
     snap.frame_total_us = args.frame_total_us;
+    snap.event_us = args.event_us;
+    snap.app_tick_us = args.app_tick_us;
+    snap.pre_paint_us = args.pre_paint_us;
+    snap.post_frame_us = args.post_frame_us;
     snap.fps = args.fps;
     snap.frame_number = gpu.telemetryFrameCounter();
 

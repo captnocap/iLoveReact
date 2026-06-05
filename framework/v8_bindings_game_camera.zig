@@ -69,6 +69,33 @@ fn setReturnString(info: v8.FunctionCallbackInfo, value: []const u8) void {
     info.getReturnValue().set(v8.String.initUtf8(info.getIsolate(), value));
 }
 
+fn setObjectNumber(ctx: v8.Context, obj: v8.Object, key: []const u8, value: anytype) void {
+    const iso = ctx.getIsolate();
+    const k = iso.initStringUtf8(key);
+    const n_value: f64 = switch (@typeInfo(@TypeOf(value))) {
+        .int, .comptime_int => @floatFromInt(value),
+        .float, .comptime_float => @floatCast(value),
+        else => 0,
+    };
+    const n = iso.initNumber(n_value);
+    _ = obj.setValue(ctx, k.toValue(), n.toValue());
+}
+
+fn setObjectString(ctx: v8.Context, obj: v8.Object, key: []const u8, value: []const u8) void {
+    const iso = ctx.getIsolate();
+    const k = iso.initStringUtf8(key);
+    const s = iso.initStringUtf8(value);
+    _ = obj.setValue(ctx, k.toValue(), s.toValue());
+}
+
+fn modeName(mode: game_camera.Mode) []const u8 {
+    return switch (mode) {
+        .orbit => "orbit",
+        .aim => "aim",
+        .freefly => "freefly",
+    };
+}
+
 fn modeFromString(s: []const u8) ?game_camera.Mode {
     if (std.mem.eql(u8, s, "walk") or std.mem.eql(u8, s, "orbit")) return .orbit;
     if (std.mem.eql(u8, s, "aim") or std.mem.eql(u8, s, "ads")) return .aim;
@@ -109,19 +136,6 @@ fn hostBindFirst(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     while (it.next()) |entry| {
         const node = entry.value_ptr.*;
         if (node.scene3d_camera) {
-            std.debug.print(
-                "[probe-camera-host] __game_camera_bind_first candidate node={d} pos({d:.2},{d:.2},{d:.2}) look({d:.2},{d:.2},{d:.2}) fov={d:.2}\n",
-                .{
-                    entry.key_ptr.*,
-                    node.scene3d_pos_x,
-                    node.scene3d_pos_y,
-                    node.scene3d_pos_z,
-                    node.scene3d_look_x,
-                    node.scene3d_look_y,
-                    node.scene3d_look_z,
-                    node.scene3d_fov,
-                },
-            );
             game_camera.bindNode(entry.key_ptr.*);
             game_camera.probeHostBind("__game_camera_bind_first", entry.key_ptr.*, true);
             setReturnF64(info, @floatFromInt(entry.key_ptr.*));
@@ -358,6 +372,63 @@ fn hostActiveNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnF64(info, @floatFromInt(game_camera.activeNodeId()));
 }
 
+fn hostProbeSnapshot(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const snap = game_camera.probeSnapshot();
+    if (!snap.has_sample) {
+        setReturnNull(info);
+        return;
+    }
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const obj = iso.initObject();
+    setObjectNumber(ctx, obj, "node_id", snap.node_id);
+    setObjectNumber(ctx, obj, "active_node_id", snap.active_node_id);
+    setObjectNumber(ctx, obj, "frames", snap.frames);
+    setObjectNumber(ctx, obj, "avg_dt_ms", snap.avg_dt_ms);
+    setObjectNumber(ctx, obj, "last_dt_ms", snap.last_dt_ms);
+    setObjectNumber(ctx, obj, "params", snap.params);
+    setObjectNumber(ctx, obj, "modes", snap.modes);
+    setObjectNumber(ctx, obj, "deltas", snap.deltas);
+    setObjectNumber(ctx, obj, "last_param_age_ms", snap.last_param_age_ms);
+    setObjectNumber(ctx, obj, "max_solved_step", snap.max_solved_step);
+    setObjectNumber(ctx, obj, "max_pos_lag", snap.max_pos_lag);
+    setObjectNumber(ctx, obj, "max_target_lag", snap.max_target_lag);
+    setObjectString(ctx, obj, "mode", modeName(snap.mode));
+    setObjectNumber(ctx, obj, "desired_pos_x", snap.desired.pos.x);
+    setObjectNumber(ctx, obj, "desired_pos_y", snap.desired.pos.y);
+    setObjectNumber(ctx, obj, "desired_pos_z", snap.desired.pos.z);
+    setObjectNumber(ctx, obj, "desired_target_x", snap.desired.target.x);
+    setObjectNumber(ctx, obj, "desired_target_y", snap.desired.target.y);
+    setObjectNumber(ctx, obj, "desired_target_z", snap.desired.target.z);
+    setObjectNumber(ctx, obj, "desired_fov", snap.desired.fov);
+    setObjectNumber(ctx, obj, "solved_pos_x", snap.solved.pos.x);
+    setObjectNumber(ctx, obj, "solved_pos_y", snap.solved.pos.y);
+    setObjectNumber(ctx, obj, "solved_pos_z", snap.solved.pos.z);
+    setObjectNumber(ctx, obj, "solved_target_x", snap.solved.target.x);
+    setObjectNumber(ctx, obj, "solved_target_y", snap.solved.target.y);
+    setObjectNumber(ctx, obj, "solved_target_z", snap.solved.target.z);
+    setObjectNumber(ctx, obj, "solved_fov", snap.solved.fov);
+    setObjectNumber(ctx, obj, "slot_target_x", snap.slot_orbit.target.x);
+    setObjectNumber(ctx, obj, "slot_target_y", snap.slot_orbit.target.y);
+    setObjectNumber(ctx, obj, "slot_target_z", snap.slot_orbit.target.z);
+    setObjectNumber(ctx, obj, "slot_yaw", snap.slot_orbit.yaw);
+    setObjectNumber(ctx, obj, "slot_pitch", snap.slot_orbit.pitch);
+    setObjectNumber(ctx, obj, "slot_dist", snap.slot_orbit.dist);
+    setObjectNumber(ctx, obj, "slot_fov", snap.slot_orbit.fov);
+    setObjectNumber(ctx, obj, "freefly_pos_x", snap.slot_freefly.position.x);
+    setObjectNumber(ctx, obj, "freefly_pos_y", snap.slot_freefly.position.y);
+    setObjectNumber(ctx, obj, "freefly_pos_z", snap.slot_freefly.position.z);
+    setObjectNumber(ctx, obj, "freefly_yaw", snap.slot_freefly.yaw);
+    setObjectNumber(ctx, obj, "freefly_pitch", snap.slot_freefly.pitch);
+    setObjectNumber(ctx, obj, "freefly_fov", snap.slot_freefly.fov);
+    setObjectNumber(ctx, obj, "move_forward", snap.move_axes.forward);
+    setObjectNumber(ctx, obj, "move_strafe", snap.move_axes.strafe);
+    setObjectNumber(ctx, obj, "move_lift", snap.move_axes.lift);
+    setObjectNumber(ctx, obj, "move_speed", snap.move_axes.speed);
+    info.getReturnValue().set(obj.toValue());
+}
+
 pub fn registerGameCamera(_: anytype) void {
     v8_runtime.registerHostFn("__game_camera_bind_node", hostBindNode);
     v8_runtime.registerHostFn("__game_camera_bind_first", hostBindFirst);
@@ -379,4 +450,5 @@ pub fn registerGameCamera(_: anytype) void {
     v8_runtime.registerHostFn("__game_camera_set_smoothing", hostSetSmoothing);
     v8_runtime.registerHostFn("__game_camera_set_smoothing_node", hostSetSmoothingNode);
     v8_runtime.registerHostFn("__game_camera_active_node", hostActiveNode);
+    v8_runtime.registerHostFn("__game_camera_probe", hostProbeSnapshot);
 }

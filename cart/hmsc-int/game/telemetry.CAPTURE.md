@@ -20,13 +20,14 @@ and maps `fpsTone` tones to its own palette.
 
 ## Verification
 
-- `game/telemetry.test.ts`: **26/26** P4 meaning-tests green under v8cli —
+- `game/telemetry.test.ts`: **28/28** P4 meaning-tests green under v8cli —
   honesty (availability naming, fallback reads), kind→fn mapping, snake_case
   normalization, ring sanitation, both detector gates (the canonical
   240→190fps dip fires; ratio-only and jump-only do not), the full verdict
   tree, the report shape, snapshot + clipboard transport, runtime diagnostics
-  toggles, aggregate JSONL output, and disabled-channel overhead measurement.
-- `rjit game verify`: **VERDICT GREEN — 26/26 suites, 2/2 scripts.**
+  toggles, host-flush drain stats, sampled native-camera probes, aggregate
+  JSONL output, and disabled-channel overhead measurement.
+- `rjit game verify`: **VERDICT GREEN — 48/48 suites, 2/2 scripts.**
 - Metafile gate: `cart/hmsc-int/game/telemetry.ts` added as a trigger on the
   existing `telemetry` registry entry (`sdk/dependency-registry.json`) — the
   game-pathing "or the door" pattern. Importing the game door now compiles
@@ -37,12 +38,21 @@ and maps `fpsTone` tones to its own palette.
 
 - **V27 PERFLOG-0605: one switchable diagnostics system**:
   `GAME_TELEMETRY` owns `DIAGNOSTIC_CHANNELS` (`frame`, `tick`, `physics`,
-  `camera`, `figure`, `worldStream`, `bridge`, `draw`, `capture`, `hmr`,
-  `pools`, `churn`, `spikes`). Every channel is off by default. A disabled
+  `camera`, `figure`, `worldStream`, `bridge`, `hostFlush`, `draw`,
+  `capture`, `hmr`, `pools`, `churn`, `spikes`). Every channel is off by default. A disabled
   channel exits after the boolean check; enabled channels aggregate samples
   over `TELEMETRY_TUNING.diagnostics.aggregateWindowMs` and flush structured
   JSONL to `/tmp/hmsc-int-diagnostics.jsonl`. This is the CAMSTUTTER lesson:
   no hot-path per-call `console.*` prints.
+- **GCHITCH-0605 folded the remaining native camera probes**: the old
+  `[probe-camera-cadence]`/`[probe-camera-host]` stderr path is gone from
+  `framework/game/camera.zig` and `framework/v8_bindings_game_camera.zig`.
+  The same cadence data now lives behind `__game_camera_probe` and is sampled
+  only when the `camera` diagnostics channel is on. `hostFlush` reads the
+  reconciler queue/drain counters (`__tel_host_flush`) so a reported "flush"
+  hitch can be separated from JS tick, camera solve, draw, and present. The
+  first-three-frame `[probe-tick]` stderr path in `v8_app.zig` was removed in
+  the same cleanup; tick timing belongs in the `tick`/`frame` channels.
 - **Runtime control is command vocabulary**: `log status`,
   `log all on|off|toggle`, `log <channel> on|off|toggle`, `log dump [label]`,
   and `log overhead [iterations]` are real GAME_COMMANDS registrations so

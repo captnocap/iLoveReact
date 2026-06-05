@@ -110,6 +110,7 @@ export type DiagnosticChannel =
   | 'figure'
   | 'worldStream'
   | 'bridge'
+  | 'hostFlush'
   | 'draw'
   | 'capture'
   | 'hmr'
@@ -133,6 +134,7 @@ export const DIAGNOSTIC_CHANNELS: readonly DiagnosticChannelSpec[] = Object.free
   { name: 'figure', label: 'Figure rig', purpose: 'rig build/sample counts and part counts', source: 'GAME_FIGURE consumers', defaultEnabled: false },
   { name: 'worldStream', label: 'World stream IO', purpose: 'stream reads/writes/snapshot sizes', source: 'V20 data/store + world streams', defaultEnabled: false },
   { name: 'bridge', label: 'JS-host bridge', purpose: 'calls per host fn and payload byte estimates', source: 'transport wrappers/callHost seams', defaultEnabled: false },
+  { name: 'hostFlush', label: 'Host flush', purpose: 'React queue batches, bytes, and drain cost per frame', source: '__hostFlush queue / v8 reconciler drain', defaultEnabled: false },
   { name: 'draw', label: 'Draw/instances', purpose: 'draw calls, instances, mesh/capture counts', source: '__tel_gpu snapshots', defaultEnabled: false },
   { name: 'capture', label: 'Static captures', purpose: 'paint/capture rebuilds, upload churn', source: 'perfLog/useChurn + capture call sites', defaultEnabled: false },
   { name: 'hmr', label: 'HMR/bundle', purpose: 'bundle push/build timing', source: 'dev/HMR hooks hand-off', defaultEnabled: false },
@@ -187,6 +189,7 @@ let diagnosticStarted = false;
 let diagnosticLastFlushMs = 0;
 let diagnosticSamplerTimer: unknown = null;
 let diagnosticLastSampleMs = 0;
+let diagnosticSampling = false;
 const diagnosticAggregates: Partial<Record<DiagnosticChannel, DiagnosticAggregate>> = {};
 
 function perfNow(): number {
@@ -347,6 +350,7 @@ export function flushDiagnosticChannel(channel: DiagnosticChannel): void {
 
 export function recordDiagnostic(channel: DiagnosticChannel, label: string, fields: Record<string, unknown> = {}): void {
   if (diagnosticEnabled[channel] !== true) return;
+  if (!diagnosticSampling && diagnosticSamplerTimer == null && samplerNeeded()) ensureDiagnosticSampler();
   ensureDiagnosticStarted();
   const nowMs = perfNow();
   const agg = aggregateFor(channel, nowMs);
@@ -369,6 +373,8 @@ export function recordDiagnostic(channel: DiagnosticChannel, label: string, fiel
 
 function samplerNeeded(): boolean {
   return diagnosticChannelEnabled('frame') ||
+    diagnosticChannelEnabled('hostFlush') ||
+    diagnosticChannelEnabled('camera') ||
     diagnosticChannelEnabled('draw') ||
     diagnosticChannelEnabled('pools') ||
     diagnosticChannelEnabled('tick');
@@ -382,7 +388,12 @@ function ensureDiagnosticSampler(): void {
   const tick = () => {
     diagnosticSamplerTimer = null;
     if (!samplerNeeded()) return;
-    sampleHostDiagnostics();
+    diagnosticSampling = true;
+    try {
+      sampleHostDiagnostics();
+    } finally {
+      diagnosticSampling = false;
+    }
     diagnosticSamplerTimer = timer(tick, TELEMETRY_TUNING.diagnostics.aggregateWindowMs);
   };
   diagnosticSamplerTimer = timer(tick, TELEMETRY_TUNING.diagnostics.aggregateWindowMs);
@@ -403,6 +414,10 @@ function sampleHostDiagnostics(): void {
         paintUs: frame.paintUs,
         gpuUs: frame.gpuUs,
         totalUs: frame.totalUs,
+        eventUs: frame.eventUs,
+        appTickUs: frame.appTickUs,
+        prePaintUs: frame.prePaintUs,
+        postFrameUs: frame.postFrameUs,
         frameNumber: frame.frameNumber,
       });
     }
@@ -412,6 +427,42 @@ function sampleHostDiagnostics(): void {
         samples: history.length,
         worstUs: Math.max(...history),
         medianUs: median(history),
+      });
+    }
+  }
+  if (diagnosticChannelEnabled('hostFlush')) {
+    const hostFlush = readSnapshot('hostFlush');
+    if (hostFlush) {
+      recordDiagnostic('hostFlush', 'reconciler-drain', {
+        queuedBatches: Number(hostFlush.queued_batches) || 0,
+        queuedBytes: Number(hostFlush.queued_bytes) || 0,
+        lastDrainBatches: Number(hostFlush.last_drain_batches) || 0,
+        lastDrainBytes: Number(hostFlush.last_drain_bytes) || 0,
+        lastDrainUs: Number(hostFlush.last_drain_us) || 0,
+        totalEnqueuedBatches: Number(hostFlush.total_enqueued_batches) || 0,
+        totalEnqueuedBytes: Number(hostFlush.total_enqueued_bytes) || 0,
+        totalDrainedBatches: Number(hostFlush.total_drained_batches) || 0,
+        totalDrainedBytes: Number(hostFlush.total_drained_bytes) || 0,
+      });
+    }
+  }
+  if (diagnosticChannelEnabled('camera')) {
+    const camera = callHost<Record<string, unknown> | null>(CAMERA_PROBE_HOST_FN, null);
+    if (camera) {
+      recordDiagnostic('camera', 'native-probe', {
+        nodeId: Number(camera.node_id) || 0,
+        activeNodeId: Number(camera.active_node_id) || 0,
+        frames: Number(camera.frames) || 0,
+        avgDtMs: Number(camera.avg_dt_ms) || 0,
+        lastDtMs: Number(camera.last_dt_ms) || 0,
+        params: Number(camera.params) || 0,
+        modes: Number(camera.modes) || 0,
+        deltas: Number(camera.deltas) || 0,
+        lastParamAgeMs: Number(camera.last_param_age_ms) || 0,
+        maxSolvedStep: Number(camera.max_solved_step) || 0,
+        maxPosLag: Number(camera.max_pos_lag) || 0,
+        maxTargetLag: Number(camera.max_target_lag) || 0,
+        mode: String(camera.mode ?? ''),
       });
     }
   }
@@ -494,7 +545,7 @@ export function estimateDiagnosticOffOverhead(iterations: number = 100_000): { i
 // ── The wire vocabulary (kind → registered host fn, as table data) ──────────
 
 export type ScalarKind = 'fps' | 'layoutUs' | 'paintUs' | 'tickUs' | 'nodeCount';
-export type SnapshotKind = 'frame' | 'gpu' | 'nodes' | 'input';
+export type SnapshotKind = 'frame' | 'gpu' | 'nodes' | 'input' | 'hostFlush';
 
 export const SCALAR_HOST_FN: Record<ScalarKind, string> = {
   fps: 'getFps',
@@ -509,10 +560,12 @@ export const SNAPSHOT_HOST_FN: Record<SnapshotKind, string> = {
   gpu: '__tel_gpu',
   nodes: '__tel_nodes',
   input: '__tel_input',
+  hostFlush: '__tel_host_flush',
 };
 
 const HISTORY_HOST_FN = '__tel_history';
 const CLIPBOARD_HOST_FN = '__clipboard_set';
+const CAMERA_PROBE_HOST_FN = '__game_camera_probe';
 
 // The flat counter set worth diffing across a spike — everything here should
 // be DEAD STILL at idle, so any field that moves on the spike frame is a
@@ -549,6 +602,10 @@ export type FrameRecord = {
   paintUs: number;
   gpuUs: number;
   totalUs: number;
+  eventUs: number;
+  appTickUs: number;
+  prePaintUs: number;
+  postFrameUs: number;
   frameNumber: number;
 };
 
@@ -597,6 +654,10 @@ export function readFrame(): FrameRecord | null {
     paintUs: Number(raw.paint_us) || 0,
     gpuUs: Number(raw.gpu_us) || 0,
     totalUs: Number(raw.frame_total_us) || 0,
+    eventUs: Number(raw.event_us) || 0,
+    appTickUs: Number(raw.app_tick_us) || 0,
+    prePaintUs: Number(raw.pre_paint_us) || 0,
+    postFrameUs: Number(raw.post_frame_us) || 0,
     frameNumber: Number(raw.frame_number) || 0,
   };
 }
@@ -1003,6 +1064,7 @@ export function buildDiagnostics(label: string, extra: Record<string, unknown> =
       gpu: readSnapshot('gpu'),
       nodes: readSnapshot('nodes'),
       input: readSnapshot('input'),
+      hostFlush: readSnapshot('hostFlush'),
     },
     tapeUs: readFrameHistory(TELEMETRY_TUNING.diagnostics.tapeFrames),
     ...extra,

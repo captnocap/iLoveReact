@@ -30,8 +30,28 @@ const event_bus = @import("diag/event_bus.zig");
 
 pub const Mode = enum { sync, queue };
 
+pub const Telemetry = struct {
+    queued_batches: u32 = 0,
+    queued_bytes: u64 = 0,
+    last_drain_batches: u32 = 0,
+    last_drain_bytes: u64 = 0,
+    last_drain_us: u64 = 0,
+    total_enqueued_batches: u64 = 0,
+    total_enqueued_bytes: u64 = 0,
+    total_drained_batches: u64 = 0,
+    total_drained_bytes: u64 = 0,
+};
+
 var g_mode: Mode = .sync;
 var g_pending: std.ArrayList([]u8) = .{};
+var g_pending_bytes: u64 = 0;
+var g_last_drain_batches: u32 = 0;
+var g_last_drain_bytes: u64 = 0;
+var g_last_drain_us: u64 = 0;
+var g_total_enqueued_batches: u64 = 0;
+var g_total_enqueued_bytes: u64 = 0;
+var g_total_drained_batches: u64 = 0;
+var g_total_drained_bytes: u64 = 0;
 
 pub fn setMode(mode: Mode) void {
     g_mode = mode;
@@ -70,12 +90,25 @@ fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     switch (g_mode) {
         .sync => {
             defer std.heap.c_allocator.free(payload);
+            const t0 = std.time.microTimestamp();
             host_tree.applyCommandBatch(payload);
+            const t1 = std.time.microTimestamp();
+            g_last_drain_batches = 1;
+            g_last_drain_bytes = @intCast(payload.len);
+            g_last_drain_us = @intCast(@max(0, t1 - t0));
+            g_total_enqueued_batches += 1;
+            g_total_enqueued_bytes += payload.len;
+            g_total_drained_batches += 1;
+            g_total_drained_bytes += payload.len;
         },
         .queue => {
             g_pending.append(std.heap.c_allocator, payload) catch {
                 std.heap.c_allocator.free(payload);
+                return;
             };
+            g_pending_bytes += payload.len;
+            g_total_enqueued_batches += 1;
+            g_total_enqueued_bytes += payload.len;
         },
     }
 }
@@ -88,13 +121,28 @@ fn hostFlush(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 pub const ApplyFn = *const fn (bytes: []const u8) void;
 
 pub fn drainPending(apply: ApplyFn) void {
-    if (g_pending.items.len == 0) return;
+    if (g_pending.items.len == 0) {
+        g_last_drain_batches = 0;
+        g_last_drain_bytes = 0;
+        g_last_drain_us = 0;
+        return;
+    }
+    const batch_count: u32 = @intCast(@min(g_pending.items.len, std.math.maxInt(u32)));
+    const byte_count = g_pending_bytes;
     const batches = g_pending.toOwnedSlice(std.heap.c_allocator) catch return;
+    g_pending_bytes = 0;
+    const t0 = std.time.microTimestamp();
     defer {
         for (batches) |b| std.heap.c_allocator.free(b);
         std.heap.c_allocator.free(batches);
     }
     for (batches) |b| apply(b);
+    const t1 = std.time.microTimestamp();
+    g_last_drain_batches = batch_count;
+    g_last_drain_bytes = byte_count;
+    g_last_drain_us = @intCast(@max(0, t1 - t0));
+    g_total_drained_batches += batch_count;
+    g_total_drained_bytes += byte_count;
 }
 
 /// Discard queued batches without applying. The dev-mode reload path
@@ -105,6 +153,24 @@ pub fn drainPending(apply: ApplyFn) void {
 pub fn clearPending() void {
     for (g_pending.items) |b| std.heap.c_allocator.free(b);
     g_pending.clearRetainingCapacity();
+    g_pending_bytes = 0;
+    g_last_drain_batches = 0;
+    g_last_drain_bytes = 0;
+    g_last_drain_us = 0;
+}
+
+pub fn telemetrySnapshot() Telemetry {
+    return .{
+        .queued_batches = @intCast(@min(g_pending.items.len, std.math.maxInt(u32))),
+        .queued_bytes = g_pending_bytes,
+        .last_drain_batches = g_last_drain_batches,
+        .last_drain_bytes = g_last_drain_bytes,
+        .last_drain_us = g_last_drain_us,
+        .total_enqueued_batches = g_total_enqueued_batches,
+        .total_enqueued_bytes = g_total_enqueued_bytes,
+        .total_drained_batches = g_total_drained_batches,
+        .total_drained_bytes = g_total_drained_bytes,
+    };
 }
 
 pub fn register() void {

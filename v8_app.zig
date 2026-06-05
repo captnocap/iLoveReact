@@ -3528,14 +3528,6 @@ fn appInit() void {
 }
 
 fn appTick(now: u32) void {
-    // ── PROBE: first-tick milestones (only first 3 ticks log) ──
-    const _probe_n = struct {
-        var v: u32 = 0;
-    };
-    _probe_n.v += 1;
-    const _probe = _probe_n.v <= 3;
-    if (_probe) std.debug.print("[probe-tick] #{d} entry now={d}\n", .{ _probe_n.v, now });
-
     // Bridge framework-side state.markDirty() into v8_app's g_dirty so that
     // SDL-event-driven dispatches (filedrop, router, system_signals, …) cause
     // a React re-render on the next tick. Without this, polling hooks like
@@ -3553,7 +3545,6 @@ fn appTick(now: u32) void {
         dev_ipc.pollOnce();
         processIncomingPushes();
     }
-    if (_probe) std.debug.print("[probe-tick] #{d} after dev_ipc+push\n", .{_probe_n.v});
     maybeScheduleReload();
     if (g_reload_pending) {
         g_reload_pending = false;
@@ -3565,9 +3556,7 @@ fn appTick(now: u32) void {
     // in the bundle are implemented against this — see runtime/index.tsx.
     // This may append new batches to g_pending_flush via React commits triggered
     // from handlers that ran inside timers. Drain after.
-    if (_probe) std.debug.print("[probe-tick] #{d} before __jsTick\n", .{_probe_n.v});
     v8_runtime.callGlobalInt("__jsTick", @intCast(now));
-    if (_probe) std.debug.print("[probe-tick] #{d} after __jsTick\n", .{_probe_n.v});
 
     // Per-tick drains for every binding domain that defines tickDrain().
     // Required bindings (core, websocket) and opt-in bindings (httpsrv,
@@ -3580,12 +3569,10 @@ fn appTick(now: u32) void {
     // without polling latency; engine.run owns its own repaint cadence,
     // so the GPU shell discards it.
     _ = ingredients.tickDrain();
-    if (_probe) std.debug.print("[probe-tick] #{d} after tickDrain\n", .{_probe_n.v});
 
     // Apply any CMD batches that accumulated during press events since last tick.
     // Must happen BEFORE rebuildTree so the tree reflects the new g_node_by_id.
     drainPendingFlushes();
-    if (_probe) std.debug.print("[probe-tick] #{d} after drainPendingFlushes\n", .{_probe_n.v});
     // V23 native game camera: when a cart opts a Scene3D.Camera node into
     // native ownership, the host solves/smooths that node's camera before
     // layout/paint. Carts that never opt in stay on the declarative JS-props
@@ -3600,7 +3587,6 @@ fn appTick(now: u32) void {
             }
         }
     }
-    if (_probe) std.debug.print("[probe-tick] #{d} after game_camera.stepNode\n", .{_probe_n.v});
     // Host-side animation tick. Walks the animation registry and writes
     // current values into latches; syncLatchesToNodes then propagates
     // those into node.style. Cart-side `useHostAnimation` registers
@@ -3610,17 +3596,13 @@ fn appTick(now: u32) void {
     syncLatchesToNodes();
     windows.tickIndependent();
     cleanupClosedHostWindows();
-    if (_probe) std.debug.print("[probe-tick] #{d} after windows+cleanup, dirty={}\n", .{ _probe_n.v, g_dirty.* });
 
     if (g_dirty.*) {
-        if (_probe) std.debug.print("[probe-tick] #{d} before snapshotRuntimeState\n", .{_probe_n.v});
         const t0 = std.time.microTimestamp();
         snapshotRuntimeState();
         const t1 = std.time.microTimestamp();
-        if (_probe) std.debug.print("[probe-tick] #{d} before rebuildTree\n", .{_probe_n.v});
         rebuildTree();
         const t2 = std.time.microTimestamp();
-        if (_probe) std.debug.print("[probe-tick] #{d} before markLayoutDirty\n", .{_probe_n.v});
         layout.markLayoutDirty();
         g_dirty.* = false;
         g_scroll_prop_slots.clearRetainingCapacity();
@@ -3634,7 +3616,6 @@ fn appTick(now: u32) void {
             std.debug.print("[rebuild-timing] snapshot={d}us rebuildTree={d}us nodes={d} (g_node_by_id={d})\n", .{ snap_us, rebuild_us, node_count, g_node_by_id.count() });
         }
     }
-    if (_probe) std.debug.print("[probe-tick] #{d} END\n", .{_probe_n.v});
 }
 
 fn childTitle() [*:0]const u8 {

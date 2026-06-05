@@ -524,3 +524,27 @@ test "unbind cleans state and rebind is safe" {
     const rebound_fresh = camera.stepNode(77, 48) orelse return error.MissingCamera;
     try expectSolved(rebound_fresh, .{ .x = -6, .y = 0, .z = 0 }, .{}, 40);
 }
+
+test "camera cadence probe is sampled state, not a terminal side effect" {
+    camera.resetForTests();
+    defer camera.resetForTests();
+
+    const node: u32 = 99;
+    camera.bindNode(node);
+    camera.setModeForNode(node, .orbit);
+    camera.setOrbitForNode(node, .{ .target = .{ .x = 0.5, .y = 1.45, .z = 0.5 }, .yaw = 0, .pitch = 17.8, .dist = 7.65, .fov = 52 });
+
+    var now: u32 = 0;
+    while (now <= 1000) : (now += 16) {
+        _ = camera.stepNode(node, now) orelse return error.MissingCamera;
+    }
+
+    const snap = camera.probeSnapshot();
+    try testing.expect(snap.has_sample);
+    try testing.expectEqual(node, snap.node_id);
+    try testing.expect(snap.frames > 0);
+    try testing.expect(snap.avg_dt_ms >= 0);
+    try testing.expectEqual(@as(u32, 0), snap.params);
+    try testing.expectEqual(camera.Mode.orbit, snap.mode);
+    try testing.expect(snap.max_pos_lag >= 0);
+}

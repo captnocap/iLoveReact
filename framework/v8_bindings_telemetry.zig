@@ -6,6 +6,7 @@ const v8rt = @import("v8_runtime.zig");
 // as `qjs_runtime` to keep existing call sites working.
 const frame_telemetry = @import("diag/frame_telemetry.zig");
 const telemetry = @import("diag/telemetry.zig");
+const reconciler = @import("v8_bindings_reconciler.zig");
 const localstore = @import("storage/localstore.zig");
 const hotstate = @import("state/hotstate.zig");
 const sqlite_mod = @import("storage/sqlite.zig");
@@ -174,8 +175,30 @@ fn telFrameCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "paint_us", s.paint_us);
     setObjectNumber(ctx, obj, "gpu_us", s.gpu_us);
     setObjectNumber(ctx, obj, "frame_total_us", s.frame_total_us);
+    setObjectNumber(ctx, obj, "event_us", s.event_us);
+    setObjectNumber(ctx, obj, "app_tick_us", s.app_tick_us);
+    setObjectNumber(ctx, obj, "pre_paint_us", s.pre_paint_us);
+    setObjectNumber(ctx, obj, "post_frame_us", s.post_frame_us);
     setObjectNumber(ctx, obj, "frame_number", s.frame_number);
     setObjectNumber(ctx, obj, "bridge_calls_per_sec", s.bridge_calls_per_sec);
+    info.getReturnValue().set(obj.toValue());
+}
+
+fn telHostFlushCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const iso = info.getIsolate();
+    const ctx = iso.getCurrentContext();
+    const s = reconciler.telemetrySnapshot();
+    const obj = iso.initObject();
+    setObjectNumber(ctx, obj, "queued_batches", s.queued_batches);
+    setObjectNumber(ctx, obj, "queued_bytes", s.queued_bytes);
+    setObjectNumber(ctx, obj, "last_drain_batches", s.last_drain_batches);
+    setObjectNumber(ctx, obj, "last_drain_bytes", s.last_drain_bytes);
+    setObjectNumber(ctx, obj, "last_drain_us", s.last_drain_us);
+    setObjectNumber(ctx, obj, "total_enqueued_batches", s.total_enqueued_batches);
+    setObjectNumber(ctx, obj, "total_enqueued_bytes", s.total_enqueued_bytes);
+    setObjectNumber(ctx, obj, "total_drained_batches", s.total_drained_batches);
+    setObjectNumber(ctx, obj, "total_drained_bytes", s.total_drained_bytes);
     info.getReturnValue().set(obj.toValue());
 }
 
@@ -1227,6 +1250,7 @@ pub fn registerTelemetry(_: anytype) void {
     v8rt.registerHostFn("getTickUs", getTickUsCb);
 
     v8rt.registerHostFn("__tel_frame", telFrameCb);
+    v8rt.registerHostFn("__tel_host_flush", telHostFlushCb);
     v8rt.registerHostFn("__tel_gpu", telGpuCb);
     v8rt.registerHostFn("__tel_nodes", telNodesCb);
     v8rt.registerHostFn("__tel_history", telHistoryCb);
