@@ -85,6 +85,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/story/ (GAME_STORY — narrative arcs, dialog, flags)',
+      purpose: ['scripting', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/story/index.ts',
+      description:
+        'V12/V16/V20/V22 capture (2026-06-04): the "more internal tooling for story/mission/dialog" V12 orders, REWRITTEN fresh as pure steps with inert returns (the perception precedent — nothing dispatches; channelsFor names the bus channels as data, the shell owns busEmit and time). Flags: hmsc StoryState {flags, counters} verbatim (same-ref no-op writes, defensive reviveStory — NO ruling competes, the reference is the authority). The event log: hmsc gameEvents machinery (hmsc_evt_%06d ids, 240-ring, safePayload deep-copy, parentId provenance, importance families) with occurredAt as an INPUT (purity divergence, V20 determinism); murder.committed closes perception.CAPTURE.md’s deferred item — the event id IS what WitnessMemory/Case reference (chain proven in tests against GAME_PERCEPTION). Rules: the two hmsc story rules (lab.entered → lab.<id>.visited, labeled world.trigger.entered → trigger.<id>.seen) as data, applyRules pure with story.flag.set provenance effects. Arcs: linear staged progressions, conditions as data (flag/counter/event, P2); cascade semantics = state-gates cascade in one call, a live event moves AT MOST one beat; OPENING_ARC ships V22’s seven ruled beats (gate names first-cut; stage 5’s gate encodes the ruled constraint: opening.unfair-rating.cost-paid). Dialog (NO reference exists anywhere — built exactly what V16/V22 describe): selectDialog over state-only gates (createDialogSet REJECTS event gates — gate on the flag a rule sets; PROTECT THE ZERO made mechanical), priority + authored-order determinism, once-latch as a plain said.<id> flag, asCutsceneCue drops a selected line onto the V16 clock (seam proven against GAME_CUTSCENE.create/sample). All knobs in STORY_TUNING (P2). 28 P4 tests green; rjit game verify GREEN. narrative_hooks (text, world_delta) and relationship accumulation left to missions/V21 (surfaced in story/CAPTURE.md). References untouched.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts', 'game/perception.ts', 'game/cutscene/'],
+      status: 'live',
+    },
+    {
       name: 'game/input.ts (GAME_INPUT — key/pointer transport)',
       purpose: ['input', 'ai_edit', 'maintenance'],
       kind: 'module',
