@@ -111,6 +111,27 @@ test('schema evolution by addition: a NEW stream leaves old streams untouched', 
   assert(store.undoPoint() > 0, 'the new stream joins the same chain');
 });
 
+test('apply sees each event\'s log position (an undo point IS a log position)', () => {
+  globalThis.__fs_remove?.(`${ROOT}/streams/seqs.jsonl`); // re-runs must not inherit prior seqs
+  const store = openStore(ROOT);
+  const seqs = store.defineStream({
+    name: 'seqs',
+    initial: (): number[] => [],
+    apply: (s: number[], _event: any, seq: number): number[] => [...s, seq],
+  });
+  const a = seqs.append({});
+  const b = seqs.append({});
+  assertEqual(seqs.state().join(','), `${a.globalSeq},${b.globalSeq}`,
+    'live appends hand the materializer the record seq');
+  const replayed = openStore(ROOT).defineStream({
+    name: 'seqs',
+    initial: (): number[] => [],
+    apply: (s: number[], _event: any, seq: number): number[] => [...s, seq],
+  });
+  assertEqual(replayed.state().join(','), seqs.state().join(','),
+    'a disk replay folds the same positions');
+});
+
 test('the backup story: streams + manifest copy out, byte-faithful', () => {
   const store = openStore(ROOT);
   store.defineStream(WORLD);

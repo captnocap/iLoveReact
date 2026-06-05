@@ -53,8 +53,12 @@ export type StreamDef<State, Event> = {
   /** the empty materialized state */
   initial: () => State;
   /** one materializer step; MUST return a new/updated state, never throw on
-   *  events it predates (additions arrive later — tolerate unknown shapes) */
-  apply: (state: State, event: Event) => State;
+   *  events it predates (additions arrive later — tolerate unknown shapes).
+   *  `seq` is the event's own log position (its globalSeq) — V20 says an undo
+   *  point IS a log position, so a materializer that records positions (the
+   *  sessions stream) reads them here instead of guessing. Two-arg
+   *  materializers ignore it. */
+  apply: (state: State, event: Event, seq: number) => State;
 };
 
 export type StreamHandle<State, Event> = {
@@ -140,7 +144,7 @@ export function openStore(rootDir: string): Store {
     let state = open.def.initial();
     for (const record of open.events) {
       if (record.seq > maxSeq) break;
-      state = open.def.apply(state, record.event);
+      state = open.def.apply(state, record.event, record.seq);
     }
     return state;
   };
@@ -176,7 +180,7 @@ export function openStore(rootDir: string): Store {
         const existing = host.__fs_read(path);
         host.__fs_write(path, `${typeof existing === 'string' ? existing : ''}${JSON.stringify(record)}\n`);
         open.events.push(record);
-        open.current = open.def.apply(open.current, event);
+        open.current = open.def.apply(open.current, event, record.seq);
         return { globalSeq: record.seq, stream: def.name, index: open.events.length - 1 };
       },
       state: () => open.current as State,
