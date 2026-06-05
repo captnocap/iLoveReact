@@ -839,20 +839,24 @@
       ],
       "note": "The game's host-side physics + movement (framework/game/physics.zig + movement.zig, V1/V7/V18), registered by framework/v8_bindings_game_physics.zig. Host fns keep their legacy __hmsc_* names (plus honest __game_physics_* aliases) so cart JS callers keep working. Fires for carts shipping the hmsc host-physics bridge or anything importing the cart/hmsc-int/game/ ground floor. A 2D interface cart pays zero bytes and zero host fns."
     },
-    "pathing": {
+    "game-pathing": {
       "triggers": [
         {
           "kind": "metafileInput",
           "input": "runtime/pathing.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/hmsc-int/game/pathing.ts"
         }
       ],
       "buildOptions": [
-        "has-pathing"
+        "has-game-pathing"
       ],
       "v8Bindings": [
-        "pathing"
+        "game_pathing"
       ],
-      "note": "Host-side tile-grid A* pathing (framework/v8_bindings_pathing.zig). Carts that import runtime/pathing.ts get __path_* registered: publish a kind grid + per-agent cost profiles once, the host owns pathfinding, lane offsets (drive/walk on the correct side), and the disruption generation counter that tells precomputed paths when to re-ask."
+      "note": "The game's host-side pathing (framework/game/pathing.zig, V5/V18), registered by framework/v8_bindings_game_pathing.zig: grid A* with per-agent cost profiles + flow penalties, lane discipline (trio-center snap + junction apexes, opt-in via kind classes), and deterministic motion plans. Host fns keep their legacy __path_* names (plus honest __game_pathing_* aliases) so cart JS callers keep working. Fires for carts importing runtime/pathing.ts (legacy face) or the cart/hmsc-int/game/pathing.ts door."
     },
     "pg": {
       "shipGate": "pg",

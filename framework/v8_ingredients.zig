@@ -239,10 +239,11 @@ const v8_bindings_physics_lab = if (enabledFor("physics_lab")) @import("v8_bindi
 const v8_bindings_game_physics = if (enabledFor("game_physics")) @import("v8_bindings_game_physics.zig") else struct {
     pub fn registerGamePhysics(_: anytype) void {}
 };
-// Pure-Zig grid A* for NPC walk/drive pathing — no native deps, but still
-// opt-in: only carts whose bundle calls __path_* pay the binding surface.
-const v8_bindings_pathing = if (enabledFor("pathing")) @import("v8_bindings_pathing.zig") else struct {
-    pub fn registerPathing(_: anytype) void {}
+// The game's pathing (framework/game/pathing.zig, V5/V18): grid A* + lane
+// discipline + deterministic motion plans, __path_*/__game_pathing_* host
+// fns. Gated INGREDIENT — when off, the module is never even parsed.
+const v8_bindings_game_pathing = if (enabledFor("game_pathing")) @import("v8_bindings_game_pathing.zig") else struct {
+    pub fn registerGamePathing(_: anytype) void {}
 };
 
 // ── INGREDIENTS ─────────────────────────────────────────────────────
@@ -321,7 +322,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "paintable", .required = false, .grep_prefix = "__paintable_", .reg_fn = "registerPaintable", .mod = v8_bindings_paintable },
     .{ .name = "physics_lab", .required = false, .grep_prefix = "__physics_lab_", .reg_fn = "registerPhysicsLab", .mod = v8_bindings_physics_lab },
     .{ .name = "game_physics", .required = false, .grep_prefix = "__hmsc_", .reg_fn = "registerGamePhysics", .mod = v8_bindings_game_physics },
-    .{ .name = "pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerPathing", .mod = v8_bindings_pathing },
+    .{ .name = "game_pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerGamePathing", .mod = v8_bindings_game_pathing },
 };
 
 /// Register every ingredient's host fns into the current V8 context.
