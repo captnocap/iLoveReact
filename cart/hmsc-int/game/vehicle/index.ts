@@ -4,6 +4,8 @@
 // remains the behavior reference; this file is the game-facing, React-free
 // rewrite. Authoring UI is deliberately not here.
 
+import { vehiclePaintTextureKey, type PaintedOverlay } from '../painted';
+
 export type V3 = [number, number, number];
 
 export type VehicleStyleId =
@@ -58,6 +60,11 @@ export type VehicleMesh = {
   rotation?: V3;
   scale: V3;
   material: VehicleMaterial;
+  /** MODELPAINT-0605 (additive): set when the doc carries a painted overlay
+   *  for this part — the renderer samples the capture published under this
+   *  key. Damage scars/cracks and role livery stripes are DECALS and never
+   *  carry it. */
+  textureKey?: string;
 };
 
 export type VehicleHitbox = {
@@ -82,7 +89,24 @@ export type VehicleDoc = {
   gasSide: -1 | 1;
   gasZ: number;
   damage: Partial<Record<VehiclePartId, DamageLevel>>;
+  /** MODELPAINT-0605 (additive — pre-paint docs stay valid forever): per-part
+   *  pixel-painted texture overlays, authored in /cutout. PER-PART is the
+   *  ruled granularity: every panel/part is its own paintable surface. */
+  paint?: Partial<Record<VehiclePartId, PaintedOverlay>>;
 };
+
+/** Set/replace/remove one part's painted overlay — pure, additive (the
+ *  /cutout save path; everything else on the document is untouched). */
+export function applyVehiclePaint(doc: VehicleDoc, part: VehiclePartId, overlay: PaintedOverlay | null): VehicleDoc {
+  const paint: Partial<Record<VehiclePartId, PaintedOverlay>> = { ...(doc.paint ?? {}) };
+  if (overlay) paint[part] = overlay;
+  else delete paint[part];
+  if (Object.keys(paint).length === 0) {
+    const { paint: _gone, ...rest } = doc;
+    return rest as VehicleDoc;
+  }
+  return { ...doc, paint };
+}
 
 export type VehicleBuild = {
   meshes: VehicleMesh[];
@@ -447,27 +471,44 @@ export function buildVehicle(doc: VehicleDoc, actions: readonly VehicleAction[] 
   const rearLightsDamage = damageOf(doc, 'rear_lights');
   const gasDamage = damageOf(doc, 'gas_tank');
 
+  // MODELPAINT-0605: a painted part's PANEL meshes carry its texture key
+  // (content-addressed by the save stamp); decals — damage scars/cracks and
+  // role livery stripes/marks — are surface DRESSING, never textured. A
+  // paintless doc produces byte-identical meshes (no textureKey field at all).
+  let inDecal = false;
   const add = (id: VehiclePartId, kind: VehicleMeshKind, position: V3, scale: V3, material: VehicleMaterial, rotation: V3 = [0, 0, 0], params = VEHICLE_MESH_PARAMS.box) => {
-    meshes.push({ id, label: VEHICLE_PART_LABELS[id], kind, params, position, scale, material, rotation });
+    const overlay = doc.paint?.[id];
+    meshes.push({
+      id, label: VEHICLE_PART_LABELS[id], kind, params, position, scale, material, rotation,
+      ...(overlay && !inDecal ? { textureKey: vehiclePaintTextureKey(id, overlay.stamp) } : {}),
+    });
+  };
+  const asDecal = (fn: () => void) => {
+    inDecal = true;
+    try { fn(); } finally { inDecal = false; }
   };
   const box = (id: VehiclePartId, position: V3, size: V3, rotation: V3 = [0, 0, 0], critical = false) => {
     hitboxes.push({ id, label: VEHICLE_PART_LABELS[id], position, rotation, size, damage: damageOf(doc, id), critical });
   };
   const scar = (id: VehiclePartId, level: DamageLevel, position: V3, scale: V3, rotation: V3 = [0, 0, 0]) => {
     if (level <= 0) return;
-    add(id, 'box', position, scale, level >= 3 ? '#111827' : '#3a2a20', rotation);
+    asDecal(() => add(id, 'box', position, scale, level >= 3 ? '#111827' : '#3a2a20', rotation));
   };
   const crack = (id: VehiclePartId, level: DamageLevel, position: V3, scale: V3, rotation: V3 = [0, 0, 0]) => {
     if (level <= 0) return;
-    add(id, 'box', position, scale, level >= 3 ? '#f8fafc' : '#cbd5e1', rotation);
+    asDecal(() => add(id, 'box', position, scale, level >= 3 ? '#f8fafc' : '#cbd5e1', rotation));
   };
   const sideStripe = (id: VehiclePartId, color: string, y: number, z: number, depth: number, h = 0.11) => {
-    add(id, 'box', [-halfW - 0.086, y, z], [0.018, h, depth], color);
-    add(id, 'box', [halfW + 0.086, y, z], [0.018, h, depth], color);
+    asDecal(() => {
+      add(id, 'box', [-halfW - 0.086, y, z], [0.018, h, depth], color);
+      add(id, 'box', [halfW + 0.086, y, z], [0.018, h, depth], color);
+    });
   };
   const sideMark = (id: VehiclePartId, color: string, x: number, y: number, z: number, s = 1) => {
-    add(id, 'box', [x, y, z], [0.02, 0.16 * s, 0.36 * s], color);
-    add(id, 'box', [x + (x < 0 ? -0.004 : 0.004), y, z], [0.022, 0.36 * s, 0.13 * s], color);
+    asDecal(() => {
+      add(id, 'box', [x, y, z], [0.02, 0.16 * s, 0.36 * s], color);
+      add(id, 'box', [x + (x < 0 ? -0.004 : 0.004), y, z], [0.022, 0.36 * s, 0.13 * s], color);
+    });
   };
 
   if (isBoxyService) {
@@ -707,6 +748,8 @@ import { vehiclesStream } from './stream';
 export const GAME_VEHICLE = Object.freeze({
   make: makeVehicle,
   build: buildVehicle,
+  // MODELPAINT-0605: /cutout's save path — pixel overlays, per part
+  applyPaint: applyVehiclePaint,
   damageOf,
   maxDamage,
   shade,

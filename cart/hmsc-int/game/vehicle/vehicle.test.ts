@@ -8,6 +8,7 @@ import {
   VEHICLE_POSES,
   VEHICLE_ROLES,
   VEHICLE_STYLES,
+  applyVehiclePaint,
   buildVehicle,
   makeVehicle,
   panelMaterial,
@@ -17,6 +18,7 @@ import {
   type VehicleRoleId,
   type VehicleStyleId,
 } from './index';
+import { vehiclePaintTextureKey, type PaintedOverlay } from '../painted';
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
 const EPS = 1e-9;
@@ -163,6 +165,49 @@ test('GAME_VEHICLE is the sealed door and carries the captured interface', () =>
   assertEqual(typeof GAME_VEHICLE.build, 'function', 'build door');
   assertEqual(GAME_VEHICLE.tables.parts.length, REFERENCE_COUNTS.parts, 'door exposes part table');
   assertEqual(firstMesh(doc(), 'body').label, VEHICLE_PART_LABELS.body, 'builder reads labels from the table');
+});
+
+test('painted overlays: paintless builds byte-identical, panels keyed, decals never (MODELPAINT-0605)', () => {
+  const plain = doc({ role: 'police', damage: { hood: 2, windshield: 1 } });
+  const before = JSON.stringify(buildVehicle(plain));
+  assert(!before.includes('textureKey'), 'a paintless doc builds meshes with NO textureKey field at all');
+
+  const overlay: PaintedOverlay = {
+    version: 1, stamp: 4242, cols: 4, rows: 4,
+    layers: [{ color: '#22d3ee', cells: [1, 2] }],
+  };
+  const painted = applyVehiclePaint(plain, 'hood', overlay);
+  assertEqual(JSON.stringify(plain.paint), undefined, 'apply is pure — the source doc never mutates');
+  assertEqual(JSON.stringify(buildVehicle(plain)), before, 'the paintless build is unchanged after the field landed');
+
+  const expectKey = vehiclePaintTextureKey('hood', 4242);
+  // pristine painted hood: EVERY hood mesh is the part's surface (panel +
+  // grille detail) and carries the key — per-part uniformity
+  const pristine = buildVehicle(applyVehiclePaint(doc({ role: 'police' }), 'hood', overlay));
+  const pristineHood = pristine.meshes.filter((m) => m.id === 'hood');
+  assert(pristineHood.length > 0, 'the hood exists');
+  assert(pristineHood.every((m) => m.textureKey === expectKey), 'every undamaged hood mesh carries the content-addressed key');
+  // damaged painted hood: scars join the part id as DECALS — keyed count
+  // stays exactly the pristine surface, the scar meshes are unkeyed extras
+  const damaged = buildVehicle(applyVehiclePaint(painted, 'hood', overlay));
+  const damagedHood = damaged.meshes.filter((m) => m.id === 'hood');
+  assert(damagedHood.length > pristineHood.length, 'damage adds scar meshes to the part');
+  assertEqual(damagedHood.filter((m) => m.textureKey === expectKey).length, pristineHood.length,
+    'scar decals never take the paint — keyed meshes are exactly the surface set');
+  for (const m of damaged.meshes) {
+    if (m.id !== 'hood') assertEqual(m.textureKey, undefined, `unpainted part ${m.id} carries no key`);
+  }
+  // role livery stripes/marks ride the door part ids as decals — paint a
+  // police car's driver door and the stripes must stay untextured
+  const stripey = buildVehicle(applyVehiclePaint(doc({ role: 'police' }), 'driver_door', overlay));
+  const doorKey = vehiclePaintTextureKey('driver_door', 4242);
+  const doorMeshes = stripey.meshes.filter((m) => m.id === 'driver_door');
+  assert(doorMeshes.some((m) => m.textureKey === doorKey), 'the painted door panel carries the key');
+  assert(doorMeshes.some((m) => m.textureKey === undefined), 'the police stripes/marks on the door stay untextured decals');
+
+  const cleared = applyVehiclePaint(painted, 'hood', null);
+  assert(!('paint' in cleared), 'removing the last overlay drops the channel');
+  assertEqual(JSON.stringify(buildVehicle(cleared)), before, 'paint → unpaint rebuilds byte-identical');
 });
 
 finish('game/vehicle');

@@ -100,7 +100,7 @@ export type { PaintedOverlay, PaintedOverlayLayer } from './painted';
 // ── capture-pending doors (V17: the import line is already the right one) ──
 export { GAME_FIGURE, charactersStream, bakeBodyDocument, applyBodyPaint } from './figure';
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';
-export { GAME_VEHICLE, vehiclesStream } from './vehicle';
+export { GAME_VEHICLE, vehiclesStream, applyVehiclePaint } from './vehicle';
 export type { VehicleDoc, VehiclePartId, VehicleStyleId, VehicleRoleId, VehiclePoseId, DamageLevel, VehicleBuild, VehiclesEvent, VehiclesStreamState } from './vehicle';
 export { GAME_ITEMS } from './items';
 export { GAME_ANIMATION } from './animation';

@@ -116,3 +116,26 @@ GAME_* door — the same shape as `createKeyState`/`CAMERA_RIGS`).
 `stream.test.ts` (5 P4 cases) pins garage semantics, schema-evolution
 tolerance, the deletion-contract round-trip through a real on-disk store, and
 undo-as-log-position.
+
+## Per-part painted textures (MODELPAINT-0605, 2026-06-05)
+
+GREENLIT as new capability (vehicles had NO texture system — color/trim
+hexes only): `VehicleDoc.paint?` — per-`VehiclePartId` `PaintedOverlay`
+slots (game/painted.ts), authored in /cutout. `applyVehiclePaint` is the
+pure save step (null removes; last removal drops the channel).
+`buildVehicle` threads a content-addressed `textureKey` onto a painted
+part's SURFACE meshes; damage scars/cracks and role livery stripes/marks
+are DECALS (the `asDecal` guard) and never take the paint. Pinned: a
+paintless doc builds meshes with no textureKey field at all (byte-identical
+to pre-capability builds); paint→unpaint rebuilds byte-identical.
+
+REPRESENTATIONAL PICKS (named, per the ruling's no-stall order):
+- granularity = the existing `VehiclePartId` vocabulary — one painting per
+  part id; every mesh of the part's surface set shares it (the hood's
+  grille detail is hood surface, so it takes the hood's paint — per-part
+  uniformity beats special-casing details).
+- unwrap convention = one square canvas per part, box-mapped to all six
+  faces of each part mesh (the billboard_demo texture law). No per-face
+  unwrap; a part with several boxes repeats the texture per box.
+- glass/light parts are paintable like everything else (uniform
+  capability); a painted windshield reads opaque — the user's choice.
