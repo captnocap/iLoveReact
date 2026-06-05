@@ -220,6 +220,28 @@ const ControllerSlot = struct {
 var g_controllers: [MAX_CONTROLLERS]ControllerSlot = [_]ControllerSlot{.{}} ** MAX_CONTROLLERS;
 var g_active_node_id: u32 = 0;
 var g_legacy_controller: Controller = .{};
+var g_probe_last_ms: u32 = 0;
+
+fn probeMode(mode: Mode) []const u8 {
+    return switch (mode) {
+        .orbit => "orbit",
+        .aim => "aim",
+    };
+}
+
+fn probeOrbit(label: []const u8, orbit: OrbitParams) void {
+    std.debug.print(
+        "{s}=target({d:.2},{d:.2},{d:.2}) yaw={d:.2} pitch={d:.2} dist={d:.2} fov={d:.2} zoom={d:.2}",
+        .{ label, orbit.target.x, orbit.target.y, orbit.target.z, orbit.yaw, orbit.pitch, orbit.dist, orbit.fov, orbit.zoom },
+    );
+}
+
+fn probeSolved(label: []const u8, solved: Solved) void {
+    std.debug.print(
+        "{s}=pos({d:.2},{d:.2},{d:.2}) look({d:.2},{d:.2},{d:.2}) fov={d:.2}",
+        .{ label, solved.pos.x, solved.pos.y, solved.pos.z, solved.target.x, solved.target.y, solved.target.z, solved.fov },
+    );
+}
 
 fn findSlotIndex(node_id: u32) ?usize {
     if (node_id == 0) return null;
@@ -341,6 +363,7 @@ pub fn resetForTests() void {
     g_controllers = [_]ControllerSlot{.{}} ** MAX_CONTROLLERS;
     g_active_node_id = 0;
     g_legacy_controller = .{};
+    g_probe_last_ms = 0;
 }
 
 pub fn writeNode(node: anytype, solved: Solved) void {
@@ -363,5 +386,47 @@ pub fn stepNode(node_id: u32, now_ms: u32) ?Solved {
     const dt_ms = if (slot.last_tick_ms == 0 or now_ms < slot.last_tick_ms) 0 else now_ms - slot.last_tick_ms;
     slot.last_tick_ms = now_ms;
     const dt_seconds = @as(f32, @floatFromInt(dt_ms)) / 1000.0;
-    return slot.controller.step(dt_seconds);
+    const solved = slot.controller.step(dt_seconds);
+    if (g_probe_last_ms == 0 or now_ms < g_probe_last_ms or now_ms - g_probe_last_ms >= 1000) {
+        g_probe_last_ms = now_ms;
+        const desired = slot.controller.desired();
+        std.debug.print(
+            "[probe-camera-frame] now={d} node={d} active={d} enabled={} mode={s} initialized={} dt_ms={d} ",
+            .{ now_ms, node_id, g_active_node_id, slot.controller.enabled, probeMode(slot.controller.mode), slot.controller.initialized, dt_ms },
+        );
+        probeOrbit("stagedOrbit", g_legacy_controller.orbit);
+        std.debug.print(" ", .{});
+        probeOrbit("slotOrbit", slot.controller.orbit);
+        std.debug.print(" ", .{});
+        probeSolved("desired", desired);
+        std.debug.print(" ", .{});
+        probeSolved("solved", solved);
+        std.debug.print("\n", .{});
+    }
+    return solved;
+}
+
+pub fn probeHostBind(label: []const u8, node_id: u32, hit: bool) void {
+    std.debug.print("[probe-camera-host] {s} node={d} hit={} active={d} bound={}\n", .{ label, node_id, hit, g_active_node_id, isBound(node_id) });
+}
+
+pub fn probeHostMode(label: []const u8, mode: Mode, argc: u32, node_id: u32) void {
+    std.debug.print("[probe-camera-host] {s} argc={d} node={d} mode={s} active={d}\n", .{ label, argc, node_id, probeMode(mode), g_active_node_id });
+}
+
+pub fn probeHostOrbit(label: []const u8, params: OrbitParams, argc: u32, node_id: u32) void {
+    std.debug.print("[probe-camera-host] {s} argc={d} node={d} active={d} ", .{ label, argc, node_id, g_active_node_id });
+    probeOrbit("argsOrbit", params);
+    std.debug.print("\n", .{});
+}
+
+pub fn probeHostAim(label: []const u8, params: AimParams, argc: u32, node_id: u32) void {
+    std.debug.print(
+        "[probe-camera-host] {s} argc={d} node={d} active={d} aim=target({d:.2},{d:.2},{d:.2}) yaw={d:.2} pitch={d:.2} fov={d:.2}\n",
+        .{ label, argc, node_id, g_active_node_id, params.target.x, params.target.y, params.target.z, params.yaw, params.pitch, params.fov },
+    );
+}
+
+pub fn probeHostDeltas(label: []const u8, yaw_delta: f32, pitch_delta: f32, argc: u32, node_id: u32) void {
+    std.debug.print("[probe-camera-host] {s} argc={d} node={d} active={d} yawDelta={d:.2} pitchDelta={d:.2}\n", .{ label, argc, node_id, g_active_node_id, yaw_delta, pitch_delta });
 }

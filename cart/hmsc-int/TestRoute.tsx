@@ -189,6 +189,8 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   // SAME clamped deltas feed both sides. No React state: a camera drag is
   // zero render work.
   const lookRef = useRef({ yaw: props.state.player.yawDegrees, pitch: CAMERA.initialPitchDegrees });
+  const cameraRef = useRef<any>(null);
+  const nativeCameraRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
   const keysRef = useRef<ReturnType<typeof GAME_INPUT.createKeyState> | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   // ADS aim (the ruled camera is REGISTRY-WITH-AIM, Q3/Q3b): right-mouse hold
@@ -202,12 +204,12 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   // Send the CURRENT rig params to the controller — called on change only
   // (pose published, mode switched, route reset). Drag deltas go through
   // setInputDeltas instead; idle frames send nothing.
-  const sendCameraParams = (pose: { x: number; y: number; z: number }) => {
+  const sendCameraParamsTo = (camera: ReturnType<typeof GAME_NATIVE_CAMERA.forNode>, pose: { x: number; y: number; z: number }) => {
     const l = lookRef.current;
     if (aimRef.current) {
-      GAME_NATIVE_CAMERA.setAim({ target: [pose.x, pose.y, pose.z], yaw: l.yaw, pitch: l.pitch });
+      camera.setAim({ target: [pose.x, pose.y, pose.z], yaw: l.yaw, pitch: l.pitch });
     } else {
-      GAME_NATIVE_CAMERA.setOrbit({
+      camera.setOrbit({
         target: [pose.x, pose.y + CAMERA.targetHeightMeters, pose.z],
         yaw: l.yaw,
         pitch: l.pitch,
@@ -215,6 +217,10 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         fov: CAMERA.fovDegrees,
       });
     }
+  };
+  const sendCameraParams = (pose: { x: number; y: number; z: number }) => {
+    const camera = nativeCameraRef.current;
+    if (camera) sendCameraParamsTo(camera, pose);
   };
   const sendCameraRef = useRef(sendCameraParams);
   sendCameraRef.current = sendCameraParams;
@@ -224,12 +230,18 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   // declarative camera props below stay STATIC, so React never fights the
   // host's per-frame writes; disable on unmount returns the node to JS props.
   useEffect(() => {
-    sendCameraRef.current(playerRef.current);
-    GAME_NATIVE_CAMERA.setMode('walk');
-    const bound = GAME_NATIVE_CAMERA.bindFirst();
-    if (!bound) console.warn('[test] native camera not engaged — host missing has-game-camera (rebuild)');
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) {
+      console.warn('[test] native camera not engaged — camera node id unavailable');
+      return;
+    }
+    const camera = GAME_NATIVE_CAMERA.forNode(nodeId);
+    nativeCameraRef.current = camera;
+    sendCameraParamsTo(camera, playerRef.current);
+    camera.setMode('walk');
     return () => {
-      GAME_NATIVE_CAMERA.disable();
+      camera.disable();
+      if (nativeCameraRef.current === camera) nativeCameraRef.current = null;
     };
   }, []);
 
@@ -364,7 +376,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
           const l = lookRef.current;
           l.pitch = clamp(l.pitch, CAMERA.minPitchDegrees, CAMERA.maxPitchDegrees);
         }
-        GAME_NATIVE_CAMERA.setMode(aim ? 'aim' : 'walk');
+        nativeCameraRef.current?.setMode(aim ? 'aim' : 'walk');
         sendCameraRef.current(playerRef.current);
       }
       // The V7 cart-side duty: ship a camera-relative direction vector.
@@ -491,7 +503,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     const l = lookRef.current;
     const nextYaw = l.yaw - dx * CAMERA.yawDegreesPerPixel;
     const nextPitch = clamp(l.pitch - dy * CAMERA.pitchDegreesPerPixel, limits.min, limits.max);
-    GAME_NATIVE_CAMERA.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    nativeCameraRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
     l.yaw = nextYaw;
     l.pitch = nextPitch;
   };
@@ -549,7 +561,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       {/* GAP(W-3): game sky background awaits a captured home */}
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={hmscSkyBackgroundColor(sceneState.config.sky)} showGrid={false} showAxes={false}>
         {/* STATIC boot frame — the V23 controller owns these fields per frame once bound */}
-        <Scene3D.Camera position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={sceneState.config.view.drawRadiusMeters} />
+        <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={sceneState.config.view.drawRadiusMeters} />
         <Scene3D.Fog enabled={false} />
         {/* GAP(W-2): the world renderer awaits the world render lane */}
         <WorldStatics world={sceneState.world} skyConfig={sceneState.config.sky} />

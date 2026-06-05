@@ -73,6 +73,7 @@ fn hostBindNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     game_camera.bindNode(node_id);
+    game_camera.probeHostBind("__game_camera_bind_node", node_id, true);
     setReturnNull(info);
 }
 
@@ -98,11 +99,26 @@ fn hostBindFirst(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     while (it.next()) |entry| {
         const node = entry.value_ptr.*;
         if (node.scene3d_camera) {
+            std.debug.print(
+                "[probe-camera-host] __game_camera_bind_first candidate node={d} pos({d:.2},{d:.2},{d:.2}) look({d:.2},{d:.2},{d:.2}) fov={d:.2}\n",
+                .{
+                    entry.key_ptr.*,
+                    node.scene3d_pos_x,
+                    node.scene3d_pos_y,
+                    node.scene3d_pos_z,
+                    node.scene3d_look_x,
+                    node.scene3d_look_y,
+                    node.scene3d_look_z,
+                    node.scene3d_fov,
+                },
+            );
             game_camera.bindNode(entry.key_ptr.*);
+            game_camera.probeHostBind("__game_camera_bind_first", entry.key_ptr.*, true);
             setReturnF64(info, @floatFromInt(entry.key_ptr.*));
             return;
         }
     }
+    game_camera.probeHostBind("__game_camera_bind_first", 0, false);
     setReturnF64(info, 0);
 }
 
@@ -117,6 +133,7 @@ fn hostSetMode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnNull(info);
         return;
     };
+    game_camera.probeHostMode("__game_camera_set_mode", mode, info.length(), 0);
     game_camera.setMode(mode);
     setReturnNull(info);
 }
@@ -136,6 +153,7 @@ fn hostSetModeNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void 
         setReturnNull(info);
         return;
     };
+    game_camera.probeHostMode("__game_camera_set_mode_node", mode, info.length(), node_id);
     game_camera.setModeForNode(node_id, mode);
     setReturnNull(info);
 }
@@ -157,7 +175,9 @@ fn orbitParams(info: v8.FunctionCallbackInfo, offset: u32) game_camera.OrbitPara
 
 fn hostSetOrbit(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    game_camera.setOrbit(orbitParams(info, 0));
+    const params = orbitParams(info, 0);
+    game_camera.probeHostOrbit("__game_camera_set_orbit", params, info.length(), 0);
+    game_camera.setOrbit(params);
     setReturnNull(info);
 }
 
@@ -167,7 +187,9 @@ fn hostSetOrbitNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void
         setReturnNull(info);
         return;
     };
-    game_camera.setOrbitForNode(node_id, orbitParams(info, 1));
+    const params = orbitParams(info, 1);
+    game_camera.probeHostOrbit("__game_camera_set_orbit_node", params, info.length(), node_id);
+    game_camera.setOrbitForNode(node_id, params);
     setReturnNull(info);
 }
 
@@ -192,7 +214,9 @@ fn aimParams(info: v8.FunctionCallbackInfo, offset: u32) game_camera.AimParams {
 
 fn hostSetAim(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    game_camera.setAim(aimParams(info, 0));
+    const params = aimParams(info, 0);
+    game_camera.probeHostAim("__game_camera_set_aim", params, info.length(), 0);
+    game_camera.setAim(params);
     setReturnNull(info);
 }
 
@@ -202,16 +226,18 @@ fn hostSetAimNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnNull(info);
         return;
     };
-    game_camera.setAimForNode(node_id, aimParams(info, 1));
+    const params = aimParams(info, 1);
+    game_camera.probeHostAim("__game_camera_set_aim_node", params, info.length(), node_id);
+    game_camera.setAimForNode(node_id, params);
     setReturnNull(info);
 }
 
 fn hostSetInputDeltas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    game_camera.applyInputDeltas(
-        @floatCast(argToF64(info, 0) orelse 0),
-        @floatCast(argToF64(info, 1) orelse 0),
-    );
+    const yaw_delta: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const pitch_delta: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    game_camera.probeHostDeltas("__game_camera_set_input_deltas", yaw_delta, pitch_delta, info.length(), 0);
+    game_camera.applyInputDeltas(yaw_delta, pitch_delta);
     setReturnNull(info);
 }
 
@@ -221,11 +247,10 @@ fn hostSetInputDeltasNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c
         setReturnNull(info);
         return;
     };
-    game_camera.applyInputDeltasForNode(
-        node_id,
-        @floatCast(argToF64(info, 1) orelse 0),
-        @floatCast(argToF64(info, 2) orelse 0),
-    );
+    const yaw_delta: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const pitch_delta: f32 = @floatCast(argToF64(info, 2) orelse 0);
+    game_camera.probeHostDeltas("__game_camera_set_input_deltas_node", yaw_delta, pitch_delta, info.length(), node_id);
+    game_camera.applyInputDeltasForNode(node_id, yaw_delta, pitch_delta);
     setReturnNull(info);
 }
 

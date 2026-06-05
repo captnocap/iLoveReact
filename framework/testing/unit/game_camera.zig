@@ -26,6 +26,28 @@ fn expectSolved(actual: camera.Solved, pos: camera.Vec3, target: camera.Vec3, fo
     try expectClose(actual.fov, fov);
 }
 
+const FakeCameraNode = struct {
+    scene3d_camera: bool = false,
+    scene3d_pos_x: f32 = 0,
+    scene3d_pos_y: f32 = 0,
+    scene3d_pos_z: f32 = 0,
+    scene3d_look_x: f32 = 0,
+    scene3d_look_y: f32 = 0,
+    scene3d_look_z: f32 = 0,
+    scene3d_fov: f32 = 0,
+};
+
+fn expectNodeCamera(node: FakeCameraNode, solved: camera.Solved) !void {
+    try testing.expect(node.scene3d_camera);
+    try expectClose(node.scene3d_pos_x, solved.pos.x);
+    try expectClose(node.scene3d_pos_y, solved.pos.y);
+    try expectClose(node.scene3d_pos_z, solved.pos.z);
+    try expectClose(node.scene3d_look_x, solved.target.x);
+    try expectClose(node.scene3d_look_y, solved.target.y);
+    try expectClose(node.scene3d_look_z, solved.target.z);
+    try expectClose(node.scene3d_fov, solved.fov);
+}
+
 fn expectBetween(actual: f32, a: f32, b: f32) !void {
     try testing.expect(actual > @min(a, b));
     try testing.expect(actual < @max(a, b));
@@ -275,6 +297,100 @@ test "legacy node-less params staged before binding drive the default binding" {
     try testing.expectEqual(@as(u32, 303), camera.activeNodeId());
     const solved = camera.stepActive(1) orelse return error.MissingCamera;
     try expectSolved(solved, .{ .x = -5, .y = 1.5, .z = -2 }, .{ .x = 3, .y = 1.5, .z = -2 }, 51);
+}
+
+test "test route node-scoped boot ignores already-mounted editor cameras" {
+    camera.resetForTests();
+    defer camera.resetForTests();
+
+    const editor_node: u32 = 11;
+    const test_node: u32 = 22;
+    camera.bindNode(editor_node);
+    const editor_params = camera.OrbitParams{
+        .target = .{ .x = 4508.64, .y = -12866.19, .z = 6513.40 },
+        .yaw = 0,
+        .pitch = 0,
+        .dist = 1,
+        .fov = 65,
+    };
+    camera.setOrbitForNode(editor_node, editor_params);
+
+    camera.bindNode(test_node);
+    const test_params = camera.OrbitParams{
+        .target = .{ .x = 0.5, .y = 1.45, .z = 0.5 },
+        .yaw = 0,
+        .pitch = 17.8,
+        .dist = 7.65,
+        .fov = 52,
+    };
+    camera.setOrbitForNode(test_node, test_params);
+    camera.setModeForNode(test_node, .orbit);
+
+    const solved = camera.stepNode(test_node, 1) orelse return error.MissingCamera;
+    const expected = camera.solveOrbit(test_params);
+    try expectSolved(solved, expected.pos, expected.target, expected.fov);
+
+    const hidden = camera.stepNode(editor_node, 1) orelse return error.MissingEditorCamera;
+    const expected_hidden = camera.solveOrbit(editor_params);
+    try expectSolved(hidden, expected_hidden.pos, expected_hidden.target, expected_hidden.fov);
+}
+
+test "visible test camera layout fields receive the native frame when an editor camera is mounted" {
+    camera.resetForTests();
+    defer camera.resetForTests();
+
+    const editor_node: u32 = 11;
+    const test_node: u32 = 22;
+    const hidden_boot = camera.Solved{
+        .pos = .{ .x = 4508.65, .y = -12867.19, .z = 6513.38 },
+        .target = .{ .x = 4508.64, .y = -12866.19, .z = 6513.40 },
+        .fov = 65,
+    };
+    const hidden_layout = FakeCameraNode{
+        .scene3d_camera = true,
+        .scene3d_pos_x = hidden_boot.pos.x,
+        .scene3d_pos_y = hidden_boot.pos.y,
+        .scene3d_pos_z = hidden_boot.pos.z,
+        .scene3d_look_x = hidden_boot.target.x,
+        .scene3d_look_y = hidden_boot.target.y,
+        .scene3d_look_z = hidden_boot.target.z,
+        .scene3d_fov = hidden_boot.fov,
+    };
+    var visible_layout = FakeCameraNode{
+        .scene3d_camera = true,
+        .scene3d_pos_x = 0.5,
+        .scene3d_pos_y = 3.79,
+        .scene3d_pos_z = -6.78,
+        .scene3d_look_x = 0.5,
+        .scene3d_look_y = 1.45,
+        .scene3d_look_z = 0.5,
+        .scene3d_fov = 52,
+    };
+
+    camera.bindNode(editor_node);
+    camera.setOrbitForNode(editor_node, .{
+        .target = hidden_boot.target,
+        .yaw = 0,
+        .pitch = 0,
+        .dist = 1,
+        .fov = hidden_boot.fov,
+    });
+
+    camera.bindNode(test_node);
+    const moved_params = camera.OrbitParams{
+        .target = .{ .x = 1.45, .y = 1.45, .z = 0.5 },
+        .yaw = 0,
+        .pitch = 17.8,
+        .dist = 7.65,
+        .fov = 52,
+    };
+    camera.setOrbitForNode(test_node, moved_params);
+    camera.setModeForNode(test_node, .orbit);
+    const visible_solved = camera.stepNode(test_node, 1000) orelse return error.MissingCamera;
+    camera.writeNode(&visible_layout, visible_solved);
+
+    try expectNodeCamera(visible_layout, camera.solveOrbit(moved_params));
+    try expectNodeCamera(hidden_layout, hidden_boot);
 }
 
 test "unbind cleans state and rebind is safe" {
