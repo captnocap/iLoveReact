@@ -313,7 +313,11 @@ export function VehiclesRoute(props: { onExit: () => void }) {
     // absolute full-area + opaque bg, exactly like LabsRoute/CharactersRoute.
     <Row style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', backgroundColor: T.page }}>
       <Col style={{ width: 390, height: '100%' }}>
-        <ScrollView style={{ flexGrow: 1, height: 100 }}>
+        {/* VEHUI-0605: the viewport must FILL the panel — a literal height
+            beside flexGrow resolved to 100px and clipped the rail mid-glyph
+            (ScrollView needs an explicit height; '100%' is the panel-filling
+            one, the same shape the characters route proves out). */}
+        <ScrollView showScrollbar={true} style={{ width: '100%', height: '100%' }}>
           <Col style={{ padding: 14, gap: 10 }}>
             <Row style={{ alignItems: 'center', justifyContent: 'space-between' }}>
               <Text fontSize={16} color={T.ink} style={{ fontWeight: 900 }}>VEHICLES</Text>

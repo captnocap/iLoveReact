@@ -45,20 +45,25 @@ export function LabsRoute(props: { labs: ShellLab[]; onExit: () => void }) {
         <Box style={{ paddingLeft: 10, paddingBottom: 6 }}>
           <Text style={{ color: '#9fb4d8', fontSize: 13 }}>{`labs (${props.labs.length})`}</Text>
         </Box>
-        <ScrollView style={{ flexGrow: 1, height: 100 }}>
-          {props.labs.length === 0 ? (
-            <Box style={{ padding: 10 }}>
-              <Text style={{ color: '#46587a', fontSize: 12 }}>{'no labs yet — rjit lab new <name>'}</Text>
-            </Box>
-          ) : null}
-          {props.labs.map((lab) => (
-            <Pressable key={lab.name} onPress={() => setOpenName(lab.name)}>
-              <Box style={{ padding: 10, backgroundColor: lab.name === openName ? '#16233c' : 'transparent' }}>
-                <Text style={{ color: lab.name === openName ? '#d6e4ff' : '#8aa0c4', fontSize: 12 }}>{lab.name}</Text>
+        {/* VEHUI-0605: a literal height beside flexGrow pinned the viewport to
+            100px (ScrollView needs an explicit height and ignores flexGrow);
+            the grown Box owns the remaining rail space, the ScrollView fills it. */}
+        <Box style={{ flexGrow: 1, minHeight: 0 }}>
+          <ScrollView style={{ width: '100%', height: '100%' }}>
+            {props.labs.length === 0 ? (
+              <Box style={{ padding: 10 }}>
+                <Text style={{ color: '#46587a', fontSize: 12 }}>{'no labs yet — rjit lab new <name>'}</Text>
               </Box>
-            </Pressable>
-          ))}
-        </ScrollView>
+            ) : null}
+            {props.labs.map((lab) => (
+              <Pressable key={lab.name} onPress={() => setOpenName(lab.name)}>
+                <Box style={{ padding: 10, backgroundColor: lab.name === openName ? '#16233c' : 'transparent' }}>
+                  <Text style={{ color: lab.name === openName ? '#d6e4ff' : '#8aa0c4', fontSize: 12 }}>{lab.name}</Text>
+                </Box>
+              </Pressable>
+            ))}
+          </ScrollView>
+        </Box>
       </Box>
 
       {/* the loaded lab — the scene IS the lab; it owns this surface */}
@@ -78,11 +83,14 @@ export function LabsRoute(props: { labs: ShellLab[]; onExit: () => void }) {
           <Box style={{ padding: 10 }}>
             <Text style={{ color: '#9fb4d8', fontSize: 13 }}>{`${open.name}.notes.md`}</Text>
           </Box>
-          <ScrollView style={{ flexGrow: 1, height: 100 }}>
-            <Box style={{ padding: 10 }}>
-              <Text style={{ color: '#8aa0c4', fontSize: 11 }}>{notes}</Text>
-            </Box>
-          </ScrollView>
+          {/* VEHUI-0605: same fix as the rail — fill, don't pin to 100px */}
+          <Box style={{ flexGrow: 1, minHeight: 0 }}>
+            <ScrollView style={{ width: '100%', height: '100%' }}>
+              <Box style={{ padding: 10 }}>
+                <Text style={{ color: '#8aa0c4', fontSize: 11 }}>{notes}</Text>
+              </Box>
+            </ScrollView>
+          </Box>
         </Box>
       ) : null}
     </Box>

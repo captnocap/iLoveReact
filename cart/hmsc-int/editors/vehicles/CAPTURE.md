@@ -100,3 +100,14 @@ now owns `cart/hmsc-int/editors` as a suite root.
    no cohesive place of everything, so there was 30 different camera
    approaches effectively"). One drag convention everywhere; pinned
    conventions beat legacy behavior, always (DECISIONS.md V25).
+
+## VEHUI-0605 (2026-06-05): the sidebar fills its panel
+
+USER VERDICT fix: the rail's ScrollView carried `flexGrow:1, height:100` —
+the engine takes the explicit height (ScrollView ignores flexGrow), so the
+viewport pinned to 100px and clipped the garage row mid-glyph with a void
+below at every panel size. Now `height:'100%'` (the ScrollView is the
+panel's only child — exact). The same idiom was fixed at its two
+shell/LabsRoute.tsx twins (grown `flexGrow:1, minHeight:0` Box wrapping a
+full-height ScrollView, since those sit under fixed-header siblings).
+Visually verified at two window sizes.
