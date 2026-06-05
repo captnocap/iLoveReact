@@ -50,6 +50,18 @@ import { identifyImage, loadGraySource } from './sources';
 import { buildDraft, CUTOUT_DRAFT_PATH, parseDraft, serializeDraft } from './draft';
 import { CutoutInspector, type BackendChoice } from './Inspector';
 import { CutoutStatusBar } from './StatusBar';
+// MODEL TEXTURE TARGETS (MODELPAINT-0605): pick a face / body part / vehicle
+// part, paint it here, save back onto the model document through the doors.
+import {
+  bakeOverlayFromDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
+  modelWorkName, overlayOf, reopenOverlayDocument, type ModelBinding,
+} from './models';
+import { applyBodyPaint, applyVehiclePaint, paintedOverlayHasContent, charactersStream, vehiclesStream } from '@game';
+import type { BodyDocument, CharactersEvent, VehicleDoc, VehiclesEvent } from '@game';
+import { PART_IDS, type PartId } from '../../game/figure/shapes';
+import type { HedLayer } from '../../game/figure/hed';
+import { VEHICLE_PART_IDS, type VehiclePartId } from '../../game/vehicle';
+import { FaceLayerPaint } from '../../game/figure/render';
 
 const { Chip } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
@@ -86,6 +98,13 @@ type Work = {
   srcPath: string | null;
   /** the registry material under the paint (the material canvas), if any */
   textureId: string | null;
+  /** MODELPAINT-0605: the model slot under the paint (a figure part or a
+   *  vehicle part) — saves apply to the model document, not the library */
+  model: ModelBinding | null;
+  /** the model canvas context resolved at open (underlay bg + the head's
+   *  shape layers so face painting sees the face) */
+  modelBg: string | null;
+  modelLayers: HedLayer[] | null;
   dims: Dims;
   initial: PaintDocument | null;
   epoch: number;
@@ -106,6 +125,9 @@ function freshWork(prev: Work | null, patch: Partial<Omit<Work, 'epoch'>>): Work
     name: patch.name ?? 'untitled',
     srcPath: patch.srcPath ?? null,
     textureId: patch.textureId ?? null,
+    model: patch.model ?? null,
+    modelBg: patch.modelBg ?? null,
+    modelLayers: patch.modelLayers ?? null,
     dims: patch.dims ?? { w: PAINT.tuning.canvas.defaultSize, h: PAINT.tuning.canvas.defaultSize },
     initial: patch.initial ?? null,
     epoch: (prev?.epoch ?? 0) + 1,
@@ -136,6 +158,9 @@ function restoreOrBlank(): Work {
     name: draft.name,
     srcPath: srcOk ? draft.srcPath : null,
     textureId: draft.textureId ?? null,
+    model: null,
+    modelBg: null,
+    modelLayers: null,
     dims: { w: draft.doc.dims.w, h: draft.doc.dims.h },
     initial: draft.doc,
     epoch: 0,
@@ -158,6 +183,35 @@ export function CutoutRoute(props: { onExit: () => void }) {
     () => live.channel?.state() ?? cutoutStream.initial(),
     [live, libRev],
   );
+
+  // ── the MODEL channels (MODELPAINT-0605): the rosters this route paints ───
+  // editorChannel = the tool's ONE store; saves commit through lazily-opened
+  // '/cutout' sessions on the figure/vehicle channels (one labeled commit
+  // per save — it rides the same global chain and shows in the bus).
+  const models = useMemo(() => {
+    try {
+      return { figures: editorChannel(charactersStream), vehicles: editorChannel(vehiclesStream) };
+    } catch {
+      return { figures: null, vehicles: null };
+    }
+  }, []);
+  const modelSessions = useRef<{ figure: RouteSession<CharactersEvent> | null; vehicle: RouteSession<VehiclesEvent> | null }>({ figure: null, vehicle: null });
+  const figureSession = () => {
+    if (!modelSessions.current.figure && models.figures) {
+      modelSessions.current.figure = editorSessions().open('/cutout', models.figures) as RouteSession<CharactersEvent>;
+    }
+    return modelSessions.current.figure;
+  };
+  const vehicleSession = () => {
+    if (!modelSessions.current.vehicle && models.vehicles) {
+      modelSessions.current.vehicle = editorSessions().open('/cutout', models.vehicles) as RouteSession<VehiclesEvent>;
+    }
+    return modelSessions.current.vehicle;
+  };
+  useEffect(() => () => {
+    modelSessions.current.figure?.close();
+    modelSessions.current.vehicle?.close();
+  }, []);
 
   // ── the working target (draft-restored on mount) ───────────────────────────
   const [work, setWork] = useState<Work>(restoreOrBlank);
@@ -186,15 +240,21 @@ export function CutoutRoute(props: { onExit: () => void }) {
   }, [work.srcPath, work.epoch]);
 
   // ── working-draft autosave (debounced; the in-between-saves lifeline) ──────
+  // Model targets skip the draft file: the draft format carries no model
+  // binding, so a restore would silently re-open the painting as a plain
+  // canvas whose save lands in the LIBRARY instead of the model — worse than
+  // the gap. Recorded in CAPTURE.md; the binding-carrying draft is queued.
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onDirty = useCallback(() => {
     setEdited(true);
+    if (workRef.current.model) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
       draftTimer.current = null;
       const doc = painterApi.current?.buildDocument() ?? null;
       if (!doc) return;
       const w = workRef.current;
+      if (w.model) return;
       mkdir(VIEW.sessionsDir);
       writeFile(CUTOUT_DRAFT_PATH, serializeDraft(buildDraft({ docId: w.docId, name: w.name, srcPath: w.srcPath, textureId: w.textureId, doc })));
     }, VIEW.draftDebounceMs);
@@ -229,6 +289,8 @@ export function CutoutRoute(props: { onExit: () => void }) {
   // ── library actions (commit-grade: content event + labeled marker) ────────
   const saveDocument = () => {
     if (!edited) { setStatus('nothing to save yet — paint something first'); return; }
+    // a model target saves to its MODEL document, never the library
+    if (work.model) { saveModelPaint(work.model); return; }
     const doc = painterApi.current?.buildDocument() ?? null;
     if (!doc || !live.session) { setStatus('nothing to save'); return; }
     const name = work.name.trim() || 'untitled';
@@ -285,6 +347,63 @@ export function CutoutRoute(props: { onExit: () => void }) {
     live.session?.note(`open cutout · ${asset.name}`);
   };
 
+  // ── MODEL TEXTURE TARGETS (MODELPAINT-0605) ────────────────────────────────
+  // "i dont want to paint depth, i want to paint their face though, or body
+  // parts" — pick a face/body part/vehicle part, paint pixels, save back onto
+  // the model document through the doors.
+  const openModelTarget = (binding: ModelBinding) => {
+    const model: BodyDocument | VehicleDoc | undefined = binding.family === 'figure'
+      ? models.figures?.state().characters[binding.docId]
+      : models.vehicles?.state().vehicles[binding.docId];
+    if (!model) { setStatus(`model ${binding.docId} not found`); return; }
+    const overlay = overlayOf(binding, (model as any).paint);
+    const initial = overlay ? reopenOverlayDocument(overlay) : null;
+    setWork((prev) => freshWork(prev, {
+      docId: modelWorkId(binding),
+      name: modelWorkName(binding),
+      model: binding,
+      modelBg: modelCanvasBg(binding, model),
+      modelLayers: binding.family === 'figure' && binding.part === 'head'
+        ? (model as BodyDocument).parts.head.layers
+        : null,
+      dims: modelCanvasDims(binding),
+      initial,
+    }));
+    setEdited(!!initial);
+    setStatus(`painting ${binding.family} ${binding.docId} · ${binding.part}${initial ? ' (reopened)' : ''}`);
+    live.session?.note(`paint model · ${binding.family} ${binding.docId} · ${binding.part}`);
+  };
+
+  // Save a model painting: bake → apply through the door → ONE labeled
+  // commit-grade upsert on the owning channel. An empty painting CLEARS the
+  // slot (paint → unpaint is byte-parity, the door tests pin it).
+  const saveModelPaint = (binding: ModelBinding) => {
+    const doc = painterApi.current?.buildDocument() ?? null;
+    if (!doc) { setStatus('nothing to save'); return; }
+    const overlay = bakeOverlayFromDocument(doc, Date.now());
+    const has = paintedOverlayHasContent(overlay);
+    if (binding.family === 'figure') {
+      const session = figureSession();
+      const model = models.figures?.state().characters[binding.docId];
+      if (!session || !model) { setStatus(`figure ${binding.docId} unavailable`); return; }
+      const next = applyBodyPaint(model, binding.part as PartId, has ? overlay : null);
+      session.commit({ kind: 'authored', id: binding.docId, doc: next },
+        `${binding.docId}: ${binding.part} ${has ? 'painted' : 'paint cleared'}`);
+    } else {
+      const session = vehicleSession();
+      const model = models.vehicles?.state().vehicles[binding.docId];
+      if (!session || !model) { setStatus(`vehicle ${binding.docId} unavailable`); return; }
+      const next = applyVehiclePaint(model, binding.part as VehiclePartId, has ? overlay : null);
+      session.commit({ kind: 'authored', id: binding.docId, doc: next },
+        `${binding.docId}: ${binding.part} ${has ? 'painted' : 'paint cleared'}`);
+    }
+    setLibRev((r) => r + 1); // the MODELS rail re-reads painted dots
+    setLastSavedAt(Date.now());
+    setStatus(has
+      ? `painted ${binding.part} saved to ${binding.docId}`
+      : `cleared ${binding.part} paint on ${binding.docId}`);
+  };
+
   // ── the material/shader lab connection ─────────────────────────────────────
   // IN: paint ON a registry texture — the material becomes the canvas under
   // the paint (1 tile, square canvas). Smart select needs an image FILE, so
@@ -326,6 +445,13 @@ export function CutoutRoute(props: { onExit: () => void }) {
 
   const documents = libraryDocuments(library);
   const cutouts = libraryCutouts(library);
+
+  // the MODELS rail: rosters read live off the one store (libRev re-renders
+  // after a model save so painted dots refresh)
+  const [modelPick, setModelPick] = useState<{ family: 'figure' | 'vehicle'; docId: string } | null>(null);
+  const figureRoster = models.figures ? models.figures.state() : null;
+  const vehicleGarage = models.vehicles ? models.vehicles.state() : null;
+  const modelCount = (figureRoster?.order.length ?? 0) + (vehicleGarage?.order.length ?? 0);
 
   return (
     <Col style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', backgroundColor: T.page }}>
@@ -370,6 +496,39 @@ export function CutoutRoute(props: { onExit: () => void }) {
         }}>
           <ScrollView style={{ flexGrow: 1 }}>
             <Col style={{ gap: 10 }}>
+              {/* MODELPAINT-0605: THE place you paint model textures — pick a
+                  face, a body part, or a vehicle part; save lands on the model. */}
+              <LibrarySection title={`MODELS · ${modelCount}`}>
+                {figureRoster?.order.map((id) => (
+                  <ModelRow
+                    key={`fig-${id}`}
+                    label={id}
+                    family="figure"
+                    paint={(figureRoster.characters[id] as any)?.paint}
+                    parts={PART_IDS}
+                    partLabels={FIGURE_PART_LABELS}
+                    open={modelPick?.family === 'figure' && modelPick.docId === id}
+                    activePart={work.model?.family === 'figure' && work.model.docId === id ? work.model.part : null}
+                    onToggle={() => setModelPick((p) => (p?.family === 'figure' && p.docId === id ? null : { family: 'figure', docId: id }))}
+                    onPart={(part) => openModelTarget({ family: 'figure', docId: id, part: part as PartId })}
+                  />
+                ))}
+                {vehicleGarage?.order.map((id) => (
+                  <ModelRow
+                    key={`veh-${id}`}
+                    label={id}
+                    family="vehicle"
+                    paint={(vehicleGarage.vehicles[id] as any)?.paint}
+                    parts={VEHICLE_PART_IDS}
+                    partLabels={null}
+                    open={modelPick?.family === 'vehicle' && modelPick.docId === id}
+                    activePart={work.model?.family === 'vehicle' && work.model.docId === id ? work.model.part : null}
+                    onToggle={() => setModelPick((p) => (p?.family === 'vehicle' && p.docId === id ? null : { family: 'vehicle', docId: id }))}
+                    onPart={(part) => openModelTarget({ family: 'vehicle', docId: id, part: part as VehiclePartId })}
+                  />
+                ))}
+                {modelCount === 0 ? <RailHint text="author characters in /characters and vehicles in /vehicles — their textures paint here" /> : null}
+              </LibrarySection>
               <LibrarySection title={`DOCUMENTS · ${documents.length}`}>
                 {documents.map((rec) => (
                   <LibraryRow
@@ -488,7 +647,17 @@ function Workbench(props: {
 
   // The material canvas: the registry texture rendered UNDER the paint (the
   // PaintSurface underlay slot) — paint masks/shapes directly on the look.
+  // The MODEL canvas (MODELPAINT-0605) rides the same slot: the part's base
+  // (skin / body color) with the head's shape layers so face painting sees
+  // the face it paints over.
   const underlay = useMemo(() => {
+    if (work.model && work.modelBg) {
+      return (
+        <Box style={{ position: 'absolute', left: 0, top: 0, width: work.dims.w, height: work.dims.h, backgroundColor: work.modelBg, overflow: 'hidden' }}>
+          {work.modelLayers ? <FaceLayerPaint layers={work.modelLayers} /> : null}
+        </Box>
+      );
+    }
     if (!work.textureId) return undefined;
     const def = textureById(work.textureId);
     if (!def || def.source.kind !== 'shader') return undefined;
@@ -500,7 +669,7 @@ function Workbench(props: {
       />
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [work.textureId, work.dims.w, work.dims.h]);
+  }, [work.model, work.modelBg, work.modelLayers, work.textureId, work.dims.w, work.dims.h]);
 
   // every meaningful edit → the route's edited flag + draft autosave
   const onDirtyRef = useRef(props.onDirty); onDirtyRef.current = props.onDirty;
@@ -653,6 +822,61 @@ function EffectModal({ s, onClose }: { s: ReturnType<typeof usePaintEditor>; onC
 }
 
 // ── library rail pieces ───────────────────────────────────────────────────────
+
+// MODELPAINT-0605: what the rail calls the figure parts (the user's words —
+// "their face... or body parts"; the kit's part ids stay the data).
+const FIGURE_PART_LABELS: Record<string, string> = {
+  head: 'face', torso: 'torso', pipe: 'limbs', hand: 'hands', foot: 'feet', finger: 'fingers',
+};
+
+/** One model in the rail: header row toggles the part picker; a part chip
+ *  opens that surface in the painter. ● marks already-painted parts. */
+function ModelRow(props: {
+  label: string;
+  family: 'figure' | 'vehicle';
+  paint: Record<string, unknown> | undefined;
+  parts: readonly string[];
+  partLabels: Record<string, string> | null;
+  open: boolean;
+  activePart: string | null;
+  onToggle: () => void;
+  onPart: (part: string) => void;
+}) {
+  const paintedCount = props.paint ? Object.keys(props.paint).length : 0;
+  return (
+    <Col style={{ gap: 4 }}>
+      <Pressable onPress={props.onToggle}>
+        <Row style={{
+          gap: 6, alignItems: 'center', paddingHorizontal: 8, paddingVertical: 5,
+          borderRadius: 5, borderWidth: 1,
+          borderColor: props.open || props.activePart ? T.accent : T.frame,
+          backgroundColor: props.open || props.activePart ? T.controlAlt : T.control,
+        }}>
+          <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0 }}>
+            <Text style={{ color: props.open ? T.ink : T.dim, fontSize: 11 }} numberOfLines={1}>{props.label}</Text>
+            <Text style={{ color: T.dim, fontSize: 9 }} numberOfLines={1}>
+              {`${props.family}${paintedCount > 0 ? ` · ${paintedCount} painted` : ''}`}
+            </Text>
+          </Col>
+          <Text style={{ color: T.dim, fontSize: 9, fontFamily: 'monospace' }}>{props.open ? '▾' : '▸'}</Text>
+        </Row>
+      </Pressable>
+      {props.open ? (
+        <Row style={{ gap: 4, flexWrap: 'wrap', paddingLeft: 4 }}>
+          {props.parts.map((part) => (
+            <Chip
+              key={part}
+              label={`${props.partLabels?.[part] ?? part}${props.paint && (props.paint as any)[part] ? ' ●' : ''}`}
+              active={props.activePart === part}
+              color="cyan"
+              onPress={() => props.onPart(part)}
+            />
+          ))}
+        </Row>
+      ) : null}
+    </Col>
+  );
+}
 
 function LibrarySection(props: { title: string; children?: React.ReactNode }) {
   return (
