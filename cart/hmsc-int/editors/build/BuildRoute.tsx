@@ -1,16 +1,26 @@
 // editors/build/BuildRoute — /build: CREATIVE BUILD MODE (V24). Build the map
-// WHILE PLAYING: Fortnite-Creative semantics on /test's embodied drop-in.
+// WHILE PLAYING: Fortnite-Creative semantics on the embodied drop-in.
 //
 // One surface, two vocabularies:
-//   the PLAYER   — /test's exact pattern: GAME_INPUT key transport, the V23
-//                  native camera (host owns every frame), GAME_PHYSICS host
-//                  step against GAME_WORLD colliders + heightfields.
+//   the PLAYER   — the shared embodied substrate (../../Embodied, SUBSTRATE-0605):
+//                  GAME_INPUT key transport, the V23 node-bound native camera
+//                  (host owns every frame — the SAME working bind /test has),
+//                  GAME_PHYSICS host step against GAME_WORLD colliders +
+//                  heightfields + this route's placed-piece solids/ramps.
 //   the BUILDER  — crosshair (the solved camera's screen-center axis — the
 //                  crosshair law) → snap target (./snap, the catalog entry's
 //                  OWN snap mode); registry-driven palette (GAME_BUILD —
 //                  never a hardcoded list); ghost preview; click places;
 //                  E cycles the WallEdit vocabulary on the targeted piece;
 //                  P marks pieces → a named prefab → stamp anywhere.
+//
+// Controls (USER VERDICT, SUBSTRATE-0605 addendum 2: "r on rotate, e for edit,
+// 1 2 3 4 for floor wall ramp roof"): R rotate · E edit · 1 floor · 2 wall ·
+// 3 ramp · 4 roof — PALETTE_KIND_ORDER below bakes the ruled order; the
+// palette chips and the help line display the same numbers the keys use.
+// Mouse (addendum 4: "consume my mouse until esc"): the substrate CAPTURES
+// the mouse — look follows raw motion, a click is always PLACE (the loop's
+// captured-click edge → onTap), Esc frees the mouse for the palette UI.
 //
 // ONE MODEL, TWO VIEWS (the V24 invariant): nothing here puts "build mode"
 // in the data. A placement is a plain world-stream event; the session commit
@@ -19,37 +29,23 @@
 // materialized state is the one placed-piece truth — this route re-reads it
 // after every commit and keeps no second copy.
 //
-// GAP(W-2)/(W-3): world render + sky still reach into cart/hmsc/render3d,
-// marked exactly as TestRoute marks them — they move behind the world lanes
-// when those captures land.
-//
-// Numbers are TUNING DATA (P2): snap/ghost/camera values live in named
-// tables below and the reach/ghost/march knobs are LIVE in the in-route
-// tuning panel — tweak while playing, never re-code.
+// Numbers are TUNING DATA (P2): snap/ghost values live in named tables below
+// and the reach/ghost/march knobs are LIVE in the in-route tuning panel —
+// tweak while playing, never re-code.
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import {
-  GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_FIGURE, GAME_INPUT, GAME_KINDS,
-  GAME_LOOP, GAME_NATIVE_CAMERA, GAME_PHYSICS, GAME_WORLD, PHYSICS_LIMITS, worldStream,
-} from '@game';
+import { GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_INPUT, GAME_PHYSICS, GAME_WORLD, worldStream } from '@game';
 import type {
   BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, PieceRay,
-  PlacedBuildPiece, WallEdit, WorldEvent, WorldGridState, WorldStreamState,
+  PlacedBuildPiece, WallEdit, WorldEvent, WorldStreamState,
 } from '@game';
-import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
-import type { GameState, Vec3 } from '../../../hmsc/design'; // GAP: retires when hmsc becomes compile/'s output (V15)
-import { WorldStatics } from '../../../hmsc/render3d/GameWorld3D'; // GAP(W-2)
-import { TileSurfaceCaptures } from '../../../hmsc/render3d/tileSurface'; // GAP(W-2)
-import { RoadSurfaceCaptures } from '../../../hmsc/render3d/Road'; // GAP(W-2)
-import { RoadJunctionCaptures } from '../../../hmsc/render3d/RoadJunctions'; // GAP(W-2)
-import { LandformSurfaceCaptures } from '../../../hmsc/render3d/Landform'; // GAP(W-2)
-import { BuildingSurfaceCaptures } from '../../../hmsc/render3d/BuildingFacades'; // GAP(W-2)
-import { PropSurfaceCaptures } from '../../../hmsc/render3d/PropCaptures'; // GAP(W-2)
-import { WorldPartCaptures } from '../../../hmsc/render3d/PartCaptures'; // GAP(W-2)
-import { DriveInScreenCaptures } from '../../../hmsc/render3d/driveInScreen'; // GAP(W-2)
-import { hmscSkyBackgroundColor } from '../../../hmsc/render3d/sky'; // GAP(W-3)
+import type { GameState } from '../../../hmsc/design'; // GAP: retires when hmsc becomes compile/'s output (V15)
+import {
+  EmbodiedCaptures, EmbodiedMouseSurface, EmbodiedScene, PLAYER_CAMERA,
+  groundColumnTop, normalizeYawDegrees, useEmbodiedPlayer, type EmbodiedWorldExtras,
+} from '../../Embodied';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './snap';
@@ -57,31 +53,7 @@ import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './snap
 const DEG = Math.PI / 180;
 
 // ── route presentation/feel data (P2: named values, no inline numbers) ───────
-// Camera reproduces /test's proven boot frame; the live knobs below let the
-// user tune the BUILD feel in-interface.
-const CAMERA = {
-  distanceMeters: 7.65,
-  initialPitchDegrees: 17.8,
-  minPitchDegrees: -10,
-  maxPitchDegrees: 62,
-  targetHeightMeters: 1.45,
-  fovDegrees: 52,
-  yawDegreesPerPixel: 0.28,
-  pitchDegreesPerPixel: 0.22,
-} as const;
-const GAIT = {
-  walkCyclesPerSecond: 1.6,
-  runCyclesPerSecond: 2.3,
-  framesPerCycle: 12,
-} as const;
-const FRAME = { minDtSeconds: 0.001, maxDtSeconds: 0.05 } as const;
-const PLAYER_FIGURE_SEED = 1;
-const PLAYER_FIGURE_CART_KEY = 'hmscint.build.player';
-const IDLE_REST_EPSILON = 1e-4;
-
 const BUILD_UI = {
-  /** mouse-up within this many pixels of mouse-down = a click, not a drag */
-  clickSlopPixels: 4,
   ghostOpacity: 0.45,
   ghostColor: '#7dd3fc',
   ghostBlockedColor: '#fb7185',
@@ -95,6 +67,16 @@ const BUILD_UI = {
   paletteBg: '#0b1220e0',
   panelBg: '#0f1a2ef0',
 } as const;
+
+// The ruled category hotkeys lead the palette (USER VERDICT: 1 floor, 2 wall,
+// 3 ramp, 4 roof); every other registry kind follows in registry order. The
+// registry stays the source of WHAT exists — this only orders the display,
+// and the chips show the same numbers the keys answer to.
+const RULED_HOTKEY_KINDS: readonly BuildPieceKind[] = ['floor', 'wall', 'ramp', 'roof'];
+const PALETTE_KIND_ORDER: readonly BuildPieceKind[] = [
+  ...RULED_HOTKEY_KINDS,
+  ...GAME_BUILD.kinds.kinds.filter((kind) => !RULED_HOTKEY_KINDS.includes(kind)),
+];
 
 // How each material READS (display table — gameplay truth stays in the
 // catalog tags; glass opacity matches the materials.ts family look).
@@ -113,65 +95,9 @@ const SIGHTLINE_EDIT_OPACITY: Partial<Record<WallEdit, number>> = {
   brokenWindow: 0.12,
 };
 
-const PlayerMeshes = memo(FigureMeshes);
-
-type PlayerPose = {
-  x: number; y: number; z: number;
-  vx: number; vy: number; vz: number;
-  grounded: boolean;
-  yaw: number;
-  moving: boolean;
-  running: boolean;
-  gaitPhase: number;
-};
-
 type Armed =
   | { type: 'piece'; id: string }
   | { type: 'prefab'; id: string };
-
-const FALLBACK_SURFACE = GAME_KINDS.tiles.get('road').surface;
-
-function clamp(n: number, lo: number, hi: number): number {
-  return Math.max(lo, Math.min(hi, n));
-}
-
-function normalizeYawDegrees(yawDegrees: number): number {
-  return ((yawDegrees % 360) + 360) % 360;
-}
-
-// The authored GameState's world slice as the door's view (TestRoute's W-1
-// pattern — route glue over door functions, no second world model).
-function worldGridOf(state: GameState): WorldGridState {
-  return {
-    cellSizeMeters: state.world.cellSizeMeters,
-    surfaceRegions: state.world.surfaceRegions as unknown as WorldGridState['surfaceRegions'],
-    placedCells: state.world.placedCells as unknown as WorldGridState['placedCells'],
-    landforms: (state.world.landforms ?? []) as unknown as WorldGridState['landforms'],
-  };
-}
-
-// Highest standable top at (x, z) — the spawn/snap ground column (TestRoute's
-// spawnGroundTop, the same door math).
-function groundColumnTop(world: WorldGridState, x: number, z: number): number {
-  let top = 0;
-  const c = world.cellSizeMeters;
-  for (const r of world.surfaceRegions) {
-    if (x >= r.x * c && x <= (r.x + r.width) * c && z >= r.z * c && z <= (r.z + r.depth) * c) {
-      top = Math.max(top, GAME_WORLD.surfaceRegionTopMeters(r, c));
-    }
-  }
-  return Math.max(top, GAME_WORLD.landformGroundTopAt(world, x, z) ?? top);
-}
-
-function initialPlayer(state: GameState, world: WorldGridState): PlayerPose {
-  const p = state.player;
-  const y = groundColumnTop(world, p.position.x, p.position.z);
-  return {
-    x: p.position.x, y, z: p.position.z,
-    vx: 0, vy: 0, vz: 0, grounded: true,
-    yaw: p.yawDegrees, moving: false, running: false, gaitPhase: 0,
-  };
-}
 
 // ── piece visuals: the same meaning the colliders carry, as boxes ────────────
 
@@ -312,8 +238,6 @@ function Chip(props: { label: string; on: boolean; onPress: () => void }) {
 }
 
 export function BuildRoute(props: { state: GameState; mapName: string; onExit: () => void }) {
-  const worldGrid = useMemo(() => worldGridOf(props.state), [props.state]);
-
   // ── the builder's session on the WORLD channel (the user's V20 ruling) ────
   const build = useMemo(() => {
     try {
@@ -336,6 +260,34 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
 
+  // ── the player: the shared embodied substrate, fed this route's extras ────
+  // Placed pieces join the world as solids (door-derived, host caps enforced
+  // in the substrate) and ramp/stairs slopes as heightfields continuing after
+  // the terrain's slots. The crosshair re-resolves on the substrate's frame;
+  // a tap (mouse-up inside slop) places.
+  const worldExtras = useMemo<EmbodiedWorldExtras>(() => ({
+    solids: GAME_BUILD.placed.colliders(pieces),
+    registerHeightfields: (worldBake) => {
+      const ramps = GAME_BUILD.placed.ramps(pieces, worldBake.fields.length);
+      let registered = 0;
+      for (const field of ramps) {
+        if (field.slot >= GAME_WORLD.heightfieldSlots) break;
+        GAME_PHYSICS.registerHeightfield(field);
+        registered += 1;
+      }
+      if (registered < ramps.length) console.warn(`[build] ${ramps.length - registered} ramp slopes past the heightfield slots`);
+    },
+  }), [pieces]);
+  const embodied = useEmbodiedPlayer({
+    state: props.state,
+    figureCartKey: 'hmscint.build.player',
+    logTag: '[build]',
+    worldExtras,
+    onFrame: () => refreshSnapRef.current(),
+    onTap: () => placeRef.current(),
+  });
+  const { playerRef, lookRef, worldGrid } = embodied;
+
   // ── live tuning (P2 in-interface; defaults are the named tables) ──────────
   const [reachMeters, setReachMeters] = useState(SNAP_TUNING_DEFAULTS.reachMeters);
   const [ghostOpacity, setGhostOpacity] = useState<number>(BUILD_UI.ghostOpacity);
@@ -350,7 +302,7 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
   snapTuningRef.current = snapTuning;
 
   // ── the palette (registry-driven: the catalog is the source) ──────────────
-  const kinds = GAME_BUILD.kinds.kinds;
+  const kinds = PALETTE_KIND_ORDER;
   const prefabDefs = useMemo<BuildPrefabDef[]>(() => [
     ...GAME_BUILD.prefabs.ids.map((id) => GAME_BUILD.prefabs.get(id)),
     ...Object.values(streamState?.prefabs ?? {}),
@@ -395,119 +347,25 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
   const [ghostYaw, setGhostYaw] = useState(0);
   const ghostYawRef = useRef(0);
 
-  // ── player + camera (the /test pattern, walk mode only) ───────────────────
-  const [player, setPlayer] = useState(() => initialPlayer(props.state, worldGrid));
-  const playerRef = useRef(player);
-  playerRef.current = player;
-  const lookRef = useRef({ yaw: props.state.player.yawDegrees, pitch: CAMERA.initialPitchDegrees });
-  const keysRef = useRef<ReturnType<typeof GAME_INPUT.createKeyState> | null>(null);
-  const dragRef = useRef<{ x: number; y: number; movedPixels: number } | null>(null);
-
-  const sendCameraParams = (pose: { x: number; y: number; z: number }) => {
-    const l = lookRef.current;
-    GAME_NATIVE_CAMERA.setOrbit({
-      target: [pose.x, pose.y + CAMERA.targetHeightMeters, pose.z],
-      yaw: l.yaw,
-      pitch: l.pitch,
-      distance: CAMERA.distanceMeters,
-      fov: CAMERA.fovDegrees,
-    });
-  };
-  const sendCameraRef = useRef(sendCameraParams);
-  sendCameraRef.current = sendCameraParams;
-
-  useEffect(() => {
-    sendCameraRef.current(playerRef.current);
-    GAME_NATIVE_CAMERA.setMode('walk');
-    const bound = GAME_NATIVE_CAMERA.bindFirst();
-    if (!bound) console.warn('[build] native camera not engaged — host missing has-game-camera (rebuild)');
-    return () => {
-      GAME_NATIVE_CAMERA.disable();
-    };
-  }, []);
-
-  useEffect(() => {
-    const next = initialPlayer(props.state, worldGrid);
-    playerRef.current = next;
-    setPlayer(next);
-    lookRef.current.yaw = props.state.player.yawDegrees;
-    sendCameraRef.current(next);
-  }, [props.state, worldGrid]);
-
-  useEffect(() => {
-    const keys = GAME_INPUT.createKeyState();
-    keysRef.current = keys;
-    return () => {
-      keysRef.current = null;
-      keys.dispose();
-    };
-  }, []);
-
-  // ── colliders: the authored world + the placed pieces, both door-derived ──
-  const worldColliders = useMemo(() => {
-    const built = GAME_WORLD.collisionRects(worldGrid);
-    if (built.dropped > 0) console.warn(`[build] world colliders past the host cap: ${built.dropped} dropped`);
-    return built;
-  }, [worldGrid]);
-  const stepSolids = useMemo(() => {
-    const placedSolids = GAME_BUILD.placed.colliders(pieces);
-    const rects = [...worldColliders.rects, ...placedSolids.rects];
-    const orientedRects = placedSolids.orientedRects;
-    // host caps are wire facts — truncate loudly, never throw mid-frame
-    if (rects.length > PHYSICS_LIMITS.rects) {
-      console.warn(`[build] ${rects.length} rects past the host cap ${PHYSICS_LIMITS.rects} — newest dropped`);
-      rects.length = PHYSICS_LIMITS.rects;
-    }
-    if (orientedRects.length > PHYSICS_LIMITS.orientedRects) {
-      console.warn(`[build] ${orientedRects.length} oriented rects past the host cap ${PHYSICS_LIMITS.orientedRects}`);
-      orientedRects.length = PHYSICS_LIMITS.orientedRects;
-    }
-    return { rects, orientedRects };
-  }, [worldColliders, pieces]);
-
-  // terrain heightfields + ramp/stairs slopes (slots continue after terrain)
-  useEffect(() => {
-    const baked = GAME_WORLD.registerHeightfields(worldGrid);
-    if (baked.dropped > 0) console.warn(`[build] landforms past the heightfield slots: ${baked.dropped} not baked`);
-    const ramps = GAME_BUILD.placed.ramps(pieces, baked.fields.length);
-    let registered = 0;
-    for (const field of ramps) {
-      if (field.slot >= GAME_WORLD.heightfieldSlots) break;
-      GAME_PHYSICS.registerHeightfield(field);
-      registered += 1;
-    }
-    if (registered < ramps.length) console.warn(`[build] ${ramps.length - registered} ramp slopes past the heightfield slots`);
-    return () => {
-      GAME_PHYSICS.clearHeightfields();
-    };
-  }, [worldGrid, pieces]);
-
-  // ── the figure (V2 kit, editor-preview render path) ───────────────────────
-  const figure = useMemo(() => {
-    const doc = GAME_FIGURE.generateFace(PLAYER_FIGURE_SEED);
-    const parts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), PLAYER_FIGURE_CART_KEY, PLAYER_FIGURE_SEED);
-    return { doc, parts };
-  }, []);
-  const pose = player.moving ? 'walk' : 'stand';
-  const gaitStep = Math.round(player.gaitPhase * GAIT.framesPerCycle) / GAIT.framesPerCycle;
-  const rig = useMemo(() => GAME_FIGURE.buildRigFrame('neutral', pose, gaitStep), [pose, gaitStep]);
-  const figureOffset = useMemo<[number, number, number]>(() => [player.x, player.y, player.z], [player.x, player.y, player.z]);
-
-  // ── crosshair → snap target (recomputed in the frame loop, published only
-  //    when the SNAPPED result changes — quantized values make that cheap) ───
+  // ── crosshair → snap target (recomputed on the substrate's frame, published
+  //    only when the SNAPPED result changes — quantized values make that cheap) ─
   const [snapTarget, setSnapTarget] = useState<SnapTarget | null>(null);
   const snapTargetRef = useRef<SnapTarget | null>(null);
   const snapKeyRef = useRef('');
 
+  // The crosshair law: the screen-center axis of the camera the renderer is
+  // consuming. The substrate's look shadow + PLAYER_CAMERA are the SAME
+  // values the native controller was parameterized with, so this JS solve is
+  // registry math for PICKING only — the render drive stays host-side (V23).
   const crosshairRay = (): PieceRay => {
     const p = playerRef.current;
     const l = lookRef.current;
     const solved = GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
-      target: [p.x, p.y + CAMERA.targetHeightMeters, p.z],
+      target: [p.x, p.y + PLAYER_CAMERA.targetHeightMeters, p.z],
       yaw: l.yaw,
       pitch: l.pitch,
-      dist: CAMERA.distanceMeters,
-      fov: CAMERA.fovDegrees,
+      dist: PLAYER_CAMERA.distanceMeters,
+      fov: PLAYER_CAMERA.fovDegrees,
     });
     const dx = solved.target[0] - solved.pos[0];
     const dy = solved.target[1] - solved.pos[1];
@@ -614,7 +472,8 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
     setArmed({ type: 'prefab', id: def.id }); // clone → stamp, one motion
   };
 
-  // ── the builder keys (route chrome; typing-gated) ──────────────────────────
+  // ── the builder keys (route chrome; typing-gated). USER-RULED hotkeys:
+  //    R rotate · E edit · 1 floor · 2 wall · 3 ramp · 4 roof ────────────────
   useEffect(() => {
     const off = GAME_INPUT.onKeyDown((event) => {
       if (GAME_INPUT.isTextEditing()) return;
@@ -668,128 +527,6 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── the frame loop (the /test movement pattern + snap refresh) ────────────
-  useEffect(() => {
-    let alive = true;
-    let handle: ReturnType<typeof GAME_LOOP.scheduleFrame> | null = null;
-    let last = GAME_LOOP.now();
-    const loop = () => {
-      if (!alive) return;
-      const now = GAME_LOOP.now();
-      const dt = clamp((now - last) / 1000, FRAME.minDtSeconds, FRAME.maxDtSeconds);
-      last = now;
-      const keys = keysRef.current;
-      const typing = GAME_INPUT.isTextEditing();
-      const axes = keys && !typing ? GAME_INPUT.moveAxes(keys) : { forward: 0, strafe: 0 };
-      const running = keys != null && !typing && GAME_INPUT.actionDown(keys, 'run');
-      const jumpDown = keys != null && !typing && GAME_INPUT.actionDown(keys, 'jump');
-      const intent = GAME_INPUT.moveIntent(axes, lookRef.current.yaw * DEG);
-      const moving = intent.x !== 0 || intent.z !== 0;
-      const prev = playerRef.current;
-      const desiredYaw = moving ? normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG) : prev.yaw;
-      const footing = GAME_WORLD.footingKindAtWorldPosition(worldGrid, { x: prev.x, y: prev.y, z: prev.z });
-      const surfaceProfile = footing ? GAME_KINDS.tiles.get(footing).surface : FALLBACK_SURFACE;
-      const baseSpeed = running ? props.state.player.runSpeedMetersPerSecond : props.state.player.walkSpeedMetersPerSecond;
-      const speed = baseSpeed * (running ? surfaceProfile.runSpeedMultiplier : surfaceProfile.walkSpeedMultiplier);
-      const stepped = GAME_PHYSICS.hostReady()
-        ? GAME_PHYSICS.step({
-            dtSeconds: dt,
-            intentX: intent.x,
-            intentZ: intent.z,
-            speedMetersPerSecond: speed,
-            jumpDown,
-            player: {
-              position: { x: prev.x, y: prev.y, z: prev.z },
-              velocity: { x: prev.vx, y: prev.vy, z: prev.vz },
-              yawDegrees: prev.yaw,
-            },
-            surface: {
-              accelerationMultiplier: surfaceProfile.accelerationMultiplier,
-              friction: surfaceProfile.friction,
-              restitution: surfaceProfile.restitution,
-            },
-            tuning: props.state.config.physics,
-            rects: stepSolids.rects,
-            orientedRects: stepSolids.orientedRects,
-          })
-        : null;
-      if (stepped) {
-        const p = stepped.player;
-        const atRest = !moving && !jumpDown && p.grounded && prev.grounded && !prev.moving && !prev.running
-          && desiredYaw === prev.yaw
-          && Math.abs(p.position.x - prev.x) < IDLE_REST_EPSILON
-          && Math.abs(p.position.y - prev.y) < IDLE_REST_EPSILON
-          && Math.abs(p.position.z - prev.z) < IDLE_REST_EPSILON;
-        if (!atRest) {
-          const next: PlayerPose = {
-            x: p.position.x, y: p.position.y, z: p.position.z,
-            vx: p.velocity.x, vy: p.velocity.y, vz: p.velocity.z,
-            grounded: p.grounded,
-            yaw: desiredYaw,
-            moving,
-            running: moving && running,
-            gaitPhase: moving ? prev.gaitPhase + dt * (running ? GAIT.runCyclesPerSecond : GAIT.walkCyclesPerSecond) : prev.gaitPhase,
-          };
-          playerRef.current = next;
-          setPlayer(next);
-          sendCameraRef.current(next);
-        }
-      } else if (moving) {
-        // honest fallback when host physics is absent: kinematic + ground pin
-        const x = prev.x + intent.x * speed * dt;
-        const z = prev.z + intent.z * speed * dt;
-        const next: PlayerPose = {
-          ...prev,
-          x,
-          y: groundColumnTop(worldGrid, x, z),
-          z,
-          yaw: desiredYaw,
-          moving: true,
-          running,
-          gaitPhase: prev.gaitPhase + dt * (running ? GAIT.runCyclesPerSecond : GAIT.walkCyclesPerSecond),
-        };
-        playerRef.current = next;
-        setPlayer(next);
-        sendCameraRef.current(next);
-      } else if (prev.moving || prev.running || prev.yaw !== desiredYaw) {
-        const next = { ...prev, vx: 0, vz: 0, moving: false, running: false, yaw: desiredYaw };
-        playerRef.current = next;
-        setPlayer(next);
-      }
-      // the builder's eye: re-resolve the crosshair every frame; publishes
-      // React state only when the SNAPPED target actually changed
-      refreshSnapRef.current();
-      handle = GAME_LOOP.scheduleFrame(loop);
-    };
-    handle = GAME_LOOP.scheduleFrame(loop);
-    return () => {
-      alive = false;
-      if (handle != null) GAME_LOOP.cancelFrame(handle);
-    };
-  }, [props.state, worldGrid, stepSolids]);
-
-  // ── drag-orbit + click-places (slop separates the two) ────────────────────
-  const onDown = (e: any) => { dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0), movedPixels: 0 }; };
-  const onMove = (e: any) => {
-    const d = dragRef.current;
-    if (!d) return;
-    const x = Number(e?.x ?? 0), y = Number(e?.y ?? 0);
-    const dx = x - d.x, dy = y - d.y;
-    d.x = x; d.y = y;
-    d.movedPixels += Math.abs(dx) + Math.abs(dy);
-    const l = lookRef.current;
-    const nextYaw = l.yaw - dx * CAMERA.yawDegreesPerPixel;
-    const nextPitch = clamp(l.pitch - dy * CAMERA.pitchDegreesPerPixel, CAMERA.minPitchDegrees, CAMERA.maxPitchDegrees);
-    GAME_NATIVE_CAMERA.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
-    l.yaw = nextYaw;
-    l.pitch = nextPitch;
-  };
-  const onUp = () => {
-    const d = dragRef.current;
-    dragRef.current = null;
-    if (d && d.movedPixels <= BUILD_UI.clickSlopPixels) placeRef.current();
-  };
-
   // ── ghost boxes for the armed selection at the snap target ────────────────
   const ghostBoxes = useMemo<VisualBox[]>(() => {
     if (!snapTarget) return [];
@@ -812,49 +549,13 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
     return record ? record.commits : [];
   }, [build, piecesRev]);
 
-  const sceneState = {
-    ...props.state,
-    player: {
-      ...props.state.player,
-      position: { x: player.x, y: player.y, z: player.z } as Vec3,
-      yawDegrees: player.yaw,
-    },
-  };
-  const [bootCam] = useState(() =>
-    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
-      target: [playerRef.current.x, playerRef.current.y + CAMERA.targetHeightMeters, playerRef.current.z],
-      yaw: lookRef.current.yaw,
-      pitch: lookRef.current.pitch,
-      dist: CAMERA.distanceMeters,
-      fov: CAMERA.fovDegrees,
-    }));
-
   const armedLabel = armedPrefab ? `${armedPrefab.label} (prefab)` : armedDef ? armedDef.label : '—';
   const targetPiece = snapTarget?.targetPieceId ? pieces.find((p) => p.id === snapTarget.targetPieceId) ?? null : null;
 
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#080d16' }}>
-      {/* GAP(W-2): world surface captures await the world render lane */}
-      <TileSurfaceCaptures regions={sceneState.world.surfaceRegions} />
-      <RoadSurfaceCaptures roads={sceneState.world.roads} />
-      <RoadJunctionCaptures junctions={sceneState.world.junctions} />
-      <LandformSurfaceCaptures landforms={sceneState.world.landforms ?? []} />
-      <BuildingSurfaceCaptures buildings={sceneState.world.buildings} perception={sceneState.player.perception} />
-      <PropSurfaceCaptures props={sceneState.world.props} />
-      <WorldPartCaptures buildings={sceneState.world.buildings} props={sceneState.world.props} perception={sceneState.player.perception} />
-      <DriveInScreenCaptures buildings={sceneState.world.buildings} />
-      <CharacterCaptures
-        headTexKey={figure.parts.head.texKey}
-        skinTexKey={figure.parts.torso.texKey}
-        skin={figure.doc.skin}
-        layers={figure.doc.layers}
-      />
-      {/* GAP(W-3): game sky background awaits a captured home */}
-      <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={hmscSkyBackgroundColor(sceneState.config.sky)} showGrid={false} showAxes={false}>
-        {/* STATIC boot frame — the V23 controller owns these fields per frame once bound */}
-        <Scene3D.Camera position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={sceneState.config.view.drawRadiusMeters} />
-        <Scene3D.Fog enabled={false} />
-        <WorldStatics world={sceneState.world} skyConfig={sceneState.config.sky} />
+      <EmbodiedCaptures embodied={embodied} />
+      <EmbodiedScene embodied={embodied}>
         {/* the standing pieces — the world stream's materialized truth */}
         <PlacedPieceMeshes pieces={pieces} markedIds={markedIds} targetId={snapTarget?.targetPieceId ?? null} />
         {/* the snap indicator + the ghost */}
@@ -870,8 +571,7 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
         {ghostBoxes.map((b) => (
           <VisualBoxMesh key={b.key} box={b} colorOverride={BUILD_UI.ghostColor} opacityOverride={ghostOpacity} />
         ))}
-        <PlayerMeshes rig={rig} parts={figure.parts} yawDeg={player.yaw} offset={figureOffset} />
-      </Scene3D>
+      </EmbodiedScene>
 
       {/* crosshair — centered by the wrapper (absolute left/top take no %),
           BEFORE the gesture Pressable so the center click still places */}
@@ -880,7 +580,7 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
         <Box style={{ width: 14, height: 2, backgroundColor: '#e0f2fe88', marginTop: -8 }} />
       </Box>
 
-      <Pressable onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }} />
+      <EmbodiedMouseSurface embodied={embodied} />
 
       {/* top-left: exit + status */}
       <Box style={{ position: 'absolute', left: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -888,7 +588,7 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
           <Text fontSize={11} color="#cbd5e1" style={{ fontWeight: 700 }}>Back</Text>
         </Pressable>
         <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>
-          {`${props.mapName} · BUILD · WASD move · Space jump · drag look · click place · R rotate · E edit · X remove · P mark · 1-9/0 category · [ ] variant`}
+          {`${props.mapName} · BUILD · WASD move · Space jump · mouse look (${embodied.mouseCaptured ? 'Esc frees the mouse' : 'click to capture'}) · click place · R rotate · E edit · 1 floor · 2 wall · 3 ramp · 4 roof · X remove · P mark · 0 prefabs · [ ] variant`}
         </Text>
       </Box>
       {build.error != null && (
@@ -934,7 +634,8 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
         </Box>
       )}
 
-      {/* bottom palette — the registry IS the list (kinds + catalog + prefabs) */}
+      {/* bottom palette — the registry IS the list (kinds + catalog + prefabs),
+          displayed in the USER-RULED hotkey order so keys and labels agree */}
       <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: BUILD_UI.paletteBg, borderTopWidth: 1, borderTopColor: '#1f2937', padding: 8, gap: 6 }}>
         <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
           {kinds.map((kind, index) => (

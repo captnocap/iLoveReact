@@ -5,14 +5,30 @@ on /test's embodied drop-in pattern (BUILDMODE-0605). V24 + addenda are the
 law; `game/build/` is the registry (read, honored, extended only by the
 placed-piece family that landed at `badcf178c`).
 
+## SUBSTRATE-0605 amendment (2026-06-05)
+
+The route's first cut COPIED TestRoute's embodied stack wholesale; the copy
+diverged immediately (stale quantized gait; a camera that NEVER ENGAGED —
+module-level `bindFirst` with no `nativeCamera` node, the CAMGONE-0605
+shape). USER VERDICT: "made a whole new route that is just the same as /test
+route". The embodied substrate now lives ONCE in `cart/hmsc-int/Embodied.tsx`
+(extracted FROM TestRoute, the verdict-hardened lineage) and this route
+consumes it — `useEmbodiedPlayer` with `EmbodiedWorldExtras` (placed solids +
+ramp slopes), `onFrame` (snap), `onTap` (place). Two more USER rulings rode
+the same landing: hotkeys 1 floor · 2 wall · 3 ramp · 4 roof lead the palette
+(addendum 2), and the mouse is CAPTURED game-style — look follows raw motion,
+a click always places, Esc frees the mouse (addendum 4; supersedes surfaced
+choice #1 below — the click-slop heuristic is dead). `viewport.test.ts` pins
+all of it.
+
 ## The pieces
 
-- `BuildRoute.tsx` — one surface, two vocabularies: the /test player (V23
-  native camera, GAME_PHYSICS host step, GAME_WORLD colliders/heightfields)
-  plus the builder (crosshair → snap → ghost → click places → E edits →
-  P-mark → prefab → stamp). Consumes ONLY doors: GAME_BUILD, GAME_WORLD,
-  GAME_PHYSICS, GAME_INPUT, GAME_CAMERA/GAME_NATIVE_CAMERA, GAME_FIGURE,
-  GAME_KINDS, GAME_LOOP, GAME_CHROME, editors/sessions.
+- `BuildRoute.tsx` — the builder layer over the shared embodied substrate
+  (`../../Embodied`): crosshair → snap → ghost → captured click places →
+  E edits → P-mark → prefab → stamp. Consumes ONLY doors + the substrate:
+  GAME_BUILD, GAME_WORLD, GAME_PHYSICS, GAME_CAMERA (crosshair pick only,
+  solved with the substrate's `PLAYER_CAMERA`), GAME_INPUT (builder keys),
+  GAME_CHROME, editors/sessions.
 - `snap.ts` — crosshair→snap-target resolution, pure (P4: `snap.test.ts`,
   11 cases). The catalog entry's OWN snap mode decides (grid/edge/surface/
   free — registry data); nearest of piece-face vs ground wins; top faces
@@ -21,6 +37,9 @@ placed-piece family that landed at `badcf178c`).
   cases): one placement = ONE labeled commit on the WORLD channel; a prefab
   stamp is ONE commit landing N semantic pieces; an undo point steps
   placements back.
+- `viewport.test.ts` — the SUBSTRATE-0605 consumption-layer proof (P4, 5
+  cases): substrate carries the node-bound camera, both routes consume it,
+  capture-mode look pinned, ruled hotkeys pinned, CAMGONE shape banned.
 
 ## The seven steps (the dispatch's loop), where each lives
 
@@ -54,8 +73,9 @@ top, ramp slope gate) live in `game/build/placed.ts` `PLACED_TUNING`.
 
 ## Design choices SURFACED (where the spec was silent)
 
-1. **Click vs camera-drag share the left button** — a mouse-up within
-   `clickSlopPixels` (4) of its mouse-down places; more is a camera drag.
+1. ~~**Click vs camera-drag share the left button** — pixel-slop heuristic~~
+   SUPERSEDED by addendum 4 (USER VERDICT: "consume my mouse until esc"):
+   the substrate captures the mouse; a click is always place; Esc releases.
 2. **Edge snap derives its own orientation** (the nearer grid line owns the
    wall; the run goes along it). R-rotation applies to grid/free/surface
    modes; rotating an edge-snapped wall means aiming at the other line.
