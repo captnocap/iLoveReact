@@ -703,3 +703,43 @@ when they change. Zig holds active camera state, solves Orbit/Aim, smooths and
 interpolates every frame, and writes the existing `Scene3D.Camera` layout fields
 that `gpu/3d.zig` already consumes. The old declarative JS-props camera path
 remains valid for carts that do not explicitly engage the host controller.
+
+**V24 — Map authoring: the BUILDING PIECE GRAMMAR — "minecraft but without the
+voxel". (Added 2026-06-04; evidence: BUILDING-GRAMMAR.md.)**
+
+The user's framing: "with the amount of fortnite i played and how simple it is
+for how expansive of the set you can create from it is minecraft but without
+the voxel." Fortnite Creative semantics on the Minecraft authoring feel. The
+architectural rule, user-endorsed:
+
+**Author by semantic piece. Bake by gameplay contract. Skin by catalog.**
+
+- **Semantic pieces, not voxel density.** The structural primitives: wall,
+  floor, ramp/stairs, roof, pillar/corner, arch, fence, railing, trim, sign,
+  prop. Edits are MEANINGFUL — a WallEdit is solid/door/window/doubleWindow/
+  brokenWindow/garageDoor/arch/halfHeight. "You are not modeling the Taj
+  Mahal; you are composing readable architectural signals."
+- **Kind vs catalog.** "A wall is always a wall. A floor is always a floor."
+  Game meaning lives on the KIND; variety lives in the CATALOG: style,
+  material, theme ('downtown'|'motel'|'trap_lot'|'suburb'|'industrial'),
+  size, snap mode ('grid'|'edge'|'surface'|'free'), gameplay tags (collision,
+  blocksSight, blocksSound, cover, durability, climbable, vaultable, portal).
+- **The grid is the SNAP SUBSTRATE, not the object model.** The 1m grid (R4)
+  stays as the alignment/snap substrate for collision/pathing/cover; authored
+  objects are pieces, never cells.
+- **The bake contract.** Authored pieces compile into render geometry,
+  collision boxes, cover faces, sound occlusion, room volumes, nav
+  portals/blockers, destructible sections. "The authored object already knows
+  what it means... A doorway knows it connects rooms. A ramp knows it connects
+  floors." This partially answers the open W-2 world-rendering direction (the
+  TestRoute GAP lane): the bake direction — Fortnite Creative as the authoring
+  UX, HMSC semantic bake as the runtime output (V4/V15/V19 harmonized).
+- **Three authoring modes COEXIST**: Map Paint (terrain/roads/zones, exists),
+  Build Mode (semantic pieces — this ruling, expected primary: "i have a
+  feeling this will be the most used shape because it fits too well"), and
+  Voxel (VoxelHybridRoute stays as an alternative). Plus Prop Mode, Drop In
+  (/test), and Bake/Compile (V15/V19).
+- **Build Mode UX (Fortnite Creative as the capture target):** third-person
+  camera (V23 native), crosshair targets a snap surface, category select,
+  ghost preview snapped to grid/edge/surface, click places, edit key cycles
+  variants/cutouts, props drop, bake emits runtime data.
