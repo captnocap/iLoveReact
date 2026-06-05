@@ -8,17 +8,17 @@
 // propParts (render3d), the SAME list the game renders, so what you click is what
 // gets textured.
 //
-// Like SceneSurface, orbit state lives HERE and the camera is a plain solved
-// <Scene3D.Camera> (not an OrbitCamera rig), so the SAME solve drives both render
-// and pick — click selection stays exact. The model is drawn through ModelScene
-// (the real Building3D / facades / Prop), and the offscreen texture captures are
-// mounted as 2D siblings so an applied texture actually bakes and shows.
+// CAMNUKE-0605: the renderer camera is the V23 native host controller. JS keeps
+// only a semantic pick shadow from the registry so click selection stays exact.
+// The model is drawn through ModelScene (the real Building3D / facades / Prop),
+// and the offscreen texture captures are mounted as 2D siblings so an applied
+// texture actually bakes and shows.
 
-import { memo, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { solveCamera, CAMERAS, type Rect, type Vec3 } from '@reactjit/cameras';
 import { pickMesh } from './assist3d/picking';
+import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 import type { Building, WorldProp } from '../hmsc/design';
 import { buildingParts } from '../hmsc/render3d/buildingParts';
 import { propParts } from '../hmsc/render3d/propParts';
@@ -28,6 +28,9 @@ import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures';
 import { WorldPartCaptures, BuildingTexturedFaces } from '../hmsc/render3d/PartCaptures';
 import { ModelScene } from './ModelViewer';
 import { accentFor } from './studio.cls';
+
+type Vec3 = [number, number, number];
+type Rect = { x: number; y: number; width: number; height: number };
 
 const NEUTRAL_PERCEPTION = { high: 0 };
 
@@ -44,9 +47,10 @@ export const ObjectInspect3D = memo(function ObjectInspect3D(props: {
   onAdd?: () => void;
 }) {
   const { building, prop, selectedPartId } = props;
-  const [yaw, setYaw] = useState(35);
-  const [pitch, setPitch] = useState(26);
-  const [dist, setDist] = useState(props.baseDist);
+  const lookRef = useRef({ yaw: 35, pitch: 26 });
+  const distRef = useRef(props.baseDist);
+  const cameraRef = useRef<any>(null);
+  const cameraCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
 
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 600 });
   const dragRef = useRef<{ x: number; y: number; dist: number } | null>(null);
@@ -56,10 +60,37 @@ export const ObjectInspect3D = memo(function ObjectInspect3D(props: {
     [building, prop],
   );
 
-  const solved = useMemo(
-    () => solveCamera(CAMERAS.Orbit, { target: [0, props.targetY, 0] as Vec3, yaw, pitch, dist, zoom: 1, fov: 38 }),
-    [yaw, pitch, dist, props.targetY],
-  );
+  const solveShadow = (look = lookRef.current, distance = distRef.current) =>
+    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: [0, props.targetY, 0] as Vec3, yaw: look.yaw, pitch: look.pitch, dist: distance, zoom: 1, fov: 38 });
+  const shadowCamRef = useRef(solveShadow());
+  const [bootCam] = useState(() => shadowCamRef.current);
+  const sendOrbit = () => {
+    const l = lookRef.current;
+    shadowCamRef.current = solveShadow(l, distRef.current);
+    cameraCtlRef.current?.setOrbit({ target: [0, props.targetY, 0], yaw: l.yaw, pitch: l.pitch, distance: distRef.current, zoom: 1, fov: 38 });
+  };
+
+  useEffect(() => {
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) {
+      console.warn('[object-inspect] native camera not engaged — camera node id unavailable');
+      return;
+    }
+    const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
+    cameraCtlRef.current = ctl;
+    ctl.setOrbit({ target: [0, props.targetY, 0], yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: distRef.current, zoom: 1, fov: 38 });
+    ctl.setMode('orbit');
+    return () => {
+      cameraCtlRef.current = null;
+      ctl.disable();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; param changes ride effects/input below
+  }, []);
+
+  useEffect(() => {
+    distRef.current = props.baseDist;
+    sendOrbit();
+  }, [props.baseDist, props.targetY]);
 
   const onDown = (e: any) => { dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0), dist: 0 }; };
   const onMove = (e: any) => {
@@ -67,20 +98,26 @@ export const ObjectInspect3D = memo(function ObjectInspect3D(props: {
     const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
     const dx = nx - d.x, dy = ny - d.y;
     d.dist += Math.abs(dx) + Math.abs(dy); d.x = nx; d.y = ny;
-    setYaw((v) => v + dx * 0.4);
-    setPitch((v) => clamp(v - dy * 0.3, 6, 85));
+    const l = lookRef.current;
+    const nextYaw = l.yaw - dx * 0.4;
+    const nextPitch = clamp(l.pitch - dy * 0.3, 6, 85);
+    cameraCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    l.yaw = nextYaw;
+    l.pitch = nextPitch;
+    shadowCamRef.current = solveShadow();
   };
   const onUp = (e: any) => {
     const d = dragRef.current; dragRef.current = null;
     if (!d || d.dist >= 6) return;                       // a drag, not a tap
     const r = rectRef.current;
     const sx = Number(e?.x ?? 0) - r.x, sy = Number(e?.y ?? 0) - r.y;
-    const hit = pickMesh(sx, sy, r, solved, parts);
+    const hit = pickMesh(sx, sy, r, shadowCamRef.current, parts);
     props.onPick(hit >= 0 ? parts[hit].id : null);
   };
   const onWheel = (e: any) => {
     const dy = Number(e?.deltaY ?? e?.dy ?? 0);
-    setDist((v) => clamp(v + (dy > 0 ? 1 : -1) * Math.max(1, props.baseDist * 0.08), 3, props.baseDist * 3));
+    distRef.current = clamp(distRef.current + (dy > 0 ? 1 : -1) * Math.max(1, props.baseDist * 0.08), 3, props.baseDist * 3);
+    sendOrbit();
   };
 
   // Highlight every part SHARING the selected id (a part group — e.g. all pillars
@@ -103,7 +140,7 @@ export const ObjectInspect3D = memo(function ObjectInspect3D(props: {
         style={{ width: '100%', height: '100%', position: 'relative', overflow: 'hidden' }}
       >
         <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0e1622'} showGrid showAxes={false}>
-          <Scene3D.Camera position={solved.pos} target={solved.target} fov={solved.fov} />
+          <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} />
           <ModelScene building={building} prop={prop} />
           {/* Box-building face textures from the part-texture channel (skin panels
               come from ModelScene's BuildingFacades; this adds the global ones). */}
