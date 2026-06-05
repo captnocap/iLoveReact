@@ -60,6 +60,10 @@ export type CharacterDraft = {
   /** opaque id into the items registry; 'none' = empty hands */
   heldItem: string;
   bodyPose: BodyPoseId;
+  /** MODELPAINT-0605: the document's painted overlays, carried OPAQUE
+   *  through the edit cycle — /cutout authors them; a /characters save must
+   *  never wipe them (pinned in characters.test.ts). */
+  paint?: BodyDocument['paint'];
 };
 
 export const emptyGrid = (): number[] => new Array(GRID_CELLS).fill(0);
@@ -121,9 +125,13 @@ export function draftToHed(draft: CharacterDraft, title?: string): HedDocument {
 }
 
 /** The draft as the whole-character document the stream stores and the bake
- *  consumes. Region sliders bake INTO each part's sculpt here. */
+ *  consumes. Region sliders bake INTO each part's sculpt here. The painted
+ *  overlays ride through opaque (MODELPAINT-0605 — never wiped by a save). */
 export function draftToDocument(draft: CharacterDraft, title?: string): BodyDocument {
-  return buildBody({
+  const paint = draft.paint && Object.keys(draft.paint).length > 0 ? { paint: draft.paint } : {};
+  return {
+    ...paint,
+    ...buildBody({
     skin: draft.skin,
     amount: draft.amount,
     headScaleY: draft.headScaleY,
@@ -138,7 +146,8 @@ export function draftToDocument(draft: CharacterDraft, title?: string): BodyDocu
     heldItem: draft.heldItem === 'none' ? undefined : draft.heldItem,
     bodyPose: draft.bodyPose,
     title,
-  });
+    }),
+  };
 }
 
 /** A stored document back into a working draft (the roster "load" path).
@@ -174,5 +183,6 @@ export function draftFromDocument(doc: BodyDocument): CharacterDraft {
     accessories: doc.clothingAccessories ?? [],
     heldItem: doc.heldItem ?? 'none',
     bodyPose: doc.bodyPose ?? DRAFT_DEFAULTS.bodyPose,
+    paint: doc.paint,
   };
 }

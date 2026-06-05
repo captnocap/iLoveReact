@@ -138,3 +138,27 @@ mount restores the most recent roster entry as the working draft. Restores/
 loads arm a skip (re-committing unchanged content would churn the chain);
 generate/import are authored content and DO autosave. The explicit Save stays
 as the named commit.
+
+## MODELPAINT-0605 (2026-06-05): texture painting migrated OUT, to /cutout
+
+THE USER'S RULING, verbatim: "i dont want to paint depth, i want to paint
+their face though, or body parts, is that clear." Executed:
+
+- DELETED: the coupled color+depth face-paint tool (the stroke that landed
+  color AND ±0.16·strength relief as one .hed layer), its `face color`
+  mode chip, palette swatches, `undo paint`, the vector-stroke capture, and
+  the paintKit numbers that served it (`faceStrokeMinStep`/`faceStrokeDepth`/
+  `faceStrokeFeather`/`facePaints`, `facePaintDepth`). The .hed one-shape
+  law is untouched for SHAPE layers (generated faces, animations); SCULPT
+  stays exactly as it was — this route shapes geometry.
+- The paint row now deep-links: `paint texture → /cutout` (the mailbox in
+  editors/cutout/models.ts preloads the SAVED character's selected part;
+  unsaved drafts are told to save first).
+- The route RENDERS /cutout's work: `CharacterDraft.paint` carries the
+  document's overlays OPAQUE through the edit cycle — pinned in
+  characters.test.ts that a sculpt/wardrobe save never wipes a painting
+  (the wipe hazard found during this capture: draftToDocument rebuilt the
+  document from scratch). Captures composite the head overlay at the photo
+  slot (over skin, UNDER shape layers — the ruled z-order) and painted body
+  parts under their stamps; overlay stamps fold into the texture keys so
+  /cutout saves re-bake exactly the affected captures.

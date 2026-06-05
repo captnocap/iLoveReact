@@ -54,7 +54,8 @@ import { CutoutStatusBar } from './StatusBar';
 // part, paint it here, save back onto the model document through the doors.
 import {
   bakeOverlayFromDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
-  modelWorkName, overlayOf, reopenOverlayDocument, type ModelBinding,
+  modelWorkName, overlayOf, reopenOverlayDocument, takePendingModelTarget,
+  type ModelBinding,
 } from './models';
 import { applyBodyPaint, applyVehiclePaint, paintedOverlayHasContent, charactersStream, vehiclesStream } from '@game';
 import type { BodyDocument, CharactersEvent, VehicleDoc, VehiclesEvent } from '@game';
@@ -374,6 +375,15 @@ export function CutoutRoute(props: { onExit: () => void }) {
     setStatus(`painting ${binding.family} ${binding.docId} · ${binding.part}${initial ? ' (reopened)' : ''}`);
     live.session?.note(`paint model · ${binding.family} ${binding.docId} · ${binding.part}`);
   };
+
+  // The deep-link mailbox: another route said "paint texture → /cutout with
+  // the model preloaded" — take it once on mount and open the target.
+  const openModelTargetRef = useRef(openModelTarget);
+  openModelTargetRef.current = openModelTarget;
+  useEffect(() => {
+    const pending = takePendingModelTarget();
+    if (pending) openModelTargetRef.current(pending);
+  }, []);
 
   // Save a model painting: bake → apply through the door → ONE labeled
   // commit-grade upsert on the owning channel. An empty painting CLEARS the

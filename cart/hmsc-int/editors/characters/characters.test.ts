@@ -330,4 +330,18 @@ test('mesh grab: the drag axis points outward and mouse motion maps onto it', ()
   assertClose(gridDeltaFor(-sa.y, sa.x, sa), 0, 1e-6, 'perpendicular mouse travel maps to zero');
 });
 
+test('a /characters save never wipes /cutout paint: the draft carries overlays opaque (MODELPAINT-0605)', () => {
+  const draft = generateCharacterDraft(77);
+  const doc = draftToDocument(draft, 'painted subject');
+  assert(!('paint' in doc), 'an unpainted draft saves without the channel');
+  // /cutout painted the head and torso on the SAVED document
+  const overlay = { version: 1 as const, stamp: 5150, cols: 4, rows: 4, layers: [{ color: '#dc2626', cells: [0, 5] }] };
+  const painted: BodyDocument = { ...doc, paint: { head: overlay, torso: { ...overlay, stamp: 5151 } } };
+  // the roster load → edit → save cycle (the wipe hazard under test)
+  const reloaded = draftFromDocument(parseBody(serializeBody(painted))!);
+  const resaved = draftToDocument({ ...reloaded, skin: '#112233' }, 'edited after painting');
+  assertEqual(JSON.stringify(resaved.paint), JSON.stringify(painted.paint), 'sculpt/wardrobe edits in /characters never wipe the painting');
+  assertEqual(resaved.skin, '#112233', 'the edit itself still lands');
+});
+
 finish('editors/characters');

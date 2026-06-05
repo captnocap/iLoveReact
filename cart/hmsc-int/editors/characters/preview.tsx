@@ -17,7 +17,9 @@ import { Box, Image, Scene3D, StaticSurface, Text } from '@reactjit/runtime/prim
 import * as Geometry from '@reactjit/geometries';
 import type { BodyRigFrame } from '../../game/figure/rig';
 import type { HedLayer } from '../../game/figure/hed';
-import { FaceLayerPaint, UNWRAP_H, UNWRAP_W, type PartRender } from '../../game/figure/render';
+import { FaceLayerPaint, UNWRAP_H, UNWRAP_W, type FigurePaint, type PartRender } from '../../game/figure/render';
+import { PaintedOverlayPaint } from '../../game/paintedRender';
+import type { PaintedOverlay } from '../../game/painted';
 import { BOTTOMS, clothingSkinTextureKey, type BodyShapeId, type BottomsId, type ClothingId, type ClothingSkinId, type PartId, CLOTHING_SKINS } from '../../game/figure/shapes';
 import type { ClothingInstance } from '../../game/figure/clothing';
 import { ITEM_DEFINITIONS, ITEM_GEOMETRIES, type ItemPart } from '../../game/items';
@@ -236,6 +238,10 @@ export function UnwrapContent(props: {
   photoScale: number;
   photoY: number;
   layers: HedLayer[] | null;
+  /** MODELPAINT-0605: the part's painted overlay (authored in /cutout) —
+   *  composited where the photo sits: over the skin, UNDER the shape
+   *  layers (the ruled z-order). */
+  overlay?: PaintedOverlay | null;
   width?: number;
   height?: number;
 }) {
@@ -256,6 +262,7 @@ export function UnwrapContent(props: {
           }}
         />
       ) : null}
+      {props.overlay ? <PaintedOverlayPaint overlay={props.overlay} w={width} h={height} /> : null}
       {props.layers ? (
         <Box style={{ position: 'absolute', left: 0, top: 0, width, height }}>
           <ScaledLayerPaint layers={props.layers} width={width} height={height} />
@@ -418,6 +425,11 @@ export function CharacterEditorCaptures(props: {
   bottoms: BottomsId;
   bodyShape: BodyShapeId;
   parts: readonly PartId[];
+  /** MODELPAINT-0605: the document's painted overlays — the head's rides
+   *  the unwrap composition (photo slot); painted body parts composite
+   *  under their stamps. The route folds the stamps into the texture keys
+   *  (content-addressing), so paintless renders are byte-identical. */
+  paint?: FigurePaint;
 }) {
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
@@ -426,11 +438,12 @@ export function CharacterEditorCaptures(props: {
   return (
     <>
       <StaticSurface staticKey={props.headTexKey} style={surfaceStyle}>
-        <UnwrapContent skin={props.skin} photo={props.photo} photoScale={props.photoScale} photoY={props.photoY} layers={props.layers} />
+        <UnwrapContent skin={props.skin} photo={props.photo} photoScale={props.photoScale} photoY={props.photoY} layers={props.layers} overlay={props.paint?.head ?? null} />
       </StaticSurface>
       {props.parts.filter((id) => id !== 'head').map((id) => (
         <StaticSurface key={`skin-${id}`} staticKey={props.skinTexKeyFor(id)} style={surfaceStyle}>
           <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin, position: 'relative', overflow: 'hidden' }}>
+            {props.paint?.[id] ? <PaintedOverlayPaint overlay={props.paint[id]!} w={UNWRAP_W} h={UNWRAP_H} /> : null}
             <UnderwearTexturePaint part={id} clothing={props.clothing} bottoms={props.bottoms} bodyShape={props.bodyShape} />
           </Box>
         </StaticSurface>

@@ -53,7 +53,7 @@ import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { PAINT } from '../paint';
 import {
-  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, facePaintDepth, gridFromBytes,
+  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, gridFromBytes,
   headTextureKey, partDynKey, reliefBytesFromGrid, sculptModeValue, skinTextureKey,
   type SculptMode,
 } from './paintKit';
@@ -65,6 +65,8 @@ import {
   type GrabCloud, type GrabHit, type GrabInstance, type ScreenAxis,
 } from './grabKit';
 import { ANIM_PRESETS, DEFAULT_ANIM_SCRIPT } from './animPresets';
+// MODELPAINT-0605: the deep-link mailbox into /cutout's model targets
+import { setPendingModelTarget } from '../cutout/models';
 
 const { Chip, Knob, Panel, LabEnvironment } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
@@ -77,7 +79,9 @@ const GRID_W = TUNE.grid.width;
 const GRID_H = TUNE.grid.height;
 const NEUTRAL = TUNE.neutral;
 
-type PaintTool = 'sculpt' | 'face';
+// MODELPAINT-0605: the coupled color+depth face-paint tool is DELETED, by
+// ruling ("i dont want to paint depth, i want to paint their face though") —
+// texture painting lives in /cutout; this route keeps SCULPT (geometry).
 type EditTab = 'outline' | 'detail';
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -89,7 +93,7 @@ function setLatch(key: string, value: number): void {
   if (typeof fn === 'function') fn(key, value);
 }
 
-export function CharactersRoute(props: { onExit: () => void }) {
+export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: () => void }) {
   // ── the character being authored + session state ──────────────────────────
   const [draft, setDraft] = useState<CharacterDraft>(emptyDraft);
   const [draftId, setDraftId] = useState<string | null>(null);
@@ -98,12 +102,10 @@ export function CharactersRoute(props: { onExit: () => void }) {
   const [selPart, setSelPart] = useState<PartId>('head');
   const [view, setView] = useState<PreviewView>('part');
   const [editTab, setEditTab] = useState<EditTab>('outline');
-  const [paintTool, setPaintTool] = useState<PaintTool>('sculpt');
   const [mode, setMode] = useState<SculptMode>('raise');
   const [mirror, setMirror] = useState(true);
   const [brush, setBrush] = useState(14);
   const [strength, setStrength] = useState(0.5);
-  const [facePaintColor, setFacePaintColor] = useState(TUNE.facePaints[0]);
   const [photo, setPhoto] = useState<Photo | null>(null);
   const [photoScale, setPhotoScale] = useState(0.4);
   const [photoY, setPhotoY] = useState(0);
@@ -126,9 +128,8 @@ export function CharactersRoute(props: { onExit: () => void }) {
 
   const paintingRef = useRef(false);
   // the shared painter's input plumbing: gap-free interpolated sculpt dabs
-  // (mirror riding the engine) + min-step vector capture for face strokes
+  // (mirror riding the engine)
   const strokeEngineRef = useRef<ReturnType<typeof PAINT.createStrokeEngine> | null>(null);
-  const faceStrokeRef = useRef<ReturnType<typeof PAINT.createVectorStroke> | null>(null);
   const profileDraftRef = useRef<number[] | null>(null);
   const canvasRect = useRef({ x: 0, y: 0, width: EDITOR_W, height: EDITOR_H });
   const orbitRef = useRef<{ x: number; y: number } | null>(null);
@@ -300,12 +301,15 @@ export function CharactersRoute(props: { onExit: () => void }) {
   useEffect(() => { relief.paint.upload(reliefBytesFromGrid(selDisplace)); }, [selDisplace]);
 
   // ── content-addressed keys + the memo'd mesh bundle ───────────────────────
+  // MODELPAINT-0605: a painted part's overlay stamp folds into its key, so
+  // /cutout saves re-bake exactly the affected captures and nothing else.
+  const paintStamp = (id: PartId) => (draft.paint?.[id] ? `.p${draft.paint[id]!.stamp}` : '');
   const headTexKey = headTextureKey({
     photoStamp: photo?.stamp ?? null, faceId, anim: activeAnim ?? 'still', phase,
     skin: draft.skin, photoScale, photoY,
-  });
+  }) + paintStamp('head');
   const skinTexKeyFor = (id: PartId) =>
-    skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape });
+    skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape }) + paintStamp(id);
 
   const partRender = useMemo(() => {
     const out = {} as Record<PartId, PartRender>;
@@ -320,7 +324,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the helpers read exactly these
-  }, [regionedGrids, headDisplace, seqs, draft.profiles, faceId, activeAnim, phase, draft.amount, draft.headScaleY, draft.skin, headTexKey, draft.clothing, draft.bottoms, draft.bodyShape, draft.regions]);
+  }, [regionedGrids, headDisplace, seqs, draft.profiles, faceId, activeAnim, phase, draft.amount, draft.headScaleY, draft.skin, headTexKey, draft.clothing, draft.bottoms, draft.bodyShape, draft.regions, draft.paint]);
 
   const bodyPhase = scriptPlaying ? scriptFrame / 20 : bodyRigAnim ? rigFrame / 24 : 0;
   const rig = useMemo(
@@ -351,36 +355,13 @@ export function CharactersRoute(props: { onExit: () => void }) {
     }
   };
 
-  const appendFacePoint = (sx: number, sy: number) => {
-    const p = uvFromScreen(sx, sy);
-    faceStrokeRef.current?.add(p.cx, p.cy);
-  };
-
-  const ensureFace = (): HedDocument => draft.face ?? {
-    kind: 'hed', version: 1, cols: GRID_W, rows: GRID_H,
-    skin: draft.skin, amount: draft.amount, scaleY: draft.headScaleY,
-    sculpt: emptyGrid(), layers: [],
-  };
-
-  const commitFaceStroke = () => {
-    const points = faceStrokeRef.current?.points() ?? [];
-    faceStrokeRef.current = null;
-    if (points.length === 0) return;
-    const rx = clamp(brush / PAINT_W, 0.01, 0.2);
-    const ry = clamp(brush / PAINT_H, 0.01, 0.2);
-    const depth = facePaintDepth(mode, strength);
-    const layer: HedLayer = {
-      id: `paint-${Date.now()}`,
-      label: 'paint stroke',
-      color: facePaintColor,
-      depth,
-      feather: TUNE.faceStrokeFeather,
-      shapes: points.map((p) => ({ kind: 'ellipse' as const, cx: p.x, cy: p.y, rx, ry, mirror: mirror && Math.abs(p.x - 0.5) > 0.01 ? true : undefined })),
-    };
-    const doc = ensureFace();
-    setDraft((d) => ({ ...d, face: { ...doc, skin: d.skin, amount: d.amount, scaleY: d.headScaleY, layers: doc.layers.concat(layer) } }));
-    setStatus(`painted ${points.length} face dabs as one .hed layer`);
-    live.session?.note(`face paint · ${points.length} dabs · ${facePaintColor}`);
+  // (the face-paint stroke — color+depth as one .hed layer — is DELETED per
+  // the MODELPAINT-0605 ruling; face/body TEXTURE painting lives in /cutout)
+  const paintTextureInCutout = () => {
+    if (!draftId) { setStatus('save to the roster first — /cutout paints the SAVED character'); return; }
+    setPendingModelTarget({ family: 'figure', docId: draftId, part: selPart });
+    live.session?.note(`paint texture → /cutout · ${draftId} · ${selPart}`);
+    props.onPaintTexture?.();
   };
 
   const syncGrid = () => {
@@ -392,27 +373,19 @@ export function CharactersRoute(props: { onExit: () => void }) {
   const onPaintDown = (e: any) => {
     paintingRef.current = true;
     const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
-    if (isHead && paintTool === 'face') {
-      faceStrokeRef.current = PAINT.createVectorStroke(Math.max(TUNE.faceStrokeMinStep, brush / PAINT_W * 0.35));
-      appendFacePoint(sx, sy);
-    } else {
-      strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: brush, mirrorAxisX: mirror ? PAINT_W / 2 : null });
-      strokeEngineRef.current.begin();
-      dab(sx, sy, Number(e?.pressure) || undefined);
-    }
+    strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: brush, mirrorAxisX: mirror ? PAINT_W / 2 : null });
+    strokeEngineRef.current.begin();
+    dab(sx, sy, Number(e?.pressure) || undefined);
   };
   const onPaintMove = (e: any) => {
     if (!paintingRef.current) return;
     const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
-    if (isHead && paintTool === 'face') appendFacePoint(sx, sy);
-    else dab(sx, sy, Number(e?.pressure) || undefined);
+    dab(sx, sy, Number(e?.pressure) || undefined);
   };
   const onPaintUp = () => {
     if (!paintingRef.current) return;
     paintingRef.current = false;
-    if (isHead && paintTool === 'face') {
-      commitFaceStroke();
-    } else {
+    {
       strokeEngineRef.current?.end();
       strokeEngineRef.current = null;
       syncGrid();
@@ -440,18 +413,6 @@ export function CharactersRoute(props: { onExit: () => void }) {
     paints[selPart].paint.clear(NEUTRAL);
     setPartGrid(selPart, emptyGrid());
     live.session?.note(`clear sculpt · ${selPart}`);
-  };
-
-  const removeLastPaintLayer = () => {
-    setDraft((d) => {
-      if (!d.face) return d;
-      let drop = -1;
-      for (let i = d.face.layers.length - 1; i >= 0; i--) {
-        if (d.face.layers[i].id.startsWith('paint-')) { drop = i; break; }
-      }
-      if (drop < 0) return d;
-      return { ...d, face: { ...d.face, layers: d.face.layers.filter((_, i) => i !== drop) } };
-    });
   };
 
   // ── outline lathe (drag previews → latches; commit on release) ────────────
@@ -950,18 +911,12 @@ export function CharactersRoute(props: { onExit: () => void }) {
               {editTab === 'outline' ? <Chip label="reset outline" onPress={resetOutline} /> : null}
             </Row>
           ) : (
-            <>
-              <Row style={{ gap: 8, alignItems: 'center' }}>
-                <Text fontSize={11} color={T.dim} style={{ width: 52 }}>paint</Text>
-                <Chip label="sculpt" active={paintTool === 'sculpt'} onPress={() => setPaintTool('sculpt')} />
-                <Chip label="face color" active={paintTool === 'face'} color="warn" onPress={() => setPaintTool('face')} />
-              </Row>
-              {paintTool === 'face' ? (
-                <ChipRow label="color">
-                  <SwatchRow colors={TUNE.facePaints} active={facePaintColor} onPick={setFacePaintColor} />
-                </ChipRow>
-              ) : null}
-            </>
+            <Row style={{ gap: 8, alignItems: 'center' }}>
+              <Text fontSize={11} color={T.dim} style={{ width: 52 }}>paint</Text>
+              <Chip label="sculpt" active onPress={() => undefined} />
+              {/* MODELPAINT-0605: texture painting migrated to /cutout */}
+              <Chip label="paint texture → /cutout" color="cyan" onPress={paintTextureInCutout} />
+            </Row>
           )}
 
           {/* ── the canvas: outline lathe OR unwrap painter ── */}
@@ -998,6 +953,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
                 photoScale={photoScale}
                 photoY={photoY}
                 layers={isHead ? shownDoc?.layers ?? null : null}
+                overlay={draft.paint?.[selPart] ?? null}
                 width={EDITOR_W}
                 height={EDITOR_H}
               />
@@ -1017,21 +973,12 @@ export function CharactersRoute(props: { onExit: () => void }) {
                 <Chip label="carve in" active={mode === 'lower'} color="#ff9445" onPress={() => setMode('lower')} />
                 <Chip label="flatten" active={mode === 'flatten'} color="#94a3b8" onPress={() => setMode('flatten')} />
               </Row>
-              {isHead && paintTool === 'face' ? (
-                <Row style={{ gap: 8, alignItems: 'center' }}>
-                  <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
-                  {draft.face && draft.face.layers.some((l) => l.id.startsWith('paint-')) ? (
-                    <Chip label="undo paint" color="warn" onPress={removeLastPaintLayer} />
-                  ) : null}
-                </Row>
-              ) : (
-                <Row style={{ gap: 8, alignItems: 'center' }}>
-                  <Chip label="fill" onPress={fillAll} />
-                  <Chip label="soften" onPress={soften} />
-                  <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
-                  <Chip label="clear" onPress={clearStrokes} />
-                </Row>
-              )}
+              <Row style={{ gap: 8, alignItems: 'center' }}>
+                <Chip label="fill" onPress={fillAll} />
+                <Chip label="soften" onPress={soften} />
+                <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
+                <Chip label="clear" onPress={clearStrokes} />
+              </Row>
             </>
           ) : null}
 
@@ -1126,6 +1073,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
         bottoms={draft.bottoms}
         bodyShape={draft.bodyShape}
         parts={PART_IDS}
+        paint={draft.paint}
       />
     </Row>
   );

@@ -103,3 +103,20 @@ export function modelWorkId(binding: ModelBinding): string {
 export function modelWorkName(binding: ModelBinding): string {
   return `${binding.docId} · ${binding.part}`;
 }
+
+// ── the deep-link mailbox ─────────────────────────────────────────────────────
+// "paint texture → /cutout with the model preloaded": the source route sets
+// the target, navigates, and CutoutRoute takes it once on mount. One slot,
+// one-shot — never persisted (a navigation gesture, not state).
+
+let pendingModelTarget: ModelBinding | null = null;
+
+export function setPendingModelTarget(binding: ModelBinding): void {
+  pendingModelTarget = binding;
+}
+
+export function takePendingModelTarget(): ModelBinding | null {
+  const binding = pendingModelTarget;
+  pendingModelTarget = null;
+  return binding;
+}

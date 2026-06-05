@@ -25,12 +25,6 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
   grid: { width: HED_GRID_W, height: HED_GRID_H },
   /** R8 midpoint = flat; above raises, below carves */
   neutral: 0.5,
-  /** brush dab spacing floor for face strokes, in UV */
-  faceStrokeMinStep: 0.008,
-  /** face-paint stroke depth at full strength */
-  faceStrokeDepth: 0.16,
-  /** face-paint layer edge softness */
-  faceStrokeFeather: 0.42,
   /** knob specs (GAME_CHROME.Knob) */
   knobs: {
     brush: { min: 4, max: 40, step: 2, precision: 0 },
@@ -45,8 +39,8 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
   orbit: { yawPerPx: 0.4, pitchPerPx: 0.3, pitchMin: 4, pitchMax: 85 },
   /** draft auto-commit debounce (V20 micro-save; AUTOSAVE-0605) */
   autosaveDebounceMs: 1200,
-  /** face-paint palette */
-  facePaints: ['#1f2937', '#f8fafc', '#7a4a3a', '#c2410c', '#dc2626', '#facc15', '#38bdf8', '#8b5cf6'],
+  // (the face-paint palette + stroke numbers died with the coupled
+  // color+depth tool — MODELPAINT-0605; /cutout owns texture painting)
 });
 
 export type SculptMode = 'raise' | 'lower' | 'flatten';
@@ -55,12 +49,6 @@ export type SculptMode = 'raise' | 'lower' | 'flatten';
 export function sculptModeValue(mode: SculptMode, strength: number): number {
   const N = PAINT_EDITOR_TUNING.neutral;
   return mode === 'flatten' ? N : mode === 'raise' ? N + 0.5 * strength : N - 0.5 * strength;
-}
-
-/** The face-paint layer depth for a mode at a strength. */
-export function facePaintDepth(mode: SculptMode, strength: number): number {
-  const D = PAINT_EDITOR_TUNING.faceStrokeDepth;
-  return mode === 'flatten' ? 0 : mode === 'raise' ? D * strength : -D * strength;
 }
 
 /** paint-texture R8 bytes → signed mesh grid (average blocks, recenter). */

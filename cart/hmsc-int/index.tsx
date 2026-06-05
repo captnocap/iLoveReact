@@ -914,7 +914,7 @@ function EditorShell() {
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
         {/* The characters editor (editors/characters/) — authors what game/figure runs. */}
-        <Route path="/characters">{() => <CharactersRoute onExit={() => nav.push('/')} />}</Route>
+        <Route path="/characters">{() => <CharactersRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
         {/* The vehicles editor (editors/vehicles/) — authors what game/vehicle builds. */}
         <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} />}</Route>
         {/* The cutout painter (editors/cutout/) — the cutout app remade for skins/textures. */}
