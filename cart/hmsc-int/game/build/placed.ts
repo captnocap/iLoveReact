@@ -201,8 +201,10 @@ export function raycastPieces(
       }
       let t0 = (-half[axis] - origin[axis]) / dir[axis];
       let t1 = (half[axis] - origin[axis]) / dir[axis];
-      let sign = dir[axis] > 0 ? -1 : 1;
-      if (t0 > t1) { const swap = t0; t0 = t1; t1 = swap; sign = -sign; }
+      // the entry face is the one the ray travels AGAINST — its outward
+      // normal opposes the ray on this axis, regardless of slab ordering
+      const sign = dir[axis] > 0 ? -1 : 1;
+      if (t0 > t1) { const swap = t0; t0 = t1; t1 = swap; }
       if (t0 > tNear) { tNear = t0; nearAxis = axis; nearSign = sign; }
       if (t1 < tFar) tFar = t1;
       if (tNear > tFar) { miss = true; break; }
@@ -376,11 +378,14 @@ export function stampPrefabPieces(
   const yawRadians = normalizeYaw(yawDegrees) * DEG;
   const cos = Math.cos(yawRadians);
   const sin = Math.sin(yawRadians);
+  // R(+yaw), the SAME frame raycastPieces/placedPieceColliders rotate a
+  // piece's own body with — composition turn and piece spin must agree or
+  // a turned stamp pulls its walls off its corners
   return prefab.pieces.map((piece) => ({
     pieceId: piece.pieceId,
-    x: origin.x + piece.x * cos + piece.z * sin,
+    x: origin.x + piece.x * cos - piece.z * sin,
     y: origin.y + piece.y,
-    z: origin.z - piece.x * sin + piece.z * cos,
+    z: origin.z + piece.x * sin + piece.z * cos,
     yawDegrees: normalizeYaw(piece.yawDegrees + yawDegrees),
     ...(piece.edit !== undefined ? { edit: piece.edit } : {}),
   }));

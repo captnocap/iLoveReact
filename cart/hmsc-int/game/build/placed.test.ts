@@ -165,11 +165,30 @@ test('a stamp at yaw 0 is exactly the decomposition placement', () => {
 test('a stamp turns as one composition: locals rotate, piece yaw composes', () => {
   const prefab = prefabDefinition('prefab.motelRoom');
   const stamped = stampPrefabPieces(prefab, { x: 0, y: 0, z: 0 }, 90);
-  // local (x:0,z:3) window wall under +90: x' = lz, z' = -lx → (3, 0)
+  // R(+90) — the same frame the pieces' own colliders/raycast turn with:
+  // local (x:0,z:3) window wall → (lx·0 − lz·1, lx·1 + lz·0) = (−3, 0)
   const window = stamped.find((p) => p.edit === 'window')!;
-  assertClose(window.x, 3, 1e-9, 'the local offset rotated');
+  assertClose(window.x, -3, 1e-9, 'the local offset rotated');
   assertClose(window.z, 0, 1e-9, 'the local offset rotated');
   assertEqual(window.yawDegrees, 90, 'piece yaw composed with the stamp yaw');
+});
+
+test('composition turn and piece spin share one frame: a turned room keeps its corners', () => {
+  // two walls meeting at a corner: one along x at the origin cell run, one
+  // turned 90° at the same corner. After a 90° stamp, the pair must still
+  // meet at a corner (envelope corners coincide), not pull apart.
+  const prefab = prefabFromPieces('prefab.cornerProof', 'Corner', 'common', [
+    { id: 'a', pieceId: 'wall.concrete.common', x: 1.5, y: 0, z: 0, yawDegrees: 0 },
+    { id: 'b', pieceId: 'wall.concrete.common', x: 0, y: 0, z: 1.5, yawDegrees: 90 },
+  ]);
+  const stamped = stampPrefabPieces(prefab, { x: 10, y: 0, z: 10 }, 90).map((p, i) => ({ ...p, id: `s_${i}` }));
+  const a = pieceBounds(stamped[0]);
+  const b = pieceBounds(stamped[1]);
+  // wall a (was along x, now along z) and wall b (was along z, now along x)
+  // still touch: their envelopes overlap at the shared corner cell
+  const overlapX = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX);
+  const overlapZ = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+  assert(overlapX > -1e-9 && overlapZ > -1e-9, 'the turned composition still meets at its corner');
 });
 
 test('clone-from-world round-trips: capture a composition, stamp it back, identical pieces', () => {
