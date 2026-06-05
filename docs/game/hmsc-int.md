@@ -581,9 +581,10 @@ painting SKINS/TEXTURES (the user's explicit ask; an earlier wave's
 head-part-painting landing in /characters was ruled NOT it). The ENGINE is
 `editors/paint/` (consumed whole via `PaintEditor`, never forked); this route
 is the app around it. The cutout cart stays an untouched behavior reference;
-`editors/cutout/CAPTURE.md` is the APP-surface deletion contract (17-row
-inventory; the engine's 34 are already contracted in paint's own CAPTURE.md).
-Pieces:
+`editors/cutout/CAPTURE.md` is the APP-surface deletion contract — a 44-row
+line-item audit against cutout.md AND a component-by-component read of the
+reference's workflow affordances (the QoL correction: the fine details ARE
+the product; the engine's 34 are paint's own CAPTURE.md). Pieces:
 
 - `editors/cutout/stream.ts` — the V20 `cutout` concern (the LIBRARY): saved
   working `PaintDocument`s (re-openable, upsert by id) + extracted
@@ -600,24 +601,37 @@ Pieces:
 - `editors/cutout/sources.ts` — source ingestion, the hosting editor's half
   of the engine hand-off (`dims`/`srcPath`/`gray` as data): magick `identify`
   + grayscale load for edge snapping.
-- `editors/cutout/CutoutRoute.tsx` — the page: header (name · save · extract
-  cutout · blank-canvas W×H + presets · image path + load · status), library
+- `editors/cutout/CutoutRoute.tsx` + `Inspector.tsx` + `StatusBar.tsx` +
+  `draft.ts` — the page: header (name · gated save/extract · status), library
   rail (documents + cutout swatches via `PaintQuad` cells mode; open/remove),
-  and the full painter (`usePaintEditor` + `PaintEditor`) remounted per
-  working target. File drop loads an image anywhere on the route. Smart
-  select auto-arms (`makeDefaultBackend`) only with an image source. Painter
-  hotkeys stay ON — the host suppresses key triggers while a TextInput is
-  focused.
+  and the full app remade around `usePaintEditor` + `PaintToolRail` +
+  `PaintSurface`, remounted per working target. The route's own inspector is
+  the reference's right stack: TOOL tab (mask-state/refining pills, selection
+  metrics, the Flood/SAM backend picker with onnx gating, tunable knobs +
+  SAM whole/part/subpart candidates, undo/redo), FX tab (LIVE animated
+  surface-gallery cards + the custom-WGSL `EffectModal` with
+  apply-preview/stale signal, defaults-vs-layer targeting,
+  hue/phase/opacity/blend/visibility), SOURCE tab (path/dims, Enter-to-apply
+  canvas size + presets, image load), a drag-resizable properties/layers
+  split, and the full LAYERS panel (real-silhouette texture-mode previews,
+  inline rename, Eye visibility, group/click tags, add/dup/move/merge/cut/
+  delete bar). Bottom status bar = the reference's pill + 1Hz
+  FPS/ZOOM/CANVAS/SIZE/MASK/LAYERS/CLICKS/SAVED cells. The working draft
+  autosaves debounced (600ms) to `sessions/_cutout_draft.json` and restores
+  on mount — hot reloads and crashes lose nothing between deliberate stream
+  Saves. File drop loads an image anywhere; painter hotkeys stay ON (the
+  host suppresses key triggers while a TextInput is focused).
 
 Session history (V20, the user's ruling): the route opens `/cutout` on the
 `cutout` channel — strokes/lasso/smart/layer-ops land as the painter's
 labeled notes; saves, extractions and removals are COMMIT-grade (content
 event + marker + materialized snapshot). Wired as `/cutout` + the Scissors
 nav icon in ProjectBar (beside the texture studio). `rjit game verify`
-(editors suite root): `cutout.test.ts` 7 P4 cases GREEN — extraction
+(editors suite root): `cutout.test.ts` 8 P4 cases GREEN — extraction
 round-trip/refusal laws, reopen-as-document, library upsert/remove/
 unknown-kind tolerance, the one-commit-per-save session contract, replay
-identity, minting laws. Surfaced, not guessed (CAPTURE.md): file exports
+identity, minting laws, working-draft round-trip + strict version/shape
+gate. Surfaced, not guessed (CAPTURE.md): file exports
 (PNG/pixel-icon/.sqi) deliberately absent pending the user's export ruling —
 the stream asset is the in-app landing and carries everything a file
 exporter would need.

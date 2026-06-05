@@ -23,6 +23,7 @@ import {
   countSelected, cutoutToDocument, extractCutout, inflateCutoutMask,
   mintCutoutId, mintDocumentId, previewCells, stockLookDefaults, uniqueAssetName,
 } from './extraction';
+import { buildDraft, parseDraft, serializeDraft } from './draft';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
 declare const globalThis: any;
@@ -177,6 +178,24 @@ test('names and ids: collision-free minting', () => {
   assertEqual(uniqueAssetName('door', ['door']), 'door 2', 'collision appends a counter');
   assertEqual(uniqueAssetName('door', ['door', 'door 2']), 'door 3', 'and keeps counting');
   assertEqual(uniqueAssetName('   ', []), 'cutout', 'blank names fall back');
+});
+
+test('the working draft round-trips and gates strictly (the autosave lifeline)', () => {
+  const doc = sampleDocument('wip skin', 12, 10);
+  const draft = buildDraft({ docId: 'cd-w', name: 'wip skin', srcPath: '/tmp/skin.png', doc });
+  const back = parseDraft(serializeDraft(draft));
+  assert(!!back, 'a built draft parses');
+  assertEqual(back!.docId, 'cd-w', 'the library identity carries — a restored draft re-saves into the same entry');
+  assertEqual(back!.srcPath, '/tmp/skin.png', 'the source path carries');
+  assertEqual(back!.doc.dims.w, 12, 'the embedded document carries');
+  assertEqual(JSON.stringify(inflatePaintDocument(back!.doc)[0].clicks), JSON.stringify([]), 'layers inflate from the draft');
+
+  const blank = parseDraft(serializeDraft(buildDraft({ docId: 'cd-b', name: 'blank', srcPath: null, doc })));
+  assertEqual(blank!.srcPath, null, 'blank-canvas drafts keep srcPath null');
+
+  assertEqual(parseDraft('not json'), null, 'garbage → null (boot blank, never half-restore)');
+  assertEqual(parseDraft(JSON.stringify({ kind: 'cutout-draft', version: 99, docId: 'x', name: '', srcPath: null, doc })), null, 'future versions are rejected by the gate');
+  assertEqual(parseDraft(JSON.stringify({ kind: 'cutout-draft', version: 1, docId: 'x', name: '', srcPath: null, doc: { kind: 'wrong' } })), null, 'a draft with a non-paint document is rejected');
 });
 
 finish('editors/cutout');
