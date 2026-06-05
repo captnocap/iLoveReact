@@ -219,6 +219,7 @@ const ControllerSlot = struct {
 
 var g_controllers: [MAX_CONTROLLERS]ControllerSlot = [_]ControllerSlot{.{}} ** MAX_CONTROLLERS;
 var g_active_node_id: u32 = 0;
+var g_legacy_controller: Controller = .{};
 
 fn findSlotIndex(node_id: u32) ?usize {
     if (node_id == 0) return null;
@@ -247,7 +248,7 @@ fn ensureSlot(node_id: u32) ?*ControllerSlot {
         return slot;
     }
     const i = firstFreeSlotIndex() orelse return null;
-    g_controllers[i] = .{};
+    g_controllers[i] = .{ .controller = g_legacy_controller };
     g_controllers[i].controller.bindNode(node_id);
     g_active_node_id = node_id;
     return &g_controllers[i];
@@ -284,6 +285,7 @@ pub fn disableNode(node_id: u32) void {
 }
 
 pub fn setMode(mode: Mode) void {
+    g_legacy_controller.setMode(mode);
     if (activeSlot()) |slot| slot.controller.setMode(mode);
 }
 
@@ -292,6 +294,7 @@ pub fn setModeForNode(node_id: u32, mode: Mode) void {
 }
 
 pub fn setOrbit(params: OrbitParams) void {
+    g_legacy_controller.setOrbit(params);
     if (activeSlot()) |slot| slot.controller.setOrbit(params);
 }
 
@@ -300,6 +303,7 @@ pub fn setOrbitForNode(node_id: u32, params: OrbitParams) void {
 }
 
 pub fn setAim(params: AimParams) void {
+    g_legacy_controller.setAim(params);
     if (activeSlot()) |slot| slot.controller.setAim(params);
 }
 
@@ -308,6 +312,7 @@ pub fn setAimForNode(node_id: u32, params: AimParams) void {
 }
 
 pub fn setSmoothing(per_second: f32) void {
+    g_legacy_controller.setSmoothing(per_second);
     if (activeSlot()) |slot| slot.controller.setSmoothing(per_second);
 }
 
@@ -316,6 +321,7 @@ pub fn setSmoothingForNode(node_id: u32, per_second: f32) void {
 }
 
 pub fn applyInputDeltas(yaw_delta: f32, pitch_delta: f32) void {
+    g_legacy_controller.applyInputDeltas(yaw_delta, pitch_delta);
     if (activeSlot()) |slot| slot.controller.applyInputDeltas(yaw_delta, pitch_delta);
 }
 
@@ -334,6 +340,7 @@ pub fn isBound(node_id: u32) bool {
 pub fn resetForTests() void {
     g_controllers = [_]ControllerSlot{.{}} ** MAX_CONTROLLERS;
     g_active_node_id = 0;
+    g_legacy_controller = .{};
 }
 
 pub fn writeNode(node: anytype, solved: Solved) void {

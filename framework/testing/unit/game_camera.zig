@@ -257,6 +257,26 @@ test "bound nodes keep independent rigs and per-frame state" {
     try expectSolved(b1, .{ .x = -5, .y = 0, .z = 0 }, .{}, 70);
 }
 
+test "legacy node-less params staged before binding drive the default binding" {
+    camera.resetForTests();
+    defer camera.resetForTests();
+
+    camera.setOrbit(.{
+        .target = .{ .x = 3, .y = 1.5, .z = -2 },
+        .yaw = 90,
+        .pitch = 0,
+        .dist = 8,
+        .fov = 51,
+    });
+    camera.setMode(.orbit);
+    try testing.expectEqual(@as(u32, 0), camera.activeNodeId());
+
+    camera.bindNode(303);
+    try testing.expectEqual(@as(u32, 303), camera.activeNodeId());
+    const solved = camera.stepActive(1) orelse return error.MissingCamera;
+    try expectSolved(solved, .{ .x = -5, .y = 1.5, .z = -2 }, .{ .x = 3, .y = 1.5, .z = -2 }, 51);
+}
+
 test "unbind cleans state and rebind is safe" {
     camera.resetForTests();
     defer camera.resetForTests();
