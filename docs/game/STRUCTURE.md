@@ -3,12 +3,15 @@
 Greenfield proposal per the constitution (DECISIONS.md). Existing files are NOT
 the input — the isolated systems get EXTRACTED INTO this one system. When ruled,
 this becomes the blueprint; the extraction map at the bottom says what lands where.
+The "(ruled)" tags in this document are citations of DECISIONS verdicts — only
+the directory shape itself is the proposal.
 
 ## The shape
 
 ```
 cart/hmsc-int/
-  index.tsx            the shell: router only — thin, boring, never grows logic
+  index.tsx            mounts shell/ and nothing else — thin, boring, never
+                       grows logic; shell/ owns the routes
   AGENTS.md            the cart contract (oracle-first, this file's rules)
 
   game/                ★ THE GAME — the one system, the GAME_* ground floor (V14/V17)
