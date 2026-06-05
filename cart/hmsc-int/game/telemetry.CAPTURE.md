@@ -20,11 +20,12 @@ and maps `fpsTone` tones to its own palette.
 
 ## Verification
 
-- `game/telemetry.test.ts`: **23/23** P4 meaning-tests green under v8cli —
+- `game/telemetry.test.ts`: **26/26** P4 meaning-tests green under v8cli —
   honesty (availability naming, fallback reads), kind→fn mapping, snake_case
   normalization, ring sanitation, both detector gates (the canonical
   240→190fps dip fires; ratio-only and jump-only do not), the full verdict
-  tree, the report shape, snapshot + clipboard transport.
+  tree, the report shape, snapshot + clipboard transport, runtime diagnostics
+  toggles, aggregate JSONL output, and disabled-channel overhead measurement.
 - `rjit game verify`: **VERDICT GREEN — 26/26 suites, 2/2 scripts.**
 - Metafile gate: `cart/hmsc-int/game/telemetry.ts` added as a trigger on the
   existing `telemetry` registry entry (`sdk/dependency-registry.json`) — the
@@ -33,6 +34,26 @@ and maps `fpsTone` tones to its own palette.
   exact "diagnostics silently degrade" hazard it set out to fix.
 
 ## Shape decisions
+
+- **V27 PERFLOG-0605: one switchable diagnostics system**:
+  `GAME_TELEMETRY` owns `DIAGNOSTIC_CHANNELS` (`frame`, `tick`, `physics`,
+  `camera`, `figure`, `worldStream`, `bridge`, `draw`, `capture`, `hmr`,
+  `pools`, `churn`, `spikes`). Every channel is off by default. A disabled
+  channel exits after the boolean check; enabled channels aggregate samples
+  over `TELEMETRY_TUNING.diagnostics.aggregateWindowMs` and flush structured
+  JSONL to `/tmp/hmsc-int-diagnostics.jsonl`. This is the CAMSTUTTER lesson:
+  no hot-path per-call `console.*` prints.
+- **Runtime control is command vocabulary**: `log status`,
+  `log all on|off|toggle`, `log <channel> on|off|toggle`, `log dump [label]`,
+  and `log overhead [iterations]` are real GAME_COMMANDS registrations so
+  verify scripts and the live console use the same path. `gv_perflog`
+  remains as a compatibility alias onto the `spikes` channel.
+  `diagnosticToggles()` exposes
+  `diagnostics.<channel>` keys for the settings/tunables registry hand-off.
+- **Folded families**: `perfLog.ts`/`useChurn` no longer writes a separate
+  churn log; it records into the `churn` channel. The old spike watcher now
+  records `spikes` aggregates while preserving its visible warn report for
+  actual spike events.
 
 - **Pure core, thin loop**: `detectSpike` / `classifySpike` /
   `buildSpikeReport` are pure (testable without a host); `startSpikeWatch` is
@@ -62,8 +83,9 @@ and maps `fpsTone` tones to its own palette.
 - **The platform telemetry catalog** (net/system/canvas/layout/processes/
   threads/per-node queries) — stays in `runtime/hooks/useTelemetry.ts`; a lab
   wanting OS process listings is doing platform work, not game work.
-- **The `gv_perflog` console toggle** — a GAME_COMMANDS registration the
-  console route owns; the door exposes `startSpikeWatch` for it to call.
+- **The old standalone `gv_perflog` path** — no separate spike-toggle system
+  was carried; the command vocabulary keeps `gv_perflog` only as a
+  compatibility alias onto the `spikes` diagnostics channel.
 - **The React hook itself** (`useTelemetry`) — the door stays react-free so
   it bundles/tests under v8cli; chrome owns polling-in-render.
 - **massive-map's hardcoded cap labels** (meshCap 8192 / nodeIndexCap 4096) —

@@ -21,6 +21,7 @@
 
 import { GAME_KINDS, mountainTrailheadPoint, tileKindDefinition, isTileKind, tileKindNamesForConsole, propKindNamesForConsole } from '../kinds';
 import { GAME_PERCEPTION } from '../perception';
+import { GAME_TELEMETRY, type DiagnosticChannel } from '../telemetry';
 import { GAME_WORLD, type GridCell, type LandformPlacement, type PlacedCell, type WorldSurfaceRegion } from '../world';
 import { parseCommandValue } from './parser';
 import type { CommandRegistry } from './index';
@@ -390,7 +391,6 @@ export const NOT_YET_CAPTURED: Record<string, string[]> = {
   'placement validation (placementCheck)': ['wv_validate'],
   'lab scenes (V13 labs-route integration with the game world)': ['lab_list', 'lab_spawn', 'lab_exit'],
   'input contract data (GAME_INPUT is transport-only today, V7)': ['gv_controls'],
-  'telemetry (GAME_TELEMETRY capture-pending)': ['gv_perflog'],
 };
 
 const NOT_YET_OWNER_BY_COMMAND: Record<string, string> = {};
@@ -485,6 +485,71 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
     run: (game, args) => {
       game.command.debugHudEnabled = toggleArg(args[0], game.command.debugHudEnabled, 'debugHud');
       return [`debugHud = ${game.command.debugHudEnabled ? '1' : '0'}`];
+    },
+  });
+
+  define({
+    name: 'log',
+    usage: 'log status | log all <on|off|toggle> | log <channel> <on|off|toggle> | log dump [label] | log overhead [iterations]',
+    summary: 'Runtime-switch diagnostics channels, dump JSONL snapshots, and measure all-off overhead.',
+    run: (_game, args) => {
+      const op = args[0] ?? 'status';
+      if (op === 'status') {
+        const status = GAME_TELEMETRY.diagnosticStatus();
+        return [
+          `diagnostics path = ${status.path}`,
+          ...status.channels.map((c) => `${c.name}=${c.enabled ? 'on' : 'off'} — ${c.purpose}`),
+        ];
+      }
+      if (op === 'dump') {
+        const label = args.slice(1).join(' ').trim() || 'console';
+        const dump = GAME_TELEMETRY.diagnosticDump(label);
+        const count = Array.isArray((dump.snapshot.status as any)?.channels) ? (dump.snapshot.status as any).channels.length : 0;
+        return [`diagnostics dumped to ${dump.path}`, `channels = ${count}`];
+      }
+      if (op === 'overhead') {
+        const iterations = Math.max(1, Math.floor(Number(args[1] ?? 100_000)));
+        const measure = GAME_TELEMETRY.estimateDiagnosticOffOverhead(iterations);
+        return [
+          `iterations = ${measure.iterations}`,
+          `baselineMs = ${measure.baselineMs.toFixed(3)}`,
+          `allOffMs = ${measure.offMs.toFixed(3)}`,
+          `perCallNs = ${measure.perCallNs.toFixed(2)}`,
+        ];
+      }
+      if (op === 'all') {
+        const mode = args[1] ?? 'toggle';
+        const allEnabled = GAME_TELEMETRY.channels.every((c) => GAME_TELEMETRY.diagnosticChannelEnabled(c.name));
+        const enabled = mode === 'toggle' ? !allEnabled : switchArg(mode, 'log all');
+        for (const spec of GAME_TELEMETRY.channels) GAME_TELEMETRY.setDiagnosticChannel(spec.name, enabled);
+        return [
+          `all channels = ${enabled ? 'on' : 'off'}`,
+          `count = ${GAME_TELEMETRY.channels.length}`,
+          `path = ${GAME_TELEMETRY.tuning.diagnostics.logPath}`,
+        ];
+      }
+      if (!GAME_TELEMETRY.isDiagnosticChannel(op)) {
+        throw new Error(`unknown log channel ${op}; expected one of ${GAME_TELEMETRY.channels.map((c) => c.name).join(', ')}`);
+      }
+      const channel = op as DiagnosticChannel;
+      const mode = args[1] ?? 'toggle';
+      const current = GAME_TELEMETRY.diagnosticChannelEnabled(channel);
+      const enabled = mode === 'toggle' ? !current : switchArg(mode, 'log channel');
+      GAME_TELEMETRY.setDiagnosticChannel(channel, enabled);
+      return [`${channel} = ${enabled ? 'on' : 'off'}`, `path = ${GAME_TELEMETRY.tuning.diagnostics.logPath}`];
+    },
+  });
+
+  define({
+    name: 'gv_perflog',
+    usage: 'gv_perflog [0|1|toggle]',
+    summary: 'Compatibility alias: toggle the spike recorder diagnostics channel.',
+    run: (_game, args) => {
+      const current = GAME_TELEMETRY.diagnosticChannelEnabled('spikes');
+      const enabled = args[0] == null ? !current : switchArg(args[0], 'perflog');
+      GAME_TELEMETRY.setDiagnosticChannel('spikes', enabled);
+      if (enabled) GAME_TELEMETRY.startSpikeWatch();
+      return [`spikes = ${enabled ? 'on' : 'off'}`, `path = ${GAME_TELEMETRY.tuning.diagnostics.logPath}`];
     },
   });
 
@@ -845,7 +910,6 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
   notYet('lab_spawn', 'lab_spawn <name>', 'Enter a lab scene through the normal gameplay rig.');
   notYet('lab_exit', 'lab_exit', 'Return from a lab scene to the normal game scene.');
   notYet('gv_controls', 'gv_controls', 'Print the canonical input contract.');
-  notYet('gv_perflog', 'gv_perflog [0|1|2|toggle] [spikeRatio] [minJumpMs]', 'Toggle the spike perf recorder.');
   // ── the world grid commands (V4: CAPTURED — run for real via game/world/) ──
   // The door's mutators are pure state-in/state-out; the vocabulary owns
   // mutating its ctx, so each body assigns the returned slice fields back.
@@ -986,7 +1050,7 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
 
 /** Every command name the vocabulary registers — the capture's contract. */
 export const GAME_COMMAND_NAMES: string[] = [
-  'cmd_help', 'cmd_cheats',
+  'cmd_help', 'cmd_cheats', 'log',
   'lab_list', 'lab_spawn', 'lab_exit',
   'gv_controls', 'gv_debug_hud', 'gv_perflog', 'gv_noise',
   'gv_sky', 'gv_time', 'gv_daycycle', 'gv_weather', 'gv_view',

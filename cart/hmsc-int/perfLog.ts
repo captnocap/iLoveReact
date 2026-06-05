@@ -4,9 +4,9 @@
 // de-thrashed (chunk buffers in refs, per-chunk GPU re-upload, hover through a
 // sink, the preview mirror THROTTLED to ~3/sec), but some recent change put the
 // churn back. This module makes the churn visible: every suspect re-render,
-// state bump, and heavy rebuild stamps a line into ONE log file you can tail.
+// state bump, and heavy rebuild stamps a line into the unified diagnostics log.
 //
-//   tail -f /tmp/hmsc-int-churn.log
+//   tail -f /tmp/hmsc-int-diagnostics.jsonl
 //
 // console.log (severity 0) only lands in the in-memory ring, never the dev
 // terminal (see memory console_log_severity_terminal), and a stream of warns
@@ -15,22 +15,25 @@
 // logging never sits on the paint path.
 //
 // Pure diagnostics, no behavioural effect. Toggle live in the console with
-// `hmsc_churnlog = false`. Rip the whole module + its call sites out once the
-// choke is settled (grep `perfLog`).
+// `log churn on|off`. Rip the whole module + its call sites out once the choke
+// is settled (grep `perfLog`).
 
 import { useRef } from 'react';
-import { writeFile } from '@reactjit/hooks/fs';
+import { GAME_TELEMETRY } from './game/telemetry';
 
-const LOG_PATH = '/tmp/hmsc-int-churn.log';
-const MAX_TEXT = 600_000; // trim the on-disk file from the front past this
 const FLUSH_MS = 250;     // debounce window — never sits on the paint path
 const RING_MAX = 2000;    // recent lines kept in memory for the in-app /log route
 
 const g: any = globalThis;
 function now(): number { return g.performance?.now?.() ?? Date.now(); }
-function enabled(): boolean { return g.hmsc_churnlog !== false; }
+function enabled(): boolean { return GAME_TELEMETRY.diagnosticChannelEnabled('churn'); }
+function captureEnabled(): boolean { return GAME_TELEMETRY.diagnosticChannelEnabled('capture'); }
+function active(): boolean { return enabled() || captureEnabled(); }
+function isCaptureLine(line: string): boolean {
+  const l = line.toLowerCase();
+  return l.includes('capture') || l.includes('paint') || l.includes('chunk') || l.includes('bake') || l.includes('upload');
+}
 
-let fileText = '';
 let buf: string[] = [];
 let flushTimer: any = null;
 let lastAt = 0;
@@ -47,34 +50,39 @@ export function subscribeLog(cb: () => void): () => void { logListeners.add(cb);
 /** The recent log lines (oldest→newest), for the in-app viewer. */
 export function getLogLines(): string[] { return ring; }
 /** Wipe the in-memory + on-disk log. */
-export function clearLog(): void { ring.length = 0; buf = []; fileText = ''; try { writeFile(LOG_PATH, ''); } catch {} notifyLog(); }
-/** Is churn logging on? (mirror of the `hmsc_churnlog` global.) */
+export function clearLog(): void { ring.length = 0; buf = []; GAME_TELEMETRY.clearDiagnostics(); notifyLog(); }
+/** Is churn logging on? (mirror of the diagnostics `churn` channel.) */
 export function isLoggingEnabled(): boolean { return enabled(); }
-/** Turn churn logging on/off live (same as setting `hmsc_churnlog` in the console). */
-export function setLoggingEnabled(on: boolean): void { g.hmsc_churnlog = on; notifyLog(); }
+/** Turn churn logging on/off live (same as `log churn on|off` in the console). */
+export function setLoggingEnabled(on: boolean): void { GAME_TELEMETRY.setDiagnosticChannel('churn', on); notifyLog(); }
 /** Where the on-disk copy lives (shown in the viewer). */
-export function logFilePath(): string { return LOG_PATH; }
+export function logFilePath(): string { return GAME_TELEMETRY.tuning.diagnostics.logPath; }
 
 // One header per process so successive runs are separable in the same file.
 function ensureStarted() {
   if (started) return;
   started = true;
-  fileText = '';
   const stamp = new Date().toISOString?.() ?? String(Date.now());
-  const header = `==== hmsc-int churn log · session start ${stamp} ====`;
+  const header = `==== hmsc-int diagnostics churn channel - session start ${stamp} ====`;
   buf.push(header);
   ring.push(header);
   // Surface the path in the dev terminal (warn reaches stderr) so it's findable.
-  try { console.warn(`[perfLog] churn log → ${LOG_PATH} (set hmsc_churnlog=false to stop)`); } catch {}
+  try { console.warn(`[perfLog] churn channel → ${logFilePath()} (console: log churn off)`); } catch {}
 }
 
 function flush() {
   flushTimer = null;
   if (!buf.length) return;
-  fileText += buf.join('\n') + '\n';
+  const churnOn = enabled();
+  const captureOn = captureEnabled();
+  for (const line of buf) {
+    if (churnOn) GAME_TELEMETRY.recordDiagnostic('churn', 'line', { line });
+    if (captureOn && isCaptureLine(line)) GAME_TELEMETRY.recordDiagnostic('capture', 'line', { line });
+  }
   buf = [];
-  if (fileText.length > MAX_TEXT) fileText = fileText.slice(fileText.length - MAX_TEXT);
-  try { writeFile(LOG_PATH, fileText); } catch {}
+  GAME_TELEMETRY.flushDiagnosticChannel('churn');
+  GAME_TELEMETRY.flushDiagnosticChannel('capture');
+  GAME_TELEMETRY.flushDiagnostics();
   notifyLog(); // wake the in-app /log viewer
 }
 
@@ -85,7 +93,7 @@ function scheduleFlush() {
 
 /** Stamp one line: `[t.t +Δms] tag: msg`. Δ = ms since the previous line. */
 export function plog(tag: string, msg: string): void {
-  if (!enabled()) return;
+  if (!active()) return;
   ensureStarted();
   const t = now();
   const dt = lastAt ? t - lastAt : 0;
@@ -99,7 +107,7 @@ export function plog(tag: string, msg: string): void {
 
 /** Time a synchronous block, log its duration under `label`, return its result. */
 export function ptime<T>(tag: string, label: string, fn: () => T): T {
-  if (!enabled()) return fn();
+  if (!active()) return fn();
   const t0 = now();
   const r = fn();
   plog(tag, `${label} took ${(now() - t0).toFixed(2)}ms`);
@@ -133,7 +141,7 @@ export function counterDelta(before: Record<string, number>, tag: string): numbe
 export function useChurn(name: string, watched: Record<string, unknown>): void {
   const prev = useRef<Record<string, unknown> | null>(null);
   const n = bump(`render:${name}`);
-  if (!enabled()) { prev.current = { ...watched }; return; }
+  if (!active()) { prev.current = { ...watched }; return; }
   let detail = '';
   if (prev.current) {
     const changed: string[] = [];

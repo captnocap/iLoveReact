@@ -856,3 +856,39 @@ The ruling:
   camera types, cinematic/cutscene shot vocabulary, pure rig solves, screen
   rays, and boot-frame reference solves stay in the registry. The target is
   JS viewport DRIVING, not semantic camera math.
+
+**V27 — Performance diagnostics are switchable runtime channels, aggregate-only on hot paths (PERFLOG-0605). (Added 2026-06-05.)**
+
+Trigger: CAMSTUTTER proved that synchronous per-call probe prints can create
+the very stutter they are trying to diagnose. The user ruled in a standing
+performance logging system that can be enabled live the moment performance
+falls apart.
+
+The user, verbatim: "i want someone to hook up some logging methods on
+anything and everything that we can switch on the moment performance starts
+eating shit and get logs, dont have to wait around with our dicks in our
+hands to figure it out. so we want effectively all the data we can capture
+in the event its needed."
+
+The ruling:
+- **One diagnostics system.** Game performance logging lives behind
+  `GAME_TELEMETRY` runtime diagnostics channels. The old churn/perfLog path
+  and the `gv_perflog` spike recorder fold into that system; no third probe
+  family is allowed.
+- **Channels are off by default and near-zero cost when off.** A disabled
+  channel must pay only the boolean branch needed to skip recording. Hot
+  paths never print per call; enabled channels aggregate samples over a
+  throttle window and write structured JSONL to the predictable diagnostics
+  file.
+- **Runtime control is command vocabulary.** V19's console/script language is
+  the control plane: `log status`, `log all on|off|toggle`,
+  `log <channel> on|off|toggle`, `log dump`, and compatibility aliases such
+  as `gv_perflog` are real commands. Toggle metadata is exposed as values so
+  the settings/tunables surface can render it later without inventing another
+  registry.
+- **Coverage is broad, but source-owned.** Frame timing, game tick,
+  physics, camera, figure/rig build, world stream IO, JS-host bridge traffic,
+  draw/capture counts, HMR/bundle timing, pool/slot occupancy, churn, and
+  spike reports are named channels. Each subsystem records through the
+  telemetry door it owns; missing future hooks are hand-off rows, not local
+  print hacks.

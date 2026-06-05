@@ -31,6 +31,8 @@
 //
 // P2: nothing here owns a gameplay number. P3: openStore() is the only door.
 
+import { GAME_TELEMETRY } from '../game/telemetry';
+
 declare const globalThis: any;
 
 export type LogPosition = {
@@ -114,6 +116,11 @@ function readLog(path: string): StoredEvent[] {
       if (i < lines.length - 1) throw new Error(`data store: corrupt record at ${path}:${i + 1}`);
     }
   }
+  GAME_TELEMETRY.recordDiagnostic('worldStream', 'readLog', {
+    bytes: typeof text === 'string' ? text.length : 0,
+    events: events.length,
+    path,
+  });
   return events;
 }
 
@@ -170,6 +177,10 @@ export function openStore(rootDir: string): Store {
     const open: OpenStream = { def, path, events, current: undefined };
     open.current = foldUpTo(open, Number.MAX_SAFE_INTEGER);
     streams.set(def.name, open);
+    GAME_TELEMETRY.recordDiagnostic('worldStream', 'defineStream', {
+      stream: def.name,
+      events: events.length,
+    });
 
     return {
       name: def.name,
@@ -179,9 +190,18 @@ export function openStore(rootDir: string): Store {
         // Semantically append-only: existing lines never change. Whole-file
         // write is the host's only write today — see the header note.
         const existing = host.__fs_read(path);
-        host.__fs_write(path, `${typeof existing === 'string' ? existing : ''}${JSON.stringify(record)}\n`);
+        const line = `${JSON.stringify(record)}\n`;
+        const text = `${typeof existing === 'string' ? existing : ''}${line}`;
+        host.__fs_write(path, text);
         open.events.push(record);
         open.current = open.def.apply(open.current, event, record.seq);
+        GAME_TELEMETRY.recordDiagnostic('worldStream', 'append', {
+          stream: def.name,
+          seq: record.seq,
+          eventBytes: line.length,
+          fileBytes: text.length,
+          events: open.events.length,
+        });
         return { globalSeq: record.seq, stream: def.name, index: open.events.length - 1 };
       },
       state: () => open.current as State,
@@ -197,7 +217,13 @@ export function openStore(rootDir: string): Store {
       const written: string[] = [];
       for (const [name, open] of streams) {
         const path = `${snapshotsDir}/${name}.snapshot.json`;
-        host.__fs_write(path, JSON.stringify({ name, globalSeq, state: open.current }));
+        const text = JSON.stringify({ name, globalSeq, state: open.current });
+        host.__fs_write(path, text);
+        GAME_TELEMETRY.recordDiagnostic('worldStream', 'snapshot.write', {
+          stream: name,
+          bytes: text.length,
+          globalSeq,
+        });
         written.push(path);
       }
       return written;
@@ -215,6 +241,11 @@ export function openStore(rootDir: string): Store {
         const dest = `${destDir}/${name}.jsonl`;
         const text = host.__fs_read(open.path);
         host.__fs_write(dest, typeof text === 'string' ? text : '');
+        GAME_TELEMETRY.recordDiagnostic('worldStream', 'backup.copy', {
+          stream: name,
+          bytes: typeof text === 'string' ? text.length : 0,
+          events: open.events.length,
+        });
         manifest[name] = open.events.length;
         copied.push(dest);
       }

@@ -245,4 +245,11 @@ export const DECISIONS: Decision[] = [
     keywords: ['CAMNUKE', 'camera nuke', 'JS camera', 'javascript camera', 'viewport camera', 'native viewport', 'V23 native', 'nativeCamera', 'Scene3D camera', 'voxel camera', 'orbit camera', 'camera lag', 'per-frame camera', 'host camera', 'no JS viewport driving'],
     cites: ['cart/hmsc-int/game/nativeCamera.ts', 'framework/game/camera.zig', 'cart/hmsc-int/TestRoute.tsx', 'cart/hmsc-int/VoxelHybridRoute.tsx'],
   },
+  {
+    id: 'V27', name: 'Performance diagnostics are switchable runtime channels, aggregate-only on hot paths (PERFLOG-0605)', status: 'ruled',
+    ruling: 'Performance logging is one GAME_TELEMETRY diagnostics system: channels are off by default, disabled-channel cost is only the boolean branch, and enabled hot-path logging aggregates over a throttle window before structured JSONL output. Per-call synchronous prints are banned because CAMSTUTTER proved they can create user-visible stutter. Runtime control goes through the V19 command vocabulary: log status, log all on|off|toggle, log <channel> on|off|toggle, log dump, log overhead, and compatibility aliases such as gv_perflog. Toggle metadata is exposed as settings-ready values. Coverage channels include frame, tick, physics, camera, figure, worldStream, bridge, draw, capture, hmr, pools, churn, and spikes; source-owned subsystems record through the telemetry door, with future hooks tracked as hand-offs instead of local print probes.',
+    detail: 'User, verbatim: "i want someone to hook up some logging methods on anything and everything that we can switch on the moment performance starts eating shit and get logs, dont have to wait around with our dicks in our hands to figure it out. so we want effectively all the data we can capture in the event its needed."',
+    keywords: ['PERFLOG', 'performance logging', 'diagnostics', 'diagnostic channels', 'runtime logging', 'log command', 'log status', 'log dump', 'log overhead', 'gv_perflog', 'telemetry', 'JSONL', 'aggregate logging', 'throttled probes', 'frame timing', 'physics step', 'camera solve', 'bridge traffic', 'world stream', 'churn', 'spikes'],
+    cites: ['cart/hmsc-int/game/telemetry.ts', 'cart/hmsc-int/game/commands/vocabulary.ts', 'cart/hmsc-int/perfLog.ts'],
+  },
 ];

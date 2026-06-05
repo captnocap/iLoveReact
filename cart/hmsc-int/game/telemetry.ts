@@ -35,6 +35,7 @@
 // to buildDiagnostics' extra block; this door does not reach into physics.
 
 import { callHost, hasHost } from '@reactjit/ffi';
+import { writeFile } from '@reactjit/hooks/fs';
 
 declare const globalThis: { console?: { warn?: (text: string) => void } } & Record<string, unknown>;
 
@@ -92,8 +93,403 @@ export const TELEMETRY_TUNING = {
   diagnostics: {
     // Frame-time tape carried in a copy-diagnostics snapshot.
     tapeFrames: 48,
+    logPath: '/tmp/hmsc-int-diagnostics.jsonl',
+    flushMs: 250,
+    maxTextBytes: 1_200_000,
+    aggregateWindowMs: 1000,
   },
 } as const;
+
+// ── Runtime diagnostics channels (PERFLOG-0605) ────────────────────────────
+
+export type DiagnosticChannel =
+  | 'frame'
+  | 'tick'
+  | 'physics'
+  | 'camera'
+  | 'figure'
+  | 'worldStream'
+  | 'bridge'
+  | 'draw'
+  | 'capture'
+  | 'hmr'
+  | 'pools'
+  | 'churn'
+  | 'spikes';
+
+export type DiagnosticChannelSpec = {
+  name: DiagnosticChannel;
+  label: string;
+  purpose: string;
+  source: string;
+  defaultEnabled: boolean;
+};
+
+export const DIAGNOSTIC_CHANNELS: readonly DiagnosticChannelSpec[] = Object.freeze([
+  { name: 'frame', label: 'Frame timing', purpose: 'dt distribution, frame tape, spikes', source: 'GAME_TELEMETRY host frame reads', defaultEnabled: false },
+  { name: 'tick', label: 'Game tick', purpose: 'state tick and reconciliation timing', source: 'GAME_LOOP/game routes', defaultEnabled: false },
+  { name: 'physics', label: 'Physics step', purpose: 'host step us, bodies, rect counts, payload sizes', source: 'GAME_PHYSICS.step/registerHeightfield', defaultEnabled: false },
+  { name: 'camera', label: 'Camera solve', purpose: 'native camera modes, params, deltas, solved lag', source: 'framework/game/camera.zig + nativeCamera.ts', defaultEnabled: false },
+  { name: 'figure', label: 'Figure rig', purpose: 'rig build/sample counts and part counts', source: 'GAME_FIGURE consumers', defaultEnabled: false },
+  { name: 'worldStream', label: 'World stream IO', purpose: 'stream reads/writes/snapshot sizes', source: 'V20 data/store + world streams', defaultEnabled: false },
+  { name: 'bridge', label: 'JS-host bridge', purpose: 'calls per host fn and payload byte estimates', source: 'transport wrappers/callHost seams', defaultEnabled: false },
+  { name: 'draw', label: 'Draw/instances', purpose: 'draw calls, instances, mesh/capture counts', source: '__tel_gpu snapshots', defaultEnabled: false },
+  { name: 'capture', label: 'Static captures', purpose: 'paint/capture rebuilds, upload churn', source: 'perfLog/useChurn + capture call sites', defaultEnabled: false },
+  { name: 'hmr', label: 'HMR/bundle', purpose: 'bundle push/build timing', source: 'dev/HMR hooks hand-off', defaultEnabled: false },
+  { name: 'pools', label: 'Pools/slots', purpose: 'node pools, camera slots, physics slots occupancy', source: 'host telemetry + per-node camera controller', defaultEnabled: false },
+  { name: 'churn', label: 'React churn', purpose: 'render churn, identity changes, editor paint perf lines', source: 'perfLog.ts folded into diagnostics', defaultEnabled: false },
+  { name: 'spikes', label: 'Spike recorder', purpose: 'legacy perfWatch spike flight-recorder reports', source: 'startSpikeWatch', defaultEnabled: false },
+] as const);
+
+const CHANNEL_SET = new Set<DiagnosticChannel>(DIAGNOSTIC_CHANNELS.map((c) => c.name));
+
+export type DiagnosticToggle = {
+  key: string;
+  channel: DiagnosticChannel;
+  label: string;
+  value: boolean;
+  defaultValue: boolean;
+};
+
+type DiagnosticAggregate = {
+  channel: DiagnosticChannel;
+  count: number;
+  firstMs: number;
+  lastMs: number;
+  payloadBytes: number;
+  labels: Record<string, number>;
+  numeric: Record<string, { count: number; sum: number; min: number; max: number; last: number }>;
+  last?: Record<string, unknown>;
+};
+
+type DiagnosticRecord = {
+  ts: string;
+  ms: number;
+  channel: DiagnosticChannel;
+  type: 'aggregate' | 'snapshot' | 'control';
+  data: Record<string, unknown>;
+};
+
+const gDiag = globalThis as typeof globalThis & {
+  __hmsc_diag_enabled?: Record<string, boolean>;
+};
+
+const diagnosticEnabled: Record<string, boolean> = gDiag.__hmsc_diag_enabled ?? {};
+gDiag.__hmsc_diag_enabled = diagnosticEnabled;
+for (const spec of DIAGNOSTIC_CHANNELS) {
+  if (diagnosticEnabled[spec.name] == null) diagnosticEnabled[spec.name] = spec.defaultEnabled;
+}
+
+let diagnosticFileText = '';
+let diagnosticLines: string[] = [];
+let diagnosticFlushTimer: unknown = null;
+let diagnosticStarted = false;
+let diagnosticLastFlushMs = 0;
+let diagnosticSamplerTimer: unknown = null;
+let diagnosticLastSampleMs = 0;
+const diagnosticAggregates: Partial<Record<DiagnosticChannel, DiagnosticAggregate>> = {};
+
+function perfNow(): number {
+  const perf = (globalThis as any).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
+function diagnosticPath(): string {
+  return TELEMETRY_TUNING.diagnostics.logPath;
+}
+
+function scheduleDiagnosticFlush(): void {
+  if (diagnosticFlushTimer != null) return;
+  const timer = (globalThis as any).setTimeout;
+  if (typeof timer !== 'function') return;
+  diagnosticFlushTimer = timer(flushDiagnostics, TELEMETRY_TUNING.diagnostics.flushMs);
+}
+
+function appendDiagnosticRecord(record: DiagnosticRecord): void {
+  diagnosticLines.push(JSON.stringify(record));
+  scheduleDiagnosticFlush();
+}
+
+function ensureDiagnosticStarted(): void {
+  if (diagnosticStarted) return;
+  diagnosticStarted = true;
+  appendDiagnosticRecord({
+    ts: new Date().toISOString(),
+    ms: perfNow(),
+    channel: 'frame',
+    type: 'control',
+    data: {
+      event: 'session.start',
+      path: diagnosticPath(),
+      channels: DIAGNOSTIC_CHANNELS.map((c) => c.name),
+    },
+  });
+}
+
+export function flushDiagnostics(): void {
+  diagnosticFlushTimer = null;
+  if (!diagnosticLines.length) return;
+  diagnosticFileText += diagnosticLines.join('\n') + '\n';
+  diagnosticLines = [];
+  const max = TELEMETRY_TUNING.diagnostics.maxTextBytes;
+  if (diagnosticFileText.length > max) diagnosticFileText = diagnosticFileText.slice(diagnosticFileText.length - max);
+  try { writeFile(diagnosticPath(), diagnosticFileText); } catch {}
+}
+
+export function clearDiagnostics(): void {
+  diagnosticLines = [];
+  diagnosticFileText = '';
+  for (const spec of DIAGNOSTIC_CHANNELS) diagnosticAggregates[spec.name] = undefined;
+  try { writeFile(diagnosticPath(), ''); } catch {}
+}
+
+export function isDiagnosticChannel(value: string): value is DiagnosticChannel {
+  return CHANNEL_SET.has(value as DiagnosticChannel);
+}
+
+export function diagnosticChannelEnabled(channel: DiagnosticChannel): boolean {
+  return diagnosticEnabled[channel] === true;
+}
+
+export function diagnosticToggles(): DiagnosticToggle[] {
+  return DIAGNOSTIC_CHANNELS.map((spec) => ({
+    key: `diagnostics.${spec.name}`,
+    channel: spec.name,
+    label: spec.label,
+    value: diagnosticChannelEnabled(spec.name),
+    defaultValue: spec.defaultEnabled,
+  }));
+}
+
+export function setDiagnosticChannel(channel: DiagnosticChannel, enabled: boolean): void {
+  diagnosticEnabled[channel] = enabled;
+  ensureDiagnosticStarted();
+  appendDiagnosticRecord({
+    ts: new Date().toISOString(),
+    ms: perfNow(),
+    channel,
+    type: 'control',
+    data: { event: 'channel.toggle', enabled },
+  });
+  ensureDiagnosticSampler();
+  flushDiagnostics();
+}
+
+export function diagnosticStatus(): { path: string; channels: Array<DiagnosticChannelSpec & { enabled: boolean }> } {
+  return {
+    path: diagnosticPath(),
+    channels: DIAGNOSTIC_CHANNELS.map((spec) => ({ ...spec, enabled: diagnosticChannelEnabled(spec.name) })),
+  };
+}
+
+function aggregateFor(channel: DiagnosticChannel, nowMs: number): DiagnosticAggregate {
+  let agg = diagnosticAggregates[channel];
+  if (!agg) {
+    agg = {
+      channel,
+      count: 0,
+      firstMs: nowMs,
+      lastMs: nowMs,
+      payloadBytes: 0,
+      labels: {},
+      numeric: {},
+    };
+    diagnosticAggregates[channel] = agg;
+  }
+  return agg;
+}
+
+function addNumeric(agg: DiagnosticAggregate, key: string, value: number): void {
+  if (!Number.isFinite(value)) return;
+  const stat = agg.numeric[key] ?? { count: 0, sum: 0, min: value, max: value, last: value };
+  stat.count += 1;
+  stat.sum += value;
+  stat.min = Math.min(stat.min, value);
+  stat.max = Math.max(stat.max, value);
+  stat.last = value;
+  agg.numeric[key] = stat;
+}
+
+function summarizeAggregate(agg: DiagnosticAggregate): Record<string, unknown> {
+  const numeric: Record<string, unknown> = {};
+  for (const [key, stat] of Object.entries(agg.numeric)) {
+    numeric[key] = {
+      count: stat.count,
+      avg: stat.count ? stat.sum / stat.count : 0,
+      min: stat.min,
+      max: stat.max,
+      last: stat.last,
+    };
+  }
+  return {
+    count: agg.count,
+    windowMs: Math.max(0, agg.lastMs - agg.firstMs),
+    payloadBytes: agg.payloadBytes,
+    labels: agg.labels,
+    numeric,
+    last: agg.last ?? null,
+  };
+}
+
+export function flushDiagnosticChannel(channel: DiagnosticChannel): void {
+  const agg = diagnosticAggregates[channel];
+  if (!agg || agg.count === 0) return;
+  appendDiagnosticRecord({
+    ts: new Date().toISOString(),
+    ms: perfNow(),
+    channel,
+    type: 'aggregate',
+    data: summarizeAggregate(agg),
+  });
+  diagnosticAggregates[channel] = undefined;
+  diagnosticLastFlushMs = perfNow();
+}
+
+export function recordDiagnostic(channel: DiagnosticChannel, label: string, fields: Record<string, unknown> = {}): void {
+  if (diagnosticEnabled[channel] !== true) return;
+  ensureDiagnosticStarted();
+  const nowMs = perfNow();
+  const agg = aggregateFor(channel, nowMs);
+  agg.count += 1;
+  agg.lastMs = nowMs;
+  agg.labels[label] = (agg.labels[label] ?? 0) + 1;
+  let payloadBytes = 0;
+  for (const [key, value] of Object.entries(fields)) {
+    if (typeof value === 'number') addNumeric(agg, key, value);
+    else if (typeof value === 'string') payloadBytes += value.length;
+  }
+  payloadBytes += label.length;
+  agg.payloadBytes += payloadBytes;
+  agg.last = { label, ...fields };
+  const due =
+    diagnosticLastFlushMs === 0 ||
+    nowMs - Math.max(diagnosticLastFlushMs, agg.firstMs) >= TELEMETRY_TUNING.diagnostics.aggregateWindowMs;
+  if (due) flushDiagnosticChannel(channel);
+}
+
+function samplerNeeded(): boolean {
+  return diagnosticChannelEnabled('frame') ||
+    diagnosticChannelEnabled('draw') ||
+    diagnosticChannelEnabled('pools') ||
+    diagnosticChannelEnabled('tick');
+}
+
+function ensureDiagnosticSampler(): void {
+  if (diagnosticSamplerTimer != null || !samplerNeeded()) return;
+  const timer = (globalThis as any).setTimeout;
+  if (typeof timer !== 'function') return;
+  diagnosticLastSampleMs = perfNow();
+  const tick = () => {
+    diagnosticSamplerTimer = null;
+    if (!samplerNeeded()) return;
+    sampleHostDiagnostics();
+    diagnosticSamplerTimer = timer(tick, TELEMETRY_TUNING.diagnostics.aggregateWindowMs);
+  };
+  diagnosticSamplerTimer = timer(tick, TELEMETRY_TUNING.diagnostics.aggregateWindowMs);
+}
+
+function sampleHostDiagnostics(): void {
+  const nowMs = perfNow();
+  const dtMs = diagnosticLastSampleMs ? nowMs - diagnosticLastSampleMs : 0;
+  diagnosticLastSampleMs = nowMs;
+  if (diagnosticChannelEnabled('frame')) {
+    const frame = readFrame();
+    if (frame) {
+      recordDiagnostic('frame', 'host-frame', {
+        dtMs,
+        fps: frame.fps,
+        tickUs: frame.tickUs,
+        layoutUs: frame.layoutUs,
+        paintUs: frame.paintUs,
+        gpuUs: frame.gpuUs,
+        totalUs: frame.totalUs,
+        frameNumber: frame.frameNumber,
+      });
+    }
+    const history = readFrameHistory(TELEMETRY_TUNING.diagnostics.tapeFrames);
+    if (history.length) {
+      recordDiagnostic('frame', 'history', {
+        samples: history.length,
+        worstUs: Math.max(...history),
+        medianUs: median(history),
+      });
+    }
+  }
+  if (diagnosticChannelEnabled('draw') || diagnosticChannelEnabled('pools')) {
+    const gpu = readSnapshot('gpu');
+    if (gpu && diagnosticChannelEnabled('draw')) {
+      recordDiagnostic('draw', 'gpu', {
+        rects: Number(gpu.rect_count) || 0,
+        glyphs: Number(gpu.glyph_count) || 0,
+        scene3dInstances: Number(gpu.scene3d_instances) || 0,
+        scene3dDrawCalls: Number(gpu.scene3d_draw_calls) || 0,
+        scene3dMeshes: Number(gpu.scene3d_meshes_collected) || 0,
+        scene3dDropped: Number(gpu.scene3d_meshes_dropped) || 0,
+        scene3dChildren: Number(gpu.scene3d_mesh_children) || 0,
+      });
+    }
+    const nodes = readSnapshot('nodes');
+    const input = readSnapshot('input');
+    if (diagnosticChannelEnabled('pools')) {
+      recordDiagnostic('pools', 'host-pools', {
+        nodesTotal: Number(nodes?.total) || 0,
+        nodesVisible: Number(nodes?.visible) || 0,
+        nodesHidden: Number(nodes?.hidden) || 0,
+        inputActive: Number(input?.active_count) || 0,
+        inputTypes: Number(input?.type_count) || 0,
+      });
+    }
+  }
+  if (diagnosticChannelEnabled('tick')) {
+    recordDiagnostic('tick', 'sampler', { dtMs });
+  }
+}
+
+export function diagnosticDump(label: string = 'manual'): { path: string; snapshot: Record<string, unknown> } {
+  ensureDiagnosticStarted();
+  for (const spec of DIAGNOSTIC_CHANNELS) flushDiagnosticChannel(spec.name);
+  const snapshot = {
+    label,
+    capturedAt: new Date().toISOString(),
+    status: diagnosticStatus(),
+    telemetry: buildDiagnostics(`diagnostic-dump:${label}`),
+  };
+  appendDiagnosticRecord({
+    ts: new Date().toISOString(),
+    ms: perfNow(),
+    channel: 'frame',
+    type: 'snapshot',
+    data: snapshot,
+  });
+  flushDiagnostics();
+  return { path: diagnosticPath(), snapshot };
+}
+
+export function estimateDiagnosticOffOverhead(iterations: number = 100_000): { iterations: number; baselineMs: number; offMs: number; perCallNs: number } {
+  const n = Math.max(1, Math.floor(iterations));
+  const saved = diagnosticEnabled.frame;
+  diagnosticEnabled.frame = false;
+  let sink = 0;
+  const b0 = perfNow();
+  for (let i = 0; i < n; i += 1) sink += i & 1;
+  const b1 = perfNow();
+  for (let i = 0; i < n; i += 1) {
+    if (diagnosticEnabled.frame === true) sink += 1;
+    sink += i & 1;
+  }
+  const b2 = perfNow();
+  diagnosticEnabled.frame = saved;
+  if (sink === -1) recordDiagnostic('frame', 'impossible');
+  const baselineMs = b1 - b0;
+  const offMs = b2 - b1;
+  const deltaMs = Math.max(0, offMs - baselineMs);
+  return {
+    iterations: n,
+    baselineMs,
+    offMs,
+    perCallNs: (deltaMs * 1_000_000) / n,
+  };
+}
 
 // ── The wire vocabulary (kind → registered host fn, as table data) ──────────
 
@@ -501,9 +897,16 @@ export function startSpikeWatch(patch: Partial<SpikeWatchConfig> = {}): () => vo
   const config: SpikeWatchConfig = { ...TELEMETRY_TUNING.spike, ...patch };
 
   const raf = globalThis.requestAnimationFrame as ((fn: () => void) => unknown) | undefined;
-  const schedule = typeof raf === 'function' ? raf.bind(globalThis) : (fn: () => void) => setTimeout(fn, 16);
+  const timeout = (globalThis as any).setTimeout as (((fn: () => void, ms: number) => unknown) | undefined);
+  if (typeof raf !== 'function' && typeof timeout !== 'function') {
+    recordDiagnostic('spikes', 'timer-unavailable');
+    watchRunning = false;
+    return () => {};
+  }
+  const schedule = typeof raf === 'function' ? raf.bind(globalThis) : (fn: () => void) => timeout!(fn, 16);
   const cancelRaf = globalThis.cancelAnimationFrame as ((handle: unknown) => void) | undefined;
-  const cancel = typeof cancelRaf === 'function' ? cancelRaf.bind(globalThis) : clearTimeout;
+  const clear = (globalThis as any).clearTimeout as (((handle: unknown) => void) | undefined);
+  const cancel = typeof cancelRaf === 'function' ? cancelRaf.bind(globalThis) : (typeof clear === 'function' ? clear : (_handle: unknown) => {});
 
   let handle: unknown = 0;
   let stopped = false;
@@ -522,6 +925,7 @@ export function startSpikeWatch(patch: Partial<SpikeWatchConfig> = {}): () => vo
       // or you're watching the wrong terminal.
       if (!armed) {
         armed = true;
+        recordDiagnostic('spikes', 'armed', { baselineUs: detection.baselineUs, samples: history.length });
         emitLine(
           `[spikewatch] armed — baseline ~${formatUs(detection.baselineUs)} (~${detection.baselineUs > 0 ? Math.round(1_000_000 / detection.baselineUs) : 0}fps). ` +
             `Will flush on frames > ${config.spikeRatio}x baseline. Go idle and wait for GAME PERF SPIKE.`,
@@ -538,6 +942,12 @@ export function startSpikeWatch(patch: Partial<SpikeWatchConfig> = {}): () => vo
             spikeCounters: readCounters(),
             record: readFrame(),
             recorderFrames: config.recorderFrames,
+          });
+          recordDiagnostic('spikes', 'spike', {
+            baselineUs: detection.baselineUs,
+            worstUs: detection.worstUs,
+            samples: history.length,
+            report: lines.join('\n'),
           });
           emitLine(lines.join('\n'));
           lastFlushAt = t;
@@ -637,6 +1047,19 @@ export const GAME_TELEMETRY = Object.freeze({
   classifySpike,
   buildSpikeReport,
   startSpikeWatch,
+  // runtime diagnostics channels (PERFLOG-0605)
+  channels: DIAGNOSTIC_CHANNELS,
+  isDiagnosticChannel,
+  diagnosticChannelEnabled,
+  diagnosticToggles,
+  diagnosticStatus,
+  setDiagnosticChannel,
+  recordDiagnostic,
+  flushDiagnosticChannel,
+  flushDiagnostics,
+  clearDiagnostics,
+  diagnosticDump,
+  estimateDiagnosticOffOverhead,
   // copy-diagnostics
   buildDiagnostics,
   serializeDiagnostics,

@@ -83,6 +83,41 @@ import { buildBody, parseBody, serializeBody } from './body';
 import { JOINT_IDS, RAGDOLL_TUNING, jointsToBones, ragdollHostReady, seedJointsFromBones } from './ragdoll';
 import { bakeBodyDocument, bakeFigure, bakeFigureFromSeed, bakePopulation } from './bake';
 import { charactersStream } from './stream';
+import { GAME_TELEMETRY } from '../telemetry';
+
+function countedRigFrame(...args: Parameters<typeof buildRigFrame>): ReturnType<typeof buildRigFrame> {
+  const frame = buildRigFrame(...args);
+  GAME_TELEMETRY.recordDiagnostic('figure', 'buildRigFrame', {
+    bones: Object.keys(frame.bones).length,
+    assembly: frame.assembly.length,
+    clothing: frame.clothing.length,
+    hitboxes: frame.hitboxes.length,
+    anchors: frame.anchors.length,
+  });
+  return frame;
+}
+
+function countedRigFrameFromBones(...args: Parameters<typeof buildRigFrameFromBones>): ReturnType<typeof buildRigFrameFromBones> {
+  const frame = buildRigFrameFromBones(...args);
+  GAME_TELEMETRY.recordDiagnostic('figure', 'buildRigFrameFromBones', {
+    bones: Object.keys(frame.bones).length,
+    assembly: frame.assembly.length,
+    clothing: frame.clothing.length,
+    hitboxes: frame.hitboxes.length,
+    anchors: frame.anchors.length,
+  });
+  return frame;
+}
+
+function countedBake(...args: Parameters<typeof bakeFigure>): ReturnType<typeof bakeFigure> {
+  const baked = bakeFigure(...args);
+  GAME_TELEMETRY.recordDiagnostic('figure', 'bakeFigure', {
+    parts: Object.keys(baked.parts).length,
+    hitboxes: baked.hitboxes.length,
+    anchors: baked.anchors.length,
+  });
+  return baked;
+}
 
 export const GAME_FIGURE = Object.freeze({
   // the skeleton + posing
@@ -91,8 +126,8 @@ export const GAME_FIGURE = Object.freeze({
   offsetBones,
   blendBones,
   // the dressed figure
-  buildRigFrame,
-  fromBones: buildRigFrameFromBones,
+  buildRigFrame: countedRigFrame,
+  fromBones: countedRigFrameFromBones,
   // ruled combat vocabulary
   damageZones: DAMAGE_ZONES,
   damageZoneForBone,
@@ -106,7 +141,7 @@ export const GAME_FIGURE = Object.freeze({
   parseBody,
   serializeBody,
   // THE BAKE ENTRY (V2-AMENDED: the game path)
-  bake: bakeFigure,
+  bake: countedBake,
   bakeBody: bakeBodyDocument,
   bakeFromSeed: bakeFigureFromSeed,
   bakePopulation,

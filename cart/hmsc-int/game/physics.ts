@@ -17,6 +17,8 @@
 // constants below are WIRE-FORMAT facts: slot counts, the host's hard caps,
 // and the solid-floor sentinel. They mirror the host protocol, not gameplay.
 
+import { GAME_TELEMETRY } from './telemetry';
+
 export type Vec3 = { x: number; y: number; z: number };
 
 /** The gameplay numbers the host integrator needs every step (P2: caller-owned). */
@@ -258,7 +260,7 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
     };
   }
 
-  return {
+  const result = {
     hostMicroseconds: out[0] || 0,
     player: {
       position: { x: out[1] || 0, y: out[2] || 0, z: out[3] || 0 },
@@ -267,6 +269,19 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
     },
     bodies: steppedBodies,
   };
+  GAME_TELEMETRY.recordDiagnostic('physics', 'step', {
+    hostUs: result.hostMicroseconds,
+    bodies: bodies.length,
+    rects: rects.length,
+    orientedRects: oriented.length,
+    inputBytes: wire.byteLength,
+    outputBytes: out.byteLength,
+  });
+  GAME_TELEMETRY.recordDiagnostic('bridge', '__game_physics_step', {
+    args: 1,
+    payloadBytes: wire.byteLength + out.byteLength,
+  });
+  return result;
 }
 
 /**
@@ -276,6 +291,16 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
 export function registerHeightfield(field: Heightfield): void {
   const register = globalThis.__game_physics_register_heightfield;
   if (typeof register !== 'function') return;
+  GAME_TELEMETRY.recordDiagnostic('physics', 'heightfield.register', {
+    slot: field.slot,
+    cols: field.cols,
+    rows: field.rows,
+    heightBytes: field.heights.byteLength,
+  });
+  GAME_TELEMETRY.recordDiagnostic('bridge', '__game_physics_register_heightfield', {
+    args: 12,
+    payloadBytes: field.heights.byteLength + 11 * 8,
+  });
   register(
     field.slot,
     field.originX,
@@ -295,7 +320,11 @@ export function registerHeightfield(field: Heightfield): void {
 /** Drop every registered heightfield (world reload). */
 export function clearHeightfields(): void {
   const clear = globalThis.__game_physics_clear_heightfields;
-  if (typeof clear === 'function') clear();
+  if (typeof clear === 'function') {
+    GAME_TELEMETRY.recordDiagnostic('physics', 'heightfield.clear');
+    GAME_TELEMETRY.recordDiagnostic('bridge', '__game_physics_clear_heightfields', { args: 0, payloadBytes: 0 });
+    clear();
+  }
 }
 
 export const GAME_PHYSICS = Object.freeze({

@@ -5,8 +5,20 @@
 // it). The values are the cutout painter's proven feel, plus the two
 // character-route capabilities the painter absorbed so adoption loses
 // nothing: mirror symmetry and arbitrary-value (sculpt-style) painting.
+//
+// SETTINGS-0605: the numeric leaves register into THE P2 registry
+// (editors/tunables.ts) below — /settings edits them live and the registry
+// writes THROUGH this table, which is why it is no longer frozen. The
+// literals here stay the defaults (reset-to-default returns to them).
+// Deliberately NOT registered: `bands` (MUST match the in-shader compose in
+// surfaces.ts — live-editing one side breaks the pinned invariant; needs a
+// one-source seam first), `overlayRes` (baked into stored asset previews),
+// arrays/strings (brushSizes, palette, layerLook modes — the registry is
+// numeric v1). All recorded in editors/settings/CAPTURE.md.
 
-export const PAINT_TUNING = Object.freeze({
+import { editorTunables } from '../tunables';
+
+export const PAINT_TUNING = ({
   /** brush diameters offered by the size rail; [ and ] step through these */
   brushSizes: [2, 8, 32, 128, 512],
   brushDefaultPx: 32,
@@ -71,3 +83,46 @@ export const PAINT_TUNING = Object.freeze({
 });
 
 export type PaintTuning = typeof PAINT_TUNING;
+
+// ── THE P2 registry (SETTINGS-0605): same values, now /settings-editable ─────
+editorTunables().register({
+  system: 'paint', route: 'editors/paint', table: PAINT_TUNING,
+  specs: {
+    'brushDefaultPx': { label: 'brush px', min: 1, max: 512, step: 1, precision: 0 },
+    'cursor.radiusMin': { label: 'cursor r min', min: 1, max: 50, step: 1, precision: 0 },
+    'cursor.radiusMax': { label: 'cursor r max', min: 50, max: 500, step: 5, precision: 0 },
+    'cursor.throttleMs': { label: 'cursor ms', min: 0, max: 500, step: 10, precision: 0 },
+    'cursor.smartRadius': { label: 'smart r', min: 1, max: 64, step: 1, precision: 0 },
+    'cursor.lassoRadius': { label: 'lasso r', min: 1, max: 64, step: 1, precision: 0 },
+    'pressure.base': { label: 'press base', min: 0, max: 1, step: 0.05, precision: 2 },
+    'pressure.gain': { label: 'press gain', min: 0, max: 4, step: 0.05, precision: 2 },
+    'pressure.fallback': { label: 'press fallbk', min: 0, max: 1, step: 0.05, precision: 2 },
+    'spacingFrac': { label: 'dab spacing', min: 0.05, max: 1, step: 0.01, precision: 2 },
+    'edgeSnap.threshold': { label: 'snap thresh', min: 0, max: 255, step: 5, precision: 0 },
+    'edgeSnap.radiusFrac': { label: 'snap r frac', min: 0, max: 1, step: 0.05, precision: 2 },
+    'edgeSnap.radiusMin': { label: 'snap r min', min: 1, max: 32, step: 1, precision: 0 },
+    'edgeSnap.radiusMax': { label: 'snap r max', min: 1, max: 64, step: 1, precision: 0 },
+    'mirrorMinSeparationPx': { label: 'mirror sep', min: 0, max: 16, step: 1, precision: 0 },
+    'lasso.closeRadiusMin': { label: 'lasso close', min: 1, max: 64, step: 1, precision: 0 },
+    'lasso.closeRadiusFrac': { label: 'close frac', min: 0, max: 0.2, step: 0.005, precision: 3 },
+    'lasso.doubleClickMs': { label: 'dbl-click ms', min: 100, max: 1000, step: 20, precision: 0 },
+    'lasso.doubleClickDistSq': { label: 'dbl-click d²', min: 1, max: 400, step: 1, precision: 0 },
+    'lasso.minVerts': { label: 'lasso verts', min: 3, max: 10, step: 1, precision: 0 },
+    'canvas.minSize': { label: 'canvas min', min: 1, max: 256, step: 1, precision: 0 },
+    'canvas.maxSize': { label: 'canvas max', min: 256, max: 8192, step: 64, precision: 0 },
+    'canvas.defaultSize': { label: 'canvas def', min: 16, max: 4096, step: 16, precision: 0 },
+    'canvas.checkerCell': { label: 'checker px', min: 2, max: 128, step: 1, precision: 0 },
+    'history.cap': { label: 'undo depth', min: 1, max: 500, step: 1, precision: 0 },
+    'history.coalesceMs': { label: 'undo coalesce', min: 0, max: 2000, step: 50, precision: 0 },
+    'maskBumpThrottleMs': { label: 'mask bump ms', min: 0, max: 500, step: 10, precision: 0 },
+    'layerLook.hueStagger': { label: 'hue stagger', min: 0, max: 1, step: 0.001, precision: 3 },
+    'layerLook.phaseStagger': { label: 'phase stagger', min: 0, max: 6.3, step: 0.05, precision: 2 },
+    'layerLook.defaultDim': { label: 'layer dim', min: 0, max: 1, step: 0.05, precision: 2 },
+    'softenRadius': { label: 'soften r', min: 1, max: 8, step: 1, precision: 0 },
+    'backends.floodFuzz': { label: 'flood fuzz', min: 0, max: 100, step: 5, precision: 0 },
+    'backends.floodRejectFrac': { label: 'flood reject', min: 0.001, max: 0.5, step: 0.005, precision: 3 },
+    'backends.rejectDiskMinPx': { label: 'reject disk', min: 1, max: 64, step: 1, precision: 0 },
+    'backends.samThreshold': { label: 'sam thresh', min: -8, max: 8, step: 1, precision: 0 },
+    'backends.retuneDebounceMs': { label: 'retune ms', min: 0, max: 2000, step: 50, precision: 0 },
+  },
+});

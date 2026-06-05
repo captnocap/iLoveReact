@@ -277,6 +277,51 @@ test('copyDiagnostics puts pretty JSON on the clipboard wire and reports transpo
   assert(copied.includes('\n  '), 'pretty-printed (2-space) — a bug report a human can read');
 });
 
+// ── runtime diagnostics channels ────────────────────────────────────────────
+
+test('diagnostics channels are registered, off by default, and expose settings-ready toggles', () => {
+  const names = GAME_TELEMETRY.channels.map((c) => c.name);
+  for (const required of ['frame', 'tick', 'physics', 'camera', 'figure', 'worldStream', 'bridge', 'draw', 'capture', 'hmr', 'pools', 'churn', 'spikes']) {
+    assert(names.includes(required), `${required} channel must be registered`);
+  }
+  for (const toggle of GAME_TELEMETRY.diagnosticToggles()) {
+    GAME_TELEMETRY.setDiagnosticChannel(toggle.channel, false);
+    assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled(toggle.channel), false, `${toggle.channel} must be off`);
+    assert(toggle.key.startsWith('diagnostics.'), 'toggle keys must match the settings registry hand-off shape');
+  }
+});
+
+test('diagnostics aggregate only when enabled and flush structured JSONL to the predictable path', () => {
+  let wrotePath = '';
+  let wroteText = '';
+  withHost({ __fs_write: (path: string, text: string) => { wrotePath = path; wroteText = text; return true; } }, () => {
+    GAME_TELEMETRY.setDiagnosticChannel('bridge', false);
+    GAME_TELEMETRY.recordDiagnostic('bridge', 'off-sample', { payloadBytes: 99 });
+    GAME_TELEMETRY.flushDiagnostics();
+    assert(!wroteText.includes('off-sample'), 'off channel samples must disappear after the branch');
+
+    GAME_TELEMETRY.setDiagnosticChannel('bridge', true);
+    GAME_TELEMETRY.recordDiagnostic('bridge', '__test_host', { payloadBytes: 16, args: 2 });
+    GAME_TELEMETRY.flushDiagnosticChannel('bridge');
+    GAME_TELEMETRY.flushDiagnostics();
+    GAME_TELEMETRY.setDiagnosticChannel('bridge', false);
+  });
+  assertEqual(wrotePath, TELEMETRY_TUNING.diagnostics.logPath, 'diagnostics write to the one predictable JSONL path');
+  const lines = wroteText.trim().split('\n').map((line) => JSON.parse(line));
+  const aggregate = lines.find((line) => line.channel === 'bridge' && line.type === 'aggregate');
+  assert(!!aggregate, 'enabled channel must flush an aggregate record');
+  assertEqual(aggregate.data.labels.__test_host, 1, 'aggregate counts labels by host fn');
+  assertEqual(aggregate.data.numeric.payloadBytes.last, 16, 'numeric payload stats ride the aggregate');
+});
+
+test('all-off overhead probe reports measured branch cost numbers', () => {
+  const result = GAME_TELEMETRY.estimateDiagnosticOffOverhead(1000);
+  assertEqual(result.iterations, 1000, 'iteration count is caller-controlled');
+  assert(Number.isFinite(result.baselineMs), 'baselineMs is numeric');
+  assert(Number.isFinite(result.offMs), 'offMs is numeric');
+  assert(Number.isFinite(result.perCallNs), 'perCallNs is numeric');
+});
+
 // ── the door itself ──────────────────────────────────────────────────────────
 
 test('the door is sealed and carries the knob surface', () => {
@@ -284,6 +329,7 @@ test('the door is sealed and carries the knob surface', () => {
   assertEqual(GAME_TELEMETRY.tuning, TELEMETRY_TUNING, 'tuning rides the door');
   assertEqual(TELEMETRY_TUNING.panel.scalarPollMs, 250, 'the panel idiom cadence: scalars @250ms');
   assertEqual(TELEMETRY_TUNING.panel.snapshotPollMs, 500, 'the panel idiom cadence: JSON @500ms');
+  assertEqual(TELEMETRY_TUNING.diagnostics.logPath, '/tmp/hmsc-int-diagnostics.jsonl', 'one predictable diagnostics path');
 });
 
 finish('game/telemetry');

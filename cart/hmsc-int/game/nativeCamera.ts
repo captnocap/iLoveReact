@@ -4,6 +4,8 @@
 // transport wrapper only: JS sends rig parameters/mode/input deltas on change;
 // framework/game/camera.zig owns per-frame solve/smoothing/interpolation.
 
+import { GAME_TELEMETRY } from './telemetry';
+
 declare const globalThis: any;
 
 export type NativeCameraMode = 'walk' | 'orbit' | 'aim' | 'ads' | 'freefly' | 'freeFly';
@@ -39,8 +41,25 @@ export type NativeFreeFlyParams = {
 
 function callHost(name: string, ...args: unknown[]): unknown {
   const fn = globalThis[name];
+  GAME_TELEMETRY.recordDiagnostic('bridge', name, {
+    args: args.length,
+    payloadBytes: estimatePayloadBytes(args),
+  });
+  GAME_TELEMETRY.recordDiagnostic('camera', name, { args: args.length });
   if (typeof fn !== 'function') return undefined;
   return fn(...args);
+}
+
+function estimatePayloadBytes(args: unknown[]): number {
+  let total = 0;
+  for (const arg of args) {
+    if (typeof arg === 'number') total += 8;
+    else if (typeof arg === 'string') total += arg.length;
+    else if (typeof arg === 'boolean') total += 1;
+    else if (arg == null) total += 0;
+    else total += String(arg).length;
+  }
+  return total;
 }
 
 function sendOrbit(name: string, params: NativeOrbitParams, nodeId?: number): void {

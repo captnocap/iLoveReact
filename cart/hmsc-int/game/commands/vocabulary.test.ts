@@ -16,6 +16,7 @@ import {
   defineGameCommands,
   type GameCommandState,
 } from './vocabulary';
+import { GAME_TELEMETRY } from '../telemetry';
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
 function freshConsole(): { registry: CommandRegistry<GameCommandState>; game: GameCommandState } {
@@ -24,10 +25,10 @@ function freshConsole(): { registry: CommandRegistry<GameCommandState>; game: Ga
   return { registry, game: createGameCommandState() };
 }
 
-test('all 48 reference command names are registered — the script language is complete', () => {
+test('all 49 command names are registered — the script language plus diagnostics control is complete', () => {
   const { registry } = freshConsole();
   const registered = new Set(registry.list().map((spec) => spec.name));
-  assertEqual(GAME_COMMAND_NAMES.length, 48, 'the captured vocabulary is 48 names');
+  assertEqual(GAME_COMMAND_NAMES.length, 49, 'the captured vocabulary is 49 names after PERFLOG-0605');
   for (const name of GAME_COMMAND_NAMES) {
     assert(registered.has(name), `${name} must be registered`);
   }
@@ -36,8 +37,8 @@ test('all 48 reference command names are registered — the script language is c
 test('every not-yet command fails LOUDLY, never silently (the capture boundary)', () => {
   const { registry, game } = freshConsole();
   const pending = Object.values(NOT_YET_CAPTURED).flat();
-  assert(pending.length >= 16, 'the pending list covers the uncaptured systems');
-  for (const flipped of ['gv_noise', 'gv_save', 'gv_load', 'wv_place', 'wv_fill', 'wv_remove', 'wv_trigger', 'pv_respawn']) {
+  assert(pending.length >= 15, 'the pending list covers the uncaptured systems');
+  for (const flipped of ['gv_noise', 'gv_save', 'gv_load', 'wv_place', 'wv_fill', 'wv_remove', 'wv_trigger', 'pv_respawn', 'gv_perflog', 'log']) {
     assert(!pending.includes(flipped), `${flipped} has a captured owner and must not stay in the pending list`);
   }
   for (const name of pending) {
@@ -49,6 +50,44 @@ test('every not-yet command fails LOUDLY, never silently (the capture boundary)'
       `${name} must say WHY it fails (got: ${outcome.output[0]})`,
     );
   }
+});
+
+test('log command toggles diagnostics channels live and dump writes a snapshot', () => {
+  const { registry, game } = freshConsole();
+  const status = registry.run(game, 'log status');
+  assertEqual(status.ok, true, 'log status must run');
+  assert(status.output.join('\n').includes('frame='), 'status must list channels');
+  const on = registry.run(game, 'log bridge on');
+  assertEqual(on.ok, true, 'log bridge on must run');
+  assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('bridge'), true, 'bridge channel must be enabled');
+  const off = registry.run(game, 'log bridge off');
+  assertEqual(off.ok, true, 'log bridge off must run');
+  assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('bridge'), false, 'bridge channel must be disabled');
+  const allOn = registry.run(game, 'log all on');
+  assertEqual(allOn.ok, true, 'log all on must run');
+  for (const spec of GAME_TELEMETRY.channels) assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled(spec.name), true, `${spec.name} must bulk-enable`);
+  const allOff = registry.run(game, 'log all off');
+  assertEqual(allOff.ok, true, 'log all off must run');
+  for (const spec of GAME_TELEMETRY.channels) assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled(spec.name), false, `${spec.name} must bulk-disable`);
+  const bad = registry.run(game, 'log nope on');
+  assertEqual(bad.ok, false, 'unknown channels fail loud');
+  assert(bad.output[0].includes('unknown log channel'), 'failure must name channel vocabulary');
+  const dump = registry.run(game, 'log dump test-snapshot');
+  assertEqual(dump.ok, true, 'log dump must run');
+  assert(dump.output[0].includes('/tmp/hmsc-int-diagnostics.jsonl'), 'dump must name the predictable output path');
+  const overhead = registry.run(game, 'log overhead 1000');
+  assertEqual(overhead.ok, true, 'log overhead must run');
+  assert(overhead.output.join('\n').includes('perCallNs ='), 'overhead report must expose the all-off branch cost');
+});
+
+test('gv_perflog is a compatibility alias onto the spike diagnostics channel', () => {
+  const { registry, game } = freshConsole();
+  const on = registry.run(game, 'gv_perflog 1');
+  assertEqual(on.ok, true, 'gv_perflog must no longer be a not-yet stub');
+  assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), true, 'gv_perflog 1 enables spikes');
+  const off = registry.run(game, 'gv_perflog 0');
+  assertEqual(off.ok, true, 'gv_perflog 0 must run');
+  assertEqual(GAME_TELEMETRY.diagnosticChannelEnabled('spikes'), false, 'gv_perflog 0 disables spikes');
 });
 
 test('wv_prop is partial: kind table answers, placement fails loud', () => {
@@ -218,9 +257,9 @@ test('gv_save and gv_load require a mounted persistence door and restore the com
 test('cmd_help teaches the whole surface, including pending commands', () => {
   const { registry, game } = freshConsole();
   const help = registry.run(game, 'cmd_help');
-  // 48 reference names + the bare `help` alias (registered for the player —
+  // 49 command names + the bare `help` alias (registered for the player —
   // the unknown-command hint says "try: help", so help must exist).
-  assertEqual(help.output.length, 49, 'help lists every registered command');
+  assertEqual(help.output.length, 50, 'help lists every registered command');
   const one = registry.run(game, 'cmd_help wv_road');
   assertEqual(one.ok, true, 'help on a pending command still teaches its usage');
   assert(one.output[1].includes('usage: wv_road'), 'the usage line must print');

@@ -26,6 +26,15 @@ wv_tile road
 wv_prop kinds
 gv_noise
 
+# runtime diagnostics control (PERFLOG-0605)
+log status
+log all on
+log overhead 1000000
+log dump verify.commands
+log all off
+gv_perflog 1
+gv_perflog 0
+
 # entity vocabulary (spawn tuning tables)
 ev_spawn crate 12 -7 3
 ev_burst 8
