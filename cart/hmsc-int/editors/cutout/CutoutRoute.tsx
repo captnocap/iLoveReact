@@ -62,6 +62,7 @@ import { PART_IDS, type PartId } from '../../game/figure/shapes';
 import type { HedLayer } from '../../game/figure/hed';
 import { VEHICLE_PART_IDS, type VehiclePartId } from '../../game/vehicle';
 import { FaceLayerPaint } from '../../game/figure/render';
+import { ModelPreview3D } from './ModelPreview';
 
 const { Chip } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
@@ -587,6 +588,11 @@ export function CutoutRoute(props: { onExit: () => void }) {
         <Workbench
           key={`${work.docId}#${work.epoch}`}
           work={work}
+          activeModel={work.model
+            ? (work.model.family === 'figure'
+                ? figureRoster?.characters[work.model.docId] ?? null
+                : vehicleGarage?.vehicles[work.model.docId] ?? null)
+            : null}
           gray={gray}
           session={live.session}
           apiRef={painterApi}
@@ -608,6 +614,8 @@ export function CutoutRoute(props: { onExit: () => void }) {
 
 function Workbench(props: {
   work: Work;
+  /** the live model document under a model binding (re-read after saves) */
+  activeModel: BodyDocument | VehicleDoc | null;
   gray: GraySource | null;
   session: PaintSession | null;
   apiRef: { current: PainterApi | null };
@@ -684,6 +692,16 @@ function Workbench(props: {
       <Row style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
         <CutoutToolRail s={s} />
         <PaintSurface s={s} underlay={underlay} />
+        {/* MODELPAINT-0605: the live 3D model beside the canvas — paint-and-see */}
+        {work.model ? (
+          <ModelPreview3D
+            s={s}
+            binding={work.model}
+            model={props.activeModel}
+            bg={work.modelBg ?? '#808080'}
+            modelLayers={work.modelLayers}
+          />
+        ) : null}
         <CutoutInspector
           s={s}
           samAvailable={props.samAvailable}
