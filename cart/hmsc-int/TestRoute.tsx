@@ -19,7 +19,7 @@
 // GAP(W-3) game sky: hmsc config.sky has no captured home (chrome's LabSky is
 //   the lab environment, a different shape).
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_LOOP } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
@@ -56,10 +56,16 @@ const CAMERA = {
 const GAIT = {
   walkCyclesPerSecond: 1.6,
   runCyclesPerSecond: 2.3,
+  /** rig identity steps per gait cycle (the N-cached-bakes idiom) */
+  framesPerCycle: 12,
 } as const;
 const FRAME = { minDtSeconds: 0.001, maxDtSeconds: 0.05 } as const;
 const PLAYER_FIGURE_SEED = 1;
 const PLAYER_FIGURE_CART_KEY = 'hmscint.test.player';
+
+// memo() so the 57-mesh figure subtree only re-diffs when rig/offset/yaw
+// actually change — an idle camera drag must not pay the figure.
+const PlayerMeshes = memo(FigureMeshes);
 
 type PlayerPose = {
   x: number;
@@ -119,7 +125,16 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     const parts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), PLAYER_FIGURE_CART_KEY, PLAYER_FIGURE_SEED);
     return { doc, parts };
   }, []);
-  const rig = GAME_FIGURE.buildRigFrame('neutral', player.moving ? 'walk' : 'stand', player.gaitPhase);
+  // Camera-feel fix (measured: the figure is 57 mesh nodes vs the old 19 — a
+  // 3× bridge UPDATE storm that dragged the camera with it). The rig is memo'd
+  // on (pose, quantized gait) and the mesh subtree on stable props, so an IDLE
+  // camera drag diffs exactly one node: the camera. Gait quantizes to N steps
+  // per cycle (the content-addressed N-bakes idiom) — identity only changes
+  // ~19×/s while walking instead of every frame.
+  const pose = player.moving ? 'walk' : 'stand';
+  const gaitStep = Math.round(player.gaitPhase * GAIT.framesPerCycle) / GAIT.framesPerCycle;
+  const rig = useMemo(() => GAME_FIGURE.buildRigFrame('neutral', pose, gaitStep), [pose, gaitStep]);
+  const figureOffset = useMemo<[number, number, number]>(() => [player.x, player.y, player.z], [player.x, player.y, player.z]);
 
   useEffect(() => {
     const next = initialPlayer(props.state);
@@ -252,7 +267,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         <Scene3D.Fog enabled={false} />
         {/* GAP(W-2): the world renderer awaits the world render lane */}
         <WorldStatics world={sceneState.world} skyConfig={sceneState.config.sky} />
-        <FigureMeshes rig={rig} parts={figure.parts} yawDeg={player.yaw} offset={[player.x, player.y, player.z]} />
+        <PlayerMeshes rig={rig} parts={figure.parts} yawDeg={player.yaw} offset={figureOffset} />
       </Scene3D>
 
       <Pressable onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }} />
