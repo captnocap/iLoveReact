@@ -24,7 +24,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/compile/main.ts',
       description:
-        'The V19 skeleton: `rjit game compile` bundles the headless boot → zig-out/game/hmsc-headless.js; `rjit game verify` compiles fresh, runs every game/**/*.test.ts suite, boots the output under v8cli, replays every compile/verify/*.cmds command sequence (game/commands is the language), and exits with one VERDICT GREEN/RED line. Milestone-0 world = boot/tick/status skeleton; grows as captures land.',
+        'The V19 skeleton: `rjit game compile` bundles the headless boot → zig-out/game/hmsc-headless.js; `rjit game verify` compiles fresh, runs every game/**/*.test.ts suite, boots the output under v8cli, replays every compile/verify/*.cmds command sequence (game/commands is the language), and exits with one VERDICT GREEN/RED line. The headless state is the captured GameCommandState + boot/tick locals; the full 48-name console vocabulary is mounted (defineGameCommands), so verify scripts speak real commands (commands.cmds: 25 captured commands). Grows as captures land.',
       status: 'live',
     },
     {
@@ -82,6 +82,16 @@ export const hmsc_int: DocIndex = {
       description:
         'WO-2 capture (2026-06-04): the kind registries REWRITTEN fresh (V17-TRIAGE) — tiles (18 kinds, LOCKED road grammar with lane flow as table data), props (16), NPCs (4 + faction regard matrix), roles (open axis), landforms (4, fixed-shape constants lifted into LANDFORM_TUNING per P2). One door (index.ts → GAME_KINDS via game/index.ts); P4 behavior tests per family under tools/v8cli (shared game/_testkit.ts); CAPTURE.md records dropped dead fields (door sub-fields, two duplicates) and surfaced ambiguities. Old cart/hmsc registries untouched (V15-TRANSITION behavior references).',
       dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
+      name: 'game/commands/vocabulary.ts (the captured console vocabulary)',
+      purpose: ['scripting', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/commands/vocabulary.ts',
+      description:
+        'Capture wave (2026-06-05): hmsc’s 48-command console vocabulary (cmd_/lab_/gv_/pv_/ev_/wv_) REWRITTEN fresh onto the skeleton’s mutable-ctx conventions (cart/hmsc/commands/registry.ts untouched behavior reference). All 48 names register so the V19 script language is complete: 23 run for REAL against GameCommandState + the P2 tables (COMMAND_TUNING, SKY_NAMED_HOURS, SKY_WEATHER_PRESETS) + GAME_KINDS (wv_tile); wv_prop partial (kinds listing real); 24 explicit NOT-YET stubs FAIL LOUDLY ("system not captured yet: <owner>") — NOT_YET_CAPTURED exports the per-owner hand-off lists (world grid, roads, traffic, buildings/interiors, zones, validation, landform instances, lab scenes, input contract, telemetry, noise, V20 save/load). Dot-path state shape preserved so saved scripts keep meaning. Exposed via GAME_COMMANDS.{createGameState,defineGameCommands,tuning,names,notYetCaptured}. 14 P4 tests (vocabulary.test.ts) + compile/verify/commands.cmds; rjit game verify GREEN. CAPTURE.md records the boundary + ambiguities.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts', 'game/kinds (GAME_KINDS registries)'],
       status: 'live',
     },
     {

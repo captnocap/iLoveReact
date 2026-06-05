@@ -104,8 +104,36 @@ export function createCommandRegistry<Ctx>(): CommandRegistry<Ctx> {
 
 export { parseCommandValue, tokenizeCommandLine };
 
+// The captured hmsc console vocabulary (48 names; see ./vocabulary.ts +
+// CAPTURE.md). defineGameCommands() registers it onto any registry whose ctx
+// carries a GameCommandState; NOT_YET_CAPTURED lists the commands whose
+// behavior still awaits its owning capture lane (they fail loudly until then).
+export {
+  COMMAND_TUNING,
+  GAME_COMMAND_NAMES,
+  NOT_YET_CAPTURED,
+  SKY_NAMED_HOURS,
+  SKY_WEATHER_PRESETS,
+  createGameCommandState,
+  defineGameCommands,
+} from './vocabulary';
+export type { GameCommandState, GameEvent, SpawnedEntity, Vec3Like } from './vocabulary';
+
+import {
+  createGameCommandState as createGameCommandStateImpl,
+  defineGameCommands as defineGameCommandsImpl,
+  COMMAND_TUNING as COMMAND_TUNING_IMPL,
+  GAME_COMMAND_NAMES as GAME_COMMAND_NAMES_IMPL,
+  NOT_YET_CAPTURED as NOT_YET_CAPTURED_IMPL,
+} from './vocabulary';
+
 export const GAME_COMMANDS = Object.freeze({
   createRegistry: createCommandRegistry,
   tokenize: tokenizeCommandLine,
   parseValue: parseCommandValue,
+  createGameState: createGameCommandStateImpl,
+  defineGameCommands: defineGameCommandsImpl,
+  tuning: COMMAND_TUNING_IMPL,
+  names: GAME_COMMAND_NAMES_IMPL,
+  notYetCaptured: NOT_YET_CAPTURED_IMPL,
 });

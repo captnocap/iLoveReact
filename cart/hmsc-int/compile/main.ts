@@ -20,16 +20,24 @@ import { GAME_COMMANDS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS } from '../game';
 
 declare const globalThis: any;
 
-/** The headless game state. Grows with the captures; never logic, only state. */
-type HeadlessGame = {
+/**
+ * The headless game state: the captured command state (the console vocabulary
+ * mutates it — game/commands/vocabulary.ts, via the GAME_COMMANDS door) plus
+ * the boot-local fields. Grows with the captures; never logic, only state.
+ */
+type HeadlessGame = ReturnType<typeof GAME_COMMANDS.createGameState> & {
   booted: boolean;
   /** the V8 state-tick counter (~45/min in real time; replay runs it hot) */
   tick: number;
-  events: string[];
 };
 
 function buildRegistry() {
   const registry = GAME_COMMANDS.createRegistry<HeadlessGame>();
+
+  // The captured hmsc console vocabulary — all 48 names. Captured commands run
+  // for real against the command state; not-yet commands fail loudly with
+  // their owning capture lane (V19: the language is complete before the world).
+  GAME_COMMANDS.defineGameCommands(registry);
 
   registry.define({
     name: 'boot',
@@ -38,7 +46,6 @@ function buildRegistry() {
     run: (game) => {
       if (game.booted) throw new Error('already booted');
       game.booted = true;
-      game.events.push('boot');
       return [
         `booted (state tick cadence ${GAME_LOOP.STATE_TICKS_PER_MINUTE}/min)`,
         `host physics: ${GAME_PHYSICS.hostReady() ? 'live' : 'absent (headless ok)'}`,
@@ -70,7 +77,7 @@ function buildRegistry() {
     usage: 'status',
     summary: 'one-line world status',
     run: (game) => [
-      `booted=${game.booted ? 1 : 0} tick=${game.tick} events=${game.events.length}`,
+      `booted=${game.booted ? 1 : 0} tick=${game.tick} events=${game.events.recent.length} entities=${Object.keys(game.world.spawnedEntities).length}`,
     ],
   });
 
@@ -103,7 +110,7 @@ function main(): number {
     return 1;
   }
 
-  const game: HeadlessGame = { booted: false, tick: 0, events: [] };
+  const game: HeadlessGame = { ...GAME_COMMANDS.createGameState(), booted: false, tick: 0 };
   const registry = buildRegistry();
   const result = registry.runScript(game, lines);
   for (const line of result.transcript) console.log(line);
