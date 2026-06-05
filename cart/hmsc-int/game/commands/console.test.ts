@@ -34,30 +34,56 @@ function type(session: ConsoleSession, text: string): void {
   }
 }
 
+/** One PHYSICAL toggle press: keydown + keyup (re-arms the edge). */
+function pressToggle(session: ConsoleSession): boolean {
+  const consumed = session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  session.handleKeyUp({ key: CONSOLE_TOGGLE_KEY });
+  return consumed;
+}
+
 test('closed by default; only the toggle key is consumed while closed', () => {
   const { session } = freshSession();
   assertEqual(session.isOpen(), false, 'starts closed');
   assertEqual(session.handleKey({ key: 'w' }), false, 'movement keys pass through while closed');
   assertEqual(session.handleKey({ key: 'space' }), false, 'jump passes through while closed');
   assertEqual(session.isOpen(), false, 'still closed');
-  assertEqual(session.handleKey({ key: CONSOLE_TOGGLE_KEY }), true, 'the toggle is consumed');
+  assertEqual(pressToggle(session), true, 'the toggle is consumed');
   assertEqual(session.isOpen(), true, 'open after toggle');
+});
+
+test('the toggle is EDGE-triggered: held/repeated keydowns flip exactly once (the "opens twice" verdict)', () => {
+  const { session } = freshSession();
+  // The engine bus delivers SDL key repeats as fresh keydowns — a held
+  // backtick must NOT flip the console again until its keyup re-arms it.
+  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  session.handleKey({ key: CONSOLE_TOGGLE_KEY }); // repeat, no keyup between
+  session.handleKey({ key: CONSOLE_TOGGLE_KEY }); // repeat
+  assertEqual(session.isOpen(), true, 'three keydowns without keyup = ONE flip (open)');
+  assertEqual(session.buffer(), '', 'repeats never leak into the buffer');
+  session.handleKeyUp({ key: CONSOLE_TOGGLE_KEY });
+  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  session.handleKey({ key: CONSOLE_TOGGLE_KEY }); // repeat again
+  assertEqual(session.isOpen(), false, 'after keyup, the next press flips once (closed)');
+  session.handleKeyUp({ key: CONSOLE_TOGGLE_KEY });
+  assertEqual(session.handleKey({ key: '~' }), true, 'the ~ alias is a toggle too');
+  assertEqual(session.isOpen(), true, 'tilde opens');
+  session.handleKeyUp({ key: '~' });
 });
 
 test('the toggle key NEVER lands in the line buffer (open or close)', () => {
   const { session } = freshSession();
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   assertEqual(session.buffer(), '', 'opening leaks no backtick');
   type(session, 'pv_where');
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   assertEqual(session.isOpen(), false, 'backtick mid-line closes');
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   assertEqual(session.buffer(), 'pv_where', 'the buffer survives a close/reopen with no extra backtick');
 });
 
 test('escape closes and returns input to the game', () => {
   const { session } = freshSession();
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   assert(CONSOLE_CLOSE_KEYS.includes('escape'), 'escape is a ruled close key');
   assertEqual(session.handleKey({ key: 'escape' }), true, 'escape is consumed');
   assertEqual(session.isOpen(), false, 'closed by escape');
@@ -66,7 +92,7 @@ test('escape closes and returns input to the game', () => {
 
 test('while open EVERY key is consumed — typed characters go only to the console', () => {
   const { session } = freshSession();
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   for (const key of ['w', 'a', 's', 'd', 'space', 'f1', 'up', 'down']) {
     assertEqual(session.handleKey({ key }), true, `'${key}' must be consumed while open`);
   }
@@ -75,7 +101,7 @@ test('while open EVERY key is consumed — typed characters go only to the conso
 test('enter dispatches through the captured registry; output lands verbatim', () => {
   const { session, game } = freshSession();
   game.player.position = { x: 12, y: 1.5, z: -7 };
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   type(session, 'pv_where');
   session.handleKey({ key: 'return' });
   const lines = session.transcript();
@@ -99,7 +125,7 @@ test('a failing command lands as error lines, exactly what the vocabulary said',
 
 test('shift reconstruction + space wire-name typing builds real command lines', () => {
   const { session } = freshSession();
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   type(session, 'gv_state player.position');
   assertEqual(session.buffer(), 'gv_state player.position', 'dots/underscores/spaces type clean');
   session.handleKey({ key: 'backspace' });
@@ -110,7 +136,7 @@ test('shift reconstruction + space wire-name typing builds real command lines', 
 
 test('history: up recalls, down returns to the live buffer', () => {
   const { session } = freshSession();
-  session.handleKey({ key: CONSOLE_TOGGLE_KEY });
+  pressToggle(session);
   type(session, 'cmd_help');
   session.handleKey({ key: 'return' });
   type(session, 'pv_where');

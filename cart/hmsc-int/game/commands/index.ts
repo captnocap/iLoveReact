@@ -122,7 +122,7 @@ export type { GameCommandState, GameEvent, SpawnedEntity, Vec3Like } from './voc
 // The in-game console SESSION (the CS idiom: backtick toggle, key-fed line
 // buffer, registry dispatch, transcript ring). Pure + headless — see
 // ./console.ts; overlays that draw a session are route/editor chrome.
-export { CONSOLE_CLOSE_KEYS, CONSOLE_TOGGLE_KEY, createConsoleSession } from './console';
+export { CONSOLE_CLOSE_KEYS, CONSOLE_TOGGLE_KEY, CONSOLE_TOGGLE_KEYS, createConsoleSession } from './console';
 export type { ConsoleKeyEvent, ConsoleLine, ConsoleLineKind, ConsoleSession } from './console';
 
 import {

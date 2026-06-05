@@ -234,12 +234,18 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   const [, setConsoleRev] = useState(0);
   const consoleOpen = gameConsole.session.isOpen();
   useEffect(() => {
-    const off = GAME_INPUT.onKeyDown((event) => {
+    const offDown = GAME_INPUT.onKeyDown((event) => {
       const before = gameConsole.session.revision();
       gameConsole.session.handleKey(event ?? {});
       if (gameConsole.session.revision() !== before) setConsoleRev(gameConsole.session.revision());
     });
-    return off;
+    // keyups re-arm the toggle edge (one physical press = exactly one flip;
+    // the engine bus delivers SDL key repeats unfiltered).
+    const offUp = GAME_INPUT.onKeyUp((event) => gameConsole.session.handleKeyUp(event ?? {}));
+    return () => {
+      offDown();
+      offUp();
+    };
   }, [gameConsole]);
 
   // The V2 player figure: seeded documents → part meshes, built once. The

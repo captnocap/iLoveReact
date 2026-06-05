@@ -51,6 +51,13 @@ export type ConsoleSession = {
    * closed: only the toggle key; open: every key (the input discipline).
    */
   handleKey: (event: ConsoleKeyEvent) => boolean;
+  /**
+   * Feed every keyup. Re-arms the toggle edge — the engine bus delivers SDL
+   * key REPEATS as fresh keydowns (engine.zig filters nothing), so the toggle
+   * flips on the keydown EDGE only: further toggle keydowns are ignored until
+   * this sees the key released (one physical press = exactly one flip).
+   */
+  handleKeyUp: (event: ConsoleKeyEvent) => void;
   /** dispatch one line through the registry (what Enter does) */
   submit: (line: string) => void;
   /** bumps on every visible change — a React consumer mirrors this into state */
@@ -58,7 +65,9 @@ export type ConsoleSession = {
 };
 
 export const CONSOLE_TOGGLE_KEY = '`';
-export const CONSOLE_CLOSE_KEYS: readonly string[] = [CONSOLE_TOGGLE_KEY, 'escape'];
+/** '~' aliases the toggle — some layouts/wires name shifted-backquote directly */
+export const CONSOLE_TOGGLE_KEYS: readonly string[] = [CONSOLE_TOGGLE_KEY, '~'];
+export const CONSOLE_CLOSE_KEYS: readonly string[] = [...CONSOLE_TOGGLE_KEYS, 'escape'];
 
 const HISTORY_DEPTH = 64;
 
@@ -124,15 +133,25 @@ export function createConsoleSession<Ctx>(
     rev += 1;
   };
 
+  // The toggle is EDGE-triggered: the engine bus delivers SDL key repeats as
+  // fresh keydowns (engine.zig filters nothing), so a held backtick would
+  // otherwise flip the console open→closed→open ("opens twice" — the user
+  // verdict that pinned this). Flip on the first keydown, ignore toggle
+  // keydowns until handleKeyUp re-arms.
+  let toggleHeld = false;
+
   const handleKey = (event: ConsoleKeyEvent): boolean => {
     const key = String(event?.key ?? '').toLowerCase();
     if (!key) return open; // open consumes even unnamed keys
-    if (!open) {
-      if (key !== CONSOLE_TOGGLE_KEY) return false;
-      open = true;
-      rev += 1;
-      return true; // the toggle key never reaches the buffer
+    if (CONSOLE_TOGGLE_KEYS.includes(key)) {
+      if (!toggleHeld) {
+        toggleHeld = true;
+        open = !open;
+        rev += 1;
+      }
+      return true; // the toggle key never reaches the buffer, held or not
     }
+    if (!open) return false;
     // open: every key below is consumed
     if (CONSOLE_CLOSE_KEYS.includes(key)) {
       open = false;
@@ -179,11 +198,17 @@ export function createConsoleSession<Ctx>(
     return true; // even non-printables (shift itself, F-keys) never leak to the game
   };
 
+  const handleKeyUp = (event: ConsoleKeyEvent): void => {
+    const key = String(event?.key ?? '').toLowerCase();
+    if (CONSOLE_TOGGLE_KEYS.includes(key)) toggleHeld = false;
+  };
+
   return {
     isOpen: () => open,
     buffer: () => buffer,
     transcript: () => lines,
     handleKey,
+    handleKeyUp,
     submit,
     revision: () => rev,
   };
