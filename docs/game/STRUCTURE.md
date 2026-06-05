@@ -19,7 +19,9 @@ cart/hmsc-int/
                        GAME_CAMERA, GAME_FIGURE, GAME_VEHICLE, GAME_ITEMS,
                        GAME_ANIMATION, GAME_KINDS, GAME_LOOP, GAME_CHANCE,
                        GAME_PERCEPTION, GAME_CUTSCENE, GAME_STORY, GAME_MISSIONS,
-                       GAME_ACTIVITIES, GAME_COMMANDS, GAME_CHROME, GAME_TELEMETRY
+                       GAME_ACTIVITIES, GAME_COMMANDS, GAME_CHROME, GAME_TELEMETRY,
+                       GAME_WORLD (the V4 substrate door — added during the
+                       /test collision integration, commit 2e2fb2643)
     loop.ts            frame loop + the ~45/min state tick + event channel (V8)
                        — API stays MINIMAL until the loop-shapes lab rules R3
     camera.ts          registry + aim rig + screenRay picking (V3)
