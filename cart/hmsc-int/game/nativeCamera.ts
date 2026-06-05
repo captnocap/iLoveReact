@@ -6,7 +6,7 @@
 
 declare const globalThis: any;
 
-export type NativeCameraMode = 'walk' | 'orbit' | 'aim' | 'ads';
+export type NativeCameraMode = 'walk' | 'orbit' | 'aim' | 'ads' | 'freefly' | 'freeFly';
 
 export type NativeOrbitParams = {
   target: [number, number, number];
@@ -28,6 +28,13 @@ export type NativeAimParams = {
   distance?: number;
   lookAhead?: number;
   fov?: number;
+};
+
+export type NativeFreeFlyParams = {
+  position: [number, number, number];
+  yaw: number;
+  pitch: number;
+  fov: number;
 };
 
 function callHost(name: string, ...args: unknown[]): unknown {
@@ -61,6 +68,30 @@ function sendAim(name: string, params: NativeAimParams, nodeId?: number): void {
   );
 }
 
+function sendFreeFly(name: string, params: NativeFreeFlyParams, nodeId?: number): void {
+  callHost(
+    name,
+    ...(nodeId == null ? [] : [nodeId]),
+    params.position[0], params.position[1], params.position[2],
+    params.yaw, params.pitch, params.fov,
+  );
+}
+
+function parseFreeFlySnapshot(raw: unknown): NativeFreeFlyParams | null {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const pos = parsed?.pos;
+    if (!Array.isArray(pos) || pos.length < 3) return null;
+    const x = Number(pos[0]), y = Number(pos[1]), z = Number(pos[2]);
+    const yaw = Number(parsed?.yaw), pitch = Number(parsed?.pitch), fov = Number(parsed?.fov);
+    if (![x, y, z, yaw, pitch, fov].every(Number.isFinite)) return null;
+    return { position: [x, y, z], yaw, pitch, fov };
+  } catch {
+    return null;
+  }
+}
+
 export const GAME_NATIVE_CAMERA = Object.freeze({
   bindNode(nodeId: number): void {
     callHost('__game_camera_bind_node', nodeId);
@@ -79,6 +110,12 @@ export const GAME_NATIVE_CAMERA = Object.freeze({
   },
   setAim(params: NativeAimParams): void {
     sendAim('__game_camera_set_aim', params);
+  },
+  setFreeFly(params: NativeFreeFlyParams): void {
+    sendFreeFly('__game_camera_set_freefly', params);
+  },
+  setMoveAxes(forward: number, strafe: number, lift: number, speed: number): void {
+    callHost('__game_camera_set_move_axes', forward, strafe, lift, speed);
   },
   setInputDeltas(yawDelta: number, pitchDelta: number): void {
     callHost('__game_camera_set_input_deltas', yawDelta, pitchDelta);
@@ -102,6 +139,15 @@ export const GAME_NATIVE_CAMERA = Object.freeze({
       },
       setAim(params: NativeAimParams): void {
         sendAim('__game_camera_set_aim_node', params, nodeId);
+      },
+      setFreeFly(params: NativeFreeFlyParams): void {
+        sendFreeFly('__game_camera_set_freefly_node', params, nodeId);
+      },
+      setMoveAxes(forward: number, strafe: number, lift: number, speed: number): void {
+        callHost('__game_camera_set_move_axes_node', nodeId, forward, strafe, lift, speed);
+      },
+      getFreeFly(): NativeFreeFlyParams | null {
+        return parseFreeFlySnapshot(callHost('__game_camera_get_freefly_node', nodeId));
       },
       setInputDeltas(yawDelta: number, pitchDelta: number): void {
         callHost('__game_camera_set_input_deltas_node', nodeId, yawDelta, pitchDelta);

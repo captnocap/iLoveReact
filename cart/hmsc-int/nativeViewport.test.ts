@@ -69,4 +69,17 @@ test('assist3d SceneSurface uses native render drive and keeps registry math onl
   assert(!source.includes('CAMERAS.Orbit'), 'runtime Orbit registry import must not drive this viewport');
 });
 
+test('IsoPreview uses native FreeFly drive, not a JS animation-frame camera loop', () => {
+  const source = read('cart/hmsc-int/IsoPreview.tsx');
+  assert(source.includes('<Scene3D.Camera nativeCamera ref={cameraRef}'), 'renderer-consumed camera node must opt into nativeCamera');
+  assert(source.includes('GAME_NATIVE_CAMERA.forNode'), 'surface must engage the node-scoped native controller');
+  assert(source.includes("ctl.setMode('freefly')"), 'preview must use the native FreeFly controller mode');
+  assert(source.includes('.setMoveAxes('), 'WASD intent must be sent as native movement axes');
+  assert(source.includes('.getFreeFly()'), 'camera persistence must read back the native integrated pose');
+  assert(!source.includes('requestAnimationFrame'), 'JS must not run the per-frame camera movement loop');
+  assert(!source.includes('bumpTick'), 'JS camera movement must not force per-frame rerenders');
+  assert(!source.includes('position={eye}'), 'JS-computed eye must not drive the renderer');
+  assert(!source.includes('target={target}'), 'JS-computed target must not drive the renderer');
+});
+
 finish('native-viewport');

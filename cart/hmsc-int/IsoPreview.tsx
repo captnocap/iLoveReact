@@ -2,11 +2,11 @@
 // drawn by the game's own renderer. Paint in the 2D top-down map (left); this
 // mirrors it in 3D — fly around at ground level to inspect.
 //
-// Camera: a FreeFly rig you drive yourself — drag to look (yaw/pitch), WASD to fly
-// along the look direction, Q/E (or Space/Shift) for world up/down. Movement only
-// applies while the pointer is over THIS pane, so typing elsewhere (notes) never
-// moves the camera. Fog is OFF and the far clip is pushed way out, so the ground
-// reads as solid ground instead of fading into the sky.
+// Camera: a V23 native FreeFly controller — JS sends focus/key/look changes, and
+// the host integrates the eye and writes the renderer-consumed camera node every
+// frame. Movement only applies while the pointer is over THIS pane, so typing
+// elsewhere (notes) never moves the camera. Fog is OFF and the far clip is pushed
+// way out, so the ground reads as solid ground instead of fading into the sky.
 //
 // Floors: ONE slab mesh per focused chunk, textured by a STABLE per-chunk capture
 // (keyed by chunk coord) of that chunk's per-cell tile field — the SAME shader the
@@ -14,7 +14,7 @@
 // their bind groups every paint and crashed wgpu mid-draw. Painting now just
 // re-bakes a chunk's texture in place.
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import { Heightfield } from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
@@ -24,6 +24,7 @@ import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
 import { BuildingSurfaceCaptures } from '../hmsc/render3d/BuildingFacades';
 import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures';
 import { WorldPartCaptures } from '../hmsc/render3d/PartCaptures';
+import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 import { useChurn } from './perfLog';
 
 type Vec3 = [number, number, number];
@@ -70,23 +71,37 @@ export const IsoPreview = memo(function IsoPreview(props: {
   const world = state.world;
   // Churn probe: `state` is the cart's previewWorld. If it changes per stroke, the
   // preview rebuilds + re-bakes landform captures every sync — the choke's far end.
-  // (bumpTick/look churn here too, but those are camera-fly, not paint.)
+  // (look churn here too, but that is camera-fly, not paint.)
   useChurn('IsoPreview', { state, world, wasdFocused: props.wasdFocused });
 
   // ── Free-fly camera ─────────────────────────────────────────────────────────
-  // Look (yaw/pitch) is state so a drag re-renders; position is a ref the movement
-  // loop integrates, with a tick to re-render on motion. Seed from the opened map's
-  // saved pose, else start above + south of the seed chunk, looking down -Z at it.
-  const [look, setLook] = useState(() => props.initialCamera ? { yaw: props.initialCamera.yaw, pitch: props.initialCamera.pitch } : { yaw: 180, pitch: -18 });
-  const lookRef = useRef(look); lookRef.current = look;
+  // Seed from the opened map's saved pose, else start above + south of the seed
+  // chunk, looking down -Z at it. The native controller owns per-frame movement;
+  // refs mirror the last known params for save/readback and no-host tests.
+  const lookRef = useRef(props.initialCamera ? { yaw: props.initialCamera.yaw, pitch: props.initialCamera.pitch } : { yaw: 180, pitch: -18 });
   const posRef = useRef<Vec3>(props.initialCamera ? [props.initialCamera.pos[0], props.initialCamera.pos[1], props.initialCamera.pos[2]] : [CHUNK_TILES / 2, 48, CHUNK_TILES / 2 + 150]);
-  const [, bumpTick] = useState(0);
+  const cameraRef = useRef<any>(null);
+  const cameraCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
+  const bootCam = useRef(GAME_CAMERA.solve(GAME_CAMERA.rigs.FreeFly, {
+    position: posRef.current,
+    yaw: lookRef.current.yaw,
+    pitch: lookRef.current.pitch,
+    fov: FOV,
+  })).current;
 
   // Expose the live pose + a debounced "camera stopped moving" signal so the cart
   // can save the view without writing on every animation frame.
   const onSettleRef = useRef(props.onCameraSettle);
   onSettleRef.current = props.onCameraSettle;
-  if (props.cameraApiRef) props.cameraApiRef.current = { get: () => ({ pos: posRef.current, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch }) };
+  const readCamera = useCallback((): PreviewCamera => {
+    const snap = cameraCtlRef.current?.getFreeFly?.();
+    if (snap) {
+      posRef.current = snap.position;
+      lookRef.current = { yaw: snap.yaw, pitch: snap.pitch };
+    }
+    return { pos: posRef.current, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch };
+  }, []);
+  if (props.cameraApiRef) props.cameraApiRef.current = { get: readCamera };
   const settleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scheduleSettle = useCallback(() => {
     if (settleTimer.current) clearTimeout(settleTimer.current);
@@ -97,50 +112,64 @@ export const IsoPreview = memo(function IsoPreview(props: {
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const active = !!props.wasdFocused; // this quad owns WASD (claimed by a click)
 
+  const sendFreeFly = useCallback(() => {
+    cameraCtlRef.current?.setFreeFly({
+      position: posRef.current,
+      yaw: lookRef.current.yaw,
+      pitch: lookRef.current.pitch,
+      fov: FOV,
+    });
+  }, []);
+
+  const sendMoveAxes = useCallback(() => {
+    const ctl = cameraCtlRef.current;
+    if (!ctl || !active) {
+      ctl?.setMoveAxes(0, 0, 0, 0);
+      return;
+    }
+    const k = keysRef.current;
+    const forward = (k['w'] ? 1 : 0) + (k['s'] ? -1 : 0);
+    const strafe = (k['d'] ? 1 : 0) + (k['a'] ? -1 : 0);
+    const lift = ((k['e'] || k['space']) ? 1 : 0) + ((k['q'] || k['__shift']) ? -1 : 0);
+    ctl.setMoveAxes(forward, strafe, lift, FLY_SPEED);
+  }, [active]);
+
+  useEffect(() => {
+    const ctl = GAME_NATIVE_CAMERA.forNode(cameraRef.current);
+    cameraCtlRef.current = ctl;
+    ctl.setMode('freefly');
+    ctl.setSmoothing(0);
+    sendFreeFly();
+    ctl.setMoveAxes(0, 0, 0, 0);
+    return () => {
+      const snap = ctl.getFreeFly();
+      if (snap) {
+        posRef.current = snap.position;
+        lookRef.current = { yaw: snap.yaw, pitch: snap.pitch };
+      }
+      ctl.setMoveAxes(0, 0, 0, 0);
+      ctl.disable();
+      cameraCtlRef.current = null;
+    };
+  }, [sendFreeFly]);
+
+  useEffect(() => {
+    sendMoveAxes();
+  }, [sendMoveAxes]);
+
   // Key bus (always listening; cheap). Shift arrives as a modifier flag, not a key.
   useEffect(() => {
     const setk = (e: any, v: boolean) => {
       const k = String(e?.key ?? '').toLowerCase();
       if (k) keysRef.current[k] = v;
       if (typeof e?.shiftKey === 'boolean') keysRef.current['__shift'] = e.shiftKey;
+      sendMoveAxes();
+      if (!v) scheduleSettle();
     };
     const offD = busOn('__keydown', (e: any) => setk(e, true));
     const offU = busOn('__keyup', (e: any) => setk(e, false));
     return () => { offD(); offU(); };
-  }, []);
-
-  // Movement loop — only while the pane is active. Forward includes pitch (W flies
-  // along the look direction); strafe stays horizontal so A/D never sink.
-  useEffect(() => {
-    if (!active) return;
-    const g: any = globalThis;
-    const sched = g.requestAnimationFrame ? g.requestAnimationFrame.bind(g) : (fn: any) => setTimeout(fn, 16);
-    let alive = true;
-    let last = g.performance?.now?.() ?? 0;
-    const loop = () => {
-      if (!alive) return;
-      const now = g.performance?.now?.() ?? (last + 16);
-      const dt = Math.min(0.05, (now - last) / 1000); last = now;
-      const k = keysRef.current;
-      const sp = FLY_SPEED * dt;
-      const yr = lookRef.current.yaw * Math.PI / 180;
-      const pr = lookRef.current.pitch * Math.PI / 180;
-      const cp = Math.cos(pr);
-      const fx = -Math.sin(yr) * cp, fy = Math.sin(pr), fz = Math.cos(yr) * cp;
-      const rx = -Math.cos(yr), rz = -Math.sin(yr);
-      let [x, y, z] = posRef.current; let moved = false;
-      if (k['w']) { x += fx * sp; y += fy * sp; z += fz * sp; moved = true; }
-      if (k['s']) { x -= fx * sp; y -= fy * sp; z -= fz * sp; moved = true; }
-      if (k['d']) { x += rx * sp; z += rz * sp; moved = true; }
-      if (k['a']) { x -= rx * sp; z -= rz * sp; moved = true; }
-      if (k['e'] || k['space']) { y += sp; moved = true; }
-      if (k['q'] || k['__shift']) { y -= sp; moved = true; }
-      if (moved) { posRef.current = [x, y, z]; bumpTick((t) => t + 1); scheduleSettle(); }
-      sched(loop);
-    };
-    sched(loop);
-    return () => { alive = false; };
-  }, [active]);
+  }, [scheduleSettle, sendMoveAxes]);
 
   // Click = claim WASD focus (so this quad's keys drive the cam, not the canvas's);
   // drag = look. Same node for down+move+up so pointer capture carries the drag
@@ -152,15 +181,14 @@ export const IsoPreview = memo(function IsoPreview(props: {
     const d = dragRef.current; if (!d) return;
     const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
     const dx = nx - d.x, dy = ny - d.y; d.x = nx; d.y = ny;
-    setLook((l) => ({ yaw: l.yaw + dx * 0.3, pitch: Math.max(-89, Math.min(89, l.pitch - dy * 0.3)) }));
+    const look = lookRef.current;
+    const nextYaw = look.yaw + dx * 0.3;
+    const nextPitch = Math.max(-89, Math.min(89, look.pitch - dy * 0.3));
+    cameraCtlRef.current?.setInputDeltas(nextYaw - look.yaw, nextPitch - look.pitch);
+    lookRef.current = { yaw: nextYaw, pitch: nextPitch };
     scheduleSettle();
   };
   const onUp = () => { dragRef.current = null; scheduleSettle(); };
-
-  // Camera = FreeFly solve: target = eye + look-forward (pitch included).
-  const eye = posRef.current;
-  const yr = look.yaw * Math.PI / 180, pr = look.pitch * Math.PI / 180, cp = Math.cos(pr);
-  const target: Vec3 = [eye[0] - Math.sin(yr) * cp, eye[1] + Math.sin(pr), eye[2] + Math.cos(yr) * cp];
 
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
@@ -178,7 +206,7 @@ export const IsoPreview = memo(function IsoPreview(props: {
       <PropSurfaceCaptures props={world.props} />
       <WorldPartCaptures buildings={world.buildings} props={world.props} perception={state.player.perception} />
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showGrid={false} showAxes={false}>
-        <Scene3D.Camera position={eye} target={target} fov={FOV} far={FAR_CLIP} />
+        <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
         {/* WorldStatics draws everything — terrain (the painted chunks as
             heightfield landforms), skybox, lights, and the placements. */}

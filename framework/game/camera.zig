@@ -25,6 +25,7 @@ pub const Solved = struct {
 pub const Mode = enum {
     orbit,
     aim,
+    freefly,
 };
 
 pub const OrbitParams = struct {
@@ -49,6 +50,20 @@ pub const AimParams = struct {
     min_pitch: f32 = -1.15 / DEG,
     max_pitch: f32 = 1.0 / DEG,
     fov: f32 = 47,
+};
+
+pub const FreeFlyParams = struct {
+    position: Vec3 = .{ .x = 0, .y = 5, .z = 14 },
+    yaw: f32 = 180,
+    pitch: f32 = -12,
+    fov: f32 = 60,
+};
+
+pub const MoveAxes = struct {
+    forward: f32 = 0,
+    strafe: f32 = 0,
+    lift: f32 = 0,
+    speed: f32 = 0,
 };
 
 pub const ControllerParams = struct {
@@ -96,6 +111,25 @@ pub fn solveOrbit(params: OrbitParams) Solved {
     };
 }
 
+pub fn lookForward(eye: Vec3, yaw_deg: f32, pitch_deg: f32) Vec3 {
+    const yaw = yaw_deg * DEG;
+    const pitch = pitch_deg * DEG;
+    const cp = @cos(pitch);
+    return .{
+        .x = eye.x - @sin(yaw) * cp,
+        .y = eye.y + @sin(pitch),
+        .z = eye.z + @cos(yaw) * cp,
+    };
+}
+
+pub fn solveFreeFly(params: FreeFlyParams) Solved {
+    return .{
+        .pos = params.position,
+        .target = lookForward(params.position, params.yaw, params.pitch),
+        .fov = params.fov,
+    };
+}
+
 pub fn aimPivot(params: AimParams) Vec3 {
     const yaw = params.yaw * DEG;
     const right_x = -@cos(yaw);
@@ -137,6 +171,8 @@ pub const Controller = struct {
     mode: Mode = .orbit,
     orbit: OrbitParams = .{},
     aim: AimParams = .{},
+    freefly: FreeFlyParams = .{},
+    move_axes: MoveAxes = .{},
     current: Solved = solveOrbit(.{}),
     initialized: bool = false,
     smoothing_per_second: f32 = DEFAULT_SMOOTHING_PER_SECOND,
@@ -171,6 +207,17 @@ pub const Controller = struct {
         }
     }
 
+    pub fn setFreeFly(self: *Controller, params: FreeFlyParams) void {
+        self.freefly = params;
+        if (self.mode == .freefly and !self.initialized) {
+            self.current = solveFreeFly(params);
+        }
+    }
+
+    pub fn setMoveAxes(self: *Controller, axes: MoveAxes) void {
+        self.move_axes = axes;
+    }
+
     pub fn setSmoothing(self: *Controller, per_second: f32) void {
         self.smoothing_per_second = @max(@as(f32, 0), per_second);
     }
@@ -185,17 +232,46 @@ pub const Controller = struct {
                 self.aim.yaw += yaw_delta;
                 self.aim.pitch = clamp(self.aim.pitch + pitch_delta, self.aim.min_pitch, self.aim.max_pitch);
             },
+            .freefly => {
+                self.freefly.yaw += yaw_delta;
+                self.freefly.pitch = clamp(self.freefly.pitch + pitch_delta, -89, 89);
+            },
         }
+    }
+
+    fn integrateFreeFly(self: *Controller, dt_seconds: f32) void {
+        if (dt_seconds <= 0 or self.move_axes.speed == 0) return;
+        const yaw = self.freefly.yaw * DEG;
+        const pitch = self.freefly.pitch * DEG;
+        const cp = @cos(pitch);
+        const fwd = Vec3{
+            .x = -@sin(yaw) * cp,
+            .y = @sin(pitch),
+            .z = @cos(yaw) * cp,
+        };
+        const right = Vec3{
+            .x = -@cos(yaw),
+            .y = 0,
+            .z = -@sin(yaw),
+        };
+        const step_len = self.move_axes.speed * dt_seconds;
+        self.freefly.position = .{
+            .x = self.freefly.position.x + (fwd.x * self.move_axes.forward + right.x * self.move_axes.strafe) * step_len,
+            .y = self.freefly.position.y + (fwd.y * self.move_axes.forward + self.move_axes.lift) * step_len,
+            .z = self.freefly.position.z + (fwd.z * self.move_axes.forward + right.z * self.move_axes.strafe) * step_len,
+        };
     }
 
     pub fn desired(self: *const Controller) Solved {
         return switch (self.mode) {
             .orbit => solveOrbit(self.orbit),
             .aim => solveAim(self.aim),
+            .freefly => solveFreeFly(self.freefly),
         };
     }
 
     pub fn step(self: *Controller, dt_seconds: f32) Solved {
+        if (self.mode == .freefly) self.integrateFreeFly(dt_seconds);
         const want = self.desired();
         if (!self.initialized or self.smoothing_per_second <= 0 or dt_seconds <= 0) {
             self.current = want;
@@ -237,6 +313,7 @@ fn probeMode(mode: Mode) []const u8 {
     return switch (mode) {
         .orbit => "orbit",
         .aim => "aim",
+        .freefly => "freefly",
     };
 }
 
@@ -251,6 +328,25 @@ fn probeSolved(label: []const u8, solved: Solved) void {
     std.debug.print(
         "{s}=pos({d:.2},{d:.2},{d:.2}) look({d:.2},{d:.2},{d:.2}) fov={d:.2}",
         .{ label, solved.pos.x, solved.pos.y, solved.pos.z, solved.target.x, solved.target.y, solved.target.z, solved.fov },
+    );
+}
+
+fn probeFreeFly(label: []const u8, params: FreeFlyParams, axes: MoveAxes) void {
+    std.debug.print(
+        "{s}=pos({d:.2},{d:.2},{d:.2}) yaw={d:.2} pitch={d:.2} fov={d:.2} axes({d:.2},{d:.2},{d:.2}) speed={d:.2}",
+        .{
+            label,
+            params.position.x,
+            params.position.y,
+            params.position.z,
+            params.yaw,
+            params.pitch,
+            params.fov,
+            axes.forward,
+            axes.strafe,
+            axes.lift,
+            axes.speed,
+        },
     );
 }
 
@@ -412,6 +508,36 @@ pub fn setAimForNode(node_id: u32, params: AimParams) void {
     }
 }
 
+pub fn setFreeFly(params: FreeFlyParams) void {
+    g_legacy_controller.setFreeFly(params);
+    if (activeSlot()) |slot| {
+        slot.controller.setFreeFly(params);
+        probeRecordParams(slot);
+    }
+}
+
+pub fn setFreeFlyForNode(node_id: u32, params: FreeFlyParams) void {
+    if (ensureSlot(node_id)) |slot| {
+        slot.controller.setFreeFly(params);
+        probeRecordParams(slot);
+    }
+}
+
+pub fn setMoveAxes(axes: MoveAxes) void {
+    g_legacy_controller.setMoveAxes(axes);
+    if (activeSlot()) |slot| {
+        slot.controller.setMoveAxes(axes);
+        probeRecordParams(slot);
+    }
+}
+
+pub fn setMoveAxesForNode(node_id: u32, axes: MoveAxes) void {
+    if (ensureSlot(node_id)) |slot| {
+        slot.controller.setMoveAxes(axes);
+        probeRecordParams(slot);
+    }
+}
+
 pub fn setSmoothing(per_second: f32) void {
     g_legacy_controller.setSmoothing(per_second);
     if (activeSlot()) |slot| slot.controller.setSmoothing(per_second);
@@ -442,6 +568,11 @@ pub fn activeNodeId() u32 {
 
 pub fn isBound(node_id: u32) bool {
     return getSlot(node_id) != null;
+}
+
+pub fn freeFlyForNode(node_id: u32) ?FreeFlyParams {
+    const slot = getSlot(node_id) orelse return null;
+    return slot.controller.freefly;
 }
 
 pub fn resetForTests() void {
@@ -496,9 +627,12 @@ pub fn stepNode(node_id: u32, now_ms: u32) ?Solved {
                 slot.probe_max_target_lag,
             },
         );
+        std.debug.print("mode={s} ", .{probeMode(slot.controller.mode)});
         probeOrbit("stagedOrbit", g_legacy_controller.orbit);
         std.debug.print(" ", .{});
         probeOrbit("slotOrbit", slot.controller.orbit);
+        std.debug.print(" ", .{});
+        probeFreeFly("slotFreeFly", slot.controller.freefly, slot.controller.move_axes);
         std.debug.print(" ", .{});
         probeSolved("desired", desired);
         std.debug.print(" ", .{});

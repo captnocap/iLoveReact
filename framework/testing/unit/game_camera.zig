@@ -125,6 +125,26 @@ test "orbit solve matches TypeScript registry reference vectors" {
     );
 }
 
+test "freefly solve matches TypeScript registry reference vectors" {
+    try expectSolved(
+        camera.solveFreeFly(.{}),
+        .{ .x = 0, .y = 5, .z = 14 },
+        .{ .x = 0, .y = 4.792088, .z = 13.021852 },
+        60,
+    );
+    try expectSolved(
+        camera.solveFreeFly(.{
+            .position = .{ .x = 60, .y = 48, .z = 210 },
+            .yaw = 180,
+            .pitch = -18,
+            .fov = 65,
+        }),
+        .{ .x = 60, .y = 48, .z = 210 },
+        .{ .x = 60, .y = 47.690983, .z = 209.048943 },
+        65,
+    );
+}
+
 test "aim solve matches TypeScript ADS reference vectors and clamps pitch" {
     try expectSolved(
         camera.solveAim(.{}),
@@ -269,6 +289,34 @@ test "input deltas update only the active mode parameters" {
     try expectClose(c.aim.yaw, 6);
     try expectClose(c.aim.pitch, 1.0 / camera.DEG);
     try expectClose(c.orbit.yaw, 15);
+    c.setMode(.freefly);
+    c.setFreeFly(.{ .yaw = 180, .pitch = -18 });
+    c.applyInputDeltas(3, -100);
+    try expectClose(c.freefly.yaw, 183);
+    try expectClose(c.freefly.pitch, -89);
+}
+
+test "freefly movement integrates natively and writes consumed layout fields" {
+    var c = camera.Controller{};
+    c.setMode(.freefly);
+    c.setSmoothing(0);
+    c.setFreeFly(.{
+        .position = .{ .x = 60, .y = 48, .z = 210 },
+        .yaw = 180,
+        .pitch = -18,
+        .fov = 65,
+    });
+    c.setMoveAxes(.{ .forward = 1, .speed = 45 });
+    const solved = c.step(1.0);
+    try expectSolved(
+        solved,
+        .{ .x = 60, .y = 34.094235, .z = 167.202456 },
+        .{ .x = 60, .y = 33.785218, .z = 166.251399 },
+        65,
+    );
+    var node = FakeCameraNode{};
+    camera.writeNode(&node, solved);
+    try expectNodeCamera(node, solved);
 }
 
 test "bound nodes keep independent rigs and per-frame state" {

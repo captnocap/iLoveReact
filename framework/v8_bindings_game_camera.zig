@@ -6,18 +6,23 @@
 //!   __game_camera_bind_node(nodeId)
 //!   __game_camera_bind_first() -> bound node id, 0 when none exists
 //!   __game_camera_disable()
-//!   __game_camera_set_mode("walk"|"orbit"|"aim")
+//!   __game_camera_set_mode("walk"|"orbit"|"aim"|"freefly")
 //!   __game_camera_set_orbit(targetX,targetY,targetZ,yaw,pitch,distance,fov,zoom?)
 //!   __game_camera_set_aim(targetX,targetY,targetZ,yaw,pitch,crouch?,
 //!       shoulderShift?,pivotHeight?,crouchDrop?,distance?,lookAhead?,fov?)
+//!   __game_camera_set_freefly(posX,posY,posZ,yaw,pitch,fov)
+//!   __game_camera_set_move_axes(forward,strafe,lift,speed)
 //!   __game_camera_set_input_deltas(yawDelta,pitchDelta)
 //!   __game_camera_set_smoothing(perSecond)
 //!   __game_camera_active_node() -> node id, 0 when disabled
 //!   __game_camera_disable_node(nodeId)
-//!   __game_camera_set_mode_node(nodeId,"walk"|"orbit"|"aim")
+//!   __game_camera_set_mode_node(nodeId,"walk"|"orbit"|"aim"|"freefly")
 //!   __game_camera_set_orbit_node(nodeId,targetX,targetY,targetZ,yaw,pitch,distance,fov,zoom?)
 //!   __game_camera_set_aim_node(nodeId,targetX,targetY,targetZ,yaw,pitch,crouch?,
 //!       shoulderShift?,pivotHeight?,crouchDrop?,distance?,lookAhead?,fov?)
+//!   __game_camera_set_freefly_node(nodeId,posX,posY,posZ,yaw,pitch,fov)
+//!   __game_camera_set_move_axes_node(nodeId,forward,strafe,lift,speed)
+//!   __game_camera_get_freefly_node(nodeId) -> JSON snapshot
 //!   __game_camera_set_input_deltas_node(nodeId,yawDelta,pitchDelta)
 //!   __game_camera_set_smoothing_node(nodeId,perSecond)
 //!
@@ -60,9 +65,14 @@ fn setReturnF64(info: v8.FunctionCallbackInfo, value: f64) void {
     info.getReturnValue().set(v8.Number.init(info.getIsolate(), value));
 }
 
+fn setReturnString(info: v8.FunctionCallbackInfo, value: []const u8) void {
+    info.getReturnValue().set(v8.String.initUtf8(info.getIsolate(), value));
+}
+
 fn modeFromString(s: []const u8) ?game_camera.Mode {
     if (std.mem.eql(u8, s, "walk") or std.mem.eql(u8, s, "orbit")) return .orbit;
     if (std.mem.eql(u8, s, "aim") or std.mem.eql(u8, s, "ads")) return .aim;
+    if (std.mem.eql(u8, s, "freefly") or std.mem.eql(u8, s, "freeFly")) return .freefly;
     return null;
 }
 
@@ -232,6 +242,79 @@ fn hostSetAimNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setReturnNull(info);
 }
 
+fn freeFlyParams(info: v8.FunctionCallbackInfo, offset: u32) game_camera.FreeFlyParams {
+    return .{
+        .position = .{
+            .x = @floatCast(argToF64(info, offset + 0) orelse 0),
+            .y = @floatCast(argToF64(info, offset + 1) orelse 5),
+            .z = @floatCast(argToF64(info, offset + 2) orelse 14),
+        },
+        .yaw = @floatCast(argToF64(info, offset + 3) orelse 180),
+        .pitch = @floatCast(argToF64(info, offset + 4) orelse -12),
+        .fov = @floatCast(argToF64(info, offset + 5) orelse 60),
+    };
+}
+
+fn moveAxes(info: v8.FunctionCallbackInfo, offset: u32) game_camera.MoveAxes {
+    return .{
+        .forward = @floatCast(argToF64(info, offset + 0) orelse 0),
+        .strafe = @floatCast(argToF64(info, offset + 1) orelse 0),
+        .lift = @floatCast(argToF64(info, offset + 2) orelse 0),
+        .speed = @floatCast(argToF64(info, offset + 3) orelse 0),
+    };
+}
+
+fn hostSetFreeFly(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    game_camera.setFreeFly(freeFlyParams(info, 0));
+    setReturnNull(info);
+}
+
+fn hostSetFreeFlyNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    game_camera.setFreeFlyForNode(node_id, freeFlyParams(info, 1));
+    setReturnNull(info);
+}
+
+fn hostSetMoveAxes(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    game_camera.setMoveAxes(moveAxes(info, 0));
+    setReturnNull(info);
+}
+
+fn hostSetMoveAxesNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    game_camera.setMoveAxesForNode(node_id, moveAxes(info, 1));
+    setReturnNull(info);
+}
+
+fn hostGetFreeFlyNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    const params = game_camera.freeFlyForNode(node_id) orelse {
+        setReturnString(info, "");
+        return;
+    };
+    var buf: [192]u8 = undefined;
+    const json = std.fmt.bufPrint(
+        &buf,
+        "{{\"pos\":[{d:.6},{d:.6},{d:.6}],\"yaw\":{d:.6},\"pitch\":{d:.6},\"fov\":{d:.6}}}",
+        .{ params.position.x, params.position.y, params.position.z, params.yaw, params.pitch, params.fov },
+    ) catch "";
+    setReturnString(info, json);
+}
+
 fn hostSetInputDeltas(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const yaw_delta: f32 = @floatCast(argToF64(info, 0) orelse 0);
@@ -286,6 +369,11 @@ pub fn registerGameCamera(_: anytype) void {
     v8_runtime.registerHostFn("__game_camera_set_orbit_node", hostSetOrbitNode);
     v8_runtime.registerHostFn("__game_camera_set_aim", hostSetAim);
     v8_runtime.registerHostFn("__game_camera_set_aim_node", hostSetAimNode);
+    v8_runtime.registerHostFn("__game_camera_set_freefly", hostSetFreeFly);
+    v8_runtime.registerHostFn("__game_camera_set_freefly_node", hostSetFreeFlyNode);
+    v8_runtime.registerHostFn("__game_camera_set_move_axes", hostSetMoveAxes);
+    v8_runtime.registerHostFn("__game_camera_set_move_axes_node", hostSetMoveAxesNode);
+    v8_runtime.registerHostFn("__game_camera_get_freefly_node", hostGetFreeFlyNode);
     v8_runtime.registerHostFn("__game_camera_set_input_deltas", hostSetInputDeltas);
     v8_runtime.registerHostFn("__game_camera_set_input_deltas_node", hostSetInputDeltasNode);
     v8_runtime.registerHostFn("__game_camera_set_smoothing", hostSetSmoothing);
