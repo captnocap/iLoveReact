@@ -186,3 +186,45 @@ preview-grid resolution, look-color fill, transparency default, clamping,
 bounds), and the material-canvas identity riding extractions/saves/drafts
 (with pre-connection drafts still parsing). Route JSX bundle-verified
 through the real cart pipeline aliases.
+
+## MODELPAINT-0605 (2026-06-05): model texture painting lives HERE
+
+THE USER'S RULING, verbatim: "the painting tools for the TEXTURE of the
+character MODEL and vehicle MODEL are need to migrate entirely to the
+cutout painter, thats a start. from there, we need to bbeee able to save
+the painting. we will want to have a live 3d preview to see along side our
+paintings." And the scope ruling: "i dont want to paint depth, i want to
+paint their face though, or body parts, is that clear." All three landed:
+
+- TARGETS: the MODELS rail section (characters roster + vehicle garage off
+  the one store; part pickers — face/torso/limbs/hands/feet/fingers,
+  18 vehicle parts; ● = painted). `models.ts` is the pure half (binding,
+  dims, bg, bake, reopen, mailbox); figure parts paint the kit's 512×256
+  unwrap, vehicles a square box-mapped canvas.
+- SAVE: bake (per-layer effective masks → cell grid + look colors — PIXELS
+  ONLY by ruling) → applyBodyPaint/applyVehiclePaint through the doors →
+  ONE labeled commit-grade upsert on the owning channel ('/cutout' sessions
+  on the characters/vehicles streams). Empty painting = slot CLEARED. The
+  overlay carries its PaintDocument — reopen is lossless (pinned).
+- LIVE 3D PREVIEW: ModelPreview.tsx — the figure part / whole vehicle
+  beside the canvas, painting applied as you stroke (one StaticSurface
+  sampling the painter's live GPU masks; throttled bake clock, P2 knobs;
+  V23 native orbit).
+
+REPRESENTATIONAL PICKS (named): bake fidelity is CELL-GRID (default 96,
+tunable 'cutout-modelpaint.bakeRes') — what saves is the painter's own
+preview language, not source-res pixels; overlay z-order = the photo slot
+(over skin, under shape layers); vehicle capture raster fixed at 256²
+(independent of the canvas knob — the bake is resolution-projected).
+
+SURFACED SEAMS (not guessed):
+- Model targets SKIP the working-draft autosave: the draft format carries
+  no binding, and a restore would silently retarget saves at the library.
+  Queued: a binding-carrying draft (additive draft.ts field).
+- The cutout underlay shows skin + face shape layers; torso underwear
+  stamps and clothing prints are NOT in the paint underlay yet (they
+  composite in the /characters captures over the painting).
+- The COMPILED game does not composite overlays yet — bake.ts's texture
+  story is the bake lane's (figure CAPTURE carries the same row).
+- Smart select stays off for model targets (needs an image FILE — the
+  material-canvas rule).

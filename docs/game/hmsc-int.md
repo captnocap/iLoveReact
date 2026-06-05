@@ -871,3 +871,37 @@ interfacing with." Two pieces:
   not re-render OTHER mounted routes (they read the live value on their next
   render). `editors/settings/CAPTURE.md` is the P2 BUG BURNDOWN: every
   un-migrated magic-number cluster, plus the pane hand-off rows.
+
+## Model texture painting — /cutout owns it (MODELPAINT-0605, 2026-06-05)
+
+THE USER'S RULING: model textures (character + vehicle) "migrate entirely to
+the cutout painter"; save the painting; live 3D preview beside it. And the
+scope ruling: "i dont want to paint depth, i want to paint their face
+though, or body parts" — pixels only; the coupled color+depth face stroke
+died; sculpt stays in /characters.
+
+- `game/painted.ts` (+`paintedRender.tsx`, direct-import React half) — the
+  PaintedOverlay: per-layer cell-grid color bake + the painter's re-editable
+  document held OPAQUE (STRUCTURE arrows: game/ stores, editors/cutout
+  interprets). Boundary validation never throws; texture keys are
+  content-addressed by the save stamp. `VehiclePaintCaptures` is the one
+  shared capture component. 7 P4 cases.
+- `BodyDocument.paint` / `VehicleDoc.paint` — additive per-part slots;
+  `applyBodyPaint`/`applyVehiclePaint` pure save steps; paint→unpaint is
+  byte-parity; torn overlays degrade, never reject; pre-paint documents
+  byte-unaffected (all pinned). buildVehicle threads textureKey onto a
+  painted part's SURFACE meshes — scars/cracks/livery stripes are decals
+  and never take the paint (the suite caught the hood-grille escape).
+- `/cutout` MODELS rail: pick a face/body part/vehicle part → the full
+  painter over the model's own underlay (512×256 figure unwrap / square
+  vehicle canvas) → save = bake + door-apply + ONE commit-grade upsert on
+  the owning channel → reopen lossless. Live 3D preview (`ModelPreview.tsx`)
+  shows the part/vehicle with the painting applied as you stroke (throttled
+  StaticSurface sampling the live GPU masks; V23 native orbit; P2 knobs).
+  Deep-link mailbox: /characters + /vehicles preload a target.
+- `/characters`: face-paint tool DELETED; draft carries `paint` opaque —
+  pinned that a sculpt/wardrobe save never wipes a painting (a real wipe
+  hazard found + closed); captures composite overlays at the photo slot.
+- `/vehicles`: viewport renders painted panels; `texture` row deep-links.
+- Surfaced seams in editors/cutout/CAPTURE.md (model-target draft gap,
+  cell-grid bake fidelity, compile-side bake follow-up).

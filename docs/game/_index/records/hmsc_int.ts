@@ -184,6 +184,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/painted + model texture painting (MODELPAINT-0605)',
+      purpose: ['texture_bake', 'character', 'vehicle', 'ui', 'persistence'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/painted.ts',
+      description:
+        'MODELPAINT-0605 (2026-06-05), the user\'s rulings verbatim: model textures "migrate entirely to the cutout painter" + save + live 3D preview; and "i dont want to paint depth, i want to paint their face though, or body parts" — PIXELS ONLY (the coupled color+depth face stroke died; sculpt stays /characters\'). game/painted.ts = the PaintedOverlay model documents carry: per-layer cell-grid color bake (renderable anywhere) + the painter\'s re-editable PaintDocument held OPAQUE (STRUCTURE arrows: game/ stores, editors/cutout interprets); validation never throws; texture keys content-addressed by the save stamp. paintedRender.tsx (direct-import React half, the figure/render idiom) = the premultiplied cell-fill Effect + PaintedOverlaySurface + the ONE shared VehiclePaintCaptures. BodyDocument.paint / VehicleDoc.paint = additive per-part slots with pure applyBodyPaint/applyVehiclePaint (paint→unpaint byte-parity; torn overlays degrade; pre-paint docs byte-unaffected — all pinned); buildVehicle threads textureKey onto a painted part\'s SURFACE meshes, decals (scars/cracks/livery stripes — the asDecal guard) never take the paint. /cutout: the MODELS rail (rosters + part pickers, ● = painted), the model canvas over the model\'s own underlay (512×256 figure unwrap so face strokes land where the head texture samples / square box-mapped vehicle canvas), save = bake + door-apply + ONE commit-grade upsert on the owning channel via the route\'s own \'/cutout\' sessions, reopen lossless (the re-edit law), the LIVE 3D preview (ModelPreview.tsx: the figure part / whole vehicle with the painting applied as you stroke — one StaticSurface sampling the painter\'s live GPU masks on a throttled bake clock, P2 knobs \'cutout-modelpaint\'/\'cutout-modelpreview\', V23 native orbit), and the deep-link mailbox /characters + /vehicles preload targets through. /characters: face-paint tool DELETED; CharacterDraft.paint rides opaque (a real wipe hazard — draftToDocument rebuilt the doc and would have destroyed paintings on every save — found and pinned closed); captures composite overlays at the photo slot (over skin, UNDER shape layers, the ruled z-order). /vehicles: viewport renders painted panels; texture row deep-links. P4: painted.test 7 + documents.test paint case + vehicle.test paint case + cutout models.test 4 + characters.test wipe case; verify GREEN. Surfaced (cutout CAPTURE): model targets skip the draft autosave (binding-less draft format), cell-grid bake fidelity is the pick, the COMPILED game\'s overlay composite is the bake lane\'s follow-up.',
+      dependsOn: ['editors/cutout (the cutout painter route)', 'editors/paint (THE shared painter)', 'game/index.ts', 'data/index.ts (the V20 store)'],
+      status: 'live',
+    },
+    {
       name: 'editors/build (Creative Build mode, /build)',
       purpose: ['world_gen', 'ui', 'physics', 'persistence', 'interaction'],
       kind: 'module',
