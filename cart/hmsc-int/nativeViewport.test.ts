@@ -25,4 +25,13 @@ test('/voxels uses the V23 native viewport drive, not JS camera props', () => {
   assert(!source.includes('CAMERAS.Orbit'), 'runtime Orbit registry import must not drive this viewport');
 });
 
+test('ModelViewer uses the V23 native viewport drive, not OrbitCamera', () => {
+  const source = read('cart/hmsc-int/ModelViewer.tsx');
+  assert(source.includes('<Scene3D.Camera nativeCamera ref={cameraRef}'), 'renderer-consumed camera node must opt into nativeCamera');
+  assert(source.includes('GAME_NATIVE_CAMERA.forNode'), 'surface must engage the node-scoped native controller');
+  assert(source.includes('.setInputDeltas('), 'drag must send native input deltas');
+  assert(!source.includes('<OrbitCamera'), 'OrbitCamera must not drive the renderer');
+  assert(!source.includes('from \'@reactjit/cameras\''), 'runtime camera component import must stay removed');
+});
+
 finish('native-viewport');

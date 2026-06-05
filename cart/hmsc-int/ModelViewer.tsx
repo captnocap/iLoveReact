@@ -7,17 +7,14 @@
 //     (Building3D / Prop / a tile slab) + neutral studio lights under a flat
 //     backgroundColor — no Skybox, no Fog — so the model reads on a clean field.
 //
-//  2. Orbit + zoom by mouse, not buttons. The OrbitCamera rig is a pure solve of
-//     (yaw, pitch, dist, zoom); we drive it from input — drag orbits (host global
-//     cursor channel, the same seam the divider uses), scroll wheel zooms. The
-//     built-in <Scene3D.OrbitControls> is a host-side stub, so the cart owns the
-//     camera, exactly like IsoPreview already does — just with live input.
+//  2. Orbit + zoom by mouse, not buttons. CAMNUKE-0605: the viewport camera is
+//     the V23 native host controller; JS only sends params/deltas on input.
 
 import { useEffect, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
-import { OrbitCamera } from '@reactjit/cameras';
 import * as Geometry from '@reactjit/geometries';
 import { busOn } from '@reactjit/hooks/useIFTTT';
+import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 import type { Building, TileKind, WorldProp } from '../hmsc/design';
 import { Building3D } from '../hmsc/render3d/Building';
 import { BuildingFacades } from '../hmsc/render3d/BuildingFacades';
@@ -62,17 +59,48 @@ export function ModelViewer(props: {
   background?: string;
   onAdd?: () => void; // when set, a + button drops this object into the place layer
 }) {
-  const [yaw, setYaw] = useState(35);
-  const [pitch, setPitch] = useState(26);
-  const [zoom, setZoom] = useState(1);
+  const lookRef = useRef({ yaw: 35, pitch: 26 });
+  const zoomRef = useRef(1);
+  const cameraRef = useRef<any>(null);
+  const cameraCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
   const draggingRef = useRef(false);
+
+  const sendOrbit = () => {
+    const l = lookRef.current;
+    cameraCtlRef.current?.setOrbit({ target: [0, props.targetY, 0], yaw: l.yaw, pitch: l.pitch, distance: props.baseDist, zoom: zoomRef.current, fov: 38 });
+  };
+
+  useEffect(() => {
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) {
+      console.warn('[model-viewer] native camera not engaged — camera node id unavailable');
+      return;
+    }
+    const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
+    cameraCtlRef.current = ctl;
+    ctl.setOrbit({ target: [0, props.targetY, 0], yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: props.baseDist, zoom: zoomRef.current, fov: 38 });
+    ctl.setMode('orbit');
+    return () => {
+      cameraCtlRef.current = null;
+      ctl.disable();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; param changes ride effects/input below
+  }, []);
+
+  useEffect(() => { sendOrbit(); }, [props.targetY, props.baseDist]);
 
   // Drag → orbit, driven by the host's global cursor deltas (no per-node move
   // handler → no capture gaps). No-op unless a press is active on the input layer.
   useEffect(() => busOn('system:cursor:move', (e: any) => {
     if (!draggingRef.current) return;
-    setYaw((y) => y + Number(e?.dx ?? 0) * ORBIT_SPEED);
-    setPitch((p) => clamp(p - Number(e?.dy ?? 0) * ORBIT_SPEED, 4, 88));
+    const dx = Number(e?.dx ?? 0);
+    const dy = Number(e?.dy ?? 0);
+    const l = lookRef.current;
+    const nextYaw = l.yaw - dx * ORBIT_SPEED;
+    const nextPitch = clamp(l.pitch - dy * ORBIT_SPEED, 4, 88);
+    cameraCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    l.yaw = nextYaw;
+    l.pitch = nextPitch;
   }), []);
 
   // Wheel up (deltaY > 0) zooms in — matches the 2D canvas zoom convention.
@@ -81,15 +109,23 @@ export function ModelViewer(props: {
   const onScroll = (payload: any) => {
     const dz = Number(payload?.deltaY ?? 0);
     if (!dz) return;
-    setZoom((z) => clamp(z * (dz > 0 ? ZOOM_STEP : 1 / ZOOM_STEP), 0.3, 6));
+    zoomRef.current = clamp(zoomRef.current * (dz > 0 ? ZOOM_STEP : 1 / ZOOM_STEP), 0.3, 6);
+    sendOrbit();
   };
 
-  const reset = () => { setYaw(35); setPitch(26); setZoom(1); };
+  const reset = () => {
+    lookRef.current = { yaw: 35, pitch: 26 };
+    zoomRef.current = 1;
+    sendOrbit();
+  };
+
+  const [bootCam] = useState(() =>
+    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: [0, props.targetY, 0], yaw: 35, pitch: 26, dist: props.baseDist, zoom: 1, fov: 38 }));
 
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={props.background ?? '#0e1622'} showGrid showAxes={false}>
-        <OrbitCamera target={[0, props.targetY, 0]} yaw={yaw} pitch={pitch} dist={props.baseDist} zoom={zoom} fov={38} />
+        <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} />
         <ModelScene building={props.building} prop={props.prop} tile={props.tile} />
       </Scene3D>
 
