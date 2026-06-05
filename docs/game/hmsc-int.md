@@ -135,9 +135,12 @@ worldRev / viewRev / worldEpoch: Autosave trip counters (stroke edits / camera s
 
 `cart/hmsc-int/game/` is the V17 ground floor — `game/index.ts` is the ONLY
 door, exporting the 19 standard `GAME_*` names. Live at milestone-0:
-GAME_PHYSICS (typed wire wrapper over `__hmsc_physics_step` /
-`__hmsc_register_heightfield`; re-points when WO-1's honest bindings land),
-GAME_PATHING (door over runtime/pathing.ts + runtime/motion.ts), GAME_INPUT
+GAME_PHYSICS (typed wire wrapper over the honest `__game_physics_*` bindings —
+`v8_bindings_game_physics.zig`, re-pointed 2026-06-05 when WO-1 landed; it does
+NOT fall back to the legacy `__hmsc_*` aliases, so a missing honest name
+surfaces a broken `has-game-physics` gate instead of masking it),
+GAME_PATHING (door over runtime/pathing.ts + runtime/motion.ts — still the
+`__path_*` names; no honest alias registered yet), GAME_INPUT
 (transport only, V7), GAME_CAMERA (the pure side of @reactjit/cameras;
 solveCamera extracted to runtime/cameras/solve.ts), GAME_LOOP (clocks only —
 NO loop API per R3; the V8 45/min cadence + frame transport), GAME_COMMANDS

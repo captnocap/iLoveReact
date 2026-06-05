@@ -1,10 +1,11 @@
 // game/physics.ts — GAME_PHYSICS: the game door over the host physics system.
 //
-// V1: physics is ONE coherent system, host-side. This door speaks the EXISTING
-// host names (`__hmsc_physics_step`, `__hmsc_register_heightfield`,
-// `__hmsc_clear_heightfields` in framework/v8_bindings_physics_lab.zig); when
-// the honest bindings land (V18 — v8_bindings_game_physics.zig, the WO-1 lane)
-// only the host lookups at the bottom of this file re-point. No caller changes.
+// V1: physics is ONE coherent system, host-side. This door speaks the HONEST
+// binding names (`__game_physics_*`, framework/v8_bindings_game_physics.zig —
+// the WO-1 registrar, gated by -Dhas-game-physics per V18). The registrar also
+// keeps the legacy `__hmsc_*` names registered for the OLD carts' JS callers;
+// this door deliberately does NOT fall back to them — a missing honest name
+// means the gate didn't flip, and silence there would mask the V18 bug.
 //
 // The wire dialect is the one the live consumer speaks today —
 // cart/hmsc/state/hostPhysics.ts is the BEHAVIOR REFERENCE (V17-TRIAGE:
@@ -142,7 +143,7 @@ const SOLID_TO_GROUND = -1e9;
 declare const globalThis: any;
 
 function hostStepFn(): ((input: Float32Array) => ArrayBuffer | null) | null {
-  const fn = globalThis.__hmsc_physics_step;
+  const fn = globalThis.__game_physics_step;
   return typeof fn === 'function' ? fn : null;
 }
 
@@ -273,7 +274,7 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
  * bindings are missing — terrain just isn't solid until the host carries them.
  */
 export function registerHeightfield(field: Heightfield): void {
-  const register = globalThis.__hmsc_register_heightfield;
+  const register = globalThis.__game_physics_register_heightfield;
   if (typeof register !== 'function') return;
   register(
     field.slot,
@@ -293,7 +294,7 @@ export function registerHeightfield(field: Heightfield): void {
 
 /** Drop every registered heightfield (world reload). */
 export function clearHeightfields(): void {
-  const clear = globalThis.__hmsc_clear_heightfields;
+  const clear = globalThis.__game_physics_clear_heightfields;
   if (typeof clear === 'function') clear();
 }
 

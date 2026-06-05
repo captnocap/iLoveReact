@@ -46,7 +46,7 @@ function stepInput(overrides: Partial<PhysicsStepInput> = {}): PhysicsStepInput 
  *  Reads the SAME slots the Zig host reads; records the wire for inspection. */
 let lastWire: Float32Array | null = null;
 function installFakeHost(): void {
-  globalThis.__hmsc_physics_step = (wire: Float32Array): ArrayBuffer => {
+  globalThis.__game_physics_step = (wire: Float32Array): ArrayBuffer => {
     lastWire = wire;
     const dt = wire[0];
     const gravity = wire[14];
@@ -81,9 +81,9 @@ function installFakeHost(): void {
 }
 
 function removeFakeHost(): void {
-  delete globalThis.__hmsc_physics_step;
-  delete globalThis.__hmsc_register_heightfield;
-  delete globalThis.__hmsc_clear_heightfields;
+  delete globalThis.__game_physics_step;
+  delete globalThis.__game_physics_register_heightfield;
+  delete globalThis.__game_physics_clear_heightfields;
 }
 
 test('a missing host degrades to null, never throws', () => {
@@ -160,8 +160,8 @@ test('over-cap input is rejected at the boundary, not silently truncated', () =>
 
 test('heightfields register with the slot/grid/rotation the host expects', () => {
   const calls: any[][] = [];
-  globalThis.__hmsc_register_heightfield = (...args: any[]) => calls.push(args);
-  globalThis.__hmsc_clear_heightfields = () => calls.push(['clear']);
+  globalThis.__game_physics_register_heightfield = (...args: any[]) => calls.push(args);
+  globalThis.__game_physics_clear_heightfields = () => calls.push(['clear']);
   const heights = new Float32Array([0, 1, 2, 3]);
   GAME_PHYSICS.registerHeightfield({
     slot: 3, originX: 10, originZ: 20, cellSizeMeters: 2, cols: 2, rows: 2,
