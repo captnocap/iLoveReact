@@ -32,7 +32,7 @@ export const DECISIONS: Decision[] = [
   },
   {
     id: 'V2', name: 'Player model: head_lab kit, authored in JS, BAKED into the host', status: 'ruled',
-    ruling: 'The head_lab kit is THE figure stack, outright. Damage zones spell lArm/rArm/lLeg/rLeg (head_lab). Hit volumes are head_lab\'s oriented boxes. AMENDED: head_lab is the AUTHORING system — models are COMPILED (baked) into the host; the per-frame JS evaluation path (buildRigFrame, dyn-geometry, on-the-fly face bakes) is editor/lab preview ONLY, never the game path.',
+    ruling: 'The head_lab kit is THE figure stack, outright (ragdoll.ts per V1: behavior reference only — its implementation is not kept). Damage zones spell lArm/rArm/lLeg/rLeg (head_lab). Hit volumes are head_lab\'s oriented boxes. AMENDED: head_lab is the AUTHORING system — models are COMPILED (baked) into the host; the per-frame JS evaluation path (buildRigFrame, dyn-geometry, on-the-fly face bakes) is editor/lab preview ONLY, never the game path.',
     detail: 'The seeded generators stay — "the variety of life is the right shape"; the bake preserves variety (documents/seeds in, compiled population out). hmsc\'s render3d/humanoid retires; bodylab\'s third solver and the inline parts-arrays (animation_lab/camera_lab/input_bench) are deleted.',
     keywords: ['player model', 'humanoid', 'figure', 'character', 'head_lab', 'hmsc humanoid', 'damage zones', 'hitbox', 'armL', 'lArm', 'capsules', 'boxes', 'bake', 'baked', 'hed', 'body document', 'face', 'clothing', 'variety'],
     retires: ['cart/hmsc/render3d/humanoid/', 'cart/bodylab solveHumanoid', 'inline HUMANOID parts arrays in animation_lab/camera_lab/input_bench'],

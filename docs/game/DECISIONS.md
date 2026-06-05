@@ -274,7 +274,8 @@ Projectile ("bullet") physics remains UNDETERMINED pending the SHOW-ME lab.
 
 **V2 — Player model: the head_lab kit, outright (overrides the consensus lean).**
 `cart/head_lab/{parts.ts, figureRender.tsx, hed.ts, ragdoll.ts}` is THE figure
-stack. Damage-zone spelling: head_lab's `lArm/rArm/lLeg/rLeg`. Hit volumes:
+stack (ragdoll.ts per V1: behavior reference only — its implementation is not
+kept). Damage-zone spelling: head_lab's `lArm/rArm/lLeg/rLeg`. Hit volumes:
 head_lab's oriented boxes. hmsc's `render3d/humanoid/` retires (its consumers
 migrate); bodylab's third solver and the inline parts-array copies
 (animation_lab/camera_lab/input_bench) are deleted.
