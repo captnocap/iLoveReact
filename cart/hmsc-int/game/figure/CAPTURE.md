@@ -100,3 +100,31 @@ re-exports `charactersStream`/`bakeBodyDocument` + the doc types as NAMED
 exports (not a 20th GAME_* door). `stream.test.ts` (6 P4 cases) pins roster
 semantics, schema-evolution tolerance, the deletion-contract round-trip
 through a real on-disk store, undo-as-log-position, and the door.
+
+## The painted-overlay channel (MODELPAINT-0605, 2026-06-05)
+
+THE USER'S RULING, verbatim: "i dont want to paint depth, i want to paint
+their face though, or body parts, is that clear." The coupled color+depth
+face stroke (one .hed layer per stroke, depth ±0.16·strength) is RETIRED —
+/cutout paints color PIXELS; sculpt remains /characters' geometry tool. The
+.hed one-shape coherence law is untouched for SHAPE layers (generated faces,
+features); the painted overlay is a separate, additive color-only channel.
+
+- `body.ts`: `BodyDocument.paint?` — per-part `PaintedOverlay` slots
+  (game/painted.ts: baked cell-grid color layers + the painter's re-editable
+  document held opaque). `applyBodyPaint(doc, part, overlay|null)` is the
+  pure save-path step; removing the last overlay drops the channel, so
+  paint → unpaint is byte-parity. `parseBody` degrades a torn overlay to
+  unpainted, never to a rejected document. Pre-paint documents parse
+  byte-unaffected (pinned).
+- `render.tsx`: `buildPartRender` takes optional `paint` — a painted part's
+  texKey leaves the shared plain-skin bake, content-addressed by the save
+  stamp (`paintedPartTexKey`). `CharacterCaptures` composites the head's
+  overlay where the photo sits (over skin, UNDER the shape layers — the
+  ruled z-order) and mounts one `PaintedOverlaySurface` per painted
+  non-head part. Paintless callers are byte-identical (Embodied.tsx,
+  fenced, passes 4 args and is untouched).
+- NOT DONE HERE (the bake lane's follow-up): `bake.ts`'s BakedTexture does
+  not yet composite overlays into the COMPILED game's textures — the editor
+  preview paths render them; the compile-side composite belongs to the bake
+  capture when texture baking lands. Surfaced, not guessed.

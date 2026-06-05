@@ -57,7 +57,7 @@ export {
 } from './hed';
 export type { HedDocument, HedLayer, HedShape, HedAnimation, FaceStyle } from './hed';
 
-export { buildBody, parseBody, serializeBody } from './body';
+export { applyBodyPaint, buildBody, parseBody, serializeBody } from './body';
 export type { BodyDocument } from './body';
 
 export {
@@ -79,7 +79,7 @@ import {
 import { blendBones, buildSkeleton, offsetBones, placeBones } from './skeleton';
 import { buildRigFrame, buildRigFrameFromBones, DAMAGE_ZONES, damageZoneForBone } from './rig';
 import { animateHed, generateFace, hedDepthGrid, parseHed, serializeHed } from './hed';
-import { buildBody, parseBody, serializeBody } from './body';
+import { applyBodyPaint, buildBody, parseBody, serializeBody } from './body';
 import { JOINT_IDS, RAGDOLL_TUNING, jointsToBones, ragdollHostReady, seedJointsFromBones } from './ragdoll';
 import { bakeBodyDocument, bakeFigure, bakeFigureFromSeed, bakePopulation } from './bake';
 import { charactersStream } from './stream';
@@ -140,6 +140,8 @@ export const GAME_FIGURE = Object.freeze({
   buildBody,
   parseBody,
   serializeBody,
+  // MODELPAINT-0605: /cutout's save path — pixel overlays, color only
+  applyBodyPaint,
   // THE BAKE ENTRY (V2-AMENDED: the game path)
   bake: countedBake,
   bakeBody: bakeBodyDocument,

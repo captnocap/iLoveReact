@@ -9,8 +9,9 @@ import {
   HED_ANIM_FRAMES, HED_GRID_H, HED_GRID_W, animateHed, buildHed, generateFace,
   hedDepthGrid, parseHed, serializeHed,
 } from './hed';
-import { buildBody, parseBody, serializeBody } from './body';
+import { applyBodyPaint, buildBody, parseBody, serializeBody } from './body';
 import { PART_IDS, PROFILE_N, defaultProfile, type PartId } from './shapes';
+import type { PaintedOverlay } from '../painted';
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
 function gridAt(grid: number[], u: number, v: number): number {
@@ -96,6 +97,46 @@ test('.body round-trips, quantizes sculpts, and keeps pre-finger files valid', (
   delete legacy.parts.finger;
   assert(parseBody(JSON.stringify(legacy)) !== null, 'legacy part sets must keep parsing (evolution by addition)');
   assertEqual(parseBody('{"kind":"body","version":1}'), null, 'a body without parts must be rejected');
+});
+
+test('painted overlays are additive: pre-paint documents byte-unaffected, apply round-trips (MODELPAINT-0605)', () => {
+  const sculpts = {} as Record<PartId, number[]>;
+  const profiles = {} as Record<PartId, number[]>;
+  for (const id of PART_IDS) {
+    sculpts[id] = [0];
+    profiles[id] = defaultProfile(id);
+  }
+  const doc = buildBody({
+    skin: '#caa07a', amount: 0.35, headScaleY: 1.2, sculpts, profiles,
+    headLayers: generateFace(11).layers, title: 'paint subject',
+  });
+  // a pre-paint document parses to EXACTLY itself — the channel is invisible
+  // until used (old data unaffected, the ruling's bar)
+  assertEqual(JSON.stringify(parseBody(serializeBody(doc))), JSON.stringify(doc), 'paintless documents are byte-unaffected');
+  assert(!('paint' in doc), 'buildBody never mints the channel');
+
+  const overlay: PaintedOverlay = {
+    version: 1, stamp: 99, cols: 4, rows: 2,
+    layers: [{ color: '#ff0000', cells: [0, 7] }],
+    paintDoc: { kind: 'paint-doc' },
+  };
+  const painted = applyBodyPaint(doc, 'head', overlay);
+  assertEqual(JSON.stringify(doc.paint), undefined, 'apply is pure — the source document never mutates');
+  assertEqual(painted.paint?.head?.stamp, 99, 'the overlay lands on its part');
+  const back = parseBody(serializeBody(painted));
+  assertEqual(JSON.stringify(back?.paint?.head), JSON.stringify(overlay), 'a painted document round-trips its overlay losslessly');
+
+  // a torn overlay degrades to unpainted — never a rejected document
+  const torn: any = JSON.parse(serializeBody(painted));
+  torn.paint.head.cols = 0;
+  const degraded = parseBody(JSON.stringify(torn));
+  assert(degraded !== null, 'a torn overlay must not reject the document');
+  assert(degraded!.paint === undefined, 'the torn overlay degrades away');
+
+  // removal: null deletes the slot; the last removal drops the channel
+  const cleared = applyBodyPaint(painted, 'head', null);
+  assert(!('paint' in cleared), 'removing the last overlay removes the channel (byte-parity with pre-paint)');
+  assertEqual(JSON.stringify(cleared), JSON.stringify(doc), 'paint → unpaint is a perfect round trip');
 });
 
 finish('game/figure/documents');

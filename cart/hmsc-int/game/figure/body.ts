@@ -8,6 +8,7 @@
 // Captured fresh from cart/head_lab/parts.ts's document section (untouched).
 
 import type { HedLayer } from './hed';
+import { validatePaintedOverlay, type PaintedOverlay } from '../painted';
 import {
   LEGACY_PART_IDS, PART_IDS, defaultProfile,
   type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
@@ -30,8 +31,27 @@ export type BodyDocument = {
    *  (the head's face lives in parts.head.layers) + the dragged outline
    *  (PROFILE_N radius samples; absent = the part's preset default). */
   parts: Record<PartId, { sculpt: number[]; layers: HedLayer[]; profile?: number[] }>;
+  /** MODELPAINT-0605 (additive — pre-paint documents stay valid forever):
+   *  per-part pixel-painted color overlays, authored in /cutout. Composited
+   *  in the unwrap stack where the photo sits — UNDER the face's shape
+   *  layers, OVER the skin. Color only; depth never rides this channel
+   *  (the ruling: "i dont want to paint depth"). */
+  paint?: Partial<Record<PartId, PaintedOverlay>>;
   metadata?: { title?: string; createdAt?: number };
 };
+
+/** Set/replace/remove one part's painted overlay — pure, additive (the
+ *  /cutout save path; everything else on the document is untouched). */
+export function applyBodyPaint(doc: BodyDocument, part: PartId, overlay: PaintedOverlay | null): BodyDocument {
+  const paint: Partial<Record<PartId, PaintedOverlay>> = { ...(doc.paint ?? {}) };
+  if (overlay) paint[part] = overlay;
+  else delete paint[part];
+  if (Object.keys(paint).length === 0) {
+    const { paint: _gone, ...rest } = doc;
+    return rest as BodyDocument;
+  }
+  return { ...doc, paint };
+}
 
 export function buildBody(args: {
   skin: string;
@@ -87,6 +107,21 @@ export function parseBody(text: string): BodyDocument | null {
   for (const id of LEGACY_PART_IDS) {
     const part = doc.parts[id];
     if (!part || !Array.isArray(part.sculpt) || !Array.isArray(part.layers)) return null;
+  }
+  // painted overlays (MODELPAINT-0605): keep only the valid ones — a torn
+  // overlay degrades to unpainted, never to a rejected document.
+  if (doc.paint != null) {
+    if (typeof doc.paint !== 'object') {
+      delete doc.paint;
+    } else {
+      const paint: Record<string, unknown> = {};
+      for (const id of PART_IDS) {
+        const overlay = validatePaintedOverlay(doc.paint[id]);
+        if (overlay) paint[id] = overlay;
+      }
+      if (Object.keys(paint).length > 0) doc.paint = paint;
+      else delete doc.paint;
+    }
   }
   return doc as BodyDocument;
 }

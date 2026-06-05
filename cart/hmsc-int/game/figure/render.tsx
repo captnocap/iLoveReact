@@ -27,24 +27,40 @@ import type { BodyRigFrame } from './rig';
 import type { ClothingInstance } from './clothing';
 import type { HedDocument, HedLayer } from './hed';
 import type { V3 } from './math';
+import type { PaintedOverlay } from '../painted';
+import { PaintedOverlayPaint, PaintedOverlaySurface } from '../paintedRender';
 
 export type PartRender = { params: any; dynKey: string; texKey: string };
+
+/** The per-part painted overlays a figure carries (BodyDocument.paint). */
+export type FigurePaint = Partial<Record<PartId, PaintedOverlay>>;
+
+/** A painted part's own texture key — content-addressed by the save stamp
+ *  (a painted part leaves the shared plain-skin bake; MODELPAINT-0605). */
+export function paintedPartTexKey(cartKey: string, skin: string, id: PartId, stamp: number): string {
+  return `${cartKey}.skin.${skin}.${id}.p${stamp}`;
+}
 
 export function buildPartRender(
   doc: HedDocument,
   faceDepth: number[],
   cartKey: string,
   seed: number,
+  /** MODELPAINT-0605 (optional — paintless callers are byte-identical) */
+  paint?: FigurePaint,
 ): Record<PartId, PartRender> {
   const out = {} as Record<PartId, PartRender>;
   const skinTexKey = `${cartKey}.skin.${doc.skin}`;
   for (const id of PART_IDS) {
+    const overlay = paint?.[id];
     out[id] = {
       params: partGlobeParams(id, doc, faceDepth),
       // Dyn-key contract (3d.zig dynSlotLocate): "<slotId>~<version>" — the
       // '~' is REQUIRED or the host silently drops the mesh.
       dynKey: `${cartKey}.${id}~${seed}`,
-      texKey: id === 'head' ? `${cartKey}.head.${seed}` : skinTexKey,
+      texKey: id === 'head'
+        ? (overlay ? `${cartKey}.head.${seed}.p${overlay.stamp}` : `${cartKey}.head.${seed}`)
+        : (overlay ? paintedPartTexKey(cartKey, doc.skin, id, overlay.stamp) : skinTexKey),
     };
   }
   return out;
@@ -91,21 +107,42 @@ export const CharacterCaptures = memo(function CharacterCaptures(props: {
   skinTexKey: string;
   skin: string;
   layers: HedLayer[];
+  /** MODELPAINT-0605: the document's painted overlays. The head's composites
+   *  where the photo sits — over the skin, UNDER the shape layers (the
+   *  ruled z-order); each painted non-head part gets its own capture (its
+   *  texKey diverged from the shared skin bake in buildPartRender). The
+   *  cartKey is required exactly when paint is passed — keys must match. */
+  paint?: FigurePaint;
+  cartKey?: string;
 }) {
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
     [],
   );
+  const headOverlay = props.paint?.head ?? null;
   return (
     <>
       <StaticSurface staticKey={props.headTexKey} style={surfaceStyle}>
         <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin, position: 'relative', overflow: 'hidden' }}>
+          {headOverlay ? <PaintedOverlayPaint overlay={headOverlay} w={UNWRAP_W} h={UNWRAP_H} /> : null}
           <FaceLayerPaint layers={props.layers} />
         </Box>
       </StaticSurface>
       <StaticSurface staticKey={props.skinTexKey} style={surfaceStyle}>
         <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin }} />
       </StaticSurface>
+      {props.paint && props.cartKey
+        ? PART_IDS.filter((id) => id !== 'head' && props.paint![id]).map((id) => (
+            <PaintedOverlaySurface
+              key={`paint-${id}`}
+              staticKey={paintedPartTexKey(props.cartKey!, props.skin, id, props.paint![id]!.stamp)}
+              bg={props.skin}
+              w={UNWRAP_W}
+              h={UNWRAP_H}
+              overlay={props.paint![id]!}
+            />
+          ))
+        : null}
     </>
   );
 });
