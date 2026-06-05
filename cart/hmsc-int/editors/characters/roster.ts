@@ -11,7 +11,6 @@
 import type { LogPosition, Store, StreamHandle } from '../../data';
 import { charactersStream, type CharactersEvent, type CharactersStreamState } from '../../game/figure/stream';
 import type { BodyDocument } from '../../game/figure/body';
-import { editorStore } from '../store';
 
 export type Roster = {
   /** append the authored document (upsert by id) + materialize snapshots */
@@ -50,10 +49,8 @@ export function mintCharacterId(): string {
   return `chr-${Date.now().toString(36)}-${Math.floor(Math.random() * 0xffff).toString(36)}`;
 }
 
-let live: Roster | null = null;
-
-/** The LIVE roster on the tool's one store — route code only (never tests). */
-export function editorRoster(): Roster {
-  if (!live) live = createRoster(editorStore());
-  return live;
-}
+// NOTE: the route no longer rides a roster singleton — it opens the
+// 'characters' channel via editorChannel() and a RouteSession
+// (editors/sessions.ts), so every save is a labeled session commit on the one
+// undo chain. createRoster stays as the headless/testable door (the P4
+// round-trip suite drives it against scratch stores).

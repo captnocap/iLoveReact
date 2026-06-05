@@ -47,10 +47,14 @@ import {
 } from './draft';
 import { generateCharacterDraft } from './generate';
 import { SHAPE_REGIONS, applyRegionValues, regionSignature } from './regions';
-import { editorRoster, mintCharacterId } from './roster';
+import { mintCharacterId } from './roster';
+import { charactersStream, type CharactersEvent, type CharactersStreamState } from '../../game/figure/stream';
+import { editorChannel } from '../store';
+import { editorSessions, type RouteSession } from '../sessions';
+import { PAINT } from '../paint';
 import {
   DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, facePaintDepth, gridFromBytes,
-  headTextureKey, partDynKey, reliefBytesFromGrid, sculptModeValue, skinTextureKey, softenBytes,
+  headTextureKey, partDynKey, reliefBytesFromGrid, sculptModeValue, skinTextureKey,
   type SculptMode,
 } from './paintKit';
 import { ChipRow, RegionSliderRow, SwatchRow } from './controls';
@@ -116,7 +120,10 @@ export function CharactersRoute(props: { onExit: () => void }) {
   );
 
   const paintingRef = useRef(false);
-  const faceStrokeRef = useRef<{ cx: number; cy: number }[]>([]);
+  // the shared painter's input plumbing: gap-free interpolated sculpt dabs
+  // (mirror riding the engine) + min-step vector capture for face strokes
+  const strokeEngineRef = useRef<ReturnType<typeof PAINT.createStrokeEngine> | null>(null);
+  const faceStrokeRef = useRef<ReturnType<typeof PAINT.createVectorStroke> | null>(null);
   const profileDraftRef = useRef<number[] | null>(null);
   const canvasRect = useRef({ x: 0, y: 0, width: EDITOR_W, height: EDITOR_H });
   const orbitRef = useRef<{ x: number; y: number } | null>(null);
@@ -126,9 +133,22 @@ export function CharactersRoute(props: { onExit: () => void }) {
   const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
   const lookRef = useRef({ yaw: 20, pitch: 12 });
 
-  // ── the V20 roster (persistence from version one) ──────────────────────────
-  const roster = useMemo(() => editorRoster(), []);
-  const rosterState = useMemo(() => roster.state(), [roster, rosterRev]);
+  // ── the V20 roster channel + this visit's SESSION (persistence from version
+  // one; every authoring interaction is a labeled commit/note on the one
+  // cross-channel undo chain — the vehicles-route pattern) ───────────────────
+  const live = useMemo(() => {
+    try {
+      const channel = editorChannel(charactersStream);
+      return { channel, session: editorSessions().open('/characters', channel) as RouteSession<CharactersEvent>, error: null as string | null };
+    } catch (e) {
+      return { channel: null, session: null, error: String(e) };
+    }
+  }, []);
+  useEffect(() => () => live.session?.close(), [live]);
+  const rosterState: CharactersStreamState = useMemo(
+    () => live.channel?.state() ?? { characters: {}, order: [] },
+    [live, rosterRev],
+  );
 
   // ── per-part GPU paint surfaces (PART_IDS is constant → stable hook order) ─
   const paints = {} as Record<PartId, PaintableHandle>;
@@ -249,29 +269,25 @@ export function CharactersRoute(props: { onExit: () => void }) {
     return { cx: clamp((sx - r.x) / r.width, 0, 1), cy: clamp((sy - r.y) / r.height, 0, 1) };
   };
 
-  const dab = (sx: number, sy: number) => {
+  // Sculpt dabs ride the shared stroke engine (editors/paint): gap-free
+  // interpolation between pointer samples + pressure→radius + mirror twins
+  // across the front meridian. At the no-pressure fallback the engine's
+  // radius equals `brush` exactly (the hand-off's fidelity law).
+  const dab = (sx: number, sy: number, pressure?: number) => {
+    const engine = strokeEngineRef.current;
+    if (!engine) return;
     const r = canvasRect.current;
     const tx = ((sx - r.x) / r.width) * PAINT_W;
     const ty = ((sy - r.y) / r.height) * PAINT_H;
     const value = sculptModeValue(mode, strength);
-    paints[selPart].paint.circle(tx, ty, brush, value);
-    // symmetry: also dab mirrored across the front meridian (u=0.5)
-    if (mirror) {
-      const mx = PAINT_W - tx;
-      if (Math.abs(mx - tx) > 2) paints[selPart].paint.circle(mx, ty, brush, value);
+    for (const d of engine.move(tx, ty, pressure)) {
+      paints[selPart].paint.circle(d.x, d.y, d.radius, value);
     }
   };
 
   const appendFacePoint = (sx: number, sy: number) => {
     const p = uvFromScreen(sx, sy);
-    const prev = faceStrokeRef.current[faceStrokeRef.current.length - 1];
-    const minStep = Math.max(TUNE.faceStrokeMinStep, brush / PAINT_W * 0.35);
-    if (prev) {
-      const dx = p.cx - prev.cx;
-      const dy = p.cy - prev.cy;
-      if (Math.sqrt(dx * dx + dy * dy) < minStep) return;
-    }
-    faceStrokeRef.current.push(p);
+    faceStrokeRef.current?.add(p.cx, p.cy);
   };
 
   const ensureFace = (): HedDocument => draft.face ?? {
@@ -281,8 +297,8 @@ export function CharactersRoute(props: { onExit: () => void }) {
   };
 
   const commitFaceStroke = () => {
-    const points = faceStrokeRef.current;
-    faceStrokeRef.current = [];
+    const points = faceStrokeRef.current?.points() ?? [];
+    faceStrokeRef.current = null;
     if (points.length === 0) return;
     const rx = clamp(brush / PAINT_W, 0.01, 0.2);
     const ry = clamp(brush / PAINT_H, 0.01, 0.2);
@@ -293,11 +309,12 @@ export function CharactersRoute(props: { onExit: () => void }) {
       color: facePaintColor,
       depth,
       feather: TUNE.faceStrokeFeather,
-      shapes: points.map((p) => ({ kind: 'ellipse' as const, cx: p.cx, cy: p.cy, rx, ry, mirror: mirror && Math.abs(p.cx - 0.5) > 0.01 ? true : undefined })),
+      shapes: points.map((p) => ({ kind: 'ellipse' as const, cx: p.x, cy: p.y, rx, ry, mirror: mirror && Math.abs(p.x - 0.5) > 0.01 ? true : undefined })),
     };
     const doc = ensureFace();
     setDraft((d) => ({ ...d, face: { ...doc, skin: d.skin, amount: d.amount, scaleY: d.headScaleY, layers: doc.layers.concat(layer) } }));
     setStatus(`painted ${points.length} face dabs as one .hed layer`);
+    live.session?.note(`face paint · ${points.length} dabs · ${facePaintColor}`);
   };
 
   const syncGrid = () => {
@@ -310,42 +327,53 @@ export function CharactersRoute(props: { onExit: () => void }) {
     paintingRef.current = true;
     const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
     if (isHead && paintTool === 'face') {
-      faceStrokeRef.current = [];
+      faceStrokeRef.current = PAINT.createVectorStroke(Math.max(TUNE.faceStrokeMinStep, brush / PAINT_W * 0.35));
       appendFacePoint(sx, sy);
     } else {
-      dab(sx, sy);
+      strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: brush, mirrorAxisX: mirror ? PAINT_W / 2 : null });
+      strokeEngineRef.current.begin();
+      dab(sx, sy, Number(e?.pressure) || undefined);
     }
   };
   const onPaintMove = (e: any) => {
     if (!paintingRef.current) return;
     const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
     if (isHead && paintTool === 'face') appendFacePoint(sx, sy);
-    else dab(sx, sy);
+    else dab(sx, sy, Number(e?.pressure) || undefined);
   };
   const onPaintUp = () => {
     if (!paintingRef.current) return;
     paintingRef.current = false;
-    if (isHead && paintTool === 'face') commitFaceStroke();
-    else syncGrid();
+    if (isHead && paintTool === 'face') {
+      commitFaceStroke();
+    } else {
+      strokeEngineRef.current?.end();
+      strokeEngineRef.current = null;
+      syncGrid();
+      live.session?.note(`sculpt stroke · ${mode} · ${brush}px · ${selPart}`);
+    }
   };
 
   const fillAll = () => {
     const value = sculptModeValue(mode, strength);
     paints[selPart].paint.clear(value);
     setPartGrid(selPart, new Array(GRID_W * GRID_H).fill((value - NEUTRAL) * 2));
+    live.session?.note(`fill · ${mode} · ${selPart}`);
   };
 
   const soften = () => {
     const src = paints[selPart].paint.readback();
     if (!src || src.length < PAINT_W * PAINT_H) return;
-    const out = softenBytes(src);
+    const out = PAINT.soften3x3(src, PAINT_W, PAINT_H);
     paints[selPart].paint.upload(out);
     setPartGrid(selPart, gridFromBytes(out));
+    live.session?.note(`soften · ${selPart}`);
   };
 
   const clearStrokes = () => {
     paints[selPart].paint.clear(NEUTRAL);
     setPartGrid(selPart, emptyGrid());
+    live.session?.note(`clear sculpt · ${selPart}`);
   };
 
   const removeLastPaintLayer = () => {
@@ -400,6 +428,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
     if (next) {
       setDraft((d) => ({ ...d, profiles: { ...d.profiles, [selPart]: next } }));
       bumpSeq(selPart);
+      live.session?.note(`outline drag · ${selPart}`);
     }
   };
   const resetOutline = () => {
@@ -431,9 +460,12 @@ export function CharactersRoute(props: { onExit: () => void }) {
   };
 
   const saveToRoster = () => {
+    if (!live.session) { setStatus(`save unavailable — ${live.error ?? 'no session'}`); return; }
     const id = draftId ?? mintCharacterId();
     const doc = draftToDocument(draft, draftName);
-    roster.save(id, doc);
+    // the full V20 deal: the document event on the characters channel + a
+    // labeled session commit marker + fresh snapshots, in one interaction
+    live.session.commit({ kind: 'authored', id, doc }, `${draftName}: saved`);
     setDraftId(id);
     setRosterRev((r) => r + 1);
     setStatus(`saved "${draftName}" to the roster + snapshot (the game's view is fresh)`);
@@ -450,7 +482,8 @@ export function CharactersRoute(props: { onExit: () => void }) {
   };
 
   const removeFromRoster = (id: string) => {
-    roster.remove(id);
+    if (!live.session) return;
+    live.session.commit({ kind: 'removed', id }, `${id}: removed`);
     setRosterRev((r) => r + 1);
     if (draftId === id) setDraftId(null);
     setStatus('removed from the roster (its history stays in the log)');
@@ -565,6 +598,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
       ...d,
       regions: { ...d.regions, [part]: { ...(d.regions[part] ?? {}), [regionId]: Math.abs(value) < 0.01 ? 0 : clamp(value, -1, 1) } },
     }));
+    live.session?.note(`region · ${regionId} ${value.toFixed(2)} · ${part}`);
   };
 
   // ── the surface ────────────────────────────────────────────────────────────

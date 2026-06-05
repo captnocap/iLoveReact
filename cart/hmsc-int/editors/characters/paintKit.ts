@@ -105,26 +105,7 @@ export function reliefBytesFromGrid(g: number[]): Uint8Array {
   return bytes;
 }
 
-/** 3×3 box blur over paint-texture bytes — evens out lumpy hand strokes. */
-export function softenBytes(src: Uint8Array): Uint8Array {
-  const { width: W, height: H } = PAINT_EDITOR_TUNING.paint;
-  const out = new Uint8Array(W * H);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      let sum = 0, n = 0;
-      for (let dy = -1; dy <= 1; dy++) {
-        for (let dx = -1; dx <= 1; dx++) {
-          const yy = y + dy, xx = x + dx;
-          if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-          sum += src[yy * W + xx];
-          n++;
-        }
-      }
-      out[y * W + x] = Math.round(sum / n);
-    }
-  }
-  return out;
-}
+// (softening lives in the shared painter now: PAINT.soften3x3 — editors/paint)
 
 /** The editor's PREVIEW mesh params for a part — the bake recipe extended
  *  with live displacement on every part (see the header note). */

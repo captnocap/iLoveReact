@@ -102,3 +102,29 @@ double-counts), deterministic+varied seeded generation, shape-warped
 outlines, and the full chain author → stream → snapshot → bake through a
 real on-disk store. The stream itself: `game/figure/stream.test.ts` (6).
 JSX surfaces are bundle-verified through the real cart pipeline.
+
+## Adoptions (post-capture, same wave)
+
+- **V23 native camera (da1730e24):** the preview viewport rides the host
+  per-node controller — `<Scene3D.Camera nativeCamera ref>` (static boot
+  props) + `GAME_NATIVE_CAMERA.forNode(id)`; drags send `setInputDeltas`,
+  the view toggle/zoom knob re-send `setOrbit`; per-mousemove yaw/pitch
+  React state is GONE. Per-node because IsoPreview's camera stays mounted
+  beneath every route overlay.
+- **The shared painter (1f1891468, per its CAPTURE hand-off):** sculpt dabs
+  ride `PAINT.createStrokeEngine` (gap-free interpolation + pressure→radius
+  + engine-side mirror; fallback-pressure radius == the brush knob, so the
+  default feel is unchanged), face strokes ride `PAINT.createVectorStroke`,
+  soften rides `PAINT.soften3x3` (paintKit's `softenBytes` deleted).
+  paintKit.ts deliberately does NOT die whole — its sculpt-domain pieces
+  (resolutions, mode values, byte↔grid, `editorPartParams`, keys,
+  `DEPTH_OVERLAY_WGSL`) are figure semantics, not painting (the hand-off's
+  ownership fence). The optional full-`PaintEditor` unwrap upgrade (layers/
+  lasso/undo on face paint) is a model change — seam exists, not taken.
+- **Session history (editors/sessions.ts):** the route opens a
+  `RouteSession` on the `characters` channel via `editorChannel()` (the one
+  store, no double registration — `roster.ts`'s live singleton removed;
+  `createRoster` stays the headless test door). Saves are commit-grade
+  (document event + labeled marker + fresh snapshots); strokes/fill/soften/
+  clear/outline drags/region slides are labeled notes. Pinned by the
+  `paint session` P4 case (7/7).

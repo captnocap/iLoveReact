@@ -14,6 +14,12 @@ import {
 import { SHAPE_REGIONS, applyRegionValues, regionSignature, stampGrid } from './regions';
 import { generateCharacterDraft } from './generate';
 import { createRoster } from './roster';
+import { charactersStream, type CharactersStreamState } from '../../game/figure/stream';
+import { createSessionLog } from '../sessions';
+// the painter's headless module directly — the door also exports the JSX/hook
+// half, which only bundles under the full cart alias set (paint.test.ts does
+// the same)
+import { createStrokeEngine } from '../paint/strokes';
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 
 declare const globalThis: any;
@@ -23,7 +29,9 @@ const ROOT = 'zig-out/game/test-characters-editor';
 function wipeScratch(): void {
   for (const path of [
     `${ROOT}/streams/characters.jsonl`,
+    `${ROOT}/streams/sessions.jsonl`,
     `${ROOT}/snapshots/characters.snapshot.json`,
+    `${ROOT}/snapshots/sessions.snapshot.json`,
   ]) globalThis.__fs_remove?.(path);
 }
 
@@ -149,6 +157,49 @@ test('the roster: save → stream → snapshot; the saved doc bakes (the full ch
   const baked = bakeBodyDocument(restored);
   assertEqual(baked.kind, 'baked-figure', 'the snapshot doc bakes into a figure');
   assert(baked.hitboxes.length > 0, 'the baked figure carries hit volumes');
+});
+
+test('the paint session: strokes note, saves commit — one labeled undo chain', () => {
+  wipeScratch();
+  const store = openStore(ROOT);
+  const channel = store.defineStream(charactersStream);
+  const log = createSessionLog(store);
+  const ses = log.open('/characters', channel);
+
+  // the shared painter's fidelity law the route leans on: at the no-pressure
+  // fallback, a dab's radius IS the brush knob value — and mirror twins land
+  // across the meridian (the route passes mirrorAxisX = PAINT_W / 2)
+  const engine = createStrokeEngine({ brushPx: 14, mirrorAxisX: 96 });
+  engine.begin();
+  const dabs = engine.move(48, 40);
+  assert(dabs.length >= 2, 'a mirrored stroke emits the dab and its twin');
+  assertClose(dabs[0].radius, 14, 1e-9, 'fallback-pressure radius equals the brush knob');
+  assertClose(dabs[1].x, 144, 1e-9, 'the twin lands mirrored across the meridian');
+  engine.end();
+
+  // route behavior: stroke release → note; Save → commit with the document
+  ses.note('sculpt stroke · raise · 14px · torso');
+  const doc = draftToDocument(generateCharacterDraft(777), 'painted-hero');
+  ses.commit({ kind: 'authored', id: 'hero', doc }, 'painted-hero: saved');
+  ses.close();
+
+  const history = log.state();
+  assertEqual(history.order.length, 1, 'one session this visit');
+  const record = history.sessions[history.order[0]];
+  assertEqual(record.route, '/characters', 'the session knows its route');
+  assertEqual(record.commits.map((c) => c.label).join(' | '), 'sculpt stroke · raise · 14px · torso | painted-hero: saved', 'every interaction is a labeled commit, in order');
+  assertEqual(record.commits[0].at, null, 'a stroke note is marker-only (content lands at save)');
+  assert(record.commits[1].at !== null, 'the save carries its content event position');
+  assert(record.closedSeq !== null, 'the session closed');
+
+  // the undo chain: as of the stroke note hero does not exist; as of the save he does
+  assert(!('hero' in channel.stateAt(record.commits[0].seq).characters), 'stateAt(the stroke) predates the save');
+  assertEqual(JSON.stringify(channel.stateAt(record.commits[1].seq).characters.hero), JSON.stringify(doc), 'stateAt(the save) is the saved document');
+
+  // the commit re-materialized the snapshot — the compile's view is fresh
+  const snapshot = openStore(ROOT).loadSnapshot<CharactersStreamState>('characters');
+  assert(snapshot !== null, 'the save left a fresh characters snapshot');
+  assertEqual(JSON.stringify(snapshot!.state.characters.hero), JSON.stringify(doc), 'the snapshot doc is byte-exact');
 });
 
 finish('editors/characters');
