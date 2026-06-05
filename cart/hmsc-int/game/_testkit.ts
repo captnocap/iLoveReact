@@ -50,6 +50,26 @@ export function assertThrows(fn: () => void, message: string): void {
   if (!threw) throw new Error(message);
 }
 
+/** Stub host fns on globalThis (the same dispatch callHost uses) for the body,
+ *  then restore — the P4 idiom for testing wire reads under v8cli, where no
+ *  real host fns exist. */
+export function withHost(stubs: Record<string, unknown>, body: () => void): void {
+  const g = globalThis as Record<string, unknown>;
+  const saved: Record<string, unknown> = {};
+  for (const name of Object.keys(stubs)) {
+    saved[name] = g[name];
+    g[name] = stubs[name];
+  }
+  try {
+    body();
+  } finally {
+    for (const name of Object.keys(stubs)) {
+      if (saved[name] === undefined) delete g[name];
+      else g[name] = saved[name];
+    }
+  }
+}
+
 export function finish(suiteName: string): void {
   let failed = 0;
   for (const testCase of cases) {

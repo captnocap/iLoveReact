@@ -48,6 +48,8 @@ test('the live doors carry their interface, not a grab-bag', () => {
   assertEqual(typeof door.GAME_PHYSICS.step, 'function', 'GAME_PHYSICS.step');
   assertEqual(typeof door.GAME_PATHING.find, 'function', 'GAME_PATHING.find');
   assertEqual(typeof door.GAME_INPUT.createKeyState, 'function', 'GAME_INPUT.createKeyState');
+  assertEqual(typeof door.GAME_INPUT.moveIntent, 'function', 'GAME_INPUT.moveIntent');
+  assertEqual(typeof door.GAME_INPUT.readPointer, 'function', 'GAME_INPUT.readPointer');
   assertEqual(typeof door.GAME_CAMERA.solve, 'function', 'GAME_CAMERA.solve');
   assertEqual(typeof door.GAME_LOOP.scheduleFrame, 'function', 'GAME_LOOP.scheduleFrame');
   assertEqual(typeof door.GAME_COMMANDS.createRegistry, 'function', 'GAME_COMMANDS.createRegistry');

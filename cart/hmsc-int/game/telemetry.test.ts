@@ -14,27 +14,9 @@ import {
   type Counters,
   type FrameRecord,
 } from './telemetry';
-import { assert, assertClose, assertEqual, finish, test } from './_testkit';
+import { assert, assertClose, assertEqual, finish, test, withHost } from './_testkit';
 
-declare const globalThis: Record<string, unknown>;
-
-// ── wire stubs ───────────────────────────────────────────────────────────────
-
-function withHost(stubs: Record<string, unknown>, body: () => void): void {
-  const saved: Record<string, unknown> = {};
-  for (const name of Object.keys(stubs)) {
-    saved[name] = globalThis[name];
-    globalThis[name] = stubs[name];
-  }
-  try {
-    body();
-  } finally {
-    for (const name of Object.keys(stubs)) {
-      if (saved[name] === undefined) delete globalThis[name];
-      else globalThis[name] = saved[name];
-    }
-  }
-}
+// ── wire stubs (withHost — the shared _testkit idiom) ────────────────────────
 
 const FULL_WIRE: Record<string, unknown> = {
   getFps: () => 240,

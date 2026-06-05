@@ -630,6 +630,10 @@
         },
         {
           "kind": "metafileInput",
+          "input": "cart/hmsc-int/game/input.ts"
+        },
+        {
+          "kind": "metafileInput",
           "input": "cart/inspector/bridge.ts"
         },
         {

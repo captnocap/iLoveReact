@@ -85,6 +85,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/input.ts (GAME_INPUT — key/pointer transport)',
+      purpose: ['input', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/input.ts',
+      description:
+        'V7 capture completed (2026-06-04): key/pointer TRANSPORT only — the integrator is the host’s (framework/game/movement.zig integrateHorizontal inside the physics step); the TRANSPORT-ONLY test pins the fence (stateless, |intent| ≤ 1, no step/integrate/velocity/position on the door). Keys: __keydown/__keyup bus → createKeyState held snapshot (case-insensitive; modifiers read from the FLAGS — Shift arrives as truncated sdl:225 with a true shiftKey, the camera_lab lesson; system:blur clears held keys since SDL never delivers the keyup after focus loss — the PaintCanvas idiom). Control contract as data (P2): INPUT_BINDINGS carries hmsc input/controlContract.ts’s 14 actions (implemented/reserved) with wire-true names (jump = ‘space’, run = the shift modifier; WASD only — arrows are dead on this wire, see hazard); actionDown/moveAxes walk the table. moveIntent(axes, yawRadians) ships the camera-relative DIRECTION the committed physics wire takes (stepPhysics intentX/intentZ) — the deliberate, fidelity-pinned JS twin of movement.zig wasdDirection (no V8 binding exists; retires if one ships). Pointer: readPointer (getMouseX/Y/getMouseDown/getMouseRightDown), readPointerDelta (__mouse_delta — the mouse-look feed), setPointerCapture (__mouse_capture, honest transport report), onCursorMove (system:cursor:move). Typing gate: isTextEditing() via __tel_input.focused_id (input.ts is a metafile trigger on the telemetry registry entry so the binding compiles in). availability() names every missing pointer/typing-gate fn (the telemetry.ts honesty idiom). 15 P4 tests green; ambiguities (the wasdDirection twin, the arrow truncation, the cross-door __tel_input wire, aimed-vs-light primary disambiguation) in input.CAPTURE.md.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
       name: 'game/chance.ts (GAME_CHANCE — the ONE odds engine)',
       purpose: ['chance', 'ai_edit', 'maintenance'],
       kind: 'module',
@@ -677,6 +687,15 @@ export const hmsc_int: DocIndex = {
     },
   ],
   hazards: [
+    {
+      name: 'arrow/function/nav keys dead on the __keydown wire (printable collisions)',
+      purpose: ['input', 'host_bridge'],
+      description:
+        'engine.zig packs key events as (mod<<16 | sym & 0xFFFF), truncating 0x4000xxxx SDLK codes into printable ASCII: LEFT arrives as ‘p’, UP ‘r’, RIGHT ‘o’, DOWN ‘q’, F1 ‘:’. Pressing RIGHT-arrow is indistinguishable from typing o. useIFTTT.ts’s SDL_KEY_NAMES arrow/fn/nav entries (keyed 0x4000xxxx) can never match a 16-bit sym — dead code. GAME_INPUT’s bindings table is WASD-only because of this; never alias arrows until the packing is widened.',
+      evidence: ['framework/engine.zig:4170 (sym & 0xFFFF)', 'runtime/hooks/useIFTTT.ts:339-350 (SDL_KEY_NAMES 0x4000xxxx entries vs 16-bit sym)', 'cart/hmsc-int/game/input.CAPTURE.md ambiguity 2'],
+      fix: 'Widen the packing (e.g. mod<<32 | sym — still exact in an f64) in engine.zig + decodeKey; framework rebuild.',
+      severity: 'medium',
+    },
     {
       name: 'AGENTS.md MapCanvas drift',
       purpose: ['maintenance'],
