@@ -510,8 +510,8 @@ historical undo) is the floor — extended:
   pretending otherwise.
 
 **Tier C — accepted by default** (no objection raised). C1's dormant-vs-delete
-choice for Bullet inherits Q1's open item; until ruled, the loud DORMANT banner
-applies.
+choice for Bullet is RULED by R1: KEEP (the game uses the hmsc phys; the
+library stays for clients). The loud DORMANT banner applies.
 
 **V13/V15 — The harness: a fresh rewrite anchored on the internal tool.**
 hmsc-int (the internal tooling) is the most concrete "human has declared where
