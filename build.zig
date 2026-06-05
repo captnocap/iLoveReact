@@ -550,6 +550,7 @@ pub fn build(b: *std.Build) void {
     const has_physics_lab = b.option(bool, "has-physics-lab", "Register __physics_lab_* bindings (host-side demo physics)") orelse false;
     const has_game_physics = b.option(bool, "has-game-physics", "Register __hmsc_*/__game_physics_* bindings (framework/game: the game's host-side physics + movement)") orelse false;
     const has_game_pathing = b.option(bool, "has-game-pathing", "Register __path_*/__game_pathing_* bindings (framework/game: grid A* + lane discipline + motion plans)") orelse false;
+    const has_game_camera = b.option(bool, "has-game-camera", "Register __game_camera_* bindings (framework/game: native per-frame camera controller)") orelse false;
     // has_whisper, has_pg, has_embed, has_doom hoisted earlier (next to their compile/link blocks).
     options.addOption(bool, "has_process", has_process);
     options.addOption(bool, "has_httpsrv", has_httpsrv);
@@ -567,6 +568,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_physics_lab", has_physics_lab);
     options.addOption(bool, "has_game_physics", has_game_physics);
     options.addOption(bool, "has_game_pathing", has_game_pathing);
+    options.addOption(bool, "has_game_camera", has_game_camera);
     options.addOption(bool, "has_pg", has_pg or has_embed);
     options.addOption(bool, "has_embed", has_embed);
     options.addOption(bool, "has_whisper", has_whisper);
@@ -597,6 +599,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/physics_lab.flag", if (has_physics_lab) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_physics.flag", if (has_game_physics) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/game_pathing.flag", if (has_game_pathing) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/game_camera.flag", if (has_game_camera) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/whisper.flag", if (has_whisper) "1\n" else "0\n");
@@ -898,6 +901,33 @@ pub fn build(b: *std.Build) void {
     const run_game_pathing_test = b.addRunArtifact(game_pathing_test);
     const game_pathing_test_step = b.step("test-game-pathing", "Run the game pathing behavior tests");
     game_pathing_test_step.dependOn(&run_game_pathing_test.step);
+
+    // ── Game camera behavior tests (V23, P4) ───────────────────────
+    // Exercises framework/game/camera.zig: Orbit/Aim fidelity against
+    // runtime/cameras reference vectors, retained host-side smoothing, and
+    // walk<->aim interpolation. Pure-math module — no V8/SDL link; the cart
+    // binary gets it only through the gated v8_bindings_game_camera.zig
+    // ingredient.
+    const game_camera_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/camera.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const game_camera_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/game_camera.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    game_camera_test_mod.addImport("game_camera", game_camera_mod_for_tests);
+    const game_camera_test = b.addTest(.{
+        .name = "game-camera-test",
+        .root_module = game_camera_test_mod,
+    });
+    const run_game_camera_test = b.addRunArtifact(game_camera_test);
+    const game_camera_test_step = b.step("test-game-camera", "Run the game camera behavior tests");
+    game_camera_test_step.dependOn(&run_game_camera_test.step);
 
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key

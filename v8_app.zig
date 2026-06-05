@@ -77,6 +77,18 @@ const gpu = if (HEADLESS) struct {
         return 0;
     }
 } else @import("framework/gpu/gpu.zig");
+const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_options.has_game_camera) @import("framework/game/camera.zig") else struct {
+    pub const Solved = struct {};
+    pub fn activeNodeId() u32 {
+        return 0;
+    }
+    pub fn stepActive(_: u32) ?Solved {
+        return null;
+    }
+    pub fn writeNode(_: anytype, _: Solved) void {
+        return;
+    }
+};
 const latches = @import("framework/state/latches.zig");
 const animations = if (HEADLESS) struct {
     pub fn clearAll() void {}
@@ -3557,6 +3569,22 @@ fn appTick(now: u32) void {
     // Must happen BEFORE rebuildTree so the tree reflects the new g_node_by_id.
     drainPendingFlushes();
     if (_probe) std.debug.print("[probe-tick] #{d} after drainPendingFlushes\n", .{_probe_n.v});
+    // V23 native game camera: when a cart explicitly binds a Scene3D.Camera
+    // node, the host owns per-frame solve/smoothing and writes that node's
+    // camera fields before layout/paint. Carts that never call
+    // __game_camera_bind_node stay on the existing JS-props path.
+    const camera_node_id = game_camera.activeNodeId();
+    if (camera_node_id != 0) {
+        if (g_node_by_id.get(camera_node_id)) |camera_node| {
+            if (camera_node.scene3d_camera) {
+                if (game_camera.stepActive(now)) |solved| {
+                    game_camera.writeNode(camera_node, solved);
+                    g_dirty.* = true;
+                }
+            }
+        }
+    }
+    if (_probe) std.debug.print("[probe-tick] #{d} after game_camera.stepActive\n", .{_probe_n.v});
     // Host-side animation tick. Walks the animation registry and writes
     // current values into latches; syncLatchesToNodes then propagates
     // those into node.style. Cart-side `useHostAnimation` registers

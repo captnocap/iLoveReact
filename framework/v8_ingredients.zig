@@ -245,6 +245,13 @@ const v8_bindings_game_physics = if (enabledFor("game_physics")) @import("v8_bin
 const v8_bindings_game_pathing = if (enabledFor("game_pathing")) @import("v8_bindings_game_pathing.zig") else struct {
     pub fn registerGamePathing(_: anytype) void {}
 };
+// The game's camera controller (framework/game/camera.zig, V23): host-side
+// per-frame solve/smoothing/interpolation, __game_camera_* host fns. Gated
+// INGREDIENT — when off, the module is never parsed and Scene3D.Camera keeps
+// its existing declarative JS-props path.
+const v8_bindings_game_camera = if (enabledFor("game_camera")) @import("v8_bindings_game_camera.zig") else struct {
+    pub fn registerGameCamera(_: anytype) void {}
+};
 
 // ── INGREDIENTS ─────────────────────────────────────────────────────
 //
@@ -323,6 +330,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "physics_lab", .required = false, .grep_prefix = "__physics_lab_", .reg_fn = "registerPhysicsLab", .mod = v8_bindings_physics_lab },
     .{ .name = "game_physics", .required = false, .grep_prefix = "__hmsc_", .reg_fn = "registerGamePhysics", .mod = v8_bindings_game_physics },
     .{ .name = "game_pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerGamePathing", .mod = v8_bindings_game_pathing },
+    .{ .name = "game_camera", .required = false, .grep_prefix = "__game_camera_", .reg_fn = "registerGameCamera", .mod = v8_bindings_game_camera },
 };
 
 /// Register every ingredient's host fns into the current V8 context.

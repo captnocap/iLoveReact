@@ -866,6 +866,21 @@
       ],
       "note": "The game's host-side pathing (framework/game/pathing.zig, V5/V18), registered by framework/v8_bindings_game_pathing.zig: grid A* with per-agent cost profiles + flow penalties, lane discipline (trio-center snap + junction apexes, opt-in via kind classes), and deterministic motion plans. Host fns keep their legacy __path_* names (plus honest __game_pathing_* aliases) so cart JS callers keep working. Fires for carts importing runtime/pathing.ts (legacy face) or the cart/hmsc-int/game/pathing.ts door."
     },
+    "game-camera": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "cart/hmsc-int/game/nativeCamera.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-game-camera"
+      ],
+      "v8Bindings": [
+        "game_camera"
+      ],
+      "note": "The game's native host-side camera controller (framework/game/camera.zig, V23), registered by framework/v8_bindings_game_camera.zig: opt-in Scene3D.Camera ownership with Orbit/Aim solves, smoothing, and per-frame node-field writes before the 3D renderer builds matrices. Carts that never call __game_camera_* stay on the existing declarative JS-props camera path."
+    },
     "pg": {
       "shipGate": "pg",
       "triggers": [

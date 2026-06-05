@@ -690,3 +690,16 @@ visible to human and AI alike.)
   capture). Context-tag sessions; every mined token is replayed headless by the
   NPC figure body before entering the dictionary (the verify bot is the
   bouncer); provenance tags forever.
+
+**V23 — Camera runtime: native host-side controller, V7 applied to camera. (Added 2026-06-05.)**
+
+The camera registry ruling (V3/Q3) still stands: the rig vocabulary and reference
+math are the one camera system. The runtime ownership changes: JavaScript is
+transport and parameters; the host owns per-frame camera integration. Movement
+got this in V7; camera gets it here.
+
+Implementation law: JS sends rig parameters, mode changes, and input deltas only
+when they change. Zig holds active camera state, solves Orbit/Aim, smooths and
+interpolates every frame, and writes the existing `Scene3D.Camera` layout fields
+that `gpu/3d.zig` already consumes. The old declarative JS-props camera path
+remains valid for carts that do not explicitly engage the host controller.
