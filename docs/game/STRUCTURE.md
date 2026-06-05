@@ -21,7 +21,9 @@ cart/hmsc-int/
                        GAME_PERCEPTION, GAME_CUTSCENE, GAME_STORY, GAME_MISSIONS,
                        GAME_ACTIVITIES, GAME_COMMANDS, GAME_CHROME, GAME_TELEMETRY,
                        GAME_WORLD (the V4 substrate door — added during the
-                       /test collision integration, commit 2e2fb2643)
+                       /test collision integration, commit 2e2fb2643),
+                       GAME_BUILD (the V24 piece-grammar door — pieces/edits/
+                       catalog/prefabs/markers, added with the build capture)
     loop.ts            frame loop + the ~45/min state tick + event channel (V8)
                        — API stays MINIMAL until the loop-shapes lab rules R3
     camera.ts          registry + aim rig + screenRay picking (V3)
@@ -34,6 +36,10 @@ cart/hmsc-int/
     items/             the items registry + models (V11)
     animation/         DSL semantics today; the RLE/relational format grows here (V6)
     kinds/             tile/prop/NPC/role/landform registries (V4)
+    build/             the V24 piece grammar: kind taxonomy + bake contracts,
+                       WallEdit vocabulary, the catalog (P2), prefabs
+                       (decompose to pieces), WorldMarker semantic overlays —
+                       data + validation; bake emission lands with compile/
     chance.ts          ONE odds engine: breakdown surface + cover input (V9)
     perception.ts      the awareness ladder + consequence hooks (V12)
     cutscene/          the live scene format: one clock, tracks, scrubbing (V16)

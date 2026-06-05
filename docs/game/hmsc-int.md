@@ -372,6 +372,35 @@ DELIBERATELY NOT a 20th `game/index.ts` export — the door list is RULED
 (V17); the question is surfaced to the supervisor, and in-game/ consumers
 import `../world` meanwhile.
 
+## game/build/ — the building piece grammar (V24 capture, 2026-06-04)
+
+The V24 ruling's data layer ("Author by semantic piece. Bake by gameplay
+contract. Skin by catalog" — evidence docs/game/BUILDING-GRAMMAR.md), written
+fresh. Five families behind one door (`game/build/index.ts`, exported as
+`GAME_BUILD` through `game/index.ts` — the 21st door, STRUCTURE list updated
+same commit): `pieces.ts` (the 13-kind taxonomy wall/floor/ramp/stairs/roof/
+pillar/corner/arch/fence/railing/trim/sign/prop, each with a `BakePromise`
+contract DECLARING what a placed piece promises the bake — emission lands
+with compile/), `edits.ts` (the WallEdit vocabulary with per-edit MEANING:
+a doorway is a walk portal, a window is sightline-not-traversal, halfHeight
+is vaultable low cover; `applyWallEdit` is the one composition point),
+`catalog.ts` (the P2 variety tables — theme/material/size/snap/gameplay
+tags; cover speaks `TileCoverHeight` so cover values carry; glass durability
+carries materials.ts health exactly; prop rows reference `propKind` — props
+stay prompt-generated via the items/model pipelines; `validateCatalog`
+enforces the kind contracts and caught its first real table bug during the
+capture), `prefabs.ts` (first-class compositions that DECOMPOSE to semantic
+pieces with effective tags — no opaque blobs; one authoring action to place,
+piece-granular to edit; world-saved prefabs ride the V20 streams),
+`markers.ts` (the addendum-3 WorldMarker semantic-overlay union — path_node/
+trigger/room/portal/interest_point/camera_marker; reconciliation law in the
+types: trigger.event is a V19 command line, camera_marker.shot names an
+existing camera rig, mission markers stay missions' own). ONE MODEL, TWO
+VIEWS honored: nothing in the tables assumes a camera/interaction mode.
+18 P4 meaning-tests green (`build.test.ts`); ambiguities surfaced in
+`game/build/CAPTURE.md`. The Build/Plan mode EDITORS and the bake emission
+are later consumers of this same door.
+
 ## editors/vehicles/ — the vehicle editor route (editors wave, 2026-06-04)
 
 `cart/vehicle_lab`'s authoring UI REMADE ENTIRELY as the `/vehicles` route in

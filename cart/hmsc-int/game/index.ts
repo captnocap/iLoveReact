@@ -61,6 +61,28 @@ export type { CommandOutcome, CommandRegistry, CommandSpec, ScriptResult } from 
 export { GAME_WORLD } from './world';
 export type { GridCell, LandformPlacement, PlacedCell, WorldGridState, WorldSurfaceRegion } from './world';
 
+// The V24 building piece grammar: piece kinds + bake contracts, the WallEdit
+// vocabulary, the catalog (P2), prefabs (decompose to semantic pieces), and
+// the WorldMarker semantic overlays. Data + validation; the bake emission and
+// the Build/Plan mode editors land later behind this same door.
+export { GAME_BUILD } from './build';
+export type {
+  BakePromise,
+  BuildGameplayTags,
+  BuildKindContract,
+  BuildMaterial,
+  BuildPieceDef,
+  BuildPieceKind,
+  BuildPrefabDef,
+  BuildSnapMode,
+  BuildTheme,
+  DecomposedPiece,
+  PrefabPiece,
+  WallEdit,
+  WorldMarker,
+  WorldMarkerType,
+} from './build';
+
 // ── capture-pending doors (V17: the import line is already the right one) ──
 export { GAME_FIGURE, charactersStream, bakeBodyDocument } from './figure';
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';
