@@ -12,7 +12,7 @@ import {
   type NpcFaction,
   type RegardTarget,
 } from './npcs';
-import { assert, assertEqual, report, test } from './testKit';
+import { assert, assertEqual, finish, test } from '../_testkit';
 
 const def = npcKindDefinition;
 const FACTIONS: NpcFaction[] = ['civilian', 'gang', 'police'];
@@ -110,4 +110,4 @@ test('isNpcKind accepts every kind and rejects strangers', () => {
   assertEqual(NPC_KINDS.length, Object.keys(NPC_KIND_DEFINITIONS).length, 'kind list covers the table');
 });
 
-report('kinds/npcs');
+finish('kinds/npcs');

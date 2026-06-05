@@ -7,7 +7,7 @@ import {
   isNpcRole,
   npcRole,
 } from './roles';
-import { assert, assertEqual, report, test } from './testKit';
+import { assert, assertEqual, finish, test } from '../_testkit';
 
 test('unknown role ids never crash — they fall back to none', () => {
   const r = npcRole('some-future-designation');
@@ -68,4 +68,4 @@ test('the table is well-formed and open by data', () => {
   assertEqual(NPC_ROLES.join(','), 'none,personOfInterest,target,informant,witness,contact', 'base role set');
 });
 
-report('kinds/roles');
+finish('kinds/roles');

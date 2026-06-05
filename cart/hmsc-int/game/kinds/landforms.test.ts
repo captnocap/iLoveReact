@@ -14,7 +14,7 @@ import {
   type LandformField,
   type LandformInstance,
 } from './landforms';
-import { assert, assertClose, assertEqual, report, test } from './testKit';
+import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
 const def = (kind: string) => {
   const d = landformKindDefinition(kind);
@@ -211,4 +211,4 @@ test('landformSurfaceTop is baseY + rise, and baseY alone for unknown kinds', ()
   assertEqual(landformSurfaceTop(ghost, 0, 0), 3, 'unknown kind contributes no rise');
 });
 
-report('kinds/landforms');
+finish('kinds/landforms');

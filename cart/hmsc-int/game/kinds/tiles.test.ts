@@ -15,7 +15,7 @@ import {
   tileKindDefinition,
   type TileKind,
 } from './tiles';
-import { assert, assertEqual, report, test } from './testKit';
+import { assert, assertEqual, finish, test } from '../_testkit';
 
 const def = tileKindDefinition;
 
@@ -214,4 +214,4 @@ test('embedded/dev kinds sit on the cell base; surfaces drape the heightfield', 
   }
 });
 
-report('kinds/tiles');
+finish('kinds/tiles');

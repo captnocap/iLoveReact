@@ -8,7 +8,7 @@ import {
   propKindDefinition,
   type PropKind,
 } from './props';
-import { assert, assertEqual, report, test } from './testKit';
+import { assert, assertEqual, finish, test } from '../_testkit';
 
 const def = propKindDefinition;
 
@@ -76,4 +76,4 @@ test('isPropKind accepts every kind and rejects strangers', () => {
   assertEqual(PROP_KINDS.length, Object.keys(PROP_KIND_DEFINITIONS).length, 'kind list covers the table');
 });
 
-report('kinds/props');
+finish('kinds/props');
