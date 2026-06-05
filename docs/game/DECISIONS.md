@@ -254,6 +254,8 @@ ANSWER: its all the same thing to me. we can keep as hmsc-int and build from the
 ## VERDICTS (ruled 2026-06-04 — this is the constitution)
 
 Anything contradicting a verdict is a bug. Open items listed at the bottom.
+Verdicts are numbered by question; V16+ are appended rulings — page order is
+not chronology.
 
 **V1 — Physics is ONE COHERENT SYSTEM, host-side. (REVISED 2026-06-04, second pass.)**
 Original ruling said "two layers"; the user corrected it: the right option is ONE
@@ -537,7 +539,7 @@ heightfields, host pathing + motion plans, animation system, kinds registries,
 lab chrome kit + environment, telemetry + copy-diagnostics, the texture system
 with bake-once discipline.
 
-### Open items — RESOLVED (2026-06-04 second pass)
+### Resolutions (R1–R7) (2026-06-04 second pass)
 
 1. **Bullet (the library): KEEP BOTH, let the client decide.** The game uses the
    hmsc phys, not Bullet. And the verdict on naming is blunt: "physics_lab.zig is
