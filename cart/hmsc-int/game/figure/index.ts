@@ -66,8 +66,11 @@ export {
 } from './ragdoll';
 export type { JointId, RagdollJoints, RagdollConstraint } from './ragdoll';
 
-export { bakeFigure, bakeFigureFromSeed, bakePopulation, partGlobeParams } from './bake';
+export { bakeFigure, bakeFigureFromSeed, bakeBodyDocument, bakePopulation, partGlobeParams } from './bake';
 export type { BakedFigure, BakedPart, BakedTexture, BakeWardrobe } from './bake';
+
+export { charactersStream } from './stream';
+export type { CharactersEvent, CharactersStreamState } from './stream';
 
 import {
   BODY_POSES, BODY_SHAPES, BOTTOMS, CLOTHING, CLOTHING_ACCESSORIES, CLOTHING_SKINS,
@@ -78,7 +81,8 @@ import { buildRigFrame, buildRigFrameFromBones, DAMAGE_ZONES, damageZoneForBone 
 import { animateHed, generateFace, hedDepthGrid, parseHed, serializeHed } from './hed';
 import { buildBody, parseBody, serializeBody } from './body';
 import { JOINT_IDS, RAGDOLL_TUNING, jointsToBones, ragdollHostReady, seedJointsFromBones } from './ragdoll';
-import { bakeFigure, bakeFigureFromSeed, bakePopulation } from './bake';
+import { bakeBodyDocument, bakeFigure, bakeFigureFromSeed, bakePopulation } from './bake';
+import { charactersStream } from './stream';
 
 export const GAME_FIGURE = Object.freeze({
   // the skeleton + posing
@@ -103,8 +107,11 @@ export const GAME_FIGURE = Object.freeze({
   serializeBody,
   // THE BAKE ENTRY (V2-AMENDED: the game path)
   bake: bakeFigure,
+  bakeBody: bakeBodyDocument,
   bakeFromSeed: bakeFigureFromSeed,
   bakePopulation,
+  // the V20 concern (like world/missions/vehicles): authored characters
+  stream: charactersStream,
   // the V1 ragdoll contract (solver = host feature, physics lane)
   ragdoll: Object.freeze({
     hostReady: ragdollHostReady,

@@ -77,3 +77,26 @@ the 25-bone → 6-zone map existed nowhere in head_lab — combat_lab's
 `skeleton.test.ts` 8 · `rig.test.ts` 5 · `documents.test.ts` 5 ·
 `bake.test.ts` 6 — 24 meaning-level cases; `render.tsx` is bundle-verified
 through the real cart pipeline (JSX can't run under v8cli).
+
+## Editors-wave addition (2026-06-04): the V20 `characters` stream + `bakeBodyDocument`
+
+`stream.ts` defines the `characters` concern (the ROSTER: authored
+`BodyDocument` per id + first-authored rail order), following the
+`world`/`missions`/`vehicles` precedent of the stream def living beside its
+system. Events carry the RESULTING document (`authored` upsert / `removed`),
+never the edit verb — sculpt strokes, outline drags, region stamps and
+wardrobe picks are editor-side in `editors/characters/`, so the materializer
+is a dumb upsert and the round-trip author → stream → snapshot → bake is
+exact by construction.
+
+`bake.ts` grows `bakeBodyDocument(doc)` — the ONE BodyDocument → BakedFigure
+adapter (reconstructs the head's face document from the doc's own head part;
+what compile, verify, and the editor's bake trigger all call). Note:
+`.body.heldItem` rides the document but not `BakedFigure` — item resolution
+stays the V11 lane's (ambiguity 5 above, unchanged).
+
+`GAME_FIGURE.stream` + `GAME_FIGURE.bakeBody` carry both; `game/index.ts`
+re-exports `charactersStream`/`bakeBodyDocument` + the doc types as NAMED
+exports (not a 20th GAME_* door). `stream.test.ts` (6 P4 cases) pins roster
+semantics, schema-evolution tolerance, the deletion-contract round-trip
+through a real on-disk store, undo-as-log-position, and the door.

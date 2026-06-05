@@ -144,6 +144,33 @@ export function bakeFigure(
   };
 }
 
+/** A whole-character document → figure: the adapter the characters stream's
+ *  snapshot consumers call (compile, verify, the editor's bake trigger). The
+ *  head's face document is reconstructed from the doc's own head part — the
+ *  one place that mapping exists. NOTE: `.body.heldItem` is carried by the
+ *  document but not by BakedFigure — item resolution is the V11 lane's (see
+ *  CAPTURE.md ambiguity 5). */
+export function bakeBodyDocument(doc: BodyDocument): BakedFigure {
+  const face: HedDocument = {
+    kind: 'hed',
+    version: 1,
+    cols: HED_GRID_W,
+    rows: HED_GRID_H,
+    skin: doc.skin,
+    amount: doc.amount,
+    scaleY: doc.headScaleY,
+    sculpt: doc.parts.head?.sculpt ?? [],
+    layers: doc.parts.head?.layers ?? [],
+    metadata: { title: doc.metadata?.title },
+  };
+  return bakeFigure(face, doc.bodyShape ?? 'neutral', {
+    clothing: doc.clothing,
+    clothingSkin: doc.clothingSkin,
+    accessories: doc.clothingAccessories,
+    bottoms: doc.bottoms,
+  }, { sculpts: doc.parts, title: doc.metadata?.title });
+}
+
 /** Seed → figure, deterministically — the population path (variety preserved:
  *  the same seed always bakes the same citizen). */
 export function bakeFigureFromSeed(
