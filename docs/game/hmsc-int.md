@@ -92,16 +92,39 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 - `TexturePreview.tsx` — one swatch component for both texture kinds (react-authored facade markup vs shader `Effect` with frozen data) — "texture is one concept."
 
 **Routes (under `@reactjit/router`, hot-persistent via `hotKey`)**
-- `/` editor · `/log` `LogView` (in-app tail of the V27 diagnostics/churn channel) · `/textures` `TextureStudio` (155: catalog rail → `ShaderLab` (189: tune named params on a shared base + overlay, **Materialize** freezes data[] into a stored material in the shared 'hmsc' store → joins `allTextures`) · `/assist3d` (below) · `/voxels` `VoxelHybridRoute` (544: a voxel build/mine surface — voxel_stack_demo's pattern grown an export: writes meshes to disk) · `/test` `TestRoute` (~260: walk the staged world — the FIRST real consumer of the `@game` ground floor, rewired 2026-06-04 per `TestRoute.REWIRE.md`: GAME_INPUT key snapshot/WASD contract/moveIntent + GAME_CAMERA Orbit solve + GAME_LOOP frame transport + GAME_FIGURE V2-kit player on the editor-preview render path; remaining `cart/hmsc` reads marked GAP(W-1 world grid / W-2 world render / W-3 game sky) awaiting the world lanes).
+- `/` editor · `/log` `LogView` (in-app tail of the V27 diagnostics/churn channel) · `/textures` `TextureStudio` (155: catalog rail → `ShaderLab` (189: tune named params on a shared base + overlay, **Materialize** freezes data[] into a stored material in the shared 'hmsc' store → joins `allTextures`) · `/assist3d` (below) · `/voxels` `VoxelHybridRoute` (544: a voxel build/mine surface — voxel_stack_demo's pattern grown an export: writes meshes to disk) · `/test` `TestRoute` (~266: walk the staged world — the FIRST real consumer of the `@game` ground floor, rewired 2026-06-04 per `TestRoute.REWIRE.md`; SUBSTRATE-0605 2026-06-05: the embodied drop-in moved to the shared `Embodied.tsx` substrate — this route keeps only its mode layer: the backtick console (live speed owner, teleport adopt-back), the RMB ADS aim opt-in, the `[probe-player-model]` diagnostic).
+- **`Embodied.tsx` — the SHARED EMBODIED SUBSTRATE (SUBSTRATE-0605,
+  2026-06-05).** The drop-in player scene exists exactly once, extracted FROM
+  TestRoute (the USER-VERDICT-hardened lineage) after /build shipped a
+  wholesale copy whose camera never engaged (CAMGONE-0605: module-level
+  `bindFirst` with no `nativeCamera` node) and whose gait was the stale
+  quantized path. `useEmbodiedPlayer(options)` = world grid/colliders/
+  heightfields through GAME_WORLD (mode layers extend via
+  `EmbodiedWorldExtras`), GAME_INPUT key transport, the frame loop
+  (GAME_PHYSICS host step, V7 camera-relative WASD, footing feel, idle-rest
+  epsilon, honest kinematic fallback), the V23 node-bound native camera
+  (`GAME_NATIVE_CAMERA.forNode` on a `<Scene3D.Camera nativeCamera ref>`
+  node; optional ADS aim layer), CAPTURED-MOUSE look (addendum 4: entry/
+  viewport click consumes the mouse via `setPointerCapture`, look rides
+  `readPointerDelta`, a captured click IS the mode layer's `onTap`, Esc
+  releases — no drag heuristics anywhere), the V2 figure + continuous gait.
+  Components: `<EmbodiedCaptures>` / `<EmbodiedScene>` (route 3D as
+  children) / `<EmbodiedMouseSurface>`. Exports `PLAYER_CAMERA` (the one
+  camera tuning truth), `groundColumnTop`, `normalizeYawDegrees`,
+  `PlayerPose`. Pinned by `editors/build/viewport.test.ts` so a per-route
+  embodied copy cannot reappear. The GAP(W-2)/(W-3) markers ride here now.
 - `/build` `editors/build/BuildRoute` — CREATIVE BUILD MODE (V24): build the
-  map WHILE PLAYING. /test's embodied drop-in (V23 native camera, host
-  physics, world colliders) + the V24 builder vocabulary on one surface:
+  map WHILE PLAYING. The shared embodied substrate (which FIXED the launch
+  camera — see CAMGONE above) + the V24 builder vocabulary on one surface:
   crosshair → snap target (`editors/build/snap.ts`, the catalog entry's OWN
-  snap mode) → registry-driven palette → ghost preview → click places (ONE
-  labeled session commit per interaction on the WORLD channel) → E cycles
-  WallEdit on the targeted piece → P-marked pieces clone into a named prefab
-  → stamps decompose to semantic pieces. The world stream's materialized
-  state is the one placed-piece truth. See `editors/build/CAPTURE.md`.
+  snap mode) → registry-driven palette (RULED hotkeys lead the display:
+  1 floor · 2 wall · 3 ramp · 4 roof — USER VERDICT, addendum 2) → ghost
+  preview → captured-mouse click places (ONE labeled session commit per
+  interaction on the WORLD channel; Esc frees the mouse for the palette) →
+  R rotates → E cycles WallEdit on the targeted piece → P-marked pieces
+  clone into a named prefab → stamps decompose to semantic pieces. The
+  world stream's materialized state is the one placed-piece truth. See
+  `editors/build/CAPTURE.md`.
 
 **assist3d/ (AI scene authoring)**
 - `scene.json` is the single source of truth; `MeshSpec` = raw geometry primitive (6 shapes), deliberately NOT a game kind — bridging into placements is a separate step. Three backends in `backends.ts`: `claude_code` (subprocess **writes scene.json itself** via its Write tool), `openai_compat` and `local_ai` (llama.cpp GGUF) call a `set_scene` tool and the **cart** writes the file (plus a fenced-JSON fallback). `useSceneAssistant` hides the difference; `useAssistScene` watches the file; the Objects tab's ASSISTANT category browses the same file. `picking.ts` — screenRay (same unexported-camera-math duplicate family) + **AABB slab pick, not sphere** (sphere fails for flat slabs: camera ends up inside the bounding sphere). `modelHistory.ts` remembers local GGUF paths.
@@ -456,21 +479,29 @@ Numbers in `PLACED_TUNING` (P2). 21 P4 meaning-tests green (`placed.test.ts`).
 ## editors/build/ — Creative Build mode, /build (V24, 2026-06-05)
 
 The user builds the map WHILE PLAYING (BUILDMODE-0605): Fortnite-Creative
-semantics on /test's embodied pattern — a drop-in player (V23 native camera,
-GAME_PHYSICS host step, GAME_WORLD colliders + heightfields) carrying the
-V24 builder vocabulary. Three pieces:
+semantics on the embodied drop-in — since SUBSTRATE-0605 the player (V23
+node-bound native camera, GAME_PHYSICS host step, GAME_WORLD colliders +
+heightfields, captured-mouse look) is the SHARED `cart/hmsc-int/Embodied.tsx`
+substrate, not route code (the original route carried a wholesale TestRoute
+copy whose camera never engaged — CAMGONE-0605). Four pieces:
 
-- `BuildRoute.tsx` — the surface. Crosshair = the solved camera's
-  screen-center axis (the crosshair law); palette = GAME_BUILD's kinds/
-  catalog/prefabs (registry-driven, keys 1-9/0 + [ ] + chips); ghost
+- `BuildRoute.tsx` — the builder layer over `useEmbodiedPlayer` (feeds
+  `EmbodiedWorldExtras`: placed-piece solids + ramp/stairs heightfield
+  slopes; `onFrame`: snap re-resolve; `onTap`: place). Crosshair = the
+  solved camera's screen-center axis (the crosshair law, solved with the
+  substrate-exported `PLAYER_CAMERA` so pick and render agree); palette =
+  GAME_BUILD's kinds/catalog/prefabs (registry-driven; the RULED hotkey
+  order leads the display: 1 floor · 2 wall · 3 ramp · 4 roof — USER
+  VERDICT addendum 2 — then registry order, 0 prefabs, [ ] + chips); ghost
   previews the armed piece (or a whole prefab decomposition) at the snap
-  target; click places; R rotates; E cycles the WallEdit vocabulary on the
-  targeted piece; X removes; P marks → named prefab (`prefabFromPieces`) →
-  the palette's Prefabs category → stamps. Placed pieces RENDER from and
-  COLLIDE through the world stream's materialized state (re-read after
-  every commit — no second copy); ramps/stairs register walkable
-  heightfield slopes after the terrain bake. Live P2 knobs (reach, ghost
-  opacity, ground march) in the in-route tuning panel.
+  target; a CAPTURED-MOUSE click places (addendum 4: the substrate consumes
+  the mouse, a click is always intent, Esc frees it for the palette — the
+  old drag/click slop heuristic is dead); R rotates; E cycles the WallEdit
+  vocabulary on the targeted piece; X removes; P marks → named prefab
+  (`prefabFromPieces`) → the palette's Prefabs category → stamps. Placed
+  pieces RENDER from and COLLIDE through the world stream's materialized
+  state (re-read after every commit — no second copy). Live P2 knobs
+  (reach, ghost opacity, ground march) in the in-route tuning panel.
 - `snap.ts` (P4: `snap.test.ts`, 11) — pure crosshair→snap resolution:
   nearest of piece-face vs ground wins within reach; grid centers on the
   cell, edge pins to the nearer grid line and runs along it, surface mounts
@@ -478,12 +509,17 @@ V24 builder vocabulary. Three pieces:
 - `commits.test.ts` (P4, 3) — the session contract on a real scratch
   store: one placement = ONE labeled commit on the WORLD channel; a stamp
   is ONE commit landing N semantic pieces; an undo point steps back.
+- `viewport.test.ts` (P4, 5) — the SUBSTRATE-0605 consumption-layer proof:
+  the substrate carries the V23 node-bound camera (`nativeCamera ref` +
+  `forNode` + `setInputDeltas`; the CAMGONE `bindFirst` shape banned), BOTH
+  routes consume it with zero route-local embodied code, capture-mode look
+  is pinned (no drag heuristics), and the ruled 1/2/3/4 hotkeys lead.
 
 ONE MODEL, TWO VIEWS: nothing build-mode-shaped is in the data — placements
 are plain `worldStream` events; '/build' appears only as the session's
-route label. Surfaced design choices (click-slop, global-not-per-map
-pieces, window collision honesty, no-lintel portals, stepped-box ramp
-visuals over true slope collision, overlap allowed) are recorded in
+route label. Surfaced design choices (global-not-per-map pieces, window
+collision honesty, no-lintel portals, stepped-box ramp visuals over true
+slope collision, overlap allowed) are recorded in
 `editors/build/CAPTURE.md`.
 
 ## editors/vehicles/ — the vehicle editor route (editors wave, 2026-06-04)
@@ -729,3 +765,48 @@ file exports (PNG/pixel-icon/.sqi) deliberately absent pending the user's
 export ruling — the stream asset is the in-app landing and carries
 everything a file exporter would need; recipes as LAYER overlays (vs the
 canvas) deliberately not built — per-recipe WGSL surgery, awaits a ruling.
+
+## editors/settings/ + editors/tunables.ts — the grand settings route (SETTINGS-0605, 2026-06-05)
+
+THE USER'S RULING, verbatim: "it would be nice to have a grand settings page
+that shows an event bus for all of these [the routes' session/autosave
+systems], and we need to get all those magic numbers into some route for
+interfacing with." Two pieces:
+
+- `editors/tunables.ts` — **THE P2 interface the constitution promises** ("a
+  constant buried in code that affects game behavior is a bug"). A pure
+  in-memory registry: a tuning module registers its numeric leaves WHERE THE
+  NUMBERS LIVE (dotted path + KnobSpec-shaped min/max/step/precision into its
+  own live table, at module scope); the registry clamps at the boundary (P3)
+  and writes THROUGH the table, so an edit lands in the exact value the
+  route's code reads next frame — no second copy. Persistence is the V20
+  `tuning` stream (STRUCTURE.md's streams list already named it): one
+  set/reset event per knob edit, override map materialized; index.tsx folds
+  the snapshot back over code defaults at shell mount (`applyOverrides`,
+  pending until late registrations — stream order never races module order).
+  `createTunables()` testable door / `editorTunables()` live singleton (the
+  sessions.ts split; no host bindings, so module-scope registration is safe
+  under any test). P4: `editors/tunables.test.ts` (7 cases — write-through
+  round trip, boundary clamps, spec/table drift dies loud, any-order override
+  fold, revision signal, stream materialization, on-disk restart fold).
+- `editors/settings/` — the `/settings` route (Settings nav icon), two
+  surfaces, both READ layers over existing machinery. **SESSION EVENT BUS**:
+  the unified live view of every route's session channel — `bus.ts` is a pure
+  fold over the `sessions` stream's materialized state (every commit/note
+  with route/channel/label, ordered by the one global seq, newest first;
+  per-channel filter chips with commit counts + open-session dots), polled
+  through the existing doors (`editorSessions().state()`/`undoPoint()`,
+  re-render only on movement) — read-only, no second event system, no new
+  persistence. **TUNABLES**: the registry grouped by system, GAME_CHROME
+  knobs editing live, per-knob reset-to-default; every edit is one LABELED
+  commit on this route's own `/settings` session over the `tuning` channel —
+  so turning a knob shows up in the bus beside everyone else's interactions
+  and persists across boots. The page registers its own chrome numbers
+  (`settings-view`) — it eats its own dog food. P4: `bus.test.ts` (5 cases —
+  cross-channel seq ordering against REAL session machinery on a scratch
+  store, row grades, filtering, per-channel rollups, replay identity).
+  Surfaced: wall-clock timestamps would need sessions.ts to fold the stored
+  `at` stamp (the bus shows seq order — what V20 defines); a knob edit does
+  not re-render OTHER mounted routes (they read the live value on their next
+  render). `editors/settings/CAPTURE.md` is the P2 BUG BURNDOWN: every
+  un-migrated magic-number cluster, plus the pane hand-off rows.
