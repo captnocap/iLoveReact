@@ -2,7 +2,7 @@
 
 **Cart file:** `cart/pathing_lab/index.tsx` (single file, ~1,230 lines)
 **Ship:** `./scripts/ship pathing_lab` · Dev: `./scripts/dev pathing_lab` (NOTE: `__path_*` is a Zig binding — the dev host must be REBUILT once after it lands; the cart shows a red banner if `__path_set_grid` is missing)
-**Capability under test:** `framework/v8_bindings_pathing.zig` (`__path_*` host fns) via `runtime/pathing.ts`
+**Capability under test:** the host `__path_*` fns via `runtime/pathing.ts`. CAPTURED (V5, 2026-06-05): the implementation now lives in `framework/game/pathing.zig` behind `framework/v8_bindings_game_pathing.zig` (`v8_bindings_pathing.zig` deleted; the `__path_*` names persist + honest `__game_pathing_*` aliases), and this lab's lane discipline moved HOST-side — see `cart/hmsc-int/game/pathing.CAPTURE.md`.
 **Imports from everywhere (this is the integration cart):** head_lab (`parts`, `ragdoll`, `hed`, `figureRender`), `vehicle_lab` (`buildVehicle`/`makeVehicle`/`VEHICLE_STYLES`/`geometryFor`), hmsc (`world/tileKinds`, `world/traffic`), `runtime/motion.ts`, `runtime/pathing.ts`, `@reactjit/cameras` (`OrbitCamera` + `solveCamera`/`unprojectGround` for click-picking)
 
 ## What it is, in one sentence
@@ -11,7 +11,7 @@ The reference implementation of the **road grammar** (the user-specified, LOCKED
 
 ## Architecture: who owns what
 
-- **Host (Zig, `v8_bindings_pathing.zig`):** the grid (`__path_set_grid`), per-profile tile costs (`__path_set_profile` with laneOffset/againstFlow/crossFlow), the flow table (`__path_set_flows`), A* + waypoint simplification (`__path_find` — returns into reused scratch), grid patches (`__path_fill_rect`/`__path_update_cells`), and a monotone `__path_generation` counter.
+- **Host (Zig, now `framework/game/pathing.zig` via the `v8_bindings_game_pathing.zig` registrar):** the grid (`__path_set_grid`), per-profile tile costs (`__path_set_profile` with laneOffset/againstFlow/crossFlow), the flow table (`__path_set_flows`), A* + waypoint simplification (`__path_find` — returns into reused scratch), grid patches (`__path_fill_rect`/`__path_update_cells`), and a monotone `__path_generation` counter.
 - **`runtime/pathing.ts` (JS face):** typed wrappers + the **disruption test**: every grid patch records a world-space change rect in a bounded ring (64); `pathDisrupted(path, nextIdx)` answers "did any change since my path's generation touch my REMAINING waypoints" — so one dropped barrier re-paths only the agents actually routed through it. Importing this file is what opts the cart into the `pathing` ingredient (metafile gate).
 - **`runtime/motion.ts`:** deterministic motion along a polyline — trapezoidal velocity schedule (corner caps from turn angles → backward brake pass → forward throttle pass → closed-form accel/cruise/brake phases). `sampleMotion(plan, t)` is exact for ANY t: frame-rate independent, rewindable, identical on every machine. Position, speed, accel, and arc-distance (odometry) are pure functions of time; **only interruptions create new state**.
 - **The cart:** world authoring, behavioral cost shaping, lane discipline post-processing, the yield monitor, goal selection, agent state machines, rendering.

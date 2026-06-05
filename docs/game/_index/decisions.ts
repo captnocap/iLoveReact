@@ -55,7 +55,7 @@ export const DECISIONS: Decision[] = [
     id: 'V5', name: 'Pathing/NPC: deterministic-until-game-state-change', status: 'ruled',
     ruling: 'pathing_lab\'s host A* + deterministic motion plans are the START of the real traffic and civilian systems. Doctrine: ALL NPC pathing is deterministic until a game-state change — paths precomputed; the player\'s effect on the world is what invalidates them. Full dynamic NPC state is the goal (combat_lab + pathing_lab are its seeds).',
     keywords: ['pathing', 'traffic', 'npc', 'civilians', 'a*', 'astar', 'motion plans', 'deterministic', 'precomputed', 'road grammar', 'lanes', 'crosswalk', 'pedestrians'],
-    cites: ['framework/v8_bindings_pathing.zig', 'runtime/pathing.ts', 'runtime/motion.ts', 'cart/pathing_lab'],
+    cites: ['framework/game/pathing.zig', 'framework/v8_bindings_game_pathing.zig', 'runtime/pathing.ts', 'runtime/motion.ts', 'cart/pathing_lab'],
   },
   {
     id: 'V6', name: 'Animation: DSL semantics win; format becomes RLE/relational', status: 'ruled',
@@ -132,7 +132,7 @@ export const DECISIONS: Decision[] = [
     id: 'V18', name: 'Game Zig is organized, properly named, and CONDITIONAL all the way through', status: 'ruled',
     ruling: 'Game Zig follows the framework convention: implementation in a proper module home (framework/game/), bindings as thin registrars with honest capability names (v8_bindings_game_physics.zig — not physics_lab; movement out of input_bench). AND the game is a gated INGREDIENT like every other capability: declared in sdk/dependency-registry.json, flipped by the metafile-gate walker when a cart imports the GAME_* ground floor (importing cart/hmsc-int/game/ — the @game alias — is the gate signal), compiled behind has-game* gates in build.zig — never an unconditional addImport. A 2D interface cart pays zero bytes and zero host fns for the game\'s existence. No "cheap dep" carve-outs.',
     keywords: ['zig organization', 'framework structure', 'bindings naming', 'game zig', 'adhoc', 'module home', 'rename', 'v8_bindings', 'conditional', 'ingredient', 'metafile gate', 'dependency registry', 'has-game', 'bundling'],
-    cites: ['framework/v8_bindings_physics_lab.zig', 'framework/v8_bindings_input_bench.zig', 'framework/v8_bindings_pathing.zig', 'sdk/dependency-registry.json'],
+    cites: ['framework/v8_bindings_physics_lab.zig', 'framework/v8_bindings_input_bench.zig', 'framework/v8_bindings_game_pathing.zig', 'sdk/dependency-registry.json'],
   },
   {
     id: 'V19', name: 'The compile is always green and LLM-callable', status: 'ruled',

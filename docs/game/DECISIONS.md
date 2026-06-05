@@ -86,7 +86,7 @@ question is what the GROUND FLOOR commits to for THE game.
 ANSWER: We want C performance, with D and A harmonized. the A system is what we are clearly following for gameplay, the tile system IS the system. we want to juice the fuck out of it so we can have a game map the size of gta vice city
 
 ### Q5. Pathing / traffic
-- **A) Host A\*** — `framework/v8_bindings_pathing.zig` (`__path_*`) +
+- **A) Host A\*** — `framework/game/pathing.zig` via `v8_bindings_game_pathing.zig` (`__path_*`/`__game_pathing_*`; captured out of `v8_bindings_pathing.zig` 2026-06-05) +
   `runtime/pathing.ts` (pre-calculated-until-disrupted) + `runtime/motion.ts`
   (deterministic plans). Proven in pathing_lab with full road grammar.
 - **B) hmsc's current JS pathing** — `cart/hmsc/world/pathing.ts`
@@ -415,7 +415,7 @@ mostly organized (the `v8_bindings_<capability>.zig` convention + `gpu/`,
 `phys/`, `ffi/` subdirs) — EXCEPT the recent game changes, which are ad-hoc.
 The game's Zig follows the same convention as the rest of the framework:
 implementation logic lives in a proper module home (e.g. `framework/game/` —
-physics, movement, pathing already half-exists in `v8_bindings_pathing.zig`),
+physics, movement, pathing already half-exists in the old `v8_bindings_pathing.zig`, since captured into `framework/game/pathing.zig`),
 bindings files are thin registrars with honest capability names
 (`v8_bindings_game_physics.zig`, not `v8_bindings_physics_lab.zig`;
 movement out of `v8_bindings_input_bench.zig`). This executes C1/R1's rename
