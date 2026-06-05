@@ -836,4 +836,32 @@ pub fn build(b: *std.Build) void {
     const run_layout_wrap_test = b.addRunArtifact(layout_wrap_test);
     const layout_wrap_test_step = b.step("test-layout-wrap", "Run the layout wrap unit tests");
     layout_wrap_test_step.dependOn(&run_layout_wrap_test.step);
+
+    // ── Game physics/movement behavior tests (WO-1, P4) ───────────
+    // Exercises framework/game/physics.zig (+ movement.zig via its
+    // re-export) with packed input buffers: jump arc, gravity, ground
+    // collision, heightfield sampling, movement integration. Pure-math
+    // module — no SDL/V8 link. This is a TEST artifact only; the cart
+    // binary gets framework/game/ exclusively through the gated
+    // v8_bindings_game_physics.zig ingredient (V18).
+    const game_physics_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/physics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const game_physics_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/game_physics.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    game_physics_test_mod.addImport("game_physics", game_physics_mod_for_tests);
+    const game_physics_test = b.addTest(.{
+        .name = "game-physics-test",
+        .root_module = game_physics_test_mod,
+    });
+    const run_game_physics_test = b.addRunArtifact(game_physics_test);
+    const game_physics_test_step = b.step("test-game-physics", "Run the game physics/movement behavior tests");
+    game_physics_test_step.dependOn(&run_game_physics_test.step);
 }
