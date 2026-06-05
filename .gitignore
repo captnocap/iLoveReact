@@ -314,3 +314,9 @@ images/
 # hmsc-int, ...). Runtime "disk = truth" state, written every few hundred ms
 # while editing; never commit it, and keep file-trail watchers from churning on it.
 cart/*/sessions/
+
+# V20 persistence content — the CONTENT time machine, never git's (the layer
+# code in cart/hmsc-int/data/*.ts IS tracked; backup story: store.exportBackup
+# or `tar czf streams-backup.tgz cart/hmsc-int/data/streams/`).
+cart/hmsc-int/data/streams/
+cart/hmsc-int/data/snapshots/

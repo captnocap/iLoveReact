@@ -15,6 +15,8 @@ import { err, out } from '../host/log.ts';
 import { spawnSync } from '../host/process.ts';
 
 const GAME_DIR = 'cart/hmsc-int/game';
+/** every root whose *.test.ts suites the verify run owns (game + the V20 data layer) */
+const SUITE_ROOTS = [GAME_DIR, 'cart/hmsc-int/data'];
 const COMPILE_ENTRY = 'cart/hmsc-int/compile/main.ts';
 const VERIFY_DIR = 'cart/hmsc-int/compile/verify';
 const OUT_DIR = 'zig-out/game';
@@ -57,8 +59,9 @@ function compile(root: string): number {
   return 0;
 }
 
-/** Every *.test.ts under game/, recursively — each is a P4 behavior suite. */
-function findTestSuites(root: string, dir: string = GAME_DIR): string[] {
+/** Every *.test.ts under the suite roots, recursively — each is a P4 behavior suite. */
+function findTestSuites(root: string, dir: string): string[] {
+  if (!fsExists(`${root}/${dir}`)) return [];
   const suites: string[] = [];
   for (const name of fsList(`${root}/${dir}`)) {
     const path = `${dir}/${name}`;
@@ -77,10 +80,10 @@ function verify(root: string): number {
 
   // ── the P4 behavior suites (dual-sided testing's TS side) ────────────────
   fsMkdir(`${root}/${TEST_OUT_DIR}`);
-  const suites = findTestSuites(root);
+  const suites = SUITE_ROOTS.flatMap((suiteRoot) => findTestSuites(root, suiteRoot));
   let suitesPassed = 0;
   for (const suite of suites) {
-    const name = suite.slice(GAME_DIR.length + 1).replace(/\//g, '_').replace(/\.test\.ts$/, '.test.js');
+    const name = suite.replace(/^cart\/hmsc-int\//, '').replace(/\//g, '_').replace(/\.test\.ts$/, '.test.js');
     const compiled = `${TEST_OUT_DIR}/${name}`;
     if (!bundle(root, suite, compiled)) {
       err(`[game] suite does not bundle: ${suite}`);

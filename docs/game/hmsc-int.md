@@ -171,3 +171,20 @@ route (ProjectBar FlaskConical button): lab list on the left, the loaded scene
 center, the notes always beside it. Shell stays game-agnostic: the lab list
 crosses in as plain data at the router. The remaining index.tsx→shell/
 inversion is the editors-capture lane.
+
+## The data/ persistence layer (added 2026-06-05, Milestone-0 step 4)
+
+`cart/hmsc-int/data/index.ts` is the V20 layer — `openStore(rootDir)` is the
+only door. Per-concern append-only streams (`data/streams/<name>.jsonl`), one
+TOTAL cross-session undo chain (a global sequence number across all streams;
+an undo point is a log position — `stateAt(seq)` reads as-of, history is never
+rewritten), and materialized snapshots (`data/snapshots/<name>.snapshot.json`,
+stamped with their chain position) — the game/compile loads snapshots, never
+history. The incompleteness guard is in the API: `defineStream` demands the
+log name AND the materializer (initial+apply) in ONE registration — a stream
+without snapshot support cannot be expressed. Stream/snapshot CONTENT is
+gitignored (the content time machine); backup story = `store.exportBackup()`
+(streams + manifest) or tar of `data/streams/`. Host gap flagged: no
+`__fs_append` binding yet, so appends are read+concat+write (semantically
+append-only; the reader tolerates a torn trailing line). P4 suite
+`data/data.test.ts` rides `rjit game verify` (suite roots: game/ + data/).

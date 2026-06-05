@@ -37,6 +37,15 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'data/index.ts (the V20 store)',
+      purpose: ['persistence', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/data/index.ts',
+      description:
+        'The V20 persistence layer — openStore(rootDir) is the only door. Per-concern append-only streams (data/streams/<name>.jsonl), ONE total cross-session undo chain (global seq across all streams; an undo point is a log position — stateAt(seq) reads as-of, history never rewrites), materialized snapshots stamped with their chain position (the game/compile loads snapshots, never history). The incompleteness guard is the API: defineStream demands name AND initial+apply in one registration. Content gitignored; backup = exportBackup() (streams + manifest). Host gap: no __fs_append binding yet → read+concat+write (reader tolerates a torn trailing line). P4 suite data/data.test.ts rides rjit game verify.',
+      status: 'live',
+    },
+    {
       name: 'index.tsx',
       purpose: ['world_gen', 'ui', 'persistence'],
       kind: 'module',

@@ -5170,6 +5170,7 @@ ${entry}
     run: () => run11
   });
   var GAME_DIR = "cart/hmsc-int/game";
+  var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data"];
   var COMPILE_ENTRY = "cart/hmsc-int/compile/main.ts";
   var VERIFY_DIR = "cart/hmsc-int/compile/verify";
   var OUT_DIR = "zig-out/game";
@@ -5208,7 +5209,8 @@ ${entry}
     out(`[game] compiled ${COMPILE_ENTRY} -> ${HEADLESS_BUNDLE}`);
     return 0;
   }
-  function findTestSuites(root, dir = GAME_DIR) {
+  function findTestSuites(root, dir) {
+    if (!fsExists(`${root}/${dir}`)) return [];
     const suites = [];
     for (const name of fsList(`${root}/${dir}`)) {
       const path = `${dir}/${name}`;
@@ -5224,10 +5226,10 @@ ${entry}
       return 1;
     }
     fsMkdir(`${root}/${TEST_OUT_DIR}`);
-    const suites = findTestSuites(root);
+    const suites = SUITE_ROOTS.flatMap((suiteRoot) => findTestSuites(root, suiteRoot));
     let suitesPassed = 0;
     for (const suite of suites) {
-      const name = suite.slice(GAME_DIR.length + 1).replace(/\//g, "_").replace(/\.test\.ts$/, ".test.js");
+      const name = suite.replace(/^cart\/hmsc-int\//, "").replace(/\//g, "_").replace(/\.test\.ts$/, ".test.js");
       const compiled = `${TEST_OUT_DIR}/${name}`;
       if (!bundle(root, suite, compiled)) {
         err(`[game] suite does not bundle: ${suite}`);
