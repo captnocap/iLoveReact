@@ -175,11 +175,12 @@ is the capture done wrong.
 | hmsc-int ShaderLab/TextureStudio/materials | editors/materials/                        |
 | combat_lab / pathing_lab / ragdoll_lab / planet_run scenes | labs/<name>.tsx (rebuilt on @game, with notes) |
 | lab Chip/Knob/panel + skybox/lights re-rolls | game/chrome/                            |
-
 | hmsc commands/registry.ts (console commands)| game/commands/ + editors/console/ — and doubles as the V19 test scripting surface |
 
 What does NOT move: `runtime/` and `framework/` stay platform (the registry,
-primitives, workspace, geometries — game/ consumes them).
+primitives, workspace, geometries — game/ consumes them). The Effect/StaticSurface
+texture system (V14) stays platform-side in `runtime/`; game/ consumes it with
+the bake-once discipline — it gets no `game/` home.
 
 **`cart/hmsc` is an EXTRACTION SURFACE (ruled).** Everything goes into one
 thing: hmsc-int. The playable hmsc is a capture source exactly like the labs —
