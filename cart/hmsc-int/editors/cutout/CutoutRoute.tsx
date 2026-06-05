@@ -32,6 +32,7 @@ import { allTextures, textureById } from '../../../hmsc/render3d/textures';
 import { saveCustomTexture, useCustomTextures } from '../../../hmsc/render3d/customTextures';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
+import { editorTunables } from '../tunables';
 import {
   PAINT, usePaintEditor, PaintSurface, PaintQuad,
   type Dims, type GraySource, type PaintDocument, type PaintSession,
@@ -54,15 +55,27 @@ const { Chip } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
 
 // The route's own view tuning (P2) — chrome sizes only, never paint behavior
-// (paint behavior lives in editors/paint/tuning.ts).
-const VIEW = Object.freeze({
+// (paint behavior lives in editors/paint/tuning.ts). SETTINGS-0605: the
+// numeric leaves register into THE P2 registry below (same values, now
+// /settings-editable; the registry writes through, so no freeze).
+const VIEW = {
   railWidth: 216,
   headerHeight: 46,
   swatch: 34,
   nameWidth: 150,
   draftDebounceMs: 600,
   sessionsDir: 'cart/hmsc-int/sessions',
-} as const);
+};
+editorTunables().register({
+  system: 'cutout-view', route: '/cutout', table: VIEW,
+  specs: {
+    railWidth: { label: 'rail px', min: 140, max: 420, step: 4, precision: 0 },
+    headerHeight: { label: 'header px', min: 32, max: 90, step: 2, precision: 0 },
+    swatch: { label: 'swatch px', min: 16, max: 96, step: 2, precision: 0 },
+    nameWidth: { label: 'name px', min: 80, max: 320, step: 5, precision: 0 },
+    draftDebounceMs: { label: 'draft ms', min: 100, max: 5000, step: 100, precision: 0 },
+  },
+});
 
 /** One working target: what's on the canvas right now. A fresh `docId` is a
  *  new library entry; reopening a saved document keeps its id so re-saves
