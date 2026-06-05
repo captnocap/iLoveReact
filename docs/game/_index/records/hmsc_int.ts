@@ -15,7 +15,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/index.ts',
       description:
-        'THE ONLY DOOR (V17): all 19 standard GAME_* exports. Live at milestone-0: GAME_PHYSICS (typed wire over the honest __game_physics_* bindings, v8_bindings_game_physics.zig; no fallback to the legacy __hmsc_* aliases), GAME_PATHING (over runtime/pathing+motion — still the __path_* names; no honest alias yet), GAME_INPUT (transport only, V7), GAME_CAMERA (pure side of @reactjit/cameras), GAME_LOOP (clocks only, NO loop API — R3), GAME_COMMANDS (the V19 scripting surface), GAME_KINDS (the five kind tables), GAME_VEHICLE (V10 VehicleDoc + buildVehicle + semantic part vocabulary). The rest export { status: "capture-pending" }. @game bundler alias (cli/cart/bundle.ts) = the V18 metafile-gate signal. P4 *.test.ts beside every family, run under tools/v8cli.',
+        'THE ONLY DOOR (V17): all 19 standard GAME_* exports. Live at milestone-0: GAME_PHYSICS (typed wire over the honest __game_physics_* bindings, v8_bindings_game_physics.zig; no fallback to the legacy __hmsc_* aliases), GAME_PATHING (over runtime/pathing+motion — still the __path_* names; no honest alias yet), GAME_INPUT (transport only, V7), GAME_CAMERA (pure side of @reactjit/cameras, incl. the V3-graduated Aim rig + R7 screenRay), GAME_LOOP (clocks only, NO loop API — R3), GAME_COMMANDS (the V19 scripting surface), GAME_KINDS (the five kind tables), GAME_VEHICLE (V10 VehicleDoc + buildVehicle + semantic part vocabulary). The rest export { status: "capture-pending" }. @game bundler alias (cli/cart/bundle.ts) = the V18 metafile-gate signal. P4 *.test.ts beside every family, run under tools/v8cli.',
       status: 'live',
     },
     {
@@ -102,6 +102,16 @@ export const hmsc_int: DocIndex = {
       description:
         'V10 capture (2026-06-05): vehicle_lab\'s reusable system REWRITTEN fresh behind the game door (reference untouched; authoring UI deliberately out of scope for editors/vehicles/). Captures VehicleDoc, makeVehicle(seed), buildVehicle(doc, actions), 18 semantic VehiclePartId entries, 8 styles, 4 roles, 5 pose DSL presets, sparse damage map, material metadata, explicit hitboxes, critical parts, named anchors, service liveries, and action-driven wheel/steer/bounce/brake transforms. Renderer dependencies dropped at the boundary: meshes carry kind+params, not Geometry imports. P4 suite sweeps 64 style/role/gas cases and asserts the tables\' meaning; CAPTURE.md records dropped UI and scale/material/animation ambiguities.',
       dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
+      name: 'game/camera.ts (GAME_CAMERA — the camera door)',
+      purpose: ['camera', 'interaction', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/camera.ts',
+      description:
+        'V3 capture (2026-06-05): the game-facing door over @reactjit/cameras — the ruled split keeps the registry in runtime/ and GRADUATES the two combat pieces INTO it. runtime/cameras/rigs/aim.ts = combat_lab\'s ADS over-the-shoulder rig REWRITTEN fresh as a first-class CameraDef (shoulder-shifted crouch-aware pivot, genuinely pitched axis — the aim-ceiling fix; degrees, + = up per registry convention; reference radian clamps carried bit-exact through DEG; aimPivot exported for the game-side camera-collision clamp, which needs physics and stays out). runtime/cameras/unproject.ts now owns the canonical screenRay (R7) with unprojectGround as a consumer; the two active-cart hand-rolls (assist3d/picking.ts, VoxelHybridRoute.tsx) re-pointed. Door = solve/screenRay/unprojectGround/aimPivot/rigs(8)/modifiers, all pure (headless verify solves cameras with no React). The crosshair law carried as contract: fire ray = the solved camera\'s screen-center axis, never raw yaw/pitch trig. Fidelity: 1,728-case Aim sweep + 150-case screenRay sweep identical to verbatim reference transcriptions; 13 P4 tests. Ambiguities (yaw-convention fork vs lookForward, pivot-Y generalization, clamp-in-solve) in camera.CAPTURE.md. References untouched.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts', 'runtime/cameras/'],
       status: 'live',
     },
     {
@@ -481,7 +491,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/assist3d/picking.ts',
       description:
-        'screenRay (same unexported-camera-math duplicate family) + AABB slab pick, not sphere (sphere fails for flat slabs — the camera ends up inside the bounding sphere).',
+        'AABB slab pick, not sphere (sphere fails for flat slabs — the camera ends up inside the bounding sphere). Its hand-rolled screenRay was retired by the V3/R7 graduation: the ray now imports from @reactjit/cameras.',
       status: 'lab',
     },
     {
@@ -650,10 +660,10 @@ export const hmsc_int: DocIndex = {
       name: 'screenRay / unexported camera math duplicate family',
       purpose: ['camera', 'interaction', 'math'],
       description:
-        'Each picker re-rolls a ray from the solved render camera (assist3d picking.ts, ObjectInspect3D, ModelViewer) — the recurring unexported camera-math duplicate that wants one canonical unprojectGround.',
+        'Each picker re-rolled a ray from the solved render camera (assist3d picking.ts, VoxelHybridRoute) — RESOLVED by the R7 graduation: screenRay is exported from @reactjit/cameras (unprojectGround is a consumer) and both hand-rolls in this cart now import it.',
       examples: ['hmsc-int'],
-      promoteTo: 'unprojectGround',
-      status: 'promote',
+      promoteTo: 'screenRay exported from @reactjit/cameras',
+      status: 'resolved',
     },
   ],
   hazards: [

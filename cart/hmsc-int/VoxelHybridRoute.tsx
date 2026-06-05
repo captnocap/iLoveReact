@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react';
 import { Box, Col, Pressable, Row, Scene3D, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import * as Geometry from '@reactjit/geometries';
-import { CAMERAS, solveCamera, type Rect } from '@reactjit/cameras';
+import { CAMERAS, solveCamera, screenRay, type Rect } from '@reactjit/cameras';
 import { mkdir, writeFile } from '@reactjit/hooks/fs';
 
 type Vec3 = [number, number, number];
@@ -158,26 +158,6 @@ function detectFaceGroups(blocks: Block[]): FaceGroup[] {
   return groups.sort((a, b) => b.cells.length - a.cells.length || a.id.localeCompare(b.id));
 }
 
-function screenRay(sx: number, sy: number, rect: Rect, cam: { pos: Vec3; target: Vec3; fov: number }): { o: Vec3; d: Vec3 } {
-  const { pos, target, fov } = cam;
-  let fx = pos[0] - target[0], fy = pos[1] - target[1], fz = pos[2] - target[2];
-  const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
-  let sxv = fz, syv = 0, szv = -fx;
-  const sl = Math.hypot(sxv, syv, szv) || 1; sxv /= sl; syv /= sl; szv /= sl;
-  const ux = fy * szv - fz * syv;
-  const uy = fz * sxv - fx * szv;
-  const uz = fx * syv - fy * sxv;
-  const w = Math.max(1, rect.width), h = Math.max(1, rect.height);
-  const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
-  const ndcX = (sx / w) * 2 - 1, ndcY = 1 - (sy / h) * 2;
-  const vx = ndcX * tanHalf * (w / h), vy = ndcY * tanHalf, vz = -1;
-  let dx = vx * sxv + vy * ux + vz * fx;
-  let dy = vx * syv + vy * uy + vz * fy;
-  let dz = vx * szv + vy * uz + vz * fz;
-  const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
-  return { o: pos, d: [dx, dy, dz] };
-}
-
 function rayBlockFace(o: Vec3, d: Vec3, block: Block): { t: number; face: Face } | null {
   const c: Vec3 = [block.x, block.y, block.z];
   let tmin = -Infinity;
@@ -207,7 +187,8 @@ function rayBlockFace(o: Vec3, d: Vec3, block: Block): { t: number; face: Face }
 }
 
 function pickBlockFace(sx: number, sy: number, rect: Rect, cam: { pos: Vec3; target: Vec3; fov: number }, blocks: Block[]): { block: Block; face: Face } | null {
-  const { o, d } = screenRay(sx, sy, rect, cam);
+  // the registry's pixel->ray inverse (R7) — this file carried its own copy before
+  const { origin: o, dir: d } = screenRay(sx, sy, rect, cam);
   let best: { block: Block; face: Face; t: number } | null = null;
   for (const block of blocks) {
     const hit = rayBlockFace(o, d, block);

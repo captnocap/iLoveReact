@@ -1,8 +1,8 @@
 // assist3d/picking.ts — invert the active camera to pick a mesh under the cursor.
 //
-// screenRay reconstructs the exact view basis framework m4lookAt builds (the same
-// math as @reactjit/cameras unprojectGround) and returns the world-space ray.
-// pickMesh intersects that ray against each mesh's axis-aligned bounding box
+// The pixel->ray inverse is the registry's screenRay (R7 graduation: this file
+// used to carry its own copy of the view-basis math). pickMesh intersects that
+// ray against each mesh's axis-aligned bounding box
 // (NOT a sphere): a sphere test fails for wide/thin geometry — a flat slab's
 // bounding sphere can be many units across while the camera orbits closer, so the
 // camera sits INSIDE the sphere and the near hit lands behind the eye, making the
@@ -14,27 +14,7 @@
 // that's plenty for click-rate selection; the Objects tree remains the exact
 // escape hatch for anything geometry overlap makes ambiguous.
 
-import type { Solved, Rect, Vec3 } from '@reactjit/cameras';
-
-export function screenRay(sx: number, sy: number, rect: Rect, cam: Solved): { o: Vec3; d: Vec3 } {
-  const { pos, target, fov } = cam;
-  let fx = pos[0] - target[0], fy = pos[1] - target[1], fz = pos[2] - target[2];
-  const fl = Math.hypot(fx, fy, fz) || 1; fx /= fl; fy /= fl; fz /= fl;
-  let sxv = fz, syv = 0, szv = -fx;            // s = up × f, up = (0,1,0)
-  const sl = Math.hypot(sxv, syv, szv) || 1; sxv /= sl; syv /= sl; szv /= sl;
-  const ux = fy * szv - fz * syv;              // u = f × s
-  const uy = fz * sxv - fx * szv;
-  const uz = fx * syv - fy * sxv;
-  const w = Math.max(1, rect.width), h = Math.max(1, rect.height);
-  const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
-  const ndcX = (sx / w) * 2 - 1, ndcY = 1 - (sy / h) * 2;
-  const vx = ndcX * tanHalf * (w / h), vy = ndcY * tanHalf, vz = -1;
-  let dx = vx * sxv + vy * ux + vz * fx;
-  let dy = vx * syv + vy * uy + vz * fy;
-  let dz = vx * szv + vy * uz + vz * fz;
-  const dl = Math.hypot(dx, dy, dz) || 1; dx /= dl; dy /= dl; dz /= dl;
-  return { o: pos, d: [dx, dy, dz] };
-}
+import { screenRay, type Solved, type Rect, type Vec3 } from '@reactjit/cameras';
 
 // World-space axis-aligned half-extents per geometry (before scale). The ground
 // (a wide thin Box) and a Plane both collapse to a flat slab in Y — exactly what
@@ -82,7 +62,7 @@ export type Pickable = {
 };
 
 export function pickMesh(sx: number, sy: number, rect: Rect, cam: Solved, meshes: Pickable[]): number {
-  const { o, d } = screenRay(sx, sy, rect, cam);
+  const { origin: o, dir: d } = screenRay(sx, sy, rect, cam);
   let best = -1, bestT = Infinity;
   for (let i = 0; i < meshes.length; i++) {
     const m = meshes[i];

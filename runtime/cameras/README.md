@@ -55,6 +55,13 @@ happens once, inside `_util.ts`. Don't pass `Math.PI/4`; pass `45`.
 | `FirstPerson`  | Eye at the subject + `eyeHeight`, looks along `facing`+`pitch`. | `position, eyeHeight, facing, pitch, fov` |
 | `FreeFly`      | Unconstrained debug/spectator; `position` is the eye. | `position, yaw, pitch, fov` |
 | `Cinematic`    | Lerps between keyframed `Solved` waypoints by `t∈[0,1]` (smoothstep). | `waypoints, t, loop` |
+| `Aim`          | Over-the-shoulder ADS (combat_lab graduation): shoulder-shifted, crouch-aware pivot with a *genuinely pitched* axis — full sky authority, no aim ceiling. | `target, yaw, pitch, crouch, shoulderShift, distance, fov` |
+
+`Aim` also exports `aimPivot(params)` — the shoulder pivot the game-side
+camera-collision clamp pulls the eye toward when cover intrudes (the clamp
+itself needs physics, so it stays with the game). The **crosshair law**: fire
+rays must read the solved camera's screen-center axis (`normalize(target - pos)`
+— exactly `screenRay` at the rect center), never raw yaw/pitch trig.
 
 ## Modifiers — composable, pure
 
@@ -87,6 +94,18 @@ const { x, y } = unprojectGround(sx, sy, sceneRect, solved, heightAt);
 `sx,sy` are the click's pixel coords relative to the scene rect (capture the rect
 via `onLayout`, subtract its origin from the event's `.x/.y` — see
 `cart/camera_lab.tsx`). `heightAt` is optional (defaults to flat ground at y=0).
+
+For non-ground hits (mesh AABBs, voxel faces, hitboxes), take the raw ray and
+intersect it yourself — `unprojectGround` is just one consumer:
+
+```ts
+import { screenRay } from '@reactjit/cameras';
+
+const { origin, dir } = screenRay(sx, sy, sceneRect, solved);
+// intersect origin + t·dir against whatever is pickable
+```
+
+This is THE canonical pixel→ray (R7) — don't re-roll the view-basis math.
 
 ## Adding a rig
 

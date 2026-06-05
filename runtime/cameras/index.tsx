@@ -27,6 +27,7 @@ import { Isometric } from './rigs/isometric';
 import { FirstPerson } from './rigs/firstPerson';
 import { FreeFly } from './rigs/freeFly';
 import { Cinematic } from './rigs/cinematic';
+import { Aim } from './rigs/aim';
 
 // ── Types + per-rig defs (re-exported so carts import everything from here) ──
 export type { Vec3, Rect, Solved, Rig, CameraDef, Modifier } from './types';
@@ -38,9 +39,10 @@ export { Isometric, ISOMETRIC_DEFAULTS, type IsometricParams } from './rigs/isom
 export { FirstPerson, FIRSTPERSON_DEFAULTS, type FirstPersonParams } from './rigs/firstPerson';
 export { FreeFly, FREEFLY_DEFAULTS, type FreeFlyParams } from './rigs/freeFly';
 export { Cinematic, CINEMATIC_DEFAULTS, SHOTS, type CinematicParams, type Shot, type Subject } from './rigs/cinematic';
+export { Aim, AIM_DEFAULTS, aimPivot, type AimParams } from './rigs/aim';
 
 export { sway, shake } from './modifiers';
-export { unprojectGround } from './unproject';
+export { screenRay, unprojectGround, type ScreenRay } from './unproject';
 
 // ── The spine: resolve a rig + params (+ modifiers) to a Solved ──────────────
 // Lives in ./solve.ts (a pure, React-free home) so game logic and headless
@@ -64,11 +66,12 @@ export const IsometricCamera = (p: any) => <CameraRig rig={Isometric} {...p} />;
 export const FirstPersonCamera = (p: any) => <CameraRig rig={FirstPerson} {...p} />;
 export const FreeFlyCamera = (p: any) => <CameraRig rig={FreeFly} {...p} />;
 export const CinematicCamera = (p: any) => <CameraRig rig={Cinematic} {...p} />;
+export const AimCamera = (p: any) => <CameraRig rig={Aim} {...p} />;
 
 // The registry, keyed by id — for tooling, debug panels, and rig-switcher UIs
 // that pick a CameraDef by name (e.g. CAMERAS[mode].solve for picking).
 export const CAMERAS: Record<string, CameraDef> = {
-  Orbit, Follow, TopDown, Isometric, FirstPerson, FreeFly, Cinematic,
+  Orbit, Follow, TopDown, Isometric, FirstPerson, FreeFly, Cinematic, Aim,
 };
 
 // ── Smoothing hook (state, so not a pure modifier) ───────────────────────────
