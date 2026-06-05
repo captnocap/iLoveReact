@@ -93,6 +93,15 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 
 **Routes (under `@reactjit/router`, hot-persistent via `hotKey`)**
 - `/` editor · `/log` `LogView` (in-app tail of the perf churn log) · `/textures` `TextureStudio` (155: catalog rail → `ShaderLab` (189: tune named params on a shared base + overlay, **Materialize** freezes data[] into a stored material in the shared 'hmsc' store → joins `allTextures`) · `/assist3d` (below) · `/voxels` `VoxelHybridRoute` (544: a voxel build/mine surface — voxel_stack_demo's pattern grown an export: writes meshes to disk) · `/test` `TestRoute` (~260: walk the staged world — the FIRST real consumer of the `@game` ground floor, rewired 2026-06-04 per `TestRoute.REWIRE.md`: GAME_INPUT key snapshot/WASD contract/moveIntent + GAME_CAMERA Orbit solve + GAME_LOOP frame transport + GAME_FIGURE V2-kit player on the editor-preview render path; remaining `cart/hmsc` reads marked GAP(W-1 world grid / W-2 world render / W-3 game sky) awaiting the world lanes).
+- `/build` `editors/build/BuildRoute` — CREATIVE BUILD MODE (V24): build the
+  map WHILE PLAYING. /test's embodied drop-in (V23 native camera, host
+  physics, world colliders) + the V24 builder vocabulary on one surface:
+  crosshair → snap target (`editors/build/snap.ts`, the catalog entry's OWN
+  snap mode) → registry-driven palette → ghost preview → click places (ONE
+  labeled session commit per interaction on the WORLD channel) → E cycles
+  WallEdit on the targeted piece → P-marked pieces clone into a named prefab
+  → stamps decompose to semantic pieces. The world stream's materialized
+  state is the one placed-piece truth. See `editors/build/CAPTURE.md`.
 
 **assist3d/ (AI scene authoring)**
 - `scene.json` is the single source of truth; `MeshSpec` = raw geometry primitive (6 shapes), deliberately NOT a game kind — bridging into placements is a separate step. Three backends in `backends.ts`: `claude_code` (subprocess **writes scene.json itself** via its Write tool), `openai_compat` and `local_ai` (llama.cpp GGUF) call a `set_scene` tool and the **cart** writes the file (plus a fenced-JSON fallback). `useSceneAssistant` hides the difference; `useAssistScene` watches the file; the Objects tab's ASSISTANT category browses the same file. `picking.ts` — screenRay (same unexported-camera-math duplicate family) + **AABB slab pick, not sphere** (sphere fails for flat slabs: camera ends up inside the bounding sphere). `modelHistory.ts` remembers local GGUF paths.
@@ -417,6 +426,39 @@ the full BakePromise later), rotation-aware prefab stamping
 capture (`prefabFromPieces`/`mintPrefabId`), and the strict authoring
 boundary (`validatePlacement` — the stream materializer stays tolerant).
 Numbers in `PLACED_TUNING` (P2). 21 P4 meaning-tests green (`placed.test.ts`).
+
+## editors/build/ — Creative Build mode, /build (V24, 2026-06-05)
+
+The user builds the map WHILE PLAYING (BUILDMODE-0605): Fortnite-Creative
+semantics on /test's embodied pattern — a drop-in player (V23 native camera,
+GAME_PHYSICS host step, GAME_WORLD colliders + heightfields) carrying the
+V24 builder vocabulary. Three pieces:
+
+- `BuildRoute.tsx` — the surface. Crosshair = the solved camera's
+  screen-center axis (the crosshair law); palette = GAME_BUILD's kinds/
+  catalog/prefabs (registry-driven, keys 1-9/0 + [ ] + chips); ghost
+  previews the armed piece (or a whole prefab decomposition) at the snap
+  target; click places; R rotates; E cycles the WallEdit vocabulary on the
+  targeted piece; X removes; P marks → named prefab (`prefabFromPieces`) →
+  the palette's Prefabs category → stamps. Placed pieces RENDER from and
+  COLLIDE through the world stream's materialized state (re-read after
+  every commit — no second copy); ramps/stairs register walkable
+  heightfield slopes after the terrain bake. Live P2 knobs (reach, ghost
+  opacity, ground march) in the in-route tuning panel.
+- `snap.ts` (P4: `snap.test.ts`, 11) — pure crosshair→snap resolution:
+  nearest of piece-face vs ground wins within reach; grid centers on the
+  cell, edge pins to the nearer grid line and runs along it, surface mounts
+  proud of the face facing outward, free is raw; top faces stack storeys.
+- `commits.test.ts` (P4, 3) — the session contract on a real scratch
+  store: one placement = ONE labeled commit on the WORLD channel; a stamp
+  is ONE commit landing N semantic pieces; an undo point steps back.
+
+ONE MODEL, TWO VIEWS: nothing build-mode-shaped is in the data — placements
+are plain `worldStream` events; '/build' appears only as the session's
+route label. Surfaced design choices (click-slop, global-not-per-map
+pieces, window collision honesty, no-lintel portals, stepped-box ramp
+visuals over true slope collision, overlap allowed) are recorded in
+`editors/build/CAPTURE.md`.
 
 ## editors/vehicles/ — the vehicle editor route (editors wave, 2026-06-04)
 

@@ -56,6 +56,10 @@ cart/hmsc-int/
 
   editors/             the tool surfaces — every authoring UI is an editor route
     world/             paint tiles, place things, preview — the map editor
+    build/             Creative Build mode (/build, V24): embodied third-person
+                       piece placement — crosshair→snap, ghost, click places,
+                       WallEdit cycling, prefab clone/stamp; placements ride
+                       the V20 world stream (LANDED 2026-06-05)
     characters/        the head_lab EDITOR surface (authors what game/figure runs)
     vehicles/          vehicle authoring
     cutout/            the cutout painter — skins/textures painting (the cutout

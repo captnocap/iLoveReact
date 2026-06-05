@@ -184,6 +184,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'editors/build (Creative Build mode, /build)',
+      purpose: ['world_gen', 'ui', 'physics', 'persistence', 'interaction'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/editors/build/BuildRoute.tsx',
+      description:
+        'BUILDMODE-0605 (2026-06-05): build the map WHILE PLAYING — V24 Fortnite-Creative semantics on /test\'s embodied pattern. BuildRoute.tsx = the /test player (V23 native camera, GAME_PHYSICS host step, GAME_WORLD colliders + heightfields) + the builder on one surface: crosshair (the solved camera\'s screen-center axis — the crosshair law) → snap target → registry-driven palette (GAME_BUILD kinds/catalog/prefabs; 1-9/0 keys + [ ] + chips, never a hardcoded list) → ghost preview (piece or whole prefab decomposition at P2 ghost opacity) → click places (drag-vs-click by pixel slop) → R rotates → E cycles the WallEdit vocabulary on the targeted piece → X removes → P marks → named prefab (prefabFromPieces) → palette stamps (decompose per the see-through law). EVERY interaction = ONE labeled session commit on the WORLD channel (editors/sessions); the world stream\'s materialized state is the ONE placed-piece truth (re-read after each commit, no second copy); placed pieces collide via GAME_BUILD.placed.colliders (+ ramp slopes as heightfields after the terrain bake); live P2 knobs (reach/ghost/march) in the in-route tuning panel. snap.ts = pure crosshair→snap resolution (nearest of piece-face vs ground in reach; grid cell-centers, edge pins to the nearer grid line and runs along it, surface mounts proud of the face, free raw; top faces stack storeys, side faces place beside). ONE MODEL, TWO VIEWS: placements are plain worldStream events — \'/build\' exists only as the session\'s route label. P4: snap.test.ts 11 + commits.test.ts 3 (one-commit-per-placement, stamp-is-one-commit, undo-point steps back), editors suite root, verify GREEN. Surfaced (CAPTURE.md): global-not-per-map pieces (V20 scoping question), window/brokenWindow keep collision until a mantle system, no-lintel portals, stepped-box ramp visuals over true slope collision, overlap allowed, edge snap owns its orientation.',
+      dependsOn: ['game/index.ts', 'data/index.ts (the V20 store)', 'editors/sessions.ts (route-scoped session history)', 'game/camera.ts (GAME_CAMERA — the camera door)'],
+      status: 'live',
+    },
+    {
       name: 'game/camera.ts (GAME_CAMERA — the camera door)',
       purpose: ['camera', 'interaction', 'ai_edit', 'maintenance'],
       kind: 'module',

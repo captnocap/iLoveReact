@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'build' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -47,6 +47,9 @@ interface ProjectBarProps {
   onAssist: () => void;
   // Navigate to the /test route — quick in-editor player drop-in.
   onTest: () => void;
+  // Navigate to the /build route — Creative Build mode (editors/build): build
+  // the map while playing; embodied placement of the V24 piece grammar.
+  onBuild: () => void;
   // Navigate to the /textures route — the texture studio (tune a shader recipe,
   // Materialize it into a stored material the registry serves everywhere).
   onTextures: () => void;
@@ -106,6 +109,7 @@ export function ProjectBar(props: ProjectBarProps) {
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
         <IconBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="test" />
+        <IconBtn icon="Hammer" on={props.activeRoute === 'build'} onPress={props.onBuild} title="creative build" />
         <IconBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <IconBtn icon="User" on={props.activeRoute === 'characters'} onPress={props.onCharacters} title="characters" />
         <IconBtn icon="Car" on={props.activeRoute === 'vehicles'} onPress={props.onVehicles} title="vehicles" />

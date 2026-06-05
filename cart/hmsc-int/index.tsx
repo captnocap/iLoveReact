@@ -47,6 +47,7 @@ import { LABS } from './labs';
 import { CharactersRoute } from './editors/characters/CharactersRoute';
 import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
 import { CutoutRoute } from './editors/cutout/CutoutRoute';
+import { BuildRoute } from './editors/build/BuildRoute';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { worldStream } from './game/world/stream';
@@ -763,7 +764,7 @@ function EditorShell() {
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
+  const activeRoute = route.path === '/test' ? 'test' : route.path === '/build' ? 'build' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
@@ -787,6 +788,7 @@ function EditorShell() {
         onNew={() => { setMenuOpen(false); newMap(); }}
         onEditor={() => nav.push('/')}
         onTest={() => nav.push('/test')}
+        onBuild={() => nav.push('/build')}
         onLabs={() => nav.push('/labs')}
         onCharacters={() => nav.push('/characters')}
         onVehicles={() => nav.push('/vehicles')}
@@ -867,6 +869,8 @@ function EditorShell() {
         <Route path="/textures">{() => <TextureStudio />}</Route>
         <Route path="/voxels">{() => <VoxelHybridRoute onExit={() => nav.push('/')} />}</Route>
         <Route path="/test">{() => <TestRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
+        {/* Creative Build mode (editors/build/) — build the map WHILE PLAYING (V24). */}
+        <Route path="/build">{() => <BuildRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
