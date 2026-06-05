@@ -236,7 +236,10 @@ export function VehiclesRoute(props: { onExit: () => void }) {
   }, [build]);
 
   return (
-    <Row style={{ width: '100%', height: '100%', backgroundColor: T.page }}>
+    // Route surfaces must COVER the always-mounted editor (later siblings
+    // paint on top; coverage is the overlay mechanism in this shell):
+    // absolute full-area + opaque bg, exactly like LabsRoute/CharactersRoute.
+    <Row style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', backgroundColor: T.page }}>
       <Col style={{ width: 390, height: '100%' }}>
         <ScrollView style={{ flexGrow: 1, height: 100 }}>
           <Col style={{ padding: 14, gap: 10 }}>
