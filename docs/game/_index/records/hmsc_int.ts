@@ -65,6 +65,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/perception.ts (GAME_PERCEPTION — the detective loop)',
+      purpose: ['perception', 'npc', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/perception.ts',
+      description:
+        'V12 capture (2026-06-04): combat_lab PRODUCES, scape consequences CONSUME — the awareness ladder as a pure step (FoV-cone vision, exposure×proximity/reactionSeconds fill, tile-noise hearing run16/walk8/crouch3.5m × tile noise, gunshot 40m fixed, thresholds 0.33/0.66/1.0 + dwells + 0.12/s decay, stimulus vs confirmed-only lastKnown, terminal by kind, single-step cascade) emitting inert consequence-hook events (spooked/alerted/hostile/panicked/sightingConfirmed/lostTrail/calmed) for story/missions; scape vocabulary (WitnessMemory, the Case, 5-axis Suspicion, computeNotoriety) + the perceivedChance display warp (the lie, never the dice). awarenessForChance closes the chance awareness seam (P2 table). All knobs in PERCEPTION_TUNING. Fidelity: 14,412 cases identical (warp+bias+notoriety); ladder constants line-verified (inline-React reference not importable). 22 P4 tests. FIRST-CUT curves (witnessCertainty, signature weights, visualHeatPerReport) surfaced in perception.CAPTURE.md. References untouched.',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts', 'game/kinds (GAME_KINDS registries)'],
+      status: 'live',
+    },
+    {
       name: 'game/chance.ts (GAME_CHANCE — the ONE odds engine)',
       purpose: ['chance', 'ai_edit', 'maintenance'],
       kind: 'module',
