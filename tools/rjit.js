@@ -1262,10 +1262,41 @@
     }
     return null;
   }
+  var KNOWN_GEOMETRY_IDS = new Set(Object.keys(GEOMETRIES));
   function geometryDefId(node, ts) {
     if (ts.isIdentifier(node)) return node.text;
     if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) return node.name.text;
     return null;
+  }
+  function collectGeometryAliases(sf, ts) {
+    const aliases = /* @__PURE__ */ new Map();
+    for (const stmt of sf.statements ?? []) {
+      if (ts.isVariableStatement(stmt)) {
+        for (const decl of stmt.declarationList?.declarations ?? []) {
+          if (!ts.isIdentifier(decl.name) || !decl.initializer) continue;
+          const target = geometryDefId(decl.initializer, ts);
+          if (target && target !== decl.name.text) aliases.set(decl.name.text, target);
+        }
+      } else if (ts.isImportDeclaration(stmt)) {
+        const named = stmt.importClause?.namedBindings;
+        if (named && ts.isNamedImports(named)) {
+          for (const spec of named.elements) {
+            const imported = spec.propertyName?.text;
+            if (imported && imported !== spec.name.text) aliases.set(spec.name.text, imported);
+          }
+        }
+      }
+    }
+    return aliases;
+  }
+  function resolveGeometryId(node, ts, aliases) {
+    let id = geometryDefId(node, ts);
+    let hops = 0;
+    while (id && aliases.has(id) && hops < 16) {
+      id = aliases.get(id);
+      hops++;
+    }
+    return id && KNOWN_GEOMETRY_IDS.has(id) ? id : null;
   }
   function isRelativeSpecifier(specifier) {
     return specifier === "." || specifier === ".." || specifier.startsWith("./") || specifier.startsWith("../");
@@ -1330,6 +1361,7 @@
     state.seenFiles.add(normalizedFilename);
     const source = fsRead(normalizedFilename);
     const sf = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const aliases = collectGeometryAliases(sf, ts);
     function visit(node) {
       const opening = ts.isJsxSelfClosingElement(node) ? node : ts.isJsxElement(node) ? node.openingElement : null;
       const tag = opening ? tagName(opening, ts) : null;
@@ -1345,7 +1377,7 @@
           else if (attr.name.text === "params") paramsNode = init.expression;
         }
         if (geomNode && paramsNode) {
-          const defId = geometryDefId(geomNode, ts);
+          const defId = resolveGeometryId(geomNode, ts, aliases);
           const params = extractLiteral(paramsNode, ts);
           if (defId && params.ok && params.value !== null && typeof params.value === "object") {
             const key = defId + "|" + JSON.stringify(params.value, Object.keys(params.value).sort());

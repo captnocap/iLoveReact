@@ -24,6 +24,7 @@
 import { fsExists, fsRead, fsWrite } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 import { parseArgs } from '../host/argv.ts';
+import { GEOMETRIES } from '../../runtime/geometries/index.ts';
 
 // ── TypeScript compiler loader ────────────────────────────────────────────
 // Same pattern classify.ts uses: eval the vendored TypeScript bundle into a
@@ -141,13 +142,63 @@ function tagName(element: any, ts: any): string | null {
   return null;
 }
 
-/** Resolve the geometry def reference to its id. Accepts `Geometry.Box` or
- *  `geometries.Box` (namespace member access) and bare `Box` (the def imported
- *  directly). The id is the property name in either case. */
+/** The geometry ids the bake backend will accept — the same registry
+ *  bake-geometry.ts validates a manifest against. The producer must never
+ *  emit an id outside this set: an unprovable geometry ref is SKIPPED (the
+ *  mesh falls to runtime intern, which is correct), never emitted to fail
+ *  the whole ship downstream. */
+const KNOWN_GEOMETRY_IDS = new Set(Object.keys(GEOMETRIES));
+
+/** Raw geometry-ref name: `Geometry.Box`/`geometries.Box` (namespace member
+ *  access) gives the property name; a bare identifier gives its own text,
+ *  which still needs alias resolution + registry validation by the caller. */
 function geometryDefId(node: any, ts: any): string | null {
   if (ts.isIdentifier(node)) return node.text;
   if (ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.name)) return node.name.text;
   return null;
+}
+
+/** Per-file geometry aliases: top-level `const sphere = Geometry.Sphere`
+ *  (any depth of such chains) and renamed import specifiers
+ *  (`import { Sphere as orb } from ...`). Maps local name -> referenced name;
+ *  resolveGeometryId() follows the chain. */
+function collectGeometryAliases(sf: any, ts: any): Map<string, string> {
+  const aliases = new Map<string, string>();
+  for (const stmt of sf.statements ?? []) {
+    if (ts.isVariableStatement(stmt)) {
+      for (const decl of stmt.declarationList?.declarations ?? []) {
+        if (!ts.isIdentifier(decl.name) || !decl.initializer) continue;
+        const target = geometryDefId(decl.initializer, ts);
+        if (target && target !== decl.name.text) aliases.set(decl.name.text, target);
+      }
+    } else if (ts.isImportDeclaration(stmt)) {
+      const named = stmt.importClause?.namedBindings;
+      if (named && ts.isNamedImports(named)) {
+        for (const spec of named.elements) {
+          const imported = spec.propertyName?.text;
+          if (imported && imported !== spec.name.text) aliases.set(spec.name.text, imported);
+        }
+      }
+    }
+  }
+  return aliases;
+}
+
+/** Resolve a JSX geometry ref to a registry id: follow local alias chains
+ *  (cycle-guarded), then validate against KNOWN_GEOMETRY_IDS. Returns null
+ *  when the ref can't be PROVEN to be a registry def — e.g. a cart-local
+ *  def() geometry (physics_lab's Blade) or an opaque identifier — and the
+ *  caller skips it. This is what keeps a legal cart alias like
+ *  `const sphere = Geometry.Sphere` from emitting the unknown id "sphere"
+ *  and killing the bake. */
+function resolveGeometryId(node: any, ts: any, aliases: Map<string, string>): string | null {
+  let id = geometryDefId(node, ts);
+  let hops = 0;
+  while (id && aliases.has(id) && hops < 16) {
+    id = aliases.get(id)!;
+    hops++;
+  }
+  return id && KNOWN_GEOMETRY_IDS.has(id) ? id : null;
 }
 
 interface ManifestItem { geometry: string; params: Record<string, unknown>; }
@@ -232,6 +283,7 @@ function scanFile(filename: string, ts: any, state: ScanState): void {
 
   const source = fsRead(normalizedFilename);
   const sf = ts.createSourceFile(filename, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const aliases = collectGeometryAliases(sf, ts);
 
   function visit(node: any): void {
     const opening = ts.isJsxSelfClosingElement(node) ? node
@@ -250,7 +302,7 @@ function scanFile(filename: string, ts: any, state: ScanState): void {
         else if (attr.name.text === 'params') paramsNode = init.expression;
       }
       if (geomNode && paramsNode) {
-        const defId = geometryDefId(geomNode, ts);
+        const defId = resolveGeometryId(geomNode, ts, aliases);
         const params = extractLiteral(paramsNode, ts);
         if (defId && params.ok && params.value !== null && typeof params.value === 'object') {
           const key = defId + '|' + JSON.stringify(params.value, Object.keys(params.value as object).sort());
