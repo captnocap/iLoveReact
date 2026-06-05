@@ -200,4 +200,6 @@ hmsc ends as compile/'s OUTPUT (V15), not a hand-written cart.
    from their first version, never retrofitted.
 5. `framework/game/` + gated `v8_bindings_game_*` (parallel worker; wrappers
    re-point when it lands)
-6. First lab rebuilt on the shape (proves the contract end to end)
+6. First lab rebuilt on the shape (proves the contract end to end — the
+   explicit contract-proof exception to V17-LIFECYCLE's after-the-ENTIRE-corpus
+   rule; the rest of the corpus still waits for full capture)

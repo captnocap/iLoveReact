@@ -389,7 +389,10 @@ rewritten as new drop-ins and the old carts are ARCHIVED: locked up and away,
 read-only, the `archive/`/`tsz/` treatment. After that, "make a lab" is ONE
 COHERENT IDEA — there is the lab shape and there is the archive, never an old
 approach and a new one. An agent extending an old lab cart instead of
-capturing it has gone wrong.
+capturing it has gone wrong. (One deliberate carve-out: Milestone 0's
+build-order step 6 rebuilds the FIRST lab early as the contract proof — that
+single early rebuild is the explicit exception to the after-the-ENTIRE-corpus
+rule.)
 
 **V17-TRIAGE (clarified 2026-06-04): some "labs" are dev tooling — they become
 editors/ routes, and capture means REWRITING, never moving files.**
