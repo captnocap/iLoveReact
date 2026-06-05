@@ -15,7 +15,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/index.ts',
       description:
-        'THE ONLY DOOR (V17): all 19 standard GAME_* exports. Live at milestone-0: GAME_PHYSICS (typed wire over the honest __game_physics_* bindings, v8_bindings_game_physics.zig; no fallback to the legacy __hmsc_* aliases), GAME_PATHING (over runtime/pathing+motion — still the __path_* names; no honest alias yet), GAME_INPUT (transport only, V7), GAME_CAMERA (pure side of @reactjit/cameras, incl. the V3-graduated Aim rig + R7 screenRay), GAME_LOOP (clocks only, NO loop API — R3), GAME_COMMANDS (the V19 scripting surface), GAME_KINDS (the five kind tables), GAME_VEHICLE (V10 VehicleDoc + buildVehicle + semantic part vocabulary). The rest export { status: "capture-pending" }. @game bundler alias (cli/cart/bundle.ts) = the V18 metafile-gate signal. P4 *.test.ts beside every family, run under tools/v8cli.',
+        'THE ONLY DOOR (V17): all 19 standard GAME_* exports. Live at milestone-0: GAME_PHYSICS (typed wire over the honest __game_physics_* bindings, v8_bindings_game_physics.zig; no fallback to the legacy __hmsc_* aliases), GAME_PATHING (over runtime/pathing+motion — still the __path_* names; no honest alias yet), GAME_INPUT (transport only, V7), GAME_CAMERA (pure side of @reactjit/cameras, incl. the V3-graduated Aim rig + R7 screenRay; V23 adds the opt-in native host controller in game/nativeCamera.ts), GAME_LOOP (clocks only, NO loop API — R3), GAME_COMMANDS (the V19 scripting surface), GAME_KINDS (the five kind tables), GAME_VEHICLE (V10 VehicleDoc + buildVehicle + semantic part vocabulary). The rest export { status: "capture-pending" }. @game bundler alias (cli/cart/bundle.ts) = the V18 metafile-gate signal. P4 *.test.ts beside every family, run under tools/v8cli.',
       status: 'live',
     },
     {
@@ -135,13 +135,33 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'editors/vehicles (the vehicle editor route)',
+      purpose: ['vehicle', 'ui', 'persistence', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/editors/vehicles/VehiclesRoute.tsx',
+      description:
+        'Editors wave (2026-06-04): cart/vehicle_lab\'s authoring UI REMADE ENTIRELY as the /vehicles route in the one shell (V10/V17-TRIAGE; the reference stays untouched until the user deletes it — CAPTURE.md is the deletion contract, all 13 inventory capabilities DONE). edits.ts = every control as a pure tested doc-step (editStyle with gas-port REFIT clamp, editRole pool coercion + service livery, setGasZ/gasZKnobSpec clamp law, seeded repaint/wreck on the captured tables, sparse damage set/nudge/repair; VEHICLE_EDITOR_TUNING carries both reference gasZ clamp ranges verbatim, P2). VehiclesRoute.tsx = the garage rail over the V20 vehicles stream (every edit = one authored event + fresh snapshot; view state transient by design), style/role/pose chips, run playback through GAME_ANIMATION.parse/sample, hitbox-group selection, damage chips, memo\'d mesh/hitbox/anchor overlays, orbit viewport (GAME_CAMERA.rigs.Orbit solve + GAME_CHROME.LabEnvironment arena + orbit.zoom knob preset), contract readout. Strictly through the @game door — vehicles has NO internal-reach exception. Mesh kind→Geometry mapping at the route boundary per the V10 capture rule. 8 P4 cases (vehicles.test.ts, the editors suite root in rjit game verify) + the stream\'s 5 round-trip cases. Surfaced, not guessed: the two gasZ clamp ranges, compile-side garage consumption (placement belongs to the world stream, not the doc), the open V10 scale audit.',
+      dependsOn: ['game/index.ts', 'data/index.ts (the V20 store)', 'game/vehicle (GAME_VEHICLE — the V10 vehicle module)'],
+      status: 'live',
+    },
+    {
       name: 'game/camera.ts (GAME_CAMERA — the camera door)',
       purpose: ['camera', 'interaction', 'ai_edit', 'maintenance'],
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/camera.ts',
       description:
-        'V3 capture (2026-06-05): the game-facing door over @reactjit/cameras — the ruled split keeps the registry in runtime/ and GRADUATES the two combat pieces INTO it. runtime/cameras/rigs/aim.ts = combat_lab\'s ADS over-the-shoulder rig REWRITTEN fresh as a first-class CameraDef (shoulder-shifted crouch-aware pivot, genuinely pitched axis — the aim-ceiling fix; degrees, + = up per registry convention; reference radian clamps carried bit-exact through DEG; aimPivot exported for the game-side camera-collision clamp, which needs physics and stays out). runtime/cameras/unproject.ts now owns the canonical screenRay (R7) with unprojectGround as a consumer; the two active-cart hand-rolls (assist3d/picking.ts, VoxelHybridRoute.tsx) re-pointed. Door = solve/screenRay/unprojectGround/aimPivot/rigs(8)/modifiers, all pure (headless verify solves cameras with no React). The crosshair law carried as contract: fire ray = the solved camera\'s screen-center axis, never raw yaw/pitch trig. Fidelity: 1,728-case Aim sweep + 150-case screenRay sweep identical to verbatim reference transcriptions; 13 P4 tests. Ambiguities (yaw-convention fork vs lookForward, pivot-Y generalization, clamp-in-solve) in camera.CAPTURE.md. References untouched.',
+        'V3 capture (2026-06-05): the game-facing door over @reactjit/cameras — the ruled split keeps the registry in runtime/ and GRADUATES the two combat pieces INTO it. runtime/cameras/rigs/aim.ts = combat_lab\'s ADS over-the-shoulder rig REWRITTEN fresh as a first-class CameraDef (shoulder-shifted crouch-aware pivot, genuinely pitched axis — the aim-ceiling fix; degrees, + = up per registry convention; reference radian clamps carried bit-exact through DEG; aimPivot exported for the game-side camera-collision clamp, which needs physics and stays out). runtime/cameras/unproject.ts now owns the canonical screenRay (R7) with unprojectGround as a consumer; the two active-cart hand-rolls (assist3d/picking.ts, VoxelHybridRoute.tsx) re-pointed. Door = solve/screenRay/unprojectGround/aimPivot/rigs(8)/modifiers, all pure (headless verify solves cameras with no React). V23 keeps this pure door as the reference vocabulary while moving per-frame integration into the opt-in native controller. The crosshair law carried as contract: fire ray = the solved camera\'s screen-center axis, never raw yaw/pitch trig. Fidelity: 1,728-case Aim sweep + 150-case screenRay sweep identical to verbatim reference transcriptions; 13 P4 tests. Ambiguities (yaw-convention fork vs lookForward, pivot-Y generalization, clamp-in-solve) in camera.CAPTURE.md. References untouched.',
       dependsOn: ['game/_testkit.ts', 'game/index.ts', 'runtime/cameras/'],
+      status: 'live',
+    },
+    {
+      name: 'game/nativeCamera.ts (V23 native host camera opt-in)',
+      purpose: ['camera', 'runtime', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/nativeCamera.ts',
+      description:
+        'V23 host-controller surface (2026-06-05): importing this file is the V18 metafile gate for -Dhas-game-camera. JS sends mode, rig params, and input deltas on change only through GAME_NATIVE_CAMERA; framework/game/camera.zig owns per-frame Orbit/Aim solve, smoothing, and interpolation, then v8_app writes the same Scene3D.Camera layout fields consumed by gpu/3d.zig. Host fns: __game_camera_bind_node, __game_camera_bind_first, __game_camera_disable, __game_camera_set_mode, __game_camera_set_orbit, __game_camera_set_aim, __game_camera_set_input_deltas, __game_camera_set_smoothing, __game_camera_active_node. Backcompat law: carts that never call bind keep the old declarative camera-props path untouched.',
+      dependsOn: ['framework/game/camera.zig', 'framework/v8_bindings_game_camera.zig', 'v8_app.zig', 'runtime/cameras/'],
       status: 'live',
     },
     {

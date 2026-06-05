@@ -60,6 +60,7 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 
 **game/camera.ts — the camera door (V3 capture, 2026-06-05)**
 - `game/camera.ts` (`GAME_CAMERA`) — the door over the ruled split: the registry STAYS in `runtime/cameras/` and the two combat pieces GRADUATE INTO it (the one capture whose implementation home is runtime/). `runtime/cameras/rigs/aim.ts` = combat_lab's ADS over-the-shoulder rig REWRITTEN fresh as a first-class `CameraDef` — shoulder-shifted (0.62m), crouch-aware (1.62m − crouch·0.42m) pivot with a GENUINELY pitched axis (the aim-ceiling fix: screen-axis elevation == the pitch param), 2.4m ADS framing, fov 47, reference radian clamps carried bit-exact (`−1.15/DEG`/`1.0/DEG`); registry conventions adopted (degrees, pitch + = up). `aimPivot` exported as the seam for the game-side camera-collision clamp (needs physics — surfaced, not implemented). `screenRay` (R7) is now THE canonical pixel→ray in `runtime/cameras/unproject.ts` with `unprojectGround` a consumer; the two active-cart hand-rolls (`assist3d/picking.ts`, `VoxelHybridRoute.tsx`) re-pointed (old-cart copies await the lab rebuild per V17-LIFECYCLE). Door = `solve`/`screenRay`/`unprojectGround`/`aimPivot`/`rigs`(8)/`modifiers`, all pure. The crosshair law carried as contract + test: a fire ray is the solved camera's screen-center axis. Fidelity: 1,728-case Aim sweep + 150-case screenRay sweep identical to verbatim reference transcriptions; 13 P4 tests green. Ambiguities (the registry's yaw-convention fork, pivot-Y generalization, clamp-in-solve) in `camera.CAPTURE.md`.
+- V23 native runtime (2026-06-05): `game/nativeCamera.ts` (`GAME_NATIVE_CAMERA`) is the opt-in host-controller surface. Importing it gates `-Dhas-game-camera`; `framework/v8_bindings_game_camera.zig` registers `__game_camera_bind_node`, `__game_camera_bind_first`, `__game_camera_disable`, `__game_camera_set_mode`, `__game_camera_set_orbit`, `__game_camera_set_aim`, `__game_camera_set_input_deltas`, `__game_camera_set_smoothing`, and `__game_camera_active_node`. JS sends mode/rig params/input deltas on change only; `framework/game/camera.zig` owns per-frame Orbit/Aim solve plus smoothing/interpolation, and `v8_app.zig` writes the existing `Scene3D.Camera` layout fields before `gpu/3d.zig` builds matrices. Carts that never bind a camera stay on the old JS-props path unchanged.
 
 **game/cutscene/ — the live scene format (V16 capture, 2026-06-05)**
 - `game/cutscene/` (`GAME_CUTSCENE`) — V16 REWRITTEN from the ruling itself: **a format ruling with NO prior reference implementation** (oracle names zero cutscene carts; flagged in `CAPTURE.md`, built exactly what the ruling describes, no more). A cutscene is a simple TypeScript file — camera cues (CAMERA_RIGS names + params static or a PURE function of cue-local seconds for moving shots), dialog lines `{at, duration, speaker, text}` (head_lab faces render consumer-side), actor tracks (`MotionPlan[]` anchored at their own `t0` + V6 animation-DSL cues parsed once at build) — and ONE CLOCK drives all of it: `sampleCutscene(scene, t)` is the only evaluation entry, pure in (scene, t), every track answered by the delegated system at exactly the same t (`GAME_CAMERA.solve` / `GAME_PATHING.sampleMotion` / `GAME_ANIMATION.sample`). The clock is a pure value `{duration, t, rate, playing}` — advance/scrub/pause/rate/skip are data-in/data-out, so scrubbing/pause/skip fall out free exactly as ruled. `createCutscene` fails loud at build (unknown rig, cue outside the clock, bad DSL, duplicate actor). Never-baked honored structurally: the scene references live instance ids only, owns no geometry — the player's current state shows. Fidelity: **804-case sweep** asserting byte-identity with each system's own pure answer over the whole clock + backward/forward/jump-around scrub identity; 22 P4 tests green. story/missions hooks = the clock ops + `frame.done` (surfaced, not built); perception NOT wired (V16/V12 rule no seam). Ambiguities (dialog overlap policy, pre-first-cue camera hold, cuts-not-blends between cues) in `cutscene/CAPTURE.md`.
@@ -172,7 +173,8 @@ surfaces a broken `has-game-physics` gate instead of masking it),
 GAME_PATHING (door over runtime/pathing.ts + runtime/motion.ts — still the
 `__path_*` names; no honest alias registered yet), GAME_INPUT
 (transport only, V7), GAME_CAMERA (the pure side of @reactjit/cameras;
-solveCamera extracted to runtime/cameras/solve.ts), GAME_LOOP (clocks only —
+solveCamera extracted to runtime/cameras/solve.ts; V23 adds opt-in
+GAME_NATIVE_CAMERA so the host owns per-frame camera integration), GAME_LOOP (clocks only —
 NO loop API per R3; the V8 45/min cadence + frame transport), GAME_COMMANDS
 (registry + hmsc-dialect parser — the V19 scripting surface), and GAME_KINDS
 (the five kind tables, captured by its own lane). The rest export an honest
@@ -338,3 +340,41 @@ mismatches; 21 P4 tests + 2 vocabulary tests ride `rjit game verify`.
 DELIBERATELY NOT a 20th `game/index.ts` export — the door list is RULED
 (V17); the question is surfaced to the supervisor, and in-game/ consumers
 import `../world` meanwhile.
+
+## editors/vehicles/ — the vehicle editor route (editors wave, 2026-06-04)
+
+`cart/vehicle_lab`'s authoring UI REMADE ENTIRELY as the `/vehicles` route in
+the one shell (V10/V17-TRIAGE; the lab stays an untouched behavior reference —
+`editors/vehicles/CAPTURE.md` is the deletion contract, all 13 inventory
+capabilities DONE; the user deletes the old cart). Three pieces:
+
+- `game/vehicle/stream.ts` — the V20 `vehicles` concern (the GARAGE: authored
+  `VehicleDoc` per id + rail order). Events carry the RESULTING doc
+  (`authored` upsert / `removed`) so edit logic stays editor-side and the
+  round-trip author → stream → snapshot → `buildVehicle` is exact by
+  construction (pinned through a real on-disk store). `GAME_VEHICLE.stream`
+  carries it; `game/index.ts` re-exports `vehiclesStream` + doc types as
+  NAMED exports (not a 20th door).
+- `editors/vehicles/edits.ts` — every control as a pure tested step:
+  `editStyle` (gas-port REFIT clamp), `editRole` (pool coercion; services
+  take livery, civilians keep paint), `setGasZ`/`gasZKnobSpec` (the clamp
+  law; the chrome Knob owns step/round), seeded `repaint`/`wreck` over the
+  captured tables, sparse damage set/nudge/repair. Both reference gasZ clamp
+  ranges preserved verbatim in `VEHICLE_EDITOR_TUNING` (P2; the asymmetry is
+  surfaced, not resolved).
+- `editors/vehicles/VehiclesRoute.tsx` — the route: garage rail (every edit =
+  one appended event + a fresh snapshot; view state transient by design),
+  style/role/pose chips + run playback (`GAME_ANIMATION.parse/sample`),
+  hitbox-group selection, damage chips, memo'd mesh/hitbox/anchor overlays,
+  orbit viewport (`GAME_CAMERA.rigs.Orbit` solve + `GAME_CHROME
+  .LabEnvironment` arena + the `orbit.zoom` knob preset), contract readout
+  with id + saved-seq. Strictly through the `@game` door (vehicles has NO
+  internal-reach exception); mesh kind→Geometry mapping at the route boundary
+  per the V10 capture rule; store failures surface in-panel.
+
+Wired as `/vehicles` + the Car nav icon in ProjectBar (after the characters
+route per the editors-wave coordination rule). `rjit game verify` owns
+`cart/hmsc-int/editors` as a suite root: 8 edit-step cases + 5 stream cases,
+VERDICT GREEN. Open seams (CAPTURE.md): compile/ does not yet consume the
+garage snapshot (placement belongs to the world stream, not the vehicle doc),
+and the V10 scale audit remains open.
