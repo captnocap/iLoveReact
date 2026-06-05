@@ -44,6 +44,12 @@ export type { KeyEvent, KeyState } from './input';
 export { GAME_CAMERA, CAMERA_RIGS } from './camera';
 export type { CameraDef, Modifier, Rect, Solved } from './camera';
 
+// V23: the native host camera controller's param transport (JS sends rig
+// params/mode/deltas ON CHANGE; framework/game/camera.zig owns every frame).
+// Importing it through the door is the -Dhas-game-camera metafile-gate signal.
+export { GAME_NATIVE_CAMERA } from './nativeCamera';
+export type { NativeAimParams, NativeCameraMode, NativeOrbitParams } from './nativeCamera';
+
 export { GAME_LOOP, STATE_TICKS_PER_MINUTE, stateTickIntervalMs, FALLBACK_FRAME_MS } from './loop';
 export type { FrameHandle } from './loop';
 

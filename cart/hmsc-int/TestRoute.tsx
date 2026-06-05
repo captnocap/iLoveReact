@@ -7,7 +7,11 @@
 //   GAME_INPUT    keys (blur-clearing snapshot), WASD contract, camera-relative
 //                 moveIntent (the V7 cart-side duty: ship a direction vector),
 //                 typing gate.
-//   GAME_CAMERA   BOTH ruled modes (Q3/Q3b): Orbit walk + RMB ADS Aim rig.
+//   GAME_NATIVE_CAMERA  V23 — THE CAMERA IS NOT JAVASCRIPT: the host
+//                 controller (framework/game/camera.zig) owns every frame;
+//                 JS sends rig params/mode/drag deltas ON CHANGE only. Both
+//                 ruled modes (Q3/Q3b): Orbit walk + RMB ADS Aim. GAME_CAMERA
+//                 remains only for the boot frame + the Aim pitch limits.
 //   GAME_LOOP     frame transport (rAF probe) + monotonic now.
 //   GAME_FIGURE   the V2 kit player (seeded face, dressed rig); render via the
 //                 editor-preview path @game/figure/render (V2-AMENDED: per-frame
@@ -25,7 +29,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
-import { GAME_CAMERA, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_PHYSICS, GAME_WORLD } from '@game';
+import { GAME_CAMERA, GAME_COMMANDS, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_NATIVE_CAMERA, GAME_PHYSICS, GAME_WORLD } from '@game';
 import type { WorldGridState } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
 import type { GameState, Vec3 } from '../hmsc/design'; // GAP: the editor GameState type retires when hmsc becomes compile/'s output (V15)
@@ -178,19 +182,56 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   const [player, setPlayer] = useState(() => initialPlayer(props.state, worldGrid));
   const playerRef = useRef(player);
   playerRef.current = player;
-  const [look, setLook] = useState(() => ({ yaw: props.state.player.yawDegrees, pitch: CAMERA.initialPitchDegrees }));
-  const lookRef = useRef(look);
-  lookRef.current = look;
+  // V23 — THE CAMERA IS NOT JAVASCRIPT: framework/game/camera.zig owns every
+  // frame (solve/smoothing, writes the bound Scene3D.Camera node fields).
+  // JS keeps only a yaw/pitch SHADOW ref — movement stays camera-relative
+  // (V7 needs the yaw) and the shadow mirrors the host exactly because the
+  // SAME clamped deltas feed both sides. No React state: a camera drag is
+  // zero render work.
+  const lookRef = useRef({ yaw: props.state.player.yawDegrees, pitch: CAMERA.initialPitchDegrees });
   const keysRef = useRef<ReturnType<typeof GAME_INPUT.createKeyState> | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   // ADS aim (the ruled camera is REGISTRY-WITH-AIM, Q3/Q3b): right-mouse hold
   // per INPUT_BINDINGS' 'aim' binding (pointer: 'right'), read through the
-  // door's pointer wire each frame. Honesty: when the pointer host fns are
-  // missing, rightDown reads false and the hint says so.
-  const [aiming, setAiming] = useState(false);
-  const aimingRef = useRef(aiming);
-  aimingRef.current = aiming;
+  // door's pointer wire each frame. A ref — mode rides the controller, not
+  // a render. Honesty: when the pointer host fns are missing, rightDown
+  // reads false and the hint says so.
+  const aimRef = useRef(false);
   const pointerWire = useMemo(() => GAME_INPUT.availability(), []);
+
+  // Send the CURRENT rig params to the controller — called on change only
+  // (pose published, mode switched, route reset). Drag deltas go through
+  // setInputDeltas instead; idle frames send nothing.
+  const sendCameraParams = (pose: { x: number; y: number; z: number }) => {
+    const l = lookRef.current;
+    if (aimRef.current) {
+      GAME_NATIVE_CAMERA.setAim({ target: [pose.x, pose.y, pose.z], yaw: l.yaw, pitch: l.pitch });
+    } else {
+      GAME_NATIVE_CAMERA.setOrbit({
+        target: [pose.x, pose.y + CAMERA.targetHeightMeters, pose.z],
+        yaw: l.yaw,
+        pitch: l.pitch,
+        distance: CAMERA.distanceMeters,
+        fov: CAMERA.fovDegrees,
+      });
+    }
+  };
+  const sendCameraRef = useRef(sendCameraParams);
+  sendCameraRef.current = sendCameraParams;
+
+  // Engage the controller: params first (a set before init pins the boot
+  // frame — no swoop-in), then bind the route's Scene3D.Camera node. The
+  // declarative camera props below stay STATIC, so React never fights the
+  // host's per-frame writes; disable on unmount returns the node to JS props.
+  useEffect(() => {
+    sendCameraRef.current(playerRef.current);
+    GAME_NATIVE_CAMERA.setMode('walk');
+    const bound = GAME_NATIVE_CAMERA.bindFirst();
+    if (!bound) console.warn('[test] native camera not engaged — host missing has-game-camera (rebuild)');
+    return () => {
+      GAME_NATIVE_CAMERA.disable();
+    };
+  }, []);
 
   // The in-game console (CS idiom): backtick toggles an overlay; the session
   // is the captured GAME_COMMANDS console over a per-mount GameCommandState
@@ -232,6 +273,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
           };
           playerRef.current = next;
           setPlayer(next);
+          sendCameraRef.current(next); // teleport — the camera follows
         }
       },
     });
@@ -279,7 +321,8 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     const next = initialPlayer(props.state, worldGrid);
     playerRef.current = next;
     setPlayer(next);
-    setLook((l) => ({ ...l, yaw: props.state.player.yawDegrees }));
+    lookRef.current.yaw = props.state.player.yawDegrees;
+    sendCameraRef.current(next);
   }, [props.state, worldGrid]);
 
   // Key transport: the door's held-keys snapshot (blur-clears on focus loss).
@@ -310,13 +353,19 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       const running = keys != null && !typing && GAME_INPUT.actionDown(keys, 'run');
       const jumpDown = keys != null && !typing && GAME_INPUT.actionDown(keys, 'jump');
       // ADS trigger: the bindings' 'aim' input is right-mouse hold, read
-      // through the door's pointer wire (honest false when unwired).
+      // through the door's pointer wire (honest false when unwired). The
+      // walk<->aim transition rides the controller: setMode + full params;
+      // the host's retained smoothing animates the framing change.
       const aim = !typing && GAME_INPUT.readPointer().rightDown;
-      if (aim !== aimingRef.current) {
-        aimingRef.current = aim;
-        setAiming(aim);
+      if (aim !== aimRef.current) {
+        aimRef.current = aim;
         // leaving ADS: fold the wider aim pitch back into the orbit clamp
-        if (!aim) setLook((l) => ({ ...l, pitch: clamp(l.pitch, CAMERA.minPitchDegrees, CAMERA.maxPitchDegrees) }));
+        if (!aim) {
+          const l = lookRef.current;
+          l.pitch = clamp(l.pitch, CAMERA.minPitchDegrees, CAMERA.maxPitchDegrees);
+        }
+        GAME_NATIVE_CAMERA.setMode(aim ? 'aim' : 'walk');
+        sendCameraRef.current(playerRef.current);
       }
       // The V7 cart-side duty: ship a camera-relative direction vector.
       const intent = GAME_INPUT.moveIntent(axes, lookRef.current.yaw * DEG);
@@ -383,6 +432,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
           };
           playerRef.current = next;
           setPlayer(next);
+          sendCameraRef.current(next); // target moved — params on change
         }
       } else if (moving) {
         // Honest fallback when the host bindings are absent (headless, or a
@@ -402,6 +452,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         };
         playerRef.current = next;
         setPlayer(next);
+        sendCameraRef.current(next); // target moved — params on change
       } else if (prev.moving || prev.running || prev.yaw !== desiredYaw) {
         const next = { ...prev, vx: 0, vz: 0, moving: false, running: false, yaw: desiredYaw };
         playerRef.current = next;
@@ -427,45 +478,47 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     const x = Number(e?.x ?? 0), y = Number(e?.y ?? 0);
     const dx = x - d.x, dy = y - d.y;
     d.x = x; d.y = y;
-    const limits = aimingRef.current
+    const limits = aimRef.current
       ? { min: GAME_CAMERA.rigs.Aim.defaults.minPitch as number, max: GAME_CAMERA.rigs.Aim.defaults.maxPitch as number }
       : { min: CAMERA.minPitchDegrees, max: CAMERA.maxPitchDegrees };
     // Horizontal sign: the engine renders world +X as screen-LEFT (the
     // movement.zig mirror), and both rigs use compass yaw (yaw+ = CCW from
     // above) — so yaw must DECREASE with a rightward drag for the view to
     // turn screen-right. USER VERDICT pinned this: "left to right backwards,
-    // not top to bottom" (the old route carried the same inversion).
-    setLook((l) => ({
-      yaw: l.yaw - dx * CAMERA.yawDegreesPerPixel,
-      pitch: clamp(l.pitch - dy * CAMERA.pitchDegreesPerPixel, limits.min, limits.max),
-    }));
+    // not top to bottom". The controller ADDS deltas to its params, so the
+    // sign rides the delta; clamps apply HERE so the shadow and the host
+    // accumulate identically (only the post-clamp delta is sent).
+    const l = lookRef.current;
+    const nextYaw = l.yaw - dx * CAMERA.yawDegreesPerPixel;
+    const nextPitch = clamp(l.pitch - dy * CAMERA.pitchDegreesPerPixel, limits.min, limits.max);
+    GAME_NATIVE_CAMERA.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    l.yaw = nextYaw;
+    l.pitch = nextPitch;
   };
   const onUp = () => { dragRef.current = null; };
   const resetPlayer = () => {
     const next = initialPlayer(props.state, worldGrid);
     playerRef.current = next;
     setPlayer(next);
-    setLook((l) => ({ ...l, yaw: next.yaw }));
+    lookRef.current.yaw = next.yaw;
+    sendCameraRef.current(next);
   };
 
-  // The camera through the door — BOTH ruled modes (Q3/Q3b: registry-with-aim):
-  // walk = Orbit (chest-height target, the pre-rewire framing); ADS = the Aim
-  // rig with the reference defaults verbatim (shoulder 0.62m, fov 47, pitch
-  // clamps ±~57/66° — full above-horizon authority; the screen-center axis IS
-  // the fire ray when combat arrives, per the crosshair law).
-  const cam = aiming
-    ? GAME_CAMERA.solve(GAME_CAMERA.rigs.Aim, {
-        target: [player.x, player.y, player.z],
-        yaw: look.yaw,
-        pitch: look.pitch,
-      })
-    : GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
-        target: [player.x, player.y + CAMERA.targetHeightMeters, player.z],
-        yaw: look.yaw,
-        pitch: look.pitch,
-        dist: CAMERA.distanceMeters,
-        fov: CAMERA.fovDegrees,
-      });
+  // The DECLARATIVE camera is the boot frame only — static props, so React
+  // never sends camera UPDATEs after mount; framework/game/camera.zig writes
+  // these node fields every frame once bound (V23). Both ruled modes ride the
+  // controller: walk = Orbit (the pre-rewire framing), RMB ADS = Aim with the
+  // reference defaults (shoulder 0.62m, fov 47, pitch clamps −66/+57° — full
+  // above-horizon authority; the screen-center axis IS the fire ray per the
+  // crosshair law).
+  const [bootCam] = useState(() =>
+    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+      target: [playerRef.current.x, playerRef.current.y + CAMERA.targetHeightMeters, playerRef.current.z],
+      yaw: lookRef.current.yaw,
+      pitch: lookRef.current.pitch,
+      dist: CAMERA.distanceMeters,
+      fov: CAMERA.fovDegrees,
+    }));
   const sceneState = {
     ...props.state,
     player: {
@@ -495,7 +548,8 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       />
       {/* GAP(W-3): game sky background awaits a captured home */}
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={hmscSkyBackgroundColor(sceneState.config.sky)} showGrid={false} showAxes={false}>
-        <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={sceneState.config.view.drawRadiusMeters} />
+        {/* STATIC boot frame — the V23 controller owns these fields per frame once bound */}
+        <Scene3D.Camera position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={sceneState.config.view.drawRadiusMeters} />
         <Scene3D.Fog enabled={false} />
         {/* GAP(W-2): the world renderer awaits the world render lane */}
         <WorldStatics world={sceneState.world} skyConfig={sceneState.config.sky} />
