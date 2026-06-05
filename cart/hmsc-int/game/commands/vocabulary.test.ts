@@ -218,7 +218,9 @@ test('gv_save and gv_load require a mounted persistence door and restore the com
 test('cmd_help teaches the whole surface, including pending commands', () => {
   const { registry, game } = freshConsole();
   const help = registry.run(game, 'cmd_help');
-  assertEqual(help.output.length, 48, 'help lists every registered command');
+  // 48 reference names + the bare `help` alias (registered for the player —
+  // the unknown-command hint says "try: help", so help must exist).
+  assertEqual(help.output.length, 49, 'help lists every registered command');
   const one = registry.run(game, 'cmd_help wv_road');
   assertEqual(one.ok, true, 'help on a pending command still teaches its usage');
   assert(one.output[1].includes('usage: wv_road'), 'the usage line must print');

@@ -85,12 +85,10 @@ function buildRegistry() {
     ],
   });
 
-  registry.define({
-    name: 'help',
-    usage: 'help',
-    summary: 'list commands',
-    run: () => registry.list().map((spec) => `${spec.usage} — ${spec.summary}`),
-  });
+  // `help` is the vocabulary's now (defineGameCommands registers the bare
+  // name, generated from the registry — it lists boot/tick/status too). The
+  // boot's local copy collided once the player-facing alias landed; deleted,
+  // never forked (no-duplication).
 
   return registry;
 }

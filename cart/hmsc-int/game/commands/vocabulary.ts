@@ -432,6 +432,37 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
     },
   });
 
+  // Bare `help` — what a player actually types (USER BUG: the registry's
+  // unknown-command hint said "(try: help)" while only cmd_help existed — a
+  // self-recommending error). Generated FROM the registry (P2: never a hand
+  // list): every registered command's USAGE line, with not-yet stubs marked
+  // and their owning capture lane named on inspection.
+  define({
+    name: 'help',
+    usage: 'help [command]',
+    summary: 'List every command with its usage; help <command> for one.',
+    run: (_game, args) => {
+      const query = args[0];
+      if (query) {
+        const spec = registry.list().find((candidate) => candidate.name === query);
+        if (!spec) throw new Error(`unknown command ${query} — plain "help" lists everything`);
+        const owner = NOT_YET_OWNER_BY_COMMAND[spec.name];
+        return [
+          `${spec.name}: ${spec.summary}`,
+          `usage: ${spec.usage}`,
+          ...(owner ? [`status: not captured yet — lands with: ${owner}`] : []),
+        ];
+      }
+      const specs = registry.list();
+      // Column capped so one long usage (wv_road's ~110 chars) doesn't push
+      // every summary off a console overlay; longer usages just run on.
+      const pad = Math.min(40, Math.max(...specs.map((spec) => spec.usage.length))) + 2;
+      return specs.map((spec) =>
+        `${spec.usage.padEnd(pad)} ${NOT_YET_OWNER_BY_COMMAND[spec.name] ? '[not yet] ' : ''}${spec.summary}`,
+      );
+    },
+  });
+
   define({
     name: 'cmd_cheats',
     usage: 'cmd_cheats <1|0>',

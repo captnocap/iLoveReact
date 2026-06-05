@@ -576,15 +576,23 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       {consoleOpen && (
         <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, height: CONSOLE_UI.heightPercent, backgroundColor: CONSOLE_UI.backdrop, borderBottomWidth: 2, borderBottomColor: '#334155', paddingLeft: 12, paddingRight: 12, paddingTop: 8, paddingBottom: 8 }}>
           <Box style={{ flexGrow: 1, justifyContent: 'flex-end', overflow: 'hidden', gap: 2 }}>
-            {gameConsole.session.transcript().slice(-CONSOLE_UI.maxVisibleLines).map((line) => (
+            {gameConsole.session.scrollOffset() > 0 && (
+              <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>
+                {`— scrollback (${gameConsole.session.scrollOffset()} lines up) · PgDn to return —`}
+              </Text>
+            )}
+            {gameConsole.session.visibleTail(CONSOLE_UI.maxVisibleLines).map((line) => (
               <Text key={line.id} fontSize={12} color={CONSOLE_UI.lineColor[line.kind]} style={{ fontFamily: 'monospace', lineHeight: 16 }}>
                 {line.text}
               </Text>
             ))}
           </Box>
-          <Box style={{ flexDirection: 'row', alignItems: 'center', borderTopWidth: 1, borderTopColor: '#1f2937', paddingTop: 6, marginTop: 6 }}>
+          <Box style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderTopWidth: 1, borderTopColor: '#1f2937', paddingTop: 6, marginTop: 6 }}>
             <Text fontSize={12} color="#fbbf24" style={{ fontFamily: 'monospace', fontWeight: 700 }}>
               {`] ${gameConsole.session.buffer()}▌`}
+            </Text>
+            <Text fontSize={10} color="#475569" style={{ fontFamily: 'monospace' }}>
+              help · ↑↓ history · PgUp/PgDn scroll
             </Text>
           </Box>
         </Box>

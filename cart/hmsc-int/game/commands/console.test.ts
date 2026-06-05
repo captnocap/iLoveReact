@@ -175,4 +175,65 @@ test('empty/whitespace submits are no-ops (no transcript noise)', () => {
   assertEqual(session.transcript().length, 0, 'nothing echoed');
 });
 
+test('help produces the FULL registered inventory, generated from the registry, not-yet stubs marked (USER BUG: bare help did not exist)', () => {
+  const { session, registry } = freshSession();
+  session.submit('help');
+  const lines = session.transcript();
+  const output = lines.filter((l) => l.kind === 'output');
+  const specs = registry.list();
+  assertEqual(output.length, specs.length, `help lists every registered command (${specs.length})`);
+  for (const spec of specs) {
+    assert(
+      output.some((l) => l.text.startsWith(spec.usage)),
+      `help carries the usage line for ${spec.name}`,
+    );
+  }
+  const pending = GAME_COMMANDS.notYetCaptured;
+  for (const name of Object.values(pending).flat()) {
+    const line = output.find((l) => l.text.startsWith(name)); // usage lines start with the name
+    assert(line != null && line.text.includes('[not yet]'), `${name} must be marked [not yet] in help`);
+  }
+  assert(
+    output.some((l) => !l.text.includes('[not yet]')),
+    'captured commands are NOT marked',
+  );
+});
+
+test('help <command> teaches usage; a pending command names its owning lane', () => {
+  const { session } = freshSession();
+  session.submit('help wv_road');
+  const lines = session.transcript().map((l) => l.text);
+  assert(lines.some((t) => t.startsWith('usage: wv_road')), 'usage line prints');
+  assert(lines.some((t) => t.includes('not captured yet')), 'pending status names the capture boundary');
+});
+
+test('unknown command suggests help — and help now EXISTS (the self-recommending error is fixed)', () => {
+  const { session, registry, game } = freshSession();
+  session.submit('frobnicate');
+  const error = session.transcript().find((l) => l.kind === 'error');
+  assert(error != null && error.text.includes('help'), 'the error points at help');
+  assertEqual(registry.run(game, 'help').ok, true, 'and help actually runs');
+});
+
+test('PageUp/PageDown scroll the transcript; a submit snaps back to the tail', () => {
+  const { session } = freshSession();
+  pressToggle(session);
+  session.submit('help'); // ~50 lines — taller than any overlay
+  const tailBefore = session.visibleTail(5).map((l) => l.id).join(',');
+  assertEqual(session.scrollOffset(), 0, 'starts at the live tail');
+  session.handleKey({ key: 'pageup' });
+  assert(session.scrollOffset() > 0, 'PageUp scrolls back');
+  const scrolled = session.visibleTail(5).map((l) => l.id).join(',');
+  assert(scrolled !== tailBefore, 'the visible window moved');
+  session.handleKey({ key: 'pagedown' });
+  assertEqual(session.scrollOffset(), 0, 'PageDown returns to the tail');
+  session.handleKey({ key: 'pageup' });
+  session.submit('pv_where');
+  assertEqual(session.scrollOffset(), 0, 'a submit snaps the view back');
+  // clamp: spamming PageUp never scrolls past the oldest line
+  for (let i = 0; i < 50; i += 1) session.handleKey({ key: 'pageup' });
+  assert(session.scrollOffset() < session.transcript().length, 'scrollback clamps inside the transcript');
+  assert(session.visibleTail(5).length > 0, 'the view never goes empty');
+});
+
 finish('game/commands/console');

@@ -60,6 +60,14 @@ export type ConsoleSession = {
   handleKeyUp: (event: ConsoleKeyEvent) => void;
   /** dispatch one line through the registry (what Enter does) */
   submit: (line: string) => void;
+  /**
+   * The lines an overlay of `count` rows shows, honoring scrollback —
+   * PageUp/PageDown walk the transcript (long `help` output is readable);
+   * a submit snaps back to the tail.
+   */
+  visibleTail: (count: number) => ConsoleLine[];
+  /** lines currently scrolled back from the tail (0 = live tail) */
+  scrollOffset: () => number;
   /** bumps on every visible change — a React consumer mirrors this into state */
   revision: () => number;
 };
@@ -70,6 +78,8 @@ export const CONSOLE_TOGGLE_KEYS: readonly string[] = [CONSOLE_TOGGLE_KEY, '~'];
 export const CONSOLE_CLOSE_KEYS: readonly string[] = [...CONSOLE_TOGGLE_KEYS, 'escape'];
 
 const HISTORY_DEPTH = 64;
+/** lines one PageUp/PageDown press moves the scrollback */
+const SCROLL_PAGE_LINES = 12;
 
 // US-layout shift table for the printable reconstruction (the wire ships the
 // unshifted SDL sym + a TRUE shift flag, never the shifted character).
@@ -110,6 +120,7 @@ export function createConsoleSession<Ctx>(
   let buffer = '';
   let rev = 0;
   let nextLineId = 1;
+  let scrollBack = 0; // lines scrolled up from the tail (0 = live tail)
 
   const push = (kind: ConsoleLineKind, text: string): void => {
     lines.push({ id: nextLineId, kind, text });
@@ -126,6 +137,7 @@ export function createConsoleSession<Ctx>(
       if (history.length > HISTORY_DEPTH) history.splice(0, history.length - HISTORY_DEPTH);
     }
     historyAt = -1;
+    scrollBack = 0; // a submit snaps the view back to the live tail
     opts?.beforeRun?.(ctx);
     const outcome = registry.run(ctx, trimmed);
     for (const text of outcome.output) push(outcome.ok ? 'output' : 'error', text);
@@ -188,6 +200,24 @@ export function createConsoleSession<Ctx>(
       }
       return true;
     }
+    // Transcript scrollback — long output (help's full inventory) stays
+    // readable; clamped so the view never scrolls past the oldest line.
+    if (key === 'pageup') {
+      const next = Math.min(Math.max(0, lines.length - 1), scrollBack + SCROLL_PAGE_LINES);
+      if (next !== scrollBack) {
+        scrollBack = next;
+        rev += 1;
+      }
+      return true;
+    }
+    if (key === 'pagedown') {
+      const next = Math.max(0, scrollBack - SCROLL_PAGE_LINES);
+      if (next !== scrollBack) {
+        scrollBack = next;
+        rev += 1;
+      }
+      return true;
+    }
     if (event?.ctrlKey || event?.altKey || event?.metaKey) return true; // chords: consumed, ignored
     const ch = printableOf(key, event?.shiftKey === true);
     if (ch !== null) {
@@ -210,6 +240,11 @@ export function createConsoleSession<Ctx>(
     handleKey,
     handleKeyUp,
     submit,
+    visibleTail: (count: number): ConsoleLine[] => {
+      const end = Math.max(0, lines.length - scrollBack);
+      return lines.slice(Math.max(0, end - Math.max(1, count)), end);
+    },
+    scrollOffset: () => scrollBack,
     revision: () => rev,
   };
 }
