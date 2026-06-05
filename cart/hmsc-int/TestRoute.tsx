@@ -166,6 +166,14 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   lookRef.current = look;
   const keysRef = useRef<ReturnType<typeof GAME_INPUT.createKeyState> | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
+  // ADS aim (the ruled camera is REGISTRY-WITH-AIM, Q3/Q3b): right-mouse hold
+  // per INPUT_BINDINGS' 'aim' binding (pointer: 'right'), read through the
+  // door's pointer wire each frame. Honesty: when the pointer host fns are
+  // missing, rightDown reads false and the hint says so.
+  const [aiming, setAiming] = useState(false);
+  const aimingRef = useRef(aiming);
+  aimingRef.current = aiming;
+  const pointerWire = useMemo(() => GAME_INPUT.availability(), []);
 
   // The V2 player figure: seeded documents → part meshes, built once. The
   // per-update rig solve below is the editor-preview path (V2-AMENDED).
@@ -218,10 +226,24 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
       const axes = keys && !typing ? GAME_INPUT.moveAxes(keys) : { forward: 0, strafe: 0 };
       const running = keys != null && !typing && GAME_INPUT.actionDown(keys, 'run');
       const jumpDown = keys != null && !typing && GAME_INPUT.actionDown(keys, 'jump');
+      // ADS trigger: the bindings' 'aim' input is right-mouse hold, read
+      // through the door's pointer wire (honest false when unwired).
+      const aim = !typing && GAME_INPUT.readPointer().rightDown;
+      if (aim !== aimingRef.current) {
+        aimingRef.current = aim;
+        setAiming(aim);
+        // leaving ADS: fold the wider aim pitch back into the orbit clamp
+        if (!aim) setLook((l) => ({ ...l, pitch: clamp(l.pitch, CAMERA.minPitchDegrees, CAMERA.maxPitchDegrees) }));
+      }
       // The V7 cart-side duty: ship a camera-relative direction vector.
       const intent = GAME_INPUT.moveIntent(axes, lookRef.current.yaw * DEG);
       const moving = intent.x !== 0 || intent.z !== 0;
       const prev = playerRef.current;
+      // Facing: ADS pins the body to the camera yaw (the crosshair law's
+      // frame); walking faces the move direction; idle keeps the last facing.
+      const desiredYaw = aim
+        ? normalizeYawDegrees(lookRef.current.yaw)
+        : moving ? normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG) : prev.yaw;
       // P2: speeds are authored GameState data (defaults 2.4/5.8 — already
       // one source of truth with GAME_COMMANDS.tuning.player; REWIRE.md).
       const speed = running ? props.state.player.runSpeedMetersPerSecond : props.state.player.walkSpeedMetersPerSecond;
@@ -249,6 +271,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         const p = stepped.player;
         // The hostPhysics idle discipline: a resting step publishes no new pose.
         const atRest = !moving && !jumpDown && p.grounded && prev.grounded && !prev.moving && !prev.running
+          && desiredYaw === prev.yaw
           && Math.abs(p.position.x - prev.x) < IDLE_REST_EPSILON
           && Math.abs(p.position.y - prev.y) < IDLE_REST_EPSILON
           && Math.abs(p.position.z - prev.z) < IDLE_REST_EPSILON;
@@ -257,7 +280,7 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
             x: p.position.x, y: p.position.y, z: p.position.z,
             vx: p.velocity.x, vy: p.velocity.y, vz: p.velocity.z,
             grounded: p.grounded,
-            yaw: moving ? normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG) : prev.yaw,
+            yaw: desiredYaw,
             moving,
             running: moving && running,
             gaitPhase: moving ? prev.gaitPhase + dt * (running ? GAIT.runCyclesPerSecond : GAIT.walkCyclesPerSecond) : prev.gaitPhase,
@@ -276,15 +299,15 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
           x,
           y: groundTop(props.state, x, z),
           z,
-          yaw: normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG),
+          yaw: desiredYaw,
           moving: true,
           running,
           gaitPhase: prev.gaitPhase + dt * (running ? GAIT.runCyclesPerSecond : GAIT.walkCyclesPerSecond),
         };
         playerRef.current = next;
         setPlayer(next);
-      } else if (prev.moving || prev.running) {
-        const next = { ...prev, vx: 0, vz: 0, moving: false, running: false };
+      } else if (prev.moving || prev.running || prev.yaw !== desiredYaw) {
+        const next = { ...prev, vx: 0, vz: 0, moving: false, running: false, yaw: desiredYaw };
         playerRef.current = next;
         setPlayer(next);
       }
@@ -299,6 +322,8 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
 
   // Drag-orbit gesture: route chrome (visible-cursor drag; the door's
   // readPointerDelta capture-mode mouse-look is deliberately not adopted).
+  // While ADS is held the pitch clamp widens to the Aim rig's own limits —
+  // "aiming needs the sky" (the aim ceiling was Q3's whole reason to exist).
   const onDown = (e: any) => { dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; };
   const onMove = (e: any) => {
     const d = dragRef.current;
@@ -306,9 +331,12 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     const x = Number(e?.x ?? 0), y = Number(e?.y ?? 0);
     const dx = x - d.x, dy = y - d.y;
     d.x = x; d.y = y;
+    const limits = aimingRef.current
+      ? { min: GAME_CAMERA.rigs.Aim.defaults.minPitch as number, max: GAME_CAMERA.rigs.Aim.defaults.maxPitch as number }
+      : { min: CAMERA.minPitchDegrees, max: CAMERA.maxPitchDegrees };
     setLook((l) => ({
       yaw: l.yaw + dx * CAMERA.yawDegreesPerPixel,
-      pitch: clamp(l.pitch - dy * CAMERA.pitchDegreesPerPixel, CAMERA.minPitchDegrees, CAMERA.maxPitchDegrees),
+      pitch: clamp(l.pitch - dy * CAMERA.pitchDegreesPerPixel, limits.min, limits.max),
     }));
   };
   const onUp = () => { dragRef.current = null; };
@@ -319,14 +347,24 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     setLook((l) => ({ ...l, yaw: next.yaw }));
   };
 
-  // The camera through the door: Orbit rig, chest-height target.
-  const cam = GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
-    target: [player.x, player.y + CAMERA.targetHeightMeters, player.z],
-    yaw: look.yaw,
-    pitch: look.pitch,
-    dist: CAMERA.distanceMeters,
-    fov: CAMERA.fovDegrees,
-  });
+  // The camera through the door — BOTH ruled modes (Q3/Q3b: registry-with-aim):
+  // walk = Orbit (chest-height target, the pre-rewire framing); ADS = the Aim
+  // rig with the reference defaults verbatim (shoulder 0.62m, fov 47, pitch
+  // clamps ±~57/66° — full above-horizon authority; the screen-center axis IS
+  // the fire ray when combat arrives, per the crosshair law).
+  const cam = aiming
+    ? GAME_CAMERA.solve(GAME_CAMERA.rigs.Aim, {
+        target: [player.x, player.y, player.z],
+        yaw: look.yaw,
+        pitch: look.pitch,
+      })
+    : GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+        target: [player.x, player.y + CAMERA.targetHeightMeters, player.z],
+        yaw: look.yaw,
+        pitch: look.pitch,
+        dist: CAMERA.distanceMeters,
+        fov: CAMERA.fovDegrees,
+      });
   const sceneState = {
     ...props.state,
     player: {
@@ -372,7 +410,9 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
         <Pressable onPress={resetPlayer} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f1a2e' }}>
           <Text fontSize={11} color="#cbd5e1" style={{ fontWeight: 700 }}>Drop in</Text>
         </Pressable>
-        <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>{props.mapName} · WASD move · Space jump · drag camera · Shift run</Text>
+        <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>
+          {`${props.mapName} · WASD move · Space jump · Shift run · drag camera · ${pointerWire.complete ? 'RMB aim' : `aim unavailable (host missing: ${pointerWire.missing.join(', ')})`}`}
+        </Text>
       </Box>
     </Box>
   );
