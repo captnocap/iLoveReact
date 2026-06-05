@@ -11,6 +11,25 @@ import {
 } from './rig';
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
+function dist3(a: readonly number[], b: readonly number[]): number {
+  const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+function turnPlace(p: readonly number[], yawDeg: number, offset: readonly number[]): [number, number, number] {
+  const rad = yawDeg * Math.PI / 180;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  return [p[0] * c + p[2] * s + offset[0], p[1] + offset[1], -p[0] * s + p[2] * c + offset[2]];
+}
+
+function firstMovingIndex<T extends { position: readonly number[] }>(a: T[], b: T[]): number {
+  const n = Math.min(a.length, b.length);
+  for (let i = 0; i < n; i += 1) {
+    if (dist3(a[i].position, b[i].position) > 1e-7) return i;
+  }
+  return -1;
+}
+
 test('a rig frame carries every layer of the dressed figure', () => {
   const frame = buildRigFrame('neutral', 'stand', 0, [], 'tee');
   assertEqual(Object.keys(frame.bones).length, 25, '25 bones');
@@ -76,6 +95,44 @@ test('pants track the pose (bones-driven garments, not stand-pose heights)', () 
   const meanY = (frame: typeof stand) => frame.clothing.reduce((sum, c) => sum + c.position[1], 0) / frame.clothing.length;
   assert(kneel.bones.torso.position[1] < stand.bones.torso.position[1], 'kneel must lower the body');
   assert(meanY(kneel) < meanY(stand) - 0.02, 'garments must follow the lowered pose');
+});
+
+test('steady 60hz walk phases move body parts and clothing every consumed frame', () => {
+  const dt = 1 / 60;
+  const walkCyclesPerSecond = 1.6;
+  const yawDeg = 37;
+  const root: [number, number, number] = [4, 0.2, -6];
+  let prev = buildRigFrame('neutral', 'walk', 0, [], 'tee');
+  const probe = buildRigFrame('neutral', 'walk', dt * walkCyclesPerSecond, [], 'tee');
+  const assemblyIndex = firstMovingIndex(prev.assembly, probe.assembly);
+  const clothingIndex = firstMovingIndex(prev.clothing, probe.clothing);
+  assert(assemblyIndex >= 0, 'walk must expose at least one moving body part for the consumption-layer probe');
+  assert(clothingIndex >= 0, 'walk must expose at least one moving clothing part for the consumption-layer probe');
+  let zeroAssemblyFrames = 0;
+  let zeroClothingFrames = 0;
+  let maxAssemblyStep = 0;
+  let maxClothingStep = 0;
+  for (let frame = 1; frame <= 60; frame += 1) {
+    const phase = frame * dt * walkCyclesPerSecond;
+    const next = buildRigFrame('neutral', 'walk', phase, [], 'tee');
+    const assemblyStep = dist3(
+      turnPlace(next.assembly[assemblyIndex].position, yawDeg, root),
+      turnPlace(prev.assembly[assemblyIndex].position, yawDeg, root),
+    );
+    const clothingStep = dist3(
+      turnPlace(next.clothing[clothingIndex].position, yawDeg, root),
+      turnPlace(prev.clothing[clothingIndex].position, yawDeg, root),
+    );
+    if (assemblyStep <= 1e-7) zeroAssemblyFrames += 1;
+    if (clothingStep <= 1e-7) zeroClothingFrames += 1;
+    maxAssemblyStep = Math.max(maxAssemblyStep, assemblyStep);
+    maxClothingStep = Math.max(maxClothingStep, clothingStep);
+    prev = next;
+  }
+  assertEqual(zeroAssemblyFrames, 0, 'body assembly must not emit zero/zero/jump local pose frames under steady walking');
+  assertEqual(zeroClothingFrames, 0, 'clothing must not emit zero/zero/jump local pose frames under steady walking');
+  assert(maxAssemblyStep < 0.01, `assembly per-frame step stays small (${maxAssemblyStep})`);
+  assert(maxClothingStep < 0.01, `clothing per-frame step stays small (${maxClothingStep})`);
 });
 
 finish('game/figure/rig');

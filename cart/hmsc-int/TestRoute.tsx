@@ -63,8 +63,6 @@ const CAMERA = {
 const GAIT = {
   walkCyclesPerSecond: 1.6,
   runCyclesPerSecond: 2.3,
-  /** rig identity steps per gait cycle (the N-cached-bakes idiom) */
-  framesPerCycle: 12,
 } as const;
 const FRAME = { minDtSeconds: 0.001, maxDtSeconds: 0.05 } as const;
 const PLAYER_FIGURE_SEED = 1;
@@ -115,6 +113,25 @@ function clamp(n: number, lo: number, hi: number): number {
 
 function normalizeYawDegrees(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
+}
+
+function dist3(a: readonly number[], b: readonly number[]): number {
+  const dx = a[0] - b[0], dy = a[1] - b[1], dz = a[2] - b[2];
+  return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+function turnPlace(p: readonly number[], yawDeg: number, offset: readonly number[]): [number, number, number] {
+  const rad = yawDeg * DEG;
+  const c = Math.cos(rad), s = Math.sin(rad);
+  return [p[0] * c + p[2] * s + offset[0], p[1] + offset[1], -p[0] * s + p[2] * c + offset[2]];
+}
+
+function movingAssemblyProbe(rig: ReturnType<typeof GAME_FIGURE.buildRigFrame>) {
+  return rig.assembly.find((inst) => inst.bone === 'lUpperArm') ?? rig.assembly.find((inst) => inst.bone === 'lThigh') ?? rig.assembly[0];
+}
+
+function movingClothingProbe(rig: ReturnType<typeof GAME_FIGURE.buildRigFrame>) {
+  return rig.clothing[3] ?? rig.clothing[0];
 }
 
 // The authored GameState's world slice IS the captured world-grid shape
@@ -191,6 +208,29 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
   const lookRef = useRef({ yaw: props.state.player.yawDegrees, pitch: CAMERA.initialPitchDegrees });
   const cameraRef = useRef<any>(null);
   const nativeCameraRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
+  const playerProbeRef = useRef({
+    lastLog: 0,
+    frames: 0,
+    rootMoves: 0,
+    assemblyMoves: 0,
+    clothingMoves: 0,
+    assemblyLocalMoves: 0,
+    clothingLocalMoves: 0,
+    dtSum: 0,
+    maxRootDelta: 0,
+    maxAssemblyDelta: 0,
+    maxClothingDelta: 0,
+    maxAssemblyLocalDelta: 0,
+    maxClothingLocalDelta: 0,
+    zeroAssemblyLocalWhileRoot: 0,
+    zeroClothingLocalWhileRoot: 0,
+    lastRoot: null as [number, number, number] | null,
+    lastAssembly: null as [number, number, number] | null,
+    lastClothing: null as [number, number, number] | null,
+    lastAssemblyLocal: null as [number, number, number] | null,
+    lastClothingLocal: null as [number, number, number] | null,
+    lastRenderNow: 0,
+  });
   const keysRef = useRef<ReturnType<typeof GAME_INPUT.createKeyState> | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   // ADS aim (the ruled camera is REGISTRY-WITH-AIM, Q3/Q3b): right-mouse hold
@@ -318,16 +358,79 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     const parts = buildPartRender(doc, GAME_FIGURE.hedDepthGrid(doc), PLAYER_FIGURE_CART_KEY, PLAYER_FIGURE_SEED);
     return { doc, parts };
   }, []);
-  // Camera-feel fix (measured: the figure is 57 mesh nodes vs the old 19 — a
-  // 3× bridge UPDATE storm that dragged the camera with it). The rig is memo'd
-  // on (pose, quantized gait) and the mesh subtree on stable props, so an IDLE
-  // camera drag diffs exactly one node: the camera. Gait quantizes to N steps
-  // per cycle (the content-addressed N-bakes idiom) — identity only changes
-  // ~19×/s while walking instead of every frame.
+  // Camera-feel fix after V23: the camera no longer pays the figure's React
+  // update cost, so the player model must stay frame-continuous. The old
+  // quantized gait path made body/clothing transforms update at ~19Hz while
+  // the root offset moved at frame cadence; that read as PLAYERJIT-0605.
   const pose = player.moving ? 'walk' : 'stand';
-  const gaitStep = Math.round(player.gaitPhase * GAIT.framesPerCycle) / GAIT.framesPerCycle;
-  const rig = useMemo(() => GAME_FIGURE.buildRigFrame('neutral', pose, gaitStep), [pose, gaitStep]);
+  const rig = useMemo(() => GAME_FIGURE.buildRigFrame('neutral', pose, player.gaitPhase), [pose, player.gaitPhase]);
   const figureOffset = useMemo<[number, number, number]>(() => [player.x, player.y, player.z], [player.x, player.y, player.z]);
+
+  useEffect(() => {
+    const probe = playerProbeRef.current;
+    const now = GAME_LOOP.now();
+    const dtMs = probe.lastRenderNow > 0 ? now - probe.lastRenderNow : 0;
+    probe.lastRenderNow = now;
+    const root = figureOffset;
+    const assemblySample = movingAssemblyProbe(rig);
+    const clothingSample = movingClothingProbe(rig);
+    const assemblyLocal = turnPlace(assemblySample?.position ?? [0, 0, 0], player.yaw, [0, 0, 0]);
+    const clothingLocal = turnPlace(clothingSample?.position ?? assemblySample?.position ?? [0, 0, 0], player.yaw, [0, 0, 0]);
+    const assembly = turnPlace(assemblySample?.position ?? [0, 0, 0], player.yaw, figureOffset);
+    const clothing = turnPlace(clothingSample?.position ?? assemblySample?.position ?? [0, 0, 0], player.yaw, figureOffset);
+    if (probe.lastRoot && probe.lastAssembly && probe.lastClothing && probe.lastAssemblyLocal && probe.lastClothingLocal) {
+      const rootDelta = dist3(root, probe.lastRoot);
+      const assemblyDelta = dist3(assembly, probe.lastAssembly);
+      const clothingDelta = dist3(clothing, probe.lastClothing);
+      const assemblyLocalDelta = dist3(assemblyLocal, probe.lastAssemblyLocal);
+      const clothingLocalDelta = dist3(clothingLocal, probe.lastClothingLocal);
+      probe.frames += 1;
+      probe.dtSum += dtMs;
+      if (rootDelta > 1e-5) probe.rootMoves += 1;
+      if (assemblyDelta > 1e-5) probe.assemblyMoves += 1;
+      if (clothingDelta > 1e-5) probe.clothingMoves += 1;
+      if (assemblyLocalDelta > 1e-5) probe.assemblyLocalMoves += 1;
+      if (clothingLocalDelta > 1e-5) probe.clothingLocalMoves += 1;
+      if (rootDelta > 1e-5 && assemblyLocalDelta <= 1e-5) probe.zeroAssemblyLocalWhileRoot += 1;
+      if (rootDelta > 1e-5 && clothingLocalDelta <= 1e-5) probe.zeroClothingLocalWhileRoot += 1;
+      probe.maxRootDelta = Math.max(probe.maxRootDelta, rootDelta);
+      probe.maxAssemblyDelta = Math.max(probe.maxAssemblyDelta, assemblyDelta);
+      probe.maxClothingDelta = Math.max(probe.maxClothingDelta, clothingDelta);
+      probe.maxAssemblyLocalDelta = Math.max(probe.maxAssemblyLocalDelta, assemblyLocalDelta);
+      probe.maxClothingLocalDelta = Math.max(probe.maxClothingLocalDelta, clothingLocalDelta);
+    }
+    probe.lastRoot = [...root] as [number, number, number];
+    probe.lastAssembly = assembly;
+    probe.lastClothing = clothing;
+    probe.lastAssemblyLocal = assemblyLocal;
+    probe.lastClothingLocal = clothingLocal;
+    if (now - probe.lastLog >= 1000 && probe.frames > 0) {
+      console.log(
+        `[probe-player-model] frames=${probe.frames} avgRenderDtMs=${(probe.dtSum / probe.frames).toFixed(2)} ` +
+        `rootMoves=${probe.rootMoves} assemblyWorldMoves=${probe.assemblyMoves} clothingWorldMoves=${probe.clothingMoves} ` +
+        `assemblyLocalMoves=${probe.assemblyLocalMoves} clothingLocalMoves=${probe.clothingLocalMoves} ` +
+        `zeroAssemblyLocalWhileRoot=${probe.zeroAssemblyLocalWhileRoot} zeroClothingLocalWhileRoot=${probe.zeroClothingLocalWhileRoot} ` +
+        `maxRootDelta=${probe.maxRootDelta.toFixed(4)} maxAssemblyWorldDelta=${probe.maxAssemblyDelta.toFixed(4)} maxClothingWorldDelta=${probe.maxClothingDelta.toFixed(4)} ` +
+        `maxAssemblyLocalDelta=${probe.maxAssemblyLocalDelta.toFixed(4)} maxClothingLocalDelta=${probe.maxClothingLocalDelta.toFixed(4)} ` +
+        `root=(${root.map((n) => n.toFixed(3)).join(',')}) assemblyProbe=(${assembly.map((n) => n.toFixed(3)).join(',')}) clothingProbe=(${clothing.map((n) => n.toFixed(3)).join(',')})`,
+      );
+      probe.lastLog = now;
+      probe.frames = 0;
+      probe.rootMoves = 0;
+      probe.assemblyMoves = 0;
+      probe.clothingMoves = 0;
+      probe.assemblyLocalMoves = 0;
+      probe.clothingLocalMoves = 0;
+      probe.dtSum = 0;
+      probe.maxRootDelta = 0;
+      probe.maxAssemblyDelta = 0;
+      probe.maxClothingDelta = 0;
+      probe.maxAssemblyLocalDelta = 0;
+      probe.maxClothingLocalDelta = 0;
+      probe.zeroAssemblyLocalWhileRoot = 0;
+      probe.zeroClothingLocalWhileRoot = 0;
+    }
+  }, [figureOffset, player.yaw, rig]);
 
   useEffect(() => {
     const next = initialPlayer(props.state, worldGrid);
