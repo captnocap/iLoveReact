@@ -40,6 +40,9 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 - `kindTextures.ts` (64) — GLOBAL per-kind part textures in the shared 'hmsc' store (key `cat:kind` → partId→textureId), broadcast via an IFTTT bus event; folded into instances at preview+compile with instance overrides winning.
 - `worldFile.ts` (178) + `assets.ts` (91) + `assetPrompt.ts` — the **other** (future) authoring lane: the world as a hand-editable `.tsx` file importing asset components, placements serialized as JSX tags at spreadsheet addresses; `ASSET_AUTHORING_PROMPT` is the codified contract for AI-generated assets (1 tile = 1m, 2-unit player anchor, Scene3D.Mesh emission). *Not wired to the main editor flow yet — a parallel model awaiting the bake pipeline.*
 
+**game/kinds/ — the kind registries (WO-2 capture, 2026-06-04)**
+- `game/kinds/` — the V4 ground-floor data layer, REWRITTEN fresh from the hmsc registries (V17-TRIAGE: capture = rewrite; the old files under `cart/hmsc/` stay untouched behavior references). Five families behind one door (`game/kinds/index.ts`, exported as `GAME_KINDS` through `game/index.ts`): `tiles.ts` (18 kinds; the LOCKED road grammar — lane trios, flow-neutral `junction`, walk-preferred `crosswalk` — with lane flow as table DATA `flow`/`TILE_FLOW_VECTORS`, not a naming convention), `props.ts` (16 kinds borrowing tile bundles), `npcs.ts` (4 kinds + the faction regard matrix), `roles.ts` (the open role axis), `landforms.ts` (4 kinds; every fixed-shape constant lifted into `LANDFORM_TUNING` per P2). Each family ships P4 behavior tests (`*.test.ts`, shared `game/_testkit.ts`, run under `tools/v8cli`); `CAPTURE.md` records what was deliberately not carried (dead door sub-fields, two duplicated fields) and every ambiguity surfaced.
+
 **2D paint surface**
 - `PaintCanvas.tsx` (1265, the largest file) — the bottom-left authoring quad. Four layers (paint/height/place/zone) over focused chunks only; each focused chunk is one `<ChunkSurface>`; "+" ghosts on open sides grow the map. Brush input is the cutout pattern: a screen-space `<Pressable>` sibling over the `<Canvas>` (same-node down/move for pointer capture), rails rendered after it to stay clickable. Alt-drag pans; WASD pans via the Canvas `drift*` props when this quad owns WASD focus. Host calls: `__canvas_screen_to_graph` (pointer→graph coords, the same telemetry binding pixel_icon_demo wraps) and `__tel_input` (focused-node check so typing in an input never paints); key state via `__keydown`/`__keyup`/`system:blur` bus.
 - `ChunkSurface.tsx` (72) — one chunk = one Effect quad; owns its coalesced GPU buffer (`usePaintedField`) and picks the layer's shader; registers a flush so a stroke re-uploads only its chunk.
@@ -127,3 +130,28 @@ Tile selection: Pointer-tool click (+ctrl-click) group of cells — the bulk-ove
 WASD focus: Exactly one bottom quad (canvas pan vs preview fly) owns the WASD keys, claimed by click, persisted per map.
 
 worldRev / viewRev / worldEpoch: Autosave trip counters (stroke edits / camera settles) and the remount key for PaintCanvas on map open.
+
+## The game/ ground floor + compile/verify (added 2026-06-05, Milestone-0 steps 1–2)
+
+`cart/hmsc-int/game/` is the V17 ground floor — `game/index.ts` is the ONLY
+door, exporting the 19 standard `GAME_*` names. Live at milestone-0:
+GAME_PHYSICS (typed wire wrapper over `__hmsc_physics_step` /
+`__hmsc_register_heightfield`; re-points when WO-1's honest bindings land),
+GAME_PATHING (door over runtime/pathing.ts + runtime/motion.ts), GAME_INPUT
+(transport only, V7), GAME_CAMERA (the pure side of @reactjit/cameras;
+solveCamera extracted to runtime/cameras/solve.ts), GAME_LOOP (clocks only —
+NO loop API per R3; the V8 45/min cadence + frame transport), GAME_COMMANDS
+(registry + hmsc-dialect parser — the V19 scripting surface), and GAME_KINDS
+(the five kind tables, captured by its own lane). The rest export an honest
+`{ status: 'capture-pending' }` so the standard import line already resolves.
+`@game` is a bundler alias for this directory (cli/cart/bundle.ts) and the
+V18 metafile-gate signal. Every family carries a P4 `*.test.ts` beside it
+(bundle with tools/esbuild, run under tools/v8cli).
+
+`cart/hmsc-int/compile/` is the V19 skeleton: `rjit game compile` bundles
+`compile/main.ts` → `zig-out/game/hmsc-headless.js`; `rjit game verify`
+compiles fresh, runs every `game/**/*.test.ts` suite, then boots the output
+headless under v8cli and replays every `compile/verify/*.cmds` command
+sequence, exiting with one `VERDICT GREEN/RED` line. The milestone-0 world is
+a state skeleton (boot / tick / status / help); it grows as captures land —
+the green light exists from day one and never goes dark.

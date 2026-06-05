@@ -29,6 +29,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/kinds (GAME_KINDS registries)',
+      purpose: ['world_gen', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/kinds/index.ts',
+      description:
+        'WO-2 capture (2026-06-04): the kind registries REWRITTEN fresh (V17-TRIAGE) — tiles (18 kinds, LOCKED road grammar with lane flow as table data), props (16), NPCs (4 + faction regard matrix), roles (open axis), landforms (4, fixed-shape constants lifted into LANDFORM_TUNING per P2). One door (index.ts → GAME_KINDS via game/index.ts); P4 behavior tests per family under tools/v8cli (shared game/_testkit.ts); CAPTURE.md records dropped dead fields (door sub-fields, two duplicates) and surfaced ambiguities. Old cart/hmsc registries untouched (V15-TRANSITION behavior references).',
+      dependsOn: ['game/_testkit.ts', 'game/index.ts'],
+      status: 'live',
+    },
+    {
       name: 'ProjectBar',
       purpose: ['ui', 'persistence'],
       kind: 'component',
