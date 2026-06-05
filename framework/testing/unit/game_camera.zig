@@ -48,6 +48,24 @@ fn expectNodeCamera(node: FakeCameraNode, solved: camera.Solved) !void {
     try expectClose(node.scene3d_fov, solved.fov);
 }
 
+fn solvedDistance(a: camera.Solved, b: camera.Solved) f32 {
+    const px = a.pos.x - b.pos.x;
+    const py = a.pos.y - b.pos.y;
+    const pz = a.pos.z - b.pos.z;
+    const tx = a.target.x - b.target.x;
+    const ty = a.target.y - b.target.y;
+    const tz = a.target.z - b.target.z;
+    return @sqrt(px * px + py * py + pz * pz + tx * tx + ty * ty + tz * tz);
+}
+
+fn nodeSolved(node: FakeCameraNode) camera.Solved {
+    return .{
+        .pos = .{ .x = node.scene3d_pos_x, .y = node.scene3d_pos_y, .z = node.scene3d_pos_z },
+        .target = .{ .x = node.scene3d_look_x, .y = node.scene3d_look_y, .z = node.scene3d_look_z },
+        .fov = node.scene3d_fov,
+    };
+}
+
 fn expectBetween(actual: f32, a: f32, b: f32) !void {
     try testing.expect(actual > @min(a, b));
     try testing.expect(actual < @max(a, b));
@@ -391,6 +409,51 @@ test "visible test camera layout fields receive the native frame when an editor 
 
     try expectNodeCamera(visible_layout, camera.solveOrbit(moved_params));
     try expectNodeCamera(hidden_layout, hidden_boot);
+}
+
+test "per-node moving target stream matches legacy staging smoothness at the consumed layout fields" {
+    const node: u32 = 44;
+    const frames = [_]u32{ 1, 17, 33, 50, 67, 83, 100, 117, 133, 150 };
+
+    var legacy_layout = FakeCameraNode{ .scene3d_camera = true };
+    var legacy_last: ?camera.Solved = null;
+    var legacy_max_step: f32 = 0;
+    camera.resetForTests();
+    camera.setOrbit(.{ .target = .{ .x = 0.5, .y = 1.45, .z = 0.5 }, .yaw = 0, .pitch = 17.8, .dist = 7.65, .fov = 52 });
+    camera.setMode(.orbit);
+    camera.bindNode(node);
+    for (frames, 0..) |now, i| {
+        const target_x = 0.5 + @as(f32, @floatFromInt(i)) * 0.04;
+        camera.setOrbit(.{ .target = .{ .x = target_x, .y = 1.45, .z = 0.5 }, .yaw = 0, .pitch = 17.8, .dist = 7.65, .fov = 52 });
+        const solved = camera.stepNode(node, now) orelse return error.MissingLegacyCamera;
+        camera.writeNode(&legacy_layout, solved);
+        const consumed = nodeSolved(legacy_layout);
+        if (legacy_last) |prev| legacy_max_step = @max(legacy_max_step, solvedDistance(prev, consumed));
+        legacy_last = consumed;
+    }
+
+    var node_layout = FakeCameraNode{ .scene3d_camera = true };
+    var node_last: ?camera.Solved = null;
+    var node_max_step: f32 = 0;
+    camera.resetForTests();
+    camera.bindNode(node);
+    camera.setOrbitForNode(node, .{ .target = .{ .x = 0.5, .y = 1.45, .z = 0.5 }, .yaw = 0, .pitch = 17.8, .dist = 7.65, .fov = 52 });
+    camera.setModeForNode(node, .orbit);
+    for (frames, 0..) |now, i| {
+        // Mirrors the declarative nativeCamera prop being applied again during
+        // React updates: rebinding an existing slot must not reset smoothing.
+        camera.bindNode(node);
+        const target_x = 0.5 + @as(f32, @floatFromInt(i)) * 0.04;
+        camera.setOrbitForNode(node, .{ .target = .{ .x = target_x, .y = 1.45, .z = 0.5 }, .yaw = 0, .pitch = 17.8, .dist = 7.65, .fov = 52 });
+        const solved = camera.stepNode(node, now) orelse return error.MissingNodeCamera;
+        camera.writeNode(&node_layout, solved);
+        const consumed = nodeSolved(node_layout);
+        if (node_last) |prev| node_max_step = @max(node_max_step, solvedDistance(prev, consumed));
+        node_last = consumed;
+    }
+
+    try expectNodeCamera(node_layout, nodeSolved(legacy_layout));
+    try expectClose(node_max_step, legacy_max_step);
 }
 
 test "unbind cleans state and rebind is safe" {
