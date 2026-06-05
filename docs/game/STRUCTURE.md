@@ -98,10 +98,11 @@ Dependencies point one way; violating an arrow is a bug:
 ```
 labs/     → game/ only.                      (a lab that imports an editor is wrong)
 editors/  → game/ + shell/ + data/.
-game/     → framework bindings + runtime/.   (never imports editors, labs, shell)
+game/     → framework bindings + runtime/ + data/.   (never imports editors, labs, shell)
 compile/  → game/ + data/.
 shell/    → nothing game-specific.
-data/     → imported by everyone, imports nothing (it's data).
+data/     → imports nothing (it's data). Imported by game/, editors/, compile/ —
+            labs never touch data/ directly; it reaches them through game/'s door.
 ```
 
 - `@game` becomes a bundler alias for `cart/hmsc-int/game` — labs and editors
