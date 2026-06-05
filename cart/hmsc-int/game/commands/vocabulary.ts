@@ -19,8 +19,9 @@
 // config.sky.hour, world.spawnedEntities...) so saved command sequences keep
 // meaning the same thing.
 
-import { GAME_KINDS, tileKindDefinition, isTileKind, tileKindNamesForConsole, propKindNamesForConsole } from '../kinds';
+import { GAME_KINDS, mountainTrailheadPoint, tileKindDefinition, isTileKind, tileKindNamesForConsole, propKindNamesForConsole } from '../kinds';
 import { GAME_PERCEPTION } from '../perception';
+import { GAME_WORLD, type GridCell, type LandformPlacement, type PlacedCell, type WorldSurfaceRegion } from '../world';
 import { parseCommandValue } from './parser';
 import type { CommandRegistry } from './index';
 
@@ -65,9 +66,15 @@ export const COMMAND_TUNING = {
   player: {
     defaultWalkSpeedMetersPerSecond: 2.4,
     defaultRunSpeedMetersPerSecond: 5.8,
+    /** R4 scale contract (HMSC_SCALE.playerStepHeightMeters) — pv_respawn's ground-snap reach. */
+    stepHeightMeters: 0.35,
   },
   /** R4: 1 tile = 1 meter — the world-scale contract. */
-  world: { cellSizeMeters: 1 },
+  world: {
+    cellSizeMeters: 1,
+    /** wv_mountain trailhead drop-in clearance above the bench surface. */
+    trailheadLiftMeters: 0.05,
+  },
   spawn: {
     defaultEntityRadiusMeters: 0.28,
     crateEntityRadiusMeters: 0.42,
@@ -143,8 +150,18 @@ export type GameCommandState = {
     walkSpeedMetersPerSecond: number;
     runSpeedMetersPerSecond: number;
     physics: { velocity: Vec3Like; grounded: boolean };
+    /** the armed respawn cell — a save checkpoint or pv_respawn's target (reference dot path) */
+    respawnCell?: GridCell;
   };
-  world: { cellSizeMeters: number; spawnedEntities: Record<string, SpawnedEntity> };
+  // The world-grid slice rides the GAME_WORLD shapes directly (same reference
+  // dot paths: world.placedCells, world.surfaceRegions, world.landforms).
+  world: {
+    cellSizeMeters: number;
+    spawnedEntities: Record<string, SpawnedEntity>;
+    surfaceRegions: WorldSurfaceRegion[];
+    placedCells: Record<string, PlacedCell>;
+    landforms: LandformPlacement[];
+  };
   events: { nextSerial: number; recent: GameEvent[] };
   nextEntitySerial: number;
   __commandPersistence?: CommandPersistence;
@@ -177,7 +194,7 @@ export function createGameCommandState(): GameCommandState {
       runSpeedMetersPerSecond: t.player.defaultRunSpeedMetersPerSecond,
       physics: { velocity: { x: 0, y: 0, z: 0 }, grounded: true },
     },
-    world: { cellSizeMeters: t.world.cellSizeMeters, spawnedEntities: {} },
+    world: { cellSizeMeters: t.world.cellSizeMeters, spawnedEntities: {}, surfaceRegions: [], placedCells: {}, landforms: [] },
     events: { nextSerial: 1, recent: [] },
     nextEntitySerial: 0,
   };
@@ -360,15 +377,15 @@ function tileNoiseLine(): string {
  * One entry per owner so the supervisor can hand each list to its lane.
  */
 export const NOT_YET_CAPTURED: Record<string, string[]> = {
-  'world grid (V4: placed cells, surface regions, triggers, ground heights)': [
-    'wv_place', 'wv_fill', 'wv_remove', 'wv_trigger', 'pv_respawn',
-  ],
+  // world grid (V4): CAPTURED — wv_place/wv_fill/wv_remove/wv_trigger/
+  // pv_respawn run for real through game/world/.
   'world grid pathing (V4 grid x V5 host pathing integration)': ['wv_path'],
   'road grammar world system (roads, junctions)': ['wv_road', 'wv_intersection', 'wv_culdesac'],
   'traffic system (signal clock, phase overrides)': ['wv_signal'],
   'world props placement (kind data IS captured in game/kinds)': ['wv_prop'],
   'buildings + interiors world system': ['wv_building', 'wv_enter', 'wv_leave'],
-  'world landform instances (kind data IS captured in game/kinds)': ['wv_mountain'],
+  // world landform instances (V4): CAPTURED — wv_mountain runs for real
+  // over world.landforms + the kinds registry's trailhead helper.
   'world zones': ['wv_zone'],
   'placement validation (placementCheck)': ['wv_validate'],
   'lab scenes (V13 labs-route integration with the game world)': ['lab_list', 'lab_spawn', 'lab_exit'],
@@ -798,11 +815,108 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
   notYet('lab_exit', 'lab_exit', 'Return from a lab scene to the normal game scene.');
   notYet('gv_controls', 'gv_controls', 'Print the canonical input contract.');
   notYet('gv_perflog', 'gv_perflog [0|1|2|toggle] [spikeRatio] [minJumpMs]', 'Toggle the spike perf recorder.');
-  notYet('pv_respawn', 'pv_respawn', 'Teleport the player to the armed respawn cell.');
-  notYet('wv_place', 'wv_place <kind> <x> <z> [y]', 'Place a world cell on the construction grid.');
-  notYet('wv_fill', 'wv_fill <kind> <x> <z> <width> <depth> [y]', 'Fill a rectangle of one tile kind as a surface region.');
-  notYet('wv_remove', 'wv_remove <x> <z> [y]', 'Remove a placed world cell.');
-  notYet('wv_trigger', 'wv_trigger <x> <z> [y] [command...|off]', 'Show, set, or clear an enter-cell command trigger.');
+  // ── the world grid commands (V4: CAPTURED — run for real via game/world/) ──
+  // The door's mutators are pure state-in/state-out; the vocabulary owns
+  // mutating its ctx, so each body assigns the returned slice fields back.
+
+  define({
+    name: 'pv_respawn',
+    usage: 'pv_respawn',
+    summary: 'Teleport the player to the armed respawn cell — the spawn paired with the last save checkpoint stepped on, or the world default spawn.',
+    run: (game) => {
+      const cell = game.player.respawnCell ?? GAME_WORLD.defaultSpawnCell(game.world);
+      if (!cell) throw new Error('no respawn point set — step on a save point or author a spawn marker');
+      const point = GAME_WORLD.respawnPoint(game.world, cell, COMMAND_TUNING.player.stepHeightMeters, game.player.position.y);
+      game.player.position = point.position;
+      game.player.physics.velocity = { x: 0, y: 0, z: 0 };
+      game.player.physics.grounded = true;
+      return [`respawned at ${cell.x}, ${cell.z}`];
+    },
+  });
+
+  define({
+    name: 'wv_place',
+    usage: 'wv_place <kind> <x> <z> [y]',
+    summary: 'Place a world cell on the construction grid.',
+    run: (game, args) => {
+      const kind = args[0];
+      if (!kind) throw new Error('usage: wv_place <kind> <x> <z> [y]');
+      if (!isTileKind(kind)) throw new Error(`unknown tile kind ${kind}; expected one of ${tileKindNamesForConsole()}`);
+      const cell = { x: numberArg(args[1], 'x'), y: args[3] == null ? 0 : numberArg(args[3], 'y'), z: numberArg(args[2], 'z') };
+      // provenance: the registry hands specs args, not the raw line — rebuild it
+      const sourceLine = ['wv_place', ...args].join(' ');
+      game.world.placedCells = GAME_WORLD.placeCell(game.world, kind, cell, sourceLine).placedCells;
+      return [`placed ${kind} at cell ${GAME_WORLD.cellKey(cell)}`];
+    },
+  });
+
+  define({
+    name: 'wv_fill',
+    usage: 'wv_fill <kind> <x> <z> <width> <depth> [y]',
+    summary: 'Fill a rectangle of one tile kind as a surface region (chunk-native).',
+    run: (game, args) => {
+      const kind = args[0];
+      if (!kind) throw new Error('usage: wv_fill <kind> <x> <z> <width> <depth> [y]');
+      if (!isTileKind(kind)) throw new Error(`unknown tile kind ${kind}; expected one of ${tileKindNamesForConsole()}`);
+      const x = numberArg(args[1], 'x');
+      const z = numberArg(args[2], 'z');
+      const width = numberArg(args[3], 'width');
+      const depth = numberArg(args[4], 'depth');
+      const y = args[5] == null ? 0 : numberArg(args[5], 'y');
+      if (width <= 0 || depth <= 0) throw new Error('width and depth must be positive');
+      const region: WorldSurfaceRegion = {
+        id: `fill_${x}_${z}_${width}x${depth}`,
+        label: `${tileKindDefinition(kind).label} fill`,
+        kind,
+        x,
+        y,
+        z,
+        width,
+        depth,
+        zoneKey: `fill_${x}_${z}`,
+      };
+      game.world.surfaceRegions = GAME_WORLD.addSurfaceRegion(game.world, region).surfaceRegions;
+      return [`filled ${kind} ${width}x${depth} @ [${x},${z}]`];
+    },
+  });
+
+  define({
+    name: 'wv_remove',
+    usage: 'wv_remove <x> <z> [y]',
+    summary: 'Remove a placed world cell.',
+    run: (game, args) => {
+      const cell = { x: numberArg(args[0], 'x'), y: args[2] == null ? 0 : numberArg(args[2], 'y'), z: numberArg(args[1], 'z') };
+      game.world.placedCells = GAME_WORLD.removeCell(game.world, cell).placedCells;
+      return [`removed cell ${GAME_WORLD.cellKey(cell)}`];
+    },
+  });
+
+  define({
+    name: 'wv_trigger',
+    usage: 'wv_trigger <x> <z> [y] [command...|off]',
+    summary: 'Show, set, or clear an enter-cell command trigger.',
+    run: (game, args) => {
+      const x = numberArg(args[0], 'x');
+      const z = numberArg(args[1], 'z');
+      let y = 0;
+      let commandStart = 2;
+      if (args[2] != null && Number.isFinite(Number(args[2])) && args[3] != null) {
+        y = numberArg(args[2], 'y');
+        commandStart = 3;
+      }
+      const cell = { x, y, z };
+      const placedCell = GAME_WORLD.placedCellAt(game.world, cell);
+      if (!placedCell) throw new Error(`no placed cell at ${GAME_WORLD.cellKey(cell)}`);
+      const triggerCommand = args.slice(commandStart).join(' ').trim();
+      if (!triggerCommand) return [`${GAME_WORLD.cellKey(cell)} trigger = ${placedCell.triggerCommand ?? 'none'}`];
+      if (triggerCommand === 'off') {
+        game.world.placedCells = GAME_WORLD.setCellTrigger(game.world, cell, null).placedCells;
+        return [`cleared trigger at ${GAME_WORLD.cellKey(cell)}`];
+      }
+      game.world.placedCells = GAME_WORLD.setCellTrigger(game.world, cell, triggerCommand).placedCells;
+      return [`${GAME_WORLD.cellKey(cell)} trigger = ${triggerCommand}`];
+    },
+  });
   notYet('wv_path', 'wv_path <fromX> <fromZ> <toX> <toZ> [y] [pedestrian|runner|vehicle]', 'Find a typed-tile grid path between two cells.');
   notYet('wv_road', 'wv_road [x z length [ns|ew] [lanesPerDir 1|2] [bike 1|0] [sidewalks 1|0]] | wv_road remove <id>', 'List roads, or lay a road.');
   notYet('wv_intersection', 'wv_intersection <x> <z> [lanesPerDir 1|2] [bike 1|0] [sidewalks 1|0] | wv_intersection remove <id>', 'Lay a four-way intersection.');
@@ -811,7 +925,30 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
   notYet('wv_building', 'wv_building [kinds|skins] | wv_building <kind> <x> <z> [...] | wv_building remove <id>', 'List/place/remove a building, or skin one face.');
   notYet('wv_enter', 'wv_enter <buildingId>', 'Enter a closed (interior) building.');
   notYet('wv_leave', 'wv_leave', 'Leave the current building interior.');
-  notYet('wv_mountain', 'wv_mountain | wv_mountain trailhead [id]', 'List mountains, or teleport to a mountain trailhead.');
+  define({
+    name: 'wv_mountain',
+    usage: 'wv_mountain | wv_mountain trailhead [id]',
+    summary: 'List mountains, or teleport to a mountain trailhead to start the climb.',
+    run: (game, args) => {
+      const mountains = game.world.landforms.filter((lf) => lf.kind === 'mountain');
+      if (args.length === 0) {
+        if (mountains.length === 0) return ['no mountains'];
+        return mountains.map((m) =>
+          `${m.id} ${m.label} peak ${m.params.peak}m r=${m.params.baseRadius}m @ [${m.centerX},${m.centerZ}]`,
+        );
+      }
+      if (args[0] === 'trailhead') {
+        const mountain = args[1] ? mountains.find((m) => m.id === args[1]) : mountains[0];
+        if (!mountain) throw new Error(args[1] ? `no mountain ${args[1]}` : 'no mountains');
+        const head = mountainTrailheadPoint(mountain);
+        game.player.position = { x: head.x, y: head.top + COMMAND_TUNING.world.trailheadLiftMeters, z: head.z };
+        game.player.physics.velocity = { x: 0, y: 0, z: 0 };
+        game.player.physics.grounded = true;
+        return [`at ${mountain.label} trailhead [${head.x.toFixed(1)},${head.z.toFixed(1)}] — walk the switchbacks up`];
+      }
+      throw new Error('usage: wv_mountain | wv_mountain trailhead [id]');
+    },
+  });
   notYet('wv_zone', 'wv_zone [name x z w d [flags...]] | wv_zone remove <id>', 'List zones, or define/remove a named area.');
   notYet('wv_validate', 'wv_validate | wv_validate <id> | wv_validate building <kind> <x> <z> [w d] | wv_validate prop <kind> <x> <z>', 'Audit placed things (or preview one) for bad tile/scale/spacing.');
 }

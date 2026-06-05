@@ -36,8 +36,8 @@ test('all 48 reference command names are registered — the script language is c
 test('every not-yet command fails LOUDLY, never silently (the capture boundary)', () => {
   const { registry, game } = freshConsole();
   const pending = Object.values(NOT_YET_CAPTURED).flat();
-  assert(pending.length >= 21, 'the pending list covers the uncaptured systems');
-  for (const flipped of ['gv_noise', 'gv_save', 'gv_load']) {
+  assert(pending.length >= 16, 'the pending list covers the uncaptured systems');
+  for (const flipped of ['gv_noise', 'gv_save', 'gv_load', 'wv_place', 'wv_fill', 'wv_remove', 'wv_trigger', 'pv_respawn']) {
     assert(!pending.includes(flipped), `${flipped} has a captured owner and must not stay in the pending list`);
   }
   for (const name of pending) {
@@ -222,6 +222,61 @@ test('cmd_help teaches the whole surface, including pending commands', () => {
   const one = registry.run(game, 'cmd_help wv_road');
   assertEqual(one.ok, true, 'help on a pending command still teaches its usage');
   assert(one.output[1].includes('usage: wv_road'), 'the usage line must print');
+});
+
+test('the world grid commands run for real: place, fill, trigger, remove, respawn (V4 captured)', () => {
+  const { registry, game } = freshConsole();
+
+  assertEqual(registry.run(game, 'wv_fill road 0 0 8 8').ok, true, 'wv_fill must paint a region');
+  assertEqual(game.world.surfaceRegions.length, 1, 'the region must land in state');
+  assertEqual(game.world.surfaceRegions[0].id, 'fill_0_0_8x8', 'the reference region id shape');
+
+  assertEqual(registry.run(game, 'wv_place spawn 3 3').ok, true, 'wv_place must place a cell');
+  assertEqual(game.world.placedCells['3,0,3'].kind, 'spawn', 'the spawn cell must land');
+  const badKind = registry.run(game, 'wv_place lava 1 1');
+  assertEqual(badKind.ok, false, 'unknown kinds must fail');
+  assert(badKind.output[0].includes('expected one of'), 'the failure must teach the valid kinds');
+
+  assertEqual(registry.run(game, 'wv_trigger 3 3 gv_time noon').ok, true, 'wv_trigger must set a command');
+  assertEqual(game.world.placedCells['3,0,3'].triggerCommand, 'gv_time noon', 'the trigger must land');
+  const show = registry.run(game, 'wv_trigger 3 3');
+  assert(show.output[0].includes('gv_time noon'), 'bare wv_trigger must show the command');
+  registry.run(game, 'wv_trigger 3 3 off');
+  assertEqual(game.world.placedCells['3,0,3'].triggerCommand, undefined, 'off must clear the trigger');
+  assertEqual(registry.run(game, 'wv_trigger 9 9 anything').ok, false, 'no placed cell → loud failure');
+
+  // pv_respawn: no marker → loud; the placed spawn is the world default; the
+  // landing y snaps to the painted road region's walkable top.
+  registry.run(game, 'pv_teleport 50 50 9');
+  const respawn = registry.run(game, 'pv_respawn');
+  assertEqual(respawn.ok, true, 'the placed spawn must serve as the default respawn');
+  assertEqual(game.player.position.x, 3.5, 'respawn lands on the cell centre');
+  assertClose(game.player.position.y, 0.07, 1e-9, 'respawn y snaps to the painted ground top');
+  assertEqual(game.player.physics.grounded, true, 'respawn grounds the player');
+
+  registry.run(game, 'wv_remove 3 3');
+  assertEqual(game.world.placedCells['3,0,3'], undefined, 'wv_remove must delete the cell');
+  delete game.player.respawnCell;
+  assertEqual(registry.run(game, 'pv_respawn').ok, false, 'no spawn anywhere → loud failure');
+});
+
+test('wv_mountain lists landform instances and drops the player at the trailhead', () => {
+  const { registry, game } = freshConsole();
+  assertEqual(registry.run(game, 'wv_mountain').output[0], 'no mountains', 'an empty world says so');
+  game.world.landforms.push({
+    id: 'mountain_a', kind: 'mountain', label: 'Mount Test',
+    centerX: 100, centerZ: 100, baseY: 0,
+    params: { baseRadius: 48, peak: 30, trailStartAngle: Math.PI / 2 },
+    createdByCommand: 'test',
+  });
+  const list = registry.run(game, 'wv_mountain');
+  assert(list.output[0].includes('mountain_a Mount Test peak 30m'), 'the listing must describe the instance');
+  const tp = registry.run(game, 'wv_mountain trailhead');
+  assertEqual(tp.ok, true, 'the trailhead teleport must run');
+  assertClose(game.player.position.x, 100, 1e-6, 'trailStartAngle π/2 puts the trailhead at +Z of centre');
+  assertClose(game.player.position.z, 148, 1e-6, 'trailhead radius = baseRadius');
+  assertClose(game.player.position.y, 0.05, 1e-9, 'the drop-in lift is the named tuning value');
+  assertEqual(registry.run(game, 'wv_mountain trailhead nope').ok, false, 'an unknown id fails loud');
 });
 
 test('a verify script over captured commands runs green end to end (V19)', () => {

@@ -174,6 +174,7 @@ is the capture done wrong.
 | scape chance + hmsc chance + coverFractionOf | game/chance.ts (V9 hybrid)             |
 | combat_lab perception + scape consequences | game/perception.ts (V12)                  |
 | hmsc world/tileKinds + prop/NPC registries | game/kinds/                               |
+| hmsc world/grid + surfaceHeights + landform instances + spawn/trigger drive-steps + hostPhysics' world-derivation half (V4: the tile system IS the system) | game/world/ (the substrate; collider data feeds game/physics.ts) |
 | hmsc-int existing paint/preview            | editors/world/                            |
 | hmsc-int ShaderLab/TextureStudio/materials | editors/materials/                        |
 | combat_lab / pathing_lab / ragdoll_lab / planet_run scenes | labs/<name>.tsx (rebuilt on @game, with notes) |

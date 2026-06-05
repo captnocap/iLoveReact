@@ -304,3 +304,37 @@ and playing the delivery gig advances OPENING_ARC past stage 5. 30 P4 tests
 ride `rjit game verify`; CAPTURE.md records the judgment calls (first-cut
 facts vocabulary, the strict numbers law, mechanical "unrelated death",
 caller-driven re-arm, rating-never-scales-pay, invented P2 values).
+
+## game/world/ — the world grid state (V4 capture, gap W-1, 2026-06-04)
+
+THE SUBSTRATE, REWRITTEN fresh — V4's "the tile system IS the system" gets
+its captured home, closing the last structural gap from the TestRoute
+inventory (TestRoute.REWIRE.md W-1). `grid.ts` owns the world-grid state the
+authored map lowers to (surface regions, placed cells, landform INSTANCES —
+kind MEANING stays in game/kinds), the R4 cell math (1 tile = 1 m), and pure
+state-in/state-out mutators; reference dot paths preserved so saved scripts
+keep meaning. `heights.ts` keeps the two height questions distinct: walkable
+ground (`groundTopAtWorldPosition` — tile walkability + landform slope gate
++ step reach; what the player stands on) vs the raw landform top
+(`landformGroundTopAt` — what a placed object rests on), plus footing
+resolution (water > placed cell > [junction] > [road] > landform footing >
+region — uncaptured lanes' seams documented in order). `colliders.ts` is the
+world→physics adapter: regions/cells → `CollisionRect[]`, landforms → baked
+`Heightfield[]` (the kind rise sampled across the footprint; a painted field
+bakes 1:1 — see-it == walk-it), feeding game/physics.ts's exact wire types
+(V1: ONE host system; the door derives data, never simulates); every cap
+truncation is RETURNED, never silent. `spawn.ts` captures the
+marker/trigger/respawn semantics as pure steps with inert returns
+(save↔spawn pairing never-self, once-per-entry debounces as data,
+ground-snapped respawn, first-spawn-wins default). `authored.ts` loads the
+USER'S AUTHORED MAP as data from the editor compile channel
+(localstore 'hmsc'/'game-state' — the channel traced, not invented; `raw`
+hands the parsed record to the other world lanes). `stream.ts` registers
+the V20 `world` concern (grid edits as events → the grid snapshot).
+Command stubs flipped: wv_place/wv_fill/wv_remove/wv_trigger/pv_respawn/
+wv_mountain run for real. Fidelity: a 251,550-comparison sweep against the
+reference math (heights/footing across all four landform kinds), 0
+mismatches; 21 P4 tests + 2 vocabulary tests ride `rjit game verify`.
+DELIBERATELY NOT a 20th `game/index.ts` export — the door list is RULED
+(V17); the question is surfaced to the supervisor, and in-game/ consumers
+import `../world` meanwhile.
