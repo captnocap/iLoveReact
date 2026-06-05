@@ -58,6 +58,7 @@ export const game_cutscene: DocIndex = {
   patterns: [
     {
       name: 'One pure clock drives every track',
+      purpose: ['game_loop', 'scripting'],
       description:
         'No track owns a clock or keeps state; sparse cues (last at ≤ t holds) select, the delegated system answers at exactly the same t. The 804-case fidelity sweep asserts byte-identity with GAME_CAMERA.solve / GAME_PATHING.sampleMotion / GAME_ANIMATION.sample over the whole clock.',
       appearsIn: ['hmsc-int'],
@@ -66,10 +67,12 @@ export const game_cutscene: DocIndex = {
   ],
   hazards: [
     {
+      name: 'camera cues are hard cuts — blends would be NEW format',
+      purpose: ['camera', 'format'],
       description:
         'Camera cue changes are hard CUTS — V16 names cues-at-times only; a blend/ease vocabulary between cues would be NEW format requiring a verdict, not an addition to sneak in. Moving shots belong inside one cue via params-as-pure-function of cue-local seconds.',
+      evidence: ['cart/hmsc-int/game/cutscene/index.ts (camera track selection: last cue at ≤ t holds)'],
       severity: 'low',
-      cart: 'hmsc-int',
     },
   ],
 };
