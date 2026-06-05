@@ -374,8 +374,8 @@ A new lab is a SCAFFOLD FROM A SCRIPT, so every lab carries the same shape:
 
     import { GAME_PHYSICS, GAME_PATHING, GAME_INPUT, GAME_CAMERA, ... } from <the ground floor>
 
-The GAME_* names are STANDARD — pathing, physics, input, camera, figure,
-vehicle, animation, kinds, loop, chrome, telemetry (the V14 list). Everything
+The GAME_* names are STANDARD — the canonical list is STRUCTURE.md's
+`game/index.ts` door (the V14 ground floor plus the later-added systems). Everything
 arrives ready to use; the lab just exports itself and can be loaded (the V13
 labs route). Host changes to test = rebuild the host — fine, that's the deal.
 **Installing this shape is the FIRST build task of the rebuild** — the shape
