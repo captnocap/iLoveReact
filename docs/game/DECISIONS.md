@@ -188,18 +188,18 @@ ANSWER: C, again we need to work on this, and there is still more internal tooli
 
 ## TIER C — CONFIRMATIONS (unanimous, no real competitor — object or initial)
 
-| # | Item | Action |
-|---|------|--------|
-| C1 | Physics bindings honesty split | `v8_bindings_hmsc_physics.zig` extracted; DORMANT banner (or delete per Q1) on phys/physics3d.zig; fictional header removed | ____ |
-| C2 | `__fs_write_bytes`/`__fs_copy` host fn | kill the 3 UTF-8-writeFile workarounds | ____ |
-| C3 | One color utility + one V3/clamp/lerp3 math module | retire 8+ re-rolls | ____ |
-| C4 | Pixel-icon codec module (`encode/decodeMatrix` + `.64.json`) | one home beside matrix.ts | ____ |
-| C5 | `PLAYER_VISUAL_*` exported from the figure module | rulers derive, never transcribe; delete the drifted ScaleLabScene orphan | ____ |
-| C6 | Stale-claims pass | car.tsx header, AGENTS.md MapCanvas, massive_map 8192/4096 labels, dead mesh trio, vestigial pixel editor | ____ |
-| C7 | Scene3D nested transforms (or one blessed `Part`/`placeLocal` helper) | retire 5+ ModelCtx re-rolls | ____ |
-| C8 | `Boxxx` blessed as the 2D batch primitive | pairs with Scene3D.Instances | ____ |
-| C9 | YXZ euler knowledge (`T·Ry·Rx·Rz·S`) gets one canonical home + shared `eulerFromQuat` | ____ |
-| C10 | Doctrine written down: see-it==hit-it; ground-truth-vs-display; game-loop vs editor-clock idioms | ____ |
+| # | Item | Action | Status |
+|---|------|--------|--------|
+| C1 | Physics bindings honesty split | `v8_bindings_hmsc_physics.zig` extracted; DORMANT banner (or delete per Q1) on phys/physics3d.zig; fictional header removed | accepted |
+| C2 | `__fs_write_bytes`/`__fs_copy` host fn | kill the 3 UTF-8-writeFile workarounds | accepted |
+| C3 | One color utility + one V3/clamp/lerp3 math module | retire 8+ re-rolls | accepted |
+| C4 | Pixel-icon codec module (`encode/decodeMatrix` + `.64.json`) | one home beside matrix.ts | accepted |
+| C5 | `PLAYER_VISUAL_*` exported from the figure module | rulers derive, never transcribe; delete the drifted ScaleLabScene orphan | accepted |
+| C6 | Stale-claims pass | car.tsx header, AGENTS.md MapCanvas, massive_map 8192/4096 labels, dead mesh trio, vestigial pixel editor | accepted |
+| C7 | Scene3D nested transforms (or one blessed `Part`/`placeLocal` helper) | retire 5+ ModelCtx re-rolls | accepted |
+| C8 | `Boxxx` blessed as the 2D batch primitive | pairs with Scene3D.Instances | accepted |
+| C9 | YXZ euler knowledge (`T·Ry·Rx·Rz·S`) | one canonical home + shared `eulerFromQuat` | accepted |
+| C10 | Doctrine written down | see-it==hit-it; ground-truth-vs-display; game-loop vs editor-clock idioms | accepted |
 
 ---
 
