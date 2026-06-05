@@ -48,8 +48,10 @@ import { CharactersRoute } from './editors/characters/CharactersRoute';
 import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
 import { CutoutRoute } from './editors/cutout/CutoutRoute';
 import { BuildRoute } from './editors/build/BuildRoute';
+import { SettingsRoute } from './editors/settings/SettingsRoute';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
+import { editorTunables, tuningStream } from './editors/tunables';
 import { worldStream } from './game/world/stream';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
@@ -400,6 +402,20 @@ function EditorShell() {
     }
   }, []);
   useEffect(() => () => worldSession?.close(), [worldSession]);
+
+  // ── The P2 tunables boot fold (editors/tunables.ts) ───────────────────────────
+  // Persisted knob edits (the V20 'tuning' stream's override map) fold back over
+  // the registered code defaults once per process, at shell mount — so a value
+  // tuned on /settings yesterday is the value every route reads today. Knobs
+  // registered after this (later module evals) pick their override up at
+  // registration; /settings owns the edit path.
+  useMemo(() => {
+    try {
+      editorTunables().applyOverrides(editorChannel(tuningStream).state().overrides);
+    } catch {
+      // no __fs_* host — tunables run on code defaults, editing still works
+    }
+  }, []);
 
   // ── Event-log trace (the categorized eventbus shown in the ProjectBar popover) ──
   // A stream of WHAT happened (tile painted, object moved, camera moved, ...), not
@@ -764,7 +780,7 @@ function EditorShell() {
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/test' ? 'test' : route.path === '/build' ? 'build' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
+  const activeRoute = route.path === '/test' ? 'test' : route.path === '/build' ? 'build' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
@@ -795,6 +811,7 @@ function EditorShell() {
         onCutout={() => nav.push('/cutout')}
         onVoxels={() => nav.push('/voxels')}
         onPerf={() => nav.push('/log')}
+        onSettings={() => nav.push('/settings')}
         onAssist={() => nav.push('/assist3d')}
         onTextures={() => nav.push('/textures')}
         onUndo={ws.undo}
@@ -880,6 +897,9 @@ function EditorShell() {
         <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} />}</Route>
         {/* The cutout painter (editors/cutout/) — the cutout app remade for skins/textures. */}
         <Route path="/cutout">{() => <CutoutRoute onExit={() => nav.push('/')} />}</Route>
+        {/* The grand settings page (editors/settings/) — the session event bus + the
+            P2 tunables registry (SETTINGS-0605). */}
+        <Route path="/settings">{() => <SettingsRoute onExit={() => nav.push('/')} />}</Route>
       </Box>
 
       {/* The maps menu lives here — the shell root's LAST child — so it paints on

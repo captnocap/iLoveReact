@@ -70,7 +70,11 @@ cart/hmsc-int/
     cutscenes/         timeline editor + scrubber over game/cutscene
     story/             story / missions / activities authoring (may split into
                        three routes as the systems grow; starts as one)
-    tuning/            P2 made real: every exposed value, edit → compile and go
+    settings/          the grand settings page (/settings): the session event
+                       bus viewer (read-only fold over the sessions stream) +
+                       the P2 tunables surface over editors/tunables.ts — every
+                       exposed value, edit → compile and go (LANDED 2026-06-05;
+                       this is the planned tuning/ slot, named by the ruling)
     console/           the command console (game/commands surface) — run, record,
                        and SAVE command sequences as replayable test scripts (V19)
 

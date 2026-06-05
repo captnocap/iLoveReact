@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'build' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'build' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout' | 'settings';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -66,6 +66,9 @@ interface ProjectBarProps {
   // Navigate to the /cutout route — the cutout painter (editors/cutout, the
   // cutout app experience remade; paints skins/textures on the shared painter).
   onCutout: () => void;
+  // Navigate to the /settings route — the grand settings page (editors/settings):
+  // the session event bus across every route channel + the P2 tunables registry.
+  onSettings: () => void;
 }
 
 function IconBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
@@ -118,6 +121,7 @@ export function ProjectBar(props: ProjectBarProps) {
         <IconBtn icon="Scissors" on={props.activeRoute === 'cutout'} onPress={props.onCutout} title="cutout painter" />
         <IconBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />
         <IconBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
+        <IconBtn icon="Settings" on={props.activeRoute === 'settings'} onPress={props.onSettings} title="settings" />
       </Box>
 
       {/* Undo / redo */}
