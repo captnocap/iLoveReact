@@ -334,8 +334,13 @@ export function TestRoute(props: { state: GameState; mapName: string; onExit: ()
     const limits = aimingRef.current
       ? { min: GAME_CAMERA.rigs.Aim.defaults.minPitch as number, max: GAME_CAMERA.rigs.Aim.defaults.maxPitch as number }
       : { min: CAMERA.minPitchDegrees, max: CAMERA.maxPitchDegrees };
+    // Horizontal sign: the engine renders world +X as screen-LEFT (the
+    // movement.zig mirror), and both rigs use compass yaw (yaw+ = CCW from
+    // above) — so yaw must DECREASE with a rightward drag for the view to
+    // turn screen-right. USER VERDICT pinned this: "left to right backwards,
+    // not top to bottom" (the old route carried the same inversion).
     setLook((l) => ({
-      yaw: l.yaw + dx * CAMERA.yawDegreesPerPixel,
+      yaw: l.yaw - dx * CAMERA.yawDegreesPerPixel,
       pitch: clamp(l.pitch - dy * CAMERA.pitchDegreesPerPixel, limits.min, limits.max),
     }));
   };
