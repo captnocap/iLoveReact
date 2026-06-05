@@ -548,6 +548,7 @@ pub fn build(b: *std.Build) void {
     const has_audio_input = b.option(bool, "has-audio-input", "Register __rawCapture_* bindings (raw mic capture for music sampling)") orelse false;
     const has_paintable = b.option(bool, "has-paintable", "Register __paintable_* bindings (persistent GPU mask textures)") orelse false;
     const has_physics_lab = b.option(bool, "has-physics-lab", "Register __physics_lab_* bindings (host-side demo physics)") orelse false;
+    const has_game_physics = b.option(bool, "has-game-physics", "Register __hmsc_*/__game_physics_* bindings (framework/game: the game's host-side physics + movement)") orelse false;
     const has_pathing = b.option(bool, "has-pathing", "Register __path_* bindings (host-side tile-grid A* pathing)") orelse false;
     // has_whisper, has_pg, has_embed, has_doom hoisted earlier (next to their compile/link blocks).
     options.addOption(bool, "has_process", has_process);
@@ -564,6 +565,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_audio_input", has_audio_input);
     options.addOption(bool, "has_paintable", has_paintable);
     options.addOption(bool, "has_physics_lab", has_physics_lab);
+    options.addOption(bool, "has_game_physics", has_game_physics);
     options.addOption(bool, "has_pathing", has_pathing);
     options.addOption(bool, "has_pg", has_pg or has_embed);
     options.addOption(bool, "has_embed", has_embed);
@@ -593,6 +595,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/audio_input.flag", if (has_audio_input) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/paintable.flag", if (has_paintable) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/physics_lab.flag", if (has_physics_lab) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/game_physics.flag", if (has_game_physics) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/pathing.flag", if (has_pathing) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/pg.flag", if (has_pg or has_embed) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/embed.flag", if (has_embed) "1\n" else "0\n");

@@ -806,10 +806,6 @@
         {
           "kind": "metafileInput",
           "input": "cart/physics_lab.tsx"
-        },
-        {
-          "kind": "metafileInput",
-          "input": "cart/hmsc/state/hostPhysics.ts"
         }
       ],
       "buildOptions": [
@@ -818,7 +814,30 @@
       "v8Bindings": [
         "physics_lab"
       ],
-      "note": "Registers the packed host physics bindings used by the standalone physics lab and by HMSC gameplay physics. HMSC calls __hmsc_physics_step; the older physics lab calls __physics_lab_* from the same Zig binding module."
+      "note": "Registers the __physics_lab_* packed host physics used by the standalone physics lab toy ONLY. The game's __hmsc_* sim graduated to framework/game/ behind the game-physics feature (WO-1)."
+    },
+    "game-physics": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "cart/hmsc/state/hostPhysics.ts"
+        },
+        {
+          "kind": "metafileInput",
+          "input": "cart/hmsc/state/terrainColliders.ts"
+        },
+        {
+          "kind": "metafileInputPrefix",
+          "input": "cart/hmsc-int/game/"
+        }
+      ],
+      "buildOptions": [
+        "has-game-physics"
+      ],
+      "v8Bindings": [
+        "game_physics"
+      ],
+      "note": "The game's host-side physics + movement (framework/game/physics.zig + movement.zig, V1/V7/V18), registered by framework/v8_bindings_game_physics.zig. Host fns keep their legacy __hmsc_* names (plus honest __game_physics_* aliases) so cart JS callers keep working. Fires for carts shipping the hmsc host-physics bridge or anything importing the cart/hmsc-int/game/ ground floor. A 2D interface cart pays zero bytes and zero host fns."
     },
     "pathing": {
       "triggers": [
