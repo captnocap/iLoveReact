@@ -49,9 +49,27 @@ function ChunkSurfaceImpl(props: {
   // Encode reads the live chunk buffers; recomputes only on a flushed stroke or a
   // layer/zone-def change (usePaintedField caps it at one encode+upload per frame).
   const surface = usePaintedField(() => {
-    if (layer === 'height') return [...encodeTileMap(chunk.tiles), ...Array.from(encodeField(chunk.height))];
-    if (layer === 'zone') return [...encodeTileMap(chunk.tiles), ...encodeZoneSection(chunk.zones, zones)];
-    return encodeTileMap(chunk.tiles); // paint + place: the tile ground
+    const enc = layer === 'height'
+      ? [...encodeTileMap(chunk.tiles), ...Array.from(encodeField(chunk.height))]
+      : layer === 'zone'
+        ? [...encodeTileMap(chunk.tiles), ...encodeZoneSection(chunk.zones, zones)]
+        : encodeTileMap(chunk.tiles); // paint + place: the tile ground
+    // [mapgone-probe MAPGONE2-0605] encode-layer count — stays until the user confirms
+    {
+      const header = 3 + (enc[2] ?? 0) * 3;
+      let painted = 0;
+      const hist = new Map<number, number>();
+      const cellEnd = header + chunk.tiles.idx.length;
+      for (let i = header; i < cellEnd && i < enc.length; i++) {
+        if (enc[i] >= 0) {
+          painted++;
+          hist.set(enc[i], (hist.get(enc[i]) ?? 0) + 1);
+        }
+      }
+      const top = Array.from(hist.entries()).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k}:${n}`).join(' ');
+      console.warn(`[mapgone] ChunkSurface ${key} layer=${layer} encLen=${enc.length} painted=${painted} cellHist=[${top}] palette[0..3]=${enc.slice(3, 12).map((v) => v.toFixed(2)).join(',')}`);
+    }
+    return enc;
   }, [layer, zones]);
 
   // Expose this chunk's flush to the parent brush; drop it when unfocused/unmounted.
@@ -60,7 +78,35 @@ function ChunkSurfaceImpl(props: {
     return () => unregister(key);
   }, [key, surface.touch, register, unregister]);
 
-  const shader = layer === 'height' ? HEIGHT_TILE_VIEW_WGSL : layer === 'zone' ? ZONE_VIEW_WGSL : TILE_FIELD_WGSL;
+  // [mapgone-probe MAPGONE2-0605] GPU-truth shader — paints raw D[] regions so
+  // the screen itself reports what the storage buffer holds. Quadrants:
+  //   TL = palette[0] (water — must be BLUE if the palette reached the GPU)
+  //   TR = palette[5] (sand — tan)
+  //   BL = cell[0] kind/17 grayscale (water=0 → black)
+  //   BR = the normal per-fragment lookup
+  // Flip MAPGONE_PROBE_SHADER on to re-run the GPU-truth diagnostic.
+  const MAPGONE_PROBE_SHADER = false;
+  const MAPGONE_WGSL = `
+@group(0) @binding(1) var<storage, read> D: array<f32>;
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  // red border marks each quad's true bounds; interior = the REAL lookup
+  if (in.uv.x < 0.01 || in.uv.x > 0.99 || in.uv.y < 0.01 || in.uv.y > 0.99) {
+    return vec4f(1.0, 0.1, 0.1, 1.0);
+  }
+  let cols = i32(D[0]);
+  let rows = i32(D[1]);
+  let pal = i32(D[2]);
+  let cellBase = 3 + pal * 3;
+  let cx = clamp(i32(floor(in.uv.x * f32(cols))), 0, cols - 1);
+  let cy = clamp(i32(floor(in.uv.y * f32(rows))), 0, rows - 1);
+  let kind = i32(D[cellBase + cy * cols + cx]);
+  if (kind < 0) { return vec4f(0.05, 0.07, 0.10, 1.0); }
+  let pbase = 3 + kind * 3;
+  return vec4f(D[pbase], D[pbase + 1], D[pbase + 2], 1.0);
+}
+`;
+  const baseShader = layer === 'height' ? HEIGHT_TILE_VIEW_WGSL : layer === 'zone' ? ZONE_VIEW_WGSL : TILE_FIELD_WGSL;
+  const shader = MAPGONE_PROBE_SHADER && layer !== 'height' && layer !== 'zone' ? MAPGONE_WGSL : baseShader;
 
   return (
     <Canvas.Node gx={chunk.cx * PATCH} gy={chunk.cz * PATCH} gw={PATCH} gh={PATCH}>

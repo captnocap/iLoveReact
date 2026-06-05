@@ -18,13 +18,13 @@ import { cellCenterToWorld, cellKey as gridCellKey } from '../hmsc/world/grid';
 import { type ChunkFloor, floorsToLandforms } from './chunkFloor';
 import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
-import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi, type BrushSettings } from './PaintCanvas';
+import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi, type BrushSettings, type CanvasView2D } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
 import { RightPanel, type TabId } from './RightPanel';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
-import { serializeMap, deserializeMap, emptyMap, type MapSnapshot, type EditorWorld } from './mapStore';
+import { serializeMap, deserializeMap, emptyMap, paintedCenter, type MapSnapshot, type EditorWorld } from './mapStore';
 import { ProjectBar, MapsMenu, EventLog } from './ProjectBar';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
@@ -94,6 +94,9 @@ interface MapPayload {
   cam?: PreviewCamera;                 // the 3D preview's free-fly pose
   overrides?: OverrideSnap[];          // per-cell property overrides (patch on kind)
   brush?: BrushSettings;               // paint/zone/height brush controls
+  view2d?: CanvasView2D;               // the 2D canvas camera (MAPGONE2-0605:
+                                       // unrestored, every remount snapped the
+                                       // viewport to the lattice origin)
 }
 
 function clampFrac(f: number): number {
@@ -237,6 +240,11 @@ function EditorShell() {
   // edit (PaintCanvas.onEdit) to trip the debounced autosave.
   const paintApiRef = useRef<PaintCanvasApi | null>(null);
   const [seedWorld, setSeedWorld] = useState<EditorWorld | null>(null);
+  // The 2D canvas camera the next PaintCanvas mount opens at: the map's saved
+  // view, or (older files) the painted-content centre — never the bare lattice
+  // origin on a non-empty map (MAPGONE2-0605: that read as "the map vanished"
+  // whenever the origin chunk is featureless at default zoom).
+  const [seedView, setSeedView] = useState<CanvasView2D | null>(null);
   const [worldEpoch, setWorldEpoch] = useState(0);
   const [worldRev, setWorldRev] = useState(0);
 
@@ -300,7 +308,7 @@ function EditorShell() {
     if (!api) return null; // canvas not mounted yet — skip this autosave tick
     const w = api.getWorld();
     const world = ptime('autosave', `serializeMap chunks=${w.chunks.size}`, () => serializeMap({ chunks: w.chunks, zones: w.zones, focus: w.focus, placements }));
-    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current };
+    return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d: api.getView() ?? undefined };
   }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
   const applyPayload = useCallback((env: SessionEnvelope<MapPayload>) => {
@@ -316,6 +324,12 @@ function EditorShell() {
     if (typeof p.showGrid === 'boolean') setShowGrid(p.showGrid);
     // Decode the world and remount PaintCanvas onto it.
     const w = p.world ? deserializeMap(p.world) : emptyMap();
+    // [mapgone-probe MAPGONE2-0605] boot-path count — stays until the user confirms
+    {
+      let painted = 0;
+      for (const c of w.chunks.values()) for (let i = 0; i < c.tiles.idx.length; i++) if (c.tiles.idx[i] >= 0) painted++;
+      console.warn(`[mapgone] applyPayload: world=${p.world ? 'present' : 'MISSING'} chunks=${w.chunks.size} focus=${w.focus.size} painted=${painted} placements=${w.placements.length}`);
+    }
     placeSeq.current = Math.max(placeSeq.current, maxPlacementSeq(w.placements));
     setPlacements(w.placements);
     setSelPlaceId(p.sel ?? null);
@@ -324,6 +338,17 @@ function EditorShell() {
     setOverrides(deserializeOverrides(p.overrides));
     setBrush(normalizeBrushSettings(p.brush));
     setSelCells([]); // selection is transient — never carries across a map switch
+    // The 2D camera: the saved view, else centre on the painted content (an
+    // older file or a pre-fix save) — never the bare lattice origin on a
+    // non-empty map (MAPGONE2-0605).
+    const restoredView = p.view2d && Number.isFinite(p.view2d.x) && Number.isFinite(p.view2d.y) && Number.isFinite(p.view2d.zoom) && p.view2d.zoom > 0
+      ? p.view2d
+      : (() => {
+          const center = paintedCenter(w, TILE_UNITS);
+          return center ? { x: center.gx, y: center.gy, zoom: 1 } : null;
+        })();
+    setSeedView(restoredView);
+    console.warn(`[mapgone] applyPayload: view2d=${p.view2d ? 'saved' : 'absent'} → seedView=${restoredView ? `${restoredView.x.toFixed(0)},${restoredView.y.toFixed(0)}@${restoredView.zoom.toFixed(2)}` : 'host default'}`);
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
   }, []);
@@ -800,6 +825,7 @@ function EditorShell() {
             <MemoPaintCanvas
               key={`${ws.stem}#${worldEpoch}`}
               initialWorld={seedWorld}
+              initialView={seedView}
               apiRef={paintApiRef}
               onEdit={onCanvasEdit}
               tool={tool}

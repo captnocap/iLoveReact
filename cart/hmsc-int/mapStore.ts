@@ -187,3 +187,32 @@ export function emptyMap(): EditorWorld {
   chunks.set(chunkKey(0, 0), makeChunk(0, 0));
   return { chunks, zones: [], focus: new Set([chunkKey(0, 0)]), placements: [] };
 }
+
+// The graph-space centre of everything painted — where the canvas should look
+// when a map opens without a saved 2D view (MAPGONE2-0605: the default view
+// sat at the lattice origin; on a map whose origin chunk is a featureless
+// interior, the boot canvas read as "blank" while every byte was intact).
+// Uses the chunk lattice law (chunk (cx,cz) is CENTRED at cx*PATCH —
+// see ChunkSurface): cell (x,y) of chunk (cx,cz) sits at
+// cx*PATCH − PATCH/2 + (x + 0.5)*tileUnits.
+export function paintedCenter(world: EditorWorld, tileUnits: number): { gx: number; gy: number } | null {
+  const patch = CHUNK_TILES * tileUnits;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let any = false;
+  for (const c of world.chunks.values()) {
+    const baseX = c.cx * patch - patch / 2;
+    const baseY = c.cz * patch - patch / 2;
+    for (let i = 0; i < c.tiles.idx.length; i++) {
+      if (c.tiles.idx[i] < 0) continue;
+      any = true;
+      const x = baseX + ((i % c.tiles.cols) + 0.5) * tileUnits;
+      const y = baseY + (Math.floor(i / c.tiles.cols) + 0.5) * tileUnits;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (!any) return null;
+  return { gx: (minX + maxX) / 2, gy: (minY + maxY) / 2 };
+}

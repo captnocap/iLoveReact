@@ -55,10 +55,22 @@ export type Layer = 'paint' | 'height' | 'place' | 'zone';
 export type { BrushMode, BrushShape, BrushProfile };
 export type BrushSettings = BrushRailSettings;
 
+// The 2D canvas camera as persisted state (MAPGONE2-0605: an unrestored view
+// snapped to the lattice origin on every remount — on a map whose origin chunk
+// is featureless, the canvas read as "blank" while every byte was intact).
+export interface CanvasView2D {
+  x: number;
+  y: number;
+  zoom: number;
+}
+
 // The serialize seam: the cart pulls the live world (chunks + zone defs + focus)
 // through this on autosave. Placements live in the cart, so they're added there.
 export interface PaintCanvasApi {
   getWorld: () => Pick<EditorWorld, 'chunks' | 'zones' | 'focus'>;
+  /** the live 2D camera (centre + px-per-graph-unit), derived through the
+   *  host's affine screen→graph mapping; null before first layout */
+  getView: () => CanvasView2D | null;
 }
 
 // The place-layer state + actions, owned by the cart (so placements persist /
@@ -383,6 +395,10 @@ export function PaintCanvas(props: {
   // when opening a different map, so this only ever reads on the first render of
   // each mount. null/undefined = a blank map (one seed chunk).
   initialWorld?: EditorWorld | null;
+  // Where the 2D camera opens: the map's saved view (or the cart's painted-
+  // content fallback). null/undefined = the host default (lattice origin) —
+  // the pre-MAPGONE2-0605 behavior. Applied once per canvas instance.
+  initialView?: CanvasView2D | null;
   // Registered with the live-world getter so the cart can serialize on autosave.
   apiRef?: { current: PaintCanvasApi | null };
   // Fired once per meaningful edit (stroke end, chunk add, focus / zone change) so
@@ -587,6 +603,11 @@ export function PaintCanvas(props: {
 
   const allChunks = useMemo(() => Array.from(chunks.values()), [chunks, chunkRev]);
   const focusedChunks = allChunks.filter((c) => focus.has(chunkKey(c.cx, c.cz)));
+  // [mapgone-probe MAPGONE2-0605] surface gate — stays until the user confirms
+  useEffect(() => {
+    console.warn(`[mapgone] PaintCanvas mount: seed=${props.initialWorld ? 'initialWorld' : 'blank'} chunks=${chunks.size} focus=${focus.size} focusedChunks=${focusedChunks.length} layer=${layer}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount probe
+  }, []);
   const occupied = useCallback((cx: number, cz: number) => chunks.has(chunkKey(cx, cz)), [chunks]);
 
   // Per-chunk flush callbacks (registered by each ChunkSurface) so the brush can
@@ -814,7 +835,21 @@ export function PaintCanvas(props: {
 
   // Register the live-world getter so the cart can serialize on autosave. Reassign
   // each render so it captures the latest zones / focus (chunks is a stable ref).
-  if (props.apiRef) props.apiRef.current = { getWorld: () => ({ chunks, zones, focus }) };
+  // The live 2D camera, read back through the host's affine screen→graph
+  // mapping: the rect centre maps to the view centre, and a second probe one
+  // PROBE px to the side yields the zoom (px per graph unit) — the same trick
+  // the brush cursor uses (no graph→screen host fn exists; none needed).
+  const getView = (): CanvasView2D | null => {
+    const r = rectRef.current;
+    if (!r || r.width <= 0) return null;
+    const cxp = r.x + r.width / 2;
+    const cyp = r.y + r.height / 2;
+    const center = callHost<{ gx: number; gy: number } | null>('__canvas_screen_to_graph', null, cxp, cyp, cxp, cyp);
+    const probe = callHost<{ gx: number; gy: number } | null>('__canvas_screen_to_graph', null, cxp + 100, cyp, cxp, cyp);
+    if (!center || !probe || probe.gx === center.gx) return null;
+    return { x: center.gx, y: center.gy, zoom: 100 / (probe.gx - center.gx) };
+  };
+  if (props.apiRef) props.apiRef.current = { getWorld: () => ({ chunks, zones, focus }), getView };
 
   // Unified brush dispatch: paint paints tiles, zone paints the active zone, height
   // sculpts; place stamps the armed object when the brush tool is active.
@@ -1122,6 +1157,11 @@ export function PaintCanvas(props: {
         gridColor="#13203200"
         gridMajorColor={grid ? '#1b2a40' : '#00000000'}
         gridMajorEvery={2}
+        // the restored (or painted-content-fallback) camera — mount-stable
+        // values, so the host applies them once and user pan/zoom takes over
+        viewX={props.initialView?.x}
+        viewY={props.initialView?.y}
+        viewZoom={props.initialView?.zoom}
         driftX={drift.x}
         driftY={drift.y}
         driftActive={drift.x !== 0 || drift.y !== 0}
