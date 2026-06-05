@@ -142,7 +142,7 @@ export const DECISIONS: Decision[] = [
   {
     id: 'V20', name: 'Persistence: stateless, micro-saved, UNBREAKABLE total cross-session history', status: 'ruled',
     ruling: 'Workspace behavior (stateless design, saved at every micro change, historical undo) extended: history persists across ALL sessions as one total undo chain that CANNOT break when something new is introduced — ten days of bad changes steps right back to where it went bad. Storage is a LOG THAT SPLITS ITS CONCERNS: per-concern append-only streams (world, characters, tuning, story, missions, activities, ...), never one monolithic blob. New feature = new stream; old streams stay valid forever (schema evolution by addition, not migration). The game LOADS materialized snapshots, not the history. Streams are NOT git-tracked (gitignored; explicit backup story). THE SNAPSHOT SYSTEM GROWS WITH ANY ADDED TRACKING — a new stream without snapshot support is an incomplete change. Disk cost accepted for development.',
-    detail: 'The storage twin of V8\'s event-channel state tick and R6\'s RLE/determinism — the system is event-shaped; storage stops pretending otherwise. An undo point is a log position.',
+    detail: 'The storage twin of V8\'s event-channel state tick and R6\'s RLE/determinism — the system is event-shaped; storage stops pretending otherwise. An undo point is a log position. "One total undo chain" = a global sequence number across all streams (equivalently a tuple of per-stream positions), not one merged file.',
     keywords: ['persistence', 'history', 'undo', 'workspace', 'stateless', 'micro save', 'append only', 'log', 'streams', 'snapshot', 'sessions', 'time machine', 'storage'],
   },
   {
@@ -183,7 +183,7 @@ export const DECISIONS: Decision[] = [
   },
   {
     id: 'R1', name: 'Bullet (the library): KEEP, for clients — the game uses hmsc phys', status: 'ruled',
-    ruling: 'Keep both physics backends; let the client decide. The GAME uses the hmsc phys, not Bullet. And "physics_lab.zig is a horrible name" — the honesty split/rename is confirmed urgent.',
+    ruling: 'Keep both physics backends; let the client decide ("client" = the consuming system, decided per use-case — not a network client). The GAME uses the hmsc phys, not Bullet. And "physics_lab.zig is a horrible name" — the honesty split/rename is confirmed urgent.',
     keywords: ['bullet', 'physics3d', 'dormant', 'delete', 'keep', 'rename', 'physics_lab.zig'],
     cites: ['framework/phys/physics3d.zig', 'framework/v8_bindings_physics_lab.zig'],
   },

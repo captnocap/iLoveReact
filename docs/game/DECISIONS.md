@@ -494,7 +494,9 @@ historical undo) is the floor — extended:
 - History is PERSISTENT ACROSS ALL SESSIONS, one total undo chain that CANNOT
   break when something new is introduced. Ten days of bad changes → step right
   back to the point it went bad, with zero "did I save it in that state"
-  anxiety. Disk cost is accepted for development.
+  anxiety. Disk cost is accepted for development. ("One total undo chain" = a
+  global sequence number across all streams — equivalently a tuple of per-stream
+  positions — not one merged file.)
 - The storage shape: a LOG THAT SPLITS ITS CONCERNS — a state update writes to
   its specific workspace storage (per-concern append-only streams: world edits,
   character edits, tuning changes, ...), never one monolithic blob.
@@ -544,7 +546,8 @@ with bake-once discipline.
 
 1. **Bullet (the library): KEEP BOTH, let the client decide.** The game uses the
    hmsc phys, not Bullet. And the verdict on naming is blunt: "physics_lab.zig is
-   a horrible name" — the C1 honesty split is confirmed and urgent.
+   a horrible name" — the C1 honesty split is confirmed and urgent. ("Client"
+   here = the consuming system, decided per use-case — not a network client.)
 2. **Projectile model: UNDECIDED — "someone needs to show me both."** → SHOW-ME
    task: a lab demonstrating geometric vs probabilistic shot paths side by side.
    Note: "this could be bullet tbh" — the projectile sim is a possible revival
