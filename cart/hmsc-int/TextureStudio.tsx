@@ -22,7 +22,7 @@
 //   • REACT textures (the building skins) are the other authoring kind — laid out
 //     in code, browsable here as previews. Authoring those stays a code task.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Box, Col, Effect, Pressable, Row, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { shaderGroups, shaderSpec, type ShaderSpec } from '../hmsc/render3d/textureShaders';
 import { TEXTURE_REGISTRY, textureById } from '../hmsc/render3d/textures';
@@ -30,6 +30,9 @@ import { removeCustomTexture, saveCustomTexture, useCustomTextures, type CustomT
 import { ShaderLab } from './ShaderLab';
 import { TexturePreview } from './TexturePreview';
 import { accentFor } from './studio.cls';
+import { editorChannel } from './editors/store';
+import { editorSessions, type RouteSession } from './editors/sessions';
+import { materialsStream, type MaterialsEvent } from './editors/materials/stream';
 
 type Sel =
   | { kind: 'shader'; id: string }
@@ -79,16 +82,41 @@ export function TextureStudio() {
   const [sel, setSel] = useState<Sel>({ kind: 'shader', id: groups[0].specs[0].id });
   const [saveAs, setSaveAs] = useState('');
 
+  // ── the V20 channel + this visit's session (AUTOSAVE-0605): every
+  // Materialize/delete lands as its own labeled commit on the materials
+  // channel (the legacy localstore keeps serving renderers unchanged —
+  // the stream is the chain's truth + snapshot the future materials
+  // editor inherits). ────────────────────────────────────────────────────────
+  const live = useMemo(() => {
+    try {
+      const channel = editorChannel(materialsStream);
+      return { channel, session: editorSessions().open('/textures', channel) as RouteSession<MaterialsEvent>, error: null as string | null };
+    } catch (e) {
+      return { channel: null, session: null, error: String(e) };
+    }
+  }, []);
+  useEffect(() => () => live.session?.close(), [live]);
+
   const selSpec: ShaderSpec | undefined = sel.kind === 'shader' ? shaderSpec(sel.id) : undefined;
   const selDef = sel.kind !== 'shader' ? textureById(sel.id) : undefined;
 
   // Materialize → persist as a stored material. The typed SAVE AS name wins; an
-  // empty field falls back to the lab's suggested recipe/take name.
+  // empty field falls back to the lab's suggested recipe/take name. The commit
+  // IS the autosave: Materialize is the route's authoring interaction.
   const persist = (suggested: string, data: number[]) => {
     if (!selSpec) return;
     const saved = saveCustomTexture(saveAs.trim() || suggested, selSpec.id, data);
+    live.session?.commit(
+      { kind: 'materialized', material: { id: saved.id, label: saved.label, shaderId: selSpec.id, data: [...data] } },
+      `materialized · ${saved.label} (${selSpec.id})`,
+    );
     setSaveAs('');
     setSel({ kind: 'custom', id: saved.id });
+  };
+
+  const removeMaterial = (id: string) => {
+    removeCustomTexture(id);
+    live.session?.commit({ kind: 'removed', id }, `${id}: deleted`);
   };
 
   return (
@@ -145,7 +173,7 @@ export function TextureStudio() {
             {customs.length === 0 ? (
               <Text fontSize={9} color={accentFor('textFaint')} style={{ fontFamily: 'monospace' }}>tune a recipe, then MATERIALIZE to store it →</Text>
             ) : customs.map((t) => (
-              <SavedSwatch key={t.id} tex={t} on={sel.kind === 'custom' && sel.id === t.id} onPress={() => setSel({ kind: 'custom', id: t.id })} onDelete={() => removeCustomTexture(t.id)} />
+              <SavedSwatch key={t.id} tex={t} on={sel.kind === 'custom' && sel.id === t.id} onPress={() => setSel({ kind: 'custom', id: t.id })} onDelete={() => removeMaterial(t.id)} />
             ))}
           </ScrollView>
         </Box>
