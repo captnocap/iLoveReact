@@ -14,6 +14,7 @@ import * as firecrackerBuild from './commands/firecracker-build.ts';
 import * as game from './commands/game.ts';
 import * as help from './commands/help.ts';
 import * as init from './commands/init.ts';
+import * as lab from './commands/lab.ts';
 import * as metafileGate from './commands/metafile-gate.ts';
 import * as packSdk from './commands/pack-sdk.ts';
 import * as pushBundle from './commands/push-bundle.ts';
@@ -40,6 +41,7 @@ const COMMANDS: Record<string, Command> = {
   'game': game,
   'help': help,
   'init': init,
+  'lab': lab,
   'metafile-gate': metafileGate,
   'pack-sdk': packSdk,
   'push-bundle': pushBundle,

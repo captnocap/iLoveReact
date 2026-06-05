@@ -42,6 +42,8 @@ import { Assist3DRoute } from './assist3d';
 import { TextureStudio } from './TextureStudio';
 import { TestRoute } from './TestRoute';
 import { VoxelHybridRoute } from './VoxelHybridRoute';
+import { LabsRoute } from './shell/LabsRoute';
+import { LABS } from './labs';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -709,7 +711,7 @@ function EditorShell() {
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/test' ? 'test' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
+  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : 'editor';
 
   // Churn probe: which cart-level state drove this whole-cart re-render? During a
   // paint stroke the cart should be QUIET — any line here mid-stroke is the choke.
@@ -733,6 +735,7 @@ function EditorShell() {
         onNew={() => { setMenuOpen(false); newMap(); }}
         onEditor={() => nav.push('/')}
         onTest={() => nav.push('/test')}
+        onLabs={() => nav.push('/labs')}
         onVoxels={() => nav.push('/voxels')}
         onPerf={() => nav.push('/log')}
         onAssist={() => nav.push('/assist3d')}
@@ -808,6 +811,9 @@ function EditorShell() {
         <Route path="/textures">{() => <TextureStudio />}</Route>
         <Route path="/voxels">{() => <VoxelHybridRoute onExit={() => nav.push('/')} />}</Route>
         <Route path="/test">{() => <TestRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
+        {/* Labs cross into shell as plain data here — shell/ imports nothing
+            game-specific; labs/index.ts is the registry rjit lab new maintains. */}
+        <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
       </Box>
 
       {/* The maps menu lives here — the shell root's LAST child — so it paints on

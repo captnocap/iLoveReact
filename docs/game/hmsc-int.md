@@ -155,3 +155,16 @@ headless under v8cli and replays every `compile/verify/*.cmds` command
 sequence, exiting with one `VERDICT GREEN/RED` line. The milestone-0 world is
 a state skeleton (boot / tick / status / help); it grows as captures land —
 the green light exists from day one and never goes dark.
+
+## The labs route + scaffold (added 2026-06-05, Milestone-0 step 3)
+
+`cart/hmsc-int/labs/` holds the experiment slots (V13/V17/P5): `_scaffold.tsx`
+(+`_scaffold.notes.md`) is the template `rjit lab new <name>` copies — a lab is
+`@game` imports + an exported scene, nothing else, with the paired
+`<name>.notes.md` as its P6 contract (read by humans, AI, and the oracle).
+`labs/index.ts` is the registry the CLI maintains at its `rjit:` markers.
+`cart/hmsc-int/shell/LabsRoute.tsx` is the first shell/ piece — the `/labs`
+route (ProjectBar FlaskConical button): lab list on the left, the loaded scene
+center, the notes always beside it. Shell stays game-agnostic: the lab list
+crosses in as plain data at the router. The remaining index.tsx→shell/
+inversion is the editors-capture lane.

@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -52,6 +52,8 @@ interface ProjectBarProps {
   onTextures: () => void;
   // Navigate to the /voxels route — the 1m³ authoring / baked-mesh proposal.
   onVoxels: () => void;
+  // Navigate to the /labs route — every lab, instantly loadable (V13).
+  onLabs: () => void;
 }
 
 function IconBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
@@ -95,6 +97,7 @@ export function ProjectBar(props: ProjectBarProps) {
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
         <IconBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="test" />
+        <IconBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <IconBtn icon="Boxes" on={props.activeRoute === 'voxels'} onPress={props.onVoxels} title="voxel bake" />
         <IconBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
         <IconBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />

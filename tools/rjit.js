@@ -5829,10 +5829,66 @@ export default function App() {
     stdlib: { description: "ReactJIT stdlib starter with base icons and media primitives", width: 1180, height: 820, files: (ctx) => ({ "index.tsx": stdlibIndex(ctx), "theme.ts": themeSource(ctx.themeImport), "style.cls.ts": styleClsSource(ctx.classifierImport), "media/README.md": mediaReadme() }) }
   };
 
+  // cli/commands/lab.ts
+  var lab_exports = {};
+  __export(lab_exports, {
+    run: () => run14
+  });
+  var LABS_DIR = "cart/hmsc-int/labs";
+  var SCAFFOLD_SCENE = `${LABS_DIR}/_scaffold.tsx`;
+  var SCAFFOLD_NOTES = `${LABS_DIR}/_scaffold.notes.md`;
+  var REGISTRY = `${LABS_DIR}/index.ts`;
+  var IMPORTS_MARKER = "// rjit:lab-imports";
+  var ENTRIES_MARKER = "// rjit:lab-entries";
+  async function run14(argv) {
+    if (argv[0] !== "new") {
+      err("Usage: rjit lab new <name>");
+      err("  scaffolds labs/<name>.tsx + labs/<name>.notes.md and registers the lab");
+      return 2;
+    }
+    const name = argv[1];
+    if (!name || !/^[a-z][a-z0-9-]*[a-z0-9]$/.test(name)) {
+      err(`[lab] name must be kebab-case (got ${JSON.stringify(name ?? "")}) \u2014 e.g. projectile-shapes`);
+      return 2;
+    }
+    const root = __cwd();
+    const scenePath = `${LABS_DIR}/${name}.tsx`;
+    const notesPath = `${LABS_DIR}/${name}.notes.md`;
+    if (fsExists(`${root}/${scenePath}`) || fsExists(`${root}/${notesPath}`)) {
+      err(`[lab] ${name} already exists (${scenePath})`);
+      return 1;
+    }
+    const componentName = pascalCase(name);
+    const today = new Date(__nowMs()).toISOString().slice(0, 10);
+    const scene = fsRead(`${root}/${SCAFFOLD_SCENE}`).replaceAll("__LAB_NAME__", name).replaceAll("ScaffoldLab", componentName);
+    const notes = fsRead(`${root}/${SCAFFOLD_NOTES}`).replaceAll("__LAB_NAME__", name).replaceAll("__CREATED_DATE__", today);
+    const registry = fsRead(`${root}/${REGISTRY}`);
+    if (!registry.includes(IMPORTS_MARKER) || !registry.includes(ENTRIES_MARKER)) {
+      err(`[lab] ${REGISTRY} is missing its rjit markers \u2014 restore them before scaffolding`);
+      return 1;
+    }
+    const registered = registry.replace(IMPORTS_MARKER, `import ${componentName} from './${name}';
+${IMPORTS_MARKER}`).replace(
+      `  ${ENTRIES_MARKER}`,
+      `  { name: '${name}', Component: ${componentName}, notesPath: '${notesPath}' },
+  ${ENTRIES_MARKER}`
+    );
+    fsWrite(`${root}/${scenePath}`, scene);
+    fsWrite(`${root}/${notesPath}`, notes);
+    fsWrite(`${root}/${REGISTRY}`, registered);
+    out(`[lab] scaffolded ${scenePath}`);
+    out(`[lab] paired notes ${notesPath}`);
+    out(`[lab] registered "${name}" in ${REGISTRY} \u2014 it lists on the labs route`);
+    return 0;
+  }
+  function pascalCase(kebab) {
+    return kebab.split("-").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join("");
+  }
+
   // cli/commands/metafile-gate.ts
   var metafile_gate_exports = {};
   __export(metafile_gate_exports, {
-    run: () => run14
+    run: () => run15
   });
 
   // cli/cart/metafile.ts
@@ -5957,7 +6013,7 @@ export default function App() {
   }
 
   // cli/commands/metafile-gate.ts
-  async function run14(argv) {
+  async function run15(argv) {
     let registryPath = "sdk/dependency-registry.json";
     let metafilePath = "";
     let format = "ship-gate";
@@ -6045,7 +6101,7 @@ export default function App() {
   // cli/commands/pack-sdk.ts
   var pack_sdk_exports = {};
   __export(pack_sdk_exports, {
-    run: () => run15
+    run: () => run16
   });
   var ROOT2 = __cwd();
   var EXCLUDES = [
@@ -6110,7 +6166,7 @@ export default function App() {
     "/lib/x86_64-linux-gnu/libresolv.so.2",
     "/lib64/ld-linux-x86-64.so.2"
   ];
-  async function run15(argv) {
+  async function run16(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
     const registryPath = `${ROOT2}/sdk/dependency-registry.json`;
@@ -6359,7 +6415,7 @@ export default function App() {
   // cli/commands/push-bundle.ts
   var push_bundle_exports = {};
   __export(push_bundle_exports, {
-    run: () => run16
+    run: () => run17
   });
 
   // cli/host/net.ts
@@ -6392,7 +6448,7 @@ export default function App() {
   // cli/commands/push-bundle.ts
   var SOCKET_PATH = "/tmp/reactjit.sock";
   var TIMEOUT_MS = 3e3;
-  async function run16(argv) {
+  async function run17(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["tabName", "bundlePath"] });
@@ -6471,9 +6527,9 @@ export default function App() {
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run17
+    run: () => run18
   });
-  async function run17(argv) {
+  async function run18(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -7012,28 +7068,28 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run18
+    run: () => run19
   });
-  async function run18(argv) {
-    return run17([...argv, "--tui"]);
+  async function run19(argv) {
+    return run18([...argv, "--tui"]);
   }
 
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run19
+    run: () => run20
   });
-  async function run19(argv) {
+  async function run20(argv) {
     return run9([...argv, "--tui"]);
   }
 
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run20
+    run: () => run21
   });
   var POLL_MS = 200;
-  async function run20(argv) {
+  async function run21(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -7106,6 +7162,7 @@ __ARCHIVE__
     "game": game_exports,
     "help": help_exports,
     "init": init_exports,
+    "lab": lab_exports,
     "metafile-gate": metafile_gate_exports,
     "pack-sdk": pack_sdk_exports,
     "push-bundle": push_bundle_exports,

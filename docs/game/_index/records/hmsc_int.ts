@@ -28,6 +28,15 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'labs/ + shell/LabsRoute.tsx + rjit lab new',
+      purpose: ['scripting', 'ui', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/labs/index.ts',
+      description:
+        'The experiment slots (V13/V17/P5): labs/_scaffold.tsx(+.notes.md) is the template `rjit lab new <name>` copies (a lab = @game imports + an exported scene, nothing else; the paired <name>.notes.md is its P6 contract). labs/index.ts is the registry the CLI maintains at its rjit: markers. shell/LabsRoute.tsx (the first shell/ piece) renders the /labs route — list, loaded scene, notes always beside it — and stays game-agnostic: the lab list crosses in as plain data at the router (ProjectBar FlaskConical button).',
+      status: 'live',
+    },
+    {
       name: 'index.tsx',
       purpose: ['world_gen', 'ui', 'persistence'],
       kind: 'module',
