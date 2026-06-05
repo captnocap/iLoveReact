@@ -460,3 +460,62 @@ the bake composites head-only; `heldItem` is authored + stored but not baked
 (V11 resolves items); item rotations ride verbatim until the scale audit;
 editor session state is deliberately not streamed (documents are the
 artifact).
+
+## editors/paint/ — THE shared painter (editors wave, 2026-06-04)
+
+`cart/cutout`'s painting tool ("actually good for painting" — the user's
+ruling) CAPTURED as the one paint surface every editor that paints embeds —
+characters first (replacing paintKit's hand-rolled input plumbing),
+materials/textures later. COMPOSABILITY IS THE POINT: one painter, no
+per-route forks. The cutout cart stays an untouched behavior reference
+(`docs/game/cutout.md` is its audit; the user deletes it);
+`editors/paint/CAPTURE.md` is the deletion contract — all 34 inventory
+capabilities DONE (the cutout 30 + paintKit's mirror/value-painting/soften/
+vector-capture so adoption loses nothing + the V20 session integration
+cutout never had). Two halves behind ONE door (`index.ts`, P3):
+
+- the HEADLESS CORE (`PAINT`): `tuning.ts` (every behavior-affecting number,
+  P2 — bands, pressure curve, spacing, edge-snap, lasso rules, history
+  cap/coalesce, φ hue stagger, palette, backend tunables), `strokes.ts`
+  (the stroke engine: pointer samples → gap-free dab lists with pressure
+  lerp, mirror symmetry, sobel edge snap; CPU raster ops; lasso geometry;
+  min-step vector capture; dims-generic 3×3 soften), `layers.ts` (the
+  dual-source model: base smart mask + brush override per layer, the
+  192/64/128 band compose, merge/invert/union math, the RLE `PaintDocument`
+  v1 round-trip on `@reactjit/workspace/rle`), `history.ts` (generic
+  before-action undo/redo: 50-deep, 250ms coalesce, LAZY snapshot builders —
+  a 60Hz drag never does 60 readbacks), `surfaces.ts` (the 6 built-in
+  animated WGSL surfaces in texture AND cells mode, marching-ants edges,
+  2 color slots, custom-surface registry + adopt/inflate, storage-buffer
+  packing — the in-shader compose mirrors `effectiveMask` exactly),
+  `backends/` (the `SelectionBackend` seam + the ImageMagick flood and
+  MobileSAM implementations, `makeDefaultBackend()` auto-picks).
+- the LIVE half: `usePaintEditor` (core → GPU paintables wiring with the
+  cutout perf invariants: dabs write straight to the override texture, never
+  a per-dab setState; readback only at discrete commits; prefix-namespaced
+  paintable ids so embeds coexist), `PaintSurface` (the viewport: pan-zoom
+  Canvas, screen→world→source coordinate discipline, input overlay sized to
+  ITS box — full-viewport-safe by construction, cursor/HUD/lasso preview/
+  click markers/checkerboard), `PaintToolRail`/`PaintLayerStrip`/
+  `PaintLookPanel` (chrome-kit controls), `PaintEditor` (the one-liner).
+
+Session contract (V20): `usePaintEditor({ session })` lands ONE labeled
+edit-commit per interaction (`brush stroke · erase · 32px · Layer 1`) on
+whatever channel the hosting route passes — a `RouteSession` satisfies it
+note-grade; `{ note: (label) => ses.commit(event, label) }` upgrades to
+commit-grade without the painter knowing the event type. Persistence is the
+HOST's call: the painter bumps `documentVersion` and hands out lazy
+`buildDocument()`/`applyDocument()`/`composeExportMask()`; it ships no `fs`
+writes.
+
+NOT a route: editors/paint is a module other routes embed. NOT wired into
+the characters route here — the OWNERSHIP FENCE leaves the swap to the
+characters lane; `CAPTURE.md` carries the precise adoption hand-off (dab→
+stroke engine with the exact-fidelity note that fallback-pressure radius =
+the route's current brush value, appendFacePoint→createVectorStroke,
+softenBytes→soften3x3, stroke-end session labels, the optional full-painter
+upgrade seam).
+
+`rjit game verify` (editors suite root): `paint.test.ts` 29 P4 cases GREEN —
+stroke/compositing/palette/history/document/WGSL-shape laws. JSX surfaces
+bundle-verified through the real cart pipeline aliases.

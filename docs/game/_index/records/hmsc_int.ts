@@ -164,6 +164,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'editors/paint (THE shared painter)',
+      purpose: ['ui', 'texture_bake', 'asset_pipeline', 'ai_edit', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/editors/paint/index.ts',
+      description:
+        'Editors wave (2026-06-04): cart/cutout\'s painting tool ("actually good for painting" — the user\'s ruling) CAPTURED as the one paint surface every editor that paints embeds — characters first (replacing paintKit\'s hand-rolled input plumbing; adoption hand-off in CAPTURE.md, the swap belongs to the characters lane), materials/textures later. One painter, no per-route forks; cutout stays the untouched behavior reference until the user deletes it. ONE door (index.ts): the headless PAINT core — tuning.ts (P2: bands, pressure curve, dab spacing, edge-snap, lasso rules, history cap/coalesce, φ hue stagger, palette, backend tunables), strokes.ts (createStrokeEngine: pointer samples → gap-free dab lists with pressure lerp + mirror symmetry + sobel edge snap; CPU raster ops; createVectorStroke min-step capture; dims-generic soften3x3), layers.ts (the dual-source model: smart base + brush override per layer, the 192/64/128 band compose, merge/invert/union, RLE PaintDocument v1 on @reactjit/workspace/rle), history.ts (generic before-action undo: 50-deep, 250ms coalesce, LAZY builders), surfaces.ts (6 built-in animated WGSL surfaces texture+cells mode, marching ants, 2 color slots, custom registry + adopt/inflate; in-shader compose mirrors effectiveMask), backends/ (SelectionBackend seam + flood/SAM + makeDefaultBackend) — plus the live half: usePaintEditor (cutout perf invariants: dabs straight to the GPU override texture, never per-dab setState; readback at discrete commits; prefix-namespaced paintable ids so embeds coexist; V20 session prop = ONE labeled edit-commit per interaction, RouteSession satisfies it), PaintSurface (full-viewport-safe rect-driven viewport, screen→world→source discipline), PaintToolRail/PaintLayerStrip/PaintLookPanel (chrome-kit), PaintEditor (the one-liner). Persistence is the HOST\'s call (documentVersion + lazy buildDocument/applyDocument/composeExportMask; no fs writes). paint.test.ts 29 P4 cases (editors suite root) GREEN; JSX bundle-verified through the cart pipeline. Surfaced: refine snaps dab centers (the active cutout path) with paintCircleEdgeAware on the door; hotkeys default ON (pass hotkeys:false when the host owns keys); paint-doc v1 deliberately does not parse cutout-session v2.',
+      dependsOn: ['data/index.ts (the V20 store)', 'editors/sessions.ts (route-scoped session history)', 'game/chrome (GAME_CHROME)', 'runtime/workspace/rle'],
+      status: 'live',
+    },
+    {
       name: 'game/camera.ts (GAME_CAMERA — the camera door)',
       purpose: ['camera', 'interaction', 'ai_edit', 'maintenance'],
       kind: 'module',

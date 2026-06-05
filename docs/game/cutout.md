@@ -4,6 +4,14 @@ Source cart: `cart/cutout/`
 
 Reviewed: 2026-06-04
 
+> **CAPTURED (editors wave, 2026-06-04):** the PAINTING TOOL was captured
+> into `cart/hmsc-int/editors/paint/` as THE shared painter (the user's
+> ruling — "actually good for painting"; `editors/paint/CAPTURE.md` is the
+> deletion contract, 34/34 inventory capabilities). This cart stays an
+> untouched behavior reference until the user deletes it; its cutout-app
+> concerns (ImageMagick exports, `.sqi`, Zenity/file-drop ingest, autosave
+> file layout) were deliberately NOT carried.
+
 ## High-level purpose
 
 `cart/cutout` is a full image cutout and shader-quad-image editor. It is closer to a production tool than a small lab cart: it loads an image or creates a blank canvas, lets the user build a stack of mask layers, supports smart selection through either ImageMagick flood fill or MobileSAM/ONNX, lets the user clean masks with brush/lasso/refine tools, previews selected regions through GPU shader overlays, and exports PNG cutouts, pixel-icon JSON, or self-contained `.sqi.json` documents.
