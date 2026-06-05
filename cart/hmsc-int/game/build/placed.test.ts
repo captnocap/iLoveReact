@@ -7,6 +7,7 @@
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 import {
   PLACED_TUNING,
+  connectedPieceIds,
   pieceBounds,
   placedPieceColliders,
   placedPieceRamps,
@@ -299,6 +300,34 @@ test('the surfaced edge case: a wall sandwiched between two ramps trims away ent
   const rampB = placed('ramp.concrete.common', 6, 3);
   const { rects } = placedPieceColliders([rampA, rampB, wall]);
   assertEqual(rects.length, 0, 'both overhangs trimmed — the band degenerates (documented in CAPTURE.md)');
+});
+
+// ── SMARTSEL-0605: one click grabs the connected shape ───────────────────────
+
+test('the connected shape: floor → wall → next storey, in one grab; islands stay out', () => {
+  const floorA = placed('floor.concrete.common', 1.5, 1.5);
+  const wall = placed('wall.concrete.common', 1.5, 0, { yawDegrees: 0 }); // on floorA's edge line
+  const storey = placed('floor.concrete.common', 1.5, 1.5, { y: 3 });    // resting on the wall top
+  const island = placed('floor.concrete.common', 30.5, 30.5);            // far away
+  const shape = connectedPieceIds(floorA.id, [floorA, wall, storey, island]);
+  assert(shape.has(floorA.id) && shape.has(wall.id) && shape.has(storey.id), 'the whole tower comes along');
+  assert(!shape.has(island.id), 'the detached island stays out');
+  // transitivity: seeding from the TOP storey collects down to the ground floor
+  const fromTop = connectedPieceIds(storey.id, [floorA, wall, storey, island]);
+  assertEqual(fromTop.size, 3, 'the grab is transitive from any seed');
+});
+
+test('flush module neighbors touch: two grid-snapped plates are one shape', () => {
+  const a = placed('floor.concrete.common', 1.5, 1.5);
+  const b = placed('floor.concrete.common', 4.5, 1.5); // exactly abutting at x=3
+  const shape = connectedPieceIds(a.id, [a, b]);
+  assertEqual(shape.size, 2, 'abutting faces count as touching (module snap lands flush)');
+  const apart = placed('floor.concrete.common', 7.5 + PLACED_TUNING.touchToleranceMeters * 4, 1.5);
+  assert(!connectedPieceIds(a.id, [a, b, apart]).has(apart.id), 'a real gap breaks the shape');
+});
+
+test('an unknown seed grabs nothing', () => {
+  assertEqual(connectedPieceIds('ghost', [placed('floor.concrete.common', 0, 0)]).size, 0, 'empty, no crash');
 });
 
 finish('build-placed');

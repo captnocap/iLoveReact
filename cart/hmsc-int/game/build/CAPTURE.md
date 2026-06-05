@@ -123,3 +123,14 @@ trimmed (oriented subtraction needs host support). SURFACED EDGE CASE: a wall
 sandwiched between two ramps trims away entirely (collision-free) — pinned by
 test, not silently special-cased; a vertical band split needs the physics
 wire to grow before it can be honest. 4 new P4 cases (26/26).
+
+## SMARTSEL-0605 (2026-06-05): one click grabs the connected shape
+
+USER ASK: select many pieces, save the whole shape as one prefab, plus a
+smart select that "collects all the pieces that touch in one click".
+placed.ts grows connectedPieceIds(seed, pieces) — BFS over envelope contact
+(pieceBounds, touchToleranceMeters in PLACED_TUNING; flush module-snapped
+faces count). GAME_BUILD.placed.connected carries it. The route binds G:
+grab the whole connected shape into the marked set (G again on a fully
+marked shape unmarks it); P stays the single-piece toggle; the existing
+marked-panel (name → Save prefab) stores the shape. 3 P4 cases (29/29).

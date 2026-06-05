@@ -78,6 +78,9 @@ export const PLACED_TUNING = {
   /** RAMPFOOT-0605: degenerate-band floor when trimming wall overhangs out of
    *  ramp footprints — a trimmed band thinner than this is dropped, meters */
   rampTrimMinBandMeters: 0.01,
+  /** SMARTSEL-0605: two pieces TOUCH when their envelopes come within this
+   *  (abutting faces count; module-snapped neighbors sit exactly flush) */
+  touchToleranceMeters: 0.05,
 } as const;
 
 // ── basics ───────────────────────────────────────────────────────────────────
@@ -146,6 +149,48 @@ export function pieceBounds(piece: PlacedBuildPiece): PieceBounds {
     baseY: piece.y,
     topY: piece.y + size.heightMeters,
   };
+}
+
+// ── SMARTSEL-0605: the connected shape under one click ───────────────────────
+
+function boundsTouch(a: PieceBounds, b: PieceBounds, tolerance: number): boolean {
+  return (
+    a.minX <= b.maxX + tolerance && b.minX <= a.maxX + tolerance &&
+    a.minZ <= b.maxZ + tolerance && b.minZ <= a.maxZ + tolerance &&
+    a.baseY <= b.topY + tolerance && b.baseY <= a.topY + tolerance
+  );
+}
+
+/**
+ * Every piece TRANSITIVELY touching the seed — the connected shape (a wall on
+ * a floor touches it; the next storey touches the wall top; module-snapped
+ * neighbors abut exactly, so flush faces count as touching). BFS over
+ * envelope contact (pieceBounds — exact at quarter turns, the rotated
+ * envelope otherwise, so free-yaw pieces err toward inclusion). The seed is
+ * always in the result; an unknown seed returns empty.
+ */
+export function connectedPieceIds(
+  seedId: string,
+  pieces: readonly PlacedBuildPiece[],
+  toleranceMeters: number = PLACED_TUNING.touchToleranceMeters,
+): Set<string> {
+  const out = new Set<string>();
+  const seed = pieces.find((p) => p.id === seedId);
+  if (!seed) return out;
+  const all = pieces.map((p) => ({ id: p.id, bounds: pieceBounds(p) }));
+  out.add(seedId);
+  const queue = [pieceBounds(seed)];
+  while (queue.length > 0) {
+    const current = queue.pop()!;
+    for (const candidate of all) {
+      if (out.has(candidate.id)) continue;
+      if (boundsTouch(current, candidate.bounds, toleranceMeters)) {
+        out.add(candidate.id);
+        queue.push(candidate.bounds);
+      }
+    }
+  }
+  return out;
 }
 
 // ── crosshair targeting: ray vs placed pieces ────────────────────────────────

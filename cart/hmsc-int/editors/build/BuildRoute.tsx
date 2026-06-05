@@ -540,6 +540,24 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
           else next.add(targetId);
           return next;
         });
+        return;
+      }
+      // SMARTSEL-0605: G grabs the whole connected shape under the crosshair
+      // (every piece transitively touching the target). Pressing G on a shape
+      // that is already fully marked unmarks it — the P toggle, shape-sized.
+      if (key === 'g' && targetId) {
+        const shape = GAME_BUILD.placed.connected(targetId, piecesRef.current);
+        if (shape.size === 0) return;
+        setMarkedIds((prev) => {
+          let allMarked = true;
+          for (const id of shape) if (!prev.has(id)) { allMarked = false; break; }
+          const next = new Set(prev);
+          for (const id of shape) {
+            if (allMarked) next.delete(id);
+            else next.add(id);
+          }
+          return next;
+        });
       }
     });
     return off;
@@ -681,7 +699,7 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
         <Chip label="tuning" on={showTuning} onPress={() => setShowTuning((s) => !s)} />
         {!embodied.mouseCaptured && (
           <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>
-            {`${props.mapName} · BUILD · click to capture the mouse · WASD move · Space jump · click place · R rotate · E edit · 1 floor · 2 wall · 3 ramp · 4 roof · X remove · P mark · 0 prefabs · [ ] variant · Esc frees the mouse`}
+            {`${props.mapName} · BUILD · click to capture the mouse · WASD move · Space jump · click place · R rotate · E edit · 1 floor · 2 wall · 3 ramp · 4 roof · X remove · P mark · G grab shape · 0 prefabs · [ ] variant · Esc frees the mouse`}
           </Text>
         )}
       </Box>
@@ -702,7 +720,7 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
           the bottom-right blueprint/hotbar stack) */}
       {markedIds.size > 0 && (
         <Box style={{ position: 'absolute', right: 12, bottom: 190, backgroundColor: BUILD_UI.panelBg, borderWidth: 1, borderColor: '#facc15', borderRadius: 8, padding: 10, gap: 6, width: 240 }}>
-          <Text fontSize={10} color="#fde68a" style={{ fontWeight: 700 }}>{`${markedIds.size} piece${markedIds.size === 1 ? '' : 's'} marked (P toggles)`}</Text>
+          <Text fontSize={10} color="#fde68a" style={{ fontWeight: 700 }}>{`${markedIds.size} piece${markedIds.size === 1 ? '' : 's'} marked (P toggles one · G grabs the shape)`}</Text>
           <TextInput
             value={prefabName}
             onChangeText={setPrefabName}
