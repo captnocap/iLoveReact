@@ -44,3 +44,21 @@ Requirements distilled:
 4. Prefab definitions are P2 data (catalog tables / V20-streamable), same registry family as pieces.
 
 And the prop split: props remain PROMPT-GENERATED assets ("that just leaves props to prompting") — the catalog's prop entries get filled by the existing items/model pipelines, not by the builder.
+
+---
+
+## Addendum 2 (same session) — the Sims-style "Plan Build" mode; one model, two views
+
+A Sims-style Plan Build mode joins the layered game-as-authoring model. The framing: Fortnite mode = EMBODIED authoring at player scale ("does this feel good to stand in, does the storefront read from the sidewalk"); Sims mode = ARCHITECTURAL authoring from above the world (floorplans, rooms, doors, furnishing, duplicate/mirror/rotate sections, "lay out ten buildings fast"). Both wanted; they answer different questions.
+
+**The invariant, user's words (load-bearing): "The key is they must edit the same semantic data, not separate representations."** Sims and Fortnite modes are two VIEWS over the same piece model (kind + gridPos + rotation + style + gameplayTags). Nothing in the piece tables may assume a single camera/interaction mode; placement provenance, if recorded, is metadata, not schema.
+
+**The mode taxonomy (the tool's authoring modes):**
+- Map Paint — terrain/heightfield/roads/zones
+- Creative Build — third-person embodied
+- Plan Build — Sims-style topdown/iso
+- Prefab Edit — isolate a building/stamp
+- Drop In — playtest
+- Compile — bake
+
+**Mode-switch UX ruled:** alt-tab-style instant swap / an action-bar mode strip (F1 Map, F2 Build, F3 Plan, F4 Props, F5 Play, F6 Bake) — "authoring itself becomes multiple playable camera modes over the same world. Not a separate editor app."

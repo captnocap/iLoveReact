@@ -757,3 +757,21 @@ architectural rule, user-endorsed:
   same registry family as pieces. Props remain PROMPT-GENERATED assets — the
   catalog's prop entries fill from the existing items/model pipelines, not
   from the builder.
+- **The Sims-style PLAN BUILD mode; ONE MODEL, TWO VIEWS (same-session
+  addendum 2).** Fortnite mode = EMBODIED authoring at player scale ("does
+  this feel good to stand in, does the storefront read from the sidewalk");
+  Sims mode = ARCHITECTURAL authoring from above (floorplans, rooms, doors,
+  furnishing, duplicate/mirror/rotate sections, "lay out ten buildings
+  fast"). Both wanted — they answer different questions. THE INVARIANT
+  (user's words, load-bearing): "The key is they must edit the same semantic
+  data, not separate representations." Both modes are VIEWS over the same
+  piece model (kind + gridPos + rotation + style + gameplayTags); nothing in
+  the piece tables may assume a single camera/interaction mode (placement
+  provenance, if recorded, is metadata, not schema). The mode taxonomy:
+  Map Paint · Creative Build (third-person embodied) · Plan Build (Sims
+  topdown/iso) · Prefab Edit (isolate a building/stamp) · Drop In (playtest)
+  · Compile (bake). Mode-switch UX: alt-tab instant swap / an action-bar
+  strip (F1 Map, F2 Build, F3 Plan, F4 Props, F5 Play, F6 Bake) —
+  "authoring itself becomes multiple playable camera modes over the same
+  world. Not a separate editor app." (Plan Build mode is recorded here as
+  ruled direction; building it is later work, not a current task.)
