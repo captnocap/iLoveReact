@@ -145,6 +145,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'editors/characters (the character editor route)',
+      purpose: ['character', 'ui', 'persistence', 'asset_pipeline', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/editors/characters/CharactersRoute.tsx',
+      description:
+        'Editors wave (2026-06-04): cart/head_lab\'s authoring UI REMADE ENTIRELY as the /characters route in the one shell (V2/V17-TRIAGE; the reference stays untouched until the user deletes it — CAPTURE.md is the deletion contract, all 27 inventory capabilities DONE). The headless core is pure + tested: draft.ts (CharacterDraft ↔ BodyDocument/HedDocument lossless; the .hed coherence law — face residue moves into the head grid, the kept face zeroes its sculpt; region sliders bake INTO the sculpt at export), regions.ts (SHAPE_REGIONS + elliptical stamp math, REGION_TUNING P2), generate.ts (one seed → one complete deterministic draft on the kit\'s mulberry32; GENERATE_TUNING P2), roster.ts (save = \'authored\' event + snapshot materialized in the same breath; createRoster(store) testable, editorRoster() live), editors/store.ts (lane-neutral ONE Store per process = one globalSeq authority — the vehicles route should adopt it). CharactersRoute.tsx = sculpt painting (per-part GPU paintables, raise/carve/flatten, mirror, DEPTH_OVERLAY_WGSL heat+contours+guides, fill/soften/clear, stroke→48×24→dyn mesh), outline lathe + region sliders (latch previews, commit on release), face tools (paint→.hed layers + undo-last, seeded generate, talk/chew/cry/yell, photo drop), wardrobe (8 shapes, tops/bottoms/prints/extras, held item via game/items part tables — HeldItemMeshes), poses + GAME_ANIMATION DSL script + 32-preset shelf (animPresets.ts P2), hitboxes/anchors overlay, memo\'d PartMeshes (orbit drag re-renders only the camera node), the richer capture stack (photo head / underwear torso stamps / clothing prints — the RULED editors-reach-into-game/figure exception). 6 P4 cases (characters.test.ts, editors suite root) + the stream\'s 6. Surfaced: non-head sculpt detail previews live but the bake composites head-only; heldItem authored+stored but not baked (V11); item rotations verbatim until the scale audit.',
+      dependsOn: ['game/index.ts', 'data/index.ts (the V20 store)', 'game/figure (GAME_FIGURE — the character kit)', 'game/items (GAME_ITEMS)', 'game/chrome (GAME_CHROME)'],
+      status: 'live',
+    },
+    {
       name: 'game/camera.ts (GAME_CAMERA — the camera door)',
       purpose: ['camera', 'interaction', 'ai_edit', 'maintenance'],
       kind: 'module',

@@ -378,3 +378,51 @@ route per the editors-wave coordination rule). `rjit game verify` owns
 VERDICT GREEN. Open seams (CAPTURE.md): compile/ does not yet consume the
 garage snapshot (placement belongs to the world stream, not the vehicle doc),
 and the V10 scale audit remains open.
+
+## editors/characters/ — the character editor route (editors wave, 2026-06-04)
+
+`cart/head_lab`'s authoring UI (1734-line `index.tsx`) REMADE ENTIRELY as the
+`/characters` route in the one shell (V2/V17-TRIAGE; the lab stays an
+untouched behavior reference — `editors/characters/CAPTURE.md` is the
+deletion contract, all 27 inventory capabilities DONE; the user deletes the
+old cart). The kit it edits is `game/figure/`; this route is the RULED
+editors-reach-into-figure-internals exception. Pieces:
+
+- `game/figure/stream.ts` — the V20 `characters` concern (the ROSTER:
+  authored `BodyDocument` per id + rail order; `authored` upsert /
+  `removed`). `bake.ts` grew `bakeBodyDocument` (the ONE doc→figure adapter;
+  compile/verify/the editor all call it). `GAME_FIGURE.stream` +
+  `GAME_FIGURE.bakeBody` carry both; named re-exports through `game/index.ts`
+  (not a 20th door). The round-trip author → stream → snapshot →
+  `bakeBodyDocument` is pinned byte-exact through a real on-disk store.
+- `editors/store.ts` — lane-neutral: the tool's ONE Store per process (one
+  globalSeq authority; two `openStore()` instances would fork the undo
+  chain). Every editor concern should register here.
+- the headless core, pure + P4-tested: `draft.ts` (CharacterDraft ↔
+  documents, lossless; the .hed coherence law — face residue lives in ONE
+  place; region sliders bake INTO the sculpt at export), `regions.ts`
+  (SHAPE_REGIONS + stamp math, REGION_TUNING), `generate.ts` (one seed → one
+  complete deterministic character on the kit's mulberry32, GENERATE_TUNING),
+  `roster.ts` (save = append + snapshot in the same breath — the compile's
+  view is never stale), `animPresets.ts` (the 32-script shelf, P2 data).
+- `CharactersRoute.tsx` + `preview.tsx` + `controls.tsx` + `paintKit.ts` —
+  the surface: per-part GPU sculpt painting (raise/carve/flatten, mirror
+  symmetry, the depth-overlay WGSL: stroke heat + contour rings + unwrap
+  guides; stroke release → readback → 48×24 grid → dyn mesh), outline lathe +
+  region sliders (latch drag previews, React commits on release), face tools
+  (color paint → `.hed` layers + undo-last, seeded generate, talk/chew/cry/
+  yell preview, photo drop + knobs), wardrobe (8 shapes, tops/bottoms/prints/
+  extras, held item rendered from `game/items` part tables), poses +
+  `GAME_ANIMATION` DSL script (drives rig AND mouth), hitboxes/anchors
+  overlay, memo'd `PartMeshes` (orbit drag re-renders only the camera node),
+  and the richer capture stack (photo head, underwear torso stamps, clothing
+  prints). `.hed`/`.body` file export + drop-in import kept beside the roster.
+
+Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
+lane, before the vehicles route per the editors-wave coordination rule).
+`rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.
+Surfaced, not guessed (CAPTURE.md): non-head sculpt detail previews live but
+the bake composites head-only; `heldItem` is authored + stored but not baked
+(V11 resolves items); item rotations ride verbatim until the scale audit;
+editor session state is deliberately not streamed (documents are the
+artifact).
