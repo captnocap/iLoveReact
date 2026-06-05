@@ -421,7 +421,8 @@ no use for anything the game introduces, so it is all conditional — exactly ho
 the greater system already works: declared in `sdk/dependency-registry.json`,
 flipped by the metafile-gate walker when a cart actually imports the `GAME_*`
 ground floor, compiled behind `has-game*` gates in build.zig (never an
-unconditional `addImport`). Importing `cart/game/` is what opts a binary into
+unconditional `addImport`). Importing `cart/hmsc-int/game/` (the `@game` alias)
+is what opts a binary into
 the game's bindings; sweatshop/tui/chat carts pay zero bytes and zero host fns
 for the game's existence. Follow this through all the way — no exceptions, no
 "cheap dep" carve-outs.
