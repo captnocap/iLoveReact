@@ -13,8 +13,11 @@ import { GAME_CHROME } from '../../game/chrome';
 
 export function CharactersRoute(props: { onExit: () => void }) {
   const T = GAME_CHROME.tokens.color;
+  // Route surfaces OVERLAY the shell body (the editor stays mounted
+  // underneath): absolute full-area + opaque bg, exactly like LabsRoute —
+  // a normal-flow root stacks BELOW the editor panes instead of covering them.
   return (
-    <Col style={{ width: '100%', height: '100%', backgroundColor: T.page, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+    <Col style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', backgroundColor: T.page, alignItems: 'center', justifyContent: 'center', gap: 8 }}>
       <Text fontSize={15} color={T.ink} style={{ fontWeight: 900 }}>CHARACTERS</Text>
       <Text fontSize={11} color={T.dim}>the character editor is being rebuilt here (head_lab → editors/characters)</Text>
       <GAME_CHROME.Chip label="back to editor" onPress={props.onExit} />
