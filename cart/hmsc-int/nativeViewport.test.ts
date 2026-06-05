@@ -82,4 +82,10 @@ test('IsoPreview uses native FreeFly drive, not a JS animation-frame camera loop
   assert(!source.includes('target={target}'), 'JS-computed target must not drive the renderer');
 });
 
+test('lab scaffold has no placeholder JS camera solve', () => {
+  const source = read('cart/hmsc-int/labs/_scaffold.tsx');
+  assert(!source.includes('GAME_CAMERA'), 'dead scaffold must not import the camera door for a placeholder solve');
+  assert(!source.includes('camera.fov'), 'dead scaffold must not teach JS camera solve as the lab pattern');
+});
+
 finish('native-viewport');
