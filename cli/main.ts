@@ -11,6 +11,7 @@ import * as classify from './commands/classify.ts';
 import * as codegenBindings from './commands/codegen-bindings.ts';
 import * as dev from './commands/dev.ts';
 import * as firecrackerBuild from './commands/firecracker-build.ts';
+import * as game from './commands/game.ts';
 import * as help from './commands/help.ts';
 import * as init from './commands/init.ts';
 import * as metafileGate from './commands/metafile-gate.ts';
@@ -36,6 +37,7 @@ const COMMANDS: Record<string, Command> = {
   'codegen-bindings': codegenBindings,
   'dev': dev,
   'firecracker-build': firecrackerBuild,
+  'game': game,
   'help': help,
   'init': init,
   'metafile-gate': metafileGate,

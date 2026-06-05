@@ -59,6 +59,9 @@
     const result = __fs_stat_json(path);
     return result === null ? null : JSON.parse(result);
   }
+  function fsList(path) {
+    return JSON.parse(__fs_list_json(path));
+  }
   function fsMkdir(path) {
     if (!__fs_mkdir(path)) throw new FsError("mkdir", path);
   }
@@ -4734,7 +4737,7 @@ ${entry}
     reapOrphanWatchers();
     out(`[dev] bundling ${cart.entry} -> ${perCartBundle}`);
     const term = terminalSize();
-    const bundle = bundleCart({
+    const bundle2 = bundleCart({
       rjitHome,
       cartEntry: cart.entry,
       outFile: perCartBundle,
@@ -4742,8 +4745,8 @@ ${entry}
       termCols: term.cols,
       termRows: term.rows
     });
-    writeSpawnOutput2(bundle);
-    if (bundle.code !== 0) return bundle.code || 1;
+    writeSpawnOutput2(bundle2);
+    if (bundle2.code !== 0) return bundle2.code || 1;
     const needsBuild = devHostNeedsBuild(rjitHome, bin);
     const socket = "/tmp/reactjit.sock";
     const hostAlive = isHostAlive(socket);
@@ -5161,11 +5164,105 @@ ${entry}
     return code;
   }
 
+  // cli/commands/game.ts
+  var game_exports = {};
+  __export(game_exports, {
+    run: () => run11
+  });
+  var GAME_DIR = "cart/hmsc-int/game";
+  var COMPILE_ENTRY = "cart/hmsc-int/compile/main.ts";
+  var VERIFY_DIR = "cart/hmsc-int/compile/verify";
+  var OUT_DIR = "zig-out/game";
+  var HEADLESS_BUNDLE = `${OUT_DIR}/hmsc-headless.js`;
+  var TEST_OUT_DIR = `${OUT_DIR}/tests`;
+  async function run11(argv) {
+    const subcommand = argv[0];
+    if (subcommand === "compile") return compile(__cwd());
+    if (subcommand === "verify") return verify(__cwd());
+    err("Usage: rjit game <compile|verify>");
+    err("  compile  bundle the headless game output");
+    err("  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict");
+    return 2;
+  }
+  function bundle(root, entry, outFile) {
+    const result = spawnSync(`${root}/tools/esbuild`, [
+      `${root}/${entry}`,
+      "--bundle",
+      `--outfile=${root}/${outFile}`,
+      "--format=iife",
+      "--platform=neutral",
+      "--target=es2022",
+      `--alias:@reactjit=${root}/runtime`,
+      `--alias:@game=${root}/${GAME_DIR}`,
+      "--log-level=warning"
+    ]);
+    if (result.stderr.trim()) err(result.stderr.trim());
+    return result.code === 0;
+  }
+  function compile(root) {
+    fsMkdir(`${root}/${OUT_DIR}`);
+    if (!bundle(root, COMPILE_ENTRY, HEADLESS_BUNDLE)) {
+      err(`[game] compile FAILED: ${COMPILE_ENTRY}`);
+      return 1;
+    }
+    out(`[game] compiled ${COMPILE_ENTRY} -> ${HEADLESS_BUNDLE}`);
+    return 0;
+  }
+  function findTestSuites(root, dir = GAME_DIR) {
+    const suites = [];
+    for (const name of fsList(`${root}/${dir}`)) {
+      const path = `${dir}/${name}`;
+      const stat = tryFsStat(`${root}/${path}`);
+      if (stat?.isDir) suites.push(...findTestSuites(root, path));
+      else if (name.endsWith(".test.ts")) suites.push(path);
+    }
+    return suites.sort();
+  }
+  function verify(root) {
+    if (compile(root) !== 0) {
+      err("[game] VERDICT RED \u2014 the game does not compile");
+      return 1;
+    }
+    fsMkdir(`${root}/${TEST_OUT_DIR}`);
+    const suites = findTestSuites(root);
+    let suitesPassed = 0;
+    for (const suite of suites) {
+      const name = suite.slice(GAME_DIR.length + 1).replace(/\//g, "_").replace(/\.test\.ts$/, ".test.js");
+      const compiled = `${TEST_OUT_DIR}/${name}`;
+      if (!bundle(root, suite, compiled)) {
+        err(`[game] suite does not bundle: ${suite}`);
+        continue;
+      }
+      const result = spawnSync(`${root}/tools/v8cli`, [`${root}/${compiled}`]);
+      if (result.stdout.trim()) out(result.stdout.trim());
+      if (result.stderr.trim()) err(result.stderr.trim());
+      if (result.code === 0) suitesPassed += 1;
+      else err(`[game] suite FAILED: ${suite}`);
+    }
+    const scripts = fsExists(`${root}/${VERIFY_DIR}`) ? fsList(`${root}/${VERIFY_DIR}`).filter((name) => name.endsWith(".cmds")).sort() : [];
+    let scriptsPassed = 0;
+    for (const script of scripts) {
+      const result = spawnSync(`${root}/tools/v8cli`, [`${root}/${HEADLESS_BUNDLE}`, `${root}/${VERIFY_DIR}/${script}`]);
+      if (result.stdout.trim()) out(result.stdout.trim());
+      if (result.stderr.trim()) err(result.stderr.trim());
+      if (result.code === 0) scriptsPassed += 1;
+      else err(`[game] verify script FAILED: ${VERIFY_DIR}/${script}`);
+    }
+    const green = suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
+    const tally = `${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
+    if (!green) {
+      err(`[game] VERDICT RED \u2014 ${tally}`);
+      return 1;
+    }
+    out(`[game] VERDICT GREEN \u2014 ${tally}`);
+    return 0;
+  }
+
   // cli/commands/help.ts
   var help_exports = {};
   __export(help_exports, {
     printTopLevel: () => printTopLevel,
-    run: () => run11
+    run: () => run12
   });
   var TEMPLATES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
   var SUBCOMMANDS = ["init", "dev", "tui", "ship", "ship-tui", "autotest", "classify", "bake-icons", "pack-sdk", "firecracker-build", "help"];
@@ -5298,7 +5395,7 @@ ${entry}
       detail: []
     }
   };
-  async function run11(argv) {
+  async function run12(argv) {
     const target = argv[0];
     const registry = readRegistry();
     if (!target) {
@@ -5377,10 +5474,10 @@ ${entry}
   // cli/commands/init.ts
   var init_exports = {};
   __export(init_exports, {
-    run: () => run12
+    run: () => run13
   });
   var TEMPLATE_NAMES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  async function run12(argv) {
+  async function run13(argv) {
     const parsed = parseArgs3(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -5735,7 +5832,7 @@ export default function App() {
   // cli/commands/metafile-gate.ts
   var metafile_gate_exports = {};
   __export(metafile_gate_exports, {
-    run: () => run13
+    run: () => run14
   });
 
   // cli/cart/metafile.ts
@@ -5860,7 +5957,7 @@ export default function App() {
   }
 
   // cli/commands/metafile-gate.ts
-  async function run13(argv) {
+  async function run14(argv) {
     let registryPath = "sdk/dependency-registry.json";
     let metafilePath = "";
     let format = "ship-gate";
@@ -5948,7 +6045,7 @@ export default function App() {
   // cli/commands/pack-sdk.ts
   var pack_sdk_exports = {};
   __export(pack_sdk_exports, {
-    run: () => run14
+    run: () => run15
   });
   var ROOT2 = __cwd();
   var EXCLUDES = [
@@ -6013,7 +6110,7 @@ export default function App() {
     "/lib/x86_64-linux-gnu/libresolv.so.2",
     "/lib64/ld-linux-x86-64.so.2"
   ];
-  async function run14(argv) {
+  async function run15(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
     const registryPath = `${ROOT2}/sdk/dependency-registry.json`;
@@ -6262,7 +6359,7 @@ export default function App() {
   // cli/commands/push-bundle.ts
   var push_bundle_exports = {};
   __export(push_bundle_exports, {
-    run: () => run15
+    run: () => run16
   });
 
   // cli/host/net.ts
@@ -6295,7 +6392,7 @@ export default function App() {
   // cli/commands/push-bundle.ts
   var SOCKET_PATH = "/tmp/reactjit.sock";
   var TIMEOUT_MS = 3e3;
-  async function run15(argv) {
+  async function run16(argv) {
     let parsed;
     try {
       parsed = parseArgs(argv.slice(0, 2), { positional: ["tabName", "bundlePath"] });
@@ -6309,8 +6406,8 @@ export default function App() {
       err("[push-bundle] usage: push-bundle.js <tab-name> <bundle-path>");
       return 1;
     }
-    const bundle = tryFsRead(bundlePath);
-    if (bundle === null) {
+    const bundle2 = tryFsRead(bundlePath);
+    if (bundle2 === null) {
       err(`[push-bundle] cannot read ${bundlePath}`);
       return 1;
     }
@@ -6319,7 +6416,7 @@ export default function App() {
     if (fd === null) return 2;
     try {
       try {
-        unixWrite(fd, `PUSH ${tabName} ${utf8ByteLength(bundle)}
+        unixWrite(fd, `PUSH ${tabName} ${utf8ByteLength(bundle2)}
 `);
       } catch (error) {
         if (error instanceof SocketError) {
@@ -6329,7 +6426,7 @@ export default function App() {
         throw error;
       }
       try {
-        unixWrite(fd, bundle);
+        unixWrite(fd, bundle2);
       } catch (error) {
         if (error instanceof SocketError) {
           err("[push-bundle] write bundle failed");
@@ -6374,9 +6471,9 @@ export default function App() {
   // cli/commands/ship.ts
   var ship_exports = {};
   __export(ship_exports, {
-    run: () => run16
+    run: () => run17
   });
-  async function run16(argv) {
+  async function run17(argv) {
     const parsed = parseShipArgs(argv);
     if (typeof parsed === "number") return parsed;
     const root = __cwd();
@@ -6394,15 +6491,15 @@ export default function App() {
     const restoreGeometrySeed = bakeGeometryForCart(rjitHome, parsed.name, cart);
     if (!restoreGeometrySeed) return 1;
     out(`[ship] bundling ${cart.entry} -> ${bundleOut}...`);
-    const bundle = bundleCart({
+    const bundle2 = bundleCart({
       rjitHome,
       cartEntry: cart.entry,
       outFile: bundleOut,
       mode: substrate === "tui" ? "tui-host" : "gpu-host"
     });
-    writeSpawnOutput3(bundle);
+    writeSpawnOutput3(bundle2);
     restoreGeometrySeed();
-    if (bundle.code !== 0) return bundle.code || 1;
+    if (bundle2.code !== 0) return bundle2.code || 1;
     if (embedBundle !== bundleOut) {
       fsMkdir(dirname5(embedBundle));
       const copy = spawnSync("cp", ["-f", bundleOut, embedBundle]);
@@ -6570,8 +6667,8 @@ export default function App() {
   function customChromeFlagFor(manifestPath, bundlePath) {
     const manifest2 = tryFsRead(manifestPath);
     if (!manifest2 || !/"customChrome"\s*:\s*true/.test(manifest2)) return [];
-    const bundle = tryFsRead(bundlePath) ?? "";
-    if (bundle.includes("windowDrag")) {
+    const bundle2 = tryFsRead(bundlePath) ?? "";
+    if (bundle2.includes("windowDrag")) {
       out("[ship] cart manifest: customChrome=true (windowDrag detected -> borderless)");
       return ["-Dcustom-chrome=true"];
     }
@@ -6805,8 +6902,8 @@ done
     out("[ship]   bundled rjit-llm-worker + libllama.so + ggml-vulkan backend");
   }
   function bundleLibMpv(rjitHome, libDir, bundleOut) {
-    const bundle = tryFsRead(bundleOut) ?? "";
-    if (!/__jsxs?\(Video,/.test(bundle)) return;
+    const bundle2 = tryFsRead(bundleOut) ?? "";
+    if (!/__jsxs?\(Video,/.test(bundle2)) return;
     const src = `${rjitHome}/love2d/storybook/lib/libmpv.so.2`;
     if (fsExists(src)) {
       runOrThrow("cp", ["-L", src, `${libDir}/libmpv.so.2`]);
@@ -6915,28 +7012,28 @@ __ARCHIVE__
   // cli/commands/ship-tui.ts
   var ship_tui_exports = {};
   __export(ship_tui_exports, {
-    run: () => run17
+    run: () => run18
   });
-  async function run17(argv) {
-    return run16([...argv, "--tui"]);
+  async function run18(argv) {
+    return run17([...argv, "--tui"]);
   }
 
   // cli/commands/tui.ts
   var tui_exports = {};
   __export(tui_exports, {
-    run: () => run18
+    run: () => run19
   });
-  async function run18(argv) {
+  async function run19(argv) {
     return run9([...argv, "--tui"]);
   }
 
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run19
+    run: () => run20
   });
   var POLL_MS = 200;
-  async function run19(argv) {
+  async function run20(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -7006,6 +7103,7 @@ __ARCHIVE__
     "codegen-bindings": codegen_bindings_exports,
     "dev": dev_exports,
     "firecracker-build": firecracker_build_exports,
+    "game": game_exports,
     "help": help_exports,
     "init": init_exports,
     "metafile-gate": metafile_gate_exports,

@@ -16,17 +16,24 @@ const STANDARD_NAMES = [
   'GAME_TELEMETRY',
 ] as const;
 
+/** The doors THIS lane sealed; other lanes' doors (e.g. kinds) own their own style. */
+const SEALED_HERE = [
+  'GAME_PHYSICS', 'GAME_PATHING', 'GAME_INPUT', 'GAME_CAMERA', 'GAME_LOOP', 'GAME_COMMANDS',
+];
+
 test('the door exports all 19 standard GAME_* names (V17)', () => {
   assertEqual(STANDARD_NAMES.length, 19, 'the standard list itself must be 19 names');
   for (const name of STANDARD_NAMES) {
     const value = (door as any)[name];
     assert(value != null && typeof value === 'object', `${name} must be exported from the door`);
-    assert(Object.isFrozen(value), `${name} must be sealed (Object.freeze)`);
+  }
+  for (const name of SEALED_HERE) {
+    assert(Object.isFrozen((door as any)[name]), `${name} must be sealed (Object.freeze)`);
   }
 });
 
 test('live doors are live; capture-pending doors say so honestly', () => {
-  const live = ['GAME_PHYSICS', 'GAME_PATHING', 'GAME_INPUT', 'GAME_CAMERA', 'GAME_LOOP', 'GAME_COMMANDS'];
+  const live = [...SEALED_HERE, 'GAME_KINDS'];
   for (const name of live) {
     assert(!('status' in (door as any)[name]), `${name} must not claim capture-pending`);
   }

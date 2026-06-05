@@ -10,6 +10,24 @@ export const hmsc_int: DocIndex = {
     'The world editor for Hitman Shitcity: paint top-down in 2D, preview in the game’s own iso/free-fly 3D renderer, and Compile to persist a real GameState to the shared boot localstore key the game boots from.',
   interfaces: [
     {
+      name: 'game/index.ts (the GAME_* door)',
+      purpose: ['host_bridge', 'game_loop', 'scripting', 'maintenance'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/index.ts',
+      description:
+        'THE ONLY DOOR (V17): all 19 standard GAME_* exports. Live at milestone-0: GAME_PHYSICS (typed wire over __hmsc_physics_step/__hmsc_register_heightfield), GAME_PATHING (over runtime/pathing+motion), GAME_INPUT (transport only, V7), GAME_CAMERA (pure side of @reactjit/cameras), GAME_LOOP (clocks only, NO loop API — R3), GAME_COMMANDS (the V19 scripting surface), GAME_KINDS (the five kind tables). The rest export { status: "capture-pending" }. @game bundler alias (cli/cart/bundle.ts) = the V18 metafile-gate signal. P4 *.test.ts beside every family, run under tools/v8cli.',
+      status: 'live',
+    },
+    {
+      name: 'compile/main.ts + rjit game compile/verify',
+      purpose: ['scripting', 'maintenance', 'persistence'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/compile/main.ts',
+      description:
+        'The V19 skeleton: `rjit game compile` bundles the headless boot → zig-out/game/hmsc-headless.js; `rjit game verify` compiles fresh, runs every game/**/*.test.ts suite, boots the output under v8cli, replays every compile/verify/*.cmds command sequence (game/commands is the language), and exits with one VERDICT GREEN/RED line. Milestone-0 world = boot/tick/status skeleton; grows as captures land.',
+      status: 'live',
+    },
+    {
       name: 'index.tsx',
       purpose: ['world_gen', 'ui', 'persistence'],
       kind: 'module',
