@@ -57,4 +57,16 @@ test('AssistMeshViewer uses the V23 native viewport drive', () => {
   assert(!source.includes('CAMERAS.Orbit'), 'runtime Orbit registry import must not drive this viewport');
 });
 
+test('assist3d SceneSurface uses native render drive and keeps registry math only for picking', () => {
+  const source = read('cart/hmsc-int/assist3d/SceneSurface.tsx');
+  assert(source.includes('<Scene3D.Camera nativeCamera ref={cameraRef}'), 'renderer-consumed camera node must opt into nativeCamera');
+  assert(source.includes('GAME_NATIVE_CAMERA.forNode'), 'surface must engage the node-scoped native controller');
+  assert(source.includes('.setInputDeltas('), 'drag must send native input deltas');
+  assert(source.includes('shadowCamRef.current'), 'picking shadow must be explicit and separate from renderer drive');
+  assert(!source.includes('position={solved.pos}'), 'JS-solved camera position must not drive the renderer');
+  assert(!source.includes('target={solved.target}'), 'JS-solved camera target must not drive the renderer');
+  assert(!source.includes('solveCamera('), 'runtime solveCamera must not drive this viewport');
+  assert(!source.includes('CAMERAS.Orbit'), 'runtime Orbit registry import must not drive this viewport');
+});
+
 finish('native-viewport');
