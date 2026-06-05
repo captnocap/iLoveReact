@@ -177,11 +177,14 @@ V18 metafile-gate signal. Every family carries a P4 `*.test.ts` beside it
 
 `cart/hmsc-int/compile/` is the V19 skeleton: `rjit game compile` bundles
 `compile/main.ts` → `zig-out/game/hmsc-headless.js`; `rjit game verify`
-compiles fresh, runs every `game/**/*.test.ts` suite, then boots the output
-headless under v8cli and replays every `compile/verify/*.cmds` command
-sequence, exiting with one `VERDICT GREEN/RED` line. The milestone-0 world is
-a state skeleton (boot / tick / status / help); it grows as captures land —
-the green light exists from day one and never goes dark.
+compiles fresh, runs the oracle self-check over `docs/game/_index` (every
+record file parsed and validated against the fields `tools/oracle` actually
+dereferences, `decisions.ts` ids checked, plus 14 system smoke queries), runs
+every `game/**/*.test.ts` suite, then boots the output headless under v8cli and
+replays every `compile/verify/*.cmds` command sequence, exiting with one
+`VERDICT GREEN/RED` line. The milestone-0 world is a state skeleton (boot /
+tick / status / help); it grows as captures land — the green light exists from
+day one and never goes dark.
 
 ## The labs route + scaffold (added 2026-06-05, Milestone-0 step 3)
 

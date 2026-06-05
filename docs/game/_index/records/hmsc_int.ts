@@ -24,7 +24,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/compile/main.ts',
       description:
-        'The V19 skeleton: `rjit game compile` bundles the headless boot → zig-out/game/hmsc-headless.js; `rjit game verify` compiles fresh, runs every game/**/*.test.ts suite, boots the output under v8cli, replays every compile/verify/*.cmds command sequence (game/commands is the language), and exits with one VERDICT GREEN/RED line. The headless state is the captured GameCommandState + boot/tick locals, with a mounted V20 `commands` stream/snapshot adapter under zig-out/game/headless-data for gv_save/gv_load. The full 48-name console vocabulary is mounted (defineGameCommands), so verify scripts speak real commands (commands.cmds: 30 command lines). Grows as captures land.',
+        'The V19 skeleton: `rjit game compile` bundles the headless boot → zig-out/game/hmsc-headless.js; `rjit game verify` compiles fresh, runs the oracle self-check over docs/game/_index (every record file parses and has the fields tools/oracle dereferences, decisions.ts ids match V*/P*/R*, and 14 system smoke queries return matching rulings), runs every game/**/*.test.ts suite, boots the output under v8cli, replays every compile/verify/*.cmds command sequence (game/commands is the language), and exits with one VERDICT GREEN/RED line. The headless state is the captured GameCommandState + boot/tick locals, with a mounted V20 `commands` stream/snapshot adapter under zig-out/game/headless-data for gv_save/gv_load. The full 48-name console vocabulary is mounted (defineGameCommands), so verify scripts speak real commands (commands.cmds: 30 command lines). Grows as captures land.',
       status: 'live',
     },
     {

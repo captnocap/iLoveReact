@@ -61,8 +61,8 @@ export const game_cutscene: DocIndex = {
       purpose: ['game_loop', 'scripting'],
       description:
         'No track owns a clock or keeps state; sparse cues (last at ≤ t holds) select, the delegated system answers at exactly the same t. The 804-case fidelity sweep asserts byte-identity with GAME_CAMERA.solve / GAME_PATHING.sampleMotion / GAME_ANIMATION.sample over the whole clock.',
-      appearsIn: ['hmsc-int'],
-      frequency: 'recurring',
+      examples: ['hmsc-int'],
+      status: 'recurring',
     },
   ],
   hazards: [
