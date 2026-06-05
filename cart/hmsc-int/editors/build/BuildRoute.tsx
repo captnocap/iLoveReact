@@ -36,7 +36,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text, TextInput } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_INPUT, GAME_PHYSICS, GAME_WORLD, worldStream } from '@game';
+import { GAME_BUILD, GAME_CAMERA, GAME_CHROME, GAME_INPUT, GAME_ITEMS, GAME_PHYSICS, GAME_WORLD, worldStream } from '@game';
 import type {
   BuildMaterial, BuildPieceDef, BuildPieceKind, BuildPrefabDef, PieceRay,
   PlacedBuildPiece, WallEdit, WorldEvent, WorldStreamState,
@@ -46,6 +46,8 @@ import {
   EmbodiedCaptures, EmbodiedMouseSurface, EmbodiedScene, PLAYER_CAMERA,
   groundColumnTop, normalizeYawDegrees, useEmbodiedPlayer, type EmbodiedWorldExtras,
 } from '../../Embodied';
+import { EmbodiedHud, HUD_TUNING, type HudCompassMarker, type HudFeedEntry, type HudSlotDef } from '../../EmbodiedHud';
+import { C, accentFor } from '../../studio.cls';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './snap';
@@ -64,7 +66,6 @@ const BUILD_UI = {
   /** ramp/stairs render as this many stepped boxes (visual only — collision
    *  is the real heightfield slope) */
   rampVisualSteps: 4,
-  paletteBg: '#0b1220e0',
   panelBg: '#0f1a2ef0',
 } as const;
 
@@ -220,6 +221,24 @@ const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
 });
 
 // ── chips (route chrome) ─────────────────────────────────────────────────────
+
+/** HUD-family chip for the blueprint selection (tokens via studio.cls; the
+ *  active state colors are raw values read through accentFor — user props are
+ *  not token-resolved). */
+function BlueprintChip(props: { label: string; on: boolean; onPress: () => void }) {
+  return (
+    <Pressable onPress={props.onPress}>
+      <C.HudPanel
+        style={{
+          paddingLeft: 7, paddingRight: 7, paddingTop: 3, paddingBottom: 3,
+          ...(props.on ? { backgroundColor: accentFor('segActiveBg'), borderColor: accentFor('primary') } : {}),
+        }}
+      >
+        <C.HudKeyTag style={props.on ? { color: accentFor('hudText') } : undefined}>{props.label}</C.HudKeyTag>
+      </C.HudPanel>
+    </Pressable>
+  );
+}
 
 function Chip(props: { label: string; on: boolean; onPress: () => void }) {
   return (
@@ -552,6 +571,33 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
   const armedLabel = armedPrefab ? `${armedPrefab.label} (prefab)` : armedDef ? armedDef.label : '—';
   const targetPiece = snapTarget?.targetPieceId ? pieces.find((p) => p.id === snapTarget.targetPieceId) ?? null : null;
 
+  // ── HUD data (HUD-0605) — every datum through a door ──────────────────────
+  // compass + minimap marker: the build target IS this route's live objective
+  const hudMarkers = useMemo<HudCompassMarker[]>(
+    () => (snapTarget ? [{ x: snapTarget.placement.x, z: snapTarget.placement.z, label: 'target' }] : []),
+    [snapTarget],
+  );
+  // game status updates: the session's labeled commits (the V20 truth channel)
+  const hudFeed = useMemo<HudFeedEntry[]>(() => {
+    const tail = sessionCommits.slice(-HUD_TUNING.feed.maxLines);
+    return tail.map((c, index) => ({ id: c.seq, text: `#${c.seq} ${c.label}`, hot: index === tail.length - 1 }));
+  }, [sessionCommits]);
+  // equipment: the authored inventory through the items door (empty = honest)
+  const hudEquipment = useMemo<HudSlotDef[]>(
+    () => (props.state.player.inventory ?? []).slice(0, HUD_TUNING.equipment.slotCount).map((id, index) => ({
+      id: `${index}:${id}`,
+      label: GAME_ITEMS.is(id) ? GAME_ITEMS.get(id).label : id,
+    })),
+    [props.state],
+  );
+  const hudKeyInfo = useMemo(() => [
+    { label: 'map', value: props.mapName },
+    { label: 'pieces', value: String(pieces.length) },
+    { label: 'commits', value: String(sessionCommits.length) },
+    { label: 'armed', value: armedLabel },
+  ], [props.mapName, pieces.length, sessionCommits.length, armedLabel]);
+  const hudMapBlips = useMemo(() => pieces.map((p) => ({ x: p.x, z: p.z })), [pieces]);
+
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#080d16' }}>
       <EmbodiedCaptures embodied={embodied} />
@@ -582,44 +628,80 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
 
       <EmbodiedMouseSurface embodied={embodied} />
 
-      {/* top-left: exit + status */}
+      {/* THE GAME HUD (HUD-0605 — Fortnite-verbatim layout, USER ruling).
+          The blueprint selection (the ruled 1/2/3/4 categories + variants)
+          rides the bottom-right slot above the equipment hotbar. */}
+      <EmbodiedHud
+        embodied={embodied}
+        markers={hudMarkers}
+        feed={hudFeed}
+        vitals={{ health: props.state.player.health }}
+        keyInfo={hudKeyInfo}
+        mapBlips={hudMapBlips}
+        equipment={hudEquipment}
+        blueprint={
+          <Box style={{ alignItems: 'flex-end', gap: 4, maxWidth: 470 }}>
+            {/* variants of the armed category (or the prefab shelf) */}
+            <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {armedKind === 'prefab'
+                ? prefabDefs.map((def) => (
+                    <BlueprintChip key={def.id} label={def.label} on={armed.type === 'prefab' && armed.id === def.id} onPress={() => setArmed({ type: 'prefab', id: def.id })} />
+                  ))
+                : entriesOfArmedKind.map((def) => (
+                    <BlueprintChip key={def.id} label={`${def.label} · ${def.theme}`} on={armed.type === 'piece' && armed.id === def.id} onPress={() => setArmed({ type: 'piece', id: def.id })} />
+                  ))}
+            </Box>
+            {/* categories — the registry IS the list, USER-RULED order leads
+                (1 floor · 2 wall · 3 ramp · 4 roof), keys and chips agree */}
+            <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {kinds.map((kind, index) => (
+                <BlueprintChip
+                  key={kind}
+                  label={`${index < 9 ? `${index + 1} ` : ''}${GAME_BUILD.kinds.get(kind).label}`}
+                  on={armedKind === kind}
+                  onPress={() => armKind(kind)}
+                />
+              ))}
+              <BlueprintChip label="0 Prefabs" on={armedKind === 'prefab'} onPress={() => armKind('prefab')} />
+            </Box>
+            <C.HudTextDim>
+              {`armed: ${armedLabel} · yaw ${ghostYaw}° · ${snapTarget ? `${snapTarget.surface}${targetPiece ? ` → ${GAME_BUILD.catalog.get(targetPiece.pieceId).label}${targetPiece.edit ? ` [${targetPiece.edit}]` : ''}` : ''}` : 'no target'}`}
+            </C.HudTextDim>
+          </Box>
+        }
+      />
+
+      {/* route chrome: exit + tuning (small, top-left; Fortnite keeps this
+          corner quiet). The help line teaches the ruled keys while the mouse
+          is RELEASED (Esc = UI mode); captured play keeps the HUD clean. */}
       <Box style={{ position: 'absolute', left: 12, top: 12, flexDirection: 'row', alignItems: 'center', gap: 8 }}>
         <Pressable onPress={props.onExit} style={{ paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 6, borderRadius: 6, borderWidth: 1, borderColor: '#334155', backgroundColor: '#0f1a2e' }}>
           <Text fontSize={11} color="#cbd5e1" style={{ fontWeight: 700 }}>Back</Text>
         </Pressable>
-        <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>
-          {`${props.mapName} · BUILD · WASD move · Space jump · mouse look (${embodied.mouseCaptured ? 'Esc frees the mouse' : 'click to capture'}) · click place · R rotate · E edit · 1 floor · 2 wall · 3 ramp · 4 roof · X remove · P mark · 0 prefabs · [ ] variant`}
-        </Text>
+        <Chip label="tuning" on={showTuning} onPress={() => setShowTuning((s) => !s)} />
+        {!embodied.mouseCaptured && (
+          <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace' }}>
+            {`${props.mapName} · BUILD · click to capture the mouse · WASD move · Space jump · click place · R rotate · E edit · 1 floor · 2 wall · 3 ramp · 4 roof · X remove · P mark · 0 prefabs · [ ] variant · Esc frees the mouse`}
+          </Text>
+        )}
       </Box>
       {build.error != null && (
-        <Box style={{ position: 'absolute', left: 12, top: 40, backgroundColor: '#7f1d1dcc', borderRadius: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}>
+        <Box style={{ position: 'absolute', left: 12, top: 44, backgroundColor: '#7f1d1dcc', borderRadius: 6, paddingLeft: 8, paddingRight: 8, paddingTop: 4, paddingBottom: 4 }}>
           <Text fontSize={10} color="#fecaca" style={{ fontFamily: 'monospace' }}>{`persistence host missing — placements disabled (${build.error})`}</Text>
         </Box>
       )}
-
-      {/* top-right: session trace (one interaction = one labeled commit) + tuning */}
-      <Box style={{ position: 'absolute', right: 12, top: 12, alignItems: 'flex-end', gap: 4 }}>
-        <Box style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
-          <Text fontSize={10} color="#94a3b8" style={{ fontFamily: 'monospace' }}>
-            {`${sessionCommits.length} commit${sessionCommits.length === 1 ? '' : 's'} · ${pieces.length} piece${pieces.length === 1 ? '' : 's'}`}
-          </Text>
-          <Chip label="tuning" on={showTuning} onPress={() => setShowTuning((s) => !s)} />
+      {showTuning && (
+        <Box style={{ position: 'absolute', left: 12, top: 44, backgroundColor: BUILD_UI.panelBg, borderWidth: 1, borderColor: '#27364a', borderRadius: 8, padding: 10, gap: 6, width: 240 }}>
+          <GAME_CHROME.Knob label="build reach (m)" value={reachMeters} spec={{ min: 4, max: 30, step: 1, precision: 0 }} onChange={setReachMeters} />
+          <GAME_CHROME.Knob label="ghost opacity" value={ghostOpacity} spec={{ min: 0.1, max: 0.9, step: 0.05, precision: 2 }} onChange={setGhostOpacity} />
+          <GAME_CHROME.Knob label="ground march (m)" value={marchStep} spec={{ min: 0.1, max: 1, step: 0.05, precision: 2 }} onChange={setMarchStep} />
         </Box>
-        {sessionCommits.slice(-3).reverse().map((c) => (
-          <Text key={c.seq} fontSize={9} color="#475569" style={{ fontFamily: 'monospace' }}>{`#${c.seq} ${c.label}`}</Text>
-        ))}
-        {showTuning && (
-          <Box style={{ backgroundColor: BUILD_UI.panelBg, borderWidth: 1, borderColor: '#27364a', borderRadius: 8, padding: 10, gap: 6, width: 240 }}>
-            <GAME_CHROME.Knob label="build reach (m)" value={reachMeters} spec={{ min: 4, max: 30, step: 1, precision: 0 }} onChange={setReachMeters} />
-            <GAME_CHROME.Knob label="ghost opacity" value={ghostOpacity} spec={{ min: 0.1, max: 0.9, step: 0.05, precision: 2 }} onChange={setGhostOpacity} />
-            <GAME_CHROME.Knob label="ground march (m)" value={marchStep} spec={{ min: 0.1, max: 1, step: 0.05, precision: 2 }} onChange={setMarchStep} />
-          </Box>
-        )}
-      </Box>
+      )}
 
-      {/* prefab capture panel — appears while pieces are marked */}
+      {/* prefab capture panel — appears while pieces are marked (sits above
+          the bottom-right blueprint/hotbar stack) */}
       {markedIds.size > 0 && (
-        <Box style={{ position: 'absolute', right: 12, bottom: 86, backgroundColor: BUILD_UI.panelBg, borderWidth: 1, borderColor: '#facc15', borderRadius: 8, padding: 10, gap: 6, width: 240 }}>
+        <Box style={{ position: 'absolute', right: 12, bottom: 190, backgroundColor: BUILD_UI.panelBg, borderWidth: 1, borderColor: '#facc15', borderRadius: 8, padding: 10, gap: 6, width: 240 }}>
           <Text fontSize={10} color="#fde68a" style={{ fontWeight: 700 }}>{`${markedIds.size} piece${markedIds.size === 1 ? '' : 's'} marked (P toggles)`}</Text>
           <TextInput
             value={prefabName}
@@ -633,34 +715,6 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
           </Box>
         </Box>
       )}
-
-      {/* bottom palette — the registry IS the list (kinds + catalog + prefabs),
-          displayed in the USER-RULED hotkey order so keys and labels agree */}
-      <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: BUILD_UI.paletteBg, borderTopWidth: 1, borderTopColor: '#1f2937', padding: 8, gap: 6 }}>
-        <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap' }}>
-          {kinds.map((kind, index) => (
-            <Chip
-              key={kind}
-              label={`${index < 9 ? `${index + 1} ` : ''}${GAME_BUILD.kinds.get(kind).label}`}
-              on={armedKind === kind}
-              onPress={() => armKind(kind)}
-            />
-          ))}
-          <Chip label="0 Prefabs" on={armedKind === 'prefab'} onPress={() => armKind('prefab')} />
-        </Box>
-        <Box style={{ flexDirection: 'row', gap: 4, flexWrap: 'wrap', alignItems: 'center' }}>
-          {armedKind === 'prefab'
-            ? prefabDefs.map((def) => (
-                <Chip key={def.id} label={def.label} on={armed.type === 'prefab' && armed.id === def.id} onPress={() => setArmed({ type: 'prefab', id: def.id })} />
-              ))
-            : entriesOfArmedKind.map((def) => (
-                <Chip key={def.id} label={`${def.label} · ${def.theme}`} on={armed.type === 'piece' && armed.id === def.id} onPress={() => setArmed({ type: 'piece', id: def.id })} />
-              ))}
-          <Text fontSize={10} color="#64748b" style={{ fontFamily: 'monospace', marginLeft: 8 }}>
-            {`armed: ${armedLabel} · yaw ${ghostYaw}° · ${snapTarget ? `${snapTarget.surface}${targetPiece ? ` → ${GAME_BUILD.catalog.get(targetPiece.pieceId).label}${targetPiece.edit ? ` [${targetPiece.edit}]` : ''}` : ''}` : 'no target'}`}
-          </Text>
-        </Box>
-      </Box>
     </Box>
   );
 }

@@ -586,6 +586,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'EmbodiedHud.tsx (the Fortnite-verbatim game HUD)',
+      purpose: ['ui', 'game_loop', 'telemetry'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/EmbodiedHud.tsx',
+      description:
+        'HUD-0605 (2026-06-05), USER ruling: "just make a normal game hud … literally just take the same idea as fortnite. verbatim". Composable beside the embodied substrate — any embodied route mounts <EmbodiedHud embodied={...}>; /build is the proving surface. Layout per the user\'s annotated reference screenshot: TOP-CENTER compass strip (headings N/NE/… + degree ticks; objective/target markers bearing-relative to the player — the V23 look SHADOW is sampled on a coarse P2 clock with whole-degree re-renders, so the host-driven camera stays zero-render); TOP-RIGHT minimap (north-up, player-centered: surface regions colored by GAME_KINDS render colors, buildings, route-fed blips like placed pieces, marker blips, player dot + facing dot; legibility cap in HUD_TUNING) + key info rows; LEFT-MIDDLE game status updates feed; BOTTOM-LEFT health bar (state.player.health through the player door) — NO stamina (USER-excluded) and shields render a HAND-OFF row while no damage system door exists (never a fake number); BOTTOM-RIGHT equipment hotbar (player.inventory through GAME_ITEMS; empty inventory = honest hand-off line) with the route\'s blueprint selection slot ABOVE it (on /build: the ruled 1 floor · 2 wall · 3 ramp · 4 roof categories + variant chips — keys and HUD agree) — NO material amounts (USER-excluded). Chrome is the Hud* class family (studio.cls.ts) over hud* tokens (theme.ts) — zero raw colours in the components; every feel number in the exported P2 HUD_TUNING table. Exports: EmbodiedHud, HudSlots, HUD_TUNING + the Hud* prop types.',
+      dependsOn: ['Embodied.tsx (the shared embodied substrate)', 'GAME_KINDS', 'GAME_ITEMS', 'studio.cls.ts', 'theme.ts'],
+      status: 'live',
+    },
+    {
       name: 'TestRoute',
       purpose: ['world_gen', 'character', 'game_loop'],
       kind: 'component',

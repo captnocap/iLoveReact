@@ -54,6 +54,17 @@ export const STUDIO_COLORS: Partial<ThemeColors> = {
   segActiveText: '#bfeef5',
   valText:       '#cdd9e2', // slider / generic value text
   valNum:        '#f0e3c4', // numeric value (warm)
+
+  // ── embodied HUD (extra — the Fortnite-verbatim game chrome, HUD-0605) ─
+  hudPanel:      '#0b1220b8', // translucent HUD panel over the 3D scene
+  hudPanelEdge:  '#26313c66', // soft translucent panel border
+  hudText:       '#e6edf3',   // HUD primary text (reads over sky + ground)
+  hudTextDim:    '#9fb0c4',   // HUD secondary
+  hudHealth:     '#6fe08a',   // health bar fill (Fortnite green family)
+  hudShield:     '#4aa8ff',   // shield bar fill (Fortnite blue family)
+  hudBarTrack:   '#0a0f16cc', // bar track under fills
+  hudMarker:     '#fbbf24',   // compass objective/target marker
+  hudPlayer:     '#7dd3fc',   // minimap player blip
 };
 
 export const STUDIO_STYLES: Partial<StylePalette> = {

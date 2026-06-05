@@ -21,6 +21,18 @@ a click always places, Esc frees the mouse (addendum 4; supersedes surfaced
 choice #1 below — the click-slop heuristic is dead). `viewport.test.ts` pins
 all of it.
 
+## HUD-0605 amendment (2026-06-05)
+
+The route wears the Fortnite-verbatim `EmbodiedHud` (USER ruling, reference
+screenshot supplied): compass top-center (the snap target rides it as the
+marker), minimap + key info top-right, the session's labeled commits as the
+left-middle status feed, health bottom-left (shields = hand-off, NO stamina),
+and the blueprint selection (the ruled 1/2/3/4 categories + variant chips)
+above the equipment hotbar bottom-right (NO material amounts). The old
+full-width bottom palette and top-right session strip are gone; the help line
+shows only while the mouse is RELEASED (Esc = UI mode). HUD chrome is
+studio.cls `Hud*` tokens; feel numbers in `EmbodiedHud.tsx` `HUD_TUNING` (P2).
+
 ## The pieces
 
 - `BuildRoute.tsx` — the builder layer over the shared embodied substrate

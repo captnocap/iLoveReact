@@ -201,6 +201,31 @@ classifier({
   EmptyState: { type: 'Box', style: { flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 'theme:spacingSm', padding: 'theme:spacingLg' } },
   EmptyTitle: { type: 'Text', fontSize: 'theme:fontXl', color: 'theme:textDim', style: { fontWeight: 700, letterSpacing: 1 } },
   EmptyHint:  { type: 'Text', fontSize: 'theme:fontLg', color: 'theme:textFaint', style: { fontFamily: MONO, textAlign: 'center' } },
+
+  // ─────────────────────────────────────────────────────────────
+  // EMBODIED HUD (HUD-0605 — the Fortnite-verbatim game chrome,
+  // EmbodiedHud.tsx; tokens only, no raw colours)
+  // ─────────────────────────────────────────────────────────────
+  HudPanel:     { type: 'Box', style: { backgroundColor: 'theme:hudPanel', borderWidth: 'theme:borderThin', borderColor: 'theme:hudPanelEdge', borderRadius: 'theme:radiusLg' } },
+  HudText:      { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:hudText', style: { fontFamily: MONO, fontWeight: 700 } },
+  HudTextDim:   { type: 'Text', fontSize: 'theme:fontSm', color: 'theme:hudTextDim', style: { fontFamily: MONO } },
+  HudHeading:   { type: 'Text', fontSize: 'theme:fontLg', color: 'theme:hudText', style: { fontFamily: MONO, fontWeight: 700, letterSpacing: 1 } },
+  HudDegrees:   { type: 'Text', fontSize: 'theme:fontSm', color: 'theme:hudTextDim', style: { fontFamily: MONO } },
+  HudTick:      { type: 'Box', style: { width: 1, height: 6, backgroundColor: 'theme:hudTextDim' } },
+  HudTickMajor: { type: 'Box', style: { width: 2, height: 9, backgroundColor: 'theme:hudText' } },
+  HudMarker:    { type: 'Box', style: { width: 7, height: 7, backgroundColor: 'theme:hudMarker', borderRadius: 2 } },
+  HudBarTrack:  { type: 'Box', style: { height: 10, backgroundColor: 'theme:hudBarTrack', borderRadius: 'theme:radiusSm', overflow: 'hidden' } },
+  HudBarHealth: { type: 'Box', style: { height: '100%', backgroundColor: 'theme:hudHealth' } },
+  HudBarShield: { type: 'Box', style: { height: '100%', backgroundColor: 'theme:hudShield' } },
+  HudBarNum:    { type: 'Text', fontSize: 'theme:fontLg', color: 'theme:hudText', style: { fontFamily: MONO, fontWeight: 700 } },
+  HudFeedLine:  { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:hudTextDim', style: { fontFamily: MONO } },
+  HudFeedHot:   { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:hudText', style: { fontFamily: MONO, fontWeight: 700 } },
+  HudSlot:      { type: 'Box', style: { width: 44, height: 44, backgroundColor: 'theme:hudPanel', borderWidth: 'theme:borderThin', borderColor: 'theme:hudPanelEdge', borderRadius: 'theme:radiusMd', alignItems: 'center', justifyContent: 'center' } },
+  HudSlotActive:{ type: 'Box', style: { width: 44, height: 44, backgroundColor: 'theme:segActiveBg', borderWidth: 'theme:borderMedium', borderColor: 'theme:primary', borderRadius: 'theme:radiusMd', alignItems: 'center', justifyContent: 'center' } },
+  HudSlotText:  { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:hudTextDim', style: { fontFamily: MONO, fontWeight: 700, textAlign: 'center' } },
+  HudKeyTag:    { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:hudTextDim', style: { fontFamily: MONO, fontWeight: 700 } },
+  HudMapFrame:  { type: 'Box', style: { backgroundColor: 'theme:hudPanel', borderWidth: 'theme:borderThin', borderColor: 'theme:hudPanelEdge', borderRadius: 'theme:radiusLg', overflow: 'hidden' } },
+  HudHandoff:   { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:textFaint', style: { fontFamily: MONO } },
 });
 
 export { C };

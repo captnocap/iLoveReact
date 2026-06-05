@@ -113,18 +113,38 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
   camera tuning truth), `groundColumnTop`, `normalizeYawDegrees`,
   `PlayerPose`. Pinned by `editors/build/viewport.test.ts` so a per-route
   embodied copy cannot reappear. The GAP(W-2)/(W-3) markers ride here now.
+- **`EmbodiedHud.tsx` — the Fortnite-verbatim game HUD (HUD-0605,
+  2026-06-05).** USER ruling ("just make a normal game hud … take the same
+  idea as fortnite. verbatim"), composable beside the substrate so every
+  embodied route can mount it; /build is the proving surface. Layout per the
+  user's annotated reference: TOP-CENTER compass strip (headings + degree
+  ticks; objective/target markers ride it bearing-relative — the look shadow
+  sampled on a coarse clock, whole-degree re-renders only); TOP-RIGHT
+  minimap (north-up, player-centered; regions colored by the GAME_KINDS
+  render color, buildings + placed-piece blips, marker blips) + the key
+  info block; LEFT-MIDDLE game status updates (the session's labeled
+  commits); BOTTOM-LEFT health bar (the player door) — NO stamina
+  (excluded) and shields render as a HAND-OFF row (no damage system door —
+  never a fake number); BOTTOM-RIGHT equipment hotbar (player.inventory
+  through GAME_ITEMS; empty = honest hand-off) with the blueprint selection
+  ABOVE it (the ruled 1/2/3/4 categories — keys and HUD agree) — NO
+  material amounts (excluded). Chrome = the `Hud*` class family in
+  `studio.cls.ts` over new `hud*` tokens in `theme.ts` (no raw colours);
+  every feel number in the P2 `HUD_TUNING` table.
 - `/build` `editors/build/BuildRoute` — CREATIVE BUILD MODE (V24): build the
   map WHILE PLAYING. The shared embodied substrate (which FIXED the launch
-  camera — see CAMGONE above) + the V24 builder vocabulary on one surface:
-  crosshair → snap target (`editors/build/snap.ts`, the catalog entry's OWN
-  snap mode) → registry-driven palette (RULED hotkeys lead the display:
-  1 floor · 2 wall · 3 ramp · 4 roof — USER VERDICT, addendum 2) → ghost
-  preview → captured-mouse click places (ONE labeled session commit per
-  interaction on the WORLD channel; Esc frees the mouse for the palette) →
-  R rotates → E cycles WallEdit on the targeted piece → P-marked pieces
-  clone into a named prefab → stamps decompose to semantic pieces. The
-  world stream's materialized state is the one placed-piece truth. See
-  `editors/build/CAPTURE.md`.
+  camera — see CAMGONE above) + the V24 builder vocabulary on one surface,
+  wearing `EmbodiedHud` (the blueprint chips live in the HUD's bottom-right
+  slot; the snap target is the compass/minimap marker; commits are the
+  status feed): crosshair → snap target (`editors/build/snap.ts`, the
+  catalog entry's OWN snap mode) → registry-driven palette (RULED hotkeys
+  lead the display: 1 floor · 2 wall · 3 ramp · 4 roof — USER VERDICT,
+  addendum 2) → ghost preview → captured-mouse click places (ONE labeled
+  session commit per interaction on the WORLD channel; Esc frees the mouse
+  for the palette) → R rotates → E cycles WallEdit on the targeted piece →
+  P-marked pieces clone into a named prefab → stamps decompose to semantic
+  pieces. The world stream's materialized state is the one placed-piece
+  truth. See `editors/build/CAPTURE.md`.
 
 **assist3d/ (AI scene authoring)**
 - `scene.json` is the single source of truth; `MeshSpec` = raw geometry primitive (6 shapes), deliberately NOT a game kind — bridging into placements is a separate step. Three backends in `backends.ts`: `claude_code` (subprocess **writes scene.json itself** via its Write tool), `openai_compat` and `local_ai` (llama.cpp GGUF) call a `set_scene` tool and the **cart** writes the file (plus a fenced-JSON fallback). `useSceneAssistant` hides the difference; `useAssistScene` watches the file; the Objects tab's ASSISTANT category browses the same file. `picking.ts` — screenRay (same unexported-camera-math duplicate family) + **AABB slab pick, not sphere** (sphere fails for flat slabs: camera ends up inside the bounding sphere). `modelHistory.ts` remembers local GGUF paths.
