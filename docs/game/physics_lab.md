@@ -12,12 +12,12 @@ Reviewed: 2026-06-04
 2. a JS-vs-host benchmark harness (sim cost, bridge cost, delta), and
 3. a gallery of ~19 multi-part "game item" models (knife, pistol, bat, cash, vehicle, sailboat, bottles, drugs, backpack, TV…) each defined as a composable mesh function.
 
-The host side lives in `framework/v8_bindings_physics_lab.zig`, which has since grown into the **real hmsc physics backend** (`__hmsc_physics_step`, heightfields) — this lab is the proving ground that file graduated from.
+The host side lives in `framework/v8_bindings_physics_lab.zig`. It once also carried the **real hmsc physics backend** (`__hmsc_physics_step`, heightfields); in WO-1 (2026-06-04) that sim graduated to `framework/game/physics.zig` (+ `movement.zig`) behind `-Dhas-game-physics`, and the lab file now holds ONLY the `__physics_lab_*` toy — this lab is the proving ground the game sim graduated from.
 
 ## Files touched by this behavior
 
 - `cart/physics_lab.tsx`: everything cart-side — JS physics, item models, snapshot decoding, camera, HUD, frame loop.
-- `framework/v8_bindings_physics_lab.zig`: the Zig twin. Registers (line 1345-1355) `__physics_lab_reset`, `__physics_lab_burst`, `__physics_lab_step` (CSV), `__physics_lab_step_buffer` (Float32 ArrayBuffer), plus the hmsc functions this cart does NOT call (`__hmsc_physics_step`, `__hmsc_register_heightfield`, `__hmsc_clear_heightfields`, `__hmsc_spike_trace`).
+- `framework/v8_bindings_physics_lab.zig`: the Zig twin. Registers (line 753-759) `__physics_lab_reset`, `__physics_lab_burst`, `__physics_lab_step` (CSV), `__physics_lab_step_buffer` (Float32 ArrayBuffer). The `__hmsc_*` functions that used to cohabit here are gone (WO-1): they live in `framework/game/physics.zig`, registered by `v8_bindings_game_physics.zig`.
 - `framework/v8_bindings_input_bench.zig`: registers `__bench_now_us` (line 200) — the monotonic µs clock the cart prefers for timing.
 - `framework/v8_bindings_core.zig`: registers `isKeyDown(scancode)` used for host-polled WASD/Space/Shift.
 - `runtime/hooks/useIFTTT.ts`: `busOn` (line 207) — the cart subscribes to `__keydown`/`__keyup` bus channels; the host pushes packed key events via `G.__ifttt_onKeyDown/__ifttt_onKeyUp` (lines 371-372) which `emit()` onto those channels.
@@ -82,9 +82,9 @@ Backend default: `'host'` if `hasHostPhysics()` (either step fn registered), els
 
 UI: top bar (`Col`) with title, control `Btn`s (pause/reset/+balls/JS phys/HOST phys) and 11 `Meter`s; the scene fills the rest inside the drag `Pressable`; bottom-left absolute overlay shows backend/grounded/gravity and restitution/peak. Scene dressing: `Scene3D.Skybox` (zenith/horizon/ground + sun params), ambient + directional + 2 point lights, floor slab, grid line boxes, 4 wall slabs, 3 block volumes.
 
-## The cohabitant: hmsc physics (same file, not used by this cart)
+## The former cohabitant: the game sim (graduated in WO-1, not used by this cart)
 
-`framework/v8_bindings_physics_lab.zig` also hosts the production hmsc step — documented here because the lab file is where it lives, but **this cart never calls it**: `__hmsc_physics_step(Float32Array) → ArrayBuffer` is a *stateless-per-call* (config-in, snapshot-out) player+entity step with banded solid rects (walk-under platforms via the 9th `floor` float), oriented (yawed) rects rotated into local frame, registered heightfield terrain with slope-limit walls (`__hmsc_register_heightfield`, bilinear sampling + central-difference normals), per-surface friction/restitution, and step-height ground support. Contrast with the lab fns, which are *stateful* (Zig owns the world). Consumed by `cart/hmsc/state/hostPhysics.ts`.
+`framework/v8_bindings_physics_lab.zig` HOSTED the production hmsc step until WO-1 (2026-06-04) moved it to `framework/game/physics.zig` (registrar `v8_bindings_game_physics.zig`, gate `-Dhas-game-physics`) — kept documented here because this lab is where it grew up, but **this cart never calls it**: `__hmsc_physics_step(Float32Array) → ArrayBuffer` is a *stateless-per-call* (config-in, snapshot-out) player+entity step with banded solid rects (walk-under platforms via the 9th `floor` float), oriented (yawed) rects rotated into local frame, registered heightfield terrain with slope-limit walls (`__hmsc_register_heightfield`, bilinear sampling + central-difference normals), per-surface friction/restitution, and step-height ground support. Contrast with the lab fns, which are *stateful* (Zig owns the world). Consumed by `cart/hmsc/state/hostPhysics.ts`.
 
 ## What is not here
 

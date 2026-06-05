@@ -6,7 +6,7 @@ export const physics_lab: DocIndex = {
   cart: 'cart/physics_lab.tsx',
   purpose: ['physics', 'host_bridge', 'geometry', 'item', 'telemetry', 'camera'],
   summary:
-    'A 3D rigid-body-ish physics probe with a dual backend — the same toy world (a walkable player + tumbling item bodies in a walled arena) implemented twice, once in JS and once in Zig on the host — switchable at runtime while showing per-frame microsecond timings for both.',
+    'A 3D rigid-body-ish physics probe with a dual backend — the same toy world (a walkable player + tumbling item bodies in a walled arena) implemented twice, once in JS and once in Zig on the host — switchable at runtime while showing per-frame microsecond timings for both. Since WO-1 (2026-06-04) the Zig file holds ONLY this toy: the game sim it incubated graduated to framework/game/physics.zig behind -Dhas-game-physics.',
   interfaces: [
     {
       name: 'stepPhysics',
@@ -23,7 +23,7 @@ export const physics_lab: DocIndex = {
       purpose: ['physics', 'host_bridge'],
       kind: 'host_fn',
       sourceFile: 'framework/v8_bindings_physics_lab.zig',
-      codeRef: 'framework/v8_bindings_physics_lab.zig:1345',
+      codeRef: 'framework/v8_bindings_physics_lab.zig:753',
       description: 'Resets both the Zig sim and triggers a JS reset; called when switching to the host backend.',
       consumers: ['physics_lab'],
       status: 'lab',
@@ -53,47 +53,9 @@ export const physics_lab: DocIndex = {
       kind: 'host_fn',
       sourceFile: 'framework/v8_bindings_physics_lab.zig',
       description:
-        'Hot-path host step: Zig writes into a static g_snapshot f32 array (max 512 balls) and returns it as a zero-copy ArrayBuffer (setReturnF32Buffer, line 251); cart reads fields positionally.',
+        'Hot-path host step: Zig writes into a static g_snapshot f32 array (max 512 balls) and returns it as a zero-copy ArrayBuffer (setReturnF32Buffer); cart reads fields positionally.',
       consumers: ['physics_lab'],
       status: 'lab',
-    },
-    {
-      name: '__hmsc_physics_step',
-      purpose: ['physics', 'host_bridge'],
-      kind: 'host_fn',
-      sourceFile: 'framework/v8_bindings_physics_lab.zig',
-      description:
-        'The production hmsc step (cohabits this file, NOT called by this cart): stateless-per-call player+entity step with banded solid rects, yawed local-frame rects, heightfield terrain, per-surface friction/restitution, step-height ground support.',
-      consumers: ['hmsc'],
-      status: 'live',
-    },
-    {
-      name: '__hmsc_register_heightfield',
-      purpose: ['physics', 'world_gen', 'host_bridge'],
-      kind: 'host_fn',
-      sourceFile: 'framework/v8_bindings_physics_lab.zig',
-      description:
-        'Registers heightfield terrain with slope-limit walls (bilinear sampling + central-difference normals); used by hmsc, not this cart.',
-      consumers: ['hmsc'],
-      status: 'live',
-    },
-    {
-      name: '__hmsc_clear_heightfields',
-      purpose: ['physics', 'host_bridge'],
-      kind: 'host_fn',
-      sourceFile: 'framework/v8_bindings_physics_lab.zig',
-      description: 'Clears registered heightfields; hmsc-side, not called by this cart.',
-      consumers: ['hmsc'],
-      status: 'live',
-    },
-    {
-      name: '__hmsc_spike_trace',
-      purpose: ['physics', 'host_bridge'],
-      kind: 'host_fn',
-      sourceFile: 'framework/v8_bindings_physics_lab.zig',
-      description: 'hmsc trace function cohabiting the file; not called by this cart.',
-      consumers: ['hmsc'],
-      status: 'live',
     },
     {
       name: '__bench_now_us',
@@ -360,7 +322,7 @@ export const physics_lab: DocIndex = {
         'The cart\'s ITEM_CATALOG (19 r/m/cog triples) is mirrored in Zig\'s items array, hand-synced; Zig knows nothing about labels/tones/models. Editing one side without the other drifts the sim.',
       evidence: [
         'cart/physics_lab.tsx:367 (ITEM_CATALOG)',
-        'framework/v8_bindings_physics_lab.zig:120 (items)',
+        'framework/v8_bindings_physics_lab.zig:103 (items)',
       ],
       fix: 'A canonical physics module should generate or share one source of truth (the hmsc step already moved to config-in-the-call).',
       severity: 'high',
@@ -372,7 +334,7 @@ export const physics_lab: DocIndex = {
         'collideCircleBlock/collideSphereBlock/resolveBallPair/kickSpin/stepPhysics, GRAVITY/restitution/WORLD_HALF/jump tuning/scancodes, and the blocks array are all duplicated line-for-line between TS (664-966) and Zig (340-681).',
       evidence: [
         'cart/physics_lab.tsx:664-966',
-        'framework/v8_bindings_physics_lab.zig:340-681',
+        'framework/v8_bindings_physics_lab.zig:265-605',
       ],
       fix: 'Share one source of truth for constants and step logic.',
       severity: 'high',
@@ -381,8 +343,8 @@ export const physics_lab: DocIndex = {
       name: 'Host backend bypasses JS key tracking',
       purpose: ['input', 'physics'],
       description:
-        'In host mode Zig polls SDL_GetKeyboardState directly (lines 269-273) so JS-side key tracking is bypassed for movement; only camera yaw crosses the bridge as input.',
-      evidence: ['framework/v8_bindings_physics_lab.zig:269-273'],
+        'In host mode Zig polls SDL_GetKeyboardState directly (lines 194-198) so JS-side key tracking is bypassed for movement; only camera yaw crosses the bridge as input.',
+      evidence: ['framework/v8_bindings_physics_lab.zig:194-198'],
       severity: 'medium',
     },
     {
@@ -394,18 +356,10 @@ export const physics_lab: DocIndex = {
       severity: 'medium',
     },
     {
-      name: 'hmsc functions cohabit the lab file unused',
-      purpose: ['physics', 'maintenance'],
-      description:
-        'v8_bindings_physics_lab.zig also hosts the production hmsc step + heightfields (stateless config-in/snapshot-out, consumed by hmsc/state/hostPhysics.ts) which this cart never calls — the lab file is the proving ground hmsc graduated from.',
-      evidence: ['framework/v8_bindings_physics_lab.zig:1345-1355 registrations'],
-      severity: 'low',
-    },
-    {
-      name: 'Stateful Zig lab vs stateless hmsc step',
+      name: 'Stateful Zig lab vs stateless game step',
       purpose: ['physics', 'host_bridge'],
       description:
-        'The lab fns are stateful (Zig owns g_player/g_balls/its own dt and SDL input); the cohabiting __hmsc_physics_step is stateless-per-call (config-in, snapshot-out) — opposite ownership models in the same file.',
+        'The lab fns are stateful (Zig owns g_player/g_balls/its own dt and SDL input); the game step (framework/game/physics.zig, formerly cohabiting this file as __hmsc_physics_step until the WO-1 graduation) is stateless-per-call (config-in, snapshot-out) — opposite ownership models.',
       evidence: ['cart/physics_lab.md "Contrast with the lab fns, which are stateful"'],
       severity: 'low',
     },

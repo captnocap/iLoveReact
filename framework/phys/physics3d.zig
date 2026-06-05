@@ -1,16 +1,20 @@
-//! physics3d.zig — 3D physics engine integration (Bullet Physics 3.25)
+//! physics3d.zig — Bullet Physics 3.25 backend. DORMANT — KEPT FOR CLIENTS (R1).
 //!
-//! Manages Bullet worlds and maps physics bodies to 3D.Mesh layout nodes.
-//! Each frame: step worlds, then write body transforms back to node scene3d fields.
+//! Status: fully implemented, wired to NOTHING. build.zig never compiles the
+//! shim (ffi/physics3d_shim.cpp) and nothing imports this module. The GAME
+//! does not use it — game physics is framework/game/physics.zig (the hmsc
+//! sim, V1), registered via v8_bindings_game_physics.zig. Per the user's R1
+//! ruling, Bullet stays available as a library option for CLIENTS that want
+//! a general rigid-body engine; do not wire it into the game and do not
+//! delete it.
 //!
-//! Instance-safe: each <3D.Physics> gets its own Bullet world and body pool.
-//! Node.physics3d_world_id indexes into the world pool. Instance 0 is the default.
-//!
-//! Architecture:
-//!   - Pool of MAX_PHYSICS3D_WORLDS, each with MAX_BODIES_PER_WORLD bodies
-//!   - Bodies are registered with a pointer to their Node
-//!   - tick(dt) steps all active worlds and syncs transforms to nodes
-//!   - Works in world units (1 unit = 1 unit, no pixel conversion like 2D)
+//! What actually exists here: a pool of MAX_PHYSICS3D_WORLDS Bullet worlds
+//! behind the C shim (ffi/physics3d_shim.h hides all C++ types), body
+//! registration carrying a Node pointer, and tick(dt) stepping active worlds
+//! and writing transforms back to node scene3d fields. World units (1 unit =
+//! 1 unit, no pixel conversion like 2D). A future client integration still
+//! needs: a build gate compiling the shim + linking Bullet, engine plumbing
+//! to call tick, and a JS prop-mapper — none of that is present today.
 
 const std = @import("std");
 const layout = @import("../layout.zig");

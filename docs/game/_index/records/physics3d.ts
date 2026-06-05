@@ -6,7 +6,7 @@ export const physics3d: DocIndex = {
   purpose: ['physics', 'host_bridge', 'maintenance'],
   loc: 320,
   summary:
-    'A fully implemented but completely disconnected Bullet 3.25 rigid-body module — a fixed-pool manager that would map Bullet bodies onto layout nodes scene3d_* transform fields so physics drives what Scene3D.Mesh renders — wired to nothing in the V8 era.',
+    'A fully implemented but completely disconnected Bullet 3.25 rigid-body module — a fixed-pool manager that would map Bullet bodies onto layout nodes scene3d_* transform fields so physics drives what Scene3D.Mesh renders — wired to nothing in the V8 era. Per R1 it is KEPT, dormant, for clients; the game uses framework/game/physics.zig. Its header now carries the DORMANT-kept-for-clients banner (WO-1, 2026-06-04).',
   interfaces: [
     {
       name: 'physics3d.zig',
@@ -40,9 +40,9 @@ export const physics3d: DocIndex = {
       name: '__hmsc_physics_step',
       purpose: ['physics', 'host_bridge'],
       kind: 'host_fn',
-      sourceFile: 'framework/v8_bindings_physics_lab.zig',
+      sourceFile: 'framework/v8_bindings_game_physics.zig',
       description:
-        'The LIVE 3D physics path (NOT physics3d). Host fn taking a Float32 ArrayBuffer in and out, a hand-rolled flat-rect + heightfield-collider world. The bridge is crossed once per frame with a packed buffer rather than per-body node sync. This is what hmsc actually uses.',
+        'The LIVE 3D physics path (NOT physics3d). Host fn taking a Float32 ArrayBuffer in and out, a hand-rolled flat-rect + heightfield-collider world; the bridge is crossed once per frame with a packed buffer rather than per-body node sync. Implementation graduated to framework/game/physics.zig (+ movement.zig) in WO-1; the registrar keeps this legacy name and adds an honest __game_physics_step alias, gated by -Dhas-game-physics. This is what hmsc actually uses.',
       consumers: ['cart/hmsc'],
       status: 'live',
     },
@@ -50,7 +50,7 @@ export const physics3d: DocIndex = {
       name: '__hmsc_register_heightfield',
       purpose: ['physics', 'host_bridge'],
       kind: 'host_fn',
-      sourceFile: 'framework/v8_bindings_physics_lab.zig',
+      sourceFile: 'framework/v8_bindings_game_physics.zig',
       description:
         'LIVE host fn registering a heightfield terrain collider — first-class here, exactly the collider physics3d never implemented (its enum case returns null).',
       consumers: ['cart/hmsc'],
@@ -60,7 +60,7 @@ export const physics3d: DocIndex = {
       name: '__hmsc_clear_heightfields',
       purpose: ['physics', 'host_bridge'],
       kind: 'host_fn',
-      sourceFile: 'framework/v8_bindings_physics_lab.zig',
+      sourceFile: 'framework/v8_bindings_game_physics.zig',
       description: 'LIVE host fn clearing registered heightfield colliders before re-registering the current set.',
       consumers: ['cart/hmsc'],
       status: 'live',
@@ -71,7 +71,7 @@ export const physics3d: DocIndex = {
       kind: 'host_fn',
       sourceFile: 'framework/v8_bindings_physics_lab.zig',
       description:
-        'LIVE host fn family (__physics_lab_reset/burst/step/step_buffer) for the hand-rolled hmsc sim world.',
+        'LIVE host fn family (__physics_lab_reset/burst/step/step_buffer) for the standalone physics-lab toy world — the only thing left in v8_bindings_physics_lab.zig after the WO-1 graduation.',
       status: 'live',
     },
     {
@@ -123,7 +123,7 @@ export const physics3d: DocIndex = {
       name: 'Doc-comment drift as a trap',
       purpose: ['maintenance'],
       description:
-        'The module header confidently describes <3D.Physics> and Node.physics3d_world_id, neither of which exist. When auditing capability, trust grep over header comments.',
+        'The module header confidently described <3D.Physics> and Node.physics3d_world_id, neither of which exist (fixed 2026-06-04: replaced by the R1 DORMANT banner). When auditing capability, trust grep over header comments.',
       examples: ['physics3d'],
       status: 'avoid',
     },
@@ -147,16 +147,7 @@ export const physics3d: DocIndex = {
         'build.zig never compiles physics3d_shim.cpp, never links Bullet',
         'runtime/primitives.tsx <Physics> = 2D Box2D only',
       ],
-      fix: 'Either wire it up (build gate, layout fields, engine plumbing, JS prop-mapper, implement heightfield) or declare it dead and delete all three files — a user decision.',
-      severity: 'high',
-    },
-    {
-      name: 'Stale/aspirational module header comment',
-      purpose: ['physics', 'maintenance'],
-      description:
-        'The header comment ("Node.physics3d_world_id indexes into the world pool", "each <3D.Physics> gets its own world") describes wiring that does not exist — carried over from the Smith era. layout.zig Node has no physics3d_* fields.',
-      evidence: ['physics3d.md: framework/layout.zig Node has no physics3d_* fields; comment is aspirational/stale'],
-      fix: 'Trust grep over header comments; correct or remove the comment if the module is kept.',
+      fix: 'RULED (R1): keep it, dormant, for clients — the game uses the hmsc sim (framework/game/physics.zig). Wiring it up for a client still needs: build gate, layout fields, engine plumbing, JS prop-mapper, implement heightfield.',
       severity: 'high',
     },
     {

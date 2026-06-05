@@ -11,12 +11,12 @@
 
 - The ONLY files mentioning `physics3d`/`phys3d` are the three above. Nothing imports `phys/physics3d.zig`.
 - `build.zig` never compiles `physics3d_shim.cpp` and never links Bullet — no `has-physics3d` gate exists, no entry in `sdk/dependency-registry.json`.
-- `framework/layout.zig`'s `Node` has **no** `physics3d_*` fields. The module's own header comment ("`Node.physics3d_world_id` indexes into the world pool", "each `<3D.Physics>` gets its own world") describes wiring that **does not exist** — the comment is aspirational/stale, carried over from the Smith era.
+- `framework/layout.zig`'s `Node` has **no** `physics3d_*` fields. The module's old header comment ("`Node.physics3d_world_id` indexes into the world pool", "each `<3D.Physics>` gets its own world") described wiring that **does not exist** — fixed 2026-06-04 (WO-1): the header now carries the R1 DORMANT-kept-for-clients banner and describes only what is really there.
 - No JS primitive maps to it (`runtime/primitives.tsx` has `<Physics>` = 2D Box2D only), no `__phys3d_*` host fn is registered in `v8_app.zig` / `v8_runtime`.
 
 **Provenance:** added in the Smith-era framework (`7640b6de9` "add blend2d, crashlog, physics3d, …"), lifted to repo root with the framework (`a18559bbf`), and survived the dead-code sweep (`05337961f`). It has never been reachable from a cart in the V8 era.
 
-**What actually does 3D physics in the game today:** NOT this. The live path is the custom host sim in `framework/v8_bindings_physics_lab.zig` — host fns `__hmsc_physics_step` (Float32 ArrayBuffer in/out), `__hmsc_register_heightfield`, `__hmsc_clear_heightfields`, `__physics_lab_reset/burst/step/step_buffer` — a hand-rolled flat-rect + heightfield-collider world (see memory: hmsc terrain is flat rects). hmsc chose a bespoke sim over Bullet.
+**What actually does 3D physics in the game today:** NOT this. The live path is the game sim in `framework/game/physics.zig` (+ `movement.zig`), registered by `framework/v8_bindings_game_physics.zig` behind `-Dhas-game-physics` — host fns `__hmsc_physics_step` (Float32 ArrayBuffer in/out), `__hmsc_register_heightfield`, `__hmsc_clear_heightfields` (honest `__game_physics_*` aliases registered alongside) — a hand-rolled flat-rect + heightfield-collider world (see memory: hmsc terrain is flat rects). The `__physics_lab_*` toy stays in `v8_bindings_physics_lab.zig`. hmsc chose a bespoke sim over Bullet (graduated out of the lab file in WO-1, 2026-06-04). Per **R1** this Bullet module is KEPT, dormant, for clients.
 
 ## What the module would do, in English
 
@@ -47,7 +47,7 @@ Every per-body fn bounds-checks `idx` and the `active` flag, then silently no-op
 | | physics2d (LIVE) | physics3d (DORMANT) | hmsc host sim (LIVE) |
 |---|---|---|---|
 | Engine | Box2D | Bullet 3.25 | hand-rolled Zig |
-| Wired via | Node props (`physics_world/body/collider` flags) read by `framework/engine.zig:561+`, gated `HAS_PHYSICS` | nothing | `__hmsc_*` / `__physics_lab_*` host fns in `v8_bindings_physics_lab.zig` |
+| Wired via | Node props (`physics_world/body/collider` flags) read by `framework/engine.zig:561+`, gated `HAS_PHYSICS` | nothing | `__hmsc_*`/`__game_physics_*` host fns in `v8_bindings_game_physics.zig` (impl `framework/game/physics.zig`); `__physics_lab_*` toy in `v8_bindings_physics_lab.zig` |
 | JS surface | `<Physics.World/Body/Collider>` primitive (`runtime/primitives.tsx:373`) | none (the imagined `<3D.Physics>` was never built) | cart JS calls host fns directly, packed f32 ArrayBuffer protocol |
 | Render handoff | writes node layout fields | would write node `scene3d_*` fields | snapshot buffer → cart state → mesh props |
 | Heightfield | n/a | enum case stubbed `null` | first-class (`__hmsc_register_heightfield`) |
@@ -60,7 +60,7 @@ The pointed historical note: the one collider hmsc's terrain actually needed —
 2. **Fixed pool + linear-scan slot allocation** — `[MAX]struct{active:bool,...}` arrays, first-inactive-wins, index-as-handle, bounds-check + silent no-op on every access. The standard framework resource-pool shape (same in physics2d, GPU pools).
 3. **Instance-pool with default-0 + `xxxFor(id)` API doubling** — every public fn exists as a world-0 convenience and an explicit-instance variant. Mirrors how multi-instance subsystems are exposed across the framework.
 4. **Physics-writes-node-fields sync** — the simulation's output IS mutation of the same `Node` fields the reconciler sets from JSX props (`scene3d_pos/rot_*`). Render reads node state and doesn't know who wrote it. (Same contract as physics2d ↔ layout fields.)
-5. **Doc-comment drift as a trap** — the module header confidently describes `<3D.Physics>` and `Node.physics3d_world_id`, neither of which exist. When auditing capability, trust grep over header comments.
+5. **Doc-comment drift as a trap** — the module header confidently described `<3D.Physics>` and `Node.physics3d_world_id`, neither of which exist (header fixed 2026-06-04, WO-1). When auditing capability, trust grep over header comments.
 6. **The bespoke-vs-library physics fork** — the repo's revealed preference: cross the JS↔host bridge once per frame with a packed buffer (hmsc sim) rather than maintain per-body node bindings to a general engine. Any future "real physics" effort should decide consciously between reviving this module or extending the hmsc sim.
 
 ## If someone wants to light it up
