@@ -238,4 +238,11 @@ export const DECISIONS: Decision[] = [
     keywords: ['drag sign', 'dragsign', 'drag direction', 'orbit drag', 'yaw sign', 'camera convention', 'pinned convention', 'legacy behavior', 'divergent behavior', 'capture fidelity', 'it always existed', 'one convention', 'vehicles drag', 'drag flip', 'convention beats legacy'],
     cites: ['cart/hmsc-int/editors/vehicles/VehiclesRoute.tsx', 'cart/hmsc-int/editors/characters/CharactersRoute.tsx'],
   },
+  {
+    id: 'V26', name: 'JS viewport cameras are dead app-wide; V23 native is the only viewport drive (CAMNUKE-0605)', status: 'ruled',
+    ruling: 'Every live 3D viewport in hmsc-int is V23 native-driven: per-node Scene3D.Camera nativeCamera binding plus GAME_NATIVE_CAMERA.forNode(nodeId). JavaScript sends rig parameters, mode changes, and input deltas on change; Zig owns per-frame solve, smoothing, interpolation, and renderer-consumed camera fields. JS viewport driving is retired: no route, preview, lab surface, object inspector, assistant viewport, or voxel editor may compute the per-frame view in JavaScript and push Scene3D.Camera position/target/fov updates. Replaced JS camera code is deleted, with no fallback or commented compatibility. V3/V16/V23 registry semantics remain law: camera types, cinematic/cutscene shot vocabulary, pure rig solves, screen rays, and boot-frame reference solves stay in the registry; the target is JS viewport DRIVING, not semantic camera math.',
+    detail: 'User, verbatim: "voxel editor route has the wrong camera approach, which means the worker needs to identify the correct one (its on the test route right now) and from there find all other cameras that are not this approach and nuke them im tired of running into not the game camera every other turn" and "dont mistake this for the cinematic camera and the camera types i just mean this dogshit javascript camera is ass. it just lags."',
+    keywords: ['CAMNUKE', 'camera nuke', 'JS camera', 'javascript camera', 'viewport camera', 'native viewport', 'V23 native', 'nativeCamera', 'Scene3D camera', 'voxel camera', 'orbit camera', 'camera lag', 'per-frame camera', 'host camera', 'no JS viewport driving'],
+    cites: ['cart/hmsc-int/game/nativeCamera.ts', 'framework/game/camera.zig', 'cart/hmsc-int/TestRoute.tsx', 'cart/hmsc-int/VoxelHybridRoute.tsx'],
+  },
 ];

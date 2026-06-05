@@ -827,3 +827,32 @@ The ruling, generalized:
   `-dx` family (TestRoute, CharactersRoute, and now VehiclesRoute). Tuning
   values (per-pixel rates, clamps) stay per-surface P2 data; the SIGN is a
   pinned convention, not tuning.
+
+**V26 — JS viewport cameras are dead app-wide; V23 native is the only viewport drive (CAMNUKE-0605). (Added 2026-06-05.)**
+
+Trigger: the voxel editor route still used a JavaScript-solved orbit camera
+after /test had moved to the V23 native host controller. The user hit the old
+path and ruled it out globally.
+
+The user, verbatim: "voxel editor route has the wrong camera approach, which
+means the worker needs to identify the correct one (its on the test route
+right now) and from there find all other cameras that are not this approach
+and nuke them im tired of running into not the game camera every other turn"
+and: "dont mistake this for the cinematic camera and the camera types i just
+mean this dogshit javascript camera is ass. it just lags."
+
+The ruling:
+- **Every live 3D viewport in hmsc-int is V23 native-driven.** The correct
+  pattern is /test's per-node `Scene3D.Camera nativeCamera` binding plus
+  `GAME_NATIVE_CAMERA.forNode(nodeId)`: JavaScript sends rig parameters,
+  mode changes, and input deltas on change; Zig owns per-frame solve,
+  smoothing, interpolation, and writes the renderer-consumed camera node.
+- **JS viewport driving is retired.** No route, preview, lab surface, object
+  inspector, assistant viewport, or voxel editor may compute the per-frame
+  view in JavaScript and push `Scene3D.Camera position/target/fov` updates.
+  Replaced JS camera code is deleted, not kept as fallback or commented
+  compatibility.
+- **The camera registry remains law for semantics.** V3/V16/V23 still stand:
+  camera types, cinematic/cutscene shot vocabulary, pure rig solves, screen
+  rays, and boot-frame reference solves stay in the registry. The target is
+  JS viewport DRIVING, not semantic camera math.
