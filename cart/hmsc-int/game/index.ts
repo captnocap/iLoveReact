@@ -87,6 +87,16 @@ export type {
   WorldMarkerType,
 } from './build';
 
+// ── the painted-overlay layer (MODELPAINT-0605: pixels only, by ruling) ──
+// Named exports, not a new door: model documents carry these; the React
+// render half (paintedRender.tsx) is imported directly, like figure/render.
+export {
+  validatePaintedOverlay, paintedOverlayHasContent,
+  figurePaintTextureKey, vehiclePaintTextureKey,
+  packPaintedLayerData, PAINTED_LAYER_WGSL,
+} from './painted';
+export type { PaintedOverlay, PaintedOverlayLayer } from './painted';
+
 // ── capture-pending doors (V17: the import line is already the right one) ──
 export { GAME_FIGURE, charactersStream, bakeBodyDocument } from './figure';
 export type { BodyDocument, BakedFigure, CharactersEvent, CharactersStreamState } from './figure';
