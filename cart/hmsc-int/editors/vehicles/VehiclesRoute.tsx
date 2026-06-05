@@ -20,13 +20,14 @@
 // Deletion contract: editors/vehicles/CAPTURE.md — when every inventory
 // capability is DONE there, the user deletes cart/vehicle_lab.
 
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import {
   GAME_ANIMATION,
   GAME_CAMERA,
   GAME_CHROME,
+  GAME_NATIVE_CAMERA,
   GAME_VEHICLE,
   vehiclesStream,
   type DamageLevel,
@@ -73,8 +74,9 @@ function geometryFor(kind: 'box' | 'cylinder' | 'sphere') {
 }
 
 // Capability 9 — the debug overlays: meshes, selected highlight, hitbox tints
-// by damage/critical, anchor spheres. memo'd so orbit drags re-solve the
-// camera without re-diffing the ~80 mesh nodes (the TestRoute lesson).
+// by damage/critical, anchor spheres. memo'd so non-camera updates never
+// re-diff the ~80 mesh nodes (the TestRoute lesson; orbit drags don't render
+// at all now — the V23 native controller owns the camera per-frame).
 const VehicleMeshes = memo(function VehicleMeshes(props: {
   build: VehicleBuild;
   selected: VehiclePartId | null;
@@ -172,10 +174,14 @@ export function VehiclesRoute(props: { onExit: () => void }) {
   const [showHitboxes, setShowHitboxes] = useState(true);
   const [showAnchors, setShowAnchors] = useState(true);
   const [selected, setSelected] = useState<VehiclePartId | null>('gas_tank');
-  const [yaw, setYaw] = useState(VIEW_TUNING.orbit.boot.yaw);
-  const [pitch, setPitch] = useState(VIEW_TUNING.orbit.boot.pitch);
+  // zoom is a KNOB (param-rate); yaw/pitch live in lookRef — drag deltas ride
+  // the V23 native controller and never re-render the cart (TestRoute /
+  // CharactersRoute pattern).
   const [dist, setDist] = useState(VIEW_TUNING.orbit.boot.dist);
-  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const lookRef = useRef({ yaw: VIEW_TUNING.orbit.boot.yaw, pitch: VIEW_TUNING.orbit.boot.pitch });
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const cameraRef = useRef<any>(null);
+  const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
 
   useEffect(() => {
     if (!running) return;
@@ -218,21 +224,77 @@ export function VehiclesRoute(props: { onExit: () => void }) {
   const sampledActions = useMemo(() => GAME_ANIMATION.sample(timeline, seconds), [timeline, seconds]);
   const build = useMemo(() => (doc ? GAME_VEHICLE.build(doc, sampledActions) : null), [doc, sampledActions]);
 
-  // ── capability 10: the orbit viewport via the ruled camera registry ───────
-  const cam = useMemo(
-    () => GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: VIEW_TUNING.orbit.target, yaw, pitch, dist, zoom: 1, fov: VIEW_TUNING.orbit.fov }),
-    [yaw, pitch, dist],
-  );
-  const orbitDown = (e: any) => setDrag({ x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) });
-  const orbitMove = (e: any) => {
-    if (!drag) return;
-    const nx = Number(e?.x ?? 0);
-    const ny = Number(e?.y ?? 0);
-    setYaw((v) => v + (nx - drag.x) * VIEW_TUNING.orbit.yawPerPixel);
-    setPitch((v) => Math.max(VIEW_TUNING.orbit.minPitch, Math.min(VIEW_TUNING.orbit.maxPitch, v - (ny - drag.y) * VIEW_TUNING.orbit.pitchPerPixel)));
-    setDrag({ x: nx, y: ny });
+  // ── capability 10: the orbit viewport — V23: THE CAMERA IS NOT JAVASCRIPT ──
+  // The host (framework/game/camera.zig) owns per-frame solve/smoothing of the
+  // route's own camera node; JS sends rig params on CHANGE (the zoom knob) and
+  // deltas per drag move. VIEW_TUNING stays the rig params (P2, unchanged feel).
+  const sendOrbit = (distance: number) => {
+    const l = lookRef.current;
+    camCtlRef.current?.setOrbit({
+      target: VIEW_TUNING.orbit.target, yaw: l.yaw, pitch: l.pitch,
+      distance, fov: VIEW_TUNING.orbit.fov, zoom: 1,
+    });
   };
-  const orbitUp = () => setDrag(null);
+
+  // Engage: params ride the node id from the camera ref (the nativeCamera prop
+  // already bound it host-side at CREATE). Disable on unmount returns the node
+  // to the declarative JS-props path.
+  useEffect(() => {
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) {
+      console.warn('[vehicles] native camera not engaged — camera node id unavailable (rebuild the host with has-game-camera?)');
+      return;
+    }
+    const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
+    camCtlRef.current = ctl;
+    ctl.setOrbit({
+      target: VIEW_TUNING.orbit.target, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch,
+      distance: dist, fov: VIEW_TUNING.orbit.fov, zoom: 1,
+    });
+    ctl.setMode('orbit');
+    return () => {
+      camCtlRef.current = null;
+      ctl.disable();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; param changes ride the effect below
+  }, []);
+
+  // Param changes (the zoom knob) re-send the rig params; yaw/pitch ride along
+  // from the ref unchanged.
+  useEffect(() => { sendOrbit(dist); }, [dist]);
+
+  const orbitDown = (e: any) => { dragRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; };
+  const orbitMove = (e: any) => {
+    const d = dragRef.current;
+    if (!d) return;
+    const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
+    const dx = nx - d.x, dy = ny - d.y;
+    d.x = nx; d.y = ny;
+    // Pitch clamps apply HERE so the JS shadow and the host accumulate
+    // identically — only the post-clamp delta is sent. Yaw keeps this route's
+    // established +dx sign (unchanged feel; the /test-pinned sign question is
+    // surfaced in CAPTURE.md).
+    const l = lookRef.current;
+    const nextYaw = l.yaw + dx * VIEW_TUNING.orbit.yawPerPixel;
+    const nextPitch = Math.max(VIEW_TUNING.orbit.minPitch, Math.min(VIEW_TUNING.orbit.maxPitch, l.pitch - dy * VIEW_TUNING.orbit.pitchPerPixel));
+    camCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    l.yaw = nextYaw;
+    l.pitch = nextPitch;
+  };
+  const orbitUp = () => { dragRef.current = null; };
+
+  // The DECLARATIVE camera is the boot frame only — static props, so React
+  // never sends camera UPDATEs after mount; the host writes the node fields
+  // every frame once engaged.
+  const [bootCam] = useState(() =>
+    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+      target: VIEW_TUNING.orbit.target,
+      yaw: lookRef.current.yaw,
+      pitch: lookRef.current.pitch,
+      dist: VIEW_TUNING.orbit.boot.dist,
+      zoom: 1,
+      fov: VIEW_TUNING.orbit.fov,
+    }));
 
   const tables = GAME_VEHICLE.tables;
   const dims = doc ? tables.styles[doc.style] : null;
@@ -375,7 +437,7 @@ export function VehiclesRoute(props: { onExit: () => void }) {
         style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden' }}
       >
         <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={T.page}>
-          <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} />
+          <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} />
           <GAME_CHROME.LabEnvironment preset="arena" />
           {build ? (
             <VehicleMeshes build={build} selected={selected} showHitboxes={showHitboxes} showAnchors={showAnchors} />

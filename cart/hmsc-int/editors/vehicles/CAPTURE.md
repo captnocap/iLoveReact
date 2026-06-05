@@ -28,7 +28,7 @@ new home:
 | 7 | Hitbox-group selection chips + none (:780) | route selection state | DONE |
 | 8 | Damage: repair / +1 nudge / wreck spread / level chips (:790) | `edits.ts setPartDamage/nudgeDamage/wreck/repairAll` | DONE |
 | 9 | Overlays: hitboxes (damage/critical tint), anchors, selected 1.04x highlight (:577) | `VehiclesRoute VehicleMeshes` (memo'd - the camera-drag lesson) | DONE |
-| 10 | 3D viewport: orbit drag (0.38/0.3 per px, pitch 5..82), zoom 4..14, lights/ground (:819) | route viewport - `GAME_CAMERA.rigs.Orbit` solve + `GAME_CHROME.LabEnvironment('arena')` + `knobPresets['orbit.zoom']` | DONE |
+| 10 | 3D viewport: orbit drag (0.38/0.3 per px, pitch 5..82), zoom 4..14, lights/ground (:819) | route viewport - V23 native per-node controller (`Scene3D.Camera nativeCamera` + `GAME_NATIVE_CAMERA.forNode`: setOrbit on knob change, setInputDeltas per drag move, disable on unmount; `GAME_CAMERA.rigs.Orbit` solves the static boot frame only; `VIEW_TUNING` stays the rig params, unchanged feel) + `GAME_CHROME.LabEnvironment('arena')` + `knobPresets['orbit.zoom']` | DONE |
 | 11 | Contract readout (style/role/scale/size/wheel/dsl/seed/gas/selected/damage) (:804) | route panel (+ id and saved-seq lines) | DONE |
 | 12 | Mesh kind -> geometry mapping (`geometryFor` :194) | route-local `geometryFor` (the V10 renderer-boundary rule) | DONE |
 | 13 | NEW - V20 persistence from the first version | `game/vehicle/stream.ts` (the garage) + store wiring in the route | DONE |
@@ -90,3 +90,10 @@ now owns `cart/hmsc-int/editors` as a suite root.
 4. **Scale audit still open** (V10: "many cars need work" against 1-tile=1m).
    The editor displays the same contract line the lab did; auditing the
    dimension tables is a separate ruled work item.
+5. **Orbit yaw sign vs the /test-pinned verdict.** This route's drag has
+   always used `yaw += dx` (carried from the reference lab); the /test +
+   characters routes use `yaw -= dx` (the USER-VERDICT-pinned sign: the
+   engine renders world +X as screen-LEFT under compass yaw). The V23
+   adoption kept this route's existing `+dx` for unchanged feel — whether
+   vehicles should flip to the pinned sign is a one-character call for the
+   user to make, not a thing to change silently.

@@ -400,8 +400,12 @@ capabilities DONE; the user deletes the old cart). Three pieces:
   `openStore` was removed as a forked undo chain),
   style/role/pose chips + run playback (`GAME_ANIMATION.parse/sample`),
   hitbox-group selection, damage chips, memo'd mesh/hitbox/anchor overlays,
-  orbit viewport (`GAME_CAMERA.rigs.Orbit` solve + `GAME_CHROME
-  .LabEnvironment` arena + the `orbit.zoom` knob preset), contract readout
+  orbit viewport on the V23 native per-node controller (`Scene3D.Camera
+  nativeCamera` + `GAME_NATIVE_CAMERA.forNode`: setOrbit on knob change,
+  setInputDeltas per drag move, disable on unmount; `GAME_CAMERA.rigs.Orbit`
+  solves the static boot frame only and a drag never re-renders the cart;
+  `VIEW_TUNING` stays the rig params + `GAME_CHROME.LabEnvironment` arena +
+  the `orbit.zoom` knob preset), contract readout
   with id + saved-seq. Strictly through the `@game` door (vehicles has NO
   internal-reach exception); mesh kind→Geometry mapping at the route boundary
   per the V10 capture rule; store failures surface in-panel.
@@ -411,7 +415,9 @@ route per the editors-wave coordination rule). `rjit game verify` owns
 `cart/hmsc-int/editors` as a suite root: 8 edit-step cases + 5 stream cases +
 the session-path round trip (`roundtrip.test.ts`), VERDICT GREEN. Open seams (CAPTURE.md): compile/ does not yet consume the
 garage snapshot (placement belongs to the world stream, not the vehicle doc),
-and the V10 scale audit remains open.
+the V10 scale audit remains open, and the route's orbit yaw sign (`+dx`,
+carried from the lab) sits opposite the /test-pinned `-dx` verdict — kept for
+unchanged feel, surfaced as CAPTURE.md ambiguity 5.
 
 ## editors/characters/ — the character editor route (editors wave, 2026-06-04)
 
