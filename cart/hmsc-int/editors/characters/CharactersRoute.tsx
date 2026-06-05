@@ -25,7 +25,8 @@ import { Box, Col, Effect, Paintable, Pressable, Row, ScrollView, Scene3D, Text,
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
-import { OrbitCamera } from '@reactjit/cameras';
+import { GAME_CAMERA } from '../../game/camera';
+import { GAME_NATIVE_CAMERA } from '../../game/nativeCamera';
 import { GAME_ANIMATION } from '../../game/animation';
 import { GAME_CHROME } from '../../game/chrome';
 import { GAME_ITEMS } from '../../game/items';
@@ -106,8 +107,8 @@ export function CharactersRoute(props: { onExit: () => void }) {
   const [scriptPlaying, setScriptPlaying] = useState(false);
   const [scriptFrame, setScriptFrame] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
-  const [yaw, setYaw] = useState(20);
-  const [pitch, setPitch] = useState(12);
+  // zoom is a KNOB (param-rate); yaw/pitch live in lookRef — drag deltas ride
+  // the native controller (V23), never React state
   const [dist, setDist] = useState(4.2);
   // per-part sculpt versions — bumping regenerates that part's dyn mesh
   const [seqs, setSeqs] = useState<Record<PartId, number>>(
@@ -119,6 +120,11 @@ export function CharactersRoute(props: { onExit: () => void }) {
   const profileDraftRef = useRef<number[] | null>(null);
   const canvasRect = useRef({ x: 0, y: 0, width: EDITOR_W, height: EDITOR_H });
   const orbitRef = useRef<{ x: number; y: number } | null>(null);
+  // V23 native camera: the route's own Scene3D.Camera node (nativeCamera prop
+  // binds it host-side; the ref's id keys the per-node param/delta channel)
+  const cameraRef = useRef<any>(null);
+  const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
+  const lookRef = useRef({ yaw: 20, pitch: 12 });
 
   // ── the V20 roster (persistence from version one) ──────────────────────────
   const roster = useMemo(() => editorRoster(), []);
@@ -487,19 +493,73 @@ export function CharactersRoute(props: { onExit: () => void }) {
     setPhoto({ path, stamp: Date.now() });
   });
 
-  // ── orbit ──────────────────────────────────────────────────────────────────
+  // ── orbit — V23: THE CAMERA IS NOT JAVASCRIPT ──────────────────────────────
+  // The host (framework/game/camera.zig) owns per-frame solve/smoothing of the
+  // route's own camera node (per-node channel, da1730e24). JS sends params on
+  // CHANGE (view target, zoom knob) and deltas per drag move; idle frames send
+  // nothing and a drag never re-renders the cart.
+  const camTarget: [number, number, number] = view === 'figure' ? [0, 1.05, 0] : [0, 1.4, 0];
+
+  const sendOrbit = (target: [number, number, number], distance: number) => {
+    const l = lookRef.current;
+    camCtlRef.current?.setOrbit({ target, yaw: l.yaw, pitch: l.pitch, distance, fov: 45 });
+  };
+
+  // Engage: params ride the node id from the camera ref (the nativeCamera prop
+  // already bound it host-side at CREATE). Disable on unmount returns the node
+  // to the declarative JS-props path.
+  useEffect(() => {
+    const nodeId = Number(cameraRef.current?.id ?? 0);
+    if (!nodeId) {
+      console.warn('[characters] native camera not engaged — camera node id unavailable (rebuild the host with has-game-camera?)');
+      return;
+    }
+    const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
+    camCtlRef.current = ctl;
+    ctl.setOrbit({ target: camTarget, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: dist, fov: 45 });
+    ctl.setMode('orbit');
+    return () => {
+      camCtlRef.current = null;
+      ctl.disable();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; param changes ride the effect below
+  }, []);
+
+  // Param changes (view toggle moves the target, the zoom knob moves distance)
+  // re-send the rig params; yaw/pitch ride along from the ref unchanged.
+  useEffect(() => { sendOrbit(camTarget, dist); }, [view, dist]);
+
   const orbitDown = (e: any) => { orbitRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; };
   const orbitMove = (e: any) => {
     const d = orbitRef.current;
     if (!d) return;
     const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
-    setYaw((v) => v + (nx - d.x) * TUNE.orbit.yawPerPx);
-    setPitch((v) => clamp(v - (ny - d.y) * TUNE.orbit.pitchPerPx, TUNE.orbit.pitchMin, TUNE.orbit.pitchMax));
+    const dx = nx - d.x, dy = ny - d.y;
     d.x = nx; d.y = ny;
+    // Horizontal sign: the engine renders world +X as screen-LEFT and the rig
+    // uses compass yaw, so yaw DECREASES with a rightward drag (the /test
+    // USER-VERDICT-pinned sign). Clamps apply HERE so the JS shadow and the
+    // host accumulate identically — only the post-clamp delta is sent.
+    const l = lookRef.current;
+    const nextYaw = l.yaw - dx * TUNE.orbit.yawPerPx;
+    const nextPitch = clamp(l.pitch - dy * TUNE.orbit.pitchPerPx, TUNE.orbit.pitchMin, TUNE.orbit.pitchMax);
+    camCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    l.yaw = nextYaw;
+    l.pitch = nextPitch;
   };
   const orbitUp = () => { orbitRef.current = null; };
 
-  const camTarget: [number, number, number] = view === 'figure' ? [0, 1.05, 0] : [0, 1.4, 0];
+  // The DECLARATIVE camera is the boot frame only — static props, so React
+  // never sends camera UPDATEs after mount; the host writes the node fields
+  // every frame once engaged.
+  const [bootCam] = useState(() =>
+    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+      target: [0, 1.4, 0],
+      yaw: lookRef.current.yaw,
+      pitch: lookRef.current.pitch,
+      dist: 4.2,
+      fov: 45,
+    }));
   const setRegion = (part: PartId, regionId: string, value: number) => {
     setDraft((d) => ({
       ...d,
@@ -789,7 +849,9 @@ export function CharactersRoute(props: { onExit: () => void }) {
         style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden' }}
       >
         <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={T.panelSolid} showGrid={false} showAxes={false}>
-          <OrbitCamera target={camTarget} yaw={yaw} pitch={pitch} dist={dist} fov={45} />
+          {/* boot frame only — static props; framework/game/camera.zig writes
+              this node's fields every frame once engaged (V23 per-node) */}
+          <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} />
           <LabEnvironment preset="studio" />
           <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={showHitboxes} />
           {view === 'figure' && draft.heldItem !== 'none' ? <HeldItemMeshes itemId={draft.heldItem} rig={rig} /> : null}
