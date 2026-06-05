@@ -21,6 +21,7 @@ import { FaceLayerPaint, UNWRAP_H, UNWRAP_W, type PartRender } from '../../game/
 import { BOTTOMS, clothingSkinTextureKey, type BodyShapeId, type BottomsId, type ClothingId, type ClothingSkinId, type PartId, CLOTHING_SKINS } from '../../game/figure/shapes';
 import type { ClothingInstance } from '../../game/figure/clothing';
 import { ITEM_DEFINITIONS, ITEM_GEOMETRIES, type ItemPart } from '../../game/items';
+import { GRAB_TUNING, instanceScaleVec } from './grabKit';
 
 export type PreviewView = 'part' | 'figure';
 export type Photo = { path: string; stamp: number };
@@ -64,7 +65,7 @@ export const PartMeshes = memo(function PartMeshes(props: {
             textureKey={p.texKey}
             position={inst.position}
             rotation={inst.rotation ?? [0, 0, 0]}
-            scale={inst.thickness != null ? [inst.scale * inst.thickness, inst.scale, inst.scale * inst.thickness] : inst.scale}
+            scale={instanceScaleVec(inst.scale, inst.thickness)}
           />
         );
       })}
@@ -92,7 +93,7 @@ export const PartMeshes = memo(function PartMeshes(props: {
             textureKey={p.texKey}
             position={inst.position}
             rotation={inst.rotation ?? [0, 0, 0]}
-            scale={inst.thickness != null ? [inst.scale * inst.thickness, inst.scale, inst.scale * inst.thickness] : inst.scale}
+            scale={instanceScaleVec(inst.scale, inst.thickness)}
           />
         );
       })}
@@ -117,6 +118,47 @@ export const PartMeshes = memo(function PartMeshes(props: {
           scale={anchor.radius}
         />
       )) : null}
+    </>
+  );
+});
+
+// ── the grab affordance (GRABSHAPE-0605) ─────────────────────────────────────
+
+export type GrabMarkerInfo = {
+  /** the grabbable cell's surface point (world) — rides the rendered skin */
+  world: [number, number, number];
+  /** the handle dot scales off the pick radius */
+  grabRadius: number;
+  /** the influence shell: how much surface the drag's stamp will move */
+  stampWorldRadius: number;
+  /** hover = "you can grab here"; raise/carve = mid-drag direction */
+  state: 'hover' | 'raise' | 'carve';
+};
+
+/** The "you can grab HERE" handle: a solid dot snapped to the grid cell under
+ *  the cursor + a translucent shell showing the stamp's reach. Mid-drag it
+ *  takes the raise/carve color (the same blue/orange the paint canvas speaks). */
+export const GrabMarker = memo(function GrabMarker(props: { marker: GrabMarkerInfo | null }) {
+  const m = props.marker;
+  if (!m) return null;
+  const T = GRAB_TUNING;
+  const color = m.state === 'carve' ? T.colors.carve : m.state === 'raise' ? T.colors.raise : T.colors.hover;
+  return (
+    <>
+      <Scene3D.Mesh
+        geometry={Geometry.Sphere}
+        params={{ radius: 1, segments: 12, rings: 8 }}
+        material={color}
+        position={m.world}
+        scale={m.grabRadius * T.handleScale}
+      />
+      <Scene3D.Mesh
+        geometry={Geometry.Sphere}
+        params={{ radius: 1, segments: 16, rings: 10 }}
+        material={{ color, opacity: T.shellOpacity }}
+        position={m.world}
+        scale={m.stampWorldRadius}
+      />
     </>
   );
 });

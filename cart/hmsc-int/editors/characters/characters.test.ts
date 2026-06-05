@@ -6,8 +6,10 @@
 import { openStore } from '../../data';
 import { parseBody, serializeBody, type BodyDocument } from '../../game/figure/body';
 import { bakeBodyDocument } from '../../game/figure/bake';
-import { PART_IDS, PROFILE_N, defaultProfile } from '../../game/figure/shapes';
+import { buildRigFrame } from '../../game/figure/rig';
+import { PART_IDS, PROFILE_N, defaultProfile, type PartId } from '../../game/figure/shapes';
 import { HED_GRID_W } from '../../game/figure/hed';
+import { GAME_CAMERA } from '../../game/camera';
 import {
   GRID_CELLS, draftFromDocument, draftPartGrid, draftToDocument, draftToHed, draftWithFace, emptyDraft, emptyGrid,
 } from './draft';
@@ -20,6 +22,11 @@ import { createSessionLog } from '../sessions';
 // half, which only bundles under the full cart alias set (paint.test.ts does
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
+import { PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, gridFromBytes } from './paintKit';
+import {
+  applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, gridDeltaFor,
+  pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
+} from './grabKit';
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 
 declare const globalThis: any;
@@ -200,6 +207,127 @@ test('the paint session: strokes note, saves commit — one labeled undo chain',
   const snapshot = openStore(ROOT).loadSnapshot<CharactersStreamState>('characters');
   assert(snapshot !== null, 'the save left a fresh characters snapshot');
   assertEqual(JSON.stringify(snapshot!.state.characters.hero), JSON.stringify(doc), 'the snapshot doc is byte-exact');
+});
+
+// ── mesh grabbing (GRABSHAPE-0605) ───────────────────────────────────────────
+
+const GRAB_RECT = { x: 0, y: 0, width: 800, height: 600 };
+
+function grabParamsFor(draft = emptyDraft()) {
+  return (id: PartId) => editorPartParams(id, draft, draft.grids[id]) as any;
+}
+
+test('mesh grab: the pick resolves to the right part (figure + part view)', () => {
+  const paramsFor = grabParamsFor();
+  const rig = buildRigFrame('neutral', 'stand');
+  const instances = grabInstancesFor('figure', 'head', rig.assembly);
+  const clouds = buildGrabClouds(instances, paramsFor);
+  const cam = GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: [0, 1.05, 0], yaw: 0, pitch: 5, dist: 4.2, fov: 45 });
+
+  const pickAtBone = (world: [number, number, number]): GrabHit | null => {
+    const s = GAME_CAMERA.worldToScreen(world, GRAB_RECT, cam);
+    assert(s !== null, 'the probe point projects onto the screen');
+    return pickGrab(s!.x, s!.y, GRAB_RECT, cam, clouds);
+  };
+
+  const head = pickAtBone(rig.bones.head.position as [number, number, number]);
+  assertEqual(head?.part, 'head', 'a ray at the head grabs the head');
+  const arm = pickAtBone(rig.bones.lForearm.position as [number, number, number]);
+  assertEqual(arm?.part, 'pipe', 'a ray at the forearm grabs the limb pipe');
+  const foot = pickAtBone(rig.bones.lFoot.position as [number, number, number]);
+  assertEqual(foot?.part, 'foot', 'a ray at the foot grabs the foot');
+  assertEqual(pickGrab(2, 2, GRAB_RECT, cam, clouds), null, 'empty space grabs nothing — no fake handles');
+
+  // part view: the lone part placement picks the selected part
+  const partInstances = grabInstancesFor('part', 'torso', rig.assembly);
+  assertEqual(partInstances.length, 1, 'part view exposes exactly the selected part');
+  const partClouds = buildGrabClouds(partInstances, paramsFor);
+  const pcam = GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: [0, 1.4, 0], yaw: 20, pitch: 12, dist: 4.2, fov: 45 });
+  const s = GAME_CAMERA.worldToScreen([0, 1.4, 0], GRAB_RECT, pcam)!;
+  assertEqual(pickGrab(s.x, s.y, GRAB_RECT, pcam, partClouds)?.part, 'torso', 'part view grabs the selected part');
+});
+
+test('mesh grab: a drag stamps the grid the paint reads — and they compose (one truth)', () => {
+  const { rx, ry } = stampRadiusUv(14, PAINT_EDITOR_TUNING.paint.width);
+  const cell = cellUv(12, 12);
+  const at = (gx: number, gy: number, g: number[]) => g[gy * HED_GRID_W + gx];
+
+  // drag first
+  const base = emptyGrid();
+  const dragged = applyGrabStamp(base, cell.cu, cell.cv, rx, ry, 0.6, true);
+  assertEqual(Math.max(...base.map(Math.abs)), 0, 'the stamp never mutates the drag-start base');
+  assert(at(12, 12, dragged) > 0.4, 'the grabbed cell raises by the drag value');
+  assert(at(35, 12, dragged) > 0.4, 'the mirror twin lands across the meridian (mirror toggle honored)');
+  assertEqual(at(0, 0, dragged), 0, 'outside the stamp stays untouched');
+
+  // …then paint: the release path uploads bytesFromGrid(dragged) to the paint
+  // texture, and the NEXT paint stroke's readback runs gridFromBytes — the
+  // drag must survive that round trip or the stroke would clobber it
+  const bytes = bytesFromGrid(dragged);
+  const afterRoundTrip = gridFromBytes(bytes);
+  assertClose(at(12, 12, afterRoundTrip), at(12, 12, dragged), 0.02, 'the drag survives the paint-texture round trip');
+
+  // a paint dab on another cell composes with the drag (texture-space edit,
+  // exactly what a brush stroke does)
+  const painted = Uint8Array.from(bytes);
+  const pw = PAINT_EDITOR_TUNING.paint.width;
+  const bx = pw / HED_GRID_W, by = PAINT_EDITOR_TUNING.paint.height / 24;
+  for (let oy = 0; oy < by; oy++) for (let ox = 0; ox < bx; ox++) painted[(4 * by + oy) * pw + (40 * bx + ox)] = 255;
+  const composed = gridFromBytes(painted);
+  assert(at(40, 4, composed) > 0.9, 'the paint stroke lands');
+  assertClose(at(12, 12, composed), at(12, 12, dragged), 0.02, 'the earlier drag is still there — one grid, two tools');
+
+  // …and drag-after-paint: stamping onto a painted grid keeps the paint
+  const paintedGrid = emptyGrid();
+  paintedGrid[4 * HED_GRID_W + 40] = 0.5;
+  const both = applyGrabStamp(paintedGrid, cell.cu, cell.cv, rx, ry, -0.7, false);
+  assertClose(at(40, 4, both), 0.5, 1e-9, 'a drag leaves painted cells outside its stamp alone');
+  assert(at(12, 12, both) < -0.4, 'the carve drag lands on its own cell');
+  assertEqual(at(35, 12, both), 0, 'mirror off stamps no twin');
+});
+
+test('mesh grab: the drag axis points outward and mouse motion maps onto it', () => {
+  const paramsFor = grabParamsFor();
+  const instances = grabInstancesFor('part', 'torso', []);
+  const clouds = buildGrabClouds(instances, paramsFor);
+  const cam = GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: [0, 1.4, 0], yaw: 0, pitch: 5, dist: 4.2, fov: 45 });
+
+  // grab a SIDE cell (u≈0.25 → the torso's +X flank) so the radial axis is
+  // lateral on screen (a front cell's axis points at the camera — the
+  // degenerate case the screen-axis floor exists for)
+  const sideWorld = ((): [number, number, number] => {
+    const i = (12 * HED_GRID_W + 12) * 3;
+    return [clouds[0].points[i], clouds[0].points[i + 1], clouds[0].points[i + 2]];
+  })();
+  const sp = GAME_CAMERA.worldToScreen(sideWorld, GRAB_RECT, cam);
+  assert(sp !== null, 'the flank cell projects');
+
+  // worldToScreen is screenRay's exact inverse: the ray back through that
+  // pixel passes through the point
+  const ray = GAME_CAMERA.screenRay(sp!.x, sp!.y, GRAB_RECT, cam);
+  const wx = sideWorld[0] - ray.origin[0], wy = sideWorld[1] - ray.origin[1], wz = sideWorld[2] - ray.origin[2];
+  const t = wx * ray.dir[0] + wy * ray.dir[1] + wz * ray.dir[2];
+  const miss = Math.sqrt(Math.max(0, wx * wx + wy * wy + wz * wz - t * t));
+  assert(miss < 1e-3, `worldToScreen inverts screenRay (miss ${miss})`);
+
+  const hit = pickGrab(sp!.x, sp!.y, GRAB_RECT, cam, clouds);
+  assert(hit !== null, 'the flank cell is grabbable');
+  const params = paramsFor('torso');
+  const axis = grabDragAxis(hit!, params, instances[0]);
+  // outward at the flank: away from the part's axis (the hit sits at +/-X)
+  assert(axis[0] * hit!.world[0] > 0 || Math.abs(axis[0]) > Math.abs(axis[2]), 'the axis points out the flank');
+  // |axis| per +1.0 grid value is the depth amount (radial displacement law)
+  const len = Math.hypot(axis[0], axis[1], axis[2]);
+  assertClose(len, 0.35, 0.05, 'one grid unit of drag moves the surface by the depth amount');
+  // doubling amount doubles the axis — the knob scales the drag like the brush
+  const twice = grabDragAxis(hit!, { ...params, amount: 0.7 }, instances[0]);
+  assertClose(Math.hypot(twice[0], twice[1], twice[2]), len * 2, 0.02, 'the depth-amount knob scales the drag axis');
+
+  // mouse motion exactly along the screen axis = exactly that many grid units
+  const sa = screenAxisFor(hit!.world, axis, GRAB_RECT, cam);
+  assert(sa.len2 > 24 * 24, 'a lateral axis projects above the degeneracy floor');
+  assertClose(gridDeltaFor(sa.x, sa.y, sa), 1, 1e-6, 'one axis-length of mouse travel = one grid unit');
+  assertClose(gridDeltaFor(-sa.y, sa.x, sa), 0, 1e-6, 'perpendicular mouse travel maps to zero');
 });
 
 finish('editors/characters');

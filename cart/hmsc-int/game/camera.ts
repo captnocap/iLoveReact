@@ -20,7 +20,7 @@
 // All angle params are DEGREES (the registry convention).
 
 import { solveCamera } from '@reactjit/cameras/solve';
-import { screenRay, unprojectGround } from '@reactjit/cameras/unproject';
+import { screenRay, unprojectGround, worldToScreen } from '@reactjit/cameras/unproject';
 import { sway, shake } from '@reactjit/cameras/modifiers';
 import { Orbit } from '@reactjit/cameras/rigs/orbit';
 import { Follow } from '@reactjit/cameras/rigs/follow';
@@ -55,6 +55,8 @@ export const GAME_CAMERA = Object.freeze({
   screenRay,
   /** screen point + Solved → ground point (a screenRay consumer; any rig) */
   unprojectGround,
+  /** world point + Solved → screen pixel (screenRay's exact inverse) */
+  worldToScreen,
   /** Aim's shoulder pivot — what the camera-collision clamp pulls the eye toward */
   aimPivot,
   rigs: CAMERA_RIGS,

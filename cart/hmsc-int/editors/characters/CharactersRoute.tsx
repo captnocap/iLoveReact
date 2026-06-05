@@ -58,7 +58,12 @@ import {
   type SculptMode,
 } from './paintKit';
 import { ChipRow, RegionSliderRow, SwatchRow } from './controls';
-import { CharacterEditorCaptures, HeldItemMeshes, PartMeshes, UnwrapContent, type Photo, type PreviewView } from './preview';
+import { CharacterEditorCaptures, GrabMarker, HeldItemMeshes, PartMeshes, UnwrapContent, type GrabMarkerInfo, type Photo, type PreviewView } from './preview';
+import {
+  GRAB_TUNING, applyGrabStamp, buildGrabClouds, grabDragAxis, grabInstancesFor, grabPointWorld, gridDeltaFor,
+  pickGrab, screenAxisFor, stampRadiusUv, stampWorldRadius,
+  type GrabCloud, type GrabHit, type GrabInstance, type ScreenAxis,
+} from './grabKit';
 import { ANIM_PRESETS, DEFAULT_ANIM_SCRIPT } from './animPresets';
 
 const { Chip, Knob, Panel, LabEnvironment } = GAME_CHROME;
@@ -127,6 +132,21 @@ export function CharactersRoute(props: { onExit: () => void }) {
   const profileDraftRef = useRef<number[] | null>(null);
   const canvasRect = useRef({ x: 0, y: 0, width: EDITOR_W, height: EDITOR_H });
   const orbitRef = useRef<{ x: number; y: number } | null>(null);
+  // ── direct mesh grabbing (GRABSHAPE-0605) — see grabKit.ts ────────────────
+  // hover state is the ONLY React state per pick: it changes when the snapped
+  // cell changes, not per mousemove; the drag itself lives in grabRef and
+  // re-sculpts on a throttle (the live grid rides setPartGrid — the SAME truth
+  // the paint canvas edits).
+  const [grabHover, setGrabHover] = useState<
+    { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' } | null
+  >(null);
+  const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
+  const grabCloudsRef = useRef<{ sig: unknown[]; clouds: GrabCloud[]; instances: GrabInstance[] } | null>(null);
+  const grabRef = useRef<null | {
+    hit: GrabHit; baseGrid: number[]; axis: ScreenAxis;
+    startX: number; startY: number; delta: number; rx: number; ry: number;
+    lastSync: number; timer: ReturnType<typeof setTimeout> | null; applied: boolean;
+  }>(null);
   // V23 native camera: the route's own Scene3D.Camera node (nativeCamera prop
   // binds it host-side; the ref's id keys the per-node param/delta channel)
   const cameraRef = useRef<any>(null);
@@ -644,6 +664,143 @@ export function CharactersRoute(props: { onExit: () => void }) {
       dist: 4.2,
       fov: 45,
     }));
+  // ── grab — see where you can grab, then pull the shape (GRABSHAPE-0605) ───
+  // Picking solves the orbit rig from the JS shadow (lookRef/dist/camTarget) —
+  // the SAME params the V23 host camera renders from (registry pure math is
+  // sanctioned; the host owns per-frame driving). A grab stamps regions.ts's
+  // ellipse into draft.grids[part] — the identical grid the depth-paint
+  // canvas edits, so drags and paint strokes compose on one truth.
+  const solvedCam = () =>
+    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+      target: camTarget, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, dist, fov: 45,
+    });
+  const partParamsFor = (id: PartId) => partRender[id].params as any;
+
+  // lazy clouds: built on first pick after (view/part/mesh/pose) change —
+  // a drag invalidates them every sync tick but never picks, so the rebuild
+  // cost lands once, on the next hover.
+  const grabClouds = () => {
+    const sig: unknown[] = [view, selPart, partRender, rig];
+    const cached = grabCloudsRef.current;
+    if (cached && cached.sig.length === sig.length && cached.sig.every((v, i) => v === sig[i])) return cached;
+    const instances = grabInstancesFor(view, selPart, rig.assembly);
+    const next = { sig, clouds: buildGrabClouds(instances, partParamsFor), instances };
+    grabCloudsRef.current = next;
+    return next;
+  };
+
+  const pickAt = (sx: number, sy: number) => {
+    const r = viewRect.current;
+    const { clouds, instances } = grabClouds();
+    const rect = { x: 0, y: 0, width: r.width, height: r.height };
+    return { hit: pickGrab(sx - r.x, sy - r.y, rect, solvedCam(), clouds), instances };
+  };
+
+  const hoverMove = (e: any) => {
+    const { hit } = pickAt(Number(e?.x ?? 0), Number(e?.y ?? 0));
+    setGrabHover((cur) => {
+      if (!hit) return cur === null ? cur : null;
+      if (cur && cur.part === hit.part && cur.instanceIndex === hit.instanceIndex && cur.gx === hit.gx && cur.gy === hit.gy && cur.state === 'hover') return cur;
+      return { part: hit.part, instanceIndex: hit.instanceIndex, gx: hit.gx, gy: hit.gy, cu: hit.cu, cv: hit.cv, grabRadius: hit.grabRadius, state: 'hover' };
+    });
+  };
+
+  const startGrab = (hit: GrabHit, instances: GrabInstance[], e: any) => {
+    // grabbing a part in figure view selects it — the unwrap canvas snaps to
+    // the same part (two views over one truth, made visible)
+    if (view === 'figure' && hit.part !== selPart) setSelPart(hit.part);
+    const inst = instances[hit.instanceIndex];
+    const r = viewRect.current;
+    const axisWorld = grabDragAxis(hit, partParamsFor(hit.part), inst);
+    const axis = screenAxisFor(hit.world, axisWorld, { x: 0, y: 0, width: r.width, height: r.height }, solvedCam());
+    const { rx, ry } = stampRadiusUv(brush, PAINT_W);
+    grabRef.current = {
+      hit, baseGrid: draft.grids[hit.part].slice(), axis,
+      startX: Number(e?.x ?? 0), startY: Number(e?.y ?? 0), delta: 0, rx, ry,
+      lastSync: 0, timer: null, applied: false,
+    };
+    setGrabHover({ part: hit.part, instanceIndex: hit.instanceIndex, gx: hit.gx, gy: hit.gy, cu: hit.cu, cv: hit.cv, grabRadius: hit.grabRadius, state: 'raise' });
+  };
+
+  const applyGrabLive = () => {
+    const g = grabRef.current;
+    if (!g) return;
+    g.lastSync = Date.now();
+    g.applied = true;
+    setPartGrid(g.hit.part, applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, mirror));
+    setGrabHover((cur) => (cur ? { ...cur, state: g.delta < 0 ? 'carve' : 'raise' } : cur));
+  };
+
+  const grabMove = (e: any) => {
+    const g = grabRef.current;
+    if (!g) return;
+    g.delta = gridDeltaFor(Number(e?.x ?? 0) - g.startX, Number(e?.y ?? 0) - g.startY, g.axis);
+    const since = Date.now() - g.lastSync;
+    if (since >= GRAB_TUNING.liveSyncMs) {
+      applyGrabLive();
+    } else if (!g.timer) {
+      g.timer = setTimeout(() => {
+        if (grabRef.current === g) { g.timer = null; applyGrabLive(); }
+      }, GRAB_TUNING.liveSyncMs - since);
+    }
+  };
+
+  const endGrab = () => {
+    const g = grabRef.current;
+    if (!g) return;
+    grabRef.current = null;
+    if (g.timer) clearTimeout(g.timer);
+    if (Math.abs(g.delta) < 0.01) {
+      // a click, not a drag — undo any live tick, write nothing to the chain
+      if (g.applied) {
+        setPartGrid(g.hit.part, g.baseGrid);
+        uploadGrid(g.hit.part, g.baseGrid);
+      }
+    } else {
+      const final = applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, mirror);
+      setPartGrid(g.hit.part, final);
+      // ONE-TRUTH compose law: the paint texture must carry the dragged grid,
+      // or the next paint stroke's release readback would clobber the drag
+      uploadGrid(g.hit.part, final);
+      live.session?.note(`grab drag · ${g.hit.part} · cell ${g.hit.gx},${g.hit.gy} · ${g.delta > 0 ? 'raise' : 'carve'} ${Math.abs(g.delta).toFixed(2)}`);
+    }
+    setGrabHover((cur) => (cur ? { ...cur, state: 'hover' } : cur));
+  };
+
+  // grab beats orbit on the same Pressable: mousedown ON the mesh grabs,
+  // anywhere else orbits; idle moves drive the hover affordance
+  const previewDown = (e: any) => {
+    const { hit, instances } = pickAt(Number(e?.x ?? 0), Number(e?.y ?? 0));
+    if (hit) startGrab(hit, instances, e);
+    else orbitDown(e);
+  };
+  const previewMove = (e: any) => {
+    if (grabRef.current) { grabMove(e); return; }
+    if (orbitRef.current) { orbitMove(e); return; }
+    hoverMove(e);
+  };
+  const previewUp = () => {
+    if (grabRef.current) endGrab();
+    else orbitUp();
+  };
+
+  // The marker derives its world position from the CURRENT mesh params at
+  // render time, so it sits on the rendered skin and rides the surface as a
+  // drag pulls it (never a stale pick-time snapshot).
+  const grabMarker: GrabMarkerInfo | null = useMemo(() => {
+    if (!grabHover) return null;
+    const instances = grabInstancesFor(view, selPart, rig.assembly);
+    const inst = instances[grabHover.instanceIndex];
+    if (!inst || inst.part !== grabHover.part) return null;
+    const params = partRender[grabHover.part].params as any;
+    return {
+      world: grabPointWorld(params, inst, grabHover.cu, grabHover.cv) as [number, number, number],
+      grabRadius: grabHover.grabRadius,
+      stampWorldRadius: stampWorldRadius(params, inst, grabHover.cu, grabHover.cv, stampRadiusUv(brush, PAINT_W).rx),
+      state: grabHover.state,
+    };
+  }, [grabHover, partRender, rig, view, selPart, brush]);
+
   const setRegion = (part: PartId, regionId: string, value: number) => {
     setDraft((d) => ({
       ...d,
@@ -665,8 +822,8 @@ export function CharactersRoute(props: { onExit: () => void }) {
           </Row>
           <Text fontSize={11} color={T.dim}>
             {status ?? (photo || draft.face
-              ? 'paint depth — blue pushes out, orange carves in'
-              : 'drop a face picture (or generate one), then paint depth over it')}
+              ? 'paint depth — blue pushes out, orange carves in · or hover the 3D side and grab the mesh'
+              : 'drop a face picture (or generate one), then paint depth over it — or grab the mesh in 3D and pull')}
           </Text>
 
           {/* roster: every saved character, one click to load */}
@@ -928,9 +1085,10 @@ export function CharactersRoute(props: { onExit: () => void }) {
 
       {/* ── right: the selected part, or the assembled figure ── */}
       <Pressable
-        onMouseDown={orbitDown}
-        onMouseMove={orbitMove}
-        onMouseUp={orbitUp}
+        onLayout={(lr: any) => { viewRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
+        onMouseDown={previewDown}
+        onMouseMove={previewMove}
+        onMouseUp={previewUp}
         style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden' }}
       >
         <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={T.panelSolid} showGrid={false} showAxes={false}>
@@ -940,6 +1098,7 @@ export function CharactersRoute(props: { onExit: () => void }) {
           <LabEnvironment preset="studio" />
           <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={showHitboxes} />
           {view === 'figure' && draft.heldItem !== 'none' ? <HeldItemMeshes itemId={draft.heldItem} rig={rig} /> : null}
+          <GrabMarker marker={grabMarker} />
         </Scene3D>
         <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
           <Knob label="zoom" value={dist} spec={TUNE.knobs.zoom} onChange={setDist} />

@@ -94,6 +94,10 @@ export type { SphereParams } from './Sphere';
 export type { HeadParams } from './Head';
 export type { CarveParams } from './Carve';
 export type { GlobeParams } from './Globe';
+// The Globe's analytic surface evaluator — the same (u,v)→point math generate()
+// builds vertices from, exported so tools (the character editor's mesh grab)
+// can place handles/ray-pick against EXACTLY the rendered surface.
+export { globeSurface } from './Globe';
 export type { PlaneParams } from './Plane';
 export type { CylinderParams } from './Cylinder';
 export type { ConeParams } from './Cone';

@@ -50,8 +50,19 @@ export const GLOBE_DEFAULTS: GlobeParams = { radius: 0.5, segments: 32, rings: 1
 
 const PI = Math.PI;
 
-export function generate(p: GlobeParams): GeometryData {
-  const { radius, segments, rings } = p;
+/**
+ * The analytic displaced surface: (u, v) -> local-space point. THE one source
+ * of truth for where the globe's skin sits — generate() below builds every
+ * vertex through it, and the character editor's 3D grab tool samples it to
+ * place handles and ray-pick cells, so the pickable surface can never drift
+ * from the rendered one.
+ *
+ * `extraDisplace` adds to the sampled grid value before scaling by `amount` —
+ * the grab tool's "where would this point be at value g±δ" probe (and how it
+ * derives the radial drag axis numerically).
+ */
+export function globeSurface(p: GlobeParams): (u: number, v: number, extraDisplace?: number) => Vec3 {
+  const { radius } = p;
   const amount = p.amount ?? 0;
   const scaleY = p.scaleY ?? 1;
   const scaleX = p.scaleX ?? 1;
@@ -103,22 +114,27 @@ export function generate(p: GlobeParams): GeometryData {
     return (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
   };
 
-  // Displaced position at param (i ring, j segment). phi DECREASES with u so
-  // the unwrap reads unmirrored to a viewer facing the front (-Z at u=0.5).
-  // Profile shapes the base RADIAL silhouette only (length stays scaleY's);
+  // Displaced position at unwrap (u, v). phi DECREASES with u so the unwrap
+  // reads unmirrored to a viewer facing the front (-Z at u=0.5). Profile
+  // shapes the base RADIAL silhouette only (length stays scaleY's);
   // displacement is world-units on top so sculpt strength doesn't shrink
-  // where the part is thin.
-  const pos = (i: number, j: number): Vec3 => {
-    const v = i / rings;
-    const u = j / segments;
+  // where the part is thin. `extraDisplace` rides the grid sample (0 for
+  // every rendered vertex — generate() never passes it).
+  return (u: number, v: number, extraDisplace = 0): Vec3 => {
     const theta = PI * v;
     const phi = PI / 2 - 2 * PI * u;
     const st = Math.sin(theta);
-    const d = amount * sample(u, v);
+    const d = amount * (sample(u, v) + extraDisplace);
     const rxz = radius * profileAt(v) + d;
     const ry = radius + d;
     return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * ry * scaleY, st * Math.sin(phi) * rxz * scaleZ];
   };
+}
+
+export function generate(p: GlobeParams): GeometryData {
+  const { segments, rings } = p;
+  const surf = globeSurface(p);
+  const pos = (i: number, j: number): Vec3 => surf(j / segments, i / rings);
 
   // Finite-difference outward normal; pole rows fall back to the axis.
   const nrm = (i: number, j: number): Vec3 => {

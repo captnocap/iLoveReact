@@ -629,6 +629,47 @@ editors-reach-into-figure-internals exception. Pieces:
   and the richer capture stack (photo head, underwear torso stamps, clothing
   prints). `.hed`/`.body` file export + drop-in import kept beside the roster.
 
+GRABSHAPE-0605 (2026-06-05, USER ASK "i want to see where i can grab on the
+mesh and drag its shape and shape it that way also"): DIRECT MESH GRABBING
+beside the grid depth-paint — hover the 3D preview and a handle dot + a
+translucent influence shell snap to the grid cell under the cursor (only
+where a grab really works — no fake handles); mousedown ON the mesh grabs
+(anywhere else still orbits, same Pressable), dragging pulls the surface out
+/ pushes it in live (throttled re-sculpt, `GRAB_TUNING.liveSyncMs`), release
+lands the final stamp + a labeled V20 note (`grab drag · <part> · cell x,y ·
+raise/carve n.nn`). ONE TRUTH (V24's invariant applied to sculpting): a grab
+stamps regions.ts's `stampGrid` ellipse into `draft.grids[part]` — the
+identical 48×24 grid the unwrap depth-paint edits — and release uploads
+`bytesFromGrid` to the paint texture so the next stroke's readback COMPOSES
+instead of clobbering; drags, strokes, fills, and region sliders all land in
+one grid, no second deformation store. HONEST PARAMETERIZATION: the Globe is
+radial-displacement-only, so a grabbed point moves along its outward axis
+(mouse motion projects onto it; there is no tangential parameter —
+silhouettes stay the outline lathe's job); the stamp radius follows the
+brush knob, the mirror toggle stamps the meridian twin, the depth-amount
+knob scales the drag axis 1:1. `grabKit.ts` is the pure headless core: grab
+clouds sample every cell through `@reactjit/geometries` `globeSurface` (the
+EXACT analytic surface `generate()` builds vertices from — exported in this
+lane so pick and render cannot drift), pick = min-t front-facing cell within
+an adaptive radius from BOTH row and column spacing (column-only let rays
+fall between rows on the slim limb pipe — caught by the P4 test). Picking
+solves the orbit rig from the JS shadow (lookRef/dist) through
+`GAME_CAMERA.screenRay` + the NEW `worldToScreen` (screenRay's exact
+inverse, landed in `runtime/cameras/unproject.ts`) — registry pure math,
+sanctioned under V26; the host still owns per-frame viewport driving.
+Figure view grabs the ASSEMBLY only (anatomy sockets reuse other parts'
+grids — a shoulder ball is a 'hand'; clothing is garments, a grab reaches
+through a sleeve onto the body part), and grabbing a part there SELECTS it
+so the unwrap canvas follows — two views over one truth, made visible.
+`instanceScaleVec` is the one scale law render and pick share (preview.tsx
+adopted it). The marker derives its position from the CURRENT mesh params
+at render time, so it rides the surface up as the drag pulls. 3 new P4
+cases: pick-resolves-to-the-right-part (real rig + real solved camera, head/
+pipe/foot + empty-space-null), drag-then-paint compose on one truth (stamp →
+texture round trip → byte-space dab → both edits present, both orders), and
+the drag axis (outward, |axis| = depth amount, knob scales it, screen
+mapping 1:1 along / 0 across).
+
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).
 `rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.

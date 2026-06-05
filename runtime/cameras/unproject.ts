@@ -59,6 +59,47 @@ export function screenRay(sx: number, sy: number, rect: Rect, cam: Solved): Scre
   return { origin: [pos[0], pos[1], pos[2]], dir: [dx, dy, dz] };
 }
 
+// The forward path: world point -> screen pixel. The exact inverse of
+// screenRay (same view basis, same fov mapping), so projecting a point and
+// shooting a ray back through the returned pixel passes through that point.
+// Consumers: drag-axis mapping (project a world direction into screen space to
+// turn mouse deltas into world-parameter deltas), overlays pinned to 3D points.
+// Returns null when the point sits at/behind the eye plane (no pixel exists).
+export function worldToScreen(world: Vec3, rect: Rect, cam: Solved): { x: number; y: number; depth: number } | null {
+  const { pos, target, fov } = cam;
+
+  // view basis (mirrors screenRay / framework m4lookAt exactly)
+  let fx = pos[0] - target[0];
+  let fy = pos[1] - target[1];
+  let fz = pos[2] - target[2];
+  const fl = Math.hypot(fx, fy, fz) || 1;
+  fx /= fl; fy /= fl; fz /= fl;
+  let sxv = fz;
+  let syv = 0;
+  let szv = -fx;
+  const sl = Math.hypot(sxv, syv, szv) || 1;
+  sxv /= sl; syv /= sl; szv /= sl;
+  const ux = fy * szv - fz * syv;
+  const uy = fz * sxv - fx * szv;
+  const uz = fx * syv - fy * sxv;
+
+  const rx = world[0] - pos[0];
+  const ry = world[1] - pos[1];
+  const rz = world[2] - pos[2];
+  const cx = rx * sxv + ry * syv + rz * szv;
+  const cy = rx * ux + ry * uy + rz * uz;
+  const depth = -(rx * fx + ry * fy + rz * fz); // camera looks along -f
+  if (depth <= 1e-6) return null;
+
+  const w = Math.max(1, rect.width);
+  const h = Math.max(1, rect.height);
+  const aspect = w / h;
+  const tanHalf = Math.tan((fov * Math.PI) / 180 / 2);
+  const ndcX = cx / depth / (tanHalf * aspect);
+  const ndcY = cy / depth / tanHalf;
+  return { x: ((ndcX + 1) / 2) * w, y: ((1 - ndcY) / 2) * h, depth };
+}
+
 // March the pixel's ray against the height field, then bisect for a clean
 // landing. Returns scape world coords {x, y} where the 3D z axis maps back to
 // y (1 tile = 1 unit). Picking is click-rate, so the step budget is irrelevant.
