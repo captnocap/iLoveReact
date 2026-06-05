@@ -867,4 +867,35 @@ pub fn build(b: *std.Build) void {
     const run_game_physics_test = b.addRunArtifact(game_physics_test);
     const game_physics_test_step = b.step("test-game-physics", "Run the game physics/movement behavior tests");
     game_physics_test_step.dependOn(&run_game_physics_test.step);
+
+    // ── Game pathing behavior tests (V5 capture, P4) ───────────────
+    // Exercises framework/game/pathing.zig: routes found/blocked/
+    // deterministic, flow + lane discipline (trio snap, junction apexes),
+    // closed-form motion plans. Pure-math module — no SDL/V8 link; the
+    // cart binary gets framework/game/ only through the gated
+    // v8_bindings_game_pathing.zig ingredient (V18).
+    const game_pathing_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/game/pathing.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const game_pathing_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/game_pathing.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    game_pathing_test_mod.addImport("game_pathing", game_pathing_mod_for_tests);
+    const game_pathing_test = b.addTest(.{
+        .name = "game-pathing-test",
+        .root_module = game_pathing_test_mod,
+        // Zig 0.15.2's self-hosted x86_64 Debug backend miscompiles the A*
+        // (emit MIR: no encoding for mov m32,m32). The app always builds
+        // through LLVM (ReleaseFast); pin the test to LLVM too.
+        .use_llvm = true,
+    });
+    const run_game_pathing_test = b.addRunArtifact(game_pathing_test);
+    const game_pathing_test_step = b.step("test-game-pathing", "Run the game pathing behavior tests");
+    game_pathing_test_step.dependOn(&run_game_pathing_test.step);
 }
