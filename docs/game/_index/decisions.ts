@@ -108,7 +108,7 @@ export const DECISIONS: Decision[] = [
   },
   {
     id: 'V14', name: 'The ground floor: ALL eleven items in', status: 'ruled',
-    ruling: 'Every lab gets for free: game loop, camera registry (incl. aim rig + screenRay), the figure stack with auto-mounted captures, vehicle module, host physics + heightfields, host pathing + motion plans, the animation system, kinds registries as importable data, lab chrome kit + environment, telemetry + copy-diagnostics, and the Effect/StaticSurface texture system with bake-once discipline.',
+    ruling: 'Every lab gets for free: loop (minimal API, pending R3), camera registry (incl. aim rig + screenRay), the figure stack with auto-mounted captures, vehicle module, host physics + heightfields, host pathing + motion plans, the animation system, kinds registries as importable data, lab chrome kit + environment, telemetry + copy-diagnostics, and the Effect/StaticSurface texture system with bake-once discipline.',
     keywords: ['ground floor', 'free', 'lab contract', 'baked in', 'foundation'],
   },
   {

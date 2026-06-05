@@ -531,7 +531,7 @@ source exactly like the labs: feature development on it stops; new game work
 happens inside hmsc-int's structure; hmsc ends as compile/'s output.
 
 **V14 — The ground floor (everything a lab gets for free): ALL IN.**
-useGameLoop-equivalent, camera registry (incl. aim rig + screenRay), the head_lab
+loop (minimal API, pending R3), camera registry (incl. aim rig + screenRay), the head_lab
 figure stack with auto-mounted captures, vehicle module, host physics +
 heightfields, host pathing + motion plans, animation system, kinds registries,
 lab chrome kit + environment, telemetry + copy-diagnostics, the texture system
