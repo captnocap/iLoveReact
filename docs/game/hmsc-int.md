@@ -268,3 +268,39 @@ concern in one StreamDef (engine events in, life totals + heat
 materialized). 25 P4 tests ride `rjit game verify`; CAPTURE.md records the
 judgment calls (invented preset values, the single quality channel, the
 caller-cadenced engine pending R3).
+
+## game/missions/ — scripted objectives (V22/V8/V16/V20 capture, 2026-06-04)
+
+The SCRIPTED counterpart of activities, REWRITTEN fresh — built on the
+cutscene clock, pathing, and the state tick's forced events. V22-CaaS is the
+binding ruling: dailies are LLM-generated mission ROWS over a CLOSED schema.
+`objectives.ts` carries scape design.ts's Objective vocabulary (the corpus's
+one objective reference — contract-first, never consumed) as completion
+predicates evaluated against the QUERYABLE WORLD AS DATA (`MissionFacts`, a
+plain JSON snapshot per tick; an absent fact is never true; target kind
+`position` added per V22's Hitman model, occupant-resolved). `defs.ts` is
+the P2 table layer — staged objectives, the activities-shared reward row,
+expiry ticks, collateral policy, narrative hooks ((text, world_delta) pairs;
+`defineMission` rejects an empty delta: "a hook without a delta is the world
+calling the app a liar") — and ships `delivery-gig`, the RULED opening
+tutorial whose complete-hook delta makes the unfair rating cost VISIBLE
+MONEY and names the OPENING_ARC stage-5 gate. `rows.ts` is the CaaS
+pipeline: `validateRow` proves every slot against the queryable future
+(methods_hinted are AFFORDANCES GUARANTEED) and enforces the numbers law
+(the LLM never touches numbers — any numeric slot fails; `missionFromRow`
+prices reward/expiry/collateral from `MISSION_TUNING`), plus the
+seed/fingerprint dedup window (no-doubles for narrative). `run.ts` is the
+pure engine (one `stepMission` = one state tick, forced tick = same call
+now; collateral docks the rating → objectives latch, stages cascade,
+completion pays EXACTLY the table → person-bound unrelated death VOIDS (the
+one impossible-predicate fail screen) → expiry fails; failed restarts,
+position-bound re-arms against the replacement — failure degrades, never
+ends). `stream.ts` registers the V20 `missions` concern (per-verb
+completion/rating tallies — tomorrow's generation weights' input). Seams
+proven in tests: hooks record through GAME_STORY's log (the story capture's
+deferred narrative_hooks item CLOSED), `briefingCutscene` samples on the
+V16 clock scrub-identical, `objectiveMarker` feeds GAME_PATHING.planMotion,
+and playing the delivery gig advances OPENING_ARC past stage 5. 30 P4 tests
+ride `rjit game verify`; CAPTURE.md records the judgment calls (first-cut
+facts vocabulary, the strict numbers law, mechanical "unrelated death",
+caller-driven re-arm, rating-never-scales-pay, invented P2 values).
