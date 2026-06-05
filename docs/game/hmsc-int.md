@@ -223,6 +223,37 @@ gitignored (the content time machine); backup story = `store.exportBackup()`
 `__fs_append` binding yet, so appends are read+concat+write (semantically
 append-only; the reader tolerates a torn trailing line). P4 suite
 `data/data.test.ts` rides `rjit game verify` (suite roots: game/ + data/).
+`apply` receives each event's log position as an optional third arg
+(`apply(state, event, seq?)` — the store always passes it; two-arg
+materializers and the tests' direct-apply idiom stay valid).
+
+## The route-scoped session history (added 2026-06-04, the user's ruling)
+
+`editors/sessions.ts` — "route specific session commit histories... sprinkle
+in the edit commits after each interaction" (the user's words) made live on
+the V20 store. A route opens a SESSION on its concern channel; every
+interaction appends one LABELED edit-commit. The `sessions` stream records
+lifecycle only (opened/committed/closed markers, folded with each marker's
+log position); content events stay in their concern streams, so the one
+global sequence orders the whole history cross-channel and an interaction's
+undo point is its commit's position. `sessionsOnRoute(state, route)` answers
+"what did I do this session, on this route". Two commit grades:
+`commit(event, label)` (content + marker + snapshots — `/vehicles`, every
+control press labeled like `car-1: style → van`) and `note(label)`
+(marker-only — the `/` map editor's logEvent funnel; its world content still
+saves through the workspace session files UNTOUCHED, and content events join
+the same `world` channel later by addition). `editors/store.ts` grew
+`editorChannel(def)` (route-safe cached defineStream on the one live store —
+remounts can't double-register; a private openStore in a route would fork
+the undo chain, which is exactly what the /vehicles rewire removed).
+`createSessionLog(store)` is the testable door, `editorSessions()` the live
+singleton (the roster.ts split). P4: `editors/sessions.test.ts` (7 cases:
+commit append, boundaries, scoping, cross-channel ordering, undo-point
+resolution, replay identity, snapshot growth) +
+`editors/vehicles/roundtrip.test.ts` (pure edits → session commits →
+snapshot → fresh-store reload → buildVehicle byte-identical; labels +
+boundaries survive; pre-wreck undo point resolves undamaged). Adoption
+hand-off for the characters lane: `editors/SESSIONS.md`.
 
 ## game/figure/ — the character kit (V2/V2-AMENDED/V1 capture, 2026-06-05)
 
@@ -362,8 +393,11 @@ capabilities DONE; the user deletes the old cart). Three pieces:
   captured tables, sparse damage set/nudge/repair. Both reference gasZ clamp
   ranges preserved verbatim in `VEHICLE_EDITOR_TUNING` (P2; the asymmetry is
   surfaced, not resolved).
-- `editors/vehicles/VehiclesRoute.tsx` — the route: garage rail (every edit =
-  one appended event + a fresh snapshot; view state transient by design),
+- `editors/vehicles/VehiclesRoute.tsx` — the route: garage rail on the tool's
+  ONE store (`editorChannel(vehiclesStream)` + a `RouteSession` per visit —
+  every edit = one LABELED session commit: authored event + marker + fresh
+  snapshot; view state transient by design; the original per-mount private
+  `openStore` was removed as a forked undo chain),
   style/role/pose chips + run playback (`GAME_ANIMATION.parse/sample`),
   hitbox-group selection, damage chips, memo'd mesh/hitbox/anchor overlays,
   orbit viewport (`GAME_CAMERA.rigs.Orbit` solve + `GAME_CHROME
@@ -374,8 +408,8 @@ capabilities DONE; the user deletes the old cart). Three pieces:
 
 Wired as `/vehicles` + the Car nav icon in ProjectBar (after the characters
 route per the editors-wave coordination rule). `rjit game verify` owns
-`cart/hmsc-int/editors` as a suite root: 8 edit-step cases + 5 stream cases,
-VERDICT GREEN. Open seams (CAPTURE.md): compile/ does not yet consume the
+`cart/hmsc-int/editors` as a suite root: 8 edit-step cases + 5 stream cases +
+the session-path round trip (`roundtrip.test.ts`), VERDICT GREEN. Open seams (CAPTURE.md): compile/ does not yet consume the
 garage snapshot (placement belongs to the world stream, not the vehicle doc),
 and the V10 scale audit remains open.
 
