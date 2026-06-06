@@ -13,6 +13,9 @@
 
 import { HED_GRID_H, HED_GRID_W } from '../../game/figure/hed';
 import { PART_LOD, PART_PRESETS, type PartId } from '../../game/figure/shapes';
+// the engine's own pressure curve — the cursor ring and the landed dab must
+// derive from the SAME function (BRUSHFLOOR-0606; headless-safe import)
+import { pressureRadius } from '../paint/strokes';
 import { editorTunables } from '../tunables';
 import type { CharacterDraft } from './draft';
 import { regionSignature } from './regions';
@@ -236,6 +239,42 @@ export const GREATER_POINTS = [
   { u: 0.75, v: 0.5, color: '#3b82f6', ink: [0.23, 0.51, 0.96] },
 ] as const;
 
+// ── the honest brush (BRUSHFLOOR-0606, USER REPORT) ──────────────────────────
+// The sculpt brush speaks DIAMETER in paint px. Before this, the stroke
+// engine treated v.brush as a RADIUS SCALE (mouse dab radius = brushPx ×
+// 1.0) while the cursor circle drew brushPx/2 — the landed footprint was 2×
+// the ring, and the "4px" floor splashed a multi-cell core. Now ONE math
+// (sculptEffectiveRadiusPx, riding the engine's own pressureRadius curve)
+// feeds BOTH the landed dab and the cursor ring: nominal == drawn == landed.
+
+/** one paint cell, in paint px (192/48 = 96/24 = 4) */
+export const SCULPT_CELL_PX = PAINT_EDITOR_TUNING.paint.width / PAINT_EDITOR_TUNING.grid.width;
+
+/** the stroke engine's brushPx argument for a nominal sculpt diameter —
+ *  pressureRadius(x) returns x at mouse/fallback pressure, so half the
+ *  diameter in = radius out, and the disc lands at exactly nominal width */
+export function sculptEngineBrushPx(diameterPx: number): number {
+  return diameterPx / 2;
+}
+
+/** the effective dab radius (mouse/fallback) for a nominal diameter — THE
+ *  number both the landed dab and the cursor footprint derive from */
+export function sculptEffectiveRadiusPx(diameterPx: number): number {
+  return pressureRadius(diameterPx / 2, undefined);
+}
+
+/** THE FLOOR: at single-cell size a dab snaps to the center of the cell
+ *  under it — one click = exactly one cell core, zero falloff bleed, no
+ *  matter where in the cell the click lands. Above the floor, untouched. */
+export function sculptDabSnap(diameterPx: number, x: number, y: number): { x: number; y: number } {
+  if (diameterPx > SCULPT_CELL_PX) return { x, y };
+  const ch = PAINT_EDITOR_TUNING.paint.height / PAINT_EDITOR_TUNING.grid.height;
+  return {
+    x: (Math.floor(x / SCULPT_CELL_PX) + 0.5) * SCULPT_CELL_PX,
+    y: (Math.floor(y / ch) + 0.5) * ch,
+  };
+}
+
 // ── the painter overlay shader ───────────────────────────────────────────────
 // Layers in one quad: live stroke heat (blue raised / orange carved), contour
 // rings of the current form (relief texture, slot 2), the unwrap guides, the
@@ -400,7 +439,9 @@ export function depthOverlayData(args?: {
     hover ? 1 : 0,
     hover?.u ?? 0,
     hover?.v ?? 0,
-    args ? (args.brushPx / 2) / PAINT_EDITOR_TUNING.paint.height : 0,
+    // BRUSHFLOOR-0606: the ring shows the EFFECTIVE footprint — the same
+    // radius the engine will land at mouse/fallback pressure, in v units
+    args ? sculptEffectiveRadiusPx(args.brushPx) / PAINT_EDITOR_TUNING.paint.height : 0,
     modeIdx,
     args?.mirror ? 1 : 0,
     sel ? 1 : 0,

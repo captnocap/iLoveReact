@@ -60,7 +60,7 @@ import { sculptedItemDefinition } from '../items/bake';
 import { PAINT } from '../paint';
 import {
   DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes,
-  headTextureKey, partDynKey, reliefBytesFromGrid, sculptModeValue, skinTextureKey,
+  headTextureKey, partDynKey, reliefBytesFromGrid, sculptDabSnap, sculptEngineBrushPx, sculptModeValue, skinTextureKey,
   type SculptMode,
 } from './paintKit';
 import { ChipRow, RegionSliderRow, SwatchRow } from './controls';
@@ -405,16 +405,15 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
 
   // Sculpt dabs ride the shared stroke engine (editors/paint): gap-free
   // interpolation between pointer samples + pressure→radius + mirror twins
-  // across the front meridian. At the no-pressure fallback the engine's
-  // radius equals `brush` exactly (the hand-off's fidelity law).
+  // across the front meridian. BRUSHFLOOR-0606: `brush` is the DIAMETER —
+  // the engine takes its half (radius scale), the floor snaps to the cell.
   const dab = (sx: number, sy: number, pressure?: number) => {
     const engine = strokeEngineRef.current;
     if (!engine) return;
     const r = canvasRect.current;
-    const tx = ((sx - r.x) / r.width) * PAINT_W;
-    const ty = ((sy - r.y) / r.height) * PAINT_H;
+    const p = sculptDabSnap(brush, ((sx - r.x) / r.width) * PAINT_W, ((sy - r.y) / r.height) * PAINT_H);
     const value = sculptModeValue(mode, strength);
-    for (const d of engine.move(tx, ty, pressure)) {
+    for (const d of engine.move(p.x, p.y, pressure)) {
       paints[selPart].paint.circle(d.x, d.y, d.radius, value);
     }
   };
@@ -457,7 +456,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
       smoothDab(sx, sy);
       return;
     }
-    strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: brush, mirrorAxisX: mirror ? PAINT_W / 2 : null });
+    strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: sculptEngineBrushPx(brush), mirrorAxisX: mirror ? PAINT_W / 2 : null });
     strokeEngineRef.current.begin();
     dab(sx, sy, Number(e?.pressure) || undefined);
   };

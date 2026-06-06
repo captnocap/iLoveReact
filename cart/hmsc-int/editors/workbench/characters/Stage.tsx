@@ -38,7 +38,7 @@ import { PAINT } from '../../paint';
 import * as Geometry from '@reactjit/geometries';
 import {
   DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, gridFromBytes,
-  gridNodeAt, reliefBytesFromGrid, sculptModeValue, withNodeValue,
+  gridNodeAt, reliefBytesFromGrid, sculptDabSnap, sculptEngineBrushPx, sculptModeValue, withNodeValue,
   type GridNode,
 } from '../../characters/paintKit';
 import { useRouteTwigState } from '../../twigs';
@@ -228,15 +228,17 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     [draft.bodyShape, draft.bodyPose],
   );
 
-  // ── the depth-paint stroke (Route.tsx:384-444 — the shared stroke engine) ──
+  // ── the depth-paint stroke (Route.tsx:384-444 — the shared stroke engine).
+  // BRUSHFLOOR-0606: v.brush is the DIAMETER — sculptEngineBrushPx halves it
+  // into the engine's radius scale so the landed disc is exactly nominal
+  // width; at the single-cell floor the dab snaps to the cell center. ───────
   const dab = (sx: number, sy: number, pressure?: number) => {
     const engine = strokeEngineRef.current;
     if (!engine) return;
     const r = canvasRect.current;
-    const tx = ((sx - r.x) / r.width) * PAINT_W;
-    const ty = ((sy - r.y) / r.height) * PAINT_H;
+    const p = sculptDabSnap(v.brush, ((sx - r.x) / r.width) * PAINT_W, ((sy - r.y) / r.height) * PAINT_H);
     const value = sculptModeValue(v.sculptMode, v.strength);
-    for (const d of engine.move(tx, ty, pressure)) {
+    for (const d of engine.move(p.x, p.y, pressure)) {
       paints[selPart].paint.circle(d.x, d.y, d.radius, value);
     }
   };
@@ -296,7 +298,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       smoothDab(Number(e?.x ?? 0), Number(e?.y ?? 0));
       return;
     }
-    strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: v.brush, mirrorAxisX: v.mirror ? PAINT_W / 2 : null });
+    strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: sculptEngineBrushPx(v.brush), mirrorAxisX: v.mirror ? PAINT_W / 2 : null });
     strokeEngineRef.current.begin();
     dab(Number(e?.x ?? 0), Number(e?.y ?? 0), Number(e?.pressure) || undefined);
   };

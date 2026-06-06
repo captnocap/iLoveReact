@@ -23,7 +23,7 @@ import { createSessionLog } from '../sessions';
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
 import { globeSurface } from '@reactjit/geometries';
-import { DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes, gridNodeAt, withNodeValue } from './paintKit';
+import { DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, SCULPT_CELL_PX, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes, gridNodeAt, sculptDabSnap, sculptEffectiveRadiusPx, sculptEngineBrushPx, withNodeValue } from './paintKit';
 import {
   GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, grabPointWorld, gridDeltaFor,
   gridOverlayParams, pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
@@ -507,6 +507,35 @@ test('grid nodes: click→node mapping, one-cell value edits, greater points sit
   for (const p of GREATER_POINTS) {
     const w = grabPointWorld(params as any, inst, p.u, p.v);
     assert((w as number[]).every(Number.isFinite), 'the 3D flag resolves at the canvas dot uv');
+  }
+});
+
+test('the honest brush: min size lands one cell, the cursor ring IS the landed radius (BRUSHFLOOR-0606)', () => {
+  const { paint } = PAINT_EDITOR_TUNING;
+  // THE FLOOR: at min knob size (one cell), any click in a cell snaps to its
+  // center and the effective radius fits INSIDE the cell — one click = one
+  // cell core, zero neighbor bleed
+  const minPx = PAINT_EDITOR_TUNING.knobs.brush.min;
+  assertEqual(minPx, SCULPT_CELL_PX, 'the knob floor is exactly one cell');
+  const eff = sculptEffectiveRadiusPx(minPx);
+  assert(eff <= SCULPT_CELL_PX / 2, `floor radius ${eff} fits inside one cell (≤ ${SCULPT_CELL_PX / 2})`);
+  for (const [cx, cy] of [[0.4, 3.7], [3.9, 0.1], [2.0, 2.0]]) {
+    const snapped = sculptDabSnap(minPx, 17 * SCULPT_CELL_PX + cx, 5 * SCULPT_CELL_PX + cy);
+    assertClose(snapped.x, 17 * SCULPT_CELL_PX + SCULPT_CELL_PX / 2, 1e-9, 'snaps to the cell-center x');
+    assertClose(snapped.y, 5 * SCULPT_CELL_PX + SCULPT_CELL_PX / 2, 1e-9, 'snaps to the cell-center y');
+  }
+  // above the floor: no snap — the hand stays free
+  const free = sculptDabSnap(minPx + 2, 70.3, 33.7);
+  assertClose(free.x, 70.3, 1e-9, 'no snap above the floor');
+  // FALLOFF HONESTY: the cursor ring radius (data[4], v units) equals the
+  // radius the engine actually lands at fallback pressure — one math
+  for (const px of [4, 8, 16, 40]) {
+    const ring = depthOverlayData({ hover: { u: 0.5, v: 0.5 }, brushPx: px, mode: 'raise', mirror: false })[4];
+    const engine = createStrokeEngine({ brushPx: sculptEngineBrushPx(px) });
+    engine.begin();
+    const dabs = engine.move(96, 48, undefined);
+    assert(dabs.length > 0, 'the engine lands a dab');
+    assertClose(ring * paint.height, dabs[0].radius, 1e-6, `nominal ${px}px: cursor == landed (${(ring * paint.height).toFixed(2)} vs ${dabs[0].radius.toFixed(2)})`);
   }
 });
 
