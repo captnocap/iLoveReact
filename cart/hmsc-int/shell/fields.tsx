@@ -14,6 +14,7 @@
 import { useRef, useState } from 'react';
 import { Box, Pressable } from '@reactjit/primitives';
 import { C, accentFor } from './workbench.cls';
+import { colorRangeCells, type ColorRange } from './colorRange';
 
 export type FieldSpec =
   | { k: string; t: 'val'; get(): string }
@@ -26,8 +27,9 @@ export type FieldSpec =
   | { k: string; t: 'text'; get(): string; set(v: string): void; placeholder?: string; width?: number }
   // act — a verb chip in the strip (generate face, reset part, anim preset)
   | { k: string; t: 'act'; tone?: string; run(): void }
-  // color gains a palette: opts + set → pick-a-swatch row (skin tones)
-  | { k: string; t: 'color'; get(): string; opts?: string[]; set?(v: string): void };
+  // color gains a palette (opts = quick-pick presets) and a RANGE
+  // (SKINRANGE-0606: a full gradient grid — any tone reachable, presets on top)
+  | { k: string; t: 'color'; get(): string; opts?: string[]; set?(v: string): void; range?: ColorRange };
 
 export interface PanelGroup { title: string; fields: FieldSpec[] }
 export interface PanelSpec { groups: PanelGroup[] }
@@ -124,38 +126,65 @@ function TextField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'text' }>; onEdit
 }
 
 function ColorField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'color' }>; onEdit: () => void }) {
-  if (f.opts && f.set) {
-    const cur = f.get();
+  const cur = f.get();
+  const pick = (c: string) => { f.set!(c); onEdit(); };
+  if (f.set && (f.opts || f.range)) {
     return (
-      <>
-        {f.opts.map((c) => (
-          <C.ColorSwatch
-            key={c}
-            style={{ backgroundColor: c, borderWidth: c === cur ? 2 : 1, borderColor: c === cur ? accentFor('primary') : accentFor('controlBorder') }}
-            onPress={() => { f.set!(c); onEdit(); }}
-          />
-        ))}
-      </>
+      <Box style={{ flexDirection: 'column', gap: 4 }}>
+        {f.opts ? (
+          <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 3, alignItems: 'center' }}>
+            {f.opts.map((c) => (
+              <C.ColorSwatch
+                key={c}
+                style={{ backgroundColor: c, borderWidth: c === cur ? 2 : 1, borderColor: c === cur ? accentFor('primary') : accentFor('controlBorder') }}
+                onPress={() => pick(c)}
+              />
+            ))}
+            <C.FieldValue>{cur}</C.FieldValue>
+          </Box>
+        ) : null}
+        {f.range ? (
+          // SKINRANGE-0606: the full continuum under the quick-pick presets —
+          // every cell a real value; any tone reachable
+          <Box style={{ flexDirection: 'column', gap: 2 }}>
+            {colorRangeCells(f.range).map((row, ri) => (
+              <Box key={ri} style={{ flexDirection: 'row', gap: 2 }}>
+                {row.map((c, ci) => (
+                  <Pressable
+                    key={`${ri}-${ci}`}
+                    onPress={() => pick(c)}
+                    style={{ width: 12, height: 12, borderRadius: 2, backgroundColor: c, borderWidth: c === cur ? 2 : 0, borderColor: accentFor('primary') }}
+                  />
+                ))}
+              </Box>
+            ))}
+          </Box>
+        ) : null}
+      </Box>
     );
   }
   return (
     <>
-      <C.ColorSwatch style={{ backgroundColor: f.get() }} onPress={() => {}} />
-      <C.FieldValue>{f.get()}</C.FieldValue>
+      <C.ColorSwatch style={{ backgroundColor: cur }} onPress={() => {}} />
+      <C.FieldValue>{cur}</C.FieldValue>
     </>
   );
 }
 
+// ENUMWRAP-0606 (USER: "one big row of buttons … i cant even see the name of
+// that last one or if there are more"): options render as a WRAPPING chip
+// grid — every option always visible, long sets read as tidy rows. Fixed
+// ONCE here; every enum instance inherits.
 function EnumField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'enum' }>; onEdit: () => void }) {
   const cur = f.get();
   return (
-    <C.Segment>
+    <C.FieldEnumWrap>
       {f.opts.map((o) => {
-        const Cell = o === cur ? C.SegOptionActive : C.SegOption;
-        const T = o === cur ? C.SegTextActive : C.SegText;
+        const Cell = o === cur ? C.EnumCellOn : C.EnumCell;
+        const T = o === cur ? C.EnumCellTextOn : C.EnumCellText;
         return <Cell key={o} onPress={() => { f.set(o); onEdit(); }}><T>{o}</T></Cell>;
       })}
-    </C.Segment>
+    </C.FieldEnumWrap>
   );
 }
 

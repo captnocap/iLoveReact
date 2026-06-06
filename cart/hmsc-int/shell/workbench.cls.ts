@@ -119,6 +119,23 @@ classifier({
   HeroMetaLabel: { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:textFaint', style: { fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1 } },
   HeroActionsRow: { type: 'Box', style: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, rowGap: 6, paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd', paddingTop: 2 } },
 
+  // ENUMWRAP-0606 (USER: "i cant even see the name of that last one or if
+  // there are more") — enum options render as a WRAPPING chip grid, never a
+  // clipping row. maxWidth keeps the grid inside the panel; every option
+  // always visible.
+  FieldEnumWrap: { type: 'Box', style: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 3, rowGap: 3, maxWidth: 200 } },
+  EnumCell: {
+    type: 'Pressable',
+    style: { paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' },
+    hoverStyle: { borderColor: 'theme:textDim' },
+  },
+  EnumCellOn: {
+    type: 'Pressable',
+    style: { paddingLeft: 6, paddingRight: 6, paddingTop: 3, paddingBottom: 3, borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:primary', backgroundColor: 'theme:segActiveBg' },
+  },
+  EnumCellText: { type: 'Text', fontSize: 'theme:fontSm', color: 'theme:textDim', style: { fontFamily: 'monospace', fontWeight: 700 } },
+  EnumCellTextOn: { type: 'Text', fontSize: 'theme:fontSm', color: 'theme:segActiveText', style: { fontFamily: 'monospace', fontWeight: 700 } },
+
   // 4 — the demonstration surface
   PreviewCol: { type: 'Box', style: { flexGrow: 1, minWidth: 0, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt' } },
   PreviewBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 'theme:spacingMd', paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd', paddingTop: 6, paddingBottom: 6, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
