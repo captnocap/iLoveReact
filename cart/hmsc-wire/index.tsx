@@ -168,7 +168,7 @@ const SET_DB: Record<Dom, WireDom> = {
         { title: 'WALK', fields: [sl('speed', 0.55, '4.2'), sl('run ×', 0.6, '1.6'), sl('strafe', 0.45, '0.8'), onoff('sprint', true)] },
         { title: 'AIR', fields: [sl('control', 0.3, '0.3'), sl('friction', 0.55, '0.55')] },
       ] },
-      { name: 'gravity & jump', note: 'tune gravity below and watch the jump change', groups: [
+      { name: 'gravity & jump', note: 'step the gravity knob in the panel — the jump reacts', groups: [
         { title: 'GRAVITY', fields: [num('gravity', '9.8'), num('terminal', '38')] },
         { title: 'JUMP', fields: [sl('height', 0.5, '1.1m'), num('coyote', '80ms'), onoff('double', false)] },
       ] },
@@ -427,12 +427,35 @@ function ChromeStrip(props: { active: string; onNav: (label: string) => void }) 
 
 // ── typed control cells (shared by W2 + W3 panels) ────────────────────────────
 
-function FieldCell({ f }: { f: WF }) {
+// A bind makes a panel field LIVE: gutter 3 edits, column 4 reacts. This is
+// the only edit path — the stage never grows its own controls.
+interface FieldBind {
+  num?: Record<string, { v: string; onStep: (dir: -1 | 1) => void }>;
+  pick?: Record<string, { v: string; onPick: (o: string) => void }>;
+}
+
+function FieldCell({ f, bind }: { f: WF; bind?: FieldBind }) {
+  const numBind = f.t === 'num' ? bind?.num?.[f.k] : undefined;
+  const pickBind = f.t === 'enum' ? bind?.pick?.[f.k] : undefined;
   return (
     <C.Field>
       <C.FieldLabel>{f.k}</C.FieldLabel>
       {f.t === 'val' ? <C.FieldValue>{f.v}</C.FieldValue> : null}
-      {f.t === 'num' ? <C.FieldValueNum>{f.v}</C.FieldValueNum> : null}
+      {f.t === 'num' ? (
+        numBind ? (
+          <>
+            <C.StepBtn onPress={() => numBind.onStep(-1)}>
+              <Icon name="Minus" size={10} color={tone('textSecondary')} />
+            </C.StepBtn>
+            <C.FieldValueNum>{numBind.v}</C.FieldValueNum>
+            <C.StepBtn onPress={() => numBind.onStep(1)}>
+              <Icon name="Plus" size={10} color={tone('textSecondary')} />
+            </C.StepBtn>
+          </>
+        ) : (
+          <C.FieldValueNum>{f.v}</C.FieldValueNum>
+        )
+      ) : null}
       {f.t === 'bool' ? (
         f.v ? (
           <C.ToggleTrackOn><C.ToggleKnob /></C.ToggleTrackOn>
@@ -451,8 +474,13 @@ function FieldCell({ f }: { f: WF }) {
       {f.t === 'enum' ? (
         <C.SegMiniWrap>
           {f.opts.map((o) => {
-            const Cell = o === f.v ? C.SegMiniCellOn : C.SegMiniCell;
-            const T = o === f.v ? C.SegMiniTextOn : C.SegMiniText;
+            const cur = pickBind ? pickBind.v : f.v;
+            const T = o === cur ? C.SegMiniTextOn : C.SegMiniText;
+            if (pickBind) {
+              const Cell = o === cur ? C.SegMiniPressOn : C.SegMiniPress;
+              return <Cell key={o} onPress={() => pickBind.onPick(o)}><T>{o}</T></Cell>;
+            }
+            const Cell = o === cur ? C.SegMiniCellOn : C.SegMiniCell;
             return <Cell key={o}><T>{o}</T></Cell>;
           })}
         </C.SegMiniWrap>
@@ -467,7 +495,7 @@ function FieldCell({ f }: { f: WF }) {
   );
 }
 
-function PropsGroups(props: { groups: WireGroup[] }) {
+function PropsGroups(props: { groups: WireGroup[]; bind?: FieldBind }) {
   return (
     <>
       {props.groups.map((g, gi) => {
@@ -481,7 +509,7 @@ function PropsGroups(props: { groups: WireGroup[] }) {
               <C.GroupCount>{`${g.fields.length}`}</C.GroupCount>
             </C.GroupHead>
             <C.FieldStrip>
-              {g.fields.map((f) => <FieldCell key={f.k} f={f} />)}
+              {g.fields.map((f) => <FieldCell key={f.k} f={f} bind={props.bind} />)}
             </C.FieldStrip>
           </C.Group>
         );
@@ -618,39 +646,28 @@ function AssetEditor(props: { cat: Cat; onCat: (c: Cat) => void }) {
 }
 
 // ── W3: the demo rigs ─────────────────────────────────────────────────────────
+// Rigs DEMONSTRATE only — no controls in here. The knobs live in gutter 3 (the
+// one edit surface, bound via FieldBind); the rig just receives the values.
 
-// PHYSICS — a real animated jump rig. ± gravity and the arc changes instantly.
-// This is the "see the setting act" loop, alive in the wireframe.
-function PhysicsRig() {
-  const [gravity, setGravity] = useState(9.8);
+// PHYSICS — a real animated jump rig. Step the panel's gravity knob and the
+// arc changes instantly. This is the col-3-edits → col-4-reacts loop, alive.
+function PhysicsRig(props: { gravity: number }) {
   const [t, setT] = useState(0);
   useEffect(() => {
     const id = setInterval(() => setT((x) => x + 0.033), 33);
     return () => clearInterval(id);
   }, []);
-  const apex = Math.max(20, Math.min(200, 1100 / gravity)); // px — lighter gravity, higher arc
-  const y = Math.round(apex * Math.abs(Math.sin(t * Math.sqrt(gravity) * 0.55)));
+  const apex = Math.max(20, Math.min(200, 1100 / props.gravity)); // px — lighter gravity, higher arc
+  const y = Math.round(apex * Math.abs(Math.sin(t * Math.sqrt(props.gravity) * 0.55)));
   return (
-    <>
-      <C.StageCtl>
-        <C.ToolBtn onPress={() => setGravity((g) => Math.max(3, Math.round(g - 1)))}>
-          <Icon name="Minus" size={13} color={tone('textSecondary')} />
-        </C.ToolBtn>
-        <C.FieldValueNum>{`gravity ${gravity.toFixed(1)}`}</C.FieldValueNum>
-        <C.ToolBtn onPress={() => setGravity((g) => Math.min(25, Math.round(g + 1)))}>
-          <Icon name="Plus" size={13} color={tone('textSecondary')} />
-        </C.ToolBtn>
-        <C.WireNote>± and watch the jump change — the whole point of the rig pane</C.WireNote>
-      </C.StageCtl>
-      <C.Stage>
-        <C.StageFigure style={{ marginBottom: y }} />
-        <C.StageFloor />
-      </C.Stage>
-    </>
+    <C.Stage>
+      <C.StageFigure style={{ marginBottom: y }} />
+      <C.StageFloor />
+    </C.Stage>
   );
 }
 
-// WORLD — day-cycle scrub: pick an hour, the stage relights.
+// WORLD — day-cycle stage: the panel's `start` hour enum relights it.
 // Sky values lifted from the lab sky tables (demo data, not UI chrome).
 const HOURS = [
   { name: 'midnight', bg: '#05060f', sun: '#20304f' },
@@ -659,26 +676,13 @@ const HOURS = [
   { name: 'dusk', bg: '#1d2f63', sun: '#ff7a44' },
 ];
 
-function TimeRig() {
-  const [hour, setHour] = useState(2); // noon
-  const h = HOURS[hour];
+function TimeRig(props: { hour: string }) {
+  const h = HOURS.find((x) => x.name === props.hour) ?? HOURS[2];
   return (
-    <>
-      <C.StageCtl>
-        <C.ModeSeg>
-          {HOURS.map((o, i) => {
-            const Cell = i === hour ? C.SegCellOn : C.SegCell;
-            const T = i === hour ? C.SegTextOn : C.SegText;
-            return <Cell key={o.name} onPress={() => setHour(i)}><T>{o.name.toUpperCase()}</T></Cell>;
-          })}
-        </C.ModeSeg>
-        <C.WireNote>scrub the hour — the stage relights</C.WireNote>
-      </C.StageCtl>
-      <C.Stage style={{ backgroundColor: h.bg }}>
-        <Box style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: h.sun, marginBottom: 90 }} />
-        <C.StageFloor />
-      </C.Stage>
-    </>
+    <C.Stage style={{ backgroundColor: h.bg }}>
+      <Box style={{ width: 26, height: 26, borderRadius: 13, backgroundColor: h.sun, marginBottom: 90 }} />
+      <C.StageFloor />
+    </C.Stage>
   );
 }
 
@@ -710,6 +714,17 @@ function SettingsEditor(props: { dom: Dom; onDom: (d: Dom) => void }) {
   const dom = props.dom;
   const [selByDom, setSelByDom] = useState<Record<Dom, number>>({ physics: 0, camera: 0, world: 0, perception: 0, input: 0, editor: 0, logs: 0 });
   const [logAll, setLogAll] = useState(true);
+
+  // The live demo values. Edited ONLY through gutter 3's bound fields — the
+  // rigs receive them and demonstrate. (The real page binds tunables here.)
+  const [gravity, setGravity] = useState(9.8);
+  const [hour, setHour] = useState('noon');
+  const bind: FieldBind | undefined =
+    dom === 'physics'
+      ? { num: { gravity: { v: gravity.toFixed(1), onStep: (d) => setGravity((g) => Math.max(3, Math.min(25, Math.round(g + d)))) } } }
+      : dom === 'world'
+        ? { pick: { start: { v: hour, onPick: setHour } } }
+        : undefined;
 
   const db = SET_DB[dom];
   const sel = selByDom[dom];
@@ -767,11 +782,11 @@ function SettingsEditor(props: { dom: Dom; onDom: (d: Dom) => void }) {
           </Box>
         </C.HeroBar>
         <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }}>
-          <PropsGroups groups={subject.groups} />
+          <PropsGroups groups={subject.groups} bind={bind} />
         </ScrollView>
       </C.PropsCol>
 
-      {/* 4 — THE RIG: the selection demonstrates itself */}
+      {/* 4 — THE RIG: the selection demonstrates itself (receives, never edits) */}
       <C.PreviewCol>
         <C.PreviewBar>
           <C.WireTag>{`${subject.name.toUpperCase()} · ${dom}`}</C.WireTag>
@@ -790,8 +805,8 @@ function SettingsEditor(props: { dom: Dom; onDom: (d: Dom) => void }) {
           )}
         </C.PreviewBar>
 
-        {db.rig === 'physics' ? <PhysicsRig /> : null}
-        {db.rig === 'time' ? <TimeRig /> : null}
+        {db.rig === 'physics' ? <PhysicsRig gravity={gravity} /> : null}
+        {db.rig === 'time' ? <TimeRig hour={hour} /> : null}
         {db.rig === 'logs' ? <LogStream channel={subject.name} all={logAll} /> : null}
         {db.rig === 'note' ? (
           <C.PreviewSurface>

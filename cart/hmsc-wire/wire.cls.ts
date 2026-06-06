@@ -203,11 +203,28 @@ classifier({
   // selection" — settings domains get a live rig (physics = jumping figure),
   // the logs domain's demonstration IS its stream.
 
-  // demo rig stage (physics / day-cycle rigs render into this)
+  // demo rig stage (physics / day-cycle rigs render into this).
+  // RULE: the stage DEMONSTRATES, it never edits — no controls in here. The
+  // knobs live in gutter 3 (the one edit surface); the stage receives values.
+  // The only widgets allowed in the preview bar are LENSES (3D/2D ⇄ PAINT,
+  // ALL ⇄ channel), never subject properties.
   Stage: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column', alignItems: 'center', justifyContent: 'flex-end', gap: 0 } },
   StageFigure: { type: 'Box', style: { width: 18, height: 18, borderRadius: 'theme:radiusSm', backgroundColor: 'theme:primary' } },
   StageFloor: { type: 'Box', style: { width: '46%', height: 2, backgroundColor: 'theme:border', marginTop: 8, marginBottom: 56 } },
-  StageCtl: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd', paddingTop: 'theme:spacingMd' } },
+
+  // live panel controls — gutter 3 fields that actually edit (the wireframe's
+  // proof of the col-3-edits → col-4-reacts loop)
+  StepBtn: {
+    type: 'Pressable',
+    style: { width: 18, height: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 'theme:radiusSm', borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', backgroundColor: 'theme:controlBg' },
+    hoverStyle: { borderColor: 'theme:textDim' },
+  },
+  SegMiniPress: {
+    type: 'Pressable',
+    style: { paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2 },
+    hoverStyle: { backgroundColor: 'theme:surfaceHover' },
+  },
+  SegMiniPressOn: { type: 'Pressable', style: { paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, backgroundColor: 'theme:segActiveBg' } },
 
   // the log stream (logs domain, column 4)
   LogPane: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column' } },
