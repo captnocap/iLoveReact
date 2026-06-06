@@ -114,20 +114,54 @@ export function globeSurface(p: GlobeParams): (u: number, v: number, extraDispla
     return (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
   };
 
-  // Displaced position at unwrap (u, v). phi DECREASES with u so the unwrap
-  // reads unmirrored to a viewer facing the front (-Z at u=0.5). Profile
-  // shapes the base RADIAL silhouette only (length stays scaleY's);
-  // displacement is world-units on top so sculpt strength doesn't shrink
-  // where the part is thin. `extraDisplace` rides the grid sample (0 for
-  // every rendered vertex — generate() never passes it).
-  return (u: number, v: number, extraDisplace = 0): Vec3 => {
+  // The UNDISPLACED skin at (u, v) — profile + per-axis scale, no grid.
+  // phi DECREASES with u so the unwrap reads unmirrored to a viewer facing
+  // the front (-Z at u=0.5). Profile shapes the base RADIAL silhouette only
+  // (length stays scaleY's).
+  const base = (u: number, v: number): Vec3 => {
     const theta = PI * v;
     const phi = PI / 2 - 2 * PI * u;
     const st = Math.sin(theta);
+    const rxz = radius * profileAt(v);
+    return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * radius * scaleY, st * Math.sin(phi) * rxz * scaleZ];
+  };
+
+  // The base skin's outward NORMAL at (u, v), finite-differenced. This is the
+  // direction displacement GROWS along (see the return fn below); pole rows
+  // collapse to the axis like the cap law.
+  const NEPS = 1e-3;
+  const baseNormal = (u: number, v: number): Vec3 => {
+    if (v <= NEPS) return [0, 1, 0];
+    if (v >= 1 - NEPS) return [0, -1, 0];
+    const pu0 = base(u - NEPS, v), pu1 = base(u + NEPS, v);
+    const pv0 = base(u, v - NEPS), pv1 = base(u, v + NEPS);
+    const tu: Vec3 = [pu1[0] - pu0[0], pu1[1] - pu0[1], pu1[2] - pu0[2]];
+    const tv: Vec3 = [pv1[0] - pv0[0], pv1[1] - pv0[1], pv1[2] - pv0[2]];
+    // cross(tv, tu) points outward with this phi orientation
+    return normalize(
+      tv[1] * tu[2] - tv[2] * tu[1],
+      tv[2] * tu[0] - tv[0] * tu[2],
+      tv[0] * tu[1] - tv[1] * tu[0],
+    );
+  };
+
+  // Displaced position at unwrap (u, v): the base skin plus `amount × sample`
+  // world units along the base skin's NORMAL. On a sphere the normal IS the
+  // radius, so heads sculpt exactly as before — but on a profiled/flattened
+  // part (the torso's scaleZ squash) the old radial push made every
+  // off-meridian bump veer SIDEWAYS toward the side it sits on (the user's
+  // "directional split" report: a chest pull always came out at an angle).
+  // Growing along the normal is what every sculpt tool does: a chest pull
+  // comes out the chest. Displacement is world-units so sculpt strength
+  // doesn't shrink where the part is thin. `extraDisplace` rides the grid
+  // sample (0 for every rendered vertex — generate() never passes it); the
+  // grab tool's ±probe through it makes the drag axis the normal too.
+  return (u: number, v: number, extraDisplace = 0): Vec3 => {
+    const b = base(u, v);
     const d = amount * (sample(u, v) + extraDisplace);
-    const rxz = radius * profileAt(v) + d;
-    const ry = radius + d;
-    return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * ry * scaleY, st * Math.sin(phi) * rxz * scaleZ];
+    if (d === 0) return b;
+    const n = baseNormal(u, v);
+    return [b[0] + n[0] * d, b[1] + n[1] * d, b[2] + n[2] * d];
   };
 }
 

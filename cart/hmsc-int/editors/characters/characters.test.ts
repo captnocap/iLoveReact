@@ -365,6 +365,41 @@ test('mesh grab: the drag axis points outward and mouse motion maps onto it', ()
   assertClose(gridDeltaFor(0, 90, fb), -1, 1e-6, 'a 90px downward drag = −1.0 (carve in)');
 });
 
+test('displacement grows along the surface normal — a chest pull comes out the chest (NORMALPULL-0605)', () => {
+  const paramsFor = grabParamsFor();
+  const inst = grabInstancesFor('part', 'torso', [])[0];
+  const torso = paramsFor('torso');
+
+  // a chest cell TWO columns off the front meridian (u=0.5), mid-torso
+  const gx = 26, gy = 8;
+  const { cu, cv } = cellUv(gx, gy);
+  const hit = { part: 'torso', instanceIndex: 0, gx, gy, cu, cv, world: [0, 0, 0], grabRadius: 0.1, t: 1 } as GrabHit;
+  const axis = grabDragAxis(hit, torso, inst);
+  const ax = Math.abs(axis[0]), az = Math.abs(axis[2]);
+  assert(az > 0, 'the chest axis points forward at all');
+
+  // the OLD radial law pushed along the core ray, whose sideways fraction the
+  // torso's scaleZ flatten amplifies — the user's "directional split". The
+  // radial direction at this cell (analytic, scaleZ-squashed):
+  const phi = Math.PI / 2 - 2 * Math.PI * cu;
+  const rx = Math.abs(Math.cos(phi) * 1.0); // scaleX 1
+  const rz = Math.abs(Math.sin(phi) * 0.62); // the torso flatten
+  const radialVeer = rx / rz;
+  const normalVeer = ax / az;
+  assert(normalVeer < radialVeer * 0.75, `the normal pull veers far less than the radial did (${normalVeer.toFixed(3)} vs ${radialVeer.toFixed(3)})`);
+
+  // sphere sanity: with no profile and uniform scale, the normal IS the
+  // radius — heads sculpt exactly as before
+  const sphere = { radius: 1, segments: 16, rings: 8, displace: emptyGrid(), dCols: HED_GRID_W, dRows: 24, amount: 0.35 } as any;
+  const sAxis = grabDragAxis(hit, sphere, inst);
+  const sLen = Math.hypot(sAxis[0], sAxis[1], sAxis[2]);
+  const theta = Math.PI * cv;
+  const radial = [Math.sin(theta) * Math.cos(phi), Math.cos(theta), Math.sin(theta) * Math.sin(phi)];
+  const dot = (sAxis[0] * radial[0] + sAxis[1] * radial[1] + sAxis[2] * radial[2]) / sLen;
+  assertClose(dot, 1, 1e-3, 'on a sphere the normal pull IS the radial pull (heads unchanged)');
+  assertClose(sLen, 0.35, 0.01, 'displacement stays world-units (one grid unit = the depth amount)');
+});
+
 test('a /characters save never wipes /cutout paint: the draft carries overlays opaque (MODELPAINT-0605)', () => {
   const draft = generateCharacterDraft(77);
   const doc = draftToDocument(draft, 'painted subject');

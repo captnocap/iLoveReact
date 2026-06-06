@@ -738,6 +738,53 @@ hitTestScroll — a non-scrolling node's onScroll receives the wheel delta;
 built for exactly this transparent-overlay-over-Scene3D case): wheel up =
 in, one knob step per notch. Suite 11/11 GREEN.
 
+GRABNAV-0605 (2026-06-05, third hands-on round): (1) ZOOM-TO-CURSOR — the
+wheel now PANS as it dollies. Wheel IN converges the orbit pivot on what
+the cursor points at (the mesh cell when pickAt hits, else the ray's
+closest approach to the pivot), so aiming at the face and rolling brings
+the face in — the fix for "if i have the full body in view, the zoom lands
+right in the crotch". Wheel OUT drifts the pivot back toward the view
+center: fully zoomed out is always the whole body, recentered — there is
+no lost-camera state. The pivot rides `orbitTargetPan` (a twig-persisted
+offset from the view center, clamped to `TUNE.orbit.panY/panXZ`); the
+param-change effect re-sends the rig on pan like it does on zoom (V23: JS
+sends params on change, the host drives frames). Middle-drag pan was
+considered and rejected: mouse-move payloads carry no button state and
+`js_on_middle_click` is dead plumbing no prop writes — wiring it is a host
+rebuild, while zoom-to-cursor is pure TSX and hot-reloads into the running
+session. (2) RESET PART — the user's "reset only works on the head" was
+real: on non-head parts 'clear' hides behind the detail-paint tab and
+'reset outline' touches only the silhouette, so nothing visibly undid a
+grab-sculpted torso. A `reset part` chip (both tab rows, every part) resets
+the sculpt grid + outline + region sliders AND clears the paint texture
+(the one-truth law), undoable via the GRABQOL history like every other
+edit. Suite 11/11 GREEN.
+
+NORMALPULL-0605 (2026-06-05, USER REPORT "directional split: a chest pull
+always comes out at an angle, veering toward the side the node represents,
+mirror or not"): root-caused to the Globe's displacement DIRECTION. Every
+displaced point moved along its RAY FROM THE PART'S CORE AXIS — correct on
+a sphere (ray = normal) but on a profiled/flattened part the ray tilts
+sideways the moment you leave the front meridian, and the torso's scaleZ
+0.62 squash AMPLIFIES it (the flatten multiplies the ray's forward
+component by 0.62 while the sideways component keeps scaleX 1 — one cell
+off-center already veered ~12°, two cells ~24°). FIX, in the ONE surface
+fn (`runtime/geometries/Globe.ts` globeSurface): displacement now grows
+along the BASE SKIN'S NORMAL (finite-differenced, pole rows collapse to
+±Y like the cap law) — what every sculpt tool does; a chest pull comes
+out the chest. Parity by construction: the bake runs the same generator,
+so editor preview and compiled figures change together; the grab tool's
+±probe through `extraDisplace` makes the drag axis the normal
+automatically (the drag mapping aligned for free). Compatibility, pinned
+by P4: zero displacement returns the base EXACTLY (build-time baked
+static Globes stay byte-valid), and on a sphere the normal IS the radial
+(heads sculpt as before; displacement stays world-units). The veer
+shrinks by the flatten factor and the profile correction — not to zero
+(a curved skin's normals fan; that's every sculptor) — and the radial-only
+PROFILE law is untouched (silhouettes still never couple length;
+NORMALPULL changes detail-displacement direction only). 12/12 GREEN +
+geometry smoke + full verify 51/51.
+
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).
 `rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.

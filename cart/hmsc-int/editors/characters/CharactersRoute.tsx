@@ -123,6 +123,10 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   // zoom is a KNOB (param-rate); yaw/pitch live in lookRef — drag deltas ride
   // the native controller (V23), never React state
   const [dist, setDist] = useRouteTwigState('/characters', 'orbitDistance', 4.2);
+  // the orbit pivot's offset from the view center — zoom-to-cursor writes it
+  // (wheel in = converge on the cursor point, wheel out = drift home), so
+  // zooming reaches the head/feet instead of diving at the body center
+  const [targetPan, setTargetPan] = useRouteTwigState('/characters', 'orbitTargetPan', { x: 0, y: 0, z: 0 });
   // per-part sculpt versions — bumping regenerates that part's dyn mesh
   const [seqs, setSeqs] = useState<Record<PartId, number>>(
     () => Object.fromEntries(PART_IDS.map((id) => [id, 0])) as Record<PartId, number>,
@@ -457,6 +461,25 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     live.session?.note(`clear sculpt · ${selPart}`);
   };
 
+  // ── reset part (GRABNAV-0605): the WHOLE selected part back to factory ────
+  // "the reset button only works on the head" was real: on non-head parts
+  // 'clear' hides behind the detail-paint tab and 'reset outline' touches
+  // only the silhouette — nothing visibly undid a grab-sculpted torso. ONE
+  // chip resets sculpt grid + outline + region sliders (and the paint
+  // texture, the one-truth law), undoable like everything else.
+  const resetPart = () => {
+    editDraft((d) => ({
+      ...d,
+      grids: { ...d.grids, [selPart]: emptyGrid() },
+      profiles: { ...d.profiles, [selPart]: defaultProfile(selPart) },
+      regions: { ...d.regions, [selPart]: {} },
+    }));
+    paints[selPart].paint.clear(NEUTRAL);
+    bumpSeq(selPart);
+    live.session?.note(`reset part · ${selPart}`);
+    setStatus(`${selPart} reset — sculpt, outline, and region sliders back to default (ctrl+z undoes)`);
+  };
+
   // ── outline lathe (drag previews → latches; commit on release) ────────────
   const profileLatchKey = (part: PartId, row: number, axis: 'left' | 'width') => `chr.profile.${part}.${row}.${axis}`;
   const writeProfileLatch = (part: PartId, row: number, value: number) => {
@@ -609,7 +632,10 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   // route's own camera node (per-node channel, da1730e24). JS sends params on
   // CHANGE (view target, zoom knob) and deltas per drag move; idle frames send
   // nothing and a drag never re-renders the cart.
-  const camTarget: [number, number, number] = view === 'figure' ? [0, 1.05, 0] : [0, 1.4, 0];
+  const viewCenter: [number, number, number] = view === 'figure' ? [0, 1.05, 0] : [0, 1.4, 0];
+  const camTarget: [number, number, number] = [
+    viewCenter[0] + targetPan.x, viewCenter[1] + targetPan.y, viewCenter[2] + targetPan.z,
+  ];
 
   const sendOrbit = (target: [number, number, number], distance: number) => {
     const l = lookRef.current;
@@ -636,9 +662,10 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; param changes ride the effect below
   }, []);
 
-  // Param changes (view toggle moves the target, the zoom knob moves distance)
-  // re-send the rig params; yaw/pitch ride along from the ref unchanged.
-  useEffect(() => { sendOrbit(camTarget, dist); }, [view, dist]);
+  // Param changes (view toggle / zoom-to-cursor move the target, the zoom
+  // knob and wheel move distance) re-send the rig params; yaw/pitch ride
+  // along from the ref unchanged.
+  useEffect(() => { sendOrbit(camTarget, dist); }, [view, dist, targetPan]);
 
   const orbitDown = (e: any) => { orbitRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; };
   const orbitMove = (e: any) => {
@@ -663,18 +690,12 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     orbitRef.current = null;
   };
 
-  // ── zoom (GRABQOL-0605): bigger number = CLOSER, and the wheel dollies ────
+  // ── zoom knob (GRABQOL-0605): bigger number = CLOSER ──────────────────────
   // The knob shows a true zoom value (the distance REFLECTED across the spec
   // range) so + always moves in — editing raw distance read backwards. The
-  // wheel rides the raw onScroll fallback (events.zig hitTestScroll: a
-  // non-scrolling node's onScroll gets the wheel delta — built for exactly
-  // this camera-dolly case); wheel up = in, one knob step per notch.
+  // wheel handler lives below the grab section (zoom-to-cursor picks).
   const ZOOM_REFLECT = TUNE.knobs.zoom.min + TUNE.knobs.zoom.max;
   const zoomTo = (d: number) => setDist(clamp(d, TUNE.knobs.zoom.min, TUNE.knobs.zoom.max));
-  const onZoomWheel = (e: any) => {
-    const notches = Number(e?.deltaY ?? 0);
-    if (notches) zoomTo(dist - notches * TUNE.knobs.zoom.step);
-  };
 
   // The DECLARATIVE camera is the boot frame only — static props, so React
   // never sends camera UPDATEs after mount; the host writes the node fields
@@ -812,6 +833,45 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const previewUp = () => {
     if (grabRef.current) endGrab();
     else orbitUp();
+  };
+
+  // ── the wheel: dolly + zoom-to-cursor (GRABNAV-0605) ──────────────────────
+  // Rides the raw onScroll fallback (events.zig hitTestScroll — built for a
+  // transparent overlay driving a camera dolly). Wheel IN converges the orbit
+  // pivot on what the cursor points at — the mesh cell if hit, else the ray's
+  // closest approach to the pivot — so aiming at the face and rolling brings
+  // the FACE in, not the body center ("the zoom lands right in the crotch").
+  // Wheel OUT drifts the pivot home: fully zoomed out is always the whole
+  // body, recentered — no lost-camera state to dig out of. Pan offsets clamp
+  // to TUNE.orbit.panY/panXZ.
+  const onZoomWheel = (e: any) => {
+    const notches = Number(e?.deltaY ?? 0);
+    if (!notches) return;
+    const next = clamp(dist - notches * TUNE.knobs.zoom.step, TUNE.knobs.zoom.min, TUNE.knobs.zoom.max);
+    if (next < dist) {
+      const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
+      const { hit } = pickAt(sx, sy);
+      let aim: [number, number, number];
+      if (hit) {
+        aim = hit.world as [number, number, number];
+      } else {
+        const r = viewRect.current;
+        const ray = GAME_CAMERA.screenRay(sx - r.x, sy - r.y, { x: 0, y: 0, width: r.width, height: r.height }, solvedCam());
+        const t = (camTarget[0] - ray.origin[0]) * ray.dir[0] + (camTarget[1] - ray.origin[1]) * ray.dir[1] + (camTarget[2] - ray.origin[2]) * ray.dir[2];
+        aim = [ray.origin[0] + ray.dir[0] * t, ray.origin[1] + ray.dir[1] * t, ray.origin[2] + ray.dir[2] * t];
+      }
+      const k = 1 - next / dist; // the dolly fraction covered this notch
+      const B = TUNE.orbit;
+      setTargetPan((p) => ({
+        x: clamp(p.x + (aim[0] - camTarget[0]) * k, -B.panXZ, B.panXZ),
+        y: clamp(p.y + (aim[1] - camTarget[1]) * k, -B.panY, B.panY),
+        z: clamp(p.z + (aim[2] - camTarget[2]) * k, -B.panXZ, B.panXZ),
+      }));
+    } else if (next > dist) {
+      const k = clamp((next - dist) / Math.max(next, 0.001), 0, 1);
+      setTargetPan((p) => ({ x: p.x * (1 - k), y: p.y * (1 - k), z: p.z * (1 - k) }));
+    }
+    setDist(next);
   };
 
   // The marker derives its world position from the CURRENT mesh params at
@@ -978,6 +1038,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
               <Chip label="outline" active={editTab === 'outline'} onPress={() => setEditTab('outline')} />
               <Chip label="detail paint" active={editTab === 'detail'} onPress={() => setEditTab('detail')} />
               {editTab === 'outline' ? <Chip label="reset outline" onPress={resetOutline} /> : null}
+              <Chip label="reset part" color="bad" onPress={resetPart} />
             </Row>
           ) : (
             <Row style={{ gap: 8, alignItems: 'center' }}>
@@ -985,6 +1046,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
               <Chip label="sculpt" active onPress={() => undefined} />
               {/* MODELPAINT-0605: texture painting migrated to /cutout */}
               <Chip label="paint texture → /cutout" color="cyan" onPress={paintTextureInCutout} />
+              <Chip label="reset part" color="bad" onPress={resetPart} />
             </Row>
           )}
 

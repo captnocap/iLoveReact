@@ -40,7 +40,12 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
    *  degenerates exactly overhead/underfoot (GRABQOL-0605: "i cant get top
    *  or bottom of the model"). The host orbit controller doesn't clamp;
    *  this JS clamp is the one authority and the shadow stays exact. */
-  orbit: { yawPerPx: 0.4, pitchPerPx: 0.3, pitchMin: -88, pitchMax: 88 },
+  orbit: {
+    yawPerPx: 0.4, pitchPerPx: 0.3, pitchMin: -88, pitchMax: 88,
+    /** zoom-to-cursor pivot travel, as offsets from the view's center —
+     *  enough to reach head/feet, never off into space (GRABQOL-0605) */
+    panY: 1.1, panXZ: 0.9,
+  },
   /** draft auto-commit debounce (V20 micro-save; AUTOSAVE-0605) */
   autosaveDebounceMs: 1200,
   // (the face-paint palette + stroke numbers died with the coupled
