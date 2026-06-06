@@ -1,8 +1,7 @@
 # WBITEMS.CAPTURE.md — item source + voxel SCULPT capture (WBSTEP5-0606)
 
-Scope: additive Workbench source for `/workbench` only. The old `/items` and
-`/voxels` routes are untouched and remain live until the flip commit lands on
-the user's word.
+Scope: Workbench source for `/workbench`. WBITEMS-FLIP-0606 retired the old
+`/items` and `/voxels` routes after independent capture verification.
 
 Coverage law inputs:
 - `editors/workbench/census/items.md`
@@ -12,7 +11,7 @@ Coverage law inputs:
 
 | census | dying route source | behavior | workbench coverage |
 |---|---|---|---|
-| C1 | `shell/chrome.tsx:157`; `index.tsx:838`; `index.tsx:930`; `editors/items/ItemsRoute.tsx:497` | route/nav surface | ACCOUNTED by `/workbench` source registration in `editors/workbench/sources.ts`; old route untouched until flip |
+| C1 | `shell/chrome.tsx:157`; `index.tsx:838`; `index.tsx:930`; `editors/items/ItemsRoute.tsx:497` | route/nav surface | ACCOUNTED by `/workbench` source registration in `editors/workbench/sources.ts`; old route deleted by WBITEMS-FLIP-0606 |
 | C2 | `editors/items/ItemsRoute.tsx:511`; `:525`; `:264` | item roster, name, save/new/remove | ACCOUNTED by `items/panel.ts` roster/actions and `items/store.ts` item stream save/load/remove |
 | C3 | `editors/items/ItemsRoute.tsx:238`; `editors/items/bake.ts:1`; `:86` | import latest voxel blockout and report star-wrap limit | ACCOUNTED by `items/store.ts#importBlockout`, panel action, source action, and source test import coverage |
 | C4 | `editors/items/ItemsRoute.tsx:15`; `editors/items/stream.ts:13`; `editors/items/bake.ts:56` | 48x24 grid is the single shape truth | ACCOUNTED by `items/store.ts` draft grid, `items/Stage.tsx` paint/grab paths, and item doc helpers |
@@ -20,14 +19,14 @@ Coverage law inputs:
 | C6 | `editors/items/ItemsRoute.tsx:579`; `:588`; `:592`; `:601` | 3D Globe stage with grab grid and LabEnvironment | ACCOUNTED by `items/Stage.tsx` ITEM/SCULPT mesh stages using `Geometry.Globe`, grid shell, and `LabEnvironment` |
 | C7 | `editors/items/ItemsRoute.tsx:379`; `:613`; `:624` | orbit/fly/focus/wheel camera | ACCOUNTED by `items/Stage.tsx` item mesh stage via shared `useSculptCamera` on `/workbench/items` |
 | C8 | `editors/items/ItemsRoute.tsx:402`; `:411`; `:431`; `:444` | grab-sculpt hover/drag through shared grabKit | ACCOUNTED by `items/Stage.tsx` SCULPT mesh drag path through shared `grabKit` and `ItemStore.setGrid` |
-| C9 | `editors/items/ItemsRoute.tsx:199`; `:221`; `:620` | undo/redo buttons/hotkeys | ACCOUNTED by `items/store.ts` shared paint history and Workbench hero actions; hotkey wiring remains route-owned until flip |
+| C9 | `editors/items/ItemsRoute.tsx:199`; `:221`; `:620` | undo/redo buttons/hotkeys | ACCOUNTED by `items/store.ts` shared paint history and Workbench hero actions |
 | C10 | `editors/items/bake.ts:176`; `editors/workbench/characters/store.ts:45`; `:498`; `WBCHAR.CAPTURE.md:95` | saved sculpted items become game item definitions/character prop options | ACCOUNTED by preserving `itemsStream` and existing character store consumer; item authoring is now covered by `items/store.ts` |
 
 ## `/voxels` capability parity
 
 | census | dying route source | behavior | workbench coverage |
 |---|---|---|---|
-| C1 | `shell/chrome.tsx:159`; `index.tsx:842`; `index.tsx:918`; `VoxelHybridRoute.tsx:601` | route/nav surface | ACCOUNTED by `/workbench` item source VOXEL lens; old route untouched until flip |
+| C1 | `shell/chrome.tsx:159`; `index.tsx:842`; `index.tsx:918`; `VoxelHybridRoute.tsx:601` | route/nav surface | ACCOUNTED by `/workbench` item source VOXEL lens; old route deleted by WBITEMS-FLIP-0606 |
 | C2 | `VoxelHybridRoute.tsx:107`; `:219`; `:456`; `:546` | W/D/H steppers and derived floor resize | ACCOUNTED by `items/panel.ts` W/D/H fields and `items/store.ts#setVoxelDims` |
 | C3 | `VoxelHybridRoute.tsx:236`; `:464`; `:551` | build/mine tools, mine refuses floor, build adds next to face | ACCOUNTED by `items/panel.ts` tool field and `items/store.ts#onVoxelFace`; tested headlessly |
 | C4 | `VoxelHybridRoute.tsx:52`; `:59`; `:556` | wall/glass/trim/floor palette, pick switches to Build | ACCOUNTED by `items/panel.ts` kind field and `items/store.ts#setVoxelKind` |
@@ -46,9 +45,7 @@ Coverage law inputs:
   actions, source lenses, panel groups, voxel dims/build/mine/palette/groups,
   import, empty import, undo, export, and item document round-trip.
 
-## Remaining Flip Work
+## Flip Result
 
-- `/items` and `/voxels` route files and chrome nav entries die only in the
-  later flip commit after the user passes the workbench source by hand.
-- Route-local hotkeys remain on old routes until the flip; Workbench exposes
-  undo/redo as source actions today.
+- `/items` and `/voxels` route files and chrome nav entries are deleted.
+- Workbench ITEM/SCULPT/VOXEL lenses are the live surface for these capabilities.

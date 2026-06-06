@@ -185,12 +185,12 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 |---|---|---|
 | `index.tsx` (EditorShell, routes, map-editor wiring) | 958 | **KEEP/SHRINK** — stays the cart root + map editor host; route table shrinks to 6; ~~ProjectBar swap → `shell/chrome.tsx`~~ DONE (WBCHROME-0606) |
 | `editors/characters/CharactersRoute.tsx` | 1141 | **EXTRACT→DIE** — chip-row layout dies; roster/draft wiring → character source |
-| `editors/items/ItemsRoute.tsx` | 627 | **EXTRACT→DIE** — → item source |
+| `editors/items/ItemsRoute.tsx` | 627 | ~~**EXTRACT→DIE** — → item source~~ **DEAD** (WBITEMS-FLIP-0606) — route deleted; item authoring lives in `itemsSource()` |
 | `editors/vehicles/VehiclesRoute.tsx` | 508 | **EXTRACT→DIE** — garage store lifts to `editors/vehicles/garage.ts`; → vehicle source |
 | `editors/cutout/CutoutRoute.tsx` | 1159 | **EXTRACT→DIE** — becomes the PAINT lens of every asset source; library rail logic → cutout source files |
 | `TextureStudio.tsx` | 188 | **FOLD→DIE** — material source: catalog rail = roster, Materialize = action, ShaderLab = stage mode |
 | `editors/compose/ComposeRoute.tsx` | 455 | **EXTRACT→FOLD** — decal doc model extracts; stage/layers/3D-billboard = material source's COMPOSE stage mode; layers+props panel becomes PanelSpec |
-| `VoxelHybridRoute.tsx` | 610 | **FOLD→DIE\*** — proposed: item source's SCULPT stage mode (ITEMSCULPT already made voxels the item input) |
+| `VoxelHybridRoute.tsx` | 610 | ~~**FOLD→DIE\*** — proposed: item source's SCULPT stage mode~~ **DEAD** (WBITEMS-FLIP-0606) — route deleted; voxel blockout authoring lives in the item source VOXEL lens |
 | `editors/settings/SettingsRoute.tsx` | 221 | **FOLD→DIE** — settings sources generate from `tunables.ts` + `bus.ts`; the two-column page dies |
 | `LogView.tsx` | 109 | **FOLD→DIE** — logs domain churn channel (perfLog ring) |
 | `editors/play/PlayRoute.tsx` | 1034 | **OWN** — fullscreen game surface; F1/F2 modes; untouched |
@@ -256,14 +256,13 @@ bang; the old route works until the minute its replacement does.
    (FIGURE/PART grab-sculpt · SCULPT canvas · PAINT in-page with live 3D).
    The FLIP (`/characters` route + nav icon die) is a separate commit on the
    user's word — the route is untouched today.
-5. **Item source** BUILT (WBSTEP5-0606, awaiting user test): the coverage-law
+5. **Item source** DONE + FLIPPED (WBSTEP5-0606, WBITEMS-FLIP-0606): the coverage-law
    parity table lives at `editors/workbench/WBITEMS.CAPTURE.md` (all 10
    `/items` rows and all 12 `/voxels` rows line-referenced).
    `editors/workbench/items/{store.ts,panel.ts,source.tsx,Stage.tsx}` + P4 suite; ITEM is live
    on `/workbench` with ITEM/SCULPT/VOXEL lenses, stream-backed sculpted item
    authoring, voxel blockout authoring, and voxel→item import. The FLIP
-   (`/items`, `/voxels` routes + nav icons die) is a separate commit on the
-   user's word — both routes are untouched today.
+   deleted `/items`, `/voxels`, and their chrome nav icons on the user's word.
 6. **Vehicle source.** Flip: `/vehicles`.
 7. **Material source** (roster = stored materials + shader recipes + decals;
    stage modes: PREVIEW / SHADER LAB / COMPOSE; Materialize = action). Flip:
@@ -287,9 +286,8 @@ updates `docs/game/` per the maintenance contract.
 
 ## 7. Open questions (need a ruling before their step)
 
-1. **Voxels → item SCULPT mode** (step 5): ITEMSCULPT-0606 already made voxel
-   blockouts the item input — assuming VoxelHybridRoute's standalone surface
-   has nothing left that items doesn't cover. Confirm before deleting.
+1. **Voxels → item SCULPT mode** (step 5): ANSWERED by WBITEMS-FLIP-0606 —
+   the standalone voxel route was confirmed disposable and deleted.
 2. **assist3d**: stays its own route here. Fold into labs later? Not blocking.
 3. **Map-editor convergence**: the quad's PropertiesPanel and the Workbench
    panel share classes today and should eventually share `shell/fields.tsx` —

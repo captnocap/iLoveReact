@@ -33,7 +33,7 @@ import { CAT_COLOR, CAT_TAG, relTime, type EditEvent } from '../editLog';
 
 interface ChromeProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'items' | 'vehicles' | 'cutout' | 'compose' | 'settings' | 'workbench';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'labs' | 'characters' | 'vehicles' | 'cutout' | 'compose' | 'settings' | 'workbench';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -59,16 +59,11 @@ interface ChromeProps {
   // Navigate to the /textures route — the texture studio (tune a shader recipe,
   // Materialize it into a stored material the registry serves everywhere).
   onTextures: () => void;
-  // Navigate to the /voxels route — the 1m³ authoring / baked-mesh proposal.
-  onVoxels: () => void;
   // Navigate to the /labs route — every lab, instantly loadable (V13).
   onLabs: () => void;
   // Navigate to the /characters route — the character editor (editors/characters,
   // the head_lab authoring UI remade; authors what game/figure runs).
   onCharacters: () => void;
-  // Navigate to the /items route — the item sculpt editor (editors/items,
-  // ITEMSCULPT-0606: voxel blockouts become grab-sculptable Globe items).
-  onItems: () => void;
   // Navigate to the /vehicles route — the vehicle editor (editors/vehicles,
   // the vehicle_lab authoring UI remade; authors what game/vehicle builds).
   onVehicles: () => void;
@@ -154,9 +149,7 @@ export function Chrome(props: ChromeProps) {
         <NavBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="play (F1 test / F2 build)" />
         <NavBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <NavBtn icon="User" on={props.activeRoute === 'characters'} onPress={props.onCharacters} title="characters" />
-        <NavBtn icon="Gem" on={props.activeRoute === 'items'} onPress={props.onItems} title="item sculpt" />
         <NavBtn icon="Car" on={props.activeRoute === 'vehicles'} onPress={props.onVehicles} title="vehicles" />
-        <NavBtn icon="Boxes" on={props.activeRoute === 'voxels'} onPress={props.onVoxels} title="voxel bake" />
         <NavBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
         <NavBtn icon="Scissors" on={props.activeRoute === 'cutout'} onPress={props.onCutout} title="cutout painter" />
         <NavBtn icon="PenTool" on={props.activeRoute === 'compose'} onPress={props.onCompose} title="decal editor" />

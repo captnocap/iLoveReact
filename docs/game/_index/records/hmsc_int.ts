@@ -164,11 +164,12 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
-      name: 'editors/items (the item sculpt editor route)',
+      name: 'editors/items (item sculpt modules; route retired into workbench)',
       purpose: ['item', 'voxel', 'geometry', 'ui', 'persistence', 'asset_pipeline'],
       kind: 'module',
-      sourceFile: 'cart/hmsc-int/editors/items/ItemsRoute.tsx',
+      sourceFile: 'cart/hmsc-int/editors/items/bake.ts',
       description:
+        'WBITEMS-FLIP-0606: /items route and Gem chrome icon deleted after Workbench item-source parity; itemsSource() now owns ITEM/SCULPT/VOXEL authoring while bake.ts and stream.ts remain the shared data doors. ' +
         'ITEMSCULPT-0606 (2026-06-06, USER ASK "take a model i can make in the voxel editor, and then bring this into an item editor that behaves just like the character editor for the mesh of it, so i can smooth out the blocky shape for game items"): the /items route (Gem nav icon) — the /characters sculpt hands pointed at ONE Globe item. PARAMETERIZATION (bake.ts, headless): import = GLOBE-WRAP — bakeBlockoutToGlobe ray-marches the /voxels occupancy from its centroid along every 48×24 unwrap-cell direction (the exact (u,v)→direction map globeSurface uses; a block at integer coords is the unit cube ±0.5, /voxels\' own convention), takes the LAST occupied sample per ray, encodes extents as base radius (mean) + amount (max deviation × headroom, floored so near-spheres still sculpt) + the signed grid; voxel units are METERS so items arrive real-scale. THE LIMIT SURFACED (status line + header + P4-pinned as real): star-shaped from the centroid — concave overhangs/holes flatten to their hull; right for bottles/bats/tools, any-topology would need marching-cubes + a new pick parameterization (rejected this pass). REUSE NOT RE-ROLL: grabKit went GENERIC over the mesh key (GrabInstance<P>/GrabCloud<P>/GrabHit<P>, default PartId — characters call sites unchanged; /items grabs key \'item\'); editors/sculptCamera.ts is NEW-shared — the orbit+noclip-fly+zoom-to-cursor camera EXTRACTED VERBATIM from CharactersRoute (same twig keys so saved poses survived; V23/V26 law unchanged; CharactersRoute shrank ~230 lines to a hook call, /items is the second call site); paintKit byte↔grid + DEPTH_OVERLAY_WGSL, the shared painter\'s stroke engine + history, GrabMarker/GrabGridCapture all imported (the cutout-models cross-editor-import precedent). ONE TRUTH: one 48×24 signed grid is the only deformation store — grabs stamp it, depth-paint reads back into it, mesh + lattice shell generate from it through globeSurface, release uploads keep the compose law. V20 day one: stream.ts (the \'items\' concern — SculptedItemDoc {radius, amount, grid, color, source provenance}, authored/removed upsert/delete, unknown kinds pass; ONE store with /voxels so import reads the channel /voxels autosaves), debounced autosave, labeled session notes, mount restore, ctrl+z/y history. REGISTRY DOOR (V11): ITEM_GEOMETRIES grew \'globe\'; ItemDefinition grew optional heldScale; sculptedItemDefinition(id, doc) shapes a saved item as ONE globe-part definition (heldScale 1 = real meters; scaleStatus stays \'unaudited\' — the audit is the user\'s verdict); /characters lists the sculpted roster as ◆ prop chips and HeldItemMeshes resolves them via the new extraItems prop — a sculpted item is HOLDABLE the moment it saves (roster read once per route mount). NOT yet wired: world-drop/bake consumption (the V11 items lane proper). P4 items.test.ts 7 cases (bake determinism + bounded cube field + symmetry; off-center mass shift AND the wrap limit asserted real; amount floors; grab-stamp compose on the baked surface; R8 round trip; registry door; stream fold + on-disk snapshot). Full verify 52/52 GREEN.',
       dependsOn: ['editors/sessions.ts (route-scoped session history)', 'data/index.ts (the V20 store)', 'game/items (GAME_ITEMS)', 'editors/characters (the character editor route)', 'game/chrome (GAME_CHROME)'],
       status: 'live',
@@ -259,7 +260,7 @@ export const hmsc_int: DocIndex = {
       kind: 'module',
       sourceFile: 'cart/hmsc-int/game/camera.ts',
       description:
-        'V3 capture (2026-06-05): the game-facing door over @reactjit/cameras — the ruled split keeps the registry in runtime/ and GRADUATES the two combat pieces INTO it. runtime/cameras/rigs/aim.ts = combat_lab\'s ADS over-the-shoulder rig REWRITTEN fresh as a first-class CameraDef (shoulder-shifted crouch-aware pivot, genuinely pitched axis — the aim-ceiling fix; degrees, + = up per registry convention; reference radian clamps carried bit-exact through DEG; aimPivot exported for the game-side camera-collision clamp, which needs physics and stays out). runtime/cameras/unproject.ts now owns the canonical screenRay (R7) with unprojectGround as a consumer; the two active-cart hand-rolls (assist3d/picking.ts, VoxelHybridRoute.tsx) re-pointed. Door = solve/screenRay/unprojectGround/aimPivot/rigs(8)/modifiers, all pure (headless verify solves cameras with no React). V23 keeps this pure door as the reference vocabulary while moving per-frame integration into the opt-in native controller. The crosshair law carried as contract: fire ray = the solved camera\'s screen-center axis, never raw yaw/pitch trig. Fidelity: 1,728-case Aim sweep + 150-case screenRay sweep identical to verbatim reference transcriptions; 13 P4 tests. Ambiguities (yaw-convention fork vs lookForward, pivot-Y generalization, clamp-in-solve) in camera.CAPTURE.md. References untouched.',
+        'V3 capture (2026-06-05): the game-facing door over @reactjit/cameras — the ruled split keeps the registry in runtime/ and GRADUATES the two combat pieces INTO it. runtime/cameras/rigs/aim.ts = combat_lab\'s ADS over-the-shoulder rig REWRITTEN fresh as a first-class CameraDef (shoulder-shifted crouch-aware pivot, genuinely pitched axis — the aim-ceiling fix; degrees, + = up per registry convention; reference radian clamps carried bit-exact through DEG; aimPivot exported for the game-side camera-collision clamp, which needs physics and stays out). runtime/cameras/unproject.ts now owns the canonical screenRay (R7) with unprojectGround as a consumer; the two active-cart hand-rolls (assist3d/picking.ts, retired voxel route) re-pointed before WBITEMS-FLIP-0606. Door = solve/screenRay/unprojectGround/aimPivot/rigs(8)/modifiers, all pure (headless verify solves cameras with no React). V23 keeps this pure door as the reference vocabulary while moving per-frame integration into the opt-in native controller. The crosshair law carried as contract: fire ray = the solved camera\'s screen-center axis, never raw yaw/pitch trig. Fidelity: 1,728-case Aim sweep + 150-case screenRay sweep identical to verbatim reference transcriptions; 13 P4 tests. Ambiguities (yaw-convention fork vs lookForward, pivot-Y generalization, clamp-in-solve) in camera.CAPTURE.md. References untouched.',
       dependsOn: ['game/_testkit.ts', 'game/index.ts', 'runtime/cameras/'],
       status: 'live',
     },
@@ -319,7 +320,7 @@ export const hmsc_int: DocIndex = {
       kind: 'component',
       sourceFile: 'cart/hmsc-int/shell/chrome.tsx',
       description:
-        'The persistent titlebar strip (302; WBCHROME-0606, WORKBENCH.md step 2 — replaced ProjectBar.tsx at full parity, line-referenced table in commit 34400c6e7): map switcher (MapsMenu), new/rename/delete, undo/redo, the full 14-icon route nav, Compile button, save pill, event-log popover; plus the W1 additions — the borderless host’s window controls (__window_minimize/maximize/close) and the dead-middle windowDrag titlebar grab. Renders through the Chrome*/Win* classes (shell/workbench.cls.ts), zero raw colours. Menus export separately and render as the root’s last children (overlays-last hit-test rule).',
+        'The persistent titlebar strip (302; WBCHROME-0606, WORKBENCH.md step 2 — replaced ProjectBar.tsx at full parity, line-referenced table in commit 34400c6e7): map switcher (MapsMenu), new/rename/delete, undo/redo, the current route nav (items/voxels icons retired by WBITEMS-FLIP-0606), Compile button, save pill, event-log popover; plus the W1 additions — the borderless host’s window controls (__window_minimize/maximize/close) and the dead-middle windowDrag titlebar grab. Renders through the Chrome*/Win* classes (shell/workbench.cls.ts), zero raw colours. Menus export separately and render as the root’s last children (overlays-last hit-test rule).',
       status: 'live',
     },
     {
@@ -606,14 +607,14 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
-      name: 'VoxelHybridRoute',
+      name: 'VoxelHybridRoute (retired into workbench item VOXEL lens)',
       purpose: ['voxel', 'world_gen', 'asset_pipeline'],
       kind: 'component',
-      sourceFile: 'cart/hmsc-int/VoxelHybridRoute.tsx',
+      sourceFile: 'cart/hmsc-int/editors/voxels/stream.ts',
       description:
-        'Route /voxels (544): a voxel build/mine surface (voxel_stack_demo’s pattern grown an export — writes meshes to disk).',
+        'WBITEMS-FLIP-0606: /voxels route and Boxes chrome icon deleted after Workbench item-source parity; voxel blockout authoring lives in the Workbench item source VOXEL lens while editors/voxels/stream.ts remains the shared blockout stream.',
       consumes: ['__fs_write'],
-      status: 'live',
+      status: 'deprecated',
     },
     {
       name: 'Embodied.tsx (the shared embodied substrate)',
@@ -839,7 +840,7 @@ export const hmsc_int: DocIndex = {
       name: 'screenRay / unexported camera math duplicate family',
       purpose: ['camera', 'interaction', 'math'],
       description:
-        'Each picker re-rolled a ray from the solved render camera (assist3d picking.ts, VoxelHybridRoute) — RESOLVED by the R7 graduation: screenRay is exported from @reactjit/cameras (unprojectGround is a consumer) and both hand-rolls in this cart now import it.',
+        'Each picker re-rolled a ray from the solved render camera (assist3d picking.ts, retired VoxelHybridRoute) — RESOLVED by the R7 graduation: screenRay is exported from @reactjit/cameras (unprojectGround is a consumer) and both hand-rolls in this cart imported it before the voxel route retired.',
       examples: ['hmsc-int'],
       promoteTo: 'screenRay exported from @reactjit/cameras',
       status: 'resolved',

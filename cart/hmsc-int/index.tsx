@@ -41,13 +41,11 @@ import { LogView } from './LogView';
 import { Assist3DRoute } from './assist3d';
 import { TextureStudio } from './TextureStudio';
 import { PlayRoute } from './editors/play/PlayRoute';
-import { VoxelHybridRoute } from './VoxelHybridRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
 import { CharactersRoute } from './editors/characters/CharactersRoute';
-import { ItemsRoute } from './editors/items/ItemsRoute';
 import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
 import { CutoutRoute } from './editors/cutout/CutoutRoute';
 import { ComposeRoute } from './editors/compose/ComposeRoute';
@@ -802,7 +800,7 @@ function EditorShell() {
   // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/items' ? 'items' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/compose' ? 'compose' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/compose' ? 'compose' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
   // VIEWRUNAWAY-0605: the editor stays MOUNTED under route overlays, but it
   // must go input-DEAF there — the key bus is global, so a WASD walk in
   // /build was also driving the buried canvas's drift (700px/s ÷ zoom for
@@ -835,11 +833,9 @@ function EditorShell() {
         onTest={() => nav.push('/test')}
         onLabs={() => nav.push('/labs')}
         onCharacters={() => nav.push('/characters')}
-        onItems={() => nav.push('/items')}
         onVehicles={() => nav.push('/vehicles')}
         onCutout={() => nav.push('/cutout')}
         onCompose={() => nav.push('/compose')}
-        onVoxels={() => nav.push('/voxels')}
         onPerf={() => nav.push('/log')}
         onSettings={() => nav.push('/settings')}
         onWorkbench={() => nav.push('/workbench')}
@@ -915,7 +911,6 @@ function EditorShell() {
         <Route path="/log">{() => <LogView />}</Route>
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
         <Route path="/textures">{() => <TextureStudio />}</Route>
-        <Route path="/voxels">{() => <VoxelHybridRoute onExit={() => nav.push('/')} />}</Route>
         {/* The embodied game surface (editors/play/, PLAYFOLD-0605): /test +
             /build folded into ONE route — mode is PlayRoute's own state,
             F1 test / F2 build flip it WITHOUT remounting, so the pose,
@@ -927,9 +922,6 @@ function EditorShell() {
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
         {/* The characters editor (editors/characters/) — authors what game/figure runs. */}
         <Route path="/characters">{() => <CharactersRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
-        {/* The item sculpt editor (editors/items/, ITEMSCULPT-0606) — voxel
-            blockouts become grab-sculptable Globe items, the /characters hands. */}
-        <Route path="/items">{() => <ItemsRoute onExit={() => nav.push('/')} />}</Route>
         {/* The vehicles editor (editors/vehicles/) — authors what game/vehicle builds. */}
         <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
         {/* The cutout painter (editors/cutout/) — the cutout app remade for skins/textures. */}
