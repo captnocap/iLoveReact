@@ -308,3 +308,45 @@ updates `docs/game/` per the maintenance contract.
   persistence it adds a stream the V20 way — by addition.
 - **No duplication**: one field renderer, one painter, one stage kit. A second
   implementation of any of these appearing during migration is a review-blocker.
+
+---
+
+## ROUTE CENSUS — master index
+
+CENSUSIDX-0606 assembly; resolves the route-census assembly request. Inputs read: `editors/workbench/census/{items,voxels,vehicles,textures,compose,settings,log,assist3d}.md`, `editors/workbench/WBCHAR.CAPTURE.md`, and `editors/workbench/AGNOSTICPAINT.CAPTURE.md`. Count note: ACCOUNTED counts rows whose workbench accounting includes `ACCOUNTED` / `ACCOUNTED-AS-OWN`; PENDING counts rows whose accounting includes `PENDING`, so partially covered rows count in both columns.
+
+| route | capabilities counted | ACCOUNTED | PENDING (step) | UNPLANNED |
+|---|---:|---:|---|---:|
+| `/items` | 10 | 2 partial | 10 rows — step 5 `itemsSource` | 0 |
+| `/voxels` | 12 | 0 | 12 rows — step 5 item/voxel sculpt unification | 0 |
+| `/vehicles` | 14 | 1 | 13 rows — step 6 `vehiclesSource()` | 0 |
+| `/textures` | 14 | 2 partial | 13 rows — step 7 `materialsSource()` | 0 |
+| `/compose` | 18 | 1 partial | 18 rows — step 7 `materialsSource()` | 0 |
+| `/settings` | 9 | 3 partial | 9 rows — step 9 settings domains + logs | 0 |
+| `/log` | 7 | 0 | 7 rows — step 9 logs source/action/lens | 0 |
+| `/assist3d` | 17 | 17 ACCOUNTED-AS-OWN | none — own route | 0 |
+
+THE UNPLANNED LIST:
+- NONE — no capability table row in the eight census files is marked `UNPLANNED`.
+
+Oddities/bugs aggregate:
+- `census/items.md:30` — Live save/autosave/remove cannot be proven today because route session open fails against the existing ignored `sessions.jsonl` corruption; the route surfaces this as `save unavailable` on /items.
+- `census/items.md:31` — The headless witness can press/click/wheel but has no true drag primitive, so grab-pull and paint-stroke movement are only partially live-driven.
+- `census/items.md:32` — TextInput witness `clear` reported PASS but the field visually retained/appended around `new item` during the first pass.
+- `census/items.md:33` — The host prints an existing crash/watchdog trailer after some successful autotest exits even when the manifest result is PASS.
+- `census/voxels.md:29` — The shared sessions corruption at `cart/hmsc-int/data/streams/sessions.jsonl:884` blocks live session-backed autosave for this route too, but /voxels does not surface an explicit save-unavailable warning like /items.
+- `census/voxels.md:30` — `Export JSON` writes to a non-ignored repo path; census constraints said touch only assigned census files, so it was source-verified but not clicked.
+- `census/voxels.md:31` — The headless witness can click and wheel but cannot perform a real drag orbit, so drag-only camera motion was not live-driven.
+- `census/voxels.md:32` — The host prints an existing crash/watchdog trailer after some successful autotest exits even when the manifest result is PASS.
+- `census/vehicles.md:27` — The private `tools/rjit shot` route render passed and produced `/tmp/census-vehicles.png`; the visible state already had a `car-1` and displayed the ambulance/fire-medical edited vehicle, proving stream restore in the isolated host.
+- `census/vehicles.md:28` — The headless witness/autotest environment did not emit witness step logs for this shipped binary, so click/drag mutation proof could not be collected from the available automation path.
+- `census/vehicles.md:29` — `delete` is immediate and has no confirmation in the route (`VehiclesRoute.tsx:374`).
+- `census/textures.md:27` — The screenshot `/tmp/census-textures.png` proved the route renders the Road shader recipe, overlay chips, sliders, Materialize button, in-memory `MATERIALS (0)`, and persisted `SAVED MATERIALS (0)` strip.
+- `census/textures.md:28` — Shader tuning state is not route-persistent until Materialize; this appears intentional from `ShaderLab` state ownership, but it is a workbench parity point for step 7.
+- `census/textures.md:29` — The headless witness/autotest environment did not emit witness step logs for this shipped binary, so click/slider mutation proof could not be collected from automation.
+- `census/compose.md:31` — The screenshot `/tmp/census-compose.png` booted with an existing working draft containing one rect and `SAVED DECALS · 0`, proving `/compose` twig draft restore in the isolated host.
+- `census/compose.md:32` — There is no route-local undo/redo in `ComposeRoute.tsx`; doc edits rely on draft persistence and Materialize commits, not a per-edit undo stack.
+- `census/compose.md:33` — The headless witness/autotest environment did not emit witness step logs for this shipped binary, so click/drag mutation proof could not be collected from automation.
+- `census/settings.md:19` — The live `/settings` selfshot showed `store unavailable: data store: corrupt record at cart/hmsc-int/data/streams/sessions.jsonl:884`, leaving the bus empty even though the page rendered. The generated witness snapshot can see and click many underlying editor controls after route navigation, so proof manifests must be scoped carefully; the clean walk only used assigned route controls.
+- `census/log.md:17` — The first log walk's query assertion for `all lines` failed even though the captured frame after clicking visibly showed `all lines`; the clean walk removed that brittle assertion and all scripted control steps passed. The headless host emits an existing watchdog/crash trailer after some autotest exits even when the manifest is complete.
+- `census/assist3d.md:27` — React warns that `ScrollView` is given a ref in `Assist3DRoute`; this appeared on every assist3d run. The dirty route twig after the walk showed the Claude model string repeated, suggesting TextInput clear/type did not fully replace the existing field in the headless driver. A first exploratory walk also showed that entering a fake Local GGUF path spawned local worker load attempts on every partial typed path, which is expensive and noisy for a config field. Full generate was intentionally not verified live because it invokes external/long-running assistant backends; mesh-comment send was clicked.
