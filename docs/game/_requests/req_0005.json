@@ -1,0 +1,14 @@
+{
+  "id": "req_0005",
+  "at": "2026-06-06T04:34:49.786Z",
+  "origin": "session:159435dc",
+  "text": "SUPERVISOR — REQLEDGER-0606 addendum 2, USER ASK verbatim: \"have them also make it do the same thing with codex https://developers.openai.com/codex/hooks\"\n\nExtend the hook auto-capture to CODEX panes: read that docs page (WebFetch) and wire the Codex CLI's hook system the same way you wired Claude's — prompt-submit equivalent captures the user's literal text + session key into the same ledger via your existing hook-mode CLI; turn-end/stop equivalent does the unresolved-asks nudge if Codex's hook vocabulary supports it (if it lacks a stop-equivalent, say so honestly in CAPTURE and wire what exists — partial mechanical capture beats none). Hook scripts = real files under tools/ beside the Claude ones (shared logic, thin per-CLI adapters — no second implementation of the ledger write path). Config lands wherever Codex expects it in this repo (their docs say where — likely a config.toml or similar; additive, do not disturb existing codex settings beyond the hook block). Test with fabricated payloads against a scratch root like you did for Claude. Log this ask in the ledger first (it is itself a req), resolve on landing. Explicit paths, docs/REQUESTS.md + _index record updated same commit, verify green.\n",
+  "status": "resolved",
+  "sessionId": "159435dc-74b2-4e0e-9c32-2dff9bacc5d1",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T04:40:23.644Z",
+  "resolution": "Wired Codex panes into the request ledger with full parity (REQLEDGER-0606 addendum 2). Read the Codex hooks docs: their vocabulary mirrors Claude's — UserPromptSubmit and Stop both exist with the same session_id/prompt/stop_hook_active payload fields — so no second ledger write path was built. .codex/hooks.json (the repo .codex layer was empty; purely additive) registers tools/request-hook-prompt-codex and tools/request-hook-stop-codex, thin bash adapters beside the Claude ones that exec the shared CLI subcommands with --cli codex. The flag changes exactly two things: captures get origin codex:<id8> so the ledger says which CLI took the ask, and the Stop reminder's context mode emits {systemMessage} JSON because Codex Stop accepts JSON-only stdout (block-once was already JSON on both). Stop-nudge parity is FULL — Codex supports decision:block continuation and the stop_hook_active loop guard, so nothing was left partial. Proven by piping fabricated Codex payloads (their real field set, turn_id/last_assistant_message included) through the CLI and the actual adapter scripts against a scratch root; P4 suite grew the codex case, 11/11. Honest caveat in REQUESTS.md: Codex skips non-managed hooks until trusted once via /hooks in a Codex pane (per-hash trust + project .codex layer trust).",
+  "shas": [
+    "e83eb2c7f"
+  ]
+}
