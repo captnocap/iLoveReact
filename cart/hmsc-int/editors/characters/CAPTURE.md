@@ -162,3 +162,19 @@ their face though, or body parts, is that clear." Executed:
   slot (over skin, UNDER shape layers — the ruled z-order) and painted body
   parts under their stamps; overlay stamps fold into the texture keys so
   /cutout saves re-bake exactly the affected captures.
+
+## STAMPDELETE (2026-06-05, USER RULING): the underwear texture stamps die
+
+"the clothing like the white stamps, delete that. it looks horrible... but
+those white lines, remove it. looks dumb" — `UnderwearTexturePaint` (the
+briefs/bra boxes painted INTO the torso skin texture) is DELETED. Body-part
+textures are now skin + the user's /cutout paint, nothing else; the
+LIMBPAINT bare-torso surface is plain skin. CLOTHING IS MESHES
+(rig.clothing — "its not on the player model itself, its extra"), deferred
+to its own conversation per the ruling. Knock-on, surfaced: the 'underwear'
+wardrobe style skips bottom MESHES too (clothing.ts paintedUnderwear — it
+assumed the stamps), so that style now shows the bare model; deliberately
+untouched, it's the clothing conversation. This supersedes the
+bra-shadows-the-pelvis seam in the figure CAPTURE (no stamps, no shadow).
+The skinTextureKey clothing/bottoms/bodyShape components stay for key
+stability (wardrobe changes re-bake identical skins — harmless).

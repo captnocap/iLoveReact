@@ -8,9 +8,10 @@
 // the reconciler, so re-diffing ~14 of them per mousemove is the lag.
 //
 // Captures: the kit's CharacterCaptures (game/figure/render) covers the bare
-// head+skin pair; the EDITOR needs more (photo on the head, underwear stamps
-// on the torso, clothing-print bakes), so this file owns the richer capture
-// stack — the ruled editors-reach-into-figure-internals exception at work.
+// head+skin pair; the EDITOR needs more (photo on the head, painted-overlay
+// bakes, clothing-print bakes), so this file owns the richer capture stack —
+// the ruled editors-reach-into-figure-internals exception at work. (The
+// underwear texture stamps are DELETED by ruling — clothing is meshes.)
 
 import { memo, useMemo } from 'react';
 import { Box, Effect, Image, Scene3D, StaticSurface, Text } from '@reactjit/runtime/primitives';
@@ -22,9 +23,9 @@ import { PART_IDS as FIGURE_PART_IDS, type PaintTargetId } from '../../game/figu
 import { PaintedOverlaySurface } from '../../game/paintedRender';
 import { PaintedOverlayPaint } from '../../game/paintedRender';
 import type { PaintedOverlay } from '../../game/painted';
-import { BOTTOMS, clothingSkinTextureKey, type BodyShapeId, type BottomsId, type ClothingId, type ClothingSkinId, type PartId, CLOTHING_SKINS } from '../../game/figure/shapes';
+import { clothingSkinTextureKey, type BodyShapeId, type BottomsId, type ClothingId, type ClothingSkinId, type PartId, CLOTHING_SKINS } from '../../game/figure/shapes';
 import type { ClothingInstance } from '../../game/figure/clothing';
-import { ITEM_DEFINITIONS, ITEM_GEOMETRIES, type ItemPart } from '../../game/items';
+import { ITEM_DEFINITIONS, ITEM_GEOMETRIES, type ItemDefinition, type ItemPart } from '../../game/items';
 import { GRAB_GRID_TEXTURE_KEY, GRAB_GRID_WGSL, GRAB_TUNING, PART_VIEW_PLACEMENT, gridOverlayParams, instanceScaleVec } from './grabKit';
 import { PAINT_EDITOR_TUNING } from './paintKit';
 
@@ -278,16 +279,22 @@ export const HELD_ITEM_TUNING = Object.freeze({
 
 /** One item from the registry, posed into the figure's right hand. Texture
  *  CONTENT for textured parts is the materials lane's (game/items CAPTURE) —
- *  until it lands, textured parts read as their material color. */
+ *  until it lands, textured parts read as their material color.
+ *  ITEMSCULPT-0606: `extraItems` carries the /items roster's sculpted
+ *  definitions (stream-sourced, beside the static registry); a definition's
+ *  own heldScale wins over the gallery-calibrated per-id table. */
 export const HeldItemMeshes = memo(function HeldItemMeshes(props: {
   itemId: string;
   rig: BodyRigFrame;
+  extraItems?: ItemDefinition[];
 }) {
-  const item = ITEM_DEFINITIONS.find((d) => d.id === props.itemId) ?? null;
+  const item = ITEM_DEFINITIONS.find((d) => d.id === props.itemId)
+    ?? props.extraItems?.find((d) => d.id === props.itemId)
+    ?? null;
   const hand = props.rig.assembly.find((inst) => inst.bone === 'rHand');
   if (!item || !hand) return null;
   const T = HELD_ITEM_TUNING;
-  const scale = T.scale[item.id] ?? T.scale.default;
+  const scale = item.heldScale ?? T.scale[item.id] ?? T.scale.default;
   const origin: [number, number, number] = [
     hand.position[0] + T.handOffset[0],
     hand.position[1] + T.handOffset[1],
@@ -398,50 +405,10 @@ function ScaledLayerPaint(props: { layers: HedLayer[]; width: number; height: nu
   return <>{boxes}</>;
 }
 
-/** Torso texture stamps when the figure wears underwear: briefs front/back +
- *  bands, bra for the feminine shape. Texture stamps, not scene meshes —
- *  torso and pelvis globes share these unwrap coordinates. */
-export function UnderwearTexturePaint(props: { part: PartId; clothing: ClothingId; bottoms: BottomsId; bodyShape: BodyShapeId }) {
-  if (props.clothing !== 'underwear' || props.part !== 'torso') return null;
-  const feminine = props.bodyShape === 'female';
-  const main = BOTTOMS[props.bottoms].primary;
-  const trim = BOTTOMS[props.bottoms].secondary;
-  const boxes: any[] = [];
-  const add = (key: string, left: number, top: number, width: number, height: number, color: string, radius = 2) => {
-    boxes.push(
-      <Box
-        key={key}
-        style={{
-          position: 'absolute',
-          left: left * UNWRAP_W,
-          top: top * UNWRAP_H,
-          width: width * UNWRAP_W,
-          height: height * UNWRAP_H,
-          backgroundColor: color,
-          borderRadius: radius,
-        }}
-      />,
-    );
-  };
-
-  const short = props.bottoms === 'shorts';
-  add('brief-front', feminine ? 0.32 : 0.29, short ? 0.69 : 0.75, feminine ? 0.36 : 0.42, short ? 0.2 : 0.14, main, 3);
-  add('brief-back', feminine ? 0.32 : 0.29, short ? 0.06 : 0.08, feminine ? 0.36 : 0.42, short ? 0.19 : 0.14, main, 3);
-  add('front-band', feminine ? 0.29 : 0.27, short ? 0.675 : 0.735, feminine ? 0.42 : 0.46, 0.022, trim, 1);
-  add('back-band', feminine ? 0.29 : 0.27, short ? 0.045 : 0.065, feminine ? 0.42 : 0.46, 0.022, trim, 1);
-  add('front-left-cut', feminine ? 0.28 : 0.27, short ? 0.86 : 0.87, 0.16, 0.025, trim, 1);
-  add('front-right-cut', feminine ? 0.56 : 0.57, short ? 0.86 : 0.87, 0.16, 0.025, trim, 1);
-
-  if (feminine) {
-    add('bra-band', 0.28, 0.33, 0.44, 0.03, trim, 1);
-    add('bra-left', 0.34, 0.25, 0.17, 0.105, main, 4);
-    add('bra-right', 0.49, 0.25, 0.17, 0.105, main, 4);
-    add('strap-left', 0.36, 0.13, 0.025, 0.19, trim, 1);
-    add('strap-right', 0.615, 0.13, 0.025, 0.19, trim, 1);
-  }
-
-  return <>{boxes}</>;
-}
+// (the underwear texture stamps — white briefs/bra lines painted INTO the
+// skin textures — are DELETED by ruling: "those white lines, remove it.
+// looks dumb." The body texture is skin + the user's paint, nothing else;
+// clothing is MESHES (rig.clothing), a separate conversation.)
 
 const TEE_CAPTURE_W = 256;
 const TEE_CAPTURE_H = 192;
@@ -506,7 +473,8 @@ export const ClothingSkinCaptures = memo(function ClothingSkinCaptures() {
 });
 
 /** The route's offscreen texture stack: the head's composition + one skin
- *  bake per non-head part (the torso's carries underwear stamps). */
+ *  bake per non-head part (skin + the user's paint — the underwear stamps
+ *  are deleted by ruling; clothing is meshes). */
 export function CharacterEditorCaptures(props: {
   headTexKey: string;
   skinTexKeyFor: (id: PartId) => string;
@@ -538,23 +506,22 @@ export function CharacterEditorCaptures(props: {
       <StaticSurface staticKey={props.headTexKey} style={surfaceStyle}>
         <UnwrapContent skin={props.skin} photo={props.photo} photoScale={props.photoScale} photoY={props.photoY} layers={props.layers} overlay={props.paint?.head ?? null} />
       </StaticSurface>
+      {/* body-part skins: skin + the user's paint, NOTHING ELSE (the
+          underwear stamps are deleted by ruling — clothing is meshes) */}
       {props.parts.filter((id) => id !== 'head').map((id) => (
         <StaticSurface key={`skin-${id}`} staticKey={props.skinTexKeyFor(id)} style={surfaceStyle}>
           <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin, position: 'relative', overflow: 'hidden' }}>
             {props.paint?.[id] ? <PaintedOverlayPaint overlay={props.paint[id]!} w={UNWRAP_W} h={UNWRAP_H} /> : null}
-            <UnderwearTexturePaint part={id} clothing={props.clothing} bottoms={props.bottoms} bodyShape={props.bodyShape} />
           </Box>
         </StaticSurface>
       ))}
-      {/* LIMBPAINT no-fallback support: the torso's BARE surface (skin +
-          stamps, no paint) mounts beside the painted one whenever the torso
-          is painted — the pelvis socket samples it instead of inheriting
-          the painting (the two-sets-of-tits rule) */}
+      {/* LIMBPAINT no-fallback support: the torso's BARE surface (plain
+          skin) mounts beside the painted one whenever the torso is painted —
+          the pelvis socket samples it instead of inheriting the painting
+          (the two-sets-of-tits rule) */}
       {props.paint?.torso && props.bareSkinTexKeyFor ? (
         <StaticSurface staticKey={props.bareSkinTexKeyFor('torso')} style={surfaceStyle}>
-          <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin, position: 'relative', overflow: 'hidden' }}>
-            <UnderwearTexturePaint part="torso" clothing={props.clothing} bottoms={props.bottoms} bodyShape={props.bodyShape} />
-          </Box>
+          <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin }} />
         </StaticSurface>
       ) : null}
       {/* LIMBPAINT: one capture per painted SEGMENT (the per-instance keys

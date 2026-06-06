@@ -142,8 +142,9 @@ export function headTextureKey(args: { photoStamp: number | null; faceId: string
   return `chr.head.${args.photoStamp ?? 'bare'}.${args.faceId}.${args.anim}.${args.phase}.${args.skin}.${args.photoScale.toFixed(2)}.${args.photoY}`;
 }
 
-/** Non-head parts share the plain-skin bake EXCEPT the torso, whose texture
- *  carries the underwear stamps (briefs/bra paint in unwrap space). */
+/** Non-head parts share the plain-skin bake. (The clothing/bottoms/bodyShape
+ *  key components date from the deleted underwear stamps; they stay so keys
+ *  remain stable — wardrobe changes re-bake identical skins, harmless.) */
 export function skinTextureKey(id: PartId, args: { skin: string; clothing: string; bottoms: string; bodyShape: string }): string {
   return `chr.skin.${id}.${args.skin}.${args.clothing}.${args.bottoms}.${args.bodyShape}`;
 }
