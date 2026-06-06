@@ -48,6 +48,7 @@ import {
 } from '../../characters/grabKit';
 import { useSculptCamera } from '../../sculptCamera';
 import type { CharacterStore, CharacterLens } from './store';
+import { CharacterPaintLens } from './PaintLens';
 
 const { Chip, Knob, LabEnvironment } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
@@ -118,10 +119,14 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the rev IS the signal
   }, [s.installRev]);
 
-  // ── hotkeys (K1) + file drops (E1, J1-J2) — live only while mounted ────────
-  useIFTTT('key:ctrl+z', s.undo);
-  useIFTTT('key:ctrl+y', s.redo);
-  useIFTTT('key:ctrl+shift+z', s.redo);
+  // ── hotkeys (K1) + file drops (E1, J1-J2) — live only while mounted.
+  // In the PAINT lens the shared painter owns ctrl+z/y (its own hotkey map);
+  // the draft undo would double-fire — gate through the live lens. ──────────
+  const lensRef = useRef(lens);
+  lensRef.current = lens;
+  useIFTTT('key:ctrl+z', () => { if (lensRef.current !== 'paint') s.undo(); });
+  useIFTTT('key:ctrl+y', () => { if (lensRef.current !== 'paint') s.redo(); });
+  useIFTTT('key:ctrl+shift+z', () => { if (lensRef.current !== 'paint') s.redo(); });
   useFileDrop((path) => s.dropFile(path));
 
   // ── animation clocks (Route.tsx:288-314 — no rAF in the cart host) ─────────
@@ -584,12 +589,9 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
             {viewport}
           </>
         ) : lens === 'paint' ? (
-          /* commit 4 mounts CharacterPaintLens here (the shared painter +
-             live ModelPreview per the K4 ruling) */
-          <Col style={{ flexGrow: 1, alignItems: 'center', justifyContent: 'center', gap: 6 }}>
-            <Text fontSize={12} color={T.dim}>PAINT lens lands next commit</Text>
-            <Text fontSize={10} color={T.dim}>sculpt/figure/part are live — texture painting mounts the shared painter here</Text>
-          </Col>
+          /* the shared painter + live ModelPreview (K2/K4) — paint without
+             leaving the page; save lands on the characters channel (K3) */
+          <CharacterPaintLens store={s} />
         ) : (
           viewport
         )}

@@ -174,6 +174,23 @@ test('undo restores the pre-edit draft through the history door', () => {
   assertEqual(store.status, 'undo', 'the status narrates');
 });
 
+test('savePaintedModel: K3 — apply through the door, one labeled commit, draft adopts', () => {
+  const { deps, rec } = fakeDeps(true);
+  const store = createCharacterStore(deps);
+  charactersSource(store).onPick!('chr-a');
+  const overlay = { version: 1 as const, stamp: 4242, cols: 4, rows: 4, layers: [{ color: '#dc2626', cells: [1, 2] }] };
+  store.savePaintedModel('torso' as any, overlay as any);
+  const last = rec.commits[rec.commits.length - 1];
+  assertEqual(last.label, 'chr-a: torso painted', 'the labeled commit (cutout save parity)');
+  assertEqual(last.e.kind, 'authored', 'the authored event');
+  assertEqual(JSON.stringify(last.e.doc.paint?.torso), JSON.stringify(overlay), 'the overlay rides the committed doc');
+  assertEqual(JSON.stringify(store.draft.paint?.torso), JSON.stringify(overlay), 'the working draft adopts the committed paint');
+  const commitsBefore = rec.commits.length;
+  store.savePaintedModel('torso' as any, null);
+  assertEqual(rec.commits[rec.commits.length - 1].label, 'chr-a: torso paint cleared', 'an empty painting CLEARS');
+  assertEqual(rec.commits.length, commitsBefore + 1, 'exactly one commit per save (no autosave echo)');
+});
+
 test('the lens set is FIGURE/PART/SCULPT/PAINT and the source controls it', () => {
   const { deps } = fakeDeps(false);
   const store = createCharacterStore(deps);

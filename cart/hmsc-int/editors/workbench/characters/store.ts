@@ -34,6 +34,9 @@ import { defaultProfile, DEFAULT_BOTTOMS, PART_IDS, type ClothingAccessoryId, ty
 import { generateFace, parseHed, serializeHed, type HedAnimation, type HedDocument } from '../../../game/figure/hed';
 import { parseBody, serializeBody, type BodyDocument } from '../../../game/figure/body';
 import { charactersStream, type CharactersEvent, type CharactersStreamState } from '../../../game/figure/stream';
+import { applyBodyPaint } from '../../../game/figure/body';
+import type { PaintTargetId } from '../../../game/figure/shapes';
+import type { PaintedOverlay } from '../../../game/painted';
 import { createPaintHistory } from '../../paint/history';
 import { readRouteTwigState, writeRouteTwigState } from '../../twigs';
 import { editorChannel } from '../../store';
@@ -343,10 +346,21 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     wearLens();
   };
 
-  // ── the PAINT lens save landed (K3): adopt the committed doc's paint ──────
-  const adoptPaintedDocument = (next: BodyDocument) => {
-    setDraft({ ...draft, paint: next.paint }, { autosave: false }); // the commit already landed
+  // ── the PAINT lens save (K3 — cutout's saveModelPaint figure branch):
+  // bake happened lens-side; here the overlay applies through the door,
+  // commits ONE labeled authored event, and the working draft adopts the
+  // committed paint (no re-autosave — the commit already landed). ──────────
+  const savePaintedModel = (part: PaintTargetId, overlay: PaintedOverlay | null) => {
+    if (!deps.session) { setStatus(`save unavailable — ${deps.error ?? 'no session'}`); return; }
+    const id = draftId;
+    if (!id) { setStatus('save to the roster first — PAINT works on the SAVED character'); return; }
+    const model = rosterState().characters[id];
+    if (!model) { setStatus(`figure ${id} unavailable`); return; }
+    const next = applyBodyPaint(model, part, overlay);
+    deps.session.commit({ kind: 'authored', id, doc: next }, `${id}: ${part} ${overlay ? 'painted' : 'paint cleared'}`);
+    setDraft({ ...draft, paint: next.paint }, { autosave: false });
     rosterRev += 1;
+    setStatus(overlay ? `painted ${part} saved to ${id}` : `cleared ${part} paint on ${id}`);
   };
 
   return {
@@ -381,7 +395,7 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     setAmount: (amount: number) => editDraftCoalesced((d) => ({ ...d, amount })),
     setHeadScaleY: (headScaleY: number) => editDraftCoalesced((d) => ({ ...d, headScaleY })),
     removeFace: () => { editDraft((d) => ({ ...d, face: null })); view.faceAnim = null; twigWrite('faceAnim', null); setStatus(null); },
-    adoptPaintedDocument,
+    savePaintedModel,
     // view setters (twig write-through; the route's keys)
     setLens: setViewKey('lens', 'wbLens'),
     setSelPart: setViewKey('selPart', 'selPart'),
