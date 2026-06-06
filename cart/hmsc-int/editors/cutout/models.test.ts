@@ -74,14 +74,16 @@ test('the bake: look colors + effective masks at the grid, muted layers skipped'
   const doc = demoDocument();
   const overlay = bakeOverlayFromDocument(doc, 777, 4);
   assertEqual(overlay.cols, 4, 'bake grid cols');
-  assertEqual(overlay.rows, 4, 'bake grid rows (square — the sampleToCells shape)');
+  // RESBAKE-0606: the grid is ASPECT-TRUE — the 8×4 demo doc at 4 cols bakes
+  // 4×2 (square texels), no longer a stretched square grid
+  assertEqual(overlay.rows, 2, 'bake grid rows follow the canvas aspect');
   assertEqual(overlay.stamp, 777, 'the save stamp rides the overlay');
   assertEqual(overlay.layers.length, 2, 'the muted layer bakes to nothing');
   assertEqual(overlay.layers[0].color, '#ff0000', 'layer A keeps its look color');
-  // left half of a 4×4 grid = columns 0..1 of every row
-  assertEqual(overlay.layers[0].cells.join(','), '0,1,4,5,8,9,12,13', 'cells are the effective mask sampled to the grid');
+  // left half of a 4×2 grid = columns 0..1 of both rows
+  assertEqual(overlay.layers[0].cells.join(','), '0,1,4,5', 'cells are the effective mask sampled to the grid');
   assertEqual(overlay.layers[1].color, '#0000ff', 'layer C keeps its look color');
-  assertEqual(overlay.layers[1].cells.join(','), '15', 'a single painted pixel lands in its cell');
+  assertEqual(overlay.layers[1].cells.join(','), '7', 'a single painted pixel lands in its (aspect-true) cell');
 });
 
 test('the re-edit law: a baked overlay reopens as the document it came from', () => {

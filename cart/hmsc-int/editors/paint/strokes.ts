@@ -147,12 +147,14 @@ export function hasAnyPainted(mask: Uint8Array): boolean {
 }
 
 /** Downsample a hi-res mask to a coarse cell set (cy*res + cx indices where
- *  ANY covered source pixel is set). */
-export function sampleToCells(mask: Uint8Array, w: number, h: number, res: number): Set<number> {
+ *  ANY covered source pixel is set). `rowsRes` (optional, defaults square)
+ *  lets a non-square canvas bake to aspect-true cells — RESBAKE-0606: a 2:1
+ *  unwrap at square res made every painted texel twice as tall as wide. */
+export function sampleToCells(mask: Uint8Array, w: number, h: number, res: number, rowsRes = res): Set<number> {
   const out = new Set<number>();
   const cellW = w / res;
-  const cellH = h / res;
-  for (let cy = 0; cy < res; cy++) {
+  const cellH = h / rowsRes;
+  for (let cy = 0; cy < rowsRes; cy++) {
     const y0 = Math.floor(cy * cellH);
     const y1 = Math.min(h, Math.floor((cy + 1) * cellH));
     for (let cx = 0; cx < res; cx++) {

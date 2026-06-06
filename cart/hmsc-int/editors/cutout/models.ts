@@ -51,14 +51,19 @@ export const FIGURE_PAINT_TARGETS: PaintTargetId[] = [
 // square canvas box-mapped to each part mesh (the vehicle CAPTURE's pick).
 export const MODEL_PAINT = {
   vehicleCanvasPx: 256,
-  /** overlay bake grid (cells across each axis; square — sampleToCells) */
-  bakeRes: 96,
+  /** overlay bake grid COLUMNS; rows follow the canvas aspect (RESBAKE-0606:
+   *  at the old square-96 bake a torso texel was a fat 5.3×2.7px block —
+   *  "even 1px brush size is quite large"; 256 over the 512-wide unwrap =
+   *  2px aspect-true texels) */
+  bakeRes: 256,
 };
 editorTunables().register({
   system: 'cutout-modelpaint', route: '/cutout', table: MODEL_PAINT,
   specs: {
     vehicleCanvasPx: { label: 'veh canvas px', min: 64, max: 1024, step: 32, precision: 0 },
-    bakeRes: { label: 'bake res', min: 16, max: 256, step: 8, precision: 0 },
+    // 512 = 1:1 with the figure unwrap (every canvas pixel its own bake cell);
+    // heavy per-layer data — crank deliberately, it's live-tunable in /settings
+    bakeRes: { label: 'bake res (cols)', min: 16, max: 512, step: 8, precision: 0 },
   },
 });
 
@@ -73,21 +78,26 @@ const HEX_SHAPE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
 /** Bake a painter document into the overlay the model documents carry:
  *  one color layer per unmuted painted layer — the layer's effective mask
  *  sampled to the bake grid, colored by its look's primary slot. Pixels
- *  only, by ruling — depth never exists here. */
+ *  only, by ruling — depth never exists here.
+ *  RESBAKE-0606: the grid is ASPECT-TRUE — `res` is the column count, rows
+ *  follow the canvas shape (a 512×256 unwrap at 256 bakes 256×128, square
+ *  texels). The PaintedOverlay format always carried cols+rows separately;
+ *  square canvases (vehicles) are unchanged. */
 export function bakeOverlayFromDocument(doc: PaintDocument, stamp: number, res = MODEL_PAINT.bakeRes): PaintedOverlay {
   const n = doc.dims.w * doc.dims.h;
+  const rows = Math.max(1, Math.round((res * doc.dims.h) / Math.max(1, doc.dims.w)));
   const layers: PaintedOverlay['layers'] = [];
   for (const layer of inflatePaintDocument(doc)) {
     if (layer.config.muted) continue;
     // document bases decode 0/1; the band compose reads byte thresholds —
     // scale first (the layers.ts scaleMask law, same as the GPU upload path)
     const effective = effectiveMask(layer.base ? scaleMask(layer.base) : null, layer.brush, n);
-    const cells = [...sampleToCells(effective, doc.dims.w, doc.dims.h, res)].sort((a, b) => a - b);
+    const cells = [...sampleToCells(effective, doc.dims.w, doc.dims.h, res, rows)].sort((a, b) => a - b);
     if (cells.length === 0) continue;
     const slot = layer.config.colors[0];
     layers.push({ color: HEX_SHAPE.test(slot ?? '') ? slot : '#ffffff', cells });
   }
-  return { version: 1, stamp, cols: res, rows: res, layers, paintDoc: doc };
+  return { version: 1, stamp, cols: res, rows, layers, paintDoc: doc };
 }
 
 /** A stroke-less placeholder document for a just-opened model target — what

@@ -33,6 +33,7 @@ import { FaceLayerPaint } from '../../../game/figure/render';
 import type { BodyDocument } from '../../../game/figure/body';
 import type { PaintTargetId } from '../../../game/figure/shapes';
 import { usePaintEditor, PaintSurface, PAINT, type PaintEditorState } from '../../paint';
+import { readRouteTwigState } from '../../twigs';
 import { CutoutToolRail } from '../../cutout/ToolRail';
 import { CutoutInspector, type BackendChoice } from '../../cutout/Inspector';
 import { CutoutStatusBar } from '../../cutout/StatusBar';
@@ -140,6 +141,21 @@ function PaintTarget(props: {
     session: null, // the SAVE is the labeled commit (store.savePaintedModel)
     initial: props.initial,
   });
+
+  // BRUSHTWIG-0606 (user: "hot updates change [brush sizes] on me"): the
+  // painter twigs brushPx on /paint/<idPrefix>, but its document RESTORE
+  // overwrites it from the doc's embedded value — and brush changes alone
+  // never rewrite the slot doc, so every hot update reverted the size to the
+  // last STROKE's brush. The twig carries the user's latest intent; re-assert
+  // it once, after the painter's mount restore (this effect registers after
+  // the hook's own, so it runs second).
+  useEffect(() => {
+    try {
+      const remembered = readRouteTwigState('/paint/wbchr-paint', 'brushPx', s.brushPx);
+      if (remembered !== s.brushPx) s.setBrushPx(remembered);
+    } catch { /* twigless host */ }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once, post-restore
+  }, []);
 
   // the same save-state surface cutout's chrome reads (edited pill, save age)
   const [edited, setEdited] = useState(!!props.initial);
