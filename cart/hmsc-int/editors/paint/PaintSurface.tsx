@@ -18,6 +18,7 @@ import { Box, Canvas, Effect, Image, Paintable, Pressable, Row, Text } from '@re
 import { callHost } from '@reactjit/runtime/ffi';
 import { GAME_CHROME } from '../../game/chrome';
 import { PAINT_TUNING } from './tuning';
+import { pressureRadius } from './strokes';
 import {
   packTextureModeData, packCellModeData, resolveShader,
   type CustomSurface, type PaintBlendMode, type SurfaceId,
@@ -27,7 +28,14 @@ import type { PaintEditorState } from './usePaintEditor';
 const T = GAME_CHROME.tokens.color;
 
 type Rect = { x: number; y: number; width: number; height: number };
-type ToolCursor = { x: number; y: number; radius: number; kind: 'brush' | 'smart' | 'lasso' | 'refine' };
+type ToolCursor = {
+  x: number; y: number; radius: number;
+  kind: 'brush' | 'smart' | 'lasso' | 'refine';
+  /** the active paint color (slot 0) — fills the ring in paint mode */
+  color?: string | null;
+  /** screen-x of the mirror twin ring when mirror painting is on */
+  mirrorX?: number | null;
+};
 
 function screenToWorld(sx: number, sy: number, rect: Rect): { gx: number; gy: number } | null {
   const vpcx = rect.x + rect.width / 2;
@@ -111,6 +119,18 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
     return { sx, sy };
   };
 
+  // The canvas pan-ZOOMS: a dab is SOURCE pixels, the cursor ring is SCREEN
+  // pixels. Derive the live zoom from two screen probes through the same
+  // host transform the dab coordinates use — no new bindings.
+  const measureZoom = (px: number, py: number): number | null => {
+    if (!rect) return null;
+    const a = screenToWorld(px, py, rect);
+    const b = screenToWorld(px + 16, py, rect);
+    if (!a || !b) return null;
+    const d = Math.abs(b.gx - a.gx);
+    return d > 1e-6 ? 16 / d : null;
+  };
+
   const updateCursor = (px: number, py: number, hit: { sx: number; sy: number } | null, force = false) => {
     if (!rect || !hit) { setCursor(null); return; }
     const now = Date.now();
@@ -121,8 +141,31 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
     const C = PAINT_TUNING.cursor;
     if (s.tool === 'smart') { setCursor({ x: localX, y: localY, radius: C.smartRadius, kind: 'smart' }); return; }
     if (s.tool === 'lasso') { setCursor({ x: localX, y: localY, radius: C.lassoRadius, kind: 'lasso' }); return; }
-    const radius = Math.max(C.radiusMin, Math.min(C.radiusMax, s.brushPx));
-    setCursor({ x: localX, y: localY, radius, kind: s.tool === 'refine' ? 'refine' : 'brush' });
+    // THE HONEST RING ("an actual live brush preview so i can see where im
+    // painting"): the dab the engine will paint is pressureRadius(brushPx)
+    // SOURCE pixels — the no-pressure fallback radius, which the stock curve
+    // makes exactly brushPx (base 0.35 + fallback 0.5 × gain 1.3 = 1.0); if
+    // the P2 pressure curve is retuned the ring follows the DAB, not the
+    // label. Source → screen via the live zoom. No display clamp — the old
+    // clamp papered over the zoom lie.
+    const zoom = measureZoom(px, py) ?? 1;
+    const radius = Math.max(1, pressureRadius(s.brushPx, undefined) * zoom);
+    const layer = s.activeLayer >= 0 && s.activeLayer < s.layers.length ? s.layers[s.activeLayer] : null;
+    const slot0 = (layer?.config.colors ?? s.defaults.colors)[0] ?? '#ffffff';
+    // mirror on → the engine paints a twin at x' = w − sx; preview it too
+    let mirrorX: number | null = null;
+    if (s.mirror) {
+      const mx = s.dims.w - hit.sx;
+      if (Math.abs(mx - hit.sx) > PAINT_TUNING.mirrorMinSeparationPx) {
+        mirrorX = localX + (mx - hit.sx) * zoom;
+      }
+    }
+    setCursor({
+      x: localX, y: localY, radius,
+      kind: s.tool === 'refine' ? 'refine' : 'brush',
+      color: s.mode === 'erase' ? slot0 : null,
+      mirrorX,
+    });
   };
 
   const updateHoverCursor = (p: any, force = false) => {
@@ -236,6 +279,12 @@ export function PaintSurface({ s, style, underlay }: { s: PaintEditorState; styl
 
 // ── Cursor / HUD / previews ──────────────────────────────────────────────────
 
+/** hex6 + alpha byte → hex8; non-hex6 inputs (named colors, hex8) pass null
+ *  so the caller falls back to the mode tint */
+function withAlpha(hex: string | null | undefined, alpha: string): string | null {
+  return hex && /^#[0-9a-fA-F]{6}$/.test(hex) ? hex + alpha : null;
+}
+
 function BrushCursor({ cursor, mode }: { cursor: ToolCursor; mode: string }) {
   const color = cursor.kind === 'smart' || cursor.kind === 'refine'
     ? T.accent
@@ -267,19 +316,31 @@ function BrushCursor({ cursor, mode }: { cursor: ToolCursor; mode: string }) {
       </Box>
     );
   }
-  return (
-    <Box style={{
+  // Brush / refine: the ring IS the dab footprint (size from updateCursor's
+  // zoom math). Mode hue on the border; in paint mode the fill shows WHAT
+  // will paint — the active slot-0 color at low alpha.
+  const fill = (mode === 'erase' ? withAlpha(cursor.color, '2e') : null)
+    ?? (mode === 'erase' ? '#ff9f431f' : '#34d3991f');
+  const ring = (cx: number, twin: boolean) => (
+    <Box key={twin ? 'twin' : 'ring'} style={{
       position: 'absolute',
-      left: cursor.x - cursor.radius,
+      left: cx - cursor.radius,
       top: cursor.y - cursor.radius,
       width: cursor.radius * 2,
       height: cursor.radius * 2,
       borderRadius: cursor.radius,
       borderWidth: 1,
       borderColor: color,
-      backgroundColor: mode === 'erase' ? '#ff9f431f' : '#34d3991f',
+      backgroundColor: fill,
       zIndex: 8,
+      opacity: twin ? 0.55 : 1,
     }} />
+  );
+  return (
+    <>
+      {ring(cursor.x, false)}
+      {typeof cursor.mirrorX === 'number' ? ring(cursor.mirrorX, true) : null}
+    </>
   );
 }
 

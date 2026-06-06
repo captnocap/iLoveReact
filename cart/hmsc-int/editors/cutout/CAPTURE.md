@@ -297,3 +297,22 @@ before inventing the granularity.
   already-pushed code (ToolRail, paint.test.ts) but never git-added, and
   layers.ts/usePaintEditor.ts backendTunables persistence backs the pushed
   test expectations. main could not bundle without them.
+
+## LIVEBRUSH (2026-06-06, USER ASK: "a actual live brush preview so i can
+## see where im painting")
+
+- The brush/refine cursor ring is now the dab's TRUE screen footprint at
+  any canvas zoom: source radius = pressureRadius(brushPx) (the no-pressure
+  fallback dab — exactly brushPx on the stock curve; the ring follows the
+  DAB if the P2 pressure curve is retuned), converted source → screen with
+  the live zoom measured from two __canvas_screen_to_graph probes (no new
+  host bindings). The old display clamp (cursor.radiusMin/Max) papered over
+  the zoom lie and is DELETED from the tuning table + the /settings
+  registry (stale stored overrides park harmlessly in the registry's
+  pending map).
+- Paint mode fills the ring with the ACTIVE slot-0 color at low alpha (the
+  ring shows WHAT will paint); the border keeps the mode hue (warn=Paint /
+  good=Eraser, accent=refine). Eraser keeps the green eraser look.
+- Mirror on → a second, dimmer twin ring tracks at x' = w − sx (the engine
+  paints a mirrored twin; the preview no longer hides it). The twin skips
+  inside mirrorMinSeparationPx of the axis, matching the engine's seam rule.

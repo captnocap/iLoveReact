@@ -25,8 +25,11 @@ export const PAINT_TUNING = ({
    *  brushTrackToPx), these are its detent ticks and the step-key ladder. */
   brushSizes: [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512],
   brushDefaultPx: 32,
-  /** on-screen cursor ring clamp (display only — dabs use the true radius) */
-  cursor: { radiusMin: 4, radiusMax: 180, throttleMs: 60, smartRadius: 12, lassoRadius: 8 },
+  /** tool cursor: smart/lasso fixed screen radii + the update throttle. The
+   *  brush ring is UNCLAMPED — it is the dab's true screen footprint
+   *  (source radius × live zoom; the old radiusMin/Max clamp existed only
+   *  because the ring ignored zoom). */
+  cursor: { throttleMs: 60, smartRadius: 12, lassoRadius: 8 },
   /** pointer pressure → dab radius: r = brushPx * (base + p*gain), floor 1 */
   pressure: { base: 0.35, gain: 1.3, fallback: 0.5 },
   /** dab spacing along a stroke, as a fraction of the dab radius */
@@ -95,8 +98,6 @@ editorTunables().register({
   system: 'paint', route: 'editors/paint', table: PAINT_TUNING,
   specs: {
     'brushDefaultPx': { label: 'brush px', min: 1, max: 512, step: 1, precision: 0 },
-    'cursor.radiusMin': { label: 'cursor r min', min: 1, max: 50, step: 1, precision: 0 },
-    'cursor.radiusMax': { label: 'cursor r max', min: 50, max: 500, step: 5, precision: 0 },
     'cursor.throttleMs': { label: 'cursor ms', min: 0, max: 500, step: 10, precision: 0 },
     'cursor.smartRadius': { label: 'smart r', min: 1, max: 64, step: 1, precision: 0 },
     'cursor.lassoRadius': { label: 'lasso r', min: 1, max: 64, step: 1, precision: 0 },
