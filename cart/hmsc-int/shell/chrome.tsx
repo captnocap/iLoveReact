@@ -92,7 +92,10 @@ function NavBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress:
   const enabled = props.enabled !== false;
   const B = props.on ? C.ChromeBtnOn : C.ChromeBtn;
   return (
-    <B onPress={() => { if (enabled) props.onPress(); }} style={enabled ? undefined : { opacity: 0.35 }}>
+    // NOTE: the style prop must be ABSENT when enabled — classifier mergeUserProps
+    // spreads user props over the class's resolved set, so an explicit
+    // `style={undefined}` would wipe ChromeBtn's styling (classifier.tsx:445).
+    <B onPress={() => { if (enabled) props.onPress(); }} {...(enabled ? {} : { style: { opacity: 0.35 } })}>
       <Icon name={props.icon} size={14} color={accentFor(enabled ? (props.on ? 'text' : 'textSecondary') : 'textFaint')} />
     </B>
   );

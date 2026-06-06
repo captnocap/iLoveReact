@@ -22,7 +22,8 @@ import { C, accentFor } from '../studio.cls';
 export const CHROME_H = 38; // structural — PROJECT_BAR_H, captured
 
 classifier({
-  // ── chrome strip (the titlebar; lands at the ProjectBar swap) ──
+  // ── chrome strip (the titlebar; rendered by shell/chrome.tsx since the
+  //    WBCHROME-0606 swap replaced ProjectBar) ──
   // paddingRight deliberately 0 — the window controls sit flush to the edge.
   ChromeBar: {
     type: 'Box',
