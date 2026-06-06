@@ -826,6 +826,30 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
         }
     }
 
+    // Canvas container: graph-space children (Canvas.Node / Canvas.Path and
+    // their wrapper containers — positionOneCanvasNode writes RAW GRAPH
+    // coordinates into their computed rects) must never be hit-tested with
+    // screen coords. A panned canvas leaves children with rects far outside
+    // the viewport — over the app's chrome — that swallow clicks wherever
+    // graph coords coincide with screen coords (NAVDEAD-0605: hmsc-int's
+    // route bar went unclickable under the buried editor's panned paint
+    // canvas). Clicks INSIDE the canvas are routed by the engine's dedicated
+    // canvas path (findCanvasNode → screenToGraph → hitTestCanvasNode); only
+    // Canvas.Clamp children stay in screen space and hit-test normally.
+    // Mirrors events.hitTestHoverable's guard.
+    if (node.canvas_type != null) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        var ci = node.children.len;
+        while (ci > 0) {
+            ci -= 1;
+            const child = &node.children[ci];
+            if (child.canvas_clamp) {
+                if (hitTest(child, child_mx, child_my)) |hit| return hit;
+            }
+        }
+        return node;
+    }
+
     var i = node.children.len;
     while (i > 0) {
         i -= 1;

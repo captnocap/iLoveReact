@@ -24,6 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Effect, Paintable, Pressable, Row, ScrollView, Scene3D, Text, TextInput } from '@reactjit/runtime/primitives';
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
+import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
 import { GAME_CAMERA } from '../../game/camera';
 import { GAME_NATIVE_CAMERA } from '../../game/nativeCamera';
@@ -51,6 +52,7 @@ import { mintCharacterId } from './roster';
 import { charactersStream, type CharactersEvent, type CharactersStreamState } from '../../game/figure/stream';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
+import { useRouteTwigState } from '../twigs';
 import { PAINT } from '../paint';
 import {
   DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, gridFromBytes,
@@ -99,28 +101,28 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const [draftId, setDraftId] = useState<string | null>(null);
   const [draftName, setDraftName] = useState('new character');
   const [rosterRev, setRosterRev] = useState(0);
-  const [selPart, setSelPart] = useState<PartId>('head');
-  const [view, setView] = useState<PreviewView>('part');
-  const [editTab, setEditTab] = useState<EditTab>('outline');
-  const [mode, setMode] = useState<SculptMode>('raise');
-  const [mirror, setMirror] = useState(true);
-  const [brush, setBrush] = useState(14);
-  const [strength, setStrength] = useState(0.5);
-  const [photo, setPhoto] = useState<Photo | null>(null);
-  const [photoScale, setPhotoScale] = useState(0.4);
-  const [photoY, setPhotoY] = useState(0);
-  const [showHitboxes, setShowHitboxes] = useState(false);
-  const [anim, setAnim] = useState<HedAnimation | null>(null);
+  const [selPart, setSelPart] = useRouteTwigState<PartId>('/characters', 'selPart', 'head');
+  const [view, setView] = useRouteTwigState<PreviewView>('/characters', 'view', 'part');
+  const [editTab, setEditTab] = useRouteTwigState<EditTab>('/characters', 'editTab', 'outline');
+  const [mode, setMode] = useRouteTwigState<SculptMode>('/characters', 'sculptMode', 'raise');
+  const [mirror, setMirror] = useRouteTwigState('/characters', 'mirror', true);
+  const [brush, setBrush] = useRouteTwigState('/characters', 'brush', 14);
+  const [strength, setStrength] = useRouteTwigState('/characters', 'strength', 0.5);
+  const [photo, setPhoto] = useRouteTwigState<Photo | null>('/characters', 'photo', null);
+  const [photoScale, setPhotoScale] = useRouteTwigState('/characters', 'photoScale', 0.4);
+  const [photoY, setPhotoY] = useRouteTwigState('/characters', 'photoY', 0);
+  const [showHitboxes, setShowHitboxes] = useRouteTwigState('/characters', 'showHitboxes', false);
+  const [anim, setAnim] = useRouteTwigState<HedAnimation | null>('/characters', 'faceAnim', null);
   const [animFrame, setAnimFrame] = useState(0);
-  const [bodyRigAnim, setBodyRigAnim] = useState(false);
+  const [bodyRigAnim, setBodyRigAnim] = useRouteTwigState('/characters', 'bodyRigAnim', false);
   const [rigFrame, setRigFrame] = useState(0);
-  const [animScript, setAnimScript] = useState(DEFAULT_ANIM_SCRIPT);
-  const [scriptPlaying, setScriptPlaying] = useState(false);
+  const [animScript, setAnimScript] = useRouteTwigState('/characters', 'animScript', DEFAULT_ANIM_SCRIPT);
+  const [scriptPlaying, setScriptPlaying] = useRouteTwigState('/characters', 'scriptPlaying', false);
   const [scriptFrame, setScriptFrame] = useState(0);
   const [status, setStatus] = useState<string | null>(null);
   // zoom is a KNOB (param-rate); yaw/pitch live in lookRef — drag deltas ride
   // the native controller (V23), never React state
-  const [dist, setDist] = useState(4.2);
+  const [dist, setDist] = useRouteTwigState('/characters', 'orbitDistance', 4.2);
   // per-part sculpt versions — bumping regenerates that part's dyn mesh
   const [seqs, setSeqs] = useState<Record<PartId, number>>(
     () => Object.fromEntries(PART_IDS.map((id) => [id, 0])) as Record<PartId, number>,
@@ -143,7 +145,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   >(null);
   // the wireframe lattice over the selected part — every line crossing is a
   // pullable grid point (GRABGRID-0605)
-  const [showGrabGrid, setShowGrabGrid] = useState(true);
+  const [showGrabGrid, setShowGrabGrid] = useRouteTwigState('/characters', 'showGrabGrid', true);
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const grabCloudsRef = useRef<{ sig: unknown[]; clouds: GrabCloud[]; instances: GrabInstance[] } | null>(null);
   const grabRef = useRef<null | {
@@ -155,7 +157,8 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   // binds it host-side; the ref's id keys the per-node param/delta channel)
   const cameraRef = useRef<any>(null);
   const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
-  const lookRef = useRef({ yaw: 20, pitch: 12 });
+  const [orbitLook, setOrbitLook] = useRouteTwigState('/characters', 'orbitLook', { yaw: 20, pitch: 12 });
+  const lookRef = useRef(orbitLook);
 
   // ── the V20 roster channel + this visit's SESSION (persistence from version
   // one; every authoring interaction is a labeled commit/note on the one
@@ -229,6 +232,38 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     for (const id of PART_IDS) uploadGrid(id, next.grids[id]);
     bumpAllSeqs();
   };
+
+  // ── UNDO/REDO (GRABQOL-0605): the shared painter's history over the DRAFT ──
+  // The within-tool stack (editors/paint createPaintHistory: 50-deep, 250ms
+  // coalesce) — every commit-grade interaction pushes the BEFORE state, ctrl+z
+  // walks back, ctrl+y / ctrl+shift+z walks forward. Restores route through
+  // installDraft (textures + mesh slots resync) and DO autosave: the restored
+  // state becomes the working draft on the V20 chain. The session log stays
+  // the cross-visit history; this stack is what makes sculpting feel safe.
+  const history = useRef(PAINT.createPaintHistory<CharacterDraft>()).current;
+  const snapDraft = () => JSON.parse(JSON.stringify(draftRef.current)) as CharacterDraft;
+  /** a discrete undoable edit (chip picks, resets, stroke/drag releases) */
+  const editDraft = (updater: (d: CharacterDraft) => CharacterDraft) => {
+    history.commit(snapDraft);
+    setDraft(updater);
+  };
+  /** knob-style bursts coalesce — undo returns to the value before the drag */
+  const editDraftCoalesced = (updater: (d: CharacterDraft) => CharacterDraft) => {
+    history.commitCoalesced(snapDraft);
+    setDraft(updater);
+  };
+  const restoreDraft = (state: CharacterDraft | null, label: string) => {
+    if (!state) { setStatus(`nothing to ${label}`); return; }
+    installDraft(state);
+    autosaveSkipRef.current = false; // the restored state IS the working draft now
+    setStatus(label);
+    live.session?.note(label);
+  };
+  const undoDraft = () => restoreDraft(history.undo(snapDraft), 'undo');
+  const redoDraft = () => restoreDraft(history.redo(snapDraft), 'redo');
+  useIFTTT('key:ctrl+z', undoDraft);
+  useIFTTT('key:ctrl+y', redoDraft);
+  useIFTTT('key:ctrl+shift+z', redoDraft);
 
   // ── AUTOSAVE-0605 mount restore (V20 "stateless design"): reopen the route
   // exactly where authoring left off — the most recent roster entry IS the
@@ -391,12 +426,14 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     {
       strokeEngineRef.current?.end();
       strokeEngineRef.current = null;
+      history.commit(snapDraft); // the draft mutates HERE (release readback)
       syncGrid();
       live.session?.note(`sculpt stroke · ${mode} · ${brush}px · ${selPart}`);
     }
   };
 
   const fillAll = () => {
+    history.commit(snapDraft);
     const value = sculptModeValue(mode, strength);
     paints[selPart].paint.clear(value);
     setPartGrid(selPart, new Array(GRID_W * GRID_H).fill((value - NEUTRAL) * 2));
@@ -406,6 +443,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const soften = () => {
     const src = paints[selPart].paint.readback();
     if (!src || src.length < PAINT_W * PAINT_H) return;
+    history.commit(snapDraft);
     const out = PAINT.soften3x3(src, PAINT_W, PAINT_H);
     paints[selPart].paint.upload(out);
     setPartGrid(selPart, gridFromBytes(out));
@@ -413,6 +451,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   };
 
   const clearStrokes = () => {
+    history.commit(snapDraft);
     paints[selPart].paint.clear(NEUTRAL);
     setPartGrid(selPart, emptyGrid());
     live.session?.note(`clear sculpt · ${selPart}`);
@@ -456,18 +495,19 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     const next = profileDraftRef.current;
     profileDraftRef.current = null;
     if (next) {
-      setDraft((d) => ({ ...d, profiles: { ...d.profiles, [selPart]: next } }));
+      editDraft((d) => ({ ...d, profiles: { ...d.profiles, [selPart]: next } }));
       bumpSeq(selPart);
       live.session?.note(`outline drag · ${selPart}`);
     }
   };
   const resetOutline = () => {
-    setDraft((d) => ({ ...d, profiles: { ...d.profiles, [selPart]: defaultProfile(selPart) } }));
+    editDraft((d) => ({ ...d, profiles: { ...d.profiles, [selPart]: defaultProfile(selPart) } }));
     bumpSeq(selPart);
   };
 
   // ── generation / documents / roster ────────────────────────────────────────
   const applyFaceDoc = (doc: HedDocument, label: string) => {
+    history.commit(snapDraft);
     const next = draftWithFace(draft, doc);
     installDraft(next);
     autosaveSkipRef.current = false; // new content (generated/imported face) — autosave it
@@ -483,6 +523,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const generateWholeCharacter = () => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffff)) >>> 0;
     const next = generateCharacterDraft(seed);
+    history.commit(snapDraft);
     installDraft(next);
     autosaveSkipRef.current = false; // a generated character is authored content — autosave it
     setDraftId(null); // a NEW character, not an overwrite of the loaded one
@@ -508,6 +549,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const loadFromRoster = (id: string) => {
     const doc = rosterState.characters[id];
     if (!doc) return;
+    history.commit(snapDraft);
     installDraft(draftFromDocument(doc));
     setDraftId(id);
     setDraftName(doc.metadata?.title ?? id);
@@ -543,6 +585,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
       const text = readFile(path);
       const doc = text ? parseBody(text) : null;
       if (!doc) { setStatus(`${path.split('/').pop()} is not a .body document`); return; }
+      history.commit(snapDraft);
       installDraft(draftFromDocument(doc));
       autosaveSkipRef.current = false; // imported content is not on the chain yet — autosave it
       setDraftId(null);
@@ -615,7 +658,10 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     l.yaw = nextYaw;
     l.pitch = nextPitch;
   };
-  const orbitUp = () => { orbitRef.current = null; };
+  const orbitUp = () => {
+    setOrbitLook({ ...lookRef.current });
+    orbitRef.current = null;
+  };
 
   // The DECLARATIVE camera is the boot frame only — static props, so React
   // never sends camera UPDATEs after mount; the host writes the node fields
@@ -721,6 +767,13 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         uploadGrid(g.hit.part, g.baseGrid);
       }
     } else {
+      // the undo entry is the PRE-DRAG state (live ticks already moved the
+      // draft, so a plain snapshot would capture mid-drag — swap the base in)
+      history.commit(() => {
+        const pre = snapDraft();
+        pre.grids[g.hit.part] = g.baseGrid.slice();
+        return pre;
+      });
       const final = applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, mirror);
       setPartGrid(g.hit.part, final);
       // ONE-TRUTH compose law: the paint texture must carry the dragged grid,
@@ -766,7 +819,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   }, [grabHover, partRender, rig, view, selPart, brush]);
 
   const setRegion = (part: PartId, regionId: string, value: number) => {
-    setDraft((d) => ({
+    editDraftCoalesced((d) => ({
       ...d,
       regions: { ...d.regions, [part]: { ...(d.regions[part] ?? {}), [regionId]: Math.abs(value) < 0.01 ? 0 : clamp(value, -1, 1) } },
     }));
@@ -827,22 +880,22 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
 
           <ChipRow label="body">
             {(Object.keys(BODY_SHAPES) as BodyShapeId[]).map((id) => (
-              <Chip key={id} label={BODY_SHAPES[id].label} active={draft.bodyShape === id} color="good" onPress={() => { setDraft((d) => ({ ...d, bodyShape: id })); setView('figure'); }} />
+              <Chip key={id} label={BODY_SHAPES[id].label} active={draft.bodyShape === id} color="good" onPress={() => { editDraft((d) => ({ ...d, bodyShape: id })); setView('figure'); }} />
             ))}
           </ChipRow>
           <ChipRow label="clothes">
             {(Object.keys(CLOTHING) as ClothingId[]).map((id) => (
-              <Chip key={id} label={CLOTHING[id].label} active={draft.clothing === id} color={CLOTHING[id].accent} onPress={() => { setDraft((d) => ({ ...d, clothing: id, bottoms: DEFAULT_BOTTOMS[id] })); setView('figure'); }} />
+              <Chip key={id} label={CLOTHING[id].label} active={draft.clothing === id} color={CLOTHING[id].accent} onPress={() => { editDraft((d) => ({ ...d, clothing: id, bottoms: DEFAULT_BOTTOMS[id] })); setView('figure'); }} />
             ))}
           </ChipRow>
           <ChipRow label="bottoms">
             {(Object.keys(BOTTOMS) as BottomsId[]).map((id) => (
-              <Chip key={id} label={BOTTOMS[id].label} active={draft.bottoms === id} color={BOTTOMS[id].accent} onPress={() => { setDraft((d) => ({ ...d, bottoms: id })); setView('figure'); }} />
+              <Chip key={id} label={BOTTOMS[id].label} active={draft.bottoms === id} color={BOTTOMS[id].accent} onPress={() => { editDraft((d) => ({ ...d, bottoms: id })); setView('figure'); }} />
             ))}
           </ChipRow>
           <ChipRow label="print">
             {(Object.keys(CLOTHING_SKINS) as ClothingSkinId[]).map((id) => (
-              <Chip key={id} label={CLOTHING_SKINS[id].label} active={draft.clothingSkin === id} color={id === 'plain' ? 'good' : 'warn'} onPress={() => { setDraft((d) => ({ ...d, clothingSkin: id })); setView('figure'); }} />
+              <Chip key={id} label={CLOTHING_SKINS[id].label} active={draft.clothingSkin === id} color={id === 'plain' ? 'good' : 'warn'} onPress={() => { editDraft((d) => ({ ...d, clothingSkin: id })); setView('figure'); }} />
             ))}
           </ChipRow>
           <ChipRow label="extras">
@@ -853,7 +906,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
                 active={draft.accessories.includes(id)}
                 color="#a78bfa"
                 onPress={() => {
-                  setDraft((d) => {
+                  editDraft((d) => {
                     const cur = d.accessories;
                     if (cur.includes(id)) return { ...d, accessories: cur.filter((x) => x !== id) };
                     const cleaned = id === 'cap' ? cur.filter((x) => x !== 'beanie') : id === 'beanie' ? cur.filter((x) => x !== 'cap') : cur;
@@ -865,14 +918,14 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
             ))}
           </ChipRow>
           <ChipRow label="prop">
-            <Chip label="none" active={draft.heldItem === 'none'} color="good" onPress={() => { setDraft((d) => ({ ...d, heldItem: 'none' })); setView('figure'); }} />
+            <Chip label="none" active={draft.heldItem === 'none'} color="good" onPress={() => { editDraft((d) => ({ ...d, heldItem: 'none' })); setView('figure'); }} />
             {GAME_ITEMS.definitions.map((item) => (
-              <Chip key={item.id} label={item.label} active={draft.heldItem === item.id} color={item.tone} onPress={() => { setDraft((d) => ({ ...d, heldItem: item.id })); setView('figure'); }} />
+              <Chip key={item.id} label={item.label} active={draft.heldItem === item.id} color={item.tone} onPress={() => { editDraft((d) => ({ ...d, heldItem: item.id })); setView('figure'); }} />
             ))}
           </ChipRow>
           <ChipRow label="rig">
             {(Object.keys(BODY_POSES) as BodyPoseId[]).map((id) => (
-              <Chip key={id} label={BODY_POSES[id].label} active={draft.bodyPose === id} color="good" onPress={() => { setDraft((d) => ({ ...d, bodyPose: id })); setView('figure'); }} />
+              <Chip key={id} label={BODY_POSES[id].label} active={draft.bodyPose === id} color="good" onPress={() => { editDraft((d) => ({ ...d, bodyPose: id })); setView('figure'); }} />
             ))}
             <Chip label={bodyRigAnim ? 'anim ■' : 'anim'} active={bodyRigAnim} color="good" onPress={() => { setBodyRigAnim((v) => !v); setView('figure'); }} />
             <Chip label="hitboxes" active={showHitboxes} color="cyan" onPress={() => { setShowHitboxes((v) => !v); setView('figure'); }} />
@@ -989,7 +1042,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
             <Row style={{ gap: 8, alignItems: 'center' }}>
               <Chip label="generate face" color="good" onPress={generateFaceOnly} />
               <Chip label="export .hed" onPress={exportHead} />
-              {draft.face ? <Chip label="remove face" onPress={() => { setDraft((d) => ({ ...d, face: null })); setAnim(null); setStatus(null); }} /> : null}
+              {draft.face ? <Chip label="remove face" onPress={() => { editDraft((d) => ({ ...d, face: null })); setAnim(null); setStatus(null); }} /> : null}
             </Row>
           ) : null}
           {isHead && draft.face ? (
@@ -1001,15 +1054,15 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
           ) : null}
 
           <ChipRow label="skin">
-            <SwatchRow colors={DRAFT_DEFAULTS.skins} active={draft.skin} onPick={(skin) => setDraft((d) => ({ ...d, skin }))} />
+            <SwatchRow colors={DRAFT_DEFAULTS.skins} active={draft.skin} onPick={(skin) => editDraft((d) => ({ ...d, skin }))} />
           </ChipRow>
 
           <Knob label="brush size" value={brush} spec={TUNE.knobs.brush} onChange={setBrush} />
           <Knob label="strength" value={strength} spec={TUNE.knobs.strength} onChange={setStrength} />
-          <Knob label="depth amount" value={draft.amount} spec={TUNE.knobs.amount} onChange={(amount) => setDraft((d) => ({ ...d, amount }))} />
+          <Knob label="depth amount" value={draft.amount} spec={TUNE.knobs.amount} onChange={(amount) => editDraftCoalesced((d) => ({ ...d, amount }))} />
           {isHead ? (
             <>
-              <Knob label="skull stretch" value={draft.headScaleY} spec={TUNE.knobs.skull} onChange={(headScaleY) => setDraft((d) => ({ ...d, headScaleY }))} />
+              <Knob label="skull stretch" value={draft.headScaleY} spec={TUNE.knobs.skull} onChange={(headScaleY) => editDraftCoalesced((d) => ({ ...d, headScaleY }))} />
               <Knob label="photo size" value={photoScale} spec={TUNE.knobs.photoScale} onChange={setPhotoScale} />
               <Knob label="photo up/down" value={photoY} spec={TUNE.knobs.photoY} onChange={setPhotoY} />
             </>
@@ -1018,7 +1071,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
           <Col style={{ gap: 6, paddingTop: 4 }}>
             <Row style={{ gap: 8, alignItems: 'center' }}>
               <Text fontSize={11} color={T.dim} style={{ width: 84 }}>region shape</Text>
-              <Chip label="reset" onPress={() => setDraft((d) => ({ ...d, regions: { ...d.regions, [selPart]: {} } }))} />
+              <Chip label="reset" onPress={() => editDraft((d) => ({ ...d, regions: { ...d.regions, [selPart]: {} } }))} />
             </Row>
             {SHAPE_REGIONS[selPart].map((region) => (
               <RegionSliderRow

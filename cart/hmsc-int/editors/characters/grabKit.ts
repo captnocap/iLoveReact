@@ -209,13 +209,21 @@ export type GrabHit = {
   t: number;
 };
 
-/** The cell whose surface point sits nearest the pixel's ray — front-facing,
- *  closest-along-ray wins (so a cheek beats the back of the skull). */
+/** The cell under the pixel. Two passes over the front-facing candidates
+ *  within the grab radius: first find the FIRST surface the ray meets (min
+ *  t), then pick the candidate NEAREST THE RAY inside that depth window. Pure
+ *  min-t picked silhouette cells nearer the camera at grazing angles — the
+ *  "hit box gets funky on angles" report; nearest-to-the-ray is what the
+ *  cursor visually points at, while the window keeps occlusion honest (a
+ *  cheek still beats the shoulder behind it). */
 export function pickGrab(sx: number, sy: number, rect: Rect, cam: Solved, clouds: GrabCloud[]): GrabHit | null {
   const ray = GAME_CAMERA.screenRay(sx, sy, rect, cam);
   const [ox, oy, oz] = ray.origin;
   const [dx, dy, dz] = ray.dir;
-  let best: GrabHit | null = null;
+  type Candidate = { cloud: GrabCloud; c: number; t: number; distSq: number };
+  const candidates: Candidate[] = [];
+  let tMin = Infinity;
+  let windowR = 0;
   for (const cloud of clouds) {
     const { points, outward, grabRadius } = cloud;
     const r2 = grabRadius * grabRadius;
@@ -223,20 +231,31 @@ export function pickGrab(sx: number, sy: number, rect: Rect, cam: Solved, clouds
       const i = c * 3;
       const wx = points[i] - ox, wy = points[i + 1] - oy, wz = points[i + 2] - oz;
       const t = wx * dx + wy * dy + wz * dz;
-      if (t <= 0 || (best && t >= best.t)) continue;
+      if (t <= 0) continue;
       const distSq = wx * wx + wy * wy + wz * wz - t * t;
       if (distSq > r2) continue;
       if (outward[i] * dx + outward[i + 1] * dy + outward[i + 2] * dz > GRAB_TUNING.facingMax) continue;
-      const gx = c % HED_GRID_W;
-      const gy = (c / HED_GRID_W) | 0;
-      const { cu, cv } = cellUv(gx, gy);
-      best = {
-        part: cloud.part, instanceIndex: cloud.instanceIndex, gx, gy, cu, cv,
-        world: [points[i], points[i + 1], points[i + 2]], grabRadius, t,
-      };
+      candidates.push({ cloud, c, t, distSq });
+      if (t < tMin) { tMin = t; windowR = grabRadius; }
     }
   }
-  return best;
+  if (candidates.length === 0) return null;
+  const tMax = tMin + windowR * 2;
+  let best: Candidate | null = null;
+  for (const cand of candidates) {
+    if (cand.t > tMax) continue;
+    if (!best || cand.distSq < best.distSq) best = cand;
+  }
+  const { cloud, c, t } = best!;
+  const i = c * 3;
+  const gx = c % HED_GRID_W;
+  const gy = (c / HED_GRID_W) | 0;
+  const { cu, cv } = cellUv(gx, gy);
+  return {
+    part: cloud.part, instanceIndex: cloud.instanceIndex, gx, gy, cu, cv,
+    world: [cloud.points[i], cloud.points[i + 1], cloud.points[i + 2]],
+    grabRadius: cloud.grabRadius, t,
+  };
 }
 
 // ── drag — mouse deltas → grid value, value → stamped grid ───────────────────
@@ -317,13 +336,18 @@ export function applyGrabStamp(base: number[], cu: number, cv: number, rxUv: num
 }
 
 // ── the wireframe grid texture (the "see the grid stretch" toggle) ───────────
-// Baked ONCE under GRAB_GRID_TEXTURE_KEY (StaticSurface + this Effect) and
-// sampled by an inflated twin of the part mesh, whose UVs ARE unwrap space —
-// so the lines run exactly THROUGH the 48×24 cell centers (the pull points),
-// every intersection dot IS a grabbable point, and the whole lattice stretches
-// with the surface as a drag deforms it (vertices move, UVs don't).
-// Transparent outside lines/dots: the capture clears to alpha 0 and the mesh
-// shader multiplies texture alpha. (No backticks in WGSL.)
+// Baked under GRAB_GRID_TEXTURE_KEY (StaticSurface + this Effect) and sampled
+// by an inflated twin of the part mesh, whose UVs ARE unwrap space — so the
+// lines run exactly THROUGH the 48×24 cell centers (the pull points), every
+// intersection dot IS a grabbable point, and the whole lattice stretches with
+// the surface as a drag deforms it (vertices move, UVs don't).
+//
+// data = [hoverU, hoverV, mirrorOn]: the HOVERED cell lights up hot (plus its
+// meridian twin when mirror is on — you see BOTH stamp sites before pulling).
+// hoverU < 0 = no hover. The capture re-bakes only when the cell changes (the
+// route memoizes the data array on it). Transparent outside lines/dots: the
+// capture clears to alpha 0 and the mesh shader multiplies texture alpha.
+// (No backticks in WGSL.)
 export const GRAB_GRID_WGSL = `
 @group(0) @binding(1) var<storage, read> data: array<f32>;
 
@@ -343,8 +367,27 @@ export const GRAB_GRID_WGSL = `
   let d = length(f);
   let dot_a = 1.0 - smoothstep(0.16, 0.16 + max(fw.x, fw.y) * 1.4, d);
 
-  let a = clamp(line_a + dot_a, 0.0, 0.92);
-  let col = mix(vec3f(0.55, 0.82, 1.0), vec3f(1.0, 1.0, 1.0), dot_a);
+  // the hovered node lights up: a hot core + a soft halo, in cell units so it
+  // hugs exactly one lattice point; the meridian twin joins when mirror is on
+  let hover = vec2f(data[0], data[1]);
+  var hot = 0.0;
+  if (hover.x >= 0.0) {
+    let hc = vec2f(cell.x - hover.x * ${HED_GRID_W}.0, cell.y - hover.y * ${HED_GRID_H}.0);
+    let hd = length(hc);
+    hot = 1.0 - smoothstep(0.28, 0.42, hd);
+    hot = hot + (1.0 - smoothstep(0.3, 1.1, hd)) * 0.35;
+    if (data[2] > 0.5) {
+      let mc = vec2f(cell.x - (1.0 - hover.x) * ${HED_GRID_W}.0, cell.y - hover.y * ${HED_GRID_H}.0);
+      let md = length(mc);
+      let mhot = (1.0 - smoothstep(0.28, 0.42, md)) + (1.0 - smoothstep(0.3, 1.1, md)) * 0.35;
+      hot = max(hot, mhot * 0.8);
+    }
+    hot = clamp(hot, 0.0, 1.0);
+  }
+
+  let a = clamp(line_a + dot_a + hot, 0.0, 1.0);
+  var col = mix(vec3f(0.55, 0.82, 1.0), vec3f(1.0, 1.0, 1.0), dot_a);
+  col = mix(col, vec3f(0.35, 0.95, 1.0), hot);
   return vec4f(col * a, a);
 }
 `;

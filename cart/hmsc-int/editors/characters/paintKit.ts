@@ -35,8 +35,12 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
     photoY: { min: -200, max: 200, step: 8, precision: 0 },
     zoom: { min: 1.6, max: 12, step: 0.4, precision: 1 },
   },
-  /** orbit drag feel + pitch clamp */
-  orbit: { yawPerPx: 0.4, pitchPerPx: 0.3, pitchMin: 4, pitchMax: 85 },
+  /** orbit drag feel + pitch clamp. Yaw is unbounded (full 360 spins); pitch
+   *  runs pole to pole — ±88 instead of ±90 because the look-at up vector
+   *  degenerates exactly overhead/underfoot (GRABQOL-0605: "i cant get top
+   *  or bottom of the model"). The host orbit controller doesn't clamp;
+   *  this JS clamp is the one authority and the shadow stays exact. */
+  orbit: { yawPerPx: 0.4, pitchPerPx: 0.3, pitchMin: -88, pitchMax: 88 },
   /** draft auto-commit debounce (V20 micro-save; AUTOSAVE-0605) */
   autosaveDebounceMs: 1200,
   // (the face-paint palette + stroke numbers died with the coupled

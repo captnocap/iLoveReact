@@ -18,6 +18,7 @@ const image_cache = @import("gpu/image_cache.zig");
 const border_dash = @import("gpu/svg/dash.zig");
 const animations = @import("gpu/animations.zig");
 const log = @import("diag/log.zig");
+const hit_trace = @import("diag/hit_trace.zig");
 const tooltip = @import("primitive/tooltip.zig");
 const context_menu = @import("primitive/context_menu.zig");
 const telemetry = @import("diag/telemetry.zig");
@@ -3659,6 +3660,9 @@ pub fn run(config_in: AppConfig) !void {
                             }
                         }
                         const hit = layout.hitTest(config.root, mx, my);
+                        // NAVDEAD-0605 diagnostic: dump the full hit-candidate
+                        // stack for every left click → stderr + /tmp/reactjit-hit.log.
+                        hit_trace.trace(config.root, mx, my, hit);
                         const hit_is_interactive = if (hit) |h| (h.input_id != null or h.handlers.on_mouse_down != null or h.handlers.js_on_mouse_down != null or h.handlers.lua_on_mouse_down != null or h.handlers.on_mouse_move != null or h.handlers.js_on_mouse_move != null or h.handlers.lua_on_mouse_move != null or h.handlers.on_mouse_up != null or h.handlers.js_on_mouse_up != null or h.handlers.lua_on_mouse_up != null or h.handlers.on_press != null or h.handlers.js_on_press != null or h.handlers.lua_on_press != null or h.href != null) else false;
                         if (hit_is_interactive) {
                             const h = hit.?;

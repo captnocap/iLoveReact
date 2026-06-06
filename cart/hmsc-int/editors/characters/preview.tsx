@@ -166,18 +166,29 @@ export const GrabMarker = memo(function GrabMarker(props: { marker: GrabMarkerIn
   );
 });
 
-// The grid overlay's static texture: ONE Effect bake (transparent except the
-// cell-center hairlines + intersection dots). Module-const props — inline
-// identities on an Effect inside a StaticSurface re-bake the capture every
-// frame (the recorded tileSurface hazard).
-const GRID_EFFECT_DATA = [0];
+// The grid overlay's texture: ONE Effect bake (transparent except the
+// cell-center hairlines + intersection dots), re-baked ONLY when the hovered
+// cell changes — the data array is memo'd on (cu, cv, mirror), so an idle or
+// orbiting frame never re-captures (the tileSurface inline-identity hazard,
+// inverted on purpose: identity change IS the re-bake signal here).
 const GRID_EFFECT_STYLE = { position: 'absolute' as const, left: 0, top: 0, width: PAINT_EDITOR_TUNING.editor.width, height: PAINT_EDITOR_TUNING.editor.height };
 const GRID_CAPTURE_STYLE = { position: 'absolute' as const, left: -99999, top: 0, width: PAINT_EDITOR_TUNING.editor.width, height: PAINT_EDITOR_TUNING.editor.height };
 
-export const GrabGridCapture = memo(function GrabGridCapture() {
+/** The lattice texture + its hover highlight: the hovered pull point lights
+ *  up hot in the lattice itself (and its meridian twin when mirror is on), so
+ *  "am I about to pull the right node" is answered in the same visual layer
+ *  as the grid — not just by the marker sphere. */
+export const GrabGridCapture = memo(function GrabGridCapture(props: {
+  hover: { cu: number; cv: number } | null;
+  mirror: boolean;
+}) {
+  const data = useMemo(
+    () => [props.hover?.cu ?? -1, props.hover?.cv ?? -1, props.mirror ? 1 : 0],
+    [props.hover?.cu, props.hover?.cv, props.mirror],
+  );
   return (
     <StaticSurface staticKey={GRAB_GRID_TEXTURE_KEY} style={GRID_CAPTURE_STYLE}>
-      <Effect shader={GRAB_GRID_WGSL} data={GRID_EFFECT_DATA} style={GRID_EFFECT_STYLE} />
+      <Effect shader={GRAB_GRID_WGSL} data={data} style={GRID_EFFECT_STYLE} />
     </StaticSurface>
   );
 });

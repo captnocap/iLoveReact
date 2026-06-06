@@ -125,6 +125,24 @@ pub fn hitTest(node: *Node, mx: f32, my: f32) ?*Node {
         child_my = w.y;
     }
 
+    // Canvas container: graph-space children must never be hit-tested with
+    // screen coords — positionOneCanvasNode writes RAW GRAPH coordinates into
+    // their computed rects, so a panned canvas leaves rects over the app's
+    // chrome that swallow clicks (NAVDEAD-0605). Only Canvas.Clamp children
+    // stay in screen space. Mirrors layout.hitTest + hitTestHoverable.
+    if (node.canvas_type != null) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        var ci = node.children.len;
+        while (ci > 0) {
+            ci -= 1;
+            const child = &node.children[ci];
+            if (child.canvas_clamp) {
+                if (hitTest(child, child_mx, child_my)) |hit| return hit;
+            }
+        }
+        return node;
+    }
+
     // Check children in reverse order (last child = front-most)
     var i = node.children.len;
     while (i > 0) {
@@ -291,6 +309,22 @@ pub fn hitTestText(node: *Node, mx: f32, my: f32) ?*Node {
         child_my = w.y;
     }
 
+    // Canvas guard — graph-space children skipped, see hitTest (NAVDEAD-0605).
+    // A canvas itself is never a text node, so in-bounds resolves to clamp
+    // children only.
+    if (node.canvas_type != null) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        var ci = node.children.len;
+        while (ci > 0) {
+            ci -= 1;
+            const child = &node.children[ci];
+            if (child.canvas_clamp) {
+                if (hitTestText(child, child_mx, child_my)) |hit| return hit;
+            }
+        }
+        return null;
+    }
+
     // Check children in reverse order (last child = front-most)
     var i = node.children.len;
     while (i > 0) {
@@ -363,6 +397,21 @@ pub fn hitTestRightClick(node: *Node, mx: f32, my: f32) ?*Node {
         child_my = w.y;
     }
 
+    // Canvas guard — graph-space children skipped, see hitTest (NAVDEAD-0605).
+    if (node.canvas_type != null) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        var ci = node.children.len;
+        while (ci > 0) {
+            ci -= 1;
+            const child = &node.children[ci];
+            if (child.canvas_clamp) {
+                if (hitTestRightClick(child, child_mx, child_my)) |hit| return hit;
+            }
+        }
+        if (node.handlers.on_right_click != null or node.context_menu_items != null) return node;
+        return null;
+    }
+
     var i = node.children.len;
     while (i > 0) {
         i -= 1;
@@ -406,6 +455,21 @@ pub fn hitTestScroll(node: *Node, mx: f32, my: f32) ?*Node {
         child_my = w.y;
     }
 
+    // Canvas guard — graph-space children skipped, see hitTest (NAVDEAD-0605).
+    if (node.canvas_type != null) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        var ci = node.children.len;
+        while (ci > 0) {
+            ci -= 1;
+            const child = &node.children[ci];
+            if (child.canvas_clamp) {
+                if (hitTestScroll(child, child_mx, child_my)) |hit| return hit;
+            }
+        }
+        if (node.handlers.js_on_scroll != null or node.handlers.on_scroll != null) return node;
+        return null;
+    }
+
     var i = node.children.len;
     while (i > 0) {
         i -= 1;
@@ -434,6 +498,23 @@ pub fn findScrollContainer(node: *Node, mx: f32, my: f32) ?*Node {
     if (is_scroll) {
         child_my = my + node.scroll_y;
         child_mx = mx + node.scroll_x;
+    }
+
+    // Canvas guard — graph-space children skipped, see hitTest (NAVDEAD-0605).
+    // A scroll container inside a panned-away Canvas.Node must not capture
+    // wheel events through its leaked graph-space rect.
+    if (node.canvas_type != null) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        var ci = node.children.len;
+        while (ci > 0) {
+            ci -= 1;
+            const child = &node.children[ci];
+            if (child.canvas_clamp) {
+                if (findScrollContainer(child, child_mx, child_my)) |hit| return hit;
+            }
+        }
+        if (is_scroll) return node;
+        return null;
     }
 
     // Check children in reverse order (deepest/front-most first). NO AABB
