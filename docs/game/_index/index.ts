@@ -1,4 +1,4 @@
-// docs/game/_index — aggregate over all 38 DocIndex records + query helpers.
+// docs/game/_index — aggregate over all 39 DocIndex records + query helpers.
 //
 // Usage (from a cart, a script under tools/v8cli, or just by reading):
 //   import { byPurpose, byStatus, hazardsBySeverity } from 'docs/game/_index';
@@ -48,6 +48,7 @@ import { pixel_icon_gallery } from './records/pixel_icon_gallery';
 import { planet_run } from './records/planet_run';
 import { ragdoll_lab } from './records/ragdoll_lab';
 import { render_perf_lab } from './records/render_perf_lab';
+import { request_ledger } from './records/request_ledger';
 import { scape } from './records/scape';
 import { shitcoin } from './records/shitcoin';
 import { skybox_demo } from './records/skybox_demo';
@@ -65,7 +66,8 @@ export const ALL_DOCS: DocIndex[] = [
   effect_fills, game_item_gallery, game_activities, game_animation, game_build, game_cutscene, game_missions, game_world, geometry_demo, head_lab, hmsc, hmsc_int,
   hmsc_massive_map_lab, hmsc_scale_lab, input_bench, pathing_lab, physics3d,
   physics_lab, pixel_icon_demo, pixel_icon_gallery, planet_run, ragdoll_lab,
-  render_perf_lab, scape, shitcoin, skybox_demo, vehicle_lab, voxel_stack_demo,
+  render_perf_lab, request_ledger, scape, shitcoin, skybox_demo, vehicle_lab,
+  voxel_stack_demo,
 ];
 
 // ── flattened views (each row carries its owning doc) ───────────────────────

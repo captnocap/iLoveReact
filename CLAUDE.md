@@ -205,6 +205,26 @@ Every capability should be usable in one line by someone who doesn't code. The t
 
 ---
 
+## User Asks: the Request Ledger (REQLEDGER-0606)
+
+git captures commits, not prompts. Un-logged user asks historically get lost
+or half-resolved with no trace — the ledger is how your work survives review.
+
+When a USER prompt arrives directly in your pane (or you relay one as
+supervisor):
+
+1. **FIRST**, before working: `tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>` — it prints your req id. Verbatim means verbatim: quote it, never paraphrase or trim.
+2. Your work is **not done** until the resolution paragraph is written:
+   `tools/request resolve <id> --para "<what was done, why, what changed>" --shas <sha,...>` (real paragraph, ≥120 chars; `--shas none` for no-code answers).
+3. Cite the req id in your commit message — the existing `USER ASK` marker convention gains an id: `(USER ASK req_0007)`.
+
+`tools/request list --open` is the standing debt list. `tools/oracle "<query>"`
+matches request text + resolutions (the REQUEST LEDGER tier). Mechanism doc:
+`docs/game/REQUESTS.md`. Backfill is not required — historical USER ASK
+commits stay as they are.
+
+---
+
 ## Git Discipline (CRITICAL)
 
 **Commit early and often. Do not leave work uncommitted.**

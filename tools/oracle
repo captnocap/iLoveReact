@@ -18,7 +18,9 @@ IDX="$ROOT/docs/game/_index"
 GEN="$IDX/bundle-oracle.js"   # bundle-*.js is gitignored
 
 if [ ! -f "$GEN" ] || [ -n "$(find "$IDX" -name '*.ts' -newer "$GEN" -print -quit 2>/dev/null)" ]; then
-  "$ROOT/tools/esbuild" "$IDX/oracle.ts" --bundle --format=iife --outfile="$GEN" --log-level=error
+  "$ROOT/tools/esbuild" "$IDX/oracleCli.ts" --bundle --format=iife --outfile="$GEN" --log-level=error
 fi
 
-exec "$ROOT/tools/v8cli" "$GEN" "$@"
+# RJIT_ROOT: the REQUEST LEDGER tier (docs/game/_requests/) is read at
+# runtime, so the oracle needs the repo root regardless of caller cwd.
+RJIT_ROOT="$ROOT" exec "$ROOT/tools/v8cli" "$GEN" "$@"

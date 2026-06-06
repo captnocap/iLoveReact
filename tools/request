@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# request — the REQUEST LEDGER CLI (REQLEDGER-0606): user asks become durable,
+# oracle-served, resolution-accountable records. git captures commits, not
+# prompts; this captures the prompts.
+#
+#   tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>
+#   tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
+#   tools/request list [--open]
+#   tools/request show <id>
+#
+# LLMs: when a USER prompt arrives directly in your pane, log it FIRST; your
+# work is not done until `resolve` carries the paragraph + commit SHAs. The
+# rule lives in CLAUDE.md ("User Asks: the Request Ledger"); the mechanism in
+# docs/game/REQUESTS.md. Entries live in docs/game/_requests/ and are served
+# by tools/oracle. Source: docs/game/_index/requestCli.ts + requests.ts;
+# rebuilds its bundle automatically; runs under tools/v8cli (no node).
+set -euo pipefail
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+IDX="$ROOT/docs/game/_index"
+GEN="$IDX/bundle-request.js"   # bundle-*.js is gitignored
+
+if [ ! -f "$GEN" ] || [ -n "$(find "$IDX" -name '*.ts' -newer "$GEN" -print -quit 2>/dev/null)" ]; then
+  "$ROOT/tools/esbuild" "$IDX/requestCli.ts" --bundle --format=iife --outfile="$GEN" --log-level=error
+fi
+
+RJIT_ROOT="$ROOT" exec "$ROOT/tools/v8cli" "$GEN" "$@"

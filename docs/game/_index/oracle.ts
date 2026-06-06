@@ -4,17 +4,20 @@
 //   tools/oracle "player height"
 //   tools/oracle camera aim
 //
-// Searches three tiers, in authority order:
+// Searches four tiers, in authority order:
 //   1. RULINGS    — the user's decisions (decisions.ts / DECISIONS.md). These
 //                   override everything; competing ideas in code are history.
-//   2. RECORDS    — the typed index over the 33-doc corpus (interfaces,
+//   2. REQUESTS   — the request ledger (requests.ts / docs/game/_requests/):
+//                   the user's asks, verbatim, with their resolutions + SHAs.
+//   3. RECORDS    — the typed index over the 33-doc corpus (interfaces,
 //                   patterns), with live/lab/dormant/deprecated status.
-//   3. HAZARDS    — the traps: naming lies, drift, footguns.
+//   4. HAZARDS    — the traps: naming lies, drift, footguns.
 //
 // Output is compact, ranked, and source-cited so the caller can go deeper
 // (DECISIONS.md / docs/game/<doc>.md) only when needed.
 
 import { DECISIONS, type Decision } from './decisions';
+import { loadRequests, type RequestRecord } from './requests';
 import {
   ALL_INTERFACES, ALL_PATTERNS, ALL_HAZARDS,
   type OwnedInterface, type OwnedPattern, type OwnedHazard,
@@ -29,7 +32,7 @@ const STOPWORDS = new Set([
   'this', 'that', 'and', 'or', 'not', 'with', 'about', 'best', 'right', 'correct',
 ]);
 
-function tokenize(s: string): string[] {
+export function tokenize(s: string): string[] {
   return s.toLowerCase().split(/[^a-z0-9_]+/).filter((t) => t.length > 1 && !STOPWORDS.has(t));
 }
 
@@ -110,6 +113,16 @@ export function searchDecisions(queryTokens: string[]): Scored<Decision>[] {
   ], 3);
 }
 
+/** The ledger is runtime data, not bundled — callers pass the loaded list
+ *  (oracle() loads the real one; tests pass fabricated records). */
+export function searchRequests(queryTokens: string[], requests: RequestRecord[]): Scored<RequestRecord>[] {
+  return rank(requests, queryTokens, (r) => [
+    { text: r.text, weight: 3 },
+    { text: r.resolution ?? '', weight: 1 },
+    { text: `${r.id} ${r.origin}`, weight: 1 },
+  ], 3);
+}
+
 export function searchInterfaces(queryTokens: string[]): Scored<OwnedInterface>[] {
   return rank(ALL_INTERFACES, queryTokens, (i) => [
     { text: i.name, weight: 3 },
@@ -140,6 +153,7 @@ export function searchHazards(queryTokens: string[]): Scored<OwnedHazard>[] {
 // ── report ───────────────────────────────────────────────────────────────────
 
 const RULE_CAP = 4;
+const REQ_CAP = 4;
 const REC_CAP = 8;
 const PAT_CAP = 4;
 const HAZ_CAP = 5;
@@ -173,6 +187,17 @@ function retiredBy(i: OwnedInterface): string | null {
   return null;
 }
 
+function requestLine(r: RequestRecord, score: number): string {
+  const ask = r.text.length > 220 ? `${r.text.slice(0, 220)}…` : r.text;
+  const lines = [
+    `[${r.id} · ${r.status.toUpperCase()} · ${fmtScore(score)}] ${r.at.slice(0, 10)} · ${r.origin}`,
+    `  "${ask.replace(/\n/g, ' ')}"`,
+  ];
+  if (r.resolution) lines.push(`  resolution: ${r.resolution.length > 200 ? `${r.resolution.slice(0, 200)}…` : r.resolution}`);
+  if (r.status === 'resolved') lines.push(`  commits: ${r.shas && r.shas.length > 0 ? r.shas.join(' ') : '(none — no-code resolution)'}`);
+  return lines.join('\n');
+}
+
 function interfaceLine(i: OwnedInterface, score: number): string {
   const where = i.codeRef ?? i.sourceFile ?? '';
   const retired = retiredBy(i);
@@ -195,26 +220,44 @@ export function oracle(query: string): string {
     return 'usage: tools/oracle "<query>"  (e.g. tools/oracle "which humanoid", tools/oracle "player height")';
   }
 
+  // The ledger is data on disk, not bundled — a corrupt entry shouldn't take
+  // every oracle query down, but it must be SAID, not swallowed.
+  let requests: RequestRecord[] = [];
+  let ledgerWarning: string | null = null;
+  try {
+    requests = loadRequests();
+  } catch (error: any) {
+    ledgerWarning = `⚠ request ledger unreadable: ${error?.message ?? String(error)}`;
+  }
+
   buildDf([
     { texts: DECISIONS.map((d) => `${d.name} ${d.keywords.join(' ')} ${d.ruling}`) },
+    { texts: requests.map((r) => `${r.text} ${r.resolution ?? ''}`) },
     { texts: ALL_INTERFACES.map((i) => `${i.name} ${i.purpose.join(' ')} ${i.description}`) },
     { texts: ALL_PATTERNS.map((p) => `${p.name} ${p.description}`) },
     { texts: ALL_HAZARDS.map((h) => `${h.name} ${h.description}`) },
   ]);
 
   const rulings = searchDecisions(queryTokens).slice(0, RULE_CAP);
+  const asks = searchRequests(queryTokens, requests).slice(0, REQ_CAP);
   const records = searchInterfaces(queryTokens).slice(0, REC_CAP);
   const patterns = searchPatterns(queryTokens).slice(0, PAT_CAP);
   const hazards = searchHazards(queryTokens).slice(0, HAZ_CAP);
 
   const out: string[] = [];
   out.push(`oracle: "${query}"`);
+  if (ledgerWarning) out.push(ledgerWarning);
 
   if (rulings.length > 0) {
     out.push('', '═══ RULINGS — the user\'s decisions. These OVERRIDE all code/ideas below. ═══');
     for (const r of rulings) out.push('', decisionBlock(r.item, r.score));
   } else {
     out.push('', '═══ RULINGS ═══', '(no ruling matches — this area may be UNDECIDED; check DECISIONS.md open/show-me items before inventing an approach)');
+  }
+
+  if (asks.length > 0) {
+    out.push('', '─── REQUEST LEDGER (user asks, verbatim → resolutions · tools/request) ───');
+    for (const a of asks) out.push(requestLine(a.item, a.score));
   }
 
   if (records.length > 0) {
@@ -232,15 +275,10 @@ export function oracle(query: string): string {
     for (const h of hazards) out.push(hazardLine(h.item, h.score));
   }
 
-  out.push('', 'sources: docs/game/DECISIONS.md · docs/game/<doc>.md · docs/game/_index/');
+  out.push('', 'sources: docs/game/DECISIONS.md · docs/game/<doc>.md · docs/game/_index/ · docs/game/_requests/');
   return out.join('\n');
 }
 
-// ── CLI entry (run under tools/v8cli; argv = [script, ...query words]) ───────
-
-declare const process: { argv: string[] } | undefined;
-
-const argv = typeof process !== 'undefined' ? process.argv.slice(1) : [];
-if (argv.length > 0 || typeof process !== 'undefined') {
-  console.log(oracle(argv.join(' ')));
-}
+// CLI entry: oracleCli.ts (tools/oracle bundles that, not this). Keeping this
+// module side-effect-free lets requests.test.ts import searchRequests/tokenize
+// without firing a query.
