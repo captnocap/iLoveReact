@@ -44,10 +44,10 @@ export const request_ledger: DocIndex = {
       kind: 'utility',
       sourceFile: 'docs/game/_index/requests.ts',
       codeRef: 'docs/game/_index/requests.ts (hookCapturePrompt, requestsForSession)',
-      description: 'The addendum layer: .claude/settings.json registers tools/request-hook-prompt (UserPromptSubmit → log the LITERAL prompt with sessionId + captureMode hook; stdout puts the req id in session context) and tools/request-hook-stop (Stop → one {"decision":"block"} nudge per turn cycle listing the session\'s unresolved asks; stop_hook_active guards loops). The necessary-vs-noise rule is P2 data in docs/game/_requests/_config.json (minPromptChars, ackPattern, stopReminder block-once|context|off) — acks and slash/!/# commands are never logged. Hook mode NEVER exits 2 (would block + erase the user\'s prompt).',
+      description: 'The addendum layer: .claude/settings.json registers tools/request-hook-prompt (UserPromptSubmit → log the LITERAL prompt with sessionId + captureMode hook; stdout puts the req id in session context) and tools/request-hook-stop (Stop → one {"decision":"block"} nudge per turn cycle listing the session\'s unresolved asks; stop_hook_active guards loops). CODEX PARITY (addendum 2): .codex/hooks.json registers tools/request-hook-{prompt,stop}-codex — thin adapters exec\'ing the SAME subcommands with --cli codex (origin codex:<id8>; Stop context-mode emits {"systemMessage"} because Codex Stop is JSON-only stdout). Codex skips the hooks until trusted via /hooks (per-hash trust + project .codex layer trust). The necessary-vs-noise rule is P2 data in docs/game/_requests/_config.json (minPromptChars, ackPattern, stopReminder block-once|context|off) — acks and slash/!/# commands are never logged. Hook mode NEVER exits 2 (would block + erase the user\'s prompt).',
       dependsOn: ['RequestRecord', 'loadRequests/logRequest/resolveRequest'],
       emits: ['docs/game/_requests/req_<seq>.json'],
-      consumers: ['every Claude session in this repo (settings.json hooks)'],
+      consumers: ['every Claude session in this repo (.claude/settings.json hooks)', 'every trusted Codex session in this repo (.codex/hooks.json)'],
       status: 'live',
     },
     {

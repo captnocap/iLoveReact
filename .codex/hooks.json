@@ -1,0 +1,27 @@
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/tools/request-hook-prompt-codex\"",
+            "statusMessage": "request-ledger capture"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$(git rev-parse --show-toplevel)/tools/request-hook-stop-codex\"",
+            "timeout": 30,
+            "statusMessage": "request-ledger open-asks check"
+          }
+        ]
+      }
+    ]
+  }
+}

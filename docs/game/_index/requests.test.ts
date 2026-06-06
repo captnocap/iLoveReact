@@ -140,6 +140,17 @@ test('hook capture logs the literal prompt with sessionId + captureMode', () => 
   assertEqual(record.origin, `session:${SESSION.slice(0, 8)}`, 'origin derives from session');
 });
 
+test('codex captures share the write path, diverging only in the origin label', () => {
+  const dir = freshDir('codex');
+  const literal = 'please wire the painter so the texture lands on the selected face of the piece';
+  const result = hookCapturePrompt(dir, 'c0dex123-4567-89ab-cdef-000000000042', literal, DEFAULT_LEDGER_CONFIG, 'codex');
+  assertEqual(result.action, 'logged', 'codex prompt captured');
+  const record = loadRequests(dir)[0];
+  assertEqual(record.text, literal, 'verbatim through the shared path');
+  assertEqual(record.origin, 'codex:c0dex123', 'origin names the capturing CLI');
+  assertEqual(record.captureMode, 'hook', 'same captureMode vocabulary');
+});
+
 test('the noise rule skips acks, commands, and short prompts — never logs them', () => {
   const dir = freshDir('noise');
   const skipped = [

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# request-hook-prompt-codex — Codex CLI UserPromptSubmit hook (REQLEDGER-0606
+# addendum 2). Same job as the Claude adapter beside it: payload JSON on stdin
+# ({session_id, prompt, ...} — Codex sends the same field names), the LITERAL
+# prompt lands in the ledger via the ONE shared write path (request
+# hook-prompt); --cli codex only labels the origin codex:<id8>. Plain stdout
+# becomes developer context on both CLIs, so the captured-req line surfaces
+# the same way. Registered in .codex/hooks.json; never exits 2 (would block
+# the user's prompt).
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/request" hook-prompt --cli codex

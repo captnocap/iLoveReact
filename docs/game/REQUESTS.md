@@ -114,8 +114,27 @@ tunable data in `docs/game/_requests/_config.json`, not a buried constant:
 - `stopReminder` — `block-once` (default) | `context` (transcript-only) |
   `off`.
 
-Manual `tools/request log` keeps working unchanged — codex panes, relays, and
-non-hook contexts still need it (`--session <id>` attaches a session by hand).
+Manual `tools/request log` keeps working unchanged — relays and hook-less
+contexts still need it (`--session <id>` attaches a session by hand).
+
+**Codex panes are captured too** (addendum 2, USER ASK: "have them also make
+it do the same thing with codex"). Codex's hook vocabulary mirrors Claude's —
+`UserPromptSubmit` and `Stop` both exist, with the same `session_id`/`prompt`/
+`stop_hook_active` payload fields — so the ledger write path is shared, not
+reimplemented: `<repo>/.codex/hooks.json` registers
+`tools/request-hook-prompt-codex` and `tools/request-hook-stop-codex`, thin
+adapters that exec `request hook-prompt|hook-stop --cli codex`. The flag's two
+effects: captures get origin `codex:<id8>` (vs `session:<id8>` for Claude),
+and the Stop reminder's `context` mode emits `{"systemMessage": ...}` because
+Codex Stop accepts JSON-only stdout (plain text is invalid there; `block-once`
+is already JSON on both). Stop-nudge parity is full — Codex supports
+`decision:block` continuation and the `stop_hook_active` loop guard.
+
+Codex trust caveat: Codex requires non-managed hooks to be reviewed and
+trusted per hook hash — run `/hooks` in a Codex pane once after this lands
+(and re-trust if the hook files change); project-local hooks also need the
+repo's `.codex/` layer trusted. Until trusted, Codex lists them but skips
+execution.
 
 Verification honesty: the hook payload path is tested by piping fabricated
 UserPromptSubmit/Stop JSON through the real scripts (see requests.test.ts and

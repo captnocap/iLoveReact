@@ -29,9 +29,9 @@ const USAGE = `request — the REQUEST LEDGER (user asks → resolutions; docs/g
   request list [--open] [--session <id>]
   request show <id>
 
-hook mode (wired by .claude/settings.json; payload JSON on stdin):
-  request hook-prompt    UserPromptSubmit → auto-capture the literal prompt
-  request hook-stop      Stop → remind the session of its unresolved asks`;
+hook mode (wired by .claude/settings.json + .codex/hooks.json; payload JSON on stdin):
+  request hook-prompt [--cli codex]   UserPromptSubmit → auto-capture the literal prompt
+  request hook-stop   [--cli codex]   Stop → remind the session of its unresolved asks`;
 
 function fail(message: string, code = 1): never {
   console.error(`request: ${message}`);
@@ -129,13 +129,17 @@ function hookPayload(): any {
 }
 
 /** UserPromptSubmit: capture the LITERAL prompt. stdout (exit 0) becomes
- *  context for the session — the req id lands in front of the worker. */
-function cmdHookPrompt(): void {
+ *  context for the session — the req id lands in front of the worker.
+ *  Claude and Codex send the same payload shape ({session_id, prompt}) and
+ *  both treat plain stdout as added context, so one path serves both;
+ *  --cli codex only changes the origin label. */
+function cmdHookPrompt(flags: Map<string, string>): void {
   const payload = hookPayload();
   const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
   const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
   if (sessionId.length === 0) fail('hook payload has no session_id', 1);
-  const result = hookCapturePrompt(defaultRequestsDir(), sessionId, prompt);
+  const originLabel = flags.get('cli') === 'codex' ? 'codex' : 'session';
+  const result = hookCapturePrompt(defaultRequestsDir(), sessionId, prompt, undefined, originLabel);
   if (result.action === 'logged') {
     console.log(`[request-ledger] captured ${result.record.id} (this prompt, verbatim). Your work is not done until: tools/request resolve ${result.record.id} --para "<what was done, why, what changed>" --shas <sha,...|none>`);
   }
@@ -143,8 +147,10 @@ function cmdHookPrompt(): void {
 }
 
 /** Stop: nudge once per turn cycle about this session's unresolved captures.
- *  stop_hook_active means this nudge already fired — never loop. */
-function cmdHookStop(): void {
+ *  stop_hook_active means this nudge already fired — never loop.
+ *  Codex divergence (--cli codex): its Stop event accepts JSON-ONLY stdout
+ *  (plain text is invalid), so 'context' mode emits {"systemMessage"} there. */
+function cmdHookStop(flags: Map<string, string>): void {
   const payload = hookPayload();
   if (payload.stop_hook_active === true) return;
   const config = loadLedgerConfig();
@@ -159,6 +165,8 @@ function cmdHookStop(): void {
   const reason = `[request-ledger] ${open.length} unresolved ask(s) captured for this session: ${listing}. Resolve each (tools/request resolve <id> --para "<paragraph>" --shas <sha,...|none>) or, if genuinely still in flight, say so and stop again — this reminder fires once per turn cycle.`;
   if (config.stopReminder === 'block-once') {
     console.log(JSON.stringify({ decision: 'block', reason }));
+  } else if (flags.get('cli') === 'codex') {
+    console.log(JSON.stringify({ systemMessage: reason })); // 'context', JSON-only stdout
   } else {
     console.log(reason); // 'context': transcript-only note
   }
@@ -207,8 +215,8 @@ try {
   else if (command === 'resolve') cmdResolve(positionals, flags);
   else if (command === 'list') cmdList(flags);
   else if (command === 'show') cmdShow(positionals);
-  else if (command === 'hook-prompt') cmdHookPrompt();
-  else if (command === 'hook-stop') cmdHookStop();
+  else if (command === 'hook-prompt') cmdHookPrompt(flags);
+  else if (command === 'hook-stop') cmdHookStop(flags);
   else {
     console.error(USAGE);
     process.exit(2);

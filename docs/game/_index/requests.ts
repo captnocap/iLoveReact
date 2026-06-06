@@ -182,17 +182,21 @@ export type HookCaptureResult =
   | { action: 'logged'; record: RequestRecord }
   | { action: 'skipped'; reason: string };
 
-/** The UserPromptSubmit path: decide noise-vs-ask, then log VERBATIM. */
+/** The UserPromptSubmit path: decide noise-vs-ask, then log VERBATIM.
+ *  `originLabel` names the capturing CLI in the origin field — 'session'
+ *  (Claude, the original vocabulary) or 'codex'; both CLIs send the same
+ *  payload shape, so this is the only per-CLI divergence on capture. */
 export function hookCapturePrompt(
   dir: string, sessionId: string, prompt: string,
   config: LedgerConfig = loadLedgerConfig(dir),
+  originLabel: string = 'session',
 ): HookCaptureResult {
   const trimmed = prompt.trim();
   if (trimmed.length === 0) return { action: 'skipped', reason: 'empty prompt' };
   if (/^[/!#]/.test(trimmed)) return { action: 'skipped', reason: 'slash/shell/memory command, not an ask' };
   if (new RegExp(config.ackPattern, 'i').test(trimmed)) return { action: 'skipped', reason: 'trivial ack (ackPattern)' };
   if (trimmed.length < config.minPromptChars) return { action: 'skipped', reason: `under minPromptChars (${config.minPromptChars})` };
-  const record = logRequest(dir, prompt, `session:${sessionId.slice(0, 8)}`, {
+  const record = logRequest(dir, prompt, `${originLabel}:${sessionId.slice(0, 8)}`, {
     sessionId, captureMode: 'hook',
   });
   return { action: 'logged', record };

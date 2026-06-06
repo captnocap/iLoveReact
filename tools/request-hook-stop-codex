@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# request-hook-stop-codex — Codex CLI Stop hook (REQLEDGER-0606 addendum 2).
+# Same unresolved-asks nudge as the Claude adapter ({"decision":"block"} once
+# per turn cycle, stop_hook_active loop guard — Codex Stop has the identical
+# guard field and block semantics). --cli codex matters here: Codex Stop
+# accepts JSON-ONLY stdout (plain text is invalid), so the 'context' reminder
+# mode emits {"systemMessage": ...} instead of plain text.
+# Registered in .codex/hooks.json; tunables in docs/game/_requests/_config.json.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/request" hook-stop --cli codex
