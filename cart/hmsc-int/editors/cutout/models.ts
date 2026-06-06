@@ -13,21 +13,37 @@
 
 // headless submodule imports (the cutout.test idiom) — the ../paint door
 // re-exports the React half, which headless suites must never drag in
-import { effectiveMask, inflatePaintDocument, parsePaintDocument, scaleMask, type PaintDocument } from '../paint/layers';
+import {
+  effectiveMask, inflatePaintDocument, parsePaintDocument, scaleMask,
+  PAINT_DOC_KIND, PAINT_DOC_VERSION, type PaintDocument,
+} from '../paint/layers';
 import { sampleToCells } from '../paint/strokes';
+import { PAINT_TUNING } from '../paint/tuning';
+import { stockLookDefaults } from './extraction';
 import type { PaintedOverlay } from '@game';
 import { validatePaintedOverlay } from '@game';
-import type { PartId } from '../../game/figure/shapes';
+import { type PaintTargetId } from '../../game/figure/shapes';
 import type { VehicleDoc, VehiclePartId } from '../../game/vehicle';
 // the kit's unwrap dims (512×256) — hed.ts owns them headless; render.tsx's
 // UNWRAP_W/H is the same contract on the React side
 import { HED_TEX_H, HED_TEX_W } from '../../game/figure/hed';
 import { editorTunables } from '../tunables';
 
-/** What the canvas is painting ON when a model target is open. */
+/** What the canvas is painting ON when a model target is open. Figure parts
+ *  are PAINT TARGETS (LIMBPAINT): a part, or one limb segment — "left upper
+ *  arm, lower arm, upper leg, lower leg", the user's ruling. */
 export type ModelBinding =
-  | { family: 'figure'; docId: string; part: PartId }
+  | { family: 'figure'; docId: string; part: PaintTargetId }
   | { family: 'vehicle'; docId: string; part: VehiclePartId };
+
+/** The figure picker's order: the user's segments lead; the shared
+ *  all-instance surfaces trail (they remain the broad-stroke targets). */
+export const FIGURE_PAINT_TARGETS: PaintTargetId[] = [
+  'head', 'torso', 'pelvis',
+  'lUpperArm', 'rUpperArm', 'lLowerArm', 'rLowerArm', 'lHand', 'rHand',
+  'lUpperLeg', 'rUpperLeg', 'lLowerLeg', 'rLowerLeg', 'lFoot', 'rFoot',
+  'pipe', 'hand', 'foot', 'finger',
+];
 
 // The model-paint tuning (P2 — registered where the numbers live).
 // figure parts paint in the kit's unwrap space (512×256 — face painting
@@ -72,6 +88,27 @@ export function bakeOverlayFromDocument(doc: PaintDocument, stamp: number, res =
     layers.push({ color: HEX_SHAPE.test(slot ?? '') ? slot : '#ffffff', cells });
   }
   return { version: 1, stamp, cols: res, rows: res, layers, paintDoc: doc };
+}
+
+/** A stroke-less placeholder document for a just-opened model target — what
+ *  the OPEN-SLOT write records so the TARGET itself survives a hot update
+ *  before the first stroke (the user's "took a torso to the cutout → a hot
+ *  update hit → it went away"). Restores treat empty-layer docs as a fresh
+ *  canvas (the painter mints its own starter layer). */
+export function emptyModelDocument(dims: { w: number; h: number }): PaintDocument {
+  return {
+    kind: PAINT_DOC_KIND, version: PAINT_DOC_VERSION,
+    dims: { w: dims.w, h: dims.h },
+    layers: [], activeLayer: -1,
+    tool: 'brush', mode: 'erase', brushPx: PAINT_TUNING.brushDefaultPx,
+    defaults: stockLookDefaults(), customSurfaces: [],
+  };
+}
+
+/** Does a slot document carry real strokes? (Empty docs are open-intent
+ *  placeholders — restore them as a fresh canvas, never as `initial`.) */
+export function slotDocumentHasContent(doc: PaintDocument): boolean {
+  return doc.layers.length > 0;
 }
 
 /** Reopen a saved overlay as the painter document it was baked from —

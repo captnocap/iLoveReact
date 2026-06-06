@@ -261,3 +261,22 @@ a forearm tattoo appears on every limb (hands/feet/fingers likewise share
 across left/right). Per-limb tattoos need per-INSTANCE texture slots in the
 figure kit (a door extension + new paint targets) — awaiting a ruling
 before inventing the granularity.
+
+## LIMBPAINT + OPEN-SLOT + the preview panel (2026-06-05, USER ASKS)
+
+- ~~limbs share one texture~~ CLOSED by ruling: the MODELS rail offers
+  per-segment targets (L/R upper/lower arm + leg, L/R hand/foot, pelvis,
+  plus the broad all-limbs/both-hands/both-feet surfaces). A forearm tattoo
+  lands on THAT forearm. The pelvis is its own target and never inherits
+  torso paint (the "two sets of tits" report).
+- /characters body parts: 'detail paint' renamed 'sculpt detail' (it shapes
+  geometry — the user read it as the painter) and every body part's row
+  carries the same 'paint texture → /cutout' deep-link the face has.
+- OPEN-SLOT (the "took a torso to the cutout → a hot update hit → it went
+  away" report): OPENING a model target records its book slot immediately
+  (an open-intent placeholder when stroke-less), so the TARGET survives a
+  pre-stroke hot update; placeholders restore as a fresh canvas, never as
+  a fake painting.
+- The live 3D preview is a PANEL in the right stack above the inspector
+  (280×300, P2 'cutout-modelpreview.panelWidth/Height') — the full-height
+  thin column is gone ("the column is bad").

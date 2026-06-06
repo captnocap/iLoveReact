@@ -128,3 +128,23 @@ features); the painted overlay is a separate, additive color-only channel.
   not yet composite overlays into the COMPILED game's textures — the editor
   preview paths render them; the compile-side composite belongs to the bake
   capture when texture baking lands. Surfaced, not guessed.
+
+## LIMBPAINT (2026-06-05, USER RULING): per-segment paint targets
+
+"can we update it so we can say this is a left upper arm, lower arm, upper
+leg, lower leg, so we dont have some stupid shit" — GEOMETRY keeps the
+shared-part model (one pipe sculpted once); PAINT now addresses instances:
+`PaintTargetId` = PartId | segment (L/R upper/lower arm + leg, L/R hand,
+L/R foot, pelvis), mapped per skeleton bone (`PAINT_TARGET_BY_BONE`;
+wrists ride the lower arm). Resolution: SEGMENT WINS, PART IS THE FALLBACK
+("all limbs" stays a broad-stroke target; old documents keep meaning) —
+EXCEPT the pelvis (`PAINT_TARGET_NO_PART_FALLBACK`): the pelvis SOCKET
+wears the torso globe (assembly pelvisSocket — the user's "two sets of
+tits"), so torso paint never cascades there; unpainted it samples the
+torso's BARE key (`PartRender.bareTexKey`; the route mounts the bare torso
+surface beside the painted one). Fingers stay shared (tiny fan instances —
+the one remaining shared paint surface). SURFACED, pre-existing: the
+underwear BRA stamps still render on the pelvis socket via the shared
+torso texture when the torso is UNPAINTED — splitting the stamp layout
+between torso/pelvis surfaces changes dressed appearance and needs the
+user's eyes.

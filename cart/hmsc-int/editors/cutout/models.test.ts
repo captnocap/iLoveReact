@@ -11,8 +11,8 @@ import { openStore } from '../../data';
 import { createSessionLog } from '../sessions';
 import { PAINT_DOC_KIND, PAINT_DOC_VERSION, type PaintDocument } from '../paint/layers';
 import {
-  bakeOverlayFromDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
-  overlayOf, reopenOverlayDocument, MODEL_PAINT,
+  bakeOverlayFromDocument, emptyModelDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
+  overlayOf, reopenOverlayDocument, slotDocumentHasContent, FIGURE_PAINT_TARGETS, MODEL_PAINT,
 } from './models';
 import {
   buildDraft, currentDraft, draftModelBinding, emptyDraftBook, parseDraft, parseDraftBook,
@@ -173,6 +173,27 @@ test('HOTDRAFT: an unsaved model painting survives the draft round-trip with its
   })));
   assert(stale !== null, 'a garbage part never rejects the draft (the strokes matter most)');
   assertEqual(draftModelBinding(stale!), null, 'a garbage part restores as no binding');
+});
+
+test('LIMBPAINT: segment bindings draft-gate, dims ride the part, open-slots are placeholders', () => {
+  const doc = demoDocument();
+  // a segment binding survives the draft gate (the hot-update lifeline)
+  const seg = draftModelBinding(parseDraft(serializeDraft(buildDraft({
+    docId: 'x', name: 's', srcPath: null, model: { family: 'figure', docId: 'chr-1', part: 'lLowerArm' }, doc,
+  })))!);
+  assertEqual(seg?.part, 'lLowerArm', 'a limb-segment binding restores');
+  assertEqual(modelCanvasDims({ family: 'figure', docId: 'c', part: 'lUpperLeg' }).w, 512, 'segments paint the kit unwrap');
+  assert(FIGURE_PAINT_TARGETS.includes('pelvis'), 'the pelvis is pickable in the rail');
+  assert(FIGURE_PAINT_TARGETS.includes('rLowerArm'), 'every segment is pickable in the rail');
+  // the open-slot placeholder: parses as a draft doc, carries no strokes
+  const empty = emptyModelDocument({ w: 512, h: 256 });
+  assert(!slotDocumentHasContent(empty), 'an open-intent placeholder has no content');
+  assert(slotDocumentHasContent(doc), 'a real painting has content');
+  const viaDraft = parseDraft(serializeDraft(buildDraft({
+    docId: 'm', name: 'm', srcPath: null, model: { family: 'figure', docId: 'chr-1', part: 'torso' }, doc: empty,
+  })));
+  assert(viaDraft !== null, 'the placeholder rides the draft format (the TARGET survives a pre-stroke hot update)');
+  assertEqual(bakeOverlayFromDocument(empty, 1, 4).layers.length, 0, 'an empty doc bakes to no content (a save would clear, never smear)');
 });
 
 test('TATTOODRAFT: the draft book keeps one unsaved painting PER target', () => {

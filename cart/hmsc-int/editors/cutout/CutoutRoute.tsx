@@ -58,13 +58,13 @@ import { CutoutStatusBar } from './StatusBar';
 // MODEL TEXTURE TARGETS (MODELPAINT-0605): pick a face / body part / vehicle
 // part, paint it here, save back onto the model document through the doors.
 import {
-  bakeOverlayFromDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
-  modelWorkName, overlayOf, reopenOverlayDocument, takePendingModelTarget,
-  type ModelBinding,
+  bakeOverlayFromDocument, emptyModelDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
+  modelWorkName, overlayOf, reopenOverlayDocument, slotDocumentHasContent, takePendingModelTarget,
+  FIGURE_PAINT_TARGETS, type ModelBinding,
 } from './models';
 import { applyBodyPaint, applyVehiclePaint, paintedOverlayHasContent, charactersStream, vehiclesStream } from '@game';
 import type { BodyDocument, CharactersEvent, VehicleDoc, VehiclesEvent } from '@game';
-import { PART_IDS, type PartId } from '../../game/figure/shapes';
+import { PAINT_TARGET_LABELS, type PaintTargetId, type PartId } from '../../game/figure/shapes';
 import type { HedLayer } from '../../game/figure/hed';
 import { VEHICLE_PART_IDS, type VehiclePartId } from '../../game/vehicle';
 import { FaceLayerPaint } from '../../game/figure/render';
@@ -206,7 +206,9 @@ function restoreOrBlank(): Work {
             ? (model as BodyDocument).parts.head.layers
             : null,
           dims: { w: draft.doc.dims.w, h: draft.doc.dims.h },
-          initial: draft.doc,
+          // an open-intent placeholder (no strokes yet) restores the TARGET
+          // with a fresh canvas — the painter mints its starter layer
+          initial: slotDocumentHasContent(draft.doc) ? draft.doc : null,
           epoch: 0,
         };
       }
@@ -441,10 +443,12 @@ export function CutoutRoute(props: { onExit: () => void }) {
       : models.vehicles?.state().vehicles[binding.docId];
     if (!model) { setStatus(`model ${binding.docId} not found`); return; }
     // TATTOODRAFT: this part's own unsaved slot wins over the saved overlay —
-    // coming back to the torso mid-tattoo resumes exactly where you left it
+    // coming back to the torso mid-tattoo resumes exactly where you left it.
+    // Empty slot docs are open-intent placeholders, not paintings.
     const slot = readDraftBook().slots[modelWorkId(binding)] ?? null;
+    const slotDoc = slot && slotDocumentHasContent(slot.doc) ? slot.doc : null;
     const overlay = overlayOf(binding, (model as any).paint);
-    const initial = slot?.doc ?? (overlay ? reopenOverlayDocument(overlay) : null);
+    const initial = slotDoc ?? (overlay ? reopenOverlayDocument(overlay) : null);
     setWork((prev) => freshWork(prev, {
       docId: modelWorkId(binding),
       name: modelWorkName(binding),
@@ -457,8 +461,22 @@ export function CutoutRoute(props: { onExit: () => void }) {
       initial,
     }));
     setEdited(!!initial);
-    setStatus(`painting ${binding.family} ${binding.docId} · ${binding.part}${slot ? ' (unsaved draft resumed)' : initial ? ' (reopened)' : ''}`);
+    setStatus(`painting ${binding.family} ${binding.docId} · ${binding.part}${slotDoc ? ' (unsaved draft resumed)' : initial ? ' (reopened)' : ''}`);
     live.session?.note(`paint model · ${binding.family} ${binding.docId} · ${binding.part}`);
+    // OPEN-SLOT (the user's "took a torso to the cutout → a hot update hit →
+    // it went away"): opening a model target is itself worth persisting —
+    // record the slot NOW (the painting if any, else an open-intent
+    // placeholder), so a hot update before the first stroke restores the
+    // same target instead of whatever was current before.
+    writeDraftBook(upsertDraftSlot(
+      readDraftBook(),
+      modelWorkId(binding),
+      buildDraft({
+        docId: modelWorkId(binding), name: modelWorkName(binding), srcPath: null,
+        model: binding, doc: initial ?? emptyModelDocument(modelCanvasDims(binding)),
+      }),
+      VIEW.draftSlots,
+    ));
   };
 
   // The deep-link mailbox: another route said "paint texture → /cutout with
@@ -482,7 +500,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
       const session = figureSession();
       const model = models.figures?.state().characters[binding.docId];
       if (!session || !model) { setStatus(`figure ${binding.docId} unavailable`); return; }
-      const next = applyBodyPaint(model, binding.part as PartId, has ? overlay : null);
+      const next = applyBodyPaint(model, binding.part as PaintTargetId, has ? overlay : null);
       session.commit({ kind: 'authored', id: binding.docId, doc: next },
         `${binding.docId}: ${binding.part} ${has ? 'painted' : 'paint cleared'}`);
     } else {
@@ -607,12 +625,12 @@ export function CutoutRoute(props: { onExit: () => void }) {
                     label={id}
                     family="figure"
                     paint={(figureRoster.characters[id] as any)?.paint}
-                    parts={PART_IDS}
-                    partLabels={FIGURE_PART_LABELS}
+                    parts={FIGURE_PAINT_TARGETS}
+                    partLabels={PAINT_TARGET_LABELS}
                     open={modelPick?.family === 'figure' && modelPick.docId === id}
                     activePart={work.model?.family === 'figure' && work.model.docId === id ? work.model.part : null}
                     onToggle={() => setModelPick((p) => (p?.family === 'figure' && p.docId === id ? null : { family: 'figure', docId: id }))}
-                    onPart={(part) => openModelTarget({ family: 'figure', docId: id, part: part as PartId })}
+                    onPart={(part) => openModelTarget({ family: 'figure', docId: id, part: part as PaintTargetId })}
                   />
                 ))}
                 {vehicleGarage?.order.map((id) => (
@@ -793,29 +811,50 @@ function Workbench(props: {
       <Row style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
         <CutoutToolRail s={s} />
         <PaintSurface s={s} underlay={underlay} />
-        {/* MODELPAINT-0605: the live 3D model beside the canvas — paint-and-see */}
+        {/* MODELPAINT-0605: the live 3D model — a PANEL in the right stack
+            above the inspector (the user: the thin full-height column was
+            bad; this is the layers/selection container language) */}
         {work.model ? (
-          <ModelPreview3D
+          <Col style={{ height: '100%', minHeight: 0 }}>
+            <ModelPreview3D
+              s={s}
+              binding={work.model}
+              model={props.activeModel}
+              bg={work.modelBg ?? '#808080'}
+              modelLayers={work.modelLayers}
+            />
+            <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
+              <CutoutInspector
+                s={s}
+                samAvailable={props.samAvailable}
+                backendChoice={props.backendChoice}
+                onBackendChoice={props.onBackendChoice}
+                srcPath={work.srcPath}
+                textureId={work.textureId}
+                edited={props.edited}
+                lastSavedAt={props.lastSavedAt}
+                onNewCanvas={props.onNewCanvas}
+                onLoadImage={props.onLoadImage}
+                onOpenEffectModal={() => setFxModal(true)}
+                fill
+              />
+            </Box>
+          </Col>
+        ) : (
+          <CutoutInspector
             s={s}
-            binding={work.model}
-            model={props.activeModel}
-            bg={work.modelBg ?? '#808080'}
-            modelLayers={work.modelLayers}
+            samAvailable={props.samAvailable}
+            backendChoice={props.backendChoice}
+            onBackendChoice={props.onBackendChoice}
+            srcPath={work.srcPath}
+            textureId={work.textureId}
+            edited={props.edited}
+            lastSavedAt={props.lastSavedAt}
+            onNewCanvas={props.onNewCanvas}
+            onLoadImage={props.onLoadImage}
+            onOpenEffectModal={() => setFxModal(true)}
           />
-        ) : null}
-        <CutoutInspector
-          s={s}
-          samAvailable={props.samAvailable}
-          backendChoice={props.backendChoice}
-          onBackendChoice={props.onBackendChoice}
-          srcPath={work.srcPath}
-          textureId={work.textureId}
-          edited={props.edited}
-          lastSavedAt={props.lastSavedAt}
-          onNewCanvas={props.onNewCanvas}
-          onLoadImage={props.onLoadImage}
-          onOpenEffectModal={() => setFxModal(true)}
-        />
+        )}
       </Row>
       <CutoutStatusBar s={s} edited={props.edited} lastSavedAt={props.lastSavedAt} />
       {/* custom-WGSL modal — last child of the workbench root (overlay rule) */}
@@ -942,11 +981,7 @@ function EffectModal({ s, onClose }: { s: ReturnType<typeof usePaintEditor>; onC
 
 // ── library rail pieces ───────────────────────────────────────────────────────
 
-// MODELPAINT-0605: what the rail calls the figure parts (the user's words —
-// "their face... or body parts"; the kit's part ids stay the data).
-const FIGURE_PART_LABELS: Record<string, string> = {
-  head: 'face', torso: 'torso', pipe: 'limbs', hand: 'hands', foot: 'feet', finger: 'fingers',
-};
+// (figure target labels come from the kit's PAINT_TARGET_LABELS — LIMBPAINT)
 
 /** One model in the rail: header row toggles the part picker; a part chip
  *  opens that surface in the painter. ● marks already-painted parts. */

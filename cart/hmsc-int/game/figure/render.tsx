@@ -21,7 +21,7 @@
 import { memo, useMemo } from 'react';
 import { Box, Scene3D, StaticSurface } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
-import { PART_IDS, type PartId } from './shapes';
+import { PAINT_TARGET_NO_PART_FALLBACK, PART_IDS, paintTargetForInstance, paintTargetPart, type PaintTargetId, type PartId } from './shapes';
 import { partGlobeParams } from './bake';
 import type { BodyRigFrame } from './rig';
 import type { ClothingInstance } from './clothing';
@@ -30,15 +30,48 @@ import type { V3 } from './math';
 import type { PaintedOverlay } from '../painted';
 import { PaintedOverlayPaint, PaintedOverlaySurface } from '../paintedRender';
 
-export type PartRender = { params: any; dynKey: string; texKey: string };
+export type PartRender = {
+  params: any;
+  dynKey: string;
+  texKey: string;
+  /** the part's PAINT-FREE texture key (LIMBPAINT: what a no-fallback
+   *  segment — the pelvis — samples when the part is painted but the
+   *  segment is not). Equals texKey on unpainted parts. */
+  bareTexKey?: string;
+};
 
-/** The per-part painted overlays a figure carries (BodyDocument.paint). */
-export type FigurePaint = Partial<Record<PartId, PaintedOverlay>>;
+/** The painted overlays a figure carries (BodyDocument.paint) — keyed by
+ *  PAINT TARGET: a part, or one limb segment (LIMBPAINT). */
+export type FigurePaint = Partial<Record<PaintTargetId, PaintedOverlay>>;
 
-/** A painted part's own texture key — content-addressed by the save stamp
- *  (a painted part leaves the shared plain-skin bake; MODELPAINT-0605). */
-export function paintedPartTexKey(cartKey: string, skin: string, id: PartId, stamp: number): string {
+/** A painted target's own texture key — content-addressed by the save stamp
+ *  (a painted target leaves the shared plain-skin bake; MODELPAINT-0605). */
+export function paintedPartTexKey(cartKey: string, skin: string, id: PaintTargetId, stamp: number): string {
   return `${cartKey}.skin.${skin}.${id}.p${stamp}`;
+}
+
+/** LIMBPAINT per-instance resolution: the instance's bone segment wins when
+ *  it carries paint; otherwise the caller's part-level key (which already
+ *  folds part-level paint) — EXCEPT no-fallback segments (the pelvis), which
+ *  drop to the part's BARE key when the part is painted (torso paint must
+ *  never duplicate onto the pelvis socket). Anatomy blobs riding joint bones
+ *  keep their plain part — see paintTargetForInstance. */
+export function instancePaintTexKey(
+  cartKey: string,
+  skin: string,
+  paint: FigurePaint | undefined,
+  inst: { part: PartId; bone?: string },
+  partLevelKey: string,
+  bareKey: string = partLevelKey,
+): string {
+  if (!paint) return partLevelKey;
+  const target = paintTargetForInstance(inst.part, inst.bone);
+  if (target !== inst.part) {
+    const overlay = paint[target];
+    if (overlay) return paintedPartTexKey(cartKey, skin, target, overlay.stamp);
+    if (PAINT_TARGET_NO_PART_FALLBACK.has(target) && paint[inst.part]) return bareKey;
+  }
+  return partLevelKey;
 }
 
 export function buildPartRender(
@@ -53,14 +86,16 @@ export function buildPartRender(
   const skinTexKey = `${cartKey}.skin.${doc.skin}`;
   for (const id of PART_IDS) {
     const overlay = paint?.[id];
+    const bareTexKey = id === 'head' ? `${cartKey}.head.${seed}` : skinTexKey;
     out[id] = {
       params: partGlobeParams(id, doc, faceDepth),
       // Dyn-key contract (3d.zig dynSlotLocate): "<slotId>~<version>" — the
       // '~' is REQUIRED or the host silently drops the mesh.
       dynKey: `${cartKey}.${id}~${seed}`,
-      texKey: id === 'head'
-        ? (overlay ? `${cartKey}.head.${seed}.p${overlay.stamp}` : `${cartKey}.head.${seed}`)
-        : (overlay ? paintedPartTexKey(cartKey, doc.skin, id, overlay.stamp) : skinTexKey),
+      texKey: overlay
+        ? (id === 'head' ? `${cartKey}.head.${seed}.p${overlay.stamp}` : paintedPartTexKey(cartKey, doc.skin, id, overlay.stamp))
+        : bareTexKey,
+      bareTexKey,
     };
   }
   return out;
@@ -132,7 +167,8 @@ export const CharacterCaptures = memo(function CharacterCaptures(props: {
         <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin }} />
       </StaticSurface>
       {props.paint && props.cartKey
-        ? PART_IDS.filter((id) => id !== 'head' && props.paint![id]).map((id) => (
+        ? (Object.keys(props.paint) as PaintTargetId[]).filter((id) => id !== 'head' && props.paint![id]).map((id) => (
+            // one capture per painted TARGET — parts and limb segments alike
             <PaintedOverlaySurface
               key={`paint-${id}`}
               staticKey={paintedPartTexKey(props.cartKey!, props.skin, id, props.paint![id]!.stamp)}
@@ -166,6 +202,11 @@ export function FigureMeshes(props: {
   lift?: number;
   /** translate the whole body */
   offset?: V3;
+  /** LIMBPAINT (optional — paintless callers byte-identical): per-instance
+   *  segment textures. cartKey + skin must match the mounted captures. */
+  paint?: FigurePaint;
+  cartKey?: string;
+  skin?: string;
 }) {
   const yawDeg = props.yawDeg ?? 0;
   const lift = props.lift ?? 0;
@@ -176,6 +217,10 @@ export function FigureMeshes(props: {
     return [r[0] + ox, r[1] + lift + oy, r[2] + oz];
   };
   const turn = (r?: V3): V3 => [r?.[0] ?? 0, (r?.[1] ?? 0) + yawDeg, r?.[2] ?? 0];
+  const texFor = (inst: { part: PartId; bone?: string }, p: PartRender): string =>
+    props.paint && props.cartKey != null && props.skin != null
+      ? instancePaintTexKey(props.cartKey, props.skin, props.paint, inst, p.texKey, p.bareTexKey ?? p.texKey)
+      : p.texKey;
   return (
     <>
       {props.rig.assembly.map((inst, i) => {
@@ -187,7 +232,7 @@ export function FigureMeshes(props: {
             params={p.params}
             dynamicKey={p.dynKey}
             material="#ffffff"
-            textureKey={p.texKey}
+            textureKey={texFor(inst, p)}
             position={place(inst.position)}
             rotation={turn(inst.rotation)}
             scale={inst.thickness != null ? [inst.scale * inst.thickness, inst.scale, inst.scale * inst.thickness] : inst.scale}
@@ -203,7 +248,7 @@ export function FigureMeshes(props: {
             params={p.params}
             dynamicKey={p.dynKey}
             material="#ffffff"
-            textureKey={p.texKey}
+            textureKey={texFor(inst, p)}
             position={place(inst.position)}
             rotation={turn(inst.rotation)}
             scale={inst.thickness != null ? [inst.scale * inst.thickness, inst.scale, inst.scale * inst.thickness] : inst.scale}

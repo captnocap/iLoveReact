@@ -10,7 +10,10 @@ import {
   hedDepthGrid, parseHed, serializeHed,
 } from './hed';
 import { applyBodyPaint, buildBody, parseBody, serializeBody } from './body';
-import { PART_IDS, PROFILE_N, defaultProfile, type PartId } from './shapes';
+import {
+  PAINT_TARGET_BY_BONE, PAINT_TARGET_IDS, PAINT_TARGET_NO_PART_FALLBACK, PAINT_TARGET_PART,
+  PART_IDS, PROFILE_N, defaultProfile, paintTargetForInstance, paintTargetPart, type PartId,
+} from './shapes';
 import type { PaintedOverlay } from '../painted';
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
@@ -137,6 +140,42 @@ test('painted overlays are additive: pre-paint documents byte-unaffected, apply 
   const cleared = applyBodyPaint(painted, 'head', null);
   assert(!('paint' in cleared), 'removing the last overlay removes the channel (byte-parity with pre-paint)');
   assertEqual(JSON.stringify(cleared), JSON.stringify(doc), 'paint → unpaint is a perfect round trip');
+});
+
+test('LIMBPAINT: segments resolve per bone, the pelvis never inherits, documents round-trip segment paint', () => {
+  // the user's ruling: "left upper arm, lower arm, upper leg, lower leg"
+  assertEqual(paintTargetForInstance('pipe', 'lUpperArm'), 'lUpperArm', 'left upper arm is its own target');
+  assertEqual(paintTargetForInstance('pipe', 'lForearm'), 'lLowerArm', 'the forearm is the lower arm');
+  assertEqual(paintTargetForInstance('pipe', 'lWrist'), 'lLowerArm', 'a forearm tattoo runs to the wrist');
+  assertEqual(paintTargetForInstance('pipe', 'rShin'), 'rLowerLeg', 'right shin is the right lower leg');
+  assertEqual(paintTargetForInstance('hand', 'rHand'), 'rHand', 'hands split left/right');
+  assertEqual(paintTargetForInstance('foot', 'lFoot'), 'lFoot', 'feet split left/right');
+  assertEqual(paintTargetForInstance('torso', 'pelvis'), 'pelvis', 'the pelvis socket is its own target');
+  assertEqual(paintTargetForInstance('torso', 'torso'), 'torso', 'the torso instance stays the torso');
+  assertEqual(paintTargetForInstance('hand', 'lUpperArm'), 'hand', 'a joint blob on a limb bone keeps its plain part (the part guard)');
+  assertEqual(paintTargetForInstance('pipe', undefined), 'pipe', 'boneless instances keep the part');
+  // every mapped segment names a real part + appears in the id list
+  for (const bone of Object.keys(PAINT_TARGET_BY_BONE)) {
+    const segment = PAINT_TARGET_BY_BONE[bone];
+    assert((PAINT_TARGET_IDS as readonly string[]).includes(segment), `${segment} is a registered target`);
+    assert((PART_IDS as readonly string[]).includes(PAINT_TARGET_PART[segment]), `${segment} paints a real part`);
+  }
+  assertEqual(paintTargetPart('lUpperLeg'), 'pipe', 'segments paint the pipe unwrap');
+  assertEqual(paintTargetPart('torso'), 'torso', 'parts are their own unwrap');
+  assert(PAINT_TARGET_NO_PART_FALLBACK.has('pelvis'), 'the pelvis is the no-fallback segment (two-sets-of-tits rule)');
+  assert(!PAINT_TARGET_NO_PART_FALLBACK.has('lLowerArm'), 'limbs keep the all-limbs fallback');
+
+  // segment paint rides the document exactly like part paint
+  const sculpts = {} as Record<PartId, number[]>;
+  const profiles = {} as Record<PartId, number[]>;
+  for (const id of PART_IDS) { sculpts[id] = [0]; profiles[id] = defaultProfile(id); }
+  const doc = buildBody({ skin: '#caa07a', amount: 0.35, headScaleY: 1.2, sculpts, profiles, headLayers: [] });
+  const overlay = { version: 1 as const, stamp: 7, cols: 4, rows: 4, layers: [{ color: '#16a34a', cells: [3] }] };
+  const painted = applyBodyPaint(applyBodyPaint(doc, 'lLowerArm', overlay), 'pelvis', { ...overlay, stamp: 8 });
+  const back = parseBody(serializeBody(painted));
+  assertEqual(back?.paint?.lLowerArm?.stamp, 7, 'a segment overlay round-trips');
+  assertEqual(back?.paint?.pelvis?.stamp, 8, 'the pelvis overlay round-trips');
+  assertEqual(JSON.stringify(parseBody(serializeBody(doc))), JSON.stringify(doc), 'pre-segment documents stay byte-unaffected');
 });
 
 finish('game/figure/documents');

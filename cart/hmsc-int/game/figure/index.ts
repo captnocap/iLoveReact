@@ -26,10 +26,14 @@ export {
   PART_IDS, PART_PRESETS, PART_LOD, PROFILE_N, defaultProfile,
   BODY_SHAPES, BODY_POSES, CLOTHING, BOTTOMS, DEFAULT_BOTTOMS, CLOTHING_SKINS, CLOTHING_ACCESSORIES,
   clothingSkinTextureKey,
+  // LIMBPAINT: the paint-target vocabulary (segments + parts)
+  PAINT_TARGET_IDS, LIMB_PAINT_TARGET_IDS, PAINT_TARGET_LABELS, PAINT_TARGET_BY_BONE,
+  paintTargetPart, paintTargetForInstance,
 } from './shapes';
 export type {
   PartId, PartPreset, BodyShape, BodyShapeId, BodyPoseId,
   ClothingId, BottomsId, ClothingSkinId, ClothingAccessoryId, GarmentPalette,
+  PaintTargetId, LimbPaintTargetId,
 } from './shapes';
 
 export {

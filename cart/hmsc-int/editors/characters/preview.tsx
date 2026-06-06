@@ -17,7 +17,9 @@ import { Box, Effect, Image, Scene3D, StaticSurface, Text } from '@reactjit/runt
 import * as Geometry from '@reactjit/geometries';
 import type { BodyRigFrame } from '../../game/figure/rig';
 import type { HedLayer } from '../../game/figure/hed';
-import { FaceLayerPaint, UNWRAP_H, UNWRAP_W, type FigurePaint, type PartRender } from '../../game/figure/render';
+import { FaceLayerPaint, instancePaintTexKey, paintedPartTexKey, UNWRAP_H, UNWRAP_W, type FigurePaint, type PartRender } from '../../game/figure/render';
+import { PART_IDS as FIGURE_PART_IDS, type PaintTargetId } from '../../game/figure/shapes';
+import { PaintedOverlaySurface } from '../../game/paintedRender';
 import { PaintedOverlayPaint } from '../../game/paintedRender';
 import type { PaintedOverlay } from '../../game/painted';
 import { BOTTOMS, clothingSkinTextureKey, type BodyShapeId, type BottomsId, type ClothingId, type ClothingSkinId, type PartId, CLOTHING_SKINS } from '../../game/figure/shapes';
@@ -40,7 +42,15 @@ export const PartMeshes = memo(function PartMeshes(props: {
   parts: Record<PartId, PartRender>;
   rig: BodyRigFrame;
   showHitboxes: boolean;
+  /** LIMBPAINT: per-instance segment textures (segment wins, part falls
+   *  back). skin must match the mounted captures' keys. */
+  paint?: FigurePaint;
+  skin?: string;
 }) {
+  const texFor = (inst: { part: PartId; bone?: string }, p: PartRender): string =>
+    props.paint && props.skin != null
+      ? instancePaintTexKey('chr', props.skin, props.paint, inst, p.texKey, p.bareTexKey ?? p.texKey)
+      : p.texKey;
   if (props.view === 'part') {
     const p = props.parts[props.selPart];
     return (
@@ -65,7 +75,7 @@ export const PartMeshes = memo(function PartMeshes(props: {
             params={p.params}
             dynamicKey={p.dynKey}
             material="#ffffff"
-            textureKey={p.texKey}
+            textureKey={texFor(inst, p)}
             position={inst.position}
             rotation={inst.rotation ?? [0, 0, 0]}
             scale={instanceScaleVec(inst.scale, inst.thickness)}
@@ -93,7 +103,7 @@ export const PartMeshes = memo(function PartMeshes(props: {
             params={p.params}
             dynamicKey={`${p.dynKey}.anatomy.${i}`}
             material="#ffffff"
-            textureKey={p.texKey}
+            textureKey={texFor(inst, p)}
             position={inst.position}
             rotation={inst.rotation ?? [0, 0, 0]}
             scale={instanceScaleVec(inst.scale, inst.thickness)}
@@ -514,6 +524,10 @@ export function CharacterEditorCaptures(props: {
    *  under their stamps. The route folds the stamps into the texture keys
    *  (content-addressing), so paintless renders are byte-identical. */
   paint?: FigurePaint;
+  /** LIMBPAINT: the paint-free key per part — the pelvis socket samples the
+   *  torso's bare surface when the torso is painted (no-fallback rule), so
+   *  that surface must mount BESIDE the painted one. */
+  bareSkinTexKeyFor?: (id: PartId) => string;
 }) {
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
@@ -532,6 +546,33 @@ export function CharacterEditorCaptures(props: {
           </Box>
         </StaticSurface>
       ))}
+      {/* LIMBPAINT no-fallback support: the torso's BARE surface (skin +
+          stamps, no paint) mounts beside the painted one whenever the torso
+          is painted — the pelvis socket samples it instead of inheriting
+          the painting (the two-sets-of-tits rule) */}
+      {props.paint?.torso && props.bareSkinTexKeyFor ? (
+        <StaticSurface staticKey={props.bareSkinTexKeyFor('torso')} style={surfaceStyle}>
+          <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin, position: 'relative', overflow: 'hidden' }}>
+            <UnderwearTexturePaint part="torso" clothing={props.clothing} bottoms={props.bottoms} bodyShape={props.bodyShape} />
+          </Box>
+        </StaticSurface>
+      ) : null}
+      {/* LIMBPAINT: one capture per painted SEGMENT (the per-instance keys
+          PartMeshes resolves to via instancePaintTexKey, cartKey 'chr') */}
+      {props.paint
+        ? (Object.keys(props.paint) as PaintTargetId[])
+            .filter((id) => !(FIGURE_PART_IDS as readonly string[]).includes(id) && props.paint![id])
+            .map((id) => (
+              <PaintedOverlaySurface
+                key={`seg-${id}`}
+                staticKey={paintedPartTexKey('chr', props.skin, id, props.paint![id]!.stamp)}
+                bg={props.skin}
+                w={UNWRAP_W}
+                h={UNWRAP_H}
+                overlay={props.paint![id]!}
+              />
+            ))
+        : null}
       <ClothingSkinCaptures />
     </>
   );

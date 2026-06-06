@@ -12,7 +12,7 @@
 // imported).
 
 import { PAINT_DOC_KIND, PAINT_DOC_VERSION, type PaintDocument } from '../paint/layers';
-import { PART_IDS } from '../../game/figure/shapes';
+import { PAINT_TARGET_IDS } from '../../game/figure/shapes';
 import { VEHICLE_PART_IDS } from '../../game/vehicle';
 import type { ModelBinding } from './models';
 
@@ -56,7 +56,7 @@ export function buildDraft(args: { docId: string; name: string; srcPath: string 
 export function draftModelBinding(d: CutoutDraft): ModelBinding | null {
   const m: any = d.model;
   if (!m || typeof m.docId !== 'string' || m.docId.length === 0) return null;
-  if (m.family === 'figure' && (PART_IDS as readonly string[]).includes(m.part)) {
+  if (m.family === 'figure' && (PAINT_TARGET_IDS as readonly string[]).includes(m.part)) {
     return { family: 'figure', docId: m.docId, part: m.part };
   }
   if (m.family === 'vehicle' && (VEHICLE_PART_IDS as readonly string[]).includes(m.part)) {

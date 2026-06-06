@@ -73,6 +73,9 @@ export function CutoutInspector(props: {
   onNewCanvas: (w: number, h: number) => void;
   onLoadImage: (path: string) => void;
   onOpenEffectModal: () => void;
+  /** fill the parent box (the model-preview stack wraps the inspector in a
+   *  sized column; rows stretch it for free, columns don't) */
+  fill?: boolean;
 }) {
   const { s } = props;
   const [tab, setTab] = useRouteTwigState<Tab>('/cutout', 'inspectorTab', 'tool');
@@ -91,6 +94,7 @@ export function CutoutInspector(props: {
     <Col
       style={{
         width: INSPECTOR.width, minHeight: 0, position: 'relative',
+        height: props.fill ? '100%' : undefined,
         backgroundColor: T.panelSolid, borderLeftWidth: 1, borderColor: T.frame,
       }}
       onLayout={(r: any) => setRect(r)}

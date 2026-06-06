@@ -10,8 +10,8 @@
 import type { HedLayer } from './hed';
 import { validatePaintedOverlay, type PaintedOverlay } from '../painted';
 import {
-  LEGACY_PART_IDS, PART_IDS, defaultProfile,
-  type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
+  LEGACY_PART_IDS, PAINT_TARGET_IDS, PART_IDS, defaultProfile,
+  type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PaintTargetId, type PartId,
 } from './shapes';
 
 export type BodyDocument = {
@@ -32,20 +32,22 @@ export type BodyDocument = {
    *  (PROFILE_N radius samples; absent = the part's preset default). */
   parts: Record<PartId, { sculpt: number[]; layers: HedLayer[]; profile?: number[] }>;
   /** MODELPAINT-0605 (additive — pre-paint documents stay valid forever):
-   *  per-part pixel-painted color overlays, authored in /cutout. Composited
-   *  in the unwrap stack where the photo sits — UNDER the face's shape
-   *  layers, OVER the skin. Color only; depth never rides this channel
-   *  (the ruling: "i dont want to paint depth"). */
-  paint?: Partial<Record<PartId, PaintedOverlay>>;
+   *  pixel-painted color overlays, authored in /cutout, keyed by PAINT
+   *  TARGET — a part (the all-instances surface, the original vocabulary)
+   *  or one limb segment (LIMBPAINT: "left upper arm, lower arm, upper leg,
+   *  lower leg"; segment wins, part is the fallback). Composited in the
+   *  unwrap stack where the photo sits — UNDER the face's shape layers,
+   *  OVER the skin. Color only; depth never rides this channel. */
+  paint?: Partial<Record<PaintTargetId, PaintedOverlay>>;
   metadata?: { title?: string; createdAt?: number };
 };
 
-/** Set/replace/remove one part's painted overlay — pure, additive (the
+/** Set/replace/remove one target's painted overlay — pure, additive (the
  *  /cutout save path; everything else on the document is untouched). */
-export function applyBodyPaint(doc: BodyDocument, part: PartId, overlay: PaintedOverlay | null): BodyDocument {
-  const paint: Partial<Record<PartId, PaintedOverlay>> = { ...(doc.paint ?? {}) };
-  if (overlay) paint[part] = overlay;
-  else delete paint[part];
+export function applyBodyPaint(doc: BodyDocument, target: PaintTargetId, overlay: PaintedOverlay | null): BodyDocument {
+  const paint: Partial<Record<PaintTargetId, PaintedOverlay>> = { ...(doc.paint ?? {}) };
+  if (overlay) paint[target] = overlay;
+  else delete paint[target];
   if (Object.keys(paint).length === 0) {
     const { paint: _gone, ...rest } = doc;
     return rest as BodyDocument;
@@ -115,7 +117,7 @@ export function parseBody(text: string): BodyDocument | null {
       delete doc.paint;
     } else {
       const paint: Record<string, unknown> = {};
-      for (const id of PART_IDS) {
+      for (const id of PAINT_TARGET_IDS) {
         const overlay = validatePaintedOverlay(doc.paint[id]);
         if (overlay) paint[id] = overlay;
       }

@@ -15,6 +15,81 @@ export const PART_IDS: PartId[] = ['head', 'torso', 'pipe', 'hand', 'foot', 'fin
 /** pre-finger documents validate against this subset (schema by addition) */
 export const LEGACY_PART_IDS: PartId[] = ['head', 'torso', 'pipe', 'hand', 'foot'];
 
+// ── paint targets (MODELPAINT-0605 LIMBPAINT, the user's ruling) ─────────────
+// "can we update it so we can say this is a left upper arm, lower arm, upper
+// leg, lower leg, so we dont have some stupid shit" — GEOMETRY stays the
+// shared-part model (one pipe sculpted once, every limb follows), but PAINT
+// addresses individual limb segments. A paint target is either a part (the
+// "all instances" surface — also the pre-LIMBPAINT vocabulary, so old
+// documents keep meaning) or one limb segment; per-instance resolution is
+// SEGMENT WINS, PART IS THE FALLBACK.
+
+export type LimbPaintTargetId =
+  | 'lUpperArm' | 'rUpperArm' | 'lLowerArm' | 'rLowerArm'
+  | 'lUpperLeg' | 'rUpperLeg' | 'lLowerLeg' | 'rLowerLeg'
+  | 'lHand' | 'rHand' | 'lFoot' | 'rFoot'
+  // not a limb — the pelvis SOCKET wears the torso globe (assembly
+  // pelvisSocket), the same shared-model artifact ("two sets of tits"):
+  // it gets its own target so torso paint stays on the torso
+  | 'pelvis';
+export type PaintTargetId = PartId | LimbPaintTargetId;
+
+export const LIMB_PAINT_TARGET_IDS: LimbPaintTargetId[] = [
+  'lUpperArm', 'rUpperArm', 'lLowerArm', 'rLowerArm',
+  'lUpperLeg', 'rUpperLeg', 'lLowerLeg', 'rLowerLeg',
+  'lHand', 'rHand', 'lFoot', 'rFoot', 'pelvis',
+];
+export const PAINT_TARGET_IDS: PaintTargetId[] = [...PART_IDS, ...LIMB_PAINT_TARGET_IDS];
+
+/** what the paint rails call each target (the user's words lead) */
+export const PAINT_TARGET_LABELS: Record<PaintTargetId, string> = {
+  head: 'face', torso: 'torso', pipe: 'all limbs', hand: 'both hands', foot: 'both feet', finger: 'fingers',
+  lUpperArm: 'L upper arm', rUpperArm: 'R upper arm',
+  lLowerArm: 'L lower arm', rLowerArm: 'R lower arm',
+  lUpperLeg: 'L upper leg', rUpperLeg: 'R upper leg',
+  lLowerLeg: 'L lower leg', rLowerLeg: 'R lower leg',
+  lHand: 'L hand', rHand: 'R hand', lFoot: 'L foot', rFoot: 'R foot',
+  pelvis: 'pelvis',
+};
+
+/** which PART a segment paints (its unwrap space + preview geometry) */
+export const PAINT_TARGET_PART: Record<LimbPaintTargetId, PartId> = {
+  lUpperArm: 'pipe', rUpperArm: 'pipe', lLowerArm: 'pipe', rLowerArm: 'pipe',
+  lUpperLeg: 'pipe', rUpperLeg: 'pipe', lLowerLeg: 'pipe', rLowerLeg: 'pipe',
+  lHand: 'hand', rHand: 'hand', lFoot: 'foot', rFoot: 'foot',
+  pelvis: 'torso',
+};
+
+export function paintTargetPart(target: PaintTargetId): PartId {
+  return (PAINT_TARGET_PART as Record<string, PartId>)[target] ?? (target as PartId);
+}
+
+/** bone → limb segment (the skeleton's own vocabulary; wrists ride the
+ *  lower arm — a forearm tattoo runs to the wrist) */
+export const PAINT_TARGET_BY_BONE: Record<string, LimbPaintTargetId> = {
+  lUpperArm: 'lUpperArm', rUpperArm: 'rUpperArm',
+  lForearm: 'lLowerArm', rForearm: 'rLowerArm',
+  lWrist: 'lLowerArm', rWrist: 'rLowerArm',
+  lThigh: 'lUpperLeg', rThigh: 'rUpperLeg',
+  lShin: 'lLowerLeg', rShin: 'rLowerLeg',
+  lHand: 'lHand', rHand: 'rHand', lFoot: 'lFoot', rFoot: 'rFoot',
+  pelvis: 'pelvis',
+};
+
+/** Segments that must NEVER inherit their part's paint: limbs WANT the
+ *  'all limbs' fallback; the pelvis inheriting torso paint is exactly the
+ *  two-sets-of-tits bug. When unpainted, these fall to the part's BARE
+ *  (paint-free) texture. */
+export const PAINT_TARGET_NO_PART_FALLBACK: ReadonlySet<PaintTargetId> = new Set(['pelvis']);
+
+/** The paint target ONE INSTANCE resolves to: its bone's segment when the
+ *  segment paints this part (anatomy blobs riding joint bones keep their
+ *  plain part), else the part itself. */
+export function paintTargetForInstance(part: PartId, bone?: string): PaintTargetId {
+  const segment = bone ? PAINT_TARGET_BY_BONE[bone] : undefined;
+  return segment && PAINT_TARGET_PART[segment] === part ? segment : part;
+}
+
 export type PartPreset = {
   label: string;
   /** silhouette: lerped radius multipliers along v (Globe.profile semantics —

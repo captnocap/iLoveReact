@@ -41,7 +41,10 @@ export const MODEL_PREVIEW_LIVE_KEY = 'cutout.modelpaint.live';
 // The preview's own numbers (P2 — registered where they live).
 export const MODEL_PREVIEW = {
   bakeMs: 90,
-  panelWidth: 320,
+  /** the preview is a PANEL in the right stack (the user: the full-height
+   *  thin column was bad) — width matches the inspector, height is its own */
+  panelWidth: 280,
+  panelHeight: 300,
   figureDist: 3.2,
   vehicleDist: 8.2,
   fov: 42,
@@ -52,7 +55,8 @@ editorTunables().register({
   system: 'cutout-modelpreview', route: '/cutout', table: MODEL_PREVIEW,
   specs: {
     bakeMs: { label: 'bake ms', min: 16, max: 1000, step: 8, precision: 0 },
-    panelWidth: { label: 'panel px', min: 220, max: 560, step: 10, precision: 0 },
+    panelWidth: { label: 'panel w px', min: 220, max: 560, step: 10, precision: 0 },
+    panelHeight: { label: 'panel h px', min: 180, max: 640, step: 10, precision: 0 },
     figureDist: { label: 'fig dist', min: 1, max: 10, step: 0.2, precision: 1 },
     vehicleDist: { label: 'veh dist', min: 3, max: 20, step: 0.2, precision: 1 },
     fov: { label: 'fov', min: 20, max: 90, step: 1, precision: 0 },
@@ -140,8 +144,11 @@ const LiveCapture = memo(function LiveCapture(props: {
 const vehicleGeometry = (kind: 'box' | 'cylinder' | 'sphere') =>
   kind === 'cylinder' ? Geometry.Cylinder : kind === 'sphere' ? Geometry.Sphere : Geometry.Box;
 
-function FigurePartMesh(props: { model: BodyDocument; part: PartId }) {
-  const { model, part } = props;
+function FigurePartMesh(props: { model: BodyDocument; target: PaintTargetId }) {
+  const { model, target } = props;
+  // LIMBPAINT: a segment target previews on its PART's geometry (one pipe
+  // sculpted once — the painting is what's per-segment, not the mesh)
+  const part = paintTargetPart(target);
   const params = useMemo(() => {
     const hed: HedDocument = {
       kind: 'hed', version: 1, cols: HED_GRID_W, rows: HED_GRID_H,
@@ -257,24 +264,26 @@ export function ModelPreview3D(props: {
 
   if (!props.model) {
     return (
-      <Box style={{ width: MODEL_PREVIEW.panelWidth, height: '100%', backgroundColor: T.panelSolid, padding: 10 }}>
+      <Box style={{ width: MODEL_PREVIEW.panelWidth, height: MODEL_PREVIEW.panelHeight, backgroundColor: T.panelSolid, padding: 10, borderLeftWidth: 1, borderBottomWidth: 1, borderColor: T.frame }}>
         <Text style={{ color: T.dim, fontSize: 11 }}>model unavailable</Text>
       </Box>
     );
   }
 
   return (
+    // a PANEL in the right stack (above the inspector), not a column of its
+    // own — the layers/selection container language
     <Pressable
       onMouseDown={onDown}
       onMouseMove={onMove}
       onMouseUp={onUp}
-      style={{ width: MODEL_PREVIEW.panelWidth, height: '100%', position: 'relative', overflow: 'hidden', borderLeftWidth: 1, borderColor: T.frame }}
+      style={{ width: MODEL_PREVIEW.panelWidth, height: MODEL_PREVIEW.panelHeight, position: 'relative', overflow: 'hidden', backgroundColor: T.panelSolid, borderLeftWidth: 1, borderBottomWidth: 1, borderColor: T.frame }}
     >
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={T.page}>
         <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} />
         <GAME_CHROME.LabEnvironment preset="studio" />
         {isFigure ? (
-          <FigurePartMesh model={props.model as BodyDocument} part={binding.part as PartId} />
+          <FigurePartMesh model={props.model as BodyDocument} target={binding.part as PaintTargetId} />
         ) : (
           <VehicleMeshesLive model={props.model as VehicleDoc} part={binding.part} />
         )}
