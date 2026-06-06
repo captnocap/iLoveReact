@@ -835,6 +835,68 @@ the bake composites head-only; `heldItem` is authored + stored but not baked
 editor session state is deliberately not streamed (documents are the
 artifact).
 
+## editors/items/ — the item sculpt editor route (ITEMSCULPT-0606, 2026-06-06)
+
+USER ASK: "take a model i can make in the voxel editor, and then bring this
+into an item editor that behaves just like the character editor for the mesh
+of it, so i can smooth out the blocky shape for game items." `/items` (Gem
+nav icon, after characters) is that editor — the /characters sculpt hands
+pointed at ONE Globe item instead of a figure.
+
+The parameterization (`editors/items/bake.ts`, headless): a /voxels blockout
+imports by GLOBE-WRAP — `bakeBlockoutToGlobe` ray-marches the voxel
+occupancy from its centroid along every 48×24 unwrap-cell direction (the
+exact (u,v)→direction map `globeSurface` uses, so the field reads on the
+mesh where the march looked; a block at integer (x,y,z) is the unit cube
+±0.5 — /voxels' own convention), takes the LAST occupied sample per ray
+(interior gaps don't truncate), and encodes the extents as base `radius`
+(mean) + `amount` (max deviation × headroom, floored so a near-sphere still
+sculpts) + the signed grid. Voxel units are METERS, so items arrive
+real-scale. THE LIMIT, SURFACED (status line + bake header + P4-pinned):
+star-shaped from the centroid — concave overhangs/holes flatten to their
+hull. Right for bottles/bats/tools; any-topology items would need a
+marching-cubes skin + a new pick parameterization (rejected this pass).
+
+REUSE, not re-roll (the no-duplication law):
+- `grabKit` went GENERIC over the mesh key (`GrabInstance<P>`/`GrabCloud<P>`/
+  `GrabHit<P>`, default `PartId` — /characters call sites unchanged); /items
+  grabs with key `'item'`. Pick/drag/stamp/lattice math byte-identical.
+- `editors/sculptCamera.ts` — NEW shared hook: the orbit + noclip-fly +
+  zoom-to-cursor camera EXTRACTED VERBATIM from CharactersRoute
+  (GRABQOL/GRABNAV/GRABFLY machinery; same twig keys so /characters' saved
+  poses survived the refactor; V23/V26 law unchanged — host drives, JS sends
+  params/deltas, `solvedCam()` is the pick shadow). CharactersRoute shrank
+  ~230 lines to a hook call; /items is the second call site.
+- paintKit (DEPTH_OVERLAY_WGSL, byte↔grid, sculpt modes), the shared
+  painter's stroke engine + history, `GrabMarker`/`GrabGridCapture`
+  (characters/preview) — imported, not copied (the cutout-models
+  cross-editor-import precedent).
+
+ONE TRUTH: a single 48×24 signed grid is the only deformation store — grab
+drags stamp it, depth-paint strokes read back into it, mesh + lattice shell
+generate from it through `globeSurface`, release uploads keep the compose
+law. V20 from day one: `editors/items/stream.ts` (the `items` concern —
+`SculptedItemDoc` {radius, amount, grid, color, source provenance},
+authored/removed, unknown kinds pass; ONE store with /voxels so import reads
+the channel /voxels autosaves), debounced autosave, labeled session notes,
+mount restore, ctrl+z/y via the painter history.
+
+Registry door (V11): `ITEM_GEOMETRIES` grew `globe`; `ItemDefinition` grew
+optional `heldScale`; `sculptedItemDefinition(id, doc)` (bake.ts) shapes a
+saved item as ONE 'globe'-part definition (heldScale 1 — real meters;
+scaleStatus stays 'unaudited', the audit is the user's verdict). /characters
+lists the sculpted roster as ◆-prefixed prop chips and `HeldItemMeshes`
+resolves them via the new `extraItems` prop — a sculpted item is HOLDABLE
+the moment it's saved. Read once per route mount (save in /items, revisit
+/characters to refresh). Not yet wired: world-drop/bake consumption (the
+V11 items lane proper).
+
+P4 (`editors/items/items.test.ts`, 7 cases): bake determinism + bounded
+flat-ish cube field + meridian symmetry; off-center mass shifts the field
+AND the star-shape limit asserted as real; amount-floor; grab-stamp compose
+on the baked surface (one truth); R8 paint round-trip; registry door;
+stream fold + on-disk snapshot round trip. Full verify 52/52 GREEN.
+
 ## editors/paint/ — THE shared painter (editors wave, 2026-06-04)
 
 `cart/cutout`'s painting tool ("actually good for painting" — the user's

@@ -35,6 +35,9 @@ export const ITEM_GEOMETRIES = {
   cone: EngineGeometry.Cone,
   sphere: EngineGeometry.Sphere,
   torus: EngineGeometry.Torus,
+  // ITEMSCULPT-0606: the sculpted-item surface — /items bakes a voxel
+  // blockout into a Globe displacement field and saves ONE 'globe' part
+  globe: EngineGeometry.Globe,
   blade: ITEM_CUSTOM_GEOMETRIES.blade,
   sail: ITEM_CUSTOM_GEOMETRIES.sail,
   boatHull: ITEM_CUSTOM_GEOMETRIES.boatHull,
@@ -96,6 +99,10 @@ export type ItemDefinition = {
   note: string;
   /** V11: every item owes the scale audit; nothing is audited yet */
   scaleStatus: ItemScaleStatus;
+  /** in-hand scale override (ITEMSCULPT-0606): sculpted items are authored
+   *  at real meters and carry 1; absent = the gallery-calibrated per-id
+   *  table in the renderer (HELD_ITEM_TUNING.scale) */
+  heldScale?: number;
   parts: ItemPart[];
 };
 

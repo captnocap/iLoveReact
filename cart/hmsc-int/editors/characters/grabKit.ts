@@ -21,6 +21,10 @@
 // the V20 session notes. Picking goes through GAME_CAMERA.screenRay /
 // worldToScreen (registry pure math — sanctioned under V26, which kills JS
 // viewport DRIVING, not semantic camera math).
+//
+// ITEMSCULPT-0606: the kit is generic over the mesh KEY type (`P`, default
+// PartId) — any Globe-parameterized surface sculpts through it. /items grabs
+// its one sculpted item with the identical hands /characters grabs a torso.
 
 import { GAME_CAMERA, type Rect, type Solved } from '../../game/camera';
 import { globeSurface, type GlobeParams } from '@reactjit/geometries';
@@ -84,9 +88,11 @@ export function gridOverlayParams(params: GlobeParams): GlobeParams {
 
 // ── instances — which meshes are grabbable, and where they sit ───────────────
 
-/** One grabbable mesh placement (a strict subset of the rendered transform). */
-export type GrabInstance = {
-  part: PartId;
+/** One grabbable mesh placement (a strict subset of the rendered transform).
+ *  `P` keys WHICH sculpt grid the grab edits — PartId in /characters, the
+ *  item slot id in /items (ITEMSCULPT-0606). */
+export type GrabInstance<P = PartId> = {
+  part: P;
   position: V3;
   rotation?: V3;
   /** RESOLVED per-axis scale — instanceScaleVec keeps it identical to render */
@@ -120,7 +126,7 @@ export function grabInstancesFor(view: 'part' | 'figure', selPart: PartId, assem
 
 // host transform law (gpu/3d.zig): world = T · Ry·Rx·Rz · S · local —
 // rotateEulerVec IS Ry·Rx·Rz (figure/math owns that convention)
-function toWorld(local: V3, inst: GrabInstance): V3 {
+function toWorld(local: V3, inst: GrabInstance<unknown>): V3 {
   const scaled: V3 = [local[0] * inst.scale[0], local[1] * inst.scale[1], local[2] * inst.scale[2]];
   const rotated = inst.rotation ? rotateEulerVec(scaled, inst.rotation) : scaled;
   return [rotated[0] + inst.position[0], rotated[1] + inst.position[1], rotated[2] + inst.position[2]];
@@ -128,8 +134,8 @@ function toWorld(local: V3, inst: GrabInstance): V3 {
 
 // ── clouds — every grid cell's surface point, in world space ─────────────────
 
-export type GrabCloud = {
-  part: PartId;
+export type GrabCloud<P = PartId> = {
+  part: P;
   instanceIndex: number;
   /** world cell-center points, xyz interleaved, row-major gy·48+gx */
   points: Float32Array;
@@ -152,9 +158,9 @@ export function cellUv(gx: number, gy: number): { cu: number; cv: number } {
  * `paramsFor` is the route's editorPartParams output — the EXACT params the
  * rendered mesh carries, so the cloud sits on the rendered skin.
  */
-export function buildGrabClouds(instances: GrabInstance[], paramsFor: (part: PartId) => GlobeParams): GrabCloud[] {
+export function buildGrabClouds<P = PartId>(instances: GrabInstance<P>[], paramsFor: (part: P) => GlobeParams): GrabCloud<P>[] {
   // one local-space cloud per distinct part, shared across its instances
-  const localByPart = new Map<PartId, { pts: Float32Array; out: Float32Array }>();
+  const localByPart = new Map<P, { pts: Float32Array; out: Float32Array }>();
   for (const inst of instances) {
     if (localByPart.has(inst.part)) continue;
     const surf = globeSurface(paramsFor(inst.part));
@@ -210,8 +216,8 @@ export function buildGrabClouds(instances: GrabInstance[], paramsFor: (part: Par
 
 // ── pick — pixel → the cell under it ─────────────────────────────────────────
 
-export type GrabHit = {
-  part: PartId;
+export type GrabHit<P = PartId> = {
+  part: P;
   instanceIndex: number;
   gx: number;
   gy: number;
@@ -231,11 +237,11 @@ export type GrabHit = {
  *  "hit box gets funky on angles" report; nearest-to-the-ray is what the
  *  cursor visually points at, while the window keeps occlusion honest (a
  *  cheek still beats the shoulder behind it). */
-export function pickGrab(sx: number, sy: number, rect: Rect, cam: Solved, clouds: GrabCloud[]): GrabHit | null {
+export function pickGrab<P = PartId>(sx: number, sy: number, rect: Rect, cam: Solved, clouds: GrabCloud<P>[]): GrabHit<P> | null {
   const ray = GAME_CAMERA.screenRay(sx, sy, rect, cam);
   const [ox, oy, oz] = ray.origin;
   const [dx, dy, dz] = ray.dir;
-  type Candidate = { cloud: GrabCloud; c: number; t: number; distSq: number };
+  type Candidate = { cloud: GrabCloud<P>; c: number; t: number; distSq: number };
   const candidates: Candidate[] = [];
   let tMin = Infinity;
   let windowR = 0;
@@ -277,7 +283,7 @@ export function pickGrab(sx: number, sy: number, rect: Rect, cam: Solved, clouds
 
 /** World direction the grabbed point moves per +1.0 grid value (numeric over
  *  the same surface fn, so amount/profile/instance scale are all in it). */
-export function grabDragAxis(hit: GrabHit, params: GlobeParams, inst: GrabInstance): V3 {
+export function grabDragAxis<P = PartId>(hit: GrabHit<P>, params: GlobeParams, inst: GrabInstance<P>): V3 {
   const surf = globeSurface(params);
   const a = toWorld(surf(hit.cu, hit.cv, 0.5), inst);
   const b = toWorld(surf(hit.cu, hit.cv, -0.5), inst);
@@ -327,13 +333,13 @@ export function stampRadiusUv(brushPx: number, paintW: number): { rx: number; ry
 
 /** A cell's CURRENT surface point (world) — the marker rides this, so it sits
  *  on the rendered skin and follows the surface up/down as a drag stamps. */
-export function grabPointWorld(params: GlobeParams, inst: GrabInstance, cu: number, cv: number): V3 {
+export function grabPointWorld(params: GlobeParams, inst: GrabInstance<unknown>, cu: number, cv: number): V3 {
   return toWorld(globeSurface(params)(cu, cv), inst);
 }
 
 /** Half the world width the stamp ellipse spans at a cell — the influence
  *  shell's radius (what "this much of the surface will move" looks like). */
-export function stampWorldRadius(params: GlobeParams, inst: GrabInstance, cu: number, cv: number, rxUv: number): number {
+export function stampWorldRadius(params: GlobeParams, inst: GrabInstance<unknown>, cu: number, cv: number, rxUv: number): number {
   const surf = globeSurface(params);
   const a = toWorld(surf(cu - rxUv, cv), inst);
   const b = toWorld(surf(cu + rxUv, cv), inst);

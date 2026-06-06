@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout' | 'settings';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'items' | 'vehicles' | 'cutout' | 'settings';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -58,6 +58,9 @@ interface ProjectBarProps {
   // Navigate to the /characters route — the character editor (editors/characters,
   // the head_lab authoring UI remade; authors what game/figure runs).
   onCharacters: () => void;
+  // Navigate to the /items route — the item sculpt editor (editors/items,
+  // ITEMSCULPT-0606: voxel blockouts become grab-sculptable Globe items).
+  onItems: () => void;
   // Navigate to the /vehicles route — the vehicle editor (editors/vehicles,
   // the vehicle_lab authoring UI remade; authors what game/vehicle builds).
   onVehicles: () => void;
@@ -112,6 +115,7 @@ export function ProjectBar(props: ProjectBarProps) {
         <IconBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="play (F1 test / F2 build)" />
         <IconBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <IconBtn icon="User" on={props.activeRoute === 'characters'} onPress={props.onCharacters} title="characters" />
+        <IconBtn icon="Gem" on={props.activeRoute === 'items'} onPress={props.onItems} title="item sculpt" />
         <IconBtn icon="Car" on={props.activeRoute === 'vehicles'} onPress={props.onVehicles} title="vehicles" />
         <IconBtn icon="Boxes" on={props.activeRoute === 'voxels'} onPress={props.onVoxels} title="voxel bake" />
         <IconBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
