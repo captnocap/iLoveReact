@@ -557,8 +557,10 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     };
   }, [grabHover, partRender, rig, view, selPart, v.brush]);
 
-  // ── the 3D viewport (shared by FIGURE / PART / SCULPT lenses) ──────────────
-  const viewport = (
+  // ── the 3D viewport pane (LENSCLARITY-0606: ONE pane, three captioned
+  // mounts — FIGURE full-bleed body · PART full-bleed close-up · SCULPT's
+  // small live side view; the caption makes each lens unmistakable) ─────────
+  const viewportPane = (caption: string) => (
     <Pressable
       onLayout={(lr: any) => { viewRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
       onMouseDown={previewDown}
@@ -568,6 +570,8 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       style={{ flexGrow: 1, minWidth: 0, height: '100%', position: 'relative', overflow: 'hidden' }}
     >
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={T.panelSolid} showGrid={false} showAxes={false}>
+        {/* LENSCLARITY-0606: CAMERA MOUNT — pane 2 (a2ae) lands the non-head
+            binding fix HERE; this node did not move in the restructure. */}
         <Scene3D.Camera nativeCamera ref={camera.cameraRef} position={camera.bootCam.pos} target={camera.bootCam.target} fov={camera.bootCam.fov} />
         <LabEnvironment preset="studio" ground={false} />
         <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={v.showHitboxes} paint={draft.paint} skin={draft.skin} />
@@ -575,6 +579,8 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         {v.showGrabGrid ? <GrabGridMeshes view={view} selPart={selPart} parts={partRender} rig={rig} /> : null}
         <GrabMarker marker={grabMarker} />
       </Scene3D>
+      {/* the lens identity caption — which composition you are looking at */}
+      <Text fontSize={9} color={T.dim} style={{ position: 'absolute', right: 14, top: 14, fontWeight: 800, letterSpacing: 1 }}>{caption}</Text>
       {/* workspace chips ON the viewport (I6/G3 — the route's convention) */}
       <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
         <Chip label="grid" active={v.showGrabGrid} color="cyan" onPress={() => s.setShowGrabGrid(!v.showGrabGrid)} />
@@ -702,10 +708,10 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       <Row style={{ flexGrow: 1, minHeight: 0 }}>
         {lens === 'sculpt' ? (
           <>
-            {/* DEADSPACE-0606: the canvas COLUMN (flex 3 against the 3D's 2);
-                tools strip on top, the measured box aspect-fills with the
-                canvas, samples demonstrate the tail — zero black void */}
-            <Col style={{ flexGrow: 3, flexBasis: 0, minWidth: 0, height: '100%' }}>
+            {/* DEADSPACE-0606 + LENSCLARITY-0606: SCULPT is the 2D unwrap
+                LARGE (the canvas column IS the page) with a SMALL live 3D
+                beside it — visibly distinct from PART's full-bleed view */}
+            <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, height: '100%' }}>
               {sculptTools}
               <Box
                 onLayout={(lr: any) => setCanvasBox((b) => (Math.abs(b.w - lr.width) > 1 || Math.abs(b.h - lr.height) > 1 ? { w: lr.width, h: lr.height } : b))}
@@ -715,8 +721,8 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
               </Box>
               {sampleStrip}
             </Col>
-            <Box style={{ flexGrow: 2, flexBasis: 0, minWidth: 0, height: '100%', flexDirection: 'row' }}>
-              {viewport}
+            <Box style={{ width: 340, height: '100%', flexDirection: 'row', borderLeftWidth: 1, borderColor: T.frame }}>
+              {viewportPane(`LIVE 3D · ${selPart.toUpperCase()}`)}
             </Box>
           </>
         ) : lens === 'paint' ? (
@@ -724,7 +730,9 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
              leaving the page; save lands on the characters channel (K3) */
           <CharacterPaintLens store={s} />
         ) : (
-          viewport
+          /* LENSCLARITY-0606: FIGURE = the whole body posed; PART = the
+             isolated selected part close-up — captioned, never the same */
+          viewportPane(lens === 'figure' ? 'ASSEMBLED FIGURE' : `ISOLATED PART · ${selPart.toUpperCase()}`)
         )}
       </Row>
       {/* the status strip — every store status lands here (Route.tsx:812-816) */}
