@@ -13,6 +13,7 @@ const std = @import("std");
 const v8rt = @import("framework/v8_runtime.zig");
 const cli_bindings = @import("framework/v8_bindings_cli.zig");
 const fs_bindings = @import("framework/v8_bindings_fs.zig");
+const sqlite_bindings = @import("framework/v8_bindings_sqlite.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -60,6 +61,12 @@ pub fn main() !void {
     // Build scripts always need fs. cli no longer shadows __fs_* with
     // un-prefixed names, so register fs explicitly here.
     fs_bindings.registerFs({});
+    // __sql_* rides along like fs: storage/sqlite.zig dlopens libsqlite3 at
+    // first use, so registration is free when the library is absent. The P4
+    // suites (rjit game verify) run under v8cli and the V20 data store is
+    // sqlite-backed (STOREDB-0606) — the tests need the same surface the
+    // cart host has.
+    sqlite_bindings.registerSqlite({});
     // SIGINT/SIGTERM/SIGHUP → kill tracked children before exiting. Prevents
     // Ctrl-C on scripts/dev from orphaning the esbuild watch child.
     cli_bindings.installSignalHandlers();

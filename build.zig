@@ -542,6 +542,7 @@ pub fn build(b: *std.Build) void {
     const has_fs = b.option(bool, "has-fs", "Register __fs_* bindings") orelse false;
     const has_websocket = b.option(bool, "has-websocket", "Register __ws_* (client) bindings") orelse false;
     const has_telemetry = b.option(bool, "has-telemetry", "Register __tel_*/getFps/... bindings") orelse false;
+    const has_sqlite = b.option(bool, "has-sqlite", "Register __sql_* bindings (storage/sqlite.zig dlopens libsqlite3 — no link-time dep)") orelse false;
     const has_zigcall = b.option(bool, "has-zigcall", "Register __zig_call/__zig_call_list bindings") orelse false;
     const has_sdk = b.option(bool, "has-sdk", "Register __http_request_*/__fetch/__claude_*/__kimi_*/__localai_*/__browser_*/__ipc_*/__play_*/__rec_* bindings") orelse false;
     const has_voice = b.option(bool, "has-voice", "Register __voice_* bindings (mic + WebRTC VAD)") orelse false;
@@ -561,6 +562,7 @@ pub fn build(b: *std.Build) void {
     options.addOption(bool, "has_fs", has_fs);
     options.addOption(bool, "has_websocket", has_websocket);
     options.addOption(bool, "has_telemetry", has_telemetry);
+    options.addOption(bool, "has_sqlite", has_sqlite);
     options.addOption(bool, "has_zigcall", has_zigcall);
     options.addOption(bool, "has_sdk", has_sdk);
     options.addOption(bool, "has_voice", has_voice);
@@ -593,6 +595,7 @@ pub fn build(b: *std.Build) void {
     _ = manifest_wf.add("v8-ingredients/fs.flag", if (has_fs) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/websocket.flag", if (has_websocket) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/telemetry.flag", if (has_telemetry) "1\n" else "0\n");
+    _ = manifest_wf.add("v8-ingredients/sqlite.flag", if (has_sqlite) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/zigcall.flag", if (has_zigcall) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/sdk.flag", if (has_sdk) "1\n" else "0\n");
     _ = manifest_wf.add("v8-ingredients/voice.flag", if (has_voice) "1\n" else "0\n");

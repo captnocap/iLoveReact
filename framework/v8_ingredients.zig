@@ -129,6 +129,13 @@ const v8_bindings_telemetry = if (enabledFor("telemetry")) @import("v8_bindings_
     pub fn registerTelemetry(_: anytype) void {}
     pub fn tickDrain() void {}
 };
+// `__sql_*` — extracted from v8_bindings_telemetry.zig (STOREDB-0606) so
+// sqlite consumers stop dragging the whole telemetry surface in via the
+// old has-telemetry piggyback. storage/sqlite.zig dlopens libsqlite3 at
+// runtime, so this ingredient adds no link-time dependency.
+const v8_bindings_sqlite = if (enabledFor("sqlite")) @import("v8_bindings_sqlite.zig") else struct {
+    pub fn registerSqlite(_: anytype) void {}
+};
 const v8_bindings_zigcall = if (enabledFor("zigcall")) @import("v8_bindings_zigcall.zig") else struct {
     pub fn registerZigCall(_: anytype) void {}
     pub fn registerZigCallList(_: anytype) void {}
@@ -310,6 +317,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "fs", .required = false, .grep_prefix = "__fs_", .reg_fn = "registerFs", .mod = v8_bindings_fs },
     .{ .name = "websocket", .required = false, .grep_prefix = "__ws_", .reg_fn = "registerWebSocket", .mod = v8_bindings_websocket },
     .{ .name = "telemetry", .required = false, .grep_prefix = "__tel_", .reg_fn = "registerTelemetry", .mod = v8_bindings_telemetry },
+    .{ .name = "sqlite", .required = false, .grep_prefix = "__sql_", .reg_fn = "registerSqlite", .mod = v8_bindings_sqlite },
     .{ .name = "zigcall", .required = false, .grep_prefix = "__zig_call", .reg_fn = "registerZigCall", .mod = v8_bindings_zigcall },
     .{ .name = "zigcall_list", .required = false, .grep_prefix = "__zig_call", .reg_fn = "registerZigCallList", .mod = v8_bindings_zigcall },
     // Opt-in per cart — scripts/ship grep flips -Dhas-X when the bundle

@@ -263,7 +263,9 @@ function resolveZigFlags(rjitHome: string, metafilePath: string): string[] {
   const names = ['privacy', 'useHost', 'useConnection', 'fs', 'websocket', 'telemetry', 'zigcall', 'sdk', 'voice', 'audio_input', 'whisper', 'paintable', 'onnx', 'pg', 'embed', 'sqlite', 'terminal', 'process', 'window', 'doom'];
   const values = gate.stdout.trim().split(/\s+/);
   const enabled = new Set(names.filter((_, i) => values[i] === '1'));
-  if (enabled.has('sqlite') && !flags.includes('-Dhas-telemetry=true')) flags.push('-Dhas-telemetry=true');
+  // sqlite no longer piggybacks has-telemetry: __sql_* is its own ingredient
+  // (v8_bindings_sqlite.zig, STOREDB-0606) and the registry's buildOptions
+  // emit -Dhas-sqlite=true through the zig-flags format above.
   if (enabled.has('embed') && !flags.includes('-Dhas-pg=true')) flags.push('-Dhas-pg=true');
   return flags;
 }
@@ -315,6 +317,7 @@ function verifyIngredientLabels(cartRoot: string, buildBin: string, flags: strin
     fs: hasBuildFlag(flags, 'has-fs'),
     websocket: hasBuildFlag(flags, 'has-websocket'),
     telemetry: hasBuildFlag(flags, 'has-telemetry'),
+    sqlite: hasBuildFlag(flags, 'has-sqlite'),
     zigcall: hasBuildFlag(flags, 'has-zigcall'),
     sdk: hasBuildFlag(flags, 'has-sdk'),
     voice: hasBuildFlag(flags, 'has-voice'),

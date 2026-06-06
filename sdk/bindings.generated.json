@@ -61,6 +61,18 @@
           "zig": "hostGetMouseRightDown"
         },
         {
+          "js": "__mouse_capture",
+          "zig": "hostMouseCapture"
+        },
+        {
+          "js": "__mouse_delta",
+          "zig": "hostMouseDelta"
+        },
+        {
+          "js": "__input_unfocus",
+          "zig": "hostInputUnfocus"
+        },
+        {
           "js": "__viewport_width",
           "zig": "hostViewportWidth"
         },
@@ -607,6 +619,10 @@
           "zig": "telFrameCb"
         },
         {
+          "js": "__tel_host_flush",
+          "zig": "telHostFlushCb"
+        },
+        {
           "js": "__tel_gpu",
           "zig": "telGpuCb"
         },
@@ -739,6 +755,19 @@
           "zig": "hotKeysJsonCb"
         },
         {
+          "js": "__db_query",
+          "zig": "dbQueryCb"
+        }
+      ]
+    },
+    "sqlite": {
+      "required": false,
+      "module": "framework/v8_bindings_sqlite.zig",
+      "registerFn": "registerSqlite",
+      "grepPrefix": "__sql_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
           "js": "__sql_open",
           "zig": "sqlOpenCb"
         },
@@ -761,10 +790,6 @@
         {
           "js": "__sql_last_rowid",
           "zig": "sqlLastRowIdCb"
-        },
-        {
-          "js": "__db_query",
-          "zig": "dbQueryCb"
         }
       ]
     },
@@ -2377,6 +2402,10 @@
           "zig": "paintCircleEdge"
         },
         {
+          "js": "__paintable_brush",
+          "zig": "paintBrush"
+        },
+        {
           "js": "__paintable_polygon",
           "zig": "paintPolygon"
         },
@@ -2391,6 +2420,247 @@
         {
           "js": "__paintable_readback",
           "zig": "paintReadback"
+        }
+      ]
+    },
+    "physics_lab": {
+      "required": false,
+      "module": "framework/v8_bindings_physics_lab.zig",
+      "registerFn": "registerPhysicsLab",
+      "grepPrefix": "__physics_lab_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__physics_lab_reset",
+          "zig": "hostReset"
+        },
+        {
+          "js": "__physics_lab_burst",
+          "zig": "hostBurst"
+        },
+        {
+          "js": "__physics_lab_step",
+          "zig": "hostStep"
+        },
+        {
+          "js": "__physics_lab_step_buffer",
+          "zig": "hostStepBuffer"
+        }
+      ]
+    },
+    "game_physics": {
+      "required": false,
+      "module": "framework/v8_bindings_game_physics.zig",
+      "registerFn": "registerGamePhysics",
+      "grepPrefix": "__hmsc_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__hmsc_physics_step",
+          "zig": "hostPhysicsStep"
+        },
+        {
+          "js": "__hmsc_register_heightfield",
+          "zig": "hostRegisterHeightfield"
+        },
+        {
+          "js": "__hmsc_clear_heightfields",
+          "zig": "hostClearHeightfields"
+        },
+        {
+          "js": "__hmsc_spike_trace",
+          "zig": "hostSpikeTrace"
+        },
+        {
+          "js": "__game_physics_step",
+          "zig": "hostPhysicsStep"
+        },
+        {
+          "js": "__game_physics_register_heightfield",
+          "zig": "hostRegisterHeightfield"
+        },
+        {
+          "js": "__game_physics_clear_heightfields",
+          "zig": "hostClearHeightfields"
+        }
+      ]
+    },
+    "game_pathing": {
+      "required": false,
+      "module": "framework/v8_bindings_game_pathing.zig",
+      "registerFn": "registerGamePathing",
+      "grepPrefix": "__path_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__path_set_grid",
+          "zig": "hostSetGrid"
+        },
+        {
+          "js": "__path_update_cells",
+          "zig": "hostUpdateCells"
+        },
+        {
+          "js": "__path_fill_rect",
+          "zig": "hostFillRect"
+        },
+        {
+          "js": "__path_set_profile",
+          "zig": "hostSetProfile"
+        },
+        {
+          "js": "__path_set_flows",
+          "zig": "hostSetFlows"
+        },
+        {
+          "js": "__path_find",
+          "zig": "hostFind"
+        },
+        {
+          "js": "__path_generation",
+          "zig": "hostGeneration"
+        },
+        {
+          "js": "__game_pathing_set_grid",
+          "zig": "hostSetGrid"
+        },
+        {
+          "js": "__game_pathing_update_cells",
+          "zig": "hostUpdateCells"
+        },
+        {
+          "js": "__game_pathing_fill_rect",
+          "zig": "hostFillRect"
+        },
+        {
+          "js": "__game_pathing_set_profile",
+          "zig": "hostSetProfile"
+        },
+        {
+          "js": "__game_pathing_set_flows",
+          "zig": "hostSetFlows"
+        },
+        {
+          "js": "__game_pathing_find",
+          "zig": "hostFind"
+        },
+        {
+          "js": "__game_pathing_generation",
+          "zig": "hostGeneration"
+        },
+        {
+          "js": "__game_pathing_set_kind_classes",
+          "zig": "hostSetKindClasses"
+        },
+        {
+          "js": "__game_pathing_plan",
+          "zig": "hostPlan"
+        }
+      ]
+    },
+    "game_camera": {
+      "required": false,
+      "module": "framework/v8_bindings_game_camera.zig",
+      "registerFn": "registerGameCamera",
+      "grepPrefix": "__game_camera_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__game_camera_bind_node",
+          "zig": "hostBindNode"
+        },
+        {
+          "js": "__game_camera_bind_first",
+          "zig": "hostBindFirst"
+        },
+        {
+          "js": "__game_camera_disable",
+          "zig": "hostDisable"
+        },
+        {
+          "js": "__game_camera_disable_node",
+          "zig": "hostDisableNode"
+        },
+        {
+          "js": "__game_camera_set_mode",
+          "zig": "hostSetMode"
+        },
+        {
+          "js": "__game_camera_set_mode_node",
+          "zig": "hostSetModeNode"
+        },
+        {
+          "js": "__game_camera_set_orbit",
+          "zig": "hostSetOrbit"
+        },
+        {
+          "js": "__game_camera_set_orbit_node",
+          "zig": "hostSetOrbitNode"
+        },
+        {
+          "js": "__game_camera_set_aim",
+          "zig": "hostSetAim"
+        },
+        {
+          "js": "__game_camera_set_aim_node",
+          "zig": "hostSetAimNode"
+        },
+        {
+          "js": "__game_camera_set_freefly",
+          "zig": "hostSetFreeFly"
+        },
+        {
+          "js": "__game_camera_set_freefly_node",
+          "zig": "hostSetFreeFlyNode"
+        },
+        {
+          "js": "__game_camera_set_move_axes",
+          "zig": "hostSetMoveAxes"
+        },
+        {
+          "js": "__game_camera_set_move_axes_node",
+          "zig": "hostSetMoveAxesNode"
+        },
+        {
+          "js": "__game_camera_get_freefly_node",
+          "zig": "hostGetFreeFlyNode"
+        },
+        {
+          "js": "__game_camera_set_input_deltas",
+          "zig": "hostSetInputDeltas"
+        },
+        {
+          "js": "__game_camera_set_input_deltas_node",
+          "zig": "hostSetInputDeltasNode"
+        },
+        {
+          "js": "__game_camera_set_smoothing",
+          "zig": "hostSetSmoothing"
+        },
+        {
+          "js": "__game_camera_set_smoothing_node",
+          "zig": "hostSetSmoothingNode"
+        },
+        {
+          "js": "__game_camera_active_node",
+          "zig": "hostActiveNode"
+        },
+        {
+          "js": "__game_camera_probe",
+          "zig": "hostProbeSnapshot"
+        }
+      ]
+    },
+    "capture": {
+      "required": false,
+      "module": "framework/v8_bindings_capture.zig",
+      "registerFn": "registerCapture",
+      "grepPrefix": "__capture_",
+      "tickDrain": "noop",
+      "hostFns": [
+        {
+          "js": "__capture_frame",
+          "zig": "captureFrame"
         }
       ]
     }

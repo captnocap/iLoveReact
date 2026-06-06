@@ -16,6 +16,9 @@ declare global {
   function getMouseY(...args: unknown[]): unknown;
   function getMouseDown(...args: unknown[]): unknown;
   function getMouseRightDown(...args: unknown[]): unknown;
+  function __mouse_capture(...args: unknown[]): unknown;
+  function __mouse_delta(...args: unknown[]): unknown;
+  function __input_unfocus(...args: unknown[]): unknown;
   function __viewport_width(...args: unknown[]): unknown;
   function __viewport_height(...args: unknown[]): unknown;
   function isKeyDown(...args: unknown[]): unknown;
@@ -150,6 +153,7 @@ declare global {
   function getPaintUs(...args: unknown[]): unknown;
   function getTickUs(...args: unknown[]): unknown;
   function __tel_frame(...args: unknown[]): unknown;
+  function __tel_host_flush(...args: unknown[]): unknown;
   function __tel_gpu(...args: unknown[]): unknown;
   function __tel_nodes(...args: unknown[]): unknown;
   function __tel_history(...args: unknown[]): unknown;
@@ -183,13 +187,15 @@ declare global {
   function __hot_remove(...args: unknown[]): unknown;
   function __hot_clear(...args: unknown[]): unknown;
   function __hot_keys_json(...args: unknown[]): unknown;
+  function __db_query(...args: unknown[]): unknown;
+
+  // sqlite (framework/v8_bindings_sqlite.zig)
   function __sql_open(...args: unknown[]): unknown;
   function __sql_close(...args: unknown[]): unknown;
   function __sql_exec(...args: unknown[]): unknown;
   function __sql_query_json(...args: unknown[]): unknown;
   function __sql_changes(...args: unknown[]): unknown;
   function __sql_last_rowid(...args: unknown[]): unknown;
-  function __db_query(...args: unknown[]): unknown;
 
   // zigcall (framework/v8_bindings_zigcall.zig)
   function __zig_call(...args: unknown[]): unknown;
@@ -587,10 +593,70 @@ declare global {
   // paintable (framework/v8_bindings_paintable.zig)
   function __paintable_circle(...args: unknown[]): unknown;
   function __paintable_circle_edge(...args: unknown[]): unknown;
+  function __paintable_brush(...args: unknown[]): unknown;
   function __paintable_polygon(...args: unknown[]): unknown;
   function __paintable_clear(...args: unknown[]): unknown;
   function __paintable_upload(...args: unknown[]): unknown;
   function __paintable_readback(...args: unknown[]): unknown;
+
+  // physics_lab (framework/v8_bindings_physics_lab.zig)
+  function __physics_lab_reset(...args: unknown[]): unknown;
+  function __physics_lab_burst(...args: unknown[]): unknown;
+  function __physics_lab_step(...args: unknown[]): unknown;
+  function __physics_lab_step_buffer(...args: unknown[]): unknown;
+
+  // game_physics (framework/v8_bindings_game_physics.zig)
+  function __hmsc_physics_step(...args: unknown[]): unknown;
+  function __hmsc_register_heightfield(...args: unknown[]): unknown;
+  function __hmsc_clear_heightfields(...args: unknown[]): unknown;
+  function __hmsc_spike_trace(...args: unknown[]): unknown;
+  function __game_physics_step(...args: unknown[]): unknown;
+  function __game_physics_register_heightfield(...args: unknown[]): unknown;
+  function __game_physics_clear_heightfields(...args: unknown[]): unknown;
+
+  // game_pathing (framework/v8_bindings_game_pathing.zig)
+  function __path_set_grid(...args: unknown[]): unknown;
+  function __path_update_cells(...args: unknown[]): unknown;
+  function __path_fill_rect(...args: unknown[]): unknown;
+  function __path_set_profile(...args: unknown[]): unknown;
+  function __path_set_flows(...args: unknown[]): unknown;
+  function __path_find(...args: unknown[]): unknown;
+  function __path_generation(...args: unknown[]): unknown;
+  function __game_pathing_set_grid(...args: unknown[]): unknown;
+  function __game_pathing_update_cells(...args: unknown[]): unknown;
+  function __game_pathing_fill_rect(...args: unknown[]): unknown;
+  function __game_pathing_set_profile(...args: unknown[]): unknown;
+  function __game_pathing_set_flows(...args: unknown[]): unknown;
+  function __game_pathing_find(...args: unknown[]): unknown;
+  function __game_pathing_generation(...args: unknown[]): unknown;
+  function __game_pathing_set_kind_classes(...args: unknown[]): unknown;
+  function __game_pathing_plan(...args: unknown[]): unknown;
+
+  // game_camera (framework/v8_bindings_game_camera.zig)
+  function __game_camera_bind_node(...args: unknown[]): unknown;
+  function __game_camera_bind_first(...args: unknown[]): unknown;
+  function __game_camera_disable(...args: unknown[]): unknown;
+  function __game_camera_disable_node(...args: unknown[]): unknown;
+  function __game_camera_set_mode(...args: unknown[]): unknown;
+  function __game_camera_set_mode_node(...args: unknown[]): unknown;
+  function __game_camera_set_orbit(...args: unknown[]): unknown;
+  function __game_camera_set_orbit_node(...args: unknown[]): unknown;
+  function __game_camera_set_aim(...args: unknown[]): unknown;
+  function __game_camera_set_aim_node(...args: unknown[]): unknown;
+  function __game_camera_set_freefly(...args: unknown[]): unknown;
+  function __game_camera_set_freefly_node(...args: unknown[]): unknown;
+  function __game_camera_set_move_axes(...args: unknown[]): unknown;
+  function __game_camera_set_move_axes_node(...args: unknown[]): unknown;
+  function __game_camera_get_freefly_node(...args: unknown[]): unknown;
+  function __game_camera_set_input_deltas(...args: unknown[]): unknown;
+  function __game_camera_set_input_deltas_node(...args: unknown[]): unknown;
+  function __game_camera_set_smoothing(...args: unknown[]): unknown;
+  function __game_camera_set_smoothing_node(...args: unknown[]): unknown;
+  function __game_camera_active_node(...args: unknown[]): unknown;
+  function __game_camera_probe(...args: unknown[]): unknown;
+
+  // capture (framework/v8_bindings_capture.zig)
+  function __capture_frame(...args: unknown[]): unknown;
 
 }
 

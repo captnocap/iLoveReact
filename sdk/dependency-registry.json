@@ -471,10 +471,13 @@
           "input": "cart/sweatshop/lib/storage/"
         }
       ],
-      "buildOptions": [],
+      "buildOptions": [
+        "has-sqlite"
+      ],
       "nativeLibraries": [
         "sqlite3"
-      ]
+      ],
+      "note": "__sql_* is its own ingredient (v8_bindings_sqlite.zig, STOREDB-0606); the old has-telemetry piggyback is retired. libsqlite3 is dlopen'd at runtime, so has-sqlite only gates host-fn registration + .so bundling."
     },
     "crypto": {
       "triggers": [

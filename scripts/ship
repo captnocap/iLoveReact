@@ -346,14 +346,11 @@ if [[ -f "$METAFILE" ]]; then
         PG_FLAG="-Dhas-pg=true"
     fi
     if [[ "$WANT_SQLITE" == "1" ]]; then
-        # libsqlite3 is dlopen'd at runtime by framework/storage/sqlite.zig
-        # — no link-time -D flag. WANT_SQLITE still gates bundling the .so.
-        # __sql_* host fns are registered inside v8_bindings_telemetry.zig,
-        # so SQLite consumers also need has-telemetry to pull that binding
-        # in. Couple them here until __sql_* moves to its own binding
-        # (TODO: extract to v8_bindings_sqlite.zig).
-        TEL_FLAG="-Dhas-telemetry=true"
-        WANT_TEL=1
+        # libsqlite3 is dlopen'd at runtime by framework/storage/sqlite.zig —
+        # no link-time dependency; WANT_SQLITE also gates bundling the .so.
+        # __sql_* is its own ingredient now (v8_bindings_sqlite.zig,
+        # STOREDB-0606) — the old has-telemetry piggyback is retired.
+        SQLITE_FLAG="-Dhas-sqlite=true"
     fi
     if [[ "$WANT_EMBED" == "1" ]]; then
         EMBED_FLAG="-Dhas-embed=true"
@@ -415,6 +412,10 @@ fi
 if [[ "$WANT_TEL" == "1" ]]; then
     BUILD_BINDINGS+=("telemetry")
     BUILD_TRIGGERS+=("telemetry: telemetry cart source")
+fi
+if [[ "$WANT_SQLITE" == "1" ]]; then
+    BUILD_BINDINGS+=("sqlite")
+    BUILD_TRIGGERS+=("sqlite: runtime/hooks/sqlite.ts or localstore")
 fi
 if [[ "$WANT_ZIGCALL" == "1" ]]; then
     BUILD_BINDINGS+=("zigcall" "zigcall_list")
@@ -542,12 +543,13 @@ declare -A EXPECTED=(
     [fs]="$WANT_FS"
     [websocket]="$WANT_WS"
     [telemetry]="$WANT_TEL"
+    [sqlite]="$WANT_SQLITE"
     [zigcall]="$WANT_ZIGCALL"
     [physics_lab]="$WANT_PHYSICS_LAB"
     [game_physics]="$WANT_GAME_PHYSICS"
 )
 LABEL_MISMATCH=0
-for ing in privacy process httpsrv wssrv net tor fs websocket telemetry zigcall physics_lab game_physics; do
+for ing in privacy process httpsrv wssrv net tor fs websocket telemetry sqlite zigcall physics_lab game_physics; do
     flag_file="$LABEL_DIR/${ing}.flag"
     expected="${EXPECTED[$ing]:-0}"
     if [[ ! -f "$flag_file" ]]; then
