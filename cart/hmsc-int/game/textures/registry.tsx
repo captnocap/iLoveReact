@@ -1,11 +1,18 @@
 import { memo, useMemo } from 'react';
 import { Effect, StaticSurface } from '@reactjit/primitives';
-import type { PerceptionState } from '../design';
-import { BUILDING_SKINS, type BuildingSkin, skinCapturePx } from './buildingSkins';
-import { HMSC_SHADERS, defaultShaderData, shaderSpec } from './textureShaders';
-import { type CustomTexture, loadCustomTextures } from './customTextures';
+// GAP(V15): the PerceptionState type rides the legacy design module until hmsc
+// becomes compile/'s output.
+import type { PerceptionState } from '../../../hmsc/design';
+// GAP(buildings): the React facade catalog stays with the legacy building
+// renderer — these REACT_TEXTURES entries retire WITH the hand-coded buildings
+// (the V24 build mode replaces them); only the import path keeps them alive.
+import { BUILDING_SKINS, type BuildingSkin, skinCapturePx } from '../../../hmsc/render3d/buildingSkins';
+import { HMSC_SHADERS, defaultShaderData, shaderSpec } from './shaders';
+import { type CustomTexture, loadCustomTextures } from './materials';
 
-// THE TEXTURE REGISTRY — one flat list of bakeable surface looks.
+// game/textures/registry.tsx — THE TEXTURE REGISTRY: one flat list of bakeable
+// surface looks. (Lineage: cart/hmsc/render3d/textures.tsx; TEXPORT-0606 moved
+// the texture pipeline behind the game/textures door. Export names unchanged.)
 //
 // To everyone downstream a texture is ONE thing: a named look that bakes to a
 // GPU texture and gets sampled by `textureKey` on a tile, a prop, or a building
@@ -17,9 +24,9 @@ import { type CustomTexture, loadCustomTextures } from './customTextures';
 // "texture is one concept": the user sees a texture, not a shader-vs-skin split.
 //
 // This is the single source of truth the game renders from AND the editor
-// browses. Shader entries derive from the textureShaders catalog (texture id ==
+// browses. Shader entries derive from the ./shaders catalog (texture id ==
 // spec id, default data == defaultShaderData — no hand-written data arrays), and
-// the studio's saved materials (customTextures) hydrate in via allTextures().
+// the studio's saved materials (./materials) hydrate in via allTextures().
 
 export type TextureRenderCtx = {
   widthMeters: number;
@@ -60,7 +67,7 @@ const REACT_TEXTURES: TextureDef[] = Object.keys(BUILDING_SKINS).map((id) => ({
   },
 }));
 
-// The shader textures: every catalog recipe (render3d/textureShaders.ts) at its
+// The shader textures: every catalog recipe (./shaders.ts) at its
 // default look — texture id == spec id, so the editor opens the matching lab and
 // `defaultShaderData` is THE default (no hand-written data arrays). The studio's
 // tuned saves land in customTextures and hydrate below.

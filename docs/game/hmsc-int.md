@@ -452,6 +452,24 @@ DELIBERATELY NOT a 20th `game/index.ts` export — the door list is RULED
 (V17); the question is surfaced to the supervisor, and in-game/ consumers
 import `../world` meanwhile.
 
+## game/textures/ — the texture pipeline door (TEXPORT-0606, 2026-06-06)
+
+The texture pipeline MOVED here from `cart/hmsc/render3d/` (USER ASK "properly
+port that into the correct space") — a faithful move, not a rewrite: export
+names, `custom:` ids, the `custom-textures` store key, and behavior unchanged,
+so pre-move saves resolve. `shaders.ts` (was `textureShaders.ts`) = the
+canonical tunable-WGSL recipe catalog; `materials.ts` (was `customTextures.ts`)
+= the stored materials Materialize freezes into the shared 'hmsc' store;
+`registry.tsx` (was `textures.tsx`) = THE one texture registry
+(`TextureDef`/`allTextures`/`textureById`/`TextureCapture`) every face/tile/
+part samples by id. Follows the `game/world` pattern (own module, not a ruled
+`game/index.ts` door); hmsc-int consumers use `@game/textures` subpaths and the
+legacy renderer `cart/hmsc/render3d/parts.tsx` imports the registry FROM
+hmsc-int (the V15 compile direction). GAP edges marked at the import sites
+(W-2 WGSL fills, doomed buildingSkins, V15 design/store wires). The decal
+editor and the V24 piece/voxel-item texture slots land on this door. Full
+lineage table: `game/textures/CAPTURE.md`.
+
 ## game/build/ — the building piece grammar (V24 capture, 2026-06-04)
 
 The V24 ruling's data layer ("Author by semantic piece. Bake by gameplay

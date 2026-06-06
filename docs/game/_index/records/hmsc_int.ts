@@ -194,6 +194,16 @@ export const hmsc_int: DocIndex = {
       status: 'live',
     },
     {
+      name: 'game/textures (the texture pipeline door, TEXPORT-0606)',
+      purpose: ['texture_bake', 'shader', 'persistence', 'rendering'],
+      kind: 'module',
+      sourceFile: 'cart/hmsc-int/game/textures/index.ts',
+      description:
+        'TEXPORT-0606 (2026-06-06, USER ASK "properly port that into the correct space"): the texture pipeline MOVED from cart/hmsc/render3d behind the captured ground floor\'s own door — a faithful move, not a rewrite (export names, custom: ids, the custom-textures store key, and behavior unchanged; old saves resolve). shaders.ts (was textureShaders.ts) = the canonical tunable-WGSL recipe catalog; materials.ts (was customTextures.ts) = the stored materials Materialize freezes into the shared hmsc store; registry.tsx (was textures.tsx) = THE one texture registry (TextureDef/TEXTURE_REGISTRY/allTextures/textureById/TextureCapture) every face/tile/part samples by id. Follows the game/world pattern (own module, not a 20th ruled game/index.ts door); consumers use @game/textures subpaths (TextureStudio, ShaderLab, TexturePreview, ObjectsTab, editors/cutout) and the legacy renderer cart/hmsc/render3d/parts.tsx imports the registry FROM hmsc-int (the V15 compile direction). GAP edges marked at the import sites: roadTileFill/fillShader WGSL stays with the W-2 render fills; buildingSkins (REACT_TEXTURES) retires WITH the hand-coded buildings; design.PerceptionState + state/gameState store wires are V15. This door is where the decal editor (composed Box/Text/Image source) and the V24 piece/voxel-item texture slots land. See game/textures/CAPTURE.md.',
+      dependsOn: ['cart/hmsc/render3d (GAP: WGSL fills + buildingSkins + store wires)', 'data/index.ts (the V20 store)'],
+      status: 'live',
+    },
+    {
       name: 'game/painted + model texture painting (MODELPAINT-0605)',
       purpose: ['texture_bake', 'character', 'vehicle', 'ui', 'persistence'],
       kind: 'module',

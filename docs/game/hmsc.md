@@ -816,9 +816,9 @@ Commands present in the registry:
 `cart/hmsc/render3d/fillShader.ts`
 
 - Large shared WGSL fill shader catalog used by texture recipes.
-- Provides procedural material logic used by `textureShaders.ts`.
+- Provides procedural material logic used by `game/textures/shaders.ts`.
 
-`cart/hmsc/render3d/textureShaders.ts`
+`cart/hmsc-int/game/textures/shaders.ts` (MOVED — was `cart/hmsc/render3d/textureShaders.ts`, TEXPORT-0606: the texture pipeline lives behind hmsc-int's `game/textures` door now; raw WGSL sources `roadTileFill`/`fillShader` stay here with the W-2 fills)
 
 - Texture recipe catalog.
 - Defines shader params, variants, defaults, and groups.
@@ -831,14 +831,15 @@ Commands present in the registry:
   form tunes a full tile of fill color.
 - Exports `HMSC_SHADERS`, `shaderSpec`, and `shaderGroups`.
 
-`cart/hmsc/render3d/textures.tsx`
+`cart/hmsc-int/game/textures/registry.tsx` (MOVED — was `cart/hmsc/render3d/textures.tsx`, TEXPORT-0606)
 
 - Unified texture registry.
 - Treats shader textures and React facade textures as one concept: a texture id that bakes to a StaticSurface and is sampled by `textureKey`.
-- Hydrates custom saved materials through `customTextures.ts`.
+- Hydrates custom saved materials through `game/textures/materials.ts`.
 - Exports `TextureCapture`, `TEXTURE_REGISTRY`, `TEXTURE_IDS`, `allTextures`, and `textureById`.
+- The legacy consumer `render3d/parts.tsx` imports it from hmsc-int (the V15 compile direction).
 
-`cart/hmsc/render3d/customTextures.ts`
+`cart/hmsc-int/game/textures/materials.ts` (MOVED — was `cart/hmsc/render3d/customTextures.ts`, TEXPORT-0606; export names, `custom:` ids, and the store key unchanged)
 
 - Stored material layer for editor-authored textures.
 - Reads/writes through `hmscStoreGet` and `hmscStoreSet`, which ultimately use host localstore/store functions.
@@ -1119,7 +1120,7 @@ Browser APIs not used:
 
 `texture registry`
 
-- Unified list in `render3d/textures.tsx`.
+- Unified list in `cart/hmsc-int/game/textures/registry.tsx` (TEXPORT-0606 — moved behind the captured ground floor's door).
 - A texture can be authored by WGSL shader or React UI, but downstream it is just an id that bakes to a texture key.
 
 `part`

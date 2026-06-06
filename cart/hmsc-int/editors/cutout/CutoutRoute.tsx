@@ -28,8 +28,8 @@ import { GAME_CHROME } from '@game';
 // texture registry + the studio's stored materials. /cutout participates both
 // ways — paint ON a registry texture (the material canvas), and Materialize an
 // extracted cutout INTO a stored material (the 'cutout-stencil' recipe).
-import { allTextures, textureById } from '../../../hmsc/render3d/textures';
-import { saveCustomTexture, useCustomTextures } from '../../../hmsc/render3d/customTextures';
+import { allTextures, textureById } from '@game/textures/registry';
+import { saveCustomTexture, useCustomTextures } from '@game/textures/materials';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { editorTunables } from '../tunables';

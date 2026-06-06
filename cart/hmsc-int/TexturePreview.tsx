@@ -8,7 +8,7 @@
 // texture studio.
 
 import { Box, Effect, Text } from '@reactjit/primitives';
-import type { TextureDef } from '../hmsc/render3d/textures';
+import type { TextureDef } from '@game/textures/registry';
 import { accentFor } from './studio.cls';
 
 const PREVIEW_PX = 300;

@@ -26,7 +26,7 @@ import {
 import { buildDraft, parseDraft, serializeDraft } from './draft';
 import { packStencilData, stencilDataFromAsset, STENCIL_CELLS_OFFSET, STENCIL_RECIPE_ID } from './extraction';
 // the LIVE material catalog — the materialize contract is pinned against it
-import { defaultShaderData, shaderSpec } from '../../../hmsc/render3d/textureShaders';
+import { defaultShaderData, shaderSpec } from '@game/textures/shaders';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
 declare const globalThis: any;

@@ -16,8 +16,9 @@
 //
 // PER-PART TEXTURES are stored as Record<partId, textureId> on the placed object
 // (Building.partTextures / WorldProp.partTextures, design.ts). The texture id is a
-// TEXTURE_REGISTRY id (render3d/textures.tsx) — the SAME one flat list the editor
-// browses; see the "texture is one concept" rule.
+// TEXTURE_REGISTRY id (hmsc-int/game/textures — the pipeline moved behind the
+// captured ground floor's door, TEXPORT-0606) — the SAME one flat list the
+// editor browses; see the "texture is one concept" rule.
 
 import { memo, useMemo } from 'react';
 import { Scene3D } from '@reactjit/primitives';
@@ -25,7 +26,9 @@ import * as Geometry from '@reactjit/geometries';
 import type { BoxFace } from '@reactjit/geometries';
 import type { PerceptionState } from '../design';
 import { skinCapturePx, skinGridCols, skinGridFloors } from './buildingSkins';
-import { TextureCapture, textureById } from './textures';
+// The legacy renderer reads the captured ground floor's registry — the same
+// direction the V15 compile contract points (hmsc consumes hmsc-int's output).
+import { TextureCapture, textureById } from '../../hmsc-int/game/textures/registry';
 
 export type Vec3 = [number, number, number];
 

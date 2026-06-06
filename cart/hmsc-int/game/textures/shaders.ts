@@ -1,25 +1,29 @@
-// textureShaders.ts — the CANONICAL texture-shader catalog: every tunable WGSL
-// recipe a texture can be authored from, each one NAMED, range-bounded, draggable
-// parameters — never a bare data[] of magic numbers. (This is the catalog that
-// used to live editor-side as hmsc-int/shaderCatalog.ts with one entry; it moved
-// game-side because the GAME bakes stored materials from these specs — the editor
-// only adds sliders on top.)
+// game/textures/shaders.ts — the CANONICAL texture-shader catalog: every tunable
+// WGSL recipe a texture can be authored from, each one NAMED, range-bounded,
+// draggable parameters — never a bare data[] of magic numbers. (Lineage: lived as
+// cart/hmsc/render3d/textureShaders.ts, and before that editor-side as
+// hmsc-int/shaderCatalog.ts with one entry; TEXPORT-0606 moved the texture
+// pipeline behind the game/textures door — the captured ground floor bakes
+// stored materials from these specs, the editor only adds sliders on top.)
 //
 // A shader here is a RECIPE, not an assignable asset: the texture studio
-// Materializes a tuned recipe into a stored material (render3d/customTextures.ts),
-// and THAT lands in the texture registry for faces/tiles/parts. Canvas is always
-// exactly 1 tile — wider looks decompose into per-tile materials.
+// Materializes a tuned recipe into a stored material (./materials.ts), and THAT
+// lands in the texture registry (./registry.tsx) for faces/tiles/parts. Canvas is
+// always exactly 1 tile — wider looks decompose into per-tile materials.
 //
 // Two shader families:
 //   • ROAD — the game's own layered road-tile shader (asphalt base + marking
-//     overlays), imported from roadTileFill.ts.
+//     overlays), imported from the W-2 render lane's roadTileFill.ts.
 //   • THE FILL BOARDS — the effect_fills evaluation boards (A–H), one mega-WGSL
-//     (render3d/fillShader.ts) whose D[] selects [materialId, variant, seed,
-//     quality, board]. Each board material becomes one spec with its three
+//     (the W-2 lane's fillShader.ts) whose D[] selects [materialId, variant,
+//     seed, quality, board]. Each board material becomes one spec with its three
 //     authored takes as variants and seed/detail-grade as the tunable base.
 
-import { ROAD_TILE_SHADER } from './roadTileFill';
-import { FILL_SHADER } from './fillShader';
+// GAP(W-2): the raw WGSL sources sit with the world-render fills in
+// cart/hmsc/render3d (tileFill prelude + per-surface fills); they move when the
+// world render lane is captured.
+import { ROAD_TILE_SHADER } from '../../../hmsc/render3d/roadTileFill';
+import { FILL_SHADER } from '../../../hmsc/render3d/fillShader';
 
 export interface ShaderParam {
   key: string;

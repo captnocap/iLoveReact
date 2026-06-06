@@ -116,7 +116,7 @@ export function cutoutToDocument(asset: CutoutAsset): PaintDocument {
 }
 
 // ── Materializing: a cutout as a stencil MATERIAL ────────────────────────────
-// The 'cutout-stencil' recipe (cart/hmsc/render3d/textureShaders.ts) renders
+// The 'cutout-stencil' recipe (game/textures/shaders.ts) renders
 // a coarse 0/1 cell grid as fill-inside / background-outside. THIS packer
 // builds its data[]; the layout below is the recipe's documented contract
 // and is pinned by test against the live catalog.

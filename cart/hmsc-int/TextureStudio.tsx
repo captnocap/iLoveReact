@@ -10,11 +10,11 @@
 //   └────────────────┴──────────────────────────────────┘
 //
 // The texture pipeline in one surface (the locked art→material vocabulary):
-//   • a SHADER is a tunable WGSL recipe from render3d/textureShaders.ts — every
+//   • a SHADER is a tunable WGSL recipe from game/textures/shaders.ts — every
 //     parameter is named + range-bounded (the no-magic-numbers rule), canvas is
 //     exactly 1 tile;
 //   • MATERIALIZE freezes the current values into a stored material
-//     (render3d/customTextures.ts, persisted in the shared 'hmsc' store) under
+//     (game/textures/materials.ts, persisted in the shared 'hmsc' store) under
 //     the name typed in SAVE AS;
 //   • the stored material joins the one texture registry (allTextures), so it is
 //     immediately assignable everywhere — part picking, tiles, faces — and the
@@ -24,9 +24,9 @@
 
 import { useEffect, useMemo } from 'react';
 import { Box, Col, Effect, Pressable, Row, ScrollView, Text, TextInput } from '@reactjit/primitives';
-import { shaderGroups, shaderSpec, type ShaderSpec } from '../hmsc/render3d/textureShaders';
-import { TEXTURE_REGISTRY, textureById } from '../hmsc/render3d/textures';
-import { removeCustomTexture, saveCustomTexture, useCustomTextures, type CustomTexture } from '../hmsc/render3d/customTextures';
+import { shaderGroups, shaderSpec, type ShaderSpec } from '@game/textures/shaders';
+import { TEXTURE_REGISTRY, textureById } from '@game/textures/registry';
+import { removeCustomTexture, saveCustomTexture, useCustomTextures, type CustomTexture } from '@game/textures/materials';
 import { ShaderLab } from './ShaderLab';
 import { TexturePreview } from './TexturePreview';
 import { accentFor } from './studio.cls';

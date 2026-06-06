@@ -17,7 +17,7 @@
 
 import { useMemo, useState } from 'react';
 import { Box, Col, Effect, Pressable, Row, ScrollView, Text } from '@reactjit/primitives';
-import { paramDefaults, type ShaderParam, type ShaderSpec } from '../hmsc/render3d/textureShaders';
+import { paramDefaults, type ShaderParam, type ShaderSpec } from '@game/textures/shaders';
 
 interface Material { name: string; data: number[] }
 

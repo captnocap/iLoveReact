@@ -5,7 +5,7 @@
 // `quality` is the runtime detail grade (PSX → Max). Authored in the
 // cart/effect_fills evaluation cart (see its CATALOG.md for the board maps); the
 // canonical copy lives HERE because the game's texture catalog
-// (render3d/textureShaders.ts) registers these looks as tunable texture shaders —
+// (hmsc-int/game/textures/shaders.ts) registers these looks as tunable texture shaders —
 // effect_fills imports this module, so there is exactly one copy of the WGSL.
 //
 // Data layout (storage buffer D):

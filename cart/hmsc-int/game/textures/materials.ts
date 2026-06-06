@@ -1,18 +1,23 @@
-// customTextures.ts — the stored MATERIALS the texture studio authors.
+// game/textures/materials.ts — the stored MATERIALS the texture studio authors.
+// (Lineage: cart/hmsc/render3d/customTextures.ts; TEXPORT-0606 moved the texture
+// pipeline behind the game/textures door. Export names unchanged — a stored
+// material is still a CustomTexture and 'custom:' ids stay stable.)
 //
-// A texture shader (render3d/textureShaders.ts) is a tunable RECIPE; pressing
-// Materialize in the studio freezes the current slider values into a named
-// material — a {shaderId, data[]} snapshot — and saves it HERE. Stored materials
-// live in the shared 'hmsc' localstore (the same store the game boots from, see
+// A texture shader (./shaders.ts) is a tunable RECIPE; pressing Materialize in
+// the studio freezes the current slider values into a named material — a
+// {shaderId, data[]} snapshot — and saves it HERE. Stored materials live in the
+// shared 'hmsc' localstore (the same store the game boots from, see
 // hmsc_localstore_shared_across_carts), so the game bakes them with no editor
-// dependency: render3d/textures.tsx hydrates each record back through the shader
+// dependency: ./registry.tsx hydrates each record back through the shader
 // catalog into a regular TextureDef, and from there the normal capture path
 // (TextureCapture / partTextureKey) treats it like any built-in texture.
 //
 // Records are raw data only (id/label/shaderId/data) — hydration lives in
-// textures.tsx so this module has no component imports and no cycles.
+// registry.tsx so this module has no component imports and no cycles.
 
-import { hmscStoreGet, hmscStoreSet } from '../state/gameState';
+// GAP(V15): the shared-store wires still live with the legacy game state module;
+// they move when hmsc becomes compile/'s output.
+import { hmscStoreGet, hmscStoreSet } from '../../../hmsc/state/gameState';
 import { busOn, busEmit } from '@reactjit/hooks/useIFTTT';
 import { useEffect, useState } from 'react';
 
