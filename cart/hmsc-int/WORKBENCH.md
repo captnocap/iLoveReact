@@ -239,9 +239,15 @@ bang; the old route works until the minute its replacement does.
    as the live proof source (panel generated from the tunables registry,
    write-through). Touches to pre-existing files: 2 additive edits
    (index.tsx route+handler, ProjectBar button) — both die at the flip.
-4. **Character source** (hardest first — roster + draft + 3D stage + PAINT
-   lens). Parity bar: everything CharactersRoute does today, plus paint without
-   leaving the page. Flip: `/characters` route + nav icon die.
+4. ~~**Character source**~~ BUILT (WBCHAR-0606, awaiting user test): the
+   coverage-law parity table lives at `editors/workbench/WBCHAR.CAPTURE.md`
+   (every CharactersRoute capability line-referenced; zero open deferrals —
+   K4 live-3D-in-PAINT-lens and K5 workbench-scoped slot book both user-ruled
+   in). `editors/workbench/characters/{store.ts,panel.ts,source.tsx,Stage.tsx,
+   PaintLens.tsx}` + 13-test P4 suite; CHARACTER is live on /workbench
+   (FIGURE/PART grab-sculpt · SCULPT canvas · PAINT in-page with live 3D).
+   The FLIP (`/characters` route + nav icon die) is a separate commit on the
+   user's word — the route is untouched today.
 5. **Item source** (+ ruled-in voxel SCULPT mode → VoxelHybridRoute dies).
    Flip: `/items`, `/voxels`.
 6. **Vehicle source.** Flip: `/vehicles`.
