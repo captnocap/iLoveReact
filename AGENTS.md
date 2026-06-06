@@ -134,6 +134,19 @@ The "V8 has baggage" claim is false — the baggage is Chromium (200MB CEF), not
 
 ---
 
+## Testing Parity
+
+Test at the layer where the logic lives. Any change touching `framework/*.zig`
+or engine-side code requires Zig-side unit tests in `framework/testing/unit/`,
+run via the relevant `zig build test-*` target, in addition to consumption-layer
+TS tests. A TS test asserting across the bridge proves the bridge contract, not
+the Zig internals — TS-only coverage of Zig logic is green-at-wrong-layer. Use
+`framework/testing/unit/game_physics.zig` from commit `6d21dd74c` as the exemplar
+pattern: focused Zig tests beside the framework logic, with cart/TS tests only
+covering the higher-level consumption contract.
+
+---
+
 ## Discipline Rules
 
 - **No subagents.** Do everything inline. The `Agent` / `Explore` tools go blind to supervisor context.
