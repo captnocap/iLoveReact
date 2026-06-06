@@ -61,8 +61,13 @@ export {
 } from './hed';
 export type { HedDocument, HedLayer, HedShape, HedAnimation, FaceStyle } from './hed';
 
-export { applyBodyPaint, buildBody, parseBody, partsWithPelvisFallback, serializeBody } from './body';
+export { applyBodyPaint, bodyWithOutfit, buildBody, parseBody, partsWithPelvisFallback, serializeBody } from './body';
 export type { BodyDocument } from './body';
+
+// CLOTHSPLIT-0606: the wardrobe ATTACHMENT family — clothing is a prop-like
+// attachment (separate but tightly related), never body-mesh state
+export { attachOutfit, buildOutfit, defaultOutfit, outfitOf, validateOutfit } from './outfit';
+export type { OutfitDocument } from './outfit';
 
 export {
   JOINT_IDS, JOINT_SEED_BONE, RAGDOLL_TUNING,
@@ -71,7 +76,7 @@ export {
 export type { JointId, RagdollJoints, RagdollConstraint } from './ragdoll';
 
 export { bakeFigure, bakeFigureFromSeed, bakeBodyDocument, bakePopulation, partGlobeParams } from './bake';
-export type { BakedFigure, BakedPart, BakedTexture, BakeWardrobe } from './bake';
+export type { BakedFigure, BakedPart, BakedTexture, BakeOutfit } from './bake';
 
 export { charactersStream } from './stream';
 export type { CharactersEvent, CharactersStreamState } from './stream';

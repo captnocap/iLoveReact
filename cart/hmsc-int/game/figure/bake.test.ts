@@ -95,7 +95,7 @@ test('a population preserves variety across seeds and shapes', () => {
 
 test('an authored face document bakes the same as its generated twin', () => {
   const face = generateFace(5);
-  const fromDoc = bakeFigure(face, 'neutral', { clothing: 'suit' });
+  const fromDoc = bakeFigure(face, 'neutral', { top: 'suit' });
   assertEqual(fromDoc.faceTexture.skin, face.skin, 'the document skin must carry');
   assertEqual(fromDoc.parts.head.params.scaleY, face.scaleY, 'the document skull stretch must carry');
   assert(fromDoc.clothing.length > 0, 'the chosen wardrobe must bake');

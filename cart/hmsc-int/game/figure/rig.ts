@@ -19,7 +19,8 @@
 import { type V3 } from './math';
 import { BODY_SHAPES, type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, DEFAULT_BOTTOMS } from './shapes';
 import { anatomyFromSkeleton, assemblyFromSkeleton, type BodyInstance } from './assembly';
-import { buildClothing, type ClothingInstance } from './clothing';
+import type { ClothingInstance } from './clothing';
+import { attachOutfit, buildOutfit } from './outfit';
 import { buildSkeleton, offsetBone, type Bones, type BoneId, type RigTimelineAction } from './skeleton';
 
 // ── hit volumes + damage zones (V2 ruled) ────────────────────────────────────
@@ -113,14 +114,55 @@ export function buildRigAnchors(shapeId: BodyShapeId = 'neutral', pose: BodyPose
 
 // ── the frame ────────────────────────────────────────────────────────────────
 
-export type BodyRigFrame = {
+/** The BODY alone (CLOTHSPLIT-0606): bones + parts + sockets + hit volumes +
+ *  anchors — NO clothing. This is what mesh editing looks at; attachments
+ *  (the outfit, held items) dress it from outside. */
+export type MeshRigFrame = {
   bones: Bones;
   assembly: BodyInstance[];
-  clothing: ClothingInstance[];
   anatomy: BodyInstance[];
   hitboxes: BodyHitbox[];
   anchors: BodyAnchor[];
 };
+
+export type BodyRigFrame = MeshRigFrame & {
+  clothing: ClothingInstance[];
+};
+
+/** The clothing-free frame — the mesh editor's surface (CLOTHSPLIT-0606
+ *  phase 2 mounts this; today it's the inner half of buildRigFrame). */
+export function buildMeshFrame(
+  shapeId: BodyShapeId = 'neutral',
+  pose: BodyPoseId = 'stand',
+  phase = 0,
+  actions: RigTimelineAction[] = [],
+): MeshRigFrame {
+  const s = BODY_SHAPES[shapeId];
+  const bones = buildSkeleton(shapeId, pose, phase, actions);
+  return meshFrameFromBones(bones, s, shapeId, actions);
+}
+
+/** The mesh-frame half of the V1 seam: a clothing-free frame from a CUSTOM
+ *  bones record (a host ragdoll produces bones; the body follows). */
+export function meshFrameFromBones(
+  bones: Bones,
+  s: typeof BODY_SHAPES.neutral,
+  shapeId: BodyShapeId,
+  actions: RigTimelineAction[] = [],
+): MeshRigFrame {
+  return {
+    bones,
+    assembly: assemblyFromSkeleton(s, bones, actions),
+    anatomy: anatomyFromSkeleton(s, shapeId, bones),
+    hitboxes: hitboxesFromSkeleton(bones),
+    anchors: anchorsFromSkeleton(s, bones),
+  };
+}
+
+// The dressed-frame doors keep their pre-split signatures (every route/lab
+// call site unchanged); inside, the frame is the COMPOSITION the user ruled:
+// the body (buildMeshFrame) plus the outfit attached to its bones
+// (attachOutfit) — byte-identical output, pinned in rig.test.ts.
 
 export function buildRigFrame(
   shapeId: BodyShapeId = 'neutral',
@@ -132,16 +174,9 @@ export function buildRigFrame(
   accessories: ClothingAccessoryId[] = [],
   bottoms: BottomsId = DEFAULT_BOTTOMS[clothing],
 ): BodyRigFrame {
-  const s = BODY_SHAPES[shapeId];
-  const bones = buildSkeleton(shapeId, pose, phase, actions);
-  return {
-    bones,
-    assembly: assemblyFromSkeleton(s, bones, actions),
-    clothing: buildClothing(clothing, shapeId, pose, phase, actions, clothingSkin, accessories, bottoms, bones),
-    anatomy: anatomyFromSkeleton(s, shapeId, bones),
-    hitboxes: hitboxesFromSkeleton(bones),
-    anchors: anchorsFromSkeleton(s, bones),
-  };
+  const frame = buildMeshFrame(shapeId, pose, phase, actions);
+  const outfit = buildOutfit({ top: clothing, bottoms, print: clothingSkin, accessories });
+  return { ...frame, clothing: attachOutfit(frame.bones, outfit, shapeId, pose, phase, actions) };
 }
 
 /** The physics seam (V1): a full frame from a CUSTOM bones record. */
@@ -155,12 +190,9 @@ export function buildRigFrameFromBones(
   actions: RigTimelineAction[] = [],
 ): BodyRigFrame {
   const s = BODY_SHAPES[shapeId];
-  return {
-    bones,
-    assembly: assemblyFromSkeleton(s, bones, actions),
-    clothing: buildClothing(clothing, shapeId, 'stand', 0, actions, clothingSkin, accessories, bottoms, bones),
-    anatomy: anatomyFromSkeleton(s, shapeId, bones),
-    hitboxes: hitboxesFromSkeleton(bones),
-    anchors: anchorsFromSkeleton(s, bones),
-  };
+  const frame = meshFrameFromBones(bones, s, shapeId, actions);
+  const outfit = buildOutfit({ top: clothing, bottoms, print: clothingSkin, accessories });
+  // pose/phase pin to stand/0 exactly as the pre-split path did — garment
+  // placement reads the BONES; pose only steers garment-internal modulation
+  return { ...frame, clothing: attachOutfit(bones, outfit, shapeId, 'stand', 0, actions) };
 }

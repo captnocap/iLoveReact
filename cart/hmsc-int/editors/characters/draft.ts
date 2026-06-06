@@ -16,6 +16,7 @@ import {
   HED_GRID_H, HED_GRID_W, buildHed, type HedDocument,
 } from '../../game/figure/hed';
 import { buildBody, partsWithPelvisFallback, type BodyDocument } from '../../game/figure/body';
+import { buildOutfit, outfitOf } from '../../game/figure/outfit';
 import {
   DEFAULT_BOTTOMS, PART_IDS, PROFILE_N, defaultProfile,
   type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
@@ -141,10 +142,9 @@ export function draftToDocument(draft: CharacterDraft, title?: string): BodyDocu
     profiles: perPart((id) => draft.profiles[id].slice()),
     headLayers: draft.face?.layers ?? [],
     bodyShape: draft.bodyShape,
-    clothing: draft.clothing,
-    bottoms: draft.bottoms,
-    clothingSkin: draft.clothingSkin,
-    clothingAccessories: draft.accessories,
+    // CLOTHSPLIT-0606: the wardrobe leaves as the ONE attachment document —
+    // the body's mesh truth and what it wears never interleave in the file
+    outfit: buildOutfit({ top: draft.clothing, bottoms: draft.bottoms, print: draft.clothingSkin, accessories: draft.accessories }),
     heldItem: draft.heldItem === 'none' ? undefined : draft.heldItem,
     bodyPose: draft.bodyPose,
     title,
@@ -155,7 +155,9 @@ export function draftToDocument(draft: CharacterDraft, title?: string): BodyDocu
 /** A stored document back into a working draft (the roster "load" path).
  *  Regions come back empty — their effect is already in the sculpts. */
 export function draftFromDocument(doc: BodyDocument): CharacterDraft {
-  const clothing = doc.clothing ?? DRAFT_DEFAULTS.clothing;
+  // CLOTHSPLIT-0606: the wardrobe loads through the one attachment door —
+  // new docs carry `outfit`, pre-split docs map their legacy loose fields
+  const outfit = outfitOf(doc);
   const headLayers = doc.parts.head?.layers ?? [];
   // PELVISMESH-0606: stream documents bypass parseBody, so the load path
   // normalizes itself — a pre-split doc's pelvis is the torso copy.
@@ -182,10 +184,10 @@ export function draftFromDocument(doc: BodyDocument): CharacterDraft {
         }
       : null,
     bodyShape: doc.bodyShape ?? DRAFT_DEFAULTS.bodyShape,
-    clothing,
-    bottoms: doc.bottoms ?? DEFAULT_BOTTOMS[clothing],
-    clothingSkin: doc.clothingSkin ?? DRAFT_DEFAULTS.clothingSkin,
-    accessories: doc.clothingAccessories ?? [],
+    clothing: outfit.top,
+    bottoms: outfit.bottoms,
+    clothingSkin: outfit.print,
+    accessories: outfit.accessories,
     heldItem: doc.heldItem ?? 'none',
     bodyPose: doc.bodyPose ?? DRAFT_DEFAULTS.bodyPose,
     paint: doc.paint,

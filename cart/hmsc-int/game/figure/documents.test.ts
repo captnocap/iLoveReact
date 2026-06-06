@@ -9,7 +9,8 @@ import {
   HED_ANIM_FRAMES, HED_GRID_H, HED_GRID_W, animateHed, buildHed, generateFace,
   hedDepthGrid, parseHed, serializeHed,
 } from './hed';
-import { applyBodyPaint, buildBody, parseBody, partsWithPelvisFallback, serializeBody } from './body';
+import { applyBodyPaint, bodyWithOutfit, buildBody, parseBody, partsWithPelvisFallback, serializeBody } from './body';
+import { buildOutfit, defaultOutfit, outfitOf, validateOutfit } from './outfit';
 import {
   PAINT_TARGET_BY_BONE, PAINT_TARGET_IDS, PAINT_TARGET_NO_PART_FALLBACK, PAINT_TARGET_PART,
   PART_IDS, PROFILE_N, defaultProfile, paintTargetForInstance, paintTargetPart, type PartId,
@@ -86,14 +87,16 @@ test('.body round-trips, quantizes sculpts, and keeps pre-finger files valid', (
   }
   const doc = buildBody({
     skin: '#caa07a', amount: 0.35, headScaleY: 1.2, sculpts, profiles,
-    headLayers: generateFace(3).layers, bodyShape: 'female', clothing: 'dress', title: 'test subject',
+    headLayers: generateFace(3).layers, bodyShape: 'female',
+    outfit: buildOutfit({ top: 'dress' }), title: 'test subject',
   });
   assertEqual(doc.parts.torso.sculpt.join(','), '64,-127,127,1', 'sculpt floats must quantize to signed bytes');
   assertEqual(doc.parts.head.profile, undefined, 'the head wears doc scale, not a dragged outline');
   assertEqual(doc.parts.pipe.profile?.length, PROFILE_N, 'limb outlines must carry the dragged grid');
   const back = parseBody(serializeBody(doc));
   assert(back !== null, 'a serialized body must parse');
-  assertEqual(back!.clothing, 'dress', 'wardrobe must round-trip');
+  assertEqual(back!.outfit?.top, 'dress', 'the wardrobe attachment must round-trip (CLOTHSPLIT-0606)');
+  assertEqual(outfitOf(back!).bottoms, 'briefs', 'the dress wears its coherent default bottoms');
 
   // a pre-finger document (no parts.finger) must stay valid forever
   const legacy: any = JSON.parse(serializeBody(doc));
@@ -221,6 +224,51 @@ test('PELVISMESH-0606: the pelvis is a real part; old documents map torso → pe
   const reparsed = parseBody(JSON.stringify(oldPainted));
   assertEqual(reparsed?.paint?.pelvis?.stamp, 11, 'pre-split pelvis paint survives onto the pelvis part');
   assertEqual(paintTargetPart('pelvis'), 'pelvis', 'and resolves onto the pelvis mesh, not the torso');
+});
+
+test('CLOTHSPLIT-0606: the outfit is an attachment — attach/detach round-trips, old documents map deterministically', () => {
+  const sculpts = {} as Record<PartId, number[]>;
+  const profiles = {} as Record<PartId, number[]>;
+  for (const id of PART_IDS) { sculpts[id] = [0]; profiles[id] = defaultProfile(id); }
+  // a body built WITHOUT an outfit carries no wardrobe channel at all
+  const bare = buildBody({ skin: '#caa07a', amount: 0.35, headScaleY: 1.2, sculpts, profiles, headLayers: [] });
+  assert(!('outfit' in bare) || bare.outfit === undefined, 'buildBody never mints an empty wardrobe channel');
+  assertEqual(JSON.stringify(outfitOf(bare)), JSON.stringify(defaultOutfit()), 'a bare body wears the default dress');
+
+  // attach → detach is a perfect round trip (the applyBodyPaint idiom)
+  const outfit = buildOutfit({ top: 'hoodie', print: 'fourtwenty', accessories: ['cap'] });
+  const dressed = bodyWithOutfit(bare, outfit);
+  assertEqual(dressed.outfit?.top, 'hoodie', 'attach writes the one outfit channel');
+  assertEqual(dressed.outfit?.bottoms, 'jeans', 'a missing bottoms takes the top’s coherent default');
+  assert(!('outfit' in bare) || bare.outfit === undefined, 'attach is pure — the source document never mutates');
+  const undressed = bodyWithOutfit(dressed, null);
+  assertEqual(JSON.stringify(parseBody(serializeBody(undressed))), JSON.stringify(parseBody(serializeBody(bare))), 'attach → detach restores the bare body');
+
+  // OLD documents (pre-split loose fields) map deterministically — including
+  // the DEFAULT_BOTTOMS coupling a missing bottoms always meant
+  const old: any = JSON.parse(serializeBody(bare));
+  old.clothing = 'suit';
+  old.clothingAccessories = ['shades'];
+  const parsed = parseBody(JSON.stringify(old))!;
+  const mapped = outfitOf(parsed);
+  assertEqual(mapped.top, 'suit', 'the legacy top maps');
+  assertEqual(mapped.bottoms, 'slacks', 'the legacy missing bottoms takes the suit default');
+  assertEqual(mapped.print, 'plain', 'the legacy missing print is plain');
+  assertEqual(mapped.accessories.join(','), 'shades', 'legacy accessories carry');
+  // the new channel WINS over stale legacy fields when both exist
+  const both: any = JSON.parse(serializeBody(bodyWithOutfit(parsed, buildOutfit({ top: 'tee' }))));
+  both.clothing = 'dress'; // a stale legacy field sneaks back in
+  assertEqual(outfitOf(parseBody(JSON.stringify(both))!).top, 'tee', 'the outfit channel outranks legacy fields');
+
+  // a torn outfit degrades to the legacy mapping, never a rejected document
+  const torn: any = JSON.parse(serializeBody(bodyWithOutfit(bare, outfit)));
+  torn.outfit.top = 'tuxedo';
+  torn.clothing = 'armor';
+  const degraded = parseBody(JSON.stringify(torn));
+  assert(degraded !== null, 'a torn outfit must not reject the document');
+  assertEqual(degraded!.outfit, undefined, 'the torn outfit degrades away');
+  assertEqual(outfitOf(degraded!).top, 'armor', 'and the legacy fields catch the fall');
+  assertEqual(validateOutfit({ kind: 'outfit', version: 1, top: 'tee', bottoms: 'jeans', print: 'plain', accessories: ['cap', 'nonsense'] })?.accessories.join(','), 'cap', 'unknown accessories are filtered, not fatal');
 });
 
 finish('game/figure/documents');

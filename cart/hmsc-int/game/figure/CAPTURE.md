@@ -129,6 +129,56 @@ features); the painted overlay is a separate, additive color-only channel.
   preview paths render them; the compile-side composite belongs to the bake
   capture when texture baking lands. Surfaced, not guessed.
 
+## CLOTHSPLIT-0606 phase 1 (2026-06-06, USER RULING req_0040): clothing as attachments
+
+"have someone move clothing into its own thing that is decoupled from the
+body... clothing should effectively be a prop that is seperate but tightly
+related, not entirely coupled." The DATA layer decouples (phase 1; the editor
+separation is phase 2, gated):
+
+- `outfit.ts` (NEW) — the wardrobe ATTACHMENT family. `OutfitDocument` =
+  {top, bottoms, print, accessories}: its own document, attached to a body as
+  ONE optional channel (`BodyDocument.outfit` — the paint precedent), never
+  interleaved with the body's mesh truth (parts). The prop analogy holds end
+  to end: the outfit names WHAT is worn; `attachOutfit(bones, outfit, ...)`
+  builds garment instances against an EXISTING bones record (the V1 seam —
+  a ragdoll keeps its clothes), bottoms anchoring the pelvis bone
+  (PELVISMESH's part), tops the torso/arm chain. Placement code
+  (clothing.ts) untouched.
+- `rig.ts` — `MeshRigFrame` + `buildMeshFrame` (bones + parts + sockets +
+  hitboxes + anchors, NO clothing — what mesh editing looks at; phase 2
+  mounts it). `BodyRigFrame = MeshRigFrame + clothing`; the dressed doors
+  (`buildRigFrame`/`FromBones`) keep their pre-split signatures and compose
+  mesh-frame + attachOutfit — equality pinned in rig.test.ts (every route
+  call site unchanged).
+- `body.ts` — `buildBody` takes/writes `outfit` ONLY (the legacy
+  clothing/bottoms/clothingSkin/clothingAccessories fields stay in the type,
+  readable forever, never written by new saves); `bodyWithOutfit` =
+  attach/detach (applyBodyPaint idiom; attach clears legacy fields — one
+  wardrobe truth; detach removes every wardrobe channel); parseBody degrades
+  a torn outfit away (legacy fields/defaults catch the fall).
+- `outfitOf(doc)` — THE V20 read door: outfit channel wins; pre-split
+  documents map their legacy fields deterministically INCLUDING the
+  DEFAULT_BOTTOMS coupling a missing bottoms always meant; a bare doc wears
+  the default dress. Consumers: draftFromDocument, bakeBodyDocument (both
+  normalize themselves — stream docs bypass parseBody).
+- `bake.ts` — BakeWardrobe retired for `BakeOutfit` (buildOutfit's partial);
+  bakeFigure dresses via mesh-frame + attachOutfit, same composition.
+
+**Deliberate non-changes:** clothing.ts garment placement byte-identical;
+CharacterDraft keeps its wardrobe fields for phase 1 (the EDITOR relocation
+is phase 2 — gated on the workbench lane); BakedFigure.clothing unchanged
+(the compiled shape is the compile lane's contract).
+
+**Surfaced (phase 2 will need rulings):** the editor shape for the clothing
+context — proposal from the attachment model: CLOTHING as its own
+WorkbenchSource (roster = outfits; panel = top/bottoms/print/accessories
+specs; stage = dressed figure on the current body) with the mesh stage
+mounting buildMeshFrame (no garments, no toggles); ANIMATION as its own
+rig/posing context (where pose/anim-script commands live). Nothing
+constitution-grade in phase 1: no vocabulary changed, garments still
+bones-driven, V20 by addition.
+
 ## PELVISMESH-0606 (2026-06-06, USER ASK req_0022): the pelvis is a real mesh
 
 "i thought i asked someone earlier to make the torso and the pelvis not the

@@ -374,6 +374,26 @@ so pre-split seeds keep their look. Damage zones unchanged (pelvis bone stays
 bottoms were already pelvis-bone-driven; hitboxes per-bone unchanged.
 Counts: 27 assembly instances (was 26), 8 anatomy sockets (was 9).
 
+CLOTHSPLIT-0606 phase 1 (USER RULING req_0040 — "clothing should effectively
+be a prop that is seperate but tightly related, not entirely coupled"):
+clothing is a wardrobe ATTACHMENT family. `outfit.ts` (new) defines
+`OutfitDocument` {top, bottoms, print, accessories} — its own document riding
+the body as ONE optional channel (the paint precedent), never interleaved
+with the mesh truth; `attachOutfit(bones, outfit, ...)` dresses an EXISTING
+bones record (the V1 seam — a ragdoll keeps its clothes; placement code in
+clothing.ts byte-identical). `rig.ts` splits `MeshRigFrame`/`buildMeshFrame`
+(the clothing-free body — what mesh editing looks at; the phase-2 editor
+mounts it) from the dressed `BodyRigFrame`; the dressed doors keep their
+signatures and compose mesh + attachOutfit (equality pinned). V20:
+`buildBody` writes `outfit` only; the legacy loose fields stay readable
+forever through `outfitOf` (deterministic mapping incl. the DEFAULT_BOTTOMS
+coupling), consumed at draftFromDocument + bakeBodyDocument; `bodyWithOutfit`
+is the pure attach/detach door (attach clears legacy — one wardrobe truth;
+detach round-trips byte-identically). BakeWardrobe retired for `BakeOutfit`.
+Phase 2 (editor separation: mesh-only sculpt context, clothing + animation
+as their own contexts) is GATED on the workbench lane; the proposed shapes
+are surfaced in game/figure/CAPTURE.md.
+
 ## game/activities/ — repeatable side loops (V22/V8/V20 capture, 2026-06-04)
 
 The non-mission gameplay verbs, REWRITTEN fresh. V22-MODES is the binding

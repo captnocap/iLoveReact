@@ -7,8 +7,9 @@
 
 import { offsetBones } from './skeleton';
 import {
-  DAMAGE_ZONES, DAMAGE_ZONE_BY_BONE, buildRigFrame, buildRigFrameFromBones, damageZoneForBone,
+  DAMAGE_ZONES, DAMAGE_ZONE_BY_BONE, buildMeshFrame, buildRigFrame, buildRigFrameFromBones, damageZoneForBone,
 } from './rig';
+import { attachOutfit, buildOutfit } from './outfit';
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
 function dist3(a: readonly number[], b: readonly number[]): number {
@@ -93,6 +94,26 @@ test('garment choices change the wardrobe, not the body', () => {
   assert(underwear.clothing.length < tee.clothing.length, 'underwear is the minimal wardrobe');
   const shades = buildRigFrame('neutral', 'stand', 0, [], 'tee', 'plain', ['shades']);
   assertEqual(shades.clothing.length, tee.clothing.length + 3, 'shades add their three pieces');
+});
+
+test('CLOTHSPLIT-0606: the dressed frame IS the mesh frame plus the outfit attached — rig-follow equality', () => {
+  // the compat door must equal the explicit composition, byte for byte
+  const dressed = buildRigFrame('female', 'walk', 0.3, [], 'hoodie', 'fourtwenty', ['cap'], 'shorts');
+  const mesh = buildMeshFrame('female', 'walk', 0.3, []);
+  const outfit = buildOutfit({ top: 'hoodie', bottoms: 'shorts', print: 'fourtwenty', accessories: ['cap'] });
+  const attached = attachOutfit(mesh.bones, outfit, 'female', 'walk', 0.3, []);
+  assertEqual(JSON.stringify(mesh.bones), JSON.stringify(dressed.bones), 'one skeleton');
+  assertEqual(JSON.stringify(mesh.assembly), JSON.stringify(dressed.assembly), 'one body assembly');
+  assertEqual(JSON.stringify(mesh.anatomy), JSON.stringify(dressed.anatomy), 'one socket set');
+  assertEqual(JSON.stringify(mesh.hitboxes), JSON.stringify(dressed.hitboxes), 'one hit-volume set');
+  assertEqual(JSON.stringify(mesh.anchors), JSON.stringify(dressed.anchors), 'one anchor set');
+  assertEqual(JSON.stringify(attached), JSON.stringify(dressed.clothing), 'the outfit attaches exactly what the dressed frame wears');
+  // the mesh frame is the BODY ALONE — what mesh editing looks at
+  assert(!('clothing' in mesh), 'the mesh frame carries no clothing');
+  // attachments follow ANY bones record (the V1 seam — the prop model)
+  const moved = offsetBones(mesh.bones, [2, 0, -1]);
+  const movedClothes = attachOutfit(moved, outfit, 'female', 'walk', 0.3, []);
+  assertClose(movedClothes[0].position[0], attached[0].position[0] + 2, 1e-9, 'the outfit follows the rig wherever it goes');
 });
 
 test('pants track the pose (bones-driven garments, not stand-pose heights)', () => {

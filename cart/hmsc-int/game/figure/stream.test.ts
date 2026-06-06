@@ -4,7 +4,7 @@
 // __fs_* bindings in a scratch root under zig-out/ (never the live data/).
 
 import { openStore } from '../../data';
-import { GAME_FIGURE, charactersStream, bakeBodyDocument, buildBody, generateFace, hedDepthGrid, PART_IDS, PROFILE_N, defaultProfile, type BodyDocument } from './index';
+import { GAME_FIGURE, charactersStream, bakeBodyDocument, buildBody, buildOutfit, generateFace, hedDepthGrid, PART_IDS, PROFILE_N, defaultProfile, type BodyDocument } from './index';
 import { assert, assertEqual, finish, test } from '../_testkit';
 
 declare const globalThis: any;
@@ -38,10 +38,8 @@ function makeCharacter(seed: number, title: string): BodyDocument {
     profiles,
     headLayers: face.layers,
     bodyShape: 'heavy',
-    clothing: 'hoodie',
-    bottoms: 'jeans',
-    clothingSkin: 'fourtwenty',
-    clothingAccessories: ['cap'],
+    // CLOTHSPLIT-0606: the wardrobe rides as the one attachment document
+    outfit: buildOutfit({ top: 'hoodie', bottoms: 'jeans', print: 'fourtwenty', accessories: ['cap'] }),
     heldItem: 'bat',
     bodyPose: 'stand',
     title,

@@ -9,6 +9,7 @@
 
 import type { HedLayer } from './hed';
 import { validatePaintedOverlay, type PaintedOverlay } from '../painted';
+import { validateOutfit, type OutfitDocument } from './outfit';
 import {
   LEGACY_PART_IDS, PAINT_TARGET_IDS, PART_IDS, defaultProfile,
   type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PaintTargetId, type PartId,
@@ -21,12 +22,20 @@ export type BodyDocument = {
   amount: number;
   headScaleY: number;
   bodyShape?: BodyShapeId;
+  /** LEGACY wardrobe channels (pre-CLOTHSPLIT-0606): readable forever (V20),
+   *  never written by new saves — `outfit` is the one wardrobe truth now;
+   *  outfitOf() folds these in deterministically when it's absent. */
   clothing?: ClothingId;
   bottoms?: BottomsId;
   clothingSkin?: ClothingSkinId;
   clothingAccessories?: ClothingAccessoryId[];
   heldItem?: string;
   bodyPose?: BodyPoseId;
+  /** CLOTHSPLIT-0606 (USER RULING req_0040): the wardrobe ATTACHMENT SET —
+   *  "clothing should effectively be a prop that is seperate but tightly
+   *  related". Its own document, attached here as one channel (the paint
+   *  precedent); the body's mesh truth (parts) never interleaves with it. */
+  outfit?: OutfitDocument;
   /** per part: quantized signed sculpt bytes (−127..127) + feature layers
    *  (the head's face lives in parts.head.layers) + the dragged outline
    *  (PROFILE_N radius samples; absent = the part's preset default). */
@@ -62,6 +71,20 @@ export function partsWithPelvisFallback(parts: BodyDocument['parts']): BodyDocum
   };
 }
 
+/** CLOTHSPLIT-0606: attach/replace/detach the outfit — pure, the
+ *  applyBodyPaint idiom. Attaching writes the one `outfit` channel AND
+ *  clears the legacy loose fields (one wardrobe truth, never two); detach
+ *  (null) removes every wardrobe channel — the figure falls to the default
+ *  dress through outfitOf, and a doc that never had wardrobe round-trips
+ *  byte-identically through attach → detach. */
+export function bodyWithOutfit(doc: BodyDocument, outfit: OutfitDocument | null): BodyDocument {
+  const {
+    outfit: _outfit, clothing: _c, bottoms: _b, clothingSkin: _s, clothingAccessories: _a,
+    ...rest
+  } = doc;
+  return outfit ? { ...rest, outfit } as BodyDocument : rest as BodyDocument;
+}
+
 /** Set/replace/remove one target's painted overlay — pure, additive (the
  *  /cutout save path; everything else on the document is untouched). */
 export function applyBodyPaint(doc: BodyDocument, target: PaintTargetId, overlay: PaintedOverlay | null): BodyDocument {
@@ -85,10 +108,9 @@ export function buildBody(args: {
   profiles: Record<PartId, number[]>;
   headLayers: HedLayer[];
   bodyShape?: BodyShapeId;
-  clothing?: ClothingId;
-  bottoms?: BottomsId;
-  clothingSkin?: ClothingSkinId;
-  clothingAccessories?: ClothingAccessoryId[];
+  /** CLOTHSPLIT-0606: the wardrobe arrives as the attachment document —
+   *  buildBody never writes the legacy loose fields */
+  outfit?: OutfitDocument;
   heldItem?: string;
   bodyPose?: BodyPoseId;
   title?: string;
@@ -108,10 +130,7 @@ export function buildBody(args: {
     amount: args.amount,
     headScaleY: args.headScaleY,
     bodyShape: args.bodyShape,
-    clothing: args.clothing,
-    bottoms: args.bottoms,
-    clothingSkin: args.clothingSkin,
-    clothingAccessories: args.clothingAccessories,
+    outfit: args.outfit,
     heldItem: args.heldItem,
     bodyPose: args.bodyPose,
     parts,
@@ -144,6 +163,14 @@ export function parseBody(text: string): BodyDocument | null {
       if (Object.keys(paint).length > 0) doc.paint = paint;
       else delete doc.paint;
     }
+  }
+  // the outfit attachment (CLOTHSPLIT-0606): a torn outfit degrades away —
+  // outfitOf falls back to the legacy fields / the default dress, never a
+  // rejected document (the paint precedent).
+  if (doc.outfit != null) {
+    const outfit = validateOutfit(doc.outfit);
+    if (outfit) doc.outfit = outfit;
+    else delete doc.outfit;
   }
   // PELVISMESH-0606: pre-split documents gain the deterministic pelvis copy
   // at the parse door (stream consumers normalize at their own read sites —

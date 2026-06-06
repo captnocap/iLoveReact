@@ -19,10 +19,11 @@ import {
 } from './hed';
 import {
   BODY_SHAPES, PART_IDS, PART_LOD, PART_PRESETS, defaultProfile,
-  type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
+  type BodyShapeId, type PartId,
 } from './shapes';
 import { partsWithPelvisFallback, type BodyDocument } from './body';
-import { buildRigFrame, type BodyAnchor, type BodyHitbox } from './rig';
+import { attachOutfit, buildOutfit, outfitOf } from './outfit';
+import { buildMeshFrame, type BodyAnchor, type BodyHitbox } from './rig';
 import type { ClothingInstance } from './clothing';
 import type { Bones } from './skeleton';
 
@@ -73,12 +74,10 @@ export type BakedFigure = {
   clothing: ClothingInstance[];
 };
 
-export type BakeWardrobe = {
-  clothing?: ClothingId;
-  clothingSkin?: ClothingSkinId;
-  accessories?: ClothingAccessoryId[];
-  bottoms?: BottomsId;
-};
+/** CLOTHSPLIT-0606: the bake dresses through the SAME attachment vocabulary
+ *  everything else speaks — BakeWardrobe (the loose-fields shape) retired in
+ *  favor of OutfitDocument; the seed path takes a partial via buildOutfit. */
+export type BakeOutfit = Parameters<typeof buildOutfit>[0];
 
 /** One part's Globe params from a face doc + its (live or composited) depth
  *  grid — the ONE place this recipe exists; the bake and the preview renderer
@@ -107,11 +106,14 @@ export function partGlobeParams(
   };
 }
 
-/** Bake a figure from a face document + body choices (the editor's output). */
+/** Bake a figure from a face document + body choices (the editor's output).
+ *  CLOTHSPLIT-0606: the body bakes as a MESH FRAME; the outfit attaches to
+ *  its bones — the same body-then-attachments composition every consumer
+ *  speaks now. */
 export function bakeFigure(
   face: HedDocument,
   shape: BodyShapeId = 'neutral',
-  wardrobe: BakeWardrobe = {},
+  outfitArgs: BakeOutfit = {},
   opts: { sculpts?: BodyDocument['parts']; title?: string } = {},
 ): BakedFigure {
   const faceDepth = hedDepthGrid(face);
@@ -120,13 +122,9 @@ export function bakeFigure(
     parts[id] = { part: id, params: partGlobeParams(id, face, faceDepth, opts.sculpts?.[id]?.profile) };
   }
 
-  const frame = buildRigFrame(
-    shape, 'stand', 0, [],
-    wardrobe.clothing ?? 'tee',
-    wardrobe.clothingSkin ?? 'plain',
-    wardrobe.accessories ?? [],
-    wardrobe.bottoms,
-  );
+  const frame = buildMeshFrame(shape, 'stand', 0, []);
+  const outfit = buildOutfit(outfitArgs);
+  const clothing = attachOutfit(frame.bones, outfit, shape, 'stand', 0, []);
 
   return {
     kind: 'baked-figure',
@@ -140,7 +138,7 @@ export function bakeFigure(
     bones: frame.bones,
     hitboxes: frame.hitboxes,
     anchors: frame.anchors,
-    clothing: frame.clothing,
+    clothing,
   };
 }
 
@@ -163,11 +161,14 @@ export function bakeBodyDocument(doc: BodyDocument): BakedFigure {
     layers: doc.parts.head?.layers ?? [],
     metadata: { title: doc.metadata?.title },
   };
+  // CLOTHSPLIT-0606: the wardrobe reads through the one attachment door —
+  // new docs carry `outfit`, pre-split docs map their legacy fields
+  const outfit = outfitOf(doc);
   return bakeFigure(face, doc.bodyShape ?? 'neutral', {
-    clothing: doc.clothing,
-    clothingSkin: doc.clothingSkin,
-    accessories: doc.clothingAccessories,
-    bottoms: doc.bottoms,
+    top: outfit.top,
+    bottoms: outfit.bottoms,
+    print: outfit.print,
+    accessories: outfit.accessories,
     // PELVISMESH-0606: pre-split documents bake the pelvis as the torso copy
     // (stream docs bypass parseBody, so the bake normalizes itself)
   }, { sculpts: partsWithPelvisFallback(doc.parts), title: doc.metadata?.title });
@@ -177,10 +178,10 @@ export function bakeBodyDocument(doc: BodyDocument): BakedFigure {
  *  the same seed always bakes the same citizen). */
 export function bakeFigureFromSeed(
   seed: number,
-  opts: { style?: FaceStyle; shape?: BodyShapeId; wardrobe?: BakeWardrobe } = {},
+  opts: { style?: FaceStyle; shape?: BodyShapeId; outfit?: BakeOutfit } = {},
 ): BakedFigure {
   const face = generateFace(seed, { style: opts.style });
-  return bakeFigure(face, opts.shape ?? 'neutral', opts.wardrobe ?? {});
+  return bakeFigure(face, opts.shape ?? 'neutral', opts.outfit ?? {});
 }
 
 /** Every body shape is bakeable — the variety check the compile runs. */
