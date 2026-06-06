@@ -235,3 +235,29 @@ SURFACED SEAMS (not guessed):
   story is the bake lane's (figure CAPTURE carries the same row).
 - Smart select stays off for model targets (needs an image FILE — the
   material-canvas rule).
+
+## TATTOODRAFT (2026-06-05, USER ASK: "the same for all the body parts — tattoos")
+
+The draft lifeline grew into a BOOK: one slot PER working target
+(_cutout_drafts.json — each body part, each vehicle panel, the library
+canvas), MRU-ordered, capped (P2 'cutout-view.draftSlots', default 12,
+oldest evicts). The tattoo workflow this serves: hop torso → arm → hand
+mid-design and EVERY part keeps its unsaved strokes —
+
+- target switches flush the old target's slot synchronously (the debounce
+  window can't eat the tail) — but only targets actually painted earn a
+  slot (a pristine open-and-leave never evicts real work);
+- re-opening a part resumes its unsaved slot OVER the saved overlay
+  ("unsaved draft resumed" in the status);
+- a save releases its slot (the model carries the painting; a lingering
+  slot could resurrect stale strokes after an external edit);
+- one torn slot never costs the others; the legacy single-draft file reads
+  as one slot (addition, not migration); a fresh mount restores the newest
+  slot — hot updates land you exactly where you were.
+
+SURFACED for the user's eyes (tattoo-shaped, not guessed): the figure's
+limbs are ONE part ('pipe') — all four limb instances share one texture, so
+a forearm tattoo appears on every limb (hands/feet/fingers likewise share
+across left/right). Per-limb tattoos need per-INSTANCE texture slots in the
+figure kit (a door extension + new paint targets) — awaiting a ruling
+before inventing the granularity.

@@ -69,11 +69,9 @@ export function serializeDraft(draft: CutoutDraft): string {
   return JSON.stringify(draft);
 }
 
-/** Strict gate: wrong kind/version/embedded-document shape → null (boot
- *  blank, never a half-restored canvas). */
-export function parseDraft(text: string): CutoutDraft | null {
-  let d: any;
-  try { d = JSON.parse(text); } catch { return null; }
+/** Strict gate on one draft VALUE: wrong kind/version/embedded-document
+ *  shape → null (boot blank, never a half-restored canvas). */
+export function validateDraft(d: any): CutoutDraft | null {
   if (!d || d.kind !== CUTOUT_DRAFT_KIND || d.version !== CUTOUT_DRAFT_VERSION) return null;
   if (typeof d.docId !== 'string' || d.docId.length === 0) return null;
   if (typeof d.name !== 'string') return null;
@@ -89,4 +87,82 @@ export function parseDraft(text: string): CutoutDraft | null {
   if (!doc.dims || typeof doc.dims.w !== 'number' || typeof doc.dims.h !== 'number') return null;
   if (!Array.isArray(doc.layers)) return null;
   return d as CutoutDraft;
+}
+
+export function parseDraft(text: string): CutoutDraft | null {
+  let d: any;
+  try { d = JSON.parse(text); } catch { return null; }
+  return validateDraft(d);
+}
+
+// ── the DRAFT BOOK (MODELPAINT-0605 TATTOODRAFT) ─────────────────────────────
+// The user's tattoo workflow hops between body parts mid-design. One draft
+// slot meant switching targets dropped the previous part's unsaved strokes —
+// so the lifeline grew into a BOOK: one slot per working target (each body
+// part, each vehicle panel, the library canvas), MRU-ordered and capped.
+// Every part keeps its own in-progress painting across hot updates AND
+// target switches; the newest slot is what a fresh mount restores.
+
+export const CUTOUT_DRAFTS_KIND = 'cutout-drafts';
+export const CUTOUT_DRAFTS_VERSION = 1;
+export const CUTOUT_DRAFTS_PATH = 'cart/hmsc-int/sessions/_cutout_drafts.json';
+
+export type CutoutDraftBook = {
+  kind: typeof CUTOUT_DRAFTS_KIND;
+  version: number;
+  /** MRU order, newest LAST — order[order.length - 1] is the current target */
+  order: string[];
+  slots: Record<string, CutoutDraft>;
+};
+
+export function emptyDraftBook(): CutoutDraftBook {
+  return { kind: CUTOUT_DRAFTS_KIND, version: CUTOUT_DRAFTS_VERSION, order: [], slots: {} };
+}
+
+/** Parse the book; every slot passes the single-draft gate or is dropped —
+ *  one torn slot never costs the others. */
+export function parseDraftBook(text: string): CutoutDraftBook | null {
+  let b: any;
+  try { b = JSON.parse(text); } catch { return null; }
+  if (!b || b.kind !== CUTOUT_DRAFTS_KIND || b.version !== CUTOUT_DRAFTS_VERSION) return null;
+  if (!Array.isArray(b.order) || !b.slots || typeof b.slots !== 'object') return null;
+  const book = emptyDraftBook();
+  for (const key of b.order) {
+    if (typeof key !== 'string') continue;
+    const slot = validateDraft(b.slots[key]);
+    if (!slot) continue;
+    book.order.push(key);
+    book.slots[key] = slot;
+  }
+  return book;
+}
+
+export function serializeDraftBook(book: CutoutDraftBook): string {
+  return JSON.stringify(book);
+}
+
+/** Upsert one slot as the current (newest) target; evict the OLDEST slots
+ *  beyond `cap` (never the one just written). Pure. */
+export function upsertDraftSlot(book: CutoutDraftBook, key: string, draft: CutoutDraft, cap: number): CutoutDraftBook {
+  const order = [...book.order.filter((k) => k !== key), key];
+  const slots: Record<string, CutoutDraft> = { ...book.slots, [key]: draft };
+  while (order.length > Math.max(1, cap)) {
+    const evicted = order.shift()!;
+    delete slots[evicted];
+  }
+  return { ...book, order, slots };
+}
+
+/** Drop one slot (a save landed — the model document carries it now). Pure. */
+export function removeDraftSlot(book: CutoutDraftBook, key: string): CutoutDraftBook {
+  if (!(key in book.slots)) return book;
+  const slots = { ...book.slots };
+  delete slots[key];
+  return { ...book, order: book.order.filter((k) => k !== key), slots };
+}
+
+/** The newest slot — what a fresh mount restores. */
+export function currentDraft(book: CutoutDraftBook): { key: string; draft: CutoutDraft } | null {
+  const key = book.order[book.order.length - 1];
+  return key ? { key, draft: book.slots[key] } : null;
 }

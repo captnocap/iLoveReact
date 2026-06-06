@@ -14,7 +14,10 @@ import {
   bakeOverlayFromDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
   overlayOf, reopenOverlayDocument, MODEL_PAINT,
 } from './models';
-import { buildDraft, draftModelBinding, parseDraft, serializeDraft } from './draft';
+import {
+  buildDraft, currentDraft, draftModelBinding, emptyDraftBook, parseDraft, parseDraftBook,
+  removeDraftSlot, serializeDraft, serializeDraftBook, upsertDraftSlot,
+} from './draft';
 import { applyBodyPaint, buildBody, parseBody, serializeBody, type BodyDocument } from '../../game/figure/body';
 import { charactersStream } from '../../game/figure/stream';
 import { PART_IDS, defaultProfile, type PartId } from '../../game/figure/shapes';
@@ -170,6 +173,50 @@ test('HOTDRAFT: an unsaved model painting survives the draft round-trip with its
   })));
   assert(stale !== null, 'a garbage part never rejects the draft (the strokes matter most)');
   assertEqual(draftModelBinding(stale!), null, 'a garbage part restores as no binding');
+});
+
+test('TATTOODRAFT: the draft book keeps one unsaved painting PER target', () => {
+  const doc = demoDocument();
+  const slotFor = (part: 'head' | 'torso' | 'pipe') => buildDraft({
+    docId: `model-figure-chr-1-${part}`, name: `chr-1 · ${part}`, srcPath: null,
+    model: { family: 'figure', docId: 'chr-1', part }, doc,
+  });
+  // the tattoo hop: torso → pipe → head, every part keeps its slot
+  let book = emptyDraftBook();
+  book = upsertDraftSlot(book, 'model-figure-chr-1-torso', slotFor('torso'), 12);
+  book = upsertDraftSlot(book, 'model-figure-chr-1-pipe', slotFor('pipe'), 12);
+  book = upsertDraftSlot(book, 'model-figure-chr-1-head', slotFor('head'), 12);
+  assertEqual(book.order.length, 3, 'every part keeps its own slot');
+  assertEqual(currentDraft(book)?.key, 'model-figure-chr-1-head', 'the newest target is what a fresh mount restores');
+  assert(book.slots['model-figure-chr-1-torso'] !== undefined, 'the torso strokes survived the hops');
+
+  // disk round-trip — exactly what a hot update replays
+  const back = parseDraftBook(serializeDraftBook(book));
+  assertEqual(JSON.stringify(back), JSON.stringify(book), 'the book round-trips byte-exact');
+
+  // re-painting an old target moves it to newest WITHOUT duplicating
+  book = upsertDraftSlot(book, 'model-figure-chr-1-torso', slotFor('torso'), 12);
+  assertEqual(book.order.length, 3, 're-upsert never duplicates');
+  assertEqual(currentDraft(book)?.key, 'model-figure-chr-1-torso', 're-painting an old part makes it current');
+
+  // the cap evicts the OLDEST, never the one just painted
+  let capped = emptyDraftBook();
+  capped = upsertDraftSlot(capped, 'a', slotFor('torso'), 2);
+  capped = upsertDraftSlot(capped, 'b', slotFor('pipe'), 2);
+  capped = upsertDraftSlot(capped, 'c', slotFor('head'), 2);
+  assertEqual(capped.order.join(','), 'b,c', 'the oldest slot evicts at the cap');
+
+  // a save drops its slot; the others stay
+  book = removeDraftSlot(book, 'model-figure-chr-1-torso');
+  assert(!('model-figure-chr-1-torso' in book.slots), 'a saved target releases its slot');
+  assertEqual(book.order.length, 2, 'the other parts keep theirs');
+
+  // one torn slot never costs the others
+  const torn: any = JSON.parse(serializeDraftBook(book));
+  torn.slots['model-figure-chr-1-pipe'].doc = { kind: 'garbage' };
+  const healed = parseDraftBook(JSON.stringify(torn));
+  assert(healed !== null, 'a torn slot never rejects the book');
+  assertEqual(healed!.order.join(','), 'model-figure-chr-1-head', 'the torn slot drops, the rest survive');
 });
 
 finish('cutout-models');

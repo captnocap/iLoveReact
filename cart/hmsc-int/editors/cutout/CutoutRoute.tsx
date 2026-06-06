@@ -48,7 +48,11 @@ import {
   stencilDataFromAsset, STENCIL_RECIPE_ID, uniqueAssetName,
 } from './extraction';
 import { identifyImage, loadGraySource } from './sources';
-import { buildDraft, draftModelBinding, CUTOUT_DRAFT_PATH, parseDraft, serializeDraft } from './draft';
+import {
+  buildDraft, currentDraft, draftModelBinding, emptyDraftBook, parseDraft, parseDraftBook,
+  removeDraftSlot, serializeDraftBook, upsertDraftSlot,
+  CUTOUT_DRAFT_PATH, CUTOUT_DRAFTS_PATH, type CutoutDraft, type CutoutDraftBook,
+} from './draft';
 import { CutoutInspector, type BackendChoice } from './Inspector';
 import { CutoutStatusBar } from './StatusBar';
 // MODEL TEXTURE TARGETS (MODELPAINT-0605): pick a face / body part / vehicle
@@ -79,6 +83,9 @@ const VIEW = {
   swatch: 34,
   nameWidth: 150,
   draftDebounceMs: 600,
+  /** draft-book slot cap (TATTOODRAFT): how many targets keep an unsaved
+   *  in-progress painting at once (MRU eviction beyond it) */
+  draftSlots: 12,
   sessionsDir: 'cart/hmsc-int/sessions',
 };
 editorTunables().register({
@@ -89,8 +96,28 @@ editorTunables().register({
     swatch: { label: 'swatch px', min: 16, max: 96, step: 2, precision: 0 },
     nameWidth: { label: 'name px', min: 80, max: 320, step: 5, precision: 0 },
     draftDebounceMs: { label: 'draft ms', min: 100, max: 5000, step: 100, precision: 0 },
+    draftSlots: { label: 'draft slots', min: 1, max: 64, step: 1, precision: 0 },
   },
 });
+
+// ── the draft book on disk (TATTOODRAFT) ─────────────────────────────────────
+// Read the book; an absent book falls back to the legacy single-draft file
+// wrapped as one slot (the pre-book lifeline keeps working across the
+// upgrade — addition, not migration).
+function readDraftBook(): CutoutDraftBook {
+  const text = readFile(CUTOUT_DRAFTS_PATH);
+  const book = text ? parseDraftBook(text) : null;
+  if (book) return book;
+  const legacyText = readFile(CUTOUT_DRAFT_PATH);
+  const legacy = legacyText ? parseDraft(legacyText) : null;
+  if (legacy) return upsertDraftSlot(emptyDraftBook(), legacy.docId, legacy, VIEW.draftSlots);
+  return emptyDraftBook();
+}
+
+function writeDraftBook(book: CutoutDraftBook): void {
+  mkdir(VIEW.sessionsDir);
+  writeFile(CUTOUT_DRAFTS_PATH, serializeDraftBook(book));
+}
 
 /** One working target: what's on the canvas right now. A fresh `docId` is a
  *  new library entry; reopening a saved document keeps its id so re-saves
@@ -159,8 +186,7 @@ function clampCanvasSize(n: number): number {
  *  store; a model that vanished (or no store host) keeps the PAINTING as a
  *  plain canvas — strokes are never the thing that gets dropped. */
 function restoreOrBlank(): Work {
-  const text = readFile(CUTOUT_DRAFT_PATH);
-  const draft = text ? parseDraft(text) : null;
+  const draft = currentDraft(readDraftBook())?.draft ?? null;
   if (!draft) return { ...freshWork(null, {}), epoch: 0 };
   const binding = draftModelBinding(draft);
   if (binding) {
@@ -283,23 +309,40 @@ export function CutoutRoute(props: { onExit: () => void }) {
   // the binding, so a hot update mid-painting restores the same face/part
   // with the unsaved strokes intact and the next save still applies to the
   // MODEL (never silently retargeted at the library).
+  // TATTOODRAFT: the lifeline is a BOOK — one slot PER TARGET, so hopping
+  // between body parts mid-tattoo never drops the previous part's unsaved
+  // strokes. flushDraft() writes synchronously before every target switch
+  // (the debounce window must not eat the tail of the old target).
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const writeDraftSlot = useCallback(() => {
+    const doc = painterApi.current?.buildDocument() ?? null;
+    if (!doc) return;
+    const w = workRef.current;
+    const draft = buildDraft({ docId: w.docId, name: w.name, srcPath: w.srcPath, textureId: w.textureId, model: w.model, doc });
+    writeDraftBook(upsertDraftSlot(readDraftBook(), w.docId, draft, VIEW.draftSlots));
+  }, []);
+  const editedRef = useRef(false);
+  editedRef.current = edited;
+  const flushDraft = useCallback(() => {
+    // only a target that was actually painted earns a slot — a pristine
+    // open-and-leave must never evict someone's real unsaved work
+    if (!draftTimer.current && !editedRef.current) return;
+    if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+    writeDraftSlot();
+  }, [writeDraftSlot]);
   const onDirty = useCallback(() => {
     setEdited(true);
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
       draftTimer.current = null;
-      const doc = painterApi.current?.buildDocument() ?? null;
-      if (!doc) return;
-      const w = workRef.current;
-      mkdir(VIEW.sessionsDir);
-      writeFile(CUTOUT_DRAFT_PATH, serializeDraft(buildDraft({ docId: w.docId, name: w.name, srcPath: w.srcPath, textureId: w.textureId, model: w.model, doc })));
+      writeDraftSlot();
     }, VIEW.draftDebounceMs);
-  }, []);
+  }, [writeDraftSlot]);
   useEffect(() => () => { if (draftTimer.current) clearTimeout(draftTimer.current); }, []);
 
   // ── source actions ─────────────────────────────────────────────────────────
   const newCanvas = (wPx: number, hPx: number) => {
+    flushDraft();
     const dims = { w: clampCanvasSize(wPx), h: clampCanvasSize(hPx) };
     setWork((prev) => freshWork(prev, { dims }));
     setEdited(false);
@@ -310,6 +353,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
   const loadImage = async (path: string) => {
     const clean = path.trim();
     if (!clean) return;
+    flushDraft();
     setStatus(`reading ${clean}…`);
     const dims = await identifyImage(clean);
     if (!dims) { setStatus(`could not read image: ${clean}`); return; }
@@ -365,6 +409,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
   };
 
   const openDocument = (rec: SavedPaintDoc) => {
+    flushDraft();
     setWork((prev) => freshWork(prev, {
       docId: rec.id, name: rec.name, srcPath: rec.srcPath, textureId: rec.textureId ?? null,
       dims: rec.doc.dims, initial: rec.doc,
@@ -375,6 +420,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
   };
 
   const openCutout = (asset: CutoutAsset) => {
+    flushDraft();
     setWork((prev) => freshWork(prev, {
       name: asset.name, srcPath: asset.srcPath, textureId: asset.textureId ?? null,
       dims: asset.dims, initial: cutoutToDocument(asset),
@@ -389,12 +435,16 @@ export function CutoutRoute(props: { onExit: () => void }) {
   // parts" — pick a face/body part/vehicle part, paint pixels, save back onto
   // the model document through the doors.
   const openModelTarget = (binding: ModelBinding) => {
+    flushDraft(); // the OLD target's unsaved strokes land in its book slot first
     const model: BodyDocument | VehicleDoc | undefined = binding.family === 'figure'
       ? models.figures?.state().characters[binding.docId]
       : models.vehicles?.state().vehicles[binding.docId];
     if (!model) { setStatus(`model ${binding.docId} not found`); return; }
+    // TATTOODRAFT: this part's own unsaved slot wins over the saved overlay —
+    // coming back to the torso mid-tattoo resumes exactly where you left it
+    const slot = readDraftBook().slots[modelWorkId(binding)] ?? null;
     const overlay = overlayOf(binding, (model as any).paint);
-    const initial = overlay ? reopenOverlayDocument(overlay) : null;
+    const initial = slot?.doc ?? (overlay ? reopenOverlayDocument(overlay) : null);
     setWork((prev) => freshWork(prev, {
       docId: modelWorkId(binding),
       name: modelWorkName(binding),
@@ -407,7 +457,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
       initial,
     }));
     setEdited(!!initial);
-    setStatus(`painting ${binding.family} ${binding.docId} · ${binding.part}${initial ? ' (reopened)' : ''}`);
+    setStatus(`painting ${binding.family} ${binding.docId} · ${binding.part}${slot ? ' (unsaved draft resumed)' : initial ? ' (reopened)' : ''}`);
     live.session?.note(`paint model · ${binding.family} ${binding.docId} · ${binding.part}`);
   };
 
@@ -443,6 +493,11 @@ export function CutoutRoute(props: { onExit: () => void }) {
       session.commit({ kind: 'authored', id: binding.docId, doc: next },
         `${binding.docId}: ${binding.part} ${has ? 'painted' : 'paint cleared'}`);
     }
+    // the save landed on the model — its draft slot would now only shadow it
+    // (and could resurrect stale strokes after an external edit): drop it
+    if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
+    writeDraftBook(removeDraftSlot(readDraftBook(), modelWorkId(binding)));
+    setEdited(false);
     setLibRev((r) => r + 1); // the MODELS rail re-reads painted dots
     setLastSavedAt(Date.now());
     setStatus(has
@@ -455,6 +510,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
   // the paint (1 tile, square canvas). Smart select needs an image FILE, so
   // it stays off here (like blank canvases); brush/lasso/layers all work.
   const paintOnMaterial = (id: string, label: string) => {
+    flushDraft();
     const px = PAINT.tuning.canvas.defaultSize;
     setWork((prev) => freshWork(prev, { name: label, textureId: id, dims: { w: px, h: px } }));
     setEdited(false);
