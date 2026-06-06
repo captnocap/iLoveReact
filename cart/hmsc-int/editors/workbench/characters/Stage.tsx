@@ -36,7 +36,7 @@ import { buildMeshFrame } from '../../../game/figure/rig';
 import { PART_IDS, PROFILE_N, type PartId } from '../../../game/figure/shapes';
 import { PAINT } from '../../paint';
 import {
-  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, gridFromBytes,
+  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, gridFromBytes,
   reliefBytesFromGrid, sculptModeValue,
 } from '../../characters/paintKit';
 import { useRouteTwigState } from '../../twigs';
@@ -67,10 +67,11 @@ const PAINT_H = TUNE.paint.height;
 const GRID_W = TUNE.grid.width;
 const GRID_H = TUNE.grid.height;
 const NEUTRAL = TUNE.neutral;
-// SCULPTSPLIT-0606: the SCULPT lens's canvas⇄3D divider — the default sits
-// at the spec's "canvas LARGE, live 3D small beside" (~62/38); the fraction
-// clamps so BOTH sides stay usable and the 3D pane never thins to a sliver.
-const SCULPT_SPLIT = { default: 0.62, min: 0.35, max: 0.78, canvasMinPx: 360, paneMinPx: 300 };
+// SCULPTSPLIT-0606 v2 (USER RULING): VERTICAL STACK — "put the mesh up top
+// and then a row of the two other tools below it. this side by side column
+// approach is ass." The divider drags the top/bottom split; minima keep the
+// mesh a real view and the tool row usable at any window size.
+const SCULPT_SPLIT = { default: 0.55, min: 0.3, max: 0.75, meshMinPx: 220, rowMinPx: 240, toolColPx: 320 };
 // the mesh context's face moment: always still (stable identity — never
 // re-triggers the derivation's memos)
 const STILL_FACE = { anim: null, phase: 0 } as const;
@@ -121,16 +122,29 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   })();
   const canvasFitRef = useRef(canvasFit);
   canvasFitRef.current = canvasFit;
-  // SCULPTSPLIT-0606: the canvas⇄3D split is YOURS to set — a drag divider
-  // (the Inspector's resizable-panel pattern), the fraction twigged as view
-  // state on the character route's keys.
-  const [sculptSplit, setSculptSplit] = useRouteTwigState<number>('/characters', 'sculptSplit', SCULPT_SPLIT.default);
+  // SCULPTSPLIT-0606 v2: the mesh⇄tools split is YOURS to set — a drag
+  // divider (the Inspector's resizable-panel pattern), the TOP fraction
+  // twigged as view state on the character route's keys.
+  const [sculptSplit, setSculptSplit] = useRouteTwigState<number>('/characters', 'sculptSplitY', SCULPT_SPLIT.default);
   const [splitDragging, setSplitDragging] = useState(false);
   const stageRect = useRef({ x: 0, y: 0, width: 0, height: 0 });
-  const resizeSplit = (screenX: number) => {
+  const resizeSplit = (screenY: number) => {
     const r = stageRect.current;
-    if (r.width <= 0) return;
-    setSculptSplit(clamp((screenX - r.x) / r.width, SCULPT_SPLIT.min, SCULPT_SPLIT.max));
+    if (r.height <= 0) return;
+    setSculptSplit(clamp((screenY - r.y) / r.height, SCULPT_SPLIT.min, SCULPT_SPLIT.max));
+  };
+  // the brush footprint (Q3): canvas-uv hover the overlay shader draws; a
+  // stale ring auto-fades when moves stop landing on the canvas
+  const [brushHover, setBrushHover] = useState<{ u: number; v: number } | null>(null);
+  const brushHoverFade = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const canvasHoverMove = (sx: number, sy: number) => {
+    const r = canvasRect.current;
+    if (r.width <= 0 || r.height <= 0) return;
+    const u = clamp((sx - r.x) / r.width, 0, 1);
+    const v2 = clamp((sy - r.y) / r.height, 0, 1);
+    setBrushHover((cur) => (cur && Math.abs(cur.u - u) < 0.002 && Math.abs(cur.v - v2) < 0.004 ? cur : { u, v: v2 }));
+    if (brushHoverFade.current) clearTimeout(brushHoverFade.current);
+    brushHoverFade.current = setTimeout(() => setBrushHover(null), 1600);
   };
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const [grabHover, setGrabHover] = useState<
@@ -503,7 +517,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
 
   // ── the 3D viewport pane (LENSCLARITY-0606: ONE pane, three captioned
   // mounts — FIGURE full-bleed body · PART full-bleed close-up · SCULPT's
-  // small live side view; the caption makes each lens unmistakable) ─────────
+  // full-width TOP view (v2 stack); the caption makes each unmistakable) ────
   const viewportPane = (caption: string) => (
     <Pressable
       onLayout={(lr: any) => { viewRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
@@ -550,10 +564,9 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     </Pressable>
   );
 
-  // ── the SCULPT lens (DEADSPACE-0606): tools = ONE compact wrapping strip
-  // on TOP (the canvas is 2:1 — width is the scarce axis, so a side rail
-  // would cost more canvas than a top strip); the canvas aspect-fills the
-  // rest; the samples strip rides UNDER it (Law 3's demonstrative filler,
+  // ── the SCULPT toolset (SCULPTSPLIT-0606 v2): one wrapping strip that
+  // lives in the tool COLUMN beside the canvas (the bottom row of the
+  // stack); the samples strip rides under it (Law 3's demonstrative filler,
   // never a black void). Same verbs, same data — layout only.
   const sculptTools = (
     <Row style={{ flexWrap: 'wrap', gap: 8, rowGap: 6, alignItems: 'center', paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8 }}>
@@ -623,7 +636,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     <Pressable
       onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
       onMouseDown={onPaintDown}
-      onMouseMove={onPaintMove}
+      onMouseMove={(e: any) => { canvasHoverMove(Number(e?.x ?? 0), Number(e?.y ?? 0)); onPaintMove(e); }}
       onMouseUp={onPaintUp}
       style={{ width: CW, height: CH, borderWidth: 1, borderColor: T.frame, position: 'relative' }}
     >
@@ -642,7 +655,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       />
       <Effect
         shader={DEPTH_OVERLAY_WGSL}
-        data={[0]}
+        data={depthOverlayData({ hover: brushHover, brushPx: v.brush, mode: v.sculptMode, mirror: v.mirror })}
         textures={[paints[selPart].id, relief.id]}
         style={{ position: 'absolute', left: 0, top: 0, width: CW, height: CH }}
       />
@@ -658,46 +671,48 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     <Col style={{ flexGrow: 1, minHeight: 0 }}>
       <Row style={{ flexGrow: 1, minHeight: 0 }}>
         {lens === 'sculpt' ? (
-          /* SCULPTSPLIT-0606 (supersedes the fixed-340 pane): "canvas LARGE,
-             live 3D small beside" means BOTH usable — the split is a DRAG
-             divider (the Inspector's resizable-panel pattern), defaulting
-             ~62/38, the fraction twigged; minWidths keep the 3D side a real
-             view at any window size, never a clipped sliver. */
-          <Box
+          /* SCULPTSPLIT-0606 v2 (USER RULING): VERTICAL STACK — the 3D mesh
+             full-width on TOP, ONE ROW below it holding the two other tools
+             (the unwrap canvas + the sculpt toolset/samples). The divider
+             drags the top/bottom split (fraction twigged); side-by-side
+             columns are dead on this lens. */
+          <Col
             onLayout={(lr: any) => { stageRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
-            style={{ flexGrow: 1, minWidth: 0, height: '100%', flexDirection: 'row', position: 'relative' }}
+            style={{ flexGrow: 1, minWidth: 0, height: '100%', position: 'relative' }}
           >
-            <Col style={{ flexGrow: Math.round(sculptSplit * 100), flexBasis: 0, minWidth: SCULPT_SPLIT.canvasMinPx, height: '100%' }}>
-              {sculptTools}
+            <Box style={{ flexGrow: Math.round(sculptSplit * 100), flexBasis: 0, minHeight: SCULPT_SPLIT.meshMinPx, flexDirection: 'row', minWidth: 0 }}>
+              {viewportPane(`LIVE 3D · ${selPart.toUpperCase()}`)}
+            </Box>
+            {/* the divider — the mesh⇄tools split is yours to set */}
+            <Pressable
+              onMouseDown={(p: any) => { setSplitDragging(true); resizeSplit(Number(p?.y ?? 0)); }}
+              onMouseMove={(p: any) => { if (splitDragging) resizeSplit(Number(p?.y ?? 0)); }}
+              onMouseUp={() => setSplitDragging(false)}
+              style={{ height: 10, alignItems: 'center', justifyContent: 'center', borderTopWidth: 1, borderBottomWidth: 1, borderColor: T.frame }}
+            >
+              <Box style={{ width: 48, height: 2, borderRadius: 1, backgroundColor: T.dim }} />
+            </Pressable>
+            <Row style={{ flexGrow: 100 - Math.round(sculptSplit * 100), flexBasis: 0, minHeight: SCULPT_SPLIT.rowMinPx, minWidth: 0 }}>
               <Box
                 onLayout={(lr: any) => setCanvasBox((b) => (Math.abs(b.w - lr.width) > 1 || Math.abs(b.h - lr.height) > 1 ? { w: lr.width, h: lr.height } : b))}
-                style={{ flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center' }}
+                style={{ flexGrow: 1, minWidth: 0, height: '100%', alignItems: 'center', justifyContent: 'center' }}
               >
                 {sculptCanvas}
               </Box>
-              {sampleStrip}
-            </Col>
-            {/* the divider — the canvas⇄3D split is yours to set */}
-            <Pressable
-              onMouseDown={(p: any) => { setSplitDragging(true); resizeSplit(Number(p?.x ?? 0)); }}
-              onMouseMove={(p: any) => { if (splitDragging) resizeSplit(Number(p?.x ?? 0)); }}
-              onMouseUp={() => setSplitDragging(false)}
-              style={{ width: 10, height: '100%', alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderRightWidth: 1, borderColor: T.frame }}
-            >
-              <Box style={{ width: 2, height: 48, borderRadius: 1, backgroundColor: T.dim }} />
-            </Pressable>
-            <Box style={{ flexGrow: Math.round((1 - sculptSplit) * 100), flexBasis: 0, minWidth: SCULPT_SPLIT.paneMinPx, height: '100%', flexDirection: 'row' }}>
-              {viewportPane(`LIVE 3D · ${selPart.toUpperCase()}`)}
-            </Box>
+              <Col style={{ width: SCULPT_SPLIT.toolColPx, height: '100%', minHeight: 0, borderLeftWidth: 1, borderColor: T.frame }}>
+                {sculptTools}
+                {sampleStrip}
+              </Col>
+            </Row>
             {splitDragging ? (
               /* full-stage capture while dragging (Inspector.tsx:141-147) */
               <Pressable
                 style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001', zIndex: 50 }}
-                onMouseMove={(p: any) => resizeSplit(Number(p?.x ?? 0))}
+                onMouseMove={(p: any) => resizeSplit(Number(p?.y ?? 0))}
                 onMouseUp={() => setSplitDragging(false)}
               />
             ) : null}
-          </Box>
+          </Col>
         ) : lens === 'paint' ? (
           /* the shared painter + live ModelPreview (K2/K4) — paint without
              leaving the page; save lands on the characters channel (K3) */

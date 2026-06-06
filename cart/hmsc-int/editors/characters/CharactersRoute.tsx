@@ -59,7 +59,7 @@ import { itemsStream } from '../items/stream';
 import { sculptedItemDefinition } from '../items/bake';
 import { PAINT } from '../paint';
 import {
-  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, editorPartParams, gridFromBytes,
+  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes,
   headTextureKey, partDynKey, reliefBytesFromGrid, sculptModeValue, skinTextureKey,
   type SculptMode,
 } from './paintKit';
@@ -1110,7 +1110,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
               />
               <Effect
                 shader={DEPTH_OVERLAY_WGSL}
-                data={[0]}
+                data={depthOverlayData()}
                 textures={[paints[selPart].id, relief.id]}
                 style={{ position: 'absolute', left: 0, top: 0, width: EDITOR_W, height: EDITOR_H }}
               />

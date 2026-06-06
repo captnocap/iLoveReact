@@ -23,7 +23,7 @@ import { createSessionLog } from '../sessions';
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
 import { globeSurface } from '@reactjit/geometries';
-import { DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, editorPartParams, gridFromBytes } from './paintKit';
+import { DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes } from './paintKit';
 import {
   GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, gridDeltaFor,
   gridOverlayParams, pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
@@ -450,6 +450,17 @@ test('the sculpt canvas is a measurement surface: fixed palette, guides always r
   assert(lum(SCULPT_CANVAS.silhouette) - lum(SCULPT_CANVAS.base) >= 0.1, 'the lathe silhouette reads on the base');
   // the shader's gridline ink IS the palette's — one truth, no drift
   assert(DEPTH_OVERLAY_WGSL.includes(`vec3f(${SCULPT_CANVAS.guideInk.join(', ')})`), 'the overlay shader embeds the palette guide ink');
+});
+
+test('the overlay data[] contract: 7 floats always, rest is zeros, aiming is chunky (SCULPTSPLIT-0606 v2)', () => {
+  // a short array reads out of bounds in the shader — the builder is the law
+  assertEqual(JSON.stringify(depthOverlayData()), JSON.stringify([0, 0, 0, 0, 0, 0, 0]), 'rest state is 7 zeros (smooth display, no footprint)');
+  const aiming = depthOverlayData({ hover: { u: 0.25, v: 0.5 }, brushPx: 16, mode: 'lower', mirror: true });
+  assertEqual(aiming.length, 7, 'aiming state is 7 floats');
+  assertEqual(aiming[0], 1, 'aiming snaps the display chunky');
+  assertEqual(aiming[5], 1, 'carve maps to mode 1 (ring tint)');
+  assertEqual(aiming[6], 1, 'mirror rides to the twin footprint');
+  assert(aiming[4] > 0 && aiming[4] < 0.5, 'brush radius lands in sane v units');
 });
 
 finish('editors/characters');
