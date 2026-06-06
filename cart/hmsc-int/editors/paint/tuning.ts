@@ -47,12 +47,15 @@ export const PAINT_TUNING = ({
   /** GPU writes never setState per dab — visual dependents poll a version
    *  counter bumped at most this often mid-stroke */
   maskBumpThrottleMs: 60,
-  /** per-ordinal look stagger for new layers (golden-ratio hue walk) */
+  /** per-ordinal look stagger for new layers (golden-ratio hue walk).
+   *  defaults are THE NORMAL PAINT BRUSH (solid = exactly the picked color,
+   *  dim 1 = no darkening) — the effect surfaces live in the FX gallery;
+   *  the stagger only matters when a layer adopts one of them. */
   layerLook: {
     hueStagger: 0.6180339887,
     phaseStagger: 0.7,
-    defaultDim: 0.85,
-    defaultSurface: 'rainbow',
+    defaultDim: 1.0,
+    defaultSurface: 'solid',
     defaultBlend: 'normal',
   },
   /** quick palette swatches in the tool rail */

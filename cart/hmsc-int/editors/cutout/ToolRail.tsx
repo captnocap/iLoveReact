@@ -10,10 +10,11 @@
 // color slots) + cart/cutout/components/TopBar.tsx BrushSlider (read, never
 // imported).
 
+import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CHROME } from '@game';
-import { PAINT, type PaintEditorState } from '../paint';
+import { ColorWheel, PAINT, type PaintEditorState } from '../paint';
 import type { PaintMode, PaintTool } from '../paint';
 
 const T = GAME_CHROME.tokens.color;
@@ -32,17 +33,20 @@ const RAIL = Object.freeze({
 } as const);
 
 const TOOLS: { id: PaintTool; label: string; icon: string }[] = [
-  { id: 'hand', label: 'Move — drag to pan, wheel to zoom', icon: 'Hand' },
-  { id: 'brush', label: 'Brush', icon: 'Brush' },
-  { id: 'refine', label: 'Refine brush — edge-aware', icon: 'ScanLine' },
-  { id: 'lasso', label: 'Lasso', icon: 'Spline' },
-  { id: 'smart', label: 'Smart select', icon: 'WandSparkles' },
+  { id: 'hand', label: 'Move (H) — drag to pan, wheel to zoom', icon: 'Hand' },
+  { id: 'brush', label: 'Brush (B)', icon: 'Brush' },
+  { id: 'refine', label: 'Refine brush (F) — edge-aware', icon: 'ScanLine' },
+  { id: 'lasso', label: 'Lasso (L) — Enter closes, Esc cancels', icon: 'Spline' },
+  { id: 'smart', label: 'Smart select (S)', icon: 'WandSparkles' },
 ];
 
 const MODES: { id: PaintMode; label: string; icon: string; color: string }[] = [
-  { id: 'erase', label: 'Paint / remove', icon: 'Eraser', color: '#ff9f43' },
-  { id: 'restore', label: 'Restore', icon: 'RotateCcw', color: '#34d399' },
+  { id: 'erase', label: 'Paint / remove (E)', icon: 'Eraser', color: '#ff9f43' },
+  { id: 'restore', label: 'Restore (R)', icon: 'RotateCcw', color: '#34d399' },
 ];
+
+/** the keyboard map, visible (the engine binds these in usePaintEditor) */
+const KEY_HINT = 'B brush · E paint · R restore · H hand · L lasso · F refine · [ ] size · Ctrl+Z/Y undo/redo';
 
 export function CutoutToolRail({ s }: { s: PaintEditorState }) {
   const target = s.activeLayer;
@@ -113,6 +117,12 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
           />
         ))}
       </Row>
+      <ColorWheel
+        value={colors[safeSlot] ?? '#ffffff'}
+        onChange={(hex) => s.setLayerColor(target, safeSlot, hex)}
+        size={150}
+        showHex
+      />
       <Row style={{ gap: 5, flexWrap: 'wrap', width: RAIL.width - 30, justifyContent: 'center' }}>
         {PAINT.tuning.palette.map((hex) => (
           <Pressable key={hex} onPress={() => s.setLayerColor(target, safeSlot, hex)} tooltip={hex}>
@@ -124,6 +134,11 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
           </Pressable>
         ))}
       </Row>
+      <Box style={{ flexGrow: 1 }} />
+      {/* the keyboard map, visible at the rail's foot */}
+      <Text style={{ color: T.dim, fontSize: 8, fontFamily: 'monospace', textAlign: 'center', width: RAIL.width - 16 }}>
+        {KEY_HINT}
+      </Text>
     </Col>
   );
 }

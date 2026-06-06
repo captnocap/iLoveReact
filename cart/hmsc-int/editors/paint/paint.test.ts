@@ -20,6 +20,7 @@ import {
   type PaintLayerBytes, type PaintLookDefaults,
 } from './layers';
 import { createPaintHistory } from './history';
+import { hexToHsv, hsvToHex, normalizeHexColor } from './colors';
 import {
   addCustomSurface, adoptSurface, buildCellShader, buildTextureShader,
   hexToRgb01, inflateSurface, MASK_SURFACES, NUM_COLOR_SLOTS,
@@ -360,6 +361,19 @@ test('hex colors parse defensively', () => {
   assertEqual(hexToRgb01('336699')[0], 0.2, 'bare hex accepted');
 });
 
+test('HSV color wheel math round-trips common hex colors', () => {
+  assertEqual(normalizeHexColor('#f0c'), '#ff00cc', 'short hex expands');
+  assertEqual(normalizeHexColor('336699'), '#336699', 'bare hex normalizes');
+  assertEqual(hsvToHex({ h: 0, s: 1, v: 1 }), '#ff0000', 'hue 0 is red');
+  assertEqual(hsvToHex({ h: 1 / 3, s: 1, v: 1 }), '#00ff00', 'hue 1/3 is green');
+  assertEqual(hsvToHex({ h: 2 / 3, s: 1, v: 1 }), '#0000ff', 'hue 2/3 is blue');
+  const hsv = hexToHsv('#336699');
+  assertClose(hsv.h, 210 / 360, 0.001, '336699 hue is blue-biased');
+  assertClose(hsv.s, 2 / 3, 0.001, '336699 saturation');
+  assertClose(hsv.v, 0.6, 0.001, '336699 value');
+  assertEqual(hsvToHex(hexToHsv('#7c5cff')), '#7c5cff', 'round-trip keeps palette hex');
+});
+
 test('custom surfaces register, resolve, and adopt round-trip', () => {
   const grown = addCustomSurface([], '  Lava  ', 'LAVA_WGSL');
   assertEqual(grown.customs[0].label, 'Lava', 'label trimmed');
@@ -385,6 +399,20 @@ test('every built-in surface builds valid-shaped WGSL in both modes', () => {
   const tex = buildTextureShader('rainbow');
   assert(tex.includes('ov > 0.75') && tex.includes('ov > 0.25'),
     'texture mode composes the same override bands as effectiveMask');
+});
+
+test('solid is THE NORMAL PAINT BRUSH: exactly the picked color, static, and the default look', () => {
+  // the user's report: "i cant paint a normal color. it just paints the
+  // effect" — solid must be a white body so the slot-0 tint makes painted
+  // pixels EXACTLY the picked color, with no time term and no hue cycle.
+  for (const build of [buildCellShader, buildTextureShader]) {
+    const wgsl = build('solid');
+    assert(wgsl.includes('let color = vec3f(1.0, 1.0, 1.0);'), 'the solid body is white (tint = the picked color, exact)');
+    assert(wgsl.includes('_tint'), 'the slot tint composes the final color');
+  }
+  // and a fresh layer IS the normal brush: solid look, no dimming
+  assertEqual(PAINT_TUNING.layerLook.defaultSurface, 'solid', 'new layers default to the normal brush');
+  assertEqual(PAINT_TUNING.layerLook.defaultDim, 1, 'the default look never darkens the picked color');
 });
 
 finish('paint');

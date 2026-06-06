@@ -152,13 +152,17 @@ const SHADER_BODY: Record<MaskSurface, string> = {
     let color = hsv2rgb(fract(n * 0.5 + hue_off + t * 0.05), 0.7, 0.7 + 0.3 * n);
   `,
   solid: `
-    let color = hsv2rgb(fract(hue_off + t * 0.08), 0.7, 0.85);
+    let color = vec3f(1.0, 1.0, 1.0);
   `,
   edges: `
     let color = hsv2rgb(fract(hue_off + t * 0.2), 1.0, 1.0);
   `,
 };
 
+// solid is THE NORMAL PAINT BRUSH (the user: "i cant paint a normal color.
+// it just paints the effect"): a white body, so the final tint-by-slot-0
+// makes the painted pixels EXACTLY the picked color — static, no time, no
+// hue cycle. The other modes are the effects gallery.
 // solid skips the alpha pulse; edges paints ONLY the silhouette contour.
 const SURFACE_FLAGS: Record<MaskSurface, { pulse: boolean; interiorAlpha: number; edgeAlpha: number }> = {
   rainbow: { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0 },
