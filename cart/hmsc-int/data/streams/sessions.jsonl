@@ -1,0 +1,897 @@
+{"seq":2,"at":1780636592014,"event":{"kind":"opened","session":"ses-vehicles-mq0h1vny-keg","route":"/vehicles","channel":"vehicles"}}
+{"seq":3,"at":1780636606245,"event":{"kind":"opened","session":"ses-vehicles-mq0h26n9-hy8","route":"/vehicles","channel":"vehicles"}}
+{"seq":4,"at":1780636613268,"event":{"kind":"opened","session":"ses-vehicles-mq0h2c2c-pj6","route":"/vehicles","channel":"vehicles"}}
+{"seq":5,"at":1780636614686,"event":{"kind":"opened","session":"ses-vehicles-mq0h2d5q-qlq","route":"/vehicles","channel":"vehicles"}}
+{"seq":6,"at":1780636617519,"event":{"kind":"opened","session":"ses-vehicles-mq0h2fcf-118o","route":"/vehicles","channel":"vehicles"}}
+{"seq":7,"at":1780636622340,"event":{"kind":"opened","session":"ses-vehicles-mq0h2j2c-qtp","route":"/vehicles","channel":"vehicles"}}
+{"seq":8,"at":1780636626371,"event":{"kind":"opened","session":"ses-vehicles-mq0h2m6b-ont","route":"/vehicles","channel":"vehicles"}}
+{"seq":9,"at":1780636628389,"event":{"kind":"opened","session":"ses-vehicles-mq0h2nqd-85c","route":"/vehicles","channel":"vehicles"}}
+{"seq":10,"at":1780636630417,"event":{"kind":"opened","session":"ses-vehicles-mq0h2pap-q6c","route":"/vehicles","channel":"vehicles"}}
+{"seq":11,"at":1780636698071,"event":{"kind":"opened","session":"ses-vehicles-mq0h45hz-4f2","route":"/vehicles","channel":"vehicles"}}
+{"seq":12,"at":1780636840347,"event":{"kind":"opened","session":"ses-root-mq0h77a3-p6i","route":"/","channel":"world"}}
+{"seq":13,"at":1780636840384,"event":{"kind":"opened","session":"ses-vehicles-mq0h77b4-ho9","route":"/vehicles","channel":"vehicles"}}
+{"seq":14,"at":1780637069492,"event":{"kind":"opened","session":"ses-root-mq0hc438-5pc","route":"/","channel":"world"}}
+{"seq":15,"at":1780637069520,"event":{"kind":"opened","session":"ses-vehicles-mq0hc440-v6s","route":"/vehicles","channel":"vehicles"}}
+{"seq":16,"at":1780637086326,"event":{"kind":"opened","session":"ses-root-mq0hch2u-103","route":"/","channel":"world"}}
+{"seq":17,"at":1780637086366,"event":{"kind":"opened","session":"ses-vehicles-mq0hch3y-m5","route":"/vehicles","channel":"vehicles"}}
+{"seq":18,"at":1780637153379,"event":{"kind":"opened","session":"ses-root-mq0hdwtf-k2j","route":"/","channel":"world"}}
+{"seq":19,"at":1780637153409,"event":{"kind":"opened","session":"ses-vehicles-mq0hdwu9-1afs","route":"/vehicles","channel":"vehicles"}}
+{"seq":20,"at":1780637176421,"event":{"kind":"opened","session":"ses-root-mq0heelh-n0c","route":"/","channel":"world"}}
+{"seq":21,"at":1780637176459,"event":{"kind":"opened","session":"ses-vehicles-mq0heemj-cu7","route":"/vehicles","channel":"vehicles"}}
+{"seq":22,"at":1780637176751,"event":{"kind":"opened","session":"ses-root-mq0heeun-10vq","route":"/","channel":"world"}}
+{"seq":23,"at":1780637176771,"event":{"kind":"opened","session":"ses-vehicles-mq0heev7-hiq","route":"/vehicles","channel":"vehicles"}}
+{"seq":24,"at":1780637290427,"event":{"kind":"opened","session":"ses-root-mq0hgukb-ect","route":"/","channel":"world"}}
+{"seq":25,"at":1780637290447,"event":{"kind":"opened","session":"ses-vehicles-mq0hgukv-1e73","route":"/vehicles","channel":"vehicles"}}
+{"seq":26,"at":1780637380737,"event":{"kind":"opened","session":"ses-root-mq0his8x-pdh","route":"/","channel":"world"}}
+{"seq":27,"at":1780637380771,"event":{"kind":"opened","session":"ses-vehicles-mq0his9v-vlq","route":"/vehicles","channel":"vehicles"}}
+{"seq":28,"at":1780637393125,"event":{"kind":"opened","session":"ses-root-mq0hj1t1-a9x","route":"/","channel":"world"}}
+{"seq":29,"at":1780637393154,"event":{"kind":"opened","session":"ses-vehicles-mq0hj1tu-172y","route":"/vehicles","channel":"vehicles"}}
+{"seq":30,"at":1780637436595,"event":{"kind":"closed","session":"ses-vehicles-mq0hj1tu-172y"}}
+{"seq":31,"at":1780637539979,"event":{"kind":"opened","session":"ses-root-mq0hm74b-gy2","route":"/","channel":"world"}}
+{"seq":32,"at":1780637540344,"event":{"kind":"opened","session":"ses-root-mq0hm7eg-qtq","route":"/","channel":"world"}}
+{"seq":33,"at":1780637680673,"event":{"kind":"committed","session":"ses-root-mq0hm7eg-qtq","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":34,"at":1780637715064,"event":{"kind":"opened","session":"ses-root-mq0hpy7s-37v","route":"/","channel":"world"}}
+{"seq":35,"at":1780637729090,"event":{"kind":"opened","session":"ses-root-mq0hq91e-14b8","route":"/","channel":"world"}}
+{"seq":36,"at":1780637734314,"event":{"kind":"opened","session":"ses-root-mq0hqd2i-ehk","route":"/","channel":"world"}}
+{"seq":37,"at":1780637740872,"event":{"kind":"committed","session":"ses-root-mq0hqd2i-ehk","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":38,"at":1780637769750,"event":{"kind":"opened","session":"ses-root-mq0hr4eu-24x","route":"/","channel":"world"}}
+{"seq":39,"at":1780637772018,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":40,"at":1780637773384,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":41,"at":1780637780980,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":42,"at":1780637782159,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":43,"at":1780637784082,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":44,"at":1780637787566,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":45,"at":1780637788375,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":46,"at":1780637792864,"event":{"kind":"committed","session":"ses-root-mq0hr4eu-24x","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":47,"at":1780637793981,"event":{"kind":"opened","session":"ses-root-mq0hrn3x-1ctx","route":"/","channel":"world"}}
+{"seq":48,"at":1780637857244,"event":{"kind":"committed","session":"ses-root-mq0hrn3x-1ctx","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":49,"at":1780637886682,"event":{"kind":"committed","session":"ses-root-mq0hrn3x-1ctx","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":50,"at":1780637998905,"event":{"kind":"opened","session":"ses-root-mq0hw189-hrl","route":"/","channel":"world"}}
+{"seq":51,"at":1780638043346,"event":{"kind":"opened","session":"ses-root-mq0hwziq-ft3","route":"/","channel":"world"}}
+{"seq":52,"at":1780638047091,"event":{"kind":"opened","session":"ses-root-mq0hx2er-xgd","route":"/","channel":"world"}}
+{"seq":53,"at":1780638051317,"event":{"kind":"opened","session":"ses-root-mq0hx5o5-sev","route":"/","channel":"world"}}
+{"seq":54,"at":1780638054341,"event":{"kind":"opened","session":"ses-root-mq0hx805-444","route":"/","channel":"world"}}
+{"seq":55,"at":1780638091261,"event":{"kind":"opened","session":"ses-root-mq0hy0hp-gpk","route":"/","channel":"world"}}
+{"seq":56,"at":1780638198137,"event":{"kind":"opened","session":"ses-root-mq0i0ayh-668","route":"/","channel":"world"}}
+{"seq":57,"at":1780638637327,"event":{"kind":"opened","session":"ses-vehicles-mq0i9pu7-w43","route":"/vehicles","channel":"vehicles"}}
+{"seq":58,"at":1780638638373,"event":{"kind":"closed","session":"ses-vehicles-mq0i9pu7-w43"}}
+{"seq":59,"at":1780638874878,"event":{"kind":"opened","session":"ses-root-mq0iet4u-110a","route":"/","channel":"world"}}
+{"seq":60,"at":1780638889298,"event":{"kind":"opened","session":"ses-root-mq0if49e-10p4","route":"/","channel":"world"}}
+{"seq":61,"at":1780638899522,"event":{"kind":"opened","session":"ses-root-mq0ifc5e-bky","route":"/","channel":"world"}}
+{"seq":62,"at":1780638908347,"event":{"kind":"opened","session":"ses-root-mq0ifiyj-6h7","route":"/","channel":"world"}}
+{"seq":63,"at":1780638918771,"event":{"kind":"opened","session":"ses-root-mq0ifr03-1031","route":"/","channel":"world"}}
+{"seq":64,"at":1780638930403,"event":{"kind":"opened","session":"ses-root-mq0ifzz7-178f","route":"/","channel":"world"}}
+{"seq":65,"at":1780638936623,"event":{"kind":"opened","session":"ses-root-mq0ig4rz-vr2","route":"/","channel":"world"}}
+{"seq":66,"at":1780638951058,"event":{"kind":"opened","session":"ses-root-mq0igfwy-vqx","route":"/","channel":"world"}}
+{"seq":67,"at":1780638968880,"event":{"kind":"opened","session":"ses-root-mq0igto0-dxb","route":"/","channel":"world"}}
+{"seq":68,"at":1780638973500,"event":{"kind":"opened","session":"ses-root-mq0igx8c-pvr","route":"/","channel":"world"}}
+{"seq":69,"at":1780638976124,"event":{"kind":"opened","session":"ses-root-mq0igz98-9k1","route":"/","channel":"world"}}
+{"seq":70,"at":1780638987310,"event":{"kind":"committed","session":"ses-root-mq0igz98-9k1","channel":"world","label":"testing: tile: painted sidewalk","at":null}}
+{"seq":71,"at":1780639000157,"event":{"kind":"opened","session":"ses-root-mq0ihhst-zyz","route":"/","channel":"world"}}
+{"seq":72,"at":1780639022986,"event":{"kind":"opened","session":"ses-root-mq0ihzey-fr0","route":"/","channel":"world"}}
+{"seq":73,"at":1780639026812,"event":{"kind":"opened","session":"ses-root-mq0ii2d8-din","route":"/","channel":"world"}}
+{"seq":74,"at":1780640119421,"event":{"kind":"opened","session":"ses-root-mq0j5hfh-pyd","route":"/","channel":"world"}}
+{"seq":75,"at":1780640119709,"event":{"kind":"opened","session":"ses-root-mq0j5hnh-ti6","route":"/","channel":"world"}}
+{"seq":76,"at":1780640391087,"event":{"kind":"opened","session":"ses-root-mq0jbb1r-qxs","route":"/","channel":"world"}}
+{"seq":77,"at":1780640610942,"event":{"kind":"opened","session":"ses-characters-mq0jg0ou-r18","route":"/characters","channel":"characters"}}
+{"seq":78,"at":1780640641086,"event":{"kind":"opened","session":"ses-vehicles-mq0jgny6-752","route":"/vehicles","channel":"vehicles"}}
+{"seq":79,"at":1780640641094,"event":{"kind":"closed","session":"ses-characters-mq0jg0ou-r18"}}
+{"seq":80,"at":1780640642425,"event":{"kind":"closed","session":"ses-vehicles-mq0jgny6-752"}}
+{"seq":81,"at":1780640648743,"event":{"kind":"opened","session":"ses-vehicles-mq0jgtuv-tba","route":"/vehicles","channel":"vehicles"}}
+{"seq":82,"at":1780640649166,"event":{"kind":"opened","session":"ses-characters-mq0jgu6m-63l","route":"/characters","channel":"characters"}}
+{"seq":83,"at":1780640649176,"event":{"kind":"closed","session":"ses-vehicles-mq0jgtuv-tba"}}
+{"seq":84,"at":1780640649981,"event":{"kind":"closed","session":"ses-characters-mq0jgu6m-63l"}}
+{"seq":85,"at":1780640690908,"event":{"kind":"opened","session":"ses-characters-mq0jhqe4-jmt","route":"/characters","channel":"characters"}}
+{"seq":86,"at":1780640692334,"event":{"kind":"opened","session":"ses-vehicles-mq0jhrhq-131j","route":"/vehicles","channel":"vehicles"}}
+{"seq":87,"at":1780640692339,"event":{"kind":"closed","session":"ses-characters-mq0jhqe4-jmt"}}
+{"seq":88,"at":1780640702507,"event":{"kind":"closed","session":"ses-vehicles-mq0jhrhq-131j"}}
+{"seq":89,"at":1780640708278,"event":{"kind":"committed","session":"ses-root-mq0jbb1r-qxs","channel":"world","label":"testing: map: compiled testing → game","at":null}}
+{"seq":90,"at":1780640709819,"event":{"kind":"opened","session":"ses-characters-mq0ji4zf-15d","route":"/characters","channel":"characters"}}
+{"seq":91,"at":1780640710554,"event":{"kind":"closed","session":"ses-characters-mq0ji4zf-15d"}}
+{"seq":92,"at":1780640720774,"event":{"kind":"committed","session":"ses-root-mq0jbb1r-qxs","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":93,"at":1780640723391,"event":{"kind":"committed","session":"ses-root-mq0jbb1r-qxs","channel":"world","label":"testing: tile: painted sidewalk","at":null}}
+{"seq":94,"at":1780640843081,"event":{"kind":"opened","session":"ses-root-mq0jkzt5-zw8","route":"/","channel":"world"}}
+{"seq":95,"at":1780640871196,"event":{"kind":"opened","session":"ses-root-mq0jlli4-oxj","route":"/","channel":"world"}}
+{"seq":96,"at":1780641076279,"event":{"kind":"opened","session":"ses-root-mq0jpzqv-12b9","route":"/","channel":"world"}}
+{"seq":97,"at":1780641076588,"event":{"kind":"opened","session":"ses-root-mq0jpzzg-16jr","route":"/","channel":"world"}}
+{"seq":98,"at":1780641084023,"event":{"kind":"opened","session":"ses-root-mq0jq5pz-glh","route":"/","channel":"world"}}
+{"seq":99,"at":1780641097156,"event":{"kind":"opened","session":"ses-root-mq0jqfus-15gl","route":"/","channel":"world"}}
+{"seq":100,"at":1780641097442,"event":{"kind":"opened","session":"ses-root-mq0jqg2q-dhz","route":"/","channel":"world"}}
+{"seq":101,"at":1780641135505,"event":{"kind":"opened","session":"ses-root-mq0jr9g1-i0x","route":"/","channel":"world"}}
+{"seq":102,"at":1780641145935,"event":{"kind":"opened","session":"ses-root-mq0jrhhr-1bbj","route":"/","channel":"world"}}
+{"seq":103,"at":1780641153361,"event":{"kind":"opened","session":"ses-root-mq0jrn81-1722","route":"/","channel":"world"}}
+{"seq":104,"at":1780641159580,"event":{"kind":"opened","session":"ses-root-mq0jrs0s-147y","route":"/","channel":"world"}}
+{"seq":105,"at":1780641165804,"event":{"kind":"opened","session":"ses-root-mq0jrwto-k53","route":"/","channel":"world"}}
+{"seq":106,"at":1780641276570,"event":{"kind":"opened","session":"ses-root-mq0juaai-fci","route":"/","channel":"world"}}
+{"seq":106,"at":1780641463465,"event":{"kind":"opened","session":"ses-characters-mq0jyai1-bmz","route":"/characters","channel":"characters"}}
+{"seq":107,"at":1780641464072,"event":{"kind":"opened","session":"ses-vehicles-mq0jyayw-g3c","route":"/vehicles","channel":"vehicles"}}
+{"seq":108,"at":1780641464080,"event":{"kind":"closed","session":"ses-characters-mq0jyai1-bmz"}}
+{"seq":109,"at":1780641464732,"event":{"kind":"closed","session":"ses-vehicles-mq0jyayw-g3c"}}
+{"seq":110,"at":1780641468857,"event":{"kind":"opened","session":"ses-vehicles-mq0jyent-1bdj","route":"/vehicles","channel":"vehicles"}}
+{"seq":111,"at":1780641469783,"event":{"kind":"opened","session":"ses-characters-mq0jyfdj-1d0i","route":"/characters","channel":"characters"}}
+{"seq":112,"at":1780641469793,"event":{"kind":"closed","session":"ses-vehicles-mq0jyent-1bdj"}}
+{"seq":113,"at":1780641475482,"event":{"kind":"committed","session":"ses-characters-mq0jyfdj-1d0i","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":114,"at":1780641477942,"event":{"kind":"committed","session":"ses-characters-mq0jyfdj-1d0i","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":115,"at":1780641479232,"event":{"kind":"committed","session":"ses-characters-mq0jyfdj-1d0i","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":116,"at":1780641480557,"event":{"kind":"committed","session":"ses-characters-mq0jyfdj-1d0i","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":117,"at":1780641481504,"event":{"kind":"committed","session":"ses-characters-mq0jyfdj-1d0i","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":118,"at":1780641482195,"event":{"kind":"opened","session":"ses-root-mq0jyoyb-anz","route":"/","channel":"world"}}
+{"seq":119,"at":1780641482219,"event":{"kind":"opened","session":"ses-characters-mq0jyoyz-7qm","route":"/characters","channel":"characters"}}
+{"seq":120,"at":1780641508421,"event":{"kind":"opened","session":"ses-root-mq0jz96t-1d3","route":"/","channel":"world"}}
+{"seq":121,"at":1780641508445,"event":{"kind":"opened","session":"ses-characters-mq0jz97h-zv","route":"/characters","channel":"characters"}}
+{"seq":122,"at":1780641512373,"event":{"kind":"opened","session":"ses-vehicles-mq0jzc8l-zi8","route":"/vehicles","channel":"vehicles"}}
+{"seq":123,"at":1780641512381,"event":{"kind":"closed","session":"ses-characters-mq0jz97h-zv"}}
+{"seq":124,"at":1780641513443,"event":{"kind":"closed","session":"ses-vehicles-mq0jzc8l-zi8"}}
+{"seq":125,"at":1780641621244,"event":{"kind":"committed","session":"ses-root-mq0jz96t-1d3","channel":"world","label":"testing: tile: painted sidewalk","at":null}}
+{"seq":126,"at":1780641627497,"event":{"kind":"committed","session":"ses-root-mq0jz96t-1d3","channel":"world","label":"untitled-2: map: opened untitled-2","at":null}}
+{"seq":127,"at":1780641629456,"event":{"kind":"committed","session":"ses-root-mq0jz96t-1d3","channel":"world","label":"untitled-2: tile: erased tiles","at":null}}
+{"seq":128,"at":1780641631660,"event":{"kind":"committed","session":"ses-root-mq0jz96t-1d3","channel":"world","label":"untitled-2: tile: painted door","at":null}}
+{"seq":129,"at":1780641631890,"event":{"kind":"committed","session":"ses-root-mq0jz96t-1d3","channel":"world","label":"untitled-2: tile: painted door","at":null}}
+{"seq":130,"at":1780641633166,"event":{"kind":"committed","session":"ses-root-mq0jz96t-1d3","channel":"world","label":"untitled-2: tile: painted marker","at":null}}
+{"seq":131,"at":1780641639211,"event":{"kind":"committed","session":"ses-root-mq0jz96t-1d3","channel":"world","label":"testing: map: opened testing","at":null}}
+{"seq":132,"at":1780641651108,"event":{"kind":"opened","session":"ses-root-mq0k2bac-zw0","route":"/","channel":"world"}}
+{"seq":133,"at":1780641940878,"event":{"kind":"opened","session":"ses-characters-mq0k8ivi-1ddb","route":"/characters","channel":"characters"}}
+{"seq":134,"at":1780641941287,"event":{"kind":"opened","session":"ses-vehicles-mq0k8j6v-jb9","route":"/vehicles","channel":"vehicles"}}
+{"seq":135,"at":1780641941294,"event":{"kind":"closed","session":"ses-characters-mq0k8ivi-1ddb"}}
+{"seq":136,"at":1780641941735,"event":{"kind":"closed","session":"ses-vehicles-mq0k8j6v-jb9"}}
+{"seq":137,"at":1780641944826,"event":{"kind":"opened","session":"ses-vehicles-mq0k8lx6-14bj","route":"/vehicles","channel":"vehicles"}}
+{"seq":138,"at":1780641945889,"event":{"kind":"opened","session":"ses-characters-mq0k8mqp-84e","route":"/characters","channel":"characters"}}
+{"seq":139,"at":1780641945905,"event":{"kind":"closed","session":"ses-vehicles-mq0k8lx6-14bj"}}
+{"seq":140,"at":1780641946455,"event":{"kind":"closed","session":"ses-characters-mq0k8mqp-84e"}}
+{"seq":141,"at":1780641949190,"event":{"kind":"opened","session":"ses-characters-mq0k8pae-2ub","route":"/characters","channel":"characters"}}
+{"seq":142,"at":1780642526959,"event":{"kind":"opened","session":"ses-root-mq0kl33j-150p","route":"/","channel":"world"}}
+{"seq":143,"at":1780642526992,"event":{"kind":"opened","session":"ses-characters-mq0kl34g-13bi","route":"/characters","channel":"characters"}}
+{"seq":144,"at":1780642527279,"event":{"kind":"opened","session":"ses-root-mq0kl3cf-ekm","route":"/","channel":"world"}}
+{"seq":145,"at":1780642527303,"event":{"kind":"opened","session":"ses-characters-mq0kl3d3-4jy","route":"/characters","channel":"characters"}}
+{"seq":146,"at":1780642604254,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #8b5cf6","at":null}}
+{"seq":147,"at":1780642605090,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 5 dabs · #8b5cf6","at":null}}
+{"seq":148,"at":1780642608648,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 14 dabs · #8b5cf6","at":null}}
+{"seq":149,"at":1780642609515,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 6 dabs · #8b5cf6","at":null}}
+{"seq":150,"at":1780642610108,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 3 dabs · #8b5cf6","at":null}}
+{"seq":151,"at":1780642611027,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 14 dabs · #8b5cf6","at":null}}
+{"seq":152,"at":1780642611636,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 2 dabs · #8b5cf6","at":null}}
+{"seq":153,"at":1780642612630,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 21 dabs · #8b5cf6","at":null}}
+{"seq":154,"at":1780642613887,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 5 dabs · #8b5cf6","at":null}}
+{"seq":155,"at":1780642614748,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #8b5cf6","at":null}}
+{"seq":156,"at":1780642615480,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 4 dabs · #8b5cf6","at":null}}
+{"seq":157,"at":1780642635980,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":158,"at":1780642637203,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":159,"at":1780642639366,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":160,"at":1780642645903,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":161,"at":1780642649345,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":162,"at":1780642652297,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":163,"at":1780642656073,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":164,"at":1780642659023,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"face paint · 1 dabs · #dc2626","at":null}}
+{"seq":165,"at":1780642697132,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":166,"at":1780642698146,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":167,"at":1780642699292,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":168,"at":1780642699433,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":169,"at":1780642700337,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":170,"at":1780642703523,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":171,"at":1780642705095,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":172,"at":1780642706404,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":173,"at":1780642707387,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":174,"at":1780642708101,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"sculpt stroke · raise · 14px · torso","at":null}}
+{"seq":175,"at":1780642713060,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":176,"at":1780642716796,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":177,"at":1780642718549,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":178,"at":1780642724356,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":179,"at":1780642726126,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":180,"at":1780642727189,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":181,"at":1780642734570,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":182,"at":1780642736003,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":183,"at":1780642740803,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":184,"at":1780642742048,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":185,"at":1780642743898,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":186,"at":1780642744638,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":187,"at":1780642745278,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":188,"at":1780642746315,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":189,"at":1780642748481,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":190,"at":1780642749811,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":191,"at":1780642750773,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":192,"at":1780642751576,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":193,"at":1780642752809,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":194,"at":1780642753736,"event":{"kind":"committed","session":"ses-characters-mq0kl3d3-4jy","channel":"characters","label":"outline drag · torso","at":null}}
+{"seq":195,"at":1780642753807,"event":{"kind":"opened","session":"ses-root-mq0kpy4v-15u","route":"/","channel":"world"}}
+{"seq":196,"at":1780642753831,"event":{"kind":"opened","session":"ses-characters-mq0kpy5j-14jh","route":"/characters","channel":"characters"}}
+{"seq":197,"at":1780642754583,"event":{"kind":"committed","session":"ses-characters-mq0kpy5j-14jh","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":198,"at":1780642756979,"event":{"kind":"committed","session":"ses-characters-mq0kpy5j-14jh","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":199,"at":1780642758511,"event":{"kind":"committed","session":"ses-characters-mq0kpy5j-14jh","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":200,"at":1780642762229,"event":{"kind":"opened","session":"ses-root-mq0kq4mt-15iy","route":"/","channel":"world"}}
+{"seq":201,"at":1780642762254,"event":{"kind":"opened","session":"ses-characters-mq0kq4ni-111i","route":"/characters","channel":"characters"}}
+{"seq":202,"at":1780642765662,"event":{"kind":"committed","session":"ses-characters-mq0kq4ni-111i","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":203,"at":1780642770038,"event":{"kind":"committed","session":"ses-characters-mq0kq4ni-111i","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":204,"at":1780642773855,"event":{"kind":"opened","session":"ses-root-mq0kqdlr-227","route":"/","channel":"world"}}
+{"seq":205,"at":1780642773880,"event":{"kind":"opened","session":"ses-characters-mq0kqdmg-oqc","route":"/characters","channel":"characters"}}
+{"seq":206,"at":1780642776265,"event":{"kind":"committed","session":"ses-characters-mq0kqdmg-oqc","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":207,"at":1780642779341,"event":{"kind":"committed","session":"ses-characters-mq0kqdmg-oqc","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":208,"at":1780642783825,"event":{"kind":"committed","session":"ses-characters-mq0kqdmg-oqc","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":209,"at":1780642793039,"event":{"kind":"closed","session":"ses-characters-mq0kqdmg-oqc"}}
+{"seq":210,"at":1780642794533,"event":{"kind":"opened","session":"ses-characters-mq0kqtk5-c6l","route":"/characters","channel":"characters"}}
+{"seq":211,"at":1780642799149,"event":{"kind":"committed","session":"ses-characters-mq0kqtk5-c6l","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":212,"at":1780642801290,"event":{"kind":"opened","session":"ses-root-mq0kqyru-ldo","route":"/","channel":"world"}}
+{"seq":213,"at":1780642801315,"event":{"kind":"opened","session":"ses-characters-mq0kqysj-1d0q","route":"/characters","channel":"characters"}}
+{"seq":214,"at":1780642803580,"event":{"kind":"committed","session":"ses-characters-mq0kqysj-1d0q","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":215,"at":1780642805287,"event":{"kind":"committed","session":"ses-characters-mq0kqysj-1d0q","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":216,"at":1780642809297,"event":{"kind":"opened","session":"ses-root-mq0kr4y9-8zo","route":"/","channel":"world"}}
+{"seq":217,"at":1780642809324,"event":{"kind":"opened","session":"ses-characters-mq0kr4z0-9or","route":"/characters","channel":"characters"}}
+{"seq":218,"at":1780642815765,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"sculpt stroke · raise · 4px · head","at":null}}
+{"seq":219,"at":1780642819876,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"sculpt stroke · raise · 4px · head","at":null}}
+{"seq":220,"at":1780642840361,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"sculpt stroke · lower · 4px · head","at":null}}
+{"seq":221,"at":1780642851164,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"fill · lower · head","at":null}}
+{"seq":222,"at":1780642852796,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"fill · lower · head","at":null}}
+{"seq":223,"at":1780642853870,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"fill · lower · head","at":null}}
+{"seq":224,"at":1780642856079,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"sculpt stroke · lower · 4px · head","at":null}}
+{"seq":225,"at":1780642857202,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"sculpt stroke · lower · 4px · head","at":null}}
+{"seq":226,"at":1780642858150,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"soften · head","at":null}}
+{"seq":227,"at":1780642863453,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"sculpt stroke · raise · 4px · head","at":null}}
+{"seq":228,"at":1780642869559,"event":{"kind":"opened","session":"ses-root-mq0ksfg7-q3x","route":"/","channel":"world"}}
+{"seq":228,"at":1780642870651,"event":{"kind":"committed","session":"ses-characters-mq0kr4z0-9or","channel":"characters","label":"sculpt stroke · raise · 4px · head","at":null}}
+{"seq":229,"at":1780642874061,"event":{"kind":"opened","session":"ses-characters-mq0ksix9-v9q","route":"/characters","channel":"characters"}}
+{"seq":230,"at":1780642874544,"event":{"kind":"opened","session":"ses-vehicles-mq0ksjao-ias","route":"/vehicles","channel":"vehicles"}}
+{"seq":231,"at":1780642874555,"event":{"kind":"closed","session":"ses-characters-mq0ksix9-v9q"}}
+{"seq":232,"at":1780642875023,"event":{"kind":"closed","session":"ses-vehicles-mq0ksjao-ias"}}
+{"seq":233,"at":1780642902553,"event":{"kind":"opened","session":"ses-root-mq0kt4wp-1edt","route":"/","channel":"world"}}
+{"seq":234,"at":1780643097133,"event":{"kind":"opened","session":"ses-root-mq0kxb1o-eld","route":"/","channel":"world"}}
+{"seq":235,"at":1780643203139,"event":{"kind":"opened","session":"ses-root-mq0kzkub-cgm","route":"/","channel":"world"}}
+{"seq":236,"at":1780643203167,"event":{"kind":"opened","session":"ses-characters-mq0kzkv3-31p","route":"/characters","channel":"characters"}}
+{"seq":237,"at":1780643213365,"event":{"kind":"opened","session":"ses-root-mq0kzsqd-dlb","route":"/","channel":"world"}}
+{"seq":238,"at":1780643213392,"event":{"kind":"opened","session":"ses-characters-mq0kzsr4-186k","route":"/characters","channel":"characters"}}
+{"seq":239,"at":1780643213672,"event":{"kind":"opened","session":"ses-root-mq0kzsyw-itj","route":"/","channel":"world"}}
+{"seq":240,"at":1780643213695,"event":{"kind":"opened","session":"ses-characters-mq0kzszj-mij","route":"/characters","channel":"characters"}}
+{"seq":241,"at":1780643265046,"event":{"kind":"opened","session":"ses-root-mq0l0wly-o6c","route":"/","channel":"world"}}
+{"seq":242,"at":1780643419813,"event":{"kind":"opened","session":"ses-root-mq0l4811-sna","route":"/","channel":"world"}}
+{"seq":243,"at":1780643419839,"event":{"kind":"opened","session":"ses-characters-mq0l481r-tn4","route":"/characters","channel":"characters"}}
+{"seq":244,"at":1780643431821,"event":{"kind":"opened","session":"ses-root-mq0l4hal-18pi","route":"/","channel":"world"}}
+{"seq":245,"at":1780643431837,"event":{"kind":"opened","session":"ses-characters-mq0l4hb1-6ra","route":"/characters","channel":"characters"}}
+{"seq":246,"at":1780643432094,"event":{"kind":"opened","session":"ses-root-mq0l4hi6-b0c","route":"/","channel":"world"}}
+{"seq":247,"at":1780643432111,"event":{"kind":"opened","session":"ses-characters-mq0l4hin-osd","route":"/characters","channel":"characters"}}
+{"seq":248,"at":1780643482496,"event":{"kind":"opened","session":"ses-root-mq0l5ke8-jlv","route":"/","channel":"world"}}
+{"seq":248,"at":1780643501792,"event":{"kind":"closed","session":"ses-characters-mq0l4hin-osd"}}
+{"seq":249,"at":1780643591161,"event":{"kind":"opened","session":"ses-root-mq0l7w8p-cn9","route":"/","channel":"world"}}
+{"seq":250,"at":1780643591462,"event":{"kind":"opened","session":"ses-root-mq0l7wh2-yjn","route":"/","channel":"world"}}
+{"seq":251,"at":1780643599567,"event":{"kind":"committed","session":"ses-root-mq0l7wh2-yjn","channel":"world","label":"testing: tile: painted sidewalk","at":null}}
+{"seq":252,"at":1780643602662,"event":{"kind":"opened","session":"ses-root-mq0l8546-10cn","route":"/","channel":"world"}}
+{"seq":253,"at":1780643603405,"event":{"kind":"committed","session":"ses-root-mq0l8546-10cn","channel":"world","label":"testing: tile: painted sidewalk","at":null}}
+{"seq":254,"at":1780643612029,"event":{"kind":"committed","session":"ses-root-mq0l8546-10cn","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":255,"at":1780643630028,"event":{"kind":"committed","session":"ses-root-mq0l8546-10cn","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":256,"at":1780643632909,"event":{"kind":"committed","session":"ses-root-mq0l8546-10cn","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":257,"at":1780643634651,"event":{"kind":"committed","session":"ses-root-mq0l8546-10cn","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":258,"at":1780643653220,"event":{"kind":"opened","session":"ses-root-mq0l984k-pg8","route":"/","channel":"world"}}
+{"seq":259,"at":1780643654079,"event":{"kind":"committed","session":"ses-root-mq0l984k-pg8","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":258,"at":1780643694027,"event":{"kind":"committed","session":"ses-root-mq0l8546-10cn","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":260,"at":1780643771190,"event":{"kind":"opened","session":"ses-root-mq0lbr5i-6pp","route":"/","channel":"world"}}
+{"seq":261,"at":1780643780619,"event":{"kind":"opened","session":"ses-root-mq0lbyff-qb1","route":"/","channel":"world"}}
+{"seq":262,"at":1780643781041,"event":{"kind":"opened","session":"ses-root-mq0lbyr5-64t","route":"/","channel":"world"}}
+{"seq":263,"at":1780643781998,"event":{"kind":"committed","session":"ses-root-mq0lbyr5-64t","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":264,"at":1780643796195,"event":{"kind":"opened","session":"ses-characters-mq0lcag3-w6h","route":"/characters","channel":"characters"}}
+{"seq":265,"at":1780643797604,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":266,"at":1780643798476,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":267,"at":1780643799315,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":268,"at":1780643805133,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · raise · 14px · head","at":null}}
+{"seq":269,"at":1780643821529,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · raise · 4px · head","at":null}}
+{"seq":270,"at":1780643822247,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · raise · 4px · head","at":null}}
+{"seq":271,"at":1780643823091,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · raise · 4px · head","at":null}}
+{"seq":272,"at":1780643830256,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · lower · 4px · head","at":null}}
+{"seq":273,"at":1780643831121,"event":{"kind":"opened","session":"ses-root-mq0ld1e9-90x","route":"/","channel":"world"}}
+{"seq":273,"at":1780643836141,"event":{"kind":"committed","session":"ses-characters-mq0lcag3-w6h","channel":"characters","label":"sculpt stroke · lower · 4px · head","at":null}}
+{"seq":274,"at":1780643843315,"event":{"kind":"opened","session":"ses-root-mq0ldasz-euz","route":"/","channel":"world"}}
+{"seq":275,"at":1780643843342,"event":{"kind":"opened","session":"ses-characters-mq0ldatq-96x","route":"/characters","channel":"characters"}}
+{"seq":276,"at":1780643853020,"event":{"kind":"committed","session":"ses-characters-mq0ldatq-96x","channel":"characters","label":"sculpt stroke · raise · 6px · head","at":null}}
+{"seq":277,"at":1780643886350,"event":{"kind":"opened","session":"ses-root-mq0le80e-dga","route":"/","channel":"world"}}
+{"seq":278,"at":1780643886378,"event":{"kind":"opened","session":"ses-characters-mq0le816-14d2","route":"/characters","channel":"characters"}}
+{"seq":279,"at":1780643895371,"event":{"kind":"opened","session":"ses-root-mq0leeyz-jgi","route":"/","channel":"world"}}
+{"seq":280,"at":1780643895400,"event":{"kind":"opened","session":"ses-characters-mq0leezs-1012","route":"/characters","channel":"characters"}}
+{"seq":281,"at":1780643901012,"event":{"kind":"closed","session":"ses-characters-mq0leezs-1012"}}
+{"seq":282,"at":1780643926642,"event":{"kind":"opened","session":"ses-vehicles-mq0lf33m-1abj","route":"/vehicles","channel":"vehicles"}}
+{"seq":283,"at":1780643928421,"event":{"kind":"closed","session":"ses-vehicles-mq0lf33m-1abj"}}
+{"seq":284,"at":1780643947428,"event":{"kind":"opened","session":"ses-root-mq0lfj50-6l5","route":"/","channel":"world"}}
+{"seq":285,"at":1780644008467,"event":{"kind":"opened","session":"ses-root-mq0lgu8j-3jf","route":"/","channel":"world"}}
+{"seq":286,"at":1780644010707,"event":{"kind":"committed","session":"ses-root-mq0lgu8j-3jf","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":287,"at":1780644029298,"event":{"kind":"opened","session":"ses-root-mq0lhab6-pyq","route":"/","channel":"world"}}
+{"seq":288,"at":1780644031321,"event":{"kind":"opened","session":"ses-root-mq0lhbvd-zkg","route":"/","channel":"world"}}
+{"seq":289,"at":1780644033800,"event":{"kind":"opened","session":"ses-root-mq0lhds8-11q1","route":"/","channel":"world"}}
+{"seq":290,"at":1780644084731,"event":{"kind":"opened","session":"ses-root-mq0lih2z-4go","route":"/","channel":"world"}}
+{"seq":291,"at":1780644105760,"event":{"kind":"opened","session":"ses-root-mq0lixb4-1d72","route":"/","channel":"world"}}
+{"seq":292,"at":1780644136597,"event":{"kind":"opened","session":"ses-root-mq0ljl3p-166m","route":"/","channel":"world"}}
+{"seq":293,"at":1780644181242,"event":{"kind":"opened","session":"ses-root-mq0lkjju-jqa","route":"/","channel":"world"}}
+{"seq":294,"at":1780644219681,"event":{"kind":"opened","session":"ses-root-mq0lld7l-qr3","route":"/","channel":"world"}}
+{"seq":295,"at":1780644237311,"event":{"kind":"opened","session":"ses-root-mq0llqtb-jzg","route":"/","channel":"world"}}
+{"seq":296,"at":1780644242933,"event":{"kind":"opened","session":"ses-root-mq0llv5h-3t8","route":"/","channel":"world"}}
+{"seq":297,"at":1780644251909,"event":{"kind":"committed","session":"ses-root-mq0llv5h-3t8","channel":"world","label":"testing: map: compiled testing → game","at":null}}
+{"seq":298,"at":1780644252773,"event":{"kind":"opened","session":"ses-cutout-mq0lm2qt-12es","route":"/cutout","channel":"cutout"}}
+{"seq":299,"at":1780644257619,"event":{"kind":"committed","session":"ses-cutout-mq0lm2qt-12es","channel":"cutout","label":"brush stroke · erase · 32px · Layer 1","at":null}}
+{"seq":300,"at":1780644263033,"event":{"kind":"committed","session":"ses-cutout-mq0lm2qt-12es","channel":"cutout","label":"brush stroke · erase · 32px · Layer 1","at":null}}
+{"seq":301,"at":1780644275170,"event":{"kind":"opened","session":"ses-root-mq0lmk0y-i1i","route":"/","channel":"world"}}
+{"seq":302,"at":1780644275200,"event":{"kind":"opened","session":"ses-cutout-mq0lmk1s-b4","route":"/cutout","channel":"cutout"}}
+{"seq":303,"at":1780644359235,"event":{"kind":"opened","session":"ses-root-mq0locw3-nga","route":"/","channel":"world"}}
+{"seq":304,"at":1780644359266,"event":{"kind":"opened","session":"ses-cutout-mq0locwy-13jf","route":"/cutout","channel":"cutout"}}
+{"seq":305,"at":1780644371664,"event":{"kind":"opened","session":"ses-root-mq0lomhc-kcy","route":"/","channel":"world"}}
+{"seq":306,"at":1780644371691,"event":{"kind":"opened","session":"ses-cutout-mq0lomi3-4ku","route":"/cutout","channel":"cutout"}}
+{"seq":307,"at":1780644373887,"event":{"kind":"opened","session":"ses-root-mq0loo73-6zk","route":"/","channel":"world"}}
+{"seq":308,"at":1780644373912,"event":{"kind":"opened","session":"ses-cutout-mq0loo7s-4kk","route":"/cutout","channel":"cutout"}}
+{"seq":309,"at":1780644377707,"event":{"kind":"opened","session":"ses-root-mq0lor57-7tm","route":"/","channel":"world"}}
+{"seq":310,"at":1780644377733,"event":{"kind":"opened","session":"ses-cutout-mq0lor5x-4vr","route":"/cutout","channel":"cutout"}}
+{"seq":311,"at":1780644408956,"event":{"kind":"opened","session":"ses-root-mq0lpf98-1d14","route":"/","channel":"world"}}
+{"seq":312,"at":1780644409809,"event":{"kind":"committed","session":"ses-root-mq0lpf98-1d14","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":311,"at":1780644640256,"event":{"kind":"committed","session":"ses-cutout-mq0lor5x-4vr","channel":"cutout","label":"invert · Layer 1","at":null}}
+{"seq":312,"at":1780644641388,"event":{"kind":"committed","session":"ses-cutout-mq0lor5x-4vr","channel":"cutout","label":"invert · Layer 1","at":null}}
+{"seq":313,"at":1780644642089,"event":{"kind":"committed","session":"ses-cutout-mq0lor5x-4vr","channel":"cutout","label":"clear · Layer 1","at":null}}
+{"seq":314,"at":1780645046058,"event":{"kind":"opened","session":"ses-root-mq0m32ui-wsi","route":"/","channel":"world"}}
+{"seq":315,"at":1780645046087,"event":{"kind":"opened","session":"ses-cutout-mq0m32vb-uln","route":"/cutout","channel":"cutout"}}
+{"seq":316,"at":1780645048084,"event":{"kind":"opened","session":"ses-root-mq0m34es-e81","route":"/","channel":"world"}}
+{"seq":317,"at":1780645048109,"event":{"kind":"opened","session":"ses-cutout-mq0m34fh-m4w","route":"/cutout","channel":"cutout"}}
+{"seq":318,"at":1780645050705,"event":{"kind":"opened","session":"ses-root-mq0m36fl-1a4y","route":"/","channel":"world"}}
+{"seq":319,"at":1780645050729,"event":{"kind":"opened","session":"ses-cutout-mq0m36g9-15fs","route":"/cutout","channel":"cutout"}}
+{"seq":320,"at":1780645081736,"event":{"kind":"opened","session":"ses-root-mq0m3udk-10o1","route":"/","channel":"world"}}
+{"seq":321,"at":1780645081766,"event":{"kind":"opened","session":"ses-cutout-mq0m3uee-b6v","route":"/cutout","channel":"cutout"}}
+{"seq":322,"at":1780645147208,"event":{"kind":"opened","session":"ses-root-mq0m58w8-jqj","route":"/","channel":"world"}}
+{"seq":323,"at":1780645147238,"event":{"kind":"opened","session":"ses-cutout-mq0m58x2-ntl","route":"/cutout","channel":"cutout"}}
+{"seq":324,"at":1780657957690,"event":{"kind":"committed","session":"ses-cutout-mq0m58x2-ntl","channel":"cutout","label":"brush stroke · erase · 32px · Layer 1","at":null}}
+{"seq":325,"at":1780658144894,"event":{"kind":"committed","session":"ses-cutout-mq0m58x2-ntl","channel":"cutout","label":"brush stroke · erase · 32px · Layer 1","at":null}}
+{"seq":326,"at":1780658215852,"event":{"kind":"closed","session":"ses-cutout-mq0m58x2-ntl"}}
+{"seq":327,"at":1780658288817,"event":{"kind":"opened","session":"ses-vehicles-mq0tyx0x-qpf","route":"/vehicles","channel":"vehicles"}}
+{"seq":328,"at":1780658439010,"event":{"kind":"opened","session":"ses-characters-mq0u24wy-c3d","route":"/characters","channel":"characters"}}
+{"seq":329,"at":1780658439028,"event":{"kind":"closed","session":"ses-vehicles-mq0tyx0x-qpf"}}
+{"seq":330,"at":1780658540524,"event":{"kind":"opened","session":"ses-root-mq0u4b8s-9la","route":"/","channel":"world"}}
+{"seq":331,"at":1780658540557,"event":{"kind":"opened","session":"ses-characters-mq0u4b9p-gbe","route":"/characters","channel":"characters"}}
+{"seq":332,"at":1780658559487,"event":{"kind":"opened","session":"ses-root-mq0u4pvj-89m","route":"/","channel":"world"}}
+{"seq":333,"at":1780658559515,"event":{"kind":"opened","session":"ses-characters-mq0u4pwb-ln8","route":"/characters","channel":"characters"}}
+{"seq":334,"at":1780658564587,"event":{"kind":"opened","session":"ses-vehicles-mq0u4tt7-lic","route":"/vehicles","channel":"vehicles"}}
+{"seq":335,"at":1780658564597,"event":{"kind":"closed","session":"ses-characters-mq0u4pwb-ln8"}}
+{"seq":336,"at":1780658577584,"event":{"kind":"opened","session":"ses-build-mq0u53u8-ayx","route":"/build","channel":"world"}}
+{"seq":337,"at":1780658577656,"event":{"kind":"closed","session":"ses-vehicles-mq0u4tt7-lic"}}
+{"seq":338,"at":1780658578796,"event":{"kind":"closed","session":"ses-build-mq0u53u8-ayx"}}
+{"seq":339,"at":1780658580425,"event":{"kind":"opened","session":"ses-build-mq0u5615-nd8","route":"/build","channel":"world"}}
+{"seq":340,"at":1780658584424,"event":{"kind":"closed","session":"ses-build-mq0u5615-nd8"}}
+{"seq":341,"at":1780658585139,"event":{"kind":"opened","session":"ses-vehicles-mq0u59o3-11qr","route":"/vehicles","channel":"vehicles"}}
+{"seq":342,"at":1780658585623,"event":{"kind":"closed","session":"ses-vehicles-mq0u59o3-11qr"}}
+{"seq":343,"at":1780658588845,"event":{"kind":"opened","session":"ses-build-mq0u5cj1-qs9","route":"/build","channel":"world"}}
+{"seq":344,"at":1780658594322,"event":{"kind":"opened","session":"ses-root-mq0u5gr6-10ll","route":"/","channel":"world"}}
+{"seq":345,"at":1780658594349,"event":{"kind":"opened","session":"ses-build-mq0u5grx-5kh","route":"/build","channel":"world"}}
+{"seq":346,"at":1780658596546,"event":{"kind":"opened","session":"ses-root-mq0u5igy-16yx","route":"/","channel":"world"}}
+{"seq":347,"at":1780658596573,"event":{"kind":"opened","session":"ses-build-mq0u5ihp-19rr","route":"/build","channel":"world"}}
+{"seq":348,"at":1780658607945,"event":{"kind":"closed","session":"ses-build-mq0u5ihp-19rr"}}
+{"seq":349,"at":1780658608469,"event":{"kind":"opened","session":"ses-characters-mq0u5ro5-tgv","route":"/characters","channel":"characters"}}
+{"seq":350,"at":1780658609028,"event":{"kind":"opened","session":"ses-vehicles-mq0u5s3o-1cnz","route":"/vehicles","channel":"vehicles"}}
+{"seq":351,"at":1780658609036,"event":{"kind":"closed","session":"ses-characters-mq0u5ro5-tgv"}}
+{"seq":352,"at":1780658609474,"event":{"kind":"closed","session":"ses-vehicles-mq0u5s3o-1cnz"}}
+{"seq":353,"at":1780658615018,"event":{"kind":"opened","session":"ses-cutout-mq0u5wq2-1ec8","route":"/cutout","channel":"cutout"}}
+{"seq":354,"at":1780658621787,"event":{"kind":"opened","session":"ses-root-mq0u61y3-y4t","route":"/","channel":"world"}}
+{"seq":355,"at":1780658621805,"event":{"kind":"opened","session":"ses-cutout-mq0u61yl-10r4","route":"/cutout","channel":"cutout"}}
+{"seq":356,"at":1780658629675,"event":{"kind":"closed","session":"ses-cutout-mq0u61yl-10r4"}}
+{"seq":357,"at":1780658664620,"event":{"kind":"opened","session":"ses-root-mq0u6yzw-kpo","route":"/","channel":"world"}}
+{"seq":358,"at":1780658671846,"event":{"kind":"opened","session":"ses-root-mq0u74km-qby","route":"/","channel":"world"}}
+{"seq":359,"at":1780658675067,"event":{"kind":"opened","session":"ses-root-mq0u7723-1any","route":"/","channel":"world"}}
+{"seq":360,"at":1780658676490,"event":{"kind":"opened","session":"ses-root-mq0u785m-bk7","route":"/","channel":"world"}}
+{"seq":361,"at":1780658685719,"event":{"kind":"opened","session":"ses-root-mq0u7f9z-7u3","route":"/","channel":"world"}}
+{"seq":362,"at":1780658686014,"event":{"kind":"opened","session":"ses-root-mq0u7fi6-plg","route":"/","channel":"world"}}
+{"seq":363,"at":1780658690854,"event":{"kind":"opened","session":"ses-root-mq0u7j8m-1093","route":"/","channel":"world"}}
+{"seq":364,"at":1780658744209,"event":{"kind":"opened","session":"ses-vehicles-mq0u8oep-11bv","route":"/vehicles","channel":"vehicles"}}
+{"seq":365,"at":1780658744854,"event":{"kind":"committed","session":"ses-root-mq0u7j8m-1093","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":366,"at":1780658767685,"event":{"kind":"opened","session":"ses-root-mq0u96it-1d3r","route":"/","channel":"world"}}
+{"seq":367,"at":1780658790920,"event":{"kind":"opened","session":"ses-root-mq0u9og8-10yz","route":"/","channel":"world"}}
+{"seq":368,"at":1780658805344,"event":{"kind":"opened","session":"ses-root-mq0u9zkw-el2","route":"/","channel":"world"}}
+{"seq":369,"at":1780658806966,"event":{"kind":"opened","session":"ses-root-mq0ua0ty-g98","route":"/","channel":"world"}}
+{"seq":370,"at":1780658845008,"event":{"kind":"opened","session":"ses-root-mq0uau6o-u8b","route":"/","channel":"world"}}
+{"seq":371,"at":1780658846031,"event":{"kind":"opened","session":"ses-root-mq0uauz3-42u","route":"/","channel":"world"}}
+{"seq":372,"at":1780658856657,"event":{"kind":"opened","session":"ses-root-mq0ub369-oq2","route":"/","channel":"world"}}
+{"seq":373,"at":1780658859478,"event":{"kind":"opened","session":"ses-root-mq0ub5cm-g9f","route":"/","channel":"world"}}
+{"seq":374,"at":1780658871106,"event":{"kind":"opened","session":"ses-root-mq0ubebm-2ak","route":"/","channel":"world"}}
+{"seq":375,"at":1780658875932,"event":{"kind":"opened","session":"ses-root-mq0ubi1o-1b7j","route":"/","channel":"world"}}
+{"seq":376,"at":1780658879552,"event":{"kind":"opened","session":"ses-root-mq0ubku8-eqe","route":"/","channel":"world"}}
+{"seq":377,"at":1780658917994,"event":{"kind":"opened","session":"ses-root-mq0ucei2-4hk","route":"/","channel":"world"}}
+{"seq":378,"at":1780658943228,"event":{"kind":"opened","session":"ses-root-mq0ucxz0-c52","route":"/","channel":"world"}}
+{"seq":379,"at":1780658947211,"event":{"kind":"opened","session":"ses-root-mq0ud11n-zd7","route":"/","channel":"world"}}
+{"seq":380,"at":1780658958037,"event":{"kind":"opened","session":"ses-root-mq0ud9ed-nkb","route":"/","channel":"world"}}
+{"seq":381,"at":1780658961263,"event":{"kind":"opened","session":"ses-root-mq0udbvz-15ow","route":"/","channel":"world"}}
+{"seq":382,"at":1780658964484,"event":{"kind":"opened","session":"ses-root-mq0udedg-19e","route":"/","channel":"world"}}
+{"seq":383,"at":1780658977310,"event":{"kind":"opened","session":"ses-root-mq0udo9q-1di4","route":"/","channel":"world"}}
+{"seq":384,"at":1780658992353,"event":{"kind":"opened","session":"ses-root-mq0udzvl-71r","route":"/","channel":"world"}}
+{"seq":385,"at":1780659009182,"event":{"kind":"opened","session":"ses-root-mq0uecv2-xp3","route":"/","channel":"world"}}
+{"seq":386,"at":1780659024408,"event":{"kind":"opened","session":"ses-root-mq0ueom0-11su","route":"/","channel":"world"}}
+{"seq":387,"at":1780659025834,"event":{"kind":"opened","session":"ses-root-mq0ueppm-bqq","route":"/","channel":"world"}}
+{"seq":388,"at":1780659032862,"event":{"kind":"opened","session":"ses-root-mq0uev4u-ukg","route":"/","channel":"world"}}
+{"seq":389,"at":1780659039302,"event":{"kind":"opened","session":"ses-root-mq0uf03q-d8w","route":"/","channel":"world"}}
+{"seq":390,"at":1780659043720,"event":{"kind":"opened","session":"ses-root-mq0uf3ig-q9f","route":"/","channel":"world"}}
+{"seq":391,"at":1780659054747,"event":{"kind":"opened","session":"ses-root-mq0ufc0r-28z","route":"/","channel":"world"}}
+{"seq":392,"at":1780659070363,"event":{"kind":"opened","session":"ses-root-mq0ufo2j-vc","route":"/","channel":"world"}}
+{"seq":393,"at":1780659070616,"event":{"kind":"opened","session":"ses-root-mq0ufo9k-cgl","route":"/","channel":"world"}}
+{"seq":394,"at":1780659241919,"event":{"kind":"opened","session":"ses-build-mq0ujcfz-gp6","route":"/build","channel":"world"}}
+{"seq":395,"at":1780659245415,"event":{"kind":"committed","session":"ses-root-mq0ufo9k-cgl","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":396,"at":1780659251145,"event":{"kind":"opened","session":"ses-root-mq0ujjk9-okm","route":"/","channel":"world"}}
+{"seq":397,"at":1780659251169,"event":{"kind":"opened","session":"ses-build-mq0ujjkx-1afs","route":"/build","channel":"world"}}
+{"seq":399,"at":1780659271605,"event":{"kind":"committed","session":"ses-build-mq0ujjkx-1afs","channel":"world","label":"placed Concrete Wall @ 0.5,5.0","at":398}}
+{"seq":400,"at":1780659274169,"event":{"kind":"committed","session":"ses-root-mq0ujjk9-okm","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":401,"at":1780659275639,"event":{"kind":"committed","session":"ses-root-mq0ujjk9-okm","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":402,"at":1780659278005,"event":{"kind":"committed","session":"ses-root-mq0ujjk9-okm","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":403,"at":1780659278739,"event":{"kind":"committed","session":"ses-root-mq0ujjk9-okm","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":405,"at":1780659282186,"event":{"kind":"committed","session":"ses-build-mq0ujjkx-1afs","channel":"world","label":"placed Concrete Wall @ 3.0,5.5","at":404}}
+{"seq":406,"at":1780659286585,"event":{"kind":"opened","session":"ses-root-mq0ukawp-15yc","route":"/","channel":"world"}}
+{"seq":407,"at":1780659286612,"event":{"kind":"opened","session":"ses-build-mq0ukaxg-a42","route":"/build","channel":"world"}}
+{"seq":408,"at":1780659287046,"event":{"kind":"committed","session":"ses-root-mq0ukawp-15yc","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":409,"at":1780659288311,"event":{"kind":"committed","session":"ses-root-mq0ukawp-15yc","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":410,"at":1780659289002,"event":{"kind":"committed","session":"ses-root-mq0ukawp-15yc","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":411,"at":1780659292184,"event":{"kind":"committed","session":"ses-root-mq0ukawp-15yc","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":412,"at":1780659296211,"event":{"kind":"opened","session":"ses-root-mq0ukic3-ilg","route":"/","channel":"world"}}
+{"seq":413,"at":1780659296242,"event":{"kind":"opened","session":"ses-build-mq0ukicy-j5","route":"/build","channel":"world"}}
+{"seq":415,"at":1780659388149,"event":{"kind":"committed","session":"ses-build-mq0ukicy-j5","channel":"world","label":"placed Concrete Wall @ 2.0,3.5","at":414}}
+{"seq":416,"at":1780659391893,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":417,"at":1780659393062,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":418,"at":1780659394347,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":419,"at":1780659394844,"event":{"kind":"closed","session":"ses-build-mq0ukicy-j5"}}
+{"seq":420,"at":1780659398194,"event":{"kind":"opened","session":"ses-build-mq0ump0y-tqj","route":"/build","channel":"world"}}
+{"seq":421,"at":1780659400439,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":422,"at":1780659401931,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":423,"at":1780659402978,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":424,"at":1780659407510,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":425,"at":1780659408929,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":426,"at":1780659410838,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":427,"at":1780659412342,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":428,"at":1780659413274,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":429,"at":1780659415066,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":430,"at":1780659417402,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":431,"at":1780659418361,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":432,"at":1780659419324,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":433,"at":1780659419954,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":434,"at":1780659421069,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":435,"at":1780659421927,"event":{"kind":"committed","session":"ses-root-mq0ukic3-ilg","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":436,"at":1780659423324,"event":{"kind":"opened","session":"ses-root-mq0un8f0-11du","route":"/","channel":"world"}}
+{"seq":437,"at":1780659423358,"event":{"kind":"opened","session":"ses-build-mq0un8fy-ddz","route":"/build","channel":"world"}}
+{"seq":438,"at":1780659423822,"event":{"kind":"opened","session":"ses-root-mq0un8su-z3r","route":"/","channel":"world"}}
+{"seq":439,"at":1780659423849,"event":{"kind":"opened","session":"ses-build-mq0un8tl-jyb","route":"/build","channel":"world"}}
+{"seq":441,"at":1780659425231,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 0.5,5.0","at":440}}
+{"seq":442,"at":1780659426735,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":443,"at":1780659428525,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":445,"at":1780659428596,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 1.5,5.0","at":444}}
+{"seq":447,"at":1780659429798,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 2.5,4.0","at":446}}
+{"seq":448,"at":1780659430070,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":450,"at":1780659430494,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 3.5,4.0","at":449}}
+{"seq":451,"at":1780659431049,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":453,"at":1780659431552,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 4.5,4.0","at":452}}
+{"seq":455,"at":1780659431752,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 4.5,4.0","at":454}}
+{"seq":457,"at":1780659431860,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 4.5,4.0","at":456}}
+{"seq":459,"at":1780659432012,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 5.5,4.0","at":458}}
+{"seq":460,"at":1780659432092,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":462,"at":1780659432171,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 5.5,4.0","at":461}}
+{"seq":464,"at":1780659432317,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 6.0,3.5","at":463}}
+{"seq":466,"at":1780659432530,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 6.5,2.0","at":465}}
+{"seq":468,"at":1780659432622,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 6.5,2.0","at":467}}
+{"seq":470,"at":1780659432788,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 6.5,2.0","at":469}}
+{"seq":472,"at":1780659432948,"event":{"kind":"committed","session":"ses-build-mq0un8tl-jyb","channel":"world","label":"placed Concrete Wall @ 7.0,1.5","at":471}}
+{"seq":473,"at":1780659435869,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":474,"at":1780659436578,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":475,"at":1780659442733,"event":{"kind":"closed","session":"ses-build-mq0un8tl-jyb"}}
+{"seq":476,"at":1780659453812,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":477,"at":1780659456943,"event":{"kind":"committed","session":"ses-root-mq0un8su-z3r","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":478,"at":1780659467936,"event":{"kind":"opened","session":"ses-cutout-mq0uo6u8-704","route":"/cutout","channel":"cutout"}}
+{"seq":479,"at":1780659477796,"event":{"kind":"committed","session":"ses-cutout-mq0uo6u8-704","channel":"cutout","label":"brush stroke · erase · 512px · Layer 1","at":null}}
+{"seq":480,"at":1780659481280,"event":{"kind":"committed","session":"ses-cutout-mq0uo6u8-704","channel":"cutout","label":"paint on material · Rust Sheet (b-rust-sheet)","at":null}}
+{"seq":481,"at":1780659483004,"event":{"kind":"committed","session":"ses-cutout-mq0uo6u8-704","channel":"cutout","label":"paint on material · Skin (c-skin)","at":null}}
+{"seq":482,"at":1780659484474,"event":{"kind":"committed","session":"ses-cutout-mq0uo6u8-704","channel":"cutout","label":"paint on material · Pool Tile (d-pool-tile)","at":null}}
+{"seq":483,"at":1780659762076,"event":{"kind":"closed","session":"ses-cutout-mq0uo6u8-704"}}
+{"seq":484,"at":1780659841243,"event":{"kind":"opened","session":"ses-root-mq0uw6vv-402","route":"/","channel":"world"}}
+{"seq":485,"at":1780659869483,"event":{"kind":"opened","session":"ses-root-mq0uwsob-km9","route":"/","channel":"world"}}
+{"seq":486,"at":1780659897117,"event":{"kind":"opened","session":"ses-root-mq0uxdzx-198","route":"/","channel":"world"}}
+{"seq":487,"at":1780659908786,"event":{"kind":"opened","session":"ses-vehicles-mq0uxn02-fd5","route":"/vehicles","channel":"vehicles"}}
+{"seq":488,"at":1780659911130,"event":{"kind":"opened","session":"ses-characters-mq0uxot6-10ma","route":"/characters","channel":"characters"}}
+{"seq":489,"at":1780659911155,"event":{"kind":"closed","session":"ses-vehicles-mq0uxn02-fd5"}}
+{"seq":490,"at":1780659913026,"event":{"kind":"closed","session":"ses-characters-mq0uxot6-10ma"}}
+{"seq":491,"at":1780659917189,"event":{"kind":"opened","session":"ses-build-mq0uxthh-sg9","route":"/build","channel":"world"}}
+{"seq":492,"at":1780659921211,"event":{"kind":"committed","session":"ses-root-mq0uxdzx-198","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":493,"at":1780659928186,"event":{"kind":"closed","session":"ses-build-mq0uxthh-sg9"}}
+{"seq":494,"at":1780659932069,"event":{"kind":"committed","session":"ses-root-mq0uxdzx-198","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":495,"at":1780659935318,"event":{"kind":"committed","session":"ses-root-mq0uxdzx-198","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":496,"at":1780659935857,"event":{"kind":"opened","session":"ses-root-mq0uy7w1-x6z","route":"/","channel":"world"}}
+{"seq":497,"at":1780659938684,"event":{"kind":"opened","session":"ses-root-mq0uya2k-kw5","route":"/","channel":"world"}}
+{"seq":498,"at":1780659939846,"event":{"kind":"committed","session":"ses-root-mq0uya2k-kw5","channel":"world","label":"testing: camera: camera moved","at":null}}
+{"seq":499,"at":1780659941308,"event":{"kind":"opened","session":"ses-root-mq0uyc3g-pbu","route":"/","channel":"world"}}
+{"seq":500,"at":1780659949626,"event":{"kind":"opened","session":"ses-characters-mq0uyiii-1119","route":"/characters","channel":"characters"}}
+{"seq":501,"at":1780659951118,"event":{"kind":"opened","session":"ses-vehicles-mq0uyjny-6fu","route":"/vehicles","channel":"vehicles"}}
+{"seq":502,"at":1780659951126,"event":{"kind":"closed","session":"ses-characters-mq0uyiii-1119"}}
+{"seq":503,"at":1780659952196,"event":{"kind":"closed","session":"ses-vehicles-mq0uyjny-6fu"}}
+{"seq":504,"at":1780659954002,"event":{"kind":"opened","session":"ses-cutout-mq0uylw2-hsw","route":"/cutout","channel":"cutout"}}
+{"seq":505,"at":1780659955634,"event":{"kind":"closed","session":"ses-cutout-mq0uylw2-hsw"}}
+{"seq":506,"at":1780660017978,"event":{"kind":"opened","session":"ses-root-mq0uzz96-r9y","route":"/","channel":"world"}}
+{"seq":507,"at":1780660030198,"event":{"kind":"opened","session":"ses-root-mq0v08om-d5l","route":"/","channel":"world"}}
+{"seq":508,"at":1780660040232,"event":{"kind":"opened","session":"ses-root-mq0v0gfc-1dp5","route":"/","channel":"world"}}
+{"seq":509,"at":1780660048454,"event":{"kind":"opened","session":"ses-root-mq0v0mrq-czi","route":"/","channel":"world"}}
+{"seq":510,"at":1780660055545,"event":{"kind":"opened","session":"ses-root-mq0v0s8p-1bmm","route":"/","channel":"world"}}
+{"seq":511,"at":1780660069973,"event":{"kind":"opened","session":"ses-root-mq0v13dh-1d11","route":"/","channel":"world"}}
+{"seq":512,"at":1780660077205,"event":{"kind":"opened","session":"ses-root-mq0v18yd-az3","route":"/","channel":"world"}}
+{"seq":513,"at":1780660084833,"event":{"kind":"opened","session":"ses-root-mq0v1eu9-c60","route":"/","channel":"world"}}
+{"seq":514,"at":1780660089453,"event":{"kind":"opened","session":"ses-root-mq0v1iel-131","route":"/","channel":"world"}}
+{"seq":515,"at":1780660105754,"event":{"kind":"opened","session":"ses-root-mq0v1uze-c2y","route":"/","channel":"world"}}
+{"seq":516,"at":1780660111172,"event":{"kind":"opened","session":"ses-root-mq0v1z5w-10av","route":"/","channel":"world"}}
+{"seq":517,"at":1780660122402,"event":{"kind":"opened","session":"ses-root-mq0v27tu-uv5","route":"/","channel":"world"}}
+{"seq":518,"at":1780660127823,"event":{"kind":"opened","session":"ses-root-mq0v2c0f-16j4","route":"/","channel":"world"}}
+{"seq":519,"at":1780660143248,"event":{"kind":"opened","session":"ses-root-mq0v2nww-hws","route":"/","channel":"world"}}
+{"seq":520,"at":1780660173885,"event":{"kind":"opened","session":"ses-root-mq0v3bjw-15xj","route":"/","channel":"world"}}
+{"seq":521,"at":1780660203316,"event":{"kind":"opened","session":"ses-root-mq0v3y9g-1e5e","route":"/","channel":"world"}}
+{"seq":522,"at":1780660207941,"event":{"kind":"opened","session":"ses-root-mq0v41tx-b80","route":"/","channel":"world"}}
+{"seq":523,"at":1780660214564,"event":{"kind":"opened","session":"ses-root-mq0v46xw-8rv","route":"/","channel":"world"}}
+{"seq":524,"at":1780660225392,"event":{"kind":"opened","session":"ses-root-mq0v4fao-16t","route":"/","channel":"world"}}
+{"seq":525,"at":1780660236618,"event":{"kind":"opened","session":"ses-root-mq0v4nyi-m3f","route":"/","channel":"world"}}
+{"seq":526,"at":1780660247243,"event":{"kind":"opened","session":"ses-root-mq0v4w5n-hnn","route":"/","channel":"world"}}
+{"seq":527,"at":1780660251070,"event":{"kind":"opened","session":"ses-root-mq0v4z3y-scr","route":"/","channel":"world"}}
+{"seq":528,"at":1780660340942,"event":{"kind":"opened","session":"ses-root-mq0v6wge-13vd","route":"/","channel":"world"}}
+{"seq":529,"at":1780660343765,"event":{"kind":"opened","session":"ses-root-mq0v6ymt-k","route":"/","channel":"world"}}
+{"seq":530,"at":1780660347985,"event":{"kind":"opened","session":"ses-root-mq0v71w1-pdd","route":"/","channel":"world"}}
+{"seq":531,"at":1780660367482,"event":{"kind":"opened","session":"ses-root-mq0v7gxm-10w8","route":"/","channel":"world"}}
+{"seq":532,"at":1780660378903,"event":{"kind":"opened","session":"ses-root-mq0v7pqv-ig5","route":"/","channel":"world"}}
+{"seq":533,"at":1780660380122,"event":{"kind":"opened","session":"ses-root-mq0v7qoq-txl","route":"/","channel":"world"}}
+{"seq":534,"at":1780660412366,"event":{"kind":"opened","session":"ses-root-mq0v8fke-dky","route":"/","channel":"world"}}
+{"seq":535,"at":1780660431422,"event":{"kind":"opened","session":"ses-root-mq0v8u9q-fx4","route":"/","channel":"world"}}
+{"seq":536,"at":1780660443846,"event":{"kind":"opened","session":"ses-root-mq0v93uu-q34","route":"/","channel":"world"}}
+{"seq":537,"at":1780660468880,"event":{"kind":"opened","session":"ses-root-mq0v9n68-12mh","route":"/","channel":"world"}}
+{"seq":538,"at":1780660470303,"event":{"kind":"opened","session":"ses-root-mq0v9o9r-wmx","route":"/","channel":"world"}}
+{"seq":539,"at":1780660473323,"event":{"kind":"opened","session":"ses-root-mq0v9qln-74w","route":"/","channel":"world"}}
+{"seq":540,"at":1780660500363,"event":{"kind":"opened","session":"ses-root-mq0vabgr-165x","route":"/","channel":"world"}}
+{"seq":541,"at":1780660501581,"event":{"kind":"opened","session":"ses-root-mq0vacel-18lr","route":"/","channel":"world"}}
+{"seq":542,"at":1780660521615,"event":{"kind":"opened","session":"ses-root-mq0varv3-3l8","route":"/","channel":"world"}}
+{"seq":543,"at":1780660523250,"event":{"kind":"opened","session":"ses-root-mq0vat4i-lhv","route":"/","channel":"world"}}
+{"seq":544,"at":1780660526267,"event":{"kind":"opened","session":"ses-root-mq0vavgb-14xo","route":"/","channel":"world"}}
+{"seq":545,"at":1780660552308,"event":{"kind":"opened","session":"ses-root-mq0vbfjo-rf1","route":"/","channel":"world"}}
+{"seq":546,"at":1780660708398,"event":{"kind":"opened","session":"ses-root-mq0verzi-y1m","route":"/","channel":"world"}}
+{"seq":547,"at":1780660737247,"event":{"kind":"opened","session":"ses-root-mq0vfe8v-y9t","route":"/","channel":"world"}}
+{"seq":548,"at":1780660798089,"event":{"kind":"opened","session":"ses-root-mq0vgp6x-70n","route":"/","channel":"world"}}
+{"seq":549,"at":1780660855740,"event":{"kind":"opened","session":"ses-root-mq0vhxoc-8qi","route":"/","channel":"world"}}
+{"seq":550,"at":1780660856760,"event":{"kind":"opened","session":"ses-root-mq0vhygo-1a5c","route":"/","channel":"world"}}
+{"seq":551,"at":1780660891403,"event":{"kind":"opened","session":"ses-root-mq0vip6z-128a","route":"/","channel":"world"}}
+{"seq":552,"at":1780660979305,"event":{"kind":"opened","session":"ses-root-mq0vkl0p-ncu","route":"/","channel":"world"}}
+{"seq":553,"at":1780661031201,"event":{"kind":"opened","session":"ses-root-mq0vlp29-e1r","route":"/","channel":"world"}}
+{"seq":554,"at":1780661041384,"event":{"kind":"opened","session":"ses-root-mq0vlwx4-rgy","route":"/","channel":"world"}}
+{"seq":555,"at":1780661043605,"event":{"kind":"opened","session":"ses-root-mq0vlymt-id","route":"/","channel":"world"}}
+{"seq":556,"at":1780661043864,"event":{"kind":"opened","session":"ses-root-mq0vlyu0-m1i","route":"/","channel":"world"}}
+{"seq":557,"at":1780661132693,"event":{"kind":"opened","session":"ses-root-mq0vnvdh-mt5","route":"/","channel":"world"}}
+{"seq":558,"at":1780661133173,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: map: new map untitled-3","at":null}}
+{"seq":559,"at":1780661133358,"event":{"kind":"opened","session":"ses-build-mq0vnvvy-wmc","route":"/build","channel":"world"}}
+{"seq":560,"at":1780661133441,"event":{"kind":"closed","session":"ses-build-mq0vnvvy-wmc"}}
+{"seq":561,"at":1780661133464,"event":{"kind":"opened","session":"ses-characters-mq0vnvyw-53b","route":"/characters","channel":"characters"}}
+{"seq":562,"at":1780661133504,"event":{"kind":"opened","session":"ses-vehicles-mq0vnw00-1dtk","route":"/vehicles","channel":"vehicles"}}
+{"seq":563,"at":1780661133620,"event":{"kind":"closed","session":"ses-characters-mq0vnvyw-53b"}}
+{"seq":564,"at":1780661133640,"event":{"kind":"opened","session":"ses-voxels-mq0vnw3s-pp6","route":"/voxels","channel":"voxels"}}
+{"seq":565,"at":1780661133653,"event":{"kind":"closed","session":"ses-vehicles-mq0vnw00-1dtk"}}
+{"seq":566,"at":1780661133703,"event":{"kind":"opened","session":"ses-assist3d-mq0vnw5j-ico","route":"/assist3d","channel":"assist3d"}}
+{"seq":567,"at":1780661133710,"event":{"kind":"closed","session":"ses-voxels-mq0vnw3s-pp6"}}
+{"seq":568,"at":1780661133753,"event":{"kind":"opened","session":"ses-cutout-mq0vnw6x-14ow","route":"/cutout","channel":"cutout"}}
+{"seq":569,"at":1780661133766,"event":{"kind":"closed","session":"ses-assist3d-mq0vnw5j-ico"}}
+{"seq":570,"at":1780661133862,"event":{"kind":"opened","session":"ses-textures-mq0vnw9y-132p","route":"/textures","channel":"materials"}}
+{"seq":571,"at":1780661133870,"event":{"kind":"closed","session":"ses-cutout-mq0vnw6x-14ow"}}
+{"seq":572,"at":1780661133892,"event":{"kind":"closed","session":"ses-textures-mq0vnw9y-132p"}}
+{"seq":573,"at":1780661133912,"event":{"kind":"opened","session":"ses-settings-mq0vnwbc-d7n","route":"/settings","channel":"tuning"}}
+{"seq":574,"at":1780661134018,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: map: compiled untitled-3 → game","at":null}}
+{"seq":575,"at":1780661134249,"event":{"kind":"closed","session":"ses-settings-mq0vnwbc-d7n"}}
+{"seq":576,"at":1780661134856,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: chunk: added chunk B0","at":null}}
+{"seq":577,"at":1780661135520,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":578,"at":1780661135548,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":579,"at":1780661135580,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":580,"at":1780661135612,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":581,"at":1780661135647,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":582,"at":1780661135711,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":583,"at":1780661135731,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: camera: camera moved","at":null}}
+{"seq":584,"at":1780661135888,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":585,"at":1780661136788,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":586,"at":1780661136834,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":587,"at":1780661136864,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":588,"at":1780661136916,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":589,"at":1780661136962,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":590,"at":1780661136993,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":591,"at":1780661137199,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":592,"at":1780661137231,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":593,"at":1780661137266,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":594,"at":1780661137293,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":595,"at":1780661137328,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":596,"at":1780661137374,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":597,"at":1780661137506,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":598,"at":1780661137539,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":599,"at":1780661137572,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":600,"at":1780661137718,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":601,"at":1780661137752,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":602,"at":1780661137874,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":603,"at":1780661137904,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":604,"at":1780661137932,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":605,"at":1780661137966,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":606,"at":1780661138106,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":607,"at":1780661138139,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":608,"at":1780661138294,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":609,"at":1780661138329,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":610,"at":1780661138362,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":611,"at":1780661138397,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":612,"at":1780661138526,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":613,"at":1780661138560,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":614,"at":1780661138589,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":615,"at":1780661138618,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":616,"at":1780661138667,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":617,"at":1780661138697,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":618,"at":1780661138966,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":619,"at":1780661139506,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: camera: camera moved","at":null}}
+{"seq":620,"at":1780661139940,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":621,"at":1780661139991,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":622,"at":1780661140018,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":623,"at":1780661140096,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":624,"at":1780661140144,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":625,"at":1780661140196,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":626,"at":1780661140292,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":627,"at":1780661140377,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":628,"at":1780661140446,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":629,"at":1780661140482,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":630,"at":1780661140572,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":631,"at":1780661140653,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":632,"at":1780661140680,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":633,"at":1780661140811,"event":{"kind":"opened","session":"ses-build-mq0vo1mz-zgw","route":"/build","channel":"world"}}
+{"seq":634,"at":1780661140900,"event":{"kind":"closed","session":"ses-build-mq0vo1mz-zgw"}}
+{"seq":635,"at":1780661140916,"event":{"kind":"opened","session":"ses-characters-mq0vo1pw-v37","route":"/characters","channel":"characters"}}
+{"seq":636,"at":1780661140955,"event":{"kind":"opened","session":"ses-vehicles-mq0vo1qz-507","route":"/vehicles","channel":"vehicles"}}
+{"seq":637,"at":1780661140961,"event":{"kind":"closed","session":"ses-characters-mq0vo1pw-v37"}}
+{"seq":638,"at":1780661140979,"event":{"kind":"opened","session":"ses-voxels-mq0vo1rn-n69","route":"/voxels","channel":"voxels"}}
+{"seq":639,"at":1780661140985,"event":{"kind":"closed","session":"ses-vehicles-mq0vo1qz-507"}}
+{"seq":640,"at":1780661141003,"event":{"kind":"opened","session":"ses-assist3d-mq0vo1sb-12v3","route":"/assist3d","channel":"assist3d"}}
+{"seq":641,"at":1780661141006,"event":{"kind":"closed","session":"ses-voxels-mq0vo1rn-n69"}}
+{"seq":642,"at":1780661141046,"event":{"kind":"opened","session":"ses-cutout-mq0vo1ti-14fn","route":"/cutout","channel":"cutout"}}
+{"seq":643,"at":1780661141061,"event":{"kind":"closed","session":"ses-assist3d-mq0vo1sb-12v3"}}
+{"seq":644,"at":1780661141129,"event":{"kind":"opened","session":"ses-textures-mq0vo1vt-88a","route":"/textures","channel":"materials"}}
+{"seq":645,"at":1780661141133,"event":{"kind":"closed","session":"ses-cutout-mq0vo1ti-14fn"}}
+{"seq":646,"at":1780661141298,"event":{"kind":"closed","session":"ses-textures-mq0vo1vt-88a"}}
+{"seq":647,"at":1780661141316,"event":{"kind":"opened","session":"ses-settings-mq0vo210-rxo","route":"/settings","channel":"tuning"}}
+{"seq":648,"at":1780661144886,"event":{"kind":"closed","session":"ses-settings-mq0vo210-rxo"}}
+{"seq":649,"at":1780661145136,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: camera: camera moved","at":null}}
+{"seq":650,"at":1780661145640,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":651,"at":1780661145702,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: zone: painted zone","at":null}}
+{"seq":652,"at":1780661146739,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: camera: camera moved","at":null}}
+{"seq":653,"at":1780661146932,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":654,"at":1780661146962,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":655,"at":1780661146989,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":656,"at":1780661147020,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":657,"at":1780661147058,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":658,"at":1780661147189,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":659,"at":1780661147223,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":660,"at":1780661147251,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":661,"at":1780661147282,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":662,"at":1780661147310,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":663,"at":1780661147339,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":664,"at":1780661147370,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":665,"at":1780661147397,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":666,"at":1780661147427,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":667,"at":1780661147461,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":668,"at":1780661147489,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":669,"at":1780661147520,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":670,"at":1780661147550,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":671,"at":1780661147576,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":672,"at":1780661147724,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":673,"at":1780661147751,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":674,"at":1780661147785,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":675,"at":1780661147814,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":676,"at":1780661147843,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":677,"at":1780661147875,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":678,"at":1780661147906,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":679,"at":1780661147935,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":680,"at":1780661147966,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":681,"at":1780661147993,"event":{"kind":"committed","session":"ses-root-mq0vnvdh-mt5","channel":"world","label":"untitled-3: object: painted Shop","at":null}}
+{"seq":682,"at":1780661157433,"event":{"kind":"opened","session":"ses-root-mq0voegp-1d1g","route":"/","channel":"world"}}
+{"seq":683,"at":1780661157692,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: map: new map untitled-4","at":null}}
+{"seq":684,"at":1780661157859,"event":{"kind":"opened","session":"ses-build-mq0voesj-esl","route":"/build","channel":"world"}}
+{"seq":685,"at":1780661157954,"event":{"kind":"closed","session":"ses-build-mq0voesj-esl"}}
+{"seq":686,"at":1780661157971,"event":{"kind":"opened","session":"ses-characters-mq0voevn-ywc","route":"/characters","channel":"characters"}}
+{"seq":687,"at":1780661158015,"event":{"kind":"opened","session":"ses-vehicles-mq0voewv-1cxb","route":"/vehicles","channel":"vehicles"}}
+{"seq":688,"at":1780661158023,"event":{"kind":"closed","session":"ses-characters-mq0voevn-ywc"}}
+{"seq":689,"at":1780661158041,"event":{"kind":"opened","session":"ses-voxels-mq0voexl-kbx","route":"/voxels","channel":"voxels"}}
+{"seq":690,"at":1780661158051,"event":{"kind":"closed","session":"ses-vehicles-mq0voewv-1cxb"}}
+{"seq":691,"at":1780661158070,"event":{"kind":"opened","session":"ses-assist3d-mq0voeye-rxk","route":"/assist3d","channel":"assist3d"}}
+{"seq":692,"at":1780661158077,"event":{"kind":"closed","session":"ses-voxels-mq0voexl-kbx"}}
+{"seq":693,"at":1780661158120,"event":{"kind":"opened","session":"ses-cutout-mq0voezs-rmh","route":"/cutout","channel":"cutout"}}
+{"seq":694,"at":1780661158132,"event":{"kind":"closed","session":"ses-assist3d-mq0voeye-rxk"}}
+{"seq":695,"at":1780661158304,"event":{"kind":"opened","session":"ses-textures-mq0vof4w-712","route":"/textures","channel":"materials"}}
+{"seq":696,"at":1780661158310,"event":{"kind":"closed","session":"ses-cutout-mq0voezs-rmh"}}
+{"seq":697,"at":1780661158337,"event":{"kind":"closed","session":"ses-textures-mq0vof4w-712"}}
+{"seq":698,"at":1780661158354,"event":{"kind":"opened","session":"ses-settings-mq0vof6a-n4e","route":"/settings","channel":"tuning"}}
+{"seq":699,"at":1780661158454,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: map: compiled untitled-4 → game","at":null}}
+{"seq":701,"at":1780661158714,"event":{"kind":"committed","session":"ses-settings-mq0vof6a-n4e","channel":"tuning","label":"paint.pressure.gain → 1.35","at":700}}
+{"seq":702,"at":1780661158779,"event":{"kind":"closed","session":"ses-settings-mq0vof6a-n4e"}}
+{"seq":703,"at":1780661159005,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: added zone Zone 1","at":null}}
+{"seq":704,"at":1780661159111,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: chunk: added chunk B0","at":null}}
+{"seq":705,"at":1780661159642,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":706,"at":1780661159677,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":707,"at":1780661159710,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":708,"at":1780661159746,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":709,"at":1780661159765,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: camera: camera moved","at":null}}
+{"seq":710,"at":1780661159792,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":711,"at":1780661159823,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":712,"at":1780661159997,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":713,"at":1780661160440,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: camera: camera moved","at":null}}
+{"seq":714,"at":1780661161062,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":715,"at":1780661161097,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":716,"at":1780661161140,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":717,"at":1780661161177,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":718,"at":1780661161215,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":719,"at":1780661161251,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":720,"at":1780661161403,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":721,"at":1780661161435,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":722,"at":1780661161473,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":723,"at":1780661161518,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":724,"at":1780661161577,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":725,"at":1780661161610,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":726,"at":1780661161737,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":727,"at":1780661161769,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":728,"at":1780661161806,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":729,"at":1780661161843,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":730,"at":1780661161877,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":731,"at":1780661162006,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":732,"at":1780661162042,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":733,"at":1780661162084,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":734,"at":1780661162121,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":735,"at":1780661162280,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: added zone Zone 2","at":null}}
+{"seq":736,"at":1780661162346,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":737,"at":1780661162380,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":738,"at":1780661162419,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":739,"at":1780661162458,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":740,"at":1780661162495,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":741,"at":1780661162536,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":742,"at":1780661162676,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":743,"at":1780661162710,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":744,"at":1780661162750,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":745,"at":1780661162783,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":746,"at":1780661162815,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":747,"at":1780661162848,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":748,"at":1780661162993,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":749,"at":1780661163538,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: camera: camera moved","at":null}}
+{"seq":750,"at":1780661163722,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":751,"at":1780661163780,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":752,"at":1780661163821,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":753,"at":1780661163902,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":754,"at":1780661163960,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":755,"at":1780661164019,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":756,"at":1780661164060,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":757,"at":1780661164173,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 2","at":null}}
+{"seq":758,"at":1780661164215,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: removed zone","at":null}}
+{"seq":759,"at":1780661164261,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":760,"at":1780661164332,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":761,"at":1780661164430,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":762,"at":1780661164504,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":763,"at":1780661164550,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted Zone 1","at":null}}
+{"seq":764,"at":1780661165954,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: removed zone","at":null}}
+{"seq":765,"at":1780661166454,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":766,"at":1780661166483,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":767,"at":1780661166530,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":768,"at":1780661166564,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":769,"at":1780661166595,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":770,"at":1780661166629,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":771,"at":1780661166672,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":772,"at":1780661166705,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":773,"at":1780661166738,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":774,"at":1780661166775,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":775,"at":1780661166818,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":776,"at":1780661166883,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: zone: painted zone","at":null}}
+{"seq":777,"at":1780661167510,"event":{"kind":"opened","session":"ses-build-mq0vom8m-1cj4","route":"/build","channel":"world"}}
+{"seq":778,"at":1780661167599,"event":{"kind":"closed","session":"ses-build-mq0vom8m-1cj4"}}
+{"seq":779,"at":1780661167617,"event":{"kind":"opened","session":"ses-characters-mq0vombl-v3q","route":"/characters","channel":"characters"}}
+{"seq":780,"at":1780661167652,"event":{"kind":"opened","session":"ses-vehicles-mq0vomck-snz","route":"/vehicles","channel":"vehicles"}}
+{"seq":781,"at":1780661167658,"event":{"kind":"closed","session":"ses-characters-mq0vombl-v3q"}}
+{"seq":782,"at":1780661167676,"event":{"kind":"opened","session":"ses-voxels-mq0vomd8-1bb3","route":"/voxels","channel":"voxels"}}
+{"seq":783,"at":1780661167681,"event":{"kind":"closed","session":"ses-vehicles-mq0vomck-snz"}}
+{"seq":784,"at":1780661167697,"event":{"kind":"opened","session":"ses-assist3d-mq0vomdt-368","route":"/assist3d","channel":"assist3d"}}
+{"seq":785,"at":1780661167700,"event":{"kind":"closed","session":"ses-voxels-mq0vomd8-1bb3"}}
+{"seq":786,"at":1780661167722,"event":{"kind":"opened","session":"ses-cutout-mq0vomei-fb0","route":"/cutout","channel":"cutout"}}
+{"seq":787,"at":1780661167737,"event":{"kind":"closed","session":"ses-assist3d-mq0vomdt-368"}}
+{"seq":788,"at":1780661167803,"event":{"kind":"opened","session":"ses-textures-mq0vomgr-14cl","route":"/textures","channel":"materials"}}
+{"seq":789,"at":1780661167807,"event":{"kind":"closed","session":"ses-cutout-mq0vomei-fb0"}}
+{"seq":790,"at":1780661167827,"event":{"kind":"closed","session":"ses-textures-mq0vomgr-14cl"}}
+{"seq":791,"at":1780661167847,"event":{"kind":"opened","session":"ses-settings-mq0vomhz-i4v","route":"/settings","channel":"tuning"}}
+{"seq":792,"at":1780661167895,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: camera: camera moved","at":null}}
+{"seq":793,"at":1780661168993,"event":{"kind":"closed","session":"ses-settings-mq0vomhz-i4v"}}
+{"seq":794,"at":1780661169554,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":795,"at":1780661169564,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":796,"at":1780661169672,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":797,"at":1780661170418,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":798,"at":1780661170445,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":799,"at":1780661170471,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":800,"at":1780661170498,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":801,"at":1780661170526,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":802,"at":1780661170552,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":803,"at":1780661170645,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":804,"at":1780661170671,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":805,"at":1780661170701,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":806,"at":1780661170711,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: camera: camera moved","at":null}}
+{"seq":807,"at":1780661170740,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":808,"at":1780661170767,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":809,"at":1780661170797,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":810,"at":1780661170823,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":811,"at":1780661170855,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":812,"at":1780661170880,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":813,"at":1780661170902,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: rotated Shop","at":null}}
+{"seq":814,"at":1780661170941,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: cloned Shop","at":null}}
+{"seq":815,"at":1780661170973,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: removed Shop","at":null}}
+{"seq":816,"at":1780661171019,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":817,"at":1780661171051,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":818,"at":1780661171082,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":819,"at":1780661171131,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":820,"at":1780661171163,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":821,"at":1780661171194,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":822,"at":1780661171891,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":823,"at":1780661171920,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":824,"at":1780661172035,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":825,"at":1780661172067,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":826,"at":1780661172098,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":827,"at":1780661172130,"event":{"kind":"committed","session":"ses-root-mq0voegp-1d1g","channel":"world","label":"untitled-4: object: painted Shop","at":null}}
+{"seq":828,"at":1780661184164,"event":{"kind":"opened","session":"ses-root-mq0voz38-9h","route":"/","channel":"world"}}
+{"seq":829,"at":1780661184376,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: map: new map untitled-5","at":null}}
+{"seq":830,"at":1780661184525,"event":{"kind":"opened","session":"ses-build-mq0vozd9-wfg","route":"/build","channel":"world"}}
+{"seq":831,"at":1780661184611,"event":{"kind":"closed","session":"ses-build-mq0vozd9-wfg"}}
+{"seq":832,"at":1780661184629,"event":{"kind":"opened","session":"ses-characters-mq0vozg5-xe4","route":"/characters","channel":"characters"}}
+{"seq":833,"at":1780661184673,"event":{"kind":"opened","session":"ses-vehicles-mq0vozhd-k3z","route":"/vehicles","channel":"vehicles"}}
+{"seq":834,"at":1780661184681,"event":{"kind":"closed","session":"ses-characters-mq0vozg5-xe4"}}
+{"seq":835,"at":1780661184703,"event":{"kind":"opened","session":"ses-voxels-mq0vozi7-a0","route":"/voxels","channel":"voxels"}}
+{"seq":836,"at":1780661184719,"event":{"kind":"closed","session":"ses-vehicles-mq0vozhd-k3z"}}
+{"seq":837,"at":1780661184735,"event":{"kind":"opened","session":"ses-assist3d-mq0vozj3-1awe","route":"/assist3d","channel":"assist3d"}}
+{"seq":838,"at":1780661184742,"event":{"kind":"closed","session":"ses-voxels-mq0vozi7-a0"}}
+{"seq":839,"at":1780661184783,"event":{"kind":"opened","session":"ses-cutout-mq0vozkf-16tl","route":"/cutout","channel":"cutout"}}
+{"seq":840,"at":1780661184799,"event":{"kind":"closed","session":"ses-assist3d-mq0vozj3-1awe"}}
+{"seq":841,"at":1780661184863,"event":{"kind":"opened","session":"ses-textures-mq0vozmn-12x8","route":"/textures","channel":"materials"}}
+{"seq":842,"at":1780661184868,"event":{"kind":"closed","session":"ses-cutout-mq0vozkf-16tl"}}
+{"seq":843,"at":1780661184888,"event":{"kind":"closed","session":"ses-textures-mq0vozmn-12x8"}}
+{"seq":844,"at":1780661184910,"event":{"kind":"opened","session":"ses-settings-mq0vozny-1ejk","route":"/settings","channel":"tuning"}}
+{"seq":845,"at":1780661185096,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: map: compiled untitled-5 → game","at":null}}
+{"seq":846,"at":1780661185274,"event":{"kind":"closed","session":"ses-settings-mq0vozny-1ejk"}}
+{"seq":847,"at":1780661185481,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: chunk: added chunk B0","at":null}}
+{"seq":848,"at":1780661186010,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":849,"at":1780661186041,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":850,"at":1780661186073,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":851,"at":1780661186111,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":852,"at":1780661186124,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: camera: camera moved","at":null}}
+{"seq":853,"at":1780661186158,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":854,"at":1780661186186,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":855,"at":1780661186360,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":856,"at":1780661186801,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: camera: camera moved","at":null}}
+{"seq":857,"at":1780661187290,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":858,"at":1780661187323,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":859,"at":1780661187354,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":860,"at":1780661187382,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":861,"at":1780661187417,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":862,"at":1780661187446,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":863,"at":1780661187603,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":864,"at":1780661187635,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":865,"at":1780661187668,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":866,"at":1780661187706,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":867,"at":1780661187736,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":868,"at":1780661187767,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":869,"at":1780661187888,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":870,"at":1780661187942,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":871,"at":1780661187974,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":872,"at":1780661188005,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":873,"at":1780661188036,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":874,"at":1780661188155,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":875,"at":1780661188186,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":876,"at":1780661188225,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":877,"at":1780661188252,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":878,"at":1780661188394,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":879,"at":1780661188446,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":880,"at":1780661188479,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":881,"at":1780661188506,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":882,"at":1780661188547,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":883,"at":1780661188581,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":884,"at":1780661188714,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":885,"at":1780661188744,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":886,"at":1780661188779,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":887,"at":1780661188809,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":888,"at":1780661188836,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":889,"at":1780661188869,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":890,"at":1780661189030,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":891,"at":1780661189574,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: camera: camera moved","at":null}}
+{"seq":892,"at":1780661189689,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":893,"at":1780661189756,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":894,"at":1780661189788,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":895,"at":1780661189872,"event":{"kind":"committed","session":"ses-root-mq0voz38-9h","channel":"world","label":"untitled-5: zone: painted zone","at":null}}
+{"seq":4077,"at":1780726710873,"event":{"kind":"opened","session":"ses-workbench-mq1ypftl-18e8","route":"/workbench","channel":"cutout"}}
+{"seq":4078,"at":1780726710905,"event":{"kind":"opened","session":"ses-textures-mq1ypfuh-wrl","route":"/textures","channel":"materials"}}
+{"seq":4079,"at":1780727798342,"event":{"kind":"opened","session":"ses-root-mq1zcqx2-1abq","route":"/","channel":"world"}}
+{"seq":4080,"at":1780727798354,"event":{"kind":"opened","session":"ses-workbench-mq1zcqxe-lu3","route":"/workbench","channel":"characters"}}
+{"seq":4081,"at":1780727798356,"event":{"kind":"opened","session":"ses-workbench-mq1zcqxg-i7n","route":"/workbench","channel":"cutout"}}
+{"seq":4082,"at":1780727798377,"event":{"kind":"opened","session":"ses-settings-mq1zcqy1-8nx","route":"/settings","channel":"tuning"}}
+{"seq":4083,"at":1780727812973,"event":{"kind":"opened","session":"ses-root-mq1zd27h-j0h","route":"/","channel":"world"}}
+{"seq":4084,"at":1780727812984,"event":{"kind":"opened","session":"ses-workbench-mq1zd27s-1804","route":"/workbench","channel":"characters"}}
+{"seq":4085,"at":1780727812986,"event":{"kind":"opened","session":"ses-workbench-mq1zd27u-6gw","route":"/workbench","channel":"cutout"}}
+{"seq":4086,"at":1780727813005,"event":{"kind":"opened","session":"ses-settings-mq1zd28d-vsj","route":"/settings","channel":"tuning"}}
+{"seq":4087,"at":1780727825605,"event":{"kind":"opened","session":"ses-root-mq1zdbyd-21a","route":"/","channel":"world"}}
+{"seq":4088,"at":1780727825617,"event":{"kind":"opened","session":"ses-workbench-mq1zdbyp-1cnw","route":"/workbench","channel":"characters"}}
+{"seq":4089,"at":1780727825619,"event":{"kind":"opened","session":"ses-workbench-mq1zdbyr-1caa","route":"/workbench","channel":"cutout"}}
+{"seq":4090,"at":1780727825638,"event":{"kind":"opened","session":"ses-settings-mq1zdbza-107f","route":"/settings","channel":"tuning"}}
