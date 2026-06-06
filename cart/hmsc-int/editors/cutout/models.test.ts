@@ -14,6 +14,7 @@ import {
   bakeOverlayFromDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
   overlayOf, reopenOverlayDocument, MODEL_PAINT,
 } from './models';
+import { buildDraft, draftModelBinding, parseDraft, serializeDraft } from './draft';
 import { applyBodyPaint, buildBody, parseBody, serializeBody, type BodyDocument } from '../../game/figure/body';
 import { charactersStream } from '../../game/figure/stream';
 import { PART_IDS, defaultProfile, type PartId } from '../../game/figure/shapes';
@@ -136,6 +137,39 @@ test('save applies through the doors: figure + vehicle round-trip a real store r
     const build = buildVehicle(car);
     assert(build.meshes.some((m) => m.textureKey === vehiclePaintTextureKey('hood', 31337)), 'the reloaded vehicle builds with the painted texture key');
   }
+});
+
+test('HOTDRAFT: an unsaved model painting survives the draft round-trip with its binding', () => {
+  const doc = demoDocument();
+  const binding = { family: 'figure' as const, docId: 'chr-1', part: 'head' as const };
+  // what onDirty writes mid-painting, through the disk format (JSON)
+  const draft = parseDraft(serializeDraft(buildDraft({
+    docId: modelWorkId(binding), name: 'chr-1 · head', srcPath: null, model: binding, doc,
+  })));
+  assert(draft !== null, 'a binding-carrying draft parses');
+  assertEqual(JSON.stringify(draft!.doc), JSON.stringify(doc), 'the unsaved strokes round-trip byte-exact');
+  const back = draftModelBinding(draft!);
+  assertEqual(JSON.stringify(back), JSON.stringify(binding), 'the model binding restores — saves keep targeting the MODEL');
+
+  const vehicle = draftModelBinding(parseDraft(serializeDraft(buildDraft({
+    docId: 'x', name: 'v', srcPath: null, model: { family: 'vehicle', docId: 'car-1', part: 'hood' }, doc,
+  })))!);
+  assertEqual(vehicle?.family, 'vehicle', 'vehicle bindings restore too');
+
+  // older drafts (no model field) keep parsing — and read as no binding
+  const legacy: any = JSON.parse(serializeDraft(buildDraft({ docId: 'd1', name: 'plain', srcPath: null, doc })));
+  delete legacy.model;
+  const legacyDraft = parseDraft(JSON.stringify(legacy));
+  assert(legacyDraft !== null, 'pre-HOTDRAFT drafts stay valid (addition law)');
+  assertEqual(draftModelBinding(legacyDraft!), null, 'no binding restores as a plain canvas');
+
+  // a stale/garbage binding degrades to no binding — the PAINTING is kept,
+  // the half-target is not
+  const stale = parseDraft(serializeDraft(buildDraft({
+    docId: 'x', name: 'v', srcPath: null, model: { family: 'figure', docId: 'chr-1', part: 'tailfin' } as any, doc,
+  })));
+  assert(stale !== null, 'a garbage part never rejects the draft (the strokes matter most)');
+  assertEqual(draftModelBinding(stale!), null, 'a garbage part restores as no binding');
 });
 
 finish('cutout-models');

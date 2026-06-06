@@ -12,6 +12,9 @@
 // imported).
 
 import { PAINT_DOC_KIND, PAINT_DOC_VERSION, type PaintDocument } from '../paint/layers';
+import { PART_IDS } from '../../game/figure/shapes';
+import { VEHICLE_PART_IDS } from '../../game/vehicle';
+import type { ModelBinding } from './models';
 
 export const CUTOUT_DRAFT_KIND = 'cutout-draft';
 export const CUTOUT_DRAFT_VERSION = 1;
@@ -27,10 +30,15 @@ export type CutoutDraft = {
   srcPath: string | null;
   /** the registry material under the paint (the material canvas), if any */
   textureId?: string | null;
+  /** MODELPAINT-0605 (HOTDRAFT): the model slot under the paint, so a hot
+   *  update mid-painting restores the MODEL target (saves keep applying to
+   *  the model, never silently retarget the library). Arrived by addition —
+   *  older drafts lack it. */
+  model?: ModelBinding | null;
   doc: PaintDocument;
 };
 
-export function buildDraft(args: { docId: string; name: string; srcPath: string | null; textureId?: string | null; doc: PaintDocument }): CutoutDraft {
+export function buildDraft(args: { docId: string; name: string; srcPath: string | null; textureId?: string | null; model?: ModelBinding | null; doc: PaintDocument }): CutoutDraft {
   return {
     kind: CUTOUT_DRAFT_KIND,
     version: CUTOUT_DRAFT_VERSION,
@@ -38,8 +46,23 @@ export function buildDraft(args: { docId: string; name: string; srcPath: string 
     name: args.name,
     srcPath: args.srcPath ?? null,
     textureId: args.textureId ?? null,
+    model: args.model ?? null,
     doc: args.doc,
   };
+}
+
+/** A draft's model binding, validated against the REAL part vocabularies —
+ *  a stale/garbage binding restores as no binding, never a half-target. */
+export function draftModelBinding(d: CutoutDraft): ModelBinding | null {
+  const m: any = d.model;
+  if (!m || typeof m.docId !== 'string' || m.docId.length === 0) return null;
+  if (m.family === 'figure' && (PART_IDS as readonly string[]).includes(m.part)) {
+    return { family: 'figure', docId: m.docId, part: m.part };
+  }
+  if (m.family === 'vehicle' && (VEHICLE_PART_IDS as readonly string[]).includes(m.part)) {
+    return { family: 'vehicle', docId: m.docId, part: m.part };
+  }
+  return null;
 }
 
 export function serializeDraft(draft: CutoutDraft): string {
@@ -57,6 +80,10 @@ export function parseDraft(text: string): CutoutDraft | null {
   if (d.srcPath !== null && typeof d.srcPath !== 'string') return null;
   // textureId arrived by addition — older drafts lack it (→ null)
   if (d.textureId !== undefined && d.textureId !== null && typeof d.textureId !== 'string') return null;
+  // model arrived by addition (HOTDRAFT) — shape-checked here loosely; the
+  // REAL gate is draftModelBinding (part vocabulary + family), which the
+  // restore path consults. A malformed slot degrades to "no binding".
+  if (d.model !== undefined && d.model !== null && typeof d.model !== 'object') return null;
   const doc = d.doc;
   if (!doc || doc.kind !== PAINT_DOC_KIND || doc.version !== PAINT_DOC_VERSION) return null;
   if (!doc.dims || typeof doc.dims.w !== 'number' || typeof doc.dims.h !== 'number') return null;

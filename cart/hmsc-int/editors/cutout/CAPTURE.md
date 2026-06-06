@@ -218,9 +218,16 @@ preview language, not source-res pixels; overlay z-order = the photo slot
 (independent of the canvas knob — the bake is resolution-projected).
 
 SURFACED SEAMS (not guessed):
-- Model targets SKIP the working-draft autosave: the draft format carries
-  no binding, and a restore would silently retarget saves at the library.
-  Queued: a binding-carrying draft (additive draft.ts field).
+- ~~Model targets SKIP the working-draft autosave~~ CLOSED (HOTDRAFT,
+  2026-06-05, USER ASK: "make sure a hot update doesn't wipe it before I
+  save"): the draft carries the model binding (additive `model` field,
+  old drafts stay valid); a hot update mid-painting restores the SAME
+  face/part with the unsaved strokes intact and saves keep applying to the
+  MODEL. The binding gates against the real part vocabularies
+  (`draftModelBinding`); a vanished model or garbage binding keeps the
+  PAINTING as a plain canvas — strokes are never the thing dropped. At
+  most the draft debounce window (`cutout-view.draftDebounceMs`, default
+  600ms) of strokes is at risk — same as every cutout target.
 - The cutout underlay shows skin + face shape layers; torso underwear
   stamps and clothing prints are NOT in the paint underlay yet (they
   composite in the /characters captures over the painting).

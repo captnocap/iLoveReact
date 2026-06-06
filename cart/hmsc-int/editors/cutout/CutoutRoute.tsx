@@ -48,7 +48,7 @@ import {
   stencilDataFromAsset, STENCIL_RECIPE_ID, uniqueAssetName,
 } from './extraction';
 import { identifyImage, loadGraySource } from './sources';
-import { buildDraft, CUTOUT_DRAFT_PATH, parseDraft, serializeDraft } from './draft';
+import { buildDraft, draftModelBinding, CUTOUT_DRAFT_PATH, parseDraft, serializeDraft } from './draft';
 import { CutoutInspector, type BackendChoice } from './Inspector';
 import { CutoutStatusBar } from './StatusBar';
 // MODEL TEXTURE TARGETS (MODELPAINT-0605): pick a face / body part / vehicle
@@ -150,11 +150,44 @@ function clampCanvasSize(n: number): number {
 
 /** Restore the working draft (the autosave lifeline) — boot blank when
  *  there is none or the gate rejects it. A draft whose source image moved
- *  keeps the painted layers and drops the missing image. */
+ *  keeps the painted layers and drops the missing image.
+ *
+ *  HOTDRAFT (MODELPAINT-0605): a draft carrying a model binding restores as
+ *  THE MODEL TARGET — the unsaved strokes come back on the same face/part
+ *  and the next save still applies to the model. The binding is gated
+ *  against the real part vocabularies and re-resolved against the live
+ *  store; a model that vanished (or no store host) keeps the PAINTING as a
+ *  plain canvas — strokes are never the thing that gets dropped. */
 function restoreOrBlank(): Work {
   const text = readFile(CUTOUT_DRAFT_PATH);
   const draft = text ? parseDraft(text) : null;
   if (!draft) return { ...freshWork(null, {}), epoch: 0 };
+  const binding = draftModelBinding(draft);
+  if (binding) {
+    try {
+      const model: BodyDocument | VehicleDoc | undefined = binding.family === 'figure'
+        ? editorChannel(charactersStream).state().characters[binding.docId]
+        : editorChannel(vehiclesStream).state().vehicles[binding.docId];
+      if (model) {
+        return {
+          docId: modelWorkId(binding),
+          name: modelWorkName(binding),
+          srcPath: null,
+          textureId: null,
+          model: binding,
+          modelBg: modelCanvasBg(binding, model),
+          modelLayers: binding.family === 'figure' && binding.part === 'head'
+            ? (model as BodyDocument).parts.head.layers
+            : null,
+          dims: { w: draft.doc.dims.w, h: draft.doc.dims.h },
+          initial: draft.doc,
+          epoch: 0,
+        };
+      }
+    } catch {
+      // no __fs_* host — fall through to the plain-canvas restore below
+    }
+  }
   const srcOk = draft.srcPath ? exists(draft.srcPath) : true;
   return {
     docId: draft.docId,
@@ -246,23 +279,21 @@ export function CutoutRoute(props: { onExit: () => void }) {
   }, [work.srcPath, work.epoch]);
 
   // ── working-draft autosave (debounced; the in-between-saves lifeline) ──────
-  // Model targets skip the draft file: the draft format carries no model
-  // binding, so a restore would silently re-open the painting as a plain
-  // canvas whose save lands in the LIBRARY instead of the model — worse than
-  // the gap. Recorded in CAPTURE.md; the binding-carrying draft is queued.
+  // HOTDRAFT (MODELPAINT-0605): MODEL TARGETS DRAFT TOO — the draft carries
+  // the binding, so a hot update mid-painting restores the same face/part
+  // with the unsaved strokes intact and the next save still applies to the
+  // MODEL (never silently retargeted at the library).
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onDirty = useCallback(() => {
     setEdited(true);
-    if (workRef.current.model) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => {
       draftTimer.current = null;
       const doc = painterApi.current?.buildDocument() ?? null;
       if (!doc) return;
       const w = workRef.current;
-      if (w.model) return;
       mkdir(VIEW.sessionsDir);
-      writeFile(CUTOUT_DRAFT_PATH, serializeDraft(buildDraft({ docId: w.docId, name: w.name, srcPath: w.srcPath, textureId: w.textureId, doc })));
+      writeFile(CUTOUT_DRAFT_PATH, serializeDraft(buildDraft({ docId: w.docId, name: w.name, srcPath: w.srcPath, textureId: w.textureId, model: w.model, doc })));
     }, VIEW.draftDebounceMs);
   }, []);
   useEffect(() => () => { if (draftTimer.current) clearTimeout(draftTimer.current); }, []);
