@@ -43,6 +43,8 @@ import { TextureStudio } from './TextureStudio';
 import { PlayRoute } from './editors/play/PlayRoute';
 import { VoxelHybridRoute } from './VoxelHybridRoute';
 import { LabsRoute } from './shell/LabsRoute';
+import { WorkbenchRoute } from './shell/WorkbenchRoute';
+import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
 import { CharactersRoute } from './editors/characters/CharactersRoute';
 import { ItemsRoute } from './editors/items/ItemsRoute';
@@ -793,10 +795,13 @@ function EditorShell() {
   // The current map always shows in the switcher even before its file lands on disk.
   const displayMaps = maps.includes(ws.stem) ? maps : [...maps, ws.stem].sort();
 
+  // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
+  const wbSources = useMemo(workbenchSources, []);
+
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/items' ? 'items' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/compose' ? 'compose' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/items' ? 'items' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/compose' ? 'compose' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
   // VIEWRUNAWAY-0605: the editor stays MOUNTED under route overlays, but it
   // must go input-DEAF there — the key bus is global, so a WASD walk in
   // /build was also driving the buried canvas's drift (700px/s ÷ zoom for
@@ -836,6 +841,7 @@ function EditorShell() {
         onVoxels={() => nav.push('/voxels')}
         onPerf={() => nav.push('/log')}
         onSettings={() => nav.push('/settings')}
+        onWorkbench={() => nav.push('/workbench')}
         onAssist={() => nav.push('/assist3d')}
         onTextures={() => nav.push('/textures')}
         onUndo={ws.undo}
@@ -930,6 +936,9 @@ function EditorShell() {
         {/* The decal editor (editors/compose/) — compose Box/Text/Image looks,
             Materialize them into the texture registry (DECALEDIT-0606). */}
         <Route path="/compose">{() => <ComposeRoute />}</Route>
+        {/* The four-gutter rebuild (WORKBENCH.md) — additive while sources land;
+            old routes flip off one at a time as parity is reached. */}
+        <Route path="/workbench">{() => <WorkbenchRoute sources={wbSources} onExit={() => nav.push('/')} />}</Route>
         {/* The grand settings page (editors/settings/) — the session event bus + the
             P2 tunables registry (SETTINGS-0605). */}
         <Route path="/settings">{() => <SettingsRoute onExit={() => nav.push('/')} />}</Route>

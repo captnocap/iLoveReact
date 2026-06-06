@@ -234,7 +234,10 @@ love2d/data/*.db
 
 # Experimental networking and test binaries
 *_bin
-*bench
+# (was a bare `*bench`, which silently swallowed cart/input_bench,
+# cart/polycss_effect_bench, scripts/bench AND any new dir ending in
+# "bench" — e.g. editors/workbench. Scoped to the frozen tree it was for.)
+tsz/experiments/**/*bench
 tsz/experiments/bleeding/networking/test_api*
 tsz/experiments/bleeding/networking/test_io*
 tsz/experiments/bleeding/networking/quickjs/qjs_*_server

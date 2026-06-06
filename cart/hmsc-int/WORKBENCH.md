@@ -45,23 +45,34 @@ logs demonstrate by STREAMING. One frame holds all three.
 
 ## 2. The contract
 
-New files, all under `cart/hmsc-int/shell/` (the existing shell dir), classes
-in `studio.cls.ts` (graduated from `cart/hmsc-wire/wire.cls.ts`, which was
-written token-identical and name-identical for this purpose).
+New files, all under `cart/hmsc-int/shell/` (the existing shell dir). The
+classes graduated from `cart/hmsc-wire/wire.cls.ts` into an ADDITIVE sheet —
+`shell/workbench.cls.ts` — rather than edits to `studio.cls.ts`: the classifier
+registry is global per cart, so a new sheet registers new names and reuses
+studio's existing control/panel kit (Toggle*/Slider*/Stepper*/Segment*/
+ColorSwatch, Group*/Field*/Hero*, EmptyState) without touching the shared file.
+Zero pre-existing files change during the build except two additive lines
+(route mount + nav button).
 
 ```
-shell/chrome.tsx       — the W1 strip: brand · map pill · new · windowDrag
-                         drag-space · nav · undo/redo · compile · save pill ·
-                         window controls (__window_minimize/maximize/close).
-                         Replaces ProjectBar.tsx. Pure shell, zero route logic.
-shell/Workbench.tsx    — the four gutters. Pure layout: renders a
-                         WorkbenchSource, owns selection + lens state, knows
-                         zero category names.
-shell/fields.tsx       — ONE field renderer (the real FieldCell): typed
-                         controls (bool toggle / slider / stepper / enum seg /
-                         color swatch / value) consuming FieldSpec + FieldBind.
-shell/stage.tsx        — stage scaffolding: PreviewBar (lens segs), Stage,
-                         StatBand/StatCard/Spark, LogRow kit, SelBar.
+shell/workbench.cls.ts — LANDED. The additive vocabulary: Chrome*/Win* strip,
+                         CatRail/ItemRail/PropsCol/PreviewCol gutters, Lens*
+                         (the bar's only widgets), Stage*, Stat*/Spark/Log*/
+                         SelBar, ToolRail kit.
+shell/Workbench.tsx    — LANDED. The four gutters. Pure layout: renders
+                         WorkbenchSource[], owns selection/lens/filter/rev
+                         state, knows zero category names.
+shell/fields.tsx       — LANDED. ONE field renderer: FieldSpec/PanelSpec types
+                         + typed controls (toggle / drag-slider / stepper /
+                         enum segment / color swatch / value) via studio.cls.
+shell/stage.tsx        — LANDED. LensBar (lens segments) + EmptyStage; rig and
+                         log-stream components land with their sources.
+shell/WorkbenchRoute.tsx — LANDED. Mounted at /workbench alongside every
+                         existing route; sources arrive from
+                         editors/workbench/sources.ts (shell stays generic).
+shell/chrome.tsx       — step 2: the W1 strip with window controls
+                         (__window_minimize/maximize/close + windowDrag);
+                         replaces ProjectBar.tsx at the swap.
 ```
 
 ### WorkbenchSource — what a category implements
@@ -216,13 +227,17 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 Additive landings, per-category flips, one deletion per parity. Never a big
 bang; the old route works until the minute its replacement does.
 
-1. **Graduate the vocabulary.** wire.cls.ts → studio.cls.ts (chrome strip,
-   gutters, typed controls, stage/log kit). No behavior change anywhere.
+1. ~~**Graduate the vocabulary.**~~ DONE — wire.cls.ts → `shell/workbench.cls.ts`
+   (additive sheet; studio.cls untouched, its control/panel kit reused).
 2. **`shell/chrome.tsx`.** New strip with window controls replaces ProjectBar
    in index.tsx (same props, MapsMenu/EventLog carried over). ProjectBar.tsx
    dies. First visible win; map editor untouched.
-3. **`shell/Workbench.tsx` + `fields.tsx` + `stage.tsx`** land mounted at a new
-   `/assets` route alongside everything existing.
+3. ~~**Frame at a separate route.**~~ DONE — `shell/{Workbench,fields,stage,
+   WorkbenchRoute}.tsx` mounted at `/workbench` (temporary Columns3 nav icon)
+   alongside everything existing, with `editors/workbench/tunablesSource.ts`
+   as the live proof source (panel generated from the tunables registry,
+   write-through). Touches to pre-existing files: 2 additive edits
+   (index.tsx route+handler, ProjectBar button) — both die at the flip.
 4. **Character source** (hardest first — roster + draft + 3D stage + PAINT
    lens). Parity bar: everything CharactersRoute does today, plus paint without
    leaving the page. Flip: `/characters` route + nav icon die.

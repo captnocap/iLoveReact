@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'items' | 'vehicles' | 'cutout' | 'compose' | 'settings';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'items' | 'vehicles' | 'cutout' | 'compose' | 'settings' | 'workbench';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -74,6 +74,9 @@ interface ProjectBarProps {
   // Navigate to the /settings route — the grand settings page (editors/settings):
   // the session event bus across every route channel + the P2 tunables registry.
   onSettings: () => void;
+  // Navigate to the /workbench route — the four-gutter rebuild (WORKBENCH.md).
+  // Temporary while sources land; the chrome collapse retires most of this row.
+  onWorkbench: () => void;
 }
 
 function IconBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
@@ -126,6 +129,7 @@ export function ProjectBar(props: ProjectBarProps) {
         <IconBtn icon="Scissors" on={props.activeRoute === 'cutout'} onPress={props.onCutout} title="cutout painter" />
         <IconBtn icon="PenTool" on={props.activeRoute === 'compose'} onPress={props.onCompose} title="decal editor" />
         <IconBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />
+        <IconBtn icon="Columns3" on={props.activeRoute === 'workbench'} onPress={props.onWorkbench} title="workbench (rebuild in progress)" />
         <IconBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
         <IconBtn icon="Settings" on={props.activeRoute === 'settings'} onPress={props.onSettings} title="settings" />
       </Box>
