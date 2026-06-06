@@ -8,9 +8,10 @@
 // Per P6 the paired notes are ALWAYS surfaced beside the loaded lab — the
 // notes are the lab's contract, and this panel is where humans read it.
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { readFile } from '@reactjit/hooks/fs';
+import { useRouteTwigState } from '../editors/twigs';
 
 /** One loadable lab, as plain data — mirror of labs/index.ts's LabEntry. */
 export type ShellLab = {
@@ -23,7 +24,7 @@ const RAIL_WIDTH = 220;
 const NOTES_WIDTH = 320;
 
 export function LabsRoute(props: { labs: ShellLab[]; onExit: () => void }) {
-  const [openName, setOpenName] = useState<string | null>(null);
+  const [openName, setOpenName] = useRouteTwigState<string | null>('/labs', 'openName', null);
   const open = props.labs.find((lab) => lab.name === openName) ?? null;
 
   // Re-read from disk on every open: the notes are living text — hot-edited

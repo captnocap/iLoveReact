@@ -6,13 +6,14 @@
 //
 // Pure diagnostics, like the rest of perfLog — rip out with it.
 
-import { useEffect, useReducer, useState } from 'react';
+import { useEffect, useReducer } from 'react';
 import { Box, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import {
   getLogLines, subscribeLog, clearLog,
   isLoggingEnabled, setLoggingEnabled, logFilePath,
 } from './perfLog';
+import { useRouteTwigState } from './editors/twigs';
 
 // Pull the tag out of `[t +dt] tag: msg` to colour the line.
 function tagOf(line: string): string {
@@ -64,7 +65,7 @@ export function LogView() {
   // Re-render on each flush (subscribeLog) so the view tails the log live.
   const [, bump] = useReducer((n: number) => n + 1, 0);
   useEffect(() => subscribeLog(bump), []);
-  const [keyOnly, setKeyOnly] = useState(true);
+  const [keyOnly, setKeyOnly] = useRouteTwigState('/log', 'keyOnly', true);
   const on = isLoggingEnabled();
 
   const all = getLogLines();

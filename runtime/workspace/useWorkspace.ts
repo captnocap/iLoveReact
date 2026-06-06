@@ -64,7 +64,7 @@ export interface WorkspaceArgs<T> {
    *  The cart should rehydrate every field from `env.payload`. The
    *  workspace handles stem separately (it owns stem state and will
    *  setStem(env.stem) around this call). */
-  applyPayload: (env: SessionEnvelope<T>) => void;
+  applyPayload: (env: SessionEnvelope<T>, reason?: 'restore' | 'history') => void;
   /** State slices that should trigger autosave when they change. Same
    *  list you'd pass to a useEffect deps array. `stem` is implicitly
    *  included; don't list it here. */
@@ -162,7 +162,7 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
     if (!env) { release(); return; }
 
     setStem(env.stem);
-    applyPayload(env);
+    applyPayload(env, 'restore');
     setRestoredFrom(env.stem);
     release();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -208,7 +208,7 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
     if (!prev) return;
     autosaveSuppressedRef.current = true;
     setStem(prev.stem);
-    applyPayload(prev);
+    applyPayload(prev, 'history');
     setTimeout(() => { autosaveSuppressedRef.current = false; }, 0);
   }, [history, snapshot, applyPayload]);
 
@@ -217,7 +217,7 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
     if (!next) return;
     autosaveSuppressedRef.current = true;
     setStem(next.stem);
-    applyPayload(next);
+    applyPayload(next, 'history');
     setTimeout(() => { autosaveSuppressedRef.current = false; }, 0);
   }, [history, snapshot, applyPayload]);
 

@@ -7,6 +7,7 @@ import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 import { editorChannel } from './editors/store';
 import { editorSessions, type RouteSession } from './editors/sessions';
 import { voxelsStream, type VoxelsEvent } from './editors/voxels/stream';
+import { useRouteTwigState } from './editors/twigs';
 
 // AUTOSAVE-0605 (V20 "saved at every micro change"): blockout auto-commit debounce
 const AUTOSAVE_DEBOUNCE_MS = 1200;
@@ -415,11 +416,11 @@ export function VoxelHybridRoute(props: { onExit: () => void }) {
 
   const [dims, setDims] = useState<Dims>(() => restored?.dims ?? { w: 5, d: 6, h: 7 });
   const [custom, setCustom] = useState<Block[]>(() => restored ? restored.blocks.map((b) => ({ ...b })) : []);
-  const [selectedId, setSelectedId] = useState(1);
-  const [activeKind, setActiveKind] = useState<Kind>('wall');
-  const [activeFace, setActiveFace] = useState(FACES[2]);
-  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
-  const [tool, setTool] = useState<Tool>('build');
+  const [selectedId, setSelectedId] = useRouteTwigState('/voxels', 'selectedId', 1);
+  const [activeKind, setActiveKind] = useRouteTwigState<Kind>('/voxels', 'activeKind', 'wall');
+  const [activeFace, setActiveFace] = useRouteTwigState('/voxels', 'activeFace', FACES[2]);
+  const [selectedGroupId, setSelectedGroupId] = useRouteTwigState<string | null>('/voxels', 'selectedGroupId', null);
+  const [tool, setTool] = useRouteTwigState<Tool>('/voxels', 'tool', 'build');
   const [status, setStatus] = useState(restored ? `Restored blockout · ${restored.blocks.length} blocks` : 'Click a floor top face to add a block');
 
   // debounced auto-commit of the working blockout (the restore above never

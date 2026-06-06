@@ -15,7 +15,6 @@ import { MASK_SURFACES, maskSurfaceLabel, NUM_COLOR_SLOTS, PAINT_BLEND_MODES, SL
 import type { PaintTool, PaintMode } from './layers';
 import type { PaintEditorState } from './usePaintEditor';
 import { PaintSurface } from './PaintSurface';
-import { useState } from 'react';
 
 const { Chip, Knob } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
@@ -44,7 +43,7 @@ const KNOBS = {
 };
 
 export function PaintToolRail({ s }: { s: PaintEditorState }) {
-  const [activeSlot, setActiveSlot] = useState(0);
+  const activeSlot = s.activeColorSlot;
   const target = s.activeLayer; // palette taps recolor the active layer (or defaults when none)
   const colors = target >= 0 && target < s.layers.length
     ? (s.layers[target].config.colors ?? s.defaults.colors)
@@ -81,7 +80,7 @@ export function PaintToolRail({ s }: { s: PaintEditorState }) {
       <Text style={{ color: T.dim, fontSize: 10, fontWeight: '800', letterSpacing: 1 }}>COLOR</Text>
       <Row style={{ gap: 6 }}>
         {SLOT_LABELS.slice(0, NUM_COLOR_SLOTS).map((label, i) => (
-          <Pressable key={label} onPress={() => setActiveSlot(i)}>
+          <Pressable key={label} onPress={() => s.setActiveColorSlot(i)}>
             <Row style={{ gap: 4, alignItems: 'center', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 4, borderWidth: 1, borderColor: activeSlot === i ? T.accent : T.frame }}>
               <Box style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: colors[i] ?? '#ffffff', borderWidth: 1, borderColor: T.frame }} />
               <Text style={{ color: activeSlot === i ? T.ink : T.dim, fontSize: 10 }}>{label}</Text>

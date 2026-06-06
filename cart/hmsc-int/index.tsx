@@ -321,17 +321,18 @@ function EditorShell() {
     return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d };
   }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
-  const applyPayload = useCallback((env: SessionEnvelope<MapPayload>) => {
+  const applyPayload = useCallback((env: SessionEnvelope<MapPayload>, reason?: 'restore' | 'history') => {
     const p = env.payload;
-    if (typeof p.fx === 'number') setFx(p.fx);
-    if (typeof p.fy === 'number') setFy(p.fy);
-    if (typeof p.yaw === 'number') setYaw(p.yaw);
-    if (p.tool) setTool(p.tool);
-    if (p.tile) setTile(p.tile);
-    if (p.layer) setLayer(p.layer);
-    if (p.tab) setTab(p.tab);
+    const applyTwig = reason !== 'history';
+    if (applyTwig && typeof p.fx === 'number') setFx(p.fx);
+    if (applyTwig && typeof p.fy === 'number') setFy(p.fy);
+    if (applyTwig && typeof p.yaw === 'number') setYaw(p.yaw);
+    if (applyTwig && p.tool) setTool(p.tool);
+    if (applyTwig && p.tile) setTile(p.tile);
+    if (applyTwig && p.layer) setLayer(p.layer);
+    if (applyTwig && p.tab) setTab(p.tab);
     if (typeof p.notes === 'string') setNotes(p.notes);
-    if (typeof p.showGrid === 'boolean') setShowGrid(p.showGrid);
+    if (applyTwig && typeof p.showGrid === 'boolean') setShowGrid(p.showGrid);
     // Decode the world and remount PaintCanvas onto it.
     const w = p.world ? deserializeMap(p.world) : emptyMap();
     // [mapgone-probe MAPGONE2-0605] boot-path count — stays until the user confirms
@@ -342,12 +343,12 @@ function EditorShell() {
     }
     placeSeq.current = Math.max(placeSeq.current, maxPlacementSeq(w.placements));
     setPlacements(w.placements);
-    setSelPlaceId(p.sel ?? null);
-    if (p.wasd) setWasdQuad(p.wasd);
-    setSeedCam(p.cam ?? null);
+    if (applyTwig) setSelPlaceId(p.sel ?? null);
+    if (applyTwig && p.wasd) setWasdQuad(p.wasd);
+    if (applyTwig) setSeedCam(p.cam ?? null);
     setOverrides(deserializeOverrides(p.overrides));
-    setBrush(normalizeBrushSettings(p.brush));
-    setSelCells([]); // selection is transient — never carries across a map switch
+    if (applyTwig) setBrush(normalizeBrushSettings(p.brush));
+    if (applyTwig) setSelCells([]); // selection is transient — never carries across a map switch
     // The 2D camera: the saved view, else centre on the painted content (an
     // older file or a pre-fix save) — never the bare lattice origin on a
     // non-empty map (MAPGONE2-0605).
@@ -365,8 +366,8 @@ function EditorShell() {
           const center = paintedCenter(w, TILE_UNITS);
           return center ? { x: center.gx, y: center.gy, zoom: 1 } : null;
         })();
-    setSeedView(restoredView);
-    console.warn(`[mapgone] applyPayload: view2d=${p.view2d ? (savedSane ? 'saved' : 'saved-INSANE') : 'absent'} → seedView=${restoredView ? `${restoredView.x.toFixed(0)},${restoredView.y.toFixed(0)}@${restoredView.zoom.toFixed(2)}` : 'host default'}`);
+    if (applyTwig) setSeedView(restoredView);
+    console.warn(`[mapgone] applyPayload: view2d=${p.view2d ? (savedSane ? 'saved' : 'saved-INSANE') : 'absent'} → seedView=${applyTwig && restoredView ? `${restoredView.x.toFixed(0)},${restoredView.y.toFixed(0)}@${restoredView.zoom.toFixed(2)}` : applyTwig ? 'host default' : 'preserved (history apply)'}`);
     setSeedWorld(w);
     setWorldEpoch((e) => e + 1);
   }, []);
@@ -502,14 +503,13 @@ function EditorShell() {
   }, [buildPayload, writeMapFile, ws]);
 
   const updateBrush = useCallback((patch: Partial<BrushSettings>) => {
-    snapshotForUndoCoalesced();
     const next = normalizeBrushSettings({ ...brushRef.current, ...patch });
     brushRef.current = next;
     setBrush(next);
     setViewRev((r) => r + 1);
     const payload = buildPayload();
     if (payload) writeMapFile(ws.stem, payload);
-  }, [snapshotForUndoCoalesced, buildPayload, writeMapFile, ws.stem]);
+  }, [buildPayload, writeMapFile, ws.stem]);
 
   const openMap = useCallback((name: string) => {
     if (name === ws.stem) return;

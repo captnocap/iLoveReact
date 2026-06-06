@@ -33,6 +33,7 @@ import { saveCustomTexture, useCustomTextures } from '../../../hmsc/render3d/cus
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { editorTunables } from '../tunables';
+import { useRouteTwigState } from '../twigs';
 import {
   PAINT, usePaintEditor, PaintSurface, PaintQuad,
   type Dims, type GraySource, type PaintDocument, type PaintSession,
@@ -228,7 +229,10 @@ export function CutoutRoute(props: { onExit: () => void }) {
   // Smart-backend choice (the original's flood/SAM toggle; SAM wins by
   // default when the onnx host binding exists — the auto rule).
   const samAvailable = useMemo(() => PAINT.isSegmentAvailable(), []);
-  const [backendChoice, setBackendChoice] = useState<BackendChoice>(samAvailable ? 'sam' : 'flood');
+  const [backendChoice, setBackendChoice] = useRouteTwigState<BackendChoice>('/cutout', 'backendChoice', samAvailable ? 'sam' : 'flood');
+  useEffect(() => {
+    if (backendChoice === 'sam' && !samAvailable) setBackendChoice('flood');
+  }, [backendChoice, samAvailable, setBackendChoice]);
 
   // Grayscale of the source (edge snap / refine) — loaded async per target.
   const [gray, setGray] = useState<GraySource | null>(null);
@@ -459,7 +463,7 @@ export function CutoutRoute(props: { onExit: () => void }) {
 
   // the MODELS rail: rosters read live off the one store (libRev re-renders
   // after a model save so painted dots refresh)
-  const [modelPick, setModelPick] = useState<{ family: 'figure' | 'vehicle'; docId: string } | null>(null);
+  const [modelPick, setModelPick] = useRouteTwigState<{ family: 'figure' | 'vehicle'; docId: string } | null>('/cutout', 'modelPick', null);
   const figureRoster = models.figures ? models.figures.state() : null;
   const vehicleGarage = models.vehicles ? models.vehicles.state() : null;
   const modelCount = (figureRoster?.order.length ?? 0) + (vehicleGarage?.order.length ?? 0);
@@ -695,7 +699,7 @@ function Workbench(props: {
     if (s.documentVersion > 0) onDirtyRef.current();
   }, [s.documentVersion]);
 
-  const [fxModal, setFxModal] = useState(false);
+  const [fxModal, setFxModal] = useRouteTwigState('/cutout', 'fxModalOpen', false);
 
   return (
     <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, minHeight: 0, position: 'relative' }}>
@@ -769,9 +773,9 @@ const MODAL_PREVIEW_CELLS = (() => {
 })();
 
 function EffectModal({ s, onClose }: { s: ReturnType<typeof usePaintEditor>; onClose: () => void }) {
-  const [label, setLabel] = useState(`Custom ${s.customSurfaces.length + 1}`);
-  const [shader, setShader] = useState(CUSTOM_FX_TEMPLATE);
-  const [previewShader, setPreviewShader] = useState(CUSTOM_FX_TEMPLATE);
+  const [label, setLabel] = useRouteTwigState('/cutout', 'fxDraftLabel', `Custom ${s.customSurfaces.length + 1}`);
+  const [shader, setShader] = useRouteTwigState('/cutout', 'fxDraftShader', CUSTOM_FX_TEMPLATE);
+  const [previewShader, setPreviewShader] = useRouteTwigState('/cutout', 'fxPreviewShader', CUSTOM_FX_TEMPLATE);
   const previewStale = shader !== previewShader;
   const add = () => {
     const id = s.addCustomSurface(label.trim() || 'Custom FX', shader);

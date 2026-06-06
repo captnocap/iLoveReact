@@ -29,6 +29,7 @@ import type { PartId } from '../../game/figure/shapes';
 import { PaintQuad, type PaintEditorState } from '../paint';
 import type { PaintLayer } from '../paint';
 import { editorTunables } from '../tunables';
+import { useRouteTwigState } from '../twigs';
 import type { ModelBinding } from './models';
 
 const T = GAME_CHROME.tokens.color;
@@ -209,7 +210,11 @@ export function ModelPreview3D(props: {
   // ── V23 native orbit (the VehiclesRoute pattern) ───────────────────────────
   const isFigure = binding.family === 'figure';
   const target: [number, number, number] = isFigure ? [0, 1.4, 0] : [0, 0.8, 0];
-  const [dist, setDist] = useState(isFigure ? MODEL_PREVIEW.figureDist : MODEL_PREVIEW.vehicleDist);
+  const [dist, setDist] = useRouteTwigState(
+    '/cutout',
+    isFigure ? 'modelPreviewFigureDist' : 'modelPreviewVehicleDist',
+    isFigure ? MODEL_PREVIEW.figureDist : MODEL_PREVIEW.vehicleDist,
+  );
   const lookRef = useRef({ yaw: 30, pitch: 16 });
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const cameraRef = useRef<any>(null);

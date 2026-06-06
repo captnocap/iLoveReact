@@ -22,7 +22,7 @@
 //   • REACT textures (the building skins) are the other authoring kind — laid out
 //     in code, browsable here as previews. Authoring those stays a code task.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { Box, Col, Effect, Pressable, Row, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { shaderGroups, shaderSpec, type ShaderSpec } from '../hmsc/render3d/textureShaders';
 import { TEXTURE_REGISTRY, textureById } from '../hmsc/render3d/textures';
@@ -33,6 +33,7 @@ import { accentFor } from './studio.cls';
 import { editorChannel } from './editors/store';
 import { editorSessions, type RouteSession } from './editors/sessions';
 import { materialsStream, type MaterialsEvent } from './editors/materials/stream';
+import { useRouteTwigState } from './editors/twigs';
 
 type Sel =
   | { kind: 'shader'; id: string }
@@ -79,8 +80,8 @@ export function TextureStudio() {
   const reactTextures = useMemo(() => TEXTURE_REGISTRY.filter((t) => t.source.kind === 'react'), []);
   const customs = useCustomTextures();
 
-  const [sel, setSel] = useState<Sel>({ kind: 'shader', id: groups[0].specs[0].id });
-  const [saveAs, setSaveAs] = useState('');
+  const [sel, setSel] = useRouteTwigState<Sel>('/textures', 'selection', { kind: 'shader', id: groups[0].specs[0].id });
+  const [saveAs, setSaveAs] = useRouteTwigState('/textures', 'saveAs', '');
 
   // ── the V20 channel + this visit's session (AUTOSAVE-0605): every
   // Materialize/delete lands as its own labeled commit on the materials

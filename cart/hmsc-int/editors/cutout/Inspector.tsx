@@ -19,6 +19,7 @@ import {
   PaintQuad, PAINT,
   type PaintEditorState, type PaintBlendMode, type SurfaceId,
 } from '../paint';
+import { useRouteTwigState } from '../twigs';
 
 const { Chip, Knob } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
@@ -74,9 +75,9 @@ export function CutoutInspector(props: {
   onOpenEffectModal: () => void;
 }) {
   const { s } = props;
-  const [tab, setTab] = useState<Tab>('tool');
+  const [tab, setTab] = useRouteTwigState<Tab>('/cutout', 'inspectorTab', 'tool');
   const [rect, setRect] = useState<Rect | null>(null);
-  const [layersHeight, setLayersHeight] = useState<number>(INSPECTOR.layersDefault);
+  const [layersHeight, setLayersHeight] = useRouteTwigState<number>('/cutout', 'layersHeight', INSPECTOR.layersDefault);
   const [resizing, setResizing] = useState(false);
 
   const resizeLayers = (screenY: number) => {

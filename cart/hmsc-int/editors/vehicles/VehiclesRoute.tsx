@@ -9,7 +9,7 @@
 // Persistence is not a retrofit (V20): the garage IS the 'vehicles' stream —
 // every edit appends an 'authored' event (one undo position per edit) and
 // re-materializes the snapshot the game/compile loads. View state (camera,
-// selection, playback) is transient by design; the CONTENT lives in data/.
+// selection, playback) is a route twig: persisted, never undoable.
 //
 // Session history (the user's ruling): the route opens a SESSION on the
 // vehicles channel (editors/sessions.ts) — every interaction is one LABELED
@@ -44,6 +44,7 @@ import type { StreamHandle } from '../../data';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { editorTunables } from '../tunables';
+import { useRouteTwigState } from '../twigs';
 // MODELPAINT-0605: render /cutout's per-part paintings + deep-link into it
 import { VehiclePaintCaptures } from '../../game/paintedRender';
 import { setPendingModelTarget } from '../cutout/models';
@@ -190,20 +191,21 @@ export function VehiclesRoute(props: { onExit: () => void; onPaintTexture?: () =
   // The session boundary: leaving the route records the close marker.
   useEffect(() => () => garage.session?.close(), [garage]);
   const [state, setState] = useState<VehiclesStreamState>(() => garage.channel ? garage.channel.state() : { vehicles: {}, order: [] });
-  const [activeId, setActiveId] = useState<string | null>(() => state.order[state.order.length - 1] ?? null);
+  const [activeId, setActiveId] = useRouteTwigState<string | null>('/vehicles', 'activeId', state.order[state.order.length - 1] ?? null);
 
-  // ── transient view state (never persisted — content lives in the stream) ──
-  const [pose, setPose] = useState<VehiclePoseId>('parked');
+  // ── route twig state (persisted, never undoable; content lives in the stream) ──
+  const [pose, setPose] = useRouteTwigState<VehiclePoseId>('/vehicles', 'pose', 'parked');
   const [frame, setFrame] = useState(0);
-  const [running, setRunning] = useState(false);
-  const [showHitboxes, setShowHitboxes] = useState(true);
-  const [showAnchors, setShowAnchors] = useState(true);
-  const [selected, setSelected] = useState<VehiclePartId | null>('gas_tank');
+  const [running, setRunning] = useRouteTwigState('/vehicles', 'running', false);
+  const [showHitboxes, setShowHitboxes] = useRouteTwigState('/vehicles', 'showHitboxes', true);
+  const [showAnchors, setShowAnchors] = useRouteTwigState('/vehicles', 'showAnchors', true);
+  const [selected, setSelected] = useRouteTwigState<VehiclePartId | null>('/vehicles', 'selectedPart', 'gas_tank');
   // zoom is a KNOB (param-rate); yaw/pitch live in lookRef — drag deltas ride
   // the V23 native controller and never re-render the cart (TestRoute /
   // CharactersRoute pattern).
-  const [dist, setDist] = useState(VIEW_TUNING.orbit.boot.dist);
-  const lookRef = useRef({ yaw: VIEW_TUNING.orbit.boot.yaw, pitch: VIEW_TUNING.orbit.boot.pitch });
+  const [dist, setDist] = useRouteTwigState('/vehicles', 'orbitDistance', VIEW_TUNING.orbit.boot.dist);
+  const [orbitLook, setOrbitLook] = useRouteTwigState('/vehicles', 'orbitLook', { yaw: VIEW_TUNING.orbit.boot.yaw, pitch: VIEW_TUNING.orbit.boot.pitch });
+  const lookRef = useRef(orbitLook);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const cameraRef = useRef<any>(null);
   const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
@@ -215,6 +217,10 @@ export function VehiclesRoute(props: { onExit: () => void; onPaintTexture?: () =
   }, [running]);
 
   const doc: VehicleDoc | null = activeId ? state.vehicles[activeId] ?? null : null;
+  useEffect(() => {
+    if (activeId && state.vehicles[activeId]) return;
+    setActiveId(state.order[state.order.length - 1] ?? null);
+  }, [activeId, state, setActiveId]);
 
   // ── capability 13: every edit is one LABELED session commit (content event
   // on the vehicles channel + commit marker + fresh snapshots) ──────────────
@@ -307,7 +313,10 @@ export function VehiclesRoute(props: { onExit: () => void; onPaintTexture?: () =
     l.yaw = nextYaw;
     l.pitch = nextPitch;
   };
-  const orbitUp = () => { dragRef.current = null; };
+  const orbitUp = () => {
+    setOrbitLook({ ...lookRef.current });
+    dragRef.current = null;
+  };
 
   // The DECLARATIVE camera is the boot frame only — static props, so React
   // never sends camera UPDATEs after mount; the host writes the node fields

@@ -36,6 +36,7 @@ import {
 import { createPaintHistory } from './history';
 import { addCustomSurface as addCustomSurfaceOp, SLOT_DEFAULTS, type CustomSurface, type PaintBlendMode, type SurfaceId } from './surfaces';
 import type { BackendOpts, ClickLabel, ClickPoint, SelectionBackend } from './backends/types';
+import { useRouteTwigState } from '../twigs';
 
 export type Dims = { w: number; h: number };
 
@@ -85,10 +86,12 @@ export interface PaintEditorState {
   mode: PaintMode;
   brushPx: number;
   mirror: boolean;
+  activeColorSlot: number;
   setTool: (t: PaintTool) => void;
   setMode: (m: PaintMode) => void;
   setBrushPx: (n: number) => void;
   setMirror: (on: boolean) => void;
+  setActiveColorSlot: (i: number) => void;
   stepBrush: (dir: -1 | 1) => void;
 
   // strokes (viewport input → here)
@@ -171,15 +174,17 @@ export interface PaintEditorState {
 
 export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const { idPrefix } = opts;
+  const twigRoute = `/paint/${idPrefix}`;
   const dims = opts.dims;
   const dimsRef = useRef(dims); dimsRef.current = dims;
   const srcPath = opts.srcPath ?? null;
 
   const [status, setStatus] = useState('pick a tool and start painting');
-  const [tool, setTool] = useState<PaintTool>('brush');
-  const [mode, setMode] = useState<PaintMode>('erase');
-  const [brushPx, setBrushPx] = useState(PAINT_TUNING.brushDefaultPx);
-  const [mirror, setMirror] = useState(!!opts.mirror);
+  const [tool, setTool] = useRouteTwigState<PaintTool>(twigRoute, 'tool', 'brush');
+  const [mode, setMode] = useRouteTwigState<PaintMode>(twigRoute, 'mode', 'erase');
+  const [brushPx, setBrushPx] = useRouteTwigState(twigRoute, 'brushPx', PAINT_TUNING.brushDefaultPx);
+  const [mirror, setMirror] = useRouteTwigState(twigRoute, 'mirror', !!opts.mirror);
+  const [activeColorSlot, setActiveColorSlotState] = useRouteTwigState(twigRoute, 'activeColorSlot', 0);
   const [lassoPoints, setLassoPoints] = useState<LassoPoint[]>([]);
   const [maskVersion, setMaskVersion] = useState(0);
   const [documentVersion, setDocumentVersion] = useState(0);
@@ -195,7 +200,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const [layers, setLayersState] = useState<PaintLayer[]>([]);
   const layersRef = useRef<PaintLayer[]>([]);
   const setLayers = (next: PaintLayer[]) => { layersRef.current = next; setLayersState(next); };
-  const [activeLayer, setActiveLayerState] = useState(-1);
+  const [activeLayer, setActiveLayerState] = useRouteTwigState(twigRoute, 'activeLayer', -1);
   const activeLayerRef = useRef(-1);
   const setActiveLayer = (i: number) => {
     const clamped = i < 0 ? -1 : Math.min(i, layersRef.current.length - 1);
@@ -224,7 +229,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   }, [layers]);
 
   // ── look defaults (seed new layers) ─────────────────────────────────────────
-  const [defaults, setDefaults] = useState<PaintLookDefaults>({
+  const [defaults, setDefaults] = useRouteTwigState<PaintLookDefaults>(twigRoute, 'defaults', {
     mode: PAINT_TUNING.layerLook.defaultSurface,
     colors: SLOT_DEFAULTS.slice(),
     hueOffset: 0,
@@ -241,10 +246,10 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const backend = opts.backend ?? null;
   const backendRef = useRef<SelectionBackend | null>(backend); backendRef.current = backend;
   const smartAvailable = !!backend && !!srcPath;
-  const [floodFuzz, setFloodFuzzState] = useState(PAINT_TUNING.backends.floodFuzz);
-  const [floodRejectFrac, setFloodRejectFracState] = useState(PAINT_TUNING.backends.floodRejectFrac);
-  const [samThreshold, setSamThresholdState] = useState(PAINT_TUNING.backends.samThreshold);
-  const [samMaskIdx, setSamMaskIdxState] = useState<0 | 1 | 2>(PAINT_TUNING.backends.samMaskIdx);
+  const [floodFuzz, setFloodFuzzState] = useRouteTwigState(twigRoute, 'floodFuzz', PAINT_TUNING.backends.floodFuzz);
+  const [floodRejectFrac, setFloodRejectFracState] = useRouteTwigState(twigRoute, 'floodRejectFrac', PAINT_TUNING.backends.floodRejectFrac);
+  const [samThreshold, setSamThresholdState] = useRouteTwigState(twigRoute, 'samThreshold', PAINT_TUNING.backends.samThreshold);
+  const [samMaskIdx, setSamMaskIdxState] = useRouteTwigState<0 | 1 | 2>(twigRoute, 'samMaskIdx', PAINT_TUNING.backends.samMaskIdx);
   const tunablesRef = useRef<BackendOpts>({});
   tunablesRef.current = {
     fuzzPercent: floodFuzz,
@@ -349,7 +354,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     });
   };
 
-  const applyDocument = (doc: PaintDocument) => {
+  const applyDocument = (doc: PaintDocument, preserveTwig = false) => {
     const inflated = inflatePaintDocument(doc);
     pendingUploadsRef.current.clear();
     const restored: PaintLayer[] = inflated.map((l) => {
@@ -359,11 +364,15 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
       return { id: l.id, name: l.name, groupName: l.groupName, config: l.config, clicks: l.clicks };
     });
     setLayers(restored);
-    setActiveLayer(typeof doc.activeLayer === 'number' ? doc.activeLayer : (restored.length > 0 ? 0 : -1));
-    setTool(doc.tool ?? 'brush');
-    setMode(doc.mode ?? 'erase');
-    setBrushPx(doc.brushPx ?? PAINT_TUNING.brushDefaultPx);
-    if (doc.defaults) setDefaults({ ...doc.defaults, colors: doc.defaults.colors.slice() });
+    if (preserveTwig) {
+      setActiveLayer(activeLayerRef.current);
+    } else {
+      setActiveLayer(typeof doc.activeLayer === 'number' ? doc.activeLayer : (restored.length > 0 ? 0 : -1));
+      setTool(doc.tool ?? 'brush');
+      setMode(doc.mode ?? 'erase');
+      setBrushPx(doc.brushPx ?? PAINT_TUNING.brushDefaultPx);
+      if (doc.defaults) setDefaults({ ...doc.defaults, colors: doc.defaults.colors.slice() });
+    }
     setCustomSurfaces((doc.customSurfaces ?? []).map((cs) => ({ ...cs })));
     setLassoPoints([]);
     bump();
@@ -809,14 +818,14 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     const prev = history.undo(buildDocument);
     bumpHistory();
     if (!prev) { setStatus('nothing to undo'); return; }
-    applyDocument(prev);
+    applyDocument(prev, true);
     setStatus('undo');
   };
   const redo = () => {
     const next = history.redo(buildDocument);
     bumpHistory();
     if (!next) { setStatus('nothing to redo'); return; }
-    applyDocument(next);
+    applyDocument(next, true);
     setStatus('redo');
   };
 
@@ -864,6 +873,9 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     const next = sizes[Math.max(0, Math.min(sizes.length - 1, idx + dir))];
     setBrushPx(next);
   };
+  const setActiveColorSlot = (i: number) => {
+    setActiveColorSlotState(Math.max(0, Math.min(SLOT_DEFAULTS.length - 1, Math.round(i))));
+  };
 
   const active = activeLayer >= 0 && activeLayer < layers.length ? layers[activeLayer] : null;
 
@@ -873,9 +885,9 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     srcPath,
     status,
     smartBusy,
-    tool, mode, brushPx, mirror,
+    tool, mode, brushPx, mirror, activeColorSlot,
     setTool: (t) => { if (t === 'smart' && !smartAvailable) return; setTool(t); },
-    setMode, setBrushPx, setMirror, stepBrush,
+    setMode, setBrushPx, setMirror, setActiveColorSlot, stepBrush,
     beginStroke, paintAtSource, endStroke,
     lassoPoints, addLassoPoint, commitLasso, clearLasso,
     smartAvailable,

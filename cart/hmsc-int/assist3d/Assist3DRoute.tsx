@@ -26,6 +26,7 @@ import { BACKEND_LABELS, DEFAULT_CONFIG, type Backend, type BackendConfig } from
 import { loadModelHistory, rememberModelPath, forgetModelPath } from './modelHistory';
 import { editorChannel } from '../editors/store';
 import { editorSessions, type RouteSession } from '../editors/sessions';
+import { useRouteTwigState } from '../editors/twigs';
 import { assist3dStream, type Assist3dEvent } from './stream';
 
 // AUTOSAVE-0605 (V20 "saved at every micro change"): scene auto-commit debounce
@@ -124,14 +125,14 @@ export function Assist3DRoute() {
 
   // ── selection ── (camera + drag/pick live in the memo'd SceneSurface, so
   // orbiting never re-renders this route's streaming chat log)
-  const [selected, setSelected] = useState<number | null>(null);
+  const [selected, setSelected] = useRouteTwigState<number | null>('/assist3d', 'selectedMesh', null);
   const selMesh = selected != null ? scene.meshes[selected] : null;
   useEffect(() => { setSelected((cur) => (cur != null && cur < scene.meshes.length ? cur : null)); }, [scene]);
   // stable identity so SceneSurface's memo holds while the chat streams
   const onPick = useCallback((i: number | null) => setSelected(i), []);
 
   // ── assistant (swappable backend) ──
-  const [config, setConfig] = useState<BackendConfig>(DEFAULT_CONFIG.claude_code);
+  const [config, setConfig] = useRouteTwigState<BackendConfig>('/assist3d', 'backendConfig', DEFAULT_CONFIG.claude_code);
   // remember each backend's edited config so switching away and back keeps it
   const savedRef = useRef<Record<Backend, BackendConfig>>({ ...DEFAULT_CONFIG });
   const pickBackend = (b: Backend) => {
@@ -145,9 +146,9 @@ export function Assist3DRoute() {
 
   const sa = useSceneAssistant({ config, scenePath });
 
-  const [input, setInput] = useState('');
+  const [input, setInput] = useRouteTwigState('/assist3d', 'inputDraft', '');
   const inputRef = useRef(''); inputRef.current = input;
-  const [comment, setComment] = useState('');
+  const [comment, setComment] = useRouteTwigState('/assist3d', 'commentDraft', '');
   const commentRef = useRef(''); commentRef.current = comment;
   const [myPrompts, setMyPrompts] = useState<{ text: string; ts: number }[]>([]);
 

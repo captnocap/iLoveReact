@@ -27,6 +27,7 @@ import { GAME_CHROME } from '@game';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession, type SessionsState } from '../sessions';
 import { editorTunables, tuningStream, type TunableEntry, type TuningEvent } from '../tunables';
+import { useRouteTwigState } from '../twigs';
 import { busChannels, busRows, filterBusRows } from './bus';
 
 const T = GAME_CHROME.tokens.color;
@@ -97,7 +98,7 @@ export function SettingsRoute(props: { onExit: () => void }) {
   }, [sync]);
   const rows = useMemo(() => busRows(sessionsState), [sessionsState]);
   const channels = useMemo(() => busChannels(sessionsState), [sessionsState]);
-  const [channelFilter, setChannelFilter] = useState<string | null>(null);
+  const [channelFilter, setChannelFilter] = useRouteTwigState<string | null>('/settings', 'channelFilter', null);
   const visible = filterBusRows(rows, channelFilter).slice(0, SETTINGS_VIEW.busRowCap);
 
   // ── the tunables fold ──────────────────────────────────────────────────────

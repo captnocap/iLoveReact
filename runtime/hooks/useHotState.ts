@@ -22,6 +22,7 @@
  * persistence is per-process either way). Functionally behaves as useState.
  */
 
+import * as React from 'react';
 import { callHost, callHostJson } from '../ffi';
 
 type Updater<T> = T | ((prev: T) => T);

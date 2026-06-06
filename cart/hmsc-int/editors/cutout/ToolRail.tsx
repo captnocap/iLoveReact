@@ -10,7 +10,6 @@
 // color slots) + cart/cutout/components/TopBar.tsx BrushSlider (read, never
 // imported).
 
-import { useState } from 'react';
 import { Box, Col, Pressable, Row, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { GAME_CHROME } from '@game';
@@ -46,12 +45,11 @@ const MODES: { id: PaintMode; label: string; icon: string; color: string }[] = [
 ];
 
 export function CutoutToolRail({ s }: { s: PaintEditorState }) {
-  const [activeSlot, setActiveSlot] = useState(0);
   const target = s.activeLayer;
   const colors = target >= 0 && target < s.layers.length
     ? (s.layers[target].config.colors ?? s.defaults.colors)
     : s.defaults.colors;
-  const safeSlot = Math.min(Math.max(activeSlot, 0), PAINT.NUM_COLOR_SLOTS - 1);
+  const safeSlot = Math.min(Math.max(s.activeColorSlot, 0), PAINT.NUM_COLOR_SLOTS - 1);
 
   return (
     <Col style={{
@@ -111,7 +109,7 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
             tooltip={`${label} color slot`}
             color={colors[i] ?? '#ffffff'}
             active={safeSlot === i}
-            onPress={() => setActiveSlot(i)}
+            onPress={() => s.setActiveColorSlot(i)}
           />
         ))}
       </Row>

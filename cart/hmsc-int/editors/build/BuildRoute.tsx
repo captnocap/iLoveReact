@@ -50,6 +50,7 @@ import { EmbodiedHud, HUD_TUNING, type HudCompassMarker, type HudFeedEntry, type
 import { C, accentFor } from '../../studio.cls';
 import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
+import { useRouteTwigState } from '../twigs';
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './snap';
 
 const DEG = Math.PI / 180;
@@ -308,10 +309,10 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
   const { playerRef, lookRef, worldGrid } = embodied;
 
   // ── live tuning (P2 in-interface; defaults are the named tables) ──────────
-  const [reachMeters, setReachMeters] = useState(SNAP_TUNING_DEFAULTS.reachMeters);
-  const [ghostOpacity, setGhostOpacity] = useState<number>(BUILD_UI.ghostOpacity);
-  const [marchStep, setMarchStep] = useState(SNAP_TUNING_DEFAULTS.groundMarchStepMeters);
-  const [showTuning, setShowTuning] = useState(false);
+  const [reachMeters, setReachMeters] = useRouteTwigState('/build', 'reachMeters', SNAP_TUNING_DEFAULTS.reachMeters);
+  const [ghostOpacity, setGhostOpacity] = useRouteTwigState<number>('/build', 'ghostOpacity', BUILD_UI.ghostOpacity);
+  const [marchStep, setMarchStep] = useRouteTwigState('/build', 'marchStep', SNAP_TUNING_DEFAULTS.groundMarchStepMeters);
+  const [showTuning, setShowTuning] = useRouteTwigState('/build', 'showTuning', false);
   const snapTuning = useMemo(() => ({
     ...SNAP_TUNING_DEFAULTS,
     reachMeters,
@@ -326,10 +327,10 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
     ...GAME_BUILD.prefabs.ids.map((id) => GAME_BUILD.prefabs.get(id)),
     ...Object.values(streamState?.prefabs ?? {}),
   ], [streamState]);
-  const [armed, setArmed] = useState<Armed>(() => {
+  const [armed, setArmed] = useRouteTwigState<Armed>('/build', 'armed', (() => {
     const first = GAME_BUILD.catalog.byKind(kinds[0])[0];
     return { type: 'piece', id: first.id };
-  });
+  })());
   const armedRef = useRef(armed);
   armedRef.current = armed;
   const armedDef: BuildPieceDef | null = armed.type === 'piece' ? GAME_BUILD.catalog.get(armed.id) : null;
@@ -363,8 +364,8 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
   };
 
   // ghost rotation (R) — a ref for the frame loop + state for the HUD
-  const [ghostYaw, setGhostYaw] = useState(0);
-  const ghostYawRef = useRef(0);
+  const [ghostYaw, setGhostYaw] = useRouteTwigState('/build', 'ghostYaw', 0);
+  const ghostYawRef = useRef(ghostYaw);
 
   // ── crosshair → snap target (recomputed on the substrate's frame, published
   //    only when the SNAPPED result changes — quantized values make that cheap) ─
@@ -466,10 +467,18 @@ export function BuildRoute(props: { state: GameState; mapName: string; onExit: (
   placeRef.current = place;
 
   // ── prefab capture (P marks → name → save) ────────────────────────────────
-  const [markedIds, setMarkedIds] = useState<ReadonlySet<string>>(() => new Set<string>());
+  const [markedIdList, setMarkedIdList] = useRouteTwigState<string[]>('/build', 'markedIds', []);
+  const markedIds = useMemo<ReadonlySet<string>>(() => new Set(markedIdList), [markedIdList]);
+  const setMarkedIds = (next: ReadonlySet<string> | ((prev: ReadonlySet<string>) => ReadonlySet<string>)): void => {
+    setMarkedIdList((prevList) => {
+      const prevSet = new Set(prevList);
+      const nextSet = typeof next === 'function' ? next(prevSet) : next;
+      return [...nextSet];
+    });
+  };
   const markedRef = useRef(markedIds);
   markedRef.current = markedIds;
-  const [prefabName, setPrefabName] = useState('');
+  const [prefabName, setPrefabName] = useRouteTwigState('/build', 'prefabName', '');
 
   const savePrefab = () => {
     const ids = markedRef.current;
