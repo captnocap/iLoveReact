@@ -31,7 +31,8 @@ const TUNING = {
 function wipeScratch(): void {
   for (const path of [
     `${ROOT}/streams/world.jsonl`, `${ROOT}/streams/tuning.jsonl`, `${ROOT}/streams/later.jsonl`,
-    `${ROOT}/streams/torn.jsonl`, `${ROOT}/snapshots/world.snapshot.json`,
+    `${ROOT}/streams/torn.jsonl`, `${ROOT}/streams/corrupt.jsonl`, `${ROOT}/streams/spliced.jsonl`,
+    `${ROOT}/snapshots/world.snapshot.json`,
     `${ROOT}/snapshots/tuning.snapshot.json`, `${ROOT}/snapshots/later.snapshot.json`,
     `${ROOT}/backup/world.jsonl`, `${ROOT}/backup/tuning.jsonl`, `${ROOT}/backup/manifest.json`,
   ]) globalThis.__fs_remove?.(path);
@@ -154,8 +155,49 @@ test('a torn trailing line (crash mid-write) costs one event, never the chain', 
   const torn = store.defineStream({ ...WORLD, name: 'torn' });
   assertEqual(torn.length(), 1, 'the intact record must survive');
   assertEqual(torn.state().placed.join(','), 'road', 'the fold must use what survived');
+  assertEqual(store.quarantine().length, 1, 'the torn line must be quarantined, not silently dropped');
+  assert(store.quarantine()[0].trailing, 'a last-line tear is the ordinary crash-mid-write case');
   torn.append({ place: 'house' });
   assertEqual(torn.state().placed.join(','), 'road,house', 'the chain must keep appending after the tear');
+  // The seam guard: the append must NOT splice onto the torn bytes — a fresh
+  // open parses every event written after the tear (the :884 regression).
+  const reopened = openStore(ROOT).defineStream({ ...WORLD, name: 'torn' });
+  assertEqual(reopened.state().placed.join(','), 'road,house', 'a reopen must replay everything around the tear');
+});
+
+test('a corrupt MID-FILE record is skipped + quarantined; the fold never throws (tolerance law)', () => {
+  const path = `${ROOT}/streams/corrupt.jsonl`;
+  const garbage = '{"seq":2,"at":0,"event":{"place":"NOT JSON';
+  globalThis.__fs_write(path, [
+    JSON.stringify({ seq: 1, at: 0, event: { place: 'road' } }),
+    garbage,
+    JSON.stringify({ seq: 3, at: 0, event: { place: 'house' } }),
+    '',
+  ].join('\n'));
+  const store = openStore(ROOT);
+  const stream = store.defineStream({ ...WORLD, name: 'corrupt' });
+  assertEqual(stream.length(), 2, 'every valid record must survive a mid-file corruption');
+  assertEqual(stream.state().placed.join(','), 'road,house', 'the fold must continue past the corrupt record');
+  const q = store.quarantine();
+  assertEqual(q.length, 1, 'the corrupt record must be quarantined in memory');
+  assertEqual(q[0].line, 2, 'the quarantine must carry the 1-based line number');
+  assertEqual(q[0].raw, garbage, 'the quarantine must keep the bytes exactly as they sit on disk');
+  assert(!q[0].trailing, 'a mid-file corruption is not the ordinary trailing tear');
+  assert(store.undoPoint() >= 3, 'the global sequence must resume from the valid records');
+});
+
+test('the :884 shape — a record spliced onto torn bytes — is quarantined, never a repair write', () => {
+  // Reproduces sessions.jsonl:884: an interrupted write left a torn record,
+  // and a later writer (pre-seam-guard) glued a full record onto it.
+  const path = `${ROOT}/streams/spliced.jsonl`;
+  const spliced = '{"seq":2,"at":0,"event":{"kind":"c{"seq":7,"at":9,"event":{"place":"lost"}}';
+  const before = `${JSON.stringify({ seq: 1, at: 0, event: { place: 'road' } })}\n${spliced}\n${JSON.stringify({ seq: 8, at: 9, event: { place: 'house' } })}\n`;
+  globalThis.__fs_write(path, before);
+  const store = openStore(ROOT);
+  const stream = store.defineStream({ ...WORLD, name: 'spliced' });
+  assertEqual(stream.state().placed.join(','), 'road,house', 'the records around the splice must fold');
+  assertEqual(store.quarantine().length, 1, 'the spliced line is one quarantined record');
+  assertEqual(globalThis.__fs_read(path), before, 'the file is NEVER rewritten — no repair writes, append-only is sacred');
 });
 
 finish('data/store');

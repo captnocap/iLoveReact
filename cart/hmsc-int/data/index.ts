@@ -26,8 +26,18 @@
 // The host has no append binding yet, so append = read + concat + write —
 // SEMANTICALLY append-only (existing lines are never modified); a real
 // `__fs_append` host fn is the queued bindings-lane follow-up (beside C2's
-// `__fs_write_bytes`/`__fs_copy`). The reader skips a torn trailing line, so a
-// crash mid-write costs at most the one in-flight event, never the chain.
+// `__fs_write_bytes`/`__fs_copy`).
+//
+// TOLERANCE (the V20 boundary law — boundary validation never throws): a
+// corrupt or partial record ANYWHERE in a stream file is SKIPPED, logged
+// loudly (console.warn + telemetry), and QUARANTINED in memory
+// (store.quarantine()) — the fold continues with every valid record. The file
+// is NEVER rewritten: append-only is sacred, there are no "repair" writes.
+// A crash mid-write costs at most the one in-flight event, never the chain.
+// The writer guards the seam too: if the file's last line is torn (no
+// trailing newline — an interrupted write), the next append starts on a
+// fresh line instead of splicing onto the torn bytes. That splice is exactly
+// what produced the sessions.jsonl:884 corruption (STOREDB-0606 step 0).
 //
 // P2: nothing here owns a gameplay number. P3: openStore() is the only door.
 
@@ -76,6 +86,19 @@ export type StreamHandle<State, Event> = {
   length: () => number;
 };
 
+/** one skipped record, preserved byte-for-byte in memory (the file is never rewritten) */
+export type QuarantinedRecord = {
+  /** the stream file the record was read from */
+  path: string;
+  /** 1-based line number in that file */
+  line: number;
+  /** the raw line, exactly as it sits on disk */
+  raw: string;
+  /** true when this was the file's last line with no trailing newline — the
+   *  ordinary crash-mid-write tear; false = a mid-file corruption */
+  trailing: boolean;
+};
+
 export type Store = {
   defineStream: <State, Event>(def: StreamDef<State, Event>) => StreamHandle<State, Event>;
   /** the current undo-chain position — pass back to stateAt to time-travel */
@@ -86,6 +109,9 @@ export type Store = {
   loadSnapshot: <State>(name: string) => { name: string; globalSeq: number; state: State } | null;
   /** the explicit backup story: copy every stream file + manifest to destDir */
   exportBackup: (destDir: string) => string[];
+  /** every corrupt record skipped while reading this store's streams —
+   *  in-memory quarantine only; the files on disk are never touched */
+  quarantine: () => QuarantinedRecord[];
 };
 
 type StoredEvent = { seq: number; at: number; event: unknown };
@@ -100,7 +126,7 @@ function fs() {
   return host;
 }
 
-function readLog(path: string): StoredEvent[] {
+function readLog(path: string, quarantine: QuarantinedRecord[]): StoredEvent[] {
   const text = fs().__fs_read(path);
   if (typeof text !== 'string' || text === '') return [];
   const events: StoredEvent[] = [];
@@ -111,9 +137,23 @@ function readLog(path: string): StoredEvent[] {
     try {
       events.push(JSON.parse(line) as StoredEvent);
     } catch {
-      // A torn trailing line (crash mid-write) loses only the in-flight event.
-      // Anything torn EARLIER would be a real corruption — surface it.
-      if (i < lines.length - 1) throw new Error(`data store: corrupt record at ${path}:${i + 1}`);
+      // TOLERANCE (V20 boundary law): never throw. Skip the record, keep its
+      // bytes in memory, log loudly, and keep folding every valid record.
+      // The file is never rewritten — no "repair" writes, ever.
+      // `trailing` = the ordinary crash-mid-write tear (last line, no final
+      // newline); anything else is a real mid-file corruption worth a stare.
+      const trailing = i === lines.length - 1;
+      quarantine.push({ path, line: i + 1, raw: lines[i], trailing });
+      console.warn(
+        `data store: ${trailing ? 'torn trailing record' : 'CORRUPT RECORD'} skipped + quarantined at ${path}:${i + 1} ` +
+        `(${lines[i].length} bytes; fold continues with every valid record; file left untouched)`,
+      );
+      GAME_TELEMETRY.recordDiagnostic('worldStream', 'quarantine', {
+        path,
+        line: i + 1,
+        bytes: lines[i].length,
+        trailing,
+      });
     }
   }
   GAME_TELEMETRY.recordDiagnostic('worldStream', 'readLog', {
@@ -146,6 +186,7 @@ export function openStore(rootDir: string): Store {
     current: any;
   };
   const streams = new Map<string, OpenStream>();
+  const quarantined: QuarantinedRecord[] = [];
   let globalSeq = 0;
 
   const foldUpTo = (open: OpenStream, maxSeq: number): any => {
@@ -170,7 +211,7 @@ export function openStore(rootDir: string): Store {
     }
 
     const path = `${streamsDir}/${def.name}.jsonl`;
-    const events = readLog(path);
+    const events = readLog(path, quarantined);
     for (const record of events) {
       if (record.seq > globalSeq) globalSeq = record.seq;
     }
@@ -190,8 +231,15 @@ export function openStore(rootDir: string): Store {
         // Semantically append-only: existing lines never change. Whole-file
         // write is the host's only write today — see the header note.
         const existing = host.__fs_read(path);
+        const prior = typeof existing === 'string' ? existing : '';
+        // The seam guard (STOREDB-0606 step 0): a torn trailing line (an
+        // interrupted write left no final newline) must stay isolated on its
+        // own line — splicing the next record onto it is what turned a
+        // tolerated tear into the sessions.jsonl:884 mid-file corruption.
+        // Existing bytes are untouched; we only refuse to share their line.
+        const seam = prior !== '' && !prior.endsWith('\n') ? '\n' : '';
         const line = `${JSON.stringify(record)}\n`;
-        const text = `${typeof existing === 'string' ? existing : ''}${line}`;
+        const text = `${prior}${seam}${line}`;
         host.__fs_write(path, text);
         open.events.push(record);
         open.current = open.def.apply(open.current, event, record.seq);
@@ -254,5 +302,6 @@ export function openStore(rootDir: string): Store {
       copied.push(manifestPath);
       return copied;
     },
+    quarantine: () => quarantined.slice(),
   };
 }

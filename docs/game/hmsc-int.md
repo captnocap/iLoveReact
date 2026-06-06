@@ -275,7 +275,16 @@ without snapshot support cannot be expressed. Stream/snapshot CONTENT is
 gitignored (the content time machine); backup story = `store.exportBackup()`
 (streams + manifest) or tar of `data/streams/`. Host gap flagged: no
 `__fs_append` binding yet, so appends are read+concat+write (semantically
-append-only; the reader tolerates a torn trailing line). P4 suite
+append-only). TOLERANCE (STOREDB-0606 step 0, 2026-06-06 — the
+sessions.jsonl:884 outage): the reader NEVER throws — a corrupt/partial
+record ANYWHERE in a stream file is skipped, logged loudly (console.warn +
+worldStream telemetry), and quarantined in memory (`store.quarantine()`,
+byte-faithful `{path, line, raw, trailing}`); the fold continues with every
+valid record and the file is NEVER rewritten (no repair writes). The writer
+guards the seam: an append onto a torn trailing line (interrupted write, no
+final newline) starts on a fresh line instead of splicing onto the torn
+bytes — that splice is exactly what turned a tolerated tear into the :884
+mid-file corruption. P4 suite
 `data/data.test.ts` rides `rjit game verify` (suite roots: game/ + data/).
 `apply` receives each event's log position as an optional third arg
 (`apply(state, event, seq?)` — the store always passes it; two-arg
