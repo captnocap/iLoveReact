@@ -368,10 +368,17 @@ ${GREATER_POINTS.map((p) => `  {
   let foot_a = max(brush_a, twin_a);
 
   let ink = vec3f(${SCULPT_CANVAS.guideInk.join(', ')});
-  let color = heat_c * heat_a + contour_c * contour_a + ink * (guide_a + lattice_a + node_a)
-            + greater_c * greater_a + sel_c * sel_a + brush_c * foot_a;
-  let a = min(heat_a + contour_a + guide_a + lattice_a + node_a + greater_a + sel_a + foot_a, 0.92);
-  return vec4f(color, a);
+  // base field: heat/contours/guides compose additively (they ARE light)
+  var rgb = heat_c * heat_a + contour_c * contour_a + ink * (guide_a + lattice_a + node_a);
+  var out_a = min(heat_a + contour_a + guide_a + lattice_a + node_a, 0.92);
+  // markers paint OVER the field (GRIDNODES fix 2: additive blending washed
+  // the greater-point hues white against the heat — mix keeps them TRUE,
+  // the same token the 3D flag wears)
+  rgb = mix(rgb, greater_c, greater_a);
+  rgb = mix(rgb, sel_c, sel_a);
+  rgb = mix(rgb, brush_c, foot_a);
+  let out_a2 = max(max(out_a, greater_a), max(sel_a, foot_a));
+  return vec4f(rgb, out_a2);
 }
 `;
 

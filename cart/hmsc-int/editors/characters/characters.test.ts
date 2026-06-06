@@ -492,6 +492,12 @@ test('grid nodes: click→node mapping, one-cell value edits, greater points sit
   for (const p of GREATER_POINTS) {
     assert([0.25, 0.5, 0.75].includes(p.u) && p.v === 0.5, `(${p.u}, ${p.v}) sits on a meridian × the equator`);
     assert(DEPTH_OVERLAY_WGSL.includes(`vec3f(${p.ink.join(', ')})`), 'the canvas dot color is baked in the shader');
+    // color IDENTITY across views: the 3D flag's hex IS the canvas dot's ink
+    const n = parseInt(p.color.slice(1), 16);
+    const rgb = [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+    for (let c = 0; c < 3; c++) {
+      assertClose(p.ink[c], rgb[c], 0.011, `${p.color} channel ${c}: one token on both sides`);
+    }
   }
   assertEqual(new Set(GREATER_POINTS.map((p) => p.color)).size, 3, 'distinct flag colors');
   // 2D↔3D consistency: the same uv resolves to a finite world flag position

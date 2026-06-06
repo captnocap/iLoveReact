@@ -175,9 +175,29 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   const relief = usePaintable({ id: 'wbchr-relief', w: GRID_W, h: GRID_H });
   const uploadGrid = (id: PartId, g: number[]) => paints[id].paint.upload(bytesFromGrid(g));
 
-  // installRev → re-upload every grid (mount restore, roster load, undo, reset)
+  // installRev → re-upload every grid (mount restore, roster load, undo, reset).
+  // GRIDNODES-0606 fix (HOT-UPDATE GRID DESYNC): the host paintable entry is
+  // created when the <Paintable> CREATE command DRAINS (next frame) — an
+  // upload queued before that is silently dropped (paintable.zig queueUpload:
+  // findEntry orelse return), so a mount/hot-reload restore left the canvas
+  // reading an all-zero texture while the mesh read store truth. Re-assert
+  // the uploads until the entry answers readback (existence probe), then stop.
+  const selDisplaceRef = useRef<number[]>([]);
   useEffect(() => {
-    for (const id of PART_IDS) uploadGrid(id, s.draft.grids[id]);
+    let cancelled = false;
+    let tries = 0;
+    const push = () => {
+      if (cancelled) return;
+      for (const id of PART_IDS) uploadGrid(id, s.draft.grids[id]);
+      relief.paint.upload(reliefBytesFromGrid(selDisplaceRef.current));
+      const probe = paints[PART_IDS[0]].paint.readback();
+      if ((!probe || probe.length < PAINT_W * PAINT_H) && tries < 30) {
+        tries += 1;
+        setTimeout(push, 40);
+      }
+    };
+    push();
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the rev IS the signal
   }, [s.installRev]);
 
