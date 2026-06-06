@@ -1,20 +1,28 @@
 // editors/workbench/characters/PaintLens.tsx — the PAINT lens (WBCHAR-0606
-// parity rows J3, K1-K5): texture painting on the selected part WITHOUT
-// leaving the page — the /cutout model-target machinery mounted in-lens.
+// parity rows J3, K1-K5; rebuilt under ONEPAINTER-0606).
 //
-//   ┌──────────────────────────────┬──────────────┐
-//   │  the shared painter           │ live 3D      │  K4 RULED DAY ONE:
-//   │  (PaintEditor one-liner:      │ ModelPreview │  paint-and-see — the
-//   │   rail · viewport · layers)   ├──────────────┤  part re-bakes per
-//   │                               │ save panel   │  stroke (cutout's wire)
-//   └──────────────────────────────┴──────────────┘
+// ONE PAINTER, ONE CHROME: this lens mounts the EXACT modules the /cutout
+// surface mounts today — CutoutToolRail (with the ColorWheel), PaintSurface,
+// CutoutInspector (tabbed TOOL · FX · SOURCE over the resizable LAYERS
+// panel), CutoutStatusBar, ModelPreview3D — so a fix or feature in the
+// painter lands in BOTH surfaces forever. The first cut mounted the generic
+// PaintEditor kit instead (a second painter EXPERIENCE — the user's
+// rejection, the ledger's own §8 review-blocker); that mount is DELETED.
+// The only lens-owned surface is a thin SAVE strip (a host verb, layout not
+// chrome — cutout's equivalent verb lives in its TopBar).
 //
-// ONE painter (editors/paint — no fork), ONE save door (store.savePainted-
-// Model → applyBodyPaint → labeled commit on the characters channel, K3).
-// Unsaved strokes ride a WORKBENCH-SCOPED slot book (K5 RULED: its own file,
-// never cutout's — "makes it better if something gets really fucked up";
-// one corrupted book must not eat both surfaces' unsaved work). The TATTOO-
-// DRAFT law holds: an unsaved slot resumes over the saved overlay (K1).
+//   ┌──────┬───────────────────────┬──────────────┐
+//   │ tool │  PaintSurface          │ live 3D      │  K4: the part re-bakes
+//   │ rail │  (model underlay:      │ ModelPreview │  per stroke
+//   │ +    │   part base + face     ├──────────────┤
+//   │ wheel│   layers)              │ CutoutInspector (TOOL·FX·SOURCE
+//   └──────┴───────────────────────┴──── + LAYERS) ┘
+//      save strip (the lens's one verb) · CutoutStatusBar
+//
+// Save: bake → store.savePaintedModel (applyBodyPaint → ONE labeled commit
+// on the characters channel; empty painting CLEARS — K3). Unsaved strokes
+// ride the WORKBENCH-SCOPED slot book (K5 ruling: its own file, never
+// cutout's) with the TATTOODRAFT resume law (K1).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Row, Text } from '@reactjit/runtime/primitives';
@@ -24,7 +32,10 @@ import { paintedOverlayHasContent } from '../../../game/painted';
 import { FaceLayerPaint } from '../../../game/figure/render';
 import type { BodyDocument } from '../../../game/figure/body';
 import type { PaintTargetId } from '../../../game/figure/shapes';
-import { usePaintEditor, PaintEditor, type PaintEditorState } from '../../paint';
+import { usePaintEditor, PaintSurface, PAINT, type PaintEditorState } from '../../paint';
+import { CutoutToolRail } from '../../cutout/ToolRail';
+import { CutoutInspector, type BackendChoice } from '../../cutout/Inspector';
+import { CutoutStatusBar } from '../../cutout/StatusBar';
 import {
   bakeOverlayFromDocument, emptyModelDocument, modelCanvasBg, modelCanvasDims,
   modelWorkId, modelWorkName, overlayOf, reopenOverlayDocument, slotDocumentHasContent,
@@ -125,10 +136,19 @@ function PaintTarget(props: {
     dims,
     srcPath: null,
     gray: null,
-    backend: null, // smart select needs an image FILE (the blank-canvas guard)
+    backend: null, // smart select needs an image FILE (the blank-canvas guard, cutout-identical)
     session: null, // the SAVE is the labeled commit (store.savePaintedModel)
     initial: props.initial,
   });
+
+  // the same save-state surface cutout's chrome reads (edited pill, save age)
+  const [edited, setEdited] = useState(!!props.initial);
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  useEffect(() => { if (s.documentVersion > 0) setEdited(true); }, [s.documentVersion]);
+  // the backend picker UI is the same; model targets never smart-select
+  // (no source image), exactly like cutout's model targets
+  const [backendChoice, setBackendChoice] = useState<BackendChoice>('flood');
+  const samAvailable = useMemo(() => { try { return PAINT.isSegmentAvailable(); } catch { return false; } }, []);
 
   // the model canvas underlay: part base color + the head's face layers, so
   // face painting sees the face it paints over (cutout's K1 wire)
@@ -162,34 +182,52 @@ function PaintTarget(props: {
   const save = () => {
     const doc = s.buildDocument();
     if (!doc) { store.setStatus('nothing to save'); return; }
-    const overlay = bakeOverlayFromDocument(doc, Date.now());
-    const has = paintedOverlayHasContent(overlay);
-    store.savePaintedModel(part, has ? overlay : null);
-    // the save landed on the model — the slot would only shadow it now
+    const baked = bakeOverlayFromDocument(doc, Date.now());
+    const has = paintedOverlayHasContent(baked);
+    store.savePaintedModel(part, has ? baked : null);
     if (draftTimer.current) { clearTimeout(draftTimer.current); draftTimer.current = null; }
     writeBook(dropSlot(readBook(), workId));
+    setEdited(false);
+    setLastSavedAt(Date.now());
   };
 
   return (
-    <Row style={{ flexGrow: 1, minWidth: 0, minHeight: 0 }}>
-      {/* ONE painter — rail · viewport · layers+look (K2) */}
-      <PaintEditor s={s} />
-      {/* K4 (RULED DAY ONE): the live 3D beside the painter — the part
-          re-bakes per stroke; what you paint is what the figure wears */}
-      <Col style={{ height: '100%', minHeight: 0 }}>
-        <ModelPreview3D s={s} binding={binding} model={model} bg={bg} modelLayers={modelLayers} />
-        <Col style={{ padding: 10, gap: 8, borderLeftWidth: 1, borderColor: T.frame, backgroundColor: T.panelSolid, flexGrow: 1 }}>
-          <Text fontSize={10} color={T.dim} style={{ fontWeight: 800, letterSpacing: 1 }}>
-            {`PAINTING ${binding.docId} · ${binding.part}${props.resumed ? ' · unsaved draft resumed' : ''}`}
-          </Text>
-          <Row style={{ gap: 8 }}>
-            <Chip label="save paint to character" color="good" onPress={save} />
-          </Row>
-          <Text fontSize={10} color={T.dim}>
-            an empty painting clears the part's paint · unsaved strokes ride the workbench draft book
-          </Text>
+    <Col style={{ flexGrow: 1, minWidth: 0, minHeight: 0 }}>
+      <Row style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+        {/* the EXACT /cutout chrome — same modules, both surfaces, forever */}
+        <CutoutToolRail s={s} />
+        <PaintSurface s={s} underlay={underlay} />
+        {/* the model-target stack, cutout's own arrangement (CutoutRoute:844-869):
+            live 3D above the inspector (K4 — paint-and-see) */}
+        <Col style={{ height: '100%', minHeight: 0 }}>
+          <ModelPreview3D s={s} binding={binding} model={model} bg={bg} modelLayers={modelLayers} />
+          <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'column' }}>
+            <CutoutInspector
+              s={s}
+              samAvailable={samAvailable}
+              backendChoice={backendChoice}
+              onBackendChoice={setBackendChoice}
+              srcPath={null}
+              textureId={null}
+              edited={edited}
+              lastSavedAt={lastSavedAt}
+              onNewCanvas={() => store.setStatus('canvas documents live in /cutout — this lens paints the selected part')}
+              onLoadImage={() => store.setStatus('image documents live in /cutout — this lens paints the selected part')}
+              onOpenEffectModal={() => store.setStatus('custom WGSL FX opens in /cutout for now (its modal is route-local — ONEPAINTER-0606 report)')}
+              fill
+            />
+          </Box>
         </Col>
-      </Col>
-    </Row>
+      </Row>
+      {/* the lens's ONE verb — a thin host strip (layout, never chrome) */}
+      <Row style={{ alignItems: 'center', gap: 10, paddingLeft: 10, paddingRight: 10, paddingTop: 4, paddingBottom: 4, backgroundColor: T.panelSolid, borderTopWidth: 1, borderColor: T.frame }}>
+        <Text fontSize={10} color={T.dim} style={{ fontWeight: 800, letterSpacing: 1 }}>
+          {`PAINTING ${binding.docId} · ${binding.part}${props.resumed ? ' · unsaved draft resumed' : ''}`}
+        </Text>
+        <Box style={{ flexGrow: 1 }} />
+        <Chip label="save paint to character" color={edited ? 'good' : 'dim'} onPress={save} />
+      </Row>
+      <CutoutStatusBar s={s} edited={edited} lastSavedAt={lastSavedAt} />
+    </Col>
   );
 }
