@@ -96,9 +96,13 @@ session in this cwd (merged with each machine's `settings.local.json`):
 - **UserPromptSubmit** → `tools/request-hook-prompt` → `request hook-prompt`:
   reads the hook payload JSON from stdin and logs the LITERAL prompt with
   `sessionId` + `captureMode: "hook"` — zero paraphrasing, zero worker
-  cooperation. On capture, the hook's stdout becomes session context, so the
-  req id lands in front of the worker immediately. Never exits 2 (that would
-  block and erase the user's prompt).
+  cooperation. On capture, the req id lands in front of the worker as added
+  context via the documented control JSON
+  (`{"hookSpecificOutput": {"hookEventName", "additionalContext"}}`) — never
+  bare text (HOOKJSON-0606: the context line starts with `[`, which a strict
+  host parser rejects as broken JSON instead of falling back to plain text —
+  the "invalid user prompt submit JSON output" failure). Never exits 2 (that
+  would block and erase the user's prompt).
 - **Stop** → `tools/request-hook-stop` → `request hook-stop`: when the
   session has unresolved captured asks, emits ONE `{"decision":"block"}`
   nudge listing them (`stop_hook_active` guards against loops — at most one
@@ -130,12 +134,13 @@ it do the same thing with codex"). Codex's hook vocabulary mirrors Claude's —
 `stop_hook_active` payload fields — so the ledger write path is shared, not
 reimplemented: `<repo>/.codex/hooks.json` registers
 `tools/request-hook-prompt-codex` and `tools/request-hook-stop-codex`, thin
-adapters that exec `request hook-prompt|hook-stop --cli codex`. The flag's two
-effects: captures get origin `codex:<id8>` (vs `session:<id8>` for Claude),
-and the Stop reminder's `context` mode emits `{"systemMessage": ...}` because
-Codex Stop accepts JSON-only stdout (plain text is invalid there; `block-once`
-is already JSON on both). Stop-nudge parity is full — Codex supports
-`decision:block` continuation and the `stop_hook_active` loop guard.
+adapters that exec `request hook-prompt|hook-stop --cli codex`. The flag's one
+effect since HOOKJSON-0606: captures get origin `codex:<id8>` (vs
+`session:<id8>` for Claude) — every hook emission is the same valid JSON on
+both CLIs (Stop `context` mode is `{"systemMessage": ...}` everywhere; Codex
+Stop is JSON-only by contract and the strict-parser trap applies to both).
+Stop-nudge parity is full — Codex supports `decision:block` continuation and
+the `stop_hook_active` loop guard.
 
 Codex trust caveat: Codex requires non-managed hooks to be reviewed and
 trusted per hook hash — run `/hooks` in a Codex pane once after this lands

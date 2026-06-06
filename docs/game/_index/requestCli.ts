@@ -132,11 +132,16 @@ function hookPayload(): any {
   }
 }
 
-/** UserPromptSubmit: capture the LITERAL prompt. stdout (exit 0) becomes
- *  context for the session — the req id lands in front of the worker.
- *  Claude and Codex send the same payload shape ({session_id, prompt}) and
- *  both treat plain stdout as added context, so one path serves both;
- *  --cli codex only changes the origin label. */
+/** UserPromptSubmit: capture the LITERAL prompt — the req id lands in front
+ *  of the worker as added context. Claude and Codex send the same payload
+ *  shape ({session_id, prompt}); --cli codex only changes the origin label.
+ *
+ *  HOOKJSON-0606: the context line is emitted as the documented control JSON
+ *  ({hookSpecificOutput: {hookEventName, additionalContext}}) — BOTH CLIs
+ *  accept that shape. It must NEVER go out as plain text here: the line
+ *  starts with '[' (a JSON array opener), and a strict host parser
+ *  ("hook returned invalid user prompt submit JSON output") rejects
+ *  JSON-looking stdout that doesn't parse instead of falling back to text. */
 function cmdHookPrompt(flags: Map<string, string>): void {
   const payload = hookPayload();
   const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
@@ -145,20 +150,24 @@ function cmdHookPrompt(flags: Map<string, string>): void {
   const originLabel = flags.get('cli') === 'codex' ? 'codex' : 'session';
   const result = hookCapturePrompt(defaultRequestsDir(), sessionId, prompt, undefined, originLabel);
   if (result.action === 'logged') {
-    if (result.record.origin === DISPATCH_ORIGIN) {
-      console.log(`[request-ledger] captured ${result.record.id} (supervisor dispatch — recorded for the durable record; its marker tracks resolution, no ledger resolve required)`);
-    } else {
-      console.log(`[request-ledger] captured ${result.record.id} (this prompt, verbatim). Your work is not done until: tools/request resolve ${result.record.id} --para "<what was done, why, what changed>" --shas <sha,...|none>`);
-    }
+    const line = result.record.origin === DISPATCH_ORIGIN
+      ? `[request-ledger] captured ${result.record.id} (supervisor dispatch — recorded for the durable record; its marker tracks resolution, no ledger resolve required)`
+      : `[request-ledger] captured ${result.record.id} (this prompt, verbatim). Your work is not done until: tools/request resolve ${result.record.id} --para "<what was done, why, what changed>" --shas <sha,...|none>`;
+    console.log(JSON.stringify({
+      hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: line },
+    }));
   }
   // skipped → silent: noise must cost the session nothing
 }
 
 /** Stop: nudge once per turn cycle about this session's unresolved captures.
  *  stop_hook_active means this nudge already fired — never loop.
- *  Codex divergence (--cli codex): its Stop event accepts JSON-ONLY stdout
- *  (plain text is invalid), so 'context' mode emits {"systemMessage"} there. */
-function cmdHookStop(flags: Map<string, string>): void {
+ *  HOOKJSON-0606: every Stop emission is JSON on BOTH CLIs — Codex Stop is
+ *  JSON-only by contract, and the plain-text reminder began with '[' (the
+ *  strict-parser trap cmdHookPrompt documents); {"systemMessage"} is the
+ *  documented context shape on both. The --cli flag no longer changes
+ *  emission here (it still picks the origin label on capture). */
+function cmdHookStop(): void {
   const payload = hookPayload();
   if (payload.stop_hook_active === true) return;
   const config = loadLedgerConfig();
@@ -174,10 +183,8 @@ function cmdHookStop(flags: Map<string, string>): void {
   const reason = `[request-ledger] ${open.length} unresolved ask(s) captured for this session: ${listing}. Resolve each (tools/request resolve <id> --para "<paragraph>" --shas <sha,...|none>) or, if genuinely still in flight, say so and stop again — this reminder fires once per turn cycle.`;
   if (config.stopReminder === 'block-once') {
     console.log(JSON.stringify({ decision: 'block', reason }));
-  } else if (flags.get('cli') === 'codex') {
-    console.log(JSON.stringify({ systemMessage: reason })); // 'context', JSON-only stdout
   } else {
-    console.log(reason); // 'context': transcript-only note
+    console.log(JSON.stringify({ systemMessage: reason })); // 'context': a JSON note, never bare text
   }
 }
 
@@ -236,7 +243,7 @@ try {
   else if (command === 'show') cmdShow(positionals);
   else if (command === 'mark-dispatch') cmdMarkDispatch(positionals);
   else if (command === 'hook-prompt') cmdHookPrompt(flags);
-  else if (command === 'hook-stop') cmdHookStop(flags);
+  else if (command === 'hook-stop') cmdHookStop();
   else {
     console.error(USAGE);
     process.exit(2);
