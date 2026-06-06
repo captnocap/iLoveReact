@@ -31,12 +31,18 @@ declare const process: { env: Record<string, string | null | undefined>; cwd(): 
 
 export type RequestStatus = 'open' | 'resolved';
 
+/** 'hook' = auto-captured by the Claude Code UserPromptSubmit hook;
+ *  'manual' (or absent) = a worker ran `tools/request log` by hand. */
+export type CaptureMode = 'hook' | 'manual';
+
 export type RequestRecord = {
   id: string;            // 'req_0007'
   at: string;            // ISO timestamp of the ask
-  origin: string;        // which pane/lane, or 'supervisor-relay'
+  origin: string;        // which pane/lane, 'supervisor-relay', or 'session:<id8>'
   text: string;          // the user's words, BYTE-VERBATIM
   status: RequestStatus;
+  sessionId?: string;    // Claude session that received the ask (the report key)
+  captureMode?: CaptureMode;
   resolvedAt?: string;   // ISO timestamp of the resolution
   resolution?: string;   // the paragraph: what was done, why, what changed
   shas?: string[];       // commit SHAs implementing it ([] = no-code resolution)
@@ -106,7 +112,10 @@ function writeEntry(dir: string, record: RequestRecord): void {
 }
 
 /** Log an ask. `text` is stored exactly as given — verbatim is the contract. */
-export function logRequest(dir: string, text: string, origin: string): RequestRecord {
+export function logRequest(
+  dir: string, text: string, origin: string,
+  extra?: { sessionId?: string; captureMode?: CaptureMode },
+): RequestRecord {
   if (text.trim().length === 0) throw new Error('request text is empty — the ask must be the user\'s words, verbatim');
   if (origin.trim().length === 0) throw new Error('origin is required (which pane/lane, or supervisor-relay)');
   const record: RequestRecord = {
@@ -115,9 +124,83 @@ export function logRequest(dir: string, text: string, origin: string): RequestRe
     origin,
     text,
     status: 'open',
+    ...(extra?.sessionId ? { sessionId: extra.sessionId } : {}),
+    captureMode: extra?.captureMode ?? 'manual',
   };
   writeEntry(dir, record);
   return record;
+}
+
+// ── hook auto-capture (REQLEDGER-0606 addendum) ──────────────────────────────
+//
+// The Claude Code UserPromptSubmit hook pipes its JSON payload through
+// tools/request-hook-prompt → `request hook-prompt`, which calls
+// hookCapturePrompt with the LITERAL prompt + session_id. Zero paraphrasing,
+// zero worker cooperation. The Stop hook (`request hook-stop`) reminds the
+// session about its unresolved captures so the resolution paragraph gets
+// written before the turn cycle ends.
+//
+// The necessary-vs-noise rule (which prompts the hook logs at all) is P2
+// data, not a buried constant: docs/game/_requests/_config.json overrides
+// DEFAULT_LEDGER_CONFIG. Trivial acks and slash/shell/memory commands are
+// never logged (cleaner than logging + auto-closing them); everything
+// substantive is.
+
+export type StopReminderMode =
+  | 'block-once'  // Stop hook nudges the worker once per turn cycle (default)
+  | 'context'     // transcript-only note, never interrupts
+  | 'off';
+
+export type LedgerConfig = {
+  /** Hook captures shorter than this (trimmed) are noise, not asks. */
+  minPromptChars: number;
+  /** Case-insensitive regex of trivial acks the hook never logs. */
+  ackPattern: string;
+  stopReminder: StopReminderMode;
+};
+
+export const DEFAULT_LEDGER_CONFIG: LedgerConfig = {
+  minPromptChars: 40,
+  ackPattern: '^(ok(ay)?|yes|no|nah|yep|k|sure|go( ahead)?|continue|proceed|do it|stop|wait|thanks?|ty|lgtm|good( work)?|nice|approved?)\\b.{0,20}$',
+  stopReminder: 'block-once',
+};
+
+/** _config.json in the requests dir overrides the defaults, key by key. */
+export function loadLedgerConfig(dir: string = defaultRequestsDir()): LedgerConfig {
+  const raw = __fs_read(`${dir}/_config.json`);
+  if (raw === null) return DEFAULT_LEDGER_CONFIG;
+  let parsed: Partial<LedgerConfig>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`corrupt ledger config (bad JSON): ${dir}/_config.json`);
+  }
+  return { ...DEFAULT_LEDGER_CONFIG, ...parsed };
+}
+
+export type HookCaptureResult =
+  | { action: 'logged'; record: RequestRecord }
+  | { action: 'skipped'; reason: string };
+
+/** The UserPromptSubmit path: decide noise-vs-ask, then log VERBATIM. */
+export function hookCapturePrompt(
+  dir: string, sessionId: string, prompt: string,
+  config: LedgerConfig = loadLedgerConfig(dir),
+): HookCaptureResult {
+  const trimmed = prompt.trim();
+  if (trimmed.length === 0) return { action: 'skipped', reason: 'empty prompt' };
+  if (/^[/!#]/.test(trimmed)) return { action: 'skipped', reason: 'slash/shell/memory command, not an ask' };
+  if (new RegExp(config.ackPattern, 'i').test(trimmed)) return { action: 'skipped', reason: 'trivial ack (ackPattern)' };
+  if (trimmed.length < config.minPromptChars) return { action: 'skipped', reason: `under minPromptChars (${config.minPromptChars})` };
+  const record = logRequest(dir, prompt, `session:${sessionId.slice(0, 8)}`, {
+    sessionId, captureMode: 'hook',
+  });
+  return { action: 'logged', record };
+}
+
+/** The Stop-hook scan + the `list --session` group: a session's entries. */
+export function requestsForSession(dir: string, sessionId: string): RequestRecord[] {
+  return loadRequests(dir).filter((record) => record.sessionId === sessionId);
 }
 
 /** Close an ask: the ONE field-fill an entry ever gets. The original ask

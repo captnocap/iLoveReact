@@ -12,6 +12,7 @@
 
 import {
   defaultRequestsDir, loadRequests, logRequest, resolveRequest,
+  hookCapturePrompt, requestsForSession, loadLedgerConfig,
   type RequestRecord,
 } from './requests';
 
@@ -22,11 +23,15 @@ declare const process: { argv: string[]; exit(code: number): void };
 
 const USAGE = `request — the REQUEST LEDGER (user asks → resolutions; docs/game/REQUESTS.md)
 
-  request log "<verbatim ask>" --origin <pane|lane|supervisor-relay>
+  request log "<verbatim ask>" --origin <pane|lane|supervisor-relay> [--session <id>]
   request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
       (or pipe the paragraph on stdin instead of --para)
-  request list [--open]
-  request show <id>`;
+  request list [--open] [--session <id>]
+  request show <id>
+
+hook mode (wired by .claude/settings.json; payload JSON on stdin):
+  request hook-prompt    UserPromptSubmit → auto-capture the literal prompt
+  request hook-stop      Stop → remind the session of its unresolved asks`;
 
 function fail(message: string, code = 1): never {
   console.error(`request: ${message}`);
@@ -84,6 +89,7 @@ function oneLine(record: RequestRecord): string {
 function fullEntry(record: RequestRecord): string {
   const lines = [
     `${record.id} · ${record.status.toUpperCase()} · ${record.at} · origin: ${record.origin}`,
+    `capture: ${record.captureMode ?? 'manual'}${record.sessionId ? ` · session: ${record.sessionId}` : ''}`,
     '',
     record.text,
   ];
@@ -102,8 +108,60 @@ function cmdLog(positionals: string[], flags: Map<string, string>): void {
     fail('the ask arrived as multiple words — QUOTE it so it stays one verbatim string: request log "<ask>" --origin <origin>', 2);
   }
   const origin = flags.get('origin') ?? fail('--origin is required (which pane/lane, or supervisor-relay)', 2);
-  const record = logRequest(defaultRequestsDir(), positionals[0], origin);
+  const sessionId = flags.get('session');
+  const record = logRequest(defaultRequestsDir(), positionals[0], origin, { sessionId, captureMode: 'manual' });
   console.log(`${record.id} logged (open) — resolve with: tools/request resolve ${record.id} --para "<paragraph>" --shas <sha,...>`);
+}
+
+// ── hook mode: stdin carries the Claude Code hook payload JSON ────────────────
+
+// Exit-code discipline: NEVER exit 2 from hook mode — in UserPromptSubmit,
+// exit 2 BLOCKS and erases the user's prompt. A ledger bug must never eat an
+// ask; exit 1 (non-blocking, stderr surfaced) is the loudest safe failure.
+function hookPayload(): any {
+  const raw = readStdinAll();
+  if (raw.trim().length === 0) fail('hook mode expects the hook payload JSON on stdin', 1);
+  try {
+    return JSON.parse(raw);
+  } catch {
+    fail(`hook payload is not JSON: ${raw.slice(0, 120)}`, 1);
+  }
+}
+
+/** UserPromptSubmit: capture the LITERAL prompt. stdout (exit 0) becomes
+ *  context for the session — the req id lands in front of the worker. */
+function cmdHookPrompt(): void {
+  const payload = hookPayload();
+  const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+  if (sessionId.length === 0) fail('hook payload has no session_id', 1);
+  const result = hookCapturePrompt(defaultRequestsDir(), sessionId, prompt);
+  if (result.action === 'logged') {
+    console.log(`[request-ledger] captured ${result.record.id} (this prompt, verbatim). Your work is not done until: tools/request resolve ${result.record.id} --para "<what was done, why, what changed>" --shas <sha,...|none>`);
+  }
+  // skipped → silent: noise must cost the session nothing
+}
+
+/** Stop: nudge once per turn cycle about this session's unresolved captures.
+ *  stop_hook_active means this nudge already fired — never loop. */
+function cmdHookStop(): void {
+  const payload = hookPayload();
+  if (payload.stop_hook_active === true) return;
+  const config = loadLedgerConfig();
+  if (config.stopReminder === 'off') return;
+  const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
+  if (sessionId.length === 0) return;
+  const open = requestsForSession(defaultRequestsDir(), sessionId).filter((record) => record.status === 'open');
+  if (open.length === 0) return;
+  const listing = open
+    .map((record) => `${record.id} "${record.text.replace(/\n/g, ' ').slice(0, 100)}"`)
+    .join('; ');
+  const reason = `[request-ledger] ${open.length} unresolved ask(s) captured for this session: ${listing}. Resolve each (tools/request resolve <id> --para "<paragraph>" --shas <sha,...|none>) or, if genuinely still in flight, say so and stop again — this reminder fires once per turn cycle.`;
+  if (config.stopReminder === 'block-once') {
+    console.log(JSON.stringify({ decision: 'block', reason }));
+  } else {
+    console.log(reason); // 'context': transcript-only note
+  }
 }
 
 function cmdResolve(positionals: string[], flags: Map<string, string>): void {
@@ -120,7 +178,10 @@ function cmdResolve(positionals: string[], flags: Map<string, string>): void {
 
 function cmdList(flags: Map<string, string>): void {
   const all = loadRequests();
-  const records = flags.has('open') ? all.filter((record) => record.status === 'open') : all;
+  const inSession = flags.has('session')
+    ? all.filter((record) => record.sessionId === flags.get('session'))
+    : all;
+  const records = flags.has('open') ? inSession.filter((record) => record.status === 'open') : inSession;
   if (records.length === 0) {
     console.log(flags.has('open') ? '(no open requests)' : '(empty ledger)');
     return;
@@ -146,6 +207,8 @@ try {
   else if (command === 'resolve') cmdResolve(positionals, flags);
   else if (command === 'list') cmdList(flags);
   else if (command === 'show') cmdShow(positionals);
+  else if (command === 'hook-prompt') cmdHookPrompt();
+  else if (command === 'hook-stop') cmdHookStop();
   else {
     console.error(USAGE);
     process.exit(2);

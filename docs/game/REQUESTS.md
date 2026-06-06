@@ -38,13 +38,18 @@ the V20 by-addition discipline applied to process:
   "origin": "supervisor-relay",
   "text": "<the user's words, verbatim>",
   "status": "resolved",
+  "sessionId": "abc12345-6789-...",
+  "captureMode": "hook",
   "resolvedAt": "2026-06-06T05:00:00.000Z",
   "resolution": "<a real paragraph: what was done, why, what changed>",
   "shas": ["b6fd34eb9"]
 }
 ```
 
-`origin` is which pane/lane took the ask, or `supervisor-relay`. `shas` is
+`origin` is which pane/lane took the ask, `supervisor-relay`, or
+`session:<id8>` for hook captures. `sessionId` is the Claude session that
+received the ask — the report key (`list --session <id>` groups a session's
+asks). `captureMode` is `hook` (auto-captured) or `manual`. `shas` is
 the list of commits implementing the resolution (`[]` for a no-code
 resolution, e.g. a question answered). The resolution paragraph has a
 minimum bar (`MIN_RESOLUTION_CHARS`, 120 chars) — a commit-message one-liner
@@ -56,10 +61,10 @@ from clobbering each other's appends and give clean one-entry git diffs.
 ## The CLI
 
 ```
-tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>
+tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay> [--session <id>]
 tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
 echo "<paragraph>" | tools/request resolve <id> --shas <sha,...>
-tools/request list [--open]
+tools/request list [--open] [--session <id>]
 tools/request show <id>
 ```
 
@@ -75,6 +80,49 @@ resolutions) and returns them as the REQUEST LEDGER tier, between RULINGS
 and INDEX RECORDS, with status + SHAs. The ledger is read from disk at query
 time (the tools wrappers export `RJIT_ROOT`), so a fresh `log` is servable
 immediately — no rebundle.
+
+## Automatic capture (the hook layer)
+
+The user's addendum, verbatim:
+
+> we can use the claude hook system to see when i submit a prompt -> read the
+> file -> capture my literal text -> use this to build the report with a
+> session id, that the worker can comment on at the end of every turn cycle
+> that is necessary.
+
+Repo-level `.claude/settings.json` registers two hooks for every Claude
+session in this cwd (merged with each machine's `settings.local.json`):
+
+- **UserPromptSubmit** → `tools/request-hook-prompt` → `request hook-prompt`:
+  reads the hook payload JSON from stdin and logs the LITERAL prompt with
+  `sessionId` + `captureMode: "hook"` — zero paraphrasing, zero worker
+  cooperation. On capture, the hook's stdout becomes session context, so the
+  req id lands in front of the worker immediately. Never exits 2 (that would
+  block and erase the user's prompt).
+- **Stop** → `tools/request-hook-stop` → `request hook-stop`: when the
+  session has unresolved captured asks, emits ONE `{"decision":"block"}`
+  nudge listing them (`stop_hook_active` guards against loops — at most one
+  nudge per turn cycle, never a hard block).
+
+**The necessary-vs-noise rule** (which prompts get logged at all) is P2
+tunable data in `docs/game/_requests/_config.json`, not a buried constant:
+
+- `minPromptChars` (default 40) — shorter prompts are conversation, not asks;
+- `ackPattern` — trivial acks ("ok do it", "yes", "lgtm…") are never logged
+  (cleaner than logging + auto-closing them); slash/`!`/`#` commands are
+  always skipped;
+- `stopReminder` — `block-once` (default) | `context` (transcript-only) |
+  `off`.
+
+Manual `tools/request log` keeps working unchanged — codex panes, relays, and
+non-hook contexts still need it (`--session <id>` attaches a session by hand).
+
+Verification honesty: the hook payload path is tested by piping fabricated
+UserPromptSubmit/Stop JSON through the real scripts (see requests.test.ts and
+the REQLEDGER-0606 report); settings.json loads at session start, so the
+live end-to-end fires for sessions opened after this lands — confirm by
+typing any ≥40-char prompt in a fresh pane and seeing the
+`[request-ledger] captured req_NNNN` context line.
 
 ## The process
 

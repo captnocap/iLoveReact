@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# request-hook-stop — Claude Code Stop hook (REQLEDGER-0606 addendum).
+# Receives the hook payload JSON on stdin (session_id, stop_hook_active) and,
+# when this session has unresolved hook-captured asks, emits one
+# {"decision":"block"} nudge so the worker writes the resolution paragraph
+# before the turn cycle ends. stop_hook_active guards against loops — the
+# nudge fires at most once per turn cycle, never a hard block.
+# Tunable (block-once | context | off): docs/game/_requests/_config.json.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/request" hook-stop

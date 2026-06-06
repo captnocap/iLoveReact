@@ -210,8 +210,14 @@ Every capability should be usable in one line by someone who doesn't code. The t
 git captures commits, not prompts. Un-logged user asks historically get lost
 or half-resolved with no trace — the ledger is how your work survives review.
 
-When a USER prompt arrives directly in your pane (or you relay one as
-supervisor):
+**Automatic capture is on:** repo hooks (`.claude/settings.json`) log every
+substantive user prompt for you — watch for the `[request-ledger] captured
+req_NNNN` context line; that id is YOUR debt, and the Stop hook will nudge
+once per turn cycle while it stays open. The noise rule (what gets captured)
+is tunable in `docs/game/_requests/_config.json`.
+
+When a USER prompt arrives WITHOUT a capture line (relayed asks, codex panes,
+hook-less contexts):
 
 1. **FIRST**, before working: `tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>` — it prints your req id. Verbatim means verbatim: quote it, never paraphrase or trim.
 2. Your work is **not done** until the resolution paragraph is written:

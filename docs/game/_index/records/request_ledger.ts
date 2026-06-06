@@ -39,6 +39,18 @@ export const request_ledger: DocIndex = {
       status: 'live',
     },
     {
+      name: 'hook auto-capture (request hook-prompt / hook-stop)',
+      purpose: ['maintenance'],
+      kind: 'utility',
+      sourceFile: 'docs/game/_index/requests.ts',
+      codeRef: 'docs/game/_index/requests.ts (hookCapturePrompt, requestsForSession)',
+      description: 'The addendum layer: .claude/settings.json registers tools/request-hook-prompt (UserPromptSubmit → log the LITERAL prompt with sessionId + captureMode hook; stdout puts the req id in session context) and tools/request-hook-stop (Stop → one {"decision":"block"} nudge per turn cycle listing the session\'s unresolved asks; stop_hook_active guards loops). The necessary-vs-noise rule is P2 data in docs/game/_requests/_config.json (minPromptChars, ackPattern, stopReminder block-once|context|off) — acks and slash/!/# commands are never logged. Hook mode NEVER exits 2 (would block + erase the user\'s prompt).',
+      dependsOn: ['RequestRecord', 'loadRequests/logRequest/resolveRequest'],
+      emits: ['docs/game/_requests/req_<seq>.json'],
+      consumers: ['every Claude session in this repo (settings.json hooks)'],
+      status: 'live',
+    },
+    {
       name: 'oracle REQUEST LEDGER tier',
       purpose: ['maintenance'],
       kind: 'utility',

@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# request-hook-prompt — Claude Code UserPromptSubmit hook (REQLEDGER-0606
+# addendum). Receives the hook payload JSON on stdin (session_id, prompt, ...)
+# and auto-captures the LITERAL prompt into the request ledger — zero
+# paraphrasing, zero worker cooperation. Registered in .claude/settings.json.
+# Noise rule (what gets logged at all): docs/game/_requests/_config.json.
+#
+# stdout on exit 0 becomes session context (the req id lands in front of the
+# worker). NEVER exits 2 — that would block and erase the user's prompt.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/request" hook-prompt

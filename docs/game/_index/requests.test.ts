@@ -13,12 +13,17 @@
 // (`rjit game verify` does this for every suite under its roots.)
 
 import { test, assert, assertEqual, assertThrows, finish } from '../../../cart/hmsc-int/game/_testkit';
-import { loadRequests, logRequest, resolveRequest, MIN_RESOLUTION_CHARS, type RequestRecord } from './requests';
+import {
+  loadRequests, logRequest, resolveRequest, MIN_RESOLUTION_CHARS,
+  hookCapturePrompt, requestsForSession, loadLedgerConfig, DEFAULT_LEDGER_CONFIG,
+  type RequestRecord,
+} from './requests';
 import { searchRequests, tokenize } from './oracle';
 
 declare const __fs_mkdir: (path: string) => boolean;
 declare const __fs_remove: (path: string) => boolean;
 declare const __fs_read: (path: string) => string | null;
+declare const __fs_write: (path: string, content: string) => boolean;
 
 const TMP = `/tmp/reactjit-requests-test-${Date.now()}`;
 
@@ -117,6 +122,62 @@ test('oracle ranks entries by verbatim ask text and by resolution words', () => 
   assertEqual((byResolution[0].item.shas ?? []).join(','), '1234abcd', 'match carries shas');
 
   assertEqual(searchRequests(tokenize('quaternion skybox raytracer'), requests).length, 0, 'unrelated query matches nothing');
+});
+
+// ── hook auto-capture (REQLEDGER-0606 addendum) ──────────────────────────────
+
+const SESSION = 'abc12345-6789-dead-beef-000000000001';
+
+test('hook capture logs the literal prompt with sessionId + captureMode', () => {
+  const dir = freshDir('hook');
+  const literal = 'please make the voxel editor respect the same camera convention as the test route';
+  const result = hookCapturePrompt(dir, SESSION, literal, DEFAULT_LEDGER_CONFIG);
+  assertEqual(result.action, 'logged', 'substantive prompt is captured');
+  const record = loadRequests(dir)[0];
+  assertEqual(record.text, literal, 'prompt stored verbatim');
+  assertEqual(record.sessionId, SESSION, 'sessionId stored (the report key)');
+  assertEqual(record.captureMode, 'hook', 'captureMode marks the auto path');
+  assertEqual(record.origin, `session:${SESSION.slice(0, 8)}`, 'origin derives from session');
+});
+
+test('the noise rule skips acks, commands, and short prompts — never logs them', () => {
+  const dir = freshDir('noise');
+  const skipped = [
+    'ok do it',                       // ack
+    'yes',                            // ack
+    '/clear',                         // slash command
+    '! git status',                   // shell passthrough
+    'fix it',                         // under minPromptChars
+    '   ',                            // empty
+  ];
+  for (const prompt of skipped) {
+    assertEqual(hookCapturePrompt(dir, SESSION, prompt, DEFAULT_LEDGER_CONFIG).action, 'skipped', `skipped: ${JSON.stringify(prompt)}`);
+  }
+  assertEqual(loadRequests(dir).length, 0, 'noise leaves the ledger untouched');
+});
+
+test('the noise rule is a tunable knob: _config.json overrides key-by-key', () => {
+  const dir = freshDir('config');
+  assertEqual(loadLedgerConfig(dir).minPromptChars, DEFAULT_LEDGER_CONFIG.minPromptChars, 'defaults without a file');
+  __fs_write(`${dir}/_config.json`, '{ "minPromptChars": 5 }\n');
+  const tuned = loadLedgerConfig(dir);
+  assertEqual(tuned.minPromptChars, 5, 'override applies');
+  assertEqual(tuned.stopReminder, DEFAULT_LEDGER_CONFIG.stopReminder, 'unset keys keep defaults');
+  assertEqual(hookCapturePrompt(dir, SESSION, 'fix the door', tuned).action, 'logged', 'tuned threshold changes capture behavior');
+  assertEqual(loadRequests(dir).length, 1, '_config.json is not a ledger entry');
+});
+
+test('requestsForSession groups a session\'s asks — the report key', () => {
+  const dir = freshDir('session');
+  hookCapturePrompt(dir, SESSION, 'first substantive ask, long enough to clear the bar', DEFAULT_LEDGER_CONFIG);
+  hookCapturePrompt(dir, 'ffff0000-0000-0000-0000-000000000099', 'other session ask, also long enough to clear the bar', DEFAULT_LEDGER_CONFIG);
+  logRequest(dir, 'manually relayed ask for the same session', 'supervisor-relay', { sessionId: SESSION });
+  const mine = requestsForSession(dir, SESSION);
+  assertEqual(mine.length, 2, 'hook + manual entries group by sessionId');
+  assert(mine.every((record) => record.sessionId === SESSION), 'only this session\'s entries');
+  resolveRequest(dir, mine[0].id, PARAGRAPH, []);
+  const open = requestsForSession(dir, SESSION).filter((record) => record.status === 'open');
+  assertEqual(open.length, 1, 'the stop-hook scan sees only unresolved entries');
 });
 
 // cases run inside finish(), so cleanup must be the last CASE — a plain
