@@ -701,6 +701,43 @@ falls back to every sculpt tool's convention — drag UP pulls out, DOWN
 carves in, at `fallbackPxPerUnit` (90px). P4: the axis case grew floor +
 fallback assertions (up=+1/down=−1 at the fallback feel); 11/11 green.
 
+GRABQOL-0605 (2026-06-05, second hands-on round): (1) UNDO/REDO — ctrl+z /
+ctrl+y / ctrl+shift+z (useIFTTT key triggers; the host already suppresses
+keys while a TextInput is focused) plus undo/redo chips on the viewport. The
+stack is the shared painter's `createPaintHistory` over deep-copied
+CharacterDraft snapshots (50-deep, 250ms coalesce — knobs/sliders coalesce
+to "before the drag") committed BEFORE every commit-grade interaction:
+stroke release, grab release (the pre-drag grid swapped into the snapshot —
+live ticks already moved the draft), fill/soften/clear, outline drag +
+reset, region sliders, wardrobe/body/skin/prop/pose picks, face generate /
+character generate / roster load / file import. Restore runs through
+`installDraft` (textures + mesh slots resync) and autosaves — the restored
+state becomes the working draft on the V20 chain; the session log stays the
+cross-visit history. (2) THE LIT NODE — the grid texture takes
+`data=[hoverU, hoverV, mirrorOn]` and lights the hovered pull point hot in
+the lattice itself (core + halo, and the meridian twin when mirror is on:
+BOTH stamp sites visible before pulling); the capture re-bakes only when
+the cell changes (data memo'd on it — the inline-identity hazard inverted
+on purpose). (3) THE ANGLE FIX behind the "hit box gets funky" feel:
+pickGrab now collects front-facing candidates within the radius, finds the
+FIRST surface (min t), then picks the cell NEAREST THE RAY inside that
+depth window — pure min-t favored silhouette cells nearer the camera at
+oblique views; a visible cell's own pixel now picks exactly that cell
+(P4-pinned over a probe set filtered to camera-facing cells; a back cell's
+pixel still picks the front surface — occlusion is correct). (4) FULL
+ORBIT — pitch clamp widened from 4..85 to ±88 (the host orbit controller
+doesn't clamp; the JS clamp is the one authority, ±90 degenerates the
+look-at up vector), and the studio floor is dropped (`LabEnvironment
+ground={false}`): with under-horizon views allowed, the floor box turned
+every bottom view into its black interior — the user's "workspace went
+black" report, hit live on the hot-reload watcher mid-lane. (5) ZOOM — the
+knob now shows distance REFLECTED across its spec range so + always moves
+CLOSER ("+ zooms out and - zooms in" was the raw-distance readout), and
+the wheel dollies via the raw `onScroll` fallback (events.zig
+hitTestScroll — a non-scrolling node's onScroll receives the wheel delta;
+built for exactly this transparent-overlay-over-Scene3D case): wheel up =
+in, one knob step per notch. Suite 11/11 GREEN.
+
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).
 `rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.

@@ -245,6 +245,26 @@ test('mesh grab: the pick resolves to the right part (figure + part view)', () =
   const pcam = GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, { target: [0, 1.4, 0], yaw: 20, pitch: 12, dist: 4.2, fov: 45 });
   const s = GAME_CAMERA.worldToScreen([0, 1.4, 0], GRAB_RECT, pcam)!;
   assertEqual(pickGrab(s.x, s.y, GRAB_RECT, pcam, partClouds)?.part, 'torso', 'part view grabs the selected part');
+
+  // GRABQOL-0605 angle fix: a VISIBLE cell's own pixel picks THAT cell —
+  // nearest-to-the-ray inside the first-hit window, not min-t (which favored
+  // silhouette cells nearer the camera at oblique views: "funky on angles").
+  // Only camera-facing cells assert (a back cell's pixel correctly picks the
+  // front surface in front of it — that's occlusion, not the bug).
+  let visibleProbes = 0;
+  for (const [gx, gy] of [[20, 8], [24, 12], [28, 16], [22, 6], [26, 10]] as Array<[number, number]>) {
+    const i = (gy * HED_GRID_W + gx) * 3;
+    const cw: [number, number, number] = [partClouds[0].points[i], partClouds[0].points[i + 1], partClouds[0].points[i + 2]];
+    const cp = GAME_CAMERA.worldToScreen(cw, GRAB_RECT, pcam);
+    if (!cp) continue;
+    const ray = GAME_CAMERA.screenRay(cp.x, cp.y, GRAB_RECT, pcam);
+    const facing = partClouds[0].outward[i] * ray.dir[0] + partClouds[0].outward[i + 1] * ray.dir[1] + partClouds[0].outward[i + 2] * ray.dir[2];
+    if (facing > -0.35) continue; // edge-on or back-facing from this view
+    visibleProbes++;
+    const hit = pickGrab(cp.x, cp.y, GRAB_RECT, pcam, partClouds);
+    assertEqual(hit && `${hit.gx},${hit.gy}`, `${gx},${gy}`, `the pixel of visible cell ${gx},${gy} picks exactly that cell`);
+  }
+  assert(visibleProbes >= 2, `the probe set saw the front of the torso (${visibleProbes} visible)`);
 });
 
 test('mesh grab: a drag stamps the grid the paint reads — and they compose (one truth)', () => {

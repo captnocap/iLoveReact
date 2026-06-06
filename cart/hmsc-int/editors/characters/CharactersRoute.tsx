@@ -663,6 +663,19 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     orbitRef.current = null;
   };
 
+  // ── zoom (GRABQOL-0605): bigger number = CLOSER, and the wheel dollies ────
+  // The knob shows a true zoom value (the distance REFLECTED across the spec
+  // range) so + always moves in — editing raw distance read backwards. The
+  // wheel rides the raw onScroll fallback (events.zig hitTestScroll: a
+  // non-scrolling node's onScroll gets the wheel delta — built for exactly
+  // this camera-dolly case); wheel up = in, one knob step per notch.
+  const ZOOM_REFLECT = TUNE.knobs.zoom.min + TUNE.knobs.zoom.max;
+  const zoomTo = (d: number) => setDist(clamp(d, TUNE.knobs.zoom.min, TUNE.knobs.zoom.max));
+  const onZoomWheel = (e: any) => {
+    const notches = Number(e?.deltaY ?? 0);
+    if (notches) zoomTo(dist - notches * TUNE.knobs.zoom.step);
+  };
+
   // The DECLARATIVE camera is the boot frame only — static props, so React
   // never sends camera UPDATEs after mount; the host writes the node fields
   // every frame once engaged.
@@ -1092,13 +1105,17 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         onMouseDown={previewDown}
         onMouseMove={previewMove}
         onMouseUp={previewUp}
+        onScroll={onZoomWheel}
         style={{ flexGrow: 1, height: '100%', position: 'relative', overflow: 'hidden' }}
       >
         <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={T.panelSolid} showGrid={false} showAxes={false}>
           {/* boot frame only — static props; framework/game/camera.zig writes
               this node's fields every frame once engaged (V23 per-node) */}
           <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} />
-          <LabEnvironment preset="studio" />
+          {/* no ground: the orbit goes pole to pole now (GRABQOL-0605 full
+              360) — a studio floor turns every under-the-horizon view into a
+              black box interior (the "workspace went black" report) */}
+          <LabEnvironment preset="studio" ground={false} />
           <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={showHitboxes} />
           {view === 'figure' && draft.heldItem !== 'none' ? <HeldItemMeshes itemId={draft.heldItem} rig={rig} /> : null}
           {showGrabGrid ? <GrabGridMeshes view={view} selPart={selPart} parts={partRender} rig={rig} /> : null}
@@ -1109,9 +1126,11 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
           <Chip label="grid" active={showGrabGrid} color="cyan" onPress={() => setShowGrabGrid((v) => !v)} />
           <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
+          <Chip label="undo ⌃Z" onPress={undoDraft} />
+          <Chip label="redo ⌃Y" onPress={redoDraft} />
         </Row>
         <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
-          <Knob label="zoom" value={dist} spec={TUNE.knobs.zoom} onChange={setDist} />
+          <Knob label="zoom" value={ZOOM_REFLECT - dist} spec={TUNE.knobs.zoom} onChange={(v) => zoomTo(ZOOM_REFLECT - v)} />
         </Box>
       </Pressable>
 
@@ -1138,7 +1157,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         parts={PART_IDS}
         paint={draft.paint}
       />
-      <GrabGridCapture />
+      <GrabGridCapture hover={grabHover} mirror={mirror} />
     </Row>
   );
 }
