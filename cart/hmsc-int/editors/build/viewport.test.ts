@@ -29,27 +29,31 @@ test('the embodied substrate carries the V23 node-bound native camera', () => {
   assert(!source.includes('target={solved.target}'), 'JS-solved camera target must not drive the renderer');
 });
 
-test('/build consumes the substrate — no route-local embodied copy, camera included', () => {
-  const source = read('cart/hmsc-int/editors/build/BuildRoute.tsx');
-  assert(source.includes('useEmbodiedPlayer'), '/build must consume the shared embodied substrate');
-  assert(source.includes('<EmbodiedScene'), '/build must render through the substrate scene (the bound camera node lives there)');
-  assert(source.includes('<EmbodiedCaptures'), '/build must mount the substrate capture set');
+test('the folded /test+/build surface consumes the substrate — no route-local embodied copy, camera included', () => {
+  // PLAYFOLD-0605: both embodied routes are ONE surface now; the guards that
+  // pinned each pre-fold route to the substrate pin the fold the same way.
+  const source = read('cart/hmsc-int/editors/play/PlayRoute.tsx');
+  assert(source.includes('useEmbodiedPlayer'), 'the fold must consume the shared embodied substrate');
+  assert(source.includes('<EmbodiedScene'), 'the fold must render through the substrate scene (the bound camera node lives there)');
+  assert(source.includes('<EmbodiedCaptures'), 'the fold must mount the substrate capture set');
   assert(!source.includes('GAME_NATIVE_CAMERA'), 'no route-local camera transport — the substrate owns the bind');
   assert(!source.includes('GAME_PHYSICS.step'), 'no route-local physics loop — the substrate owns the step');
   assert(!source.includes('GAME_INPUT.createKeyState'), 'no route-local key transport — the substrate owns it');
-  assert(!source.includes('buildRigFrame'), 'no route-local figure rig — the substrate owns the player model');
+  // the probe's TYPE annotations name buildRigFrame legitimately; only a CALL
+  // would be a route-local figure rig.
+  assert(!/GAME_FIGURE\.buildRigFrame\(/.test(source.replace(/typeof GAME_FIGURE\.buildRigFrame/g, '')), 'no route-local figure rig — the substrate owns the player model');
   // GAME_CAMERA.solve stays: registry math for the crosshair PICK only,
   // parameterized by the substrate-exported PLAYER_CAMERA (one camera truth).
   assert(source.includes('PLAYER_CAMERA.'), 'the crosshair pick must solve with the substrate camera values');
 });
 
-test('/test consumes the same substrate (no second embodied copy anywhere)', () => {
-  const source = read('cart/hmsc-int/TestRoute.tsx');
-  assert(source.includes('useEmbodiedPlayer'), '/test must consume the shared embodied substrate');
-  assert(source.includes('<EmbodiedScene'), '/test must render through the substrate scene');
-  assert(!source.includes('GAME_NATIVE_CAMERA'), 'no route-local camera transport — the substrate owns the bind');
-  assert(!source.includes('GAME_PHYSICS'), 'no route-local physics — the substrate owns the step');
-  assert(!source.includes('collisionRects'), 'no route-local collider build — the substrate owns the world door calls');
+test('F1/F2 toggle the fold mode and the URL carries it (PLAYFOLD-0605)', () => {
+  const source = read('cart/hmsc-int/editors/play/PlayRoute.tsx');
+  assert(source.includes("key === 'f1'"), 'F1 must flip to test mode');
+  assert(source.includes("key === 'f2'"), 'F2 must flip to build mode');
+  const shell = read('cart/hmsc-int/index.tsx');
+  assert(shell.includes("activeRoute === 'test' || activeRoute === 'build'"), 'the shell must mount ONE PlayRoute for both paths (no remount across the toggle)');
+  assert(!shell.includes('TestRoute') && !shell.includes('BuildRoute'), 'the pre-fold routes must stay dead — the fold is the one embodied surface');
 });
 
 test('the substrate consumes the mouse — capture-mode look, never drag heuristics', () => {
@@ -63,7 +67,7 @@ test('the substrate consumes the mouse — capture-mode look, never drag heurist
 });
 
 test('the ruled build hotkeys lead the palette: 1 floor, 2 wall, 3 ramp, 4 roof', () => {
-  const source = read('cart/hmsc-int/editors/build/BuildRoute.tsx');
+  const source = read('cart/hmsc-int/editors/play/PlayRoute.tsx');
   assert(source.includes("['floor', 'wall', 'ramp', 'roof']"), "USER VERDICT order: '1 2 3 4 for floor wall ramp roof'");
   assert(source.includes('1 floor · 2 wall · 3 ramp · 4 roof'), 'the help line must teach the ruled keys');
 });

@@ -40,14 +40,13 @@ import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
 import { LogView } from './LogView';
 import { Assist3DRoute } from './assist3d';
 import { TextureStudio } from './TextureStudio';
-import { TestRoute } from './TestRoute';
+import { PlayRoute } from './editors/play/PlayRoute';
 import { VoxelHybridRoute } from './VoxelHybridRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { LABS } from './labs';
 import { CharactersRoute } from './editors/characters/CharactersRoute';
 import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
 import { CutoutRoute } from './editors/cutout/CutoutRoute';
-import { BuildRoute } from './editors/build/BuildRoute';
 import { SettingsRoute } from './editors/settings/SettingsRoute';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
@@ -907,9 +906,20 @@ function EditorShell() {
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
         <Route path="/textures">{() => <TextureStudio />}</Route>
         <Route path="/voxels">{() => <VoxelHybridRoute onExit={() => nav.push('/')} />}</Route>
-        <Route path="/test">{() => <TestRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
-        {/* Creative Build mode (editors/build/) — build the map WHILE PLAYING (V24). */}
-        <Route path="/build">{() => <BuildRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
+        {/* The embodied game surface (editors/play/, PLAYFOLD-0605): /test +
+            /build FOLDED — the URL is the mode, F1/F2 (and the ProjectBar
+            buttons) flip it WITHOUT remounting, so the pose, camera, console,
+            and placed pieces carry across the toggle. Mounted directly (not
+            via <Route>) so both paths share ONE element position. */}
+        {(activeRoute === 'test' || activeRoute === 'build') && (
+          <PlayRoute
+            state={previewWorld}
+            mapName={ws.stem}
+            mode={activeRoute}
+            onMode={(m) => nav.push(m === 'build' ? '/build' : '/test')}
+            onExit={() => nav.push('/')}
+          />
+        )}
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>

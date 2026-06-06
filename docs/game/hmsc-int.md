@@ -92,7 +92,7 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 - `TexturePreview.tsx` — one swatch component for both texture kinds (react-authored facade markup vs shader `Effect` with frozen data) — "texture is one concept."
 
 **Routes (under `@reactjit/router`, hot-persistent via `hotKey`)**
-- `/` editor · `/log` `LogView` (in-app tail of the V27 diagnostics/churn channel) · `/textures` `TextureStudio` (155: catalog rail → `ShaderLab` (189: tune named params on a shared base + overlay, **Materialize** freezes data[] into a stored material in the shared 'hmsc' store → joins `allTextures`) · `/assist3d` (below) · `/voxels` `VoxelHybridRoute` (544: a voxel build/mine surface — voxel_stack_demo's pattern grown an export: writes meshes to disk) · `/test` `TestRoute` (~266: walk the staged world — the FIRST real consumer of the `@game` ground floor, rewired 2026-06-04 per `TestRoute.REWIRE.md`; SUBSTRATE-0605 2026-06-05: the embodied drop-in moved to the shared `Embodied.tsx` substrate — this route keeps only its mode layer: the backtick console (live speed owner, teleport adopt-back), the RMB ADS aim opt-in, the `[probe-player-model]` diagnostic).
+- `/` editor · `/log` `LogView` (in-app tail of the V27 diagnostics/churn channel) · `/textures` `TextureStudio` (155: catalog rail → `ShaderLab` (189: tune named params on a shared base + overlay, **Materialize** freezes data[] into a stored material in the shared 'hmsc' store → joins `allTextures`) · `/assist3d` (below) · `/voxels` `VoxelHybridRoute` (544: a voxel build/mine surface — voxel_stack_demo's pattern grown an export: writes meshes to disk) · `/test` + `/build` `editors/play/PlayRoute` (PLAYFOLD-0605, 2026-06-05 USER ASK "its the same game … fold it so that i can just toggle between them with the F keys like f1 f2": ONE embodied game surface, the URL is the mode — **F1 test / F2 build** and the ProjectBar buttons flip the mode prop with NO remount; pose, camera, mouse capture, the backtick console, and the placed pieces carry across the toggle. The shell mounts ONE `PlayRoute` for both paths, directly — not via `<Route>` — so they share one element position. TEST mode = the TestRoute lineage in full (rewired 2026-06-04 per `TestRoute.REWIRE.md`; SUBSTRATE-0605: the drop-in lives in `Embodied.tsx`): the backtick console (live speed owner, teleport adopt-back — now opens in BOTH modes; build hotkeys gate while it's open), the RMB ADS aim opt-in (test mode only; the substrate folds the camera back to walk on a mid-ADS mode flip), the `[probe-player-model]` diagnostic (test mode only). BUILD mode = the BuildRoute lineage in full, below. Placed pieces render AND collide in both modes).
 - **`Embodied.tsx` — the SHARED EMBODIED SUBSTRATE (SUBSTRATE-0605,
   2026-06-05).** The drop-in player scene exists exactly once, extracted FROM
   TestRoute (the USER-VERDICT-hardened lineage) after /build shipped a
@@ -131,7 +131,8 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
   material amounts (excluded). Chrome = the `Hud*` class family in
   `studio.cls.ts` over new `hud*` tokens in `theme.ts` (no raw colours);
   every feel number in the P2 `HUD_TUNING` table.
-- `/build` `editors/build/BuildRoute` — CREATIVE BUILD MODE (V24): build the
+- `/build` — CREATIVE BUILD MODE (V24; since PLAYFOLD-0605 the build mode of
+  `editors/play/PlayRoute`, F2 from anywhere on the folded surface): build the
   map WHILE PLAYING. The shared embodied substrate (which FIXED the launch
   camera — see CAMGONE above) + the V24 builder vocabulary on one surface,
   wearing `EmbodiedHud` (the blueprint chips live in the HUD's bottom-right
@@ -503,9 +504,11 @@ semantics on the embodied drop-in — since SUBSTRATE-0605 the player (V23
 node-bound native camera, GAME_PHYSICS host step, GAME_WORLD colliders +
 heightfields, captured-mouse look) is the SHARED `cart/hmsc-int/Embodied.tsx`
 substrate, not route code (the original route carried a wholesale TestRoute
-copy whose camera never engaged — CAMGONE-0605). Four pieces:
+copy whose camera never engaged — CAMGONE-0605). PLAYFOLD-0605 (2026-06-05):
+`BuildRoute.tsx` folded with `TestRoute.tsx` into `editors/play/PlayRoute.tsx`
+(this dir keeps `snap.ts` + the P4 suites). Four pieces:
 
-- `BuildRoute.tsx` — the builder layer over `useEmbodiedPlayer` (feeds
+- the build layer of `editors/play/PlayRoute.tsx` — over `useEmbodiedPlayer` (feeds
   `EmbodiedWorldExtras`: placed-piece solids + ramp/stairs heightfield
   slopes; `onFrame`: snap re-resolve; `onTap`: place). Crosshair = the
   solved camera's screen-center axis (the crosshair law, solved with the

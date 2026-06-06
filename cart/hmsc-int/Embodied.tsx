@@ -415,8 +415,11 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       // right-mouse hold, read through the door's pointer wire (honest false
       // when unwired). The walk<->aim transition rides the controller:
       // setMode + full params; the host's retained smoothing animates it.
-      if (optionsRef.current.aim) {
-        const aim = !typing && GAME_INPUT.readPointer().rightDown;
+      // The block also runs while aimRef is STILL set after the option turned
+      // off (PLAYFOLD-0605: F2 mid-ADS flips the mode prop live) — the next
+      // frame reads aim=false and folds the camera back to walk.
+      if (optionsRef.current.aim || aimRef.current) {
+        const aim = optionsRef.current.aim === true && !typing && GAME_INPUT.readPointer().rightDown;
         if (aim !== aimRef.current) {
           aimRef.current = aim;
           // leaving ADS: fold the wider aim pitch back into the orbit clamp
