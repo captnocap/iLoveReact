@@ -38,6 +38,7 @@ import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { useRouteTwigState } from '../twigs';
 import { useSculptCamera } from '../sculptCamera';
+import { cloudBounds } from '../sculptFraming';
 import { PAINT } from '../paint';
 import { voxelsStream } from '../voxels/stream';
 import {
@@ -145,6 +146,10 @@ export function ItemsRoute(props: { onExit: () => void }) {
   const [strength, setStrength] = useRouteTwigState('/items', 'strength', 0.5);
   const [showGrabGrid, setShowGrabGrid] = useRouteTwigState('/items', 'showGrabGrid', true);
   const [status, setStatus] = useState<string | null>(null);
+  // CAMFOCUS-0606: load/import/new bump the epoch → the camera reframes the
+  // new subject; undo restores deliberately don't (the camera holds still).
+  const [focusEpoch, setFocusEpoch] = useState(0);
+  const bumpFocus = () => setFocusEpoch((n) => n + 1);
 
   const draftRef = useRef(draft); draftRef.current = draft;
   const draftIdRef = useRef(draftId); draftIdRef.current = draftId;
@@ -225,6 +230,7 @@ export function ItemsRoute(props: { onExit: () => void }) {
     installDraft(draftFromDoc(doc));
     setDraftId(lastId);
     setDraftName(doc.metadata?.title ?? doc.name);
+    bumpFocus(); // frame the restored item, not the blank boot draft
     setStatus(`restored "${doc.metadata?.title ?? doc.name}" — the draft autosaves as you work`);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount restore only
   }, []);
@@ -250,6 +256,7 @@ export function ItemsRoute(props: { onExit: () => void }) {
     autosaveSkipRef.current = false; // imported content is authored content — autosave it
     setDraftId(null); // a NEW item, not an overwrite of the loaded one
     setDraftName('blockout item');
+    bumpFocus(); // CAMFOCUS-0606: frame the imported blockout
     setStatus(`imported ${doc.blocks.length} blocks — grab the mesh and pull it smooth. Star-shape wrap: concave overhangs flatten to their hull.`);
     live.session?.note(`import blockout · ${doc.blocks.length} blocks · ${doc.dims.w}×${doc.dims.d}×${doc.dims.h}`);
   };
@@ -270,6 +277,7 @@ export function ItemsRoute(props: { onExit: () => void }) {
     installDraft(draftFromDoc(doc));
     setDraftId(id);
     setDraftName(doc.metadata?.title ?? doc.name);
+    bumpFocus(); // CAMFOCUS-0606: frame the loaded item
     setStatus(`loaded "${doc.metadata?.title ?? doc.name}"`);
   };
   const removeFromRoster = (id: string) => {
@@ -285,6 +293,7 @@ export function ItemsRoute(props: { onExit: () => void }) {
     autosaveSkipRef.current = false;
     setDraftId(null);
     setDraftName('new item');
+    bumpFocus(); // CAMFOCUS-0606: frame the fresh sphere
     setStatus('blank sphere — sculpt from scratch, or import a blockout');
   };
 
@@ -373,6 +382,10 @@ export function ItemsRoute(props: { onExit: () => void }) {
     center: ITEM_PLACEMENT,
     viewRect,
     pickWorld: (sx, sy, cam) => (pickAtCam(sx, sy, cam)?.world as [number, number, number] | undefined) ?? null,
+    // CAMFOCUS-0606: boot/refocus framing centers the sculpted item's bounds;
+    // load/import/new bump the epoch so a switched subject reframes.
+    subjectBounds: () => cloudBounds(grabClouds()),
+    focusKey: `item:${focusEpoch}`,
     defaults: { dist: 3.4, look: { yaw: 20, pitch: 12 }, flyPose: { pos: [0, 1.4, -3.0], yaw: 0, pitch: -4 }, mode: 'orbit' },
   });
   const pickAt = (sx: number, sy: number) => pickAtCam(sx, sy, camera.solvedCam());
@@ -600,17 +613,24 @@ export function ItemsRoute(props: { onExit: () => void }) {
         <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
           <Chip label="grid" active={showGrabGrid} color="cyan" onPress={() => setShowGrabGrid((v) => !v)} />
           <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
-          <Chip label="fly" active={camera.camMode === 'fly'} color="good" onPress={() => camera.setCamMode(camera.camMode === 'fly' ? 'orbit' : 'fly')} />
+          {/* the camera pair, explicit (CAMFOCUS-0606): both rigs visible, the
+              active one lit; focus reframes the subject (also F) */}
+          <Chip label="orbit" active={camera.camMode === 'orbit'} color="good" onPress={() => camera.setCamMode('orbit')} />
+          <Chip label="fly" active={camera.camMode === 'fly'} color="good" onPress={() => camera.setCamMode('fly')} />
+          <Chip label="focus · F" color="cyan" onPress={camera.focus} />
           <Chip label="undo ⌃Z" onPress={undoDraft} />
           <Chip label="redo ⌃Y" onPress={redoDraft} />
         </Row>
         {camera.camMode === 'fly' ? (
           <Text fontSize={10} color={T.dim} style={{ position: 'absolute', right: 14, bottom: 14 }}>
-            wasd move · q/e down/up · drag look · drag the mesh to pull · wheel dolly
+            wasd move · q/e down/up · drag look · drag the mesh to pull · wheel dolly · F focus · C orbit
           </Text>
         ) : (
-          <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
+          <Box style={{ position: 'absolute', right: 14, bottom: 14, alignItems: 'flex-end', gap: 6 }}>
             <Knob label="zoom" value={camera.zoomReflect - camera.dist} spec={TUNE.knobs.zoom} onChange={(v) => camera.zoomTo(camera.zoomReflect - v)} />
+            <Text fontSize={10} color={T.dim}>
+              drag orbit · wheel zoom-to-cursor · F focus · C fly
+            </Text>
           </Box>
         )}
       </Pressable>

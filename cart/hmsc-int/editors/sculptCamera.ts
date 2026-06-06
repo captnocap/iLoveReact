@@ -19,6 +19,10 @@
 //   - fly (noclip): WASD + q/e move on the key bus (host-integrated per
 //     frame), drag-look, wheel dolly along the cursor ray, pose persisted
 //     per route at rest points.
+//   - FOCUS (CAMFOCUS-0606): deterministic subject framing — at boot (the
+//     persisted pose no longer drives the load; it was arbitrary), on
+//     focusKey change (part/model switch), and on the F key. C flips
+//     orbit ⇄ fly. Pure math in sculptFraming.ts.
 //   - the boot-frame declarative camera (static props; the host writes the
 //     node's fields every frame once engaged).
 // What the route owns: the Pressable, the grab-beats-orbit split (call
@@ -34,6 +38,7 @@ import { GAME_CAMERA, type Solved } from '../game/camera';
 import { GAME_NATIVE_CAMERA } from '../game/nativeCamera';
 import { useRouteTwigState } from './twigs';
 import { PAINT_EDITOR_TUNING } from './characters/paintKit';
+import { frameFly, frameOrbit, type SubjectBounds } from './sculptFraming';
 
 const TUNE = PAINT_EDITOR_TUNING;
 
@@ -61,6 +66,14 @@ export type SculptCameraOpts = {
   /** the world point under a pixel (mesh pick) — zoom-to-cursor aims at it;
    *  null falls back to the ray's closest approach to the pivot */
   pickWorld?: (sx: number, sy: number, cam: Solved) => V3 | null;
+  /** the subject's bounding sphere (CAMFOCUS-0606) — boot/refocus framing
+   *  centers on it at a bounds-fitted distance; null/absent frames the view
+   *  center at defaults.dist. Routes derive it from their grab clouds. */
+  subjectBounds?: () => SubjectBounds | null;
+  /** when this changes, the camera reframes the subject (the route's
+   *  "part/model switched" signal — e.g. `part:${selPart}:${epoch}`).
+   *  Mount framing happens regardless; this drives the in-session switches. */
+  focusKey?: string;
   defaults: SculptCameraDefaults;
 };
 
@@ -86,6 +99,10 @@ export type SculptCamera = {
   dragging: () => boolean;
   /** the wheel: orbit zoom-to-cursor dolly, or fly dolly along the cursor ray */
   onWheel: (e: any) => void;
+  /** REFOCUS (CAMFOCUS-0606): deterministically reframe the subject in the
+   *  ACTIVE rig — the escape hatch from any lost position. Also on the F key;
+   *  runs automatically at boot and on focusKey change. */
+  focus: () => void;
 };
 
 export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
@@ -122,6 +139,39 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     camCtlRef.current?.setOrbit({ target, yaw: l.yaw, pitch: l.pitch, distance, fov: 45 });
   };
 
+  // ── FOCUS (CAMFOCUS-0606): deterministically frame the subject ────────────
+  // The framed pose is pure registry math (sculptFraming.ts) from the
+  // subject's bounds (or the view center) + the route's default angles; sent
+  // once at param rate in whichever rig is ACTIVE. Runs at boot (outranking
+  // the persisted twig pose — a noclip pose is relative to nothing, so the
+  // verbatim restore put the camera somewhere arbitrary on every load), on
+  // focusKey change (part/model switch), and on the F verb. The persistence
+  // machinery stays untouched: mid-session mode flips still resume their pose.
+  const focusNow = () => {
+    const bounds = opts.subjectBounds?.() ?? null;
+    const clampTo = { minDist: TUNE.knobs.zoom.min, maxDist: TUNE.knobs.zoom.max };
+    const o = frameOrbit(bounds, center, defaults.look, 45, TUNE.frame.margin, clampTo, defaults.dist);
+    // the orbit shadow adopts the framed pose in full (pan = the bounds
+    // center's offset from the view center, so camTarget() IS the subject)
+    lookRef.current = { yaw: o.yaw, pitch: o.pitch };
+    setOrbitLook({ yaw: o.yaw, pitch: o.pitch });
+    setTargetPan({ x: o.target[0] - center[0], y: o.target[1] - center[1], z: o.target[2] - center[2] });
+    setDist(o.dist);
+    if (camModeRef.current === 'fly') {
+      const f = frameFly(bounds, center, defaults.look, 45, TUNE.frame.margin, clampTo, defaults.dist);
+      flyPosRef.current = f.pos;
+      flyLookRef.current = { yaw: f.yaw, pitch: f.pitch };
+      sendFlyPose();
+      setFlyPose({ pos: f.pos, yaw: f.yaw, pitch: f.pitch });
+    } else {
+      sendOrbit(o.target, o.dist);
+    }
+  };
+  // effects + the key bus call through the ref so they never hold a stale
+  // closure (center/defaults change per render; the bus subscribes once)
+  const focusRef = useRef(focusNow);
+  focusRef.current = focusNow;
+
   // Engage: params ride the node id from the camera ref (the nativeCamera prop
   // already bound it host-side at CREATE). Disable on unmount returns the node
   // to the declarative JS-props path.
@@ -135,12 +185,24 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     camCtlRef.current = ctl;
     ctl.setOrbit({ target: camTarget(), yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: dist, fov: 45 });
     ctl.setMode('orbit');
+    // BOOT FRAMING (CAMFOCUS-0606): frame the subject before the mode effect
+    // engages the active rig — the framed fly refs are what it sends.
+    focusRef.current();
     return () => {
       camCtlRef.current = null;
       ctl.disable();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; param changes ride the effect below
   }, []);
+
+  // part/model switch (the route bumps focusKey) → reframe. Boot framing
+  // belongs to the engage effect, so the mount run is skipped.
+  const focusKeyRef = useRef(opts.focusKey);
+  useEffect(() => {
+    if (focusKeyRef.current === opts.focusKey) return;
+    focusKeyRef.current = opts.focusKey;
+    focusRef.current();
+  }, [opts.focusKey]);
 
   // Param changes (view center / zoom-to-cursor move the target, the zoom
   // knob and wheel move distance) re-send the rig params; yaw/pitch ride
@@ -200,6 +262,14 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
   useEffect(() => {
     const setk = (e: any, down: boolean) => {
       const key = String(e?.key ?? '').toLowerCase();
+      // camera verbs (CAMFOCUS-0606), taught in the routes' hint lines:
+      // F reframes the subject (the lost-position escape hatch), C flips
+      // orbit ⇄ fly. Plain keys only — a focused TextInput consumes keys
+      // before the bus fires, so typing never triggers them.
+      if (down && !e?.ctrlKey && !e?.metaKey && !e?.altKey) {
+        if (key === 'f') { focusRef.current(); return; }
+        if (key === 'c') { setCamMode((m: any) => (m === 'fly' ? 'orbit' : 'fly')); return; }
+      }
       if (key) flyKeysRef.current[key] = down;
       if (typeof e?.shiftKey === 'boolean') flyKeysRef.current['__shift'] = e.shiftKey;
       sendFlyAxes();
@@ -346,5 +416,6 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     orbitUp,
     dragging: () => orbitRef.current !== null,
     onWheel,
+    focus: () => focusRef.current(),
   };
 }

@@ -50,6 +50,11 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
    *  down/up at flySpeed units/s (host-integrated), drag = look at lookPerPx,
    *  wheel = dolly along the cursor ray by flyWheelStep per notch */
   fly: { speed: 2.6, lookPerPx: 0.3, wheelStep: 0.35, pitchMin: -89, pitchMax: 89 },
+  /** boot/refocus framing (CAMFOCUS-0606): on load, on part/model switch, and
+   *  on the F verb the camera frames the subject's bounding sphere — margin
+   *  multiplies the fitted distance (1 = the sphere kisses the frustum edge);
+   *  distance clamps ride knobs.zoom, angles ride each route's defaults.look. */
+  frame: { margin: 1.25 },
   /** draft auto-commit debounce (V20 micro-save; AUTOSAVE-0605) */
   autosaveDebounceMs: 1200,
   // (the face-paint palette + stroke numbers died with the coupled

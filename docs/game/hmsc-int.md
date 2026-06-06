@@ -876,6 +876,29 @@ rendered camera mid-flight); orbit mode keeps everything it had
 by a key-hint line). Orbit param effects gate on mode so the two rigs
 never fight over the controller. 13/13 + full verify 51/51 GREEN.
 
+CAMFOCUS-0606 (2026-06-06, USER VERDICT "the camera is offset on load
+every time... dont remove anything but the focus of the camera needs
+fixed"): the measured cause — fly is the boot default and the `flyPose`/
+`orbitTargetPan` twigs restored VERBATIM (the on-disk twig held a pose
+aimed off-subject; orbit's pan sat pinned at its clamp, yaw at -365°); a
+noclip pose is relative to nothing, so every load was arbitrary. The cure
+(NEITHER camera removed; persistence machinery untouched): deterministic
+SUBJECT FRAMING — `editors/sculptFraming.ts` (pure registry math, P4
+suite `sculptFraming.test.ts` 7/7): bounds from the grab clouds' world
+points, distance fits the bounding sphere in the fov ×
+`TUNE.frame.margin` (P2) clamped to the zoom-knob range, fly pose = the
+same framed orbit eye converted through `fpsLookAt` (lookForward's exact
+inverse — host renders looking dead at the subject). Framing runs at
+BOOT (outranks the stale twig restore), on `focusKey` change (the routes
+bump a focus epoch on load/generate/import/new — part switches reframe
+in part view only, never on a figure-view grab-select; undo restores
+hold still), and on the F verb. Toggle made DISCOVERABLE: explicit
+`orbit`/`fly` chip pair (active lit) + a `focus · F` chip on the
+/characters and /items viewports; C flips rigs from the key bus; both
+hint lines teach F/C (orbit mode gained a hint line beside the zoom
+knob). V23/V26 unchanged — framing is param-rate sends of pure-math
+poses; the host still owns every frame.
+
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).
 `rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.
@@ -916,7 +939,10 @@ REUSE, not re-roll (the no-duplication law):
   (GRABQOL/GRABNAV/GRABFLY machinery; same twig keys so /characters' saved
   poses survived the refactor; V23/V26 law unchanged — host drives, JS sends
   params/deltas, `solvedCam()` is the pick shadow). CharactersRoute shrank
-  ~230 lines to a hook call; /items is the second call site.
+  ~230 lines to a hook call; /items is the second call site. CAMFOCUS-0606
+  added subject framing (`subjectBounds`/`focusKey` opts, `focus()` verb,
+  F/C keys — math in `editors/sculptFraming.ts`); every consumer (including
+  the workbench character Stage) gets boot framing + the keys for free.
 - paintKit (DEPTH_OVERLAY_WGSL, byte↔grid, sculpt modes), the shared
   painter's stroke engine + history, `GrabMarker`/`GrabGridCapture`
   (characters/preview) — imported, not copied (the cutout-models

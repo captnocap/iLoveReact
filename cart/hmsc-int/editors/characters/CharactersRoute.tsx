@@ -53,6 +53,7 @@ import { editorChannel } from '../store';
 import { editorSessions, type RouteSession } from '../sessions';
 import { useRouteTwigState } from '../twigs';
 import { useSculptCamera } from '../sculptCamera';
+import { cloudBounds } from '../sculptFraming';
 // ITEMSCULPT-0606: sculpted items (the /items roster) join the prop chips
 import { itemsStream } from '../items/stream';
 import { sculptedItemDefinition } from '../items/bake';
@@ -281,6 +282,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     installDraft(draftFromDocument(doc));
     setDraftId(lastId);
     setDraftName(doc.metadata?.title ?? lastId);
+    bumpFocus(); // frame the restored character, not the blank boot draft
     setStatus(`restored "${doc.metadata?.title ?? lastId}" — the draft autosaves as you work`);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount restore only
   }, []);
@@ -561,6 +563,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     setSelPart('head');
     setView('figure');
     setBodyRigAnim(false);
+    bumpFocus(); // CAMFOCUS-0606: frame the generated character
     setStatus(`generated character ${seed} — ${BODY_SHAPES[next.bodyShape].label}, ${CLOTHING[next.clothing].label} + ${BOTTOMS[next.bottoms].label}`);
   };
 
@@ -584,6 +587,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     setDraftId(id);
     setDraftName(doc.metadata?.title ?? id);
     setView('figure');
+    bumpFocus(); // CAMFOCUS-0606: frame the loaded character
     setStatus(`loaded "${doc.metadata?.title ?? id}" from the roster`);
   };
 
@@ -620,6 +624,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
       autosaveSkipRef.current = false; // imported content is not on the chain yet — autosave it
       setDraftId(null);
       setDraftName(doc.metadata?.title ?? 'imported character');
+      bumpFocus(); // CAMFOCUS-0606: frame the imported character
       setStatus(`loaded ${path.split('/').pop()}`);
       return;
     }
@@ -640,12 +645,23 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   // sculpts with the identical hands (ITEMSCULPT-0606). Same twig keys, so
   // saved camera poses carry across the refactor.
   const viewCenter: [number, number, number] = view === 'figure' ? [0, 1.05, 0] : [0, 1.4, 0];
+  // CAMFOCUS-0606: a model load / generate / import bumps the epoch so the
+  // camera reframes the NEW subject; undo restores deliberately don't (the
+  // camera holds still while you walk history).
+  const [focusEpoch, setFocusEpoch] = useState(0);
+  const bumpFocus = () => setFocusEpoch((n) => n + 1);
   const camera = useSculptCamera({
     route: '/characters',
     center: viewCenter,
     viewRect,
     // zoom-to-cursor aims at the mesh cell under the wheel (GRABNAV-0605)
     pickWorld: (sx, sy, cam) => (pickAtCam(sx, sy, cam).hit?.world as [number, number, number] | undefined) ?? null,
+    // the subject as rendered: the grab clouds' world points (part view = the
+    // selected part alone, figure view = the whole assembly)
+    subjectBounds: () => cloudBounds(grabClouds().clouds),
+    // part switches reframe in part view only — in figure view a grab-select
+    // changes selPart mid-drag and the camera must NOT jump (GRABSHAPE-0605)
+    focusKey: view === 'figure' ? `figure:${focusEpoch}` : `part:${selPart}:${focusEpoch}`,
     defaults: { dist: 4.2, look: { yaw: 20, pitch: 12 }, flyPose: { pos: [0, 1.5, -3.4], yaw: 0, pitch: -4 }, mode: 'fly' },
   });
 
@@ -1094,19 +1110,27 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
           <Chip label="grid" active={showGrabGrid} color="cyan" onPress={() => setShowGrabGrid((v) => !v)} />
           <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
-          <Chip label="fly" active={camera.camMode === 'fly'} color="good" onPress={() => camera.setCamMode(camera.camMode === 'fly' ? 'orbit' : 'fly')} />
+          {/* the camera pair, explicit (CAMFOCUS-0606 — "im not even sure how
+              you toggle between them"): both rigs visible, the active one lit;
+              focus reframes the subject from any lost position (also F) */}
+          <Chip label="orbit" active={camera.camMode === 'orbit'} color="good" onPress={() => camera.setCamMode('orbit')} />
+          <Chip label="fly" active={camera.camMode === 'fly'} color="good" onPress={() => camera.setCamMode('fly')} />
+          <Chip label="focus · F" color="cyan" onPress={camera.focus} />
           <Chip label="undo ⌃Z" onPress={undoDraft} />
           <Chip label="redo ⌃Y" onPress={redoDraft} />
         </Row>
         {camera.camMode === 'fly' ? (
           <Text fontSize={10} color={T.dim} style={{ position: 'absolute', right: 14, bottom: 14 }}>
-            wasd move · q/e down/up · drag look · drag the mesh to pull · wheel dolly
+            wasd move · q/e down/up · drag look · drag the mesh to pull · wheel dolly · F focus · C orbit
           </Text>
         ) : (
-          <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
+          <Box style={{ position: 'absolute', right: 14, bottom: 14, alignItems: 'flex-end', gap: 6 }}>
             {/* zoom knob (GRABQOL-0605): bigger number = CLOSER — the distance
                 REFLECTED across the spec range so + always moves in */}
             <Knob label="zoom" value={camera.zoomReflect - camera.dist} spec={TUNE.knobs.zoom} onChange={(v) => camera.zoomTo(camera.zoomReflect - v)} />
+            <Text fontSize={10} color={T.dim}>
+              drag orbit · wheel zoom-to-cursor · F focus · C fly
+            </Text>
           </Box>
         )}
       </Pressable>
