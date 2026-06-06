@@ -49,7 +49,13 @@ export function characterPanel(s: CharacterStore): PanelSpec {
     title: 'IDENTITY',
     fields: [
       { k: 'name', t: 'text', width: 150, get: () => s.draftName, set: (x) => s.setDraftName(x) },
-      { k: 'skin', t: 'color', opts: DRAFT_DEFAULTS.skins.slice(), get: () => s.draft.skin, set: (c) => s.setSkin(c) },
+      {
+        k: 'skin', t: 'color', opts: DRAFT_DEFAULTS.skins.slice(),
+        // SKINRANGE-0606 ("end the race war"): the full melanin continuum —
+        // presets above for fast picks, every tone reachable in the grid
+        range: { stops: ['#f9ece1', '#e8c5a8', '#c89066', '#8d5a3c', '#5d3a26', '#2b1a10'], cols: 14, rows: 5, warmth: 16 },
+        get: () => s.draft.skin, set: (c) => s.setSkin(c),
+      },
     ],
   });
 

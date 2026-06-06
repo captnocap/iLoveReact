@@ -34,8 +34,10 @@ export const DRAFT_DEFAULTS = Object.freeze({
   clothing: 'tee' as ClothingId,
   clothingSkin: 'plain' as ClothingSkinId,
   bodyPose: 'stand' as BodyPoseId,
-  /** the editor's skin-tone palette */
-  skins: ['#caa07a', '#8d5a3c', '#e0b48c', '#a9785a'],
+  /** the editor's skin-tone QUICK-PICK presets (SKINRANGE-0606: widened to
+   *  span the range — the full continuum lives in the panel's range grid;
+   *  the original four stay, so existing docs' values remain quick-picks) */
+  skins: ['#f6e3d4', '#e0b48c', '#caa07a', '#a9785a', '#8d5a3c', '#6b4430', '#4a2e1f', '#332014'],
 });
 
 export type CharacterDraft = {

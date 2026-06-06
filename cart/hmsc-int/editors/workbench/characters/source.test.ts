@@ -15,6 +15,7 @@ import { generateCharacterDraft } from '../../characters/generate';
 import { SHAPE_REGIONS } from '../../characters/regions';
 import { PAINT_EDITOR_TUNING } from '../../characters/paintKit';
 import { CLOTHING_ACCESSORIES, DEFAULT_BOTTOMS, PART_PRESETS } from '../../../game/figure/shapes';
+import { colorRangeCells } from '../../../shell/colorRange';
 import type { PanelSpec, FieldSpec } from '../../../shell/fields';
 
 type Rec = { commits: Array<{ e: any; label: string }>; notes: string[] };
@@ -237,6 +238,26 @@ test('TWIGSTATE-0606: the view round-trips — a reload returns to the same brus
   (c.deps as any).twig = adapter;
   const s3 = createCharacterStore(c.deps);
   assertEqual(s3.draftId, 'chr-b', 'a stale twig row falls back to the newest entry');
+});
+
+test('SKINRANGE-0606: the tone grid reaches the whole range (pure generator)', () => {
+  const range = { stops: ['#f9ece1', '#8d5a3c', '#2b1a10'], cols: 14, rows: 5, warmth: 16 };
+  const grid = colorRangeCells(range);
+  assertEqual(grid.length, 5, 'row count');
+  assertEqual(grid[0].length, 14, 'column count');
+  for (const row of grid) for (const c of row) assert(/^#[0-9a-f]{6}$/.test(c), `valid hex: ${c}`);
+  const mid = grid[2];
+  assertEqual(mid[0], '#f9ece1', 'the pure curve starts at the palest stop');
+  assertEqual(mid[mid.length - 1], '#2b1a10', 'and ends at the deepest');
+  assert(grid[0][7] !== grid[4][7], 'warm and cool rows actually differ');
+  // the panel's spec carries the range (any tone reachable from gutter 3)
+  const { deps } = fakeDeps(false);
+  const store = createCharacterStore(deps);
+  const skin = field(characterPanel(store), 'IDENTITY', 'skin') as any;
+  assert(skin.range && skin.range.stops.length >= 3, 'the skin field carries the continuum');
+  assert(skin.opts.length >= 8, 'quick-pick presets widened');
+  skin.set('#5d3a26');
+  assertEqual(store.draft.skin, '#5d3a26', 'an arbitrary tone lands on the draft');
 });
 
 finish('editors/workbench/characters');
