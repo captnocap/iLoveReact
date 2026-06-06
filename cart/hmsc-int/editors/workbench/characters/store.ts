@@ -330,6 +330,10 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
       profiles: { ...d.profiles, [part]: defaultProfile(part) },
       regions: { ...d.regions, [part]: {} },
     }));
+    // RESETPART-0606: the 3D mesh slot is content-addressed (partDynKey ←
+    // seqs[part]) — without this bump the data reset never re-sculpts the
+    // view (the route's own bumpSeq, Route.tsx:486; the port dropped it)
+    bumpSeq(part);
     installRev += 1; // the stage re-uploads (an empty grid IS the neutral clear)
     note(`reset part · ${part}`);
     setStatus(`${part} reset — sculpt, outline, and region sliders back to default (ctrl+z undoes)`);

@@ -14,7 +14,7 @@ import { draftToDocument } from '../../characters/draft';
 import { generateCharacterDraft } from '../../characters/generate';
 import { SHAPE_REGIONS } from '../../characters/regions';
 import { PAINT_EDITOR_TUNING } from '../../characters/paintKit';
-import { CLOTHING_ACCESSORIES, DEFAULT_BOTTOMS, PART_PRESETS } from '../../../game/figure/shapes';
+import { CLOTHING_ACCESSORIES, DEFAULT_BOTTOMS, PART_PRESETS, defaultProfile } from '../../../game/figure/shapes';
 import { colorRangeCells } from '../../../shell/colorRange';
 import type { PanelSpec, FieldSpec } from '../../../shell/fields';
 
@@ -258,6 +258,33 @@ test('SKINRANGE-0606: the tone grid reaches the whole range (pure generator)', (
   assert(skin.opts.length >= 8, 'quick-pick presets widened');
   skin.set('#5d3a26');
   assertEqual(store.draft.skin, '#5d3a26', 'an arbitrary tone lands on the draft');
+});
+
+test('RESETPART-0606: reset part wipes the data AND re-keys the view', () => {
+  const { deps } = fakeDeps(false);
+  const store = createCharacterStore(deps);
+  const part = store.view.selPart;
+  // sculpt something real: a grid value, an outline drag, a region slider
+  const dirtyGrid = store.draft.grids[part].map((_, i) => (i === 5 ? 0.8 : 0));
+  store.setPartGrid(part, dirtyGrid);
+  store.editDraft((d) => ({ ...d, profiles: { ...d.profiles, [part]: d.profiles[part].map(() => 1.2) } }));
+  store.setRegion(part, 'any', 0.6);
+  assert(store.draft.grids[part][5] === 0.8, 'the sculpt landed');
+  const seqBefore = store.seqs[part];
+  const installBefore = store.installRev;
+  // the panel's reset-part act (the user's button)
+  (field(characterPanel(store), 'PART', 'reset part') as any).run();
+  // (1) the DATA equals defaults
+  assert(store.draft.grids[part].every((v) => v === 0), 'the sculpt grid is zeroed');
+  assertEqual(JSON.stringify(store.draft.regions[part]), '{}', 'the region sliders are cleared');
+  const def = defaultProfile(part);
+  assert(store.draft.profiles[part].every((v, i) => Math.abs(v - def[i]) < 1e-9), 'the outline is back to the factory profile');
+  // (2) the VIEW re-keys: the mesh slot's content address moves + textures re-upload
+  assert(store.seqs[part] > seqBefore, 'the part seq bumped — partDynKey changes, the mesh re-sculpts');
+  assert(store.installRev > installBefore, 'installRev bumped — the stage re-uploads the paint texture');
+  // (3) undoable, like every edit
+  store.undo();
+  assertEqual(store.draft.grids[part][5], 0.8, 'ctrl+z returns the sculpt');
 });
 
 finish('editors/workbench/characters');
