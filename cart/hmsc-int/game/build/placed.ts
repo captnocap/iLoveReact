@@ -481,8 +481,9 @@ function pushRampBoundaryRects(
     // flush with the ramp edge, so slope walking stays unchanged.
     { minU: -halfW - wall, maxU: -halfW, minV: -halfD, maxV: halfD },
     { minU: halfW, maxU: halfW + wall, minV: -halfD, maxV: halfD },
-    // the low/back face is closed; the high/front edge stays open to the next floor.
-    { minU: -halfW - wall, maxU: halfW + wall, minV: -halfD - wall, maxV: -halfD },
+    // the far/high face is closed for cover from behind; the low approach
+    // edge stays open so the slope itself remains walkable.
+    { minU: -halfW - wall, maxU: halfW + wall, minV: halfD, maxV: halfD + wall },
   ];
   const base = {
     topMeters: top,

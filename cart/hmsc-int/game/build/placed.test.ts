@@ -169,14 +169,16 @@ test('a ramp registers its walkable slope plus solid side/back faces', () => {
   const ramp = placed('ramp.concrete.common', 6, 6);
   const { rects, orientedRects } = placedPieceColliders([ramp]);
   const fields = placedPieceRamps([ramp], 3);
-  console.log(`[RAMPSIDE-0606] ramp registration rects=${rects.length} oriented=${orientedRects.length} heightfields=${fields.length} heights=${fields[0] ? Array.from(fields[0].heights).join(',') : 'none'}`);
+  console.log(`[RAMPSIDE-0606] ramp registration rects=${rects.length} oriented=${orientedRects.length} heightfields=${fields.length} rampBounds=x[${pieceBounds(ramp).minX},${pieceBounds(ramp).maxX}] z[${pieceBounds(ramp).minZ},${pieceBounds(ramp).maxZ}] bands=${rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}]`).join(';')} oldApproachBand=x[4.25,7.75]z[4.25,4.5] heights=${fields[0] ? Array.from(fields[0].heights).join(',') : 'none'}`);
   assertEqual(orientedRects.length, 0, 'axis-aligned ramp emits plain rects');
   assertEqual(rects.length, 3, 'left side, right side, and back face are solid bands');
   const bounds = pieceBounds(ramp);
   const sideRects = rects.filter((r) => r.minZ >= bounds.minZ - 1e-9 && r.maxZ <= bounds.maxZ + 1e-9 && (r.maxX <= bounds.minX + 1e-9 || r.minX >= bounds.maxX - 1e-9));
-  const backRect = rects.find((r) => r.maxZ <= bounds.minZ + 1e-9);
+  const backRect = rects.find((r) => r.minZ >= bounds.maxZ - 1e-9);
+  const approachRect = rects.find((r) => r.maxZ <= bounds.minZ + 1e-9);
   assertEqual(sideRects.length, 2, 'both ramp sides block like walls');
-  assert(!!backRect, 'the low/back face blocks like a wall');
+  assert(!!backRect, 'the far/high face blocks like a wall');
+  assertEqual(approachRect, undefined, 'no wall band covers the walk-up approach edge');
   for (const rect of rects) {
     assertEqual(rect.blocksPlayer, true, 'ramp boundary faces block the player');
     assertClose(rect.topMeters, ramp.y + catalogEntry('ramp.concrete.common').size.heightMeters, 1e-9, 'boundary face is wall-height');

@@ -346,6 +346,7 @@ test('RAMPSIDE-0606: ramp side blocks the character while the slope still ground
   for (const field of fields) GAME_PHYSICS.registerHeightfield(field);
   assertEqual(fields.length, 1, 'the ramp still registers its walkable slope');
   assertEqual(solids.rects.length, 3, 'side/back faces are now sent as solid rects');
+  console.log(`[RAMPSIDE-0606] physics ramp bands=${solids.rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] top=${r.topMeters}`).join(';')} heightfield=x[${fields[0].originX},${fields[0].originX + fields[0].cellSizeMeters * (fields[0].cols - 1)}] z[${fields[0].originZ},${fields[0].originZ + fields[0].cellSizeMeters * (fields[0].rows - 1)}] heights=${Array.from(fields[0].heights).join(',')} oldIntruder=x[4.25,7.75]z[4.25,4.5]`);
 
   const slope = GAME_PHYSICS.step(stepInput({
     dtSeconds: 0.016,
@@ -354,6 +355,26 @@ test('RAMPSIDE-0606: ramp side blocks the character while the slope still ground
   }))!;
   assertClose(slope.player.position.y, catalogEntry('ramp.concrete.common').size.heightMeters / 2, 1e-6, 'center of the ramp still grounds on the slope');
   assertEqual(slope.player.grounded, true, 'slope walk remains grounded');
+
+  let walker = { x: 6, y: 0, z: 4.5, vx: 0, vy: 0, vz: 3 };
+  for (let frame = 0; frame < 20; frame += 1) {
+    const walked = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.05,
+      player: { position: { x: walker.x, y: walker.y, z: walker.z }, velocity: { x: walker.vx, y: walker.vy, z: walker.vz }, yawDegrees: 0 },
+      rects: solids.rects,
+    }))!;
+    walker = {
+      x: walked.player.position.x,
+      y: walked.player.position.y,
+      z: walked.player.position.z,
+      vx: walked.player.velocity.x,
+      vy: walked.player.velocity.y,
+      vz: walker.vz,
+    };
+    assertEqual(walked.player.grounded, true, `walk-up frame ${frame} stays grounded`);
+  }
+  assert(walker.z >= 7.45, `walk-up reaches the crest instead of being blocked at the approach (z=${walker.z})`);
+  assertClose(walker.y, catalogEntry('ramp.concrete.common').size.heightMeters, 0.05, 'walk-up reaches the ramp crest height');
 
   const leftSide = solids.rects.find((r) => r.maxX <= 4.5)!;
   const blocked = GAME_PHYSICS.step(stepInput({
