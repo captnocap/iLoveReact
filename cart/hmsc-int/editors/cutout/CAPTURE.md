@@ -1,5 +1,11 @@
 # editors/cutout — EDITOR-CAPTURE note (CUTOUTAPP-0605)
 
+> **FROZEN (AGNOSTICPAINT-0606):** /cutout is frozen pending workbench
+> agnostic-paint parity — no new features land here; the workbench PAINT
+> bench (editors/workbench/paint/) is the one surface going forward. See
+> WORKBENCH.md §6 step 8. The flip (deletion) is its own commit after the
+> user's pass.
+
 The cutout APP EXPERIENCE remade as its own route in the one shell — the
 full-canvas, layer-stack, smart-select image/texture editor, for painting
 SKINS/TEXTURES (the user's ruling: NOT map painting, and NOT head-part

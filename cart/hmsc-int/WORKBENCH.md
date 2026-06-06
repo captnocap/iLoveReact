@@ -127,9 +127,17 @@ Today's 13 flat icons → 6. The chrome gains window controls.
 | labs                                | **labs** (own surface)                |
 | characters · items · vehicles ·     | **assets** (Workbench: character /    |
 | textures · cutout · voxels ·        | item / vehicle / material gutter-1    |
-| compose                             | categories; cutout = PAINT lens,      |
-|                                     | compose + shader lab = material stage |
-|                                     | modes, voxels = item SCULPT mode*)    |
+| compose                             | categories + PAINT — the AGNOSTIC     |
+|                                     | painting surface (AGNOSTICPAINT-0606, |
+|                                     | USER RULING: "any thing at all is all |
+|                                     | just the same thing at this level" —  |
+|                                     | one bench paints figures, vehicles,   |
+|                                     | materials, documents, blanks; per-    |
+|                                     | source PAINT lenses are doorways into |
+|                                     | the same bench; MATERIALIZE routes    |
+|                                     | output by family). compose + shader   |
+|                                     | lab = material stage modes, voxels =  |
+|                                     | item SCULPT mode*)                    |
 | settings · log                      | **settings** (Workbench: domains +    |
 |                                     | logs domain)                          |
 | assist3d                            | **assist3d** (own surface; candidate  |
@@ -254,8 +262,14 @@ bang; the old route works until the minute its replacement does.
 7. **Material source** (roster = stored materials + shader recipes + decals;
    stage modes: PREVIEW / SHADER LAB / COMPOSE; Materialize = action). Flip:
    `/textures`, `/compose`.
-8. **Cutout retirement.** PAINT lens reaches save-path parity on all four
-   categories → `/cutout` dies.
+8. **Cutout retirement — RE-SEQUENCED (AGNOSTICPAINT-0606).** /cutout dies
+   as soon as the AGNOSTIC PAINT surface passes the user's test (one bench:
+   shirt + car door + material + blank canvas + materialize) — NOT after
+   all-four-source parity. USER-RULED, to kill split-brain updates. /cutout
+   is FROZEN until that flip (its CAPTURE carries the note; the supervisor
+   rejects /cutout-touching commits). The bench is LIVE on /workbench
+   (editors/workbench/paint/, parity table AGNOSTICPAINT.CAPTURE.md);
+   remaining at the flip: EffectModal extracts from the frozen route.
 9. **Settings + logs sources** (panel generated from tunables registry; rigs;
    log stream with dashboard band + select/copy). Flip: `/settings`, `/log`.
 10. **Chrome collapse** to 6 icons. Delete `cart/hmsc-wire/`. Done.
