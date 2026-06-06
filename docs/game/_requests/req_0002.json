@@ -1,0 +1,13 @@
+{
+  "id": "req_0002",
+  "at": "2026-06-06T04:30:45.509Z",
+  "origin": "supervisor-relay",
+  "text": "we can use the claude hook system to see when i submit a prompt -> read the file -> capture my literal text -> use this to build the report with a session id, that the worker can comment on at the end of every turn cycle that is necessary.",
+  "status": "resolved",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T04:31:06.145Z",
+  "resolution": "Extended the ledger with automatic capture via Claude Code hooks (REQLEDGER-0606 addendum). Repo-level .claude/settings.json registers tools/request-hook-prompt on UserPromptSubmit — it reads the hook payload JSON from stdin and logs the user's literal prompt text with the session id and captureMode hook, zero paraphrasing and zero worker cooperation; the captured req id is echoed into session context so the worker sees its debt immediately. tools/request-hook-stop on Stop emits one decision:block nudge per turn cycle listing the session's unresolved asks (stop_hook_active guards loops — a visible nudge, never a hard block). The necessary-vs-noise rule is a tunable knob in docs/game/_requests/_config.json (minPromptChars 40, ackPattern for trivial acks which are never logged, stopReminder block-once/context/off) per P2. request list --session <id> groups a session's asks — the user's per-session report shape. Manual request log kept working for codex panes and relays. Hook payload path proven by piping fabricated UserPromptSubmit/Stop JSON through the real scripts; live capture applies to sessions opened after this lands.",
+  "shas": [
+    "17efea4f1"
+  ]
+}

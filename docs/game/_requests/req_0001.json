@@ -1,0 +1,13 @@
+{
+  "id": "req_0001",
+  "at": "2026-06-06T04:30:45.501Z",
+  "origin": "supervisor-relay",
+  "text": "maybe there is a way we can make a script that ties into the oracle where whenever i send a request to either you or a worker when ur not up, they place the request into a formatted and organized set that they come back to and have to write the resolution to the request as a paragraph, we can use that as a means to follow much better since git doesnt capture what my prompt is.",
+  "status": "resolved",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T04:31:06.136Z",
+  "resolution": "Built the request ledger end to end (REQLEDGER-0606). Storage: one git-tracked JSON file per ask under docs/game/_requests/ (req_<seq>.json), V20 by-addition — the set only grows, the ask text is byte-verbatim and never rewritten, resolution is a one-time field-fill flipping open to resolved and requires this kind of real paragraph plus the implementing commit SHAs (the bridge to git). CLI: tools/request log/resolve/list/show, bundled from docs/game/_index/requestCli.ts over requests.ts (decisions.ts's sibling) and run under tools/v8cli. Oracle: tools/oracle gained a REQUEST LEDGER tier between RULINGS and INDEX RECORDS that matches verbatim ask text and resolutions and prints status plus SHAs, reading the ledger from disk at query time so fresh logs serve immediately. Conduct: CLAUDE.md gained the one-home log-first rule (log verbatim before working, resolve before done, cite the req id in commits). Tested by the P4 suite docs/game/_index/requests.test.ts, wired into rjit game verify.",
+  "shas": [
+    "ea0cfb5c3"
+  ]
+}
