@@ -101,6 +101,20 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   });
   const profileDraftRef = useRef<number[] | null>(null);
   const canvasRect = useRef({ x: 0, y: 0, width: EDITOR_W, height: EDITOR_H });
+  // DEADSPACE-0606 (Law 3): the unwrap canvas EARNS THE COLUMN — it aspect-
+  // fits the measured space instead of a fixed 768×384 island over a void.
+  // All stroke/lathe math is rect-normalized already; only the profile
+  // latches need the live width (canvasFitRef).
+  const [canvasBox, setCanvasBox] = useState({ w: EDITOR_W, h: EDITOR_H });
+  const canvasFit = (() => {
+    const aspect = EDITOR_W / EDITOR_H;
+    let w = canvasBox.w;
+    let h = w / aspect;
+    if (h > canvasBox.h) { h = canvasBox.h; w = h * aspect; }
+    return { w: Math.max(192, Math.floor(w)), h: Math.max(96, Math.floor(h)) };
+  })();
+  const canvasFitRef = useRef(canvasFit);
+  canvasFitRef.current = canvasFit;
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const [grabHover, setGrabHover] = useState<
     { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' | 'smooth' } | null
@@ -359,13 +373,14 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   // ── the outline lathe (Route.tsx:490-536 — latch previews, commit on up) ──
   const profileLatchKey = (part: PartId, row: number, axis: 'left' | 'width') => `chr.profile.${part}.${row}.${axis}`;
   const writeProfileLatch = (part: PartId, row: number, value: number) => {
-    const width = value * EDITOR_W * 0.9;
+    const cw = canvasFitRef.current.w;
+    const width = value * cw * 0.9;
     setLatch(profileLatchKey(part, row, 'width'), width);
-    setLatch(profileLatchKey(part, row, 'left'), EDITOR_W / 2 - width / 2);
+    setLatch(profileLatchKey(part, row, 'left'), cw / 2 - width / 2);
   };
   useEffect(() => {
     for (let i = 0; i < PROFILE_N; i++) writeProfileLatch(selPart, i, draft.profiles[selPart][i]);
-  }, [selPart, draft.profiles]);
+  }, [selPart, draft.profiles, canvasFit.w]);
 
   const profDab = (sx: number, sy: number) => {
     const r = canvasRect.current;
@@ -581,39 +596,32 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     </Pressable>
   );
 
-  // ── the SCULPT lens: unwrap canvas / outline lathe + tools + the 3D part ──
+  // ── the SCULPT lens (DEADSPACE-0606): tools = ONE compact wrapping strip
+  // on TOP (the canvas is 2:1 — width is the scarce axis, so a side rail
+  // would cost more canvas than a top strip); the canvas aspect-fills the
+  // rest; the samples strip rides UNDER it (Law 3's demonstrative filler,
+  // never a black void). Same verbs, same data — layout only.
   const sculptTools = (
-    <Col style={{ gap: 8 }}>
+    <Row style={{ flexWrap: 'wrap', gap: 8, rowGap: 6, alignItems: 'center', paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8 }}>
       {!isHead ? (
-        <Row style={{ gap: 8, alignItems: 'center' }}>
+        <>
           <Chip label="outline" active={v.sculptTab === 'outline'} onPress={() => s.setSculptTab('outline')} />
           <Chip label="sculpt detail" active={v.sculptTab === 'detail'} onPress={() => s.setSculptTab('detail')} />
           {v.sculptTab === 'outline' ? <Chip label="reset outline" onPress={s.resetOutline} /> : null}
-        </Row>
+        </>
       ) : null}
       {isHead || v.sculptTab === 'detail' ? (
         <>
-          <Row style={{ gap: 8, alignItems: 'center' }}>
-            <Chip label="raise" active={v.sculptMode === 'raise'} onPress={() => s.setSculptMode('raise')} />
-            <Chip label="carve in" active={v.sculptMode === 'lower'} color="#ff9445" onPress={() => s.setSculptMode('lower')} />
-            <Chip label="flatten" active={v.sculptMode === 'flatten'} color="#94a3b8" onPress={() => s.setSculptMode('flatten')} />
-            {/* MESHSMOOTH-0606: the relax brush — paint OR grab-drag it */}
-            <Chip label="smooth" active={v.sculptMode === 'smooth'} color="#34d399" onPress={() => s.setSculptMode('smooth')} />
-          </Row>
-          <Row style={{ gap: 8, alignItems: 'center' }}>
-            <Chip label="fill" onPress={fillAll} />
-            <Chip label="soften" onPress={soften} />
-            <Chip label="smooth part" color="#34d399" onPress={smoothPart} />
-            <Chip label="mirror" active={v.mirror} onPress={() => s.setMirror(!v.mirror)} />
-            <Chip label="clear" onPress={clearStrokes} />
-          </Row>
-          {/* the matrix data door: shaped grids as hand-editable files */}
-          <Row style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <Chip label="save sample" color="good" onPress={saveSample} />
-            {samples.map((sample) => (
-              <Chip key={sample.name} label={sample.name} color="cyan" onPress={() => applySample(sample.name)} />
-            ))}
-          </Row>
+          <Chip label="raise" active={v.sculptMode === 'raise'} onPress={() => s.setSculptMode('raise')} />
+          <Chip label="carve in" active={v.sculptMode === 'lower'} color="#ff9445" onPress={() => s.setSculptMode('lower')} />
+          <Chip label="flatten" active={v.sculptMode === 'flatten'} color="#94a3b8" onPress={() => s.setSculptMode('flatten')} />
+          {/* MESHSMOOTH-0606: the relax brush — paint OR grab-drag it */}
+          <Chip label="smooth" active={v.sculptMode === 'smooth'} color="#34d399" onPress={() => s.setSculptMode('smooth')} />
+          <Chip label="fill" onPress={fillAll} />
+          <Chip label="soften" onPress={soften} />
+          <Chip label="smooth part" color="#34d399" onPress={smoothPart} />
+          <Chip label="mirror" active={v.mirror} onPress={() => s.setMirror(!v.mirror)} />
+          <Chip label="clear" onPress={clearStrokes} />
         </>
       ) : null}
       <Knob label="brush size" value={v.brush} spec={TUNE.knobs.brush} onChange={s.setBrush} />
@@ -621,19 +629,33 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       {isHead || v.sculptTab === 'detail' ? (
         <Knob label="smooth passes" value={v.smoothIterations} spec={SMOOTH_TUNING.knobs.iterations} onChange={s.setSmoothIterations} />
       ) : null}
-    </Col>
+    </Row>
   );
 
+  // the matrix data door (MESHSMOOTH): the strip under the canvas — the
+  // leftover space demonstrates the grid samples instead of going black
+  const sampleStrip = (isHead || v.sculptTab === 'detail') ? (
+    <Row style={{ flexWrap: 'wrap', gap: 8, rowGap: 6, alignItems: 'center', paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 8 }}>
+      <Text fontSize={9} color={T.dim} style={{ fontWeight: 800, letterSpacing: 1 }}>GRID SAMPLES</Text>
+      <Chip label="save sample" color="good" onPress={saveSample} />
+      {samples.map((sample) => (
+        <Chip key={sample.name} label={sample.name} color="cyan" onPress={() => applySample(sample.name)} />
+      ))}
+    </Row>
+  ) : null;
+
+  const CW = canvasFit.w;
+  const CH = canvasFit.h;
   const sculptCanvas = !isHead && v.sculptTab === 'outline' ? (
     <Pressable
       onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
       onMouseDown={onProfDown}
       onMouseMove={onProfMove}
       onMouseUp={onProfUp}
-      style={{ width: EDITOR_W, height: EDITOR_H, borderWidth: 1, borderColor: T.frame, position: 'relative', backgroundColor: '#0a1322' }}
+      style={{ width: CW, height: CH, borderWidth: 1, borderColor: T.frame, position: 'relative', backgroundColor: '#0a1322' }}
     >
       {draft.profiles[selPart].map((_p, i) => {
-        const rowH = EDITOR_H / PROFILE_N;
+        const rowH = CH / PROFILE_N;
         return (
           <Box
             key={i}
@@ -641,7 +663,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
           />
         );
       })}
-      <Box style={{ position: 'absolute', left: EDITOR_W / 2 - 1, top: 0, width: 2, height: EDITOR_H, backgroundColor: T.frame }} />
+      <Box style={{ position: 'absolute', left: CW / 2 - 1, top: 0, width: 2, height: CH, backgroundColor: T.frame }} />
     </Pressable>
   ) : (
     <Pressable
@@ -649,7 +671,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       onMouseDown={onPaintDown}
       onMouseMove={onPaintMove}
       onMouseUp={onPaintUp}
-      style={{ width: EDITOR_W, height: EDITOR_H, borderWidth: 1, borderColor: T.frame, position: 'relative' }}
+      style={{ width: CW, height: CH, borderWidth: 1, borderColor: T.frame, position: 'relative' }}
     >
       <UnwrapContent
         skin={draft.skin}
@@ -658,14 +680,14 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         photoY={v.photoY}
         layers={isHead ? shownDoc?.layers ?? null : null}
         overlay={draft.paint?.[selPart] ?? null}
-        width={EDITOR_W}
-        height={EDITOR_H}
+        width={CW}
+        height={CH}
       />
       <Effect
         shader={DEPTH_OVERLAY_WGSL}
         data={[0]}
         textures={[paints[selPart].id, relief.id]}
-        style={{ position: 'absolute', left: 0, top: 0, width: EDITOR_W, height: EDITOR_H }}
+        style={{ position: 'absolute', left: 0, top: 0, width: CW, height: CH }}
       />
     </Pressable>
   );
@@ -680,13 +702,22 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       <Row style={{ flexGrow: 1, minHeight: 0 }}>
         {lens === 'sculpt' ? (
           <>
-            <Box style={{ width: EDITOR_W + 24, height: '100%' }}>
-              <Col style={{ padding: 12, gap: 10 }}>
+            {/* DEADSPACE-0606: the canvas COLUMN (flex 3 against the 3D's 2);
+                tools strip on top, the measured box aspect-fills with the
+                canvas, samples demonstrate the tail — zero black void */}
+            <Col style={{ flexGrow: 3, flexBasis: 0, minWidth: 0, height: '100%' }}>
+              {sculptTools}
+              <Box
+                onLayout={(lr: any) => setCanvasBox((b) => (Math.abs(b.w - lr.width) > 1 || Math.abs(b.h - lr.height) > 1 ? { w: lr.width, h: lr.height } : b))}
+                style={{ flexGrow: 1, minHeight: 0, alignItems: 'center', justifyContent: 'center' }}
+              >
                 {sculptCanvas}
-                {sculptTools}
-              </Col>
+              </Box>
+              {sampleStrip}
+            </Col>
+            <Box style={{ flexGrow: 2, flexBasis: 0, minWidth: 0, height: '100%', flexDirection: 'row' }}>
+              {viewport}
             </Box>
-            {viewport}
           </>
         ) : lens === 'paint' ? (
           /* the shared painter + live ModelPreview (K2/K4) — paint without
