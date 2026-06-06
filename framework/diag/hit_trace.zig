@@ -12,7 +12,9 @@
 //! dispatches when the winner is press-capable — a hover-only node sitting on
 //! top of a button eats the click with zero feedback.
 //!
-//! Output goes to stderr AND /tmp/reactjit-hit.log (truncated per launch).
+//! Output always goes to /tmp/reactjit-hit.log (truncated per launch);
+//! stderr too when ZIGOS_HIT_TRACE=1 is set (keeps the dev terminal quiet
+//! by default — same discipline as GCHITCH-0605's probe cleanup).
 //! Event-rate only (one block per click) — never in a per-frame path.
 
 const std = @import("std");
@@ -26,6 +28,7 @@ const NEAR_RADIUS = 400.0; // px — ignore far-away rects in the nearest list
 
 var log_file: ?std.fs.File = null;
 var file_init = false;
+var stderr_on = false;
 
 const Entry = struct { node: *Node, depth: u32 };
 var contains_buf: [MAX_CONTAINS]Entry = undefined;
@@ -40,13 +43,14 @@ fn ensureFile() void {
     if (file_init) return;
     file_init = true;
     log_file = std.fs.createFileAbsolute(LOG_PATH, .{ .truncate = true }) catch null;
+    stderr_on = std.posix.getenv("ZIGOS_HIT_TRACE") != null;
 }
 
-/// Write one formatted chunk to both stderr and the log file.
+/// Write one formatted chunk to the log file (and stderr when opted in).
 fn out(comptime fmt: []const u8, args: anytype) void {
     var buf: [1024]u8 = undefined;
     const s = std.fmt.bufPrint(&buf, fmt, args) catch return;
-    std.debug.print("{s}", .{s});
+    if (stderr_on) std.debug.print("{s}", .{s});
     if (log_file) |f| _ = f.write(s) catch {};
 }
 
