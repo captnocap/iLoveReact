@@ -692,8 +692,32 @@ function TimeRig(props: { hour: string }) {
 // a per-channel dashboard band (event count + activity sparkline) spends the
 // width, then the stream reads at terminal size with channel edge-stripes
 // and alternating row shading. No dead space.
+// Rows select on click (keep clicking = multi-select); the SelBar carries the
+// selection-scoped actions — COPY goes to the real system clipboard via
+// __clipboard_set (telemetry's proven wire).
 function LogStream(props: { channel: string; all: boolean }) {
-  const rows = props.all ? LOG_LINES : LOG_LINES.filter((l) => l.ch === props.channel);
+  const rows = LOG_LINES
+    .map((l, id) => ({ ...l, id }))
+    .filter((l) => props.all || l.ch === props.channel);
+  const [selIds, setSelIds] = useState<Set<number>>(() => new Set());
+  const [copied, setCopied] = useState(0);
+  // the filter is a lens — switching it drops a selection the lens may hide
+  useEffect(() => { setSelIds(new Set()); setCopied(0); }, [props.channel, props.all]);
+
+  const toggleRow = (id: number) => {
+    setSelIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+    setCopied(0);
+  };
+  const copySelected = () => {
+    const picked = rows.filter((l) => selIds.has(l.id));
+    callHost<void>('__clipboard_set', picked.map((l) => `${l.t} [${l.ch}] ${l.text}`).join('\n') as any);
+    setCopied(picked.length);
+  };
+
   return (
     <C.LogPane>
       <C.StatBand>
@@ -719,18 +743,43 @@ function LogStream(props: { channel: string; all: boolean }) {
           );
         })}
       </C.StatBand>
+
+      {/* selection-scoped actions — only exists while a selection does */}
+      {selIds.size > 0 ? (
+        <C.SelBar>
+          <C.WireTag>{`${selIds.size} SELECTED`}</C.WireTag>
+          <C.ChromePill onPress={copySelected}>
+            <Icon name="Copy" size={12} color={tone('success')} />
+            <C.ChromePillText>Copy</C.ChromePillText>
+          </C.ChromePill>
+          <C.ChromePill onPress={() => { setSelIds(new Set()); setCopied(0); }}>
+            <Icon name="X" size={12} color={tone('textDim')} />
+            <C.ChromePillText>Clear</C.ChromePillText>
+          </C.ChromePill>
+          {copied > 0 ? <C.WireNote>{`copied ${copied} row${copied === 1 ? '' : 's'} to clipboard ✓`}</C.WireNote> : null}
+        </C.SelBar>
+      ) : null}
+
       <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }}>
         <Box style={{ flexDirection: 'column' }}>
-          {rows.map((l, i) => (
-            <C.LogRow key={`${l.t}-${i}`} style={{ backgroundColor: i % 2 ? 'transparent' : tone('bg') }}>
-              <C.LogStripe style={{ backgroundColor: tone(LOG_TONE[l.ch] ?? 'primary') }} />
-              <C.LogTime>{l.t}</C.LogTime>
-              <C.LogChip style={{ backgroundColor: tone(LOG_TONE[l.ch] ?? 'primary') }}>
-                <C.LogChipText>{l.ch}</C.LogChipText>
-              </C.LogChip>
-              <C.LogText>{l.text}</C.LogText>
-            </C.LogRow>
-          ))}
+          {rows.map((l, i) => {
+            const on = selIds.has(l.id);
+            const Row = on ? C.LogRowSel : C.LogRow;
+            return (
+              <Row
+                key={l.id}
+                onPress={() => toggleRow(l.id)}
+                style={on ? undefined : { backgroundColor: i % 2 ? 'transparent' : tone('bg') }}
+              >
+                <C.LogStripe style={{ backgroundColor: tone(LOG_TONE[l.ch] ?? 'primary') }} />
+                <C.LogTime>{l.t}</C.LogTime>
+                <C.LogChip style={{ backgroundColor: tone(LOG_TONE[l.ch] ?? 'primary') }}>
+                  <C.LogChipText>{l.ch}</C.LogChipText>
+                </C.LogChip>
+                <C.LogText>{l.text}</C.LogText>
+              </Row>
+            );
+          })}
         </Box>
       </ScrollView>
     </C.LogPane>

@@ -238,7 +238,18 @@ classifier({
   StatSub: { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:textFaint', style: { fontFamily: 'monospace' } },
   Spark: { type: 'Box', style: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 24 } },
   SparkBar: { type: 'Box', style: { width: 5, borderRadius: 1, backgroundColor: 'theme:primary' } }, // height/color per instance
-  LogRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
+  // rows are pressable: click to select, click more to multi-select; the
+  // SelBar (selection-scoped actions: copy/clear) appears above the stream.
+  LogRow: {
+    type: 'Pressable',
+    style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' },
+    hoverStyle: { backgroundColor: 'theme:surfaceHover' },
+  },
+  LogRowSel: {
+    type: 'Pressable',
+    style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft', backgroundColor: 'theme:bgElevated' },
+  },
+  SelBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 'theme:spacingMd', paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd', paddingTop: 5, paddingBottom: 5, backgroundColor: 'theme:bgElevated', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
   LogStripe: { type: 'Box', style: { width: 3, alignSelf: 'stretch' } }, // channel color per instance
   LogTime: { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:textDim', style: { fontFamily: 'monospace' } },
   LogChip: { type: 'Box', style: { paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 'theme:radiusSm' } }, // bg per channel
