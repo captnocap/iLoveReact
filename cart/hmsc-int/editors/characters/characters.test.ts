@@ -328,6 +328,21 @@ test('mesh grab: the drag axis points outward and mouse motion maps onto it', ()
   assert(sa.len2 > 24 * 24, 'a lateral axis projects above the degeneracy floor');
   assertClose(gridDeltaFor(sa.x, sa.y, sa), 1, 1e-6, 'one axis-length of mouse travel = one grid unit');
   assertClose(gridDeltaFor(-sa.y, sa.x, sa), 0, 1e-6, 'perpendicular mouse travel maps to zero');
+  // sensitivity floor: no part ever drags hotter than minPxPerUnit (the
+  // head-easier-than-torso fix — small parts used to be hair-trigger + mushy)
+  assert(Math.sqrt(sa.len2) >= 56 - 1e-6, 'px-per-unit never drops below the floor');
+
+  // a camera-facing axis (the torso's flat front) has no usable screen
+  // direction — the mapping falls back to drag-up-pulls-out at a fixed feel
+  const toCam: [number, number, number] = [
+    (cam.pos[0] - hit!.world[0]), (cam.pos[1] - hit!.world[1]), (cam.pos[2] - hit!.world[2]),
+  ];
+  const tl = Math.hypot(toCam[0], toCam[1], toCam[2]);
+  const atCam: [number, number, number] = [toCam[0] / tl * 0.35, toCam[1] / tl * 0.35, toCam[2] / tl * 0.35];
+  const fb = screenAxisFor(hit!.world, atCam, GRAB_RECT, cam);
+  assertEqual(fb.x, 0, 'the degenerate fallback is pure screen-vertical');
+  assertClose(gridDeltaFor(0, -90, fb), 1, 1e-6, 'a 90px upward drag = +1.0 (pull out) at the fallback feel');
+  assertClose(gridDeltaFor(0, 90, fb), -1, 1e-6, 'a 90px downward drag = −1.0 (carve in)');
 });
 
 test('a /characters save never wipes /cutout paint: the draft carries overlays opaque (MODELPAINT-0605)', () => {

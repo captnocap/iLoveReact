@@ -58,7 +58,7 @@ import {
   type SculptMode,
 } from './paintKit';
 import { ChipRow, RegionSliderRow, SwatchRow } from './controls';
-import { CharacterEditorCaptures, GrabMarker, HeldItemMeshes, PartMeshes, UnwrapContent, type GrabMarkerInfo, type Photo, type PreviewView } from './preview';
+import { CharacterEditorCaptures, GrabGridCapture, GrabGridMeshes, GrabMarker, HeldItemMeshes, PartMeshes, UnwrapContent, type GrabMarkerInfo, type Photo, type PreviewView } from './preview';
 import {
   GRAB_TUNING, applyGrabStamp, buildGrabClouds, grabDragAxis, grabInstancesFor, grabPointWorld, gridDeltaFor,
   pickGrab, screenAxisFor, stampRadiusUv, stampWorldRadius,
@@ -141,6 +141,9 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const [grabHover, setGrabHover] = useState<
     { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' } | null
   >(null);
+  // the wireframe lattice over the selected part — every line crossing is a
+  // pullable grid point (GRABGRID-0605)
+  const [showGrabGrid, setShowGrabGrid] = useState(true);
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const grabCloudsRef = useRef<{ sig: unknown[]; clouds: GrabCloud[]; instances: GrabInstance[] } | null>(null);
   const grabRef = useRef<null | {
@@ -1045,8 +1048,15 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
           <LabEnvironment preset="studio" />
           <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={showHitboxes} />
           {view === 'figure' && draft.heldItem !== 'none' ? <HeldItemMeshes itemId={draft.heldItem} rig={rig} /> : null}
+          {showGrabGrid ? <GrabGridMeshes view={view} selPart={selPart} parts={partRender} rig={rig} /> : null}
           <GrabMarker marker={grabMarker} />
         </Scene3D>
+        {/* the grab controls live ON the viewport — visible in every tab
+            (the mirror chip used to hide behind the paint tab; GRABGRID-0605) */}
+        <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
+          <Chip label="grid" active={showGrabGrid} color="cyan" onPress={() => setShowGrabGrid((v) => !v)} />
+          <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
+        </Row>
         <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
           <Knob label="zoom" value={dist} spec={TUNE.knobs.zoom} onChange={setDist} />
         </Box>
@@ -1075,6 +1085,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         parts={PART_IDS}
         paint={draft.paint}
       />
+      <GrabGridCapture />
     </Row>
   );
 }

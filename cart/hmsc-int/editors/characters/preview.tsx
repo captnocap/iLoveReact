@@ -13,7 +13,7 @@
 // stack — the ruled editors-reach-into-figure-internals exception at work.
 
 import { memo, useMemo } from 'react';
-import { Box, Image, Scene3D, StaticSurface, Text } from '@reactjit/runtime/primitives';
+import { Box, Effect, Image, Scene3D, StaticSurface, Text } from '@reactjit/runtime/primitives';
 import * as Geometry from '@reactjit/geometries';
 import type { BodyRigFrame } from '../../game/figure/rig';
 import type { HedLayer } from '../../game/figure/hed';
@@ -23,7 +23,8 @@ import type { PaintedOverlay } from '../../game/painted';
 import { BOTTOMS, clothingSkinTextureKey, type BodyShapeId, type BottomsId, type ClothingId, type ClothingSkinId, type PartId, CLOTHING_SKINS } from '../../game/figure/shapes';
 import type { ClothingInstance } from '../../game/figure/clothing';
 import { ITEM_DEFINITIONS, ITEM_GEOMETRIES, type ItemPart } from '../../game/items';
-import { GRAB_TUNING, instanceScaleVec } from './grabKit';
+import { GRAB_GRID_TEXTURE_KEY, GRAB_GRID_WGSL, GRAB_TUNING, PART_VIEW_PLACEMENT, instanceScaleVec } from './grabKit';
+import { PAINT_EDITOR_TUNING } from './paintKit';
 
 export type PreviewView = 'part' | 'figure';
 export type Photo = { path: string; stamp: number };
@@ -49,7 +50,7 @@ export const PartMeshes = memo(function PartMeshes(props: {
         dynamicKey={p.dynKey}
         material="#ffffff"
         textureKey={p.texKey}
-        position={[0, 1.4, 0]}
+        position={PART_VIEW_PLACEMENT.position}
       />
     );
   }
@@ -161,6 +162,74 @@ export const GrabMarker = memo(function GrabMarker(props: { marker: GrabMarkerIn
         position={m.world}
         scale={m.stampWorldRadius}
       />
+    </>
+  );
+});
+
+// The grid overlay's static texture: ONE Effect bake (transparent except the
+// cell-center hairlines + intersection dots). Module-const props — inline
+// identities on an Effect inside a StaticSurface re-bake the capture every
+// frame (the recorded tileSurface hazard).
+const GRID_EFFECT_DATA = [0];
+const GRID_EFFECT_STYLE = { position: 'absolute' as const, left: 0, top: 0, width: PAINT_EDITOR_TUNING.editor.width, height: PAINT_EDITOR_TUNING.editor.height };
+const GRID_CAPTURE_STYLE = { position: 'absolute' as const, left: -99999, top: 0, width: PAINT_EDITOR_TUNING.editor.width, height: PAINT_EDITOR_TUNING.editor.height };
+
+export const GrabGridCapture = memo(function GrabGridCapture() {
+  return (
+    <StaticSurface staticKey={GRAB_GRID_TEXTURE_KEY} style={GRID_CAPTURE_STYLE}>
+      <Effect shader={GRAB_GRID_WGSL} data={GRID_EFFECT_DATA} style={GRID_EFFECT_STYLE} />
+    </StaticSurface>
+  );
+});
+
+/** The "grid" toggle: an inflated twin of every visible instance of the
+ *  SELECTED part, wearing the grid texture. Same geometry, same dynamicKey —
+ *  zero extra generation; its UVs are unwrap space, so the lattice runs
+ *  through the exact 48×24 pull points and stretches as a drag deforms the
+ *  surface. Figure view grids the assembly's instances of that part (all of
+ *  them — one sculpt, many placements; watching every limb pipe move at once
+ *  IS the shared-part truth). */
+export const GrabGridMeshes = memo(function GrabGridMeshes(props: {
+  view: PreviewView;
+  selPart: PartId;
+  parts: Record<PartId, PartRender>;
+  rig: BodyRigFrame;
+}) {
+  const G = GRAB_TUNING.grid;
+  const p = props.parts[props.selPart];
+  const mat = { color: G.color, opacity: G.opacity };
+  if (props.view === 'part') {
+    return (
+      <Scene3D.Mesh
+        geometry={Geometry.Globe}
+        params={p.params}
+        dynamicKey={p.dynKey}
+        material={mat}
+        textureKey={GRAB_GRID_TEXTURE_KEY}
+        position={PART_VIEW_PLACEMENT.position}
+        scale={[G.inflate, G.inflate, G.inflate]}
+      />
+    );
+  }
+  return (
+    <>
+      {props.rig.assembly.map((inst, i) => {
+        if (inst.part !== props.selPart) return null;
+        const s = instanceScaleVec(inst.scale, inst.thickness);
+        return (
+          <Scene3D.Mesh
+            key={`g${i}`}
+            geometry={Geometry.Globe}
+            params={p.params}
+            dynamicKey={p.dynKey}
+            material={mat}
+            textureKey={GRAB_GRID_TEXTURE_KEY}
+            position={inst.position}
+            rotation={inst.rotation ?? [0, 0, 0]}
+            scale={[s[0] * G.inflate, s[1] * G.inflate, s[2] * G.inflate]}
+          />
+        );
+      })}
     </>
   );
 });

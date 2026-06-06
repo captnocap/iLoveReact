@@ -670,6 +670,37 @@ texture round trip → byte-space dab → both edits present, both orders), and
 the drag axis (outward, |axis| = depth amount, knob scales it, screen
 mapping 1:1 along / 0 across).
 
+GRABGRID-0605 (2026-06-05, USER ASK after first hands-on: wireframe so space
+is conceivable + "each point on that grid is a dot i can pull" + no way to
+turn off mirror + "head easier to drag than torso"): three additions on the
+grab. (1) THE GRID TOGGLE — an inflated twin of every visible instance of
+the selected part (same geometry, same dynamicKey: zero extra generation)
+wears ONE static grid texture (`GRAB_GRID_TEXTURE_KEY`, a StaticSurface-
+baked Effect running `GRAB_GRID_WGSL`); because the Globe's UVs ARE unwrap
+space, the hairlines run exactly THROUGH the 48×24 cell centers — every
+intersection dot IS a pullable point, and the lattice stretches with the
+surface as a drag deforms it (vertices move, UVs don't) — "see how much a
+drag stretches the graph". Transparent texture alpha rides the capture
+(clears to a=0) through the mesh shader's `tex_sample.a` multiply; opacity
+0.92 routes it through the transparent pass (depth-tested → the far side
+culls behind the skin). In figure view ALL assembly instances of the
+selected part grid up (one sculpt, many placements — watching every limb
+pipe move at once is the shared-part truth made visible). Module-const
+Effect props (the StaticSurface inline-identity re-bake hazard). (2) GRAB
+CONTROLS ON THE VIEWPORT — `grid` + `mirror` chips overlay the 3D pane,
+visible in every tab; mirror binds the SAME state the paint brush reads
+(one mirror, two tools — it used to hide behind the paint-tab conditional).
+(3) THE DRAG-FEEL FIX — the user's "head easier than torso" report was
+real: screenAxisFor used the raw projected axis with a len² floor, so a
+camera-facing pull axis (the torso's FLAT front, scaleZ 0.62) had a noisy
+direction and mushy travel, while the round head always offered a clean
+lateral projection. Rework: direction comes from the projection, sensitivity
+is floored at `minPxPerUnit` (56px per grid unit — every part now drags
+with the same hand-feel), and under `degenerateAxisPx` (6px) the mapping
+falls back to every sculpt tool's convention — drag UP pulls out, DOWN
+carves in, at `fallbackPxPerUnit` (90px). P4: the axis case grew floor +
+fallback assertions (up=+1/down=−1 at the fallback feel); 11/11 green.
+
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).
 `rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.

@@ -35,10 +35,16 @@ export const GRAB_TUNING = Object.freeze({
   pickRadiusFactor: 0.8,
   /** a candidate must face the camera at least this much (dot(outward, rayDir) below it) */
   facingMax: 0.15,
-  /** drag-axis floor: below this screen length (px per +1.0 grid value) the
-   *  axis is ill-conditioned (pointing at the camera) — the divisor clamps
-   *  here so a drag stays stable instead of exploding */
-  minScreenAxisPx: 24,
+  /** the FASTEST a drag gets: never fewer mouse-px per +1.0 grid value than
+   *  this (small parts project a tiny axis; without the floor they'd be
+   *  hair-trigger AND every part would feel different — the head-easier-
+   *  than-torso report) */
+  minPxPerUnit: 56,
+  /** below this projected length the axis direction is noise (it points at
+   *  the camera — the torso's flat front) — fall back to screen-up = pull out */
+  degenerateAxisPx: 6,
+  /** the fallback's sensitivity: a straight-up drag of this many px = +1.0 */
+  fallbackPxPerUnit: 90,
   /** live mesh re-sculpt cadence mid-drag (release always lands the final) */
   liveSyncMs: 80,
   /** the stamp ellipse never gets narrower than this many grid columns */
@@ -52,8 +58,14 @@ export const GRAB_TUNING = Object.freeze({
   handleScale: 0.5,
   /** the influence shell's translucency */
   shellOpacity: 0.16,
+  /** the wireframe overlay: inflate factor (floats just above the skin),
+   *  mesh tint + translucency (texture alpha carries the lines/dots) */
+  grid: { inflate: 1.012, color: '#bfe6ff', opacity: 0.92 },
   colors: { hover: '#38bdf8', raise: '#38bdf8', carve: '#f97316' },
 });
+
+/** The grid overlay's texture key — ONE static bake (GRAB_GRID_WGSL below). */
+export const GRAB_GRID_TEXTURE_KEY = 'chr.grabgrid';
 
 // ── instances — which meshes are grabbable, and where they sit ───────────────
 
@@ -240,17 +252,30 @@ export function grabDragAxis(hit: GrabHit, params: GlobeParams, inst: GrabInstan
 
 export type ScreenAxis = { x: number; y: number; len2: number };
 
-/** The drag axis projected to screen px per +1.0 grid value. Falls back to
- *  "drag up = raise" when the projection degenerates (axis at the camera). */
+/** The drag axis in screen space — DIRECTION from the projected radial axis,
+ *  SENSITIVITY floored at minPxPerUnit so every part drags with the same
+ *  hand-feel (a small part's tiny projection used to make its direction noisy
+ *  and its travel mushy — the head-easier-than-torso report). When the axis
+ *  points at the camera (the torso's flat front: projection under
+ *  degenerateAxisPx) there is no usable screen direction, so the mapping
+ *  falls back to every sculpt tool's: drag UP pulls out, DOWN carves in, at
+ *  fallbackPxPerUnit. The returned vector is dir × pxPerUnit, so
+ *  gridDeltaFor's dot/len2 is dot(mouse, dir)/pxPerUnit. */
 export function screenAxisFor(world: V3, axisWorld: V3, rect: Rect, cam: Solved): ScreenAxis {
   const p0 = GAME_CAMERA.worldToScreen(world, rect, cam);
   const p1 = GAME_CAMERA.worldToScreen([world[0] + axisWorld[0], world[1] + axisWorld[1], world[2] + axisWorld[2]], rect, cam);
-  const min = GRAB_TUNING.minScreenAxisPx;
-  if (!p0 || !p1) return { x: 0, y: -min, len2: min * min };
-  const x = p1.x - p0.x;
-  const y = p1.y - p0.y;
-  const len2 = Math.max(x * x + y * y, min * min);
-  return { x, y, len2 };
+  const fb = GRAB_TUNING.fallbackPxPerUnit;
+  if (p0 && p1) {
+    const x = p1.x - p0.x;
+    const y = p1.y - p0.y;
+    const len = Math.hypot(x, y);
+    if (len >= GRAB_TUNING.degenerateAxisPx) {
+      const pxPerUnit = Math.max(len, GRAB_TUNING.minPxPerUnit);
+      const k = pxPerUnit / len;
+      return { x: x * k, y: y * k, len2: pxPerUnit * pxPerUnit };
+    }
+  }
+  return { x: 0, y: -fb, len2: fb * fb };
 }
 
 /** Mouse delta (px) → grid value delta along the screen axis, clamped. */
@@ -290,3 +315,36 @@ export function applyGrabStamp(base: number[], cu: number, cv: number, rxUv: num
   if (delta !== 0) stampGrid(g, cu, cv, rxUv, ryUv, delta, mirror);
   return g;
 }
+
+// ── the wireframe grid texture (the "see the grid stretch" toggle) ───────────
+// Baked ONCE under GRAB_GRID_TEXTURE_KEY (StaticSurface + this Effect) and
+// sampled by an inflated twin of the part mesh, whose UVs ARE unwrap space —
+// so the lines run exactly THROUGH the 48×24 cell centers (the pull points),
+// every intersection dot IS a grabbable point, and the whole lattice stretches
+// with the surface as a drag deforms it (vertices move, UVs don't).
+// Transparent outside lines/dots: the capture clears to alpha 0 and the mesh
+// shader multiplies texture alpha. (No backticks in WGSL.)
+export const GRAB_GRID_WGSL = `
+@group(0) @binding(1) var<storage, read> data: array<f32>;
+
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  // cell space: integer steps are cell boundaries; centers sit at +0.5 —
+  // lines/dots land ON the centers (the actual grab cells)
+  let cell = vec2f(in.uv.x * ${HED_GRID_W}.0, in.uv.y * ${HED_GRID_H}.0);
+  let f = fract(cell) - vec2f(0.5);
+  let fw = max(fwidth(cell), vec2f(0.0001));
+
+  // hairlines through every cell center, ~1.1px with screen-space AA
+  let lx = 1.0 - smoothstep(0.0, fw.x * 1.1, abs(f.x));
+  let ly = 1.0 - smoothstep(0.0, fw.y * 1.1, abs(f.y));
+  let line_a = max(lx, ly) * 0.5;
+
+  // a dot at every intersection — the pull points
+  let d = length(f);
+  let dot_a = 1.0 - smoothstep(0.16, 0.16 + max(fw.x, fw.y) * 1.4, d);
+
+  let a = clamp(line_a + dot_a, 0.0, 0.92);
+  let col = mix(vec3f(0.55, 0.82, 1.0), vec3f(1.0, 1.0, 1.0), dot_a);
+  return vec4f(col * a, a);
+}
+`;
