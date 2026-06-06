@@ -115,6 +115,9 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
   let lastSavedAt: number | null = null;
   let status = 'blank canvas — pick anything in the roster, or drop an image';
   let libRev = 0;
+  /** the last successfully-opened target — the hero's materialize/remove
+   *  verbs act on the LIBRARY ROW the subject came from */
+  let lastTarget: PaintTarget | null = null;
   let gray: GraySource | null = null;
   let grayEpoch = 0;
   /** the live painter lifts its doors here (cutout's painterApi idiom) */
@@ -187,6 +190,7 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     flushDraft();
     const next = resolveTarget(target, resolveDeps());
     if (!next) { setStatus('that target is gone — the canvas stays put'); return false; }
+    lastTarget = target;
     install(next, `open · ${next.name}`);
     if (next.model) {
       // OPEN-SLOT (A5): the TARGET itself survives a hot update before the
@@ -366,6 +370,7 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     get lastSavedAt() { return lastSavedAt; },
     get status() { return status; },
     get libRev() { return libRev; },
+    get lastTarget() { return lastTarget; },
     get gray() { return gray; },
     get sessionError() { return deps.error; },
     painterApi,
