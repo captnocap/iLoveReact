@@ -1,0 +1,15 @@
+{
+  "id": "req_0040",
+  "at": "2026-06-06T06:12:02.923Z",
+  "origin": "supervisor-relay",
+  "text": "have someone move clothing into its own thing that is decoupled from the body. i dont like it / find it useful to go to the body editor and then have to turn off the clothing that is in place just to edit the mesh, and clothing should effectively be a prop that is seperate but tightly related, not entirely coupled. same with animation. the fact that when im on the mesh editor and i have animation commands to see is a problem",
+  "status": "resolved",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T07:19:26.504Z",
+  "resolution": "CLOTHSPLIT-0606 complete, both phases. Phase 1 (f66ead7c3): clothing became a wardrobe ATTACHMENT family — outfit.ts OutfitDocument {top,bottoms,print,accessories} riding BodyDocument as ONE optional channel, attachOutfit dressing an existing bones record, rig.ts split MeshRigFrame/buildMeshFrame (the clothing-free body) from the dressed doors (signatures unchanged, equality pinned), outfitOf the V20 read door mapping legacy fields deterministically. Phase 2 (7e7d78b97 + 462a43389): the editor separation — three workbench contexts over ONE character store: the mesh context shows MESH ONLY (panel = identity/part/shape/face-mesh/sculpt/regions; stage = buildMeshFrame UNDRESSED, no garments, no held prop, no animation clock ever ticks there), CLOTHING is its own context (OUTFIT/EXTRAS/PROP panel, dressed-figure stage), ANIMATION is its own context (POSE/FACE/SCRIPT+presets panel, animating stage owning all three clocks). Line-referenced parity ledger editors/workbench/WBCLOTH.CAPTURE.md proves nothing was lost; mechanical parity pin in source.test.ts (22/22; rjit game verify GREEN except the paint lane's pre-existing cutout-models RED). The /characters route is untouched and dies at its own flip.",
+  "shas": [
+    "f66ead7c3",
+    "7e7d78b97",
+    "462a43389"
+  ]
+}
