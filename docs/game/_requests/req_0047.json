@@ -1,0 +1,14 @@
+{
+  "id": "req_0047",
+  "at": "2026-06-06T06:22:43.308Z",
+  "origin": "supervisor-relay",
+  "text": "UserPromptSubmit hook (failed) / error: hook returned invalid user prompt submit JSON output",
+  "status": "resolved",
+  "sessionId": "159435dc-74b2-4e0e-9c32-2dff9bacc5d1",
+  "captureMode": "manual",
+  "resolvedAt": "2026-06-06T06:22:43.316Z",
+  "resolution": "Fixed in 2a5fba1e8 (HOOKJSON-0606). Root cause: the ledger hooks' context line starts with '[request-ledger]' — '[' opens a JSON array, so a strict hook-output parser tries to parse the whole line as JSON, fails, and rejects the hook ('invalid user prompt submit JSON output') instead of falling back to plain text; Claude Code tolerated the line all session, the freshly-spun codex lanes hit the strict path, matching the user's suspicion. Fix: every hook emission is now the documented control JSON on BOTH CLIs — hook-prompt emits {hookSpecificOutput:{hookEventName:'UserPromptSubmit',additionalContext:'[request-ledger] captured …'}}, hook-stop's context mode emits {systemMessage}, block-once stays {decision:'block'}, noise-skips stay silent (empty stdout). Reproduced and verified all seven paths with real payloads on a scratch root: every byte of stdout now parses as valid JSON or is empty. The bundle auto-rebuilds on next hook fire, so the fix is live the moment it's pulled.",
+  "shas": [
+    "2a5fba1e8"
+  ]
+}
