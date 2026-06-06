@@ -6,7 +6,8 @@
 
 import { GAME_CAMERA, type Vec3 } from '../game/camera';
 import {
-  cloudBounds, fpsLookAt, frameDistance, frameFly, frameOrbit, normalizeDeg,
+  applySculptEngagement, cloudBounds, fpsLookAt, frameDistance, frameFly, frameOrbit, normalizeDeg,
+  type SculptEngageCtl,
 } from './sculptFraming';
 import { PAINT_EDITOR_TUNING } from './characters/paintKit';
 import { assert, assertClose, finish, test } from '../game/_testkit';
@@ -111,6 +112,46 @@ test('a figure-sized subject frames inside the zoom knob range', () => {
   const o = frameOrbit(figure, [0, 1.05, 0], LOOK, FOV, TUNE.frame.margin, CLAMP, 4.2);
   assert(o.dist >= CLAMP.minDist && o.dist <= CLAMP.maxDist, `figure framing distance ${o.dist} stays on the knob`);
   assertClose(o.target[1], 1.0, 1e-6, 'framed at mid-figure, not the floor');
+});
+
+test('engagement (CAMBIND-0606): one full-state sequence per rig — a rebind is never partial, never just orbit', () => {
+  const calls: string[] = [];
+  const ctl: SculptEngageCtl = {
+    setMode: (m) => calls.push(`mode:${m}`),
+    setOrbit: (p) => calls.push(`orbit:${p.target.join(',')}@${p.distance}`),
+    setFreeFly: (p) => calls.push(`fly:${p.position.join(',')}/${p.yaw.toFixed(0)}`),
+    setSmoothing: (n) => calls.push(`smooth:${n}`),
+    setMoveAxes: (f, s, l, sp) => calls.push(`axes:${f},${s},${l},${sp}`),
+  };
+  const orbit = { target: [0, 1.05, 0] as Vec3, yaw: 20, pitch: 12, distance: 4.2, fov: 45 };
+  const fly = { position: [0, 1.5, -3.4] as Vec3, yaw: 0, pitch: -4, fov: 45 };
+
+  // FLY: freefly mode, zero smoothing (raw look), the saved pose, axes cleared
+  applySculptEngagement(ctl, 'fly', orbit, fly);
+  assert(JSON.stringify(calls) === JSON.stringify([
+    'mode:freefly', 'smooth:0', 'fly:0,1.5,-3.4/0', 'axes:0,0,0,0',
+  ]), `fly engagement is the exact GRABFLY sequence (got ${calls.join(' | ')})`);
+
+  // ORBIT: any flight stopped FIRST, the rig params, orbit mode
+  calls.length = 0;
+  applySculptEngagement(ctl, 'orbit', orbit, fly);
+  assert(JSON.stringify(calls) === JSON.stringify([
+    'axes:0,0,0,0', 'orbit:0,1.05,0@4.2', 'mode:orbit',
+  ]), `orbit engagement stops flight then applies the rig (got ${calls.join(' | ')})`);
+
+  // a REBIND (the lens-switch case) is the SAME sequence against a fresh
+  // controller — full state, nothing carried from the dead node
+  const rebindCalls: string[] = [];
+  const fresh: SculptEngageCtl = {
+    setMode: (m) => rebindCalls.push(`mode:${m}`),
+    setOrbit: () => rebindCalls.push('orbit'),
+    setFreeFly: () => rebindCalls.push('fly'),
+    setSmoothing: (n) => rebindCalls.push(`smooth:${n}`),
+    setMoveAxes: () => rebindCalls.push('axes'),
+  };
+  applySculptEngagement(fresh, 'fly', orbit, fly);
+  assert(rebindCalls.includes('mode:freefly') && rebindCalls.includes('fly') && rebindCalls.includes('smooth:0'),
+    'a rebound controller receives mode AND pose AND smoothing — the stale-state hole is closed');
 });
 
 finish('editors/sculptFraming');

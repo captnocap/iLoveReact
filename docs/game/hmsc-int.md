@@ -986,6 +986,20 @@ REUSE, not re-roll (the no-duplication law):
   added subject framing (`subjectBounds`/`focusKey` opts, `focus()` verb,
   F/C keys — math in `editors/sculptFraming.ts`); every consumer (including
   the workbench character Stage) gets boot framing + the keys for free.
+  CAMBIND-0606 (USER DIAGNOSIS "it doesnt automatically update its state
+  with the tab... a hot update finally updates the tab"): the once-on-mount
+  engage went STALE when the camera node remounted under the hook (workbench
+  lens/tab switches reparent the viewport — bare, boxed, or unmounted per
+  lens), leaving the controller writing a dead node until an HMR remount
+  accidentally re-engaged; the view froze on every view except the
+  mount-time one. Engagement now FOLLOWS THE NODE ID — checked every
+  render, re-bound through ONE pure full-state sequence
+  (`sculptFraming.applySculptEngagement`: fly = freefly + smoothing 0 +
+  pose + axes cleared; orbit = axes cleared + rig + mode; the mode-flip
+  effect rides the same sequence). Boot framing fires on first engage only;
+  a rebind keeps the user's pose and logs `camera re-bound → node N`.
+  Survives any future lens restructure by construction — no reliance on
+  remounts. P4-pinned in `sculptFraming.test.ts` (8/8).
 - paintKit (DEPTH_OVERLAY_WGSL, byte↔grid, sculpt modes), the shared
   painter's stroke engine + history, `GrabMarker`/`GrabGridCapture`
   (characters/preview) — imported, not copied (the cutout-models

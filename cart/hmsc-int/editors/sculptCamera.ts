@@ -23,6 +23,10 @@
 //     persisted pose no longer drives the load; it was arbitrary), on
 //     focusKey change (part/model switch), and on the F key. C flips
 //     orbit ⇄ fly. Pure math in sculptFraming.ts.
+//   - REBIND (CAMBIND-0606): engagement FOLLOWS THE NODE ID — the camera
+//     node can remount under this hook (lens/tab reparenting); checked
+//     every render, re-engaged through one pure full-state sequence
+//     (sculptFraming.applySculptEngagement). No reliance on remounts.
 //   - the boot-frame declarative camera (static props; the host writes the
 //     node's fields every frame once engaged).
 // What the route owns: the Pressable, the grab-beats-orbit split (call
@@ -38,7 +42,7 @@ import { GAME_CAMERA, type Solved } from '../game/camera';
 import { GAME_NATIVE_CAMERA } from '../game/nativeCamera';
 import { useRouteTwigState } from './twigs';
 import { PAINT_EDITOR_TUNING } from './characters/paintKit';
-import { frameFly, frameOrbit, type SubjectBounds } from './sculptFraming';
+import { applySculptEngagement, frameFly, frameOrbit, type SubjectBounds } from './sculptFraming';
 
 const TUNE = PAINT_EDITOR_TUNING;
 
@@ -172,27 +176,57 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
   const focusRef = useRef(focusNow);
   focusRef.current = focusNow;
 
-  // Engage: params ride the node id from the camera ref (the nativeCamera prop
-  // already bound it host-side at CREATE). Disable on unmount returns the node
-  // to the declarative JS-props path.
+  // ── ENGAGE + REBIND (CAMBIND-0606) ─────────────────────────────────────────
+  // USER DIAGNOSIS, verbatim: "it has some broken state, and it doesnt
+  // automatically update its state with the tab. so a hot update finally
+  // updates the tab and shows me it with the right camera. dumb code."
+  // The camera NODE remounts under this hook without the component
+  // remounting: lens/tab switches reparent the viewport (Stage.tsx renders
+  // it bare, boxed, or not at all per lens) and per-part tree shifts can
+  // recreate it — so the old once-on-mount engage ([] deps) kept writing a
+  // DEAD node and the view froze until an HMR remount accidentally
+  // re-engaged. The cure: ENGAGEMENT FOLLOWS THE NODE ID. This effect runs
+  // after EVERY render (no deps, deliberately) and re-binds whenever
+  // cameraRef points at a different node, restoring the ACTIVE rig's full
+  // state through the one pure sequence (applySculptEngagement — never just
+  // orbit, never partial). Boot framing (CAMFOCUS-0606) runs on the FIRST
+  // engage only; a mid-session rebind keeps the user's current pose.
+  const engagedIdRef = useRef(0);
+  const engageWarnedRef = useRef(false);
   useEffect(() => {
     const nodeId = Number(cameraRef.current?.id ?? 0);
     if (!nodeId) {
-      console.warn(`[${route}] native camera not engaged — camera node id unavailable (rebuild the host with has-game-camera?)`);
+      if (!engageWarnedRef.current) {
+        engageWarnedRef.current = true;
+        console.warn(`[${route}] native camera not engaged — camera node id unavailable (rebuild the host with has-game-camera?)`);
+      }
       return;
     }
+    if (nodeId === engagedIdRef.current) return;
+    const first = engagedIdRef.current === 0;
+    camCtlRef.current?.disable(); // release the previous (possibly dead) node
     const ctl = GAME_NATIVE_CAMERA.forNode(nodeId);
     camCtlRef.current = ctl;
-    ctl.setOrbit({ target: camTarget(), yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: dist, fov: 45 });
-    ctl.setMode('orbit');
-    // BOOT FRAMING (CAMFOCUS-0606): frame the subject before the mode effect
-    // engages the active rig — the framed fly refs are what it sends.
-    focusRef.current();
-    return () => {
-      camCtlRef.current = null;
-      ctl.disable();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- engage once; param changes ride the effect below
+    engagedIdRef.current = nodeId;
+    applySculptEngagement(
+      ctl,
+      camModeRef.current,
+      { target: camTarget(), yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: dist, fov: 45 },
+      { position: flyPosRef.current, yaw: flyLookRef.current.yaw, pitch: flyLookRef.current.pitch, fov: 45 },
+    );
+    if (first) {
+      focusRef.current();
+    } else {
+      // visible in the dev terminal — the rebind IS the fix working
+      console.warn(`[${route}] camera re-bound → node ${nodeId} (viewport remounted; mode=${camModeRef.current})`);
+    }
+  });
+  // unmount: release whatever is CURRENTLY engaged (the node id may have
+  // changed many times since mount — never the mount-time capture)
+  useEffect(() => () => {
+    camCtlRef.current?.disable();
+    camCtlRef.current = null;
+    engagedIdRef.current = 0;
   }, []);
 
   // part/model switch (the route bumps focusKey) → reframe. Boot framing
@@ -240,20 +274,17 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     ctl.setMoveAxes(forward, strafe, lift, TUNE.fly.speed);
   };
   // mode switch: the host flips rigs; fly resumes its saved pose, orbit
-  // re-sends its rig (runs on mount too — right after the engage effect)
+  // re-sends its rig (runs on mount too — right after the engage effect).
+  // Same full-state sequence as bind/rebind (CAMBIND-0606: one truth).
   useEffect(() => {
     const ctl = camCtlRef.current;
     if (!ctl) return;
-    if (camMode === 'fly') {
-      ctl.setMode('freefly');
-      ctl.setSmoothing(0);
-      sendFlyPose();
-      ctl.setMoveAxes(0, 0, 0, 0);
-    } else {
-      ctl.setMoveAxes(0, 0, 0, 0);
-      ctl.setMode('orbit');
-      sendOrbit(camTarget(), dist);
-    }
+    applySculptEngagement(
+      ctl,
+      camMode,
+      { target: camTarget(), yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, distance: dist, fov: 45 },
+      { position: flyPosRef.current, yaw: flyLookRef.current.yaw, pitch: flyLookRef.current.pitch, fov: 45 },
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mode flips only; params ride their own effects
   }, [camMode]);
   // the key bus drives move axes (the host integrates per frame). A focused

@@ -112,6 +112,47 @@ export function fpsLookAt(eye: V3, target: V3): FrameLook {
 
 export type FramedFly = { pos: V3; yaw: number; pitch: number };
 
+// ── engagement (CAMBIND-0606) ────────────────────────────────────────────────
+// USER DIAGNOSIS, verbatim: "it has some broken state, and it doesnt
+// automatically update its state with the tab. so a hot update finally
+// updates the tab and shows me it with the right camera." The camera NODE
+// can remount under a stable hook (lens/tab switches reparent the viewport),
+// so engagement must be re-appliable against ANY node at ANY time — this is
+// the ONE sequence that puts a controller into the active rig's full state
+// (never just orbit, never partial). Pure over a structural controller type
+// so the P4 suite pins the exact call order.
+
+/** the controller surface the engagement sequence drives (the shape of
+ *  GAME_NATIVE_CAMERA.forNode(id) — structural, so tests stub it) */
+export type SculptEngageCtl = {
+  setMode(mode: string): void;
+  setOrbit(params: { target: V3; yaw: number; pitch: number; distance: number; fov: number }): void;
+  setFreeFly(params: { position: V3; yaw: number; pitch: number; fov: number }): void;
+  setSmoothing(perSecond: number): void;
+  setMoveAxes(forward: number, strafe: number, lift: number, speed: number): void;
+};
+
+export type EngageOrbit = { target: V3; yaw: number; pitch: number; distance: number; fov: number };
+export type EngageFly = { position: V3; yaw: number; pitch: number; fov: number };
+
+/** Put `ctl` into the ACTIVE rig's complete state. Fly: freefly mode, zero
+ *  smoothing (GRABFLY: raw look), the saved pose, move axes cleared. Orbit:
+ *  axes cleared (stop any flight), the rig params, orbit mode. Used by the
+ *  hook's bind/REBIND (node id changed) and its mode-flip effect — one
+ *  sequence, one truth. */
+export function applySculptEngagement(ctl: SculptEngageCtl, mode: 'orbit' | 'fly', orbit: EngageOrbit, fly: EngageFly): void {
+  if (mode === 'fly') {
+    ctl.setMode('freefly');
+    ctl.setSmoothing(0);
+    ctl.setFreeFly(fly);
+    ctl.setMoveAxes(0, 0, 0, 0);
+  } else {
+    ctl.setMoveAxes(0, 0, 0, 0);
+    ctl.setOrbit(orbit);
+    ctl.setMode('orbit');
+  }
+}
+
 /** The framed FLY pose: the SAME framed orbit eye (one framing, two rigs),
  *  converted to the freefly's position + FPS look angles toward the subject.
  *  Solved through the registry Orbit rig so the eye math is the rig's own. */
