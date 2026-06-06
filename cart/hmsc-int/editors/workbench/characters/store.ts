@@ -387,6 +387,14 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     setStatus(overlay ? `painted ${part} saved to ${id}` : `cleared ${part} paint on ${id}`);
   };
 
+  /** ADOPT-ONLY (AGNOSTICPAINT-0606): the agnostic bench committed a figure
+   *  save on its own session — the open draft just follows the committed
+   *  paint (no re-commit, no autosave echo). */
+  const adoptPaintedDocument = (next: BodyDocument) => {
+    setDraft({ ...draft, paint: next.paint }, { autosave: false });
+    rosterRev += 1;
+  };
+
   // ── mount restore (A3 + TWIGSTATE-0606): reopen EXACTLY where the user
   // was — the twig'd working row when it still exists, else the newest entry.
   // keepView: every twig'd view field (lens/part/brush/...) stays authoritative.
@@ -432,7 +440,7 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     setAmount: (amount: number) => editDraftCoalesced((d) => ({ ...d, amount })),
     setHeadScaleY: (headScaleY: number) => editDraftCoalesced((d) => ({ ...d, headScaleY })),
     removeFace: () => { editDraft((d) => ({ ...d, face: null })); view.faceAnim = null; twigWrite('faceAnim', null); setStatus(null); },
-    savePaintedModel,
+    savePaintedModel, adoptPaintedDocument,
     // view setters (twig write-through; the route's keys)
     setLens: setViewKey('lens', 'wbLens'),
     setSelPart: setViewKey('selPart', 'selPart'),
