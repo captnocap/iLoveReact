@@ -22,10 +22,12 @@ import * as Geometry from '@reactjit/geometries';
 import { GAME_CAMERA, GAME_CHROME, GAME_NATIVE_CAMERA, GAME_VEHICLE } from '@game';
 import type { BodyDocument, VehicleDoc } from '@game';
 import { VehiclePaintCaptures } from '../../game/paintedRender';
-import { partGlobeParams } from '../../game/figure/bake';
 import { hedDepthGrid, HED_GRID_H, HED_GRID_W, type HedDocument, type HedLayer } from '../../game/figure/hed';
 import { FaceLayerPaint } from '../../game/figure/render';
-import { paintTargetPart, type PaintTargetId, type PartId } from '../../game/figure/shapes';
+import { defaultProfile, paintTargetPart, PART_IDS, type PaintTargetId, type PartId } from '../../game/figure/shapes';
+// the character editor's own mesh recipe (displaces EVERY part — the bake's
+// partGlobeParams is head-only and rendered sculpted bodies as bare eggs)
+import { editorPartParams } from '../characters/paintKit';
 import { PaintQuad, type PaintEditorState } from '../paint';
 import type { PaintLayer } from '../paint';
 import { editorTunables } from '../tunables';
@@ -150,12 +152,29 @@ function FigurePartMesh(props: { model: BodyDocument; target: PaintTargetId }) {
   // sculpted once — the painting is what's per-segment, not the mesh)
   const part = paintTargetPart(target);
   const params = useMemo(() => {
-    const hed: HedDocument = {
-      kind: 'hed', version: 1, cols: HED_GRID_W, rows: HED_GRID_H,
-      skin: model.skin, amount: model.amount, scaleY: model.headScaleY,
-      sculpt: model.parts.head.sculpt, layers: model.parts.head.layers,
-    };
-    return partGlobeParams(part, hed, hedDepthGrid(hed), model.parts[part]?.profile);
+    // THE SAME MODEL THE CHARACTER EDITOR SHOWS (the user's "its not the
+    // same model" report): the bake recipe (partGlobeParams) displaces the
+    // head ONLY, so a sculpted torso rendered as a bare egg here. Use the
+    // editor's own recipe — editorPartParams displaces every part — fed
+    // from the document: per-part sculpt grids, dragged outlines, and the
+    // head's full sculpt+layers composite.
+    const grid = HED_GRID_W * HED_GRID_H;
+    const profiles = Object.fromEntries(
+      PART_IDS.map((id) => [id, model.parts[id]?.profile ?? defaultProfile(id)]),
+    ) as Record<PartId, number[]>;
+    let displace: number[];
+    if (part === 'head') {
+      const hed: HedDocument = {
+        kind: 'hed', version: 1, cols: HED_GRID_W, rows: HED_GRID_H,
+        skin: model.skin, amount: model.amount, scaleY: model.headScaleY,
+        sculpt: model.parts.head.sculpt, layers: model.parts.head.layers,
+      };
+      displace = hedDepthGrid(hed); // sculpt residue + layer relief, composited
+    } else {
+      const sculpt = model.parts[part]?.sculpt ?? [];
+      displace = sculpt.length === grid ? sculpt.map((b) => b / 127) : new Array(grid).fill(0);
+    }
+    return editorPartParams(part, { amount: model.amount, headScaleY: model.headScaleY, profiles }, displace);
   }, [model, part]);
   return (
     <Scene3D.Mesh
