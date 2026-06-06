@@ -58,14 +58,29 @@ export const GRAB_TUNING = Object.freeze({
   handleScale: 0.5,
   /** the influence shell's translucency */
   shellOpacity: 0.16,
-  /** the wireframe overlay: inflate factor (floats just above the skin),
+  /** the wireframe overlay: a NORMAL-OFFSET SHELL floating `lift` local
+   *  world-units above the skin (a center-scale inflate got swallowed in
+   *  carved bends — the radial lift stops clearing a concave skin), plus
    *  mesh tint + translucency (texture alpha carries the lines/dots) */
-  grid: { inflate: 1.012, color: '#bfe6ff', opacity: 0.92 },
+  grid: { lift: 0.018, color: '#bfe6ff', opacity: 0.92 },
   colors: { hover: '#38bdf8', raise: '#38bdf8', carve: '#f97316' },
 });
 
 /** The grid overlay's texture key — ONE static bake (GRAB_GRID_WGSL below). */
 export const GRAB_GRID_TEXTURE_KEY = 'chr.grabgrid';
+
+/** The overlay's geometry params: the part's OWN params with a constant
+ *  added to every displacement cell. A constant survives the bilinear sample
+ *  and the pole averages unchanged, so the generated surface is EXACTLY the
+ *  skin pushed `lift` units along its local normal everywhere — a shell no
+ *  bend can swallow (the depth-tested twin used to dip under concave
+ *  carves when it was inflated by center-scaling). */
+export function gridOverlayParams(params: GlobeParams): GlobeParams {
+  const amount = Math.abs(params.amount ?? 0);
+  if (!(amount > 1e-6) || !params.displace) return params;
+  const lift = GRAB_TUNING.grid.lift / amount;
+  return { ...params, displace: params.displace.map((v) => v + lift) };
+}
 
 // ── instances — which meshes are grabbable, and where they sit ───────────────
 

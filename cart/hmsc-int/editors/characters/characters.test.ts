@@ -22,10 +22,11 @@ import { createSessionLog } from '../sessions';
 // half, which only bundles under the full cart alias set (paint.test.ts does
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
+import { globeSurface } from '@reactjit/geometries';
 import { PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, gridFromBytes } from './paintKit';
 import {
-  applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, gridDeltaFor,
-  pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
+  GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, gridDeltaFor,
+  gridOverlayParams, pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
 } from './grabKit';
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 
@@ -398,6 +399,27 @@ test('displacement grows along the surface normal — a chest pull comes out the
   const dot = (sAxis[0] * radial[0] + sAxis[1] * radial[1] + sAxis[2] * radial[2]) / sLen;
   assertClose(dot, 1, 1e-3, 'on a sphere the normal pull IS the radial pull (heads unchanged)');
   assertClose(sLen, 0.35, 0.01, 'displacement stays world-units (one grid unit = the depth amount)');
+});
+
+test('the grid shell floats a constant lift above the skin — no bend swallows it (GRIDSHELL-0605)', () => {
+  // a skin with a deep carve AND a bump, so concave and convex bends both probe
+  const draft = emptyDraft();
+  stampGrid(draft.grids.torso, 0.5, 0.6, 0.12, 0.18, -0.95, false);
+  stampGrid(draft.grids.torso, 0.3, 0.3, 0.1, 0.12, 0.85, true);
+  const params = editorPartParams('torso', draft, draft.grids.torso) as any;
+  const shell = gridOverlayParams(params);
+  const skin = globeSurface(params);
+  const over = globeSurface(shell as any);
+  // a constant added to every cell survives the bilinear sample and the pole
+  // averages, so the shell sits EXACTLY lift along the local normal — in the
+  // carve bowl, on the bump, mid-flank, and at the pole rows alike (the
+  // center-scale inflate dipped under the carve: the swallowed-lattice report)
+  for (const [u, v] of [[0.5, 0.6], [0.53, 0.66], [0.3, 0.3], [0.7, 0.3], [0.1, 0.5], [0.5, 0.02], [0.5, 0.98]] as Array<[number, number]>) {
+    const s = skin(u, v);
+    const o = over(u, v);
+    const gap = Math.hypot(o[0] - s[0], o[1] - s[1], o[2] - s[2]);
+    assertClose(gap, GRAB_TUNING.grid.lift, GRAB_TUNING.grid.lift * 0.02, `constant lift at (${u}, ${v})`);
+  }
 });
 
 test('a /characters save never wipes /cutout paint: the draft carries overlays opaque (MODELPAINT-0605)', () => {

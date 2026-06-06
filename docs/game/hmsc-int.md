@@ -785,6 +785,23 @@ PROFILE law is untouched (silhouettes still never couple length;
 NORMALPULL changes detail-displacement direction only). 12/12 GREEN +
 geometry smoke + full verify 51/51.
 
+GRIDSHELL-0605 (2026-06-05, USER REPORT "you hit some bend and the grid
+mesh is being swallowed"): the lattice overlay was the part mesh inflated
+1.2% BY CENTER-SCALING — a radial lift, which stops clearing the skin
+inside concave bends (a carve bowl curves inward; the scaled twin dips
+under it and the transparent pass's depth test hides the grid).
+NORMALPULL made real bends common, exposing it. Fix: the overlay is now a
+true NORMAL-OFFSET SHELL — `gridOverlayParams` (grabKit) returns the
+part's own params with a CONSTANT added to every displacement cell; a
+constant survives the bilinear sample and the pole averages unchanged, so
+the generated surface is exactly the skin pushed `GRAB_TUNING.grid.lift`
+(0.018 local units, scaled by amount⁻¹ into grid space) along its local
+normal EVERYWHERE — no bend can swallow it. The shell rides its own dyn
+slot (`.grid` appended to the slot id — different verts than the skin
+now) and the center-scale inflate is gone. P4: constant-lift gap pinned
+at carve bowl / bump / flank / pole rows (±2%). 13/13 GREEN + full
+verify 51/51.
+
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).
 `rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.

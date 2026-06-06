@@ -23,7 +23,7 @@ import type { PaintedOverlay } from '../../game/painted';
 import { BOTTOMS, clothingSkinTextureKey, type BodyShapeId, type BottomsId, type ClothingId, type ClothingSkinId, type PartId, CLOTHING_SKINS } from '../../game/figure/shapes';
 import type { ClothingInstance } from '../../game/figure/clothing';
 import { ITEM_DEFINITIONS, ITEM_GEOMETRIES, type ItemPart } from '../../game/items';
-import { GRAB_GRID_TEXTURE_KEY, GRAB_GRID_WGSL, GRAB_TUNING, PART_VIEW_PLACEMENT, instanceScaleVec } from './grabKit';
+import { GRAB_GRID_TEXTURE_KEY, GRAB_GRID_WGSL, GRAB_TUNING, PART_VIEW_PLACEMENT, gridOverlayParams, instanceScaleVec } from './grabKit';
 import { PAINT_EDITOR_TUNING } from './paintKit';
 
 export type PreviewView = 'part' | 'figure';
@@ -193,13 +193,17 @@ export const GrabGridCapture = memo(function GrabGridCapture(props: {
   );
 });
 
-/** The "grid" toggle: an inflated twin of every visible instance of the
- *  SELECTED part, wearing the grid texture. Same geometry, same dynamicKey —
- *  zero extra generation; its UVs are unwrap space, so the lattice runs
- *  through the exact 48×24 pull points and stretches as a drag deforms the
- *  surface. Figure view grids the assembly's instances of that part (all of
- *  them — one sculpt, many placements; watching every limb pipe move at once
- *  IS the shared-part truth). */
+/** The "grid" toggle: a NORMAL-OFFSET SHELL of every visible instance of the
+ *  SELECTED part, wearing the grid texture — the skin's own params with a
+ *  constant lift on the displacement grid (grabKit gridOverlayParams), so
+ *  the lattice floats the same few millimeters above EVERY point, concave
+ *  carves included (a center-scale inflate dipped under bends — the
+ *  "grid mesh is being swallowed" report). Its UVs are unwrap space, so the
+ *  lattice runs through the exact 48×24 pull points and stretches as a drag
+ *  deforms the surface. Figure view grids the assembly's instances of that
+ *  part (all of them — one sculpt, many placements; watching every limb pipe
+ *  move at once IS the shared-part truth). The shell is its own dyn slot
+ *  (`.grid` on the slot id) — different verts than the skin's. */
 export const GrabGridMeshes = memo(function GrabGridMeshes(props: {
   view: PreviewView;
   selPart: PartId;
@@ -208,17 +212,18 @@ export const GrabGridMeshes = memo(function GrabGridMeshes(props: {
 }) {
   const G = GRAB_TUNING.grid;
   const p = props.parts[props.selPart];
+  const shellParams = useMemo(() => gridOverlayParams(p.params as any), [p.params]);
+  const shellKey = p.dynKey.replace('~', '.grid~');
   const mat = { color: G.color, opacity: G.opacity };
   if (props.view === 'part') {
     return (
       <Scene3D.Mesh
         geometry={Geometry.Globe}
-        params={p.params}
-        dynamicKey={p.dynKey}
+        params={shellParams}
+        dynamicKey={shellKey}
         material={mat}
         textureKey={GRAB_GRID_TEXTURE_KEY}
         position={PART_VIEW_PLACEMENT.position}
-        scale={[G.inflate, G.inflate, G.inflate]}
       />
     );
   }
@@ -226,18 +231,17 @@ export const GrabGridMeshes = memo(function GrabGridMeshes(props: {
     <>
       {props.rig.assembly.map((inst, i) => {
         if (inst.part !== props.selPart) return null;
-        const s = instanceScaleVec(inst.scale, inst.thickness);
         return (
           <Scene3D.Mesh
             key={`g${i}`}
             geometry={Geometry.Globe}
-            params={p.params}
-            dynamicKey={p.dynKey}
+            params={shellParams}
+            dynamicKey={shellKey}
             material={mat}
             textureKey={GRAB_GRID_TEXTURE_KEY}
             position={inst.position}
             rotation={inst.rotation ?? [0, 0, 0]}
-            scale={[s[0] * G.inflate, s[1] * G.inflate, s[2] * G.inflate]}
+            scale={instanceScaleVec(inst.scale, inst.thickness)}
           />
         );
       })}
