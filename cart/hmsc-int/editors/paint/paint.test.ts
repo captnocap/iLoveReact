@@ -20,7 +20,7 @@ import {
   type PaintLayerBytes, type PaintLookDefaults,
 } from './layers';
 import { createPaintHistory } from './history';
-import { hexToHsv, hsvToHex, normalizeHexColor } from './colors';
+import { hexToHsv, hsvToHex, isHexColor, normalizeHexColor } from './colors';
 import {
   addCustomSurface, adoptSurface, buildCellShader, buildTextureShader,
   hexToRgb01, inflateSurface, MASK_SURFACES, NUM_COLOR_SLOTS,
@@ -364,6 +364,9 @@ test('hex colors parse defensively', () => {
 test('HSV color wheel math round-trips common hex colors', () => {
   assertEqual(normalizeHexColor('#f0c'), '#ff00cc', 'short hex expands');
   assertEqual(normalizeHexColor('336699'), '#336699', 'bare hex normalizes');
+  assert(isHexColor('#f0c'), 'short hash hex is valid');
+  assert(isHexColor('336699'), 'bare long hex is valid');
+  assert(!isHexColor('#12xz56'), 'bad hex digits rejected');
   assertEqual(hsvToHex({ h: 0, s: 1, v: 1 }), '#ff0000', 'hue 0 is red');
   assertEqual(hsvToHex({ h: 1 / 3, s: 1, v: 1 }), '#00ff00', 'hue 1/3 is green');
   assertEqual(hsvToHex({ h: 2 / 3, s: 1, v: 1 }), '#0000ff', 'hue 2/3 is blue');
@@ -409,10 +412,25 @@ test('solid is THE NORMAL PAINT BRUSH: exactly the picked color, static, and the
     const wgsl = build('solid');
     assert(wgsl.includes('let color = vec3f(1.0, 1.0, 1.0);'), 'the solid body is white (tint = the picked color, exact)');
     assert(wgsl.includes('_tint'), 'the slot tint composes the final color');
+    // "its also painting my secondary color as the primary": the normal
+    // brush has NO edge band — border pixels included tint slot 0
+    assert(wgsl.includes('let on_edge = false;'), 'solid never classifies pixels as edge (no slot-1 rim, no ants)');
   }
   // and a fresh layer IS the normal brush: solid look, no dimming
   assertEqual(PAINT_TUNING.layerLook.defaultSurface, 'solid', 'new layers default to the normal brush');
   assertEqual(PAINT_TUNING.layerLook.defaultDim, 1, 'the default look never darkens the picked color');
+});
+
+test('edge detection composes base + override — brush-only strokes are not all-edge', () => {
+  // the root of the secondary-color report: the old detector sampled the
+  // BASE mask alone, so on a painted-from-scratch layer (empty base) every
+  // painted pixel had an "off" neighbor in base-space → the whole stroke
+  // wore the edge tint (slot 1, the secondary color).
+  const wgsl = buildTextureShader('rainbow');
+  assert(wgsl.includes('fn effMaskAt'), 'the effective-mask sampler exists in the prelude');
+  const edgeFn = wgsl.slice(wgsl.indexOf('fn isMaskEdgeTex'), wgsl.indexOf('fs_main'));
+  assert(edgeFn.includes('effMaskAt'), 'edge detection samples the COMPOSED mask, never the base alone');
+  assert(edgeFn.split('effMaskAt').length - 1 >= 4, 'all four neighbors compose base + override');
 });
 
 finish('paint');

@@ -164,13 +164,15 @@ const SHADER_BODY: Record<MaskSurface, string> = {
 // makes the painted pixels EXACTLY the picked color — static, no time, no
 // hue cycle. The other modes are the effects gallery.
 // solid skips the alpha pulse; edges paints ONLY the silhouette contour.
-const SURFACE_FLAGS: Record<MaskSurface, { pulse: boolean; interiorAlpha: number; edgeAlpha: number }> = {
-  rainbow: { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0 },
-  plasma:  { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0 },
-  voronoi: { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0 },
-  fbm:     { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0 },
-  solid:   { pulse: false, interiorAlpha: 1.0, edgeAlpha: 1.0 },
-  edges:   { pulse: true,  interiorAlpha: 0.0, edgeAlpha: 1.0 },
+const SURFACE_FLAGS: Record<MaskSurface, { pulse: boolean; interiorAlpha: number; edgeAlpha: number; plainEdges: boolean }> = {
+  rainbow: { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0, plainEdges: false },
+  plasma:  { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0, plainEdges: false },
+  voronoi: { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0, plainEdges: false },
+  fbm:     { pulse: true,  interiorAlpha: 1.0, edgeAlpha: 1.0, plainEdges: false },
+  // plainEdges: the NORMAL brush has no marching-ants rim — every painted
+  // pixel (border included) is exactly the slot-0 color
+  solid:   { pulse: false, interiorAlpha: 1.0, edgeAlpha: 1.0, plainEdges: true },
+  edges:   { pulse: true,  interiorAlpha: 0.0, edgeAlpha: 1.0, plainEdges: false },
 };
 
 export function buildCellShader(mode: MaskSurface): string {
@@ -205,7 +207,7 @@ export function buildCellShader(mode: MaskSurface): string {
 ${SHADER_BODY[mode]}
 
   let pulse = ${pulseExpr};
-  let on_edge = isEdge(cx, cy, igw, igh, total);
+  let on_edge = ${f.plainEdges ? 'false' : 'isEdge(cx, cy, igw, igh, total)'};
   let interior_a = ${f.interiorAlpha.toFixed(3)};
   let edge_a = ${f.edgeAlpha.toFixed(3)};
 
@@ -271,15 +273,28 @@ fn rainbow(t: f32) -> vec3f {
 
 // 4-neighbor edge probe stepping 1/textureDim so the probe lands on
 // adjacent texels regardless of mask resolution.
+// The EFFECTIVE mask at a uv — base + override band compose, the same rule
+// the fragment body applies at its own pixel. Edge detection MUST use this:
+// sampling the base alone made every brush-only pixel read as "edge" (the
+// base is empty on painted-from-scratch layers), so whole strokes wore the
+// edge tint — the user's "its also painting my secondary color as the
+// primary".
+fn effMaskAt(uv: vec2f) -> f32 {
+  let base_v = textureSampleLevel(mask_tex, mask_samp, uv, 0.0).r;
+  let ov = textureSampleLevel(override_tex, override_samp, uv, 0.0).r;
+  var mask_v = base_v;
+  if (ov > 0.75) { mask_v = 1.0; } else if (ov > 0.25) { mask_v = 0.0; }
+  return mask_v;
+}
+
 fn isMaskEdgeTex(uv: vec2f) -> bool {
   let dims = textureDimensions(mask_tex);
   let dx = 1.0 / f32(dims.x);
   let dy = 1.0 / f32(dims.y);
-  let vl = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(-dx, 0.0), 0.0).r;
-  let vr = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(dx, 0.0), 0.0).r;
-  let vu = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(0.0, -dy), 0.0).r;
-  let vd = textureSampleLevel(mask_tex, mask_samp, uv + vec2f(0.0, dy), 0.0).r;
-  return (vl < 0.5 || vr < 0.5 || vu < 0.5 || vd < 0.5);
+  return (effMaskAt(uv + vec2f(-dx, 0.0)) < 0.5 ||
+          effMaskAt(uv + vec2f(dx, 0.0)) < 0.5 ||
+          effMaskAt(uv + vec2f(0.0, -dy)) < 0.5 ||
+          effMaskAt(uv + vec2f(0.0, dy)) < 0.5);
 }
 `;
 
@@ -318,7 +333,7 @@ export function buildTextureShader(mode: MaskSurface): string {
 ${SHADER_BODY[mode]}
 
   let pulse = ${pulseExpr};
-  let on_edge = isMaskEdgeTex(in.uv);
+  let on_edge = ${f.plainEdges ? 'false' : 'isMaskEdgeTex(in.uv)'};
   let interior_a = ${f.interiorAlpha.toFixed(3)};
   let edge_a = ${f.edgeAlpha.toFixed(3)};
 

@@ -40,13 +40,27 @@ const TOOLS: { id: PaintTool; label: string; icon: string }[] = [
   { id: 'smart', label: 'Smart select (S)', icon: 'WandSparkles' },
 ];
 
-const MODES: { id: PaintMode; label: string; icon: string; color: string }[] = [
-  { id: 'erase', label: 'Paint / remove (E)', icon: 'Eraser', color: '#ff9f43' },
-  { id: 'restore', label: 'Restore (R)', icon: 'RotateCcw', color: '#34d399' },
-];
+// The two stroke modes, in the CANVAS's vocabulary (the user: "paint and
+// remove are the same tool?" — no more). On a color canvas (blank, model,
+// material) the additive stroke is PAINT and the subtractive one is the
+// ERASER; on an image source (the cutout extraction flow) the same two
+// bands mean REMOVE and KEEP. The DATA vocabulary stays the mask's
+// ('erase'/'restore' bands — document compatibility); only the surface
+// speaks paint.
+function modesFor(hasImage: boolean): { id: PaintMode; label: string; icon: string; color: string }[] {
+  return hasImage
+    ? [
+        { id: 'erase', label: 'Remove from image (B)', icon: 'Eraser', color: '#ff9f43' },
+        { id: 'restore', label: 'Keep — undo removal (E)', icon: 'RotateCcw', color: '#34d399' },
+      ]
+    : [
+        { id: 'erase', label: 'Paint (B)', icon: 'Paintbrush', color: '#ff9f43' },
+        { id: 'restore', label: 'Eraser (E)', icon: 'Eraser', color: '#34d399' },
+      ];
+}
 
 /** the keyboard map, visible (the engine binds these in usePaintEditor) */
-const KEY_HINT = 'B brush · E paint · R restore · H hand · L lasso · F refine · [ ] size · Ctrl+Z/Y undo/redo';
+const KEY_HINT = 'B paint · E eraser · H hand · L lasso · F refine · S smart · [ ] size · Ctrl+Z/Y undo/redo';
 
 export function CutoutToolRail({ s }: { s: PaintEditorState }) {
   const target = s.activeLayer;
@@ -54,6 +68,8 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
     ? (s.layers[target].config.colors ?? s.defaults.colors)
     : s.defaults.colors;
   const safeSlot = Math.min(Math.max(s.activeColorSlot, 0), PAINT.NUM_COLOR_SLOTS - 1);
+  const hasImage = !!s.srcPath;
+  const modes = modesFor(hasImage);
 
   return (
     <Col style={{
@@ -79,9 +95,9 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
       </Row>
 
       <RailDivider />
-      <SectionLabel>MASK</SectionLabel>
+      <SectionLabel>{hasImage ? 'MASK' : 'MODE'}</SectionLabel>
       <Row style={{ gap: 6, flexWrap: 'wrap', width: RAIL.tile * 4 + 18, justifyContent: 'center' }}>
-        {MODES.map((m) => (
+        {modes.map((m) => (
           <IconTile
             key={m.id}
             icon={m.icon}
@@ -91,8 +107,8 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
             onPress={() => s.setMode(m.id)}
           />
         ))}
-        <IconTile icon="X" label="Clear layer mask" active={false} color={T.bad} onPress={s.clearMask} />
-        <IconTile icon="RefreshCcw" label="Invert layer mask" active={false} color={T.accent} onPress={s.invertMask} />
+        <IconTile icon="X" label={hasImage ? 'Clear layer mask' : 'Clear layer paint'} active={false} color={T.bad} onPress={s.clearMask} />
+        <IconTile icon="RefreshCcw" label={hasImage ? 'Invert layer mask' : 'Invert layer paint'} active={false} color={T.accent} onPress={s.invertMask} />
         <IconTile icon="FlipHorizontal" label="Mirror painting across the vertical center" active={s.mirror} color="#22d3ee" onPress={() => s.setMirror(!s.mirror)} />
         {s.tool === 'lasso' && s.lassoPoints.length > 0 ? (
           <IconTile icon="Check" label={`Close lasso (${s.lassoPoints.length} points)`} active={false} color={T.good} onPress={s.commitLasso} />

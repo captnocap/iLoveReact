@@ -850,12 +850,17 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   useIFTTT('key:ctrl+c', key(() => { const i = activeLayerRef.current; if (i >= 0) copyLayer(i); }));
   useIFTTT('key:ctrl+v', key(pasteLayer));
   useIFTTT('key:ctrl+x', key(() => { const i = activeLayerRef.current; if (i >= 0) cutLayer(i); }));
-  useIFTTT('key:b', key(() => setTool('brush')));
+  // B/E are the PAINT APP keys (the user: "paint and remove are the same
+  // tool?"): B = the paint brush, E = the eraser — each picks the brush
+  // tool AND its mode in one press. Internally paint rides the 'erase'
+  // band and the eraser rides 'restore' (the mask data vocabulary stays
+  // for document compatibility; only the surface speaks paint).
+  useIFTTT('key:b', key(() => { setTool('brush'); setMode('erase'); }));
+  useIFTTT('key:e', key(() => { setTool('brush'); setMode('restore'); }));
   useIFTTT('key:h', key(() => setTool('hand')));
   useIFTTT('key:s', key(() => { if (smartAvailable) setTool('smart'); }));
   useIFTTT('key:l', key(() => setTool('lasso')));
   useIFTTT('key:f', key(() => setTool('refine')));
-  useIFTTT('key:e', key(() => setMode('erase')));
   useIFTTT('key:r', key(() => setMode('restore')));
   useIFTTT('key:enter', key(() => { if (toolRef.current === 'lasso') commitLasso(); }));
   useIFTTT('key:escape', key(() => { if (toolRef.current === 'lasso') clearLasso(); }));
