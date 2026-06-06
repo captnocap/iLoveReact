@@ -54,6 +54,13 @@ export type Photo = { path: string; stamp: number }; // preview.tsx's shape (hea
 
 export type SculptedItemRef = { id: string; label: string; tone: string };
 
+/** TWIGSTATE-0606: tests inject a bag-backed adapter to prove the round-trip
+ *  (set state → fresh store over the same bag → identical view fields). */
+export type TwigAdapter = {
+  read<T>(key: string, initial: T): T;
+  write<T>(key: string, value: T): void;
+};
+
 export type CharacterStoreDeps = {
   channel: { state(): CharactersStreamState } | null;
   session: Pick<RouteSession<CharactersEvent>, 'commit' | 'note'> | null;
@@ -62,8 +69,9 @@ export type CharacterStoreDeps = {
   items?: (() => SculptedItemRef[]) | null;
   /** autosave debounce; <= 0 commits synchronously (tests) */
   autosaveMs?: number;
-  /** false → skip twig io (tests) */
-  twig?: boolean;
+  /** false → no view persistence · adapter → tests' twig bag · default → the
+   *  route twig file ('/characters' keys, C4 parity) */
+  twig?: boolean | TwigAdapter;
 };
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -91,13 +99,16 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
   const listeners = new Set<() => void>();
   const emit = () => { for (const fn of [...listeners]) fn(); };
 
-  // ── view state on the route's own twig keys (C4) ──────────────────────────
+  // ── view state on the route's own twig keys (C4 + TWIGSTATE-0606) ─────────
+  const adapter: TwigAdapter | null = typeof deps.twig === 'object' ? deps.twig : null;
   const twigRead = <T>(key: string, initial: T): T => {
     if (!tw) return initial;
+    if (adapter) return adapter.read(key, initial);
     try { return readRouteTwigState(TWIG_ROUTE, key, initial); } catch { return initial; }
   };
   const twigWrite = <T>(key: string, value: T): void => {
     if (!tw) return;
+    if (adapter) { adapter.write(key, value); return; }
     try { writeRouteTwigState(TWIG_ROUTE, key, value); } catch { /* twigless host */ }
   };
   const view = {
@@ -124,12 +135,21 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     emit();
   };
 
+  // TWIGSTATE-0606: the WORKING ROW survives hot reloads too — without this,
+  // a reload re-created the store and mount-restored the LAST roster entry,
+  // yanking the user off the character they were on. Every draftId change
+  // writes through; the factory restore below prefers it.
+  const assignDraftId = (id: string | null) => {
+    draftId = id;
+    twigWrite('wbDraftId', id);
+  };
+
   // ── autosave (Route.tsx:185-211 — AUTOSAVE-0605, V20 micro-saves) ─────────
   let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
   const commitAutosave = () => {
     if (!deps.session) return;
     const id = draftId ?? mintCharacterId();
-    draftId = id;
+    assignDraftId(id);
     deps.session.commit({ kind: 'authored', id, doc: draftToDocument(draft, draftName) }, `autosave · ${draftName}`);
     rosterRev += 1;
   };
@@ -194,21 +214,25 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     if (!deps.session) { setStatus(`save unavailable — ${deps.error ?? 'no session'}`); return; }
     const id = draftId ?? mintCharacterId();
     deps.session.commit({ kind: 'authored', id, doc: draftToDocument(draft, draftName) }, `${draftName}: saved`);
-    draftId = id;
+    assignDraftId(id);
     rosterRev += 1;
     setStatus(`saved "${draftName}" to the roster + snapshot (the game's view is fresh)`);
   };
 
-  const loadFromRoster = (id: string, opts?: { history?: boolean }) => {
+  const loadFromRoster = (id: string, opts?: { history?: boolean; keepView?: boolean }) => {
     const doc = rosterState().characters[id];
     if (!doc) return;
     // the mount restore is NOT an edit — no undo step back to the blank draft
     if (opts?.history !== false) history.commit(snapDraft);
     installDraft(draftFromDocument(doc));
-    draftId = id;
+    assignDraftId(id);
     draftName = doc.metadata?.title ?? id;
-    view.lens = 'figure';
-    twigWrite('wbLens', 'figure');
+    // keepView (TWIGSTATE-0606): the RESTORE path must not flip the lens —
+    // a reload mid-painting returns to PAINT, never to the figure view.
+    if (!opts?.keepView) {
+      view.lens = 'figure';
+      twigWrite('wbLens', 'figure');
+    }
     setStatus(`loaded "${draftName}" from the roster`);
   };
 
@@ -216,7 +240,7 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     if (!deps.session) return;
     deps.session.commit({ kind: 'removed', id }, `${id}: removed`);
     rosterRev += 1;
-    if (draftId === id) draftId = null;
+    if (draftId === id) assignDraftId(null);
     setStatus('removed from the roster (its history stays in the log)');
   };
 
@@ -239,7 +263,7 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     const next = generateCharacterDraft(seed);
     history.commit(snapDraft);
     installDraft(next, { autosave: true });
-    draftId = null; // a NEW character, not an overwrite of the loaded one
+    assignDraftId(null); // a NEW character, not an overwrite of the loaded one
     draftName = `character ${seed.toString(36)}`;
     view.selPart = 'head';
     view.lens = 'figure';
@@ -277,7 +301,7 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
       if (!doc) { setStatus(`${path.split('/').pop()} is not a .body document`); return; }
       history.commit(snapDraft);
       installDraft(draftFromDocument(doc), { autosave: true });
-      draftId = null;
+      assignDraftId(null);
       draftName = doc.metadata?.title ?? 'imported character';
       setStatus(`loaded ${path.split('/').pop()}`);
       return;
@@ -363,6 +387,19 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     setStatus(overlay ? `painted ${part} saved to ${id}` : `cleared ${part} paint on ${id}`);
   };
 
+  // ── mount restore (A3 + TWIGSTATE-0606): reopen EXACTLY where the user
+  // was — the twig'd working row when it still exists, else the newest entry.
+  // keepView: every twig'd view field (lens/part/brush/...) stays authoritative.
+  {
+    const st = rosterState();
+    if (st.order.length > 0) {
+      const remembered = twigRead<string | null>('wbDraftId', null);
+      const id = remembered && st.characters[remembered] ? remembered : st.order[st.order.length - 1];
+      loadFromRoster(id, { history: false, keepView: true });
+      status = `restored "${draftName}" — the draft autosaves as you work`;
+    }
+  }
+
   return {
     // subscription
     subscribe(fn: () => void): () => void { listeners.add(fn); return () => listeners.delete(fn); },
@@ -436,17 +473,9 @@ export function characterWorkbenchStore(): CharacterStore {
   } catch (e) {
     deps = { channel: null, session: null, error: String(e), items: null };
   }
+  // the factory's TWIGSTATE-0606 mount restore reopens the twig'd row in the
+  // twig'd view — nothing extra to do here.
   liveStore = createCharacterStore(deps);
-  // AUTOSAVE-0605 mount restore (A3): the most recent roster entry IS the
-  // working draft — reopen exactly where authoring left off (loadFromRoster
-  // installs + sets id/name; the status then reads as a restore, not a load).
-  const state = liveStore.rosterState();
-  const lastId = state.order[state.order.length - 1];
-  const doc = lastId ? state.characters[lastId] : null;
-  if (doc) {
-    liveStore.loadFromRoster(lastId!, { history: false });
-    liveStore.setStatus(`restored "${doc.metadata?.title ?? lastId}" — the draft autosaves as you work`);
-  }
   return liveStore;
 }
 

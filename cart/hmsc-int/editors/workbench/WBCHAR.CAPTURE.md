@@ -148,6 +148,34 @@ PAINT = the shared painter on the selected part, in-page).
 | K4 | Cutout:846-852 ModelPreview3D | live 3D beside the painter re-baking per stroke | **RULED → DAY ONE** (user, 2026-06-06): the PAINT lens imports cutout's ModelPreview now — paint-and-see in the workbench immediately |
 | K5 | Cutout:496-504 draft slots | OPEN-SLOT hot-update persistence of unsaved paint | **RULED → WORKBENCH-SCOPED SLOTS** (user, verbatim: "makes it better if something gets really fucked up"): the lens gets its OWN slot book, never cutout's — one corrupted book must not eat both surfaces' unsaved work |
 
+## TWIGSTATE-0606 — deep view-state twigs (the hot-reload law)
+
+USER ASK: "remember exactly what route/panel/state im in so hot reload doesnt
+take me from painting on a texture to viewing a 3d model." The full restore
+chain, each link twigged at its owner:
+
+| link | owner | twig |
+|---|---|---|
+| route (/workbench itself) | the Router | `hotKey="hmsc-int:route"` (pre-existing) |
+| active source/category | shell/Workbench | `/workbench · source` |
+| selected roster row (frame) | shell/Workbench | `/workbench · selBySource` (per-source map) |
+| lens fallback (uncontrolled sources) | shell/Workbench | `/workbench · lensBySource` |
+| working row (characters — survives the singleton reset) | store | `/characters · wbDraftId`; factory restore prefers it over newest-entry, stale ids degrade to newest |
+| lens (characters, source-controlled) | store | `/characters · wbLens`; restore uses `keepView` so loading never flips a twig'd PAINT back to figure |
+| painted part / sculpt tab / mode / mirror / brush / strength / photo / hitboxes / anims / script / grab grid | store | `/characters · <route keys>` (C4 — pre-existing) |
+| painter tool/brush/look | the painter itself | `/paint/wbchr-paint · *` (pre-existing) + BRUSHTWIG post-restore re-assert |
+| sculpt camera pose | useSculptCamera | `/characters` keys (pre-existing) |
+| unsaved paint strokes | the workbench slot book | `_workbench_paint_drafts.json` (K5) — the view twigs above make them VISIBLE again without navigation |
+
+Deliberately NOT twigged (transient by design): the roster filter text (a
+search box, like hover), grab hover/drag state, animation clock frames
+(scriptFrame restarts at 0 — the script TEXT is twigged), the status line,
+and the in-tool undo stack (session-scoped like the route's).
+
+P4: `TWIGSTATE-0606: the view round-trips` — a fresh store over the same twig
+bag restores lens=paint, part, brush, mode, mirror, AND the working row;
+stale row ids fall back to the newest entry.
+
 ## Deferred (full list — nothing silently dropped)
 
 1. ~~**K4** live 3D model preview inside the PAINT lens~~ — RULED IN (day one).

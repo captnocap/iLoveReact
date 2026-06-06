@@ -15,6 +15,9 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Box, ScrollView } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
+// twigs are workspace-persistence INFRA, not game knowledge — the LabsRoute
+// precedent (shell/LabsRoute.tsx imports the same hook)
+import { useRouteTwigState } from '../editors/twigs';
 import { C, accentFor } from './workbench.cls';
 import { PanelGroups, panelFieldCount, type PanelSpec } from './fields';
 import { LensBar, EmptyStage, type LensSpec } from './stage';
@@ -58,9 +61,14 @@ export interface WorkbenchSource<S = unknown> {
 
 export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?: () => void }) {
   const sources = props.sources;
-  const [srcId, setSrcId] = useState(sources[0]?.id ?? '');
-  const [selBySrc, setSelBySrc] = useState<Record<string, string>>({});
-  const [lensBySrc, setLensBySrc] = useState<Record<string, string>>({});
+  // TWIGSTATE-0606: the frame's view state is ephemeral-but-TWIGGED — a hot
+  // reload (or leave-and-return) restores the exact source, roster row, and
+  // lens the user was on ("painting on a texture → reload → staring at a 3D
+  // model", never again). Stale ids degrade gracefully below (find ?? first).
+  // The roster FILTER stays deliberately transient (a search box, like hover).
+  const [srcId, setSrcId] = useRouteTwigState('/workbench', 'source', sources[0]?.id ?? '');
+  const [selBySrc, setSelBySrc] = useRouteTwigState<Record<string, string>>('/workbench', 'selBySource', {});
+  const [lensBySrc, setLensBySrc] = useRouteTwigState<Record<string, string>>('/workbench', 'lensBySource', {});
   const [filter, setFilter] = useState('');
   // edit revision: setters are the only write path; bumping re-reads every get()
   const [, setRev] = useState(0);

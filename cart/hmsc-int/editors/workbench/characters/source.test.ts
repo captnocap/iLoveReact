@@ -54,7 +54,7 @@ test('list/defaultRow/onPick: roster order, last entry is the working draft', ()
   const rows = src.list();
   assertEqual(rows.length, 2, 'two roster entries list');
   assertEqual(rows[0].label, 'alpha', 'titles come from metadata');
-  assertEqual(src.defaultRow!(rows), 'chr-b', 'no working draft → the LAST entry (mount-restore law)');
+  assertEqual(src.defaultRow!(rows), 'chr-b', 'a fresh store restores the LAST entry (mount-restore law; no twig)');
   src.onPick!('chr-a');
   assertEqual(store.draftId, 'chr-a', 'onPick installs the picked entry');
   assertEqual(store.draftName, 'alpha', 'the name follows the document title');
@@ -149,10 +149,13 @@ test('the held-prop enum lists sculpted /items and resolves labels back to ids',
 });
 
 test('actions: save commits a labeled authored event; remove appears with an id', () => {
+  // an EMPTY roster: the factory restore (TWIGSTATE-0606) now gives any
+  // roster-backed store a working id at birth, so the no-id case is fresh
+  const empty = createCharacterStore(fakeDeps(false).deps);
+  assert(!charactersSource(empty).actions!(empty).some((a) => a.id === 'remove'), 'no remove before an id exists');
   const { deps, rec } = fakeDeps(true);
   const store = createCharacterStore(deps);
   const src = charactersSource(store);
-  assert(!src.actions!(store).some((a) => a.id === 'remove'), 'no remove before an id exists');
   src.onPick!('chr-a');
   const actions = src.actions!(store);
   assert(actions.some((a) => a.id === 'remove'), 'remove appears for a loaded entry');
@@ -199,6 +202,41 @@ test('the lens set is FIGURE/PART/SCULPT/PAINT and the source controls it', () =
   assertEqual(src.activeLens!(store), 'part', 'the default lens');
   src.onLens!(store, 'sculpt');
   assertEqual(store.view.lens, 'sculpt', 'onLens writes the store');
+});
+
+test('TWIGSTATE-0606: the view round-trips — a reload returns to the same brush on the same part, still painting', () => {
+  const bag = new Map<string, unknown>();
+  const adapter = {
+    read: <T,>(k: string, init: T): T => (bag.has(k) ? (bag.get(k) as T) : init),
+    write: <T,>(k: string, v: T): void => { bag.set(k, v); },
+  };
+  // the session: the user picks a row, goes to PAINT on the torso, brush 2
+  const a = fakeDeps(true);
+  (a.deps as any).twig = adapter;
+  const s1 = createCharacterStore(a.deps);
+  charactersSource(s1).onPick!('chr-a');
+  s1.setLens('paint');
+  s1.setSelPart('torso');
+  s1.setBrush(2);
+  s1.setMirror(false);
+  s1.setSculptMode('lower');
+  // the hot reload: a FRESH store over the same twig bag (module state gone)
+  const b = fakeDeps(true);
+  (b.deps as any).twig = adapter;
+  const s2 = createCharacterStore(b.deps);
+  assertEqual(s2.view.lens, 'paint', 'PAINTING STAYS PAINTING — the named failure, dead');
+  assertEqual(s2.view.selPart, 'torso', 'the painted part restores');
+  assertEqual(s2.view.brush, 2, 'the sculpt brush restores');
+  assertEqual(s2.view.mirror, false, 'toggles restore');
+  assertEqual(s2.view.sculptMode, 'lower', 'tool modes restore');
+  assertEqual(s2.draftId, 'chr-a', 'the WORKING ROW restores (not the newest entry)');
+  assertEqual(s2.draftName, 'alpha', 'with its name');
+  // a removed row degrades gracefully: twig points at a ghost → newest entry
+  bag.set('wbDraftId', 'chr-ghost');
+  const c = fakeDeps(true);
+  (c.deps as any).twig = adapter;
+  const s3 = createCharacterStore(c.deps);
+  assertEqual(s3.draftId, 'chr-b', 'a stale twig row falls back to the newest entry');
 });
 
 finish('editors/workbench/characters');
