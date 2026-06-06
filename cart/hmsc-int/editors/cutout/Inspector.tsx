@@ -473,9 +473,14 @@ function LayersPanel({ s, height }: { s: PaintEditorState; height: number }) {
           {s.layers.length === 0 ? (
             <Text style={{ color: T.dim, fontSize: 10 }}>No layers — paint or smart-select a region.</Text>
           ) : null}
-          {s.layers.map((layer, idx) => (
-            <LayerRow key={layer.id} s={s} index={idx} />
-          ))}
+          {/* LAYERFLIP-0606 (user: "layers that are actually above on the
+              image are below in the list"): the DATA stack stays bottom-up
+              (index 0 composites first); the LIST renders top-of-image at
+              the top — the universal convention. Display order only. */}
+          {s.layers.map((_, k) => {
+            const idx = s.layers.length - 1 - k;
+            return <LayerRow key={s.layers[idx].id} s={s} index={idx} />;
+          })}
         </Col>
       </ScrollView>
       <Row style={{
@@ -484,8 +489,12 @@ function LayersPanel({ s, height }: { s: PaintEditorState; height: number }) {
       }}>
         <LayerAction icon="Plus" label="Add layer" onPress={() => s.addLayer()} />
         <LayerAction icon="Copy" label="Duplicate layer" disabled={!canTarget} onPress={() => s.duplicateLayer(i)} />
-        <LayerAction icon="ArrowUp" label="Move layer up" disabled={!canTarget} onPress={() => s.moveLayer(i, -1)} />
-        <LayerAction icon="ArrowDown" label="Move layer down" disabled={!canTarget} onPress={() => s.moveLayer(i, 1)} />
+        {/* LAYERFLIP-0606: with top-of-image rendered at the top of the list,
+            visual UP = toward the END of the bottom-up data stack (+1) and
+            DOWN = toward index 0. Merge-down already merges into i-1 — the
+            layer now VISUALLY below the active row — so it stays as-is. */}
+        <LayerAction icon="ArrowUp" label="Move layer up" disabled={!canTarget} onPress={() => s.moveLayer(i, 1)} />
+        <LayerAction icon="ArrowDown" label="Move layer down" disabled={!canTarget} onPress={() => s.moveLayer(i, -1)} />
         <LayerAction icon="Merge" label="Merge down" disabled={!canTarget} onPress={() => s.mergeLayer(i)} />
         <LayerAction icon="Scissors" label="Cut layer to clipboard" disabled={!canTarget} onPress={() => s.cutLayer(i)} />
         <Box style={{ flexGrow: 1 }} />
