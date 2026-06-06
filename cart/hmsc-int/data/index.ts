@@ -2,9 +2,9 @@
 // one total cross-session undo chain, materialized snapshots.
 //
 // THE RULES (V20, ruled):
-//   - A state update writes to ITS concern's stream (data/streams/<name>.jsonl)
-//     — never one monolithic blob. New feature = NEW stream; old streams stay
-//     valid forever (schema evolution by addition, not migration).
+//   - A state update writes to ITS concern's stream — never one monolithic
+//     blob. New feature = NEW stream; old streams stay valid forever (schema
+//     evolution by addition, not migration).
 //   - One total undo chain: every appended event carries a GLOBAL sequence
 //     number across all streams. An undo point is a log position (a seq).
 //     History is immutable — "undo" reads the state AS OF a position; it never
@@ -15,33 +15,53 @@
 //     materializer (initial + apply) in the same registration — a stream
 //     without snapshot support cannot be expressed.
 //
-// Git: stream/snapshot CONTENT is not git-tracked (.gitignore — git is the
-// code time machine, these are the content time machine). The BACKUP STORY is
-// explicit: store.exportBackup(destDir) copies every stream file + a manifest;
-// restoring is copying them back into data/streams/. (Equivalent by hand:
-// `tar czf streams-backup.tgz cart/hmsc-int/data/streams/`.)
-//
-// Host surface: only `__fs_*` globals (identical names under the cart host and
-// tools/v8cli, so the same layer serves editors, compile/, and the P4 tests).
-// The host has no append binding yet, so append = read + concat + write —
-// SEMANTICALLY append-only (existing lines are never modified); a real
-// `__fs_append` host fn is the queued bindings-lane follow-up (beside C2's
-// `__fs_write_bytes`/`__fs_copy`).
+// BACKING (STOREDB-0606, the user's ruling after the sessions.jsonl:884
+// outage: "we need to move to pg or sqlite which are in the framework
+// already"): streams live in ONE sqlite database, <rootDir>/store.db —
+// WAL journal + BEGIN IMMEDIATE transactions, so N concurrent app instances
+// (user session + census walks + headless boots) can never tear a record or
+// mint a duplicate seq again. Only the backing changed; the V20 semantics
+// above survive exactly:
+//   - the `events` table is append-only (INSERT only — no UPDATE/DELETE path
+//     exists in this module); per-concern streams are the indexed `stream`
+//     column; the one global sequence is allocated as MAX(seq)+1 INSIDE the
+//     write transaction, so it is race-free by construction.
+//   - `record` holds each event line byte-for-byte (the exact JSON text) —
+//     ingested history keeps its original bytes, including warts like the
+//     duplicate seq 4077 pair the old read-concat-write race minted.
+//   - INGEST: at openStore(), every <rootDir>/streams/*.jsonl not yet
+//     imported is folded into the DB inside one transaction (the marker row
+//     in `ingested_files` commits atomically with the rows, and the
+//     check-inside-the-transaction makes concurrent first-boots safe).
+//     Corrupt records are quarantined + logged, never imported, and the
+//     original .jsonl files are LEFT IN PLACE UNTOUCHED as the archive —
+//     this module never writes them; the user retires them.
 //
 // TOLERANCE (the V20 boundary law — boundary validation never throws): a
-// corrupt or partial record ANYWHERE in a stream file is SKIPPED, logged
-// loudly (console.warn + telemetry), and QUARANTINED in memory
-// (store.quarantine()) — the fold continues with every valid record. The file
-// is NEVER rewritten: append-only is sacred, there are no "repair" writes.
-// A crash mid-write costs at most the one in-flight event, never the chain.
-// The writer guards the seam too: if the file's last line is torn (no
-// trailing newline — an interrupted write), the next append starts on a
-// fresh line instead of splicing onto the torn bytes. That splice is exactly
-// what produced the sessions.jsonl:884 corruption (STOREDB-0606 step 0).
+// corrupt/partial record met while reading (ingest or a damaged row) is
+// SKIPPED, logged loudly (console.warn + telemetry), and QUARANTINED in
+// memory (store.quarantine()) — the fold continues with every valid record.
+// Nothing is ever rewritten: no "repair" writes, on either backing. A failed
+// WRITE (transaction error) does throw — losing an append silently would be
+// worse; the routes surface store errors already.
+//
+// Git: store.db / streams / snapshots CONTENT is not git-tracked (.gitignore —
+// git is the code time machine, these are the content time machine). The
+// BACKUP STORY is explicit: store.exportBackup(destDir) dumps every stream
+// back to <name>.jsonl (one record line per event, byte-faithful for ingested
+// history) + a manifest; restoring is dropping store.db and placing the dump
+// in data/streams/ for re-ingest.
+//
+// Host surface: `__sql_*` via @reactjit/hooks/sqlite (the import is the
+// metafile-gate trigger that flips -Dhas-sqlite, source-driven bundling) +
+// `__fs_*` for snapshots/backup/ingest. Identical names under the cart host
+// and tools/v8cli, so the same layer serves editors, compile/, and the P4
+// tests.
 //
 // P2: nothing here owns a gameplay number. P3: openStore() is the only door.
 
 import { GAME_TELEMETRY } from '../game/telemetry';
+import { open as sqlOpen, exec as sqlExec, query as sqlQuery, type DbHandle } from '@reactjit/hooks/sqlite';
 
 declare const globalThis: any;
 
@@ -60,7 +80,7 @@ export type LogPosition = {
  * callers — a stream without snapshot support cannot be registered.
  */
 export type StreamDef<State, Event> = {
-  /** concern name — the stream's file stem (kebab-case, one word) */
+  /** concern name — the stream's channel (kebab-case, one word) */
   name: string;
   /** the empty materialized state */
   initial: () => State;
@@ -86,16 +106,17 @@ export type StreamHandle<State, Event> = {
   length: () => number;
 };
 
-/** one skipped record, preserved byte-for-byte in memory (the file is never rewritten) */
+/** one skipped record, preserved byte-for-byte in memory (nothing on disk is ever rewritten) */
 export type QuarantinedRecord = {
-  /** the stream file the record was read from */
+  /** where the record was read from (a stream .jsonl during ingest, or store.db#<stream>) */
   path: string;
-  /** 1-based line number in that file */
+  /** 1-based line number in a .jsonl, or the row's physical id in the DB */
   line: number;
-  /** the raw line, exactly as it sits on disk */
+  /** the raw record text, exactly as it sits on disk */
   raw: string;
-  /** true when this was the file's last line with no trailing newline — the
-   *  ordinary crash-mid-write tear; false = a mid-file corruption */
+  /** true when this was a .jsonl's last line with no trailing newline — the
+   *  ordinary crash-mid-write tear of the old backing; false = a mid-file
+   *  corruption (or a damaged DB row) */
   trailing: boolean;
 };
 
@@ -107,10 +128,10 @@ export type Store = {
   materializeSnapshots: () => string[];
   /** read one materialized view (what the game/compile consumes) */
   loadSnapshot: <State>(name: string) => { name: string; globalSeq: number; state: State } | null;
-  /** the explicit backup story: copy every stream file + manifest to destDir */
+  /** the explicit backup story: dump every stream to <name>.jsonl + manifest in destDir */
   exportBackup: (destDir: string) => string[];
-  /** every corrupt record skipped while reading this store's streams —
-   *  in-memory quarantine only; the files on disk are never touched */
+  /** every corrupt record skipped while reading this store's history —
+   *  in-memory quarantine only; nothing on disk is ever touched */
   quarantine: () => QuarantinedRecord[];
 };
 
@@ -126,27 +147,29 @@ function fs() {
   return host;
 }
 
-function readLog(path: string, quarantine: QuarantinedRecord[]): StoredEvent[] {
-  const text = fs().__fs_read(path);
-  if (typeof text !== 'string' || text === '') return [];
-  const events: StoredEvent[] = [];
+function requireSql(): void {
+  const host = globalThis;
+  if (typeof host.__sql_open !== 'function' || typeof host.__sql_exec !== 'function' || typeof host.__sql_query_json !== 'function') {
+    throw new Error('data store: __sql_* host bindings are missing (host built without the sqlite ingredient — rebuild)');
+  }
+}
+
+/** tolerant .jsonl scan for INGEST — the old backing's reader, kept verbatim:
+ *  skip + quarantine + log, never throw, never write. */
+function scanJsonl(path: string, text: string, quarantine: QuarantinedRecord[]): { raw: string; parsed: StoredEvent }[] {
+  const records: { raw: string; parsed: StoredEvent }[] = [];
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].trim();
     if (line === '') continue;
     try {
-      events.push(JSON.parse(line) as StoredEvent);
+      records.push({ raw: lines[i], parsed: JSON.parse(line) as StoredEvent });
     } catch {
-      // TOLERANCE (V20 boundary law): never throw. Skip the record, keep its
-      // bytes in memory, log loudly, and keep folding every valid record.
-      // The file is never rewritten — no "repair" writes, ever.
-      // `trailing` = the ordinary crash-mid-write tear (last line, no final
-      // newline); anything else is a real mid-file corruption worth a stare.
       const trailing = i === lines.length - 1;
       quarantine.push({ path, line: i + 1, raw: lines[i], trailing });
       console.warn(
         `data store: ${trailing ? 'torn trailing record' : 'CORRUPT RECORD'} skipped + quarantined at ${path}:${i + 1} ` +
-        `(${lines[i].length} bytes; fold continues with every valid record; file left untouched)`,
+        `(${lines[i].length} bytes; ingest continues with every valid record; file left untouched)`,
       );
       GAME_TELEMETRY.recordDiagnostic('worldStream', 'quarantine', {
         path,
@@ -156,38 +179,153 @@ function readLog(path: string, quarantine: QuarantinedRecord[]): StoredEvent[] {
       });
     }
   }
-  GAME_TELEMETRY.recordDiagnostic('worldStream', 'readLog', {
-    bytes: typeof text === 'string' ? text.length : 0,
-    events: events.length,
-    path,
-  });
-  return events;
+  return records;
 }
 
 /**
- * Open the store rooted at <rootDir>/streams + <rootDir>/snapshots. The global
- * sequence resumes from the largest seq on disk — the undo chain is one chain
- * across every session that ever wrote here.
+ * Open the store rooted at <rootDir>: streams in <rootDir>/store.db (WAL),
+ * snapshots in <rootDir>/snapshots, legacy .jsonl archive in
+ * <rootDir>/streams (read-only — ingested once, then left alone). The global
+ * sequence resumes from the largest seq in the DB — the undo chain is one
+ * chain across every session that ever wrote here.
  */
 export function openStore(rootDir: string): Store {
   const host = fs();
+  requireSql();
   const streamsDir = `${rootDir}/streams`;
   const snapshotsDir = `${rootDir}/snapshots`;
   host.__fs_mkdir(rootDir);
   host.__fs_mkdir(streamsDir);
   host.__fs_mkdir(snapshotsDir);
 
+  const dbPath = `${rootDir}/store.db`;
+  const db: DbHandle = sqlOpen(dbPath);
+  if (!db) throw new Error(`data store: cannot open ${dbPath}`);
+
+  // WAL = readers never block the writer and a crash can't tear the log;
+  // busy_timeout serializes concurrent writers instead of failing them;
+  // synchronous=NORMAL is the WAL-safe durability point (a power cut may
+  // drop the last instants of appends, it can never corrupt — same contract
+  // as the old "a crash costs at most the in-flight event").
+  sqlExec(db, 'PRAGMA journal_mode=WAL');
+  sqlExec(db, 'PRAGMA busy_timeout=5000');
+  sqlExec(db, 'PRAGMA synchronous=NORMAL');
+  // Append-only by construction: this module only ever INSERTs into events.
+  // id = physical total order; seq = the V20 global chain position carried
+  // by the record; record = the event line byte-for-byte.
+  sqlExec(db, `CREATE TABLE IF NOT EXISTS events(
+    id INTEGER PRIMARY KEY,
+    seq INTEGER NOT NULL,
+    stream TEXT NOT NULL,
+    at INTEGER NOT NULL,
+    record TEXT NOT NULL
+  )`);
+  sqlExec(db, 'CREATE INDEX IF NOT EXISTS events_stream ON events(stream, id)');
+  sqlExec(db, `CREATE TABLE IF NOT EXISTS ingested_files(
+    path TEXT PRIMARY KEY,
+    records INTEGER NOT NULL,
+    quarantined INTEGER NOT NULL,
+    at INTEGER NOT NULL
+  )`);
+
+  const quarantined: QuarantinedRecord[] = [];
+  const nowMs = (): number => (host.__nowMs ? host.__nowMs() : Date.now());
+
+  const beginImmediate = (): void => {
+    // busy_timeout already waits up to 5s per attempt; a couple of retries
+    // covers a writer pile-up before we surface the failure.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (sqlExec(db, 'BEGIN IMMEDIATE')) return;
+    }
+    throw new Error(`data store: cannot acquire the write transaction on ${dbPath}`);
+  };
+  const commitOrThrow = (what: string): void => {
+    if (!sqlExec(db, 'COMMIT')) {
+      sqlExec(db, 'ROLLBACK');
+      throw new Error(`data store: ${what} failed to commit on ${dbPath}`);
+    }
+  };
+
+  // ── one-time ingest: every legacy stream file joins the DB, originals stay ──
+  const archiveFiles: string[] = (() => {
+    try {
+      const listed = host.__fs_list_json ? JSON.parse(host.__fs_list_json(streamsDir)) : [];
+      return (Array.isArray(listed) ? listed : []).filter((n: string) => typeof n === 'string' && n.endsWith('.jsonl')).sort();
+    } catch {
+      return [];
+    }
+  })();
+  for (const name of archiveFiles) {
+    const path = `${streamsDir}/${name}`;
+    // The marker key is the file's identity INSIDE this store — its path
+    // relative to rootDir — never the caller's spelling of rootDir. Two
+    // opens of the same store via different spellings (relative vs absolute)
+    // must agree on what was already ingested, or the archive imports twice
+    // (this exact bug double-imported the live store on 2026-06-06).
+    const markerKey = `streams/${name}`;
+    const stream = name.slice(0, -'.jsonl'.length);
+    if (!STREAM_NAME_SHAPE.test(stream)) continue;
+    const text = host.__fs_read(path);
+    if (typeof text !== 'string' || text === '') continue;
+    const before = quarantined.length;
+    const records = scanJsonl(path, text, quarantined);
+    beginImmediate();
+    // TAIL-INCREMENTAL, and the marker check lives INSIDE the write
+    // transaction (concurrent first-boots serialize on BEGIN IMMEDIATE; the
+    // second sees the first's marker — no double ingest). The cutover
+    // window matters: app instances still running the .jsonl-backed code
+    // keep appending to the archive after the first import; because the
+    // archive is itself append-only, "everything past the marker count" is
+    // exactly the new history — import the tail, bump the marker.
+    // Legacy markers: the first cutover wrote rootDir-spelled keys; honor
+    // them as the same file so existing stores don't re-import.
+    const marker = sqlQuery<{ records: number }>(db, 'SELECT MAX(records) AS records FROM ingested_files WHERE path IN (?, ?)', [markerKey, path]);
+    const alreadyImported = marker.length > 0 && typeof marker[0].records === 'number' ? marker[0].records : -1;
+    if (alreadyImported >= records.length) {
+      sqlExec(db, 'ROLLBACK');
+      continue;
+    }
+    const startAt = Math.max(0, alreadyImported);
+    let imported = 0;
+    for (const r of records.slice(startAt)) {
+      const seq = typeof r.parsed?.seq === 'number' ? r.parsed.seq : 0;
+      const at = typeof r.parsed?.at === 'number' ? r.parsed.at : 0;
+      if (!sqlExec(db, 'INSERT INTO events(seq, stream, at, record) VALUES (?, ?, ?, ?)', [seq, stream, at, r.raw])) {
+        sqlExec(db, 'ROLLBACK');
+        throw new Error(`data store: ingest of ${path} failed at record ${startAt + imported + 1}`);
+      }
+      imported += 1;
+    }
+    // Write the marker under the canonical relative key; an UPDATE that
+    // matches no row (legacy-keyed marker) falls through to a fresh INSERT.
+    sqlExec(db, 'UPDATE ingested_files SET records = ?, at = ? WHERE path = ?', [records.length, nowMs(), markerKey]);
+    const bumped = sqlQuery<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM ingested_files WHERE path = ?', [markerKey]);
+    if (!(bumped.length > 0 && bumped[0].n > 0)) {
+      sqlExec(db, 'INSERT INTO ingested_files(path, records, quarantined, at) VALUES (?, ?, ?, ?)', [markerKey, records.length, quarantined.length - before, nowMs()]);
+    }
+    commitOrThrow(`ingest of ${path}`);
+    console.warn(`data store: ingested ${imported} record(s) from ${path} into ${dbPath} (${alreadyImported < 0 ? 'first import' : `tail past ${alreadyImported}`}; ${quarantined.length - before} quarantined; original left in place as the archive)`);
+    GAME_TELEMETRY.recordDiagnostic('worldStream', 'ingest', {
+      path,
+      stream,
+      records: imported,
+      quarantined: quarantined.length - before,
+    });
+  }
+
   type OpenStream = {
     def: StreamDef<any, any>;
-    path: string;
     events: StoredEvent[];
     /** memoized fold of `events` (rebuilt after every append — appends are
      *  edit-rate, folds are cheap relative to the disk write beside them) */
     current: any;
   };
   const streams = new Map<string, OpenStream>();
-  const quarantined: QuarantinedRecord[] = [];
   let globalSeq = 0;
+  {
+    const top = sqlQuery<{ s: number | null }>(db, 'SELECT MAX(seq) AS s FROM events');
+    if (top.length > 0 && typeof top[0].s === 'number') globalSeq = top[0].s;
+  }
 
   const foldUpTo = (open: OpenStream, maxSeq: number): any => {
     let state = open.def.initial();
@@ -210,12 +348,28 @@ export function openStore(rootDir: string): Store {
       throw new Error(`defineStream: stream "${def.name}" is already registered`);
     }
 
-    const path = `${streamsDir}/${def.name}.jsonl`;
-    const events = readLog(path, quarantined);
+    const rows = sqlQuery<{ id: number; record: string }>(db, 'SELECT id, record FROM events WHERE stream = ? ORDER BY id', [def.name]);
+    const events: StoredEvent[] = [];
+    for (const row of rows) {
+      try {
+        events.push(JSON.parse(row.record) as StoredEvent);
+      } catch {
+        // A damaged row would be a DB-level fault, but the tolerance law is
+        // backing-independent: skip + quarantine + log, fold what survives.
+        quarantined.push({ path: `${dbPath}#${def.name}`, line: row.id, raw: row.record, trailing: false });
+        console.warn(`data store: CORRUPT RECORD skipped + quarantined at ${dbPath}#${def.name} row ${row.id} (fold continues with every valid record)`);
+        GAME_TELEMETRY.recordDiagnostic('worldStream', 'quarantine', {
+          path: `${dbPath}#${def.name}`,
+          line: row.id,
+          bytes: row.record.length,
+          trailing: false,
+        });
+      }
+    }
     for (const record of events) {
       if (record.seq > globalSeq) globalSeq = record.seq;
     }
-    const open: OpenStream = { def, path, events, current: undefined };
+    const open: OpenStream = { def, events, current: undefined };
     open.current = foldUpTo(open, Number.MAX_SAFE_INTEGER);
     streams.set(def.name, open);
     GAME_TELEMETRY.recordDiagnostic('worldStream', 'defineStream', {
@@ -226,28 +380,26 @@ export function openStore(rootDir: string): Store {
     return {
       name: def.name,
       append: (event: Event): LogPosition => {
-        globalSeq += 1;
-        const record: StoredEvent = { seq: globalSeq, at: host.__nowMs ? host.__nowMs() : Date.now(), event };
-        // Semantically append-only: existing lines never change. Whole-file
-        // write is the host's only write today — see the header note.
-        const existing = host.__fs_read(path);
-        const prior = typeof existing === 'string' ? existing : '';
-        // The seam guard (STOREDB-0606 step 0): a torn trailing line (an
-        // interrupted write left no final newline) must stay isolated on its
-        // own line — splicing the next record onto it is what turned a
-        // tolerated tear into the sessions.jsonl:884 mid-file corruption.
-        // Existing bytes are untouched; we only refuse to share their line.
-        const seam = prior !== '' && !prior.endsWith('\n') ? '\n' : '';
-        const line = `${JSON.stringify(record)}\n`;
-        const text = `${prior}${seam}${line}`;
-        host.__fs_write(path, text);
+        // The whole point of the DB backing: seq allocation + insert happen
+        // under ONE write lock, so concurrent app instances serialize and
+        // the chain stays total — no duplicate seqs, no torn records.
+        beginImmediate();
+        const next = sqlQuery<{ next: number }>(db, 'SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events');
+        const seq = next.length > 0 && typeof next[0].next === 'number' ? next[0].next : globalSeq + 1;
+        const record: StoredEvent = { seq, at: nowMs(), event };
+        const line = JSON.stringify(record);
+        if (!sqlExec(db, 'INSERT INTO events(seq, stream, at, record) VALUES (?, ?, ?, ?)', [seq, def.name, record.at, line])) {
+          sqlExec(db, 'ROLLBACK');
+          throw new Error(`data store: append to "${def.name}" failed on ${dbPath}`);
+        }
+        commitOrThrow(`append to "${def.name}"`);
+        globalSeq = seq;
         open.events.push(record);
         open.current = open.def.apply(open.current, event, record.seq);
         GAME_TELEMETRY.recordDiagnostic('worldStream', 'append', {
           stream: def.name,
           seq: record.seq,
           eventBytes: line.length,
-          fileBytes: text.length,
           events: open.events.length,
         });
         return { globalSeq: record.seq, stream: def.name, index: open.events.length - 1 };
@@ -287,18 +439,21 @@ export function openStore(rootDir: string): Store {
       const manifest: Record<string, number> = {};
       for (const [name, open] of streams) {
         const dest = `${destDir}/${name}.jsonl`;
-        const text = host.__fs_read(open.path);
-        host.__fs_write(dest, typeof text === 'string' ? text : '');
+        // One record line per event, straight from the DB — byte-faithful
+        // for ingested history (the raw line is what was stored).
+        const rows = sqlQuery<{ record: string }>(db, 'SELECT record FROM events WHERE stream = ? ORDER BY id', [name]);
+        const text = rows.map((r) => `${r.record}\n`).join('');
+        host.__fs_write(dest, text);
         GAME_TELEMETRY.recordDiagnostic('worldStream', 'backup.copy', {
           stream: name,
-          bytes: typeof text === 'string' ? text.length : 0,
+          bytes: text.length,
           events: open.events.length,
         });
         manifest[name] = open.events.length;
         copied.push(dest);
       }
       const manifestPath = `${destDir}/manifest.json`;
-      host.__fs_write(manifestPath, JSON.stringify({ exportedAt: host.__nowMs ? host.__nowMs() : Date.now(), globalSeq, streams: manifest }));
+      host.__fs_write(manifestPath, JSON.stringify({ exportedAt: nowMs(), globalSeq, streams: manifest }));
       copied.push(manifestPath);
       return copied;
     },

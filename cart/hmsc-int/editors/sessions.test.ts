@@ -33,6 +33,7 @@ const WORLD = {
 
 function wipeScratch(): void {
   for (const path of [
+    `${ROOT}/store.db`, `${ROOT}/store.db-wal`, `${ROOT}/store.db-shm`, // STOREDB-0606: the scratch store is a DB now
     `${ROOT}/streams/sessions.jsonl`, `${ROOT}/streams/vehicles.jsonl`, `${ROOT}/streams/world.jsonl`,
     `${ROOT}/snapshots/sessions.snapshot.json`, `${ROOT}/snapshots/vehicles.snapshot.json`,
     `${ROOT}/snapshots/world.snapshot.json`,

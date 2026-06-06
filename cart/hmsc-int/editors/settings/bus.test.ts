@@ -17,6 +17,7 @@ const ROOT = 'zig-out/game/test-settings-bus';
 
 function wipeScratch(): void {
   for (const path of [
+    `${ROOT}/store.db`, `${ROOT}/store.db-wal`, `${ROOT}/store.db-shm`, // STOREDB-0606: the scratch store is a DB now
     `${ROOT}/streams/sessions.jsonl`, `${ROOT}/streams/vehicles.jsonl`,
     `${ROOT}/streams/world.jsonl`, `${ROOT}/streams/tuning.jsonl`,
     `${ROOT}/snapshots/sessions.snapshot.json`, `${ROOT}/snapshots/vehicles.snapshot.json`,

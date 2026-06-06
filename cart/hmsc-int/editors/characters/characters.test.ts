@@ -23,7 +23,7 @@ import { createSessionLog } from '../sessions';
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
 import { globeSurface } from '@reactjit/geometries';
-import { PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, gridFromBytes } from './paintKit';
+import { DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, editorPartParams, gridFromBytes } from './paintKit';
 import {
   GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, gridDeltaFor,
   gridOverlayParams, pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
@@ -36,6 +36,7 @@ const ROOT = 'zig-out/game/test-characters-editor';
 
 function wipeScratch(): void {
   for (const path of [
+    `${ROOT}/store.db`, `${ROOT}/store.db-wal`, `${ROOT}/store.db-shm`, // STOREDB-0606: the scratch store is a DB now
     `${ROOT}/streams/characters.jsonl`,
     `${ROOT}/streams/sessions.jsonl`,
     `${ROOT}/snapshots/characters.snapshot.json`,
@@ -434,6 +435,21 @@ test('a /characters save never wipes /cutout paint: the draft carries overlays o
   const resaved = draftToDocument({ ...reloaded, skin: '#112233' }, 'edited after painting');
   assertEqual(JSON.stringify(resaved.paint), JSON.stringify(painted.paint), 'sculpt/wardrobe edits in /characters never wipe the painting');
   assertEqual(resaved.skin, '#112233', 'the edit itself still lands');
+});
+
+test('the sculpt canvas is a measurement surface: fixed palette, guides always read (SCULPTSPLIT-0606)', () => {
+  // the palette is constants — no field of it derives from character data
+  const lum = (hex: string) => {
+    const n = parseInt(hex.slice(1), 16);
+    return (0.2126 * ((n >> 16) & 255) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255)) / 255;
+  };
+  assert(/^#[0-9a-f]{6}$/i.test(SCULPT_CANVAS.base), 'base is a fixed hex token');
+  assert(/^#[0-9a-f]{6}$/i.test(SCULPT_CANVAS.silhouette), 'silhouette is a fixed hex token');
+  const inkLum = 0.2126 * SCULPT_CANVAS.guideInk[0] + 0.7152 * SCULPT_CANVAS.guideInk[1] + 0.0722 * SCULPT_CANVAS.guideInk[2];
+  assert(inkLum - lum(SCULPT_CANVAS.base) >= 0.4, `guide ink reads on the base (Δlum ${(inkLum - lum(SCULPT_CANVAS.base)).toFixed(2)})`);
+  assert(lum(SCULPT_CANVAS.silhouette) - lum(SCULPT_CANVAS.base) >= 0.1, 'the lathe silhouette reads on the base');
+  // the shader's gridline ink IS the palette's — one truth, no drift
+  assert(DEPTH_OVERLAY_WGSL.includes(`vec3f(${SCULPT_CANVAS.guideInk.join(', ')})`), 'the overlay shader embeds the palette guide ink');
 });
 
 finish('editors/characters');

@@ -264,31 +264,47 @@ inversion is the editors-capture lane.
 ## The data/ persistence layer (added 2026-06-05, Milestone-0 step 4)
 
 `cart/hmsc-int/data/index.ts` is the V20 layer — `openStore(rootDir)` is the
-only door. Per-concern append-only streams (`data/streams/<name>.jsonl`), one
-TOTAL cross-session undo chain (a global sequence number across all streams;
-an undo point is a log position — `stateAt(seq)` reads as-of, history is never
-rewritten), and materialized snapshots (`data/snapshots/<name>.snapshot.json`,
-stamped with their chain position) — the game/compile loads snapshots, never
-history. The incompleteness guard is in the API: `defineStream` demands the
-log name AND the materializer (initial+apply) in ONE registration — a stream
-without snapshot support cannot be expressed. Stream/snapshot CONTENT is
-gitignored (the content time machine); backup story = `store.exportBackup()`
-(streams + manifest) or tar of `data/streams/`. Host gap flagged: no
-`__fs_append` binding yet, so appends are read+concat+write (semantically
-append-only). TOLERANCE (STOREDB-0606 step 0, 2026-06-06 — the
-sessions.jsonl:884 outage): the reader NEVER throws — a corrupt/partial
-record ANYWHERE in a stream file is skipped, logged loudly (console.warn +
-worldStream telemetry), and quarantined in memory (`store.quarantine()`,
-byte-faithful `{path, line, raw, trailing}`); the fold continues with every
-valid record and the file is NEVER rewritten (no repair writes). The writer
-guards the seam: an append onto a torn trailing line (interrupted write, no
-final newline) starts on a fresh line instead of splicing onto the torn
-bytes — that splice is exactly what turned a tolerated tear into the :884
-mid-file corruption. P4 suite
-`data/data.test.ts` rides `rjit game verify` (suite roots: game/ + data/).
-`apply` receives each event's log position as an optional third arg
-(`apply(state, event, seq?)` — the store always passes it; two-arg
-materializers and the tests' direct-apply idiom stay valid).
+only door. Per-concern append-only streams, one TOTAL cross-session undo
+chain (a global sequence number across all streams; an undo point is a log
+position — `stateAt(seq)` reads as-of, history is never rewritten), and
+materialized snapshots (`data/snapshots/<name>.snapshot.json`, stamped with
+their chain position) — the game/compile loads snapshots, never history. The
+incompleteness guard is in the API: `defineStream` demands the log name AND
+the materializer (initial+apply) in ONE registration — a stream without
+snapshot support cannot be expressed.
+
+BACKING (STOREDB-0606 step 1, 2026-06-06 — the user's ruling after the
+sessions.jsonl:884 outage: "we need to move to pg or sqlite which are in the
+framework already"): streams live in ONE sqlite database, `data/store.db`
+(WAL + `BEGIN IMMEDIATE` write transactions via `@reactjit/hooks/sqlite` →
+the `__sql_*` ingredient). The `events` table is append-only (INSERT-only
+module), per-concern streams are the indexed `stream` column, and the global
+seq is allocated as MAX(seq)+1 INSIDE the write transaction — N concurrent
+app instances (user session + census walks + headless boots) serialize
+instead of tearing records or double-minting seqs (the :884 mechanism and
+the duplicate-seq-4077 race, both proven dead by the two-writer-PROCESS P4
+hammer test). `data/streams/*.jsonl` is now the read-only INGESTED ARCHIVE:
+openStore imports any not-yet-imported records byte-faithfully (raw line
+preserved; tail-incremental, so old-code instances appending during cutover
+lose nothing), quarantines corrupt records, and NEVER writes the files —
+the user retires them. Only the backing changed; V20's law text needed no
+edit (it never named jsonl).
+
+TOLERANCE (STOREDB-0606 step 0): the reader NEVER throws — a corrupt/partial
+record anywhere (archive ingest or a damaged DB row) is skipped, logged
+loudly (console.warn + worldStream telemetry), and quarantined in memory
+(`store.quarantine()`, byte-faithful `{path, line, raw, trailing}`); the
+fold continues with every valid record and nothing on disk is ever rewritten
+(no repair writes). A failed WRITE (transaction error) does throw — routes
+surface store errors. Backup story = `store.exportBackup()` (per-stream
+.jsonl dump straight from the DB — byte-identical for ingested history — +
+manifest); restore = drop store.db, place the dump in `data/streams/`,
+re-ingest. Content (store.db + streams/ + snapshots/) stays gitignored. P4
+suite `data/data.test.ts` rides `rjit game verify` (suite roots: game/ +
+data/); scratch stores are DBs now, so every suite's wipe also removes
+`store.db{,-wal,-shm}`. `apply` receives each event's log position as an
+optional third arg (`apply(state, event, seq?)` — the store always passes
+it; two-arg materializers and the tests' direct-apply idiom stay valid).
 
 ## The route-scoped session history (added 2026-06-04, the user's ruling)
 
@@ -399,9 +415,28 @@ forever through `outfitOf` (deterministic mapping incl. the DEFAULT_BOTTOMS
 coupling), consumed at draftFromDocument + bakeBodyDocument; `bodyWithOutfit`
 is the pure attach/detach door (attach clears legacy — one wardrobe truth;
 detach round-trips byte-identically). BakeWardrobe retired for `BakeOutfit`.
-Phase 2 (editor separation: mesh-only sculpt context, clothing + animation
-as their own contexts) is GATED on the workbench lane; the proposed shapes
-are surfaced in game/figure/CAPTURE.md.
+Phase 2 (editor separation, 2026-06-06, same ruling) LANDED: three workbench
+contexts over ONE `characterWorkbenchStore()` — **character** (`User`) shows
+MESH ONLY (identity/part/body-shape/face-mesh/sculpt/regions; its stage
+renders `buildMeshFrame` UNDRESSED, no garments, no held prop, no animation
+clock ever ticks there — the face pins 'still'); **clothing** (`Shirt`) is
+the wardrobe attachment context (OUTFIT clothes/bottoms/print + EXTRAS +
+held PROP; stage = the dressed figure via buildRigFrame, static pose);
+**animation** (`Clapperboard`) is the rig/posing context (POSE rig/anim +
+FACE anim + SCRIPT/presets; stage = the dressed ANIMATING figure — the
+pre-split face/rig/script clocks moved there wholesale, scriptMouth fold
+identical). The rosters mirror (the outfit is per-character); panel writes
+flow through the same editDraft/autosave/V20 doors; the pre-split
+wearLens "show me what I changed" flip is structurally fulfilled (those
+stages always show the dressed figure) and removed from the relocated
+setters — kept only on body-shape (mesh-side). One render derivation
+(`editors/workbench/characters/figureFrame.tsx` useFigureRender +
+FigureCaptures) feeds all three stages; capture keys stay in lockstep with
+mesh texKeys per stage. Line-referenced parity ledger:
+`editors/workbench/WBCLOTH.CAPTURE.md` (nothing dropped; parity pinned
+mechanically in source.test.ts — the three panels collectively expose every
+pre-split control, and the mesh panel exposes zero wardrobe/animation
+fields). The /characters route is untouched (dies at its own flip).
 
 ## game/activities/ — repeatable side loops (V22/V8/V20 capture, 2026-06-04)
 

@@ -13,6 +13,7 @@ const ROOT = 'zig-out/game/test-characters-data';
 
 function wipeScratch(): void {
   for (const path of [
+    `${ROOT}/store.db`, `${ROOT}/store.db-wal`, `${ROOT}/store.db-shm`, // STOREDB-0606: the scratch store is a DB now
     `${ROOT}/streams/characters.jsonl`,
     `${ROOT}/snapshots/characters.snapshot.json`,
   ]) globalThis.__fs_remove?.(path);

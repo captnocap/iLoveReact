@@ -319,7 +319,9 @@ images/
 cart/*/sessions/
 
 # V20 persistence content — the CONTENT time machine, never git's (the layer
-# code in cart/hmsc-int/data/*.ts IS tracked; backup story: store.exportBackup
-# or `tar czf streams-backup.tgz cart/hmsc-int/data/streams/`).
+# code in cart/hmsc-int/data/*.ts IS tracked; backup story: store.exportBackup).
+# Since STOREDB-0606 the live backing is cart/hmsc-int/data/store.db (sqlite,
+# already caught by the *.db/*.db-wal/*.db-shm patterns above); streams/ is the
+# read-only ingested .jsonl archive, snapshots/ the materialized views.
 cart/hmsc-int/data/streams/
 cart/hmsc-int/data/snapshots/

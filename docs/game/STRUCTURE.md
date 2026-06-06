@@ -219,9 +219,12 @@ hmsc ends as compile/'s OUTPUT (V15), not a hand-written cart.
    day one and never goes dark; every later step lands under it. LLM-callable:
    `rjit game compile && rjit game verify`.
 3. `labs/_scaffold.tsx` + `rjit lab new <name>` + the labs route in shell
-4. `data/streams/` + `data/snapshots/` persistence layer (V20) — the workspace
-   pattern extended to per-concern append-only streams; editors write to it
-   from their first version, never retrofitted.
+4. `data/` persistence layer (V20) — the workspace pattern extended to
+   per-concern append-only streams; editors write to it from their first
+   version, never retrofitted. Backing since STOREDB-0606: ONE sqlite DB
+   (`data/store.db`, WAL + write transactions — concurrency-proof) behind the
+   same openStore() door; `data/streams/*.jsonl` is the ingested read-only
+   archive, `data/snapshots/` the materialized views.
 5. `framework/game/` + gated `v8_bindings_game_*` (parallel worker; wrappers
    re-point when it lands)
 6. First lab rebuilt on the shape (proves the contract end to end — the
