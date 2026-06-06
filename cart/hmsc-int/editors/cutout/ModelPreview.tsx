@@ -25,7 +25,7 @@ import { VehiclePaintCaptures } from '../../game/paintedRender';
 import { partGlobeParams } from '../../game/figure/bake';
 import { hedDepthGrid, HED_GRID_H, HED_GRID_W, type HedDocument, type HedLayer } from '../../game/figure/hed';
 import { FaceLayerPaint } from '../../game/figure/render';
-import type { PartId } from '../../game/figure/shapes';
+import { paintTargetPart, type PaintTargetId, type PartId } from '../../game/figure/shapes';
 import { PaintQuad, type PaintEditorState } from '../paint';
 import type { PaintLayer } from '../paint';
 import { editorTunables } from '../tunables';
