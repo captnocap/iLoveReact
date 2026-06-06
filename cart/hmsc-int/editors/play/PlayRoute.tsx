@@ -14,11 +14,13 @@
 //                    prefab capture, the Fortnite-verbatim HUD (HUD-0605),
 //                    live P2 tuning, one-interaction-one-commit sessions.
 //
-// MODE IS THE URL: /test renders mode='test', /build mode='build'. The shell
-// mounts ONE PlayRoute for either path, so switching mode (F-keys OR the
-// ProjectBar buttons) changes only the prop — the substrate never remounts:
-// pose, camera, mouse capture, the console session, and the placed pieces all
-// carry across the flip. Build a ramp, F1, walk it, F2, keep building.
+// ONE ROUTE (/test, the ProjectBar Play button), MODE IS ROUTE STATE: the
+// /build URL retired once the fold made it a dupe (USER: "remove the one
+// route that is now just a dupe of it"). F1/F2 set the mode in place — the
+// substrate never remounts: pose, camera, mouse capture, the console session,
+// and the placed pieces all carry across the flip. Build a ramp, F1, walk it,
+// F2, keep building. ('/build' survives only as the session channel label and
+// the twig storage keys — those are names, not URLs.)
 //
 // THE UNION IS DELIBERATE (fold contract — nothing dropped, additions only
 // where the fold makes the surface coherent):
@@ -300,17 +302,13 @@ function Chip(props: { label: string; on: boolean; onPress: () => void }) {
 export function PlayRoute(props: {
   state: GameState;
   mapName: string;
-  /** the URL is the mode: /test = 'test', /build = 'build' */
-  mode: PlayMode;
-  /** F1/F2 ask the shell to nav the matching path — mode flips, no remount */
-  onMode: (mode: PlayMode) => void;
   onExit: () => void;
 }) {
-  const mode = props.mode;
+  // Mode is route state (ONE route since the /build dupe retired) — F1/F2
+  // flip it in place, nothing remounts.
+  const [mode, setMode] = useState<PlayMode>('test');
   const modeRef = useRef(mode);
   modeRef.current = mode;
-  const onModeRef = useRef(props.onMode);
-  onModeRef.current = props.onMode;
 
   // ── the builder's session on the WORLD channel (the user's V20 ruling).
   //    Opened for the surface's lifetime — commits only flow from build-mode
@@ -370,14 +368,13 @@ export function PlayRoute(props: {
   });
   const { player, playerRef, lookRef, rig, figureOffset, pointerWire, worldGrid } = embodied;
 
-  // ── F1/F2: the mode toggle (the fold's reason to exist). The URL carries
-  //    the mode, so this just asks the shell to nav — no remount, the pose
-  //    and the world carry across. ─────────────────────────────────────────
+  // ── F1/F2: the mode toggle (the fold's reason to exist) — route state,
+  //    flipped in place; no remount, the pose and the world carry across. ───
   useEffect(() => {
     const off = GAME_INPUT.onKeyDown((event) => {
       const key = String(event?.key ?? '').toLowerCase();
-      if (key === 'f1' && modeRef.current !== 'test') onModeRef.current('test');
-      if (key === 'f2' && modeRef.current !== 'build') onModeRef.current('build');
+      if (key === 'f1') setMode('test');
+      if (key === 'f2') setMode('build');
     });
     return off;
   }, []);

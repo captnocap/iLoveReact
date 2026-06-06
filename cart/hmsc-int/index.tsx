@@ -794,7 +794,7 @@ function EditorShell() {
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/test' ? 'test' : route.path === '/build' ? 'build' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
   // VIEWRUNAWAY-0605: the editor stays MOUNTED under route overlays, but it
   // must go input-DEAF there — the key bus is global, so a WASD walk in
   // /build was also driving the buried canvas's drift (700px/s ÷ zoom for
@@ -825,7 +825,6 @@ function EditorShell() {
         onNew={() => { setMenuOpen(false); newMap(); }}
         onEditor={() => nav.push('/')}
         onTest={() => nav.push('/test')}
-        onBuild={() => nav.push('/build')}
         onLabs={() => nav.push('/labs')}
         onCharacters={() => nav.push('/characters')}
         onVehicles={() => nav.push('/vehicles')}
@@ -907,19 +906,11 @@ function EditorShell() {
         <Route path="/textures">{() => <TextureStudio />}</Route>
         <Route path="/voxels">{() => <VoxelHybridRoute onExit={() => nav.push('/')} />}</Route>
         {/* The embodied game surface (editors/play/, PLAYFOLD-0605): /test +
-            /build FOLDED — the URL is the mode, F1/F2 (and the ProjectBar
-            buttons) flip it WITHOUT remounting, so the pose, camera, console,
-            and placed pieces carry across the toggle. Mounted directly (not
-            via <Route>) so both paths share ONE element position. */}
-        {(activeRoute === 'test' || activeRoute === 'build') && (
-          <PlayRoute
-            state={previewWorld}
-            mapName={ws.stem}
-            mode={activeRoute}
-            onMode={(m) => nav.push(m === 'build' ? '/build' : '/test')}
-            onExit={() => nav.push('/')}
-          />
-        )}
+            /build folded into ONE route — mode is PlayRoute's own state,
+            F1 test / F2 build flip it WITHOUT remounting, so the pose,
+            camera, console, and placed pieces carry across the toggle.
+            (The /build URL retired as a dupe of this surface.) */}
+        <Route path="/test">{() => <PlayRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>

@@ -47,12 +47,13 @@ test('the folded /test+/build surface consumes the substrate — no route-local 
   assert(source.includes('PLAYER_CAMERA.'), 'the crosshair pick must solve with the substrate camera values');
 });
 
-test('F1/F2 toggle the fold mode and the URL carries it (PLAYFOLD-0605)', () => {
+test('F1/F2 toggle the fold mode in-route — ONE route, the /build dupe stays dead (PLAYFOLD-0605)', () => {
   const source = read('cart/hmsc-int/editors/play/PlayRoute.tsx');
   assert(source.includes("key === 'f1'"), 'F1 must flip to test mode');
   assert(source.includes("key === 'f2'"), 'F2 must flip to build mode');
   const shell = read('cart/hmsc-int/index.tsx');
-  assert(shell.includes("activeRoute === 'test' || activeRoute === 'build'"), 'the shell must mount ONE PlayRoute for both paths (no remount across the toggle)');
+  assert(shell.includes('<Route path="/test">{() => <PlayRoute'), 'the shell must mount PlayRoute on the one /test route');
+  assert(!shell.includes("'/build'") && !shell.includes('"/build"'), "the /build URL retired as a dupe of the folded surface — mode is PlayRoute's own state");
   assert(!shell.includes('TestRoute') && !shell.includes('BuildRoute'), 'the pre-fold routes must stay dead — the fold is the one embodied surface');
 });
 

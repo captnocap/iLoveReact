@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'build' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout' | 'settings';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'vehicles' | 'cutout' | 'settings';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -45,11 +45,9 @@ interface ProjectBarProps {
   onPerf: () => void;
   // Navigate to the /assist3d route — the assistant-authored hot 3D surface.
   onAssist: () => void;
-  // Navigate to the /test route — quick in-editor player drop-in.
+  // Navigate to the /test route — the embodied game surface (PLAYFOLD-0605:
+  // test + Creative Build folded; F1 test / F2 build flip the mode in-route).
   onTest: () => void;
-  // Navigate to the /build route — Creative Build mode (editors/build): build
-  // the map while playing; embodied placement of the V24 piece grammar.
-  onBuild: () => void;
   // Navigate to the /textures route — the texture studio (tune a shader recipe,
   // Materialize it into a stored material the registry serves everywhere).
   onTextures: () => void;
@@ -111,8 +109,7 @@ export function ProjectBar(props: ProjectBarProps) {
       {/* Route navigation — this is the persistent shell for every hmsc-int route. */}
       <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
         <IconBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
-        <IconBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="test" />
-        <IconBtn icon="Hammer" on={props.activeRoute === 'build'} onPress={props.onBuild} title="creative build" />
+        <IconBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="play (F1 test / F2 build)" />
         <IconBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <IconBtn icon="User" on={props.activeRoute === 'characters'} onPress={props.onCharacters} title="characters" />
         <IconBtn icon="Car" on={props.activeRoute === 'vehicles'} onPress={props.onVehicles} title="vehicles" />
