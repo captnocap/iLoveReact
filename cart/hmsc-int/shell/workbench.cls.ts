@@ -106,6 +106,19 @@ classifier({
   // 3 — properties column (panel kit itself comes from studio.cls)
   PropsCol: { type: 'Box', style: { width: 290, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bg', borderRightWidth: 'theme:borderThin', borderRightColor: 'theme:border' } },
 
+  // HEROBAR-0606 (USER: "this header is crowded, and there is a button in
+  // that array u cant even see") — the hero is a STACK, never a crowded row:
+  //   row 1: icon + name (full width, room to breathe)
+  //   row 2: the metadata as COLUMNS (value over a tiny label)
+  //   row 3: ALL the actions, full-width + wrapping — never clipped
+  Hero: { type: 'Box', style: { flexDirection: 'column', gap: 6, paddingTop: 'theme:spacingMd', paddingBottom: 'theme:spacingMd', backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  HeroTopRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 'theme:spacingMd', paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd' } },
+  HeroMetaRow: { type: 'Box', style: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd' } },
+  HeroMetaCell: { type: 'Box', style: { flexDirection: 'column', gap: 1 } },
+  HeroMetaValue: { type: 'Text', fontSize: 'theme:fontLg', color: 'theme:text', style: { fontFamily: 'monospace', fontWeight: 700 } },
+  HeroMetaLabel: { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:textFaint', style: { fontFamily: 'monospace', fontWeight: 700, letterSpacing: 1 } },
+  HeroActionsRow: { type: 'Box', style: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 6, rowGap: 6, paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd', paddingTop: 2 } },
+
   // 4 — the demonstration surface
   PreviewCol: { type: 'Box', style: { flexGrow: 1, minWidth: 0, height: '100%', flexDirection: 'column', backgroundColor: 'theme:bgAlt' } },
   PreviewBar: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 'theme:spacingMd', paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd', paddingTop: 6, paddingBottom: 6, backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },

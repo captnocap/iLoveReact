@@ -143,21 +143,42 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
         </ScrollView>
       </C.ItemRail>
 
-      {/* 3 — the properties panel (the ONE edit surface) */}
+      {/* 3 — the properties panel (the ONE edit surface).
+          HEROBAR-0606: identity row → metadata columns → the full-width
+          wrapping ACTIONS row (bottom — identity, facts, then verbs, with
+          the verbs adjacent to the panel they act on). Same data, every
+          button always visible. */}
       <C.PropsCol>
-        <C.HeroBar>
-          <Icon name={source.icon} size={16} color={accentFor('primary')} />
-          <Box style={{ flexDirection: 'column', gap: 1, flexGrow: 1 }}>
+        <C.Hero>
+          <C.HeroTopRow>
+            <Icon name={source.icon} size={16} color={accentFor('primary')} />
             <C.HeroName>{selRow.label}</C.HeroName>
-            <C.HeroSub>{`${source.id} · ${spec.groups.length} groups · ${panelFieldCount(spec)} fields`}</C.HeroSub>
-          </Box>
-          {actions.map((a) => (
-            <C.ChromePill key={a.id} onPress={a.run}>
-              {a.icon ? <Icon name={a.icon} size={12} color={accentFor('success')} /> : null}
-              <C.ChromePillText>{a.label}</C.ChromePillText>
-            </C.ChromePill>
-          ))}
-        </C.HeroBar>
+          </C.HeroTopRow>
+          <C.HeroMetaRow>
+            <C.HeroMetaCell>
+              <C.HeroMetaValue>{source.id}</C.HeroMetaValue>
+              <C.HeroMetaLabel>SOURCE</C.HeroMetaLabel>
+            </C.HeroMetaCell>
+            <C.HeroMetaCell>
+              <C.HeroMetaValue>{`${spec.groups.length}`}</C.HeroMetaValue>
+              <C.HeroMetaLabel>GROUPS</C.HeroMetaLabel>
+            </C.HeroMetaCell>
+            <C.HeroMetaCell>
+              <C.HeroMetaValue>{`${panelFieldCount(spec)}`}</C.HeroMetaValue>
+              <C.HeroMetaLabel>FIELDS</C.HeroMetaLabel>
+            </C.HeroMetaCell>
+          </C.HeroMetaRow>
+          {actions.length ? (
+            <C.HeroActionsRow>
+              {actions.map((a) => (
+                <C.ChromePill key={a.id} onPress={a.run}>
+                  {a.icon ? <Icon name={a.icon} size={12} color={accentFor('success')} /> : null}
+                  <C.ChromePillText>{a.label}</C.ChromePillText>
+                </C.ChromePill>
+              ))}
+            </C.HeroActionsRow>
+          ) : null}
+        </C.Hero>
         <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }}>
           <PanelGroups spec={spec} onEdit={onEdit} />
         </ScrollView>
