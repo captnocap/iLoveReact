@@ -9,11 +9,15 @@
 import type { WorkbenchSource } from '../../shell/Workbench';
 import { tunablesSource } from './tunablesSource';
 import { charactersSource } from './characters/source';
+import { clothingSource } from './characters/clothingSource';
+import { animationSource } from './characters/animationSource';
 import { paintSource } from './paint/source';
 
 export function workbenchSources(): Array<WorkbenchSource<any>> {
   return [
-    charactersSource(), // WBCHAR-0606 — the pattern-setter (flip of /characters awaits the user's word)
+    charactersSource(), // WBCHAR-0606 — the MESH context (flip of /characters awaits the user's word)
+    clothingSource(),   // CLOTHSPLIT-0606 phase 2 — the wardrobe attachment context (USER RULING req_0040)
+    animationSource(),  // CLOTHSPLIT-0606 phase 2 — the rig/posing context (same ruling)
     paintSource(),      // AGNOSTICPAINT-0606 — THE agnostic painting surface (flip of /cutout awaits the user's pass)
     tunablesSource(),
     // itemsSource(),        — step 5 (kills /items, /voxels)

@@ -179,6 +179,19 @@ rig/posing context (where pose/anim-script commands live). Nothing
 constitution-grade in phase 1: no vocabulary changed, garments still
 bones-driven, V20 by addition.
 
+**Phase 2 LANDED (2026-06-06, same ruling):** the proposal above built as
+proposed, with two surfaced decisions — body SHAPE stayed mesh-side (it
+reshapes the skeleton; flip-to-FIGURE gesture kept) and the held PROP went
+clothing-side (an attachment, the outfit's sibling). One deviation from the
+proposal: the clothing roster is the CHARACTER roster (the outfit is
+per-character today — no separate outfit stream invented; that would be a
+new V20 concern needing its own ruling). The mesh context's stage mounts
+`buildMeshFrame` exactly as phase 1 staged it; the dressed contexts compose
+mesh + attachOutfit through the unchanged `buildRigFrame` door. The
+line-referenced relocation ledger (every moved control, its old line, its
+new home, nothing dropped) is `editors/workbench/WBCLOTH.CAPTURE.md`;
+mechanical parity pin in `editors/workbench/characters/source.test.ts`.
+
 ## PELVISMESH-0606 (2026-06-06, USER ASK req_0022): the pelvis is a real mesh
 
 "i thought i asked someone earlier to make the torso and the pelvis not the

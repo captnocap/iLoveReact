@@ -358,14 +358,18 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     note(`region · ${regionId} ${value.toFixed(2)} · ${part}`);
   };
 
-  // ── wardrobe setters (Route.tsx:853-907 — picks flip to the figure) ───────
+  // ── wardrobe + pose setters (CLOTHSPLIT-0606 phase 2, WBCLOTH row F1):
+  // the pre-split wearLens() flip ("show me what I changed") is structurally
+  // fulfilled — the clothing/animation contexts' stages ALWAYS show the
+  // dressed figure, and a pick there must not yank the MESH context's lens.
+  // Only the body-shape pick keeps the flip (mesh-side, row W1). ────────────
   const wearLens = () => { view.lens = 'figure'; twigWrite('wbLens', 'figure'); };
   const setBodyShape = (id: CharacterDraft['bodyShape']) => { editDraft((d) => ({ ...d, bodyShape: id })); wearLens(); };
-  const setClothing = (id: ClothingId) => { editDraft((d) => ({ ...d, clothing: id, bottoms: DEFAULT_BOTTOMS[id] })); wearLens(); };
-  const setBottoms = (id: CharacterDraft['bottoms']) => { editDraft((d) => ({ ...d, bottoms: id })); wearLens(); };
-  const setClothingSkin = (id: CharacterDraft['clothingSkin']) => { editDraft((d) => ({ ...d, clothingSkin: id })); wearLens(); };
-  const setBodyPose = (id: CharacterDraft['bodyPose']) => { editDraft((d) => ({ ...d, bodyPose: id })); wearLens(); };
-  const setHeldItem = (id: string) => { editDraft((d) => ({ ...d, heldItem: id })); wearLens(); };
+  const setClothing = (id: ClothingId) => editDraft((d) => ({ ...d, clothing: id, bottoms: DEFAULT_BOTTOMS[id] }));
+  const setBottoms = (id: CharacterDraft['bottoms']) => editDraft((d) => ({ ...d, bottoms: id }));
+  const setClothingSkin = (id: CharacterDraft['clothingSkin']) => editDraft((d) => ({ ...d, clothingSkin: id }));
+  const setBodyPose = (id: CharacterDraft['bodyPose']) => editDraft((d) => ({ ...d, bodyPose: id }));
+  const setHeldItem = (id: string) => editDraft((d) => ({ ...d, heldItem: id }));
   /** accessory toggle with the cap⇄beanie exclusivity (Route.tsx:880-888) */
   const toggleAccessory = (id: ClothingAccessoryId) => {
     editDraft((d) => {
@@ -374,7 +378,6 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
       const cleaned = id === 'cap' ? cur.filter((x) => x !== 'beanie') : id === 'beanie' ? cur.filter((x) => x !== 'cap') : cur;
       return { ...d, accessories: cleaned.concat(id) };
     });
-    wearLens();
   };
 
   // ── the PAINT lens save (K3 — cutout's saveModelPaint figure branch):
