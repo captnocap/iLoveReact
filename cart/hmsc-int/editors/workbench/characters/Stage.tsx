@@ -1,11 +1,18 @@
-// editors/workbench/characters/Stage.tsx — the character source's column 4
-// (WBCHAR-0606; parity rows C2-C3, D1-D8, E1, G3, G6, I1-I10, J1-J2, K1, B7).
+// editors/workbench/characters/Stage.tsx — the MESH context's column 4
+// (WBCHAR-0606; parity rows C2-C3, D1-D8, E1, G3, I1-I10, J1-J2, K1, B7).
 //
 // CharactersRoute.tsx's render+input half, re-hung on the store. LAW 1 holds:
 // everything in here DEMONSTRATES or direct-manipulates (grab-sculpt, depth
 // strokes, outline lathe — workspace input owned by the surface); every
 // PARAMETER edit lives in gutter 3. The viewport chips (grid/mirror/fly/
 // hitboxes/undo/redo) are workspace controls, the route's own convention.
+//
+// CLOTHSPLIT-0606 phase 2 (USER RULING req_0040): this stage shows MESH
+// THINGS ONLY — the figure renders UNDRESSED (buildMeshFrame; no garments,
+// no held prop) and NO animation clock ever ticks here (the face pins
+// 'still'). Dressing lives in the CLOTHING context, posing/animating in the
+// ANIMATION context (both DressedStage.tsx); the relocation ledger is
+// ../WBCLOTH.CAPTURE.md.
 //
 // Lenses:
 //   FIGURE — the assembled rig, grab-sculpt live (grabbing a part selects it)
@@ -24,23 +31,20 @@ import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/useP
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { type Solved } from '../../../game/camera';
-import { GAME_ANIMATION } from '../../../game/animation';
 import { GAME_CHROME } from '../../../game/chrome';
-import { HED_ANIM_FRAMES, animateHed, hedDepthGrid, type HedAnimation } from '../../../game/figure/hed';
-import { buildRigFrame } from '../../../game/figure/rig';
+import { buildMeshFrame } from '../../../game/figure/rig';
 import { PART_IDS, PROFILE_N, type PartId } from '../../../game/figure/shapes';
-import type { PartRender } from '../../../game/figure/render';
-import { applyRegionValues, regionSignature } from '../../characters/regions';
 import { PAINT } from '../../paint';
 import {
-  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, gridFromBytes,
-  headTextureKey, partDynKey, reliefBytesFromGrid, sculptModeValue,
-  skinTextureKey,
+  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, gridFromBytes,
+  reliefBytesFromGrid, sculptModeValue,
 } from '../../characters/paintKit';
+import { useRouteTwigState } from '../../twigs';
 import {
-  CharacterEditorCaptures, GrabGridCapture, GrabGridMeshes, GrabMarker, HeldItemMeshes, PartMeshes, UnwrapContent,
+  GrabGridCapture, GrabGridMeshes, GrabMarker, PartMeshes, UnwrapContent,
   type GrabMarkerInfo, type PreviewView,
 } from '../../characters/preview';
+import { FigureCaptures, useFigureRender } from './figureFrame';
 import {
   GRAB_TUNING, applyGrabStamp, buildGrabClouds, grabDragAxis, grabInstancesFor, grabPointWorld, gridDeltaFor,
   pickGrab, screenAxisFor, stampRadiusUv, stampWorldRadius,
@@ -63,6 +67,13 @@ const PAINT_H = TUNE.paint.height;
 const GRID_W = TUNE.grid.width;
 const GRID_H = TUNE.grid.height;
 const NEUTRAL = TUNE.neutral;
+// SCULPTSPLIT-0606: the SCULPT lens's canvas⇄3D divider — the default sits
+// at the spec's "canvas LARGE, live 3D small beside" (~62/38); the fraction
+// clamps so BOTH sides stay usable and the 3D pane never thins to a sliver.
+const SCULPT_SPLIT = { default: 0.62, min: 0.35, max: 0.78, canvasMinPx: 360, paneMinPx: 300 };
+// the mesh context's face moment: always still (stable identity — never
+// re-triggers the derivation's memos)
+const STILL_FACE = { anim: null, phase: 0 } as const;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
@@ -87,11 +98,6 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   // the 3D side's view: FIGURE lens shows the rig; PART + SCULPT show the part
   const view: PreviewView = lens === 'figure' ? 'figure' : 'part';
 
-  // clocks are stage-local (Route.tsx:119-124, 288-314)
-  const [animFrame, setAnimFrame] = useState(0);
-  const [rigFrame, setRigFrame] = useState(0);
-  const [scriptFrame, setScriptFrame] = useState(0);
-
   const paintingRef = useRef(false);
   const strokeEngineRef = useRef<ReturnType<typeof PAINT.createStrokeEngine> | null>(null);
   // MESHSMOOTH-0606: the smooth brush's working stroke (Route.tsx parity)
@@ -115,6 +121,17 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   })();
   const canvasFitRef = useRef(canvasFit);
   canvasFitRef.current = canvasFit;
+  // SCULPTSPLIT-0606: the canvas⇄3D split is YOURS to set — a drag divider
+  // (the Inspector's resizable-panel pattern), the fraction twigged as view
+  // state on the character route's keys.
+  const [sculptSplit, setSculptSplit] = useRouteTwigState<number>('/characters', 'sculptSplit', SCULPT_SPLIT.default);
+  const [splitDragging, setSplitDragging] = useState(false);
+  const stageRect = useRef({ x: 0, y: 0, width: 0, height: 0 });
+  const resizeSplit = (screenX: number) => {
+    const r = stageRect.current;
+    if (r.width <= 0) return;
+    setSculptSplit(clamp((screenX - r.x) / r.width, SCULPT_SPLIT.min, SCULPT_SPLIT.max));
+  };
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const [grabHover, setGrabHover] = useState<
     { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' | 'smooth' } | null
@@ -151,95 +168,22 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   useIFTTT('key:ctrl+shift+z', () => { if (lensRef.current !== 'paint') s.redo(); });
   useFileDrop((path) => s.dropFile(path));
 
-  // ── animation clocks (Route.tsx:288-314 — no rAF in the cart host) ─────────
-  useEffect(() => {
-    if (!v.faceAnim || !draft.face) return;
-    const iv = setInterval(() => setAnimFrame((f) => f + 1), 150);
-    return () => clearInterval(iv);
-  }, [v.faceAnim, !!draft.face]);
-  useEffect(() => {
-    if (!v.bodyRigAnim) return;
-    const iv = setInterval(() => setRigFrame((f) => f + 1), 90);
-    return () => clearInterval(iv);
-  }, [v.bodyRigAnim]);
-  useEffect(() => {
-    if (!v.scriptPlaying) return;
-    const iv = setInterval(() => setScriptFrame((f) => f + 1), 50);
-    return () => clearInterval(iv);
-  }, [v.scriptPlaying]);
-  // a fresh script starts from frame zero (the route's reset chip semantics)
-  useEffect(() => { setScriptFrame(0); }, [v.animScript]);
-
-  const timeline = useMemo(() => GAME_ANIMATION.parse(v.animScript), [v.animScript]);
-  const timelineLoops = useMemo(() => GAME_ANIMATION.isLooping(timeline), [timeline]);
-  const scriptActions = useMemo(
-    () => ((v.scriptPlaying || scriptFrame > 0) ? GAME_ANIMATION.sample(timeline, scriptFrame / 20) : []),
-    [v.scriptPlaying, timeline, scriptFrame],
-  );
-  useEffect(() => {
-    if (!v.scriptPlaying || timelineLoops || timeline.total <= 0) return;
-    if (scriptFrame / 20 >= timeline.total) s.setScriptPlaying(false);
-  }, [v.scriptPlaying, timelineLoops, timeline.total, scriptFrame]);
-
-  const scriptMouth = scriptActions.find((a: any) => a.target === 'mouth' && (['talk', 'chew', 'cry', 'yell'] as string[]).includes(a.action));
-  const activeAnim: HedAnimation | null = scriptMouth ? scriptMouth.action as HedAnimation : v.faceAnim;
-  const phase = activeAnim
-    ? scriptMouth
-      ? Math.min(HED_ANIM_FRAMES[activeAnim] - 1, Math.floor(scriptMouth.phase * HED_ANIM_FRAMES[activeAnim]))
-      : animFrame % HED_ANIM_FRAMES[activeAnim]
-    : 0;
-  const faceId = draft.face?.metadata?.seed != null ? `s${draft.face.metadata.seed}` : draft.face ? `f${draft.face.layers.length}` : 'noface';
-  const shownDoc = useMemo(
-    () => (draft.face ? (activeAnim ? animateHed(draft.face, activeAnim, phase) : draft.face) : null),
-    [draft.face, activeAnim, phase],
-  );
-
-  // ── geometry: composited displacement per part (Route.tsx:331-382) ─────────
-  const regionedGrids = useMemo(
-    () => Object.fromEntries(PART_IDS.map((id) => [id, applyRegionValues(id, draft.grids[id], draft.regions[id])])) as Record<PartId, number[]>,
-    [draft.grids, draft.regions],
-  );
-  const faceDepth = useMemo(() => (shownDoc ? hedDepthGrid(shownDoc) : null), [shownDoc]);
-  const headDisplace = useMemo(
-    () => (faceDepth ? regionedGrids.head.map((x, i) => clamp(x + faceDepth[i], -1, 1)) : regionedGrids.head),
-    [regionedGrids.head, faceDepth],
-  );
-  const selDisplace = isHead ? headDisplace : regionedGrids[selPart];
+  // ── the render derivation (figureFrame.tsx — the ONE copy). The mesh
+  // context NEVER animates: the face pins 'still', no clock state exists
+  // here at all (CLOTHSPLIT-0606; the clocks live in DressedStage). ─────────
+  const fr = useFigureRender(s, STILL_FACE);
+  const shownDoc = fr.shownDoc;
+  const partRender = fr.partRender;
+  const selDisplace = isHead ? fr.headDisplace : fr.regionedGrids[selPart];
   useEffect(() => { relief.paint.upload(reliefBytesFromGrid(selDisplace)); }, [selDisplace]);
 
-  const paintStamp = (id: PartId) => (draft.paint?.[id] ? `.p${draft.paint[id]!.stamp}` : '');
-  const headTexKey = headTextureKey({
-    photoStamp: v.photo?.stamp ?? null, faceId, anim: activeAnim ?? 'still', phase,
-    skin: draft.skin, photoScale: v.photoScale, photoY: v.photoY,
-  }) + paintStamp('head');
-  const skinTexKeyFor = (id: PartId) =>
-    skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape }) + paintStamp(id);
-
-  const seqs = s.seqs;
-  const partRender = useMemo(() => {
-    const out = {} as Record<PartId, PartRender>;
-    for (const id of PART_IDS) {
-      const displace = id === 'head' ? headDisplace : regionedGrids[id];
-      const headBits = id === 'head' ? `${faceId}.${activeAnim ?? 'still'}.${phase}.${draft.headScaleY.toFixed(2)}` : 'x';
-      out[id] = {
-        params: editorPartParams(id, draft, displace),
-        dynKey: partDynKey(id, seqs[id], headBits, draft.amount, regionSignature(draft.regions[id])),
-        texKey: id === 'head' ? headTexKey : skinTexKeyFor(id),
-        bareTexKey: id === 'head'
-          ? headTexKey
-          : skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape }),
-      };
-    }
-    return out;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the helpers read exactly these
-  }, [regionedGrids, headDisplace, seqs, draft.profiles, faceId, activeAnim, phase, draft.amount, draft.headScaleY, draft.skin, headTexKey, draft.clothing, draft.bottoms, draft.bodyShape, draft.regions, draft.paint]);
-
-  const bodyPhase = v.scriptPlaying ? scriptFrame / 20 : v.bodyRigAnim ? rigFrame / 24 : 0;
+  // ── the UNDRESSED rig (parity S6): the body alone — bones + parts +
+  // sockets, NO garments. PartMeshes' contract wants a clothing list; the
+  // mesh context's is empty BY RULING, not by accident. ─────────────────────
   const rig = useMemo(
-    () => buildRigFrame(draft.bodyShape, draft.bodyPose, bodyPhase, scriptActions, draft.clothing, draft.clothingSkin, draft.accessories, draft.bottoms),
-    [draft.bodyShape, draft.bodyPose, bodyPhase, scriptActions, draft.clothing, draft.clothingSkin, draft.accessories, draft.bottoms],
+    () => ({ ...buildMeshFrame(draft.bodyShape, draft.bodyPose, 0, []), clothing: [] }),
+    [draft.bodyShape, draft.bodyPose],
   );
-  const sculpted = s.sculptedItems();
 
   // ── the depth-paint stroke (Route.tsx:384-444 — the shared stroke engine) ──
   const dab = (sx: number, sy: number, pressure?: number) => {
@@ -575,20 +519,24 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         <Scene3D.Camera nativeCamera ref={camera.cameraRef} position={camera.bootCam.pos} target={camera.bootCam.target} fov={camera.bootCam.fov} />
         <LabEnvironment preset="studio" ground={false} />
         <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={v.showHitboxes} paint={draft.paint} skin={draft.skin} />
-        {view === 'figure' && draft.heldItem !== 'none' ? <HeldItemMeshes itemId={draft.heldItem} rig={rig} extraItems={sculpted} /> : null}
+        {/* CLOTHSPLIT-0606: no HeldItemMeshes here — the prop demonstrates
+            in the CLOTHING/ANIMATION contexts (WBCLOTH row S7) */}
         {v.showGrabGrid ? <GrabGridMeshes view={view} selPart={selPart} parts={partRender} rig={rig} /> : null}
         <GrabMarker marker={grabMarker} />
       </Scene3D>
-      {/* the lens identity caption — which composition you are looking at */}
-      <Text fontSize={9} color={T.dim} style={{ position: 'absolute', right: 14, top: 14, fontWeight: 800, letterSpacing: 1 }}>{caption}</Text>
-      {/* workspace chips ON the viewport (I6/G3 — the route's convention) */}
-      <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
+      {/* SCULPTSPLIT-0606: workspace chips (I6/G3) + the lens caption share
+          ONE wrapping strip — at any pane width content wraps to new lines;
+          the two-layer toolbar collision (chips over the caption) is dead */}
+      <Row style={{ position: 'absolute', left: 14, top: 14, right: 14, flexWrap: 'wrap', gap: 8, rowGap: 6, alignItems: 'center' }}>
         <Chip label="grid" active={v.showGrabGrid} color="cyan" onPress={() => s.setShowGrabGrid(!v.showGrabGrid)} />
         <Chip label="mirror" active={v.mirror} onPress={() => s.setMirror(!v.mirror)} />
         <Chip label="hitboxes" active={v.showHitboxes} color="cyan" onPress={() => s.setShowHitboxes(!v.showHitboxes)} />
         <Chip label="fly" active={camera.camMode === 'fly'} color="good" onPress={() => camera.setCamMode(camera.camMode === 'fly' ? 'orbit' : 'fly')} />
         <Chip label="undo ⌃Z" onPress={s.undo} />
         <Chip label="redo ⌃Y" onPress={s.redo} />
+        <Box style={{ flexGrow: 1 }} />
+        {/* the lens identity caption — which composition you are looking at */}
+        <Text fontSize={9} color={T.dim} style={{ fontWeight: 800, letterSpacing: 1 }}>{caption}</Text>
       </Row>
       {camera.camMode === 'fly' ? (
         <Text fontSize={10} color={T.dim} style={{ position: 'absolute', right: 14, bottom: 14 }}>
@@ -658,14 +606,14 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       onMouseDown={onProfDown}
       onMouseMove={onProfMove}
       onMouseUp={onProfUp}
-      style={{ width: CW, height: CH, borderWidth: 1, borderColor: T.frame, position: 'relative', backgroundColor: '#0a1322' }}
+      style={{ width: CW, height: CH, borderWidth: 1, borderColor: T.frame, position: 'relative', backgroundColor: SCULPT_CANVAS.base }}
     >
       {draft.profiles[selPart].map((_p, i) => {
         const rowH = CH / PROFILE_N;
         return (
           <Box
             key={i}
-            style={{ position: 'absolute', left: ('latch:' + profileLatchKey(selPart, i, 'left')) as any, top: i * rowH, width: ('latch:' + profileLatchKey(selPart, i, 'width')) as any, height: rowH - 1, backgroundColor: draft.skin, borderRadius: 4 }}
+            style={{ position: 'absolute', left: ('latch:' + profileLatchKey(selPart, i, 'left')) as any, top: i * rowH, width: ('latch:' + profileLatchKey(selPart, i, 'width')) as any, height: rowH - 1, backgroundColor: SCULPT_CANVAS.silhouette, borderRadius: 4 }}
           />
         );
       })}
@@ -679,8 +627,11 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       onMouseUp={onPaintUp}
       style={{ width: CW, height: CH, borderWidth: 1, borderColor: T.frame, position: 'relative' }}
     >
+      {/* SCULPTSPLIT-0606 addendum (USER RULING): the unwrap is a MEASUREMENT
+          surface — its base is FIXED ink, never draft.skin; skin tone shows
+          in the 3D views and the PAINT lens, not on the sculpt grid */}
       <UnwrapContent
-        skin={draft.skin}
+        skin={SCULPT_CANVAS.base}
         photo={isHead ? v.photo : null}
         photoScale={v.photoScale}
         photoY={v.photoY}
@@ -707,11 +658,16 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     <Col style={{ flexGrow: 1, minHeight: 0 }}>
       <Row style={{ flexGrow: 1, minHeight: 0 }}>
         {lens === 'sculpt' ? (
-          <>
-            {/* DEADSPACE-0606 + LENSCLARITY-0606: SCULPT is the 2D unwrap
-                LARGE (the canvas column IS the page) with a SMALL live 3D
-                beside it — visibly distinct from PART's full-bleed view */}
-            <Col style={{ flexGrow: 1, flexBasis: 0, minWidth: 0, height: '100%' }}>
+          /* SCULPTSPLIT-0606 (supersedes the fixed-340 pane): "canvas LARGE,
+             live 3D small beside" means BOTH usable — the split is a DRAG
+             divider (the Inspector's resizable-panel pattern), defaulting
+             ~62/38, the fraction twigged; minWidths keep the 3D side a real
+             view at any window size, never a clipped sliver. */
+          <Box
+            onLayout={(lr: any) => { stageRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
+            style={{ flexGrow: 1, minWidth: 0, height: '100%', flexDirection: 'row', position: 'relative' }}
+          >
+            <Col style={{ flexGrow: Math.round(sculptSplit * 100), flexBasis: 0, minWidth: SCULPT_SPLIT.canvasMinPx, height: '100%' }}>
               {sculptTools}
               <Box
                 onLayout={(lr: any) => setCanvasBox((b) => (Math.abs(b.w - lr.width) > 1 || Math.abs(b.h - lr.height) > 1 ? { w: lr.width, h: lr.height } : b))}
@@ -721,10 +677,27 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
               </Box>
               {sampleStrip}
             </Col>
-            <Box style={{ width: 340, height: '100%', flexDirection: 'row', borderLeftWidth: 1, borderColor: T.frame }}>
+            {/* the divider — the canvas⇄3D split is yours to set */}
+            <Pressable
+              onMouseDown={(p: any) => { setSplitDragging(true); resizeSplit(Number(p?.x ?? 0)); }}
+              onMouseMove={(p: any) => { if (splitDragging) resizeSplit(Number(p?.x ?? 0)); }}
+              onMouseUp={() => setSplitDragging(false)}
+              style={{ width: 10, height: '100%', alignItems: 'center', justifyContent: 'center', borderLeftWidth: 1, borderRightWidth: 1, borderColor: T.frame }}
+            >
+              <Box style={{ width: 2, height: 48, borderRadius: 1, backgroundColor: T.dim }} />
+            </Pressable>
+            <Box style={{ flexGrow: Math.round((1 - sculptSplit) * 100), flexBasis: 0, minWidth: SCULPT_SPLIT.paneMinPx, height: '100%', flexDirection: 'row' }}>
               {viewportPane(`LIVE 3D · ${selPart.toUpperCase()}`)}
             </Box>
-          </>
+            {splitDragging ? (
+              /* full-stage capture while dragging (Inspector.tsx:141-147) */
+              <Pressable
+                style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001', zIndex: 50 }}
+                onMouseMove={(p: any) => resizeSplit(Number(p?.x ?? 0))}
+                onMouseUp={() => setSplitDragging(false)}
+              />
+            ) : null}
+          </Box>
         ) : lens === 'paint' ? (
           /* the shared painter + live ModelPreview (K2/K4) — paint without
              leaving the page; save lands on the characters channel (K3) */
@@ -732,7 +705,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         ) : (
           /* LENSCLARITY-0606: FIGURE = the whole body posed; PART = the
              isolated selected part close-up — captioned, never the same */
-          viewportPane(lens === 'figure' ? 'ASSEMBLED FIGURE' : `ISOLATED PART · ${selPart.toUpperCase()}`)
+          viewportPane(lens === 'figure' ? 'BODY MESH · UNDRESSED' : `ISOLATED PART · ${selPart.toUpperCase()}`)
         )}
       </Row>
       {/* the status strip — every store status lands here (Route.tsx:812-816) */}
@@ -750,20 +723,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         ))}
         <Paintable id={relief.id} w={GRID_W} h={GRID_H} />
       </Box>
-      <CharacterEditorCaptures
-        headTexKey={headTexKey}
-        skinTexKeyFor={skinTexKeyFor}
-        skin={draft.skin}
-        photo={v.photo}
-        photoScale={v.photoScale}
-        photoY={v.photoY}
-        layers={shownDoc?.layers ?? null}
-        clothing={draft.clothing}
-        bottoms={draft.bottoms}
-        bodyShape={draft.bodyShape}
-        parts={PART_IDS}
-        paint={draft.paint}
-      />
+      <FigureCaptures store={s} r={fr} />
       <GrabGridCapture hover={grabHover} mirror={v.mirror} />
     </Col>
   );
