@@ -34,7 +34,10 @@
 // node itself (render it with cameraRef + bootCam).
 //
 // Tuning rides PAINT_EDITOR_TUNING.orbit/.fly/.knobs.zoom — ONE hand-feel
-// for every sculpt surface, by construction.
+// for every sculpt surface, by construction. CAMSENS-0606: the feel numbers
+// are /settings tunables (paintKit registers the sculpt-camera cluster), and
+// the first look-drag per rig logs its measured px-in → °-out ratio to the
+// dev terminal — the sensitivity claim stays checkable, never theorized.
 
 import { useEffect, useRef, useState } from 'react';
 import { busOn } from '@reactjit/runtime/hooks/useIFTTT';
@@ -51,6 +54,12 @@ type V3 = [number, number, number];
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
 }
+
+// CAMSENS-0606 data line: the FIRST look-drag per rig per bundle eval warns
+// its measured ratio (px moved → degrees sent to the host) — one quiet line
+// each, so "the dpi of like a million" is a number in the dev terminal, not
+// a vibe. Resets on hot reload (fresh data after every tuning edit).
+const lookRatioLogged: Record<'orbit' | 'fly', boolean> = { orbit: false, fly: false };
 
 export type SculptCameraDefaults = {
   dist: number;
@@ -124,7 +133,8 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
   // binds it host-side; the ref's id keys the per-node param/delta channel)
   const cameraRef = useRef<any>(null);
   const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
-  const orbitRef = useRef<{ x: number; y: number } | null>(null);
+  // px/deg accumulate per drag for the CAMSENS ratio line (logged on release)
+  const orbitRef = useRef<{ x: number; y: number; pxIn: number; degOut: number } | null>(null);
   // the FLY camera (noclip, GRABFLY-0605): host freefly mode — WASD + q/e
   // move (host-integrated per frame), drag looks, wheel dollies along the
   // cursor ray. Pose persists per route.
@@ -312,20 +322,24 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- bus handlers read refs
   }, []);
 
-  const orbitDown = (e: any) => { orbitRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; };
+  const orbitDown = (e: any) => { orbitRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0), pxIn: 0, degOut: 0 }; };
   const orbitMove = (e: any) => {
     const d = orbitRef.current;
     if (!d) return;
     const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
     const dx = nx - d.x, dy = ny - d.y;
     d.x = nx; d.y = ny;
+    d.pxIn += Math.abs(dx) + Math.abs(dy);
     if (camModeRef.current === 'fly') {
-      // FPS look: drag right = look right (lookForward convention), pitch
-      // clamped to the host freefly's own ±89 so shadow and host agree
+      // FPS look (CAMSENS-0606: fly.lookPerPx sits ~4× under the orbit rate —
+      // it turns the VIEW DIRECTION, not an eye around a centered subject):
+      // drag right = look right (lookForward convention), pitch clamped to
+      // the host freefly's own ±89 so shadow and host agree
       const l = flyLookRef.current;
       const nextYaw = l.yaw + dx * TUNE.fly.lookPerPx;
       const nextPitch = clamp(l.pitch - dy * TUNE.fly.lookPerPx, TUNE.fly.pitchMin, TUNE.fly.pitchMax);
       camCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+      d.degOut += Math.abs(nextYaw - l.yaw) + Math.abs(nextPitch - l.pitch);
       l.yaw = nextYaw;
       l.pitch = nextPitch;
       return;
@@ -338,11 +352,19 @@ export function useSculptCamera(opts: SculptCameraOpts): SculptCamera {
     const nextYaw = l.yaw - dx * TUNE.orbit.yawPerPx;
     const nextPitch = clamp(l.pitch - dy * TUNE.orbit.pitchPerPx, TUNE.orbit.pitchMin, TUNE.orbit.pitchMax);
     camCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    d.degOut += Math.abs(nextYaw - l.yaw) + Math.abs(nextPitch - l.pitch);
     l.yaw = nextYaw;
     l.pitch = nextPitch;
   };
   const orbitUp = () => {
-    if (camModeRef.current === 'fly') saveFlyPose();
+    const d = orbitRef.current;
+    const mode = camModeRef.current;
+    if (d && d.pxIn > 0 && !lookRatioLogged[mode]) {
+      // the CAMSENS-0606 data line: delta-in vs rotation-out, measured
+      lookRatioLogged[mode] = true;
+      console.warn(`[${route}] ${mode} look: ${d.pxIn.toFixed(0)}px in → ${d.degOut.toFixed(1)}° out (${(d.degOut / d.pxIn).toFixed(3)}°/px)`);
+    }
+    if (mode === 'fly') saveFlyPose();
     else setOrbitLook({ ...lookRef.current });
     orbitRef.current = null;
   };

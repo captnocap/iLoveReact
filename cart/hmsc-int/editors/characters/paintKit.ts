@@ -13,6 +13,7 @@
 
 import { HED_GRID_H, HED_GRID_W } from '../../game/figure/hed';
 import { PART_LOD, PART_PRESETS, type PartId } from '../../game/figure/shapes';
+import { editorTunables } from '../tunables';
 import type { CharacterDraft } from './draft';
 import { regionSignature } from './regions';
 
@@ -48,8 +49,15 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
   },
   /** the FLY camera (noclip, GRABFLY-0605): WASD move + q/e (or shift/space)
    *  down/up at flySpeed units/s (host-integrated), drag = look at lookPerPx,
-   *  wheel = dolly along the cursor ray by flyWheelStep per notch */
-  fly: { speed: 2.6, lookPerPx: 0.3, wheelStep: 0.35, pitchMin: -89, pitchMax: 89 },
+   *  wheel = dolly along the cursor ray by flyWheelStep per notch.
+   *  lookPerPx (CAMSENS-0606, USER: "the freeroam ... has the dpi of like a
+   *  million so a small movement goes like 720 degree spin"): an fps look
+   *  rotates the VIEW DIRECTION — at fov 45 the subject leaves the frame
+   *  after ~75px of drag — so its rate must sit ~4× UNDER the orbit rate
+   *  (orbit swings the eye around a centered subject; same °/px feels calm
+   *  there and wild here). 0.08°/px ≈ a full pane-width drag sweeps ~72°.
+   *  /settings-tunable (sculpt-camera cluster below) for the user's own DPI. */
+  fly: { speed: 2.6, lookPerPx: 0.08, wheelStep: 0.35, pitchMin: -89, pitchMax: 89 },
   /** boot/refocus framing (CAMFOCUS-0606): on load, on part/model switch, and
    *  on the F verb the camera frames the subject's bounding sphere — margin
    *  multiplies the fitted distance (1 = the sphere kisses the frustum edge);
@@ -59,6 +67,24 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
   autosaveDebounceMs: 1200,
   // (the face-paint palette + stroke numbers died with the coupled
   // color+depth tool — MODELPAINT-0605; /cutout owns texture painting)
+});
+
+// CAMSENS-0606: the sculpt camera's FEEL numbers are P2 tunables — they show
+// on /settings and the user dials their own DPI. Registration where the
+// numbers live (SETTINGS-0605 law); the registry writes THROUGH the table, so
+// a knob edit lands in the very value orbitMove reads on the next mouse move.
+// Only NESTED leaves are registered — the top-level freeze is shallow, so the
+// orbit/fly/frame sub-objects stay writable.
+editorTunables().register({
+  system: 'sculpt-camera', route: 'editors/sculptCamera', table: PAINT_EDITOR_TUNING,
+  specs: {
+    'orbit.yawPerPx': { label: 'orbit yaw °/px', min: 0.05, max: 2, step: 0.01, precision: 2 },
+    'orbit.pitchPerPx': { label: 'orbit pitch °/px', min: 0.05, max: 2, step: 0.01, precision: 2 },
+    'fly.lookPerPx': { label: 'fly look °/px', min: 0.01, max: 0.6, step: 0.01, precision: 2 },
+    'fly.speed': { label: 'fly speed u/s', min: 0.5, max: 12, step: 0.1, precision: 1 },
+    'fly.wheelStep': { label: 'fly wheel u', min: 0.05, max: 2, step: 0.05, precision: 2 },
+    'frame.margin': { label: 'frame margin ×', min: 1, max: 2.5, step: 0.05, precision: 2 },
+  },
 });
 
 /** 'smooth' (MESHSMOOTH-0606) relaxes the grid (smoothKit) instead of
@@ -175,10 +201,21 @@ export const SCULPT_CANVAS = {
 } as const;
 
 // ── the painter overlay shader ───────────────────────────────────────────────
-// Three layers in one quad: live stroke heat (blue raised / orange carved),
-// contour rings of the current form (relief texture, slot 2), faint unwrap
-// guides. Declares the FULL textures-mode binding set (2 tex + 2 samp) — the
-// textures-enabled pipeline layout expects all four. (No backticks in WGSL.)
+// Layers in one quad: live stroke heat (blue raised / orange carved), contour
+// rings of the current form (relief texture, slot 2), the unwrap guides, the
+// always-on cell lattice, and the brush footprint ring. Declares the FULL
+// textures-mode binding set (2 tex + 2 samp) — the textures-enabled pipeline
+// layout expects all four. (No backticks in WGSL; no unary plus.)
+//
+// data[] contract (SCULPTSPLIT-0606 design rulings — both routes must pass
+// all 7 floats; a short array reads out of bounds):
+//   [0] chunky   — 1: depth/relief snap to cell centers ("precise when
+//                  aiming"); 0: cell-bilinear smooth display at rest
+//   [1] hoverOn  — 1: the brush footprint renders
+//   [2] hoverU / [3] hoverV — cursor in canvas uv
+//   [4] brushRadV — brush radius in v units (the 2:1 aspect is corrected here)
+//   [5] mode     — 0 raise · 1 carve · 2 flatten · 3 smooth (ring tint)
+//   [6] mirror   — 1: the mirror-twin footprint renders across u=0.5
 export const DEPTH_OVERLAY_WGSL = `
 @group(0) @binding(1) var<storage, read> data: array<f32>;
 @group(0) @binding(2) var depth_tex: texture_2d<f32>;
@@ -186,9 +223,31 @@ export const DEPTH_OVERLAY_WGSL = `
 @group(0) @binding(4) var relief_tex: texture_2d<f32>;
 @group(0) @binding(5) var relief_samp: sampler;
 
+// bilinear over CELL CENTERS — the display granularity is the sculpt grid
+// (what the mesh actually consumes), organic at rest like the 3D result
+fn cell_bilinear(tex: texture_2d<f32>, samp: sampler, uv: vec2f, dims: vec2f) -> f32 {
+  let p = uv * dims - 0.5;
+  let i = floor(p);
+  let f = p - i;
+  let c00 = textureSampleLevel(tex, samp, (i + vec2f(0.5, 0.5)) / dims, 0.0).r;
+  let c10 = textureSampleLevel(tex, samp, (i + vec2f(1.5, 0.5)) / dims, 0.0).r;
+  let c01 = textureSampleLevel(tex, samp, (i + vec2f(0.5, 1.5)) / dims, 0.0).r;
+  let c11 = textureSampleLevel(tex, samp, (i + vec2f(1.5, 1.5)) / dims, 0.0).r;
+  return mix(mix(c00, c10, f.x), mix(c01, c11, f.x), f.y);
+}
+
 @fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
-  let live = textureSampleLevel(depth_tex, depth_samp, in.uv, 0.0).r - 0.5;
-  let relief = textureSampleLevel(relief_tex, relief_samp, in.uv, 0.0).r - 0.5;
+  let dims = vec2f(${PAINT_EDITOR_TUNING.grid.width}.0, ${PAINT_EDITOR_TUNING.grid.height}.0);
+  let chunky = data[0] > 0.5;
+  let uv_q = (floor(in.uv * dims) + vec2f(0.5, 0.5)) / dims;
+
+  // smart depth read (Q4): smooth at rest, cell-snapped while aiming
+  var live = cell_bilinear(depth_tex, depth_samp, in.uv, dims) - 0.5;
+  var relief = cell_bilinear(relief_tex, relief_samp, in.uv, dims) - 0.5;
+  if (chunky) {
+    live = textureSampleLevel(depth_tex, depth_samp, uv_q, 0.0).r - 0.5;
+    relief = textureSampleLevel(relief_tex, relief_samp, uv_q, 0.0).r - 0.5;
+  }
 
   let raised = vec3f(0.24, 0.66, 1.0);
   let carved = vec3f(1.0, 0.58, 0.2);
@@ -208,13 +267,66 @@ export const DEPTH_OVERLAY_WGSL = `
   let guide_a = max((1.0 - smoothstep(0.0015, 0.0035, gx)) * 0.3,
                     (1.0 - smoothstep(0.003, 0.007, gy)) * 0.22);
 
+  // the cell lattice — ALWAYS ON (USER: "keep the lattice on, there is no
+  // reason to not"); one faint line per sculpt-grid cell boundary
+  let cf = fract(in.uv * dims);
+  let cdx = min(cf.x, 1.0 - cf.x) / dims.x;
+  let cdy = min(cf.y, 1.0 - cf.y) / dims.y;
+  let cd = min(cdx, cdy);
+  let lattice_a = (1.0 - smoothstep(0.0006, 0.0018, cd)) * 0.09;
+
   // live stroke heat
   let heat_a = clamp(abs(live) * 2.0, 0.0, 1.0) * 0.5;
   let heat_c = select(carved, raised, live > 0.0);
 
+  // the brush footprint (Q3): circle at true size + mode tint, mirror twin
+  let aspect = 2.0; // the unwrap is structurally 2:1 equirect
+  var brush_a = 0.0;
+  var twin_a = 0.0;
+  if (data[1] > 0.5) {
+    let rad = data[4];
+    let pv = vec2f((in.uv.x - data[2]) * aspect, in.uv.y - data[3]);
+    let pd = length(pv);
+    brush_a = (1.0 - smoothstep(0.0025, 0.006, abs(pd - rad))) * 0.85;
+    brush_a = max(brush_a, select(0.0, 0.10, pd < rad));
+    if (data[6] > 0.5) {
+      let mv = vec2f((in.uv.x - (1.0 - data[2])) * aspect, in.uv.y - data[3]);
+      let md = length(mv);
+      twin_a = (1.0 - smoothstep(0.0025, 0.006, abs(md - rad))) * 0.45;
+      twin_a = max(twin_a, select(0.0, 0.05, md < rad));
+    }
+  }
+  let mode = u32(data[5] + 0.5);
+  var brush_c = raised;                                  // 0 raise
+  if (mode == 1u) { brush_c = carved; }                  // 1 carve
+  if (mode == 2u) { brush_c = vec3f(0.58, 0.64, 0.72); } // 2 flatten
+  if (mode == 3u) { brush_c = vec3f(0.2, 0.83, 0.6); }   // 3 smooth
+  let foot_a = max(brush_a, twin_a);
+
   let ink = vec3f(${SCULPT_CANVAS.guideInk.join(', ')});
-  let color = heat_c * heat_a + contour_c * contour_a + ink * guide_a;
-  let a = min(heat_a + contour_a + guide_a, 0.85);
+  let color = heat_c * heat_a + contour_c * contour_a + ink * (guide_a + lattice_a) + brush_c * foot_a;
+  let a = min(heat_a + contour_a + guide_a + lattice_a + foot_a, 0.9);
   return vec4f(color, a);
 }
 `;
+
+/** The overlay's data[] for a frame — ONE builder for every mount (the v2
+ *  contract above; the old route passes the rest-state defaults). */
+export function depthOverlayData(args?: {
+  hover: { u: number; v: number } | null;
+  brushPx: number;
+  mode: SculptMode;
+  mirror: boolean;
+}): number[] {
+  if (!args || !args.hover) return [0, 0, 0, 0, 0, 0, 0];
+  const modeIdx = args.mode === 'raise' ? 0 : args.mode === 'lower' ? 1 : args.mode === 'flatten' ? 2 : 3;
+  return [
+    1, // aiming → chunky (cell-snapped) display
+    1,
+    args.hover.u,
+    args.hover.v,
+    (args.brushPx / 2) / PAINT_EDITOR_TUNING.paint.height,
+    modeIdx,
+    args.mirror ? 1 : 0,
+  ];
+}

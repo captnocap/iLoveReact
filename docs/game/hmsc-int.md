@@ -1064,6 +1064,21 @@ REUSE, not re-roll (the no-duplication law):
   a rebind keeps the user's pose and logs `camera re-bound → node N`.
   Survives any future lens restructure by construction — no reliance on
   remounts. P4-pinned in `sculptFraming.test.ts` (8/8).
+  CAMSENS-0606 (USER: "the freeroam ... has the dpi of like a million so a
+  small movement goes like 720 degree spin"): the fly look rate was NOT raw
+  deltas — both rigs scale per-pixel at the one seam (`orbitMove`) — but fly's
+  0.3°/px sat at orbit's rate, and an fps look rotates the VIEW DIRECTION
+  (subject leaves a 45° fov after ~75px of drag) where orbit swings the eye
+  around a centered subject; same °/px feels calm there and wild here. Fly
+  `lookPerPx` dropped to 0.08 (~4× under orbit's 0.4), and the camera FEEL
+  numbers became /settings tunables — paintKit registers the `sculpt-camera`
+  cluster (orbit yaw/pitch °/px, fly look °/px, fly speed, fly wheel, frame
+  margin) into the P2 registry, write-through so a knob edit lands in the
+  value the next mouse move reads (the user dials their own DPI). Data line:
+  the FIRST look-drag per rig per bundle eval warns its measured
+  `px in → ° out` ratio to the dev terminal — the sensitivity stays a
+  number, never a vibe. V26 untouched (host drive unchanged; this is rig
+  parameter scaling).
 - paintKit (DEPTH_OVERLAY_WGSL, byte↔grid, sculpt modes), the shared
   painter's stroke engine + history, `GrabMarker`/`GrabGridCapture`
   (characters/preview) — imported, not copied (the cutout-models
