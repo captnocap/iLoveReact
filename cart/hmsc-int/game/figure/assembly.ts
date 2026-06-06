@@ -43,6 +43,16 @@ export function assemblyFromSkeleton(s: Shape, bones: Bones, actions: RigTimelin
 
   return [
     inst('torso', 'torso'),
+    // PELVISMESH-0606: the pelvis is a REAL PART ("make the torso and the
+    // pelvis not the same mesh"), not an anatomy socket wearing the torso.
+    // The sizing numbers are the old pelvisSocket's verbatim (scale ×1.18 on
+    // the bone, thickness = hip ×1.18), so an unsculpted pelvis sits exactly
+    // where the socket always did.
+    {
+      part: 'pelvis', bone: 'pelvis',
+      position: bones.pelvis.position, rotation: bones.pelvis.rotation,
+      scale: bones.pelvis.scale * 1.18, thickness: bones.pelvis.thickness * 1.18,
+    },
     inst('head', 'head'),
     // arms: slim pipes chained shoulder → elbow → hand
     inst('lUpperArm', 'pipe'),
@@ -80,7 +90,7 @@ export function anatomyFromSkeleton(s: Shape, shapeId: BodyShapeId, bones: Bones
     shoulderSocket(1, s, bones),
     elbowSocket(-1, s, bones),
     elbowSocket(1, s, bones),
-    pelvisSocket(s, bones),
+    // (no pelvisSocket — PELVISMESH-0606: the pelvis is a real assembly part)
     hipSocket(-1, s, bones),
     hipSocket(1, s, bones),
     kneeSocket(-1, s, bones),
@@ -146,16 +156,8 @@ function elbowSocket(side: -1 | 1, s: Shape, bones: Bones): BodyInstance {
   };
 }
 
-function pelvisSocket(s: Shape, bones: Bones): BodyInstance {
-  return {
-    part: 'torso',
-    bone: 'pelvis',
-    position: bones.pelvis.position,
-    scale: bones.pelvis.scale * 1.18,
-    rotation: bones.pelvis.rotation,
-    thickness: s.hip * 1.18,
-  };
-}
+// (pelvisSocket retired by PELVISMESH-0606 — the pelvis moved into the
+// assembly as its own part, carrying the socket's exact sizing numbers)
 
 function hipSocket(side: -1 | 1, s: Shape, bones: Bones): BodyInstance {
   const hip = side < 0 ? bones.lHip : bones.rHip;

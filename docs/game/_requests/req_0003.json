@@ -1,0 +1,8 @@
+{
+  "id": "req_0003",
+  "at": "2026-06-06T04:31:45.801Z",
+  "origin": "supervisor-relay",
+  "text": "uh im not sure at what point i would want to say it but the painter has a paint shaders method, and we have all these shader materials, but neither of them are speaking the same language. the paintable shaders are completely decoupled from the game materials, which is something to address, at the right time.",
+  "status": "open",
+  "captureMode": "manual"
+}

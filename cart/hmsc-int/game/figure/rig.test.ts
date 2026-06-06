@@ -33,10 +33,17 @@ function firstMovingIndex<T extends { position: readonly number[] }>(a: T[], b: 
 test('a rig frame carries every layer of the dressed figure', () => {
   const frame = buildRigFrame('neutral', 'stand', 0, [], 'tee');
   assertEqual(Object.keys(frame.bones).length, 25, '25 bones');
-  // 16 named parts + two 5-digit finger fans = 26 assembly instances
-  assertEqual(frame.assembly.length, 26, 'assembly: 16 parts + 10 fingers');
+  // 17 named parts (incl. the pelvis, PELVISMESH-0606) + two 5-digit finger
+  // fans = 27 assembly instances
+  assertEqual(frame.assembly.length, 27, 'assembly: 17 parts + 10 fingers');
   assert(frame.assembly.filter((i) => i.part === 'finger').length === 10, 'two hands of five digits');
-  assert(frame.anatomy.length >= 9, 'the joint-socket set must be present');
+  // PELVISMESH-0606: the pelvis is a REAL assembly part on the pelvis bone —
+  // never an anatomy socket wearing the torso
+  const pelvisInstances = frame.assembly.filter((i) => i.part === 'pelvis');
+  assertEqual(pelvisInstances.length, 1, 'exactly one pelvis mesh');
+  assertEqual(pelvisInstances[0].bone, 'pelvis', 'the pelvis mesh rides the pelvis bone');
+  assertEqual(frame.anatomy.filter((i) => i.bone === 'pelvis').length, 0, 'the old torso-wearing pelvis socket is gone');
+  assert(frame.anatomy.length >= 8, 'the joint-socket set must be present');
   assert(frame.clothing.length > 0, 'a dressed figure has garments');
   assertEqual(frame.hitboxes.length, 25, 'one oriented-box hit volume per bone');
   assertEqual(frame.anchors.length, 10, 'the semantic anchor set');

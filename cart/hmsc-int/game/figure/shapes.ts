@@ -10,9 +10,10 @@
 // work identically on all of them. Mirrored limbs reuse one part doc —
 // sculpt the pipe once, both arms and both legs follow.
 
-export type PartId = 'head' | 'torso' | 'pipe' | 'hand' | 'foot' | 'finger';
-export const PART_IDS: PartId[] = ['head', 'torso', 'pipe', 'hand', 'foot', 'finger'];
-/** pre-finger documents validate against this subset (schema by addition) */
+export type PartId = 'head' | 'torso' | 'pelvis' | 'pipe' | 'hand' | 'foot' | 'finger';
+export const PART_IDS: PartId[] = ['head', 'torso', 'pelvis', 'pipe', 'hand', 'foot', 'finger'];
+/** pre-finger documents validate against this subset (schema by addition;
+ *  the pelvis part is likewise post-legacy — PELVISMESH-0606) */
 export const LEGACY_PART_IDS: PartId[] = ['head', 'torso', 'pipe', 'hand', 'foot'];
 
 // ── paint targets (MODELPAINT-0605 LIMBPAINT, the user's ruling) ─────────────
@@ -24,20 +25,21 @@ export const LEGACY_PART_IDS: PartId[] = ['head', 'torso', 'pipe', 'hand', 'foot
 // documents keep meaning) or one limb segment; per-instance resolution is
 // SEGMENT WINS, PART IS THE FALLBACK.
 
+// PELVISMESH-0606: 'pelvis' is NO LONGER a limb segment — the user ruled the
+// pelvis a REAL PART ("make the torso and the pelvis not the same mesh"), so
+// the string 'pelvis' moved from LimbPaintTargetId into PartId. The PAINT
+// vocabulary is unchanged at the string level (old documents' paint.pelvis
+// keeps meaning — same unwrap dims, now sampled by the pelvis's own mesh).
 export type LimbPaintTargetId =
   | 'lUpperArm' | 'rUpperArm' | 'lLowerArm' | 'rLowerArm'
   | 'lUpperLeg' | 'rUpperLeg' | 'lLowerLeg' | 'rLowerLeg'
-  | 'lHand' | 'rHand' | 'lFoot' | 'rFoot'
-  // not a limb — the pelvis SOCKET wears the torso globe (assembly
-  // pelvisSocket), the same shared-model artifact ("two sets of tits"):
-  // it gets its own target so torso paint stays on the torso
-  | 'pelvis';
+  | 'lHand' | 'rHand' | 'lFoot' | 'rFoot';
 export type PaintTargetId = PartId | LimbPaintTargetId;
 
 export const LIMB_PAINT_TARGET_IDS: LimbPaintTargetId[] = [
   'lUpperArm', 'rUpperArm', 'lLowerArm', 'rLowerArm',
   'lUpperLeg', 'rUpperLeg', 'lLowerLeg', 'rLowerLeg',
-  'lHand', 'rHand', 'lFoot', 'rFoot', 'pelvis',
+  'lHand', 'rHand', 'lFoot', 'rFoot',
 ];
 export const PAINT_TARGET_IDS: PaintTargetId[] = [...PART_IDS, ...LIMB_PAINT_TARGET_IDS];
 
@@ -57,7 +59,6 @@ export const PAINT_TARGET_PART: Record<LimbPaintTargetId, PartId> = {
   lUpperArm: 'pipe', rUpperArm: 'pipe', lLowerArm: 'pipe', rLowerArm: 'pipe',
   lUpperLeg: 'pipe', rUpperLeg: 'pipe', lLowerLeg: 'pipe', rLowerLeg: 'pipe',
   lHand: 'hand', rHand: 'hand', lFoot: 'foot', rFoot: 'foot',
-  pelvis: 'torso',
 };
 
 export function paintTargetPart(target: PaintTargetId): PartId {
@@ -73,14 +74,16 @@ export const PAINT_TARGET_BY_BONE: Record<string, LimbPaintTargetId> = {
   lThigh: 'lUpperLeg', rThigh: 'rUpperLeg',
   lShin: 'lLowerLeg', rShin: 'rLowerLeg',
   lHand: 'lHand', rHand: 'rHand', lFoot: 'lFoot', rFoot: 'rFoot',
-  pelvis: 'pelvis',
+  // (no pelvis row — PELVISMESH-0606: the pelvis bone wears the pelvis PART;
+  // paintTargetForInstance resolves it through the part path, not a segment)
 };
 
 /** Segments that must NEVER inherit their part's paint: limbs WANT the
- *  'all limbs' fallback; the pelvis inheriting torso paint is exactly the
- *  two-sets-of-tits bug. When unpainted, these fall to the part's BARE
- *  (paint-free) texture. */
-export const PAINT_TARGET_NO_PART_FALLBACK: ReadonlySet<PaintTargetId> = new Set(['pelvis']);
+ *  'all limbs' fallback. EMPTY since PELVISMESH-0606 — the pelvis (the one
+ *  no-fallback segment, the "two sets of tits" fix) became a real part with
+ *  its own mesh + unwrap, so torso paint can no longer cascade anywhere it
+ *  shouldn't. The seam stays for any future no-fallback segment. */
+export const PAINT_TARGET_NO_PART_FALLBACK: ReadonlySet<PaintTargetId> = new Set([]);
 
 /** The paint target ONE INSTANCE resolves to: its bone's segment when the
  *  segment paints this part (anatomy blobs riding joint bones keep their
@@ -106,6 +109,11 @@ export const PART_PRESETS: Record<PartId, PartPreset> = {
   head: { label: 'head', scaleY: 1.2 },
   // taller and wider than the egg: shoulders → chest → waist → hips
   torso: { label: 'torso', scaleY: 1.14, scaleZ: 0.62, profile: [0.72, 1.0, 0.94, 0.88, 0.6] },
+  // PELVISMESH-0606: its own sculptable mesh ("make the torso and the pelvis
+  // not the same mesh"). The DEFAULT silhouette is the torso preset verbatim —
+  // the old pelvis socket wore the whole torso globe scaled down, so a fresh
+  // pelvis looks exactly like it always did until the user sculpts it apart.
+  pelvis: { label: 'pelvis', scaleY: 1.14, scaleZ: 0.62, profile: [0.72, 1.0, 0.94, 0.88, 0.6] },
   // the limb pipe: long and SLIM, slightly waisted, rounded ends so two of
   // them visually connect at an elbow/knee without a seam gap
   pipe: { label: 'pipe', scaleY: 1.37, scaleX: 0.42, scaleZ: 0.42, profile: [0.45, 0.85, 0.8, 0.85, 0.45] },
@@ -237,6 +245,9 @@ export function clothingSkinTextureKey(skin: ClothingSkinId): string {
 export const PART_LOD: Record<PartId, { segments: number; rings: number }> = {
   head: { segments: 40, rings: 20 },
   torso: { segments: 24, rings: 12 },
+  // the pelvis renders smaller than the torso but sculpts the same unwrap —
+  // same LOD so the 48×24 grid lands on real quads (PELVISMESH-0606)
+  pelvis: { segments: 24, rings: 12 },
   pipe: { segments: 16, rings: 9 },
   hand: { segments: 16, rings: 8 },
   foot: { segments: 14, rings: 8 },

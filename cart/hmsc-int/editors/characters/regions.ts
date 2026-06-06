@@ -39,6 +39,13 @@ export const SHAPE_REGIONS: Record<PartId, ShapeRegion[]> = {
     { id: 'waist', label: 'waist carve', cx: 0.5, cy: 0.66, rx: 0.2, ry: 0.08 },
     { id: 'hips', label: 'hips', cx: 0.38, cy: 0.76, rx: 0.12, ry: 0.12, mirror: true },
   ],
+  // PELVISMESH-0606: the pelvis sculpts its own unwrap now — hip/seat/crotch
+  // anatomy instead of the torso's chest-led set
+  pelvis: [
+    { id: 'hips', label: 'hip flare', cx: 0.38, cy: 0.42, rx: 0.13, ry: 0.14, mirror: true },
+    { id: 'seat', label: 'seat', cx: 0.5, cy: 0.55, rx: 0.16, ry: 0.15 },
+    { id: 'crotch', label: 'crotch carve', cx: 0.5, cy: 0.78, rx: 0.14, ry: 0.1 },
+  ],
   pipe: [
     { id: 'upper', label: 'upper mass', cx: 0.5, cy: 0.28, rx: 0.34, ry: 0.14 },
     { id: 'middle', label: 'middle taper', cx: 0.5, cy: 0.52, rx: 0.28, ry: 0.12 },

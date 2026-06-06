@@ -25,6 +25,7 @@ import { VehiclePaintCaptures } from '../../game/paintedRender';
 import { hedDepthGrid, HED_GRID_H, HED_GRID_W, type HedDocument, type HedLayer } from '../../game/figure/hed';
 import { FaceLayerPaint } from '../../game/figure/render';
 import { defaultProfile, paintTargetPart, PART_IDS, type PaintTargetId, type PartId } from '../../game/figure/shapes';
+import { partsWithPelvisFallback } from '../../game/figure/body';
 // the character editor's own mesh recipe (displaces EVERY part — the bake's
 // partGlobeParams is head-only and rendered sculpted bodies as bare eggs)
 import { editorPartParams } from '../characters/paintKit';
@@ -159,19 +160,22 @@ function FigurePartMesh(props: { model: BodyDocument; target: PaintTargetId }) {
     // from the document: per-part sculpt grids, dragged outlines, and the
     // head's full sculpt+layers composite.
     const grid = HED_GRID_W * HED_GRID_H;
+    // PELVISMESH-0606: stream documents bypass parseBody — normalize here so
+    // a pre-split doc's pelvis previews as the torso copy it used to wear
+    const parts = partsWithPelvisFallback(model.parts);
     const profiles = Object.fromEntries(
-      PART_IDS.map((id) => [id, model.parts[id]?.profile ?? defaultProfile(id)]),
+      PART_IDS.map((id) => [id, parts[id]?.profile ?? defaultProfile(id)]),
     ) as Record<PartId, number[]>;
     let displace: number[];
     if (part === 'head') {
       const hed: HedDocument = {
         kind: 'hed', version: 1, cols: HED_GRID_W, rows: HED_GRID_H,
         skin: model.skin, amount: model.amount, scaleY: model.headScaleY,
-        sculpt: model.parts.head.sculpt, layers: model.parts.head.layers,
+        sculpt: parts.head.sculpt, layers: parts.head.layers,
       };
       displace = hedDepthGrid(hed); // sculpt residue + layer relief, composited
     } else {
-      const sculpt = model.parts[part]?.sculpt ?? [];
+      const sculpt = parts[part]?.sculpt ?? [];
       displace = sculpt.length === grid ? sculpt.map((b) => b / 127) : new Array(grid).fill(0);
     }
     return editorPartParams(part, { amount: model.amount, headScaleY: model.headScaleY, profiles }, displace);

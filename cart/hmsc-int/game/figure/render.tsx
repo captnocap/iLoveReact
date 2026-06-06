@@ -35,8 +35,9 @@ export type PartRender = {
   dynKey: string;
   texKey: string;
   /** the part's PAINT-FREE texture key (LIMBPAINT: what a no-fallback
-   *  segment — the pelvis — samples when the part is painted but the
-   *  segment is not). Equals texKey on unpainted parts. */
+   *  segment samples when the part is painted but the segment is not).
+   *  Equals texKey on unpainted parts. The no-fallback set is EMPTY since
+   *  PELVISMESH-0606 (the pelvis became a real part); the seam stays. */
   bareTexKey?: string;
 };
 
@@ -52,10 +53,11 @@ export function paintedPartTexKey(cartKey: string, skin: string, id: PaintTarget
 
 /** LIMBPAINT per-instance resolution: the instance's bone segment wins when
  *  it carries paint; otherwise the caller's part-level key (which already
- *  folds part-level paint) — EXCEPT no-fallback segments (the pelvis), which
- *  drop to the part's BARE key when the part is painted (torso paint must
- *  never duplicate onto the pelvis socket). Anatomy blobs riding joint bones
- *  keep their plain part — see paintTargetForInstance. */
+ *  folds part-level paint) — EXCEPT no-fallback segments, which drop to the
+ *  part's BARE key when the part is painted. (The set is empty since
+ *  PELVISMESH-0606 — the pelvis, its only member, became a real part with
+ *  its own unwrap.) Anatomy blobs riding joint bones keep their plain part —
+ *  see paintTargetForInstance. */
 export function instancePaintTexKey(
   cartKey: string,
   skin: string,

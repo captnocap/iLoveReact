@@ -42,6 +42,26 @@ export type BodyDocument = {
   metadata?: { title?: string; createdAt?: number };
 };
 
+/** PELVISMESH-0606, the V20 fallback: documents saved before the pelvis was
+ *  a real part carry no `parts.pelvis` — back then the pelvis WORE the torso
+ *  (the whole torso globe scaled down onto the pelvis bone), so the
+ *  deterministic mapping is a COPY of the torso's sculpt + profile. Old saves
+ *  render exactly as they always did; the copy diverges the moment the user
+ *  sculpts the pelvis. Pure; returns the SAME reference when the document
+ *  already carries a pelvis (new saves are untouched). */
+export function partsWithPelvisFallback(parts: BodyDocument['parts']): BodyDocument['parts'] {
+  if (parts.pelvis) return parts;
+  const torso = parts.torso;
+  return {
+    ...parts,
+    pelvis: {
+      sculpt: (torso?.sculpt ?? []).slice(),
+      layers: [],
+      profile: torso?.profile ? torso.profile.slice() : defaultProfile('pelvis'),
+    },
+  };
+}
+
 /** Set/replace/remove one target's painted overlay — pure, additive (the
  *  /cutout save path; everything else on the document is untouched). */
 export function applyBodyPaint(doc: BodyDocument, target: PaintTargetId, overlay: PaintedOverlay | null): BodyDocument {
@@ -125,6 +145,10 @@ export function parseBody(text: string): BodyDocument | null {
       else delete doc.paint;
     }
   }
+  // PELVISMESH-0606: pre-split documents gain the deterministic pelvis copy
+  // at the parse door (stream consumers normalize at their own read sites —
+  // draftFromDocument, bakeBodyDocument, the cutout preview).
+  doc.parts = partsWithPelvisFallback(doc.parts);
   return doc as BodyDocument;
 }
 

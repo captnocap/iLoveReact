@@ -61,7 +61,7 @@ export {
 } from './hed';
 export type { HedDocument, HedLayer, HedShape, HedAnimation, FaceStyle } from './hed';
 
-export { applyBodyPaint, buildBody, parseBody, serializeBody } from './body';
+export { applyBodyPaint, buildBody, parseBody, partsWithPelvisFallback, serializeBody } from './body';
 export type { BodyDocument } from './body';
 
 export {

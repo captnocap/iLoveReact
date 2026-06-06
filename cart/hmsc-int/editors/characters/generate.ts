@@ -113,6 +113,9 @@ export function fitProfilesUnderClothing(profiles: Record<PartId, number[]>, clo
   const F = GENERATE_TUNING.clothingFit;
   const shrink: Partial<Record<PartId, number>> = {
     torso: clothing === 'dress' ? F.torsoDress : F.torso,
+    // the pelvis shrinks with the torso — bottoms' seat boxes must cover it
+    // exactly like the old socket they replaced (PELVISMESH-0606)
+    pelvis: clothing === 'dress' ? F.torsoDress : F.torso,
     foot: F.foot,
   };
   const out = { ...profiles };
@@ -167,10 +170,15 @@ export function generatedBodyGrids(shapeId: BodyShapeId, rand: () => number): Re
   stampGrid(grids.foot, 0.5, 0.75, 0.2, 0.08, -0.07);
 
   for (const id of PART_IDS) {
+    if (id === 'pelvis') continue; // copied from the torso below — zero draws
     for (let i = 0; i < grids[id].length; i++) {
       grids[id][i] = clamp(grids[id][i] + (rand() - 0.5) * G.grain, -G.clamp, G.clamp);
     }
   }
+  // PELVISMESH-0606: a generated pelvis IS the generated torso's detail —
+  // exactly what the old socket displayed — and consumes no rand draws, so
+  // pre-split seeds keep producing the same citizens.
+  grids.pelvis = grids.torso.slice();
   return grids;
 }
 
@@ -207,10 +215,14 @@ export function generateCharacterDraft(seed: number): CharacterDraft {
   const bottoms = pick(rand, bottomsPool);
 
   const face = generateFace(seed, { style: faceStyle });
-  const profiles = fitProfilesUnderClothing(
-    Object.fromEntries(PART_IDS.map((id) => [id, generatedProfile(id, shape, rand)])) as Record<PartId, number[]>,
-    clothing,
-  );
+  // PELVISMESH-0606: the pelvis profile is the generated torso's, copied —
+  // the silhouette the old socket wore, with zero extra rand draws (pre-split
+  // seeds keep their look; the per-sample wobble stream is untouched).
+  const generatedProfiles = Object.fromEntries(
+    PART_IDS.filter((id) => id !== 'pelvis').map((id) => [id, generatedProfile(id, shape, rand)]),
+  ) as Record<PartId, number[]>;
+  generatedProfiles.pelvis = generatedProfiles.torso.slice();
+  const profiles = fitProfilesUnderClothing(generatedProfiles, clothing);
   const grids = generatedBodyGrids(shape, rand);
   grids.head = face.sculpt.map((b) => b / 127);
 

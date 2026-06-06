@@ -15,7 +15,7 @@
 import {
   HED_GRID_H, HED_GRID_W, buildHed, type HedDocument,
 } from '../../game/figure/hed';
-import { buildBody, type BodyDocument } from '../../game/figure/body';
+import { buildBody, partsWithPelvisFallback, type BodyDocument } from '../../game/figure/body';
 import {
   DEFAULT_BOTTOMS, PART_IDS, PROFILE_N, defaultProfile,
   type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
@@ -155,16 +155,19 @@ export function draftToDocument(draft: CharacterDraft, title?: string): BodyDocu
 export function draftFromDocument(doc: BodyDocument): CharacterDraft {
   const clothing = doc.clothing ?? DRAFT_DEFAULTS.clothing;
   const headLayers = doc.parts.head?.layers ?? [];
+  // PELVISMESH-0606: stream documents bypass parseBody, so the load path
+  // normalizes itself — a pre-split doc's pelvis is the torso copy.
+  const parts = partsWithPelvisFallback(doc.parts);
   return {
     skin: doc.skin,
     amount: doc.amount,
     headScaleY: doc.headScaleY,
     grids: perPart((id) => {
-      const sculpt = doc.parts[id]?.sculpt ?? [];
+      const sculpt = parts[id]?.sculpt ?? [];
       return sculpt.length === GRID_CELLS ? sculpt.map((b) => b / 127) : emptyGrid();
     }),
     profiles: perPart((id) => {
-      const profile = doc.parts[id]?.profile;
+      const profile = parts[id]?.profile;
       return profile && profile.length === PROFILE_N ? profile.slice() : defaultProfile(id);
     }),
     regions: perPart(() => ({})),

@@ -9,7 +9,7 @@ import {
   HED_ANIM_FRAMES, HED_GRID_H, HED_GRID_W, animateHed, buildHed, generateFace,
   hedDepthGrid, parseHed, serializeHed,
 } from './hed';
-import { applyBodyPaint, buildBody, parseBody, serializeBody } from './body';
+import { applyBodyPaint, buildBody, parseBody, partsWithPelvisFallback, serializeBody } from './body';
 import {
   PAINT_TARGET_BY_BONE, PAINT_TARGET_IDS, PAINT_TARGET_NO_PART_FALLBACK, PAINT_TARGET_PART,
   PART_IDS, PROFILE_N, defaultProfile, paintTargetForInstance, paintTargetPart, type PartId,
@@ -142,7 +142,7 @@ test('painted overlays are additive: pre-paint documents byte-unaffected, apply 
   assertEqual(JSON.stringify(cleared), JSON.stringify(doc), 'paint → unpaint is a perfect round trip');
 });
 
-test('LIMBPAINT: segments resolve per bone, the pelvis never inherits, documents round-trip segment paint', () => {
+test('LIMBPAINT: segments resolve per bone, documents round-trip segment paint', () => {
   // the user's ruling: "left upper arm, lower arm, upper leg, lower leg"
   assertEqual(paintTargetForInstance('pipe', 'lUpperArm'), 'lUpperArm', 'left upper arm is its own target');
   assertEqual(paintTargetForInstance('pipe', 'lForearm'), 'lLowerArm', 'the forearm is the lower arm');
@@ -150,7 +150,10 @@ test('LIMBPAINT: segments resolve per bone, the pelvis never inherits, documents
   assertEqual(paintTargetForInstance('pipe', 'rShin'), 'rLowerLeg', 'right shin is the right lower leg');
   assertEqual(paintTargetForInstance('hand', 'rHand'), 'rHand', 'hands split left/right');
   assertEqual(paintTargetForInstance('foot', 'lFoot'), 'lFoot', 'feet split left/right');
-  assertEqual(paintTargetForInstance('torso', 'pelvis'), 'pelvis', 'the pelvis socket is its own target');
+  // PELVISMESH-0606: the pelvis is a real PART — its instance resolves
+  // through the part path, and a stray pelvis bone on the torso is just torso
+  assertEqual(paintTargetForInstance('pelvis', 'pelvis'), 'pelvis', 'the pelvis part is its own target');
+  assertEqual(paintTargetForInstance('torso', 'pelvis'), 'torso', 'no pelvis segment exists anymore — the torso stays torso');
   assertEqual(paintTargetForInstance('torso', 'torso'), 'torso', 'the torso instance stays the torso');
   assertEqual(paintTargetForInstance('hand', 'lUpperArm'), 'hand', 'a joint blob on a limb bone keeps its plain part (the part guard)');
   assertEqual(paintTargetForInstance('pipe', undefined), 'pipe', 'boneless instances keep the part');
@@ -162,7 +165,8 @@ test('LIMBPAINT: segments resolve per bone, the pelvis never inherits, documents
   }
   assertEqual(paintTargetPart('lUpperLeg'), 'pipe', 'segments paint the pipe unwrap');
   assertEqual(paintTargetPart('torso'), 'torso', 'parts are their own unwrap');
-  assert(PAINT_TARGET_NO_PART_FALLBACK.has('pelvis'), 'the pelvis is the no-fallback segment (two-sets-of-tits rule)');
+  assertEqual(paintTargetPart('pelvis'), 'pelvis', 'the pelvis paints its OWN unwrap (PELVISMESH-0606)');
+  assertEqual(PAINT_TARGET_NO_PART_FALLBACK.size, 0, 'the no-fallback set emptied — the pelvis mesh split killed the cascade structurally');
   assert(!PAINT_TARGET_NO_PART_FALLBACK.has('lLowerArm'), 'limbs keep the all-limbs fallback');
 
   // segment paint rides the document exactly like part paint
@@ -176,6 +180,47 @@ test('LIMBPAINT: segments resolve per bone, the pelvis never inherits, documents
   assertEqual(back?.paint?.lLowerArm?.stamp, 7, 'a segment overlay round-trips');
   assertEqual(back?.paint?.pelvis?.stamp, 8, 'the pelvis overlay round-trips');
   assertEqual(JSON.stringify(parseBody(serializeBody(doc))), JSON.stringify(doc), 'pre-segment documents stay byte-unaffected');
+});
+
+test('PELVISMESH-0606: the pelvis is a real part; old documents map torso → pelvis deterministically', () => {
+  // the roster: the pelvis is a first-class part everywhere parts enumerate
+  assert((PART_IDS as readonly string[]).includes('pelvis'), 'the pelvis is in the part roster');
+  assertEqual(PAINT_TARGET_IDS.filter((id) => id === 'pelvis').length, 1, 'exactly one pelvis target (part, not segment)');
+  assertEqual(defaultProfile('pelvis').length, PROFILE_N, 'the pelvis carries a sculptable outline');
+
+  const sculpts = {} as Record<PartId, number[]>;
+  const profiles = {} as Record<PartId, number[]>;
+  for (const id of PART_IDS) { sculpts[id] = [0.25, -0.5]; profiles[id] = defaultProfile(id); }
+  const doc = buildBody({ skin: '#caa07a', amount: 0.35, headScaleY: 1.2, sculpts, profiles, headLayers: [] });
+  assert(!!doc.parts.pelvis, 'new saves carry the pelvis part');
+  assertEqual(JSON.stringify(partsWithPelvisFallback(doc.parts)), JSON.stringify(doc.parts), 'docs with a pelvis pass through untouched');
+  assert(partsWithPelvisFallback(doc.parts) === doc.parts, 'untouched means the SAME reference (no re-bake churn)');
+
+  // a PRE-SPLIT document (no parts.pelvis): the old pelvis socket wore the
+  // torso, so the deterministic mapping is a torso copy — old saves render
+  // exactly as they always did
+  const old: any = JSON.parse(serializeBody(doc));
+  old.parts.torso.sculpt = [9, -9, 3];
+  delete old.parts.pelvis;
+  const parsed = parseBody(JSON.stringify(old));
+  assert(parsed !== null, 'pre-split documents keep parsing (V20)');
+  assertEqual(parsed!.parts.pelvis.sculpt.join(','), '9,-9,3', 'the pelvis inherits the torso sculpt');
+  assertEqual(parsed!.parts.pelvis.profile?.join(','), old.parts.torso.profile.join(','), 'the pelvis inherits the torso outline');
+  assertEqual(parsed!.parts.pelvis.layers.length, 0, 'no face layers ride the pelvis');
+  // the copy is a COPY — sculpting one must not echo into the other
+  parsed!.parts.pelvis.sculpt[0] = 99;
+  assertEqual(parsed!.parts.torso.sculpt[0], 9, 'pelvis and torso are separate arrays after the split');
+
+  // old pelvis SEGMENT paint maps 1:1 onto the new mesh: the target id is
+  // unchanged and its unwrap dims are the same 512×256 contract every part
+  // shares, so a saved overlay lands on the pelvis mesh exactly where it
+  // landed on the socket
+  const overlay: PaintedOverlay = { version: 1, stamp: 11, cols: 4, rows: 2, layers: [{ color: '#ff0000', cells: [1] }] };
+  const oldPainted: any = JSON.parse(serializeBody(applyBodyPaint(doc, 'pelvis', overlay)));
+  delete oldPainted.parts.pelvis;
+  const reparsed = parseBody(JSON.stringify(oldPainted));
+  assertEqual(reparsed?.paint?.pelvis?.stamp, 11, 'pre-split pelvis paint survives onto the pelvis part');
+  assertEqual(paintTargetPart('pelvis'), 'pelvis', 'and resolves onto the pelvis mesh, not the torso');
 });
 
 finish('game/figure/documents');

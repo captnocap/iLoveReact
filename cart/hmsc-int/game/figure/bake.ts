@@ -21,7 +21,7 @@ import {
   BODY_SHAPES, PART_IDS, PART_LOD, PART_PRESETS, defaultProfile,
   type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
 } from './shapes';
-import type { BodyDocument } from './body';
+import { partsWithPelvisFallback, type BodyDocument } from './body';
 import { buildRigFrame, type BodyAnchor, type BodyHitbox } from './rig';
 import type { ClothingInstance } from './clothing';
 import type { Bones } from './skeleton';
@@ -168,7 +168,9 @@ export function bakeBodyDocument(doc: BodyDocument): BakedFigure {
     clothingSkin: doc.clothingSkin,
     accessories: doc.clothingAccessories,
     bottoms: doc.bottoms,
-  }, { sculpts: doc.parts, title: doc.metadata?.title });
+    // PELVISMESH-0606: pre-split documents bake the pelvis as the torso copy
+    // (stream docs bypass parseBody, so the bake normalizes itself)
+  }, { sculpts: partsWithPelvisFallback(doc.parts), title: doc.metadata?.title });
 }
 
 /** Seed → figure, deterministically — the population path (variety preserved:

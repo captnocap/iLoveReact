@@ -129,6 +129,51 @@ features); the painted overlay is a separate, additive color-only channel.
   preview paths render them; the compile-side composite belongs to the bake
   capture when texture baking lands. Surfaced, not guessed.
 
+## PELVISMESH-0606 (2026-06-06, USER ASK req_0022): the pelvis is a real mesh
+
+"i thought i asked someone earlier to make the torso and the pelvis not the
+same mesh but it seems to be the same and i dont see a pelvis mesh to edit" —
+LIMBPAINT had split the pelvis as a PAINT SEGMENT only; the geometry stayed
+the torso worn by an anatomy socket. Now the GEOMETRY splits:
+
+- `shapes.ts`: `'pelvis'` is a **PartId** (roster, presets, LOD, regions) and
+  no longer a LimbPaintTargetId. The string `'pelvis'` is still a valid
+  PaintTargetId, so old `paint.pelvis` overlays keep meaning — same 512×256
+  unwrap contract, now sampled by the pelvis's own mesh 1:1. The pelvis
+  PRESET is the torso preset verbatim (the socket wore the whole torso globe
+  scaled down — a fresh pelvis looks exactly like it always did).
+- `assembly.ts`: the pelvis is an ASSEMBLY instance on the pelvis bone with
+  the dead pelvisSocket's exact sizing (bone scale ×1.18, thickness hip
+  ×1.18). Being assembly (not anatomy) makes it grab-sculptable in figure
+  view and selectable by grab, like every part.
+- `body.ts` `partsWithPelvisFallback`: THE deterministic old-doc mapping —
+  a pre-split document's pelvis is a COPY of its torso sculpt + profile
+  (what the socket displayed). Called at parseBody, draftFromDocument,
+  bakeBodyDocument, and the cutout ModelPreview (stream docs bypass
+  parseBody). New saves carry a real `parts.pelvis` (buildBody loops
+  PART_IDS).
+- Paint plumbing: `PAINT_TARGET_NO_PART_FALLBACK` is now EMPTY (the bare-key
+  seam stays for future no-fallback segments; the bare-torso captures in the
+  editors died — nothing samples them). The two-sets-of-tits cascade is dead
+  STRUCTURALLY: pelvis paint lives on the pelvis unwrap.
+- `generate.ts`: a generated pelvis copies the generated torso's profile +
+  detail grid with ZERO extra rand draws — pre-split seeds keep producing
+  the same citizens.
+
+**Deliberate couplings (checked, not incidental):**
+- **rig/bones**: no skeleton change — the pelvis bone always existed; the
+  part now rides it. 25 bones, 27 assembly instances (was 26), 8 anatomy
+  sockets (was 9).
+- **damage zones**: pelvis bone stays in the `torso` zone (V2's six-zone
+  vocabulary untouched — splitting the ZONE would be constitution-grade and
+  is NOT done here; surfaced in case the user wants a 'pelvis' damage zone).
+- **clothing**: bottoms were ALREADY pelvis-bone-driven (seat/crotch boxes,
+  skirt/dress cones ride `bones.pelvis`); the part split moves no garment.
+- **hitboxes**: per-bone, unchanged (the pelvis bone always had its oriented
+  box).
+- **the bra-stamp note from LIMBPAINT is MOOT**: the underwear texture
+  stamps were deleted by ruling before this split landed.
+
 ## LIMBPAINT (2026-06-05, USER RULING): per-segment paint targets
 
 "can we update it so we can say this is a left upper arm, lower arm, upper
