@@ -67,7 +67,7 @@ export const GRAB_TUNING = Object.freeze({
    *  carved bends — the radial lift stops clearing a concave skin), plus
    *  mesh tint + translucency (texture alpha carries the lines/dots) */
   grid: { lift: 0.018, color: '#bfe6ff', opacity: 0.92 },
-  colors: { hover: '#38bdf8', raise: '#38bdf8', carve: '#f97316' },
+  colors: { hover: '#38bdf8', raise: '#38bdf8', carve: '#f97316', smooth: '#34d399' },
 });
 
 /** The grid overlay's texture key — ONE static bake (GRAB_GRID_WGSL below). */

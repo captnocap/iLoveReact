@@ -178,3 +178,61 @@ untouched, it's the clothing conversation. This supersedes the
 bra-shadows-the-pelvis seam in the figure CAPTURE (no stamps, no shadow).
 The skinTextureKey clothing/bottoms/bodyShape components stay for key
 stability (wardrobe changes re-bake identical skins — harmless).
+
+## MESHSMOOTH-0606 (2026-06-06, USER ASK req_0024): the smooth verb + the matrix data door
+
+"im wondering if we can either try and make a tool to smooth out my own
+changes to something since claude clearly can round the mesh properly but
+cant shape it. i shaped it but its very low poly effect which i think if we
+get the matrix data we can use it to edit by hand and get a few samples?"
+— THEY shape (intent), the MACHINE rounds (math).
+
+**The honest finding first — MEASURED, the user's own shaped torso.** The
+faceted ridges in the user's screenshot are ROUGHNESS-bound, not
+resolution-bound. On the same 48×24 grid: the shaped torso's
+|cell − 3×3-neighborhood mean| averaged **0.154** (201 cells over 0.3,
+single-cell spikes to 1.2, 656/1152 cells active, values saturating ±1);
+the parts that read smooth average **~0.007**. So 48×24 + the Globe's
+bilinear sample CAN read round — when neighbor deltas are small. Relaxation
+attacks exactly the measured quantity. Resolution stays a SECONDARY ceiling,
+surfaced as an option, not papered over: bilinear creases exist at cell
+scale on extreme closeups, and a ±1-saturated plateau cannot keep its full
+height while its edge rounds. If post-smooth quality ever stalls, the knob
+is the grid density (HED_GRID_W/H — a by-addition document version, cols/
+rows already ride every grid file).
+
+**The smooth verb** (`smoothKit.ts`, pure math; both surfaces wire it):
+- `relaxGrid` — whole-part neighborhood relaxation; **smooth part** chip
+  applies it at the strength knob × **smooth passes** knob (P2:
+  SMOOTH_TUNING, twig-persisted `smoothIterations` shared by /characters
+  and the workbench stage). Status shows roughness before → after.
+- `relaxStamp` — the **smooth** brush mode (joins raise/carve/flatten):
+  paint it on the unwrap canvas (per-dab relax under the brush ellipse,
+  same falloff² shape every stamp uses, mirror twin honored) or grab-drag
+  it on the 3D mesh (drag distance = smoothing dose at the grabbed cell,
+  recomputed from the drag base — never compounding). Marker/hover show
+  the smooth green (#34d399).
+- Topology: x WRAPS (longitude), y clamps (poles) — a seam spike relaxes
+  exactly like an interior one (pinned in smooth.test.ts).
+- One truth: every smooth lands through setPartGrid + paint-texture upload,
+  undoable (ctrl+z), session-noted — a smooth is just another grid edit.
+- Silhouette law (P4): relaxation is a convex combination — the result
+  never leaves the input's [min, max]; pulled shapes keep their reach.
+
+**The matrix data door** (`gridData.ts`): the per-part deformation grid as
+hand-editable data. `save sample` writes
+`cart/hmsc-int/sessions/sculpt-grids/<slug>.grid.json` (V20 by-addition —
+collisions append -2/-3, never overwrite); each sample's chip reapplies it
+(exact round-trip, pinned cell-=== in smooth.test.ts). The format, so any
+lane can be handed a grid file and asked to round it numerically:
+
+```json
+{ "kind": "sculpt-grid", "version": 1, "part": "torso",
+  "cols": 48, "rows": 24, "label": "...", "savedAt": "...",
+  "values": [ [48 floats] × 24 rows ] }
+```
+
+values[y][x]: y north→south, x wraps (longitude, seam at u=0); signed −1
+(carve) .. +1 (raise), the displacement the Globe scales by `amount`.
+Hand-typed overshoot clamps on import. Samples apply to the SELECTED part
+regardless of which part authored them (the file records its origin part).

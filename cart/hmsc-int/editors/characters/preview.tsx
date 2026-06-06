@@ -145,18 +145,20 @@ export type GrabMarkerInfo = {
   grabRadius: number;
   /** the influence shell: how much surface the drag's stamp will move */
   stampWorldRadius: number;
-  /** hover = "you can grab here"; raise/carve = mid-drag direction */
-  state: 'hover' | 'raise' | 'carve';
+  /** hover = "you can grab here"; raise/carve = mid-drag direction;
+   *  smooth = the relax brush mid-drag (MESHSMOOTH-0606) */
+  state: 'hover' | 'raise' | 'carve' | 'smooth';
 };
 
 /** The "you can grab HERE" handle: a solid dot snapped to the grid cell under
  *  the cursor + a translucent shell showing the stamp's reach. Mid-drag it
- *  takes the raise/carve color (the same blue/orange the paint canvas speaks). */
+ *  takes the raise/carve color (the same blue/orange the paint canvas speaks),
+ *  or the smooth green while relaxing. */
 export const GrabMarker = memo(function GrabMarker(props: { marker: GrabMarkerInfo | null }) {
   const m = props.marker;
   if (!m) return null;
   const T = GRAB_TUNING;
-  const color = m.state === 'carve' ? T.colors.carve : m.state === 'raise' ? T.colors.raise : T.colors.hover;
+  const color = m.state === 'carve' ? T.colors.carve : m.state === 'raise' ? T.colors.raise : m.state === 'smooth' ? T.colors.smooth : T.colors.hover;
   return (
     <>
       <Scene3D.Mesh
@@ -492,10 +494,6 @@ export function CharacterEditorCaptures(props: {
    *  under their stamps. The route folds the stamps into the texture keys
    *  (content-addressing), so paintless renders are byte-identical. */
   paint?: FigurePaint;
-  /** LIMBPAINT: the paint-free key per part — the pelvis socket samples the
-   *  torso's bare surface when the torso is painted (no-fallback rule), so
-   *  that surface must mount BESIDE the painted one. */
-  bareSkinTexKeyFor?: (id: PartId) => string;
 }) {
   const surfaceStyle = useMemo(
     () => ({ position: 'absolute' as const, left: -99999, top: 0, width: UNWRAP_W, height: UNWRAP_H }),
@@ -515,15 +513,8 @@ export function CharacterEditorCaptures(props: {
           </Box>
         </StaticSurface>
       ))}
-      {/* LIMBPAINT no-fallback support: the torso's BARE surface (plain
-          skin) mounts beside the painted one whenever the torso is painted —
-          the pelvis socket samples it instead of inheriting the painting
-          (the two-sets-of-tits rule) */}
-      {props.paint?.torso && props.bareSkinTexKeyFor ? (
-        <StaticSurface staticKey={props.bareSkinTexKeyFor('torso')} style={surfaceStyle}>
-          <Box style={{ width: UNWRAP_W, height: UNWRAP_H, backgroundColor: props.skin }} />
-        </StaticSurface>
-      ) : null}
+      {/* (the bare-torso capture died with PELVISMESH-0606 — the pelvis has
+          its own part surface now, so nothing samples a bare twin anymore) */}
       {/* LIMBPAINT: one capture per painted SEGMENT (the per-instance keys
           PartMeshes resolves to via instancePaintTexKey, cartKey 'chr') */}
       {props.paint

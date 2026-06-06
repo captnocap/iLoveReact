@@ -47,6 +47,9 @@ import {
   type GrabCloud, type GrabHit, type GrabInstance, type ScreenAxis,
 } from '../../characters/grabKit';
 import { useSculptCamera } from '../../sculptCamera';
+// MESHSMOOTH-0606: the relax verb + the matrix data door (Route.tsx parity)
+import { SMOOTH_TUNING, gridRoughness, relaxGrid, relaxStamp } from '../../characters/smoothKit';
+import { fileToGrid, gridToFile, listGridSamples, readGridSample, saveGridSample, type GridSampleEntry } from '../../characters/gridData';
 import type { CharacterStore, CharacterLens } from './store';
 import { CharacterPaintLens } from './PaintLens';
 
@@ -91,11 +94,16 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
 
   const paintingRef = useRef(false);
   const strokeEngineRef = useRef<ReturnType<typeof PAINT.createStrokeEngine> | null>(null);
+  // MESHSMOOTH-0606: the smooth brush's working stroke (Route.tsx parity)
+  const smoothStrokeRef = useRef<null | { base: number[]; work: number[]; lastSync: number }>(null);
+  const [samples, setSamples] = useState<GridSampleEntry[]>(() => {
+    try { return listGridSamples(); } catch { return []; }
+  });
   const profileDraftRef = useRef<number[] | null>(null);
   const canvasRect = useRef({ x: 0, y: 0, width: EDITOR_W, height: EDITOR_H });
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const [grabHover, setGrabHover] = useState<
-    { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' } | null
+    { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' | 'smooth' } | null
   >(null);
   const grabCloudsRef = useRef<{ sig: unknown[]; clouds: GrabCloud[]; instances: GrabInstance[] } | null>(null);
   const grabRef = useRef<null | {
@@ -236,19 +244,54 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     if (!bytes || bytes.length < PAINT_W * PAINT_H) return;
     s.setPartGrid(selPart, gridFromBytes(bytes));
   };
+  // MESHSMOOTH-0606: a smooth dab relaxes the GRID under the brush (Route.tsx
+  // parity — working copy per dab, mesh sync throttled, one undo on release)
+  const smoothDab = (sx: number, sy: number) => {
+    const st = smoothStrokeRef.current;
+    if (!st) return;
+    const r = canvasRect.current;
+    const cx = clamp((sx - r.x) / r.width, 0, 1);
+    const cy = clamp((sy - r.y) / r.height, 0, 1);
+    const { rx, ry } = stampRadiusUv(v.brush, PAINT_W);
+    st.work = relaxStamp(st.work, cx, cy, rx, ry, v.strength, 1, v.mirror);
+    if (Date.now() - st.lastSync >= GRAB_TUNING.liveSyncMs) {
+      st.lastSync = Date.now();
+      s.setPartGrid(selPart, st.work);
+    }
+  };
+
   const onPaintDown = (e: any) => {
     paintingRef.current = true;
+    if (v.sculptMode === 'smooth') {
+      smoothStrokeRef.current = { base: s.draft.grids[selPart].slice(), work: s.draft.grids[selPart].slice(), lastSync: 0 };
+      smoothDab(Number(e?.x ?? 0), Number(e?.y ?? 0));
+      return;
+    }
     strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: v.brush, mirrorAxisX: v.mirror ? PAINT_W / 2 : null });
     strokeEngineRef.current.begin();
     dab(Number(e?.x ?? 0), Number(e?.y ?? 0), Number(e?.pressure) || undefined);
   };
   const onPaintMove = (e: any) => {
     if (!paintingRef.current) return;
+    if (v.sculptMode === 'smooth') { smoothDab(Number(e?.x ?? 0), Number(e?.y ?? 0)); return; }
     dab(Number(e?.x ?? 0), Number(e?.y ?? 0), Number(e?.pressure) || undefined);
   };
   const onPaintUp = () => {
     if (!paintingRef.current) return;
     paintingRef.current = false;
+    const smooth = smoothStrokeRef.current;
+    if (smooth) {
+      smoothStrokeRef.current = null;
+      s.history.commit(() => {
+        const pre = s.snapDraft();
+        pre.grids[selPart] = smooth.base.slice();
+        return pre;
+      });
+      s.setPartGrid(selPart, smooth.work);
+      uploadGrid(selPart, smooth.work); // one-truth: the paint texture carries it
+      s.note(`smooth stroke · ${v.brush}px · ${selPart}`);
+      return;
+    }
     strokeEngineRef.current?.end();
     strokeEngineRef.current = null;
     s.history.commit(s.snapDraft); // the draft mutates HERE (release readback)
@@ -277,6 +320,40 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     paints[selPart].paint.clear(NEUTRAL);
     s.setPartGrid(selPart, s.draft.grids[selPart].map(() => 0));
     s.note(`clear sculpt · ${selPart}`);
+  };
+
+  // ── MESHSMOOTH-0606: smooth part + the matrix data door (Route.tsx parity) ──
+  const smoothPart = () => {
+    s.history.commit(s.snapDraft);
+    const before = gridRoughness(s.draft.grids[selPart]);
+    const g = relaxGrid(s.draft.grids[selPart], v.strength, v.smoothIterations);
+    uploadGrid(selPart, g);
+    s.setPartGrid(selPart, g);
+    s.note(`smooth part · ${selPart} · s${v.strength.toFixed(1)} ×${v.smoothIterations}`);
+    s.setStatus(`${selPart} smoothed — roughness ${before.mean.toFixed(3)} → ${gridRoughness(g).mean.toFixed(3)} (ctrl+z undoes)`);
+  };
+  const saveSample = () => {
+    try {
+      const saved = saveGridSample(gridToFile(selPart, s.draft.grids[selPart], `${s.draftName} ${selPart}`));
+      setSamples(listGridSamples());
+      s.note(`grid sample saved · ${saved.name} · ${selPart}`);
+      s.setStatus(`sample → ${saved.path} — hand-edit the rows, then press its chip to reapply`);
+    } catch (error: any) {
+      s.setStatus(`sample save failed: ${error?.message ?? error}`);
+    }
+  };
+  const applySample = (name: string) => {
+    try {
+      const file = readGridSample(name);
+      const g = fileToGrid(file);
+      s.history.commit(s.snapDraft);
+      uploadGrid(selPart, g);
+      s.setPartGrid(selPart, g);
+      s.note(`grid sample applied · ${name} → ${selPart}`);
+      s.setStatus(`${name} applied to ${selPart} (authored on ${file.part}; ctrl+z undoes)`);
+    } catch (error: any) {
+      s.setStatus(`sample apply failed: ${error?.message ?? error}`);
+    }
   };
 
   // ── the outline lathe (Route.tsx:490-536 — latch previews, commit on up) ──
@@ -372,16 +449,24 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       startX: Number(e?.x ?? 0), startY: Number(e?.y ?? 0), delta: 0, rx, ry,
       lastSync: 0, timer: null, applied: false,
     };
-    setGrabHover({ part: hit.part, instanceIndex: hit.instanceIndex, gx: hit.gx, gy: hit.gy, cu: hit.cu, cv: hit.cv, grabRadius: hit.grabRadius, state: 'raise' });
+    setGrabHover({ part: hit.part, instanceIndex: hit.instanceIndex, gx: hit.gx, gy: hit.gy, cu: hit.cu, cv: hit.cv, grabRadius: hit.grabRadius, state: v.sculptMode === 'smooth' ? 'smooth' : 'raise' });
   };
+
+  // MESHSMOOTH-0606: smooth mode turns a drag's distance into a smoothing
+  // dose at the grabbed cell — recomputed from base, never compounding
+  const smoothDose = (delta: number) => Math.min(1, Math.abs(delta) * SMOOTH_TUNING.dragDoseFactor);
+  const grabbedGrid = (g: NonNullable<typeof grabRef.current>) =>
+    v.sculptMode === 'smooth'
+      ? relaxStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, smoothDose(g.delta), SMOOTH_TUNING.drag.iterations, v.mirror)
+      : applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, v.mirror);
 
   const applyGrabLive = () => {
     const g = grabRef.current;
     if (!g) return;
     g.lastSync = Date.now();
     g.applied = true;
-    s.setPartGrid(g.hit.part, applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, v.mirror));
-    setGrabHover((cur) => (cur ? { ...cur, state: g.delta < 0 ? 'carve' : 'raise' } : cur));
+    s.setPartGrid(g.hit.part, grabbedGrid(g));
+    setGrabHover((cur) => (cur ? { ...cur, state: v.sculptMode === 'smooth' ? 'smooth' : g.delta < 0 ? 'carve' : 'raise' } : cur));
   };
 
   const grabMove = (e: any) => {
@@ -416,11 +501,13 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         pre.grids[g.hit.part] = g.baseGrid.slice();
         return pre;
       });
-      const final = applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, v.mirror);
+      const final = grabbedGrid(g);
       s.setPartGrid(g.hit.part, final);
       // ONE-TRUTH compose law: the paint texture carries the dragged grid
       uploadGrid(g.hit.part, final);
-      s.note(`grab drag · ${g.hit.part} · cell ${g.hit.gx},${g.hit.gy} · ${g.delta > 0 ? 'raise' : 'carve'} ${Math.abs(g.delta).toFixed(2)}`);
+      s.note(v.sculptMode === 'smooth'
+        ? `smooth drag · ${g.hit.part} · cell ${g.hit.gx},${g.hit.gy} · dose ${smoothDose(g.delta).toFixed(2)}`
+        : `grab drag · ${g.hit.part} · cell ${g.hit.gx},${g.hit.gy} · ${g.delta > 0 ? 'raise' : 'carve'} ${Math.abs(g.delta).toFixed(2)}`);
     }
     setGrabHover((cur) => (cur ? { ...cur, state: 'hover' } : cur));
   };
@@ -510,17 +597,30 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
             <Chip label="raise" active={v.sculptMode === 'raise'} onPress={() => s.setSculptMode('raise')} />
             <Chip label="carve in" active={v.sculptMode === 'lower'} color="#ff9445" onPress={() => s.setSculptMode('lower')} />
             <Chip label="flatten" active={v.sculptMode === 'flatten'} color="#94a3b8" onPress={() => s.setSculptMode('flatten')} />
+            {/* MESHSMOOTH-0606: the relax brush — paint OR grab-drag it */}
+            <Chip label="smooth" active={v.sculptMode === 'smooth'} color="#34d399" onPress={() => s.setSculptMode('smooth')} />
           </Row>
           <Row style={{ gap: 8, alignItems: 'center' }}>
             <Chip label="fill" onPress={fillAll} />
             <Chip label="soften" onPress={soften} />
+            <Chip label="smooth part" color="#34d399" onPress={smoothPart} />
             <Chip label="mirror" active={v.mirror} onPress={() => s.setMirror(!v.mirror)} />
             <Chip label="clear" onPress={clearStrokes} />
+          </Row>
+          {/* the matrix data door: shaped grids as hand-editable files */}
+          <Row style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Chip label="save sample" color="good" onPress={saveSample} />
+            {samples.map((sample) => (
+              <Chip key={sample.name} label={sample.name} color="cyan" onPress={() => applySample(sample.name)} />
+            ))}
           </Row>
         </>
       ) : null}
       <Knob label="brush size" value={v.brush} spec={TUNE.knobs.brush} onChange={s.setBrush} />
       <Knob label="strength" value={v.strength} spec={TUNE.knobs.strength} onChange={s.setStrength} />
+      {isHead || v.sculptTab === 'detail' ? (
+        <Knob label="smooth passes" value={v.smoothIterations} spec={SMOOTH_TUNING.knobs.iterations} onChange={s.setSmoothIterations} />
+      ) : null}
     </Col>
   );
 
@@ -624,7 +724,6 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
         bodyShape={draft.bodyShape}
         parts={PART_IDS}
         paint={draft.paint}
-        bareSkinTexKeyFor={(id) => skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape })}
       />
       <GrabGridCapture hover={grabHover} mirror={v.mirror} />
     </Col>

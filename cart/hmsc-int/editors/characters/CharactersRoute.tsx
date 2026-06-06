@@ -71,6 +71,10 @@ import {
   type GrabCloud, type GrabHit, type GrabInstance, type ScreenAxis,
 } from './grabKit';
 import { ANIM_PRESETS, DEFAULT_ANIM_SCRIPT } from './animPresets';
+// MESHSMOOTH-0606: the user shapes, the machine rounds — relax verb + the
+// matrix data door (grid export/import + named samples)
+import { SMOOTH_TUNING, gridRoughness, relaxGrid, relaxStamp } from './smoothKit';
+import { fileToGrid, gridToFile, listGridSamples, readGridSample, saveGridSample, type GridSampleEntry } from './gridData';
 // MODELPAINT-0605: the deep-link mailbox into /cutout's model targets
 import { setPendingModelTarget } from '../cutout/models';
 
@@ -112,6 +116,12 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const [mirror, setMirror] = useRouteTwigState('/characters', 'mirror', true);
   const [brush, setBrush] = useRouteTwigState('/characters', 'brush', 14);
   const [strength, setStrength] = useRouteTwigState('/characters', 'strength', 0.5);
+  // MESHSMOOTH-0606: whole-part relax pass count (strength rides the shared knob)
+  const [smoothIters, setSmoothIters] = useRouteTwigState('/characters', 'smoothIterations', SMOOTH_TUNING.action.iterations);
+  // the sample shelf (sessions/sculpt-grids/) — refreshed on save/apply
+  const [samples, setSamples] = useState<GridSampleEntry[]>(() => {
+    try { return listGridSamples(); } catch { return []; }
+  });
   const [photo, setPhoto] = useRouteTwigState<Photo | null>('/characters', 'photo', null);
   const [photoScale, setPhotoScale] = useRouteTwigState('/characters', 'photoScale', 0.4);
   const [photoY, setPhotoY] = useRouteTwigState('/characters', 'photoY', 0);
@@ -133,6 +143,9 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   // the shared painter's input plumbing: gap-free interpolated sculpt dabs
   // (mirror riding the engine)
   const strokeEngineRef = useRef<ReturnType<typeof PAINT.createStrokeEngine> | null>(null);
+  // MESHSMOOTH-0606: the smooth brush's working stroke — grid relaxation per
+  // dab on a working copy, mesh sync throttled, ONE undo entry on release
+  const smoothStrokeRef = useRef<null | { base: number[]; work: number[]; lastSync: number }>(null);
   const profileDraftRef = useRef<number[] | null>(null);
   const canvasRect = useRef({ x: 0, y: 0, width: EDITOR_W, height: EDITOR_H });
   // ── direct mesh grabbing (GRABSHAPE-0605) — see grabKit.ts ────────────────
@@ -141,7 +154,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   // re-sculpts on a throttle (the live grid rides setPartGrid — the SAME truth
   // the paint canvas edits).
   const [grabHover, setGrabHover] = useState<
-    { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' } | null
+    { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' | 'smooth' } | null
   >(null);
   // the wireframe lattice over the selected part — every line crossing is a
   // pullable grid point (GRABGRID-0605)
@@ -365,9 +378,9 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         params: editorPartParams(id, draft, displace),
         dynKey: partDynKey(id, seqs[id], headBits, draft.amount, regionSignature(draft.regions[id])),
         texKey: id === 'head' ? headTexKey : skinTexKeyFor(id),
-        // LIMBPAINT: the paint-free key a no-fallback segment (pelvis) drops
-        // to when this part is painted — its capture mounts beside the
-        // painted one (CharacterEditorCaptures barePartIds)
+        // LIMBPAINT: the paint-free key a no-fallback segment drops to when
+        // its part is painted (the set is EMPTY since PELVISMESH-0606 — the
+        // pelvis is a real part now; the seam stays for future segments)
         bareTexKey: id === 'head'
           ? headTexKey
           : skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape }),
@@ -421,9 +434,29 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     setPartGrid(selPart, gridFromBytes(bytes));
   };
 
+  // MESHSMOOTH-0606: a smooth dab relaxes the GRID under the brush (no paint
+  // value to stroke) — working copy per dab, mesh sync throttled at the grab
+  // cadence, paint texture + ONE undo entry land on release (one-truth law).
+  const smoothDab = (sx: number, sy: number) => {
+    const s = smoothStrokeRef.current;
+    if (!s) return;
+    const { cx, cy } = uvFromScreen(sx, sy);
+    const { rx, ry } = stampRadiusUv(brush, PAINT_W);
+    s.work = relaxStamp(s.work, cx, cy, rx, ry, strength, 1, mirror);
+    if (Date.now() - s.lastSync >= GRAB_TUNING.liveSyncMs) {
+      s.lastSync = Date.now();
+      setPartGrid(selPart, s.work);
+    }
+  };
+
   const onPaintDown = (e: any) => {
     paintingRef.current = true;
     const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
+    if (mode === 'smooth') {
+      smoothStrokeRef.current = { base: draft.grids[selPart].slice(), work: draft.grids[selPart].slice(), lastSync: 0 };
+      smoothDab(sx, sy);
+      return;
+    }
     strokeEngineRef.current = PAINT.createStrokeEngine({ brushPx: brush, mirrorAxisX: mirror ? PAINT_W / 2 : null });
     strokeEngineRef.current.begin();
     dab(sx, sy, Number(e?.pressure) || undefined);
@@ -431,11 +464,27 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const onPaintMove = (e: any) => {
     if (!paintingRef.current) return;
     const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
+    if (mode === 'smooth') { smoothDab(sx, sy); return; }
     dab(sx, sy, Number(e?.pressure) || undefined);
   };
   const onPaintUp = () => {
     if (!paintingRef.current) return;
     paintingRef.current = false;
+    const smooth = smoothStrokeRef.current;
+    if (smooth) {
+      smoothStrokeRef.current = null;
+      // the undo entry is the PRE-STROKE state (live ticks already moved the
+      // draft — the grab-release pattern)
+      history.commit(() => {
+        const pre = snapDraft();
+        pre.grids[selPart] = smooth.base.slice();
+        return pre;
+      });
+      setPartGrid(selPart, smooth.work);
+      uploadGrid(selPart, smooth.work); // paint texture carries the relaxed grid
+      live.session?.note(`smooth stroke · ${brush}px · ${selPart}`);
+      return;
+    }
     {
       strokeEngineRef.current?.end();
       strokeEngineRef.current = null;
@@ -468,6 +517,42 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     paints[selPart].paint.clear(NEUTRAL);
     setPartGrid(selPart, emptyGrid());
     live.session?.note(`clear sculpt · ${selPart}`);
+  };
+
+  // ── MESHSMOOTH-0606: smooth part (one press evens the whole thing) ────────
+  const smoothPart = () => {
+    history.commit(snapDraft);
+    const before = gridRoughness(draft.grids[selPart]);
+    const g = relaxGrid(draft.grids[selPart], strength, smoothIters);
+    uploadGrid(selPart, g);
+    setPartGrid(selPart, g);
+    live.session?.note(`smooth part · ${selPart} · s${strength.toFixed(1)} ×${smoothIters}`);
+    setStatus(`${selPart} smoothed — roughness ${before.mean.toFixed(3)} → ${gridRoughness(g).mean.toFixed(3)} (ctrl+z undoes)`);
+  };
+
+  // ── MESHSMOOTH-0606: the matrix data door — samples on sessions/sculpt-grids/ ──
+  const saveSample = () => {
+    try {
+      const saved = saveGridSample(gridToFile(selPart, draft.grids[selPart], `${draftName} ${selPart}`));
+      setSamples(listGridSamples());
+      live.session?.note(`grid sample saved · ${saved.name} · ${selPart}`);
+      setStatus(`sample → ${saved.path} — hand-edit the rows, then press its chip to reapply`);
+    } catch (error: any) {
+      setStatus(`sample save failed: ${error?.message ?? error}`);
+    }
+  };
+  const applySample = (name: string) => {
+    try {
+      const file = readGridSample(name);
+      const g = fileToGrid(file);
+      history.commit(snapDraft);
+      uploadGrid(selPart, g);
+      setPartGrid(selPart, g);
+      live.session?.note(`grid sample applied · ${name} → ${selPart}`);
+      setStatus(`${name} applied to ${selPart} (authored on ${file.part}; ctrl+z undoes)`);
+    } catch (error: any) {
+      setStatus(`sample apply failed: ${error?.message ?? error}`);
+    }
   };
 
   // ── reset part (GRABNAV-0605): the WHOLE selected part back to factory ────
@@ -716,16 +801,25 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
       startX: Number(e?.x ?? 0), startY: Number(e?.y ?? 0), delta: 0, rx, ry,
       lastSync: 0, timer: null, applied: false,
     };
-    setGrabHover({ part: hit.part, instanceIndex: hit.instanceIndex, gx: hit.gx, gy: hit.gy, cu: hit.cu, cv: hit.cv, grabRadius: hit.grabRadius, state: 'raise' });
+    setGrabHover({ part: hit.part, instanceIndex: hit.instanceIndex, gx: hit.gx, gy: hit.gy, cu: hit.cu, cv: hit.cv, grabRadius: hit.grabRadius, state: mode === 'smooth' ? 'smooth' : 'raise' });
   };
+
+  // MESHSMOOTH-0606: in smooth mode a drag's DISTANCE is its smoothing dose at
+  // the grabbed cell — always recomputed from the drag-start base (never
+  // compounding), exactly like a pull recomputes its stamp.
+  const smoothDose = (delta: number) => Math.min(1, Math.abs(delta) * SMOOTH_TUNING.dragDoseFactor);
+  const grabbedGrid = (g: NonNullable<typeof grabRef.current>) =>
+    mode === 'smooth'
+      ? relaxStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, smoothDose(g.delta), SMOOTH_TUNING.drag.iterations, mirror)
+      : applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, mirror);
 
   const applyGrabLive = () => {
     const g = grabRef.current;
     if (!g) return;
     g.lastSync = Date.now();
     g.applied = true;
-    setPartGrid(g.hit.part, applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, mirror));
-    setGrabHover((cur) => (cur ? { ...cur, state: g.delta < 0 ? 'carve' : 'raise' } : cur));
+    setPartGrid(g.hit.part, grabbedGrid(g));
+    setGrabHover((cur) => (cur ? { ...cur, state: mode === 'smooth' ? 'smooth' : g.delta < 0 ? 'carve' : 'raise' } : cur));
   };
 
   const grabMove = (e: any) => {
@@ -761,12 +855,14 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         pre.grids[g.hit.part] = g.baseGrid.slice();
         return pre;
       });
-      const final = applyGrabStamp(g.baseGrid, g.hit.cu, g.hit.cv, g.rx, g.ry, g.delta, mirror);
+      const final = grabbedGrid(g);
       setPartGrid(g.hit.part, final);
       // ONE-TRUTH compose law: the paint texture must carry the dragged grid,
       // or the next paint stroke's release readback would clobber the drag
       uploadGrid(g.hit.part, final);
-      live.session?.note(`grab drag · ${g.hit.part} · cell ${g.hit.gx},${g.hit.gy} · ${g.delta > 0 ? 'raise' : 'carve'} ${Math.abs(g.delta).toFixed(2)}`);
+      live.session?.note(mode === 'smooth'
+        ? `smooth drag · ${g.hit.part} · cell ${g.hit.gx},${g.hit.gy} · dose ${smoothDose(g.delta).toFixed(2)}`
+        : `grab drag · ${g.hit.part} · cell ${g.hit.gx},${g.hit.gy} · ${g.delta > 0 ? 'raise' : 'carve'} ${Math.abs(g.delta).toFixed(2)}`);
     }
     setGrabHover((cur) => (cur ? { ...cur, state: 'hover' } : cur));
   };
@@ -1025,13 +1121,23 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
                 <Chip label="raise" active={mode === 'raise'} onPress={() => setMode('raise')} />
                 <Chip label="carve in" active={mode === 'lower'} color="#ff9445" onPress={() => setMode('lower')} />
                 <Chip label="flatten" active={mode === 'flatten'} color="#94a3b8" onPress={() => setMode('flatten')} />
+                {/* MESHSMOOTH-0606: the relax brush — paint OR grab-drag it */}
+                <Chip label="smooth" active={mode === 'smooth'} color="#34d399" onPress={() => setMode('smooth')} />
               </Row>
               <Row style={{ gap: 8, alignItems: 'center' }}>
                 <Chip label="fill" onPress={fillAll} />
                 <Chip label="soften" onPress={soften} />
+                <Chip label="smooth part" color="#34d399" onPress={smoothPart} />
                 <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
                 <Chip label="clear" onPress={clearStrokes} />
               </Row>
+              {/* the matrix data door: shaped grids as hand-editable files */}
+              <ChipRow label="grid data">
+                <Chip label="save sample" color="good" onPress={saveSample} />
+                {samples.map((s) => (
+                  <Chip key={s.name} label={s.name} color="cyan" onPress={() => applySample(s.name)} />
+                ))}
+              </ChipRow>
             </>
           ) : null}
 
@@ -1056,6 +1162,9 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
 
           <Knob label="brush size" value={brush} spec={TUNE.knobs.brush} onChange={setBrush} />
           <Knob label="strength" value={strength} spec={TUNE.knobs.strength} onChange={setStrength} />
+          {isHead || editTab === 'detail' ? (
+            <Knob label="smooth passes" value={smoothIters} spec={SMOOTH_TUNING.knobs.iterations} onChange={setSmoothIters} />
+          ) : null}
           <Knob label="depth amount" value={draft.amount} spec={TUNE.knobs.amount} onChange={(amount) => editDraftCoalesced((d) => ({ ...d, amount }))} />
           {isHead ? (
             <>
@@ -1157,7 +1266,6 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         bodyShape={draft.bodyShape}
         parts={PART_IDS}
         paint={draft.paint}
-        bareSkinTexKeyFor={(id) => skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape })}
       />
       <GrabGridCapture hover={grabHover} mirror={mirror} />
     </Row>

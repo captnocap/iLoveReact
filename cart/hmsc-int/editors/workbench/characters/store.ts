@@ -29,6 +29,7 @@ import {
 import { generateCharacterDraft } from '../../characters/generate';
 import { mintCharacterId } from '../../characters/roster';
 import { PAINT_EDITOR_TUNING, type SculptMode } from '../../characters/paintKit';
+import { SMOOTH_TUNING } from '../../characters/smoothKit';
 import { DEFAULT_ANIM_SCRIPT } from '../../characters/animPresets';
 import { defaultProfile, DEFAULT_BOTTOMS, PART_IDS, type ClothingAccessoryId, type ClothingId, type PartId } from '../../../game/figure/shapes';
 import { generateFace, parseHed, serializeHed, type HedAnimation, type HedDocument } from '../../../game/figure/hed';
@@ -119,6 +120,8 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     mirror: twigRead('mirror', true),
     brush: twigRead('brush', 14),
     strength: twigRead('strength', 0.5),
+    // MESHSMOOTH-0606 — the route's twig key, so both surfaces share it
+    smoothIterations: twigRead('smoothIterations', SMOOTH_TUNING.action.iterations),
     photo: twigRead<Photo | null>('photo', null),
     photoScale: twigRead('photoScale', 0.4),
     photoY: twigRead('photoY', 0),
@@ -449,6 +452,7 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     setMirror: setViewKey('mirror', 'mirror'),
     setBrush: setViewKey('brush', 'brush'),
     setStrength: setViewKey('strength', 'strength'),
+    setSmoothIterations: setViewKey('smoothIterations', 'smoothIterations'),
     setPhoto: setViewKey('photo', 'photo'),
     setPhotoScale: setViewKey('photoScale', 'photoScale'),
     setPhotoY: setViewKey('photoY', 'photoY'),

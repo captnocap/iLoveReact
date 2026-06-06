@@ -357,6 +357,23 @@ tests across four suites ride `rjit game verify`; CAPTURE.md records drops +
 ambiguities (P2 grain in the FK, visual-height canon, texture-key prefix,
 ragdollHostReady=false until the binding exists).
 
+PELVISMESH-0606 (USER ASK req_0022): the pelvis is a REAL PART — its own
+PartId/preset/LOD/regions, an ASSEMBLY instance on the pelvis bone with the
+dead pelvisSocket's exact sizing (×1.18), sculpt/grab/paint-editable like any
+part and listed in every part roster (/characters, the workbench character
+stage, the /cutout MODELS rail). LIMBPAINT's pelvis paint SEGMENT folded into
+the part: the string `'pelvis'` keeps meaning (same 512×256 unwrap, now the
+pelvis mesh's own), `PAINT_TARGET_NO_PART_FALLBACK` emptied (the
+two-sets-of-tits cascade is dead structurally; the editors' bare-torso
+captures died). V20: `body.ts partsWithPelvisFallback` maps pre-split docs
+deterministically — pelvis = torso sculpt+profile copy (what the socket
+displayed) — at parseBody/draftFromDocument/bakeBodyDocument/ModelPreview;
+generated citizens copy the torso's profile/grid with zero extra rand draws
+so pre-split seeds keep their look. Damage zones unchanged (pelvis bone stays
+`torso` — splitting the ZONE is constitution-grade, surfaced not done);
+bottoms were already pelvis-bone-driven; hitboxes per-bone unchanged.
+Counts: 27 assembly instances (was 26), 8 anatomy sockets (was 9).
+
 ## game/activities/ — repeatable side loops (V22/V8/V20 capture, 2026-06-04)
 
 The non-mission gameplay verbs, REWRITTEN fresh. V22-MODES is the binding
@@ -898,6 +915,32 @@ hold still), and on the F verb. Toggle made DISCOVERABLE: explicit
 hint lines teach F/C (orbit mode gained a hint line beside the zoom
 knob). V23/V26 unchanged — framing is param-rate sends of pure-math
 poses; the host still owns every frame.
+
+MESHSMOOTH-0606 (2026-06-06, USER ASK req_0024 "make a tool to smooth out
+my own changes… i shaped it but its very low poly effect… if we get the
+matrix data we can use it to edit by hand and get a few samples"): the
+SMOOTH verb + the MATRIX DATA DOOR. Measured first (the user's own shaped
+torso): the faceting is ROUGHNESS-bound, not resolution-bound —
+|cell − neighborhood mean| averaged 0.154 on the shaped torso vs ~0.007 on
+parts that read smooth, same 48×24 grid (resolution stays a surfaced
+secondary ceiling: bilinear cell creases + ±1-saturated plateaus;
+CAPTURE.md). `smoothKit.ts` (pure, seam-aware: x wraps, y clamps):
+`relaxGrid` behind the **smooth part** chip (strength knob × the
+twig-shared **smooth passes** knob; status shows roughness before→after)
+and `relaxStamp` behind the **smooth** brush mode beside raise/carve/
+flatten — paintable on the unwrap canvas AND grab-draggable on the mesh
+(drag distance = dose at the grabbed cell, recomputed from the drag base;
+green marker). Convex relaxation = silhouette bounds conserved (P4). One
+truth held: every smooth lands via setPartGrid + paint-texture upload,
+undoable, session-noted; both /characters and the workbench character
+stage wire the same kit. `gridData.ts`: **save sample** writes the part's
+grid as hand-editable JSON (one row per line) to
+`sessions/sculpt-grids/<slug>.grid.json` (V20 by-addition — collisions
+suffix, never overwrite); sample chips reapply (round-trip EXACT,
+cell-=== pinned); format documented in CAPTURE.md so any lane can be
+handed a grid file and asked to round it numerically. P4
+`smooth.test.ts` 9/9 (bounds, roughness drop, seam wrap, stamp locality,
+mirror twin, exact round-trip, boundary rejects, additive samples).
 
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).

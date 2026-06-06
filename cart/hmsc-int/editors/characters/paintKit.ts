@@ -61,12 +61,15 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
   // color+depth tool — MODELPAINT-0605; /cutout owns texture painting)
 });
 
-export type SculptMode = 'raise' | 'lower' | 'flatten';
+/** 'smooth' (MESHSMOOTH-0606) relaxes the grid (smoothKit) instead of
+ *  painting a value — surfaces branch on it before the stroke engine. */
+export type SculptMode = 'raise' | 'lower' | 'flatten' | 'smooth';
 
-/** The brush's paint-texture value for a mode at a strength. */
+/** The brush's paint-texture value for a mode at a strength. 'smooth' has no
+ *  paint value; an unguarded call paints neutral (a no-op), never a dent. */
 export function sculptModeValue(mode: SculptMode, strength: number): number {
   const N = PAINT_EDITOR_TUNING.neutral;
-  return mode === 'flatten' ? N : mode === 'raise' ? N + 0.5 * strength : N - 0.5 * strength;
+  return mode === 'raise' ? N + 0.5 * strength : mode === 'lower' ? N - 0.5 * strength : N;
 }
 
 /** paint-texture R8 bytes → signed mesh grid (average blocks, recenter). */
