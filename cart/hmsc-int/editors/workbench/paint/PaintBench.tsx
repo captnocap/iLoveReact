@@ -8,7 +8,7 @@
 // dispatch: one painting experience everywhere).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Col, Effect, Pressable, Row, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Row, Text } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { GAME_CHROME } from '../../../game/chrome';
 import { FaceLayerPaint } from '../../../game/figure/render';
@@ -21,7 +21,7 @@ import { DEPTH_HINT_WGSL, PAINT_EDITOR_TUNING, depthHintData, depthHintGrid } fr
 import { editorTunables } from '../../tunables';
 import type { PartId } from '../../../game/figure/shapes';
 import { readRouteTwigState, useRouteTwigState } from '../../twigs';
-import { CutoutToolRail } from '../../cutout/ToolRail';
+import { CutoutToolRail, LinearRailSlider } from '../../cutout/ToolRail';
 // IMGOPEN-0606: the original cutout app's ingest, restored — the picker
 // (path cleaning happens inside the store's openImage, one door for all)
 import { pickImageFile } from '../../cutout/sources';
@@ -32,35 +32,6 @@ import type { PaintBenchStore } from './store';
 
 const { Chip } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
-
-/** req_0074: the depth hint's intensity — a continuous 0..1 slide in the
- *  painter's own track visuals (BrushSlider's constants; SCULPTKIT-0606
- *  folds this into the ONE kit slider when the cohesion pass lands). */
-function HintIntensity({ value, onChange }: { value: number; onChange: (v: number) => void }) {
-  const [rect, setRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const TRACK = 96, INSET = 8;
-  const span = TRACK - INSET * 2;
-  const fromX = (x: number) => {
-    if (!rect || rect.width <= 0) return;
-    onChange(Math.max(0, Math.min(1, (x - rect.x - INSET) / Math.max(1, rect.width - INSET * 2))));
-  };
-  return (
-    <Pressable
-      tooltip={`depth hint intensity — ${Math.round(value * 100)}%`}
-      onMouseDown={(p: any) => { setDragging(true); fromX(Number(p?.x ?? 0)); }}
-      onMouseMove={(p: any) => { if (dragging) fromX(Number(p?.x ?? 0)); }}
-      onMouseUp={() => setDragging(false)}
-      onMouseLeave={() => setDragging(false)}
-    >
-      <Box onLayout={(r: any) => setRect(r)} style={{ width: TRACK, height: 20, borderRadius: 5, backgroundColor: T.page, borderWidth: 1, borderColor: T.frame, justifyContent: 'center', position: 'relative' }}>
-        <Box style={{ position: 'absolute', left: INSET, right: INSET, top: 9, height: 2, borderRadius: 1, backgroundColor: T.frame }} />
-        <Box style={{ position: 'absolute', left: INSET, top: 9, width: Math.max(2, Math.round(span * value)), height: 2, borderRadius: 1, backgroundColor: T.accent }} />
-        <Box style={{ position: 'absolute', left: INSET - 5 + Math.round(span * value), top: 4, width: 10, height: 12, borderRadius: 5, backgroundColor: T.accent, borderWidth: 2, borderColor: T.ink }} />
-      </Box>
-    </Pressable>
-  );
-}
 
 export function PaintBench(props: { store: PaintBenchStore }) {
   const store = props.store;
@@ -229,7 +200,14 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
           <Chip label="depth hint" active={showDepthHint} color="cyan" onPress={() => setShowDepthHint(!showDepthHint)} />
         ) : null}
         {work.model?.family === 'figure' && showDepthHint ? (
-          <HintIntensity value={hintOpacity} onChange={setHintOpacity} />
+          /* req_0074 intensity — THE kit slider (SCULPTKIT-0606 one-slider law) */
+          <LinearRailSlider
+            value={hintOpacity}
+            min={0} max={1} step={0.05}
+            onChange={setHintOpacity}
+            format={(n) => `${Math.round(n * 100)}%`}
+            tooltip="depth hint intensity — the same P2 dial as /settings"
+          />
         ) : null}
         <Chip label={saveLabel} color={store.edited ? 'good' : 'dim'} onPress={store.saveCurrent} />
         <Chip label="extract cutout" color={store.edited ? 'accent' : 'dim'} onPress={store.extractCurrent} />

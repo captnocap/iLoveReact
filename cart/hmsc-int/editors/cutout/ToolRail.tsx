@@ -23,7 +23,9 @@ const T = GAME_CHROME.tokens.color;
 // editors/paint/tuning.ts, which also owns brushSizes and the palette).
 const RAIL = Object.freeze({
   width: 200,
-  tile: 35,
+  // 34: five tiles + 3px gaps ride ONE row inside the rail (the no-orphan
+  // law) — 5×34 + 4×3 = 182 ≤ the rail's 184 inner width
+  tile: 34,
   tileIcon: 17,
   slotW: 35,
   slotH: 42,
@@ -77,7 +79,10 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
       backgroundColor: T.panelSolid, borderRightWidth: 1, borderColor: T.frame,
     }}>
       <SectionLabel>TOOLS</SectionLabel>
-      <Row style={{ gap: 6, flexWrap: 'wrap', width: RAIL.tile * 4 + 18, justifyContent: 'center' }}>
+      {/* SCULPTKIT-0606 chrome law (USER: "4 buttons wide and then the 5th
+          one wrapping below. horrible approach"): a tile grid's width
+          DIVIDES its set size — the 5 tools ride ONE row, never 4+1 */}
+      <Row style={{ gap: 3, justifyContent: 'center' }}>
         {TOOLS.map((t) => {
           const disabled = t.id === 'smart' && !s.smartAvailable;
           return (
@@ -96,7 +101,9 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
 
       <RailDivider />
       <SectionLabel>{hasImage ? 'MASK' : 'MODE'}</SectionLabel>
-      <Row style={{ gap: 6, flexWrap: 'wrap', width: RAIL.tile * 4 + 18, justifyContent: 'center' }}>
+      {/* 5 tiles, one row (the same divides-law); the transient lasso
+          confirm is its own row below — never a wrap orphan */}
+      <Row style={{ gap: 3, justifyContent: 'center' }}>
         {modes.map((m) => (
           <IconTile
             key={m.id}
@@ -110,46 +117,56 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
         <IconTile icon="X" label={hasImage ? 'Clear layer mask' : 'Clear layer paint'} active={false} color={T.bad} onPress={s.clearMask} />
         <IconTile icon="RefreshCcw" label={hasImage ? 'Invert layer mask' : 'Invert layer paint'} active={false} color={T.accent} onPress={s.invertMask} />
         <IconTile icon="FlipHorizontal" label="Mirror painting across the vertical center" active={s.mirror} color="#22d3ee" onPress={() => s.setMirror(!s.mirror)} />
-        {s.tool === 'lasso' && s.lassoPoints.length > 0 ? (
-          <IconTile icon="Check" label={`Close lasso (${s.lassoPoints.length} points)`} active={false} color={T.good} onPress={s.commitLasso} />
-        ) : null}
       </Row>
+      {s.tool === 'lasso' && s.lassoPoints.length > 0 ? (
+        <Row style={{ gap: 3, justifyContent: 'center' }}>
+          <IconTile icon="Check" label={`Close lasso (${s.lassoPoints.length} points)`} active={false} color={T.good} onPress={s.commitLasso} />
+        </Row>
+      ) : null}
 
       <RailDivider />
       <SectionLabel>BRUSH</SectionLabel>
       <BrushSlider value={s.brushPx} onChange={s.setBrushPx} />
 
-      <RailDivider />
-      <SectionLabel>COLOR</SectionLabel>
-      <Row style={{ gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
-        {PAINT.SLOT_LABELS.slice(0, PAINT.NUM_COLOR_SLOTS).map((label, i) => (
-          <ColorSlot
-            key={label}
-            label={label.slice(0, 1).toUpperCase()}
-            tooltip={`${label} color slot`}
-            color={colors[i] ?? '#ffffff'}
-            active={safeSlot === i}
-            onPress={() => s.setActiveColorSlot(i)}
+      {/* SCULPTKIT-0606 conditional-section law (USER: "you just
+          conditionally render this instead of all the time"): COLOR shows
+          only when the active mode CONSUMES color — the paint band on a
+          color canvas; mask work on an image source never reads it */}
+      {!hasImage && s.mode === 'erase' ? (
+        <>
+          <RailDivider />
+          <SectionLabel>COLOR</SectionLabel>
+          <Row style={{ gap: 6, flexWrap: 'wrap', justifyContent: 'center' }}>
+            {PAINT.SLOT_LABELS.slice(0, PAINT.NUM_COLOR_SLOTS).map((label, i) => (
+              <ColorSlot
+                key={label}
+                label={label.slice(0, 1).toUpperCase()}
+                tooltip={`${label} color slot`}
+                color={colors[i] ?? '#ffffff'}
+                active={safeSlot === i}
+                onPress={() => s.setActiveColorSlot(i)}
+              />
+            ))}
+          </Row>
+          <ColorWheel
+            value={colors[safeSlot] ?? '#ffffff'}
+            onChange={(hex) => s.setLayerColor(target, safeSlot, hex)}
+            size={150}
+            showHex
           />
-        ))}
-      </Row>
-      <ColorWheel
-        value={colors[safeSlot] ?? '#ffffff'}
-        onChange={(hex) => s.setLayerColor(target, safeSlot, hex)}
-        size={150}
-        showHex
-      />
-      <Row style={{ gap: 5, flexWrap: 'wrap', width: RAIL.width - 30, justifyContent: 'center' }}>
-        {PAINT.tuning.palette.map((hex) => (
-          <Pressable key={hex} onPress={() => s.setLayerColor(target, safeSlot, hex)} tooltip={hex}>
-            <Box style={{
-              width: RAIL.swatch, height: RAIL.swatch, borderRadius: 4, backgroundColor: hex,
-              borderWidth: colors[safeSlot] === hex ? 2 : 1,
-              borderColor: colors[safeSlot] === hex ? T.accent : (hex === '#ffffff' ? T.dim : T.frame),
-            }} />
-          </Pressable>
-        ))}
-      </Row>
+          <Row style={{ gap: 5, flexWrap: 'wrap', width: RAIL.width - 30, justifyContent: 'center' }}>
+            {PAINT.tuning.palette.map((hex) => (
+              <Pressable key={hex} onPress={() => s.setLayerColor(target, safeSlot, hex)} tooltip={hex}>
+                <Box style={{
+                  width: RAIL.swatch, height: RAIL.swatch, borderRadius: 4, backgroundColor: hex,
+                  borderWidth: colors[safeSlot] === hex ? 2 : 1,
+                  borderColor: colors[safeSlot] === hex ? T.accent : (hex === '#ffffff' ? T.dim : T.frame),
+                }} />
+              </Pressable>
+            ))}
+          </Row>
+        </>
+      ) : null}
       <Box style={{ flexGrow: 1 }} />
       {/* the keyboard map, visible at the rail's foot */}
       <Text style={{ color: T.dim, fontSize: 8, fontFamily: 'monospace', textAlign: 'center', width: RAIL.width - 16 }}>
@@ -159,39 +176,41 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
   );
 }
 
-// ── the brush-size slider (the reference TopBar interaction) ─────────────────
-// CONTINUOUS drag on a log-mapped track (strokes.ts brushTrackToPx — the low
-// end is fine-grained for tattoo lines), with the brushSizes ladder rendered
-// as tick marks, +/- nudge buttons and [ ] stepping the ladder, and a live
-// px readout.
+// ── THE one rail slider (SCULPTKIT-0606) ─────────────────────────────────────
+// The reference TopBar interaction, generalized: continuous drag on a mapped
+// track (toTrack/fromTrack — log for the paint ladder, linear for sculpt
+// ranges), tick marks, +/- nudges, and a live value readout. Every slider on
+// a stage surface IS this component (§8: one kit, no lookalikes); BrushSlider
+// below stays the paint-ladder instantiation.
 
-export function BrushSlider({ value, onChange }: { value: number; onChange: (px: number) => void }) {
-  const sizes = PAINT.tuning.brushSizes;
+export function RailSlider(props: {
+  value: number;
+  onChange: (v: number) => void;
+  /** value ↔ 0..1 track mapping (quantization is fromTrack's job) */
+  toTrack: (v: number) => number;
+  fromTrack: (t: number) => number;
+  /** tick values rendered on the track */
+  ticks?: number[];
+  readout: string;
+  tooltip?: string;
+  nudge?: { dec: () => void; inc: () => void; canDec: boolean; canInc: boolean };
+}) {
   const [rect, setRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [dragging, setDragging] = useState(false);
-  // nearest ladder detent for the nudge buttons ([/] keys use the same rule)
-  let index = 0;
-  for (let i = 0; i < sizes.length; i++) {
-    if (Math.abs(sizes[i] - value) < Math.abs(sizes[index] - value)) index = i;
-  }
-  const pct = PAINT.brushPxToTrack(value);
-  const step = (delta: number) => {
-    const next = Math.max(0, Math.min(sizes.length - 1, index + delta));
-    onChange(sizes[next]);
-  };
   const trackInset = 8;
   const span = RAIL.sliderTrack - trackInset * 2;
+  const pct = Math.max(0, Math.min(1, props.toTrack(props.value)));
   const updateFromX = (x: number) => {
     if (!rect || rect.width <= 0) return;
     const t = (x - rect.x - trackInset) / Math.max(1, rect.width - trackInset * 2);
-    onChange(PAINT.brushTrackToPx(t));
+    props.onChange(props.fromTrack(Math.max(0, Math.min(1, t))));
   };
   return (
     <Col style={{ gap: 4, alignItems: 'center' }}>
       <Row style={{ gap: 6, alignItems: 'center' }}>
-        <NudgeButton label="-" disabled={value <= sizes[0]} onPress={() => step(-1)} />
+        {props.nudge ? <NudgeButton label="-" disabled={!props.nudge.canDec} onPress={props.nudge.dec} /> : null}
         <Pressable
-          tooltip={`${value}px brush — drag (1–${sizes[sizes.length - 1]}px), or [ and ] to step`}
+          tooltip={props.tooltip ?? props.readout}
           onMouseDown={(p: any) => { setDragging(true); updateFromX(p.x); }}
           onMouseMove={(p: any) => { if (dragging) updateFromX(p.x); }}
           onMouseUp={() => setDragging(false)}
@@ -207,14 +226,14 @@ export function BrushSlider({ value, onChange }: { value: number; onChange: (px:
           >
             <Box style={{ position: 'absolute', left: trackInset, right: trackInset, top: 13, height: 2, borderRadius: 1, backgroundColor: T.frame }} />
             <Box style={{ position: 'absolute', left: trackInset, top: 13, width: Math.max(2, Math.round(span * pct)), height: 2, borderRadius: 1, backgroundColor: T.accent }} />
-            {sizes.map((px) => (
+            {(props.ticks ?? []).map((tv) => (
               <Box
-                key={px}
+                key={tv}
                 style={{
                   position: 'absolute',
-                  left: trackInset + Math.round(span * PAINT.brushPxToTrack(px)),
+                  left: trackInset + Math.round(span * Math.max(0, Math.min(1, props.toTrack(tv)))),
                   top: 11, width: 1, height: 6,
-                  backgroundColor: px <= value ? T.accent : T.frame,
+                  backgroundColor: tv <= props.value ? T.accent : T.frame,
                 }}
               />
             ))}
@@ -226,26 +245,94 @@ export function BrushSlider({ value, onChange }: { value: number; onChange: (px:
             }} />
           </Box>
         </Pressable>
-        <NudgeButton label="+" disabled={value >= sizes[sizes.length - 1]} onPress={() => step(1)} />
+        {props.nudge ? <NudgeButton label="+" disabled={!props.nudge.canInc} onPress={props.nudge.inc} /> : null}
       </Row>
-      <Text style={{ color: T.ink, fontSize: 10, fontWeight: '800' }}>{`${value}px`}</Text>
+      <Text style={{ color: T.ink, fontSize: 10, fontWeight: '800' }}>{props.readout}</Text>
     </Col>
   );
 }
 
-// ── pieces ────────────────────────────────────────────────────────────────────
+// ── the brush-size slider (the reference TopBar interaction) ─────────────────
+// The paint ladder over RailSlider: log-mapped track (strokes.ts
+// brushTrackToPx — the low end is fine-grained for tattoo lines), the
+// brushSizes ladder as ticks, [/] stepping the ladder.
 
-function SectionLabel({ children }: { children: string }) {
+export function BrushSlider({ value, onChange }: { value: number; onChange: (px: number) => void }) {
+  const sizes = PAINT.tuning.brushSizes;
+  // nearest ladder detent for the nudge buttons ([/] keys use the same rule)
+  let index = 0;
+  for (let i = 0; i < sizes.length; i++) {
+    if (Math.abs(sizes[i] - value) < Math.abs(sizes[index] - value)) index = i;
+  }
+  const step = (delta: number) => {
+    const next = Math.max(0, Math.min(sizes.length - 1, index + delta));
+    onChange(sizes[next]);
+  };
+  return (
+    <RailSlider
+      value={value}
+      onChange={onChange}
+      toTrack={(v) => PAINT.brushPxToTrack(v)}
+      fromTrack={(t) => PAINT.brushTrackToPx(t)}
+      ticks={sizes as unknown as number[]}
+      readout={`${value}px`}
+      tooltip={`${value}px brush — drag (1–${sizes[sizes.length - 1]}px), or [ and ] to step`}
+      nudge={{ dec: () => step(-1), inc: () => step(1), canDec: value > sizes[0], canInc: value < sizes[sizes.length - 1] }}
+    />
+  );
+}
+
+/** SCULPTKIT-0606: the linear instantiation — sculpt ranges (brush px,
+ *  strength, passes, node value) ride the SAME track. Quantizes to step. */
+export function LinearRailSlider(props: {
+  value: number; min: number; max: number; step: number;
+  onChange: (v: number) => void;
+  format?: (v: number) => string;
+  tooltip?: string;
+}) {
+  const { min, max, step } = props;
+  const quant = (v: number) => {
+    const snapped = Math.round((v - min) / step) * step + min;
+    const fixed = Number(snapped.toFixed(4));
+    return Math.max(min, Math.min(max, fixed));
+  };
+  const ticks: number[] = [];
+  const count = Math.round((max - min) / step);
+  if (count <= 24) for (let i = 0; i <= count; i++) ticks.push(Number((min + i * step).toFixed(4)));
+  const fmt = props.format ?? ((v: number) => String(v));
+  return (
+    <RailSlider
+      value={props.value}
+      onChange={(v) => props.onChange(quant(v))}
+      toTrack={(v) => (v - min) / (max - min)}
+      fromTrack={(t) => quant(min + t * (max - min))}
+      ticks={ticks}
+      readout={fmt(props.value)}
+      tooltip={props.tooltip}
+      nudge={{
+        dec: () => props.onChange(quant(props.value - step)),
+        inc: () => props.onChange(quant(props.value + step)),
+        canDec: props.value > min,
+        canInc: props.value < max,
+      }}
+    />
+  );
+}
+
+// ── pieces (SCULPTKIT-0606: exported — the sculpt rail speaks THIS language;
+// a second tile/label/divider implementation is a rejection) ─────────────────
+
+export function SectionLabel({ children }: { children: string }) {
   return (
     <Text style={{ color: T.dim, fontSize: 9, fontWeight: '800', letterSpacing: 1 }}>{children}</Text>
   );
 }
 
-function RailDivider() {
+export function RailDivider() {
   return <Box style={{ width: RAIL.width - 40, height: 1, backgroundColor: T.frame }} />;
 }
 
-function IconTile(props: {
+export function IconTile(props: {
   icon: string;
   label: string;
   active: boolean;

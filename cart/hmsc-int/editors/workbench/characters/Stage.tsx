@@ -26,7 +26,7 @@
 // on release into store.setPartGrid — the ONE truth the panel also edits.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Col, Effect, Paintable, Pressable, Row, Scene3D, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Paintable, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
@@ -53,6 +53,9 @@ import {
   type GrabCloud, type GrabHit, type GrabInstance, type ScreenAxis,
 } from '../../characters/grabKit';
 import { useSculptCamera } from '../../sculptCamera';
+// SCULPTKIT-0606: the painter rail's OWN pieces — one tile, one slider, one
+// label/divider language; a second implementation is a rejection (§8)
+import { IconTile, LinearRailSlider, RailDivider, SectionLabel } from '../../cutout/ToolRail';
 // MESHSMOOTH-0606: the relax verb + the matrix data door (Route.tsx parity)
 import { SMOOTH_TUNING, gridRoughness, relaxGrid, relaxStamp } from '../../characters/smoothKit';
 import { fileToGrid, gridToFile, listGridSamples, readGridSample, saveGridSample, type GridSampleEntry } from '../../characters/gridData';
@@ -73,7 +76,8 @@ const NEUTRAL = TUNE.neutral;
 // and then a row of the two other tools below it. this side by side column
 // approach is ass." The divider drags the top/bottom split; minima keep the
 // mesh a real view and the tool row usable at any window size.
-const SCULPT_SPLIT = { default: 0.55, min: 0.3, max: 0.75, meshMinPx: 220, rowMinPx: 240, toolColPx: 320 };
+// SCULPTKIT-0606: the tool column is the painter RAIL's width — one chrome.
+const SCULPT_SPLIT = { default: 0.55, min: 0.3, max: 0.75, meshMinPx: 220, rowMinPx: 240, toolColPx: 200 };
 // the mesh context's face moment: always still (stable identity — never
 // re-triggers the derivation's memos)
 const STILL_FACE = { anim: null, phase: 0 } as const;
@@ -647,7 +651,9 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
           the two-layer toolbar collision (chips over the caption) is dead */}
       <Row style={{ position: 'absolute', left: 14, top: 14, right: 14, flexWrap: 'wrap', gap: 8, rowGap: 6, alignItems: 'center' }}>
         <Chip label="grid" active={v.showGrabGrid} color="cyan" onPress={() => s.setShowGrabGrid(!v.showGrabGrid)} />
-        <Chip label="mirror" active={v.mirror} onPress={() => s.setMirror(!v.mirror)} />
+        {/* SCULPTKIT-0606 no-duplication law: in the SCULPT lens mirror's
+            one home is the rail's toggle tile — the chip yields there */}
+        {lens !== 'sculpt' ? <Chip label="mirror" active={v.mirror} onPress={() => s.setMirror(!v.mirror)} /> : null}
         <Chip label="hitboxes" active={v.showHitboxes} color="cyan" onPress={() => s.setShowHitboxes(!v.showHitboxes)} />
         <Chip label="fly" active={camera.camMode === 'fly'} color="good" onPress={() => camera.setCamMode(camera.camMode === 'fly' ? 'orbit' : 'fly')} />
         <Chip label="undo ⌃Z" onPress={s.undo} />
@@ -668,72 +674,125 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     </Pressable>
   );
 
-  // ── the SCULPT toolset (SCULPTSPLIT-0606 v2): one wrapping strip that
-  // lives in the tool COLUMN beside the canvas (the bottom row of the
-  // stack); the samples strip rides under it (Law 3's demonstrative filler,
-  // never a black void). Same verbs, same data — layout only.
-  const sculptTools = (
-    <Row style={{ flexWrap: 'wrap', gap: 8, rowGap: 6, alignItems: 'center', paddingLeft: 10, paddingRight: 10, paddingTop: 8, paddingBottom: 8 }}>
-      {!isHead ? (
-        <>
-          <Chip label="outline" active={v.sculptTab === 'outline'} onPress={() => s.setSculptTab('outline')} />
-          <Chip label="sculpt detail" active={v.sculptTab === 'detail'} onPress={() => s.setSculptTab('detail')} />
-          {v.sculptTab === 'outline' ? <Chip label="reset outline" onPress={s.resetOutline} /> : null}
-        </>
-      ) : null}
-      {isHead || v.sculptTab === 'detail' ? (
-        <>
-          <Chip label="raise" active={v.sculptMode === 'raise'} onPress={() => s.setSculptMode('raise')} />
-          <Chip label="carve in" active={v.sculptMode === 'lower'} color="#ff9445" onPress={() => s.setSculptMode('lower')} />
-          <Chip label="flatten" active={v.sculptMode === 'flatten'} color="#94a3b8" onPress={() => s.setSculptMode('flatten')} />
-          {/* MESHSMOOTH-0606: the relax brush — paint OR grab-drag it */}
-          <Chip label="smooth" active={v.sculptMode === 'smooth'} color="#34d399" onPress={() => s.setSculptMode('smooth')} />
-          <Chip label="fill" onPress={fillAll} />
-          <Chip label="soften" onPress={soften} />
-          <Chip label="smooth part" color="#34d399" onPress={smoothPart} />
-          <Chip label="mirror" active={v.mirror} onPress={() => s.setMirror(!v.mirror)} />
-          <Chip label="clear" onPress={clearStrokes} />
-        </>
-      ) : null}
-      <Knob label="brush size" value={v.brush} spec={TUNE.knobs.brush} onChange={s.setBrush} />
-      <Knob label="strength" value={v.strength} spec={TUNE.knobs.strength} onChange={s.setStrength} />
-      {isHead || v.sculptTab === 'detail' ? (
-        <Knob label="smooth passes" value={v.smoothIterations} spec={SMOOTH_TUNING.knobs.iterations} onChange={s.setSmoothIterations} />
-      ) : null}
-      {/* GRIDNODES-0606: click a node, fine-tune THAT point's depth */}
-      {isHead || v.sculptTab === 'detail' ? (
-        <Chip label="nodes" active={nodesMode} color="cyan" onPress={() => setNodesMode(!nodesMode)} />
-      ) : null}
-      {nodesMode && (isHead || v.sculptTab === 'detail') ? (
-        selNode ? (
+  // ── the SCULPT rail (SCULPTKIT-0606, USER VERDICT): the painter rail's
+  // OWN language — IconTile verbs with mode tints, SectionLabels, dividers,
+  // and the ONE RailSlider track for every range (steppers are dead). The
+  // chrome laws hold: every tile grid's width DIVIDES its set size (no wrap
+  // orphans), sections render only when the context consumes them, and no
+  // control appears twice on the surface (mirror's sculpt home is HERE —
+  // the viewport chip yields on this lens). From the brushes lab: the
+  // verb-color-per-mode, visual-first presentation; its shape gallery is
+  // the paint lane's brush-kind WIP, not chrome.
+  const detailTools = isHead || v.sculptTab === 'detail';
+  const fmtPx = (n: number) => `${n}px`;
+  const sculptRail = (
+    <ScrollView style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
+      <Col style={{ padding: 8, gap: 9, alignItems: 'center' }}>
+        {!isHead ? (
           <>
-            <Text fontSize={9} color={T.accent} style={{ fontWeight: 800, letterSpacing: 1 }}>{`NODE ${selNode.gx},${selNode.gy}`}</Text>
-            <Knob
-              label="node value"
-              value={s.draft.grids[selPart][selNode.idx]}
-              spec={{ min: -1, max: 1, step: 0.02, precision: 2 }}
-              onChange={setNodeValue}
-            />
-            <Chip label="deselect" onPress={() => setSelNode(null)} />
+            <SectionLabel>SURFACE</SectionLabel>
+            {/* 2 tiles (3 with the conditional reset) — both divide their row */}
+            <Row style={{ gap: 6, justifyContent: 'center' }}>
+              <IconTile icon="PenLine" label="Outline lathe — drag the silhouette rows" active={v.sculptTab === 'outline'} color={T.accent} onPress={() => s.setSculptTab('outline')} />
+              <IconTile icon="Brush" label="Sculpt detail — paint depth on the unwrap" active={v.sculptTab === 'detail'} color={T.accent} onPress={() => s.setSculptTab('detail')} />
+              {v.sculptTab === 'outline' ? (
+                <IconTile icon="RotateCcw" label="Reset outline" active={false} color={T.accent} onPress={s.resetOutline} />
+              ) : null}
+            </Row>
+            <RailDivider />
           </>
-        ) : (
-          <Text fontSize={9} color={T.dim}>click a grid point…</Text>
-        )
-      ) : null}
-    </Row>
+        ) : null}
+        {detailTools ? (
+          <>
+            <SectionLabel>MODE</SectionLabel>
+            {/* the four sculpt verbs — 4 wide, 4 items (MESHSMOOTH's relax rides) */}
+            <Row style={{ gap: 6, justifyContent: 'center' }}>
+              <IconTile icon="ArrowBigUp" label="Raise — blue pushes out" active={v.sculptMode === 'raise'} color="#3da8ff" onPress={() => s.setSculptMode('raise')} />
+              <IconTile icon="ArrowBigDown" label="Carve in — orange digs" active={v.sculptMode === 'lower'} color="#ff9445" onPress={() => s.setSculptMode('lower')} />
+              <IconTile icon="Minus" label="Flatten toward the base" active={v.sculptMode === 'flatten'} color="#94a3b8" onPress={() => s.setSculptMode('flatten')} />
+              <IconTile icon="Waves" label="Smooth — relax the surface (paint or grab-drag)" active={v.sculptMode === 'smooth'} color="#34d399" onPress={() => s.setSculptMode('smooth')} />
+            </Row>
+            <SectionLabel>ACTIONS</SectionLabel>
+            {/* four one-shot verbs — 4 wide, 4 items */}
+            <Row style={{ gap: 6, justifyContent: 'center' }}>
+              <IconTile icon="PaintBucket" label="Fill the whole part at the current mode/strength" active={false} color={T.accent} onPress={fillAll} />
+              <IconTile icon="Droplets" label="Soften — 3×3 blur over the sculpt" active={false} color={T.accent} onPress={soften} />
+              <IconTile icon="Sparkles" label="Smooth part — relax everything (strength × passes)" active={false} color="#34d399" onPress={smoothPart} />
+              <IconTile icon="X" label="Clear the sculpt strokes" active={false} color={T.bad} onPress={clearStrokes} />
+            </Row>
+            <SectionLabel>TOGGLES</SectionLabel>
+            {/* two toggles — 2 wide, 2 items; mirror's ONE sculpt home */}
+            <Row style={{ gap: 6, justifyContent: 'center' }}>
+              <IconTile icon="FlipHorizontal" label="Mirror painting across the front meridian" active={v.mirror} color="#22d3ee" onPress={() => s.setMirror(!v.mirror)} />
+              <IconTile icon="Grid3x3" label="Nodes — click a grid point, fine-tune its depth" active={nodesMode} color="#22d3ee" onPress={() => setNodesMode(!nodesMode)} />
+            </Row>
+            <RailDivider />
+          </>
+        ) : null}
+        <SectionLabel>BRUSH</SectionLabel>
+        <LinearRailSlider
+          value={v.brush}
+          min={TUNE.knobs.brush.min} max={TUNE.knobs.brush.max} step={TUNE.knobs.brush.step}
+          onChange={s.setBrush}
+          format={fmtPx}
+          tooltip={`brush diameter — the floor (${TUNE.knobs.brush.min}px) is exactly one cell`}
+        />
+        <SectionLabel>STRENGTH</SectionLabel>
+        <LinearRailSlider
+          value={v.strength}
+          min={TUNE.knobs.strength.min} max={TUNE.knobs.strength.max} step={TUNE.knobs.strength.step}
+          onChange={s.setStrength}
+          format={(n) => n.toFixed(1)}
+        />
+        {detailTools ? (
+          <>
+            <SectionLabel>PASSES</SectionLabel>
+            <LinearRailSlider
+              value={v.smoothIterations}
+              min={SMOOTH_TUNING.knobs.iterations.min} max={SMOOTH_TUNING.knobs.iterations.max} step={SMOOTH_TUNING.knobs.iterations.step}
+              onChange={s.setSmoothIterations}
+              format={(n) => `×${Math.round(n)}`}
+              tooltip="smooth passes — how many relax iterations per smooth-part"
+            />
+          </>
+        ) : null}
+        {/* GRIDNODES-0606 — only while the nodes toggle consumes the space */}
+        {detailTools && nodesMode ? (
+          <>
+            <RailDivider />
+            <SectionLabel>{selNode ? `NODE ${selNode.gx},${selNode.gy}` : 'NODES'}</SectionLabel>
+            {selNode ? (
+              <Row style={{ gap: 6, alignItems: 'center' }}>
+                <LinearRailSlider
+                  value={s.draft.grids[selPart][selNode.idx]}
+                  min={-1} max={1} step={0.02}
+                  onChange={setNodeValue}
+                  format={(n) => n.toFixed(2)}
+                  tooltip="this point's depth — minus carves, plus raises"
+                />
+                <IconTile icon="X" label="Deselect the node" active={false} color={T.bad} onPress={() => setSelNode(null)} />
+              </Row>
+            ) : (
+              <Text fontSize={9} color={T.dim}>click a grid point…</Text>
+            )}
+          </>
+        ) : null}
+        {/* the matrix data door (MESHSMOOTH) — Law 3's demonstrative filler */}
+        {detailTools ? (
+          <>
+            <RailDivider />
+            <SectionLabel>GRID SAMPLES</SectionLabel>
+            <Row style={{ gap: 5, rowGap: 5, flexWrap: 'wrap', justifyContent: 'center' }}>
+              <Chip label="save sample" color="good" onPress={saveSample} />
+              {samples.map((sample) => (
+                <Chip key={sample.name} label={sample.name} color="cyan" onPress={() => applySample(sample.name)} />
+              ))}
+            </Row>
+          </>
+        ) : null}
+      </Col>
+    </ScrollView>
   );
-
-  // the matrix data door (MESHSMOOTH): the strip under the canvas — the
-  // leftover space demonstrates the grid samples instead of going black
-  const sampleStrip = (isHead || v.sculptTab === 'detail') ? (
-    <Row style={{ flexWrap: 'wrap', gap: 8, rowGap: 6, alignItems: 'center', paddingLeft: 10, paddingRight: 10, paddingTop: 6, paddingBottom: 8 }}>
-      <Text fontSize={9} color={T.dim} style={{ fontWeight: 800, letterSpacing: 1 }}>GRID SAMPLES</Text>
-      <Chip label="save sample" color="good" onPress={saveSample} />
-      {samples.map((sample) => (
-        <Chip key={sample.name} label={sample.name} color="cyan" onPress={() => applySample(sample.name)} />
-      ))}
-    </Row>
-  ) : null;
 
   const CW = canvasFit.w;
   const CH = canvasFit.h;
@@ -826,9 +885,10 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
               >
                 {sculptCanvas}
               </Box>
-              <Col style={{ width: SCULPT_SPLIT.toolColPx, height: '100%', minHeight: 0, borderLeftWidth: 1, borderColor: T.frame }}>
-                {sculptTools}
-                {sampleStrip}
+              {/* SCULPTKIT-0606: the sculpt RAIL — the painter rail's own
+                  surface (same width, same bg, same border discipline) */}
+              <Col style={{ width: SCULPT_SPLIT.toolColPx, height: '100%', minHeight: 0, backgroundColor: T.panelSolid, borderLeftWidth: 1, borderColor: T.frame }}>
+                {sculptRail}
               </Col>
             </Row>
             {splitDragging ? (
