@@ -142,19 +142,29 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   const [selNode, setSelNode] = useState<GridNode | null>(null);
   const nodeGestureRef = useRef(false); // one undo entry per node-edit gesture
   useEffect(() => { setSelNode(null); nodeGestureRef.current = false; }, [selPart]);
-  // the brush footprint (Q3): canvas-uv hover the overlay shader draws; a
-  // stale ring auto-fades when moves stop landing on the canvas
+  // the brush footprint (Q3) + the display-mode trigger: chunky while the
+  // brush is OVER THE CANVAS or mid-stroke; smooth the moment the cursor
+  // leaves it — WITHOUT leaving the page (USER: "this never resolves to
+  // smooth at all until i leave the interface"). Moves landing anywhere
+  // else (the 3D pane, the stage) clear the hover; a short settle timer
+  // backstops surfaces that emit no events at all.
   const [brushHover, setBrushHover] = useState<{ u: number; v: number } | null>(null);
   const brushHoverFade = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const SETTLE_MS = 450;
   const canvasHoverMove = (sx: number, sy: number) => {
     const r = canvasRect.current;
     if (r.width <= 0 || r.height <= 0) return;
+    if (sx < r.x || sx > r.x + r.width || sy < r.y || sy > r.y + r.height) {
+      setBrushHover((cur) => (cur === null ? cur : null));
+      return;
+    }
     const u = clamp((sx - r.x) / r.width, 0, 1);
     const v2 = clamp((sy - r.y) / r.height, 0, 1);
     setBrushHover((cur) => (cur && Math.abs(cur.u - u) < 0.002 && Math.abs(cur.v - v2) < 0.004 ? cur : { u, v: v2 }));
     if (brushHoverFade.current) clearTimeout(brushHoverFade.current);
-    brushHoverFade.current = setTimeout(() => setBrushHover(null), 1600);
+    brushHoverFade.current = setTimeout(() => setBrushHover((cur) => (paintingRef.current ? cur : null)), SETTLE_MS);
   };
+  const clearBrushHover = () => setBrushHover((cur) => (cur === null ? cur : null));
   const viewRect = useRef({ x: 0, y: 0, width: 1, height: 1 });
   const [grabHover, setGrabHover] = useState<
     { part: PartId; instanceIndex: number; gx: number; gy: number; cu: number; cv: number; grabRadius: number; state: 'hover' | 'raise' | 'carve' | 'smooth' } | null
@@ -551,6 +561,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     else camera.orbitDown(e);
   };
   const previewMove = (e: any) => {
+    clearBrushHover(); // the cursor is in the 3D pane — the canvas settles smooth
     if (grabRef.current) { grabMove(e); return; }
     if (camera.dragging()) { camera.orbitMove(e); return; }
     hoverMove(e);

@@ -461,11 +461,13 @@ test('the overlay data[] contract: 10 floats always, rest is zeros, aiming is ch
   assertEqual(aiming[5], 1, 'carve maps to mode 1 (ring tint)');
   assertEqual(aiming[6], 1, 'mirror rides to the twin footprint');
   assert(aiming[4] > 0 && aiming[4] < 0.5, 'brush radius lands in sane v units');
-  // a live node selection alone (no hover) still snaps chunky + rings
+  // DISPLAY-MODE TRIGGER (USER: "never resolves to smooth"): chunky keys off
+  // AIMING alone — a persistent selection rings but does NOT hold it chunky;
+  // cursor-off-canvas (hover null) → smooth, on-surface
   const sel = depthOverlayData({ hover: null, brushPx: 16, mode: 'raise', mirror: false, selected: { u: 0.3, v: 0.4 } });
-  assertEqual(sel[0], 1, 'selection snaps the display chunky');
+  assertEqual(sel[0], 0, 'selection alone does NOT hold the display chunky');
   assertEqual(sel[1], 0, 'no footprint without hover');
-  assertEqual(sel[7], 1, 'selection ring on');
+  assertEqual(sel[7], 1, 'selection ring still on');
   assertClose(sel[8], 0.3, 1e-9, 'sel u rides');
   assertClose(sel[9], 0.4, 1e-9, 'sel v rides');
 });

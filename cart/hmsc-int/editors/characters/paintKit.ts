@@ -435,7 +435,10 @@ export function depthOverlayData(args?: {
   const sel = args?.selected ?? null;
   const modeIdx = !args ? 0 : args.mode === 'raise' ? 0 : args.mode === 'lower' ? 1 : args.mode === 'flatten' ? 2 : 3;
   return [
-    hover || sel ? 1 : 0,
+    // the display mode keys off AIMING alone (hover/stroke) — a persistent
+    // node selection must NOT hold the canvas chunky (USER: "this never
+    // resolves to smooth at all until i leave the interface")
+    hover ? 1 : 0,
     hover ? 1 : 0,
     hover?.u ?? 0,
     hover?.v ?? 0,
