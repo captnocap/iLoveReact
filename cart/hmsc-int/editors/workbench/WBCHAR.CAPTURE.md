@@ -143,18 +143,20 @@ PAINT = the shared painter on the selected part, in-page).
 | K1 | Cutout:464-505 openModelTarget | part target resolve: saved model doc, TATTOODRAFT slot resume, overlay reopen, head face-layer underlay, canvas dims/bg | **L** PAINT — same machinery against `{family:'figure', docId, part}`; requires a saved id (autosave mints one — until then the lens shows the route's own guard message Route.tsx:410) |
 | K2 | paint/PaintControls.tsx:212 | PaintEditor one-liner (tool rail · viewport · layers+look) over usePaintEditor | **L** PAINT mounts it (ONE painter — no fork) |
 | K3 | Cutout:519-549 saveModelPaint | bake overlay → applyBodyPaint → labeled commit on the characters channel; empty painting CLEARS; draft slot dropped | **L** PAINT save action (figure branch only); store refreshes draft.paint from the committed doc |
-| K4 | Cutout:846-852 ModelPreview3D | live 3D beside the painter re-baking per stroke | **DEFERRED** (ruling): v1 shows the painted result on flipping back to PART/FIGURE; live-while-painting 3D imports cutout's ModelPreview — want it in-lens day one, or after the flip? |
-| K5 | Cutout:496-504 draft slots | OPEN-SLOT hot-update persistence of unsaved paint | **DEFERRED** (ruling): cutout's draft book is cutout-scoped storage; reusing it from /workbench shares one book across two routes (fine?) or the lens gets its own slot file. Until ruled, unsaved lens strokes survive hot reload only via the painter's own session history |
+| K4 | Cutout:846-852 ModelPreview3D | live 3D beside the painter re-baking per stroke | **RULED → DAY ONE** (user, 2026-06-06): the PAINT lens imports cutout's ModelPreview now — paint-and-see in the workbench immediately |
+| K5 | Cutout:496-504 draft slots | OPEN-SLOT hot-update persistence of unsaved paint | **RULED → WORKBENCH-SCOPED SLOTS** (user, verbatim: "makes it better if something gets really fucked up"): the lens gets its OWN slot book, never cutout's — one corrupted book must not eat both surfaces' unsaved work |
 
 ## Deferred (full list — nothing silently dropped)
 
-1. **K4** live 3D model preview inside the PAINT lens (cutout parity nicety).
-2. **K5** TATTOODRAFT draft-book reuse vs workbench-scoped slots.
+1. ~~**K4** live 3D model preview inside the PAINT lens~~ — RULED IN (day one).
+2. ~~**K5** draft-book scope~~ — RULED: workbench-scoped slot book (isolation).
 3. **ClothingSkinCaptures** (preview.tsx:459) — module-internal capture set;
    verified mounted via the captures stack, rides I9. Listed for the
    independent check, not actually deferred.
 4. The /characters route itself — UNTOUCHED this dispatch; flips on the
    user's word in its own commit (the dispatch's own fence).
+
+→ ZERO open deferrals: every parity row has a workbench landing.
 
 ## Shared-file edits this dispatch genuinely requires (named per the fence)
 

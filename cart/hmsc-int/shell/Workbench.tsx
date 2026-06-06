@@ -12,7 +12,7 @@
 // per source, lens per source, roster filter, edit revision). Persistence
 // stays in each source's backing stores — the Workbench never saves anything.
 
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Box, ScrollView } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { C, accentFor } from './workbench.cls';
@@ -40,6 +40,20 @@ export interface WorkbenchSource<S = unknown> {
   lenses?(subject: S): LensSpec[];
   /** hero-bar verbs (save / export / clone …) */
   actions?(subject: S): ActionSpec[];
+  // ── WBCHAR-0606 contract additions (declared in WBCHAR.CAPTURE.md) ──
+  /** roster click as an EVENT (load is a side effect — never in render).
+   *  Sources with mutable working state (drafts) install the row here. */
+  onPick?(rowId: string): void;
+  /** the row to select when the frame has no memory (characters: the LAST
+   *  roster entry is the working draft — AUTOSAVE-0605 mount restore) */
+  defaultRow?(rows: RosterRow[]): string | undefined;
+  /** controlled lens: a source whose SETTERS flip the view (wardrobe edits
+   *  jump to the figure) owns the active lens; absent → frame-owned state */
+  activeLens?(subject: S): string | undefined;
+  onLens?(subject: S, id: string): void;
+  /** live sources notify here (autosave landed → roster row appears); the
+   *  frame re-reads every get() on each tick */
+  subscribe?(fn: () => void): () => void;
 }
 
 export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?: () => void }) {
@@ -52,16 +66,27 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
   const [, setRev] = useState(0);
   const onEdit = () => setRev((r) => r + 1);
 
+  // live sources tick the same revision (autosave → roster rows appear)
+  useEffect(() => {
+    const offs = sources
+      .map((s) => s.subscribe?.(() => setRev((r) => r + 1)))
+      .filter((off): off is () => void => typeof off === 'function');
+    return () => { for (const off of offs) off(); };
+  }, [sources]);
+
   const source = sources.find((s) => s.id === srcId) ?? sources[0];
   if (!source) return <EmptyStage title="WORKBENCH" hint="no sources registered" />;
 
   const roster = source.list();
   const shown = filter ? roster.filter((r) => r.label.toLowerCase().includes(filter.toLowerCase())) : roster;
-  const selId = selBySrc[source.id] ?? roster[0]?.id ?? '';
+  const selId = selBySrc[source.id] ?? source.defaultRow?.(roster) ?? roster[0]?.id ?? '';
   const selRow = roster.find((r) => r.id === selId) ?? roster[0];
 
   const pickSource = (id: string) => { setSrcId(id); setFilter(''); };
-  const pickRow = (id: string) => setSelBySrc((s) => ({ ...s, [source.id]: id }));
+  const pickRow = (id: string) => {
+    source.onPick?.(id); // the load event — render stays pure
+    setSelBySrc((s) => ({ ...s, [source.id]: id }));
+  };
 
   if (!selRow) {
     return (
@@ -75,7 +100,12 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
   const subject = source.select(selRow.id);
   const spec = source.panel(subject);
   const lenses = source.lenses?.(subject) ?? [];
-  const lens = lensBySrc[source.id] ?? lenses[0]?.id ?? 'default';
+  // controlled lens (source-owned) wins; else the frame's own per-source state
+  const lens = source.activeLens?.(subject) ?? lensBySrc[source.id] ?? lenses[0]?.id ?? 'default';
+  const setLens = (id: string) => {
+    if (source.onLens) { source.onLens(subject, id); onEdit(); return; }
+    setLensBySrc((s) => ({ ...s, [source.id]: id }));
+  };
   const actions = source.actions?.(subject) ?? [];
   const stage = source.stage(subject, lens);
 
@@ -131,7 +161,7 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
           tag={`${selRow.label.toUpperCase()} · ${source.id}`}
           lenses={lenses}
           active={lens}
-          onLens={(id) => setLensBySrc((s) => ({ ...s, [source.id]: id }))}
+          onLens={setLens}
         />
         {stage ?? (
           <EmptyStage

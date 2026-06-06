@@ -21,7 +21,13 @@ export type FieldSpec =
   | { k: string; t: 'num'; get(): number; min: number; max: number; step: number; precision: number; set(v: number): void }
   | { k: string; t: 'slider'; get(): number; min: number; max: number; show(v: number): string; set(v: number): void }
   | { k: string; t: 'enum'; get(): string; opts: string[]; set(v: string): void }
-  | { k: string; t: 'color'; get(): string; set?(v: string): void };
+  // WBCHAR-0606 additions (declared in WBCHAR.CAPTURE.md):
+  // text — editable string (character name, anim script)
+  | { k: string; t: 'text'; get(): string; set(v: string): void; placeholder?: string; width?: number }
+  // act — a verb chip in the strip (generate face, reset part, anim preset)
+  | { k: string; t: 'act'; tone?: string; run(): void }
+  // color gains a palette: opts + set → pick-a-swatch row (skin tones)
+  | { k: string; t: 'color'; get(): string; opts?: string[]; set?(v: string): void };
 
 export interface PanelGroup { title: string; fields: FieldSpec[] }
 export interface PanelSpec { groups: PanelGroup[] }
@@ -66,25 +72,32 @@ function NumField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'num' }>; onEdit: 
 
 // Slider drag: all three mouse handlers on the SAME node (pointer-capture
 // rule) + onLayout for the track rect, the proven cutout BrushSlider wire.
+// COMMIT ON RELEASE (WBCHAR-0606): drags preview locally and call set() ONCE
+// on mouse-up — region sliders re-sculpt a mesh per set(), so per-move
+// commits would melt the frame (the route's latch-preview law, kept).
 function SliderField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'slider' }>; onEdit: () => void }) {
   const rectRef = useRef<{ x: number; width: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const apply = (px: number) => {
+  const [drag, setDrag] = useState<number | null>(null); // preview value while dragging
+  const preview = (px: number) => {
     const r = rectRef.current;
     if (!r || r.width <= 0) return;
     const frac = clamp((px - r.x) / r.width, 0, 1);
-    f.set(f.min + frac * (f.max - f.min));
-    onEdit();
+    setDrag(f.min + frac * (f.max - f.min));
   };
-  const v = f.get();
+  const v = drag ?? f.get();
   const frac = f.max > f.min ? clamp((v - f.min) / (f.max - f.min), 0, 1) : 0;
   const pct = Math.round(frac * 100);
   return (
     <>
       <Pressable
-        onMouseDown={(p: any) => { setDragging(true); apply(p.x); }}
-        onMouseMove={(p: any) => { if (dragging) apply(p.x); }}
-        onMouseUp={() => setDragging(false)}
+        onMouseDown={(p: any) => preview(p.x)}
+        onMouseMove={(p: any) => { if (drag !== null) preview(p.x); }}
+        onMouseUp={() => {
+          if (drag === null) return;
+          f.set(drag);
+          setDrag(null);
+          onEdit();
+        }}
       >
         <Box onLayout={(r: any) => { rectRef.current = { x: r.x, width: r.width }; }}>
           <C.SliderTrack>
@@ -94,6 +107,41 @@ function SliderField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'slider' }>; on
         </Box>
       </Pressable>
       <C.SliderValue>{f.show(v)}</C.SliderValue>
+    </>
+  );
+}
+
+function TextField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'text' }>; onEdit: () => void }) {
+  return (
+    <C.PromptInput
+      value={f.get()}
+      onChangeText={(t: string) => { f.set(t); onEdit(); }}
+      placeholder={f.placeholder}
+      fontSize={11}
+      style={{ flexGrow: 0, width: f.width ?? 140, paddingTop: 4, paddingBottom: 4 }}
+    />
+  );
+}
+
+function ColorField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'color' }>; onEdit: () => void }) {
+  if (f.opts && f.set) {
+    const cur = f.get();
+    return (
+      <>
+        {f.opts.map((c) => (
+          <C.ColorSwatch
+            key={c}
+            style={{ backgroundColor: c, borderWidth: c === cur ? 2 : 1, borderColor: c === cur ? accentFor('primary') : accentFor('controlBorder') }}
+            onPress={() => { f.set!(c); onEdit(); }}
+          />
+        ))}
+      </>
+    );
+  }
+  return (
+    <>
+      <C.ColorSwatch style={{ backgroundColor: f.get() }} onPress={() => {}} />
+      <C.FieldValue>{f.get()}</C.FieldValue>
     </>
   );
 }
@@ -112,6 +160,16 @@ function EnumField({ f, onEdit }: { f: Extract<FieldSpec, { t: 'enum' }>; onEdit
 }
 
 function FieldCell({ f, onEdit }: { f: FieldSpec; onEdit: () => void }) {
+  // act fields ARE their own label — a verb chip, no label/value split
+  if (f.t === 'act') {
+    return (
+      <C.Field>
+        <C.Chip onPress={() => { f.run(); onEdit(); }}>
+          <C.ChipLabel color={f.tone ? accentFor(f.tone) : undefined}>{f.k}</C.ChipLabel>
+        </C.Chip>
+      </C.Field>
+    );
+  }
   return (
     <C.Field>
       <C.FieldLabel>{f.k}</C.FieldLabel>
@@ -120,12 +178,8 @@ function FieldCell({ f, onEdit }: { f: FieldSpec; onEdit: () => void }) {
       {f.t === 'num' ? <NumField f={f} onEdit={onEdit} /> : null}
       {f.t === 'slider' ? <SliderField f={f} onEdit={onEdit} /> : null}
       {f.t === 'enum' ? <EnumField f={f} onEdit={onEdit} /> : null}
-      {f.t === 'color' ? (
-        <>
-          <C.ColorSwatch style={{ backgroundColor: f.get() }} onPress={() => {}} />
-          <C.FieldValue>{f.get()}</C.FieldValue>
-        </>
-      ) : null}
+      {f.t === 'text' ? <TextField f={f} onEdit={onEdit} /> : null}
+      {f.t === 'color' ? <ColorField f={f} onEdit={onEdit} /> : null}
     </C.Field>
   );
 }
