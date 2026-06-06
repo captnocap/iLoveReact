@@ -35,9 +35,11 @@ import { GAME_CHROME } from '../../../game/chrome';
 import { buildMeshFrame } from '../../../game/figure/rig';
 import { PART_IDS, PROFILE_N, type PartId } from '../../../game/figure/shapes';
 import { PAINT } from '../../paint';
+import * as Geometry from '@reactjit/geometries';
 import {
-  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, gridFromBytes,
-  reliefBytesFromGrid, sculptModeValue,
+  DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, gridFromBytes,
+  gridNodeAt, reliefBytesFromGrid, sculptModeValue, withNodeValue,
+  type GridNode,
 } from '../../characters/paintKit';
 import { useRouteTwigState } from '../../twigs';
 import {
@@ -133,6 +135,13 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     if (r.height <= 0) return;
     setSculptSplit(clamp((screenY - r.y) / r.height, SCULPT_SPLIT.min, SCULPT_SPLIT.max));
   };
+  // GRIDNODES-0606: every grid point is a clickable NODE — the 'nodes' chip
+  // routes canvas clicks to selection (twigged: a mode survives the reload),
+  // the selected node fine-tunes through ONE slider riding the grid truth
+  const [nodesMode, setNodesMode] = useRouteTwigState<boolean>('/characters', 'nodesMode', false);
+  const [selNode, setSelNode] = useState<GridNode | null>(null);
+  const nodeGestureRef = useRef(false); // one undo entry per node-edit gesture
+  useEffect(() => { setSelNode(null); nodeGestureRef.current = false; }, [selPart]);
   // the brush footprint (Q3): canvas-uv hover the overlay shader draws; a
   // stale ring auto-fades when moves stop landing on the canvas
   const [brushHover, setBrushHover] = useState<{ u: number; v: number } | null>(null);
@@ -230,6 +239,34 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       st.lastSync = Date.now();
       s.setPartGrid(selPart, st.work);
     }
+  };
+
+  // GRIDNODES-0606: in nodes mode a canvas click SELECTS the node under it
+  // (never paints); the knob writes that one cell through the same one-truth
+  // doors as every other sculpt verb (setPartGrid + texture upload + undo)
+  const onCanvasDown = (e: any) => {
+    if (nodesMode) {
+      const r = canvasRect.current;
+      if (r.width <= 0 || r.height <= 0) return;
+      const u = clamp((Number(e?.x ?? 0) - r.x) / r.width, 0, 0.9999);
+      const v2 = clamp((Number(e?.y ?? 0) - r.y) / r.height, 0, 0.9999);
+      setSelNode(gridNodeAt(u, v2));
+      nodeGestureRef.current = false; // the next edit opens a fresh undo entry
+      return;
+    }
+    onPaintDown(e);
+  };
+  const setNodeValue = (value: number) => {
+    const n = selNode;
+    if (!n) return;
+    if (!nodeGestureRef.current) {
+      nodeGestureRef.current = true;
+      s.history.commit(s.snapDraft);
+      s.note(`node edit · ${n.gx},${n.gy} · ${selPart}`);
+    }
+    const g = withNodeValue(s.draft.grids[selPart], n.idx, value);
+    s.setPartGrid(selPart, g);
+    uploadGrid(selPart, g); // one-truth: the paint texture carries it
   };
 
   const onPaintDown = (e: any) => {
@@ -515,6 +552,38 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     };
   }, [grabHover, partRender, rig, view, selPart, v.brush]);
 
+  // ── GRIDNODES-0606: the 2D↔3D correspondence flags — each greater-grid
+  // crossing gets a same-color marker ON the model at the SAME surface uv
+  // the canvas dot rides (grabPointWorld is the one mapping), and the
+  // selected node flies its own flag so "where is this point" reads instantly
+  const flagWorld = (cu: number, cv: number): [number, number, number] => {
+    const inst = grabInstancesFor('part', selPart, rig.assembly)[0];
+    return grabPointWorld(partRender[selPart].params as any, inst, cu, cv) as [number, number, number];
+  };
+  const sculptFlags = lens === 'sculpt' ? (
+    <>
+      {GREATER_POINTS.map((p) => (
+        <Scene3D.Mesh
+          key={`gp-${p.u}`}
+          geometry={Geometry.Sphere}
+          params={{ radius: 1, segments: 12, rings: 8 }}
+          material={p.color}
+          position={flagWorld(p.u, p.v)}
+          scale={0.045}
+        />
+      ))}
+      {nodesMode && selNode ? (
+        <Scene3D.Mesh
+          geometry={Geometry.Sphere}
+          params={{ radius: 1, segments: 12, rings: 8 }}
+          material="#33e6ff"
+          position={flagWorld(selNode.u, selNode.v)}
+          scale={0.055}
+        />
+      ) : null}
+    </>
+  ) : null;
+
   // ── the 3D viewport pane (LENSCLARITY-0606: ONE pane, three captioned
   // mounts — FIGURE full-bleed body · PART full-bleed close-up · SCULPT's
   // full-width TOP view (v2 stack); the caption makes each unmistakable) ────
@@ -537,6 +606,8 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
             in the CLOTHING/ANIMATION contexts (WBCLOTH row S7) */}
         {v.showGrabGrid ? <GrabGridMeshes view={view} selPart={selPart} parts={partRender} rig={rig} /> : null}
         <GrabMarker marker={grabMarker} />
+        {/* GRIDNODES-0606: the greater-point + selected-node flags */}
+        {sculptFlags}
       </Scene3D>
       {/* SCULPTSPLIT-0606: workspace chips (I6/G3) + the lens caption share
           ONE wrapping strip — at any pane width content wraps to new lines;
@@ -596,6 +667,26 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       {isHead || v.sculptTab === 'detail' ? (
         <Knob label="smooth passes" value={v.smoothIterations} spec={SMOOTH_TUNING.knobs.iterations} onChange={s.setSmoothIterations} />
       ) : null}
+      {/* GRIDNODES-0606: click a node, fine-tune THAT point's depth */}
+      {isHead || v.sculptTab === 'detail' ? (
+        <Chip label="nodes" active={nodesMode} color="cyan" onPress={() => setNodesMode(!nodesMode)} />
+      ) : null}
+      {nodesMode && (isHead || v.sculptTab === 'detail') ? (
+        selNode ? (
+          <>
+            <Text fontSize={9} color={T.accent} style={{ fontWeight: 800, letterSpacing: 1 }}>{`NODE ${selNode.gx},${selNode.gy}`}</Text>
+            <Knob
+              label="node value"
+              value={s.draft.grids[selPart][selNode.idx]}
+              spec={{ min: -1, max: 1, step: 0.02, precision: 2 }}
+              onChange={setNodeValue}
+            />
+            <Chip label="deselect" onPress={() => setSelNode(null)} />
+          </>
+        ) : (
+          <Text fontSize={9} color={T.dim}>click a grid point…</Text>
+        )
+      ) : null}
     </Row>
   );
 
@@ -635,7 +726,7 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
   ) : (
     <Pressable
       onLayout={(lr: any) => { canvasRect.current = { x: lr.x, y: lr.y, width: lr.width, height: lr.height }; }}
-      onMouseDown={onPaintDown}
+      onMouseDown={onCanvasDown}
       onMouseMove={(e: any) => { canvasHoverMove(Number(e?.x ?? 0), Number(e?.y ?? 0)); onPaintMove(e); }}
       onMouseUp={onPaintUp}
       style={{ width: CW, height: CH, borderWidth: 1, borderColor: T.frame, position: 'relative' }}
@@ -655,7 +746,10 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
       />
       <Effect
         shader={DEPTH_OVERLAY_WGSL}
-        data={depthOverlayData({ hover: brushHover, brushPx: v.brush, mode: v.sculptMode, mirror: v.mirror })}
+        data={depthOverlayData({
+          hover: brushHover, brushPx: v.brush, mode: v.sculptMode, mirror: v.mirror,
+          selected: nodesMode && selNode ? { u: selNode.u, v: selNode.v } : null,
+        })}
         textures={[paints[selPart].id, relief.id]}
         style={{ position: 'absolute', left: 0, top: 0, width: CW, height: CH }}
       />

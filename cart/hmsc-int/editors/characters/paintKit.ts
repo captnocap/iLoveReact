@@ -200,15 +200,52 @@ export const SCULPT_CANVAS = {
   guideInk: [0.55, 0.66, 0.84],
 } as const;
 
+// ── grid nodes (GRIDNODES-0606, USER SPEC) ───────────────────────────────────
+// "i want to see every single point on the grid down here as a node that i
+// can click on, and can have a slider value that lets me fine tune that one
+// specific point." Every sculpt-grid cell is an addressable NODE: the shader
+// draws a dot at every cell center, ONE Pressable maps clicks (48×24 React
+// nodes would be a scatter-limit violation), the selected node rings bright,
+// and its value edits ride the same grid truth as brush/grab/smooth.
+
+export type GridNode = { gx: number; gy: number; idx: number; u: number; v: number };
+
+/** canvas uv → the node under it; u/v come back as that CELL's CENTER (the
+ *  same surface point grabPointWorld puts the 3D flag on — one mapping). */
+export function gridNodeAt(u: number, v: number): GridNode {
+  const { width: GW, height: GH } = PAINT_EDITOR_TUNING.grid;
+  const gx = Math.max(0, Math.min(GW - 1, Math.floor(u * GW)));
+  const gy = Math.max(0, Math.min(GH - 1, Math.floor(v * GH)));
+  return { gx, gy, idx: gy * GW + gx, u: (gx + 0.5) / GW, v: (gy + 0.5) / GH };
+}
+
+/** pure: the grid with ONE node set, clamped to the signed depth range. */
+export function withNodeValue(grid: number[], idx: number, value: number): number[] {
+  const next = grid.slice();
+  next[idx] = Math.max(-1, Math.min(1, value));
+  return next;
+}
+
+/** The GREATER-GRID crossings (meridian × equator) — each gets a DISTINCT
+ *  colored dot on the canvas AND a same-color flag on the 3D model at the
+ *  same surface uv, so 2D position ↔ 3D location reads instantly.
+ *  `ink` is the 0..1 rgb baked into the shader; `color` is the flag's hex. */
+export const GREATER_POINTS = [
+  { u: 0.25, v: 0.5, color: '#34d399', ink: [0.2, 0.83, 0.6] },
+  { u: 0.5, v: 0.5, color: '#ef4444', ink: [0.94, 0.27, 0.27] },
+  { u: 0.75, v: 0.5, color: '#3b82f6', ink: [0.23, 0.51, 0.96] },
+] as const;
+
 // ── the painter overlay shader ───────────────────────────────────────────────
 // Layers in one quad: live stroke heat (blue raised / orange carved), contour
 // rings of the current form (relief texture, slot 2), the unwrap guides, the
-// always-on cell lattice, and the brush footprint ring. Declares the FULL
+// always-on cell lattice, the per-cell node dots + selection ring, the
+// greater-point markers, and the brush footprint ring. Declares the FULL
 // textures-mode binding set (2 tex + 2 samp) — the textures-enabled pipeline
 // layout expects all four. (No backticks in WGSL; no unary plus.)
 //
-// data[] contract (SCULPTSPLIT-0606 design rulings — both routes must pass
-// all 7 floats; a short array reads out of bounds):
+// data[] contract (SCULPTSPLIT-0606 + GRIDNODES-0606 — both routes must pass
+// all 10 floats; a short array reads out of bounds):
 //   [0] chunky   — 1: depth/relief snap to cell centers ("precise when
 //                  aiming"); 0: cell-bilinear smooth display at rest
 //   [1] hoverOn  — 1: the brush footprint renders
@@ -216,6 +253,8 @@ export const SCULPT_CANVAS = {
 //   [4] brushRadV — brush radius in v units (the 2:1 aspect is corrected here)
 //   [5] mode     — 0 raise · 1 carve · 2 flatten · 3 smooth (ring tint)
 //   [6] mirror   — 1: the mirror-twin footprint renders across u=0.5
+//   [7] selOn    — 1: a node is selected (the ring renders)
+//   [8] selU / [9] selV — the selected node's cell-center uv
 export const DEPTH_OVERLAY_WGSL = `
 @group(0) @binding(1) var<storage, read> data: array<f32>;
 @group(0) @binding(2) var depth_tex: texture_2d<f32>;
@@ -275,12 +314,37 @@ fn cell_bilinear(tex: texture_2d<f32>, samp: sampler, uv: vec2f, dims: vec2f) ->
   let cd = min(cdx, cdy);
   let lattice_a = (1.0 - smoothstep(0.0006, 0.0018, cd)) * 0.09;
 
+  let aspect = 2.0; // the unwrap is structurally 2:1 equirect
+
+  // GRIDNODES: a dot at EVERY cell center — every point is a visible node
+  let pc = cf - vec2f(0.5, 0.5);
+  let node_a = (1.0 - smoothstep(0.10, 0.18, length(pc))) * 0.13;
+
+  // GRIDNODES: the selected node — bright ring + soft fill at its cell
+  var sel_a = 0.0;
+  if (data[7] > 0.5) {
+    let sd = length(vec2f((in.uv.x - data[8]) * aspect, in.uv.y - data[9]));
+    let selr = 0.7 / dims.y;
+    sel_a = (1.0 - smoothstep(0.002, 0.005, abs(sd - selr)));
+    sel_a = max(sel_a, select(0.0, 0.16, sd < selr));
+  }
+  let sel_c = vec3f(0.2, 0.9, 1.0);
+
+  // GRIDNODES: the greater-grid crossings — distinct colors, matched 1:1 by
+  // the same-color flags on the 3D model (GREATER_POINTS is the one truth)
+  var greater_a = 0.0;
+  var greater_c = vec3f(0.0, 0.0, 0.0);
+${GREATER_POINTS.map((p) => `  {
+    let gd = length(vec2f((in.uv.x - ${p.u}) * aspect, in.uv.y - ${p.v}));
+    let ga = (1.0 - smoothstep(0.006, 0.013, gd)) * 0.95;
+    if (ga > greater_a) { greater_a = ga; greater_c = vec3f(${p.ink.join(', ')}); }
+  }`).join('\n')}
+
   // live stroke heat
   let heat_a = clamp(abs(live) * 2.0, 0.0, 1.0) * 0.5;
   let heat_c = select(carved, raised, live > 0.0);
 
   // the brush footprint (Q3): circle at true size + mode tint, mirror twin
-  let aspect = 2.0; // the unwrap is structurally 2:1 equirect
   var brush_a = 0.0;
   var twin_a = 0.0;
   if (data[1] > 0.5) {
@@ -304,29 +368,36 @@ fn cell_bilinear(tex: texture_2d<f32>, samp: sampler, uv: vec2f, dims: vec2f) ->
   let foot_a = max(brush_a, twin_a);
 
   let ink = vec3f(${SCULPT_CANVAS.guideInk.join(', ')});
-  let color = heat_c * heat_a + contour_c * contour_a + ink * (guide_a + lattice_a) + brush_c * foot_a;
-  let a = min(heat_a + contour_a + guide_a + lattice_a + foot_a, 0.9);
+  let color = heat_c * heat_a + contour_c * contour_a + ink * (guide_a + lattice_a + node_a)
+            + greater_c * greater_a + sel_c * sel_a + brush_c * foot_a;
+  let a = min(heat_a + contour_a + guide_a + lattice_a + node_a + greater_a + sel_a + foot_a, 0.92);
   return vec4f(color, a);
 }
 `;
 
-/** The overlay's data[] for a frame — ONE builder for every mount (the v2
- *  contract above; the old route passes the rest-state defaults). */
+/** The overlay's data[] for a frame — ONE builder for every mount (the
+ *  10-float contract above; the old route passes the rest-state defaults).
+ *  Aiming (hover) OR a live node selection snaps the display chunky. */
 export function depthOverlayData(args?: {
   hover: { u: number; v: number } | null;
   brushPx: number;
   mode: SculptMode;
   mirror: boolean;
+  selected?: { u: number; v: number } | null;
 }): number[] {
-  if (!args || !args.hover) return [0, 0, 0, 0, 0, 0, 0];
-  const modeIdx = args.mode === 'raise' ? 0 : args.mode === 'lower' ? 1 : args.mode === 'flatten' ? 2 : 3;
+  const hover = args?.hover ?? null;
+  const sel = args?.selected ?? null;
+  const modeIdx = !args ? 0 : args.mode === 'raise' ? 0 : args.mode === 'lower' ? 1 : args.mode === 'flatten' ? 2 : 3;
   return [
-    1, // aiming → chunky (cell-snapped) display
-    1,
-    args.hover.u,
-    args.hover.v,
-    (args.brushPx / 2) / PAINT_EDITOR_TUNING.paint.height,
+    hover || sel ? 1 : 0,
+    hover ? 1 : 0,
+    hover?.u ?? 0,
+    hover?.v ?? 0,
+    args ? (args.brushPx / 2) / PAINT_EDITOR_TUNING.paint.height : 0,
     modeIdx,
-    args.mirror ? 1 : 0,
+    args?.mirror ? 1 : 0,
+    sel ? 1 : 0,
+    sel?.u ?? 0,
+    sel?.v ?? 0,
   ];
 }

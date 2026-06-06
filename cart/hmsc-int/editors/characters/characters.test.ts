@@ -23,9 +23,9 @@ import { createSessionLog } from '../sessions';
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
 import { globeSurface } from '@reactjit/geometries';
-import { DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes } from './paintKit';
+import { DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes, gridNodeAt, withNodeValue } from './paintKit';
 import {
-  GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, gridDeltaFor,
+  GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, grabPointWorld, gridDeltaFor,
   gridOverlayParams, pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
 } from './grabKit';
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
@@ -452,15 +452,56 @@ test('the sculpt canvas is a measurement surface: fixed palette, guides always r
   assert(DEPTH_OVERLAY_WGSL.includes(`vec3f(${SCULPT_CANVAS.guideInk.join(', ')})`), 'the overlay shader embeds the palette guide ink');
 });
 
-test('the overlay data[] contract: 7 floats always, rest is zeros, aiming is chunky (SCULPTSPLIT-0606 v2)', () => {
+test('the overlay data[] contract: 10 floats always, rest is zeros, aiming is chunky (SCULPTSPLIT+GRIDNODES)', () => {
   // a short array reads out of bounds in the shader — the builder is the law
-  assertEqual(JSON.stringify(depthOverlayData()), JSON.stringify([0, 0, 0, 0, 0, 0, 0]), 'rest state is 7 zeros (smooth display, no footprint)');
+  assertEqual(JSON.stringify(depthOverlayData()), JSON.stringify([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), 'rest state is 10 zeros (smooth display, no footprint, no selection)');
   const aiming = depthOverlayData({ hover: { u: 0.25, v: 0.5 }, brushPx: 16, mode: 'lower', mirror: true });
-  assertEqual(aiming.length, 7, 'aiming state is 7 floats');
+  assertEqual(aiming.length, 10, 'aiming state is 10 floats');
   assertEqual(aiming[0], 1, 'aiming snaps the display chunky');
   assertEqual(aiming[5], 1, 'carve maps to mode 1 (ring tint)');
   assertEqual(aiming[6], 1, 'mirror rides to the twin footprint');
   assert(aiming[4] > 0 && aiming[4] < 0.5, 'brush radius lands in sane v units');
+  // a live node selection alone (no hover) still snaps chunky + rings
+  const sel = depthOverlayData({ hover: null, brushPx: 16, mode: 'raise', mirror: false, selected: { u: 0.3, v: 0.4 } });
+  assertEqual(sel[0], 1, 'selection snaps the display chunky');
+  assertEqual(sel[1], 0, 'no footprint without hover');
+  assertEqual(sel[7], 1, 'selection ring on');
+  assertClose(sel[8], 0.3, 1e-9, 'sel u rides');
+  assertClose(sel[9], 0.4, 1e-9, 'sel v rides');
+});
+
+test('grid nodes: click→node mapping, one-cell value edits, greater points sit on the guides (GRIDNODES-0606)', () => {
+  const { width: GW, height: GH } = PAINT_EDITOR_TUNING.grid;
+  // a click maps to the cell under it; the node's u/v is that cell's CENTER
+  const n = gridNodeAt(0.26, 0.52);
+  assertEqual(n.gx, Math.floor(0.26 * GW), 'node column');
+  assertEqual(n.gy, Math.floor(0.52 * GH), 'node row');
+  assertEqual(n.idx, n.gy * GW + n.gx, 'node index');
+  assertClose(n.u, (n.gx + 0.5) / GW, 1e-9, 'center u');
+  assertClose(n.v, (n.gy + 0.5) / GH, 1e-9, 'center v');
+  assertEqual(gridNodeAt(n.u, n.v).idx, n.idx, 'center → the same node (round-trip)');
+  // the value edit: pure, clamped, exactly one cell moves
+  const grid = new Array(GW * GH).fill(0);
+  const out = withNodeValue(grid, n.idx, 1.7);
+  assertEqual(out[n.idx], 1, 'clamped to the signed depth range');
+  assertEqual(out.filter((x) => x !== 0).length, 1, 'exactly one node moved');
+  assertEqual(grid[n.idx], 0, 'pure — the source grid is untouched');
+  // greater points: ON the guide crossings, distinct colors, and the canvas
+  // dot + the 3D flag ride the SAME uv (flagWorld takes p.u/p.v raw)
+  assertEqual(GREATER_POINTS.length, 3, 'three meridian × equator crossings');
+  for (const p of GREATER_POINTS) {
+    assert([0.25, 0.5, 0.75].includes(p.u) && p.v === 0.5, `(${p.u}, ${p.v}) sits on a meridian × the equator`);
+    assert(DEPTH_OVERLAY_WGSL.includes(`vec3f(${p.ink.join(', ')})`), 'the canvas dot color is baked in the shader');
+  }
+  assertEqual(new Set(GREATER_POINTS.map((p) => p.color)).size, 3, 'distinct flag colors');
+  // 2D↔3D consistency: the same uv resolves to a finite world flag position
+  const draft = generateCharacterDraft(7);
+  const params = editorPartParams('torso', draft, draft.grids.torso);
+  const inst = grabInstancesFor('part', 'torso', [])[0];
+  for (const p of GREATER_POINTS) {
+    const w = grabPointWorld(params as any, inst, p.u, p.v);
+    assert((w as number[]).every(Number.isFinite), 'the 3D flag resolves at the canvas dot uv');
+  }
 });
 
 finish('editors/characters');
