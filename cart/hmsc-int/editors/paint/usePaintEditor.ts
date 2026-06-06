@@ -351,6 +351,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
       brushPx: brushPxRef.current,
       defaults: defaultsRef.current,
       customSurfaces: customSurfacesRef.current,
+      backendTunables: { floodFuzz, floodRejectFrac, samThreshold, samMaskIdx },
     });
   };
 
@@ -372,6 +373,12 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
       setMode(doc.mode ?? 'erase');
       setBrushPx(doc.brushPx ?? PAINT_TUNING.brushDefaultPx);
       if (doc.defaults) setDefaults({ ...doc.defaults, colors: doc.defaults.colors.slice() });
+    }
+    if (doc.backendTunables) {
+      setFloodFuzzState(doc.backendTunables.floodFuzz);
+      setFloodRejectFracState(doc.backendTunables.floodRejectFrac);
+      setSamThresholdState(doc.backendTunables.samThreshold);
+      setSamMaskIdxState(doc.backendTunables.samMaskIdx);
     }
     setCustomSurfaces((doc.customSurfaces ?? []).map((cs) => ({ ...cs })));
     setLassoPoints([]);
@@ -582,6 +589,23 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     noteEdit(`clear selection · ${layer.name}`);
   };
 
+  const setFloodFuzz = (n: number) => {
+    commitCoalesced();
+    setFloodFuzzState(n);
+  };
+  const setFloodRejectFrac = (n: number) => {
+    commitCoalesced();
+    setFloodRejectFracState(n);
+  };
+  const setSamThreshold = (n: number) => {
+    commitCoalesced();
+    setSamThresholdState(n);
+  };
+  const setSamMaskIdx = (n: 0 | 1 | 2) => {
+    commitCoalesced();
+    setSamMaskIdxState(n);
+  };
+
   // tunable change → debounced active-layer re-refine (live slider feedback)
   useEffect(() => {
     const layer = activeLayerObj();
@@ -701,21 +725,27 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     noteEdit(`${cur[i].config.muted ? 'show' : 'mute'} layer · ${cur[i].name}`);
   };
   const setLayerName = (i: number, name: string) => {
+    if (i < 0 || i >= layersRef.current.length) return;
     const clean = name.trim() || `Layer ${i + 1}`;
     commit();
     patchLayer(i, { name: clean });
     touchDocument();
+    noteEdit(`rename layer · ${clean}`);
   };
   const setLayerGroup = (i: number, groupName: string) => {
+    if (i < 0 || i >= layersRef.current.length) return;
+    const layer = layersRef.current[i];
+    const group = groupName.trim() || null;
     commit();
-    patchLayer(i, { groupName: groupName.trim() || null });
+    patchLayer(i, { groupName: group });
     touchDocument();
+    noteEdit(group ? `group layer · ${group}` : `ungroup layer · ${layer.name}`);
   };
 
   // ── look setters (i < 0 targets the defaults) ───────────────────────────────
   const setLayerMode = (i: number, m: SurfaceId) => {
     commitCoalesced();
-    if (i < 0) { setDefaults((dft) => ({ ...dft, mode: m })); return; }
+    if (i < 0) { setDefaults((dft) => ({ ...dft, mode: m })); touchDocument(); return; }
     patchLayerConfig(i, { mode: m });
     bump();
     touchDocument();
@@ -736,6 +766,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
         colors[slotIdx] = hex;
         return { ...dft, colors };
       });
+      touchDocument();
       return;
     }
     const cur = layersRef.current;
@@ -749,14 +780,14 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const setLayerHueOffset = (i: number, value: number) => {
     const v = Math.max(0, Math.min(1, value));
     commitCoalesced();
-    if (i < 0) { setDefaults((dft) => ({ ...dft, hueOffset: v })); return; }
+    if (i < 0) { setDefaults((dft) => ({ ...dft, hueOffset: v })); touchDocument(); return; }
     patchLayerConfig(i, { hueOffset: v });
     bump();
     touchDocument();
   };
   const setLayerPhaseOffset = (i: number, value: number) => {
     commitCoalesced();
-    if (i < 0) { setDefaults((dft) => ({ ...dft, phaseOffset: value })); return; }
+    if (i < 0) { setDefaults((dft) => ({ ...dft, phaseOffset: value })); touchDocument(); return; }
     patchLayerConfig(i, { phaseOffset: value });
     bump();
     touchDocument();
@@ -764,13 +795,14 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const setLayerDim = (i: number, value: number) => {
     const v = Math.max(0, Math.min(1, value));
     commitCoalesced();
-    if (i < 0) { setDefaults((dft) => ({ ...dft, dim: v })); return; }
+    if (i < 0) { setDefaults((dft) => ({ ...dft, dim: v })); touchDocument(); return; }
     patchLayerConfig(i, { dim: v });
     bump();
     touchDocument();
   };
 
   const addCustomSurface = (label: string, shader: string): string => {
+    commit();
     const grown = addCustomSurfaceOp(customSurfacesRef.current, label, shader);
     setCustomSurfaces(grown.customs);
     touchDocument();
@@ -818,15 +850,17 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     const prev = history.undo(buildDocument);
     bumpHistory();
     if (!prev) { setStatus('nothing to undo'); return; }
-    applyDocument(prev, true);
+    applyDocument(prev);
     setStatus('undo');
+    noteEdit('undo');
   };
   const redo = () => {
     const next = history.redo(buildDocument);
     bumpHistory();
     if (!next) { setStatus('nothing to redo'); return; }
-    applyDocument(next, true);
+    applyDocument(next);
     setStatus('redo');
+    noteEdit('redo');
   };
 
   // ── export compose ──────────────────────────────────────────────────────────
@@ -899,10 +933,10 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     clicks: active?.clicks ?? [],
     addClick, clearClicks,
     backendName: backend?.name ?? 'none',
-    floodFuzz, setFloodFuzz: setFloodFuzzState,
-    floodRejectFrac, setFloodRejectFrac: setFloodRejectFracState,
-    samThreshold, setSamThreshold: setSamThresholdState,
-    samMaskIdx, setSamMaskIdx: setSamMaskIdxState,
+    floodFuzz, setFloodFuzz,
+    floodRejectFrac, setFloodRejectFrac,
+    samThreshold, setSamThreshold,
+    samMaskIdx, setSamMaskIdx,
     layers, activeLayer, setActiveLayer, maskVersion,
     baseIdOf, brushIdOf,
     addLayer, deleteLayer, duplicateLayer, moveLayer, mergeLayer,

@@ -74,6 +74,13 @@ export type PaintLookDefaults = {
   dim: number;
 };
 
+export type PaintBackendTunables = {
+  floodFuzz: number;
+  floodRejectFrac: number;
+  samThreshold: number;
+  samMaskIdx: 0 | 1 | 2;
+};
+
 // ── Ids ───────────────────────────────────────────────────────────────────────
 
 let g_layerCounter = 1;
@@ -223,6 +230,8 @@ export type PaintDocument = {
   brushPx: number;
   defaults: PaintLookDefaults;
   customSurfaces: CustomSurface[];
+  /** Optional in v1 documents; old saves omit it and fall back to P2 tuning. */
+  backendTunables?: PaintBackendTunables;
 };
 
 function brushHasContent(brush: Uint8Array): boolean {
@@ -254,6 +263,7 @@ export type BuildPaintDocumentArgs = {
   brushPx: number;
   defaults: PaintLookDefaults;
   customSurfaces: CustomSurface[];
+  backendTunables?: PaintBackendTunables;
 };
 
 export function buildPaintDocument(args: BuildPaintDocumentArgs): PaintDocument {
@@ -277,6 +287,7 @@ export function buildPaintDocument(args: BuildPaintDocumentArgs): PaintDocument 
     brushPx: args.brushPx,
     defaults: { ...args.defaults, colors: args.defaults.colors.slice() },
     customSurfaces: args.customSurfaces.map((cs) => ({ ...cs })),
+    backendTunables: args.backendTunables ? { ...args.backendTunables } : undefined,
   };
 }
 

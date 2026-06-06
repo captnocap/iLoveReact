@@ -227,6 +227,31 @@ export type StrokeEngineOpts = {
   spacingFrac?: number;
 };
 
+// ── The brush-size slider's track mapping ────────────────────────────────────
+// t∈[0,1] ↔ px on a LOG curve, so the low end of the track is fine-grained
+// (a linear track wastes most of its travel on 256–512px). Ends come from
+// the brushSizes ladder; the ladder itself stays the [/] step-key and
+// detent-tick source.
+
+function brushTrackEnds(): { lo: number; hi: number } {
+  const sizes = PAINT_TUNING.brushSizes;
+  return { lo: Math.max(1, sizes[0]), hi: Math.max(2, sizes[sizes.length - 1]) };
+}
+
+/** slider track position → integer brush px (log-eased, clamped) */
+export function brushTrackToPx(t: number): number {
+  const { lo, hi } = brushTrackEnds();
+  const c = Math.max(0, Math.min(1, t));
+  return Math.round(lo * Math.pow(hi / lo, c));
+}
+
+/** brush px → slider track position (the inverse, clamped) */
+export function brushPxToTrack(px: number): number {
+  const { lo, hi } = brushTrackEnds();
+  const p = Math.max(lo, Math.min(hi, px));
+  return Math.log(p / lo) / Math.log(hi / lo);
+}
+
 /** Pointer pressure → dab radius (cutout's curve). */
 export function pressureRadius(brushPx: number, pressure?: number): number {
   const { base, gain, fallback } = PAINT_TUNING.pressure;

@@ -25,10 +25,10 @@
 
 import { PAINT_TUNING } from './tuning';
 import {
-  createStrokeEngine, createVectorStroke, fillPolygon, hasAnyPainted,
-  lassoIsDoubleClick, lassoShouldClose, paintCircle, paintCircleEdgeAware,
-  pressureRadius, rowRuns, sampleToCells, snapToStrongGradient, soften3x3,
-  sobelMagnitudeSq,
+  brushPxToTrack, brushTrackToPx, createStrokeEngine, createVectorStroke,
+  fillPolygon, hasAnyPainted, lassoIsDoubleClick, lassoShouldClose,
+  paintCircle, paintCircleEdgeAware, pressureRadius, rowRuns, sampleToCells,
+  snapToStrongGradient, soften3x3, sobelMagnitudeSq,
 } from './strokes';
 import {
   activeAfterDelete, buildPaintDocument, cloneLayerConfig, defaultLayerConfig,
@@ -60,6 +60,7 @@ export const PAINT = Object.freeze({
   tuning: PAINT_TUNING,
   // strokes
   createStrokeEngine, createVectorStroke, pressureRadius,
+  brushTrackToPx, brushPxToTrack,
   paintCircle, paintCircleEdgeAware, fillPolygon, soften3x3,
   snapToStrongGradient, sobelMagnitudeSq, hasAnyPainted,
   sampleToCells, rowRuns, lassoShouldClose, lassoIsDoubleClick,
@@ -87,6 +88,11 @@ export { usePaintEditor } from './usePaintEditor';
 export type { PaintEditorOptions, PaintEditorState, PaintSession, Dims } from './usePaintEditor';
 export { PaintSurface, PaintQuad } from './PaintSurface';
 export { PaintEditor, PaintToolRail, PaintLayerStrip, PaintLookPanel } from './PaintControls';
+export { ColorWheel } from './ColorWheel';
+export {
+  hexToHsv, hsvToHex, isFullHexColor, isHexColor, normalizeHexColor,
+  type HsvColor,
+} from './colors';
 
 // Types consumers speak.
 export type {

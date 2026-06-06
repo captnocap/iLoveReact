@@ -280,3 +280,20 @@ before inventing the granularity.
 - The live 3D preview is a PANEL in the right stack above the inspector
   (280×300, P2 'cutout-modelpreview.panelWidth/Height') — the full-height
   thin column is gone ("the column is bad").
+
+## FINEBRUSH (2026-06-06, USER ASK: "finer brush sizes")
+
+- The brushSizes ladder went 5 detents → 18 (1,2,3,4,6,8,12,16,24,32,48,64,
+  96,128,192,256,384,512): tattoo-line control at the low end. [ and ] (and
+  the slider's +/- nudges) still step the ladder.
+- The BrushSlider drags CONTINUOUS between 1 and 512 on a LOG-mapped track
+  (the low end is fine-grained; a linear track wasted its travel on
+  256–512). The pure mapping pair brushTrackToPx/brushPxToTrack lives in
+  editors/paint/strokes.ts (P4: monotonic, clamps, round-trips the ladder,
+  low third of the track stays at or under 8px). The 18 ladder sizes render
+  as tick marks on the track.
+- ALSO IN THIS COMMIT (another lane's stranded sources, riding to unbreak
+  main): editors/paint/colors.ts + ColorWheel.tsx were referenced by
+  already-pushed code (ToolRail, paint.test.ts) but never git-added, and
+  layers.ts/usePaintEditor.ts backendTunables persistence backs the pushed
+  test expectations. main could not bundle without them.

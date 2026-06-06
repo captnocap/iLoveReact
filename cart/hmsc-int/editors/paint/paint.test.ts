@@ -8,9 +8,10 @@
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 import { PAINT_TUNING } from './tuning';
 import {
-  createStrokeEngine, createVectorStroke, fillPolygon, hasAnyPainted,
-  lassoIsDoubleClick, lassoShouldClose, paintCircle, paintCircleEdgeAware,
-  pressureRadius, rowRuns, sampleToCells, snapToStrongGradient, soften3x3,
+  brushPxToTrack, brushTrackToPx, createStrokeEngine, createVectorStroke,
+  fillPolygon, hasAnyPainted, lassoIsDoubleClick, lassoShouldClose,
+  paintCircle, paintCircleEdgeAware, pressureRadius, rowRuns, sampleToCells,
+  snapToStrongGradient, soften3x3,
 } from './strokes';
 import {
   activeAfterDelete, buildPaintDocument, defaultLayerConfig, effectiveMask,
@@ -20,7 +21,7 @@ import {
   type PaintLayerBytes, type PaintLookDefaults,
 } from './layers';
 import { createPaintHistory } from './history';
-import { hexToHsv, hsvToHex, isHexColor, normalizeHexColor } from './colors';
+import { hexToHsv, hsvToHex, isFullHexColor, isHexColor, normalizeHexColor } from './colors';
 import {
   addCustomSurface, adoptSurface, buildCellShader, buildTextureShader,
   hexToRgb01, inflateSurface, MASK_SURFACES, NUM_COLOR_SLOTS,
@@ -65,6 +66,29 @@ test('pressure drives the dab radius along the cutout curve', () => {
   engine.move(0, 0, 0);
   const dabs = engine.move(200, 0, 1);
   assert(dabs[dabs.length - 1].radius > dabs[0].radius, 'radius grows toward the high-pressure end');
+});
+
+test('the brush slider track is log-eased, monotonic, and round-trips the ladder', () => {
+  const sizes = PAINT_TUNING.brushSizes;
+  for (let i = 1; i < sizes.length; i++) {
+    assert(sizes[i] > sizes[i - 1], 'the ladder is strictly increasing');
+  }
+  assertEqual(brushTrackToPx(0), sizes[0], 't=0 is the smallest size');
+  assertEqual(brushTrackToPx(1), sizes[sizes.length - 1], 't=1 is the largest');
+  assertEqual(brushTrackToPx(-5), sizes[0], 'below-track clamps');
+  assertEqual(brushTrackToPx(5), sizes[sizes.length - 1], 'past-track clamps');
+  let prev = -1;
+  for (let i = 0; i <= 100; i++) {
+    const px = brushTrackToPx(i / 100);
+    assert(px >= prev, `monotonic at t=${i / 100} (${px} < ${prev})`);
+    prev = px;
+  }
+  for (const px of sizes) {
+    assertEqual(brushTrackToPx(brushPxToTrack(px)), px, `${px}px round-trips through the track`);
+  }
+  // the log easing is the point: the low THIRD of the track stays in fine
+  // tattoo-line sizes instead of racing past them like a linear map would
+  assert(brushTrackToPx(1 / 3) <= 8, `low third of the track is fine-grained (got ${brushTrackToPx(1 / 3)}px)`);
 });
 
 test('mirror symmetry emits the mirrored dab and skips the axis seam', () => {
@@ -240,6 +264,7 @@ test('document round-trip: layers, masks, clicks and look survive RLE + JSON', (
     dims: { w, h }, layers: [bytes], activeLayer: 0,
     tool: 'brush', mode: 'erase', brushPx: 32,
     defaults: DEFAULTS, customSurfaces: [],
+    backendTunables: { floodFuzz: 27, floodRejectFrac: 0.08, samThreshold: 3, samMaskIdx: 2 },
   });
   const parsed = parsePaintDocument(serializePaintDocument(doc));
   assert(!!parsed, 'serialized document parses');
@@ -254,6 +279,7 @@ test('document round-trip: layers, masks, clicks and look survive RLE + JSON', (
   assertEqual(rb[20], 128, 'force-keep byte survives (value-grid RLE)');
   assertEqual(rb[30], 255, 'force-remove byte survives');
   assertEqual(rb[0], 0, 'untouched stays untouched');
+  assertEqual(parsed!.backendTunables?.samMaskIdx, 2, 'smart tunables survive undo/document snapshots');
 });
 
 test('an untouched brush channel is skipped, not persisted as zeros', () => {
@@ -366,6 +392,8 @@ test('HSV color wheel math round-trips common hex colors', () => {
   assertEqual(normalizeHexColor('336699'), '#336699', 'bare hex normalizes');
   assert(isHexColor('#f0c'), 'short hash hex is valid');
   assert(isHexColor('336699'), 'bare long hex is valid');
+  assert(!isFullHexColor('#f0c'), 'short hex waits for submit in the field');
+  assert(isFullHexColor('336699'), 'full hex live-applies');
   assert(!isHexColor('#12xz56'), 'bad hex digits rejected');
   assertEqual(hsvToHex({ h: 0, s: 1, v: 1 }), '#ff0000', 'hue 0 is red');
   assertEqual(hsvToHex({ h: 1 / 3, s: 1, v: 1 }), '#00ff00', 'hue 1/3 is green');

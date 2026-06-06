@@ -160,37 +160,38 @@ export function CutoutToolRail({ s }: { s: PaintEditorState }) {
 }
 
 // ── the brush-size slider (the reference TopBar interaction) ─────────────────
-// A draggable track with one detent per brush size, +/- nudge buttons, and a
-// live px readout. Detents come from PAINT.tuning.brushSizes (P2).
+// CONTINUOUS drag on a log-mapped track (strokes.ts brushTrackToPx — the low
+// end is fine-grained for tattoo lines), with the brushSizes ladder rendered
+// as tick marks, +/- nudge buttons and [ ] stepping the ladder, and a live
+// px readout.
 
 export function BrushSlider({ value, onChange }: { value: number; onChange: (px: number) => void }) {
   const sizes = PAINT.tuning.brushSizes;
   const [rect, setRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
   const [dragging, setDragging] = useState(false);
-  // nearest detent for an off-list value ([/] step keys keep it on-list)
+  // nearest ladder detent for the nudge buttons ([/] keys use the same rule)
   let index = 0;
   for (let i = 0; i < sizes.length; i++) {
     if (Math.abs(sizes[i] - value) < Math.abs(sizes[index] - value)) index = i;
   }
-  const pct = sizes.length <= 1 ? 0 : index / (sizes.length - 1);
+  const pct = PAINT.brushPxToTrack(value);
   const step = (delta: number) => {
     const next = Math.max(0, Math.min(sizes.length - 1, index + delta));
     onChange(sizes[next]);
   };
-  const updateFromX = (x: number) => {
-    if (!rect || rect.width <= 0) return;
-    const raw = (x - rect.x) / rect.width;
-    const nextIndex = Math.max(0, Math.min(sizes.length - 1, Math.round(raw * (sizes.length - 1))));
-    onChange(sizes[nextIndex]);
-  };
   const trackInset = 8;
   const span = RAIL.sliderTrack - trackInset * 2;
+  const updateFromX = (x: number) => {
+    if (!rect || rect.width <= 0) return;
+    const t = (x - rect.x - trackInset) / Math.max(1, rect.width - trackInset * 2);
+    onChange(PAINT.brushTrackToPx(t));
+  };
   return (
     <Col style={{ gap: 4, alignItems: 'center' }}>
       <Row style={{ gap: 6, alignItems: 'center' }}>
-        <NudgeButton label="-" disabled={index === 0} onPress={() => step(-1)} />
+        <NudgeButton label="-" disabled={value <= sizes[0]} onPress={() => step(-1)} />
         <Pressable
-          tooltip={`${value}px brush — drag, or [ and ] to step`}
+          tooltip={`${value}px brush — drag (1–${sizes[sizes.length - 1]}px), or [ and ] to step`}
           onMouseDown={(p: any) => { setDragging(true); updateFromX(p.x); }}
           onMouseMove={(p: any) => { if (dragging) updateFromX(p.x); }}
           onMouseUp={() => setDragging(false)}
@@ -206,27 +207,26 @@ export function BrushSlider({ value, onChange }: { value: number; onChange: (px:
           >
             <Box style={{ position: 'absolute', left: trackInset, right: trackInset, top: 13, height: 2, borderRadius: 1, backgroundColor: T.frame }} />
             <Box style={{ position: 'absolute', left: trackInset, top: 13, width: Math.max(2, Math.round(span * pct)), height: 2, borderRadius: 1, backgroundColor: T.accent }} />
-            {sizes.map((px, i) => (
+            {sizes.map((px) => (
               <Box
                 key={px}
                 style={{
                   position: 'absolute',
-                  left: trackInset - 2 + Math.round((span * i) / (sizes.length - 1)),
-                  top: 10, width: 8, height: 8, borderRadius: 4,
-                  backgroundColor: i <= index ? T.accent : T.control,
-                  borderWidth: 1, borderColor: i === index ? T.ink : T.frame,
+                  left: trackInset + Math.round(span * PAINT.brushPxToTrack(px)),
+                  top: 11, width: 1, height: 6,
+                  backgroundColor: px <= value ? T.accent : T.frame,
                 }}
               />
             ))}
             <Box style={{
               position: 'absolute',
               left: trackInset - 6 + Math.round(span * pct),
-              top: 6, width: 16, height: 16, borderRadius: 8,
+              top: 6, width: 12, height: 16, borderRadius: 6,
               backgroundColor: T.accent, borderWidth: 2, borderColor: T.ink,
             }} />
           </Box>
         </Pressable>
-        <NudgeButton label="+" disabled={index === sizes.length - 1} onPress={() => step(1)} />
+        <NudgeButton label="+" disabled={value >= sizes[sizes.length - 1]} onPress={() => step(1)} />
       </Row>
       <Text style={{ color: T.ink, fontSize: 10, fontWeight: '800' }}>{`${value}px`}</Text>
     </Col>

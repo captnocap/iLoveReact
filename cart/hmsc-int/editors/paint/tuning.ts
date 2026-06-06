@@ -19,8 +19,11 @@
 import { editorTunables } from '../tunables';
 
 export const PAINT_TUNING = ({
-  /** brush diameters offered by the size rail; [ and ] step through these */
-  brushSizes: [2, 8, 32, 128, 512],
+  /** brush diameters offered by the size rail; [ and ] step through these.
+   *  Dense at the low end (tattoo lines on a 512×256 unwrap want 1–16px);
+   *  the slider is CONTINUOUS between the ends (log-mapped — strokes.ts
+   *  brushTrackToPx), these are its detent ticks and the step-key ladder. */
+  brushSizes: [1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512],
   brushDefaultPx: 32,
   /** on-screen cursor ring clamp (display only — dabs use the true radius) */
   cursor: { radiusMin: 4, radiusMax: 180, throttleMs: 60, smartRadius: 12, lassoRadius: 8 },
