@@ -112,9 +112,14 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-once, post-restore
   }, []);
 
-  // every meaningful edit → the store's edited flag + draft-slot autosave
+  // every meaningful edit → the store's edited flag + draft-slot autosave.
+  // DRAFTHOLE-0606: a restored document replays through applyDocument (one
+  // version bump) — that is NOT the user's edit; dirty starts BEYOND the
+  // restore baseline, so a fresh mount can never trigger a slot write that
+  // races the painter's own rehydration.
   const dirtyRef = useRef(store.onDirty); dirtyRef.current = store.onDirty;
-  useEffect(() => { if (s.documentVersion > 0) dirtyRef.current(); }, [s.documentVersion]);
+  const dirtyBase = store.work.initial ? 1 : 0;
+  useEffect(() => { if (s.documentVersion > dirtyBase) dirtyRef.current(); }, [s.documentVersion, dirtyBase]);
 
   // anything dropped on the bench becomes the canvas (cutout's route-wide drop)
   useFileDrop((path) => { void store.openImage(path); });

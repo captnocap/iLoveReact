@@ -44,7 +44,7 @@ type Rec = {
   notes: string[];
 };
 
-function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook }) {
+function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook; noFigures?: boolean }) {
   const rec: Rec = { lib: [], fig: [], veh: [], mat: [], adopt: [], notes: [] };
   let libState: CutoutStreamState = cutoutStream.initial();
   const figDoc = draftToDocument(generateCharacterDraft(7), 'alpha');
@@ -61,7 +61,7 @@ function rig(opts?: { bookSeed?: (book: CutoutDraftBook) => CutoutDraftBook }) {
       note: (l: string) => rec.notes.push(l),
     },
     error: null,
-    figures: { state: () => figures as any },
+    figures: { state: () => (opts?.noFigures ? { characters: {}, order: [] } : figures) as any },
     vehicles: { state: () => vehicles },
     figureSession: () => ({ commit: (e: any, label: string) => { figures.characters[e.id] = e.doc; rec.fig.push({ e, label }); } }),
     vehicleSession: () => ({ commit: (e: any, label: string) => { vehicles.vehicles[e.id] = e.doc; rec.veh.push({ e, label }); } }),
@@ -191,6 +191,86 @@ test('roster row encoding round-trips every family', () => {
     assertEqual(back?.kind, t.kind, `${t.kind} survives the row round-trip`);
   }
   assertEqual(decodeTargetRow('garbage', partFor), null, 'junk rows decode to null');
+});
+
+// ── DRAFTHOLE-0606: the LAW — no unsaved paint work, on ANY target family,
+// dies to a hot update. rig() over the same book IS a hot update (the live
+// singleton re-creates and mount-restores from the book). One test per
+// reachable family; image needs a real identify door (no-op in the rig —
+// its slot path is the same non-model branch material/blank pin); document/
+// cutout open SAVED work and share the same non-model slot machinery.
+
+test('DRAFTHOLE: figure part — stroke → hot update → the painting survives', () => {
+  const { store, getBook } = rig();
+  store.open({ kind: 'figure-part', docId: 'chr-a', part: 'torso' });
+  store.onDirty(); // a stroke (draftMs 0 → synchronous slot write)
+  const { store: reborn } = rig({ bookSeed: () => getBook() });
+  assertEqual(reborn.work.docId, modelWorkId({ family: 'figure', docId: 'chr-a', part: 'torso' }), 'the figure target restores');
+  assert(!!reborn.work.initial && reborn.work.initial.layers.length > 0, 'the strokes survive');
+  assert(reborn.edited, 'restored work counts as unsaved');
+});
+
+test('DRAFTHOLE: vehicle part — stroke → hot update → the painting survives', () => {
+  const { store, getBook } = rig();
+  store.open({ kind: 'vehicle-part', docId: 'veh-a', part: 'body' });
+  store.onDirty();
+  const { store: reborn } = rig({ bookSeed: () => getBook() });
+  assertEqual(reborn.work.model?.family, 'vehicle', 'the vehicle target restores');
+  assert(!!reborn.work.initial && reborn.work.initial.layers.length > 0, 'the strokes survive');
+});
+
+test('DRAFTHOLE: material — stroke → hot update → the painting survives over its shader', () => {
+  const { store, getBook } = rig();
+  store.open({ kind: 'material', id: 'brick', label: 'Brick' });
+  store.onDirty();
+  const { store: reborn } = rig({ bookSeed: () => getBook() });
+  assertEqual(reborn.work.textureId, 'brick', 'the material binding restores');
+  assert(!!reborn.work.initial && reborn.work.initial.layers.length > 0, 'the strokes survive');
+});
+
+test('DRAFTHOLE: blank canvas — stroke → hot update → the painting survives', () => {
+  const { store, getBook } = rig();
+  store.open({ kind: 'blank', w: 64, h: 32 });
+  store.onDirty();
+  const { store: reborn } = rig({ bookSeed: () => getBook() });
+  assert(!!reborn.work.initial && reborn.work.initial.layers.length > 0, 'the strokes survive');
+  assertEqual(`${reborn.work.dims.w}x${reborn.work.dims.h}`, '8x4', 'the document carries its own dims');
+});
+
+test('DRAFTHOLE: an empty painter can NEVER clobber a painted slot (the user\'s loss)', () => {
+  const { store, getBook } = rig();
+  store.open({ kind: 'figure-part', docId: 'chr-a', part: 'torso' });
+  store.onDirty(); // the painted slot exists
+  const key = store.work.docId;
+  // the degenerate race: a painter that hasn't rehydrated yet reports a
+  // layer-less document; its slot write must be REFUSED
+  const realDoc = (store.painterApi.current as PainterApi).buildDocument() as PaintDocument;
+  store.painterApi.current = {
+    buildDocument: () => ({ ...realDoc, layers: [] } as PaintDocument),
+    composeExportMask: () => null,
+    lookColors: () => [],
+  } as PainterApi;
+  store.onDirty();
+  const slot = getBook().slots[key];
+  assert(!!slot && slot.doc.layers.length > 0, 'the painted slot refused the empty document');
+});
+
+test('DRAFTHOLE: a vanished model keeps its binding through the degrade — the restore self-heals', () => {
+  // paint a figure part, hot-update into a world where the roster is EMPTY
+  // (deleted doc / channel not yet ingested — the V20 race)
+  const { store, getBook } = rig();
+  store.open({ kind: 'figure-part', docId: 'chr-a', part: 'torso' });
+  store.onDirty();
+  const { store: degraded, getBook: getBook2 } = rig({ bookSeed: () => getBook(), noFigures: true });
+  assert(degraded.work.model === null, 'the painting degrades to a plain canvas (it SURVIVES)');
+  assert(!!degraded.work.initial && degraded.work.initial.layers.length > 0, 'the strokes are intact');
+  degraded.onDirty(); // a stroke while degraded — the slot rewrites
+  const slot = getBook2().slots[degraded.work.docId];
+  assert(!!slot.model && (slot.model as any).docId === 'chr-a', 'the model binding SURVIVES the degraded slot write');
+  // the roster returns (next hot update) — the model target re-resolves
+  const { store: healed } = rig({ bookSeed: () => getBook2() });
+  assertEqual(healed.work.model?.family, 'figure', 'the binding re-resolves once the roster is back');
+  assert(!!healed.work.initial && healed.work.initial.layers.length > 0, 'nothing was lost across the whole episode');
 });
 
 finish('editors/workbench/paint');

@@ -138,14 +138,24 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
   }
 
   // ── the draft book (C3 — TATTOODRAFT, edited gate, flush-before-switch) ────
+  // DRAFTHOLE-0606: when a model slot's roster doc can't resolve at restore
+  // (deleted, or the channel hadn't ingested yet), the painting degrades to
+  // a plain canvas — but the BINDING must survive into every later slot
+  // write, so the next restore can re-resolve the model (self-healing).
+  let orphanModel: ReturnType<typeof draftModelBinding> = null;
   let draftTimer: ReturnType<typeof setTimeout> | null = null;
   const writeDraftSlot = (nameOverride?: string) => {
     const doc = painterApi.current?.buildDocument() ?? null;
     if (!doc) return;
+    // DRAFTHOLE-0606 (the user's loss, the book's smoking gun: layers=0
+    // written over painted work): a degenerate layer-less document must
+    // NEVER clobber a slot holding real painted layers.
+    const existing = book.read().slots[work.docId];
+    if (doc.layers.length === 0 && (existing?.doc?.layers?.length ?? 0) > 0) return;
     book.write(upsertDraftSlot(
       book.read(),
       work.docId,
-      buildDraft({ docId: work.docId, name: nameOverride ?? work.name, srcPath: work.srcPath, textureId: work.textureId, model: work.model, doc }),
+      buildDraft({ docId: work.docId, name: nameOverride ?? work.name, srcPath: work.srcPath, textureId: work.textureId, model: work.model ?? orphanModel, doc }),
       WB_PAINT_SLOTS_CAP,
     ));
   };
@@ -181,6 +191,7 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
   const install = (next: BenchWork, note?: string) => {
     work = { ...next, epoch: work.epoch + 1 };
     edited = !!next.initial && next.resumed; // a resumed slot counts as edited (it IS unsaved work)
+    orphanModel = null; // a real open replaces the degraded context
     loadGray();
     if (note) { deps.session?.note?.(note); }
     emit();
@@ -336,8 +347,12 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
           work = { ...restored, epoch: 0 };
           edited = restored.resumed;
           status = `restored working draft · ${restored.name}`;
+        } else {
+          // a vanished model: the PAINTING survives as a plain canvas below,
+          // and the binding survives in orphanModel so later slot writes
+          // keep it — the next restore re-resolves (DRAFTHOLE-0606)
+          orphanModel = binding;
         }
-        // a vanished model: the PAINTING survives as a plain canvas below
       }
       if (!work.model && slot.doc) {
         const srcOk = slot.srcPath ? fileExists(slot.srcPath) : true;
