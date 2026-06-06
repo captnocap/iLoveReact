@@ -157,13 +157,23 @@ export type LedgerConfig = {
   /** Case-insensitive regex of trivial acks the hook never logs. */
   ackPattern: string;
   stopReminder: StopReminderMode;
+  /** Prompts starting with one of these (exact case) are supervisor
+   *  dispatches: still captured (the durable record is welcome), but with
+   *  origin 'supervisor-dispatch' — exempt from the Stop-hook nudge and the
+   *  resolution requirement, hidden from `list --open` unless --all. The
+   *  dispatch markers (XYZ-0606) already track their resolution. */
+  dispatchPrefixes: string[];
 };
 
 export const DEFAULT_LEDGER_CONFIG: LedgerConfig = {
   minPromptChars: 40,
   ackPattern: '^(ok(ay)?|yes|no|nah|yep|k|sure|go( ahead)?|continue|proceed|do it|stop|wait|thanks?|ty|lgtm|good( work)?|nice|approved?)\\b.{0,20}$',
   stopReminder: 'block-once',
+  dispatchPrefixes: ['SUPERVISOR'],
 };
+
+/** The origin marking a captured supervisor dispatch — the exemption key. */
+export const DISPATCH_ORIGIN = 'supervisor-dispatch';
 
 /** _config.json in the requests dir overrides the defaults, key by key. */
 export function loadLedgerConfig(dir: string = defaultRequestsDir()): LedgerConfig {
@@ -196,10 +206,25 @@ export function hookCapturePrompt(
   if (/^[/!#]/.test(trimmed)) return { action: 'skipped', reason: 'slash/shell/memory command, not an ask' };
   if (new RegExp(config.ackPattern, 'i').test(trimmed)) return { action: 'skipped', reason: 'trivial ack (ackPattern)' };
   if (trimmed.length < config.minPromptChars) return { action: 'skipped', reason: `under minPromptChars (${config.minPromptChars})` };
-  const record = logRequest(dir, prompt, `${originLabel}:${sessionId.slice(0, 8)}`, {
+  const isDispatch = config.dispatchPrefixes.some((prefix) => trimmed.startsWith(prefix));
+  const record = logRequest(dir, prompt, isDispatch ? DISPATCH_ORIGIN : `${originLabel}:${sessionId.slice(0, 8)}`, {
     sessionId, captureMode: 'hook',
   });
   return { action: 'logged', record };
+}
+
+/** Amend a mis-captured entry to supervisor-dispatch — a field-fill on
+ *  origin only (the ask text and timestamps are untouched; resolved entries
+ *  keep their record as-is and can't be amended). */
+export function markDispatch(dir: string, id: string): RequestRecord {
+  const path = `${dir}/${id}.json`;
+  if (!__fs_exists(path)) throw new Error(`no such request: ${id}`);
+  const record = parseEntry(path);
+  if (record.status === 'resolved') throw new Error(`${id} is already resolved — its record stands as-is`);
+  if (record.origin === DISPATCH_ORIGIN) return record;
+  const amended: RequestRecord = { ...record, origin: DISPATCH_ORIGIN };
+  writeEntry(dir, amended);
+  return amended;
 }
 
 /** The Stop-hook scan + the `list --session` group: a session's entries. */

@@ -112,7 +112,14 @@ tunable data in `docs/game/_requests/_config.json`, not a buried constant:
   (cleaner than logging + auto-closing them); slash/`!`/`#` commands are
   always skipped;
 - `stopReminder` — `block-once` (default) | `context` (transcript-only) |
-  `off`.
+  `off`;
+- `dispatchPrefixes` (default `["SUPERVISOR"]`) — prompts starting with one
+  of these are supervisor dispatches: still captured verbatim (the durable
+  record is welcome) but with origin `supervisor-dispatch`, EXEMPT from the
+  Stop-hook nudge and the resolution requirement (their markers already
+  track resolution), and hidden from `list --open` unless `--all`.
+  Mis-captures from before the rule amend with
+  `tools/request mark-dispatch <id>` — a field-fill on origin only.
 
 Manual `tools/request log` keeps working unchanged — relays and hook-less
 contexts still need it (`--session <id>` attaches a session by hand).

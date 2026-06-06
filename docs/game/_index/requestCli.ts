@@ -13,6 +13,7 @@
 import {
   defaultRequestsDir, loadRequests, logRequest, resolveRequest,
   hookCapturePrompt, requestsForSession, loadLedgerConfig,
+  markDispatch, DISPATCH_ORIGIN,
   type RequestRecord,
 } from './requests';
 
@@ -26,8 +27,10 @@ const USAGE = `request — the REQUEST LEDGER (user asks → resolutions; docs/g
   request log "<verbatim ask>" --origin <pane|lane|supervisor-relay> [--session <id>]
   request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
       (or pipe the paragraph on stdin instead of --para)
-  request list [--open] [--session <id>]
+  request list [--open] [--all] [--session <id>]
+      (--open hides supervisor dispatches; add --all to show everything)
   request show <id>
+  request mark-dispatch <id>   amend a mis-captured entry to supervisor-dispatch
 
 hook mode (wired by .claude/settings.json + .codex/hooks.json; payload JSON on stdin):
   request hook-prompt [--cli codex]   UserPromptSubmit → auto-capture the literal prompt
@@ -47,6 +50,7 @@ function parseArgs(argv: string[]): { positionals: string[]; flags: Map<string, 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--open') { flags.set('open', 'true'); continue; }
+    if (arg === '--all') { flags.set('all', 'true'); continue; }
     if (arg.startsWith('--')) {
       const value = argv[i + 1];
       if (value === undefined) fail(`${arg} needs a value`);
@@ -141,7 +145,11 @@ function cmdHookPrompt(flags: Map<string, string>): void {
   const originLabel = flags.get('cli') === 'codex' ? 'codex' : 'session';
   const result = hookCapturePrompt(defaultRequestsDir(), sessionId, prompt, undefined, originLabel);
   if (result.action === 'logged') {
-    console.log(`[request-ledger] captured ${result.record.id} (this prompt, verbatim). Your work is not done until: tools/request resolve ${result.record.id} --para "<what was done, why, what changed>" --shas <sha,...|none>`);
+    if (result.record.origin === DISPATCH_ORIGIN) {
+      console.log(`[request-ledger] captured ${result.record.id} (supervisor dispatch — recorded for the durable record; its marker tracks resolution, no ledger resolve required)`);
+    } else {
+      console.log(`[request-ledger] captured ${result.record.id} (this prompt, verbatim). Your work is not done until: tools/request resolve ${result.record.id} --para "<what was done, why, what changed>" --shas <sha,...|none>`);
+    }
   }
   // skipped → silent: noise must cost the session nothing
 }
@@ -157,7 +165,8 @@ function cmdHookStop(flags: Map<string, string>): void {
   if (config.stopReminder === 'off') return;
   const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
   if (sessionId.length === 0) return;
-  const open = requestsForSession(defaultRequestsDir(), sessionId).filter((record) => record.status === 'open');
+  const open = requestsForSession(defaultRequestsDir(), sessionId)
+    .filter((record) => record.status === 'open' && record.origin !== DISPATCH_ORIGIN);
   if (open.length === 0) return;
   const listing = open
     .map((record) => `${record.id} "${record.text.replace(/\n/g, ' ').slice(0, 100)}"`)
@@ -189,7 +198,11 @@ function cmdList(flags: Map<string, string>): void {
   const inSession = flags.has('session')
     ? all.filter((record) => record.sessionId === flags.get('session'))
     : all;
-  const records = flags.has('open') ? inSession.filter((record) => record.status === 'open') : inSession;
+  // --open is the debt list: supervisor dispatches are exempt from the
+  // resolution requirement, so they hide there unless --all asks for them.
+  const records = flags.has('open')
+    ? inSession.filter((record) => record.status === 'open' && (flags.has('all') || record.origin !== DISPATCH_ORIGIN))
+    : inSession;
   if (records.length === 0) {
     console.log(flags.has('open') ? '(no open requests)' : '(empty ledger)');
     return;
@@ -197,6 +210,12 @@ function cmdList(flags: Map<string, string>): void {
   for (const record of records) console.log(oneLine(record));
   const open = all.filter((record) => record.status === 'open').length;
   console.log(`${records.length} shown · ${all.length} total · ${open} open`);
+}
+
+function cmdMarkDispatch(positionals: string[]): void {
+  const id = positionals[0] ?? fail(`mark-dispatch needs an id.\n${USAGE}`, 2);
+  const record = markDispatch(defaultRequestsDir(), id);
+  console.log(`${record.id} amended — origin: ${record.origin} (exempt from the open list and the stop nudge; the ask text is untouched)`);
 }
 
 function cmdShow(positionals: string[]): void {
@@ -215,6 +234,7 @@ try {
   else if (command === 'resolve') cmdResolve(positionals, flags);
   else if (command === 'list') cmdList(flags);
   else if (command === 'show') cmdShow(positionals);
+  else if (command === 'mark-dispatch') cmdMarkDispatch(positionals);
   else if (command === 'hook-prompt') cmdHookPrompt(flags);
   else if (command === 'hook-stop') cmdHookStop(flags);
   else {

@@ -1,5 +1,6 @@
 {
   "minPromptChars": 40,
   "ackPattern": "^(ok(ay)?|yes|no|nah|yep|k|sure|go( ahead)?|continue|proceed|do it|stop|wait|thanks?|ty|lgtm|good( work)?|nice|approved?)\\b.{0,20}$",
-  "stopReminder": "block-once"
+  "stopReminder": "block-once",
+  "dispatchPrefixes": ["SUPERVISOR"]
 }

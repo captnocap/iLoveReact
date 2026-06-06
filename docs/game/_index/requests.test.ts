@@ -16,6 +16,7 @@ import { test, assert, assertEqual, assertThrows, finish } from '../../../cart/h
 import {
   loadRequests, logRequest, resolveRequest, MIN_RESOLUTION_CHARS,
   hookCapturePrompt, requestsForSession, loadLedgerConfig, DEFAULT_LEDGER_CONFIG,
+  markDispatch, DISPATCH_ORIGIN,
   type RequestRecord,
 } from './requests';
 import { searchRequests, tokenize } from './oracle';
@@ -149,6 +150,32 @@ test('codex captures share the write path, diverging only in the origin label', 
   assertEqual(record.text, literal, 'verbatim through the shared path');
   assertEqual(record.origin, 'codex:c0dex123', 'origin names the capturing CLI');
   assertEqual(record.captureMode, 'hook', 'same captureMode vocabulary');
+});
+
+test('SUPERVISOR-prefixed prompts capture as dispatches: exempt origin, configurable prefix, field-fill amendment', () => {
+  const dir = freshDir('dispatch');
+  const dispatchText = 'SUPERVISOR — SOMETHING-0606 dispatch: do a large thing across several files with a marker tracking it.';
+  const captured = hookCapturePrompt(dir, SESSION, dispatchText, DEFAULT_LEDGER_CONFIG);
+  assertEqual(captured.action, 'logged', 'dispatches are still captured — the durable record is welcome');
+  const record = loadRequests(dir)[0];
+  assertEqual(record.origin, DISPATCH_ORIGIN, 'dispatch origin replaces session:<id8>');
+  assertEqual(record.text, dispatchText, 'verbatim as ever');
+  assertEqual(record.sessionId, SESSION, 'session key kept for the report');
+
+  // the prefix list is a knob, not a hardcode
+  const tuned = { ...DEFAULT_LEDGER_CONFIG, dispatchPrefixes: ['DISPATCH:'] };
+  const underTuned = hookCapturePrompt(dir, SESSION, dispatchText, tuned);
+  assert(underTuned.action === 'logged' && underTuned.record.origin !== DISPATCH_ORIGIN, 'SUPERVISOR is not special once the knob changes');
+  const tunedHit = hookCapturePrompt(dir, SESSION, 'DISPATCH: another marker-tracked block of work for a worker lane.', tuned);
+  assert(tunedHit.action === 'logged' && tunedHit.record.origin === DISPATCH_ORIGIN, 'the configured prefix rules');
+
+  // mis-captures amend by field-fill: origin flips, the ask is untouched
+  const mis = hookCapturePrompt(dir, SESSION, 'SUPERVISOR-shaped text captured before the rule existed, long enough to log.', tuned);
+  const amended = markDispatch(dir, (mis as { record: RequestRecord }).record.id);
+  assertEqual(amended.origin, DISPATCH_ORIGIN, 'amendment flips origin');
+  assertEqual(amended.text, 'SUPERVISOR-shaped text captured before the rule existed, long enough to log.', 'amendment never touches the ask');
+  resolveRequest(dir, (underTuned as { record: RequestRecord }).record.id, PARAGRAPH, []);
+  assertThrows(() => markDispatch(dir, (underTuned as { record: RequestRecord }).record.id), 'resolved entries cannot be amended');
 });
 
 test('the noise rule skips acks, commands, and short prompts — never logs them', () => {
