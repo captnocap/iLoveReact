@@ -160,6 +160,16 @@ interface WireDom { icon: string; kicker: string; rig: 'physics' | 'time' | 'log
 
 const DOMS: Dom[] = ['physics', 'camera', 'world', 'perception', 'input', 'editor', 'logs'];
 
+// The log channels — gutter 2's roster for the logs domain AND the dashboard
+// band's cards. Stats live HERE (display), never in the panel (properties).
+const LOG_CHANNELS = [
+  { name: 'world', persisted: true, cap: '100', path: 'sessions/world', events: '341', last: '12s ago' },
+  { name: 'tuning', persisted: true, cap: '200', path: 'sessions/tuning', events: '57', last: '4m ago' },
+  { name: 'sessions', persisted: true, cap: '200', path: 'sessions/bus', events: '129', last: '40s ago' },
+  { name: 'churn', persisted: false, cap: '500', path: '(memory ring)', events: '2.1k', last: 'now' },
+  { name: 'frame', persisted: false, cap: '500', path: '(memory ring)', events: '9.4k', last: 'now' },
+];
+
 const SET_DB: Record<Dom, WireDom> = {
   physics: {
     icon: 'Zap', kicker: 'PHYSICS', rig: 'physics',
@@ -275,60 +285,52 @@ const SET_DB: Record<Dom, WireDom> = {
   },
   logs: {
     icon: 'Activity', kicker: 'LOGS', rig: 'logs',
-    subjects: [
-      { name: 'world', note: '', groups: [
-        { title: 'CHANNEL', fields: [onoff('persisted', true), num('cap', '100'), val('path', 'sessions/world')] },
-        { title: 'ACTIVITY', fields: [num('events', '341'), val('last', '12s ago')] },
-      ] },
-      { name: 'tuning', note: '', groups: [
-        { title: 'CHANNEL', fields: [onoff('persisted', true), num('cap', '200'), val('path', 'sessions/tuning')] },
-        { title: 'ACTIVITY', fields: [num('events', '57'), val('last', '4m ago')] },
-      ] },
-      { name: 'sessions', note: '', groups: [
-        { title: 'CHANNEL', fields: [onoff('persisted', true), num('cap', '200'), val('path', 'sessions/bus')] },
-        { title: 'ACTIVITY', fields: [num('events', '129'), val('last', '40s ago')] },
-      ] },
-      { name: 'churn', note: '', groups: [
-        { title: 'CHANNEL', fields: [onoff('persisted', false), num('cap', '500'), val('path', '(memory ring)')] },
-        { title: 'ACTIVITY', fields: [num('events', '2.1k'), val('last', 'now')] },
-      ] },
-      { name: 'frame', note: '', groups: [
-        { title: 'CHANNEL', fields: [onoff('persisted', false), num('cap', '500'), val('path', '(memory ring)')] },
-        { title: 'ACTIVITY', fields: [num('events', '9.4k'), val('last', 'now')] },
-      ] },
-    ],
+    // Panel = the channel's editable PROPERTIES only. Its stats (events/last)
+    // are display — they live in column 4's dashboard band, not here.
+    subjects: LOG_CHANNELS.map((c) => ({
+      name: c.name, note: '',
+      groups: [
+        { title: 'CHANNEL', fields: [onoff('persisted', c.persisted), num('cap', c.cap), val('path', c.path)] },
+        { title: 'FILTERS', fields: [onoff('verbose', false), onoff('info', true), onoff('warn', true), onoff('error', true)] },
+        { title: 'RETENTION', fields: [num('keep days', '7'), val('max size', '2mb'), onoff('rotate', true)] },
+        { title: 'EXPORT', fields: [val('format', 'jsonl'), val('dest', 'sessions/export'), onoff('on compile', false)] },
+      ],
+    })),
   },
 };
 
 // channel → studio tone (display only — mirrors the bus's toneFor idea)
 const LOG_TONE: Record<string, string> = { world: 'primary', tuning: 'warning', sessions: 'success', churn: 'info', frame: 'error' };
 
-const LOG_LINES: Array<{ t: string; ch: string; text: string }> = [
-  { t: '14:02:41', ch: 'frame', text: 'fps 238 → 241' },
-  { t: '14:02:39', ch: 'world', text: 'tile: painted 14 cells (road)' },
-  { t: '14:02:38', ch: 'churn', text: 'setFloors n=4 → previewWorld rebuild 12ms' },
-  { t: '14:02:31', ch: 'world', text: 'object: placed palm_tree at 12,-4' },
-  { t: '14:02:28', ch: 'sessions', text: '/vehicles opened' },
-  { t: '14:02:21', ch: 'tuning', text: 'physics.gravity ← 12.0' },
-  { t: '14:02:19', ch: 'world', text: 'camera: settled' },
-  { t: '14:02:12', ch: 'frame', text: 'paint spike 38ms (static surface re-bake)' },
-  { t: '14:01:58', ch: 'world', text: 'object: moved bench' },
-  { t: '14:01:55', ch: 'churn', text: 'cart re-render (floors)' },
-  { t: '14:01:49', ch: 'sessions', text: 'commit: paint stroke ×34' },
-  { t: '14:01:42', ch: 'tuning', text: 'camera.follow.damping ← 0.35' },
-  { t: '14:01:38', ch: 'world', text: 'map: compiled downtown → game' },
-  { t: '14:01:30', ch: 'frame', text: 'gpu upload 1.2mb' },
-  { t: '14:01:24', ch: 'world', text: 'tile: height brush +3 (9 cells)' },
-  { t: '14:01:19', ch: 'sessions', text: '/cutout closed' },
-  { t: '14:01:11', ch: 'churn', text: 'previewWorld rebuild 9ms' },
-  { t: '14:00:58', ch: 'tuning', text: 'reset walk.speed → default' },
-  { t: '14:00:52', ch: 'world', text: 'object: rotated cop car 90°' },
-  { t: '14:00:47', ch: 'frame', text: 'fps 240 steady' },
-  { t: '14:00:41', ch: 'sessions', text: '/items opened' },
-  { t: '14:00:33', ch: 'world', text: 'map: opened marina' },
-  { t: '14:00:21', ch: 'churn', text: 'kind textures re-skinned (brick)' },
-  { t: '14:00:09', ch: 'world', text: 'tile: painted 41 cells (sidewalk)' },
-];
+// Deterministic fake stream, sized for a BIG surface (the real page tails the
+// V20 streams). {n} slots keep repeats from reading like a copy-paste loop.
+const LOG_TEMPLATES: Record<string, string[]> = {
+  world: [
+    'tile: painted {n} cells (road)', 'object: placed palm_tree at {n},-4', 'camera: settled',
+    'object: moved bench', 'map: compiled downtown → game', 'tile: height brush +3 ({n} cells)',
+    'object: rotated cop car 90°', 'map: opened marina', 'tile: painted {n} cells (sidewalk)',
+    'object: cloned hotdog cart', 'marker: spawn set at {n},8',
+  ],
+  tuning: ['physics.gravity ← {n}.0', 'camera.follow.damping ← 0.{n}', 'reset walk.speed → default', 'perception.cone ← {n}m'],
+  sessions: ['/vehicles opened', 'commit: paint stroke ×{n}', '/cutout closed', '/items opened', 'commit: placement edit', '/characters opened'],
+  churn: ['cart re-render (floors)', 'previewWorld rebuild {n}ms', 'setFloors n={n}', 'kind textures re-skinned (brick)'],
+  frame: ['fps 238 → 241', 'paint spike {n}ms (static surface re-bake)', 'gpu upload 1.{n}mb', 'fps 240 steady'],
+};
+// rough real-world mix: world chatters most, tuning least
+const LOG_MIX = ['world', 'frame', 'world', 'churn', 'sessions', 'world', 'tuning', 'frame', 'world', 'churn', 'sessions', 'world'];
+
+function fakeClock(i: number): string {
+  const s = 14 * 3600 + 2 * 60 + 41 - i * 7;
+  const p = (x: number) => String(x).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+}
+
+const LOG_LINES: Array<{ t: string; ch: string; text: string }> = Array.from({ length: 64 }, (_, i) => {
+  const ch = LOG_MIX[i % LOG_MIX.length];
+  const temps = LOG_TEMPLATES[ch];
+  const text = temps[(i * 7 + 3) % temps.length].replace('{n}', String(((i * 13) % 37) + 4));
+  return { t: fakeClock(i), ch, text };
+});
 
 // ── shared little pieces ──────────────────────────────────────────────────────
 
@@ -686,15 +688,42 @@ function TimeRig(props: { hour: string }) {
   );
 }
 
-// LOGS — the channel's demonstration IS its stream.
+// LOGS — the channel's demonstration IS its stream. Big-surface treatment:
+// a per-channel dashboard band (event count + activity sparkline) spends the
+// width, then the stream reads at terminal size with channel edge-stripes
+// and alternating row shading. No dead space.
 function LogStream(props: { channel: string; all: boolean }) {
   const rows = props.all ? LOG_LINES : LOG_LINES.filter((l) => l.ch === props.channel);
   return (
     <C.LogPane>
+      <C.StatBand>
+        {LOG_CHANNELS.map((c) => {
+          const on = !props.all && c.name === props.channel;
+          const Card = on ? C.StatCardOn : C.StatCard;
+          const color = tone(LOG_TONE[c.name] ?? 'primary');
+          return (
+            <Card key={c.name}>
+              <C.StatHead>
+                <C.LogChip style={{ backgroundColor: color }}>
+                  <C.LogChipText>{c.name}</C.LogChipText>
+                </C.LogChip>
+                <C.StatSub>{`last ${c.last}`}</C.StatSub>
+              </C.StatHead>
+              <C.StatBig>{c.events}</C.StatBig>
+              <C.Spark>
+                {Array.from({ length: 14 }, (_, i) => (
+                  <C.SparkBar key={i} style={{ height: 5 + ((c.name.charCodeAt(0) * (i + 3) * 31) % 19), backgroundColor: color }} />
+                ))}
+              </C.Spark>
+            </Card>
+          );
+        })}
+      </C.StatBand>
       <ScrollView showScrollbar style={{ flexGrow: 1, minHeight: 0 }}>
         <Box style={{ flexDirection: 'column' }}>
           {rows.map((l, i) => (
-            <C.LogRow key={`${l.t}-${i}`}>
+            <C.LogRow key={`${l.t}-${i}`} style={{ backgroundColor: i % 2 ? 'transparent' : tone('bg') }}>
+              <C.LogStripe style={{ backgroundColor: tone(LOG_TONE[l.ch] ?? 'primary') }} />
               <C.LogTime>{l.t}</C.LogTime>
               <C.LogChip style={{ backgroundColor: tone(LOG_TONE[l.ch] ?? 'primary') }}>
                 <C.LogChipText>{l.ch}</C.LogChipText>

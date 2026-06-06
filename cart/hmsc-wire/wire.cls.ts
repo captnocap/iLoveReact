@@ -226,13 +226,24 @@ classifier({
   },
   SegMiniPressOn: { type: 'Pressable', style: { paddingLeft: 5, paddingRight: 5, paddingTop: 2, paddingBottom: 2, backgroundColor: 'theme:segActiveBg' } },
 
-  // the log stream (logs domain, column 4)
+  // the log stream (logs domain, column 4) — sized for the BIG surface.
+  // Dead-space rule: the stream is the content, so it reads at terminal size
+  // (13px mono rows) under a per-channel dashboard band (count + sparkline).
   LogPane: { type: 'Box', style: { flexGrow: 1, minHeight: 0, flexDirection: 'column' } },
-  LogRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 10, paddingTop: 3, paddingBottom: 3, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
-  LogTime: { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:textFaint', style: { fontFamily: 'monospace' } },
-  LogChip: { type: 'Box', style: { paddingLeft: 5, paddingRight: 5, paddingTop: 1, paddingBottom: 1, borderRadius: 'theme:radiusSm' } }, // bg per channel
-  LogChipText: { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:bg', style: { fontFamily: 'monospace', fontWeight: 800 } },
-  LogText: { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:textSecondary', style: { fontFamily: 'monospace' } },
+  StatBand: { type: 'Box', style: { flexDirection: 'row', gap: 'theme:spacingMd', paddingLeft: 'theme:spacingMd', paddingRight: 'theme:spacingMd', paddingTop: 'theme:spacingMd', paddingBottom: 'theme:spacingMd', backgroundColor: 'theme:surface', borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:border' } },
+  StatCard: { type: 'Box', style: { flexGrow: 1, flexDirection: 'column', gap: 6, padding: 10, borderWidth: 'theme:borderThin', borderColor: 'theme:controlBorder', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:cardBg' } },
+  StatCardOn: { type: 'Box', style: { flexGrow: 1, flexDirection: 'column', gap: 6, padding: 10, borderWidth: 'theme:borderThin', borderColor: 'theme:primary', borderRadius: 'theme:radiusMd', backgroundColor: 'theme:bgElevated' } },
+  StatHead: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 6 } },
+  StatBig: { type: 'Text', fontSize: 20, color: 'theme:text', style: { fontFamily: 'monospace', fontWeight: 800 } },
+  StatSub: { type: 'Text', fontSize: 'theme:fontXs', color: 'theme:textFaint', style: { fontFamily: 'monospace' } },
+  Spark: { type: 'Box', style: { flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: 24 } },
+  SparkBar: { type: 'Box', style: { width: 5, borderRadius: 1, backgroundColor: 'theme:primary' } }, // height/color per instance
+  LogRow: { type: 'Box', style: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingRight: 12, paddingTop: 5, paddingBottom: 5, borderBottomWidth: 'theme:borderThin', borderBottomColor: 'theme:borderSoft' } },
+  LogStripe: { type: 'Box', style: { width: 3, alignSelf: 'stretch' } }, // channel color per instance
+  LogTime: { type: 'Text', fontSize: 'theme:fontMd', color: 'theme:textDim', style: { fontFamily: 'monospace' } },
+  LogChip: { type: 'Box', style: { paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 'theme:radiusSm' } }, // bg per channel
+  LogChipText: { type: 'Text', fontSize: 'theme:fontSm', color: 'theme:bg', style: { fontFamily: 'monospace', fontWeight: 800 } },
+  LogText: { type: 'Text', fontSize: 'theme:fontXl', color: 'theme:textSecondary', style: { fontFamily: 'monospace' } },
 
   // ── greybox wireframe slots (the not-yet-real regions) ───────
   WireBody: { type: 'Box', style: { flexGrow: 1, minHeight: 0, padding: 'theme:spacingLg', gap: 'theme:spacingMd' } },
