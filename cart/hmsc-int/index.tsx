@@ -25,7 +25,7 @@ import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } fr
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
 import { serializeMap, deserializeMap, emptyMap, paintedCenter, isSaneView2d, type MapSnapshot, type EditorWorld } from './mapStore';
-import { ProjectBar, MapsMenu, EventLog } from './ProjectBar';
+import { Chrome, MapsMenu, EventLog } from './shell/chrome';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS, HEIGHT_LIMIT } from './heightData';
@@ -59,7 +59,8 @@ import { worldStream } from './game/world/stream';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
-// (the ProjectBar) manages the SET of maps; below it the editor is a 2x2 pane grid:
+// (the chrome strip, shell/chrome.tsx) manages the SET of maps; below it the
+// editor is a 2x2 pane grid:
 //
 //   ┌──────────┬──────────┐
 //   │ in-focus │  right    │   top row — properties + tabbed rail
@@ -192,7 +193,7 @@ const MemoPaintCanvas = memo(PaintCanvas);
 // The cart's router: the editor at "/", the in-app churn-log viewer at "/log",
 // and the assistant-authored 3D route at "/assist3d". `hotKey` persists the
 // active route across hot reloads. The editor stays MOUNTED below the persistent
-// ProjectBar shell while route surfaces overlay the shell body.
+// chrome shell while route surfaces overlay the shell body.
 export default function HmscWorldEditorCart() {
   return (
     <Router hotKey="hmsc-int:route" initialPath="/">
@@ -393,7 +394,7 @@ function EditorShell() {
   const snapshotForUndo = useCallback(() => wsRef.current.commit(), []);
   const snapshotForUndoCoalesced = useCallback(() => wsRef.current.commitCoalesced(), []);
 
-  // ── Multi-map management (the project manager surface is ProjectBar) ──────────
+  // ── Multi-map management (the project manager surface is the chrome strip) ────
   const [maps, setMaps] = useState<string[]>(() => listMaps());
   const [menuOpen, setMenuOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
@@ -436,7 +437,7 @@ function EditorShell() {
     }
   }, []);
 
-  // ── Event-log trace (the categorized eventbus shown in the ProjectBar popover) ──
+  // ── Event-log trace (the categorized eventbus shown in the chrome popover) ────
   // A stream of WHAT happened (tile painted, object moved, camera moved, ...), not
   // autosave spam — the "saved" pill already shows save state.
   const EVENTS_CAP = 100;
@@ -798,7 +799,7 @@ function EditorShell() {
   // The /workbench source registry (WORKBENCH.md §6) — built once per mount.
   const wbSources = useMemo(workbenchSources, []);
 
-  // Router nav lives in the persistent ProjectBar shell.
+  // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
   const route = useRoute();
   const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/items' ? 'items' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/compose' ? 'compose' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
@@ -819,7 +820,7 @@ function EditorShell() {
 
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#080d16' }}>
-      <ProjectBar
+      <Chrome
         mapName={ws.stem}
         activeRoute={activeRoute}
         menuOpen={menuOpen}
@@ -909,7 +910,7 @@ function EditorShell() {
           }
         />
 
-        {/* Route surfaces live inside the shell body, so ProjectBar remains the
+        {/* Route surfaces live inside the shell body, so the chrome remains the
             one navigation shell and the editor stays mounted underneath. */}
         <Route path="/log">{() => <LogView />}</Route>
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>

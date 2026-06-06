@@ -2,8 +2,9 @@
 //
 // Every meaningful edit emits an EditNote describing WHAT happened (a category +
 // a human line), instead of the old useless "saved" spam. The cart collects them
-// into a capped ring of EditEvents (note + timestamp) shown in the ProjectBar's
-// log popover. Categories drive the row colour so the trace is scannable at a glance.
+// into a capped ring of EditEvents (note + timestamp) shown in the chrome strip's
+// log popover (shell/chrome.tsx EventLog). Categories drive the row colour so the
+// trace is scannable at a glance.
 //
 // The trace PERSISTS to its own file (sessions/_eventlog.json) so it survives hot
 // updates instead of resetting every reload — see loadEvents/saveEvents. That file

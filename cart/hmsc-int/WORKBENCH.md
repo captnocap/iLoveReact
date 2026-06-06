@@ -70,9 +70,10 @@ shell/stage.tsx        — LANDED. LensBar (lens segments) + EmptyStage; rig and
 shell/WorkbenchRoute.tsx — LANDED. Mounted at /workbench alongside every
                          existing route; sources arrive from
                          editors/workbench/sources.ts (shell stays generic).
-shell/chrome.tsx       — step 2: the W1 strip with window controls
-                         (__window_minimize/maximize/close + windowDrag);
-                         replaces ProjectBar.tsx at the swap.
+shell/chrome.tsx       — LANDED (WBCHROME-0606). The W1 strip with window
+                         controls (__window_minimize/maximize/close +
+                         windowDrag); replaced ProjectBar.tsx at the swap
+                         (MapsMenu/EventLog overlays carried over intact).
 ```
 
 ### WorkbenchSource — what a category implements
@@ -174,7 +175,7 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 
 | file | lines | disposition |
 |---|---|---|
-| `index.tsx` (EditorShell, routes, map-editor wiring) | 958 | **KEEP/SHRINK** — stays the cart root + map editor host; route table shrinks to 6; ProjectBar swap → `shell/chrome.tsx` |
+| `index.tsx` (EditorShell, routes, map-editor wiring) | 958 | **KEEP/SHRINK** — stays the cart root + map editor host; route table shrinks to 6; ~~ProjectBar swap → `shell/chrome.tsx`~~ DONE (WBCHROME-0606) |
 | `editors/characters/CharactersRoute.tsx` | 1141 | **EXTRACT→DIE** — chip-row layout dies; roster/draft wiring → character source |
 | `editors/items/ItemsRoute.tsx` | 627 | **EXTRACT→DIE** — → item source |
 | `editors/vehicles/VehiclesRoute.tsx` | 508 | **EXTRACT→DIE** — garage store lifts to `editors/vehicles/garage.ts`; → vehicle source |
@@ -199,7 +200,7 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 | `IsoPreview.tsx` (228) | the 3D preview pane |
 | `PropertiesPanel.tsx` (716) | in-focus inspector — ALREADY on studio.cls; its Group/FieldStrip classes are the ones the Workbench panel shares |
 | `RightPanel.tsx` (85) + `tabs/{ObjectsTab,ChatTab,NotesTab,SettingsTab}.tsx` | right rail. ObjectsTab (370) keeps serving placeables; its embedded ShaderLab/TexturePreview usage re-points at the material source's shared pieces |
-| `ProjectBar.tsx` (264) | **DIE** — replaced by `shell/chrome.tsx` (same shape + window controls; MapsMenu/EventLog overlays carry over) |
+| `ProjectBar.tsx` (264) | **DIED** (WBCHROME-0606) — replaced by `shell/chrome.tsx` (same shape + window controls; MapsMenu/EventLog overlays carried over; line-referenced parity table in the landing commit `34400c6e7`) |
 | `ShaderLab.tsx` (189) | **KEEP/SHARE** — param lab becomes a material-source stage mode AND stays embeddable (ObjectsTab) |
 | `TexturePreview.tsx` (33) · `ModelViewer.tsx` (152) · `ObjectInspect3D.tsx` (176) | **KEEP** — preview atoms; ModelViewer/ObjectInspect3D also serve asset stages |
 | `Embodied.tsx` (709) · `EmbodiedHud.tsx` (373) | **KEEP** — play surface internals |
@@ -229,9 +230,9 @@ bang; the old route works until the minute its replacement does.
 
 1. ~~**Graduate the vocabulary.**~~ DONE — wire.cls.ts → `shell/workbench.cls.ts`
    (additive sheet; studio.cls untouched, its control/panel kit reused).
-2. **`shell/chrome.tsx`.** New strip with window controls replaces ProjectBar
-   in index.tsx (same props, MapsMenu/EventLog carried over). ProjectBar.tsx
-   dies. First visible win; map editor untouched.
+2. ~~**`shell/chrome.tsx`.**~~ DONE (WBCHROME-0606) — new strip with window
+   controls replaced ProjectBar in index.tsx (same props, MapsMenu/EventLog
+   carried over). ProjectBar.tsx dead. First visible win; map editor untouched.
 3. ~~**Frame at a separate route.**~~ DONE — `shell/{Workbench,fields,stage,
    WorkbenchRoute}.tsx` mounted at `/workbench` (temporary Columns3 nav icon)
    alongside everything existing, with `editors/workbench/tunablesSource.ts`
