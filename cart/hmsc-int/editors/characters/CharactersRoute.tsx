@@ -59,7 +59,7 @@ import { itemsStream } from '../items/stream';
 import { sculptedItemDefinition } from '../items/bake';
 import { PAINT } from '../paint';
 import {
-  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, bytesFromGrid, editorPartParams, gridFromBytes,
+  DEPTH_OVERLAY_WGSL, PAINT_EDITOR_TUNING, SCULPT_CANVAS, bytesFromGrid, editorPartParams, gridFromBytes,
   headTextureKey, partDynKey, reliefBytesFromGrid, sculptModeValue, skinTextureKey,
   type SculptMode,
 } from './paintKit';
@@ -1075,14 +1075,14 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
               onMouseDown={onProfDown}
               onMouseMove={onProfMove}
               onMouseUp={onProfUp}
-              style={{ width: EDITOR_W, height: EDITOR_H, borderWidth: 1, borderColor: T.frame, position: 'relative', backgroundColor: '#0a1322' }}
+              style={{ width: EDITOR_W, height: EDITOR_H, borderWidth: 1, borderColor: T.frame, position: 'relative', backgroundColor: SCULPT_CANVAS.base }}
             >
               {draft.profiles[selPart].map((_p, i) => {
                 const rowH = EDITOR_H / PROFILE_N;
                 return (
                   <Box
                     key={i}
-                    style={{ position: 'absolute', left: ('latch:' + profileLatchKey(selPart, i, 'left')) as any, top: i * rowH, width: ('latch:' + profileLatchKey(selPart, i, 'width')) as any, height: rowH - 1, backgroundColor: draft.skin, borderRadius: 4 }}
+                    style={{ position: 'absolute', left: ('latch:' + profileLatchKey(selPart, i, 'left')) as any, top: i * rowH, width: ('latch:' + profileLatchKey(selPart, i, 'width')) as any, height: rowH - 1, backgroundColor: SCULPT_CANVAS.silhouette, borderRadius: 4 }}
                   />
                 );
               })}
@@ -1096,8 +1096,10 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
               onMouseUp={onPaintUp}
               style={{ width: EDITOR_W, height: EDITOR_H, borderWidth: 1, borderColor: T.frame, position: 'relative' }}
             >
+              {/* SCULPTSPLIT-0606 addendum (USER RULING): the unwrap is a
+                  MEASUREMENT surface — fixed-ink base, never draft.skin */}
               <UnwrapContent
-                skin={draft.skin}
+                skin={SCULPT_CANVAS.base}
                 photo={isHead ? photo : null}
                 photoScale={photoScale}
                 photoY={photoY}

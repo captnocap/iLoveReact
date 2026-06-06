@@ -159,6 +159,21 @@ export function skinTextureKey(id: PartId, args: { skin: string; clothing: strin
 
 export { regionSignature };
 
+// ── the sculpt canvas palette (SCULPTSPLIT-0606 addendum, USER RULING) ───────
+// The unwrap canvas is a MEASUREMENT surface, not a skin preview — its base
+// and gridlines are FIXED theme ink, never derived from character data. Skin
+// tone belongs to the 3D views and the PAINT lens. Both routes (the live
+// /characters page and the workbench SCULPT lens) read this one palette.
+export const SCULPT_CANVAS = {
+  /** the canvas field — the outline lathe's proven dark, now the unwrap's too */
+  base: '#0a1322',
+  /** the lathe's profile bars (was draft.skin — the exact bug class ruled out) */
+  silhouette: '#3d6ea8',
+  /** the unwrap guide lines (0..1 rgb — interpolated into the shader below);
+   *  pinned LIGHT against the dark base so the grid always reads */
+  guideInk: [0.55, 0.66, 0.84],
+} as const;
+
 // ── the painter overlay shader ───────────────────────────────────────────────
 // Three layers in one quad: live stroke heat (blue raised / orange carved),
 // contour rings of the current form (relief texture, slot 2), faint unwrap
@@ -185,17 +200,19 @@ export const DEPTH_OVERLAY_WGSL = `
   let contour_a = ring * 0.3 * smoothstep(0.01, 0.05, abs(relief));
   let contour_c = select(carved, raised, relief > 0.0);
 
-  // unwrap guides: front meridian (u=.5), side meridians (u=.25/.75), equator
+  // unwrap guides: front meridian (u=.5), side meridians (u=.25/.75), equator.
+  // SCULPTSPLIT-0606 addendum: the canvas base is FIXED dark ink now, so the
+  // guides are light and their alpha is pinned high enough to always read.
   let gx = min(abs(in.uv.x - 0.5), min(abs(in.uv.x - 0.25), abs(in.uv.x - 0.75)));
   let gy = abs(in.uv.y - 0.5);
-  let guide_a = max((1.0 - smoothstep(0.0015, 0.0035, gx)) * 0.13,
-                    (1.0 - smoothstep(0.003, 0.007, gy)) * 0.09);
+  let guide_a = max((1.0 - smoothstep(0.0015, 0.0035, gx)) * 0.3,
+                    (1.0 - smoothstep(0.003, 0.007, gy)) * 0.22);
 
   // live stroke heat
   let heat_a = clamp(abs(live) * 2.0, 0.0, 1.0) * 0.5;
   let heat_c = select(carved, raised, live > 0.0);
 
-  let ink = vec3f(0.07, 0.1, 0.16);
+  let ink = vec3f(${SCULPT_CANVAS.guideInk.join(', ')});
   let color = heat_c * heat_a + contour_c * contour_a + ink * guide_a;
   let a = min(heat_a + contour_a + guide_a, 0.85);
   return vec4f(color, a);
