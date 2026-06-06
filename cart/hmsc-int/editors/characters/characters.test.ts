@@ -23,7 +23,7 @@ import { createSessionLog } from '../sessions';
 // the same)
 import { createStrokeEngine } from '../paint/strokes';
 import { globeSurface } from '@reactjit/geometries';
-import { DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, SCULPT_CELL_PX, bytesFromGrid, depthOverlayData, editorPartParams, gridFromBytes, gridNodeAt, sculptDabSnap, sculptEffectiveRadiusPx, sculptEngineBrushPx, withNodeValue } from './paintKit';
+import { DEPTH_OVERLAY_WGSL, GREATER_POINTS, PAINT_EDITOR_TUNING, SCULPT_CANVAS, SCULPT_CELL_PX, bytesFromGrid, depthHintData, depthHintGrid, depthOverlayData, editorPartParams, gridFromBytes, gridNodeAt, sculptDabSnap, sculptEffectiveRadiusPx, sculptEngineBrushPx, withNodeValue } from './paintKit';
 import {
   GRAB_TUNING, applyGrabStamp, buildGrabClouds, cellUv, grabDragAxis, grabInstancesFor, grabPointWorld, gridDeltaFor,
   gridOverlayParams, pickGrab, screenAxisFor, stampRadiusUv, type GrabHit,
@@ -583,6 +583,28 @@ test('mirror symmetry holds mesh-deep: the trident case + the preview resolves t
   assert(bump > p2.amount * 0.5, `a single sculpted cell is VISIBLE on the mesh (moved ${bump.toFixed(3)})`);
   const tw = s2(1 - cu, cv);
   assert(Math.abs(at[0] + tw[0]) < 1e-9 && Math.abs(at[1] - tw[1]) < 1e-9 && Math.abs(at[2] - tw[2]) < 1e-9, 'the spike and its mirror render identically');
+});
+
+test('the paint depth hint reads the sculpt truth: sculpt + face fold, one scale (DEPTHOVERLAY-0606)', () => {
+  const GW = HED_GRID_W, GH = 24;
+  const draft = generateCharacterDraft(21);
+  const sculpted = { ...draft, grids: { ...draft.grids, torso: draftPartGrid(draft, 'torso').map((_, i) => (i === 100 ? 0.5 : 0)) } };
+  const doc = draftToDocument(sculpted, 'hint subject');
+  // a body part: the hint IS the stored sculpt, same signed scale
+  const torsoHint = depthHintGrid(doc, 'torso');
+  assertEqual(torsoHint.length, GW * GH, 'hint grid is the sculpt grid resolution');
+  assertClose(torsoHint[100], 0.5, 1 / 127, 'the sculpted cell reads back at its value');
+  assertEqual(torsoHint.filter((x) => Math.abs(x) > 1 / 127).length, 1, 'nothing else lights up');
+  // the head folds the face-layer depth (the nose lives there)
+  const faced = draftWithFace(draft, generateCharacterDraft(22).face ?? null);
+  if (faced.face && faced.face.layers.some((l: any) => l.depth !== 0)) {
+    const headHint = depthHintGrid(draftToDocument(faced, 'faced'), 'head');
+    assert(headHint.some((x) => Math.abs(x) > 1 / 127), 'face depth shows in the head hint');
+  }
+  // the data contract: [opacity, ...grid], opacity from the live P2 table
+  const data = depthHintData(torsoHint);
+  assertEqual(data.length, 1 + GW * GH, 'data = opacity + the grid');
+  assertEqual(data[0], PAINT_EDITOR_TUNING.depthHint.opacity, 'opacity reads the tunable table');
 });
 
 finish('editors/characters');

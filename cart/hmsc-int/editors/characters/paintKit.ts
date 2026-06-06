@@ -11,13 +11,14 @@
 // only (game/figure/bake.ts); whether non-head sculpt detail ships in the
 // compiled figure is the bake's open question (CAPTURE.md).
 
-import { HED_GRID_H, HED_GRID_W } from '../../game/figure/hed';
+import { HED_GRID_H, HED_GRID_W, hedDepthGrid } from '../../game/figure/hed';
 import { PART_LOD, PART_PRESETS, type PartId } from '../../game/figure/shapes';
+import type { BodyDocument } from '../../game/figure/body';
 // the engine's own pressure curve — the cursor ring and the landed dab must
 // derive from the SAME function (BRUSHFLOOR-0606; headless-safe import)
 import { pressureRadius } from '../paint/strokes';
 import { editorTunables } from '../tunables';
-import type { CharacterDraft } from './draft';
+import { draftFromDocument, type CharacterDraft } from './draft';
 import { regionSignature } from './regions';
 
 export const PAINT_EDITOR_TUNING = Object.freeze({
@@ -68,6 +69,9 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
   frame: { margin: 1.25 },
   /** draft auto-commit debounce (V20 micro-save; AUTOSAVE-0605) */
   autosaveDebounceMs: 1200,
+  /** DEPTHOVERLAY-0606: the PAINT surface's light depth hint — orienting,
+   *  never fighting the colors being painted. Opacity is the P2 dial. */
+  depthHint: { opacity: 0.45 },
   // (the face-paint palette + stroke numbers died with the coupled
   // color+depth tool — MODELPAINT-0605; /cutout owns texture painting)
 });
@@ -87,6 +91,7 @@ editorTunables().register({
     'fly.speed': { label: 'fly speed u/s', min: 0.5, max: 12, step: 0.1, precision: 1 },
     'fly.wheelStep': { label: 'fly wheel u', min: 0.05, max: 2, step: 0.05, precision: 2 },
     'frame.margin': { label: 'frame margin ×', min: 1, max: 2.5, step: 0.05, precision: 2 },
+    'depthHint.opacity': { label: 'depth hint α', min: 0, max: 1, step: 0.05, precision: 2 },
   },
 });
 
@@ -284,6 +289,67 @@ export function sculptDabSnap(diameterPx: number, x: number, y: number): { x: nu
     x: (Math.floor(x / SCULPT_CELL_PX) + 0.5) * SCULPT_CELL_PX,
     y: (Math.floor(y / ch) + 0.5) * ch,
   };
+}
+
+// ── the PAINT surface's depth hint (DEPTHOVERLAY-0606, USER ASK) ─────────────
+// "we need a light overlay or something that shows the depth painting grid
+// for the surface so i can be aware and not blind to where im painting."
+// A faint contour layer in the sculpt canvas's own color language, riding
+// the painter's underlay slot (it pans/zooms with the canvas, no painter
+// fork). The grid travels IN data[] (data[0] = opacity, then 48×24 signed
+// values) — no paintable dependency, so the bench shows it even when the
+// sculpt stage isn't mounted.
+
+export const DEPTH_HINT_WGSL = `
+@group(0) @binding(1) var<storage, read> data: array<f32>;
+
+@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
+  let cols = ${HED_GRID_W};
+  let rows = ${HED_GRID_H};
+  let dims = vec2f(${HED_GRID_W}.0, ${HED_GRID_H}.0);
+  let opacity = data[0];
+  let p = in.uv * dims - vec2f(0.5, 0.5);
+  let ixf = floor(p.x);
+  let iyf = clamp(floor(p.y), 0.0, dims.y - 1.0);
+  let tx = p.x - ixf;
+  let ty = clamp(p.y - iyf, 0.0, 1.0);
+  let xa = ((i32(ixf) % cols) + cols) % cols;
+  let xb = (xa + 1) % cols;
+  let ya = i32(iyf);
+  let yb = min(ya + 1, rows - 1);
+  let d00 = data[u32(1 + ya * cols + xa)];
+  let d10 = data[u32(1 + ya * cols + xb)];
+  let d01 = data[u32(1 + yb * cols + xa)];
+  let d11 = data[u32(1 + yb * cols + xb)];
+  let g = (d00 * (1.0 - tx) + d10 * tx) * (1.0 - ty) + (d01 * (1.0 - tx) + d11 * tx) * ty;
+
+  // the sculpt canvas's contour language, LIGHT — orienting, not measuring
+  let levels = 12.0;
+  let t = fract(abs(g) * levels);
+  let ring = 1.0 - smoothstep(0.0, 0.2, min(t, 1.0 - t));
+  let a = ring * smoothstep(0.01, 0.06, abs(g)) * opacity;
+  let raised = vec3f(0.24, 0.66, 1.0);
+  let carved = vec3f(1.0, 0.58, 0.2);
+  return vec4f(select(carved, raised, g > 0.0), a);
+}
+`;
+
+/** The hint's grid: the SAME truth the sculpt canvas shows for this part —
+ *  the stored sculpt plus the head's face-layer depth (the nose lives there). */
+export function depthHintGrid(doc: BodyDocument, part: PartId): number[] {
+  const draft = draftFromDocument(doc);
+  const g = draft.grids[part].slice();
+  if (part === 'head' && draft.face) {
+    const fd = hedDepthGrid(draft.face);
+    for (let i = 0; i < g.length; i++) g[i] = Math.max(-1, Math.min(1, g[i] + (fd[i] ?? 0)));
+  }
+  return g;
+}
+
+/** data[] for DEPTH_HINT_WGSL: [opacity, ...grid] — opacity reads the live
+ *  P2 table so the /settings dial lands on the next render. */
+export function depthHintData(grid: number[]): number[] {
+  return [PAINT_EDITOR_TUNING.depthHint.opacity, ...grid];
 }
 
 // ── the painter overlay shader ───────────────────────────────────────────────

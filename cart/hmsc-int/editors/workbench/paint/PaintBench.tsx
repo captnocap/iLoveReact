@@ -8,13 +8,18 @@
 // dispatch: one painting experience everywhere).
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Col, Effect, Row, Text } from '@reactjit/runtime/primitives';
+import { Box, Col, Effect, Pressable, Row, Text } from '@reactjit/runtime/primitives';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
 import { GAME_CHROME } from '../../../game/chrome';
 import { FaceLayerPaint } from '../../../game/figure/render';
 import { textureById } from '../../../game/textures/registry';
 import type { BodyDocument } from '../../../game/figure/body';
 import { usePaintEditor, PaintSurface, PAINT, type PaintEditorState } from '../../paint';
+// DEPTHOVERLAY-0606: the sculpt kit's depth-hint layer (figure targets) —
+// the same grid truth the sculpt canvas shows, as a light contour underlay
+import { DEPTH_HINT_WGSL, PAINT_EDITOR_TUNING, depthHintData, depthHintGrid } from '../../characters/paintKit';
+import { editorTunables } from '../../tunables';
+import type { PartId } from '../../../game/figure/shapes';
 import { readRouteTwigState, useRouteTwigState } from '../../twigs';
 import { CutoutToolRail } from '../../cutout/ToolRail';
 import { CutoutInspector, type BackendChoice } from '../../cutout/Inspector';
@@ -24,6 +29,35 @@ import type { PaintBenchStore } from './store';
 
 const { Chip } = GAME_CHROME;
 const T = GAME_CHROME.tokens.color;
+
+/** req_0074: the depth hint's intensity — a continuous 0..1 slide in the
+ *  painter's own track visuals (BrushSlider's constants; SCULPTKIT-0606
+ *  folds this into the ONE kit slider when the cohesion pass lands). */
+function HintIntensity({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const [rect, setRect] = useState<{ x: number; y: number; width: number; height: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const TRACK = 96, INSET = 8;
+  const span = TRACK - INSET * 2;
+  const fromX = (x: number) => {
+    if (!rect || rect.width <= 0) return;
+    onChange(Math.max(0, Math.min(1, (x - rect.x - INSET) / Math.max(1, rect.width - INSET * 2))));
+  };
+  return (
+    <Pressable
+      tooltip={`depth hint intensity — ${Math.round(value * 100)}%`}
+      onMouseDown={(p: any) => { setDragging(true); fromX(Number(p?.x ?? 0)); }}
+      onMouseMove={(p: any) => { if (dragging) fromX(Number(p?.x ?? 0)); }}
+      onMouseUp={() => setDragging(false)}
+      onMouseLeave={() => setDragging(false)}
+    >
+      <Box onLayout={(r: any) => setRect(r)} style={{ width: TRACK, height: 20, borderRadius: 5, backgroundColor: T.page, borderWidth: 1, borderColor: T.frame, justifyContent: 'center', position: 'relative' }}>
+        <Box style={{ position: 'absolute', left: INSET, right: INSET, top: 9, height: 2, borderRadius: 1, backgroundColor: T.frame }} />
+        <Box style={{ position: 'absolute', left: INSET, top: 9, width: Math.max(2, Math.round(span * value)), height: 2, borderRadius: 1, backgroundColor: T.accent }} />
+        <Box style={{ position: 'absolute', left: INSET - 5 + Math.round(span * value), top: 4, width: 10, height: 12, borderRadius: 5, backgroundColor: T.accent, borderWidth: 2, borderColor: T.ink }} />
+      </Box>
+    </Pressable>
+  );
+}
 
 export function PaintBench(props: { store: PaintBenchStore }) {
   const store = props.store;
@@ -85,6 +119,22 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
   // anything dropped on the bench becomes the canvas (cutout's route-wide drop)
   useFileDrop((path) => { void store.openImage(path); });
 
+  // DEPTHOVERLAY-0606: the depth hint — default ON ("not blind"), twigged;
+  // figure targets only (conditional-render law: it earns its space).
+  // Intensity (USER req_0074) drives the P2 tunable THROUGH the registry —
+  // the strip slider, /settings, and the shader read the one table.
+  const [showDepthHint, setShowDepthHint] = useRouteTwigState<boolean>('/workbench', 'depthHint', true);
+  const [, bumpHint] = useState(0);
+  const hintOpacity = PAINT_EDITOR_TUNING.depthHint.opacity;
+  const setHintOpacity = (v: number) => {
+    editorTunables().write('sculpt-camera.depthHint.opacity', v);
+    bumpHint((t) => t + 1);
+  };
+  const hintGrid = useMemo(
+    () => (work.model?.family === 'figure' && model ? depthHintGrid(model as BodyDocument, work.model.part as PartId) : null),
+    [model, work.model],
+  );
+
   // the underlay: a model's base (+ the head's face layers) or the registry
   // material's live shader — the canvas IS the thing being painted (E1)
   const underlay = useMemo(() => {
@@ -92,6 +142,15 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
       return (
         <Box style={{ position: 'absolute', left: 0, top: 0, width: work.dims.w, height: work.dims.h, backgroundColor: work.modelBg, overflow: 'hidden' }}>
           {work.modelLayers ? <FaceLayerPaint layers={work.modelLayers} /> : null}
+          {/* the depth hint rides the underlay slot — it pans/zooms with the
+              canvas; light contours, the sculpt canvas's color language */}
+          {showDepthHint && hintGrid ? (
+            <Effect
+              shader={DEPTH_HINT_WGSL}
+              data={depthHintData(hintGrid)}
+              style={{ position: 'absolute', left: 0, top: 0, width: work.dims.w, height: work.dims.h }}
+            />
+          ) : null}
         </Box>
       );
     }
@@ -106,7 +165,7 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
       />
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [work.model, work.modelBg, work.modelLayers, work.textureId, work.dims.w, work.dims.h]);
+  }, [work.model, work.modelBg, work.modelLayers, work.textureId, work.dims.w, work.dims.h, showDepthHint, hintGrid, hintOpacity]);
 
   const inspector = (
     <CutoutInspector
@@ -152,6 +211,14 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
         </Text>
         <Box style={{ flexGrow: 1 }} />
         {store.sessionError ? <Text fontSize={10} color={T.bad} numberOfLines={1}>{`library store offline — ${store.sessionError}`}</Text> : null}
+        {/* DEPTHOVERLAY-0606 (+ req_0074): the hint toggle, and while it's
+            on, its intensity — sliding the one P2 tunable */}
+        {work.model?.family === 'figure' ? (
+          <Chip label="depth hint" active={showDepthHint} color="cyan" onPress={() => setShowDepthHint(!showDepthHint)} />
+        ) : null}
+        {work.model?.family === 'figure' && showDepthHint ? (
+          <HintIntensity value={hintOpacity} onChange={setHintOpacity} />
+        ) : null}
         <Chip label={saveLabel} color={store.edited ? 'good' : 'dim'} onPress={store.saveCurrent} />
         <Chip label="extract cutout" color={store.edited ? 'accent' : 'dim'} onPress={store.extractCurrent} />
       </Row>
