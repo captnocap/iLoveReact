@@ -944,6 +944,21 @@
         "doom"
       ],
       "note": "Vendored doomgeneric (id Software Doom + ozkl porting shim) compiled into the cart. ~30K LOC of C, adds ~600KB to the binary. Carts that don't import useDoom pay nothing."
+    },
+    "frame-capture": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "runtime/capture.ts"
+        }
+      ],
+      "buildOptions": [
+        "has-capture"
+      ],
+      "v8Bindings": [
+        "capture"
+      ],
+      "note": "SELFSHOT-0606: __capture_frame(path) — the app screenshots its OWN rendered frame (framework/gpu/capture.zig readback → PNG), registered by framework/v8_bindings_capture.zig. The replacement for the BANNED desktop/X11 capture of the user's system. Carts opt in by importing runtime/capture.ts (the captureFrame door)."
     }
   },
   "shipGate": {

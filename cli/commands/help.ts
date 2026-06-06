@@ -4,7 +4,7 @@ import { tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 
 const TEMPLATES = ['basic', 'routes', 'dashboard', 'taskboard', 'canvas', 'stdlib'];
-const SUBCOMMANDS = ['init', 'dev', 'tui', 'ship', 'ship-tui', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
+const SUBCOMMANDS = ['init', 'dev', 'tui', 'ship', 'ship-tui', 'shot', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
 
 type HelpCommand = typeof SUBCOMMANDS[number];
 
@@ -76,6 +76,23 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
       '',
       'Kept for muscle memory during the migration; the canonical command is',
       'rjit ship <cart-name> --tui.',
+    ],
+  },
+  shot: {
+    summary: "capture a cart's OWN rendered frame headless (never the desktop)",
+    usage: ['rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S]'],
+    detail: [
+      'SELFSHOT-0606: desktop/X11 capture of the user\'s system is BANNED.',
+      'This boots the cart\'s shipped binary with a HIDDEN window',
+      '(ZIGOS_HEADLESS=1 — never shown on any desktop), optionally navigates',
+      'to --route (RJIT_BOOT_ROUTE), renders N frames (default 60), captures',
+      'the app\'s own swapchain to a PNG, and exits. The PNG is then asserted',
+      '(magic, IHDR dims, plausible size) — exit 0 = PASS, so this doubles as',
+      'the capability\'s smoke test.',
+      '',
+      'Default output: shots/<cart>-<stamp>.png. Builds via ship when the',
+      'binary is stale. The live-app sibling is the in-app console verb',
+      '`shot [path]` (__capture_frame — same readback, no exit).',
     ],
   },
   autotest: {

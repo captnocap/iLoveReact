@@ -231,6 +231,34 @@ commits stay as they are.
 
 ---
 
+## Screenshots: the App Captures ITSELF (SELFSHOT-0606)
+
+**Desktop/X11 capture of the user's system is BANNED.** No `import -window`,
+no `scrot`, no `xwd`, no reading any X11/Wayland surface, no screenshots of
+the user's screen — ever, for any reason. On 2026-06-06 lanes verifying UI
+work via desktop capture got **every lane stopped**; the user's ruling,
+verbatim: "they need to figure it out without using my desktop. make a
+command to get the proper screenshot of whatever u need, dont look at the
+system."
+
+The replacement is first-class — the app reads back its OWN rendered frame
+(framework/gpu/capture.zig; nothing touches the desktop):
+
+- **Headless CLI (the default for self-verification):**
+  `./tools/rjit shot <cart> [--out path.png] [--route /r] [--frames N]` —
+  boots the cart with a HIDDEN window, navigates, renders, captures its own
+  swapchain, asserts a well-formed PNG, exits (0 = PASS). Works with zero
+  display attachment to your method.
+- **Live app:** the in-app console verb `shot [path]`, or the
+  `captureFrame(path)` door (`@reactjit/capture` → `__capture_frame`) from
+  cart code. Importing the door flips `-Dhas-capture` (source-driven).
+
+When you verify UI work, cite the shot command + the PNG path in your
+report. A worker found desktop-capturing again is repeating the exact
+failure that stopped all 14 lanes.
+
+---
+
 ## Git Discipline (CRITICAL)
 
 **Commit early and often. Do not leave work uncommitted.**

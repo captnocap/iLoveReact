@@ -252,6 +252,14 @@ const v8_bindings_game_pathing = if (enabledFor("game_pathing")) @import("v8_bin
 const v8_bindings_game_camera = if (enabledFor("game_camera")) @import("v8_bindings_game_camera.zig") else struct {
     pub fn registerGameCamera(_: anytype) void {}
 };
+// Frame self-capture (SELFSHOT-0606): __capture_frame(path) writes the app's
+// OWN rendered frame to a PNG — the replacement for the BANNED desktop/X11
+// capture of the user's system. Rides the existing gpu/capture.zig readback.
+// GPU-substrate only (capture.zig imports gpu.zig), so the gate composes
+// with has_gpu like core/window do.
+const v8_bindings_capture = if (enabledFor("capture") and has_gpu_flag) @import("v8_bindings_capture.zig") else struct {
+    pub fn registerCapture(_: anytype) void {}
+};
 
 // ── INGREDIENTS ─────────────────────────────────────────────────────
 //
@@ -331,6 +339,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "game_physics", .required = false, .grep_prefix = "__hmsc_", .reg_fn = "registerGamePhysics", .mod = v8_bindings_game_physics },
     .{ .name = "game_pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerGamePathing", .mod = v8_bindings_game_pathing },
     .{ .name = "game_camera", .required = false, .grep_prefix = "__game_camera_", .reg_fn = "registerGameCamera", .mod = v8_bindings_game_camera },
+    .{ .name = "capture", .required = false, .grep_prefix = "__capture_", .reg_fn = "registerCapture", .mod = v8_bindings_capture },
 };
 
 /// Register every ingredient's host fns into the current V8 context.

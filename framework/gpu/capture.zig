@@ -36,7 +36,9 @@ const page_alloc = std.heap.page_allocator;
 var ss_enabled: bool = false;
 var ss_captured: bool = false;
 var ss_frame: u32 = 0;
-const SS_WAIT_FRAMES: u32 = 60;
+/// Frames to wait before the env-mode capture (layout settle). Default 60;
+/// ZIGOS_SCREENSHOT_FRAMES overrides (SELFSHOT-0606: the CLI flow's knob).
+var ss_wait_frames: u32 = 60;
 
 var ss_path_buf: [512]u8 = undefined;
 var ss_path: [*:0]const u8 = "screenshot.png";
@@ -104,6 +106,11 @@ pub fn init() void {
         ss_padding = std.fmt.parseInt(u32, p, 10) catch 8;
     }
 
+    if (std.posix.getenv("ZIGOS_SCREENSHOT_FRAMES")) |f| {
+        ss_wait_frames = std.fmt.parseInt(u32, f, 10) catch 60;
+        if (ss_wait_frames == 0) ss_wait_frames = 1;
+    }
+
     log.print("[capture] screenshot mode enabled → {s}\n", .{std.mem.span(ss_path)});
 }
 
@@ -120,7 +127,7 @@ pub fn tick(root: *Node) bool {
     // Screenshot mode: wait N frames then capture
     if (ss_enabled and !ss_captured) {
         ss_frame += 1;
-        if (ss_frame >= SS_WAIT_FRAMES) {
+        if (ss_frame >= ss_wait_frames) {
             ss_root = root;
             log.print("[capture] requesting screenshot frame {d}...\n", .{ss_frame});
             gpu.captureScreenshot(&onScreenshotPixels);
@@ -171,7 +178,13 @@ fn onScreenshotPixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
     if (cy + ch > h) ch = h - cy;
     if (cw == 0 or ch == 0) return;
 
-    // Convert BGRA → RGBA for stbi_write_png
+    writeRegionPng(ss_path, pixels, stride, cx, cy, cw, ch);
+    ss_should_exit = true;
+}
+
+/// BGRA frame region → RGBA PNG on disk. Shared by the env-mode screenshot
+/// (above) and the live __capture_frame one-shot (below) — one write path.
+fn writeRegionPng(path: [*:0]const u8, pixels: [*]const u8, stride: u32, cx: u32, cy: u32, cw: u32, ch: u32) void {
     const out_size = @as(usize, cw) * @as(usize, ch) * 4;
     const rgba = page_alloc.alloc(u8, out_size) catch return;
     defer page_alloc.free(rgba);
@@ -189,14 +202,52 @@ fn onScreenshotPixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
         }
     }
 
-    const ret = stbi_write_png(ss_path, @intCast(cw), @intCast(ch), 4, @ptrCast(rgba.ptr), @intCast(cw * 4));
+    const ret = stbi_write_png(path, @intCast(cw), @intCast(ch), 4, @ptrCast(rgba.ptr), @intCast(cw * 4));
     if (ret != 0) {
-        log.print("SCREENSHOT_SAVED:{s} ({d}x{d})\n", .{ std.mem.span(ss_path), cw, ch });
+        log.print("SCREENSHOT_SAVED:{s} ({d}x{d})\n", .{ std.mem.span(path), cw, ch });
     } else {
-        log.print("[capture] stbi_write_png failed\n", .{});
+        log.print("[capture] stbi_write_png failed: {s}\n", .{std.mem.span(path)});
     }
+}
 
-    ss_should_exit = true;
+// ════════════════════════════════════════════════════════════════════════
+// Live one-shot — __capture_frame(path) (SELFSHOT-0606)
+//
+// The app screenshots ITSELF: a host-fn-driven capture of the next rendered
+// frame on a RUNNING app, written to `path` as a full-frame PNG. Unlike the
+// env-mode screenshot above it never exits, and unlike the F9 recorder it
+// disarms itself after one delivery. Desktop/X11 capture of the user's
+// system is BANNED (the 2026-06-06 all-lanes stop) — this is the
+// replacement: the swapchain readback the GPU already composed.
+// ════════════════════════════════════════════════════════════════════════
+
+var live_path_buf: [512]u8 = undefined;
+var live_path: ?[:0]const u8 = null;
+
+/// Queue a one-shot capture of the next rendered frame to a PNG at `path`.
+/// Returns false when the path is unusable or the F9 recorder owns the
+/// capture hook (one callback slot in gpu.zig — don't steal a recording).
+pub fn requestFrame(path: []const u8) bool {
+    if (rec_active) {
+        log.print("[capture] __capture_frame refused — F9 recording owns the capture hook\n", .{});
+        return false;
+    }
+    if (path.len == 0 or path.len + 1 >= live_path_buf.len) return false;
+    @memcpy(live_path_buf[0..path.len], path);
+    live_path_buf[path.len] = 0;
+    live_path = live_path_buf[0..path.len :0];
+    gpu.captureScreenshot(&onLiveFramePixels);
+    return true;
+}
+
+fn onLiveFramePixels(pixels: [*]const u8, w: u32, h: u32, stride: u32) void {
+    // One-shot: disarm FIRST — captureScreenshot leaves the hook armed
+    // (env mode exits after one frame and never needed to clear it).
+    gpu.stopCapture();
+    const path = live_path orelse return;
+    live_path = null;
+    if (w == 0 or h == 0) return;
+    writeRegionPng(path, pixels, stride, 0, 0, w, h);
 }
 
 // ════════════════════════════════════════════════════════════════════════

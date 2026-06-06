@@ -20,6 +20,7 @@ import * as packSdk from './commands/pack-sdk.ts';
 import * as pushBundle from './commands/push-bundle.ts';
 import * as ship from './commands/ship.ts';
 import * as shipTui from './commands/ship-tui.ts';
+import * as shot from './commands/shot.ts';
 import * as tui from './commands/tui.ts';
 import * as watchAndPush from './commands/watch-and-push.ts';
 
@@ -47,6 +48,7 @@ const COMMANDS: Record<string, Command> = {
   'push-bundle': pushBundle,
   'ship': ship,
   'ship-tui': shipTui,
+  'shot': shot,
   'tui': tui,
   'watch-and-push': watchAndPush,
 };

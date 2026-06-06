@@ -245,8 +245,13 @@ export function Router({
   // ── Host-backed branch (process-global, persisted) ───────────
   const initRef = React.useRef(null);
   if (initRef.current !== routerHotKey) {
+    // RJIT_BOOT_ROUTE (SELFSHOT-0606): an env override for the BOOT route —
+    // the headless `rjit shot --route` flow navigates any cart to any
+    // surface with zero input injection. Wins over the hot-restored path
+    // (a forced boot route is explicit intent; hot restore is convenience).
+    const envRoute = callHost<string | null>('__env_get', null, 'RJIT_BOOT_ROUTE');
     const restoredPath = readHotPath(routerHotKey);
-    const path = restoredPath ?? normalizePath(initialPath);
+    const path = envRoute && envRoute.length > 0 ? normalizePath(envRoute) : (restoredPath ?? normalizePath(initialPath));
     hostInit(path);
     writeHotPath(routerHotKey, path);
     initRef.current = routerHotKey;

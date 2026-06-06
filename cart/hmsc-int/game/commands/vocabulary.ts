@@ -19,6 +19,7 @@
 // config.sky.hour, world.spawnedEntities...) so saved command sequences keep
 // meaning the same thing.
 
+import { captureFrame } from '@reactjit/capture';
 import { GAME_KINDS, mountainTrailheadPoint, tileKindDefinition, isTileKind, tileKindNamesForConsole, propKindNamesForConsole } from '../kinds';
 import { GAME_PERCEPTION } from '../perception';
 import { GAME_TELEMETRY, type DiagnosticChannel } from '../telemetry';
@@ -460,6 +461,24 @@ export function defineGameCommands<C extends GameCommandState>(registry: Command
       return specs.map((spec) =>
         `${spec.usage.padEnd(pad)} ${NOT_YET_OWNER_BY_COMMAND[spec.name] ? '[not yet] ' : ''}${spec.summary}`,
       );
+    },
+  });
+
+  // SELFSHOT-0606 (USER RULING, 2026-06-06): the app screenshots ITSELF —
+  // desktop/X11 capture of the user's system is BANNED. `shot` rides the
+  // __capture_frame host door (runtime/capture.ts → framework/gpu/capture.zig
+  // swapchain readback). Headless boots (verify replays) degrade gracefully:
+  // the host fn is absent, the command reports it and stays green.
+  define({
+    name: 'shot',
+    usage: 'shot [path]',
+    summary: "Capture the app's OWN rendered frame to a PNG (never the desktop).",
+    run: (_game, args) => {
+      const path = args[0] ?? `shot-${Date.now()}.png`;
+      if (!path.endsWith('.png')) throw new Error('shot writes PNG — give the path a .png suffix');
+      const ok = captureFrame(path);
+      if (!ok) return ['frame capture unavailable (headless boot, F9 recording active, or bad path) — nothing written'];
+      return [`capturing → ${path} (the host logs SCREENSHOT_SAVED:${path} when the PNG lands)`];
     },
   });
 

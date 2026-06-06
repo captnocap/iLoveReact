@@ -544,8 +544,8 @@
   // runtime/geometries/Globe.ts
   var GLOBE_DEFAULTS = { radius: 0.5, segments: 32, rings: 16, amount: 0, scaleY: 1 };
   var PI3 = Math.PI;
-  function generate5(p) {
-    const { radius, segments, rings } = p;
+  function globeSurface(p) {
+    const { radius } = p;
     const amount = p.amount ?? 0;
     const scaleY = p.scaleY ?? 1;
     const scaleX = p.scaleX ?? 1;
@@ -589,17 +589,39 @@
       const d01 = grid[y1 * dCols + xa], d11 = grid[y1 * dCols + xb];
       return (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
     };
-    const pos4 = (i, j) => {
-      const v = i / rings;
-      const u = j / segments;
+    const base = (u, v) => {
       const theta = PI3 * v;
       const phi = PI3 / 2 - 2 * PI3 * u;
       const st = Math.sin(theta);
-      const d = amount * sample(u, v);
-      const rxz = radius * profileAt(v) + d;
-      const ry = radius + d;
-      return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * ry * scaleY, st * Math.sin(phi) * rxz * scaleZ];
+      const rxz = radius * profileAt(v);
+      return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * radius * scaleY, st * Math.sin(phi) * rxz * scaleZ];
     };
+    const NEPS = 1e-3;
+    const baseNormal = (u, v) => {
+      if (v <= NEPS) return [0, 1, 0];
+      if (v >= 1 - NEPS) return [0, -1, 0];
+      const pu0 = base(u - NEPS, v), pu1 = base(u + NEPS, v);
+      const pv0 = base(u, v - NEPS), pv1 = base(u, v + NEPS);
+      const tu = [pu1[0] - pu0[0], pu1[1] - pu0[1], pu1[2] - pu0[2]];
+      const tv = [pv1[0] - pv0[0], pv1[1] - pv0[1], pv1[2] - pv0[2]];
+      return normalize(
+        tv[1] * tu[2] - tv[2] * tu[1],
+        tv[2] * tu[0] - tv[0] * tu[2],
+        tv[0] * tu[1] - tv[1] * tu[0]
+      );
+    };
+    return (u, v, extraDisplace = 0) => {
+      const b = base(u, v);
+      const d = amount * (sample(u, v) + extraDisplace);
+      if (d === 0) return b;
+      const n = baseNormal(u, v);
+      return [b[0] + n[0] * d, b[1] + n[1] * d, b[2] + n[2] * d];
+    };
+  }
+  function generate5(p) {
+    const { segments, rings } = p;
+    const surf = globeSurface(p);
+    const pos4 = (i, j) => surf(j / segments, i / rings);
     const nrm4 = (i, j) => {
       if (i <= 0) return [0, 1, 0];
       if (i >= rings) return [0, -1, 0];
@@ -1440,13 +1462,9 @@
   // cli/commands/bake-icons.ts
   var bake_icons_exports = {};
   __export(bake_icons_exports, {
+    bakeIconAtlas: () => bakeIconAtlas,
     run: () => run4
   });
-  var ROOT = __cwd();
-  var ICONS_TS = `${ROOT}/runtime/icons/icons.ts`;
-  var OUT_ZIG = `${ROOT}/framework/gpu/icon_atlas.zig`;
-  var OUT_PGM_HEX = `${ROOT}/framework/gpu/icon_atlas_debug.ppm.txt`;
-  var OUT_TS = `${ROOT}/runtime/icons/baked-names.ts`;
   var VIEWBOX = 24;
   var HIRES = 256;
   var TILE = 32;
@@ -1454,78 +1472,41 @@
   var SPREAD_HIRES = 18;
   var ATLAS_COLS = 16;
   var PADDING = 2;
-  var ICON_NAMES = [
-    "Heart",
-    "Search",
-    "ArrowRight",
-    "Plus",
-    "X",
-    "Settings",
-    "Star",
-    "Home",
-    "Eye",
-    "User",
-    "Bell",
-    "Bookmark",
-    "Upload",
-    "Download",
-    "Save",
-    "FileImage",
-    "Image",
-    "Hand",
-    "Brush",
-    "WandSparkles",
-    "Eraser",
-    "RotateCcw",
-    "Palette",
-    "Minus",
-    "Square",
-    "Maximize",
-    "Minimize",
-    "Scissors",
-    "FolderOpen",
-    "FolderInput",
-    "PanelTop",
-    "PanelLeft",
-    "Undo2",
-    "Redo2",
-    "RefreshCw",
-    "RefreshCcw",
-    "Copy",
-    "ArrowUp",
-    "ArrowDown",
-    "Merge",
-    "Trash2",
-    "Package",
-    "ScanLine",
-    "Spline",
-    // hmsc-int world editor — bars, tabs, log, paint tools, assist route.
-    "Activity",
-    "ArrowLeft",
-    "Check",
-    "ChevronDown",
-    "FolderTree",
-    "Hammer",
-    "Map",
-    "MessageSquare",
-    "MousePointer",
-    "NotebookPen",
-    "Sparkles"
-  ];
   var HEX = "0123456789abcdef";
   async function run4(argv) {
     if (argv[0] === "--help" || argv[0] === "-h") {
-      __writeStdout("Usage: rjit bake-icons\n");
+      __writeStdout("Usage: rjit bake-icons [--if-needed] [--quiet]\n");
       return 0;
     }
-    if (argv.length !== 0) {
-      err("[bake-icons] usage: rjit bake-icons");
-      return 1;
+    const opts = {};
+    for (const arg of argv) {
+      if (arg === "--if-needed") opts.ifNeeded = true;
+      else if (arg === "--quiet") opts.quiet = true;
+      else {
+        err("[bake-icons] usage: rjit bake-icons [--if-needed] [--quiet]");
+        return 1;
+      }
     }
-    const srcRaw = fsRead(ICONS_TS);
+    return bakeIconAtlas(opts);
+  }
+  function bakeIconAtlas(opts = {}) {
+    const root = opts.root || __env("RJIT_HOME") || __cwd();
+    const iconsTs = `${root}/runtime/icons/icons.ts`;
+    const outZig = `${root}/framework/gpu/icon_atlas.zig`;
+    const outPgmHex = `${root}/framework/gpu/icon_atlas_debug.ppm.txt`;
+    const outTs = `${root}/runtime/icons/baked-names.ts`;
+    const srcRaw = fsRead(iconsTs);
+    const iconNames = discoverIconNames(srcRaw);
+    if (iconNames.length === 0) {
+      return fail2("no icons discovered in runtime/icons/icons.ts");
+    }
+    if (opts.ifNeeded && atlasIsCurrent(iconsTs, outZig, outPgmHex, outTs, iconNames)) {
+      log(`atlas current (${iconNames.length} icons)`, opts);
+      return 0;
+    }
     const polylines = {};
     const missing = [];
-    for (const name of ICON_NAMES) {
+    for (const name of iconNames) {
       const data = loadIcon(srcRaw, name);
       if (!data) {
         missing.push(name);
@@ -1535,15 +1516,15 @@
     }
     if (missing.length) return fail2(`missing icons in icons.ts: ${missing.join(", ")}`);
     const cols = ATLAS_COLS;
-    const rows = Math.ceil(ICON_NAMES.length / cols);
+    const rows = Math.ceil(iconNames.length / cols);
     const cellPx = TILE + PADDING * 2;
     const atlasW = cols * cellPx;
     const atlasH = rows * cellPx;
     const atlas = new Uint8Array(atlasW * atlasH);
     const meta = [];
-    log(`baking ${ICON_NAMES.length} icons into ${atlasW}\xD7${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`);
-    for (let i = 0; i < ICON_NAMES.length; i++) {
-      const name = ICON_NAMES[i];
+    log(`baking ${iconNames.length} icons into ${atlasW}x${atlasH} R8 atlas (tile ${TILE}, hires ${HIRES})`, opts);
+    for (let i = 0; i < iconNames.length; i++) {
+      const name = iconNames[i];
       const t0 = Date.now();
       const mask = rasterizePolylines(polylines[name]);
       const sdf = distanceTransform(mask);
@@ -1559,17 +1540,52 @@
         }
       }
       meta.push({ name, u, v, w: TILE, h: TILE });
-      log(`  [${i + 1}/${ICON_NAMES.length}] ${name} (${Date.now() - t0}ms)`);
+      log(`  [${i + 1}/${iconNames.length}] ${name} (${Date.now() - t0}ms)`, opts);
     }
-    fsWrite(OUT_ZIG, emitZig(atlas, meta, atlasW, atlasH));
-    log(`wrote ${OUT_ZIG} (${meta.length} icons + ${atlas.length}-byte atlas inlined)`);
-    fsWrite(OUT_PGM_HEX, emitPgmHex(atlas, atlasW, atlasH));
-    log(`wrote ${OUT_PGM_HEX} - preview via:`);
-    log(`  xxd -r -p ${OUT_PGM_HEX} > /tmp/icon_atlas.pgm && xdg-open /tmp/icon_atlas.pgm`);
-    fsWrite(OUT_TS, emitNamesTs(meta));
-    log(`wrote ${OUT_TS}`);
-    log("done.");
+    fsWrite(outZig, emitZig(atlas, meta, atlasW, atlasH));
+    log(`wrote ${outZig} (${meta.length} icons + ${atlas.length}-byte atlas inlined)`, opts);
+    fsWrite(outPgmHex, emitPgmHex(atlas, atlasW, atlasH));
+    log(`wrote ${outPgmHex} - preview via:`, opts);
+    log(`  xxd -r -p ${outPgmHex} > /tmp/icon_atlas.pgm && xdg-open /tmp/icon_atlas.pgm`, opts);
+    fsWrite(outTs, emitNamesTs(meta));
+    log(`wrote ${outTs}`, opts);
+    log("done.", opts);
     return 0;
+  }
+  function discoverIconNames(src) {
+    const names = [];
+    const seen = /* @__PURE__ */ new Set();
+    const re = /^export const ([A-Za-z0-9_]+): number\[\]\[] = /gm;
+    let match;
+    while ((match = re.exec(src)) !== null) {
+      const name = match[1];
+      if (seen.has(name)) continue;
+      seen.add(name);
+      names.push(name);
+    }
+    return names;
+  }
+  function atlasIsCurrent(iconsTs, outZig, outPgmHex, outTs, iconNames) {
+    const source = tryFsStat(iconsTs);
+    const zig = tryFsStat(outZig);
+    const pgm = tryFsStat(outPgmHex);
+    const ts = tryFsStat(outTs);
+    if (!source || !zig || !pgm || !ts) return false;
+    if (zig.mtimeMs < source.mtimeMs || pgm.mtimeMs < source.mtimeMs || ts.mtimeMs < source.mtimeMs) return false;
+    const baked = readBakedNames(outTs);
+    if (baked.size !== iconNames.length) return false;
+    for (const name of iconNames) {
+      if (!baked.has(name)) return false;
+    }
+    return true;
+  }
+  function readBakedNames(outTs) {
+    const raw = fsRead(outTs);
+    const names = /* @__PURE__ */ new Set();
+    const re = /^\s+"([^"]+)",\s*$/gm;
+    let match;
+    while ((match = re.exec(raw)) !== null) names.add(match[1]);
+    return names;
   }
   function loadIcon(src, name) {
     const needle = `export const ${name}: number[][] = `;
@@ -1708,7 +1724,7 @@
   function emitZig(atlas, meta, atlasW, atlasH) {
     let zig = "// Auto-generated by scripts/bake-icons.js \u2014 do not edit.\n";
     zig += "// Source: runtime/icons/icons.ts\n";
-    zig += `// Atlas: ${atlasW}\xD7${atlasH} R8, ${ICON_NAMES.length} icons, tile=${TILE}, hires=${HIRES}.
+    zig += `// Atlas: ${atlasW}x${atlasH} R8, ${meta.length} icons, tile=${TILE}, hires=${HIRES}.
 `;
     zig += `// SDF encoding: byte = clamp(255 * (1 - dist/${SPREAD_HIRES}_hires_px), 0, 255).
 `;
@@ -1779,7 +1795,8 @@ ${atlasW} ${atlasH}
   function hexByte(value) {
     return HEX[value >> 4] + HEX[value & 15];
   }
-  function log(message) {
+  function log(message, opts = {}) {
+    if (opts.quiet) return;
     __writeStderr(`[bake-icons] ${message}
 `);
   }
@@ -4766,6 +4783,8 @@ ${entry}
     const bin = `${rjitHome}/zig-out/bin/${binName}`;
     fsMkdir(`${cartRoot}/.cache`);
     runFixReactImports(rjitHome, cartRoot);
+    const bakedIcons = bakeIconAtlas({ root: rjitHome, ifNeeded: true, quiet: true });
+    if (bakedIcons !== 0) return bakedIcons;
     reapOrphanWatchers();
     out(`[dev] bundling ${cart.entry} -> ${perCartBundle}`);
     const term = terminalSize();
@@ -5202,7 +5221,7 @@ ${entry}
     run: () => run11
   });
   var GAME_DIR = "cart/hmsc-int/game";
-  var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors"];
+  var SUITE_ROOTS = [GAME_DIR, "cart/hmsc-int/data", "cart/hmsc-int/editors", "docs/game/_index"];
   var COMPILE_ENTRY = "cart/hmsc-int/compile/main.ts";
   var VERIFY_DIR = "cart/hmsc-int/compile/verify";
   var OUT_DIR = "zig-out/game";
@@ -5518,7 +5537,7 @@ if (failures.length > 0) {
     run: () => run12
   });
   var TEMPLATES = ["basic", "routes", "dashboard", "taskboard", "canvas", "stdlib"];
-  var SUBCOMMANDS = ["init", "dev", "tui", "ship", "ship-tui", "autotest", "classify", "bake-icons", "pack-sdk", "firecracker-build", "help"];
+  var SUBCOMMANDS = ["init", "dev", "tui", "ship", "ship-tui", "shot", "autotest", "classify", "bake-icons", "pack-sdk", "firecracker-build", "help"];
   var SUBCOMMAND_DOC = {
     init: {
       summary: "scaffold a new cart from a template",
@@ -5587,6 +5606,23 @@ if (failures.length > 0) {
         "",
         "Kept for muscle memory during the migration; the canonical command is",
         "rjit ship <cart-name> --tui."
+      ]
+    },
+    shot: {
+      summary: "capture a cart's OWN rendered frame headless (never the desktop)",
+      usage: ["rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S]"],
+      detail: [
+        "SELFSHOT-0606: desktop/X11 capture of the user's system is BANNED.",
+        "This boots the cart's shipped binary with a HIDDEN window",
+        "(ZIGOS_HEADLESS=1 \u2014 never shown on any desktop), optionally navigates",
+        "to --route (RJIT_BOOT_ROUTE), renders N frames (default 60), captures",
+        "the app's own swapchain to a PNG, and exits. The PNG is then asserted",
+        "(magic, IHDR dims, plausible size) \u2014 exit 0 = PASS, so this doubles as",
+        "the capability's smoke test.",
+        "",
+        "Default output: shots/<cart>-<stamp>.png. Builds via ship when the",
+        "binary is stale. The live-app sibling is the in-app console verb",
+        "`shot [path]` (__capture_frame \u2014 same readback, no exit)."
       ]
     },
     autotest: {
@@ -5689,7 +5725,7 @@ if (failures.length > 0) {
     }
     const doc = SUBCOMMAND_DOC[name];
     const lines = [`rjit ${name} - ${doc.summary}`, "", "Usage:"];
-    for (const usage3 of doc.usage) lines.push(`  ${usage3}`);
+    for (const usage4 of doc.usage) lines.push(`  ${usage4}`);
     if (doc.detail.length) {
       lines.push("");
       lines.push(...doc.detail);
@@ -6392,7 +6428,7 @@ ${IMPORTS_MARKER}`).replace(
   __export(pack_sdk_exports, {
     run: () => run16
   });
-  var ROOT2 = __cwd();
+  var ROOT = __cwd();
   var EXCLUDES = [
     ".zig-cache",
     "zig-cache",
@@ -6458,7 +6494,7 @@ ${IMPORTS_MARKER}`).replace(
   async function run16(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
-    const registryPath = `${ROOT2}/sdk/dependency-registry.json`;
+    const registryPath = `${ROOT}/sdk/dependency-registry.json`;
     if (!fsExists(registryPath)) return fail6(`registry missing: ${registryPath}`, 1);
     const registry = fsReadJson(registryPath);
     const stage = `/tmp/rjit-stage-${Date.now()}`;
@@ -6495,7 +6531,7 @@ ${IMPORTS_MARKER}`).replace(
     }
   }
   function parsePackArgs(argv) {
-    let outPath = `${ROOT2}/dist/rjit`;
+    let outPath = `${ROOT}/dist/rjit`;
     let keepStage = false;
     for (let i = 0; i < argv.length; i++) {
       const arg = argv[i];
@@ -6512,28 +6548,28 @@ ${IMPORTS_MARKER}`).replace(
         return fail6(`unknown flag: ${arg}`, 2);
       }
     }
-    if (!outPath.startsWith("/")) outPath = `${ROOT2}/${outPath}`;
+    if (!outPath.startsWith("/")) outPath = `${ROOT}/${outPath}`;
     return { outPath, keepStage };
   }
   function stageSourceTrees(stage) {
     for (const sub2 of SOURCE_TREES) {
-      if (!fsExists(`${ROOT2}/${sub2}`)) continue;
+      if (!fsExists(`${ROOT}/${sub2}`)) continue;
       log3(`copy ${sub2}/`);
-      copyTree(`${ROOT2}/${sub2}`, `${stage}/${sub2}`, sub2);
+      copyTree(`${ROOT}/${sub2}`, `${stage}/${sub2}`, sub2);
     }
   }
   function stageZigDeps(stage) {
     for (const sub2 of ZIG_PATH_DEPS) {
-      if (!fsExists(`${ROOT2}/${sub2}`)) continue;
+      if (!fsExists(`${ROOT}/${sub2}`)) continue;
       log3(`copy ${sub2}/`);
-      copyTree(`${ROOT2}/${sub2}`, `${stage}/${sub2}`, sub2);
+      copyTree(`${ROOT}/${sub2}`, `${stage}/${sub2}`, sub2);
     }
   }
   function stageTopLevelFiles(stage) {
     for (const file of TOP_LEVEL_FILES) {
-      if (!fsExists(`${ROOT2}/${file}`)) continue;
+      if (!fsExists(`${ROOT}/${file}`)) continue;
       log3(`copy ${file}`);
-      copyFile(`${ROOT2}/${file}`, `${stage}/${file}`);
+      copyFile(`${ROOT}/${file}`, `${stage}/${file}`);
     }
   }
   function stageToolchain(stage, registry) {
@@ -6542,20 +6578,20 @@ ${IMPORTS_MARKER}`).replace(
       if (spec.packPolicy === "optional") continue;
       if (spec.payloadPath) {
         log3(`tool ${name} <- ${spec.payloadPath}`);
-        copyFile(`${ROOT2}/${spec.payloadPath}`, `${stage}/${spec.payloadPath}`);
+        copyFile(`${ROOT}/${spec.payloadPath}`, `${stage}/${spec.payloadPath}`);
       }
       for (const supportPath of spec.supportPaths ?? []) {
-        if (!fsExists(`${ROOT2}/${supportPath}`)) continue;
+        if (!fsExists(`${ROOT}/${supportPath}`)) continue;
         log3(`tool ${name} support <- ${supportPath}`);
-        copyTree(`${ROOT2}/${supportPath}`, `${stage}/${supportPath}`, supportPath);
+        copyTree(`${ROOT}/${supportPath}`, `${stage}/${supportPath}`, supportPath);
       }
     }
   }
   function stageRjitTool(stage) {
     for (const file of ["tools/rjit", "tools/rjit.js"]) {
-      if (!fsExists(`${ROOT2}/${file}`)) throw new Error(`missing rjit tool payload: ${file}`);
+      if (!fsExists(`${ROOT}/${file}`)) throw new Error(`missing rjit tool payload: ${file}`);
       log3(`tool rjit <- ${file}`);
-      copyFile(`${ROOT2}/${file}`, `${stage}/${file}`);
+      copyFile(`${ROOT}/${file}`, `${stage}/${file}`);
     }
   }
   function stageSdlDeps(stage) {
@@ -6619,7 +6655,7 @@ ${IMPORTS_MARKER}`).replace(
       }
       const payloads = Array.isArray(spec.payloadPath) ? spec.payloadPath : [spec.payloadPath];
       for (const payloadPath of payloads) {
-        const src = `${ROOT2}/${payloadPath}`;
+        const src = `${ROOT}/${payloadPath}`;
         if (!fsExists(src)) {
           missing.push(`${name} (${payloadPath} missing)`);
           continue;
@@ -7363,22 +7399,136 @@ __ARCHIVE__
     return run18([...argv, "--tui"]);
   }
 
-  // cli/commands/tui.ts
-  var tui_exports = {};
-  __export(tui_exports, {
+  // cli/commands/shot.ts
+  var shot_exports = {};
+  __export(shot_exports, {
     run: () => run20
   });
   async function run20(argv) {
+    let name = null;
+    let outPath = null;
+    let route = null;
+    let frames = 60;
+    let timeoutS = 120;
+    for (let i = 0; i < argv.length; i++) {
+      const arg = argv[i];
+      if (arg === "--out" || arg === "-o") {
+        outPath = argv[++i] ?? null;
+        continue;
+      }
+      if (arg === "--route" || arg === "-r") {
+        route = argv[++i] ?? null;
+        continue;
+      }
+      if (arg === "--frames") {
+        frames = Math.max(1, Number(argv[++i] ?? 60) || 60);
+        continue;
+      }
+      if (arg === "--timeout") {
+        timeoutS = Math.max(5, Number(argv[++i] ?? 120) || 120);
+        continue;
+      }
+      if (arg.startsWith("-")) return usage3(`unknown flag: ${arg}`);
+      if (name === null) {
+        name = arg;
+        continue;
+      }
+      return usage3("too many positional args");
+    }
+    if (!name) return usage3("missing cart name");
+    const root = __cwd();
+    const cartEntry = resolveCartEntry(root, name);
+    if (!cartEntry) return fail8(`[shot] no cart found for ${name} (expected cart/${name}/index.tsx or cart/${name}.tsx)`);
+    const binary = `${root}/zig-out/bin/${name}`;
+    if (!binaryCurrent2(binary, cartEntry)) {
+      out(`[shot] ${name} binary is stale/missing \u2014 building via ship...`);
+      const build = spawnSync(`${root}/tools/rjit`, ["ship", name]);
+      if (build.stderr) __writeStderr(build.stderr);
+      if (build.code !== 0) return fail8("[shot] BUILD FAILED");
+    }
+    if (!fsExists(binary)) return fail8(`[shot] binary not found at zig-out/bin/${name}`);
+    const png = outPath ?? `${root}/shots/${name}-${dateStamp2()}.png`;
+    fsMkdir(dirname6(png));
+    const env = [
+      "ZIGOS_HEADLESS=1",
+      "ZIGOS_SCREENSHOT=1",
+      `ZIGOS_SCREENSHOT_OUTPUT=${shellQuote2(png)}`,
+      `ZIGOS_SCREENSHOT_FRAMES=${frames}`,
+      ...route ? [`RJIT_BOOT_ROUTE=${shellQuote2(route)}`] : []
+    ].join(" ");
+    out(`[shot] booting ${name} hidden${route ? ` at ${route}` : ""}, capturing after ${frames} frames...`);
+    const result = spawnSync("sh", ["-c", `${env} timeout -s KILL ${timeoutS} ${shellQuote2(binary)} 2>&1 | grep -E "SCREENSHOT|capture" || true`]);
+    if (result.stdout) __writeStdout(result.stdout);
+    if (!fsExists(png)) return fail8(`[shot] FAIL \u2014 no PNG at ${png} (did the app crash before frame ${frames}?)`);
+    const size = fsStat(png).size;
+    if (size < 1024) return fail8(`[shot] FAIL \u2014 ${png} is ${size} bytes (implausibly small for a rendered frame)`);
+    const dims = pngDims(png);
+    if (!dims) return fail8(`[shot] FAIL \u2014 ${png} is not a well-formed PNG (bad magic/IHDR)`);
+    out(`[shot] PASS \u2014 ${png} (${dims.w}x${dims.h}, ${size} bytes)`);
+    return 0;
+  }
+  function resolveCartEntry(root, name) {
+    const dirEntry = `${root}/cart/${name}/index.tsx`;
+    if (fsExists(dirEntry)) return dirEntry;
+    const fileEntry = `${root}/cart/${name}.tsx`;
+    if (fsExists(fileEntry)) return fileEntry;
+    return null;
+  }
+  function binaryCurrent2(binary, cartEntry) {
+    if (!fsExists(binary)) return false;
+    return fsStat(binary).mtimeMs > fsStat(cartEntry).mtimeMs;
+  }
+  function pngDims(path) {
+    const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote2(path)} | od -An -v -tu1`]);
+    const bytes = dump.stdout.trim().split(/\s+/).map((token) => Number(token));
+    if (bytes.length < 24 || bytes.some((value) => !Number.isFinite(value))) return null;
+    const magic = [137, 80, 78, 71, 13, 10, 26, 10];
+    for (let i = 0; i < 8; i++) if (bytes[i] !== magic[i]) return null;
+    if (String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15]) !== "IHDR") return null;
+    const w = bytes[16] << 24 | bytes[17] << 16 | bytes[18] << 8 | bytes[19];
+    const h = bytes[20] << 24 | bytes[21] << 16 | bytes[22] << 8 | bytes[23];
+    if (w <= 0 || h <= 0) return null;
+    return { w, h };
+  }
+  function dateStamp2() {
+    const result = spawnSync("date", ["+%Y%m%d_%H%M%S"]);
+    return result.stdout.trim() || String(Math.floor(__nowMs()));
+  }
+  function dirname6(path) {
+    const idx = path.lastIndexOf("/");
+    return idx <= 0 ? "/" : path.slice(0, idx);
+  }
+  function shellQuote2(value) {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
+  }
+  function usage3(message) {
+    err(`[shot] ${message}`);
+    err("Usage: rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S]");
+    err("  Captures the cart's OWN rendered frame headless (hidden window \u2014 the");
+    err("  user's desktop is never touched). Asserts a well-formed PNG; exit 0 = PASS.");
+    return 2;
+  }
+  function fail8(message) {
+    err(message);
+    return 1;
+  }
+
+  // cli/commands/tui.ts
+  var tui_exports = {};
+  __export(tui_exports, {
+    run: () => run21
+  });
+  async function run21(argv) {
     return run9([...argv, "--tui"]);
   }
 
   // cli/commands/watch-and-push.ts
   var watch_and_push_exports = {};
   __export(watch_and_push_exports, {
-    run: () => run21
+    run: () => run22
   });
   var POLL_MS = 200;
-  async function run21(argv) {
+  async function run22(argv) {
     const cartName = argv[0];
     const cartFile = argv[1];
     const outPath = argv[2];
@@ -7457,6 +7607,7 @@ __ARCHIVE__
     "push-bundle": push_bundle_exports,
     "ship": ship_exports,
     "ship-tui": ship_tui_exports,
+    "shot": shot_exports,
     "tui": tui_exports,
     "watch-and-push": watch_and_push_exports
   };

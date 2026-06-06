@@ -258,8 +258,9 @@ test('cmd_help teaches the whole surface, including pending commands', () => {
   const { registry, game } = freshConsole();
   const help = registry.run(game, 'cmd_help');
   // 49 command names + the bare `help` alias (registered for the player —
-  // the unknown-command hint says "try: help", so help must exist).
-  assertEqual(help.output.length, 50, 'help lists every registered command');
+  // the unknown-command hint says "try: help", so help must exist) + `shot`
+  // (SELFSHOT-0606 frame self-capture).
+  assertEqual(help.output.length, 51, 'help lists every registered command');
   const one = registry.run(game, 'cmd_help wv_road');
   assertEqual(one.ok, true, 'help on a pending command still teaches its usage');
   assert(one.output[1].includes('usage: wv_road'), 'the usage line must print');
@@ -334,6 +335,41 @@ test('a verify script over captured commands runs green end to end (V19)', () =>
   ]);
   assertEqual(result.ok, true, `the script must pass (${result.transcript.join(' | ')})`);
   assertEqual(result.commandsRun, 7, 'every line must run');
+});
+
+test('shot (SELFSHOT-0606): the console captures the app frame through the host door, never the desktop', () => {
+  const { registry, game } = freshConsole();
+  const g = globalThis as any;
+
+  // headless boot (no GPU host fn) — graceful, never a script-breaking failure
+  delete g.__capture_frame;
+  const headless = registry.run(game, 'shot /tmp/x.png');
+  assertEqual(headless.ok, true, 'shot stays green headless');
+  assert(headless.output[0].includes('unavailable'), 'headless reports unavailable, never fake success');
+
+  // live host — the verb routes the EXACT path into __capture_frame
+  let captured: string | null = null;
+  g.__capture_frame = (path: string) => { captured = path; return true; };
+  try {
+    const live = registry.run(game, 'shot /tmp/selfshot-test.png');
+    assertEqual(live.ok, true, 'shot dispatches');
+    assertEqual(captured, '/tmp/selfshot-test.png', 'the path reaches the host door verbatim');
+    assert(live.output[0].includes('SCREENSHOT_SAVED:/tmp/selfshot-test.png'), 'the output teaches the saved-marker to watch for');
+
+    // default path: generated, .png-suffixed, still through the door
+    captured = null;
+    const defaulted = registry.run(game, 'shot');
+    assertEqual(defaulted.ok, true, 'bare shot works');
+    assert(captured !== null && (captured as unknown as string).endsWith('.png'), 'the default path is a .png');
+
+    // non-png path refused before the host is touched
+    captured = null;
+    const refused = registry.run(game, 'shot /tmp/nope.jpg');
+    assertEqual(refused.ok, false, 'non-png path fails loudly');
+    assertEqual(captured, null, 'the host door is never called with a bad path');
+  } finally {
+    delete g.__capture_frame;
+  }
 });
 
 finish('game/commands/vocabulary');
