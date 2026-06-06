@@ -802,6 +802,26 @@ now) and the center-scale inflate is gone. P4: constant-lift gap pinned
 at carve bowl / bump / flank / pole rows (±2%). 13/13 GREEN + full
 verify 51/51.
 
+GRABFLY-0605 (2026-06-05, USER ASK "easier approach to wasd the camera...
+kinda like a noclip"): /characters grows a FLY camera mode — the
+IsoPreview noclip pattern on the route's own V23 node. A `fly` chip
+(viewport row, twig-persisted, DEFAULT ON) flips the host controller to
+`freefly`: WASD + q/e (or shift/space) move at `TUNE.fly.speed` with the
+HOST integrating position per frame (`setMoveAxes` — JS only sends axis
+changes on key edges through the `__keydown`/`__keyup` bus; a focused
+TextInput consumes keys BEFORE the bus fires, so typing a name never
+flies); drag-on-empty looks (FPS sign, ±89 pitch matching the host's own
+freefly clamp); drag-on-the-mesh still grabs (unchanged); the wheel
+dollies straight along the CURSOR RAY (noclip zoom: aim and roll). Pose
+persists via the `flyPose` twig, saved at rest points (drag/key release,
+wheel) from `getFreeFly()` readback — never per frame. Picking in fly
+mode solves the FreeFly rig from that same readback (registry
+`lookForward` is formula-identical to the host's — pick camera IS the
+rendered camera mid-flight); orbit mode keeps everything it had
+(zoom-to-cursor pivot, reflected knob — the knob hides in fly, replaced
+by a key-hint line). Orbit param effects gate on mode so the two rigs
+never fight over the controller. 13/13 + full verify 51/51 GREEN.
+
 Wired as `/characters` + the User nav icon in ProjectBar (commit 1 of the
 lane, before the vehicles route per the editors-wave coordination rule).
 `rjit game verify`: 6 editor-core cases + 6 stream cases, VERDICT GREEN.

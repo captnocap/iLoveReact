@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Effect, Paintable, Pressable, Row, ScrollView, Scene3D, Text, TextInput } from '@reactjit/runtime/primitives';
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
-import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
+import { busOn, useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { readFile, writeFile, mkdir } from '@reactjit/runtime/hooks/fs';
 import { GAME_CAMERA } from '../../game/camera';
 import { GAME_NATIVE_CAMERA } from '../../game/nativeCamera';
@@ -163,6 +163,17 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const camCtlRef = useRef<ReturnType<typeof GAME_NATIVE_CAMERA.forNode> | null>(null);
   const [orbitLook, setOrbitLook] = useRouteTwigState('/characters', 'orbitLook', { yaw: 20, pitch: 12 });
   const lookRef = useRef(orbitLook);
+  // ── the FLY camera (noclip, GRABFLY-0605): host freefly mode — WASD + q/e
+  // move (host-integrated per frame), drag-on-empty looks, drag-on-mesh still
+  // grabs, wheel dollies along the cursor ray. Pose persists per route. ──────
+  const [camMode, setCamMode] = useRouteTwigState<'orbit' | 'fly'>('/characters', 'camMode', 'fly');
+  const [flyPose, setFlyPose] = useRouteTwigState('/characters', 'flyPose', {
+    pos: [0, 1.5, -3.4] as [number, number, number], yaw: 0, pitch: -4,
+  });
+  const camModeRef = useRef(camMode); camModeRef.current = camMode;
+  const flyPosRef = useRef<[number, number, number]>(flyPose.pos);
+  const flyLookRef = useRef({ yaw: flyPose.yaw, pitch: flyPose.pitch });
+  const flyKeysRef = useRef<Record<string, boolean>>({});
 
   // ── the V20 roster channel + this visit's SESSION (persistence from version
   // one; every authoring interaction is a labeled commit/note on the one
@@ -362,6 +373,12 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         params: editorPartParams(id, draft, displace),
         dynKey: partDynKey(id, seqs[id], headBits, draft.amount, regionSignature(draft.regions[id])),
         texKey: id === 'head' ? headTexKey : skinTexKeyFor(id),
+        // LIMBPAINT: the paint-free key a no-fallback segment (pelvis) drops
+        // to when this part is painted — its capture mounts beside the
+        // painted one (CharacterEditorCaptures barePartIds)
+        bareTexKey: id === 'head'
+          ? headTexKey
+          : skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape }),
       };
     }
     return out;
@@ -664,8 +681,71 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
 
   // Param changes (view toggle / zoom-to-cursor move the target, the zoom
   // knob and wheel move distance) re-send the rig params; yaw/pitch ride
-  // along from the ref unchanged.
-  useEffect(() => { sendOrbit(camTarget, dist); }, [view, dist, targetPan]);
+  // along from the ref unchanged. Orbit-mode only — fly owns its own pose.
+  useEffect(() => {
+    if (camMode === 'orbit') sendOrbit(camTarget, dist);
+  }, [view, dist, targetPan, camMode]);
+
+  // ── fly machinery (GRABFLY-0605) — the IsoPreview noclip pattern ──────────
+  const sendFlyPose = () => {
+    camCtlRef.current?.setFreeFly({
+      position: flyPosRef.current, yaw: flyLookRef.current.yaw, pitch: flyLookRef.current.pitch, fov: 45,
+    });
+  };
+  /** read the host-integrated pose back into the refs + the twig (called at
+   *  rest points: drag release, key release, wheel — never per frame) */
+  const saveFlyPose = () => {
+    if (camModeRef.current !== 'fly') return;
+    const snap = camCtlRef.current?.getFreeFly?.();
+    if (snap) {
+      flyPosRef.current = snap.position;
+      flyLookRef.current = { yaw: snap.yaw, pitch: snap.pitch };
+    }
+    setFlyPose({ pos: flyPosRef.current, yaw: flyLookRef.current.yaw, pitch: flyLookRef.current.pitch });
+  };
+  const sendFlyAxes = () => {
+    const ctl = camCtlRef.current;
+    if (!ctl) return;
+    if (camModeRef.current !== 'fly') { ctl.setMoveAxes(0, 0, 0, 0); return; }
+    const k = flyKeysRef.current;
+    const forward = (k['w'] ? 1 : 0) + (k['s'] ? -1 : 0);
+    const strafe = (k['d'] ? 1 : 0) + (k['a'] ? -1 : 0);
+    const lift = ((k['e'] || k['space']) ? 1 : 0) + ((k['q'] || k['__shift']) ? -1 : 0);
+    ctl.setMoveAxes(forward, strafe, lift, TUNE.fly.speed);
+  };
+  // mode switch: the host flips rigs; fly resumes its saved pose, orbit
+  // re-sends its rig (runs on mount too — right after the engage effect)
+  useEffect(() => {
+    const ctl = camCtlRef.current;
+    if (!ctl) return;
+    if (camMode === 'fly') {
+      ctl.setMode('freefly');
+      ctl.setSmoothing(0);
+      sendFlyPose();
+      ctl.setMoveAxes(0, 0, 0, 0);
+    } else {
+      ctl.setMoveAxes(0, 0, 0, 0);
+      ctl.setMode('orbit');
+      sendOrbit(camTarget, dist);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode flips only; params ride their own effects
+  }, [camMode]);
+  // the key bus drives move axes (the host integrates per frame). A focused
+  // TextInput consumes keys BEFORE the bus fires (engine.zig input_consumed),
+  // so typing a name never flies the camera.
+  useEffect(() => {
+    const setk = (e: any, down: boolean) => {
+      const key = String(e?.key ?? '').toLowerCase();
+      if (key) flyKeysRef.current[key] = down;
+      if (typeof e?.shiftKey === 'boolean') flyKeysRef.current['__shift'] = e.shiftKey;
+      sendFlyAxes();
+      if (!down) saveFlyPose();
+    };
+    const offD = busOn('__keydown', (e: any) => setk(e, true));
+    const offU = busOn('__keyup', (e: any) => setk(e, false));
+    return () => { offD(); offU(); camCtlRef.current?.setMoveAxes(0, 0, 0, 0); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- bus handlers read refs
+  }, []);
 
   const orbitDown = (e: any) => { orbitRef.current = { x: Number(e?.x ?? 0), y: Number(e?.y ?? 0) }; };
   const orbitMove = (e: any) => {
@@ -674,6 +754,17 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     const nx = Number(e?.x ?? 0), ny = Number(e?.y ?? 0);
     const dx = nx - d.x, dy = ny - d.y;
     d.x = nx; d.y = ny;
+    if (camModeRef.current === 'fly') {
+      // FPS look: drag right = look right (lookForward convention), pitch
+      // clamped to the host freefly's own ±89 so shadow and host agree
+      const l = flyLookRef.current;
+      const nextYaw = l.yaw + dx * TUNE.fly.lookPerPx;
+      const nextPitch = clamp(l.pitch - dy * TUNE.fly.lookPerPx, TUNE.fly.pitchMin, TUNE.fly.pitchMax);
+      camCtlRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+      l.yaw = nextYaw;
+      l.pitch = nextPitch;
+      return;
+    }
     // Horizontal sign: the engine renders world +X as screen-LEFT and the rig
     // uses compass yaw, so yaw DECREASES with a rightward drag (the /test
     // USER-VERDICT-pinned sign). Clamps apply HERE so the JS shadow and the
@@ -686,7 +777,8 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
     l.pitch = nextPitch;
   };
   const orbitUp = () => {
-    setOrbitLook({ ...lookRef.current });
+    if (camModeRef.current === 'fly') saveFlyPose();
+    else setOrbitLook({ ...lookRef.current });
     orbitRef.current = null;
   };
 
@@ -709,15 +801,27 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
       fov: 45,
     }));
   // ── grab — see where you can grab, then pull the shape (GRABSHAPE-0605) ───
-  // Picking solves the orbit rig from the JS shadow (lookRef/dist/camTarget) —
-  // the SAME params the V23 host camera renders from (registry pure math is
-  // sanctioned; the host owns per-frame driving). A grab stamps regions.ts's
-  // ellipse into draft.grids[part] — the identical grid the depth-paint
-  // canvas edits, so drags and paint strokes compose on one truth.
-  const solvedCam = () =>
-    GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+  // Picking solves the ACTIVE rig from the JS shadow — orbit from
+  // lookRef/dist/camTarget, fly from the host's own freefly readback (so the
+  // pick camera IS the rendered camera even mid-flight). Registry pure math,
+  // V26-sanctioned; the host owns per-frame driving. A grab stamps
+  // regions.ts's ellipse into draft.grids[part] — the identical grid the
+  // depth-paint canvas edits, so drags and paint strokes compose on one truth.
+  const solvedCam = () => {
+    if (camModeRef.current === 'fly') {
+      const snap = camCtlRef.current?.getFreeFly?.();
+      if (snap) {
+        flyPosRef.current = snap.position;
+        flyLookRef.current = { yaw: snap.yaw, pitch: snap.pitch };
+      }
+      return GAME_CAMERA.solve(GAME_CAMERA.rigs.FreeFly, {
+        position: flyPosRef.current, yaw: flyLookRef.current.yaw, pitch: flyLookRef.current.pitch, fov: 45,
+      });
+    }
+    return GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
       target: camTarget, yaw: lookRef.current.yaw, pitch: lookRef.current.pitch, dist, fov: 45,
     });
+  };
   const partParamsFor = (id: PartId) => partRender[id].params as any;
 
   // lazy clouds: built on first pick after (view/part/mesh/pose) change —
@@ -847,6 +951,21 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
   const onZoomWheel = (e: any) => {
     const notches = Number(e?.deltaY ?? 0);
     if (!notches) return;
+    if (camModeRef.current === 'fly') {
+      // noclip dolly: fly straight along the cursor ray (up = toward it)
+      const r = viewRect.current;
+      const ray = GAME_CAMERA.screenRay(Number(e?.x ?? 0) - r.x, Number(e?.y ?? 0) - r.y, { x: 0, y: 0, width: r.width, height: r.height }, solvedCam());
+      const step = notches * TUNE.fly.wheelStep;
+      const next: [number, number, number] = [
+        flyPosRef.current[0] + ray.dir[0] * step,
+        flyPosRef.current[1] + ray.dir[1] * step,
+        flyPosRef.current[2] + ray.dir[2] * step,
+      ];
+      flyPosRef.current = next;
+      sendFlyPose();
+      setFlyPose({ pos: next, yaw: flyLookRef.current.yaw, pitch: flyLookRef.current.pitch });
+      return;
+    }
     const next = clamp(dist - notches * TUNE.knobs.zoom.step, TUNE.knobs.zoom.min, TUNE.knobs.zoom.max);
     if (next < dist) {
       const sx = Number(e?.x ?? 0), sy = Number(e?.y ?? 0);
@@ -1036,8 +1155,12 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
           {!isHead ? (
             <Row style={{ gap: 8, alignItems: 'center' }}>
               <Chip label="outline" active={editTab === 'outline'} onPress={() => setEditTab('outline')} />
-              <Chip label="detail paint" active={editTab === 'detail'} onPress={() => setEditTab('detail')} />
+              {/* 'sculpt detail' shapes GEOMETRY (was 'detail paint' — the
+                  user read it as the texture painter and it isn't one) */}
+              <Chip label="sculpt detail" active={editTab === 'detail'} onPress={() => setEditTab('detail')} />
               {editTab === 'outline' ? <Chip label="reset outline" onPress={resetOutline} /> : null}
+              {/* texture painting lives in /cutout — same door as the face */}
+              <Chip label="paint texture → /cutout" color="cyan" onPress={paintTextureInCutout} />
               <Chip label="reset part" color="bad" onPress={resetPart} />
             </Row>
           ) : (
@@ -1178,7 +1301,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
               360) — a studio floor turns every under-the-horizon view into a
               black box interior (the "workspace went black" report) */}
           <LabEnvironment preset="studio" ground={false} />
-          <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={showHitboxes} />
+          <PartMeshes view={view} selPart={selPart} parts={partRender} rig={rig} showHitboxes={showHitboxes} paint={draft.paint} skin={draft.skin} />
           {view === 'figure' && draft.heldItem !== 'none' ? <HeldItemMeshes itemId={draft.heldItem} rig={rig} /> : null}
           {showGrabGrid ? <GrabGridMeshes view={view} selPart={selPart} parts={partRender} rig={rig} /> : null}
           <GrabMarker marker={grabMarker} />
@@ -1188,12 +1311,19 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
           <Chip label="grid" active={showGrabGrid} color="cyan" onPress={() => setShowGrabGrid((v) => !v)} />
           <Chip label="mirror" active={mirror} onPress={() => setMirror((v) => !v)} />
+          <Chip label="fly" active={camMode === 'fly'} color="good" onPress={() => setCamMode(camMode === 'fly' ? 'orbit' : 'fly')} />
           <Chip label="undo ⌃Z" onPress={undoDraft} />
           <Chip label="redo ⌃Y" onPress={redoDraft} />
         </Row>
-        <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
-          <Knob label="zoom" value={ZOOM_REFLECT - dist} spec={TUNE.knobs.zoom} onChange={(v) => zoomTo(ZOOM_REFLECT - v)} />
-        </Box>
+        {camMode === 'fly' ? (
+          <Text fontSize={10} color={T.dim} style={{ position: 'absolute', right: 14, bottom: 14 }}>
+            wasd move · q/e down/up · drag look · drag the mesh to pull · wheel dolly
+          </Text>
+        ) : (
+          <Box style={{ position: 'absolute', right: 14, bottom: 14 }}>
+            <Knob label="zoom" value={ZOOM_REFLECT - dist} spec={TUNE.knobs.zoom} onChange={(v) => zoomTo(ZOOM_REFLECT - v)} />
+          </Box>
+        )}
       </Pressable>
 
       {/* offscreen: per-part GPU paint textures + the texture-capture stack.
@@ -1218,6 +1348,7 @@ export function CharactersRoute(props: { onExit: () => void; onPaintTexture?: ()
         bodyShape={draft.bodyShape}
         parts={PART_IDS}
         paint={draft.paint}
+        bareSkinTexKeyFor={(id) => skinTextureKey(id, { skin: draft.skin, clothing: draft.clothing, bottoms: draft.bottoms, bodyShape: draft.bodyShape })}
       />
       <GrabGridCapture hover={grabHover} mirror={mirror} />
     </Row>

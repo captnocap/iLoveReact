@@ -46,6 +46,10 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
      *  enough to reach head/feet, never off into space (GRABQOL-0605) */
     panY: 1.1, panXZ: 0.9,
   },
+  /** the FLY camera (noclip, GRABFLY-0605): WASD move + q/e (or shift/space)
+   *  down/up at flySpeed units/s (host-integrated), drag = look at lookPerPx,
+   *  wheel = dolly along the cursor ray by flyWheelStep per notch */
+  fly: { speed: 2.6, lookPerPx: 0.3, wheelStep: 0.35, pitchMin: -89, pitchMax: 89 },
   /** draft auto-commit debounce (V20 micro-save; AUTOSAVE-0605) */
   autosaveDebounceMs: 1200,
   // (the face-paint palette + stroke numbers died with the coupled
