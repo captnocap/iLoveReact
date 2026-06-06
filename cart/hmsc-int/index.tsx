@@ -48,6 +48,7 @@ import { CharactersRoute } from './editors/characters/CharactersRoute';
 import { ItemsRoute } from './editors/items/ItemsRoute';
 import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
 import { CutoutRoute } from './editors/cutout/CutoutRoute';
+import { ComposeRoute } from './editors/compose/ComposeRoute';
 import { SettingsRoute } from './editors/settings/SettingsRoute';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
@@ -795,7 +796,7 @@ function EditorShell() {
   // Router nav lives in the persistent ProjectBar shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/items' ? 'items' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/items' ? 'items' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/compose' ? 'compose' : route.path === '/voxels' ? 'voxels' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
   // VIEWRUNAWAY-0605: the editor stays MOUNTED under route overlays, but it
   // must go input-DEAF there — the key bus is global, so a WASD walk in
   // /build was also driving the buried canvas's drift (700px/s ÷ zoom for
@@ -831,6 +832,7 @@ function EditorShell() {
         onItems={() => nav.push('/items')}
         onVehicles={() => nav.push('/vehicles')}
         onCutout={() => nav.push('/cutout')}
+        onCompose={() => nav.push('/compose')}
         onVoxels={() => nav.push('/voxels')}
         onPerf={() => nav.push('/log')}
         onSettings={() => nav.push('/settings')}
@@ -925,6 +927,9 @@ function EditorShell() {
         <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
         {/* The cutout painter (editors/cutout/) — the cutout app remade for skins/textures. */}
         <Route path="/cutout">{() => <CutoutRoute onExit={() => nav.push('/')} />}</Route>
+        {/* The decal editor (editors/compose/) — compose Box/Text/Image looks,
+            Materialize them into the texture registry (DECALEDIT-0606). */}
+        <Route path="/compose">{() => <ComposeRoute />}</Route>
         {/* The grand settings page (editors/settings/) — the session event bus + the
             P2 tunables registry (SETTINGS-0605). */}
         <Route path="/settings">{() => <SettingsRoute onExit={() => nav.push('/')} />}</Route>

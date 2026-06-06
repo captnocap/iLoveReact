@@ -27,6 +27,7 @@ import { Box, Col, Effect, Pressable, Row, ScrollView, Text, TextInput } from '@
 import { shaderGroups, shaderSpec, type ShaderSpec } from '@game/textures/shaders';
 import { TEXTURE_REGISTRY, textureById } from '@game/textures/registry';
 import { removeCustomTexture, saveCustomTexture, useCustomTextures, type CustomTexture } from '@game/textures/materials';
+import { DecalSurface } from '@game/textures/decalRender';
 import { ShaderLab } from './ShaderLab';
 import { TexturePreview } from './TexturePreview';
 import { accentFor } from './studio.cls';
@@ -59,13 +60,16 @@ function RailItem(props: { label: string; on: boolean; onPress: () => void }) {
 }
 
 // One saved material in the strip: live swatch + label + the id a part/tile
-// references + delete. The swatch renders the recipe's shader with the frozen data.
+// references + delete. A shader record renders its recipe with the frozen
+// data; a decal record (DECALEDIT-0606) renders its composed doc.
 function SavedSwatch(props: { tex: CustomTexture; on: boolean; onPress: () => void; onDelete: () => void }) {
-  const spec = shaderSpec(props.tex.shaderId);
+  const spec = props.tex.shaderId !== undefined ? shaderSpec(props.tex.shaderId) : undefined;
   return (
     <Col style={{ alignItems: 'center', gap: 3, width: 84 }}>
       <Pressable onPress={props.onPress} style={{ width: 56, height: 56, borderRadius: 4, borderWidth: 1, borderColor: props.on ? accentFor('primary') : accentFor('border'), overflow: 'hidden' }}>
-        {spec ? <Effect shader={spec.shader} data={props.tex.data} style={{ width: '100%', height: '100%' }} /> : null}
+        {props.tex.decal
+          ? <DecalSurface doc={props.tex.decal} width={56} height={56} />
+          : spec ? <Effect shader={spec.shader} data={props.tex.data} style={{ width: '100%', height: '100%' }} /> : null}
       </Pressable>
       <Text fontSize={8} color={accentFor('text')} style={{ fontFamily: 'monospace' }} numberOfLines={1}>{props.tex.label}</Text>
       <Pressable onPress={props.onDelete} style={{ paddingLeft: 6, paddingRight: 6, paddingTop: 1, paddingBottom: 1, borderRadius: 3, borderWidth: 1, borderColor: accentFor('border') }}>

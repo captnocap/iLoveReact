@@ -9,8 +9,10 @@ MOVE, not a rewrite: export names, ids, store keys, and behavior unchanged.
 | here | lineage |
 | --- | --- |
 | `shaders.ts` | `cart/hmsc/render3d/textureShaders.ts` (before that `hmsc-int/shaderCatalog.ts`) |
-| `materials.ts` | `cart/hmsc/render3d/customTextures.ts` |
-| `registry.tsx` | `cart/hmsc/render3d/textures.tsx` |
+| `materials.ts` | `cart/hmsc/render3d/customTextures.ts` (+ DECALEDIT-0606: decal records beside shader records, `saveDecalTexture` upsert) |
+| `registry.tsx` | `cart/hmsc/render3d/textures.tsx` (+ DECALEDIT-0606: decal records hydrate as react-source TextureDefs) |
+| `decal.ts` | new (DECALEDIT-0606) — the DecalDoc model: boundary validator, size presets, font-carrying text nodes |
+| `decalRender.tsx` | new (DECALEDIT-0606) — `DecalSurface`, the doc scaled to any capture size (the painted/paintedRender split) |
 | `index.ts` | new — the door (the game/world pattern: own module, not a 20th ruled `game/index.ts` entry) |
 
 **Stability contract:** stored materials keep the `custom:<slug>` ids and the

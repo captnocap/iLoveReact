@@ -452,6 +452,33 @@ DELIBERATELY NOT a 20th `game/index.ts` export — the door list is RULED
 (V17); the question is surfaced to the supervisor, and in-game/ consumers
 import `../world` meanwhile.
 
+## editors/compose/ — the decal editor, /compose (DECALEDIT-0606, 2026-06-06)
+
+The locked vocabulary's DECAL source (a look authored in React — Box/Text/
+Image — baked to a texture; what facades and street signs always were, hand-
+coded) gets its authoring surface. USER ASK: "whatever approach will let me
+make billboards and shit like that easily", font-ready for graffiti later.
+`ComposeRoute.tsx` = toolbar (name · canvas presets, billboard-led · add
+rect/text/image · MATERIALIZE) + saved-decals rail (live swatches, click
+reopens LOSSLESS — the doc rides the stored material, the re-edit law; del
+removes) + the stage (doc at fit scale; drag rides the host cursor channel —
+the QuadSplit wire; click selects; click-away deselects) + layers panel
+(paint-order up/down, duplicate, delete) + per-kind properties (rect: fill/
+radius/border; text: content/color/size/tracking/weight chips/FAMILY chips —
+the font surface, host-mapped names, a graffiti face later is a host family
+addition with ZERO schema work/align; image: src path; all: x/y/w/h, opacity
+knob) + a live 3D billboard preview (a mesh sampling the live `compose:live`
+StaticSurface — edits re-bake via subtree-mutation invalidation). Materialize
+= `saveDecalTexture` (upsert by the editing id) + ONE labeled commit on the
+materials channel via the route's `/compose` session (the /textures
+AUTOSAVE-0605 pattern). The decal joins `allTextures` immediately —
+assignable everywhere a texture is; the V24 piece-face and voxel-item slots
+land on the same registry. Working doc autosaves to the `/compose` twig
+(debounced — drags never storm the twig file). P4: `compose.test.ts` 6 cases
+(validator round-trip with JSON-semantics canonical compare, font surface
+survival, garbage→null, boundary clamps, presets valid, the materials
+stream's additive decal records + upsert + unknown-kind tolerance).
+
 ## game/textures/ — the texture pipeline door (TEXPORT-0606, 2026-06-06)
 
 The texture pipeline MOVED here from `cart/hmsc/render3d/` (USER ASK "properly
@@ -462,7 +489,12 @@ canonical tunable-WGSL recipe catalog; `materials.ts` (was `customTextures.ts`)
 = the stored materials Materialize freezes into the shared 'hmsc' store;
 `registry.tsx` (was `textures.tsx`) = THE one texture registry
 (`TextureDef`/`allTextures`/`textureById`/`TextureCapture`) every face/tile/
-part samples by id. Follows the `game/world` pattern (own module, not a ruled
+part samples by id. DECALEDIT-0606 added the DECAL source: `decal.ts` (the
+DecalDoc model — boundary validator, size presets, the font-carrying text
+nodes) + `decalRender.tsx` (`DecalSurface`, the doc scaled to any capture
+size); `materials.ts` stores decal records beside shader records (same ids,
+same store key, `saveDecalTexture` upserts) and `registry.tsx` hydrates them
+as react-source TextureDefs — pickers and captures need no decal knowledge. Follows the `game/world` pattern (own module, not a ruled
 `game/index.ts` door); hmsc-int consumers use `@game/textures` subpaths and the
 legacy renderer `cart/hmsc/render3d/parts.tsx` imports the registry FROM
 hmsc-int (the V15 compile direction). GAP edges marked at the import sites

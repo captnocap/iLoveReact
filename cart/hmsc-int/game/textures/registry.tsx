@@ -9,6 +9,7 @@ import type { PerceptionState } from '../../../hmsc/design';
 import { BUILDING_SKINS, type BuildingSkin, skinCapturePx } from '../../../hmsc/render3d/buildingSkins';
 import { HMSC_SHADERS, defaultShaderData, shaderSpec } from './shaders';
 import { type CustomTexture, loadCustomTextures } from './materials';
+import { DecalSurface } from './decalRender';
 
 // game/textures/registry.tsx — THE TEXTURE REGISTRY: one flat list of bakeable
 // surface looks. (Lineage: cart/hmsc/render3d/textures.tsx; TEXPORT-0606 moved
@@ -82,6 +83,23 @@ export const TEXTURE_REGISTRY: TextureDef[] = [...SHADER_TEXTURES, ...REACT_TEXT
 // A stored material (studio Materialize) → a regular TextureDef: same shader as
 // its recipe, frozen data. Unknown shaderId (a spec that was removed) → null.
 function customTextureDef(t: CustomTexture): TextureDef | null {
+  // DECAL source (DECALEDIT-0606): the composed Box/Text/Image doc renders
+  // through DecalSurface, stretched to the capture's pixel bucket — a plain
+  // react-source TextureDef, so TextureCapture/pickers need no decal knowledge.
+  if (t.decal) {
+    const doc = t.decal;
+    return {
+      id: t.id,
+      label: t.label,
+      source: {
+        kind: 'react',
+        render: (ctx: TextureRenderCtx) => (
+          <DecalSurface doc={doc} width={skinCapturePx(ctx.cols)} height={skinCapturePx(ctx.floors)} />
+        ),
+      },
+    };
+  }
+  if (t.shaderId === undefined || t.data === undefined) return null;
   const spec = shaderSpec(t.shaderId);
   if (!spec) return null;
   return { id: t.id, label: t.label, source: { kind: 'shader', shader: spec.shader, data: t.data } };

@@ -25,7 +25,7 @@ export const PROJECT_BAR_H = 38;
 
 interface ProjectBarProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'items' | 'vehicles' | 'cutout' | 'settings';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'voxels' | 'labs' | 'characters' | 'items' | 'vehicles' | 'cutout' | 'compose' | 'settings';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -67,6 +67,10 @@ interface ProjectBarProps {
   // Navigate to the /cutout route — the cutout painter (editors/cutout, the
   // cutout app experience remade; paints skins/textures on the shared painter).
   onCutout: () => void;
+  // Navigate to the /compose route — the decal editor (editors/compose,
+  // DECALEDIT-0606: compose Box/Text/Image looks → Materialize → the texture
+  // registry; billboards, signs, posters).
+  onCompose: () => void;
   // Navigate to the /settings route — the grand settings page (editors/settings):
   // the session event bus across every route channel + the P2 tunables registry.
   onSettings: () => void;
@@ -120,6 +124,7 @@ export function ProjectBar(props: ProjectBarProps) {
         <IconBtn icon="Boxes" on={props.activeRoute === 'voxels'} onPress={props.onVoxels} title="voxel bake" />
         <IconBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
         <IconBtn icon="Scissors" on={props.activeRoute === 'cutout'} onPress={props.onCutout} title="cutout painter" />
+        <IconBtn icon="PenTool" on={props.activeRoute === 'compose'} onPress={props.onCompose} title="decal editor" />
         <IconBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />
         <IconBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
         <IconBtn icon="Settings" on={props.activeRoute === 'settings'} onPress={props.onSettings} title="settings" />

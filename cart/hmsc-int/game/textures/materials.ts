@@ -3,23 +3,28 @@
 // pipeline behind the game/textures door. Export names unchanged — a stored
 // material is still a CustomTexture and 'custom:' ids stay stable.)
 //
-// A texture shader (./shaders.ts) is a tunable RECIPE; pressing Materialize in
-// the studio freezes the current slider values into a named material — a
-// {shaderId, data[]} snapshot — and saves it HERE. Stored materials live in the
-// shared 'hmsc' localstore (the same store the game boots from, see
-// hmsc_localstore_shared_across_carts), so the game bakes them with no editor
-// dependency: ./registry.tsx hydrates each record back through the shader
-// catalog into a regular TextureDef, and from there the normal capture path
-// (TextureCapture / partTextureKey) treats it like any built-in texture.
+// A material's SOURCE is one of the locked vocabulary's kinds:
+//   • SHADER — a tunable RECIPE (./shaders.ts); Materialize freezes the current
+//     slider values into a {shaderId, data[]} snapshot.
+//   • DECAL — a look authored in React (Box/Text/Image) as a DecalDoc
+//     (./decal.ts, DECALEDIT-0606); the /compose editor authors it and the doc
+//     rides the record, so reopening a saved decal is lossless (re-edit law).
+// Stored materials live in the shared 'hmsc' localstore (the same store the
+// game boots from, see hmsc_localstore_shared_across_carts), so the game bakes
+// them with no editor dependency: ./registry.tsx hydrates each record back into
+// a regular TextureDef (shader → Effect, decal → DecalSurface), and from there
+// the normal capture path (TextureCapture / partTextureKey) treats it like any
+// built-in texture.
 //
-// Records are raw data only (id/label/shaderId/data) — hydration lives in
-// registry.tsx so this module has no component imports and no cycles.
+// Records are raw data only — hydration lives in registry.tsx so this module
+// has no component imports and no cycles (decal.ts is data-only too).
 
 // GAP(V15): the shared-store wires still live with the legacy game state module;
 // they move when hmsc becomes compile/'s output.
 import { hmscStoreGet, hmscStoreSet } from '../../../hmsc/state/gameState';
 import { busOn, busEmit } from '@reactjit/hooks/useIFTTT';
 import { useEffect, useState } from 'react';
+import { validateDecalDoc, type DecalDoc } from './decal';
 
 const STORE_KEY = 'custom-textures';
 const CHANGED = 'hmsc:custom-textures-changed';
@@ -27,8 +32,12 @@ const CHANGED = 'hmsc:custom-textures-changed';
 export type CustomTexture = {
   id: string;       // 'custom:<slug>' — stable; what partTextures / tiles reference
   label: string;
-  shaderId: string; // a textureShaders spec id ('road', 'e-stucco-facade', …)
-  data: number[];   // the frozen buildData snapshot
+  /** SHADER source: a ./shaders spec id ('road', 'e-stucco-facade', …) */
+  shaderId?: string;
+  /** SHADER source: the frozen buildData snapshot */
+  data?: number[];
+  /** DECAL source: the composed Box/Text/Image document (re-editable) */
+  decal?: DecalDoc;
 };
 
 export function loadCustomTextures(): CustomTexture[] {
@@ -37,7 +46,19 @@ export function loadCustomTextures(): CustomTexture[] {
     if (!raw) return [];
     const j = JSON.parse(raw);
     if (!Array.isArray(j)) return [];
-    return j.filter((t: any) => t && typeof t.id === 'string' && typeof t.shaderId === 'string' && Array.isArray(t.data));
+    const out: CustomTexture[] = [];
+    for (const t of j) {
+      if (!t || typeof t.id !== 'string' || typeof t.label !== 'string') continue;
+      // shader record — the pre-decal shape, unchanged
+      if (typeof t.shaderId === 'string' && Array.isArray(t.data)) {
+        out.push({ id: t.id, label: t.label, shaderId: t.shaderId, data: t.data });
+        continue;
+      }
+      // decal record — boundary-validated; a corrupt doc drops the record
+      const doc = validateDecalDoc(t.decal);
+      if (doc) out.push({ id: t.id, label: t.label, decal: doc });
+    }
+    return out;
   } catch {
     return [];
   }
@@ -53,14 +74,39 @@ function slugify(label: string): string {
   return s || 'material';
 }
 
+function mintId(list: CustomTexture[], label: string): string {
+  const base = `custom:${slugify(label)}`;
+  let id = base;
+  for (let n = 2; list.some((t) => t.id === id); n++) id = `${base}-${n}`;
+  return id;
+}
+
 // Save a materialized look under a name. Returns the stored record (its id is
 // unique — a name collision gets a numeric suffix, never an overwrite).
 export function saveCustomTexture(label: string, shaderId: string, data: number[]): CustomTexture {
   const list = loadCustomTextures();
-  const base = `custom:${slugify(label)}`;
-  let id = base;
-  for (let n = 2; list.some((t) => t.id === id); n++) id = `${base}-${n}`;
+  const id = mintId(list, label);
   const record: CustomTexture = { id, label: label.trim() || id, shaderId, data: [...data] };
+  write([...list, record]);
+  return record;
+}
+
+// Save a composed decal under a name (DECALEDIT-0606). Same id minting; the
+// doc is boundary-validated so the store never holds a half-doc. UPSERT by
+// existingId — re-saving an opened decal updates it in place (re-edit law);
+// a missing/foreign existingId falls back to a fresh record.
+export function saveDecalTexture(label: string, doc: DecalDoc, existingId?: string): CustomTexture | null {
+  const valid = validateDecalDoc(doc);
+  if (!valid) return null;
+  const list = loadCustomTextures();
+  const existing = existingId ? list.find((t) => t.id === existingId && t.decal) : undefined;
+  if (existing) {
+    const record: CustomTexture = { id: existing.id, label: label.trim() || existing.label, decal: valid };
+    write(list.map((t) => (t.id === existing.id ? record : t)));
+    return record;
+  }
+  const id = mintId(list, label);
+  const record: CustomTexture = { id, label: label.trim() || id, decal: valid };
   write([...list, record]);
   return record;
 }

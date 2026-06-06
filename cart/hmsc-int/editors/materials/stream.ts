@@ -10,13 +10,18 @@
 // editors/materials capture inherits. Unknown kinds pass through (addition).
 
 import type { StreamDef } from '../../data';
+import type { DecalDoc } from '../../game/textures/decal';
 
 export type MaterialRecord = {
   id: string;
   label: string;
-  shaderId: string;
-  /** the Effect data[] knob values at Materialize time — the recipe */
-  data: number[];
+  /** SHADER source: the recipe spec id (absent on decal records) */
+  shaderId?: string;
+  /** SHADER source: the Effect data[] knob values at Materialize time */
+  data?: number[];
+  /** DECAL source (DECALEDIT-0606): the composed Box/Text/Image document —
+   *  the chain carries the re-editable doc, same as the localstore record */
+  decal?: DecalDoc;
 };
 
 export type MaterialsStreamState = {

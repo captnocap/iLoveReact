@@ -25,10 +25,24 @@ export {
 export {
   loadCustomTextures,
   saveCustomTexture,
+  saveDecalTexture,
   removeCustomTexture,
   useCustomTextures,
   type CustomTexture,
 } from './materials';
+export {
+  DECAL_DOC_VERSION,
+  DECAL_SIZE_PRESETS,
+  emptyDecalDoc,
+  validateDecalDoc,
+  type DecalAlign,
+  type DecalDoc,
+  type DecalNode,
+  type DecalRectNode,
+  type DecalTextNode,
+  type DecalImageNode,
+} from './decal';
+export { DecalSurface } from './decalRender';
 export {
   TEXTURE_REGISTRY,
   TEXTURE_IDS,
