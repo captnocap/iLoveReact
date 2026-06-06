@@ -95,6 +95,16 @@ function liveBook() {
   };
 }
 
+/** IMGOPEN-0606: typed/dropped paths arrive messy — quoted (the shell drag
+ *  idiom), file://-prefixed (DE drops), or whitespace-wrapped. The cleaner
+ *  sits INSIDE openImage so the picker, the drop, and the typed field all
+ *  share one load path. Headless + pure (the P4 suite pins it). */
+export function cleanImagePath(raw: string): string {
+  let p = raw.trim().replace(/^['"]+|['"]+$/g, '').trim();
+  if (p.startsWith('file://')) p = decodeURIComponent(p.slice('file://'.length));
+  return p;
+}
+
 function dropSlot(book: CutoutDraftBook, key: string): CutoutDraftBook {
   const slots = { ...book.slots };
   delete slots[key];
@@ -222,11 +232,13 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
   const newCanvas = (w: number, h: number) => { open({ kind: 'blank', w, h }); };
 
   const openImage = async (path: string) => {
-    const clean = path.trim();
+    const clean = cleanImagePath(path);
     if (!clean || !deps.identify) return;
     setStatus(`reading ${clean}…`);
     const dims = await deps.identify(clean);
-    if (!dims) { setStatus(`could not read image: ${clean}`); return; }
+    // IMGOPEN-0606: fail LOUD and point at the doors that work — the typed
+    // path was the only ingest the user could find, and it read as broken
+    if (!dims) { setStatus(`could not read image: ${clean} — use the open-image picker or drop the file onto the canvas`); return; }
     const base = clean.split('/').pop() ?? clean;
     open({ kind: 'image', path: clean, name: base.replace(/\.[^.]+$/, '') || 'image', dims });
   };

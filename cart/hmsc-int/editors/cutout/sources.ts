@@ -8,11 +8,29 @@
 // Behavior reference: cart/cutout/magick.ts identify/loadGrayImage (read,
 // never imported).
 
-import { run } from '@reactjit/runtime/hooks/process';
+import { execAsync, run } from '@reactjit/runtime/hooks/process';
 import { mkdir, readFile } from '@reactjit/runtime/hooks/fs';
 import type { Dims, GraySource } from '../paint';
 
 const SCRATCH_DIR = '/tmp/_reactjit_cutout_route';
+
+/** IMGOPEN-0606: the native file picker — the ORIGINAL cutout app's zenity
+ *  ingest restored (cart/cutout/state.ts:1232 is the reference; no host
+ *  dialog door exists today, so the shell picker remains the honest path).
+ *  Resolves to the chosen path, or null on cancel. */
+export async function pickImageFile(title = 'Pick an image'): Promise<string | null> {
+  const r = await execAsync(
+    `zenity --file-selection --title='${title}' ` +
+    "--file-filter='Images | *.png *.jpg *.jpeg *.webp *.gif *.bmp *.tif *.tiff' " +
+    "--file-filter='All files | *'",
+  );
+  const path = (r.stdout || '').trim();
+  return path || null;
+}
+
+// (the path cleaner lives in workbench/paint/store.ts cleanImagePath —
+// INSIDE openImage, so picker/drop/typed-field all get it for free, and the
+// headless P4 suite can pin it without pulling this module's host doors)
 
 /** Native pixel dimensions of an image file (null = unreadable/not an image). */
 export async function identifyImage(path: string): Promise<Dims | null> {

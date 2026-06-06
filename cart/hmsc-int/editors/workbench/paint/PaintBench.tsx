@@ -22,6 +22,9 @@ import { editorTunables } from '../../tunables';
 import type { PartId } from '../../../game/figure/shapes';
 import { readRouteTwigState, useRouteTwigState } from '../../twigs';
 import { CutoutToolRail } from '../../cutout/ToolRail';
+// IMGOPEN-0606: the original cutout app's ingest, restored — the picker
+// (path cleaning happens inside the store's openImage, one door for all)
+import { pickImageFile } from '../../cutout/sources';
 import { CutoutInspector, type BackendChoice } from '../../cutout/Inspector';
 import { CutoutStatusBar } from '../../cutout/StatusBar';
 import { ModelPreview3D } from '../../cutout/ModelPreview';
@@ -121,7 +124,8 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
   const dirtyBase = store.work.initial ? 1 : 0;
   useEffect(() => { if (s.documentVersion > dirtyBase) dirtyRef.current(); }, [s.documentVersion, dirtyBase]);
 
-  // anything dropped on the bench becomes the canvas (cutout's route-wide drop)
+  // anything dropped on the bench becomes the canvas (cutout's route-wide
+  // drop) — openImage cleans file://-prefixed/quoted paths itself
   useFileDrop((path) => { void store.openImage(path); });
 
   // DEPTHOVERLAY-0606: the depth hint — default ON ("not blind"), twigged;
@@ -216,6 +220,9 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
         </Text>
         <Box style={{ flexGrow: 1 }} />
         {store.sessionError ? <Text fontSize={10} color={T.bad} numberOfLines={1}>{`library store offline — ${store.sessionError}`}</Text> : null}
+        {/* IMGOPEN-0606: the picker — no path typing, ever ("ya right. im
+            not going to type a path xD"); dropping a file works too */}
+        <Chip label="open image…" color="accent" onPress={() => { void pickImageFile().then((p) => { if (p) void store.openImage(p); }); }} />
         {/* DEPTHOVERLAY-0606 (+ req_0074): the hint toggle, and while it's
             on, its intensity — sliding the one P2 tunable */}
         {work.model?.family === 'figure' ? (

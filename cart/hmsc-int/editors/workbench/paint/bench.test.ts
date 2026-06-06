@@ -8,7 +8,7 @@
 // round-trip.
 
 import { assert, assertEqual, finish, test } from '../../../game/_testkit';
-import { createPaintBenchStore, type PaintBenchDeps, type PainterApi } from './store';
+import { cleanImagePath, createPaintBenchStore, type PaintBenchDeps, type PainterApi } from './store';
 import { resolveTarget, encodeTargetRow, decodeTargetRow, type PaintTarget } from './targets';
 import { cutoutStream, libraryCutouts, libraryDocuments, type CutoutStreamState } from '../../cutout/stream';
 import { emptyDraftBook, upsertDraftSlot, buildDraft, type CutoutDraftBook } from '../../cutout/draft';
@@ -271,6 +271,14 @@ test('DRAFTHOLE: a vanished model keeps its binding through the degrade — the 
   const { store: healed } = rig({ bookSeed: () => getBook2() });
   assertEqual(healed.work.model?.family, 'figure', 'the binding re-resolves once the roster is back');
   assert(!!healed.work.initial && healed.work.initial.layers.length > 0, 'nothing was lost across the whole episode');
+});
+
+test('IMGOPEN: every ingest door shares one path cleaner — quotes, file://, whitespace', () => {
+  assertEqual(cleanImagePath('  /home/u/pic.png  '), '/home/u/pic.png', 'whitespace trims');
+  assertEqual(cleanImagePath('"/home/u/my pic.png"'), '/home/u/my pic.png', 'shell quotes strip');
+  assertEqual(cleanImagePath("'/home/u/pic.png'"), '/home/u/pic.png', 'single quotes strip');
+  assertEqual(cleanImagePath('file:///home/u/pic%20name.png'), '/home/u/pic name.png', 'DE file:// drops decode');
+  assertEqual(cleanImagePath('/plain/path.png'), '/plain/path.png', 'clean input passes through');
 });
 
 finish('editors/workbench/paint');
