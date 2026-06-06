@@ -30,6 +30,8 @@ export type PhysicsTuning = {
   wallRestitution: number;
   bodyRestitution: number;
   playerStepHeightMeters: number;
+  /** Suppress lateral floor-edge pushes while a walkable rect top is within step reach. */
+  walkableRectSidePushGraceMeters?: number;
 };
 
 /** How the surface under the player feels this step. */
@@ -126,6 +128,15 @@ export type Heightfield = {
 
 // ── The wire protocol (mirrors framework/v8_bindings_physics_lab.zig + the
 //    hostPhysics.ts behavior reference; these are facts, not tuning) ─────────
+export const PHYSICS_TUNING = Object.freeze({
+  /** FLOOREDGE-0606: feet this close below a walkable floor band count as landing/on it,
+   *  so the side resolver does not shove the capsule off seams or true edges. */
+  walkableRectSidePushGraceMeters: 0.08,
+  knobs: Object.freeze({
+    walkableRectSidePushGraceMeters: { min: 0, max: 0.25, step: 0.005, precision: 3 },
+  }),
+});
+
 const INPUT_HEADER_FLOATS = 25;
 const BODY_FLOATS = 8;
 const RECT_FLOATS = 9;
@@ -144,9 +155,26 @@ const SOLID_TO_GROUND = -1e9;
 
 declare const globalThis: any;
 
-function hostStepFn(): ((input: Float32Array) => ArrayBuffer | null) | null {
-  const fn = globalThis.__game_physics_step;
-  return typeof fn === 'function' ? fn : null;
+type HostFn<T extends (...args: any[]) => any> = { fn: T; name: string };
+
+let liveStepProbePrinted = false;
+let missingStepProbePrinted = false;
+let heightfieldProbeCount = 0;
+let missingHeightfieldRegisterPrinted = false;
+
+function hostStepFn(): HostFn<(input: Float32Array) => ArrayBuffer | null> | null {
+  const honest = globalThis.__game_physics_step;
+  if (typeof honest === 'function') return { fn: honest, name: '__game_physics_step' };
+  const legacy = globalThis.__hmsc_physics_step;
+  if (typeof legacy === 'function') return { fn: legacy, name: '__hmsc_physics_step' };
+  if (!missingStepProbePrinted) {
+    missingStepProbePrinted = true;
+    console.warn('[game-physics live] no host step fn', {
+      hasGameStep: typeof honest,
+      hasLegacyStep: typeof legacy,
+    });
+  }
+  return null;
 }
 
 /** True when the host physics bindings are compiled into this binary. */
@@ -174,8 +202,8 @@ function packRect(out: number[], rect: CollisionRect): void {
  * compiled in (the cart still runs; nothing is solid).
  */
 export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
-  const step = hostStepFn();
-  if (!step) return null;
+  const stepHost = hostStepFn();
+  if (!stepHost) return null;
 
   const bodies = input.bodies ?? [];
   const rects = input.rects ?? [];
@@ -205,7 +233,7 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
   wire[8] = player.velocity.x;
   wire[9] = player.velocity.y;
   wire[10] = player.velocity.z;
-  wire[11] = player.yawDegrees;
+  wire[11] = tuning.walkableRectSidePushGraceMeters ?? PHYSICS_TUNING.walkableRectSidePushGraceMeters;
   wire[12] = bodies.length;
   wire[13] = rects.length;
   wire[14] = tuning.gravityMetersPerSecondSquared;
@@ -242,7 +270,26 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
   }
   wire.set(orientedFloats, at);
 
-  const buffer = step(wire);
+  if (!liveStepProbePrinted) {
+    liveStepProbePrinted = true;
+    console.warn('[game-physics live] step wire', {
+      fn: stepHost.name,
+      headerFloats: INPUT_HEADER_FLOATS,
+      wireFloats: wire.length,
+      dt: wire[0],
+      player: { x: wire[5], y: wire[6], z: wire[7], vx: wire[8], vy: wire[9], vz: wire[10] },
+      slot11WalkableGrace: wire[11],
+      bodies: wire[12],
+      rects: wire[13],
+      gravity: wire[14],
+      stepHeight: wire[20],
+      orientedRects: wire[24],
+      firstRect: rects[0] ?? null,
+      firstOrientedRect: oriented[0] ?? null,
+    });
+  }
+
+  const buffer = stepHost.fn(wire);
   if (!buffer || typeof (buffer as any).byteLength !== 'number') return null;
   const out = new Float32Array(buffer);
   if (out.length < OUTPUT_HEADER_FLOATS) return null;
@@ -289,8 +336,40 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
  * bindings are missing — terrain just isn't solid until the host carries them.
  */
 export function registerHeightfield(field: Heightfield): void {
-  const register = globalThis.__game_physics_register_heightfield;
-  if (typeof register !== 'function') return;
+  const honest = globalThis.__game_physics_register_heightfield;
+  const legacy = globalThis.__hmsc_register_heightfield;
+  const register = typeof honest === 'function' ? honest : typeof legacy === 'function' ? legacy : null;
+  if (typeof register !== 'function') {
+    if (!missingHeightfieldRegisterPrinted) {
+      missingHeightfieldRegisterPrinted = true;
+      console.warn('[game-physics live] no heightfield register fn', {
+        slot: field.slot,
+        cols: field.cols,
+        rows: field.rows,
+        hasGameRegister: typeof honest,
+        hasLegacyRegister: typeof legacy,
+      });
+    }
+    return;
+  }
+  if (heightfieldProbeCount < 8) {
+    heightfieldProbeCount += 1;
+    console.warn('[game-physics live] heightfield.register', {
+      fn: typeof honest === 'function' ? '__game_physics_register_heightfield' : '__hmsc_register_heightfield',
+      slot: field.slot,
+      originX: field.originX,
+      originZ: field.originZ,
+      cell: field.cellSizeMeters,
+      cols: field.cols,
+      rows: field.rows,
+      baseY: field.baseY,
+      walkableSlopeCos: field.walkableSlopeCos,
+      heightBytes: field.heights.byteLength,
+      yawRadians: field.yawRadians ?? 0,
+      pivotX: field.pivotX ?? 0,
+      pivotZ: field.pivotZ ?? 0,
+    });
+  }
   GAME_TELEMETRY.recordDiagnostic('physics', 'heightfield.register', {
     slot: field.slot,
     cols: field.cols,
@@ -319,7 +398,9 @@ export function registerHeightfield(field: Heightfield): void {
 
 /** Drop every registered heightfield (world reload). */
 export function clearHeightfields(): void {
-  const clear = globalThis.__game_physics_clear_heightfields;
+  const clear = typeof globalThis.__game_physics_clear_heightfields === 'function'
+    ? globalThis.__game_physics_clear_heightfields
+    : globalThis.__hmsc_clear_heightfields;
   if (typeof clear === 'function') {
     GAME_TELEMETRY.recordDiagnostic('physics', 'heightfield.clear');
     GAME_TELEMETRY.recordDiagnostic('bridge', '__game_physics_clear_heightfields', { args: 0, payloadBytes: 0 });
@@ -333,4 +414,5 @@ export const GAME_PHYSICS = Object.freeze({
   registerHeightfield,
   clearHeightfields,
   limits: PHYSICS_LIMITS,
+  tuning: PHYSICS_TUNING,
 });

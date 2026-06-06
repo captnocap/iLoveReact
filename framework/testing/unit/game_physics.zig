@@ -35,6 +35,7 @@ const Sim = struct {
     player_height: f32 = 1.7,
     wall_restitution: f32 = 0,
     step_height: f32 = 0.4,
+    walkable_side_push_grace: f32 = 0,
     acceleration_multiplier: f32 = 1,
     surface_friction: f32 = 0,
     surface_restitution: f32 = 0,
@@ -67,6 +68,7 @@ const Sim = struct {
         buf[21] = self.acceleration_multiplier;
         buf[22] = self.surface_friction;
         buf[23] = self.surface_restitution;
+        buf[11] = self.walkable_side_push_grace;
         buf[24] = 0; // oriented count
         var at: usize = H;
         for (self.entities) |e| {
@@ -147,6 +149,96 @@ test "ground collide: solid wall blocks horizontal motion" {
         sim.pvx = 4;
         out = physics.step(sim.pack(&g_buf)).?;
         try testing.expect(out[1] <= 1 - 0.4 + 1e-4);
+    }
+}
+
+test "ground collide: flush floor seam is continuous when side-push grace is tuned on" {
+    physics.clearHeightfields();
+    const floor_a = [physics.RECT_FLOATS]f32{ -1.5, -1.5, 1.5, 1.5, 0.2, 1, 0.85, 0.02, 0 };
+    const floor_b = [physics.RECT_FLOATS]f32{ 1.5, -1.5, 4.5, 1.5, 0.2, 1, 0.85, 0.02, 0 };
+
+    const before = physics.step((Sim{
+        .dt = 0.016,
+        .px = 1.5,
+        .py = 0.05,
+        .pz = 0,
+        .pvy = -1,
+        .rects = &.{ floor_a, floor_b },
+    }).pack(&g_buf)).?;
+    try testing.expectApproxEqAbs(@as(f32, 0.9), before[1], 1e-5);
+    try testing.expectApproxEqAbs(@as(f32, 0.2), before[2], 1e-5);
+    try testing.expectEqual(@as(f32, 1), before[7]);
+
+    const after = physics.step((Sim{
+        .dt = 0.016,
+        .px = 1.5,
+        .py = 0.05,
+        .pz = 0,
+        .pvy = -1,
+        .walkable_side_push_grace = 0.08,
+        .rects = &.{ floor_a, floor_b },
+    }).pack(&g_buf)).?;
+    try testing.expectApproxEqAbs(@as(f32, 1.5), after[1], 1e-5);
+    try testing.expectApproxEqAbs(@as(f32, 0.2), after[2], 1e-5);
+    try testing.expectEqual(@as(f32, 1), after[7]);
+}
+
+test "ground collide: true floor edge supports to the bound without oscillation" {
+    physics.clearHeightfields();
+    const floor = [physics.RECT_FLOATS]f32{ -1.5, -1.5, 1.5, 1.5, 0.2, 1, 0.85, 0.02, 0 };
+    var sim = Sim{
+        .dt = 0.016,
+        .px = 1.5,
+        .py = 0.05,
+        .pz = 0,
+        .pvy = -1,
+        .walkable_side_push_grace = 0.08,
+        .rects = &.{floor},
+    };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    var frame: usize = 0;
+    while (frame < 6) : (frame += 1) {
+        try testing.expectApproxEqAbs(@as(f32, 1.5), out[1], 1e-5);
+        try testing.expectApproxEqAbs(@as(f32, 0.2), out[2], 1e-5);
+        try testing.expectEqual(@as(f32, 1), out[7]);
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pz = out[3];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        sim.pvz = out[6];
+        out = physics.step(sim.pack(&g_buf)).?;
+    }
+}
+
+test "ground collide: rest on flat floor does not oscillate with side-push grace" {
+    physics.clearHeightfields();
+    const floor = [physics.RECT_FLOATS]f32{ -1.5, -1.5, 1.5, 1.5, 0.2, 1, 0.85, 0.02, 0 };
+    var sim = Sim{
+        .dt = 0.016,
+        .px = 0,
+        .py = 0.2,
+        .pz = 0,
+        .walkable_side_push_grace = 0.08,
+        .rects = &.{floor},
+    };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    var frame: usize = 0;
+    while (frame < 12) : (frame += 1) {
+        try testing.expectApproxEqAbs(@as(f32, 0), out[1], 1e-6);
+        try testing.expectApproxEqAbs(@as(f32, 0.2), out[2], 1e-6);
+        try testing.expectApproxEqAbs(@as(f32, 0), out[3], 1e-6);
+        try testing.expectApproxEqAbs(@as(f32, 0), out[4], 1e-6);
+        try testing.expectApproxEqAbs(@as(f32, 0), out[5], 1e-6);
+        try testing.expectApproxEqAbs(@as(f32, 0), out[6], 1e-6);
+        try testing.expectEqual(@as(f32, 1), out[7]);
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pz = out[3];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        sim.pvz = out[6];
+        out = physics.step(sim.pack(&g_buf)).?;
     }
 }
 

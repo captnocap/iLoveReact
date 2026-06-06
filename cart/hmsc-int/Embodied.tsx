@@ -55,9 +55,10 @@
 
 import { memo, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { Pressable, Scene3D } from '@reactjit/primitives';
-import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_NATIVE_CAMERA, GAME_PHYSICS, GAME_WORLD, PHYSICS_LIMITS } from '@game';
+import { GAME_CAMERA, GAME_FIGURE, GAME_INPUT, GAME_KINDS, GAME_LOOP, GAME_NATIVE_CAMERA, GAME_PHYSICS, GAME_TELEMETRY, GAME_WORLD, PHYSICS_LIMITS } from '@game';
 import type { CollisionRect, OrientedCollisionRect, WorldGridState } from '@game';
 import { CharacterCaptures, FigureMeshes, buildPartRender } from '@game/figure/render';
+import { LIVE_FLOOR_PROBE, liveFloorRecoveryDecision } from './embodiedLiveFloor';
 import type { GameState, Vec3 } from '../hmsc/design'; // GAP: the editor GameState type retires when hmsc becomes compile/'s output (V15)
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D'; // GAP(W-2) awaiting world render
 import { TileSurfaceCaptures } from '../hmsc/render3d/tileSurface'; // GAP(W-2)
@@ -93,7 +94,10 @@ const GAIT = {
   runCyclesPerSecond: 2.3,
 } as const;
 const FRAME = { minDtSeconds: 0.001, maxDtSeconds: 0.05 } as const;
+const MOVEMENT_INTENT_DEADZONE = 0.001;
+const NOCLIP_MIN_HEIGHT_METERS = 0;
 const PLAYER_FIGURE_SEED = 1;
+const HEIGHTFIELD_OWNER_KEY = '__hmsc_embodied_heightfield_owner';
 
 // memo() so the 57-mesh figure subtree only re-diffs when rig/offset/yaw
 // actually change — an idle camera drag must not pay the figure.
@@ -128,6 +132,18 @@ const IDLE_REST_EPSILON = 1e-4;
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function claimHeightfieldOwner(): number {
+  const g = globalThis as any;
+  const next = (typeof g[HEIGHTFIELD_OWNER_KEY] === 'number' ? g[HEIGHTFIELD_OWNER_KEY] : 0) + 1;
+  g[HEIGHTFIELD_OWNER_KEY] = next;
+  return next;
+}
+
+function currentHeightfieldOwner(): number {
+  const current = (globalThis as any)[HEIGHTFIELD_OWNER_KEY];
+  return typeof current === 'number' ? current : 0;
 }
 
 export function normalizeYawDegrees(yawDegrees: number): number {
@@ -195,10 +211,14 @@ export type EmbodiedOptions = {
   isTyping?: () => boolean;
   /** live speed source (test: the console ctx so gv_speed drives the route);
    *  default reads the authored state.player */
-  speeds?: () => { walkSpeedMetersPerSecond: number; runSpeedMetersPerSecond: number };
+  speeds?: () => { walkSpeedMetersPerSecond: number; runSpeedMetersPerSecond: number; noclip?: boolean };
+  /** optional live physics tuning override (build: floor-edge dial) */
+  physicsTuning?: () => GameState['config']['physics'] & { walkableRectSidePushGraceMeters?: number };
   worldExtras?: EmbodiedWorldExtras;
   /** runs once per frame after the movement step (build: snap re-resolve) */
   onFrame?: () => void;
+  /** PLAYERJIT-0606 witness: route-gated straight-walk frame table. */
+  playerJitProbe?: boolean;
   /** a left-click while the mouse is CAPTURED (build: place) — always
    *  intentional; capture means a click is never a camera gesture */
   onTap?: () => void;
@@ -217,6 +237,7 @@ export type Embodied = {
   figureOffset: [number, number, number];
   /** the authored state with the live player pose folded in — what the scene renders */
   sceneState: GameState;
+  playerJitRenderRef: RefObject<PlayerJitRenderedFrame>;
   cameraRef: RefObject<any>;
   bootCam: ReturnType<typeof GAME_CAMERA.solve>;
   /** is the mouse currently consumed (relative-mode look)? Esc releases. */
@@ -231,12 +252,102 @@ export type Embodied = {
   resetPlayer: () => void;
 };
 
+type PlayerJitRenderedFrame = {
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pose: 'walk' | 'stand';
+  gaitPhase: number;
+};
+
+type PlayerJitFrame = {
+  frame: number;
+  tMs: number;
+  dtMs: number;
+  input: {
+    axesForward: number;
+    axesStrafe: number;
+    intentX: number;
+    intentZ: number;
+    moving: boolean;
+    running: boolean;
+    jump: boolean;
+    crouch: boolean;
+    noclip: boolean;
+  };
+  rendered: PlayerJitRenderedFrame;
+  physics: { x: number; y: number; z: number; dt: number; hostUs: number };
+  camera: { x: number | null; y: number | null; z: number | null; nodeId: number; source: string };
+  animation: { pose: 'walk' | 'stand'; gaitPhase: number };
+  correction: {
+    kind: 'none' | 'noclip-bypass' | 'live-floor-recovery' | 'host-step' | 'js-fallback' | 'idle-stop';
+    reason?: string;
+    registered?: boolean;
+    fromY?: number;
+    toY?: number;
+  };
+};
+
+function numberField(obj: any, keys: string[]): number | null {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const key of keys) {
+    const value = obj[key];
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+  }
+  return null;
+}
+
+function vectorField(obj: any, keys: string[]): [number, number, number] | null {
+  if (!obj || typeof obj !== 'object') return null;
+  for (const key of keys) {
+    const value = obj[key];
+    if (Array.isArray(value) && value.length >= 3) {
+      const x = Number(value[0]), y = Number(value[1]), z = Number(value[2]);
+      if ([x, y, z].every(Number.isFinite)) return [x, y, z];
+    }
+  }
+  return null;
+}
+
+function parseHostJson(raw: unknown): any {
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch { return null; }
+  }
+  return raw && typeof raw === 'object' ? raw : null;
+}
+
+function readCameraNode(camera: any): PlayerJitFrame['camera'] {
+  const nodeId = Number(camera?.id ?? 0);
+  if (!nodeId) return { x: null, y: null, z: null, nodeId: 0, source: 'no-node-id' };
+  const host = globalThis as any;
+  const raw = typeof host.__tel_node === 'function' ? parseHostJson(host.__tel_node(nodeId)) : null;
+  const style = raw?.style ?? raw?.resolved_style ?? raw?.node?.style ?? raw;
+  const pos = vectorField(style, ['position', 'pos', 'camera_position', 'cameraPosition'])
+    ?? vectorField(raw, ['position', 'pos', 'camera_position', 'cameraPosition']);
+  if (pos) return { x: pos[0], y: pos[1], z: pos[2], nodeId, source: 'tel_node.vector' };
+  const x = numberField(style, ['x', 'camera_x', 'cameraX', 'position_x', 'pos_x']);
+  const y = numberField(style, ['y', 'camera_y', 'cameraY', 'position_y', 'pos_y']);
+  const z = numberField(style, ['z', 'camera_z', 'cameraZ', 'position_z', 'pos_z']);
+  if (x != null && y != null && z != null) return { x, y, z, nodeId, source: 'tel_node.scalars' };
+  return { x: null, y: null, z: null, nodeId, source: raw ? `tel_node.keys:${Object.keys(raw).slice(0, 10).join(',')}` : 'tel_node.unavailable' };
+}
+
+function writePlayerJitWitness(frames: PlayerJitFrame[]): void {
+  const host = globalThis as any;
+  if (typeof host.__fs_write !== 'function') return;
+  const lines = frames.map((frame) => JSON.stringify(frame)).join('\n') + '\n';
+  host.__fs_write('/tmp/playerjit-0606-frames.jsonl', lines);
+}
+
 export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   const { state, worldExtras } = options;
   // Mode-layer callbacks are read through this ref at call time (the latest-ref
   // idiom both routes already live by) — the frame loop never needs them as deps.
   const optionsRef = useRef(options);
   optionsRef.current = options;
+  const liveFloorProbeRef = useRef({ worldPrinted: false, recoveries: 0 });
+  const registerHeightfieldsRef = useRef<(reason: string) => void>(() => undefined);
 
   // W-1 CLOSED: the door's view over the authored world — every GAME_WORLD
   // call (colliders, heightfields, footing, ground) takes this. Memoized per
@@ -249,6 +360,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     if (built.dropped > 0) console.warn(`${options.logTag} world colliders past the host cap: ${built.dropped} dropped`);
     return built;
   }, [worldGrid]);
+  const worldHeightfields = useMemo(() => GAME_WORLD.heightfields(worldGrid), [worldGrid]);
   // The world's solids + the mode layer's (build: placed pieces) — host caps
   // are wire facts: truncate loudly, never throw mid-frame.
   const solids = useMemo(() => {
@@ -271,17 +383,78 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   // (build: ramp/stairs slopes continue where terrain stopped). No-op until
   // the host carries has-game-physics; cleared on unmount so routes start clean.
   useEffect(() => {
-    const baked = GAME_WORLD.registerHeightfields(worldGrid);
-    if (baked.dropped > 0) console.warn(`${optionsRef.current.logTag} landforms past the heightfield slots: ${baked.dropped} not baked`);
-    worldExtras?.registerHeightfields?.(baked);
+    const owner = claimHeightfieldOwner();
+    const syncHeightfields = (reason: string) => {
+      if (currentHeightfieldOwner() !== owner) return;
+      const baked = GAME_WORLD.registerHeightfields(worldGrid);
+      if (baked.dropped > 0) console.warn(`${optionsRef.current.logTag} landforms past the heightfield slots: ${baked.dropped} not baked`);
+      worldExtras?.registerHeightfields?.(baked);
+      GAME_TELEMETRY.recordDiagnostic('physics', 'live-floor.sync', {
+        reason,
+        owner,
+        hostReady: GAME_PHYSICS.hostReady() ? 1 : 0,
+        surfaceRegions: worldGrid.surfaceRegions.length,
+        placedCells: Object.keys(worldGrid.placedCells).length,
+        landforms: worldGrid.landforms.length,
+        heightfields: baked.fields.length,
+        heightfieldDropped: baked.dropped,
+        spawnGround: groundColumnTop(worldGrid, optionsRef.current.state.player.position.x, optionsRef.current.state.player.position.z),
+      });
+      if (!liveFloorProbeRef.current.worldPrinted) {
+        const spawn = optionsRef.current.state.player.position;
+        liveFloorProbeRef.current.worldPrinted = true;
+        console.warn(`${optionsRef.current.logTag} live floor probe`, {
+          reason,
+          owner,
+          hostReady: GAME_PHYSICS.hostReady(),
+          surfaceRegions: worldGrid.surfaceRegions.length,
+          placedCells: Object.keys(worldGrid.placedCells).length,
+          landforms: worldGrid.landforms.length,
+          heightfields: baked.fields.length,
+          heightfieldDropped: baked.dropped,
+          spawn: { x: spawn.x, y: spawn.y, z: spawn.z },
+          spawnGround: groundColumnTop(worldGrid, spawn.x, spawn.z),
+        });
+      }
+    };
+    registerHeightfieldsRef.current = syncHeightfields;
+    syncHeightfields('mount-or-world-change');
     return () => {
-      GAME_PHYSICS.clearHeightfields();
+      if (currentHeightfieldOwner() === owner) {
+        GAME_TELEMETRY.recordDiagnostic('physics', 'live-floor.clear', { owner });
+        GAME_PHYSICS.clearHeightfields();
+      } else {
+        GAME_TELEMETRY.recordDiagnostic('physics', 'live-floor.stale-clear-skipped', {
+          owner,
+          currentOwner: currentHeightfieldOwner(),
+        });
+        console.warn(`${optionsRef.current.logTag} stale heightfield cleanup skipped`, {
+          owner,
+          currentOwner: currentHeightfieldOwner(),
+        });
+      }
     };
   }, [worldGrid, worldExtras]);
 
   const [player, setPlayer] = useState(() => initialPlayer(state, worldGrid));
   const playerRef = useRef(player);
   playerRef.current = player;
+  const playerJitRenderRef = useRef<PlayerJitRenderedFrame>({
+    x: player.x,
+    y: player.y,
+    z: player.z,
+    yaw: player.yaw,
+    pose: 'stand',
+    gaitPhase: player.gaitPhase,
+  });
+  const playerJitProbeRef = useRef({
+    active: false,
+    done: false,
+    startedAt: 0,
+    lastAt: 0,
+    frames: [] as PlayerJitFrame[],
+    latestPhysics: { x: player.x, y: player.y, z: player.z, dt: 0, hostUs: 0 },
+  });
   // V23 — THE CAMERA IS NOT JAVASCRIPT: framework/game/camera.zig owns every
   // frame (solve/smoothing, writes the bound Scene3D.Camera node fields).
   // JS keeps only a yaw/pitch SHADOW ref — movement stays camera-relative
@@ -408,9 +581,22 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
         if (leftDown && !leftWasDownRef.current && !typing) optionsRef.current.onTap?.();
         leftWasDownRef.current = leftDown;
       }
-      const axes = keys && !typing ? GAME_INPUT.moveAxes(keys) : { forward: 0, strafe: 0 };
-      const running = keys != null && !typing && GAME_INPUT.actionDown(keys, 'run');
+      const probe = playerJitProbeRef.current;
+      const probeEnabled = optionsRef.current.playerJitProbe === true && !probe.done;
+      if (probeEnabled && !probe.active) {
+        probe.active = true;
+        probe.startedAt = now;
+        probe.lastAt = 0;
+        probe.frames = [];
+        probe.latestPhysics = { x: playerRef.current.x, y: playerRef.current.y, z: playerRef.current.z, dt: 0, hostUs: 0 };
+        GAME_TELEMETRY.clearDiagnostics();
+        GAME_TELEMETRY.setDiagnosticChannel('camera', true);
+        GAME_TELEMETRY.recordDiagnostic('camera', 'playerjit.armed', { frames: 120 });
+      }
+      const axes = probe.active ? { forward: 1, strafe: 0 } : (keys && !typing ? GAME_INPUT.moveAxes(keys) : { forward: 0, strafe: 0 });
+      const running = probe.active ? false : (keys != null && !typing && GAME_INPUT.actionDown(keys, 'run'));
       const jumpDown = keys != null && !typing && GAME_INPUT.actionDown(keys, 'jump');
+      const crouchDown = keys != null && !typing && GAME_INPUT.actionDown(keys, 'crouch');
       // ADS trigger (aim-enabled routes only): the bindings' 'aim' input is
       // right-mouse hold, read through the door's pointer wire (honest false
       // when unwired). The walk<->aim transition rides the controller:
@@ -435,6 +621,173 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       const intent = GAME_INPUT.moveIntent(axes, lookRef.current.yaw * DEG);
       const moving = intent.x !== 0 || intent.z !== 0;
       const prev = playerRef.current;
+      const speeds = optionsRef.current.speeds?.() ?? state.player;
+      const noclip = speeds.noclip === true;
+      const authoredGroundExists = worldGrid.surfaceRegions.length > 0
+        || Object.keys(worldGrid.placedCells).length > 0
+        || worldGrid.landforms.length > 0;
+      const columnTop = groundColumnTop(worldGrid, prev.x, prev.z);
+      const physicsTuning = optionsRef.current.physicsTuning?.() ?? state.config.physics;
+      const probeInput: PlayerJitFrame['input'] = {
+        axesForward: axes.forward,
+        axesStrafe: axes.strafe,
+        intentX: intent.x,
+        intentZ: intent.z,
+        moving,
+        running,
+        jump: jumpDown,
+        crouch: crouchDown,
+        noclip,
+      };
+      const recordProbeFrame = (correction: PlayerJitFrame['correction']) => {
+        if (!probe.active || probe.done) return;
+        const camera = readCameraNode(cameraRef.current);
+        const rendered = playerJitRenderRef.current;
+        const row: PlayerJitFrame = {
+          frame: probe.frames.length + 1,
+          tMs: now - probe.startedAt,
+          dtMs: probe.lastAt > 0 ? now - probe.lastAt : 0,
+          input: probeInput,
+          rendered: { ...rendered },
+          physics: { ...probe.latestPhysics },
+          camera,
+          animation: { pose: rendered.pose, gaitPhase: rendered.gaitPhase },
+          correction,
+        };
+        probe.lastAt = now;
+        probe.frames.push(row);
+        GAME_TELEMETRY.recordDiagnostic('camera', 'playerjit.frame', {
+          frame: row.frame,
+          intentX: row.input.intentX,
+          intentZ: row.input.intentZ,
+          renderX: row.rendered.x,
+          renderY: row.rendered.y,
+          renderZ: row.rendered.z,
+          physicsX: row.physics.x,
+          physicsY: row.physics.y,
+          physicsZ: row.physics.z,
+          cameraX: row.camera.x ?? 0,
+          cameraY: row.camera.y ?? 0,
+          cameraZ: row.camera.z ?? 0,
+          gaitPhase: row.animation.gaitPhase,
+          correctionKind: row.correction.kind,
+          correctionRegistered: row.correction.registered ? 1 : 0,
+        });
+        if (probe.frames.length >= 120) {
+          probe.done = true;
+          probe.active = false;
+          writePlayerJitWitness(probe.frames);
+          GAME_TELEMETRY.diagnosticDump('playerjit-0606');
+          GAME_TELEMETRY.setDiagnosticChannel('camera', false);
+        }
+      };
+      // Reference pv_noclip behavior: cheats gate in the console command;
+      // movement bypasses collision/ground resolution, Space flies up, C/Ctrl
+      // flies down, velocity is zeroed, and the player is never grounded.
+      if (noclip) {
+        const baseSpeed = running ? speeds.runSpeedMetersPerSecond : speeds.walkSpeedMetersPerSecond;
+        const intentLength = Math.hypot(intent.x, intent.z);
+        const moveX = intentLength > MOVEMENT_INTENT_DEADZONE ? intent.x / intentLength : 0;
+        const moveZ = intentLength > MOVEMENT_INTENT_DEADZONE ? intent.z / intentLength : 0;
+        const verticalIntent = (jumpDown ? 1 : 0) - (crouchDown ? 1 : 0);
+        const movingNoClip = intentLength > MOVEMENT_INTENT_DEADZONE || verticalIntent !== 0;
+        const desiredYaw = intentLength > MOVEMENT_INTENT_DEADZONE
+          ? normalizeYawDegrees(Math.atan2(-moveX, -moveZ) / DEG)
+          : prev.yaw;
+        if (movingNoClip || prev.moving || prev.running || prev.grounded || prev.yaw !== desiredYaw || prev.vx !== 0 || prev.vy !== 0 || prev.vz !== 0) {
+          const next: PlayerPose = {
+            ...prev,
+            x: prev.x + moveX * baseSpeed * dt,
+            y: Math.max(NOCLIP_MIN_HEIGHT_METERS, prev.y + verticalIntent * baseSpeed * dt),
+            z: prev.z + moveZ * baseSpeed * dt,
+            vx: 0,
+            vy: 0,
+            vz: 0,
+            grounded: false,
+            yaw: desiredYaw,
+            moving: movingNoClip,
+            running: movingNoClip && running,
+            gaitPhase: movingNoClip ? prev.gaitPhase + dt * (running ? GAIT.runCyclesPerSecond : GAIT.walkCyclesPerSecond) : prev.gaitPhase,
+          };
+          playerRef.current = next;
+          playerJitProbeRef.current.latestPhysics = { x: next.x, y: next.y, z: next.z, dt, hostUs: 0 };
+          setPlayer(next);
+          sendCameraRef.current(next);
+        }
+        recordProbeFrame({ kind: 'noclip-bypass' });
+        optionsRef.current.onFrame?.();
+        handle = GAME_LOOP.scheduleFrame(loop);
+        return;
+      }
+      const recovery = liveFloorRecoveryDecision({
+        authoredGroundExists,
+        player: prev,
+        columnTop,
+        capsuleHeightMeters: physicsTuning.playerCapsuleHeightMeters,
+        tuning: physicsTuning,
+        heightfields: worldHeightfields.fields,
+      });
+      if (recovery.shouldRecover) {
+        if (recovery.shouldRegister) registerHeightfieldsRef.current(recovery.reason);
+        const next: PlayerPose = {
+          ...prev,
+          y: columnTop,
+          vx: 0,
+          vy: 0,
+          vz: 0,
+          grounded: true,
+          moving: false,
+          running: false,
+        };
+        playerRef.current = next;
+        setPlayer(next);
+        sendCameraRef.current(next);
+        if (liveFloorProbeRef.current.recoveries < LIVE_FLOOR_PROBE.maxRecoveryLogs) {
+          liveFloorProbeRef.current.recoveries += 1;
+          GAME_TELEMETRY.recordDiagnostic('physics', 'live-floor.recovery', {
+            reason: recovery.reason,
+            registered: recovery.shouldRegister ? 1 : 0,
+            fromY: prev.y,
+            toY: columnTop,
+            x: prev.x,
+            z: prev.z,
+            hostReady: recovery.hostReady ? 1 : 0,
+            fieldCount: recovery.fieldCount,
+            fieldUnderPlayer: recovery.fieldUnderPlayer ? 1 : 0,
+            thresholdY: recovery.recoveryThresholdY,
+            probeY: recovery.probeY ?? -999999,
+            probeGrounded: recovery.probeGrounded === true ? 1 : 0,
+            solidRects: solids.rects.length,
+            orientedRects: solids.orientedRects.length,
+          });
+          console.warn(`${optionsRef.current.logTag} live floor recovery`, {
+            reason: recovery.reason,
+            registered: recovery.shouldRegister,
+            fromY: prev.y,
+            toY: columnTop,
+            x: prev.x,
+            z: prev.z,
+            hostReady: recovery.hostReady,
+            fieldCount: recovery.fieldCount,
+            fieldUnderPlayer: recovery.fieldUnderPlayer,
+            thresholdY: recovery.recoveryThresholdY,
+            probeY: recovery.probeY,
+            probeGrounded: recovery.probeGrounded,
+            solidRects: solids.rects.length,
+            orientedRects: solids.orientedRects.length,
+          });
+        }
+        recordProbeFrame({
+          kind: 'live-floor-recovery',
+          reason: recovery.reason,
+          registered: recovery.shouldRegister,
+          fromY: prev.y,
+          toY: columnTop,
+        });
+        optionsRef.current.onFrame?.();
+        handle = GAME_LOOP.scheduleFrame(loop);
+        return;
+      }
       // Facing: ADS pins the body to the camera yaw (the crosshair law's
       // frame); walking faces the move direction; idle keeps the last facing.
       const desiredYaw = aimRef.current
@@ -448,7 +801,6 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       // P2: speeds are data — the mode layer may own a live source (test: the
       // console ctx, so `gv_speed` drives the real walk/run); the default is
       // the authored GameState — scaled by the footing's walk/run multiplier.
-      const speeds = optionsRef.current.speeds?.() ?? state.player;
       const baseSpeed = running ? speeds.runSpeedMetersPerSecond : speeds.walkSpeedMetersPerSecond;
       const speed = baseSpeed * (running ? surfaceProfile.runSpeedMultiplier : surfaceProfile.walkSpeedMultiplier);
       // The host owns integration (V7): movement blend, gravity, the jump arc
@@ -472,13 +824,20 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
               friction: surfaceProfile.friction,
               restitution: surfaceProfile.restitution,
             },
-            tuning: state.config.physics,
+            tuning: physicsTuning,
             rects: solids.rects,
             orientedRects: solids.orientedRects,
           })
         : null;
       if (stepped) {
         const p = stepped.player;
+        playerJitProbeRef.current.latestPhysics = {
+          x: p.position.x,
+          y: p.position.y,
+          z: p.position.z,
+          dt,
+          hostUs: stepped.hostMicroseconds,
+        };
         // The hostPhysics idle discipline: a resting step publishes no new pose.
         const atRest = !moving && !jumpDown && p.grounded && prev.grounded && !prev.moving && !prev.running
           && desiredYaw === prev.yaw
@@ -499,6 +858,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
           setPlayer(next);
           sendCameraRef.current(next); // target moved — params on change
         }
+        recordProbeFrame({ kind: 'host-step' });
       } else if (moving) {
         // Honest fallback when the host bindings are absent (headless, or a
         // host built before the has-game-physics gate flipped): the old
@@ -516,12 +876,17 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
           gaitPhase: prev.gaitPhase + dt * (running ? GAIT.runCyclesPerSecond : GAIT.walkCyclesPerSecond),
         };
         playerRef.current = next;
+        playerJitProbeRef.current.latestPhysics = { x, y: next.y, z, dt, hostUs: 0 };
         setPlayer(next);
         sendCameraRef.current(next); // target moved — params on change
+        recordProbeFrame({ kind: 'js-fallback' });
       } else if (prev.moving || prev.running || prev.yaw !== desiredYaw) {
         const next = { ...prev, vx: 0, vz: 0, moving: false, running: false, yaw: desiredYaw };
         playerRef.current = next;
         setPlayer(next);
+        recordProbeFrame({ kind: 'idle-stop' });
+      } else {
+        recordProbeFrame({ kind: 'none' });
       }
       // the mode layer's per-frame duty (build: re-resolve the crosshair)
       optionsRef.current.onFrame?.();
@@ -532,7 +897,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       alive = false;
       if (handle != null) GAME_LOOP.cancelFrame(handle);
     };
-  }, [state, worldGrid, solids]);
+  }, [state, worldGrid, worldHeightfields, solids]);
 
   // Captured-mouse look (addendum 4 — game-style, no button held). While ADS
   // is held the pitch clamp widens to the Aim rig's own limits — "aiming
@@ -644,6 +1009,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     pose,
     figureOffset,
     sceneState,
+    playerJitRenderRef,
     cameraRef,
     bootCam,
     mouseCaptured,
@@ -683,7 +1049,15 @@ export function EmbodiedCaptures(props: { embodied: Embodied }) {
  *  figure. Route 3D content (build: pieces/ghost) renders as children,
  *  between the world and the player. */
 export function EmbodiedScene(props: { embodied: Embodied; children?: ReactNode }) {
-  const { sceneState, cameraRef, bootCam, rig, figure, player, figureOffset } = props.embodied;
+  const { sceneState, cameraRef, bootCam, rig, figure, player, pose, figureOffset, playerJitRenderRef } = props.embodied;
+  playerJitRenderRef.current = {
+    x: figureOffset[0],
+    y: figureOffset[1],
+    z: figureOffset[2],
+    yaw: player.yaw,
+    pose,
+    gaitPhase: player.gaitPhase,
+  };
   return (
     /* GAP(W-3): game sky background awaits a captured home */
     <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor={hmscSkyBackgroundColor(sceneState.config.sky)} showGrid={false} showAxes={false}>

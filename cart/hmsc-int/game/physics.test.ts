@@ -9,6 +9,8 @@
 
 import { GAME_PHYSICS, PHYSICS_LIMITS, type PhysicsBody, type PhysicsStepInput } from './physics';
 import { assert, assertClose, assertEqual, assertThrows, finish, test } from './_testkit';
+import { catalogEntry } from './build/catalog';
+import { placedPieceColliders, placedPieceRamps, type PlacedBuildPiece } from './build/placed';
 
 declare const globalThis: any;
 
@@ -20,6 +22,7 @@ const TUNING = {
   wallRestitution: 0.1,
   bodyRestitution: 0.4,
   playerStepHeightMeters: 0.4,
+  walkableRectSidePushGraceMeters: 0.08,
 };
 
 const SURFACE = { accelerationMultiplier: 1, friction: 0.2, restitution: 0.8 };
@@ -40,6 +43,12 @@ function stepInput(overrides: Partial<PhysicsStepInput> = {}): PhysicsStepInput 
     tuning: TUNING,
     ...overrides,
   };
+}
+
+let nextPlacedId = 0;
+function buildPiece(pieceId: string, x: number, z: number, over: Partial<PlacedBuildPiece> = {}): PlacedBuildPiece {
+  nextPlacedId += 1;
+  return { id: `p_${nextPlacedId}`, pieceId, x, y: 0, z, yawDegrees: 0, ...over };
 }
 
 /** Fake host: applies gravity to the player + every body, echoes the rest.
@@ -142,11 +151,218 @@ test('tuning, surface, and solids arrive on the wire the host reads', () => {
   assertClose(wire[22], SURFACE.friction, 1e-5, 'surface friction slot');
   assertEqual(wire[13], 1, 'rect count slot');
   assertEqual(wire[24], 1, 'oriented count slot');
+  assertClose(wire[11], TUNING.walkableRectSidePushGraceMeters, 1e-5, 'walkable rect grace slot');
   const rectAt = 25; // no bodies in this step
   assert(wire[rectAt + 8] < -1e8, 'rect without floorMeters must be solid-to-the-ground');
   const orientedAt = rectAt + 9;
   assertClose(wire[orientedAt + 8], 1.5, 1e-5, 'oriented rect floor must carry through');
   assertClose(wire[orientedAt + 11], 0.7, 1e-5, 'oriented rect yaw must carry through');
+});
+
+function installFloorEdgeHost(): void {
+  globalThis.__game_physics_step = (wire: Float32Array): ArrayBuffer => {
+    lastWire = wire;
+    const dt = wire[0];
+    const radius = wire[16];
+    const height = wire[17];
+    const stepHeight = wire[20];
+    const grace = wire[11];
+    const rectCount = wire[13] | 0;
+    let x = wire[5] + wire[8] * dt;
+    let y = wire[6] + (wire[9] - wire[14] * dt) * dt;
+    const z = wire[7] + wire[10] * dt;
+    let vx = wire[8];
+    let vy = wire[9] - wire[14] * dt;
+    let vz = wire[10];
+    let ground = -1000000;
+    let at = 25;
+    for (let i = 0; i < rectCount; i += 1) {
+      const minX = wire[at], minZ = wire[at + 1], maxX = wire[at + 2], maxZ = wire[at + 3];
+      const top = wire[at + 4], solid = wire[at + 5] > 0.5, floor = wire[at + 8];
+      if (x >= minX && x <= maxX && z >= minZ && z <= maxZ && top <= y + stepHeight) ground = Math.max(ground, top);
+      const reachable = top <= y + stepHeight && y >= floor - grace;
+      const belowBand = y + height <= floor;
+      if (solid && !reachable && !belowBand && y < top - 0.04) {
+        const closestX = Math.max(minX, Math.min(maxX, x));
+        const closestZ = Math.max(minZ, Math.min(maxZ, z));
+        const dx = x - closestX;
+        const dz = z - closestZ;
+        const d = Math.hypot(dx, dz);
+        if (d < radius && d > 1e-6) {
+          const nx = dx / d;
+          const nz = dz / d;
+          x += nx * (radius - d);
+          vx = Math.max(0, vx * nx) === 0 ? 0 : vx;
+          vz = Math.max(0, vz * nz) === 0 ? 0 : vz;
+        }
+      }
+      at += 9;
+    }
+    if (y <= ground) {
+      y = ground;
+      if (vy < 0) vy = 0;
+    }
+    const out = new Float32Array(9);
+    out[1] = x; out[2] = y; out[3] = z;
+    out[4] = vx; out[5] = vy; out[6] = vz;
+    out[7] = y === ground ? 1 : 0;
+    return out.buffer;
+  };
+}
+
+function installRampCollisionHost(): void {
+  const fields: Array<{ originX: number; originZ: number; cell: number; cols: number; rows: number; baseY: number; heights: Float32Array }> = [];
+  globalThis.__game_physics_clear_heightfields = () => { fields.length = 0; };
+  globalThis.__game_physics_register_heightfield = (
+    _slot: number,
+    originX: number,
+    originZ: number,
+    cell: number,
+    cols: number,
+    rows: number,
+    baseY: number,
+    _walkCos: number,
+    heights: Float32Array,
+  ) => {
+    fields.push({ originX, originZ, cell, cols, rows, baseY, heights });
+    return true;
+  };
+  const fieldGroundAt = (x: number, z: number): number | null => {
+    let best: number | null = null;
+    for (const field of fields) {
+      const fx = (x - field.originX) / field.cell;
+      const fz = (z - field.originZ) / field.cell;
+      if (fx < 0 || fz < 0 || fx > field.cols - 1 || fz > field.rows - 1) continue;
+      const x0 = Math.floor(fx);
+      const z0 = Math.floor(fz);
+      const x1 = Math.min(x0 + 1, field.cols - 1);
+      const z1 = Math.min(z0 + 1, field.rows - 1);
+      const tx = fx - x0;
+      const tz = fz - z0;
+      const h00 = field.heights[z0 * field.cols + x0];
+      const h10 = field.heights[z0 * field.cols + x1];
+      const h01 = field.heights[z1 * field.cols + x0];
+      const h11 = field.heights[z1 * field.cols + x1];
+      const hx0 = h00 + (h10 - h00) * tx;
+      const hx1 = h01 + (h11 - h01) * tx;
+      const h = field.baseY + hx0 + (hx1 - hx0) * tz;
+      best = best === null ? h : Math.max(best, h);
+    }
+    return best;
+  };
+  globalThis.__game_physics_step = (wire: Float32Array): ArrayBuffer => {
+    lastWire = wire;
+    const dt = wire[0];
+    const radius = wire[16];
+    const height = wire[17];
+    const stepHeight = wire[20];
+    const rectCount = wire[13] | 0;
+    let x = wire[5] + wire[8] * dt;
+    let y = wire[6] + (wire[9] - wire[14] * dt) * dt;
+    let z = wire[7] + wire[10] * dt;
+    let vx = wire[8];
+    let vy = wire[9] - wire[14] * dt;
+    let vz = wire[10];
+    let ground = -1000000;
+    const hfGround = fieldGroundAt(x, z);
+    if (hfGround !== null && hfGround <= y + stepHeight) ground = Math.max(ground, hfGround);
+    let at = 25;
+    for (let i = 0; i < rectCount; i += 1) {
+      const minX = wire[at], minZ = wire[at + 1], maxX = wire[at + 2], maxZ = wire[at + 3];
+      const top = wire[at + 4], solid = wire[at + 5] > 0.5, floor = wire[at + 8];
+      if (x >= minX && x <= maxX && z >= minZ && z <= maxZ && top <= y + stepHeight) ground = Math.max(ground, top);
+      if (solid && y < top - 0.04 && y + height > floor) {
+        const closestX = Math.max(minX, Math.min(maxX, x));
+        const closestZ = Math.max(minZ, Math.min(maxZ, z));
+        const dx = x - closestX;
+        const dz = z - closestZ;
+        const d = Math.hypot(dx, dz);
+        if (d < radius && d > 1e-6) {
+          const nx = dx / d;
+          const nz = dz / d;
+          x += nx * (radius - d);
+          if (vx * nx < 0) vx = 0;
+          if (vz * nz < 0) vz = 0;
+        }
+      }
+      at += 9;
+    }
+    if (y <= ground) {
+      y = ground;
+      if (vy < 0) vy = 0;
+    }
+    const out = new Float32Array(9);
+    out[1] = x; out[2] = y; out[3] = z;
+    out[4] = vx; out[5] = vy; out[6] = vz;
+    out[7] = y === ground ? 1 : 0;
+    return out.buffer;
+  };
+}
+
+test('floor seams consume as continuous support, not a side rejection', () => {
+  installFloorEdgeHost();
+  const floorA = { minX: -1.5, minZ: -1.5, maxX: 1.5, maxZ: 1.5, topMeters: 0.2, blocksPlayer: true, friction: 0.85, restitution: 0.02, floorMeters: 0 };
+  const floorB = { minX: 1.5, minZ: -1.5, maxX: 4.5, maxZ: 1.5, topMeters: 0.2, blocksPlayer: true, friction: 0.85, restitution: 0.02, floorMeters: 0 };
+  const result = GAME_PHYSICS.step(stepInput({
+    dtSeconds: 0.016,
+    player: { position: { x: 1.5, y: 0.05, z: 0 }, velocity: { x: 0, y: -1, z: 0 }, yawDegrees: 0 },
+    rects: [floorA, floorB],
+  }))!;
+  assertClose(result.player.position.x, 1.5, 1e-6, 'seam landing keeps x planted');
+  assertClose(result.player.position.y, 0.2, 1e-6, 'seam landing snaps to floor top');
+  assertEqual(result.player.grounded, true, 'seam landing stays grounded');
+});
+
+test('true outer floor edge supports to the bound without oscillating', () => {
+  installFloorEdgeHost();
+  const floor = { minX: -1.5, minZ: -1.5, maxX: 1.5, maxZ: 1.5, topMeters: 0.2, blocksPlayer: true, friction: 0.85, restitution: 0.02, floorMeters: 0 };
+  let player = { x: 1.5, y: 0.05, z: 0, vx: 0, vy: -1, vz: 0 };
+  for (let frame = 0; frame < 6; frame += 1) {
+    const result = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.016,
+      player: { position: { x: player.x, y: player.y, z: player.z }, velocity: { x: player.vx, y: player.vy, z: player.vz }, yawDegrees: 0 },
+      rects: [floor],
+    }))!;
+    assertClose(result.player.position.x, 1.5, 1e-6, `outer edge frame ${frame} x does not oscillate`);
+    assertClose(result.player.position.y, 0.2, 1e-6, `outer edge frame ${frame} y remains on top`);
+    assertEqual(result.player.grounded, true, `outer edge frame ${frame} remains grounded`);
+    player = {
+      x: result.player.position.x,
+      y: result.player.position.y,
+      z: result.player.position.z,
+      vx: result.player.velocity.x,
+      vy: result.player.velocity.y,
+      vz: result.player.velocity.z,
+    };
+  }
+});
+
+test('RAMPSIDE-0606: ramp side blocks the character while the slope still grounds', () => {
+  installRampCollisionHost();
+  GAME_PHYSICS.clearHeightfields();
+  const ramp = buildPiece('ramp.concrete.common', 6, 6);
+  const solids = placedPieceColliders([ramp]);
+  const fields = placedPieceRamps([ramp], 0);
+  for (const field of fields) GAME_PHYSICS.registerHeightfield(field);
+  assertEqual(fields.length, 1, 'the ramp still registers its walkable slope');
+  assertEqual(solids.rects.length, 3, 'side/back faces are now sent as solid rects');
+
+  const slope = GAME_PHYSICS.step(stepInput({
+    dtSeconds: 0.016,
+    player: { position: { x: 6, y: 1.42, z: 6 }, velocity: { x: 0, y: -1, z: 0 }, yawDegrees: 0 },
+    rects: solids.rects,
+  }))!;
+  assertClose(slope.player.position.y, catalogEntry('ramp.concrete.common').size.heightMeters / 2, 1e-6, 'center of the ramp still grounds on the slope');
+  assertEqual(slope.player.grounded, true, 'slope walk remains grounded');
+
+  const leftSide = solids.rects.find((r) => r.maxX <= 4.5)!;
+  const blocked = GAME_PHYSICS.step(stepInput({
+    dtSeconds: 0.016,
+    player: { position: { x: 4, y: 0, z: 6 }, velocity: { x: 6, y: 0, z: 0 }, yawDegrees: 0 },
+    rects: solids.rects,
+  }))!;
+  assert(blocked.player.position.x <= leftSide.minX - TUNING.playerCapsuleRadiusMeters + 1e-6, 'walking into the ramp side is blocked before entering the wall face');
+  removeFakeHost();
 });
 
 test('over-cap input is rejected at the boundary, not silently truncated', () => {

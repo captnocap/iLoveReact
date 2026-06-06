@@ -102,6 +102,62 @@ test('a turned wall blocks across the other axis (quarter turns stay plain rects
   assertClose(rects[0].maxZ - rects[0].minZ, size.widthMeters, 1e-9, 'the wall now runs along z');
 });
 
+test('REQ-0107: floor and wall pieces keep catalog extents; flushness is origin lattice, not resizing', () => {
+  const wallSize = catalogEntry('wall.concrete.common').size;
+  const floorSize = catalogEntry('floor.concrete.common').size;
+  const floor = placed('floor.concrete.common', 1.5, 1.5);
+  const horizontal = placed('wall.concrete.common', 1.5, 0, { yawDegrees: 0 });
+  const vertical = placed('wall.concrete.common', 3, 1.5, { yawDegrees: 90 });
+  const floorBounds = pieceBounds(floor);
+  const hBounds = pieceBounds(horizontal);
+  const vBounds = pieceBounds(vertical);
+  const hSolo = placedPieceColliders([horizontal]).rects[0];
+  const vSolo = placedPieceColliders([vertical]).rects[0];
+  console.log(`[REQ-0107] floor=(${floor.x},${floor.y},${floor.z}) bounds=x[${floorBounds.minX},${floorBounds.maxX}] z[${floorBounds.minZ},${floorBounds.maxZ}] size=${floorBounds.maxX - floorBounds.minX}x${floorBounds.maxZ - floorBounds.minZ} hWall=x[${hBounds.minX},${hBounds.maxX}] z[${hBounds.minZ},${hBounds.maxZ}] vWall=x[${vBounds.minX},${vBounds.maxX}] z[${vBounds.minZ},${vBounds.maxZ}] hSoloSpan=${hSolo.maxX - hSolo.minX} vSoloSpan=${vSolo.maxZ - vSolo.minZ}`);
+  assertEqual(floorBounds.maxX - floorBounds.minX, floorSize.widthMeters, 'floor x size is the catalog width');
+  assertEqual(floorBounds.maxZ - floorBounds.minZ, floorSize.depthMeters, 'floor z size is the catalog depth');
+  assertEqual(horizontal.x, floor.x, 'wall run center shares the floor lattice center');
+  assertEqual(horizontal.z, floorBounds.minZ, 'wall line is exactly on the floor edge');
+  assertEqual(vertical.x, floorBounds.maxX, 'turned wall line is exactly on the floor edge');
+  assertEqual(vertical.z, floor.z, 'turned wall run center shares the floor lattice center');
+  assertEqual(hBounds.maxX - hBounds.minX, wallSize.widthMeters, 'horizontal wall keeps catalog run width');
+  assertEqual(vBounds.maxZ - vBounds.minZ, wallSize.widthMeters, 'vertical wall keeps catalog run width');
+  assertEqual(hSolo.maxX - hSolo.minX, wallSize.widthMeters, 'standalone horizontal collision keeps catalog run width');
+  assertEqual(vSolo.maxZ - vSolo.minZ, wallSize.widthMeters, 'standalone vertical collision keeps catalog run width');
+});
+
+test('REQ-0109: L wall corners close the endpoint-to-side outer faces exactly', () => {
+  const wallSize = catalogEntry('wall.concrete.common').size;
+  const halfDepth = wallSize.depthMeters / 2;
+  const horizontal = placed('wall.concrete.common', 1.5, 0, { yawDegrees: 0 });
+  const vertical = placed('wall.concrete.common', 3, 1.5, { yawDegrees: 90 });
+  const hBounds = pieceBounds(horizontal);
+  const vBounds = pieceBounds(vertical);
+  const [hRect, vRect] = placedPieceColliders([horizontal, vertical]).rects;
+  console.log(`[REQ-0109] L-corner placed h=(${horizontal.x},${horizontal.y},${horizontal.z},yaw=${horizontal.yawDegrees}) bounds=x[${hBounds.minX},${hBounds.maxX}] z[${hBounds.minZ},${hBounds.maxZ}] v=(${vertical.x},${vertical.y},${vertical.z},yaw=${vertical.yawDegrees}) bounds=x[${vBounds.minX},${vBounds.maxX}] z[${vBounds.minZ},${vBounds.maxZ}] uncoveredX=${vBounds.maxX - hBounds.maxX} uncoveredZ=${vBounds.minZ - hBounds.minZ} joinedH=x[${hRect.minX},${hRect.maxX}] z[${hRect.minZ},${hRect.maxZ}] joinedV=x[${vRect.minX},${vRect.maxX}] z[${vRect.minZ},${vRect.maxZ}]`);
+  assertEqual(vBounds.maxX - hBounds.maxX, halfDepth, 'raw placed bounds show the old outside-corner x sliver');
+  assertEqual(vBounds.minZ - hBounds.minZ, halfDepth, 'raw placed bounds show the old outside-corner z sliver');
+  assertEqual(hRect.maxX, vRect.maxX, 'joined L corner closes the outer x face');
+  assertEqual(hRect.minZ, vRect.minZ, 'joined L corner closes the outer z face');
+  assertEqual(hRect.maxX - hBounds.maxX, halfDepth, 'horizontal wall extends only its joined endpoint');
+  assertEqual(vBounds.minZ - vRect.minZ, halfDepth, 'vertical wall extends only its joined endpoint');
+});
+
+test('REQ-0109: T wall junctions close the end-to-side face without resizing the crossing wall', () => {
+  const wallSize = catalogEntry('wall.concrete.common').size;
+  const halfDepth = wallSize.depthMeters / 2;
+  const cross = placed('wall.concrete.common', 1.5, 0, { yawDegrees: 0 });
+  const stem = placed('wall.concrete.common', 1.5, 1.5, { yawDegrees: 90 });
+  const crossBounds = pieceBounds(cross);
+  const stemBounds = pieceBounds(stem);
+  const [crossRect, stemRect] = placedPieceColliders([cross, stem]).rects;
+  console.log(`[REQ-0109] T-junction crossBounds=x[${crossBounds.minX},${crossBounds.maxX}] z[${crossBounds.minZ},${crossBounds.maxZ}] stemBounds=x[${stemBounds.minX},${stemBounds.maxX}] z[${stemBounds.minZ},${stemBounds.maxZ}] uncoveredZ=${stemBounds.minZ - crossBounds.minZ} joinedCross=x[${crossRect.minX},${crossRect.maxX}] z[${crossRect.minZ},${crossRect.maxZ}] joinedStem=x[${stemRect.minX},${stemRect.maxX}] z[${stemRect.minZ},${stemRect.maxZ}]`);
+  assertEqual(stemBounds.minZ - crossBounds.minZ, halfDepth, 'raw placed bounds show the T-junction side sliver');
+  assertEqual(stemRect.minZ, crossRect.minZ, 'joined T closes the stem end to the crossing wall outer face');
+  assertEqual(crossRect.maxX - crossRect.minX, wallSize.widthMeters, 'the crossing wall keeps its catalog run width');
+  assertEqual(stemRect.maxZ - stemRect.minZ, wallSize.widthMeters + halfDepth, 'only the stem endpoint extends to cover wall thickness');
+});
+
 test('a free-angled piece lands in the oriented frame', () => {
   const { rects, orientedRects } = placedPieceColliders([placed('wall.concrete.common', 0, 0, { yawDegrees: 30 })]);
   assertEqual(rects.length, 0, 'no axis-aligned band');
@@ -109,10 +165,23 @@ test('a free-angled piece lands in the oriented frame', () => {
   assertClose(orientedRects[0].yawRadians, (30 * Math.PI) / 180, 1e-9, 'the host gets the turn');
 });
 
-test('a ramp is a walkable slope, never a wall: heightfield, no band', () => {
+test('a ramp registers its walkable slope plus solid side/back faces', () => {
   const ramp = placed('ramp.concrete.common', 6, 6);
-  assertEqual(placedPieceColliders([ramp]).rects.length, 0, 'no solid band');
+  const { rects, orientedRects } = placedPieceColliders([ramp]);
   const fields = placedPieceRamps([ramp], 3);
+  console.log(`[RAMPSIDE-0606] ramp registration rects=${rects.length} oriented=${orientedRects.length} heightfields=${fields.length} heights=${fields[0] ? Array.from(fields[0].heights).join(',') : 'none'}`);
+  assertEqual(orientedRects.length, 0, 'axis-aligned ramp emits plain rects');
+  assertEqual(rects.length, 3, 'left side, right side, and back face are solid bands');
+  const bounds = pieceBounds(ramp);
+  const sideRects = rects.filter((r) => r.minZ >= bounds.minZ - 1e-9 && r.maxZ <= bounds.maxZ + 1e-9 && (r.maxX <= bounds.minX + 1e-9 || r.minX >= bounds.maxX - 1e-9));
+  const backRect = rects.find((r) => r.maxZ <= bounds.minZ + 1e-9);
+  assertEqual(sideRects.length, 2, 'both ramp sides block like walls');
+  assert(!!backRect, 'the low/back face blocks like a wall');
+  for (const rect of rects) {
+    assertEqual(rect.blocksPlayer, true, 'ramp boundary faces block the player');
+    assertClose(rect.topMeters, ramp.y + catalogEntry('ramp.concrete.common').size.heightMeters, 1e-9, 'boundary face is wall-height');
+    assertClose(rect.floorMeters ?? -999, ramp.y, 1e-9, 'same collision band floor as walls');
+  }
   assertEqual(fields.length, 1, 'one slope');
   assertEqual(fields[0].slot, 3, 'slots continue after the world terrain bake');
   const heights = fields[0].heights;
@@ -273,25 +342,28 @@ test('a wall beside a ramp never steals the slope: its band trims flush to the r
   const ramp = placed('ramp.concrete.common', 6, 6);
   const wall = placed('wall.concrete.common', 6, 4.5);
   const { rects } = placedPieceColliders([ramp, wall]);
-  assertEqual(rects.length, 1, 'the wall is still one band');
-  assertClose(rects[0].maxZ, 4.5, 1e-9, 'trimmed flush to the ramp edge — no overhang into the slope');
-  assert(rects[0].minZ < 4.5, 'the non-ramp side keeps its mass');
+  const wallRects = rects.slice(placedPieceColliders([ramp]).rects.length);
+  assertEqual(wallRects.length, 1, 'the wall is still one band');
+  assertClose(wallRects[0].maxZ, 4.5, 1e-9, 'trimmed flush to the ramp edge — no overhang into the slope');
+  assert(wallRects[0].minZ < 4.5, 'the non-ramp side keeps its mass');
 });
 
 test('an upper-storey wall at the crest still blocks (its base IS the ramp top)', () => {
   const ramp = placed('ramp.concrete.common', 6, 6);
   const upper = placed('wall.concrete.common', 6, 4.5, { y: catalogEntry('ramp.concrete.common').size.heightMeters });
   const { rects } = placedPieceColliders([ramp, upper]);
+  const wallRects = rects.slice(placedPieceColliders([ramp]).rects.length);
   const depth = catalogEntry('wall.concrete.common').size.depthMeters;
-  assertClose(rects[0].maxZ - rects[0].minZ, depth, 1e-9, 'untrimmed — a wall above the slope is a legitimate blocker');
+  assertClose(wallRects[0].maxZ - wallRects[0].minZ, depth, 1e-9, 'untrimmed — a wall above the slope is a legitimate blocker');
 });
 
 test('a landing plate over the crest keeps full collision (floors deliver, never trim)', () => {
   const ramp = placed('ramp.concrete.common', 6, 6);
   const landing = placed('floor.concrete.common', 6, 6, { y: catalogEntry('ramp.concrete.common').size.heightMeters });
   const { rects } = placedPieceColliders([ramp, landing]);
-  assertEqual(rects.length, 1, 'the plate is one band');
-  assertClose(rects[0].maxZ - rects[0].minZ, catalogEntry('floor.concrete.common').size.depthMeters, 1e-9, 'full footprint — the crest delivery surface');
+  const landingRects = rects.slice(placedPieceColliders([ramp]).rects.length);
+  assertEqual(landingRects.length, 1, 'the plate is one band');
+  assertClose(landingRects[0].maxZ - landingRects[0].minZ, catalogEntry('floor.concrete.common').size.depthMeters, 1e-9, 'full footprint — the crest delivery surface');
 });
 
 test('the surfaced edge case: a wall sandwiched between two ramps trims away entirely', () => {
@@ -299,7 +371,8 @@ test('the surfaced edge case: a wall sandwiched between two ramps trims away ent
   const rampA = placed('ramp.concrete.common', 6, 6);
   const rampB = placed('ramp.concrete.common', 6, 3);
   const { rects } = placedPieceColliders([rampA, rampB, wall]);
-  assertEqual(rects.length, 0, 'both overhangs trimmed — the band degenerates (documented in CAPTURE.md)');
+  const wallRects = rects.slice(placedPieceColliders([rampA, rampB]).rects.length);
+  assertEqual(wallRects.length, 0, 'both overhangs trimmed — the band degenerates (documented in CAPTURE.md)');
 });
 
 // ── SMARTSEL-0605: one click grabs the connected shape ───────────────────────

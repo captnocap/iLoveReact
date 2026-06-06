@@ -20,7 +20,8 @@
 //!   [4]  jump down (>0.5)        [17] player height
 //!   [5..7]  player x,y,z         [18] wall restitution
 //!   [8..10] player vx,vy,vz      [19] body restitution (reserved, unused)
-//!   [11] (reserved)              [20] step height
+//!   [11] walkable rect side-push grace
+//!                                [20] step height
 //!   [12] entity count            [21] acceleration multiplier
 //!                                [22] player surface friction
 //!                                [23] player surface restitution
@@ -329,7 +330,7 @@ fn collideCircleRect(x: *f32, z: *f32, vx: *f32, vz: *f32, radius: f32, rect: []
     return true;
 }
 
-fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, oriented: []const f32, restitution: f32, step_height: f32) void {
+fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, height: f32, rects: []const f32, oriented: []const f32, restitution: f32, step_height: f32, walkable_side_push_grace: f32) void {
     var at: usize = 0;
     while (at + RECT_FLOATS <= rects.len) : (at += RECT_FLOATS) {
         const solid = rects[at + 5] > 0.5;
@@ -342,6 +343,8 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         // rect's floor — you walk UNDER a raised platform (a parking deck), not
         // into it. Walls pass floor = −∞ so this never skips them.
         if (y + height <= rect_floor) continue;
+        const finite_floor_band = rect_floor > -100000;
+        if (walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace) continue;
         _ = collideCircleRect(x, z, vx, vz, radius, rects[at .. at + RECT_FLOATS], restitution);
     }
     // Oriented walls (yawed buildings): rotate the body + its velocity into the
@@ -356,6 +359,8 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         if (!solid and !too_tall_to_step) continue;
         if (y >= rect_height - 0.04 or y + height < 0) continue;
         if (y + height <= rect_floor) continue;
+        const finite_floor_band = rect_floor > -100000;
+        if (walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace) continue;
         const pivot_x = oriented[o + 9];
         const pivot_z = oriented[o + 10];
         const yaw = oriented[o + 11];
@@ -444,6 +449,8 @@ pub fn step(input: []const f32) ?[]f32 {
     const player_surface_restitution = clamp(input[23], 0, 1);
     _ = body_restitution;
 
+    const walkable_side_push_grace = @max(@as(f32, 0), input[11]);
+
     const entity_start = INPUT_HEADER_FLOATS;
     const rect_start = entity_start + entity_count * ENTITY_FLOATS;
     const oriented_start = rect_start + rect_count * RECT_FLOATS;
@@ -472,7 +479,7 @@ pub fn step(input: []const f32) ?[]f32 {
     px += pvx * dt;
     py += pvy * dt;
     pz += pvz * dt;
-    collideSolidRects(&px, py, &pz, &pvx, &pvz, player_radius, player_height, rects, oriented, @max(wall_restitution, player_surface_restitution * 0.15), step_height);
+    collideSolidRects(&px, py, &pz, &pvx, &pvz, player_radius, player_height, rects, oriented, @max(wall_restitution, player_surface_restitution * 0.15), step_height, walkable_side_push_grace);
     var next_ground_y = groundAt(rects, oriented, px, pz, py, step_height);
     // Terrain hit detection on the real slope. The slope LIMIT is enforced by the
     // surface normal, not the step height: a single frame only nudges the player a
@@ -522,7 +529,7 @@ pub fn step(input: []const f32) ?[]f32 {
         y += vy * dt;
         z += vz * dt;
         const entity_step_height = @max(0.05, r * 0.35);
-        collideSolidRects(&x, y - r, &z, &vx, &vz, r, r * 2, rects, oriented, wall_restitution, entity_step_height);
+        collideSolidRects(&x, y - r, &z, &vx, &vz, r, r * 2, rects, oriented, wall_restitution, entity_step_height, walkable_side_push_grace);
         const gy = groundAt(rects, oriented, x, z, y - r, entity_step_height) + r;
         const surface_friction = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 6, 0.2), 0, 1);
         const surface_restitution = clamp(surfaceValueAt(rects, oriented, x, z, y - r, entity_step_height, 7, 0.8), 0, 1);

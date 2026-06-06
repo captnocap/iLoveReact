@@ -75,12 +75,16 @@ export const PLACED_TUNING = {
   /** ramp/stairs walkable-slope gate (cos): 3m rise over 3m run is 45°;
    *  0.6 keeps the standard ramp walkable with margin */
   rampWalkableSlopeCos: 0.6,
+  /** RAMPSIDE-0606: side/back boundary thickness for ramp/stair wall faces. */
+  rampBoundaryWallThicknessMeters: 0.25,
   /** RAMPFOOT-0605: degenerate-band floor when trimming wall overhangs out of
    *  ramp footprints — a trimmed band thinner than this is dropped, meters */
   rampTrimMinBandMeters: 0.01,
   /** SMARTSEL-0605: two pieces TOUCH when their envelopes come within this
    *  (abutting faces count; module-snapped neighbors sit exactly flush) */
   touchToleranceMeters: 0.05,
+  /** REQ-0109: numeric recognition tolerance for exact lattice wall joins. */
+  wallJoinToleranceMeters: 1e-6,
 } as const;
 
 // ── basics ───────────────────────────────────────────────────────────────────
@@ -101,6 +105,12 @@ export function placedPieceAcceptsEdits(piece: PlacedBuildPiece): boolean {
 }
 
 const DEG = Math.PI / 180;
+
+function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz: number } {
+  const cos = Math.cos(yawDegrees * DEG);
+  const sin = Math.sin(yawDegrees * DEG);
+  return { dx: u * cos - v * sin, dz: u * sin + v * cos };
+}
 
 function normalizeYaw(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
@@ -125,7 +135,8 @@ export type PieceBounds = {
 /** Axis-aligned world envelope of a placed piece (exact for quarter-turn yaw,
  *  the rotated envelope otherwise). */
 export function pieceBounds(piece: PlacedBuildPiece): PieceBounds {
-  const size = placedPieceDef(piece).size;
+  const def = placedPieceDef(piece);
+  const size = def.size;
   const halfW = size.widthMeters / 2;
   const halfD = size.depthMeters / 2;
   const quarter = quarterTurns(piece.yawDegrees);
@@ -291,10 +302,74 @@ export type PlacedPieceColliders = {
 
 /** One solid band in the piece's own frame: [u0,u1] along the piece width,
  *  full depth, with its own top. Split points come from the edit's opening. */
-type Band = { u0: number; u1: number; top: number };
+export type PlacedPieceBand = { u0: number; u1: number; top: number };
 
-function pieceBands(piece: PlacedBuildPiece, def: BuildPieceDef): Band[] {
+type WallRunFrame = {
+  axis: 'x' | 'z';
+  quarter: number;
+  center: number;
+  line: number;
+  runMin: number;
+  runMax: number;
+  halfDepth: number;
+  baseY: number;
+  topY: number;
+};
+
+function wallRunFrame(piece: PlacedBuildPiece, def: BuildPieceDef): WallRunFrame | null {
+  if (def.kind !== 'wall' || def.snap !== 'edge') return null;
+  const quarter = quarterTurns(piece.yawDegrees);
+  if (quarter === null) return null;
   const size = def.size;
+  const axis = quarter % 2 === 0 ? 'x' : 'z';
+  const center = axis === 'x' ? piece.x : piece.z;
+  const line = axis === 'x' ? piece.z : piece.x;
+  return {
+    axis,
+    quarter,
+    center,
+    line,
+    runMin: center - size.widthMeters / 2,
+    runMax: center + size.widthMeters / 2,
+    halfDepth: size.depthMeters / 2,
+    baseY: piece.y,
+    topY: piece.y + size.heightMeters,
+  };
+}
+
+function rangesOverlap(a0: number, a1: number, b0: number, b1: number, tolerance: number): boolean {
+  return Math.min(a1, b1) >= Math.max(a0, b0) - tolerance;
+}
+
+function wallJoinRunLimits(piece: PlacedBuildPiece, def: BuildPieceDef, pieces: readonly PlacedBuildPiece[]): { minU: number; maxU: number } {
+  const self = wallRunFrame(piece, def);
+  if (!self) return { minU: -def.size.widthMeters / 2, maxU: def.size.widthMeters / 2 };
+  const tolerance = PLACED_TUNING.wallJoinToleranceMeters;
+  let runMin = self.runMin;
+  let runMax = self.runMax;
+  for (const other of pieces) {
+    if (other.id === piece.id) continue;
+    const otherDef = placedPieceDef(other);
+    const candidate = wallRunFrame(other, otherDef);
+    if (!candidate || candidate.axis === self.axis) continue;
+    if (!rangesOverlap(self.baseY, self.topY, candidate.baseY, candidate.topY, tolerance)) continue;
+    if (Math.abs(candidate.line - self.runMin) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
+      runMin = Math.min(runMin, candidate.line - candidate.halfDepth);
+    }
+    if (Math.abs(candidate.line - self.runMax) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
+      runMax = Math.max(runMax, candidate.line + candidate.halfDepth);
+    }
+  }
+  const flip = self.quarter === 2 || self.quarter === 3 ? -1 : 1;
+  return flip > 0
+    ? { minU: runMin - self.center, maxU: runMax - self.center }
+    : { minU: self.center - runMax, maxU: self.center - runMin };
+}
+
+export function placedPieceBands(piece: PlacedBuildPiece, pieces: readonly PlacedBuildPiece[] = [piece]): PlacedPieceBand[] {
+  const def = placedPieceDef(piece);
+  const size = def.size;
+  const { minU, maxU } = wallJoinRunLimits(piece, def, pieces);
   const fullTop = piece.y + size.heightMeters;
   const edit = piece.edit;
   if (edit !== undefined && BUILD_KIND_CONTRACTS[def.kind].edits === 'wall') {
@@ -308,17 +383,17 @@ function pieceBands(piece: PlacedBuildPiece, def: BuildPieceDef): Band[] {
       const jamb = (size.widthMeters - opening) / 2;
       if (jamb <= 0) return []; // the cutout consumed the whole face
       return [
-        { u0: -size.widthMeters / 2, u1: -size.widthMeters / 2 + jamb, top: fullTop },
-        { u0: size.widthMeters / 2 - jamb, u1: size.widthMeters / 2, top: fullTop },
+        { u0: minU, u1: -size.widthMeters / 2 + jamb, top: fullTop },
+        { u0: size.widthMeters / 2 - jamb, u1: maxU, top: fullTop },
       ];
     }
     if (edit === 'halfHeight') {
-      return [{ u0: -size.widthMeters / 2, u1: size.widthMeters / 2, top: piece.y + PLACED_TUNING.halfHeightTopMeters }];
+      return [{ u0: minU, u1: maxU, top: piece.y + PLACED_TUNING.halfHeightTopMeters }];
     }
     // window/doubleWindow/brokenWindow: the pane keeps its collision mass —
     // vault traversal (brokenWindow) waits on a mantle system; surfaced, not faked.
   }
-  return [{ u0: -size.widthMeters / 2, u1: size.widthMeters / 2, top: fullTop }];
+  return [{ u0: minU, u1: maxU, top: fullTop }];
 }
 
 /**
@@ -346,6 +421,7 @@ function pieceBands(piece: PlacedBuildPiece, def: BuildPieceDef): Band[] {
 const RAMP_TRIM_KINDS: ReadonlySet<BuildPieceKind> = new Set(['wall', 'fence', 'railing', 'pillar', 'corner', 'arch']);
 
 type PlanRect = { minX: number; maxX: number; minZ: number; maxZ: number };
+type LocalPlanRect = { minU: number; maxU: number; minV: number; maxV: number };
 
 /** Trim one axis-aligned band out of one ramp footprint: move the cheapest
  *  edge that eliminates the overlap; null = the band degenerated. */
@@ -369,6 +445,71 @@ function trimBandRect<R extends PlanRect>(rect: R, ramp: PieceBounds): R | null 
   return out;
 }
 
+function localRectToAxisRect(piece: PlacedBuildPiece, local: LocalPlanRect): PlanRect {
+  const corners = [
+    localOffset(local.minU, local.minV, piece.yawDegrees),
+    localOffset(local.minU, local.maxV, piece.yawDegrees),
+    localOffset(local.maxU, local.minV, piece.yawDegrees),
+    localOffset(local.maxU, local.maxV, piece.yawDegrees),
+  ];
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minZ = Infinity;
+  let maxZ = -Infinity;
+  for (const c of corners) {
+    minX = Math.min(minX, piece.x + c.dx);
+    maxX = Math.max(maxX, piece.x + c.dx);
+    minZ = Math.min(minZ, piece.z + c.dz);
+    maxZ = Math.max(maxZ, piece.z + c.dz);
+  }
+  return { minX, maxX, minZ, maxZ };
+}
+
+function pushRampBoundaryRects(
+  rects: CollisionRect[],
+  orientedRects: OrientedCollisionRect[],
+  piece: PlacedBuildPiece,
+  def: BuildPieceDef,
+): void {
+  const size = def.size;
+  const halfW = size.widthMeters / 2;
+  const halfD = size.depthMeters / 2;
+  const wall = PLACED_TUNING.rampBoundaryWallThicknessMeters;
+  const top = piece.y + size.heightMeters;
+  const localRects: LocalPlanRect[] = [
+    // side walls sit outside the walkable slope footprint; their inner face is
+    // flush with the ramp edge, so slope walking stays unchanged.
+    { minU: -halfW - wall, maxU: -halfW, minV: -halfD, maxV: halfD },
+    { minU: halfW, maxU: halfW + wall, minV: -halfD, maxV: halfD },
+    // the low/back face is closed; the high/front edge stays open to the next floor.
+    { minU: -halfW - wall, maxU: halfW + wall, minV: -halfD - wall, maxV: -halfD },
+  ];
+  const base = {
+    topMeters: top,
+    floorMeters: piece.y,
+    blocksPlayer: true,
+    friction: PLACED_TUNING.pieceFriction,
+    restitution: PLACED_TUNING.pieceRestitution,
+  };
+  const quarter = quarterTurns(piece.yawDegrees);
+  for (const local of localRects) {
+    if (quarter !== null) {
+      rects.push({ ...base, ...localRectToAxisRect(piece, local) });
+    } else {
+      orientedRects.push({
+        ...base,
+        minX: piece.x + local.minU,
+        maxX: piece.x + local.maxU,
+        minZ: piece.z + local.minV,
+        maxZ: piece.z + local.maxV,
+        pivotX: piece.x,
+        pivotZ: piece.z,
+        yawRadians: piece.yawDegrees * DEG,
+      });
+    }
+  }
+}
+
 export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): PlacedPieceColliders {
   const rects: CollisionRect[] = [];
   const orientedRects: OrientedCollisionRect[] = [];
@@ -381,12 +522,15 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
   }
   for (const piece of pieces) {
     const def = placedPieceDef(piece);
-    if (def.kind === 'ramp' || def.kind === 'stairs') continue; // slopes, not bands
+    if (def.kind === 'ramp' || def.kind === 'stairs') {
+      if (placedPieceTags(piece).collision) pushRampBoundaryRects(rects, orientedRects, piece, def);
+      continue;
+    }
     if (!placedPieceTags(piece).collision) continue;
     const size = def.size;
     const halfD = size.depthMeters / 2;
     const quarter = quarterTurns(piece.yawDegrees);
-    for (const band of pieceBands(piece, def)) {
+    for (const band of placedPieceBands(piece, pieces)) {
       const base = {
         topMeters: band.top,
         floorMeters: piece.y,

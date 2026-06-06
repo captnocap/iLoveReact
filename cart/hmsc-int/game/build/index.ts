@@ -69,6 +69,7 @@ export {
   placedPieceDef,
   placedPieceTags,
   placedPieceAcceptsEdits,
+  placedPieceBands,
   pieceBounds,
   connectedPieceIds,
   raycastPieces,
@@ -151,6 +152,7 @@ import {
   placedPieceDef,
   placedPieceTags,
   placedPieceAcceptsEdits,
+  placedPieceBands,
   pieceBounds,
   connectedPieceIds,
   raycastPieces,
@@ -211,6 +213,7 @@ export const GAME_BUILD = {
     def: placedPieceDef,
     tags: placedPieceTags,
     acceptsEdits: placedPieceAcceptsEdits,
+    bands: placedPieceBands,
     bounds: pieceBounds,
     /** SMARTSEL-0605: the connected shape under one click */
     connected: connectedPieceIds,
