@@ -12,6 +12,7 @@ import { charactersSource } from './characters/source';
 import { clothingSource } from './characters/clothingSource';
 import { animationSource } from './characters/animationSource';
 import { paintSource } from './paint/source';
+import { itemsSource } from './items/source';
 
 export function workbenchSources(): Array<WorkbenchSource<any>> {
   return [
@@ -20,7 +21,7 @@ export function workbenchSources(): Array<WorkbenchSource<any>> {
     animationSource(),  // CLOTHSPLIT-0606 phase 2 — the rig/posing context (same ruling)
     paintSource(),      // AGNOSTICPAINT-0606 — THE agnostic painting surface (flip of /cutout awaits the user's pass)
     tunablesSource(),
-    // itemsSource(),        — step 5 (kills /items, /voxels)
+    itemsSource(),      // WBSTEP5-0606 — item source + ruled-in voxel SCULPT mode (flip of /items,/voxels awaits user's word)
     // vehiclesSource(),     — step 6 (kills /vehicles)
     // materialsSource(),    — step 7 (kills /textures, /compose; the bench already fronts material painting)
     // settings domains + logs — step 9 (kills /settings, /log; tunables folds in)

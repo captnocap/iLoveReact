@@ -256,8 +256,14 @@ bang; the old route works until the minute its replacement does.
    (FIGURE/PART grab-sculpt · SCULPT canvas · PAINT in-page with live 3D).
    The FLIP (`/characters` route + nav icon die) is a separate commit on the
    user's word — the route is untouched today.
-5. **Item source** (+ ruled-in voxel SCULPT mode → VoxelHybridRoute dies).
-   Flip: `/items`, `/voxels`.
+5. **Item source** BUILT (WBSTEP5-0606, awaiting user test): the coverage-law
+   parity table lives at `editors/workbench/WBITEMS.CAPTURE.md` (all 10
+   `/items` rows and all 12 `/voxels` rows line-referenced).
+   `editors/workbench/items/{store.ts,panel.ts,source.tsx,Stage.tsx}` + P4 suite; ITEM is live
+   on `/workbench` with ITEM/SCULPT/VOXEL lenses, stream-backed sculpted item
+   authoring, voxel blockout authoring, and voxel→item import. The FLIP
+   (`/items`, `/voxels` routes + nav icons die) is a separate commit on the
+   user's word — both routes are untouched today.
 6. **Vehicle source.** Flip: `/vehicles`.
 7. **Material source** (roster = stored materials + shader recipes + decals;
    stage modes: PREVIEW / SHADER LAB / COMPOSE; Materialize = action). Flip:
@@ -317,8 +323,8 @@ CENSUSIDX-0606 assembly; resolves the route-census assembly request. Inputs read
 
 | route | capabilities counted | ACCOUNTED | PENDING (step) | UNPLANNED |
 |---|---:|---:|---|---:|
-| `/items` | 10 | 2 partial | 10 rows — step 5 `itemsSource` | 0 |
-| `/voxels` | 12 | 0 | 12 rows — step 5 item/voxel sculpt unification | 0 |
+| `/items` | 10 | 10 | none — step 5 `itemsSource()` built | 0 |
+| `/voxels` | 12 | 12 | none — step 5 item/voxel sculpt unification built | 0 |
 | `/vehicles` | 14 | 1 | 13 rows — step 6 `vehiclesSource()` | 0 |
 | `/textures` | 14 | 2 partial | 13 rows — step 7 `materialsSource()` | 0 |
 | `/compose` | 18 | 1 partial | 18 rows — step 7 `materialsSource()` | 0 |
