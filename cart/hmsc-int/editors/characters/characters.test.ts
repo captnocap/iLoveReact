@@ -541,4 +541,48 @@ test('the honest brush: min size lands one cell, the cursor ring IS the landed r
   }
 });
 
+test('mirror symmetry holds mesh-deep: the trident case + the preview resolves the grid (MIRRORSYM-0606)', () => {
+  const GW = HED_GRID_W, GH = 24;
+  // the user's canonical case: a mirror-symmetric trident — center prong on
+  // the meridian + two mirrored arms, drawn at single-cell width (the
+  // worst case for aliasing: min-size snapped cells)
+  const grid = new Array(GW * GH).fill(0);
+  const set = (x: number, y: number, v: number) => { grid[y * GW + x] = v; grid[y * GW + (GW - 1 - x)] = v; };
+  for (let y = 4; y <= 16; y++) set(GW / 2, y, 1);            // center prong (self-mirrors)
+  for (let i = 0; i < 8; i++) { set(GW / 2 - 3 - i, 10 + Math.floor(i / 2), 1); } // arms, stair-stepped
+  for (let x = 0; x < GW / 2; x++) {
+    for (let y = 0; y < GH; y++) {
+      assertEqual(grid[y * GW + x], grid[y * GW + (GW - 1 - x)], 'the input grid is mirror-symmetric');
+    }
+  }
+  const draft = generateCharacterDraft(11);
+  const params = editorPartParams('torso', { ...draft, profiles: { ...draft.profiles, torso: defaultProfile('torso') } }, grid) as any;
+  // the preview RESOLVES the sculpt grid — no more 2:1 undersampling aliasing
+  assert(params.segments >= GW * 2, `editor segments ${params.segments} resolve the ${GW}-col grid`);
+  assert(params.rings >= GH * 2, `editor rings ${params.rings} resolve the ${GH}-row grid`);
+  const surf = globeSurface(params);
+  // (b) mirrored VERTEX pairs across the full editor mesh sampling
+  let worst = 0;
+  for (let iv = 1; iv < params.rings; iv++) {
+    for (let iu = 0; iu <= params.segments; iu++) {
+      const u = iu / params.segments, v = iv / params.rings;
+      const a = surf(u, v), b = surf(1 - u, v);
+      worst = Math.max(worst, Math.abs(a[0] + b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2]));
+    }
+  }
+  assert(worst < 1e-9, `mirrored vertex pairs equal (worst ${worst.toExponential(2)})`);
+  // see-it == sculpt-it: a single-cell spike reads at FULL value on its own
+  // cell-center vertex, and its mirror twin reads identically
+  const spike = new Array(GW * GH).fill(0);
+  spike[12 * GW + 9] = 1; spike[12 * GW + (GW - 1 - 9)] = 1;
+  const p2 = editorPartParams('torso', { ...draft, profiles: { ...draft.profiles, torso: defaultProfile('torso') } }, spike) as any;
+  const s2 = globeSurface(p2);
+  const cu = (9 + 0.5) / GW, cv = (12 + 0.5) / GH;
+  const at = s2(cu, cv), flat = s2(cu + 4 / GW, cv);
+  const bump = Math.hypot(at[0] - flat[0], at[1] - flat[1], at[2] - flat[2]);
+  assert(bump > p2.amount * 0.5, `a single sculpted cell is VISIBLE on the mesh (moved ${bump.toFixed(3)})`);
+  const tw = s2(1 - cu, cv);
+  assert(Math.abs(at[0] + tw[0]) < 1e-9 && Math.abs(at[1] - tw[1]) < 1e-9 && Math.abs(at[2] - tw[2]) < 1e-9, 'the spike and its mirror render identically');
+});
+
 finish('editors/characters');

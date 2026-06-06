@@ -148,7 +148,16 @@ export function reliefBytesFromGrid(g: number[]): Uint8Array {
 // (softening lives in the shared painter now: PAINT.soften3x3 — editors/paint)
 
 /** The editor's PREVIEW mesh params for a part — the bake recipe extended
- *  with live displacement on every part (see the header note). */
+ *  with live displacement on every part (see the header note).
+ *
+ *  MIRRORSYM-0606: the editor preview RESOLVES the sculpt grid. The bake
+ *  LODs undersample 48×24 (torso 24×12, finger 10×7) — single-cell sculpt
+ *  lines alias into irregular spikes that READ as a mirror-symmetry break
+ *  under a rotated camera, while the data and the analytic surface are
+ *  exactly symmetric (mirrored-pair error 8.5e-15, measured on the user's
+ *  own trident). 2× the grid puts a vertex on every cell CENTER (full-value
+ *  tents) and every boundary: see-it == sculpt-it. Editor-only — the game
+ *  bake keeps its own LODs (the documented open question stands). */
 export function editorPartParams(
   id: PartId,
   draft: Pick<CharacterDraft, 'amount' | 'headScaleY' | 'profiles'>,
@@ -157,7 +166,9 @@ export function editorPartParams(
   const preset = PART_PRESETS[id];
   const lod = PART_LOD[id];
   return {
-    radius: 1, segments: lod.segments, rings: lod.rings,
+    radius: 1,
+    segments: Math.max(lod.segments, HED_GRID_W * 2),
+    rings: Math.max(lod.rings, HED_GRID_H * 2),
     displace, dCols: HED_GRID_W, dRows: HED_GRID_H,
     amount: draft.amount,
     // radial-only law: the profile thins x/z; length is scaleY alone
