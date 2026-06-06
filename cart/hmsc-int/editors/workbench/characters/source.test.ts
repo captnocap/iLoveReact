@@ -7,7 +7,9 @@
 
 import { assert, assertEqual, finish, test } from '../../../game/_testkit';
 import { createCharacterStore, type CharacterStoreDeps } from './store';
-import { charactersSource, characterPanel } from './source';
+// the HEADLESS core (panel.ts) — never source.tsx, which carries the stage's
+// React half (the characters.test.ts bundling law)
+import { characterSourceCore as charactersSource, characterPanel } from './panel';
 import { draftToDocument } from '../../characters/draft';
 import { generateCharacterDraft } from '../../characters/generate';
 import { SHAPE_REGIONS } from '../../characters/regions';

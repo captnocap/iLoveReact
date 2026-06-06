@@ -8,11 +8,12 @@
 
 import type { WorkbenchSource } from '../../shell/Workbench';
 import { tunablesSource } from './tunablesSource';
+import { charactersSource } from './characters/source';
 
 export function workbenchSources(): Array<WorkbenchSource<any>> {
   return [
+    charactersSource(), // WBCHAR-0606 — the pattern-setter (flip of /characters awaits the user's word)
     tunablesSource(),
-    // charactersSource(),   — step 4 (kills /characters)
     // itemsSource(),        — step 5 (kills /items, /voxels)
     // vehiclesSource(),     — step 6 (kills /vehicles)
     // materialsSource(),    — step 7 (kills /textures, /compose)
