@@ -1,0 +1,14 @@
+{
+  "id": "req_0011",
+  "at": "2026-06-06T05:02:24.545Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — WBCHAR-0606 addendum: deep view-state twigs. Marker: TWIGSTATE-0606, ledger req_0010 (resolve it on landing).\n\nUSER ASK, verbatim: \"they need to add in workspace twigs to remember exactly what route/panel/state im in so hot reload doesnt take me from painting on a texture to viewing a 3d model.\"\n\nThe twig system exists (editors/twigs.ts, route twigs landed 414469c6f) — extend it DEEP for the workbench: a hot reload (or leave-and-return) restores EXACTLY where the user was: route → source/category → selected roster row → active lens (PAINT vs FIGURE/PART/SCULPT) → the lens's own working target (the part being painted). The named failure, never again: painting on a texture → reload → staring at a 3D model.\n\nShape: view-state is ephemeral-but-twigged — the Workbench already owns selection/lens state (§2: \"owns selection/lens/filter/rev state\"); twig those fields per the existing twigs conventions (additive; old twig files unaffected). The PAINT lens's unsaved strokes are ALREADY covered by your workbench-scoped draft slots — this is about the VIEW restoring so those drafts are visible again without navigation. Apply the same depth to any view state your source owns; note in CAPTURE what is twigged vs deliberately not (e.g. transient hover). P4: a twig round-trip test (set state → serialize → restore → identical view fields). Explicit paths, verify green, resolve req_0010 with the paragraph + SHAs. READY when a mid-painting hot reload provably returns the user to the same brush on the same part.\n",
+  "status": "resolved",
+  "sessionId": "749ea40a-8b61-47c3-8d6c-5bde9e2a5c99",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T05:08:53.360Z",
+  "resolution": "Same landing as req_0010 (this prompt was the TWIGSTATE-0606 dispatch itself): deep workspace twigs for the workbench — frame source/row/lens twigs, store working-row twig with keepView restore, adapter-injectable twig deps, CAPTURE twigged-vs-transient table, 14/14 P4 green incl. the round-trip test.",
+  "shas": [
+    "8cc27ef6f"
+  ]
+}

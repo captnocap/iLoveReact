@@ -1,0 +1,14 @@
+{
+  "id": "req_0012",
+  "at": "2026-06-06T05:05:34.742Z",
+  "origin": "session:159435dc",
+  "text": "SUPERVISOR — REQLEDGER-0606 refinement (the necessary-vs-noise knob you built, first live tuning). The hooks are capturing supervisor dispatches as open user asks: req_0008 and req_0011 are SUPERVISOR-prefixed dispatch texts auto-captured from worker sessions, now sitting in the open list demanding resolutions that the dispatch markers already track. Refine: prompts beginning with \"SUPERVISOR\" get origin \"supervisor-dispatch\", are EXEMPT from the Stop-hook nudge and the resolution requirement (still captured — the durable record is welcome), and `request list --open` hides them by default (a --all flag shows everything). Make the prefix rule part of the configurable knob set, not hardcoded. Mark req_0008 + req_0011 accordingly (a status/origin amendment is a field-fill, not a rewrite). Small commit, explicit paths, test the prefix rule, resolve via your own ledger.\n",
+  "status": "resolved",
+  "sessionId": "159435dc-74b2-4e0e-9c32-2dff9bacc5d1",
+  "captureMode": "hook",
+  "resolvedAt": "2026-06-06T05:09:11.904Z",
+  "resolution": "Tuned the noise knob for its first live finding (REQLEDGER-0606 refinement). LedgerConfig gained dispatchPrefixes (default [\"SUPERVISOR\"], overridable in docs/game/_requests/_config.json — a knob, not a hardcode): hook captures matching a prefix still land verbatim with their sessionId, but with origin supervisor-dispatch, which exempts them everywhere it matters — the Stop-hook nudge filters them out, list --open hides them unless --all, and the capture context line tells the worker no ledger resolve is required because the dispatch marker already tracks resolution. Added tools/request mark-dispatch <id> as the amendment path for mis-captures: a field-fill flipping origin only, ask text and timestamps untouched, refused on resolved entries. Applied it to req_0008 (CAMFOCUS-0606) and req_0011 (TWIGSTATE-0606), which now sit out of the open list while staying in the durable record. P4 suite grew the prefix-rule case covering capture, knob override, and amendment guards — 12/12.",
+  "shas": [
+    "fcbfc035d"
+  ]
+}
