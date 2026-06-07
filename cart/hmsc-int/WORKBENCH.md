@@ -272,15 +272,20 @@ bang; the old route works until the minute its replacement does.
    (garage roster, stream-backed authoring, pose/debug/gas/damage/contract
    panel, 3D orbit stage, shared PAINT lens). The FLIP deleted `/vehicles`,
    `editors/vehicles/`, and the chrome car nav icon on the user's word.
-7. **Material source.** BUILT (WBSTEP7-0606, awaiting user test): the
+7. **Material source.** DONE + FLIPPED (WBSTEP7-0606, WBMATERIALS-FLIP-0607):
+   the
    coverage-law parity table lives at `editors/workbench/WBMATERIALS.CAPTURE.md`
    (all 14 `/textures` rows and all 18 `/compose` rows line-referenced; req_0003
-   surfaced as "shared material door now, shader-language unification still a
-   user ruling"). `editors/workbench/materials/{store.ts,source.tsx}` +
-   5-test suite; MATERIAL is live on `/workbench` (stored materials + shader
-   recipes + decals roster, PREVIEW / SHADER LAB / COMPOSE stages, hero
-   Materialize action). The FLIP (`/textures` + `/compose` routes die) is a
-   separate commit on the user's word — both routes are untouched today.
+   answered by making MATERIAL the authored material door while keeping PAINT as
+   the one agnostic painter). `editors/workbench/materials/{store.ts,source.tsx,
+   chooser.ts}` + 6-test suite; MATERIAL is live on `/workbench` (stored
+   materials + shader recipes + decals roster, PREVIEW / SHADER LAB / COMPOSE
+   stages, hero Materialize action). `materials/chooser.ts` is THE shared
+   material chooser contract consumed by building skins and garment variants;
+   vehicle variants have no material model yet, so vehicles continue through the
+   agnostic PAINT lens instead of growing a parallel material path. The FLIP
+   deleted `/textures`, `/compose`, their route registrations, and their chrome
+   nav icons on the user's word.
 8. **Cutout retirement — DONE (CUTOUTFLIP-0606).** USER RULING, verbatim:
    "cutout needs work but its at least got everything from the route in
    there so its g2g nuke that shit." The flip executed: EffectModal
@@ -307,6 +312,18 @@ bang; the old route works until the minute its replacement does.
    The FLIP (`/settings` + `/log` routes + nav icons die, tunablesSource.ts +
    LogView.tsx delete) is a separate commit on the user's word — both routes
    are untouched today.
+9b. **Garment source** — BUILT (CLOTHSOURCE-0606, req_0187, awaiting user
+   test): the clothing-CENTRIC view the user asked for ("just show the
+   clothing items, and then the variety in that same item"). Roster =
+   the garment tables (tops/bottoms/accessories, generated); stage = the
+   garment ALONE (buildClothingSlices — buildClothing's own output sliced
+   by slot marks, one placement truth) with a variant strip; variants =
+   the built-in prints (seeds) + user material assignments through THE
+   shared chooser, persisted on the new V20 `clothing-variants` stream.
+   `editors/workbench/clothing/{store,panel,live,Stage,source,clothing.test}`
+   + `editors/workbench/WBCLOTHING.CAPTURE.md` (W-row accounting: the
+   wardrobe ATTACHMENT context keeps W2-W6 — this source COEXISTS with
+   `clothingSource` until the user's word). 9-test P4 suite.
 10. **Chrome collapse** to 6 icons. Delete `cart/hmsc-wire/`. Done.
 
 Each flip's commit deletes the old route file(s), updates this ledger, and

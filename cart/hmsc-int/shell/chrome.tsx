@@ -33,7 +33,7 @@ import { CAT_COLOR, CAT_TAG, relTime, type EditEvent } from '../editLog';
 
 interface ChromeProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'labs' | 'compose' | 'settings' | 'workbench';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'labs' | 'settings' | 'workbench';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -56,15 +56,8 @@ interface ChromeProps {
   // Navigate to the /test route — the embodied game surface (PLAYFOLD-0605:
   // test + Creative Build folded; F1 test / F2 build flip the mode in-route).
   onTest: () => void;
-  // Navigate to the /textures route — the texture studio (tune a shader recipe,
-  // Materialize it into a stored material the registry serves everywhere).
-  onTextures: () => void;
   // Navigate to the /labs route — every lab, instantly loadable (V13).
   onLabs: () => void;
-  // Navigate to the /compose route — the decal editor (editors/compose,
-  // DECALEDIT-0606: compose Box/Text/Image looks → Materialize → the texture
-  // registry; billboards, signs, posters).
-  onCompose: () => void;
   // Navigate to the /settings route — the grand settings page (editors/settings):
   // the session event bus across every route channel + the P2 tunables registry.
   onSettings: () => void;
@@ -140,8 +133,6 @@ export function Chrome(props: ChromeProps) {
         <NavBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="play (F1 test / F2 build)" />
         <NavBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <NavBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
-        <NavBtn icon="PenTool" on={props.activeRoute === 'compose'} onPress={props.onCompose} title="decal editor" />
-        <NavBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />
         <NavBtn icon="Columns3" on={props.activeRoute === 'workbench'} onPress={props.onWorkbench} title="workbench (rebuild in progress)" />
         <NavBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
         <NavBtn icon="Settings" on={props.activeRoute === 'settings'} onPress={props.onSettings} title="settings" />

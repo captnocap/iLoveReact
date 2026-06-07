@@ -2,7 +2,7 @@
 
 Derived from the WORKBENCH.md route census. The supervisor keeps this current;
 every flip commit that deletes a route updates its row here.
-Last updated: 2026-06-07 (post vehicles flip).
+Last updated: 2026-06-07 (post materials flip).
 
 ## DEAD — ported to the workbench, route deleted
 
@@ -12,6 +12,8 @@ Last updated: 2026-06-07 (post vehicles flip).
 | /items | ITEM source — ITEM lens | dd3b11817 + 11f7b54de |
 | /voxels | ITEM source — SCULPT/VOXEL lenses (voxel→item import via Globe bake) | 11f7b54de |
 | /vehicles | VEHICLE source — garage authoring, 3D preview, shared PAINT lens | WBSTEP6-FLIP-0606 |
+| /textures | MATERIAL source — PREVIEW / SHADER LAB / COMPOSE | WBMATERIALS-FLIP-0607 |
+| /compose | MATERIAL source — COMPOSE stage mode | WBMATERIALS-FLIP-0607 |
 
 ## DYING — ported, deletion commit in flight
 
@@ -23,8 +25,6 @@ Last updated: 2026-06-07 (post vehicles flip).
 
 | old route | workbench step | state |
 |---|---|---|
-| /textures | step 7 — material source (PREVIEW / SHADER LAB / COMPOSE) | queued |
-| /compose | step 7 — material source | queued (18 rows, biggest) |
 | /settings | step 9 — settings source (tunables-generated) | built; density respec pending; flip after |
 | /log | step 9 — logs source (stream + dashboard band) | in step-9 scope |
 

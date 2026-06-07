@@ -24,7 +24,7 @@ import { RightPanel, type TabId } from './RightPanel';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
-import { serializeMap, deserializeMap, emptyMap, hasAuthoredMapContent, paintedCenter, isSaneView2d, type MapSnapshot, type EditorWorld } from './mapStore';
+import { serializeMap, deserializeMap, emptyMap, hasAuthoredMapContent, paintedCenter, isSaneView2d, viewRunawayLogKey, type MapSnapshot, type EditorWorld } from './mapStore';
 import { Chrome, MapsMenu, EventLog } from './shell/chrome';
 import { NotificationOverlayHost } from './shell/notifications';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
@@ -40,13 +40,11 @@ import { plog, ptime, useChurn } from './perfLog';
 import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
 import { LogView } from './LogView';
 import { Assist3DRoute } from './assist3d';
-import { TextureStudio } from './TextureStudio';
 import { PlayRoute } from './editors/play/PlayRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
-import { ComposeRoute } from './editors/compose/ComposeRoute';
 import { SettingsRoute } from './editors/settings/SettingsRoute';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
@@ -271,6 +269,7 @@ function EditorShell() {
   // origin on a non-empty map (MAPGONE2-0605: that read as "the map vanished"
   // whenever the origin chunk is featureless at default zoom).
   const [seedView, setSeedView] = useState<CanvasView2D | null>(null);
+  const lastViewRunawayWarn = useRef<string | null>(null);
   const [worldEpoch, setWorldEpoch] = useState(0);
   const [worldRev, setWorldRev] = useState(0);
 
@@ -340,7 +339,15 @@ function EditorShell() {
     // sample resumes persisting).
     const liveView = api.getView();
     const view2d = liveView && isSaneView2d(liveView, { chunks: w.chunks, zones: w.zones, focus: w.focus, placements }, TILE_UNITS) ? liveView : undefined;
-    if (liveView && !view2d) console.warn(`[viewrunaway] NOT persisting insane live view ${liveView.x.toFixed(0)},${liveView.y.toFixed(0)}@${liveView.zoom.toFixed(2)}`);
+    if (liveView && !view2d) {
+      const key = viewRunawayLogKey(liveView);
+      if (lastViewRunawayWarn.current !== key) {
+        lastViewRunawayWarn.current = key;
+        console.warn(`[viewrunaway] NOT persisting insane live view ${key}`);
+      }
+    } else if (view2d) {
+      lastViewRunawayWarn.current = null;
+    }
     return { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, world, sel: selPlaceId, wasd: wasdQuad, cam: camApiRef.current?.get(), overrides: serializeOverrides(overrides), brush: brushRef.current, view2d };
   }, [fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, placements, selPlaceId, wasdQuad, overrides]);
 
@@ -826,7 +833,7 @@ function EditorShell() {
   // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/compose' ? 'compose' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
   const [editorPanesMounted, setEditorPanesMounted] = useState(activeRoute === 'editor');
   useEffect(() => {
     if (activeRoute === 'editor') setEditorPanesMounted(true);
@@ -862,12 +869,10 @@ function EditorShell() {
         onEditor={() => nav.push('/')}
         onTest={() => nav.push('/test')}
         onLabs={() => nav.push('/labs')}
-        onCompose={() => nav.push('/compose')}
         onPerf={() => nav.push('/log')}
         onSettings={() => nav.push('/settings')}
         onWorkbench={() => nav.push('/workbench')}
         onAssist={() => nav.push('/assist3d')}
-        onTextures={() => nav.push('/textures')}
         onUndo={ws.undo}
         onRedo={ws.redo}
         onCompile={compileToGame}
@@ -939,7 +944,6 @@ function EditorShell() {
             one navigation shell and the editor stays mounted underneath. */}
         <Route path="/log">{() => <LogView />}</Route>
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
-        <Route path="/textures">{() => <TextureStudio />}</Route>
         {/* The embodied game surface (editors/play/, PLAYFOLD-0605): /test +
             /build folded into ONE route — mode is PlayRoute's own state,
             F1 test / F2 build flip it WITHOUT remounting, so the pose,
@@ -949,9 +953,6 @@ function EditorShell() {
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
-        {/* The decal editor (editors/compose/) — compose Box/Text/Image looks,
-            Materialize them into the texture registry (DECALEDIT-0606). */}
-        <Route path="/compose">{() => <ComposeRoute />}</Route>
         {/* The four-gutter rebuild (WORKBENCH.md) — additive while sources land;
             old routes flip off one at a time as parity is reached. */}
         <Route path="/workbench">{() => <WorkbenchRoute sources={wbSources} onExit={() => nav.push('/')} />}</Route>
