@@ -168,11 +168,14 @@ export interface Instance {
   renderCount: number;
   parent?: Instance | null;
   hostWindowId?: number | null;
+  debugName?: string;
+  debugSource?: { fileName?: string; lineNumber?: number };
 }
 
 export interface TextInstance {
   id: number;
   text: string;
+  parent?: Instance | null;
 }
 
 type Container = { id: number };
@@ -218,6 +221,205 @@ export function setTransportFlush(fn: (commands: Command[]) => void): void {
 let nodeIdCounter = 0;
 const pendingCommands: Command[] = [];
 const rootInstances: Instance[] = [];
+
+type ChurnTraceRecord = {
+  op: string;
+  id: number;
+  parentId?: number | null;
+  type: string;
+  name: string;
+  source: string;
+  nodes: number;
+  glyphs: number;
+  detail?: string;
+};
+
+let churnTraceEnvEnabled: boolean | null = null;
+let churnTraceCommit = 0;
+const churnTraceBatch: ChurnTraceRecord[] = [];
+const churnTraceRecent: Array<{ commit: number; at: number; events: number; nodes: number; glyphs: number; parts: string[] }> = [];
+const CHURN_TRACE_RECENT_MAX = 16;
+
+function isDiagnosticConsoleChurn(record: ChurnTraceRecord): boolean {
+  const detail = record.detail ?? '';
+  if (record.name !== 'PlayRoute') return false;
+  return (
+    detail.includes('gv_churntrace') ||
+    detail.includes('gv_perflog') ||
+    detail.includes('help ·') ||
+    detail.includes('PgUp/PgDn') ||
+    /text="] .*▌"/.test(detail) ||
+    /^"] .*▌"=>"] ▌"/.test(detail)
+  );
+}
+
+function churnTraceEnabled(): boolean {
+  if ((globalThis as any).__RECON_CHURN_TRACE === true) return true;
+  if ((globalThis as any).__RECON_CHURN_TRACE === false) return false;
+  if (churnTraceEnvEnabled != null) return churnTraceEnvEnabled;
+  let value: any = null;
+  try {
+    const envGet = (globalThis as any).__env_get;
+    value = typeof envGet === 'function' ? envGet('RJIT_RECON_CHURN_TRACE') : null;
+  } catch {
+    value = null;
+  }
+  churnTraceEnvEnabled = value != null && value !== '' && value !== '0' && value !== 'false';
+  return churnTraceEnvEnabled;
+}
+
+function sourceLabel(source?: { fileName?: string; lineNumber?: number }): string {
+  if (!source?.fileName) return 'unknown';
+  return `${source.fileName}${source.lineNumber ? `:${source.lineNumber}` : ''}`;
+}
+
+function previewText(text: string): string {
+  return JSON.stringify(text.length > 32 ? `${text.slice(0, 32)}...` : text);
+}
+
+function propFontSize(props: Record<string, any> | undefined): unknown {
+  if (!props) return undefined;
+  if (props.fontSize != null) return props.fontSize;
+  if (props.style && typeof props.style === 'object' && props.style.fontSize != null) return props.style.fontSize;
+  return undefined;
+}
+
+function collectTextPreview(node: Instance | TextInstance, out: string[], limit = 4): void {
+  if (out.length >= limit) return;
+  if (!isInstance(node)) {
+    out.push(node.text);
+    return;
+  }
+  for (const child of node.children as Array<Instance | TextInstance>) {
+    collectTextPreview(child, out, limit);
+    if (out.length >= limit) return;
+  }
+}
+
+function textOwnerDetail(node: Instance | TextInstance, props?: Record<string, any>): string {
+  const owner = isInstance(node) ? node : node.parent ?? undefined;
+  const texts: string[] = [];
+  collectTextPreview(node, texts);
+  const bits: string[] = [];
+  const size = propFontSize(props ?? owner?.props);
+  if (size != null) bits.push(`fontSize=${String(size)}`);
+  if (texts.length > 0) bits.push(`text=${texts.map(previewText).join('|')}`);
+  return bits.join(' ');
+}
+
+function updateChurnDetail(instance: Instance, oldProps: Record<string, any>, newProps: Record<string, any>, diffKeys: string[]): string {
+  const bits: string[] = [];
+  const oldSize = propFontSize(oldProps);
+  const newSize = propFontSize(newProps);
+  bits.push(diffKeys.join(','));
+  if (oldSize !== newSize) bits.push(`fontSize ${String(oldSize ?? 'unset')}=>${String(newSize ?? 'unset')}`);
+  const text = textOwnerDetail(instance, newProps);
+  if (text) bits.push(text);
+  return bits.filter(Boolean).join(' ');
+}
+
+function nodeLabel(node: Instance | TextInstance): { name: string; source: string; type: string } {
+  if (isInstance(node)) {
+    return {
+      name: node.debugName ?? node.type,
+      source: sourceLabel(node.debugSource),
+      type: node.type,
+    };
+  }
+  const parent = node.parent ?? null;
+  return {
+    name: parent?.debugName ?? parent?.type ?? 'Text',
+    source: sourceLabel(parent?.debugSource),
+    type: 'Text',
+  };
+}
+
+function subtreeCounts(node: Instance | TextInstance): { nodes: number; glyphs: number } {
+  if (!isInstance(node)) return { nodes: 1, glyphs: node.text.length };
+  let nodes = 1;
+  let glyphs = 0;
+  for (const child of node.children as Array<Instance | TextInstance>) {
+    const counts = subtreeCounts(child);
+    nodes += counts.nodes;
+    glyphs += counts.glyphs;
+  }
+  return { nodes, glyphs };
+}
+
+function recordChurn(op: string, node: Instance | TextInstance, counts?: { nodes: number; glyphs: number }, detail?: string): void {
+  if (!churnTraceEnabled()) return;
+  const label = nodeLabel(node);
+  const c = counts ?? subtreeCounts(node);
+  const nodeDetail = detail ?? (c.glyphs > 0 ? textOwnerDetail(node) : undefined);
+  churnTraceBatch.push({
+    op,
+    id: node.id,
+    parentId: node.parent?.id ?? null,
+    type: label.type,
+    name: label.name,
+    source: label.source,
+    nodes: c.nodes,
+    glyphs: c.glyphs,
+    detail: nodeDetail,
+  });
+}
+
+function flushChurnTrace(): void {
+  if (!churnTraceEnabled() || churnTraceBatch.length === 0) return;
+  for (let i = churnTraceBatch.length - 1; i >= 0; i -= 1) {
+    if (isDiagnosticConsoleChurn(churnTraceBatch[i])) churnTraceBatch.splice(i, 1);
+  }
+  if (churnTraceBatch.length === 0) return;
+  churnTraceCommit += 1;
+  const total = churnTraceBatch.reduce((acc, r) => {
+    acc.nodes += r.nodes;
+    acc.glyphs += r.glyphs;
+    return acc;
+  }, { nodes: 0, glyphs: 0 });
+  const groups = new Map<string, ChurnTraceRecord & { count: number; ids: number[]; parentIds: Array<number | null | undefined> }>();
+  for (const record of churnTraceBatch) {
+    const key = `${record.op}|${record.name}|${record.source}|${record.type}|${record.detail ?? ''}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.nodes += record.nodes;
+      existing.glyphs += record.glyphs;
+      if (existing.ids.length < 8) existing.ids.push(record.id);
+      if (existing.parentIds.length < 8) existing.parentIds.push(record.parentId);
+      if (record.detail && !existing.detail?.includes(record.detail)) {
+        existing.detail = existing.detail ? `${existing.detail},${record.detail}` : record.detail;
+      }
+    } else {
+      groups.set(key, { ...record, count: 1, ids: [record.id], parentIds: [record.parentId] });
+    }
+  }
+  const parts = [...groups.values()]
+    .sort((a, b) => (b.glyphs - a.glyphs) || (b.nodes - a.nodes))
+    .slice(0, 8)
+    .map((g) => {
+      const parents = [...new Set(g.parentIds.map((id) => id == null ? 'root' : String(id)))].join(',');
+      return `${g.op} ${g.name}@${g.source} type=${g.type} count=${g.count} ids=${g.ids.join(',')} parents=${parents} nodes=${g.nodes} glyphs=${g.glyphs}${g.detail ? ` detail=${g.detail}` : ''}`;
+    });
+  churnTraceRecent.push({ commit: churnTraceCommit, at: Date.now(), events: churnTraceBatch.length, nodes: total.nodes, glyphs: total.glyphs, parts });
+  if (churnTraceRecent.length > CHURN_TRACE_RECENT_MAX) churnTraceRecent.splice(0, churnTraceRecent.length - CHURN_TRACE_RECENT_MAX);
+  try {
+    globalThis.console?.warn?.(`[recon-churn] commit=${churnTraceCommit} events=${churnTraceBatch.length} nodes=${total.nodes} glyphs=${total.glyphs}\n  ${parts.join('\n  ')}`);
+  } catch {}
+  churnTraceBatch.length = 0;
+}
+
+(globalThis as any).__RECON_CHURN_SET = (enabled: unknown) => {
+  (globalThis as any).__RECON_CHURN_TRACE = enabled === true || enabled === 1 || enabled === '1' || enabled === 'on';
+  if ((globalThis as any).__RECON_CHURN_TRACE) churnTraceRecent.length = 0;
+  return (globalThis as any).__RECON_CHURN_TRACE;
+};
+(globalThis as any).__RECON_CHURN_DUMP = () => churnTraceRecent.slice();
+(globalThis as any).__RECON_CHURN_CLEAR = () => {
+  churnTraceBatch.length = 0;
+  churnTraceRecent.length = 0;
+  return true;
+};
+(globalThis as any).__RECON_CHURN_STATUS = () => ({ enabled: churnTraceEnabled(), recent: churnTraceRecent.length });
 const WINDOW_HOST_TYPES = new Set(['Window', 'Notification']);
 
 /**
@@ -255,8 +457,8 @@ function assignHostWindow(node: Instance | TextInstance, windowId: number | null
 }
 
 function markParent(parent: Instance | null, child: Instance | TextInstance): void {
-  if (!isInstance(child)) return;
   child.parent = parent;
+  if (!isInstance(child)) return;
   const inherited = parent ? (WINDOW_HOST_TYPES.has(parent.type) ? parent.id : parent.hostWindowId ?? null) : null;
   assignHostWindow(child, inherited);
 }
@@ -581,6 +783,21 @@ function diffStyleObjects(
   };
 }
 
+const STYLE_OBJECT_PROPS = new Set([
+  'contentContainerStyle',
+  'hoverStyle',
+  'activeStyle',
+  'focusStyle',
+  'textStyle',
+]);
+
+function styleObjectPropChanged(oldVal: unknown, newVal: unknown): boolean {
+  if (oldVal === newVal) return false;
+  if (!oldVal || !newVal || typeof oldVal !== 'object' || typeof newVal !== 'object') return true;
+  const styleDiff = diffStyleObjects(oldVal as Record<string, any>, newVal as Record<string, any>);
+  return styleDiff.changed !== null || styleDiff.removed.length > 0;
+}
+
 /**
  * Compute a minimal diff between two clean prop objects.
  * Returns the changed props (with partial style diff), removed top-level keys,
@@ -607,6 +824,11 @@ function diffCleanProps(
       }
       removeStyleKeys = styleDiff.removed;
       if (removeStyleKeys.length > 0) hasDiff = true;
+    } else if (STYLE_OBJECT_PROPS.has(key)) {
+      if (styleObjectPropChanged(oldVal, newVal)) {
+        diff[key] = newVal;
+        hasDiff = true;
+      }
     } else if (oldVal !== newVal) {
       diff[key] = newVal;
       hasDiff = true;
@@ -777,7 +999,20 @@ export const hostConfig: HostConfig<
       manageSubscription(id, clean.__subscribeKey, 'onKeyDown', () => nodeHandlers.onKeyDown, comboFilter);
     }
 
-    return { id, type: resolvedType, props: clean, handlers, children: [], renderCount: 1, parent: null, hostWindowId: null };
+    const instance = {
+      id,
+      type: resolvedType,
+      props: clean,
+      handlers,
+      children: [],
+      renderCount: 1,
+      parent: null,
+      hostWindowId: null,
+      debugName,
+      debugSource,
+    };
+    recordChurn('create', instance, { nodes: 1, glyphs: 0 });
+    return instance;
   },
 
   createTextInstance(text: string): TextInstance {
@@ -793,6 +1028,9 @@ export const hostConfig: HostConfig<
     hostLog(`[hostConfig] appendInitialChild parent=${parent.id} child=${child.id}`);
     markParent(parent, child);
     (parent.children as any[]).push(child);
+    if (!isInstance(child)) {
+      recordChurn('create-text-initial', child, { nodes: 1, glyphs: child.text.length }, textOwnerDetail(child));
+    }
     emit({ op: 'APPEND', parentId: parent.id, childId: child.id });
   },
 
@@ -806,6 +1044,9 @@ export const hostConfig: HostConfig<
     hostLog(`[hostConfig] appendChild parent=${parent.id} child=${child.id}`);
     markParent(parent, child);
     (parent.children as any[]).push(child);
+    if (!isInstance(child)) {
+      recordChurn('create-text', child, { nodes: 1, glyphs: child.text.length }, textOwnerDetail(child));
+    }
     emit({ op: 'APPEND', parentId: parent.id, childId: child.id });
   },
 
@@ -813,6 +1054,9 @@ export const hostConfig: HostConfig<
     hostLog(`[hostConfig] appendChildToContainer container=${container.id} child=${child.id}`);
     markParent(null, child);
     rootInstances.push(child as Instance);
+    if (!isInstance(child)) {
+      recordChurn('create-text-root', child, { nodes: 1, glyphs: child.text.length }, textOwnerDetail(child));
+    }
     emit({ op: 'APPEND_TO_ROOT', childId: child.id });
   },
 
@@ -824,6 +1068,7 @@ export const hostConfig: HostConfig<
     const windowId = isInstance(child)
       ? child.hostWindowId
       : (WINDOW_HOST_TYPES.has(parent.type) ? parent.id : parent.hostWindowId);
+    recordChurn('remove', child);
     markParent(null, child);
     emit(commandWithWindow({ op: 'REMOVE', parentId: parent.id, childId: child.id }, windowId));
     cleanupHandlers(child);
@@ -834,6 +1079,7 @@ export const hostConfig: HostConfig<
     const idx = rootInstances.indexOf(child as Instance);
     if (idx !== -1) rootInstances.splice(idx, 1);
     const windowId = isInstance(child) ? child.hostWindowId : null;
+    recordChurn('remove-root', child);
     markParent(null, child);
     emit(commandWithWindow({ op: 'REMOVE_FROM_ROOT', childId: child.id }, windowId));
     cleanupHandlers(child);
@@ -853,6 +1099,9 @@ export const hostConfig: HostConfig<
       arr.push(child);
     }
     markParent(parent, child);
+    if (!isInstance(child)) {
+      recordChurn('insert-text', child, { nodes: 1, glyphs: child.text.length }, textOwnerDetail(child));
+    }
     emit({
       op: 'INSERT_BEFORE',
       parentId: parent.id,
@@ -961,7 +1210,9 @@ export const hostConfig: HostConfig<
       const handlerNames = Object.keys(handlers);
       const hasHandlers = handlerNames.length > 0;
       const payload = updatePayload as { diff: Record<string, any>; removeKeys: string[]; removeStyleKeys: string[] };
-      debugLog.log('recon', `commitUpdate id=${instance.id} type=${instance.type} diffKeys=[${Object.keys(payload.diff).join(',')}] removeStyle=[${payload.removeStyleKeys.join(',')}]`);
+      const diffKeys = Object.keys(payload.diff);
+      debugLog.log('recon', `commitUpdate id=${instance.id} type=${instance.type} diffKeys=[${diffKeys.join(',')}] removeStyle=[${payload.removeStyleKeys.join(',')}]`);
+      recordChurn('update', instance, { nodes: 1, glyphs: 0 }, updateChurnDetail(instance, instance.props, clean, diffKeys));
 
       const cmd: any = {
         op: 'UPDATE',
@@ -1013,6 +1264,7 @@ export const hostConfig: HostConfig<
 
   commitTextUpdate(_textInstance: TextInstance, _oldText: string, newText: string) {
     hostLog(`[hostConfig] commitTextUpdate id=${_textInstance.id} text=${JSON.stringify(newText)}`);
+    recordChurn('update-text', _textInstance, { nodes: 1, glyphs: Math.abs(newText.length - _oldText.length) || newText.length }, `${previewText(_oldText)}=>${previewText(newText)} ${textOwnerDetail(_textInstance)}`);
     _textInstance.text = newText;
     emit({ op: 'UPDATE_TEXT', id: _textInstance.id, text: newText });
   },
@@ -1025,6 +1277,7 @@ export const hostConfig: HostConfig<
 
   resetAfterCommit() {
     hostLog(`[hostConfig] resetAfterCommit`);
+    flushChurnTrace();
     const stampStateUpdate = (globalThis as any).__clickLatencyStampStateUpdate;
     if (typeof stampStateUpdate === 'function') {
       try { stampStateUpdate(); } catch {}

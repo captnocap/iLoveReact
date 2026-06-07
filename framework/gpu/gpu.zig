@@ -760,6 +760,8 @@ pub const ScissorSnapshot = struct {
 const StaticSurfaceEntry = struct {
     key_hash: u64 = 0,
     key_len: usize = 0,
+    key_sample_len: u8 = 0,
+    key_sample: [64]u8 = [_]u8{0} ** 64,
     width: u32 = 0,
     height: u32 = 0,
     texture: ?*wgpu.Texture = null,
@@ -812,6 +814,10 @@ const MAX_STATIC_CAPTURES = 2048;
 var g_static_entries: [MAX_STATIC_SURFACES]StaticSurfaceEntry = [_]StaticSurfaceEntry{.{}} ** MAX_STATIC_SURFACES;
 var g_static_captures: [MAX_STATIC_CAPTURES]StaticSurfaceCapture = [_]StaticSurfaceCapture{.{}} ** MAX_STATIC_CAPTURES;
 var g_static_capture_count: usize = 0;
+const MAX_STATIC_CAPTURE_TRACE: usize = 1024;
+var g_last_static_capture_trace: [MAX_STATIC_CAPTURE_TRACE]u8 = [_]u8{0} ** MAX_STATIC_CAPTURE_TRACE;
+var g_last_static_capture_trace_len: usize = 0;
+var g_last_static_capture_count: usize = 0;
 
 pub fn primitiveCounts() PrimitiveCounts {
     return .{
@@ -871,7 +877,7 @@ fn deinitStaticSurfaces() void {
     g_static_capture_count = 0;
 }
 
-fn ensureStaticEntry(hash: u64, key_len: usize, width: u32, height: u32) ?usize {
+fn ensureStaticEntry(key: []const u8, hash: u64, key_len: usize, width: u32, height: u32) ?usize {
     if (width == 0 or height == 0) return null;
     const device = g_device orelse return null;
 
@@ -892,11 +898,20 @@ fn ensureStaticEntry(hash: u64, key_len: usize, width: u32, height: u32) ?usize 
     };
 
     const entry = &g_static_entries[idx];
+    const sample_len = @min(key_len, entry.key_sample.len);
+    if (entry.key_sample_len == 0 or entry.key_hash != hash or entry.key_len != key_len) {
+        @memset(&entry.key_sample, 0);
+        if (sample_len > 0) @memcpy(entry.key_sample[0..sample_len], key[0..sample_len]);
+        entry.key_sample_len = @intCast(sample_len);
+    }
     if (entry.texture != null and entry.width == width and entry.height == height) return idx;
 
     releaseStaticResources(entry);
     entry.key_hash = hash;
     entry.key_len = key_len;
+    @memset(&entry.key_sample, 0);
+    if (sample_len > 0) @memcpy(entry.key_sample[0..sample_len], key[0..sample_len]);
+    entry.key_sample_len = @intCast(sample_len);
     entry.width = width;
     entry.height = height;
     entry.active = true;
@@ -990,7 +1005,7 @@ pub fn staticSurfaceWarming(key: []const u8, width_f: f32, height_f: f32, warmup
     if (warmup_frames == 0) return false;
     const width = staticDim(width_f, scale_f);
     const height = staticDim(height_f, scale_f);
-    const idx = ensureStaticEntry(staticKeyHash(key), key.len, width, height) orelse return false;
+    const idx = ensureStaticEntry(key, staticKeyHash(key), key.len, width, height) orelse return false;
     const entry = &g_static_entries[idx];
     if (entry.ready) {
         // A captured-and-ready entry that's now stale must skip the warming
@@ -1037,7 +1052,7 @@ pub fn staticSurfaceBindGroup3D(key: []const u8) ?*wgpu.BindGroup {
 pub fn beginStaticSurfaceCapture(key: []const u8, x: f32, y: f32, width_f: f32, height_f: f32, opacity: f32, intro_frames: u16, scale_f: f32) ?StaticSurfaceToken {
     const width = staticDim(width_f, scale_f);
     const height = staticDim(height_f, scale_f);
-    const idx = ensureStaticEntry(staticKeyHash(key), key.len, width, height) orelse return null;
+    const idx = ensureStaticEntry(key, staticKeyHash(key), key.len, width, height) orelse return null;
     const entry = &g_static_entries[idx];
     entry.ready_frame = g_frame_counter;
     _ = queueStaticSurfaceQuad(entry, x, y, width_f, height_f, opacity, intro_frames);
@@ -1122,7 +1137,7 @@ pub fn beginFilterCapture(
     _ = filter_name;
     const width = staticDim(width_f, scale_f);
     const height = staticDim(height_f, scale_f);
-    const idx = ensureStaticEntry(staticKeyHash(key), key.len, width, height) orelse return null;
+    const idx = ensureStaticEntry(key, staticKeyHash(key), key.len, width, height) orelse return null;
     const entry = &g_static_entries[idx];
     if (!ensureFilterResources(entry)) return null;
     return .{ .entry_index = idx, .width = width, .height = height };
@@ -1309,6 +1324,31 @@ fn capEncloses(outer: StaticSurfaceCapture, inner: StaticSurfaceCapture) bool {
 }
 
 fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
+    g_last_static_capture_count = g_static_capture_count;
+    var stream = std.io.fixedBufferStream(&g_last_static_capture_trace);
+    var writer = stream.writer();
+    var wrote_any = false;
+    for (g_static_captures[0..g_static_capture_count]) |cap| {
+        const entry = if (cap.entry_index < MAX_STATIC_SURFACES) &g_static_entries[cap.entry_index] else null;
+        const key_sample = if (entry) |e| e.key_sample[0..e.key_sample_len] else "";
+        const start = cap.start;
+        const end = cap.end;
+        if (wrote_any) writer.writeAll(" | ") catch break;
+        writer.print("#{d} key=\"{s}\" {d}x{d} r{d} g{d} c{d} cap{d} p{d} img{d}", .{
+            cap.entry_index,
+            key_sample,
+            cap.width,
+            cap.height,
+            @as(i64, end.rects) - @as(i64, start.rects),
+            @as(i64, end.glyphs) - @as(i64, start.glyphs),
+            @as(i64, end.curves) - @as(i64, start.curves),
+            @as(i64, end.capsules) - @as(i64, start.capsules),
+            @as(i64, end.polys) - @as(i64, start.polys),
+            @as(i64, end.images) - @as(i64, start.images),
+        }) catch break;
+        wrote_any = true;
+    }
+    g_last_static_capture_trace_len = stream.pos;
     if (g_static_capture_count == 0) return;
 
     // A <Filter> nested inside a <StaticSurface> shows up as a filter capture
@@ -2071,6 +2111,7 @@ pub const TelemetryStats = struct {
     rect_capacity: u32,
     glyph_capacity: u32,
     atlas_glyph_count: u32,
+    atlas_miss_count: u32,
     atlas_capacity: u32,
     atlas_row_x: u32,
     atlas_row_y: u32,
@@ -2079,6 +2120,14 @@ pub const TelemetryStats = struct {
     surface_w: u32,
     surface_h: u32,
     frame_hash: u64,
+    rect_hash: u64,
+    text_hash: u64,
+    curves_hash: u64,
+    capsules_hash: u64,
+    polys_hash: u64,
+    text_trace: []const u8,
+    static_capture_count: u32,
+    static_capture_trace: []const u8,
     frames_since_drain: u64,
 };
 
@@ -2089,6 +2138,7 @@ pub fn telemetryStats() TelemetryStats {
         .rect_capacity = rects.MAX_RECTS,
         .glyph_capacity = text.MAX_GLYPHS,
         .atlas_glyph_count = @intCast(text.atlasCount()),
+        .atlas_miss_count = @intCast(text.lastAtlasMissCount()),
         .atlas_capacity = @intCast(text.atlasCapacity()),
         .atlas_row_x = 0, // internal to text pipeline now
         .atlas_row_y = text.atlasRowY(),
@@ -2097,6 +2147,14 @@ pub fn telemetryStats() TelemetryStats {
         .surface_w = g_width,
         .surface_h = g_height,
         .frame_hash = g_prev_frame_hash,
+        .rect_hash = g_prev_pipeline_hashes.rects,
+        .text_hash = g_prev_pipeline_hashes.text,
+        .curves_hash = g_prev_pipeline_hashes.curves,
+        .capsules_hash = g_prev_pipeline_hashes.capsules,
+        .polys_hash = g_prev_pipeline_hashes.polys,
+        .text_trace = text.lastTraceSummary(),
+        .static_capture_count = @intCast(g_last_static_capture_count),
+        .static_capture_trace = g_last_static_capture_trace[0..g_last_static_capture_trace_len],
         .frames_since_drain = g_frame_counter % DRAIN_INTERVAL,
     };
 }

@@ -174,10 +174,18 @@ type DiagnosticRecord = {
 
 const gDiag = globalThis as typeof globalThis & {
   __hmsc_diag_enabled?: Record<string, boolean>;
+  __hmsc_spike_watch_enabled?: boolean;
+  __hmsc_spike_watch_stop?: () => void;
+  __hmsc_spike_watch_config?: SpikeWatchConfig;
 };
 
 const diagnosticEnabled: Record<string, boolean> = gDiag.__hmsc_diag_enabled ?? {};
 gDiag.__hmsc_diag_enabled = diagnosticEnabled;
+const previousSpikeWatchStop = gDiag.__hmsc_spike_watch_stop;
+if (typeof previousSpikeWatchStop === 'function') {
+  try { previousSpikeWatchStop(); } catch {}
+  gDiag.__hmsc_spike_watch_stop = undefined;
+}
 for (const spec of DIAGNOSTIC_CHANNELS) {
   if (diagnosticEnabled[spec.name] == null) diagnosticEnabled[spec.name] = spec.defaultEnabled;
 }
@@ -574,6 +582,11 @@ const CAMERA_PROBE_HOST_FN = '__game_camera_probe';
 export const COUNTER_SPEC: Partial<Record<SnapshotKind, readonly string[]>> = {
   gpu: [
     'frame_hash',
+    'rect_hash',
+    'text_hash',
+    'curves_hash',
+    'capsules_hash',
+    'polys_hash',
     'rect_count',
     'glyph_count',
     'glyph_capacity',
@@ -581,6 +594,7 @@ export const COUNTER_SPEC: Partial<Record<SnapshotKind, readonly string[]>> = {
     // atlas shows as atlas_glyph_count jumping — the tell for "37ms paint =
     // atlas rebuild" vs "draw data just re-uploaded".
     'atlas_glyph_count',
+    'atlas_miss_count',
     'atlas_capacity',
     'frames_since_drain',
     'scene3d_instances',
@@ -588,9 +602,10 @@ export const COUNTER_SPEC: Partial<Record<SnapshotKind, readonly string[]>> = {
     'scene3d_meshes_collected',
     'scene3d_meshes_dropped',
     'scene3d_mesh_children',
+    'static_capture_count',
   ],
   nodes: ['total', 'visible', 'hidden'],
-  input: ['active_count', 'type_count'],
+  input: ['active_count', 'type_count', 'focused_id'],
 };
 
 // ── Reads (every one tolerates a missing host fn) ───────────────────────────
@@ -751,6 +766,17 @@ export type SpikeWatchConfig = {
   historyFrames: number;
 };
 
+let spikeWatchConfig: SpikeWatchConfig = {
+  spikeRatio: TELEMETRY_TUNING.spike.spikeRatio,
+  minJumpUs: TELEMETRY_TUNING.spike.minJumpUs,
+  cooldownMs: TELEMETRY_TUNING.spike.cooldownMs,
+  recorderFrames: TELEMETRY_TUNING.spike.recorderFrames,
+  historyFrames: TELEMETRY_TUNING.spike.historyFrames,
+};
+if (gDiag.__hmsc_spike_watch_config) {
+  spikeWatchConfig = { ...spikeWatchConfig, ...gDiag.__hmsc_spike_watch_config };
+}
+
 export type SpikeDetection = {
   isSpike: boolean;
   baselineUs: number;
@@ -793,8 +819,14 @@ function fpsImpliedCaughtFloor(record: FrameRecord): number {
  *  the report names the cause instead of leaving the reader to decode raw
  *  counters. Ordered most-specific first; a heuristic, so the raw deltas
  *  still print below it in the report. */
-export function classifySpike(record: FrameRecord | null, calm: Counters, spike: Counters): string {
+export function classifySpike(
+  record: FrameRecord | null,
+  calm: Counters,
+  spike: Counters,
+  options: { countersReliable?: boolean } = {},
+): string {
   const cfg = TELEMETRY_TUNING.classify;
+  const countersReliable = options.countersReliable !== false;
   const delta = (key: string): number => {
     const before = calm[key];
     const after = spike[key];
@@ -802,7 +834,8 @@ export function classifySpike(record: FrameRecord | null, calm: Counters, spike:
   };
   const hashFlipped =
     calm.frame_hash != null && spike.frame_hash != null && calm.frame_hash !== spike.frame_hash;
-  const atlasGrew = delta('atlas_glyph_count');
+  const atlasMisses = spike.atlas_miss_count ?? 0;
+  const atlasGrew = atlasMisses > 0 ? atlasMisses : delta('atlas_glyph_count');
   const nodeSwing = Math.max(Math.abs(delta('total')), Math.abs(delta('visible')));
   const glyphSwing = Math.abs(delta('glyph_count'));
   const meshSwing = Math.max(Math.abs(delta('scene3d_meshes_collected')), Math.abs(delta('scene3d_instances')));
@@ -819,6 +852,22 @@ export function classifySpike(record: FrameRecord | null, calm: Counters, spike:
       ['layout', record.layoutUs], ['other', otherUs],
     ];
     dominant = phases.sort((a, b) => b[1] - a[1])[0][0];
+  }
+
+  if (!countersReliable) {
+    if (caught && dominant === 'paint') {
+      return 'WHAT FIRED: PAINT SPIKE — latest frame caught the CPU paint cost, but owner counters were not trusted for this report.';
+    }
+    if (caught && dominant === 'gpu') {
+      return 'WHAT FIRED: GPU/PRESENT SPIKE — latest frame caught the GPU/present cost, but owner counters were not trusted for this report.';
+    }
+    if (caught && dominant === 'tick') {
+      return 'WHAT FIRED: TICK — latest frame caught JS/game logic cost, but owner counters were not trusted for this report.';
+    }
+    if (caught && dominant === 'other') {
+      return 'WHAT FIRED: GC / NATIVE — latest frame caught time outside render phases; owner counters were not trusted for this report.';
+    }
+    return 'WHAT FIRED: SPIKE IN HOST TAPE — worst frame already recovered before owner counters were sampled; do not attribute stale counter deltas to this spike.';
   }
 
   // A big node/glyph/mesh swing = a React update mounted/unmounted a subtree.
@@ -861,13 +910,55 @@ export function classifySpike(record: FrameRecord | null, calm: Counters, spike:
   return 'WHAT FIRED: UNCLEAR — spike likely already recovered; trust the deltas below over the phase line.';
 }
 
+function recentReconChurnLines(): string[] {
+  const dump = (globalThis as any).__RECON_CHURN_DUMP;
+  if (typeof dump !== 'function') return [];
+  let snapshots: unknown;
+  try { snapshots = dump(); } catch { return []; }
+  if (!Array.isArray(snapshots) || snapshots.length === 0) return [];
+  const now = Date.now();
+  const fresh = snapshots.filter((snap) => {
+    if (!snap || typeof snap !== 'object') return false;
+    const at = Number((snap as { at?: unknown }).at);
+    return Number.isFinite(at) && now - at <= 1200;
+  });
+  if (fresh.length === 0) return [];
+  const lines: string[] = [];
+  for (const snap of fresh.slice(-4)) {
+    if (!snap || typeof snap !== 'object') continue;
+    const s = snap as { commit?: unknown; events?: unknown; nodes?: unknown; glyphs?: unknown; parts?: unknown };
+    lines.push(`  commit=${String(s.commit ?? '?')} events=${String(s.events ?? '?')} nodes=${String(s.nodes ?? '?')} glyphs=${String(s.glyphs ?? '?')}`);
+    if (Array.isArray(s.parts)) {
+      for (const part of s.parts.slice(0, 4)) lines.push(`    ${String(part)}`);
+    }
+  }
+  return lines;
+}
+
+function readTextTrace(): string {
+  const gpu = readSnapshot('gpu');
+  const trace = gpu?.text_trace;
+  return typeof trace === 'string' ? trace : '';
+}
+
+function readStaticCaptureTrace(): string {
+  const gpu = readSnapshot('gpu');
+  const trace = gpu?.static_capture_trace;
+  return typeof trace === 'string' ? trace : '';
+}
+
 export type SpikeReportInput = {
   historyNewestFirstUs: number[];
   baselineUs: number;
   worstUs: number;
   calmCounters: Counters;
   spikeCounters: Counters;
+  counterFrameCaught?: boolean;
   record: FrameRecord | null;
+  calmTextTrace?: string;
+  spikeTextTrace?: string;
+  calmStaticCaptureTrace?: string;
+  spikeStaticCaptureTrace?: string;
   recorderFrames?: number;
 };
 
@@ -876,9 +967,10 @@ export type SpikeReportInput = {
  *  loop reads the host then hands everything here. */
 export function buildSpikeReport(input: SpikeReportInput): string[] {
   const { baselineUs, worstUs, calmCounters, spikeCounters, record } = input;
+  const counterFrameCaught = input.counterFrameCaught !== false;
   const lines: string[] = [];
   lines.push('──────── GAME PERF SPIKE ────────');
-  lines.push(classifySpike(record, calmCounters, spikeCounters));
+  lines.push(classifySpike(record, calmCounters, spikeCounters, { countersReliable: counterFrameCaught }));
   lines.push(
     `worst ${formatUs(worstUs)}  baseline ${formatUs(baselineUs)}  (+${formatUs(worstUs - baselineUs)}, ${baselineUs > 0 ? (worstUs / baselineUs).toFixed(2) : '?'}x)` +
       `  ~${baselineUs > 0 ? Math.round(1_000_000 / baselineUs) : 0}fps → ~${worstUs > 0 ? Math.round(1_000_000 / worstUs) : 0}fps`,
@@ -915,16 +1007,78 @@ export function buildSpikeReport(input: SpikeReportInput): string[] {
     moved.push(`${key} ${before}→${after} (${sign}${delta})`);
   }
   if (moved.length > 0) {
-    lines.push(`changed across spike: ${moved.join('  |  ')}`);
+    lines.push(`${counterFrameCaught ? 'changed across spike' : 'latest recovered-frame diff vs last clean frame'}: ${moved.join('  |  ')}`);
     if (
       calmCounters.frame_hash != null &&
       spikeCounters.frame_hash != null &&
       calmCounters.frame_hash !== spikeCounters.frame_hash
     ) {
-      lines.push('  ^ frame_hash flipped → 2D draw data changed → full GPU re-upload (a React update / StaticSurface rebake landed this frame).');
+      lines.push(
+        counterFrameCaught
+          ? '  ^ frame_hash flipped → 2D draw data changed → full GPU re-upload (a React update / StaticSurface rebake landed this frame).'
+          : '  ^ frame_hash differs on the recovered frame; this is NOT proof that the hash flip landed on the worst frame.',
+      );
     }
   } else {
-    lines.push('changed across spike: nothing in our counters moved → GC / native / GPU-driver hitch, not our JS or draw tree.');
+    lines.push(
+      counterFrameCaught
+        ? 'changed across spike: nothing in our counters moved → GC / native / GPU-driver hitch, not our JS or draw tree.'
+        : 'changed across spike: not captured — latest telemetry had already recovered, so owner counters were refreshed instead of attributed.',
+    );
+  }
+
+  const calmTextTrace = input.calmTextTrace ?? '';
+  const spikeTextTrace = input.spikeTextTrace ?? '';
+  if (counterFrameCaught && (calmTextTrace || spikeTextTrace)) {
+    if (calmTextTrace !== spikeTextTrace) {
+      lines.push('text trace changed across spike:');
+      if (calmTextTrace) lines.push(`  calm: ${calmTextTrace}`);
+      if (spikeTextTrace) lines.push(`  spike: ${spikeTextTrace}`);
+    } else if (
+      calmCounters.text_hash != null &&
+      spikeCounters.text_hash != null &&
+      calmCounters.text_hash !== spikeCounters.text_hash
+    ) {
+      lines.push(`text trace unchanged but text_hash flipped: ${spikeTextTrace}`);
+    }
+  }
+
+  const calmStaticCaptureTrace = input.calmStaticCaptureTrace ?? '';
+  const spikeStaticCaptureTrace = input.spikeStaticCaptureTrace ?? '';
+  if (counterFrameCaught && (calmStaticCaptureTrace || spikeStaticCaptureTrace)) {
+    if (calmStaticCaptureTrace !== spikeStaticCaptureTrace) {
+      lines.push('static capture trace changed across spike:');
+      if (calmStaticCaptureTrace) lines.push(`  calm: ${calmStaticCaptureTrace}`);
+      if (spikeStaticCaptureTrace) lines.push(`  spike: ${spikeStaticCaptureTrace}`);
+    } else if ((spikeCounters.static_capture_count ?? 0) > 0) {
+      lines.push(`static capture trace unchanged: ${spikeStaticCaptureTrace}`);
+    }
+  }
+
+  const atlasMisses = spikeCounters.atlas_miss_count ?? 0;
+  const atlasGrew = atlasMisses > 0
+    ? atlasMisses
+    : (spikeCounters.atlas_glyph_count ?? 0) - (calmCounters.atlas_glyph_count ?? 0);
+  const nodeSwing = Math.max(
+    Math.abs((spikeCounters.total ?? 0) - (calmCounters.total ?? 0)),
+    Math.abs((spikeCounters.visible ?? 0) - (calmCounters.visible ?? 0)),
+  );
+  const glyphSwing = Math.abs((spikeCounters.glyph_count ?? 0) - (calmCounters.glyph_count ?? 0));
+  const shouldAttachOwnerTrace =
+    counterFrameCaught &&
+    (
+      atlasGrew >= TELEMETRY_TUNING.classify.atlasGrowthAt ||
+      nodeSwing >= TELEMETRY_TUNING.classify.nodeSwingAt ||
+      glyphSwing >= TELEMETRY_TUNING.classify.glyphSwingAt
+    );
+  if (shouldAttachOwnerTrace) {
+    const churn = recentReconChurnLines();
+    if (churn.length > 0) {
+      lines.push(`recon owner trace (recent text/font-size mutations; atlas +${atlasGrew}, nodes ~${nodeSwing}, glyphs ${glyphSwing}):`);
+      lines.push(...churn);
+    } else {
+      lines.push(`recon owner trace: no recent records — run gv_churntrace 1 before waiting for the next CONTENT SWAP / GLYPH RASTERIZE spike.`);
+    }
   }
 
   // Flight-recorder tape: recent frame times newest-first, in ms, so the
@@ -944,6 +1098,27 @@ function emitLine(text: string): void {
 }
 
 let watchRunning = false;
+let activeSpikeWatchStop: (() => void) | null = null;
+
+export function configureSpikeWatch(patch: Partial<SpikeWatchConfig>): SpikeWatchConfig {
+  spikeWatchConfig = { ...spikeWatchConfig, ...patch };
+  gDiag.__hmsc_spike_watch_config = { ...spikeWatchConfig };
+  return { ...spikeWatchConfig };
+}
+
+export function spikeWatchStatusLine(enabled: boolean): string {
+  return (
+    `perflog = ${enabled ? '1' : '0'}  ` +
+    `spikeRatio ${spikeWatchConfig.spikeRatio}  minJump ${(spikeWatchConfig.minJumpUs / 1000).toFixed(2)}ms  ` +
+    `cooldown ${spikeWatchConfig.cooldownMs}ms  tape ${spikeWatchConfig.recorderFrames}`
+  );
+}
+
+export function stopSpikeWatch(): void {
+  gDiag.__hmsc_spike_watch_enabled = false;
+  gDiag.__hmsc_spike_watch_stop = undefined;
+  activeSpikeWatchStop?.();
+}
 
 /**
  * Start the spike flight recorder. Idempotent; returns a stop fn. Rides the
@@ -953,9 +1128,10 @@ let watchRunning = false;
  * GAME_COMMANDS registration the console route owns, not this module.
  */
 export function startSpikeWatch(patch: Partial<SpikeWatchConfig> = {}): () => void {
-  if (watchRunning) return () => {};
+  if (Object.keys(patch).length > 0) configureSpikeWatch(patch);
+  if (watchRunning) return activeSpikeWatchStop ?? (() => {});
   watchRunning = true;
-  const config: SpikeWatchConfig = { ...TELEMETRY_TUNING.spike, ...patch };
+  gDiag.__hmsc_spike_watch_enabled = true;
 
   const raf = globalThis.requestAnimationFrame as ((fn: () => void) => unknown) | undefined;
   const timeout = (globalThis as any).setTimeout as (((fn: () => void, ms: number) => unknown) | undefined);
@@ -974,12 +1150,23 @@ export function startSpikeWatch(patch: Partial<SpikeWatchConfig> = {}): () => vo
   let armed = false;
   let lastFlushAt = 0;
   let calmCounters = readCounters();
+  let calmTextTrace = readTextTrace();
+  let calmStaticCaptureTrace = readStaticCaptureTrace();
   const now = (): number => Date.now();
 
   const tick = () => {
     if (stopped) return;
+    const config = spikeWatchConfig;
     const history = readFrameHistory(config.historyFrames);
     const detection = detectSpike(history, config);
+    const latestRecord = readFrame();
+    const latestCaughtSpike =
+      latestRecord != null &&
+      detection.baselineUs > 0 &&
+      latestRecord.totalUs > detection.baselineUs * TELEMETRY_TUNING.spike.caughtRatio;
+    const latestCounters = readCounters();
+    const latestTextTrace = readTextTrace();
+    const latestStaticCaptureTrace = readStaticCaptureTrace();
     if (history.length >= TELEMETRY_TUNING.spike.minHistorySamples) {
       // One-shot heartbeat: confirms the recorder is sampling AND that warn-
       // level logs reach this terminal. Never see it → telemetry isn't wired
@@ -1000,8 +1187,13 @@ export function startSpikeWatch(patch: Partial<SpikeWatchConfig> = {}): () => vo
             baselineUs: detection.baselineUs,
             worstUs: detection.worstUs,
             calmCounters,
-            spikeCounters: readCounters(),
-            record: readFrame(),
+            spikeCounters: latestCounters,
+            counterFrameCaught: latestCaughtSpike,
+            calmTextTrace,
+            spikeTextTrace: latestTextTrace,
+            calmStaticCaptureTrace,
+            spikeStaticCaptureTrace: latestStaticCaptureTrace,
+            record: latestRecord,
             recorderFrames: config.recorderFrames,
           });
           recordDiagnostic('spikes', 'spike', {
@@ -1013,20 +1205,43 @@ export function startSpikeWatch(patch: Partial<SpikeWatchConfig> = {}): () => vo
           emitLine(lines.join('\n'));
           lastFlushAt = t;
         }
-      } else {
-        // Calm tick: keep a fresh pre-spike counter snapshot to diff against.
-        calmCounters = readCounters();
+      }
+      if (!detection.isSpike || !latestCaughtSpike) {
+        // Keep a fresh pre-spike snapshot whenever the latest frame is calm.
+        // The host history can still contain an old worst frame for a while;
+        // those recovered ticks must not keep reusing stale "calm" counters.
+        calmCounters = latestCounters;
+        calmTextTrace = latestTextTrace;
+        calmStaticCaptureTrace = latestStaticCaptureTrace;
       }
     }
     handle = schedule(tick);
   };
 
   handle = schedule(tick);
-  return () => {
+  const stop = () => {
     stopped = true;
     watchRunning = false;
+    activeSpikeWatchStop = null;
+    if (gDiag.__hmsc_spike_watch_stop === stop) gDiag.__hmsc_spike_watch_stop = undefined;
     (cancel as (h: unknown) => void)(handle);
   };
+  activeSpikeWatchStop = stop;
+  gDiag.__hmsc_spike_watch_stop = stop;
+  return stop;
+}
+
+const rehydrateSpikeWatch =
+  gDiag.__hmsc_spike_watch_enabled === true ||
+  diagnosticChannelEnabled('spikes') === true;
+if (rehydrateSpikeWatch) {
+  const timer = (globalThis as any).setTimeout;
+  const rearm = () => {
+    diagnosticEnabled.spikes = true;
+    startSpikeWatch();
+  };
+  if (typeof timer === 'function') timer(rearm, 0);
+  else rearm();
 }
 
 // ── Copy-diagnostics (the button's working half) ────────────────────────────
@@ -1108,7 +1323,10 @@ export const GAME_TELEMETRY = Object.freeze({
   detectSpike,
   classifySpike,
   buildSpikeReport,
+  configureSpikeWatch,
+  spikeWatchStatusLine,
   startSpikeWatch,
+  stopSpikeWatch,
   // runtime diagnostics channels (PERFLOG-0605)
   channels: DIAGNOSTIC_CHANNELS,
   isDiagnosticChannel,

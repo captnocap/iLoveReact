@@ -48,7 +48,19 @@ const FULL_WIRE: Record<string, unknown> = {
     total_drained_batches: 9,
     total_drained_bytes: 8192,
   }),
-  __tel_gpu: () => ({ frame_hash: 7, rect_count: 64, glyph_count: 210, zero_size: 999999, junk: 'no' }),
+  __tel_gpu: () => ({
+    frame_hash: 7,
+    rect_hash: 11,
+    text_hash: 13,
+    curves_hash: 17,
+    capsules_hash: 19,
+    polys_hash: 23,
+    rect_count: 64,
+    glyph_count: 210,
+    atlas_miss_count: 7,
+    zero_size: 999999,
+    junk: 'no',
+  }),
   __tel_nodes: () => ({ total: 41, visible: 38, hidden: 3 }),
   __tel_input: () => ({ active_count: 2, type_count: 5 }),
   __tel_history: (n: number) => Array.from({ length: Math.min(n, 8) }, () => 4200),
@@ -132,6 +144,8 @@ test('readCounters pulls exactly the diffable spec — zero_size stays out (cumu
   withHost(FULL_WIRE, () => {
     const counters = GAME_TELEMETRY.readCounters();
     assertEqual(counters.frame_hash, 7, 'gpu spec keys must land');
+    assertEqual(counters.text_hash, 13, 'per-pipeline hashes must land for no-React repaint attribution');
+    assertEqual(counters.atlas_miss_count, 7, 'per-frame atlas misses must land for exact glyph-raster attribution');
     assertEqual(counters.total, 41, 'nodes spec keys must land');
     assertEqual(counters.active_count, 2, 'input spec keys must land');
     assert(!('zero_size' in counters), 'zero_size is excluded on purpose — its delta is pure noise');
@@ -284,6 +298,63 @@ test('a report with nothing moved says so instead of printing an empty delta lis
     record: null,
   });
   assert(lines.join('\n').includes('nothing in our counters moved'), 'the dead-still case is named');
+});
+
+test('a recovered-frame report does not attribute stale counter deltas to the spike', () => {
+  const lines = GAME_TELEMETRY.buildSpikeReport({
+    historyNewestFirstUs: [4167, 4167, 15000, 4167],
+    baselineUs: 4167,
+    worstUs: 15000,
+    calmCounters: { frame_hash: 1, text_hash: 10, glyph_count: 972, atlas_glyph_count: 363 },
+    spikeCounters: { frame_hash: 2, text_hash: 11, glyph_count: 929, atlas_glyph_count: 370 },
+    counterFrameCaught: false,
+    record: caughtRecord({ totalUs: 4167, paintUs: 200, gpuUs: 3200 }),
+    calmTextTrace: 'sz=10 text="stable"',
+    spikeTextTrace: 'sz=10 text="stable"',
+  });
+  const text = lines.join('\n');
+  assert(text.includes('SPIKE IN HOST TAPE'), 'the headline must say the owner counters missed the worst frame');
+  assert(text.includes('latest recovered-frame diff vs last clean frame'), 'stale deltas may print only as recovered-frame context');
+  assert(text.includes('NOT proof'), 'hash-flip callout must be explicit about uncertainty');
+  assert(!text.includes('GLYPH RASTERIZE'), 'stale atlas deltas must not drive the verdict');
+  assert(!text.includes('text trace unchanged but text_hash flipped'), 'stale text trace must not spam owner-looking evidence');
+  assert(!text.includes('recon owner trace'), 'stale deltas must not attach owner trace');
+});
+
+test('recon owner trace attaches only fresh churn records, never stale self-noise', () => {
+  const report = (at: number) => GAME_TELEMETRY.buildSpikeReport({
+    historyNewestFirstUs: [5263, 4167],
+    baselineUs: 4167,
+    worstUs: 5263,
+    calmCounters: { atlas_glyph_count: 10 },
+    spikeCounters: { atlas_glyph_count: 17 },
+    record: null,
+  }).join('\n');
+  const g = globalThis as Record<string, unknown>;
+  const previous = g.__RECON_CHURN_DUMP;
+  try {
+    g.__RECON_CHURN_DUMP = () => [{
+      commit: 1,
+      at: Date.now(),
+      events: 1,
+      nodes: 7,
+      glyphs: 39,
+      parts: ['remove PlayRoute@unknown type=View count=1 detail=text="] ▌"|"help · ↑↓ history · PgUp/PgDn sc..."'],
+    }];
+    assert(report(Date.now()).includes('commit=1'), 'fresh churn can be attached to a matching spike');
+    g.__RECON_CHURN_DUMP = () => [{
+      commit: 1,
+      at: Date.now() - 5000,
+      events: 1,
+      nodes: 7,
+      glyphs: 39,
+      parts: ['remove PlayRoute@unknown type=View count=1 detail=text="] ▌"|"help · ↑↓ history · PgUp/PgDn sc..."'],
+    }];
+    assert(!report(Date.now()).includes('commit=1'), 'stale churn must not be reused for later spikes');
+  } finally {
+    if (previous === undefined) delete g.__RECON_CHURN_DUMP;
+    else g.__RECON_CHURN_DUMP = previous;
+  }
 });
 
 // ── copy-diagnostics ─────────────────────────────────────────────────────────

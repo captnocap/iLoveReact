@@ -122,6 +122,28 @@ var g_atlas_sampler: ?*wgpu.Sampler = null;
 var g_glyphs: [MAX_GLYPHS]GlyphInstance = undefined;
 var g_glyph_count: usize = 0;
 var g_last_glyph_count: usize = 0;
+var g_atlas_miss_count: usize = 0;
+var g_last_atlas_miss_count: usize = 0;
+
+const MAX_TEXT_TRACE_LINES = 128;
+const MAX_TEXT_TRACE_SAMPLE = 64;
+const MAX_TEXT_TRACE_SUMMARY = 12000;
+
+const TextTraceLine = struct {
+    hash: u64 = 0,
+    count: u16 = 0,
+    size_px: u16 = 0,
+    render_size_px: u16 = 0,
+    font_id: u8 = 0,
+    text_len: u16 = 0,
+    sample_len: u8 = 0,
+    sample: [MAX_TEXT_TRACE_SAMPLE]u8 = [_]u8{0} ** MAX_TEXT_TRACE_SAMPLE,
+};
+
+var g_text_trace: [MAX_TEXT_TRACE_LINES]TextTraceLine = [_]TextTraceLine{.{}} ** MAX_TEXT_TRACE_LINES;
+var g_text_trace_count: usize = 0;
+var g_last_text_trace_summary: [MAX_TEXT_TRACE_SUMMARY]u8 = [_]u8{0} ** MAX_TEXT_TRACE_SUMMARY;
+var g_last_text_trace_summary_len: usize = 0;
 
 // Inline glyph slot recording — filled by drawTextWrapped/drawTextLine,
 // read by engine.paintNode to render polygons into text slots.
@@ -220,6 +242,46 @@ pub fn setBold(b: bool) void {
 pub fn setFontFamily(id: u8) void {
     const idx: usize = @intCast(id);
     g_font_family_id = if (idx < MAX_FONT_FAMILIES and g_font_families[idx].regular != null) id else 0;
+}
+
+fn recordTextTrace(text: []const u8, size_px: u16, render_size_px: u16) void {
+    if (text.len == 0) return;
+    var hasher = std.hash.Wyhash.init(0);
+    hasher.update(text);
+    var meta: [5]u8 = .{
+        @intCast(size_px & 0xff),
+        @intCast((size_px >> 8) & 0xff),
+        @intCast(render_size_px & 0xff),
+        @intCast((render_size_px >> 8) & 0xff),
+        activeFontId(),
+    };
+    hasher.update(&meta);
+    const hash = hasher.final();
+
+    for (0..g_text_trace_count) |i| {
+        if (g_text_trace[i].hash == hash) {
+            if (g_text_trace[i].count < std.math.maxInt(u16)) g_text_trace[i].count += 1;
+            return;
+        }
+    }
+    if (g_text_trace_count >= MAX_TEXT_TRACE_LINES) return;
+
+    var line = TextTraceLine{
+        .hash = hash,
+        .count = 1,
+        .size_px = size_px,
+        .render_size_px = render_size_px,
+        .font_id = activeFontId(),
+        .text_len = @intCast(@min(text.len, std.math.maxInt(u16))),
+    };
+    const n = @min(text.len, MAX_TEXT_TRACE_SAMPLE);
+    for (0..n) |i| {
+        const b = text[i];
+        line.sample[i] = if (b == '\n' or b == '\r' or b == '\t') ' ' else b;
+    }
+    line.sample_len = @intCast(n);
+    g_text_trace[g_text_trace_count] = line;
+    g_text_trace_count += 1;
 }
 
 /// Pick the right face for the active weight and ensure its FreeType pixel
@@ -415,6 +477,7 @@ pub fn drawTextLine(text: []const u8, x: f32, y: f32, size_px: u16, cr: f32, cg:
         @intFromFloat(@max(4, @min(200, @round(effective_size))))
     else
         size_px;
+    recordTextTrace(text, size_px, render_size);
 
     const face = activeFace(render_size);
     const ascent: f32 = @as(f32, @floatFromInt(face.*.size.*.metrics.ascender)) / 64.0;
@@ -1050,10 +1113,48 @@ pub fn lastCount() usize {
     return g_last_glyph_count;
 }
 
+/// Number of glyph atlas cache misses in the last completed frame.
+pub fn lastAtlasMissCount() usize {
+    return g_last_atlas_miss_count;
+}
+
 /// Reset for next frame.
 pub fn reset() void {
     g_last_glyph_count = g_glyph_count;
+    g_last_atlas_miss_count = g_atlas_miss_count;
+    var stream = std.io.fixedBufferStream(&g_last_text_trace_summary);
+    var writer = stream.writer();
+    var wrote_any = false;
+    for (g_text_trace[0..g_text_trace_count]) |line| {
+        if (wrote_any) writer.writeAll(" | ") catch break;
+        if (line.render_size_px != line.size_px) {
+            writer.print("sz={d} render={d} font={d} n={d} bytes={d} text=\"{s}\"", .{
+                line.size_px,
+                line.render_size_px,
+                line.font_id,
+                line.count,
+                line.text_len,
+                line.sample[0..line.sample_len],
+            }) catch break;
+        } else {
+            writer.print("sz={d} font={d} n={d} bytes={d} text=\"{s}\"", .{
+                line.size_px,
+                line.font_id,
+                line.count,
+                line.text_len,
+                line.sample[0..line.sample_len],
+            }) catch break;
+        }
+        wrote_any = true;
+    }
+    g_last_text_trace_summary_len = stream.pos;
     g_glyph_count = 0;
+    g_atlas_miss_count = 0;
+    g_text_trace_count = 0;
+}
+
+pub fn lastTraceSummary() []const u8 {
+    return g_last_text_trace_summary[0..g_last_text_trace_summary_len];
 }
 
 /// Hash the current glyph instance data for dirty checking.
@@ -1235,6 +1336,7 @@ fn cacheGlyph(codepoint: u32, size_px: u16) ?*const AtlasGlyphInfo {
         }
     }
     if (g_atlas_count >= MAX_ATLAS_GLYPHS) return null;
+    g_atlas_miss_count += 1;
 
     // DIAG: reaching here is a cache MISS — about to FreeType-rasterize a
     // (codepoint, size_px, font) never seen before. After warmup this should be

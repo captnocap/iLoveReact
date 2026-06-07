@@ -132,50 +132,115 @@ const vterm_mod = if (HAS_TERMINAL) @import("terminal/vterm.zig") else struct {
     pub const Pipe = struct {};
     pub const MAX_TERMINALS: u8 = 16;
     pub const DEFAULT_SESSION: []const u8 = "default";
-    pub fn pipeCount() usize { return 0; }
-    pub fn getPipe(_: []const u8) ?*Pipe { return null; }
-    pub fn copySelectedTextByName(_: []const u8, _: u16, _: u16, _: u16, _: u16, _: []u8) usize { return 0; }
-    pub fn getCellByName(_: []const u8, _: u16, _: u16) Cell { return .{}; }
-    pub fn getColsByName(_: []const u8) u16 { return 0; }
-    pub fn getCursorColByName(_: []const u8) u16 { return 0; }
-    pub fn getCursorRowByName(_: []const u8) u16 { return 0; }
-    pub fn getCursorVisibleByName(_: []const u8) bool { return false; }
-    pub fn getMouseModeByName(_: []const u8) c_int { return 0; }
-    pub fn getRowsByName(_: []const u8) u16 { return 0; }
-    pub fn getRowTextByName(_: []const u8, _: u16) []const u8 { return ""; }
-    pub fn scrollbackCellByName(_: []const u8, _: u16, _: u16) Cell { return .{}; }
-    pub fn pollPtyByName(_: []const u8) bool { return false; }
+    pub fn pipeCount() usize {
+        return 0;
+    }
+    pub fn getPipe(_: []const u8) ?*Pipe {
+        return null;
+    }
+    pub fn copySelectedTextByName(_: []const u8, _: u16, _: u16, _: u16, _: u16, _: []u8) usize {
+        return 0;
+    }
+    pub fn getCellByName(_: []const u8, _: u16, _: u16) Cell {
+        return .{};
+    }
+    pub fn getColsByName(_: []const u8) u16 {
+        return 0;
+    }
+    pub fn getCursorColByName(_: []const u8) u16 {
+        return 0;
+    }
+    pub fn getCursorRowByName(_: []const u8) u16 {
+        return 0;
+    }
+    pub fn getCursorVisibleByName(_: []const u8) bool {
+        return false;
+    }
+    pub fn getMouseModeByName(_: []const u8) c_int {
+        return 0;
+    }
+    pub fn getRowsByName(_: []const u8) u16 {
+        return 0;
+    }
+    pub fn getRowTextByName(_: []const u8, _: u16) []const u8 {
+        return "";
+    }
+    pub fn scrollbackCellByName(_: []const u8, _: u16, _: u16) Cell {
+        return .{};
+    }
+    pub fn pollPtyByName(_: []const u8) bool {
+        return false;
+    }
     pub fn resizeByName(_: []const u8, _: u16, _: u16) void {}
     pub fn scrollDownByName(_: []const u8, _: u16) void {}
-    pub fn scrollOffsetByName(_: []const u8) u16 { return 0; }
+    pub fn scrollOffsetByName(_: []const u8) u16 {
+        return 0;
+    }
     pub fn scrollToBottomByName(_: []const u8) void {}
     pub fn scrollUpByName(_: []const u8, _: u16) void {}
     pub fn spawnShellByName(_: []const u8, _: [*:0]const u8, _: u16, _: u16) void {}
     pub fn writePtyByName(_: []const u8, _: []const u8) void {}
-    pub fn ptyAliveByName(_: []const u8) bool { return false; }
-    pub fn ensurePipe(_: []const u8, _: u16, _: u16) ?*Pipe { return null; }
-    pub fn hasDamageByName(_: []const u8) bool { return false; }
+    pub fn ptyAliveByName(_: []const u8) bool {
+        return false;
+    }
+    pub fn ensurePipe(_: []const u8, _: u16, _: u16) ?*Pipe {
+        return null;
+    }
+    pub fn hasDamageByName(_: []const u8) bool {
+        return false;
+    }
     pub fn clearDamageByName(_: []const u8) void {}
 };
 
 const classifier = if (HAS_TERMINAL) @import("terminal/classifier.zig") else struct {
     pub const Token = enum(u8) {
-        output, command, @"error", success, heading, separator, progress,
-        user_prompt, user_text, assistant_text, thinking, thought_complete,
-        tool, result, diff,
-        banner, status_bar, box_drawing, input_border, input_zone,
-        permission, menu_title, menu_option, menu_desc, hint,
-        task_done, task_active, task_open, task_summary,
+        output,
+        command,
+        @"error",
+        success,
+        heading,
+        separator,
+        progress,
+        user_prompt,
+        user_text,
+        assistant_text,
+        thinking,
+        thought_complete,
+        tool,
+        result,
+        diff,
+        banner,
+        status_bar,
+        box_drawing,
+        input_border,
+        input_zone,
+        permission,
+        menu_title,
+        menu_option,
+        menu_desc,
+        hint,
+        task_done,
+        task_active,
+        task_open,
+        task_summary,
         text,
     };
     pub const Mode = enum { none, basic, claude_code, json };
-    pub fn tokenColor(_: Token) layout.Color { return .{}; }
-    pub fn getModeByName(_: []const u8) Mode { return .none; }
+    pub fn tokenColor(_: Token) layout.Color {
+        return .{};
+    }
+    pub fn getModeByName(_: []const u8) Mode {
+        return .none;
+    }
     pub fn setModeByName(_: []const u8, _: Mode) void {}
     pub fn markDirtyByName(_: []const u8) void {}
-    pub fn isDirtyByName(_: []const u8) bool { return false; }
+    pub fn isDirtyByName(_: []const u8) bool {
+        return false;
+    }
     pub fn clearDirtyByName(_: []const u8) void {}
-    pub fn getRowTokenByName(_: []const u8, _: u16) Token { return .text; }
+    pub fn getRowTokenByName(_: []const u8, _: u16) Token {
+        return .text;
+    }
     pub fn classifyAndCacheByName(_: []const u8, _: u16, _: []const u8, _: u16) void {}
 };
 
@@ -1868,10 +1933,16 @@ fn paintNode(node: *Node) void {
             var i: usize = 0;
             while (i + 5 < gd.len) : (i += 6) {
                 gpu.gcurve_fill.drawGCurveFill(
-                    gd[i], gd[i + 1],
-                    gd[i + 2], gd[i + 3],
-                    gd[i + 4], gd[i + 5],
-                    r, g, b, a,
+                    gd[i],
+                    gd[i + 1],
+                    gd[i + 2],
+                    gd[i + 3],
+                    gd[i + 4],
+                    gd[i + 5],
+                    r,
+                    g,
+                    b,
+                    a,
                 );
             }
         }
@@ -1896,10 +1967,16 @@ fn paintNode(node: *Node) void {
                 var i: usize = 2;
                 while (i + 3 < pts.len) : (i += 2) {
                     gpu.polys.drawTri(
-                        x0, y0,
-                        pts[i], pts[i + 1],
-                        pts[i + 2], pts[i + 3],
-                        r, g, b, a,
+                        x0,
+                        y0,
+                        pts[i],
+                        pts[i + 1],
+                        pts[i + 2],
+                        pts[i + 3],
+                        r,
+                        g,
+                        b,
+                        a,
                     );
                 }
             }
@@ -1932,7 +2009,11 @@ fn paintNode(node: *Node) void {
         if (gpu.sdf_icons.lookup(name)) |uv| {
             const tc = node.text_color orelse Color.rgb(255, 255, 255);
             gpu.sdf_icons.queueIcon(
-                r.x, r.y, r.w, r.h, uv,
+                r.x,
+                r.y,
+                r.w,
+                r.h,
+                uv,
                 @as(f32, @floatFromInt(tc.r)) / 255.0,
                 @as(f32, @floatFromInt(tc.g)) / 255.0,
                 @as(f32, @floatFromInt(tc.b)) / 255.0,
@@ -2288,11 +2369,23 @@ fn paintRectBatch(node: *Node) void {
             if (o + 13 >= data.len) break;
             const rad = data[o + 8];
             gpu.drawRectCorners(
-                r.x + data[o], r.y + data[o + 1], data[o + 2], data[o + 3],
-                data[o + 4], data[o + 5], data[o + 6], data[o + 7] * g_paint_opacity,
-                rad, rad, rad, rad,
+                r.x + data[o],
+                r.y + data[o + 1],
+                data[o + 2],
+                data[o + 3],
+                data[o + 4],
+                data[o + 5],
+                data[o + 6],
+                data[o + 7] * g_paint_opacity,
+                rad,
+                rad,
+                rad,
+                rad,
                 data[o + 9],
-                data[o + 10], data[o + 11], data[o + 12], data[o + 13] * g_paint_opacity,
+                data[o + 10],
+                data[o + 11],
+                data[o + 12],
+                data[o + 13] * g_paint_opacity,
             );
         }
         return;
@@ -2315,12 +2408,18 @@ fn emitNodeRect(node: *Node) void {
             if (bg.a > 0) {
                 const bc = node.style.border_color orelse Color.rgb(0, 0, 0);
                 gpu.drawRectCorners(
-                    r.x, r.y, r.w, r.h,
+                    r.x,
+                    r.y,
+                    r.w,
+                    r.h,
                     @as(f32, @floatFromInt(bg.r)) / 255.0,
                     @as(f32, @floatFromInt(bg.g)) / 255.0,
                     @as(f32, @floatFromInt(bg.b)) / 255.0,
                     @as(f32, @floatFromInt(bg.a)) / 255.0 * g_paint_opacity,
-                    node.style.radiusTL(), node.style.radiusTR(), node.style.radiusBR(), node.style.radiusBL(),
+                    node.style.radiusTL(),
+                    node.style.radiusTR(),
+                    node.style.radiusBR(),
+                    node.style.radiusBL(),
                     node.style.brdTop(),
                     @as(f32, @floatFromInt(bc.r)) / 255.0,
                     @as(f32, @floatFromInt(bc.g)) / 255.0,
@@ -2331,9 +2430,18 @@ fn emitNodeRect(node: *Node) void {
         } else if (node.style.border_color) |bc| {
             if (node.style.brdTop() > 0 and bc.a > 0) {
                 gpu.drawRectCorners(
-                    r.x, r.y, r.w, r.h,
-                    0, 0, 0, 0,
-                    node.style.radiusTL(), node.style.radiusTR(), node.style.radiusBR(), node.style.radiusBL(),
+                    r.x,
+                    r.y,
+                    r.w,
+                    r.h,
+                    0,
+                    0,
+                    0,
+                    0,
+                    node.style.radiusTL(),
+                    node.style.radiusTR(),
+                    node.style.radiusBR(),
+                    node.style.radiusBL(),
                     node.style.brdTop(),
                     @as(f32, @floatFromInt(bc.r)) / 255.0,
                     @as(f32, @floatFromInt(bc.g)) / 255.0,
@@ -4750,6 +4858,25 @@ pub fn run(config_in: AppConfig) !void {
                 std.debug.print("[host-spike] frame={d} total={d}us cpu={d} tick={d} layout={d} paint={d} gpu={d} other={d}\n", .{
                     gpu.frameCounter(), frame_total_i, cpu_i, t1 - t0, t3 - t2, t5 - t4, gpu_i, other_i,
                 });
+                const gpu_stats = gpu.telemetryStats();
+                std.debug.print("[host-spike-gpu] frame={d} rects={d} glyphs={d} atlas={d} atlas_miss={d} static_caps={d} frame_hash={d} rect_hash={d} text_hash={d} drain={d}\n", .{
+                    gpu.frameCounter(),
+                    gpu_stats.rect_count,
+                    gpu_stats.glyph_count,
+                    gpu_stats.atlas_glyph_count,
+                    gpu_stats.atlas_miss_count,
+                    gpu_stats.static_capture_count,
+                    gpu_stats.frame_hash,
+                    gpu_stats.rect_hash,
+                    gpu_stats.text_hash,
+                    gpu_stats.frames_since_drain,
+                });
+                if (gpu_stats.text_trace.len > 0) {
+                    std.debug.print("[host-spike-text] frame={d} {s}\n", .{ gpu.frameCounter(), gpu_stats.text_trace });
+                }
+                if (gpu_stats.static_capture_trace.len > 0) {
+                    std.debug.print("[host-spike-capture] frame={d} {s}\n", .{ gpu.frameCounter(), gpu_stats.static_capture_trace });
+                }
             }
         }
 

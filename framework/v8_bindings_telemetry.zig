@@ -13,8 +13,6 @@ const sqlite_mod = @import("storage/sqlite.zig");
 const pty_mod = @import("terminal/pty.zig");
 const canvas_mod = @import("primitive/canvas.zig");
 
-
-
 const MAX_PTYS: usize = 16;
 var g_ptys: [MAX_PTYS]?pty_mod.Pty = .{null} ** MAX_PTYS;
 var g_active_pty_handle: u8 = 0;
@@ -211,6 +209,7 @@ fn telGpuCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "rect_capacity", s.rect_capacity);
     setObjectNumber(ctx, obj, "glyph_capacity", s.glyph_capacity);
     setObjectNumber(ctx, obj, "atlas_glyph_count", s.atlas_glyph_count);
+    setObjectNumber(ctx, obj, "atlas_miss_count", s.atlas_miss_count);
     setObjectNumber(ctx, obj, "atlas_capacity", s.atlas_capacity);
     setObjectNumber(ctx, obj, "atlas_row_x", s.atlas_row_x);
     setObjectNumber(ctx, obj, "atlas_row_y", s.atlas_row_y);
@@ -219,6 +218,14 @@ fn telGpuCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setObjectNumber(ctx, obj, "gpu_surface_w", s.gpu_surface_w);
     setObjectNumber(ctx, obj, "gpu_surface_h", s.gpu_surface_h);
     setObjectNumber(ctx, obj, "frame_hash", s.frame_hash);
+    setObjectNumber(ctx, obj, "rect_hash", s.rect_hash);
+    setObjectNumber(ctx, obj, "text_hash", s.text_hash);
+    setObjectNumber(ctx, obj, "curves_hash", s.curves_hash);
+    setObjectNumber(ctx, obj, "capsules_hash", s.capsules_hash);
+    setObjectNumber(ctx, obj, "polys_hash", s.polys_hash);
+    setObjectString(ctx, obj, "text_trace", s.text_trace);
+    setObjectNumber(ctx, obj, "static_capture_count", s.static_capture_count);
+    setObjectString(ctx, obj, "static_capture_trace", s.static_capture_trace);
     setObjectNumber(ctx, obj, "frames_since_drain", s.frames_since_drain);
     setObjectNumber(ctx, obj, "scene3d_scene_count", s.scene3d_scene_count);
     setObjectNumber(ctx, obj, "scene3d_mesh_children", s.scene3d_mesh_children);
@@ -663,7 +670,7 @@ fn ptyCwdCb(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     if (handle > 0 and @as(usize, @intCast(handle - 1)) < MAX_PTYS) {
         if (g_ptys[@intCast(handle - 1)]) |*p| {
             var path_buf: [64]u8 = undefined;
-            const path = std.fmt.bufPrint(&path_buf, "/proc/{d}/cwd", .{ p.pid }) catch {
+            const path = std.fmt.bufPrint(&path_buf, "/proc/{d}/cwd", .{p.pid}) catch {
                 setStringReturn(info, "");
                 return;
             };

@@ -15,7 +15,7 @@
 // Face skins show a SWATCH OF WHAT IT IS — a live mini-render of the real facade
 // (office glass / residential brick / plain wall). Pick a face, then a skin.
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Box, ScrollView, Text, Graph, Pressable, StaticSurface } from '@reactjit/primitives';
 import type { Building, BuildingSkin, GameState, TileKind, WorldProp } from '../hmsc/design';
 import { tileKindDefinition } from '../hmsc/world/tileKinds';
@@ -54,6 +54,8 @@ const clampN = (n: number, lo?: number, hi?: number) =>
 
 const NEUTRAL_PERCEPTION = { high: 0 };
 const TRACK_W = 60;
+const PROPERTIES_SCROLL_STYLE = { flexGrow: 1, height: '100%' };
+const PROPERTIES_SCROLL_CONTENT_STYLE = { paddingBottom: 14 };
 
 function fmt(v: unknown): string {
   if (typeof v === 'boolean') return v ? 'yes' : 'no';
@@ -151,13 +153,19 @@ function FrictionGauge({ v }: { v: number }) {
   const t = clamp01(v), W = 50, H = 28, cx = W / 2, cy = H - 4, r = 19;
   const ang = Math.PI * (1 - t);
   const zone = t < 0.4 ? accentFor('error') : t < 0.7 ? accentFor('warning') : accentFor('success');
+  const trackPoints = useMemo(() => arcPts(cx, cy, r, Math.PI, 0), [cx, cy, r]);
+  const valuePoints = useMemo(() => arcPts(cx, cy, r, Math.PI, ang), [cx, cy, r, ang]);
+  const needlePoints = useMemo(
+    () => [cx, cy, cx + Math.cos(ang) * r * 0.82, cy - Math.sin(ang) * r * 0.82],
+    [cx, cy, r, ang],
+  );
   return (
     <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
       <StaticSurface staticKey={`gauge-fric:${t.toFixed(3)}`} style={{ width: W, height: H }}>
         <Graph style={{ width: W, height: H }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-          <Graph.Polyline points={arcPts(cx, cy, r, Math.PI, 0)} stroke={accentFor('track')} strokeWidth={3} />
-          <Graph.Polyline points={arcPts(cx, cy, r, Math.PI, ang)} stroke={zone} strokeWidth={3} />
-          <Graph.Polyline points={[cx, cy, cx + Math.cos(ang) * r * 0.82, cy - Math.sin(ang) * r * 0.82]} stroke={accentFor('knob')} strokeWidth={1.5} />
+          <Graph.Polyline points={trackPoints} stroke={accentFor('track')} strokeWidth={3} />
+          <Graph.Polyline points={valuePoints} stroke={zone} strokeWidth={3} />
+          <Graph.Polyline points={needlePoints} stroke={accentFor('knob')} strokeWidth={1.5} />
         </Graph>
       </StaticSurface>
       <C.SliderValue>{v.toFixed(2)}</C.SliderValue>
@@ -168,21 +176,32 @@ function FrictionGauge({ v }: { v: number }) {
 // profile radar — the tile's character at a glance (5 gameplay axes)
 function ProfileRadar({ axes }: { axes: { label: string; v: number }[] }) {
   const S = 84, CX = S / 2, CY = S / 2, R = S / 2 - 15, N = axes.length;
-  const vals = axes.map((a) => a.v);
+  const labelsKey = axes.map((a) => a.label).join('|');
+  const valsKey = axes.map((a) => clamp01(a.v).toFixed(2)).join(',');
+  const vals = useMemo(() => axes.map((a) => a.v), [valsKey]);
   const grid = accentFor('borderSoft'), spoke = accentFor('track'), line = accentFor('primary');
   const fill = accentFor('primary') + '44', dim = accentFor('textFaint');
   // The whole web (3 rings + N spokes + fill polygon + outline) is per-segment
   // capsule/poly geometry — baked to a quad via StaticSurface keyed on the axis
   // values, so it only re-rasterises when the profile changes, not per frame.
-  const radarKey = `radar:${vals.map((v) => clamp01(v).toFixed(2)).join(',')}`;
+  const radarKey = `radar:${valsKey}`;
+  const gridRings = useMemo(
+    () => [0.34, 0.67, 1].map((g) => ({ key: g, points: radarRing(CX, CY, R, new Array(N).fill(g)) })),
+    [CX, CY, R, N],
+  );
+  const spokes = useMemo(
+    () => axes.map((axis, i) => ({ key: axis.label, points: radarSpoke(CX, CY, R, i, N) })),
+    [labelsKey, CX, CY, R, N],
+  );
+  const valueRing = useMemo(() => radarRing(CX, CY, R, vals), [CX, CY, R, vals]);
   return (
     <Box style={{ width: S, height: S, position: 'relative' }}>
       <StaticSurface staticKey={radarKey} style={{ width: S, height: S }}>
         <Graph style={{ width: S, height: S }} viewX={0} viewY={0} viewZoom={1} originTopLeft>
-          {[0.34, 0.67, 1].map((g) => <Graph.Polyline key={g} points={radarRing(CX, CY, R, new Array(N).fill(g))} stroke={grid} strokeWidth={1} />)}
-          {axes.map((_, i) => <Graph.Polyline key={i} points={radarSpoke(CX, CY, R, i, N)} stroke={spoke} strokeWidth={1} />)}
-          <Graph.Polygon points={radarRing(CX, CY, R, vals)} fill={fill} />
-          <Graph.Polyline points={radarRing(CX, CY, R, vals)} stroke={line} strokeWidth={1.5} />
+          {gridRings.map((g) => <Graph.Polyline key={g.key} points={g.points} stroke={grid} strokeWidth={1} />)}
+          {spokes.map((s) => <Graph.Polyline key={s.key} points={s.points} stroke={spoke} strokeWidth={1} />)}
+          <Graph.Polygon points={valueRing} fill={fill} />
+          <Graph.Polyline points={valueRing} stroke={line} strokeWidth={1.5} />
         </Graph>
       </StaticSurface>
       {axes.map((a, i) => {
@@ -708,7 +727,7 @@ export function PropertiesPanel(props: {
   return (
     <C.StudioBg>
       <C.StatusBar><C.StatusKicker>PROPERTIES</C.StatusKicker></C.StatusBar>
-      <ScrollView style={{ flexGrow: 1, height: '100%' }} contentContainerStyle={{ paddingBottom: 14 }}>
+      <ScrollView style={PROPERTIES_SCROLL_STYLE} contentContainerStyle={PROPERTIES_SCROLL_CONTENT_STYLE}>
         {body}
       </ScrollView>
     </C.StudioBg>
