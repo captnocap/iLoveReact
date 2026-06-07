@@ -11,6 +11,7 @@ import { editorSessions, type RouteSession } from '../../sessions';
 import { readRouteTwigState, writeRouteTwigState } from '../../twigs';
 import { createPaintHistory } from '../../paint/history';
 import { PAINT_EDITOR_TUNING, type SculptMode } from '../../characters/paintKit';
+import { SMOOTH_TUNING } from '../../characters/smoothKit';
 import {
   ITEM_DRAFT_DEFAULTS, bakeBlockoutToGlobe, emptyItemGrid, itemGlobeParams,
 } from '../../items/bake';
@@ -18,18 +19,29 @@ import {
   itemsStream, mintItemId, type ItemsEvent, type ItemsStreamState, type SculptedItemDoc,
 } from '../../items/stream';
 import {
-  voxelsStream, type VoxelBlockKind, type VoxelBlockoutDoc, type VoxelBlockSnap, type VoxelsEvent, type VoxelsStreamState,
+  VOXEL_BLOCKOUT_TUNING, normalizeVoxelCellSizeMeters, voxelsStream,
+  type VoxelBlockKind, type VoxelBlockoutDoc, type VoxelBlockSnap, type VoxelsEvent, type VoxelsStreamState,
 } from '../../voxels/stream';
+import { GAME_ITEMS, type ItemDefinition } from '../../../game/items';
 
 const GRID_W = PAINT_EDITOR_TUNING.grid.width;
 const GRID_H = PAINT_EDITOR_TUNING.grid.height;
 const AUTOSAVE_MS = PAINT_EDITOR_TUNING.autosaveDebounceMs;
 const TWIG_ROUTE = '/workbench/items';
+const GAME_ITEM_ROSTER_PREFIX = 'game:';
+const STREAM_ITEM_ROSTER_PREFIX = 'stream:';
+export const WORKING_ITEM_ROSTER_ID = '__working_item__';
 
 export const ITEM_KNOBS = Object.freeze({
   radius: { min: 0.1, max: 4, step: 0.05, precision: 2 },
   amount: { min: 0.05, max: 3, step: 0.05, precision: 2 },
   dims: { min: 1, max: 20, step: 1, precision: 0 },
+  cellSize: {
+    min: VOXEL_BLOCKOUT_TUNING.minCellSizeMeters,
+    max: VOXEL_BLOCKOUT_TUNING.maxCellSizeMeters,
+    step: VOXEL_BLOCKOUT_TUNING.cellSizeStepMeters,
+    precision: 2,
+  },
   brush: PAINT_EDITOR_TUNING.knobs.brush,
   strength: PAINT_EDITOR_TUNING.knobs.strength,
 });
@@ -54,6 +66,13 @@ export type ItemDraft = {
   grid: number[];
   color: string;
   source: SculptedItemDoc['source'];
+};
+
+type AutoBakeBase = {
+  radius: number;
+  amount: number;
+  grid: number[];
+  source: NonNullable<SculptedItemDoc['source']>;
 };
 
 export type TwigAdapter = {
@@ -100,6 +119,22 @@ export function emptyItemDraft(): ItemDraft {
   };
 }
 
+export function gameItemRosterId(id: string): string {
+  return `${GAME_ITEM_ROSTER_PREFIX}${id}`;
+}
+
+export function gameItemIdFromRosterId(id: string): string | null {
+  return id.startsWith(GAME_ITEM_ROSTER_PREFIX) ? id.slice(GAME_ITEM_ROSTER_PREFIX.length) : null;
+}
+
+export function streamItemRosterId(id: string): string {
+  return `${STREAM_ITEM_ROSTER_PREFIX}${id}`;
+}
+
+export function streamItemIdFromRosterId(id: string): string {
+  return id.startsWith(STREAM_ITEM_ROSTER_PREFIX) ? id.slice(STREAM_ITEM_ROSTER_PREFIX.length) : id;
+}
+
 export function draftToItemDoc(draft: ItemDraft, name: string): SculptedItemDoc {
   return {
     kind: 'sculpted-item',
@@ -132,8 +167,19 @@ function cloneDraft(draft: ItemDraft): ItemDraft {
     amount: draft.amount,
     grid: draft.grid.slice(),
     color: draft.color,
-    source: draft.source ? { blocks: draft.source.blocks, dims: { ...draft.source.dims } } : null,
+    source: draft.source ? { blocks: draft.source.blocks, dims: { ...draft.source.dims }, cellSizeMeters: draft.source.cellSizeMeters } : null,
   };
+}
+
+function cloneAutoBakeBase(base: AutoBakeBase | null): AutoBakeBase | null {
+  return base
+    ? {
+      radius: base.radius,
+      amount: base.amount,
+      grid: base.grid.slice(),
+      source: { blocks: base.source.blocks, dims: { ...base.source.dims }, cellSizeMeters: base.source.cellSizeMeters },
+    }
+    : null;
 }
 
 function clamp(n: number, lo: number, hi: number): number {
@@ -225,9 +271,10 @@ export function detectVoxelFaceGroups(blocks: WorkbenchVoxelBlock[]): VoxelFaceG
   return groups.sort((a, b) => b.cells.length - a.cells.length || a.id.localeCompare(b.id));
 }
 
-export function voxelDocFromState(dims: VoxelDims, custom: WorkbenchVoxelBlock[]): VoxelBlockoutDoc {
+export function voxelDocFromState(dims: VoxelDims, custom: WorkbenchVoxelBlock[], cellSizeMeters = VOXEL_BLOCKOUT_TUNING.defaultCellSizeMeters): VoxelBlockoutDoc {
   return {
     dims: { ...dims },
+    cellSizeMeters: normalizeVoxelCellSizeMeters(cellSizeMeters),
     blocks: custom.map((b) => ({ id: b.id, x: b.x, y: b.y, z: b.z, kind: b.kind })),
   };
 }
@@ -255,6 +302,8 @@ export function createItemStore(deps: ItemStoreDeps) {
   let draft = emptyItemDraft();
   let draftId: string | null = null;
   let draftName = 'new item';
+  let selectedGameItemId: string | null = null;
+  let workingDraftVisible = false;
   let status: string | null = deps.error ? `store unavailable: ${deps.error}` : null;
   let rosterRev = 0;
   let seq = 0;
@@ -265,6 +314,7 @@ export function createItemStore(deps: ItemStoreDeps) {
     mirror: twigRead('mirror', false),
     brush: twigRead('brush', 14),
     strength: twigRead('strength', 0.5),
+    smoothIterations: twigRead('smoothIterations', SMOOTH_TUNING.action.iterations),
     showGrabGrid: twigRead('showGrabGrid', true),
     voxelTool: twigRead<VoxelTool>('voxelTool', 'build'),
     voxelKind: twigRead<VoxelBlockKind>('voxelKind', 'wall'),
@@ -273,7 +323,9 @@ export function createItemStore(deps: ItemStoreDeps) {
     selectedGroupId: twigRead<string | null>('selectedGroupId', null),
   };
   let voxelDims: VoxelDims = deps.voxels?.state().doc?.dims ?? { w: 5, d: 6, h: 7 };
+  let voxelCellSizeMeters = normalizeVoxelCellSizeMeters(deps.voxels?.state().doc?.cellSizeMeters);
   let voxelCustom: WorkbenchVoxelBlock[] = deps.voxels?.state().doc?.blocks.map((b) => ({ ...b })) ?? [];
+  let autoBakeBase: AutoBakeBase | null = null;
 
   const listeners = new Set<() => void>();
   const emit = () => { for (const fn of [...listeners]) fn(); };
@@ -298,8 +350,8 @@ export function createItemStore(deps: ItemStoreDeps) {
   };
   const flushVoxelAutosave = () => {
     if (!deps.voxelSession) return;
-    const doc = voxelDocFromState(voxelDims, voxelCustom);
-    deps.voxelSession.commit({ kind: 'authored', doc }, `autosave · ${doc.blocks.length} blocks · ${doc.dims.w}x${doc.dims.d}x${doc.dims.h}`);
+    const doc = voxelDocFromState(voxelDims, voxelCustom, voxelCellSizeMeters);
+    deps.voxelSession.commit({ kind: 'authored', doc }, `autosave · ${doc.blocks.length} blocks · ${doc.dims.w}x${doc.dims.d}x${doc.dims.h} @ ${doc.cellSizeMeters.toFixed(2)}m`);
   };
   const scheduleVoxelAutosave = () => {
     if (!deps.voxelSession) return;
@@ -340,16 +392,43 @@ export function createItemStore(deps: ItemStoreDeps) {
   };
 
   const rosterState = (): ItemsStreamState => deps.items?.state() ?? { items: {}, order: [] };
+  const registryItem = (): ItemDefinition | null => {
+    if (!selectedGameItemId || !GAME_ITEMS.is(selectedGameItemId)) return null;
+    return GAME_ITEMS.get(selectedGameItemId);
+  };
   const loadFromRoster = (id: string, opts?: { history?: boolean }) => {
-    const doc = rosterState().items[id];
+    if (id === WORKING_ITEM_ROSTER_ID) {
+      selectedGameItemId = null;
+      workingDraftVisible = true;
+      emit();
+      return;
+    }
+    const gameId = gameItemIdFromRosterId(id);
+    if (gameId) {
+      if (!GAME_ITEMS.is(gameId)) return;
+      const def = GAME_ITEMS.get(gameId);
+      selectedGameItemId = gameId;
+      draftId = null;
+      draftName = def.label;
+      view.lens = 'item';
+      twigWrite('lens', view.lens);
+      setStatus(`registry item · ${def.scaleStatus} scale · no migration written`);
+      emit();
+      return;
+    }
+    const streamId = streamItemIdFromRosterId(id);
+    const doc = rosterState().items[streamId];
     if (!doc) return;
+    selectedGameItemId = null;
     installDraft(draftFromItemDoc(doc), { history: opts?.history !== false });
-    draftId = id;
+    autoBakeBase = doc.source ? { radius: doc.radius, amount: doc.amount, grid: doc.grid.slice(), source: doc.source } : null;
+    draftId = streamId;
     draftName = doc.metadata?.title ?? doc.name;
     setStatus(`loaded "${draftName}"`);
     emit();
   };
   const saveToRoster = () => {
+    selectedGameItemId = null;
     if (!deps.itemSession) { setStatus(`save unavailable — ${deps.error ?? 'no session'}`); return; }
     const id = draftId ?? mintItemId();
     deps.itemSession.commit({ kind: 'authored', id, doc: draftToItemDoc(draft, draftName) }, `${draftName}: saved`);
@@ -358,19 +437,35 @@ export function createItemStore(deps: ItemStoreDeps) {
     setStatus(`saved "${draftName}" — it shows up as a prop in characters`);
   };
   const removeFromRoster = (id: string) => {
+    if (gameItemIdFromRosterId(id)) { setStatus('registry items are read-only until the scale audit/migration'); return; }
     if (!deps.itemSession) { setStatus(`remove unavailable — ${deps.error ?? 'no session'}`); return; }
-    deps.itemSession.commit({ kind: 'removed', id }, `${id}: removed`);
+    const streamId = streamItemIdFromRosterId(id);
+    deps.itemSession.commit({ kind: 'removed', id: streamId }, `${streamId}: removed`);
     rosterRev += 1;
-    if (draftId === id) draftId = null;
+    if (draftId === streamId) draftId = null;
     setStatus('removed from the roster (its history stays in the log)');
   };
   const newItem = () => {
     history.commit(snapDraft);
+    selectedGameItemId = null;
+    workingDraftVisible = true;
     draft = emptyItemDraft();
+    autoBakeBase = null;
     draftId = null;
     draftName = 'new item';
+    view.lens = 'item';
+    twigWrite('lens', view.lens);
     bumpItem({ autosave: true });
-    setStatus('blank sphere — sculpt from scratch, or import a blockout');
+    setStatus('blank sphere — sculpt from scratch, or build voxels to shape it');
+  };
+  const openVoxelBlockout = () => {
+    selectedGameItemId = null;
+    workingDraftVisible = true;
+    view.lens = 'voxel';
+    view.voxelTool = 'build';
+    twigWrite('lens', view.lens);
+    twigWrite('voxelTool', view.voxelTool);
+    setStatus('voxel blockout — stack blocks here; sculpt updates automatically');
   };
   const setGrid = (grid: number[], opts?: { history?: boolean; note?: string }) => {
     if (opts?.history) history.commit(snapDraft);
@@ -378,31 +473,59 @@ export function createItemStore(deps: ItemStoreDeps) {
     if (opts?.note) deps.itemSession?.note(opts.note);
     bumpItem();
   };
-  const importBlockout = () => {
-    const doc = voxelDocFromState(voxelDims, voxelCustom);
+  const commitGrid = (baseGrid: number[], grid: number[], note?: string) => {
+    history.commit(() => {
+      const pre = snapDraft();
+      pre.grid = baseGrid.slice();
+      return pre;
+    });
+    draft = { ...draft, grid: grid.slice() };
+    if (note) deps.itemSession?.note(note);
+    bumpItem();
+  };
+  const sculptDeltaFromBase = (base: AutoBakeBase | null): number[] => {
+    if (!base || base.grid.length !== draft.grid.length) return new Array(draft.grid.length).fill(0);
+    return draft.grid.map((v, i) => v - base.grid[i]);
+  };
+  const applyVoxelBake = (reason: string, opts?: { history?: boolean; switchLens?: boolean }) => {
+    const doc = voxelDocFromState(voxelDims, voxelCustom, voxelCellSizeMeters);
     if (doc.blocks.length === 0) {
-      setStatus('no blockout yet — build a shape in the VOXEL lens, then import');
-      return;
+      const hadBase = autoBakeBase !== null || draft.source !== null;
+      autoBakeBase = null;
+      if (hadBase) {
+        if (opts?.history) history.commit(snapDraft);
+        draft = { ...emptyItemDraft(), color: draft.color };
+        bumpItem({ autosave: true });
+      }
+      setStatus(`${reason} — no custom blocks; sculpt is a blank item`);
+      return false;
     }
     const bake = bakeBlockoutToGlobe(doc);
-    if (!bake) { setStatus('the blockout is empty'); return; }
-    history.commit(snapDraft);
+    if (!bake) { setStatus(`${reason} — blockout did not bake`); return false; }
+    if (opts?.history) history.commit(snapDraft);
+    selectedGameItemId = null;
+    workingDraftVisible = workingDraftVisible || !draftId;
+    const delta = sculptDeltaFromBase(autoBakeBase);
+    const grid = bake.grid.map((v, i) => clamp(v + (delta[i] ?? 0), -1, 1));
+    const source = { blocks: doc.blocks.length, dims: { ...doc.dims }, cellSizeMeters: doc.cellSizeMeters };
     draft = {
       ...draft,
       radius: bake.radius,
       amount: bake.amount,
-      grid: bake.grid,
-      source: { blocks: doc.blocks.length, dims: { ...doc.dims } },
+      grid,
+      source,
     };
-    draftId = null;
-    draftName = 'blockout item';
-    view.lens = 'sculpt';
-    twigWrite('lens', view.lens);
-    deps.itemSession?.note(`import blockout · ${doc.blocks.length} blocks · ${doc.dims.w}x${doc.dims.d}x${doc.dims.h}`);
+    autoBakeBase = { radius: bake.radius, amount: bake.amount, grid: bake.grid.slice(), source };
+    if (!draftName || draftName === 'new item') draftName = 'blockout item';
+    if (opts?.switchLens) {
+      view.lens = 'sculpt';
+      twigWrite('lens', view.lens);
+    }
+    deps.itemSession?.note(`auto-bake blockout · ${doc.blocks.length} blocks · ${doc.dims.w}x${doc.dims.d}x${doc.dims.h} @ ${doc.cellSizeMeters.toFixed(2)}m`);
     bumpItem({ autosave: true });
-    setStatus(`imported ${doc.blocks.length} blocks — star-shape wrap: concave overhangs flatten to their hull`);
+    setStatus(`${reason} — sculpt auto-baked from ${doc.blocks.length} blocks @ ${doc.cellSizeMeters.toFixed(2)}m cells`);
+    return true;
   };
-
   const voxelFloor = () => makeVoxelFloor(voxelDims);
   const voxelBlocks = () => [...voxelFloor(), ...voxelCustom];
   const voxelGroups = () => detectVoxelFaceGroups(voxelBlocks());
@@ -414,9 +537,20 @@ export function createItemStore(deps: ItemStoreDeps) {
     return inVoxelBounds(p, voxelDims) && !occupied.has(coordKey(p.x, p.y, p.z));
   };
   const commitVoxel = (statusText: string) => {
-    setStatus(statusText);
+    const base = cloneAutoBakeBase(autoBakeBase);
+    const before = snapDraft();
+    const changed = applyVoxelBake(statusText, { history: false, switchLens: false });
+    if (changed) {
+      history.commit(() => before);
+    } else if (base !== autoBakeBase) {
+      history.commit(() => before);
+    }
     scheduleVoxelAutosave();
     emit();
+  };
+  const setVoxelCellSizeMeters = (size: number) => {
+    voxelCellSizeMeters = normalizeVoxelCellSizeMeters(size);
+    commitVoxel(`Cell size ${voxelCellSizeMeters.toFixed(2)}m`);
   };
   const setVoxelDims = (patch: Partial<VoxelDims>) => {
     voxelDims = {
@@ -507,8 +641,14 @@ export function createItemStore(deps: ItemStoreDeps) {
       schema: 'hmsc-int.voxel-blockout.v1',
       exportedAt: new Date().toISOString(),
       dims: voxelDims,
+      cellSizeMeters: voxelCellSizeMeters,
+      worldSizeMeters: {
+        w: voxelDims.w * voxelCellSizeMeters,
+        d: voxelDims.d * voxelCellSizeMeters,
+        h: voxelDims.h * voxelCellSizeMeters,
+      },
       blocks: voxelCustom.map((b) => ({ x: b.x, y: b.y, z: b.z, kind: b.kind })),
-      artificialFloor: { y: 0, width: voxelDims.w, depth: voxelDims.d },
+      artificialFloor: { y: 0, width: voxelDims.w, depth: voxelDims.d, cellSizeMeters: voxelCellSizeMeters },
       faceGroups: groups.map((g) => ({
         id: g.id,
         face: g.face.key,
@@ -532,6 +672,7 @@ export function createItemStore(deps: ItemStoreDeps) {
     loadFromRoster(id, { history: false });
     status = `restored "${draftName}" — the draft autosaves as you work`;
   }
+  if (voxelCustom.length > 0) applyVoxelBake('restored voxel blockout', { history: false, switchLens: false });
 
   const setViewKey = <K extends keyof typeof view>(key: K, twigKey: string) => (value: (typeof view)[K]) => {
     (view[key] as (typeof view)[K]) = value;
@@ -544,14 +685,17 @@ export function createItemStore(deps: ItemStoreDeps) {
     get draft() { return draft; },
     get draftId() { return draftId; },
     get draftName() { return draftName; },
+    selectedRegistryItem: registryItem,
+    get workingDraftVisible() { return workingDraftVisible; },
     get status() { return status; },
     get rosterRev() { return rosterRev; },
     get seq() { return seq; },
     get installRev() { return installRev; },
     get view() { return view; },
     get voxelDims() { return voxelDims; },
+    get voxelCellSizeMeters() { return voxelCellSizeMeters; },
     get voxelCustom() { return voxelCustom; },
-    get voxelDoc() { return voxelDocFromState(voxelDims, voxelCustom); },
+    get voxelDoc() { return voxelDocFromState(voxelDims, voxelCustom, voxelCellSizeMeters); },
     get itemParams() { return itemGlobeParams(draft); },
     rosterState,
     voxelBlocks,
@@ -565,6 +709,7 @@ export function createItemStore(deps: ItemStoreDeps) {
     editDraftCoalesced,
     installDraft,
     setGrid,
+    commitGrid,
     setStatus,
     setDraftName: (name: string) => { draftName = name; twigWrite('draftName', name); emit(); },
     setRadius: (radius: number) => editDraftCoalesced((d) => ({ ...d, radius: clamp(radius, ITEM_KNOBS.radius.min, ITEM_KNOBS.radius.max) })),
@@ -575,8 +720,10 @@ export function createItemStore(deps: ItemStoreDeps) {
     setMirror: setViewKey('mirror', 'mirror'),
     setBrush: setViewKey('brush', 'brush'),
     setStrength: setViewKey('strength', 'strength'),
+    setSmoothIterations: setViewKey('smoothIterations', 'smoothIterations'),
     setShowGrabGrid: setViewKey('showGrabGrid', 'showGrabGrid'),
     setVoxelDims,
+    setVoxelCellSizeMeters,
     setVoxelTool,
     setVoxelKind,
     setActiveFace,
@@ -590,10 +737,18 @@ export function createItemStore(deps: ItemStoreDeps) {
     loadFromRoster,
     removeFromRoster,
     newItem,
-    importBlockout,
+    openVoxelBlockout,
     undo: () => restoreDraft(history.undo(snapDraft), 'undo'),
     redo: () => restoreDraft(history.redo(snapDraft), 'redo'),
-    clearSculpt: () => setGrid(emptyItemGrid(), { history: true, note: 'clear sculpt' }),
+    clearSculpt: () => {
+      if (autoBakeBase) {
+        installDraft({ ...draft, radius: autoBakeBase.radius, amount: autoBakeBase.amount, grid: autoBakeBase.grid.slice(), source: autoBakeBase.source }, { autosave: true, history: true });
+        deps.itemSession?.note('clear sculpt detail');
+        setStatus('cleared sculpt detail; voxel base kept');
+        return;
+      }
+      setGrid(emptyItemGrid(), { history: true, note: 'clear sculpt' });
+    },
     softenGrid: (grid: number[]) => setGrid(grid, { history: true, note: 'soften' }),
     note: (label: string) => deps.itemSession?.note(label),
   };

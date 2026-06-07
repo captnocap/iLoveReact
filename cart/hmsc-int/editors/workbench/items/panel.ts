@@ -5,7 +5,10 @@ import type { PanelSpec, FieldSpec } from '../../../shell/fields';
 import type { LensSpec } from '../../../shell/stage';
 import { PAINT_EDITOR_TUNING, type SculptMode } from '../../characters/paintKit';
 import { ITEM_DRAFT_DEFAULTS } from '../../items/bake';
+import { VOXEL_BLOCKOUT_TUNING } from '../../voxels/stream';
+import { GAME_ITEMS } from '../../../game/items';
 import {
+  gameItemRosterId, streamItemRosterId, WORKING_ITEM_ROSTER_ID,
   ITEM_KNOBS, VOXEL_FACES, VOXEL_KINDS, VOXEL_PALETTE, itemWorkbenchStore,
   type ItemLens, type ItemStore, type VoxelBlockKind, type VoxelTool,
 } from './store';
@@ -16,12 +19,12 @@ export const ITEM_LENSES: LensSpec[] = [
   { id: 'voxel', label: 'VOXEL' },
 ];
 
-const SCULPT_MODES: SculptMode[] = ['raise', 'lower', 'flatten'];
+const SCULPT_MODES: SculptMode[] = ['raise', 'lower', 'flatten', 'smooth'];
 const VOXEL_TOOLS: VoxelTool[] = ['build', 'mine'];
 
 function sourceLabel(s: ItemStore): string {
   return s.draft.source
-    ? `${s.draft.source.blocks} blocks · ${s.draft.source.dims.w}x${s.draft.source.dims.d}x${s.draft.source.dims.h}`
+    ? `${s.draft.source.blocks} blocks · ${s.draft.source.dims.w}x${s.draft.source.dims.d}x${s.draft.source.dims.h} @ ${(s.draft.source.cellSizeMeters ?? VOXEL_BLOCKOUT_TUNING.defaultCellSizeMeters).toFixed(2)}m`
     : 'blank sphere';
 }
 
@@ -63,7 +66,6 @@ export function itemPanel(s: ItemStore): PanelSpec {
       { k: 'mirror', t: 'bool', get: () => s.view.mirror, set: (v) => s.setMirror(v) },
       { k: 'brush', t: 'num', ...ITEM_KNOBS.brush, get: () => s.view.brush, set: (v) => s.setBrush(v) },
       { k: 'strength', t: 'slider', min: ITEM_KNOBS.strength.min, max: ITEM_KNOBS.strength.max, show: (v) => v.toFixed(2), get: () => s.view.strength, set: (v) => s.setStrength(v) },
-      { k: 'import voxel', t: 'act', tone: 'success', run: () => s.importBlockout() },
       { k: 'clear sculpt', t: 'act', tone: 'error', run: () => s.clearSculpt() },
     ],
   });
@@ -71,6 +73,7 @@ export function itemPanel(s: ItemStore): PanelSpec {
   groups.push({
     title: 'VOXEL BLOCKOUT',
     fields: [
+      { k: 'cell m', t: 'num', ...ITEM_KNOBS.cellSize, get: () => s.voxelCellSizeMeters, set: (v) => s.setVoxelCellSizeMeters(v) },
       { k: 'W', t: 'num', ...ITEM_KNOBS.dims, get: () => s.voxelDims.w, set: (w) => s.setVoxelDims({ w }) },
       { k: 'D', t: 'num', ...ITEM_KNOBS.dims, get: () => s.voxelDims.d, set: (d) => s.setVoxelDims({ d }) },
       { k: 'H', t: 'num', ...ITEM_KNOBS.dims, get: () => s.voxelDims.h, set: (h) => s.setVoxelDims({ h }) },
@@ -93,9 +96,20 @@ function rosterDoors(s: ItemStore) {
   return {
     list(): RosterRow[] {
       const st = s.rosterState();
-      return st.order.map((id) => ({ id, label: st.items[id]?.metadata?.title ?? st.items[id]?.name ?? id, icon: 'Package' }));
+      const registry = GAME_ITEMS.definitions.map((it: { id: string; label: string }) => ({ id: gameItemRosterId(it.id), label: it.label, icon: 'Package' }));
+      const authored = st.order.map((id) => ({ id: streamItemRosterId(id), label: st.items[id]?.metadata?.title ?? st.items[id]?.name ?? id, icon: 'Package' }));
+      const working = s.workingDraftVisible && !s.draftId
+        ? [{ id: WORKING_ITEM_ROSTER_ID, label: s.draftName, icon: 'Package' }]
+        : [];
+      return working.concat(registry, authored);
     },
-    defaultRow: (rows: RosterRow[]) => (s.draftId && rows.some((r) => r.id === s.draftId) ? s.draftId : rows[rows.length - 1]?.id),
+    defaultRow: (rows: RosterRow[]) => {
+      if (s.workingDraftVisible && rows.some((r) => r.id === WORKING_ITEM_ROSTER_ID)) return WORKING_ITEM_ROSTER_ID;
+      if (s.draftId && rows.some((r) => r.id === streamItemRosterId(s.draftId))) return streamItemRosterId(s.draftId);
+      const st = s.rosterState();
+      const authored = [...st.order].reverse().find((id) => st.items[id] && rows.some((r) => r.id === streamItemRosterId(id)));
+      return authored ? streamItemRosterId(authored) : rows[0]?.id;
+    },
     onPick: (id: string) => s.loadFromRoster(id),
     select: () => s,
     subscribe: (fn: () => void) => s.subscribe(fn),
@@ -103,6 +117,7 @@ function rosterDoors(s: ItemStore) {
 }
 
 const newItemAction = (s: ItemStore): ActionSpec => ({ id: 'new', label: 'New', icon: 'Plus', run: () => s.newItem() });
+const voxelBlockoutAction = (s: ItemStore): ActionSpec => ({ id: 'voxel-blockout', label: 'Voxel Blockout', icon: 'Boxes', run: () => s.openVoxelBlockout() });
 
 export function itemSourceCore(store?: ItemStore): Omit<WorkbenchSource<ItemStore>, 'stage'> & { store: ItemStore } {
   const s = store ?? itemWorkbenchStore();
@@ -117,10 +132,16 @@ export function itemSourceCore(store?: ItemStore): Omit<WorkbenchSource<ItemStor
     activeLens: () => s.view.lens,
     onLens: (_subject, id) => s.setLens(id as ItemLens),
     actions(): ActionSpec[] {
+      if (s.selectedRegistryItem()) {
+        return [
+          newItemAction(s),
+          voxelBlockoutAction(s),
+        ];
+      }
       return [
         newItemAction(s),
+        voxelBlockoutAction(s),
         { id: 'save', label: 'Save', icon: 'Check', run: () => s.saveToRoster() },
-        { id: 'import', label: 'Import Voxels', icon: 'Boxes', run: () => s.importBlockout() },
         { id: 'export-voxels', label: 'Export Voxels', icon: 'Download', run: () => s.exportVoxelJson() },
         { id: 'undo', label: 'Undo', icon: 'Undo2', run: () => s.undo() },
         { id: 'redo', label: 'Redo', icon: 'Redo2', run: () => s.redo() },
@@ -128,7 +149,7 @@ export function itemSourceCore(store?: ItemStore): Omit<WorkbenchSource<ItemStor
       ];
     },
     emptyActions(): ActionSpec[] {
-      return [newItemAction(s), { id: 'import', label: 'Import Voxels', icon: 'Boxes', run: () => s.importBlockout() }];
+      return [newItemAction(s), voxelBlockoutAction(s)];
     },
   };
 }
