@@ -4,8 +4,8 @@
 // THE USER'S RULING: "this is an agnostic painting surface, put whatever u
 // want here … any thing at all is all just the same thing at this level."
 // A PaintTarget names ANY paintable thing — a figure part, a vehicle part,
-// a stored material, a recipe, a saved document, an extracted cutout, an
-// image file, a blank canvas — and resolveTarget() turns it into the ONE
+// a stored material, a recipe, a saved document, an extracted cutout, or a
+// blank canvas — and resolveTarget() turns it into the ONE
 // working shape the bench paints (cutout's Work model, line-true:
 // CutoutRoute.tsx:125-165, 188-232, 438-505, 555-562).
 //
@@ -36,12 +36,21 @@ export type VehiclesStateLike = { vehicles: Record<string, any>; order: string[]
 
 export type PaintTarget =
   | { kind: 'blank'; w?: number; h?: number }
-  | { kind: 'image'; path: string; name: string; dims: Dims }
   | { kind: 'material'; id: string; label: string }
   | { kind: 'figure-part'; docId: string; part: PaintTargetId }
   | { kind: 'vehicle-part'; docId: string; part: string }
   | { kind: 'document'; id: string }
-  | { kind: 'cutout'; id: string };
+  | { kind: 'cutout'; id: string }
+  // CLOTHFLIP-0607 (req_0234, the user's spine: "add a new design, brings me
+  // to the painter save, done now that shirt exists"): a garment's print
+  // DESIGN. designId null = a fresh design; set = re-edit (the model-paint
+  // re-edit law, worn by garments). Save routes to the clothing-variants
+  // stream — the garment family's own consumer, like figure/vehicle parts.
+  | { kind: 'garment-design'; garmentId: string; designId: string | null };
+
+/** the print canvas — TEE_CAPTURE dims (the chest print box's aspect; the
+ *  same artwork shape ClothingSkinCaptures bakes the built-in prints at) */
+export const GARMENT_DESIGN_DIMS: Dims = { w: 256, h: 192 };
 
 /** What's on the canvas — cutout's Work, minus the route's epoch (the store
  *  owns remount epochs). */
@@ -57,6 +66,9 @@ export type BenchWork = {
   initial: PaintDocument | null;
   /** an unsaved slot resumed (TATTOODRAFT) — surfaced in the status line */
   resumed: boolean;
+  /** CLOTHFLIP-0607: set when the canvas IS a garment design — save routes
+   *  to the clothing-variants stream (additive; every other target omits) */
+  garment?: { garmentId: string; designId: string | null } | null;
 };
 
 export type ResolveDeps = {
@@ -67,7 +79,17 @@ export type ResolveDeps = {
   textureById: (id: string) => { id: string; label: string } | null;
   /** the workbench draft book's slot for a workId (content-gated by caller) */
   slotDoc: (workId: string) => PaintDocument | null;
+  /** CLOTHFLIP-0607: garment label + saved-design lookup (live: the garment
+   *  store's tables + the clothing-variants channel; tests fake) */
+  garmentLabel?: (garmentId: string) => string | null;
+  garmentDesign?: (garmentId: string, designId: string) => { label: string; overlay: unknown } | null;
 };
+
+/** a design target's stable slot id — the draft book key (the modelWorkId
+ *  idiom; fresh designs share one 'new' slot per garment) */
+export function garmentDesignWorkId(garmentId: string, designId: string | null): string {
+  return `gdsn:${garmentId}:${designId ?? 'new'}`;
+}
 
 function clampCanvasSize(n: number): number {
   const { minSize, maxSize, defaultSize } = PAINT_TUNING.canvas;
@@ -125,14 +147,6 @@ export function resolveTarget(target: PaintTarget, deps: ResolveDeps): BenchWork
     case 'blank':
       return blankWork(target.w, target.h);
 
-    case 'image':
-      return {
-        ...blankWork(target.dims.w, target.dims.h),
-        name: target.name,
-        srcPath: target.path,
-        dims: target.dims, // identified, not clamped — the file IS the truth
-      };
-
     case 'material': {
       const def = deps.textureById(target.id);
       if (!def) return null;
@@ -183,6 +197,33 @@ export function resolveTarget(target: PaintTarget, deps: ResolveDeps): BenchWork
         resumed: false,
       };
     }
+
+    case 'garment-design': {
+      // CLOTHFLIP-0607: the garment print canvas. The garment must exist;
+      // a re-edit reopens the saved overlay's own document (the model-paint
+      // re-edit law); the unsaved slot wins over both (TATTOODRAFT).
+      const label = deps.garmentLabel?.(target.garmentId) ?? null;
+      if (label === null) return null;
+      const workId = garmentDesignWorkId(target.garmentId, target.designId);
+      const slot = deps.slotDoc(workId);
+      const slotDoc = slot && slotDocumentHasContent(slot) ? slot : null;
+      const saved = target.designId ? deps.garmentDesign?.(target.garmentId, target.designId) ?? null : null;
+      if (target.designId && !saved) return null; // a ghost design row
+      const reopened = saved ? reopenOverlayDocument(saved.overlay as any) : null;
+      return {
+        docId: workId,
+        name: saved?.label ?? `${label} design`,
+        srcPath: null,
+        textureId: null,
+        model: null,
+        modelBg: '#ffffff', // the print bakes over white (ClothingSkinSurface's plain base)
+        modelLayers: null,
+        dims: { ...GARMENT_DESIGN_DIMS },
+        initial: slotDoc ?? reopened,
+        resumed: !!slotDoc,
+        garment: { garmentId: target.garmentId, designId: target.designId },
+      };
+    }
   }
 }
 
@@ -191,12 +232,14 @@ export function resolveTarget(target: PaintTarget, deps: ResolveDeps): BenchWork
 export function encodeTargetRow(target: PaintTarget): string {
   switch (target.kind) {
     case 'blank': return 'blank';
-    case 'image': return `img:${target.path}`;
     case 'material': return `mat:${target.id}`;
     case 'figure-part': return `fig:${target.docId}`;
     case 'vehicle-part': return `veh:${target.docId}`;
     case 'document': return `doc:${target.id}`;
     case 'cutout': return `cut:${target.id}`;
+    // not a PAINT-roster row (designs open from the garment source) — the
+    // encoding exists so defaultRow/twig round-trips stay total
+    case 'garment-design': return garmentDesignWorkId(target.garmentId, target.designId);
   }
 }
 
@@ -214,6 +257,13 @@ export function decodeTargetRow(row: string, partFor: (family: 'figure' | 'vehic
     case 'veh': return { kind: 'vehicle-part', docId: id, part: partFor('vehicle', id) };
     case 'doc': return { kind: 'document', id };
     case 'cut': return { kind: 'cutout', id };
+    case 'gdsn': {
+      // `gdsn:<garmentId>:<designId|new>` — round-trips garmentDesignWorkId
+      const last = id.lastIndexOf(':');
+      if (last < 0) return null;
+      const designId = id.slice(last + 1);
+      return { kind: 'garment-design', garmentId: id.slice(0, last), designId: designId === 'new' ? null : designId };
+    }
     default: return null;
   }
 }

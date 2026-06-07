@@ -26,6 +26,39 @@ export type ClothingInstance = {
   textureKey?: string;
 };
 
+/** CLOTHSOURCE-0606: the instance list builds in fixed section order —
+ *  top → bottoms → shoes → accessories — so three boundary indices slice it
+ *  into garment slots. buildClothing fills these when a caller passes the
+ *  object (additive trailing param; render/bake callers never do). One
+ *  placement truth: the slices ARE buildClothing's own output, never a fork. */
+export type GarmentSectionMarks = { top: number; bottoms: number; shoes: number };
+
+export type GarmentSlot = 'top' | 'bottoms' | 'shoes' | 'accessories';
+
+/** buildClothing's output split by garment slot — the clothing workbench
+ *  renders a garment ALONE (no body) from one of these slices. Known seam:
+ *  armor's knee pads ride the leg loop, so they land in `bottoms`. */
+export function buildClothingSlices(
+  style: ClothingId,
+  shapeId: BodyShapeId = 'neutral',
+  pose: BodyPoseId = 'stand',
+  phase = 0,
+  actions: RigTimelineAction[] = [],
+  clothingSkin: ClothingSkinId = 'plain',
+  accessories: ClothingAccessoryId[] = [],
+  bottoms: BottomsId = DEFAULT_BOTTOMS[style],
+  bonesOverride?: Bones,
+): Record<GarmentSlot, ClothingInstance[]> {
+  const marks: GarmentSectionMarks = { top: 0, bottoms: 0, shoes: 0 };
+  const all = buildClothing(style, shapeId, pose, phase, actions, clothingSkin, accessories, bottoms, bonesOverride, marks);
+  return {
+    top: all.slice(0, marks.top),
+    bottoms: all.slice(marks.top, marks.bottoms),
+    shoes: all.slice(marks.bottoms, marks.shoes),
+    accessories: all.slice(marks.shoes),
+  };
+}
+
 export function buildClothing(
   style: ClothingId,
   shapeId: BodyShapeId = 'neutral',
@@ -36,6 +69,7 @@ export function buildClothing(
   accessories: ClothingAccessoryId[] = [],
   bottoms: BottomsId = DEFAULT_BOTTOMS[style],
   bonesOverride?: Bones,
+  sectionMarks?: GarmentSectionMarks,
 ): ClothingInstance[] {
   const s = BODY_SHAPES[shapeId];
   const c = CLOTHING[style];
@@ -80,8 +114,12 @@ export function buildClothing(
       1,
     ));
     if (clothingSkin !== 'plain' && style !== 'armor' && style !== 'dress') {
+      // CLOTHFLIP-0607: the print sits proud of THIS garment's front face —
+      // derived from torsoDepth, not a constant. The old fixed -0.225 was
+      // SWALLOWED by the hoodie's 1.14-deep torso (front at -0.2416): hoodie
+      // prints never rendered, found by the per-face visual proof.
       clothes.push(box(
-        offsetBone(bones.torso, 0, 0.04 * s.height, -0.225),
+        offsetBone(bones.torso, 0, 0.04 * s.height, -0.025 - torsoDepth / 2 - 0.012),
         [0.32 * s.torsoWide, 0.26 * s.torsoLong, 0.018],
         '#ffffff',
         bones.torso.rotation,
@@ -135,6 +173,8 @@ export function buildClothing(
       box(offsetBone(bones.torso, 0, 0.015 * s.height, -0.22), [0.07, 0.2, 0.025], '#991b1b', bones.torso.rotation, 1),
     );
   }
+
+  if (sectionMarks) sectionMarks.top = clothes.length;
 
   // ── bottoms — a real garment layer, chosen independently of the top ────────
   const b = BOTTOMS[bottoms];
@@ -246,6 +286,8 @@ export function buildClothing(
     }
   }
 
+  if (sectionMarks) sectionMarks.bottoms = clothes.length;
+
   if (style !== 'underwear') {
     const shoe = style === 'dress' ? '#171717' : style === 'armor' ? c.secondary : darkenHex(c.secondary, 0.55);
     clothes.push(
@@ -255,6 +297,8 @@ export function buildClothing(
       box(offsetBone(bones.rFoot, 0, 0.018, -0.12), [0.18 * s.foot, 0.06 * s.foot, 0.14 * s.foot], shoe, bones.rFoot.rotation, 1),
     );
   }
+
+  if (sectionMarks) sectionMarks.shoes = clothes.length;
 
   if (accessories.includes('shades')) {
     clothes.push(

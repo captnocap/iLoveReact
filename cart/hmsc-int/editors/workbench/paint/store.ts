@@ -62,6 +62,13 @@ export type PaintBenchDeps = {
   catalogs: () => { materials: Array<{ id: string; label: string }>; recipes: Array<{ id: string; label: string }> };
   /** the open character draft adopts a figure save (K3) — live: the char store */
   charAdopt: ((docId: string, next: any) => void) | null;
+  /** CLOTHFLIP-0607 — the garment-design family's own doors (additive):
+   *  label lookup gates resolve; the session lands `garmentVariantSaved`
+   *  commits on the clothing-variants channel; designs feed re-edit opens.
+   *  Structural types — store.ts stays decoupled from the garment module. */
+  garmentLabel?: ((garmentId: string) => string | null) | null;
+  garmentDesigns?: { state(): { variants: Record<string, Array<{ id: string; label: string; overlay?: unknown }>> } } | null;
+  garmentSession?: (() => Commitish | null) | null;
   /** image identify (async, host) — live: cutout/sources identifyImage */
   identify: ((path: string) => Promise<Dims | null>) | null;
   /** gray source for smart select — live: cutout/sources loadGraySource */
@@ -76,6 +83,9 @@ export type PainterApi = {
   buildDocument: () => PaintDocument | null;
   composeExportMask: () => Uint8Array | null;
   lookColors: () => string[];
+  addImageLayer: (path: string, name: string, dims: Dims) => number;
+  undo: () => void;
+  redo: () => void;
 };
 
 function liveBook() {
@@ -95,10 +105,10 @@ function liveBook() {
   };
 }
 
-/** IMGOPEN-0606: typed/dropped paths arrive messy — quoted (the shell drag
- *  idiom), file://-prefixed (DE drops), or whitespace-wrapped. The cleaner
- *  sits INSIDE openImage so the picker, the drop, and the typed field all
- *  share one load path. Headless + pure (the P4 suite pins it). */
+/** IMGOPEN-0606: picker/drop paths arrive messy — quoted (some shell picker
+ *  idioms), file://-prefixed (DE drops), or whitespace-wrapped. The cleaner
+ *  sits INSIDE openImage so picker and drop share one load path. Headless +
+ *  pure (the P4 suite pins it). */
 export function cleanImagePath(raw: string): string {
   let p = raw.trim().replace(/^['"]+|['"]+$/g, '').trim();
   if (p.startsWith('file://')) p = decodeURIComponent(p.slice('file://'.length));
@@ -144,6 +154,11 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
       library: deps.library?.state() ?? null,
       textureById: deps.textureById,
       slotDoc: (workId) => book.read().slots[workId]?.doc ?? null,
+      garmentLabel: (id) => deps.garmentLabel?.(id) ?? null,
+      garmentDesign: (garmentId, designId) => {
+        const v = deps.garmentDesigns?.state().variants[garmentId]?.find((x) => x.id === designId);
+        return v?.overlay ? { label: v.label, overlay: v.overlay } : null;
+      },
     };
   }
 
@@ -185,6 +200,16 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
   };
 
   const setStatus = (s: string) => { status = s; emit(); };
+  const undo = () => {
+    const api = painterApi.current;
+    if (!api) { setStatus('painter not ready — try again after the canvas appears'); return; }
+    api.undo();
+  };
+  const redo = () => {
+    const api = painterApi.current;
+    if (!api) { setStatus('painter not ready — try again after the canvas appears'); return; }
+    api.redo();
+  };
 
   // ── gray source (A3) — async per target ────────────────────────────────────
   const loadGray = () => {
@@ -236,11 +261,16 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     if (!clean || !deps.identify) return;
     setStatus(`reading ${clean}…`);
     const dims = await deps.identify(clean);
-    // IMGOPEN-0606: fail LOUD and point at the doors that work — the typed
-    // path was the only ingest the user could find, and it read as broken
+    // IMGOPEN-0606: fail LOUD and point at the two doors that work.
     if (!dims) { setStatus(`could not read image: ${clean} — use the open-image picker or drop the file onto the canvas`); return; }
     const base = clean.split('/').pop() ?? clean;
-    open({ kind: 'image', path: clean, name: base.replace(/\.[^.]+$/, '') || 'image', dims });
+    const name = base.replace(/\.[^.]+$/, '') || 'image';
+    const api = painterApi.current;
+    if (!api) { setStatus('painter not ready — try again after the canvas appears'); return; }
+    api.addImageLayer(clean, name, dims);
+    edited = true;
+    onDirty();
+    setStatus(`added image layer · ${name}`);
   };
 
   // ── rename (C2) ────────────────────────────────────────────────────────────
@@ -259,6 +289,7 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
   // ── output routing — MATERIALIZE is the verb (B1-B5) ──────────────────────
   const saveCurrent = () => {
     if (!edited) { setStatus('nothing to save yet — paint something first'); return; }
+    if (work.garment) { saveGarmentDesign(work.garment); return; }
     if (work.model) { saveModelPaint(work.model); return; }
     const doc = painterApi.current?.buildDocument() ?? null;
     if (!doc || !deps.session) { setStatus('nothing to save'); return; }
@@ -270,6 +301,36 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     libRev += 1;
     lastSavedAt = Date.now();
     setStatus(`saved ${name}`);
+  };
+
+  // CLOTHFLIP-0607 — the garment family's consumer (the user's spine:
+  // "add a new design, brings me to the painter save, done now that shirt
+  // exists"): bake the document to a PaintedOverlay (the model-paint bake,
+  // one truth) and land ONE `garmentVariantSaved` commit on the
+  // clothing-variants channel. The first save MINTS the design id and the
+  // work adopts it, so every later save UPSERTS the same design (A7's law).
+  let designSeq = 0;
+  const saveGarmentDesign = (g: { garmentId: string; designId: string | null }) => {
+    const doc = painterApi.current?.buildDocument() ?? null;
+    if (!doc) { setStatus('nothing to save'); return; }
+    const session = deps.garmentSession?.();
+    if (!session) { setStatus('garment designs unavailable — the clothing-variants channel is down'); return; }
+    const overlay = bakeOverlayFromDocument(doc, Date.now());
+    if (!paintedOverlayHasContent(overlay)) { setStatus('nothing painted yet — the design needs at least one stroke'); return; }
+    const designId = g.designId ?? `dsn-${Date.now().toString(36)}${(designSeq++).toString(36)}`;
+    const label = work.name.trim() || 'untitled design';
+    session.commit(
+      { kind: 'garmentVariantSaved', garmentId: g.garmentId, variant: { id: designId, label, overlay } },
+      `${g.garmentId}: design ${label} saved`,
+    );
+    // the 'new' slot's work would now only shadow the saved design
+    if (draftTimer) { clearTimeout(draftTimer); draftTimer = null; }
+    book.write(dropSlot(book.read(), work.docId));
+    work = { ...work, garment: { garmentId: g.garmentId, designId }, docId: `gdsn:${g.garmentId}:${designId}`, name: label };
+    edited = false;
+    libRev += 1;
+    lastSavedAt = Date.now();
+    setStatus(`design saved · ${label} — the ${g.garmentId.split(':')[1] ?? g.garmentId} wears it`);
   };
 
   const saveModelPaint = (binding: ModelBinding) => {
@@ -410,6 +471,7 @@ export function createPaintBenchStore(deps: PaintBenchDeps) {
     open, openImage, newCanvas,
     rename, commitName,
     onDirty, flushDraft,
+    undo, redo,
     saveCurrent, extractCurrent, materializeAsset, removeEntry,
     setStatus,
   };

@@ -102,7 +102,7 @@ export const PartMeshes = memo(function PartMeshes(props: {
             key={`n${i}`}
             geometry={Geometry.Globe}
             params={p.params}
-            dynamicKey={`${p.dynKey}.anatomy.${i}`}
+            dynamicKey={p.dynKey}
             material="#ffffff"
             textureKey={texFor(inst, p)}
             position={inst.position}
@@ -193,11 +193,13 @@ const GRID_CAPTURE_STYLE = { position: 'absolute' as const, left: -99999, top: 0
  *  as the grid — not just by the marker sphere. */
 export const GrabGridCapture = memo(function GrabGridCapture(props: {
   hover: { cu: number; cv: number } | null;
+  selected?: { u: number; v: number } | null;
   mirror: boolean;
 }) {
+  const point = props.hover ? { u: props.hover.cu, v: props.hover.cv } : props.selected ?? null;
   const data = useMemo(
-    () => [props.hover?.cu ?? -1, props.hover?.cv ?? -1, props.mirror ? 1 : 0],
-    [props.hover?.cu, props.hover?.cv, props.mirror],
+    () => [point?.u ?? -1, point?.v ?? -1, props.mirror ? 1 : 0],
+    [point?.u, point?.v, props.mirror],
   );
   return (
     <StaticSurface staticKey={GRAB_GRID_TEXTURE_KEY} style={GRID_CAPTURE_STYLE}>
@@ -416,7 +418,9 @@ const TEE_CAPTURE_W = 256;
 const TEE_CAPTURE_H = 192;
 
 /** One clothing print's artwork (sampled by tee/hoodie clothing meshes). */
-function ClothingSkinSurface(props: { skin: ClothingSkinId }) {
+// exported for the garment source's variant grid (CLOTHFLIP-0607): the grid
+// shows the print ARTWORK itself, this exact content, at swatch size
+export function ClothingSkinSurface(props: { skin: ClothingSkinId }) {
   if (props.skin === 'plain') return <Box style={{ width: '100%', height: '100%', backgroundColor: '#ffffff' }} />;
   if (props.skin === 'designer') {
     return (

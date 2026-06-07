@@ -17,6 +17,8 @@ import { saveCustomTexture } from '../../../game/textures/materials';
 import { allTextures, textureById as registryTextureById } from '../../../game/textures/registry';
 import { identifyImage, loadGraySource } from '../../cutout/sources';
 import { characterWorkbenchStore } from '../characters/store';
+import { clothingVariantsStream, type ClothingVariantsEvent } from '../../../game/figure/clothingVariants';
+import { garmentLabelById } from '../clothing/store';
 
 let liveBench: PaintBenchStore | null = null;
 
@@ -30,11 +32,18 @@ export function paintBenchStore(): PaintBenchStore {
     const session = editorSessions().open('/workbench', library) as RouteSession<CutoutEvent>;
     let figSession: Commitish | null = null;
     let vehSession: Commitish | null = null;
+    // CLOTHFLIP-0607: the garment-design family's channel (lazy, the
+    // figure/vehicle session idiom)
+    const garmentVariants = editorChannel(clothingVariantsStream);
+    let garmentSess: Commitish | null = null;
     deps = {
       library, session, error: null,
       figures, vehicles,
       figureSession: () => (figSession ??= editorSessions().open('/workbench', figures) as RouteSession<CharactersEvent>),
       vehicleSession: () => (vehSession ??= editorSessions().open('/workbench', editorChannel(vehiclesStream)) as unknown as Commitish),
+      garmentLabel: (id) => garmentLabelById(id),
+      garmentDesigns: garmentVariants,
+      garmentSession: () => (garmentSess ??= editorSessions().open('/workbench', garmentVariants) as RouteSession<ClothingVariantsEvent>),
       materialize: (name, recipeId, data) => saveCustomTexture(name, recipeId, data),
       textureById: (id) => (registryTextureById(id) as { id: string; label: string } | null) ?? null,
       catalogs: () => {
