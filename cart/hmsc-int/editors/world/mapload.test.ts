@@ -13,9 +13,10 @@
 // painted-content centre, never the bare origin on a non-empty map).
 
 import { buildEnvelope, parseEnvelope, serializeEnvelope } from '@reactjit/workspace';
-import { deserializeMap, emptyMap, isSaneView2d, paintedCenter, VIEW_SANITY, serializeMap, type EditorWorld, type MapSnapshot } from '../../mapStore';
+import { deserializeMap, emptyMap, hasAuthoredMapContent, isSaneView2d, paintedCenter, VIEW_SANITY, serializeMap, viewRunawayLogKey, type EditorWorld, type MapSnapshot } from '../../mapStore';
 import { encodeTileMap, paintTile, tileKindIndex, TILE_PALETTE } from '../../tileData';
 import { chunkKey, makeChunk, CHUNK_TILES } from '../../chunks';
+import { floorsFromEditorWorld, floorsToLandforms } from '../../chunkFloor';
 import { TILE_UNITS } from '../../heightData';
 import { assert, assertClose, assertEqual, finish, test } from '../../game/_testkit';
 
@@ -77,6 +78,31 @@ test('the renderer-consumed surface receives N painted cells, not zero (the full
   assertEqual(enc[2], TILE_PALETTE.length, 'the palette count matches the registry');
 });
 
+test('HOTMAP-0606: payload restore rebuilds runtime floor snapshots without a mounted PaintCanvas', () => {
+  const { world, painted } = paintedWorld();
+  const text = serializeEnvelope(buildEnvelope({ cartName: CART, version: VERSION, stem: 'hotmap-regression', payload: { world: serializeMap(world) } }));
+  const env = parseEnvelope<{ world: MapSnapshot }>(text, { cartName: CART, version: VERSION });
+  const decoded = deserializeMap(env!.payload.world);
+
+  const floors = floorsFromEditorWorld(decoded);
+  const landforms = floorsToLandforms(floors);
+  const cells = floors[0].tileData.slice(3 + floors[0].tileData[2] * 3).filter((v) => v >= 0).length;
+  console.log(`[HOTMAP-0606] decodedChunks=${decoded.chunks.size} focus=${decoded.focus.size} floors=${floors.length} landforms=${landforms.length} paintedCells=${cells}`);
+
+  assertEqual(floors.length, 1, 'hot restore rebuilds the focused floor snapshot without waiting for PaintCanvas mount');
+  assertEqual(landforms.length, 1, 'the play surface receives a heightfield landform immediately after hot restore');
+  assertEqual(cells, painted, 'the restored floor snapshot carries the painted cells');
+});
+
+test('HOTRESTORE-0606: a blank seed map is not a legacy build-piece owner', () => {
+  const clear = emptyMap();
+  const authored = paintedWorld().world;
+  console.log(`[HOTRESTORE-0606-MAP] clearAuthored=${hasAuthoredMapContent(clear)} paintedAuthored=${hasAuthoredMapContent(authored)}`);
+
+  assertEqual(hasAuthoredMapContent(clear), false, 'a clear map cannot unlock the legacy global build-piece pool');
+  assertEqual(hasAuthoredMapContent(authored), true, 'an authored map can still be the explicit legacy owner');
+});
+
 test('the boot view law: painted-content centre when no view is saved — never the bare origin', () => {
   const { world } = paintedWorld();
   const center = paintedCenter(world, TILE_UNITS);
@@ -121,6 +147,21 @@ test('VIEWRUNAWAY-0605: the sanity law rejects the runaway, accepts the workshop
   // a blank map measures against the origin chunk
   assert(isSaneView2d({ x: 0, y: 0, zoom: 1 }, emptyMap(), TILE_UNITS), 'a blank map accepts the origin');
   assert(!isSaneView2d({ x: -174185, y: -1439464, zoom: 0.1 }, emptyMap(), TILE_UNITS), 'and still rejects the runaway');
+});
+
+test('VIEWRUNAWAY-0607: identical rejected live-view warnings have one key', () => {
+  const runaway = { x: 8038, y: -980, zoom: 0.13 };
+  const same = { x: 8038.2, y: -979.8, zoom: 0.1301 };
+  const distinct = { x: 8041, y: -980, zoom: 0.13 };
+
+  const first = viewRunawayLogKey(runaway);
+  const repeat = viewRunawayLogKey(same);
+  const next = viewRunawayLogKey(distinct);
+  console.log(`[VIEWRUNAWAY-0607-WARN] first=${first} repeat=${repeat} distinct=${next}`);
+
+  assertEqual(first, '8038,-980@0.13', 'the user-visible rejected view key is stable');
+  assertEqual(repeat, first, 'same rounded live view has the same throttle key');
+  assert(next !== first, 'a distinct live view can still report once');
 });
 
 finish('editors/world/mapload');

@@ -19,12 +19,12 @@
 // rail / buttons / filter panel are absolute siblings rendered AFTER it so they
 // stay clickable (the host hit-tests children in reverse). alt-drag pans.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Canvas, Pressable, ScrollView, Text } from '@reactjit/primitives';
 import { callHost } from '@reactjit/ffi';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { columnLabel } from './address';
-import { type ChunkFloor } from './chunkFloor';
+import { CHUNK_FLOOR_HF_RES, downsampleChunkFloorHeights, type ChunkFloor } from './chunkFloor';
 import type { TileKind } from '../hmsc/design';
 import { TILE_KINDS, tileKindDefinition } from '../hmsc/world/tileKinds';
 import { TILE_UNITS, DOT_M, HEIGHT_LIMIT, stampBrush, stampRamp, clearField, type BrushProfile } from './heightData';
@@ -104,53 +104,72 @@ const SIZE_MIN = 0, SIZE_MAX = 40;
 // preview's floor captures is heavy, so cap it to ~3 syncs/sec.
 const REGION_SYNC_MS = 320;
 
-// Preview height-mesh resolution (vertices per side). The brush field is sampled at
-// DOTS_PER_TILE (0.5 m → 241² for a 120-tile chunk), far finer than the mesh needs;
-// baking that 1:1 ships a ~580KB heights key + ~350k verts per sculpt and chokes.
-// But the mesh MUST resolve at least per TILE, or distinct 1-tile strokes collapse
-// into the same mesh cell (3 painted dots and a filled 2×2 rendered identically).
-// So pin it to ONE VERTEX PER TILE: CHUNK_TILES+1 (121 over 120 m = 1 m spacing).
-// That's the authoring grain — what you paint per tile shows per tile — at 1/4 the
-// cost of the full 0.5 m field. The landform renders this field 1:1 (no further
-// downsample; see hmsc/world/landforms/kinds.ts heightfield resolution).
-const HF_RES = CHUNK_TILES + 1;
+export const CANVAS_PAN_SPEED = 700; // px/s while a direction key is held
+type CanvasPanDrift = { x: number; y: number };
+export type EffectiveCanvasPanDrift = CanvasPanDrift & { active: boolean };
 
-// Downsample a chunk's full height field (cols x rows) to an HF_RES x HF_RES grid.
-// MAX-MAGNITUDE POOLING, not point-sampling: each coarse sample takes the most
-// extreme source height (largest |z|) in its footprint, keeping the sign. The field
-// is 0.5m-spaced and the mesh is 1m (sx≈2), so nearest-sampling dropped every other
-// source sample — a thin painted ridge/pit could fall between the kept points and
-// vanish from the mesh while the 2D field still showed it. Max-pooling guarantees a
-// painted feature survives at its full height, snapped to the mesh grid. Window
-// half-extent = ceil(step/2) so footprints tile the source with no gaps.
-function downsampleHeights(z: Float32Array, cols: number, rows: number): number[] {
-  const out = new Array<number>(HF_RES * HF_RES);
-  const sx = (cols - 1) / (HF_RES - 1);
-  const sy = (rows - 1) / (HF_RES - 1);
-  const hx = Math.max(1, Math.ceil(sx / 2));
-  const hy = Math.max(1, Math.ceil(sy / 2));
-  for (let j = 0; j < HF_RES; j++) {
-    const cy = Math.round(j * sy);
-    for (let i = 0; i < HF_RES; i++) {
-      const cx = Math.round(i * sx);
-      let best = 0;
-      for (let dy = -hy; dy <= hy; dy++) {
-        const yy = cy + dy;
-        if (yy < 0 || yy >= rows) continue;
-        for (let dx = -hx; dx <= hx; dx++) {
-          const xx = cx + dx;
-          if (xx < 0 || xx >= cols) continue;
-          const v = z[yy * cols + xx];
-          if (Math.abs(v) > Math.abs(best)) best = v;
-        }
-      }
-      out[j * HF_RES + i] = best;
-    }
+const ZERO_CANVAS_DRIFT: EffectiveCanvasPanDrift = { x: 0, y: 0, active: false };
+const PAN_DIR: Record<string, CanvasPanDrift> = {
+  d: { x: 1, y: 0 }, a: { x: -1, y: 0 }, s: { x: 0, y: 1 }, w: { x: 0, y: -1 },
+};
+
+export function canvasPanDriftForHeldKeys(keys: Iterable<string>, wasdFocused = true): CanvasPanDrift {
+  if (!wasdFocused) return ZERO_CANVAS_DRIFT;
+  let x = 0, y = 0;
+  for (const raw of keys) {
+    const v = PAN_DIR[String(raw).toLowerCase()];
+    if (v) { x += v.x; y += v.y; }
   }
-  return out;
+  return { x: x * CANVAS_PAN_SPEED, y: y * CANVAS_PAN_SPEED };
+}
+
+export function effectiveCanvasPanDrift(drift: CanvasPanDrift, heldKeyCount: number, wasdFocused: boolean): EffectiveCanvasPanDrift {
+  if (!wasdFocused || heldKeyCount <= 0 || (drift.x === 0 && drift.y === 0)) return ZERO_CANVAS_DRIFT;
+  return { x: drift.x, y: drift.y, active: true };
 }
 
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
+
+const HIDDEN_CURSOR_STYLE = { position: 'absolute', left: -10000, top: -10000, width: 0, height: 0, borderWidth: 0, backgroundColor: '#00000000' };
+const HIDDEN_CURSOR_PIP_STYLE = { position: 'absolute', left: 0, top: 0, width: 0, height: 0, backgroundColor: '#00000000' };
+
+function hoverStateSame(a: HoverState, b: HoverState): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return a.addr === b.addr;
+}
+
+function brushVisSame(a: BrushVis, b: BrushVis): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.x !== b.x || a.y !== b.y || a.d !== b.d || a.color !== b.color || a.on !== b.on || a.shape !== b.shape) return false;
+  if (!!a.rect !== !!b.rect || !!a.ramp !== !!b.ramp) return false;
+  if (a.rect && b.rect && (a.rect.w !== b.rect.w || a.rect.h !== b.rect.h || (a.rect.angle ?? 0) !== (b.rect.angle ?? 0))) return false;
+  if (a.ramp && b.ramp && (a.ramp.w !== b.ramp.w || a.ramp.h !== b.ramp.h || a.ramp.angle !== b.ramp.angle)) return false;
+  return true;
+}
+
+function brushPx(value: number): number {
+  return Number.isFinite(value) ? Math.round(value) : 0;
+}
+
+function normalizeBrushVis(b: BrushVis): BrushVis {
+  if (!b) return null;
+  const rect = b.rect
+    ? { w: brushPx(b.rect.w), h: brushPx(b.rect.h), angle: brushPx(b.rect.angle ?? 0) }
+    : undefined;
+  const ramp = b.ramp
+    ? { w: brushPx(b.ramp.w), h: brushPx(b.ramp.h), angle: brushPx(b.ramp.angle) }
+    : undefined;
+  return {
+    ...b,
+    x: brushPx(b.x),
+    y: brushPx(b.y),
+    d: brushPx(b.d),
+    rect,
+    ramp,
+  };
+}
 
 // A chunk's short address label, e.g. (0,0)→"A0", (1,0)→"B0", (0,1)→"A1".
 const chunkLabel = (cx: number, cz: number) => `${columnLabel(cx)}${cz}`;
@@ -311,7 +330,7 @@ function ChunkGutter(props: {
 // the storm that chokes paint past a handful of chunks).
 function HoverReadout(props: { sink: HoverSink }) {
   const [hover, setHover] = useState<HoverState>(null);
-  props.sink.current = setHover; // stable setter; idempotent to assign each render
+  props.sink.current = (next) => setHover((prev) => hoverStateSame(prev, next) ? prev : next);
   if (!hover) return null;
   return (
     <Box style={{ position: 'absolute', left: hover.x, top: hover.y, paddingLeft: 6, paddingRight: 6, paddingTop: 2, paddingBottom: 2, borderRadius: 4, backgroundColor: '#0b1320ee', borderWidth: 1, borderColor: '#334155' }}>
@@ -326,10 +345,19 @@ function HoverReadout(props: { sink: HoverSink }) {
 // and registers its setter into a sink ref, so cursor moves repaint ONLY this node,
 // never the whole PaintCanvas (the re-render storm that chokes paint past a few
 // chunks). A plain Box never hit-tests, so it sits over the brush overlay harmlessly.
-function BrushCursor(props: { sink: BrushSink }) {
+const BrushCursor = memo(function BrushCursor(props: { sink: BrushSink }) {
   const [b, setB] = useState<BrushVis>(null);
-  props.sink.current = setB; // stable setter; idempotent to assign each render
-  if (!b) return null;
+  props.sink.current = (next) => {
+    const normalized = normalizeBrushVis(next);
+    setB((prev) => brushVisSame(prev, normalized) ? prev : normalized);
+  };
+  if (!b) {
+    return (
+      <Box style={HIDDEN_CURSOR_STYLE}>
+        <Box style={HIDDEN_CURSOR_PIP_STYLE} />
+      </Box>
+    );
+  }
   const r = b.d / 2;
   if (b.rect) {
     return (
@@ -369,7 +397,7 @@ function BrushCursor(props: { sink: BrushSink }) {
       <Box style={{ position: 'absolute', left: c - 2, top: c - 2, width: 4, height: 4, borderRadius: 2, backgroundColor: b.color }} />
     </Box>
   );
-}
+});
 
 // ── Canvas ───────────────────────────────────────────────────────────────────
 
@@ -468,28 +496,32 @@ export function PaintCanvas(props: {
   // mid-fly — only a click claims it. Also gated on no text field being focused
   // anywhere (zone-name input, notes pane) so typing never pans; blur clears so
   // alt-tab can't strand a drift.
-  const PAN_SPEED = 700; // px/s while a direction key is held
-  const [drift, setDrift] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [drift, setDrift] = useState<CanvasPanDrift>({ x: 0, y: 0 });
+  const driftRef = useRef<CanvasPanDrift>({ x: 0, y: 0 });
   const heldKeys = useRef<Set<string>>(new Set());
   const recomputeDriftRef = useRef<() => void>(() => {});
   const wasdFocusedRef = useRef(false);
   wasdFocusedRef.current = !!props.wasdFocused;
+  const setPanDrift = useCallback((next: CanvasPanDrift) => {
+    driftRef.current = next;
+    setDrift(next);
+  }, []);
+  const clearPanDrift = useCallback(() => {
+    if (!heldKeys.current.size && driftRef.current.x === 0 && driftRef.current.y === 0) return;
+    heldKeys.current.clear();
+    setPanDrift({ x: 0, y: 0 });
+  }, [setPanDrift]);
   // Ctrl-held state — mouse events carry no modifier flags, so track it off the key
   // bus (every key event reports the live modifier mask). Drives ctrl-click select.
   const ctrlHeldRef = useRef(false);
   const placeBrushKeyRef = useRef<{ enabled: boolean; rotate: (delta: number) => void }>({ enabled: false, rotate: () => {} });
   // Lost focus (another quad claimed WASD) → drop held keys so the pan stops at once.
   useEffect(() => {
-    if (!props.wasdFocused && heldKeys.current.size) { heldKeys.current.clear(); recomputeDriftRef.current(); }
-  }, [props.wasdFocused]);
+    if (!props.wasdFocused) clearPanDrift();
+  }, [props.wasdFocused, clearPanDrift]);
   useEffect(() => {
-    const DIR: Record<string, { x: number; y: number }> = {
-      d: { x: 1, y: 0 }, a: { x: -1, y: 0 }, s: { x: 0, y: 1 }, w: { x: 0, y: -1 },
-    };
     const recompute = () => {
-      let x = 0, y = 0;
-      for (const k of heldKeys.current) { const v = DIR[k]; if (v) { x += v.x; y += v.y; } }
-      setDrift({ x: x * PAN_SPEED, y: y * PAN_SPEED });
+      setPanDrift(canvasPanDriftForHeldKeys(heldKeys.current));
     };
     recomputeDriftRef.current = recompute;
     const textFocused = () => {
@@ -503,7 +535,7 @@ export function PaintCanvas(props: {
         if (!textFocused()) placeBrushKeyRef.current.rotate(k === 'q' ? -ROT_STEP : ROT_STEP);
         return;
       }
-      if (!DIR[k] || ev?.ctrlKey || ev?.altKey || ev?.metaKey) return;
+      if (!PAN_DIR[k] || ev?.ctrlKey || ev?.altKey || ev?.metaKey) return;
       if (!wasdFocusedRef.current) return; // only the focused quad pans
       if (heldKeys.current.has(k) || textFocused()) return; // ignore key-repeat / typing
       heldKeys.current.add(k); recompute();
@@ -513,12 +545,12 @@ export function PaintCanvas(props: {
       const k = String(ev?.key ?? '').toLowerCase();
       if (heldKeys.current.delete(k)) recompute();
     };
-    const clear = () => { if (heldKeys.current.size) { heldKeys.current.clear(); recompute(); } };
+    const clear = () => { clearPanDrift(); };
     const offDown = busOn('__keydown', onDown);
     const offUp = busOn('__keyup', onUp);
     const offBlur = busOn('system:blur', clear);
-    return () => { offDown(); offUp(); offBlur(); heldKeys.current.clear(); };
-  }, []);
+    return () => { offDown(); offUp(); offBlur(); clear(); };
+  }, [clearPanDrift, setPanDrift]);
   // Claim WASD focus on a click anywhere in the canvas working area.
   const claimWasd = props.onWasdFocus;
 
@@ -576,12 +608,12 @@ export function PaintCanvas(props: {
         tileEnc++;
       }
       if (heightDirty.current.has(k) || !heightCache.current.has(k)) {
-        heightCache.current.set(k, downsampleHeights(c.height.z, c.height.cols, c.height.rows));
+        heightCache.current.set(k, downsampleChunkFloorHeights(c.height.z, c.height.cols, c.height.rows));
         heightVer.current.set(k, (heightVer.current.get(k) ?? 0) + 1);
         heightDirty.current.delete(k);
         heightEnc++;
       }
-      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: HF_RES, hrows: HF_RES, hver: heightVer.current.get(k) ?? 0 });
+      out.push({ cx: c.cx, cz: c.cz, tileData: tileCache.current.get(k)!, heights: heightCache.current.get(k)!, hcols: CHUNK_FLOOR_HF_RES, hrows: CHUNK_FLOOR_HF_RES, hver: heightVer.current.get(k) ?? 0 });
     }
     const dt = ((globalThis as any).performance?.now?.() ?? 0) - t0;
     plog('buildFloors', `focused=${focused} tileEncoded=${tileEnc} heightEncoded=${heightEnc} took ${dt.toFixed(2)}ms`);
@@ -1045,8 +1077,7 @@ export function PaintCanvas(props: {
     const r = rectRef.current;
     const g = r ? screenToGraph(sx, sy) : null;
     const c = g ? resolveCell(g.gx, g.gy) : null;
-    if (!c) hoverSink.current?.(null);
-    else hoverSink.current?.({ x: sx - r!.x + 12, y: sy - r!.y + 12, addr: `${columnLabel(c.gCellX).toLowerCase()}${c.gCellZ}` });
+    hoverSink.current?.(null);
     if (!g || !r) { brushSink.current?.(null); return; }
     const g2 = screenToGraph(sx + BRUSH_PROBE, sy);
     const zoom = g2 && g2.gx !== g.gx ? BRUSH_PROBE / (g2.gx - g.gx) : 1; // px per graph unit
@@ -1134,7 +1165,8 @@ export function PaintCanvas(props: {
   // refs so the interval set up once on mount never goes stale on tool/layer change).
   onBrushRef.current = isRampTool ? updateRamp : onBrush;
   updateCursorRef.current = updateCursor;
-  driftActiveRef.current = drift.x !== 0 || drift.y !== 0;
+  const canvasDrift = effectiveCanvasPanDrift(drift, heldKeys.current.size, !!props.wasdFocused);
+  driftActiveRef.current = canvasDrift.active;
   brushShownRef.current = showBrush;
 
   // Churn probe: PaintCanvas is memoized + paints through refs, so it should NOT
@@ -1162,9 +1194,9 @@ export function PaintCanvas(props: {
         viewX={props.initialView?.x}
         viewY={props.initialView?.y}
         viewZoom={props.initialView?.zoom}
-        driftX={drift.x}
-        driftY={drift.y}
-        driftActive={drift.x !== 0 || drift.y !== 0}
+        driftX={canvasDrift.x}
+        driftY={canvasDrift.y}
+        driftActive={canvasDrift.active}
       >
         {/* Each focused chunk = one Effect quad at its lattice slot (own buffer). */}
         {focusedChunks.map((c) => (

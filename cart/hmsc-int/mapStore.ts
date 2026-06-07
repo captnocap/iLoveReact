@@ -225,6 +225,17 @@ export function paintedCenter(world: EditorWorld, tileUnits: number): { gx: numb
   return { gx: (bounds.minX + bounds.maxX) / 2, gy: (bounds.minY + bounds.maxY) / 2 };
 }
 
+/** True when a map carries authored world content, not just the blank seed chunk. */
+export function hasAuthoredMapContent(world: EditorWorld): boolean {
+  if (world.placements.length > 0 || world.zones.length > 0) return true;
+  for (const c of world.chunks.values()) {
+    for (let i = 0; i < c.tiles.idx.length; i++) if (c.tiles.idx[i] >= 0) return true;
+    for (let i = 0; i < c.height.z.length; i++) if (c.height.z[i] !== 0) return true;
+    for (let i = 0; i < c.zones.idx.length; i++) if (c.zones.idx[i] >= 0) return true;
+  }
+  return false;
+}
+
 // VIEWRUNAWAY-0605: the saved-view sanity law, applied at BOTH ends — the
 // autosave never writes a view that fails it, and the restore rejects one
 // that does (logged + paintedCenter fallback; the next autosave then
@@ -236,6 +247,10 @@ export const VIEW_SANITY = {
    *  (or past the origin chunk on a blank map) */
   marginChunks: 2,
 } as const;
+
+export function viewRunawayLogKey(view: { x: number; y: number; zoom: number }): string {
+  return `${view.x.toFixed(0)},${view.y.toFixed(0)}@${view.zoom.toFixed(2)}`;
+}
 
 /** Is this saved/live 2D camera believable for this world? */
 export function isSaneView2d(
