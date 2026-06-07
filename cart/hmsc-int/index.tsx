@@ -42,6 +42,7 @@ import { Assist3DRoute } from './assist3d';
 import { PlayRoute } from './editors/play/PlayRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
+import { currentWorkbenchFamily, requestWorkbenchSource, subscribeWorkbenchFamily, type WorkbenchFamily } from './shell/workbenchDoor';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
 import { editorChannel } from './editors/store';
@@ -831,7 +832,11 @@ function EditorShell() {
   // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : 'editor';
+  // STEP10-COLLAPSE-0607: ASSETS and SETTINGS are both /workbench; the bench
+  // reports its source FAMILY so the chrome lights the right door truthfully.
+  const [wbFamily, setWbFamily] = useState<WorkbenchFamily>(currentWorkbenchFamily());
+  useEffect(() => subscribeWorkbenchFamily(setWbFamily), []);
+  const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : 'editor';
   const [editorPanesMounted, setEditorPanesMounted] = useState(activeRoute === 'editor');
   useEffect(() => {
     if (activeRoute === 'editor') setEditorPanesMounted(true);
@@ -868,6 +873,7 @@ function EditorShell() {
         onTest={() => nav.push('/test')}
         onLabs={() => nav.push('/labs')}
         onWorkbench={() => nav.push('/workbench')}
+        onSettings={() => { requestWorkbenchSource('settings'); nav.push('/workbench'); }}
         onAssist={() => nav.push('/assist3d')}
         onUndo={ws.undo}
         onRedo={ws.redo}

@@ -1,9 +1,16 @@
-# WORKBENCH.md — the shared component shape (proposal, 2026-06-05)
+# WORKBENCH.md — the shared component shape (proposed 2026-06-05; FOLD COMPLETE 2026-06-07)
 
 The hmsc-int UI rework: every editor surface rebuilt fresh on ONE frame, made
 from the intention of all of them in harmony — not an amalgamation of twelve
 route dialects retrofitted after the fact. Wireframed and user-approved in
-`cart/hmsc-wire/` (W1 chrome · W2 asset editor · W3 settings+logs).
+`cart/hmsc-wire/` (W1 chrome · W2 asset editor · W3 settings+logs; the
+wireframe cart served its purpose and was DELETED at step 10 —
+STEP10-COLLAPSE-0607).
+
+**THE FOLD IS COMPLETE (STEP10-COLLAPSE-0607):** every old route flipped
+(PORTED.md is the flat audit — zero LIVE rows), the chrome collapsed to the
+ruled six (§3), `cart/hmsc-wire/` deleted. This ledger is now history +
+the standing §3/§6 contracts; new sources land in `editors/workbench/sources.ts`.
 
 This document is the end-to-end accountability ledger: the contract we build,
 where every piece of TODAY's UI goes, and the order it happens in. If a file
@@ -119,6 +126,13 @@ Key properties of the contract:
 ## 3. What the nav becomes
 
 Today's 13 flat icons → 6. The chrome gains window controls.
+**LANDED (STEP10-COLLAPSE-0607):** editor (`LayoutGrid`) · play (`Play`) ·
+labs (`FlaskConical`) · assets (`Shapes` → /workbench, last-used source) ·
+settings (`Settings` → /workbench opened ON the settings source via
+`shell/workbenchDoor.ts`) · assist3d (`Sparkles`). The bench reports its
+source FAMILY so the right door lights (settings/logs = settings family;
+`requests` rides the settings family for highlight ONLY — it postdates this
+table; revisit when REQPANEL lands).
 
 | today (13)                          | proposed (6)                          |
 |-------------------------------------|---------------------------------------|
@@ -184,7 +198,7 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 | file | lines | disposition |
 |---|---|---|
 | `index.tsx` (EditorShell, routes, map-editor wiring) | 958 | **KEEP/SHRINK** — stays the cart root + map editor host; route table shrinks to 6; ~~ProjectBar swap → `shell/chrome.tsx`~~ DONE (WBCHROME-0606) |
-| `editors/characters/CharactersRoute.tsx` | 1141 | **EXTRACT→DIE** — chip-row layout dies; roster/draft wiring → character source |
+| `editors/characters/CharactersRoute.tsx` | 1141 | ~~**EXTRACT→DIE** — chip-row layout dies; roster/draft wiring → character source~~ **DEAD** (user-ordered kill; the file's never-committed orphan deletion landed with STEP10-COLLAPSE-0607) |
 | `editors/items/ItemsRoute.tsx` | 627 | ~~**EXTRACT→DIE** — → item source~~ **DEAD** (WBITEMS-FLIP-0606) — route deleted; item authoring lives in `itemsSource()` |
 | `editors/vehicles/VehiclesRoute.tsx` | 508 | ~~**EXTRACT→DIE** — garage store lifts to vehicle source~~ **DEAD** (WBSTEP6-FLIP-0606) — route deleted; vehicle authoring lives in `vehiclesSource()` |
 | `editors/cutout/CutoutRoute.tsx` | 1159 | ~~**EXTRACT→DIE** — becomes the PAINT lens of every asset source; library rail logic → cutout source files~~ **DEAD** (CUTOUTFLIP-0606, USER RULING "nuke that shit") — EffectModal → `workbench/paint/EffectModal.tsx`; shared `editors/cutout/` internals stay as bench modules |
@@ -331,7 +345,12 @@ bang; the old route works until the minute its replacement does.
    `editors/workbench/clothing/{store,panel,live,Stage,source,clothing.test}`
    + WBCLOTHING.CAPTURE.md + the WBCLOTH.CAPTURE.md amendment. 11-test P4
    suite; bench.test 15/15; characters source.test 24/24 (amended pins).
-10. **Chrome collapse** to 6 icons. Delete `cart/hmsc-wire/`. Done.
+10. **Chrome collapse** to 6 icons. Delete `cart/hmsc-wire/`. **DONE**
+   (STEP10-COLLAPSE-0607): the ruled six landed (§3, LANDED note — assets +
+   settings are two doors into /workbench through `shell/workbenchDoor.ts`,
+   one-shot source ask + live family report); `CharactersRoute.tsx`'s
+   never-committed orphan deletion folded in (the route was already dead);
+   `cart/hmsc-wire/` deleted in the follow-up commit. THE FOLD IS COMPLETE.
 
 Each flip's commit deletes the old route file(s), updates this ledger, and
 updates `docs/game/` per the maintenance contract.

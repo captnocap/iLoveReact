@@ -33,7 +33,7 @@ import { CAT_COLOR, CAT_TAG, relTime, type EditEvent } from '../editLog';
 
 interface ChromeProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'labs' | 'settings' | 'workbench';
+  activeRoute?: 'editor' | 'assist3d' | 'test' | 'labs' | 'workbench-assets' | 'workbench-settings';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -56,10 +56,12 @@ interface ChromeProps {
   onTest: () => void;
   // Navigate to the /labs route — every lab, instantly loadable (V13).
   onLabs: () => void;
-  // Navigate to the /workbench route — the four-gutter rebuild (WORKBENCH.md).
-  // Temporary while sources land; the chrome collapse (step 10) retires most of
-  // this row.
+  // The ASSETS door — /workbench as-is, last-used source preserved
+  // (STEP10-COLLAPSE-0607: the ruled six, WORKBENCH.md §3).
   onWorkbench: () => void;
+  // The SETTINGS door — /workbench opened ON the settings source (the
+  // workbenchDoor.ts one-shot ask; gutter-1 stays the real switcher).
+  onSettings: () => void;
 }
 
 function NavBtn(props: { icon: string; on?: boolean; enabled?: boolean; onPress: () => void; title?: string }) {
@@ -121,14 +123,17 @@ export function Chrome(props: ChromeProps) {
       {/* The dead middle — this IS the titlebar grab area (borderless host). */}
       <C.ChromeDragSpace windowDrag={true} />
 
-      {/* Route navigation — this is the persistent shell for every hmsc-int
-          route. The FULL current set; the collapse to 6 is step 10, not here. */}
+      {/* Route navigation — THE RULED SIX (STEP10-COLLAPSE-0607, WORKBENCH.md
+          §3): editor · play · labs · assets · settings · assist3d. ASSETS and
+          SETTINGS are two doors into /workbench; the bench's family report
+          lights the right one. */}
       <C.ChromeGroup>
         <NavBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
         <NavBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="play (F1 test / F2 build)" />
         <NavBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
-        <NavBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
-        <NavBtn icon="Columns3" on={props.activeRoute === 'workbench'} onPress={props.onWorkbench} title="workbench (rebuild in progress)" />
+        <NavBtn icon="Shapes" on={props.activeRoute === 'workbench-assets'} onPress={props.onWorkbench} title="assets (workbench)" />
+        <NavBtn icon="Settings" on={props.activeRoute === 'workbench-settings'} onPress={props.onSettings} title="settings (workbench)" />
+        <NavBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assist3d" />
       </C.ChromeGroup>
 
       <C.ChromeRule />

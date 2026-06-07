@@ -320,7 +320,7 @@ export const hmsc_int: DocIndex = {
       kind: 'component',
       sourceFile: 'cart/hmsc-int/shell/chrome.tsx',
       description:
-        'The persistent titlebar strip (302; WBCHROME-0606, WORKBENCH.md step 2 — replaced ProjectBar.tsx at full parity, line-referenced table in commit 34400c6e7): map switcher (MapsMenu), new/rename/delete, undo/redo, the current route nav (items/voxels icons retired by WBITEMS-FLIP-0606), Compile button, save pill, event-log popover; plus the W1 additions — the borderless host’s window controls (__window_minimize/maximize/close) and the dead-middle windowDrag titlebar grab. Renders through the Chrome*/Win* classes (shell/workbench.cls.ts), zero raw colours. Menus export separately and render as the root’s last children (overlays-last hit-test rule).',
+        'The persistent titlebar strip (WBCHROME-0606, WORKBENCH.md step 2 — replaced ProjectBar.tsx at full parity, line-referenced table in commit 34400c6e7): map switcher (MapsMenu), new/rename/delete, undo/redo, THE RULED SIX route icons (STEP10-COLLAPSE-0607, WORKBENCH.md §3: editor LayoutGrid · play Play · labs FlaskConical · assets Shapes · settings Settings · assist3d Sparkles — assets and settings are two doors into /workbench through shell/workbenchDoor.ts: one-shot requestWorkbenchSource ask + live source-family report lighting the right door), Compile button, save pill, event-log popover; plus the W1 additions — the borderless host’s window controls (__window_minimize/maximize/close) and the dead-middle windowDrag titlebar grab. Renders through the Chrome*/Win* classes (shell/workbench.cls.ts), zero raw colours. Menus export separately and render as the root’s last children (overlays-last hit-test rule).',
       status: 'live',
     },
     {

@@ -12,18 +12,20 @@
 // per source, lens per source, roster filter, edit revision). Persistence
 // stays in each source's backing stores — the Workbench never saves anything.
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Box, ScrollView } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
+import { useIFTTT } from '../../../runtime/hooks/useIFTTT';
 // twigs are workspace-persistence INFRA, not game knowledge — the LabsRoute
 // precedent (shell/LabsRoute.tsx imports the same hook)
 import { useRouteTwigState } from '../editors/twigs';
+import { familyOfSource, reportWorkbenchFamily, subscribeWorkbenchSource, takePendingWorkbenchSource } from './workbenchDoor';
 import { C, accentFor } from './workbench.cls';
 import { PanelGroups, panelFieldCount, type PanelSpec } from './fields';
 import { LensBar, EmptyStage, type LensSpec } from './stage';
 
 export interface RosterRow { id: string; label: string; icon?: string }
-export interface ActionSpec { id: string; label: string; icon?: string; run(): void }
+export interface ActionSpec { id: string; label: string; icon?: string; shortcut?: string; run(): void }
 
 export interface WorkbenchSource<S = unknown> {
   /** stable id — selection/lens state is keyed by it */
@@ -43,6 +45,8 @@ export interface WorkbenchSource<S = unknown> {
   lenses?(subject: S): LensSpec[];
   /** hero-bar verbs (save / export / clone …) */
   actions?(subject: S): ActionSpec[];
+  /** source-level verbs that still make sense before the first roster row exists */
+  emptyActions?(): ActionSpec[];
   // ── WBCHAR-0606 contract additions (declared in WBCHAR.CAPTURE.md) ──
   /** roster click as an EVENT (load is a side effect — never in render).
    *  Sources with mutable working state (drafts) install the row here. */
@@ -59,7 +63,51 @@ export interface WorkbenchSource<S = unknown> {
   subscribe?(fn: () => void): () => void;
 }
 
-export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?: () => void }) {
+export type WorkbenchPerfProbe = {
+  mark(label: string, fields?: Record<string, unknown>): void;
+  now(): number;
+};
+
+const gWorkbenchPerf: any = globalThis;
+export type WorkbenchShortcut = 'save' | 'undo' | 'redo';
+
+const DEFAULT_ACTION_SHORTCUTS: Record<WorkbenchShortcut, string> = {
+  save: 'Ctrl+S',
+  undo: 'Ctrl+Z',
+  redo: 'Ctrl+Y / Ctrl+Shift+Z',
+};
+
+export function workbenchActionShortcut(action: ActionSpec): string | undefined {
+  if (action.shortcut) return action.shortcut;
+  if (action.id === 'save' || action.id === 'undo' || action.id === 'redo') return DEFAULT_ACTION_SHORTCUTS[action.id];
+  return undefined;
+}
+
+function actionTooltip(action: ActionSpec): string {
+  const shortcut = workbenchActionShortcut(action);
+  return shortcut ? `${action.label} · ${shortcut}` : action.label;
+}
+
+export function workbenchShortcutAction(actions: ActionSpec[], shortcut: WorkbenchShortcut): ActionSpec | undefined {
+  return actions.find((a) => a.id === shortcut);
+}
+
+export function workbenchShortcutHandlers(
+  actions: ActionSpec[],
+  runAction: (action: ActionSpec) => void,
+): Record<WorkbenchShortcut, (() => void) | undefined> {
+  const save = workbenchShortcutAction(actions, 'save');
+  const undo = workbenchShortcutAction(actions, 'undo');
+  const redo = workbenchShortcutAction(actions, 'redo');
+  return {
+    save: save ? () => runAction(save) : undefined,
+    undo: undo ? () => runAction(undo) : undefined,
+    redo: redo ? () => runAction(redo) : undefined,
+  };
+}
+
+export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?: () => void; perf?: WorkbenchPerfProbe }) {
+  const renderT0 = props.perf?.now() ?? 0;
   const sources = props.sources;
   // TWIGSTATE-0606: the frame's view state is ephemeral-but-TWIGGED — a hot
   // reload (or leave-and-return) restores the exact source, roster row, and
@@ -73,6 +121,7 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
   // edit revision: setters are the only write path; bumping re-reads every get()
   const [, setRev] = useState(0);
   const onEdit = () => setRev((r) => r + 1);
+  const shortcutRef = useRef<Record<WorkbenchShortcut, (() => void) | undefined>>({ save: undefined, undo: undefined, redo: undefined });
 
   // live sources tick the same revision (autosave → roster rows appear)
   useEffect(() => {
@@ -82,31 +131,113 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
     return () => { for (const off of offs) off(); };
   }, [sources]);
 
+  // STEP10-COLLAPSE-0607: the chrome doorways (workbenchDoor.ts). A pending
+  // "open ON this source" ask is consumed at mount (cross-route nav); the
+  // subscription serves the already-mounted case (the SETTINGS door pressed
+  // while on the bench). Unknown ids degrade to a no-op (find guards).
+  useEffect(() => {
+    const apply = (id: string) => { if (sources.some((s) => s.id === id)) setSrcId(id); };
+    const pendingId = takePendingWorkbenchSource();
+    if (pendingId) apply(pendingId);
+    return subscribeWorkbenchSource(apply);
+  }, [sources, setSrcId]);
+
+  // the family report — the chrome lights the right door (mirror, not memory).
+  // Resolved the same way the render resolves `source` (find ?? first).
+  const familySourceId = sources.some((s) => s.id === srcId) ? srcId : sources[0]?.id ?? '';
+  useEffect(() => {
+    if (familySourceId) reportWorkbenchFamily(familyOfSource(familySourceId));
+  }, [familySourceId]);
+
+  const sourceFindT0 = props.perf?.now() ?? 0;
   const source = sources.find((s) => s.id === srcId) ?? sources[0];
+  const sourceFindMs = props.perf ? props.perf.now() - sourceFindT0 : 0;
   if (!source) return <EmptyStage title="WORKBENCH" hint="no sources registered" />;
 
+  const runSourceAction = (a: ActionSpec) => {
+    a.run();
+    onEdit();
+    const nextRows = source.list();
+    const nextSel = source.defaultRow?.(nextRows) ?? nextRows[nextRows.length - 1]?.id;
+    if (nextSel) setSelBySrc((s) => ({ ...s, [source.id]: nextSel }));
+  };
+
+  const rosterT0 = props.perf?.now() ?? 0;
   const roster = source.list();
+  const rosterMs = props.perf ? props.perf.now() - rosterT0 : 0;
   const shown = filter ? roster.filter((r) => r.label.toLowerCase().includes(filter.toLowerCase())) : roster;
   const selId = selBySrc[source.id] ?? source.defaultRow?.(roster) ?? roster[0]?.id ?? '';
   const selRow = roster.find((r) => r.id === selId) ?? roster[0];
 
-  const pickSource = (id: string) => { setSrcId(id); setFilter(''); };
+  useEffect(() => {
+    const sw = gWorkbenchPerf.__hmsc_workbench_source_switch;
+    if (sw?.to === source.id) {
+      props.perf?.mark('workbench.source.committed', {
+        from: sw.from,
+        to: sw.to,
+        switchMs: props.perf.now() - sw.ms,
+      });
+    }
+  }, [source.id, selRow?.id]);
+
+  const pickSource = (id: string) => {
+    const now = props.perf?.now() ?? 0;
+    gWorkbenchPerf.__hmsc_workbench_source_switch = { from: source.id, to: id, ms: now };
+    props.perf?.mark('workbench.source.pick', { from: source.id, to: id, sourceCount: sources.length, rosterCount: roster.length });
+    setSrcId(id);
+    setFilter('');
+  };
   const pickRow = (id: string) => {
     source.onPick?.(id); // the load event — render stays pure
     setSelBySrc((s) => ({ ...s, [source.id]: id }));
   };
 
+  useIFTTT('key:ctrl+z', () => shortcutRef.current.undo?.());
+  useIFTTT('key:ctrl+y', () => shortcutRef.current.redo?.());
+  useIFTTT('key:ctrl+shift+z', () => shortcutRef.current.redo?.());
+  useIFTTT('key:ctrl+s', () => shortcutRef.current.save?.());
+
   if (!selRow) {
+    const emptyActions = source.emptyActions?.() ?? [];
+    shortcutRef.current = workbenchShortcutHandlers(emptyActions, runSourceAction);
     return (
       <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'row' }}>
         <SourceRail sources={sources} active={source.id} onPick={pickSource} onExit={props.onExit} />
-        <EmptyStage title={source.kicker} hint="nothing here yet — the source's roster is empty" />
+        <C.ItemRail>
+          <C.RailKicker>{`${source.kicker} · 0`}</C.RailKicker>
+          <C.RailSearchInput text={filter} onChangeText={setFilter} placeholder="filter…" />
+        </C.ItemRail>
+        <C.PropsCol>
+          <C.Hero>
+            <C.HeroTopRow>
+              <Icon name={source.icon} size={16} color={accentFor('primary')} />
+              <C.HeroName>{source.kicker}</C.HeroName>
+            </C.HeroTopRow>
+            {emptyActions.length ? (
+              <C.HeroActionsRow>
+                {emptyActions.map((a) => (
+                  <C.ChromePill key={a.id} tooltip={actionTooltip(a)} onPress={() => runSourceAction(a)}>
+                    {a.icon ? <Icon name={a.icon} size={12} color={accentFor('success')} /> : null}
+                    <C.ChromePillText>{a.label}</C.ChromePillText>
+                  </C.ChromePill>
+                ))}
+              </C.HeroActionsRow>
+            ) : null}
+          </C.Hero>
+        </C.PropsCol>
+        <C.PreviewCol>
+          <EmptyStage title={source.kicker} hint="nothing here yet — the source's roster is empty" />
+        </C.PreviewCol>
       </Box>
     );
   }
 
+  const selectT0 = props.perf?.now() ?? 0;
   const subject = source.select(selRow.id);
+  const selectMs = props.perf ? props.perf.now() - selectT0 : 0;
+  const panelT0 = props.perf?.now() ?? 0;
   const spec = source.panel(subject);
+  const panelMs = props.perf ? props.perf.now() - panelT0 : 0;
   const lenses = source.lenses?.(subject) ?? [];
   // controlled lens (source-owned) wins; else the frame's own per-source state
   const lens = source.activeLens?.(subject) ?? lensBySrc[source.id] ?? lenses[0]?.id ?? 'default';
@@ -115,7 +246,25 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
     setLensBySrc((s) => ({ ...s, [source.id]: id }));
   };
   const actions = source.actions?.(subject) ?? [];
+  shortcutRef.current = workbenchShortcutHandlers(actions, runSourceAction);
+  const stageT0 = props.perf?.now() ?? 0;
   const stage = source.stage(subject, lens);
+  const stageFactoryMs = props.perf ? props.perf.now() - stageT0 : 0;
+  props.perf?.mark('workbench.render', {
+    source: source.id,
+    selected: selRow.id,
+    sourceFindMs,
+    rosterMs,
+    selectMs,
+    panelMs,
+    stageFactoryMs,
+    totalMs: props.perf.now() - renderT0,
+    sourceCount: sources.length,
+    rosterCount: roster.length,
+    shownCount: shown.length,
+    groupCount: spec.groups.length,
+    fieldCount: panelFieldCount(spec),
+  });
 
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: 'row' }}>
@@ -171,7 +320,7 @@ export function Workbench(props: { sources: Array<WorkbenchSource<any>>; onExit?
           {actions.length ? (
             <C.HeroActionsRow>
               {actions.map((a) => (
-                <C.ChromePill key={a.id} onPress={a.run}>
+                <C.ChromePill key={a.id} tooltip={actionTooltip(a)} onPress={() => runSourceAction(a)}>
                   {a.icon ? <Icon name={a.icon} size={12} color={accentFor('success')} /> : null}
                   <C.ChromePillText>{a.label}</C.ChromePillText>
                 </C.ChromePill>
