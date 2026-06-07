@@ -145,6 +145,14 @@ the Zig internals — TS-only coverage of Zig logic is green-at-wrong-layer. Use
 pattern: focused Zig tests beside the framework logic, with cart/TS tests only
 covering the higher-level consumption contract.
 
+## Frame-Time Gate
+
+Smooth basic play is a permanent invariant. Any change running per-frame or
+touching the runtime path — bindings, camera, physics, HUD, or the hot-reload
+pipeline — must prove no frame-time regression before READY: spikewatch armed at
+baseline stays silent through 60s+ of representative play. A new rhythmic spike
+class appearing after your change is an automatic FAIL of that change.
+
 ---
 
 ## Discipline Rules
