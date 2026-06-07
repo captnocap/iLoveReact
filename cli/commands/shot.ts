@@ -29,9 +29,14 @@ export async function run(argv: string[]): Promise<number> {
   let route: string | null = null;
   let frames = 60;
   let timeoutS = 120;
+  const binaryArgs: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
+    if (arg === '--') {
+      binaryArgs.push(...argv.slice(i + 1));
+      break;
+    }
     if (arg === '--out' || arg === '-o') { outPath = argv[++i] ?? null; continue; }
     if (arg === '--route' || arg === '-r') { route = argv[++i] ?? null; continue; }
     if (arg === '--frames') { frames = Math.max(1, Number(argv[++i] ?? 60) || 60); continue; }
@@ -69,7 +74,10 @@ export async function run(argv: string[]): Promise<number> {
     ...(route ? [`RJIT_BOOT_ROUTE=${shellQuote(route)}`] : []),
   ].join(' ');
   out(`[shot] booting ${name} hidden${route ? ` at ${route}` : ''}, capturing after ${frames} frames...`);
-  const result = spawnSync('sh', ['-c', `${env} timeout -s KILL ${timeoutS} ${shellQuote(binary)} 2>&1 | grep -E "SCREENSHOT|capture" || true`]);
+  const argText = binaryArgs.map(shellQuote).join(' ');
+  const cmd = `${env} timeout -s KILL ${timeoutS} ${shellQuote(binary)} ${argText}`;
+  out(`[shot] command: ${cmd}`);
+  const result = spawnSync('sh', ['-c', `${cmd} 2>&1 | grep -E "SCREENSHOT|capture|RJIT_PLAYER_ARGV" || true`]);
   if (result.stdout) __writeStdout(result.stdout);
 
   // ── the assertion: a non-empty, plausibly-sized, well-formed PNG ──
@@ -128,7 +136,7 @@ function shellQuote(value: string): string {
 
 function usage(message: string): number {
   err(`[shot] ${message}`);
-  err('Usage: rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S]');
+  err('Usage: rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S] [-- app-args...]');
   err('  Captures the cart\'s OWN rendered frame headless (hidden window — the');
   err('  user\'s desktop is never touched). Asserts a well-formed PNG; exit 0 = PASS.');
   return 2;

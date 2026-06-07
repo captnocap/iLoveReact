@@ -28,7 +28,10 @@ declare global {
   function __hotKeys(): string;
 
   function __fs_read(path: string): string | null;
+  function __fs_read_base64(path: string): string | null;
+  function __fs_read_rjmp_entities(path: string): string | null;
   function __fs_write(path: string, content: string): boolean;
+  function __fs_write_base64_atomic(path: string, contentBase64: string): boolean;
   function __fs_exists(path: string): boolean;
   function __fs_list_json(path: string): string;
   function __fs_stat_json(path: string): string | null;

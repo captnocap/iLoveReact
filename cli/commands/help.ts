@@ -4,7 +4,7 @@ import { tryFsRead } from '../host/fs.ts';
 import { err, out } from '../host/log.ts';
 
 const TEMPLATES = ['basic', 'routes', 'dashboard', 'taskboard', 'canvas', 'stdlib'];
-const SUBCOMMANDS = ['init', 'dev', 'tui', 'ship', 'ship-tui', 'shot', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
+const SUBCOMMANDS = ['init', 'dev', 'tui', 'ship', 'ship-tui', 'pack', 'play', 'shot', 'autotest', 'classify', 'bake-icons', 'pack-sdk', 'firecracker-build', 'help'] as const;
 
 type HelpCommand = typeof SUBCOMMANDS[number];
 
@@ -78,9 +78,25 @@ const SUBCOMMAND_DOC: Record<HelpCommand, { summary: string; usage: string[]; de
       'rjit ship <cart-name> --tui.',
     ],
   },
+  pack: {
+    summary: 'build a game package (.rjpkg)',
+    usage: ['rjit pack hmsc [--out path/to/hmsc.rjpkg]'],
+    detail: [
+      'Builds the hmsc cartridge bundle and emits the package manifest plus',
+      'the slice-1 binary mapfile under maps/city.map.',
+    ],
+  },
+  play: {
+    summary: 'run a game package with the package player',
+    usage: ['rjit play path/to/game.rjpkg'],
+    detail: [
+      'Builds zig-out/bin/rjit-player when missing, then boots that player',
+      'binary with the package path.',
+    ],
+  },
   shot: {
     summary: "capture a cart's OWN rendered frame headless (never the desktop)",
-    usage: ['rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S]'],
+    usage: ['rjit shot <cart> [--out path.png] [--route /r] [--frames N] [--timeout S] [-- app-args...]'],
     detail: [
       'SELFSHOT-0606: desktop/X11 capture of the user\'s system is BANNED.',
       'This boots the cart\'s shipped binary with a HIDDEN window',

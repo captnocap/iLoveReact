@@ -27,9 +27,24 @@ export function readFile(path: string): string | null {
   return callHost<string | null>('__fs_read', null, path);
 }
 
+/** Read a file as base64. Use this for binary payloads. */
+export function readFileBase64(path: string): string | null {
+  return callHost<string | null>('__fs_read_base64', null, path);
+}
+
+/** Read the ENTITIES text lump from an RJMP mapfile through the Zig reader. */
+export function readRjmpEntities(path: string): string | null {
+  return callHost<string | null>('__fs_read_rjmp_entities', null, path);
+}
+
 /** Write a UTF-8 string to a file (creating or truncating). Returns true on success. */
 export function writeFile(path: string, content: string): boolean {
   return callHost<boolean>('__fs_write', false, path, content);
+}
+
+/** Atomically write base64-decoded bytes via temp file + fsync + rename. */
+export function writeFileBase64Atomic(path: string, contentBase64: string): boolean {
+  return callHost<boolean>('__fs_write_base64_atomic', false, path, contentBase64);
 }
 
 /** True if a file or directory exists at `path`. */

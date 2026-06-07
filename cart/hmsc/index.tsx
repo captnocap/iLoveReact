@@ -15,6 +15,7 @@ import {
   readStoredGameState,
   saveGameState,
 } from './state/gameState';
+import { readPackagedGameState } from './state/packageBoot';
 import { recordAndPublishGameEvent } from './events/gameEvents';
 import { useHmscEventRules } from './events/useHmscEventRules';
 import { HmscGameplayRig } from './gameplay/HmscGameplayRig';
@@ -34,7 +35,7 @@ function commandEntry(kind: CommandEntry['kind'], text: string): CommandEntry {
 }
 
 function initialGameState(): GameState {
-  return readStoredGameState() ?? createInitialGameState();
+  return readPackagedGameState() ?? readStoredGameState() ?? createInitialGameState();
 }
 
 export default function HmscCart() {

@@ -41,3 +41,24 @@ export {
   decodeRleRow,
 } from './rle';
 export type { RleEntry, RleRows, RleGrid } from './rle';
+export {
+  LUMP_MAGIC,
+  LUMP_FORMAT_VERSION,
+  LUMP_ALIGNMENT,
+  LUMP_HEADER_BYTES,
+  LUMP_DIRECTORY_ENTRY_BYTES,
+  LUMP_ENCODING,
+  MAP_LUMP,
+  textBytes,
+  bytesText,
+  bytesToBase64,
+  base64ToBytes,
+  writeLumpContainer,
+  readLumpContainer,
+  findLump,
+  encodeBinaryRleGrid,
+  decodeBinaryRleGrid,
+  quantizeHeightfield,
+  dequantizeHeightfield,
+} from './lumps';
+export type { LumpEncoding, LumpInput, LumpDirectoryEntry, LumpRecord, QuantizedHeightfield } from './lumps';

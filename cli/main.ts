@@ -16,7 +16,9 @@ import * as help from './commands/help.ts';
 import * as init from './commands/init.ts';
 import * as lab from './commands/lab.ts';
 import * as metafileGate from './commands/metafile-gate.ts';
+import * as pack from './commands/pack.ts';
 import * as packSdk from './commands/pack-sdk.ts';
+import * as play from './commands/play.ts';
 import * as pushBundle from './commands/push-bundle.ts';
 import * as ship from './commands/ship.ts';
 import * as shipTui from './commands/ship-tui.ts';
@@ -44,7 +46,9 @@ const COMMANDS: Record<string, Command> = {
   'init': init,
   'lab': lab,
   'metafile-gate': metafileGate,
+  'pack': pack,
   'pack-sdk': packSdk,
+  'play': play,
   'push-bundle': pushBundle,
   'ship': ship,
   'ship-tui': shipTui,

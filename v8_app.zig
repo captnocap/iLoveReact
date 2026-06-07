@@ -3426,6 +3426,10 @@ fn appInit() void {
     // framework/v8_ingredients.zig for the contract (one row + one
     // build option + one scripts/ship grep).
     ingredients.registerAll();
+    // process.argv/env/cwd for GPU-host carts. TUI carts already register the
+    // CLI surface before eval; shipped GUI carts need the same package-argument
+    // contract without pulling in Node.
+    cli_bindings.registerAll();
     // __hostFlush — single registration site shared with v8_tui_app.
     // Mode was set to `.queue` in main() so per-commit payloads go into
     // the queue and the engine drains them at the right frame phase.
@@ -3488,6 +3492,13 @@ fn appInit() void {
         \\};
         \\globalThis.__beginJsEvent = function(){};
         \\globalThis.__endJsEvent = function(){};
+        \\globalThis.process = {
+        \\  get argv() { return JSON.parse(__argv()); },
+        \\  env: new Proxy({}, { get: (_, k) => __env(String(k)) }),
+        \\  exit: (code) => __exit(code | 0),
+        \\  cwd: () => __cwd(),
+        \\  platform: 'linux',
+        \\};
     );
 
     // Persistent-store substrate for runtime/hooks/localstore. Best-effort —
@@ -3922,6 +3933,15 @@ pub fn main() !void {
     g_inline_glyphs_by_node = std.AutoHashMap(u32, InlineGlyphAlloc).init(g_alloc);
 
     g_root = .{};
+
+    // process.argv for GPU-host carts. The headless/TUI path already installs
+    // this before eval; the GUI shell needs the same argv contract so shipped
+    // carts can receive package paths and other runtime arguments.
+    const raw_argv = try std.process.argsAlloc(g_alloc);
+    const script_argv = try g_alloc.alloc([]const u8, raw_argv.len);
+    script_argv[0] = if (@hasDecl(build_options, "app_name")) build_options.app_name else "v8_app";
+    for (raw_argv[1..], 1..) |a, i| script_argv[i] = a;
+    cli_bindings.setArgv(@constCast(script_argv));
 
     if (std.posix.getenv("ZIGOS_WINDOW_CHILD") != null) {
         g_is_window_child = true;

@@ -967,6 +967,30 @@ pub fn build(b: *std.Build) void {
     const game_camera_test_step = b.step("test-game-camera", "Run the game camera behavior tests");
     game_camera_test_step.dependOn(&run_game_camera_test.step);
 
+    // ── Platform mapfile behavior tests (PLATMOD slice 1, P4) ─────
+    // Exercises framework/world/mapfile.zig: RJMP lump directory reads,
+    // future-lump skip tolerance, and binary rle16 count/value decode.
+    const world_mapfile_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world/mapfile.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const world_mapfile_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_mapfile.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    world_mapfile_test_mod.addImport("world_mapfile", world_mapfile_mod_for_tests);
+    const world_mapfile_test = b.addTest(.{
+        .name = "world-mapfile-test",
+        .root_module = world_mapfile_test_mod,
+    });
+    const run_world_mapfile_test = b.addRunArtifact(world_mapfile_test);
+    const world_mapfile_test_step = b.step("test-world-mapfile", "Run the platform mapfile reader tests");
+    world_mapfile_test_step.dependOn(&run_world_mapfile_test.step);
+
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key
     // packing engine.zig produces and ifttt.zig + useIFTTT.ts decode.

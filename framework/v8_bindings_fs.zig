@@ -3,6 +3,7 @@
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
+const mapfile = @import("world/mapfile.zig");
 
 
 fn currentContext(info: v8.FunctionCallbackInfo) v8.Context {
@@ -384,6 +385,32 @@ fn fsRead(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     setString(info, data);
 }
 
+fn fsReadBase64(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(path_buf);
+
+    const data = std.fs.cwd().readFileAlloc(alloc, path_buf, 64 * 1024 * 1024) catch {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(data);
+
+    const enc = std.base64.standard.Encoder;
+    const out_len = enc.calcSize(data.len);
+    const out = alloc.alloc(u8, out_len) catch {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(out);
+    _ = enc.encode(out, data);
+    setString(info, out);
+}
+
 fn fsWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const alloc = std.heap.page_allocator;
@@ -411,6 +438,96 @@ fn fsWrite(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         return;
     };
     setBool(info, true);
+}
+
+fn fsWriteBase64Atomic(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setBool(info, false);
+        return;
+    };
+    defer alloc.free(path_buf);
+    const b64_buf = argStringAlloc(alloc, info, 1) orelse {
+        setBool(info, false);
+        return;
+    };
+    defer alloc.free(b64_buf);
+
+    const dec = std.base64.standard.Decoder;
+    const decoded_len = dec.calcSizeForSlice(b64_buf) catch {
+        setBool(info, false);
+        return;
+    };
+    const decoded = alloc.alloc(u8, decoded_len) catch {
+        setBool(info, false);
+        return;
+    };
+    defer alloc.free(decoded);
+    dec.decode(decoded, b64_buf) catch {
+        setBool(info, false);
+        return;
+    };
+
+    if (std.mem.lastIndexOfScalar(u8, path_buf, '/')) |idx| {
+        std.fs.cwd().makePath(path_buf[0..idx]) catch {};
+    }
+    var tmp_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const tmp_path = std.fmt.bufPrint(&tmp_buf, "{s}.tmp.{d}", .{ path_buf, std.time.nanoTimestamp() }) catch {
+        setBool(info, false);
+        return;
+    };
+    var file = std.fs.cwd().createFile(tmp_path, .{ .truncate = true }) catch {
+        setBool(info, false);
+        return;
+    };
+    file.writeAll(decoded) catch {
+        file.close();
+        std.fs.cwd().deleteFile(tmp_path) catch {};
+        setBool(info, false);
+        return;
+    };
+    file.sync() catch {
+        file.close();
+        std.fs.cwd().deleteFile(tmp_path) catch {};
+        setBool(info, false);
+        return;
+    };
+    file.close();
+    std.fs.cwd().rename(tmp_path, path_buf) catch {
+        std.fs.cwd().deleteFile(tmp_path) catch {};
+        setBool(info, false);
+        return;
+    };
+    setBool(info, true);
+}
+
+fn fsReadRjmpEntities(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const alloc = std.heap.page_allocator;
+    const path_buf = argStringAlloc(alloc, info, 0) orelse {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(path_buf);
+
+    const data = std.fs.cwd().readFileAlloc(alloc, path_buf, 64 * 1024 * 1024) catch {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(data);
+
+    const known = [_]u32{mapfile.LumpType.entities};
+    const lumps = mapfile.readLumps(alloc, data, &known) catch {
+        setNull(info);
+        return;
+    };
+    defer alloc.free(lumps);
+    const entities = mapfile.findLump(lumps, mapfile.LumpType.entities) orelse {
+        setNull(info);
+        return;
+    };
+    setString(info, entities.data);
 }
 
 fn fsExists(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
@@ -632,7 +749,10 @@ fn fsScandir(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 pub fn registerFs(vm: anytype) void {
     _ = vm;
     v8_runtime.registerHostFn("__fs_read", fsRead);
+    v8_runtime.registerHostFn("__fs_read_base64", fsReadBase64);
+    v8_runtime.registerHostFn("__fs_read_rjmp_entities", fsReadRjmpEntities);
     v8_runtime.registerHostFn("__fs_write", fsWrite);
+    v8_runtime.registerHostFn("__fs_write_base64_atomic", fsWriteBase64Atomic);
     v8_runtime.registerHostFn("__fs_scandir", fsScandir);
     v8_runtime.registerHostFn("__fs_deletefile", fsDeletefile);
     v8_runtime.registerHostFn("__fs_readfile", fsReadfile);

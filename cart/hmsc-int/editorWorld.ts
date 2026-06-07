@@ -39,6 +39,7 @@ import { addSurfaceRegion, placeCell } from '../hmsc/world/grid';
 import { propKindDefinition } from '../hmsc/world/propKinds';
 import { nextUniqueId } from '../hmsc/world/idgen';
 import { rectsOverlap } from '../hmsc/world/rects';
+import { writeHmscPackageFromState } from './packageMap';
 
 // The editor always works on the same GameState shape the game uses. Load the
 // authored world if one exists, else a fresh demo world — identical to the game's
@@ -51,7 +52,9 @@ export function loadEditorWorld(): GameState {
 // 'hmsc'/'game-state' (the exact key cart/hmsc/index.tsx reads at boot) and
 // mirrors the hot-reload snapshot, so a running dev game picks it up too.
 export function compileEditorWorld(state: GameState): GameState {
-  return saveGameState(state);
+  const saved = saveGameState(state);
+  writeHmscPackageFromState(saved);
+  return saved;
 }
 
 // Reset the authored world to the fresh demo city. Returns the new state; the
