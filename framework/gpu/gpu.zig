@@ -1323,6 +1323,54 @@ fn capEncloses(outer: StaticSurfaceCapture, inner: StaticSurfaceCapture) bool {
         inner.start.images >= outer.start.images and inner.end.images <= outer.end.images;
 }
 
+fn writeStaticCaptureTraceLine(writer: anytype, entry_index: usize, key_sample: []const u8, width: u32, height: u32, start: PrimitiveCounts, end: PrimitiveCounts) !void {
+    try writer.print("#{d} key=\"{s}\" {d}x{d} r{d} g{d} c{d} cap{d} p{d} img{d}", .{
+        entry_index,
+        key_sample,
+        width,
+        height,
+        @as(i64, end.rects) - @as(i64, start.rects),
+        @as(i64, end.glyphs) - @as(i64, start.glyphs),
+        @as(i64, end.curves) - @as(i64, start.curves),
+        @as(i64, end.capsules) - @as(i64, start.capsules),
+        @as(i64, end.polys) - @as(i64, start.polys),
+        @as(i64, end.images) - @as(i64, start.images),
+    });
+}
+
+pub fn testingFormatStaticCaptureTrace(buffer: []u8, key: []const u8, width: u32, height: u32, start: PrimitiveCounts, end: PrimitiveCounts) []const u8 {
+    var sample: [64]u8 = [_]u8{0} ** 64;
+    const sample_len = @min(key.len, sample.len);
+    if (sample_len > 0) @memcpy(sample[0..sample_len], key[0..sample_len]);
+    var stream = std.io.fixedBufferStream(buffer);
+    writeStaticCaptureTraceLine(stream.writer(), 0, sample[0..sample_len], width, height, start, end) catch {};
+    return buffer[0..stream.pos];
+}
+
+pub fn testingResetTextAttributionState() void {
+    text.testingResetAttributionState();
+}
+
+pub fn testingRecordTextTrace(sample: []const u8, size_px: u16, render_size_px: u16) void {
+    text.testingRecordTextTrace(sample, size_px, render_size_px);
+}
+
+pub fn testingBumpTextAtlasMisses(count: usize) void {
+    text.testingBumpAtlasMisses(count);
+}
+
+pub fn testingResetTextFrame() void {
+    text.reset();
+}
+
+pub fn testingLastTextAtlasMissCount() usize {
+    return text.lastAtlasMissCount();
+}
+
+pub fn testingLastTextTraceSummary() []const u8 {
+    return text.lastTraceSummary();
+}
+
 fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
     g_last_static_capture_count = g_static_capture_count;
     var stream = std.io.fixedBufferStream(&g_last_static_capture_trace);
@@ -1334,18 +1382,7 @@ fn renderStaticSurfaceCaptures(device: *wgpu.Device, queue: *wgpu.Queue) void {
         const start = cap.start;
         const end = cap.end;
         if (wrote_any) writer.writeAll(" | ") catch break;
-        writer.print("#{d} key=\"{s}\" {d}x{d} r{d} g{d} c{d} cap{d} p{d} img{d}", .{
-            cap.entry_index,
-            key_sample,
-            cap.width,
-            cap.height,
-            @as(i64, end.rects) - @as(i64, start.rects),
-            @as(i64, end.glyphs) - @as(i64, start.glyphs),
-            @as(i64, end.curves) - @as(i64, start.curves),
-            @as(i64, end.capsules) - @as(i64, start.capsules),
-            @as(i64, end.polys) - @as(i64, start.polys),
-            @as(i64, end.images) - @as(i64, start.images),
-        }) catch break;
+        writeStaticCaptureTraceLine(writer, cap.entry_index, key_sample, cap.width, cap.height, start, end) catch break;
         wrote_any = true;
     }
     g_last_static_capture_trace_len = stream.pos;

@@ -284,6 +284,23 @@ fn recordTextTrace(text: []const u8, size_px: u16, render_size_px: u16) void {
     g_text_trace_count += 1;
 }
 
+pub fn testingResetAttributionState() void {
+    g_glyph_count = 0;
+    g_last_glyph_count = 0;
+    g_atlas_miss_count = 0;
+    g_last_atlas_miss_count = 0;
+    g_text_trace_count = 0;
+    g_last_text_trace_summary_len = 0;
+}
+
+pub fn testingRecordTextTrace(text: []const u8, size_px: u16, render_size_px: u16) void {
+    recordTextTrace(text, size_px, render_size_px);
+}
+
+pub fn testingBumpAtlasMisses(n: usize) void {
+    g_atlas_miss_count += n;
+}
+
 /// Pick the right face for the active weight and ensure its FreeType pixel
 /// size matches `size_px`. Returns the face that subsequent FT calls should
 /// target. Tracks size per face so flipping bold on/off doesn't thrash the

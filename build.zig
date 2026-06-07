@@ -849,6 +849,38 @@ pub fn build(b: *std.Build) void {
     const layout_wrap_test_step = b.step("test-layout-wrap", "Run the layout wrap unit tests");
     layout_wrap_test_step.dependOn(&run_layout_wrap_test.step);
 
+    // ── GPU attribution unit tests ──────────────────────────────
+    // Exercises native text/capture attribution producers without going
+    // through the TS bridge: atlas-miss rollover, text trace summaries,
+    // and StaticSurface capture trace formatting.
+    const gpu_attribution_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing_gpu_attribution.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    gpu_attribution_test_mod.addImport("wgpu", wgpu_mod);
+    gpu_attribution_test_mod.addIncludePath(b.path("."));
+    gpu_attribution_test_mod.addIncludePath(b.path("framework/ffi"));
+    if (target.result.os.tag == .linux) {
+        if (sysroot) |sr| {
+            gpu_attribution_test_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include/freetype2", .{sr}) });
+            gpu_attribution_test_mod.addIncludePath(.{ .cwd_relative = b.fmt("{s}/usr/include", .{sr}) });
+        } else {
+            gpu_attribution_test_mod.addIncludePath(.{ .cwd_relative = "/usr/include/freetype2" });
+            gpu_attribution_test_mod.addIncludePath(.{ .cwd_relative = "/usr/include/x86_64-linux-gnu" });
+        }
+    } else if (target.result.os.tag == .macos) {
+        gpu_attribution_test_mod.addIncludePath(.{ .cwd_relative = "/opt/homebrew/include/freetype2" });
+    }
+    const gpu_attribution_test = b.addTest(.{
+        .name = "gpu-attribution-test",
+        .root_module = gpu_attribution_test_mod,
+    });
+    const run_gpu_attribution_test = b.addRunArtifact(gpu_attribution_test);
+    const gpu_attribution_test_step = b.step("test-gpu-attribution", "Run GPU attribution unit tests");
+    gpu_attribution_test_step.dependOn(&run_gpu_attribution_test.step);
+
     // ── Game physics/movement behavior tests (WO-1, P4) ───────────
     // Exercises framework/game/physics.zig (+ movement.zig via its
     // re-export) with packed input buffers: jump arc, gravity, ground
