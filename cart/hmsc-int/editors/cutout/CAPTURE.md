@@ -1,10 +1,14 @@
 # editors/cutout — EDITOR-CAPTURE note (CUTOUTAPP-0605)
 
-> **FROZEN (AGNOSTICPAINT-0606):** /cutout is frozen pending workbench
-> agnostic-paint parity — no new features land here; the workbench PAINT
-> bench (editors/workbench/paint/) is the one surface going forward. See
-> WORKBENCH.md §6 step 8. The flip (deletion) is its own commit after the
-> user's pass.
+> **THE ROUTE IS DEAD (CUTOUTFLIP-0606):** the user passed the bench and
+> ruled the flip ("its at least got everything from the route in there so
+> its g2g nuke that shit") — `CutoutRoute.tsx` is deleted, `/cutout` and
+> its nav icon are deregistered, EffectModal lives at
+> `editors/workbench/paint/EffectModal.tsx`. What REMAINS in this directory
+> (ToolRail · Inspector · StatusBar · ModelPreview · models/extraction/
+> sources/draft/stream + tests) are the workbench PAINT bench's shared
+> modules — live code, consumed by `editors/workbench/paint/` and the
+> vehicle/character lenses. See WORKBENCH.md §6 step 8 (done).
 
 The cutout APP EXPERIENCE remade as its own route in the one shell — the
 full-canvas, layer-stack, smart-select image/texture editor, for painting

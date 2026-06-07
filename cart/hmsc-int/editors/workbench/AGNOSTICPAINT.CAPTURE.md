@@ -7,10 +7,12 @@ materialize something and it gets then put on the face of a building or a
 shirt, or anything."
 
 Parity source: `editors/cutout/CutoutRoute.tsx` re-read END TO END at its
-CURRENT working-tree state (1160 lines, including the paint lane's
-in-flight brush work where visible). The /cutout surface is FROZEN pending
-this parity (its CAPTURE carries the freeze note); it dies in its own flip
-commit after the user's pass.
+working-tree state at capture (1160 lines, including the paint lane's
+in-flight brush work where visible). **THE FLIP LANDED (CUTOUTFLIP-0606)**:
+the user passed the bench ("its at least got everything from the route in
+there so its g2g nuke that shit"), the route is DELETED, the freeze is
+LIFTED — the bench is THE painting surface. The Cutout:NNN line references
+below cite the dead file's last state (git history) as the parity record.
 
 The workbench translation (shape-honest, capability-total): the PAINT
 source's roster lists every paintable THING (figures · vehicles · stored
@@ -28,7 +30,7 @@ Landing legend: **R** roster · **P** panel · **S** stage (the bench) ·
 | # | source | capability | landing |
 |---|---|---|---|
 | A1 | Cutout:371-378 newCanvas (clamped PAINT.tuning.canvas) | blank canvas at W×H | **R** 'blank canvas' row + **P** TARGET w/h num fields + new-canvas act (the SOURCE tab's size editor stays too — same component) |
-| A2 | Cutout:380-395 loadImage (identifyImage, stemOf, useFileDrop anywhere) | image file as canvas + smart-select source | **S/ST** — file drop on the bench → store.openImage; SOURCE tab load path stays |
+| A2 | Cutout:380-395 loadImage (identifyImage, stemOf, useFileDrop anywhere) | image file as canvas + smart-select source | **S/ST** — open-image picker + file drop on the bench → store.openImage; no SOURCE tab path field |
 | A3 | Cutout:299-308 gray source async per target | edge snap / refine source | **ST** (same loadGraySource wire) |
 | A4 | Cutout:555-562 paintOnMaterial | a registry texture as the canvas under the paint | **R** MATERIALS + RECIPES rows → store.openMaterial (Effect underlay) |
 | A5 | Cutout:464-505 openModelTarget (figure) | paint a figure part: saved doc resolve, TATTOODRAFT slot resume, overlay reopen, head face-layer underlay, OPEN-SLOT intent write | **R** figure row + **P** `part` enum (FIGURE_PAINT_TARGETS w/ painted ● in opts? — ● rides the panel painted-parts val + roster detail) |
@@ -74,7 +76,7 @@ Landing legend: **R** roster · **P** panel · **S** stage (the bench) ·
 | # | source | capability | landing |
 |---|---|---|---|
 | E1 | Cutout:761-891 Workbench mount | CutoutToolRail · PaintSurface (underlay: model bg+face layers / material Effect) · ModelPreview3D above Inspector (model targets) · Inspector · CutoutStatusBar · backend gated on srcPath · onDirty wiring | **S** PaintBench.tsx — the ONE surface, generalized from the character lens's mount (which becomes a thin preload door) |
-| E2 | Cutout:888,928-1007 EffectModal (custom WGSL, twig'd draft, live/stale preview, add→gallery) | custom FX authoring | **DEFERRED-2** (carried from ONEPAINTER K2a): route-local in the frozen file; lands at the flip commit when EffectModal extracts to the bench. Until then the FX button defers with a message |
+| E2 | Cutout:888,928-1007 EffectModal (custom WGSL, twig'd draft, live/stale preview, add→gallery) | custom FX authoring | **S** `workbench/paint/EffectModal.tsx` (CUTOUTFLIP-0606: extracted verbatim at the flip; drafts twig under /workbench; the FX button opens it — deferral 2 CLOSED) |
 
 ## Deferred (listed, never dropped)
 
@@ -82,8 +84,9 @@ Landing legend: **R** roster · **P** panel · **S** stage (the bench) ·
    thumbnails): the frame's RosterRow is icon+label today. Lands as a
    RosterRow `swatch` extension when the frame grows it — capability
    (opening the thing) is fully present; the swatch is recognition sugar.
-2. **EffectModal in the bench** — extracts from the frozen CutoutRoute at
-   the flip commit (it cannot be imported from there today; ONEPAINTER K2a).
+2. ~~**EffectModal in the bench** — extracts from the frozen CutoutRoute at
+   the flip commit (it cannot be imported from there today; ONEPAINTER K2a).~~
+   DONE at the flip (CUTOUTFLIP-0606) — see E2.
 3. **modelPick expand-state twig** (D1) — obviated by the panel-enum
    translation; noted so the audit is total.
 

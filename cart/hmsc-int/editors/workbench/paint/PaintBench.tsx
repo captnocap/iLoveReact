@@ -19,7 +19,7 @@ import { usePaintEditor, PaintSurface, PAINT, type PaintEditorState } from '../.
 // the same grid truth the sculpt canvas shows, as a light contour underlay
 import { DEPTH_HINT_WGSL, PAINT_EDITOR_TUNING, depthHintData, depthHintGrid } from '../../characters/paintKit';
 import { editorTunables } from '../../tunables';
-import type { PartId } from '../../../game/figure/shapes';
+import { paintTargetPart, type PaintTargetId } from '../../../game/figure/shapes';
 import { readRouteTwigState, useRouteTwigState } from '../../twigs';
 import { CutoutToolRail, LinearRailSlider } from '../../cutout/ToolRail';
 // IMGOPEN-0606: the original cutout app's ingest, restored — the picker
@@ -28,6 +28,9 @@ import { pickImageFile } from '../../cutout/sources';
 import { CutoutInspector, type BackendChoice } from '../../cutout/Inspector';
 import { CutoutStatusBar } from '../../cutout/StatusBar';
 import { ModelPreview3D } from '../../cutout/ModelPreview';
+// CUTOUTFLIP-0606: the custom-WGSL FX modal, extracted from the retired
+// /cutout route — AGNOSTICPAINT deferral 2 closed, the FX button is live.
+import { EffectModal } from './EffectModal';
 import type { PaintBenchStore } from './store';
 
 const { Chip } = GAME_CHROME;
@@ -74,6 +77,7 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
       const cfg = i >= 0 && i < s.layers.length ? s.layers[i].config : null;
       return (cfg?.colors ?? s.defaults.colors).slice();
     },
+    addImageLayer: s.addImageLayer,
   };
 
   // BRUSHTWIG-0606 (carried): a restored document must not clobber the live
@@ -110,8 +114,15 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
     editorTunables().write('sculpt-camera.depthHint.opacity', v);
     bumpHint((t) => t + 1);
   };
+  // BENCHHINT-0606 (the live <BenchTarget> crash): a figure target is a
+  // PAINT TARGET — a part OR a limb segment ('lUpperArm' …). The hint reads
+  // part GRIDS, so a segment must resolve to ITS part first (the
+  // ModelPreview FigurePartMesh precedent: one pipe sculpted once; the
+  // painting is what's per-segment, not the mesh).
   const hintGrid = useMemo(
-    () => (work.model?.family === 'figure' && model ? depthHintGrid(model as BodyDocument, work.model.part as PartId) : null),
+    () => (work.model?.family === 'figure' && model
+      ? depthHintGrid(model as BodyDocument, paintTargetPart(work.model.part as PaintTargetId))
+      : null),
     [model, work.model],
   );
 
@@ -147,6 +158,10 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [work.model, work.modelBg, work.modelLayers, work.textureId, work.dims.w, work.dims.h, showDepthHint, hintGrid, hintOpacity]);
 
+  // CUTOUTFLIP-0606: the FX modal is the bench's own now — twig'd open
+  // state, so a hot update mid-shader-edit reopens where you were.
+  const [fxModal, setFxModal] = useRouteTwigState('/workbench', 'fxModalOpen', false);
+
   const inspector = (
     <CutoutInspector
       s={s}
@@ -158,8 +173,7 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
       edited={store.edited}
       lastSavedAt={store.lastSavedAt}
       onNewCanvas={(w, h) => store.newCanvas(w, h)}
-      onLoadImage={(p) => { void store.openImage(p); }}
-      onOpenEffectModal={() => store.setStatus('custom WGSL FX opens in /cutout until the flip (its modal is route-local — AGNOSTICPAINT deferral 2)')}
+      onOpenEffectModal={() => setFxModal(true)}
       fill={!!work.model}
     />
   );
@@ -169,7 +183,7 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
     : 'save to library';
 
   return (
-    <Col style={{ flexGrow: 1, minWidth: 0, minHeight: 0 }}>
+    <Col style={{ flexGrow: 1, minWidth: 0, minHeight: 0, position: 'relative' }}>
       <Row style={{ flexGrow: 1, flexBasis: 0, minHeight: 0 }}>
         <CutoutToolRail s={s} />
         <PaintSurface s={s} underlay={underlay} />
@@ -213,6 +227,8 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
         <Chip label="extract cutout" color={store.edited ? 'accent' : 'dim'} onPress={store.extractCurrent} />
       </Row>
       <CutoutStatusBar s={s} edited={store.edited} lastSavedAt={store.lastSavedAt} />
+      {/* custom-WGSL modal — last child of the bench root (overlay rule) */}
+      {fxModal ? <EffectModal s={s} onClose={() => setFxModal(false)} /> : null}
     </Col>
   );
 }

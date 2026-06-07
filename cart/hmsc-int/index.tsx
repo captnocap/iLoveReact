@@ -15,7 +15,7 @@ import type { Building, BuildingFaceRole, BuildingSkin, GameState } from '../hms
 import { applyFaceSkin } from './buildingEditor';
 import { compileEditorWorld, emptyEditorWorld, placeBuilding, placeMarker, placeWorldProp } from './editorWorld';
 import { cellCenterToWorld, cellKey as gridCellKey } from '../hmsc/world/grid';
-import { type ChunkFloor, floorsToLandforms } from './chunkFloor';
+import { type ChunkFloor, floorsFromEditorWorld, floorsToLandforms } from './chunkFloor';
 import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi, type BrushSettings, type CanvasView2D } from './PaintCanvas';
@@ -24,8 +24,9 @@ import { RightPanel, type TabId } from './RightPanel';
 import { placementCellRect, resolvePlaceable, type Placement, type PlaceCat } from './placements';
 import { buildObjectWorld } from './objectPreview';
 import { useKindTextures, kindTexturesFor } from './kindTextures';
-import { serializeMap, deserializeMap, emptyMap, paintedCenter, isSaneView2d, type MapSnapshot, type EditorWorld } from './mapStore';
+import { serializeMap, deserializeMap, emptyMap, hasAuthoredMapContent, paintedCenter, isSaneView2d, type MapSnapshot, type EditorWorld } from './mapStore';
 import { Chrome, MapsMenu, EventLog } from './shell/chrome';
+import { NotificationOverlayHost } from './shell/notifications';
 import { loadEvents, saveEvents, type EditNote, type EditEvent } from './editLog';
 import { listMaps, uniqueMapName, sanitizeMapName, mapExists, deleteMap } from './projects';
 import { TILE_UNITS, HEIGHT_LIMIT } from './heightData';
@@ -45,9 +46,7 @@ import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
-import { CharactersRoute } from './editors/characters/CharactersRoute';
 import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
-import { CutoutRoute } from './editors/cutout/CutoutRoute';
 import { ComposeRoute } from './editors/compose/ComposeRoute';
 import { SettingsRoute } from './editors/settings/SettingsRoute';
 import { editorChannel } from './editors/store';
@@ -153,7 +152,7 @@ function normalizeBrushSettings(value: Partial<BrushSettings> | undefined): Brus
 // workspace restore (applyPayload, which remounts PaintCanvas with the decoded map).
 function readInitialView(): Partial<MapPayload> {
   try {
-    const stem = readFile(lastPointerPath(CART))?.trim();
+    const stem = readInitialMapStem();
     if (!stem) return {};
     const text = readFile(sessionPathFor(CART, stem));
     if (!text) return {};
@@ -161,6 +160,28 @@ function readInitialView(): Partial<MapPayload> {
     return env?.payload ?? {};
   } catch {
     return {};
+  }
+}
+
+function readInitialMapStem(): string | null {
+  try {
+    const stem = readFile(lastPointerPath(CART))?.trim();
+    return stem && stem.length > 0 ? stem : null;
+  } catch {
+    return null;
+  }
+}
+
+function readInitialLegacyPieceMapName(): string | null {
+  const stem = readInitialMapStem();
+  if (!stem) return null;
+  const initial = readInitialView();
+  if (!initial.world) return null;
+  try {
+    const world = deserializeMap(initial.world);
+    return hasAuthoredMapContent(world) ? stem : null;
+  } catch {
+    return null;
   }
 }
 
@@ -207,6 +228,7 @@ function EditorShell() {
   // is baseWorld + the placements applied as real buildings/props (below), so
   // WorldStatics draws them — it only rebuilds when placements change, not on paint.
   const baseWorld = useMemo(emptyEditorWorld, []);
+  const [legacyPieceMapName] = useState(readInitialLegacyPieceMapName);
   const [floors, setFloors] = useState<ChunkFloor[]>([]);
   // Churn probe: PaintCanvas mirrors the focused chunks here (throttled). Each call
   // re-renders the whole cart AND rebuilds previewWorld — so log every one.
@@ -343,6 +365,9 @@ function EditorShell() {
       for (const c of w.chunks.values()) for (let i = 0; i < c.tiles.idx.length; i++) if (c.tiles.idx[i] >= 0) painted++;
       console.warn(`[mapgone] applyPayload: world=${p.world ? 'present' : 'MISSING'} chunks=${w.chunks.size} focus=${w.focus.size} painted=${painted} placements=${w.placements.length}`);
     }
+    const restoredFloors = floorsFromEditorWorld(w);
+    console.warn(`[mapgone] applyPayload floors: restored=${restoredFloors.length} source=payload`);
+    setFloors(restoredFloors);
     placeSeq.current = Math.max(placeSeq.current, maxPlacementSeq(w.placements));
     setPlacements(w.placements);
     if (applyTwig) setSelPlaceId(p.sel ?? null);
@@ -531,12 +556,14 @@ function EditorShell() {
   const newMap = useCallback(() => {
     flushCurrent(); // don't lose the current map's just-painted edits
     const name = uniqueMapName('untitled');
-    const payload: MapPayload = { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, brush, world: serializeMap(emptyMap()) };
+    const fresh = emptyMap();
+    const payload: MapPayload = { fx, fy, yaw, tool, tile, layer, tab, notes, showGrid, brush, world: serializeMap(fresh) };
     writeMapFile(name, payload);
     placeSeq.current = 0;
     setPlacements([]);
+    setFloors(floorsFromEditorWorld(fresh));
     setSelPlaceId(null);
-    setSeedWorld(emptyMap());
+    setSeedWorld(fresh);
     setWorldEpoch((e) => e + 1);
     ws.setStem(name);
     ws.history.clear();
@@ -800,7 +827,11 @@ function EditorShell() {
   // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/characters' ? 'characters' : route.path === '/vehicles' ? 'vehicles' : route.path === '/cutout' ? 'cutout' : route.path === '/compose' ? 'compose' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/vehicles' ? 'vehicles' : route.path === '/compose' ? 'compose' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const [editorPanesMounted, setEditorPanesMounted] = useState(activeRoute === 'editor');
+  useEffect(() => {
+    if (activeRoute === 'editor') setEditorPanesMounted(true);
+  }, [activeRoute]);
   // VIEWRUNAWAY-0605: the editor stays MOUNTED under route overlays, but it
   // must go input-DEAF there — the key bus is global, so a WASD walk in
   // /build was also driving the buried canvas's drift (700px/s ÷ zoom for
@@ -817,7 +848,7 @@ function EditorShell() {
   });
 
   return (
-    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: '#080d16' }}>
+    <Box style={{ width: '100%', height: '100%', flexDirection: 'column', position: 'relative', backgroundColor: '#080d16' }}>
       <Chrome
         mapName={ws.stem}
         activeRoute={activeRoute}
@@ -832,9 +863,7 @@ function EditorShell() {
         onEditor={() => nav.push('/')}
         onTest={() => nav.push('/test')}
         onLabs={() => nav.push('/labs')}
-        onCharacters={() => nav.push('/characters')}
         onVehicles={() => nav.push('/vehicles')}
-        onCutout={() => nav.push('/cutout')}
         onCompose={() => nav.push('/compose')}
         onPerf={() => nav.push('/log')}
         onSettings={() => nav.push('/settings')}
@@ -846,65 +875,67 @@ function EditorShell() {
         onCompile={compileToGame}
       />
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
-        <QuadSplit
-          fx={fx}
-          fy={fy}
-          onResize={onResize}
-          topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />}
-          topRight={
-            <RightPanel
-              tab={tab}
-              onTab={setTab}
-              notes={notes}
-              onNotes={setNotes}
-              showGrid={showGrid}
-              onShowGrid={setShowGrid}
-              onResetLayout={resetLayout}
-              onClearNotes={clearNotes}
-              lastSavedAt={ws.lastSavedAt}
-              onPlace={placeObject}
-              activePlaceable={activePlaceable}
-              onArmPlaceable={armPlaceable}
-            />
-          }
-          bottomLeft={
-            <MemoPaintCanvas
-              key={`${ws.stem}#${worldEpoch}`}
-              initialWorld={seedWorld}
-              initialView={seedView}
-              apiRef={paintApiRef}
-              onEdit={onCanvasEdit}
-              tool={tool}
-              onTool={setTool}
-              tile={tile}
-              onTile={setTile}
-              layer={layer}
-              onLayer={setLayer}
-              brush={brush}
-              onBrushChange={updateBrush}
-              place={place}
-              showGrid={showGrid}
-              onFloors={onFloors}
-              onEditBegin={snapshotForUndo}
-              wasdFocused={atEditor && wasdQuad === 'canvas'}
-              onWasdFocus={focusCanvas}
-              select={tileSelect}
-            />
-          }
-          bottomRight={
-            <Pane label="preview">
-              <IsoPreview
-                key={`${ws.stem}#${worldEpoch}`}
-                state={previewWorld}
-                wasdFocused={atEditor && wasdQuad === 'preview'}
-                onWasdFocus={focusPreview}
-                initialCamera={seedCam}
-                cameraApiRef={camApiRef}
-                onCameraSettle={onCameraSettle}
+        {editorPanesMounted ? (
+          <QuadSplit
+            fx={fx}
+            fy={fy}
+            onResize={onResize}
+            topLeft={<PropertiesPanel focus={shownFocus} world={focusWorld} overrides={overrides} onOverride={applyOverride} onClearOverride={clearOverride} onSetFace={setFaceTexture} />}
+            topRight={
+              <RightPanel
+                tab={tab}
+                onTab={setTab}
+                notes={notes}
+                onNotes={setNotes}
+                showGrid={showGrid}
+                onShowGrid={setShowGrid}
+                onResetLayout={resetLayout}
+                onClearNotes={clearNotes}
+                lastSavedAt={ws.lastSavedAt}
+                onPlace={placeObject}
+                activePlaceable={activePlaceable}
+                onArmPlaceable={armPlaceable}
               />
-            </Pane>
-          }
-        />
+            }
+            bottomLeft={
+              <MemoPaintCanvas
+                key={`${ws.stem}#${worldEpoch}`}
+                initialWorld={seedWorld}
+                initialView={seedView}
+                apiRef={paintApiRef}
+                onEdit={onCanvasEdit}
+                tool={tool}
+                onTool={setTool}
+                tile={tile}
+                onTile={setTile}
+                layer={layer}
+                onLayer={setLayer}
+                brush={brush}
+                onBrushChange={updateBrush}
+                place={place}
+                showGrid={showGrid}
+                onFloors={onFloors}
+                onEditBegin={snapshotForUndo}
+                wasdFocused={atEditor && wasdQuad === 'canvas'}
+                onWasdFocus={focusCanvas}
+                select={tileSelect}
+              />
+            }
+            bottomRight={
+              <Pane label="preview">
+                <IsoPreview
+                  key={`${ws.stem}#${worldEpoch}`}
+                  state={previewWorld}
+                  wasdFocused={atEditor && wasdQuad === 'preview'}
+                  onWasdFocus={focusPreview}
+                  initialCamera={seedCam}
+                  cameraApiRef={camApiRef}
+                  onCameraSettle={onCameraSettle}
+                />
+              </Pane>
+            }
+          />
+        ) : null}
 
         {/* Route surfaces live inside the shell body, so the chrome remains the
             one navigation shell and the editor stays mounted underneath. */}
@@ -916,16 +947,15 @@ function EditorShell() {
             F1 test / F2 build flip it WITHOUT remounting, so the pose,
             camera, console, and placed pieces carry across the toggle.
             (The /build URL retired as a dupe of this surface.) */}
-        <Route path="/test">{() => <PlayRoute state={previewWorld} mapName={ws.stem} onExit={() => nav.push('/')} />}</Route>
+        <Route path="/test">{() => <PlayRoute state={previewWorld} mapName={ws.stem} legacyPieceMapName={legacyPieceMapName} onExit={() => nav.push('/')} />}</Route>
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
-        {/* The characters editor (editors/characters/) — authors what game/figure runs. */}
-        <Route path="/characters">{() => <CharactersRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
-        {/* The vehicles editor (editors/vehicles/) — authors what game/vehicle builds. */}
-        <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/cutout')} />}</Route>
-        {/* The cutout painter (editors/cutout/) — the cutout app remade for skins/textures. */}
-        <Route path="/cutout">{() => <CutoutRoute onExit={() => nav.push('/')} />}</Route>
+        {/* The vehicles editor (editors/vehicles/) — authors what game/vehicle builds.
+            paint-texture deep-links land on the workbench PAINT bench
+            (CUTOUTFLIP-0606: /cutout died; the bench store consumes the
+            pending-model-target mailbox the route used to take). */}
+        <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/workbench')} />}</Route>
         {/* The decal editor (editors/compose/) — compose Box/Text/Image looks,
             Materialize them into the texture registry (DECALEDIT-0606). */}
         <Route path="/compose">{() => <ComposeRoute />}</Route>
@@ -937,8 +967,8 @@ function EditorShell() {
         <Route path="/settings">{() => <SettingsRoute onExit={() => nav.push('/')} />}</Route>
       </Box>
 
-      {/* The maps menu lives here — the shell root's LAST child — so it paints on
-          top of the editor panes (this engine hit-tests later siblings first). */}
+      {/* Root overlays live here so they paint on top of the editor panes (this
+          engine hit-tests later siblings first). */}
       {menuOpen ? (
         <MapsMenu
           mapName={ws.stem}
@@ -950,11 +980,12 @@ function EditorShell() {
         />
       ) : null}
 
-      {/* Event-log trace — also a root last-child overlay (same layering rule). */}
+      {/* Event-log trace — also a root overlay (same layering rule). */}
       {logOpen ? (
         <EventLog events={events} now={Date.now()} onClose={() => setLogOpen(false)} />
       ) : null}
 
+      <NotificationOverlayHost simulateRebuildNotice={route.path === '/__rebuild-notify'} />
     </Box>
   );
 }

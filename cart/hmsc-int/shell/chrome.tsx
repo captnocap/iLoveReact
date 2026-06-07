@@ -33,7 +33,7 @@ import { CAT_COLOR, CAT_TAG, relTime, type EditEvent } from '../editLog';
 
 interface ChromeProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'labs' | 'characters' | 'vehicles' | 'cutout' | 'compose' | 'settings' | 'workbench';
+  activeRoute?: 'editor' | 'assist3d' | 'log' | 'test' | 'textures' | 'labs' | 'vehicles' | 'compose' | 'settings' | 'workbench';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -61,15 +61,9 @@ interface ChromeProps {
   onTextures: () => void;
   // Navigate to the /labs route — every lab, instantly loadable (V13).
   onLabs: () => void;
-  // Navigate to the /characters route — the character editor (editors/characters,
-  // the head_lab authoring UI remade; authors what game/figure runs).
-  onCharacters: () => void;
   // Navigate to the /vehicles route — the vehicle editor (editors/vehicles,
   // the vehicle_lab authoring UI remade; authors what game/vehicle builds).
   onVehicles: () => void;
-  // Navigate to the /cutout route — the cutout painter (editors/cutout, the
-  // cutout app experience remade; paints skins/textures on the shared painter).
-  onCutout: () => void;
   // Navigate to the /compose route — the decal editor (editors/compose,
   // DECALEDIT-0606: compose Box/Text/Image looks → Materialize → the texture
   // registry; billboards, signs, posters).
@@ -148,10 +142,8 @@ export function Chrome(props: ChromeProps) {
         <NavBtn icon="LayoutGrid" on={props.activeRoute === 'editor'} onPress={props.onEditor} title="editor" />
         <NavBtn icon="Play" on={props.activeRoute === 'test'} onPress={props.onTest} title="play (F1 test / F2 build)" />
         <NavBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
-        <NavBtn icon="User" on={props.activeRoute === 'characters'} onPress={props.onCharacters} title="characters" />
         <NavBtn icon="Car" on={props.activeRoute === 'vehicles'} onPress={props.onVehicles} title="vehicles" />
         <NavBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
-        <NavBtn icon="Scissors" on={props.activeRoute === 'cutout'} onPress={props.onCutout} title="cutout painter" />
         <NavBtn icon="PenTool" on={props.activeRoute === 'compose'} onPress={props.onCompose} title="decal editor" />
         <NavBtn icon="Palette" on={props.activeRoute === 'textures'} onPress={props.onTextures} title="texture studio" />
         <NavBtn icon="Columns3" on={props.activeRoute === 'workbench'} onPress={props.onWorkbench} title="workbench (rebuild in progress)" />

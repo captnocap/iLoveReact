@@ -21,7 +21,7 @@ It is a **multi-map workspace** (VSCode model): each map is its own session file
 **Spine / shell**
 - `index.tsx` (833) — composition only: workspace persistence (`useWorkspace`, payload v2), multi-map CRUD orchestration, placement state + undo snapshots, tile-selection + override state, `previewWorld` assembly, compile, router. The 2×2 `QuadSplit` layout: PropertiesPanel | RightPanel / PaintCanvas | IsoPreview, under the persistent chrome strip (`shell/chrome.tsx`).
 - `AGENTS.md` — the cart's own agent contract (mutator rule, compile-=-persist, shape map). *Drift note: it documents `MapCanvas.tsx`, which has since become `PaintCanvas.tsx`.*
-- `shell/chrome.tsx` (302) — the persistent titlebar strip (WBCHROME-0606, WORKBENCH.md step 2; replaced `ProjectBar.tsx`, full parity — line-referenced table in commit `34400c6e7`): map switcher (`MapsMenu`), new/rename/delete, undo/redo, the full route nav (editor/test/labs/characters/vehicles/assist3d/cutout/compose/textures/workbench/log/settings — items and voxels died at WBITEMS-FLIP-0606), Compile button, save pill, event-log popover — plus the W1 additions: the borderless host's WINDOW CONTROLS (`__window_minimize/maximize/close`) and the dead-middle `windowDrag` titlebar grab. Renders through the `Chrome*`/`Win*` classes (`shell/workbench.cls.ts`), zero raw colours. Menus export separately and render as the **root's last children** (the overlays-last hit-test rule, recorded in its header).
+- `shell/chrome.tsx` (302) — the persistent titlebar strip (WBCHROME-0606, WORKBENCH.md step 2; replaced `ProjectBar.tsx`, full parity — line-referenced table in commit `34400c6e7`): map switcher (`MapsMenu`), new/rename/delete, undo/redo, the full route nav (editor/test/labs/characters/vehicles/assist3d/compose/textures/workbench/log/settings — cutout's Scissors icon died at CUTOUTFLIP-0606; items and voxels died at WBITEMS-FLIP-0606; the row shrinks per flip until the step-10 collapse), Compile button, save pill, event-log popover — plus the W1 additions: the borderless host's WINDOW CONTROLS (`__window_minimize/maximize/close`) and the dead-middle `windowDrag` titlebar grab. Renders through the `Chrome*`/`Win*` classes (`shell/workbench.cls.ts`), zero raw colours. Menus export separately and render as the **root's last children** (the overlays-last hit-test rule, recorded in its header).
 - `QuadSplit.tsx` (133) — controlled 2×2 splitter; drag is driven by the host's **global cursor channel** (`system:cursor:move`, pumped by Zig from `SDL_GetGlobalMouseState`) rather than per-node mouse-move, so tracking never loses capture; mouse down/up only bracket the gesture.
 - `theme.ts` / `studio.cls.ts` (206) — classifier-driven styling: every colour is a `theme:` token; importing `studio.cls` seeds the studio theme (`setTokens`); per-instance states are sibling classes (`…On`/`…Active`). The two inspector surfaces render exclusively through these classes.
 
@@ -343,7 +343,8 @@ shell-wide; a route without autosave-to-its-channel is a V20 violation, not
 a missing feature. The sweep:
 
 - `/` map editor — the reference (workspace micro-save + world-channel notes).
-- `/vehicles`, `/cutout` — already green (per-edit commits / draft autosave).
+- `/vehicles`, `/cutout` — already green (per-edit commits / draft autosave;
+  /cutout's lifeline now lives in the workbench PAINT bench, CUTOUTFLIP-0606).
 - `/characters` — the draft auto-commits debounced to the characters channel
   (`autosave · <name>` undo positions); mount restores the last roster entry.
 - `editors/voxels/stream.ts` — the working blockout stream; after WBITEMS-FLIP-0606
@@ -1170,6 +1171,20 @@ stroke/compositing/palette/history/document/WGSL-shape laws. JSX surfaces
 bundle-verified through the real cart pipeline aliases.
 
 ## editors/cutout/ — the cutout painter route (CUTOUTAPP-0605, 2026-06-05)
+
+> **THE ROUTE IS DEAD — CUTOUTFLIP-0606 (2026-06-06).** USER RULING,
+> verbatim: "cutout needs work but its at least got everything from the
+> route in there so its g2g nuke that shit." `CutoutRoute.tsx` is deleted,
+> the `/cutout` route + Scissors nav icon are deregistered, EffectModal
+> extracted to `editors/workbench/paint/EffectModal.tsx`, and vehicle
+> paint-texture deep-links land on `/workbench` (the bench store consumes
+> the pending-model-target mailbox). The directory's shared internals
+> (ToolRail · Inspector · StatusBar · ModelPreview ·
+> models/extraction/sources/draft/stream + tests) live on as the workbench
+> PAINT bench's modules (WORKBENCH.md step 8 done; parity table
+> `editors/workbench/AGNOSTICPAINT.CAPTURE.md`). The section below
+> describes the route AS BUILT — the capability inventory the bench
+> inherited.
 
 `cart/cutout`'s APP EXPERIENCE remade as the `/cutout` route in the one shell
 — the full-canvas, layer-stack, smart-select image/texture editor, for

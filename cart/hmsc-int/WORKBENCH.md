@@ -187,7 +187,7 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 | `editors/characters/CharactersRoute.tsx` | 1141 | **EXTRACT→DIE** — chip-row layout dies; roster/draft wiring → character source |
 | `editors/items/ItemsRoute.tsx` | 627 | ~~**EXTRACT→DIE** — → item source~~ **DEAD** (WBITEMS-FLIP-0606) — route deleted; item authoring lives in `itemsSource()` |
 | `editors/vehicles/VehiclesRoute.tsx` | 508 | **EXTRACT→DIE** — garage store lifts to `editors/vehicles/garage.ts`; → vehicle source |
-| `editors/cutout/CutoutRoute.tsx` | 1159 | **EXTRACT→DIE** — becomes the PAINT lens of every asset source; library rail logic → cutout source files |
+| `editors/cutout/CutoutRoute.tsx` | 1159 | ~~**EXTRACT→DIE** — becomes the PAINT lens of every asset source; library rail logic → cutout source files~~ **DEAD** (CUTOUTFLIP-0606, USER RULING "nuke that shit") — EffectModal → `workbench/paint/EffectModal.tsx`; shared `editors/cutout/` internals stay as bench modules |
 | `TextureStudio.tsx` | 188 | **FOLD→DIE** — material source: catalog rail = roster, Materialize = action, ShaderLab = stage mode |
 | `editors/compose/ComposeRoute.tsx` | 455 | **EXTRACT→FOLD** — decal doc model extracts; stage/layers/3D-billboard = material source's COMPOSE stage mode; layers+props panel becomes PanelSpec |
 | `VoxelHybridRoute.tsx` | 610 | ~~**FOLD→DIE\*** — proposed: item source's SCULPT stage mode~~ **DEAD** (WBITEMS-FLIP-0606) — route deleted; voxel blockout authoring lives in the item source VOXEL lens |
@@ -263,20 +263,51 @@ bang; the old route works until the minute its replacement does.
    on `/workbench` with ITEM/SCULPT/VOXEL lenses, stream-backed sculpted item
    authoring, voxel blockout authoring, and voxel→item import. The FLIP
    deleted `/items`, `/voxels`, and their chrome nav icons on the user's word.
-6. **Vehicle source.** Flip: `/vehicles`.
-7. **Material source** (roster = stored materials + shader recipes + decals;
-   stage modes: PREVIEW / SHADER LAB / COMPOSE; Materialize = action). Flip:
-   `/textures`, `/compose`.
-8. **Cutout retirement — RE-SEQUENCED (AGNOSTICPAINT-0606).** /cutout dies
-   as soon as the AGNOSTIC PAINT surface passes the user's test (one bench:
-   shirt + car door + material + blank canvas + materialize) — NOT after
-   all-four-source parity. USER-RULED, to kill split-brain updates. /cutout
-   is FROZEN until that flip (its CAPTURE carries the note; the supervisor
-   rejects /cutout-touching commits). The bench is LIVE on /workbench
-   (editors/workbench/paint/, parity table AGNOSTICPAINT.CAPTURE.md);
-   remaining at the flip: EffectModal extracts from the frozen route.
-9. **Settings + logs sources** (panel generated from tunables registry; rigs;
-   log stream with dashboard band + select/copy). Flip: `/settings`, `/log`.
+6. **Vehicle source.** BUILT (WBSTEP6-0606, awaiting user test): the
+   coverage-law parity table lives at `editors/workbench/WBVEHICLES.CAPTURE.md`
+   (all 14 `/vehicles` census rows line-referenced; C9 remains owned by the
+   agnostic paint bench with the vehicle source adding the direct PAINT
+   doorway). `editors/workbench/vehicles/{store.ts,panel.ts,source.tsx,
+   Stage.tsx,PaintLens.tsx}` + 13-test suite; VEHICLE is live on `/workbench`
+   (garage roster, stream-backed authoring, pose/debug/gas/damage/contract
+   panel, 3D orbit stage, shared PAINT lens). The FLIP (`/vehicles` route +
+   nav icon die) is a separate commit on the user's word — the route is
+   untouched today.
+7. **Material source.** BUILT (WBSTEP7-0606, awaiting user test): the
+   coverage-law parity table lives at `editors/workbench/WBMATERIALS.CAPTURE.md`
+   (all 14 `/textures` rows and all 18 `/compose` rows line-referenced; req_0003
+   surfaced as "shared material door now, shader-language unification still a
+   user ruling"). `editors/workbench/materials/{store.ts,source.tsx}` +
+   5-test suite; MATERIAL is live on `/workbench` (stored materials + shader
+   recipes + decals roster, PREVIEW / SHADER LAB / COMPOSE stages, hero
+   Materialize action). The FLIP (`/textures` + `/compose` routes die) is a
+   separate commit on the user's word — both routes are untouched today.
+8. **Cutout retirement — DONE (CUTOUTFLIP-0606).** USER RULING, verbatim:
+   "cutout needs work but its at least got everything from the route in
+   there so its g2g nuke that shit." The flip executed: EffectModal
+   extracted to `editors/workbench/paint/EffectModal.tsx` (the FX button is
+   live — AGNOSTICPAINT deferral 2 closed), `CutoutRoute.tsx` deleted, the
+   `/cutout` route + Scissors nav icon deregistered, vehicle paint-texture
+   deep-links retarget `/workbench` (the bench store consumes the
+   pending-model-target mailbox). The shared internals under
+   `editors/cutout/` (ToolRail · Inspector · StatusBar · ModelPreview ·
+   models/extraction/sources/draft/stream) stay — they are the bench's
+   modules. The freeze is lifted: the bench (editors/workbench/paint/,
+   parity table AGNOSTICPAINT.CAPTURE.md) is THE painting surface.
+9. **Settings + logs sources** — BUILT (WBSET9-0606, awaiting user test):
+   parity tables `editors/workbench/WBSETTINGS.CAPTURE.md` +
+   `editors/workbench/WBLOGS.CAPTURE.md` (every census/settings.md +
+   census/log.md row line-referenced; bus rows land in the logs source).
+   `editors/workbench/settings/` (panel GENERATED from the tunables
+   registry, write-through + V20 tuning commits + per-knob reset; camera-feel
+   rig for the sculpt-camera cluster, live dashboard rig for every system) +
+   `editors/workbench/logs/` (churn tail + session bus as one streaming
+   category; dashboard band, select/copy via the clipboard door, pause/clear
+   verbs, KEY⇄ALL and CHANNEL⇄ALL lenses) + shared `livePoll.ts`/`tone.ts`;
+   step 3's tunables proof source FOLDED IN (sources.ts). 8+9-test P4 suites.
+   The FLIP (`/settings` + `/log` routes + nav icons die, tunablesSource.ts +
+   LogView.tsx delete) is a separate commit on the user's word — both routes
+   are untouched today.
 10. **Chrome collapse** to 6 icons. Delete `cart/hmsc-wire/`. Done.
 
 Each flip's commit deletes the old route file(s), updates this ledger, and
@@ -323,11 +354,11 @@ CENSUSIDX-0606 assembly; resolves the route-census assembly request. Inputs read
 |---|---:|---:|---|---:|
 | `/items` | 10 | 10 | none — step 5 `itemsSource()` built | 0 |
 | `/voxels` | 12 | 12 | none — step 5 item/voxel sculpt unification built | 0 |
-| `/vehicles` | 14 | 1 | 13 rows — step 6 `vehiclesSource()` | 0 |
-| `/textures` | 14 | 2 partial | 13 rows — step 7 `materialsSource()` | 0 |
-| `/compose` | 18 | 1 partial | 18 rows — step 7 `materialsSource()` | 0 |
-| `/settings` | 9 | 3 partial | 9 rows — step 9 settings domains + logs | 0 |
-| `/log` | 7 | 0 | 7 rows — step 9 logs source/action/lens | 0 |
+| `/vehicles` | 14 | 14 | none — step 6 `vehiclesSource()` built | 0 |
+| `/textures` | 14 | 14 | none — step 7 `materialsSource()` built | 0 |
+| `/compose` | 18 | 18 | none — step 7 `materialsSource()` built | 0 |
+| `/settings` | 9 | 9 | none — step 9 `settingsSource()` + `logsSource()` built (WBSETTINGS.CAPTURE.md) | 0 |
+| `/log` | 7 | 7 | none — step 9 `logsSource()` built (WBLOGS.CAPTURE.md) | 0 |
 | `/assist3d` | 17 | 17 ACCOUNTED-AS-OWN | none — own route | 0 |
 
 THE UNPLANNED LIST:
