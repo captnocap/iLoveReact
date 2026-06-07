@@ -9,6 +9,7 @@ import {
   PLACED_TUNING,
   connectedPieceIds,
   pieceBounds,
+  placedPieceCameraOccluders,
   placedPieceColliders,
   placedPieceRamps,
   placedPieceTags,
@@ -21,7 +22,7 @@ import {
 } from './placed';
 import { catalogEntry } from './catalog';
 import { decomposePrefab, prefabDefinition, validatePrefab } from './prefabs';
-import { worldStream, type WorldEvent, type WorldStreamState } from '../world/stream';
+import { legacyGlobalPieces, piecesForMap, worldStream, type WorldEvent, type WorldStreamState } from '../world/stream';
 
 let nextId = 0;
 function placed(pieceId: string, x: number, z: number, over: Partial<PlacedBuildPiece> = {}): PlacedBuildPiece {
@@ -165,31 +166,82 @@ test('a free-angled piece lands in the oriented frame', () => {
   assertClose(orientedRects[0].yawRadians, (30 * Math.PI) / 180, 1e-9, 'the host gets the turn');
 });
 
-test('a ramp registers its walkable slope plus solid side/back faces', () => {
+test('camera occlusion colliders report wall and roof owners, but skip sightline edits', () => {
+  const wall = placed('wall.concrete.common', 0, 0);
+  const window = placed('wall.concrete.common', 3, 0, { edit: 'window' });
+  const roof = placed('roof.flat.common', 0, 0, { y: 3 });
+  const ramp = placed('ramp.concrete.common', 6, 0);
+  const stairs = placed('stairs.wood.common', 9, 0);
+  const occluders = placedPieceCameraOccluders([wall, window, roof, ramp, stairs]);
+  assertEqual(occluders.ownerIds.join(','), `${wall.id},${roof.id}`, 'only opaque wall/roof pieces own occlusion bands');
+  assertEqual(occluders.rects.length, 2, 'wall and roof each contribute one axis band');
+  assertEqual(occluders.rects[0].ownerIndex, 1, 'owner indices map to ownerIds');
+  assertEqual(occluders.rects[1].ownerIndex, 2, 'second owner maps to the roof');
+  assertEqual(occluders.ownerIds.includes(ramp.id), false, 'walkable ramps are not camera occluders');
+  assertEqual(occluders.ownerIds.includes(stairs.id), false, 'walkable stairs are not camera occluders');
+});
+
+test('RAMPREAL-0606: a ramp registers as a hollow inclined slab, not a solid wedge', () => {
   const ramp = placed('ramp.concrete.common', 6, 6);
   const { rects, orientedRects } = placedPieceColliders([ramp]);
   const fields = placedPieceRamps([ramp], 3);
-  console.log(`[RAMPSIDE-0606] ramp registration rects=${rects.length} oriented=${orientedRects.length} heightfields=${fields.length} rampBounds=x[${pieceBounds(ramp).minX},${pieceBounds(ramp).maxX}] z[${pieceBounds(ramp).minZ},${pieceBounds(ramp).maxZ}] bands=${rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}]`).join(';')} oldApproachBand=x[4.25,7.75]z[4.25,4.5] heights=${fields[0] ? Array.from(fields[0].heights).join(',') : 'none'}`);
+  console.log(`[RAMPREAL-0606] ramp registration rects=${rects.length} oriented=${orientedRects.length} heightfields=${fields.length} rampBounds=x[${pieceBounds(ramp).minX},${pieceBounds(ramp).maxX}] z[${pieceBounds(ramp).minZ},${pieceBounds(ramp).maxZ}] slabBands=${rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] y[${r.floorMeters},${r.topMeters}]`).join(';')} heights=${fields[0] ? Array.from(fields[0].heights).join(',') : 'none'}`);
   assertEqual(orientedRects.length, 0, 'axis-aligned ramp emits plain rects');
-  assertEqual(rects.length, 3, 'left side, right side, and back face are solid bands');
+  assertEqual(rects.length, PLACED_TUNING.rampSlabEdgeSegments * 3 + 1, 'slab core, side segments, and high edge are solid');
   const bounds = pieceBounds(ramp);
   const sideRects = rects.filter((r) => r.minZ >= bounds.minZ - 1e-9 && r.maxZ <= bounds.maxZ + 1e-9 && (r.maxX <= bounds.minX + 1e-9 || r.minX >= bounds.maxX - 1e-9));
+  const coreRects = rects.filter((r) => r.minX >= bounds.minX - 1e-9 && r.maxX <= bounds.maxX + 1e-9 && r.minZ >= bounds.minZ - 1e-9 && r.maxZ <= bounds.maxZ + 1e-9);
   const backRect = rects.find((r) => r.minZ >= bounds.maxZ - 1e-9);
   const approachRect = rects.find((r) => r.maxZ <= bounds.minZ + 1e-9);
-  assertEqual(sideRects.length, 2, 'both ramp sides block like walls');
-  assert(!!backRect, 'the far/high face blocks like a wall');
+  assertEqual(sideRects.length, PLACED_TUNING.rampSlabEdgeSegments * 2, 'both ramp sides are segmented slab edges');
+  assertEqual(coreRects.length, PLACED_TUNING.rampSlabEdgeSegments, 'the inclined floor slab has a real underside volume');
+  assert(!!backRect, 'the far/high edge is the slab edge, not a wall');
   assertEqual(approachRect, undefined, 'no wall band covers the walk-up approach edge');
   for (const rect of rects) {
     assertEqual(rect.blocksPlayer, true, 'ramp boundary faces block the player');
-    assertClose(rect.topMeters, ramp.y + catalogEntry('ramp.concrete.common').size.heightMeters, 1e-9, 'boundary face is wall-height');
-    assertClose(rect.floorMeters ?? -999, ramp.y, 1e-9, 'same collision band floor as walls');
+    assertClose(rect.topMeters - (rect.floorMeters ?? -999), PLACED_TUNING.rampSlabThicknessMeters, 1e-9, 'each edge is slab-thick, not floor-to-crest mass');
   }
+  assert(sideRects.some((r) => (r.floorMeters ?? -999) > ramp.y + 1), 'the raised side leaves usable open space under the high ramp');
   assertEqual(fields.length, 1, 'one slope');
   assertEqual(fields[0].slot, 3, 'slots continue after the world terrain bake');
   const heights = fields[0].heights;
   assertClose(heights[0], 0, 1e-9, 'back edge at the base');
   assertClose(heights[heights.length - 1], catalogEntry('ramp.concrete.common').size.heightMeters, 1e-9, 'front edge at the top — the ramp connects floors');
   assert(fields[0].walkableSlopeCos <= PLACED_TUNING.rampWalkableSlopeCos, 'the slope is walkable');
+});
+
+test('RAMPREAL-0606: the world stream can place a piece under the ramp footprint', () => {
+  const ramp = placed('ramp.concrete.common', 6, 6);
+  const under = placed('floor.concrete.common', 6, 6, { id: 'under_floor' });
+  const state = fold([
+    { kind: 'piecePlaced', placement: ramp },
+    { kind: 'piecePlaced', placement: under },
+  ]);
+  assertEqual(state.pieces.length, 2, 'the ramp is not an opaque placement volume');
+  assertEqual(validatePlacement({ pieceId: under.pieceId, x: under.x, y: under.y, z: under.z, yawDegrees: under.yawDegrees }).length, 0, 'a normal floor placement remains valid under it');
+});
+
+test('STAIRS-0607: rotated stairs register to their visible footprint and face the same way as the heightfield', () => {
+  const stairs = placed('stairs.wood.common', 6, 6, { yawDegrees: 90 });
+  const { rects, orientedRects } = placedPieceColliders([stairs]);
+  const fields = placedPieceRamps([stairs], 7);
+  const bounds = pieceBounds(stairs);
+  console.log(`[STAIRS-0607] yaw=90 bounds=x[${bounds.minX},${bounds.maxX}] z[${bounds.minZ},${bounds.maxZ}] rects=${rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] y[${r.floorMeters},${r.topMeters}]`).join(';')} field=slot${fields[0].slot} origin=(${fields[0].originX},${fields[0].originZ}) cell=${fields[0].cellSizeMeters} cols=${fields[0].cols} rows=${fields[0].rows} yaw=${fields[0].yawRadians} heights=${Array.from(fields[0].heights).join(',')}`);
+  assertEqual(orientedRects.length, 0, 'quarter-turned stairs stay axis-aligned');
+  assertEqual(fields.length, 1, 'stairs register one walkable slope');
+  assertEqual(fields[0].slot, 7, 'slots continue after world fields');
+  assertClose(fields[0].cellSizeMeters, PLACED_TUNING.verticalLinkHeightfieldCellMeters, 1e-9, 'stairs use the vertical-link cell tuning');
+  assertEqual(fields[0].cols, 3, '1.2m stairs are three samples wide at 0.6m cells');
+  assertEqual(fields[0].rows, 6, '3m stair run is six samples deep at 0.6m cells');
+  assertClose(fields[0].originX, stairs.x - catalogEntry(stairs.pieceId).size.widthMeters / 2, 1e-9, 'local width starts at the visible stair side');
+  assertClose(fields[0].originZ, stairs.z - catalogEntry(stairs.pieceId).size.depthMeters / 2, 1e-9, 'local depth starts at the low approach edge');
+  assertClose(fields[0].yawRadians ?? 0, Math.PI / 2, 1e-9, 'host receives the placed yaw');
+  const highFace = rects.find((r) => r.minX >= bounds.maxX - 1e-9);
+  const lowApproach = rects.find((r) => r.maxX <= bounds.minX + 1e-9);
+  assert(!!highFace, 'the closed/high stair face is on the turned +v edge');
+  assertEqual(lowApproach, undefined, 'the low stair approach stays open');
+  assertClose(fields[0].heights[0], 0, 1e-9, 'low row starts at base');
+  assertClose(fields[0].heights[fields[0].heights.length - 1], catalogEntry(stairs.pieceId).size.heightMeters, 1e-9, 'high row reaches the next storey');
 });
 
 // ── crosshair targeting ──────────────────────────────────────────────────────
@@ -294,6 +346,53 @@ test('placement events materialize pieces with replay-deterministic ids', () => 
   assertEqual(twice.pieces[1].id, once.pieces[1].id, 'replaying the log reproduces identical ids');
 });
 
+test('PROJSCOPE-0606: placed pieces are consumed per project/map, not from the global pool', () => {
+  let state = worldStream.initial();
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'project-a', placement: { pieceId: 'floor.concrete.common', x: 3, y: 0, z: 3, yawDegrees: 0 } });
+  const aAfterPlace = piecesForMap(state, 'project-a').map((p) => p.id);
+  const bAfterSwitch = piecesForMap(state, 'project-b').map((p) => p.id);
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'project-b', placement: { pieceId: 'wall.concrete.common', x: 9, y: 0, z: 9, yawDegrees: 0 } });
+  const bAfterPlace = piecesForMap(state, 'project-b').map((p) => p.id);
+  const aAfterReturn = piecesForMap(state, 'project-a').map((p) => p.id);
+  console.log(`[PROJSCOPE-0606] A=${JSON.stringify(aAfterPlace)} switchB=${JSON.stringify(bAfterSwitch)} B=${JSON.stringify(bAfterPlace)} returnA=${JSON.stringify(aAfterReturn)} global=${legacyGlobalPieces(state).length}`);
+
+  assertEqual(aAfterPlace.length, 1, 'project A sees its placed floor');
+  assertEqual(bAfterSwitch.length, 0, 'project B starts with no pieces from A');
+  assertEqual(bAfterPlace.length, 1, 'project B can place its own piece');
+  assertEqual(aAfterReturn.join(','), aAfterPlace.join(','), 'switching back restores A pieces');
+  assertEqual(legacyGlobalPieces(state).length, 0, 'map-scoped placement does not write the legacy global pool');
+});
+
+test('PROJSCOPE-0606 live repair: the legacy global pool remains visible only to its owner map', () => {
+  let state = worldStream.initial();
+  state = worldStream.apply(state, { kind: 'piecePlaced', placement: { pieceId: 'floor.concrete.common', x: 1, y: 0, z: 1, yawDegrees: 0 } });
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'default-map', placement: { pieceId: 'wall.concrete.common', x: 4, y: 0, z: 4, yawDegrees: 0 } });
+
+  const owner = piecesForMap(state, 'default-map', { legacyMapName: 'default-map' }).map((p) => p.id);
+  const switched = piecesForMap(state, 'other-map', { legacyMapName: 'default-map' }).map((p) => p.id);
+  console.log(`[PROJSCOPE-0606-LEGACY] owner=${JSON.stringify(owner)} switched=${JSON.stringify(switched)} global=${legacyGlobalPieces(state).length}`);
+
+  assertEqual(owner.length, 2, 'the legacy owner sees pre-scoping pieces plus its scoped pieces');
+  assertEqual(switched.length, 0, 'a switched map does not inherit the legacy pool');
+  assertEqual(legacyGlobalPieces(state).length, 1, 'the legacy pool remains intact and unmigrated');
+});
+
+test('HOTRESTORE-0606: hot restore consumes the same map scope filter as fresh mount', () => {
+  let state = worldStream.initial();
+  state = worldStream.apply(state, { kind: 'piecePlaced', placement: { pieceId: 'wall.concrete.common', x: 1, y: 0, z: 1, yawDegrees: 0 } });
+  state = worldStream.apply(state, { kind: 'piecePlaced', placement: { pieceId: 'floor.concrete.common', x: 2, y: 0, z: 2, yawDegrees: 0 } });
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'legacy-owner', placement: { pieceId: 'wall.concrete.common', x: 4, y: 0, z: 4, yawDegrees: 0 } });
+
+  const clearHotRestore = piecesForMap(state, 'clear-map', { legacyMapName: null }).map((p) => p.id);
+  const badOwnerEvidence = piecesForMap(state, 'clear-map', { legacyMapName: 'clear-map' }).map((p) => p.id);
+  const ownerHotRestore = piecesForMap(state, 'legacy-owner', { legacyMapName: 'legacy-owner' }).map((p) => p.id);
+  console.log(`[HOTRESTORE-0606] clearMap=${JSON.stringify(clearHotRestore)} badCurrentOwner=${JSON.stringify(badOwnerEvidence)} legacyOwner=${JSON.stringify(ownerHotRestore)} global=${legacyGlobalPieces(state).length}`);
+
+  assertEqual(clearHotRestore.length, 0, 'a clear map hot restore receives no legacy global pieces');
+  assertEqual(badOwnerEvidence.length, 2, 'the regression shape: using the current clear map as legacy owner admits the global pool');
+  assertEqual(ownerHotRestore.length, 3, 'the legacy owner still receives legacy plus scoped pieces across hot restore');
+});
+
 test('a prefab stamp is ONE event that lands as its semantic pieces', () => {
   const state = fold([{ kind: 'prefabStamped', prefabId: 'prefab.motelRoom', origin: { x: 10, y: 0, z: 10 }, yawDegrees: 0 }]);
   const seedCount = prefabDefinition('prefab.motelRoom').pieces.length;
@@ -313,6 +412,38 @@ test('a world-saved prefab joins the registry family and stamps by id', () => {
   ]);
   assert(!!state.prefabs['prefab.testHut'], 'the definition is world data now');
   assertEqual(state.pieces.length, 4, 'each stamp landed its pieces');
+});
+
+test('PREFABSELECT-0606: selected map pieces save as a prefab and stamp with identical relative layout', () => {
+  let state = worldStream.initial();
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'prefab-map', placement: { pieceId: 'floor.concrete.common', x: 6, y: 0, z: 6, yawDegrees: 0 } });
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'prefab-map', placement: { pieceId: 'wall.concrete.common', x: 6, y: 0, z: 4.5, yawDegrees: 0, edit: 'door' } });
+  state = worldStream.apply(state, { kind: 'piecePlaced', mapName: 'other-map', placement: { pieceId: 'wall.concrete.common', x: 99, y: 0, z: 99, yawDegrees: 0 } });
+
+  const authored = piecesForMap(state, 'prefab-map');
+  const selectedIds = new Set(authored.slice(0, 2).map((p) => p.id));
+  const selected = authored.filter((p) => selectedIds.has(p.id));
+  const minX = Math.min(...selected.map((p) => p.x));
+  const minY = Math.min(...selected.map((p) => p.y));
+  const minZ = Math.min(...selected.map((p) => p.z));
+  const def = prefabFromPieces('prefab.selectedDoorFloor', 'Selected Door Floor', 'common', selected);
+  assertEqual(validatePrefab(def).length, 0, 'the selected composition is a valid prefab definition');
+
+  state = worldStream.apply(state, { kind: 'prefabDefined', def });
+  state = worldStream.apply(state, { kind: 'prefabStamped', mapName: 'prefab-map', prefabId: def.id, origin: { x: 30, y: 0, z: 30 }, yawDegrees: 0 });
+
+  const after = piecesForMap(state, 'prefab-map');
+  const stamped = after.slice(authored.length);
+  assertEqual(stamped.length, selected.length, 'placing the prefab stamps the selected piece count');
+  for (let i = 0; i < selected.length; i += 1) {
+    assertEqual(stamped[i].pieceId, selected[i].pieceId, `piece ${i} kind carries`);
+    assertEqual(stamped[i].edit, selected[i].edit, `piece ${i} edit carries`);
+    assertClose(stamped[i].x - 30, selected[i].x - minX, 1e-9, `piece ${i} relative x is identical`);
+    assertClose(stamped[i].y - 0, selected[i].y - minY, 1e-9, `piece ${i} relative y is identical`);
+    assertClose(stamped[i].z - 30, selected[i].z - minZ, 1e-9, `piece ${i} relative z is identical`);
+    assertEqual(stamped[i].yawDegrees, selected[i].yawDegrees, `piece ${i} yaw carries`);
+  }
+  assertEqual(piecesForMap(state, 'other-map').length, 1, 'prefab authoring stays scoped to the active map');
 });
 
 test('instance edits stay piece-granular after a stamp; removal removes one piece', () => {

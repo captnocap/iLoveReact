@@ -72,6 +72,14 @@ export type OrientedCollisionRect = CollisionRect & {
   yawRadians: number;
 };
 
+export type CameraOcclusionRect = CollisionRect & {
+  ownerIndex: number;
+};
+
+export type CameraOcclusionOrientedRect = OrientedCollisionRect & {
+  ownerIndex: number;
+};
+
 export type PhysicsStepInput = {
   dtSeconds: number;
   /** normalized movement intent on the ground plane (camera-relative is the caller's job) */
@@ -104,6 +112,28 @@ export type PhysicsStepResult = {
   hostMicroseconds: number;
   player: { position: Vec3; velocity: Vec3; grounded: boolean };
   bodies: SteppedBody[];
+};
+
+export type CameraOcclusionInput = {
+  camera: Vec3;
+  target: Vec3;
+  rects?: CameraOcclusionRect[];
+  orientedRects?: CameraOcclusionOrientedRect[];
+  maxHits?: number;
+  radiusMeters?: number;
+};
+
+export type CameraOcclusionResult = {
+  hostMicroseconds: number;
+  ownerIndices: number[];
+  nearestTargetDistanceMeters: number;
+  nearestOwnerIndex: number;
+};
+
+export type CameraOcclusionConfiguredHit = {
+  hostMicroseconds: number;
+  nearestTargetDistanceMeters: number;
+  nearestOwnerIndex: number;
 };
 
 /** A baked terrain grid the host samples as sloped ground (see-it == walk-it). */
@@ -142,11 +172,15 @@ const BODY_FLOATS = 8;
 const RECT_FLOATS = 9;
 const ORIENTED_FLOATS = 12;
 const OUTPUT_HEADER_FLOATS = 9;
+const CAMERA_OCCLUSION_HEADER_FLOATS = 10;
+const CAMERA_OCCLUSION_RECT_FLOATS = RECT_FLOATS + 1;
+const CAMERA_OCCLUSION_ORIENTED_FLOATS = ORIENTED_FLOATS + 1;
+const CAMERA_OCCLUSION_MAX_HITS = 64;
 
 /** Host hard caps — exceeding one is a caller bug, surfaced at the boundary. */
 export const PHYSICS_LIMITS = Object.freeze({
   bodies: 128,
-  rects: 512,
+  rects: 2048,
   orientedRects: 256,
 });
 
@@ -177,6 +211,30 @@ function hostStepFn(): HostFn<(input: Float32Array) => ArrayBuffer | null> | nul
   return null;
 }
 
+function hostCameraOcclusionFn(): HostFn<(input: Float32Array) => ArrayBuffer | null> | null {
+  const honest = globalThis.__game_physics_camera_occlusion;
+  if (typeof honest === 'function') return { fn: honest, name: '__game_physics_camera_occlusion' };
+  return null;
+}
+
+function hostCameraOcclusionConfigureFn(): HostFn<(input: Float32Array) => null> | null {
+  const honest = globalThis.__game_physics_camera_occlusion_configure;
+  if (typeof honest === 'function') return { fn: honest, name: '__game_physics_camera_occlusion_configure' };
+  return null;
+}
+
+function hostCameraOcclusionDistanceFn(): HostFn<(cx: number, cy: number, cz: number, tx: number, ty: number, tz: number, radius: number) => number | null> | null {
+  const honest = globalThis.__game_physics_camera_occlusion_distance;
+  if (typeof honest === 'function') return { fn: honest, name: '__game_physics_camera_occlusion_distance' };
+  return null;
+}
+
+function hostCameraOcclusionHitFn(): HostFn<(cx: number, cy: number, cz: number, tx: number, ty: number, tz: number, radius: number) => ArrayBuffer | null> | null {
+  const honest = globalThis.__game_physics_camera_occlusion_hit;
+  if (typeof honest === 'function') return { fn: honest, name: '__game_physics_camera_occlusion_hit' };
+  return null;
+}
+
 /** True when the host physics bindings are compiled into this binary. */
 export function physicsHostReady(): boolean {
   return hostStepFn() !== null;
@@ -194,6 +252,24 @@ function packRect(out: number[], rect: CollisionRect): void {
     rect.restitution,
     rect.floorMeters ?? SOLID_TO_GROUND,
   );
+}
+
+function packCameraOcclusionRect(out: number[], rect: CameraOcclusionRect): void {
+  packRect(out, rect);
+  out.push(rect.ownerIndex);
+}
+
+function writeRect(out: Float32Array, at: number, rect: CollisionRect): number {
+  out[at++] = rect.minX;
+  out[at++] = rect.minZ;
+  out[at++] = rect.maxX;
+  out[at++] = rect.maxZ;
+  out[at++] = rect.topMeters;
+  out[at++] = rect.blocksPlayer ? 1 : 0;
+  out[at++] = rect.friction;
+  out[at++] = rect.restitution;
+  out[at++] = rect.floorMeters ?? SOLID_TO_GROUND;
+  return at;
 }
 
 /**
@@ -331,6 +407,180 @@ export function stepPhysics(input: PhysicsStepInput): PhysicsStepResult | null {
   return result;
 }
 
+export function cameraOcclusion(input: CameraOcclusionInput): CameraOcclusionResult | null {
+  const host = hostCameraOcclusionFn();
+  if (!host) return null;
+  const rects = input.rects ?? [];
+  const oriented = input.orientedRects ?? [];
+  if (rects.length > PHYSICS_LIMITS.rects) {
+    throw new Error(`cameraOcclusion: ${rects.length} rects exceeds the host cap of ${PHYSICS_LIMITS.rects}`);
+  }
+  if (oriented.length > PHYSICS_LIMITS.orientedRects) {
+    throw new Error(`cameraOcclusion: ${oriented.length} oriented rects exceeds the host cap of ${PHYSICS_LIMITS.orientedRects}`);
+  }
+  const maxHits = Math.max(1, Math.min(CAMERA_OCCLUSION_MAX_HITS, Math.floor(input.maxHits ?? CAMERA_OCCLUSION_MAX_HITS)));
+  const radiusMeters = Math.max(0, Number.isFinite(input.radiusMeters) ? input.radiusMeters ?? 0 : 0);
+  const wire = new Float32Array(
+    CAMERA_OCCLUSION_HEADER_FLOATS
+      + rects.length * CAMERA_OCCLUSION_RECT_FLOATS
+      + oriented.length * CAMERA_OCCLUSION_ORIENTED_FLOATS,
+  );
+  wire[0] = input.camera.x;
+  wire[1] = input.camera.y;
+  wire[2] = input.camera.z;
+  wire[3] = input.target.x;
+  wire[4] = input.target.y;
+  wire[5] = input.target.z;
+  wire[6] = rects.length;
+  wire[7] = oriented.length;
+  wire[8] = maxHits;
+  wire[9] = radiusMeters;
+  let at = CAMERA_OCCLUSION_HEADER_FLOATS;
+  const rectFloats: number[] = [];
+  for (const rect of rects) packCameraOcclusionRect(rectFloats, rect);
+  wire.set(rectFloats, at);
+  at += rectFloats.length;
+  const orientedFloats: number[] = [];
+  for (const rect of oriented) {
+    packRect(orientedFloats, rect);
+    orientedFloats.push(rect.pivotX, rect.pivotZ, rect.yawRadians, rect.ownerIndex);
+  }
+  wire.set(orientedFloats, at);
+
+  const buffer = host.fn(wire);
+  if (!buffer || typeof (buffer as any).byteLength !== 'number') return null;
+  const out = new Float32Array(buffer);
+  if (out.length < 4) return null;
+  const hitCount = Math.max(0, Math.min(maxHits, Math.floor(out[1] || 0), out.length - 4));
+  const ownerIndices: number[] = [];
+  for (let i = 0; i < hitCount; i += 1) {
+    const owner = Math.floor(out[4 + i] || 0);
+    if (owner > 0) ownerIndices.push(owner);
+  }
+  GAME_TELEMETRY.recordDiagnostic('physics', 'cameraOcclusion', {
+    hostUs: out[0] || 0,
+    rects: rects.length,
+    orientedRects: oriented.length,
+    hits: ownerIndices.length,
+    nearestTargetDistanceMeters: out[2] || 0,
+    nearestOwnerIndex: Math.floor(out[3] || 0),
+    radiusMeters,
+    inputBytes: wire.byteLength,
+    outputBytes: out.byteLength,
+  });
+  GAME_TELEMETRY.recordDiagnostic('bridge', host.name, {
+    args: 1,
+    payloadBytes: wire.byteLength + out.byteLength,
+  });
+  return {
+    hostMicroseconds: out[0] || 0,
+    ownerIndices,
+    nearestTargetDistanceMeters: out[2] || 0,
+    nearestOwnerIndex: Math.floor(out[3] || 0),
+  };
+}
+
+export function configureCameraOcclusion(rects: readonly CameraOcclusionRect[], orientedRects: readonly CameraOcclusionOrientedRect[] = []): void {
+  const host = hostCameraOcclusionConfigureFn();
+  if (!host) return;
+  if (rects.length > PHYSICS_LIMITS.rects) {
+    throw new Error(`configureCameraOcclusion: ${rects.length} rects exceeds the host cap of ${PHYSICS_LIMITS.rects}`);
+  }
+  if (orientedRects.length > PHYSICS_LIMITS.orientedRects) {
+    throw new Error(`configureCameraOcclusion: ${orientedRects.length} oriented rects exceeds the host cap of ${PHYSICS_LIMITS.orientedRects}`);
+  }
+  const wire = new Float32Array(
+    2
+      + rects.length * CAMERA_OCCLUSION_RECT_FLOATS
+      + orientedRects.length * CAMERA_OCCLUSION_ORIENTED_FLOATS,
+  );
+  wire[0] = rects.length;
+  wire[1] = orientedRects.length;
+  let at = 2;
+  for (const rect of rects) {
+    at = writeRect(wire, at, rect);
+    wire[at++] = rect.ownerIndex;
+  }
+  for (const rect of orientedRects) {
+    at = writeRect(wire, at, rect);
+    wire[at++] = rect.pivotX;
+    wire[at++] = rect.pivotZ;
+    wire[at++] = rect.yawRadians;
+    wire[at++] = rect.ownerIndex;
+  }
+  host.fn(wire);
+  if (GAME_TELEMETRY.diagnosticChannelEnabled('physics')) {
+    GAME_TELEMETRY.recordDiagnostic('physics', 'cameraOcclusion.configure', {
+      rects: rects.length,
+      orientedRects: orientedRects.length,
+      inputBytes: wire.byteLength,
+    });
+  }
+  if (GAME_TELEMETRY.diagnosticChannelEnabled('bridge')) {
+    GAME_TELEMETRY.recordDiagnostic('bridge', host.name, {
+      args: 1,
+      payloadBytes: wire.byteLength,
+    });
+  }
+}
+
+export function cameraOcclusionDistance(
+  cameraX: number,
+  cameraY: number,
+  cameraZ: number,
+  targetX: number,
+  targetY: number,
+  targetZ: number,
+  radiusMeters: number,
+): number | null {
+  const host = hostCameraOcclusionDistanceFn();
+  if (!host) return null;
+  const radius = Math.max(0, Number.isFinite(radiusMeters) ? radiusMeters : 0);
+  const distance = host.fn(cameraX, cameraY, cameraZ, targetX, targetY, targetZ, radius);
+  return typeof distance === 'number' && Number.isFinite(distance) ? Math.max(0, distance) : null;
+}
+
+export function cameraOcclusionConfiguredHit(
+  cameraX: number,
+  cameraY: number,
+  cameraZ: number,
+  targetX: number,
+  targetY: number,
+  targetZ: number,
+  radiusMeters: number,
+): CameraOcclusionConfiguredHit | null {
+  const host = hostCameraOcclusionHitFn();
+  if (!host) {
+    const distance = cameraOcclusionDistance(cameraX, cameraY, cameraZ, targetX, targetY, targetZ, radiusMeters);
+    return distance === null ? null : { hostMicroseconds: 0, nearestTargetDistanceMeters: distance, nearestOwnerIndex: 0 };
+  }
+  const radius = Math.max(0, Number.isFinite(radiusMeters) ? radiusMeters : 0);
+  const buffer = host.fn(cameraX, cameraY, cameraZ, targetX, targetY, targetZ, radius);
+  if (!buffer || typeof (buffer as any).byteLength !== 'number') return null;
+  const out = new Float32Array(buffer);
+  if (out.length < 3) return null;
+  if (GAME_TELEMETRY.diagnosticChannelEnabled('physics')) {
+    GAME_TELEMETRY.recordDiagnostic('physics', 'cameraOcclusion.hit', {
+      hostUs: out[0] || 0,
+      nearestTargetDistanceMeters: out[1] || 0,
+      nearestOwnerIndex: Math.floor(out[2] || 0),
+      radiusMeters: radius,
+      outputBytes: out.byteLength,
+    });
+  }
+  if (GAME_TELEMETRY.diagnosticChannelEnabled('bridge')) {
+    GAME_TELEMETRY.recordDiagnostic('bridge', host.name, {
+      args: 7,
+      payloadBytes: out.byteLength,
+    });
+  }
+  return {
+    hostMicroseconds: out[0] || 0,
+    nearestTargetDistanceMeters: Math.max(0, out[1] || 0),
+    nearestOwnerIndex: Math.floor(out[2] || 0),
+  };
+}
+
 /**
  * Register (or replace) one heightfield terrain collider. No-op when the host
  * bindings are missing — terrain just isn't solid until the host carries them.
@@ -411,6 +661,10 @@ export function clearHeightfields(): void {
 export const GAME_PHYSICS = Object.freeze({
   hostReady: physicsHostReady,
   step: stepPhysics,
+  cameraOcclusion,
+  configureCameraOcclusion,
+  cameraOcclusionConfiguredHit,
+  cameraOcclusionDistance,
   registerHeightfield,
   clearHeightfields,
   limits: PHYSICS_LIMITS,

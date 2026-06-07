@@ -38,7 +38,7 @@ import {
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
-import type { CollisionRect, Heightfield, OrientedCollisionRect } from '../physics';
+import type { CameraOcclusionOrientedRect, CameraOcclusionRect, CollisionRect, Heightfield, OrientedCollisionRect } from '../physics';
 
 // ── the placed record (what the world stream stores) ─────────────────────────
 
@@ -75,8 +75,23 @@ export const PLACED_TUNING = {
   /** ramp/stairs walkable-slope gate (cos): 3m rise over 3m run is 45°;
    *  0.6 keeps the standard ramp walkable with margin */
   rampWalkableSlopeCos: 0.6,
-  /** RAMPSIDE-0606: side/back boundary thickness for ramp/stair wall faces. */
-  rampBoundaryWallThicknessMeters: 0.25,
+  /** RAMPREAL-0606: ramps are inclined floor slabs, not solid wedges. The
+   *  slab thickness matches the catalog plate thickness; tune live if the
+   *  catalog's common floor module changes. */
+  rampSlabThicknessMeters: 0.2,
+  /** Thin plan footprint of a ramp slab edge. This is only the physical edge
+   *  lip of the tilted floor, not a full side/back wall mass. */
+  rampSlabEdgePlanThicknessMeters: 0.12,
+  /** Segment count for sloped side-edge bands; high enough that adjacent bands
+   *  overlap vertically for the standard 45° / 3m ramp. */
+  rampSlabEdgeSegments: 16,
+  /** Uniform host heightfield cell size for ramp/stair slopes. This keeps
+   *  non-square links like stairs on their real footprint instead of widening
+   *  them to the 3m ramp module. */
+  verticalLinkHeightfieldCellMeters: 0.6,
+  /** RAMPSIDE-0606 legacy for stairs only: side/back boundary thickness for
+   *  stair wall faces. Ramps no longer use this. */
+  stairBoundaryWallThicknessMeters: 0.25,
   /** RAMPFOOT-0605: degenerate-band floor when trimming wall overhangs out of
    *  ramp footprints — a trimmed band thinner than this is dropped, meters */
   rampTrimMinBandMeters: 0.01,
@@ -109,7 +124,8 @@ const DEG = Math.PI / 180;
 function localOffset(u: number, v: number, yawDegrees: number): { dx: number; dz: number } {
   const cos = Math.cos(yawDegrees * DEG);
   const sin = Math.sin(yawDegrees * DEG);
-  return { dx: u * cos - v * sin, dz: u * sin + v * cos };
+  // Match Scene3D/render3d yaw: local +v turns toward world +x at yaw 90.
+  return { dx: u * cos + v * sin, dz: -u * sin + v * cos };
 }
 
 function normalizeYaw(yawDegrees: number): number {
@@ -300,6 +316,12 @@ export type PlacedPieceColliders = {
   orientedRects: OrientedCollisionRect[];
 };
 
+export type PlacedPieceCameraOccluders = {
+  rects: CameraOcclusionRect[];
+  orientedRects: CameraOcclusionOrientedRect[];
+  ownerIds: string[];
+};
+
 /** One solid band in the piece's own frame: [u0,u1] along the piece width,
  *  full depth, with its own top. Split points come from the edit's opening. */
 export type PlacedPieceBand = { u0: number; u1: number; top: number };
@@ -465,7 +487,7 @@ function localRectToAxisRect(piece: PlacedBuildPiece, local: LocalPlanRect): Pla
   return { minX, maxX, minZ, maxZ };
 }
 
-function pushRampBoundaryRects(
+function pushStairBoundaryRects(
   rects: CollisionRect[],
   orientedRects: OrientedCollisionRect[],
   piece: PlacedBuildPiece,
@@ -474,7 +496,7 @@ function pushRampBoundaryRects(
   const size = def.size;
   const halfW = size.widthMeters / 2;
   const halfD = size.depthMeters / 2;
-  const wall = PLACED_TUNING.rampBoundaryWallThicknessMeters;
+  const wall = PLACED_TUNING.stairBoundaryWallThicknessMeters;
   const top = piece.y + size.heightMeters;
   const localRects: LocalPlanRect[] = [
     // side walls sit outside the walkable slope footprint; their inner face is
@@ -511,6 +533,60 @@ function pushRampBoundaryRects(
   }
 }
 
+function pushRampSlabEdgeRects(
+  rects: CollisionRect[],
+  orientedRects: OrientedCollisionRect[],
+  piece: PlacedBuildPiece,
+  def: BuildPieceDef,
+): void {
+  const size = def.size;
+  const halfW = size.widthMeters / 2;
+  const halfD = size.depthMeters / 2;
+  const edge = PLACED_TUNING.rampSlabEdgePlanThicknessMeters;
+  const thickness = PLACED_TUNING.rampSlabThicknessMeters;
+  const segments = Math.max(1, Math.round(PLACED_TUNING.rampSlabEdgeSegments));
+  const surfaceAt = (v: number): number => piece.y + ((v + halfD) / size.depthMeters) * size.heightMeters;
+  const pushLocal = (local: LocalPlanRect, topMeters: number): void => {
+    const floorMeters = topMeters - thickness;
+    const base = {
+      topMeters,
+      floorMeters,
+      blocksPlayer: true,
+      friction: PLACED_TUNING.pieceFriction,
+      restitution: PLACED_TUNING.pieceRestitution,
+    };
+    const quarter = quarterTurns(piece.yawDegrees);
+    if (quarter !== null) {
+      rects.push({ ...base, ...localRectToAxisRect(piece, local) });
+    } else {
+      orientedRects.push({
+        ...base,
+        minX: piece.x + local.minU,
+        maxX: piece.x + local.maxU,
+        minZ: piece.z + local.minV,
+        maxZ: piece.z + local.maxV,
+        pivotX: piece.x,
+        pivotZ: piece.z,
+        yawRadians: piece.yawDegrees * DEG,
+      });
+    }
+  };
+
+  for (let i = 0; i < segments; i += 1) {
+    const v0 = -halfD + (i / segments) * size.depthMeters;
+    const v1 = -halfD + ((i + 1) / segments) * size.depthMeters;
+    const topMeters = surfaceAt(v0);
+    pushLocal({ minU: -halfW, maxU: halfW, minV: v0, maxV: v1 }, topMeters);
+    pushLocal({ minU: -halfW - edge, maxU: -halfW, minV: v0, maxV: v1 }, topMeters);
+    pushLocal({ minU: halfW, maxU: halfW + edge, minV: v0, maxV: v1 }, topMeters);
+  }
+
+  pushLocal(
+    { minU: -halfW - edge, maxU: halfW + edge, minV: halfD, maxV: halfD + edge },
+    piece.y + size.heightMeters,
+  );
+}
+
 export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): PlacedPieceColliders {
   const rects: CollisionRect[] = [];
   const orientedRects: OrientedCollisionRect[] = [];
@@ -524,7 +600,10 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
   for (const piece of pieces) {
     const def = placedPieceDef(piece);
     if (def.kind === 'ramp' || def.kind === 'stairs') {
-      if (placedPieceTags(piece).collision) pushRampBoundaryRects(rects, orientedRects, piece, def);
+      if (placedPieceTags(piece).collision) {
+        if (def.kind === 'ramp') pushRampSlabEdgeRects(rects, orientedRects, piece, def);
+        else pushStairBoundaryRects(rects, orientedRects, piece, def);
+      }
       continue;
     }
     if (!placedPieceTags(piece).collision) continue;
@@ -577,6 +656,54 @@ export function placedPieceColliders(pieces: readonly PlacedBuildPiece[]): Place
   return { rects, orientedRects };
 }
 
+export function placedPieceCameraOccluders(pieces: readonly PlacedBuildPiece[]): PlacedPieceCameraOccluders {
+  const rects: CameraOcclusionRect[] = [];
+  const orientedRects: CameraOcclusionOrientedRect[] = [];
+  const ownerIds: string[] = [];
+  for (const piece of pieces) {
+    const def = placedPieceDef(piece);
+    const tags = placedPieceTags(piece);
+    if (def.kind !== 'wall' && def.kind !== 'roof') continue;
+    if (!tags.collision || (!tags.blocksSight && def.kind !== 'roof')) continue;
+    const ownerIndex = ownerIds.push(piece.id);
+    const size = def.size;
+    const halfD = size.depthMeters / 2;
+    const quarter = quarterTurns(piece.yawDegrees);
+    for (const band of placedPieceBands(piece, pieces)) {
+      const base = {
+        topMeters: band.top,
+        floorMeters: piece.y,
+        blocksPlayer: true,
+        friction: PLACED_TUNING.pieceFriction,
+        restitution: PLACED_TUNING.pieceRestitution,
+        ownerIndex,
+      };
+      if (quarter !== null) {
+        const centerU = (band.u0 + band.u1) / 2;
+        const halfU = (band.u1 - band.u0) / 2;
+        const along = quarter % 2 === 0 ? 'x' : 'z';
+        const flip = quarter === 2 || quarter === 3 ? -1 : 1;
+        const cu = centerU * flip;
+        rects.push(along === 'x'
+          ? { ...base, minX: piece.x + cu - halfU, maxX: piece.x + cu + halfU, minZ: piece.z - halfD, maxZ: piece.z + halfD }
+          : { ...base, minX: piece.x - halfD, maxX: piece.x + halfD, minZ: piece.z + cu - halfU, maxZ: piece.z + cu + halfU });
+      } else {
+        orientedRects.push({
+          ...base,
+          minX: piece.x + band.u0,
+          maxX: piece.x + band.u1,
+          minZ: piece.z - halfD,
+          maxZ: piece.z + halfD,
+          pivotX: piece.x,
+          pivotZ: piece.z,
+          yawRadians: piece.yawDegrees * DEG,
+        });
+      }
+    }
+  }
+  return { rects, orientedRects, ownerIds };
+}
+
 /**
  * Ramps and stairs as walkable slopes: each bakes a small heightfield rising
  * along its local depth (a ramp knows it connects floors — V24), rotated into
@@ -589,15 +716,19 @@ export function placedPieceRamps(pieces: readonly PlacedBuildPiece[], startSlot:
     const def = placedPieceDef(piece);
     if (def.kind !== 'ramp' && def.kind !== 'stairs') continue;
     const size = def.size;
-    const cols = 2;
-    const rows = 2;
-    // rise along local depth: back edge at base, front edge at full height
-    const heights = new Float32Array([0, 0, size.heightMeters, size.heightMeters]);
+    const cell = PLACED_TUNING.verticalLinkHeightfieldCellMeters;
+    const cols = Math.max(2, Math.round(size.widthMeters / cell) + 1);
+    const rows = Math.max(2, Math.round(size.depthMeters / cell) + 1);
+    const heights = new Float32Array(cols * rows);
+    for (let row = 0; row < rows; row += 1) {
+      const h = (row / (rows - 1)) * size.heightMeters;
+      for (let col = 0; col < cols; col += 1) heights[row * cols + col] = h;
+    }
     fields.push({
       slot: startSlot + fields.length,
       originX: piece.x - size.widthMeters / 2,
       originZ: piece.z - size.depthMeters / 2,
-      cellSizeMeters: size.depthMeters / (rows - 1),
+      cellSizeMeters: cell,
       cols,
       rows,
       baseY: piece.y,

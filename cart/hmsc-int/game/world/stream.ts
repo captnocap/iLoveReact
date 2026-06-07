@@ -52,11 +52,21 @@ export type WorldStreamState = {
   respawnCell: GridCell | null;
   /** every placed build piece, in placement order — THE placed-piece truth */
   pieces: PlacedBuildPiece[];
+  /** placed build pieces by project/map. Legacy snapshots may lack this; the
+   *  global `pieces` pool above stays loadable for its owning/default map until
+   *  the user rules on migration. */
+  piecesByMap: Record<string, PlacedBuildPiece[]>;
   /** world-saved prefab definitions (clone-from-world) — the static seeds'
    *  registry family, grown by authoring (V24 addendum: P2/V20 data) */
   prefabs: Record<string, BuildPrefabDef>;
+  /** deleted building types (BUILDSKIN req_0184 addendum): tombstones so a
+   *  removed STATIC SEED stays removed across the merged read; a later
+   *  prefabDefined for the same id revives it. Legacy snapshots lack this. */
+  removedPrefabs?: string[];
   /** the id mint — replay-deterministic (`bp_<n>`) */
   pieceSeq: number;
+  /** replay-deterministic id mint per project/map */
+  pieceSeqByMap: Record<string, number>;
 };
 
 /** A to-be-placed piece: everything but the id (the materializer mints it). */
@@ -71,16 +81,56 @@ export type WorldEvent =
   | { kind: 'landformRemoved'; id: string }
   | { kind: 'respawnArmed'; cell: GridCell }
   // ── V24 placed pieces (additions; older logs predate them and stay valid) ──
-  | { kind: 'piecePlaced'; placement: PiecePlacement }
-  | { kind: 'pieceRemoved'; id: string }
-  | { kind: 'pieceEditSet'; id: string; edit: WallEdit }
+  | { kind: 'piecePlaced'; placement: PiecePlacement; mapName?: string }
+  | { kind: 'pieceRemoved'; id: string; mapName?: string }
+  | { kind: 'pieceEditSet'; id: string; edit: WallEdit; mapName?: string }
   | { kind: 'prefabDefined'; def: BuildPrefabDef }
-  | { kind: 'prefabStamped'; prefabId: string; origin: { x: number; y: number; z: number }; yawDegrees: number };
+  // BUILDSKIN req_0184 addendum (addition): delete a building TYPE — drops
+  // the def + tombstones the id (a same-id static seed stays gone); placed
+  // stamps in the world are copies and stay standing.
+  | { kind: 'prefabRemoved'; id: string }
+  | { kind: 'prefabStamped'; prefabId: string; origin: { x: number; y: number; z: number }; yawDegrees: number; mapName?: string };
+
+function eventMapName(event: { mapName?: string } | null | undefined): string | null {
+  const name = typeof event?.mapName === 'string' ? event.mapName.trim() : '';
+  return name.length > 0 ? name : null;
+}
+
+export function piecesForMap(
+  state: WorldStreamState | null | undefined,
+  mapName: string,
+  opts: { legacyMapName?: string | null } = {},
+): PlacedBuildPiece[] {
+  const key = eventMapName({ mapName });
+  const scoped = key ? (state?.piecesByMap?.[key] ?? []) : [];
+  const legacy = state?.pieces ?? [];
+  const legacyKey = eventMapName({ mapName: opts.legacyMapName ?? undefined });
+  if (key && legacyKey === key && legacy.length > 0) return [...legacy, ...scoped];
+  return scoped;
+}
+
+export function legacyGlobalPieces(state: WorldStreamState | null | undefined): PlacedBuildPiece[] {
+  return state?.pieces ?? [];
+}
 
 /** Mint ids and append placements — the one piece-adding step both
  *  piecePlaced and prefabStamped fold through. */
-function appendPieces(state: WorldStreamState, placements: PiecePlacement[]): WorldStreamState {
+function appendPieces(state: WorldStreamState, placements: PiecePlacement[], mapName?: string): WorldStreamState {
   if (placements.length === 0) return state;
+  const map = eventMapName({ mapName });
+  if (map) {
+    const piecesByMap = { ...(state.piecesByMap ?? {}) };
+    const pieces = [...(piecesByMap[map] ?? [])];
+    const pieceSeqByMap = { ...(state.pieceSeqByMap ?? {}) };
+    let seq = Math.max(pieceSeqByMap[map] ?? 0, state.pieceSeq ?? 0);
+    for (const placement of placements) {
+      seq += 1;
+      pieces.push({ ...placement, id: `bp_${seq}` });
+    }
+    piecesByMap[map] = pieces;
+    pieceSeqByMap[map] = seq;
+    return { ...state, piecesByMap, pieceSeqByMap };
+  }
   const pieces = [...state.pieces];
   let seq = state.pieceSeq;
   for (const placement of placements) {
@@ -96,8 +146,11 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
     grid: createWorldGridState(),
     respawnCell: null,
     pieces: [],
+    piecesByMap: {},
     prefabs: {},
+    removedPrefabs: [],
     pieceSeq: 0,
+    pieceSeqByMap: {},
   }),
   apply: (state: WorldStreamState, event: WorldEvent): WorldStreamState => {
     switch (event?.kind) {
@@ -128,29 +181,55 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         // BEFORE it appends (game/build validatePlacement)
         if (!event.placement || !isCatalogId(event.placement.pieceId)) return state;
         if (event.placement.edit !== undefined && !isWallEdit(event.placement.edit)) return state;
-        return appendPieces(state, [event.placement]);
+        return appendPieces(state, [event.placement], event.mapName);
       case 'pieceRemoved':
+        if (eventMapName(event)) {
+          const map = eventMapName(event)!;
+          return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: (state.piecesByMap?.[map] ?? []).filter((piece) => piece.id !== event.id) } };
+        }
         return { ...state, pieces: state.pieces.filter((piece) => piece.id !== event.id) };
       case 'pieceEditSet': {
         if (!isWallEdit(event.edit)) return state;
-        const index = state.pieces.findIndex((piece) => piece.id === event.id);
+        const map = eventMapName(event);
+        const source = map ? (state.piecesByMap?.[map] ?? []) : state.pieces;
+        const index = source.findIndex((piece) => piece.id === event.id);
         if (index < 0) return state;
         // an edit on an editless kind would poison every later tags read —
         // refuse it here too (the kind contract, enforced at both layers)
-        if (!placedPieceAcceptsEdits(state.pieces[index])) return state;
-        const pieces = [...state.pieces];
+        if (!placedPieceAcceptsEdits(source[index])) return state;
+        const pieces = [...source];
         pieces[index] = { ...pieces[index], edit: event.edit };
+        if (map) return { ...state, piecesByMap: { ...(state.piecesByMap ?? {}), [map]: pieces } };
         return { ...state, pieces };
       }
       case 'prefabDefined': {
         if (!event.def || typeof event.def.id !== 'string' || validatePrefab(event.def).length > 0) return state;
-        return { ...state, prefabs: { ...state.prefabs, [event.def.id]: event.def } };
+        return {
+          ...state,
+          prefabs: { ...state.prefabs, [event.def.id]: event.def },
+          // re-defining a deleted id revives it (the tombstone lifts)
+          removedPrefabs: (state.removedPrefabs ?? []).filter((id) => id !== event.def.id),
+        };
+      }
+      case 'prefabRemoved': {
+        if (typeof event.id !== 'string' || event.id.length === 0) return state;
+        const prefabs = { ...state.prefabs };
+        delete prefabs[event.id];
+        const removed = state.removedPrefabs ?? [];
+        return {
+          ...state,
+          prefabs,
+          removedPrefabs: removed.includes(event.id) ? removed : [...removed, event.id],
+        };
       }
       case 'prefabStamped': {
+        // a deleted building type cannot stamp (the seed fallback would
+        // otherwise resurrect a tombstoned id)
+        if ((state.removedPrefabs ?? []).includes(event.prefabId)) return state;
         // world-saved prefabs win over a same-id static seed (newest meaning)
         const def = state.prefabs[event.prefabId] ?? BUILD_PREFAB_DEFINITIONS[event.prefabId];
         if (!def) return state;
-        return appendPieces(state, stampPrefabPieces(def, event.origin, event.yawDegrees));
+        return appendPieces(state, stampPrefabPieces(def, event.origin, event.yawDegrees), event.mapName);
       }
       default:
         // Unknown kinds from the future MUST pass through untouched (V20

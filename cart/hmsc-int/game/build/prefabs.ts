@@ -19,6 +19,7 @@
 import { catalogEntry, effectiveTags, isCatalogId, type BuildPieceDef, type BuildTheme } from './catalog';
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags } from './pieces';
 import { isWallEdit, type WallEdit } from './edits';
+import { skinSetProblems, type BuildSkinSet, type BuildTypeSkins } from './skins';
 
 // One placed piece inside a prefab: a catalog reference + a LOCAL placement
 // relative to the prefab origin, on the 1m substrate (R4).
@@ -32,6 +33,10 @@ export type PrefabPiece = {
   yawDegrees: number;
   // The meaningful cutout on THIS placement (wall-family pieces only).
   edit?: WallEdit;
+  // BUILDSKIN-0606 (addition; older defs stay valid): the per-piece face-skin
+  // OVERRIDE — beats the def-level type global. Rides the piece itself so
+  // structure edits (swap/remove/add) never detach a skin from its piece.
+  skin?: BuildSkinSet;
 };
 
 export type BuildPrefabDef = {
@@ -39,6 +44,9 @@ export type BuildPrefabDef = {
   label: string;
   theme: BuildTheme;
   pieces: PrefabPiece[];
+  // BUILDSKIN-0606 (addition): the GLOBAL face skins per piece TYPE —
+  // "all walls → green" lives here; per-piece overrides above beat it.
+  skins?: BuildTypeSkins;
 };
 
 // What decomposition hands the bake (and any view): the placed piece with its
@@ -126,6 +134,18 @@ export function validatePrefab(prefab: BuildPrefabDef): string[] {
       const kind = catalogEntry(piece.pieceId).kind;
       if (BUILD_KIND_CONTRACTS[kind].edits !== 'wall')
         problems.push(`${prefab.id}[${index}]: kind '${kind}' accepts no edits`);
+    }
+    // BUILDSKIN-0606: override shape (material EXISTENCE is the editor
+    // boundary's check — the registry lives React-side)
+    problems.push(...skinSetProblems(piece.skin, `${prefab.id}[${index}].skin`));
+  }
+  if (prefab.skins !== undefined) {
+    for (const kind of Object.keys(prefab.skins)) {
+      if (!Object.prototype.hasOwnProperty.call(BUILD_KIND_CONTRACTS, kind)) {
+        problems.push(`${prefab.id}.skins: unknown piece kind '${kind}'`);
+        continue;
+      }
+      problems.push(...skinSetProblems(prefab.skins[kind as keyof typeof prefab.skins], `${prefab.id}.skins.${kind}`));
     }
   }
   return problems;

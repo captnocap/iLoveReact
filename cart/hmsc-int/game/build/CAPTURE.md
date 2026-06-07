@@ -122,7 +122,42 @@ untouched (a landing plate is the delivery surface). Free-yaw bands are not
 trimmed (oriented subtraction needs host support). SURFACED EDGE CASE: a wall
 sandwiched between two ramps trims away entirely (collision-free) — pinned by
 test, not silently special-cased; a vertical band split needs the physics
-wire to grow before it can be honest. 4 new P4 cases (26/26).
+wire to grow before it can be honest. P4 coverage lives in `placed.test.ts`.
+
+## RAMPSIDE-0606 (2026-06-06): ramp boundaries are solid
+
+USER VERDICT: ramp slopes worked, but the visually present side/back wall was
+walk-through. Cause: `placedPieceRamps` registered only the 2x2 slope
+heightfield (`[0,0,H,H]`), while `placedPieceColliders` skipped ramp/stairs
+entirely. Fix in `placed.ts`: ramp/stairs still register the heightfield for
+the walkable slope, and also emit three wall-class collision bands: left side,
+right side, and low/back face. The side bands sit outside the slope footprint
+with their inner faces flush to the ramp edge, so center-slope walking is
+unchanged; the high/front edge stays open to the next floor. P2 thickness is
+`PLACED_TUNING.rampBoundaryWallThicknessMeters`. `physics.test.ts` consumes the
+real build colliders through `GAME_PHYSICS.step`: slope grounding still works,
+and walking into a ramp side is blocked.
+
+## REQ-0107 (2026-06-06): flushness is lattice origin, not piece resizing
+
+USER VERDICT: a previous wall-junction attempt resized live geometry and made
+floors appear tiny / wall placement reject. The grammar rule is explicit:
+catalog sizes are untouched; floor/wall junctions are made flush by exact
+lattice origins. Regression coverage logs floor bounds, wall bounds, wall
+collision spans, and the live wall-on-floor snap target; floor pieces remain
+3m x 3m, walls keep their 3m run, and validation accepts a wall placed on a
+floor top edge.
+
+## REQ-0109 (2026-06-06): wall-wall joins close endpoint-to-side notches
+
+USER VERDICT: floor-top flush passed, but L wall corners still showed a notch
+where one wall's endpoint stopped at the other wall's centerline. Bounds remain
+catalog-sized; `placedPieceBands(piece, pieces)` is the context-aware consumer
+shape for rendering and collision. When a quarter-turn edge wall endpoint lands
+on a perpendicular wall side, that endpoint extends by the neighbor wall's
+half-depth to the outer face. L-corners and T-junctions are covered in
+`placed.test.ts`: raw placed bounds log the 0.125m sliver, joined bands close
+the outer faces exactly, and standalone floor/wall placement stays unchanged.
 
 ## SMARTSEL-0605 (2026-06-05): one click grabs the connected shape
 

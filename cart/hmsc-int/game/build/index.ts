@@ -64,6 +64,20 @@ export {
 } from './prefabs';
 export type { BuildPrefabDef, DecomposedPiece, PrefabPiece } from './prefabs';
 
+// BUILDSKIN-0606: the building face-skin vocabulary (per-type globals,
+// per-piece overrides, 2 majors + the one side group; resolution order).
+export {
+  BUILD_FACE_SLOTS,
+  STRUCTURAL_SKIN_KINDS,
+  faceSlotLabels,
+  skinKindOrder,
+  resolveFaceSkin,
+  skinAllSlots,
+  skinSetProblems,
+  describeFaceSkin,
+} from './skins';
+export type { BuildFaceSlot, BuildFaceSkin, BuildSkinSet, BuildTypeSkins, ResolvedFaceSkin } from './skins';
+
 export {
   PLACED_TUNING,
   placedPieceDef,
@@ -73,6 +87,7 @@ export {
   pieceBounds,
   connectedPieceIds,
   raycastPieces,
+  placedPieceCameraOccluders,
   placedPieceColliders,
   placedPieceRamps,
   stampPrefabPieces,
@@ -85,6 +100,7 @@ export type {
   PieceHit,
   PieceRay,
   PlacedBuildPiece,
+  PlacedPieceCameraOccluders,
   PlacedPieceColliders,
 } from './placed';
 
@@ -139,6 +155,16 @@ import {
   validatePrefabs,
 } from './prefabs';
 import {
+  BUILD_FACE_SLOTS,
+  STRUCTURAL_SKIN_KINDS,
+  faceSlotLabels,
+  skinKindOrder,
+  resolveFaceSkin,
+  skinAllSlots,
+  skinSetProblems,
+  describeFaceSkin,
+} from './skins';
+import {
   WORLD_MARKER_TYPES,
   ROOM_ROLES,
   INTEREST_POINT_ROLES,
@@ -156,6 +182,7 @@ import {
   pieceBounds,
   connectedPieceIds,
   raycastPieces,
+  placedPieceCameraOccluders,
   placedPieceColliders,
   placedPieceRamps,
   stampPrefabPieces,
@@ -196,6 +223,18 @@ export const GAME_BUILD = {
     decompose: decomposePrefab,
     validate: validatePrefabs,
   },
+  // BUILDSKIN-0606: the face-skin vocabulary — the skin IS the material
+  // system (a skin = the mesh's base color or a registry textureKey).
+  skins: {
+    slots: BUILD_FACE_SLOTS,
+    structuralKinds: STRUCTURAL_SKIN_KINDS,
+    slotLabels: faceSlotLabels,
+    kindOrder: skinKindOrder,
+    resolve: resolveFaceSkin,
+    all: skinAllSlots,
+    problems: skinSetProblems,
+    describe: describeFaceSkin,
+  },
   markers: {
     types: WORLD_MARKER_TYPES,
     roomRoles: ROOM_ROLES,
@@ -218,6 +257,7 @@ export const GAME_BUILD = {
     /** SMARTSEL-0605: the connected shape under one click */
     connected: connectedPieceIds,
     raycast: raycastPieces,
+    cameraOccluders: placedPieceCameraOccluders,
     colliders: placedPieceColliders,
     ramps: placedPieceRamps,
     stamp: stampPrefabPieces,

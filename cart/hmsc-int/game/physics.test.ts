@@ -10,7 +10,7 @@
 import { GAME_PHYSICS, PHYSICS_LIMITS, type PhysicsBody, type PhysicsStepInput } from './physics';
 import { assert, assertClose, assertEqual, assertThrows, finish, test } from './_testkit';
 import { catalogEntry } from './build/catalog';
-import { placedPieceColliders, placedPieceRamps, type PlacedBuildPiece } from './build/placed';
+import { PLACED_TUNING, placedPieceColliders, placedPieceRamps, type PlacedBuildPiece } from './build/placed';
 
 declare const globalThis: any;
 
@@ -91,6 +91,10 @@ function installFakeHost(): void {
 
 function removeFakeHost(): void {
   delete globalThis.__game_physics_step;
+  delete globalThis.__game_physics_camera_occlusion;
+  delete globalThis.__game_physics_camera_occlusion_configure;
+  delete globalThis.__game_physics_camera_occlusion_distance;
+  delete globalThis.__game_physics_camera_occlusion_hit;
   delete globalThis.__game_physics_register_heightfield;
   delete globalThis.__game_physics_clear_heightfields;
 }
@@ -99,11 +103,84 @@ test('a missing host degrades to null, never throws', () => {
   removeFakeHost();
   assertEqual(GAME_PHYSICS.hostReady(), false, 'hostReady must be false without bindings');
   assertEqual(GAME_PHYSICS.step(stepInput()), null, 'step must return null without bindings');
+  assertEqual(GAME_PHYSICS.cameraOcclusion({ camera: { x: 0, y: 1, z: -4 }, target: { x: 0, y: 1, z: 4 } }), null, 'camera occlusion is null without its host binding');
   GAME_PHYSICS.registerHeightfield({
     slot: 0, originX: 0, originZ: 0, cellSizeMeters: 1, cols: 2, rows: 2,
     baseY: 0, walkableSlopeCos: 0.7, heights: new Float32Array(4),
   });
   GAME_PHYSICS.clearHeightfields();
+});
+
+test('configured camera occlusion uploads pieces once and queries distance with scalar args', () => {
+  removeFakeHost();
+  let configured: Float32Array | null = null;
+  let scalarArgs = '';
+  let hitArgs = '';
+  globalThis.__game_physics_camera_occlusion_configure = (wire: Float32Array): null => {
+    configured = wire;
+    return null;
+  };
+  globalThis.__game_physics_camera_occlusion_distance = (...args: number[]): number => {
+    scalarArgs = args.map((n) => n.toFixed(3)).join(',');
+    return 4.25;
+  };
+  globalThis.__game_physics_camera_occlusion_hit = (...args: number[]): ArrayBuffer => {
+    hitArgs = args.map((n) => n.toFixed(3)).join(',');
+    return new Float32Array([6, 4.25, 3]).buffer;
+  };
+  GAME_PHYSICS.configureCameraOcclusion([{
+    minX: -2, minZ: -0.15, maxX: 2, maxZ: 0.15,
+    topMeters: 3, floorMeters: 0, blocksPlayer: true,
+    friction: 0.85, restitution: 0.02, ownerIndex: 3,
+  }], []);
+  assert(configured !== null, 'configured occlusion must call host configure');
+  assertEqual(configured![0], 1, 'one rect configures');
+  assertEqual(configured![1], 0, 'no oriented rects configure');
+  assertEqual(configured![11], 3, 'owner id follows configured rect payload');
+  const distance = GAME_PHYSICS.cameraOcclusionDistance(0, 1.5, -5, 0, 1.6, 5, 0.125);
+  assertClose(distance ?? 0, 4.25, 1e-6, 'scalar distance returns');
+  assertEqual(scalarArgs, '0.000,1.500,-5.000,0.000,1.600,5.000,0.125', 'distance call sends scalars, not a per-frame packed wall list');
+  const hit = GAME_PHYSICS.cameraOcclusionConfiguredHit(0, 1.5, -5, 0, 1.6, 5, 0.125);
+  assertClose(hit?.nearestTargetDistanceMeters ?? 0, 4.25, 1e-6, 'owner-aware hit returns distance');
+  assertEqual(hit?.nearestOwnerIndex, 3, 'owner-aware hit returns configured owner');
+  assertEqual(hitArgs, scalarArgs, 'hit call sends the same scalar hot-path args');
+  removeFakeHost();
+});
+
+test('camera occlusion packs owner ids and maps host hits back across the bridge', () => {
+  removeFakeHost();
+  globalThis.__game_physics_camera_occlusion = (wire: Float32Array): ArrayBuffer => {
+    lastWire = wire;
+    const rectCount = wire[6] | 0;
+    const at = 10;
+    const owner = rectCount > 0 ? wire[at + 9] : 0;
+    const out = new Float32Array([8, owner > 0 ? 1 : 0, 4.75, owner, owner]);
+    return out.buffer;
+  };
+  const result = GAME_PHYSICS.cameraOcclusion({
+    camera: { x: 0, y: 1.5, z: -5 },
+    target: { x: 0, y: 1.5, z: 5 },
+    maxHits: 4,
+    radiusMeters: 0.125,
+    rects: [{
+      minX: -2, minZ: -0.15, maxX: 2, maxZ: 0.15,
+      topMeters: 3, floorMeters: 0, blocksPlayer: true,
+      friction: 0.85, restitution: 0.02, ownerIndex: 3,
+    }],
+  });
+  assert(result !== null, 'camera occlusion must return with a live host');
+  assertEqual(result!.ownerIndices.join(','), '3', 'owner id round-trips');
+  assertClose(result!.nearestTargetDistanceMeters, 4.75, 1e-6, 'nearest target distance round-trips');
+  assertEqual(result!.nearestOwnerIndex, 3, 'nearest owner id round-trips');
+  assertEqual(lastWire![0], 0, 'camera x packs at the header');
+  assertEqual(lastWire![2], -5, 'camera z packs at the header');
+  assertEqual(lastWire![3], 0, 'target x packs at the header');
+  assertEqual(lastWire![5], 5, 'target z packs at the header');
+  assertEqual(lastWire![6], 1, 'one rect sent');
+  assertEqual(lastWire![8], 4, 'max hit cap sent');
+  assertClose(lastWire![9], 0.125, 1e-6, 'sweep radius packs at the header');
+  assertEqual(lastWire![19], 3, 'owner id follows the rect payload');
+  removeFakeHost();
 });
 
 test('a falling player steps under gravity and comes back typed', () => {
@@ -227,7 +304,7 @@ function installRampCollisionHost(): void {
     fields.push({ originX, originZ, cell, cols, rows, baseY, heights });
     return true;
   };
-  const fieldGroundAt = (x: number, z: number): number | null => {
+  const fieldGroundAt = (x: number, z: number, currentY: number, stepHeight: number): number | null => {
     let best: number | null = null;
     for (const field of fields) {
       const fx = (x - field.originX) / field.cell;
@@ -246,6 +323,7 @@ function installRampCollisionHost(): void {
       const hx0 = h00 + (h10 - h00) * tx;
       const hx1 = h01 + (h11 - h01) * tx;
       const h = field.baseY + hx0 + (hx1 - hx0) * tz;
+      if (h > currentY + stepHeight) continue;
       best = best === null ? h : Math.max(best, h);
     }
     return best;
@@ -264,7 +342,7 @@ function installRampCollisionHost(): void {
     let vy = wire[9] - wire[14] * dt;
     let vz = wire[10];
     let ground = -1000000;
-    const hfGround = fieldGroundAt(x, z);
+    const hfGround = fieldGroundAt(x, z, y, stepHeight);
     if (hfGround !== null && hfGround <= y + stepHeight) ground = Math.max(ground, hfGround);
     let at = 25;
     for (let i = 0; i < rectCount; i += 1) {
@@ -272,14 +350,29 @@ function installRampCollisionHost(): void {
       const top = wire[at + 4], solid = wire[at + 5] > 0.5, floor = wire[at + 8];
       if (x >= minX && x <= maxX && z >= minZ && z <= maxZ && top <= y + stepHeight) ground = Math.max(ground, top);
       if (solid && y < top - 0.04 && y + height > floor) {
+        const finiteFloor = floor > -100000;
+        if (finiteFloor && top <= y + stepHeight && y >= floor - TUNING.walkableRectSidePushGraceMeters) {
+          at += 9;
+          continue;
+        }
         const closestX = Math.max(minX, Math.min(maxX, x));
         const closestZ = Math.max(minZ, Math.min(maxZ, z));
         const dx = x - closestX;
         const dz = z - closestZ;
-        const d = Math.hypot(dx, dz);
-        if (d < radius && d > 1e-6) {
-          const nx = dx / d;
-          const nz = dz / d;
+        let d = Math.hypot(dx, dz);
+        let nx = 0;
+        let nz = 0;
+        if (d < 1e-6) {
+          const sideX = Math.min(Math.abs(x - minX), Math.abs(maxX - x));
+          const sideZ = Math.min(Math.abs(z - minZ), Math.abs(maxZ - z));
+          if (sideX < sideZ) nx = x < (minX + maxX) * 0.5 ? -1 : 1;
+          else nz = z < (minZ + maxZ) * 0.5 ? -1 : 1;
+          d = 1;
+        } else {
+          nx = dx / d;
+          nz = dz / d;
+        }
+        if (d < radius) {
           x += nx * (radius - d);
           if (vx * nx < 0) vx = 0;
           if (vz * nz < 0) vz = 0;
@@ -337,7 +430,7 @@ test('true outer floor edge supports to the bound without oscillating', () => {
   }
 });
 
-test('RAMPSIDE-0606: ramp side blocks the character while the slope still grounds', () => {
+test('RAMPREAL-0606: ramp slab walks on top, stays hollow underneath, and blocks through the slab edge', () => {
   installRampCollisionHost();
   GAME_PHYSICS.clearHeightfields();
   const ramp = buildPiece('ramp.concrete.common', 6, 6);
@@ -345,8 +438,8 @@ test('RAMPSIDE-0606: ramp side blocks the character while the slope still ground
   const fields = placedPieceRamps([ramp], 0);
   for (const field of fields) GAME_PHYSICS.registerHeightfield(field);
   assertEqual(fields.length, 1, 'the ramp still registers its walkable slope');
-  assertEqual(solids.rects.length, 3, 'side/back faces are now sent as solid rects');
-  console.log(`[RAMPSIDE-0606] physics ramp bands=${solids.rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] top=${r.topMeters}`).join(';')} heightfield=x[${fields[0].originX},${fields[0].originX + fields[0].cellSizeMeters * (fields[0].cols - 1)}] z[${fields[0].originZ},${fields[0].originZ + fields[0].cellSizeMeters * (fields[0].rows - 1)}] heights=${Array.from(fields[0].heights).join(',')} oldIntruder=x[4.25,7.75]z[4.25,4.5]`);
+  assertEqual(solids.rects.length, PLACED_TUNING.rampSlabEdgeSegments * 3 + 1, 'ramp sends slab core + thin edges, not full-height wall bands');
+  console.log(`[RAMPREAL-0606] physics ramp slabBands=${solids.rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] y[${r.floorMeters},${r.topMeters}]`).join(';')} heightfield=x[${fields[0].originX},${fields[0].originX + fields[0].cellSizeMeters * (fields[0].cols - 1)}] z[${fields[0].originZ},${fields[0].originZ + fields[0].cellSizeMeters * (fields[0].rows - 1)}] heights=${Array.from(fields[0].heights).join(',')}`);
 
   const slope = GAME_PHYSICS.step(stepInput({
     dtSeconds: 0.016,
@@ -376,13 +469,192 @@ test('RAMPSIDE-0606: ramp side blocks the character while the slope still ground
   assert(walker.z >= 7.45, `walk-up reaches the crest instead of being blocked at the approach (z=${walker.z})`);
   assertClose(walker.y, catalogEntry('ramp.concrete.common').size.heightMeters, 0.05, 'walk-up reaches the ramp crest height');
 
-  const leftSide = solids.rects.find((r) => r.maxX <= 4.5)!;
+  const floorUnderRamp = { minX: 4.5, minZ: 4.5, maxX: 7.5, maxZ: 7.5, topMeters: 0, blocksPlayer: true, friction: 0.85, restitution: 0.02, floorMeters: -0.2 };
+  let under = { x: 5.2, y: 0, z: 6.9, vx: 1.5, vy: 0, vz: 0 };
+  for (let frame = 0; frame < 8; frame += 1) {
+    const walked = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.05,
+      player: { position: { x: under.x, y: under.y, z: under.z }, velocity: { x: under.vx, y: under.vy, z: under.vz }, yawDegrees: 0 },
+      rects: [floorUnderRamp, ...solids.rects],
+    }))!;
+    under = {
+      x: walked.player.position.x,
+      y: walked.player.position.y,
+      z: walked.player.position.z,
+      vx: walked.player.velocity.x,
+      vy: walked.player.velocity.y,
+      vz: walked.player.velocity.z,
+    };
+    assertEqual(walked.player.grounded, true, `under-ramp frame ${frame} stays on the lower floor`);
+    assertClose(walked.player.position.y, 0, 1e-6, `under-ramp frame ${frame} does not snap up to the slope`);
+  }
+  assert(under.x > 5.7, `walking under the raised slab keeps moving through the open space (x=${under.x})`);
+
+  let underTowardSlab = { x: 6, y: 0, z: 6.9, vx: 0, vy: 0, vz: -2.5 };
+  const underTowardFrames: string[] = [];
+  for (let frame = 0; frame < 14; frame += 1) {
+    const walked = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.05,
+      player: { position: { x: underTowardSlab.x, y: underTowardSlab.y, z: underTowardSlab.z }, velocity: { x: underTowardSlab.vx, y: underTowardSlab.vy, z: underTowardSlab.vz }, yawDegrees: 0 },
+      rects: [floorUnderRamp, ...solids.rects],
+    }))!;
+    underTowardSlab = {
+      x: walked.player.position.x,
+      y: walked.player.position.y,
+      z: walked.player.position.z,
+      vx: walked.player.velocity.x,
+      vy: walked.player.velocity.y,
+      vz: walked.player.velocity.z,
+    };
+    underTowardFrames.push(`${frame}:pos(${underTowardSlab.x.toFixed(3)},${underTowardSlab.y.toFixed(3)},${underTowardSlab.z.toFixed(3)}) vel(${underTowardSlab.vx.toFixed(3)},${underTowardSlab.vy.toFixed(3)},${underTowardSlab.vz.toFixed(3)})`);
+    assertClose(walked.player.position.y, 0, 1e-6, `under-to-slab frame ${frame} stays on the lower floor`);
+  }
+  console.log(`[RAMPHOLLOW-0606] under-high-walks sideEnd=(${under.x.toFixed(3)},${under.y.toFixed(3)},${under.z.toFixed(3)}) towardLow=${underTowardFrames.join(' | ')}`);
+  assert(underTowardSlab.z > 6.55, `walking at the ramp from underneath blocks at head contact instead of phasing through the lowering slab (z=${underTowardSlab.z})`);
+  assertClose(underTowardSlab.y, 0, 1e-6, 'walking at the underside never snaps up onto the slope heightfield');
+
+  let lowUnder = { x: 6, y: 0, z: 4.1, vx: 0, vy: 0, vz: 2.5 };
+  for (let frame = 0; frame < 8; frame += 1) {
+    const walked = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.05,
+      player: { position: { x: lowUnder.x, y: lowUnder.y, z: lowUnder.z }, velocity: { x: lowUnder.vx, y: lowUnder.vy, z: lowUnder.vz }, yawDegrees: 0 },
+      rects: [floorUnderRamp, ...solids.rects],
+    }))!;
+    lowUnder = {
+      x: walked.player.position.x,
+      y: walked.player.position.y,
+      z: walked.player.position.z,
+      vx: walked.player.velocity.x,
+      vy: walked.player.velocity.y,
+      vz: walked.player.velocity.z,
+    };
+  }
+  assert(lowUnder.z < 4.5, `approaching the low underside blocks before entering the slab footprint (z=${lowUnder.z})`);
+
+  const leftSide = solids.rects.find((r) => r.maxX <= 4.5 && r.minZ <= 6 && r.maxZ >= 6)!;
   const blocked = GAME_PHYSICS.step(stepInput({
     dtSeconds: 0.016,
     player: { position: { x: 4, y: 0, z: 6 }, velocity: { x: 6, y: 0, z: 0 }, yawDegrees: 0 },
     rects: solids.rects,
   }))!;
-  assert(blocked.player.position.x <= leftSide.minX - TUNING.playerCapsuleRadiusMeters + 1e-6, 'walking into the ramp side is blocked before entering the wall face');
+  assert(blocked.player.position.x <= leftSide.minX - TUNING.playerCapsuleRadiusMeters + 1e-6, 'walking into the slab edge at body height is blocked');
+  removeFakeHost();
+});
+
+test('RAMPHOLLOW-0607: terrain heightfield remains ground under a ramp heightfield', () => {
+  installRampCollisionHost();
+  GAME_PHYSICS.clearHeightfields();
+  const ramp = buildPiece('ramp.concrete.common', 6, 6);
+  const solids = placedPieceColliders([ramp]);
+  GAME_PHYSICS.registerHeightfield({
+    slot: 0,
+    originX: 4.5,
+    originZ: 4.5,
+    cellSizeMeters: 3,
+    cols: 2,
+    rows: 2,
+    baseY: 0,
+    walkableSlopeCos: 1,
+    heights: new Float32Array([0, 0, 0, 0]),
+  });
+  for (const field of placedPieceRamps([ramp], 1)) GAME_PHYSICS.registerHeightfield(field);
+
+  let under = { x: 5.2, y: 0, z: 6.9, vx: 1.5, vy: 0, vz: 0 };
+  const frames: string[] = [];
+  for (let frame = 0; frame < 10; frame += 1) {
+    const walked = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.05,
+      player: { position: { x: under.x, y: under.y, z: under.z }, velocity: { x: under.vx, y: under.vy, z: under.vz }, yawDegrees: 0 },
+      rects: solids.rects,
+    }))!;
+    under = {
+      x: walked.player.position.x,
+      y: walked.player.position.y,
+      z: walked.player.position.z,
+      vx: walked.player.velocity.x,
+      vy: walked.player.velocity.y,
+      vz: walked.player.velocity.z,
+    };
+    frames.push(`${frame}:pos(${under.x.toFixed(3)},${under.y.toFixed(3)},${under.z.toFixed(3)}) vel(${under.vx.toFixed(3)},${under.vy.toFixed(3)},${under.vz.toFixed(3)}) grounded=${walked.player.grounded}`);
+    assertClose(under.y, 0, 1e-6, `under-ramp terrain frame ${frame} stays on the real ground`);
+    assertEqual(walked.player.grounded, true, `under-ramp terrain frame ${frame} remains grounded`);
+  }
+  console.log(`[RAMPHOLLOW-0607] terrain+ramp heightfield coexist ${frames.join(' | ')}`);
+  assert(under.x > 5.8, `walking under the ramp keeps moving over the terrain heightfield (x=${under.x})`);
+  removeFakeHost();
+});
+
+test('STAIRS-0607: stairs walk up, keep terrain underneath, and block from the side', () => {
+  installRampCollisionHost();
+  GAME_PHYSICS.clearHeightfields();
+  const stairs = buildPiece('stairs.wood.common', 6, 6);
+  const solids = placedPieceColliders([stairs]);
+  GAME_PHYSICS.registerHeightfield({
+    slot: 0,
+    originX: 4.5,
+    originZ: 3,
+    cellSizeMeters: 3,
+    cols: 2,
+    rows: 3,
+    baseY: 0,
+    walkableSlopeCos: 1,
+    heights: new Float32Array([0, 0, 0, 0, 0, 0]),
+  });
+  const stairFields = placedPieceRamps([stairs], 1);
+  for (const field of stairFields) GAME_PHYSICS.registerHeightfield(field);
+  assertEqual(stairFields.length, 1, 'stairs register one heightfield');
+
+  let walker = { x: 6, y: 0, z: 4.1, vx: 0, vy: 0, vz: 2.5 };
+  const upFrames: string[] = [];
+  for (let frame = 0; frame < 24; frame += 1) {
+    const walked = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.05,
+      player: { position: { x: walker.x, y: walker.y, z: walker.z }, velocity: { x: walker.vx, y: walker.vy, z: walker.vz }, yawDegrees: 0 },
+      rects: solids.rects,
+    }))!;
+    walker = {
+      x: walked.player.position.x,
+      y: walked.player.position.y,
+      z: walked.player.position.z,
+      vx: walked.player.velocity.x,
+      vy: walked.player.velocity.y,
+      vz: walked.player.velocity.z,
+    };
+    upFrames.push(`${frame}:pos(${walker.x.toFixed(3)},${walker.y.toFixed(3)},${walker.z.toFixed(3)}) grounded=${walked.player.grounded}`);
+    assertEqual(walked.player.grounded, true, `stair walk-up frame ${frame} stays grounded`);
+  }
+  assert(walker.z > 6.6, `walking up stairs advances up the run (z=${walker.z})`);
+  assert(walker.y > 1.8, `walking up stairs gains height instead of falling through (y=${walker.y})`);
+
+  let under = { x: 6, y: 0, z: 6.9, vx: 0.8, vy: 0, vz: 0 };
+  const underFrames: string[] = [];
+  for (let frame = 0; frame < 8; frame += 1) {
+    const walked = GAME_PHYSICS.step(stepInput({
+      dtSeconds: 0.05,
+      player: { position: { x: under.x, y: under.y, z: under.z }, velocity: { x: under.vx, y: under.vy, z: under.vz }, yawDegrees: 0 },
+      rects: solids.rects,
+    }))!;
+    under = {
+      x: walked.player.position.x,
+      y: walked.player.position.y,
+      z: walked.player.position.z,
+      vx: walked.player.velocity.x,
+      vy: walked.player.velocity.y,
+      vz: walked.player.velocity.z,
+    };
+    underFrames.push(`${frame}:pos(${under.x.toFixed(3)},${under.y.toFixed(3)},${under.z.toFixed(3)}) grounded=${walked.player.grounded}`);
+    assertClose(under.y, 0, 1e-6, `under-stair terrain frame ${frame} stays on the real ground`);
+    assertEqual(walked.player.grounded, true, `under-stair terrain frame ${frame} remains grounded`);
+  }
+
+  const side = GAME_PHYSICS.step(stepInput({
+    dtSeconds: 0.05,
+    player: { position: { x: 4.8, y: 0, z: 6 }, velocity: { x: 2.5, y: 0, z: 0 }, yawDegrees: 0 },
+    rects: solids.rects,
+  }))!;
+  console.log(`[STAIRS-0607] registration rects=${solids.rects.map((r) => `x[${r.minX},${r.maxX}]z[${r.minZ},${r.maxZ}] y[${r.floorMeters},${r.topMeters}]`).join(';')} field=origin(${stairFields[0].originX},${stairFields[0].originZ}) cell=${stairFields[0].cellSizeMeters} cols=${stairFields[0].cols} rows=${stairFields[0].rows} heights=${Array.from(stairFields[0].heights).join(',')} walkUp=${upFrames.join(' | ')} under=${underFrames.join(' | ')} side=pos(${side.player.position.x.toFixed(3)},${side.player.position.y.toFixed(3)},${side.player.position.z.toFixed(3)}) vel(${side.player.velocity.x.toFixed(3)},${side.player.velocity.y.toFixed(3)},${side.player.velocity.z.toFixed(3)})`);
+  assert(side.player.position.x <= 4.81, `walking into the stair side is blocked (x=${side.player.position.x})`);
+  assertClose(side.player.position.y, 0, 1e-6, 'side-block case stays on terrain ground');
   removeFakeHost();
 });
 
