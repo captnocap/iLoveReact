@@ -892,3 +892,178 @@ The ruling:
   spike reports are named channels. Each subsystem records through the
   telemetry door it owns; missing future hooks are hand-off rows, not local
   print hacks.
+
+**V28 — The platform/mod split: Roblox/GMod tier (PLATMOD-0607). (Added
+2026-06-07, from the BSP design session, req_0194–req_0207.)**
+
+The user, verbatim: "it would be silly to only retain it in a means for a one
+off game, and effectively can get away with still building the same game, but
+its just a 'mod' on the underlying game engine we are making" — and the tier
+is explicit: "the ability to make a game is like that of roblox/gmod esque."
+
+The ruling — three lifetimes, three layers (the engine outlives games, the
+game state outlives maps, a map lives only while you stand in it):
+
+- **framework/ + runtime/ = the platform tier.** Owns the VERSIONED,
+  GAME-AGNOSTIC map format (V29). The platform never knows what a map is for;
+  the entity lump is opaque key-values the mod binds to behavior (the
+  platform doesn't know what a 'paramedic' is — hmsc does).
+- **The world systems are the base-game/SDK tier**, not hmsc's property:
+  pathing/road grammar, perception, physics, figures, vehicles, the material
+  pipeline. hmsc-int is the platform's editor (its Hammer/Studio).
+- **hmsc = the FIRST MOD.** It binds entity semantics, owns the GameState
+  schema and the changelevel persistence contract (V30). Nothing about
+  building the game changes — hmsc stays the driving game; boundaries get
+  extracted as it pulls on them, NEVER speculatively.
+- **A game is a SCRIPT + DATA PACKAGE, never a compiled binary** (the
+  GMod/Roblox tier): bundle.js + mapfiles + assets + manifest, loaded at
+  runtime by ONE shipped player binary. The dev host already IS that client
+  (persistent V8 host, runtime cart loading, ~300ms hot-swap, tabs) — only
+  the packaging shape is missing.
+- **V15 AMENDED (user-ruled 2026-06-07): the canonical compiled output of
+  hmsc-int is the GAME PACKAGE**, loaded by the player binary. A fused
+  standalone binary (today's `rjit ship`) remains a distribution option that
+  bakes the package in — it is no longer the definition of "the compiled
+  game". The compile unit becomes A MAP (V29/V30); the game becomes a package.
+- **The second-mod test** governs every future boundary: could a different
+  game (different setting, kinds, rules) be built from the editor + platform
+  without touching framework/ or forking hmsc's code? We never build the
+  second mod speculatively; we just refuse lines that would make it
+  impossible. Eventually load-bearing: the `@reactjit/*` API surface and the
+  map format become versioned public contracts — stabilized by hmsc pulling
+  on them, not frozen up front.
+
+**V29 — The map format: installable assets + RLE reference lumps
+(MAPFORMAT-0607). (Added 2026-06-07.)**
+
+The user's design, verbatim core: "you author some code to make a shape in
+the same approach we are doing now, that bakes into a referencable shape, a
+mapfile is a bundled set, that installs its assets to the game first, so that
+the map that comes with it can just be rle reference … everything is
+effectively packed into installable game assets or is referenced from
+computed dynamism during compile time … letting us get a huge map and then
+using Apriori mining to reduce from it being our compile setup for the rle."
+And the scale thesis: "what looks like a huge map is just a really small set
+of re-referenced shape" — which is literally the Vice City architecture (IDE
+object definitions + IPL placement lists + shared TXDs; a whole city in 32MB
+of PS2 RAM). Our roster = the IDE; the compiled reference grid = the IPL.
+
+- **Bake by EXECUTION, never by static analysis.** Shapes stay CODE-AUTHORED
+  (TSX def()/pieces/prefabs); the compile RUNS the authoring code in V8 and
+  snapshots the output as an installable asset. (This retires the
+  bake-geometry-auto literal-scanner direction — evaluation handles the
+  .map()/spread/const cases scanning never could.)
+- **Assets are CONTENT-ADDRESSED** (id = hash of baked payload): installs are
+  idempotent, maps sharing a lamppost dedup automatically, street + interior
+  maps share installed assets, version drift is not a bug class.
+- **A mapfile is a BUNDLE: [assets to install] + [reference-grid lumps] +
+  [entity keyvalues].** First load installs/validates assets into the game
+  content store; the map body is small-int indices into a string-table lump.
+  The reference list doubles as the dependency manifest (validate before
+  load). Map-local authored content rides an embedded-assets lump (the
+  Source pakfile move); referencing is the default, embedding the exception.
+- **Container: BSP-style versioned lump directory.** Magic, format version,
+  lump table (type, encoding raw|rle8|rle16|text, offset, length), lumps
+  8/16-byte aligned, unknown lump types SKIPPED (format evolves without
+  breaking old players). Planned lumps: STRINGS, HEIGHTS (u16-quantized +
+  scale/offset, then RLE), TILES, ZONES, MATERIALS, PATTERN-DICT, PLACEMENTS,
+  MESHES (raw aligned f32 — floats don't run; layout IS the speed), ENTITIES
+  (text keyvalues, opaque to the platform), VIS (V30), PAK.
+- **The codec: binary row-RLE — the SAME scheme as
+  runtime/workspace/rle.ts.** The editor's JSON row-RLE stays the SOURCE
+  format (diffable, lenient — the .vmf); Compile TRANSCODES to binary
+  (count,value) pairs — the .bsp. The user's measured point stands: RLE
+  decode is memory-bandwidth class ("fast as shit, something like 26gb/s");
+  the JSON carrier was the bottleneck (JSON.parse), never the RLE. TS writes
+  via DataView; Zig reads with a packed reader, no parser.
+- **Apriori pattern mining is IN from v1 (user-ruled).** Compile mines
+  frequent k×k grid windows (hash + count + support threshold — itemset
+  mining adapted to 2D), emits a pattern dictionary that is ITSELF an
+  installable shared asset (the city's grammar gets learned once, amortized
+  across maps), re-expresses the grid as pattern stamps + residual cells,
+  RLEs the residual. Expected to rediscover the road grammar (lane trios,
+  crosswalk junctions) from the paint.
+- **Win hierarchy** (never reach for codecs first): reference-not-embed
+  (100×+) → default-value sparse chunks (all-default chunks don't exist) →
+  pattern dictionary → palette indexing → RLE. General compression INSIDE
+  the format is rejected (10× decode haircut for scraps); compress for
+  TRANSPORT (whole-blob lz4/zstd at distribution time), lay out for RUNTIME.
+- **NO runtime dynamic shapes.** The user: "i dont see how you ever have
+  'dynamic' shapes." Runtime dynamism has exactly three lawful channels:
+  (1) transforms/instance params on referenced shapes, (2) shader data[]
+  uniforms, (3) runtime-authored content INSTALLS as a new asset and is then
+  referenced (the GMod-dupe model). Prior evidence this rule is right: the
+  geometry-intern OOM → "unit params + scale transform". Per-frame geometry
+  (particles/trails) is a framework-owned effect system, never a map concern.
+- This is R6 (RLE/determinism gameplay-wide) and P1 (Zig owns the brute
+  work; JS authors data) applied to the world itself; the mapfile is the
+  V20 "snapshot the compile consumes", now in platform format.
+
+**V30 — Maps, changelevel, and the frozen world (FREEZE-0607). (Added
+2026-06-07.)**
+
+**City and interiors (user-ruled, the Vice City model).** The outdoor city is
+ONE citywide map — it is never subdivided ("city itself wouldnt be, well not
+in our game at least"). Interiors are SEPARATE MAPS entered Vice
+City-style: "you would walk into a marker, and then loading screen and then
+in a new building"; big interiors (the mall) are maps in themselves. The few
+trivial walk-in interiors (the Ammu-Nation/storefront class) may live inside
+the city map; anything substantial is its own map. Doors/markers =
+changelevel: tear down the current map, load the next, the game state
+("server") persists across the swap. Interiors not entered are simply NOT
+LOADED — the cheapest residency tier.
+
+**Persistence across changelevel = DERIVATION, not serialization
+(user-ruled).** The user, verbatim: "everything really. but you dont need to
+reserialize the entire world state. you just need whats relevant of the world
+in the current place. like ok say its raining outside, you enter building,
+the rain is no longer happening inside, but if you go right back outside its
+still there, but if u wait inside long enough time passes and the rain can go
+away." GLOBAL state (clock, weather system, heat, the perturbation log, the
+player, tenured NPCs) is map-independent and always live; the place you left
+is RE-DERIVED on re-entry from f(seed, t, log) — V21's stateless-ambient law
+doing the persistence work. Everything persists *semantically*; almost
+nothing is serialized at the boundary.
+
+**The frozen world (user-ruled, req_0204–0206).** "The whole point of the
+tile system and the line of sight is that we dont have to make anything we
+cant literally see active." The unseen world is FROZEN, not slowly
+simulated: an offline NPC is a STATE ROW (no behavior/perception/pathing
+executing — "effectively the world around the player stays still");
+behaviors like npc-vs-npc fights are LATENT DISPOSITIONS in the entity data
+— editor-authored facts that only MATERIALIZE as running behavior on
+activation ("none of that needs to occur until the player is directly in LoS
+of that other NPC"), hydrating MID-ACTION (come online already fighting,
+never idle-then-boot). The V8 state tick and the event channel are the only
+movers of frozen state (a gunshot's noise mutates offline state / queues
+promotion without running anyone's behavior).
+
+**The activation predicate (user-refined): active = engaged ∪ zone ∪
+tile-distance ∪ VIS.** Pure LoS fails two ways the user named: "we dont want
+an npc to go inactive just because we are hiding behind a wall in their
+house. or we dont want the most immediate roads traffic to be at a stall
+just because we have not made the turn around the building yet." So:
+- **tile-distance** — a radius bubble, LoS-blind: around-the-corner traffic
+  keeps moving (the STALKER switch_distance / GTA traffic-bubble lesson:
+  imminent observability counts as observed);
+- **zone** — semantic containment beats geometry: inside a building, the
+  whole building's zone is active regardless of walls (zone grids are
+  already painted editor data);
+- **VIS** — Compile precomputes chunk-to-chunk potential visibility into the
+  mapfile's VIS lump (the qbsp/vis move). ONE visibility oracle serves
+  renderer culling, NPC FoV/witness perception, and audio occlusion — in a
+  stealth game residency and gameplay visibility are the same table, queried
+  in both directions;
+- **engaged** — perception state pins alerted/hunting/witness NPCs online
+  until it decays (hiding behind their couch must not freeze a pursuer).
+Promotion is instant; demotion is hysteretic (delayed) so boundary pacing
+doesn't thrash. All four checks are cheap: flag, grid lookup, subtract-and-
+compare, precomputed lump.
+
+**The residency ladder** (each tier's cost pinned to the observable
+frontier): interior not entered = UNLOADED (changelevel) → all-default chunk
+= NONEXISTENT (sparse) → outside the predicate = FROZEN STATE ROWS → inside
+the predicate = FULL BEHAVIOR. Compute is O(active bubble), constant in city
+size; disk scales with the asset vocabulary (V29); memory scales with the
+map you're standing in. This is how V4's Vice City scale is paid for —
+the same way Vice City paid for it.
