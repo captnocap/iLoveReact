@@ -2,7 +2,7 @@
 
 Derived from the WORKBENCH.md route census. The supervisor keeps this current;
 every flip commit that deletes a route updates its row here.
-Last updated: 2026-06-07 (post materials flip).
+Last updated: 2026-06-07 (post settings+logs flip).
 
 ## DEAD — ported to the workbench, route deleted
 
@@ -15,6 +15,8 @@ Last updated: 2026-06-07 (post materials flip).
 | /vehicles | VEHICLE source — garage authoring, 3D preview, shared PAINT lens | WBSTEP6-FLIP-0606 |
 | /textures | MATERIAL source — PREVIEW / SHADER LAB / COMPOSE | WBMATERIALS-FLIP-0607 |
 | /compose | MATERIAL source — COMPOSE stage mode | WBMATERIALS-FLIP-0607 |
+| /settings | SETTINGS source — domains generated from the tunables registry + rigs (`SettingsRoute.tsx` + `tunablesSource.ts` deleted; `bus.ts`/`tunables.ts` stay as backing stores) | WBSTEP9-FLIP-0607 (parity supervisor-pre-verified 9/9) |
+| /log | LOGS source — churn tail + session bus as one streaming category (`LogView.tsx` deleted; the perfLog ring stays) | WBSTEP9-FLIP-0607 (parity supervisor-pre-verified 7/7) |
 
 ## DYING — ported, deletion commit in flight
 
@@ -26,8 +28,7 @@ Last updated: 2026-06-07 (post materials flip).
 
 | old route | workbench step | state |
 |---|---|---|
-| /settings | step 9 — settings source (tunables-generated) | built; density respec pending; flip after |
-| /log | step 9 — logs source (stream + dashboard band) | in step-9 scope |
+| *(none — every LIVE row has flipped)* | | |
 
 ## STAYS — own route by ruling
 

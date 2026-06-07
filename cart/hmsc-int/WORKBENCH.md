@@ -191,8 +191,8 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 | `TextureStudio.tsx` | 188 | **FOLD→DIE** — material source: catalog rail = roster, Materialize = action, ShaderLab = stage mode |
 | `editors/compose/ComposeRoute.tsx` | 455 | **EXTRACT→FOLD** — decal doc model extracts; stage/layers/3D-billboard = material source's COMPOSE stage mode; layers+props panel becomes PanelSpec |
 | `VoxelHybridRoute.tsx` | 610 | ~~**FOLD→DIE\*** — proposed: item source's SCULPT stage mode~~ **DEAD** (WBITEMS-FLIP-0606) — route deleted; voxel blockout authoring lives in the item source VOXEL lens |
-| `editors/settings/SettingsRoute.tsx` | 221 | **FOLD→DIE** — settings sources generate from `tunables.ts` + `bus.ts`; the two-column page dies |
-| `LogView.tsx` | 109 | **FOLD→DIE** — logs domain churn channel (perfLog ring) |
+| `editors/settings/SettingsRoute.tsx` | 221 | ~~**FOLD→DIE** — settings sources generate from `tunables.ts` + `bus.ts`; the two-column page dies~~ **DEAD** (WBSTEP9-FLIP-0607) — route deleted; settings live in `settingsSource()` (`bus.ts` + `tunables.ts` stay as backing stores) |
+| `LogView.tsx` | 109 | ~~**FOLD→DIE** — logs domain churn channel (perfLog ring)~~ **DEAD** (WBSTEP9-FLIP-0607) — route deleted; the churn ring streams in `logsSource()` |
 | `editors/play/PlayRoute.tsx` | 1034 | **OWN** — fullscreen game surface; F1/F2 modes; untouched |
 | `shell/LabsRoute.tsx` | 99 | **OWN** — registry list → lab mount; untouched |
 | `assist3d/Assist3DRoute.tsx` (+ `AssistMeshViewer`, `BackendBar`, `SceneSurface`, hooks) | — | **OWN\*** — stays; candidate to fold into labs later |
@@ -298,7 +298,8 @@ bang; the old route works until the minute its replacement does.
    models/extraction/sources/draft/stream) stay — they are the bench's
    modules. The freeze is lifted: the bench (editors/workbench/paint/,
    parity table AGNOSTICPAINT.CAPTURE.md) is THE painting surface.
-9. **Settings + logs sources** — BUILT (WBSET9-0606, awaiting user test):
+9. **Settings + logs sources** — DONE + **FLIPPED** (WBSET9-0606,
+   WBSTEP9-FLIP-0607, parity supervisor-pre-verified 9/9 + 7/7 vs census):
    parity tables `editors/workbench/WBSETTINGS.CAPTURE.md` +
    `editors/workbench/WBLOGS.CAPTURE.md` (every census/settings.md +
    census/log.md row line-referenced; bus rows land in the logs source).
@@ -309,9 +310,11 @@ bang; the old route works until the minute its replacement does.
    category; dashboard band, select/copy via the clipboard door, pause/clear
    verbs, KEY⇄ALL and CHANNEL⇄ALL lenses) + shared `livePoll.ts`/`tone.ts`;
    step 3's tunables proof source FOLDED IN (sources.ts). 8+9-test P4 suites.
-   The FLIP (`/settings` + `/log` routes + nav icons die, tunablesSource.ts +
-   LogView.tsx delete) is a separate commit on the user's word — both routes
-   are untouched today.
+   The FLIP: `/settings` + `/log` route mounts, their nav icons, and the
+   `onPerf`/`onSettings` chrome props died; `SettingsRoute.tsx`,
+   `LogView.tsx`, and `tunablesSource.ts` deleted. `editors/settings/bus.ts`
+   (the logs source consumes it) and `editors/tunables.ts` (the registry)
+   stay.
 9b. **Garment source** — BUILT (CLOTHSOURCE-0606, req_0187) + **FLIPPED**
    (CLOTHFLIP-0607, req_0234): THE clothing authority. Roster = the garment
    tables (generated); stage = the garment ALONE (buildClothingSlices — one

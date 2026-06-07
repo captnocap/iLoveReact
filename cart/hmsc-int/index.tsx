@@ -38,14 +38,12 @@ import {
 } from './tileOverrides';
 import { plog, ptime, useChurn } from './perfLog';
 import { Router, Route, useNavigate, useRoute } from '@reactjit/router';
-import { LogView } from './LogView';
 import { Assist3DRoute } from './assist3d';
 import { PlayRoute } from './editors/play/PlayRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
-import { SettingsRoute } from './editors/settings/SettingsRoute';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { editorTunables, tuningStream } from './editors/tunables';
@@ -833,7 +831,7 @@ function EditorShell() {
   // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : 'editor';
   const [editorPanesMounted, setEditorPanesMounted] = useState(activeRoute === 'editor');
   useEffect(() => {
     if (activeRoute === 'editor') setEditorPanesMounted(true);
@@ -869,8 +867,6 @@ function EditorShell() {
         onEditor={() => nav.push('/')}
         onTest={() => nav.push('/test')}
         onLabs={() => nav.push('/labs')}
-        onPerf={() => nav.push('/log')}
-        onSettings={() => nav.push('/settings')}
         onWorkbench={() => nav.push('/workbench')}
         onAssist={() => nav.push('/assist3d')}
         onUndo={ws.undo}
@@ -942,7 +938,6 @@ function EditorShell() {
 
         {/* Route surfaces live inside the shell body, so the chrome remains the
             one navigation shell and the editor stays mounted underneath. */}
-        <Route path="/log">{() => <LogView />}</Route>
         <Route path="/assist3d">{() => <Assist3DRoute />}</Route>
         {/* The embodied game surface (editors/play/, PLAYFOLD-0605): /test +
             /build folded into ONE route — mode is PlayRoute's own state,
@@ -956,9 +951,6 @@ function EditorShell() {
         {/* The four-gutter rebuild (WORKBENCH.md) — additive while sources land;
             old routes flip off one at a time as parity is reached. */}
         <Route path="/workbench">{() => <WorkbenchRoute sources={wbSources} onExit={() => nav.push('/')} />}</Route>
-        {/* The grand settings page (editors/settings/) — the session event bus + the
-            P2 tunables registry (SETTINGS-0605). */}
-        <Route path="/settings">{() => <SettingsRoute onExit={() => nav.push('/')} />}</Route>
       </Box>
 
       {/* Root overlays live here so they paint on top of the editor panes (this

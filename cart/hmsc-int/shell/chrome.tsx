@@ -49,8 +49,6 @@ interface ChromeProps {
   // game's boot key, so the standalone game boots THIS map. Deliberate, not on
   // every keystroke — see index.tsx compileToGame.
   onCompile: () => void;
-  // Navigate to the /log route — the in-app churn-log viewer (perf diagnostics).
-  onPerf: () => void;
   // Navigate to the /assist3d route — the assistant-authored hot 3D surface.
   onAssist: () => void;
   // Navigate to the /test route — the embodied game surface (PLAYFOLD-0605:
@@ -58,9 +56,6 @@ interface ChromeProps {
   onTest: () => void;
   // Navigate to the /labs route — every lab, instantly loadable (V13).
   onLabs: () => void;
-  // Navigate to the /settings route — the grand settings page (editors/settings):
-  // the session event bus across every route channel + the P2 tunables registry.
-  onSettings: () => void;
   // Navigate to the /workbench route — the four-gutter rebuild (WORKBENCH.md).
   // Temporary while sources land; the chrome collapse (step 10) retires most of
   // this row.
@@ -134,8 +129,6 @@ export function Chrome(props: ChromeProps) {
         <NavBtn icon="FlaskConical" on={props.activeRoute === 'labs'} onPress={props.onLabs} title="labs" />
         <NavBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assistant 3D" />
         <NavBtn icon="Columns3" on={props.activeRoute === 'workbench'} onPress={props.onWorkbench} title="workbench (rebuild in progress)" />
-        <NavBtn icon="Activity" on={props.activeRoute === 'log'} onPress={props.onPerf} title="churn log" />
-        <NavBtn icon="Settings" on={props.activeRoute === 'settings'} onPress={props.onSettings} title="settings" />
       </C.ChromeGroup>
 
       <C.ChromeRule />
