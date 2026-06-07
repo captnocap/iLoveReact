@@ -1,11 +1,11 @@
 # PLATMOD_PLAN.md — platform/mod work breakdown (PLATMOD-PLAN-0607)
 
-**Status: PLAN, pending the user's ruling.** Drafted 2026-06-07 from supervisor
-dispatch req_0245/req_0246. The ruling set is V28 (platform/mod split), V29
-(map format), V30 (changelevel + frozen world) in `docs/game/DECISIONS.md` —
-nothing in this plan adds to or contradicts them; where a decision is still
-open it is flagged as needing a ruling, not assumed. Plan only — no
-implementation has happened.
+**Status: PLAN — open questions RULED by the user 2026-06-07 (§6,
+req_0254/req_0255); awaiting the supervisor's go for slice 1.** Drafted
+2026-06-07 from supervisor dispatch req_0245/req_0246. The ruling set is V28
+(platform/mod split), V29 (map format), V30 (changelevel + frozen world) in
+`docs/game/DECISIONS.md` — nothing in this plan adds to or contradicts them.
+Plan only — no implementation has happened.
 
 The user's word this plan executes, verbatim:
 
@@ -28,9 +28,15 @@ promotion is a build, never a port.
 
 ## 1. SLICE 1 — the player binary that loads a game package
 
-### 1a. What already exists (V28: "the dev host already IS that client")
+### 1a. What already exists — BONES, not the goal (V28: "the dev host already IS that client")
 
-The inventory, so slice 1 builds the gap and nothing else:
+**To be unmistakable (user asked, 2026-06-07): nothing can load a map file or
+game package today. None of the V29 machinery exists** — no lump container,
+no binary RLE, no package shape, no content store, no player boot path. The
+only world "loading" that exists is the localstore boot-key handoff, which is
+exactly the testing-environment channel, not the goal. This table is the
+PARTS BIN — raw host capabilities the new system is built into so we don't
+write a second host — not a claim that any of the goal works:
 
 | Capability | Where it lives today |
 |---|---|
@@ -187,17 +193,29 @@ The user's separation of concerns, made mechanical:
   format version (unknown lumps skipped) are what let already-cut packages
   keep loading on a newer player.
 
-**FLAG — missing ruling, reported not invented:** the dispatch asked to check
-"the ruled engine-channel discipline bleeding→nightly→stable" for fit. That
-discipline is NOT on disk — not in DECISIONS.md, not in the request ledger
-(only the dispatch text itself mentions it), and `tools/oracle` returns
-nothing for it. The nearest ruled machinery is P5/P6 (labs → ground floor by
-verdict; promote → re-run corpus) and V19's always-green compile. If the user
-wants named channels, the natural fit is: **bleeding** = the live dev host /
-`/test` route, **stable** = the last player binary that passed `rjit game
-verify` + the lab corpus — with "nightly" only if a scheduled middle tier
-earns its keep. Needs a ruling before slice 1 bakes any channel names into
-tooling; nothing in slice 1's spine depends on the answer.
+**RULED (user, 2026-06-07, req_0254/req_0255): the discipline did not exist —
+establish it on the Smith BLESS principle, implemented in the TS CLI (`cli/`),
+never as shell scripts.** The principle, lifted from the frozen reference
+(`tsz/scripts/bless-compiler` — principle only, the bash stays dead):
+
+- **Two states: bleeding and blessed.** Bleeding = the live dev host +
+  `/test` route, always. Blessed = the last player binary PROMOTED on the
+  user's word. (No "nightly" tier — nothing earned it; add only if pain
+  demands.)
+- **`rjit player bless` — a `cli/commands/` TS command** (rebundled into
+  `tools/rjit.js` like every CLI change): builds the player binary fresh
+  from current source (refuses if the build fails), runs the promotion gate
+  — `rjit game verify` green + the P6 lab-corpus re-run — then copies the
+  binary to the blessed path and writes a stamp: commit sha, date, binary
+  sha256, source hash. `--status` shows what's blessed; `--diff` shows
+  platform-source changes since the bless stamp's commit.
+- **Blessing is HUMAN-ONLY — Smith's rule, kept verbatim.** Claude never
+  blesses; the command runs on the user's word (relayed by the supervisor),
+  matching P5's "the ground floor only ever grows by verdict" and the
+  floor's supervisor-ordered-commit law.
+- **Packages pin against the blessed channel:** a package's
+  min-platform-version means "the blessed player at or after this stamp";
+  the bleeding host may always load it (that is the dev loop).
 
 ---
 
@@ -261,17 +279,29 @@ container/transcode/loader spine plus the package boot proves the user's
 
 ---
 
-## 6. Open questions needing rulings (none block the spine's start)
+## 6. Open questions — RULED (user, 2026-06-07)
 
-1. **Channel discipline** — §3's flag: bleeding→nightly→stable is not on
-   disk; name the channels (or rule P5/P6 + verify-green is already the
-   whole discipline).
-2. **Package naming/shape taste** — `.rjpkg` directory-then-archive, command
-   names (`rjit pack` / `rjit play`). Content is ruled (V28); names are not.
-3. **Where the player binary's content store lives on disk** — the shared
-   localstore (`fs.init("reactjit")`) vs a per-player data dir. Slice 1 can
-   start under the shared store and move.
-4. **When the boot-key channel retires** — Compile dual-writes (boot key +
-   mapfile) through slice 1; the user rules when the localstore channel
-   stops being the game's boot source (it is load-bearing for the live dev
-   loop today).
+All four were RULED by the user on 2026-06-07 (req_0254, req_0255):
+
+1. **Channel discipline — RULED:** "none of it exists so establish it, you
+   can take the same principle from the smith compiler and its bless
+   system" — and (req_0255) implemented in the TS CLI we have, not shell
+   scripts like tsz did. Established in §3: bleeding/blessed, `rjit player
+   bless` as a `cli/commands/` TS command, human-only promotion.
+2. **Package naming/shape — RULED:** "looks fine, doesnt really matter to
+   me much, just something coherent." `.rjpkg` + `rjit pack` / `rjit play`
+   stand as drafted; coherence is the only bar.
+3. **Content store location — RULED:** "do whatever is the most performant
+   and doesnt corrupt." So: NOT the shared localstore — its own
+   content-addressed directory in the player's data dir, written
+   atomically (write to temp, fsync, rename — never a partial file under
+   its final hash name), where the hash IS the corruption check: verify on
+   install, re-fetch/re-install on mismatch. Reads are plain mmap'd files,
+   the most performant shape there is.
+4. **Boot-key retirement — clarified** (the user asked whether this was a
+   question or a statement: it was a real question — "when does Compile
+   stop ALSO writing the old localstore testing channel?"). Answer now
+   pinned so it needs no further ruling: Compile dual-writes until the §5
+   done-bar passes (mapfile boot proven equal to boot-key boot); after
+   that the supervisor schedules the retirement commit like any other flip
+   — on the user's word, same as every route flip in WORKBENCH.md §6.
