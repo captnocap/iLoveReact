@@ -150,6 +150,24 @@ export function normalizeYawDegrees(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
 }
 
+function orbitPitchToAimPitch(orbitPitchDegrees: number): number {
+  return GAME_CAMERA.orientation.orbitPitchToAimPitch(orbitPitchDegrees);
+}
+
+function aimPitchToOrbitPitch(aimPitchDegrees: number): number {
+  return GAME_CAMERA.orientation.aimPitchToOrbitPitch(aimPitchDegrees);
+}
+
+function aimPitchLimitsInOrbitSpace(): { min: number; max: number } {
+  const minAim = GAME_CAMERA.rigs.Aim.defaults.minPitch as number;
+  const maxAim = GAME_CAMERA.rigs.Aim.defaults.maxPitch as number;
+  return { min: aimPitchToOrbitPitch(maxAim), max: aimPitchToOrbitPitch(minAim) };
+}
+
+function figureYawForCameraYaw(cameraYawDegrees: number): number {
+  return GAME_CAMERA.orientation.figureYawForCameraYaw(cameraYawDegrees);
+}
+
 // The authored GameState's world slice IS the captured world-grid shape
 // (the editor lowers paint/placements into these exact records) — this view
 // is what every GAME_WORLD call takes. W-1 CLOSED: colliders, ground heights,
@@ -485,7 +503,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   const sendCameraParamsTo = (camera: ReturnType<typeof GAME_NATIVE_CAMERA.forNode>, pose: { x: number; y: number; z: number }) => {
     const l = lookRef.current;
     if (aimRef.current) {
-      camera.setAim({ target: [pose.x, pose.y, pose.z], yaw: l.yaw, pitch: l.pitch });
+      camera.setAim({ target: [pose.x, pose.y, pose.z], yaw: l.yaw, pitch: orbitPitchToAimPitch(l.pitch) });
     } else {
       camera.setOrbit({
         target: [pose.x, pose.y + PLAYER_CAMERA.targetHeightMeters, pose.z],
@@ -607,14 +625,31 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       if (optionsRef.current.aim || aimRef.current) {
         const aim = optionsRef.current.aim === true && !typing && GAME_INPUT.readPointer().rightDown;
         if (aim !== aimRef.current) {
+          const l = lookRef.current;
+          const beforeBodyYaw = playerRef.current.yaw;
+          const before = {
+            transition: aim ? 'walk->aim' : 'aim->walk',
+            cameraYaw: l.yaw,
+            orbitPitch: l.pitch,
+            aimPitch: orbitPitchToAimPitch(l.pitch),
+            bodyYaw: beforeBodyYaw,
+            bodyYawIfAiming: figureYawForCameraYaw(l.yaw),
+          };
           aimRef.current = aim;
           // leaving ADS: fold the wider aim pitch back into the orbit clamp
           if (!aim) {
-            const l = lookRef.current;
             l.pitch = clamp(l.pitch, PLAYER_CAMERA.minPitchDegrees, PLAYER_CAMERA.maxPitchDegrees);
           }
           nativeCameraRef.current?.setMode(aim ? 'aim' : 'walk');
           sendCameraRef.current(playerRef.current);
+          const after = {
+            ...before,
+            orbitPitch: l.pitch,
+            aimPitch: orbitPitchToAimPitch(l.pitch),
+            bodyYawAfterTransition: aim ? figureYawForCameraYaw(l.yaw) : beforeBodyYaw,
+          };
+          GAME_TELEMETRY.recordDiagnostic('camera', 'aimPitch.transition', after);
+          console.warn(`${optionsRef.current.logTag} aim camera transition`, after);
         }
       }
       // The V7 cart-side duty: ship a camera-relative direction vector.
@@ -791,7 +826,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       // Facing: ADS pins the body to the camera yaw (the crosshair law's
       // frame); walking faces the move direction; idle keeps the last facing.
       const desiredYaw = aimRef.current
-        ? normalizeYawDegrees(lookRef.current.yaw)
+        ? figureYawForCameraYaw(lookRef.current.yaw)
         : moving ? normalizeYawDegrees(Math.atan2(-intent.x, -intent.z) / DEG) : prev.yaw;
       // Surface under the player through the door: footing kind → the
       // captured kind table's surface profile (the reference behavior — mud
@@ -904,7 +939,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   // needs the sky" (the aim ceiling was Q3's whole reason to exist).
   const applyLook = (dx: number, dy: number) => {
     const limits = aimRef.current
-      ? { min: GAME_CAMERA.rigs.Aim.defaults.minPitch as number, max: GAME_CAMERA.rigs.Aim.defaults.maxPitch as number }
+      ? aimPitchLimitsInOrbitSpace()
       : { min: PLAYER_CAMERA.minPitchDegrees, max: PLAYER_CAMERA.maxPitchDegrees };
     // Horizontal sign: the engine renders world +X as screen-LEFT (the
     // movement.zig mirror), and both rigs use compass yaw (yaw+ = CCW from
@@ -916,7 +951,8 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     const l = lookRef.current;
     const nextYaw = l.yaw - dx * PLAYER_CAMERA.yawDegreesPerPixel;
     const nextPitch = clamp(l.pitch - dy * PLAYER_CAMERA.pitchDegreesPerPixel, limits.min, limits.max);
-    nativeCameraRef.current?.setInputDeltas(nextYaw - l.yaw, nextPitch - l.pitch);
+    const pitchDelta = nextPitch - l.pitch;
+    nativeCameraRef.current?.setInputDeltas(nextYaw - l.yaw, aimRef.current ? -pitchDelta : pitchDelta);
     l.yaw = nextYaw;
     l.pitch = nextPitch;
   };

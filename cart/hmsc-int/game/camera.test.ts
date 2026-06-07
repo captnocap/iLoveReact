@@ -172,6 +172,32 @@ test('ADS framing: the eye sits exactly `distance` behind the pivot along the ai
   }
 });
 
+test('orientation mapping round-trips Orbit walk camera through Aim without pitch or body flip', () => {
+  for (const yaw of [0, 17, 90, 181, 359]) {
+    for (const orbitPitch of [-10, 0, 17.8, 35, 62]) {
+      let walkYaw = yaw;
+      let walkPitch = orbitPitch;
+      const startYaw = walkYaw;
+      const startPitch = walkPitch;
+      const bodyYaw = GAME_CAMERA.orientation.figureYawForCameraYaw(walkYaw);
+      assertClose(GAME_CAMERA.orientation.figureYawForCameraYaw(0), 180, 1e-9, 'camera yaw 0 looks +Z; figure yaw 180 faces +Z');
+
+      for (let cycle = 0; cycle < 12; cycle++) {
+        const aimYaw = walkYaw;
+        const aimPitch = GAME_CAMERA.orientation.orbitPitchToAimPitch(walkPitch);
+        const backYaw = aimYaw;
+        const backPitch = GAME_CAMERA.orientation.aimPitchToOrbitPitch(aimPitch);
+        walkYaw = backYaw;
+        walkPitch = backPitch;
+      }
+
+      assertClose(walkYaw, startYaw, 1e-9, `yaw ${yaw} pitch ${orbitPitch}: yaw survives repeated mode switches`);
+      assertClose(walkPitch, startPitch, 1e-9, `yaw ${yaw} pitch ${orbitPitch}: pitch survives repeated mode switches`);
+      assertClose(GAME_CAMERA.orientation.figureYawForCameraYaw(walkYaw), bodyYaw, 1e-9, `yaw ${yaw}: body yaw does not accumulate flips`);
+    }
+  }
+});
+
 // ── screenRay (R7 graduation — the canonical pixel→world ray) ────────────────
 
 // The behavior reference, transcribed VERBATIM from the hand-rolled duplicate

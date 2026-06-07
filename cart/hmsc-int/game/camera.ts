@@ -36,6 +36,22 @@ import type { CameraDef, Modifier, Rect, Solved, Vec3 } from '@reactjit/cameras/
 
 export type { AimParams, CameraDef, Modifier, Rect, ScreenRay, Solved, Vec3 };
 
+export function normalizeCameraYawDegrees(yawDegrees: number): number {
+  return ((yawDegrees % 360) + 360) % 360;
+}
+
+export function orbitPitchToAimPitch(orbitPitchDegrees: number): number {
+  return -orbitPitchDegrees;
+}
+
+export function aimPitchToOrbitPitch(aimPitchDegrees: number): number {
+  return -aimPitchDegrees;
+}
+
+export function figureYawForCameraYaw(cameraYawDegrees: number): number {
+  return normalizeCameraYawDegrees(cameraYawDegrees + 180);
+}
+
 /** The registry, keyed by rig id — tooling, debug panels, rig-switcher UIs. */
 export const CAMERA_RIGS: Record<string, CameraDef> = Object.freeze({
   Orbit,
@@ -61,4 +77,10 @@ export const GAME_CAMERA = Object.freeze({
   aimPivot,
   rigs: CAMERA_RIGS,
   modifiers: Object.freeze({ sway, shake }),
+  orientation: Object.freeze({
+    aimPitchToOrbitPitch,
+    figureYawForCameraYaw,
+    normalizeYaw: normalizeCameraYawDegrees,
+    orbitPitchToAimPitch,
+  }),
 });

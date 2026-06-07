@@ -71,6 +71,20 @@ fn expectBetween(actual: f32, a: f32, b: f32) !void {
     try testing.expect(actual < @max(a, b));
 }
 
+fn expectAxisClose(a: camera.Solved, b: camera.Solved) !void {
+    const ax = a.target.x - a.pos.x;
+    const ay = a.target.y - a.pos.y;
+    const az = a.target.z - a.pos.z;
+    const bx = b.target.x - b.pos.x;
+    const by = b.target.y - b.pos.y;
+    const bz = b.target.z - b.pos.z;
+    const al = @sqrt(ax * ax + ay * ay + az * az);
+    const bl = @sqrt(bx * bx + by * by + bz * bz);
+    try expectClose(ax / al, bx / bl);
+    try expectClose(ay / al, by / bl);
+    try expectClose(az / al, bz / bl);
+}
+
 const SweepSums = struct {
     values: [7]f64 = .{ 0, 0, 0, 0, 0, 0, 0 },
 
@@ -274,6 +288,39 @@ test "controller walk to aim transition interpolates toward ADS solve" {
     try testing.expect(blended.pos.y > aim.pos.y);
     try testing.expect(blended.fov < orbit.fov);
     try testing.expect(blended.fov > aim.fov);
+}
+
+test "orbit and aim orientation mapping round trips without pitch inversion" {
+    const target = camera.Vec3{ .x = 3, .y = 0.4, .z = -8 };
+    const yaws = [_]f32{ 0, 17, 90, 181, 359 };
+    const orbit_pitches = [_]f32{ -10, 0, 17.8, 35, 62 };
+    for (yaws) |yaw| {
+        for (orbit_pitches) |start_pitch| {
+            var walk_yaw = yaw;
+            var walk_pitch = start_pitch;
+            for (0..12) |_| {
+                const aim_yaw = walk_yaw;
+                const aim_pitch = -walk_pitch;
+                const orbit = camera.solveOrbit(.{
+                    .target = .{ .x = target.x, .y = target.y + 1.45, .z = target.z },
+                    .yaw = walk_yaw,
+                    .pitch = walk_pitch,
+                    .dist = 7.65,
+                    .fov = 52,
+                });
+                const aim = camera.solveAim(.{
+                    .target = target,
+                    .yaw = aim_yaw,
+                    .pitch = aim_pitch,
+                });
+                try expectAxisClose(orbit, aim);
+                walk_yaw = aim_yaw;
+                walk_pitch = -aim_pitch;
+            }
+            try expectClose(walk_yaw, yaw);
+            try expectClose(walk_pitch, start_pitch);
+        }
+    }
 }
 
 test "input deltas update only the active mode parameters" {
