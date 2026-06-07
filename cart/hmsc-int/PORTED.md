@@ -9,6 +9,7 @@ Last updated: 2026-06-07 (post materials flip).
 | old route | replaced by | died in |
 |---|---|---|
 | /characters | CHARACTER source (FIGURE/PART grab-sculpt, SCULPT, PAINT lens) | user-ordered kill |
+| clothing source (in-workbench cosplay surface — never a route; OUTFIT/EXTRAS/PROP over the dressed figure) | GARMENT source (`editors/workbench/clothing/` — items alone, variant grid, painter design spine) | CLOTHFLIP-0607 (req_0234, user verdict “not this shit where its asking me about a prop”) |
 | /items | ITEM source — ITEM lens | dd3b11817 + 11f7b54de |
 | /voxels | ITEM source — SCULPT/VOXEL lenses (voxel→item import via Globe bake) | 11f7b54de |
 | /vehicles | VEHICLE source — garage authoring, 3D preview, shared PAINT lens | WBSTEP6-FLIP-0606 |

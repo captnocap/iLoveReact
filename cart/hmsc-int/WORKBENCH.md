@@ -312,18 +312,22 @@ bang; the old route works until the minute its replacement does.
    The FLIP (`/settings` + `/log` routes + nav icons die, tunablesSource.ts +
    LogView.tsx delete) is a separate commit on the user's word — both routes
    are untouched today.
-9b. **Garment source** — BUILT (CLOTHSOURCE-0606, req_0187, awaiting user
-   test): the clothing-CENTRIC view the user asked for ("just show the
-   clothing items, and then the variety in that same item"). Roster =
-   the garment tables (tops/bottoms/accessories, generated); stage = the
-   garment ALONE (buildClothingSlices — buildClothing's own output sliced
-   by slot marks, one placement truth) with a variant strip; variants =
-   the built-in prints (seeds) + user material assignments through THE
-   shared chooser, persisted on the new V20 `clothing-variants` stream.
+9b. **Garment source** — BUILT (CLOTHSOURCE-0606, req_0187) + **FLIPPED**
+   (CLOTHFLIP-0607, req_0234): THE clothing authority. Roster = the garment
+   tables (generated); stage = the garment ALONE (buildClothingSlices — one
+   placement truth) over the stage kit's studio environment, with the
+   VISUAL variant grid (prints/designs/materials, the looks themselves;
+   click selects, twig-persisted); variants = seed prints + saved materials
+   + painted DESIGNS — `+ new design` opens THE shared paint bench on a
+   `garment-design` target (a new bench family; save = ONE
+   `garmentVariantSaved` commit, bakeOverlayFromDocument, upsert re-saves,
+   rename/meta in the panel). The cosplay wardrobe context
+   (clothingSource/clothingPanel/clothingSourceCore) is DELETED by user
+   verdict ("not this shit where its asking me about a prop") — outfit/
+   extras/prop DOORS stay in characters/store.ts (character/play domain).
    `editors/workbench/clothing/{store,panel,live,Stage,source,clothing.test}`
-   + `editors/workbench/WBCLOTHING.CAPTURE.md` (W-row accounting: the
-   wardrobe ATTACHMENT context keeps W2-W6 — this source COEXISTS with
-   `clothingSource` until the user's word). 9-test P4 suite.
+   + WBCLOTHING.CAPTURE.md + the WBCLOTH.CAPTURE.md amendment. 11-test P4
+   suite; bench.test 15/15; characters source.test 24/24 (amended pins).
 10. **Chrome collapse** to 6 icons. Delete `cart/hmsc-wire/`. Done.
 
 Each flip's commit deletes the old route file(s), updates this ledger, and

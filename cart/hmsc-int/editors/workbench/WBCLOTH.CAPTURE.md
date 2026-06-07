@@ -109,3 +109,26 @@ PAINT set is untouched — those are mesh lenses.
   (autosave path untouched);
 - play/preset keep the clock exclusivity, and wardrobe picks no longer
   flip the mesh lens (F1).
+
+## CLOTHFLIP-0607 amendment (req_0234) — the cosplay clothing context is DEAD
+
+USER verbatim: "The clothing route is still doing a character cosplay … i
+want to just have to select a t shirt, and then i can go through the
+designs, add a new design, brings me to the painter save, done now that
+shirt exists i can give it a name, and all that important meta data. not
+this shit where its asking me about a prop"
+
+The wardrobe ATTACHMENT surface this capture defined (clothingPanel +
+clothingSourceCore + the `clothing` registration) is DELETED. Final W-row
+accounting:
+
+| row | fate |
+|---|---|
+| W2 clothes / W3 bottoms / W4 print | PANEL DEAD by verdict. The draft doors (`setClothing`/`setBottoms`/`setClothingSkin`, the DEFAULT_BOTTOMS coupling, the BodyDocument.outfit channel) LIVE ON in characters/store.ts — pinned by source.test.ts ("the draft door" tests). Outfit-assembly is character/play domain awaiting its surface there; the garment tables/prints themselves are the GARMENT source's roster/seed variants |
+| W5 extras | same: panel dead, `toggleAccessory` door + cap⇄beanie exclusivity live on (pinned); accessories are GARMENT-source roster items |
+| W6 held prop | same: panel dead ("not this shit where its asking me about a prop"), `setHeldItem`/`sculptedItems` doors live on (pinned) |
+| F1/F2/F3, S-rows | unaffected — DressedStage survives as the ANIMATION context's stage; the '/clothing' camera twig namespace dies unread (twigs are additive state, no cleanup needed) |
+
+The clothing AUTHORITY is `editors/workbench/clothing/` (the GARMENT
+source, WBCLOTHING.CAPTURE.md) — id `garment`, now wearing the Shirt icon
+and the CLOTHING kicker.

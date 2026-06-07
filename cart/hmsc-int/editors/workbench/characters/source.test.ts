@@ -1,22 +1,23 @@
 // source.test.ts — P4 behavior tests for the character-FAMILY WorkbenchSources
-// (WBCHAR-0606 + CLOTHSPLIT-0606 phase 2): spec generation round-trip,
-// list/select resolution, the route-parity semantics the panels must keep
-// (autosave minting, clothes→bottoms coupling, accessory exclusivity, region
-// zero-snap), the three-context split (mesh shows MESH ONLY; wardrobe and
-// animation relocated, nothing lost — the WBCLOTH.CAPTURE.md pin).
+// (WBCHAR-0606 + CLOTHSPLIT-0606 phase 2, amended CLOTHFLIP-0607): spec
+// generation round-trip, list/select resolution, the route-parity semantics
+// the panels must keep (autosave minting, clothes→bottoms coupling at the
+// DRAFT DOOR, accessory exclusivity, region zero-snap), the context split
+// (mesh shows MESH ONLY; animation relocated; the wardrobe cosplay panel is
+// DEAD by user verdict — its draft doors live on in store.ts).
 // Headless: a fake channel/session pair stands in for the V20 wires
 // (autosaveMs 0 → synchronous commits; twig io off).
 
 import { assert, assertEqual, finish, test } from '../../../game/_testkit';
+import { workbenchActionShortcut, workbenchShortcutHandlers } from '../../../shell/Workbench';
 import { createCharacterStore, type CharacterStoreDeps } from './store';
 // the HEADLESS cores (panel.ts) — never the source .tsx files, which carry
 // the stages' React half (the characters.test.ts bundling law)
 import {
   characterSourceCore as charactersSource, characterPanel,
-  clothingSourceCore, clothingPanel,
   animationSourceCore, animationPanel,
 } from './panel';
-import { draftToDocument } from '../../characters/draft';
+import { draftFromDocument, draftToDocument } from '../../characters/draft';
 import { generateCharacterDraft } from '../../characters/generate';
 import { SHAPE_REGIONS } from '../../characters/regions';
 import { PAINT_EDITOR_TUNING } from '../../characters/paintKit';
@@ -36,11 +37,20 @@ function fakeDeps(withDocs: boolean): { deps: CharacterStoreDeps; rec: Rec } {
         'chr-b': draftToDocument(generateCharacterDraft(2), 'beta'),
       }
     : {};
-  const order = withDocs ? ['chr-a', 'chr-b'] : [];
+  let order = withDocs ? ['chr-a', 'chr-b'] : [];
   const deps: CharacterStoreDeps = {
     channel: { state: () => ({ characters, order }) },
     session: {
-      commit: ((e: any, label: string) => { rec.commits.push({ e, label }); }) as any,
+      commit: ((e: any, label: string) => {
+        rec.commits.push({ e, label });
+        if (e.kind === 'authored') {
+          characters[e.id] = e.doc;
+          if (!order.includes(e.id)) order = order.concat(e.id);
+        } else if (e.kind === 'removed') {
+          delete characters[e.id];
+          order = order.filter((id) => id !== e.id);
+        }
+      }) as any,
       note: (l: string) => { rec.notes.push(l); },
     },
     error: null,
@@ -94,39 +104,74 @@ test('autosave mints a roster id on the first edit of a fresh draft', () => {
   assertEqual(store.draftId, rec.commits[0].e.id, 'the minted id becomes the working id');
 });
 
-test('clothes enum (CLOTHING context) couples bottoms; the mesh lens never flips', () => {
+test('NEWBUTTON-0606: New creates a separate pristine target instead of reusing the current sculpt key', () => {
+  const bag = new Map<string, unknown>();
+  const adapter = {
+    read: <T,>(k: string, init: T): T => (bag.has(k) ? (bag.get(k) as T) : init),
+    write: <T,>(k: string, v: T): void => { bag.set(k, v); },
+  };
+  const { deps, rec } = fakeDeps(true);
+  deps.twig = adapter;
+  const store = createCharacterStore(deps);
+  const src = charactersSource(store);
+  src.onPick!('chr-a');
+
+  const dirtyGrid = store.draft.grids.torso.map((_, i) => (i === 5 ? 0.8 : 0));
+  store.setPartGrid('torso', dirtyGrid);
+  assertEqual(store.draftId, 'chr-a', 'A is the edited target key');
+  assert(draftFromDocument(deps.channel!.state().characters['chr-a']).grids.torso[5] !== 0, 'A carries the abdomen sculpt');
+
+  src.actions!(store).find((a) => a.id === 'new')!.run();
+  const newId = store.draftId;
+  const rows = src.list().map((r) => r.id);
+  const commitKeys = rec.commits.map((c) => ({
+    id: c.e.id,
+    label: c.label,
+    torso5: draftFromDocument(c.e.doc).grids.torso[5],
+  }));
+  console.log(`[NEWBUTTON-0606] rows=${JSON.stringify(rows)} wbDraftId=${JSON.stringify(bag.get('wbDraftId'))} commits=${JSON.stringify(commitKeys)}`);
+
+  assert(newId !== null, 'New autosaves under a real target key');
+  assert(newId !== 'chr-a', 'New does not reuse A\'s target key');
+  assert(rows.includes(newId), 'the new target appears in the consumed roster rows');
+  assertEqual(bag.get('wbDraftId'), newId, 'the working-row draft key points at B');
+  assert(store.draft.grids.torso.every((v) => v === 0), 'B starts with pristine working sculpt data');
+  assert(draftFromDocument(deps.channel!.state().characters[newId]).grids.torso.every((v) => v === 0), 'B persists pristine sculpt data');
+  assert(draftFromDocument(deps.channel!.state().characters['chr-a']).grids.torso[5] !== 0, 'A keeps its own sculpt');
+});
+
+// CLOTHFLIP-0607: the wardrobe cosplay PANEL is dead (user verdict) — these
+// pins drive the DRAFT DOORS directly; the doors and their semantics stay
+// (outfit-assembly is character/play domain awaiting its future surface).
+
+test('setClothing couples bottoms (the draft door); the mesh lens never flips', () => {
   const { deps } = fakeDeps(false);
   const store = createCharacterStore(deps);
   store.setLens('sculpt');
-  (field(clothingPanel(store), 'OUTFIT', 'clothes') as any).set('hoodie');
+  store.setClothing('hoodie');
   assertEqual(store.draft.clothing, 'hoodie', 'the clothing landed');
   assertEqual(store.draft.bottoms, DEFAULT_BOTTOMS.hoodie, 'bottoms follow DEFAULT_BOTTOMS (route coupling)');
-  // CLOTHSPLIT-0606 row F1: the pre-split wearLens flip is structurally
-  // fulfilled (the clothing stage IS the dressed figure) — a pick there
-  // must not yank the MESH context's lens
-  assertEqual(store.view.lens, 'sculpt', 'a wardrobe pick no longer flips the mesh lens (WBCLOTH F1)');
+  assertEqual(store.view.lens, 'sculpt', 'a wardrobe write never yanks the mesh lens (WBCLOTH F1)');
 });
 
 test('clothing writes land on BodyDocument.outfit through the same draft doors', () => {
   const { deps, rec } = fakeDeps(false);
   const store = createCharacterStore(deps);
-  (field(clothingPanel(store), 'OUTFIT', 'clothes') as any).set('hoodie');
-  (field(clothingPanel(store), 'OUTFIT', 'print') as any).set('designer');
+  store.setClothing('hoodie');
+  store.setClothingSkin('designer');
   const doc = draftToDocument(store.draft, 'fit check');
   assertEqual(doc.outfit?.top, 'hoodie', 'the outfit channel carries the top');
   assertEqual(doc.outfit?.bottoms, DEFAULT_BOTTOMS.hoodie, 'with the coupled bottoms');
   assertEqual(doc.outfit?.print, 'designer', 'and the print');
-  assert(rec.commits.length >= 1 && rec.commits[rec.commits.length - 1].e.kind === 'authored', 'the autosave chain saw every pick (same editDraft door)');
+  assert(rec.commits.length >= 1 && rec.commits[rec.commits.length - 1].e.kind === 'authored', 'the autosave chain saw every write (same editDraft door)');
 });
 
-test('extras (CLOTHING context) keep the cap⇄beanie exclusivity', () => {
+test('toggleAccessory keeps the cap⇄beanie exclusivity (the draft door)', () => {
   const { deps } = fakeDeps(false);
   const store = createCharacterStore(deps);
-  const capLabel = CLOTHING_ACCESSORIES.cap.label;
-  const beanieLabel = CLOTHING_ACCESSORIES.beanie.label;
-  (field(clothingPanel(store), 'EXTRAS', capLabel) as any).set(true);
+  store.toggleAccessory('cap');
   assert(store.draft.accessories.includes('cap'), 'cap toggles on');
-  (field(clothingPanel(store), 'EXTRAS', beanieLabel) as any).set(true);
+  store.toggleAccessory('beanie');
   assert(store.draft.accessories.includes('beanie'), 'beanie toggles on');
   assert(!store.draft.accessories.includes('cap'), 'cap leaves when beanie arrives (exclusive pair)');
 });
@@ -163,13 +208,15 @@ test('num fields carry the tunables-shaped spec (skull stretch)', () => {
   assertEqual(skull.precision, spec.precision, 'precision carries');
 });
 
-test('the held-prop enum (CLOTHING context) lists sculpted /items and resolves labels back to ids', () => {
+test('the held-prop draft door lists sculpted /items and lands on the draft', () => {
+  // CLOTHFLIP-0607: the PROP enum died with the cosplay panel ("not this
+  // shit where its asking me about a prop") — the DOORS stay for the
+  // character/play-domain surface that inherits them
   const { deps } = fakeDeps(false);
   const store = createCharacterStore(deps);
-  const held = field(clothingPanel(store), 'PROP', 'held') as any;
-  assert(held.opts.includes('none') && held.opts.includes('◆ shiv'), 'registry + sculpted items list');
-  held.set('◆ shiv');
-  assertEqual(store.draft.heldItem, 'itm-x', 'the sculpted label resolves to its id');
+  assert(store.sculptedItems().some((it) => it.id === 'itm-x' && it.label === 'shiv'), 'sculpted /items still enumerate');
+  store.setHeldItem('itm-x');
+  assertEqual(store.draft.heldItem, 'itm-x', 'the held item lands on the draft');
 });
 
 test('actions: save commits a labeled authored event; remove appears with an id', () => {
@@ -312,22 +359,23 @@ test('RESETPART-0606: reset part wipes the data AND re-keys the view', () => {
 
 // ── CLOTHSPLIT-0606 phase 2 (USER RULING req_0040): the editor separation ──
 
-test('CLOTHSPLIT parity pin: the three panels collectively expose every pre-split control', () => {
+test('parity pin (amended CLOTHFLIP-0607): the two panels expose every SURVIVING pre-split control; the wardrobe cosplay controls are DEAD by verdict', () => {
   const { deps } = fakeDeps(false);
   const store = createCharacterStore(deps);
   store.applyFaceDoc(generateFace(7), 'face on'); // head selected + face → every gated group shows
   const keys = new Set<string>();
-  for (const spec of [characterPanel(store), clothingPanel(store), animationPanel(store)]) {
+  for (const spec of [characterPanel(store), animationPanel(store)]) {
     for (const g of spec.groups) for (const f of g.fields) keys.add(f.k);
   }
-  // the pre-split panel's full field roster (panel.ts at e694aa488) — a
-  // control missing from EVERY context is a parity break and fails here
+  // the pre-split panel's surviving field roster — a control missing from
+  // EVERY context is a parity break and fails here. The wardrobe rows
+  // (W2-W6: clothes/bottoms/print/extras/held) were KILLED with the cosplay
+  // panel (req_0234 verbatim: "not this shit where its asking me about a
+  // prop"); their draft doors live in store.ts, surfaceless by ruling.
   const expected = [
     'name', 'skin',                                         // IDENTITY
     'part', 'reset part',                                   // PART
-    'shape', 'clothes', 'bottoms', 'print',                 // BODY (split W1-W4)
-    ...Object.values(CLOTHING_ACCESSORIES).map((a) => a.label), // EXTRAS (W5)
-    'held',                                                 // PROP (W6)
+    'shape',                                                // BODY (W1, mesh-side)
     'generate face', 'export .hed', 'remove face',          // FACE acts
     'skull stretch', 'photo size', 'photo up/down',         // FACE knobs
     'rig', 'anim', 'face anim',                             // ANIMATION → POSE/FACE (A1-A3)
@@ -337,7 +385,10 @@ test('CLOTHSPLIT parity pin: the three panels collectively expose every pre-spli
     ...SHAPE_REGIONS[store.view.selPart].map((r) => r.label), // REGION
     'reset regions',
   ];
-  for (const k of expected) assert(keys.has(k), `pre-split control "${k}" has a home in some context`);
+  for (const k of expected) assert(keys.has(k), `surviving control "${k}" has a home in some context`);
+  // the verdict as a test: the cosplay fields appear in NO character-family panel
+  const killed = ['clothes', 'bottoms', 'print', 'held', ...Object.values(CLOTHING_ACCESSORIES).map((a) => a.label)];
+  for (const k of killed) assert(!keys.has(k), `cosplay control "${k}" stays dead (CLOTHFLIP-0607)`);
 });
 
 test('CLOTHSPLIT: the mesh panel shows MESH ONLY (the ruling, as a test)', () => {
@@ -392,25 +443,38 @@ test('CLOTHSPLIT: face-anim group gates on the FACE, not the selected part', () 
   assertEqual(store.view.faceAnim, 'talk', 'the pick lands');
 });
 
-test('CLOTHSPLIT: clothing/animation sources mirror the character roster over ONE store', () => {
+test('CLOTHSPLIT (amended CLOTHFLIP-0607): the animation source mirrors the character roster over ONE store', () => {
   const { deps } = fakeDeps(true);
   const store = createCharacterStore(deps);
-  const cloth = clothingSourceCore(store);
   const anim = animationSourceCore(store);
-  assertEqual(cloth.id, 'clothing', 'the clothing source id');
   assertEqual(anim.id, 'animation', 'the animation source id');
   const chr = charactersSource(store);
-  assertEqual(
-    JSON.stringify(cloth.list()), JSON.stringify(chr.list()),
-    'the clothing roster IS the character roster (the outfit is per-character)',
-  );
-  assertEqual(JSON.stringify(anim.list()), JSON.stringify(chr.list()), 'animation too');
-  cloth.onPick!('chr-a');
-  assertEqual(store.draftId, 'chr-a', 'a pick in the clothing context installs the shared working draft');
+  assertEqual(JSON.stringify(anim.list()), JSON.stringify(chr.list()), 'the animation roster IS the character roster');
+  anim.onPick!('chr-a');
+  assertEqual(store.draftId, 'chr-a', 'a pick in the animation context installs the shared working draft');
   assertEqual(anim.defaultRow!(anim.list()), 'chr-a', 'every context resolves the same working row');
-  assert((cloth.select('chr-a') as unknown) === (store as unknown), 'one store, three contexts');
-  assert(cloth.actions!(store).some((a) => a.id === 'save'), 'a dressing session can save without context-switching');
-  assert(!cloth.lenses, 'no lens bar — one honest view (LAW 2; WBCLOTH §5)');
+  assert((anim.select('chr-a') as unknown) === (store as unknown), 'one store, two contexts');
+  assert(!anim.lenses, 'no lens bar — one honest view (LAW 2; WBCLOTH §5)');
+});
+
+test('KEYBINDINGS: character paint lens ctrl+z routes to the painter stroke history', () => {
+  const { deps } = fakeDeps(true);
+  const store = createCharacterStore(deps);
+  store.loadFromRoster('chr-a');
+  store.setLens('paint');
+  const strokes = ['stroke-1', 'stroke-2', 'stroke-3'];
+  const src = charactersSource(store, {
+    saveCurrent: () => {},
+    undo: () => { strokes.pop(); },
+    redo: () => { strokes.push('stroke-3-redone'); },
+  });
+  const actions = src.actions!(store);
+  const undoAction = actions.find((a) => a.id === 'undo');
+  assert(!!undoAction, 'character source exposes undo to the workbench shell');
+  assertEqual(workbenchActionShortcut(undoAction!), 'Ctrl+Z', 'undo advertises the standard shortcut');
+
+  workbenchShortcutHandlers(actions, (a) => a.run()).undo?.();
+  assertEqual(strokes.join(','), 'stroke-1,stroke-2', 'ctrl+z removes exactly the completed paint stroke at the top');
 });
 
 finish('editors/workbench/characters');

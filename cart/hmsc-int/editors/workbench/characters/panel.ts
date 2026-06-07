@@ -2,16 +2,16 @@
 // half (WBCHAR-0606 + CLOTHSPLIT-0606 phase 2): the generated PanelSpecs +
 // the source cores (roster, actions, lenses) — everything except the stages'
 // JSX, so the P4 suite bundles without the React half (the characters.test.ts
-// law). source.tsx / clothingSource.tsx / animationSource.tsx wrap these
-// cores and add their stages.
+// law). source.tsx / animationSource.tsx wrap these cores and add their
+// stages.
 //
-// THREE contexts over ONE store (the user's ruling, req_0040):
+// TWO contexts over ONE store (req_0040, amended by CLOTHFLIP-0607):
 //   characterPanel — MESH ONLY: identity, part, body shape, face mesh,
 //                    sculpt, regions. No wardrobe, no animation commands.
-//   clothingPanel  — the wardrobe ATTACHMENT context: outfit + extras +
-//                    held prop (parity rows W2-W6, WBCLOTH.CAPTURE.md).
 //   animationPanel — the rig/posing context: pose, face anim, rig anim,
 //                    script + presets (parity rows A1-A7).
+// (the wardrobe cosplay context died — CLOTHFLIP-0607; clothing lives at
+// editors/workbench/clothing/, the GARMENT source.)
 
 import type { WorkbenchSource, RosterRow, ActionSpec } from '../../../shell/Workbench';
 import type { PanelSpec, FieldSpec } from '../../../shell/fields';
@@ -22,10 +22,9 @@ import { SHAPE_REGIONS } from '../../characters/regions';
 import { PAINT_EDITOR_TUNING } from '../../characters/paintKit';
 import { ANIM_PRESETS, DEFAULT_ANIM_SCRIPT } from '../../characters/animPresets';
 import {
-  BODY_POSES, BODY_SHAPES, BOTTOMS, CLOTHING, CLOTHING_ACCESSORIES, CLOTHING_SKINS, PART_IDS, PART_PRESETS,
-  type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
+  BODY_POSES, BODY_SHAPES, FOOT_SHAPE_DEFAULTS, FOOT_SHAPE_SPECS, PART_IDS, PART_PRESETS,
+  type BodyPoseId, type BodyShapeId, type FootShape, type PartId,
 } from '../../../game/figure/shapes';
-import { GAME_ITEMS } from '../../../game/items';
 import type { HedAnimation } from '../../../game/figure/hed';
 
 const TUNE = PAINT_EDITOR_TUNING;
@@ -110,53 +109,32 @@ export function characterPanel(s: CharacterStore): PanelSpec {
     ],
   });
 
-  return { groups };
-}
-
-/** The CLOTHING context's panel — the wardrobe attachment family (parity
- *  W2-W6): everything here writes the same draft doors (autosave/undo/V20
- *  untouched; the outfit lands on BodyDocument.outfit via draftToDocument). */
-export function clothingPanel(s: CharacterStore): PanelSpec {
-  // held-prop options: none + the item registry + ◆ sculpted /items (W6/J4)
-  const props: Array<{ id: string; label: string }> = [
-    { id: 'none', label: 'none' },
-    ...GAME_ITEMS.definitions.map((it: { id: string; label: string }) => ({ id: it.id, label: it.label })),
-    ...s.sculptedItems().map((it) => ({ id: it.id, label: `◆ ${it.label}` })),
-  ];
-
-  const groups: PanelSpec['groups'] = [];
-
-  groups.push({
-    title: 'OUTFIT',
-    fields: [
-      { k: 'clothes', t: 'enum', opts: Object.keys(CLOTHING), get: () => s.draft.clothing, set: (x) => s.setClothing(x as ClothingId) },
-      { k: 'bottoms', t: 'enum', opts: Object.keys(BOTTOMS), get: () => s.draft.bottoms, set: (x) => s.setBottoms(x as BottomsId) },
-      { k: 'print', t: 'enum', opts: Object.keys(CLOTHING_SKINS), get: () => s.draft.clothingSkin, set: (x) => s.setClothingSkin(x as ClothingSkinId) },
-    ],
-  });
-
-  groups.push({
-    title: 'EXTRAS',
-    fields: (Object.keys(CLOTHING_ACCESSORIES) as ClothingAccessoryId[]).map((id): FieldSpec => ({
-      k: CLOTHING_ACCESSORIES[id].label,
-      t: 'bool',
-      get: () => s.draft.accessories.includes(id),
-      set: () => s.toggleAccessory(id), // route semantics: a press toggles (cap⇄beanie exclusivity inside)
-    })),
-  });
-
-  groups.push({
-    title: 'PROP',
-    fields: [{
-      k: 'held', t: 'enum',
-      opts: props.map((p) => p.label),
-      get: () => props.find((p) => p.id === s.draft.heldItem)?.label ?? s.draft.heldItem,
-      set: (label) => s.setHeldItem(props.find((p) => p.label === label)?.id ?? 'none'),
-    }],
-  });
+  // FOOTMESH-0606: the foot's anatomy dials — generated straight from the
+  // spec table (one truth: shapes.ts FOOT_SHAPE_SPECS); conditional-render
+  // law, the group earns its space only on the foot part.
+  if (v.selPart === 'foot') {
+    groups.push({
+      title: 'FOOT',
+      fields: (Object.keys(FOOT_SHAPE_SPECS) as Array<keyof FootShape>).map((dial): FieldSpec => ({
+        k: FOOT_SHAPE_SPECS[dial].label, t: 'num',
+        min: FOOT_SHAPE_SPECS[dial].min, max: FOOT_SHAPE_SPECS[dial].max,
+        step: FOOT_SHAPE_SPECS[dial].step, precision: FOOT_SHAPE_SPECS[dial].precision,
+        get: () => (s.draft.footShape ?? FOOT_SHAPE_DEFAULTS)[dial],
+        set: (x) => s.setFootShape({ [dial]: x }),
+      })),
+    });
+  }
 
   return { groups };
 }
+
+// (clothingPanel — the wardrobe cosplay context (OUTFIT/EXTRAS/PROP) — is
+// DELETED by CLOTHFLIP-0607 (req_0234), USER verbatim: "The clothing route
+// is still doing a character cosplay … not this shit where its asking me
+// about a prop". The garment source (editors/workbench/clothing/) IS the
+// clothing authority; outfit-assembly/props are character/play domain and
+// their draft DOORS (setClothing/toggleAccessory/setHeldItem + the
+// BodyDocument.outfit channel) live on in store.ts for that future home.)
 
 /** The ANIMATION context's panel — pose + face anim + script (parity A1-A7).
  *  The pre-split setLens('figure') flips are gone: this context's stage IS
@@ -219,7 +197,27 @@ function rosterDoors(s: CharacterStore) {
   };
 }
 
-export function characterSourceCore(store?: CharacterStore): Omit<WorkbenchSource<CharacterStore>, 'stage'> & { store: CharacterStore } {
+const newCharacterAction = (s: CharacterStore): ActionSpec =>
+  ({ id: 'new', label: 'New', icon: 'Plus', run: () => s.newCharacter() });
+
+export type CharacterPaintActions = { saveCurrent(): void; undo(): void; redo(): void };
+
+function saveCharacterContext(s: CharacterStore, paint?: CharacterPaintActions): void {
+  if (s.view.lens === 'paint' && paint) { paint.saveCurrent(); return; }
+  s.saveToRoster();
+}
+
+function undoCharacterContext(s: CharacterStore, paint?: CharacterPaintActions): void {
+  if (s.view.lens === 'paint' && paint) { paint.undo(); return; }
+  s.undo();
+}
+
+function redoCharacterContext(s: CharacterStore, paint?: CharacterPaintActions): void {
+  if (s.view.lens === 'paint' && paint) { paint.redo(); return; }
+  s.redo();
+}
+
+export function characterSourceCore(store?: CharacterStore, paintActions?: CharacterPaintActions): Omit<WorkbenchSource<CharacterStore>, 'stage'> & { store: CharacterStore } {
   const s = store ?? characterWorkbenchStore();
   return {
     store: s,
@@ -236,33 +234,24 @@ export function characterSourceCore(store?: CharacterStore): Omit<WorkbenchSourc
 
     actions(): ActionSpec[] {
       return [
-        { id: 'save', label: 'Save', icon: 'Check', run: () => s.saveToRoster() },
+        newCharacterAction(s),
+        { id: 'save', label: 'Save', icon: 'Check', run: () => saveCharacterContext(s, paintActions) },
+        { id: 'undo', label: 'Undo', icon: 'Undo2', run: () => undoCharacterContext(s, paintActions) },
+        { id: 'redo', label: 'Redo', icon: 'Redo2', run: () => redoCharacterContext(s, paintActions) },
         { id: 'generate', label: 'Generate', icon: 'Sparkles', run: () => s.generateWholeCharacter() },
         { id: 'export', label: '.body', icon: 'Package', run: () => s.exportBody() },
         ...(s.draftId ? [{ id: 'remove', label: 'Remove', icon: 'Trash2', run: () => s.removeFromRoster(s.draftId!) }] : []),
       ];
     },
-
-  };
-}
-
-/** CLOTHING — its own editing context built on the phase-1 attachment family
- *  (CLOTHSPLIT-0606 phase 2). Same store, same roster; the panel dresses,
- *  the stage demonstrates the dressed figure. No lens bar (one honest view). */
-export function clothingSourceCore(store?: CharacterStore): Omit<WorkbenchSource<CharacterStore>, 'stage'> & { store: CharacterStore } {
-  const s = store ?? characterWorkbenchStore();
-  return {
-    store: s,
-    id: 'clothing',
-    icon: 'Shirt',
-    kicker: 'CLOTHING',
-    ...rosterDoors(s),
-    panel: () => clothingPanel(s),
-    actions(): ActionSpec[] {
-      return [{ id: 'save', label: 'Save', icon: 'Check', run: () => s.saveToRoster() }];
+    emptyActions(): ActionSpec[] {
+      return [newCharacterAction(s)];
     },
+
   };
 }
+
+// (clothingSourceCore is DELETED by CLOTHFLIP-0607 — the cosplay clothing
+// context died with its panel; see the note above clothingPanel's grave.)
 
 /** ANIMATION — the rig/posing context (where animation commands live). */
 export function animationSourceCore(store?: CharacterStore): Omit<WorkbenchSource<CharacterStore>, 'stage'> & { store: CharacterStore } {
@@ -275,7 +264,11 @@ export function animationSourceCore(store?: CharacterStore): Omit<WorkbenchSourc
     ...rosterDoors(s),
     panel: () => animationPanel(s),
     actions(): ActionSpec[] {
-      return [{ id: 'save', label: 'Save', icon: 'Check', run: () => s.saveToRoster() }];
+      return [
+        { id: 'save', label: 'Save', icon: 'Check', run: () => s.saveToRoster() },
+        { id: 'undo', label: 'Undo', icon: 'Undo2', run: () => s.undo() },
+        { id: 'redo', label: 'Redo', icon: 'Redo2', run: () => s.redo() },
+      ];
     },
   };
 }
