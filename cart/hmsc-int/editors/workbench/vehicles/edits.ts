@@ -1,9 +1,9 @@
-// editors/vehicles/edits.ts — the pure document-edit steps behind the vehicle
-// editor route. Every control in the UI is one of these functions: doc in,
-// doc out, no React, no host — so the authoring behavior is headless-testable
-// (P4) and the stream's 'authored' events always carry a doc these steps
-// produced. Behavior reference: cart/vehicle_lab/index.tsx (setStyle/setRole/
-// moveGas/randomColor/setPartDamage/randomDamage) — read, never imported.
+// editors/workbench/vehicles/edits.ts — the pure document-edit steps behind
+// the vehicle Workbench source. Every control is one of these functions: doc
+// in, doc out, no React, no host, so the authoring behavior is headless-testable
+// and the stream's 'authored' events always carry a doc these steps produced.
+// Behavior reference: cart/vehicle_lab/index.tsx (setStyle/setRole/moveGas/
+// randomColor/setPartDamage/randomDamage) — read, never imported.
 //
 // P2: every editor-owned number lives in VEHICLE_EDITOR_TUNING. The two gasZ
 // clamp ranges differ on purpose — the reference clamps tighter when a style

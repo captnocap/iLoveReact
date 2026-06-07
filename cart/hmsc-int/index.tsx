@@ -46,7 +46,6 @@ import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
-import { VehiclesRoute } from './editors/vehicles/VehiclesRoute';
 import { ComposeRoute } from './editors/compose/ComposeRoute';
 import { SettingsRoute } from './editors/settings/SettingsRoute';
 import { editorChannel } from './editors/store';
@@ -827,7 +826,7 @@ function EditorShell() {
   // Router nav lives in the persistent chrome shell.
   const nav = useNavigate();
   const route = useRoute();
-  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/vehicles' ? 'vehicles' : route.path === '/compose' ? 'compose' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
+  const activeRoute = route.path === '/workbench' ? 'workbench' : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/compose' ? 'compose' : route.path === '/assist3d' ? 'assist3d' : route.path === '/textures' ? 'textures' : route.path === '/log' ? 'log' : route.path === '/settings' ? 'settings' : 'editor';
   const [editorPanesMounted, setEditorPanesMounted] = useState(activeRoute === 'editor');
   useEffect(() => {
     if (activeRoute === 'editor') setEditorPanesMounted(true);
@@ -863,7 +862,6 @@ function EditorShell() {
         onEditor={() => nav.push('/')}
         onTest={() => nav.push('/test')}
         onLabs={() => nav.push('/labs')}
-        onVehicles={() => nav.push('/vehicles')}
         onCompose={() => nav.push('/compose')}
         onPerf={() => nav.push('/log')}
         onSettings={() => nav.push('/settings')}
@@ -951,11 +949,6 @@ function EditorShell() {
         {/* Labs cross into shell as plain data here — shell/ imports nothing
             game-specific; labs/index.ts is the registry rjit lab new maintains. */}
         <Route path="/labs">{() => <LabsRoute labs={LABS} onExit={() => nav.push('/')} />}</Route>
-        {/* The vehicles editor (editors/vehicles/) — authors what game/vehicle builds.
-            paint-texture deep-links land on the workbench PAINT bench
-            (CUTOUTFLIP-0606: /cutout died; the bench store consumes the
-            pending-model-target mailbox the route used to take). */}
-        <Route path="/vehicles">{() => <VehiclesRoute onExit={() => nav.push('/')} onPaintTexture={() => nav.push('/workbench')} />}</Route>
         {/* The decal editor (editors/compose/) — compose Box/Text/Image looks,
             Materialize them into the texture registry (DECALEDIT-0606). */}
         <Route path="/compose">{() => <ComposeRoute />}</Route>

@@ -158,7 +158,7 @@ getter/setter is missing):
 | sessions / streams | `editors/sessions.ts`, `editors/store.ts`, `editors/twigs.ts`, `editors/tunables.ts`, `editors/*/stream.ts` (characters? · items · voxels · materials · cutout · world), `editors/settings/bus.ts` | settings domains, logs channels, every source's autosave |
 | character authoring | `editors/characters/{draft,roster,generate,regions,animPresets,paintKit,grabKit}.ts` | character source |
 | item authoring | `editors/items/{bake,stream}.ts`, `editors/voxels/stream.ts` | item source |
-| vehicle authoring | `editors/vehicles/edits.ts` (+ garage store in route — extract) | vehicle source |
+| vehicle authoring | `editors/workbench/vehicles/edits.ts` + vehicle source store/panel/stage | vehicle source |
 | material pipeline | `game/textures/{shaders,materials,registry}.ts` (+ `index.ts`, CAPTURE.md) | material source |
 | paint engine | `editors/paint/{usePaintEditor,layers,strokes,history,surfaces,colors,tuning}.ts`, `editors/paint/backends/` | PAINT lens (all assets) |
 | cutout extraction | `editors/cutout/{extraction,models,sources,draft,stream}.ts` | PAINT lens save path |
@@ -186,7 +186,7 @@ source, shell dies · **FOLD** = absorbed into a Workbench source/lens ·
 | `index.tsx` (EditorShell, routes, map-editor wiring) | 958 | **KEEP/SHRINK** — stays the cart root + map editor host; route table shrinks to 6; ~~ProjectBar swap → `shell/chrome.tsx`~~ DONE (WBCHROME-0606) |
 | `editors/characters/CharactersRoute.tsx` | 1141 | **EXTRACT→DIE** — chip-row layout dies; roster/draft wiring → character source |
 | `editors/items/ItemsRoute.tsx` | 627 | ~~**EXTRACT→DIE** — → item source~~ **DEAD** (WBITEMS-FLIP-0606) — route deleted; item authoring lives in `itemsSource()` |
-| `editors/vehicles/VehiclesRoute.tsx` | 508 | **EXTRACT→DIE** — garage store lifts to `editors/vehicles/garage.ts`; → vehicle source |
+| `editors/vehicles/VehiclesRoute.tsx` | 508 | ~~**EXTRACT→DIE** — garage store lifts to vehicle source~~ **DEAD** (WBSTEP6-FLIP-0606) — route deleted; vehicle authoring lives in `vehiclesSource()` |
 | `editors/cutout/CutoutRoute.tsx` | 1159 | ~~**EXTRACT→DIE** — becomes the PAINT lens of every asset source; library rail logic → cutout source files~~ **DEAD** (CUTOUTFLIP-0606, USER RULING "nuke that shit") — EffectModal → `workbench/paint/EffectModal.tsx`; shared `editors/cutout/` internals stay as bench modules |
 | `TextureStudio.tsx` | 188 | **FOLD→DIE** — material source: catalog rail = roster, Materialize = action, ShaderLab = stage mode |
 | `editors/compose/ComposeRoute.tsx` | 455 | **EXTRACT→FOLD** — decal doc model extracts; stage/layers/3D-billboard = material source's COMPOSE stage mode; layers+props panel becomes PanelSpec |
@@ -263,16 +263,15 @@ bang; the old route works until the minute its replacement does.
    on `/workbench` with ITEM/SCULPT/VOXEL lenses, stream-backed sculpted item
    authoring, voxel blockout authoring, and voxel→item import. The FLIP
    deleted `/items`, `/voxels`, and their chrome nav icons on the user's word.
-6. **Vehicle source.** BUILT (WBSTEP6-0606, awaiting user test): the
+6. **Vehicle source.** DONE + FLIPPED (WBSTEP6-0606, WBSTEP6-FLIP-0606): the
    coverage-law parity table lives at `editors/workbench/WBVEHICLES.CAPTURE.md`
    (all 14 `/vehicles` census rows line-referenced; C9 remains owned by the
    agnostic paint bench with the vehicle source adding the direct PAINT
    doorway). `editors/workbench/vehicles/{store.ts,panel.ts,source.tsx,
-   Stage.tsx,PaintLens.tsx}` + 13-test suite; VEHICLE is live on `/workbench`
+   Stage.tsx,PaintLens.tsx,edits.ts}` + 13-test suite; VEHICLE is live on `/workbench`
    (garage roster, stream-backed authoring, pose/debug/gas/damage/contract
-   panel, 3D orbit stage, shared PAINT lens). The FLIP (`/vehicles` route +
-   nav icon die) is a separate commit on the user's word — the route is
-   untouched today.
+   panel, 3D orbit stage, shared PAINT lens). The FLIP deleted `/vehicles`,
+   `editors/vehicles/`, and the chrome car nav icon on the user's word.
 7. **Material source.** BUILT (WBSTEP7-0606, awaiting user test): the
    coverage-law parity table lives at `editors/workbench/WBMATERIALS.CAPTURE.md`
    (all 14 `/textures` rows and all 18 `/compose` rows line-referenced; req_0003

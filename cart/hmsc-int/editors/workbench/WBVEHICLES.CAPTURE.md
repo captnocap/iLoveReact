@@ -4,8 +4,9 @@ Source census: `editors/workbench/census/vehicles.md`.
 
 Scope: additive vehicle Workbench source. `/vehicles` remains untouched until
 the later flip commit. The source uses the existing vehicle stream, route twig
-keys, `editors/vehicles/edits.ts`, the shared `shell/fields.tsx` renderer, the
-shared workbench stage/lens frame, and the existing agnostic paint bench.
+keys, `editors/workbench/vehicles/edits.ts`, the shared `shell/fields.tsx`
+renderer, the shared workbench stage/lens frame, and the existing agnostic
+paint bench.
 
 Model correction after user verdict: the old route persisted the vehicle body
 choice under `VehicleDoc.style`, but the Workbench boundary treats that value as

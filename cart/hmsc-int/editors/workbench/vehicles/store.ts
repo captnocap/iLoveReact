@@ -27,7 +27,7 @@ import {
   setGasZ,
   setPartDamage,
   wreck,
-} from '../../vehicles/edits';
+} from './edits';
 
 const TWIG_ROUTE = '/vehicles';
 
