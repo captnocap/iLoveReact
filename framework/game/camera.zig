@@ -66,6 +66,14 @@ pub const MoveAxes = struct {
     speed: f32 = 0,
 };
 
+pub const DistanceConstraint = struct {
+    target_distance: f32 = 0,
+    min_distance: f32 = 1,
+    smoothing_per_second: f32 = 24,
+    current_distance: f32 = 0,
+    initialized: bool = false,
+};
+
 pub const ControllerParams = struct {
     smoothing_per_second: f32 = DEFAULT_SMOOTHING_PER_SECOND,
 };
@@ -173,6 +181,7 @@ pub const Controller = struct {
     aim: AimParams = .{},
     freefly: FreeFlyParams = .{},
     move_axes: MoveAxes = .{},
+    distance_constraint: DistanceConstraint = .{},
     current: Solved = solveOrbit(.{}),
     initialized: bool = false,
     smoothing_per_second: f32 = DEFAULT_SMOOTHING_PER_SECOND,
@@ -216,6 +225,12 @@ pub const Controller = struct {
 
     pub fn setMoveAxes(self: *Controller, axes: MoveAxes) void {
         self.move_axes = axes;
+    }
+
+    pub fn setDistanceConstraint(self: *Controller, target_distance: f32, min_distance: f32, smoothing_per_second: f32) void {
+        self.distance_constraint.target_distance = @max(@as(f32, 0), target_distance);
+        self.distance_constraint.min_distance = @max(@as(f32, 0.1), min_distance);
+        self.distance_constraint.smoothing_per_second = @max(@as(f32, 0), smoothing_per_second);
     }
 
     pub fn setSmoothing(self: *Controller, per_second: f32) void {
@@ -270,9 +285,45 @@ pub const Controller = struct {
         };
     }
 
+    fn constrainedDistance(self: *Controller, base_distance: f32, dt_seconds: f32) f32 {
+        const base = @max(@as(f32, 0.1), base_distance);
+        var target = if (self.distance_constraint.target_distance > 0) self.distance_constraint.target_distance else base;
+        target = clamp(target, self.distance_constraint.min_distance, base);
+        if (!self.distance_constraint.initialized) {
+            self.distance_constraint.current_distance = base;
+            self.distance_constraint.initialized = true;
+        }
+        if (self.distance_constraint.smoothing_per_second <= 0 or dt_seconds <= 0) {
+            self.distance_constraint.current_distance = target;
+        } else {
+            const t = clamp(1.0 - @exp(-self.distance_constraint.smoothing_per_second * dt_seconds), 0, 1);
+            self.distance_constraint.current_distance = lerp(self.distance_constraint.current_distance, target, t);
+        }
+        self.distance_constraint.current_distance = clamp(self.distance_constraint.current_distance, self.distance_constraint.min_distance, base);
+        return self.distance_constraint.current_distance;
+    }
+
+    fn desiredForStep(self: *Controller, dt_seconds: f32) Solved {
+        return switch (self.mode) {
+            .orbit => {
+                var params = self.orbit;
+                const zoom = @max(@as(f32, 0.2), params.zoom);
+                const base = params.dist / zoom;
+                params.dist = self.constrainedDistance(base, dt_seconds) * zoom;
+                return solveOrbit(params);
+            },
+            .aim => {
+                var params = self.aim;
+                params.distance = self.constrainedDistance(params.distance, dt_seconds);
+                return solveAim(params);
+            },
+            .freefly => solveFreeFly(self.freefly),
+        };
+    }
+
     pub fn step(self: *Controller, dt_seconds: f32) Solved {
         if (self.mode == .freefly) self.integrateFreeFly(dt_seconds);
-        const want = self.desired();
+        const want = self.desiredForStep(dt_seconds);
         if (!self.initialized or self.smoothing_per_second <= 0 or dt_seconds <= 0) {
             self.current = want;
             self.initialized = true;
@@ -519,6 +570,15 @@ pub fn setMoveAxesForNode(node_id: u32, axes: MoveAxes) void {
         slot.controller.setMoveAxes(axes);
         probeRecordParams(slot);
     }
+}
+
+pub fn setDistanceConstraint(target_distance: f32, min_distance: f32, smoothing_per_second: f32) void {
+    g_legacy_controller.setDistanceConstraint(target_distance, min_distance, smoothing_per_second);
+    if (activeSlot()) |slot| slot.controller.setDistanceConstraint(target_distance, min_distance, smoothing_per_second);
+}
+
+pub fn setDistanceConstraintForNode(node_id: u32, target_distance: f32, min_distance: f32, smoothing_per_second: f32) void {
+    if (ensureSlot(node_id)) |slot| slot.controller.setDistanceConstraint(target_distance, min_distance, smoothing_per_second);
 }
 
 pub fn setSmoothing(per_second: f32) void {

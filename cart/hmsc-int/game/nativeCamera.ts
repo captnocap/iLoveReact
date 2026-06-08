@@ -142,6 +142,9 @@ export const GAME_NATIVE_CAMERA = Object.freeze({
   setSmoothing(perSecond: number): void {
     callHost('__game_camera_set_smoothing', perSecond);
   },
+  setDistanceConstraint(targetDistance: number, minDistance: number, smoothingPerSecond: number): void {
+    callHost('__game_camera_set_distance_constraint', targetDistance, minDistance, smoothingPerSecond);
+  },
   activeNode(): number {
     return Number(callHost('__game_camera_active_node') ?? 0);
   },
@@ -173,6 +176,9 @@ export const GAME_NATIVE_CAMERA = Object.freeze({
       },
       setSmoothing(perSecond: number): void {
         callHost('__game_camera_set_smoothing_node', nodeId, perSecond);
+      },
+      setDistanceConstraint(targetDistance: number, minDistance: number, smoothingPerSecond: number): void {
+        callHost('__game_camera_set_distance_constraint_node', nodeId, targetDistance, minDistance, smoothingPerSecond);
       },
     });
   },

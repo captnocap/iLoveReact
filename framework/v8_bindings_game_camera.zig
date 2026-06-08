@@ -23,6 +23,7 @@
 //!   __game_camera_set_freefly_node(nodeId,posX,posY,posZ,yaw,pitch,fov)
 //!   __game_camera_set_move_axes_node(nodeId,forward,strafe,lift,speed)
 //!   __game_camera_get_freefly_node(nodeId) -> JSON snapshot
+//!   __game_camera_set_distance_constraint_node(nodeId,targetDistance,minDistance,smoothingPerSecond)
 //!   __game_camera_set_input_deltas_node(nodeId,yawDelta,pitchDelta)
 //!   __game_camera_set_smoothing_node(nodeId,perSecond)
 //!
@@ -310,6 +311,28 @@ fn hostSetMoveAxesNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) v
     setReturnNull(info);
 }
 
+fn hostSetDistanceConstraint(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const target_distance: f32 = @floatCast(argToF64(info, 0) orelse 0);
+    const min_distance: f32 = @floatCast(argToF64(info, 1) orelse 1);
+    const smoothing: f32 = @floatCast(argToF64(info, 2) orelse 24);
+    game_camera.setDistanceConstraint(target_distance, min_distance, smoothing);
+    setReturnNull(info);
+}
+
+fn hostSetDistanceConstraintNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
+    const info = v8.FunctionCallbackInfo.initFromV8(info_c);
+    const node_id = argToNodeId(info, 0) orelse {
+        setReturnNull(info);
+        return;
+    };
+    const target_distance: f32 = @floatCast(argToF64(info, 1) orelse 0);
+    const min_distance: f32 = @floatCast(argToF64(info, 2) orelse 1);
+    const smoothing: f32 = @floatCast(argToF64(info, 3) orelse 24);
+    game_camera.setDistanceConstraintForNode(node_id, target_distance, min_distance, smoothing);
+    setReturnNull(info);
+}
+
 fn hostGetFreeFlyNode(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
     const node_id = argToNodeId(info, 0) orelse {
@@ -444,6 +467,8 @@ pub fn registerGameCamera(_: anytype) void {
     v8_runtime.registerHostFn("__game_camera_set_freefly_node", hostSetFreeFlyNode);
     v8_runtime.registerHostFn("__game_camera_set_move_axes", hostSetMoveAxes);
     v8_runtime.registerHostFn("__game_camera_set_move_axes_node", hostSetMoveAxesNode);
+    v8_runtime.registerHostFn("__game_camera_set_distance_constraint", hostSetDistanceConstraint);
+    v8_runtime.registerHostFn("__game_camera_set_distance_constraint_node", hostSetDistanceConstraintNode);
     v8_runtime.registerHostFn("__game_camera_get_freefly_node", hostGetFreeFlyNode);
     v8_runtime.registerHostFn("__game_camera_set_input_deltas", hostSetInputDeltas);
     v8_runtime.registerHostFn("__game_camera_set_input_deltas_node", hostSetInputDeltasNode);
