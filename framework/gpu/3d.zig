@@ -162,13 +162,36 @@ fn dynSlotOffset(i: usize) u64 {
     return (@as(u64, MAX_RETAINED_VERTS) + @as(u64, i) * MAX_DYN_VERTS) * @sizeOf(Vertex);
 }
 
-// Per-instance vertex buffer cap. With InstanceData = 80 bytes, 65536 instances
-// = ~5.2 MB reserved. drawScene bump-fills this each frame; uploads only the bytes
-// actually written, so a larger ceiling costs reserved GPU memory, not per-frame work.
-// Raised from 8192: world-scale tile/prop fields blew past the old ceiling (a
-// 120x120 floor alone is 14,400 tiles) and excess instances were silently dropped.
+// Per-frame DYNAMIC instance cap. drawScene refills + re-uploads this buffer every
+// frame for instanced batches whose contents change. 65536 × 80 bytes = ~5.2 MB —
+// enough for world-scale per-frame fields (a 120x120 painted floor is 14,400 tiles).
+// STATIC world geometry does NOT ride here: a node flagged scene3d_instance_static
+// uploads ONCE to g_static_inst_buf below and never re-stages. That split is what
+// lets a 776k-instance city render flat-out without re-uploading ~59 MB/frame of a
+// world that never moves (the --massive scale-lab choke).
 const MAX_INSTANCES: u32 = 65536;
 const MAX_SCENE_MESHES: usize = 32768;
+
+// The instance staging buffer, off the stack (a large local risks stack overflow).
+// Used for the per-frame dynamic fill AND as the chunked staging window for one-time
+// static uploads. BSS-resident, so its pages are committed only as drawScene writes.
+var g_inst_scratch: [MAX_INSTANCES]InstanceData = undefined;
+
+// Retained INSTANCE buffer — the instance-level analogue of g_retained_vbuf. A node
+// flagged scene3d_instance_static (the loader's static world batch) is staged +
+// uploaded ONCE, keyed by its data pointer, then redrawn every frame straight from
+// this buffer with NO restage/upload. THE fix for the static-world re-upload choke.
+// The per-instance model matrix is camera-independent (makeInstance is model-only;
+// the camera lives in per-frame SceneUniforms), so a cached instance still tracks the
+// camera. Lazily created (80 MB at the 512-block max), so carts with no static batch
+// reserve nothing.
+const MAX_STATIC_INSTANCES: u32 = 1048576;
+const STATIC_INST_CACHE_LEN: usize = 64;
+const StaticInstEntry = struct { key: usize = 0, count: u32 = 0, offset: u64 = 0, used: bool = false };
+var g_static_inst_buf: ?*wgpu.Buffer = null;
+var g_static_inst_top: u64 = 0; // bump cursor (bytes) into g_static_inst_buf
+var g_static_inst_cache: [STATIC_INST_CACHE_LEN]StaticInstEntry = [_]StaticInstEntry{.{}} ** STATIC_INST_CACHE_LEN;
+var g_static_inst_cache_len: usize = 0;
 
 // ════════════════════════════════════════════════════════════════════════
 // Pipeline state
@@ -1128,6 +1151,72 @@ fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, s
     };
 }
 
+const StaticInstDraw = struct { offset: u64, count: u32 };
+
+/// Resolve a STATIC instanced batch (scene3d_instance_static) to a persistent
+/// (offset, count) in g_static_inst_buf, staging + uploading it ONCE on first sight
+/// keyed by the data pointer. Later frames cache-hit and redraw with no restage and
+/// no upload — the fix for re-uploading a static world every frame. The one-time
+/// upload streams through g_inst_scratch in MAX_INSTANCES-sized chunks so the
+/// staging window stays small. Returns null when the batch is malformed, the cache
+/// is full, or capacity is exhausted; the caller falls back to the dynamic path.
+fn resolveStaticInstances(device: *wgpu.Device, queue: *wgpu.Queue, idata: []const f32, icount: u32, stride: u32) ?StaticInstDraw {
+    const key = @intFromPtr(idata.ptr);
+    var i: usize = 0;
+    while (i < g_static_inst_cache_len) : (i += 1) {
+        const e = g_static_inst_cache[i];
+        if (e.used and e.key == key and e.count == icount) return .{ .offset = e.offset, .count = e.count };
+    }
+    if (stride < 9 or icount == 0 or idata.len < @as(usize, icount) * stride) return null;
+    if (g_static_inst_cache_len >= STATIC_INST_CACHE_LEN) return null;
+    if (g_static_inst_buf == null) {
+        g_static_inst_buf = device.createBuffer(&.{
+            .label = wgpu.StringView.fromSlice("render3d_static_instances"),
+            .size = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(InstanceData),
+            .usage = wgpu.BufferUsages.vertex | wgpu.BufferUsages.copy_dst,
+            .mapped_at_creation = 0,
+        });
+        if (g_static_inst_buf == null) return null;
+        g_static_inst_top = 0;
+    }
+    const cap_bytes: u64 = @as(u64, MAX_STATIC_INSTANCES) * @sizeOf(InstanceData);
+    const max_fit: u32 = @intCast((cap_bytes - g_static_inst_top) / @sizeOf(InstanceData));
+    const n: u32 = @min(icount, max_fit);
+    if (n == 0) return null;
+    const base_offset = g_static_inst_top;
+    const scale_base: usize = if (stride >= 12) 6 else 3;
+    const color_base: usize = if (stride >= 12) 9 else 6;
+    var done: u32 = 0;
+    while (done < n) {
+        const chunk: u32 = @min(MAX_INSTANCES, n - done);
+        var k: u32 = 0;
+        while (k < chunk) : (k += 1) {
+            const src = @as(usize, done + k) * stride;
+            g_inst_scratch[k] = makeInstance(
+                idata[src + 0],
+                idata[src + 1],
+                idata[src + 2],
+                if (stride >= 12) idata[src + 3] else 0,
+                if (stride >= 12) idata[src + 4] else 0,
+                if (stride >= 12) idata[src + 5] else 0,
+                idata[src + scale_base + 0],
+                idata[src + scale_base + 1],
+                idata[src + scale_base + 2],
+                idata[src + color_base + 0],
+                idata[src + color_base + 1],
+                idata[src + color_base + 2],
+                1.0,
+            );
+        }
+        queue.writeBuffer(g_static_inst_buf.?, g_static_inst_top, @ptrCast(&g_inst_scratch[0]), @as(u64, chunk) * @sizeOf(InstanceData));
+        g_static_inst_top += @as(u64, chunk) * @sizeOf(InstanceData);
+        done += chunk;
+    }
+    g_static_inst_cache[g_static_inst_cache_len] = .{ .key = key, .count = n, .offset = base_offset, .used = true };
+    g_static_inst_cache_len += 1;
+    return .{ .offset = base_offset, .count = n };
+}
+
 fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
@@ -1415,13 +1504,34 @@ fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     //    group. slot.offset is the cache offset for a key — identity-by-offset
     //    is equivalent to identity-by-key since each key has one cache entry. ──
     const inst_cap_bytes: u64 = @as(u64, MAX_INSTANCES) * @sizeOf(InstanceData);
-    var inst_scratch: [MAX_INSTANCES]InstanceData = undefined;
+    const inst_scratch = &g_inst_scratch; // BSS-resident staging buffer (off the stack)
     var inst_top: u64 = 0;
     var gi: usize = 0;
     while (gi < mcount) : (gi += 1) {
         if (mvisited[gi]) continue;
         const group_slot = mslot[gi];
         const group_tex = mtex[gi];
+
+        // STATIC FAST PATH: a node flagged scene3d_instance_static is uploaded once
+        // to g_static_inst_buf and redrawn straight from it — no per-frame restage or
+        // upload. Each static batch is its own draw (not merged), which is exactly
+        // the loader's static world (one box batch + one ramp batch). Falls through
+        // to the dynamic path if the retained buffer is full.
+        const leader = &scene_node.children[midx[gi]];
+        if (leader.scene3d_instance_static) {
+            if (leader.scene3d_instance_data) |idata| {
+                if (resolveStaticInstances(device, queue, idata, leader.scene3d_instance_count, leader.scene3d_instance_stride)) |sd| {
+                    mvisited[gi] = true;
+                    if (group_tex) |bg| pass.setBindGroup(1, bg, 0, null);
+                    pass.setVertexBuffer(0, g_retained_vbuf.?, group_slot.offset, @as(u64, group_slot.count) * @sizeOf(Vertex));
+                    pass.setVertexBuffer(1, g_static_inst_buf.?, sd.offset, @as(u64, sd.count) * @sizeOf(InstanceData));
+                    pass.draw(group_slot.count, sd.count, 0, 0);
+                    g_telemetry.draw_calls += 1;
+                    g_telemetry.instances += sd.count;
+                    continue;
+                }
+            }
+        }
 
         const inst_start = inst_top;
         var group_count: u32 = 0;

@@ -536,6 +536,11 @@ pub const Node = struct {
     scene3d_instance_data: ?[]const f32 = null,
     scene3d_instance_count: u32 = 0,
     scene3d_instance_stride: u32 = 0,
+    // STATIC instanced batch: upload its instance data to the retained instance
+    // buffer ONCE (keyed by the data pointer) and redraw it every frame with no
+    // restage/upload. For world geometry that never moves (the no-V8 loader's
+    // baked city). Only set this when scene3d_instance_data is stable + immutable.
+    scene3d_instance_static: bool = false,
     // Physics 2D — inline in the 2D tree, driven by framework/physics2d.zig
     physics_world_id: u8 = 0, // multi-physics-world instance index (0..MAX_PHYSICS_WORLDS-1)
     physics_world: bool = false, // true = Physics.World container

@@ -174,7 +174,11 @@ fn keyDown(scancode: usize) bool {
 /// Read a game-file. Runtime artifacts are raw RJMP bytes; legacy round-trip
 /// fixtures remain base64 text and are decoded only as a compatibility path.
 fn loadGameFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
-    const raw = try std.fs.cwd().readFileAlloc(allocator, path, 8 << 20);
+    // 256MB read cap. Real editor bakes are a few MB; the headroom is for the
+    // procedural scale lab (`rjit game play --massive --blocks N`), where the
+    // instance buffer alone can run to hundreds of MB — we want the test to probe
+    // the GPU/physics limit, not an artificial I/O wall.
+    const raw = try std.fs.cwd().readFileAlloc(allocator, path, 256 << 20);
     if (raw.len >= 4 and std.mem.readInt(u32, raw[0..4], .little) == RJMP_MAGIC) return raw;
     defer allocator.free(raw);
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
@@ -568,39 +572,52 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
             clipped_rows += 1;
         }
     }
+    // Two passes so WALKABLE FLOORS win the collider cap over solid walls. A
+    // huge world (the --massive scale lab) has far more instances than MAX_RECTS;
+    // if buildings (which lead the buffer) fill the cap first, the ground gets
+    // clipped and the player falls through the world. Registering floors first
+    // guarantees the ground you stand on always collides — at worst, distant
+    // walls become walk-through, never the floor. For real bakes (< MAX_RECTS
+    // instances) this is a no-op: everything fits regardless of order.
     const total_rows: usize = @intCast(inst_count);
-    var row: usize = 0;
-    while (row < total_rows) : (row += 1) {
-        if (isRampInstance(insts, row, stride)) {
-            if (heightfield_count < game_physics.MAX_HEIGHTFIELDS and registerRampHeightfield(insts, row, stride, heightfield_count)) {
-                heightfield_count += 1;
+    var pass: usize = 0;
+    while (pass < 2) : (pass += 1) {
+        const want_solid = pass == 1;
+        var row: usize = 0;
+        while (row < total_rows) : (row += 1) {
+            if (isRampInstance(insts, row, stride)) {
+                if (want_solid) continue; // ramps are heightfields — registered in the floor pass
+                if (heightfield_count < game_physics.MAX_HEIGHTFIELDS and registerRampHeightfield(insts, row, stride, heightfield_count)) {
+                    heightfield_count += 1;
+                } else {
+                    clipped_rows += 1;
+                }
+                continue;
+            }
+            const scale_base: usize = if (stride >= 12) 6 else 3;
+            const b = row * stride;
+            const sx = @abs(insts[b + scale_base + 0]);
+            const sy = @abs(insts[b + scale_base + 1]);
+            const sz = @abs(insts[b + scale_base + 2]);
+            if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
+            const solid = sy > PHYSICS_SOLID_HEIGHT_METERS;
+            if (solid != want_solid) continue; // floors in pass 0, walls in pass 1
+            const yaw = instanceYawRadians(insts, row, stride);
+            if (@abs(yaw) > 0.0001) {
+                if (oriented_count >= game_physics.MAX_ORIENTED) {
+                    clipped_rows += 1;
+                    continue;
+                }
+                try appendPhysicsOrientedRect(allocator, &oriented, insts, row, stride, solid);
+                oriented_count += 1;
             } else {
-                clipped_rows += 1;
+                if (rect_count >= game_physics.MAX_RECTS) {
+                    clipped_rows += 1;
+                    continue;
+                }
+                try appendPhysicsRect(allocator, &rects, insts, row, stride, solid);
+                rect_count += 1;
             }
-            continue;
-        }
-        const scale_base: usize = if (stride >= 12) 6 else 3;
-        const b = row * stride;
-        const sx = @abs(insts[b + scale_base + 0]);
-        const sy = @abs(insts[b + scale_base + 1]);
-        const sz = @abs(insts[b + scale_base + 2]);
-        if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
-        const solid = sy > PHYSICS_SOLID_HEIGHT_METERS;
-        const yaw = instanceYawRadians(insts, row, stride);
-        if (@abs(yaw) > 0.0001) {
-            if (oriented_count >= game_physics.MAX_ORIENTED) {
-                clipped_rows += 1;
-                continue;
-            }
-            try appendPhysicsOrientedRect(allocator, &oriented, insts, row, stride, solid);
-            oriented_count += 1;
-        } else {
-            if (rect_count >= game_physics.MAX_RECTS) {
-                clipped_rows += 1;
-                continue;
-            }
-            try appendPhysicsRect(allocator, &rects, insts, row, stride, solid);
-            rect_count += 1;
         }
     }
 
@@ -1122,6 +1139,10 @@ pub const Runtime = struct {
             const first = self.scene.heightfields[0];
             log.print("[loader] built {d} terrain heightfield mesh(es); first grid {d}x{d} at ({d:.2},{d:.2}) span {d:.2}x{d:.2}\n", .{ self.scene.heightfields.len, first.cols, first.rows, first.center_x, first.center_z, first.width, first.depth });
         }
+        // The world batches are STATIC (built once at construct, never mutated) —
+        // flag them so the host uploads each ONCE and redraws from the retained
+        // instance buffer with no per-frame restage/upload. This is what makes a
+        // 776k-instance city render flat-out: the world is data, the camera moves.
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = self.shape_batches.box_count > 0,
             .scene3d_geom_key = "box",
@@ -1130,6 +1151,7 @@ pub const Runtime = struct {
             .scene3d_instance_data = self.shape_batches.boxes,
             .scene3d_instance_count = self.shape_batches.box_count,
             .scene3d_instance_stride = @intCast(self.stride),
+            .scene3d_instance_static = true,
         });
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = self.shape_batches.ramp_count > 0,
@@ -1139,6 +1161,7 @@ pub const Runtime = struct {
             .scene3d_instance_data = self.shape_batches.ramps,
             .scene3d_instance_count = self.shape_batches.ramp_count,
             .scene3d_instance_stride = @intCast(self.stride),
+            .scene3d_instance_static = true,
         });
 
         self.root = .{ .children = self.kid_list.items };

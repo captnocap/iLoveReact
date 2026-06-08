@@ -81,6 +81,12 @@ const BAKE_BUNDLE = `${OUT_DIR}/hmsc-gamefile-bake.js`;
 const BAKED_GAMEFILE = `${OUT_DIR}/hmsc.gamefile`;
 const CONTENT_STORE_DIR = `${OUT_DIR}/contentstore`;
 const FIXTURE_GAMEFILE = 'framework/testing/fixtures/gamefile_roundtrip.b64';
+// The scale lab: a procedurally-generated HUGE city baked through the SAME
+// game-file pipe, so `rjit game play --massive` stress-tests how big a world the
+// stateless no-V8 loader renders before it chokes (compile/bakeMassiveGameFile).
+const MASSIVE_BAKE_ENTRY = 'cart/hmsc-int/compile/bakeMassiveGameFile.ts';
+const MASSIVE_BAKE_BUNDLE = `${OUT_DIR}/hmsc-massive-bake.js`;
+const MASSIVE_GAMEFILE = `${OUT_DIR}/hmsc-massive.gamefile`;
 const ORACLE_SMOKE_QUERIES = [
   'physics',
   'kinds',
@@ -111,6 +117,7 @@ export async function run(argv: string[]): Promise<number> {
   err('  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict');
   err('  shot     build the no-V8 loader, render the baked game-file, capture a PNG (--out path)');
   err('  play     build the no-V8 loader and open a live window (close it or press ESC to exit)');
+  err('  play/shot flags: --fixture (codec fixture) | --massive [--blocks N] (procedural scale lab)');
   return 2;
 }
 
@@ -436,20 +443,10 @@ function assertNoV8(root: string): boolean {
   return true;
 }
 
-/** Bake the AUTHORED hmsc world (loadEditorWorld) into a game-file the loader
- *  renders. Returns false if the bake doesn't produce a tape. */
-function bakeRealGameFile(root: string): boolean {
-  if (!bundle(root, BAKE_ENTRY, BAKE_BUNDLE)) {
-    err('[game] bake FAILED: bakeGameFile does not bundle');
-    return false;
-  }
-  const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${BAKE_BUNDLE}`]);
-  if (gen.stderr.trim()) err(gen.stderr.trim());
-  const tapeTransport = gen.stdout.trim();
-  if (gen.code !== 0 || !tapeTransport) {
-    err('[game] bake FAILED: no game-file produced from the authored world');
-    return false;
-  }
+/** Decode a bake's {gamefile, assets} base64 envelope (on stdout) to disk: the
+ *  raw game-file at `gamefilePath` plus any content-addressed assets in the
+ *  shared content store. Shared by the authored bake and the massive scale lab. */
+function installGameFileEnvelope(root: string, tapeTransport: string, gamefilePath: string): boolean {
   let tapeBase64 = tapeTransport;
   let assets: Array<{ hash: string; base64: string; bytes?: number }> = [];
   if (tapeTransport.startsWith('{')) {
@@ -466,9 +463,9 @@ function bakeRealGameFile(root: string): boolean {
     err('[game] bake FAILED: game-file envelope carried no game-file bytes');
     return false;
   }
-  const gamefilePath = `${root}/${BAKED_GAMEFILE}`;
-  fsMkdir(dirOf(gamefilePath));
-  const write = spawnSync('sh', ['-c', `base64 -d > ${shellQuote(gamefilePath)}`], tapeBase64);
+  const absGamefile = `${root}/${gamefilePath}`;
+  fsMkdir(dirOf(absGamefile));
+  const write = spawnSync('sh', ['-c', `base64 -d > ${shellQuote(absGamefile)}`], tapeBase64);
   if (write.stderr.trim()) err(write.stderr.trim());
   if (write.code !== 0) {
     err('[game] bake FAILED: could not write raw game-file bytes');
@@ -489,19 +486,64 @@ function bakeRealGameFile(root: string): boolean {
       return false;
     }
   }
-  const stat = tryFsStat(gamefilePath);
+  const stat = tryFsStat(absGamefile);
   const rawBytes = stat?.size ?? 0;
   const assetBytes = assets.reduce((n, asset) => n + (asset.bytes ?? 0), 0);
-  out(`[game] baked the authored hmsc world -> raw game-file (${rawBytes} bytes; b64 transport was ${tapeBase64.length} bytes; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
+  out(`[game] wrote raw game-file ${gamefilePath} (${rawBytes} bytes; b64 transport was ${tapeBase64.length} bytes; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
   return true;
 }
 
-/** Which game-file the loader should render: the freshly-baked authored world,
- *  else (only when explicitly asked via --fixture) the synthetic round-trip
- *  fixture. A FAILED bake fails LOUDLY (returns null) — it never silently falls
- *  back to the fixture; the fixture is for the codec round-trip tests only. */
-function resolveGameFile(root: string, useFixture: boolean): string | null {
-  if (useFixture) return FIXTURE_GAMEFILE;
+/** Bake the AUTHORED hmsc world (loadEditorWorld) into a game-file the loader
+ *  renders. Returns false if the bake doesn't produce a tape. */
+function bakeRealGameFile(root: string): boolean {
+  if (!bundle(root, BAKE_ENTRY, BAKE_BUNDLE)) {
+    err('[game] bake FAILED: bakeGameFile does not bundle');
+    return false;
+  }
+  const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${BAKE_BUNDLE}`]);
+  if (gen.stderr.trim()) err(gen.stderr.trim());
+  const tapeTransport = gen.stdout.trim();
+  if (gen.code !== 0 || !tapeTransport) {
+    err('[game] bake FAILED: no game-file produced from the authored world');
+    return false;
+  }
+  return installGameFileEnvelope(root, tapeTransport, BAKED_GAMEFILE);
+}
+
+/** Bake a procedurally-generated HUGE city (the scale lab) into a game-file. The
+ *  optional `blocks` knob sizes the N×N city grid; the loader frames + plays it
+ *  exactly like a real bake, so this stress-tests the data->loader render path. */
+function bakeMassiveGameFile(root: string, blocks?: number): boolean {
+  if (!bundle(root, MASSIVE_BAKE_ENTRY, MASSIVE_BAKE_BUNDLE)) {
+    err('[game] massive bake FAILED: bakeMassiveGameFile does not bundle');
+    return false;
+  }
+  const args = [`${root}/${MASSIVE_BAKE_BUNDLE}`];
+  if (blocks && Number.isFinite(blocks)) args.push('--blocks', String(blocks));
+  const gen = spawnSync(`${root}/tools/v8cli`, args);
+  if (gen.stderr.trim()) err(gen.stderr.trim());
+  const tapeTransport = gen.stdout.trim();
+  if (gen.code !== 0 || !tapeTransport) {
+    err('[game] massive bake FAILED: no game-file produced from the procedural city');
+    return false;
+  }
+  return installGameFileEnvelope(root, tapeTransport, MASSIVE_GAMEFILE);
+}
+
+type GameFileChoice = { fixture?: boolean; massive?: boolean; blocks?: number };
+
+/** Which game-file the loader should render: the procedural scale lab (--massive),
+ *  the freshly-baked authored world (default), else (only when explicitly asked
+ *  via --fixture) the synthetic round-trip fixture. A FAILED bake fails LOUDLY
+ *  (returns null) — it never silently falls back to the fixture; the fixture is
+ *  for the codec round-trip tests only. */
+function resolveGameFile(root: string, choice: GameFileChoice = {}): string | null {
+  if (choice.massive) {
+    if (bakeMassiveGameFile(root, choice.blocks)) return MASSIVE_GAMEFILE;
+    err('[game] massive bake FAILED');
+    return null;
+  }
+  if (choice.fixture) return FIXTURE_GAMEFILE;
   if (bakeRealGameFile(root)) return BAKED_GAMEFILE;
   err('[game] bake FAILED — refusing to render the synthetic fixture in its place');
   return null;
@@ -548,18 +590,30 @@ function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
-/** `rjit game shot [--out path] [--fixture]` — render the authored world (or the
- *  test fixture) to a PNG, on demand. */
+/** Parse the shared game-file selectors: --fixture (codec fixture), --massive
+ *  (procedural scale lab) and its --blocks N size knob. */
+function parseChoice(argv: string[]): GameFileChoice {
+  const choice: GameFileChoice = {};
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--fixture') { choice.fixture = true; continue; }
+    if (argv[i] === '--massive') { choice.massive = true; continue; }
+    if (argv[i] === '--blocks') { choice.blocks = Number(argv[++i]); continue; }
+    const m = /^--blocks=(\d+)$/.exec(argv[i] ?? '');
+    if (m) choice.blocks = Number(m[1]);
+  }
+  return choice;
+}
+
+/** `rjit game shot [--out path] [--fixture] [--massive [--blocks N]]` — render
+ *  the authored world (or the scale lab / test fixture) to a PNG, on demand. */
 function shot(root: string, argv: string[]): number {
   let outPath = `shots/${LOADER_NAME}.png`;
-  let useFixture = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--out' || argv[i] === '-o') { outPath = argv[++i] ?? outPath; continue; }
-    if (argv[i] === '--fixture') { useFixture = true; continue; }
   }
-  const gameFile = resolveGameFile(root, useFixture);
+  const gameFile = resolveGameFile(root, parseChoice(argv));
   if (!gameFile) {
-    err('[game] shot FAILED: no game-file (the authored bake failed)');
+    err('[game] shot FAILED: no game-file (the bake failed)');
     return 1;
   }
   if (!runLoaderRenderProof(root, outPath, gameFile)) {
@@ -570,13 +624,13 @@ function shot(root: string, argv: string[]): number {
   return 0;
 }
 
-/** `rjit game play [--fixture]` — build the no-V8 loader and open a live,
- *  closeable window rendering the authored world (or the test fixture). */
+/** `rjit game play [--fixture] [--massive [--blocks N]]` — build the no-V8 loader
+ *  and open a live, closeable window rendering the authored world (or the
+ *  procedural scale lab / test fixture). */
 function play(root: string, argv: string[]): number {
-  const useFixture = argv.includes('--fixture');
-  const gameFile = resolveGameFile(root, useFixture);
+  const gameFile = resolveGameFile(root, parseChoice(argv));
   if (!gameFile) {
-    err('[game] play FAILED: no game-file (the authored bake failed)');
+    err('[game] play FAILED: no game-file (the bake failed)');
     return 1;
   }
   const build = spawnSync('zig', LOADER_BUILD_ARGS);
@@ -608,7 +662,7 @@ function verify(root: string): number {
   // ── keystone: the stateless no-V8 loader constructs + renders the REAL
   //    authored world's 3D geometry (not the codec fixture) and we assert it
   //    drew many instances at real positions. A failed bake is a RED. ──
-  const renderGameFile = resolveGameFile(root, false);
+  const renderGameFile = resolveGameFile(root, {});
   if (!renderGameFile) err('[game] render proof FAILED: the authored bake produced no game-file');
   const renderOk = renderGameFile ? runLoaderRenderProof(root, LOADER_SHOT, renderGameFile) : false;
 
