@@ -16,10 +16,12 @@ const mapfile = gamefile.mapfile;
 pub const Error = gamefile.Error || error{
     NoMapTiles,
     UnsupportedTileEncoding,
+    BadPlayerModel,
 };
 
 const SCENE_ENV_VERSION: u32 = 1;
 const SCENE_ENV_FLOATS: usize = 35;
+const PLAYER_MODEL_VERSION: u32 = 1;
 
 /// The scene render environment (lighting / sky / camera), DATA the loader
 /// consumes instead of hardcoding the look (USER req_0308). Defaults mirror
@@ -48,6 +50,21 @@ pub const SceneEnv = struct {
     cam_height_factor: f32 = 0.55,
     cam_height_base: f32 = 7,
     cam_far_factor: f32 = 3.0,
+};
+
+pub const PlayerModelGroup = struct {
+    color: [3]f32,
+    alpha: f32,
+    vertices: []f32,
+    vertex_count: u32,
+    tex_w: u32,
+    tex_h: u32,
+    tex_rgba: ?[]u8,
+
+    pub fn deinit(self: PlayerModelGroup, allocator: std.mem.Allocator) void {
+        allocator.free(self.vertices);
+        if (self.tex_rgba) |tex| allocator.free(tex);
+    }
 };
 
 /// Decode the ENVIRONMENT lump (u32 version | f32[35]); on any mismatch keep the
@@ -96,20 +113,30 @@ pub const Scene = struct {
     instances: []f32,
     instance_count: u32,
     instance_stride: u32,
+    has_instance_lump: bool,
     /// The first `piece_count` instance rows are the PLACED PIECES (the city's
     /// structures); the rest are the painted ground. Lets the loader frame the
     /// camera on the city, not the whole 240m ground plane.
     piece_count: u32,
     /// The render environment (lighting / sky / camera) — data, not hardcoded.
     env: SceneEnv,
+    /// The compiled player model: local-coordinate mesh groups, moved by the
+    /// runtime player transform in world_loader.zig.
+    player_model: []PlayerModelGroup,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
         allocator.free(self.instances);
+        for (self.player_model) |group| group.deinit(allocator);
+        allocator.free(self.player_model);
     }
 };
 
 const DecodedInstances = struct { values: []f32, count: u32, stride: u32, pieces: u32 };
+
+fn readF32(data: []const u8, at: usize) f32 {
+    return @bitCast(std.mem.readInt(u32, data[at..][0..4], .little));
+}
 
 /// Decode an instance lump payload
 /// (u32 count | u32 stride | u32 pieceCount | f32[count*stride]) into a heap-
@@ -131,6 +158,64 @@ fn decodeInstances(allocator: std.mem.Allocator, data: []const u8) Error!Decoded
         values[i] = @bitCast(bits);
     }
     return .{ .values = values, .count = count, .stride = stride, .pieces = @min(pieces, count) };
+}
+
+fn decodePlayerModel(allocator: std.mem.Allocator, data: []const u8) Error![]PlayerModelGroup {
+    if (data.len < 8) return try allocator.alloc(PlayerModelGroup, 0);
+    if (std.mem.readInt(u32, data[0..4], .little) != PLAYER_MODEL_VERSION) return try allocator.alloc(PlayerModelGroup, 0);
+    const count = std.mem.readInt(u32, data[4..8], .little);
+    if (count == 0) return try allocator.alloc(PlayerModelGroup, 0);
+
+    var groups = try allocator.alloc(PlayerModelGroup, count);
+    var initialized: usize = 0;
+    errdefer {
+        for (groups[0..initialized]) |group| group.deinit(allocator);
+        allocator.free(groups);
+    }
+
+    var at: usize = 8;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        if (at + 32 > data.len) return Error.BadPlayerModel;
+        const color = [3]f32{ readF32(data, at + 0), readF32(data, at + 4), readF32(data, at + 8) };
+        const alpha = readF32(data, at + 12);
+        const vertex_count = std.mem.readInt(u32, data[at + 16 ..][0..4], .little);
+        const tex_w = std.mem.readInt(u32, data[at + 20 ..][0..4], .little);
+        const tex_h = std.mem.readInt(u32, data[at + 24 ..][0..4], .little);
+        const tex_len = std.mem.readInt(u32, data[at + 28 ..][0..4], .little);
+        at += 32;
+
+        const floats = @as(usize, vertex_count) * 8;
+        const vertex_bytes = floats * 4;
+        if (at + vertex_bytes + @as(usize, tex_len) > data.len) return Error.BadPlayerModel;
+        const vertices = try allocator.alloc(f32, floats);
+        errdefer allocator.free(vertices);
+        var vi: usize = 0;
+        while (vi < floats) : (vi += 1) {
+            vertices[vi] = readF32(data, at + vi * 4);
+        }
+        at += vertex_bytes;
+
+        const tex_rgba: ?[]u8 = if (tex_len > 0) blk: {
+            if (tex_w == 0 or tex_h == 0) return Error.BadPlayerModel;
+            const tex = try allocator.alloc(u8, tex_len);
+            @memcpy(tex, data[at .. at + tex_len]);
+            at += tex_len;
+            break :blk tex;
+        } else null;
+
+        groups[i] = .{
+            .color = color,
+            .alpha = alpha,
+            .vertices = vertices,
+            .vertex_count = vertex_count,
+            .tex_w = tex_w,
+            .tex_h = tex_h,
+            .tex_rgba = tex_rgba,
+        };
+        initialized += 1;
+    }
+    return groups;
 }
 
 /// Construct a Scene from a game-file's bytes: validate the dependency gate
@@ -159,7 +244,8 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
 
     // The 3D geometry: the authored world's instance buffer (optional — absent
     // in the codec round-trip fixture, present in the real editor bake).
-    const inst: DecodedInstances = if (mapfile.findLump(map_lumps, mapfile.LumpType.instances)) |lump|
+    const instances_lump = mapfile.findLump(map_lumps, mapfile.LumpType.instances);
+    const inst: DecodedInstances = if (instances_lump) |lump|
         try decodeInstances(allocator, lump.data)
     else
         .{ .values = &.{}, .count = 0, .stride = 0, .pieces = 0 };
@@ -170,6 +256,10 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         decodeEnvironment(lump.data)
     else
         .{};
+    const player_model: []PlayerModelGroup = if (mapfile.findLump(map_lumps, mapfile.LumpType.player_model)) |lump|
+        try decodePlayerModel(allocator, lump.data)
+    else
+        try allocator.alloc(PlayerModelGroup, 0);
 
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{
@@ -179,7 +269,9 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .instances = inst.values,
         .instance_count = inst.count,
         .instance_stride = inst.stride,
+        .has_instance_lump = instances_lump != null,
         .piece_count = inst.pieces,
         .env = env,
+        .player_model = player_model,
     };
 }

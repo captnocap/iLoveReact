@@ -38,7 +38,6 @@ const STORE_DIR = "zig-out/game/contentstore";
 const MAX_FRAMES: u32 = 600;
 // Instance row: pos3 + rot3 + scale3 + color3 (matches gpu/3d.zig stride>=12).
 const INSTANCE_STRIDE: usize = 12;
-const AVATAR_PARTS: usize = 6;
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -330,39 +329,6 @@ fn groundHeightAt(insts: []const f32, inst_count: u32, piece_count: u32, stride:
     return best;
 }
 
-fn writeInstance(out: []f32, row: usize, x: f32, y: f32, z: f32, yaw_rad: f32, sx: f32, sy: f32, sz: f32, color: [3]f32) void {
-    const b = row * INSTANCE_STRIDE;
-    out[b + 0] = x;
-    out[b + 1] = y;
-    out[b + 2] = z;
-    out[b + 3] = 0;
-    out[b + 4] = yaw_rad * 180.0 / std.math.pi;
-    out[b + 5] = 0;
-    out[b + 6] = sx;
-    out[b + 7] = sy;
-    out[b + 8] = sz;
-    out[b + 9] = color[0];
-    out[b + 10] = color[1];
-    out[b + 11] = color[2];
-}
-
-fn writeAvatarPart(out: []f32, row: usize, player: PlayerState, lx: f32, ly: f32, lz: f32, sx: f32, sy: f32, sz: f32, color: [3]f32) void {
-    const s = @sin(player.yaw);
-    const c0 = @cos(player.yaw);
-    const x = player.x + lx * c0 + lz * s;
-    const z = player.z - lx * s + lz * c0;
-    writeInstance(out, row, x, player.y + ly, z, player.yaw, sx, sy, sz, color);
-}
-
-fn writeAvatar(out: []f32, player: PlayerState) void {
-    writeAvatarPart(out, 0, player, -0.22, 0.45, 0.0, 0.30, 0.90, 0.30, .{ 0.10, 0.18, 0.28 });
-    writeAvatarPart(out, 1, player, 0.22, 0.45, 0.0, 0.30, 0.90, 0.30, .{ 0.10, 0.18, 0.28 });
-    writeAvatarPart(out, 2, player, 0.0, 1.14, 0.0, 0.72, 0.82, 0.34, .{ 0.16, 0.48, 0.90 });
-    writeAvatarPart(out, 3, player, -0.58, 1.15, 0.0, 0.22, 0.74, 0.24, .{ 0.76, 0.58, 0.42 });
-    writeAvatarPart(out, 4, player, 0.58, 1.15, 0.0, 0.22, 0.74, 0.24, .{ 0.76, 0.58, 0.42 });
-    writeAvatarPart(out, 5, player, 0.0, 1.77, 0.0, 0.46, 0.46, 0.46, .{ 0.86, 0.68, 0.50 });
-}
-
 fn updateCameraNode(camera: *Node, cam: CameraState, player: PlayerState) void {
     camera.scene3d_pos_x = player.x - @sin(cam.yaw) * cam.distance;
     camera.scene3d_pos_y = player.y + cam.height;
@@ -372,6 +338,18 @@ fn updateCameraNode(camera: *Node, cam: CameraState, player: PlayerState) void {
     camera.scene3d_look_z = player.z;
     camera.scene3d_fov = cam.fov;
     camera.scene3d_far = cam.far;
+}
+
+fn updatePlayerModelNodes(kids: []Node, first: usize, count: usize, player: PlayerState) void {
+    const yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const node = &kids[first + i];
+        node.scene3d_pos_x = player.x;
+        node.scene3d_pos_y = player.y;
+        node.scene3d_pos_z = player.z;
+        node.scene3d_rot_y = yaw_degrees;
+    }
 }
 
 pub fn main() !void {
@@ -410,7 +388,7 @@ pub fn main() !void {
     var insts: []const f32 = scene.instances;
     var inst_count: u32 = scene.instance_count;
     var stride: usize = if (scene.instance_stride > 0) scene.instance_stride else INSTANCE_STRIDE;
-    if (inst_count == 0) {
+    if (inst_count == 0 and !scene.has_instance_lump) {
         const f = extrudeTiles(allocator, scene) catch |err| {
             log.print("[loader] tile extrusion FAILED: {any}\n", .{err});
             return err;
@@ -428,8 +406,8 @@ pub fn main() !void {
     // The render proof greps this exact line: real geometry, real positions.
     log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ inst_count, piece_count });
     // 0 world instances = a genuinely empty map (no pieces, no paint). Switching
-    // to an empty map should still render a skybox and the runtime avatar.
-    if (inst_count == 0) log.print("[loader] empty world — rendering avatar over void\n", .{});
+    // to an empty map should still render sky and any compiled runtime model.
+    if (inst_count == 0) log.print("[loader] empty world — rendering sky/model over void\n", .{});
 
     // ── render the constructed scene (stateless GPU substrate) ───────────
     if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
@@ -474,15 +452,16 @@ pub fn main() !void {
     };
     const authored_dx = authored_eye.x - bounds.cx;
     const authored_dz = authored_eye.z - bounds.cz;
+    const authored_yaw = std.math.atan2(authored_dx, authored_dz);
     const spawn = chooseSpawn(insts, inst_count, piece_count, stride, bounds);
     var player = PlayerState{
         .x = spawn.x,
         .y = spawn.y,
         .z = spawn.z,
-        .yaw = std.math.atan2(-authored_dx, -authored_dz),
+        .yaw = authored_yaw,
     };
     var camera = CameraState{
-        .yaw = std.math.atan2(authored_dx, authored_dz),
+        .yaw = authored_yaw,
         .pitch = CAMERA_DEFAULT_PITCH,
         .distance = CAMERA_DISTANCE_METERS,
         .height = CAMERA_HEIGHT_METERS,
@@ -491,55 +470,74 @@ pub fn main() !void {
         .far = @max(far, bounds.radius * 4.0 + 64.0),
         .fov = CAMERA_FOV_DEGREES,
     };
-    var avatar_instances: [AVATAR_PARTS * INSTANCE_STRIDE]f32 = undefined;
-    writeAvatar(avatar_instances[0..], player);
     var cube = buildCube();
-    var kids = [_]Node{
-        .{
-            .scene3d_camera = true,
-            .scene3d_pos_x = 0,
-            .scene3d_pos_y = 0,
-            .scene3d_pos_z = 0,
-            .scene3d_look_x = 0,
-            .scene3d_look_y = 0,
-            .scene3d_look_z = 0,
-            .scene3d_fov = env.cam_fov,
-            .scene3d_far = far,
-        },
-        .{
-            .scene3d_skybox = true,
-            .scene3d_sky_zenith = env.sky_zenith,
-            .scene3d_sky_horizon = env.sky_horizon,
-            .scene3d_sky_ground = env.sky_ground,
-            .scene3d_sky_sun_dir = env.sky_sun_dir,
-            .scene3d_sky_sun_color = env.sky_sun_color,
-            .scene3d_sky_haze = env.sky_haze,
-            .scene3d_sky_cloud = env.sky_cloud,
-            .scene3d_sky_night = env.sky_night,
-        },
-        .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity },
-        .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity },
-        .{
-            .scene3d_mesh = true,
-            .scene3d_geom_key = "box",
-            .scene3d_vertices = cube[0..],
-            .scene3d_vert_count = 36,
-            .scene3d_instance_data = avatar_instances[0..],
-            .scene3d_instance_count = AVATAR_PARTS,
-            .scene3d_instance_stride = INSTANCE_STRIDE,
-        },
-        .{
-            .scene3d_mesh = inst_count > 0, // false on an empty map; avatar still draws
-            .scene3d_geom_key = "box",
-            .scene3d_vertices = cube[0..],
-            .scene3d_vert_count = 36,
-            .scene3d_instance_data = insts,
-            .scene3d_instance_count = inst_count,
-            .scene3d_instance_stride = @intCast(stride),
-        },
-    };
-    var root = Node{ .children = kids[0..] };
-    updateCameraNode(&kids[0], camera, player);
+    var player_geom_keys: std.ArrayList([]u8) = .{};
+    defer {
+        for (player_geom_keys.items) |key| allocator.free(key);
+        player_geom_keys.deinit(allocator);
+    }
+    var kid_list: std.ArrayList(Node) = .{};
+    defer kid_list.deinit(allocator);
+    try kid_list.append(allocator, .{
+        .scene3d_camera = true,
+        .scene3d_pos_x = 0,
+        .scene3d_pos_y = 0,
+        .scene3d_pos_z = 0,
+        .scene3d_look_x = 0,
+        .scene3d_look_y = 0,
+        .scene3d_look_z = 0,
+        .scene3d_fov = CAMERA_FOV_DEGREES,
+        .scene3d_far = far,
+    });
+    try kid_list.append(allocator, .{
+        .scene3d_skybox = true,
+        .scene3d_sky_zenith = env.sky_zenith,
+        .scene3d_sky_horizon = env.sky_horizon,
+        .scene3d_sky_ground = env.sky_ground,
+        .scene3d_sky_sun_dir = env.sky_sun_dir,
+        .scene3d_sky_sun_color = env.sky_sun_color,
+        .scene3d_sky_haze = env.sky_haze,
+        .scene3d_sky_cloud = env.sky_cloud,
+        .scene3d_sky_night = env.sky_night,
+    });
+    try kid_list.append(allocator, .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity });
+    try kid_list.append(allocator, .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity });
+
+    const player_first_child = kid_list.items.len;
+    for (scene.player_model, 0..) |group, i| {
+        const key = try std.fmt.allocPrint(allocator, "player-model-{d}", .{i});
+        player_geom_keys.append(allocator, key) catch |err| {
+            allocator.free(key);
+            return err;
+        };
+        try kid_list.append(allocator, .{
+            .scene3d_mesh = group.vertex_count > 0,
+            .scene3d_geom_key = key,
+            .scene3d_vertices = group.vertices,
+            .scene3d_vert_count = group.vertex_count,
+            .scene3d_color_r = group.color[0],
+            .scene3d_color_g = group.color[1],
+            .scene3d_color_b = group.color[2],
+            .scene3d_color_a = group.alpha,
+            .scene3d_tex_w = group.tex_w,
+            .scene3d_tex_h = group.tex_h,
+            .scene3d_tex_rgba = group.tex_rgba,
+        });
+    }
+    if (scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
+    try kid_list.append(allocator, .{
+        .scene3d_mesh = inst_count > 0, // false on an empty map; player model still draws
+        .scene3d_geom_key = "box",
+        .scene3d_vertices = cube[0..],
+        .scene3d_vert_count = 36,
+        .scene3d_instance_data = insts,
+        .scene3d_instance_count = inst_count,
+        .scene3d_instance_stride = @intCast(stride),
+    });
+
+    var root = Node{ .children = kid_list.items };
+    updateCameraNode(&kid_list.items[0], camera, player);
+    updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model.len, player);
 
     var running = true;
     var orbit_drag = false;
@@ -609,10 +607,10 @@ pub fn main() !void {
             if (groundHeightAt(insts, inst_count, piece_count, stride, player.x, player.z)) |ground_y| {
                 player.y = ground_y;
             }
-            writeAvatar(avatar_instances[0..], player);
         }
 
-        updateCameraNode(&kids[0], camera, player);
+        updateCameraNode(&kid_list.items[0], camera, player);
+        updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model.len, player);
         _ = scene3d.render(&root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
         gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 

@@ -25,6 +25,8 @@ pub const LumpType = struct {
     pub const instances: u32 = 7;
     /// Scene render environment (lighting / sky / camera framing) as data.
     pub const environment: u32 = 8;
+    /// Baked local-coordinate player model mesh groups.
+    pub const player_model: u32 = 9;
 };
 
 pub const Lump = struct {

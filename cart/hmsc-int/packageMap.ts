@@ -20,6 +20,7 @@ import {
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { buildWorldInstances, encodeInstanceLump } from './compile/worldGeometry';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
+import { buildDefaultPlayerModel, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
 import type { PlacedBuildPiece } from '@game';
 
@@ -176,6 +177,7 @@ export function createHmscMapfile(
   // count rides in the lump so the loader frames the camera on the structures.
   const geometry = buildWorldInstances(state, pieces, floors);
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
+  const playerModel = encodePlayerModelLump(buildDefaultPlayerModel());
 
   return writeLumpContainer([
     { type: MAP_LUMP.STRINGS, encoding: 'text', data: textBytes(stringsText(strings)) },
@@ -190,6 +192,9 @@ export function createHmscMapfile(
     // The scene render environment (lighting / sky / camera) as DATA — the
     // loader reads this instead of hardcoding the look (compile/sceneEnv.ts).
     { type: MAP_LUMP.ENVIRONMENT, encoding: 'raw', data: encodeEnvironmentLump(env) },
+    // The compiled player figure from @game/figure. Runtime movement changes
+    // only the player transform; the model itself is data.
+    { type: MAP_LUMP.PLAYER_MODEL, encoding: 'raw', data: playerModel },
   ]);
 }
 

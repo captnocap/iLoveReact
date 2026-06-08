@@ -37,6 +37,10 @@ export const MAP_LUMP = {
   // Scene render environment (lighting / sky / camera framing) as data — the
   // loader reads it instead of hardcoding the look. See compile/sceneEnv.ts.
   ENVIRONMENT: 8,
+  // Baked runtime player model: local-coordinate colored mesh groups generated
+  // from the V2 figure kit. The loader instantiates these groups at the live
+  // player transform; no JS figure evaluation runs in the shipped path.
+  PLAYER_MODEL: 9,
 } as const;
 
 export type LumpInput = {
