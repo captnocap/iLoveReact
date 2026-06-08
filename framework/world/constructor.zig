@@ -18,6 +18,71 @@ pub const Error = gamefile.Error || error{
     UnsupportedTileEncoding,
 };
 
+const SCENE_ENV_VERSION: u32 = 1;
+const SCENE_ENV_FLOATS: usize = 35;
+
+/// The scene render environment (lighting / sky / camera), DATA the loader
+/// consumes instead of hardcoding the look (USER req_0308). Defaults mirror
+/// compile/sceneEnv.ts DEFAULT_SCENE_ENVIRONMENT so a game-file with no
+/// environment lump (e.g. the codec fixture) still renders sensibly.
+pub const SceneEnv = struct {
+    // White ambient + a sun direction that points UP TOWARD the sun (the shader
+    // does max(dot(N, light_dir), 0) with light_dir = direction-to-light, so a
+    // downward vector leaves every top face unlit — the dark-scene bug).
+    ambient_color: [3]f32 = .{ 1, 1, 1 },
+    ambient_intensity: f32 = 0.48,
+    dir: [3]f32 = .{ 0.4, 0.82, 0.4 },
+    dir_color: [3]f32 = .{ 1.0, 0.96, 0.85 },
+    dir_intensity: f32 = 0.95,
+    sky_zenith: [3]f32 = .{ 0.12, 0.44, 0.84 },
+    sky_horizon: [3]f32 = .{ 0.74, 0.84, 0.94 },
+    sky_ground: [3]f32 = .{ 0.05, 0.05, 0.06 },
+    sky_sun_dir: [3]f32 = .{ 0.4, 0.82, 0.4 },
+    sky_sun_color: [3]f32 = .{ 1.0, 0.96, 0.84 },
+    sky_haze: f32 = 0.42,
+    sky_cloud: f32 = 0.14,
+    sky_night: f32 = 0.0,
+    cam_fov: f32 = 50,
+    cam_horiz_factor: f32 = 1.25,
+    cam_horiz_base: f32 = 8,
+    cam_height_factor: f32 = 0.55,
+    cam_height_base: f32 = 7,
+    cam_far_factor: f32 = 3.0,
+};
+
+/// Decode the ENVIRONMENT lump (u32 version | f32[35]); on any mismatch keep the
+/// struct defaults so the look is always well-formed.
+fn decodeEnvironment(data: []const u8) SceneEnv {
+    var env = SceneEnv{};
+    if (data.len < 4 + SCENE_ENV_FLOATS * 4) return env;
+    if (std.mem.readInt(u32, data[0..4], .little) != SCENE_ENV_VERSION) return env;
+    var f: [SCENE_ENV_FLOATS]f32 = undefined;
+    var i: usize = 0;
+    while (i < SCENE_ENV_FLOATS) : (i += 1) {
+        f[i] = @bitCast(std.mem.readInt(u32, data[4 + i * 4 ..][0..4], .little));
+    }
+    env.ambient_color = .{ f[0], f[1], f[2] };
+    env.ambient_intensity = f[3];
+    env.dir = .{ f[4], f[5], f[6] };
+    env.dir_color = .{ f[7], f[8], f[9] };
+    env.dir_intensity = f[10];
+    env.sky_zenith = .{ f[11], f[12], f[13] };
+    env.sky_horizon = .{ f[14], f[15], f[16] };
+    env.sky_ground = .{ f[17], f[18], f[19] };
+    env.sky_sun_dir = .{ f[20], f[21], f[22] };
+    env.sky_sun_color = .{ f[23], f[24], f[25] };
+    env.sky_haze = f[26];
+    env.sky_cloud = f[27];
+    env.sky_night = f[28];
+    env.cam_fov = f[29];
+    env.cam_horiz_factor = f[30];
+    env.cam_horiz_base = f[31];
+    env.cam_height_factor = f[32];
+    env.cam_height_base = f[33];
+    env.cam_far_factor = f[34];
+    return env;
+}
+
 /// The composed, renderable world. `tiles` is the row-major map tile grid
 /// (null = absent cell); heap-owned. `instances` is the packed 3D instance
 /// buffer the loader renders as one instanced unit-cube batch — `instance_stride`
@@ -35,6 +100,8 @@ pub const Scene = struct {
     /// structures); the rest are the painted ground. Lets the loader frame the
     /// camera on the city, not the whole 240m ground plane.
     piece_count: u32,
+    /// The render environment (lighting / sky / camera) — data, not hardcoded.
+    env: SceneEnv,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -97,6 +164,13 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
     else
         .{ .values = &.{}, .count = 0, .stride = 0, .pieces = 0 };
 
+    // The render environment (lighting / sky / camera) — data, defaulted when
+    // the lump is absent.
+    const env: SceneEnv = if (mapfile.findLump(map_lumps, mapfile.LumpType.environment)) |lump|
+        decodeEnvironment(lump.data)
+    else
+        .{};
+
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{
         .width = grid.width,
@@ -106,5 +180,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .instance_count = inst.count,
         .instance_stride = inst.stride,
         .piece_count = inst.pieces,
+        .env = env,
     };
 }

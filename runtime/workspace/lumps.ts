@@ -34,6 +34,9 @@ export const MAP_LUMP = {
   // color3). The authored world's geometry lowered to data the no-V8 loader
   // renders as one instanced unit-cube batch. See compile/worldGeometry.ts.
   INSTANCES: 7,
+  // Scene render environment (lighting / sky / camera framing) as data — the
+  // loader reads it instead of hardcoding the look. See compile/sceneEnv.ts.
+  ENVIRONMENT: 8,
 } as const;
 
 export type LumpInput = {

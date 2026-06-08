@@ -267,18 +267,19 @@ pub fn main() !void {
     const screenshotting = capture.isScreenshotMode();
     if (!screenshotting) log.print("[loader] live window — close it or press ESC to exit\n", .{});
 
-    // ── build the Scene3D node tree: a LOW-ANGLE hero camera framed on the
-    //    placed structures, two lights, and ONE instanced mesh. ──
-    // Frame on the placed structures (piece rows) when present — the ground
-    // plane is the whole 240m map and would shrink the city to a dot.
-    // The angle is deliberately LOW (height << horizontal reach): a steep
-    // top-down iso foreshortens 3m-tall, 0.6m-wide pillars into specks; a low
-    // 3/4 view shows them as the solid vertical walls/pillars /test renders.
+    // ── build the Scene3D node tree from DATA: the camera/lights/sky come from
+    //    the game-file's render environment (scene.env), NOT hardcoded here
+    //    (USER req_0308 — the look is data and changes over time). The loader
+    //    only adds what is geometric: it FRAMES the camera on the placed
+    //    structures' bounds, deriving distance/height from the authored factors.
+    //    A steep top-down iso foreshortens 3m-tall, 0.6m-wide pillars into
+    //    specks; the authored low angle shows them as solid verticals. ──
+    const env = scene.env;
     const frame_count: u32 = if (piece_count > 0) piece_count else inst_count;
     const bounds = instanceBounds(insts, frame_count, stride);
-    const horiz = bounds.radius * 1.25 + 8.0; // horizontal reach to the center
-    const height = bounds.radius * 0.55 + 7.0; // low camera height (~24° pitch)
-    const far = (horiz + height + bounds.radius) * 3.0;
+    const horiz = bounds.radius * env.cam_horiz_factor + env.cam_horiz_base;
+    const height = bounds.radius * env.cam_height_factor + env.cam_height_base;
+    const far = (horiz + height + bounds.radius) * env.cam_far_factor;
     var cube = buildCube();
     var kids = [_]Node{
         .{
@@ -289,11 +290,22 @@ pub fn main() !void {
             .scene3d_look_x = bounds.cx,
             .scene3d_look_y = bounds.cy,
             .scene3d_look_z = bounds.cz,
-            .scene3d_fov = 50,
+            .scene3d_fov = env.cam_fov,
             .scene3d_far = far,
         },
-        .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = 0.55, .scene3d_color_g = 0.57, .scene3d_color_b = 0.62, .scene3d_intensity = 1.0 },
-        .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = -0.55, .scene3d_dir_y = -1.0, .scene3d_dir_z = -0.35, .scene3d_color_r = 1.0, .scene3d_color_g = 0.96, .scene3d_color_b = 0.9, .scene3d_intensity = 1.25 },
+        .{
+            .scene3d_skybox = true,
+            .scene3d_sky_zenith = env.sky_zenith,
+            .scene3d_sky_horizon = env.sky_horizon,
+            .scene3d_sky_ground = env.sky_ground,
+            .scene3d_sky_sun_dir = env.sky_sun_dir,
+            .scene3d_sky_sun_color = env.sky_sun_color,
+            .scene3d_sky_haze = env.sky_haze,
+            .scene3d_sky_cloud = env.sky_cloud,
+            .scene3d_sky_night = env.sky_night,
+        },
+        .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity },
+        .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity },
         .{
             .scene3d_mesh = true,
             .scene3d_geom_key = "box",

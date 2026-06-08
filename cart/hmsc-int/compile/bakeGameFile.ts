@@ -20,6 +20,8 @@
 
 import { loadEditorWorld } from '../editorWorld';
 import { createHmscMapfile } from '../packageMap';
+import { sceneEnvironmentFromSky } from './sceneEnv';
+import { buildHmscSky } from '../../hmsc/render3d/sky';
 import { bytesToBase64 } from '@reactjit/workspace';
 import { writeGameFile } from '@reactjit/workspace/gamefile';
 import { lastPointerPath } from '@reactjit/workspace';
@@ -61,7 +63,11 @@ function readPlacedPieces(): PlacedBuildPiece[] {
 
 const state = loadEditorWorld();
 const pieces = readPlacedPieces();
-const mapContainer = createHmscMapfile(state, pieces);
+// The render environment IS /test's: build it from the SAME buildHmscSky the
+// game's WorldStatics lights the scene with, so the loader's lighting/sky match.
+const sky = buildHmscSky(state.config.sky.hour, state.config.sky.weather, state.config.sky.gloom);
+const env = sceneEnvironmentFromSky(sky);
+const mapContainer = createHmscMapfile(state, pieces, env);
 
 const file = writeGameFile({
   logic: { refs: [], data: new Uint8Array(0) },

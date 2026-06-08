@@ -19,6 +19,7 @@ import {
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { buildWorldInstances, encodeInstanceLump } from './compile/worldGeometry';
+import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import type { PlacedBuildPiece } from '@game';
 
 export const DEFAULT_HMSC_PACKAGE_DIR = 'cart/hmsc-int/exports/hmsc.rjpkg';
@@ -149,7 +150,11 @@ export function hmscStateFromEntitiesText(text: string): GameState | null {
   return null;
 }
 
-export function createHmscMapfile(state: GameState, pieces: readonly PlacedBuildPiece[] = []): Uint8Array {
+export function createHmscMapfile(
+  state: GameState,
+  pieces: readonly PlacedBuildPiece[] = [],
+  env: SceneEnvironment = DEFAULT_SCENE_ENVIRONMENT,
+): Uint8Array {
   const bounds = mapBounds(state);
   const strings = stringTable(state);
   const tiles = encodeGrid(tileGrid(state, bounds, strings), bounds.width, bounds.depth);
@@ -180,6 +185,9 @@ export function createHmscMapfile(state: GameState, pieces: readonly PlacedBuild
     // The authored world's 3D geometry, lowered to a packed instance buffer the
     // stateless loader renders with zero V8 (compile/worldGeometry.ts).
     { type: MAP_LUMP.INSTANCES, encoding: 'raw', data: instances },
+    // The scene render environment (lighting / sky / camera) as DATA — the
+    // loader reads this instead of hardcoding the look (compile/sceneEnv.ts).
+    { type: MAP_LUMP.ENVIRONMENT, encoding: 'raw', data: encodeEnvironmentLump(env) },
   ]);
 }
 

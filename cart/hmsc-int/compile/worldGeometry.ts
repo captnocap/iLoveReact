@@ -63,11 +63,11 @@ function tileColor(kind: TileKind | string): Color {
     case 'laneEast':
     case 'laneWest':
     case 'junction':
-      return [0.2, 0.2, 0.22];
+      return [0.34, 0.34, 0.37]; // mid asphalt — dark enough to read, not a void
     case 'crosswalk':
-      return [0.7, 0.7, 0.72];
+      return [0.72, 0.72, 0.74];
     case 'sidewalk':
-      return [0.58, 0.58, 0.6];
+      return [0.64, 0.64, 0.66];
     case 'mud':
       return [0.4, 0.3, 0.2];
     case 'sand':

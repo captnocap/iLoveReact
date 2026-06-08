@@ -23,6 +23,8 @@ pub const LumpType = struct {
     pub const entities: u32 = 6;
     /// Packed 3D instance buffer: u32 count | f32[count*9] (pos3/scale3/color3).
     pub const instances: u32 = 7;
+    /// Scene render environment (lighting / sky / camera framing) as data.
+    pub const environment: u32 = 8;
 };
 
 pub const Lump = struct {
