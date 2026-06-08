@@ -38,6 +38,7 @@ import {
 import { BUILD_KIND_CONTRACTS, type BuildGameplayTags, type BuildPieceKind } from './pieces';
 import { wallEditDefinition, type WallEdit } from './edits';
 import type { BuildPrefabDef, PrefabPiece } from './prefabs';
+import { BUILD_FACE_SLOTS, resolveFaceSkin, type BuildSkinSet } from './skins';
 import type { CameraOcclusionOrientedRect, CameraOcclusionRect, CollisionRect, Heightfield, OrientedCollisionRect } from '../physics';
 
 // ── the placed record (what the world stream stores) ─────────────────────────
@@ -56,6 +57,8 @@ export type PlacedBuildPiece = {
   yawDegrees: number;
   /** the meaningful cutout on THIS placement (wall-family kinds only) */
   edit?: WallEdit;
+  /** resolved per-face skin/material snapshot for this placed instance */
+  skin?: BuildSkinSet;
 };
 
 // ── P2 tuning: every behavior-affecting number is table data ─────────────────
@@ -534,10 +537,11 @@ function pushStairBoundaryRects(
 }
 
 function pushRampSlabEdgeRects(
-  rects: CollisionRect[],
-  orientedRects: OrientedCollisionRect[],
+  rects: (CollisionRect & { ownerIndex?: number })[],
+  orientedRects: (OrientedCollisionRect & { ownerIndex?: number })[],
   piece: PlacedBuildPiece,
   def: BuildPieceDef,
+  ownerIndex?: number,
 ): void {
   const size = def.size;
   const halfW = size.widthMeters / 2;
@@ -554,6 +558,7 @@ function pushRampSlabEdgeRects(
       blocksPlayer: true,
       friction: PLACED_TUNING.pieceFriction,
       restitution: PLACED_TUNING.pieceRestitution,
+      ...(ownerIndex === undefined ? {} : { ownerIndex }),
     };
     const quarter = quarterTurns(piece.yawDegrees);
     if (quarter !== null) {
@@ -663,6 +668,12 @@ export function placedPieceCameraOccluders(pieces: readonly PlacedBuildPiece[]):
   for (const piece of pieces) {
     const def = placedPieceDef(piece);
     const tags = placedPieceTags(piece);
+    if (def.kind === 'ramp') {
+      if (!tags.collision || !tags.blocksSight) continue;
+      const ownerIndex = ownerIds.push(piece.id);
+      pushRampSlabEdgeRects(rects, orientedRects, piece, def, ownerIndex);
+      continue;
+    }
     if (def.kind !== 'wall' && def.kind !== 'roof') continue;
     if (!tags.collision || (!tags.blocksSight && def.kind !== 'roof')) continue;
     const ownerIndex = ownerIds.push(piece.id);
@@ -762,14 +773,23 @@ export function stampPrefabPieces(
   // R(+yaw), the SAME frame raycastPieces/placedPieceColliders rotate a
   // piece's own body with — composition turn and piece spin must agree or
   // a turned stamp pulls its walls off its corners
-  return prefab.pieces.map((piece) => ({
-    pieceId: piece.pieceId,
-    x: origin.x + piece.x * cos - piece.z * sin,
-    y: origin.y + piece.y,
-    z: origin.z + piece.x * sin + piece.z * cos,
-    yawDegrees: normalizeYaw(piece.yawDegrees + yawDegrees),
-    ...(piece.edit !== undefined ? { edit: piece.edit } : {}),
-  }));
+  return prefab.pieces.map((piece) => {
+    const kind = catalogEntry(piece.pieceId).kind;
+    const skin: BuildSkinSet = {};
+    for (const slot of BUILD_FACE_SLOTS) {
+      const resolved = resolveFaceSkin(prefab.skins, kind, piece.skin, slot).skin;
+      if (resolved) skin[slot] = resolved;
+    }
+    return {
+      pieceId: piece.pieceId,
+      x: origin.x + piece.x * cos - piece.z * sin,
+      y: origin.y + piece.y,
+      z: origin.z + piece.x * sin + piece.z * cos,
+      yawDegrees: normalizeYaw(piece.yawDegrees + yawDegrees),
+      ...(piece.edit !== undefined ? { edit: piece.edit } : {}),
+      ...(Object.keys(skin).length > 0 ? { skin } : {}),
+    };
+  });
 }
 
 /** `prefab.<slug>` from a user-facing name (the catalog id convention). */
@@ -817,6 +837,7 @@ export function prefabFromPieces(
     z: piece.z - originZ,
     yawDegrees: normalizeYaw(piece.yawDegrees),
     ...(piece.edit !== undefined ? { edit: piece.edit } : {}),
+    ...(piece.skin !== undefined ? { skin: piece.skin } : {}),
   }));
   return { id, label, theme, pieces: locals };
 }

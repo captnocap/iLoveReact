@@ -166,19 +166,19 @@ test('a free-angled piece lands in the oriented frame', () => {
   assertClose(orientedRects[0].yawRadians, (30 * Math.PI) / 180, 1e-9, 'the host gets the turn');
 });
 
-test('camera occlusion colliders report wall and roof owners, but skip sightline edits', () => {
+test('camera occlusion colliders report walls, roofs, and ramp slabs, but skip sightline edits', () => {
   const wall = placed('wall.concrete.common', 0, 0);
   const window = placed('wall.concrete.common', 3, 0, { edit: 'window' });
   const roof = placed('roof.flat.common', 0, 0, { y: 3 });
   const ramp = placed('ramp.concrete.common', 6, 0);
   const stairs = placed('stairs.wood.common', 9, 0);
   const occluders = placedPieceCameraOccluders([wall, window, roof, ramp, stairs]);
-  assertEqual(occluders.ownerIds.join(','), `${wall.id},${roof.id}`, 'only opaque wall/roof pieces own occlusion bands');
-  assertEqual(occluders.rects.length, 2, 'wall and roof each contribute one axis band');
+  assertEqual(occluders.ownerIds.join(','), `${wall.id},${roof.id},${ramp.id}`, 'opaque wall/roof pieces and ramp slabs own occlusion bands');
+  assertEqual(occluders.rects.length, 2 + PLACED_TUNING.rampSlabEdgeSegments * 3 + 1, 'wall/roof bands plus the ramp slab can occlude a camera under the ramp');
   assertEqual(occluders.rects[0].ownerIndex, 1, 'owner indices map to ownerIds');
   assertEqual(occluders.rects[1].ownerIndex, 2, 'second owner maps to the roof');
-  assertEqual(occluders.ownerIds.includes(ramp.id), false, 'walkable ramps are not camera occluders');
-  assertEqual(occluders.ownerIds.includes(stairs.id), false, 'walkable stairs are not camera occluders');
+  assert(occluders.rects.slice(2).every((rect) => rect.ownerIndex === 3), 'ramp slab rects map to the ramp owner');
+  assertEqual(occluders.ownerIds.includes(stairs.id), false, 'walkable stairs stay out of the camera occluder set');
 });
 
 test('RAMPREAL-0606: a ramp registers as a hollow inclined slab, not a solid wedge', () => {
@@ -398,6 +398,36 @@ test('a prefab stamp is ONE event that lands as its semantic pieces', () => {
   const seedCount = prefabDefinition('prefab.motelRoom').pieces.length;
   assertEqual(state.pieces.length, seedCount, 'the stamp decomposed — no opaque blob');
   assert(state.pieces.some((p) => p.edit === 'door'), 'the cloned doorway is still a doorway');
+});
+
+test('a prefab stamp carries resolved face skins with the window edit into placed pieces', () => {
+  const state = fold([
+    {
+      kind: 'prefabDefined',
+      def: {
+        id: 'prefab.skinnedWindow',
+        label: 'Skinned Window',
+        theme: 'common',
+        skins: {
+          wall: {
+            front: { kind: 'material', id: 'd-neon-stucco' },
+            back: { kind: 'color', value: '#f8fafc' },
+            sides: { kind: 'color', value: '#111827' },
+          },
+        },
+        pieces: [
+          { pieceId: 'wall.concrete.common', x: 0, y: 0, z: 0, yawDegrees: 0, edit: 'window' },
+        ],
+      },
+    },
+    { kind: 'prefabStamped', prefabId: 'prefab.skinnedWindow', origin: { x: 10, y: 0, z: 10 }, yawDegrees: 0 },
+  ]);
+  const wall = state.pieces[0];
+  assertEqual(wall.edit, 'window', 'the placed wall still has the window cutout');
+  assertEqual(wall.skin?.front?.kind, 'material', 'the front face carries a material skin');
+  assertEqual(wall.skin?.front?.kind === 'material' ? wall.skin.front.id : '', 'd-neon-stucco', 'the material id survives placement');
+  assertEqual(wall.skin?.back?.kind === 'color' ? wall.skin.back.value : '', '#f8fafc', 'the back color survives placement');
+  assertEqual(wall.skin?.sides?.kind === 'color' ? wall.skin.sides.value : '', '#111827', 'the side color survives placement');
 });
 
 test('a world-saved prefab joins the registry family and stamps by id', () => {
