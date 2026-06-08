@@ -71,12 +71,11 @@ const LOADER_BUILD_ARGS = [
   '-Doptimize=ReleaseFast',
 ];
 // The render proof must prove the loader drew the REAL world — the PLACED PIECES
-// (the /test towers/structures) AND the painted ground. The authored map bakes
-// hundreds of instances (the active dev map is ~360: ~85 ground/props + ~275
-// placed pieces). If the bake ever reads the wrong field again and drops the
-// pieces, the count collapses to the ground-only floor (~85) — so the threshold
-// sits ABOVE that floor to catch the regression, not just near-zero. The loader
-// prints `[loader] built N mesh instances`; we parse N.
+// (the build-editor structures /test renders). A piece-based map bakes hundreds
+// of instances (the active dev map is 400+). If the bake ever reads the wrong
+// field again and drops the pieces, the count collapses toward zero — so the
+// threshold sits well above a handful to catch the regression. The loader prints
+// `[loader] built N mesh instances`; we parse N.
 const MIN_LOADER_INSTANCES = 100;
 
 // The editor->loader bake (PLATMOD step 4): transcode the AUTHORED hmsc world

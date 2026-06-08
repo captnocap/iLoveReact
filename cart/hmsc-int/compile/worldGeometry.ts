@@ -264,15 +264,26 @@ export type WorldInstanceResult = {
   pieces: number;
 };
 
-/** Build the packed instance buffer for the whole authored world. The PLACED
- *  PIECES (the structures /test renders) come FIRST so the loader can frame the
- *  camera tightly on them — the painted ground spans the whole 240m map and
- *  would otherwise dwarf the city to a speck. The painted GameState layers
- *  follow as the ground context. */
-export function buildWorldInstances(state: GameState, pieces: readonly PlacedBuildPiece[] = []): WorldInstanceResult {
+/** Build the packed instance buffer for the authored world.
+ *
+ *  The world IS the PLACED PIECES — the structures the build editor / /test
+ *  render, on skybox + void (you fall; there is no ground plane). That is what a
+ *  build-editor map actually contains.
+ *
+ *  The GameState's painted layers (surfaceRegions / roads / props / landforms)
+ *  are the SEPARATE painted-world authoring path. For a piece-based map they are
+ *  unauthored demo scaffolding (createInitialGameState's chunk regions + demo
+ *  props) and render as phantom ground/props the user never placed — so they are
+ *  OFF by default. `includeGroundLayers` is the opt-in for a genuinely painted
+ *  map; the code is retained for that case, not deleted. */
+export function buildWorldInstances(
+  state: GameState,
+  pieces: readonly PlacedBuildPiece[] = [],
+  opts: { includeGroundLayers?: boolean } = {},
+): WorldInstanceResult {
   const out: number[] = [];
   const pieceCount = pushPlacedPieces(out, pieces);
-  pushWorldLayers(out, state);
+  if (opts.includeGroundLayers) pushWorldLayers(out, state);
   return {
     instances: new Float32Array(out),
     total: Math.floor(out.length / INSTANCE_STRIDE),
