@@ -31,7 +31,7 @@ import { mintCharacterId } from '../../characters/roster';
 import { PAINT_EDITOR_TUNING, type SculptMode } from '../../characters/paintKit';
 import { SMOOTH_TUNING } from '../../characters/smoothKit';
 import { DEFAULT_ANIM_SCRIPT } from '../../characters/animPresets';
-import { defaultProfile, DEFAULT_BOTTOMS, PART_IDS, type ClothingAccessoryId, type ClothingId, type PartId } from '../../../game/figure/shapes';
+import { defaultProfile, DEFAULT_BOTTOMS, FOOT_SHAPE_DEFAULTS, PART_IDS, validateFootShape, type ClothingAccessoryId, type ClothingId, type FootShape, type PartId } from '../../../game/figure/shapes';
 import { generateFace, parseHed, serializeHed, type HedAnimation, type HedDocument } from '../../../game/figure/hed';
 import { parseBody, serializeBody, type BodyDocument } from '../../../game/figure/body';
 import { charactersStream, type CharactersEvent, type CharactersStreamState } from '../../../game/figure/stream';
@@ -44,6 +44,7 @@ import { editorChannel } from '../../store';
 import { editorSessions, type RouteSession } from '../../sessions';
 import { itemsStream } from '../../items/stream';
 import { sculptedItemDefinition } from '../../items/bake';
+import { GAME_TELEMETRY } from '../../../game/telemetry';
 import { readFile, writeFile, mkdir } from '@reactjit/hooks/fs';
 
 const TUNE = PAINT_EDITOR_TUNING;
@@ -77,6 +78,15 @@ export type CharacterStoreDeps = {
 
 function clamp(n: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, n));
+}
+
+function perfNow(): number {
+  const perf = (globalThis as any).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
+function recordClothslow(label: string, fields: Record<string, unknown> = {}): void {
+  GAME_TELEMETRY.recordDiagnostic('churn', label, fields);
 }
 
 const perPartSeqs = (): Record<PartId, number> =>
@@ -161,6 +171,12 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     if (autosaveMs <= 0) { commitAutosave(); return; }
     if (autosaveTimer) clearTimeout(autosaveTimer);
     autosaveTimer = setTimeout(() => { autosaveTimer = null; commitAutosave(); emit(); }, autosaveMs);
+  };
+  const flushAutosave = () => {
+    if (!autosaveTimer) return;
+    clearTimeout(autosaveTimer);
+    autosaveTimer = null;
+    commitAutosave();
   };
 
   // ── the draft doors (Route.tsx:226-268) ───────────────────────────────────
@@ -264,10 +280,11 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
   const generateWholeCharacter = () => {
     const seed = (Date.now() ^ Math.floor(Math.random() * 0xffff)) >>> 0;
     const next = generateCharacterDraft(seed);
+    flushAutosave();
     history.commit(snapDraft);
-    installDraft(next, { autosave: true });
     assignDraftId(null); // a NEW character, not an overwrite of the loaded one
     draftName = `character ${seed.toString(36)}`;
+    installDraft(next, { autosave: true });
     view.selPart = 'head';
     view.lens = 'figure';
     view.bodyRigAnim = false;
@@ -275,6 +292,21 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     twigWrite('wbLens', 'figure');
     twigWrite('bodyRigAnim', false);
     setStatus(`generated character ${seed}`);
+  };
+
+  const newCharacter = () => {
+    flushAutosave();
+    history.commit(snapDraft);
+    assignDraftId(null);
+    draftName = 'new character';
+    installDraft(emptyDraft(), { autosave: true });
+    view.selPart = 'head';
+    view.lens = 'figure';
+    view.bodyRigAnim = false;
+    twigWrite('selPart', 'head');
+    twigWrite('wbLens', 'figure');
+    twigWrite('bodyRigAnim', false);
+    setStatus('new character — pristine draft, saved under its own roster id');
   };
 
   // ── exports + file drops (Route.tsx:598-635) ──────────────────────────────
@@ -440,7 +472,7 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     setDraftName: (v: string) => { draftName = v; emit(); },
     // roster / generation / io
     saveToRoster, loadFromRoster, removeFromRoster,
-    generateFaceOnly, generateWholeCharacter, applyFaceDoc,
+    generateFaceOnly, generateWholeCharacter, newCharacter, applyFaceDoc,
     exportHead, exportBody, dropFile,
     // sculpt-context edits
     resetPart, resetOutline, resetRegions, setRegion,
@@ -449,6 +481,16 @@ export function createCharacterStore(deps: CharacterStoreDeps) {
     setSkin: (skin: string) => editDraft((d) => ({ ...d, skin })),
     setAmount: (amount: number) => editDraftCoalesced((d) => ({ ...d, amount })),
     setHeadScaleY: (headScaleY: number) => editDraftCoalesced((d) => ({ ...d, headScaleY })),
+    // FOOTMESH-0606: one foot dial edit — clamped through the spec table; the
+    // foot's mesh slot is content-addressed (partDynKey ← seqs.foot), so the
+    // dial must bump the seq or the stage never re-uploads the new anatomy.
+    setFootShape: (patch: Partial<FootShape>) => {
+      editDraftCoalesced((d) => ({
+        ...d,
+        footShape: validateFootShape({ ...FOOT_SHAPE_DEFAULTS, ...(d.footShape ?? {}), ...patch }),
+      }));
+      bumpSeq('foot');
+    },
     removeFace: () => { editDraft((d) => ({ ...d, face: null })); view.faceAnim = null; twigWrite('faceAnim', null); setStatus(null); },
     savePaintedModel, adoptPaintedDocument,
     // view setters (twig write-through; the route's keys)
@@ -481,25 +523,38 @@ let liveStore: CharacterStore | null = null;
 export function characterWorkbenchStore(): CharacterStore {
   if (liveStore) return liveStore;
   let deps: CharacterStoreDeps;
+  const t0 = perfNow();
   try {
+    const channelT0 = perfNow();
     const channel = editorChannel(charactersStream);
+    const channelMs = perfNow() - channelT0;
+    const sessionT0 = perfNow();
+    const session = editorSessions().open('/workbench', channel) as RouteSession<CharactersEvent>;
+    const sessionMs = perfNow() - sessionT0;
     deps = {
       channel,
-      session: editorSessions().open('/workbench', channel) as RouteSession<CharactersEvent>,
+      session,
       error: null,
       items: () => readSculptedItems(),
     };
+    recordClothslow('characterStore.deps', { channelMs, sessionMs, totalMs: perfNow() - t0, orderCount: channel.state().order.length });
   } catch (e) {
     deps = { channel: null, session: null, error: String(e), items: null };
+    recordClothslow('characterStore.deps.error', { totalMs: perfNow() - t0, error: String(e) });
   }
   // the factory's TWIGSTATE-0606 mount restore reopens the twig'd row in the
   // twig'd view — nothing extra to do here.
+  const createT0 = perfNow();
   liveStore = createCharacterStore(deps);
+  recordClothslow('characterStore.create', { createMs: perfNow() - createT0, totalMs: perfNow() - t0 });
   return liveStore;
 }
 
 // the sculpted /items registry read (J4) — guarded like the route's
 function readSculptedItems(): SculptedItemRef[] {
+  const t0 = perfNow();
   const s = editorChannel(itemsStream).state();
-  return s.order.filter((id: string) => s.items[id]).map((id: string) => sculptedItemDefinition(id, s.items[id]));
+  const rows = s.order.filter((id: string) => s.items[id]).map((id: string) => sculptedItemDefinition(id, s.items[id]));
+  recordClothslow('characterStore.sculptedItems', { readMs: perfNow() - t0, orderCount: s.order.length, itemCount: rows.length });
+  return rows;
 }

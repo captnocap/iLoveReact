@@ -12,9 +12,11 @@ import {
 import { applyBodyPaint, bodyWithOutfit, buildBody, parseBody, partsWithPelvisFallback, serializeBody } from './body';
 import { buildOutfit, defaultOutfit, outfitOf, validateOutfit } from './outfit';
 import {
-  PAINT_TARGET_BY_BONE, PAINT_TARGET_IDS, PAINT_TARGET_NO_PART_FALLBACK, PAINT_TARGET_PART,
+  FOOT_SHAPE_DEFAULTS, FOOT_SHAPE_SPECS, PAINT_TARGET_BY_BONE, PAINT_TARGET_IDS, PAINT_TARGET_NO_PART_FALLBACK, PAINT_TARGET_PART,
   PART_IDS, PROFILE_N, defaultProfile, paintTargetForInstance, paintTargetPart, type PartId,
 } from './shapes';
+import { partGlobeParams } from './bake';
+import { globeSurface } from '@reactjit/geometries';
 import type { PaintedOverlay } from '../painted';
 import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 
@@ -269,6 +271,58 @@ test('CLOTHSPLIT-0606: the outfit is an attachment — attach/detach round-trips
   assertEqual(degraded!.outfit, undefined, 'the torn outfit degrades away');
   assertEqual(outfitOf(degraded!).top, 'armor', 'and the legacy fields catch the fall');
   assertEqual(validateOutfit({ kind: 'outfit', version: 1, top: 'tee', bottoms: 'jeans', print: 'plain', accessories: ['cap', 'nonsense'] })?.accessories.join(','), 'cap', 'unknown accessories are filtered, not fatal');
+});
+
+test('FOOTMESH-0606: the foot is a real mesh — dials round-trip, defaults by absence, sole never spikes', () => {
+  const sculpts = {} as Record<PartId, number[]>;
+  const profiles = {} as Record<PartId, number[]>;
+  for (const id of PART_IDS) { sculpts[id] = [0]; profiles[id] = defaultProfile(id); }
+
+  // defaults by absence: a dial-less save writes NO footShape field and
+  // pre-foot documents stay byte-unaffected (the additive law)
+  const bare = buildBody({ skin: '#caa07a', amount: 0.35, headScaleY: 1.2, sculpts, profiles, headLayers: [] });
+  assertEqual((bare as any).footShape, undefined, 'no dials, no field');
+  assertEqual(JSON.stringify(parseBody(serializeBody(bare))), JSON.stringify(bare), 'pre-foot documents round-trip byte-exact');
+
+  // dialed feet round-trip, clamped through the spec table
+  const dialed = buildBody({
+    skin: '#caa07a', amount: 0.35, headScaleY: 1.2, sculpts, profiles, headLayers: [],
+    footShape: { soleLength: 1.8, soleWidth: 0.5, heelHeight: 0.7, toeLean: 0.8, soleFlat: 0.5 },
+  });
+  const back = parseBody(serializeBody(dialed))!;
+  assertEqual(back.footShape?.soleLength, 1.8, 'dials round-trip');
+  const torn: any = JSON.parse(serializeBody(dialed));
+  torn.footShape = { soleLength: 999, soleWidth: 'x' };
+  const healed = parseBody(JSON.stringify(torn))!;
+  assertEqual(healed.footShape?.soleLength, FOOT_SHAPE_SPECS.soleLength.max, 'out-of-range dials clamp');
+  assertEqual(healed.footShape?.soleWidth, FOOT_SHAPE_DEFAULTS.soleWidth, 'garbage dials fall to the default');
+
+  // the bake recipe: the foot wears the dials (toe-box lean + flat sole),
+  // every other part is untouched by the feature
+  const params = partGlobeParams('foot', { amount: 0.35, scaleY: 1.2 }, [], undefined, back.footShape) as any;
+  assertEqual(params.scaleZ, 1.8, 'sole length drives the depth axis');
+  assert(Array.isArray(params.shiftZ) && params.shiftZ[0] > 0 && params.shiftZ[params.shiftZ.length - 1] < 0, 'the toe box leans forward off a back-set ankle');
+  assert(params.floorY < 1, 'the sole is flat-cut');
+  const pipe = partGlobeParams('pipe', { amount: 0.35, scaleY: 1.2 }, [], undefined, back.footShape) as any;
+  assertEqual(pipe.shiftZ, undefined, 'only the foot wears the deformers');
+
+  // the surface itself: the flat cut means NOTHING sits below the sole plane
+  // (the thumbtack spike, killed by construction) and the sole IS a plane
+  const surf = globeSurface({ radius: 1, segments: 22, rings: 12, ...params });
+  let minY = Infinity;
+  let toeZ = 0;
+  let heelZ = 0;
+  for (let i = 0; i <= 12; i++) {
+    for (let j = 0; j <= 22; j++) {
+      const [, y, z] = surf(j / 22, i / 12);
+      minY = Math.min(minY, y);
+      toeZ = Math.min(toeZ, z);
+      heelZ = Math.max(heelZ, z);
+    }
+  }
+  const solePlane = -params.scaleY * params.floorY;
+  assertClose(minY, solePlane, 1e-9, 'the lowest point IS the sole plane — no spike below it');
+  assert(Math.abs(toeZ) > heelZ * 0.9, 'the foot extends forward (toes at -Z, the figure facing)');
 });
 
 finish('game/figure/documents');

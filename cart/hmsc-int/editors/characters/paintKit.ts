@@ -12,7 +12,7 @@
 // compiled figure is the bake's open question (CAPTURE.md).
 
 import { HED_GRID_H, HED_GRID_W, hedDepthGrid } from '../../game/figure/hed';
-import { PART_LOD, PART_PRESETS, type PartId } from '../../game/figure/shapes';
+import { PART_LOD, PART_PRESETS, footShapeGlobeExtras, type FootShape, type PartId } from '../../game/figure/shapes';
 import type { BodyDocument } from '../../game/figure/body';
 // the engine's own pressure curve — the cursor ring and the landed dab must
 // derive from the SAME function (BRUSHFLOOR-0606; headless-safe import)
@@ -39,6 +39,12 @@ export const PAINT_EDITOR_TUNING = Object.freeze({
     photoScale: { min: 0.15, max: 0.95, step: 0.05, precision: 2 },
     photoY: { min: -200, max: 200, step: 8, precision: 0 },
     zoom: { min: 1.6, max: 12, step: 0.4, precision: 1 },
+  },
+  /** Item sculpting is the SAME camera rig at item scale. The distance floor
+   *  cannot be character-sized or a 10cm blockout is impossible to inspect. */
+  itemCamera: {
+    zoom: { min: 0.08, max: 12, step: 0.05, precision: 2 },
+    near: 0.005,
   },
   /** orbit drag feel + pitch clamp. Yaw is unbounded (full 360 spins); pitch
    *  runs pole to pole — ±88 instead of ±90 because the look-at up vector
@@ -91,6 +97,9 @@ editorTunables().register({
     'fly.speed': { label: 'fly speed u/s', min: 0.5, max: 12, step: 0.1, precision: 1 },
     'fly.wheelStep': { label: 'fly wheel u', min: 0.05, max: 2, step: 0.05, precision: 2 },
     'frame.margin': { label: 'frame margin ×', min: 1, max: 2.5, step: 0.05, precision: 2 },
+    'itemCamera.zoom.min': { label: 'item zoom min m', min: 0.02, max: 1.6, step: 0.01, precision: 2 },
+    'itemCamera.zoom.step': { label: 'item zoom wheel m', min: 0.01, max: 0.4, step: 0.01, precision: 2 },
+    'itemCamera.near': { label: 'item near clip m', min: 0.001, max: 0.08, step: 0.001, precision: 3 },
     'depthHint.opacity': { label: 'depth hint α', min: 0, max: 1, step: 0.05, precision: 2 },
   },
 });
@@ -165,11 +174,13 @@ export function reliefBytesFromGrid(g: number[]): Uint8Array {
  *  bake keeps its own LODs (the documented open question stands). */
 export function editorPartParams(
   id: PartId,
-  draft: Pick<CharacterDraft, 'amount' | 'headScaleY' | 'profiles'>,
+  draft: Pick<CharacterDraft, 'amount' | 'headScaleY' | 'profiles'> & { footShape?: FootShape | null },
   displace: number[],
 ): Record<string, unknown> {
   const preset = PART_PRESETS[id];
   const lod = PART_LOD[id];
+  // FOOTMESH-0606: the foot's dials (defaults when the draft predates them)
+  const foot = id === 'foot' ? footShapeGlobeExtras(draft.footShape) : null;
   return {
     radius: 1,
     segments: Math.max(lod.segments, HED_GRID_W * 2),
@@ -178,9 +189,10 @@ export function editorPartParams(
     amount: draft.amount,
     // radial-only law: the profile thins x/z; length is scaleY alone
     profile: id === 'head' ? (preset.profile ?? [1]) : draft.profiles[id],
-    scaleX: preset.scaleX,
-    scaleY: id === 'head' ? draft.headScaleY : preset.scaleY,
-    scaleZ: preset.scaleZ,
+    scaleX: foot ? foot.scaleX : preset.scaleX,
+    scaleY: id === 'head' ? draft.headScaleY : foot ? foot.scaleY : preset.scaleY,
+    scaleZ: foot ? foot.scaleZ : preset.scaleZ,
+    ...(foot ? { shiftZ: foot.shiftZ, floorY: foot.floorY } : {}),
   };
 }
 
@@ -235,6 +247,16 @@ export function gridNodeAt(u: number, v: number): GridNode {
   const { width: GW, height: GH } = PAINT_EDITOR_TUNING.grid;
   const gx = Math.max(0, Math.min(GW - 1, Math.floor(u * GW)));
   const gy = Math.max(0, Math.min(GH - 1, Math.floor(v * GH)));
+  return { gx, gy, idx: gy * GW + gx, u: (gx + 0.5) / GW, v: (gy + 0.5) / GH };
+}
+
+/** 3D grab hit -> the exact grid node it represents. GrabKit already picks
+ *  cell centers in the same 48x24 address space; this helper is the shared
+ *  bridge every sculpt surface uses for SCULPTPICK-0606 selection feedback. */
+export function gridNodeFromSurfaceHit(hit: Pick<GridNode, 'gx' | 'gy'>): GridNode {
+  const { width: GW, height: GH } = PAINT_EDITOR_TUNING.grid;
+  const gx = Math.max(0, Math.min(GW - 1, Math.floor(hit.gx)));
+  const gy = Math.max(0, Math.min(GH - 1, Math.floor(hit.gy)));
   return { gx, gy, idx: gy * GW + gx, u: (gx + 0.5) / GW, v: (gy + 0.5) / GH };
 }
 
@@ -338,7 +360,10 @@ export const DEPTH_HINT_WGSL = `
  *  the stored sculpt plus the head's face-layer depth (the nose lives there). */
 export function depthHintGrid(doc: BodyDocument, part: PartId): number[] {
   const draft = draftFromDocument(doc);
-  const g = draft.grids[part].slice();
+  // BENCHHINT-0606: a foreign id (a paint SEGMENT cast to PartId was the
+  // live crash — 'lUpperArm' has no part grid) degrades to a flat hint,
+  // never a blacked-out bench. Callers resolve segments via paintTargetPart.
+  const g = (draft.grids[part] ?? new Array(HED_GRID_W * HED_GRID_H).fill(0)).slice();
   if (part === 'head' && draft.face) {
     const fd = hedDepthGrid(draft.face);
     for (let i = 0; i < g.length; i++) g[i] = Math.max(-1, Math.min(1, g[i] + (fd[i] ?? 0)));

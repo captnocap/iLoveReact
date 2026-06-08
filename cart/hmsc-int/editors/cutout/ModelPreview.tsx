@@ -17,7 +17,7 @@
 // JS never drives the camera (V26).
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Pressable, Scene3D, StaticSurface, Text } from '@reactjit/primitives';
+import { Box, Image, Pressable, Scene3D, StaticSurface, Text } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_CAMERA, GAME_CHROME, GAME_NATIVE_CAMERA, GAME_VEHICLE } from '@game';
 import type { BodyDocument, VehicleDoc } from '@game';
@@ -119,7 +119,10 @@ const LiveCapture = memo(function LiveCapture(props: {
             harnessed) — the layer quads keep stable keys, no Effect churn */}
         <Box style={{ width: 0, height: props.tick % 2 }} />
         {props.layers.map((layer) => (
-          layer.config.muted ? null : (
+          layer.config.muted ? null : [
+            layer.image ? (
+              <Image key={`live-img:${layer.id}`} source={layer.image.path} style={{ width: props.w, height: props.h }} />
+            ) : null,
             <PaintQuad
               key={`live:${layer.id}`}
               paintableId={props.baseIdOf(layer)}
@@ -133,8 +136,8 @@ const LiveCapture = memo(function LiveCapture(props: {
               dim={layer.config.dim}
               colors={layer.config.colors}
               blend={layer.config.blend ?? 'normal'}
-            />
-          )
+            />,
+          ]
         ))}
         {props.modelLayers ? <FaceLayerPaint layers={props.modelLayers} /> : null}
       </Box>
@@ -178,7 +181,7 @@ function FigurePartMesh(props: { model: BodyDocument; target: PaintTargetId }) {
       const sculpt = parts[part]?.sculpt ?? [];
       displace = sculpt.length === grid ? sculpt.map((b) => b / 127) : new Array(grid).fill(0);
     }
-    return editorPartParams(part, { amount: model.amount, headScaleY: model.headScaleY, profiles }, displace);
+    return editorPartParams(part, { amount: model.amount, headScaleY: model.headScaleY, profiles, footShape: model.footShape }, displace);
   }, [model, part]);
   return (
     <Scene3D.Mesh

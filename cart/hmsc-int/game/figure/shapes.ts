@@ -105,6 +105,78 @@ export type PartPreset = {
   scaleZ?: number;
 };
 
+// ── the FOOT SHAPE dials (FOOTMESH-0606) ─────────────────────────────────────
+// "sole length/width, heel height, toe-box lean/flatness are tuning data" —
+// the user dials the look on the part's sculpt surface; these are the sane
+// STARTING values, never final numbers. Plan-view toe taper stays the
+// profile/grab-sculpt's job (the outline lathe + the 48×24 grid own radial
+// shape; these dials own the axes the profile cannot reach).
+
+export type FootShape = {
+  /** heel-to-toe extent (Globe scaleZ — the depth axis) */
+  soleLength: number;
+  /** side-to-side extent (Globe scaleX) */
+  soleWidth: number;
+  /** ankle-to-sole height (Globe scaleY — the part's length axis) */
+  heelHeight: number;
+  /** toe-box forward lean: how far the sole rings shift toward the toes
+   *  (front = -Z, the figure's facing) while the ankle stays back */
+  toeLean: number;
+  /** flat-cut fraction of the bottom dome (Globe floorY): the sole plane
+   *  sits at -heelHeight·soleFlat; 1 = full dome (no cut) */
+  soleFlat: number;
+};
+
+export const FOOT_SHAPE_DEFAULTS: FootShape = {
+  soleLength: 1.45,
+  soleWidth: 0.55,
+  heelHeight: 0.62,
+  toeLean: 0.55,
+  soleFlat: 0.55,
+};
+
+/** Dial specs in the tunables/FieldSpec shape — the workbench panel
+ *  generates its FOOT group straight from this table. */
+export const FOOT_SHAPE_SPECS: Record<keyof FootShape, { label: string; min: number; max: number; step: number; precision: number }> = {
+  soleLength: { label: 'sole length', min: 0.6, max: 2.6, step: 0.05, precision: 2 },
+  soleWidth: { label: 'sole width', min: 0.25, max: 1.4, step: 0.05, precision: 2 },
+  heelHeight: { label: 'heel height', min: 0.2, max: 1.2, step: 0.02, precision: 2 },
+  toeLean: { label: 'toe box', min: 0, max: 1.2, step: 0.05, precision: 2 },
+  soleFlat: { label: 'sole flat', min: 0.05, max: 1, step: 0.05, precision: 2 },
+};
+
+/** Boundary validation: clamp each dial into its spec range; anything
+ *  non-finite (or a missing/foreign record) falls back to the default. */
+export function validateFootShape(value: unknown): FootShape {
+  const v = (value ?? {}) as Partial<Record<keyof FootShape, unknown>>;
+  const out = {} as FootShape;
+  for (const k of Object.keys(FOOT_SHAPE_SPECS) as Array<keyof FootShape>) {
+    const spec = FOOT_SHAPE_SPECS[k];
+    const n = Number(v[k]);
+    out[k] = Number.isFinite(n) ? Math.max(spec.min, Math.min(spec.max, n)) : FOOT_SHAPE_DEFAULTS[k];
+  }
+  return out;
+}
+
+/** The ONE mapping from dials to Globe params (FOOTMESH-0606). The toe-box
+ *  lean is a per-v ring-center shift: ankle rings sit back (+Z), sole rings
+ *  push forward (-Z = the figure's facing) — the instep slope and the
+ *  forward toe box fall out of the same curve. floorY flat-cuts the bottom
+ *  dome onto the sole plane, so nothing ever spikes below the foot again. */
+export function footShapeGlobeExtras(shape?: FootShape | null): {
+  scaleX: number; scaleY: number; scaleZ: number; shiftZ: number[]; floorY: number;
+} {
+  const s = shape ?? FOOT_SHAPE_DEFAULTS;
+  const t = s.toeLean;
+  return {
+    scaleX: s.soleWidth,
+    scaleY: s.heelHeight,
+    scaleZ: s.soleLength,
+    shiftZ: [0.35 * t, 0.25 * t, 0.02 * t, -0.38 * t, -0.78 * t, -0.95 * t],
+    floorY: s.soleFlat,
+  };
+}
+
 export const PART_PRESETS: Record<PartId, PartPreset> = {
   head: { label: 'head', scaleY: 1.2 },
   // taller and wider than the egg: shoulders → chest → waist → hips
@@ -119,8 +191,14 @@ export const PART_PRESETS: Record<PartId, PartPreset> = {
   pipe: { label: 'pipe', scaleY: 1.37, scaleX: 0.42, scaleZ: 0.42, profile: [0.45, 0.85, 0.8, 0.85, 0.45] },
   // compact palm pad; fingers carry the readable hand length, not this blob
   hand: { label: 'hand', scaleX: 0.62, scaleY: 0.5, scaleZ: 0.42, profile: [0.5, 0.92, 0.76] },
-  // foot is a compact base; shoe overlays provide the readable front volume
-  foot: { label: 'foot', scaleY: 0.35, scaleX: 0.66, scaleZ: 1.02, profile: [0.62, 0.92, 0.78] },
+  // FOOTMESH-0606 (USER, verbatim: "what the hell is this for a foot LMAO
+  // please someone make a better foot this shit is comical"): the old foot
+  // was a squashed lens the shin tip spiked straight through. The foot is a
+  // REAL mesh part now — ankle→instep→sole profile, toe box leaning forward
+  // (Globe shiftZ), flat sole on the ground plane (Globe floorY). The scale
+  // numbers here are the FALLBACK silhouette only; the live values come from
+  // FOOT_SHAPE dials on the document (footShapeGlobeExtras below).
+  foot: { label: 'foot', scaleY: FOOT_SHAPE_DEFAULTS.heelHeight, scaleX: FOOT_SHAPE_DEFAULTS.soleWidth, scaleZ: FOOT_SHAPE_DEFAULTS.soleLength, profile: [0.38, 0.5, 0.66, 0.85, 1.0, 1.0] },
   // digits are tiny limb pipes with a less bulbous silhouette — still
   // paintable parts, so one finger sculpt fans across both hands
   finger: { label: 'finger', scaleY: 0.79, scaleX: 0.34, scaleZ: 0.28, profile: [0.54, 0.92, 0.8, 0.5] },
@@ -250,6 +328,8 @@ export const PART_LOD: Record<PartId, { segments: number; rings: number }> = {
   pelvis: { segments: 24, rings: 12 },
   pipe: { segments: 16, rings: 9 },
   hand: { segments: 16, rings: 8 },
-  foot: { segments: 14, rings: 8 },
+  // FOOTMESH-0606: the toe box + flat-cut sole need rows to land on — the
+  // old 14×8 lens rendered the lean as one smeared quad
+  foot: { segments: 22, rings: 12 },
   finger: { segments: 10, rings: 7 },
 };

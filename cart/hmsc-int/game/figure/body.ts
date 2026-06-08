@@ -11,8 +11,8 @@ import type { HedLayer } from './hed';
 import { validatePaintedOverlay, type PaintedOverlay } from '../painted';
 import { validateOutfit, type OutfitDocument } from './outfit';
 import {
-  LEGACY_PART_IDS, PAINT_TARGET_IDS, PART_IDS, defaultProfile,
-  type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PaintTargetId, type PartId,
+  LEGACY_PART_IDS, PAINT_TARGET_IDS, PART_IDS, defaultProfile, validateFootShape,
+  type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type FootShape, type PaintTargetId, type PartId,
 } from './shapes';
 
 export type BodyDocument = {
@@ -48,6 +48,11 @@ export type BodyDocument = {
    *  unwrap stack where the photo sits — UNDER the face's shape layers,
    *  OVER the skin. Color only; depth never rides this channel. */
   paint?: Partial<Record<PaintTargetId, PaintedOverlay>>;
+  /** FOOTMESH-0606 (additive — pre-foot documents stay valid forever and
+   *  wear the FOOT_SHAPE_DEFAULTS): the foot's anatomy dials — sole
+   *  length/width, heel height, toe-box lean, sole flatness. Both feet wear
+   *  the one record (the same part on mirrored bones). */
+  footShape?: FootShape;
   metadata?: { title?: string; createdAt?: number };
 };
 
@@ -113,6 +118,8 @@ export function buildBody(args: {
   outfit?: OutfitDocument;
   heldItem?: string;
   bodyPose?: BodyPoseId;
+  /** FOOTMESH-0606: the foot dials; absent = the defaults (not written) */
+  footShape?: FootShape;
   title?: string;
 }): BodyDocument {
   const parts = {} as BodyDocument['parts'];
@@ -133,6 +140,7 @@ export function buildBody(args: {
     outfit: args.outfit,
     heldItem: args.heldItem,
     bodyPose: args.bodyPose,
+    ...(args.footShape ? { footShape: validateFootShape(args.footShape) } : {}),
     parts,
     metadata: { title: args.title, createdAt: Date.now() },
   };
@@ -171,6 +179,12 @@ export function parseBody(text: string): BodyDocument | null {
     const outfit = validateOutfit(doc.outfit);
     if (outfit) doc.outfit = outfit;
     else delete doc.outfit;
+  }
+  // FOOTMESH-0606: a present foot-shape record clamps through validation; a
+  // torn one degrades to the defaults-by-absence, never a rejected document.
+  if (doc.footShape != null) {
+    if (typeof doc.footShape === 'object') doc.footShape = validateFootShape(doc.footShape);
+    else delete doc.footShape;
   }
   // PELVISMESH-0606: pre-split documents gain the deterministic pelvis copy
   // at the parse door (stream consumers normalize at their own read sites —

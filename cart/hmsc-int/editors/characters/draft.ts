@@ -19,7 +19,7 @@ import { buildBody, partsWithPelvisFallback, type BodyDocument } from '../../gam
 import { buildOutfit, outfitOf } from '../../game/figure/outfit';
 import {
   DEFAULT_BOTTOMS, PART_IDS, PROFILE_N, defaultProfile,
-  type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type PartId,
+  type BodyPoseId, type BodyShapeId, type BottomsId, type ClothingAccessoryId, type ClothingId, type ClothingSkinId, type FootShape, type PartId,
 } from '../../game/figure/shapes';
 import { applyRegionValues, type RegionValues } from './regions';
 
@@ -67,6 +67,9 @@ export type CharacterDraft = {
    *  through the edit cycle — /cutout authors them; a /characters save must
    *  never wipe them (pinned in characters.test.ts). */
   paint?: BodyDocument['paint'];
+  /** FOOTMESH-0606: the foot anatomy dials; absent = FOOT_SHAPE_DEFAULTS
+   *  (pre-foot drafts and documents wear the stock foot) */
+  footShape?: FootShape;
 };
 
 export const emptyGrid = (): number[] => new Array(GRID_CELLS).fill(0);
@@ -147,6 +150,7 @@ export function draftToDocument(draft: CharacterDraft, title?: string): BodyDocu
     outfit: buildOutfit({ top: draft.clothing, bottoms: draft.bottoms, print: draft.clothingSkin, accessories: draft.accessories }),
     heldItem: draft.heldItem === 'none' ? undefined : draft.heldItem,
     bodyPose: draft.bodyPose,
+    footShape: draft.footShape,
     title,
     }),
   };
@@ -191,5 +195,6 @@ export function draftFromDocument(doc: BodyDocument): CharacterDraft {
     heldItem: doc.heldItem ?? 'none',
     bodyPose: doc.bodyPose ?? DRAFT_DEFAULTS.bodyPose,
     paint: doc.paint,
+    footShape: doc.footShape,
   };
 }

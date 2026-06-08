@@ -44,6 +44,22 @@ export type GlobeParams = {
   /** Per-axis squash of the whole shape (hands/feet flatten with scaleZ). */
   scaleX?: number;
   scaleZ?: number;
+  /**
+   * Per-v ring-center Z offset (lerped top→bottom like `profile`), in units
+   * of `radius` (scaled by scaleZ with the rest of the depth axis). Bends the
+   * lathe's axis fore/aft without touching length or the radial silhouette —
+   * boot toes, jaw chins, banana limbs. FOOTMESH-0606: the foot's toe-box
+   * lean is the first consumer. Omit for a straight axis (today's parts).
+   */
+  shiftZ?: number[];
+  /**
+   * Flat-cut floor (FOOTMESH-0606): clamp the base skin's local Y to
+   * ≥ -radius·scaleY·floorY (0..1; omit or 1 = full dome). Every vertex
+   * below the plane lands ON it — a flat sole with no downward pole spike,
+   * by construction. Normals finite-difference over the clamped skin, so the
+   * sole shades flat and the cut edge stays crisp.
+   */
+  floorY?: number;
 };
 
 export const GLOBE_DEFAULTS: GlobeParams = { radius: 0.5, segments: 32, rings: 16, amount: 0, scaleY: 1 };
@@ -114,16 +130,36 @@ export function globeSurface(p: GlobeParams): (u: number, v: number, extraDispla
     return (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
   };
 
+  // Per-v ring-center Z shift: lerped like the profile, units of radius
+  // (scaled by scaleZ below so it tracks the depth axis). null = straight.
+  const shz = p.shiftZ && p.shiftZ.length > 0 ? p.shiftZ : null;
+  const shiftAt = (v: number): number => {
+    if (!shz) return 0;
+    if (shz.length === 1) return shz[0];
+    const t = Math.max(0, Math.min(1, v)) * (shz.length - 1);
+    const i = Math.min(shz.length - 2, Math.floor(t));
+    return shz[i] + (shz[i + 1] - shz[i]) * (t - i);
+  };
+
+  // Flat-cut floor plane in local Y (FOOTMESH-0606); +Infinity disables.
+  const floorCut = p.floorY != null && p.floorY < 1 ? -radius * scaleY * p.floorY : -Infinity;
+
   // The UNDISPLACED skin at (u, v) — profile + per-axis scale, no grid.
   // phi DECREASES with u so the unwrap reads unmirrored to a viewer facing
   // the front (-Z at u=0.5). Profile shapes the base RADIAL silhouette only
-  // (length stays scaleY's).
+  // (length stays scaleY's). shiftZ bends the lathe axis fore/aft; floorY
+  // clamps the bottom dome onto one flat plane (the sole).
   const base = (u: number, v: number): Vec3 => {
     const theta = PI * v;
     const phi = PI / 2 - 2 * PI * u;
     const st = Math.sin(theta);
     const rxz = radius * profileAt(v);
-    return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * radius * scaleY, st * Math.sin(phi) * rxz * scaleZ];
+    const y = Math.max(floorCut, Math.cos(theta) * radius * scaleY);
+    return [
+      st * Math.cos(phi) * rxz * scaleX,
+      y,
+      (st * Math.sin(phi) * rxz + radius * shiftAt(v)) * scaleZ,
+    ];
   };
 
   // The base skin's outward NORMAL at (u, v), finite-differenced. This is the

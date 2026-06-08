@@ -18,8 +18,8 @@ import {
   HED_GRID_H, HED_GRID_W,
 } from './hed';
 import {
-  BODY_SHAPES, PART_IDS, PART_LOD, PART_PRESETS, defaultProfile,
-  type BodyShapeId, type PartId,
+  BODY_SHAPES, PART_IDS, PART_LOD, PART_PRESETS, defaultProfile, footShapeGlobeExtras,
+  type BodyShapeId, type FootShape, type PartId,
 } from './shapes';
 import { partsWithPelvisFallback, type BodyDocument } from './body';
 import { attachOutfit, buildOutfit, outfitOf } from './outfit';
@@ -43,6 +43,9 @@ export type BakedPart = {
     scaleX?: number;
     scaleY: number;
     scaleZ?: number;
+    /** FOOTMESH-0606: the foot's toe-box lean + flat sole (Globe deformers) */
+    shiftZ?: number[];
+    floorY?: number;
   };
 };
 
@@ -87,9 +90,14 @@ export function partGlobeParams(
   face: Pick<HedDocument, 'amount' | 'scaleY'>,
   faceDepth: number[],
   draggedProfile?: number[],
+  footShape?: FootShape | null,
 ): BakedPart['params'] {
   const preset = PART_PRESETS[id];
   const lod = PART_LOD[id];
+  // FOOTMESH-0606: the foot's scales + toe-box lean + flat-cut sole come
+  // from the document's FOOT SHAPE dials (defaults when absent) — the ONE
+  // mapping lives in shapes.ts footShapeGlobeExtras.
+  const foot = id === 'foot' ? footShapeGlobeExtras(footShape) : null;
   return {
     radius: 1,
     segments: lod.segments,
@@ -100,9 +108,10 @@ export function partGlobeParams(
     amount: id === 'head' ? face.amount : 0,
     // radial-only law: the profile thins x/z; length is scaleY alone
     profile: id === 'head' ? (preset.profile ?? [1]) : (draggedProfile ?? defaultProfile(id)),
-    scaleX: preset.scaleX,
-    scaleY: id === 'head' ? face.scaleY : preset.scaleY,
-    scaleZ: preset.scaleZ,
+    scaleX: foot ? foot.scaleX : preset.scaleX,
+    scaleY: id === 'head' ? face.scaleY : foot ? foot.scaleY : preset.scaleY,
+    scaleZ: foot ? foot.scaleZ : preset.scaleZ,
+    ...(foot ? { shiftZ: foot.shiftZ, floorY: foot.floorY } : {}),
   };
 }
 
@@ -114,12 +123,12 @@ export function bakeFigure(
   face: HedDocument,
   shape: BodyShapeId = 'neutral',
   outfitArgs: BakeOutfit = {},
-  opts: { sculpts?: BodyDocument['parts']; title?: string } = {},
+  opts: { sculpts?: BodyDocument['parts']; title?: string; footShape?: FootShape | null } = {},
 ): BakedFigure {
   const faceDepth = hedDepthGrid(face);
   const parts = {} as Record<PartId, BakedPart>;
   for (const id of PART_IDS) {
-    parts[id] = { part: id, params: partGlobeParams(id, face, faceDepth, opts.sculpts?.[id]?.profile) };
+    parts[id] = { part: id, params: partGlobeParams(id, face, faceDepth, opts.sculpts?.[id]?.profile, opts.footShape) };
   }
 
   const frame = buildMeshFrame(shape, 'stand', 0, []);
@@ -171,7 +180,7 @@ export function bakeBodyDocument(doc: BodyDocument): BakedFigure {
     accessories: outfit.accessories,
     // PELVISMESH-0606: pre-split documents bake the pelvis as the torso copy
     // (stream docs bypass parseBody, so the bake normalizes itself)
-  }, { sculpts: partsWithPelvisFallback(doc.parts), title: doc.metadata?.title });
+  }, { sculpts: partsWithPelvisFallback(doc.parts), title: doc.metadata?.title, footShape: doc.footShape });
 }
 
 /** Seed → figure, deterministically — the population path (variety preserved:
