@@ -30,6 +30,7 @@ const scene3d = @import("framework/gpu/3d.zig");
 const layout = @import("framework/layout.zig");
 const Node = layout.Node;
 const constructor = @import("framework/world/constructor.zig");
+const game_physics = @import("framework/game/physics.zig");
 
 const WIN_W: c_int = 800;
 const WIN_H: c_int = 600;
@@ -42,6 +43,7 @@ const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
 const SCAN_W: usize = 26;
+const SCAN_SPACE: usize = 44;
 const SCAN_LSHIFT: usize = 225;
 const CAMERA_YAW_RADIANS_PER_PIXEL: f32 = 0.0032;
 const CAMERA_PITCH_RADIANS_PER_PIXEL: f32 = 0.0024;
@@ -55,6 +57,19 @@ const CAMERA_HEIGHT_METERS: f32 = 3.05;
 const CAMERA_TARGET_HEIGHT_METERS: f32 = 2.08;
 const CAMERA_PITCH_TARGET_METERS_PER_RADIAN: f32 = 0.82;
 const CAMERA_FOV_DEGREES: f32 = 48.0;
+const PLAYER_WALK_SPEED_METERS_PER_SECOND: f32 = 4.5;
+const PLAYER_RUN_SPEED_METERS_PER_SECOND: f32 = 8.0;
+const PLAYER_RADIUS_METERS: f32 = 0.42;
+const PLAYER_HEIGHT_METERS: f32 = 1.9;
+const PLAYER_STEP_HEIGHT_METERS: f32 = 0.42;
+const PLAYER_WALL_RESTITUTION: f32 = 0.0;
+const PLAYER_SURFACE_FRICTION: f32 = 0.55;
+const PLAYER_SURFACE_RESTITUTION: f32 = 0.0;
+const PLAYER_ACCELERATION_MULTIPLIER: f32 = 1.0;
+const PLAYER_GRAVITY_METERS_PER_SECOND2: f32 = 10.0;
+const PLAYER_JUMP_SPEED_METERS_PER_SECOND: f32 = 5.2;
+const WALKABLE_SIDE_PUSH_GRACE_METERS: f32 = 0.08;
+const PHYSICS_SOLID_HEIGHT_METERS: f32 = PLAYER_STEP_HEIGHT_METERS + 0.05;
 
 const log = std.debug;
 
@@ -68,7 +83,11 @@ const PlayerState = struct {
     x: f32,
     y: f32,
     z: f32,
+    vx: f32 = 0,
+    vy: f32 = 0,
+    vz: f32 = 0,
     yaw: f32,
+    grounded: bool = false,
 };
 
 const CameraState = struct {
@@ -80,6 +99,17 @@ const CameraState = struct {
     pitch_target_factor: f32,
     far: f32,
     fov: f32,
+};
+
+const PhysicsColliders = struct {
+    values: []f32,
+    rect_count: usize,
+    oriented_count: usize,
+    clipped_rows: usize,
+
+    pub fn deinit(self: PhysicsColliders, allocator: std.mem.Allocator) void {
+        allocator.free(self.values);
+    }
 };
 
 fn clamp(v: f32, lo: f32, hi: f32) f32 {
@@ -256,6 +286,151 @@ fn instanceCovers(insts: []const f32, row: usize, stride: usize, x: f32, z: f32)
         z >= insts[b + 2] - hz and z <= insts[b + 2] + hz;
 }
 
+fn instanceYawRadians(insts: []const f32, row: usize, stride: usize) f32 {
+    if (stride < 12) return 0;
+    return insts[row * stride + 4] * std.math.pi / 180.0;
+}
+
+fn appendPhysicsRect(allocator: std.mem.Allocator, list: *std.ArrayList(f32), insts: []const f32, row: usize, stride: usize, solid: bool) !void {
+    const scale_base: usize = if (stride >= 12) 6 else 3;
+    const b = row * stride;
+    const sx = @abs(insts[b + scale_base + 0]);
+    const sy = @abs(insts[b + scale_base + 1]);
+    const sz = @abs(insts[b + scale_base + 2]);
+    const hx = sx * 0.5;
+    const hz = sz * 0.5;
+    const top = insts[b + 1] + sy * 0.5;
+    const floor = if (solid) insts[b + 1] - sy * 0.5 else -1.0e9;
+    try list.appendSlice(allocator, &[_]f32{
+        insts[b + 0] - hx,
+        insts[b + 2] - hz,
+        insts[b + 0] + hx,
+        insts[b + 2] + hz,
+        top,
+        if (solid) 1 else 0,
+        PLAYER_SURFACE_FRICTION,
+        PLAYER_SURFACE_RESTITUTION,
+        floor,
+    });
+}
+
+fn appendPhysicsOrientedRect(allocator: std.mem.Allocator, list: *std.ArrayList(f32), insts: []const f32, row: usize, stride: usize, solid: bool) !void {
+    const scale_base: usize = if (stride >= 12) 6 else 3;
+    const b = row * stride;
+    const sx = @abs(insts[b + scale_base + 0]);
+    const sy = @abs(insts[b + scale_base + 1]);
+    const sz = @abs(insts[b + scale_base + 2]);
+    const hx = sx * 0.5;
+    const hz = sz * 0.5;
+    const top = insts[b + 1] + sy * 0.5;
+    const floor = if (solid) insts[b + 1] - sy * 0.5 else -1.0e9;
+    try list.appendSlice(allocator, &[_]f32{
+        insts[b + 0] - hx,
+        insts[b + 2] - hz,
+        insts[b + 0] + hx,
+        insts[b + 2] + hz,
+        top,
+        if (solid) 1 else 0,
+        PLAYER_SURFACE_FRICTION,
+        PLAYER_SURFACE_RESTITUTION,
+        floor,
+        insts[b + 0],
+        insts[b + 2],
+        instanceYawRadians(insts, row, stride),
+    });
+}
+
+fn buildPhysicsColliders(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize) !PhysicsColliders {
+    var rects: std.ArrayList(f32) = .{};
+    errdefer rects.deinit(allocator);
+    var oriented: std.ArrayList(f32) = .{};
+    errdefer oriented.deinit(allocator);
+    var rect_count: usize = 0;
+    var oriented_count: usize = 0;
+    var clipped_rows: usize = 0;
+
+    const total_rows: usize = @intCast(inst_count);
+    var row: usize = 0;
+    while (row < total_rows) : (row += 1) {
+        const scale_base: usize = if (stride >= 12) 6 else 3;
+        const b = row * stride;
+        const sx = @abs(insts[b + scale_base + 0]);
+        const sy = @abs(insts[b + scale_base + 1]);
+        const sz = @abs(insts[b + scale_base + 2]);
+        if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) continue;
+        const solid = sy > PHYSICS_SOLID_HEIGHT_METERS;
+        const yaw = instanceYawRadians(insts, row, stride);
+        if (@abs(yaw) > 0.0001) {
+            if (oriented_count >= game_physics.MAX_ORIENTED) {
+                clipped_rows += 1;
+                continue;
+            }
+            try appendPhysicsOrientedRect(allocator, &oriented, insts, row, stride, solid);
+            oriented_count += 1;
+        } else {
+            if (rect_count >= game_physics.MAX_RECTS) {
+                clipped_rows += 1;
+                continue;
+            }
+            try appendPhysicsRect(allocator, &rects, insts, row, stride, solid);
+            rect_count += 1;
+        }
+    }
+
+    var values = try allocator.alloc(f32, game_physics.INPUT_HEADER_FLOATS + rects.items.len + oriented.items.len);
+    @memset(values, 0);
+    @memcpy(values[game_physics.INPUT_HEADER_FLOATS .. game_physics.INPUT_HEADER_FLOATS + rects.items.len], rects.items);
+    @memcpy(values[game_physics.INPUT_HEADER_FLOATS + rects.items.len ..], oriented.items);
+    rects.deinit(allocator);
+    oriented.deinit(allocator);
+    return .{ .values = values, .rect_count = rect_count, .oriented_count = oriented_count, .clipped_rows = clipped_rows };
+}
+
+fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32, intent: game_physics.movement.Direction, speed: f32, jump_down: bool) void {
+    if (colliders.values.len < game_physics.INPUT_HEADER_FLOATS) return;
+    const input = colliders.values;
+    input[0] = dt;
+    input[1] = intent.x;
+    input[2] = intent.z;
+    input[3] = speed;
+    input[4] = if (jump_down) 1 else 0;
+    input[5] = player.x;
+    input[6] = player.y;
+    input[7] = player.z;
+    input[8] = player.vx;
+    input[9] = player.vy;
+    input[10] = player.vz;
+    input[11] = WALKABLE_SIDE_PUSH_GRACE_METERS;
+    input[12] = 0;
+    input[13] = @floatFromInt(colliders.rect_count);
+    input[14] = PLAYER_GRAVITY_METERS_PER_SECOND2;
+    input[15] = PLAYER_JUMP_SPEED_METERS_PER_SECOND;
+    input[16] = PLAYER_RADIUS_METERS;
+    input[17] = PLAYER_HEIGHT_METERS;
+    input[18] = PLAYER_WALL_RESTITUTION;
+    input[19] = 0;
+    input[20] = PLAYER_STEP_HEIGHT_METERS;
+    input[21] = PLAYER_ACCELERATION_MULTIPLIER;
+    input[22] = PLAYER_SURFACE_FRICTION;
+    input[23] = PLAYER_SURFACE_RESTITUTION;
+    input[24] = @floatFromInt(colliders.oriented_count);
+
+    const out = game_physics.step(input) orelse return;
+    player.x = out[1];
+    player.y = out[2];
+    player.z = out[3];
+    player.vx = out[4];
+    player.vy = out[5];
+    player.vz = out[6];
+    player.grounded = out[7] > 0.5;
+    const horizontal_speed = @sqrt(player.vx * player.vx + player.vz * player.vz);
+    if (horizontal_speed > 0.05) {
+        player.yaw = std.math.atan2(player.vx, player.vz);
+    } else if (@sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001) {
+        player.yaw = std.math.atan2(intent.x, intent.z);
+    }
+}
+
 fn chooseSpawn(insts: []const f32, inst_count: u32, piece_count: u32, stride: usize, bounds: Bounds) Vec3 {
     const wanted_x = bounds.cx;
     const wanted_z = bounds.cz;
@@ -408,6 +583,12 @@ pub fn main() !void {
     // 0 world instances = a genuinely empty map (no pieces, no paint). Switching
     // to an empty map should still render sky and any compiled runtime model.
     if (inst_count == 0) log.print("[loader] empty world — rendering sky/model over void\n", .{});
+    var physics_colliders = try buildPhysicsColliders(allocator, insts, inst_count, stride);
+    defer physics_colliders.deinit(allocator);
+    log.print("[loader] built {d} physics rects + {d} oriented physics rects\n", .{ physics_colliders.rect_count, physics_colliders.oriented_count });
+    if (physics_colliders.clipped_rows > 0) {
+        log.print("[loader] physics collider cap clipped {d} rendered instance rows\n", .{physics_colliders.clipped_rows});
+    }
 
     // ── render the constructed scene (stateless GPU substrate) ───────────
     if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
@@ -574,40 +755,15 @@ pub fn main() !void {
         const dt = clamp(@as(f32, @floatFromInt(ns - last_ns)) / 1_000_000_000.0, 0.001, 0.05);
         last_ns = ns;
 
-        var move_x: f32 = 0;
-        var move_z: f32 = 0;
-        const fwd_x = @sin(camera.yaw);
-        const fwd_z = @cos(camera.yaw);
-        const right_x = -@cos(camera.yaw);
-        const right_z = @sin(camera.yaw);
-        if (keyDown(SCAN_W)) {
-            move_x += fwd_x;
-            move_z += fwd_z;
-        }
-        if (keyDown(SCAN_S)) {
-            move_x -= fwd_x;
-            move_z -= fwd_z;
-        }
-        if (keyDown(SCAN_A)) {
-            move_x -= right_x;
-            move_z -= right_z;
-        }
-        if (keyDown(SCAN_D)) {
-            move_x += right_x;
-            move_z += right_z;
-        }
-        const move_len = @sqrt(move_x * move_x + move_z * move_z);
-        if (move_len > 0.001) {
-            move_x /= move_len;
-            move_z /= move_len;
-            const speed: f32 = if (keyDown(SCAN_LSHIFT)) 8.0 else 4.5;
-            player.x += move_x * speed * dt;
-            player.z += move_z * speed * dt;
-            player.yaw = std.math.atan2(move_x, move_z);
-            if (groundHeightAt(insts, inst_count, piece_count, stride, player.x, player.z)) |ground_y| {
-                player.y = ground_y;
-            }
-        }
+        var forward: f32 = 0;
+        var strafe: f32 = 0;
+        if (keyDown(SCAN_W)) forward += 1;
+        if (keyDown(SCAN_S)) forward -= 1;
+        if (keyDown(SCAN_A)) strafe -= 1;
+        if (keyDown(SCAN_D)) strafe += 1;
+        const intent = game_physics.movement.wasdDirection(forward, strafe, camera.yaw);
+        const speed: f32 = if (keyDown(SCAN_LSHIFT)) PLAYER_RUN_SPEED_METERS_PER_SECOND else PLAYER_WALK_SPEED_METERS_PER_SECOND;
+        runPlayerPhysics(&player, &physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE));
 
         updateCameraNode(&kid_list.items[0], camera, player);
         updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model.len, player);
