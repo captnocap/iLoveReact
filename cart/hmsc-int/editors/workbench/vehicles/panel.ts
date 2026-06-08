@@ -8,8 +8,6 @@ import {
   type DamageLevel,
   type VehiclePartId,
   type VehiclePoseId,
-  type VehicleRoleId,
-  type VehicleStyleId,
 } from '../../../game';
 import { vehicleWorkbenchStore, type VehicleLens, type VehicleStore } from './store';
 
@@ -18,8 +16,6 @@ export const VEHICLE_LENSES: LensSpec[] = [
   { id: 'paint', label: 'PAINT' },
 ];
 
-const vehicleTypeIds = Object.keys(GAME_VEHICLE.tables.styles) as VehicleStyleId[];
-const roleIds = Object.keys(GAME_VEHICLE.tables.roles) as VehicleRoleId[];
 const poseIds = Object.keys(GAME_VEHICLE.tables.poses) as VehiclePoseId[];
 const damageLevels = [0, 1, 2, 3] as DamageLevel[];
 
@@ -39,8 +35,7 @@ export function vehiclePanel(s: VehicleStore): PanelSpec {
       groups: [{
         title: 'GARAGE',
         fields: [
-          { k: 'new vehicle', t: 'act', tone: 'success', run: () => s.newVehicle() },
-          { k: 'status', t: 'val', get: () => s.status ?? 'empty garage' },
+          { k: 'status', t: 'val', get: () => s.status ?? 'population unavailable' },
         ],
       }],
     };
@@ -57,10 +52,31 @@ export function vehiclePanel(s: VehicleStore): PanelSpec {
   groups.push({
     title: 'IDENTITY',
     fields: [
-      { k: 'vehicle', t: 'enum', opts: vehicleTypeIds, get: () => doc.style, set: (x) => s.setVehicleType(x as VehicleStyleId) },
-      { k: 'service', t: 'enum', opts: roleIds, get: () => doc.role, set: (x) => s.setRole(x as VehicleRoleId) },
+      { k: 'vehicle', t: 'val', get: () => GAME_VEHICLE.tables.styles[doc.style].label },
+      { k: 'service', t: 'val', get: () => GAME_VEHICLE.tables.roles[doc.role].label },
       { k: 'color', t: 'color', get: () => doc.color },
       { k: 'trim', t: 'color', get: () => doc.trim },
+    ],
+  });
+
+  groups.push({
+    title: 'POPULATION',
+    fields: [
+      { k: 'spawn rate', t: 'num', ...s.populationSpec.spawnRate, get: () => doc.spawnRate ?? 0, set: (x) => s.setSpawnRate(x) },
+      { k: 'rarity', t: 'num', ...s.populationSpec.rarity, get: () => doc.rarity ?? 0, set: (x) => s.setRarity(x) },
+      { k: 'speed', t: 'num', ...s.populationSpec.speed, get: () => doc.speed ?? 0, set: (x) => s.setSpeed(x) },
+      { k: 'consumer', t: 'val', get: () => 'world vehicle spawner reads per-type population rows' },
+    ],
+  });
+
+  groups.push({
+    title: 'COLOR VARIATIONS',
+    fields: [
+      { k: 'add material', t: 'pick', opts: () => s.materialOptions(), get: () => null, set: (x) => { if (x) s.addColorVariation(x); }, clearLabel: 'none' },
+      { k: 'preview material', t: 'pick', opts: () => s.colorVariationOptions(), get: () => doc.activeColorVariationId ?? null, set: (x) => s.setActiveColorVariation(x), clearLabel: 'base' },
+      { k: 'active', t: 'val', get: () => s.activeColorVariation()?.label ?? 'base' },
+      { k: 'count', t: 'val', get: () => `${doc.colorVariations?.length ?? 0}` },
+      { k: 'remove active', t: 'act', tone: 'warning', run: () => s.removeActiveColorVariation() },
     ],
   });
 
@@ -78,7 +94,7 @@ export function vehiclePanel(s: VehicleStore): PanelSpec {
     fields: [
       { k: 'hitboxes', t: 'bool', get: () => s.view.showHitboxes, set: (x) => s.setShowHitboxes(x) },
       { k: 'anchors', t: 'bool', get: () => s.view.showAnchors, set: (x) => s.setShowAnchors(x) },
-      { k: 'reroll', t: 'act', tone: 'warning', run: () => s.reroll() },
+      { k: 'reroll look', t: 'act', tone: 'warning', run: () => s.reroll() },
       { k: 'paint', t: 'act', tone: 'success', run: () => s.repaint() },
     ],
   });
@@ -113,6 +129,10 @@ export function vehiclePanel(s: VehicleStore): PanelSpec {
     fields: [
       { k: 'vehicle', t: 'val', get: () => GAME_VEHICLE.tables.styles[doc.style].label },
       { k: 'service', t: 'val', get: () => GAME_VEHICLE.tables.roles[doc.role].label },
+      { k: 'spawn rate', t: 'val', get: () => `${doc.spawnRate ?? 0}` },
+      { k: 'rarity', t: 'val', get: () => `${doc.rarity ?? 0}` },
+      { k: 'speed', t: 'val', get: () => `${doc.speed ?? 0}` },
+      { k: 'color variations', t: 'val', get: () => `${doc.colorVariations?.length ?? 0}` },
       { k: 'scale', t: 'val', get: () => '1 unit = 1m, player ref 1.65m' },
       { k: 'size', t: 'val', get: () => `${dims.length.toFixed(2)}m L x ${dims.width.toFixed(2)}m W` },
       { k: 'wheel', t: 'val', get: () => `${(dims.wheelR * 2).toFixed(2)}m diameter` },
@@ -150,17 +170,14 @@ export function vehicleSourceCore(store?: VehicleStore): Omit<WorkbenchSource<Ve
     activeLens: () => s.view.lens,
     onLens: (_subject, id) => s.setLens(id as VehicleLens),
     actions(): ActionSpec[] {
-      const out: ActionSpec[] = [
-        { id: 'new', label: 'New', icon: 'Plus', run: () => s.newVehicle() },
+      return [
         { id: 'save', label: 'Save', icon: 'Check', run: () => s.saveActive() },
         { id: 'reroll', label: 'Reroll', icon: 'Shuffle', run: () => s.reroll() },
         { id: 'paint', label: 'Paint', icon: 'Palette', run: () => s.setLens('paint') },
       ];
-      if (s.activeId) out.push({ id: 'remove', label: 'Remove', icon: 'Trash2', run: () => s.removeActive() });
-      return out;
     },
     emptyActions(): ActionSpec[] {
-      return [{ id: 'new', label: 'New', icon: 'Plus', run: () => s.newVehicle() }];
+      return [{ id: 'save', label: 'Save', icon: 'Check', run: () => s.saveActive() }];
     },
   };
 }

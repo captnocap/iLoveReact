@@ -24,7 +24,7 @@ import { assert, assertClose, assertEqual, finish, test } from '../_testkit';
 const EPS = 1e-9;
 const REFERENCE_COUNTS = Object.freeze({
   parts: 18,
-  styles: 8,
+  styles: 9,
   roles: 4,
   poses: 5,
 });
@@ -110,7 +110,7 @@ test('buildVehicle sweeps the doc space with all semantic parts present', () => 
       }
     }
   }
-  assertEqual(cases, 64, 'case sweep size');
+  assertEqual(cases, 72, 'case sweep size');
 });
 
 test('damage tables mean darker panels, weaker glass, and sparse repair', () => {
@@ -151,8 +151,10 @@ test('actions drive wheel spin, steering, suspension bounce, and braking', () =>
 
 test('service rigs preserve reference silhouette counts', () => {
   const civilianCounts = meshCountsByPart(doc({ style: 'sedan', role: 'civilian' }));
+  const policeCounts = meshCountsByPart(doc({ style: 'police_car', role: 'police' }));
   const ambulanceCounts = meshCountsByPart(doc({ style: 'ambulance', role: 'medical' }));
   const fireCounts = meshCountsByPart(doc({ style: 'fire_truck', role: 'fire' }));
+  assert(policeCounts.body >= civilianCounts.body, 'police car keeps the sedan-class silhouette plus service livery');
   assert(civilianCounts.body < ambulanceCounts.body, 'ambulance adds service body panels');
   assert(fireCounts.trunk > ambulanceCounts.trunk, 'fire truck carries compartment and hose geometry');
   assertEqual(fireCounts.rear_left_wheel, 9, 'fire-truck tandem rear-left wheel meshes keep the same semantic id');

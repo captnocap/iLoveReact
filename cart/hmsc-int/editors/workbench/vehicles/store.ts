@@ -1,6 +1,6 @@
-// editors/workbench/vehicles/store.ts -- the vehicle source's state truth
-// (WBSTEP6-0606). Extracts VehiclesRoute's garage/session/twig behavior into
-// a headless store so gutter 3 specs and column 4 stage read/write one source.
+// editors/workbench/vehicles/store.ts -- the vehicle source's state truth.
+// Vehicle authoring is a population table: each row is a ruled vehicle type,
+// with service inferred from that type and tuning stored on the row.
 
 import {
   GAME_VEHICLE,
@@ -9,16 +9,19 @@ import {
   type VehicleDoc,
   type VehiclePartId,
   type VehiclePoseId,
+  type VehicleRoleId,
+  type VehicleStyleId,
   type VehiclesEvent,
   type VehiclesStreamState,
 } from '../../../game';
+import { allTextures, textureById } from '../../../game/textures/registry';
 import { GAME_TELEMETRY } from '../../../game/telemetry';
 import { editorChannel } from '../../store';
 import { editorSessions, type RouteSession } from '../../sessions';
 import { readRouteTwigState, writeRouteTwigState } from '../../twigs';
+import { materialLabel, materialPickOptions, type MaterialChoice } from '../materials/chooser';
 import {
   editGasSide,
-  editStyle,
   gasZKnobSpec,
   generateVehicle,
   nudgeDamage,
@@ -32,6 +35,54 @@ import {
 const TWIG_ROUTE = '/vehicles';
 
 export type VehicleLens = 'preview' | 'paint';
+export type VehiclePopulationId =
+  | 'sedan'
+  | 'coupe'
+  | 'wagon'
+  | 'van'
+  | 'pickup'
+  | 'sports'
+  | 'fire-truck'
+  | 'police-car'
+  | 'ambulance';
+
+type ColorVariation = NonNullable<VehicleDoc['colorVariations']>[number];
+
+type VehiclePopulationRow = {
+  id: VehiclePopulationId;
+  style: VehicleStyleId;
+  label: string;
+  spawnRate: number;
+  rarity: number;
+  speed: number;
+  seed: number;
+};
+
+export const VEHICLE_POPULATION_ROWS = Object.freeze([
+  { id: 'sedan', style: 'sedan', label: 'sedan', spawnRate: 28, rarity: 0.62, speed: 36, seed: 7601 },
+  { id: 'coupe', style: 'coupe', label: 'coupe', spawnRate: 14, rarity: 0.42, speed: 40, seed: 7602 },
+  { id: 'wagon', style: 'wagon', label: 'wagon', spawnRate: 12, rarity: 0.38, speed: 34, seed: 7603 },
+  { id: 'van', style: 'van', label: 'van', spawnRate: 12, rarity: 0.34, speed: 30, seed: 7604 },
+  { id: 'pickup', style: 'pickup', label: 'pickup', spawnRate: 10, rarity: 0.32, speed: 33, seed: 7605 },
+  { id: 'sports', style: 'sports', label: 'sports', spawnRate: 6, rarity: 0.18, speed: 48, seed: 7606 },
+  { id: 'fire-truck', style: 'fire_truck', label: 'fire truck', spawnRate: 1, rarity: 0.04, speed: 24, seed: 7607 },
+  { id: 'police-car', style: 'police_car', label: 'police car', spawnRate: 3, rarity: 0.1, speed: 42, seed: 7608 },
+  { id: 'ambulance', style: 'ambulance', label: 'ambulance', spawnRate: 2, rarity: 0.07, speed: 38, seed: 7609 },
+] as const satisfies readonly VehiclePopulationRow[]);
+
+const VEHICLE_POPULATION_BY_ID = Object.freeze(Object.fromEntries(
+  VEHICLE_POPULATION_ROWS.map((row) => [row.id, row]),
+) as Record<VehiclePopulationId, VehiclePopulationRow>);
+
+const VEHICLE_POPULATION_BY_STYLE = Object.freeze(Object.fromEntries(
+  VEHICLE_POPULATION_ROWS.map((row) => [row.style, row]),
+) as Record<VehicleStyleId, VehiclePopulationRow>);
+
+export const VEHICLE_POPULATION_TUNING = Object.freeze({
+  spawnRate: { min: 0, max: 100, step: 1, precision: 0 },
+  rarity: { min: 0, max: 1, step: 0.01, precision: 2 },
+  speed: { min: 0, max: 80, step: 1, precision: 0 },
+} as const);
 
 export type VehicleTwigAdapter = {
   read<T>(key: string, initial: T): T;
@@ -44,6 +95,8 @@ export type VehicleStoreDeps = {
   error: string | null;
   twig?: boolean | VehicleTwigAdapter;
   seed?: () => number;
+  materials?: () => MaterialChoice[];
+  validMaterial?: (id: string) => boolean;
 };
 
 function perfNow(): number {
@@ -55,42 +108,120 @@ function freshSeed(): number {
   return (Date.now() ^ Math.floor(Math.random() * 0xffff)) >>> 0;
 }
 
-function vehicleIdentityId(doc: VehicleDoc): string {
-  return doc.style.replace(/_/g, '-');
+function clamp(n: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, n));
 }
 
-function vehicleIdentityLabel(doc: VehicleDoc): string {
-  return GAME_VEHICLE.tables.styles[doc.style].label;
+function clampField(n: number, spec: { min: number; max: number; step: number }): number {
+  if (!Number.isFinite(n)) return spec.min;
+  const clamped = clamp(n, spec.min, spec.max);
+  return Math.round(clamped / spec.step) * spec.step;
 }
 
-function vehicleDisplayName(id: string, doc: VehicleDoc | null | undefined): string {
-  if (!doc) return id;
-  const label = vehicleIdentityLabel(doc);
-  const base = vehicleIdentityId(doc);
-  if (id === base) return label;
-  if (id.startsWith(`${base}-`)) {
-    const suffix = id.slice(base.length + 1);
-    if (/^\d+$/.test(suffix)) return `${label} ${suffix}`;
+function roleForStyle(style: VehicleStyleId): VehicleRoleId {
+  if (style === 'ambulance') return 'medical';
+  if (style === 'police_car') return 'police';
+  if (style === 'fire_truck') return 'fire';
+  return 'civilian';
+}
+
+function defaultMaterials(): MaterialChoice[] {
+  return allTextures().map((t) => ({ id: t.id, label: t.label }));
+}
+
+function validDefaultMaterial(id: string): boolean {
+  return textureById(id) !== undefined;
+}
+
+function typeForId(id: string | null | undefined): VehiclePopulationRow | null {
+  if (!id) return null;
+  return VEHICLE_POPULATION_BY_ID[id as VehiclePopulationId] ?? null;
+}
+
+function typeForDoc(doc: VehicleDoc | null | undefined): VehiclePopulationRow | null {
+  if (!doc) return null;
+  return VEHICLE_POPULATION_BY_STYLE[doc.style] ?? null;
+}
+
+function latestAuthoredType(state: VehiclesStreamState): VehiclePopulationId {
+  for (let i = state.order.length - 1; i >= 0; i -= 1) {
+    const row = typeForDoc(state.vehicles[state.order[i]]);
+    if (row) return row.id;
   }
-  return label;
+  return VEHICLE_POPULATION_ROWS[0].id;
 }
 
-function freshId(state: VehiclesStreamState, doc: VehicleDoc): string {
-  const base = vehicleIdentityId(doc);
-  if (!state.vehicles[base]) return base;
-  let n = 2;
-  while (state.vehicles[`${base}-${n}`]) n += 1;
-  return `${base}-${n}`;
+function authoredDocFor(state: VehiclesStreamState, row: VehiclePopulationRow): VehicleDoc | null {
+  const direct = state.vehicles[row.id];
+  if (direct) return direct;
+  for (let i = state.order.length - 1; i >= 0; i -= 1) {
+    const doc = state.vehicles[state.order[i]];
+    if (doc?.style === row.style) return doc;
+  }
+  return null;
 }
 
-function editService(doc: VehicleDoc, role: keyof typeof GAME_VEHICLE.tables.roles): VehicleDoc {
+function gasZForStyle(style: VehicleStyleId, source: number): number {
+  const spec = gasZKnobSpec(style);
+  return clamp(source, spec.min, spec.max);
+}
+
+function baseDoc(row: VehiclePopulationRow, seed: number): VehicleDoc {
+  const generated = generateVehicle(seed);
+  const role = roleForStyle(row.style);
   const preset = GAME_VEHICLE.tables.roles[role];
   const civilian = role === 'civilian';
   return {
-    ...doc,
+    ...generated,
+    style: row.style,
     role,
-    color: civilian ? doc.color : preset.color,
-    trim: civilian ? doc.trim : preset.trim,
+    seed,
+    color: civilian ? generated.color : preset.color,
+    trim: civilian ? generated.trim : preset.trim,
+    spawnRate: row.spawnRate,
+    rarity: row.rarity,
+    speed: row.speed,
+    colorVariations: [],
+    activeColorVariationId: null,
+    gasZ: gasZForStyle(row.style, generated.gasZ),
+    damage: {},
+  };
+}
+
+function normalizeDoc(row: VehiclePopulationRow, source: VehicleDoc | null | undefined): VehicleDoc {
+  const fallback = baseDoc(row, row.seed);
+  const role = roleForStyle(row.style);
+  const preset = GAME_VEHICLE.tables.roles[role];
+  const civilian = role === 'civilian';
+  const variations = [...(source?.colorVariations ?? fallback.colorVariations ?? [])];
+  const active = source?.activeColorVariationId && variations.some((v) => v.id === source.activeColorVariationId)
+    ? source.activeColorVariationId
+    : null;
+  return {
+    ...fallback,
+    ...(source ?? {}),
+    style: row.style,
+    role,
+    color: civilian ? (source?.color ?? fallback.color) : preset.color,
+    trim: civilian ? (source?.trim ?? fallback.trim) : preset.trim,
+    spawnRate: source?.spawnRate ?? row.spawnRate,
+    rarity: source?.rarity ?? row.rarity,
+    speed: source?.speed ?? row.speed,
+    colorVariations: variations,
+    activeColorVariationId: active,
+    gasZ: gasZForStyle(row.style, source?.gasZ ?? fallback.gasZ),
+    damage: source?.damage ?? {},
+  };
+}
+
+function preservePopulation(next: VehicleDoc, current: VehicleDoc): VehicleDoc {
+  return {
+    ...next,
+    spawnRate: current.spawnRate,
+    rarity: current.rarity,
+    speed: current.speed,
+    colorVariations: [...(current.colorVariations ?? [])],
+    activeColorVariationId: current.activeColorVariationId ?? null,
   };
 }
 
@@ -98,6 +229,8 @@ export function createVehicleStore(deps: VehicleStoreDeps) {
   const useTwigs = deps.twig !== false;
   const twigAdapter = typeof deps.twig === 'object' ? deps.twig : null;
   const seed = deps.seed ?? freshSeed;
+  const materials = deps.materials ?? defaultMaterials;
+  const validMaterial = deps.validMaterial ?? validDefaultMaterial;
   const listeners = new Set<() => void>();
   const emit = () => { for (const fn of [...listeners]) fn(); };
 
@@ -113,7 +246,9 @@ export function createVehicleStore(deps: VehicleStoreDeps) {
   };
 
   let state = deps.channel?.state() ?? vehiclesStream.initial();
-  let activeId = twigRead<string | null>('activeId', state.order[state.order.length - 1] ?? null);
+  const initialType = latestAuthoredType(state);
+  const twigActive = twigRead<string | null>('activeId', initialType);
+  let activeId: VehiclePopulationId = (typeForId(twigActive)?.id ?? initialType) as VehiclePopulationId;
   let frame = 0;
   let status: string | null = deps.error ? `store unavailable: ${deps.error}` : null;
   let rev = 0;
@@ -136,74 +271,28 @@ export function createVehicleStore(deps: VehicleStoreDeps) {
   };
 
   const syncState = () => { state = deps.channel?.state() ?? state; };
-  const setActiveId = (id: string | null) => {
-    activeId = id;
-    twigWrite('activeId', id);
-    emit();
-  };
-  const bump = () => { rev += 1; syncState(); emit(); };
-  const currentDoc = (): VehicleDoc | null => {
+  const activeType = (): VehiclePopulationRow => VEHICLE_POPULATION_BY_ID[activeId];
+  const currentDoc = (): VehicleDoc => {
     syncState();
-    return activeId ? state.vehicles[activeId] ?? null : null;
+    const row = activeType();
+    return normalizeDoc(row, authoredDocFor(state, row));
   };
 
-  const author = (id: string, next: VehicleDoc, label: string) => {
+  const bump = () => { rev += 1; syncState(); emit(); };
+
+  const author = (id: VehiclePopulationId, next: VehicleDoc, label: string) => {
     if (!deps.session || !deps.channel) {
       status = `save unavailable: ${deps.error ?? 'no session'}`;
       emit();
       return;
     }
-    const display = vehicleDisplayName(id, next);
-    deps.session.commit({ kind: 'authored', id, doc: next }, `${display}: ${label}`);
-    status = `${display}: ${label}`;
+    const row = VEHICLE_POPULATION_BY_ID[id];
+    const doc = normalizeDoc(row, next);
+    deps.session.commit({ kind: 'authored', id, doc }, `${row.label}: ${label}`);
+    status = `${row.label}: ${label}`;
     bump();
   };
-  const apply = (next: VehicleDoc, label: string) => { if (activeId) author(activeId, next, label); };
-
-  const newVehicle = () => {
-    if (!deps.session) {
-      status = `save unavailable: ${deps.error ?? 'no session'}`;
-      emit();
-      return;
-    }
-    syncState();
-    const doc = generateVehicle(seed());
-    const id = freshId(state, doc);
-    author(id, doc, 'authored');
-    activeId = id;
-    twigWrite('activeId', id);
-    view.selectedPart = 'gas_tank';
-    twigWrite('selectedPart', view.selectedPart);
-    view.pose = 'parked';
-    twigWrite('pose', view.pose);
-    frame = 0;
-    view.running = false;
-    twigWrite('running', false);
-    status = `${vehicleDisplayName(id, doc)}: authored`;
-    emit();
-  };
-
-  const removeActive = () => {
-    if (!deps.session || !deps.channel || !activeId) return;
-    const removed = activeId;
-    const removedName = vehicleDisplayName(removed, state.vehicles[removed]);
-    deps.session.commit({ kind: 'removed', id: removed }, `${removedName}: deleted`);
-    syncState();
-    activeId = state.order[state.order.length - 1] ?? null;
-    twigWrite('activeId', activeId);
-    status = `${removedName}: deleted`;
-    emit();
-  };
-
-  const pick = (id: string) => {
-    if (!state.vehicles[id]) return;
-    activeId = id;
-    twigWrite('activeId', id);
-    view.selectedPart = 'gas_tank';
-    twigWrite('selectedPart', view.selectedPart);
-    status = `loaded ${vehicleDisplayName(id, state.vehicles[id])}`;
-    emit();
-  };
+  const apply = (next: VehicleDoc, label: string) => author(activeId, next, label);
 
   const setPose = (pose: VehiclePoseId) => {
     view.pose = pose;
@@ -220,24 +309,24 @@ export function createVehicleStore(deps: VehicleStoreDeps) {
     return doc && part ? GAME_VEHICLE.damageOf(doc, part) : 0;
   };
 
-  {
-    syncState();
-    if (!activeId || !state.vehicles[activeId]) {
-      activeId = state.order[state.order.length - 1] ?? null;
-      twigWrite('activeId', activeId);
-    }
-  }
+  const setPopulationField = (field: 'spawnRate' | 'rarity' | 'speed', value: number, label: string) => {
+    const doc = currentDoc();
+    const next = clampField(value, VEHICLE_POPULATION_TUNING[field]);
+    apply({ ...doc, [field]: next }, `${label} -> ${next}`);
+  };
 
   return {
     subscribe(fn: () => void): () => void { listeners.add(fn); return () => listeners.delete(fn); },
     get state() { return state; },
     get activeId() { return activeId; },
     get doc() { return currentDoc(); },
+    get activeType() { return activeType(); },
     get view() { return view; },
     get frame() { return frame; },
     get status() { return status; },
     get rev() { return rev; },
     get sessionError() { return deps.error; },
+    get populationSpec() { return VEHICLE_POPULATION_TUNING; },
     selectedDamage,
     tickFrame() {
       if (!view.running) return;
@@ -247,44 +336,80 @@ export function createVehicleStore(deps: VehicleStoreDeps) {
     setStatus(s: string | null) { status = s; emit(); },
     listRows() {
       syncState();
-      return state.order.map((id) => ({ id, label: vehicleDisplayName(id, state.vehicles[id]), icon: 'Car' }));
+      return VEHICLE_POPULATION_ROWS.map((row) => ({ id: row.id, label: row.label, icon: 'Car' }));
     },
     defaultRow(rows: Array<{ id: string }>) {
-      if (activeId && rows.some((r) => r.id === activeId)) return activeId;
-      return rows[rows.length - 1]?.id;
+      if (rows.some((r) => r.id === activeId)) return activeId;
+      return rows[0]?.id;
     },
-    pick,
-    newVehicle,
-    removeActive,
+    pick(id: string) {
+      const row = typeForId(id);
+      if (!row) return;
+      activeId = row.id;
+      twigWrite('activeId', row.id);
+      view.selectedPart = 'gas_tank';
+      twigWrite('selectedPart', view.selectedPart);
+      status = `loaded ${row.label}`;
+      emit();
+    },
     saveActive() {
-      const doc = currentDoc();
-      if (!doc || !activeId) return;
-      author(activeId, doc, 'saved');
+      author(activeId, currentDoc(), 'saved');
     },
-    reroll() { apply(generateVehicle(seed()), 'reroll'); },
+    reroll() {
+      const row = activeType();
+      const current = currentDoc();
+      apply(preservePopulation(baseDoc(row, seed()), current), 'reroll');
+    },
     repaint() {
       const doc = currentDoc();
-      if (doc) apply(repaint(doc, seed()), 'repaint');
+      apply(normalizeDoc(activeType(), preservePopulation(repaint(doc, seed()), doc)), 'repaint');
     },
-    setVehicleType(style: keyof typeof GAME_VEHICLE.tables.styles) {
+    setSpawnRate(value: number) { setPopulationField('spawnRate', value, 'spawn rate'); },
+    setRarity(value: number) { setPopulationField('rarity', value, 'rarity'); },
+    setSpeed(value: number) { setPopulationField('speed', value, 'speed'); },
+    materialOptions() { return materialPickOptions(materials()); },
+    colorVariationOptions() {
       const doc = currentDoc();
-      if (doc) apply(editStyle(doc, style), `vehicle -> ${GAME_VEHICLE.tables.styles[style].label}`);
+      return materialPickOptions((doc.colorVariations ?? []).map((v) => ({ id: v.id, label: v.label })));
     },
-    setRole(role: keyof typeof GAME_VEHICLE.tables.roles) {
+    activeColorVariation(): ColorVariation | null {
       const doc = currentDoc();
-      if (doc) apply(editService(doc, role), `service -> ${GAME_VEHICLE.tables.roles[role].label}`);
+      return (doc.colorVariations ?? []).find((v) => v.id === doc.activeColorVariationId) ?? null;
+    },
+    addColorVariation(textureId: string) {
+      if (!validMaterial(textureId)) {
+        status = `unknown material: ${textureId}`;
+        emit();
+        return;
+      }
+      const doc = currentDoc();
+      const current = doc.colorVariations ?? [];
+      const nextVariation = { id: textureId, label: materialLabel(materials(), textureId), textureId };
+      const variations = current.some((v) => v.id === textureId) ? current : [...current, nextVariation];
+      apply({ ...doc, colorVariations: variations, activeColorVariationId: textureId }, `color variation -> ${nextVariation.label}`);
+    },
+    setActiveColorVariation(textureId: string | null) {
+      const doc = currentDoc();
+      const active = textureId && (doc.colorVariations ?? []).some((v) => v.id === textureId) ? textureId : null;
+      apply({ ...doc, activeColorVariationId: active }, active ? `preview material -> ${active}` : 'preview material -> base');
+    },
+    removeActiveColorVariation() {
+      const doc = currentDoc();
+      const active = doc.activeColorVariationId;
+      if (!active) return;
+      const variations = (doc.colorVariations ?? []).filter((v) => v.id !== active);
+      apply({ ...doc, colorVariations: variations, activeColorVariationId: null }, `removed color variation ${active}`);
     },
     setGasSide(side: -1 | 1) {
       const doc = currentDoc();
-      if (doc) apply(editGasSide(doc, side), side < 0 ? 'gas -> driver side' : 'gas -> passenger side');
+      apply(editGasSide(doc, side), side < 0 ? 'gas -> driver side' : 'gas -> passenger side');
     },
     setGasZ(v: number) {
       const doc = currentDoc();
-      if (doc) apply(setGasZ(doc, v), `gas z -> ${v.toFixed(2)}`);
+      apply(setGasZ(doc, v), `gas z -> ${v.toFixed(2)}`);
     },
     gasZSpec() {
-      const doc = currentDoc();
-      return gasZKnobSpec(doc?.style ?? 'sedan');
+      return gasZKnobSpec(activeType().style);
     },
     setSelectedPart(part: VehiclePartId | null) {
       view.selectedPart = part;
@@ -293,21 +418,19 @@ export function createVehicleStore(deps: VehicleStoreDeps) {
     },
     repairSelected() {
       const doc = currentDoc();
-      if (!doc) return;
       if (view.selectedPart) apply(setPartDamage(doc, view.selectedPart, 0), `repaired ${view.selectedPart}`);
       else apply(repairAll(doc), 'repaired all');
     },
     damageSelected() {
       const doc = currentDoc();
-      if (doc && view.selectedPart) apply(nudgeDamage(doc, view.selectedPart, 1), `damaged ${view.selectedPart}`);
+      if (view.selectedPart) apply(nudgeDamage(doc, view.selectedPart, 1), `damaged ${view.selectedPart}`);
     },
     wreck() {
-      const doc = currentDoc();
-      if (doc) apply(wreck(doc, seed()), 'wrecked');
+      apply(wreck(currentDoc(), seed()), 'wrecked');
     },
     setDamage(level: DamageLevel) {
       const doc = currentDoc();
-      if (doc && view.selectedPart) apply(setPartDamage(doc, view.selectedPart, level), `${view.selectedPart} -> ${GAME_VEHICLE.tables.damageLabels[level]}`);
+      if (view.selectedPart) apply(setPartDamage(doc, view.selectedPart, level), `${view.selectedPart} -> ${GAME_VEHICLE.tables.damageLabels[level]}`);
     },
     setPose,
     setRunning: setViewKey('running', 'running'),

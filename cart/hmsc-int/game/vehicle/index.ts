@@ -15,6 +15,7 @@ export type VehicleStyleId =
   | 'van'
   | 'pickup'
   | 'sports'
+  | 'police_car'
   | 'ambulance'
   | 'fire_truck';
 
@@ -86,6 +87,11 @@ export type VehicleDoc = {
   seed: number;
   color: string;
   trim: string;
+  spawnRate?: number;
+  rarity?: number;
+  speed?: number;
+  colorVariations?: Array<{ id: string; label: string; textureId: string }>;
+  activeColorVariationId?: string | null;
   gasSide: -1 | 1;
   gasZ: number;
   damage: Partial<Record<VehiclePartId, DamageLevel>>;
@@ -174,15 +180,16 @@ export const VEHICLE_STYLES = Object.freeze({
   van: { label: 'van', length: 4.8, width: 2.05, bodyH: 0.92, cabinH: 0.86, cabinZ: 0.08, cabinD: 2.72, wheelR: 0.41, clearance: 0.34 },
   pickup: { label: 'pickup', length: 4.85, width: 1.96, bodyH: 0.7, cabinH: 0.58, cabinZ: -0.72, cabinD: 1.5, wheelR: 0.43, clearance: 0.37 },
   sports: { label: 'sports', length: 4, width: 1.9, bodyH: 0.48, cabinH: 0.4, cabinZ: -0.24, cabinD: 1.32, wheelR: 0.4, clearance: 0.25 },
+  police_car: { label: 'police car', length: 4.45, width: 1.9, bodyH: 0.62, cabinH: 0.56, cabinZ: 0.02, cabinD: 1.86, wheelR: 0.4, clearance: 0.31 },
   ambulance: { label: 'ambulance', length: 5.9, width: 2.22, bodyH: 0.78, cabinH: 0.9, cabinZ: -1.92, cabinD: 1.78, wheelR: 0.44, clearance: 0.37 },
   fire_truck: { label: 'fire truck', length: 7.25, width: 2.42, bodyH: 0.82, cabinH: 1.08, cabinZ: -2.46, cabinD: 2.22, wheelR: 0.5, clearance: 0.43 },
 } satisfies Record<VehicleStyleId, VehicleStyleDefinition>);
 
 export const VEHICLE_ROLES = Object.freeze({
   civilian: { label: 'civilian', color: '#2f6fb0', trim: '#171a1f', styles: ['sedan', 'coupe', 'wagon', 'van', 'pickup', 'sports'] },
-  police: { label: 'police', color: '#f8fafc', trim: '#111827', styles: ['sedan', 'wagon', 'sports'] },
-  medical: { label: 'medical', color: '#f8fafc', trim: '#b91c1c', styles: ['ambulance', 'van'] },
-  fire: { label: 'fire', color: '#b91c1c', trim: '#facc15', styles: ['fire_truck', 'pickup'] },
+  police: { label: 'police', color: '#f8fafc', trim: '#111827', styles: ['police_car'] },
+  medical: { label: 'medical', color: '#f8fafc', trim: '#b91c1c', styles: ['ambulance'] },
+  fire: { label: 'fire', color: '#b91c1c', trim: '#facc15', styles: ['fire_truck'] },
 } satisfies Record<VehicleRoleId, VehicleRoleDefinition>);
 
 export const VEHICLE_POSES = Object.freeze({
@@ -232,6 +239,7 @@ export const VEHICLE_RANDOM_TABLES = Object.freeze({
     van: 0.45,
     pickup: 0.64,
     sports: 0.34,
+    police_car: 0.34,
     ambulance: 0.34,
     fire_truck: 0.34,
   },
