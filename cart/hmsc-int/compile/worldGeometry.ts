@@ -23,6 +23,7 @@
 
 import type { GameState, PropKind, BuildingKind, TileKind } from '../../hmsc/design';
 import { solveRoadCrossSection } from '../../hmsc/world/roadProfile';
+import { tileKindDefinition } from '../../hmsc/world/tileKinds';
 import { GAME_BUILD } from '@game';
 import type { BuildMaterial, PlacedBuildPiece } from '@game';
 
@@ -52,34 +53,17 @@ function hexColor(hex: string): Color {
 
 // ── colors ────────────────────────────────────────────────────────────────
 
+// Floor/tile color from the SAME source /test renders with: the tile kind's
+// authored render.color (cart/hmsc/world/tileKinds). /test's FloorMesh paints a
+// captured texture over white; the kind color is that texture's base — e.g.
+// asphalt #20242d (near-black), the user's "black floor". Using a made-up palette
+// here is what turned the floor white. No texture in the instanced path yet, so
+// the flat kind color is the closest faithful match.
 function tileColor(kind: TileKind | string): Color {
-  switch (kind) {
-    case 'water':
-      return [0.18, 0.42, 0.7];
-    case 'road':
-    case 'asphalt':
-    case 'laneNorth':
-    case 'laneSouth':
-    case 'laneEast':
-    case 'laneWest':
-    case 'junction':
-      return [0.34, 0.34, 0.37]; // mid asphalt — dark enough to read, not a void
-    case 'crosswalk':
-      return [0.72, 0.72, 0.74];
-    case 'sidewalk':
-      return [0.64, 0.64, 0.66];
-    case 'mud':
-      return [0.4, 0.3, 0.2];
-    case 'sand':
-      return [0.82, 0.74, 0.46];
-    case 'bush':
-      return [0.3, 0.52, 0.24];
-    case 'wall':
-      return [0.5, 0.5, 0.52];
-    case 'door':
-      return [0.6, 0.45, 0.3];
-    default:
-      return [0.36, 0.5, 0.34]; // generic painted ground (greenish)
+  try {
+    return hexColor(tileKindDefinition(kind as TileKind).render.color);
+  } catch {
+    return [0.2, 0.22, 0.26];
   }
 }
 
@@ -197,35 +181,35 @@ function pushWorldLayers(out: number[], state: GameState): void {
     pushBox(out, cell.x + 0.5, (cell.y ?? 0) + 0.2, cell.z + 0.5, 0.9, 0.4, 0.9, tileColor(placed.kind));
   }
 
-  // Roads — dark asphalt slabs sized to their cross-section, run along their axis.
+  // Roads — asphalt slabs sized to their cross-section, run along their axis.
+  const roadColor = tileColor('road');
   for (const road of world.roads) {
     const width = Math.max(2, solveRoadCrossSection(road.profile).totalWidthMeters);
     const length = Math.max(1, road.lengthTiles);
     if (road.orientation === 'northSouth') {
-      pushBox(out, road.x + width / 2, road.y + 0.075, road.z + length / 2, width, 0.15, length, [0.18, 0.18, 0.2]);
+      pushBox(out, road.x + width / 2, road.y + 0.075, road.z + length / 2, width, 0.15, length, roadColor);
     } else {
-      pushBox(out, road.x + length / 2, road.y + 0.075, road.z + width / 2, length, 0.15, width, [0.18, 0.18, 0.2]);
+      pushBox(out, road.x + length / 2, road.y + 0.075, road.z + width / 2, length, 0.15, width, roadColor);
     }
   }
 
   // Junctions — intersection box / cul-de-sac bulb, sized to the joining roads.
+  const junctionColor = tileColor('asphalt');
   for (const junction of world.junctions) {
     if (junction.kind === 'intersection') {
       const w = Math.max(2, solveRoadCrossSection(junction.profile).totalWidthMeters);
-      pushBox(out, junction.x + w / 2, junction.y + 0.08, junction.z + w / 2, w, 0.16, w, [0.22, 0.22, 0.24]);
+      pushBox(out, junction.x + w / 2, junction.y + 0.08, junction.z + w / 2, w, 0.16, w, junctionColor);
     } else {
       const r = Math.max(1, junction.bulbRadiusTiles);
-      pushBox(out, junction.centerX, junction.y + 0.08, junction.centerZ, r * 2, 0.16, r * 2, [0.22, 0.22, 0.24]);
+      pushBox(out, junction.centerX, junction.y + 0.08, junction.centerZ, r * 2, 0.16, r * 2, junctionColor);
     }
   }
 
-  // Landforms — extruded footprints (crude box first cut; ~hf~ mesh path later).
-  for (const landform of world.landforms) {
-    const radius = landform.params.radius ?? (landform.field ? (landform.field.cols * landform.field.cell) / 2 : 12);
-    const height = Math.max(1, landform.params.height ?? landform.params.peak ?? 6);
-    const size = Math.max(2, radius * 2);
-    pushBox(out, landform.centerX, landform.baseY + height / 2, landform.centerZ, size, height, size, [0.46, 0.5, 0.34]);
-  }
+  // Landforms (mountains/hills) are TERRAIN — /test draws them as draped
+  // heightfield meshes via <Landform>, NOT as solid blocks. Extruding them to a
+  // box produced a phantom floating "green building" that isn't in the map. Skip
+  // them until the ~hf~ heightfield path lands (ship the height grid, host bakes
+  // the mesh — see the map-format memory); a wrong box is worse than nothing.
 
   // Legacy authored buildings (usually empty; pieces are the real structures).
   for (const building of world.buildings ?? []) {
