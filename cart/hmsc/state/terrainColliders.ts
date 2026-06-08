@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
 import type { GameState } from '../design';
-import { parkingGarageColliderData } from '../world/structures';
-import { buildingKindStructureModel } from '../world/buildingKinds';
 import { landformColliderData } from '../world/landforms';
 import type { TerrainColliderData } from '../world/terrain';
 
@@ -26,21 +24,6 @@ function collectTerrainColliders(state: GameState): OrientedCollider[] {
   for (const lf of state.world.landforms ?? []) {
     colliders.push({ ...landformColliderData(lf), yaw: 0, pivotX: 0, pivotZ: 0 });
   }
-  // Open structures whose floor is a heightfield (the parking garage's terraced,
-  // ramp-connected decks) register the same way a landform does — see-it == walk-it
-  // via the SAME bake — and rotate WITH the building via yaw + footprint centre.
-  // Host cap is HMSC_MAX_HEIGHTFIELDS (64), shared with the terrain landforms
-  // above; excess is dropped by __hmsc_register_heightfield.
-  for (const building of state.world.buildings) {
-    if (buildingKindStructureModel(building.kind) === 'parkingGarage') {
-      colliders.push({
-        ...parkingGarageColliderData(building),
-        yaw: (building.yawDegrees ?? 0) * Math.PI / 180,
-        pivotX: building.x + building.widthTiles / 2,
-        pivotZ: building.z + building.depthTiles / 2,
-      });
-    }
-  }
   return colliders;
 }
 
@@ -59,5 +42,5 @@ export function registerTerrainColliders(state: GameState): void {
 export function useTerrainColliders(state: GameState): void {
   useEffect(() => {
     registerTerrainColliders(state);
-  }, [state.world.landforms, state.world.buildings]);
+  }, [state.world.landforms]);
 }

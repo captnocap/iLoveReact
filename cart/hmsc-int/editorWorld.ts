@@ -5,16 +5,13 @@
 // key here IS how the game receives the authored world: it boots via
 // readStoredGameState() in cart/hmsc/index.tsx. So "compile" = persist.
 //
-// Every mutation goes through the GAME's own world mutators (resolveBuildingPlacement
-// + addBuildingToWorld, placeProp, addZone, addSurfaceRegion, placeCell), so an
-// authored building/prop/zone/tile is byte-identical to one the game made itself —
+// Every mutation goes through the GAME's own world mutators (placeProp, addZone,
+// addSurfaceRegion, placeCell), so an authored prop/zone/tile is byte-identical
+// to one the game made itself —
 // same ids, same collision, same borrow-a-tileKind gameplay. No parallel schema,
 // no emit/parse round-trip that can drift.
 
 import type {
-  Building,
-  BuildingEnclosure,
-  BuildingSide,
   GameState,
   PropKind,
   TileKind,
@@ -28,17 +25,12 @@ import {
   readStoredGameState,
   saveGameState,
 } from '../hmsc/state/gameState';
-import { addBuildingToWorld, removeBuildingFromWorld } from '../hmsc/world/interiors';
-import { resolveBuildingPlacement } from '../hmsc/world/buildingPlacement';
 import { landformGroundTopAt } from '../hmsc/world/landforms';
-import { buildingKindDefinition } from '../hmsc/world/buildingKinds';
-import { buildingFootprint } from '../hmsc/world/buildings';
 import { placeProp, removeProp, propFootprint } from '../hmsc/world/props';
 import { addZone, removeZone } from '../hmsc/world/zones';
 import { addSurfaceRegion, placeCell } from '../hmsc/world/grid';
 import { propKindDefinition } from '../hmsc/world/propKinds';
 import { nextUniqueId } from '../hmsc/world/idgen';
-import { rectsOverlap } from '../hmsc/world/rects';
 import { writeHmscPackageFromState } from './packageMap';
 
 // The editor always works on the same GameState shape the game uses. Load the
@@ -64,7 +56,7 @@ export function resetEditorWorld(): GameState {
 }
 
 // A clean slate: the same GameState shape the game boots from, but with NO
-// authored content — no buildings, props, roads, junctions, landforms, zones, or
+// authored content — no props, roads, junctions, landforms, zones, or
 // surface regions. The grid layout + config are kept so the preview camera and
 // addressing still have a frame; everything is placed from nothing. This is the
 // "no built world" start for authoring on top of the kept mutators below.
@@ -79,7 +71,6 @@ export function emptyEditorWorld(): GameState {
       roads: [],
       junctions: [],
       props: [],
-      buildings: [],
       interiors: {},
       landforms: [],
       zones: [],
@@ -87,80 +78,6 @@ export function emptyEditorWorld(): GameState {
       npcs: {},
     },
   };
-}
-
-// ── Building placement ──────────────────────────────────────────────────────
-
-export type BuildResult =
-  | { ok: true; state: GameState; building: Building }
-  | { ok: false; reason: string };
-
-// Place a building at a cell. Mirrors the wv_building command's body exactly:
-// allocate a collision-free id, build the record from the kind defaults (any of
-// which the caller may override), run the city placement rules (overlap / on-road
-// / near-road + door auto-snap) unless forced, then add it via the game mutator
-// (which also wires interiors/entry pads). `force` keeps the given door + skips
-// the sanity checks — the intentional-placement override.
-export function placeBuilding(
-  state: GameState,
-  opts: {
-    kind: Building['kind'];
-    x: number;
-    z: number;
-    enclosure?: BuildingEnclosure;
-    widthTiles?: number;
-    depthTiles?: number;
-    yawDegrees?: number;
-    doorSide?: BuildingSide;
-    skin?: Building['skin'];
-    partTextures?: Building['partTextures'];
-    force?: boolean;
-  },
-): BuildResult {
-  const def = buildingKindDefinition(opts.kind);
-  const widthTiles = opts.widthTiles ?? def.defaultWidthTiles;
-  const depthTiles = opts.depthTiles ?? def.defaultDepthTiles;
-  // Sit the pad on the terrain: sample the landform surface under the footprint
-  // centre (a painted hill, the mountain, …). Flat ground returns nothing → y 0.
-  const groundY = landformGroundTopAt(state, opts.x + widthTiles / 2, opts.z + depthTiles / 2) ?? 0;
-  const proposed: Building = {
-    id: nextUniqueId('building_int_', state.world.buildings.map((b) => b.id)),
-    kind: opts.kind,
-    label: def.label,
-    enclosure: opts.enclosure ?? def.defaultEnclosure,
-    x: opts.x,
-    y: groundY,
-    z: opts.z,
-    widthTiles,
-    depthTiles,
-    ...(opts.yawDegrees ? { yawDegrees: opts.yawDegrees } : {}),
-    doorSide: opts.doorSide ?? 'south',
-    ...(opts.skin ? { skin: opts.skin } : {}),
-    ...(opts.partTextures ? { partTextures: opts.partTextures } : {}),
-    createdByCommand: 'hmsc-int:place',
-  };
-  const placement = resolveBuildingPlacement(state, proposed, opts.force ?? false);
-  if (!placement.ok) return { ok: false, reason: placement.reason };
-  return { ok: true, state: addBuildingToWorld(state, placement.building), building: placement.building };
-}
-
-export function removeBuilding(state: GameState, id: string): GameState {
-  return removeBuildingFromWorld(state, id);
-}
-
-// Whether a building of this footprint at this corner would overlap an existing
-// building or sit on a road — the cheap check the ghost cursor colors with
-// (green = placeable, red = blocked). Mirrors resolveBuildingPlacement's overlap
-// rules without mutating; the door-snap/near-road policy is applied on commit.
-export function buildingFootprintBlocked(
-  state: GameState,
-  opts: { x: number; z: number; widthTiles: number; depthTiles: number },
-): boolean {
-  const f = { minX: opts.x, minZ: opts.z, maxX: opts.x + opts.widthTiles, maxZ: opts.z + opts.depthTiles };
-  for (const other of state.world.buildings) {
-    if (rectsOverlap(f, buildingFootprint(other))) return true;
-  }
-  return false;
 }
 
 // ── Prop placement ──────────────────────────────────────────────────────────

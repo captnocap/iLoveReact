@@ -10,10 +10,6 @@ import { floorTextureKey } from './tileSurface';
 import { Road } from './Road';
 import { CulDeSac, Intersection } from './RoadJunctions';
 import { Prop } from './Prop';
-import { Building3D } from './Building';
-import { BuildingFacades } from './BuildingFacades';
-import { BuildingTexturedFaces } from './PartCaptures';
-import { nearestBuildingHitFraction } from '../world/buildings';
 import { Landform } from './Landform';
 import { nearestLandformCameraHit } from '../world/landforms';
 import { buildHmscSky } from './sky';
@@ -154,20 +150,6 @@ export const WorldStatics = memo(function WorldStatics(props: {
       {world.props.map((prop) => (
         <Prop key={prop.id} prop={prop} />
       ))}
-      {/* Buildings: sealed blocks, hollow walk-in shells, and the exterior shells
-          of closed (interior) buildings. Drawn from the same boxes host physics
-          collides with. Inside an interior, world.buildings holds only that
-          interior's shell, so this same map renders the room walls too. */}
-      {world.buildings.map((building) => (
-        <Building3D key={building.id} building={building} />
-      ))}
-      {/* Facade skins: thin textured panels on the exterior wall faces, sampling
-          each building's captured skin texture (office/residential/retail/
-          industrial). 'plain' buildings get none and show their bare wall. */}
-      <BuildingFacades buildings={world.buildings} />
-      {/* Part-texture facade panels (the click-to-pick channel) for box buildings —
-          additive over the skin panels above; only textured faces emit a panel. */}
-      <BuildingTexturedFaces buildings={world.buildings} />
       {/* Registry-driven landforms (mountains, hills, estates): ONE component for
           every kind — a Heightfield mesh baked from the kind's height function,
           tiled with the surface material, plus any kind decoration (crater lake,
@@ -209,20 +191,13 @@ export function GameWorld3D(props: {
   const cameraFov = props.aiming ? HMSC_GAMEPLAY_CAMERA.aimFovDegrees : HMSC_GAMEPLAY_CAMERA.fovDegrees;
   const view = props.state.config.view;
 
-  // Camera wall collision: if a building wall sits between the look pivot (near
-  // the player's head) and the desired third-person camera spot, pull the camera
-  // in to just before that wall, so the player stays visible inside hollow shells
-  // and interior rooms instead of being hidden behind a wall the camera clipped
-  // through. Walls are the active world's buildings (including an interior's
-  // shell), drawn from the same boxes the player collides with.
   const pivot = { x: player.x, y: player.y + HMSC_GAMEPLAY_CAMERA.targetHeightMeters, z: player.z };
   const desiredCamera = { x: cameraPosition[0], y: cameraPosition[1], z: cameraPosition[2] };
-  // Same pull-in for the heightfield landforms: if the orbit would put the camera
+  // Pull in for the heightfield landforms: if the orbit would put the camera
   // inside a hill/mountain, stop it at the surface — no seeing inside the mesh from
-  // a low angle. Take whichever obstruction (wall or terrain) is nearer.
-  const wallHitFraction = nearestBuildingHitFraction(props.state.world.buildings, pivot, desiredCamera);
+  // a low angle.
   const landformHitFraction = nearestLandformCameraHit(props.state, pivot, desiredCamera);
-  const hitFraction = Math.min(wallHitFraction, landformHitFraction);
+  const hitFraction = landformHitFraction;
   const segmentLength = Math.hypot(desiredCamera.x - pivot.x, desiredCamera.y - pivot.y, desiredCamera.z - pivot.z);
   const marginFraction = segmentLength > 1e-3 ? CAMERA_WALL_MARGIN_METERS / segmentLength : 0;
   const cameraFraction = hitFraction < 1

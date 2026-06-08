@@ -11,9 +11,9 @@ import {
   lastPointerPath,
   type SessionEnvelope,
 } from '@reactjit/workspace';
-import type { Building, BuildingFaceRole, BuildingSkin, GameState } from '../hmsc/design';
+import type { BuildingFaceRole, BuildingSkin, GameState } from '../hmsc/design';
 import { applyFaceSkin } from './buildingEditor';
-import { compileEditorWorld, emptyEditorWorld, placeBuilding, placeMarker, placeWorldProp } from './editorWorld';
+import { compileEditorWorld, emptyEditorWorld, placeMarker, placeWorldProp } from './editorWorld';
 import { cellCenterToWorld, cellKey as gridCellKey } from '../hmsc/world/grid';
 import { type ChunkFloor, floorsFromEditorWorld, floorsToLandforms } from './chunkFloor';
 import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
@@ -735,11 +735,10 @@ function EditorShell() {
 
   // The preview world = baseWorld + the painted chunks as REAL heightfield
   // landforms (so WorldStatics draws the terrain the game's own way and placement
-  // samples its height) + every placement applied via the game's own mutators.
-  // Landforms fold in BEFORE placements so a building/prop sits on the hill under
-  // it. Placement graph coords → world cells: graph origin is the seed chunk's
-  // centre, so worldCell = gx/TILE_UNITS + CHUNK_TILES/2; buildings place by
-  // min-corner (centre − half-footprint) and carry the placement's free rotation.
+  // samples its height) + every current placement applied via the game's own
+  // mutators. Legacy `cat: building` placements are intentionally inert:
+  // AUTHBUILD-REMOVE deletes the old world.buildings system; V24 build pieces
+  // (`bp_*`) are the surviving building model.
   const previewWorld = useMemo<GameState>(() => ptime('previewWorld', `rebuild floors=${floors.length} placements=${placements.length}`, () => {
     let s: GameState = { ...baseWorld, world: { ...baseWorld.world, landforms: floorsToLandforms(floors) } };
     // Placement graph coords → world cells via placementCellRect — the ONE shared
@@ -759,24 +758,7 @@ function EditorShell() {
       const wx = rect.minX;
       const wz = rect.minZ;
       if (p.cat === 'building') {
-        const r = placeBuilding(s, {
-          kind: p.kind as Building['kind'],
-          x: wx,
-          z: wz,
-          // The placement's free rotation IS the building's yaw now — the whole
-          // mass turns (render3d/buildingTransform + the host OBB), so the 3D box
-          // matches the rotated 2D node instead of just flipping a door quadrant.
-          yawDegrees: p.rotation,
-          // Per-face texture assignment authored on the placement rides into the
-          // derived building, so the preview AND the compiled game wear it.
-          skin: p.skin,
-          // GLOBAL per-kind part textures (right-rail Objects scope) fold in here;
-          // a per-instance partTextures override (if any) wins. The merged map rides
-          // into the derived building so preview AND compiled game wear it.
-          partTextures: mergeKindTextures('building', p.kind, p.partTextures),
-          force: true,
-        });
-        if (r.ok) s = r.state;
+        continue;
       } else if (p.cat === 'marker') {
         // Spawn / save markers lower to single placedCells. ONE marker per cell —
         // a spawn can't sit on a save (the non-overlap rule), so the first to claim
@@ -898,7 +880,7 @@ function EditorShell() {
                 onClearNotes={clearNotes}
                 lastSavedAt={ws.lastSavedAt}
                 onPlace={placeObject}
-                activePlaceable={activePlaceable}
+                activePlaceable={activePlaceable?.cat === 'building' ? null : activePlaceable}
                 onArmPlaceable={armPlaceable}
               />
             }

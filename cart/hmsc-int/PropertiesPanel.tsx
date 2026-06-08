@@ -717,8 +717,7 @@ export function PropertiesPanel(props: {
       );
     }
   } else if (focus.kind === 'building') {
-    const b = world.world.buildings.find((x) => x.id === focus.id);
-    body = b ? <BuildingBody building={b} onSetFace={props.onSetFace} /> : <HeaderBar kind="BUILDING" title="missing" sub={focus.id} />;
+    body = <HeaderBar kind="BUILDING" title="legacy layer removed" sub={focus.id} />;
   } else {
     const p = world.world.props.find((x) => x.id === focus.id);
     body = p ? <PropBody prop={p} /> : <HeaderBar kind="OBJECT" title="missing" sub={focus.id} />;

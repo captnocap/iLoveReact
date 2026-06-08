@@ -3,7 +3,6 @@ import { tileKindDefinition, type TileKindDefinition } from './tileKinds';
 import { placedCellTopMeters, surfaceRegionTopMeters } from './surfaceHeights';
 import { roadBandKindAtCell, roadBandKindAtWorldPosition, roadTopAtWorldPosition } from './roads';
 import { junctionBandKindAtCell, junctionBandKindAtWorldPosition, junctionTopAtWorldPosition } from './roadJunctions';
-import { anyBuildingBlocksWorldPoint } from './buildings';
 import { landformTileKindAtWorldPosition, landformTopAtWorldPosition, landformWaterKindAtWorldPosition } from './landforms';
 
 export type PlaceCellOptions = {
@@ -217,7 +216,6 @@ export function canPathThroughCell(state: GameState, cell: GridCell): boolean {
 }
 
 export function canOccupyWorldPosition(state: GameState, position: Vec3): boolean {
-  if (anyBuildingBlocksWorldPoint(state, position.x, position.z)) return false;
   return canPathThroughCell(state, worldToCell(position, state.world.cellSizeMeters));
 }
 

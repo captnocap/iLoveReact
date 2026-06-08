@@ -8,15 +8,11 @@ import { RoadSurfaceCaptures } from '../render3d/Road';
 import { RoadJunctionCaptures } from '../render3d/RoadJunctions';
 import { PropSurfaceCaptures } from '../render3d/PropCaptures';
 import { LandformSurfaceCaptures } from '../render3d/Landform';
-import { BuildingSurfaceCaptures } from '../render3d/BuildingFacades';
-import { WorldPartCaptures } from '../render3d/PartCaptures';
-import { DriveInScreenCaptures } from '../render3d/driveInScreen';
 import { HumanoidFaceCaptures } from '../render3d/humanoid';
 import { hmscSkyBackgroundColor } from '../render3d/sky';
 import { Hud } from '../render/Hud';
 import { HmscDebugHud } from '../render/DebugHud';
 import { usePlayerDrive } from '../state/usePlayerDrive';
-import { useBuildingInteract } from '../state/useBuildingInteract';
 import { useTerrainColliders } from '../state/terrainColliders';
 import { startPerfWatch } from '../state/perfWatch';
 import { angleDeltaDegrees, clampCameraValue, HMSC_GAMEPLAY_CAMERA } from './camera';
@@ -106,10 +102,6 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
   // Register each mountain as a heightfield terrain collider so the host samples
   // the real sloped surface (the carved trail walks; the steep cone blocks).
   useTerrainColliders(props.state);
-
-  // E/F interact for closed buildings: a "Press E to enter/leave" prompt when
-  // near a door, the discoverable counterpart to the walk-on door mats.
-  const interact = useBuildingInteract(props.state, props.setGameState, props.inputBlocked);
 
   // Spike-triggered perf flight recorder. Runs only while `gv_perflog` is on;
   // its own ~60Hz loop watches the host frame-time ring and flushes a
@@ -257,13 +249,6 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
           <Text fontSize={11} color="#cbd5e1">click to focus mouse look — Esc releases</Text>
         </Box>
       ) : null}
-      {interact.prompt && !props.inputBlocked ? (
-        <Box style={{ position: 'absolute', left: 0, right: 0, bottom: 96, alignItems: 'center', zIndex: 3 }}>
-          <Box style={{ paddingLeft: 16, paddingRight: 16, paddingTop: 10, paddingBottom: 10, borderRadius: 8, borderWidth: 1, borderColor: '#f59e0b', backgroundColor: '#020617e6' }}>
-            <Text fontSize={16} color="#f8fafc" style={{ fontWeight: 800 }}>{interact.prompt}</Text>
-          </Box>
-        </Box>
-      ) : null}
       {/* Offscreen Effect captures → the meshes' textures. Siblings of <Scene3D>
           (2D tree), parked off-screen: the tile grids for chunk floors, the
           cross-sections for roads. */}
@@ -272,11 +257,6 @@ export function HmscGameplayRig(props: HmscGameplayRigProps) {
       <RoadJunctionCaptures junctions={props.state.world.junctions} />
       <PropSurfaceCaptures props={props.state.world.props} />
       <LandformSurfaceCaptures landforms={props.state.world.landforms ?? []} />
-      <BuildingSurfaceCaptures buildings={props.state.world.buildings} perception={props.state.player.perception} />
-      {/* Per-PART textures (click-to-pick): open structures' parts + props' parts. */}
-      <WorldPartCaptures buildings={props.state.world.buildings} props={props.state.world.props} perception={props.state.player.perception} />
-      {/* Live <Video> (or NO SIGNAL) → each drive-in screen's texture. */}
-      <DriveInScreenCaptures buildings={props.state.world.buildings} />
       {/* The humanoid face pool — the player's and every NPC's head decal. */}
       <HumanoidFaceCaptures />
     </Pressable>

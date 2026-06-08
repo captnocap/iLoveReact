@@ -168,9 +168,9 @@ function CompassStrip(props: { embodied: Embodied; markers: HudCompassMarker[] }
 type MapRect = { key: string; x: number; z: number; w: number; d: number; color: string };
 
 /** World rectangles worth blipping — regions colored by their KIND table
- *  entry (the door's render color), buildings in panel-edge gray. Computed
- *  once per world; the per-frame work is translation only. */
-function worldMapRects(world: WorldGridState, buildings: readonly { id: string; x: number; z: number; widthTiles: number; depthTiles: number }[]): MapRect[] {
+ *  entry (the door's render color). Computed once per world; the per-frame work
+ *  is translation only. */
+function worldMapRects(world: WorldGridState): MapRect[] {
   const rects: MapRect[] = [];
   const c = world.cellSizeMeters;
   for (const r of world.surfaceRegions) {
@@ -179,9 +179,6 @@ function worldMapRects(world: WorldGridState, buildings: readonly { id: string; 
       x: r.x * c, z: r.z * c, w: r.width * c, d: r.depth * c,
       color: GAME_KINDS.tiles.get(r.kind).render.color,
     });
-  }
-  for (const b of buildings) {
-    rects.push({ key: `b:${b.id}`, x: b.x, z: b.z, w: b.widthTiles, d: b.depthTiles, color: accentFor('hudTextDim') });
   }
   return rects;
 }
@@ -282,10 +279,7 @@ export function EmbodiedHud(props: {
   const markers = props.markers ?? [];
   const world = embodied.sceneState.world;
   // static world → map rects once per authored world (translation is per-frame)
-  const mapRects = useMemo(
-    () => worldMapRects(embodied.worldGrid, world.buildings ?? []),
-    [embodied.worldGrid, world.buildings],
-  );
+  const mapRects = useMemo(() => worldMapRects(embodied.worldGrid), [embodied.worldGrid]);
   const vitals = props.vitals;
   const healthFrac = Math.max(0, Math.min(1, vitals.health / HUD_TUNING.vitals.healthMax));
   const equipment = props.equipment ?? [];

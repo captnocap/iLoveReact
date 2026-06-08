@@ -1,13 +1,13 @@
 // Headless seed-world auditor — runs the placement validator over the world AS
 // AUTHORED IN CODE (state/gameState.ts createInitialGameState → createInitialWorld
-// + seedBuildings/seed props/seed mountains), with NO game window.
+// + seed props/seed mountains), with NO game window.
 //
 // Why the seed and not arbitrary `wv_*` commands: the command registry imports the
 // renderer (render3d/buildingSkins.tsx = React), so it can't be bundled into a
 // plain v8cli script. The seed builders and the validator are React-free, so this
 // runner imports only those — and the seed IS how the world is actually authored
 // (data literals in gameState.ts). Ad-hoc runtime placement is covered in-game by
-// the wv_validate command + the auto-warn on wv_building/wv_prop.
+// the wv_validate command + the auto-warn on wv_prop.
 //
 // Bundled by tools/esbuild directly (see scripts/hmsc-check) — NOT scripts/
 // cart-bundle.js, which only wraps cart Apps. Output goes through __writeStderr
@@ -17,7 +17,6 @@
 import type { GameState } from '../design';
 import { createInitialGameState } from '../state/gameState';
 import {
-  buildingSubject,
   propSubject,
   landformSubject,
   checkPlacement,
@@ -30,7 +29,6 @@ declare const __exit: (code: number) => void;
 
 function subjectsForAudit(state: GameState): PlacementSubject[] {
   return [
-    ...state.world.buildings.map(buildingSubject),
     ...state.world.props.map(propSubject),
     ...(state.world.landforms ?? []).map(landformSubject),
   ];

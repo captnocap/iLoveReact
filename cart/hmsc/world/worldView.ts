@@ -1,13 +1,11 @@
 import type { GameState, ZoneFlag } from '../design';
 import type { WorldLayer } from './placeables';
-import { buildingKindDefinition } from './buildingKinds';
 import { propKindDefinition } from './propKinds';
 import { landformKindDef } from './landforms';
 
 // The shared map read-model. Both the in-game minimap (render/Hud.tsx) and the
 // internal map (cart/hmsc-int) draw landmarks from worldMarkers() instead of each
-// re-deriving a subset of layers — that re-derivation is exactly why buildings
-// never showed on either map and why the two could drift from the 3D world.
+// re-deriving a subset of layers.
 //
 // Cell-kind resolution lives in world/grid.ts:tileKindAtCell (shared with NPC
 // A* pathing); this file adds the LANDMARK layer the maps paint over that raster.
@@ -26,19 +24,6 @@ export type WorldMarker = {
 };
 
 export type MarkerProvider = (state: GameState) => WorldMarker[];
-
-function buildingMarkers(state: GameState): WorldMarker[] {
-  return state.world.buildings.map((b) => ({
-    layer: 'building',
-    id: b.id,
-    label: b.label || buildingKindDefinition(b.kind).label,
-    swatchColor: buildingKindDefinition(b.kind).facadeColor,
-    x: b.x,
-    z: b.z,
-    width: b.widthTiles,
-    depth: b.depthTiles,
-  }));
-}
 
 // Terrain landmarks — the registry-driven landforms (mountains/hills/estate).
 // Each reads its footprint radius from its kind def, so a new landform shows on
@@ -114,7 +99,7 @@ function propMarkers(state: GameState): WorldMarker[] {
 // Provider LIST — the forward seam from WORLD_AUTHORING_PLAN. Each registered
 // provider's markers appear on every map for free; the quest slice pushes an
 // objective-pin provider here later.
-const MARKER_PROVIDERS: MarkerProvider[] = [buildingMarkers, landformMarkers, zoneMarkers, propMarkers];
+const MARKER_PROVIDERS: MarkerProvider[] = [landformMarkers, zoneMarkers, propMarkers];
 
 export function worldMarkers(state: GameState): WorldMarker[] {
   return MARKER_PROVIDERS.flatMap((provider) => provider(state));

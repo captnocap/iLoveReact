@@ -43,17 +43,12 @@ import { junctionFootprint, placeJunction, removeJunction } from '../world/roadJ
 import { solveRoadCrossSection } from '../world/roadProfile';
 import { placeProp, removeProp, setPropSignalOverride } from '../world/props';
 import { isPropKind, propKindDefinition, propKindNamesForConsole } from '../world/propKinds';
-import { buildingFootprint, buildingHeightMeters, resolveBuildingSkin, setBuildingFaceSkin } from '../world/buildings';
-import { resolveBuildingPlacement } from '../world/buildingPlacement';
-import { checkPlacement, formatPlacementIssues, buildingSubject, propSubject, landformSubject, type PlacementSubject } from '../world/placementCheck';
-import { buildingSkinNamesForConsole, isBuildingSkin } from '../render3d/buildingSkins';
+import { checkPlacement, formatPlacementIssues, propSubject, landformSubject, type PlacementSubject } from '../world/placementCheck';
 import { mountainTrailheadPoint } from '../world/landforms';
-import { buildingKindDefinition, buildingKindNamesForConsole, isBuildingKind } from '../world/buildingKinds';
-import { addBuildingToWorld, enterBuildingInterior, leaveCurrentInterior, removeBuildingFromWorld } from '../world/interiors';
 import { addZone, removeZone, isZoneFlag, zoneFlagNamesForConsole } from '../world/zones';
 import { nextUniqueId } from '../world/idgen';
 import { trafficClockSeconds, trafficSignalPhase } from '../world/traffic';
-import type { Building, BuildingEnclosure, BuildingSide, BuildingSkin, PropKind, RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment, TrafficSignalPhase, WorldProp, WorldSurfaceRegion, Zone, ZoneFlag } from '../design';
+import type { PropKind, RoadCulDeSac, RoadCulDeSacThroat, RoadIntersection, RoadLaneCount, RoadOrientation, RoadProfile, RoadSegment, TrafficSignalPhase, WorldProp, WorldSurfaceRegion, Zone, ZoneFlag } from '../design';
 import { movementNoiseModesForConsole, surfaceNoiseProfilesForConsole } from '../world/noiseModel';
 import { findGridPath, type PathAgentKind } from '../world/pathing';
 import { isTileKind, tileKindDefinition, tileKindNamesForConsole } from '../world/tileKinds';
@@ -236,15 +231,12 @@ function spawnPhysicsBurst(state: GameState, count: number, sourceLine: string):
 
 function subjectsForAudit(state: GameState): PlacementSubject[] {
   return [
-    ...state.world.buildings.map(buildingSubject),
     ...state.world.props.map(propSubject),
     ...(state.world.landforms ?? []).map(landformSubject),
   ];
 }
 
 function findSubjectById(state: GameState, id: string): PlacementSubject | undefined {
-  const building = state.world.buildings.find((b) => b.id === id);
-  if (building) return buildingSubject(building);
   const prop = state.world.props.find((p) => p.id === id);
   if (prop) return propSubject(prop);
   const landform = (state.world.landforms ?? []).find((l) => l.id === id);
@@ -252,24 +244,9 @@ function findSubjectById(state: GameState, id: string): PlacementSubject | undef
   return undefined;
 }
 
-// A not-yet-placed building/prop, so the AI can check a spot BEFORE committing.
+// A not-yet-placed prop, so the AI can check a spot BEFORE committing.
 // The sentinel id matches nothing in the world, so the neighbour-scanning rules
 // treat every existing thing as "other".
-function previewBuildingSubject(args: string[]): PlacementSubject {
-  const kind = args[0];
-  if (!isBuildingKind(kind)) throw new Error(`unknown building kind ${kind}; expected one of ${buildingKindNamesForConsole()}`);
-  const x = numberArg(args[1], 'x');
-  const z = numberArg(args[2], 'z');
-  const def = buildingKindDefinition(kind);
-  const widthTiles = args[3] != null ? numberArg(args[3], 'width') : def.defaultWidthTiles;
-  const depthTiles = args[4] != null ? numberArg(args[4], 'depth') : def.defaultDepthTiles;
-  const building: Building = {
-    id: '__preview__', kind, label: def.label, enclosure: def.defaultEnclosure,
-    x, y: 0, z, widthTiles, depthTiles, doorSide: 'south', createdByCommand: 'wv_validate',
-  };
-  return buildingSubject(building);
-}
-
 function previewPropSubject(args: string[]): PlacementSubject {
   const kind = args[0];
   if (!isPropKind(kind)) throw new Error(`unknown prop kind ${kind}; expected one of ${propKindNamesForConsole()}`);
@@ -282,15 +259,15 @@ function previewPropSubject(args: string[]): PlacementSubject {
 function runValidateCommand(args: string[], state: GameState): CommandResult {
   try {
     // Dry-run a proposed thing (the "check before you place it" path).
-    if (args[0] === 'building' || args[0] === 'prop') {
-      const subject = args[0] === 'building' ? previewBuildingSubject(args.slice(1)) : previewPropSubject(args.slice(1));
+    if (args[0] === 'prop') {
+      const subject = previewPropSubject(args.slice(1));
       const issues = checkPlacement(state, subject);
       return ok(state, `preview ${subject.label} @ [${subject.footprint.minX},${subject.footprint.minZ}]: ${issues.length ? `${issues.length} issue(s)` : 'all clear'}`, ...formatPlacementIssues(issues));
     }
     // Audit one already-placed thing by id.
     if (args.length === 1) {
       const subject = findSubjectById(state, args[0]);
-      if (!subject) return fail(state, `no building/prop/landform with id ${args[0]}`);
+      if (!subject) return fail(state, `no prop/landform with id ${args[0]}`);
       const issues = checkPlacement(state, subject);
       return ok(state, `${subject.id} (${subject.label}): ${issues.length ? `${issues.length} issue(s)` : 'all clear'}`, ...formatPlacementIssues(issues));
     }
@@ -1189,121 +1166,6 @@ const COMMANDS: CommandDefinition[] = [
     },
   },
   {
-    name: 'wv_building',
-    summary: 'List/place/remove a building, or skin one face (front/back/left/right/top).',
-    usage: 'wv_building [kinds|skins] | wv_building <kind> <x> <z> [enclosure] [w] [d] [doorSide n|s|e|w] [skin] [force] | wv_building face <id> <front|back|left|right|top|all> <skin> | wv_building remove <id>',
-    run(args, state, sourceLine) {
-      try {
-        if (args.length === 0) {
-          if (state.world.buildings.length === 0) return ok(state, 'no buildings placed');
-          return ok(state, ...state.world.buildings.map((b) => {
-            const f = buildingFootprint(b);
-            const h = buildingHeightMeters(b).toFixed(1);
-            return `${b.id} ${b.kind} ${b.enclosure} ${resolveBuildingSkin(b)} ${b.widthTiles}x${b.depthTiles} h${h}m @ [${f.minX},${f.minZ}] door ${b.doorSide}`;
-          }));
-        }
-        if (args[0] === 'kinds') return ok(state, `building kinds: ${buildingKindNamesForConsole()}`);
-        if (args[0] === 'skins') return ok(state, `building skins: ${buildingSkinNamesForConsole()}`);
-        if (args[0] === 'face') {
-          const id = args[1];
-          const roleArg = args[2];
-          const skinArg = args[3];
-          if (!id || !roleArg || !skinArg) return fail(state, 'usage: wv_building face <id> <front|back|left|right|top|all> <skin>');
-          if (!state.world.buildings.some((b) => b.id === id)) return fail(state, `no building ${id}`);
-          const roles = ['front', 'back', 'left', 'right', 'top', 'all'];
-          if (!roles.includes(roleArg)) return fail(state, `face must be one of ${roles.join(', ')}`);
-          if (!isBuildingSkin(skinArg)) return fail(state, `unknown skin ${skinArg}; expected one of ${buildingSkinNamesForConsole()}`);
-          return ok(setBuildingFaceSkin(state, id, roleArg as any, skinArg as BuildingSkin), `${id} ${roleArg} skin = ${skinArg}`);
-        }
-        if (args[0] === 'remove') {
-          const id = args[1];
-          if (!id) return fail(state, 'usage: wv_building remove <id>');
-          if (!state.world.buildings.some((b) => b.id === id)) return fail(state, `no building ${id}`);
-          return ok(removeBuildingFromWorld(state, id), `removed building ${id}`);
-        }
-        const kind = args[0];
-        if (!isBuildingKind(kind)) return fail(state, `unknown building kind ${kind}; expected one of ${buildingKindNamesForConsole()}`);
-        const def = buildingKindDefinition(kind);
-        const x = numberArg(args[1], 'x');
-        const z = numberArg(args[2], 'z');
-        const enclosure = (args[3] ?? def.defaultEnclosure) as BuildingEnclosure;
-        if (enclosure !== 'sealed' && enclosure !== 'hollow' && enclosure !== 'interior') {
-          return fail(state, 'enclosure must be sealed, hollow, or interior');
-        }
-        const widthTiles = args[4] == null ? def.defaultWidthTiles : numberArg(args[4], 'w');
-        const depthTiles = args[5] == null ? def.defaultDepthTiles : numberArg(args[5], 'd');
-        const sideLetter = (args[6] ?? 'south').toLowerCase();
-        const doorSide: BuildingSide | null = sideLetter === 'n' || sideLetter === 'north' ? 'north'
-          : sideLetter === 's' || sideLetter === 'south' ? 'south'
-          : sideLetter === 'e' || sideLetter === 'east' ? 'east'
-          : sideLetter === 'w' || sideLetter === 'west' ? 'west'
-          : null;
-        if (!doorSide) return fail(state, 'doorSide must be north, south, east, or west');
-        // 'force' anywhere bypasses the placement rules (keeps the given door,
-        // skips overlap/road checks) — the intentional-placement override.
-        const force = args.some((a) => a === 'force');
-        const skinArg = args[7] && args[7] !== 'force' ? args[7] : undefined;
-        if (skinArg != null && !isBuildingSkin(skinArg)) {
-          return fail(state, `unknown skin ${skinArg}; expected one of ${buildingSkinNamesForConsole()}`);
-        }
-        const proposed: Building = {
-          id: nextUniqueId('building_user_', state.world.buildings.map((b) => b.id)),
-          kind,
-          label: def.label,
-          enclosure,
-          x,
-          y: 0,
-          z,
-          widthTiles,
-          depthTiles,
-          doorSide,
-          ...(skinArg ? { skin: skinArg as BuildingSkin } : {}),
-          createdByCommand: sourceLine,
-        };
-        // Auto-snaps the door to the nearest road and rejects overlap/sparse
-        // placement unless forced.
-        const placement = resolveBuildingPlacement(state, proposed, force);
-        if (!placement.ok) return fail(state, placement.reason);
-        const building = placement.building;
-        const placedState = addBuildingToWorld(state, building);
-        // Audit the building as actually placed (post door-snap) and surface any
-        // scale/tile warnings inline — the safety net for blind/AI placement.
-        const issues = checkPlacement(placedState, buildingSubject(building));
-        return ok(
-          placedState,
-          `placed ${building.id} ${kind} (${enclosure}) skin ${resolveBuildingSkin(building)} ${widthTiles}x${depthTiles} @ [${x},${z}] door ${building.doorSide}${force ? ' (forced)' : ''}`,
-          ...formatPlacementIssues(issues),
-        );
-      } catch (err: any) {
-        return fail(state, err.message);
-      }
-    },
-  },
-  {
-    name: 'wv_enter',
-    summary: 'Enter a closed (interior) building, swapping the player into its interior space.',
-    usage: 'wv_enter <buildingId>',
-    run(args, state) {
-      const id = args[0];
-      if (!id) return fail(state, 'usage: wv_enter <buildingId>');
-      const building = state.world.buildings.find((b) => b.id === id);
-      if (!building) return fail(state, `no building ${id}`);
-      if (building.enclosure !== 'interior') return fail(state, `${id} has no interior (enclosure ${building.enclosure})`);
-      if (!building.interiorId || !state.world.interiors[building.interiorId]) return fail(state, `${id} interior not found`);
-      return ok(enterBuildingInterior(state, building), `entered ${building.label} interior`);
-    },
-  },
-  {
-    name: 'wv_leave',
-    summary: 'Leave the current building interior, returning to the outer world.',
-    usage: 'wv_leave',
-    run(args, state) {
-      const result = leaveCurrentInterior(state);
-      if (!result) return fail(state, 'not inside a building interior');
-      return ok(result, 'left the interior');
-    },
-  },
-  {
     name: 'wv_mountain',
     summary: 'List mountains, or teleport to a mountain trailhead to start the climb.',
     usage: 'wv_mountain | wv_mountain trailhead [id]',
@@ -1385,7 +1247,7 @@ const COMMANDS: CommandDefinition[] = [
   {
     name: 'wv_validate',
     summary: 'Audit placed things (or preview one) for bad tile/scale/spacing.',
-    usage: 'wv_validate | wv_validate <id> | wv_validate building <kind> <x> <z> [w d] | wv_validate prop <kind> <x> <z>',
+    usage: 'wv_validate | wv_validate <id> | wv_validate prop <kind> <x> <z>',
     run(args, state) {
       return runValidateCommand(args, state);
     },

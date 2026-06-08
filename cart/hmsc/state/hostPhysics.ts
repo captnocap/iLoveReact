@@ -7,7 +7,6 @@ import { roadPhysicsBands, roadTopMeters } from '../world/roads';
 import { junctionPhysicsBands, junctionTopMeters } from '../world/roadJunctions';
 import { propPhysicsRect } from '../world/props';
 import { propKindDefinition } from '../world/propKinds';
-import { buildingPhysicsRects, buildingWallSurface } from '../world/buildings';
 
 // Header gained slot 24 = oriented-rect count (after the legacy rect count at 13).
 // Bumping this shifts the entity/rect sections consistently because both this
@@ -194,33 +193,6 @@ function physicsRects(state: GameState): number[] {
       RECT_SOLID_FLOOR,
     );
   }
-  // Each building adds its solid masses as blocking rects: a sealed block is one
-  // rect, a hollow/interior shell is its wall strips (hollow leaves a doorway
-  // gap). The rect top is the wall top, so the player bumps the walls from the
-  // side and can stand on the roof from above (the standable-solids host rule).
-  // Friction/restitution come from the building's wall tile, like prop rects.
-  for (const building of state.world.buildings) {
-    // A rotated box building's walls are oriented rects (physicsOrientedRects);
-    // skip it here so its collision matches the rotated mesh, not an AABB.
-    if (buildingUsesOrientedCollision(building)) continue;
-    const tile = tileKindDefinition(buildingWallSurface(building));
-    for (const rect of buildingPhysicsRects(building)) {
-      if (rects.length / RECT_FLOATS >= MAX_RECTS) break;
-      rects.push(
-        rect.minX,
-        rect.minZ,
-        rect.maxX,
-        rect.maxZ,
-        rect.topMeters,
-        1,
-        tile.surface.friction,
-        tile.surface.restitution,
-        // Raised platforms (parking decks + cars on them) carry their real bottom
-        // so the host lets you walk underneath; walls fall back to solid-to-ground.
-        rect.floorMeters ?? RECT_SOLID_FLOOR,
-      );
-    }
-  }
   // Mountains contribute NO rects: they collide as heightfield terrain registered
   // with the host (mountainColliderData → __hmsc_register_heightfield in
   // useMountainColliders), so the host samples the real sloped surface every frame
@@ -228,48 +200,9 @@ function physicsRects(state: GameState): number[] {
   return rects;
 }
 
-// Any building rotated off-axis — box OR open structure — collides as an OBB; an
-// axis-aligned one stays a cheap AABB rect. Every building turns the same way
-// (render3d/buildingTransform), so its solid rects (walls or structureSolids
-// parapets/columns/booths) turn with it. The parking garage's heightfield FLOOR
-// is rotated separately via its terrain collider (state/terrainColliders.ts).
-// Gating on yaw≠0 keeps the un-rotated city on the plain AABB path.
-function buildingUsesOrientedCollision(building: { kind: string; yawDegrees?: number }): boolean {
-  return (building.yawDegrees ?? 0) !== 0;
-}
-
-// The oriented (yawed) building walls, packed as ORIENTED_FLOATS each: the same
-// un-rotated wall box [minX..floor] the AABB path uses, then the building centre
-// (pivot) and yaw in radians. The host rotates the player into this frame, runs
-// the AABB push, and rotates the result back — so a turned building blocks and is
-// standable exactly as drawn (render3d/buildingTransform.ts is the visual twin).
 function physicsOrientedRects(state: GameState): number[] {
-  const oriented: number[] = [];
-  for (const building of state.world.buildings) {
-    if (!buildingUsesOrientedCollision(building)) continue;
-    const tile = tileKindDefinition(buildingWallSurface(building));
-    const pivotX = building.x + building.widthTiles / 2;
-    const pivotZ = building.z + building.depthTiles / 2;
-    const yaw = (building.yawDegrees ?? 0) * Math.PI / 180;
-    for (const rect of buildingPhysicsRects(building)) {
-      if (oriented.length / ORIENTED_FLOATS >= MAX_ORIENTED) break;
-      oriented.push(
-        rect.minX,
-        rect.minZ,
-        rect.maxX,
-        rect.maxZ,
-        rect.topMeters,
-        1,
-        tile.surface.friction,
-        tile.surface.restitution,
-        rect.floorMeters ?? RECT_SOLID_FLOOR,
-        pivotX,
-        pivotZ,
-        yaw,
-      );
-    }
-  }
-  return oriented;
+  void state;
+  return [];
 }
 
 export function movementSurfaceForPlayer(state: GameState, running: boolean): MovementSurface {

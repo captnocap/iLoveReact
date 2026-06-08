@@ -65,10 +65,7 @@ import { TileSurfaceCaptures } from '../hmsc/render3d/tileSurface'; // GAP(W-2)
 import { RoadSurfaceCaptures } from '../hmsc/render3d/Road'; // GAP(W-2)
 import { RoadJunctionCaptures } from '../hmsc/render3d/RoadJunctions'; // GAP(W-2)
 import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform'; // GAP(W-2)
-import { BuildingSurfaceCaptures } from '../hmsc/render3d/BuildingFacades'; // GAP(W-2)
 import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures'; // GAP(W-2)
-import { WorldPartCaptures } from '../hmsc/render3d/PartCaptures'; // GAP(W-2)
-import { DriveInScreenCaptures } from '../hmsc/render3d/driveInScreen'; // GAP(W-2)
 import { hmscSkyBackgroundColor } from '../hmsc/render3d/sky'; // GAP(W-3) awaiting game sky
 
 const DEG = Math.PI / 180;
@@ -1066,10 +1063,7 @@ export function EmbodiedCaptures(props: { embodied: Embodied }) {
       <RoadSurfaceCaptures roads={sceneState.world.roads} />
       <RoadJunctionCaptures junctions={sceneState.world.junctions} />
       <LandformSurfaceCaptures landforms={sceneState.world.landforms ?? []} />
-      <BuildingSurfaceCaptures buildings={sceneState.world.buildings} perception={sceneState.player.perception} />
       <PropSurfaceCaptures props={sceneState.world.props} />
-      <WorldPartCaptures buildings={sceneState.world.buildings} props={sceneState.world.props} perception={sceneState.player.perception} />
-      <DriveInScreenCaptures buildings={sceneState.world.buildings} />
       {/* The V2 figure's face/skin unwrap captures (replaces HumanoidFaceCaptures) */}
       <CharacterCaptures
         headTexKey={figure.parts.head.texKey}

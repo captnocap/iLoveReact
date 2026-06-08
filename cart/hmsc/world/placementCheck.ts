@@ -185,12 +185,6 @@ function scaleVsPlayerRule(_state: GameState, subject: PlacementSubject): Placem
 function overlapRule(state: GameState, subject: PlacementSubject): PlacementIssue[] {
   if (!subject.solid) return [];
   const issues: PlacementIssue[] = [];
-  for (const b of state.world.buildings) {
-    if (b.id === subject.id) continue;
-    if (rectsOverlap(subject.footprint, buildingFootprint(b))) {
-      issues.push({ severity: 'error', code: 'overlap-building', message: `${subject.label} overlaps building ${b.id} (${b.label}). They'll clip through each other.` });
-    }
-  }
   for (const p of state.world.props) {
     if (p.id === subject.id) continue;
     const def = propKindDefinition(p.kind);

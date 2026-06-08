@@ -1,4 +1,4 @@
-import type { Building, BuildingFaceRole, BuildingFaceSkins, BuildingSide, BuildingSkin, GameState, Vec3 } from '../design';
+import type { Building, BuildingFaceRole, BuildingSide, BuildingSkin, Vec3 } from '../design';
 import { buildingDefaultSkin, buildingKindDefinition, buildingKindHeightMeters, isOpenBuildingKind } from './buildingKinds';
 import { structureBlocksWorldPoint, structureSolids } from './structures';
 import { HMSC_SCALE } from './scale';
@@ -154,10 +154,6 @@ export function buildingBlocksWorldPoint(b: Building, x: number, z: number): boo
   return buildingBoxes(b).some((box) => footprintContains(box, x, z));
 }
 
-export function anyBuildingBlocksWorldPoint(state: GameState, x: number, z: number): boolean {
-  return state.world.buildings.some((b) => buildingBlocksWorldPoint(b, x, z));
-}
-
 export function buildingWallSurface(b: Building) {
   return buildingKindDefinition(b.kind).wallTileKind;
 }
@@ -301,44 +297,4 @@ function segmentBoxEntryFraction(
   if (!slab(from.y, dy, minY, maxY)) return null;
   if (!slab(from.z, dz, box.minZ, box.maxZ)) return null;
   return tMin > 0 ? tMin : null;
-}
-
-// --- Mutations (immutable, mirror roads.ts placeRoad/removeRoad). These touch
-// only the buildings array; interior generation + entry-pad wiring lives in
-// world/interiors.ts (addBuildingToWorld) to keep this module a pure geometry +
-// data layer with no dependency on the scene-swap logic. ---
-
-export function placeBuilding(state: GameState, building: Building): GameState {
-  return { ...state, world: { ...state.world, buildings: [...state.world.buildings, building] } };
-}
-
-export function removeBuilding(state: GameState, buildingId: string): GameState {
-  return {
-    ...state,
-    world: { ...state.world, buildings: state.world.buildings.filter((b) => b.id !== buildingId) },
-  };
-}
-
-// Set one face's skin (or 'all'), promoting a single-skin building to a per-face
-// map so the other faces keep what they showed.
-export function setBuildingFaceSkin(
-  state: GameState,
-  buildingId: string,
-  role: BuildingFaceRole | 'all',
-  skin: BuildingSkin,
-): GameState {
-  return {
-    ...state,
-    world: {
-      ...state.world,
-      buildings: state.world.buildings.map((b) => {
-        if (b.id !== buildingId) return b;
-        const faces: BuildingFaceSkins = typeof b.skin === 'object' && b.skin !== null
-          ? { ...b.skin }
-          : (typeof b.skin === 'string' ? { all: b.skin } : {});
-        faces[role] = skin;
-        return { ...b, skin: faces };
-      }),
-    },
-  };
 }

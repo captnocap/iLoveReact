@@ -1,7 +1,7 @@
 import type { GameState, TileKind } from '../design';
 
 // The master-list read-model: the whole world rolled up into a nested tree
-// (world -> chunk -> base kind + sparse overrides + zones + buildings) with
+// (world -> chunk -> base kind + sparse overrides + zones) with
 // per-kind world totals. A DERIVED view — never a storage shape. Honest model:
 // a chunk is ONE base kind (its surfaceRegion) plus sparse overrides stacked on
 // top (placedCells), NOT a flat per-cell array. When `painted` is supplied (the
@@ -20,15 +20,14 @@ export type ChunkSummary = {
   // Per-kind placed-cell overrides sitting on top of the base, within the chunk.
   overrides: Partial<Record<TileKind, KindGroup>>;
   zones: { id: string; name: string }[];
-  buildings: { id: string; kind: string }[];
 };
 
 export type WorldTree = {
   layoutKey: string;
   widthCells: number;
   depthCells: number;
-  // Authored inventory: `tile:<kind>` -> summed surfaceRegion area; `zone` and
-  // `building` -> layer counts. Region areas, not pixel-exact resolved kinds.
+  // Authored inventory: `tile:<kind>` -> summed surfaceRegion area; `zone` ->
+  // layer count. Region areas, not pixel-exact resolved kinds.
   worldTotals: Record<string, number>;
   chunks: ChunkSummary[];
   // Staged paint preview (placeableId -> cell count) when a painter buffer is
@@ -63,9 +62,6 @@ export function buildWorldTree(state: GameState, painted?: Map<string, string>):
     const zones = world.zones
       .filter((z) => rectsOverlap(region.x, region.z, region.width, region.depth, z.x, z.z, z.width, z.depth))
       .map((z) => ({ id: z.id, name: z.name }));
-    const buildings = world.buildings
-      .filter((b) => within(b.x, b.z, region.x, region.z, region.width, region.depth))
-      .map((b) => ({ id: b.id, kind: b.kind }));
     return {
       id: region.id,
       label: region.label,
@@ -74,7 +70,6 @@ export function buildWorldTree(state: GameState, painted?: Map<string, string>):
       baseCount: region.width * region.depth,
       overrides,
       zones,
-      buildings,
     };
   });
 
@@ -84,7 +79,6 @@ export function buildWorldTree(state: GameState, painted?: Map<string, string>):
     worldTotals[key] = (worldTotals[key] ?? 0) + region.width * region.depth;
   }
   if (world.zones.length) worldTotals.zone = world.zones.length;
-  if (world.buildings.length) worldTotals.building = world.buildings.length;
 
   let paintedTotals: Record<string, number> | undefined;
   if (painted && painted.size > 0) {

@@ -1,5 +1,4 @@
 import {
-  Building,
   DEFAULT_CELL_SIZE_METERS,
   GameState,
   HMSC_STATE_SCHEMA_VERSION,
@@ -14,8 +13,6 @@ import {
   WorldSurfaceRegion,
 } from '../design';
 import { surfaceRegionTopMeters } from '../world/surfaceHeights';
-import { addBuildingToWorld } from '../world/interiors';
-import { buildingKindDefinition } from '../world/buildingKinds';
 import {
   DEFAULT_GAME_CONFIG,
   DEFAULT_ENTITY_RADIUS_METERS,
@@ -33,6 +30,7 @@ const HMSC_STORE_NAMESPACE = 'hmsc';
 const HMSC_STORE_KEY = 'game-state';
 const HMSC_LIVE_PLAYER_KEY = 'live-player';
 const HMSC_HOT_KEY = 'hmsc:hot-game-state';
+const INTERIOR_PAD_SOURCE = 'building-interior';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -53,6 +51,25 @@ function livePlayerSnapshotFromState(state: GameState): LivePlayerSnapshot {
     updatedAt: state.updatedAt,
     player: state.player,
   };
+}
+
+function collectLegacyBuildingIds(buildings: unknown): Set<string> {
+  const ids = new Set<string>();
+  if (!Array.isArray(buildings)) return ids;
+  for (const building of buildings as Array<{ id?: unknown }>) {
+    if (typeof building?.id === 'string') ids.add(building.id);
+  }
+  return ids;
+}
+
+function stripLegacyBuildingEntryPads(placedCells: unknown, removedIds: ReadonlySet<string>): WorldState['placedCells'] {
+  if (!placedCells || typeof placedCells !== 'object') return {};
+  return Object.fromEntries(Object.entries(placedCells as WorldState['placedCells']).filter(([, cell]) => {
+    if (cell?.createdByCommand === INTERIOR_PAD_SOURCE) return false;
+    const command = String(cell.triggerCommand ?? '');
+    if (command === 'wv_leave') return false;
+    return !Array.from(removedIds).some((id) => command === `wv_enter ${id}`);
+  }));
 }
 
 function localStoreGet(key: string): string | null {
@@ -377,56 +394,6 @@ function createInitialWorld(): WorldState {
   };
 }
 
-// Three demo buildings near spawn, one per enclosure mode, so a fresh world
-// shows the building system off the way the spawn roads and props do. Placed
-// east of the arterial, south of the cross street, on the spawn sidewalk chunk.
-// Their interiors/entry pads are wired by addBuildingToWorld (seedBuildings).
-function createInitialBuildings(): Building[] {
-  // Laid to obey the placement rules: a row down the EAST side of the spawn
-  // arterial (its east curb is ~x17.2), each set back ~3m at x20 with its door
-  // facing WEST onto the road, no overlaps, all within the cross street (z<43)
-  // except the warehouse north of it — so the block reads like a real street.
-  const seed: Array<Omit<Building, 'createdByCommand' | 'label'>> = [
-    // Sealed: a solid block. Bump it; stand on its roof. No way in.
-    { id: 'building_demo_sealed', kind: 'house', enclosure: 'sealed', x: 20, y: 0, z: 4, widthTiles: 8, depthTiles: 10, doorSide: 'west' },
-    // Hollow: a walk-in shell. The doorway is a real gap and the floor inside is
-    // the same outer world — see in from outside, out from inside.
-    { id: 'building_demo_hollow', kind: 'shop', enclosure: 'hollow', x: 20, y: 0, z: 16, widthTiles: 8, depthTiles: 10, doorSide: 'west' },
-    // Interior: a closed tower. Its front pad is a portal into a separate space
-    // far larger than this 12x12 footprint.
-    { id: 'building_demo_interior', kind: 'tower', enclosure: 'interior', x: 20, y: 0, z: 28, widthTiles: 12, depthTiles: 12, doorSide: 'west' },
-    // A warehouse north of the cross street: the industrial garage on the FRONT
-    // (road-facing) face only, plain metal walls on the other sides — shows the
-    // per-face skin taxonomy.
-    { id: 'building_demo_industrial', kind: 'warehouse', enclosure: 'sealed', x: 20, y: 0, z: 60, widthTiles: 14, depthTiles: 16, doorSide: 'west', skin: { front: 'industrial', all: 'plain' } },
-
-    // ── Commercial box buildings (existing box+facade pipeline, new skins) ──────
-    // Internet cafe + Spray-N-Pray gun shop: walk-in shells wearing their themed
-    // storefront skins on the front, plain side walls.
-    { id: 'building_internet_cafe', kind: 'shop', enclosure: 'hollow', x: 40, y: 0, z: 6, widthTiles: 10, depthTiles: 8, doorSide: 'south', skin: { front: 'internetCafe', all: 'plain' } },
-    { id: 'building_gun_shop', kind: 'shop', enclosure: 'hollow', x: 56, y: 0, z: 6, widthTiles: 10, depthTiles: 8, doorSide: 'south', skin: { front: 'gunShop', all: 'plain' } },
-    // A mall: a big walk-in shell with the corporate mall facade on its front.
-    { id: 'building_mall', kind: 'shop', enclosure: 'hollow', x: 72, y: 0, z: 64, widthTiles: 30, depthTiles: 22, doorSide: 'south', skin: { front: 'mall', all: 'plain' } },
-
-    // ── Open structures (custom models + custom collision) ──────────────────────
-    { id: 'building_parking_garage', kind: 'parkingGarage', enclosure: 'hollow', x: 42, y: 0, z: 52, widthTiles: 26, depthTiles: 26, doorSide: 'south' },
-    { id: 'building_gas_station', kind: 'gasStation', enclosure: 'hollow', x: 74, y: 0, z: 8, widthTiles: 20, depthTiles: 16, doorSide: 'south' },
-    { id: 'building_used_car_lot', kind: 'usedCarLot', enclosure: 'hollow', x: 44, y: 0, z: 86, widthTiles: 26, depthTiles: 18, doorSide: 'south' },
-    // Drive-in theatre on the flat open pocket south of the mall (the only big
-    // flat ground — every other chunk has a landform in its middle). The screen
-    // wall pins to the back (maxZ) and faces -Z toward the lot/spawn, so the
-    // player walking up from spawn arrives in the lot facing the screen; the
-    // projector booth out front opens a file picker on E. The screen plays a live
-    // <Video> (NO SIGNAL until picked) via the billboard texture pattern.
-    { id: 'building_drive_in', kind: 'driveIn', enclosure: 'hollow', x: 74, y: 0, z: 28, widthTiles: 44, depthTiles: 32, doorSide: 'north' },
-  ];
-  return seed.map((b) => ({ ...b, label: buildingKindDefinition(b.kind).label, createdByCommand: 'initial-world' }));
-}
-
-function seedBuildings(state: GameState): GameState {
-  return createInitialBuildings().reduce((acc, building) => addBuildingToWorld(acc, building), state);
-}
-
 // The player spawns standing on the spawn chunk's physics top — the SAME value
 // host physics uses for ground — so the player neither floats nor sinks.
 export function initialPlayerFeetHeightMeters(): number {
@@ -481,7 +448,7 @@ export function createInitialGameState(): GameState {
     suspendedSpaces: [],
   };
 
-  return seedBuildings(state);
+  return state;
 }
 
 export function markGameStateUpdated(state: GameState): GameState {
@@ -495,6 +462,11 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
     if (!parsed || Number(parsed.schemaVersion ?? 0) > HMSC_STATE_SCHEMA_VERSION) return null;
     const initial = createInitialGameState();
     const storedWorldMatchesCurrentLayout = parsed.world?.layout?.key === initial.world.layout.key;
+    const parsedWorld = storedWorldMatchesCurrentLayout ? parsed.world : null;
+    const removedLegacyBuildingIds = collectLegacyBuildingIds(parsedWorld?.buildings);
+    const revivedPlacedCells = parsedWorld
+      ? stripLegacyBuildingEntryPads(parsedWorld.placedCells, removedLegacyBuildingIds)
+      : initial.world.placedCells;
     return cloneGameState({
       ...initial,
       ...parsed,
@@ -560,7 +532,7 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
         surfaceRegions: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.surfaceRegions)
           ? parsed.world.surfaceRegions
           : initial.world.surfaceRegions,
-        placedCells: storedWorldMatchesCurrentLayout ? (parsed.world?.placedCells ?? {}) : initial.world.placedCells,
+        placedCells: revivedPlacedCells,
         roads: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.roads)
           ? parsed.world.roads
           : initial.world.roads,
@@ -570,6 +542,8 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
         props: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.props)
           ? parsed.world.props
           : initial.world.props,
+        buildings: [],
+        interiors: {},
         // A save predating the landform layer has no `landforms` key → seed the
         // example terrain; a save that already has it keeps it.
         landforms: storedWorldMatchesCurrentLayout && Array.isArray(parsed.world?.landforms)
@@ -603,13 +577,11 @@ export function reviveGameState(raw: string | null | undefined): GameState | nul
         // layer has no key → empty. Layout-matched saves keep their crowd.
         npcs: storedWorldMatchesCurrentLayout ? (parsed.world?.npcs ?? {}) : initial.world.npcs,
       },
-      // Scene + suspend stack are only meaningful against a matching world. On a
-      // layout reset the world falls back to the fresh outer city, so a save made
-      // inside a building interior must not revive into a stale swapped world —
-      // force the console scene with an empty suspend stack. When the layout
-      // matches, keep them so reloading inside an interior lands you inside.
-      sceneStep: storedWorldMatchesCurrentLayout ? (parsed.sceneStep ?? 'boot.console') : 'boot.console',
-      suspendedSpaces: storedWorldMatchesCurrentLayout && Array.isArray(parsed.suspendedSpaces) ? parsed.suspendedSpaces : [],
+      // AUTHBUILD-REMOVE deleted the old building-interior swap stack. Revived
+      // saves always return to the outer console scene and drop suspended worlds,
+      // so legacy buildings cannot survive inside a parked outer space.
+      sceneStep: 'boot.console',
+      suspendedSpaces: [],
     });
   } catch {
     return null;

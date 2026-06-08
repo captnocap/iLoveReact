@@ -33,14 +33,12 @@ import { useMemo, useState } from 'react';
 import { Box, Pressable, ScrollView, Text, TextInput } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import type { TileKind } from '../../hmsc/design';
-import { BUILDING_KINDS, buildingKindDefinition } from '../../hmsc/world/buildingKinds';
 import { PROP_KINDS, propKindDefinition } from '../../hmsc/world/propKinds';
 import { EMBEDDED_TILE_KINDS, GAMEPLAY_TILE_KINDS, PAINTABLE_TILE_KINDS, tileKindDefinition } from '../../hmsc/world/tileKinds';
 import { buildObjectWorld, type ObjectWorld } from '../objectPreview';
 import { ModelViewer } from '../ModelViewer';
 import { ObjectInspect3D } from '../ObjectInspect3D';
 import { useKindTextures, kindTexturesFor, setKindTexture } from '../kindTextures';
-import { buildingParts } from '../../hmsc/render3d/buildingParts';
 import { propParts } from '../../hmsc/render3d/propParts';
 import type { Part } from '../../hmsc/render3d/parts';
 import { PropertiesPanel } from '../PropertiesPanel';
@@ -54,17 +52,15 @@ import { useAssistScene } from '../assist3d/useAssistScene';
 import { AssistMeshViewer } from '../assist3d/AssistMeshViewer';
 import { round, type MeshSpec } from '../assist3d/scene';
 
-type Cat = 'building' | 'prop' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
+type Cat = 'prop' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
 type Sel = { cat: Cat; kind: string };
 type Group = { cat: Cat; title: string; items: { kind: string; label: string }[] };
 
-const STOREY_M = 3;
 function clamp(n: number, lo: number, hi: number) { return Math.max(lo, Math.min(hi, n)); }
 
 // The fixed game-kind categories. ASSISTANT is appended in-component because its
 // items are live (driven by the watched scene.json).
 const STATIC_GROUPS: Group[] = [
-  { cat: 'building', title: 'BUILDINGS', items: BUILDING_KINDS.map((k) => ({ kind: k, label: buildingKindDefinition(k).label })) },
   { cat: 'prop', title: 'OBJECTS', items: PROP_KINDS.map((k) => ({ kind: k, label: propKindDefinition(k).label })) },
   // MARKERS — gameplay cells you PLACE one at a time (spawn / save), not paint.
   // Placeable (the + drops one), and the save↔spawn link is set on the placed
@@ -76,7 +72,7 @@ const STATIC_GROUPS: Group[] = [
   // looks is LIVE — built-ins plus the studio's saved materials (allTextures).
 ];
 
-const isPlaceable = (cat: Cat) => cat === 'building' || cat === 'prop' || cat === 'marker';
+const isPlaceable = (cat: Cat) => cat === 'prop' || cat === 'marker';
 
 type Preview = ObjectWorld & { tile?: TileKind; baseDist: number; targetY: number };
 
@@ -87,11 +83,6 @@ function buildPreview(sel: Sel, partTextures?: Record<string, string>): Preview 
   const ow = buildObjectWorld(sel.cat as Exclude<Cat, 'texture' | 'assistant'>, sel.kind, undefined, partTextures);
   if (sel.cat === 'tile' || sel.cat === 'embedded' || sel.cat === 'marker') {
     return { ...ow, tile: sel.kind as TileKind, baseDist: 16, targetY: 0.3 };
-  }
-  if (sel.cat === 'building') {
-    const def = buildingKindDefinition(sel.kind as typeof BUILDING_KINDS[number]);
-    const h = def.storeys * STOREY_M;
-    return { ...ow, baseDist: clamp(Math.max(def.defaultWidthTiles, def.defaultDepthTiles, h) * 2.2, 16, 130), targetY: h * 0.5 };
   }
   const def = propKindDefinition(sel.kind as typeof PROP_KINDS[number]);
   return { ...ow, baseDist: clamp(def.heightMeters * 4 + 4, 5, 30), targetY: def.heightMeters * 0.5 };
@@ -198,15 +189,15 @@ function AssistInspect(props: { mesh: MeshSpec }) {
 // kinds; a catalog recipe with a lab spec opens ShaderLab instead.)
 
 export function ObjectsTab(props: {
-  onPlace?: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
-  activePlaceable?: { cat: 'building' | 'prop' | 'marker'; kind: string } | null;
-  onArmPlaceable?: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
+  onPlace?: (cat: 'prop' | 'marker', kind: string) => void;
+  activePlaceable?: { cat: 'prop' | 'marker'; kind: string } | null;
+  onArmPlaceable?: (cat: 'prop' | 'marker', kind: string) => void;
 }) {
-  const [sel, setSel] = useState<Sel>({ cat: 'building', kind: BUILDING_KINDS[0] });
+  const [sel, setSel] = useState<Sel>({ cat: 'prop', kind: PROP_KINDS[0] });
   // The category whose item list is showing in the breadcrumb. Kept apart from
   // `sel` so switching categories to browse doesn't reload the viewer until you
   // pick an item.
-  const [palCat, setPalCat] = useState<Cat>('building');
+  const [palCat, setPalCat] = useState<Cat>('prop');
   const [catOpen, setCatOpen] = useState(false);
   const [itemOpen, setItemOpen] = useState(false);
   // The model PART selected in the 3D inspector (click-to-pick), and whether the
@@ -238,25 +229,25 @@ export function ObjectsTab(props: {
   // A shader-authored texture opens its slider lab; a react-authored one previews.
   const spec = texDef?.source.kind === 'shader' ? shaderSpec(sel.kind) : undefined;
   const assistMesh = isAssist ? scene.meshes.find((m) => m.id === sel.kind) : undefined;
-  // The inspected kind's GLOBAL part textures (building/prop only). Stable identity
+  // The inspected kind's GLOBAL part textures (prop only). Stable identity
   // across renders (changes only when the store fires), so the preview memo holds.
   const inspectedTextures = useMemo<Record<string, string> | undefined>(
-    () => ((sel.cat === 'building' || sel.cat === 'prop') ? kindTexturesFor(sel.cat, sel.kind) : undefined),
+    () => (sel.cat === 'prop' ? kindTexturesFor(sel.cat, sel.kind) : undefined),
     [kindTex, sel.cat, sel.kind],
   );
   const pv = useMemo(() => ((isTexture || isAssist) ? null : buildPreview(sel, inspectedTextures)), [isTexture, isAssist, sel.cat, sel.kind, inspectedTextures]);
 
   // The inspected object's pickable parts (for the selected-part label) + the
   // texture currently on the selected part.
-  const partsList = useMemo<Part[]>(() => (pv?.building ? buildingParts(pv.building) : pv?.prop ? propParts(pv.prop) : []), [pv]);
+  const partsList = useMemo<Part[]>(() => (pv?.prop ? propParts(pv.prop) : []), [pv]);
   const selPartLabel = selPart ? (partsList.find((p) => p.id === selPart)?.label ?? selPart) : null;
   const curTexId = selPart ? inspectedTextures?.[selPart] : undefined;
   const applyTexture = (textureId: string | null) => { if (selPart) setKindTexture(sel.cat, sel.kind, selPart, textureId); setTexOpen(false); };
 
   const palGroup = groupOf(palCat);
-  const arm = (cat: Cat, kind: string) => { if (isPlaceable(cat)) props.onArmPlaceable?.(cat as 'building' | 'prop' | 'marker', kind); };
+  const arm = (cat: Cat, kind: string) => { if (isPlaceable(cat)) props.onArmPlaceable?.(cat as 'prop' | 'marker', kind); };
   const inspect = (cat: Cat, kind: string) => { setSel({ cat, kind }); setPalCat(cat); setCatOpen(false); setItemOpen(false); setSelPart(null); setTexOpen(false); arm(cat, kind); };
-  const place = (cat: Cat, kind: string) => { if (isPlaceable(cat)) { arm(cat, kind); props.onPlace?.(cat as 'building' | 'prop' | 'marker', kind); } };
+  const place = (cat: Cat, kind: string) => { if (isPlaceable(cat)) { arm(cat, kind); props.onPlace?.(cat as 'prop' | 'marker', kind); } };
   const pickCat = (c: Cat) => { setPalCat(c); setCatOpen(false); setItemOpen(true); };
 
   // Breadcrumb item value: the selected kind when it's in the browsed category,

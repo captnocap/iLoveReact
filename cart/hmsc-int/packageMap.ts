@@ -46,7 +46,6 @@ export type HmscMapFacts = {
   bounds: HmscMapBounds;
   surfaceRegions: number;
   placedCells: number;
-  buildings: number;
   props: number;
   zones: string[];
   tileSamples: string[];
@@ -92,7 +91,6 @@ function stringTable(state: GameState): string[] {
   for (const cell of Object.values(state.world.placedCells)) strings.add(cell.kind);
   for (const zone of state.world.zones) strings.add(zone.id);
   for (const zone of state.world.zones) strings.add(zone.name);
-  for (const building of state.world.buildings) strings.add(building.id);
   for (const prop of state.world.props) strings.add(prop.id);
   return ['null', ...Array.from(strings).filter((value) => value !== 'null').sort()];
 }
@@ -159,7 +157,6 @@ export function createHmscMapfile(state: GameState): Uint8Array {
     zones: state.world.zones,
   };
   const placements = {
-    buildings: state.world.buildings,
     props: state.world.props,
     placedCells: Object.values(state.world.placedCells).sort((a, b) => a.key.localeCompare(b.key)),
     landforms: state.world.landforms,
@@ -214,7 +211,6 @@ export function factsFromGameState(state: GameState): HmscMapFacts {
     bounds,
     surfaceRegions: state.world.surfaceRegions.length,
     placedCells: Object.keys(state.world.placedCells).length,
-    buildings: state.world.buildings.length,
     props: state.world.props.length,
     zones: state.world.zones.map((zone) => zone.id).sort(),
     tileSamples: sampleCells.map((cell) => tileKindAt(state, cell) ?? 'null'),
@@ -227,7 +223,6 @@ export function factsFromMapfile(bytes: Uint8Array): HmscMapFacts {
   const strings = parseStrings(bytesText(findLump(records, MAP_LUMP.STRINGS)!.data));
   const zones = JSON.parse(bytesText(findLump(records, MAP_LUMP.ZONES)!.data)) as { bounds: HmscMapBounds; zones: Array<{ id: string }> };
   const placements = JSON.parse(bytesText(findLump(records, MAP_LUMP.PLACEMENTS)!.data)) as {
-    buildings: unknown[];
     props: unknown[];
     placedCells: unknown[];
   };
@@ -247,7 +242,6 @@ export function factsFromMapfile(bytes: Uint8Array): HmscMapFacts {
     bounds,
     surfaceRegions: state.world.surfaceRegions.length,
     placedCells: placements.placedCells.length,
-    buildings: placements.buildings.length,
     props: placements.props.length,
     zones: zones.zones.map((zone) => zone.id).sort(),
     tileSamples: sampleOffsets.map((index) => {

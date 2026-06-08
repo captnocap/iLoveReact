@@ -6,7 +6,6 @@ import { cellEventRef, playerEventActor, recordAndPublishGameEvent } from '../ev
 import { canOccupyWorldPosition, cellKey, placedCellAt, triggerCellAtWorldPosition, worldToCell } from '../world/grid';
 import { saveGameState } from './gameState';
 import { currentZone } from '../world/zones';
-import { isInteriorSceneStep } from '../world/interiors';
 import { MIN_DRIVE_FRAME_SECONDS, MOVEMENT_INTENT_DEADZONE, NOCLIP_MIN_HEIGHT_METERS } from './defaults';
 import { advanceHostPhysics, movementSurfaceForPlayer } from './hostPhysics';
 
@@ -36,15 +35,24 @@ function hostScancodeDown(scancode: number): boolean {
   return Number.isFinite(value) && value > 0;
 }
 
+function envFlag(name: string): boolean {
+  const host: any = globalThis;
+  try {
+    const value = typeof host.__env_get === 'function' ? host.__env_get(name) : null;
+    return value != null && value !== '' && value !== '0' && value !== 'false';
+  } catch {
+    return false;
+  }
+}
+
 function normalizeYawDegrees(yawDegrees: number): number {
   return ((yawDegrees % 360) + 360) % 360;
 }
 
-// World cell triggers (doors, building entry/exit pads) fire in the outer city
-// console scene AND inside building interiors (so the exit pad's wv_leave works);
-// lab scenes intentionally do not fire them.
+// World cell triggers fire in the outer city console scene; lab scenes
+// intentionally do not fire them.
 function triggersActive(sceneStep: string): boolean {
-  return sceneStep === 'boot.console' || isInteriorSceneStep(sceneStep);
+  return sceneStep === 'boot.console';
 }
 
 function runEnteredCellTrigger(state: GameState, lastTriggerKeyRef: { current: string | null }): GameState {
@@ -205,6 +213,7 @@ export function usePlayerDrive(
   const lastPlayerCellKeyRef = useRef<string | null>(null);
   const lastSaveCellKeyRef = useRef<string | null>(null);
   const lastZoneIdRef = useRef<string | null>(null);
+  const diagnosticAutowalkRef = useRef(envFlag('HMSC_DIAGNOSTIC_AUTOWALK'));
   const [driveFrame, setDriveFrame] = useState<PlayerDriveFrame>({
     animationSeconds: 0,
     moving: false,
@@ -257,6 +266,7 @@ export function usePlayerDrive(
           const dt = Math.min(current.config.physics.maxDriveFrameSeconds, rawDt);
           frameSeconds = dt;
           const keys = keysRef.current;
+          const diagnosticAutowalk = diagnosticAutowalkRef.current;
           const cameraYaw = cameraYawRef.current;
           const cameraYawRadians = radians(cameraYaw);
           const forwardX = Math.sin(cameraYawRadians);
@@ -268,7 +278,7 @@ export function usePlayerDrive(
           const speed = baseSpeed * surface.speedMultiplier;
           let intentX = 0;
           let intentZ = 0;
-          if (keys.w || keys.up) {
+          if (diagnosticAutowalk || keys.w || keys.up) {
             intentX += forwardX;
             intentZ += forwardZ;
           }

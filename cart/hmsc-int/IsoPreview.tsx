@@ -21,9 +21,7 @@ import { busOn } from '@reactjit/hooks/useIFTTT';
 import type { GameState } from '../hmsc/design';
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
-import { BuildingSurfaceCaptures } from '../hmsc/render3d/BuildingFacades';
 import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures';
-import { WorldPartCaptures } from '../hmsc/render3d/PartCaptures';
 import { GAME_CAMERA, GAME_NATIVE_CAMERA } from './game';
 import { useChurn } from './perfLog';
 
@@ -196,15 +194,9 @@ export const IsoPreview = memo(function IsoPreview(props: {
           captures, the game's own path) — siblings of the Scene3D, like the
           captures HmscGameplayRig mounts in the live game. */}
       <LandformSurfaceCaptures landforms={world.landforms ?? []} />
-      {/* Building facade textures: bake each placed building's per-face skin so
-          the preview wears the textures you assign (the live game mounts the
-          same captures in HmscGameplayRig). Without this the facade panels
-          sample an unbaked key and read blank — looks like "not painting". */}
-      <BuildingSurfaceCaptures buildings={world.buildings} perception={state.player.perception} />
       {/* The street-sign route plate (default key) + per-part textures the inspector
-          assigns to open structures and props, so the iso preview wears them too. */}
+          assigns to props, so the iso preview wears them too. */}
       <PropSurfaceCaptures props={world.props} />
-      <WorldPartCaptures buildings={world.buildings} props={world.props} perception={state.player.perception} />
       <Scene3D style={{ width: '100%', height: '100%' }} backgroundColor="#0a1018" showGrid={false} showAxes={false}>
         <Scene3D.Camera nativeCamera ref={cameraRef} position={bootCam.pos} target={bootCam.target} fov={bootCam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
