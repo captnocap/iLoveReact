@@ -4119,8 +4119,6 @@ pub fn run(config_in: AppConfig) !void {
                             continue;
                         }
                         world_loader.mouseLook(world_loader_mouse_node_id, event.motion.xrel, event.motion.yrel);
-                    } else if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
-                        world_loader.mouseLook(loader_node.id, event.motion.xrel, event.motion.yrel);
                     }
                     effects.pollMouse(mx, my, 0.016);
                     if (g_chrome_dragging) {
@@ -4599,6 +4597,7 @@ pub fn run(config_in: AppConfig) !void {
                     system_signals.notifyFocus(true);
                 },
                 c.SDL_EVENT_WINDOW_FOCUS_LOST => {
+                    releaseWorldLoaderPointer();
                     system_signals.notifyFocus(false);
                 },
                 else => {},
