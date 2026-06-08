@@ -5521,10 +5521,22 @@ done
   var ORACLE_RECORDS_DIR = `${ORACLE_INDEX_DIR}/records`;
   var ORACLE_SELF_CHECK_ENTRY = `${OUT_DIR}/oracle-self-check.ts`;
   var ORACLE_SELF_CHECK_BUNDLE = `${OUT_DIR}/oracle-self-check.js`;
-  var ROUNDTRIP_GEN_ENTRY = "framework/testing/fixtures/gen_roundtrip.ts";
-  var ROUNDTRIP_GEN_BUNDLE = `${OUT_DIR}/mapfile-roundtrip-gen.js`;
-  var ROUNDTRIP_FIXTURE = "framework/testing/fixtures/mapfile_roundtrip.b64";
-  var ROUNDTRIP_ZIG_STEP = "test-world-mapfile";
+  var ROUND_TRIPS = [
+    {
+      label: "mapfile",
+      genEntry: "framework/testing/fixtures/gen_roundtrip.ts",
+      genBundle: `${OUT_DIR}/mapfile-roundtrip-gen.js`,
+      fixture: "framework/testing/fixtures/mapfile_roundtrip.b64",
+      zigStep: "test-world-mapfile"
+    },
+    {
+      label: "game-file",
+      genEntry: "framework/testing/fixtures/gen_gamefile.ts",
+      genBundle: `${OUT_DIR}/mapfile-gamefile-gen.js`,
+      fixture: "framework/testing/fixtures/gamefile_roundtrip.b64",
+      zigStep: "test-world-gamefile"
+    }
+  ];
   var ORACLE_SMOKE_QUERIES = [
     "physics",
     "kinds",
@@ -5783,28 +5795,33 @@ if (failures.length > 0) {
     }
     return suites.sort();
   }
-  function runMapfileRoundTrip(root) {
-    if (!bundle(root, ROUNDTRIP_GEN_ENTRY, ROUNDTRIP_GEN_BUNDLE)) {
-      err("[game] mapfile round-trip FAILED: fixture generator does not bundle");
+  function runRoundTrip(root, rt) {
+    if (!bundle(root, rt.genEntry, rt.genBundle)) {
+      err(`[game] ${rt.label} round-trip FAILED: fixture generator does not bundle`);
       return false;
     }
-    const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${ROUNDTRIP_GEN_BUNDLE}`]);
+    const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${rt.genBundle}`]);
     if (gen.stderr.trim()) err(gen.stderr.trim());
     const tape = gen.stdout.trim();
     if (gen.code !== 0 || !tape) {
-      err("[game] mapfile round-trip FAILED: TS writer produced no tape");
+      err(`[game] ${rt.label} round-trip FAILED: TS writer produced no tape`);
       return false;
     }
-    fsWrite(`${root}/${ROUNDTRIP_FIXTURE}`, tape);
-    const zig = spawnSync("zig", ["build", ROUNDTRIP_ZIG_STEP]);
+    fsWrite(`${root}/${rt.fixture}`, tape);
+    const zig = spawnSync("zig", ["build", rt.zigStep]);
     if (zig.stdout.trim()) out(zig.stdout.trim());
     if (zig.stderr.trim()) err(zig.stderr.trim());
     if (zig.code !== 0) {
-      err("[game] mapfile round-trip FAILED: Zig codec disagrees with the TS tape");
+      err(`[game] ${rt.label} round-trip FAILED: Zig reader disagrees with the TS tape`);
       return false;
     }
-    out("[game] mapfile round-trip GREEN \u2014 TS tape <-> Zig codec byte/value identical");
+    out(`[game] ${rt.label} round-trip GREEN \u2014 TS tape <-> Zig reader byte/value identical`);
     return true;
+  }
+  function runRoundTrips(root) {
+    let allGreen = true;
+    for (const rt of ROUND_TRIPS) allGreen = runRoundTrip(root, rt) && allGreen;
+    return allGreen;
   }
   function verify(root) {
     if (compile(root) !== 0) {
@@ -5812,7 +5829,7 @@ if (failures.length > 0) {
       return 1;
     }
     const oracleOk = runOracleSelfCheck(root);
-    const roundtripOk = runMapfileRoundTrip(root);
+    const roundtripOk = runRoundTrips(root);
     fsMkdir(`${root}/${TEST_OUT_DIR}`);
     const suites = SUITE_ROOTS.flatMap((suiteRoot) => findTestSuites(root, suiteRoot));
     let suitesPassed = 0;
@@ -5839,7 +5856,7 @@ if (failures.length > 0) {
       else err(`[game] verify script FAILED: ${VERIFY_DIR}/${script}`);
     }
     const green = oracleOk && roundtripOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
-    const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? 1 : 0}/1 round-trip, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
+    const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? ROUND_TRIPS.length : 0}/${ROUND_TRIPS.length} round-trips, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
     if (!green) {
       err(`[game] VERDICT RED \u2014 ${tally}`);
       return 1;

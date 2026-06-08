@@ -996,6 +996,38 @@ pub fn build(b: *std.Build) void {
     const world_mapfile_test_step = b.step("test-world-mapfile", "Run the platform mapfile reader tests");
     world_mapfile_test_step.dependOn(&run_world_mapfile_test.step);
 
+    // ── Platform game-file behavior tests (PLATMOD spine step 2, P4) ──────
+    // Exercises framework/world/gamefile.zig: the three-stream game-file reader,
+    // sha256 content-store install (atomic temp->fsync->rename), and the
+    // dependency gate (bad-hash + dangling-reference negative controls). The
+    // TS writer (gamefile.ts) emits the fixture; this decodes the same tape.
+    // gamefile.zig re-exports mapfile.zig (relative import), so the test reaches
+    // the lump/RLE reader through gamefile.mapfile — one module graph, no
+    // double-rooting of mapfile.zig.
+    const world_gamefile_mod_for_tests = b.createModule(.{
+        .root_source_file = b.path("framework/world/gamefile.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    const world_gamefile_test_mod = b.createModule(.{
+        .root_source_file = b.path("framework/testing/unit/world_gamefile.zig"),
+        .target = target,
+        .optimize = optimize,
+        .link_libc = true,
+    });
+    world_gamefile_test_mod.addImport("world_gamefile", world_gamefile_mod_for_tests);
+    const world_gamefile_test = b.addTest(.{
+        .name = "world-gamefile-test",
+        .root_module = world_gamefile_test_mod,
+    });
+    const run_world_gamefile_test = b.addRunArtifact(world_gamefile_test);
+    // Pin cwd to the repo root so the round-trip test can read
+    // framework/testing/fixtures/gamefile_roundtrip.b64 by relative path.
+    run_world_gamefile_test.setCwd(b.path("."));
+    const world_gamefile_test_step = b.step("test-world-gamefile", "Run the platform game-file reader + content store tests");
+    world_gamefile_test_step.dependOn(&run_world_gamefile_test.step);
+
     // ── Key-packing behavior tests (GAME_INPUT hazard close, P4) ──────
     // Exercises framework/key_pack.zig — the one (mod << 32 | sym) key
     // packing engine.zig produces and ifttt.zig + useIFTTT.ts decode.
