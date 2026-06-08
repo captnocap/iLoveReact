@@ -19,7 +19,7 @@ import {
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
-import { buildWorldInstances, encodeInstanceLump } from './compile/worldGeometry';
+import { buildWorldInstances, encodeFloorHeightfields, encodeInstanceLump } from './compile/worldGeometry';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
 import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './compile/playerModel';
 import type { ChunkFloor } from './chunkFloor';
@@ -179,6 +179,7 @@ export function createHmscMapfile(
   // count rides in the lump so the loader frames the camera on the structures.
   const geometry = buildWorldInstances(state, pieces, floors);
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
+  const heightfields = encodeFloorHeightfields(floors);
   const includePlayerLumps = opts.includePlayerLumps ?? true;
   const playerModelData = includePlayerLumps ? buildDefaultPlayerModel() : null;
   const playerModel = playerModelData ? encodePlayerModelLump(playerModelData) : null;
@@ -197,6 +198,7 @@ export function createHmscMapfile(
     // The scene render environment (lighting / sky / camera) as DATA — the
     // loader reads this instead of hardcoding the look (compile/sceneEnv.ts).
     { type: MAP_LUMP.ENVIRONMENT, encoding: 'raw', data: encodeEnvironmentLump(env) },
+    { type: MAP_LUMP.HEIGHTFIELDS, encoding: 'raw', data: heightfields },
   ];
   if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes

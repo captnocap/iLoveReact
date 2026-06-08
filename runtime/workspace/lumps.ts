@@ -45,6 +45,10 @@ export const MAP_LUMP = {
   // content-addressed and contains declarative transform keyframes only; the
   // loader just interpolates them.
   PLAYER_ANIMATION: 10,
+  // Baked regular-grid terrain heightfields. Each field is a cols×rows height
+  // grid plus placement/material metadata; the loader hands it to the native
+  // Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
+  HEIGHTFIELDS: 11,
 } as const;
 
 export type LumpInput = {

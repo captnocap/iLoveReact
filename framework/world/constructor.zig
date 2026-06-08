@@ -17,6 +17,7 @@ pub const Error = gamefile.Error || error{
     NoMapTiles,
     UnsupportedTileEncoding,
     BadPlayerModel,
+    BadHeightfields,
 };
 
 const SCENE_ENV_VERSION: u32 = 1;
@@ -26,6 +27,8 @@ const PLAYER_ANIMATION_VERSION: u32 = 1;
 const PLAYER_ANIMATION_HASH_BYTES: usize = 32;
 const PLAYER_MODEL_ASSET_KEY: u32 = 2001;
 const PLAYER_ANIMATION_ASSET_KEY: u32 = 2002;
+const HEIGHTFIELDS_VERSION: u32 = 2;
+const HEIGHTFIELD_RECORD_FLOATS: usize = 10;
 
 /// The scene render environment (lighting / sky / camera), DATA the loader
 /// consumes instead of hardcoding the look (USER req_0308). Defaults mirror
@@ -112,6 +115,28 @@ pub const PlayerAnimationSet = struct {
     }
 };
 
+pub const HeightfieldMesh = struct {
+    cols: u32,
+    rows: u32,
+    center_x: f32,
+    center_z: f32,
+    base_y: f32,
+    width: f32,
+    depth: f32,
+    cell: f32,
+    walk_cos: f32,
+    color: [3]f32,
+    heights: []f32,
+    tex_w: u32 = 0,
+    tex_h: u32 = 0,
+    tex_rgba: ?[]u8 = null,
+
+    pub fn deinit(self: HeightfieldMesh, allocator: std.mem.Allocator) void {
+        allocator.free(self.heights);
+        if (self.tex_rgba) |rgba| allocator.free(rgba);
+    }
+};
+
 /// Decode the ENVIRONMENT lump (u32 version | f32[35]); on any mismatch keep the
 /// struct defaults so the look is always well-formed.
 fn decodeEnvironment(data: []const u8) SceneEnv {
@@ -170,6 +195,9 @@ pub const Scene = struct {
     player_model: []PlayerModelGroup,
     /// Baked transform clips for the compiled player model.
     player_animation: PlayerAnimationSet,
+    /// Regular-grid terrain heightfields. The loader hands these to the native
+    /// Scene3D heightfield primitive so gpu/3d.zig owns the triangulation.
+    heightfields: []HeightfieldMesh,
 
     pub fn deinit(self: Scene, allocator: std.mem.Allocator) void {
         allocator.free(self.tiles);
@@ -177,6 +205,8 @@ pub const Scene = struct {
         for (self.player_model) |group| group.deinit(allocator);
         allocator.free(self.player_model);
         self.player_animation.deinit(allocator);
+        for (self.heightfields) |field| field.deinit(allocator);
+        allocator.free(self.heightfields);
     }
 };
 
@@ -347,6 +377,83 @@ fn decodePlayerAnimation(allocator: std.mem.Allocator, data: []const u8) Error!P
     return decodePlayerAnimationPayload(allocator, payload, expected);
 }
 
+fn decodeHeightfields(allocator: std.mem.Allocator, data: []const u8) Error![]HeightfieldMesh {
+    if (data.len == 0) return try allocator.alloc(HeightfieldMesh, 0);
+    if (data.len < 8) return Error.BadHeightfields;
+    const version = std.mem.readInt(u32, data[0..4], .little);
+    if (version != 1 and version != HEIGHTFIELDS_VERSION) return Error.BadHeightfields;
+    const count = std.mem.readInt(u32, data[4..8], .little);
+    var fields = try allocator.alloc(HeightfieldMesh, count);
+    var initialized: usize = 0;
+    errdefer {
+        for (fields[0..initialized]) |field| field.deinit(allocator);
+        allocator.free(fields);
+    }
+
+    var at: usize = 8;
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const fixed_header_bytes: usize = if (version >= 2) 16 else 8;
+        if (at + fixed_header_bytes + HEIGHTFIELD_RECORD_FLOATS * 4 > data.len) return Error.BadHeightfields;
+        const cols = std.mem.readInt(u32, data[at + 0 ..][0..4], .little);
+        const rows = std.mem.readInt(u32, data[at + 4 ..][0..4], .little);
+        const tex_w = if (version >= 2) std.mem.readInt(u32, data[at + 8 ..][0..4], .little) else 0;
+        const tex_h = if (version >= 2) std.mem.readInt(u32, data[at + 12 ..][0..4], .little) else 0;
+        at += fixed_header_bytes;
+        if (cols < 2 or rows < 2) return Error.BadHeightfields;
+        const samples = std.math.mul(usize, @as(usize, cols), @as(usize, rows)) catch return Error.BadHeightfields;
+        const values_bytes = samples * 4;
+        const texture_bytes = if (version >= 2 and tex_w > 0 and tex_h > 0)
+            (std.math.mul(usize, @as(usize, tex_w), @as(usize, tex_h)) catch return Error.BadHeightfields) * 4
+        else
+            0;
+        if (at + HEIGHTFIELD_RECORD_FLOATS * 4 + values_bytes + texture_bytes > data.len) return Error.BadHeightfields;
+        const center_x = readF32(data, at + 0);
+        const center_z = readF32(data, at + 4);
+        const base_y = readF32(data, at + 8);
+        const width = readF32(data, at + 12);
+        const depth = readF32(data, at + 16);
+        const cell = readF32(data, at + 20);
+        const walk_cos = readF32(data, at + 24);
+        const color = [3]f32{ readF32(data, at + 28), readF32(data, at + 32), readF32(data, at + 36) };
+        at += HEIGHTFIELD_RECORD_FLOATS * 4;
+
+        const heights = try allocator.alloc(f32, samples);
+        errdefer allocator.free(heights);
+        var h: usize = 0;
+        while (h < samples) : (h += 1) {
+            heights[h] = readF32(data, at + h * 4);
+        }
+        at += values_bytes;
+        const tex_rgba = if (texture_bytes > 0) blk: {
+            const rgba = try allocator.alloc(u8, texture_bytes);
+            errdefer allocator.free(rgba);
+            @memcpy(rgba, data[at .. at + texture_bytes]);
+            at += texture_bytes;
+            break :blk rgba;
+        } else null;
+
+        fields[i] = .{
+            .cols = cols,
+            .rows = rows,
+            .center_x = center_x,
+            .center_z = center_z,
+            .base_y = base_y,
+            .width = width,
+            .depth = depth,
+            .cell = cell,
+            .walk_cos = walk_cos,
+            .color = color,
+            .heights = heights,
+            .tex_w = tex_w,
+            .tex_h = tex_h,
+            .tex_rgba = tex_rgba,
+        };
+        initialized += 1;
+    }
+    return fields;
+}
+
 fn streamReferences(stream: gamefile.Stream, key: u32) bool {
     for (stream.refs) |ref| {
         if (ref == key) return true;
@@ -414,6 +521,10 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         player_animation_asset = try readInstalledAsset(allocator, file, store_dir, PLAYER_ANIMATION_ASSET_KEY);
         break :blk if (player_animation_asset) |bytes_animation| try decodePlayerAnimation(allocator, bytes_animation) else emptyPlayerAnimationSet();
     } else emptyPlayerAnimationSet();
+    const heightfields = if (mapfile.findLump(map_lumps, mapfile.LumpType.heightfields)) |lump|
+        try decodeHeightfields(allocator, lump.data)
+    else
+        try allocator.alloc(HeightfieldMesh, 0);
 
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{
@@ -428,5 +539,6 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         .env = env,
         .player_model = player_model,
         .player_animation = player_animation,
+        .heightfields = heightfields,
     };
 }

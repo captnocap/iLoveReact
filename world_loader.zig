@@ -528,7 +528,29 @@ fn registerRampHeightfield(insts: []const f32, row: usize, stride: usize, slot: 
     }, sample_bytes);
 }
 
-fn buildPhysicsColliders(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize) !PhysicsColliders {
+fn registerSceneHeightfield(field: constructor.HeightfieldMesh, slot: usize) bool {
+    const count = @as(usize, field.cols) * @as(usize, field.rows);
+    if (count == 0 or count > game_physics.HF_MAX_SAMPLES) return false;
+    const sample_bytes = std.mem.sliceAsBytes(field.heights[0..count]);
+    return game_physics.registerHeightfield(.{
+        .id = slot,
+        .origin_x = field.center_x - field.width * 0.5,
+        .origin_z = field.center_z - field.depth * 0.5,
+        .cell = field.cell,
+        .cols = field.cols,
+        .rows = field.rows,
+        .base_y = field.base_y,
+        .walk_cos = field.walk_cos,
+    }, sample_bytes);
+}
+
+fn maxAbsHeight(heights: []const f32) f32 {
+    var max_abs: f32 = 0;
+    for (heights) |height| max_abs = @max(max_abs, @abs(height));
+    return max_abs;
+}
+
+fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene, insts: []const f32, inst_count: u32, stride: usize) !PhysicsColliders {
     var rects: std.ArrayList(f32) = .{};
     errdefer rects.deinit(allocator);
     var oriented: std.ArrayList(f32) = .{};
@@ -539,6 +561,13 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, insts: []const f32, inst_
     var clipped_rows: usize = 0;
 
     game_physics.clearHeightfields();
+    for (scene.heightfields) |field| {
+        if (heightfield_count < game_physics.MAX_HEIGHTFIELDS and registerSceneHeightfield(field, heightfield_count)) {
+            heightfield_count += 1;
+        } else {
+            clipped_rows += 1;
+        }
+    }
     const total_rows: usize = @intCast(inst_count);
     var row: usize = 0;
     while (row < total_rows) : (row += 1) {
@@ -975,7 +1004,7 @@ pub const Runtime = struct {
         log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ self.inst_count, self.piece_count });
         if (self.inst_count == 0) log.print("[loader] empty world — rendering sky/model over void\n", .{});
 
-        self.physics_colliders = try buildPhysicsColliders(self.allocator, self.insts, self.inst_count, self.stride);
+        self.physics_colliders = try buildPhysicsColliders(self.allocator, self.scene, self.insts, self.inst_count, self.stride);
         self.has_physics_colliders = true;
         log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ self.physics_colliders.rect_count, self.physics_colliders.oriented_count, self.physics_colliders.heightfield_count });
         if (self.physics_colliders.clipped_rows > 0) {
@@ -1060,6 +1089,39 @@ pub const Runtime = struct {
             });
         }
         if (self.scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
+        for (self.scene.heightfields, 0..) |field, i| {
+            const key = try std.fmt.allocPrint(self.allocator, "~hf~loader-floor-{d}~1", .{i});
+            self.player_geom_keys.append(self.allocator, key) catch |err| {
+                self.allocator.free(key);
+                return err;
+            };
+            const max_abs_y = maxAbsHeight(field.heights);
+            const bounds_radius = @sqrt(field.width * field.width * 0.25 + field.depth * field.depth * 0.25 + max_abs_y * max_abs_y);
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = true,
+                .scene3d_geom_key = key,
+                .scene3d_heights = field.heights,
+                .scene3d_hf_cols = field.cols,
+                .scene3d_hf_rows = field.rows,
+                .scene3d_hf_width = field.width,
+                .scene3d_hf_depth = field.depth,
+                .scene3d_hf_base = 0,
+                .scene3d_bounds_radius = bounds_radius,
+                .scene3d_pos_x = field.center_x,
+                .scene3d_pos_y = field.base_y,
+                .scene3d_pos_z = field.center_z,
+                .scene3d_color_r = if (field.tex_rgba != null) 1 else field.color[0],
+                .scene3d_color_g = if (field.tex_rgba != null) 1 else field.color[1],
+                .scene3d_color_b = if (field.tex_rgba != null) 1 else field.color[2],
+                .scene3d_tex_w = field.tex_w,
+                .scene3d_tex_h = field.tex_h,
+                .scene3d_tex_rgba = field.tex_rgba,
+            });
+        }
+        if (self.scene.heightfields.len > 0) {
+            const first = self.scene.heightfields[0];
+            log.print("[loader] built {d} terrain heightfield mesh(es); first grid {d}x{d} at ({d:.2},{d:.2}) span {d:.2}x{d:.2}\n", .{ self.scene.heightfields.len, first.cols, first.rows, first.center_x, first.center_z, first.width, first.depth });
+        }
         try self.kid_list.append(self.allocator, .{
             .scene3d_mesh = self.shape_batches.box_count > 0,
             .scene3d_geom_key = "box",

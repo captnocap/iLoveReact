@@ -29,6 +29,8 @@ pub const LumpType = struct {
     pub const player_model: u32 = 9;
     /// Baked player animation clips: declarative transform keyframes.
     pub const player_animation: u32 = 10;
+    /// Baked regular-grid terrain heightfields.
+    pub const heightfields: u32 = 11;
 };
 
 pub const Lump = struct {

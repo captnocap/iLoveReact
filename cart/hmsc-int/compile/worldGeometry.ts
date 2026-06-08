@@ -33,6 +33,10 @@ import type { BuildMaterial, PlacedBuildPiece } from '@game';
 export const INSTANCE_STRIDE = 13;
 export const INSTANCE_SHAPE_BOX = 0;
 export const INSTANCE_SHAPE_RAMP = 1;
+const HEIGHTFIELD_LUMP_VERSION = 2;
+const HEIGHTFIELD_RECORD_FLOATS = 10;
+const HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE = 4;
+const HEIGHTFIELD_TEXTURE_MAX_PX = 512;
 const STAIR_VISUAL_STEPS = 4; // Matches BUILD_UI.stairVisualSteps in /test.
 const DEG = Math.PI / 180;
 
@@ -162,6 +166,79 @@ function propColor(kind: PropKind | string): Color {
     default:
       return [0.7, 0.6, 0.4];
   }
+}
+
+function floorHasRelief(f: ChunkFloor): boolean {
+  if (!f.heights || f.heights.length < Math.max(1, f.hcols) * Math.max(1, f.hrows)) return false;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const h of f.heights) {
+    min = Math.min(min, h);
+    max = Math.max(max, h);
+  }
+  return max - min > 0.001;
+}
+
+function floorSurfaceColor(f: ChunkFloor): Color {
+  const tcols = f.tileData[0] | 0;
+  const trows = f.tileData[1] | 0;
+  const palCount = f.tileData[2] | 0;
+  if (tcols <= 0 || trows <= 0 || palCount <= 0) return [0.45, 0.5, 0.42];
+  const palBase = 3;
+  const idxBase = 3 + palCount * 3;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  let n = 0;
+  for (let i = 0; i < tcols * trows; i += 1) {
+    const v = f.tileData[idxBase + i] | 0;
+    if (v < 0 || v >= palCount) continue;
+    r += f.tileData[palBase + v * 3 + 0];
+    g += f.tileData[palBase + v * 3 + 1];
+    b += f.tileData[palBase + v * 3 + 2];
+    n += 1;
+  }
+  return n > 0 ? [r / n, g / n, b / n] : [0.45, 0.5, 0.42];
+}
+
+function heightfieldTextureSize(f: ChunkFloor): { width: number; height: number; scale: number } {
+  const tcols = f.tileData[0] | 0;
+  const trows = f.tileData[1] | 0;
+  if (tcols <= 0 || trows <= 0) return { width: 0, height: 0, scale: 0 };
+  const scale = Math.max(1, Math.min(HEIGHTFIELD_TEXTURE_PIXELS_PER_TILE, Math.floor(HEIGHTFIELD_TEXTURE_MAX_PX / Math.max(tcols, trows))));
+  return { width: tcols * scale, height: trows * scale, scale };
+}
+
+function heightfieldTextureBytes(f: ChunkFloor): Uint8Array {
+  const { width, height } = heightfieldTextureSize(f);
+  if (width <= 0 || height <= 0) return new Uint8Array(0);
+  const tcols = f.tileData[0] | 0;
+  const trows = f.tileData[1] | 0;
+  const palCount = f.tileData[2] | 0;
+  const palBase = 3;
+  const idxBase = 3 + palCount * 3;
+  const out = new Uint8Array(width * height * 4);
+  for (let y = 0; y < height; y += 1) {
+    const cy = Math.min(trows - 1, Math.max(0, Math.floor((y / height) * trows)));
+    for (let x = 0; x < width; x += 1) {
+      const cx = Math.min(tcols - 1, Math.max(0, Math.floor((x / width) * tcols)));
+      const kind = f.tileData[idxBase + cy * tcols + cx] | 0;
+      let r = 0.05;
+      let g = 0.07;
+      let b = 0.10;
+      if (kind >= 0 && kind < palCount) {
+        r = f.tileData[palBase + kind * 3 + 0] ?? r;
+        g = f.tileData[palBase + kind * 3 + 1] ?? g;
+        b = f.tileData[palBase + kind * 3 + 2] ?? b;
+      }
+      const o = (y * width + x) * 4;
+      out[o + 0] = Math.max(0, Math.min(255, Math.round(r * 255)));
+      out[o + 1] = Math.max(0, Math.min(255, Math.round(g * 255)));
+      out[o + 2] = Math.max(0, Math.min(255, Math.round(b * 255)));
+      out[o + 3] = 255;
+    }
+  }
+  return out;
 }
 
 const BUILDING_HEIGHT: Record<string, number> = {
@@ -331,6 +408,7 @@ function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): n
 function pushPaintedFloors(out: number[], floors: readonly ChunkFloor[]): number {
   let emitted = 0;
   for (const f of floors) {
+    if (floorHasRelief(f)) continue;
     const tcols = f.tileData[0] | 0;
     const trows = f.tileData[1] | 0;
     const palCount = f.tileData[2] | 0;
@@ -372,6 +450,57 @@ function pushPaintedFloors(out: number[], floors: readonly ChunkFloor[]): number
     }
   }
   return emitted;
+}
+
+export function encodeFloorHeightfields(floors: readonly ChunkFloor[]): Uint8Array {
+  const fields = floors.filter(floorHasRelief);
+  let bytes = 8;
+  for (const f of fields) {
+    const count = Math.max(0, f.hcols | 0) * Math.max(0, f.hrows | 0);
+    const tex = heightfieldTextureSize(f);
+    bytes += 16 + HEIGHTFIELD_RECORD_FLOATS * 4 + count * 4 + tex.width * tex.height * 4;
+  }
+
+  const out = new Uint8Array(bytes);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, HEIGHTFIELD_LUMP_VERSION, true);
+  view.setUint32(4, fields.length, true);
+  let at = 8;
+  for (const f of fields) {
+    const cols = f.hcols | 0;
+    const rows = f.hrows | 0;
+    const count = cols * rows;
+    const width = CHUNK_TILES;
+    const depth = CHUNK_TILES;
+    const cell = cols > 1 ? CHUNK_TILES / (cols - 1) : CHUNK_TILES;
+    const color = floorSurfaceColor(f);
+    const texture = heightfieldTextureBytes(f);
+    const tex = heightfieldTextureSize(f);
+    view.setUint32(at + 0, cols, true);
+    view.setUint32(at + 4, rows, true);
+    view.setUint32(at + 8, tex.width, true);
+    view.setUint32(at + 12, tex.height, true);
+    at += 16;
+    const floats = [
+      f.cx * CHUNK_TILES + CHUNK_TILES / 2,
+      f.cz * CHUNK_TILES + CHUNK_TILES / 2,
+      0,
+      width,
+      depth,
+      cell,
+      Math.cos((38 * Math.PI) / 180),
+      color[0],
+      color[1],
+      color[2],
+    ];
+    for (let i = 0; i < floats.length; i += 1) view.setFloat32(at + i * 4, floats[i], true);
+    at += HEIGHTFIELD_RECORD_FLOATS * 4;
+    for (let i = 0; i < count; i += 1) view.setFloat32(at + i * 4, f.heights[i] ?? 0, true);
+    at += count * 4;
+    out.set(texture, at);
+    at += texture.byteLength;
+  }
+  return out;
 }
 
 export type WorldInstanceResult = {
