@@ -21,8 +21,9 @@
 
 export { useWorkspace } from './useWorkspace';
 export type { WorkspaceArgs, WorkspaceControls } from './useWorkspace';
-export { useHistory } from './history';
-export type { HistoryControls } from './history';
+export { workspaceHotCurrentKey, workspaceHotHistoryKey } from './useWorkspace';
+export { createHistoryModel, useHistory } from './history';
+export type { HistoryControls, HistorySnapshot } from './history';
 export {
   buildEnvelope,
   parseEnvelope,

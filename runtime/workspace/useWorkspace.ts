@@ -46,6 +46,33 @@ import { useHistory, type HistoryControls } from './history';
 
 const AUTOSAVE_DEBOUNCE_MS = 600;
 
+export function workspaceHotCurrentKey(cartName: string, version: number): string {
+  return `workspace:${cartName}:v${version}:current`;
+}
+
+export function workspaceHotHistoryKey(cartName: string, version: number): string {
+  return `workspace:${cartName}:v${version}:history`;
+}
+
+function readHotEnvelope<T>(cartName: string, version: number): SessionEnvelope<T> | null {
+  try {
+    const raw = (globalThis as any).__hot_get?.(workspaceHotCurrentKey(cartName, version));
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    return parseEnvelope<T>(raw, { cartName, version });
+  } catch {
+    return null;
+  }
+}
+
+function writeHotEnvelope<T>(cartName: string, version: number, env: SessionEnvelope<T> | null): void {
+  if (!env) return;
+  try {
+    (globalThis as any).__hot_set?.(workspaceHotCurrentKey(cartName, version), serializeEnvelope(env));
+  } catch {
+    // Hot state is best-effort. Disk autosave remains the durable path.
+  }
+}
+
 export interface WorkspaceArgs<T> {
   /** Cart directory name under `cart/`. Also the kind tag in the
    *  envelope as `<cartName>-session`. */
@@ -124,7 +151,7 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
 
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const history = useHistory<SessionEnvelope<T>>();
+  const history = useHistory<SessionEnvelope<T>>(workspaceHotHistoryKey(cartName, version));
 
   // Build an envelope from current state. Used at autosave flush and at
   // every history commit/undo/redo. Returns null when the cart isn't
@@ -152,6 +179,15 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
       setTimeout(() => { autosaveSuppressedRef.current = false; }, 0);
     };
 
+    const hot = readHotEnvelope<T>(cartName, version);
+    if (hot) {
+      setStem(hot.stem);
+      applyPayload(hot, 'restore');
+      setRestoredFrom(hot.stem);
+      release();
+      return;
+    }
+
     const pointer = readFile(lastPointerPath(cartName));
     if (!pointer) { release(); return; }
     const targetStem = pointer.trim();
@@ -174,6 +210,7 @@ export function useWorkspace<T>(args: WorkspaceArgs<T>): WorkspaceControls<T> {
   // a burst of edits only writes once after the user pauses.
   useEffect(() => {
     if (autosaveSuppressedRef.current) return;
+    writeHotEnvelope(cartName, version, snapshot());
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     autosaveTimerRef.current = setTimeout(() => {
       const env = snapshot();

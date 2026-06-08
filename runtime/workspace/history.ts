@@ -20,6 +20,12 @@ import { useCallback, useRef, useState } from 'react';
 const HISTORY_CAP = 50;
 const COALESCE_MS = 250;
 
+export type HistorySnapshot<T> = {
+  undo: T[];
+  redo: T[];
+  lastCoalesceAt: number;
+};
+
 export interface HistoryControls<T> {
   commit: (current: T | null) => void;
   commitCoalesced: (current: T | null) => void;
@@ -30,64 +36,165 @@ export interface HistoryControls<T> {
   clear: () => void;
 }
 
-export function useHistory<T>(): HistoryControls<T> {
-  const undoStack = useRef<T[]>([]);
-  const redoStack = useRef<T[]>([]);
-  const [canUndo, setCanUndo] = useState(false);
-  const [canRedo, setCanRedo] = useState(false);
-  const lastCoalesceAt = useRef(0);
+export type HistoryModelOpts<T> = {
+  cap?: number;
+  coalesceMs?: number;
+  now?: () => number;
+  initial?: HistorySnapshot<T> | null;
+  onChange?: (snapshot: HistorySnapshot<T>) => void;
+};
+
+export type HistoryModel<T> = {
+  commit: (current: T | null) => void;
+  commitCoalesced: (current: T | null) => void;
+  undo: (current: T | null) => T | null;
+  redo: (current: T | null) => T | null;
+  canUndo: () => boolean;
+  canRedo: () => boolean;
+  clear: () => void;
+  snapshot: () => HistorySnapshot<T>;
+};
+
+export function createHistoryModel<T>(opts: HistoryModelOpts<T> = {}): HistoryModel<T> {
+  const cap = opts.cap ?? HISTORY_CAP;
+  const coalesceMs = opts.coalesceMs ?? COALESCE_MS;
+  const now = opts.now ?? (() => Date.now());
+  let undoStack = opts.initial?.undo?.slice() ?? [];
+  let redoStack = opts.initial?.redo?.slice() ?? [];
+  let lastCoalesceAt = opts.initial?.lastCoalesceAt ?? 0;
+
+  const snapshot = (): HistorySnapshot<T> => ({
+    undo: undoStack.slice(),
+    redo: redoStack.slice(),
+    lastCoalesceAt,
+  });
+
+  const changed = (): void => {
+    opts.onChange?.(snapshot());
+  };
+
+  const push = (stack: T[], value: T): void => {
+    stack.push(value);
+    if (stack.length > cap) stack.shift();
+  };
+
+  return {
+    commit: (current: T | null) => {
+      if (current === null) return;
+      lastCoalesceAt = 0;
+      push(undoStack, current);
+      redoStack = [];
+      changed();
+    },
+
+    commitCoalesced: (current: T | null) => {
+      if (current === null) return;
+      const t = now();
+      if (t - lastCoalesceAt < coalesceMs) return;
+      lastCoalesceAt = t;
+      push(undoStack, current);
+      redoStack = [];
+      changed();
+    },
+
+    undo: (current: T | null): T | null => {
+      const prev = undoStack.pop();
+      if (prev === undefined) return null;
+      if (current !== null) {
+        push(redoStack, current);
+      }
+      changed();
+      return prev;
+    },
+
+    redo: (current: T | null): T | null => {
+      const next = redoStack.pop();
+      if (next === undefined) return null;
+      if (current !== null) {
+        push(undoStack, current);
+      }
+      changed();
+      return next;
+    },
+
+    canUndo: () => undoStack.length > 0,
+    canRedo: () => redoStack.length > 0,
+    clear: () => {
+      undoStack = [];
+      redoStack = [];
+      lastCoalesceAt = 0;
+      changed();
+    },
+    snapshot,
+  };
+}
+
+function readHotHistory<T>(persistKey: string | null): HistorySnapshot<T> | null {
+  if (!persistKey) return null;
+  try {
+    const raw = (globalThis as any).__hot_get?.(persistKey);
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.undo) || !Array.isArray(parsed.redo)) return null;
+    return {
+      undo: parsed.undo,
+      redo: parsed.redo,
+      lastCoalesceAt: typeof parsed.lastCoalesceAt === 'number' ? parsed.lastCoalesceAt : 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeHotHistory<T>(persistKey: string | null, snapshot: HistorySnapshot<T>): void {
+  if (!persistKey) return;
+  try {
+    (globalThis as any).__hot_set?.(persistKey, JSON.stringify(snapshot));
+  } catch {
+    // Hot state is best-effort; disk/session persistence still owns durability.
+  }
+}
+
+export function useHistory<T>(persistKey: string | null = null): HistoryControls<T> {
+  const model = useRef<HistoryModel<T> | null>(null);
+  if (!model.current) {
+    model.current = createHistoryModel<T>({
+      initial: readHotHistory<T>(persistKey),
+      onChange: (snap) => writeHotHistory(persistKey, snap),
+    });
+  }
+  const [canUndo, setCanUndo] = useState(model.current.canUndo());
+  const [canRedo, setCanRedo] = useState(model.current.canRedo());
 
   const recompute = () => {
-    setCanUndo(undoStack.current.length > 0);
-    setCanRedo(redoStack.current.length > 0);
+    setCanUndo(model.current!.canUndo());
+    setCanRedo(model.current!.canRedo());
   };
 
   const commit = useCallback((current: T | null) => {
-    if (!current) return;
-    lastCoalesceAt.current = 0;
-    undoStack.current.push(current);
-    if (undoStack.current.length > HISTORY_CAP) undoStack.current.shift();
-    redoStack.current = [];
+    model.current!.commit(current);
     recompute();
   }, []);
 
   const commitCoalesced = useCallback((current: T | null) => {
-    if (!current) return;
-    const now = Date.now();
-    if (now - lastCoalesceAt.current < COALESCE_MS) return;
-    lastCoalesceAt.current = now;
-    undoStack.current.push(current);
-    if (undoStack.current.length > HISTORY_CAP) undoStack.current.shift();
-    redoStack.current = [];
+    model.current!.commitCoalesced(current);
     recompute();
   }, []);
 
   const undo = useCallback((current: T | null): T | null => {
-    const prev = undoStack.current.pop();
-    if (!prev) return null;
-    if (current) {
-      redoStack.current.push(current);
-      if (redoStack.current.length > HISTORY_CAP) redoStack.current.shift();
-    }
+    const prev = model.current!.undo(current);
     recompute();
     return prev;
   }, []);
 
   const redo = useCallback((current: T | null): T | null => {
-    const next = redoStack.current.pop();
-    if (!next) return null;
-    if (current) {
-      undoStack.current.push(current);
-      if (undoStack.current.length > HISTORY_CAP) undoStack.current.shift();
-    }
+    const next = model.current!.redo(current);
     recompute();
     return next;
   }, []);
 
   const clear = useCallback(() => {
-    undoStack.current = [];
-    redoStack.current = [];
-    lastCoalesceAt.current = 0;
+    model.current!.clear();
     recompute();
   }, []);
 
