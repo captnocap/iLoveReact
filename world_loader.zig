@@ -44,6 +44,18 @@ const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
 const SCAN_W: usize = 26;
 const SCAN_LSHIFT: usize = 225;
+const CAMERA_YAW_RADIANS_PER_PIXEL: f32 = 0.0032;
+const CAMERA_PITCH_RADIANS_PER_PIXEL: f32 = 0.0024;
+const CAMERA_DEFAULT_PITCH: f32 = 0.05;
+const CAMERA_MIN_PITCH: f32 = -0.65;
+const CAMERA_MAX_PITCH: f32 = 0.85;
+const CAMERA_DISTANCE_METERS: f32 = 5.9;
+const CAMERA_MIN_DISTANCE_METERS: f32 = 2.8;
+const CAMERA_MAX_DISTANCE_METERS: f32 = 12.0;
+const CAMERA_HEIGHT_METERS: f32 = 3.05;
+const CAMERA_TARGET_HEIGHT_METERS: f32 = 2.08;
+const CAMERA_PITCH_TARGET_METERS_PER_RADIAN: f32 = 0.82;
+const CAMERA_FOV_DEGREES: f32 = 48.0;
 
 const log = std.debug;
 
@@ -64,7 +76,9 @@ const CameraState = struct {
     yaw: f32,
     pitch: f32,
     distance: f32,
-    focus_height: f32,
+    height: f32,
+    target_height: f32,
+    pitch_target_factor: f32,
     far: f32,
     fov: f32,
 };
@@ -350,17 +364,12 @@ fn writeAvatar(out: []f32, player: PlayerState) void {
 }
 
 fn updateCameraNode(camera: *Node, cam: CameraState, player: PlayerState) void {
-    const target = Vec3{ .x = player.x, .y = player.y + cam.focus_height, .z = player.z };
-    const cp = @cos(cam.pitch);
-    const sx = @sin(cam.yaw) * cp * cam.distance;
-    const sy = @sin(cam.pitch) * cam.distance;
-    const sz = @cos(cam.yaw) * cp * cam.distance;
-    camera.scene3d_pos_x = target.x + sx;
-    camera.scene3d_pos_y = target.y + sy;
-    camera.scene3d_pos_z = target.z + sz;
-    camera.scene3d_look_x = target.x;
-    camera.scene3d_look_y = target.y;
-    camera.scene3d_look_z = target.z;
+    camera.scene3d_pos_x = player.x - @sin(cam.yaw) * cam.distance;
+    camera.scene3d_pos_y = player.y + cam.height;
+    camera.scene3d_pos_z = player.z - @cos(cam.yaw) * cam.distance;
+    camera.scene3d_look_x = player.x;
+    camera.scene3d_look_y = player.y + cam.target_height - cam.pitch * cam.pitch_target_factor;
+    camera.scene3d_look_z = player.z;
     camera.scene3d_fov = cam.fov;
     camera.scene3d_far = cam.far;
 }
@@ -464,10 +473,7 @@ pub fn main() !void {
         .z = bounds.cz + horiz * 0.72,
     };
     const authored_dx = authored_eye.x - bounds.cx;
-    const authored_dy = authored_eye.y - bounds.cy;
     const authored_dz = authored_eye.z - bounds.cz;
-    const authored_xz = @sqrt(authored_dx * authored_dx + authored_dz * authored_dz);
-    const authored_dist = @sqrt(authored_xz * authored_xz + authored_dy * authored_dy);
     const spawn = chooseSpawn(insts, inst_count, piece_count, stride, bounds);
     var player = PlayerState{
         .x = spawn.x,
@@ -477,11 +483,13 @@ pub fn main() !void {
     };
     var camera = CameraState{
         .yaw = std.math.atan2(authored_dx, authored_dz),
-        .pitch = clamp(std.math.atan2(authored_dy, @max(0.001, authored_xz)), 0.12, 1.05),
-        .distance = clamp(authored_dist, 8.0, @max(36.0, bounds.radius * 1.35)),
-        .focus_height = 1.25,
+        .pitch = CAMERA_DEFAULT_PITCH,
+        .distance = CAMERA_DISTANCE_METERS,
+        .height = CAMERA_HEIGHT_METERS,
+        .target_height = CAMERA_TARGET_HEIGHT_METERS,
+        .pitch_target_factor = CAMERA_PITCH_TARGET_METERS_PER_RADIAN,
         .far = @max(far, bounds.radius * 4.0 + 64.0),
-        .fov = env.cam_fov,
+        .fov = CAMERA_FOV_DEGREES,
     };
     var avatar_instances: [AVATAR_PARTS * INSTANCE_STRIDE]f32 = undefined;
     writeAvatar(avatar_instances[0..], player);
@@ -553,12 +561,12 @@ pub fn main() !void {
                 },
                 c.SDL_EVENT_MOUSE_MOTION => {
                     if (orbit_drag) {
-                        camera.yaw -= event.motion.xrel * 0.006;
-                        camera.pitch = clamp(camera.pitch - event.motion.yrel * 0.004, 0.10, 1.15);
+                        camera.yaw -= event.motion.xrel * CAMERA_YAW_RADIANS_PER_PIXEL;
+                        camera.pitch = clamp(camera.pitch + event.motion.yrel * CAMERA_PITCH_RADIANS_PER_PIXEL, CAMERA_MIN_PITCH, CAMERA_MAX_PITCH);
                     }
                 },
                 c.SDL_EVENT_MOUSE_WHEEL => {
-                    camera.distance = clamp(camera.distance * (1.0 - event.wheel.y * 0.10), 4.0, @max(24.0, bounds.radius * 1.2));
+                    camera.distance = clamp(camera.distance * (1.0 - event.wheel.y * 0.10), CAMERA_MIN_DISTANCE_METERS, CAMERA_MAX_DISTANCE_METERS);
                 },
                 else => {},
             }
@@ -570,21 +578,25 @@ pub fn main() !void {
 
         var move_x: f32 = 0;
         var move_z: f32 = 0;
+        const fwd_x = @sin(camera.yaw);
+        const fwd_z = @cos(camera.yaw);
+        const right_x = -@cos(camera.yaw);
+        const right_z = @sin(camera.yaw);
         if (keyDown(SCAN_W)) {
-            move_x -= @sin(camera.yaw);
-            move_z -= @cos(camera.yaw);
+            move_x += fwd_x;
+            move_z += fwd_z;
         }
         if (keyDown(SCAN_S)) {
-            move_x += @sin(camera.yaw);
-            move_z += @cos(camera.yaw);
+            move_x -= fwd_x;
+            move_z -= fwd_z;
         }
         if (keyDown(SCAN_A)) {
-            move_x -= @cos(camera.yaw);
-            move_z += @sin(camera.yaw);
+            move_x -= right_x;
+            move_z -= right_z;
         }
         if (keyDown(SCAN_D)) {
-            move_x += @cos(camera.yaw);
-            move_z -= @sin(camera.yaw);
+            move_x += right_x;
+            move_z += right_z;
         }
         const move_len = @sqrt(move_x * move_x + move_z * move_z);
         if (move_len > 0.001) {
