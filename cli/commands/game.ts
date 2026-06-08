@@ -8,6 +8,7 @@
 // never goes dark.
 //
 //   rjit game compile   cart/hmsc-int/compile/main.ts -> zig-out/game/hmsc-headless.js
+//   rjit game bake      cart/hmsc-int/compile/bakeGameFile.ts -> zig-out/game/hmsc.gamefile
 //   rjit game verify    compile fresh, then suites + scripts -> GREEN/RED + exit code
 
 import { fsExists, fsList, fsMkdir, fsWrite, tryFsStat } from '../host/fs.ts';
@@ -100,11 +101,13 @@ const ORACLE_SMOKE_QUERIES = [
 export async function run(argv: string[]): Promise<number> {
   const subcommand = argv[0];
   if (subcommand === 'compile') return compile(__cwd());
+  if (subcommand === 'bake') return bake(__cwd());
   if (subcommand === 'verify') return verify(__cwd());
   if (subcommand === 'shot') return shot(__cwd(), argv.slice(1));
   if (subcommand === 'play') return play(__cwd(), argv.slice(1));
-  err('Usage: rjit game <compile|verify|shot|play>');
+  err('Usage: rjit game <compile|bake|verify|shot|play>');
   err('  compile  bundle the headless game output');
+  err('  bake     write the authored world to zig-out/game/hmsc.gamefile + contentstore');
   err('  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict');
   err('  shot     build the no-V8 loader, render the baked game-file, capture a PNG (--out path)');
   err('  play     build the no-V8 loader and open a live window (close it or press ESC to exit)');
@@ -134,6 +137,13 @@ function compile(root: string): number {
     return 1;
   }
   out(`[game] compiled ${COMPILE_ENTRY} -> ${HEADLESS_BUNDLE}`);
+  return 0;
+}
+
+function bake(root: string): number {
+  fsMkdir(`${root}/${OUT_DIR}`);
+  if (!bakeRealGameFile(root)) return 1;
+  out(`[game] bake PASS — ${BAKED_GAMEFILE}`);
   return 0;
 }
 

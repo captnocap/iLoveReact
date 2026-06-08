@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Text } from '@reactjit/primitives';
 import { readFile, writeFile, mkdir } from '@reactjit/hooks/fs';
+import { execAsync } from '@reactjit/runtime/hooks/process';
 import {
   useWorkspace,
   parseEnvelope,
@@ -76,6 +77,7 @@ const CART = 'hmsc-int';
 // boot blank — those had no world to lose.
 const VERSION = 2;
 const MIN_FRAC = 0.06; // never collapse a pane fully — keep a grabbable sliver
+const GAME_BAKE_CMD = 'tools/rjit game bake 2>&1';
 
 // The persisted state of ONE map: the editor view + the authored world.
 interface MapPayload {
@@ -103,6 +105,11 @@ interface MapPayload {
 
 function clampFrac(f: number): number {
   return Math.max(MIN_FRAC, Math.min(1 - MIN_FRAC, f));
+}
+
+function lastMeaningfulLine(text: string): string {
+  const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+  return lines[lines.length - 1] ?? '';
 }
 
 const DEFAULT_BRUSH: BrushSettings = {
@@ -430,6 +437,8 @@ function EditorShell() {
   const [maps, setMaps] = useState<string[]>(() => listMaps());
   const [menuOpen, setMenuOpen] = useState(false);
   const [logOpen, setLogOpen] = useState(false);
+  const [compiledReloadKey, setCompiledReloadKey] = useState(0);
+  const [compiledStatus, setCompiledStatus] = useState('native world_loader primitive');
   const refreshMaps = useCallback(() => setMaps(listMaps()), []);
   // The two toolbar popovers are mutually exclusive; opening one closes the other.
   const toggleMenu = useCallback(() => { setMenuOpen((o) => !o); setLogOpen(false); }, []);
@@ -882,9 +891,23 @@ function EditorShell() {
   // via saveGameState. The standalone game's readStoredGameState then boots THIS
   // map — what you see in the preview is what the game runs. Deliberate (a button),
   // not on every keystroke, so authoring doesn't clobber the booted world midway.
-  const compileToGame = useCallback(() => {
-    compileEditorWorld(previewWorld);
-    logEvent({ cat: 'map', text: `compiled ${ws.stem} → game` });
+  const compileToGame = useCallback(async () => {
+    setCompiledStatus('compiling game-file...');
+    try {
+      compileEditorWorld(previewWorld);
+      const bake = await execAsync(GAME_BAKE_CMD);
+      const summary = lastMeaningfulLine(bake.stdout);
+      if (bake.code !== 0 || /\[game\].*FAILED/i.test(bake.stdout)) {
+        throw new Error(summary || `tools/rjit game bake exited ${bake.code}`);
+      }
+      setCompiledReloadKey((key) => key + 1);
+      setCompiledStatus(summary || 'compiled game-file refreshed');
+      logEvent({ cat: 'map', text: `compiled ${ws.stem} → game-file` });
+    } catch (error: any) {
+      const message = String(error?.message ?? error);
+      setCompiledStatus(`error: ${message}`);
+      logEvent({ cat: 'map', text: `compile failed: ${message}` });
+    }
   }, [previewWorld, logEvent, ws.stem]);
 
   // The current map always shows in the switcher even before its file lands on disk.
@@ -1023,7 +1046,7 @@ function EditorShell() {
         {/* The four-gutter rebuild (WORKBENCH.md) — additive while sources land;
             old routes flip off one at a time as parity is reached. */}
         <Route path="/workbench">{() => <WorkbenchRoute sources={wbSources} onExit={() => nav.push('/')} />}</Route>
-        <Route path="/compiled">{() => <CompiledWorldRoute onExit={() => nav.push('/')} />}</Route>
+        <Route path="/compiled">{() => <CompiledWorldRoute onExit={() => nav.push('/')} reloadKey={compiledReloadKey} status={compiledStatus} />}</Route>
       </Box>
 
       {/* Root overlays live here so they paint on top of the editor panes (this

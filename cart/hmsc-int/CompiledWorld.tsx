@@ -1,4 +1,4 @@
-import { createElement, useState } from 'react';
+import { createElement } from 'react';
 import { Box, Pressable, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { accentFor } from './shell/workbench.cls';
@@ -29,8 +29,8 @@ export function CompiledWorld(props: CompiledWorldProps) {
   });
 }
 
-export function CompiledWorldRoute(props: { onExit: () => void }) {
-  const [status] = useState('native world_loader primitive');
+export function CompiledWorldRoute(props: { onExit: () => void; reloadKey?: number; status?: string }) {
+  const status = props.status ?? 'native world_loader primitive';
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: accentFor('bg'), flexDirection: 'column' }}>
       <Box style={{ height: 34, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 10, borderBottomWidth: 1, borderBottomColor: accentFor('border'), backgroundColor: accentFor('surface') }}>
@@ -43,7 +43,7 @@ export function CompiledWorldRoute(props: { onExit: () => void }) {
         <Text fontSize={9} color={status.startsWith('error:') ? accentFor('error') : accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{status}</Text>
       </Box>
       <Box style={{ flexGrow: 1, minHeight: 0 }}>
-        <CompiledWorld />
+        <CompiledWorld key={props.reloadKey ?? 0} />
       </Box>
     </Box>
   );

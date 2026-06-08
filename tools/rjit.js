@@ -5574,11 +5574,13 @@ done
   async function run11(argv) {
     const subcommand = argv[0];
     if (subcommand === "compile") return compile(__cwd());
+    if (subcommand === "bake") return bake(__cwd());
     if (subcommand === "verify") return verify(__cwd());
     if (subcommand === "shot") return shot(__cwd(), argv.slice(1));
     if (subcommand === "play") return play(__cwd(), argv.slice(1));
-    err("Usage: rjit game <compile|verify|shot|play>");
+    err("Usage: rjit game <compile|bake|verify|shot|play>");
     err("  compile  bundle the headless game output");
+    err("  bake     write the authored world to zig-out/game/hmsc.gamefile + contentstore");
     err("  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict");
     err("  shot     build the no-V8 loader, render the baked game-file, capture a PNG (--out path)");
     err("  play     build the no-V8 loader and open a live window (close it or press ESC to exit)");
@@ -5606,6 +5608,12 @@ done
       return 1;
     }
     out(`[game] compiled ${COMPILE_ENTRY} -> ${HEADLESS_BUNDLE}`);
+    return 0;
+  }
+  function bake(root) {
+    fsMkdir(`${root}/${OUT_DIR}`);
+    if (!bakeRealGameFile(root)) return 1;
+    out(`[game] bake PASS \u2014 ${BAKED_GAMEFILE}`);
     return 0;
   }
   function posixJoin(...parts) {
@@ -5896,8 +5904,8 @@ if (failures.length > 0) {
         const envelope = JSON.parse(tapeTransport);
         tapeBase64 = String(envelope.gamefile ?? "");
         assets = Array.isArray(envelope.assets) ? envelope.assets : [];
-      } catch (error2) {
-        err(`[game] bake FAILED: malformed game-file envelope: ${String(error2?.message ?? error2)}`);
+      } catch (error) {
+        err(`[game] bake FAILED: malformed game-file envelope: ${String(error?.message ?? error)}`);
         return false;
       }
     }
@@ -5907,7 +5915,7 @@ if (failures.length > 0) {
     }
     const gamefilePath = `${root}/${BAKED_GAMEFILE}`;
     fsMkdir(dirOf(gamefilePath));
-    const write = spawnSync("sh", ["-c", `base64 -d > ${shellQuote(gamefilePath)}`], tapeBase64);
+    const write = spawnSync("sh", ["-c", `base64 -d > ${shellQuote2(gamefilePath)}`], tapeBase64);
     if (write.stderr.trim()) err(write.stderr.trim());
     if (write.code !== 0) {
       err("[game] bake FAILED: could not write raw game-file bytes");
@@ -5921,7 +5929,7 @@ if (failures.length > 0) {
         return false;
       }
       const assetPath = `${storeDir}/${asset.hash}`;
-      const assetWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote(assetPath)}`], asset.base64);
+      const assetWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote2(assetPath)}`], asset.base64);
       if (assetWrite.stderr.trim()) err(assetWrite.stderr.trim());
       if (assetWrite.code !== 0) {
         err(`[game] bake FAILED: could not write content-addressed asset ${asset.hash}`);
@@ -5967,6 +5975,9 @@ if (failures.length > 0) {
   function dirOf(path) {
     const i = path.lastIndexOf("/");
     return i <= 0 ? "/" : path.slice(0, i);
+  }
+  function shellQuote2(value) {
+    return `'${value.replace(/'/g, `'\\''`)}'`;
   }
   function shot(root, argv) {
     let outPath = `shots/${LOADER_NAME}.png`;
@@ -7011,7 +7022,7 @@ ${IMPORTS_MARKER}`).replace(
     fsWrite(`${packageDir}/manifest.json`, `${JSON.stringify(emitted.manifest, null, 2)}
 `);
     const mapPath = `${packageDir}/maps/city.map`;
-    const mapWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote2(mapPath)}`], emitted.mapBase64);
+    const mapWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote3(mapPath)}`], emitted.mapBase64);
     writeSpawnOutput3(mapWrite);
     if (mapWrite.code !== 0) return mapWrite.code || 1;
     const bundleOut = `${packageDir}/bundle.js`;
@@ -7035,7 +7046,7 @@ ${IMPORTS_MARKER}`).replace(
     if (result.stdout) __writeStdout(result.stdout);
     if (result.stderr) __writeStderr(result.stderr);
   }
-  function shellQuote2(value) {
+  function shellQuote3(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
 
@@ -7604,9 +7615,9 @@ ${IMPORTS_MARKER}`).replace(
     const scan2 = spawnSync(`${rjitHome}/tools/rjit`, ["bake-geometry-auto", cart.entry, "--out", manifestPath]);
     writeSpawnOutput5(scan2);
     if (scan2.code !== 0) return null;
-    const bake = spawnSync(`${rjitHome}/tools/rjit`, ["bake-geometry", "--manifest", manifestPath, "--out", seedPath]);
-    writeSpawnOutput5(bake);
-    if (bake.code !== 0) return null;
+    const bake2 = spawnSync(`${rjitHome}/tools/rjit`, ["bake-geometry", "--manifest", manifestPath, "--out", seedPath]);
+    writeSpawnOutput5(bake2);
+    if (bake2.code !== 0) return null;
     return () => {
       if (previousSeed !== null) {
         fsWrite(seedPath, previousSeed);
@@ -7747,7 +7758,8 @@ ${IMPORTS_MARKER}`).replace(
       midi: hasBuildFlag(flags, "has-midi"),
       vterm: hasBuildFlag(flags, "has-terminal"),
       doom: hasBuildFlag(flags, "has-doom"),
-      pathing: hasBuildFlag(flags, "has-pathing")
+      pathing: hasBuildFlag(flags, "has-pathing"),
+      compiled_world: hasBuildFlag(flags, "has-compiled-world")
     };
     let mismatch = false;
     for (const [name, want] of Object.entries(expected)) {
@@ -8074,13 +8086,13 @@ __ARCHIVE__
     const env = [
       "ZIGOS_HEADLESS=1",
       "ZIGOS_SCREENSHOT=1",
-      `ZIGOS_SCREENSHOT_OUTPUT=${shellQuote3(png)}`,
+      `ZIGOS_SCREENSHOT_OUTPUT=${shellQuote4(png)}`,
       `ZIGOS_SCREENSHOT_FRAMES=${frames}`,
-      ...route ? [`RJIT_BOOT_ROUTE=${shellQuote3(route)}`] : []
+      ...route ? [`RJIT_BOOT_ROUTE=${shellQuote4(route)}`] : []
     ].join(" ");
     out(`[shot] booting ${name} hidden${route ? ` at ${route}` : ""}, capturing after ${frames} frames...`);
-    const argText = binaryArgs.map(shellQuote3).join(" ");
-    const cmd = `${env} timeout -s KILL ${timeoutS} ${shellQuote3(binary)} ${argText}`;
+    const argText = binaryArgs.map(shellQuote4).join(" ");
+    const cmd = `${env} timeout -s KILL ${timeoutS} ${shellQuote4(binary)} ${argText}`;
     out(`[shot] command: ${cmd}`);
     const result = spawnSync("sh", ["-c", `${cmd} 2>&1 | grep -E "SCREENSHOT|capture|RJIT_PLAYER_ARGV" || true`]);
     if (result.stdout) __writeStdout(result.stdout);
@@ -8104,7 +8116,7 @@ __ARCHIVE__
     return fsStat(binary).mtimeMs > fsStat(cartEntry).mtimeMs;
   }
   function pngDims(path) {
-    const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote3(path)} | od -An -v -tu1`]);
+    const dump = spawnSync("sh", ["-c", `head -c 24 ${shellQuote4(path)} | od -An -v -tu1`]);
     const bytes = dump.stdout.trim().split(/\s+/).map((token) => Number(token));
     if (bytes.length < 24 || bytes.some((value) => !Number.isFinite(value))) return null;
     const magic = [137, 80, 78, 71, 13, 10, 26, 10];
@@ -8123,7 +8135,7 @@ __ARCHIVE__
     const idx = path.lastIndexOf("/");
     return idx <= 0 ? "/" : path.slice(0, idx);
   }
-  function shellQuote3(value) {
+  function shellQuote4(value) {
     return `'${value.replace(/'/g, `'\\''`)}'`;
   }
   function usage5(message) {
