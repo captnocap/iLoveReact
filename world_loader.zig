@@ -36,7 +36,8 @@ const WIN_H: c_int = 600;
 const DEFAULT_FIXTURE = "framework/testing/fixtures/gamefile_roundtrip.b64";
 const STORE_DIR = "zig-out/game/contentstore";
 const MAX_FRAMES: u32 = 600;
-const INSTANCE_STRIDE: usize = 9;
+// Instance row: pos3 + rot3 + scale3 + color3 (matches gpu/3d.zig stride>=12).
+const INSTANCE_STRIDE: usize = 12;
 
 const log = std.debug;
 
@@ -130,6 +131,7 @@ fn extrudeTiles(allocator: std.mem.Allocator, scene: constructor.Scene) ![]f32 {
             const color = tileColor(scene.tiles[y * scene.width + x]) orelse continue;
             try list.appendSlice(allocator, &[_]f32{
                 @floatFromInt(x), 0.25, @floatFromInt(y), // position (center)
+                0,                0,    0, // rotation (yaw unused)
                 0.9,              0.5,  0.9, // scale
                 color[0],         color[1], color[2], // color
             });
@@ -147,8 +149,10 @@ const Bounds = struct {
 
 /// Axis-aligned bounds of an instance batch (each row: pos3/scale3/color3),
 /// used to auto-frame the camera so the whole world fits in view.
-fn instanceBounds(insts: []const f32, count: u32) Bounds {
+fn instanceBounds(insts: []const f32, count: u32, stride: usize) Bounds {
     if (count == 0) return .{ .cx = 0, .cy = 0, .cz = 0, .radius = 16 };
+    // Scale floats follow the optional rot3 block: at +6 for stride>=12, else +3.
+    const scale_base: usize = if (stride >= 12) 6 else 3;
     var min_x: f32 = std.math.floatMax(f32);
     var min_y: f32 = std.math.floatMax(f32);
     var min_z: f32 = std.math.floatMax(f32);
@@ -157,13 +161,13 @@ fn instanceBounds(insts: []const f32, count: u32) Bounds {
     var max_z: f32 = -std.math.floatMax(f32);
     var i: usize = 0;
     while (i < count) : (i += 1) {
-        const b = i * INSTANCE_STRIDE;
+        const b = i * stride;
         const px = insts[b + 0];
         const py = insts[b + 1];
         const pz = insts[b + 2];
-        const hx = @abs(insts[b + 3]) * 0.5;
-        const hy = @abs(insts[b + 4]) * 0.5;
-        const hz = @abs(insts[b + 5]) * 0.5;
+        const hx = @abs(insts[b + scale_base + 0]) * 0.5;
+        const hy = @abs(insts[b + scale_base + 1]) * 0.5;
+        const hz = @abs(insts[b + scale_base + 2]) * 0.5;
         min_x = @min(min_x, px - hx);
         max_x = @max(max_x, px + hx);
         min_y = @min(min_y, py - hy);
@@ -217,6 +221,7 @@ pub fn main() !void {
     defer if (fallback) |f| allocator.free(f);
     var insts: []const f32 = scene.instances;
     var inst_count: u32 = scene.instance_count;
+    var stride: usize = if (scene.instance_stride > 0) scene.instance_stride else INSTANCE_STRIDE;
     if (inst_count == 0) {
         const f = extrudeTiles(allocator, scene) catch |err| {
             log.print("[loader] tile extrusion FAILED: {any}\n", .{err});
@@ -224,11 +229,16 @@ pub fn main() !void {
         };
         fallback = f;
         insts = f;
+        stride = INSTANCE_STRIDE;
         inst_count = @intCast(f.len / INSTANCE_STRIDE);
         log.print("[loader] no instance buffer — extruded {d} tile boxes\n", .{inst_count});
     }
+    // The first `piece_count` rows are the placed structures (the /test city);
+    // the camera frames on THEM so the towers fill the view instead of being a
+    // speck on the 240m ground plane. 0 → frame on everything (tile fallback).
+    const piece_count: u32 = scene.piece_count;
     // The render proof greps this exact line: real geometry, real positions.
-    log.print("[loader] built {d} mesh instances\n", .{inst_count});
+    log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ inst_count, piece_count });
     if (inst_count == 0) {
         log.print("[loader] FAIL: no geometry to render\n", .{});
         return error.NoGeometry;
@@ -259,7 +269,10 @@ pub fn main() !void {
 
     // ── build the Scene3D node tree: an iso camera framed to the world, two
     //    lights, and ONE instanced mesh carrying every object's transform. ──
-    const bounds = instanceBounds(insts, inst_count);
+    // Frame on the placed structures (piece rows) when present — the ground
+    // plane is the whole 240m map and would shrink the city to a dot.
+    const frame_count: u32 = if (piece_count > 0) piece_count else inst_count;
+    const bounds = instanceBounds(insts, frame_count, stride);
     const dist = bounds.radius * 1.9 + 12.0;
     var cube = buildCube();
     var kids = [_]Node{
@@ -283,7 +296,7 @@ pub fn main() !void {
             .scene3d_vert_count = 36,
             .scene3d_instance_data = insts,
             .scene3d_instance_count = inst_count,
-            .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+            .scene3d_instance_stride = @intCast(stride),
         },
     };
     var root = Node{ .children = kids[0..] };

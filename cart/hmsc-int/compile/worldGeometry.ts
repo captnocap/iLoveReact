@@ -2,22 +2,31 @@
 // buffer the stateless loader renders with ZERO V8.
 //
 // This is the first capability through the universal pipe (PLATMOD): the React-
-// authored world's geometry, lowered to encoded data. Every world object —
-// surface region, road, junction, prop, landform, building — becomes ONE box
-// instance: a (position, scale, color) row in a packed Float32Array. The host's
-// instanced-mesh path (scene3d_instance_data, stride 9) expands each row into a
-// model matrix and draws the whole batch with one unit-cube geometry interned
-// once. MANY instances at real world positions — the user's actual map as 3D
-// blocks, not a hand-typed cube.
+// authored world's geometry, lowered to encoded data. Two sources, both real:
+//   • the GameState world layers (surface regions, roads, junctions, props,
+//     landforms) — the painted ground the editor's preview shows; and
+//   • the BUILD WORLD STREAM's PLACED PIECES (world.state().pieces) — the
+//     walls/floors/pillars the /test play view renders as the city's structures.
+//     A "Building 1" prefab is N placed pieces; a tower is stacked wall/pillar
+//     pieces. These are the towers the user sees in /test — the loader MUST show
+//     parity. Each placed piece becomes ONE box instance using the SAME catalog
+//     size + material the play view's pieceVisualShapes uses.
 //
-// Layout per instance (stride 9, matches gpu/3d.zig makeInstance stride<12):
-//   [ px, py, pz,  sx, sy, sz,  r, g, b ]
-// position is the box CENTER (world meters, y up); scale is the full box size.
+// Every object becomes ONE box instance: a (position, rotation, scale, color)
+// row in a packed Float32Array. The host's instanced-mesh path expands each row
+// into a model matrix and draws the whole batch with one interned unit cube.
+//
+// Layout per instance (stride 12, matches gpu/3d.zig makeInstance stride>=12):
+//   [ px, py, pz,  rx, ry, rz,  sx, sy, sz,  r, g, b ]
+// position is the box CENTER (world meters, y up); rotation is degrees about
+// each axis (only ry / yaw is used); scale is the full box size.
 
 import type { GameState, PropKind, BuildingKind, TileKind } from '../../hmsc/design';
 import { solveRoadCrossSection } from '../../hmsc/world/roadProfile';
+import { GAME_BUILD } from '@game';
+import type { BuildMaterial, PlacedBuildPiece } from '@game';
 
-export const INSTANCE_STRIDE = 9;
+export const INSTANCE_STRIDE = 12;
 
 type Color = readonly [number, number, number];
 
@@ -30,8 +39,15 @@ function pushBox(
   sy: number,
   sz: number,
   color: Color,
+  yawDegrees = 0,
 ): void {
-  out.push(cx, cy, cz, sx, sy, sz, color[0], color[1], color[2]);
+  out.push(cx, cy, cz, 0, yawDegrees, 0, sx, sy, sz, color[0], color[1], color[2]);
+}
+
+function hexColor(hex: string): Color {
+  const h = hex.replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255];
 }
 
 // ── colors ────────────────────────────────────────────────────────────────
@@ -149,15 +165,26 @@ function buildingColor(kind: BuildingKind | string): Color {
   }
 }
 
+// How each build MATERIAL reads — mirrors PlayRoute's MATERIAL_LOOK so the loader
+// shows the same wall/floor/pillar colors the /test play view does.
+const MATERIAL_COLOR: Record<BuildMaterial, Color> = {
+  concrete: hexColor('#9aa3ad'),
+  brick: hexColor('#8a4a3a'),
+  stucco: hexColor('#d8cdb8'),
+  wood: hexColor('#8a6a45'),
+  metal: hexColor('#7d858d'),
+  glass: hexColor('#cfe6f2'),
+  chainlink: hexColor('#b9c2c9'),
+};
+
 // ── extrusion ───────────────────────────────────────────────────────────────
 
-/** Build the packed instance buffer for the whole authored world. */
-export function buildWorldInstances(state: GameState): Float32Array {
-  const out: number[] = [];
+/** Extrude the GameState's painted world layers into box instances (the ground
+ *  the editor preview shows: regions/roads/junctions/landforms/props). */
+function pushWorldLayers(out: number[], state: GameState): void {
   const world = state.world;
 
-  // Surface regions — flat colored ground slabs over their footprint. These show
-  // the map's painted layout (districts, water, sand…) read from above/iso.
+  // Surface regions — flat colored ground slabs over their footprint.
   for (const region of world.surfaceRegions) {
     const w = Math.max(1, region.width);
     const d = Math.max(1, region.depth);
@@ -192,8 +219,7 @@ export function buildWorldInstances(state: GameState): Float32Array {
     }
   }
 
-  // Landforms — extruded footprints (mounds/hills). A crude box first cut; the
-  // ~hf~ heightfield mesh path is the fidelity follow-up.
+  // Landforms — extruded footprints (crude box first cut; ~hf~ mesh path later).
   for (const landform of world.landforms) {
     const radius = landform.params.radius ?? (landform.field ? (landform.field.cols * landform.field.cell) / 2 : 12);
     const height = Math.max(1, landform.params.height ?? landform.params.peak ?? 6);
@@ -201,32 +227,88 @@ export function buildWorldInstances(state: GameState): Float32Array {
     pushBox(out, landform.centerX, landform.baseY + height / 2, landform.centerZ, size, height, size, [0.46, 0.5, 0.34]);
   }
 
-  // Buildings — one box per footprint, height by kind. (yaw is dropped in this
-  // stride-9 first cut; most placements are axis-aligned.)
+  // Legacy authored buildings (usually empty; pieces are the real structures).
   for (const building of world.buildings ?? []) {
     const w = Math.max(1, building.widthTiles);
     const d = Math.max(1, building.depthTiles);
     const h = BUILDING_HEIGHT[building.kind] ?? 5;
-    pushBox(out, building.x + w / 2, building.y + h / 2, building.z + d / 2, w, h, d, buildingColor(building.kind));
+    pushBox(out, building.x + w / 2, building.y + h / 2, building.z + d / 2, w, h, d, buildingColor(building.kind), building.yawDegrees ?? 0);
   }
 
-  // Props — small raised boxes, sized + colored by kind. The bulk of the count.
+  // Props — small raised boxes, sized + colored by kind.
   for (const prop of world.props) {
     const box = PROP_BOX[prop.kind] ?? [0.8, 1.0, 0.8];
-    pushBox(out, prop.x, (prop.y ?? 0) + box[1] / 2, prop.z, box[0], box[1], box[2], propColor(prop.kind));
+    pushBox(out, prop.x, (prop.y ?? 0) + box[1] / 2, prop.z, box[0], box[1], box[2], propColor(prop.kind), prop.yawDegrees ?? 0);
   }
-
-  return new Float32Array(out);
 }
 
-/** Encode the instance buffer as a map lump payload: u32 count | f32[count*9]. */
-export function encodeInstanceLump(instances: Float32Array): Uint8Array {
-  const count = Math.floor(instances.length / INSTANCE_STRIDE);
-  const out = new Uint8Array(4 + count * INSTANCE_STRIDE * 4);
+/** Extrude the BUILD stream's PLACED PIECES into box instances — the city's
+ *  structures (walls/floors/pillars/towers/prefabs). One box per piece, at the
+ *  catalog size + material the /test play view renders, rotated by the piece
+ *  yaw. This is the parity-with-/test path. */
+function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): number {
+  let emitted = 0;
+  for (const piece of pieces) {
+    let def;
+    try {
+      def = GAME_BUILD.catalog.get(piece.pieceId);
+    } catch {
+      continue; // unknown piece id — skip rather than abort the whole bake
+    }
+    const size = def.size;
+    const color = MATERIAL_COLOR[def.material] ?? [0.62, 0.64, 0.68];
+    // The play view's body box: center (x, y + h/2, z), full catalog size, yaw.
+    pushBox(
+      out,
+      piece.x,
+      piece.y + size.heightMeters / 2,
+      piece.z,
+      size.widthMeters,
+      size.heightMeters,
+      size.depthMeters,
+      color,
+      piece.yawDegrees,
+    );
+    emitted += 1;
+  }
+  return emitted;
+}
+
+export type WorldInstanceResult = {
+  instances: Float32Array;
+  total: number;
+  pieces: number;
+};
+
+/** Build the packed instance buffer for the whole authored world. The PLACED
+ *  PIECES (the structures /test renders) come FIRST so the loader can frame the
+ *  camera tightly on them — the painted ground spans the whole 240m map and
+ *  would otherwise dwarf the city to a speck. The painted GameState layers
+ *  follow as the ground context. */
+export function buildWorldInstances(state: GameState, pieces: readonly PlacedBuildPiece[] = []): WorldInstanceResult {
+  const out: number[] = [];
+  const pieceCount = pushPlacedPieces(out, pieces);
+  pushWorldLayers(out, state);
+  return {
+    instances: new Float32Array(out),
+    total: Math.floor(out.length / INSTANCE_STRIDE),
+    pieces: pieceCount,
+  };
+}
+
+/** Encode the instance buffer as a map lump payload:
+ *  u32 count | u32 stride | u32 pieceCount | f32[count*stride].
+ *  `pieceCount` (the first N rows, the placed structures) lets the loader frame
+ *  the camera on the city rather than the whole ground plane. */
+export function encodeInstanceLump(instances: Float32Array, pieceCount = 0, stride: number = INSTANCE_STRIDE): Uint8Array {
+  const count = Math.floor(instances.length / stride);
+  const out = new Uint8Array(12 + count * stride * 4);
   const view = new DataView(out.buffer);
   view.setUint32(0, count, true);
-  for (let i = 0; i < count * INSTANCE_STRIDE; i += 1) {
-    view.setFloat32(4 + i * 4, instances[i], true);
+  view.setUint32(4, stride, true);
+  view.setUint32(8, Math.min(pieceCount, count), true);
+  for (let i = 0; i < count * stride; i += 1) {
+    view.setFloat32(12 + i * 4, instances[i], true);
   }
   return out;
 }

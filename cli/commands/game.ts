@@ -70,11 +70,14 @@ const LOADER_BUILD_ARGS = [
   '-Dhas-gpu=true',
   '-Doptimize=ReleaseFast',
 ];
-// The render proof must prove the loader drew the REAL world, not a placeholder.
-// A genuine hmsc bake carries dozens of objects (regions + roads + ~74 props +
-// landforms); anything at/below a handful of cubes is a fixture/fallback, which
-// is a RED. The loader prints `[loader] built N mesh instances`; we parse N.
-const MIN_LOADER_INSTANCES = 16;
+// The render proof must prove the loader drew the REAL world — the PLACED PIECES
+// (the /test towers/structures) AND the painted ground. The authored map bakes
+// hundreds of instances (the active dev map is ~360: ~85 ground/props + ~275
+// placed pieces). If the bake ever reads the wrong field again and drops the
+// pieces, the count collapses to the ground-only floor (~85) — so the threshold
+// sits ABOVE that floor to catch the regression, not just near-zero. The loader
+// prints `[loader] built N mesh instances`; we parse N.
+const MIN_LOADER_INSTANCES = 100;
 
 // The editor->loader bake (PLATMOD step 4): transcode the AUTHORED hmsc world
 // (loadEditorWorld — your saved map, else the demo city) into a real game-file

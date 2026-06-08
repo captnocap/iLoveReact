@@ -5550,7 +5550,7 @@ done
     "-Dhas-gpu=true",
     "-Doptimize=ReleaseFast"
   ];
-  var MIN_LOADER_INSTANCES = 16;
+  var MIN_LOADER_INSTANCES = 100;
   var BAKE_ENTRY = "cart/hmsc-int/compile/bakeGameFile.ts";
   var BAKE_BUNDLE = `${OUT_DIR}/hmsc-gamefile-bake.js`;
   var BAKED_GAMEFILE = `${OUT_DIR}/hmsc.gamefile.b64`;
