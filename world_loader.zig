@@ -239,10 +239,10 @@ pub fn main() !void {
     const piece_count: u32 = scene.piece_count;
     // The render proof greps this exact line: real geometry, real positions.
     log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ inst_count, piece_count });
-    if (inst_count == 0) {
-        log.print("[loader] FAIL: no geometry to render\n", .{});
-        return error.NoGeometry;
-    }
+    // 0 instances = a genuinely empty map (no pieces, no paint). Switching to an
+    // empty map should render the skybox over void — NOT crash. The mesh node is
+    // omitted below (scene3d_mesh = inst_count > 0); camera/sky/lights still draw.
+    if (inst_count == 0) log.print("[loader] empty world — rendering skybox only\n", .{});
 
     // ── render the constructed scene (stateless GPU substrate) ───────────
     if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
@@ -307,7 +307,7 @@ pub fn main() !void {
         .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity },
         .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity },
         .{
-            .scene3d_mesh = true,
+            .scene3d_mesh = inst_count > 0, // false on an empty map → skybox only
             .scene3d_geom_key = "box",
             .scene3d_vertices = cube[0..],
             .scene3d_vert_count = 36,
