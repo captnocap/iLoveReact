@@ -18,6 +18,7 @@ import {
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
+import { buildWorldInstances, encodeInstanceLump } from './compile/worldGeometry';
 
 export const DEFAULT_HMSC_PACKAGE_DIR = 'cart/hmsc-int/exports/hmsc.rjpkg';
 export const DEFAULT_HMSC_MAP_NAME = 'city';
@@ -162,6 +163,8 @@ export function createHmscMapfile(state: GameState): Uint8Array {
     landforms: state.world.landforms,
   };
 
+  const instances = encodeInstanceLump(buildWorldInstances(state));
+
   return writeLumpContainer([
     { type: MAP_LUMP.STRINGS, encoding: 'text', data: textBytes(stringsText(strings)) },
     { type: MAP_LUMP.TILES, encoding: 'rle16', data: encodeBinaryRleGrid(tiles, 16) },
@@ -169,6 +172,9 @@ export function createHmscMapfile(state: GameState): Uint8Array {
     { type: MAP_LUMP.ZONES, encoding: 'text', data: textBytes(sortedJson(zones)) },
     { type: MAP_LUMP.PLACEMENTS, encoding: 'text', data: textBytes(sortedJson(placements)) },
     { type: MAP_LUMP.ENTITIES, encoding: 'text', data: textBytes(entitiesText(state, bounds)) },
+    // The authored world's 3D geometry, lowered to a packed instance buffer the
+    // stateless loader renders with zero V8 (compile/worldGeometry.ts).
+    { type: MAP_LUMP.INSTANCES, encoding: 'raw', data: instances },
   ]);
 }
 

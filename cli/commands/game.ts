@@ -70,6 +70,11 @@ const LOADER_BUILD_ARGS = [
   '-Dhas-gpu=true',
   '-Doptimize=ReleaseFast',
 ];
+// The render proof must prove the loader drew the REAL world, not a placeholder.
+// A genuine hmsc bake carries dozens of objects (regions + roads + ~74 props +
+// landforms); anything at/below a handful of cubes is a fixture/fallback, which
+// is a RED. The loader prints `[loader] built N mesh instances`; we parse N.
+const MIN_LOADER_INSTANCES = 16;
 
 // The editor->loader bake (PLATMOD step 4): transcode the AUTHORED hmsc world
 // (loadEditorWorld — your saved map, else the demo city) into a real game-file
@@ -445,12 +450,14 @@ function bakeRealGameFile(root: string): boolean {
 }
 
 /** Which game-file the loader should render: the freshly-baked authored world,
- *  else (or with --fixture) the synthetic round-trip fixture. */
-function resolveGameFile(root: string, useFixture: boolean): string {
+ *  else (only when explicitly asked via --fixture) the synthetic round-trip
+ *  fixture. A FAILED bake fails LOUDLY (returns null) — it never silently falls
+ *  back to the fixture; the fixture is for the codec round-trip tests only. */
+function resolveGameFile(root: string, useFixture: boolean): string | null {
   if (useFixture) return FIXTURE_GAMEFILE;
   if (bakeRealGameFile(root)) return BAKED_GAMEFILE;
-  err('[game] falling back to the synthetic fixture (authored bake unavailable)');
-  return FIXTURE_GAMEFILE;
+  err('[game] bake FAILED — refusing to render the synthetic fixture in its place');
+  return null;
 }
 
 /** Build the no-V8 loader, construct+render `gameFile` headless, and capture its
@@ -471,10 +478,19 @@ function runLoaderRenderProof(root: string, outPath: string, gameFile: string): 
     'ZIGOS_SCREENSHOT_FRAMES=8',
   ].join(' ');
   const run = spawnSync('sh', ['-c', `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
-  if (run.stdout.trim()) out(run.stdout.trim());
+  const runOut = run.stdout.trim();
+  if (runOut) out(runOut);
   if (!assertPng(root, outPath)) return false;
+  // Assert on REAL geometry: the loader must have built many instances at real
+  // world positions, not a placeholder cube. A PNG-exists check is not proof.
+  const match = runOut.match(/built (\d+) mesh instances/);
+  const builtCount = match ? Number(match[1]) : 0;
+  if (builtCount < MIN_LOADER_INSTANCES) {
+    err(`[game] render proof FAILED: loader built ${builtCount} instances (< ${MIN_LOADER_INSTANCES}); the bake produced no real geometry`);
+    return false;
+  }
   if (!assertNoV8(root)) return false;
-  out('[game] loader render proof GREEN — stateless loader rendered the game-file, no JS');
+  out(`[game] loader render proof GREEN — stateless loader rendered ${builtCount} world instances in 3D, no JS`);
   return true;
 }
 
@@ -493,6 +509,10 @@ function shot(root: string, argv: string[]): number {
     if (argv[i] === '--fixture') { useFixture = true; continue; }
   }
   const gameFile = resolveGameFile(root, useFixture);
+  if (!gameFile) {
+    err('[game] shot FAILED: no game-file (the authored bake failed)');
+    return 1;
+  }
   if (!runLoaderRenderProof(root, outPath, gameFile)) {
     err('[game] shot FAILED');
     return 1;
@@ -506,6 +526,10 @@ function shot(root: string, argv: string[]): number {
 function play(root: string, argv: string[]): number {
   const useFixture = argv.includes('--fixture');
   const gameFile = resolveGameFile(root, useFixture);
+  if (!gameFile) {
+    err('[game] play FAILED: no game-file (the authored bake failed)');
+    return 1;
+  }
   const build = spawnSync('zig', LOADER_BUILD_ARGS);
   if (build.stderr.trim()) err(build.stderr.trim());
   if (build.code !== 0) {
@@ -532,8 +556,12 @@ function verify(root: string): number {
   // ── platform spine: TS-writer <-> Zig-reader round-trips (rle + game-file) ─
   const roundtripOk = runRoundTrips(root);
 
-  // ── keystone: the stateless no-V8 loader constructs + renders the game-file ─
-  const renderOk = runLoaderRenderProof(root, LOADER_SHOT, FIXTURE_GAMEFILE);
+  // ── keystone: the stateless no-V8 loader constructs + renders the REAL
+  //    authored world's 3D geometry (not the codec fixture) and we assert it
+  //    drew many instances at real positions. A failed bake is a RED. ──
+  const renderGameFile = resolveGameFile(root, false);
+  if (!renderGameFile) err('[game] render proof FAILED: the authored bake produced no game-file');
+  const renderOk = renderGameFile ? runLoaderRenderProof(root, LOADER_SHOT, renderGameFile) : false;
 
   // ── the P4 behavior suites (dual-sided testing's TS side) ────────────────
   fsMkdir(`${root}/${TEST_OUT_DIR}`);

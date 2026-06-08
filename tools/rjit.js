@@ -5550,6 +5550,7 @@ done
     "-Dhas-gpu=true",
     "-Doptimize=ReleaseFast"
   ];
+  var MIN_LOADER_INSTANCES = 16;
   var BAKE_ENTRY = "cart/hmsc-int/compile/bakeGameFile.ts";
   var BAKE_BUNDLE = `${OUT_DIR}/hmsc-gamefile-bake.js`;
   var BAKED_GAMEFILE = `${OUT_DIR}/hmsc.gamefile.b64`;
@@ -5895,8 +5896,8 @@ if (failures.length > 0) {
   function resolveGameFile(root, useFixture) {
     if (useFixture) return FIXTURE_GAMEFILE;
     if (bakeRealGameFile(root)) return BAKED_GAMEFILE;
-    err("[game] falling back to the synthetic fixture (authored bake unavailable)");
-    return FIXTURE_GAMEFILE;
+    err("[game] bake FAILED \u2014 refusing to render the synthetic fixture in its place");
+    return null;
   }
   function runLoaderRenderProof(root, outPath, gameFile) {
     const build = spawnSync("zig", LOADER_BUILD_ARGS);
@@ -5913,10 +5914,17 @@ if (failures.length > 0) {
       "ZIGOS_SCREENSHOT_FRAMES=8"
     ].join(" ");
     const run25 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
-    if (run25.stdout.trim()) out(run25.stdout.trim());
+    const runOut = run25.stdout.trim();
+    if (runOut) out(runOut);
     if (!assertPng(root, outPath)) return false;
+    const match = runOut.match(/built (\d+) mesh instances/);
+    const builtCount = match ? Number(match[1]) : 0;
+    if (builtCount < MIN_LOADER_INSTANCES) {
+      err(`[game] render proof FAILED: loader built ${builtCount} instances (< ${MIN_LOADER_INSTANCES}); the bake produced no real geometry`);
+      return false;
+    }
     if (!assertNoV8(root)) return false;
-    out("[game] loader render proof GREEN \u2014 stateless loader rendered the game-file, no JS");
+    out(`[game] loader render proof GREEN \u2014 stateless loader rendered ${builtCount} world instances in 3D, no JS`);
     return true;
   }
   function dirOf(path) {
@@ -5937,6 +5945,10 @@ if (failures.length > 0) {
       }
     }
     const gameFile = resolveGameFile(root, useFixture);
+    if (!gameFile) {
+      err("[game] shot FAILED: no game-file (the authored bake failed)");
+      return 1;
+    }
     if (!runLoaderRenderProof(root, outPath, gameFile)) {
       err("[game] shot FAILED");
       return 1;
@@ -5947,6 +5959,10 @@ if (failures.length > 0) {
   function play(root, argv) {
     const useFixture = argv.includes("--fixture");
     const gameFile = resolveGameFile(root, useFixture);
+    if (!gameFile) {
+      err("[game] play FAILED: no game-file (the authored bake failed)");
+      return 1;
+    }
     const build = spawnSync("zig", LOADER_BUILD_ARGS);
     if (build.stderr.trim()) err(build.stderr.trim());
     if (build.code !== 0) {
@@ -5966,7 +5982,9 @@ if (failures.length > 0) {
     }
     const oracleOk = runOracleSelfCheck(root);
     const roundtripOk = runRoundTrips(root);
-    const renderOk = runLoaderRenderProof(root, LOADER_SHOT, FIXTURE_GAMEFILE);
+    const renderGameFile = resolveGameFile(root, false);
+    if (!renderGameFile) err("[game] render proof FAILED: the authored bake produced no game-file");
+    const renderOk = renderGameFile ? runLoaderRenderProof(root, LOADER_SHOT, renderGameFile) : false;
     fsMkdir(`${root}/${TEST_OUT_DIR}`);
     const suites = SUITE_ROOTS.flatMap((suiteRoot) => findTestSuites(root, suiteRoot));
     let suitesPassed = 0;

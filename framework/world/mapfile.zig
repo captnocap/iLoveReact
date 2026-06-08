@@ -21,6 +21,8 @@ pub const LumpType = struct {
     pub const zones: u32 = 4;
     pub const placements: u32 = 5;
     pub const entities: u32 = 6;
+    /// Packed 3D instance buffer: u32 count | f32[count*9] (pos3/scale3/color3).
+    pub const instances: u32 = 7;
 };
 
 pub const Lump = struct {

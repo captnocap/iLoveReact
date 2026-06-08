@@ -4,9 +4,16 @@
 //! the framework draw pipelines + capture) and ZERO V8 / zero embedded bundle.
 //! It reads a baked game-file, hands it to the constructor (which installs +
 //! verifies the asset vocabulary and resolves every reference), and renders the
-//! composed map tiles to the swapchain — then captures its OWN frame to a PNG
-//! (SELFSHOT-0606, hidden window, no desktop). This proves the user's pipeline
-//! end to end at small scale: data -> stateless engine -> rendered frame, no JS.
+//! constructed world's 3D geometry to the swapchain via gpu/3d.zig — then (in
+//! headless mode) captures its OWN frame to a PNG (SELFSHOT-0606, hidden window,
+//! no desktop). This proves the user's pipeline end to end: TypeScript/React ->
+//! encoded data -> stateless engine -> rendered 3D frame, no JS.
+//!
+//! The world's geometry rides as a packed instance buffer (the INSTANCES map
+//! lump): every authored object — region, road, prop, building, landform — is
+//! one box instance. The host expands the whole batch with a single interned
+//! unit-cube geometry and one instanced draw. 3D is the ONLY path — there is no
+//! 2D tile grid and no flag to gate it.
 //!
 //! Build:
 //!   zig build app -Dapp-name=world_loader -Dapp-source=world_loader.zig \
@@ -18,7 +25,6 @@
 const std = @import("std");
 const c = @import("framework/c.zig").imports;
 const gpu = @import("framework/gpu/gpu.zig");
-const rects = @import("framework/gpu/rects.zig");
 const capture = @import("framework/gpu/capture.zig");
 const scene3d = @import("framework/gpu/3d.zig");
 const layout = @import("framework/layout.zig");
@@ -30,6 +36,7 @@ const WIN_H: c_int = 600;
 const DEFAULT_FIXTURE = "framework/testing/fixtures/gamefile_roundtrip.b64";
 const STORE_DIR = "zig-out/game/contentstore";
 const MAX_FRAMES: u32 = 600;
+const INSTANCE_STRIDE: usize = 9;
 
 const log = std.debug;
 
@@ -47,9 +54,10 @@ fn loadGameFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     return out;
 }
 
-/// Map a tile value to a fill color. Empty cells are not drawn (show the bg):
-/// a null cell, and — by hmsc's string-table convention — tile index 0, which
-/// is the 'null' kind. Indices 1.. are distinct map kinds, colored by palette.
+/// Map a tile value to a fill color. Empty cells are not drawn: a null cell, and
+/// — by hmsc's string-table convention — tile index 0, the 'null' kind. Indices
+/// 1.. are distinct map kinds. Used only for the tile-extrusion fallback when a
+/// game-file carries no instance buffer (e.g. the codec round-trip fixture).
 fn tileColor(value: ?u16) ?[3]f32 {
     const v = value orelse return null;
     if (v == 0) return null;
@@ -66,40 +74,9 @@ fn tileColor(value: ?u16) ?[3]f32 {
     return palette[@as(usize, v - 1) % palette.len];
 }
 
-/// Lay the constructed tile grid out as colored rects, centered in the window.
-fn drawScene(scene: constructor.Scene) void {
-    rects.reset();
-    if (scene.width == 0 or scene.height == 0) return;
-
-    const cols: f32 = @floatFromInt(scene.width);
-    const rows: f32 = @floatFromInt(scene.height);
-    const margin: f32 = 60.0;
-    const avail_w: f32 = @as(f32, @floatFromInt(WIN_W)) - margin * 2;
-    const avail_h: f32 = @as(f32, @floatFromInt(WIN_H)) - margin * 2;
-    const cell = @min(avail_w / cols, avail_h / rows);
-    const grid_w = cell * cols;
-    const grid_h = cell * rows;
-    const ox = (@as(f32, @floatFromInt(WIN_W)) - grid_w) / 2.0;
-    const oy = (@as(f32, @floatFromInt(WIN_H)) - grid_h) / 2.0;
-    const gap: f32 = 6.0;
-
-    var y: u32 = 0;
-    while (y < scene.height) : (y += 1) {
-        var x: u32 = 0;
-        while (x < scene.width) : (x += 1) {
-            const color = tileColor(scene.tiles[y * scene.width + x]) orelse continue;
-            const px = ox + @as(f32, @floatFromInt(x)) * cell + gap;
-            const py = oy + @as(f32, @floatFromInt(y)) * cell + gap;
-            rects.drawRect(px, py, cell - gap * 2, cell - gap * 2, color[0], color[1], color[2], 1.0, 10.0, 0.0, 0.0, 0.0, 0.0, 0.0);
-        }
-    }
-}
-
-// ── Stage-1 3D probe: drive gpu/3d.zig from the no-V8 loader ────────────────
-// A unit cube as 36 interleaved verts (pos3 + normal3 + uv2), CCW-wound for the
-// back-face/ccw mesh pipeline. This is the smallest proof that the stateless 3D
-// render capability already in the host runs from data with no V8 — the same
-// path the world's baked <Scene3D.Mesh> instances will ride.
+/// A unit cube as 36 interleaved verts (pos3 + normal3 + uv2), CCW-wound for the
+/// back-face/ccw mesh pipeline. ONE interned geometry; every world object is an
+/// instance of it, scaled + positioned + colored by the instance buffer.
 fn buildCube() [36 * 8]f32 {
     const Corner = [3]f32;
     const Face = struct { n: Corner, a: Corner, b: Corner, c: Corner, d: Corner };
@@ -140,19 +117,79 @@ fn buildCube() [36 * 8]f32 {
     return out;
 }
 
+/// Fallback geometry for a game-file with no instance buffer: extrude each
+/// non-null tile into one box instance (stride 9: pos3/scale3/color3). Heap-
+/// owned; the caller frees it after the frame loop.
+fn extrudeTiles(allocator: std.mem.Allocator, scene: constructor.Scene) ![]f32 {
+    var list: std.ArrayList(f32) = .{};
+    errdefer list.deinit(allocator);
+    var y: u32 = 0;
+    while (y < scene.height) : (y += 1) {
+        var x: u32 = 0;
+        while (x < scene.width) : (x += 1) {
+            const color = tileColor(scene.tiles[y * scene.width + x]) orelse continue;
+            try list.appendSlice(allocator, &[_]f32{
+                @floatFromInt(x), 0.25, @floatFromInt(y), // position (center)
+                0.9,              0.5,  0.9, // scale
+                color[0],         color[1], color[2], // color
+            });
+        }
+    }
+    return list.toOwnedSlice(allocator);
+}
+
+const Bounds = struct {
+    cx: f32,
+    cy: f32,
+    cz: f32,
+    radius: f32, // half the largest world extent (xz), min-clamped
+};
+
+/// Axis-aligned bounds of an instance batch (each row: pos3/scale3/color3),
+/// used to auto-frame the camera so the whole world fits in view.
+fn instanceBounds(insts: []const f32, count: u32) Bounds {
+    if (count == 0) return .{ .cx = 0, .cy = 0, .cz = 0, .radius = 16 };
+    var min_x: f32 = std.math.floatMax(f32);
+    var min_y: f32 = std.math.floatMax(f32);
+    var min_z: f32 = std.math.floatMax(f32);
+    var max_x: f32 = -std.math.floatMax(f32);
+    var max_y: f32 = -std.math.floatMax(f32);
+    var max_z: f32 = -std.math.floatMax(f32);
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        const b = i * INSTANCE_STRIDE;
+        const px = insts[b + 0];
+        const py = insts[b + 1];
+        const pz = insts[b + 2];
+        const hx = @abs(insts[b + 3]) * 0.5;
+        const hy = @abs(insts[b + 4]) * 0.5;
+        const hz = @abs(insts[b + 5]) * 0.5;
+        min_x = @min(min_x, px - hx);
+        max_x = @max(max_x, px + hx);
+        min_y = @min(min_y, py - hy);
+        max_y = @max(max_y, py + hy);
+        min_z = @min(min_z, pz - hz);
+        max_z = @max(max_z, pz + hz);
+    }
+    const span_x = max_x - min_x;
+    const span_z = max_z - min_z;
+    const radius = @max(8.0, @max(span_x, span_z) * 0.5);
+    return .{
+        .cx = (min_x + max_x) * 0.5,
+        .cy = (min_y + max_y) * 0.5,
+        .cz = (min_z + max_z) * 0.5,
+        .radius = radius,
+    };
+}
+
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
     var path: []const u8 = DEFAULT_FIXTURE;
-    var threed = false;
     for (args[1..]) |a| {
-        if (std.mem.eql(u8, a, "--3d")) {
-            threed = true;
-        } else if (!std.mem.startsWith(u8, a, "--")) {
-            path = a;
-        }
+        if (!std.mem.startsWith(u8, a, "--")) path = a;
     }
 
     // ── construct from data (NO V8) ──────────────────────────────────────
@@ -175,7 +212,29 @@ pub fn main() !void {
     defer scene.deinit(allocator);
     log.print("[loader] constructed map {d}x{d} from {s} (no JS)\n", .{ scene.width, scene.height, path });
 
-    // ── render the composed scene (stateless GPU substrate) ──────────────
+    // ── resolve the 3D instance batch: the baked geometry, else extrude tiles ─
+    var fallback: ?[]f32 = null;
+    defer if (fallback) |f| allocator.free(f);
+    var insts: []const f32 = scene.instances;
+    var inst_count: u32 = scene.instance_count;
+    if (inst_count == 0) {
+        const f = extrudeTiles(allocator, scene) catch |err| {
+            log.print("[loader] tile extrusion FAILED: {any}\n", .{err});
+            return err;
+        };
+        fallback = f;
+        insts = f;
+        inst_count = @intCast(f.len / INSTANCE_STRIDE);
+        log.print("[loader] no instance buffer — extruded {d} tile boxes\n", .{inst_count});
+    }
+    // The render proof greps this exact line: real geometry, real positions.
+    log.print("[loader] built {d} mesh instances\n", .{inst_count});
+    if (inst_count == 0) {
+        log.print("[loader] FAIL: no geometry to render\n", .{});
+        return error.NoGeometry;
+    }
+
+    // ── render the constructed scene (stateless GPU substrate) ───────────
     if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
         log.print("[loader] SDL_Init failed\n", .{});
         return error.SDLInitFailed;
@@ -195,30 +254,43 @@ pub fn main() !void {
     };
     capture.init();
 
-    // Two run modes:
-    //   - screenshot (headless): render a few frames, capture the PNG, exit.
-    //     This is what `rjit game shot` / `rjit game verify` drive.
-    //   - visible (no ZIGOS_HEADLESS, no screenshot env): a real window you can
-    //     look at and close — pumps events, runs until QUIT / window-close / ESC.
     const screenshotting = capture.isScreenshotMode();
     if (!screenshotting) log.print("[loader] live window — close it or press ESC to exit\n", .{});
 
-    // ── Stage-1 3D scene (gated on --3d): a Scene3D node tree the loader hands
-    // to gpu/3d.zig. The world's baked meshes will populate this same shape. ──
+    // ── build the Scene3D node tree: an iso camera framed to the world, two
+    //    lights, and ONE instanced mesh carrying every object's transform. ──
+    const bounds = instanceBounds(insts, inst_count);
+    const dist = bounds.radius * 1.9 + 12.0;
     var cube = buildCube();
     var kids = [_]Node{
-        .{ .scene3d_camera = true, .scene3d_pos_x = 3.5, .scene3d_pos_y = 3.0, .scene3d_pos_z = 5.0, .scene3d_look_x = 0, .scene3d_look_y = 0.15, .scene3d_look_z = 0, .scene3d_fov = 45 },
-        .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = 0.45, .scene3d_color_g = 0.47, .scene3d_color_b = 0.55, .scene3d_intensity = 1.0 },
-        .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = -0.5, .scene3d_dir_y = -1.0, .scene3d_dir_z = -0.4, .scene3d_color_r = 1.0, .scene3d_color_g = 0.95, .scene3d_color_b = 0.88, .scene3d_intensity = 1.3 },
-        .{ .scene3d_mesh = true, .scene3d_geom_key = "cube", .scene3d_vertices = cube[0..], .scene3d_vert_count = 36, .scene3d_color_r = 0.92, .scene3d_color_g = 0.52, .scene3d_color_b = 0.18, .scene3d_color_a = 1.0 },
+        .{
+            .scene3d_camera = true,
+            .scene3d_pos_x = bounds.cx + dist * 0.85,
+            .scene3d_pos_y = bounds.cy + dist * 0.95,
+            .scene3d_pos_z = bounds.cz + dist * 0.85,
+            .scene3d_look_x = bounds.cx,
+            .scene3d_look_y = bounds.cy,
+            .scene3d_look_z = bounds.cz,
+            .scene3d_fov = 45,
+            .scene3d_far = dist * 4.0 + bounds.radius * 2.0,
+        },
+        .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = 0.55, .scene3d_color_g = 0.57, .scene3d_color_b = 0.62, .scene3d_intensity = 1.0 },
+        .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = -0.55, .scene3d_dir_y = -1.0, .scene3d_dir_z = -0.35, .scene3d_color_r = 1.0, .scene3d_color_g = 0.96, .scene3d_color_b = 0.9, .scene3d_intensity = 1.25 },
+        .{
+            .scene3d_mesh = true,
+            .scene3d_geom_key = "box",
+            .scene3d_vertices = cube[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_data = insts,
+            .scene3d_instance_count = inst_count,
+            .scene3d_instance_stride = @intCast(INSTANCE_STRIDE),
+        },
     };
     var root = Node{ .children = kids[0..] };
-    if (threed) log.print("[loader] 3D probe — rendering a cube via gpu/3d.zig (no JS)\n", .{});
 
     var running = true;
     var frame: u32 = 0;
     while (running) : (frame += 1) {
-        // Pump window events so the window stays responsive and closeable.
         var event: c.SDL_Event = undefined;
         while (c.SDL_PollEvent(&event)) {
             switch (event.type) {
@@ -230,12 +302,8 @@ pub fn main() !void {
             }
         }
 
-        if (threed) {
-            _ = scene3d.render(&root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
-        } else {
-            drawScene(scene);
-        }
-        gpu.frame(0.06, 0.07, 0.10);
+        _ = scene3d.render(&root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
+        gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 
         if (screenshotting) {
             if (capture.tick(null) or frame >= MAX_FRAMES) break; // captured → exit

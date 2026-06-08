@@ -30,6 +30,10 @@ export const MAP_LUMP = {
   ZONES: 4,
   PLACEMENTS: 5,
   ENTITIES: 6,
+  // Packed 3D instance buffer (u32 count | f32[count*9], stride = pos3/scale3/
+  // color3). The authored world's geometry lowered to data the no-V8 loader
+  // renders as one instanced unit-cube batch. See compile/worldGeometry.ts.
+  INSTANCES: 7,
 } as const;
 
 export type LumpInput = {
