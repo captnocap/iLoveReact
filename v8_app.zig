@@ -94,6 +94,9 @@ const game_camera = if (@hasDecl(build_options, "has_game_camera") and build_opt
         return;
     }
 };
+const world_loader = if (!HEADLESS and @hasDecl(build_options, "has_compiled_world") and build_options.has_compiled_world) @import("world_loader.zig") else struct {
+    pub fn unmount(_: u32) void {}
+};
 const latches = @import("framework/state/latches.zig");
 const animations = if (HEADLESS) struct {
     pub fn clearAll() void {}
@@ -1498,6 +1501,8 @@ fn applyTypeDefaults(node: *Node, id: u32, type_name: []const u8) void {
         // texture allocation happens in applyProps once paintableW/H and
         // paintableId are known. See framework/gpu/paintable.zig.
         node.is_paintable = true;
+    } else if (eq(u8, type_name, "WorldLoader")) {
+        node.world_loader = true;
     } else if (isTerminalType(type_name)) {
         node.terminal = true;
     }
@@ -1767,6 +1772,16 @@ fn applyProps(node: *Node, props: std.json.Value, type_name: ?[]const u8) void {
             if (dupJsonText(v)) |s| node.image_src = s;
         } else if (std.mem.eql(u8, k, "renderSrc")) {
             if (dupJsonText(v)) |s| node.render_src = s;
+        } else if (std.mem.eql(u8, k, "worldLoader")) {
+            if (jsonBool(v)) |b| node.world_loader = b;
+        } else if (std.mem.eql(u8, k, "gameFile")) {
+            if (dupJsonText(v)) |s| node.world_loader_game_file = s;
+        } else if (std.mem.eql(u8, k, "storeDir")) {
+            if (dupJsonText(v)) |s| node.world_loader_store_dir = s;
+        } else if (std.mem.eql(u8, k, "worldLoaderGameFile")) {
+            if (dupJsonText(v)) |s| node.world_loader_game_file = s;
+        } else if (std.mem.eql(u8, k, "worldLoaderStoreDir")) {
+            if (dupJsonText(v)) |s| node.world_loader_store_dir = s;
         } else if (std.mem.eql(u8, k, "renderSuspended")) {
             if (jsonBool(v)) |b| node.render_suspended = b;
         } else if (std.mem.eql(u8, k, "staticSurface")) {
@@ -2610,6 +2625,15 @@ fn beforeNodeDestroy(node: *Node, _: u32) void {
         node.paintable_id = null;
     }
     game_camera.unbindNode(node.id);
+    if (node.world_loader) world_loader.unmount(node.id);
+    if (node.world_loader_game_file) |s| {
+        g_alloc.free(s);
+        node.world_loader_game_file = null;
+    }
+    if (node.world_loader_store_dir) |s| {
+        g_alloc.free(s);
+        node.world_loader_store_dir = null;
+    }
     if (node.effect_textures) |arr| {
         for (arr) |s| g_alloc.free(s);
         g_alloc.free(arr);
@@ -2895,6 +2919,7 @@ fn destroyDetachedNode(id: u32) void {
     }
     _ = g_children_ids.remove(id);
     if (g_node_by_id.get(id)) |node| {
+        if (node.world_loader) world_loader.unmount(node.id);
         // Per-mesh diffuse texture buffer is owned by g_alloc — free
         // before the node memory itself is destroyed so the bytes don't
         // orphan when a textured mesh unmounts (route change / parent

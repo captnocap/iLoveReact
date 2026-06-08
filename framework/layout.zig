@@ -365,6 +365,9 @@ pub const Node = struct {
     image_src: ?[]const u8 = null,
     video_src: ?[]const u8 = null,
     render_src: ?[]const u8 = null,
+    world_loader: bool = false,
+    world_loader_game_file: ?[]const u8 = null,
+    world_loader_store_dir: ?[]const u8 = null,
     /// When true, the framework SIGSTOPs the feed's subprocesses (qemu /
     /// Xvfb / app inside Xvfb) so they consume zero CPU. Last-rendered
     /// pixels remain on the texture so the surface still paints. Toggling

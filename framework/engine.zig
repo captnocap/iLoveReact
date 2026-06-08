@@ -55,6 +55,7 @@ const HAS_RENDER_SURFACES = if (@hasDecl(build_options, "has_render_surfaces")) 
 const HAS_EFFECTS = if (@hasDecl(build_options, "has_effects")) build_options.has_effects else true;
 const HAS_CANVAS = if (@hasDecl(build_options, "has_canvas")) build_options.has_canvas else true;
 const HAS_3D = if (@hasDecl(build_options, "has_3d")) build_options.has_3d else true;
+const HAS_COMPILED_WORLD = if (@hasDecl(build_options, "has_compiled_world")) build_options.has_compiled_world else false;
 const HAS_TRANSITIONS = if (@hasDecl(build_options, "has_transitions")) build_options.has_transitions else true;
 const HAS_CRYPTO = if (@hasDecl(build_options, "has_crypto")) build_options.has_crypto else true;
 const HAS_DEBUG_SERVER = if (@hasDecl(build_options, "has_debug_server")) build_options.has_debug_server else false;
@@ -372,6 +373,13 @@ const r3d = if (HAS_3D) @import("gpu/3d.zig") else struct {
         return false;
     }
     pub fn update(_: f32) void {}
+};
+const world_loader = if (HAS_3D and HAS_COMPILED_WORLD) @import("../world_loader.zig") else struct {
+    pub fn renderEmbedded(_: std.mem.Allocator, _: *Node, _: f32, _: f32, _: f32, _: f32, _: f32) bool {
+        return false;
+    }
+    pub fn mouseLook(_: u32, _: f32, _: f32) void {}
+    pub fn setAiming(_: u32, _: bool) void {}
 };
 const transition = if (HAS_TRANSITIONS) @import("gpu/transition.zig") else struct {
     pub fn tick(_: f32) bool {
@@ -709,6 +717,8 @@ var scrollbar_hover_slot: u32 = 0;
 var scrollbar_hover_axis: ScrollbarAxis = .vertical;
 var pointer_capture_slot: u32 = 0;
 var pointer_capture_button: u8 = 0;
+var world_loader_mouse_node_id: u32 = 0;
+var world_loader_mouse_aiming: bool = false;
 
 fn findNodeByScrollSlot(node: *Node, slot: u32) ?*Node {
     if (slot == 0) return null;
@@ -834,6 +844,56 @@ fn hitTestScrollbar(node: *Node, mx: f32, my: f32) ?ScrollbarHit {
     // overlay wins only when no descendant claimed the hit.
     if (scrollbarHitForNode(node, mx, my)) |hit| return hit;
     return null;
+}
+
+fn hitTestWorldLoader(node: *Node, mx: f32, my: f32) ?*Node {
+    if (node.style.display == .none) return null;
+
+    const r = node.computed;
+    const ov = node.style.overflow;
+    const is_scroll = (ov == .scroll or (ov == .auto and node.content_height > r.h));
+    var child_mx = mx;
+    var child_my = my;
+    if (is_scroll) {
+        if (mx < r.x or mx >= r.x + r.w or my < r.y or my >= r.y + r.h) return null;
+        child_mx = mx + node.scroll_x;
+        child_my = my + node.scroll_y;
+    }
+
+    var i = node.children.len;
+    while (i > 0) {
+        i -= 1;
+        if (hitTestWorldLoader(&node.children[i], child_mx, child_my)) |hit| return hit;
+    }
+
+    if (node.world_loader and mx >= r.x and mx < r.x + r.w and my >= r.y and my < r.y + r.h) {
+        return node;
+    }
+    return null;
+}
+
+fn findWorldLoaderNodeById(node: *Node, id: u32) ?*Node {
+    if (id == 0 or node.style.display == .none) return null;
+    if (node.world_loader and node.id == id) return node;
+    for (node.children) |*child| {
+        if (findWorldLoaderNodeById(child, id)) |hit| return hit;
+    }
+    return null;
+}
+
+fn captureWorldLoaderPointer(node: *Node) void {
+    world_loader_mouse_node_id = node.id;
+    input.unfocus();
+    _ = setRelativeMouseMode(true);
+}
+
+fn releaseWorldLoaderPointer() void {
+    if (world_loader_mouse_node_id != 0 and world_loader_mouse_aiming) {
+        world_loader.setAiming(world_loader_mouse_node_id, false);
+    }
+    world_loader_mouse_node_id = 0;
+    world_loader_mouse_aiming = false;
+    _ = setRelativeMouseMode(false);
 }
 
 fn updateScrollbarDrag(root: *Node, pos: f32) bool {
@@ -2731,6 +2791,13 @@ noinline fn paintNodeVisuals(node: *Node) void {
             _ = effects.paintCustomEffect(node, r.x, r.y, r.w, r.h, g_paint_opacity);
         }
     }
+    // WorldLoader — the no-V8 compiled-game loader as a native host primitive.
+    // React owns only this rectangle; world_loader.zig owns construction,
+    // camera/player stepping, and the Scene3D render tree behind it.
+    if (node.world_loader) {
+        _ = world_loader.renderEmbedded(std.heap.c_allocator, node, r.x, r.y, r.w, r.h, g_paint_opacity);
+    }
+
     // 3D.View — 3D viewport rendered offscreen, composited here
     if (node.scene3d) {
         _ = r3d.render(node, r.x, r.y, r.w, r.h, g_paint_opacity);
@@ -3664,6 +3731,18 @@ pub fn run(config_in: AppConfig) !void {
                         const rmy: f32 = event.button.y;
                         if (render_surfaces.handleMouseDown(rmx, rmy, event.button.button)) continue;
                     }
+                    if (event.button.button == c.SDL_BUTTON_LEFT or event.button.button == c.SDL_BUTTON_RIGHT) {
+                        const mx: f32 = event.button.x;
+                        const my: f32 = event.button.y;
+                        if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
+                            captureWorldLoaderPointer(loader_node);
+                            if (event.button.button == c.SDL_BUTTON_RIGHT) {
+                                world_loader.setAiming(loader_node.id, true);
+                                world_loader_mouse_aiming = true;
+                            }
+                            continue;
+                        }
+                    }
                     // Physics drag — try to grab a dynamic body
                     if (event.button.button == c.SDL_BUTTON_LEFT and physics2d.isInitialized()) {
                         const pmx: f32 = event.button.x;
@@ -4034,6 +4113,15 @@ pub fn run(config_in: AppConfig) !void {
                     const my: f32 = event.motion.y;
                     mouse_state.updateMouse(mx, my);
                     mouse_state.addMouseDelta(event.motion.xrel, event.motion.yrel);
+                    if (world_loader_mouse_node_id != 0) {
+                        if (findWorldLoaderNodeById(config.root, world_loader_mouse_node_id) == null) {
+                            releaseWorldLoaderPointer();
+                            continue;
+                        }
+                        world_loader.mouseLook(world_loader_mouse_node_id, event.motion.xrel, event.motion.yrel);
+                    } else if (hitTestWorldLoader(config.root, mx, my)) |loader_node| {
+                        world_loader.mouseLook(loader_node.id, event.motion.xrel, event.motion.yrel);
+                    }
                     effects.pollMouse(mx, my, 0.016);
                     if (g_chrome_dragging) {
                         // Use the LIVE global mouse state, not event.motion.state.
@@ -4206,6 +4294,11 @@ pub fn run(config_in: AppConfig) !void {
                 c.SDL_EVENT_MOUSE_BUTTON_UP => {
                     mouse_state.updateMouse(event.button.x, event.button.y);
                     mouse_state.updateMouseButton(false, event.button.button == c.SDL_BUTTON_RIGHT);
+                    if (event.button.button == c.SDL_BUTTON_RIGHT and world_loader_mouse_node_id != 0 and world_loader_mouse_aiming) {
+                        world_loader.setAiming(world_loader_mouse_node_id, false);
+                        world_loader_mouse_aiming = false;
+                        continue;
+                    }
                     if (event.button.button == c.SDL_BUTTON_LEFT) {
                         prepared_input.endTerminalDockResize();
                         if (g_chrome_dragging) {
@@ -4280,6 +4373,10 @@ pub fn run(config_in: AppConfig) !void {
                 c.SDL_EVENT_KEY_DOWN => {
                     const sym: c_int = @intCast(event.key.key);
                     const mod = event.key.mod;
+                    if (sym == c.SDLK_ESCAPE and world_loader_mouse_node_id != 0) {
+                        releaseWorldLoaderPointer();
+                        continue;
+                    }
                     // Full-width sym packing — extended keys (0x4000xxxx)
                     // must survive the wire; see framework/key_pack.zig.
                     const packed_key: i64 = key_pack.pack(@intCast(event.key.key), @intCast(mod));

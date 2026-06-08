@@ -1,12 +1,12 @@
-//! V8 binding for the compiled-world embedded primitive.
+//! V8 binding for the world_loader embedded primitive.
 //!
-//! JS calls only on mount/unmount/status. The frame loop renders through
-//! framework/world/compiled_world.zig + gpu/3d.zig without crossing V8.
+//! JS calls only on mount/unmount/status. The frame loop is world_loader.zig
+//! itself, mounted under a React WorldLoader host node.
 
 const std = @import("std");
 const v8 = @import("v8");
 const v8_runtime = @import("v8_runtime.zig");
-const compiled_world = @import("world/compiled_world.zig");
+const world_loader = @import("../world_loader.zig");
 
 fn argToF64(info: v8.FunctionCallbackInfo, idx: u32) ?f64 {
     if (idx >= info.length()) return null;
@@ -51,14 +51,14 @@ fn hostMount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     };
     defer std.heap.c_allocator.free(store_dir);
 
-    compiled_world.mount(std.heap.c_allocator, node_id, game_file, store_dir) catch |e| {
+    world_loader.mount(std.heap.c_allocator, node_id, game_file, store_dir) catch |e| {
         var buf: [96]u8 = undefined;
         const msg = std.fmt.bufPrint(&buf, "error:{s}", .{@errorName(e)}) catch "error:mount";
         setReturnString(info, msg);
         return;
     };
 
-    const status = compiled_world.statusAlloc(std.heap.c_allocator, node_id) catch {
+    const status = world_loader.statusAlloc(std.heap.c_allocator, node_id) catch {
         setReturnString(info, "ok");
         return;
     };
@@ -68,7 +68,7 @@ fn hostMount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
 
 fn hostUnmount(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
     const info = v8.FunctionCallbackInfo.initFromV8(info_c);
-    if (argToNodeId(info, 0)) |node_id| compiled_world.unmount(node_id);
+    if (argToNodeId(info, 0)) |node_id| world_loader.unmount(node_id);
     setReturnString(info, "ok");
 }
 
@@ -78,7 +78,7 @@ fn hostStatus(info_c: ?*const v8.c.FunctionCallbackInfo) callconv(.c) void {
         setReturnString(info, "error:BadNodeId");
         return;
     };
-    const status = compiled_world.statusAlloc(std.heap.c_allocator, node_id) catch {
+    const status = world_loader.statusAlloc(std.heap.c_allocator, node_id) catch {
         setReturnString(info, "error:status");
         return;
     };

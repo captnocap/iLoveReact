@@ -554,7 +554,7 @@ pub fn build(b: *std.Build) void {
     const has_game_physics = b.option(bool, "has-game-physics", "Register __hmsc_*/__game_physics_* bindings (framework/game: the game's host-side physics + movement)") orelse false;
     const has_game_pathing = b.option(bool, "has-game-pathing", "Register __path_*/__game_pathing_* bindings (framework/game: grid A* + lane discipline + motion plans)") orelse false;
     const has_game_camera = b.option(bool, "has-game-camera", "Register __game_camera_* bindings (framework/game: native per-frame camera controller)") orelse false;
-    const has_compiled_world = b.option(bool, "has-compiled-world", "Register __compiled_world_* bindings (native baked game-file Scene3D source)") orelse false;
+    const has_compiled_world = b.option(bool, "has-compiled-world", "Register WorldLoader host primitive + __compiled_world_* status bindings") orelse false;
     const has_capture = b.option(bool, "has-capture", "Register __capture_frame binding (SELFSHOT-0606: the app screenshots its OWN rendered frame; desktop capture of the user's system is banned)") orelse false;
     // has_whisper, has_pg, has_embed, has_doom hoisted earlier (next to their compile/link blocks).
     options.addOption(bool, "has_process", has_process);

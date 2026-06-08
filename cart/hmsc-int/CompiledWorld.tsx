@@ -1,4 +1,4 @@
-import { createElement, useEffect, useRef, useState } from 'react';
+import { createElement, useState } from 'react';
 import { Box, Pressable, Text } from '@reactjit/primitives';
 import { Icon } from '@reactjit/icons/Icon';
 import { accentFor } from './shell/workbench.cls';
@@ -10,51 +10,16 @@ type CompiledWorldProps = {
   gameFile?: string;
   storeDir?: string;
   style?: Record<string, unknown>;
-  onStatus?: (status: string) => void;
 };
-
-declare const globalThis: any;
 
 export function CompiledWorld(props: CompiledWorldProps) {
   const gameFile = props.gameFile ?? DEFAULT_GAME_FILE;
   const storeDir = props.storeDir ?? DEFAULT_STORE_DIR;
-  const nodeRef = useRef<any>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    let timer: any = null;
-    let mountedNode = 0;
-
-    const mount = () => {
-      const nodeId = Number(nodeRef.current?.id ?? 0);
-      if (!nodeId) {
-        timer = setTimeout(mount, 16);
-        return;
-      }
-      mountedNode = nodeId;
-      const host = globalThis as any;
-      if (typeof host.__compiled_world_mount !== 'function') {
-        props.onStatus?.('error: native compiled-world binding unavailable');
-        return;
-      }
-      const status = String(host.__compiled_world_mount(nodeId, gameFile, storeDir) ?? '');
-      if (!cancelled) props.onStatus?.(status || 'mounted');
-    };
-
-    mount();
-    return () => {
-      cancelled = true;
-      if (timer != null) clearTimeout(timer);
-      if (mountedNode > 0 && typeof globalThis.__compiled_world_unmount === 'function') {
-        try { globalThis.__compiled_world_unmount(mountedNode); } catch {}
-      }
-    };
-  }, [gameFile, storeDir, props.onStatus]);
-
-  return createElement('View', {
-    ref: nodeRef,
-    scene3d: true,
-    testID: 'compiled-world-native',
+  return createElement('WorldLoader', {
+    gameFile,
+    storeDir,
+    testID: 'compiled-world-loader',
     style: {
       width: '100%',
       height: '100%',
@@ -65,7 +30,7 @@ export function CompiledWorld(props: CompiledWorldProps) {
 }
 
 export function CompiledWorldRoute(props: { onExit: () => void }) {
-  const [status, setStatus] = useState('mounting native scene');
+  const [status] = useState('native world_loader primitive');
   return (
     <Box style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: accentFor('bg'), flexDirection: 'column' }}>
       <Box style={{ height: 34, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 10, paddingRight: 10, borderBottomWidth: 1, borderBottomColor: accentFor('border'), backgroundColor: accentFor('surface') }}>
@@ -78,7 +43,7 @@ export function CompiledWorldRoute(props: { onExit: () => void }) {
         <Text fontSize={9} color={status.startsWith('error:') ? accentFor('error') : accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{status}</Text>
       </Box>
       <Box style={{ flexGrow: 1, minHeight: 0 }}>
-        <CompiledWorld onStatus={setStatus} />
+        <CompiledWorld />
       </Box>
     </Box>
   );

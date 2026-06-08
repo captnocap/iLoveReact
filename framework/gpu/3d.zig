@@ -11,7 +11,6 @@ const core = @import("gpu.zig");
 const images = @import("images.zig");
 const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
-const compiled_world = @import("../world/compiled_world.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -856,7 +855,10 @@ fn dynSlotLocate(prefix_len: usize, key: []const u8) ?DynLoc {
     const ver_hash = hashKey(rest[sep + 1 ..]);
     var idx: ?usize = null;
     for (g_dyn_slots[0..g_dyn_len], 0..) |*s, i| {
-        if (s.present and s.id_hash == id_hash) { idx = i; break; }
+        if (s.present and s.id_hash == id_hash) {
+            idx = i;
+            break;
+        }
     }
     if (idx == null) {
         if (g_dyn_len >= DYN_SLOTS) return null;
@@ -1126,8 +1128,7 @@ fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, s
     };
 }
 
-fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
-    const scene_node = compiled_world.sceneNodeFor(node) orelse node;
+fn drawScene(scene_node: *Node, slot: *Rt, w: f32, h: f32) void {
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
 

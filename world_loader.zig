@@ -88,6 +88,7 @@ const PLAYER_RUN_CYCLES_PER_SECOND: f32 = 2.3;
 const PLAYER_CLIP_IDLE: u32 = 0;
 const PLAYER_CLIP_WALK: u32 = 1;
 const PLAYER_CLIP_JUMP: u32 = 2;
+const MAX_EMBEDDED_LOADERS: usize = 8;
 
 const log = std.debug;
 
@@ -880,6 +881,362 @@ fn updatePlayerAnimationClock(player: *PlayerState, dt: f32, moving: bool, runni
     }
 }
 
+pub const Runtime = struct {
+    allocator: std.mem.Allocator,
+    node_id: u32 = 0,
+    scene: constructor.Scene,
+    fallback: ?[]f32 = null,
+    insts: []const f32 = &.{},
+    inst_count: u32 = 0,
+    stride: usize = INSTANCE_STRIDE,
+    piece_count: u32 = 0,
+    physics_colliders: PhysicsColliders = undefined,
+    has_physics_colliders: bool = false,
+    cube: [36 * 8]f32 = undefined,
+    ramp_slab: [36 * 8]f32 = undefined,
+    shape_batches: ShapeBatches = undefined,
+    has_shape_batches: bool = false,
+    player_geom_keys: std.ArrayList([]u8) = .{},
+    kid_list: std.ArrayList(Node) = .{},
+    root: Node = .{},
+    player_first_child: usize = 0,
+    player: PlayerState = undefined,
+    camera: CameraState = undefined,
+    last_ns: i64 = 0,
+    frame: u32 = 0,
+
+    pub fn create(allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !*Runtime {
+        const self = try allocator.create(Runtime);
+        errdefer allocator.destroy(self);
+        try self.initInPlace(allocator, path, store_dir, node_id);
+        return self;
+    }
+
+    pub fn destroy(self: *Runtime) void {
+        const allocator = self.allocator;
+        self.deinit();
+        allocator.destroy(self);
+    }
+
+    pub fn initInPlace(self: *Runtime, allocator: std.mem.Allocator, path: []const u8, store_dir: []const u8, node_id: u32) !void {
+        const bytes = loadGameFile(allocator, path) catch |err| {
+            log.print("[loader] failed to read game-file {s}: {any}\n", .{ path, err });
+            return err;
+        };
+        defer allocator.free(bytes);
+
+        var store = std.fs.cwd().makeOpenPath(store_dir, .{}) catch |err| {
+            log.print("[loader] cannot open content store {s}: {any}\n", .{ store_dir, err });
+            return err;
+        };
+        defer store.close();
+
+        const scene = constructor.construct(allocator, bytes, store) catch |err| {
+            log.print("[loader] construct FAILED: {any}\n", .{err});
+            return err;
+        };
+        self.* = Runtime{
+            .allocator = allocator,
+            .node_id = node_id,
+            .scene = scene,
+        };
+        errdefer self.deinit();
+        log.print("[loader] constructed map {d}x{d} from {s} (no JS)\n", .{ self.scene.width, self.scene.height, path });
+        try self.build();
+    }
+
+    pub fn deinit(self: *Runtime) void {
+        for (self.player_geom_keys.items) |key| self.allocator.free(key);
+        self.player_geom_keys.deinit(self.allocator);
+        self.kid_list.deinit(self.allocator);
+        if (self.has_shape_batches) self.shape_batches.deinit(self.allocator);
+        if (self.has_physics_colliders) self.physics_colliders.deinit(self.allocator);
+        if (self.fallback) |f| self.allocator.free(f);
+        self.scene.deinit(self.allocator);
+        self.* = undefined;
+    }
+
+    fn build(self: *Runtime) !void {
+        self.insts = self.scene.instances;
+        self.inst_count = self.scene.instance_count;
+        self.stride = if (self.scene.instance_stride > 0) self.scene.instance_stride else INSTANCE_STRIDE;
+        if (self.inst_count == 0 and !self.scene.has_instance_lump) {
+            const f = extrudeTiles(self.allocator, self.scene) catch |err| {
+                log.print("[loader] tile extrusion FAILED: {any}\n", .{err});
+                return err;
+            };
+            self.fallback = f;
+            self.insts = f;
+            self.stride = INSTANCE_STRIDE;
+            self.inst_count = @intCast(f.len / INSTANCE_STRIDE);
+            log.print("[loader] no instance buffer — extruded {d} tile boxes\n", .{self.inst_count});
+        }
+        self.piece_count = self.scene.piece_count;
+        log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ self.inst_count, self.piece_count });
+        if (self.inst_count == 0) log.print("[loader] empty world — rendering sky/model over void\n", .{});
+
+        self.physics_colliders = try buildPhysicsColliders(self.allocator, self.insts, self.inst_count, self.stride);
+        self.has_physics_colliders = true;
+        log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ self.physics_colliders.rect_count, self.physics_colliders.oriented_count, self.physics_colliders.heightfield_count });
+        if (self.physics_colliders.clipped_rows > 0) {
+            log.print("[loader] physics collider cap clipped {d} rendered instance rows\n", .{self.physics_colliders.clipped_rows});
+        }
+
+        const env = self.scene.env;
+        const frame_count: u32 = if (self.piece_count > 0) self.piece_count else self.inst_count;
+        const bounds = instanceBounds(self.insts, frame_count, self.stride);
+        const horiz = bounds.radius * env.cam_horiz_factor + env.cam_horiz_base;
+        const height = bounds.radius * env.cam_height_factor + env.cam_height_base;
+        const far = (horiz + height + bounds.radius) * env.cam_far_factor;
+        const authored_eye = Vec3{
+            .x = bounds.cx + horiz * 0.72,
+            .y = bounds.cy + height,
+            .z = bounds.cz + horiz * 0.72,
+        };
+        const authored_dx = authored_eye.x - bounds.cx;
+        const authored_dz = authored_eye.z - bounds.cz;
+        const authored_yaw = std.math.atan2(authored_dx, authored_dz);
+        const spawn = chooseSpawn(self.insts, self.inst_count, self.piece_count, self.stride, bounds);
+        self.player = .{
+            .x = spawn.x,
+            .y = spawn.y,
+            .z = spawn.z,
+            .yaw = authored_yaw,
+        };
+        self.camera = .{
+            .yaw_degrees = authored_yaw * 180.0 / std.math.pi,
+            .pitch_degrees = CAMERA_INITIAL_PITCH_DEGREES,
+            .far = @max(far, bounds.radius * 4.0 + 64.0),
+        };
+        self.cube = buildCube();
+        self.ramp_slab = buildRampSlab();
+        self.shape_batches = try buildShapeBatches(self.allocator, self.insts, self.inst_count, self.stride);
+        self.has_shape_batches = true;
+
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_camera = true,
+            .scene3d_pos_x = 0,
+            .scene3d_pos_y = 0,
+            .scene3d_pos_z = 0,
+            .scene3d_look_x = 0,
+            .scene3d_look_y = 0,
+            .scene3d_look_z = 0,
+            .scene3d_fov = CAMERA_FOV_DEGREES,
+            .scene3d_far = far,
+        });
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_skybox = true,
+            .scene3d_sky_zenith = env.sky_zenith,
+            .scene3d_sky_horizon = env.sky_horizon,
+            .scene3d_sky_ground = env.sky_ground,
+            .scene3d_sky_sun_dir = env.sky_sun_dir,
+            .scene3d_sky_sun_color = env.sky_sun_color,
+            .scene3d_sky_haze = env.sky_haze,
+            .scene3d_sky_cloud = env.sky_cloud,
+            .scene3d_sky_night = env.sky_night,
+        });
+        try self.kid_list.append(self.allocator, .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity });
+        try self.kid_list.append(self.allocator, .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity });
+
+        self.player_first_child = self.kid_list.items.len;
+        for (self.scene.player_model, 0..) |group, i| {
+            const key = try std.fmt.allocPrint(self.allocator, "player-model-{d}", .{i});
+            self.player_geom_keys.append(self.allocator, key) catch |err| {
+                self.allocator.free(key);
+                return err;
+            };
+            try self.kid_list.append(self.allocator, .{
+                .scene3d_mesh = group.vertex_count > 0,
+                .scene3d_geom_key = key,
+                .scene3d_vertices = group.vertices,
+                .scene3d_vert_count = group.vertex_count,
+                .scene3d_color_r = group.color[0],
+                .scene3d_color_g = group.color[1],
+                .scene3d_color_b = group.color[2],
+                .scene3d_color_a = group.alpha,
+                .scene3d_tex_w = group.tex_w,
+                .scene3d_tex_h = group.tex_h,
+                .scene3d_tex_rgba = group.tex_rgba,
+            });
+        }
+        if (self.scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = self.shape_batches.box_count > 0,
+            .scene3d_geom_key = "box",
+            .scene3d_vertices = self.cube[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_data = self.shape_batches.boxes,
+            .scene3d_instance_count = self.shape_batches.box_count,
+            .scene3d_instance_stride = @intCast(self.stride),
+        });
+        try self.kid_list.append(self.allocator, .{
+            .scene3d_mesh = self.shape_batches.ramp_count > 0,
+            .scene3d_geom_key = "ramp-slab",
+            .scene3d_vertices = self.ramp_slab[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_data = self.shape_batches.ramps,
+            .scene3d_instance_count = self.shape_batches.ramp_count,
+            .scene3d_instance_stride = @intCast(self.stride),
+        });
+
+        self.root = .{ .children = self.kid_list.items };
+        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, 0);
+        updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, false, false, false);
+        self.last_ns = nowNs();
+    }
+
+    fn pollStandaloneEvents(self: *Runtime, running: *bool) void {
+        var event: c.SDL_Event = undefined;
+        while (c.SDL_PollEvent(&event)) {
+            switch (event.type) {
+                c.SDL_EVENT_QUIT, c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => running.* = false,
+                c.SDL_EVENT_KEY_DOWN => {
+                    if (event.key.key == c.SDLK_ESCAPE) running.* = false;
+                },
+                c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
+                    if (event.button.button == c.SDL_BUTTON_RIGHT) setAimMode(&self.camera, true);
+                },
+                c.SDL_EVENT_MOUSE_BUTTON_UP => {
+                    if (event.button.button == c.SDL_BUTTON_RIGHT) setAimMode(&self.camera, false);
+                },
+                c.SDL_EVENT_MOUSE_MOTION => {
+                    self.mouseLook(event.motion.xrel, event.motion.yrel);
+                },
+                else => {},
+            }
+        }
+    }
+
+    pub fn mouseLook(self: *Runtime, dx: f32, dy: f32) void {
+        const pitch_limits: PitchLimits = if (self.camera.aiming) aimPitchLimitsInOrbitSpace() else .{ .min = CAMERA_MIN_PITCH_DEGREES, .max = CAMERA_MAX_PITCH_DEGREES };
+        self.camera.yaw_degrees -= dx * CAMERA_YAW_DEGREES_PER_PIXEL;
+        self.camera.pitch_degrees = clamp(
+            self.camera.pitch_degrees - dy * CAMERA_PITCH_DEGREES_PER_PIXEL,
+            pitch_limits.min,
+            pitch_limits.max,
+        );
+    }
+
+    pub fn setAiming(self: *Runtime, aiming: bool) void {
+        setAimMode(&self.camera, aiming);
+    }
+
+    pub fn stepNow(self: *Runtime) void {
+        const ns = nowNs();
+        const dt = clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
+        self.last_ns = ns;
+
+        var forward: f32 = 0;
+        var strafe: f32 = 0;
+        if (keyDown(SCAN_W)) forward += 1;
+        if (keyDown(SCAN_S)) forward -= 1;
+        if (keyDown(SCAN_A)) strafe -= 1;
+        if (keyDown(SCAN_D)) strafe += 1;
+        const intent = game_physics.movement.wasdDirection(forward, strafe, self.camera.yaw_degrees * std.math.pi / 180.0);
+        const run_down = keyDown(SCAN_LSHIFT);
+        const speed: f32 = if (run_down) PLAYER_RUN_SPEED_METERS_PER_SECOND else PLAYER_WALK_SPEED_METERS_PER_SECOND;
+        runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE));
+        if (self.camera.aiming) self.player.yaw = self.camera.yaw_degrees * std.math.pi / 180.0;
+        const moving = @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
+        const airborne = !self.player.grounded or @abs(self.player.vy) > 0.05;
+        updatePlayerAnimationClock(&self.player, dt, moving, run_down, airborne);
+
+        updateCameraNode(&self.kid_list.items[0], &self.camera, self.player, dt);
+        updatePlayerModelNodes(self.kid_list.items, self.player_first_child, self.scene.player_model, self.scene.player_animation, self.player, moving, run_down, airborne);
+        self.frame += 1;
+    }
+
+    pub fn sceneNodeForFrame(self: *Runtime) *Node {
+        self.stepNow();
+        return &self.root;
+    }
+
+    pub fn statusAlloc(self: *const Runtime, allocator: std.mem.Allocator) ![]u8 {
+        return std.fmt.allocPrint(
+            allocator,
+            "loaded {d} instances ({d} pieces), {d} player mesh groups",
+            .{ self.inst_count, self.piece_count, self.scene.player_model.len },
+        );
+    }
+};
+
+const MountedLoader = struct {
+    active: bool = false,
+    runtime: ?*Runtime = null,
+};
+
+var g_mounted_loaders: [MAX_EMBEDDED_LOADERS]MountedLoader = [_]MountedLoader{.{}} ** MAX_EMBEDDED_LOADERS;
+
+fn findMounted(node_id: u32) ?*MountedLoader {
+    for (&g_mounted_loaders) |*entry| {
+        const runtime = entry.runtime orelse continue;
+        if (entry.active and runtime.node_id == node_id) return entry;
+    }
+    return null;
+}
+
+fn findVacantMounted() ?*MountedLoader {
+    for (&g_mounted_loaders) |*entry| {
+        if (!entry.active) return entry;
+    }
+    return null;
+}
+
+pub fn mount(allocator: std.mem.Allocator, node_id: u32, game_file: []const u8, store_dir: []const u8) !void {
+    if (node_id == 0) return error.BadNodeId;
+    unmount(node_id);
+    const entry = findVacantMounted() orelse return error.TooManyWorldLoaders;
+    entry.runtime = try Runtime.create(allocator, game_file, store_dir, node_id);
+    entry.active = true;
+}
+
+pub fn unmount(node_id: u32) void {
+    if (findMounted(node_id)) |entry| {
+        if (entry.runtime) |runtime| runtime.destroy();
+        entry.runtime = null;
+        entry.active = false;
+    }
+}
+
+fn runtimeForNode(allocator: std.mem.Allocator, node: *Node) !*Runtime {
+    if (node.id == 0) return error.BadNodeId;
+    if (findMounted(node.id)) |entry| {
+        if (entry.runtime) |runtime| return runtime;
+    }
+    const game_file = node.world_loader_game_file orelse "zig-out/game/hmsc.gamefile";
+    const store_dir = node.world_loader_store_dir orelse STORE_DIR;
+    try mount(allocator, node.id, game_file, store_dir);
+    const entry = findMounted(node.id) orelse return error.MountFailed;
+    return entry.runtime orelse error.MountFailed;
+}
+
+pub fn renderEmbedded(allocator: std.mem.Allocator, node: *Node, x: f32, y: f32, w: f32, h: f32, opacity: f32) bool {
+    const runtime = runtimeForNode(allocator, node) catch |err| {
+        log.print("[loader] embedded mount/render failed for node {d}: {any}\n", .{ node.id, err });
+        return false;
+    };
+    runtime.stepNow();
+    return scene3d.render(&runtime.root, x, y, w, h, opacity);
+}
+
+pub fn mouseLook(node_id: u32, dx: f32, dy: f32) void {
+    const entry = findMounted(node_id) orelse return;
+    const runtime = entry.runtime orelse return;
+    runtime.mouseLook(dx, dy);
+}
+
+pub fn setAiming(node_id: u32, aiming: bool) void {
+    const entry = findMounted(node_id) orelse return;
+    const runtime = entry.runtime orelse return;
+    runtime.setAiming(aiming);
+}
+
+pub fn statusAlloc(allocator: std.mem.Allocator, node_id: u32) ![]u8 {
+    const entry = findMounted(node_id) orelse return try allocator.dupe(u8, "unmounted");
+    const runtime = entry.runtime orelse return try allocator.dupe(u8, "unmounted");
+    return runtime.statusAlloc(allocator);
+}
+
 pub fn main() !void {
     const allocator = std.heap.c_allocator;
 
@@ -890,58 +1247,9 @@ pub fn main() !void {
         if (!std.mem.startsWith(u8, a, "--")) path = a;
     }
 
-    // ── construct from data (NO V8) ──────────────────────────────────────
-    const bytes = loadGameFile(allocator, path) catch |err| {
-        log.print("[loader] failed to read game-file {s}: {any}\n", .{ path, err });
-        return err;
-    };
-    defer allocator.free(bytes);
-
-    var store = std.fs.cwd().makeOpenPath(STORE_DIR, .{}) catch |err| {
-        log.print("[loader] cannot open content store {s}: {any}\n", .{ STORE_DIR, err });
-        return err;
-    };
-    defer store.close();
-
-    const scene = constructor.construct(allocator, bytes, store) catch |err| {
-        log.print("[loader] construct FAILED: {any}\n", .{err});
-        return err;
-    };
-    defer scene.deinit(allocator);
-    log.print("[loader] constructed map {d}x{d} from {s} (no JS)\n", .{ scene.width, scene.height, path });
-
-    // ── resolve the 3D instance batch: the baked geometry, else extrude tiles ─
-    var fallback: ?[]f32 = null;
-    defer if (fallback) |f| allocator.free(f);
-    var insts: []const f32 = scene.instances;
-    var inst_count: u32 = scene.instance_count;
-    var stride: usize = if (scene.instance_stride > 0) scene.instance_stride else INSTANCE_STRIDE;
-    if (inst_count == 0 and !scene.has_instance_lump) {
-        const f = extrudeTiles(allocator, scene) catch |err| {
-            log.print("[loader] tile extrusion FAILED: {any}\n", .{err});
-            return err;
-        };
-        fallback = f;
-        insts = f;
-        stride = INSTANCE_STRIDE;
-        inst_count = @intCast(f.len / INSTANCE_STRIDE);
-        log.print("[loader] no instance buffer — extruded {d} tile boxes\n", .{inst_count});
-    }
-    // The first `piece_count` rows are the placed structures (the /test city);
-    // the camera frames on THEM so the towers fill the view instead of being a
-    // speck on the 240m ground plane. 0 → frame on everything (tile fallback).
-    const piece_count: u32 = scene.piece_count;
-    // The render proof greps this exact line: real geometry, real positions.
-    log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ inst_count, piece_count });
-    // 0 world instances = a genuinely empty map (no pieces, no paint). Switching
-    // to an empty map should still render sky and any compiled runtime model.
-    if (inst_count == 0) log.print("[loader] empty world — rendering sky/model over void\n", .{});
-    var physics_colliders = try buildPhysicsColliders(allocator, insts, inst_count, stride);
-    defer physics_colliders.deinit(allocator);
-    log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ physics_colliders.rect_count, physics_colliders.oriented_count, physics_colliders.heightfield_count });
-    if (physics_colliders.clipped_rows > 0) {
-        log.print("[loader] physics collider cap clipped {d} rendered instance rows\n", .{physics_colliders.clipped_rows});
-    }
+    var runtime: Runtime = undefined;
+    runtime.initInPlace(allocator, path, STORE_DIR, 0) catch |err| return err;
+    defer runtime.deinit();
 
     // ── render the constructed scene (stateless GPU substrate) ───────────
     if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
@@ -969,179 +1277,18 @@ pub fn main() !void {
         _ = c.SDL_SetWindowRelativeMouseMode(window, true);
     }
 
-    // ── build the Scene3D node tree from DATA: the camera/lights/sky come from
-    //    the game-file's render environment (scene.env), NOT hardcoded here
-    //    (USER req_0308 — the look is data and changes over time). The loader
-    //    only adds what is geometric: it FRAMES the camera on the placed
-    //    structures' bounds, deriving distance/height from the authored factors.
-    //    A steep top-down iso foreshortens 3m-tall, 0.6m-wide pillars into
-    //    specks; the authored low angle shows them as solid verticals. ──
-    const env = scene.env;
-    const frame_count: u32 = if (piece_count > 0) piece_count else inst_count;
-    const bounds = instanceBounds(insts, frame_count, stride);
-    const horiz = bounds.radius * env.cam_horiz_factor + env.cam_horiz_base;
-    const height = bounds.radius * env.cam_height_factor + env.cam_height_base;
-    const far = (horiz + height + bounds.radius) * env.cam_far_factor;
-    const authored_eye = Vec3{
-        .x = bounds.cx + horiz * 0.72,
-        .y = bounds.cy + height,
-        .z = bounds.cz + horiz * 0.72,
-    };
-    const authored_dx = authored_eye.x - bounds.cx;
-    const authored_dz = authored_eye.z - bounds.cz;
-    const authored_yaw = std.math.atan2(authored_dx, authored_dz);
-    const spawn = chooseSpawn(insts, inst_count, piece_count, stride, bounds);
-    var player = PlayerState{
-        .x = spawn.x,
-        .y = spawn.y,
-        .z = spawn.z,
-        .yaw = authored_yaw,
-    };
-    var camera = CameraState{
-        .yaw_degrees = authored_yaw * 180.0 / std.math.pi,
-        .pitch_degrees = CAMERA_INITIAL_PITCH_DEGREES,
-        .far = @max(far, bounds.radius * 4.0 + 64.0),
-    };
-    var cube = buildCube();
-    var ramp_slab = buildRampSlab();
-    var shape_batches = try buildShapeBatches(allocator, insts, inst_count, stride);
-    defer shape_batches.deinit(allocator);
-    var player_geom_keys: std.ArrayList([]u8) = .{};
-    defer {
-        for (player_geom_keys.items) |key| allocator.free(key);
-        player_geom_keys.deinit(allocator);
-    }
-    var kid_list: std.ArrayList(Node) = .{};
-    defer kid_list.deinit(allocator);
-    try kid_list.append(allocator, .{
-        .scene3d_camera = true,
-        .scene3d_pos_x = 0,
-        .scene3d_pos_y = 0,
-        .scene3d_pos_z = 0,
-        .scene3d_look_x = 0,
-        .scene3d_look_y = 0,
-        .scene3d_look_z = 0,
-        .scene3d_fov = CAMERA_FOV_DEGREES,
-        .scene3d_far = far,
-    });
-    try kid_list.append(allocator, .{
-        .scene3d_skybox = true,
-        .scene3d_sky_zenith = env.sky_zenith,
-        .scene3d_sky_horizon = env.sky_horizon,
-        .scene3d_sky_ground = env.sky_ground,
-        .scene3d_sky_sun_dir = env.sky_sun_dir,
-        .scene3d_sky_sun_color = env.sky_sun_color,
-        .scene3d_sky_haze = env.sky_haze,
-        .scene3d_sky_cloud = env.sky_cloud,
-        .scene3d_sky_night = env.sky_night,
-    });
-    try kid_list.append(allocator, .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity });
-    try kid_list.append(allocator, .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity });
-
-    const player_first_child = kid_list.items.len;
-    for (scene.player_model, 0..) |group, i| {
-        const key = try std.fmt.allocPrint(allocator, "player-model-{d}", .{i});
-        player_geom_keys.append(allocator, key) catch |err| {
-            allocator.free(key);
-            return err;
-        };
-        try kid_list.append(allocator, .{
-            .scene3d_mesh = group.vertex_count > 0,
-            .scene3d_geom_key = key,
-            .scene3d_vertices = group.vertices,
-            .scene3d_vert_count = group.vertex_count,
-            .scene3d_color_r = group.color[0],
-            .scene3d_color_g = group.color[1],
-            .scene3d_color_b = group.color[2],
-            .scene3d_color_a = group.alpha,
-            .scene3d_tex_w = group.tex_w,
-            .scene3d_tex_h = group.tex_h,
-            .scene3d_tex_rgba = group.tex_rgba,
-        });
-    }
-    if (scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
-    try kid_list.append(allocator, .{
-        .scene3d_mesh = shape_batches.box_count > 0, // false on an empty map; player model still draws
-        .scene3d_geom_key = "box",
-        .scene3d_vertices = cube[0..],
-        .scene3d_vert_count = 36,
-        .scene3d_instance_data = shape_batches.boxes,
-        .scene3d_instance_count = shape_batches.box_count,
-        .scene3d_instance_stride = @intCast(stride),
-    });
-    try kid_list.append(allocator, .{
-        .scene3d_mesh = shape_batches.ramp_count > 0,
-        .scene3d_geom_key = "ramp-slab",
-        .scene3d_vertices = ramp_slab[0..],
-        .scene3d_vert_count = 36,
-        .scene3d_instance_data = shape_batches.ramps,
-        .scene3d_instance_count = shape_batches.ramp_count,
-        .scene3d_instance_stride = @intCast(stride),
-    });
-
-    var root = Node{ .children = kid_list.items };
-    updateCameraNode(&kid_list.items[0], &camera, player, 0);
-    updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model, scene.player_animation, player, false, false, false);
-
     var running = true;
-    var last_ns = nowNs();
-    var frame: u32 = 0;
-    while (running) : (frame += 1) {
-        var event: c.SDL_Event = undefined;
-        while (c.SDL_PollEvent(&event)) {
-            switch (event.type) {
-                c.SDL_EVENT_QUIT, c.SDL_EVENT_WINDOW_CLOSE_REQUESTED => running = false,
-                c.SDL_EVENT_KEY_DOWN => {
-                    if (event.key.key == c.SDLK_ESCAPE) running = false;
-                },
-                c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
-                    if (event.button.button == c.SDL_BUTTON_RIGHT) setAimMode(&camera, true);
-                },
-                c.SDL_EVENT_MOUSE_BUTTON_UP => {
-                    if (event.button.button == c.SDL_BUTTON_RIGHT) setAimMode(&camera, false);
-                },
-                c.SDL_EVENT_MOUSE_MOTION => {
-                    const pitch_limits: PitchLimits = if (camera.aiming) aimPitchLimitsInOrbitSpace() else .{ .min = CAMERA_MIN_PITCH_DEGREES, .max = CAMERA_MAX_PITCH_DEGREES };
-                    camera.yaw_degrees -= event.motion.xrel * CAMERA_YAW_DEGREES_PER_PIXEL;
-                    camera.pitch_degrees = clamp(
-                        camera.pitch_degrees - event.motion.yrel * CAMERA_PITCH_DEGREES_PER_PIXEL,
-                        pitch_limits.min,
-                        pitch_limits.max,
-                    );
-                },
-                else => {},
-            }
-        }
-
-        const ns = nowNs();
-        const dt = clamp(@as(f32, @floatFromInt(ns - last_ns)) / 1_000_000_000.0, 0.001, 0.05);
-        last_ns = ns;
-
-        var forward: f32 = 0;
-        var strafe: f32 = 0;
-        if (keyDown(SCAN_W)) forward += 1;
-        if (keyDown(SCAN_S)) forward -= 1;
-        if (keyDown(SCAN_A)) strafe -= 1;
-        if (keyDown(SCAN_D)) strafe += 1;
-        const intent = game_physics.movement.wasdDirection(forward, strafe, camera.yaw_degrees * std.math.pi / 180.0);
-        const run_down = keyDown(SCAN_LSHIFT);
-        const speed: f32 = if (run_down) PLAYER_RUN_SPEED_METERS_PER_SECOND else PLAYER_WALK_SPEED_METERS_PER_SECOND;
-        runPlayerPhysics(&player, &physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE));
-        if (camera.aiming) player.yaw = camera.yaw_degrees * std.math.pi / 180.0;
-        const moving = @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
-        const airborne = !player.grounded or @abs(player.vy) > 0.05;
-        updatePlayerAnimationClock(&player, dt, moving, run_down, airborne);
-
-        updateCameraNode(&kid_list.items[0], &camera, player, dt);
-        updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model, scene.player_animation, player, moving, run_down, airborne);
-        _ = scene3d.render(&root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
+    while (running) {
+        runtime.pollStandaloneEvents(&running);
+        runtime.stepNow();
+        _ = scene3d.render(&runtime.root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
         gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 
         if (screenshotting) {
-            if (capture.tick(null) or frame >= MAX_FRAMES) break; // captured → exit
+            if (capture.tick(null) or runtime.frame >= MAX_FRAMES) break; // captured → exit
         } else {
             c.SDL_Delay(16); // ~60fps cap so a static scene doesn't spin the CPU
         }
     }
-    log.print("[loader] done after {d} frames\n", .{frame});
+    log.print("[loader] done after {d} frames\n", .{runtime.frame});
 }
