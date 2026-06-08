@@ -267,25 +267,30 @@ pub fn main() !void {
     const screenshotting = capture.isScreenshotMode();
     if (!screenshotting) log.print("[loader] live window — close it or press ESC to exit\n", .{});
 
-    // ── build the Scene3D node tree: an iso camera framed to the world, two
-    //    lights, and ONE instanced mesh carrying every object's transform. ──
+    // ── build the Scene3D node tree: a LOW-ANGLE hero camera framed on the
+    //    placed structures, two lights, and ONE instanced mesh. ──
     // Frame on the placed structures (piece rows) when present — the ground
     // plane is the whole 240m map and would shrink the city to a dot.
+    // The angle is deliberately LOW (height << horizontal reach): a steep
+    // top-down iso foreshortens 3m-tall, 0.6m-wide pillars into specks; a low
+    // 3/4 view shows them as the solid vertical walls/pillars /test renders.
     const frame_count: u32 = if (piece_count > 0) piece_count else inst_count;
     const bounds = instanceBounds(insts, frame_count, stride);
-    const dist = bounds.radius * 1.9 + 12.0;
+    const horiz = bounds.radius * 1.25 + 8.0; // horizontal reach to the center
+    const height = bounds.radius * 0.55 + 7.0; // low camera height (~24° pitch)
+    const far = (horiz + height + bounds.radius) * 3.0;
     var cube = buildCube();
     var kids = [_]Node{
         .{
             .scene3d_camera = true,
-            .scene3d_pos_x = bounds.cx + dist * 0.85,
-            .scene3d_pos_y = bounds.cy + dist * 0.95,
-            .scene3d_pos_z = bounds.cz + dist * 0.85,
+            .scene3d_pos_x = bounds.cx + horiz * 0.72,
+            .scene3d_pos_y = bounds.cy + height,
+            .scene3d_pos_z = bounds.cz + horiz * 0.72,
             .scene3d_look_x = bounds.cx,
             .scene3d_look_y = bounds.cy,
             .scene3d_look_z = bounds.cz,
-            .scene3d_fov = 45,
-            .scene3d_far = dist * 4.0 + bounds.radius * 2.0,
+            .scene3d_fov = 50,
+            .scene3d_far = far,
         },
         .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = 0.55, .scene3d_color_g = 0.57, .scene3d_color_b = 0.62, .scene3d_intensity = 1.0 },
         .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = -0.55, .scene3d_dir_y = -1.0, .scene3d_dir_z = -0.35, .scene3d_color_r = 1.0, .scene3d_color_g = 0.96, .scene3d_color_b = 0.9, .scene3d_intensity = 1.25 },
