@@ -18,7 +18,7 @@ import {
   inflatePaintDocument, invertIntoBase, makeLayer, mergeIntoBase, mintLayerId,
   moveLayerInStack, overrideBandValue, paintableIdsFor, parsePaintDocument,
   scaleMask, serializePaintDocument, unionMasks,
-  type PaintLayerBytes, type PaintLookDefaults,
+  type PaintDocument, type PaintLayerBytes, type PaintLookDefaults,
 } from './layers';
 import { createPaintHistory } from './history';
 import { hexToHsv, hsvToHex, isFullHexColor, isHexColor, normalizeHexColor } from './colors';
@@ -351,6 +351,55 @@ test('lazy builders: a throttled coalesced commit never builds the snapshot', ()
   h.commitCoalesced(() => { builds++; return 1; });
   h.commitCoalesced(() => { builds++; return 2; }); // same window — must not build
   assertEqual(builds, 1, 'the throttle drops the call BEFORE building (no GPU readback)');
+});
+
+test('STROKEUNDO-0606: three completed strokes undo exactly the last stroke', () => {
+  const w = 4, h = 4;
+  const layer = { ...makeLayer(DEFAULTS, 0), id: 'paint-layer', name: 'Paint layer' };
+  const base = new Uint8Array(w * h);
+  let brush = new Uint8Array(w * h);
+  let current = buildPaintDocument({
+    dims: { w, h },
+    layers: [{ ...layer, base, brush }],
+    activeLayer: 0,
+    tool: 'brush',
+    mode: 'erase',
+    brushPx: 1,
+    defaults: DEFAULTS,
+    customSurfaces: [],
+  });
+  const history = createPaintHistory<PaintDocument>();
+
+  const completeStroke = (cell: number) => {
+    const beforeStroke = current;
+    const nextBrush = brush.slice();
+    nextBrush[cell] = Math.round(overrideBandValue('erase') * 255);
+    brush = nextBrush;
+    current = buildPaintDocument({
+      dims: { w, h },
+      layers: [{ ...layer, base, brush }],
+      activeLayer: 0,
+      tool: 'brush',
+      mode: 'erase',
+      brushPx: 1,
+      defaults: DEFAULTS,
+      customSurfaces: [],
+    });
+    history.commitSnapshot(beforeStroke);
+  };
+
+  completeStroke(1);
+  completeStroke(5);
+  completeStroke(9);
+  const undoDoc = history.undo(() => current);
+  assert(undoDoc !== null, 'a completed stroke created one undo entry');
+  const restored = inflatePaintDocument(undoDoc!);
+  assertEqual(restored.length, 1, 'the layer survives undoing one stroke');
+  assertEqual(restored[0].id, 'paint-layer', 'the same layer remains active');
+  assertEqual(restored[0].brush?.[1] ?? 0, Math.round(overrideBandValue('erase') * 255), 'first stroke remains');
+  assertEqual(restored[0].brush?.[5] ?? 0, Math.round(overrideBandValue('erase') * 255), 'second stroke remains');
+  assertEqual(restored[0].brush?.[9] ?? 0, 0, 'only the third stroke disappears');
+  assert(history.canUndo(), 'earlier strokes are still separate undo entries');
 });
 
 // ── Palette / surface packing ─────────────────────────────────────────────────

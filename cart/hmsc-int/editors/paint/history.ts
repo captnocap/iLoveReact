@@ -8,6 +8,10 @@
 // Model (the cutout history, generalized off React):
 //   commit(build)          → push the CURRENT state, clear redo. Call BEFORE
 //                            the mutation lands.
+//   commitSnapshot(current)→ push an already-captured CURRENT state, clear
+//                            redo. Use when the interaction records at
+//                            completion time but must restore pre-action
+//                            state, e.g. a finished stroke.
 //   commitCoalesced(build) → first-write-wins inside a coalesce window, for
 //                            slider-style bursts — undo returns to "the value
 //                            before the drag started".
@@ -24,6 +28,7 @@ export type SnapshotBuilder<T> = () => T | null;
 
 export type PaintHistory<T> = {
   commit: (build: SnapshotBuilder<T>) => void;
+  commitSnapshot: (current: T | null) => void;
   commitCoalesced: (build: SnapshotBuilder<T>) => void;
   undo: (build: SnapshotBuilder<T>) => T | null;
   redo: (build: SnapshotBuilder<T>) => T | null;
@@ -53,14 +58,18 @@ export function createPaintHistory<T>(opts: PaintHistoryOpts = {}): PaintHistory
     if (stack.length > cap) stack.shift();
   };
 
+  const commitValue = (current: T | null): void => {
+    if (current === null) return;
+    lastCoalesceAt = 0; // any explicit commit ends a coalesce window
+    push(undoStack, current);
+    redoStack = [];
+  };
+
   return {
     commit: (build) => {
-      const current = build();
-      if (current === null) return;
-      lastCoalesceAt = 0; // any explicit commit ends a coalesce window
-      push(undoStack, current);
-      redoStack = [];
+      commitValue(build());
     },
+    commitSnapshot: commitValue,
     commitCoalesced: (build) => {
       // Throttle BEFORE building — laziness is the whole point.
       const t = now();

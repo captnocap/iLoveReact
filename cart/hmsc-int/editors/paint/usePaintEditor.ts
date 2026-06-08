@@ -270,6 +270,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const history = useMemo(() => createPaintHistory<PaintDocument>(), []);
   const [historyTick, setHistoryTick] = useState(0);
   const bumpHistory = () => setHistoryTick((v) => v + 1);
+  const pendingStrokeUndoRef = useRef<PaintDocument | null>(null);
 
   // ── interaction plumbing ────────────────────────────────────────────────────
   const session = opts.session ?? null;
@@ -387,6 +388,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   };
 
   const commit = () => { history.commit(buildDocument); bumpHistory(); };
+  const commitSnapshot = (doc: PaintDocument | null) => { history.commitSnapshot(doc); bumpHistory(); };
   const commitCoalesced = () => { history.commitCoalesced(buildDocument); bumpHistory(); };
 
   // restore-on-mount + first layer
@@ -430,7 +432,7 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
   const dabCountRef = useRef(0);
 
   const beginStroke = () => {
-    commit();
+    pendingStrokeUndoRef.current = buildDocument();
     ensureActiveLayer();
     dabCountRef.current = 0;
     engineRef.current = createStrokeEngine({
@@ -465,10 +467,12 @@ export function usePaintEditor(opts: PaintEditorOptions): PaintEditorState {
     engine.end();
     bump();
     if (dabCountRef.current > 0) {
+      commitSnapshot(pendingStrokeUndoRef.current);
       touchDocument();
       const layer = activeLayerObj();
       noteEdit(`${toolRef.current} stroke · ${modeRef.current} · ${brushPxRef.current}px · ${layer?.name ?? 'layer'}`);
     }
+    pendingStrokeUndoRef.current = null;
   };
 
   // ── whole-layer ops ─────────────────────────────────────────────────────────
