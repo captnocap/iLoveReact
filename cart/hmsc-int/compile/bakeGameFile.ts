@@ -22,9 +22,11 @@ import { loadEditorWorld } from '../editorWorld';
 import { createHmscMapfile } from '../packageMap';
 import { sceneEnvironmentFromSky } from './sceneEnv';
 import { buildHmscSky } from '../../hmsc/render3d/sky';
+import { deserializeMap } from '../mapStore';
+import { floorsFromEditorWorld, type ChunkFloor } from '../chunkFloor';
 import { bytesToBase64 } from '@reactjit/workspace';
 import { writeGameFile } from '@reactjit/workspace/gamefile';
-import { lastPointerPath } from '@reactjit/workspace';
+import { lastPointerPath, sessionPathFor } from '@reactjit/workspace';
 import { readFile } from '@reactjit/hooks/fs';
 import { openStore } from '../data';
 import { worldStream, piecesForMap } from '@game';
@@ -38,17 +40,19 @@ const warn = (msg: string): void => {
   (globalThis as any).console?.warn?.(msg);
 };
 
-/** Read the active map's placed build pieces from the editor's world stream —
- *  the SAME set /test renders (active stem from sessions/_last.txt, merged with
- *  the legacy global pool via piecesForMap). Returns [] (with a warning) if the
- *  store can't be opened, so the bake still emits the painted-world geometry. */
-function readPlacedPieces(): PlacedBuildPiece[] {
-  let stem: string | null = null;
+/** The active map stem — what /test shows (sessions/_last.txt). */
+function activeStem(): string | null {
   try {
-    stem = (readFile(lastPointerPath(CART)) ?? '').trim() || null;
+    return (readFile(lastPointerPath(CART)) ?? '').trim() || null;
   } catch {
-    stem = null;
+    return null;
   }
+}
+
+/** Read the active map's placed build pieces from the editor's world stream —
+ *  the SAME set /test renders (merged with the legacy global pool via
+ *  piecesForMap). Returns [] (with a warning) if the store can't be opened. */
+function readPlacedPieces(stem: string | null): PlacedBuildPiece[] {
   try {
     const store = openStore(EDITOR_DATA_ROOT);
     const world = store.defineStream(worldStream);
@@ -61,13 +65,36 @@ function readPlacedPieces(): PlacedBuildPiece[] {
   }
 }
 
+/** Read the active map's PAINTED FLOOR — the user's real ground. It lives in the
+ *  workspace map session payload as the editor world's chunks; reconstruct it the
+ *  same way the editor does (deserializeMap → floorsFromEditorWorld), so the bake
+ *  picks up the live paint (no Compile needed). */
+function readPaintedFloors(stem: string | null): ChunkFloor[] {
+  if (!stem) return [];
+  try {
+    const text = readFile(sessionPathFor(CART, stem));
+    if (!text) return [];
+    const payload = JSON.parse(text)?.payload;
+    if (!payload?.world) return [];
+    const floors = floorsFromEditorWorld(deserializeMap(payload.world));
+    const painted = floors.reduce((n, f) => n + (f.tileData[0] | 0) * (f.tileData[1] | 0), 0);
+    warn(`[bake] read ${floors.length} painted floor chunk(s) (~${painted} cells) from map session`);
+    return floors;
+  } catch (error: any) {
+    warn(`[bake] could not read the painted floor: ${String(error?.message ?? error)}`);
+    return [];
+  }
+}
+
+const stem = activeStem();
 const state = loadEditorWorld();
-const pieces = readPlacedPieces();
+const pieces = readPlacedPieces(stem);
+const floors = readPaintedFloors(stem);
 // The render environment IS /test's: build it from the SAME buildHmscSky the
 // game's WorldStatics lights the scene with, so the loader's lighting/sky match.
 const sky = buildHmscSky(state.config.sky.hour, state.config.sky.weather, state.config.sky.gloom);
 const env = sceneEnvironmentFromSky(sky);
-const mapContainer = createHmscMapfile(state, pieces, env);
+const mapContainer = createHmscMapfile(state, pieces, floors, env);
 
 const file = writeGameFile({
   logic: { refs: [], data: new Uint8Array(0) },

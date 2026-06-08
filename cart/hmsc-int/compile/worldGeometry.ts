@@ -24,6 +24,8 @@
 import type { GameState, PropKind, BuildingKind, TileKind } from '../../hmsc/design';
 import { solveRoadCrossSection } from '../../hmsc/world/roadProfile';
 import { tileKindDefinition } from '../../hmsc/world/tileKinds';
+import { CHUNK_TILES } from '../chunks';
+import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildMaterial, PlacedBuildPiece } from '@game';
 
@@ -258,6 +260,62 @@ function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): n
   return emitted;
 }
 
+/** Rasterize the PAINTED FLOOR — the user's real, solid, walkable ground.
+ *
+ *  A painted chunk carries a per-1m-cell tile grid (`tileData` = [cols, rows,
+ *  palCount, palette rgb…, …cell idx], -1 = empty) over a heightfield. Each
+ *  cell's color is `palette[idx]` (the tile-kind colors the editor paints with),
+ *  so this renders exactly what the user painted. Cells are merged into
+ *  horizontal RUNS (row-RLE) so a solid fill is a few hundred slabs, not 14k
+ *  tiles. Height is sampled from the chunk's height grid so a painted hill drapes
+ *  too. This is the live ground (read from the map session payload), NOT the demo
+ *  surfaceRegions. */
+function pushPaintedFloors(out: number[], floors: readonly ChunkFloor[]): number {
+  let emitted = 0;
+  for (const f of floors) {
+    const tcols = f.tileData[0] | 0;
+    const trows = f.tileData[1] | 0;
+    const palCount = f.tileData[2] | 0;
+    if (tcols <= 0 || trows <= 0) continue;
+    const palBase = 3;
+    const idxBase = 3 + palCount * 3;
+    const tileWorld = CHUNK_TILES / tcols; // meters per painted cell (≈1)
+    const originX = f.cx * CHUNK_TILES;
+    const originZ = f.cz * CHUNK_TILES;
+    // Height sampling: nearest height-grid sample (heights span the chunk; hcols×
+    // hrows with hCell meters between samples). Flat floors sample 0.
+    const hcols = Math.max(1, f.hcols);
+    const hrows = Math.max(1, f.hrows);
+    const hCell = hcols > 1 ? CHUNK_TILES / (hcols - 1) : CHUNK_TILES;
+    const heightAt = (worldX: number, worldZ: number): number => {
+      if (!f.heights || f.heights.length < hcols * hrows) return 0;
+      const hi = Math.min(hcols - 1, Math.max(0, Math.round((worldX - originX) / hCell)));
+      const hj = Math.min(hrows - 1, Math.max(0, Math.round((worldZ - originZ) / hCell)));
+      return f.heights[hj * hcols + hi] ?? 0;
+    };
+    for (let j = 0; j < trows; j += 1) {
+      let i = 0;
+      while (i < tcols) {
+        const v = f.tileData[idxBase + j * tcols + i] | 0;
+        if (v < 0) { i += 1; continue; } // empty cell — void shows through
+        let i1 = i + 1;
+        while (i1 < tcols && (f.tileData[idxBase + j * tcols + i1] | 0) === v) i1 += 1;
+        const r = f.tileData[palBase + v * 3 + 0];
+        const g = f.tileData[palBase + v * 3 + 1];
+        const b = f.tileData[palBase + v * 3 + 2];
+        const cx = originX + ((i + i1) / 2) * tileWorld;
+        const cz = originZ + (j + 0.5) * tileWorld;
+        const w = (i1 - i) * tileWorld;
+        const y = heightAt(cx, cz);
+        pushBox(out, cx, y + 0.05, cz, w, 0.1, tileWorld, [r, g, b]);
+        emitted += 1;
+        i = i1;
+      }
+    }
+  }
+  return emitted;
+}
+
 export type WorldInstanceResult = {
   instances: Float32Array;
   total: number;
@@ -266,23 +324,26 @@ export type WorldInstanceResult = {
 
 /** Build the packed instance buffer for the authored world.
  *
- *  The world IS the PLACED PIECES — the structures the build editor / /test
- *  render, on skybox + void (you fall; there is no ground plane). That is what a
- *  build-editor map actually contains.
+ *  The world is the user's authored content: the PLACED PIECES (the structures
+ *  the build editor / /test render) PLUS the PAINTED FLOOR (the solid, walkable
+ *  ground the user paints — read live from the map session as chunk tile fields).
+ *  Pieces come FIRST so the loader frames the camera on them; the floor is the
+ *  ground they stand on. Beyond the painted cells is void (you fall off the edge).
  *
  *  The GameState's painted layers (surfaceRegions / roads / props / landforms)
- *  are the SEPARATE painted-world authoring path. For a piece-based map they are
- *  unauthored demo scaffolding (createInitialGameState's chunk regions + demo
- *  props) and render as phantom ground/props the user never placed — so they are
- *  OFF by default. `includeGroundLayers` is the opt-in for a genuinely painted
- *  map; the code is retained for that case, not deleted. */
+ *  are the SEPARATE legacy painted-world path. For a piece-based map they are
+ *  unauthored demo scaffolding (createInitialGameState chunk regions + demo
+ *  props) — phantom content — so they are OFF by default. `includeGroundLayers`
+ *  is the opt-in for a genuinely painted map; the code is retained, not deleted. */
 export function buildWorldInstances(
   state: GameState,
   pieces: readonly PlacedBuildPiece[] = [],
+  floors: readonly ChunkFloor[] = [],
   opts: { includeGroundLayers?: boolean } = {},
 ): WorldInstanceResult {
   const out: number[] = [];
   const pieceCount = pushPlacedPieces(out, pieces);
+  pushPaintedFloors(out, floors);
   if (opts.includeGroundLayers) pushWorldLayers(out, state);
   return {
     instances: new Float32Array(out),

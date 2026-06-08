@@ -20,6 +20,7 @@ import {
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
 import { buildWorldInstances, encodeInstanceLump } from './compile/worldGeometry';
 import { DEFAULT_SCENE_ENVIRONMENT, encodeEnvironmentLump, type SceneEnvironment } from './compile/sceneEnv';
+import type { ChunkFloor } from './chunkFloor';
 import type { PlacedBuildPiece } from '@game';
 
 export const DEFAULT_HMSC_PACKAGE_DIR = 'cart/hmsc-int/exports/hmsc.rjpkg';
@@ -153,6 +154,7 @@ export function hmscStateFromEntitiesText(text: string): GameState | null {
 export function createHmscMapfile(
   state: GameState,
   pieces: readonly PlacedBuildPiece[] = [],
+  floors: readonly ChunkFloor[] = [],
   env: SceneEnvironment = DEFAULT_SCENE_ENVIRONMENT,
 ): Uint8Array {
   const bounds = mapBounds(state);
@@ -169,10 +171,10 @@ export function createHmscMapfile(
     landforms: state.world.landforms,
   };
 
-  // The authored world's 3D geometry: the painted GameState layers PLUS the
-  // build stream's placed pieces (the towers/structures /test renders). The
-  // piece count rides in the lump so the loader frames the camera on the city.
-  const geometry = buildWorldInstances(state, pieces);
+  // The authored world's 3D geometry: the placed pieces (structures) PLUS the
+  // painted floor (the user's real ground, from chunk tile fields). The piece
+  // count rides in the lump so the loader frames the camera on the structures.
+  const geometry = buildWorldInstances(state, pieces, floors);
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
 
   return writeLumpContainer([
