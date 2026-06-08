@@ -21,12 +21,29 @@
 // headless) and the preview render (paintedRender.tsx — React, imported
 // directly by editors like figure/render.tsx; the door stays React-free).
 
+/** The layer's baked EFFECT recipe (PAINTLIVE-0606, ruled: "pick the one
+ *  where the model can get the live texture"). Baked by the painter's one
+ *  compose authority (editors/paint/surfaces.ts bakeLayerLook) at save; the
+ *  model mounts `shader` with data = header(8) ++ dense cell grid ++ colors
+ *  (packPaintedLookData below does the splice). Self-contained WGSL text —
+ *  game/ stores and renders it, never derives it (STRUCTURE arrows hold). */
+export type PaintedLayerLook = {
+  shader: string;
+  /** the 8 header floats: [cols, rows, dim, hueOffset, phaseOffset, slots, blend, 0] */
+  header: number[];
+  /** packed color-slot floats (slots × rgb) */
+  colors: number[];
+};
+
 /** One baked color layer: sparse ON cell indices over the cols×rows grid. */
 export type PaintedOverlayLayer = {
   /** '#RRGGBB' or '#RRGGBBAA' */
   color: string;
   /** sparse row-major indices of painted cells */
   cells: number[];
+  /** the layer's effect recipe — absent on pre-PAINTLIVE overlays, which
+   *  render through the legacy flat fill (PAINTED_LAYER_WGSL) */
+  look?: PaintedLayerLook;
 };
 
 export type PaintedOverlay = {
@@ -44,6 +61,24 @@ export type PaintedOverlay = {
 };
 
 const COLOR_SHAPE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
+
+const LOOK_HEADER_LEN = 8;
+const LOOK_COLORS_MAX = 96; // generous slot ceiling — looks are a few rgb triples
+
+const isFiniteNum = (n: unknown): n is number => typeof n === 'number' && Number.isFinite(n);
+
+/** Validate a layer's look. A malformed look is DROPPED (the layer falls
+ *  back to the flat fill) — the strokes are never the thing that gets
+ *  rejected. The header's cols/rows must match the overlay grid: the splice
+ *  in packPaintedLookData is only meaningful on the grid it was baked for. */
+function validateLayerLook(value: unknown, cols: number, rows: number): PaintedLayerLook | null {
+  const v = value as any;
+  if (!v || typeof v.shader !== 'string' || v.shader.length === 0) return null;
+  if (!Array.isArray(v.header) || v.header.length !== LOOK_HEADER_LEN || !v.header.every(isFiniteNum)) return null;
+  if (!Array.isArray(v.colors) || v.colors.length < 3 || v.colors.length > LOOK_COLORS_MAX || !v.colors.every(isFiniteNum)) return null;
+  if (v.header[0] !== cols || v.header[1] !== rows) return null;
+  return { shader: v.shader, header: v.header.slice(), colors: v.colors.slice() };
+}
 
 /** Boundary validation for overlays arriving from documents/streams/files.
  *  Returns the overlay (cells clamped to the grid) or null — never throws
@@ -64,7 +99,8 @@ export function validatePaintedOverlay(value: unknown): PaintedOverlay | null {
     for (const idx of layer.cells) {
       if (Number.isInteger(idx) && idx >= 0 && idx < total) cells.push(idx);
     }
-    layers.push({ color: layer.color, cells });
+    const look = validateLayerLook(layer.look, cols, rows);
+    layers.push(look ? { color: layer.color, cells, look } : { color: layer.color, cells });
   }
   return { version: 1, stamp: v.stamp, cols, rows, layers, paintDoc: v.paintDoc };
 }
@@ -109,8 +145,30 @@ export function packPaintedLayerData(overlay: PaintedOverlay, layerIndex: number
   return data;
 }
 
+/** The look's Effect data — the splice the look contract names:
+ *  data = header(8) ++ dense 0/1 cell grid ++ colors. The header and colors
+ *  arrive packed from the painter's compose authority; the grid is ours (the
+ *  sparse cells made dense, exactly as packPaintedLayerData does). Null when
+ *  the layer carries no look (legacy flat path). */
+export function packPaintedLookData(overlay: PaintedOverlay, layerIndex: number): number[] | null {
+  const layer = overlay.layers[layerIndex];
+  const look = layer.look;
+  if (!look) return null;
+  const total = overlay.cols * overlay.rows;
+  const grid = look.header.length;
+  const data = new Array<number>(grid + total + look.colors.length);
+  for (let i = 0; i < look.header.length; i++) data[i] = look.header[i];
+  for (let i = 0; i < total; i++) data[grid + i] = 0;
+  for (const idx of layer.cells) data[grid + idx] = 1;
+  for (let i = 0; i < look.colors.length; i++) data[grid + total + i] = look.colors[i];
+  return data;
+}
+
 /** One baked layer as a fragment fill: cell lookup → premultiplied color
- *  (the painter's own shader output convention). No backticks, no unary +. */
+ *  (the painter's own shader output convention). No backticks, no unary +.
+ *  PAINTLIVE-0606: this is the LEGACY reader — layers baked since carry a
+ *  `look` and render through their own shader; only pre-look overlays (and
+ *  layers whose look failed validation) fall back here. */
 export const PAINTED_LAYER_WGSL = `
 @group(0) @binding(1) var<storage, read> data: array<f32>;
 

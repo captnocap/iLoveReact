@@ -20,9 +20,9 @@
 //!
 //! Brush rendering: the brush pipeline uses a 6-vertex triangle-list
 //! quad whose corners are emitted from a tiny per-op uniform (bbox in
-//! mask NDC). The fragment shader computes the circle SDF or polygon
-//! winding-rule fill and optionally rejects high-gradient pixels against
-//! a `gray` reference texture (edge-aware mode).
+//! mask NDC). The fragment shader computes stamp coverage for round,
+//! soft, square, flat, chisel, filbert, rake/fan, dry, spray, and knife
+//! brush shapes. Polygon lasso still uses the CPU fallback below.
 
 const std = @import("std");
 const wgpu = @import("wgpu");
@@ -40,6 +40,7 @@ const OpKind = enum(u8) {
     clear,
     circle,
     circle_edge,
+    brush,
     polygon,
     upload,
 };
@@ -52,6 +53,13 @@ const Op = struct {
     cy: f32 = 0,
     r: f32 = 0,
     value: f32 = 0,
+    brush_kind: f32 = 0,
+    angle: f32 = 0,
+    aspect: f32 = 1,
+    hardness: f32 = 1,
+    flow: f32 = 1,
+    scatter: f32 = 0,
+    seed: f32 = 0,
     // circle_edge: id of the gray reference paintable + sobel threshold
     gray_id_hash: u64 = 0,
     grad_threshold: f32 = 0,
@@ -112,8 +120,16 @@ const BrushUniforms = extern struct {
     cy: f32,
     radius: f32,
     value: f32,
-    grad_threshold: f32,
-    edge_aware: f32, // 0/1 — when 1, sample `gray` and reject high-gradient pixels
+    kind: f32,
+    angle: f32,
+    aspect: f32,
+    hardness: f32,
+    flow: f32,
+    scatter: f32,
+    seed: f32,
+    pad0: f32 = 0,
+    pad1: f32 = 0,
+    pad2: f32 = 0,
 };
 
 const BRUSH_WGSL =
@@ -121,15 +137,28 @@ const BRUSH_WGSL =
     \\  tex_w: f32, tex_h: f32,
     \\  cx: f32, cy: f32,
     \\  radius: f32, value: f32,
-    \\  grad_threshold: f32, edge_aware: f32,
+    \\  kind: f32, angle: f32,
+    \\  aspect: f32, hardness: f32,
+    \\  flow: f32, scatter: f32,
+    \\  seed: f32,
+    \\  pad0: f32, pad1: f32, pad2: f32,
     \\};
     \\@group(0) @binding(0) var<uniform> U: BU;
     \\
     \\struct VsOut { @builtin(position) pos: vec4f, @location(0) world: vec2f };
     \\
+    \\fn sat(v: f32) -> f32 { return clamp(v, 0.0, 1.0); }
+    \\fn hash12(p: vec2f) -> f32 {
+    \\  return fract(sin(dot(p, vec2f(127.1, 311.7))) * 43758.5453);
+    \\}
+    \\fn edge_coverage(dist: f32, hardness: f32) -> f32 {
+    \\  let feather = max(0.002, (1.0 - sat(hardness)) * 0.55 + 0.002);
+    \\  return 1.0 - smoothstep(1.0 - feather, 1.0, dist);
+    \\}
+    \\
     \\@vertex fn vs_main(@builtin(vertex_index) vi: u32) -> VsOut {
     \\  // Six vertices forming a quad covering the brush bbox in pixel space.
-    \\  let r = U.radius + 1.5;
+    \\  let r = U.radius * (max(max(U.aspect, 1.0), 1.0) + max(U.scatter, 0.0)) + 3.0;
     \\  let x0 = U.cx - r;
     \\  let x1 = U.cx + r;
     \\  let y0 = U.cy - r;
@@ -155,13 +184,67 @@ const BRUSH_WGSL =
     \\@fragment fn fs_main(in: VsOut) -> @location(0) vec4f {
     \\  let dx = in.world.x - U.cx;
     \\  let dy = in.world.y - U.cy;
-    \\  let d2 = dx*dx + dy*dy;
-    \\  if (d2 > U.radius * U.radius) { discard; }
-    \\  // Edge-aware mode is handled by the host re-running the same op
-    \\  // through a different pipeline that samples gray. For now this
-    \\  // basic circle paints `value` into R8Unorm. Out-of-bounds discard
-    \\  // is handled by NDC clipping.
-    \\  return vec4f(U.value, 0.0, 0.0, 1.0);
+    \\  let ca = cos(U.angle);
+    \\  let sa = sin(U.angle);
+    \\  let p = vec2f(dx * ca + dy * sa, -dx * sa + dy * ca);
+    \\  let r = max(U.radius, 0.001);
+    \\  let aspect = max(U.aspect, 0.05);
+    \\  let kind = floor(U.kind + 0.5);
+    \\  var coverage = 0.0;
+    \\
+    \\  if (kind == 1.0) {
+    \\    let d = length(p) / r;
+    \\    coverage = pow(sat(1.0 - d), mix(0.55, 3.0, sat(U.hardness)));
+    \\  } else if (kind == 2.0) {
+    \\    let d = max(abs(p.x) / (r * aspect), abs(p.y) / r);
+    \\    coverage = edge_coverage(d, U.hardness);
+    \\  } else if (kind == 3.0) {
+    \\    let d = max(abs(p.x) / (r * max(aspect, 1.6)), abs(p.y) / (r * 0.42));
+    \\    coverage = edge_coverage(d, U.hardness);
+    \\  } else if (kind == 4.0) {
+    \\    let skew = p.x + p.y * 0.55;
+    \\    let d = max(abs(skew) / (r * max(aspect, 1.5)), abs(p.y) / (r * 0.46));
+    \\    coverage = edge_coverage(d, U.hardness);
+    \\  } else if (kind == 5.0) {
+    \\    let q = vec2f(p.x / (r * max(aspect, 1.15)), p.y / (r * 0.62));
+    \\    coverage = edge_coverage(length(q), U.hardness);
+    \\  } else if (kind == 6.0) {
+    \\    let q = vec2f(p.x / (r * max(aspect, 1.3)), p.y / r);
+    \\    let base = edge_coverage(length(q), U.hardness);
+    \\    let teeth = 7.0;
+    \\    let cell = fract((q.x * 0.5 + 0.5) * teeth);
+    \\    coverage = base * step(cell, 0.48);
+    \\  } else if (kind == 7.0) {
+    \\    let q = vec2f(p.x / (r * max(aspect, 1.8)), (p.y + r * 0.18) / r);
+    \\    let width = mix(0.42, 1.08, sat((q.y + 0.95) / 1.9));
+    \\    let base = (1.0 - smoothstep(width - 0.08, width, abs(q.x))) * (1.0 - smoothstep(0.86, 1.0, abs(q.y)));
+    \\    let teeth = 9.0;
+    \\    let cell = fract((q.x * 0.5 + 0.5) * teeth);
+    \\    coverage = base * mix(0.24, 1.0, step(cell, 0.42));
+    \\  } else if (kind == 8.0) {
+    \\    let q = vec2f(p.x / (r * max(aspect, 1.2)), p.y / r);
+    \\    let base = edge_coverage(length(q), U.hardness);
+    \\    let n = hash12(floor(in.world.xy * 0.65 + vec2f(U.seed, U.seed * 1.7)));
+    \\    let grain = step(0.36 + sat(U.scatter) * 0.28, n);
+    \\    coverage = base * grain;
+    \\  } else if (kind == 9.0) {
+    \\    let q = p / (r * (1.0 + max(U.scatter, 0.0)));
+    \\    let d = length(q);
+    \\    let n = hash12(floor(in.world.xy * 0.9 + vec2f(U.seed * 3.1, U.seed * 1.3)));
+    \\    let density = mix(0.78, 0.38, sat(U.flow));
+    \\    coverage = (1.0 - smoothstep(0.75, 1.0, d)) * step(density, n);
+    \\  } else if (kind == 10.0) {
+    \\    let skew = p.x + p.y * 0.22;
+    \\    let d = max(abs(skew) / (r * max(aspect, 2.8)), abs(p.y) / (r * 0.22));
+    \\    coverage = edge_coverage(d, U.hardness);
+    \\  } else {
+    \\    let d = length(p) / r;
+    \\    coverage = edge_coverage(d, U.hardness);
+    \\  }
+    \\
+    \\  coverage = sat(coverage) * sat(U.flow);
+    \\  if (coverage <= 0.001) { discard; }
+    \\  return vec4f(U.value * coverage, 0.0, 0.0, coverage);
     \\}
     ;
 
@@ -174,6 +257,9 @@ pub fn init() void {
 pub fn deinit() void {
     for (&g_entries) |*e| {
         releaseEntry(e);
+    }
+    for (&g_parked_uploads) |*p| {
+        if (p.active) releaseParked(p);
     }
     if (g_brush_pipeline) |p| p.release();
     if (g_brush_bgl) |b| b.release();
@@ -253,10 +339,76 @@ fn findOrCreateEntry(key: []const u8, w: u32, h: u32) ?*Paintable {
             releaseEntry(e);
             return null;
         }
+        flushParkedUpload(e);
         return e;
     }
     log.print("[paintable] no free slot (max={d})\n", .{MAX_PAINTABLES});
     return null;
+}
+
+// ─── Parked uploads (PAINTLIVE-0606: the cold-boot restore race) ─────────
+// The reconciler's CREATE commands drain at the START OF THE NEXT FRAME
+// (__hostFlush queues), but __paintable_upload executes immediately — so a
+// document restore's mask upload can arrive BEFORE its <Paintable> entry
+// exists. Dropping it silently blanked restored paintings at cold boot
+// (and the autosave then snapshotted the blank GPU back over the draft).
+// Park such uploads by key and flush them the moment ensure() creates the
+// entry. Uploads only: brush/circle ops are user input, which cannot
+// precede the surface existing on screen.
+
+const MAX_PARKED_UPLOADS = 64;
+const ParkedUpload = struct {
+    key: []u8 = &.{},
+    bytes: []u8 = &.{},
+    active: bool = false,
+};
+var g_parked_uploads: [MAX_PARKED_UPLOADS]ParkedUpload = [_]ParkedUpload{.{}} ** MAX_PARKED_UPLOADS;
+
+fn releaseParked(p: *ParkedUpload) void {
+    if (p.key.len > 0) page_alloc.free(p.key);
+    if (p.bytes.len > 0) page_alloc.free(p.bytes);
+    p.* = .{};
+}
+
+fn parkUpload(key: []const u8, bytes: []const u8) void {
+    // Last write wins per key — exactly the semantics of a live upload.
+    var slot: ?*ParkedUpload = null;
+    for (&g_parked_uploads) |*p| {
+        if (p.active and std.mem.eql(u8, p.key, key)) {
+            releaseParked(p);
+            slot = p;
+            break;
+        }
+        if (slot == null and !p.active) slot = p;
+    }
+    const p = slot orelse {
+        log.print("[paintable] parked-upload table full (max={d}) — dropping {s}\n", .{ MAX_PARKED_UPLOADS, key });
+        return;
+    };
+    const key_copy = page_alloc.alloc(u8, key.len) catch return;
+    @memcpy(key_copy, key);
+    const bytes_copy = page_alloc.alloc(u8, bytes.len) catch {
+        page_alloc.free(key_copy);
+        return;
+    };
+    @memcpy(bytes_copy, bytes);
+    p.* = .{ .key = key_copy, .bytes = bytes_copy, .active = true };
+}
+
+fn flushParkedUpload(e: *Paintable) void {
+    for (&g_parked_uploads) |*p| {
+        if (!p.active or !std.mem.eql(u8, p.key, e.key)) continue;
+        if (p.bytes.len == @as(usize, e.width) * @as(usize, e.height)) {
+            // Ownership of bytes moves to the op (drainEntry frees them).
+            pushOp(e, .{ .kind = .upload, .upload_bytes = p.bytes });
+            page_alloc.free(p.key);
+            p.* = .{};
+        } else {
+            log.print("[paintable] parked upload size mismatch for {s}: got {d}, want {d}*{d}\n", .{ e.key, p.bytes.len, e.width, e.height });
+            releaseParked(p);
+        }
+        return;
+    }
 }
 
 fn ensureTexture(e: *Paintable) bool {
@@ -360,9 +512,10 @@ fn ensureBrushPipeline() bool {
     }) orelse return false;
     defer pipeline_layout.release();
 
+    const blend_state = wgpu.BlendState.premultiplied_alpha_blending;
     const color_target = wgpu.ColorTargetState{
         .format = .r8_unorm,
-        .blend = null,
+        .blend = &blend_state,
         .write_mask = wgpu.ColorWriteMasks.all,
     };
     const fragment_state = wgpu.FragmentState{
@@ -422,7 +575,7 @@ pub fn queueClear(key: []const u8, value: f32) void {
 
 pub fn queueCircle(key: []const u8, cx: f32, cy: f32, r: f32, value: f32) void {
     const e = findEntry(key) orelse return;
-    pushOp(e, .{ .kind = .circle, .cx = cx, .cy = cy, .r = r, .value = value });
+    pushOp(e, .{ .kind = .circle, .cx = cx, .cy = cy, .r = r, .value = value, .flow = 1, .hardness = 1, .aspect = 1 });
 }
 
 pub fn queueCircleEdgeAware(
@@ -441,8 +594,42 @@ pub fn queueCircleEdgeAware(
         .cy = cy,
         .r = r,
         .value = value,
+        .flow = 1,
+        .hardness = 1,
+        .aspect = 1,
         .gray_id_hash = hashKey(gray_key),
         .grad_threshold = grad_threshold,
+    });
+}
+
+pub fn queueBrush(
+    key: []const u8,
+    cx: f32,
+    cy: f32,
+    r: f32,
+    value: f32,
+    kind: f32,
+    angle: f32,
+    aspect: f32,
+    hardness: f32,
+    flow: f32,
+    scatter: f32,
+    seed: f32,
+) void {
+    const e = findEntry(key) orelse return;
+    pushOp(e, .{
+        .kind = .brush,
+        .cx = cx,
+        .cy = cy,
+        .r = r,
+        .value = value,
+        .brush_kind = kind,
+        .angle = angle,
+        .aspect = @max(0.05, aspect),
+        .hardness = std.math.clamp(hardness, 0.0, 1.0),
+        .flow = std.math.clamp(flow, 0.0, 1.0),
+        .scatter = @max(0.0, scatter),
+        .seed = seed,
     });
 }
 
@@ -467,7 +654,12 @@ pub fn queuePolygon(key: []const u8, verts: []const f32, value: f32) void {
 /// Used by backend results (SAM, flood-fill) that produce CPU masks.
 /// `bytes` is copied into a queued op; the queue drain frees it.
 pub fn queueUpload(key: []const u8, bytes: []const u8) void {
-    const e = findEntry(key) orelse return;
+    const e = findEntry(key) orelse {
+        // The entry's CREATE is still in the reconciler queue (it drains
+        // next frame) — park the bytes; ensure() flushes them on creation.
+        parkUpload(key, bytes);
+        return;
+    };
     if (bytes.len != @as(usize, e.width) * @as(usize, e.height)) {
         log.print("[paintable] upload size mismatch: got {d}, want {d}*{d}\n", .{ bytes.len, e.width, e.height });
         return;
@@ -551,7 +743,7 @@ fn drainEntry(e: *Paintable) void {
                 cmd.release();
                 e.dirty = true;
             },
-            .circle, .circle_edge => {
+            .circle, .circle_edge, .brush => {
                 // Edge-aware mode is treated identically here for now; the
                 // brush WGSL doesn't sample gray. The sobel rejection lives
                 // in a follow-up pipeline variant (see TODO). The op survives
@@ -563,8 +755,16 @@ fn drainEntry(e: *Paintable) void {
                     .cy = op.cy,
                     .radius = op.r,
                     .value = op.value,
-                    .grad_threshold = op.grad_threshold,
-                    .edge_aware = if (op.kind == .circle_edge) 1.0 else 0.0,
+                    .kind = if (op.kind == .brush) op.brush_kind else 0.0,
+                    .angle = op.angle,
+                    .aspect = op.aspect,
+                    .hardness = op.hardness,
+                    .flow = op.flow,
+                    .scatter = op.scatter,
+                    .seed = op.seed,
+                    .pad0 = 0,
+                    .pad1 = 0,
+                    .pad2 = 0,
                 };
                 queue.writeBuffer(uniform_buf, 0, @ptrCast(&u), @sizeOf(BrushUniforms));
 

@@ -15,8 +15,8 @@
 //       figures mount the same component.
 
 import { useMemo } from 'react';
-import { Box, Effect, StaticSurface } from '@reactjit/runtime/primitives';
-import { packPaintedLayerData, validatePaintedOverlay, vehiclePaintTextureKey, PAINTED_LAYER_WGSL, type PaintedOverlay } from './painted';
+import { Box, Effect, StaticSurface } from '@reactjit/primitives';
+import { packPaintedLayerData, packPaintedLookData, validatePaintedOverlay, vehiclePaintTextureKey, PAINTED_LAYER_WGSL, type PaintedOverlay } from './painted';
 import type { VehicleDoc } from './vehicle';
 
 export function PaintedOverlayPaint(props: { overlay: PaintedOverlay; w: number; h: number }) {
@@ -24,8 +24,11 @@ export function PaintedOverlayPaint(props: { overlay: PaintedOverlay; w: number;
   // The packs are memoized on the overlay's identity — overlays are immutable
   // document data, and a re-save mints a NEW object (and stamp), so this is
   // exactly content-addressed (the StaticSurface inline-prop rebake hazard).
+  // PAINTLIVE-0606 (ruled): a layer carrying a baked `look` mounts ITS OWN
+  // effect shader — the model wears the same live effect texture the painter
+  // showed. The flat fill is the legacy reader for pre-look overlays only.
   const packs = useMemo(
-    () => overlay.layers.map((_, i) => packPaintedLayerData(overlay, i)),
+    () => overlay.layers.map((_, i) => packPaintedLookData(overlay, i) ?? packPaintedLayerData(overlay, i)),
     [overlay],
   );
   const style = useMemo(
@@ -36,7 +39,7 @@ export function PaintedOverlayPaint(props: { overlay: PaintedOverlay; w: number;
     <>
       {packs.map((data, i) => (
         overlay.layers[i].cells.length === 0 ? null : (
-          <Effect key={`pl${i}`} shader={PAINTED_LAYER_WGSL} data={data} style={style} />
+          <Effect key={`pl${i}`} shader={overlay.layers[i].look?.shader ?? PAINTED_LAYER_WGSL} data={data} style={style} />
         )
       ))}
     </>

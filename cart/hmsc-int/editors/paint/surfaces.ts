@@ -393,15 +393,22 @@ export type PackLookOpts = {
   colors?: string[];
 };
 
-function packHeader(buf: number[], o: PackLookOpts): void {
-  buf[0] = o.gridSize;
-  buf[1] = o.gridSize;
+function packHeaderGrid(
+  buf: number[], cols: number, rows: number,
+  o: { dim: number; hueOffset: number; phaseOffset: number; blend: PaintBlendMode },
+): void {
+  buf[0] = cols;
+  buf[1] = rows;
   buf[2] = o.dim;
   buf[3] = o.hueOffset;
   buf[4] = o.phaseOffset;
   buf[5] = NUM_COLOR_SLOTS;
   buf[6] = blendModeIndex(o.blend);
   buf[7] = 0;
+}
+
+function packHeader(buf: number[], o: PackLookOpts): void {
+  packHeaderGrid(buf, o.gridSize, o.gridSize, o);
 }
 
 function packColors(buf: number[], offset: number, colors?: string[]): void {
@@ -435,6 +442,43 @@ export function packCellModeData(o: PackLookOpts, cells: Set<number> | undefined
   }
   packColors(buf, 8 + total, o.colors);
   return buf;
+}
+
+// ── The model-side LOOK bake (PAINTLIVE-0606, ruled) ─────────────────────────
+// "pick the one where the model can get the live texture" (req_0080; the
+// req_0003 unification ask surfaces here): when a painting SAVES onto a
+// model, each layer's look bakes to a self-contained effect recipe — the
+// resolved CELL-mode WGSL plus the packed header/colors for the overlay's
+// cols×rows grid. game/painted.ts splices the dense cell grid between header
+// and colors (data = header(8) ++ grid ++ colors) and the model mounts that
+// Effect verbatim — the model wears THE SAME shader the painter shows. THIS
+// FILE is the one compose authority; nothing model-side re-derives looks.
+
+export type BakedLayerLook = {
+  /** resolved, self-contained WGSL (cell-mode layout: header 8 + grid + colors) */
+  shader: string;
+  /** the 8 header floats: [cols, rows, dim, hueOffset, phaseOffset, slots, blend, 0] */
+  header: number[];
+  /** the packed color-slot floats (NUM_COLOR_SLOTS × rgb) */
+  colors: number[];
+};
+
+export function bakeLayerLook(args: {
+  cols: number;
+  rows: number;
+  mode: SurfaceId;
+  customSurfaces: CustomSurface[];
+  dim: number;
+  hueOffset: number;
+  phaseOffset: number;
+  blend: PaintBlendMode;
+  colors?: string[];
+}): BakedLayerLook {
+  const header = new Array<number>(8);
+  packHeaderGrid(header, args.cols, args.rows, args);
+  const colors = new Array<number>(NUM_COLOR_SLOTS * 3);
+  packColors(colors, 0, args.colors);
+  return { shader: resolveShader(args.mode, false, args.customSurfaces), header, colors };
 }
 
 // ── Custom surface registry ops ───────────────────────────────────────────────

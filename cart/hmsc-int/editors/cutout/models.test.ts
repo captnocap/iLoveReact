@@ -10,6 +10,8 @@ import { encodeBinaryMask } from '@reactjit/workspace/rle';
 import { openStore } from '../../data';
 import { createSessionLog } from '../sessions';
 import { PAINT_DOC_KIND, PAINT_DOC_VERSION, type PaintDocument } from '../paint/layers';
+import { CELL_SHADER_CACHE } from '../paint/surfaces';
+import { DEFAULT_PAINT_BRUSH_SETTINGS } from '../paint/brushKinds';
 import {
   bakeOverlayFromDocument, emptyModelDocument, modelCanvasBg, modelCanvasDims, modelWorkId,
   overlayOf, reopenOverlayDocument, slotDocumentHasContent, FIGURE_PAINT_TARGETS, MODEL_PAINT,
@@ -23,7 +25,7 @@ import { charactersStream } from '../../game/figure/stream';
 import { PART_IDS, defaultProfile, type PartId } from '../../game/figure/shapes';
 import { generateFace } from '../../game/figure/hed';
 import { applyVehiclePaint, buildVehicle, makeVehicle, vehiclesStream } from '../../game/vehicle';
-import { vehiclePaintTextureKey } from '../../game/painted';
+import { packPaintedLookData, validatePaintedOverlay, vehiclePaintTextureKey } from '../../game/painted';
 import { assert, assertEqual, finish, test } from '../../game/_testkit';
 
 declare const globalThis: any;
@@ -59,6 +61,7 @@ function demoDocument(): PaintDocument {
     dims: { w, h },
     layers: [layer('A', left, '#ff0000'), layer('B', all, '#00ff00', true), layer('C', dot, '#0000ff')],
     activeLayer: 0, tool: 'brush', mode: 'erase', brushPx: 8,
+    brush: DEFAULT_PAINT_BRUSH_SETTINGS,
     defaults: { mode: 'rainbow' as any, colors: ['#ffffff'], hueOffset: 0, phaseOffset: 0, dim: 0.85 },
     customSurfaces: [],
   };
@@ -85,6 +88,33 @@ test('the bake: look colors + effective masks at the grid, muted layers skipped'
   assertEqual(overlay.layers[0].cells.join(','), '0,1,4,5', 'cells are the effective mask sampled to the grid');
   assertEqual(overlay.layers[1].color, '#0000ff', 'layer C keeps its look color');
   assertEqual(overlay.layers[1].cells.join(','), '7', 'a single painted pixel lands in its (aspect-true) cell');
+});
+
+test('PAINTLIVE: every baked layer carries its LOOK — the painter shader, verbatim', () => {
+  const doc = demoDocument();
+  const overlay = bakeOverlayFromDocument(doc, 777, 4);
+  for (const layer of overlay.layers) {
+    assert(layer.look !== undefined, 'a baked layer carries its effect recipe');
+    assertEqual(layer.look!.shader, CELL_SHADER_CACHE.rainbow, 'the shader IS the painter cell-mode build (one compose authority)');
+    assertEqual(layer.look!.header.join(','), '4,2,0.85,0,0,2,0,0', 'header: cols, rows, dim, hue, phase, slots, blend, pad');
+  }
+  assertEqual(overlay.layers[0].look!.colors.slice(0, 3).join(','), '1,0,0', 'slot 0 packs the layer color');
+  assertEqual(overlay.layers[0].look!.colors.slice(3).join(','), '1,1,1', 'missing slots default to identity white');
+  // the consumption layer: validation (the stream boundary) keeps the look,
+  // and the model-side pack mounts header ++ grid ++ colors
+  const back = validatePaintedOverlay(JSON.parse(JSON.stringify(overlay)));
+  assertEqual(JSON.stringify(back), JSON.stringify(overlay), 'the look survives the stream boundary');
+  const pack = packPaintedLookData(back!, 0);
+  assert(pack !== null, 'the model packs the look');
+  assertEqual(pack!.length, 8 + 4 * 2 + 6, 'header(8) + grid + colors');
+  assertEqual(pack![8 + 0] + pack![8 + 1] + pack![8 + 4] + pack![8 + 5], 4, 'the painted cells land in the grid slice');
+
+  // a custom-FX layer bakes ITS OWN WGSL — self-contained on the model
+  const custom = demoDocument();
+  custom.customSurfaces = [{ id: 'custom:x', label: 'Lava', shader: 'CUSTOM_LAVA_WGSL' }];
+  (custom.layers[0].config as any).mode = 'custom:x';
+  const customBake = bakeOverlayFromDocument(custom, 778, 4);
+  assertEqual(customBake.layers[0].look!.shader, 'CUSTOM_LAVA_WGSL', 'custom surfaces ride the overlay as their own WGSL');
 });
 
 test('the re-edit law: a baked overlay reopens as the document it came from', () => {

@@ -17,6 +17,7 @@ import {
   effectiveMask, inflatePaintDocument, parsePaintDocument, scaleMask,
   PAINT_DOC_KIND, PAINT_DOC_VERSION, type PaintDocument,
 } from '../paint/layers';
+import { bakeLayerLook } from '../paint/surfaces';
 import { sampleToCells } from '../paint/strokes';
 import { PAINT_TUNING } from '../paint/tuning';
 import { stockLookDefaults } from './extraction';
@@ -82,7 +83,11 @@ const HEX_SHAPE = /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/;
  *  RESBAKE-0606: the grid is ASPECT-TRUE — `res` is the column count, rows
  *  follow the canvas shape (a 512×256 unwrap at 256 bakes 256×128, square
  *  texels). The PaintedOverlay format always carried cols+rows separately;
- *  square canvases (vehicles) are unchanged. */
+ *  square canvases (vehicles) are unchanged.
+ *  PAINTLIVE-0606 (ruled): each layer also bakes its LOOK — the resolved
+ *  effect shader + packed header/colors from the painter's one compose
+ *  authority (surfaces.ts bakeLayerLook) — so the saved model wears the
+ *  same live effect texture the painter showed, not a flattened color. */
 export function bakeOverlayFromDocument(doc: PaintDocument, stamp: number, res = MODEL_PAINT.bakeRes): PaintedOverlay {
   const n = doc.dims.w * doc.dims.h;
   const rows = Math.max(1, Math.round((res * doc.dims.h) / Math.max(1, doc.dims.w)));
@@ -95,7 +100,13 @@ export function bakeOverlayFromDocument(doc: PaintDocument, stamp: number, res =
     const cells = [...sampleToCells(effective, doc.dims.w, doc.dims.h, res, rows)].sort((a, b) => a - b);
     if (cells.length === 0) continue;
     const slot = layer.config.colors[0];
-    layers.push({ color: HEX_SHAPE.test(slot ?? '') ? slot : '#ffffff', cells });
+    const look = bakeLayerLook({
+      cols: res, rows,
+      mode: layer.config.mode, customSurfaces: doc.customSurfaces ?? [],
+      dim: layer.config.dim, hueOffset: layer.config.hueOffset, phaseOffset: layer.config.phaseOffset,
+      blend: layer.config.blend ?? 'normal', colors: layer.config.colors,
+    });
+    layers.push({ color: HEX_SHAPE.test(slot ?? '') ? slot : '#ffffff', cells, look });
   }
   return { version: 1, stamp, cols: res, rows, layers, paintDoc: doc };
 }
