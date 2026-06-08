@@ -1,0 +1,33 @@
+{
+  "id": "req_0282",
+  "at": "2026-06-08T05:30:27.828Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: COMMIT UNWIND continues — pane 2 landed FOOTMESH (94a71655f) + PAINTLIVE (9c38a67fb) clean, your turn (serialized to avoid index races, pane 2 is done). Commit your USER-PASSED work: the ctrl+z / ctrl+y / ctrl+s keyboard bindings (user passed 'ctrl z is good') + the TWIGRESTORE camera-persistence + STROKEUNDO slice + the viewrunaway dedup if still uncommitted. Same discipline: per-wave clean commits where separable (pane 2 proved the contamination was mostly separable — try clean per-wave first, only bundle-with-named-riders if a file genuinely can't split); HARD GATE tools/rjit game verify GREEN before each commit, STOP and report if red. Do NOT touch pane 4's Globe files (VoxelMesh.ts, runtime/geometries/index.ts — pending the user's A/B ruling) or pane 10's building files. Post each hash + file list. Resolve the relevant ledger entries to review.",
+  "status": "review",
+  "sessionId": "019ea1db-5f93-7392-8554-9c688d1be33f",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:36:49.075Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T05:36:49.082Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Commit unwind work is committed for review in clean waves. Keyboard routing landed in 75cc4ff08, STROKEUNDO landed in f7d130a21, TWIGRESTORE camera/history persistence landed in 4115d9db0, and viewrunaway dedup was already complete in 4de8fdab5; tools/rjit game verify was GREEN before each new commit, and pane 4 Globe files plus pane 10 building files were left unstaged.",
+  "shas": [
+    "75cc4ff08",
+    "f7d130a21",
+    "4115d9db0",
+    "4de8fdab5"
+  ],
+  "resolvedAt": "2026-06-08T05:36:49.082Z"
+}

@@ -1,0 +1,30 @@
+{
+  "id": "req_0222",
+  "at": "2026-06-07T10:10:55.008Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: USER bug report from the live session, verbatim: \"lol what is this log? xD\" followed by a per-frame spam of: [js.warn] [viewrunaway] NOT persisting insane live view 8038,-980@0.13 — repeating identically many times. Two problems, your lane (camera/view persistence): (1) the live view2d is actually AT a runaway value (x=8038) in the user's session right now — the guard correctly refuses to persist it, but something drove the live view there. No theory crafting: print where the view value comes from (restore? gesture math? a stale hot key?), read the data, fix the source. (2) the guard spams identical warns every frame — once per distinct value is enough. This takes priority inside your current TWIGRESTORE slice since it's hurting the user live.",
+  "status": "review",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:36:49.041Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T05:36:49.051Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "VIEWRUNAWAY is already committed for review in the earlier fix-forward commit. The remaining half after the accidental flip sweep landed as a dedicated viewrunaway completion commit, with mapload/viewrunaway coverage proving repeated rejected live-view warnings dedupe by value and stale canvas drift no longer keeps the host camera moving.",
+  "shas": [
+    "4de8fdab5"
+  ],
+  "resolvedAt": "2026-06-08T05:36:49.051Z"
+}

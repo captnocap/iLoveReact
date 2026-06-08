@@ -1,0 +1,30 @@
+{
+  "id": "req_0163",
+  "at": "2026-06-06T18:31:57.790Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — priority note on TWIGRESTORE (queued on you): the user is actively hurting from the camera resets (\"also that camera keeps resetting D:\"). SPLIT THE DELIVERY: land per-session camera/view persistence FIRST as its own coherent slice (edit -> hot reload -> camera stays put), post READY on that alone so the user gets relief immediately, THEN build the full undo-history/branching model. Same survey-the-jsonl-reference discipline for both slices.",
+  "status": "review",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:36:48.988Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T05:36:48.998Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The camera/view persistence split is committed for review in the workspace restore wave. Hot reload now reads the per-cart hot current envelope before disk fallback and writes the exact live envelope before autosave, with editors/world/twigrestore proving the 2D view and preview camera survive an edit/hot reload exactly instead of resetting.",
+  "shas": [
+    "4115d9db0"
+  ],
+  "resolvedAt": "2026-06-08T05:36:48.998Z"
+}

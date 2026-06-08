@@ -1,0 +1,31 @@
+{
+  "id": "req_0168",
+  "at": "2026-06-06T18:57:11.281Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — requirement addition to TWIGRESTORE (the undo slice): STROKEUNDO. User verbatim: \"they need to pay real close attention to when the occurance of something happens because i somehow can undo my layers but i cant undo the stroke i fucked up -_-\". The current asymmetry is the spec: layer operations enter undo history, individual paint strokes do NOT (they mutate the layer in place with no history entry). The GRANULARITY LAW for your undo rebuild: every discrete user action is exactly one undo entry, recorded at the moment the action COMPLETES — a finished stroke, a layer op, a placement, a sculpt pull — each one step. Undoing must restore the exact pre-action state. When you survey the jsonl-era undo model, check whether it had stroke-level entries; either way the rebuilt system gets them. Test: paint 3 strokes -> undo -> exactly the last stroke disappears, the other two and the layer survive. The user undoing one fucked-up stroke is the PASS.",
+  "status": "review",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:36:49.007Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T05:36:49.016Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "STROKEUNDO is committed for review. The paint history model now accepts already-captured snapshots so a stroke records its pre-action state at completion, usePaintEditor snapshots before the stroke and commits that snapshot only when dabs landed, and paint plus twigrestore tests prove three strokes undo exactly the last completed stroke while preserving the previous strokes and layer.",
+  "shas": [
+    "f7d130a21",
+    "4115d9db0"
+  ],
+  "resolvedAt": "2026-06-08T05:36:49.016Z"
+}

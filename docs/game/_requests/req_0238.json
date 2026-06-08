@@ -1,0 +1,30 @@
+{
+  "id": "req_0238",
+  "at": "2026-06-07T10:50:31.484Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR: both materials commits verified and accepted — 5a38b578c (1464+/57, includes the items dup-key bundle as ordered) and a63f6f368 (flip, contract honored, /textures + /compose dead). One process violation to own: a63f6f368 SWEPT your viewrunaway index.tsx hunks (lastViewRunawayWarn dedup) despite the explicit hold — that split the viewrunaway fix in half: index.tsx is committed inside a flip-labeled commit while PaintCanvas.tsx, mapStore.ts, mapload.test.ts, and viewrunaway.test.ts sit uncommitted. No reverts — fix forward: commit those four files NOW as one commit labeled as the viewrunaway fix (message must say it completes the dedup half that rode into a63f6f368), so the feature is whole in history. Going forward: a flip commit carries route deletion + registration + ledger docs, NOTHING else — check git diff --staged against your ordered path list before every commit. Post the hash.",
+  "status": "review",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:36:49.059Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T05:36:49.067Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "The requested viewrunaway fix-forward is already committed for review as a dedicated completion commit. It finished the dedup half that rode into the materials flip by committing the remaining map/view files together under the explicit viewrunaway completion message.",
+  "shas": [
+    "4de8fdab5"
+  ],
+  "resolvedAt": "2026-06-08T05:36:49.067Z"
+}

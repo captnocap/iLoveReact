@@ -1,0 +1,31 @@
+{
+  "id": "req_0209",
+  "at": "2026-06-07T07:07:23.764Z",
+  "origin": "supervisor-dispatch",
+  "text": "SUPERVISOR — addition to your TWIGRESTORE undo slice: KEYBOARD BINDINGS. User verbatim: \"and there is nno control z or other keyboard fn\" — the workbench editors have undo/redo as BUTTONS only; no ctrl+z, no standard keyboard functions at all. Wire the standard editor keys at the workbench SHELL level so they work in every source and lens uniformly: ctrl+z -> undo, ctrl+shift+z (and ctrl+y) -> redo, ctrl+s -> save (the same save the button does). They dispatch into the same undo machinery you are building (stroke-granular) — one undo system, two entry points (button + key). Respect focus rules: keys must not fire while a text input is focused except their native text behavior. Discoverable: tooltips on the existing buttons show the shortcut. Test at the consumption layer: stroke -> ctrl+z -> exactly that stroke gone, in BOTH a character paint lens and the items sculpt lens. The user's muscle memory working is the PASS.",
+  "status": "review",
+  "sessionId": "019e9ca8-ed24-7ec2-8234-de62689f6b19",
+  "captureMode": "hook",
+  "events": [
+    {
+      "at": "2026-06-08T05:36:49.024Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "new",
+      "to": "doing"
+    },
+    {
+      "at": "2026-06-08T05:36:49.034Z",
+      "actor": "codex",
+      "kind": "state",
+      "from": "doing",
+      "to": "review"
+    }
+  ],
+  "resolution": "Keyboard bindings are committed for review. The Workbench shell remains the ctrl+z/ctrl+y/ctrl+shift+z/ctrl+s owner, character paint routes save/undo/redo to the live paint bench actions, embedded paint hotkeys are disabled under the shell, and the duplicate per-stage handlers were removed so keyboard entry and button entry hit the same stroke-granular undo machinery.",
+  "shas": [
+    "75cc4ff08",
+    "f7d130a21"
+  ],
+  "resolvedAt": "2026-06-08T05:36:49.034Z"
+}
