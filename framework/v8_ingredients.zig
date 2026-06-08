@@ -259,6 +259,11 @@ const v8_bindings_game_pathing = if (enabledFor("game_pathing")) @import("v8_bin
 const v8_bindings_game_camera = if (enabledFor("game_camera")) @import("v8_bindings_game_camera.zig") else struct {
     pub fn registerGameCamera(_: anytype) void {}
 };
+// Compiled-world embedded primitive: React owns a Scene3D viewport node while
+// Zig constructs + renders the baked game-file as a retained native scene.
+const v8_bindings_compiled_world = if (enabledFor("compiled_world") and has_gpu_flag) @import("v8_bindings_compiled_world.zig") else struct {
+    pub fn registerCompiledWorld(_: anytype) void {}
+};
 // Frame self-capture (SELFSHOT-0606): __capture_frame(path) writes the app's
 // OWN rendered frame to a PNG — the replacement for the BANNED desktop/X11
 // capture of the user's system. Rides the existing gpu/capture.zig readback.
@@ -347,6 +352,7 @@ pub const INGREDIENTS = [_]Ingredient{
     .{ .name = "game_physics", .required = false, .grep_prefix = "__hmsc_", .reg_fn = "registerGamePhysics", .mod = v8_bindings_game_physics },
     .{ .name = "game_pathing", .required = false, .grep_prefix = "__path_", .reg_fn = "registerGamePathing", .mod = v8_bindings_game_pathing },
     .{ .name = "game_camera", .required = false, .grep_prefix = "__game_camera_", .reg_fn = "registerGameCamera", .mod = v8_bindings_game_camera },
+    .{ .name = "compiled_world", .required = false, .grep_prefix = "__compiled_world_", .reg_fn = "registerCompiledWorld", .mod = v8_bindings_compiled_world },
     .{ .name = "capture", .required = false, .grep_prefix = "__capture_", .reg_fn = "registerCapture", .mod = v8_bindings_capture },
 };
 

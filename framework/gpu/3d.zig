@@ -11,6 +11,7 @@ const core = @import("gpu.zig");
 const images = @import("images.zig");
 const math = @import("../math/root.zig");
 const layout = @import("../layout.zig");
+const compiled_world = @import("../world/compiled_world.zig");
 const Node = layout.Node;
 
 // ════════════════════════════════════════════════════════════════════════
@@ -1126,6 +1127,7 @@ fn makeInstance(px: f32, py: f32, pz: f32, rx: f32, ry: f32, rz: f32, sx: f32, s
 }
 
 fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
+    const scene_node = compiled_world.sceneNodeFor(node) orelse node;
     const queue = core.getQueue() orelse return;
     const device = core.getDevice() orelse return;
 
@@ -1139,7 +1141,7 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     var light_dir: [3]f32 = .{ 0.577, 0.577, 0.577 };
     var light_color: [3]f32 = .{ 1.0, 0.95, 0.9 };
     var clear_color: [3]f32 = .{ 0.05, 0.05, 0.08 };
-    if (node.style.background_color) |bg| {
+    if (scene_node.style.background_color) |bg| {
         clear_color = .{
             @as(f32, @floatFromInt(bg.r)) / 255.0,
             @as(f32, @floatFromInt(bg.g)) / 255.0,
@@ -1153,7 +1155,7 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     // <Scene3D.Fog> child — explicit distance fog that overrides the auto fade.
     var fog_node: ?*Node = null;
 
-    for (node.children) |*child| {
+    for (scene_node.children) |*child| {
         if (child.scene3d_skybox) sky_node = child;
         if (child.scene3d_fog) fog_node = child;
         if (child.scene3d_camera) {
@@ -1185,7 +1187,7 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     const focus_dist = math.v3distance(cam_pos, cam_look);
     var scene_extent: f32 = @max(8.0, focus_dist);
     var scene_mesh_children: u32 = 0;
-    for (node.children) |*child| {
+    for (scene_node.children) |*child| {
         if (!child.scene3d_mesh) continue;
         scene_mesh_children += if (child.scene3d_instance_count > 0) child.scene3d_instance_count else 1;
         const center = math.Vec3{ .x = child.scene3d_pos_x, .y = child.scene3d_pos_y, .z = child.scene3d_pos_z };
@@ -1328,8 +1330,8 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
     var tcount: usize = 0;
 
     var ci: u32 = 0;
-    while (ci < node.children.len and mcount < MAX_SCENE_MESHES) : (ci += 1) {
-        const child = &node.children[ci];
+    while (ci < scene_node.children.len and mcount < MAX_SCENE_MESHES) : (ci += 1) {
+        const child = &scene_node.children[ci];
         if (!child.scene3d_mesh) continue;
         // Draw-radius cull. Only with an explicit camera `far`, and only for
         // single (non-instanced) meshes — an instance batch carries many
@@ -1430,7 +1432,7 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
             if (mtex[hi] != group_tex) continue;
             if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break; // overflow
 
-            const child = &node.children[midx[hi]];
+            const child = &scene_node.children[midx[hi]];
             if (child.scene3d_instance_data) |idata| {
                 const stride = child.scene3d_instance_stride;
                 const icount = child.scene3d_instance_count;
@@ -1526,7 +1528,7 @@ fn drawScene(node: *Node, slot: *Rt, w: f32, h: f32) void {
         var ti: usize = 0;
         while (ti < tcount) : (ti += 1) {
             if (inst_top + @sizeOf(InstanceData) > inst_cap_bytes) break;
-            const child = &node.children[tidx[ti]];
+            const child = &scene_node.children[tidx[ti]];
             const inst_index: usize = @intCast(inst_top / @sizeOf(InstanceData));
             inst_scratch[inst_index] = makeInstance(
                 child.scene3d_pos_x,

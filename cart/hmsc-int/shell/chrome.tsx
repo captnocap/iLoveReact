@@ -33,7 +33,7 @@ import { CAT_COLOR, CAT_TAG, relTime, type EditEvent } from '../editLog';
 
 interface ChromeProps {
   mapName: string;
-  activeRoute?: 'editor' | 'assist3d' | 'test' | 'labs' | 'workbench-assets' | 'workbench-settings';
+  activeRoute?: 'editor' | 'assist3d' | 'test' | 'labs' | 'workbench-assets' | 'workbench-settings' | 'compiled';
   menuOpen: boolean;
   logOpen: boolean;
   lastSavedAt: number | null;
@@ -51,6 +51,8 @@ interface ChromeProps {
   onCompile: () => void;
   // Navigate to the /assist3d route — the assistant-authored hot 3D surface.
   onAssist: () => void;
+  // Navigate to the native compiled-world viewport.
+  onCompiled: () => void;
   // Navigate to the /test route — the embodied game surface (PLAYFOLD-0605:
   // test + Creative Build folded; F1 test / F2 build flip the mode in-route).
   onTest: () => void;
@@ -134,6 +136,7 @@ export function Chrome(props: ChromeProps) {
         <NavBtn icon="Shapes" on={props.activeRoute === 'workbench-assets'} onPress={props.onWorkbench} title="assets (workbench)" />
         <NavBtn icon="Settings" on={props.activeRoute === 'workbench-settings'} onPress={props.onSettings} title="settings (workbench)" />
         <NavBtn icon="Sparkles" on={props.activeRoute === 'assist3d'} onPress={props.onAssist} title="assist3d" />
+        <NavBtn icon="Box" on={props.activeRoute === 'compiled'} onPress={props.onCompiled} title="compiled world" />
       </C.ChromeGroup>
 
       <C.ChromeRule />

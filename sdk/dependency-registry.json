@@ -884,6 +884,21 @@
       ],
       "note": "The game's native host-side camera controller (framework/game/camera.zig, V23), registered by framework/v8_bindings_game_camera.zig: opt-in Scene3D.Camera ownership with Orbit/Aim solves, smoothing, and per-frame node-field writes before the 3D renderer builds matrices. Carts that never call __game_camera_* stay on the existing declarative JS-props camera path."
     },
+    "compiled-world": {
+      "triggers": [
+        {
+          "kind": "metafileInput",
+          "input": "cart/hmsc-int/CompiledWorld.tsx"
+        }
+      ],
+      "buildOptions": [
+        "has-compiled-world"
+      ],
+      "v8Bindings": [
+        "compiled_world"
+      ],
+      "note": "Embedded compiled-world primitive for hmsc-int: React mounts one Scene3D viewport node; framework/world/compiled_world.zig constructs the baked game-file and gpu/3d.zig renders the retained native scene without per-frame V8 or React reconciliation."
+    },
     "pg": {
       "shipGate": "pg",
       "triggers": [

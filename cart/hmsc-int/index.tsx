@@ -43,6 +43,7 @@ import { PlayRoute } from './editors/play/PlayRoute';
 import { LabsRoute } from './shell/LabsRoute';
 import { WorkbenchRoute } from './shell/WorkbenchRoute';
 import { currentWorkbenchFamily, requestWorkbenchSource, subscribeWorkbenchFamily, type WorkbenchFamily } from './shell/workbenchDoor';
+import { CompiledWorldRoute } from './CompiledWorld';
 import { workbenchSources } from './editors/workbench/sources';
 import { LABS } from './labs';
 import { editorChannel } from './editors/store';
@@ -899,7 +900,7 @@ function EditorShell() {
   // reports its source FAMILY so the chrome lights the right door truthfully.
   const [wbFamily, setWbFamily] = useState<WorkbenchFamily>(currentWorkbenchFamily());
   useEffect(() => subscribeWorkbenchFamily(setWbFamily), []);
-  const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : 'editor';
+  const activeRoute = route.path === '/workbench' ? (wbFamily === 'settings' ? 'workbench-settings' : 'workbench-assets') : route.path === '/test' ? 'test' : route.path === '/labs' ? 'labs' : route.path === '/assist3d' ? 'assist3d' : route.path === '/compiled' ? 'compiled' : 'editor';
   const [editorPanesMounted, setEditorPanesMounted] = useState(activeRoute === 'editor');
   useEffect(() => {
     if (activeRoute === 'editor') setEditorPanesMounted(true);
@@ -938,6 +939,7 @@ function EditorShell() {
         onWorkbench={() => nav.push('/workbench')}
         onSettings={() => { requestWorkbenchSource('settings'); nav.push('/workbench'); }}
         onAssist={() => nav.push('/assist3d')}
+        onCompiled={() => nav.push('/compiled')}
         onUndo={ws.undo}
         onRedo={ws.redo}
         onCompile={compileToGame}
@@ -1021,6 +1023,7 @@ function EditorShell() {
         {/* The four-gutter rebuild (WORKBENCH.md) — additive while sources land;
             old routes flip off one at a time as parity is reached. */}
         <Route path="/workbench">{() => <WorkbenchRoute sources={wbSources} onExit={() => nav.push('/')} />}</Route>
+        <Route path="/compiled">{() => <CompiledWorldRoute onExit={() => nav.push('/')} />}</Route>
       </Box>
 
       {/* Root overlays live here so they paint on top of the editor panes (this
