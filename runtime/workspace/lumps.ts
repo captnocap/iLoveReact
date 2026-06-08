@@ -41,6 +41,10 @@ export const MAP_LUMP = {
   // from the V2 figure kit. The loader instantiates these groups at the live
   // player transform; no JS figure evaluation runs in the shipped path.
   PLAYER_MODEL: 9,
+  // Baked runtime animation clips for the player model. The payload is
+  // content-addressed and contains declarative transform keyframes only; the
+  // loader just interpolates them.
+  PLAYER_ANIMATION: 10,
 } as const;
 
 export type LumpInput = {

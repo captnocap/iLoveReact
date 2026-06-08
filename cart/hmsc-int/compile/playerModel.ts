@@ -1,24 +1,44 @@
-// playerModel.ts — bake the V2 figure into loader-ready mesh data.
+// playerModel.ts — bake the V2 figure into loader-ready mesh + animation data.
 //
-// The live/editor figure is authored by @game/figure. This module evaluates that
-// authored kit at compile time and emits local-coordinate vertex groups the
-// stateless no-V8 loader can instantiate at the runtime player transform.
+// The editor/live figure is authored by @game/figure. This compile step emits
+// flat primitive data for the no-V8 loader: one mesh node per rig primitive, plus
+// declarative transform keyframes. Runtime work is only interpolation.
 
 import { MAP_LUMP } from '@reactjit/workspace';
+import { sha256 } from '@reactjit/workspace/sha256';
 import * as Geometry from '@reactjit/geometries';
+import { parseAnimationDsl, sampleAnimationTimeline } from '../../animationDsl';
 import { bakeFigureFromSeed } from '@game/figure/bake';
 import { buildRigFrame } from '@game/figure/rig';
 import type { BodyInstance } from '@game/figure/assembly';
 import type { ClothingInstance } from '@game/figure/clothing';
 import type { BakedFigure, BakedPart } from '@game/figure/bake';
+import type { RigTimelineAction } from '@game/figure/skeleton';
 
 type V3 = [number, number, number];
 
 export const PLAYER_MODEL_LUMP = MAP_LUMP.PLAYER_MODEL;
-export const PLAYER_MODEL_VERSION = 1;
+export const PLAYER_ANIMATION_LUMP = MAP_LUMP.PLAYER_ANIMATION;
+export const PLAYER_MODEL_VERSION = 2;
+export const PLAYER_ANIMATION_VERSION = 1;
 export const PLAYER_MODEL_SEED = 1;
 
-export type PlayerMeshGroup = {
+const WALK_KEYFRAMES = 9;
+const JUMP_KEYFRAMES = 5;
+
+const CLIP = {
+  idle: 0,
+  walk: 1,
+  jump: 2,
+} as const;
+
+export type PlayerTransform = {
+  position: V3;
+  rotation: V3;
+  scale: V3;
+};
+
+export type PlayerMeshGroup = PlayerTransform & {
   color: V3;
   alpha: number;
   vertices: Float32Array;
@@ -29,11 +49,21 @@ export type BakedPlayerModel = {
   groups: PlayerMeshGroup[];
 };
 
-type MutableGroup = {
-  color: V3;
-  alpha: number;
-  verts: number[];
-  texture?: { width: number; height: number; rgba: Uint8Array };
+export type PlayerAnimationKeyframe = {
+  time: number;
+  transforms: PlayerTransform[];
+};
+
+export type PlayerAnimationClip = {
+  id: number;
+  duration: number;
+  looping: boolean;
+  keyframes: PlayerAnimationKeyframe[];
+};
+
+export type BakedPlayerAnimation = {
+  nodeCount: number;
+  clips: PlayerAnimationClip[];
 };
 
 function hexToRgba(hex: string): [number, number, number, number] {
@@ -43,57 +73,29 @@ function hexToRgba(hex: string): [number, number, number, number] {
   return [((n >> 16) & 0xff) / 255, ((n >> 8) & 0xff) / 255, (n & 0xff) / 255, a / 255];
 }
 
-function rgbaKey(color: V3, alpha: number, textureKey = ''): string {
-  return `${textureKey}|${color.map((v) => v.toFixed(4)).join(',')},${alpha.toFixed(4)}`;
-}
-
-function rotateZ(p: V3, deg: number): V3 {
-  const r = deg * Math.PI / 180;
-  const c = Math.cos(r), s = Math.sin(r);
-  return [p[0] * c - p[1] * s, p[0] * s + p[1] * c, p[2]];
-}
-
-function rotateX(p: V3, deg: number): V3 {
-  const r = deg * Math.PI / 180;
-  const c = Math.cos(r), s = Math.sin(r);
-  return [p[0], p[1] * c - p[2] * s, p[1] * s + p[2] * c];
-}
-
-function rotateY(p: V3, deg: number): V3 {
-  const r = deg * Math.PI / 180;
-  const c = Math.cos(r), s = Math.sin(r);
-  return [p[0] * c + p[2] * s, p[1], -p[0] * s + p[2] * c];
-}
-
-function normalize(p: V3): V3 {
-  const len = Math.hypot(p[0], p[1], p[2]);
-  return len > 1e-6 ? [p[0] / len, p[1] / len, p[2] / len] : [0, 1, 0];
-}
-
 function scaleVec(scale: number | V3 | undefined): V3 {
   if (Array.isArray(scale)) return [scale[0], scale[1], scale[2]];
   const s = typeof scale === 'number' ? scale : 1;
   return [s, s, s];
 }
 
-function transformPosition(p: V3, position: V3, rotation: V3, scale: V3): V3 {
-  let out: V3 = [p[0] * scale[0], p[1] * scale[1], p[2] * scale[2]];
-  out = rotateZ(out, rotation[2]);
-  out = rotateX(out, rotation[0]);
-  out = rotateY(out, rotation[1]);
-  return [out[0] + position[0], out[1] + position[1], out[2] + position[2]];
+function partScale(inst: BodyInstance): V3 {
+  const xz = inst.thickness != null ? inst.scale * inst.thickness : inst.scale;
+  return [xz, inst.scale, xz];
 }
 
-function transformNormal(n: V3, rotation: V3, scale: V3): V3 {
-  let out = normalize([
-    scale[0] !== 0 ? n[0] / scale[0] : n[0],
-    scale[1] !== 0 ? n[1] / scale[1] : n[1],
-    scale[2] !== 0 ? n[2] / scale[2] : n[2],
-  ]);
-  out = rotateZ(out, rotation[2]);
-  out = rotateX(out, rotation[0]);
-  out = rotateY(out, rotation[1]);
-  return normalize(out);
+function clothingGeometry(kind: ClothingInstance['geometry']): Geometry.GeometryDef {
+  switch (kind) {
+    case 'sphere': return Geometry.Sphere;
+    case 'cone': return Geometry.Cone;
+    case 'cylinder': return Geometry.Cylinder;
+    default: return Geometry.Box;
+  }
+}
+
+function localGeometry(geometry: Geometry.GeometryDef, params: any): Float32Array {
+  const data = geometry.generate({ ...geometry.defaults, ...(params ?? {}) } as any);
+  return new Float32Array(data.positions);
 }
 
 function rasterFaceTexture(face: BakedFigure['faceTexture']): Uint8Array {
@@ -142,97 +144,109 @@ function rasterFaceTexture(face: BakedFigure['faceTexture']): Uint8Array {
   return out;
 }
 
-function appendGeometry(
-  groups: Map<string, MutableGroup>,
-  geometry: Geometry.GeometryDef,
-  params: any,
-  position: V3,
-  rotation: V3,
-  scale: number | V3 | undefined,
-  colorHex: string,
-  texture?: { width: number; height: number; rgba: Uint8Array },
-): void {
-  const [r, g, b, a] = hexToRgba(colorHex);
-  const color: V3 = [r, g, b];
-  const key = rgbaKey(color, a, texture ? 'tex' : '');
-  let group = groups.get(key);
-  if (!group) {
-    group = { color, alpha: a, verts: [], texture };
-    groups.set(key, group);
-  }
+function partGroup(figure: BakedFigure, faceTexture: { width: number; height: number; rgba: Uint8Array }, inst: BodyInstance): PlayerMeshGroup {
+  const part: BakedPart = figure.parts[inst.part];
+  const [r, g, b, a] = hexToRgba(figure.faceTexture.skin);
+  return {
+    color: [r, g, b],
+    alpha: a,
+    position: inst.position,
+    rotation: inst.rotation ?? [0, 0, 0],
+    scale: partScale(inst),
+    vertices: localGeometry(Geometry.Globe, part.params),
+    texture: inst.part === 'head' ? faceTexture : undefined,
+  };
+}
 
-  const data = geometry.generate({ ...geometry.defaults, ...(params ?? {}) } as any);
-  const s = scaleVec(scale);
-  for (let i = 0; i < data.count; i += 1) {
-    const at = i * 8;
-    const p = transformPosition([data.positions[at], data.positions[at + 1], data.positions[at + 2]], position, rotation, s);
-    const n = transformNormal([data.positions[at + 3], data.positions[at + 4], data.positions[at + 5]], rotation, s);
-    group.verts.push(p[0], p[1], p[2], n[0], n[1], n[2], data.positions[at + 6], data.positions[at + 7]);
+function clothingGroup(inst: ClothingInstance): PlayerMeshGroup {
+  const [r, g, b, a] = hexToRgba(inst.textureKey ? '#ffffff' : inst.color);
+  return {
+    color: [r, g, b],
+    alpha: a,
+    position: inst.position,
+    rotation: inst.rotation ?? [0, 0, 0],
+    scale: scaleVec(inst.scale),
+    vertices: localGeometry(clothingGeometry(inst.geometry), inst.params),
+  };
+}
+
+function rigTransforms(phasePose: 'stand' | 'walk', phase: number, actions: RigTimelineAction[] = []): PlayerTransform[] {
+  const rig = buildRigFrame('neutral', phasePose, phase, actions, 'tee', 'plain', [], 'jeans');
+  const out: PlayerTransform[] = [];
+  const pushPart = (inst: BodyInstance) => out.push({
+    position: inst.position,
+    rotation: inst.rotation ?? [0, 0, 0],
+    scale: partScale(inst),
+  });
+  for (const inst of rig.assembly) pushPart(inst);
+  for (const inst of rig.anatomy) pushPart(inst);
+  for (const inst of rig.clothing) {
+    out.push({
+      position: inst.position,
+      rotation: inst.rotation ?? [0, 0, 0],
+      scale: scaleVec(inst.scale),
+    });
+  }
+  return out;
+}
+
+function assertNodeCount(transforms: PlayerTransform[], count: number, label: string): void {
+  if (transforms.length !== count) {
+    throw new Error(`player animation ${label} produced ${transforms.length} nodes, expected ${count}`);
   }
 }
 
-function partScale(inst: BodyInstance): V3 {
-  const xz = inst.thickness != null ? inst.scale * inst.thickness : inst.scale;
-  return [xz, inst.scale, xz];
-}
-
-function clothingGeometry(kind: ClothingInstance['geometry']): Geometry.GeometryDef {
-  switch (kind) {
-    case 'sphere': return Geometry.Sphere;
-    case 'cone': return Geometry.Cone;
-    case 'cylinder': return Geometry.Cylinder;
-    default: return Geometry.Box;
-  }
+function keyframe(time: number, transforms: PlayerTransform[]): PlayerAnimationKeyframe {
+  return { time, transforms };
 }
 
 export function buildDefaultPlayerModel(): BakedPlayerModel {
   const figure = bakeFigureFromSeed(PLAYER_MODEL_SEED, { shape: 'neutral', outfit: { top: 'tee', bottoms: 'jeans' } });
   const rig = buildRigFrame('neutral', 'stand', 0, [], 'tee', 'plain', [], 'jeans');
-  const groups = new Map<string, MutableGroup>();
   const faceTexture = { width: figure.faceTexture.width, height: figure.faceTexture.height, rgba: rasterFaceTexture(figure.faceTexture) };
+  const groups: PlayerMeshGroup[] = [];
+  for (const inst of rig.assembly) groups.push(partGroup(figure, faceTexture, inst));
+  for (const inst of rig.anatomy) groups.push(partGroup(figure, faceTexture, inst));
+  for (const inst of rig.clothing) groups.push(clothingGroup(inst));
+  return { groups };
+}
 
-  const appendPart = (inst: BodyInstance): void => {
-    const part: BakedPart = figure.parts[inst.part];
-    appendGeometry(
-      groups,
-      Geometry.Globe,
-      part.params,
-      inst.position,
-      inst.rotation ?? [0, 0, 0],
-      partScale(inst),
-      figure.faceTexture.skin,
-      inst.part === 'head' ? faceTexture : undefined,
-    );
-  };
+export function buildDefaultPlayerAnimation(nodeCount: number): BakedPlayerAnimation {
+  const idleTransforms = rigTransforms('stand', 0);
+  assertNodeCount(idleTransforms, nodeCount, 'idle');
 
-  for (const inst of rig.assembly) appendPart(inst);
-  for (const inst of rig.anatomy) appendPart(inst);
-  for (const inst of rig.clothing) {
-    appendGeometry(
-      groups,
-      clothingGeometry(inst.geometry),
-      inst.params,
-      inst.position,
-      inst.rotation ?? [0, 0, 0],
-      inst.scale,
-      inst.textureKey ? '#ffffff' : inst.color,
-    );
+  const walkKeys: PlayerAnimationKeyframe[] = [];
+  for (let i = 0; i < WALK_KEYFRAMES; i += 1) {
+    const phase = i / (WALK_KEYFRAMES - 1);
+    const transforms = rigTransforms('walk', phase);
+    assertNodeCount(transforms, nodeCount, `walk.${i}`);
+    walkKeys.push(keyframe(phase, transforms));
+  }
+
+  const jumpTimeline = parseAnimationDsl('[0.24, both_arms, lift_and_bend; 0.24, both_legs, kick; 0.24, body, crouch]');
+  const jumpKeys: PlayerAnimationKeyframe[] = [];
+  for (let i = 0; i < JUMP_KEYFRAMES; i += 1) {
+    const phase = i / (JUMP_KEYFRAMES - 1);
+    const actions = sampleAnimationTimeline(jumpTimeline, phase * Math.max(0.001, jumpTimeline.total)) as RigTimelineAction[];
+    const transforms = rigTransforms('stand', 0, actions);
+    assertNodeCount(transforms, nodeCount, `jump.${i}`);
+    jumpKeys.push(keyframe(phase, transforms));
   }
 
   return {
-    groups: Array.from(groups.values()).map((group) => ({
-      color: group.color,
-      alpha: group.alpha,
-      vertices: new Float32Array(group.verts),
-      texture: group.texture,
-    })),
+    nodeCount,
+    clips: [
+      { id: CLIP.idle, duration: 1, looping: false, keyframes: [keyframe(0, idleTransforms)] },
+      { id: CLIP.walk, duration: 1, looping: true, keyframes: walkKeys },
+      { id: CLIP.jump, duration: 1, looping: false, keyframes: jumpKeys },
+    ],
   };
 }
 
 export function encodePlayerModelLump(model: BakedPlayerModel): Uint8Array {
   let bytes = 8;
   for (const group of model.groups) {
-    bytes += 32 + group.vertices.byteLength + (group.texture?.rgba.byteLength ?? 0);
+    bytes += 68 + group.vertices.byteLength + (group.texture?.rgba.byteLength ?? 0);
   }
   const out = new Uint8Array(bytes);
   const view = new DataView(out.buffer);
@@ -248,7 +262,16 @@ export function encodePlayerModelLump(model: BakedPlayerModel): Uint8Array {
     view.setUint32(at + 20, group.texture?.width ?? 0, true);
     view.setUint32(at + 24, group.texture?.height ?? 0, true);
     view.setUint32(at + 28, group.texture?.rgba.byteLength ?? 0, true);
-    at += 32;
+    view.setFloat32(at + 32, group.position[0], true);
+    view.setFloat32(at + 36, group.position[1], true);
+    view.setFloat32(at + 40, group.position[2], true);
+    view.setFloat32(at + 44, group.rotation[0], true);
+    view.setFloat32(at + 48, group.rotation[1], true);
+    view.setFloat32(at + 52, group.rotation[2], true);
+    view.setFloat32(at + 56, group.scale[0], true);
+    view.setFloat32(at + 60, group.scale[1], true);
+    view.setFloat32(at + 64, group.scale[2], true);
+    at += 68;
     const vertexBytes = new Uint8Array(group.vertices.buffer, group.vertices.byteOffset, group.vertices.byteLength);
     out.set(vertexBytes, at);
     at += vertexBytes.byteLength;
@@ -257,5 +280,59 @@ export function encodePlayerModelLump(model: BakedPlayerModel): Uint8Array {
       at += group.texture.rgba.byteLength;
     }
   }
+  return out;
+}
+
+function encodeTransform(view: DataView, at: number, transform: PlayerTransform): number {
+  view.setFloat32(at + 0, transform.position[0], true);
+  view.setFloat32(at + 4, transform.position[1], true);
+  view.setFloat32(at + 8, transform.position[2], true);
+  view.setFloat32(at + 12, transform.rotation[0], true);
+  view.setFloat32(at + 16, transform.rotation[1], true);
+  view.setFloat32(at + 20, transform.rotation[2], true);
+  view.setFloat32(at + 24, transform.scale[0], true);
+  view.setFloat32(at + 28, transform.scale[1], true);
+  view.setFloat32(at + 32, transform.scale[2], true);
+  return at + 36;
+}
+
+function encodeAnimationPayload(animation: BakedPlayerAnimation): Uint8Array {
+  let bytes = 12;
+  for (const clip of animation.clips) {
+    bytes += 16;
+    for (const key of clip.keyframes) {
+      bytes += 4 + animation.nodeCount * 36;
+    }
+  }
+  const out = new Uint8Array(bytes);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, PLAYER_ANIMATION_VERSION, true);
+  view.setUint32(4, animation.clips.length, true);
+  view.setUint32(8, animation.nodeCount, true);
+  let at = 12;
+  for (const clip of animation.clips) {
+    view.setUint32(at + 0, clip.id, true);
+    view.setFloat32(at + 4, clip.duration, true);
+    view.setUint32(at + 8, clip.looping ? 1 : 0, true);
+    view.setUint32(at + 12, clip.keyframes.length, true);
+    at += 16;
+    for (const key of clip.keyframes) {
+      view.setFloat32(at, key.time, true);
+      at += 4;
+      for (const transform of key.transforms) {
+        at = encodeTransform(view, at, transform);
+      }
+    }
+  }
+  return out;
+}
+
+export function encodePlayerAnimationLump(animation: BakedPlayerAnimation): Uint8Array {
+  const payload = encodeAnimationPayload(animation);
+  const out = new Uint8Array(4 + 32 + payload.byteLength);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, PLAYER_ANIMATION_VERSION, true);
+  out.set(sha256(payload), 4);
+  out.set(payload, 36);
   return out;
 }

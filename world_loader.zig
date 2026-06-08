@@ -45,18 +45,23 @@ const SCAN_S: usize = 22;
 const SCAN_W: usize = 26;
 const SCAN_SPACE: usize = 44;
 const SCAN_LSHIFT: usize = 225;
-const CAMERA_YAW_RADIANS_PER_PIXEL: f32 = 0.0032;
-const CAMERA_PITCH_RADIANS_PER_PIXEL: f32 = 0.0024;
-const CAMERA_DEFAULT_PITCH: f32 = 0.05;
-const CAMERA_MIN_PITCH: f32 = -0.65;
-const CAMERA_MAX_PITCH: f32 = 0.85;
-const CAMERA_DISTANCE_METERS: f32 = 5.9;
-const CAMERA_MIN_DISTANCE_METERS: f32 = 2.8;
-const CAMERA_MAX_DISTANCE_METERS: f32 = 12.0;
-const CAMERA_HEIGHT_METERS: f32 = 3.05;
-const CAMERA_TARGET_HEIGHT_METERS: f32 = 2.08;
-const CAMERA_PITCH_TARGET_METERS_PER_RADIAN: f32 = 0.82;
-const CAMERA_FOV_DEGREES: f32 = 48.0;
+const CAMERA_DISTANCE_METERS: f32 = 7.65;
+const CAMERA_INITIAL_PITCH_DEGREES: f32 = 17.8;
+const CAMERA_MIN_PITCH_DEGREES: f32 = -10.0;
+const CAMERA_MAX_PITCH_DEGREES: f32 = 62.0;
+const CAMERA_TARGET_HEIGHT_METERS: f32 = 1.45;
+const CAMERA_FOV_DEGREES: f32 = 52.0;
+const CAMERA_YAW_DEGREES_PER_PIXEL: f32 = 0.28;
+const CAMERA_PITCH_DEGREES_PER_PIXEL: f32 = 0.22;
+const CAMERA_SMOOTHING_PER_SECOND: f32 = 14.0;
+const AIM_SHOULDER_SHIFT_METERS: f32 = 0.62;
+const AIM_PIVOT_HEIGHT_METERS: f32 = 1.62;
+const AIM_CROUCH_DROP_METERS: f32 = 0.42;
+const AIM_DISTANCE_METERS: f32 = 2.4;
+const AIM_LOOK_AHEAD_METERS: f32 = 12.0;
+const AIM_MIN_PITCH_DEGREES: f32 = -1.15 * 180.0 / std.math.pi;
+const AIM_MAX_PITCH_DEGREES: f32 = 1.0 * 180.0 / std.math.pi;
+const AIM_FOV_DEGREES: f32 = 47.0;
 const PLAYER_WALK_SPEED_METERS_PER_SECOND: f32 = 4.5;
 const PLAYER_RUN_SPEED_METERS_PER_SECOND: f32 = 8.0;
 const PLAYER_RADIUS_METERS: f32 = 0.42;
@@ -70,6 +75,11 @@ const PLAYER_GRAVITY_METERS_PER_SECOND2: f32 = 10.0;
 const PLAYER_JUMP_SPEED_METERS_PER_SECOND: f32 = 5.2;
 const WALKABLE_SIDE_PUSH_GRACE_METERS: f32 = 0.08;
 const PHYSICS_SOLID_HEIGHT_METERS: f32 = PLAYER_STEP_HEIGHT_METERS + 0.05;
+const PLAYER_WALK_CYCLES_PER_SECOND: f32 = 1.6;
+const PLAYER_RUN_CYCLES_PER_SECOND: f32 = 2.3;
+const PLAYER_CLIP_IDLE: u32 = 0;
+const PLAYER_CLIP_WALK: u32 = 1;
+const PLAYER_CLIP_JUMP: u32 = 2;
 
 const log = std.debug;
 
@@ -88,17 +98,19 @@ const PlayerState = struct {
     vz: f32 = 0,
     yaw: f32,
     grounded: bool = false,
+    gait_phase: f32 = 0,
+    jump_time: f32 = 0,
 };
 
 const CameraState = struct {
-    yaw: f32,
-    pitch: f32,
-    distance: f32,
-    height: f32,
-    target_height: f32,
-    pitch_target_factor: f32,
+    yaw_degrees: f32,
+    pitch_degrees: f32,
+    current_pos: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    current_target: Vec3 = .{ .x = 0, .y = 0, .z = 0 },
+    current_fov: f32 = CAMERA_FOV_DEGREES,
+    initialized: bool = false,
+    aiming: bool = false,
     far: f32,
-    fov: f32,
 };
 
 const PhysicsColliders = struct {
@@ -114,6 +126,29 @@ const PhysicsColliders = struct {
 
 fn clamp(v: f32, lo: f32, hi: f32) f32 {
     return @max(lo, @min(hi, v));
+}
+
+fn lerp(a: f32, b: f32, t: f32) f32 {
+    return a + (b - a) * t;
+}
+
+fn lerpVec3(a: Vec3, b: Vec3, t: f32) Vec3 {
+    return .{
+        .x = lerp(a.x, b.x, t),
+        .y = lerp(a.y, b.y, t),
+        .z = lerp(a.z, b.z, t),
+    };
+}
+
+fn rotateYLocal(local: [3]f32, yaw_degrees: f32) Vec3 {
+    const rad = yaw_degrees * std.math.pi / 180.0;
+    const c0 = @cos(rad);
+    const s = @sin(rad);
+    return .{
+        .x = local[0] * c0 + local[2] * s,
+        .y = local[1],
+        .z = -local[0] * s + local[2] * c0,
+    };
 }
 
 fn nowNs() i64 {
@@ -504,26 +539,182 @@ fn groundHeightAt(insts: []const f32, inst_count: u32, piece_count: u32, stride:
     return best;
 }
 
-fn updateCameraNode(camera: *Node, cam: CameraState, player: PlayerState) void {
-    camera.scene3d_pos_x = player.x - @sin(cam.yaw) * cam.distance;
-    camera.scene3d_pos_y = player.y + cam.height;
-    camera.scene3d_pos_z = player.z - @cos(cam.yaw) * cam.distance;
-    camera.scene3d_look_x = player.x;
-    camera.scene3d_look_y = player.y + cam.target_height - cam.pitch * cam.pitch_target_factor;
-    camera.scene3d_look_z = player.z;
-    camera.scene3d_fov = cam.fov;
-    camera.scene3d_far = cam.far;
+fn orbitEye(target: Vec3, yaw_degrees: f32, pitch_degrees: f32, distance: f32) Vec3 {
+    const yaw = yaw_degrees * std.math.pi / 180.0;
+    const elev = pitch_degrees * std.math.pi / 180.0;
+    const horiz = distance * @cos(elev);
+    const height = distance * @sin(elev);
+    return .{
+        .x = target.x - @sin(yaw) * horiz,
+        .y = target.y + height,
+        .z = target.z - @cos(yaw) * horiz,
+    };
 }
 
-fn updatePlayerModelNodes(kids: []Node, first: usize, count: usize, player: PlayerState) void {
-    const yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
+const CameraSolve = struct {
+    pos: Vec3,
+    target: Vec3,
+    fov: f32,
+};
+
+const PitchLimits = struct {
+    min: f32,
+    max: f32,
+};
+
+fn solveAimCamera(player: PlayerState, yaw_degrees: f32, orbit_pitch_degrees: f32) CameraSolve {
+    const yaw = yaw_degrees * std.math.pi / 180.0;
+    const pitch = clamp(-orbit_pitch_degrees, AIM_MIN_PITCH_DEGREES, AIM_MAX_PITCH_DEGREES) * std.math.pi / 180.0;
+    const cp = @cos(pitch);
+    const fwd = Vec3{
+        .x = @sin(yaw) * cp,
+        .y = @sin(pitch),
+        .z = @cos(yaw) * cp,
+    };
+    const pivot = Vec3{
+        .x = player.x - @cos(yaw) * AIM_SHOULDER_SHIFT_METERS,
+        .y = player.y + AIM_PIVOT_HEIGHT_METERS - 0 * AIM_CROUCH_DROP_METERS,
+        .z = player.z + @sin(yaw) * AIM_SHOULDER_SHIFT_METERS,
+    };
+    return .{
+        .pos = .{
+            .x = pivot.x - fwd.x * AIM_DISTANCE_METERS,
+            .y = pivot.y - fwd.y * AIM_DISTANCE_METERS,
+            .z = pivot.z - fwd.z * AIM_DISTANCE_METERS,
+        },
+        .target = .{
+            .x = pivot.x + fwd.x * AIM_LOOK_AHEAD_METERS,
+            .y = pivot.y + fwd.y * AIM_LOOK_AHEAD_METERS,
+            .z = pivot.z + fwd.z * AIM_LOOK_AHEAD_METERS,
+        },
+        .fov = AIM_FOV_DEGREES,
+    };
+}
+
+fn desiredCamera(cam: CameraState, player: PlayerState) CameraSolve {
+    if (cam.aiming) return solveAimCamera(player, cam.yaw_degrees, cam.pitch_degrees);
+    const target = Vec3{ .x = player.x, .y = player.y + CAMERA_TARGET_HEIGHT_METERS, .z = player.z };
+    return .{
+        .pos = orbitEye(target, cam.yaw_degrees, cam.pitch_degrees, CAMERA_DISTANCE_METERS),
+        .target = target,
+        .fov = CAMERA_FOV_DEGREES,
+    };
+}
+
+fn updateCameraNode(camera_node: *Node, cam: *CameraState, player: PlayerState, dt: f32) void {
+    const want = desiredCamera(cam.*, player);
+    if (!cam.initialized or dt <= 0 or CAMERA_SMOOTHING_PER_SECOND <= 0) {
+        cam.current_pos = want.pos;
+        cam.current_target = want.target;
+        cam.current_fov = want.fov;
+        cam.initialized = true;
+    } else {
+        const t = clamp(1.0 - @exp(-CAMERA_SMOOTHING_PER_SECOND * dt), 0, 1);
+        cam.current_pos = lerpVec3(cam.current_pos, want.pos, t);
+        cam.current_target = lerpVec3(cam.current_target, want.target, t);
+        cam.current_fov = lerp(cam.current_fov, want.fov, t);
+    }
+    camera_node.scene3d_pos_x = cam.current_pos.x;
+    camera_node.scene3d_pos_y = cam.current_pos.y;
+    camera_node.scene3d_pos_z = cam.current_pos.z;
+    camera_node.scene3d_look_x = cam.current_target.x;
+    camera_node.scene3d_look_y = cam.current_target.y;
+    camera_node.scene3d_look_z = cam.current_target.z;
+    camera_node.scene3d_fov = cam.current_fov;
+    camera_node.scene3d_far = cam.far;
+}
+
+fn aimPitchLimitsInOrbitSpace() PitchLimits {
+    return .{ .min = -AIM_MAX_PITCH_DEGREES, .max = -AIM_MIN_PITCH_DEGREES };
+}
+
+fn setAimMode(cam: *CameraState, aiming: bool) void {
+    if (cam.aiming == aiming) return;
+    cam.aiming = aiming;
+    if (!aiming) {
+        cam.pitch_degrees = clamp(cam.pitch_degrees, CAMERA_MIN_PITCH_DEGREES, CAMERA_MAX_PITCH_DEGREES);
+    }
+}
+
+fn findPlayerClip(animation: constructor.PlayerAnimationSet, clip_id: u32) ?constructor.PlayerAnimationClip {
+    for (animation.clips) |clip| {
+        if (clip.id == clip_id) return clip;
+    }
+    return null;
+}
+
+fn sampleClipTransform(clip: constructor.PlayerAnimationClip, node_index: usize, t_raw: f32) ?constructor.PlayerTransform {
+    if (clip.keyframes.len == 0) return null;
+    if (node_index >= clip.keyframes[0].transforms.len) return null;
+    const duration = if (clip.duration > 0) clip.duration else 1.0;
+    var t = t_raw;
+    if (clip.looping) {
+        t = @mod(t, duration);
+        if (t < 0) t += duration;
+    } else {
+        t = clamp(t, 0, duration);
+    }
+    if (clip.keyframes.len == 1) return clip.keyframes[0].transforms[node_index];
+
+    var prev = clip.keyframes[0];
+    var next = clip.keyframes[clip.keyframes.len - 1];
+    var i: usize = 1;
+    while (i < clip.keyframes.len) : (i += 1) {
+        if (t <= clip.keyframes[i].time) {
+            next = clip.keyframes[i];
+            break;
+        }
+        prev = clip.keyframes[i];
+    }
+    const span = @max(@as(f32, 0.000001), next.time - prev.time);
+    const k = clamp((t - prev.time) / span, 0, 1);
+    const a = prev.transforms[node_index];
+    const b = next.transforms[node_index];
+    return .{
+        .position = .{ lerp(a.position[0], b.position[0], k), lerp(a.position[1], b.position[1], k), lerp(a.position[2], b.position[2], k) },
+        .rotation = .{ lerp(a.rotation[0], b.rotation[0], k), lerp(a.rotation[1], b.rotation[1], k), lerp(a.rotation[2], b.rotation[2], k) },
+        .scale = .{ lerp(a.scale[0], b.scale[0], k), lerp(a.scale[1], b.scale[1], k), lerp(a.scale[2], b.scale[2], k) },
+    };
+}
+
+fn updatePlayerModelNodes(kids: []Node, first: usize, groups: []const constructor.PlayerModelGroup, animation: constructor.PlayerAnimationSet, player: PlayerState, moving: bool, running: bool, airborne: bool) void {
+    const model_yaw_degrees = player.yaw * 180.0 / std.math.pi + 180.0;
+    const clip_id: u32 = if (airborne) PLAYER_CLIP_JUMP else if (moving or running) PLAYER_CLIP_WALK else PLAYER_CLIP_IDLE;
+    const clip_time: f32 = if (clip_id == PLAYER_CLIP_WALK) player.gait_phase else if (clip_id == PLAYER_CLIP_JUMP) player.jump_time else 0;
+    const clip = if (animation.node_count == groups.len) findPlayerClip(animation, clip_id) else null;
     var i: usize = 0;
-    while (i < count) : (i += 1) {
+    while (i < groups.len) : (i += 1) {
+        const base = groups[i];
+        const base_transform = constructor.PlayerTransform{
+            .position = base.position,
+            .rotation = base.rotation,
+            .scale = base.scale,
+        };
+        const t = if (clip) |cclip| sampleClipTransform(cclip, i, clip_time) orelse base_transform else base_transform;
+        const local = rotateYLocal(t.position, model_yaw_degrees);
         const node = &kids[first + i];
-        node.scene3d_pos_x = player.x;
-        node.scene3d_pos_y = player.y;
-        node.scene3d_pos_z = player.z;
-        node.scene3d_rot_y = yaw_degrees;
+        node.scene3d_pos_x = player.x + local.x;
+        node.scene3d_pos_y = player.y + local.y;
+        node.scene3d_pos_z = player.z + local.z;
+        node.scene3d_rot_x = t.rotation[0];
+        node.scene3d_rot_y = t.rotation[1] + model_yaw_degrees;
+        node.scene3d_rot_z = t.rotation[2];
+        node.scene3d_scale_x = t.scale[0];
+        node.scene3d_scale_y = t.scale[1];
+        node.scene3d_scale_z = t.scale[2];
+    }
+}
+
+fn updatePlayerAnimationClock(player: *PlayerState, dt: f32, moving: bool, running: bool, airborne: bool) void {
+    if (moving) {
+        const cycles = if (running) PLAYER_RUN_CYCLES_PER_SECOND else PLAYER_WALK_CYCLES_PER_SECOND;
+        player.gait_phase += dt * cycles;
+        player.gait_phase = @mod(player.gait_phase, 1.0);
+    }
+    if (airborne) {
+        player.jump_time += dt;
+    } else {
+        player.jump_time = 0;
     }
 }
 
@@ -611,7 +802,10 @@ pub fn main() !void {
     capture.init();
 
     const screenshotting = capture.isScreenshotMode();
-    if (!screenshotting) log.print("[loader] live window — close it or press ESC to exit\n", .{});
+    if (!screenshotting) log.print("[loader] live window — close it or press ESC to exit (WASD move, Shift run, Space jump, mouse look, RMB aim)\n", .{});
+    if (!headless and !screenshotting) {
+        _ = c.SDL_SetWindowRelativeMouseMode(window, true);
+    }
 
     // ── build the Scene3D node tree from DATA: the camera/lights/sky come from
     //    the game-file's render environment (scene.env), NOT hardcoded here
@@ -642,14 +836,9 @@ pub fn main() !void {
         .yaw = authored_yaw,
     };
     var camera = CameraState{
-        .yaw = authored_yaw,
-        .pitch = CAMERA_DEFAULT_PITCH,
-        .distance = CAMERA_DISTANCE_METERS,
-        .height = CAMERA_HEIGHT_METERS,
-        .target_height = CAMERA_TARGET_HEIGHT_METERS,
-        .pitch_target_factor = CAMERA_PITCH_TARGET_METERS_PER_RADIAN,
+        .yaw_degrees = authored_yaw * 180.0 / std.math.pi,
+        .pitch_degrees = CAMERA_INITIAL_PITCH_DEGREES,
         .far = @max(far, bounds.radius * 4.0 + 64.0),
-        .fov = CAMERA_FOV_DEGREES,
     };
     var cube = buildCube();
     var player_geom_keys: std.ArrayList([]u8) = .{};
@@ -717,11 +906,10 @@ pub fn main() !void {
     });
 
     var root = Node{ .children = kid_list.items };
-    updateCameraNode(&kid_list.items[0], camera, player);
-    updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model.len, player);
+    updateCameraNode(&kid_list.items[0], &camera, player, 0);
+    updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model, scene.player_animation, player, false, false, false);
 
     var running = true;
-    var orbit_drag = false;
     var last_ns = nowNs();
     var frame: u32 = 0;
     while (running) : (frame += 1) {
@@ -733,19 +921,19 @@ pub fn main() !void {
                     if (event.key.key == c.SDLK_ESCAPE) running = false;
                 },
                 c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
-                    if (event.button.button == c.SDL_BUTTON_LEFT or event.button.button == c.SDL_BUTTON_RIGHT) orbit_drag = true;
+                    if (event.button.button == c.SDL_BUTTON_RIGHT) setAimMode(&camera, true);
                 },
                 c.SDL_EVENT_MOUSE_BUTTON_UP => {
-                    if (event.button.button == c.SDL_BUTTON_LEFT or event.button.button == c.SDL_BUTTON_RIGHT) orbit_drag = false;
+                    if (event.button.button == c.SDL_BUTTON_RIGHT) setAimMode(&camera, false);
                 },
                 c.SDL_EVENT_MOUSE_MOTION => {
-                    if (orbit_drag) {
-                        camera.yaw -= event.motion.xrel * CAMERA_YAW_RADIANS_PER_PIXEL;
-                        camera.pitch = clamp(camera.pitch + event.motion.yrel * CAMERA_PITCH_RADIANS_PER_PIXEL, CAMERA_MIN_PITCH, CAMERA_MAX_PITCH);
-                    }
-                },
-                c.SDL_EVENT_MOUSE_WHEEL => {
-                    camera.distance = clamp(camera.distance * (1.0 - event.wheel.y * 0.10), CAMERA_MIN_DISTANCE_METERS, CAMERA_MAX_DISTANCE_METERS);
+                    const pitch_limits: PitchLimits = if (camera.aiming) aimPitchLimitsInOrbitSpace() else .{ .min = CAMERA_MIN_PITCH_DEGREES, .max = CAMERA_MAX_PITCH_DEGREES };
+                    camera.yaw_degrees -= event.motion.xrel * CAMERA_YAW_DEGREES_PER_PIXEL;
+                    camera.pitch_degrees = clamp(
+                        camera.pitch_degrees - event.motion.yrel * CAMERA_PITCH_DEGREES_PER_PIXEL,
+                        pitch_limits.min,
+                        pitch_limits.max,
+                    );
                 },
                 else => {},
             }
@@ -761,12 +949,17 @@ pub fn main() !void {
         if (keyDown(SCAN_S)) forward -= 1;
         if (keyDown(SCAN_A)) strafe -= 1;
         if (keyDown(SCAN_D)) strafe += 1;
-        const intent = game_physics.movement.wasdDirection(forward, strafe, camera.yaw);
-        const speed: f32 = if (keyDown(SCAN_LSHIFT)) PLAYER_RUN_SPEED_METERS_PER_SECOND else PLAYER_WALK_SPEED_METERS_PER_SECOND;
+        const intent = game_physics.movement.wasdDirection(forward, strafe, camera.yaw_degrees * std.math.pi / 180.0);
+        const run_down = keyDown(SCAN_LSHIFT);
+        const speed: f32 = if (run_down) PLAYER_RUN_SPEED_METERS_PER_SECOND else PLAYER_WALK_SPEED_METERS_PER_SECOND;
         runPlayerPhysics(&player, &physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE));
+        if (camera.aiming) player.yaw = camera.yaw_degrees * std.math.pi / 180.0;
+        const moving = @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
+        const airborne = !player.grounded or @abs(player.vy) > 0.05;
+        updatePlayerAnimationClock(&player, dt, moving, run_down, airborne);
 
-        updateCameraNode(&kid_list.items[0], camera, player);
-        updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model.len, player);
+        updateCameraNode(&kid_list.items[0], &camera, player, dt);
+        updatePlayerModelNodes(kid_list.items, player_first_child, scene.player_model, scene.player_animation, player, moving, run_down, airborne);
         _ = scene3d.render(&root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
         gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 

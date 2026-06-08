@@ -27,6 +27,8 @@ pub const LumpType = struct {
     pub const environment: u32 = 8;
     /// Baked local-coordinate player model mesh groups.
     pub const player_model: u32 = 9;
+    /// Baked player animation clips: declarative transform keyframes.
+    pub const player_animation: u32 = 10;
 };
 
 pub const Lump = struct {
