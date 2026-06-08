@@ -1,6 +1,7 @@
-# REQUESTS.md — the Request Ledger (REQLEDGER-0606)
+# REQUESTS.md — the Request Board (REQLEDGER-0606 → REQBOARD-0607)
 
-User asks become durable, oracle-served, resolution-accountable records.
+User asks become durable, oracle-served, resolution-accountable JOBS moving
+across a four-state board: **new → doing → review → done**.
 
 ## Why
 
@@ -11,7 +12,7 @@ verbatim, who received it, what was done about it, and the commit SHAs that
 implement it (the bridge back to git). It is queryable through `tools/oracle`
 like everything else in this knowledge layer.
 
-In the user's words (the ask that created this):
+In the user's words (the ask that created the ledger):
 
 > maybe there is a way we can make a script that ties into the oracle where
 > whenever i send a request to either you or a worker when ur not up, they
@@ -20,40 +21,79 @@ In the user's words (the ask that created this):
 > that as a means to follow much better since git doesnt capture what my
 > prompt is.
 
+And the board ruling (REQBOARD-0607), verbatim anchors:
+
+> so there are 4 states 1 new 2 in process 3 review 4 done
+
+> no longer takes every single message of mine and makes a request, since a
+> number of them are me just sending perf logs for bug hunting
+
+## The board
+
+| state    | meaning | who moves it there |
+|----------|---------|--------------------|
+| `new`    | intake — a marked job or a logged/relayed ask | the hook, `log`, or a review→new bounce |
+| `doing`  | claimed, in process | a worker (`move <id> doing --by <you>`) |
+| `review` | work finished, awaiting the user's word | the worker, WITH paragraph + SHAs |
+| `done`   | accepted (or supervisor noise-closed from new) | the USER only — terminal |
+
+**Legal transitions** — everything else is rejected, with the legal moves
+named in the error:
+
+- `new → doing` — a worker claims the job. Any actor.
+- `doing → review` — REQUIRES the resolution paragraph
+  (≥ `MIN_RESOLUTION_CHARS`, 120 chars) **and** `--shas` (commits, or `none`
+  for a no-code resolution). The old resolve discipline lives at this edge.
+  `resolution`/`shas`/`resolvedAt` fill here **exactly once, never
+  rewritten** — a re-review after a bounce carries its fresh paragraph on the
+  transition event instead.
+- `review → done` — acceptance. **ONLY actor `user`** — the supervisor relays
+  the user's word as `--by user`. A worker (or the supervisor acting alone)
+  can never flip this.
+- `review → new` — bounce back for rework; `--note` required.
+- `new → done` — supervisor-only noise-close for triage; `--note` required.
+  NEVER available from `doing` or `review`.
+- `done` is **terminal**. No moves out, ever.
+
 ## The shape
 
 One JSON file per entry: `docs/game/_requests/req_<seq>.json` — git-tracked,
 the V20 by-addition discipline applied to process:
 
 - the SET is append-only — entries are only ever added, never deleted;
-- an entry's ask is **never rewritten** — resolution is a one-time field-fill
-  (status flips `open` → `resolved`, the empty resolution fields get filled);
+- an entry's ask is **never rewritten**; history is **never rewritten** —
+  every transition and note APPENDS to the entry's `events` array;
 - `text` is the user's words **BYTE-VERBATIM** — never paraphrased, never
-  trimmed, never "cleaned up". The user's words ARE the record.
+  trimmed, never "cleaned up" (job markers stay in). The user's words ARE
+  the record;
+- legacy two-state files (`"open"`/`"resolved"`) stay readable forever —
+  the loader normalizes on read (`open`→`new`, `resolved`→`done`).
 
 ```json
 {
   "id": "req_0007",
-  "at": "2026-06-06T04:00:00.000Z",
-  "origin": "supervisor-relay",
-  "text": "<the user's words, verbatim>",
-  "status": "resolved",
+  "at": "2026-06-07T04:00:00.000Z",
+  "origin": "session:abc12345",
+  "text": "JOB: <the user's words, verbatim, marker included>",
+  "status": "review",
   "sessionId": "abc12345-6789-...",
   "captureMode": "hook",
-  "resolvedAt": "2026-06-06T05:00:00.000Z",
+  "events": [
+    { "at": "...", "actor": "worker-3", "kind": "state", "from": "new", "to": "doing" },
+    { "at": "...", "actor": "worker-3", "kind": "note", "text": "the collider was the culprit" },
+    { "at": "...", "actor": "worker-3", "kind": "state", "from": "doing", "to": "review" }
+  ],
+  "resolvedAt": "2026-06-07T05:00:00.000Z",
   "resolution": "<a real paragraph: what was done, why, what changed>",
   "shas": ["b6fd34eb9"]
 }
 ```
 
 `origin` is which pane/lane took the ask, `supervisor-relay`, or
-`session:<id8>` for hook captures. `sessionId` is the Claude session that
-received the ask — the report key (`list --session <id>` groups a session's
-asks). `captureMode` is `hook` (auto-captured) or `manual`. `shas` is
-the list of commits implementing the resolution (`[]` for a no-code
-resolution, e.g. a question answered). The resolution paragraph has a
-minimum bar (`MIN_RESOLUTION_CHARS`, 120 chars) — a commit-message one-liner
-does not close a request.
+`session:<id8>` / `codex:<id8>` for hook captures. `sessionId` is the Claude
+session that received the ask — the report key. `events` is the append-only
+history (absent on pre-board entries; migration invents none). `shas` is the
+list of commits implementing the resolution (`[]` for a no-code resolution).
 
 Per-entry files (rather than one shared file) keep parallel worker sessions
 from clobbering each other's appends and give clean one-entry git diffs.
@@ -61,114 +101,139 @@ from clobbering each other's appends and give clean one-entry git diffs.
 ## The CLI
 
 ```
+tools/request board [--since <ISO>] [--all] [--tag <tag>]
 tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay> [--session <id>]
-tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
-echo "<paragraph>" | tools/request resolve <id> --shas <sha,...>
-tools/request list [--open] [--session <id>]
+tools/request move <id> <new|doing|review|done> --by <actor> [--para "<paragraph>"] [--shas <sha,sha|none>] [--note "<why>"]
+tools/request note <id> --by <actor> "<text>"
+tools/request tag <id> <tag,tag,...>      # the SECRETARY door (union; organization only)
+tools/request tags                        # every tag in use, with counts
+tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>   # ALIAS for `move <id> review`
+tools/request list [--open] [--session <id>] [--tag <tag>]
 tools/request show <id>
+tools/request migrate-board
 ```
 
-`list --open` is the standing debt list — it should be empty when no work is
-in flight. Source: `docs/game/_index/requestCli.ts` (arg parsing/printing)
-over `docs/game/_index/requests.ts` (storage + validation, decisions.ts's
-sibling). Runs under `tools/v8cli`, bundle auto-rebuilds, no node.
+- **`board`** is the supervisor's loop tool: the four columns with counts and
+  compact rows (id, age, origin, first 80 chars of the ask; `done` shows its
+  recent tail). **Dispatch-exempt by default**: supervisor dispatches are
+  records, not jobs — they never appear in any column (the columns agree with
+  the true open-asks set, exactly the old `list --open` filter); `--all` is
+  the only door to them. `--since <ISO>` appends an ACTIVITY section — every
+  event after that timestamp (id, transition/note, actor) — so a supervisor
+  pass reads exactly what moved since the last pass.
+- **`resolve` is REDEFINED**: it is now an alias for `move <id> review`. The
+  workers' existing habit lands work in **review, not done** — only the user
+  flips review→done. `resolve` on an unclaimed (`new`) entry is rejected:
+  claim first.
+- **`migrate-board`** is the one-shot legacy rewrite (`open`→`new`,
+  `resolved`→`done`), idempotent, status field only. Run once at adoption;
+  reading legacy files works either way.
+
+`list --open` shows everything not yet `done`. Source:
+`docs/game/_index/requestCli.ts` (arg parsing/printing) over
+`docs/game/_index/requests.ts` (storage + the transition function,
+decisions.ts's sibling). Runs under `tools/v8cli`, bundle auto-rebuilds,
+no node.
 
 ## The oracle
 
 `tools/oracle "<query>"` matches request entries (verbatim text +
 resolutions) and returns them as the REQUEST LEDGER tier, between RULINGS
-and INDEX RECORDS, with status + SHAs. The ledger is read from disk at query
-time (the tools wrappers export `RJIT_ROOT`), so a fresh `log` is servable
-immediately — no rebundle.
+and INDEX RECORDS, with board status + SHAs. The ledger is read from disk at
+query time (the tools wrappers export `RJIT_ROOT`), so a fresh `log` is
+servable immediately — no rebundle.
 
-## Automatic capture (the hook layer)
+## Capture: blanket (the hook layer)
 
-The user's addendum, verbatim:
+**Capture changes NOTHING** (REQSEC-0607 — the user's words: "we keep the
+hook on all the same, nothing changes, we just have a secretary"). Every
+substantive prompt is captured verbatim, landing in `new`; only the original
+noise rule skips: trivial acks (`ackPattern`), prompts under
+`minPromptChars` (default 40), and slash/`!`/`#` commands. The marker-only
+capture REQBOARD-0607 briefly introduced is REMOVED — organization is the
+secretary's job, not the capture gate's. Prompts starting with a
+`dispatchPrefixes` entry (default `["SUPERVISOR"]`) capture with origin
+`supervisor-dispatch` — exempt from the board flow and the stop nudge (their
+XYZ-NNNN markers already track resolution), hidden from `list --open` and
+the board unless `--all`. Manual `tools/request log` remains for relays and
+hook-less contexts.
 
-> we can use the claude hook system to see when i submit a prompt -> read the
-> file -> capture my literal text -> use this to build the report with a
-> session id, that the worker can comment on at the end of every turn cycle
-> that is necessary.
-
-Repo-level `.claude/settings.json` registers two hooks for every Claude
-session in this cwd (merged with each machine's `settings.local.json`):
+Repo-level `.claude/settings.json` registers the two hooks (Codex parity via
+`.codex/hooks.json`, same payload shape, `--cli codex` only changes the
+origin label — see HOOKJSON-0606 in the git history for the JSON-emission
+contract both CLIs share):
 
 - **UserPromptSubmit** → `tools/request-hook-prompt` → `request hook-prompt`:
-  reads the hook payload JSON from stdin and logs the LITERAL prompt with
-  `sessionId` + `captureMode: "hook"` — zero paraphrasing, zero worker
-  cooperation. On capture, the req id lands in front of the worker as added
-  context via the documented control JSON
-  (`{"hookSpecificOutput": {"hookEventName", "additionalContext"}}`) — never
-  bare text (HOOKJSON-0606: the context line starts with `[`, which a strict
-  host parser rejects as broken JSON instead of falling back to plain text —
-  the "invalid user prompt submit JSON output" failure). Never exits 2 (that
-  would block and erase the user's prompt).
-- **Stop** → `tools/request-hook-stop` → `request hook-stop`: when the
-  session has unresolved captured asks, emits ONE `{"decision":"block"}`
-  nudge listing them (`stop_hook_active` guards against loops — at most one
-  nudge per turn cycle, never a hard block).
+  blanket capture of the LITERAL prompt. On capture, the req id lands in
+  front of the worker as added context. Never exits 2 (that would block and
+  erase the user's prompt); skips are silent.
+- **Stop** → `tools/request-hook-stop` → `request hook-stop`: scans ONLY the
+  entries this session holds in **`doing`** — claimed-but-not-reviewed is the
+  only debt a worker owns — and nudges once per turn cycle
+  (`stop_hook_active` guards loops) to move them to review.
 
-**The necessary-vs-noise rule** (which prompts get logged at all) is P2
-tunable data in `docs/game/_requests/_config.json`, not a buried constant:
+Config is P2 data in `docs/game/_requests/_config.json`: `minPromptChars`,
+`ackPattern`, `stopReminder` (`block-once` | `context` | `off`),
+`dispatchPrefixes`. Mis-captured dispatches amend with
+`tools/request mark-dispatch <id>` — a field-fill on origin only.
 
-- `minPromptChars` (default 40) — shorter prompts are conversation, not asks;
-- `ackPattern` — trivial acks ("ok do it", "yes", "lgtm…") are never logged
-  (cleaner than logging + auto-closing them); slash/`!`/`#` commands are
-  always skipped;
-- `stopReminder` — `block-once` (default) | `context` (transcript-only) |
-  `off`;
-- `dispatchPrefixes` (default `["SUPERVISOR"]`) — prompts starting with one
-  of these are supervisor dispatches: still captured verbatim (the durable
-  record is welcome) but with origin `supervisor-dispatch`, EXEMPT from the
-  Stop-hook nudge and the resolution requirement (their markers already
-  track resolution), and hidden from `list --open` unless `--all`.
-  Mis-captures from before the rule amend with
-  `tools/request mark-dispatch <id>` — a field-fill on origin only.
+## The SECRETARY: tags (REQSEC-0607)
 
-Manual `tools/request log` keeps working unchanged — relays and hook-less
-contexts still need it (`--session <id>` attaches a session by hand).
+The user's ask, verbatim:
 
-**Codex panes are captured too** (addendum 2, USER ASK: "have them also make
-it do the same thing with codex"). Codex's hook vocabulary mirrors Claude's —
-`UserPromptSubmit` and `Stop` both exist, with the same `session_id`/`prompt`/
-`stop_hook_active` payload fields — so the ledger write path is shared, not
-reimplemented: `<repo>/.codex/hooks.json` registers
-`tools/request-hook-prompt-codex` and `tools/request-hook-stop-codex`, thin
-adapters that exec `request hook-prompt|hook-stop --cli codex`. The flag's one
-effect since HOOKJSON-0606: captures get origin `codex:<id8>` (vs
-`session:<id8>` for Claude) — every hook emission is the same valid JSON on
-both CLIs (Stop `context` mode is `{"systemMessage": ...}` everywhere; Codex
-Stop is JSON-only by contract and the strict-parser trap applies to both).
-Stop-nudge parity is full — Codex supports `decision:block` continuation and
-the `stop_hook_active` loop guard.
+> we can use the useAssistant hook and hit a model who can evaluate and
+> categorize and all that jazz. since the mix of them is a shit show.
+> something like tags or whatever, that way can search by tag or etc. and if
+> model doesnt know they dont do nada. but would keep it far more organized
+> and can do it for free effectively and that way, we keep the hook on all
+> the same, nothing changes, we just have a secretary
 
-Codex trust caveat: Codex requires non-managed hooks to be reviewed and
-trusted per hook hash — run `/hooks` in a Codex pane once after this lands
-(and re-trust if the hook files change); project-local hooks also need the
-repo's `.codex/` layer trusted. Until trusted, Codex lists them but skips
-execution.
+Mechanism:
 
-Verification honesty: the hook payload path is tested by piping fabricated
-UserPromptSubmit/Stop JSON through the real scripts (see requests.test.ts and
-the REQLEDGER-0606 report); settings.json loads at session start, so the
-live end-to-end fires for sessions opened after this lands — confirm by
-typing any ≥40-char prompt in a fresh pane and seeing the
-`[request-ledger] captured req_NNNN` context line.
+- **Tags are organization ONLY.** `tags?: string[]` on the record; persisted
+  ONLY through `tagRequest` (the same store door as everything else —
+  append-only union, tags are added never removed, junk dropped silently).
+  States, the resolve discipline, and the user-only done gate are untouched
+  by the secretary — `tagRequest` *cannot* move anything.
+- **The model proposes.** The workbench requests surface runs untagged
+  entries through the framework's existing `useAssistant` hook
+  (`claude_code` subprocess — free under the Max subscription) in bounded
+  batches, with a strict-JSON, omit-when-unsure contract. **Unsure → nada**:
+  omitted/garbage replies leave entries byte-untouched, never an error.
+  Seed vocabulary: `bug, perf-log, ask, ruling, ux, idea` — the model may
+  extend it. Armed by a click (no model process spawns on tab open);
+  **tagging never blocks or delays capture** (capture is the hook, a
+  separate process entirely); model unavailable → everything works untagged.
+- **Search by tag**: CLI `board --tag <t>` / `list --tag <t>` / `tags`;
+  workbench rail grows a `#tag · n` chip per tag in use — selecting one is
+  the search. Sources: `editors/workbench/requests/secretary.ts` (protocol)
+  + `SecretaryBar.tsx` (the useAssistant wiring).
 
-## The process
+## The process (who does what)
 
-The conduct rule lives in **CLAUDE.md → "User Asks: the Request Ledger"**
-(one home; it is the doc auto-loaded into every worker pane): log the ask
-FIRST, verbatim; work is not done until `resolve` carries the paragraph +
-SHAs; cite the req id in the commit message (`USER ASK req_NNNN`).
+**Worker contract:** claim (`move <id> doing --by <you>`) → work → 
+`move <id> review --by <you> --para "<paragraph>" --shas <sha,...|none>` →
+STOP. Cite the req id in the commit message (`USER ASK req_NNNN`). **done is
+never yours to flip.**
 
-Backfill is not required — the ledger starts at its introduction; historical
-`USER ASK` commits stay as they are.
+**Supervisor:** watches `board --since <last pass>`, relays the user's
+acceptance as `move <id> done --by user`, bounces with
+`move <id> new --by supervisor --note "<why>"`, noise-closes intake mistakes
+with `move <id> done --by supervisor --note "<why>"` (from `new` only).
+
+**User:** the only source of acceptance. Their word, relayed by the
+supervisor, is what `--by user` means.
+
+The conduct rule lives in **CLAUDE.md → "User Asks: the Request Board"**
+(one home; it is the doc auto-loaded into every worker pane). Backfill is
+not required — historical `USER ASK` commits and pre-board entries stay as
+they are.
 
 ## Maintenance contract
 
 This doc + `docs/game/_index/records/request_ledger.ts` describe the feature;
 touching the ledger code (`requests.ts`, `requestCli.ts`, `tools/request`,
 the oracle tier) means updating both in the same commit. The P4 suite is
-`docs/game/_index/requests.test.ts` (log/resolve round-trip, verbatim
-preservation, oracle match), run by `rjit game verify`.
+`docs/game/_index/requests.test.ts` (board transitions, legacy
+normalization, marker capture, migrate idempotence, verbatim preservation,
+oracle match), run by `rjit game verify`.

@@ -1,10 +1,14 @@
-// requestCli.ts — `tools/request`: the REQUEST LEDGER CLI (REQLEDGER-0606).
+// requestCli.ts — `tools/request`: the REQUEST LEDGER CLI (REQLEDGER-0606,
+// board model REQBOARD-0607).
 //
+//   tools/request board [--since <ISO>]
 //   tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>
-//   tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
-//   echo "<paragraph>" | tools/request resolve <id> --shas <sha,...>
+//   tools/request move <id> <new|doing|review|done> --by <actor> [--para "..."] [--shas sha,sha|none] [--note "..."]
+//   tools/request note <id> --by <actor> "text"
+//   tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>   (alias: move <id> review)
 //   tools/request list [--open]
 //   tools/request show <id>
+//   tools/request migrate-board
 //
 // Storage + validation live in requests.ts (the deep module); this file is
 // argv parsing and printing only. Runs under tools/v8cli via the tools/request
@@ -12,9 +16,11 @@
 
 import {
   defaultRequestsDir, loadRequests, logRequest, resolveRequest,
+  moveRequest, noteRequest, migrateBoard, boardColumns,
+  tagRequest, filterByTag, allTags,
   hookCapturePrompt, requestsForSession, loadLedgerConfig,
   markDispatch, DISPATCH_ORIGIN,
-  type RequestRecord,
+  type RequestRecord, type RequestStatus, type RequestEvent,
 } from './requests';
 
 declare const __readStdin: () => string;
@@ -22,19 +28,33 @@ declare const __sleepMs: (ms: number) => void;
 declare const __termSize: () => string; // JSON [cols, rows]; [0,0] when stdin isn't a tty
 declare const process: { argv: string[]; exit(code: number): void };
 
-const USAGE = `request — the REQUEST LEDGER (user asks → resolutions; docs/game/REQUESTS.md)
+const USAGE = `request — the REQUEST LEDGER job board (new → doing → review → done; docs/game/REQUESTS.md)
 
+  request board [--since <ISO>] [--all] [--tag <tag>]
+      the four columns (dispatch-exempt — records, not jobs; --all includes
+      them); --since appends the ACTIVITY log; --tag filters to one tag
   request log "<verbatim ask>" --origin <pane|lane|supervisor-relay> [--session <id>]
-  request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
-      (or pipe the paragraph on stdin instead of --para)
-  request list [--open] [--all] [--session <id>]
-      (--open hides supervisor dispatches; add --all to show everything)
+  request move <id> <new|doing|review|done> --by <actor> [--para "<paragraph>"] [--shas <sha,sha|none>] [--note "<why>"]
+      new→doing worker claims · doing→review needs --para + --shas · review→done USER ONLY
+      review→new bounce (--note) · new→done supervisor noise-close (--note) · done is terminal
+  request note <id> --by <actor> "<text>"
+  request tag <id> <tag,tag,...>       the SECRETARY door: union onto the entry's tags
+      (organization ONLY — never touches state/resolution; bad tags dropped silently)
+  request resolve <id> --para "<paragraph>" --shas <sha,sha|none> [--by <actor>]
+      ⚠ resolve is now an ALIAS for \`move <id> review\` — your work lands in
+      REVIEW, NOT done. Only the user (via the supervisor) flips review→done.
+      (paragraph also accepted on stdin)
+  request list [--open] [--all] [--session <id>] [--tag <tag>]
+      (--open = everything not done; hides supervisor dispatches unless --all)
+  request tags                         every tag in use, with counts
   request show <id>
-  request mark-dispatch <id>   amend a mis-captured entry to supervisor-dispatch
+  request migrate-board                one-shot: legacy open→new, resolved→done (idempotent)
+  request mark-dispatch <id>           amend a mis-captured entry to supervisor-dispatch
 
 hook mode (wired by .claude/settings.json + .codex/hooks.json; payload JSON on stdin):
-  request hook-prompt [--cli codex]   UserPromptSubmit → auto-capture the literal prompt
-  request hook-stop   [--cli codex]   Stop → remind the session of its unresolved asks`;
+  request hook-prompt [--cli codex]   UserPromptSubmit → blanket-capture the literal prompt
+                                      (only trivial acks / short prompts / slash-shell skipped)
+  request hook-stop   [--cli codex]   Stop → remind the session of entries it holds in doing`;
 
 function fail(message: string, code = 1): never {
   console.error(`request: ${message}`);
@@ -87,7 +107,23 @@ function readStdinAll(): string {
 function oneLine(record: RequestRecord): string {
   const day = record.at.slice(0, 10);
   const preview = record.text.length > 80 ? `${record.text.slice(0, 80)}…` : record.text;
-  return `${record.id}  ${record.status.toUpperCase().padEnd(8)}  ${day}  ${record.origin.padEnd(18)}  "${preview.replace(/\n/g, ' ')}"`;
+  return `${record.id}  ${record.status.toUpperCase().padEnd(6)}  ${day}  ${record.origin.padEnd(18)}  "${preview.replace(/\n/g, ' ')}"`;
+}
+
+function age(iso: string): string {
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!isFinite(ms) || ms < 0) return '?';
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function boardRow(record: RequestRecord): string {
+  const preview = record.text.length > 80 ? `${record.text.slice(0, 80)}…` : record.text;
+  const tags = record.tags?.length ? `  ${record.tags.map((t) => `#${t}`).join(' ')}` : '';
+  return `  ${record.id}  ${age(record.at).padStart(4)}  ${record.origin.padEnd(18)}  "${preview.replace(/\n/g, ' ')}"${tags}`;
 }
 
 function fullEntry(record: RequestRecord): string {
@@ -97,11 +133,24 @@ function fullEntry(record: RequestRecord): string {
     '',
     record.text,
   ];
-  if (record.status === 'resolved') {
-    lines.push('', `resolved ${record.resolvedAt}:`, record.resolution ?? '');
+  if (record.tags?.length) lines.push('', `tags: ${record.tags.map((t) => `#${t}`).join(' ')}`);
+  if (record.resolution !== undefined) {
+    lines.push('', `resolution (${record.resolvedAt}):`, record.resolution);
     lines.push('', `commits: ${record.shas && record.shas.length > 0 ? record.shas.join(' ') : '(none — no-code resolution)'}`);
   }
+  const events = record.events ?? [];
+  if (events.length > 0) {
+    lines.push('', 'history:');
+    for (const event of events) lines.push(`  ${eventLine(record.id, event, false)}`);
+  }
   return lines.join('\n');
+}
+
+function eventLine(id: string, event: RequestEvent, withId: boolean): string {
+  const head = withId ? `${id}  ` : '';
+  const what = event.kind === 'state' ? `${event.from}→${event.to}` : 'note';
+  const text = event.text ? `  "${event.text.replace(/\n/g, ' ').slice(0, 100)}"` : '';
+  return `${head}${event.at}  ${what}  by ${event.actor}${text}`;
 }
 
 // ── commands ──────────────────────────────────────────────────────────────────
@@ -114,7 +163,100 @@ function cmdLog(positionals: string[], flags: Map<string, string>): void {
   const origin = flags.get('origin') ?? fail('--origin is required (which pane/lane, or supervisor-relay)', 2);
   const sessionId = flags.get('session');
   const record = logRequest(defaultRequestsDir(), positionals[0], origin, { sessionId, captureMode: 'manual' });
-  console.log(`${record.id} logged (open) — resolve with: tools/request resolve ${record.id} --para "<paragraph>" --shas <sha,...>`);
+  console.log(`${record.id} logged (new) — claim with: tools/request move ${record.id} doing --by <you>`);
+}
+
+const DONE_ROWS_SHOWN = 8;
+
+function cmdBoard(flags: Map<string, string>): void {
+  const loaded = loadRequests();
+  // --tag narrows the whole board to one secretary category (REQSEC-0607)
+  const records = flags.has('tag') ? filterByTag(loaded, flags.get('tag')!) : loaded;
+  if (flags.has('tag')) console.log(`(board filtered to #${flags.get('tag')})\n`);
+  // dispatches are records, not jobs — exempt from every column unless --all
+  // (the columns must agree with the true open-asks set, like list --open)
+  const columns = boardColumns(records, flags.has('all'));
+  const dispatches = records.filter((record) => record.origin === DISPATCH_ORIGIN).length;
+  for (const status of ['new', 'doing', 'review', 'done'] as RequestStatus[]) {
+    const inColumn = columns[status];
+    console.log(`${status.toUpperCase()} (${inColumn.length})`);
+    // done is the archive — full listing would drown the live columns
+    const rows = status === 'done' ? inColumn.slice(-DONE_ROWS_SHOWN) : inColumn;
+    if (status === 'done' && inColumn.length > rows.length) {
+      console.log(`  (… ${inColumn.length - rows.length} earlier — \`request list\` for all)`);
+    }
+    for (const record of rows) console.log(boardRow(record));
+    console.log('');
+  }
+  if (!flags.has('all') && dispatches > 0) {
+    console.log(`(${dispatches} supervisor dispatches off-board — records, not jobs; \`board --all\` to include)`);
+  }
+  const since = flags.get('since');
+  if (since !== undefined) {
+    if (isNaN(new Date(since).getTime())) fail(`--since is not a timestamp: ${JSON.stringify(since)} (ISO, e.g. 2026-06-07T12:00:00Z)`, 2);
+    const activity: { id: string; event: RequestEvent }[] = [];
+    for (const record of records) {
+      if (!flags.has('all') && record.origin === DISPATCH_ORIGIN) continue;
+      for (const event of record.events ?? []) {
+        if (event.at > new Date(since).toISOString()) activity.push({ id: record.id, event });
+      }
+    }
+    activity.sort((a, b) => (a.event.at < b.event.at ? -1 : a.event.at > b.event.at ? 1 : 0));
+    console.log(`ACTIVITY since ${since} (${activity.length})`);
+    for (const { id, event } of activity) console.log(`  ${eventLine(id, event, true)}`);
+  }
+}
+
+function parseShas(raw: string): string[] {
+  return raw.trim().toLowerCase() === 'none'
+    ? []
+    : raw.split(',').map((sha) => sha.trim()).filter((sha) => sha.length > 0);
+}
+
+function cmdMove(positionals: string[], flags: Map<string, string>): void {
+  const id = positionals[0] ?? fail(`move needs an id.\n${USAGE}`, 2);
+  const to = positionals[1] ?? fail('move needs a target state: new | doing | review | done', 2);
+  const by = flags.get('by') ?? fail('--by is required: who is moving this (user, supervisor, or a worker label)', 2);
+  const shasRaw = flags.get('shas');
+  const record = moveRequest(defaultRequestsDir(), id, to as RequestStatus, {
+    by,
+    para: flags.get('para') ?? (flags.has('shas') ? readStdinAll() : undefined),
+    shas: shasRaw !== undefined ? parseShas(shasRaw) : undefined,
+    note: flags.get('note'),
+  });
+  console.log(`${record.id} → ${record.status}${record.status === 'review' ? ' (awaiting the user\'s word — only actor user flips review→done)' : ''}`);
+}
+
+function cmdNote(positionals: string[], flags: Map<string, string>): void {
+  const id = positionals[0] ?? fail(`note needs an id.\n${USAGE}`, 2);
+  const text = positionals[1] ?? fail('note needs the text: request note <id> --by <actor> "<text>"', 2);
+  const by = flags.get('by') ?? fail('--by is required: who is noting this', 2);
+  const record = noteRequest(defaultRequestsDir(), id, by, text);
+  console.log(`${record.id} noted (${(record.events ?? []).length} history events)`);
+}
+
+/** The secretary's persistence door, also usable by hand. Bad tags are
+ *  dropped silently; nothing valid = a no-op, never an error. */
+function cmdTag(positionals: string[]): void {
+  const id = positionals[0] ?? fail(`tag needs an id.\n${USAGE}`, 2);
+  const raw = positionals[1] ?? fail('tag needs the tags: request tag <id> <tag,tag,...>', 2);
+  const record = tagRequest(defaultRequestsDir(), id, raw.split(','));
+  console.log(`${record.id} tags: ${record.tags?.length ? record.tags.map((t) => `#${t}`).join(' ') : '(none)'}`);
+}
+
+function cmdTags(): void {
+  const records = loadRequests();
+  const tags = allTags(records);
+  if (tags.length === 0) {
+    console.log('(no tags yet — the secretary has not run, or nothing was confident)');
+    return;
+  }
+  for (const tag of tags) console.log(`#${tag.padEnd(16)} ${filterByTag(records, tag).length}`);
+}
+
+function cmdMigrateBoard(): void {
+  const counts = migrateBoard(defaultRequestsDir());
+  console.log(`migrate-board: ${counts.migrated} migrated (${counts.opens} open→new, ${counts.resolveds} resolved→done) · ${counts.untouched} already board-shaped`);
 }
 
 // ── hook mode: stdin carries the Claude Code hook payload JSON ────────────────
@@ -132,9 +274,10 @@ function hookPayload(): any {
   }
 }
 
-/** UserPromptSubmit: capture the LITERAL prompt — the req id lands in front
- *  of the worker as added context. Claude and Codex send the same payload
- *  shape ({session_id, prompt}); --cli codex only changes the origin label.
+/** UserPromptSubmit: marker-gated capture (REQBOARD-0607) — the req id lands
+ *  in front of the worker as added context. Claude and Codex send the same
+ *  payload shape ({session_id, prompt}); --cli codex only changes the origin
+ *  label.
  *
  *  HOOKJSON-0606: the context line is emitted as the documented control JSON
  *  ({hookSpecificOutput: {hookEventName, additionalContext}}) — BOTH CLIs
@@ -151,16 +294,18 @@ function cmdHookPrompt(flags: Map<string, string>): void {
   const result = hookCapturePrompt(defaultRequestsDir(), sessionId, prompt, undefined, originLabel);
   if (result.action === 'logged') {
     const line = result.record.origin === DISPATCH_ORIGIN
-      ? `[request-ledger] captured ${result.record.id} (supervisor dispatch — recorded for the durable record; its marker tracks resolution, no ledger resolve required)`
-      : `[request-ledger] captured ${result.record.id} (this prompt, verbatim). Your work is not done until: tools/request resolve ${result.record.id} --para "<what was done, why, what changed>" --shas <sha,...|none>`;
+      ? `[request-ledger] captured ${result.record.id} (supervisor dispatch — recorded for the durable record; its marker tracks resolution, no board flow required)`
+      : `[request-ledger] captured ${result.record.id} on the board (new). Claim it (tools/request move ${result.record.id} doing --by <you>); when done, move it to REVIEW: tools/request move ${result.record.id} review --by <you> --para "<what was done, why, what changed>" --shas <sha,...|none>. Only the user flips review→done.`;
     console.log(JSON.stringify({
       hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: line },
     }));
   }
-  // skipped → silent: noise must cost the session nothing
+  // skipped → silent: unmarked prompts must cost the session nothing
 }
 
-/** Stop: nudge once per turn cycle about this session's unresolved captures.
+/** Stop: nudge once per turn cycle about entries this session holds in
+ *  'doing' (REQBOARD-0607 — claimed-but-not-reviewed is the only debt the
+ *  worker owns; review→done belongs to the user).
  *  stop_hook_active means this nudge already fired — never loop.
  *  HOOKJSON-0606: every Stop emission is JSON on BOTH CLIs — Codex Stop is
  *  JSON-only by contract, and the plain-text reminder began with '[' (the
@@ -174,13 +319,13 @@ function cmdHookStop(): void {
   if (config.stopReminder === 'off') return;
   const sessionId = typeof payload.session_id === 'string' ? payload.session_id : '';
   if (sessionId.length === 0) return;
-  const open = requestsForSession(defaultRequestsDir(), sessionId)
-    .filter((record) => record.status === 'open' && record.origin !== DISPATCH_ORIGIN);
-  if (open.length === 0) return;
-  const listing = open
+  const doing = requestsForSession(defaultRequestsDir(), sessionId)
+    .filter((record) => record.status === 'doing' && record.origin !== DISPATCH_ORIGIN);
+  if (doing.length === 0) return;
+  const listing = doing
     .map((record) => `${record.id} "${record.text.replace(/\n/g, ' ').slice(0, 100)}"`)
     .join('; ');
-  const reason = `[request-ledger] ${open.length} unresolved ask(s) captured for this session: ${listing}. Resolve each (tools/request resolve <id> --para "<paragraph>" --shas <sha,...|none>) or, if genuinely still in flight, say so and stop again — this reminder fires once per turn cycle.`;
+  const reason = `[request-ledger] ${doing.length} claimed job(s) still in doing for this session: ${listing}. Move each to review (tools/request move <id> review --by <you> --para "<paragraph>" --shas <sha,...|none>) or, if genuinely still in flight, say so and stop again — this reminder fires once per turn cycle.`;
   if (config.stopReminder === 'block-once') {
     console.log(JSON.stringify({ decision: 'block', reason }));
   } else {
@@ -193,30 +338,28 @@ function cmdResolve(positionals: string[], flags: Map<string, string>): void {
   const paragraph = flags.get('para') ?? readStdinAll();
   if (paragraph.trim().length === 0) fail('no paragraph — pass --para "<paragraph>" or pipe it on stdin', 2);
   const shasRaw = flags.get('shas') ?? fail('--shas is required — the commit SHAs implementing this (or "none" for a no-code resolution)', 2);
-  const shas = shasRaw.trim().toLowerCase() === 'none'
-    ? []
-    : shasRaw.split(',').map((sha) => sha.trim()).filter((sha) => sha.length > 0);
-  const record = resolveRequest(defaultRequestsDir(), id, paragraph, shas);
-  console.log(`${record.id} resolved — ${record.shas && record.shas.length > 0 ? `commits: ${record.shas.join(' ')}` : 'no-code resolution'}`);
+  const record = resolveRequest(defaultRequestsDir(), id, paragraph, parseShas(shasRaw), flags.get('by') ?? 'worker');
+  console.log(`${record.id} → review (resolve is move-to-REVIEW now, NOT done — the user accepts review→done) — ${record.shas && record.shas.length > 0 ? `commits: ${record.shas.join(' ')}` : 'no-code resolution'}`);
 }
 
 function cmdList(flags: Map<string, string>): void {
   const all = loadRequests();
+  const tagged = flags.has('tag') ? filterByTag(all, flags.get('tag')!) : all;
   const inSession = flags.has('session')
-    ? all.filter((record) => record.sessionId === flags.get('session'))
-    : all;
-  // --open is the debt list: supervisor dispatches are exempt from the
-  // resolution requirement, so they hide there unless --all asks for them.
+    ? tagged.filter((record) => record.sessionId === flags.get('session'))
+    : tagged;
+  // --open is the debt list (everything not yet done): supervisor dispatches
+  // are exempt from the board flow, so they hide there unless --all asks.
   const records = flags.has('open')
-    ? inSession.filter((record) => record.status === 'open' && (flags.has('all') || record.origin !== DISPATCH_ORIGIN))
+    ? inSession.filter((record) => record.status !== 'done' && (flags.has('all') || record.origin !== DISPATCH_ORIGIN))
     : inSession;
   if (records.length === 0) {
     console.log(flags.has('open') ? '(no open requests)' : '(empty ledger)');
     return;
   }
   for (const record of records) console.log(oneLine(record));
-  const open = all.filter((record) => record.status === 'open').length;
-  console.log(`${records.length} shown · ${all.length} total · ${open} open`);
+  const live = all.filter((record) => record.status !== 'done').length;
+  console.log(`${records.length} shown · ${all.length} total · ${live} not done`);
 }
 
 function cmdMarkDispatch(positionals: string[]): void {
@@ -237,10 +380,16 @@ function cmdShow(positionals: string[]): void {
 try {
   const [, command, ...rest] = process.argv;
   const { positionals, flags } = parseArgs(rest);
-  if (command === 'log') cmdLog(positionals, flags);
+  if (command === 'board') cmdBoard(flags);
+  else if (command === 'log') cmdLog(positionals, flags);
+  else if (command === 'move') cmdMove(positionals, flags);
+  else if (command === 'note') cmdNote(positionals, flags);
+  else if (command === 'tag') cmdTag(positionals);
+  else if (command === 'tags') cmdTags();
   else if (command === 'resolve') cmdResolve(positionals, flags);
   else if (command === 'list') cmdList(flags);
   else if (command === 'show') cmdShow(positionals);
+  else if (command === 'migrate-board') cmdMigrateBoard();
   else if (command === 'mark-dispatch') cmdMarkDispatch(positionals);
   else if (command === 'hook-prompt') cmdHookPrompt(flags);
   else if (command === 'hook-stop') cmdHookStop();

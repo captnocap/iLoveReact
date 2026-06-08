@@ -1,6 +1,7 @@
-// request_ledger — extraction of docs/game/REQUESTS.md (REQLEDGER-0606).
-// The ledger is knowledge-layer infrastructure, not a game cart: user asks
-// as durable, oracle-served, resolution-accountable records.
+// request_ledger — extraction of docs/game/REQUESTS.md (REQLEDGER-0606,
+// four-state board REQBOARD-0607). The ledger is knowledge-layer
+// infrastructure, not a game cart: user asks as durable jobs on a board
+// (new → doing → review → done), accepted only by the user's word.
 
 import type { DocIndex } from '../types';
 
@@ -8,16 +9,16 @@ export const request_ledger: DocIndex = {
   name: 'request_ledger',
   file: 'REQUESTS.md',
   purpose: ['maintenance'],
-  summary: 'The request ledger: every user ask logged verbatim (docs/game/_requests/req_<seq>.json, V20 by-addition), closed only by a real resolution paragraph + commit SHAs, served by tools/oracle as the REQUEST LEDGER tier.',
+  summary: 'The request board: marker-gated user asks logged verbatim (docs/game/_requests/req_<seq>.json, V20 by-addition) move new → doing → review → done; workers claim and move to review with a paragraph + SHAs, only actor user accepts review→done; served by tools/oracle as the REQUEST LEDGER tier.',
   interfaces: [
     {
       name: 'tools/request',
       purpose: ['maintenance'],
       kind: 'module',
       sourceFile: 'docs/game/_index/requestCli.ts',
-      description: 'The ledger CLI: `log "<verbatim>" --origin <pane|lane|supervisor-relay>` → req id; `resolve <id> --para "<paragraph>" --shas <sha,...|none>` (paragraph also accepted on stdin); `list [--open]`; `show <id>`. Thin argv/printing layer over requests.ts; runs under tools/v8cli via the auto-rebundling tools/request wrapper.',
+      description: 'The board CLI: `board [--since <ISO>]` (four columns + counts; --since appends the ACTIVITY event log — the supervisor\'s loop tool); `log "<verbatim>" --origin <...>` → lands in new; `move <id> <state> --by <actor> [--para] [--shas] [--note]` (validated by the one transition function); `note <id> --by <actor> "<text>"`; `resolve <id> --para --shas` = ALIAS for `move <id> review` (work lands in REVIEW, not done); `list [--open]` (= not done); `show <id>`; `migrate-board` (one-shot legacy open→new/resolved→done, idempotent). Thin argv/printing layer over requests.ts; runs under tools/v8cli via the auto-rebundling tools/request wrapper.',
       dependsOn: ['RequestRecord'],
-      consumers: ['every worker pane (conduct rule in CLAUDE.md)', 'supervisor relays'],
+      consumers: ['every worker pane (conduct rule in CLAUDE.md)', 'supervisor relays', 'the workbench requests source (WBREQUESTS)'],
       status: 'live',
     },
     {
@@ -25,17 +26,19 @@ export const request_ledger: DocIndex = {
       purpose: ['maintenance', 'persistence'],
       kind: 'data_model',
       sourceFile: 'docs/game/_index/requests.ts',
-      description: 'One ledger entry: id (req_<seq>), at, origin, text (the user\'s words BYTE-VERBATIM), status open|resolved, then the one-time field-fill resolvedAt/resolution (≥120-char paragraph)/shas. Storage is one git-tracked JSON file per entry under docs/game/_requests/ — append-only set, entries never rewritten (V20 by-addition applied to process).',
+      description: 'One board entry: id (req_<seq>), at, origin, text (the user\'s words BYTE-VERBATIM, job marker included), status new|doing|review|done, plus the append-only `events` array ({at, actor, kind state|note, from?, to?, text?} — transitions and notes only ever append) and the doing→review one-time field-fill resolvedAt/resolution (≥120-char paragraph)/shas. Legacy two-state files (open/resolved) normalize on read forever. Storage is one git-tracked JSON file per entry under docs/game/_requests/ — append-only set, asks and history never rewritten (V20 by-addition applied to process).',
       emits: ['docs/game/_requests/req_<seq>.json'],
       status: 'live',
     },
     {
-      name: 'loadRequests/logRequest/resolveRequest',
+      name: 'moveRequest (the transition function)',
       purpose: ['maintenance', 'persistence'],
       kind: 'utility',
       sourceFile: 'docs/game/_index/requests.ts',
-      description: 'The storage surface (decisions.ts\'s sibling): explicit-dir functions (tests run on temp dirs; defaultRequestsDir() resolves RJIT_ROOT from the tools wrappers). Validation at the boundary: verbatim text required, origin required, resolution paragraph ≥ MIN_RESOLUTION_CHARS, SHAs 7–40 hex (or [] for no-code), double-resolution rejected.',
-      consumers: ['tools/request', 'tools/oracle'],
+      codeRef: 'docs/game/_index/requests.ts (moveRequest, LEGAL_MOVES)',
+      description: 'THE one door for state changes, enforcing the board\'s legal graph: new→doing (worker claims, any actor); doing→review (REQUIRES para ≥ MIN_RESOLUTION_CHARS + shas — fields fill exactly once, a post-bounce re-review carries its paragraph on the event); review→done (ONLY actor \'user\' — the supervisor relays the user\'s word); review→new (bounce, note required); new→done (supervisor-only noise-close, note required, NEVER from doing/review); done terminal. Everything else rejected with the legal moves named. Siblings: loadRequests/logRequest (intake → new), noteRequest (append-only notes), resolveRequest (= moveRequest to review), migrateBoard.',
+      dependsOn: ['RequestRecord'],
+      consumers: ['tools/request', 'the workbench requests source (WBREQUESTS)'],
       status: 'live',
     },
     {
@@ -44,10 +47,21 @@ export const request_ledger: DocIndex = {
       kind: 'utility',
       sourceFile: 'docs/game/_index/requests.ts',
       codeRef: 'docs/game/_index/requests.ts (hookCapturePrompt, requestsForSession)',
-      description: 'The addendum layer: .claude/settings.json registers tools/request-hook-prompt (UserPromptSubmit → log the LITERAL prompt with sessionId + captureMode hook; stdout puts the req id in session context) and tools/request-hook-stop (Stop → one {"decision":"block"} nudge per turn cycle listing the session\'s unresolved asks; stop_hook_active guards loops). CODEX PARITY (addendum 2): .codex/hooks.json registers tools/request-hook-{prompt,stop}-codex — thin adapters exec\'ing the SAME subcommands with --cli codex (origin codex:<id8>; Stop context-mode emits {"systemMessage"} because Codex Stop is JSON-only stdout). Codex skips the hooks until trusted via /hooks (per-hash trust + project .codex layer trust). The necessary-vs-noise rule is P2 data in docs/game/_requests/_config.json (minPromptChars, ackPattern, stopReminder block-once|context|off, dispatchPrefixes) — acks and slash/!/# commands are never logged; dispatchPrefixes-matched prompts (default SUPERVISOR) capture with origin supervisor-dispatch, exempt from the stop nudge + resolution requirement and hidden from list --open unless --all (mark-dispatch amends mis-captures by origin field-fill). Hook mode NEVER exits 2 (would block + erase the user\'s prompt).',
-      dependsOn: ['RequestRecord', 'loadRequests/logRequest/resolveRequest'],
+      description: 'BLANKET capture, restored by REQSEC-0607 (USER RULING: "we keep the hook on all the same, nothing changes, we just have a secretary" — REQBOARD-0607\'s marker-only gate is REMOVED). UserPromptSubmit captures every substantive prompt verbatim into new; only the original noise rule skips (ackPattern trivial acks, minPromptChars default 40, slash/!/# commands). dispatchPrefixes-matched prompts (default SUPERVISOR) capture with origin supervisor-dispatch — exempt from the board flow + stop nudge, hidden from list --open and the board unless --all. The Stop hook scans ONLY the session\'s entries in \'doing\' (claimed-but-not-reviewed is the worker\'s only debt) and nudges once per turn cycle (stop_hook_active guards loops). Config is P2 data in docs/game/_requests/_config.json (minPromptChars, ackPattern, stopReminder block-once|context|off, dispatchPrefixes). CODEX PARITY via .codex/hooks.json (--cli codex changes only the origin label; HOOKJSON-0606: every emission is valid JSON on both CLIs). Hook mode NEVER exits 2 (would block + erase the user\'s prompt); mark-dispatch amends mis-captures by origin field-fill.',
+      dependsOn: ['RequestRecord', 'moveRequest (the transition function)'],
       emits: ['docs/game/_requests/req_<seq>.json'],
       consumers: ['every Claude session in this repo (.claude/settings.json hooks)', 'every trusted Codex session in this repo (.codex/hooks.json)'],
+      status: 'live',
+    },
+    {
+      name: 'the SECRETARY (tags)',
+      purpose: ['maintenance'],
+      kind: 'utility',
+      sourceFile: 'docs/game/_index/requests.ts',
+      codeRef: 'docs/game/_index/requests.ts (tagRequest, filterByTag, allTags, SEED_TAGS) + cart/hmsc-int/editors/workbench/requests/{secretary.ts,SecretaryBar.tsx}',
+      description: 'REQSEC-0607 (USER ASK: "we can use the useAssistant hook and hit a model who can evaluate and categorize … if model doesnt know they dont do nada"). Tags are ORGANIZATION ONLY: tags?: string[] on the record, persisted solely through tagRequest (append-only union, junk dropped silently — it cannot move states or touch the resolve discipline / user-only done gate). The workbench requests surface runs untagged entries through the framework\'s existing useAssistant hook (claude_code, click-armed, async — capture is never blocked; model absent → everything works untagged) under secretary.ts\'s strict-JSON omit-when-unsure protocol; seed vocabulary bug/perf-log/ask/ruling/ux/idea, model-extensible. Search: CLI board --tag / list --tag / tags; workbench rail grows a #tag · n chip per tag in use.',
+      dependsOn: ['RequestRecord'],
+      consumers: ['tools/request (tag/tags/--tag)', 'the workbench requests source (WBREQUESTS)'],
       status: 'live',
     },
     {
@@ -56,17 +70,17 @@ export const request_ledger: DocIndex = {
       kind: 'utility',
       sourceFile: 'docs/game/_index/oracle.ts',
       codeRef: 'docs/game/_index/oracle.ts (searchRequests)',
-      description: 'tools/oracle\'s second tier, between RULINGS and INDEX RECORDS: ranks entries over verbatim text (weight 3) + resolution (1) + id/origin (1), prints status, ask, resolution slice, and commit SHAs. Ledger is read from disk at query time, so fresh logs serve immediately without a rebundle.',
-      dependsOn: ['loadRequests/logRequest/resolveRequest'],
+      description: 'tools/oracle\'s second tier, between RULINGS and INDEX RECORDS: ranks entries over verbatim text (weight 3) + resolution (1) + id/origin (1), prints board status, ask, resolution slice, and commit SHAs (whenever the resolution is filled — doing→review onward). Ledger is read from disk at query time, so fresh logs serve immediately without a rebundle.',
+      dependsOn: ['moveRequest (the transition function)'],
       status: 'live',
     },
   ],
   patterns: [
     {
-      name: 'log-first ask handling',
+      name: 'claim → review → stop (the worker contract)',
       purpose: ['maintenance'],
-      description: 'When a USER prompt arrives directly in a pane (or is relayed by the supervisor): FIRST `tools/request log` it verbatim; work is not done until `resolve` carries the paragraph + SHAs; the commit message cites the req id (the USER ASK marker convention gains an id). Un-logged asks historically get lost or half-resolved with no trace.',
-      examples: ['CLAUDE.md "User Asks: the Request Ledger"'],
+      description: 'A worker takes a board job by claiming it (move <id> doing --by <you>), works, then moves it to REVIEW with the resolution paragraph + SHAs — and STOPS. done is never the worker\'s to flip: only the user\'s word, relayed by the supervisor as --by user, accepts review→done. The commit message cites the req id (USER ASK req_NNNN). The supervisor watches `board --since <last pass>`, bounces review→new with a note, and noise-closes intake mistakes new→done.',
+      examples: ['CLAUDE.md "User Asks: the Request Board"'],
       status: 'recurring',
     },
   ],
@@ -74,8 +88,15 @@ export const request_ledger: DocIndex = {
     {
       name: 'paraphrasing the ask corrupts the record',
       purpose: ['maintenance'],
-      description: 'The `text` field is the user\'s words BYTE-VERBATIM — the whole point is that git does not capture prompts. Summarizing, trimming, or "cleaning up" the ask destroys the evidence the ledger exists to keep. Quote the shell argument; the CLI rejects multi-positional input rather than joining words.',
+      description: 'The `text` field is the user\'s words BYTE-VERBATIM (job marker included) — the whole point is that git does not capture prompts. Summarizing, trimming, or "cleaning up" the ask destroys the evidence the ledger exists to keep. Quote the shell argument; the CLI rejects multi-positional input rather than joining words.',
       evidence: ['docs/game/REQUESTS.md "The shape"', 'requests.test.ts verbatim suite'],
+      severity: 'high',
+    },
+    {
+      name: 'flipping review→done as a worker',
+      purpose: ['maintenance'],
+      description: 'Acceptance belongs to the user alone. A worker (or the supervisor acting alone) moving review→done — or "helpfully" passing --by user without the user\'s actual word — forges the board\'s whole point. The transition function rejects any non-user actor; the human rule is stricter: --by user means the user actually said so.',
+      evidence: ['docs/game/_index/requests.ts moveRequest', 'requests.test.ts "a worker may NEVER flip review→done"'],
       severity: 'high',
     },
     {

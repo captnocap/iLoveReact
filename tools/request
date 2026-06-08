@@ -1,16 +1,22 @@
 #!/usr/bin/env bash
-# request — the REQUEST LEDGER CLI (REQLEDGER-0606): user asks become durable,
-# oracle-served, resolution-accountable records. git captures commits, not
-# prompts; this captures the prompts.
+# request — the REQUEST BOARD CLI (REQLEDGER-0606 → REQBOARD-0607): user asks
+# become durable jobs on a four-state board (new → doing → review → done).
+# git captures commits, not prompts; this captures the prompts.
 #
+#   tools/request board [--since <ISO>] [--all] [--tag <tag>]
 #   tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>
-#   tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>
-#   tools/request list [--open]
+#   tools/request move <id> <new|doing|review|done> --by <actor> [--para "..."] [--shas sha,sha|none] [--note "..."]
+#   tools/request note <id> --by <actor> "<text>"
+#   tools/request tag <id> <tag,tag,...>   # the SECRETARY door (organization only)
+#   tools/request resolve <id> --para "<paragraph>" --shas <sha,sha|none>   # ALIAS for `move <id> review`
+#   tools/request list [--open] [--tag <tag>]
+#   tools/request tags
 #   tools/request show <id>
 #
-# LLMs: when a USER prompt arrives directly in your pane, log it FIRST; your
-# work is not done until `resolve` carries the paragraph + commit SHAs. The
-# rule lives in CLAUDE.md ("User Asks: the Request Ledger"); the mechanism in
+# LLMs: claim a job FIRST (move <id> doing --by <you>); when finished, move it
+# to REVIEW with the paragraph + SHAs, then STOP — done is never yours to flip
+# (only the user, relayed as --by user, accepts review→done). The rule lives
+# in CLAUDE.md ("User Asks: the Request Board"); the mechanism in
 # docs/game/REQUESTS.md. Entries live in docs/game/_requests/ and are served
 # by tools/oracle. Source: docs/game/_index/requestCli.ts + requests.ts;
 # rebuilds its bundle automatically; runs under tools/v8cli (no node).

@@ -205,29 +205,45 @@ Every capability should be usable in one line by someone who doesn't code. The t
 
 ---
 
-## User Asks: the Request Ledger (REQLEDGER-0606)
+## User Asks: the Request Board (REQLEDGER-0606 → REQBOARD-0607)
 
-git captures commits, not prompts. Un-logged user asks historically get lost
-or half-resolved with no trace — the ledger is how your work survives review.
+git captures commits, not prompts. The ledger is a four-state job board —
+**new → doing → review → done** (USER RULING: "so there are 4 states 1 new
+2 in process 3 review 4 done") — and is how your work survives review.
 
-**Automatic capture is on:** repo hooks (`.claude/settings.json`) log every
-substantive user prompt for you — watch for the `[request-ledger] captured
-req_NNNN` context line; that id is YOUR debt, and the Stop hook will nudge
-once per turn cycle while it stays open. The noise rule (what gets captured)
-is tunable in `docs/game/_requests/_config.json`.
+**Capture is blanket** (REQSEC-0607, USER RULING: "we keep the hook on all
+the same, nothing changes, we just have a secretary"): repo hooks log every
+substantive user prompt — only trivial acks, sub-40-char prompts, and
+slash/shell commands skip (tunable in `docs/game/_requests/_config.json`).
+Watch for the `[request-ledger] captured req_NNNN` context line. The mess is
+organized by the SECRETARY: a model tags entries (`bug`, `perf-log`, `ask`,
+`ruling`, `ux`, `idea`, …) via the workbench; tags are organization ONLY and
+searchable (`tools/request board --tag <t>`, `list --tag <t>`, `tags`).
+Unsure model → entry untouched; no model → everything works untagged.
 
-When a USER prompt arrives WITHOUT a capture line (relayed asks, codex panes,
-hook-less contexts):
+**The worker contract** (the only moves that are yours):
 
-1. **FIRST**, before working: `tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>` — it prints your req id. Verbatim means verbatim: quote it, never paraphrase or trim.
-2. Your work is **not done** until the resolution paragraph is written:
-   `tools/request resolve <id> --para "<what was done, why, what changed>" --shas <sha,...>` (real paragraph, ≥120 chars; `--shas none` for no-code answers).
-3. Cite the req id in your commit message — the existing `USER ASK` marker convention gains an id: `(USER ASK req_0007)`.
+1. **Claim** before working: `tools/request move <id> doing --by <you>`.
+2. Work. Append progress with `tools/request note <id> --by <you> "<text>"`.
+3. **Move to review** when finished:
+   `tools/request move <id> review --by <you> --para "<what was done, why, what changed>" --shas <sha,...|none>`
+   (real paragraph, ≥120 chars). Then **STOP**. Your work lands in REVIEW.
+4. **done is NEVER yours to flip.** Only the user's word — relayed by the
+   supervisor as `--by user` — accepts review→done. The supervisor may
+   bounce review→new with a note; rework re-claims from there.
+5. Cite the req id in your commit message — the `USER ASK` marker convention
+   gains an id: `(USER ASK req_0007)`.
 
-`tools/request list --open` is the standing debt list. `tools/oracle "<query>"`
-matches request text + resolutions (the REQUEST LEDGER tier). Mechanism doc:
+`tools/request resolve` still exists but is an ALIAS for `move <id> review`
+(it does NOT close anything). For relayed asks with no capture line, log
+first: `tools/request log "<the user's words, VERBATIM>" --origin <pane|lane|supervisor-relay>`
+— verbatim means verbatim: quote it, never paraphrase or trim.
+
+`tools/request board` is the live board (`--since <ISO>` shows activity);
+`list --open` is everything not done. `tools/oracle "<query>"` matches
+request text + resolutions (the REQUEST LEDGER tier). Mechanism doc:
 `docs/game/REQUESTS.md`. Backfill is not required — historical USER ASK
-commits stay as they are.
+commits and pre-board entries stay as they are.
 
 ---
 

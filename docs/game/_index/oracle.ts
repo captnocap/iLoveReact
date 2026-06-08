@@ -194,7 +194,8 @@ function requestLine(r: RequestRecord, score: number): string {
     `  "${ask.replace(/\n/g, ' ')}"`,
   ];
   if (r.resolution) lines.push(`  resolution: ${r.resolution.length > 200 ? `${r.resolution.slice(0, 200)}…` : r.resolution}`);
-  if (r.status === 'resolved') lines.push(`  commits: ${r.shas && r.shas.length > 0 ? r.shas.join(' ') : '(none — no-code resolution)'}`);
+  // resolution fields fill at doing→review; done is acceptance only (REQBOARD-0607)
+  if (r.resolution !== undefined) lines.push(`  commits: ${r.shas && r.shas.length > 0 ? r.shas.join(' ') : '(none — no-code resolution)'}`);
   return lines.join('\n');
 }
 
