@@ -48,7 +48,8 @@ import { LABS } from './labs';
 import { editorChannel } from './editors/store';
 import { editorSessions } from './editors/sessions';
 import { editorTunables, tuningStream } from './editors/tunables';
-import { worldStream } from './game/world/stream';
+import { GAME_BUILD, piecesForMap, worldStream, type BuildPrefabDef, type WorldEvent, type WorldStreamState } from './game';
+import { graphToBuildWorld, mapBuildFootprints, mapBuildPlaceable } from './mapBuildPlacements';
 
 // hmsc-int is a multi-map WORKSPACE (the city, every building interior, ...), not
 // one world — see memory project_hmsc_int_multimap_workspace. A persistent shell
@@ -282,6 +283,7 @@ function EditorShell() {
   const placeSeq = useRef(0);
   const [placements, setPlacements] = useState<Placement[]>([]);
   const [selPlaceId, setSelPlaceId] = useState<string | null>(() => initial.sel ?? null);
+  const [selBuildId, setSelBuildId] = useState<string | null>(null);
   const [activePlaceable, setActivePlaceable] = useState<{ cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null>(null);
 
   // ── Tile selection + per-cell overrides ──────────────────────────────────────
@@ -376,6 +378,7 @@ function EditorShell() {
     placeSeq.current = Math.max(placeSeq.current, maxPlacementSeq(w.placements));
     setPlacements(w.placements);
     if (applyTwig) setSelPlaceId(p.sel ?? null);
+    if (applyTwig) setSelBuildId(null);
     if (applyTwig && p.wasd) setWasdQuad(p.wasd);
     if (applyTwig) setSeedCam(p.cam ?? null);
     setOverrides(deserializeOverrides(p.overrides));
@@ -442,13 +445,21 @@ function EditorShell() {
   // marker-only commits (note()), so the route-scoped commit history exists TODAY
   // and world content events join the same channel later by ADDITION (V20 schema
   // evolution — nothing to migrate when the editor's world goes event-sourced).
+  const worldChannel = useMemo(() => {
+    try {
+      return editorChannel(worldStream);
+    } catch {
+      return null;
+    }
+  }, []);
+  const [mapBuildRev, setMapBuildRev] = useState(0);
   const worldSession = useMemo(() => {
     try {
-      return editorSessions().open('/', editorChannel(worldStream));
+      return worldChannel ? editorSessions().open('/', worldChannel) : null;
     } catch {
       return null; // no __fs_* host — authoring continues without the trace
     }
-  }, []);
+  }, [worldChannel]);
   useEffect(() => () => worldSession?.close(), [worldSession]);
 
   // ── The P2 tunables boot fold (editors/tunables.ts) ───────────────────────────
@@ -501,6 +512,18 @@ function EditorShell() {
     lastCatAtRef.current[note.cat] = now;
     logEvent(note, now);
   }, [logEvent]);
+
+  const streamState: WorldStreamState | null = worldChannel ? worldChannel.state() : null;
+  void mapBuildRev; // revision tick: forces this component to re-read worldChannel.state().
+  const buildingPrefabs: BuildPrefabDef[] = (() => {
+    const removed = new Set(streamState?.removedPrefabs ?? []);
+    const merged: Record<string, BuildPrefabDef> = {};
+    for (const id of GAME_BUILD.prefabs.ids) merged[id] = GAME_BUILD.prefabs.get(id);
+    for (const def of Object.values(streamState?.prefabs ?? {})) merged[def.id] = def;
+    return Object.values(merged).filter((def) => !removed.has(def.id)).sort((a, b) => a.label.localeCompare(b.label));
+  })();
+  const buildPieces = piecesForMap(streamState, ws.stem, { legacyMapName: legacyPieceMapName });
+  const buildFootprints = mapBuildFootprints(buildPieces);
 
   // PaintCanvas reports each edit with a semantic note (or none for silent edits like
   // focus toggles): trip the autosave + log the note. Stable for the memoized canvas.
@@ -568,6 +591,7 @@ function EditorShell() {
     setPlacements([]);
     setFloors(floorsFromEditorWorld(fresh));
     setSelPlaceId(null);
+    setSelBuildId(null);
     setSeedWorld(fresh);
     setWorldEpoch((e) => e + 1);
     ws.setStem(name);
@@ -616,15 +640,45 @@ function EditorShell() {
   // closure over `placements`.
   const placementsRef = useRef(placements);
   placementsRef.current = placements;
+  const buildFootprintsRef = useRef(buildFootprints);
+  buildFootprintsRef.current = buildFootprints;
   const labelOf = (id: string) => placementsRef.current.find((p) => p.id === id)?.label ?? 'object';
+  const buildingLabelOf = (id: string) => buildFootprintsRef.current.find((p) => p.id === id)?.label ?? 'building';
+
+  const commitBuildEvent = useCallback((event: WorldEvent, label: string) => {
+    if (!worldSession) return false;
+    const scoped = (() => {
+      switch (event.kind) {
+        case 'piecePlaced':
+        case 'pieceRemoved':
+        case 'pieceEditSet':
+        case 'prefabStamped':
+          return { ...event, mapName: ws.stem } as WorldEvent;
+        default:
+          return event;
+      }
+    })();
+    worldSession.commit(scoped, label);
+    setMapBuildRev((r) => r + 1);
+    return true;
+  }, [worldSession, ws.stem]);
 
   const armPlaceable = useCallback((cat: PlaceCat, kind: string) => {
+    if (cat === 'building') {
+      const def = buildingPrefabs.find((prefab) => prefab.id === kind);
+      if (!def) return;
+      setActivePlaceable((prev) => ({ ...mapBuildPlaceable(def, prev?.rotation ?? 0), rotation: prev?.rotation ?? 0 }));
+      setLayer('place');
+      setTool('brush');
+      setTab('objects');
+      return;
+    }
     const base = resolvePlaceable(cat, kind);
     setActivePlaceable((prev) => ({ cat, kind, ...base, rotation: prev?.rotation ?? 0 }));
     setLayer('place');
     setTool('brush');
     setTab('objects');
-  }, []);
+  }, [buildingPrefabs]);
 
   const rotatePlaceBrush = useCallback((delta: number) => {
     setActivePlaceable((prev) => prev ? { ...prev, rotation: ((prev.rotation + delta) % 360 + 360) % 360 } : prev);
@@ -643,16 +697,34 @@ function EditorShell() {
   }, []);
 
   const placeObject = useCallback((cat: PlaceCat, kind: string) => {
+    if (cat === 'building') {
+      const def = buildingPrefabs.find((prefab) => prefab.id === kind);
+      if (!def) return;
+      armPlaceable(cat, kind);
+      const origin = graphToBuildWorld(0, 0);
+      commitBuildEvent({ kind: 'prefabStamped', prefabId: def.id, origin, yawDegrees: activePlaceable?.rotation ?? 0 }, `${ws.stem}: object: placed ${def.label}`);
+      logEvent({ cat: 'object', text: `placed ${def.label}` });
+      setLayer('place');
+      return;
+    }
     snapshotForUndo(); // pre-add
     armPlaceable(cat, kind);
     const base = addPlacement(cat, kind, 0, 0, activePlaceable?.rotation ?? 0);
     setLayer('place');
     logEvent({ cat: 'object', text: `placed ${base.label}` });
-  }, [snapshotForUndo, armPlaceable, addPlacement, activePlaceable?.rotation, logEvent]);
+  }, [buildingPrefabs, armPlaceable, commitBuildEvent, ws.stem, activePlaceable?.rotation, logEvent, snapshotForUndo, addPlacement]);
   const paintObjectAt = useCallback((cat: PlaceCat, kind: string, gx: number, gy: number, rotation: number) => {
+    if (cat === 'building') {
+      const def = buildingPrefabs.find((prefab) => prefab.id === kind);
+      if (!def) return;
+      const origin = graphToBuildWorld(gx, gy);
+      commitBuildEvent({ kind: 'prefabStamped', prefabId: def.id, origin, yawDegrees: rotation }, `${ws.stem}: object: stamped ${def.label}`);
+      logCoalesced({ cat: 'object', text: `painted ${def.label}` });
+      return;
+    }
     const base = addPlacement(cat, kind, gx, gy, rotation);
     logCoalesced({ cat: 'object', text: `painted ${base.label}` });
-  }, [addPlacement, logCoalesced]);
+  }, [buildingPrefabs, commitBuildEvent, ws.stem, addPlacement, logCoalesced]);
   // Drag/update coalesce — one undo step + one log entry per drag, not per move.
   // Position handling during a drag: the engine moves the node NATIVELY (it owns
   // canvas_gx while the button is down) and streams onMove (~60Hz + one final on
@@ -684,6 +756,13 @@ function EditorShell() {
     else logCoalesced({ cat: 'object', text: `rotated ${labelOf(id)}` });
   }, [snapshotForUndoCoalesced, logEvent, logCoalesced]);
   const removePlacement = useCallback((id: string) => { snapshotForUndo(); logEvent({ cat: 'object', text: `removed ${labelOf(id)}` }); setPlacements((ps) => ps.filter((p) => p.id !== id)); setSelPlaceId((s) => (s === id ? null : s)); }, [snapshotForUndo, logEvent]);
+  const removeBuildPlacement = useCallback((id: string) => {
+    const fp = buildFootprintsRef.current.find((p) => p.id === id);
+    if (!fp) return;
+    for (const pieceId of fp.pieceIds) commitBuildEvent({ kind: 'pieceRemoved', id: pieceId }, `${ws.stem}: object: removed ${fp.label}`);
+    logEvent({ cat: 'object', text: `removed ${fp.label}` });
+    setSelBuildId((s) => (s === id ? null : s));
+  }, [commitBuildEvent, ws.stem, logEvent]);
   const clonePlacement = useCallback((id: string) => {
     snapshotForUndo(); // pre-clone
     logEvent({ cat: 'object', text: `cloned ${labelOf(id)}` });
@@ -696,9 +775,11 @@ function EditorShell() {
     setSelPlaceId(nid);
   }, [snapshotForUndo, logEvent]);
   const place = useMemo(() => ({
-    items: placements, selId: selPlaceId, active: activePlaceable, onSelect: setSelPlaceId, onArm: armPlaceable, onRotateBrush: rotatePlaceBrush, onPaintAt: paintObjectAt,
+    items: placements, selId: selPlaceId, active: activePlaceable, buildItems: buildFootprints, buildSelId: selBuildId,
+    onSelect: setSelPlaceId, onSelectBuild: setSelBuildId, onArm: armPlaceable, onRotateBrush: rotatePlaceBrush, onPaintAt: paintObjectAt,
     onMove: movePlacement, onUpdate: updatePlacement, onClone: clonePlacement, onDelete: removePlacement,
-  }), [placements, selPlaceId, activePlaceable, armPlaceable, rotatePlaceBrush, paintObjectAt, movePlacement, updatePlacement, clonePlacement, removePlacement]);
+    onDeleteBuild: removeBuildPlacement,
+  }), [placements, selPlaceId, activePlaceable, buildFootprints, selBuildId, armPlaceable, rotatePlaceBrush, paintObjectAt, movePlacement, updatePlacement, clonePlacement, removePlacement, removeBuildPlacement]);
 
   // The top-left "in focus" panel. A tile SELECTION (group) wins — it's the
   // bulk-override surface. Else the place layer shows the SELECTED placement's
@@ -879,8 +960,9 @@ function EditorShell() {
                 onResetLayout={resetLayout}
                 onClearNotes={clearNotes}
                 lastSavedAt={ws.lastSavedAt}
+                buildingPrefabs={buildingPrefabs}
                 onPlace={placeObject}
-                activePlaceable={activePlaceable?.cat === 'building' ? null : activePlaceable}
+                activePlaceable={activePlaceable}
                 onArmPlaceable={armPlaceable}
               />
             }

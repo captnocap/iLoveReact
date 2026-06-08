@@ -36,6 +36,7 @@ import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneD
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
 import { placementCellRect, type Placement, type PlaceCat } from './placements';
+import type { MapBuildFootprint } from './mapBuildPlacements';
 import type { EditorWorld } from './mapStore';
 import type { SelCell } from './tileOverrides';
 import type { EditNote } from './editLog';
@@ -79,7 +80,10 @@ export interface PlaceProps {
   items: Placement[];
   selId: string | null;
   active: { cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null;
+  buildItems?: MapBuildFootprint[];
+  buildSelId?: string | null;
   onSelect: (id: string | null) => void;
+  onSelectBuild?: (id: string | null) => void;
   onArm: (cat: PlaceCat, kind: string) => void;
   onRotateBrush: (delta: number) => void;
   onPaintAt: (cat: PlaceCat, kind: string, gx: number, gy: number, rotation: number) => void;
@@ -87,6 +91,7 @@ export interface PlaceProps {
   onUpdate: (id: string, patch: Partial<Placement>) => void;
   onClone: (id: string) => void;
   onDelete: (id: string) => void;
+  onDeleteBuild?: (id: string) => void;
 }
 
 const RAIL_W = 176;
@@ -210,8 +215,9 @@ function SaveLinkPicker(props: { sel: Placement; place: PlaceProps }) {
 }
 
 // Place rail — controls for the SELECTED placement (conditional on selection).
-function PlaceRail(props: { tool: Tool; onTool: (t: Tool) => void; sel: Placement | null; place: PlaceProps }) {
+function PlaceRail(props: { tool: Tool; onTool: (t: Tool) => void; sel: Placement | null; buildSel: MapBuildFootprint | null; place: PlaceProps }) {
   const sel = props.sel;
+  const buildSel = props.buildSel;
   const active = props.place.active;
   const recent = (() => {
     const out: Placement[] = [];
@@ -268,8 +274,21 @@ function PlaceRail(props: { tool: Tool; onTool: (t: Tool) => void; sel: Placemen
       ) : null}
     </Box>
   );
-  if (!sel) {
+  if (!sel && !buildSel) {
     return toolRow;
+  }
+  if (buildSel) {
+    return (
+      <Box style={{ gap: 6 }}>
+        {toolRow}
+        <Box style={{ height: 1, backgroundColor: '#1e293b' }} />
+        <Text fontSize={8} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{buildSel.label}</Text>
+        <Text fontSize={8} color="#64748b" style={{ fontFamily: 'monospace' }}>{`${buildSel.pieceIds.length} build pieces`}</Text>
+        <Box style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 4 }}>
+          <ToolBtn icon="Trash2" active={false} onPress={() => props.place.onDeleteBuild?.(buildSel.id)} />
+        </Box>
+      </Box>
+    );
   }
   const set = (patch: Partial<Placement>) => props.place.onUpdate(sel.id, patch);
   return (
@@ -459,6 +478,7 @@ export function PaintCanvas(props: {
   const { tool, tile, layer, place } = props;
   const grid = props.showGrid !== false;
   const selPlacement = place.items.find((p) => p.id === place.selId) ?? null;
+  const selBuildPlacement = place.buildItems?.find((p) => p.id === place.buildSelId) ?? null;
 
   const brushMode: BrushMode = props.brush.mode === 'erase' ? 'erase' : 'paint';
   const activeBrushMode: BrushMode = tool === 'eraser' && (layer === 'paint' || layer === 'zone') ? 'erase' : brushMode;
@@ -1256,12 +1276,34 @@ export function PaintCanvas(props: {
               gy={p.gy}
               gw={p.footW * TILE_UNITS}
               gh={p.footD * TILE_UNITS}
-              onPress={() => { claimWasd?.(); place.onSelect(p.id); }}
-              onMove={p.locked || showPlaceBrush ? undefined : (evt: any) => { claimWasd?.(); place.onMove(p.id, Number(evt?.gx ?? p.gx), Number(evt?.gy ?? p.gy)); if (p.id !== place.selId) place.onSelect(p.id); }}
+              onPress={() => { claimWasd?.(); place.onSelectBuild?.(null); place.onSelect(p.id); }}
+              onMove={p.locked || showPlaceBrush ? undefined : (evt: any) => { claimWasd?.(); place.onSelectBuild?.(null); place.onMove(p.id, Number(evt?.gx ?? p.gx), Number(evt?.gy ?? p.gy)); if (p.id !== place.selId) place.onSelect(p.id); }}
             >
               <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: `${p.color}cc`, borderWidth: isSel ? 2 : 1, borderColor: isSel ? '#f8fafc' : '#0b1320', transform: { rotate: p.rotation } }}>
                 <Box style={{ position: 'absolute', top: 2, width: '40%', height: 3, borderRadius: 2, backgroundColor: isSel ? '#f8fafc' : '#0b1320' }} />
                 <Text fontSize={8} color="#0b1320" style={{ fontWeight: 800 }}>{p.label}</Text>
+              </Box>
+            </Canvas.Node>
+          );
+        }) : null}
+
+        {layer === 'place' ? (place.buildItems ?? []).map((p) => {
+          const isSel = p.id === place.buildSelId;
+          return (
+            <Canvas.Node
+              key={`build_${p.id}`}
+              gx={p.gx}
+              gy={p.gy}
+              gw={p.footW * TILE_UNITS}
+              gh={p.footD * TILE_UNITS}
+              onPress={() => { claimWasd?.(); place.onSelect(null); place.onSelectBuild?.(p.id); }}
+            >
+              <Box style={{ width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: isSel ? `${p.color}24` : `${p.color}14`, borderWidth: isSel ? 3 : 2, borderColor: isSel ? '#f8fafc' : p.color }}>
+                <Box style={{ position: 'absolute', left: 3, right: 3, top: 3, bottom: 3, borderWidth: 1, borderColor: `${p.color}aa` }} />
+                <Pressable onPress={() => { claimWasd?.(); place.onDeleteBuild?.(p.id); }} style={{ position: 'absolute', right: 2, top: 2, width: 18, height: 18, alignItems: 'center', justifyContent: 'center', borderRadius: 3, borderWidth: 1, borderColor: '#f87171', backgroundColor: '#3f1218dd' }}>
+                  <Text fontSize={12} color="#fecaca" style={{ fontWeight: 900 }}>×</Text>
+                </Pressable>
+                <Text fontSize={8} color="#e0f2fe" style={{ fontWeight: 800, fontFamily: 'monospace' }}>{p.label}</Text>
               </Box>
             </Canvas.Node>
           );
@@ -1319,7 +1361,7 @@ export function PaintCanvas(props: {
             onDeleteZone={deleteZone}
           />
         ) : null}
-        {layer === 'place' ? <PlaceRail tool={tool} onTool={props.onTool} sel={selPlacement} place={place} /> : null}
+        {layer === 'place' ? <PlaceRail tool={tool} onTool={props.onTool} sel={selPlacement} buildSel={selBuildPlacement} place={place} /> : null}
       </Box>
 
       {/* Right edge: chunk focus gutter (thin dock, keeps the centre clear). */}

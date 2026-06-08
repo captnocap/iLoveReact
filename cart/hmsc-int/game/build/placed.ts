@@ -59,6 +59,8 @@ export type PlacedBuildPiece = {
   edit?: WallEdit;
   /** resolved per-face skin/material snapshot for this placed instance */
   skin?: BuildSkinSet;
+  /** prefab stamp group id, when this piece came from one prefabStamped event */
+  stampId?: string;
 };
 
 // ── P2 tuning: every behavior-affecting number is table data ─────────────────

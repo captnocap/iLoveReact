@@ -51,8 +51,9 @@ import { accentFor } from '../studio.cls';
 import { useAssistScene } from '../assist3d/useAssistScene';
 import { AssistMeshViewer } from '../assist3d/AssistMeshViewer';
 import { round, type MeshSpec } from '../assist3d/scene';
+import type { BuildPrefabDef } from '@game';
 
-type Cat = 'prop' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
+type Cat = 'building' | 'prop' | 'marker' | 'tile' | 'embedded' | 'texture' | 'assistant';
 type Sel = { cat: Cat; kind: string };
 type Group = { cat: Cat; title: string; items: { kind: string; label: string }[] };
 
@@ -72,7 +73,7 @@ const STATIC_GROUPS: Group[] = [
   // looks is LIVE — built-ins plus the studio's saved materials (allTextures).
 ];
 
-const isPlaceable = (cat: Cat) => cat === 'prop' || cat === 'marker';
+const isPlaceable = (cat: Cat) => cat === 'building' || cat === 'prop' || cat === 'marker';
 
 type Preview = ObjectWorld & { tile?: TileKind; baseDist: number; targetY: number };
 
@@ -189,11 +190,13 @@ function AssistInspect(props: { mesh: MeshSpec }) {
 // kinds; a catalog recipe with a lab spec opens ShaderLab instead.)
 
 export function ObjectsTab(props: {
-  onPlace?: (cat: 'prop' | 'marker', kind: string) => void;
-  activePlaceable?: { cat: 'prop' | 'marker'; kind: string } | null;
-  onArmPlaceable?: (cat: 'prop' | 'marker', kind: string) => void;
+  buildingPrefabs?: BuildPrefabDef[];
+  onPlace?: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
+  activePlaceable?: { cat: 'building' | 'prop' | 'marker'; kind: string } | null;
+  onArmPlaceable?: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
 }) {
-  const [sel, setSel] = useState<Sel>({ cat: 'prop', kind: PROP_KINDS[0] });
+  const firstBuilding = props.buildingPrefabs?.[0]?.id;
+  const [sel, setSel] = useState<Sel>(() => firstBuilding ? { cat: 'building', kind: firstBuilding } : { cat: 'prop', kind: PROP_KINDS[0] });
   // The category whose item list is showing in the breadcrumb. Kept apart from
   // `sel` so switching categories to browse doesn't reload the viewer until you
   // pick an item.
@@ -216,15 +219,18 @@ export function ObjectsTab(props: {
   const customs = useCustomTextures();
   const textureItems = useMemo(() => allTextures().map((t) => ({ kind: t.id, label: t.label })), [customs]);
   const groups = useMemo<Group[]>(() => [
+    { cat: 'building', title: 'BUILDINGS', items: (props.buildingPrefabs ?? []).map((p) => ({ kind: p.id, label: p.label })) },
     ...STATIC_GROUPS,
     { cat: 'texture', title: 'TEXTURES', items: textureItems },
     { cat: 'assistant', title: 'ASSISTANT', items: scene.meshes.map((m) => ({ kind: m.id, label: m.id })) },
-  ], [scene, textureItems]);
+  ], [props.buildingPrefabs, scene, textureItems]);
   const groupOf = (cat: Cat) => groups.find((g) => g.cat === cat) ?? groups[0];
   const labelOf = (cat: Cat, kind: string) => groupOf(cat).items.find((it) => it.kind === kind)?.label ?? kind;
 
   const isTexture = sel.cat === 'texture';
   const isAssist = sel.cat === 'assistant';
+  const isBuildingPrefab = sel.cat === 'building';
+  const buildingPrefab = isBuildingPrefab ? props.buildingPrefabs?.find((p) => p.id === sel.kind) : undefined;
   const texDef = isTexture ? textureById(sel.kind) : undefined;
   // A shader-authored texture opens its slider lab; a react-authored one previews.
   const spec = texDef?.source.kind === 'shader' ? shaderSpec(sel.kind) : undefined;
@@ -235,7 +241,7 @@ export function ObjectsTab(props: {
     () => (sel.cat === 'prop' ? kindTexturesFor(sel.cat, sel.kind) : undefined),
     [kindTex, sel.cat, sel.kind],
   );
-  const pv = useMemo(() => ((isTexture || isAssist) ? null : buildPreview(sel, inspectedTextures)), [isTexture, isAssist, sel.cat, sel.kind, inspectedTextures]);
+  const pv = useMemo(() => ((isTexture || isAssist || isBuildingPrefab) ? null : buildPreview(sel, inspectedTextures)), [isTexture, isAssist, isBuildingPrefab, sel.cat, sel.kind, inspectedTextures]);
 
   // The inspected object's pickable parts (for the selected-part label) + the
   // texture currently on the selected part.
@@ -245,9 +251,9 @@ export function ObjectsTab(props: {
   const applyTexture = (textureId: string | null) => { if (selPart) setKindTexture(sel.cat, sel.kind, selPart, textureId); setTexOpen(false); };
 
   const palGroup = groupOf(palCat);
-  const arm = (cat: Cat, kind: string) => { if (isPlaceable(cat)) props.onArmPlaceable?.(cat as 'prop' | 'marker', kind); };
+  const arm = (cat: Cat, kind: string) => { if (isPlaceable(cat)) props.onArmPlaceable?.(cat as 'building' | 'prop' | 'marker', kind); };
   const inspect = (cat: Cat, kind: string) => { setSel({ cat, kind }); setPalCat(cat); setCatOpen(false); setItemOpen(false); setSelPart(null); setTexOpen(false); arm(cat, kind); };
-  const place = (cat: Cat, kind: string) => { if (isPlaceable(cat)) { arm(cat, kind); props.onPlace?.(cat as 'prop' | 'marker', kind); } };
+  const place = (cat: Cat, kind: string) => { if (isPlaceable(cat)) { arm(cat, kind); props.onPlace?.(cat as 'building' | 'prop' | 'marker', kind); } };
   const pickCat = (c: Cat) => { setPalCat(c); setCatOpen(false); setItemOpen(true); };
 
   // Breadcrumb item value: the selected kind when it's in the browsed category,
@@ -257,7 +263,22 @@ export function ObjectsTab(props: {
   return (
     <Box style={{ width: '100%', height: '100%', flexDirection: 'column', backgroundColor: accentFor('bg'), position: 'relative' }}>
       {/* viewer (+ properties for placeable/tile kinds), full width */}
-      {isTexture ? (
+      {isBuildingPrefab ? (
+        <Box style={{ flexGrow: 1, minHeight: 0, padding: 14, gap: 10, backgroundColor: accentFor('bg') }}>
+          <Box style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <Box style={{ width: 16, height: 16, borderRadius: 3, backgroundColor: '#38bdf8', borderWidth: 1, borderColor: accentFor('border') }} />
+            <Text fontSize={13} color={accentFor('text')} style={{ fontWeight: 'bold' }}>{buildingPrefab?.label ?? sel.kind}</Text>
+          </Box>
+          <Text fontSize={10} color={accentFor('textDim')} style={{ fontFamily: 'monospace' }}>{`${buildingPrefab?.pieces.length ?? 0} semantic pieces`}</Text>
+          <Box style={{ flexGrow: 1 }} />
+          {buildingPrefab ? (
+            <Pressable onPress={() => place('building', buildingPrefab.id)} style={{ alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6, paddingLeft: 10, paddingRight: 10, paddingTop: 7, paddingBottom: 7, borderWidth: 1, borderColor: accentFor('success'), backgroundColor: '#0f3d2e' }}>
+              <Text fontSize={12} color="#86efac" style={{ fontWeight: 800 }}>+</Text>
+              <Text fontSize={10} color="#bbf7d0" style={{ fontFamily: 'monospace', fontWeight: 700 }}>place</Text>
+            </Pressable>
+          ) : null}
+        </Box>
+      ) : isTexture ? (
         spec ? (
           <Box style={{ flexGrow: 1, minHeight: 0 }}><ShaderLab spec={spec} /></Box>
         ) : texDef ? (

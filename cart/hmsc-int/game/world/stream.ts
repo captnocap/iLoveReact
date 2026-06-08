@@ -140,6 +140,12 @@ function appendPieces(state: WorldStreamState, placements: PiecePlacement[], map
   return { ...state, pieces, pieceSeq: seq };
 }
 
+function nextPieceSeq(state: WorldStreamState, mapName?: string): number {
+  const map = eventMapName({ mapName });
+  if (map) return Math.max(state.pieceSeqByMap?.[map] ?? 0, state.pieceSeq ?? 0) + 1;
+  return state.pieceSeq + 1;
+}
+
 export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freeze({
   name: 'world',
   initial: (): WorldStreamState => ({
@@ -229,7 +235,8 @@ export const worldStream: StreamDef<WorldStreamState, WorldEvent> = Object.freez
         // world-saved prefabs win over a same-id static seed (newest meaning)
         const def = state.prefabs[event.prefabId] ?? BUILD_PREFAB_DEFINITIONS[event.prefabId];
         if (!def) return state;
-        return appendPieces(state, stampPrefabPieces(def, event.origin, event.yawDegrees), event.mapName);
+        const stampId = `bps_${nextPieceSeq(state, event.mapName)}`;
+        return appendPieces(state, stampPrefabPieces(def, event.origin, event.yawDegrees).map((piece) => ({ ...piece, stampId })), event.mapName);
       }
       default:
         // Unknown kinds from the future MUST pass through untouched (V20

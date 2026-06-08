@@ -15,6 +15,7 @@ import { NotesTab } from './tabs/NotesTab';
 import { ChatTab } from './tabs/ChatTab';
 import { SettingsTab } from './tabs/SettingsTab';
 import type { PlaceCat } from './placements';
+import type { BuildPrefabDef } from '@game';
 
 export type TabId = 'objects' | 'notes' | 'chat' | 'settings';
 
@@ -52,6 +53,7 @@ export function RightPanel(props: {
   onResetLayout: () => void;
   onClearNotes: () => void;
   lastSavedAt: number | null;
+  buildingPrefabs?: BuildPrefabDef[];
   onPlace: (cat: 'building' | 'prop' | 'marker', kind: string) => void;
   activePlaceable?: { cat: PlaceCat; kind: string } | null;
   onArmPlaceable?: (cat: PlaceCat, kind: string) => void;
@@ -60,7 +62,7 @@ export function RightPanel(props: {
     <Box style={{ width: '100%', height: '100%', flexDirection: 'row', backgroundColor: '#0b1320' }}>
       {/* Active tab content */}
       <Box style={{ flexGrow: 1, minWidth: 0, height: '100%' }}>
-        {props.tab === 'objects' ? <ObjectsTab onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} /> : null}
+        {props.tab === 'objects' ? <ObjectsTab buildingPrefabs={props.buildingPrefabs} onPlace={props.onPlace} activePlaceable={props.activePlaceable} onArmPlaceable={props.onArmPlaceable} /> : null}
         {props.tab === 'notes' ? <NotesTab notes={props.notes} onNotes={props.onNotes} /> : null}
         {props.tab === 'chat' ? <ChatTab /> : null}
         {props.tab === 'settings' ? (
