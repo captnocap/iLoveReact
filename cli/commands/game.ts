@@ -53,6 +53,32 @@ const ROUND_TRIPS: RoundTrip[] = [
     zigStep: 'test-world-gamefile',
   },
 ];
+
+// The stateless Zig loader render proof (PLATMOD §4.4, keystone step 3): build
+// the no-V8 loader, construct a world from the baked game-file, render it
+// headless, and capture its own frame to a PNG — proving data -> stateless
+// engine -> rendered frame with ZERO V8/JS in the construct+render path.
+const LOADER_NAME = 'world_loader';
+const LOADER_SOURCE = 'world_loader.zig';
+const LOADER_BIN = `zig-out/bin/${LOADER_NAME}`;
+const LOADER_SHOT = `${OUT_DIR}/${LOADER_NAME}-verify.png`;
+const LOADER_BUILD_ARGS = [
+  'build', 'app',
+  `-Dapp-name=${LOADER_NAME}`,
+  `-Dapp-source=${LOADER_SOURCE}`,
+  '-Duse-v8=false',
+  '-Dhas-gpu=true',
+  '-Doptimize=ReleaseFast',
+];
+
+// The editor->loader bake (PLATMOD step 4): transcode the AUTHORED hmsc world
+// (loadEditorWorld — your saved map, else the demo city) into a real game-file
+// the loader renders. The synthetic round-trip fixture is the codec gate; this
+// is what `rjit game play/shot` render so you see your actual map.
+const BAKE_ENTRY = 'cart/hmsc-int/compile/bakeGameFile.ts';
+const BAKE_BUNDLE = `${OUT_DIR}/hmsc-gamefile-bake.js`;
+const BAKED_GAMEFILE = `${OUT_DIR}/hmsc.gamefile.b64`;
+const FIXTURE_GAMEFILE = 'framework/testing/fixtures/gamefile_roundtrip.b64';
 const ORACLE_SMOKE_QUERIES = [
   'physics',
   'kinds',
@@ -74,9 +100,13 @@ export async function run(argv: string[]): Promise<number> {
   const subcommand = argv[0];
   if (subcommand === 'compile') return compile(__cwd());
   if (subcommand === 'verify') return verify(__cwd());
-  err('Usage: rjit game <compile|verify>');
+  if (subcommand === 'shot') return shot(__cwd(), argv.slice(1));
+  if (subcommand === 'play') return play(__cwd(), argv.slice(1));
+  err('Usage: rjit game <compile|verify|shot|play>');
   err('  compile  bundle the headless game output');
   err('  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict');
+  err('  shot     build the no-V8 loader, render the baked game-file, capture a PNG (--out path)');
+  err('  play     build the no-V8 loader and open a live window (close it or press ESC to exit)');
   return 2;
 }
 
@@ -359,6 +389,137 @@ function runRoundTrips(root: string): boolean {
   return allGreen;
 }
 
+/** Assert a well-formed, plausibly-sized PNG at `path` (magic + IHDR dims). */
+function assertPng(root: string, path: string): boolean {
+  if (!fsExists(`${root}/${path}`)) {
+    err(`[game] render proof FAILED: no PNG at ${path}`);
+    return false;
+  }
+  const dump = spawnSync('sh', ['-c', `head -c 24 ${root}/${path} | od -An -v -tu1`]);
+  const bytes = dump.stdout.trim().split(/\s+/).map((t) => Number(t));
+  const magic = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (bytes.length < 24 || magic.some((m, i) => bytes[i] !== m)) {
+    err(`[game] render proof FAILED: ${path} is not a well-formed PNG`);
+    return false;
+  }
+  const w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+  const h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+  out(`[game] render proof: PNG ${w}x${h} at ${path}`);
+  return w > 0 && h > 0;
+}
+
+/** Inventory the loader binary: ZERO V8 symbols and ZERO embedded JS bundle. */
+function assertNoV8(root: string): boolean {
+  const bin = `${root}/${LOADER_BIN}`;
+  const v8 = spawnSync('sh', ['-c', `nm ${bin} 2>/dev/null | grep -ic 'v8::' || true`]);
+  const js = spawnSync('sh', ['-c', `strings -n 8 ${bin} 2>/dev/null | grep -icE 'react-reconciler|bundle-${LOADER_NAME}|__reactjit' || true`]);
+  const lib = spawnSync('sh', ['-c', `ldd ${bin} 2>/dev/null | grep -ic 'v8' || true`]);
+  const v8n = Number(v8.stdout.trim()) || 0;
+  const jsn = Number(js.stdout.trim()) || 0;
+  const libn = Number(lib.stdout.trim()) || 0;
+  if (v8n !== 0 || jsn !== 0 || libn !== 0) {
+    err(`[game] no-JS proof FAILED: v8 syms=${v8n}, js markers=${jsn}, v8 libs=${libn}`);
+    return false;
+  }
+  out('[game] no-JS proof: loader binary carries 0 V8 symbols, 0 bundle markers, 0 V8 libs');
+  return true;
+}
+
+/** Bake the AUTHORED hmsc world (loadEditorWorld) into a game-file the loader
+ *  renders. Returns false if the bake doesn't produce a tape. */
+function bakeRealGameFile(root: string): boolean {
+  if (!bundle(root, BAKE_ENTRY, BAKE_BUNDLE)) {
+    err('[game] bake FAILED: bakeGameFile does not bundle');
+    return false;
+  }
+  const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${BAKE_BUNDLE}`]);
+  if (gen.stderr.trim()) err(gen.stderr.trim());
+  const tape = gen.stdout.trim();
+  if (gen.code !== 0 || !tape) {
+    err('[game] bake FAILED: no game-file produced from the authored world');
+    return false;
+  }
+  fsWrite(`${root}/${BAKED_GAMEFILE}`, tape);
+  out('[game] baked the authored hmsc world -> game-file');
+  return true;
+}
+
+/** Which game-file the loader should render: the freshly-baked authored world,
+ *  else (or with --fixture) the synthetic round-trip fixture. */
+function resolveGameFile(root: string, useFixture: boolean): string {
+  if (useFixture) return FIXTURE_GAMEFILE;
+  if (bakeRealGameFile(root)) return BAKED_GAMEFILE;
+  err('[game] falling back to the synthetic fixture (authored bake unavailable)');
+  return FIXTURE_GAMEFILE;
+}
+
+/** Build the no-V8 loader, construct+render `gameFile` headless, and capture its
+ *  own frame to a PNG. The keystone: data -> stateless engine -> rendered frame,
+ *  zero V8/JS in the construct+render path. */
+function runLoaderRenderProof(root: string, outPath: string, gameFile: string): boolean {
+  const build = spawnSync('zig', LOADER_BUILD_ARGS);
+  if (build.stderr.trim()) err(build.stderr.trim());
+  if (build.code !== 0) {
+    err('[game] render proof FAILED: no-V8 loader does not build');
+    return false;
+  }
+  fsMkdir(dirOf(`${root}/${outPath}`));
+  const env = [
+    'ZIGOS_HEADLESS=1',
+    'ZIGOS_SCREENSHOT=1',
+    `ZIGOS_SCREENSHOT_OUTPUT='${root}/${outPath}'`,
+    'ZIGOS_SCREENSHOT_FRAMES=8',
+  ].join(' ');
+  const run = spawnSync('sh', ['-c', `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
+  if (run.stdout.trim()) out(run.stdout.trim());
+  if (!assertPng(root, outPath)) return false;
+  if (!assertNoV8(root)) return false;
+  out('[game] loader render proof GREEN — stateless loader rendered the game-file, no JS');
+  return true;
+}
+
+function dirOf(path: string): string {
+  const i = path.lastIndexOf('/');
+  return i <= 0 ? '/' : path.slice(0, i);
+}
+
+/** `rjit game shot [--out path] [--fixture]` — render the authored world (or the
+ *  test fixture) to a PNG, on demand. */
+function shot(root: string, argv: string[]): number {
+  let outPath = `shots/${LOADER_NAME}.png`;
+  let useFixture = false;
+  for (let i = 0; i < argv.length; i += 1) {
+    if (argv[i] === '--out' || argv[i] === '-o') { outPath = argv[++i] ?? outPath; continue; }
+    if (argv[i] === '--fixture') { useFixture = true; continue; }
+  }
+  const gameFile = resolveGameFile(root, useFixture);
+  if (!runLoaderRenderProof(root, outPath, gameFile)) {
+    err('[game] shot FAILED');
+    return 1;
+  }
+  out(`[game] shot PASS — ${outPath}`);
+  return 0;
+}
+
+/** `rjit game play [--fixture]` — build the no-V8 loader and open a live,
+ *  closeable window rendering the authored world (or the test fixture). */
+function play(root: string, argv: string[]): number {
+  const useFixture = argv.includes('--fixture');
+  const gameFile = resolveGameFile(root, useFixture);
+  const build = spawnSync('zig', LOADER_BUILD_ARGS);
+  if (build.stderr.trim()) err(build.stderr.trim());
+  if (build.code !== 0) {
+    err('[game] play FAILED: no-V8 loader does not build');
+    return 1;
+  }
+  out('[game] launching live window — close it or press ESC to exit...');
+  // No screenshot env → the loader opens a visible window and runs until closed.
+  const run = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
+  if (run.stdout.trim()) out(run.stdout.trim());
+  if (run.stderr.trim()) err(run.stderr.trim());
+  return run.code === 0 ? 0 : 1;
+}
+
 function verify(root: string): number {
   if (compile(root) !== 0) {
     err('[game] VERDICT RED — the game does not compile');
@@ -370,6 +531,9 @@ function verify(root: string): number {
 
   // ── platform spine: TS-writer <-> Zig-reader round-trips (rle + game-file) ─
   const roundtripOk = runRoundTrips(root);
+
+  // ── keystone: the stateless no-V8 loader constructs + renders the game-file ─
+  const renderOk = runLoaderRenderProof(root, LOADER_SHOT, FIXTURE_GAMEFILE);
 
   // ── the P4 behavior suites (dual-sided testing's TS side) ────────────────
   fsMkdir(`${root}/${TEST_OUT_DIR}`);
@@ -402,8 +566,8 @@ function verify(root: string): number {
     else err(`[game] verify script FAILED: ${VERIFY_DIR}/${script}`);
   }
 
-  const green = oracleOk && roundtripOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
-  const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? ROUND_TRIPS.length : 0}/${ROUND_TRIPS.length} round-trips, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
+  const green = oracleOk && roundtripOk && renderOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
+  const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? ROUND_TRIPS.length : 0}/${ROUND_TRIPS.length} round-trips, ${renderOk ? 1 : 0}/1 render, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
   if (!green) {
     err(`[game] VERDICT RED — ${tally}`);
     return 1;

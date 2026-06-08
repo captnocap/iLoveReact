@@ -123,7 +123,7 @@ pub fn isScreenshotMode() bool {
 // Returns true if the app should exit (screenshot captured).
 // ════════════════════════════════════════════════════════════════════════
 
-pub fn tick(root: *Node) bool {
+pub fn tick(root: ?*Node) bool {
     // Screenshot mode: wait N frames then capture
     if (ss_enabled and !ss_captured) {
         ss_frame += 1;

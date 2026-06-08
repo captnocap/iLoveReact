@@ -5537,6 +5537,23 @@ done
       zigStep: "test-world-gamefile"
     }
   ];
+  var LOADER_NAME = "world_loader";
+  var LOADER_SOURCE = "world_loader.zig";
+  var LOADER_BIN = `zig-out/bin/${LOADER_NAME}`;
+  var LOADER_SHOT = `${OUT_DIR}/${LOADER_NAME}-verify.png`;
+  var LOADER_BUILD_ARGS = [
+    "build",
+    "app",
+    `-Dapp-name=${LOADER_NAME}`,
+    `-Dapp-source=${LOADER_SOURCE}`,
+    "-Duse-v8=false",
+    "-Dhas-gpu=true",
+    "-Doptimize=ReleaseFast"
+  ];
+  var BAKE_ENTRY = "cart/hmsc-int/compile/bakeGameFile.ts";
+  var BAKE_BUNDLE = `${OUT_DIR}/hmsc-gamefile-bake.js`;
+  var BAKED_GAMEFILE = `${OUT_DIR}/hmsc.gamefile.b64`;
+  var FIXTURE_GAMEFILE = "framework/testing/fixtures/gamefile_roundtrip.b64";
   var ORACLE_SMOKE_QUERIES = [
     "physics",
     "kinds",
@@ -5557,9 +5574,13 @@ done
     const subcommand = argv[0];
     if (subcommand === "compile") return compile(__cwd());
     if (subcommand === "verify") return verify(__cwd());
-    err("Usage: rjit game <compile|verify>");
+    if (subcommand === "shot") return shot(__cwd(), argv.slice(1));
+    if (subcommand === "play") return play(__cwd(), argv.slice(1));
+    err("Usage: rjit game <compile|verify|shot|play>");
     err("  compile  bundle the headless game output");
     err("  verify   compile, boot headless, replay verify scripts + behavior suites, exit with a verdict");
+    err("  shot     build the no-V8 loader, render the baked game-file, capture a PNG (--out path)");
+    err("  play     build the no-V8 loader and open a live window (close it or press ESC to exit)");
     return 2;
   }
   function bundle(root, entry, outFile) {
@@ -5823,6 +5844,121 @@ if (failures.length > 0) {
     for (const rt of ROUND_TRIPS) allGreen = runRoundTrip(root, rt) && allGreen;
     return allGreen;
   }
+  function assertPng(root, path) {
+    if (!fsExists(`${root}/${path}`)) {
+      err(`[game] render proof FAILED: no PNG at ${path}`);
+      return false;
+    }
+    const dump = spawnSync("sh", ["-c", `head -c 24 ${root}/${path} | od -An -v -tu1`]);
+    const bytes = dump.stdout.trim().split(/\s+/).map((t) => Number(t));
+    const magic = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (bytes.length < 24 || magic.some((m, i) => bytes[i] !== m)) {
+      err(`[game] render proof FAILED: ${path} is not a well-formed PNG`);
+      return false;
+    }
+    const w = bytes[16] << 24 | bytes[17] << 16 | bytes[18] << 8 | bytes[19];
+    const h = bytes[20] << 24 | bytes[21] << 16 | bytes[22] << 8 | bytes[23];
+    out(`[game] render proof: PNG ${w}x${h} at ${path}`);
+    return w > 0 && h > 0;
+  }
+  function assertNoV8(root) {
+    const bin = `${root}/${LOADER_BIN}`;
+    const v8 = spawnSync("sh", ["-c", `nm ${bin} 2>/dev/null | grep -ic 'v8::' || true`]);
+    const js = spawnSync("sh", ["-c", `strings -n 8 ${bin} 2>/dev/null | grep -icE 'react-reconciler|bundle-${LOADER_NAME}|__reactjit' || true`]);
+    const lib = spawnSync("sh", ["-c", `ldd ${bin} 2>/dev/null | grep -ic 'v8' || true`]);
+    const v8n = Number(v8.stdout.trim()) || 0;
+    const jsn = Number(js.stdout.trim()) || 0;
+    const libn = Number(lib.stdout.trim()) || 0;
+    if (v8n !== 0 || jsn !== 0 || libn !== 0) {
+      err(`[game] no-JS proof FAILED: v8 syms=${v8n}, js markers=${jsn}, v8 libs=${libn}`);
+      return false;
+    }
+    out("[game] no-JS proof: loader binary carries 0 V8 symbols, 0 bundle markers, 0 V8 libs");
+    return true;
+  }
+  function bakeRealGameFile(root) {
+    if (!bundle(root, BAKE_ENTRY, BAKE_BUNDLE)) {
+      err("[game] bake FAILED: bakeGameFile does not bundle");
+      return false;
+    }
+    const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${BAKE_BUNDLE}`]);
+    if (gen.stderr.trim()) err(gen.stderr.trim());
+    const tape = gen.stdout.trim();
+    if (gen.code !== 0 || !tape) {
+      err("[game] bake FAILED: no game-file produced from the authored world");
+      return false;
+    }
+    fsWrite(`${root}/${BAKED_GAMEFILE}`, tape);
+    out("[game] baked the authored hmsc world -> game-file");
+    return true;
+  }
+  function resolveGameFile(root, useFixture) {
+    if (useFixture) return FIXTURE_GAMEFILE;
+    if (bakeRealGameFile(root)) return BAKED_GAMEFILE;
+    err("[game] falling back to the synthetic fixture (authored bake unavailable)");
+    return FIXTURE_GAMEFILE;
+  }
+  function runLoaderRenderProof(root, outPath, gameFile) {
+    const build = spawnSync("zig", LOADER_BUILD_ARGS);
+    if (build.stderr.trim()) err(build.stderr.trim());
+    if (build.code !== 0) {
+      err("[game] render proof FAILED: no-V8 loader does not build");
+      return false;
+    }
+    fsMkdir(dirOf(`${root}/${outPath}`));
+    const env = [
+      "ZIGOS_HEADLESS=1",
+      "ZIGOS_SCREENSHOT=1",
+      `ZIGOS_SCREENSHOT_OUTPUT='${root}/${outPath}'`,
+      "ZIGOS_SCREENSHOT_FRAMES=8"
+    ].join(" ");
+    const run25 = spawnSync("sh", ["-c", `${env} timeout -s KILL 90 ${root}/${LOADER_BIN} '${root}/${gameFile}' 2>&1 | grep -E 'loader|SCREENSHOT|construct|FAIL' || true`]);
+    if (run25.stdout.trim()) out(run25.stdout.trim());
+    if (!assertPng(root, outPath)) return false;
+    if (!assertNoV8(root)) return false;
+    out("[game] loader render proof GREEN \u2014 stateless loader rendered the game-file, no JS");
+    return true;
+  }
+  function dirOf(path) {
+    const i = path.lastIndexOf("/");
+    return i <= 0 ? "/" : path.slice(0, i);
+  }
+  function shot(root, argv) {
+    let outPath = `shots/${LOADER_NAME}.png`;
+    let useFixture = false;
+    for (let i = 0; i < argv.length; i += 1) {
+      if (argv[i] === "--out" || argv[i] === "-o") {
+        outPath = argv[++i] ?? outPath;
+        continue;
+      }
+      if (argv[i] === "--fixture") {
+        useFixture = true;
+        continue;
+      }
+    }
+    const gameFile = resolveGameFile(root, useFixture);
+    if (!runLoaderRenderProof(root, outPath, gameFile)) {
+      err("[game] shot FAILED");
+      return 1;
+    }
+    out(`[game] shot PASS \u2014 ${outPath}`);
+    return 0;
+  }
+  function play(root, argv) {
+    const useFixture = argv.includes("--fixture");
+    const gameFile = resolveGameFile(root, useFixture);
+    const build = spawnSync("zig", LOADER_BUILD_ARGS);
+    if (build.stderr.trim()) err(build.stderr.trim());
+    if (build.code !== 0) {
+      err("[game] play FAILED: no-V8 loader does not build");
+      return 1;
+    }
+    out("[game] launching live window \u2014 close it or press ESC to exit...");
+    const run25 = spawnSync(`${root}/${LOADER_BIN}`, [`${root}/${gameFile}`]);
+    if (run25.stdout.trim()) out(run25.stdout.trim());
+    if (run25.stderr.trim()) err(run25.stderr.trim());
+    return run25.code === 0 ? 0 : 1;
+  }
   function verify(root) {
     if (compile(root) !== 0) {
       err("[game] VERDICT RED \u2014 the game does not compile");
@@ -5830,6 +5966,7 @@ if (failures.length > 0) {
     }
     const oracleOk = runOracleSelfCheck(root);
     const roundtripOk = runRoundTrips(root);
+    const renderOk = runLoaderRenderProof(root, LOADER_SHOT, FIXTURE_GAMEFILE);
     fsMkdir(`${root}/${TEST_OUT_DIR}`);
     const suites = SUITE_ROOTS.flatMap((suiteRoot) => findTestSuites(root, suiteRoot));
     let suitesPassed = 0;
@@ -5855,8 +5992,8 @@ if (failures.length > 0) {
       if (result.code === 0) scriptsPassed += 1;
       else err(`[game] verify script FAILED: ${VERIFY_DIR}/${script}`);
     }
-    const green = oracleOk && roundtripOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
-    const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? ROUND_TRIPS.length : 0}/${ROUND_TRIPS.length} round-trips, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
+    const green = oracleOk && roundtripOk && renderOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
+    const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? ROUND_TRIPS.length : 0}/${ROUND_TRIPS.length} round-trips, ${renderOk ? 1 : 0}/1 render, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
     if (!green) {
       err(`[game] VERDICT RED \u2014 ${tally}`);
       return 1;
