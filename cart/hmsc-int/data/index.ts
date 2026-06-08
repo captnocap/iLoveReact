@@ -135,9 +135,38 @@ export type Store = {
   quarantine: () => QuarantinedRecord[];
 };
 
+export type StoreDomainRef = {
+  /** folder path relative to the umbrella root */
+  path: string;
+  /** streams known to live in this domain DB */
+  streams: string[];
+};
+
+export type StoreManifest = {
+  version: 1;
+  domains: Record<string, StoreDomainRef>;
+};
+
 type StoredEvent = { seq: number; at: number; event: unknown };
 
 const STREAM_NAME_SHAPE = /^[a-z][a-z0-9-]*$/;
+const STORE_MANIFEST = 'manifest.json';
+const STORE_DOMAINS_DIR = 'domains';
+export const EDITOR_STORE_STREAMS = Object.freeze([
+  'activities',
+  'assist3d',
+  'characters',
+  'clothing-variants',
+  'cutout',
+  'items',
+  'materials',
+  'missions',
+  'sessions',
+  'tuning',
+  'vehicles',
+  'voxels',
+  'world',
+] as const);
 
 function fs() {
   const host = globalThis;
@@ -152,6 +181,153 @@ function requireSql(): void {
   if (typeof host.__sql_open !== 'function' || typeof host.__sql_exec !== 'function' || typeof host.__sql_query_json !== 'function') {
     throw new Error('data store: __sql_* host bindings are missing (host built without the sqlite ingredient — rebuild)');
   }
+}
+
+function assertStoreName(name: string, label: string): void {
+  if (!STREAM_NAME_SHAPE.test(name)) {
+    throw new Error(`data store: ${label} must be kebab-case (got ${JSON.stringify(name)})`);
+  }
+}
+
+function safeManifestPath(path: string): boolean {
+  return path.length > 0 && !path.startsWith('/') && !path.split('/').some((part) => part === '..' || part === '');
+}
+
+function sortedUnique(values: string[]): string[] {
+  return [...new Set(values)].sort();
+}
+
+function emptyManifest(): StoreManifest {
+  return { version: 1, domains: {} };
+}
+
+function readStoreManifest(rootDir: string): StoreManifest {
+  const host = fs();
+  const text = host.__fs_read(`${rootDir}/${STORE_MANIFEST}`);
+  if (typeof text !== 'string' || text.trim() === '') return emptyManifest();
+  try {
+    const parsed = JSON.parse(text) as Partial<StoreManifest>;
+    const domains: Record<string, StoreDomainRef> = {};
+    for (const [domain, ref] of Object.entries(parsed.domains ?? {})) {
+      if (!STREAM_NAME_SHAPE.test(domain)) continue;
+      const path = typeof ref?.path === 'string' && safeManifestPath(ref.path) ? ref.path : `${STORE_DOMAINS_DIR}/${domain}`;
+      const streams = Array.isArray(ref?.streams)
+        ? sortedUnique(ref.streams.filter((s): s is string => typeof s === 'string' && STREAM_NAME_SHAPE.test(s)))
+        : [];
+      domains[domain] = { path, streams };
+    }
+    return { version: 1, domains };
+  } catch {
+    console.warn(`data store: ignoring unreadable umbrella manifest at ${rootDir}/${STORE_MANIFEST}`);
+    return emptyManifest();
+  }
+}
+
+function writeStoreManifest(rootDir: string, manifest: StoreManifest): void {
+  const host = fs();
+  host.__fs_mkdir(rootDir);
+  host.__fs_mkdir(`${rootDir}/${STORE_DOMAINS_DIR}`);
+  const domains = Object.fromEntries(
+    Object.entries(manifest.domains)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([domain, ref]) => [domain, { path: ref.path, streams: sortedUnique(ref.streams) }]),
+  );
+  host.__fs_write(`${rootDir}/${STORE_MANIFEST}`, JSON.stringify({ version: 1, domains }, null, 2));
+}
+
+export function storeDomainForStream(stream: string): string {
+  assertStoreName(stream, 'stream');
+  // The user's ruling is one DB per stream/domain. Known streams are listed in
+  // the manifest as they are opened; new streams get their own DB by default.
+  return stream;
+}
+
+function ensureDomain(rootDir: string, domain: string, stream?: string): StoreDomainRef {
+  assertStoreName(domain, 'domain');
+  if (stream !== undefined) assertStoreName(stream, 'stream');
+  const host = fs();
+  host.__fs_mkdir(rootDir);
+  host.__fs_mkdir(`${rootDir}/${STORE_DOMAINS_DIR}`);
+  const manifest = readStoreManifest(rootDir);
+  const current = manifest.domains[domain];
+  const ref: StoreDomainRef = current
+    ? { path: current.path, streams: sortedUnique(current.streams) }
+    : { path: `${STORE_DOMAINS_DIR}/${domain}`, streams: [] };
+  if (!safeManifestPath(ref.path)) {
+    throw new Error(`data store: manifest domain "${domain}" has unsafe path ${JSON.stringify(ref.path)}`);
+  }
+  if (stream && !ref.streams.includes(stream)) ref.streams = sortedUnique([...ref.streams, stream]);
+  manifest.domains[domain] = ref;
+  host.__fs_mkdir(`${rootDir}/${ref.path}`);
+  writeStoreManifest(rootDir, manifest);
+  return ref;
+}
+
+export function openDomainStore(rootDir: string, domain: string): Store {
+  const ref = ensureDomain(rootDir, domain);
+  return openStore(`${rootDir}/${ref.path}`);
+}
+
+export function openStreamStore(rootDir: string, stream: string): Store {
+  const domain = storeDomainForStream(stream);
+  const ref = ensureDomain(rootDir, domain, stream);
+  return openStore(`${rootDir}/${ref.path}`);
+}
+
+/**
+ * Umbrella store: one manifest at <rootDir>/manifest.json, one sqlite DB under
+ * <rootDir>/domains/<stream>/store.db for each stream/domain. This is a router
+ * over per-domain stores, not a wrapper around the old monolithic file.
+ */
+export function openWorkspaceStore(rootDir: string): Store {
+  fs().__fs_mkdir(rootDir);
+  for (const stream of EDITOR_STORE_STREAMS) ensureDomain(rootDir, storeDomainForStream(stream), stream);
+  const stores = new Map<string, Store>();
+
+  const storeForDomain = (domain: string, stream?: string): Store => {
+    const ref = ensureDomain(rootDir, domain, stream);
+    const cached = stores.get(domain);
+    if (cached) return cached;
+    const store = openStore(`${rootDir}/${ref.path}`);
+    stores.set(domain, store);
+    return store;
+  };
+
+  const storeForStream = (stream: string): Store => storeForDomain(storeDomainForStream(stream), stream);
+
+  return {
+    defineStream: <State, Event>(def: StreamDef<State, Event>): StreamHandle<State, Event> =>
+      storeForStream(def.name).defineStream(def),
+    undoPoint: (): number => {
+      let seq = 0;
+      for (const store of stores.values()) seq = Math.max(seq, store.undoPoint());
+      return seq;
+    },
+    materializeSnapshots: (): string[] => {
+      const written: string[] = [];
+      for (const store of stores.values()) written.push(...store.materializeSnapshots());
+      return written;
+    },
+    loadSnapshot: <State>(name: string) => storeForStream(name).loadSnapshot<State>(name),
+    exportBackup: (destDir: string): string[] => {
+      const host = fs();
+      host.__fs_mkdir(destDir);
+      const copied: string[] = [];
+      for (const [domain, store] of stores) {
+        copied.push(...store.exportBackup(`${destDir}/${domain}`));
+      }
+      const manifest = readStoreManifest(rootDir);
+      const manifestPath = `${destDir}/${STORE_MANIFEST}`;
+      host.__fs_write(manifestPath, JSON.stringify(manifest, null, 2));
+      copied.push(manifestPath);
+      return copied;
+    },
+    quarantine: () => {
+      const records: QuarantinedRecord[] = [];
+      for (const store of stores.values()) records.push(...store.quarantine());
+      return records;
+    },
+  };
 }
 
 /** tolerant .jsonl scan for INGEST — the old backing's reader, kept verbatim:

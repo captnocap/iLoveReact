@@ -16,7 +16,7 @@
 // the game becomes THIS output; the boot will load data/snapshots/, V20). The
 // green light exists now so it never goes dark.
 
-import { openStore } from '../data';
+import { openStreamStore } from '../data';
 import { GAME_COMMANDS, GAME_LOOP, GAME_PATHING, GAME_PHYSICS, type GameCommandState } from '../game';
 
 declare const globalThis: any;
@@ -101,7 +101,7 @@ function readScriptLines(path: string): string[] | null {
 }
 
 function mountPersistence(game: HeadlessGame): void {
-  const store = openStore('zig-out/game/headless-data');
+  const store = openStreamStore('zig-out/game/headless-data', 'commands');
   const stream = store.defineStream<SavedCommandState, CommandSaveEvent>({
     name: 'commands',
     initial: () => null,

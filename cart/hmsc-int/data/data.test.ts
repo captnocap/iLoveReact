@@ -11,12 +11,13 @@
 // PROCESSES hammering one stream with zero corruption and a preserved total
 // order.
 
-import { openStore } from './index';
+import { openStore, openWorkspaceStore } from './index';
 import { assert, assertEqual, assertThrows, finish, test } from '../game/_testkit';
 
 declare const globalThis: any;
 
 const ROOT = 'zig-out/game/test-data';
+const WORKSPACE_ROOT = 'zig-out/game/test-data-workspace';
 
 // ── hammer-child mode (the two-writer proof re-execs this very bundle) ──
 // `tools/v8cli <this bundle> --hammer-child <root> <count> <writer>` opens
@@ -67,6 +68,18 @@ function wipeScratch(): void {
   ]) globalThis.__fs_remove?.(path);
 }
 
+function wipeWorkspaceScratch(): void {
+  for (const path of [
+    `${WORKSPACE_ROOT}/manifest.json`,
+    `${WORKSPACE_ROOT}/store.db`, `${WORKSPACE_ROOT}/store.db-wal`, `${WORKSPACE_ROOT}/store.db-shm`,
+    `${WORKSPACE_ROOT}/domains/world/store.db`, `${WORKSPACE_ROOT}/domains/world/store.db-wal`, `${WORKSPACE_ROOT}/domains/world/store.db-shm`,
+    `${WORKSPACE_ROOT}/domains/world/snapshots/world.snapshot.json`,
+    `${WORKSPACE_ROOT}/domains/world/snapshots/items.snapshot.json`,
+    `${WORKSPACE_ROOT}/domains/items/store.db`, `${WORKSPACE_ROOT}/domains/items/store.db-wal`, `${WORKSPACE_ROOT}/domains/items/store.db-shm`,
+    `${WORKSPACE_ROOT}/domains/items/snapshots/items.snapshot.json`,
+  ]) globalThis.__fs_remove?.(path);
+}
+
 test('a stream without snapshot support cannot be registered (V20 guard)', () => {
   wipeScratch();
   const store = openStore(ROOT);
@@ -91,6 +104,30 @@ test('appends land in the concern log and fold into the materialized state', () 
   assert(dump.some((p) => p.endsWith('world.jsonl')), 'the backup must dump the stream');
   const text = globalThis.__fs_read(`${ROOT}/backup/world.jsonl`);
   assertEqual(text.trim().split('\n').length, 2, 'the log must carry one record line per event');
+});
+
+test('umbrella manifest routes streams to separate domain databases', () => {
+  wipeWorkspaceScratch();
+  const workspace = openWorkspaceStore(WORKSPACE_ROOT);
+  const world = workspace.defineStream(WORLD);
+  const items = workspace.defineStream({ ...WORLD, name: 'items' });
+  world.append({ place: 'road' });
+  items.append({ place: 'bat' });
+  const written = workspace.materializeSnapshots();
+
+  const manifest = JSON.parse(globalThis.__fs_read(`${WORKSPACE_ROOT}/manifest.json`));
+  assertEqual(manifest.domains.world.path, 'domains/world', 'world domain is located by the master manifest');
+  assertEqual(manifest.domains.items.path, 'domains/items', 'items domain is located by the master manifest');
+  assertEqual(Object.keys(manifest.domains).sort().join(','),
+    'activities,assist3d,characters,clothing-variants,cutout,items,materials,missions,sessions,tuning,vehicles,voxels,world',
+    'the master manifest predeclares every editor stream domain');
+  assert(written.some((p) => p.endsWith('domains/world/snapshots/world.snapshot.json')), 'world snapshot lands under the world domain');
+  assert(written.some((p) => p.endsWith('domains/items/snapshots/items.snapshot.json')), 'items snapshot lands under the items domain');
+
+  const worldDbItems = openStore(`${WORKSPACE_ROOT}/domains/world`).defineStream({ ...WORLD, name: 'items' });
+  assertEqual(worldDbItems.length(), 0, 'items are not stored inside the world DB');
+  const reopenedWorld = openStore(`${WORKSPACE_ROOT}/domains/world`).defineStream(WORLD);
+  assertEqual(reopenedWorld.state().placed.join(','), 'road', 'the world DB reopens independently');
 });
 
 test('the undo chain survives sessions: a fresh open replays the same state', () => {

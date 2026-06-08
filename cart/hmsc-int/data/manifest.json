@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "domains": {
+    "activities": {
+      "path": "domains/activities",
+      "streams": [
+        "activities"
+      ]
+    },
+    "assist3d": {
+      "path": "domains/assist3d",
+      "streams": [
+        "assist3d"
+      ]
+    },
+    "characters": {
+      "path": "domains/characters",
+      "streams": [
+        "characters"
+      ]
+    },
+    "clothing-variants": {
+      "path": "domains/clothing-variants",
+      "streams": [
+        "clothing-variants"
+      ]
+    },
+    "cutout": {
+      "path": "domains/cutout",
+      "streams": [
+        "cutout"
+      ]
+    },
+    "items": {
+      "path": "domains/items",
+      "streams": [
+        "items"
+      ]
+    },
+    "materials": {
+      "path": "domains/materials",
+      "streams": [
+        "materials"
+      ]
+    },
+    "missions": {
+      "path": "domains/missions",
+      "streams": [
+        "missions"
+      ]
+    },
+    "sessions": {
+      "path": "domains/sessions",
+      "streams": [
+        "sessions"
+      ]
+    },
+    "tuning": {
+      "path": "domains/tuning",
+      "streams": [
+        "tuning"
+      ]
+    },
+    "vehicles": {
+      "path": "domains/vehicles",
+      "streams": [
+        "vehicles"
+      ]
+    },
+    "voxels": {
+      "path": "domains/voxels",
+      "streams": [
+        "voxels"
+      ]
+    },
+    "world": {
+      "path": "domains/world",
+      "streams": [
+        "world"
+      ]
+    }
+  }
+}

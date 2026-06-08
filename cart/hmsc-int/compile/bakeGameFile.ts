@@ -28,7 +28,7 @@ import { bytesToBase64 } from '@reactjit/workspace';
 import { writeGameFile } from '@reactjit/workspace/gamefile';
 import { lastPointerPath, sessionPathFor } from '@reactjit/workspace';
 import { readFile } from '@reactjit/hooks/fs';
-import { openStore } from '../data';
+import { openStreamStore } from '../data';
 import { worldStream, piecesForMap } from '@game';
 import type { PlacedBuildPiece } from '@game';
 
@@ -61,7 +61,7 @@ function activeStem(): string | null {
  *  Returns [] (with a warning) if the store can't be opened. */
 function readPlacedPieces(stem: string | null): PlacedBuildPiece[] {
   try {
-    const store = openStore(EDITOR_DATA_ROOT);
+    const store = openStreamStore(EDITOR_DATA_ROOT, 'world');
     const world = store.defineStream(worldStream);
     const pieces = piecesForMap(world.state(), stem ?? '', { legacyMapName: null });
     warn(`[bake] read ${pieces.length} placed pieces (scoped to map=${stem ?? '<none>'})`);
