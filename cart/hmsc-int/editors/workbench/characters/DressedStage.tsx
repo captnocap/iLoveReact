@@ -15,7 +15,6 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Pressable, Row, Scene3D, Text } from '@reactjit/runtime/primitives';
-import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { GAME_ANIMATION } from '../../../game/animation';
 import { GAME_CHROME } from '../../../game/chrome';
 import { HED_ANIM_FRAMES, type HedAnimation } from '../../../game/figure/hed';
@@ -111,11 +110,6 @@ export function DressedStage(props: {
     defaults: { dist: 4.2, look: { yaw: 20, pitch: 12 }, flyPose: { pos: [0, 1.5, -3.4], yaw: 0, pitch: -4 }, mode: 'orbit' },
   });
 
-  // draft undo/redo stay reachable while dressing/posing (parity §4)
-  useIFTTT('key:ctrl+z', () => s.undo());
-  useIFTTT('key:ctrl+y', () => s.redo());
-  useIFTTT('key:ctrl+shift+z', () => s.redo());
-
   const hint = s.status ?? props.idleHint;
 
   return (
@@ -137,8 +131,8 @@ export function DressedStage(props: {
         <Text fontSize={9} color={T.dim} style={{ position: 'absolute', right: 14, top: 14, fontWeight: 800, letterSpacing: 1 }}>{props.caption}</Text>
         <Row style={{ position: 'absolute', left: 14, top: 14, gap: 8 }}>
           <Chip label="fly" active={camera.camMode === 'fly'} color="good" onPress={() => camera.setCamMode(camera.camMode === 'fly' ? 'orbit' : 'fly')} />
-          <Chip label="undo ⌃Z" onPress={s.undo} />
-          <Chip label="redo ⌃Y" onPress={s.redo} />
+          <Chip label="undo ⌃Z" tooltip="Undo · Ctrl+Z" onPress={s.undo} />
+          <Chip label="redo ⌃Y" tooltip="Redo · Ctrl+Y / Ctrl+Shift+Z" onPress={s.redo} />
         </Row>
         {camera.camMode === 'fly' ? (
           <Text fontSize={10} color={T.dim} style={{ position: 'absolute', right: 14, bottom: 14 }}>

@@ -8,11 +8,12 @@ import type { WorkbenchSource } from '../../../shell/Workbench';
 import { characterSourceCore } from './panel';
 import type { CharacterStore, CharacterLens } from './store';
 import { CharacterStage } from './Stage';
+import { paintBenchStore } from '../paint/live';
 
 export { characterPanel, CHARACTER_LENSES } from './panel';
 
 export function charactersSource(store?: CharacterStore): WorkbenchSource<CharacterStore> {
-  const core = characterSourceCore(store);
+  const core = characterSourceCore(store, paintBenchStore());
   return {
     ...core,
     // the demonstration surface: 3D grab-sculpt (FIGURE/PART), the unwrap

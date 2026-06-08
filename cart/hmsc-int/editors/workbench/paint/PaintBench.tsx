@@ -68,6 +68,7 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
     backend,
     session: null, // saves are the labeled commits (the store's routing)
     initial: work.initial,
+    hotkeys: false, // Workbench shell owns ctrl+z/y/s uniformly.
   });
   store.painterApi.current = {
     buildDocument: s.buildDocument,
@@ -78,6 +79,8 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
       return (cfg?.colors ?? s.defaults.colors).slice();
     },
     addImageLayer: s.addImageLayer,
+    undo: s.undo,
+    redo: s.redo,
   };
 
   // BRUSHTWIG-0606 (carried): a restored document must not clobber the live
@@ -223,7 +226,7 @@ function BenchTarget({ store }: { store: PaintBenchStore }) {
             tooltip="depth hint intensity — the same P2 dial as /settings"
           />
         ) : null}
-        <Chip label={saveLabel} color={store.edited ? 'good' : 'dim'} onPress={store.saveCurrent} />
+        <Chip label={saveLabel} color={store.edited ? 'good' : 'dim'} tooltip={`${saveLabel} · Ctrl+S`} onPress={store.saveCurrent} />
         <Chip label="extract cutout" color={store.edited ? 'accent' : 'dim'} onPress={store.extractCurrent} />
       </Row>
       <CutoutStatusBar s={s} edited={store.edited} lastSavedAt={store.lastSavedAt} />

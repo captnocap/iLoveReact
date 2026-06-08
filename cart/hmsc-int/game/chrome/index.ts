@@ -448,10 +448,11 @@ function colorFor(tone?: LabChromeTone | string): string {
   return tone in CHROME_TOKENS.tone ? CHROME_TOKENS.tone[tone as LabChromeTone] : tone;
 }
 
-export function Chip(props: { label: string; active?: boolean; color?: LabChromeTone | string; onPress: () => void }) {
+export function Chip(props: { label: string; active?: boolean; color?: LabChromeTone | string; tooltip?: string; onPress: () => void }) {
   const color = colorFor(props.color);
   return e(Pressable, {
     onPress: props.onPress,
+    tooltip: props.tooltip,
     style: {
       paddingLeft: CHROME_LAYOUT.chip.paddingX,
       paddingRight: CHROME_LAYOUT.chip.paddingX,

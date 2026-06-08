@@ -29,7 +29,6 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Col, Effect, Paintable, Pressable, Row, Scene3D, ScrollView, Text } from '@reactjit/runtime/primitives';
 import { usePaintable, type PaintableHandle } from '@reactjit/runtime/hooks/usePaintable';
 import { useFileDrop } from '@reactjit/runtime/hooks/useFileDrop';
-import { useIFTTT } from '@reactjit/runtime/hooks/useIFTTT';
 import { type Solved } from '../../../game/camera';
 import { GAME_CHROME } from '../../../game/chrome';
 import { buildMeshFrame } from '../../../game/figure/rig';
@@ -215,14 +214,8 @@ export function CharacterStage(props: { store: CharacterStore; lens: CharacterLe
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the rev IS the signal
   }, [s.installRev]);
 
-  // ── hotkeys (K1) + file drops (E1, J1-J2) — live only while mounted.
-  // In the PAINT lens the shared painter owns ctrl+z/y (its own hotkey map);
-  // the draft undo would double-fire — gate through the live lens. ──────────
-  const lensRef = useRef(lens);
-  lensRef.current = lens;
-  useIFTTT('key:ctrl+z', () => { if (lensRef.current !== 'paint') s.undo(); });
-  useIFTTT('key:ctrl+y', () => { if (lensRef.current !== 'paint') s.redo(); });
-  useIFTTT('key:ctrl+shift+z', () => { if (lensRef.current !== 'paint') s.redo(); });
+  // ── file drops (E1, J1-J2) — live only while mounted. Keyboard undo/redo
+  // belongs to the Workbench shell so every source/lens hits the same actions.
   useFileDrop((path) => s.dropFile(path));
 
   // ── the render derivation (figureFrame.tsx — the ONE copy). The mesh
