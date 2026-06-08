@@ -5552,7 +5552,8 @@ done
   ];
   var BAKE_ENTRY = "cart/hmsc-int/compile/bakeGameFile.ts";
   var BAKE_BUNDLE = `${OUT_DIR}/hmsc-gamefile-bake.js`;
-  var BAKED_GAMEFILE = `${OUT_DIR}/hmsc.gamefile.b64`;
+  var BAKED_GAMEFILE = `${OUT_DIR}/hmsc.gamefile`;
+  var CONTENT_STORE_DIR = `${OUT_DIR}/contentstore`;
   var FIXTURE_GAMEFILE = "framework/testing/fixtures/gamefile_roundtrip.b64";
   var ORACLE_SMOKE_QUERIES = [
     "physics",
@@ -5883,13 +5884,54 @@ if (failures.length > 0) {
     }
     const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${BAKE_BUNDLE}`]);
     if (gen.stderr.trim()) err(gen.stderr.trim());
-    const tape = gen.stdout.trim();
-    if (gen.code !== 0 || !tape) {
+    const tapeTransport = gen.stdout.trim();
+    if (gen.code !== 0 || !tapeTransport) {
       err("[game] bake FAILED: no game-file produced from the authored world");
       return false;
     }
-    fsWrite(`${root}/${BAKED_GAMEFILE}`, tape);
-    out("[game] baked the authored hmsc world -> game-file");
+    let tapeBase64 = tapeTransport;
+    let assets = [];
+    if (tapeTransport.startsWith("{")) {
+      try {
+        const envelope = JSON.parse(tapeTransport);
+        tapeBase64 = String(envelope.gamefile ?? "");
+        assets = Array.isArray(envelope.assets) ? envelope.assets : [];
+      } catch (error2) {
+        err(`[game] bake FAILED: malformed game-file envelope: ${String(error2?.message ?? error2)}`);
+        return false;
+      }
+    }
+    if (!tapeBase64) {
+      err("[game] bake FAILED: game-file envelope carried no game-file bytes");
+      return false;
+    }
+    const gamefilePath = `${root}/${BAKED_GAMEFILE}`;
+    fsMkdir(dirOf(gamefilePath));
+    const write = spawnSync("sh", ["-c", `base64 -d > ${shellQuote(gamefilePath)}`], tapeBase64);
+    if (write.stderr.trim()) err(write.stderr.trim());
+    if (write.code !== 0) {
+      err("[game] bake FAILED: could not write raw game-file bytes");
+      return false;
+    }
+    const storeDir = `${root}/${CONTENT_STORE_DIR}`;
+    fsMkdir(storeDir);
+    for (const asset of assets) {
+      if (!/^[0-9a-f]{64}$/.test(asset.hash) || !asset.base64) {
+        err("[game] bake FAILED: malformed content-addressed asset envelope");
+        return false;
+      }
+      const assetPath = `${storeDir}/${asset.hash}`;
+      const assetWrite = spawnSync("sh", ["-c", `base64 -d > ${shellQuote(assetPath)}`], asset.base64);
+      if (assetWrite.stderr.trim()) err(assetWrite.stderr.trim());
+      if (assetWrite.code !== 0) {
+        err(`[game] bake FAILED: could not write content-addressed asset ${asset.hash}`);
+        return false;
+      }
+    }
+    const stat = tryFsStat(gamefilePath);
+    const rawBytes = stat?.size ?? 0;
+    const assetBytes = assets.reduce((n, asset) => n + (asset.bytes ?? 0), 0);
+    out(`[game] baked the authored hmsc world -> raw game-file (${rawBytes} bytes; b64 transport was ${tapeBase64.length} bytes; installed ${assets.length} asset(s), ${assetBytes} bytes)`);
     return true;
   }
   function resolveGameFile(root, useFixture) {

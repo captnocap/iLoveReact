@@ -36,6 +36,15 @@ fn offsetOf(buffer: []const u8, slice: []const u8) usize {
     return @intFromPtr(slice.ptr) - @intFromPtr(buffer.ptr);
 }
 
+fn writeInstalledAsset(dir: std.fs.Dir, payload: []const u8) !void {
+    var hash: [gamefile.HASH_BYTES]u8 = undefined;
+    std.crypto.hash.sha2.Sha256.hash(payload, &hash, .{});
+    const hex = std.fmt.bytesToHex(hash, .lower);
+    var file = try dir.createFile(hex[0..], .{ .truncate = true });
+    defer file.close();
+    try file.writeAll(payload);
+}
+
 test "TS-written game file: three streams round-trip byte/value identical" {
     const bytes = loadFixtureBytes(testing.allocator) catch |e| {
         std.debug.print("gamefile fixture missing ({any}); run `rjit game verify`\n", .{e});
@@ -104,6 +113,41 @@ test "asset vocabulary installs into the content store and references resolve" {
         const hex = std.fmt.bytesToHex(hash, .lower);
         try tmp.dir.access(hex[0..], .{});
     }
+}
+
+test "manifest-only asset resolves when its content-addressed bytes are already installed" {
+    const bytes = try loadFixtureBytes(testing.allocator);
+    defer testing.allocator.free(bytes);
+
+    const probe = try gamefile.readGameFile(testing.allocator, bytes);
+    const payload = try testing.allocator.dupe(u8, probe.blobs[0].payload);
+    probe.deinit(testing.allocator);
+    defer testing.allocator.free(payload);
+
+    const manifest_only = try testing.allocator.dupe(u8, bytes);
+    defer testing.allocator.free(manifest_only);
+    const dir_offset = std.mem.readInt(u32, manifest_only[12..16], .little);
+    const count = std.mem.readInt(u32, manifest_only[8..12], .little);
+    var i: usize = 0;
+    var removed = false;
+    while (i < count) : (i += 1) {
+        const at = @as(usize, dir_offset) + i * 24;
+        if (std.mem.readInt(u32, manifest_only[at..][0..4], .little) == gamefile.LumpId.asset_blob) {
+            std.mem.writeInt(u32, manifest_only[at..][0..4], 999, .little);
+            removed = true;
+            break;
+        }
+    }
+    try testing.expect(removed);
+
+    const file = try gamefile.readGameFile(testing.allocator, manifest_only);
+    defer file.deinit(testing.allocator);
+    try testing.expectEqual(@as(usize, 2), file.blobs.len);
+
+    var tmp = testing.tmpDir(.{});
+    defer tmp.cleanup();
+    try writeInstalledAsset(tmp.dir, payload);
+    try file.installAndValidate(testing.allocator, tmp.dir);
 }
 
 test "negative control: a corrupted asset blob fails the hash check loudly" {

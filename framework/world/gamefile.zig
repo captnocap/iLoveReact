@@ -89,8 +89,9 @@ pub const GameFile = struct {
     }
 
     /// The dependency gate before construction: verify+install every asset blob,
-    /// confirm every manifest asset landed, and confirm every stream reference
-    /// resolves. `dir` is the content store. Fails loudly on the first violation.
+    /// confirm every manifest asset is either embedded or already installed in
+    /// the content store, and confirm every stream reference resolves. `dir` is
+    /// the content store. Fails loudly on the first violation.
     pub fn installAndValidate(self: GameFile, allocator: std.mem.Allocator, dir: std.fs.Dir) Error!void {
         var installed: std.ArrayList([HASH_BYTES]u8) = .{};
         defer installed.deinit(allocator);
@@ -103,7 +104,8 @@ pub const GameFile = struct {
         }
 
         for (self.manifest) |entry| {
-            if (!containsHash(installed.items, entry.hash)) return Error.MissingAsset;
+            if (containsHash(installed.items, entry.hash)) continue;
+            if (!try installedAssetMatches(allocator, dir, entry)) return Error.MissingAsset;
         }
 
         try validateRefs(self.logic, self.manifest);
@@ -224,6 +226,15 @@ fn containsHash(haystack: []const [HASH_BYTES]u8, needle: [HASH_BYTES]u8) bool {
         if (std.mem.eql(u8, &entry, &needle)) return true;
     }
     return false;
+}
+
+fn installedAssetMatches(allocator: std.mem.Allocator, dir: std.fs.Dir, entry: ManifestEntry) Error!bool {
+    const hex = std.fmt.bytesToHex(entry.hash, .lower);
+    const bytes = dir.readFileAlloc(allocator, hex[0..], @as(usize, entry.length) + 1) catch return false;
+    defer allocator.free(bytes);
+    if (bytes.len != entry.length) return false;
+    const actual = sha256(bytes);
+    return std.mem.eql(u8, &actual, &entry.hash);
 }
 
 fn validateRefs(stream: Stream, manifest: []const ManifestEntry) Error!void {

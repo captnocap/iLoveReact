@@ -34,6 +34,7 @@ export interface GameAsset {
   key: number; // stable id the streams reference
   kind: number; // asset-kind tag (building/texture/model/skin…)
   bytes: Uint8Array; // the baked payload; its sha256 IS its address
+  embed?: boolean; // false when the bake preinstalls this content-addressed asset
 }
 
 /** A composed stream: the asset keys it references + its own RLE/container data. */
@@ -104,6 +105,7 @@ export function writeGameFile(input: GameFileInput): Uint8Array {
     { type: GAME_LUMP.ASSET_MANIFEST, encoding: 'raw', data: encodeManifest(input.assets) },
   ];
   for (const asset of input.assets) {
+    if (asset.embed === false) continue;
     lumps.push({ type: GAME_LUMP.ASSET_BLOB, encoding: 'raw', data: encodeBlob(asset.bytes) });
   }
   return writeLumpContainer(lumps);

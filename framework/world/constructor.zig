@@ -24,6 +24,8 @@ const SCENE_ENV_FLOATS: usize = 35;
 const PLAYER_MODEL_VERSION: u32 = 2;
 const PLAYER_ANIMATION_VERSION: u32 = 1;
 const PLAYER_ANIMATION_HASH_BYTES: usize = 32;
+const PLAYER_MODEL_ASSET_KEY: u32 = 2001;
+const PLAYER_ANIMATION_ASSET_KEY: u32 = 2002;
 
 /// The scene render environment (lighting / sky / camera), DATA the loader
 /// consumes instead of hardcoding the look (USER req_0308). Defaults mirror
@@ -345,6 +347,19 @@ fn decodePlayerAnimation(allocator: std.mem.Allocator, data: []const u8) Error!P
     return decodePlayerAnimationPayload(allocator, payload, expected);
 }
 
+fn streamReferences(stream: gamefile.Stream, key: u32) bool {
+    for (stream.refs) |ref| {
+        if (ref == key) return true;
+    }
+    return false;
+}
+
+fn readInstalledAsset(allocator: std.mem.Allocator, file: gamefile.GameFile, store_dir: std.fs.Dir, key: u32) Error!?[]u8 {
+    const hash = file.assetHashForKey(key) orelse return null;
+    const hex = std.fmt.bytesToHex(hash, .lower);
+    return store_dir.readFileAlloc(allocator, hex[0..], 64 << 20) catch return Error.MissingAsset;
+}
+
 /// Construct a Scene from a game-file's bytes: validate the dependency gate
 /// against `store_dir`, then decode the map stream's tile grid. The asset
 /// vocabulary is installed/verified as a side effect (the gate must pass before
@@ -383,14 +398,22 @@ pub fn construct(allocator: std.mem.Allocator, bytes: []const u8, store_dir: std
         decodeEnvironment(lump.data)
     else
         .{};
+    var player_model_asset: ?[]u8 = null;
+    defer if (player_model_asset) |bytes_model| allocator.free(bytes_model);
     const player_model: []PlayerModelGroup = if (mapfile.findLump(map_lumps, mapfile.LumpType.player_model)) |lump|
         try decodePlayerModel(allocator, lump.data)
-    else
-        try allocator.alloc(PlayerModelGroup, 0);
+    else if (streamReferences(file.map, PLAYER_MODEL_ASSET_KEY)) blk: {
+        player_model_asset = try readInstalledAsset(allocator, file, store_dir, PLAYER_MODEL_ASSET_KEY);
+        break :blk if (player_model_asset) |bytes_model| try decodePlayerModel(allocator, bytes_model) else try allocator.alloc(PlayerModelGroup, 0);
+    } else try allocator.alloc(PlayerModelGroup, 0);
+    var player_animation_asset: ?[]u8 = null;
+    defer if (player_animation_asset) |bytes_animation| allocator.free(bytes_animation);
     const player_animation = if (mapfile.findLump(map_lumps, mapfile.LumpType.player_animation)) |lump|
         try decodePlayerAnimation(allocator, lump.data)
-    else
-        emptyPlayerAnimationSet();
+    else if (streamReferences(file.map, PLAYER_ANIMATION_ASSET_KEY)) blk: {
+        player_animation_asset = try readInstalledAsset(allocator, file, store_dir, PLAYER_ANIMATION_ASSET_KEY);
+        break :blk if (player_animation_asset) |bytes_animation| try decodePlayerAnimation(allocator, bytes_animation) else emptyPlayerAnimationSet();
+    } else emptyPlayerAnimationSet();
 
     // grid.values ownership transfers to the Scene; do not deinit grid.
     return .{

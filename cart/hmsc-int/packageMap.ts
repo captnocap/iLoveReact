@@ -15,6 +15,7 @@ import {
   quantizeHeightfield,
   readLumpContainer,
   textBytes,
+  type LumpInput,
   writeLumpContainer,
 } from '@reactjit/workspace';
 import { mkdir, writeFile, writeFileBase64Atomic } from '@reactjit/hooks/fs';
@@ -157,6 +158,7 @@ export function createHmscMapfile(
   pieces: readonly PlacedBuildPiece[] = [],
   floors: readonly ChunkFloor[] = [],
   env: SceneEnvironment = DEFAULT_SCENE_ENVIRONMENT,
+  opts: { includePlayerLumps?: boolean } = {},
 ): Uint8Array {
   const bounds = mapBounds(state);
   const strings = stringTable(state);
@@ -177,11 +179,12 @@ export function createHmscMapfile(
   // count rides in the lump so the loader frames the camera on the structures.
   const geometry = buildWorldInstances(state, pieces, floors);
   const instances = encodeInstanceLump(geometry.instances, geometry.pieces);
-  const playerModelData = buildDefaultPlayerModel();
-  const playerModel = encodePlayerModelLump(playerModelData);
-  const playerAnimation = encodePlayerAnimationLump(buildDefaultPlayerAnimation(playerModelData.groups.length));
+  const includePlayerLumps = opts.includePlayerLumps ?? true;
+  const playerModelData = includePlayerLumps ? buildDefaultPlayerModel() : null;
+  const playerModel = playerModelData ? encodePlayerModelLump(playerModelData) : null;
+  const playerAnimation = playerModelData ? encodePlayerAnimationLump(buildDefaultPlayerAnimation(playerModelData.groups.length)) : null;
 
-  return writeLumpContainer([
+  const lumps: LumpInput[] = [
     { type: MAP_LUMP.STRINGS, encoding: 'text', data: textBytes(stringsText(strings)) },
     { type: MAP_LUMP.TILES, encoding: 'rle16', data: encodeBinaryRleGrid(tiles, 16) },
     { type: MAP_LUMP.HEIGHTS, encoding: 'rle16', data: encodeBinaryRleGrid(heights.quantized, 16) },
@@ -194,12 +197,17 @@ export function createHmscMapfile(
     // The scene render environment (lighting / sky / camera) as DATA — the
     // loader reads this instead of hardcoding the look (compile/sceneEnv.ts).
     { type: MAP_LUMP.ENVIRONMENT, encoding: 'raw', data: encodeEnvironmentLump(env) },
+  ];
+  if (playerModel) {
     // The compiled player figure from @game/figure. Runtime movement changes
     // only the player transform; the model itself is data.
-    { type: MAP_LUMP.PLAYER_MODEL, encoding: 'raw', data: playerModel },
+    lumps.push({ type: MAP_LUMP.PLAYER_MODEL, encoding: 'raw', data: playerModel });
+  }
+  if (playerAnimation) {
     // Content-addressed transform clips for the compiled player figure.
-    { type: MAP_LUMP.PLAYER_ANIMATION, encoding: 'raw', data: playerAnimation },
-  ]);
+    lumps.push({ type: MAP_LUMP.PLAYER_ANIMATION, encoding: 'raw', data: playerAnimation });
+  }
+  return writeLumpContainer(lumps);
 }
 
 export function hmscManifest(): HmscPackageManifest {

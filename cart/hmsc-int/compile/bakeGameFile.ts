@@ -26,14 +26,20 @@ import { deserializeMap } from '../mapStore';
 import { floorsFromEditorWorld, type ChunkFloor } from '../chunkFloor';
 import { bytesToBase64 } from '@reactjit/workspace';
 import { writeGameFile } from '@reactjit/workspace/gamefile';
+import { sha256Hex } from '@reactjit/workspace/sha256';
 import { lastPointerPath, sessionPathFor } from '@reactjit/workspace';
 import { readFile } from '@reactjit/hooks/fs';
 import { openStreamStore } from '../data';
 import { worldStream, piecesForMap } from '@game';
 import type { PlacedBuildPiece } from '@game';
+import { buildDefaultPlayerAnimation, buildDefaultPlayerModel, encodePlayerAnimationLump, encodePlayerModelLump } from './playerModel';
 
 const CART = 'hmsc-int';
 const EDITOR_DATA_ROOT = 'cart/hmsc-int/data';
+const PLAYER_MODEL_ASSET_KEY = 2001;
+const PLAYER_ANIMATION_ASSET_KEY = 2002;
+const ASSET_KIND_PLAYER_MODEL = 9;
+const ASSET_KIND_PLAYER_ANIMATION = 10;
 
 const warn = (msg: string): void => {
   // severity-warn so it reaches the bake's stderr (the CLI captures it).
@@ -101,14 +107,31 @@ const floors = readPaintedFloors(stem);
 // game's WorldStatics lights the scene with, so the loader's lighting/sky match.
 const sky = buildHmscSky(state.config.sky.hour, state.config.sky.weather, state.config.sky.gloom);
 const env = sceneEnvironmentFromSky(sky);
-const mapContainer = createHmscMapfile(state, pieces, floors, env);
+const mapContainer = createHmscMapfile(state, pieces, floors, env, { includePlayerLumps: false });
+const playerModelData = buildDefaultPlayerModel();
+const playerModel = encodePlayerModelLump(playerModelData);
+const playerAnimation = encodePlayerAnimationLump(buildDefaultPlayerAnimation(playerModelData.groups.length));
+
+const playerModelHash = sha256Hex(playerModel);
+const playerAnimationHash = sha256Hex(playerAnimation);
+warn(`[bake] prepared player model asset ${playerModelHash} (${playerModel.byteLength} bytes)`);
+warn(`[bake] prepared player animation asset ${playerAnimationHash} (${playerAnimation.byteLength} bytes)`);
 
 const file = writeGameFile({
   logic: { refs: [], data: new Uint8Array(0) },
-  map: { refs: [], data: mapContainer },
+  map: { refs: [PLAYER_MODEL_ASSET_KEY, PLAYER_ANIMATION_ASSET_KEY], data: mapContainer },
   skins: { refs: [], data: new Uint8Array(0) },
-  assets: [],
+  assets: [
+    { key: PLAYER_MODEL_ASSET_KEY, kind: ASSET_KIND_PLAYER_MODEL, bytes: playerModel, embed: false },
+    { key: PLAYER_ANIMATION_ASSET_KEY, kind: ASSET_KIND_PLAYER_ANIMATION, bytes: playerAnimation, embed: false },
+  ],
 });
 
 const emit = (globalThis as any).print ?? console.log;
-emit(bytesToBase64(file));
+emit(JSON.stringify({
+  gamefile: bytesToBase64(file),
+  assets: [
+    { hash: playerModelHash, base64: bytesToBase64(playerModel), bytes: playerModel.byteLength },
+    { hash: playerAnimationHash, base64: bytesToBase64(playerAnimation), bytes: playerAnimation.byteLength },
+  ],
+}));

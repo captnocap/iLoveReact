@@ -35,6 +35,7 @@ const game_physics = @import("framework/game/physics.zig");
 const WIN_W: c_int = 800;
 const WIN_H: c_int = 600;
 const DEFAULT_FIXTURE = "framework/testing/fixtures/gamefile_roundtrip.b64";
+const RJMP_MAGIC: u32 = 0x504d4a52;
 const STORE_DIR = "zig-out/game/contentstore";
 const MAX_FRAMES: u32 = 600;
 // Instance row: pos3 + rot3 + scale3 + color3 (matches gpu/3d.zig stride>=12).
@@ -161,10 +162,11 @@ fn keyDown(scancode: usize) bool {
     return keys[scancode];
 }
 
-/// Read a game-file. The on-disk fixture is base64 text (the bake writer's
-/// __fs_write is string-only); decode it to the raw RJMP bytes.
+/// Read a game-file. Runtime artifacts are raw RJMP bytes; legacy round-trip
+/// fixtures remain base64 text and are decoded only as a compatibility path.
 fn loadGameFile(allocator: std.mem.Allocator, path: []const u8) ![]u8 {
     const raw = try std.fs.cwd().readFileAlloc(allocator, path, 8 << 20);
+    if (raw.len >= 4 and std.mem.readInt(u32, raw[0..4], .little) == RJMP_MAGIC) return raw;
     defer allocator.free(raw);
     const trimmed = std.mem.trim(u8, raw, " \t\r\n");
     const dec = std.base64.standard.Decoder;
