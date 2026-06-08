@@ -88,6 +88,7 @@ const BUILD_UI = {
   faceSlabThicknessMeters: 0.02,
   faceSlabLiftMeters: 0.012,
   editCutoutWidthMeters: 1.2,
+  doubleWindowCutoutWidthMeters: 2.2,
   editCutoutHeightMeters: 1.2,
   editCutoutLowHeightMeters: 2.2,
   buildingSkinTexturePx: 256,
@@ -457,15 +458,39 @@ function pieceVisualShapes(
     const lift = BUILD_UI.faceSlabLiftMeters;
     const frontV = size.depthMeters / 2 + lift;
     const backV = -size.depthMeters / 2 - lift;
+    const isWindowOpening = edit === 'window' || edit === 'doubleWindow' || edit === 'brokenWindow';
+    const openingW = edit === 'doubleWindow' ? BUILD_UI.doubleWindowCutoutWidthMeters : BUILD_UI.editCutoutWidthMeters;
+    const openingH = BUILD_UI.editCutoutHeightMeters;
+    const openingBottom = piece.y + size.heightMeters * 0.55 - openingH / 2;
+    const openingTop = openingBottom + openingH;
+    const addWallBox = (label: string, u: number, baseY: number, w: number, h: number): void => {
+      if (w <= 0.001 || h <= 0.001) return;
+      shapes.push(box(`${label}.core`, u, 0, baseY, w, h, size.depthMeters, sides));
+      shapes.push(box(`${label}.front`, u, frontV, baseY, w, h, slab, front));
+      shapes.push(box(`${label}.back`, u, backV, baseY, w, h, slab, back));
+    };
     for (const [index, band] of GAME_BUILD.placed.bands(piece as PlacedBuildPiece, pieces).entries()) {
-      const u = (band.u0 + band.u1) / 2;
-      const w = band.u1 - band.u0;
-      const h = band.top - piece.y;
-      shapes.push(box(`band${index}.core`, u, 0, piece.y, w, h, size.depthMeters, sides));
-      shapes.push(box(`band${index}.front`, u, frontV, piece.y, w, h, slab, front));
-      shapes.push(box(`band${index}.back`, u, backV, piece.y, w, h, slab, back));
+      const label = `band${index}`;
+      if (!isWindowOpening) {
+        addWallBox(label, (band.u0 + band.u1) / 2, piece.y, band.u1 - band.u0, band.top - piece.y);
+        continue;
+      }
+      const holeU0 = -openingW / 2;
+      const holeU1 = openingW / 2;
+      const leftU0 = band.u0;
+      const leftU1 = Math.min(band.u1, holeU0);
+      const rightU0 = Math.max(band.u0, holeU1);
+      const rightU1 = band.u1;
+      addWallBox(`${label}.leftJamb`, (leftU0 + leftU1) / 2, piece.y, leftU1 - leftU0, band.top - piece.y);
+      addWallBox(`${label}.rightJamb`, (rightU0 + rightU1) / 2, piece.y, rightU1 - rightU0, band.top - piece.y);
+      const midU0 = Math.max(band.u0, holeU0);
+      const midU1 = Math.min(band.u1, holeU1);
+      if (midU1 > midU0) {
+        addWallBox(`${label}.sill`, (midU0 + midU1) / 2, piece.y, midU1 - midU0, Math.max(0, openingBottom - piece.y));
+        addWallBox(`${label}.header`, (midU0 + midU1) / 2, openingTop, midU1 - midU0, Math.max(0, band.top - openingTop));
+      }
     }
-    if (edit !== undefined) {
+    if (edit !== undefined && !isWindowOpening) {
       const low = edit === 'door' || edit === 'garageDoor' || edit === 'arch';
       const eh = low ? BUILD_UI.editCutoutLowHeightMeters : BUILD_UI.editCutoutHeightMeters;
       const ey = low ? piece.y + eh / 2 : piece.y + size.heightMeters * 0.55;
