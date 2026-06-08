@@ -446,53 +446,46 @@ fn isRampInstance(insts: []const f32, row: usize, stride: usize) bool {
     return @abs(instanceShapeId(insts, row, stride) - SHAPE_RAMP) < 0.5;
 }
 
-fn appendPhysicsRect(allocator: std.mem.Allocator, list: *std.ArrayList(f32), insts: []const f32, row: usize, stride: usize, solid: bool) !void {
+/// The 9 axis-aligned-rect collider floats for one instance row (shared by the
+/// static build and the windowed rebuild).
+fn rectFloats(insts: []const f32, row: usize, stride: usize, solid: bool) [game_physics.RECT_FLOATS]f32 {
     const scale_base: usize = if (stride >= 12) 6 else 3;
     const b = row * stride;
     const sx = @abs(insts[b + scale_base + 0]);
     const sy = @abs(insts[b + scale_base + 1]);
     const sz = @abs(insts[b + scale_base + 2]);
-    const hx = sx * 0.5;
-    const hz = sz * 0.5;
     const top = insts[b + 1] + sy * 0.5;
     const floor = if (solid) insts[b + 1] - sy * 0.5 else -1.0e9;
-    try list.appendSlice(allocator, &[_]f32{
-        insts[b + 0] - hx,
-        insts[b + 2] - hz,
-        insts[b + 0] + hx,
-        insts[b + 2] + hz,
+    return .{
+        insts[b + 0] - sx * 0.5,
+        insts[b + 2] - sz * 0.5,
+        insts[b + 0] + sx * 0.5,
+        insts[b + 2] + sz * 0.5,
         top,
         if (solid) 1 else 0,
         PLAYER_SURFACE_FRICTION,
         PLAYER_SURFACE_RESTITUTION,
         floor,
-    });
+    };
+}
+
+/// The 12 oriented-rect collider floats for one (yawed) instance row.
+fn orientedFloats(insts: []const f32, row: usize, stride: usize, solid: bool) [game_physics.ORIENTED_FLOATS]f32 {
+    const r = rectFloats(insts, row, stride, solid);
+    return .{
+        r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7], r[8],
+        insts[row * stride + 0],
+        insts[row * stride + 2],
+        instanceYawRadians(insts, row, stride),
+    };
+}
+
+fn appendPhysicsRect(allocator: std.mem.Allocator, list: *std.ArrayList(f32), insts: []const f32, row: usize, stride: usize, solid: bool) !void {
+    try list.appendSlice(allocator, &rectFloats(insts, row, stride, solid));
 }
 
 fn appendPhysicsOrientedRect(allocator: std.mem.Allocator, list: *std.ArrayList(f32), insts: []const f32, row: usize, stride: usize, solid: bool) !void {
-    const scale_base: usize = if (stride >= 12) 6 else 3;
-    const b = row * stride;
-    const sx = @abs(insts[b + scale_base + 0]);
-    const sy = @abs(insts[b + scale_base + 1]);
-    const sz = @abs(insts[b + scale_base + 2]);
-    const hx = sx * 0.5;
-    const hz = sz * 0.5;
-    const top = insts[b + 1] + sy * 0.5;
-    const floor = if (solid) insts[b + 1] - sy * 0.5 else -1.0e9;
-    try list.appendSlice(allocator, &[_]f32{
-        insts[b + 0] - hx,
-        insts[b + 2] - hz,
-        insts[b + 0] + hx,
-        insts[b + 2] + hz,
-        top,
-        if (solid) 1 else 0,
-        PLAYER_SURFACE_FRICTION,
-        PLAYER_SURFACE_RESTITUTION,
-        floor,
-        insts[b + 0],
-        insts[b + 2],
-        instanceYawRadians(insts, row, stride),
-    });
+    try list.appendSlice(allocator, &orientedFloats(insts, row, stride, solid));
 }
 
 fn registerRampHeightfield(insts: []const f32, row: usize, stride: usize, slot: usize) bool {
@@ -628,6 +621,117 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, scene: constructor.Scene,
     rects.deinit(allocator);
     oriented.deinit(allocator);
     return .{ .values = values, .rect_count = rect_count, .oriented_count = oriented_count, .heightfield_count = heightfield_count, .clipped_rows = clipped_rows };
+}
+
+// ── spatial collider windowing (huge maps) ─────────────────────────────────
+// When the full collider set overflows MAX_RECTS (a --massive city), collide only
+// the instances NEAR the player, rebuilt as they move, so the whole world is solid
+// in the near field. Local instances bucket into a uniform grid; world-spanning
+// instances (the ground slab, the long road strips) bucket by center into ONE cell,
+// so they are pulled into an ALWAYS list every rebuild includes — that keeps the
+// floor under the player everywhere, not just near the world origin.
+const COLLIDER_CELL_METERS: f32 = 64.0;
+const COLLIDER_WINDOW_CELLS: i32 = 3; // gather ±3 cells around the player (7×7 ≈ 448m)
+
+fn clampCell(v: i32, n: i32) i32 {
+    return @max(0, @min(n - 1, v));
+}
+
+const SpatialGrid = struct {
+    cell: f32,
+    min_x: f32,
+    min_z: f32,
+    cols: i32,
+    rows: i32,
+    starts: []u32, // CSR offsets, len cols*rows+1
+    items: []u32, // local row indices, bucketed by cell
+    always: []u32, // world-spanning rows, included in every rebuild
+
+    fn deinit(self: SpatialGrid, allocator: std.mem.Allocator) void {
+        allocator.free(self.starts);
+        allocator.free(self.items);
+        allocator.free(self.always);
+    }
+
+    fn cellXZ(self: SpatialGrid, x: f32, z: f32) struct { cx: i32, cz: i32 } {
+        const cx = clampCell(@as(i32, @intFromFloat(@floor((x - self.min_x) / self.cell))), self.cols);
+        const cz = clampCell(@as(i32, @intFromFloat(@floor((z - self.min_z) / self.cell))), self.rows);
+        return .{ .cx = cx, .cz = cz };
+    }
+};
+
+fn instIsSpanning(insts: []const f32, row: usize, stride: usize, cell: f32) bool {
+    const scale_base: usize = if (stride >= 12) 6 else 3;
+    const b = row * stride;
+    return @abs(insts[b + scale_base + 0]) > cell or @abs(insts[b + scale_base + 2]) > cell;
+}
+
+fn gridCellIndex(insts: []const f32, row: usize, stride: usize, min_x: f32, min_z: f32, cell: f32, cols: i32, rows: i32) usize {
+    const b = row * stride;
+    const cx = clampCell(@as(i32, @intFromFloat(@floor((insts[b + 0] - min_x) / cell))), cols);
+    const cz = clampCell(@as(i32, @intFromFloat(@floor((insts[b + 2] - min_z) / cell))), rows);
+    return @intCast(cz * cols + cx);
+}
+
+/// Bucket every instance into a uniform grid (local rows) + an always list
+/// (world-spanning rows). One O(n) classify/count pass, a prefix sum, one scatter.
+fn buildSpatialGrid(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize) !SpatialGrid {
+    const cell = COLLIDER_CELL_METERS;
+    var min_x: f32 = std.math.floatMax(f32);
+    var min_z: f32 = std.math.floatMax(f32);
+    var max_x: f32 = -std.math.floatMax(f32);
+    var max_z: f32 = -std.math.floatMax(f32);
+    var i: usize = 0;
+    while (i < inst_count) : (i += 1) {
+        const b = i * stride;
+        min_x = @min(min_x, insts[b + 0]);
+        max_x = @max(max_x, insts[b + 0]);
+        min_z = @min(min_z, insts[b + 2]);
+        max_z = @max(max_z, insts[b + 2]);
+    }
+    const cols = @max(1, @as(i32, @intFromFloat(@floor((max_x - min_x) / cell))) + 1);
+    const rows = @max(1, @as(i32, @intFromFloat(@floor((max_z - min_z) / cell))) + 1);
+    const ncells: usize = @intCast(@as(i64, cols) * @as(i64, rows));
+
+    var starts = try allocator.alloc(u32, ncells + 1);
+    errdefer allocator.free(starts);
+    @memset(starts, 0);
+
+    var local_count: usize = 0;
+    var always_count: usize = 0;
+    i = 0;
+    while (i < inst_count) : (i += 1) {
+        if (instIsSpanning(insts, i, stride, cell)) {
+            always_count += 1;
+        } else {
+            starts[gridCellIndex(insts, i, stride, min_x, min_z, cell, cols, rows) + 1] += 1;
+            local_count += 1;
+        }
+    }
+    var s: usize = 0;
+    while (s < ncells) : (s += 1) starts[s + 1] += starts[s];
+
+    var items = try allocator.alloc(u32, local_count);
+    errdefer allocator.free(items);
+    var always = try allocator.alloc(u32, always_count);
+    errdefer allocator.free(always);
+    var cursor = try allocator.alloc(u32, ncells);
+    defer allocator.free(cursor);
+    @memcpy(cursor, starts[0..ncells]);
+
+    var ai: usize = 0;
+    i = 0;
+    while (i < inst_count) : (i += 1) {
+        if (instIsSpanning(insts, i, stride, cell)) {
+            always[ai] = @intCast(i);
+            ai += 1;
+        } else {
+            const cidx = gridCellIndex(insts, i, stride, min_x, min_z, cell, cols, rows);
+            items[cursor[cidx]] = @intCast(i);
+            cursor[cidx] += 1;
+        }
+    }
+    return .{ .cell = cell, .min_x = min_x, .min_z = min_z, .cols = cols, .rows = rows, .starts = starts, .items = items, .always = always };
 }
 
 fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32, intent: game_physics.movement.Direction, speed: f32, jump_down: bool) void {
@@ -938,6 +1042,10 @@ pub const Runtime = struct {
     piece_count: u32 = 0,
     physics_colliders: PhysicsColliders = undefined,
     has_physics_colliders: bool = false,
+    // Spatial collider windowing: enabled only when the full collider set overflows
+    // MAX_RECTS (a huge --massive map), so normal maps keep their static full set.
+    windowed: bool = false,
+    grid: ?SpatialGrid = null,
     cube: [36 * 8]f32 = undefined,
     ramp_slab: [36 * 8]f32 = undefined,
     shape_batches: ShapeBatches = undefined,
@@ -997,6 +1105,7 @@ pub const Runtime = struct {
         self.kid_list.deinit(self.allocator);
         if (self.has_shape_batches) self.shape_batches.deinit(self.allocator);
         if (self.has_physics_colliders) self.physics_colliders.deinit(self.allocator);
+        if (self.grid) |g| g.deinit(self.allocator);
         if (self.fallback) |f| self.allocator.free(f);
         self.scene.deinit(self.allocator);
         self.* = undefined;
@@ -1049,6 +1158,26 @@ pub const Runtime = struct {
             .z = spawn.z,
             .yaw = authored_yaw,
         };
+        // The static collider set overflowed MAX_RECTS (a huge --massive map): switch
+        // to SPATIAL WINDOWING so collision follows the player and the whole world is
+        // solid in the near field. Build the grid, widen the physics input buffer to
+        // MAX capacity for in-place per-frame refills, and seed the window at spawn.
+        if (self.physics_colliders.clipped_rows > 0) {
+            if (buildSpatialGrid(self.allocator, self.insts, self.inst_count, self.stride)) |g| {
+                const cap = game_physics.INPUT_HEADER_FLOATS + game_physics.MAX_RECTS * game_physics.RECT_FLOATS + game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS;
+                if (self.allocator.alloc(f32, cap)) |buf| {
+                    @memset(buf, 0);
+                    self.allocator.free(self.physics_colliders.values);
+                    self.physics_colliders.values = buf;
+                    self.grid = g;
+                    self.windowed = true;
+                    self.rebuildWindow(spawn.x, spawn.z);
+                    log.print("[loader] spatial collider windowing ON — {d} spanning + grid {d}x{d}; near-field {d} rects + {d} oriented\n", .{ g.always.len, g.cols, g.rows, self.physics_colliders.rect_count, self.physics_colliders.oriented_count });
+                } else |_| {
+                    g.deinit(self.allocator);
+                }
+            } else |_| {}
+        }
         self.camera = .{
             .yaw_degrees = authored_yaw * 180.0 / std.math.pi,
             .pitch_degrees = CAMERA_INITIAL_PITCH_DEGREES,
@@ -1206,6 +1335,95 @@ pub const Runtime = struct {
         setAimMode(&self.camera, aiming);
     }
 
+    /// Emit one instance row's collider into the windowed physics input (floors-first
+    /// over two passes: want_solid=false then true). Mirrors buildPhysicsColliders'
+    /// per-row decision, but writes straight into the preallocated input buffer.
+    fn emitRowCollider(self: *Runtime, row: usize, want_solid: bool, values: []f32, oriented_tmp: []f32, rc: *usize, oc: *usize, hf: *usize, clipped: *usize) void {
+        if (isRampInstance(self.insts, row, self.stride)) {
+            if (want_solid) return; // ramps are heightfields — registered in the floor pass
+            if (hf.* < game_physics.MAX_HEIGHTFIELDS and registerRampHeightfield(self.insts, row, self.stride, hf.*)) hf.* += 1 else clipped.* += 1;
+            return;
+        }
+        const scale_base: usize = if (self.stride >= 12) 6 else 3;
+        const b = row * self.stride;
+        const sx = @abs(self.insts[b + scale_base + 0]);
+        const sy = @abs(self.insts[b + scale_base + 1]);
+        const sz = @abs(self.insts[b + scale_base + 2]);
+        if (sx <= 0.001 or sy <= 0.001 or sz <= 0.001) return;
+        const solid = sy > PHYSICS_SOLID_HEIGHT_METERS;
+        if (solid != want_solid) return;
+        if (@abs(instanceYawRadians(self.insts, row, self.stride)) > 0.0001) {
+            if (oc.* >= game_physics.MAX_ORIENTED) {
+                clipped.* += 1;
+                return;
+            }
+            const of = orientedFloats(self.insts, row, self.stride, solid);
+            @memcpy(oriented_tmp[oc.* * game_physics.ORIENTED_FLOATS ..][0..game_physics.ORIENTED_FLOATS], &of);
+            oc.* += 1;
+        } else {
+            if (rc.* >= game_physics.MAX_RECTS) {
+                clipped.* += 1;
+                return;
+            }
+            const rf = rectFloats(self.insts, row, self.stride, solid);
+            @memcpy(values[game_physics.INPUT_HEADER_FLOATS + rc.* * game_physics.RECT_FLOATS ..][0..game_physics.RECT_FLOATS], &rf);
+            rc.* += 1;
+        }
+    }
+
+    /// Rebuild the player's near-field collider set from the spatial grid: the
+    /// always list (world-spanning floors/walls) plus every local instance in the
+    /// window of cells around (center_x, center_z). Floors-first so the ground always
+    /// wins the cap. Refills the preallocated physics input in place — no allocation.
+    fn rebuildWindow(self: *Runtime, center_x: f32, center_z: f32) void {
+        const grid = self.grid orelse return;
+        const values = self.physics_colliders.values;
+        const need = game_physics.INPUT_HEADER_FLOATS + game_physics.MAX_RECTS * game_physics.RECT_FLOATS + game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS;
+        if (values.len < need) return;
+        var oriented_tmp: [game_physics.MAX_ORIENTED * game_physics.ORIENTED_FLOATS]f32 = undefined;
+        var rc: usize = 0;
+        var oc: usize = 0;
+        var hf: usize = 0;
+        var clipped: usize = 0;
+
+        game_physics.clearHeightfields();
+        for (self.scene.heightfields) |field| {
+            if (hf < game_physics.MAX_HEIGHTFIELDS and registerSceneHeightfield(field, hf)) hf += 1 else clipped += 1;
+        }
+
+        const pc = grid.cellXZ(center_x, center_z);
+        const lo_x = @max(0, pc.cx - COLLIDER_WINDOW_CELLS);
+        const hi_x = @min(grid.cols - 1, pc.cx + COLLIDER_WINDOW_CELLS);
+        const lo_z = @max(0, pc.cz - COLLIDER_WINDOW_CELLS);
+        const hi_z = @min(grid.rows - 1, pc.cz + COLLIDER_WINDOW_CELLS);
+
+        var pass: usize = 0;
+        while (pass < 2) : (pass += 1) {
+            const want_solid = pass == 1;
+            // spanning instances (ground slab / road strips) collide everywhere
+            for (grid.always) |row| self.emitRowCollider(row, want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
+            // local instances in the window of cells around the player
+            var czi = lo_z;
+            while (czi <= hi_z) : (czi += 1) {
+                var cxi = lo_x;
+                while (cxi <= hi_x) : (cxi += 1) {
+                    const cellv: usize = @intCast(czi * grid.cols + cxi);
+                    var k = grid.starts[cellv];
+                    while (k < grid.starts[cellv + 1]) : (k += 1) {
+                        self.emitRowCollider(grid.items[k], want_solid, values, oriented_tmp[0..], &rc, &oc, &hf, &clipped);
+                    }
+                }
+            }
+        }
+        // oriented rects sit right after the actual rects in the physics input layout.
+        const oriented_base = game_physics.INPUT_HEADER_FLOATS + rc * game_physics.RECT_FLOATS;
+        @memcpy(values[oriented_base .. oriented_base + oc * game_physics.ORIENTED_FLOATS], oriented_tmp[0 .. oc * game_physics.ORIENTED_FLOATS]);
+        self.physics_colliders.rect_count = rc;
+        self.physics_colliders.oriented_count = oc;
+        self.physics_colliders.heightfield_count = hf;
+        self.physics_colliders.clipped_rows = clipped;
+    }
+
     pub fn stepNow(self: *Runtime) void {
         const ns = nowNs();
         const dt = clamp(@as(f32, @floatFromInt(ns - self.last_ns)) / 1_000_000_000.0, 0.001, 0.05);
@@ -1220,6 +1438,9 @@ pub const Runtime = struct {
         const intent = game_physics.movement.wasdDirection(forward, strafe, self.camera.yaw_degrees * std.math.pi / 180.0);
         const run_down = keyDown(SCAN_LSHIFT);
         const speed: f32 = if (run_down) PLAYER_RUN_SPEED_METERS_PER_SECOND else PLAYER_WALK_SPEED_METERS_PER_SECOND;
+        // Refresh the near-field collider window around the player (huge maps only).
+        // Cheap — it touches only the spanning list + the cells around the player.
+        if (self.windowed) self.rebuildWindow(self.player.x, self.player.z);
         runPlayerPhysics(&self.player, &self.physics_colliders, dt, intent, speed, keyDown(SCAN_SPACE));
         if (self.camera.aiming) self.player.yaw = self.camera.yaw_degrees * std.math.pi / 180.0;
         const moving = @sqrt(intent.x * intent.x + intent.z * intent.z) > 0.001;
