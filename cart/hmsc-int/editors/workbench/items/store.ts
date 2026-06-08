@@ -13,10 +13,11 @@ import { createPaintHistory } from '../../paint/history';
 import { PAINT_EDITOR_TUNING, type SculptMode } from '../../characters/paintKit';
 import { SMOOTH_TUNING } from '../../characters/smoothKit';
 import {
-  ITEM_DRAFT_DEFAULTS, bakeBlockoutToGlobe, emptyItemGrid, itemGlobeParams,
+  ITEM_DRAFT_DEFAULTS, bakeBlockoutToGlobe, emptyItemGrid, itemGlobeParams, itemVoxelMeshParams,
+  itemVoxelShapeFromBlockout,
 } from '../../items/bake';
 import {
-  itemsStream, mintItemId, type ItemsEvent, type ItemsStreamState, type SculptedItemDoc,
+  itemsStream, mintItemId, type ItemRepresentation, type ItemVoxelShapeDoc, type ItemsEvent, type ItemsStreamState, type SculptedItemDoc,
 } from '../../items/stream';
 import {
   VOXEL_BLOCKOUT_TUNING, normalizeVoxelCellSizeMeters, voxelsStream,
@@ -66,6 +67,8 @@ export type ItemDraft = {
   grid: number[];
   color: string;
   source: SculptedItemDoc['source'];
+  representation: ItemRepresentation;
+  voxelShape: ItemVoxelShapeDoc | null;
 };
 
 type AutoBakeBase = {
@@ -116,6 +119,8 @@ export function emptyItemDraft(): ItemDraft {
     grid: emptyItemGrid(),
     color: ITEM_DRAFT_DEFAULTS.color,
     source: null,
+    representation: 'globe',
+    voxelShape: null,
   };
 }
 
@@ -147,6 +152,8 @@ export function draftToItemDoc(draft: ItemDraft, name: string): SculptedItemDoc 
     grid: draft.grid.slice(),
     color: draft.color,
     source: draft.source,
+    representation: draft.representation,
+    voxelShape: draft.voxelShape ? cloneVoxelShape(draft.voxelShape) : null,
     metadata: { title: name },
   };
 }
@@ -158,6 +165,23 @@ export function draftFromItemDoc(doc: SculptedItemDoc): ItemDraft {
     grid: doc.grid.length === GRID_W * GRID_H ? doc.grid.slice() : emptyItemGrid(),
     color: doc.color,
     source: doc.source ?? null,
+    representation: doc.representation ?? (doc.voxelShape ? 'voxel-surface' : 'globe'),
+    voxelShape: doc.voxelShape ? cloneVoxelShape(doc.voxelShape) : null,
+  };
+}
+
+function cloneVoxelShape(shape: ItemVoxelShapeDoc): ItemVoxelShapeDoc {
+  return {
+    kind: 'voxel-shape',
+    version: 1,
+    dims: { ...shape.dims },
+    cellSizeMeters: shape.cellSizeMeters,
+    blocks: shape.blocks.map((b) => ({ id: b.id, x: b.x, y: b.y, z: b.z, kind: b.kind })),
+    mesh: {
+      quads: shape.mesh.quads,
+      vertices: shape.mesh.vertices,
+      bounds: { size: [shape.mesh.bounds.size[0], shape.mesh.bounds.size[1], shape.mesh.bounds.size[2]] },
+    },
   };
 }
 
@@ -168,6 +192,8 @@ function cloneDraft(draft: ItemDraft): ItemDraft {
     grid: draft.grid.slice(),
     color: draft.color,
     source: draft.source ? { blocks: draft.source.blocks, dims: { ...draft.source.dims }, cellSizeMeters: draft.source.cellSizeMeters } : null,
+    representation: draft.representation,
+    voxelShape: draft.voxelShape ? cloneVoxelShape(draft.voxelShape) : null,
   };
 }
 
@@ -335,6 +361,22 @@ export function createItemStore(deps: ItemStoreDeps) {
   let itemTimer: ReturnType<typeof setTimeout> | null = null;
   let voxelTimer: ReturnType<typeof setTimeout> | null = null;
 
+  const selectedRosterId = (): string | null => {
+    if (selectedGameItemId) return gameItemRosterId(selectedGameItemId);
+    if (draftId) return streamItemRosterId(draftId);
+    if (workingDraftVisible) return WORKING_ITEM_ROSTER_ID;
+    return null;
+  };
+  const lensBoundItemId = (lens: ItemLens = view.lens): string => {
+    if (selectedGameItemId) return gameItemRosterId(selectedGameItemId);
+    if (draftId) return streamItemRosterId(draftId);
+    if (workingDraftVisible || lens === 'sculpt' || lens === 'voxel') return WORKING_ITEM_ROSTER_ID;
+    return 'none';
+  };
+  const traceLensBinding = (hop: string, selection = selectedRosterId(), lens: ItemLens = view.lens): void => {
+    console.log(`[ITEMLENS-0607] ${hop} selection=${selection ?? 'none'} lens=${lens} bound=${lensBoundItemId(lens)} draft=${draftId ?? 'working'} registry=${selectedGameItemId ?? 'none'} name="${draftName}" source=${draft.source ? `${draft.source.blocks} blocks` : 'none'}`);
+  };
+
   const flushItemAutosave = () => {
     if (!deps.itemSession) return;
     const id = draftId ?? mintItemId();
@@ -413,6 +455,7 @@ export function createItemStore(deps: ItemStoreDeps) {
       view.lens = 'item';
       twigWrite('lens', view.lens);
       setStatus(`registry item · ${def.scaleStatus} scale · no migration written`);
+      traceLensBinding('pick', id);
       emit();
       return;
     }
@@ -425,6 +468,7 @@ export function createItemStore(deps: ItemStoreDeps) {
     draftId = streamId;
     draftName = doc.metadata?.title ?? doc.name;
     setStatus(`loaded "${draftName}"`);
+    traceLensBinding('pick', id);
     emit();
   };
   const saveToRoster = () => {
@@ -494,7 +538,7 @@ export function createItemStore(deps: ItemStoreDeps) {
       autoBakeBase = null;
       if (hadBase) {
         if (opts?.history) history.commit(snapDraft);
-        draft = { ...emptyItemDraft(), color: draft.color };
+        draft = { ...emptyItemDraft(), color: draft.color, representation: 'globe', voxelShape: null };
         bumpItem({ autosave: true });
       }
       setStatus(`${reason} — no custom blocks; sculpt is a blank item`);
@@ -502,18 +546,22 @@ export function createItemStore(deps: ItemStoreDeps) {
     }
     const bake = bakeBlockoutToGlobe(doc);
     if (!bake) { setStatus(`${reason} — blockout did not bake`); return false; }
+    const voxelShape = itemVoxelShapeFromBlockout(doc);
     if (opts?.history) history.commit(snapDraft);
     selectedGameItemId = null;
     workingDraftVisible = workingDraftVisible || !draftId;
     const delta = sculptDeltaFromBase(autoBakeBase);
     const grid = bake.grid.map((v, i) => clamp(v + (delta[i] ?? 0), -1, 1));
     const source = { blocks: doc.blocks.length, dims: { ...doc.dims }, cellSizeMeters: doc.cellSizeMeters };
+    const representation: ItemRepresentation = draft.representation === 'voxel-mesh' ? 'voxel-mesh' : 'voxel-surface';
     draft = {
       ...draft,
       radius: bake.radius,
       amount: bake.amount,
       grid,
       source,
+      representation,
+      voxelShape,
     };
     autoBakeBase = { radius: bake.radius, amount: bake.amount, grid: bake.grid.slice(), source };
     if (!draftName || draftName === 'new item') draftName = 'blockout item';
@@ -523,7 +571,7 @@ export function createItemStore(deps: ItemStoreDeps) {
     }
     deps.itemSession?.note(`auto-bake blockout · ${doc.blocks.length} blocks · ${doc.dims.w}x${doc.dims.d}x${doc.dims.h} @ ${doc.cellSizeMeters.toFixed(2)}m`);
     bumpItem({ autosave: true });
-    setStatus(`${reason} — sculpt auto-baked from ${doc.blocks.length} blocks @ ${doc.cellSizeMeters.toFixed(2)}m cells`);
+    setStatus(`${reason} — ${representation} auto-baked from ${doc.blocks.length} blocks @ ${doc.cellSizeMeters.toFixed(2)}m cells`);
     return true;
   };
   const voxelFloor = () => makeVoxelFloor(voxelDims);
@@ -686,6 +734,9 @@ export function createItemStore(deps: ItemStoreDeps) {
     get draftId() { return draftId; },
     get draftName() { return draftName; },
     selectedRegistryItem: registryItem,
+    selectedRosterId,
+    lensBoundItemId,
+    traceLensBinding,
     get workingDraftVisible() { return workingDraftVisible; },
     get status() { return status; },
     get rosterRev() { return rosterRev; },
@@ -697,6 +748,7 @@ export function createItemStore(deps: ItemStoreDeps) {
     get voxelCustom() { return voxelCustom; },
     get voxelDoc() { return voxelDocFromState(voxelDims, voxelCustom, voxelCellSizeMeters); },
     get itemParams() { return itemGlobeParams(draft); },
+    get itemVoxelMeshParams() { return itemVoxelMeshParams(draft); },
     rosterState,
     voxelBlocks,
     voxelGroups,
@@ -715,7 +767,20 @@ export function createItemStore(deps: ItemStoreDeps) {
     setRadius: (radius: number) => editDraftCoalesced((d) => ({ ...d, radius: clamp(radius, ITEM_KNOBS.radius.min, ITEM_KNOBS.radius.max) })),
     setAmount: (amount: number) => editDraftCoalesced((d) => ({ ...d, amount: clamp(amount, ITEM_KNOBS.amount.min, ITEM_KNOBS.amount.max) })),
     setColor: (color: string) => editDraft((d) => ({ ...d, color })),
-    setLens: setViewKey('lens', 'lens'),
+    setRepresentation: (representation: ItemRepresentation) => {
+      if (representation !== 'globe' && !draft.voxelShape) {
+        setStatus('build a voxel blockout before comparing voxel representations');
+        return;
+      }
+      editDraft((d) => ({ ...d, representation }));
+      setStatus(`representation = ${representation}`);
+    },
+    setLens: (lens: ItemLens) => {
+      view.lens = lens;
+      twigWrite('lens', lens);
+      traceLensBinding('lens', selectedRosterId(), lens);
+      emit();
+    },
     setSculptMode: setViewKey('sculptMode', 'sculptMode'),
     setMirror: setViewKey('mirror', 'mirror'),
     setBrush: setViewKey('brush', 'brush'),

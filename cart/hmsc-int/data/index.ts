@@ -168,6 +168,16 @@ export const EDITOR_STORE_STREAMS = Object.freeze([
   'world',
 ] as const);
 
+function perfMs(): number {
+  const host = globalThis as any;
+  if (typeof host.__bench_now_us === 'function') {
+    const us = Number(host.__bench_now_us());
+    if (Number.isFinite(us)) return us / 1000;
+  }
+  const perf = (globalThis as any).performance;
+  return typeof perf?.now === 'function' ? perf.now() : Date.now();
+}
+
 function fs() {
   const host = globalThis;
   if (typeof host.__fs_read !== 'function' || typeof host.__fs_write !== 'function' || typeof host.__fs_mkdir !== 'function') {
@@ -366,10 +376,12 @@ function scanJsonl(path: string, text: string, quarantine: QuarantinedRecord[]):
  * chain across every session that ever wrote here.
  */
 export function openStore(rootDir: string): Store {
+  const openT0 = perfMs();
   const host = fs();
   requireSql();
   const streamsDir = `${rootDir}/streams`;
   const snapshotsDir = `${rootDir}/snapshots`;
+  const setupT0 = perfMs();
   host.__fs_mkdir(rootDir);
   host.__fs_mkdir(streamsDir);
   host.__fs_mkdir(snapshotsDir);
@@ -403,6 +415,7 @@ export function openStore(rootDir: string): Store {
     quarantined INTEGER NOT NULL,
     at INTEGER NOT NULL
   )`);
+  const setupMs = perfMs() - setupT0;
 
   const quarantined: QuarantinedRecord[] = [];
   const nowMs = (): number => (host.__nowMs ? host.__nowMs() : Date.now());
@@ -423,6 +436,7 @@ export function openStore(rootDir: string): Store {
   };
 
   // ── one-time ingest: every legacy stream file joins the DB, originals stay ──
+  const archiveListT0 = perfMs();
   const archiveFiles: string[] = (() => {
     try {
       const listed = host.__fs_list_json ? JSON.parse(host.__fs_list_json(streamsDir)) : [];
@@ -431,7 +445,10 @@ export function openStore(rootDir: string): Store {
       return [];
     }
   })();
+  const archiveListMs = perfMs() - archiveListT0;
+  let ingestTotalMs = 0;
   for (const name of archiveFiles) {
+    const fileT0 = perfMs();
     const path = `${streamsDir}/${name}`;
     // The marker key is the file's identity INSIDE this store — its path
     // relative to rootDir — never the caller's spelling of rootDir. Two
@@ -441,10 +458,15 @@ export function openStore(rootDir: string): Store {
     const markerKey = `streams/${name}`;
     const stream = name.slice(0, -'.jsonl'.length);
     if (!STREAM_NAME_SHAPE.test(stream)) continue;
+    const readT0 = perfMs();
     const text = host.__fs_read(path);
+    const readMs = perfMs() - readT0;
     if (typeof text !== 'string' || text === '') continue;
     const before = quarantined.length;
+    const scanT0 = perfMs();
     const records = scanJsonl(path, text, quarantined);
+    const scanMs = perfMs() - scanT0;
+    const markerT0 = perfMs();
     beginImmediate();
     // TAIL-INCREMENTAL, and the marker check lives INSIDE the write
     // transaction (concurrent first-boots serialize on BEGIN IMMEDIATE; the
@@ -457,10 +479,25 @@ export function openStore(rootDir: string): Store {
     // them as the same file so existing stores don't re-import.
     const marker = sqlQuery<{ records: number }>(db, 'SELECT MAX(records) AS records FROM ingested_files WHERE path IN (?, ?)', [markerKey, path]);
     const alreadyImported = marker.length > 0 && typeof marker[0].records === 'number' ? marker[0].records : -1;
+    const markerMs = perfMs() - markerT0;
     if (alreadyImported >= records.length) {
       sqlExec(db, 'ROLLBACK');
+      const totalMs = perfMs() - fileT0;
+      ingestTotalMs += totalMs;
+      GAME_TELEMETRY.recordDiagnostic('worldStream', 'jsonl.skip', {
+        path,
+        stream,
+        bytes: text.length,
+        records: records.length,
+        alreadyImported,
+        readMs,
+        scanMs,
+        markerMs,
+        totalMs,
+      });
       continue;
     }
+    const importT0 = perfMs();
     const startAt = Math.max(0, alreadyImported);
     let imported = 0;
     for (const r of records.slice(startAt)) {
@@ -480,12 +517,22 @@ export function openStore(rootDir: string): Store {
       sqlExec(db, 'INSERT INTO ingested_files(path, records, quarantined, at) VALUES (?, ?, ?, ?)', [markerKey, records.length, quarantined.length - before, nowMs()]);
     }
     commitOrThrow(`ingest of ${path}`);
+    const importMs = perfMs() - importT0;
+    const totalMs = perfMs() - fileT0;
+    ingestTotalMs += totalMs;
     console.warn(`data store: ingested ${imported} record(s) from ${path} into ${dbPath} (${alreadyImported < 0 ? 'first import' : `tail past ${alreadyImported}`}; ${quarantined.length - before} quarantined; original left in place as the archive)`);
     GAME_TELEMETRY.recordDiagnostic('worldStream', 'ingest', {
       path,
       stream,
       records: imported,
       quarantined: quarantined.length - before,
+      bytes: text.length,
+      alreadyImported,
+      readMs,
+      scanMs,
+      markerMs,
+      importMs,
+      totalMs,
     });
   }
 
@@ -499,9 +546,22 @@ export function openStore(rootDir: string): Store {
   const streams = new Map<string, OpenStream>();
   let globalSeq = 0;
   {
+    const maxSeqT0 = perfMs();
     const top = sqlQuery<{ s: number | null }>(db, 'SELECT MAX(seq) AS s FROM events');
     if (top.length > 0 && typeof top[0].s === 'number') globalSeq = top[0].s;
+    GAME_TELEMETRY.recordDiagnostic('worldStream', 'openStore.maxSeq', {
+      ms: perfMs() - maxSeqT0,
+      globalSeq,
+    });
   }
+  GAME_TELEMETRY.recordDiagnostic('worldStream', 'openStore.ready', {
+    rootDir,
+    archiveFiles: archiveFiles.length,
+    setupMs,
+    archiveListMs,
+    ingestTotalMs,
+    totalMs: perfMs() - openT0,
+  });
 
   const foldUpTo = (open: OpenStream, maxSeq: number): any => {
     let state = open.def.initial();
@@ -524,9 +584,15 @@ export function openStore(rootDir: string): Store {
       throw new Error(`defineStream: stream "${def.name}" is already registered`);
     }
 
+    const loadT0 = perfMs();
+    const queryT0 = perfMs();
     const rows = sqlQuery<{ id: number; record: string }>(db, 'SELECT id, record FROM events WHERE stream = ? ORDER BY id', [def.name]);
+    const queryMs = perfMs() - queryT0;
     const events: StoredEvent[] = [];
+    let bytes = 0;
+    const parseT0 = perfMs();
     for (const row of rows) {
+      bytes += row.record.length;
       try {
         events.push(JSON.parse(row.record) as StoredEvent);
       } catch {
@@ -542,15 +608,24 @@ export function openStore(rootDir: string): Store {
         });
       }
     }
+    const parseMs = perfMs() - parseT0;
     for (const record of events) {
       if (record.seq > globalSeq) globalSeq = record.seq;
     }
     const open: OpenStream = { def, events, current: undefined };
+    const foldT0 = perfMs();
     open.current = foldUpTo(open, Number.MAX_SAFE_INTEGER);
+    const foldMs = perfMs() - foldT0;
     streams.set(def.name, open);
-    GAME_TELEMETRY.recordDiagnostic('worldStream', 'defineStream', {
+    GAME_TELEMETRY.recordDiagnostic('worldStream', 'defineStream.load', {
       stream: def.name,
       events: events.length,
+      rows: rows.length,
+      bytes,
+      queryMs,
+      parseMs,
+      foldMs,
+      totalMs: perfMs() - loadT0,
     });
 
     return {
@@ -590,18 +665,34 @@ export function openStore(rootDir: string): Store {
     defineStream,
     undoPoint: () => globalSeq,
     materializeSnapshots: (): string[] => {
+      const batchT0 = perfMs();
       const written: string[] = [];
+      let totalBytes = 0;
       for (const [name, open] of streams) {
         const path = `${snapshotsDir}/${name}.snapshot.json`;
+        const stringifyT0 = perfMs();
         const text = JSON.stringify({ name, globalSeq, state: open.current });
+        const stringifyMs = perfMs() - stringifyT0;
+        const writeT0 = perfMs();
         host.__fs_write(path, text);
+        const writeMs = perfMs() - writeT0;
+        totalBytes += text.length;
         GAME_TELEMETRY.recordDiagnostic('worldStream', 'snapshot.write', {
           stream: name,
           bytes: text.length,
           globalSeq,
+          stringifyMs,
+          writeMs,
+          totalMs: stringifyMs + writeMs,
         });
         written.push(path);
       }
+      GAME_TELEMETRY.recordDiagnostic('worldStream', 'snapshot.batch', {
+        streams: written.length,
+        bytes: totalBytes,
+        globalSeq,
+        ms: perfMs() - batchT0,
+      });
       return written;
     },
     loadSnapshot: <State>(name: string) => {
