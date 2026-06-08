@@ -38,8 +38,11 @@ const DEFAULT_FIXTURE = "framework/testing/fixtures/gamefile_roundtrip.b64";
 const RJMP_MAGIC: u32 = 0x504d4a52;
 const STORE_DIR = "zig-out/game/contentstore";
 const MAX_FRAMES: u32 = 600;
-// Instance row: pos3 + rot3 + scale3 + color3 (matches gpu/3d.zig stride>=12).
+// Instance row: pos3 + rot3 + scale3 + color3 + optional shape id. The first
+// 12 floats match gpu/3d.zig; shape id is loader metadata for keyed geometry.
 const INSTANCE_STRIDE: usize = 12;
+const SHAPE_BOX: f32 = 0;
+const SHAPE_RAMP: f32 = 1;
 const SCAN_A: usize = 4;
 const SCAN_D: usize = 7;
 const SCAN_S: usize = 22;
@@ -76,6 +79,10 @@ const PLAYER_GRAVITY_METERS_PER_SECOND2: f32 = 10.0;
 const PLAYER_JUMP_SPEED_METERS_PER_SECOND: f32 = 5.2;
 const WALKABLE_SIDE_PUSH_GRACE_METERS: f32 = 0.08;
 const PHYSICS_SOLID_HEIGHT_METERS: f32 = PLAYER_STEP_HEIGHT_METERS + 0.05;
+const RAMP_SLAB_THICKNESS_METERS: f32 = 0.2;
+const RAMP_SLAB_THICKNESS_RATIO: f32 = RAMP_SLAB_THICKNESS_METERS / 3.0;
+const RAMP_HEIGHTFIELD_CELL_METERS: f32 = 0.6;
+const RAMP_WALKABLE_SLOPE_COS: f32 = 0.6;
 const PLAYER_WALK_CYCLES_PER_SECOND: f32 = 1.6;
 const PLAYER_RUN_CYCLES_PER_SECOND: f32 = 2.3;
 const PLAYER_CLIP_IDLE: u32 = 0;
@@ -118,6 +125,7 @@ const PhysicsColliders = struct {
     values: []f32,
     rect_count: usize,
     oriented_count: usize,
+    heightfield_count: usize,
     clipped_rows: usize,
 
     pub fn deinit(self: PhysicsColliders, allocator: std.mem.Allocator) void {
@@ -240,6 +248,63 @@ fn buildCube() [36 * 8]f32 {
     return out;
 }
 
+fn pushVertex(out: []f32, idx: *usize, p: [3]f32, n: [3]f32, uv: [2]f32) void {
+    out[idx.* + 0] = p[0];
+    out[idx.* + 1] = p[1];
+    out[idx.* + 2] = p[2];
+    out[idx.* + 3] = n[0];
+    out[idx.* + 4] = n[1];
+    out[idx.* + 5] = n[2];
+    out[idx.* + 6] = uv[0];
+    out[idx.* + 7] = uv[1];
+    idx.* += 8;
+}
+
+fn pushTri(out: []f32, idx: *usize, a: [3]f32, b: [3]f32, c0: [3]f32, n: [3]f32, uva: [2]f32, uvb: [2]f32, uvc: [2]f32) void {
+    pushVertex(out, idx, a, n, uva);
+    pushVertex(out, idx, b, n, uvb);
+    pushVertex(out, idx, c0, n, uvc);
+}
+
+fn pushFace(out: []f32, idx: *usize, a: [3]f32, b: [3]f32, c0: [3]f32, d: [3]f32, n: [3]f32) void {
+    pushTri(out, idx, a, b, c0, n, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 });
+    pushTri(out, idx, a, c0, d, n, .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 });
+}
+
+fn normalize3(x: f32, y: f32, z: f32) [3]f32 {
+    const len = @sqrt(x * x + y * y + z * z);
+    if (len <= 0.000001) return .{ 0, 1, 0 };
+    return .{ x / len, y / len, z / len };
+}
+
+/// /test's RampSlabGeometry normalized for instancing: local x/z are unit
+/// footprint, local y is centered so scale.y = catalog rise and position.y is
+/// base + rise/2. The slab thickness ratio matches the common 3m ramp.
+fn buildRampSlab() [36 * 8]f32 {
+    const hx: f32 = 0.5;
+    const hz: f32 = 0.5;
+    const rise0: f32 = -0.5;
+    const rise1: f32 = 0.5;
+    const t: f32 = RAMP_SLAB_THICKNESS_RATIO;
+    const low_top = [2][3]f32{ .{ -hx, rise0, -hz }, .{ hx, rise0, -hz } };
+    const high_top = [2][3]f32{ .{ -hx, rise1, hz }, .{ hx, rise1, hz } };
+    const low_bottom = [2][3]f32{ .{ -hx, rise0 - t, -hz }, .{ hx, rise0 - t, -hz } };
+    const high_bottom = [2][3]f32{ .{ -hx, rise1 - t, hz }, .{ hx, rise1 - t, hz } };
+    const top_normal = normalize3(0, 1, -1);
+    const bottom_normal = normalize3(0, -1, 1);
+    var out: [36 * 8]f32 = undefined;
+    var i: usize = 0;
+    pushTri(out[0..], &i, low_top[0], high_top[1], low_top[1], top_normal, .{ 0, 0 }, .{ 1, 1 }, .{ 1, 0 });
+    pushTri(out[0..], &i, low_top[0], high_top[0], high_top[1], top_normal, .{ 0, 0 }, .{ 0, 1 }, .{ 1, 1 });
+    pushTri(out[0..], &i, low_bottom[0], low_bottom[1], high_bottom[1], bottom_normal, .{ 0, 0 }, .{ 1, 0 }, .{ 1, 1 });
+    pushTri(out[0..], &i, low_bottom[0], high_bottom[1], high_bottom[0], bottom_normal, .{ 0, 0 }, .{ 1, 1 }, .{ 0, 1 });
+    pushFace(out[0..], &i, low_bottom[1], low_top[1], high_top[1], high_bottom[1], .{ 1, 0, 0 });
+    pushFace(out[0..], &i, low_top[0], low_bottom[0], high_bottom[0], high_top[0], .{ -1, 0, 0 });
+    pushFace(out[0..], &i, low_bottom[0], low_bottom[1], low_top[1], low_top[0], .{ 0, 0, -1 });
+    pushFace(out[0..], &i, high_bottom[1], high_bottom[0], high_top[0], high_top[1], .{ 0, 0, 1 });
+    return out;
+}
+
 /// Fallback geometry for a game-file with no instance buffer: extrude each
 /// non-null tile into one box instance (stride 9: pos3/scale3/color3). Heap-
 /// owned; the caller frees it after the frame loop.
@@ -260,6 +325,45 @@ fn extrudeTiles(allocator: std.mem.Allocator, scene: constructor.Scene) ![]f32 {
         }
     }
     return list.toOwnedSlice(allocator);
+}
+
+const ShapeBatches = struct {
+    boxes: []f32,
+    box_count: u32,
+    ramps: []f32,
+    ramp_count: u32,
+
+    pub fn deinit(self: ShapeBatches, allocator: std.mem.Allocator) void {
+        allocator.free(self.boxes);
+        allocator.free(self.ramps);
+    }
+};
+
+fn buildShapeBatches(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize) !ShapeBatches {
+    var boxes: std.ArrayList(f32) = .{};
+    errdefer boxes.deinit(allocator);
+    var ramps: std.ArrayList(f32) = .{};
+    errdefer ramps.deinit(allocator);
+    var box_count: u32 = 0;
+    var ramp_count: u32 = 0;
+    var row: usize = 0;
+    while (row < @as(usize, @intCast(inst_count))) : (row += 1) {
+        const b = row * stride;
+        const src = insts[b .. b + stride];
+        if (isRampInstance(insts, row, stride)) {
+            try ramps.appendSlice(allocator, src);
+            ramp_count += 1;
+        } else {
+            try boxes.appendSlice(allocator, src);
+            box_count += 1;
+        }
+    }
+    return .{
+        .boxes = try boxes.toOwnedSlice(allocator),
+        .box_count = box_count,
+        .ramps = try ramps.toOwnedSlice(allocator),
+        .ramp_count = ramp_count,
+    };
 }
 
 const Bounds = struct {
@@ -328,6 +432,15 @@ fn instanceYawRadians(insts: []const f32, row: usize, stride: usize) f32 {
     return insts[row * stride + 4] * std.math.pi / 180.0;
 }
 
+fn instanceShapeId(insts: []const f32, row: usize, stride: usize) f32 {
+    if (stride < 13) return SHAPE_BOX;
+    return insts[row * stride + 12];
+}
+
+fn isRampInstance(insts: []const f32, row: usize, stride: usize) bool {
+    return @abs(instanceShapeId(insts, row, stride) - SHAPE_RAMP) < 0.5;
+}
+
 fn appendPhysicsRect(allocator: std.mem.Allocator, list: *std.ArrayList(f32), insts: []const f32, row: usize, stride: usize, solid: bool) !void {
     const scale_base: usize = if (stride >= 12) 6 else 3;
     const b = row * stride;
@@ -377,6 +490,43 @@ fn appendPhysicsOrientedRect(allocator: std.mem.Allocator, list: *std.ArrayList(
     });
 }
 
+fn registerRampHeightfield(insts: []const f32, row: usize, stride: usize, slot: usize) bool {
+    const scale_base: usize = if (stride >= 12) 6 else 3;
+    const b = row * stride;
+    const width = @abs(insts[b + scale_base + 0]);
+    const rise = @abs(insts[b + scale_base + 1]);
+    const depth = @abs(insts[b + scale_base + 2]);
+    if (width <= 0.001 or rise <= 0.001 or depth <= 0.001) return false;
+    const cols: usize = @max(2, @as(usize, @intFromFloat(@round(width / RAMP_HEIGHTFIELD_CELL_METERS))) + 1);
+    const rows: usize = @max(2, @as(usize, @intFromFloat(@round(depth / RAMP_HEIGHTFIELD_CELL_METERS))) + 1);
+    const count = cols * rows;
+    if (count > game_physics.HF_MAX_SAMPLES) return false;
+    var samples: [game_physics.HF_MAX_SAMPLES]f32 = [_]f32{0} ** game_physics.HF_MAX_SAMPLES;
+    var r: usize = 0;
+    while (r < rows) : (r += 1) {
+        const h = (@as(f32, @floatFromInt(r)) / @as(f32, @floatFromInt(rows - 1))) * rise;
+        var cidx: usize = 0;
+        while (cidx < cols) : (cidx += 1) {
+            samples[r * cols + cidx] = h;
+        }
+    }
+    const base_y = insts[b + 1] - rise * 0.5;
+    const sample_bytes = std.mem.sliceAsBytes(samples[0..count]);
+    return game_physics.registerHeightfield(.{
+        .id = slot,
+        .origin_x = insts[b + 0] - width * 0.5,
+        .origin_z = insts[b + 2] - depth * 0.5,
+        .cell = RAMP_HEIGHTFIELD_CELL_METERS,
+        .cols = cols,
+        .rows = rows,
+        .base_y = base_y,
+        .walk_cos = RAMP_WALKABLE_SLOPE_COS,
+        .yaw = instanceYawRadians(insts, row, stride),
+        .pivot_x = insts[b + 0],
+        .pivot_z = insts[b + 2],
+    }, sample_bytes);
+}
+
 fn buildPhysicsColliders(allocator: std.mem.Allocator, insts: []const f32, inst_count: u32, stride: usize) !PhysicsColliders {
     var rects: std.ArrayList(f32) = .{};
     errdefer rects.deinit(allocator);
@@ -384,11 +534,21 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, insts: []const f32, inst_
     errdefer oriented.deinit(allocator);
     var rect_count: usize = 0;
     var oriented_count: usize = 0;
+    var heightfield_count: usize = 0;
     var clipped_rows: usize = 0;
 
+    game_physics.clearHeightfields();
     const total_rows: usize = @intCast(inst_count);
     var row: usize = 0;
     while (row < total_rows) : (row += 1) {
+        if (isRampInstance(insts, row, stride)) {
+            if (heightfield_count < game_physics.MAX_HEIGHTFIELDS and registerRampHeightfield(insts, row, stride, heightfield_count)) {
+                heightfield_count += 1;
+            } else {
+                clipped_rows += 1;
+            }
+            continue;
+        }
         const scale_base: usize = if (stride >= 12) 6 else 3;
         const b = row * stride;
         const sx = @abs(insts[b + scale_base + 0]);
@@ -420,7 +580,7 @@ fn buildPhysicsColliders(allocator: std.mem.Allocator, insts: []const f32, inst_
     @memcpy(values[game_physics.INPUT_HEADER_FLOATS + rects.items.len ..], oriented.items);
     rects.deinit(allocator);
     oriented.deinit(allocator);
-    return .{ .values = values, .rect_count = rect_count, .oriented_count = oriented_count, .clipped_rows = clipped_rows };
+    return .{ .values = values, .rect_count = rect_count, .oriented_count = oriented_count, .heightfield_count = heightfield_count, .clipped_rows = clipped_rows };
 }
 
 fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32, intent: game_physics.movement.Direction, speed: f32, jump_down: bool) void {
@@ -778,7 +938,7 @@ pub fn main() !void {
     if (inst_count == 0) log.print("[loader] empty world — rendering sky/model over void\n", .{});
     var physics_colliders = try buildPhysicsColliders(allocator, insts, inst_count, stride);
     defer physics_colliders.deinit(allocator);
-    log.print("[loader] built {d} physics rects + {d} oriented physics rects\n", .{ physics_colliders.rect_count, physics_colliders.oriented_count });
+    log.print("[loader] built {d} physics rects + {d} oriented physics rects + {d} heightfields\n", .{ physics_colliders.rect_count, physics_colliders.oriented_count, physics_colliders.heightfield_count });
     if (physics_colliders.clipped_rows > 0) {
         log.print("[loader] physics collider cap clipped {d} rendered instance rows\n", .{physics_colliders.clipped_rows});
     }
@@ -843,6 +1003,9 @@ pub fn main() !void {
         .far = @max(far, bounds.radius * 4.0 + 64.0),
     };
     var cube = buildCube();
+    var ramp_slab = buildRampSlab();
+    var shape_batches = try buildShapeBatches(allocator, insts, inst_count, stride);
+    defer shape_batches.deinit(allocator);
     var player_geom_keys: std.ArrayList([]u8) = .{};
     defer {
         for (player_geom_keys.items) |key| allocator.free(key);
@@ -898,12 +1061,21 @@ pub fn main() !void {
     }
     if (scene.player_model.len == 0) log.print("[loader] no player model lump — camera target only\n", .{});
     try kid_list.append(allocator, .{
-        .scene3d_mesh = inst_count > 0, // false on an empty map; player model still draws
+        .scene3d_mesh = shape_batches.box_count > 0, // false on an empty map; player model still draws
         .scene3d_geom_key = "box",
         .scene3d_vertices = cube[0..],
         .scene3d_vert_count = 36,
-        .scene3d_instance_data = insts,
-        .scene3d_instance_count = inst_count,
+        .scene3d_instance_data = shape_batches.boxes,
+        .scene3d_instance_count = shape_batches.box_count,
+        .scene3d_instance_stride = @intCast(stride),
+    });
+    try kid_list.append(allocator, .{
+        .scene3d_mesh = shape_batches.ramp_count > 0,
+        .scene3d_geom_key = "ramp-slab",
+        .scene3d_vertices = ramp_slab[0..],
+        .scene3d_vert_count = 36,
+        .scene3d_instance_data = shape_batches.ramps,
+        .scene3d_instance_count = shape_batches.ramp_count,
         .scene3d_instance_stride = @intCast(stride),
     });
 

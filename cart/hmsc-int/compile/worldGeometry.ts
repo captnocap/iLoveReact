@@ -16,10 +16,11 @@
 // row in a packed Float32Array. The host's instanced-mesh path expands each row
 // into a model matrix and draws the whole batch with one interned unit cube.
 //
-// Layout per instance (stride 12, matches gpu/3d.zig makeInstance stride>=12):
-//   [ px, py, pz,  rx, ry, rz,  sx, sy, sz,  r, g, b ]
+// Layout per instance (stride 13, first 12 match gpu/3d.zig makeInstance):
+//   [ px, py, pz,  rx, ry, rz,  sx, sy, sz,  r, g, b,  shapeId ]
 // position is the box CENTER (world meters, y up); rotation is degrees about
-// each axis (only ry / yaw is used); scale is the full box size.
+// each axis (only ry / yaw is used); scale is the full box size. shapeId 0 is
+// the shared box; shapeId 1 is the shared ramp slab mesh.
 
 import type { GameState, PropKind, BuildingKind, TileKind } from '../../hmsc/design';
 import { solveRoadCrossSection } from '../../hmsc/world/roadProfile';
@@ -29,7 +30,9 @@ import type { ChunkFloor } from '../chunkFloor';
 import { GAME_BUILD } from '@game';
 import type { BuildMaterial, PlacedBuildPiece } from '@game';
 
-export const INSTANCE_STRIDE = 12;
+export const INSTANCE_STRIDE = 13;
+export const INSTANCE_SHAPE_BOX = 0;
+export const INSTANCE_SHAPE_RAMP = 1;
 
 type Color = readonly [number, number, number];
 
@@ -44,7 +47,21 @@ function pushBox(
   color: Color,
   yawDegrees = 0,
 ): void {
-  out.push(cx, cy, cz, 0, yawDegrees, 0, sx, sy, sz, color[0], color[1], color[2]);
+  out.push(cx, cy, cz, 0, yawDegrees, 0, sx, sy, sz, color[0], color[1], color[2], INSTANCE_SHAPE_BOX);
+}
+
+function pushRamp(
+  out: number[],
+  x: number,
+  y: number,
+  z: number,
+  width: number,
+  height: number,
+  depth: number,
+  color: Color,
+  yawDegrees = 0,
+): void {
+  out.push(x, y + height / 2, z, 0, yawDegrees, 0, width, height, depth, color[0], color[1], color[2], INSTANCE_SHAPE_RAMP);
 }
 
 function hexColor(hex: string): Color {
@@ -241,8 +258,15 @@ function pushPlacedPieces(out: number[], pieces: readonly PlacedBuildPiece[]): n
     } catch {
       continue; // unknown piece id — skip rather than abort the whole bake
     }
-    const size = def.size;
     const color = MATERIAL_COLOR[def.material] ?? [0.62, 0.64, 0.68];
+    const size = def.size;
+    if (def.kind === 'ramp') {
+      // Match /test: ramps render as the real inclined slab geometry and
+      // collide as a slope heightfield, not as a bounding box.
+      pushRamp(out, piece.x, piece.y, piece.z, size.widthMeters, size.heightMeters, size.depthMeters, color, piece.yawDegrees);
+      emitted += 1;
+      continue;
+    }
     // The play view's body box: center (x, y + h/2, z), full catalog size, yaw.
     pushBox(
       out,
