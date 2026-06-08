@@ -42,7 +42,7 @@ const std = @import("std");
 pub const movement = @import("movement.zig");
 
 pub const MAX_ENTITIES: usize = 128;
-pub const MAX_RECTS: usize = 512;
+pub const MAX_RECTS: usize = 2048;
 pub const MAX_ORIENTED: usize = 256;
 pub const INPUT_HEADER_FLOATS: usize = 25;
 pub const ENTITY_FLOATS: usize = 8;
@@ -64,6 +64,19 @@ pub const RECT_FLOATS: usize = 9;
 pub const ORIENTED_FLOATS: usize = 12;
 pub const OUTPUT_HEADER_FLOATS: usize = 9;
 pub const OUTPUT_FLOATS: usize = OUTPUT_HEADER_FLOATS + MAX_ENTITIES * ENTITY_FLOATS;
+
+// Camera occlusion query: same rect dialect as the physics step, plus one
+// owner id per rect so JS can map host hits back to placed pieces.
+pub const CAMERA_OCCLUSION_HEADER_FLOATS: usize = 10;
+pub const CAMERA_OCCLUSION_RECT_FLOATS: usize = RECT_FLOATS + 1;
+pub const CAMERA_OCCLUSION_ORIENTED_FLOATS: usize = ORIENTED_FLOATS + 1;
+pub const MAX_CAMERA_OCCLUSION_HITS: usize = 64;
+pub const CAMERA_OCCLUSION_OUTPUT_FLOATS: usize = 4 + MAX_CAMERA_OCCLUSION_HITS;
+
+pub const CameraOcclusionConfiguredHit = struct {
+    nearest_target_distance: f32 = 0,
+    nearest_owner: f32 = 0,
+};
 
 // ── Heightfield colliders ──────────────────────────────────────────────
 // A generic terrain collider: a cols×rows grid of corner heights the sim
@@ -120,9 +133,18 @@ pub const HeightfieldDesc = struct {
 
 var g_heightfields: [MAX_HEIGHTFIELDS]Heightfield = [_]Heightfield{.{}} ** MAX_HEIGHTFIELDS;
 var g_snapshot: [OUTPUT_FLOATS]f32 = undefined;
+var g_camera_occlusion: [CAMERA_OCCLUSION_OUTPUT_FLOATS]f32 = undefined;
+var g_camera_occlusion_rect_values: [MAX_RECTS * CAMERA_OCCLUSION_RECT_FLOATS]f32 = [_]f32{0} ** (MAX_RECTS * CAMERA_OCCLUSION_RECT_FLOATS);
+var g_camera_occlusion_oriented_values: [MAX_ORIENTED * CAMERA_OCCLUSION_ORIENTED_FLOATS]f32 = [_]f32{0} ** (MAX_ORIENTED * CAMERA_OCCLUSION_ORIENTED_FLOATS);
+var g_camera_occlusion_rect_count: usize = 0;
+var g_camera_occlusion_oriented_count: usize = 0;
 
 fn clamp(n: f32, a: f32, b: f32) f32 {
     return @max(a, @min(b, n));
+}
+
+fn bandFloor(raw: f32) f32 {
+    return if (std.math.isFinite(raw)) raw else -1000000;
 }
 
 /// Upload/replace a terrain grid by id. Called once when a landform loads
@@ -178,6 +200,442 @@ fn localToWorld(x: f32, z: f32, pivot_x: f32, pivot_z: f32, cs: f32, sn: f32, ou
     out_z.* = pivot_z - sn * dx + cs * dz;
 }
 
+fn segmentSlabAxis(origin: f32, dir: f32, raw_min: f32, raw_max: f32, t0: *f32, t1: *f32) bool {
+    const min_v = @min(raw_min, raw_max);
+    const max_v = @max(raw_min, raw_max);
+    if (@abs(dir) < 0.000001) return origin >= min_v and origin <= max_v;
+    var near = (min_v - origin) / dir;
+    var far = (max_v - origin) / dir;
+    if (near > far) {
+        const tmp = near;
+        near = far;
+        far = tmp;
+    }
+    t0.* = @max(t0.*, near);
+    t1.* = @min(t1.*, far);
+    return t0.* <= t1.*;
+}
+
+fn segmentHitsAabb(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    dx: f32,
+    dy: f32,
+    dz: f32,
+    min_x: f32,
+    min_y: f32,
+    min_z: f32,
+    max_x: f32,
+    max_y: f32,
+    max_z: f32,
+) bool {
+    var t0: f32 = 0;
+    var t1: f32 = 1;
+    if (!segmentSlabAxis(ox, dx, min_x, max_x, &t0, &t1)) return false;
+    if (!segmentSlabAxis(oy, dy, min_y, max_y, &t0, &t1)) return false;
+    if (!segmentSlabAxis(oz, dz, min_z, max_z, &t0, &t1)) return false;
+    return true;
+}
+
+fn segmentAabbEntryT(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    dx: f32,
+    dy: f32,
+    dz: f32,
+    min_x: f32,
+    min_y: f32,
+    min_z: f32,
+    max_x: f32,
+    max_y: f32,
+    max_z: f32,
+) ?f32 {
+    var t0: f32 = 0;
+    var t1: f32 = 1;
+    if (!segmentSlabAxis(ox, dx, min_x, max_x, &t0, &t1)) return null;
+    if (!segmentSlabAxis(oy, dy, min_y, max_y, &t0, &t1)) return null;
+    if (!segmentSlabAxis(oz, dz, min_z, max_z, &t0, &t1)) return null;
+    return clamp(t0, 0, 1);
+}
+
+fn addCameraOcclusionHit(owner: f32, max_hits: usize, entry_t: f32, segment_len: f32) void {
+    if (owner <= 0) return;
+    const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
+    if (g_camera_occlusion[2] <= 0 or target_distance > g_camera_occlusion[2]) {
+        g_camera_occlusion[2] = target_distance;
+        g_camera_occlusion[3] = owner;
+    }
+    var count: usize = @intFromFloat(g_camera_occlusion[1]);
+    var i: usize = 0;
+    while (i < count) : (i += 1) {
+        if (g_camera_occlusion[4 + i] == owner) return;
+    }
+    if (count >= max_hits or count >= MAX_CAMERA_OCCLUSION_HITS) return;
+    g_camera_occlusion[4 + count] = owner;
+    count += 1;
+    g_camera_occlusion[1] = @floatFromInt(count);
+}
+
+fn clearCameraOcclusionOutput() void {
+    var clear_i: usize = 0;
+    while (clear_i < g_camera_occlusion.len) : (clear_i += 1) {
+        g_camera_occlusion[clear_i] = 0;
+    }
+}
+
+fn cameraOcclusionRectValue(index: usize) f32 {
+    return g_camera_occlusion_rect_values[index];
+}
+
+fn cameraOcclusionOrientedValue(index: usize) f32 {
+    return g_camera_occlusion_oriented_values[index];
+}
+
+fn storeCameraOcclusionRectValue(index: usize, value: f32) void {
+    g_camera_occlusion_rect_values[index] = value;
+}
+
+fn storeCameraOcclusionOrientedValue(index: usize, value: f32) void {
+    g_camera_occlusion_oriented_values[index] = value;
+}
+
+fn scanCameraOcclusion(
+    ox: f32,
+    oy: f32,
+    oz: f32,
+    tx: f32,
+    ty: f32,
+    tz: f32,
+    rects: []const f32,
+    rect_count: usize,
+    oriented: []const f32,
+    oriented_count: usize,
+    requested_hits: usize,
+    sweep_radius: f32,
+) ?[]f32 {
+    clearCameraOcclusionOutput();
+    const dx = tx - ox;
+    const dy = ty - oy;
+    const dz = tz - oz;
+    if (!std.math.isFinite(dx) or !std.math.isFinite(dy) or !std.math.isFinite(dz)) return null;
+    const segment_len = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (segment_len <= 0.0001) return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
+    const max_hits = @min(MAX_CAMERA_OCCLUSION_HITS, if (requested_hits == 0) MAX_CAMERA_OCCLUSION_HITS else requested_hits);
+    const radius = if (std.math.isFinite(sweep_radius)) @max(@as(f32, 0), sweep_radius) else 0;
+
+    var r: usize = 0;
+    while (r < rect_count) : (r += 1) {
+        const at = r * CAMERA_OCCLUSION_RECT_FLOATS;
+        if (rects[at + 5] <= 0.5) continue;
+        if (segmentAabbEntryT(
+            ox,
+            oy,
+            oz,
+            dx,
+            dy,
+            dz,
+            rects[at] - radius,
+            bandFloor(rects[at + 8]) - radius,
+            rects[at + 1] - radius,
+            rects[at + 2] + radius,
+            rects[at + 4] + radius,
+            rects[at + 3] + radius,
+        )) |entry_t| {
+            addCameraOcclusionHit(rects[at + RECT_FLOATS], max_hits, entry_t, segment_len);
+        }
+    }
+
+    var o: usize = 0;
+    while (o < oriented_count) : (o += 1) {
+        const at = o * CAMERA_OCCLUSION_ORIENTED_FLOATS;
+        if (oriented[at + 5] <= 0.5) continue;
+        const yaw = oriented[at + 11];
+        const cs = @cos(yaw);
+        const sn = @sin(yaw);
+        var lo_x: f32 = undefined;
+        var lo_z: f32 = undefined;
+        var lt_x: f32 = undefined;
+        var lt_z: f32 = undefined;
+        worldToLocal(ox, oz, oriented[at + 9], oriented[at + 10], cs, sn, &lo_x, &lo_z);
+        worldToLocal(tx, tz, oriented[at + 9], oriented[at + 10], cs, sn, &lt_x, &lt_z);
+        if (segmentAabbEntryT(
+            lo_x,
+            oy,
+            lo_z,
+            lt_x - lo_x,
+            dy,
+            lt_z - lo_z,
+            oriented[at] - radius,
+            bandFloor(oriented[at + 8]) - radius,
+            oriented[at + 1] - radius,
+            oriented[at + 2] + radius,
+            oriented[at + 4] + radius,
+            oriented[at + 3] + radius,
+        )) |entry_t| {
+            addCameraOcclusionHit(oriented[at + ORIENTED_FLOATS], max_hits, entry_t, segment_len);
+        }
+    }
+
+    return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
+}
+
+/// Upload wall-class camera occluders once when the placed-piece set changes.
+/// Per-frame camera queries then reuse this host-side scene instead of repacking
+/// the same rect arrays across the JS bridge every render frame. Input buffer:
+/// [rectCount, orientedCount], then rects and oriented rects in the same payload
+/// dialect as `cameraOcclusion`.
+pub fn configureCameraOcclusion(input: []const f32) bool {
+    if (input.len < 2) return false;
+    const rect_count: usize = @intFromFloat(@max(@as(f32, 0), input[0]));
+    const oriented_count: usize = @intFromFloat(@max(@as(f32, 0), input[1]));
+    if (rect_count > MAX_RECTS or oriented_count > MAX_ORIENTED) return false;
+    const rect_base = 2;
+    const oriented_base = rect_base + rect_count * CAMERA_OCCLUSION_RECT_FLOATS;
+    const required = oriented_base + oriented_count * CAMERA_OCCLUSION_ORIENTED_FLOATS;
+    if (input.len < required) return false;
+
+    const rect_values = rect_count * CAMERA_OCCLUSION_RECT_FLOATS;
+    var rv: usize = 0;
+    while (rv < rect_values) : (rv += 1) {
+        storeCameraOcclusionRectValue(rv, input[rect_base + rv]);
+    }
+    const oriented_values = oriented_count * CAMERA_OCCLUSION_ORIENTED_FLOATS;
+    var ov: usize = 0;
+    while (ov < oriented_values) : (ov += 1) {
+        storeCameraOcclusionOrientedValue(ov, input[oriented_base + ov]);
+    }
+    g_camera_occlusion_rect_count = rect_count;
+    g_camera_occlusion_oriented_count = oriented_count;
+    return true;
+}
+
+pub fn cameraOcclusionConfiguredHit(
+    camera_x: f32,
+    camera_y: f32,
+    camera_z: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+    sweep_radius: f32,
+    out: *CameraOcclusionConfiguredHit,
+) bool {
+    out.* = .{};
+    const dx = target_x - camera_x;
+    const dy = target_y - camera_y;
+    const dz = target_z - camera_z;
+    if (!std.math.isFinite(dx) or !std.math.isFinite(dy) or !std.math.isFinite(dz)) return false;
+    const segment_len = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (segment_len <= 0.0001) return true;
+    const radius = if (std.math.isFinite(sweep_radius)) @max(@as(f32, 0), sweep_radius) else 0;
+    var nearest_target_distance: f32 = 0;
+    var nearest_owner: f32 = 0;
+
+    var r: usize = 0;
+    while (r < g_camera_occlusion_rect_count) : (r += 1) {
+        const at = r * CAMERA_OCCLUSION_RECT_FLOATS;
+        if (cameraOcclusionRectValue(at + 5) <= 0.5) continue;
+        if (segmentAabbEntryT(
+            camera_x,
+            camera_y,
+            camera_z,
+            dx,
+            dy,
+            dz,
+            cameraOcclusionRectValue(at) - radius,
+            bandFloor(cameraOcclusionRectValue(at + 8)) - radius,
+            cameraOcclusionRectValue(at + 1) - radius,
+            cameraOcclusionRectValue(at + 2) + radius,
+            cameraOcclusionRectValue(at + 4) + radius,
+            cameraOcclusionRectValue(at + 3) + radius,
+        )) |entry_t| {
+            const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
+            if (nearest_target_distance <= 0 or target_distance > nearest_target_distance) {
+                nearest_target_distance = target_distance;
+                nearest_owner = cameraOcclusionRectValue(at + RECT_FLOATS);
+            }
+        }
+    }
+
+    var o: usize = 0;
+    while (o < g_camera_occlusion_oriented_count) : (o += 1) {
+        const at = o * CAMERA_OCCLUSION_ORIENTED_FLOATS;
+        if (cameraOcclusionOrientedValue(at + 5) <= 0.5) continue;
+        const yaw = cameraOcclusionOrientedValue(at + 11);
+        const cs = @cos(yaw);
+        const sn = @sin(yaw);
+        var lo_x: f32 = undefined;
+        var lo_z: f32 = undefined;
+        var lt_x: f32 = undefined;
+        var lt_z: f32 = undefined;
+        worldToLocal(camera_x, camera_z, cameraOcclusionOrientedValue(at + 9), cameraOcclusionOrientedValue(at + 10), cs, sn, &lo_x, &lo_z);
+        worldToLocal(target_x, target_z, cameraOcclusionOrientedValue(at + 9), cameraOcclusionOrientedValue(at + 10), cs, sn, &lt_x, &lt_z);
+        if (segmentAabbEntryT(
+            lo_x,
+            camera_y,
+            lo_z,
+            lt_x - lo_x,
+            dy,
+            lt_z - lo_z,
+            cameraOcclusionOrientedValue(at) - radius,
+            bandFloor(cameraOcclusionOrientedValue(at + 8)) - radius,
+            cameraOcclusionOrientedValue(at + 1) - radius,
+            cameraOcclusionOrientedValue(at + 2) + radius,
+            cameraOcclusionOrientedValue(at + 4) + radius,
+            cameraOcclusionOrientedValue(at + 3) + radius,
+        )) |entry_t| {
+            const target_distance = segment_len * (1.0 - clamp(entry_t, 0, 1));
+            if (nearest_target_distance <= 0 or target_distance > nearest_target_distance) {
+                nearest_target_distance = target_distance;
+                nearest_owner = cameraOcclusionOrientedValue(at + ORIENTED_FLOATS);
+            }
+        }
+    }
+
+    out.nearest_target_distance = nearest_target_distance;
+    out.nearest_owner = nearest_owner;
+    return true;
+}
+
+pub fn cameraOcclusionConfiguredHitOutput(
+    camera_x: f32,
+    camera_y: f32,
+    camera_z: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+    sweep_radius: f32,
+) ?[]f32 {
+    var hit: CameraOcclusionConfiguredHit = .{};
+    if (!cameraOcclusionConfiguredHit(
+        camera_x,
+        camera_y,
+        camera_z,
+        target_x,
+        target_y,
+        target_z,
+        sweep_radius,
+        &hit,
+    )) return null;
+    clearCameraOcclusionOutput();
+    g_camera_occlusion[1] = hit.nearest_target_distance;
+    g_camera_occlusion[2] = hit.nearest_owner;
+    return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
+}
+
+pub fn cameraOcclusionConfiguredDistance(
+    camera_x: f32,
+    camera_y: f32,
+    camera_z: f32,
+    target_x: f32,
+    target_y: f32,
+    target_z: f32,
+    sweep_radius: f32,
+) ?f32 {
+    var hit: CameraOcclusionConfiguredHit = .{};
+    if (!cameraOcclusionConfiguredHit(
+        camera_x,
+        camera_y,
+        camera_z,
+        target_x,
+        target_y,
+        target_z,
+        sweep_radius,
+        &hit,
+    )) return null;
+    return hit.nearest_target_distance;
+}
+
+/// Camera→player visibility query against the same flat/oriented solid bands
+/// the host physics step already consumes. Input buffer:
+/// [camera x,y,z, target x,y,z, rectCount, orientedCount, maxHits, sweepRadius],
+/// then rectCount × (RECT_FLOATS + ownerId), then orientedCount ×
+/// (ORIENTED_FLOATS + ownerId). Output:
+/// [hostUs, hitCount, nearestTargetDistance, nearestOwnerId, ownerId...].
+pub fn cameraOcclusion(input: []const f32) ?[]f32 {
+    if (input.len < CAMERA_OCCLUSION_HEADER_FLOATS) return null;
+    const ox = input[0];
+    const oy = input[1];
+    const oz = input[2];
+    const tx = input[3];
+    const ty = input[4];
+    const tz = input[5];
+    const rect_count: usize = @intFromFloat(@max(@as(f32, 0), input[6]));
+    const oriented_count: usize = @intFromFloat(@max(@as(f32, 0), input[7]));
+    const requested_hits: usize = @intFromFloat(@max(@as(f32, 0), input[8]));
+    const sweep_radius = if (std.math.isFinite(input[9])) @max(@as(f32, 0), input[9]) else 0;
+    const max_hits = @min(MAX_CAMERA_OCCLUSION_HITS, if (requested_hits == 0) MAX_CAMERA_OCCLUSION_HITS else requested_hits);
+    if (rect_count > MAX_RECTS or oriented_count > MAX_ORIENTED) return null;
+    const rect_base = CAMERA_OCCLUSION_HEADER_FLOATS;
+    const oriented_base = rect_base + rect_count * CAMERA_OCCLUSION_RECT_FLOATS;
+    const required = oriented_base + oriented_count * CAMERA_OCCLUSION_ORIENTED_FLOATS;
+    if (input.len < required) return null;
+
+    clearCameraOcclusionOutput();
+    const dx = tx - ox;
+    const dy = ty - oy;
+    const dz = tz - oz;
+    if (!std.math.isFinite(dx) or !std.math.isFinite(dy) or !std.math.isFinite(dz)) return null;
+    const segment_len = @sqrt(dx * dx + dy * dy + dz * dz);
+    if (segment_len <= 0.0001) return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
+
+    var r: usize = 0;
+    while (r < rect_count) : (r += 1) {
+        const at = rect_base + r * CAMERA_OCCLUSION_RECT_FLOATS;
+        if (input[at + 5] <= 0.5) continue;
+        if (segmentAabbEntryT(
+            ox,
+            oy,
+            oz,
+            dx,
+            dy,
+            dz,
+            input[at] - sweep_radius,
+            bandFloor(input[at + 8]) - sweep_radius,
+            input[at + 1] - sweep_radius,
+            input[at + 2] + sweep_radius,
+            input[at + 4] + sweep_radius,
+            input[at + 3] + sweep_radius,
+        )) |entry_t| {
+            addCameraOcclusionHit(input[at + RECT_FLOATS], max_hits, entry_t, segment_len);
+        }
+    }
+
+    var o: usize = 0;
+    while (o < oriented_count) : (o += 1) {
+        const at = oriented_base + o * CAMERA_OCCLUSION_ORIENTED_FLOATS;
+        if (input[at + 5] <= 0.5) continue;
+        const yaw = input[at + 11];
+        const cs = @cos(yaw);
+        const sn = @sin(yaw);
+        var lo_x: f32 = undefined;
+        var lo_z: f32 = undefined;
+        var lt_x: f32 = undefined;
+        var lt_z: f32 = undefined;
+        worldToLocal(ox, oz, input[at + 9], input[at + 10], cs, sn, &lo_x, &lo_z);
+        worldToLocal(tx, tz, input[at + 9], input[at + 10], cs, sn, &lt_x, &lt_z);
+        if (segmentAabbEntryT(
+            lo_x,
+            oy,
+            lo_z,
+            lt_x - lo_x,
+            dy,
+            lt_z - lo_z,
+            input[at] - sweep_radius,
+            bandFloor(input[at + 8]) - sweep_radius,
+            input[at + 1] - sweep_radius,
+            input[at + 2] + sweep_radius,
+            input[at + 4] + sweep_radius,
+            input[at + 3] + sweep_radius,
+        )) |entry_t| {
+            addCameraOcclusionHit(input[at + ORIENTED_FLOATS], max_hits, entry_t, segment_len);
+        }
+    }
+
+    return g_camera_occlusion[0..CAMERA_OCCLUSION_OUTPUT_FLOATS];
+}
+
 // Bilinear height of one heightfield at (x,z), in stored units (above base_y).
 // null when (x,z) is outside the grid.
 fn rawHeight(hf: *const Heightfield, x: f32, z: f32) ?f32 {
@@ -212,27 +670,52 @@ fn rawHeight(hf: *const Heightfield, x: f32, z: f32) ?f32 {
 
 pub const HfSurface = struct { height: f32, normal_y: f32, walk_cos: f32 };
 
-/// The highest registered-heightfield surface under (x,z), with its up-normal —
-/// the terrain's contribution to ground/wall resolution. normal.y comes from a
-/// central difference of the sampled height (the real surface slope), so a steep
-/// face reports a low normal.y the step treats as a wall. Pub for behavior tests.
+fn heightfieldSurface(hf: *const Heightfield, x: f32, z: f32) ?HfSurface {
+    const raw = rawHeight(hf, x, z) orelse return null;
+    const h = hf.base_y + raw;
+    const e = hf.cell;
+    const hx0 = rawHeight(hf, x - e, z) orelse raw;
+    const hx1 = rawHeight(hf, x + e, z) orelse raw;
+    const hz0 = rawHeight(hf, x, z - e) orelse raw;
+    const hz1 = rawHeight(hf, x, z + e) orelse raw;
+    const dhdx = (hx1 - hx0) / (2 * e);
+    const dhdz = (hz1 - hz0) / (2 * e);
+    const ny = 1.0 / @sqrt(dhdx * dhdx + 1.0 + dhdz * dhdz);
+    return .{ .height = h, .normal_y = ny, .walk_cos = hf.walk_cos };
+}
+
+/// The highest registered-heightfield surface under (x,z), with its up-normal.
+/// This remains public for diagnostics/tests. Ground support below intentionally
+/// uses heightfieldGroundAt instead: an overhead ramp must not hide the terrain
+/// heightfield the player is actually standing on.
 pub fn heightfieldSurfaceAt(x: f32, z: f32) ?HfSurface {
     var best: ?HfSurface = null;
     for (&g_heightfields) |*hf| {
         if (!hf.active) continue;
-        const raw = rawHeight(hf, x, z) orelse continue;
-        const h = hf.base_y + raw;
-        const e = hf.cell;
-        const hx0 = rawHeight(hf, x - e, z) orelse raw;
-        const hx1 = rawHeight(hf, x + e, z) orelse raw;
-        const hz0 = rawHeight(hf, x, z - e) orelse raw;
-        const hz1 = rawHeight(hf, x, z + e) orelse raw;
-        const dhdx = (hx1 - hx0) / (2 * e);
-        const dhdz = (hz1 - hz0) / (2 * e);
-        const ny = 1.0 / @sqrt(dhdx * dhdx + 1.0 + dhdz * dhdz);
-        if (best == null or h > best.?.height) best = .{ .height = h, .normal_y = ny, .walk_cos = hf.walk_cos };
+        const s = heightfieldSurface(hf, x, z) orelse continue;
+        if (best == null or s.height > best.?.height) best = s;
     }
     return best;
+}
+
+pub fn heightfieldGroundSurfaceAt(x: f32, z: f32, current_y: f32, step_height: f32) ?HfSurface {
+    var best: ?HfSurface = null;
+    for (&g_heightfields) |*hf| {
+        if (!hf.active) continue;
+        const s = heightfieldSurface(hf, x, z) orelse continue;
+        if (s.normal_y >= s.walk_cos and s.height <= current_y + step_height) {
+            if (best == null or s.height > best.?.height) best = s;
+        }
+    }
+    return best;
+}
+
+fn heightfieldGroundAt(x: f32, z: f32, current_y: f32, step_height: f32) f32 {
+    return if (heightfieldGroundSurfaceAt(x, z, current_y, step_height)) |s| s.height else -1000000;
+}
+
+fn heightfieldSlopeGroundAt(x: f32, z: f32, current_y: f32, step_height: f32) bool {
+    return if (heightfieldGroundSurfaceAt(x, z, current_y, step_height)) |s| s.normal_y < 1.0 else false;
 }
 
 fn groundAt(rects: []const f32, oriented: []const f32, x: f32, z: f32, current_y: f32, step_height: f32) f32 {
@@ -344,7 +827,9 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         // into it. Walls pass floor = −∞ so this never skips them.
         if (y + height <= rect_floor) continue;
         const finite_floor_band = rect_floor > -100000;
-        if (walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace) continue;
+        const grace_walkable = walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace;
+        const slope_walkable = finite_floor_band and heightfieldSlopeGroundAt(x.*, z.*, y, step_height);
+        if (grace_walkable or slope_walkable) continue;
         _ = collideCircleRect(x, z, vx, vz, radius, rects[at .. at + RECT_FLOATS], restitution);
     }
     // Oriented walls (yawed buildings): rotate the body + its velocity into the
@@ -360,7 +845,9 @@ fn collideSolidRects(x: *f32, y: f32, z: *f32, vx: *f32, vz: *f32, radius: f32, 
         if (y >= rect_height - 0.04 or y + height < 0) continue;
         if (y + height <= rect_floor) continue;
         const finite_floor_band = rect_floor > -100000;
-        if (walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace) continue;
+        const grace_walkable = walkable_side_push_grace > 0 and finite_floor_band and rect_height <= y + step_height and y >= rect_floor - walkable_side_push_grace;
+        const slope_walkable = finite_floor_band and heightfieldSlopeGroundAt(x.*, z.*, y, step_height);
+        if (grace_walkable or slope_walkable) continue;
         const pivot_x = oriented[o + 9];
         const pivot_z = oriented[o + 10];
         const yaw = oriented[o + 11];
@@ -465,9 +952,7 @@ pub fn step(input: []const f32) ?[]f32 {
     // surface under the feet (terrain steeper than its slope limit does not
     // support you, so it is excluded here and handled as a wall after the move).
     var player_ground_y = groundAt(rects, oriented, px, pz, py, step_height);
-    if (heightfieldSurfaceAt(px, pz)) |s| {
-        if (s.normal_y >= s.walk_cos and s.height <= py + step_height) player_ground_y = @max(player_ground_y, s.height);
-    }
+    player_ground_y = @max(player_ground_y, heightfieldGroundAt(px, pz, py, step_height));
     var player_grounded = py <= player_ground_y + 0.015 and pvy <= 0;
     if (jump_down and player_grounded) {
         pvy = jump_speed;
@@ -498,13 +983,9 @@ pub fn step(input: []const f32) ?[]f32 {
             pz = prev_pz;
             pvx = 0;
             pvz = 0;
-            if (heightfieldSurfaceAt(px, pz)) |held| {
-                if (held.height <= py + step_height) next_ground_y = @max(next_ground_y, held.height);
-            }
-        } else if (s.height <= py + step_height) {
-            next_ground_y = @max(next_ground_y, s.height);
         }
     }
+    next_ground_y = @max(next_ground_y, heightfieldGroundAt(px, pz, py, step_height));
     if (py <= next_ground_y) {
         py = next_ground_y;
         if (pvy < 0) pvy = 0;

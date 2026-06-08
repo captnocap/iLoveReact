@@ -87,6 +87,38 @@ const Sim = struct {
 const GROUND = [physics.RECT_FLOATS]f32{ -50, -50, 50, 50, 0, 0, 0.5, 0, -1e9 };
 
 var g_buf: [4096]f32 = undefined;
+var g_occ_buf: [1024]f32 = undefined;
+
+const OcclusionQuery = struct {
+    camera: [3]f32,
+    target: [3]f32,
+    rects: []const [physics.CAMERA_OCCLUSION_RECT_FLOATS]f32 = &.{},
+    oriented: []const [physics.CAMERA_OCCLUSION_ORIENTED_FLOATS]f32 = &.{},
+    max_hits: f32 = 16,
+
+    fn pack(self: OcclusionQuery, buf: []f32) []f32 {
+        @memset(buf, 0);
+        buf[0] = self.camera[0];
+        buf[1] = self.camera[1];
+        buf[2] = self.camera[2];
+        buf[3] = self.target[0];
+        buf[4] = self.target[1];
+        buf[5] = self.target[2];
+        buf[6] = @floatFromInt(self.rects.len);
+        buf[7] = @floatFromInt(self.oriented.len);
+        buf[8] = self.max_hits;
+        var at: usize = physics.CAMERA_OCCLUSION_HEADER_FLOATS;
+        for (self.rects) |r| {
+            @memcpy(buf[at .. at + physics.CAMERA_OCCLUSION_RECT_FLOATS], &r);
+            at += physics.CAMERA_OCCLUSION_RECT_FLOATS;
+        }
+        for (self.oriented) |r| {
+            @memcpy(buf[at .. at + physics.CAMERA_OCCLUSION_ORIENTED_FLOATS], &r);
+            at += physics.CAMERA_OCCLUSION_ORIENTED_FLOATS;
+        }
+        return buf[0..at];
+    }
+};
 
 // ── gravity ──────────────────────────────────────────────────────────
 
@@ -242,6 +274,73 @@ test "ground collide: rest on flat floor does not oscillate with side-push grace
     }
 }
 
+// ── camera occlusion ─────────────────────────────────────────────────
+
+test "camera occlusion: wall between camera and player reports its owner" {
+    const wall = [physics.CAMERA_OCCLUSION_RECT_FLOATS]f32{ -2, -0.15, 2, 0.15, 3, 1, 0.85, 0.02, 0, 7 };
+    const out = physics.cameraOcclusion((OcclusionQuery{
+        .camera = .{ 0, 1.5, -5 },
+        .target = .{ 0, 1.5, 5 },
+        .rects = &.{wall},
+    }).pack(&g_occ_buf)).?;
+    try testing.expectEqual(@as(f32, 1), out[1]);
+    try testing.expectApproxEqAbs(@as(f32, 5.15), out[2], 0.0001);
+    try testing.expectEqual(@as(f32, 7), out[3]);
+    try testing.expectEqual(@as(f32, 7), out[4]);
+}
+
+test "camera occlusion: configured scalar query reports no hit for an empty scene" {
+    const distance = physics.cameraOcclusionConfiguredDistance(0, 1.5, -5, 0, 1.5, 5, 0).?;
+    try testing.expectEqual(@as(f32, 0), distance);
+}
+
+test "camera occlusion: configured hit query reports nearest owner" {
+    var config = [_]f32{ 1, 0, -2, -0.15, 2, 0.15, 3, 1, 0.85, 0.02, 0, 13 };
+    try testing.expect(physics.configureCameraOcclusion(config[0..]));
+    var hit: physics.CameraOcclusionConfiguredHit = .{};
+    try testing.expect(physics.cameraOcclusionConfiguredHit(0, 1.5, -5, 0, 1.5, 5, 0, &hit));
+    try testing.expectApproxEqAbs(@as(f32, 5.15), hit.nearest_target_distance, 0.0001);
+    try testing.expectEqual(@as(f32, 13), hit.nearest_owner);
+}
+
+test "camera occlusion: wall beside the camera ray reports no hit" {
+    const wall = [physics.CAMERA_OCCLUSION_RECT_FLOATS]f32{ 3, -0.15, 5, 0.15, 3, 1, 0.85, 0.02, 0, 7 };
+    const out = physics.cameraOcclusion((OcclusionQuery{
+        .camera = .{ 0, 1.5, -5 },
+        .target = .{ 0, 1.5, 5 },
+        .rects = &.{wall},
+    }).pack(&g_occ_buf)).?;
+    try testing.expectEqual(@as(f32, 0), out[1]);
+    try testing.expectEqual(@as(f32, 0), out[2]);
+}
+
+test "camera occlusion: split bands from one piece dedupe to one owner hit" {
+    const near_band = [physics.CAMERA_OCCLUSION_RECT_FLOATS]f32{ -2, -2.1, 2, -1.9, 3, 1, 0.85, 0.02, 0, 9 };
+    const far_band = [physics.CAMERA_OCCLUSION_RECT_FLOATS]f32{ -2, 1.9, 2, 2.1, 3, 1, 0.85, 0.02, 0, 9 };
+    const out = physics.cameraOcclusion((OcclusionQuery{
+        .camera = .{ 0, 1.5, -5 },
+        .target = .{ 0, 1.5, 5 },
+        .rects = &.{ near_band, far_band },
+    }).pack(&g_occ_buf)).?;
+    try testing.expectEqual(@as(f32, 1), out[1]);
+    try testing.expectApproxEqAbs(@as(f32, 7.1), out[2], 0.0001);
+    try testing.expectEqual(@as(f32, 9), out[3]);
+    try testing.expectEqual(@as(f32, 9), out[4]);
+}
+
+test "camera occlusion: rotated wall reports through the oriented frame" {
+    const wall = [physics.CAMERA_OCCLUSION_ORIENTED_FLOATS]f32{ -0.25, -4, 0.25, 4, 3, 1, 0.85, 0.02, 0, 0, 0, std.math.pi / 4.0, 11 };
+    const out = physics.cameraOcclusion((OcclusionQuery{
+        .camera = .{ -3, 1.5, -3 },
+        .target = .{ 3, 1.5, 3 },
+        .oriented = &.{wall},
+    }).pack(&g_occ_buf)).?;
+    try testing.expectEqual(@as(f32, 1), out[1]);
+    try testing.expect(out[2] > 0);
+    try testing.expectEqual(@as(f32, 11), out[3]);
+    try testing.expectEqual(@as(f32, 11), out[4]);
+}
+
 test "ground collide: entity bounces with rect surface restitution" {
     physics.clearHeightfields();
     // Bouncy ground (restitution 1.0), entity restitution 0.9.
@@ -329,12 +428,88 @@ test "heightfield sample: bilinear interior height" {
     try testing.expect(physics.heightfieldSurfaceAt(1.5, 1.0) == null);
 }
 
+test "heightfield sample: rotated vertical link rises along the turned local depth" {
+    physics.clearHeightfields();
+    var samples = [18]f32{
+        0,   0,   0,
+        0.6, 0.6, 0.6,
+        1.2, 1.2, 1.2,
+        1.8, 1.8, 1.8,
+        2.4, 2.4, 2.4,
+        3.0, 3.0, 3.0,
+    };
+    try testing.expect(physics.registerHeightfield(.{
+        .id = 0,
+        .origin_x = 5.4,
+        .origin_z = 4.5,
+        .cell = 0.6,
+        .cols = 3,
+        .rows = 6,
+        .base_y = 0,
+        .walk_cos = 0.5,
+        .yaw = std.math.pi / 2.0,
+        .pivot_x = 6,
+        .pivot_z = 6,
+    }, std.mem.sliceAsBytes(samples[0..])));
+    const low = physics.heightfieldSurfaceAt(4.8, 6).?;
+    const high = physics.heightfieldSurfaceAt(7.2, 6).?;
+    try testing.expectApproxEqAbs(@as(f32, 0.3), low.height, 1e-5);
+    try testing.expectApproxEqAbs(@as(f32, 2.7), high.height, 1e-5);
+    try testing.expect(high.height > low.height);
+    physics.clearHeightfields();
+}
+
 test "heightfield: falling player lands on the sampled surface" {
     registerSlope(0.5); // walkable
     const sim = Sim{ .dt = 0.05, .px = 1.5, .pz = 1.0, .py = 0.32, .pvy = -1 };
     const out = physics.step(sim.pack(&g_buf)).?;
     try testing.expectApproxEqAbs(@as(f32, 0.3), out[2], 1e-5);
     try testing.expectEqual(@as(f32, 1), out[7]);
+    physics.clearHeightfields();
+}
+
+test "heightfield: ramp above terrain does not replace the ground underneath" {
+    physics.clearHeightfields();
+    var ground_samples = [4]f32{ 0, 0, 0, 0 };
+    var ramp_samples = [4]f32{ 0, 0, 3, 3 };
+    try testing.expect(physics.registerHeightfield(.{
+        .id = 0,
+        .origin_x = 0,
+        .origin_z = 0,
+        .cell = 3,
+        .cols = 2,
+        .rows = 2,
+        .base_y = 0,
+        .walk_cos = 0.5,
+    }, std.mem.sliceAsBytes(ground_samples[0..])));
+    try testing.expect(physics.registerHeightfield(.{
+        .id = 1,
+        .origin_x = 0,
+        .origin_z = 0,
+        .cell = 3,
+        .cols = 2,
+        .rows = 2,
+        .base_y = 0,
+        .walk_cos = 0.6,
+    }, std.mem.sliceAsBytes(ramp_samples[0..])));
+
+    const highest = physics.heightfieldSurfaceAt(1.5, 2.4).?;
+    try testing.expect(highest.height > 2.3);
+
+    var sim = Sim{ .dt = 0.05, .px = 1.5, .pz = 2.4, .py = 0, .pvy = 0 };
+    var out = physics.step(sim.pack(&g_buf)).?;
+    var frame: usize = 0;
+    while (frame < 8) : (frame += 1) {
+        try testing.expectApproxEqAbs(@as(f32, 0), out[2], 1e-5);
+        try testing.expectEqual(@as(f32, 1), out[7]);
+        sim.px = out[1];
+        sim.py = out[2];
+        sim.pz = out[3];
+        sim.pvx = out[4];
+        sim.pvy = out[5];
+        sim.pvz = out[6];
+        out = physics.step(sim.pack(&g_buf)).?;
+    }
     physics.clearHeightfields();
 }
 
@@ -352,6 +527,79 @@ test "heightfield: walkable grade climbs under movement" {
     }
     try testing.expect(out[1] > 0.6); // advanced up-slope
     try testing.expectApproxEqAbs(out[1] * 0.2, out[2], 1e-3); // riding h = 0.2x
+    physics.clearHeightfields();
+}
+
+test "heightfield: hollow ramp slab ascent reaches the crest with zero side grace" {
+    physics.clearHeightfields();
+    var ramp_samples: [36]f32 = undefined;
+    var row: usize = 0;
+    while (row < 6) : (row += 1) {
+        const h: f32 = @as(f32, @floatFromInt(row)) * 0.6;
+        var col: usize = 0;
+        while (col < 6) : (col += 1) ramp_samples[row * 6 + col] = h;
+    }
+    try testing.expect(physics.registerHeightfield(.{
+        .id = 0,
+        .origin_x = 4.5,
+        .origin_z = 4.5,
+        .cell = 0.6,
+        .cols = 6,
+        .rows = 6,
+        .base_y = 0,
+        .walk_cos = 0.6,
+        .yaw = 0,
+        .pivot_x = 6,
+        .pivot_z = 6,
+    }, std.mem.sliceAsBytes(ramp_samples[0..])));
+
+    const segments = 16;
+    var rects: [segments * 3 + 1][physics.RECT_FLOATS]f32 = undefined;
+    var out_i: usize = 0;
+    var i: usize = 0;
+    while (i < segments) : (i += 1) {
+        const z0 = 4.5 + (@as(f32, @floatFromInt(i)) / segments) * 3.0;
+        const z1 = 4.5 + (@as(f32, @floatFromInt(i + 1)) / segments) * 3.0;
+        const top = (@as(f32, @floatFromInt(i)) / segments) * 3.0;
+        const floor = top - 0.2;
+        rects[out_i] = .{ 4.5, z0, 7.5, z1, top, 1, 0.85, 0.02, floor };
+        out_i += 1;
+        rects[out_i] = .{ 4.38, z0, 4.5, z1, top, 1, 0.85, 0.02, floor };
+        out_i += 1;
+        rects[out_i] = .{ 7.5, z0, 7.62, z1, top, 1, 0.85, 0.02, floor };
+        out_i += 1;
+    }
+    rects[out_i] = .{ 4.38, 7.5, 7.62, 7.62, 3.0, 1, 0.85, 0.02, 2.8 };
+
+    var sim = Sim{
+        .dt = 0.05,
+        .move_z = 1,
+        .speed = 3,
+        .px = 6,
+        .py = 0,
+        .pz = 4.5,
+        .rects = rects[0..],
+        .walkable_side_push_grace = 0,
+    };
+    var frame: usize = 0;
+    while (frame < 20) : (frame += 1) {
+        const selected = physics.heightfieldGroundSurfaceAt(sim.px, sim.pz, sim.py, sim.step_height).?;
+        try testing.expect(selected.normal_y >= selected.walk_cos);
+        const stepped = physics.step(sim.pack(&g_buf)).?;
+        std.debug.print(
+            "[RAMPASCENT-ZIG] frame={} selected(h={d:.3},ny={d:.3},cos={d:.3}) pos=({d:.3},{d:.3},{d:.3}) vel=({d:.3},{d:.3},{d:.3}) grounded={d:.0}\n",
+            .{ frame, selected.height, selected.normal_y, selected.walk_cos, stepped[1], stepped[2], stepped[3], stepped[4], stepped[5], stepped[6], stepped[7] },
+        );
+        try testing.expectEqual(@as(f32, 1), stepped[7]);
+        sim.px = stepped[1];
+        sim.py = stepped[2];
+        sim.pz = stepped[3];
+        sim.pvx = stepped[4];
+        sim.pvy = stepped[5];
+        sim.pvz = stepped[6];
+    }
+    try testing.expect(sim.pz >= 7.45);
+    try testing.expectApproxEqAbs(@as(f32, 3), sim.py, 0.05);
     physics.clearHeightfields();
 }
 

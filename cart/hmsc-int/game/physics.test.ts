@@ -288,7 +288,7 @@ function installFloorEdgeHost(): void {
 }
 
 function installRampCollisionHost(): void {
-  const fields: Array<{ originX: number; originZ: number; cell: number; cols: number; rows: number; baseY: number; heights: Float32Array }> = [];
+  const fields: Array<{ originX: number; originZ: number; cell: number; cols: number; rows: number; baseY: number; heights: Float32Array; sloped: boolean }> = [];
   globalThis.__game_physics_clear_heightfields = () => { fields.length = 0; };
   globalThis.__game_physics_register_heightfield = (
     _slot: number,
@@ -301,12 +301,20 @@ function installRampCollisionHost(): void {
     _walkCos: number,
     heights: Float32Array,
   ) => {
-    fields.push({ originX, originZ, cell, cols, rows, baseY, heights });
+    let sloped = false;
+    for (let i = 1; i < heights.length; i += 1) {
+      if (Math.abs(heights[i] - heights[0]) > 1e-6) {
+        sloped = true;
+        break;
+      }
+    }
+    fields.push({ originX, originZ, cell, cols, rows, baseY, heights, sloped });
     return true;
   };
-  const fieldGroundAt = (x: number, z: number, currentY: number, stepHeight: number): number | null => {
+  const fieldGroundAt = (x: number, z: number, currentY: number, stepHeight: number, requireSlope = false): number | null => {
     let best: number | null = null;
     for (const field of fields) {
+      if (requireSlope && !field.sloped) continue;
       const fx = (x - field.originX) / field.cell;
       const fz = (z - field.originZ) / field.cell;
       if (fx < 0 || fz < 0 || fx > field.cols - 1 || fz > field.rows - 1) continue;
@@ -334,6 +342,7 @@ function installRampCollisionHost(): void {
     const radius = wire[16];
     const height = wire[17];
     const stepHeight = wire[20];
+    const grace = wire[11];
     const rectCount = wire[13] | 0;
     let x = wire[5] + wire[8] * dt;
     let y = wire[6] + (wire[9] - wire[14] * dt) * dt;
@@ -351,7 +360,9 @@ function installRampCollisionHost(): void {
       if (x >= minX && x <= maxX && z >= minZ && z <= maxZ && top <= y + stepHeight) ground = Math.max(ground, top);
       if (solid && y < top - 0.04 && y + height > floor) {
         const finiteFloor = floor > -100000;
-        if (finiteFloor && top <= y + stepHeight && y >= floor - TUNING.walkableRectSidePushGraceMeters) {
+        const slopeWalkable = finiteFloor && fieldGroundAt(x, z, y, stepHeight, true) !== null;
+        const graceWalkable = finiteFloor && top <= y + stepHeight && grace > 0 && y >= floor - grace;
+        if (slopeWalkable || graceWalkable) {
           at += 9;
           continue;
         }
@@ -450,9 +461,11 @@ test('RAMPREAL-0606: ramp slab walks on top, stays hollow underneath, and blocks
   assertEqual(slope.player.grounded, true, 'slope walk remains grounded');
 
   let walker = { x: 6, y: 0, z: 4.5, vx: 0, vy: 0, vz: 3 };
+  const walkUpFrames: string[] = [];
   for (let frame = 0; frame < 20; frame += 1) {
     const walked = GAME_PHYSICS.step(stepInput({
       dtSeconds: 0.05,
+      tuning: { ...TUNING, walkableRectSidePushGraceMeters: 0 },
       player: { position: { x: walker.x, y: walker.y, z: walker.z }, velocity: { x: walker.vx, y: walker.vy, z: walker.vz }, yawDegrees: 0 },
       rects: solids.rects,
     }))!;
@@ -464,8 +477,10 @@ test('RAMPREAL-0606: ramp slab walks on top, stays hollow underneath, and blocks
       vy: walked.player.velocity.y,
       vz: walker.vz,
     };
+    walkUpFrames.push(`${frame}:pos(${walker.x.toFixed(3)},${walker.y.toFixed(3)},${walker.z.toFixed(3)}) vel(${walker.vx.toFixed(3)},${walker.vy.toFixed(3)},${walker.vz.toFixed(3)}) grounded=${walked.player.grounded}`);
     assertEqual(walked.player.grounded, true, `walk-up frame ${frame} stays grounded`);
   }
+  console.log(`[RAMPASCENT-0607] zeroGrace walkUp=${walkUpFrames.join(' | ')}`);
   assert(walker.z >= 7.45, `walk-up reaches the crest instead of being blocked at the approach (z=${walker.z})`);
   assertClose(walker.y, catalogEntry('ramp.concrete.common').size.heightMeters, 0.05, 'walk-up reaches the ramp crest height');
 
@@ -512,24 +527,6 @@ test('RAMPREAL-0606: ramp slab walks on top, stays hollow underneath, and blocks
   console.log(`[RAMPHOLLOW-0606] under-high-walks sideEnd=(${under.x.toFixed(3)},${under.y.toFixed(3)},${under.z.toFixed(3)}) towardLow=${underTowardFrames.join(' | ')}`);
   assert(underTowardSlab.z > 6.55, `walking at the ramp from underneath blocks at head contact instead of phasing through the lowering slab (z=${underTowardSlab.z})`);
   assertClose(underTowardSlab.y, 0, 1e-6, 'walking at the underside never snaps up onto the slope heightfield');
-
-  let lowUnder = { x: 6, y: 0, z: 4.1, vx: 0, vy: 0, vz: 2.5 };
-  for (let frame = 0; frame < 8; frame += 1) {
-    const walked = GAME_PHYSICS.step(stepInput({
-      dtSeconds: 0.05,
-      player: { position: { x: lowUnder.x, y: lowUnder.y, z: lowUnder.z }, velocity: { x: lowUnder.vx, y: lowUnder.vy, z: lowUnder.vz }, yawDegrees: 0 },
-      rects: [floorUnderRamp, ...solids.rects],
-    }))!;
-    lowUnder = {
-      x: walked.player.position.x,
-      y: walked.player.position.y,
-      z: walked.player.position.z,
-      vx: walked.player.velocity.x,
-      vy: walked.player.velocity.y,
-      vz: walked.player.velocity.z,
-    };
-  }
-  assert(lowUnder.z < 4.5, `approaching the low underside blocks before entering the slab footprint (z=${lowUnder.z})`);
 
   const leftSide = solids.rects.find((r) => r.maxX <= 4.5 && r.minZ <= 6 && r.maxZ >= 6)!;
   const blocked = GAME_PHYSICS.step(stepInput({

@@ -12,6 +12,7 @@ import {
   type WorldGridState,
   type WorldSurfaceRegion,
 } from './index';
+import { PHYSICS_LIMITS } from '../physics';
 import { LANDFORM_TUNING, landformSurfaceTop, tileKindDefinition } from '../kinds';
 import { assert, assertClose, assertEqual, assertThrows, finish, test, withHost } from '../_testkit';
 
@@ -258,11 +259,11 @@ test('collision rects carry the reference semantics: tops, blockers, surface pro
 
 test('rect derivation truncates at the host cap and SAYS so', () => {
   let w = GAME_WORLD.createState();
-  for (let i = 0; i < 520; i += 1) {
+  for (let i = 0; i < PHYSICS_LIMITS.rects + 8; i += 1) {
     w = GAME_WORLD.placeCell(w, 'wall', { x: i, y: 0, z: 0 }, 'test');
   }
   const { rects, dropped } = GAME_WORLD.collisionRects(w);
-  assertEqual(rects.length, 512, 'the host rect cap');
+  assertEqual(rects.length, PHYSICS_LIMITS.rects, 'the host rect cap');
   assertEqual(dropped, 8, 'every dropped rect is reported');
 });
 
