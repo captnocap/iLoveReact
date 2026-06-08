@@ -38,8 +38,50 @@ const STORE_DIR = "zig-out/game/contentstore";
 const MAX_FRAMES: u32 = 600;
 // Instance row: pos3 + rot3 + scale3 + color3 (matches gpu/3d.zig stride>=12).
 const INSTANCE_STRIDE: usize = 12;
+const AVATAR_PARTS: usize = 6;
+const SCAN_A: usize = 4;
+const SCAN_D: usize = 7;
+const SCAN_S: usize = 22;
+const SCAN_W: usize = 26;
+const SCAN_LSHIFT: usize = 225;
 
 const log = std.debug;
+
+const Vec3 = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+};
+
+const PlayerState = struct {
+    x: f32,
+    y: f32,
+    z: f32,
+    yaw: f32,
+};
+
+const CameraState = struct {
+    yaw: f32,
+    pitch: f32,
+    distance: f32,
+    focus_height: f32,
+    far: f32,
+    fov: f32,
+};
+
+fn clamp(v: f32, lo: f32, hi: f32) f32 {
+    return @max(lo, @min(hi, v));
+}
+
+fn nowNs() i64 {
+    return @as(i64, @truncate(std.time.nanoTimestamp()));
+}
+
+fn keyDown(scancode: usize) bool {
+    const keys = c.SDL_GetKeyboardState(null);
+    if (keys == null) return false;
+    return keys[scancode];
+}
 
 /// Read a game-file. The on-disk fixture is base64 text (the bake writer's
 /// __fs_write is string-only); decode it to the raw RJMP bytes.
@@ -131,9 +173,9 @@ fn extrudeTiles(allocator: std.mem.Allocator, scene: constructor.Scene) ![]f32 {
             const color = tileColor(scene.tiles[y * scene.width + x]) orelse continue;
             try list.appendSlice(allocator, &[_]f32{
                 @floatFromInt(x), 0.25, @floatFromInt(y), // position (center)
-                0,                0,    0, // rotation (yaw unused)
-                0.9,              0.5,  0.9, // scale
-                color[0],         color[1], color[2], // color
+                0, 0, 0, // rotation (yaw unused)
+                0.9, 0.5, 0.9, // scale
+                color[0], color[1], color[2], // color
             });
         }
     }
@@ -184,6 +226,143 @@ fn instanceBounds(insts: []const f32, count: u32, stride: usize) Bounds {
         .cz = (min_z + max_z) * 0.5,
         .radius = radius,
     };
+}
+
+fn instanceTop(insts: []const f32, row: usize, stride: usize) f32 {
+    const scale_base: usize = if (stride >= 12) 6 else 3;
+    const b = row * stride;
+    return insts[b + 1] + @abs(insts[b + scale_base + 1]) * 0.5;
+}
+
+fn instanceCovers(insts: []const f32, row: usize, stride: usize, x: f32, z: f32) bool {
+    const scale_base: usize = if (stride >= 12) 6 else 3;
+    const b = row * stride;
+    const hx = @abs(insts[b + scale_base + 0]) * 0.5;
+    const hz = @abs(insts[b + scale_base + 2]) * 0.5;
+    return x >= insts[b + 0] - hx and x <= insts[b + 0] + hx and
+        z >= insts[b + 2] - hz and z <= insts[b + 2] + hz;
+}
+
+fn chooseSpawn(insts: []const f32, inst_count: u32, piece_count: u32, stride: usize, bounds: Bounds) Vec3 {
+    const wanted_x = bounds.cx;
+    const wanted_z = bounds.cz;
+    var best_row: ?usize = null;
+    var best_dist2: f32 = std.math.floatMax(f32);
+    const total_rows: usize = @intCast(inst_count);
+    var row: usize = @min(@as(usize, @intCast(piece_count)), total_rows);
+    while (row < total_rows) : (row += 1) {
+        const b = row * stride;
+        const scale_base: usize = if (stride >= 12) 6 else 3;
+        const sy = @abs(insts[b + scale_base + 1]);
+        if (sy > 0.75) continue;
+        const dx = insts[b + 0] - wanted_x;
+        const dz = insts[b + 2] - wanted_z;
+        const d2 = dx * dx + dz * dz;
+        if (d2 < best_dist2) {
+            best_dist2 = d2;
+            best_row = row;
+        }
+    }
+    if (best_row == null) {
+        row = 0;
+        while (row < total_rows) : (row += 1) {
+            const b = row * stride;
+            const scale_base: usize = if (stride >= 12) 6 else 3;
+            const sx = @abs(insts[b + scale_base + 0]);
+            const sy = @abs(insts[b + scale_base + 1]);
+            const sz = @abs(insts[b + scale_base + 2]);
+            if (sy > 1.0 or sx < 1.0 or sz < 1.0) continue;
+            const dx = insts[b + 0] - wanted_x;
+            const dz = insts[b + 2] - wanted_z;
+            const d2 = dx * dx + dz * dz;
+            if (d2 < best_dist2) {
+                best_dist2 = d2;
+                best_row = row;
+            }
+        }
+    }
+    if (best_row) |r| {
+        const b = r * stride;
+        return .{ .x = insts[b + 0], .y = instanceTop(insts, r, stride), .z = insts[b + 2] };
+    }
+
+    var y = bounds.cy;
+    row = 0;
+    var found_cover = false;
+    while (row < total_rows) : (row += 1) {
+        if (!instanceCovers(insts, row, stride, wanted_x, wanted_z)) continue;
+        const top = instanceTop(insts, row, stride);
+        if (!found_cover or top > y) {
+            y = top;
+            found_cover = true;
+        }
+    }
+    if (!found_cover) y = 0;
+    return .{ .x = wanted_x, .y = y, .z = wanted_z };
+}
+
+fn groundHeightAt(insts: []const f32, inst_count: u32, piece_count: u32, stride: usize, x: f32, z: f32) ?f32 {
+    const total_rows: usize = @intCast(inst_count);
+    var row: usize = @min(@as(usize, @intCast(piece_count)), total_rows);
+    var best: ?f32 = null;
+    while (row < total_rows) : (row += 1) {
+        const b = row * stride;
+        const scale_base: usize = if (stride >= 12) 6 else 3;
+        if (@abs(insts[b + scale_base + 1]) > 0.75) continue;
+        if (!instanceCovers(insts, row, stride, x, z)) continue;
+        const top = instanceTop(insts, row, stride);
+        if (best == null or top > best.?) best = top;
+    }
+    return best;
+}
+
+fn writeInstance(out: []f32, row: usize, x: f32, y: f32, z: f32, yaw_rad: f32, sx: f32, sy: f32, sz: f32, color: [3]f32) void {
+    const b = row * INSTANCE_STRIDE;
+    out[b + 0] = x;
+    out[b + 1] = y;
+    out[b + 2] = z;
+    out[b + 3] = 0;
+    out[b + 4] = yaw_rad * 180.0 / std.math.pi;
+    out[b + 5] = 0;
+    out[b + 6] = sx;
+    out[b + 7] = sy;
+    out[b + 8] = sz;
+    out[b + 9] = color[0];
+    out[b + 10] = color[1];
+    out[b + 11] = color[2];
+}
+
+fn writeAvatarPart(out: []f32, row: usize, player: PlayerState, lx: f32, ly: f32, lz: f32, sx: f32, sy: f32, sz: f32, color: [3]f32) void {
+    const s = @sin(player.yaw);
+    const c0 = @cos(player.yaw);
+    const x = player.x + lx * c0 + lz * s;
+    const z = player.z - lx * s + lz * c0;
+    writeInstance(out, row, x, player.y + ly, z, player.yaw, sx, sy, sz, color);
+}
+
+fn writeAvatar(out: []f32, player: PlayerState) void {
+    writeAvatarPart(out, 0, player, -0.22, 0.45, 0.0, 0.30, 0.90, 0.30, .{ 0.10, 0.18, 0.28 });
+    writeAvatarPart(out, 1, player, 0.22, 0.45, 0.0, 0.30, 0.90, 0.30, .{ 0.10, 0.18, 0.28 });
+    writeAvatarPart(out, 2, player, 0.0, 1.14, 0.0, 0.72, 0.82, 0.34, .{ 0.16, 0.48, 0.90 });
+    writeAvatarPart(out, 3, player, -0.58, 1.15, 0.0, 0.22, 0.74, 0.24, .{ 0.76, 0.58, 0.42 });
+    writeAvatarPart(out, 4, player, 0.58, 1.15, 0.0, 0.22, 0.74, 0.24, .{ 0.76, 0.58, 0.42 });
+    writeAvatarPart(out, 5, player, 0.0, 1.77, 0.0, 0.46, 0.46, 0.46, .{ 0.86, 0.68, 0.50 });
+}
+
+fn updateCameraNode(camera: *Node, cam: CameraState, player: PlayerState) void {
+    const target = Vec3{ .x = player.x, .y = player.y + cam.focus_height, .z = player.z };
+    const cp = @cos(cam.pitch);
+    const sx = @sin(cam.yaw) * cp * cam.distance;
+    const sy = @sin(cam.pitch) * cam.distance;
+    const sz = @cos(cam.yaw) * cp * cam.distance;
+    camera.scene3d_pos_x = target.x + sx;
+    camera.scene3d_pos_y = target.y + sy;
+    camera.scene3d_pos_z = target.z + sz;
+    camera.scene3d_look_x = target.x;
+    camera.scene3d_look_y = target.y;
+    camera.scene3d_look_z = target.z;
+    camera.scene3d_fov = cam.fov;
+    camera.scene3d_far = cam.far;
 }
 
 pub fn main() !void {
@@ -239,10 +418,9 @@ pub fn main() !void {
     const piece_count: u32 = scene.piece_count;
     // The render proof greps this exact line: real geometry, real positions.
     log.print("[loader] built {d} mesh instances ({d} placed pieces)\n", .{ inst_count, piece_count });
-    // 0 instances = a genuinely empty map (no pieces, no paint). Switching to an
-    // empty map should render the skybox over void — NOT crash. The mesh node is
-    // omitted below (scene3d_mesh = inst_count > 0); camera/sky/lights still draw.
-    if (inst_count == 0) log.print("[loader] empty world — rendering skybox only\n", .{});
+    // 0 world instances = a genuinely empty map (no pieces, no paint). Switching
+    // to an empty map should still render a skybox and the runtime avatar.
+    if (inst_count == 0) log.print("[loader] empty world — rendering avatar over void\n", .{});
 
     // ── render the constructed scene (stateless GPU substrate) ───────────
     if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
@@ -280,16 +458,43 @@ pub fn main() !void {
     const horiz = bounds.radius * env.cam_horiz_factor + env.cam_horiz_base;
     const height = bounds.radius * env.cam_height_factor + env.cam_height_base;
     const far = (horiz + height + bounds.radius) * env.cam_far_factor;
+    const authored_eye = Vec3{
+        .x = bounds.cx + horiz * 0.72,
+        .y = bounds.cy + height,
+        .z = bounds.cz + horiz * 0.72,
+    };
+    const authored_dx = authored_eye.x - bounds.cx;
+    const authored_dy = authored_eye.y - bounds.cy;
+    const authored_dz = authored_eye.z - bounds.cz;
+    const authored_xz = @sqrt(authored_dx * authored_dx + authored_dz * authored_dz);
+    const authored_dist = @sqrt(authored_xz * authored_xz + authored_dy * authored_dy);
+    const spawn = chooseSpawn(insts, inst_count, piece_count, stride, bounds);
+    var player = PlayerState{
+        .x = spawn.x,
+        .y = spawn.y,
+        .z = spawn.z,
+        .yaw = std.math.atan2(-authored_dx, -authored_dz),
+    };
+    var camera = CameraState{
+        .yaw = std.math.atan2(authored_dx, authored_dz),
+        .pitch = clamp(std.math.atan2(authored_dy, @max(0.001, authored_xz)), 0.12, 1.05),
+        .distance = clamp(authored_dist, 8.0, @max(36.0, bounds.radius * 1.35)),
+        .focus_height = 1.25,
+        .far = @max(far, bounds.radius * 4.0 + 64.0),
+        .fov = env.cam_fov,
+    };
+    var avatar_instances: [AVATAR_PARTS * INSTANCE_STRIDE]f32 = undefined;
+    writeAvatar(avatar_instances[0..], player);
     var cube = buildCube();
     var kids = [_]Node{
         .{
             .scene3d_camera = true,
-            .scene3d_pos_x = bounds.cx + horiz * 0.72,
-            .scene3d_pos_y = bounds.cy + height,
-            .scene3d_pos_z = bounds.cz + horiz * 0.72,
-            .scene3d_look_x = bounds.cx,
-            .scene3d_look_y = bounds.cy,
-            .scene3d_look_z = bounds.cz,
+            .scene3d_pos_x = 0,
+            .scene3d_pos_y = 0,
+            .scene3d_pos_z = 0,
+            .scene3d_look_x = 0,
+            .scene3d_look_y = 0,
+            .scene3d_look_z = 0,
             .scene3d_fov = env.cam_fov,
             .scene3d_far = far,
         },
@@ -307,7 +512,16 @@ pub fn main() !void {
         .{ .scene3d_light = true, .scene3d_light_type = "ambient", .scene3d_color_r = env.ambient_color[0], .scene3d_color_g = env.ambient_color[1], .scene3d_color_b = env.ambient_color[2], .scene3d_intensity = env.ambient_intensity },
         .{ .scene3d_light = true, .scene3d_light_type = "directional", .scene3d_dir_x = env.dir[0], .scene3d_dir_y = env.dir[1], .scene3d_dir_z = env.dir[2], .scene3d_color_r = env.dir_color[0], .scene3d_color_g = env.dir_color[1], .scene3d_color_b = env.dir_color[2], .scene3d_intensity = env.dir_intensity },
         .{
-            .scene3d_mesh = inst_count > 0, // false on an empty map → skybox only
+            .scene3d_mesh = true,
+            .scene3d_geom_key = "box",
+            .scene3d_vertices = cube[0..],
+            .scene3d_vert_count = 36,
+            .scene3d_instance_data = avatar_instances[0..],
+            .scene3d_instance_count = AVATAR_PARTS,
+            .scene3d_instance_stride = INSTANCE_STRIDE,
+        },
+        .{
+            .scene3d_mesh = inst_count > 0, // false on an empty map; avatar still draws
             .scene3d_geom_key = "box",
             .scene3d_vertices = cube[0..],
             .scene3d_vert_count = 36,
@@ -317,8 +531,11 @@ pub fn main() !void {
         },
     };
     var root = Node{ .children = kids[0..] };
+    updateCameraNode(&kids[0], camera, player);
 
     var running = true;
+    var orbit_drag = false;
+    var last_ns = nowNs();
     var frame: u32 = 0;
     while (running) : (frame += 1) {
         var event: c.SDL_Event = undefined;
@@ -328,10 +545,62 @@ pub fn main() !void {
                 c.SDL_EVENT_KEY_DOWN => {
                     if (event.key.key == c.SDLK_ESCAPE) running = false;
                 },
+                c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
+                    if (event.button.button == c.SDL_BUTTON_LEFT or event.button.button == c.SDL_BUTTON_RIGHT) orbit_drag = true;
+                },
+                c.SDL_EVENT_MOUSE_BUTTON_UP => {
+                    if (event.button.button == c.SDL_BUTTON_LEFT or event.button.button == c.SDL_BUTTON_RIGHT) orbit_drag = false;
+                },
+                c.SDL_EVENT_MOUSE_MOTION => {
+                    if (orbit_drag) {
+                        camera.yaw -= event.motion.xrel * 0.006;
+                        camera.pitch = clamp(camera.pitch - event.motion.yrel * 0.004, 0.10, 1.15);
+                    }
+                },
+                c.SDL_EVENT_MOUSE_WHEEL => {
+                    camera.distance = clamp(camera.distance * (1.0 - event.wheel.y * 0.10), 4.0, @max(24.0, bounds.radius * 1.2));
+                },
                 else => {},
             }
         }
 
+        const ns = nowNs();
+        const dt = clamp(@as(f32, @floatFromInt(ns - last_ns)) / 1_000_000_000.0, 0.001, 0.05);
+        last_ns = ns;
+
+        var move_x: f32 = 0;
+        var move_z: f32 = 0;
+        if (keyDown(SCAN_W)) {
+            move_x -= @sin(camera.yaw);
+            move_z -= @cos(camera.yaw);
+        }
+        if (keyDown(SCAN_S)) {
+            move_x += @sin(camera.yaw);
+            move_z += @cos(camera.yaw);
+        }
+        if (keyDown(SCAN_A)) {
+            move_x -= @cos(camera.yaw);
+            move_z += @sin(camera.yaw);
+        }
+        if (keyDown(SCAN_D)) {
+            move_x += @cos(camera.yaw);
+            move_z -= @sin(camera.yaw);
+        }
+        const move_len = @sqrt(move_x * move_x + move_z * move_z);
+        if (move_len > 0.001) {
+            move_x /= move_len;
+            move_z /= move_len;
+            const speed: f32 = if (keyDown(SCAN_LSHIFT)) 8.0 else 4.5;
+            player.x += move_x * speed * dt;
+            player.z += move_z * speed * dt;
+            player.yaw = std.math.atan2(move_x, move_z);
+            if (groundHeightAt(insts, inst_count, piece_count, stride, player.x, player.z)) |ground_y| {
+                player.y = ground_y;
+            }
+            writeAvatar(avatar_instances[0..], player);
+        }
+
+        updateCameraNode(&kids[0], camera, player);
         _ = scene3d.render(&root, 0, 0, @floatFromInt(WIN_W), @floatFromInt(WIN_H), 1.0);
         gpu.frame(0.52, 0.62, 0.74); // sky-ish clear so the ground reads against it
 
