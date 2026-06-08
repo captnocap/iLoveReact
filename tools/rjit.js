@@ -589,12 +589,26 @@
       const d01 = grid[y1 * dCols + xa], d11 = grid[y1 * dCols + xb];
       return (d00 * (1 - tx) + d10 * tx) * (1 - ty) + (d01 * (1 - tx) + d11 * tx) * ty;
     };
+    const shz = p.shiftZ && p.shiftZ.length > 0 ? p.shiftZ : null;
+    const shiftAt = (v) => {
+      if (!shz) return 0;
+      if (shz.length === 1) return shz[0];
+      const t = Math.max(0, Math.min(1, v)) * (shz.length - 1);
+      const i = Math.min(shz.length - 2, Math.floor(t));
+      return shz[i] + (shz[i + 1] - shz[i]) * (t - i);
+    };
+    const floorCut = p.floorY != null && p.floorY < 1 ? -radius * scaleY * p.floorY : -Infinity;
     const base = (u, v) => {
       const theta = PI3 * v;
       const phi = PI3 / 2 - 2 * PI3 * u;
       const st = Math.sin(theta);
       const rxz = radius * profileAt(v);
-      return [st * Math.cos(phi) * rxz * scaleX, Math.cos(theta) * radius * scaleY, st * Math.sin(phi) * rxz * scaleZ];
+      const y = Math.max(floorCut, Math.cos(theta) * radius * scaleY);
+      return [
+        st * Math.cos(phi) * rxz * scaleX,
+        y,
+        (st * Math.sin(phi) * rxz + radius * shiftAt(v)) * scaleZ
+      ];
     };
     const NEPS = 1e-3;
     const baseNormal = (u, v) => {
@@ -1053,9 +1067,145 @@
     return g.build();
   }
 
+  // runtime/geometries/VoxelMesh.ts
+  var FACES = [
+    { key: "xp", n: [1, 0, 0], axis: 0, sign: 1, uAxis: 2, vAxis: 1 },
+    { key: "xn", n: [-1, 0, 0], axis: 0, sign: -1, uAxis: 2, vAxis: 1 },
+    { key: "yp", n: [0, 1, 0], axis: 1, sign: 1, uAxis: 0, vAxis: 2 },
+    { key: "yn", n: [0, -1, 0], axis: 1, sign: -1, uAxis: 0, vAxis: 2 },
+    { key: "zp", n: [0, 0, 1], axis: 2, sign: 1, uAxis: 0, vAxis: 1 },
+    { key: "zn", n: [0, 0, -1], axis: 2, sign: -1, uAxis: 0, vAxis: 1 }
+  ];
+  function key(x, y, z) {
+    return `${x}:${y}:${z}`;
+  }
+  function blockCoord(block, axis) {
+    return axis === 0 ? block.x : axis === 1 ? block.y : block.z;
+  }
+  function facePlane(block, face) {
+    return blockCoord(block, face.axis) + (face.sign > 0 ? 1 : 0);
+  }
+  function faceCell(block, face) {
+    return {
+      block,
+      face,
+      plane: facePlane(block, face),
+      u: blockCoord(block, face.uAxis),
+      v: blockCoord(block, face.vAxis)
+    };
+  }
+  function bounds(blocks, cell) {
+    if (blocks.length === 0) {
+      return { min: [0, 0, 0], max: [0, 0, 0], center: [0, 0, 0], size: [0, 0, 0] };
+    }
+    let minX = Infinity, minY = Infinity, minZ = Infinity;
+    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    for (const block of blocks) {
+      minX = Math.min(minX, block.x - 0.5);
+      minY = Math.min(minY, block.y - 0.5);
+      minZ = Math.min(minZ, block.z - 0.5);
+      maxX = Math.max(maxX, block.x + 0.5);
+      maxY = Math.max(maxY, block.y + 0.5);
+      maxZ = Math.max(maxZ, block.z + 0.5);
+    }
+    const min = [minX * cell, minY * cell, minZ * cell];
+    const max = [maxX * cell, maxY * cell, maxZ * cell];
+    const center = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+    const size = [max[0] - min[0], max[1] - min[1], max[2] - min[2]];
+    return { min, max, center, size };
+  }
+  function sampleDisplace(params, pos4, b) {
+    const grid = params.displace;
+    const cols = Math.max(1, Math.round(params.dCols ?? 0));
+    const rows = Math.max(1, Math.round(params.dRows ?? 0));
+    if (!grid || grid.length < cols * rows || !(params.amount && params.amount !== 0)) return 0;
+    const sx = b.size[0] > 1e-6 ? (pos4[0] - b.min[0]) / b.size[0] : 0.5;
+    const sy = b.size[1] > 1e-6 ? 1 - (pos4[1] - b.min[1]) / b.size[1] : 0.5;
+    const gx = Math.max(0, Math.min(cols - 1, Math.round(sx * (cols - 1))));
+    const gy = Math.max(0, Math.min(rows - 1, Math.round(sy * (rows - 1))));
+    return Math.max(-1, Math.min(1, Number(grid[gy * cols + gx] ?? 0))) * params.amount;
+  }
+  function point(raw, normal, params, b) {
+    const c = [raw[0] - b.center[0], raw[1] - b.center[1], raw[2] - b.center[2]];
+    const d = sampleDisplace(params, raw, b);
+    return [c[0] + normal[0] * d, c[1] + normal[1] * d, c[2] + normal[2] * d];
+  }
+  function makeQuad(face, plane, u0, v0, u1, v1, cell, params, b) {
+    const p = (u, v) => {
+      const raw = [0, 0, 0];
+      raw[face.axis] = (plane - 0.5) * cell;
+      raw[face.uAxis] = (u - 0.5) * cell;
+      raw[face.vAxis] = (v - 0.5) * cell;
+      return point(raw, face.n, params, b);
+    };
+    const a = p(u0, v0);
+    const b1 = p(u1, v0);
+    const c = p(u1, v1);
+    const d = p(u0, v1);
+    return face.sign > 0 ? [a, b1, c, d] : [b1, a, d, c];
+  }
+  function greedyFaces(blocks) {
+    const occupied = new Set(blocks.map((b) => key(b.x, b.y, b.z)));
+    const buckets = /* @__PURE__ */ new Map();
+    for (const block of blocks) {
+      for (const face of FACES) {
+        const nx = block.x + face.n[0];
+        const ny = block.y + face.n[1];
+        const nz = block.z + face.n[2];
+        if (occupied.has(key(nx, ny, nz))) continue;
+        const cell = faceCell(block, face);
+        const bucketKey = `${face.key}:${block.kind ?? "voxel"}:${cell.plane}`;
+        const arr = buckets.get(bucketKey) ?? [];
+        arr.push(cell);
+        buckets.set(bucketKey, arr);
+      }
+    }
+    const out2 = [];
+    for (const cells of buckets.values()) {
+      const pending = new Set(cells.map((c) => `${c.u}:${c.v}`));
+      const byKey = new Map(cells.map((c) => [`${c.u}:${c.v}`, c]));
+      const sorted = cells.slice().sort((a, b) => a.v - b.v || a.u - b.u);
+      for (const start of sorted) {
+        const startKey = `${start.u}:${start.v}`;
+        if (!pending.has(startKey)) continue;
+        let width = 1;
+        while (pending.has(`${start.u + width}:${start.v}`)) width++;
+        let height = 1;
+        outer: while (true) {
+          for (let du = 0; du < width; du++) {
+            if (!pending.has(`${start.u + du}:${start.v + height}`)) break outer;
+          }
+          height++;
+        }
+        for (let dv = 0; dv < height; dv++) {
+          for (let du = 0; du < width; du++) pending.delete(`${start.u + du}:${start.v + dv}`);
+        }
+        const first = byKey.get(startKey);
+        out2.push({ face: first.face, plane: first.plane, u0: start.u, v0: start.v, u1: start.u + width, v1: start.v + height });
+      }
+    }
+    return out2;
+  }
+  var VOXEL_MESH_DEFAULTS = Object.freeze({
+    blocks: [],
+    cellSizeMeters: 1,
+    amount: 0
+  });
+  function generate12(params) {
+    const blocks = params.blocks ?? [];
+    const cell = Math.max(1e-3, Number(params.cellSizeMeters ?? 1));
+    const b = bounds(blocks, cell);
+    const m = mesh();
+    for (const q of greedyFaces(blocks)) {
+      const [a, c, d, e] = makeQuad(q.face, q.plane, q.u0, q.v0, q.u1, q.v1, cell, params, b);
+      m.face(a, c, d, e, q.face.n, [0.5, 0.5]);
+    }
+    return m.build();
+  }
+
   // runtime/geometries/index.ts
-  function def(id, generate12, defaults) {
-    return { id, generate: generate12, defaults };
+  function def(id, generate13, defaults) {
+    return { id, generate: generate13, defaults };
   }
   var Box = def("Box", generate, BOX_DEFAULTS);
   var Sphere = def("Sphere", generate2, SPHERE_DEFAULTS);
@@ -1068,6 +1218,7 @@
   var Torus = def("Torus", generate9, TORUS_DEFAULTS);
   var Heightfield = { ...def("Heightfield", generate10, HEIGHTFIELD_DEFAULTS), hostKind: "heightfield" };
   var Humanoid = def("Humanoid", generate11, HUMANOID_DEFAULTS);
+  var VoxelMesh = def("VoxelMesh", generate12, VOXEL_MESH_DEFAULTS);
   var GEOMETRIES = {
     Box,
     Sphere,
@@ -1079,7 +1230,8 @@
     Cone,
     Torus,
     Heightfield,
-    Humanoid
+    Humanoid,
+    VoxelMesh
   };
 
   // runtime/geometries/_baked.generated.ts
@@ -1087,7 +1239,7 @@
 
   // runtime/geometries/intern.ts
   var cache = /* @__PURE__ */ new Map();
-  for (const key of Object.keys(BAKED)) cache.set(key, BAKED[key]);
+  for (const key2 of Object.keys(BAKED)) cache.set(key2, BAKED[key2]);
   function stable(v) {
     if (v === null || typeof v !== "object") return JSON.stringify(v);
     if (Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
@@ -1099,9 +1251,9 @@
     return def2.id + "|" + stable(resolved);
   }
   function bakeEntry(def2, params) {
-    const key = internKey(def2, params);
+    const key2 = internKey(def2, params);
     const data = def2.generate({ ...def2.defaults ?? {}, ...params ?? {} });
-    return { key, vertices: Array.from(data.positions), count: data.count, bounds: data.bounds.radius };
+    return { key: key2, vertices: Array.from(data.positions), count: data.count, bounds: data.bounds.radius };
   }
 
   // cli/commands/bake-geometry.ts
@@ -1402,9 +1554,9 @@
           const defId = resolveGeometryId(geomNode, ts, aliases);
           const params = extractLiteral(paramsNode, ts);
           if (defId && params.ok && params.value !== null && typeof params.value === "object") {
-            const key = defId + "|" + JSON.stringify(params.value, Object.keys(params.value).sort());
-            if (!state.seenItems.has(key)) {
-              state.seenItems.add(key);
+            const key2 = defId + "|" + JSON.stringify(params.value, Object.keys(params.value).sort());
+            if (!state.seenItems.has(key2)) {
+              state.seenItems.add(key2);
               state.items.push({ geometry: defId, params: params.value });
             }
           }
@@ -3338,8 +3490,8 @@ ${atlasW} ${atlasH}
           const entry = {};
           for (const ep of prop.initializer.properties) {
             if (!ts.isPropertyAssignment(ep) || !ts.isIdentifier(ep.name)) continue;
-            const key = ep.name.text;
-            if (key === "style" && ts.isObjectLiteralExpression(ep.initializer)) {
+            const key2 = ep.name.text;
+            if (key2 === "style" && ts.isObjectLiteralExpression(ep.initializer)) {
               entry.style = {};
               for (const sp of ep.initializer.properties) {
                 if (!ts.isPropertyAssignment(sp) || !ts.isIdentifier(sp.name)) continue;
@@ -3360,10 +3512,10 @@ ${atlasW} ${atlasH}
                 const objName = ts.isIdentifier(ep.initializer.expression) ? ep.initializer.expression.text : null;
                 const propName = ep.initializer.name.text;
                 if (objName && exportedConsts[objName] && exportedConsts[objName][propName] !== void 0) {
-                  entry[key] = exportedConsts[objName][propName];
+                  entry[key2] = exportedConsts[objName][propName];
                 }
               } else if (value !== null) {
-                entry[key] = value;
+                entry[key2] = value;
               }
             }
           }
@@ -4110,10 +4262,10 @@ ${entry}
                 const isStyle = item.startsWith("s:");
                 const rest = item.slice(2);
                 const eq = rest.indexOf("=");
-                const key = rest.slice(0, eq);
+                const key2 = rest.slice(0, eq);
                 const val = JSON.parse(rest.slice(eq + 1));
-                if (isStyle) styleStatics[key] = val;
-                else jsxProps[key] = val;
+                if (isStyle) styleStatics[key2] = val;
+                else jsxProps[key2] = val;
               }
               allResults.push({
                 primitive,
@@ -4398,9 +4550,9 @@ ${entry}
             if (cat === "color" && !isColorLiteral(v)) continue;
             if (cat !== "color" && !isNumericLiteral(v)) continue;
             const bucket = buckets[cat];
-            const key = typeof v === "string" ? v.toLowerCase() : v;
-            if (!bucket.has(key)) bucket.set(key, { value: v, count: 0, props: /* @__PURE__ */ new Map(), files: /* @__PURE__ */ new Set() });
-            const entry = bucket.get(key);
+            const key2 = typeof v === "string" ? v.toLowerCase() : v;
+            if (!bucket.has(key2)) bucket.set(key2, { value: v, count: 0, props: /* @__PURE__ */ new Map(), files: /* @__PURE__ */ new Set() });
+            const entry = bucket.get(key2);
             entry.count++;
             entry.props.set(k, (entry.props.get(k) || 0) + 1);
             entry.files.add(relative(process2.cwd(), filePath));
@@ -4769,6 +4921,157 @@ ${entry}
   __export(dev_exports, {
     run: () => run9
   });
+
+  // cli/host/net.ts
+  var SocketError = class extends Error {
+  };
+  function tryUnixConnect(path) {
+    const fd = __unixConnect(path);
+    return fd < 0 ? null : fd;
+  }
+  function unixWrite(fd, data) {
+    const written = __unixWrite(fd, data);
+    if (written < 0) throw new SocketError(`write failed (fd=${fd})`);
+  }
+  function unixReadLine(fd, deadlineMs) {
+    let reply = "";
+    while (reply.indexOf("\n") === -1) {
+      const remaining = deadlineMs - __nowMs();
+      if (remaining <= 0) throw new SocketError("timeout");
+      const chunk = __unixReadAll(fd, remaining, 4096);
+      if (chunk === null) continue;
+      if (chunk === "") throw new SocketError("EOF before newline");
+      reply += chunk;
+    }
+    return reply.slice(0, reply.indexOf("\n"));
+  }
+  function unixClose(fd) {
+    __unixClose(fd);
+  }
+
+  // cli/dev/rebuild-signal.ts
+  var DEV_SOCKET_PATH = "/tmp/reactjit.sock";
+  var TIMEOUT_MS = 3e3;
+  function nativeBuildFingerprint(rjitHome) {
+    const manifest2 = spawnSync("sh", ["-c", nativeInputManifestScript(), "native-input-manifest", rjitHome]);
+    if (manifest2.code !== 0) {
+      throw new Error(`native input manifest failed
+${manifest2.stderr || manifest2.stdout}`);
+    }
+    const digest = spawnSync("sha256sum", [], manifest2.stdout);
+    if (digest.code !== 0) {
+      throw new Error(`native input digest failed
+${digest.stderr || digest.stdout}`);
+    }
+    const hash = digest.stdout.trim().split(/\s+/)[0] || "";
+    if (!/^[0-9a-f]{64}$/.test(hash)) throw new Error(`native input digest malformed: ${digest.stdout.trim()}`);
+    const inputCount = manifest2.stdout.split("\n").filter(Boolean).length;
+    return { hash, inputCount };
+  }
+  function nativeInputManifestScript() {
+    return `
+set -eu
+cd "$1"
+{
+  find framework -type f -print 2>/dev/null || true
+  printf '%s\\n' build.zig v8_app.zig sdk/dependency-registry.json scripts/sdk-dependency-resolve.js tools/zig/zig
+} | LC_ALL=C sort -u | while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  sha256sum "$f"
+done
+`;
+  }
+  function devBuildInfoPath(bin) {
+    return `${bin}.dev-build.json`;
+  }
+  function readDevBuildId(bin) {
+    const raw = tryFsRead(devBuildInfoPath(bin));
+    if (!raw) return null;
+    try {
+      const parsed = JSON.parse(raw);
+      return typeof parsed.build_id === "string" ? parsed.build_id : null;
+    } catch {
+      return null;
+    }
+  }
+  function writeDevBuildInfo(bin, fingerprint) {
+    fsWrite(devBuildInfoPath(bin), `${JSON.stringify({
+      build_id: fingerprint.hash,
+      input_count: fingerprint.inputCount,
+      written_at: (/* @__PURE__ */ new Date()).toISOString()
+    }, null, 2)}
+`);
+  }
+  function readDevHostInfo(socket = DEV_SOCKET_PATH) {
+    if (!fsExists(socket)) return null;
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return null;
+    try {
+      unixWrite(fd, "INFO\n");
+      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
+      const parsed = JSON.parse(line);
+      return typeof parsed.build_id === "string" ? { build_id: parsed.build_id } : null;
+    } catch {
+      return null;
+    } finally {
+      unixClose(fd);
+    }
+  }
+  function staleDevHost(rjitHome, socket = DEV_SOCKET_PATH) {
+    const current = nativeBuildFingerprint(rjitHome);
+    const host = readDevHostInfo(socket);
+    if (!host) return null;
+    return host.build_id === current.hash ? null : { current, host };
+  }
+  function sendRebuildNotice(stale, socket = DEV_SOCKET_PATH) {
+    const fd = tryUnixConnect(socket);
+    if (fd === null) return false;
+    const body = JSON.stringify({
+      id: "dev-host-stale",
+      type: "rebuild-required",
+      kind: "native-build-id-mismatch",
+      title: "Rebuild needed",
+      message: "The running dev host was built from different native engine or wire-format sources. Restart rjit dev before hot reload can continue.",
+      detail: `running ${shortHash(stale.host.build_id)} / disk ${shortHash(stale.current.hash)}`,
+      persistent: true,
+      runningBuildId: stale.host.build_id,
+      currentBuildId: stale.current.hash,
+      inputCount: stale.current.inputCount
+    });
+    try {
+      unixWrite(fd, `NOTICE ${utf8ByteLength(body)}
+`);
+      unixWrite(fd, body);
+      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
+      return line.startsWith("OK");
+    } catch (error) {
+      if (error instanceof SocketError) return false;
+      throw error;
+    } finally {
+      unixClose(fd);
+    }
+  }
+  function shortHash(hash) {
+    if (!hash) return "unknown";
+    return hash === "unknown" ? hash : hash.slice(0, 12);
+  }
+  function utf8ByteLength(value) {
+    let bytes = 0;
+    for (let i = 0; i < value.length; i++) {
+      const code = value.charCodeAt(i);
+      if (code < 128) bytes += 1;
+      else if (code < 2048) bytes += 2;
+      else if (code >= 55296 && code <= 56319) {
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+    }
+    return bytes;
+  }
+
+  // cli/commands/dev.ts
   async function run9(argv) {
     const parsed = parseDevArgs(argv);
     if (typeof parsed === "number") return parsed;
@@ -4798,16 +5101,20 @@ ${entry}
     });
     writeSpawnOutput2(bundle2);
     if (bundle2.code !== 0) return bundle2.code || 1;
-    const needsBuild = devHostNeedsBuild(rjitHome, bin);
-    const socket = "/tmp/reactjit.sock";
+    const nativeFingerprint = nativeBuildFingerprint(rjitHome);
+    const needsBuild = devHostNeedsBuild(bin, nativeFingerprint);
+    const socket = DEV_SOCKET_PATH;
     const hostAlive = isHostAlive(socket);
     if (hostAlive) {
-      if (needsBuild) {
-        err("[dev] STALE DEV HOST - running binary predates current framework source.");
-        err("[dev] refusing to push: bundle would talk to yesterday's native code.");
+      const hostInfo = readDevHostInfo(socket);
+      if (!hostInfo || hostInfo.build_id !== nativeFingerprint.hash) {
+        const stale = { current: nativeFingerprint, host: hostInfo ?? { build_id: "unknown" } };
+        sendRebuildNotice(stale, socket);
+        err("[dev] STALE DEV HOST - running native build id differs from disk.");
+        err("[dev] refusing to push: bundle would talk to incompatible native code.");
         err("[dev] kill the running dev host (ctrl-c its terminal) and rerun this command.");
-        err(`[dev] inputs newer than ${bin}:`);
-        for (const path of newerInputs(rjitHome, bin).slice(0, 10)) err(`[dev]   ${path}`);
+        err(`[dev] running build id: ${shortHash(stale.host.build_id)}`);
+        err(`[dev] disk build id:    ${shortHash(stale.current.hash)} (${stale.current.inputCount} native inputs)`);
         return 1;
       }
       out(`[dev] host detected - pushing '${parsed.name}'`);
@@ -4822,13 +5129,14 @@ ${entry}
     fsWrite(`${rjitHome}/bundle.js`, fsRead(perCartBundle));
     if (needsBuild && fsExists(bin)) out("[dev] dev host inputs newer than binary - rebuilding...");
     if (needsBuild) {
-      const built = buildDevHost(rjitHome, cartRoot, binName, substrate, perCartBundle);
+      const built = buildDevHost(rjitHome, cartRoot, binName, substrate, perCartBundle, nativeFingerprint);
       if (built !== 0) return built;
+      writeDevBuildInfo(bin, nativeFingerprint);
     }
     ensurePgRunning(rjitHome);
     const child = spawn("env", [`RJIT_DEV_CART_DIR=${cart.dir}`, bin]);
     out(`[dev] host child=${child.id} - run 'rjit dev <other>' from another terminal to add tabs`);
-    const watchArgs = ["watch-and-push", parsed.name, cart.entry, perCartBundle];
+    const watchArgs = ["watch-and-push", parsed.name, cart.entry, perCartBundle, "--rjit-home", rjitHome];
     if (substrate === "tui") watchArgs.push("--tui");
     const watcher = spawn(`${rjitHome}/tools/rjit`, watchArgs);
     drainUntilExit(child.id, watcher.id);
@@ -4893,28 +5201,9 @@ ${entry}
       }
     }
   }
-  function devHostNeedsBuild(rjitHome, bin) {
+  function devHostNeedsBuild(bin, fingerprint) {
     if (!fsExists(bin)) return true;
-    return newerInputs(rjitHome, bin).length > 0;
-  }
-  function newerInputs(rjitHome, bin) {
-    const candidates = [
-      `${rjitHome}/framework`,
-      `${rjitHome}/build.zig`,
-      `${rjitHome}/v8_app.zig`,
-      `${rjitHome}/sdk/dependency-registry.json`,
-      `${rjitHome}/scripts/sdk-dependency-resolve.js`,
-      `${rjitHome}/tools/zig/zig`
-    ].filter((path) => fsExists(path));
-    if (candidates.length === 0) return [];
-    const args = [
-      ...candidates,
-      "-newer",
-      bin
-    ];
-    const result = spawnSync("find", args);
-    if (result.code !== 0) return [];
-    return result.stdout.split("\n").map((line) => line.trim()).filter(Boolean);
+    return readDevBuildId(bin) !== fingerprint.hash;
   }
   function isHostAlive(socket) {
     if (!fsExists(socket)) return false;
@@ -4923,7 +5212,7 @@ ${entry}
     fsRemove(socket);
     return false;
   }
-  function buildDevHost(rjitHome, cartRoot, binName, substrate, bundlePath) {
+  function buildDevHost(rjitHome, cartRoot, binName, substrate, bundlePath, fingerprint) {
     out(`[dev] compiling dev binary (${rjitHome}/zig-out/bin/${binName}, ${substrate}, ReleaseFast)...`);
     const flagsResult = spawnSync(`${rjitHome}/tools/rjit`, ["metafile-gate", "--format", "dev-zig-flags", "--build-zig", `${rjitHome}/build.zig`]);
     writeSpawnOutput2(flagsResult);
@@ -4939,6 +5228,7 @@ ${entry}
       `-Dapp-name=${binName}`,
       "-Dapp-source=v8_app.zig",
       `-Dbundle-path=${bundlePath}`,
+      `-Ddev-build-id=${fingerprint.hash}`,
       ...devFlags,
       "-Doptimize=ReleaseFast"
     ];
@@ -5231,6 +5521,10 @@ ${entry}
   var ORACLE_RECORDS_DIR = `${ORACLE_INDEX_DIR}/records`;
   var ORACLE_SELF_CHECK_ENTRY = `${OUT_DIR}/oracle-self-check.ts`;
   var ORACLE_SELF_CHECK_BUNDLE = `${OUT_DIR}/oracle-self-check.js`;
+  var ROUNDTRIP_GEN_ENTRY = "framework/testing/fixtures/gen_roundtrip.ts";
+  var ROUNDTRIP_GEN_BUNDLE = `${OUT_DIR}/mapfile-roundtrip-gen.js`;
+  var ROUNDTRIP_FIXTURE = "framework/testing/fixtures/mapfile_roundtrip.b64";
+  var ROUNDTRIP_ZIG_STEP = "test-world-mapfile";
   var ORACLE_SMOKE_QUERIES = [
     "physics",
     "kinds",
@@ -5489,12 +5783,36 @@ if (failures.length > 0) {
     }
     return suites.sort();
   }
+  function runMapfileRoundTrip(root) {
+    if (!bundle(root, ROUNDTRIP_GEN_ENTRY, ROUNDTRIP_GEN_BUNDLE)) {
+      err("[game] mapfile round-trip FAILED: fixture generator does not bundle");
+      return false;
+    }
+    const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${ROUNDTRIP_GEN_BUNDLE}`]);
+    if (gen.stderr.trim()) err(gen.stderr.trim());
+    const tape = gen.stdout.trim();
+    if (gen.code !== 0 || !tape) {
+      err("[game] mapfile round-trip FAILED: TS writer produced no tape");
+      return false;
+    }
+    fsWrite(`${root}/${ROUNDTRIP_FIXTURE}`, tape);
+    const zig = spawnSync("zig", ["build", ROUNDTRIP_ZIG_STEP]);
+    if (zig.stdout.trim()) out(zig.stdout.trim());
+    if (zig.stderr.trim()) err(zig.stderr.trim());
+    if (zig.code !== 0) {
+      err("[game] mapfile round-trip FAILED: Zig codec disagrees with the TS tape");
+      return false;
+    }
+    out("[game] mapfile round-trip GREEN \u2014 TS tape <-> Zig codec byte/value identical");
+    return true;
+  }
   function verify(root) {
     if (compile(root) !== 0) {
       err("[game] VERDICT RED \u2014 the game does not compile");
       return 1;
     }
     const oracleOk = runOracleSelfCheck(root);
+    const roundtripOk = runMapfileRoundTrip(root);
     fsMkdir(`${root}/${TEST_OUT_DIR}`);
     const suites = SUITE_ROOTS.flatMap((suiteRoot) => findTestSuites(root, suiteRoot));
     let suitesPassed = 0;
@@ -5520,8 +5838,8 @@ if (failures.length > 0) {
       if (result.code === 0) scriptsPassed += 1;
       else err(`[game] verify script FAILED: ${VERIFY_DIR}/${script}`);
     }
-    const green = oracleOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
-    const tally = `${oracleOk ? 1 : 0}/1 oracle, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
+    const green = oracleOk && roundtripOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
+    const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? 1 : 0}/1 round-trip, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
     if (!green) {
       err(`[game] VERDICT RED \u2014 ${tally}`);
       return 1;
@@ -6517,7 +6835,7 @@ ${IMPORTS_MARKER}`).replace(
   __export(pack_sdk_exports, {
     run: () => run17
   });
-  var ROOT2 = __cwd();
+  var ROOT = __cwd();
   var EXCLUDES = [
     ".zig-cache",
     "zig-cache",
@@ -6583,7 +6901,7 @@ ${IMPORTS_MARKER}`).replace(
   async function run17(argv) {
     const parsed = parsePackArgs(argv);
     if (typeof parsed === "number") return parsed;
-    const registryPath = `${ROOT2}/sdk/dependency-registry.json`;
+    const registryPath = `${ROOT}/sdk/dependency-registry.json`;
     if (!fsExists(registryPath)) return fail6(`registry missing: ${registryPath}`, 1);
     const registry = fsReadJson(registryPath);
     const stage = `/tmp/rjit-stage-${Date.now()}`;
@@ -6620,7 +6938,7 @@ ${IMPORTS_MARKER}`).replace(
     }
   }
   function parsePackArgs(argv) {
-    let outPath = `${ROOT2}/dist/rjit`;
+    let outPath = `${ROOT}/dist/rjit`;
     let keepStage = false;
     for (let i = 0; i < argv.length; i++) {
       const arg = argv[i];
@@ -6637,28 +6955,28 @@ ${IMPORTS_MARKER}`).replace(
         return fail6(`unknown flag: ${arg}`, 2);
       }
     }
-    if (!outPath.startsWith("/")) outPath = `${ROOT2}/${outPath}`;
+    if (!outPath.startsWith("/")) outPath = `${ROOT}/${outPath}`;
     return { outPath, keepStage };
   }
   function stageSourceTrees(stage) {
     for (const sub2 of SOURCE_TREES) {
-      if (!fsExists(`${ROOT2}/${sub2}`)) continue;
+      if (!fsExists(`${ROOT}/${sub2}`)) continue;
       log3(`copy ${sub2}/`);
-      copyTree(`${ROOT2}/${sub2}`, `${stage}/${sub2}`, sub2);
+      copyTree(`${ROOT}/${sub2}`, `${stage}/${sub2}`, sub2);
     }
   }
   function stageZigDeps(stage) {
     for (const sub2 of ZIG_PATH_DEPS) {
-      if (!fsExists(`${ROOT2}/${sub2}`)) continue;
+      if (!fsExists(`${ROOT}/${sub2}`)) continue;
       log3(`copy ${sub2}/`);
-      copyTree(`${ROOT2}/${sub2}`, `${stage}/${sub2}`, sub2);
+      copyTree(`${ROOT}/${sub2}`, `${stage}/${sub2}`, sub2);
     }
   }
   function stageTopLevelFiles(stage) {
     for (const file of TOP_LEVEL_FILES) {
-      if (!fsExists(`${ROOT2}/${file}`)) continue;
+      if (!fsExists(`${ROOT}/${file}`)) continue;
       log3(`copy ${file}`);
-      copyFile(`${ROOT2}/${file}`, `${stage}/${file}`);
+      copyFile(`${ROOT}/${file}`, `${stage}/${file}`);
     }
   }
   function stageToolchain(stage, registry) {
@@ -6667,20 +6985,20 @@ ${IMPORTS_MARKER}`).replace(
       if (spec.packPolicy === "optional") continue;
       if (spec.payloadPath) {
         log3(`tool ${name} <- ${spec.payloadPath}`);
-        copyFile(`${ROOT2}/${spec.payloadPath}`, `${stage}/${spec.payloadPath}`);
+        copyFile(`${ROOT}/${spec.payloadPath}`, `${stage}/${spec.payloadPath}`);
       }
       for (const supportPath of spec.supportPaths ?? []) {
-        if (!fsExists(`${ROOT2}/${supportPath}`)) continue;
+        if (!fsExists(`${ROOT}/${supportPath}`)) continue;
         log3(`tool ${name} support <- ${supportPath}`);
-        copyTree(`${ROOT2}/${supportPath}`, `${stage}/${supportPath}`, supportPath);
+        copyTree(`${ROOT}/${supportPath}`, `${stage}/${supportPath}`, supportPath);
       }
     }
   }
   function stageRjitTool(stage) {
     for (const file of ["tools/rjit", "tools/rjit.js"]) {
-      if (!fsExists(`${ROOT2}/${file}`)) throw new Error(`missing rjit tool payload: ${file}`);
+      if (!fsExists(`${ROOT}/${file}`)) throw new Error(`missing rjit tool payload: ${file}`);
       log3(`tool rjit <- ${file}`);
-      copyFile(`${ROOT2}/${file}`, `${stage}/${file}`);
+      copyFile(`${ROOT}/${file}`, `${stage}/${file}`);
     }
   }
   function stageSdlDeps(stage) {
@@ -6744,7 +7062,7 @@ ${IMPORTS_MARKER}`).replace(
       }
       const payloads = Array.isArray(spec.payloadPath) ? spec.payloadPath : [spec.payloadPath];
       for (const payloadPath of payloads) {
-        const src = `${ROOT2}/${payloadPath}`;
+        const src = `${ROOT}/${payloadPath}`;
         if (!fsExists(src)) {
           missing.push(`${name} (${payloadPath} missing)`);
           continue;
@@ -6861,37 +7179,8 @@ ${IMPORTS_MARKER}`).replace(
   __export(push_bundle_exports, {
     run: () => run19
   });
-
-  // cli/host/net.ts
-  var SocketError = class extends Error {
-  };
-  function tryUnixConnect(path) {
-    const fd = __unixConnect(path);
-    return fd < 0 ? null : fd;
-  }
-  function unixWrite(fd, data) {
-    const written = __unixWrite(fd, data);
-    if (written < 0) throw new SocketError(`write failed (fd=${fd})`);
-  }
-  function unixReadLine(fd, deadlineMs) {
-    let reply = "";
-    while (reply.indexOf("\n") === -1) {
-      const remaining = deadlineMs - __nowMs();
-      if (remaining <= 0) throw new SocketError("timeout");
-      const chunk = __unixReadAll(fd, remaining, 4096);
-      if (chunk === null) continue;
-      if (chunk === "") throw new SocketError("EOF before newline");
-      reply += chunk;
-    }
-    return reply.slice(0, reply.indexOf("\n"));
-  }
-  function unixClose(fd) {
-    __unixClose(fd);
-  }
-
-  // cli/commands/push-bundle.ts
   var SOCKET_PATH = "/tmp/reactjit.sock";
-  var TIMEOUT_MS = 3e3;
+  var TIMEOUT_MS2 = 3e3;
   async function run19(argv) {
     let parsed;
     try {
@@ -6916,7 +7205,7 @@ ${IMPORTS_MARKER}`).replace(
     if (fd === null) return 2;
     try {
       try {
-        unixWrite(fd, `PUSH ${tabName} ${utf8ByteLength(bundle2)}
+        unixWrite(fd, `PUSH ${tabName} ${utf8ByteLength2(bundle2)}
 `);
       } catch (error) {
         if (error instanceof SocketError) {
@@ -6934,7 +7223,7 @@ ${IMPORTS_MARKER}`).replace(
         }
         throw error;
       }
-      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS).trim();
+      const line = unixReadLine(fd, __nowMs() + TIMEOUT_MS2).trim();
       if (line.startsWith("OK")) return 0;
       err(`[push-bundle] host error: ${line}`);
       return 1;
@@ -6952,7 +7241,7 @@ ${IMPORTS_MARKER}`).replace(
       unixClose(fd);
     }
   }
-  function utf8ByteLength(value) {
+  function utf8ByteLength2(value) {
     let bytes = 0;
     for (let i = 0; i < value.length; i++) {
       const code = value.charCodeAt(i);
@@ -7189,7 +7478,6 @@ ${IMPORTS_MARKER}`).replace(
     const names = ["privacy", "useHost", "useConnection", "fs", "websocket", "telemetry", "zigcall", "sdk", "voice", "audio_input", "whisper", "paintable", "onnx", "pg", "embed", "sqlite", "terminal", "process", "window", "doom"];
     const values = gate.stdout.trim().split(/\s+/);
     const enabled = new Set(names.filter((_, i) => values[i] === "1"));
-    if (enabled.has("sqlite") && !flags.includes("-Dhas-telemetry=true")) flags.push("-Dhas-telemetry=true");
     if (enabled.has("embed") && !flags.includes("-Dhas-pg=true")) flags.push("-Dhas-pg=true");
     return flags;
   }
@@ -7236,6 +7524,7 @@ ${IMPORTS_MARKER}`).replace(
       fs: hasBuildFlag(flags, "has-fs"),
       websocket: hasBuildFlag(flags, "has-websocket"),
       telemetry: hasBuildFlag(flags, "has-telemetry"),
+      sqlite: hasBuildFlag(flags, "has-sqlite"),
       zigcall: hasBuildFlag(flags, "has-zigcall"),
       sdk: hasBuildFlag(flags, "has-sdk"),
       voice: hasBuildFlag(flags, "has-voice"),
@@ -7660,6 +7949,7 @@ __ARCHIVE__
     const cartFile = argv[1];
     const outPath = argv[2];
     const tui = argv.includes("--tui") || argv.includes("--headless");
+    const rjitHome = flagValue(argv, "--rjit-home") ?? __cwd();
     if (!cartName || !cartFile || !outPath) {
       err("[watch-and-push] usage: watch-and-push.js <cart-name> <cart-file> <out-path>");
       return 1;
@@ -7688,9 +7978,13 @@ __ARCHIVE__
       const mtime = statMtime(outAbs);
       if (mtime !== 0 && mtime !== lastMtime) {
         lastMtime = mtime;
-        push(root, cartName, outAbs);
+        push(root, rjitHome, cartName, outAbs);
       }
     }
+  }
+  function flagValue(argv, flag) {
+    const idx = argv.indexOf(flag);
+    return idx >= 0 ? argv[idx + 1] ?? null : null;
   }
   function toAbs(root, path) {
     if (path.startsWith("/")) return path;
@@ -7701,7 +7995,13 @@ __ARCHIVE__
     const stat = tryFsStat(path);
     return stat ? Number(stat.mtimeMs) || 0 : 0;
   }
-  function push(root, cartName, outAbs) {
+  function push(root, rjitHome, cartName, outAbs) {
+    const stale = staleDevHost(rjitHome, DEV_SOCKET_PATH);
+    if (stale) {
+      sendRebuildNotice(stale, DEV_SOCKET_PATH);
+      err(`[dev ${(/* @__PURE__ */ new Date()).toLocaleTimeString()}] rebuild needed - native build id running ${shortHash(stale.host.build_id)} / disk ${shortHash(stale.current.hash)}`);
+      return;
+    }
     const result = spawnSync(`${root}/tools/rjit`, ["push-bundle", cartName, outAbs]);
     const timestamp = (/* @__PURE__ */ new Date()).toLocaleTimeString();
     if (result.code === 0) {

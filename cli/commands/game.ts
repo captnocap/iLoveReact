@@ -26,6 +26,13 @@ const ORACLE_INDEX_DIR = 'docs/game/_index';
 const ORACLE_RECORDS_DIR = `${ORACLE_INDEX_DIR}/records`;
 const ORACLE_SELF_CHECK_ENTRY = `${OUT_DIR}/oracle-self-check.ts`;
 const ORACLE_SELF_CHECK_BUNDLE = `${OUT_DIR}/oracle-self-check.js`;
+// Platform mapfile cross-language round-trip (PLATMOD spine, keystone step 1):
+// the TS writer emits a tape, the Zig codec decodes the SAME tape and asserts
+// byte/value identity. Freezes the wire format across both languages.
+const ROUNDTRIP_GEN_ENTRY = 'framework/testing/fixtures/gen_roundtrip.ts';
+const ROUNDTRIP_GEN_BUNDLE = `${OUT_DIR}/mapfile-roundtrip-gen.js`;
+const ROUNDTRIP_FIXTURE = 'framework/testing/fixtures/mapfile_roundtrip.b64';
+const ROUNDTRIP_ZIG_STEP = 'test-world-mapfile';
 const ORACLE_SMOKE_QUERIES = [
   'physics',
   'kinds',
@@ -298,6 +305,33 @@ function findTestSuites(root: string, dir: string): string[] {
   return suites.sort();
 }
 
+/** TS writes the mapfile tape with the production workspace codec; the Zig
+ *  codec reads the SAME tape and asserts byte/value identity. Returns false on
+ *  any drift — this is the platform spine's keystone proof. */
+function runMapfileRoundTrip(root: string): boolean {
+  if (!bundle(root, ROUNDTRIP_GEN_ENTRY, ROUNDTRIP_GEN_BUNDLE)) {
+    err('[game] mapfile round-trip FAILED: fixture generator does not bundle');
+    return false;
+  }
+  const gen = spawnSync(`${root}/tools/v8cli`, [`${root}/${ROUNDTRIP_GEN_BUNDLE}`]);
+  if (gen.stderr.trim()) err(gen.stderr.trim());
+  const tape = gen.stdout.trim();
+  if (gen.code !== 0 || !tape) {
+    err('[game] mapfile round-trip FAILED: TS writer produced no tape');
+    return false;
+  }
+  fsWrite(`${root}/${ROUNDTRIP_FIXTURE}`, tape);
+  const zig = spawnSync('zig', ['build', ROUNDTRIP_ZIG_STEP]);
+  if (zig.stdout.trim()) out(zig.stdout.trim());
+  if (zig.stderr.trim()) err(zig.stderr.trim());
+  if (zig.code !== 0) {
+    err('[game] mapfile round-trip FAILED: Zig codec disagrees with the TS tape');
+    return false;
+  }
+  out('[game] mapfile round-trip GREEN — TS tape <-> Zig codec byte/value identical');
+  return true;
+}
+
 function verify(root: string): number {
   if (compile(root) !== 0) {
     err('[game] VERDICT RED — the game does not compile');
@@ -306,6 +340,9 @@ function verify(root: string): number {
 
   // ── oracle self-check: docs/game/_index is part of the test surface ─────
   const oracleOk = runOracleSelfCheck(root);
+
+  // ── platform spine: TS-writer <-> Zig-reader mapfile round-trip ──────────
+  const roundtripOk = runMapfileRoundTrip(root);
 
   // ── the P4 behavior suites (dual-sided testing's TS side) ────────────────
   fsMkdir(`${root}/${TEST_OUT_DIR}`);
@@ -338,8 +375,8 @@ function verify(root: string): number {
     else err(`[game] verify script FAILED: ${VERIFY_DIR}/${script}`);
   }
 
-  const green = oracleOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
-  const tally = `${oracleOk ? 1 : 0}/1 oracle, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
+  const green = oracleOk && roundtripOk && suitesPassed === suites.length && scriptsPassed === scripts.length && scripts.length > 0;
+  const tally = `${oracleOk ? 1 : 0}/1 oracle, ${roundtripOk ? 1 : 0}/1 round-trip, ${suitesPassed}/${suites.length} suites, ${scriptsPassed}/${scripts.length} scripts`;
   if (!green) {
     err(`[game] VERDICT RED — ${tally}`);
     return 1;

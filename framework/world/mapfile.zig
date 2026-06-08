@@ -119,6 +119,35 @@ pub fn findLump(lumps: []const Lump, type_id: u32) ?Lump {
     return null;
 }
 
+pub fn decodeRle8(allocator: std.mem.Allocator, bytes: []const u8) Error!RleGrid {
+    if (bytes.len < 12) return Error.RleTooSmall;
+    const width = readU32(bytes, 0);
+    const height = readU32(bytes, 4);
+    const pair_count = readU32(bytes, 8);
+    const payload_end = 12 + @as(usize, pair_count) * 3;
+    if (payload_end > bytes.len) return Error.RleTruncated;
+    const total = std.math.mul(usize, @as(usize, width), @as(usize, height)) catch return Error.RleSizeOverflow;
+    const values = allocator.alloc(?u16, total) catch return Error.RleSizeOverflow;
+    errdefer allocator.free(values);
+    @memset(values, null);
+
+    var out_index: usize = 0;
+    var at: usize = 12;
+    var i: usize = 0;
+    while (i < pair_count) : (i += 1) {
+        const count = readU16(bytes, at);
+        const encoded = bytes[at + 2];
+        at += 3;
+        const value: ?u16 = if (encoded == 0) null else @as(u16, encoded) - 1;
+        var n: usize = 0;
+        while (n < count and out_index < values.len) : (n += 1) {
+            values[out_index] = value;
+            out_index += 1;
+        }
+    }
+    return .{ .width = width, .height = height, .values = values };
+}
+
 pub fn decodeRle16(allocator: std.mem.Allocator, bytes: []const u8) Error!RleGrid {
     if (bytes.len < 12) return Error.RleTooSmall;
     const width = readU32(bytes, 0);

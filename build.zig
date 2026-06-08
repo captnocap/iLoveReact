@@ -23,6 +23,7 @@ pub fn build(b: *std.Build) void {
     const app_source = b.option([]const u8, "app-source", "Root Zig source file") orelse "v8_app.zig";
     const sysroot = b.option([]const u8, "sysroot", "Optional sysroot for cross-builds");
     const dev_mode = b.option(bool, "dev-mode", "Read bundle.js from disk and hot-reload on change") orelse false;
+    const dev_build_id = b.option([]const u8, "dev-build-id", "Content fingerprint of native inputs embedded in dev-mode hosts") orelse "unknown";
     const custom_chrome = b.option(bool, "custom-chrome", "Cart draws its own window chrome (borderless)") orelse false;
     // -Dhas-gpu=false ships the app binary in headless (TUI) mode: no
     // SDL3/wgpu/freetype/X11 link, no engine.run call, framework/gpu/*
@@ -113,6 +114,7 @@ pub fn build(b: *std.Build) void {
     // target covers both substrates.
     options.addOption(bool, "has_gpu", has_gpu_cli);
     options.addOption(bool, "dev_mode", dev_mode);
+    options.addOption([]const u8, "dev_build_id", dev_build_id);
     options.addOption(bool, "custom_chrome", custom_chrome);
     options.addOption(bool, "has_physics", has_physics);
     options.addOption(bool, "has_terminal", has_terminal);
@@ -988,6 +990,9 @@ pub fn build(b: *std.Build) void {
         .root_module = world_mapfile_test_mod,
     });
     const run_world_mapfile_test = b.addRunArtifact(world_mapfile_test);
+    // Pin cwd to the repo root so the cross-language round-trip test can read
+    // framework/testing/fixtures/mapfile_roundtrip.b64 by relative path.
+    run_world_mapfile_test.setCwd(b.path("."));
     const world_mapfile_test_step = b.step("test-world-mapfile", "Run the platform mapfile reader tests");
     world_mapfile_test_step.dependOn(&run_world_mapfile_test.step);
 
