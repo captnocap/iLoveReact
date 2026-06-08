@@ -684,6 +684,24 @@ fn heightfieldSurface(hf: *const Heightfield, x: f32, z: f32) ?HfSurface {
     return .{ .height = h, .normal_y = ny, .walk_cos = hf.walk_cos };
 }
 
+fn clampUphillSurfaceSpeed(vx: *f32, vz: *f32, x: f32, z: f32, y: f32, step_height: f32, dt: f32, surface: HfSurface, max_surface_speed: f32) void {
+    if (max_surface_speed <= 0) return;
+    const horizontal_speed = @sqrt(vx.* * vx.* + vz.* * vz.*);
+    if (horizontal_speed <= 0.001) return;
+    const next_x = x + vx.* * dt;
+    const next_z = z + vz.* * dt;
+    const next_surface = heightfieldGroundSurfaceAt(next_x, next_z, y, step_height) orelse return;
+    if (next_surface.height <= surface.height) return;
+    const horizontal_delta = horizontal_speed * dt;
+    if (horizontal_delta <= 0.0001) return;
+    const slope_along = (next_surface.height - surface.height) / horizontal_delta;
+    const max_horizontal = max_surface_speed / @sqrt(1 + slope_along * slope_along);
+    if (horizontal_speed <= max_horizontal) return;
+    const scale = max_horizontal / horizontal_speed;
+    vx.* *= scale;
+    vz.* *= scale;
+}
+
 /// The highest registered-heightfield surface under (x,z), with its up-normal.
 /// This remains public for diagnostics/tests. Ground support below intentionally
 /// uses heightfieldGroundAt instead: an overhead ramp must not hide the terrain
@@ -954,6 +972,11 @@ pub fn step(input: []const f32) ?[]f32 {
     var player_ground_y = groundAt(rects, oriented, px, pz, py, step_height);
     player_ground_y = @max(player_ground_y, heightfieldGroundAt(px, pz, py, step_height));
     var player_grounded = py <= player_ground_y + 0.015 and pvy <= 0;
+    if (player_grounded) {
+        if (heightfieldGroundSurfaceAt(px, pz, py, step_height)) |s| {
+            clampUphillSurfaceSpeed(&pvx, &pvz, px, pz, py, step_height, dt, s, speed);
+        }
+    }
     if (jump_down and player_grounded) {
         pvy = jump_speed;
         player_grounded = false;

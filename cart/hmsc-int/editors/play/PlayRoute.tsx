@@ -91,6 +91,9 @@ const BUILD_UI = {
   doubleWindowCutoutWidthMeters: 2.2,
   editCutoutHeightMeters: 1.2,
   editCutoutLowHeightMeters: 2.2,
+  windowPaneDepthMeters: 0.04,
+  windowPaneColor: '#bcd3dd',
+  windowPaneOpacity: 0.3,
   buildingSkinTexturePx: 256,
   /** stairs render as this many stepped boxes; ramps render as one smooth
    *  heightfield plane matching their collision slope. */
@@ -459,6 +462,7 @@ function pieceVisualShapes(
     const frontV = size.depthMeters / 2 + lift;
     const backV = -size.depthMeters / 2 - lift;
     const isWindowOpening = edit === 'window' || edit === 'doubleWindow' || edit === 'brokenWindow';
+    const hasGlassPane = edit === 'window' || edit === 'doubleWindow';
     const openingW = edit === 'doubleWindow' ? BUILD_UI.doubleWindowCutoutWidthMeters : BUILD_UI.editCutoutWidthMeters;
     const openingH = BUILD_UI.editCutoutHeightMeters;
     const openingBottom = piece.y + size.heightMeters * 0.55 - openingH / 2;
@@ -489,6 +493,19 @@ function pieceVisualShapes(
         addWallBox(`${label}.sill`, (midU0 + midU1) / 2, piece.y, midU1 - midU0, Math.max(0, openingBottom - piece.y));
         addWallBox(`${label}.header`, (midU0 + midU1) / 2, openingTop, midU1 - midU0, Math.max(0, band.top - openingTop));
       }
+    }
+    if (hasGlassPane) {
+      shapes.push(box(
+        'glassPane',
+        0,
+        0,
+        openingBottom,
+        openingW,
+        openingH,
+        BUILD_UI.windowPaneDepthMeters,
+        { color: BUILD_UI.windowPaneColor },
+        BUILD_UI.windowPaneOpacity,
+      ));
     }
     if (edit !== undefined && !isWindowOpening) {
       const low = edit === 'door' || edit === 'garageDoor' || edit === 'arch';

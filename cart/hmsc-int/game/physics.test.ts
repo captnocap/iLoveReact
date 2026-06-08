@@ -311,8 +311,8 @@ function installRampCollisionHost(): void {
     fields.push({ originX, originZ, cell, cols, rows, baseY, heights, sloped });
     return true;
   };
-  const fieldGroundAt = (x: number, z: number, currentY: number, stepHeight: number, requireSlope = false): number | null => {
-    let best: number | null = null;
+  const fieldSurfaceAt = (x: number, z: number, currentY: number, stepHeight: number, requireSlope = false): { height: number; sloped: boolean } | null => {
+    let best: { height: number; sloped: boolean } | null = null;
     for (const field of fields) {
       if (requireSlope && !field.sloped) continue;
       const fx = (x - field.originX) / field.cell;
@@ -332,24 +332,43 @@ function installRampCollisionHost(): void {
       const hx1 = h01 + (h11 - h01) * tx;
       const h = field.baseY + hx0 + (hx1 - hx0) * tz;
       if (h > currentY + stepHeight) continue;
-      best = best === null ? h : Math.max(best, h);
+      if (best === null || h > best.height) best = { height: h, sloped: field.sloped };
     }
     return best;
   };
+  const fieldGroundAt = (x: number, z: number, currentY: number, stepHeight: number, requireSlope = false): number | null =>
+    fieldSurfaceAt(x, z, currentY, stepHeight, requireSlope)?.height ?? null;
   globalThis.__game_physics_step = (wire: Float32Array): ArrayBuffer => {
     lastWire = wire;
     const dt = wire[0];
+    const speed = wire[3];
     const radius = wire[16];
     const height = wire[17];
     const stepHeight = wire[20];
     const grace = wire[11];
     const rectCount = wire[13] | 0;
-    let x = wire[5] + wire[8] * dt;
-    let y = wire[6] + (wire[9] - wire[14] * dt) * dt;
-    let z = wire[7] + wire[10] * dt;
     let vx = wire[8];
     let vy = wire[9] - wire[14] * dt;
     let vz = wire[10];
+    const startSurface = fieldSurfaceAt(wire[5], wire[7], wire[6], stepHeight);
+    if (startSurface?.sloped && speed > 0) {
+      const horizontalSpeed = Math.hypot(vx, vz);
+      const nextSurface = horizontalSpeed > 1e-6
+        ? fieldSurfaceAt(wire[5] + vx * dt, wire[7] + vz * dt, wire[6], stepHeight)
+        : null;
+      if (nextSurface && nextSurface.height > startSurface.height) {
+        const slopeAlong = (nextSurface.height - startSurface.height) / (horizontalSpeed * dt);
+        const maxHorizontal = speed / Math.sqrt(1 + slopeAlong * slopeAlong);
+        if (horizontalSpeed > maxHorizontal) {
+          const scale = maxHorizontal / horizontalSpeed;
+          vx *= scale;
+          vz *= scale;
+        }
+      }
+    }
+    let x = wire[5] + vx * dt;
+    let y = wire[6] + vy * dt;
+    let z = wire[7] + vz * dt;
     let ground = -1000000;
     const hfGround = fieldGroundAt(x, z, y, stepHeight);
     if (hfGround !== null && hfGround <= y + stepHeight) ground = Math.max(ground, hfGround);
@@ -462,10 +481,12 @@ test('RAMPREAL-0606: ramp slab walks on top, stays hollow underneath, and blocks
 
   let walker = { x: 6, y: 0, z: 4.5, vx: 0, vy: 0, vz: 3 };
   const walkUpFrames: string[] = [];
-  for (let frame = 0; frame < 20; frame += 1) {
+  for (let frame = 0; frame < 27; frame += 1) {
+    const before = { ...walker };
     const walked = GAME_PHYSICS.step(stepInput({
       dtSeconds: 0.05,
       tuning: { ...TUNING, walkableRectSidePushGraceMeters: 0 },
+      speedMetersPerSecond: 3,
       player: { position: { x: walker.x, y: walker.y, z: walker.z }, velocity: { x: walker.vx, y: walker.vy, z: walker.vz }, yawDegrees: 0 },
       rects: solids.rects,
     }))!;
@@ -475,14 +496,16 @@ test('RAMPREAL-0606: ramp slab walks on top, stays hollow underneath, and blocks
       z: walked.player.position.z,
       vx: walked.player.velocity.x,
       vy: walked.player.velocity.y,
-      vz: walker.vz,
+      vz: walked.player.velocity.z,
     };
-    walkUpFrames.push(`${frame}:pos(${walker.x.toFixed(3)},${walker.y.toFixed(3)},${walker.z.toFixed(3)}) vel(${walker.vx.toFixed(3)},${walker.vy.toFixed(3)},${walker.vz.toFixed(3)}) grounded=${walked.player.grounded}`);
+    const surfaceSpeed = Math.hypot(walker.x - before.x, walker.y - before.y, walker.z - before.z) / 0.05;
+    walkUpFrames.push(`${frame}:surfaceSpeed=${surfaceSpeed.toFixed(3)} pos(${walker.x.toFixed(3)},${walker.y.toFixed(3)},${walker.z.toFixed(3)}) vel(${walker.vx.toFixed(3)},${walker.vy.toFixed(3)},${walker.vz.toFixed(3)}) grounded=${walked.player.grounded}`);
     assertEqual(walked.player.grounded, true, `walk-up frame ${frame} stays grounded`);
+    assert(surfaceSpeed <= 3.01, `RAMPVEL-0608 frame ${frame} keeps ramp surface speed at run speed (got ${surfaceSpeed})`);
   }
-  console.log(`[RAMPASCENT-0607] zeroGrace walkUp=${walkUpFrames.join(' | ')}`);
-  assert(walker.z >= 7.45, `walk-up reaches the crest instead of being blocked at the approach (z=${walker.z})`);
-  assertClose(walker.y, catalogEntry('ramp.concrete.common').size.heightMeters, 0.05, 'walk-up reaches the ramp crest height');
+  console.log(`[RAMPVEL-0608] zeroGrace walkUp=${walkUpFrames.join(' | ')}`);
+  assert(walker.z >= 7.35, `walk-up advances to the ramp top approach instead of being blocked at the approach (z=${walker.z})`);
+  assertClose(walker.y, 2.85, 0.08, 'walk-up gains height at the clamped surface speed');
 
   const floorUnderRamp = { minX: 4.5, minZ: 4.5, maxX: 7.5, maxZ: 7.5, topMeters: 0, blocksPlayer: true, friction: 0.85, restitution: 0.02, floorMeters: -0.2 };
   let under = { x: 5.2, y: 0, z: 6.9, vx: 1.5, vy: 0, vz: 0 };
