@@ -893,8 +893,10 @@ The ruling:
   telemetry door it owns; missing future hooks are hand-off rows, not local
   print hacks.
 
-**V28 — The platform/mod split: Roblox/GMod tier (PLATMOD-0607). (Added
-2026-06-07, from the BSP design session, req_0194–req_0207.)**
+**V28 — The platform/mod split: a STATELESS ZIG ENGINE, a game is DATA
+(PLATMOD-0607, corrected 2026-06-08). (Added 2026-06-07 from the BSP design
+session req_0194–req_0207; the loader model corrected 2026-06-08 per req_0287
+— see the CORRECTION note at the end.)**
 
 The user, verbatim: "it would be silly to only retain it in a means for a one
 off game, and effectively can get away with still building the same game, but
@@ -904,34 +906,77 @@ is explicit: "the ability to make a game is like that of roblox/gmod esque."
 The ruling — three lifetimes, three layers (the engine outlives games, the
 game state outlives maps, a map lives only while you stand in it):
 
-- **framework/ + runtime/ = the platform tier.** Owns the VERSIONED,
-  GAME-AGNOSTIC map format (V29). The platform never knows what a map is for;
-  the entity lump is opaque key-values the mod binds to behavior (the
-  platform doesn't know what a 'paramedic' is — hmsc does).
+- **framework/ + runtime/ = the platform tier — a STATELESS ZIG ENGINE.**
+  Every core capability already exists in Zig today and is stateless BY
+  DESIGN — user verbatim: "all of the capability already exists in zig, it
+  just is 'stateless' by design." Camera, movement, physics, rendering
+  (building pieces / textures / models / map), and behaviors (NPC AI, the
+  45-tick system, V8) are engine capabilities that take DATA and run it; they
+  hold no game-specific state of their own. The platform owns the VERSIONED,
+  GAME-AGNOSTIC RLE data format (V29). It never knows what a map is *for*; the
+  entity stream is opaque data the mod's authored content binds to capability
+  (the platform doesn't know what a 'paramedic' is — hmsc's data does).
 - **The world systems are the base-game/SDK tier**, not hmsc's property:
   pathing/road grammar, perception, physics, figures, vehicles, the material
   pipeline. hmsc-int is the platform's editor (its Hammer/Studio).
-- **hmsc = the FIRST MOD.** It binds entity semantics, owns the GameState
-  schema and the changelevel persistence contract (V30). Nothing about
-  building the game changes — hmsc stays the driving game; boundaries get
-  extracted as it pulls on them, NEVER speculatively.
-- **A game is a SCRIPT + DATA PACKAGE, never a compiled binary** (the
-  GMod/Roblox tier): bundle.js + mapfiles + assets + manifest, loaded at
-  runtime by ONE shipped player binary. The dev host already IS that client
-  (persistent V8 host, runtime cart loading, ~300ms hot-swap, tabs) — only
-  the packaging shape is missing.
+- **hmsc = the FIRST MOD.** It is the entity semantics, the GameState schema,
+  and the changelevel persistence contract (V30) — all expressed AS DATA, not
+  as a per-game code seam. Nothing about building the game changes — hmsc
+  stays the driving game; boundaries get extracted as it pulls on them, NEVER
+  speculatively.
+- **A GAME IS DATA, never per-game code.** User verbatim: "an entire game …
+  can be rle'd as long as the core capabilities exist in the engine itself."
+  The shape (user pseudocode): `game: { buildings[], textures[], map[],
+  models[], data: [[[1,1,[0a,20f],…]…]…] }` — an asset vocabulary plus an RLE
+  tape that composes those assets BY REFERENCE (piece → shape → position →
+  face-materials, each a tape entry). **The RLE tape IS the state** fed into
+  the stateless capabilities; there is no bundle.js, no per-game script.
+- **The Compile button does THREE bakes, each → RLE:** (1) game logic → rle,
+  (2) game map → rle, (3) custom items/skins → rle. The loader, user verbatim:
+  "the loader takes in all the data, constructs the game from it." The
+  pipeline, user verbatim: **"ts/tsx → encoded rle shape → loaded into zig
+  loader → play."**
+- **TWO PATHS, one engine.** The `/test` route is the DYNAMIC dev environment
+  — everything live and on-the-fly, "always rencoding, doing tons of work"
+  (JS-hosted iteration, correct by design; this is where you author and
+  watch a change immediately). The SHIP path is **baked RLE + the Zig loader,
+  NO JS** — the end goal, user verbatim: "dropping off the javascript." This
+  IS V28's "test engine changes in the test route, then finalize them into
+  the built engine" loop: the /test route is where capability is exercised
+  live, the Zig loader + baked data is what ships.
 - **V15 AMENDED (user-ruled 2026-06-07): the canonical compiled output of
-  hmsc-int is the GAME PACKAGE**, loaded by the player binary. A fused
-  standalone binary (today's `rjit ship`) remains a distribution option that
-  bakes the package in — it is no longer the definition of "the compiled
-  game". The compile unit becomes A MAP (V29/V30); the game becomes a package.
+  hmsc-int is the BAKED RLE GAME DATA**, constructed by the Zig loader at
+  play time. A fused standalone binary (today's `rjit ship`) remains a
+  distribution option that bakes the data in — it is no longer the definition
+  of "the compiled game". The compile unit becomes the RLE data (V29/V30).
+- **No per-game script seam ANYWHERE — behavior included.** Logic is engine
+  capability PARAMETERIZED BY DATA. Need a new capability the data can't yet
+  express? EXTEND THE ENGINE (the test-route → finalize-into-built-engine
+  loop above), never add a game-side script. This is the hard line the
+  earlier draft missed.
 - **The second-mod test** governs every future boundary: could a different
   game (different setting, kinds, rules) be built from the editor + platform
-  without touching framework/ or forking hmsc's code? We never build the
-  second mod speculatively; we just refuse lines that would make it
-  impossible. Eventually load-bearing: the `@reactjit/*` API surface and the
-  map format become versioned public contracts — stabilized by hmsc pulling
-  on them, not frozen up front.
+  by authoring DIFFERENT DATA, without touching framework/ or forking hmsc?
+  We never build the second mod speculatively; we just refuse lines that
+  would make it impossible. Eventually load-bearing: the engine's capability
+  surface and the RLE data format become versioned public contracts —
+  stabilized by hmsc pulling on them, not frozen up front.
+
+**CORRECTION (2026-06-08, req_0287).** The original V28 draft described the
+game as a "SCRIPT + DATA PACKAGE (bundle.js + mapfiles + assets + manifest)
+loaded at runtime by ONE shipped player binary" and asserted "the dev host
+already IS that client (persistent V8 host…)". **The user never said that** —
+V8-host-as-client was a worker interpretation, and it contradicts the actual
+end goal of "dropping off the javascript." The real architecture is the
+stateless-Zig-engine + RLE-data + Zig-loader model ruled above. PLATMOD
+**slice 1** (commit `92c703fa2`, "implement PLATMOD slice 1 package player" —
+`rjit-player` loading a `bundle.js` through V8) is the **testing-environment
+loader the user explicitly called wrong (req_0254)**, NOT the shipped Zig
+loader. It stands as history (no reset); read it as the dynamic /test-path
+lineage, not the ship path. Slice 1's genuinely reusable parts — the RLE
+codec, the lump/asset container, content addressing (V29) — survive; its V8
+bundle-loading premise does not. V29 (the RLE format) and V30 (the frozen
+world) are CONSISTENT with this correction and are unchanged.
 
 **V29 — The map format: installable assets + RLE reference lumps
 (MAPFORMAT-0607). (Added 2026-06-07.)**
