@@ -180,7 +180,7 @@ const CAMERA_OCCLUSION_MAX_HITS = 64;
 /** Host hard caps — exceeding one is a caller bug, surfaced at the boundary. */
 export const PHYSICS_LIMITS = Object.freeze({
   bodies: 128,
-  rects: 2048,
+  rects: 4096,
   orientedRects: 256,
 });
 

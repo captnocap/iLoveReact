@@ -42,7 +42,7 @@ const std = @import("std");
 pub const movement = @import("movement.zig");
 
 pub const MAX_ENTITIES: usize = 128;
-pub const MAX_RECTS: usize = 2048;
+pub const MAX_RECTS: usize = 4096;
 pub const MAX_ORIENTED: usize = 256;
 pub const INPUT_HEADER_FLOATS: usize = 25;
 pub const ENTITY_FLOATS: usize = 8;
