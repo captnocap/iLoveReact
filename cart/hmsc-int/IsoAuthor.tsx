@@ -16,7 +16,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Box, Pressable, Scene3D, Text } from '@reactjit/primitives';
 import { busOn } from '@reactjit/hooks/useIFTTT';
 import { GAME_BUILD } from './game';
-import type { BuildPieceKind, PlacedBuildPiece, Rect, WorldEvent } from './game';
+import type { BuildPieceKind, PlacedBuildPiece, Rect, WorldEvent, WorldGridState } from './game';
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
 import { BUILD_UI } from './editors/build/buildUi';
@@ -25,6 +25,7 @@ import type { GameState } from '../hmsc/design';
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
 import { PropSurfaceCaptures } from '../hmsc/render3d/PropCaptures';
+import { groundColumnTop } from './Embodied';
 import { CHUNK_TILES } from './chunks';
 
 const FAR_CLIP = 4000;
@@ -57,7 +58,21 @@ export interface IsoAuthorProps {
 
 export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const { state, pieces, onCommit } = props;
-  const groundTopAt = props.groundTopAt ?? (() => 0);
+  // Terrain-following picks: snap against the SAME groundColumnTop F2 uses (painted
+  // landform tops, regardless of the cursor's y), so level-0 placements drape over
+  // painted hills exactly as F2's do. The WorldGridState is the thin {regions,cells,
+  // landforms} view of state.world (kept inline rather than importing Embodied's
+  // worldGridOf, which a parallel lane is actively editing). The prop can override.
+  const worldGrid = useMemo<WorldGridState>(() => ({
+    cellSizeMeters: state.world.cellSizeMeters,
+    surfaceRegions: state.world.surfaceRegions as unknown as WorldGridState['surfaceRegions'],
+    placedCells: state.world.placedCells as unknown as WorldGridState['placedCells'],
+    landforms: (state.world.landforms ?? []) as unknown as WorldGridState['landforms'],
+  }), [state]);
+  const groundTopAt = useMemo<(x: number, z: number) => number>(
+    () => props.groundTopAt ?? ((x, z) => groundColumnTop(worldGrid, x, z)),
+    [props.groundTopAt, worldGrid],
+  );
 
   // The camera controller, seeded centred on the seed chunk. Pose lives in the ref;
   // a tick forces the Scene3D.Camera to re-read the solved pose on any pan/zoom/turn.
