@@ -20,7 +20,7 @@ import type { BuildPieceKind, PlacedBuildPiece, Rect, WorldEvent, WorldGridState
 import { resolveSnapTarget, SNAP_TUNING_DEFAULTS, type SnapTarget } from './editors/build/snap';
 import { pieceVisualShapes, VisualShapeMesh, PlacedPieceMeshes } from './editors/build/pieceMeshes';
 import { BUILD_UI } from './editors/build/buildUi';
-import { IsoStage } from './isoStage';
+import { IsoStage, METERS_PER_LEVEL } from './isoStage';
 import type { GameState } from '../hmsc/design';
 import { WorldStatics } from '../hmsc/render3d/GameWorld3D';
 import { LandformSurfaceCaptures } from '../hmsc/render3d/Landform';
@@ -233,6 +233,17 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
   const noIds = useMemo(() => new Set<string>(), []);
 
+  // Cut-away walls: fade every piece that sits ABOVE the active floor so you can see
+  // (and build) into the storey you're editing — the Sims "view this level" move,
+  // tied to the floor selector. Reuses the renderer's occluded-piece fade path, so
+  // it costs nothing extra and looks exactly like F2's wall cut-away.
+  const occludedIds = useMemo(() => {
+    const cut = (level + 1) * METERS_PER_LEVEL - 0.01;
+    const s = new Set<string>();
+    for (const p of pieces) if (p.y >= cut) s.add(p.id);
+    return s;
+  }, [pieces, level]);
+
   return (
     <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
       <LandformSurfaceCaptures landforms={state.world.landforms ?? []} />
@@ -241,8 +252,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
         <WorldStatics world={state.world} skyConfig={state.config.sky} />
-        {/* the standing city — the SAME renderer F2 uses; selection highlighted */}
-        <PlacedPieceMeshes pieces={pieces} markedIds={selectedIds} targetId={null} occludedIds={noIds} />
+        {/* the standing city — the SAME renderer F2 uses; selection highlighted,
+            floors above the active level faded (cut-away) so you see the interior */}
+        <PlacedPieceMeshes pieces={pieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
         {ghostMeshes}
       </Scene3D>
 
