@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Box, Text } from '@reactjit/primitives';
+import { Box, Pressable, Text } from '@reactjit/primitives';
 import { readFile, writeFile, mkdir } from '@reactjit/hooks/fs';
 import { execAsync } from '@reactjit/runtime/hooks/process';
 import {
@@ -18,6 +18,7 @@ import { compileEditorWorld, emptyEditorWorld, placeMarker, placeWorldProp } fro
 import { cellCenterToWorld, cellKey as gridCellKey } from '../hmsc/world/grid';
 import { type ChunkFloor, floorsFromEditorWorld, floorsToLandforms } from './chunkFloor';
 import { IsoPreview, type PreviewCamera, type PreviewCameraApi } from './IsoPreview';
+import { IsoAuthor } from './IsoAuthor';
 import { QuadSplit } from './QuadSplit';
 import { PaintCanvas, type Tool, type Layer, type PaintCanvasApi, type BrushSettings, type CanvasView2D } from './PaintCanvas';
 import { PropertiesPanel, type Focus } from './PropertiesPanel';
@@ -290,6 +291,11 @@ function EditorShell() {
 
   const placeSeq = useRef(0);
   const [placements, setPlacements] = useState<Placement[]>([]);
+  // The bottom-right 3D pane has two modes: 'inspect' (FreeFly walk-around, good for
+  // a sense of size on foot) and 'build' (the Sims-style iso authoring view, good for
+  // laying out / customizing at scale). USER RULING req_0390: build mode is for doing
+  // anything at scale; on-foot is for checking the feel.
+  const [previewMode, setPreviewMode] = useState<'inspect' | 'build'>('inspect');
   const [selPlaceId, setSelPlaceId] = useState<string | null>(() => initial.sel ?? null);
   const [selBuildId, setSelBuildId] = useState<string | null>(null);
   const [activePlaceable, setActivePlaceable] = useState<{ cat: PlaceCat; kind: string; label: string; color: string; footW: number; footD: number; rotation: number } | null>(null);
@@ -1016,16 +1022,39 @@ function EditorShell() {
               />
             }
             bottomRight={
-              <Pane label="preview">
-                <IsoPreview
-                  key={`${ws.stem}#${worldEpoch}`}
-                  state={previewWorld}
-                  wasdFocused={atEditor && wasdQuad === 'preview'}
-                  onWasdFocus={focusPreview}
-                  initialCamera={seedCam}
-                  cameraApiRef={camApiRef}
-                  onCameraSettle={onCameraSettle}
-                />
+              <Pane label={previewMode === 'build' ? 'build' : 'preview'}>
+                <Box style={{ width: '100%', height: '100%', position: 'relative' }}>
+                  {previewMode === 'build' ? (
+                    <IsoAuthor
+                      key={`${ws.stem}#${worldEpoch}`}
+                      state={previewWorld}
+                      pieces={buildPieces}
+                      onCommit={commitBuildEvent}
+                      focused={atEditor && wasdQuad === 'preview'}
+                      onFocus={focusPreview}
+                    />
+                  ) : (
+                    <IsoPreview
+                      key={`${ws.stem}#${worldEpoch}`}
+                      state={previewWorld}
+                      wasdFocused={atEditor && wasdQuad === 'preview'}
+                      onWasdFocus={focusPreview}
+                      initialCamera={seedCam}
+                      cameraApiRef={camApiRef}
+                      onCameraSettle={onCameraSettle}
+                    />
+                  )}
+                  {/* pane chrome: flip between on-foot inspect and iso build authoring */}
+                  <Box style={{ position: 'absolute', left: 8, top: 8, flexDirection: 'row', gap: 4 }}>
+                    {(['inspect', 'build'] as const).map((m) => (
+                      <Pressable key={m} onPress={() => setPreviewMode(m)}>
+                        <Box style={{ paddingLeft: 8, paddingRight: 8, paddingTop: 3, paddingBottom: 3, borderRadius: 4, backgroundColor: previewMode === m ? '#1d4ed8' : '#1e293bcc' }}>
+                          <Text fontSize={10} color={previewMode === m ? '#e0f2fe' : '#94a3b8'} style={{ fontFamily: 'monospace' }}>{m}</Text>
+                        </Box>
+                      </Pressable>
+                    ))}
+                  </Box>
+                </Box>
               </Pane>
             }
           />

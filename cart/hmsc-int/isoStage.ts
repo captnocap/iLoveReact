@@ -16,7 +16,7 @@
 // game's other cameras keep (cutscene clocks + verify runs solve cameras with no
 // reconciler in sight). The pane holds one in a ref and drives it from input.
 
-import { GAME_CAMERA, type Rect, type Solved, type Vec3 } from './game';
+import { GAME_CAMERA, type PieceRay, type Rect, type Solved, type Vec3 } from './game';
 import { HMSC_SCALE } from '../hmsc/world/scale';
 
 const FACING_COUNT = 4;        // 90° rotate detents, Sims-style (Q/E)
@@ -134,6 +134,18 @@ export class IsoStage {
   pickCell(sx: number, sy: number, rect: Rect): CellPick {
     const g = GAME_CAMERA.unprojectGround(sx, sy, rect, this.solve(), this.levelHeightSampler());
     return { tx: Math.floor(g.x), tz: Math.floor(g.y), wx: g.x, wz: g.y };
+  }
+
+  // The cursor's world ray, in the PieceRay shape resolveSnapTarget/raycastPieces
+  // consume — so the iso pane drives the SAME snap (grid/face/edge) the F2 crosshair
+  // does, just from the pointer instead of screen centre. Converts the framework's
+  // array-vec3 screenRay into the build model's {x,y,z} ray.
+  pieceRay(sx: number, sy: number, rect: Rect): PieceRay {
+    const r = GAME_CAMERA.screenRay(sx, sy, rect, this.solve());
+    return {
+      origin: { x: r.origin[0], y: r.origin[1], z: r.origin[2] },
+      dir: { x: r.dir[0], y: r.dir[1], z: r.dir[2] },
+    };
   }
 
   // Centre the view on a world tile (e.g. jump to a placement, or to the painted
