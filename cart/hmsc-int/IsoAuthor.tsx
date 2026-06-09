@@ -92,6 +92,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const ghostYawRef = useRef(ghostYaw);
   ghostYawRef.current = ghostYaw;
   const [snap, setSnap] = useState<SnapTarget | null>(null);
+  // Selection (for delete/clone). markedIds highlights them in the SAME renderer F2
+  // uses. wholeBuilding = a click grabs the connected shape (a whole building) vs one
+  // piece — GAME_BUILD.placed.connected, the same "smart select" F2's G key does.
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(() => new Set());
+  const selectedIdsRef = useRef(selectedIds);
+  selectedIdsRef.current = selectedIds;
+  const [wholeBuilding, setWholeBuilding] = useState(true);
+  const wholeBuildingRef = useRef(wholeBuilding);
+  wholeBuildingRef.current = wholeBuilding;
   const piecesRef = useRef(pieces);
   piecesRef.current = pieces;
   const rectRef = useRef<Rect>({ x: 0, y: 0, width: 800, height: 600 });
@@ -113,9 +122,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     });
   }, [stage, groundTopAt]);
 
-  // Pointer: when armed, the cursor previews a ghost (move) and a click commits a
-  // piecePlaced event. When NOT armed, a left-drag pans the map ("grab the ground").
-  const dragRef = useRef<{ x: number; y: number; panning: boolean } | null>(null);
+  // Pointer. ARMED: a click places a piece (ghost previews on move). UNARMED: a click
+  // SELECTS the piece under the cursor (whole building, or one piece); a drag pans the
+  // map. Click vs drag is told by travel — a pointer that never moved >4px was a click.
+  const dragRef = useRef<{ x: number; y: number; x0: number; y0: number; panned: boolean } | null>(null);
   const local = (e: any): { x: number; y: number } => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -128,15 +138,14 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       const t = resolveAt(p.x, p.y);
       setSnap(t);
       if (t) placeAt(t);
-      dragRef.current = { x: p.x, y: p.y, panning: false };
-    } else {
-      dragRef.current = { x: p.x, y: p.y, panning: true };
     }
+    dragRef.current = { x: p.x, y: p.y, x0: p.x, y0: p.y, panned: false };
   };
   const onMove = (e: any) => {
     const p = local(e);
     const d = dragRef.current;
-    if (d?.panning) {
+    if (d && !armedRef.current && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
+      d.panned = true;
       stage.dragPan(d.x, d.y, p.x, p.y, rectRef.current);
       d.x = p.x; d.y = p.y;
       redraw();
@@ -144,7 +153,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     }
     if (armedRef.current) setSnap(resolveAt(p.x, p.y));
   };
-  const onUp = () => { dragRef.current = null; };
+  const onUp = () => {
+    const d = dragRef.current;
+    dragRef.current = null;
+    if (d && !armedRef.current && !d.panned) selectAt(d.x0, d.y0); // a click, not a pan
+  };
 
   const placeAt = (t: SnapTarget) => {
     const a = armedRef.current;
@@ -155,15 +168,49 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     onCommit({ kind: 'piecePlaced', placement }, `placed ${def.label} @ ${t.placement.x.toFixed(1)},${t.placement.z.toFixed(1)}`);
   };
 
-  // Keys: R rotates the ghost 90° (like F2), Esc disarms. Only while focused.
+  // Select the piece under the cursor (raycast the standing pieces) — the whole
+  // connected building, or a single piece. Empty click clears.
+  const selectAt = (sx: number, sy: number) => {
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), piecesRef.current, ISO_SNAP_TUNING.reachMeters);
+    if (!hit) { setSelectedIds(new Set()); return; }
+    setSelectedIds(wholeBuildingRef.current ? GAME_BUILD.placed.connected(hit.piece.id, piecesRef.current) : new Set([hit.piece.id]));
+  };
+  // Remove every selected piece (one pieceRemoved each, the SAME event F2's X commits).
+  const deleteSelected = () => {
+    const ids = [...selectedIdsRef.current];
+    if (!ids.length) return;
+    for (const id of ids) onCommit({ kind: 'pieceRemoved', id }, `removed ${id}`);
+    setSelectedIds(new Set());
+  };
+  // Duplicate the selection beside itself: re-emit piecePlaced for each piece, shifted
+  // clear along +x by the selection's own width (the stream mints fresh ids).
+  const cloneSelected = () => {
+    const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
+    if (!sel.length) return;
+    let minX = Infinity, maxX = -Infinity;
+    for (const p of sel) { const b = GAME_BUILD.placed.bounds(p); minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX); }
+    const dx = (maxX - minX) + state.world.cellSizeMeters;
+    for (const p of sel) {
+      onCommit({ kind: 'piecePlaced', placement: { pieceId: p.pieceId, x: p.x + dx, y: p.y, z: p.z, yawDegrees: p.yawDegrees } }, `cloned ${p.pieceId}`);
+    }
+  };
+
+  // Latest delete/clone closures, so the once-mounted key listener always calls the
+  // current ones (they read live refs + the current onCommit).
+  const keyActionsRef = useRef({ deleteSelected, cloneSelected });
+  keyActionsRef.current = { deleteSelected, cloneSelected };
+
+  // Keys (while focused): R rotates the ghost, Q/E turn the view, Delete/Backspace
+  // removes the selection, Esc disarms / clears the selection.
   useEffect(() => {
     if (!props.focused) return;
     const off = busOn('__keydown', (e: any) => {
       const k = String(e?.key ?? '').toLowerCase();
       if (k === 'r') setGhostYaw((y) => (y + 90) % 360);
-      else if (k === 'escape') setArmed(null);
+      else if (k === 'escape') { setArmed(null); setSelectedIds(new Set()); }
       else if (k === 'q') { stage.rotate(-1); redraw(); }
       else if (k === 'e') { stage.rotate(1); redraw(); }
+      else if (k === 'delete' || k === 'backspace') keyActionsRef.current.deleteSelected();
     });
     return off;
   }, [props.focused, stage, redraw]);
@@ -194,8 +241,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         <Scene3D.Camera position={cam.pos} target={cam.target} fov={cam.fov} far={FAR_CLIP} />
         <Scene3D.Fog enabled={false} />
         <WorldStatics world={state.world} skyConfig={state.config.sky} />
-        {/* the standing city — the SAME renderer F2 uses */}
-        <PlacedPieceMeshes pieces={pieces} markedIds={noIds} targetId={null} occludedIds={noIds} />
+        {/* the standing city — the SAME renderer F2 uses; selection highlighted */}
+        <PlacedPieceMeshes pieces={pieces} markedIds={selectedIds} targetId={null} occludedIds={noIds} />
         {ghostMeshes}
       </Scene3D>
 
@@ -213,13 +260,24 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           <Text fontSize={10} color="#cbd5e1" style={{ fontFamily: 'monospace' }}>{`F${level}`}</Text>
         </Box>
         <IsoBtn label="▲" onPress={() => { stage.raiseLevel(); redraw(); }} />
+        <IsoBtn label={wholeBuilding ? '▦' : '▪'} onPress={() => setWholeBuilding((v) => !v)} />
+        {selectedIds.size > 0 ? (
+          <>
+            <IsoBtn label="⧉" onPress={cloneSelected} />
+            <IsoBtn label="✕" onPress={deleteSelected} />
+          </>
+        ) : null}
       </Box>
 
       {/* ── catalog rail (bottom): pick a piece to place ───────────────────── */}
-      <CatalogRail armed={armed} onArm={(id) => setArmed((cur) => (cur?.id === id ? null : { id }))} />
+      <CatalogRail armed={armed} onArm={(id) => { setArmed((cur) => (cur?.id === id ? null : { id })); setSelectedIds(new Set()); }} />
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
-        {armed ? `place: ${GAME_BUILD.catalog.get(armed.id).label} · R rotate · drag empty to pan · Esc cancel` : 'pick a piece below · Q/E turn · drag to pan'}
+        {armed
+          ? `place: ${GAME_BUILD.catalog.get(armed.id).label} · R rotate · drag to pan · Esc cancel`
+          : selectedIds.size > 0
+            ? `${selectedIds.size} selected · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
+            : 'click a piece to select · drag to pan · Q/E turn · pick below to build'}
       </Text>
     </Box>
   );
