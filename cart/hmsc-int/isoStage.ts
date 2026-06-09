@@ -19,8 +19,7 @@
 import { GAME_CAMERA, type PieceRay, type Rect, type Solved, type Vec3 } from './game';
 import { HMSC_SCALE } from '../hmsc/world/scale';
 
-const FACING_COUNT = 4;        // 90° rotate detents, Sims-style (Q/E)
-const ISO_YAW_BASE = 45;       // true-iso looks at tile CORNERS, not faces
+const ISO_YAW_START = 45;      // true-iso opens looking at tile CORNERS, not faces
 const ISO_FOV = 22;            // narrow → flattens perspective toward orthographic
 const BASE_DIST = 90;          // metres from target at zoom 1 (a chunk is 120m)
 const MIN_ZOOM = 0.12;         // far out — survey a whole district
@@ -33,12 +32,10 @@ const MAX_ZOOM = 10;           // close in — detail a single wall
 // object dropped on floor 2 sit at the same height because they read one constant.
 export const METERS_PER_LEVEL = HMSC_SCALE.storyHeightMeters;
 
-export type Facing = 0 | 1 | 2 | 3;
-
 export interface IsoPose {
   centerX: number; // world tile the view orbits over (pan), in tiles
   centerZ: number;
-  facing: Facing;  // 90° yaw detent
+  yaw: number;     // compass rotation in DEGREES — continuous (mouse-drag) + 90° buttons
   zoom: number;    // 1 = BASE_DIST; larger = closer
   level: number;   // active floor; clicks land on its slab (>= 0)
 }
@@ -64,7 +61,7 @@ export class IsoStage {
   private sampleHeight: HeightSampler;
 
   constructor(initial?: Partial<IsoPose>, heightAt: HeightSampler = () => 0) {
-    this.pose = { centerX: 0, centerZ: 0, facing: 0, zoom: 1, level: 0, ...initial };
+    this.pose = { centerX: 0, centerZ: 0, yaw: ISO_YAW_START, zoom: 1, level: 0, ...initial };
     this.sampleHeight = heightAt;
   }
 
@@ -75,7 +72,7 @@ export class IsoStage {
   }
 
   yawDegrees(): number {
-    return ISO_YAW_BASE + this.pose.facing * 90;
+    return this.pose.yaw;
   }
 
   levelElevation(): number {
@@ -95,9 +92,18 @@ export class IsoStage {
     });
   }
 
-  // Rotate the whole view in 90° steps (see behind walls), wrapping 0..3.
+  // Rotate the whole view 90° (the ⟲⟳ buttons / Q·E). Snaps to the nearest iso detent
+  // (45° + k·90° — the corner-on views) from wherever a free drag left the yaw, then
+  // steps, so the buttons always land square on a clean quarter turn.
   rotate(dir: 1 | -1): void {
-    this.pose.facing = (((this.pose.facing + dir) % FACING_COUNT) + FACING_COUNT) % FACING_COUNT as Facing;
+    const detent = Math.round((this.pose.yaw - ISO_YAW_START) / 90) * 90 + ISO_YAW_START;
+    this.pose.yaw = detent + dir * 90;
+  }
+
+  // Continuous rotate from a mouse drag (degrees). Lets you spin the view to any angle,
+  // not just the four detents — the locked iso pitch keeps the dimetric look.
+  rotateBy(deltaDegrees: number): void {
+    this.pose.yaw += deltaDegrees;
   }
 
   zoomBy(factor: number): void {

@@ -91,7 +91,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const stageRef = useRef<IsoStage | null>(null);
   if (!stageRef.current) {
     const [cx, cz] = contentCenter(pieces);
-    stageRef.current = new IsoStage({ centerX: cx, centerZ: cz, facing: 0, zoom: 1, level: 0 }, groundTopAt);
+    stageRef.current = new IsoStage({ centerX: cx, centerZ: cz, zoom: 1, level: 0 }, groundTopAt);
   }
   const stage = stageRef.current;
   useEffect(() => { stage.setHeightSampler(groundTopAt); }, [stage, groundTopAt]);
@@ -136,10 +136,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     });
   }, [stage, groundTopAt]);
 
-  // Pointer. ARMED: a click places a piece (ghost previews on move). UNARMED: a click
-  // SELECTS the piece under the cursor (whole building, or one piece); a drag pans the
-  // map. Click vs drag is told by travel — a pointer that never moved >4px was a click.
-  const dragRef = useRef<{ x: number; y: number; x0: number; y0: number; panned: boolean } | null>(null);
+  // Pointer. A DRAG rotates the view (yaw from horizontal motion — WASD does the
+  // panning). A CLICK (no drag) acts at the cursor: place the armed piece, or select
+  // the piece under it. Place/select fire on mouse-UP so a rotate-drag never drops a
+  // piece; click vs drag is told by travel (>4px = a turn).
+  const dragRef = useRef<{ x: number; x0: number; y0: number; turned: boolean } | null>(null);
   const local = (e: any): { x: number; y: number } => {
     const r = rectRef.current;
     return { x: Number(e?.x ?? 0) - r.x, y: Number(e?.y ?? 0) - r.y };
@@ -148,20 +149,16 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const onDown = (e: any) => {
     props.onFocus?.();
     const p = local(e);
-    if (armedRef.current) {
-      const t = resolveAt(p.x, p.y);
-      setSnap(t);
-      if (t) placeAt(t);
-    }
-    dragRef.current = { x: p.x, y: p.y, x0: p.x, y0: p.y, panned: false };
+    dragRef.current = { x: p.x, x0: p.x, y0: p.y, turned: false };
+    if (armedRef.current) setSnap(resolveAt(p.x, p.y));
   };
   const onMove = (e: any) => {
     const p = local(e);
     const d = dragRef.current;
-    if (d && !armedRef.current && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
-      d.panned = true;
-      stage.dragPan(d.x, d.y, p.x, p.y, rectRef.current);
-      d.x = p.x; d.y = p.y;
+    if (d && Math.abs(p.x - d.x0) + Math.abs(p.y - d.y0) > 4) {
+      d.turned = true;
+      stage.rotateBy((p.x - d.x) * 0.3); // horizontal drag → yaw
+      d.x = p.x;
       redraw();
       return;
     }
@@ -170,7 +167,13 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   const onUp = () => {
     const d = dragRef.current;
     dragRef.current = null;
-    if (d && !armedRef.current && !d.panned) selectAt(d.x0, d.y0); // a click, not a pan
+    if (!d || d.turned) return; // a rotate, not a click
+    if (armedRef.current) {
+      const t = resolveAt(d.x0, d.y0);
+      if (t) { setSnap(t); placeAt(t); }
+    } else {
+      selectAt(d.x0, d.y0);
+    }
   };
 
   const placeAt = (t: SnapTarget) => {
@@ -316,7 +319,7 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
           const d = Number(e?.deltaY ?? 0);
           if (!d) return;
           const p = local(e);
-          stage.zoomToCursor(p.x, p.y, d < 0 ? 1.15 : 1 / 1.15, rectRef.current);
+          stage.zoomToCursor(p.x, p.y, d > 0 ? 1.15 : 1 / 1.15, rectRef.current);
           redraw();
         }}
         style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
@@ -348,10 +351,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
         {armed
-          ? `place: ${GAME_BUILD.catalog.get(armed.id).label} · R rotate · WASD/drag move · scroll zoom · Esc`
+          ? `place: ${GAME_BUILD.catalog.get(armed.id).label} · click to place · drag rotate · WASD pan · scroll zoom · R · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
-            : 'WASD/drag move · scroll zoom · Q/E turn · F recenter · click to select · pick below to build'}
+            : 'WASD pan · drag rotate · scroll zoom · F recenter · click to select · pick below to build'}
+      </Text>
+      {/* what's in the map — the "junk" is the real placed pieces + world props (the
+          same content F2/the game shows); ones off the painted chunk float over sky */}
+      <Text fontSize={9} color="#64748b" style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 48 }}>
+        {`${pieces.length} pieces · ${state.world.props?.length ?? 0} props`}
       </Text>
     </Box>
   );
