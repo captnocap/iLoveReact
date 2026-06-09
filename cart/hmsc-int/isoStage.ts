@@ -23,8 +23,8 @@ const FACING_COUNT = 4;        // 90° rotate detents, Sims-style (Q/E)
 const ISO_YAW_BASE = 45;       // true-iso looks at tile CORNERS, not faces
 const ISO_FOV = 22;            // narrow → flattens perspective toward orthographic
 const BASE_DIST = 90;          // metres from target at zoom 1 (a chunk is 120m)
-const MIN_ZOOM = 0.35;
-const MAX_ZOOM = 4;
+const MIN_ZOOM = 0.12;         // far out — survey a whole district
+const MAX_ZOOM = 10;           // close in — detail a single wall
 
 // One floor level == one storey == one F2 build-mode wall. This is NOT a number we
 // pick: it IS the build catalog's WALL_SIZE.heightMeters, which is the storey module
@@ -102,6 +102,39 @@ export class IsoStage {
 
   zoomBy(factor: number): void {
     this.pose.zoom = clamp(this.pose.zoom * factor, MIN_ZOOM, MAX_ZOOM);
+  }
+
+  // Zoom toward the cursor (map/Sims behaviour): keep the ground point under the
+  // pointer fixed while the distance changes, instead of diving at the screen
+  // centre. Unproject the cursor before and after the zoom and shift centre by the
+  // difference — so "point at a building and roll in" brings THAT building closer.
+  zoomToCursor(sx: number, sy: number, factor: number, rect: Rect): void {
+    const before = GAME_CAMERA.unprojectGround(sx, sy, rect, this.solve(), this.levelHeightSampler());
+    this.zoomBy(factor);
+    const after = GAME_CAMERA.unprojectGround(sx, sy, rect, this.solve(), this.levelHeightSampler());
+    this.pose.centerX += before.x - after.x;
+    this.pose.centerZ += before.y - after.y;
+  }
+
+  // Metres the eye sits from the target at the current zoom — the pan loop scales
+  // WASD speed by this so a keystroke crosses the same fraction of the view whether
+  // you're surveying a district or detailing a wall.
+  distance(): number {
+    return BASE_DIST / clamp(this.pose.zoom, MIN_ZOOM, MAX_ZOOM);
+  }
+
+  // WASD/arrow pan: slide the centre across the GROUND along the view's own forward
+  // and right axes (derived from the solved eye→target), so "up" always means "deeper
+  // into the screen" regardless of which 90° facing you've rotated to. Units: metres.
+  nudge(forward: number, strafe: number): void {
+    const cam = this.solve();
+    let fx = cam.target[0] - cam.pos[0];
+    let fz = cam.target[2] - cam.pos[2];
+    const fl = Math.hypot(fx, fz) || 1;
+    fx /= fl; fz /= fl;           // ground-forward (into the screen)
+    const rx = -fz, rz = fx;      // ground-right (forward rotated +90° about Y)
+    this.pose.centerX += fx * forward + rx * strafe;
+    this.pose.centerZ += fz * forward + rz * strafe;
   }
 
   // Active floor. setLevel clamps at the ground; raise/lower step one storey.

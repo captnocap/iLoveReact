@@ -38,6 +38,18 @@ const ISO_SNAP_TUNING = { ...SNAP_TUNING_DEFAULTS, reachMeters: 600, groundMarch
 // rest — same kinds F2's palette leads with. Each tab lists its catalog entries.
 const PALETTE_KINDS: BuildPieceKind[] = ['floor', 'wall', 'ramp', 'roof', 'stairs', 'pillar', 'prop'];
 
+const MOVE_KEYS = new Set(['w', 'a', 's', 'd']);
+const ARROW_TO_WASD: Record<string, string> = { arrowup: 'w', arrowdown: 's', arrowleft: 'a', arrowright: 'd' };
+
+// Where the view opens / recenters: the centroid of what's already built, so you
+// start looking AT the map instead of an empty chunk corner. Empty map → chunk centre.
+function contentCenter(pieces: readonly PlacedBuildPiece[]): [number, number] {
+  if (!pieces.length) return [CHUNK_TILES / 2, CHUNK_TILES / 2];
+  let sx = 0, sz = 0;
+  for (const p of pieces) { sx += p.x; sz += p.z; }
+  return [sx / pieces.length, sz / pieces.length];
+}
+
 type Armed = { id: string } | null;
 
 export interface IsoAuthorProps {
@@ -74,16 +86,18 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     [props.groundTopAt, worldGrid],
   );
 
-  // The camera controller, seeded centred on the seed chunk. Pose lives in the ref;
-  // a tick forces the Scene3D.Camera to re-read the solved pose on any pan/zoom/turn.
+  // The camera controller, seeded centred on what's already built. Pose lives in the
+  // ref; a tick forces the Scene3D.Camera to re-read the solved pose on pan/zoom/turn.
   const stageRef = useRef<IsoStage | null>(null);
   if (!stageRef.current) {
-    stageRef.current = new IsoStage({ centerX: CHUNK_TILES / 2, centerZ: CHUNK_TILES / 2, facing: 0, zoom: 1, level: 0 }, groundTopAt);
+    const [cx, cz] = contentCenter(pieces);
+    stageRef.current = new IsoStage({ centerX: cx, centerZ: cz, facing: 0, zoom: 1, level: 0 }, groundTopAt);
   }
   const stage = stageRef.current;
   useEffect(() => { stage.setHeightSampler(groundTopAt); }, [stage, groundTopAt]);
   const [, bump] = useState(0);
   const redraw = useCallback(() => bump((n) => (n + 1) & 0xffff), []);
+  const recenter = useCallback(() => { const [cx, cz] = contentCenter(piecesRef.current); stage.centerOn(cx, cz); redraw(); }, [stage, redraw]);
 
   const [armed, setArmed] = useState<Armed>(null);
   const armedRef = useRef<Armed>(armed);
@@ -197,8 +211,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
   // Latest delete/clone closures, so the once-mounted key listener always calls the
   // current ones (they read live refs + the current onCommit).
-  const keyActionsRef = useRef({ deleteSelected, cloneSelected });
-  keyActionsRef.current = { deleteSelected, cloneSelected };
+  const keyActionsRef = useRef({ deleteSelected, cloneSelected, recenter });
+  keyActionsRef.current = { deleteSelected, cloneSelected, recenter };
 
   // Keys (while focused): R rotates the ghost, Q/E turn the view, Delete/Backspace
   // removes the selection, Esc disarms / clears the selection.
@@ -210,9 +224,43 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       else if (k === 'escape') { setArmed(null); setSelectedIds(new Set()); }
       else if (k === 'q') { stage.rotate(-1); redraw(); }
       else if (k === 'e') { stage.rotate(1); redraw(); }
+      else if (k === 'f' || k === 'home') keyActionsRef.current.recenter();
       else if (k === 'delete' || k === 'backspace') keyActionsRef.current.deleteSelected();
     });
     return off;
+  }, [props.focused, stage, redraw]);
+
+  // WASD / arrow keys slide the view across the ground (held-key pan loop). Speed
+  // scales with the eye distance so a keystroke crosses the same fraction of the view
+  // at every zoom. The loop only runs while this pane is focused.
+  useEffect(() => {
+    if (!props.focused) return;
+    const held: Record<string, boolean> = {};
+    const key = (e: any): string => { const k = String(e?.key ?? '').toLowerCase(); return ARROW_TO_WASD[k] ?? k; };
+    const offD = busOn('__keydown', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) held[k] = true; });
+    const offU = busOn('__keyup', (e: any) => { const k = key(e); if (MOVE_KEYS.has(k)) held[k] = false; });
+    const G: any = globalThis;
+    const sched = G.requestAnimationFrame ? G.requestAnimationFrame.bind(G) : (fn: any) => setTimeout(fn, 16);
+    const cancel = G.cancelAnimationFrame ? G.cancelAnimationFrame.bind(G) : clearTimeout;
+    let handle: any = 0;
+    let last = G.performance?.now?.() ?? 0;
+    let alive = true;
+    const tick = () => {
+      if (!alive) return;
+      const now = G.performance?.now?.() ?? last + 16;
+      const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
+      last = now;
+      const forward = (held.w ? 1 : 0) - (held.s ? 1 : 0);
+      const strafe = (held.d ? 1 : 0) - (held.a ? 1 : 0);
+      if (forward || strafe) {
+        const speed = Math.max(18, stage.distance() * 0.85); // m/s, scales with zoom
+        stage.nudge(forward * speed * dt, strafe * speed * dt);
+        redraw();
+      }
+      handle = sched(tick);
+    };
+    handle = sched(tick);
+    return () => { alive = false; cancel(handle); offD(); offU(); };
   }, [props.focused, stage, redraw]);
 
   const cam = stage.solve();
@@ -258,11 +306,25 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {ghostMeshes}
       </Scene3D>
 
-      {/* pointer capture (near-transparent so it's hittable) */}
-      <Pressable onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }} />
+      {/* pointer capture (near-transparent so it's hittable). onScroll rides the raw
+          wheel delta (events.zig) — zoom toward the cursor, map-style. */}
+      <Pressable
+        onMouseDown={onDown}
+        onMouseMove={onMove}
+        onMouseUp={onUp}
+        onScroll={(e: any) => {
+          const d = Number(e?.deltaY ?? 0);
+          if (!d) return;
+          const p = local(e);
+          stage.zoomToCursor(p.x, p.y, d < 0 ? 1.15 : 1 / 1.15, rectRef.current);
+          redraw();
+        }}
+        style={{ position: 'absolute', left: 0, top: 0, right: 0, bottom: 0, backgroundColor: '#00000001' }}
+      />
 
       {/* ── Sims control cluster (top-right): rotate · zoom · floor ────────── */}
       <Box style={{ position: 'absolute', right: 8, top: 8, flexDirection: 'row', gap: 4 }}>
+        <IsoBtn label="⌂" onPress={recenter} />
         <IsoBtn label="⟲" onPress={() => { stage.rotate(-1); redraw(); }} />
         <IsoBtn label="⟳" onPress={() => { stage.rotate(1); redraw(); }} />
         <IsoBtn label="−" onPress={() => { stage.zoomBy(1 / 1.25); redraw(); }} />
@@ -286,10 +348,10 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
       <Text fontSize={9} color={props.focused ? '#7dd3fc' : '#475569'} style={{ fontFamily: 'monospace', position: 'absolute', left: 8, top: 34 }}>
         {armed
-          ? `place: ${GAME_BUILD.catalog.get(armed.id).label} · R rotate · drag to pan · Esc cancel`
+          ? `place: ${GAME_BUILD.catalog.get(armed.id).label} · R rotate · WASD/drag move · scroll zoom · Esc`
           : selectedIds.size > 0
             ? `${selectedIds.size} selected · ⧉ clone · ✕/Del remove · ${wholeBuilding ? 'building' : 'one piece'}`
-            : 'click a piece to select · drag to pan · Q/E turn · pick below to build'}
+            : 'WASD/drag move · scroll zoom · Q/E turn · F recenter · click to select · pick below to build'}
       </Text>
     </Box>
   );
