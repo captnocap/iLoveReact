@@ -15,6 +15,7 @@
 //   D[3] quality      0 PSX · 1 PS2 · 2 Preview · 3 Std · 4 Max
 //   D[4] board        0 A/Environment · 1 B/Condemned · 2 C/Props · 3 D/NeonRot
 //                     4 E/NeonSurface · 5 F/Contraband · 6 G/Liminal · 7 H/SecondPass
+//                     8 I/Facades
 
 export const FILL_SHADER = `
 @group(0) @binding(1) var<storage, read> D: array<f32>;
@@ -1502,6 +1503,180 @@ fn plank_deck(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
   return sat3(col);
 }
 
+// ── Board I / Facades — apartment-brick wall faces with painted-in windows ─────
+// Claude's contribution. The user wants the SIDES of a building to read as an
+// apartment block: brick wall + windows painted straight into the tile so the
+// face tiles into a tenement facade. Three composable faces — a window grid, the
+// same with a painted fire escape, and a ground-floor shopfront — each tiling
+// seamlessly at the 0..1 cell boundaries so a stack of faces becomes a building.
+
+// Axis-aligned rect coverage with soft AA edges (0 outside, 1 inside).
+fn rect_mask(p: vec2f, x0: f32, x1: f32, y0: f32, y1: f32, aa: f32) -> f32 {
+  let mx = smoothstep(x0 - aa, x0 + aa, p.x) * (1.0 - smoothstep(x1 - aa, x1 + aa, p.x));
+  let my = smoothstep(y0 - aa, y0 + aa, p.y) * (1.0 - smoothstep(y1 - aa, y1 + aa, p.y));
+  return mx * my;
+}
+
+// The shared brick wall — running bond, sooted tone, pale mortar. Tunable course
+// colours so each facade variant can re-skin the same masonry.
+fn brick_wall(uv: vec2f, px: vec2f, lo: vec3f, hi: vec3f, mortar_c: vec3f, seed: f32) -> vec3f {
+  let rows = 8.0;
+  let cols = 4.0;
+  let row = floor(uv.y * rows);
+  let off = (row - floor(row * 0.5) * 2.0) * 0.5;
+  let buv = vec2f(uv.x * cols + off, uv.y * rows);
+  let cell = floor(buv);
+  let lcl = fract(buv);
+  let nx = min(lcl.x, 1.0 - lcl.x);
+  let ny = min(lcl.y, 1.0 - lcl.y);
+  let mortar = max(1.0 - smoothstep(0.028, 0.055, nx), 1.0 - smoothstep(0.040, 0.075, ny));
+  let tone = rand(cell + vec2f(seed, seed * 2.0));
+  let soot = fbm(uv.x * 9.0 + seed, uv.y * 9.0, 4.0) * 0.5 + 0.5;
+  var col = mix(lo, hi, tone * 0.6 + soot * 0.4);
+  let chip = speckle(px + cell * 9.0, 5.0, seed, 0.94) * smoothstep(0.10, 0.22, nx) * smoothstep(0.10, 0.22, ny);
+  col = mix(col, lo * 0.5, chip * 0.30);
+  col = mix(col, mortar_c, mortar * 0.85);
+  return col;
+}
+
+// One painted window unit inside a window-grid cell (cell-local coords lc, 0..1):
+// pale cast-stone surround + sill, white sash frame, mullioned glass that reads as
+// either dark sky reflection or a warm lit interior. Returns rgb + coverage alpha.
+fn paint_window(lc: vec2f, lit: f32, seed: f32) -> vec4f {
+  let aa = 0.010;
+  // Outer cast-stone surround (lintel above, sill below).
+  let sx0 = 0.16; let sx1 = 0.84;
+  let sy0 = 0.10; let sy1 = 0.80;
+  let surround = rect_mask(lc, sx0, sx1, sy0, sy1, aa);
+  // Sash opening, then the glass inset inside the frame.
+  let wx0 = 0.24; let wx1 = 0.76;
+  let wy0 = 0.18; let wy1 = 0.70;
+  let frame = rect_mask(lc, wx0, wx1, wy0, wy1, aa);
+  let fin = 0.04;
+  let glass = rect_mask(lc, wx0 + fin, wx1 - fin, wy0 + fin, wy1 - fin, aa);
+
+  var stone = vec3f(0.70, 0.68, 0.62);
+  stone = stone + vec3f(0.07, 0.07, 0.06) * smoothstep(sy1 - 0.02, sy1, lc.y); // bright sill lip
+  stone = stone - vec3f(0.10, 0.10, 0.09) * smoothstep(sy1, sy1 + 0.04, lc.y); // sill shadow below
+
+  let refl = smoothstep(0.0, 1.0, (lc.y - wy0) / (wy1 - wy0));
+  var pane = mix(vec3f(0.09, 0.12, 0.17), vec3f(0.20, 0.27, 0.33), refl);
+  pane = mix(pane, vec3f(0.97, 0.80, 0.45), lit * (0.50 + 0.50 * (1.0 - refl)));
+  pane = pane - vec3f(0.10, 0.10, 0.10) * (1.0 - smoothstep(wy0 + fin, wy0 + fin + 0.05, lc.y)); // top recess shadow
+
+  let sash = vec3f(0.88, 0.86, 0.80);
+  let midx = (wx0 + wx1) * 0.5;
+  let midy = (wy0 + wy1) * 0.5;
+  let mull = max(1.0 - smoothstep(0.006, 0.013, abs(lc.x - midx)), 1.0 - smoothstep(0.006, 0.013, abs(lc.y - midy)));
+
+  var col = stone;
+  col = mix(col, sash, frame);
+  col = mix(col, pane, glass);
+  col = mix(col, sash, mull * glass);
+  return vec4f(col, surround);
+}
+
+fn brick_facade(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Apartment brick wall + a 2x2 grid of painted windows. variant 0 red brick,
+  // 1 buff/sandstone brick, 2 sooted grey-brown brick.
+  var lo = vec3f(0.42, 0.13, 0.085);
+  var hi = vec3f(0.78, 0.30, 0.17);
+  var mortar_c = vec3f(0.56, 0.54, 0.49);
+  if (variant > 0.5 && variant < 1.5) {
+    lo = vec3f(0.52, 0.43, 0.33);
+    hi = vec3f(0.84, 0.72, 0.56);
+    mortar_c = vec3f(0.62, 0.60, 0.55);
+  } else if (variant >= 1.5) {
+    lo = vec3f(0.30, 0.20, 0.18);
+    hi = vec3f(0.52, 0.40, 0.36);
+    mortar_c = vec3f(0.46, 0.44, 0.42);
+  }
+  var col = brick_wall(uv, px, lo, hi, mortar_c, seed);
+  let g = uv * vec2f(2.0, 2.0);
+  let cell = floor(g);
+  let lc = fract(g);
+  let lit = step(0.5, rand(cell + vec2f(seed * 0.7 + 3.0, seed * 3.1 + 1.0)));
+  let w = paint_window(lc, lit, seed);
+  col = mix(col, w.rgb, w.a);
+  return sat3(col);
+}
+
+fn brick_fire_escape(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Red-brick apartment face with a painted fire escape: two vertical stringers,
+  // a landing platform at each floor, rail pickets, and a drop ladder. variant
+  // 0 black iron, 1 rust, 2 worn grey.
+  var col = brick_facade(uv, px, 0.0, seed);
+  var iron = vec3f(0.09, 0.09, 0.10);
+  if (variant > 0.5 && variant < 1.5) {
+    iron = vec3f(0.34, 0.15, 0.075);
+  } else if (variant >= 1.5) {
+    iron = vec3f(0.20, 0.21, 0.20);
+  }
+  let band = step(0.18, uv.x) * step(uv.x, 0.82); // structure spans the middle
+  // Vertical stringers.
+  let v1 = 1.0 - smoothstep(0.009, 0.018, abs(uv.x - 0.28));
+  let v2 = 1.0 - smoothstep(0.009, 0.018, abs(uv.x - 0.72));
+  let stringers = max(v1, v2) * band;
+  // Landing platforms at each floor (floor lines at y = 0.0/0.5/1.0; landings
+  // painted at the sill height of each window: y ~ 0.34 and 0.84).
+  let ly = min(abs(uv.y - 0.34), abs(uv.y - 0.84));
+  let landing = (1.0 - smoothstep(0.012, 0.024, ly)) * band;
+  // Rail pickets just above each landing.
+  let above = step(0.0, uv.y - 0.34) * step(uv.y - 0.34, 0.085) + step(0.0, uv.y - 0.84) * step(uv.y - 0.84, 0.085);
+  let pickets = (1.0 - smoothstep(0.006, 0.012, abs(fract(uv.x * 16.0) - 0.5))) * clamp(above, 0.0, 1.0) * band;
+  // Diagonal drop ladder on the left bay between the two landings.
+  let lad = abs((uv.x - 0.28) - (uv.y - 0.34) * 0.30);
+  let ladder = (1.0 - smoothstep(0.010, 0.020, lad)) * step(0.34, uv.y) * step(uv.y, 0.84);
+  let iron_mask = sat(max(max(stringers, landing), max(pickets, ladder)));
+  // Soft contact shadow cast onto the brick just right of and below the iron.
+  let shadow = sat(max(stringers, landing)) * 0.5;
+  col = col * (1.0 - 0.18 * shadow * smoothstep(0.0, 0.02, abs(uv.x - 0.30)));
+  col = mix(col, iron * (0.85 + 0.15 * rand(floor(px * 0.18) + seed)), iron_mask);
+  return sat3(col);
+}
+
+fn brick_shopfront(uv: vec2f, px: vec2f, variant: f32, seed: f32) -> vec3f {
+  // Mixed-use ground floor: brick piers either side, a striped awning across the
+  // top, a sign band, and a big plate-glass shop window over a bulkhead. Apply to
+  // the bottom row of faces; brick_facade above it. variant 0 green, 1 red, 2 blue.
+  var col = brick_wall(uv, px, vec3f(0.40, 0.13, 0.085), vec3f(0.74, 0.29, 0.17), vec3f(0.55, 0.53, 0.48), seed);
+  var awn = vec3f(0.10, 0.42, 0.22);
+  if (variant > 0.5 && variant < 1.5) {
+    awn = vec3f(0.62, 0.12, 0.12);
+  } else if (variant >= 1.5) {
+    awn = vec3f(0.10, 0.22, 0.50);
+  }
+  // Storefront opening: central bay, brick piers on the outer 14%.
+  let px0 = 0.14; let px1 = 0.86;
+  // Plate glass between the bulkhead (bottom) and the sign band (top).
+  let gy0 = 0.10; let gy1 = 0.66;
+  let glass = rect_mask(uv, px0 + 0.03, px1 - 0.03, gy0, gy1, 0.008);
+  let refl = smoothstep(0.0, 1.0, (uv.y - gy0) / (gy1 - gy0));
+  var pane = mix(vec3f(0.07, 0.10, 0.13), vec3f(0.16, 0.22, 0.27), refl);
+  // Warm interior glow low in the window, diagonal highlight streak across it.
+  pane = mix(pane, vec3f(0.85, 0.66, 0.34), (1.0 - refl) * 0.45);
+  pane = pane + vec3f(0.18, 0.18, 0.16) * (1.0 - smoothstep(0.02, 0.06, abs((uv.x - 0.5) + (uv.y - 0.4) * 0.6)));
+  let frame = vec3f(0.14, 0.13, 0.12);
+  let frame_mask = rect_mask(uv, px0, px1, gy0 - 0.02, gy1 + 0.02, 0.006) * (1.0 - rect_mask(uv, px0 + 0.03, px1 - 0.03, gy0, gy1, 0.006));
+  // Bulkhead panel below the glass.
+  let bulk = rect_mask(uv, px0, px1, 0.0, gy0, 0.006);
+  col = mix(col, vec3f(0.16, 0.15, 0.14), bulk);
+  col = mix(col, pane, glass);
+  col = mix(col, frame, frame_mask);
+  // Sign band across the top of the opening.
+  let sign = rect_mask(uv, px0, px1, 0.78, 0.90, 0.006);
+  col = mix(col, vec3f(0.10, 0.10, 0.11), sign);
+  // Striped awning slung above the sign band, scalloped lower edge.
+  let aw_y0 = 0.66; let aw_y1 = 0.80;
+  let scallop = 0.012 * (sin(uv.x * 40.0) * 0.5 + 0.5);
+  let awn_mask = rect_mask(uv, px0 - 0.02, px1 + 0.02, aw_y0, aw_y1 - scallop, 0.006);
+  let stripe = step(0.5, fract(uv.x * 10.0));
+  var awn_col = mix(awn, vec3f(0.90, 0.88, 0.82), stripe * 0.85);
+  awn_col = awn_col * (0.78 + 0.22 * smoothstep(aw_y0, aw_y1, uv.y)); // top-shade
+  col = mix(col, awn_col, awn_mask);
+  return sat3(col);
+}
+
 fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, board: f32) -> vec3f {
   let raw_q = clamp(quality, 0.0, 4.0);
   let q = clamp(raw_q - 2.0, 0.0, 2.0);
@@ -1545,11 +1720,16 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     out_col = out_col + out_col * threshold_bloom * (0.10 + q * 0.05);
     out_col = mix(out_col, vec3f(0.015, 0.018, 0.020), fleck * (0.06 + q * 0.04));
   }
-  if (board > 6.5) {
+  if (board > 6.5 && board < 7.5) {
     // Board H second pass — environment alts: aggregate fleck, subtle weathering
     // in the lows, but keep the crisp SDF reads intact.
     out_col = mix(out_col, vec3f(0.022, 0.024, 0.020), smoothstep(0.55 - q * 0.04, 0.88, coarse) * (0.08 + q * 0.06));
     out_col = out_col + vec3f((fine - 0.5) * (0.012 + q * 0.018));
+  }
+  if (board > 7.5) {
+    // Board I facades — keep the brick crisp and the painted windows clean; only
+    // a whisper of soot in the lows so the masonry doesn't read as plastic.
+    out_col = mix(out_col, vec3f(0.030, 0.028, 0.024), smoothstep(0.62 - q * 0.04, 0.94, coarse) * (0.06 + q * 0.05));
   }
   if (retro > 0.001) {
     let dither_cell = floor(px / (1.0 + retro));
@@ -1635,7 +1815,7 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 4) { col = ice_sheet(uv, px, variant, seed); }
     else if (material == 5) { col = charcoal_bed(uv, px, variant, seed); }
     else { col = stained_glass(uv, px, variant, seed); }
-  } else {
+  } else if (board < 7.5) {
     if (material == 0) { col = asphalt(uv, px, variant, seed); }
     else if (material == 1) { col = sidewalk(uv, px, variant, seed); }
     else if (material == 2) { col = stone_wall(uv, px, variant, seed); }
@@ -1643,6 +1823,10 @@ fn quality_pass(col_in: vec3f, uv: vec2f, px: vec2f, seed: f32, quality: f32, bo
     else if (material == 4) { col = deep_water(uv, px, variant, seed); }
     else if (material == 5) { col = turf(uv, px, variant, seed); }
     else { col = plank_deck(uv, px, variant, seed); }
+  } else {
+    if (material == 0) { col = brick_facade(uv, px, variant, seed); }
+    else if (material == 1) { col = brick_fire_escape(uv, px, variant, seed); }
+    else { col = brick_shopfront(uv, px, variant, seed); }
   }
 
   let vignette = 1.0 - smoothstep(0.20, 0.88, length(uv - vec2f(0.5, 0.5)));

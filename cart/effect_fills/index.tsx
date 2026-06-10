@@ -90,6 +90,13 @@ const ALT_MATERIALS = [
   { id: 6, name: 'Plank Deck' },
 ] as const;
 
+// Board I / Facades — Claude's apartment-brick wall faces with painted-in windows (board id 8).
+const FACADE_MATERIALS = [
+  { id: 0, name: 'Brick Apartment' },
+  { id: 1, name: 'Brick + Fire Escape' },
+  { id: 2, name: 'Brick Shopfront' },
+] as const;
+
 const QUALITY_GRADES = [
   { id: 0, label: 'PSX', note: '32px snap, 6-bit color' },
   { id: 1, label: 'PS2', note: '64px snap, banded color' },
@@ -98,7 +105,7 @@ const QUALITY_GRADES = [
   { id: 4, label: 'Max', note: 'extra detail' },
 ] as const;
 type QualityGrade = typeof QUALITY_GRADES[number]['id'];
-type BoardId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+type BoardId = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 
 function fillData(materialId: number, variant: number, quality: QualityGrade, board: BoardId): number[] {
@@ -116,7 +123,9 @@ function fillData(materialId: number, variant: number, quality: QualityGrade, bo
               ? materialId * 41.0 + variant * 23.0 + 229.0
               : board === 6
                 ? materialId * 43.0 + variant * 27.0 + 271.0
-                : materialId * 47.0 + variant * 29.0 + 313.0;
+                : board === 7
+                  ? materialId * 47.0 + variant * 29.0 + 313.0
+                  : materialId * 53.0 + variant * 31.0 + 367.0;
   return [materialId, variant, seed, quality, board];
 }
 
@@ -229,6 +238,17 @@ function AltColumn({ material, quality }: { material: typeof ALT_MATERIALS[numbe
       <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
       {VARIANTS.map((variant) => (
         <Swatch key={`h-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 7)} idLabel={swatchId('H', material.id, variant)} />
+      ))}
+    </Col>
+  );
+}
+
+function FacadeColumn({ material, quality }: { material: typeof FACADE_MATERIALS[number]; quality: QualityGrade }) {
+  return (
+    <Col style={{ width: SWATCH, gap: 10 }}>
+      <Text style={{ fontSize: 13, color: '#d8e2ef', fontWeight: '700' }}>{material.name}</Text>
+      {VARIANTS.map((variant) => (
+        <Swatch key={`i-${material.id}-${variant}`} data={fillData(material.id, variant, quality, 8)} idLabel={swatchId('I', material.id, variant)} />
       ))}
     </Col>
   );
@@ -359,6 +379,15 @@ export default function EffectFills() {
             <Row style={{ gap: 18, alignItems: 'flex-start' }}>
               {ALT_MATERIALS.map((material) => (
                 <AltColumn key={material.id} material={material} quality={quality} />
+              ))}
+            </Row>
+          </Col>
+
+          <Col style={{ gap: 18 }}>
+            <BoardHeader title="Board I / Facades — Claude" subtitle="I01-I09: brick apartment, brick + fire escape, brick shopfront — painted-in windows so a stack of wall faces reads as an apartment block" />
+            <Row style={{ gap: 18, alignItems: 'flex-start' }}>
+              {FACADE_MATERIALS.map((material) => (
+                <FacadeColumn key={material.id} material={material} quality={quality} />
               ))}
             </Row>
           </Col>

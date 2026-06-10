@@ -14,7 +14,7 @@
 // Two shader families:
 //   • ROAD — the game's own layered road-tile shader (asphalt base + marking
 //     overlays), imported from the W-2 render lane's roadTileFill.ts.
-//   • THE FILL BOARDS — the effect_fills evaluation boards (A–H), one mega-WGSL
+//   • THE FILL BOARDS — the effect_fills evaluation boards (A–I), one mega-WGSL
 //     (the W-2 lane's fillShader.ts) whose D[] selects [materialId, variant,
 //     seed, quality, board]. Each board material becomes one spec with its three
 //     authored takes as variants and seed/detail-grade as the tunable base.
@@ -178,7 +178,7 @@ const CUTOUT_STENCIL: ShaderSpec = {
   },
 };
 
-// ── The fill boards (effect_fills A–H) ───────────────────────────────────────
+// ── The fill boards (effect_fills A–I) ───────────────────────────────────────
 // D = [materialId, variant, seed, quality, board]. Each material's default seed
 // follows the board's spread formula (coefA·materialId + coefB·variant + coefC),
 // matching the evaluation cart's swatches exactly at variant 0; the seed is then
@@ -297,6 +297,14 @@ const FILL_BOARDS: FillBoard[] = [
       { slug: 'deep-water', name: 'Deep Water', variants: ['Deep Ocean', 'Tropical', 'Storm Grey'] },
       { slug: 'turf', name: 'Turf', variants: ['Mowed Stripes', 'Clover Meadow', 'Dry Summer'] },
       { slug: 'plank-deck', name: 'Plank Deck', variants: ['Fresh Cedar', 'Weathered Grey', 'Water-Stained'] },
+    ],
+  },
+  {
+    board: 8, letter: 'I', title: 'Facades', seedCoef: [53, 31, 367],
+    materials: [
+      { slug: 'brick-apartment', name: 'Brick Apartment', variants: ['Red Brick', 'Buff Brick', 'Sooted Grey'] },
+      { slug: 'brick-fire-escape', name: 'Brick + Fire Escape', variants: ['Black Iron', 'Rust', 'Worn Grey'] },
+      { slug: 'brick-shopfront', name: 'Brick Shopfront', variants: ['Green Awning', 'Red Awning', 'Blue Awning'] },
     ],
   },
 ];
