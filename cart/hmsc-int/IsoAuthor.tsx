@@ -486,8 +486,8 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
       if (g) { mode = 'paint'; gx0 = g.x; gz0 = g.z; }
     } else if (!armedRef.current && selectedIdsRef.current.size) {
       // Grab a selected piece to move it: the press raycasts onto a piece already in the
-      // selection (drawn/lifted pieces so the grab matches the screen). Else → rotate.
-      const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), displayPiecesRef.current, ISO_SNAP_TUNING.reachMeters);
+      // selection (VISIBLE drawn pieces so the grab matches the screen). Else → rotate.
+      const hit = GAME_BUILD.placed.raycast(stage.pieceRay(p.x, p.y, rectRef.current), visiblePiecesRef.current, ISO_SNAP_TUNING.reachMeters);
       if (hit && selectedIdsRef.current.has(hit.piece.id)) {
         const g = stage.groundPoint(p.x, p.y, rectRef.current);
         if (g) { mode = 'move'; gx0 = g.x; gz0 = g.z; }
@@ -634,12 +634,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // Select the piece under the cursor (raycast the standing pieces) — the whole
   // connected building, or a single piece. Empty click clears.
   const selectAt = (sx: number, sy: number) => {
-    // Hit-test the DRAWN (terrain-lifted) pieces so a click lands on what's on screen.
-    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), displayPiecesRef.current, ISO_SNAP_TUNING.reachMeters);
+    // Hit-test the VISIBLE (terrain-lifted, cut-away-filtered) pieces so a click
+    // lands on what's on screen — a hidden upper floor can't shadow the click.
+    const hit = GAME_BUILD.placed.raycast(stage.pieceRay(sx, sy, rectRef.current), visiblePiecesRef.current, ISO_SNAP_TUNING.reachMeters);
     if (!hit) { setSelectedIds(new Set()); return; }
     // The toggle sets the default scope; Shift/Alt inverts it for this click. So a single
     // piece is always one click away (even touching others), and the whole building is one
-    // modifier away — no need to flip the toggle to edit one piece.
+    // modifier away — no need to flip the toggle to edit one piece. The connected
+    // walk spans the FULL piece set (hidden floors included) so grabbing a
+    // building grabs ALL of it — a move never tears off the cut-away storeys.
     const whole = wholeBuildingRef.current !== modHeldRef.current;
     setSelectedIds(whole ? GAME_BUILD.placed.connected(hit.piece.id, displayPiecesRef.current) : new Set([hit.piece.id]));
   };
@@ -895,16 +898,20 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
 
   const noIds = useMemo(() => new Set<string>(), []);
 
-  // Cut-away walls: fade every piece that sits ABOVE the active floor so you can see
-  // (and build) into the storey you're editing — the Sims "view this level" move,
-  // tied to the floor selector. Reuses the renderer's occluded-piece fade path, so
-  // it costs nothing extra and looks exactly like F2's wall cut-away.
-  const occludedIds = useMemo(() => {
+  // Cut-away walls: HIDE every piece that sits ABOVE the active floor so you can
+  // see (and build) into the storey you're editing — the Sims "view this level"
+  // move, tied to the floor selector. Hidden, not faded (req_0504): under the
+  // instanced city renderer a faded piece falls out of the instance buckets to
+  // an individual translucent mesh, and "everything above floor 0" would
+  // re-create the per-piece node storm the instancing just removed. Raycasts
+  // pick from this same visible list, so you can't grab what you can't see.
+  const visiblePieces = useMemo(() => {
     const cut = (level + 1) * METERS_PER_LEVEL - 0.01;
-    const s = new Set<string>();
-    for (const p of displayPieces) if (p.y >= cut) s.add(p.id);
-    return s;
+    const visible = displayPieces.filter((p) => p.y < cut);
+    return visible.length === displayPieces.length ? displayPieces : visible;
   }, [displayPieces, level]);
+  const visiblePiecesRef = useRef(visiblePieces);
+  visiblePiecesRef.current = visiblePieces;
 
   // Memoize the STATIC scene content — the world meshes (terrain/landforms/props) and
   // the texture-capture mounts — so a camera-only redraw doesn't re-run and reconcile
@@ -949,9 +956,9 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
         {/* the build grid on the active floor (Scene3D's showGrid is a no-op — we draw
             our own tile lines, world-anchored, following the camera) */}
         <IsoGrid centerX={stage.pose.centerX} centerZ={stage.pose.centerZ} level={level} distance={stage.distance()} />
-        {/* the standing city — the SAME renderer F2 uses; selection highlighted,
-            floors above the active level faded (cut-away) so you see the interior */}
-        <PlacedPieceMeshes pieces={displayPieces} markedIds={selectedIds} targetId={null} occludedIds={occludedIds} />
+        {/* the standing city — the SAME renderer F2 uses (instanced buckets);
+            selection highlighted, floors above the active level HIDDEN (cut-away) */}
+        <PlacedPieceMeshes pieces={visiblePieces} markedIds={selectedIds} targetId={null} occludedIds={noIds} />
         {ghostMeshes}
         {moveGhostMeshes}
         {paintGhostMeshes}
