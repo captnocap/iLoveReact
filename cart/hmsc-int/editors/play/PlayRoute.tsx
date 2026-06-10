@@ -925,164 +925,44 @@ export function PlayRoute(props: {
 
   const updateCameraOcclusion = () => {
     const occluders = cameraOccludersRef.current;
+    // The spring-arm follows whichever rig is LIVE (walk Orbit / ADS Aim): cast
+    // from the player-side pivot out to that rig's natural eye, and PUSH the eye
+    // in to the player's side of any wall/roof on that line. Never see-through.
+    const cam = embodied.desiredCamera();
     if (occluders.ownerIds.length === 0) {
-      setResidualOcclusionIds([]);
-      applyCameraDistanceConstraint(PLAYER_CAMERA.distanceMeters);
+      applyCameraDistanceConstraint(cam.baseDistance);
       return;
     }
     const p = playerRef.current;
-    const targetY = p.y + CAMERA_OCCLUSION_TUNING.playerTargetHeightMeters;
-    const desiredRay = crosshairRayRef.current();
-    const camera = desiredRay.origin;
-    // Does this owner stand between the lens and the player as a sight blocker?
-    // Walls and roofs (ceilings) always do; a ramp does UNLESS it's the floor the
-    // player is standing on. The floor under your feet must never fade.
-    const classifyOccluder = (ownerId: string) => {
+    const eye = cam.eye;
+    const pivot = cam.pivot;
+    // Nearest hit -> how far in to pull. Walls/roofs (and non-floor ramps) push
+    // the camera in; the floor/ramp the player stands on never does. The pull-in
+    // distance is clamped to the active rig's base so ADS keeps its tight framing
+    // and walk keeps its reach.
+    const pushInDistance = (hitDistance: number, ownerIndex: number) => {
+      const ownerId = ownerIndex > 0 ? occluders.ownerIds[ownerIndex - 1] ?? '' : '';
       const meta = ownerId ? cameraOccluderOwnersRef.current[ownerId] : null;
-      const kind = meta?.kind ?? 'unknown';
+      const kind = meta?.kind ?? (hitDistance > 0 ? 'unknown' : 'none');
       const isPlayerGround = kind === 'ramp' && meta ? isPlayerStandingOnRamp(p, meta.piece) : false;
       const occludes = kind === 'wall' || kind === 'roof' || (kind === 'ramp' && !isPlayerGround);
-      return { meta, kind, isPlayerGround, occludes };
+      const distance = hitDistance > 0 && occludes
+        ? Math.max(CAMERA_OCCLUSION_TUNING.minDistanceMeters, Math.min(cam.baseDistance, hitDistance - CAMERA_OCCLUSION_TUNING.skinOffsetMeters))
+        : cam.baseDistance;
+      return { distance, ownerId, ownerKind: kind, occludes };
     };
-    // Preferred path: the FULL occluder list along camera→player. The nearest
-    // still drives the distance pull-in (tuck the lens just past the first wall);
-    // every OTHER wall/roof on the segment fades so the player stays visible in an
-    // enclosed room — the single-nearest result could only ever fade one piece,
-    // which is why interiors went blind. Null when the host isn't rebuilt yet →
-    // fall through to the legacy single-hit + array-fed paths unchanged.
-    const hits = GAME_PHYSICS.cameraOcclusionConfiguredHits(
-      camera.x,
-      camera.y,
-      camera.z,
-      p.x,
-      targetY,
-      p.z,
-      CAMERA_OCCLUSION_TUNING.sweepRadiusMeters,
-      CAMERA_OCCLUSION_TUNING.maxHits,
-    );
-    if (hits !== null) {
-      const hitDistance = hits.nearestTargetDistanceMeters;
-      const nearestOwnerIndex = hits.nearestOwnerIndex;
-      const nearestOwnerId = nearestOwnerIndex > 0 ? occluders.ownerIds[nearestOwnerIndex - 1] ?? '' : '';
-      const nearest = classifyOccluder(nearestOwnerId);
-      const nextDistance = hitDistance > 0 && nearest.occludes
-        ? Math.max(
-          CAMERA_OCCLUSION_TUNING.minDistanceMeters,
-          Math.min(PLAYER_CAMERA.distanceMeters, hitDistance - CAMERA_OCCLUSION_TUNING.skinOffsetMeters),
-        )
-        : PLAYER_CAMERA.distanceMeters;
-      applyCameraDistanceConstraint(nextDistance);
-      // The pull-in tucks the lens just past the NEAREST occluder, so it stops
-      // blocking — unless we pinned at min distance (the room is tighter than the
-      // camera can pull, so the nearest wall is still in front and must fade too).
-      const pinnedAtMin = nextDistance <= CAMERA_OCCLUSION_TUNING.minDistanceMeters + 0.001;
-      const fadeIds: string[] = [];
-      for (const ownerIndex of hits.ownerIndices) {
-        const ownerId = ownerIndex > 0 ? occluders.ownerIds[ownerIndex - 1] ?? '' : '';
-        if (!ownerId) continue;
-        if (!classifyOccluder(ownerId).occludes) continue;
-        if (ownerIndex === nearestOwnerIndex && !pinnedAtMin) continue; // cleared by the pull-in
-        fadeIds.push(ownerId);
-      }
-      setResidualOcclusionIds(fadeIds);
-      const ignored = hitDistance > 0 && !nearest.occludes;
-      const hitRole = hitDistance <= 0 ? 'none' : nearest.isPlayerGround ? 'player-ground' : 'between-barrier';
+    const recordPullDiagnostic = (source: string, distance: number, hitDistance: number, ownerIndex: number, ownerId: string, ownerKind: string, occludes: boolean, hostUs: number) => {
       const diagnostic = cameraOcclusionDiagnosticLastRef.current;
       if (
-        diagnostic.source !== 'configured-hits'
-        || Math.abs(diagnostic.distance - nextDistance) >= 0.001
-        || Math.abs(diagnostic.hitDistance - hitDistance) >= 0.001
-        || diagnostic.nearestOwnerIndex !== nearestOwnerIndex
-        || diagnostic.ownerId !== nearestOwnerId
-        || diagnostic.ownerKind !== nearest.kind
-        || diagnostic.hitRole !== hitRole
-        || diagnostic.ignored !== ignored
-        || diagnostic.hits !== fadeIds.length
-        || diagnostic.rects !== occluders.rects.length
-        || diagnostic.orientedRects !== occluders.orientedRects.length
-      ) {
-        diagnostic.source = 'configured-hits';
-        diagnostic.distance = nextDistance;
-        diagnostic.hitDistance = hitDistance;
-        diagnostic.nearestOwnerIndex = nearestOwnerIndex;
-        diagnostic.hits = fadeIds.length;
-        diagnostic.rects = occluders.rects.length;
-        diagnostic.orientedRects = occluders.orientedRects.length;
-        diagnostic.ownerId = nearestOwnerId;
-        diagnostic.ownerKind = nearest.kind;
-        diagnostic.hitRole = hitRole;
-        diagnostic.ignored = ignored;
-        GAME_TELEMETRY.recordDiagnostic('camera', 'cameraOcclusion.changed', {
-          hits: hits.ownerIndices.length,
-          fades: fadeIds.length,
-          hostUs: hits.hostMicroseconds,
-          safeDistance: nextDistance,
-          nearestTargetDistance: hitDistance,
-          nearestOwnerIndex,
-          ownerId: nearestOwnerId,
-          pieceId: nearest.meta?.pieceId ?? '',
-          ownerKind: nearest.kind,
-          hitRole,
-          hitIsPlayerGround: nearest.isPlayerGround,
-          ignored,
-          pinnedAtMin,
-          rects: occluders.rects.length,
-          orientedRects: occluders.orientedRects.length,
-          cameraSource: 'desired-orbit-configured-hits',
-        });
-      }
-      return;
-    }
-    const hit = GAME_PHYSICS.cameraOcclusionConfiguredHit(
-      camera.x,
-      camera.y,
-      camera.z,
-      p.x,
-      targetY,
-      p.z,
-      CAMERA_OCCLUSION_TUNING.sweepRadiusMeters,
-    );
-    if (hit !== null) {
-      const hitDistance = hit.nearestTargetDistanceMeters;
-      const ownerIndex = hit.nearestOwnerIndex;
-      const ownerId = ownerIndex > 0 ? occluders.ownerIds[ownerIndex - 1] ?? '' : '';
-      const ownerMeta = ownerId ? cameraOccluderOwnersRef.current[ownerId] : null;
-      const ownerKind = ownerMeta?.kind ?? (hitDistance > 0 ? 'unknown' : 'none');
-      const hitIsPlayerGround = ownerMeta?.kind === 'ramp' ? isPlayerStandingOnRamp(p, ownerMeta.piece) : false;
-      const hitRole = hitDistance <= 0
-        ? 'none'
-        : hitIsPlayerGround
-          ? 'player-ground'
-          : 'between-barrier';
-      const ownerOccludesCamera = ownerKind === 'wall' || ownerKind === 'roof' || (ownerKind === 'ramp' && !hitIsPlayerGround);
-      const ignored = hitDistance > 0 && !ownerOccludesCamera;
-      const nextDistance = hitDistance > 0 && ownerOccludesCamera
-        ? Math.max(
-          CAMERA_OCCLUSION_TUNING.minDistanceMeters,
-          Math.min(PLAYER_CAMERA.distanceMeters, hitDistance - CAMERA_OCCLUSION_TUNING.skinOffsetMeters),
-        )
-        : PLAYER_CAMERA.distanceMeters;
-      applyCameraDistanceConstraint(nextDistance);
-      setResidualOcclusionIds(
-        ownerOccludesCamera && ownerId && nextDistance <= CAMERA_OCCLUSION_TUNING.minDistanceMeters + 0.001
-          ? [ownerId]
-          : [],
-      );
-      const diagnostic = cameraOcclusionDiagnosticLastRef.current;
-      if (
-        diagnostic.source !== 'configured'
-        || Math.abs(diagnostic.distance - nextDistance) >= 0.001
+        diagnostic.source !== source
+        || Math.abs(diagnostic.distance - distance) >= 0.001
         || Math.abs(diagnostic.hitDistance - hitDistance) >= 0.001
         || diagnostic.nearestOwnerIndex !== ownerIndex
         || diagnostic.ownerId !== ownerId
         || diagnostic.ownerKind !== ownerKind
-        || diagnostic.hitRole !== hitRole
-        || diagnostic.ignored !== ignored
-        || diagnostic.rects !== occluders.rects.length
-        || diagnostic.orientedRects !== occluders.orientedRects.length
       ) {
-        diagnostic.source = 'configured';
-        diagnostic.distance = nextDistance;
+        diagnostic.source = source;
+        diagnostic.distance = distance;
         diagnostic.hitDistance = hitDistance;
         diagnostic.nearestOwnerIndex = ownerIndex;
         diagnostic.hits = hitDistance > 0 ? 1 : 0;
@@ -1090,68 +970,50 @@ export function PlayRoute(props: {
         diagnostic.orientedRects = occluders.orientedRects.length;
         diagnostic.ownerId = ownerId;
         diagnostic.ownerKind = ownerKind;
-        diagnostic.hitRole = hitRole;
-        diagnostic.ignored = ignored;
+        diagnostic.ignored = hitDistance > 0 && !occludes;
         GAME_TELEMETRY.recordDiagnostic('camera', 'cameraOcclusion.changed', {
           hits: hitDistance > 0 ? 1 : 0,
-          hostUs: hit.hostMicroseconds,
-          safeDistance: nextDistance,
+          hostUs,
+          safeDistance: distance,
           nearestTargetDistance: hitDistance,
           nearestOwnerIndex: ownerIndex,
           ownerId,
-          pieceId: ownerMeta?.pieceId ?? '',
           ownerKind,
-          hitRole,
-          hitIsPlayerGround,
-          ignored,
+          occludes,
+          aiming: cam.aiming,
+          baseDistance: cam.baseDistance,
           rects: occluders.rects.length,
           orientedRects: occluders.orientedRects.length,
-          cameraSource: 'desired-orbit-configured',
+          cameraSource: source,
         });
       }
+    };
+    // Fast path: the configured stored-scene query (no per-frame array repack).
+    const hit = GAME_PHYSICS.cameraOcclusionConfiguredHit(
+      eye.x, eye.y, eye.z, pivot.x, pivot.y, pivot.z, CAMERA_OCCLUSION_TUNING.sweepRadiusMeters,
+    );
+    if (hit !== null) {
+      const r = pushInDistance(hit.nearestTargetDistanceMeters, hit.nearestOwnerIndex);
+      applyCameraDistanceConstraint(r.distance);
+      recordPullDiagnostic('configured', r.distance, hit.nearestTargetDistanceMeters, hit.nearestOwnerIndex, r.ownerId, r.ownerKind, r.occludes, hit.hostMicroseconds);
       return;
     }
+    // Fallback: array-fed query (host without the configured fast path).
     const result = GAME_PHYSICS.cameraOcclusion({
-      camera,
-      target: { x: p.x, y: targetY, z: p.z },
+      camera: eye,
+      target: pivot,
       rects: occluders.rects,
       orientedRects: occluders.orientedRects,
       maxHits: CAMERA_OCCLUSION_TUNING.maxHits,
       radiusMeters: CAMERA_OCCLUSION_TUNING.sweepRadiusMeters,
     });
     if (!result) {
-      setResidualOcclusionIds([]);
-      applyCameraDistanceConstraint(PLAYER_CAMERA.distanceMeters);
+      applyCameraDistanceConstraint(cam.baseDistance);
       return;
     }
-    const response = cameraOcclusionResponse(result, occluders.ownerIds, PLAYER_CAMERA.distanceMeters, CAMERA_OCCLUSION_TUNING);
-    applyCameraDistanceConstraint(response.distanceMeters);
-    setResidualOcclusionIds(response.residualOwnerIds);
-    const diagnostic = cameraOcclusionDiagnosticLastRef.current;
-    if (
-      diagnostic.source !== 'fallback'
-      || Math.abs(diagnostic.distance - response.distanceMeters) >= 0.001
-      || diagnostic.nearestOwnerIndex !== result.nearestOwnerIndex
-      || diagnostic.hits !== result.ownerIndices.length
-    ) {
-      diagnostic.source = 'fallback';
-      diagnostic.distance = response.distanceMeters;
-      diagnostic.hitDistance = result.nearestTargetDistanceMeters;
-      diagnostic.nearestOwnerIndex = result.nearestOwnerIndex;
-      diagnostic.hits = result.ownerIndices.length;
-      diagnostic.rects = occluders.rects.length;
-      diagnostic.orientedRects = occluders.orientedRects.length;
-      GAME_TELEMETRY.recordDiagnostic('camera', 'cameraOcclusion.changed', {
-        hits: result.ownerIndices.length,
-        hostUs: result.hostMicroseconds,
-        safeDistance: response.distanceMeters,
-        nearestTargetDistance: result.nearestTargetDistanceMeters,
-        nearestOwnerIndex: result.nearestOwnerIndex,
-        rects: occluders.rects.length,
-        orientedRects: occluders.orientedRects.length,
-        cameraSource: 'desired-orbit',
-      });
-    }
+    const r = pushInDistance(result.nearestTargetDistanceMeters, result.nearestOwnerIndex);
+    applyCameraDistanceConstraint(r.distance);
+    recordPullDiagnostic('fallback', r.distance, result.nearestTargetDistanceMeters, result.nearestOwnerIndex, r.ownerId, r.ownerKind, r.occludes, result.hostMicroseconds);
   };
   updateCameraOcclusionRef.current = updateCameraOcclusion;
 

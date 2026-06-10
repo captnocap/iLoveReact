@@ -263,6 +263,14 @@ export type Embodied = {
   releaseMouse: () => void;
   /** adopt an externally-authored pose (console teleport) — the camera follows */
   adoptPose: (next: PlayerPose) => void;
+  /** route-owned camera constraints still pass through the substrate controller. */
+  setCameraDistanceConstraint: (distanceMeters: number, minDistanceMeters: number, smoothingPerSecond: number) => void;
+  /** The ACTIVE rig's natural (un-occluded) eye + the player-side pivot the eye
+   *  sits back from, plus that rig's base distance. Walk = Orbit, ADS = Aim. The
+   *  camera-collision spring-arm casts pivot→eye against walls, so it must use
+   *  whichever rig is live — querying the orbit eye while aiming is why the aim
+   *  camera clipped walls. */
+  desiredCamera: () => { eye: Vec3; pivot: Vec3; baseDistance: number; aiming: boolean };
   /** back to the authored spawn (the Drop-in button) */
   resetPlayer: () => void;
 };
@@ -275,6 +283,8 @@ type PlayerJitRenderedFrame = {
   pose: 'walk' | 'stand';
   gaitPhase: number;
 };
+
+export type EmbodiedCameraSample = { x: number | null; y: number | null; z: number | null; nodeId: number; source: string };
 
 type PlayerJitFrame = {
   frame: number;
@@ -293,7 +303,7 @@ type PlayerJitFrame = {
   };
   rendered: PlayerJitRenderedFrame;
   physics: { x: number; y: number; z: number; dt: number; hostUs: number };
-  camera: { x: number | null; y: number | null; z: number | null; nodeId: number; source: string };
+  camera: EmbodiedCameraSample;
   animation: { pose: 'walk' | 'stand'; gaitPhase: number };
   correction: {
     kind: 'none' | 'noclip-bypass' | 'live-floor-recovery' | 'host-step' | 'js-fallback' | 'idle-stop';
@@ -332,7 +342,7 @@ function parseHostJson(raw: unknown): any {
   return raw && typeof raw === 'object' ? raw : null;
 }
 
-function readCameraNode(camera: any): PlayerJitFrame['camera'] {
+export function readEmbodiedCameraNode(camera: any): EmbodiedCameraSample {
   const nodeId = Number(camera?.id ?? 0);
   if (!nodeId) return { x: null, y: null, z: null, nodeId: 0, source: 'no-node-id' };
   const host = globalThis as any;
@@ -517,6 +527,9 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
   };
   const sendCameraRef = useRef(sendCameraParams);
   sendCameraRef.current = sendCameraParams;
+  const setCameraDistanceConstraint = (distanceMeters: number, minDistanceMeters: number, smoothingPerSecond: number) => {
+    nativeCameraRef.current?.setDistanceConstraint(distanceMeters, minDistanceMeters, smoothingPerSecond);
+  };
 
   // Engage the controller: params first (a set before init pins the boot
   // frame — no swoop-in), then bind the route's Scene3D.Camera node. The
@@ -673,7 +686,7 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
       };
       const recordProbeFrame = (correction: PlayerJitFrame['correction']) => {
         if (!probe.active || probe.done) return;
-        const camera = readCameraNode(cameraRef.current);
+        const camera = readEmbodiedCameraNode(cameraRef.current);
         const rendered = playerJitRenderRef.current;
         const row: PlayerJitFrame = {
           frame: probe.frames.length + 1,
@@ -1031,6 +1044,41 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     },
   };
 
+  // The active rig's natural (un-occluded) eye + the player-side pivot it sits
+  // back from — what the camera-collision spring-arm casts against walls. ADS
+  // frames over the shoulder pivot (Aim rig); walk orbits the chest target.
+  // Reading the LIVE rig is the fix for "the aim camera still clips walls":
+  // the occlusion query must follow whichever camera is actually rendering.
+  const desiredCamera = (): { eye: Vec3; pivot: Vec3; baseDistance: number; aiming: boolean } => {
+    const p = playerRef.current;
+    const l = lookRef.current;
+    if (aimRef.current) {
+      const aim = GAME_CAMERA.rigs.Aim;
+      const solved = GAME_CAMERA.solve(aim, { target: [p.x, p.y, p.z], yaw: l.yaw, pitch: orbitPitchToAimPitch(l.pitch) });
+      const yawRad = l.yaw * DEG;
+      const d = aim.defaults;
+      return {
+        eye: { x: solved.pos[0], y: solved.pos[1], z: solved.pos[2] },
+        pivot: { x: p.x - Math.cos(yawRad) * d.shoulderShift, y: p.y + d.pivotHeight, z: p.z + Math.sin(yawRad) * d.shoulderShift },
+        baseDistance: d.distance,
+        aiming: true,
+      };
+    }
+    const solved = GAME_CAMERA.solve(GAME_CAMERA.rigs.Orbit, {
+      target: [p.x, p.y + PLAYER_CAMERA.targetHeightMeters, p.z],
+      yaw: l.yaw,
+      pitch: l.pitch,
+      dist: PLAYER_CAMERA.distanceMeters,
+      fov: PLAYER_CAMERA.fovDegrees,
+    });
+    return {
+      eye: { x: solved.pos[0], y: solved.pos[1], z: solved.pos[2] },
+      pivot: { x: p.x, y: p.y + PLAYER_CAMERA.targetHeightMeters, z: p.z },
+      baseDistance: PLAYER_CAMERA.distanceMeters,
+      aiming: false,
+    };
+  };
+
   return {
     worldGrid,
     player,
@@ -1049,6 +1097,8 @@ export function useEmbodiedPlayer(options: EmbodiedOptions): Embodied {
     captureMouse,
     releaseMouse,
     adoptPose,
+    setCameraDistanceConstraint,
+    desiredCamera,
     resetPlayer,
   };
 }

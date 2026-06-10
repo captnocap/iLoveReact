@@ -42,7 +42,10 @@ export const CAMERA_OCCLUSION_TUNING = {
   maxHits: 24,
   sweepRadiusMeters: 0.08,
   playerTargetHeightMeters: PLAYER_CAMERA.targetHeightMeters,
-  minDistanceMeters: 1.6,
+  // Spring-arm floor: how close the camera may tuck to the player when a wall
+  // pushes it in. Low enough to get to the player's side of a tight interior
+  // wall (an aim-like over-shoulder framing) without clipping into the model.
+  minDistanceMeters: 0.7,
   skinOffsetMeters: 0.14,
   pullSmoothingPerSecond: 26,
   rampGroundToleranceMeters: 0.28,
