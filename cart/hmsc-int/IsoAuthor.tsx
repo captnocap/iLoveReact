@@ -309,7 +309,12 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     for (const p of sel) { const b = GAME_BUILD.placed.bounds(p); minX = Math.min(minX, b.minX); maxX = Math.max(maxX, b.maxX); }
     const dx = (maxX - minX) + state.world.cellSizeMeters;
     for (const p of sel) {
-      onCommit({ kind: 'piecePlaced', placement: { pieceId: p.pieceId, x: p.x + dx, y: p.y, z: p.z, yawDegrees: p.yawDegrees } }, `cloned ${p.pieceId}`);
+      // Spread the whole piece (minus the stream-minted id) so the copy keeps its
+      // per-face skin/materials and any wall edit — only the X position shifts. Drop
+      // the stamp grouping so a clone is an independent piece, not a phantom member of
+      // the original's prefab stamp.
+      const { id, stampId, ...rest } = p;
+      onCommit({ kind: 'piecePlaced', placement: { ...rest, x: p.x + dx } }, `cloned ${p.pieceId}`);
     }
   };
   // Commit a finished move drag: shift every selected piece by the dragged world delta.
@@ -324,7 +329,11 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
     if (!delta || (Math.abs(delta.dx) < 1e-3 && Math.abs(delta.dz) < 1e-3)) return;
     const sel = piecesRef.current.filter((p) => selectedIdsRef.current.has(p.id));
     if (!sel.length) return;
-    const moves = sel.map((p) => ({ id: p.id, placement: { pieceId: p.pieceId, x: p.x + delta.dx, y: p.y, z: p.z + delta.dz, yawDegrees: p.yawDegrees } }));
+    // Spread the WHOLE piece (minus the stream-minted id) into the new placement so the
+    // moved instance keeps its per-face skin/materials, wall edit, and prefab grouping —
+    // only x/z shift. (The earlier slice copied just pieceId/pose, which stripped every
+    // face material on move.)
+    const moves = sel.map((p) => { const { id, ...rest } = p; return { id, placement: { ...rest, x: p.x + delta.dx, z: p.z + delta.dz } }; });
     if (moves.some((m) => GAME_BUILD.placed.validatePlacement(m.placement).length > 0)) return;
     for (const m of moves) onCommit({ kind: 'pieceRemoved', id: m.id }, `moved ${m.id}`);
     for (const m of moves) onCommit({ kind: 'piecePlaced', placement: m.placement }, `moved ${m.placement.pieceId}`);
