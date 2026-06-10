@@ -33,7 +33,7 @@ import { BrushRail, type BrushRailSettings } from './BrushRail';
 import { LayerBtn, MiniStepper, ToolBtn } from './railAtoms';
 import { paintTile, tileKindIndex, encodeTileMap } from './tileData';
 import { paintZoneCell, dropZoneIndex, ZONE_COLORS, type ZoneDef } from './zoneData';
-import { clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
+import { applyMergeGesture, clampProfile, laneGuides, parseCellKey, planRoads, profileLabel, isOneWay, roadWidthTiles, snapToCenterline, snapToRoadEnd, splitStroke, strokeEndpoints, type RoadPoint, type RoadProfile, type RoadStroke } from './roadData';
 import { RoadRail } from './RoadRail';
 import { ChunkSurface } from './ChunkSurface';
 import { chunkKey, makeChunk, inBounds, openNeighbors, CHUNK_TILES, type Chunk, type ChunkKey } from './chunks';
@@ -1119,15 +1119,29 @@ export function PaintCanvas(props: {
     notifyEdit({ cat: 'road', text: noteText });
   };
   const commitRoadDraft = () => {
-    const pts = roadDraftRef.current;
+    let pts = [...roadDraftRef.current];
     if (pts.length < 2) return;
-    roadSeq.current += 1;
-    const stroke: RoadStroke = { id: `r_${roadSeq.current}`, points: [...pts], profile: clampProfile(roadProfileRef.current) };
-    // Mid-stroke connections (req_0529): a draft END landing on another road's
-    // centerline mid-span SPLITS that road there — the seam stays one
-    // continuous road (parallel axes never box) and each half re-profiles
-    // independently (widen the downstream half = the lane merge).
+    const profile = clampProfile(roadProfileRef.current);
     let next = [...roadsRef.current];
+    // THE MERGE GESTURE (req_0532): a one-way draft running [...ramp, C, E] —
+    // C on a road's wire, E that road's endpoint — splits at C, WIDENS the
+    // C→E half on the side the merging traffic flows, and trims the ramp to
+    // end at C. "Click C, then click A" IS the merge.
+    let noteText = `road ${profileLabel(profile)}`;
+    const merged = applyMergeGesture(next, pts, profile, () => {
+      roadSeq.current += 1;
+      return `r_${roadSeq.current}`;
+    });
+    if (merged) {
+      next = merged.strokes;
+      pts = merged.points;
+      const widened = next.find((r) => r.id === merged.widenedId);
+      noteText = `merged ${Math.max(profile.lanesF, profile.lanesB)} lane(s) in → ${widened ? profileLabel(widened.profile) : 'road'}`;
+    }
+    // Mid-stroke connections (req_0529): any remaining draft END landing on a
+    // road's centerline mid-span SPLITS that road there — the seam stays one
+    // continuous road (parallel axes never box) and each half re-profiles
+    // independently.
     for (const end of [pts[0]!, pts[pts.length - 1]!]) {
       const hit = snapToCenterline(next, end, 0.6);
       if (!hit?.midSpan) continue;
@@ -1140,9 +1154,12 @@ export function PaintCanvas(props: {
       const halves = splitStroke(next[idx]!, hit.point, idA, idB);
       if (halves) next.splice(idx, 1, ...halves);
     }
+    if (pts.length < 2) return; // gesture consumed the whole draft (degenerate)
+    roadSeq.current += 1;
+    const stroke: RoadStroke = { id: `r_${roadSeq.current}`, points: pts, profile };
     setRoadDraft([]);
     setSelRoadId(stroke.id);
-    restampRoads([...next, stroke], `road ${profileLabel(stroke.profile)}`);
+    restampRoads([...next, stroke], noteText);
   };
   const cancelRoadDraft = () => setRoadDraft([]);
   const undoRoadPoint = () => setRoadDraft((d) => d.slice(0, -1));

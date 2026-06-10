@@ -434,6 +434,79 @@ export function snapToCenterline(strokes: RoadStroke[], p: RoadPoint, radius: nu
 }
 
 /**
+ * THE MERGE GESTURE (req_0532): a one-way draft whose tail (or head) runs
+ * ALONG an existing road — [...ramp, C, E] where C sits mid-span on a stroke
+ * and E is that same stroke's endpoint — means "these lanes pour into the road
+ * at C and continue toward E". The gesture: splits the road at C, WIDENS the
+ * C→E half on the side the merging traffic flows (the ramp's lane count, so
+ * 1 existing + 2 incoming = 3), and trims the along-road tail off the ramp so
+ * it ends at C. Works at either end of the draft: tail = an entry ramp, head
+ * = an exit ramp (traffic leaving at C widens the deceleration side).
+ * Null when the draft is two-way, too short, or no such (C, E) pair exists.
+ */
+export type MergeGestureResult = {
+  /** strokes with the target split + the C→E half widened */
+  strokes: RoadStroke[];
+  /** the draft trimmed to end (or start) at C */
+  points: RoadPoint[];
+  /** the id of the widened half (select it after commit) */
+  widenedId: string;
+};
+
+export function applyMergeGesture(
+  strokes: RoadStroke[],
+  points: RoadPoint[],
+  profile: RoadProfile,
+  mintId: () => string,
+): MergeGestureResult | null {
+  const p = clampProfile(profile);
+  if (!isOneWay(p) || points.length < 3) return null;
+  const rampLanes = Math.max(p.lanesF, p.lanesB);
+
+  const tryAt = (cIdx: number, eIdx: number): MergeGestureResult | null => {
+    const C = points[cIdx]!;
+    const E = points[eIdx]!;
+    const target = strokes.find((r) => {
+      const f = r.points[0]!;
+      const l = r.points[r.points.length - 1]!;
+      const isEnd = (f.gx === E.gx && f.gz === E.gz) || (l.gx === E.gx && l.gz === E.gz);
+      if (!isEnd) return false;
+      const hit = snapToCenterline([r], C, 0.6);
+      return !!hit && hit.midSpan;
+    });
+    if (!target) return null;
+    const halves = splitStroke(target, C, mintId(), mintId());
+    if (!halves) return null;
+    const isE = (pt: RoadPoint) => pt.gx === E.gx && pt.gz === E.gz;
+    const half = halves.find((h) => isE(h.points[0]!) || isE(h.points[h.points.length - 1]!));
+    const other = halves.find((h) => h !== half);
+    if (!half || !other) return null;
+    // Traffic direction through the gesture: tail gesture draws C→E, head
+    // gesture draws E→C; lanesB-only one-ways flow against the draw.
+    const drawIsCtoE = cIdx < eIdx;
+    const flowCtoE = p.lanesF > 0 ? drawIsCtoE : !drawIsCtoE;
+    // Which of the half's profile sides flows C→E: its draw order decides.
+    const halfForwardCtoE = half.points[0]!.gx === C.gx && half.points[0]!.gz === C.gz;
+    const widenForward = flowCtoE === halfForwardCtoE;
+    const widened: RoadStroke = {
+      ...half,
+      profile: clampProfile({
+        ...half.profile,
+        lanesF: half.profile.lanesF + (widenForward ? rampLanes : 0),
+        lanesB: half.profile.lanesB + (widenForward ? 0 : rampLanes),
+      }),
+    };
+    const idx = strokes.findIndex((r) => r.id === target.id);
+    const nextStrokes = [...strokes];
+    nextStrokes.splice(idx, 1, other, widened);
+    const trimmed = cIdx < eIdx ? points.slice(0, cIdx + 1) : points.slice(cIdx);
+    return { strokes: nextStrokes, points: trimmed, widenedId: widened.id };
+  };
+
+  return tryAt(points.length - 2, points.length - 1) ?? tryAt(1, 0);
+}
+
+/**
  * Split a stroke at a point on (or near) its centerline into two strokes that
  * share that point. Profiles copy to both halves — re-profile either after.
  * Null when the point sits on an endpoint (nothing to split) or a half would

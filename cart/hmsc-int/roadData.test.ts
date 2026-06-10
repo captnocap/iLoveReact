@@ -6,9 +6,9 @@
 
 import { assert, assertEqual, finish, test } from './game/_testkit';
 import {
-  carriagewayTiles, cellKey, clampProfile, crossSection, isOneWay, laneGuides,
-  planRoads, profileLabel, roadWidthTiles, snapToCenterline, snapToRoadEnd,
-  splitStroke, strokeChevrons,
+  applyMergeGesture, carriagewayTiles, cellKey, clampProfile, crossSection,
+  isOneWay, laneGuides, planRoads, profileLabel, roadWidthTiles,
+  snapToCenterline, snapToRoadEnd, splitStroke, strokeChevrons,
   type RoadPlan, type RoadStroke,
 } from './roadData';
 
@@ -177,6 +177,61 @@ test('splitStroke makes two halves sharing the point, profiles copied', () => {
 test('splitStroke at an endpoint degenerates to null', () => {
   const a = road('a', [[0, 10], [30, 10]], 1, 1, false);
   assertEqual(splitStroke(a, { gx: 0, gz: 10 }, 'x', 'y'), null, 'no empty half');
+});
+
+test("the merge gesture: ramp into C then along to A widens THAT half's receiving side", () => {
+  // The user's exact picture: road drawn A(20,0) → B(20,30), 3 forward + 1
+  // opposing — so the single opposing lane flows B→A (north). A 2-lane one-way
+  // ramp comes in from the east, clicks C(20,15), then continues to A.
+  let seq = 100;
+  const mint = () => `r_${++seq}`;
+  const main = road('main', [[20, 0], [20, 30]], 3, 1, true);
+  const draft: [number, number][] = [[30, 15], [20, 15], [20, 0]];
+  const res = applyMergeGesture([main], draft.map(([gx, gz]) => ({ gx, gz })), { lanesF: 2, lanesB: 0, sidewalks: false }, mint);
+  assert(!!res, 'gesture recognized');
+  assertEqual(res!.strokes.length, 2, 'main road split into two halves');
+  const widened = res!.strokes.find((r) => r.id === res!.widenedId)!;
+  assertEqual(widened.points[0]!.gz, 0, 'the widened half is the C→A side');
+  assertEqual(widened.points[widened.points.length - 1]!.gz, 15, 'ending at the split');
+  assertEqual(widened.profile.lanesF, 3, 'southbound side untouched');
+  assertEqual(widened.profile.lanesB, 3, 'northbound side 1 + 2 incoming = 3 — the merge');
+  const otherHalf = res!.strokes.find((r) => r.id !== res!.widenedId)!;
+  assertEqual(otherHalf.profile.lanesB, 1, 'the B-side half keeps its single lane');
+  assertEqual(res!.points.length, 2, 'the ramp trims to end at C');
+  assertEqual(res!.points[res!.points.length - 1]!.gx, 20, 'ramp last point is C');
+});
+
+test('the merge gesture at the draft HEAD reads as an exit ramp', () => {
+  // Drawn A-first: [A(20,0), C(20,15), ...away east] with lanes → 1: traffic
+  // flows A→C then leaves — the A→C half widens on its southbound (forward) side.
+  let seq = 200;
+  const mint = () => `r_${++seq}`;
+  const main = road('main', [[20, 0], [20, 30]], 3, 1, false);
+  const draft: [number, number][] = [[20, 0], [20, 15], [30, 15]];
+  const res = applyMergeGesture([main], draft.map(([gx, gz]) => ({ gx, gz })), { lanesF: 1, lanesB: 0, sidewalks: false }, mint);
+  assert(!!res, 'head gesture recognized');
+  const widened = res!.strokes.find((r) => r.id === res!.widenedId)!;
+  assertEqual(widened.profile.lanesF, 3, 'cap holds the southbound side at 3 (3 + 1 exit clamps)');
+  assertEqual(widened.profile.lanesB, 1, 'opposing side untouched');
+  assertEqual(res!.points[0]!.gz, 15, 'ramp now starts at C');
+});
+
+test('the merge gesture ignores two-way drafts and free-standing ends', () => {
+  let seq = 300;
+  const mint = () => `r_${++seq}`;
+  const main = road('main', [[20, 0], [20, 30]], 1, 1, false);
+  const alongRoad: [number, number][] = [[30, 15], [20, 15], [20, 0]];
+  assertEqual(
+    applyMergeGesture([main], alongRoad.map(([gx, gz]) => ({ gx, gz })), { lanesF: 1, lanesB: 1, sidewalks: false }, mint),
+    null,
+    'two-way drafts never merge-widen',
+  );
+  const freeEnd: [number, number][] = [[30, 15], [25, 15], [25, 5]];
+  assertEqual(
+    applyMergeGesture([main], freeEnd.map(([gx, gz]) => ({ gx, gz })), { lanesF: 2, lanesB: 0, sidewalks: false }, mint),
+    null,
+    'a draft not ending along a road is just a road',
+  );
 });
 
 finish('roadData');
