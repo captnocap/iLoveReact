@@ -49,6 +49,11 @@ interface ChromeProps {
   // game's boot key, so the standalone game boots THIS map. Deliberate, not on
   // every keystroke — see index.tsx compileToGame.
   onCompile: () => void;
+  // Live state of the last Compile (the bake shells out + has no instant result,
+  // so the button shows it): 'idle' | 'compiling' | 'done' | 'error', plus a one-
+  // line result the user can read (material counts / error). See index.tsx.
+  compileState?: 'idle' | 'compiling' | 'done' | 'error';
+  compileStatus?: string;
   // Navigate to the /assist3d route — the assistant-authored hot 3D surface.
   onAssist: () => void;
   // Navigate to the native compiled-world viewport.
@@ -149,11 +154,20 @@ export function Chrome(props: ChromeProps) {
 
       <C.ChromeRule />
 
-      {/* Compile → write this authored map to the game's boot key */}
+      {/* Compile → re-bake this map's game-file. The bake shells out, so the pill
+          reflects its state + a readable result (data only — it does NOT rebuild
+          the host loader; see index.tsx compileToGame). */}
       <C.ChromePill onPress={props.onCompile}>
-        <Icon name="Hammer" size={13} color={accentFor('success')} />
-        <C.ChromePillText>Compile</C.ChromePillText>
+        <Icon
+          name={props.compileState === 'compiling' ? 'LoaderCircle' : props.compileState === 'error' ? 'X' : props.compileState === 'done' ? 'Check' : 'Hammer'}
+          size={13}
+          color={props.compileState === 'error' ? accentFor('error') : accentFor('success')}
+        />
+        <C.ChromePillText>{props.compileState === 'compiling' ? 'Compiling…' : 'Compile'}</C.ChromePillText>
       </C.ChromePill>
+      {props.compileStatus ? (
+        <C.ChromePillFaint>{props.compileStatus}</C.ChromePillFaint>
+      ) : null}
 
       {/* Save status — click to expand the save-log trace */}
       <SavePill onPress={props.onToggleLog}>

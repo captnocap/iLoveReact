@@ -496,6 +496,10 @@ function EditorShell() {
   const [logOpen, setLogOpen] = useState(false);
   const [compiledReloadKey, setCompiledReloadKey] = useState(0);
   const [compiledStatus, setCompiledStatus] = useState('native world_loader primitive');
+  // Compile-button feedback (the bake shells out, no instant result): the state
+  // drives the pill icon, the status is a readable one-liner in the chrome.
+  const [compileState, setCompileState] = useState<'idle' | 'compiling' | 'done' | 'error'>('idle');
+  const [compileStatus, setCompileStatus] = useState('');
   const refreshMaps = useCallback(() => setMaps(listMaps()), []);
   // The two toolbar popovers are mutually exclusive; opening one closes the other.
   const toggleMenu = useCallback(() => { setMenuOpen((o) => !o); setLogOpen(false); }, []);
@@ -997,6 +1001,8 @@ function EditorShell() {
   // not on every keystroke, so authoring doesn't clobber the booted world midway.
   const compileToGame = useCallback(async () => {
     setCompiledStatus('compiling game-file...');
+    setCompileState('compiling');
+    setCompileStatus('baking…');
     try {
       compileEditorWorld(previewWorld);
       const bake = await execAsync(GAME_BAKE_CMD);
@@ -1006,10 +1012,19 @@ function EditorShell() {
       }
       setCompiledReloadKey((key) => key + 1);
       setCompiledStatus(summary || 'compiled game-file refreshed');
-      logEvent({ cat: 'map', text: `compiled ${ws.stem} → game-file` });
+      // Surface the material breadcrumb the bake prints (worldGeometry
+      // encodeMaterials) so you can confirm glass IS in the data — separate from
+      // whether the /compiled host loader (a SEPARATE binary, needs a host
+      // rebuild) renders it.
+      const mats = bake.stdout.match(/\[materials\][^\n]*/)?.[0]?.replace('[materials] ', '') ?? '';
+      setCompileState('done');
+      setCompileStatus(mats ? `✓ ${mats}` : '✓ baked (data only — host loader needs a rebuild)');
+      logEvent({ cat: 'map', text: `compiled ${ws.stem} → game-file${mats ? ` (${mats})` : ''}` });
     } catch (error: any) {
       const message = String(error?.message ?? error);
       setCompiledStatus(`error: ${message}`);
+      setCompileState('error');
+      setCompileStatus(`✗ ${message.slice(0, 80)}`);
       logEvent({ cat: 'map', text: `compile failed: ${message}` });
     }
   }, [previewWorld, logEvent, ws.stem]);
@@ -1070,6 +1085,8 @@ function EditorShell() {
         onUndo={ws.undo}
         onRedo={ws.redo}
         onCompile={compileToGame}
+        compileState={compileState}
+        compileStatus={compileStatus}
       />
       <Box style={{ flexGrow: 1, minHeight: 0, position: 'relative' }}>
         {editorPanesMounted ? (

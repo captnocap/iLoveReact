@@ -753,6 +753,12 @@ export function encodeMaterialRefs(refs: Uint32Array): Uint8Array {
  *  1-tile texture and samples it on the referencing faces; an empty wgsl with
  *  opacity<1 is a translucent flat material (glass) the host renders see-through. */
 export function encodeMaterials(materials: readonly MaterialAsset[]): Uint8Array {
+  // Bake breadcrumb (captured by the Compile button via 2>&1) so the user can SEE
+  // what the data carries — separating "is glass in the gamefile" from "does the
+  // loader render it". console.warn → stderr → the bake's merged output.
+  const translucent = materials.filter((m) => m.opacity < 1).length;
+  const shaders = materials.filter((m) => m.wgsl.length > 0).length;
+  console.warn(`[materials] baked ${materials.length} material(s): ${shaders} shader, ${translucent} translucent`);
   // textBytes is the workspace's headless-safe utf8 encoder (the v8cli bake has
   // no TextEncoder; it falls back to encodeURIComponent). WGSL is ASCII anyway.
   const sources = materials.map((m) => textBytes(m.wgsl));
