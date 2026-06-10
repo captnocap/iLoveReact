@@ -54,6 +54,9 @@ const SCAN_S: usize = 22;
 const SCAN_W: usize = 26;
 const SCAN_SPACE: usize = 44;
 const SCAN_LSHIFT: usize = 225;
+// Spawn drops in from slightly above the resolved ground (req_0523): an exact
+// or stale surface sample must settle ONTO the floor, never inside it.
+const SPAWN_DROP_CLEARANCE_METERS: f32 = 0.35;
 const CAMERA_DISTANCE_METERS: f32 = 7.65;
 const CAMERA_INITIAL_PITCH_DEGREES: f32 = 17.8;
 const CAMERA_MIN_PITCH_DEGREES: f32 = -10.0;
@@ -940,6 +943,28 @@ fn runPlayerPhysics(player: *PlayerState, colliders: *PhysicsColliders, dt: f32,
     }
 }
 
+/// The painted-terrain surface at (x, z): the highest heightfield sample under
+/// the point, or null when no field covers it. Nearest-sample is enough here —
+/// the spawn adds a drop clearance and settles through physics.
+fn sceneTerrainTopAt(fields: []const constructor.HeightfieldMesh, x: f32, z: f32) ?f32 {
+    var best: ?f32 = null;
+    for (fields) |field| {
+        if (field.cols == 0 or field.rows == 0 or field.cell <= 0) continue;
+        const origin_x = field.center_x - field.width * 0.5;
+        const origin_z = field.center_z - field.depth * 0.5;
+        if (x < origin_x or z < origin_z or x > origin_x + field.width or z > origin_z + field.depth) continue;
+        const max_col: f32 = @floatFromInt(field.cols - 1);
+        const max_row: f32 = @floatFromInt(field.rows - 1);
+        const col: usize = @intFromFloat(@round(std.math.clamp((x - origin_x) / field.cell, 0, max_col)));
+        const row: usize = @intFromFloat(@round(std.math.clamp((z - origin_z) / field.cell, 0, max_row)));
+        const idx = row * @as(usize, field.cols) + col;
+        if (idx >= field.heights.len) continue;
+        const top = field.base_y + field.heights[idx];
+        if (best == null or top > best.?) best = top;
+    }
+    return best;
+}
+
 fn chooseSpawn(insts: []const f32, inst_count: u32, piece_count: u32, stride: usize, bounds: Bounds) Vec3 {
     const wanted_x = bounds.cx;
     const wanted_z = bounds.cz;
@@ -1392,7 +1417,17 @@ pub const Runtime = struct {
         const authored_dx = authored_eye.x - bounds.cx;
         const authored_dz = authored_eye.z - bounds.cz;
         const authored_yaw = std.math.atan2(authored_dx, authored_dz);
-        const spawn = chooseSpawn(self.insts, self.inst_count, self.piece_count, self.stride, bounds);
+        var spawn = chooseSpawn(self.insts, self.inst_count, self.piece_count, self.stride, bounds);
+        // Painted terrain is HEIGHTFIELDS, not instance rows — chooseSpawn's
+        // flat-box top can sit UNDER a painted hill, burying the player below
+        // the surface where no collider can catch a body (req_0523: "falling
+        // thru the world when trying to just load it"). Clamp the spawn to the
+        // terrain surface, then drop in from a small clearance so an imprecise
+        // sample still settles ONTO the ground instead of inside it.
+        if (sceneTerrainTopAt(self.scene.heightfields, spawn.x, spawn.z)) |terrain_top| {
+            if (terrain_top > spawn.y) spawn.y = terrain_top;
+        }
+        spawn.y += SPAWN_DROP_CLEARANCE_METERS;
         self.player = .{
             .x = spawn.x,
             .y = spawn.y,
