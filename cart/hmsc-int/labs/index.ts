@@ -17,8 +17,10 @@ export type LabEntry = {
   notesPath: string;
 };
 
+import VehicleHandling from './vehicle-handling';
 // rjit:lab-imports — `rjit lab new` inserts imports above this line. Keep this marker.
 
 export const LABS: LabEntry[] = [
+  { name: 'vehicle-handling', Component: VehicleHandling, notesPath: 'cart/hmsc-int/labs/vehicle-handling.notes.md' },
   // rjit:lab-entries — `rjit lab new` inserts entries above this line. Keep this marker.
 ];
