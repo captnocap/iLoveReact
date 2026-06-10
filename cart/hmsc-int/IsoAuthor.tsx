@@ -468,7 +468,7 @@ const CatalogRail = memo(function CatalogRail(props: { armed: Armed; onArm: (a: 
   // 'prefabs' lists the named compositions (stamp → many pieces); every other tab lists
   // that kind's catalog pieces. Both feed the SAME rail, fed by the SAME GAME_BUILD.
   const entries = useMemo<{ id: string; label: string }[]>(
-    () => (tab === 'prefabs' ? GAME_BUILD.prefabs.definitions.map((d) => ({ id: d.id, label: d.label })) : GAME_BUILD.catalog.byKind(tab)),
+    () => (tab === 'prefabs' ? Object.values(GAME_BUILD.prefabs.definitions).map((d) => ({ id: d.id, label: d.label })) : GAME_BUILD.catalog.byKind(tab)),
     [tab],
   );
   const armKind: 'piece' | 'prefab' = tab === 'prefabs' ? 'prefab' : 'piece';
