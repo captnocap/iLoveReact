@@ -15,6 +15,8 @@ import { Scene3D } from '@reactjit/primitives';
 import * as Geometry from '@reactjit/geometries';
 import { GAME_BUILD, GAME_TELEMETRY } from '@game';
 import type { BuildFaceSkin, BuildMaterial, BuildSkinSet, PlacedBuildPiece, WallEdit } from '@game';
+import type { WorldProp } from '../../../hmsc/design';
+import { Prop } from '../../../hmsc/render3d/Prop';
 import { BUILD_UI, CAMERA_OCCLUSION_TUNING } from './buildUi';
 import { markPlaceFreezeProbe, perfMs, warnPlaceFreeze, type PlaceFreezeProbe } from './placeFreezeProbe';
 
@@ -405,6 +407,39 @@ type InstanceBucket = {
   maxHalf: number;
 };
 
+function propFromPiece(piece: PlacedBuildPiece): WorldProp | null {
+  const def = GAME_BUILD.catalog.get(piece.pieceId);
+  if (def.kind !== 'prop' || !def.propKind) return null;
+  return {
+    id: piece.id,
+    kind: def.propKind as WorldProp['kind'],
+    x: piece.x,
+    y: piece.y,
+    z: piece.z,
+    yawDegrees: piece.yawDegrees,
+    createdByCommand: 'hmsc-int:build-prop',
+  };
+}
+
+function propSelectionShape(piece: PlacedBuildPiece, color: string, opacity: number): VisualShape {
+  const def = GAME_BUILD.catalog.get(piece.pieceId);
+  return {
+    kind: 'box',
+    box: {
+      key: `${piece.id}.prop-select`,
+      cx: piece.x,
+      cy: piece.y + def.size.heightMeters / 2,
+      cz: piece.z,
+      sx: def.size.widthMeters,
+      sy: def.size.heightMeters,
+      sz: def.size.depthMeters,
+      yawDegrees: piece.yawDegrees,
+      color,
+      opacity,
+    },
+  };
+}
+
 function pushBoxInstance(bucket: InstanceBucket, b: VisualBox, rgb: readonly [number, number, number]): void {
   bucket.data.push(b.cx, b.cy, b.cz, 0, b.yawDegrees, 0, b.sx, b.sy, b.sz, rgb[0], rgb[1], rgb[2]);
   bucket.count += 1;
@@ -462,12 +497,24 @@ export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
   const t0 = perfMs();
   const buckets = new Map<string, InstanceBucket>();
   const loose: { key: string; shape: VisualShape; color?: string; opacity?: number }[] = [];
+  const propMeshes: WorldProp[] = [];
   for (const piece of props.pieces) {
     const marked = props.markedIds.has(piece.id);
     const target = props.targetId === piece.id;
     const occluded = props.occludedIds.has(piece.id);
     const colorOverride = marked ? BUILD_UI.markColor : target ? BUILD_UI.targetColor : undefined;
     const opacityOverride = occluded ? CAMERA_OCCLUSION_TUNING.residualOpacity : undefined;
+    const prop = propFromPiece(piece);
+    if (prop) {
+      propMeshes.push(prop);
+      if (colorOverride || opacityOverride !== undefined) {
+        loose.push({
+          key: `${piece.id}.prop-select`,
+          shape: propSelectionShape(piece, colorOverride ?? BUILD_UI.targetColor, opacityOverride ?? 0.22),
+        });
+      }
+      continue;
+    }
     const shapes = pieceShapesCached(piece, joinKeys.get(piece.id) ?? '', props.pieces);
     for (const shape of shapes) {
       const baseOpacity = shape.kind === 'ramp' ? shape.ramp.opacity : shape.box.opacity;
@@ -525,6 +572,7 @@ export const PlacedPieceMeshes = memo(function PlacedPieceMeshes(props: {
           />
         );
       })}
+      {propMeshes.map((prop) => <Prop key={prop.id} prop={prop} />)}
       {loose.map((l) => (
         <VisualShapeMesh key={l.key} shape={l.shape} colorOverride={l.color} opacityOverride={l.opacity} />
       ))}

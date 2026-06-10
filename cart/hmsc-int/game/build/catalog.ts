@@ -18,7 +18,7 @@
 // PROMPT-GENERATED assets filled by the items/model pipelines, never modeled
 // by the builder; the borrow mirrors how props borrow tile bundles.
 
-import { isPropKind, type PropKind } from '../kinds';
+import { PROP_KINDS, isPropKind, propKindDefinition, type PropKind } from '../kinds';
 import {
   BUILD_KIND_CONTRACTS,
   isBuildPieceKind,
@@ -98,6 +98,74 @@ const SOLID_PLATE_TAGS: BuildGameplayTags = {
 // The standard piece module: one storey tall, one cell-run wide.
 const WALL_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 3, depthMeters: 0.25 };
 const PLATE_SIZE: BuildPieceSize = { widthMeters: 3, heightMeters: 0.2, depthMeters: 3 };
+
+function propMaterial(kind: PropKind): BuildMaterial {
+  switch (kind) {
+    case 'bush':
+    case 'bushLarge':
+    case 'bushLow':
+    case 'bushSparse':
+      return 'wood';
+    default:
+      return 'metal';
+  }
+}
+
+function propCover(kind: PropKind): BuildGameplayTags['cover'] {
+  switch (kind) {
+    case 'dumpster':
+    case 'rockLarge':
+    case 'fence':
+      return 'high';
+    case 'rock':
+    case 'rockSmall':
+    case 'fireHydrant':
+    case 'payphone':
+    case 'mailbox':
+      return 'low';
+    default:
+      return 'none';
+  }
+}
+
+const PROP_DEPTH_OVERRIDES: Partial<Record<PropKind, number>> = {
+  dumpster: 0.86,
+  mailbox: 0.44,
+  payphone: 0.34,
+  streetSign: 0.24,
+  streetLight: 0.4,
+  stopSign: 0.24,
+  trafficLight: 0.46,
+  fence: 0.08,
+};
+
+function propCatalogEntry(kind: PropKind): BuildPieceDef {
+  const def = propKindDefinition(kind);
+  const width = def.kind === 'fence' ? def.footprintRadiusMeters * 1.9 : def.footprintRadiusMeters * 2;
+  const depth = PROP_DEPTH_OVERRIDES[kind] ?? def.footprintRadiusMeters * 2;
+  return {
+    id: `prop.${kind}`,
+    kind: 'prop',
+    label: def.label,
+    theme: 'common',
+    material: propMaterial(kind),
+    size: { widthMeters: width, heightMeters: def.heightMeters, depthMeters: depth },
+    snap: 'free',
+    propKind: kind,
+    tags: {
+      collision: def.solid,
+      blocksSight: def.tileKind === 'wall' && def.solid && def.heightMeters >= 1.2,
+      blocksSound: false,
+      cover: propCover(kind),
+      durability: null,
+      climbable: kind === 'dumpster' || kind === 'rockLarge',
+      vaultable: def.solid && def.heightMeters <= 1.5,
+      portal: false,
+    },
+  };
+}
+
+const PROP_CATALOG = Object.fromEntries(PROP_KINDS.map((kind) => [`prop.${kind}`, propCatalogEntry(kind)])) as Record<`prop.${PropKind}`, BuildPieceDef>;
 
 export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
   // ── walls (the edit-bearing family) ────────────────────────────────────────
@@ -407,70 +475,10 @@ export const BUILD_CATALOG: Record<string, BuildPieceDef> = {
   },
 
   // ── props (assets from the prop/items pipelines — prompt-generated) ───────
-  'prop.dumpster': {
-    id: 'prop.dumpster',
-    kind: 'prop',
-    label: 'Dumpster',
-    theme: 'common',
-    material: 'metal',
-    // From the prop registry's footprint (radius 0.95, height 1.35): chest-high
-    // hard cover you can climb onto or vault across.
-    size: { widthMeters: 1.9, heightMeters: 1.35, depthMeters: 1.9 },
-    snap: 'free',
-    propKind: 'dumpster',
-    tags: {
-      collision: true,
-      blocksSight: true,
-      blocksSound: false,
-      cover: 'high',
-      durability: null,
-      climbable: true,
-      vaultable: true,
-      portal: false,
-    },
-  },
-  'prop.fireHydrant': {
-    id: 'prop.fireHydrant',
-    kind: 'prop',
-    label: 'Fire Hydrant',
-    theme: 'common',
-    material: 'metal',
-    size: { widthMeters: 0.54, heightMeters: 0.98, depthMeters: 0.54 },
-    snap: 'free',
-    propKind: 'fireHydrant',
-    tags: {
-      collision: true,
-      blocksSight: false,
-      blocksSound: false,
-      cover: 'low',
-      durability: null,
-      climbable: false,
-      vaultable: true,
-      portal: false,
-    },
-  },
-  'prop.bush': {
-    id: 'prop.bush',
-    kind: 'prop',
-    label: 'Bush',
-    theme: 'common',
-    material: 'wood',
-    // The walk-through hide-in bush (prop registry: solid false, 2.5m tall):
-    // no collision, but the canopy blocks the sightline — concealment, not cover.
-    size: { widthMeters: 2.4, heightMeters: 2.5, depthMeters: 2.4 },
-    snap: 'free',
-    propKind: 'bush',
-    tags: {
-      collision: false,
-      blocksSight: true,
-      blocksSound: false,
-      cover: 'none',
-      durability: null,
-      climbable: false,
-      vaultable: false,
-      portal: false,
-    },
-  },
+  // Generated from the prop registry so the build palette cannot silently omit
+  // signs/lights/mailboxes/etc. The row still carries semantic `propKind`; the
+  // renderer and bake delegate to the prop model instead of treating it as a box.
+  ...PROP_CATALOG,
 };
 
 export const BUILD_CATALOG_IDS = Object.keys(BUILD_CATALOG);
