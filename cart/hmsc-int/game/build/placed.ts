@@ -199,6 +199,65 @@ function boundsTouch(a: PieceBounds, b: PieceBounds, tolerance: number): boolean
   );
 }
 
+// ── PLACEPERF-0610: spatial grid over piece footprints ───────────────────────
+// Every neighbor question in this file (wall depth spans, wall-end joins,
+// smart-select adjacency, flat-pad grouping) is LOCAL — the 3m module pitch
+// means a piece only interacts with pieces within a cell or two. These used to
+// scan the whole piece array per piece (O(N²): ~970ms/frame at 785 pieces, the
+// PLACEFREEZE visualBoxes stall). The grid is built ONCE per distinct pieces
+// array (O(N)) and cached on the array identity, so per-piece queries are O(k).
+// Predicates re-check exactly; the grid only shrinks the candidate set.
+
+const GRID_CELL_METERS = 4; // ≥ the 3m module pitch; pieces span few cells
+
+type PieceGridEntry = { piece: PlacedBuildPiece; bounds: PieceBounds };
+type PieceGrid = Map<string, PieceGridEntry[]>;
+
+const pieceGridCache = new WeakMap<readonly PlacedBuildPiece[], PieceGrid>();
+
+function pieceGridOf(pieces: readonly PlacedBuildPiece[]): PieceGrid {
+  let grid = pieceGridCache.get(pieces);
+  if (grid) return grid;
+  grid = new Map();
+  for (const piece of pieces) {
+    const entry: PieceGridEntry = { piece, bounds: pieceBounds(piece) };
+    const ix0 = Math.floor(entry.bounds.minX / GRID_CELL_METERS);
+    const ix1 = Math.floor(entry.bounds.maxX / GRID_CELL_METERS);
+    const iz0 = Math.floor(entry.bounds.minZ / GRID_CELL_METERS);
+    const iz1 = Math.floor(entry.bounds.maxZ / GRID_CELL_METERS);
+    for (let ix = ix0; ix <= ix1; ix += 1) {
+      for (let iz = iz0; iz <= iz1; iz += 1) {
+        const key = `${ix},${iz}`;
+        const cell = grid.get(key);
+        if (cell) cell.push(entry); else grid.set(key, [entry]);
+      }
+    }
+  }
+  pieceGridCache.set(pieces, grid);
+  return grid;
+}
+
+/** Pieces whose footprint MAY overlap the world rect (superset — callers keep
+ *  their exact predicates). Entries spanning cells are deduped via the Set. */
+function piecesNear(
+  pieces: readonly PlacedBuildPiece[],
+  minX: number, maxX: number, minZ: number, maxZ: number,
+  out: Set<PieceGridEntry> = new Set(),
+): Set<PieceGridEntry> {
+  const grid = pieceGridOf(pieces);
+  const ix0 = Math.floor(minX / GRID_CELL_METERS);
+  const ix1 = Math.floor(maxX / GRID_CELL_METERS);
+  const iz0 = Math.floor(minZ / GRID_CELL_METERS);
+  const iz1 = Math.floor(maxZ / GRID_CELL_METERS);
+  for (let ix = ix0; ix <= ix1; ix += 1) {
+    for (let iz = iz0; iz <= iz1; iz += 1) {
+      const cell = grid.get(`${ix},${iz}`);
+      if (cell) for (const entry of cell) out.add(entry);
+    }
+  }
+  return out;
+}
+
 /**
  * Every piece TRANSITIVELY touching the seed — the connected shape (a wall on
  * a floor touches it; the next storey touches the wall top; module-snapped
@@ -215,15 +274,21 @@ export function connectedPieceIds(
   const out = new Set<string>();
   const seed = pieces.find((p) => p.id === seedId);
   if (!seed) return out;
-  const all = pieces.map((p) => ({ id: p.id, bounds: pieceBounds(p) }));
   out.add(seedId);
   const queue = [pieceBounds(seed)];
   while (queue.length > 0) {
     const current = queue.pop()!;
-    for (const candidate of all) {
-      if (out.has(candidate.id)) continue;
+    // Grid-local candidates only (PLACEPERF-0610): touching is bounded by the
+    // tolerance, so anything outside the expanded envelope can't touch.
+    const near = piecesNear(
+      pieces,
+      current.minX - toleranceMeters, current.maxX + toleranceMeters,
+      current.minZ - toleranceMeters, current.maxZ + toleranceMeters,
+    );
+    for (const candidate of near) {
+      if (out.has(candidate.piece.id)) continue;
       if (boundsTouch(current, candidate.bounds, toleranceMeters)) {
-        out.add(candidate.id);
+        out.add(candidate.piece.id);
         queue.push(candidate.bounds);
       }
     }
@@ -347,7 +412,6 @@ type WallRunFrame = {
   line: number;
   runMin: number;
   runMax: number;
-  halfDepth: number;
   baseY: number;
   topY: number;
 };
@@ -367,7 +431,6 @@ function wallRunFrame(piece: PlacedBuildPiece, def: BuildPieceDef): WallRunFrame
     line,
     runMin: center - size.widthMeters / 2,
     runMax: center + size.widthMeters / 2,
-    halfDepth: size.depthMeters / 2,
     baseY: piece.y,
     topY: piece.y + size.heightMeters,
   };
@@ -394,11 +457,18 @@ export function placedPieceDepthSpan(piece: PlacedBuildPiece, pieces: readonly P
   const vAxis = localOffset(0, 1, piece.yawDegrees);
   let positive = false;
   let negative = false;
-  for (const other of pieces) {
+  // Grid-local candidates (PLACEPERF-0610): a qualifying plate's edge sits ON
+  // the wall line with run overlap, so its bounds intersect this thin band.
+  const margin = 0.5;
+  const near = self.axis === 'x'
+    ? piecesNear(pieces, self.runMin - margin, self.runMax + margin, self.line - margin, self.line + margin)
+    : piecesNear(pieces, self.line - margin, self.line + margin, self.runMin - margin, self.runMax + margin);
+  for (const entry of near) {
+    const other = entry.piece;
     if (other.id === piece.id) continue;
     const otherDef = placedPieceDef(other);
     if (!isSupportPlate(otherDef.kind)) continue;
-    const b = pieceBounds(other);
+    const b = entry.bounds;
     if (Math.abs(b.topY - piece.y) > tolerance) continue;
     const onEdge = self.axis === 'x'
       ? (Math.abs(self.line - b.minZ) <= tolerance || Math.abs(self.line - b.maxZ) <= tolerance)
@@ -423,23 +493,41 @@ function rangesOverlap(a0: number, a1: number, b0: number, b1: number, tolerance
   return Math.min(a1, b1) >= Math.max(a0, b0) - tolerance;
 }
 
+function wallDepthWorldRangeAlong(piece: PlacedBuildPiece, axis: 'x' | 'z', pieces: readonly PlacedBuildPiece[]): { min: number; max: number } {
+  const span = placedPieceDepthSpan(piece, pieces);
+  const a = localOffset(0, span.minV, piece.yawDegrees);
+  const b = localOffset(0, span.maxV, piece.yawDegrees);
+  const va = axis === 'x' ? piece.x + a.dx : piece.z + a.dz;
+  const vb = axis === 'x' ? piece.x + b.dx : piece.z + b.dz;
+  return { min: Math.min(va, vb), max: Math.max(va, vb) };
+}
+
 function wallJoinRunLimits(piece: PlacedBuildPiece, def: BuildPieceDef, pieces: readonly PlacedBuildPiece[]): { minU: number; maxU: number } {
   const self = wallRunFrame(piece, def);
   if (!self) return { minU: -def.size.widthMeters / 2, maxU: def.size.widthMeters / 2 };
   const tolerance = PLACED_TUNING.wallJoinToleranceMeters;
   let runMin = self.runMin;
   let runMax = self.runMax;
-  for (const other of pieces) {
+  // Grid-local candidates (PLACEPERF-0610): a joining perpendicular wall's
+  // body contains one of this wall's run ENDPOINTS — query around both.
+  const margin = 0.5;
+  const endA = self.axis === 'x' ? { x: self.runMin, z: self.line } : { x: self.line, z: self.runMin };
+  const endB = self.axis === 'x' ? { x: self.runMax, z: self.line } : { x: self.line, z: self.runMax };
+  const near = piecesNear(pieces, endA.x - margin, endA.x + margin, endA.z - margin, endA.z + margin);
+  piecesNear(pieces, endB.x - margin, endB.x + margin, endB.z - margin, endB.z + margin, near);
+  for (const entry of near) {
+    const other = entry.piece;
     if (other.id === piece.id) continue;
     const otherDef = placedPieceDef(other);
     const candidate = wallRunFrame(other, otherDef);
     if (!candidate || candidate.axis === self.axis) continue;
     if (!rangesOverlap(self.baseY, self.topY, candidate.baseY, candidate.topY, tolerance)) continue;
+    const candidateDepth = wallDepthWorldRangeAlong(other, self.axis, pieces);
     if (Math.abs(candidate.line - self.runMin) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
-      runMin = Math.min(runMin, candidate.line - candidate.halfDepth);
+      runMin = Math.min(runMin, candidateDepth.min);
     }
     if (Math.abs(candidate.line - self.runMax) <= tolerance && candidate.runMin <= self.line + tolerance && candidate.runMax >= self.line - tolerance) {
-      runMax = Math.max(runMax, candidate.line + candidate.halfDepth);
+      runMax = Math.max(runMax, candidateDepth.max);
     }
   }
   const flip = self.quarter === 2 || self.quarter === 3 ? -1 : 1;
@@ -928,8 +1016,10 @@ export function prefabFromPieces(
 // A "building" is a GROUP: prefab pieces group by stampId; hand-built pieces (no stampId)
 // group by CONNECTED COMPONENT (bounds-touching, the same adjacency "smart select" uses),
 // so a structure you laid out piece-by-piece flat-pads exactly like a prefab and a lone
-// piece sits on the ground under it. The component pass is O(loose²) bounds-touch but
-// runs only when pieces/terrain change (callers memoize), which is fine at editor scale.
+// piece sits on the ground under it. The component pass buckets pieces into a spatial
+// hash and only bounds-tests pairs sharing a cell (PLACEPERF-0610 — the pairwise
+// O(loose²) loop was half of the ~970ms/frame stall at 785 pieces); touching pieces
+// always share a cell, so the components are identical to the pairwise answer.
 export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
   pieces: readonly T[],
   terrainAt: (x: number, z: number) => number,
@@ -942,15 +1032,37 @@ export function liftBuildingsToTerrain<T extends PlacedBuildPiece>(
     else loose.push(p);
   }
   for (const g of stamped.values()) groups.push(g);
-  // Union loose pieces into connected structures (union-find over bounds-touch).
+  // Union loose pieces into connected structures (union-find over bounds-touch,
+  // candidate pairs narrowed by a spatial hash of tolerance-expanded footprints).
   if (loose.length) {
     const bounds = loose.map((p) => pieceBounds(p));
     const parent = loose.map((_, i) => i);
     const find = (i: number): number => { let r = i; while (parent[r] !== r) r = parent[r]; while (parent[i] !== r) { const n = parent[i]; parent[i] = r; i = n; } return r; };
     const tol = PLACED_TUNING.touchToleranceMeters;
+    const cellMeters = 4; // ≥ the 3m module pitch, same scale as the piece grid
+    const buckets = new Map<string, number[]>();
     for (let i = 0; i < loose.length; i += 1) {
-      for (let j = i + 1; j < loose.length; j += 1) {
-        if (boundsTouch(bounds[i], bounds[j], tol)) parent[find(i)] = find(j);
+      const b = bounds[i];
+      const ix0 = Math.floor((b.minX - tol) / cellMeters);
+      const ix1 = Math.floor((b.maxX + tol) / cellMeters);
+      const iz0 = Math.floor((b.minZ - tol) / cellMeters);
+      const iz1 = Math.floor((b.maxZ + tol) / cellMeters);
+      for (let ix = ix0; ix <= ix1; ix += 1) {
+        for (let iz = iz0; iz <= iz1; iz += 1) {
+          const key = `${ix},${iz}`;
+          const cell = buckets.get(key);
+          if (cell) cell.push(i); else buckets.set(key, [i]);
+        }
+      }
+    }
+    for (const cell of buckets.values()) {
+      for (let a = 0; a < cell.length; a += 1) {
+        for (let b = a + 1; b < cell.length; b += 1) {
+          const i = cell[a];
+          const j = cell[b];
+          if (find(i) === find(j)) continue;
+          if (boundsTouch(bounds[i], bounds[j], tol)) parent[find(i)] = find(j);
+        }
       }
     }
     const byRoot = new Map<number, T[]>();

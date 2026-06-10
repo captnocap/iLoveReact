@@ -129,12 +129,15 @@ export const IsoAuthor = memo(function IsoAuthor(props: IsoAuthorProps) {
   // painted hills exactly as F2's do. The WorldGridState is the thin {regions,cells,
   // landforms} view of state.world (kept inline rather than importing Embodied's
   // worldGridOf, which a parallel lane is actively editing). The prop can override.
+  // Keyed on the world FIELDS, not `state`: a state-identity tick (physics, HUD)
+  // must not cascade into groundTopAt → displayPieces → a full piece re-render
+  // (PLACEPERF-0610 — that cascade re-ran the lift + mesh loop every frame).
   const worldGrid = useMemo<WorldGridState>(() => ({
     cellSizeMeters: state.world.cellSizeMeters,
     surfaceRegions: state.world.surfaceRegions as unknown as WorldGridState['surfaceRegions'],
     placedCells: state.world.placedCells as unknown as WorldGridState['placedCells'],
     landforms: (state.world.landforms ?? []) as unknown as WorldGridState['landforms'],
-  }), [state]);
+  }), [state.world.cellSizeMeters, state.world.surfaceRegions, state.world.placedCells, state.world.landforms]);
   const groundTopAt = useMemo<(x: number, z: number) => number>(
     () => props.groundTopAt ?? ((x, z) => groundColumnTop(worldGrid, x, z)),
     [props.groundTopAt, worldGrid],
